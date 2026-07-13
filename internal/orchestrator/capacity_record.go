@@ -9,6 +9,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // recordRunProfile folds one finished run's measured node metrics into the
@@ -38,14 +39,15 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 			continue
 		}
 		measured = true
-		var peakCores float64
+		var observedCores float64
 		var peakMem int64
 		for _, s := range samples {
-			peakCores = math.Max(peakCores, capLocalPeakCores(float64(s.CPUMillicores)/1000.0))
+			observedCores = math.Max(observedCores, float64(s.CPUMillicores)/1000.0)
 			if s.MemoryBytes > peakMem {
 				peakMem = s.MemoryBytes
 			}
 		}
+		peakCores := capLocalPeakCores(ctx, pipeline, n.NodeID, observedCores)
 		_ = st.RecordProfileObservation(ctx, pipeline, n.NodeID, store.ProfileObservation{
 			Duration:        nodeDuration(n, samples),
 			PeakCores:       peakCores,
@@ -75,12 +77,20 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 	}
 }
 
-func capLocalPeakCores(cores float64) float64 {
+// capLocalPeakCores enforces the stored-profile invariant that a local
+// profile's peak never exceeds host capacity: a measured peak above the host's
+// core count is a sampler artifact (a reaped subtree's CPU landing in one
+// interval), so the stored peak clamps to host cores while the raw observation
+// stays in the metric samples. It logs a one-line note when it clamps so an
+// overshoot is visible rather than silently swallowed.
+func capLocalPeakCores(ctx context.Context, pipeline, node string, observedCores float64) float64 {
 	hostCores := float64(runtime.NumCPU())
-	if hostCores > 0 && cores > hostCores {
+	if hostCores > 0 && observedCores > hostCores {
+		sparkwing.Debug(ctx, "capacity: %s node %q observed %.1f cores over host %.1f; recording host capacity",
+			pipeline, node, observedCores, hostCores)
 		return hostCores
 	}
-	return cores
+	return observedCores
 }
 
 // nodeDuration is a node's wall time: its recorded start-to-finish span

@@ -15,15 +15,23 @@ import (
 )
 
 // TestQueueState_HostPressureExplainsWait sets a host under heavy external
-// (non-sparkwing) load and admits a run that needs more than the remaining
-// headroom. The queue view must carry the headroom decomposition (reserve,
-// external, available) and a per-waiter blocking reason naming the
-// external load -- the queue is not silent about a host-pressure wait.
+// (non-sparkwing) load and, with a run already holding, admits a second run
+// that needs more than the remaining headroom. The queue view must carry the
+// headroom decomposition (reserve, external, available) and a per-waiter
+// blocking reason naming the external load -- the queue is not silent about a
+// host-pressure wait. A prior holder is present so the wait is real
+// backpressure and not the liveness floor, which would admit a sole run.
 func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
 	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2})
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
+
+	holderClient := ensure(t, home, "v1")
+	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID:     "holder",
+		Resources: wingwire.HostResources{Cores: 1},
+	})
 
 	cl := ensure(t, home, "v1")
 	_, result := acquireAsync(cl, wingwire.AdmissionRequest{

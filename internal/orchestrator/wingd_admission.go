@@ -183,7 +183,7 @@ func (la *LocalAdmission) admitRun(
 	if la.ParentLeaseToken != "" {
 		return la.attachChildRun(ctx, backends, runID, pipeline, plan, onEvicted)
 	}
-	res, prof, drift := resolveHostCost(ctx, backends, pipeline, plan)
+	res, prof, drift, overCap := la.resolveHostCost(ctx, backends, pipeline, plan)
 	req := wingwire.AdmissionRequest{
 		RunID:              runID,
 		Pipeline:           pipeline,
@@ -199,8 +199,10 @@ func (la *LocalAdmission) admitRun(
 		req.ExpectedP99MS = prof.P99Duration.Milliseconds()
 		req.SampleCount = prof.SampleCount
 	}
-	if drift != nil {
-		req.DriftWarning = drift.Message
+	warning := hostChargeWarning(drift, overCap)
+	if warning != "" {
+		req.DriftWarning = warning
+		fmt.Fprintln(la.stderr(), warning)
 	}
 	submitted := time.Now()
 	lease, outcome, err := la.acquireBlocking(ctx, backends, runID, req)
@@ -211,11 +213,27 @@ func (la *LocalAdmission) admitRun(
 		_ = st.RecordWaitObservation(ctx, pipeline, time.Since(submitted))
 	}
 	rl := &runLease{token: lease.Token, leases: []*wingdclient.Lease{lease}}
-	if drift != nil {
-		rl.driftWarning = drift.Message
+	rl.driftWarning = warning
+	if lease.SoleRunUnderLoad {
+		fmt.Fprintf(la.stderr(),
+			"admitted as sole run; host under external load %.1f cores - additional runs will queue\n",
+			lease.ExternalCores)
 	}
 	go lease.WatchControl(evictionHandler(runID, onEvicted), cancelHandler(onEvicted))
 	return rl, admitProceed, nil
+}
+
+// hostChargeWarning picks the one-line note shown for a run's host charge: an
+// over-capacity pin warning takes precedence over a drift warning, since a pin
+// the machine cannot honor verbatim is the more urgent thing to surface.
+func hostChargeWarning(drift *capacity.Drift, overCapacity string) string {
+	if overCapacity != "" {
+		return overCapacity
+	}
+	if drift != nil {
+		return drift.Message
+	}
+	return ""
 }
 
 // admitNode submits one host-resource admission request for a single
@@ -233,7 +251,7 @@ func (la *LocalAdmission) admitNode(
 	pipeline, runID, nodeID string,
 	node *sparkwing.JobNode,
 ) (*runLease, error) {
-	res, _, _ := resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
+	res, _, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
 	req := wingwire.AdmissionRequest{
 		RunID:              runID + "/" + nodeID,
 		Pipeline:           pipeline,
@@ -243,6 +261,7 @@ func (la *LocalAdmission) admitNode(
 		CostSource:         wingwire.CostSource(res.Source),
 		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
 		Origin:             la.Origin,
+		DriftWarning:       overCap,
 	}
 	lease, outcome, err := la.acquireBlocking(ctx, backends, req.RunID, req)
 	if err != nil || outcome != admitProceed {
@@ -258,7 +277,7 @@ func (la *LocalAdmission) admitNode(
 // missing local store (the common runner-mode case, where state is a
 // controller client) simply means no measured profile, so the pin-or-
 // default order still holds.
-func resolveNodeHostCost(ctx context.Context, backends Backends, pipeline, nodeID string, node *sparkwing.JobNode) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift) {
+func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Backends, pipeline, nodeID string, node *sparkwing.JobNode) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift, string) {
 	pin := nodePin(node)
 	var profile *store.PipelineProfile
 	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
@@ -267,7 +286,43 @@ func resolveNodeHostCost(ctx context.Context, backends Backends, pipeline, nodeI
 		}
 	}
 	res := capacity.Resolve(pin, profile, runtime.NumCPU())
-	return res, profile, capacity.CheckDrift(pin, profile)
+	res, overCap := la.applyHostCeiling(ctx, res)
+	return res, profile, capacity.CheckDrift(pin, profile), overCap
+}
+
+// applyHostCeiling caps a resolved host charge at the daemon's idle grantable
+// ceiling so an oversized cost runs alone rather than being rejected, and
+// returns the loud warning when an explicit pin is what was capped. It asks
+// the running daemon for the ceiling; when none answers the charge is left
+// unclamped and the daemon caps it at submit.
+func (la *LocalAdmission) applyHostCeiling(ctx context.Context, res capacity.Resolution) (capacity.Resolution, string) {
+	machineCores, grantCores, grantMem, ok := la.idleGrantableHost(ctx)
+	if !ok {
+		return res, ""
+	}
+	return capacity.ApplyHostCeiling(res, machineCores, grantCores, grantMem)
+}
+
+// idleGrantableHost asks the running daemon for the largest host charge it
+// grants a single run on an otherwise idle box -- machine capacity minus the
+// reserved margin -- returning the machine size (for the warning text) and the
+// grantable cores and memory. ok is false when no daemon is reachable, so the
+// caller leaves the charge for the daemon to cap at submit.
+func (la *LocalAdmission) idleGrantableHost(ctx context.Context) (machineCores, grantableCores float64, grantableMemoryBytes int64, ok bool) {
+	qs, err := wingdclient.Query(ctx, la.clientOptions())
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	for _, r := range qs.Resources {
+		switch r.Key {
+		case "cores":
+			machineCores = r.Capacity
+			grantableCores = r.Capacity - r.Reserved
+		case "memory":
+			grantableMemoryBytes = int64(r.Capacity - r.Reserved)
+		}
+	}
+	return machineCores, grantableCores, grantableMemoryBytes, machineCores > 0
 }
 
 // nodePin flattens a single node's explicit .Resources() declaration to a
@@ -515,7 +570,7 @@ func queuePositionParts(q wingwire.Queued) (ahead int, noun, reason string) {
 func admissionFailure(admErr *wingdclient.AdmissionError) error {
 	switch admErr.Key {
 	case "never_admissible":
-		return errors.New("local admission: requested resources exceed this machine's total capacity")
+		return errors.New("local admission: a concurrency group's cost exceeds its own capacity; lower the cost or raise the group's limit")
 	case "duplicate", "invalid", "parent", "reattach":
 		return fmt.Errorf("local admission: %w", admErr)
 	default:
@@ -577,8 +632,10 @@ func tightestQueueTimeout(claims []wingwire.SemaphoreClaim) (string, time.Durati
 // has enough samples, else the conservative cold-start default. It also
 // returns a drift warning when a pin has diverged far from measurement.
 // A missing local store (cluster and remote paths) simply means no
-// measured profile, so the pin-or-default order still holds.
-func resolveHostCost(ctx context.Context, backends Backends, pipeline string, plan *sparkwing.Plan) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift) {
+// measured profile, so the pin-or-default order still holds. The final
+// string is the loud over-capacity warning when an explicit pin exceeds
+// this machine's grantable ceiling and was capped to run alone.
+func (la *LocalAdmission) resolveHostCost(ctx context.Context, backends Backends, pipeline string, plan *sparkwing.Plan) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift, string) {
 	pin := planPin(plan)
 	var profile *store.PipelineProfile
 	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
@@ -587,7 +644,8 @@ func resolveHostCost(ctx context.Context, backends Backends, pipeline string, pl
 		}
 	}
 	res := capacity.Resolve(pin, profile, runtime.NumCPU())
-	return res, profile, capacity.CheckDrift(pin, profile)
+	res, overCap := la.applyHostCeiling(ctx, res)
+	return res, profile, capacity.CheckDrift(pin, profile), overCap
 }
 
 // planPin flattens the run's explicit .Resources() declaration to a

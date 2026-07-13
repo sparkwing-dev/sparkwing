@@ -18,18 +18,33 @@ var ErrNoDaemon = errors.New("wingd/client: no daemon running")
 func (cl *Client) QueueState(ctx context.Context) (wingwire.QueueState, error) {
 	stop := cl.cancelOnDone(ctx)
 	defer stop()
+	for {
+		qs, terminal, transient := cl.readQueueState()
+		if transient == nil {
+			return qs, terminal
+		}
+		if rerr := cl.recoverConn(ctx); rerr != nil {
+			return wingwire.QueueState{}, rerr
+		}
+	}
+}
+
+// readQueueState runs one queue-state exchange. The third value is a transport
+// error the caller recovers by reconnecting, so a daemon blink during a status
+// read is retried against the fresh connection.
+func (cl *Client) readQueueState() (qs wingwire.QueueState, terminal error, transient error) {
 	if err := cl.write(&wingwire.QueueState{}); err != nil {
-		return wingwire.QueueState{}, err
+		return wingwire.QueueState{}, nil, err
 	}
 	msg, err := cl.dec.read()
 	if err != nil {
-		return wingwire.QueueState{}, err
+		return wingwire.QueueState{}, nil, err
 	}
-	qs, ok := msg.(*wingwire.QueueState)
+	got, ok := msg.(*wingwire.QueueState)
 	if !ok {
-		return wingwire.QueueState{}, fmt.Errorf("wingd/client: expected queue_state, got %T", msg)
+		return wingwire.QueueState{}, fmt.Errorf("wingd/client: expected queue_state, got %T", msg), nil
 	}
-	return *qs, nil
+	return *got, nil, nil
 }
 
 // Query connects read-only and returns the daemon's queue state without

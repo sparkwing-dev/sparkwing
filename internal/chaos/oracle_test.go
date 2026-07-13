@@ -26,6 +26,27 @@ func TestCheckLedgerTruth_AcceptsSoundSnapshot(t *testing.T) {
 	}
 }
 
+func TestCheckLivenessTruth_FlagsStrandedWaiterWithNoHolders(t *testing.T) {
+	qs := wingwire.QueueState{
+		Resources: []wingwire.ResourceState{{Key: "cores", Capacity: 8, Held: 0}},
+		Waiters:   []wingwire.Waiter{{RunID: "stranded"}},
+	}
+	if v := checkLivenessTruth(qs); len(v) != 1 {
+		t.Fatalf("want a liveness violation for a waiter behind zero holders, got %v", v)
+	}
+}
+
+func TestCheckLivenessTruth_AcceptsWaiterBehindHolder(t *testing.T) {
+	qs := wingwire.QueueState{
+		Resources: []wingwire.ResourceState{{Key: "cores", Capacity: 8, Held: 8}},
+		Holders:   []wingwire.Holder{{RunID: "a"}},
+		Waiters:   []wingwire.Waiter{{RunID: "b"}},
+	}
+	if v := checkLivenessTruth(qs); len(v) != 0 {
+		t.Fatalf("waiter behind a real holder flagged: %v", v)
+	}
+}
+
 func TestCheckLedgerTruth_FlagsHolderWaiterOverlap(t *testing.T) {
 	qs := wingwire.QueueState{
 		Holders: []wingwire.Holder{{RunID: "a"}},

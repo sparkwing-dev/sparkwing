@@ -77,17 +77,34 @@ func Run(ctx context.Context, interval time.Duration, sink Sink) {
 		case now := <-t.C:
 			sample := Sample{TS: now, MemoryBytes: readMemoryBytes()}
 			if cpu, ok := readCPUTime(); ok && havePrev {
-				dWall := now.Sub(prevWall).Seconds()
-				if dWall > 0 {
-					millicores := int64((cpu - prevCPU).Seconds() / dWall * 1000.0)
-					sample.CPUMillicores = max(millicores, 0)
-				}
+				sample.CPUMillicores = intervalMillicores(cpu-prevCPU, now.Sub(prevWall))
 				prevCPU = cpu
 				prevWall = now
 			}
 			_ = sink.Push(ctx, sample)
 		}
 	}
+}
+
+// intervalMillicores derives an interval's average CPU draw in millicores
+// from the CPU consumed and the wall time it spanned, clamped to the host's
+// core count. The clamp is load-bearing: a reaped subtree's cumulative CPU
+// (a long `make -j`) becomes visible to RUSAGE_CHILDREN all at once, so
+// dividing it by a single short interval reads as a rate no physical machine
+// could sustain; capping at host cores keeps that artifact from being stored
+// as a peak far above real concurrency. A non-positive interval draws nothing.
+func intervalMillicores(cpu time.Duration, wall time.Duration) int64 {
+	if wall <= 0 {
+		return 0
+	}
+	millicores := int64(cpu.Seconds() / wall.Seconds() * 1000.0)
+	if millicores < 0 {
+		return 0
+	}
+	if hostMilli := int64(runtime.NumCPU()) * 1000; millicores > hostMilli {
+		return hostMilli
+	}
+	return millicores
 }
 
 // readMemoryBytes returns process RSS from the platform source, falling

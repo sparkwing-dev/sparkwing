@@ -134,18 +134,58 @@ func TestMeasuredRequestAboveIdleGrantableCapacityIsAdmitted(t *testing.T) {
 	}
 }
 
-func TestPinnedRequestAboveTotalCapacityStillFails(t *testing.T) {
+// TestLivenessFloor_AdmitsSoleRunUnderExternalLoad drives the floor end to
+// end: on an otherwise-idle box pinned under synthetic 100% external load the
+// queue head still admits (charged the grantable budget, flagged sole-run),
+// while a second arrival queues -- the box runs exactly one pipeline, never
+// zero. It also composes the floor with the run-alone clamp: the head's cost
+// is an oversized measured peak.
+func TestLivenessFloor_AdmitsSoleRunUnderExternalLoad(t *testing.T) {
+	home := shortHome(t)
+	sampler := newFakeSampler(8, 16<<30)
+	sampler.set(wingd.HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, FreeMemoryBytes: 16 << 30, LoadAverage: 100})
+	startDaemon(t, wingd.Config{Home: home, Sampler: sampler})
+
+	cl := ensure(t, home, "")
+	lease := mustAcquire(t, cl, wingwire.AdmissionRequest{
+		RunID:      "sole",
+		CostSource: wingwire.CostSourceMeasured,
+		Resources:  wingwire.HostResources{Cores: 10},
+	})
+	if !lease.SoleRunUnderLoad {
+		t.Fatal("sole run under external load was not flagged SoleRunUnderLoad")
+	}
+	if lease.Resources.Cores != 6.4 {
+		t.Fatalf("sole run charge = %v, want grantable 6.4", lease.Resources.Cores)
+	}
+
+	second := ensure(t, home, "")
+	positions, result := acquireAsync(second, wingwire.AdmissionRequest{
+		RunID:      "second",
+		CostSource: wingwire.CostSourceMeasured,
+		Resources:  wingwire.HostResources{Cores: 1},
+	})
+	select {
+	case <-positions:
+	case r := <-result:
+		t.Fatalf("second run resolved without queueing: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("second run neither queued nor resolved")
+	}
+}
+
+func TestPinnedRequestAboveCapacityAdmitsAlone(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})
 
 	cl := ensure(t, home, "")
-	_, err := cl.Acquire(context.Background(), wingwire.AdmissionRequest{
+	lease := mustAcquire(t, cl, wingwire.AdmissionRequest{
 		RunID:      "pinned-heavy",
 		CostSource: wingwire.CostSourcePin,
 		Resources:  wingwire.HostResources{Cores: 10},
-	}, nil)
-	if err == nil {
-		t.Fatal("oversized pinned request admitted, want never-admissible failure")
+	})
+	if lease.Resources.Cores != 6.4 {
+		t.Fatalf("pinned charge = %v, want clamped to idle grantable 6.4 (running alone)", lease.Resources.Cores)
 	}
 }
 

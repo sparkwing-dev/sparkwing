@@ -420,17 +420,22 @@ func chargedResources(r wingwire.HostResources) wingwire.HostResources {
 	return r
 }
 
-func (d *Daemon) clampMeasuredResourcesLocked(r wingwire.HostResources, costSource wingwire.CostSource) wingwire.HostResources {
-	if costSource != wingwire.CostSourceMeasured {
-		return r
-	}
+// clampHostChargeLocked caps a request's host charge at the box's idle
+// grantable ceiling so no run is ever rejected for exceeding host capacity:
+// an oversized cost -- a measured peak or an explicit pin -- is charged the
+// whole grantable budget and serializes alone instead. It reports whether an
+// explicit pin was the thing capped so the caller can log it loudly, since a
+// pin the machine cannot honor verbatim is an operator-visible surprise.
+func (d *Daemon) clampHostChargeLocked(r wingwire.HostResources, costSource wingwire.CostSource) (wingwire.HostResources, bool) {
+	pinClamped := false
 	if maxCores := d.idleGrantableCoresLocked(); maxCores > 0 && r.Cores > maxCores {
+		pinClamped = costSource == wingwire.CostSourcePin
 		r.Cores = maxCores
 	}
 	if maxMemory := d.idleGrantableMemoryLocked(); maxMemory > 0 && r.MemoryBytes > int64(maxMemory) {
 		r.MemoryBytes = int64(maxMemory)
 	}
-	return r
+	return r, pinClamped
 }
 
 func (d *Daemon) idleGrantableCoresLocked() float64 {
@@ -513,10 +518,11 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "draining", Policy: wingwire.Policy("draining")})
 		return
 	}
+	pinClamped := false
 	if req.SemaphoresOnly {
 		charged = wingwire.HostResources{}
 	} else {
-		charged = d.clampMeasuredResourcesLocked(charged, req.CostSource)
+		charged, pinClamped = d.clampHostChargeLocked(charged, req.CostSource)
 	}
 	ar := requestFromWire(req.RunID, charged, req.Semaphores)
 	c.runID = req.RunID
@@ -560,6 +566,10 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	d.touchLocked()
 	d.mu.Unlock()
 	d.flush(deliveries, snap)
+	if pinClamped {
+		d.cfg.logf("admission: run %s pinned %.1f cores exceeds grantable %.1f; running alone",
+			req.RunID, req.Resources.Cores, charged.Cores)
+	}
 	if len(dec.Evicted) > 0 {
 		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", req.RunID, len(dec.Evicted))
 		d.armCancelTimeout(dec.Evicted, cancelTimeoutFor(req.Semaphores))

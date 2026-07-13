@@ -335,11 +335,12 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 		seen[nc.key] = true
 		s.claims = append(s.claims, nc)
 	}
+	// hack: host demand over the box total is capped, not rejected -- one box is not the whole fleet, and the floor runs it alone.
 	if s.milliCores > l.totalMilliCores {
-		return spec{}, fmt.Errorf("%w: %v cores requested, %v total", ErrNeverAdmissible, req.Cores, float64(l.totalMilliCores)/1000)
+		s.milliCores = l.totalMilliCores
 	}
 	if s.memory > l.totalMemory {
-		return spec{}, fmt.Errorf("%w: %d memory bytes requested, %d total", ErrNeverAdmissible, s.memory, l.totalMemory)
+		s.memory = l.totalMemory
 	}
 	return s, nil
 }
@@ -553,12 +554,19 @@ func touchesAny(s spec, set map[resource]bool) bool {
 	return false
 }
 
+// hostFits reports whether a spec's host cores and memory fit right now. It
+// enforces the liveness floor: a host resource with zero current holders never
+// blocks, so the queue head always admits on an otherwise-idle box regardless
+// of the reserve, external load, or an oversized cost. Headroom and external
+// sensing gate only concurrency beyond that first admission. Because normalize
+// caps a spec's demand at the totals, admitting a sole run can never push used
+// past capacity.
 func (l *Ledger) hostFits(s spec) bool {
 	effCores := min(l.totalMilliCores, l.headroomMilliCores)
 	effMemory := min(l.totalMemory, l.headroomMemory)
-	coresOK := s.milliCores == 0 ||
+	coresOK := s.milliCores == 0 || l.usedMilliCores == 0 ||
 		(l.usedMilliCores <= effCores && s.milliCores <= effCores-l.usedMilliCores)
-	memoryOK := s.memory == 0 ||
+	memoryOK := s.memory == 0 || l.usedMemory == 0 ||
 		(l.usedMemory <= effMemory && s.memory <= effMemory-l.usedMemory)
 	return coresOK && memoryOK
 }

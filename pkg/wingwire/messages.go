@@ -175,6 +175,14 @@ type Grant struct {
 	// knows which of its own claims are already covered by the lease and
 	// which it must acquire separately.
 	Semaphores []string `json:"semaphores,omitempty"`
+	// SoleRunUnderLoad is set when the liveness floor is what admitted this
+	// run: the box was otherwise idle of sparkwing work but under enough
+	// external load or reserve that only a sole run could fit. The client
+	// narrates that additional runs will queue. Zero for a normal admission.
+	SoleRunUnderLoad bool `json:"sole_run_under_load,omitempty"`
+	// ExternalCores is the measured non-sparkwing load in cores at the moment
+	// of a SoleRunUnderLoad grant, for the narration. Zero otherwise.
+	ExternalCores float64 `json:"external_cores,omitempty"`
 }
 
 // Queued reports a waiting run's position whenever it changes. Key

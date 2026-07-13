@@ -58,11 +58,17 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 			if d.cfg.Budget.Enforcing() && c.finalizable && c.pid > 0 {
 				go d.enforceHolderProcess(c.pid, ev.RequestID)
 			}
-			out = append(out, delivery{c, &wingwire.Grant{
+			soleUnderLoad := d.soleRunUnderLoadLocked(c)
+			grant := &wingwire.Grant{
 				RunID:      ev.RequestID,
 				LeaseToken: lease.Token,
 				Resources:  c.resources,
-			}})
+			}
+			if soleUnderLoad {
+				grant.SoleRunUnderLoad = true
+				grant.ExternalCores = d.externalCores
+			}
+			out = append(out, delivery{c, grant})
 		case admission.EventQueued:
 			if c := d.byRun[ev.RequestID]; c != nil {
 				out = append(out, delivery{c, &wingwire.Queued{
@@ -141,4 +147,15 @@ func requestFromWaiter(w admission.WaiterState) admission.Request {
 
 func (d *Daemon) waiterCountLocked() int {
 	return len(d.ledger.Snapshot().Waiters)
+}
+
+// soleRunUnderLoadLocked reports whether the liveness floor -- not ordinary
+// headroom -- is what let this run in: a finalizable host run whose charge
+// exceeds the currently grantable cores, which can only be granted when the
+// box is otherwise idle of sparkwing work. That is the signal the client
+// narrates as "admitted as sole run; additional runs will queue". The caller
+// holds d.mu.
+func (d *Daemon) soleRunUnderLoadLocked(c *conn) bool {
+	return c.finalizable && d.headroomInit &&
+		c.resources.Cores > 0 && c.resources.Cores > d.appliedCores
 }

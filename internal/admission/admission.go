@@ -43,9 +43,12 @@ var (
 	// ErrInvalidRequest reports a malformed [Request]: empty IDs, negative
 	// or non-finite values, duplicate semaphore keys, or unknown policies.
 	ErrInvalidRequest = errors.New("admission: invalid request")
-	// ErrNeverAdmissible reports a request that exceeds a total capacity
-	// and therefore could never be granted no matter what releases.
-	ErrNeverAdmissible = errors.New("admission: request exceeds total capacity")
+	// ErrNeverAdmissible reports a machine-independent logic error that no
+	// release can ever satisfy: a semaphore claim whose cost exceeds its own
+	// declared capacity. Host demand above the box's totals is not this error
+	// -- it is capped to the totals and serialized alone, since a machine is
+	// one box in a heterogeneous fleet and must never refuse a run outright.
+	ErrNeverAdmissible = errors.New("admission: request exceeds a semaphore's own capacity")
 	// ErrDuplicateID reports a participant ID that already holds or waits.
 	ErrDuplicateID = errors.New("admission: participant id already holds or waits")
 	// ErrUnknownLease reports an operation against a lease ID the ledger

@@ -47,6 +47,32 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** No run is ever rejected for exceeding host capacity. A cost
+  above what this box can grant -- a measured peak or an explicit
+  `.Resources()` pin -- now runs alone at the machine's grantable budget
+  instead of being refused as never-admissible. An oversized pin still runs,
+  with a loud warning naming the pin and the machine (`pin 16.0 cores exceeds
+  this machine (10.0); running alone`) on the run's stderr and in the queue
+  view. This supersedes the v0.16.4 behavior where an oversized pin failed.
+- **admission:** A liveness floor guarantees sparkwing never refuses all work.
+  Whenever no run holds a host resource, the queue head is admitted regardless
+  of the reserve or external load, so a fully loaded box still runs exactly one
+  pipeline at a time rather than none; headroom sensing gates only the runs
+  beyond that first. A sole run admitted under load says so
+  (`admitted as sole run; host under external load ...`).
+- **admission:** Measurement no longer overshoots. A reaped command's CPU is
+  amortized over its own wall time instead of landing in one sample interval,
+  the sampler clamps a derived rate to host cores, and a stored local profile
+  peak is capped at host capacity. A parallel `make -j` burst is recorded at
+  its real concurrency, not a momentary spike above the machine's core count.
+- **admission:** Clients transparently reconnect and reattach across a daemon
+  restart, idle-exit, or version takeover. A run waiting in the admission
+  queue, holding a lease, running a semaphore sub-request, or cancelling no
+  longer fails with "use of closed network connection" when the daemon blinks;
+  it recovers within the grace window, and a daemon that never returns is named
+  in the error with its log tail.
 
 ## [v0.16.4] - 2026-07-12
 ### Fixed

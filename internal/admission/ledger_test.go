@@ -97,8 +97,6 @@ func TestSubmit_RejectsInvalidRequests(t *testing.T) {
 		{"negative cost", Request{ID: "r", Semaphores: []SemaphoreClaim{sem("k", 2, -1, PolicyQueue)}}, ErrInvalidRequest},
 		{"unknown policy", Request{ID: "r", Semaphores: []SemaphoreClaim{sem("k", 2, 1, Policy("coalesce"))}}, ErrInvalidRequest},
 		{"semaphore cost above capacity", Request{ID: "r", Semaphores: []SemaphoreClaim{sem("k", 3, 5, PolicyQueue)}}, ErrNeverAdmissible},
-		{"cores above total", Request{ID: "r", Cores: 10}, ErrNeverAdmissible},
-		{"memory above total", Request{ID: "r", MemoryBytes: 2048}, ErrNeverAdmissible},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -116,6 +114,80 @@ func TestSubmit_RejectsInvalidRequests(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSubmit_HostDemandAboveTotalAdmitsClampedAlone pins the fleet
+// invariant: no run is ever rejected for exceeding host capacity. A cost
+// above this box's totals is capped to the totals and admitted alone rather
+// than refused, so an oversized measured peak or a fleet-wide pin still runs.
+func TestSubmit_HostDemandAboveTotalAdmitsClampedAlone(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		req       Request
+		wantCores float64
+		wantMem   uint64
+	}{
+		{"cores above total", Request{ID: "r", Cores: 10}, 4, 0},
+		{"memory above total", Request{ID: "r", MemoryBytes: 2048}, 0, 1024},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			l := testLedger(t, 4, 1024)
+			d, _, err := l.Submit(tc.req)
+			if err != nil {
+				t.Fatalf("Submit = %v, want a clamped grant", err)
+			}
+			if d.Kind != DecisionGranted {
+				t.Fatalf("Submit kind = %v, want granted alone", d.Kind)
+			}
+			snap := l.Snapshot()
+			if len(snap.Leases) != 1 {
+				t.Fatalf("leases = %d, want 1", len(snap.Leases))
+			}
+			le := snap.Leases[0]
+			if got := float64(le.MilliCores) / 1000.0; got != tc.wantCores {
+				t.Fatalf("granted cores = %v, want clamped %v", got, tc.wantCores)
+			}
+			if le.MemoryBytes != tc.wantMem {
+				t.Fatalf("granted memory = %d, want clamped %d", le.MemoryBytes, tc.wantMem)
+			}
+		})
+	}
+}
+
+// TestLivenessFloor_SoleRunAdmitsUnderZeroHeadroom pins the floor: with no
+// sparkwing holders, the queue head admits even when headroom has collapsed to
+// zero under external load, so a fully loaded box still runs exactly one
+// pipeline rather than none. The second arrival then queues, and the floor
+// never strands a waiter while holders are zero (the promotion invariant).
+func TestLivenessFloor_SoleRunAdmitsUnderZeroHeadroom(t *testing.T) {
+	l := testLedger(t, 8, 8<<30)
+	if _, err := l.SetHeadroom(0, 0); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+
+	d, _, err := l.Submit(Request{ID: "head", Cores: 4})
+	if err != nil {
+		t.Fatalf("Submit head: %v", err)
+	}
+	if d.Kind != DecisionGranted {
+		t.Fatalf("head under zero headroom = %s, want granted (liveness floor)", d.Kind)
+	}
+
+	mustQueue(t, l, Request{ID: "second", Cores: 4})
+
+	events := mustRelease(t, l, d.Lease.ID, "head")
+	if !containsKind(events, EventPromoted) {
+		t.Fatalf("releasing the sole run did not promote the waiter: %v", eventKinds(events))
+	}
+}
+
+func containsKind(events []Event, kind EventKind) bool {
+	for _, ev := range events {
+		if ev.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 func TestNew_RejectsInvalidConfig(t *testing.T) {

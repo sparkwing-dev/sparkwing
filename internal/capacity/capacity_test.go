@@ -7,6 +7,70 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+func TestApplyHostCeiling(t *testing.T) {
+	cases := []struct {
+		name        string
+		res         Resolution
+		machine     float64
+		grantCores  float64
+		grantMem    int64
+		wantCores   float64
+		wantMem     int64
+		wantWarning string
+	}{
+		{
+			name:        "pin over capacity clamps with loud warning",
+			res:         Resolution{Cores: 16, Source: store.CostSourcePin},
+			machine:     10,
+			grantCores:  8,
+			wantCores:   8,
+			wantWarning: "pin 16.0 cores exceeds this machine (10.0); running alone - consider a smaller pin or a machine budget",
+		},
+		{
+			name:       "measured over capacity clamps silently",
+			res:        Resolution{Cores: 18.9, Source: store.CostSourceMeasured},
+			machine:    14,
+			grantCores: 11.2,
+			wantCores:  11.2,
+		},
+		{
+			name:       "within ceiling untouched",
+			res:        Resolution{Cores: 4, Source: store.CostSourcePin},
+			machine:    10,
+			grantCores: 8,
+			wantCores:  4,
+		},
+		{
+			name:       "unknown ceiling leaves charge",
+			res:        Resolution{Cores: 16, Source: store.CostSourcePin},
+			grantCores: 0,
+			wantCores:  16,
+		},
+		{
+			name:       "memory clamps to grantable",
+			res:        Resolution{Cores: 1, MemoryBytes: 32 << 30, Source: store.CostSourceMeasured},
+			grantCores: 8,
+			grantMem:   16 << 30,
+			wantCores:  1,
+			wantMem:    16 << 30,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, warning := ApplyHostCeiling(tc.res, tc.machine, tc.grantCores, tc.grantMem)
+			if got.Cores != tc.wantCores {
+				t.Errorf("cores = %v, want %v", got.Cores, tc.wantCores)
+			}
+			if got.MemoryBytes != tc.wantMem {
+				t.Errorf("memory = %d, want %d", got.MemoryBytes, tc.wantMem)
+			}
+			if warning != tc.wantWarning {
+				t.Errorf("warning = %q, want %q", warning, tc.wantWarning)
+			}
+		})
+	}
+}
+
 func TestResolve_Order(t *testing.T) {
 	measured := &store.PipelineProfile{
 		P50Duration:     30 * time.Second,

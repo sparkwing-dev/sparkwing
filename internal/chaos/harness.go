@@ -483,6 +483,15 @@ func (h *Harness) checkLedger() {
 	if v := checkLedgerTruth(qs); len(v) > 0 {
 		h.fail("ledger-truth", v, qs)
 	}
+	// safety: gate the liveness check on daemon stability -- right after a
+	// kill the successor is still restoring holders and re-admitting
+	// reconnecting waiters, a transient in which zero holders alongside a
+	// waiter is legitimate rather than a stranded run.
+	if h.leakStable() {
+		if v := checkLivenessTruth(qs); len(v) > 0 {
+			h.fail("liveness", v, qs)
+		}
+	}
 }
 
 // checkOS cross-checks live processes against granted leases once the

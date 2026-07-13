@@ -484,14 +484,26 @@ func emitCommandResources(ctx context.Context, cmd *exec.Cmd, wall time.Duration
 	if !ok {
 		return
 	}
-	var millicores int64
-	if wall > 0 {
-		millicores = int64(cpu.Seconds() / wall.Seconds() * 1000.0)
+	reportResource(ctx, ResourceSample{CPUMillicores: amortizedMillicores(cpu, wall), MemoryBytes: maxRSS, CPUTime: cpu})
+}
+
+// amortizedMillicores spreads a finished command's total CPU over its own wall
+// duration, yielding its average concurrent core draw rather than an
+// instantaneous burst. A parallel subtree (say `make -j8` running 2s and
+// drawing 16 CPU-seconds) reports ~8 cores -- its real concurrency -- not the
+// 20-plus a single sampler interval would show if the reaped CPU landed there
+// all at once. The result is inherently bounded by host cores, since a subtree
+// cannot burn more CPU-seconds than cores times wall. A non-positive wall (a
+// command with no measurable span) draws nothing.
+func amortizedMillicores(cpu, wall time.Duration) int64 {
+	if wall <= 0 {
+		return 0
 	}
+	millicores := int64(cpu.Seconds() / wall.Seconds() * 1000.0)
 	if millicores < 0 {
-		millicores = 0
+		return 0
 	}
-	reportResource(ctx, ResourceSample{CPUMillicores: millicores, MemoryBytes: maxRSS, CPUTime: cpu})
+	return millicores
 }
 
 // streamLines reads r line-by-line, tees to buf, and pushes each line

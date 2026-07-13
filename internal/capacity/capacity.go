@@ -98,6 +98,32 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int) Resolution {
 	return res
 }
 
+// ApplyHostCeiling clamps a resolution's host charge down to the machine's
+// idle grantable ceiling (host capacity minus the reserved margin) so no run
+// is ever rejected for exceeding host capacity: an oversized cost -- a
+// measured peak or an explicit pin -- serializes alone at the grantable budget
+// instead. When an explicit pin is what gets clamped it returns a loud
+// one-line warning naming the pin and the machine, so the operator sees why
+// their pin is not honored verbatim; a measured or default clamp is silent
+// (the queue view already shows the capped charge). A non-positive ceiling
+// (an unknown grantable, e.g. no daemon to ask) or a charge already within it
+// leaves the resolution unchanged and returns no warning.
+func ApplyHostCeiling(res Resolution, machineCores, grantableCores float64, grantableMemoryBytes int64) (Resolution, string) {
+	warning := ""
+	if grantableCores > 0 && res.Cores > grantableCores {
+		if res.Source == store.CostSourcePin {
+			warning = fmt.Sprintf(
+				"pin %.1f cores exceeds this machine (%.1f); running alone - consider a smaller pin or a machine budget",
+				res.Cores, machineCores)
+		}
+		res.Cores = grantableCores
+	}
+	if grantableMemoryBytes > 0 && res.MemoryBytes > grantableMemoryBytes {
+		res.MemoryBytes = grantableMemoryBytes
+	}
+	return res, warning
+}
+
 // measurementQualifies reports whether a profile has enough evidence to
 // cost a run by measurement rather than the cold-start default: at least
 // MinSamples observations, and either a positive measured peak or a

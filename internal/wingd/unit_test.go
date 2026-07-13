@@ -95,6 +95,9 @@ func newHeadroomDaemon(t *testing.T, totalCores float64, frac float64) *Daemon {
 
 func TestApplyHeadroom_GatesUnderLoad(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
+	if dec, _, err := d.ledger.Submit(admission.Request{ID: "holder", Cores: 1}); err != nil || dec.Kind != admission.DecisionGranted {
+		t.Fatalf("holder submit = (%v, %v), want granted", dec.Kind, err)
+	}
 	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 7.5, FreeMemoryBytes: 16 << 30})
 
 	dec, _, err := d.ledger.Submit(admission.Request{ID: "big", Cores: 2})
@@ -102,7 +105,7 @@ func TestApplyHeadroom_GatesUnderLoad(t *testing.T) {
 		t.Fatalf("submit: %v", err)
 	}
 	if dec.Kind != admission.DecisionQueued {
-		t.Fatalf("under high load a 2-core request should queue, got %s", dec.Kind)
+		t.Fatalf("under high load a 2-core request behind a holder should queue, got %s", dec.Kind)
 	}
 }
 

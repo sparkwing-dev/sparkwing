@@ -52,6 +52,25 @@ func checkLedgerTruth(qs wingwire.QueueState) []string {
 	return v
 }
 
+// checkLivenessTruth asserts the liveness floor's guarantee that sparkwing
+// never refuses all work: whenever no run holds admission and no host capacity
+// is held, no run may be left queued. The floor admits the queue head on an
+// otherwise-idle box regardless of the reserve or external load, so a waiter
+// stranded behind zero holders is a liveness bug. It returns one violation
+// string when the invariant is broken, else nil.
+func checkLivenessTruth(qs wingwire.QueueState) []string {
+	if len(qs.Holders) > 0 || len(qs.Waiters) == 0 {
+		return nil
+	}
+	for _, r := range qs.Resources {
+		if r.Held > capacityEpsilon {
+			return nil
+		}
+	}
+	return []string{fmt.Sprintf(
+		"liveness floor violated: %d waiter(s) queued while no run holds admission", len(qs.Waiters))}
+}
+
 // checkOSTruth cross-checks the daemon's holder set against the set of
 // crashdummy processes the harness believes are alive. A holder the
 // harness never spawned is a phantom -- always a violation. A holder whose

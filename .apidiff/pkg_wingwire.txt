@@ -107,6 +107,10 @@ type Grant struct {
 	Resources HostResources
 
 	Semaphores []string
+
+	SoleRunUnderLoad bool
+
+	ExternalCores float64
 }
 type Hello struct {
 	ProtocolMajor int

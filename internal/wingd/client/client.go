@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -76,11 +77,20 @@ func (o Options) spawn(home, version string) error {
 	return defaultSpawn(home, version)
 }
 
-// Client is a live, handshaked connection to a daemon.
+// Client is a live, handshaked connection to a daemon. It retains the
+// options and socket it was opened with so a frame-read that fails on a
+// daemon blink (kill, idle-exit, or version takeover) can transparently
+// reconnect and reattach within the daemon's grace window instead of
+// surfacing a bare closed-connection error to the run.
 type Client struct {
-	nc  net.Conn
-	dec *frameReader
-	ack wingwire.HelloAck
+	nc   net.Conn
+	dec  *frameReader
+	ack  wingwire.HelloAck
+	opts Options
+	sock string
+	// closed marks an intentional Close so a frame-read failure that follows
+	// it is not mistaken for a daemon blink and does not trigger a reconnect.
+	closed atomic.Bool
 }
 
 // AdmissionError reports a terminal negative admission outcome: a policy
@@ -165,21 +175,35 @@ func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 	if err := wingd.ValidateSocketPath(sock); err != nil {
 		return nil, err
 	}
+	cl := &Client{opts: opts, sock: sock}
+	if err := cl.connect(ctx); err != nil {
+		return nil, err
+	}
+	return cl, nil
+}
+
+// connect dials the daemon into this client's connection, spawning one and
+// retrying with backoff when none is reachable, and resolving a newer-client
+// takeover. It is used both for the initial [EnsureDaemon] and to reconnect a
+// client whose connection dropped on a daemon blink, so a reconnect reuses the
+// exact spawn, handshake, and takeover path the first connect took.
+func (cl *Client) connect(ctx context.Context) error {
+	opts := cl.opts
 	spawns := 0
 	dialsSinceSpawn := 0
 	for {
 		if err := ctx.Err(); err != nil {
-			return nil, daemonUnreachable(opts.Home, spawns, err)
+			return daemonUnreachable(opts.Home, spawns, err)
 		}
-		nc, derr := dial(ctx, sock, opts.dialTimeout())
+		nc, derr := dial(ctx, cl.sock, opts.dialTimeout())
 		if derr != nil {
 			if spawns == 0 || dialsSinceSpawn >= dialsPerSpawn {
 				if spawns >= maxSpawnAttempts {
-					return nil, daemonUnreachable(opts.Home, spawns, derr)
+					return daemonUnreachable(opts.Home, spawns, derr)
 				}
 				_, _ = wingd.RemoveStaleSocket(opts.Home)
 				if serr := opts.spawn(opts.Home, opts.Version); serr != nil {
-					return nil, spawnFailed(opts.Home, serr)
+					return spawnFailed(opts.Home, serr)
 				}
 				spawns++
 				dialsSinceSpawn = 0
@@ -187,42 +211,81 @@ func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 				dialsSinceSpawn++
 			}
 			if err := sleep(ctx, opts.backoff()); err != nil {
-				return nil, daemonUnreachable(opts.Home, spawns, err)
+				return daemonUnreachable(opts.Home, spawns, err)
 			}
 			continue
 		}
-		cl := &Client{nc: nc, dec: newFrameReader(nc)}
+		cl.nc = nc
+		cl.dec = newFrameReader(nc)
 		ack, herr := cl.handshake(opts.Version)
 		if herr != nil {
 			cl.Close()
 			if err := sleep(ctx, opts.backoff()); err != nil {
-				return nil, daemonUnreachable(opts.Home, spawns, err)
+				return daemonUnreachable(opts.Home, spawns, err)
 			}
 			continue
 		}
 
 		if ack.ProtocolMajor != wingd.ProtocolMajor {
 			if wingd.ProtocolMajor > ack.ProtocolMajor {
+				cl.ack = ack
 				cl.takeover(ctx, opts)
 				continue
 			}
 			cl.Close()
-			return nil, ErrProtocolTooOld
+			return ErrProtocolTooOld
 		}
 		if versionNewer(opts.Version, ack.BinaryVersion) {
+			cl.ack = ack
 			cl.takeover(ctx, opts)
 			continue
 		}
 		if ack.Draining {
 			cl.Close()
 			if err := sleep(ctx, opts.backoff()); err != nil {
-				return nil, err
+				return err
 			}
 			continue
 		}
 		cl.ack = ack
-		return cl, nil
+		// safety: a live connection clears any closed mark an intermediate failed attempt set, so later frame-read recovery still runs.
+		cl.closed.Store(false)
+		return nil
 	}
+}
+
+// defaultReattachTimeout bounds a mid-operation reconnect so a frame-read
+// recovery cannot hang forever when the daemon does not come back. It is
+// generous enough to cover a daemon respawn and the reattach handshake within
+// a typical grace window.
+const defaultReattachTimeout = 8 * time.Second
+
+// reconnect re-establishes this client's connection to the daemon after a
+// blink, bounding the attempt so a daemon that never returns fails loud rather
+// than hanging. On failure it names the daemon lifecycle event and folds in the
+// daemon log tail, so a run sees "the daemon restarted and did not come back"
+// with the cause one file away rather than a bare closed-connection error.
+func (cl *Client) reconnect(ctx context.Context) error {
+	rctx, cancel := context.WithTimeout(ctx, defaultReattachTimeout)
+	defer cancel()
+	if err := cl.connect(rctx); err != nil {
+		return fmt.Errorf("wingd/client: admission daemon restarted and did not come back: %w", err)
+	}
+	return nil
+}
+
+// recoverConn decides what to do when a frame-read failed. When ctx is done
+// the caller abandoned the operation, so it returns the context error without
+// reconnecting; otherwise the failure is a daemon blink and it reconnects so
+// the operation can be re-driven on the fresh connection.
+func (cl *Client) recoverConn(ctx context.Context) error {
+	if cl.closed.Load() {
+		return net.ErrClosed
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	return cl.reconnect(ctx)
 }
 
 // takeover drains the reachable older daemon and spawns this client's
@@ -277,5 +340,9 @@ func (cl *Client) Close() error {
 	if cl.nc == nil {
 		return nil
 	}
+	// safety: mark closed before closing the socket so a Watch or Acquire
+	// reader that wakes on the close sees the intent and exits instead of
+	// reconnecting to a daemon the caller is done with.
+	cl.closed.Store(true)
 	return cl.nc.Close()
 }
