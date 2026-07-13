@@ -47,6 +47,15 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **admission:** A queued run now explains where its charge came from, not
+  just its size. The waiting log line, `sparkwing queue` holder and waiter
+  rows, and the queue JSON carry a short rationale beside the cost -- "needs
+  5.0 cores (measured p99 over 12 runs)", "(first run, conservative default
+  until measured)", "(explicit pin)", "(re-measuring at 2x prior charge)" --
+  so the number reads as a decision, not an edict. Holder and waiter rows gain
+  a `cost_rationale` field in `-o json` for a dashboard to tooltip.
 
 ## [v0.17.0] - 2026-07-13
 ### Added

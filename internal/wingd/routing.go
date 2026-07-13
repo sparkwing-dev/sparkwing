@@ -78,7 +78,7 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 					RunID:          ev.RequestID,
 					Position:       ev.Position + 1,
 					QueueLength:    d.waiterCountLocked(),
-					BlockingReason: d.hostBlockingReasonLocked(c.resources),
+					BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
 				}})
 			}
 		case admission.EventEvicted:
@@ -117,7 +117,7 @@ func (d *Daemon) waiterDeliveriesLocked() []delivery {
 			RunID:          waiter.RequestID,
 			Position:       waiterPosition(snap.Waiters[:i], waiter) + 1,
 			QueueLength:    qlen,
-			BlockingReason: d.hostBlockingReasonLocked(c.resources),
+			BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
 		}})
 	}
 	return out

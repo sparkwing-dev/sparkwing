@@ -64,6 +64,7 @@ type ContainerLimit struct {
 
 	HostMemoryBytes int64
 }
+func CostRationale(source CostSource, sampleCount int) string
 type CostSource string
 const CostSourceDefault CostSource = "default"
 const CostSourceFloor CostSource = "floor"
@@ -145,6 +146,8 @@ type Holder struct {
 	Semaphores []string
 
 	CostSource string
+
+	CostRationale string
 
 	ExpectedDurationMS int64
 
@@ -282,6 +285,8 @@ type Waiter struct {
 	WaitingMS int64
 
 	CostSource string
+
+	CostRationale string
 
 	ExpectedDurationMS int64
 

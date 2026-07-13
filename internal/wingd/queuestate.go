@@ -97,6 +97,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 				h.ElapsedMS = now.Sub(c.startAt).Milliseconds()
 			}
 			h.CostSource = c.costSource
+			h.CostRationale = d.costRationale(c)
 			h.ExpectedDurationMS = c.expectedDurationMS
 			h.DriftWarning = c.driftWarning
 			h.Origin = c.origin
@@ -148,6 +149,8 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		available[r.Key] = r
 	}
 	for i, w := range snap.Waiters {
+		c := d.byRun[w.RequestID]
+		rationale := d.costRationale(c)
 		waiter := wingwire.Waiter{
 			RunID:    w.RequestID,
 			Position: i + 1,
@@ -157,9 +160,10 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			},
 			Semaphores:     claimKeys(w.Claims),
 			WaitingOn:      waitingOn(w, remaining),
-			BlockingReason: hostBlockingReason(float64(w.MilliCores)/1000.0, float64(w.MemoryBytes), available),
+			BlockingReason: hostBlockingReason(float64(w.MilliCores)/1000.0, float64(w.MemoryBytes), available, rationale),
+			CostRationale:  rationale,
 		}
-		if c := d.byRun[w.RequestID]; c != nil {
+		if c != nil {
 			waiter.Pipeline = c.pipeline
 			waiter.Repo = c.repo
 			if !c.startAt.IsZero() {
@@ -411,7 +415,7 @@ func effectiveCapacity(ss admission.SemaphoreState) int {
 // hostBlockingReasonLocked renders the host-pressure blocking reason for a
 // run charged res against the daemon's current headroom. Empty when host
 // capacity is not what holds the run back. The caller holds d.mu.
-func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources) string {
+func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale string) string {
 	if res.Cores <= 0 && res.MemoryBytes <= 0 {
 		return ""
 	}
@@ -438,22 +442,24 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources) string {
 		"cores":  {Key: "cores", Available: grantCores, External: extCores},
 		"memory": {Key: "memory", Available: grantMem, External: extMem},
 	}
-	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail)
+	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail, rationale)
 }
 
 // hostBlockingReason renders the one-line reason a run cannot be admitted
 // on host capacity right now, comparing what it needs against what is
 // grantable and naming external load when it is the binding constraint.
-// Cores bind before memory. Empty when neither host dimension blocks the
-// run (a pure semaphore or arrival-order wait).
-func hostBlockingReason(needCores, needMem float64, available map[string]wingwire.ResourceState) string {
+// Cores bind before memory. rationale, when non-empty, explains where the
+// charge came from and is folded in right after the need ("needs 5.0 cores
+// (measured p99 over 12 runs); ..."). Empty when neither host dimension
+// blocks the run (a pure semaphore or arrival-order wait).
+func hostBlockingReason(needCores, needMem float64, available map[string]wingwire.ResourceState, rationale string) string {
 	if needCores > 0 {
 		if r, ok := available["cores"]; ok && r.Available < needCores {
 			ext := ""
 			if r.External > 0 {
 				ext = fmt.Sprintf(" (external load %s)", trimCores(r.External))
 			}
-			return fmt.Sprintf("needs %s cores; %s available%s", trimCores(needCores), trimCores(r.Available), ext)
+			return fmt.Sprintf("needs %s cores%s; %s available%s", trimCores(needCores), costParen(rationale), trimCores(r.Available), ext)
 		}
 	}
 	if needMem > 0 {
@@ -462,10 +468,28 @@ func hostBlockingReason(needCores, needMem float64, available map[string]wingwir
 			if r.External > 0 {
 				ext = fmt.Sprintf(" (external load %s)", humanBytesShort(r.External))
 			}
-			return fmt.Sprintf("needs %s; %s available%s", humanBytesShort(needMem), humanBytesShort(r.Available), ext)
+			return fmt.Sprintf("needs %s%s; %s available%s", humanBytesShort(needMem), costParen(rationale), humanBytesShort(r.Available), ext)
 		}
 	}
 	return ""
+}
+
+// costParen wraps a charge rationale in a parenthetical, or returns "" when
+// there is no rationale to show.
+func costParen(rationale string) string {
+	if rationale == "" {
+		return ""
+	}
+	return " (" + rationale + ")"
+}
+
+// costRationale is the shared charge-provenance phrase for a connection's
+// resolved cost, or "" when the connection is gone. The caller holds d.mu.
+func (d *Daemon) costRationale(c *conn) string {
+	if c == nil {
+		return ""
+	}
+	return wingwire.CostRationale(wingwire.CostSource(c.costSource), c.sampleCount)
 }
 
 // trimCores formats a core count with a single decimal place.

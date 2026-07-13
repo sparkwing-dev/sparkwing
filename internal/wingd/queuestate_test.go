@@ -72,6 +72,64 @@ func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 	}
 }
 
+// TestQueueState_BlockingReasonExplainsChargeSource queues a run whose cost
+// was resolved from a measured profile and asserts the waiter's blocking
+// reason and its standalone CostRationale both explain where the charge came
+// from, not just its size.
+func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
+	home := shortHome(t)
+	sampler := newFakeSampler(10, 64<<30)
+	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
+
+	holderClient := ensure(t, home, "v1")
+	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID:      "holder",
+		Resources:  wingwire.HostResources{Cores: 1},
+		CostSource: wingwire.CostSourcePin,
+	})
+
+	cl := ensure(t, home, "v1")
+	_, result := acquireAsync(cl, wingwire.AdmissionRequest{
+		RunID:       "heavy",
+		Resources:   wingwire.HostResources{Cores: 5},
+		CostSource:  wingwire.CostSourceMeasured,
+		SampleCount: 12,
+	})
+	select {
+	case r := <-result:
+		t.Fatalf("run was admitted (%v); it should queue on host pressure", r.err)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	w, ok := waiterByRun(qs, "heavy")
+	if !ok {
+		t.Fatal("heavy run not queued")
+	}
+	if want := "measured p99 over 12 runs"; !strings.Contains(w.BlockingReason, want) {
+		t.Fatalf("blocking reason = %q, want it to contain %q", w.BlockingReason, want)
+	}
+	if w.CostRationale != "measured p99 over 12 runs" {
+		t.Fatalf("waiter CostRationale = %q, want measured phrase", w.CostRationale)
+	}
+	var holder *wingwire.Holder
+	for i := range qs.Holders {
+		if qs.Holders[i].RunID == "holder" {
+			holder = &qs.Holders[i]
+		}
+	}
+	if holder == nil {
+		t.Fatal("holder not reported")
+	}
+	if holder.CostRationale != "explicit pin" {
+		t.Fatalf("holder CostRationale = %q, want explicit pin", holder.CostRationale)
+	}
+}
+
 // fakeProcSampler feeds controllable per-pid CPU fractions so stall
 // flagging is exercised without a real busy or idle process.
 type fakeProcSampler struct {
