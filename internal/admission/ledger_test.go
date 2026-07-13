@@ -628,6 +628,47 @@ func TestSetHeadroom_EmptyHostAdmitsQueueHead(t *testing.T) {
 	}
 }
 
+func TestSetHeadroom_AnyHostLeaseDisablesEmptyHostFloor(t *testing.T) {
+	tests := []struct {
+		name   string
+		holder Request
+		waiter Request
+	}{
+		{
+			name:   "memory holder gates cpu waiter",
+			holder: Request{ID: "holder", MemoryBytes: 1},
+			waiter: Request{ID: "waiter", Cores: 1},
+		},
+		{
+			name:   "cpu holder gates memory waiter",
+			holder: Request{ID: "holder", Cores: 1},
+			waiter: Request{ID: "waiter", MemoryBytes: 1},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := testLedger(t, 4, 1024)
+			if _, err := l.SetHeadroom(0, 0); err != nil {
+				t.Fatalf("SetHeadroom: %v", err)
+			}
+
+			mustGrant(t, l, tt.holder)
+			mustQueue(t, l, tt.waiter)
+		})
+	}
+}
+
+func TestResizeTotals_GatesNewAdmission(t *testing.T) {
+	l := testLedger(t, 8, 2048)
+	mustGrant(t, l, Request{ID: "holder", Cores: 1, MemoryBytes: 512})
+	if err := l.ResizeTotals(2, 1024); err != nil {
+		t.Fatalf("ResizeTotals: %v", err)
+	}
+
+	mustQueue(t, l, Request{ID: "waiter", Cores: 2, MemoryBytes: 1024})
+}
+
 func TestSetHeadroom_RejectsInvalidValues(t *testing.T) {
 	l := testLedger(t, 4, 0)
 	for _, cores := range []float64{-1, math.NaN(), math.Inf(1)} {

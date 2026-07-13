@@ -109,6 +109,7 @@ export function resourceAvailable(r: QueueResource): number {
 // busy with other processes. Empty when external load is not the binding
 // constraint.
 export function externalPressureNote(qs: QueueState): string {
+  if (qs.ignore_external) return "";
   const waiters = qs.waiters ?? [];
   if (waiters.length === 0) return "";
   const anyBlocked = waiters.some((w) => !!w.blocking_reason);
@@ -197,7 +198,8 @@ export function eventsLine(events: QueueEvents | null | undefined): string {
     events.runs === 0 &&
     evictions === 0 &&
     (events.queue_timeouts ?? 0) === 0 &&
-    (events.cancellations ?? 0) === 0
+    (events.cancellations ?? 0) === 0 &&
+    (events.contended ?? 0) === 0
   ) {
     return "";
   }
@@ -225,6 +227,10 @@ export function eventsLine(events: QueueEvents | null | undefined): string {
   if ((events.cancellations ?? 0) > 0) {
     const n = events.cancellations as number;
     parts.push(`${n} ${plural(n, "cancellation", "cancellations")}`);
+  }
+  if ((events.contended ?? 0) > 0) {
+    const n = events.contended as number;
+    parts.push(`${n} contended`);
   }
   return `last ${hours}h: ${parts.join(", ")}`;
 }

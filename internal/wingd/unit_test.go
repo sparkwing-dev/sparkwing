@@ -73,6 +73,58 @@ func TestSubmitErrorKey(t *testing.T) {
 	}
 }
 
+type fixedHostSampler struct {
+	stat HostStat
+}
+
+func (s fixedHostSampler) Sample() (HostStat, error) {
+	return s.stat, nil
+}
+
+func TestInitLedger_ResizesRestoredTotalsToCurrentBudget(t *testing.T) {
+	home := t.TempDir()
+	original, err := admission.New(admission.Config{TotalCores: 8, TotalMemoryBytes: 2048})
+	if err != nil {
+		t.Fatalf("new ledger: %v", err)
+	}
+	dec, _, err := original.Submit(admission.Request{ID: "holder", Cores: 1, MemoryBytes: 512})
+	if err != nil {
+		t.Fatalf("submit holder: %v", err)
+	}
+	if dec.Kind != admission.DecisionGranted {
+		t.Fatalf("holder = %s, want %s", dec.Kind, admission.DecisionGranted)
+	}
+
+	d, err := New(Config{
+		Home: home,
+		Sampler: fixedHostSampler{stat: HostStat{
+			TotalCores:       2,
+			TotalMemoryBytes: 1024,
+			FreeMemoryBytes:  1024,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+	if err := d.layout.ensureDir(); err != nil {
+		t.Fatalf("ensure dir: %v", err)
+	}
+	if err := writeState(d.layout.state, original.Snapshot(), nil); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	if err := d.initLedger(); err != nil {
+		t.Fatalf("init ledger: %v", err)
+	}
+
+	dec, _, err = d.ledger.Submit(admission.Request{ID: "waiter", Cores: 2, MemoryBytes: 1024})
+	if err != nil {
+		t.Fatalf("submit waiter: %v", err)
+	}
+	if dec.Kind != admission.DecisionQueued {
+		t.Fatalf("restored ledger admitted against stale totals: got %s, want %s", dec.Kind, admission.DecisionQueued)
+	}
+}
+
 // newHeadroomDaemon builds a daemon with a ready ledger but no listener,
 // for exercising the headroom controller in isolation.
 func newHeadroomDaemon(t *testing.T, totalCores float64, frac float64) *Daemon {

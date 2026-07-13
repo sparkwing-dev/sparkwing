@@ -292,6 +292,9 @@ func (d *Daemon) initLedger() error {
 		if err != nil {
 			return fmt.Errorf("wingd: restore ledger: %w", err)
 		}
+		if err := lg.ResizeTotals(d.budgetCores, d.budgetMemory); err != nil {
+			return fmt.Errorf("wingd: resize restored ledger: %w", err)
+		}
 		d.ledger = lg
 		for _, ls := range snap.Leases {
 			d.leaseRun[ls.ID] = ls.RequestID

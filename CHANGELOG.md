@@ -53,6 +53,9 @@ code change to unlock.
   head even when external load leaves zero measured headroom. A saturated
   machine falls back to one sparkwing run at a time instead of letting the
   queue park forever.
+- **daemon:** Restored admission state is resized to the current machine
+  budget before the daemon serves, so a restart after a capacity change
+  cannot admit new runs against stale totals.
 
 ## [v0.16.4] - 2026-07-12
 ### Fixed

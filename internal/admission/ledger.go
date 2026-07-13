@@ -314,6 +314,41 @@ func (l *Ledger) SetHeadroom(cores float64, memoryBytes uint64) ([]Event, error)
 	return events, nil
 }
 
+// ResizeTotals replaces the fixed host capacity after a daemon restore
+// on a machine with different effective limits. It preserves current
+// grants and waiters; if the new totals cannot represent that state, it
+// returns [ErrInvalidResize].
+func (l *Ledger) ResizeTotals(cores float64, memoryBytes uint64) error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	mc, err := toMilliCores(cores)
+	if err != nil {
+		return fmt.Errorf("%w: cores %v", ErrInvalidResize, cores)
+	}
+	if l.usedMilliCores > mc {
+		return fmt.Errorf("%w: granted cores %d exceed total %d", ErrInvalidResize, l.usedMilliCores, mc)
+	}
+	if l.usedMemory > memoryBytes {
+		return fmt.Errorf("%w: granted memory %d exceeds total %d", ErrInvalidResize, l.usedMemory, memoryBytes)
+	}
+	for _, w := range l.waiters {
+		if w.spec.milliCores > mc {
+			return fmt.Errorf("%w: waiter %q cores %d exceed total %d", ErrInvalidResize, w.spec.id, w.spec.milliCores, mc)
+		}
+		if w.spec.memory > memoryBytes {
+			return fmt.Errorf("%w: waiter %q memory %d exceeds total %d", ErrInvalidResize, w.spec.id, w.spec.memory, memoryBytes)
+		}
+	}
+
+	l.totalMilliCores = mc
+	l.totalMemory = memoryBytes
+	l.headroomMilliCores = min(l.headroomMilliCores, mc)
+	l.headroomMemory = min(l.headroomMemory, memoryBytes)
+	l.mustHoldInvariants()
+	return nil
+}
+
 func (l *Ledger) normalize(req Request) (spec, error) {
 	if req.ID == "" {
 		return spec{}, fmt.Errorf("%w: empty request id", ErrInvalidRequest)
@@ -564,17 +599,21 @@ func (l *Ledger) hostFits(s spec) bool {
 }
 
 func (l *Ledger) coreCapacity() int64 {
-	if l.usedMilliCores == 0 {
+	if l.hostIdle() {
 		return l.totalMilliCores
 	}
 	return min(l.totalMilliCores, l.headroomMilliCores)
 }
 
 func (l *Ledger) memoryCapacity() uint64 {
-	if l.usedMemory == 0 {
+	if l.hostIdle() {
 		return l.totalMemory
 	}
 	return min(l.totalMemory, l.headroomMemory)
+}
+
+func (l *Ledger) hostIdle() bool {
+	return l.usedMilliCores == 0 && l.usedMemory == 0
 }
 
 func (l *Ledger) semUsed(key string) int {
