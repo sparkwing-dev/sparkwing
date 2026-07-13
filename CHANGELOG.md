@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.16.6] - 2026-07-13
 ### Fixed
 
 - **admission:** Removing a `.Resources()` declaration now clears the stored
