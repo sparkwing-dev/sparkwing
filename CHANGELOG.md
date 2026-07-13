@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.2] - 2026-07-13
 ### Fixed
 
 - **admission:** Queue ETAs now use measured p99 duration instead of p50.
