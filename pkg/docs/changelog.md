@@ -49,6 +49,26 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **admission:** A queued run now explains where its charge came from, not
+  just its size. The waiting log line, `sparkwing queue` holder and waiter
+  rows, and the queue JSON carry a short rationale beside the cost -- "needs
+  5.0 cores (measured p99 over 12 runs)", "(first run, conservative default
+  until measured)", "(explicit pin)", "(re-measuring at 2x prior charge)" --
+  so the number reads as a decision, not an edict. Holder and waiter rows gain
+  a `cost_rationale` field in `-o json` for a dashboard to tooltip.
+
+### Fixed
+
+- **cli:** The `sparkwing queue` resource table now reconciles on screen. The
+  external column reports the same smoothed external load the availability
+  math actually used, so capacity - in use - reserved - external = available
+  holds exactly rather than appearing off by the deadband. A one-line legend
+  spells out that arithmetic, and "Running" and "Waiting" headers label the
+  two tables.
+
+## [v0.17.0] - 2026-07-13
+### Added
+
 - **admission:** Capacity measurement is now honest about contention and
   pipeline change. A run the daemon flags as throttled by host contention no
   longer folds into the measured profile: it measured what it got, not what it

@@ -57,6 +57,15 @@ code change to unlock.
   so the number reads as a decision, not an edict. Holder and waiter rows gain
   a `cost_rationale` field in `-o json` for a dashboard to tooltip.
 
+### Fixed
+
+- **cli:** The `sparkwing queue` resource table now reconciles on screen. The
+  external column reports the same smoothed external load the availability
+  math actually used, so capacity - in use - reserved - external = available
+  holds exactly rather than appearing off by the deadband. A one-line legend
+  spells out that arithmetic, and "Running" and "Waiting" headers label the
+  two tables.
+
 ## [v0.17.0] - 2026-07-13
 ### Added
 

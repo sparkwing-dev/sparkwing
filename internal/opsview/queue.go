@@ -117,6 +117,9 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 			fmtAmount(r.Key, resourceAvailable(r)))
 	}
 	_ = tw.Flush()
+	if line := resourceLegend(qs); line != "" {
+		fmt.Fprintln(out, line)
+	}
 
 	if c := ContainerNote(qs.Container); c != "" {
 		fmt.Fprintf(out, "%s\n", c)
@@ -132,6 +135,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	}
 
 	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Running")
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "RUN\tPIPELINE\tREPO\tORIGIN\tELAPSED\tCOST\tSOURCE\tSEMAPHORES")
 	if len(qs.Holders) == 0 {
@@ -155,6 +159,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	_ = tw.Flush()
 
 	fmt.Fprintln(out)
+	fmt.Fprintln(out, "Waiting")
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "POS\tRUN\tPIPELINE\tREPO\tORIGIN\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
 	if len(qs.Waiters) == 0 {
@@ -214,6 +219,18 @@ func resourceAvailable(r wingwire.ResourceState) float64 {
 		free = 0
 	}
 	return free
+}
+
+// resourceLegend explains the resource table's headroom arithmetic in one
+// line. Shown only when a host dimension (cores or memory) is present, since
+// the reserved and external columns are blank for a semaphore-only view.
+func resourceLegend(qs wingwire.QueueState) string {
+	for _, r := range qs.Resources {
+		if isHostResource(r.Key) {
+			return "available = capacity - in use - reserved (kept free for the rest of the machine) - external (other processes, smoothed)"
+		}
+	}
+	return ""
 }
 
 func fmtHeadroomCell(key string, v float64) string {

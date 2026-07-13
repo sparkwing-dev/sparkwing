@@ -3,12 +3,66 @@ package opsview_test
 import (
 	"bytes"
 	"encoding/json"
+	"math"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
+
+// TestRenderQueuePretty_ResourceRowReconciles renders a host resource row and
+// asserts the printed numbers satisfy capacity - in use - reserved - external
+// = available exactly, and that the legend and the Running/Waiting section
+// headers frame the tables.
+func TestRenderQueuePretty_ResourceRowReconciles(t *testing.T) {
+	qs := wingwire.QueueState{
+		Resources: []wingwire.ResourceState{
+			{Key: "cores", Capacity: 10, Held: 0, Reserved: 2, External: 4.07, Available: 3.93},
+		},
+		Holders: []wingwire.Holder{{RunID: "run-a", Resources: wingwire.HostResources{Cores: 1}}},
+		Waiters: []wingwire.Waiter{{RunID: "run-b", Position: 1, Resources: wingwire.HostResources{Cores: 5}}},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "available = capacity - in use - reserved") {
+		t.Fatalf("missing legend line:\n%s", out)
+	}
+	if !strings.Contains(out, "\nRunning\n") || !strings.Contains(out, "\nWaiting\n") {
+		t.Fatalf("missing Running/Waiting section headers:\n%s", out)
+	}
+	cap, held, reserved, external, available, ok := parseCoresRow(out)
+	if !ok {
+		t.Fatalf("no cores row parsed from:\n%s", out)
+	}
+	if got := cap - held - reserved - external; math.Abs(got-available) > 1e-9 {
+		t.Fatalf("row does not reconcile: %v - %v - %v - %v = %v, printed available %v",
+			cap, held, reserved, external, got, available)
+	}
+}
+
+func parseCoresRow(out string) (cap, held, reserved, external, available float64, ok bool) {
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 6 || fields[0] != "cores" {
+			continue
+		}
+		nums := make([]float64, 5)
+		for i := 0; i < 5; i++ {
+			v, err := strconv.ParseFloat(fields[i+1], 64)
+			if err != nil {
+				return 0, 0, 0, 0, 0, false
+			}
+			nums[i] = v
+		}
+		return nums[0], nums[1], nums[2], nums[3], nums[4], true
+	}
+	return 0, 0, 0, 0, 0, false
+}
 
 func TestRenderQueue_JSONRoundTrips(t *testing.T) {
 	want := wingwire.QueueState{

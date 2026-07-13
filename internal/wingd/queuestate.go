@@ -54,21 +54,30 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	if grantMem < 0 {
 		grantMem = 0
 	}
+	capCores := float64(snap.TotalMilliCores) / 1000.0
+	heldCores := float64(usedMilli) / 1000.0
+	capMem := float64(snap.TotalMemoryBytes)
+	heldMem := float64(usedMem)
+	extCores, extMem := d.externalCores, float64(d.externalMem)
+	if !d.cfg.Budget.IgnoreExternal {
+		extCores = reconciledExternal(capCores, heldCores, d.reservedCores, grantCores)
+		extMem = reconciledExternal(capMem, heldMem, float64(d.reservedMem), grantMem)
+	}
 	qs.Resources = append(qs.Resources,
 		wingwire.ResourceState{
 			Key:       "cores",
-			Capacity:  float64(snap.TotalMilliCores) / 1000.0,
-			Held:      float64(usedMilli) / 1000.0,
+			Capacity:  capCores,
+			Held:      heldCores,
 			Reserved:  d.reservedCores,
-			External:  d.externalCores,
+			External:  extCores,
 			Available: grantCores,
 		},
 		wingwire.ResourceState{
 			Key:       "memory",
-			Capacity:  float64(snap.TotalMemoryBytes),
-			Held:      float64(usedMem),
+			Capacity:  capMem,
+			Held:      heldMem,
 			Reserved:  float64(d.reservedMem),
-			External:  float64(d.externalMem),
+			External:  extMem,
 			Available: grantMem,
 		},
 	)
@@ -372,6 +381,20 @@ func minU64(a, b uint64) uint64 {
 		return a
 	}
 	return b
+}
+
+// reconciledExternal is the external load implied by the headroom the
+// availability math used: capacity minus what is held, reserved, and left
+// grantable. Reporting this rather than the freshest raw sample keeps the
+// queue view's arithmetic exact -- capacity - held - reserved - external
+// equals available on screen -- since both the column and available then
+// derive from the same (deadbanded) headroom. Floored at zero.
+func reconciledExternal(capacity, held, reserved, available float64) float64 {
+	ext := capacity - held - reserved - available
+	if ext < 0 {
+		return 0
+	}
+	return ext
 }
 
 // waitingOn names the resources a waiter cannot fit into right now: host

@@ -130,6 +130,39 @@ func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
 	}
 }
 
+// TestQueueState_ResourceRowsReconcile puts a host under external load with a
+// run holding, then asserts the reported cores row balances exactly:
+// capacity - held - reserved - external = available. The external the queue
+// shows is the one the availability math used, so the arithmetic never looks
+// broken even though the raw load sample is deadbanded.
+func TestQueueState_ResourceRowsReconcile(t *testing.T) {
+	home := shortHome(t)
+	sampler := newFakeSampler(10, 64<<30)
+	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
+
+	holderClient := ensure(t, home, "v1")
+	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID:     "holder",
+		Resources: wingwire.HostResources{Cores: 1},
+	})
+
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	for _, r := range qs.Resources {
+		if r.Key != "cores" && r.Key != "memory" {
+			continue
+		}
+		balance := r.Capacity - r.Held - r.Reserved - r.External
+		if diff := balance - r.Available; diff > 1e-6 || diff < -1e-6 {
+			t.Fatalf("%s row does not reconcile: cap %v - held %v - reserved %v - external %v = %v, available %v",
+				r.Key, r.Capacity, r.Held, r.Reserved, r.External, balance, r.Available)
+		}
+	}
+}
+
 // fakeProcSampler feeds controllable per-pid CPU fractions so stall
 // flagging is exercised without a real busy or idle process.
 type fakeProcSampler struct {
