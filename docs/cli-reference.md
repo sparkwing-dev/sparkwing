@@ -4185,6 +4185,7 @@ For SDK (go.mod) bumps, use 'sparkwing version update --sdk'.
 |---|---|
 | `--check` | Report installed vs latest; exit 1 if a newer release exists (read-only) |
 | `--force` | Allow downgrading to an older release |
+| `--override-hold` | Cross an operator version hold |
 | `--version TAG` | Target release tag (e.g. v0.17.0). Default: latest. |
 
 ### Examples
@@ -4224,6 +4225,7 @@ latest) for shell pipelines.
 ### Subcommands
 
 - `update` -- Self-update CLI binary or bump SDK pin (requires --cli or --sdk)
+- `hold` -- Show, set, or clear the operator ceiling on CLI upgrades
 
 ### Flags
 
@@ -4231,6 +4233,7 @@ latest) for shell pipelines.
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
 | `--offline` | Skip the network fetch for latest release |
+| `--changelog` | Print the changelog for the installed release |
 
 ### Examples
 
@@ -4247,11 +4250,60 @@ sparkwing version -o plain | head -n1
 # Local-only (no network)
 sparkwing version --offline
 
+# Changelog for the installed release
+sparkwing version --changelog
+
 # Update the CLI binary
 sparkwing version update --cli
 
 # Bump the SDK pin in this project
 sparkwing version update --sdk
+```
+
+## `sparkwing version hold`
+
+Show, set, or clear the operator ceiling on CLI upgrades
+
+A version hold is an operator-set ceiling that the tool enforces:
+once set, 'sparkwing version update --cli' (and 'sparkwing update')
+refuse to install anything beyond it, so an agent cannot perform a
+major upgrade against operator instruction.
+
+The ceiling shape controls its reach:
+
+  vMAJOR.MINOR       caps a whole minor series -- every patch of that
+                     minor is allowed, the next minor is refused
+                     (e.g. v0.15 allows v0.15.9 but refuses v0.16.0).
+  vMAJOR.MINOR.PATCH exact ceiling -- nothing above that patch installs.
+
+With no flags, prints the current hold and where it is set. The hold
+persists in the user config (XDG_CONFIG_HOME or ~/.config/sparkwing/
+version-hold); the SPARKWING_VERSION_HOLD environment variable
+overrides the file for a shell or a whole fleet. Releases beyond the
+hold still show in 'sparkwing version' so the operator sees what is
+being deferred.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--set VERSION` | Set the ceiling (e.g. v0.15 or v0.15.4) |
+| `--clear` | Remove the hold so upgrades are unrestricted |
+
+### Examples
+
+```sh
+# Show the current hold
+sparkwing version hold
+
+# Hold the minor series at v0.15
+sparkwing version hold --set v0.15
+
+# Pin an exact ceiling
+sparkwing version hold --set v0.15.4
+
+# Lift the hold
+sparkwing version hold --clear
 ```
 
 ## `sparkwing version update`
@@ -4282,6 +4334,7 @@ applies to whichever target is selected.
 | `--sdk` | Bump the SDK pin in this project's .sparkwing/go.mod |
 | `--version TAG` | Target release tag (e.g. v0.17.0). Omit for latest. |
 | `--force` | Allow downgrading to an older release (--cli only) |
+| `--override-hold` | Cross an operator version hold (--cli only) |
 
 ### Examples
 

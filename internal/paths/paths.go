@@ -38,6 +38,11 @@ func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 // semaphore's lock files. See internal/boxslot.
 func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
 
+// LastVersionFile holds the CLI version of the most recent invocation.
+// The dispatcher compares it against the running binary to detect an
+// upgrade and surface a one-time pointer at the changelog.
+func (p Paths) LastVersionFile() string { return filepath.Join(p.Root, "last-version") }
+
 // RunsDir is the parent directory for per-run artifacts.
 func (p Paths) RunsDir() string { return filepath.Join(p.Root, "runs") }
 

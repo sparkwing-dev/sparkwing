@@ -1,6 +1,7 @@
 package docs_test
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -47,6 +48,22 @@ func TestPkgDocsContentMatchesDocsRoot(t *testing.T) {
 		t.Fatalf("pkg/docs/mirror/ is out of sync with docs/:\n  %s\n\n"+
 			"Fix: bash bin/sync-docs.sh && git add pkg/docs/mirror/",
 			strings.Join(diffs, "\n  "))
+	}
+}
+
+func TestEmbeddedChangelogMatchesRoot(t *testing.T) {
+	root := repoRoot(t)
+	src, err := os.ReadFile(filepath.Join(root, "CHANGELOG.md"))
+	if err != nil {
+		t.Fatalf("read CHANGELOG.md: %v", err)
+	}
+	embedded, err := os.ReadFile(filepath.Join(root, "pkg", "docs", "changelog.md"))
+	if err != nil {
+		t.Fatalf("read pkg/docs/changelog.md: %v", err)
+	}
+	if !bytes.Equal(src, embedded) {
+		t.Fatalf("pkg/docs/changelog.md is out of sync with CHANGELOG.md\n\n" +
+			"Fix: bash bin/sync-docs.sh && git add pkg/docs/changelog.md")
 	}
 }
 

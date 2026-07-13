@@ -18,16 +18,17 @@ import (
 // Info is the JSON shape of `sparkwing info`. Stable contract: agents
 // parse this directly. Field renames here are breaking changes.
 type Info struct {
-	About        string         `json:"about"`
-	Version      InfoVersion    `json:"version"`
-	Binary       string         `json:"binary"`
-	Project      InfoProject    `json:"project"`
-	Toolchain    InfoToolchain  `json:"toolchain"`
-	NextSteps    []InfoNextStep `json:"next_steps"`
-	ForAgents    []InfoNextStep `json:"for_agents,omitempty"`
-	Tips         []InfoTip      `json:"tips,omitempty"`
-	Docs         InfoDocs       `json:"docs"`
-	FirstRunNote string         `json:"first_run_note"`
+	About         string         `json:"about"`
+	Version       InfoVersion    `json:"version"`
+	Binary        string         `json:"binary"`
+	Project       InfoProject    `json:"project"`
+	Toolchain     InfoToolchain  `json:"toolchain"`
+	NextSteps     []InfoNextStep `json:"next_steps"`
+	ForAgents     []InfoNextStep `json:"for_agents,omitempty"`
+	Tips          []InfoTip      `json:"tips,omitempty"`
+	Docs          InfoDocs       `json:"docs"`
+	FirstRunNote  string         `json:"first_run_note"`
+	UpgradeNotice string         `json:"upgrade_notice,omitempty"`
 }
 
 type InfoTip struct {
@@ -373,6 +374,7 @@ func gatherInfo(agentMode bool) Info {
 		info.Project.HowToScaffold = "sparkwing pipeline new --name release"
 	}
 
+	info.UpgradeNotice = pendingUpgradeNotice
 	info.NextSteps = nextStepsFor(info, agentMode)
 	info.Tips = gatherTips(info)
 	return info
@@ -614,6 +616,11 @@ func printInfoTable(info Info) {
 			fmt.Println("  " + info.About)
 			fmt.Println()
 		}
+	}
+
+	if info.UpgradeNotice != "" {
+		fmt.Println(color.Yellow(info.UpgradeNotice))
+		fmt.Println()
 	}
 
 	fmt.Println(color.Bold("ENVIRONMENT"))

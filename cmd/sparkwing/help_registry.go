@@ -202,10 +202,12 @@ structured report; -o plain prints semver lines (CLI then
 latest) for shell pipelines.`,
 	Subcommands: []SubcommandRef{
 		{"update", "Self-update CLI binary or bump SDK pin (requires --cli or --sdk)"},
+		{"hold", "Show, set, or clear the operator ceiling on CLI upgrades"},
 	},
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 		{Name: "offline", Desc: "Skip the network fetch for latest release", Group: "Behavior"},
+		{Name: "changelog", Desc: "Print the changelog for the installed release", Group: "Behavior"},
 	},
 	GroupOrder: []string{"Output", "Behavior", "Other"},
 	Examples: []Example{
@@ -213,8 +215,47 @@ latest) for shell pipelines.`,
 		{"Agent-readable record", "sparkwing version -o json"},
 		{"CLI semver only (scripts)", "sparkwing version -o plain | head -n1"},
 		{"Local-only (no network)", "sparkwing version --offline"},
+		{"Changelog for the installed release", "sparkwing version --changelog"},
 		{"Update the CLI binary", "sparkwing version update --cli"},
 		{"Bump the SDK pin in this project", "sparkwing version update --sdk"},
+	},
+}
+
+// cmdVersionHold is the operator-set ceiling on CLI self-upgrades.
+// The tool enforces the hold so an agent cannot cross it against
+// operator instruction; the override flag exists but is intentionally
+// left out of the refusal message an agent sees.
+var cmdVersionHold = Command{
+	Path:     "sparkwing version hold",
+	Synopsis: "Show, set, or clear the operator ceiling on CLI upgrades",
+	Description: `A version hold is an operator-set ceiling that the tool enforces:
+once set, 'sparkwing version update --cli' (and 'sparkwing update')
+refuse to install anything beyond it, so an agent cannot perform a
+major upgrade against operator instruction.
+
+The ceiling shape controls its reach:
+
+  vMAJOR.MINOR       caps a whole minor series -- every patch of that
+                     minor is allowed, the next minor is refused
+                     (e.g. v0.15 allows v0.15.9 but refuses v0.16.0).
+  vMAJOR.MINOR.PATCH exact ceiling -- nothing above that patch installs.
+
+With no flags, prints the current hold and where it is set. The hold
+persists in the user config (XDG_CONFIG_HOME or ~/.config/sparkwing/
+version-hold); the SPARKWING_VERSION_HOLD environment variable
+overrides the file for a shell or a whole fleet. Releases beyond the
+hold still show in 'sparkwing version' so the operator sees what is
+being deferred.`,
+	Flags: []FlagSpec{
+		{Name: "set", Argument: "VERSION", Desc: "Set the ceiling (e.g. v0.15 or v0.15.4)", Group: "Action"},
+		{Name: "clear", Desc: "Remove the hold so upgrades are unrestricted", Group: "Action"},
+	},
+	GroupOrder: []string{"Action", "Other"},
+	Examples: []Example{
+		{"Show the current hold", "sparkwing version hold"},
+		{"Hold the minor series at v0.15", "sparkwing version hold --set v0.15"},
+		{"Pin an exact ceiling", "sparkwing version hold --set v0.15.4"},
+		{"Lift the hold", "sparkwing version hold --clear"},
 	},
 }
 
@@ -245,6 +286,7 @@ For SDK (go.mod) bumps, use 'sparkwing version update --sdk'.`,
 	Flags: []FlagSpec{
 		{Name: "check", Desc: "Report installed vs latest; exit 1 if a newer release exists (read-only)", Group: "Behavior"},
 		{Name: "force", Desc: "Allow downgrading to an older release", Group: "Behavior"},
+		{Name: "override-hold", Desc: "Cross an operator version hold", Group: "Behavior"},
 		{Name: "version", Argument: "TAG", Desc: "Target release tag (e.g. v0.17.0). Default: latest.", Group: "Input"},
 	},
 	GroupOrder: []string{"Behavior", "Input", "Other"},
@@ -284,6 +326,7 @@ applies to whichever target is selected.`,
 		{Name: "sdk", Desc: "Bump the SDK pin in this project's .sparkwing/go.mod", Group: "Target", ConflictsWith: []string{"cli"}},
 		{Name: "version", Argument: "TAG", Desc: "Target release tag (e.g. v0.17.0). Omit for latest.", Group: "Input"},
 		{Name: "force", Desc: "Allow downgrading to an older release (--cli only)", Group: "Input"},
+		{Name: "override-hold", Desc: "Cross an operator version hold (--cli only)", Group: "Input"},
 	},
 	GroupOrder: []string{"Target", "Input", "Other"},
 	Examples: []Example{
