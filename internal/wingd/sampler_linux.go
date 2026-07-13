@@ -24,56 +24,69 @@ const linuxClockTicks = 100.0
 // change in cumulative user+system time between two /proc readings. The
 // first reading for every live pid has no baseline; sample reports once
 // at least one process in the tree has two readings.
-func (p *procSampler) sample(pid int) (float64, bool) {
-	tree, ok := linuxProcessTree(pid)
+func (p *procSampler) sample(pid int) (ProcUsage, bool) {
+	usages := p.sampleMany([]int{pid})
+	usage, ok := usages[pid]
+	return usage, ok
+}
+
+func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
+	procs, ok := linuxProcesses()
 	if !ok {
-		p.forget(pid)
-		return 0, false
+		return nil
 	}
 	now := time.Now()
 
-	type reading struct {
-		pid        int
-		cpuSeconds float64
-	}
-	readings := make([]reading, 0, len(tree))
-	for _, treePID := range tree {
-		cpuSeconds, ok := linuxProcessCPUSeconds(treePID)
-		if !ok {
-			p.forget(treePID)
-			continue
-		}
-		readings = append(readings, reading{pid: treePID, cpuSeconds: cpuSeconds})
-	}
-	if len(readings) == 0 {
-		return 0, false
-	}
-	if len(tree) > 1 {
-		return 1, true
+	children := map[int][]int{}
+	for processID, proc := range procs {
+		children[proc.parentPID] = append(children[proc.parentPID], processID)
 	}
 
-	var total float64
-	var sampled bool
+	trees := make(map[int][]int, len(pids))
+	for _, pid := range pids {
+		if _, ok := procs[pid]; !ok {
+			p.forget(pid)
+			continue
+		}
+		tree := []int{pid}
+		for i := 0; i < len(tree); i++ {
+			tree = append(tree, children[tree[i]]...)
+		}
+		trees[pid] = tree
+	}
+
+	usages := make(map[int]ProcUsage, len(trees))
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.pruneTreeLocked(pid, trackedPIDs(tree))
-	for _, r := range readings {
-		prev, ok := p.last[r.pid]
-		p.last[r.pid] = cpuSample{cpuSeconds: r.cpuSeconds, at: now}
-		if !ok {
-			continue
+	for pid, tree := range trees {
+		usage := ProcUsage{HasDescendant: len(tree) > 1}
+		var sampled bool
+		p.pruneTreeLocked(pid, trackedPIDs(tree))
+		for _, treePID := range tree {
+			proc, ok := procs[treePID]
+			if !ok {
+				continue
+			}
+			prev, ok := p.last[treePID]
+			p.last[treePID] = cpuSample{cpuSeconds: proc.cpuSeconds, at: now}
+			if !ok {
+				continue
+			}
+			wall := now.Sub(prev.at).Seconds()
+			if wall <= 0 {
+				continue
+			}
+			frac := (proc.cpuSeconds - prev.cpuSeconds) / wall
+			if frac > 0 {
+				usage.Fraction += frac
+			}
+			sampled = true
 		}
-		wall := now.Sub(prev.at).Seconds()
-		if wall <= 0 {
-			continue
+		if sampled {
+			usages[pid] = usage
 		}
-		frac := (r.cpuSeconds - prev.cpuSeconds) / wall
-		if frac > 0 {
-			total += frac
-		}
-		sampled = true
 	}
-	return total, sampled
+	return usages
 }
 
 func linuxProcessCPUSeconds(pid int) (float64, bool) {
@@ -98,6 +111,61 @@ func linuxProcessCPUSeconds(pid int) (float64, bool) {
 		return 0, false
 	}
 	return (utime + stime + cutime + cstime) / linuxClockTicks, true
+}
+
+type linuxProc struct {
+	parentPID  int
+	cpuSeconds float64
+}
+
+func linuxProcesses() (map[int]linuxProc, bool) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, false
+	}
+	procs := map[int]linuxProc{}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil {
+			continue
+		}
+		proc, ok := linuxProcess(pid)
+		if ok {
+			procs[pid] = proc
+		}
+	}
+	return procs, true
+}
+
+func linuxProcess(pid int) (linuxProc, bool) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return linuxProc{}, false
+	}
+	line := string(data)
+	rparen := strings.LastIndexByte(line, ')')
+	if rparen < 0 || rparen+2 >= len(line) {
+		return linuxProc{}, false
+	}
+	fields := strings.Fields(line[rparen+2:])
+	if len(fields) < 15 {
+		return linuxProc{}, false
+	}
+	parent, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return linuxProc{}, false
+	}
+	utime, err1 := strconv.ParseFloat(fields[11], 64)
+	stime, err2 := strconv.ParseFloat(fields[12], 64)
+	cutime, err3 := strconv.ParseFloat(fields[13], 64)
+	cstime, err4 := strconv.ParseFloat(fields[14], 64)
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+		return linuxProc{}, false
+	}
+	return linuxProc{parentPID: parent, cpuSeconds: (utime + stime + cutime + cstime) / linuxClockTicks}, true
 }
 
 func linuxProcessTree(root int) ([]int, bool) {

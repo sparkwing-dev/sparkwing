@@ -43,11 +43,19 @@ func (platformSampler) Sample() (HostStat, error) { return sampleHost() }
 // from one that is alive but wedged. Tests supply a fake so stall
 // flagging is exercised deterministically.
 type ProcSampler interface {
-	// CPUFraction reports the root process and descendant processes' CPU
-	// usage as a fraction of one core, and false when the process tree
-	// cannot be sampled -- it is gone, or the platform offers no cheap
-	// per-process reading.
-	CPUFraction(pid int) (float64, bool)
+	// CPUUsage reports the root process and descendant processes' CPU
+	// usage, and false when the process tree cannot be sampled -- it is
+	// gone, or the platform offers no cheap per-process reading.
+	CPUUsage(pid int) (ProcUsage, bool)
+}
+
+type ProcBatchSampler interface {
+	CPUUsages(pids []int) map[int]ProcUsage
+}
+
+type ProcUsage struct {
+	Fraction      float64
+	HasDescendant bool
 }
 
 // procSampler is the platform ProcSampler. It carries a small per-pid
@@ -74,5 +82,7 @@ func newProcSampler() *procSampler {
 	}
 }
 
-// CPUFraction dispatches to the platform reading.
-func (p *procSampler) CPUFraction(pid int) (float64, bool) { return p.sample(pid) }
+// CPUUsage dispatches to the platform reading.
+func (p *procSampler) CPUUsage(pid int) (ProcUsage, bool) { return p.sample(pid) }
+
+func (p *procSampler) CPUUsages(pids []int) map[int]ProcUsage { return p.sampleMany(pids) }

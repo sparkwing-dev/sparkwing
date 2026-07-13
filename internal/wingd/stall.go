@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+const descendantStallWindowMultiplier = 4
+
 // stallLoop samples holder process CPU on a slow cadence and marks
 // holders that stay idle while runs queue behind them. It runs only for
 // its side effect on holder state; the flag is surfaced through
@@ -52,12 +54,28 @@ func (d *Daemon) stallTick() {
 	}
 	d.mu.Unlock()
 
-	readings := make(map[*conn]float64, len(holders))
-	sampled := make(map[*conn]bool, len(holders))
+	holderPIDs := make([]int, 0, len(holders))
+	holderByPID := make(map[int][]*conn, len(holders))
 	for _, c := range holders {
-		if frac, ok := d.procSampler.CPUFraction(c.pid); ok {
-			readings[c] = frac
-			sampled[c] = true
+		holderPIDs = append(holderPIDs, c.pid)
+		holderByPID[c.pid] = append(holderByPID[c.pid], c)
+	}
+
+	readings := make(map[*conn]ProcUsage, len(holders))
+	sampled := make(map[*conn]bool, len(holders))
+	if batch, ok := d.procSampler.(ProcBatchSampler); ok {
+		for pid, usage := range batch.CPUUsages(holderPIDs) {
+			for _, c := range holderByPID[pid] {
+				readings[c] = usage
+				sampled[c] = true
+			}
+		}
+	} else {
+		for _, c := range holders {
+			if usage, ok := d.procSampler.CPUUsage(c.pid); ok {
+				readings[c] = usage
+				sampled[c] = true
+			}
 		}
 	}
 
@@ -67,11 +85,16 @@ func (d *Daemon) stallTick() {
 		if c.role != roleHolder || !sampled[c] {
 			continue
 		}
-		if readings[c] < threshold {
+		usage := readings[c]
+		stallWindow := window
+		if usage.HasDescendant {
+			stallWindow *= descendantStallWindowMultiplier
+		}
+		if usage.Fraction < threshold {
 			if c.lowSince.IsZero() {
 				c.lowSince = now
 			}
-			if now.Sub(c.lowSince) >= window {
+			if now.Sub(c.lowSince) >= stallWindow {
 				c.stalled = true
 			}
 		} else {

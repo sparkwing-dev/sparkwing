@@ -20,10 +20,16 @@ import (
 // the process tree's CPU percentage through ps, matching the operator
 // view on macOS. It reports not-sampled when the process is gone or the
 // process table cannot be read.
-func (p *procSampler) sample(pid int) (float64, bool) {
+func (p *procSampler) sample(pid int) (ProcUsage, bool) {
+	usages := p.sampleMany([]int{pid})
+	usage, ok := usages[pid]
+	return usage, ok
+}
+
+func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	procs, ok := darwinProcesses()
 	if !ok {
-		return 0, false
+		return nil
 	}
 	children := map[int][]int{}
 	byPID := map[int]unix.KinfoProc{}
@@ -32,17 +38,49 @@ func (p *procSampler) sample(pid int) (float64, bool) {
 		byPID[processID] = kp
 		children[int(kp.Eproc.Ppid)] = append(children[int(kp.Eproc.Ppid)], processID)
 	}
-	if _, ok := byPID[pid]; !ok {
-		return 0, false
+
+	trees := make(map[int][]int, len(pids))
+	seen := map[int]struct{}{}
+	allPIDs := make([]int, 0, len(pids))
+	for _, pid := range pids {
+		if _, ok := byPID[pid]; !ok {
+			continue
+		}
+		tree := []int{pid}
+		for i := 0; i < len(tree); i++ {
+			tree = append(tree, children[tree[i]]...)
+		}
+		trees[pid] = tree
+		for _, treePID := range tree {
+			if _, ok := seen[treePID]; ok {
+				continue
+			}
+			seen[treePID] = struct{}{}
+			allPIDs = append(allPIDs, treePID)
+		}
 	}
-	tree := []int{pid}
-	for i := 0; i < len(tree); i++ {
-		tree = append(tree, children[tree[i]]...)
+	cpu, ok := darwinProcessCPUFractions(allPIDs)
+	if !ok {
+		return nil
 	}
-	if len(tree) > 1 {
-		return 1, true
+
+	usages := make(map[int]ProcUsage, len(trees))
+	for pid, tree := range trees {
+		usage := ProcUsage{HasDescendant: len(tree) > 1}
+		var sampled bool
+		for _, treePID := range tree {
+			fraction, ok := cpu[treePID]
+			if !ok {
+				continue
+			}
+			usage.Fraction += fraction
+			sampled = true
+		}
+		if sampled {
+			usages[pid] = usage
+		}
 	}
-	return darwinProcessCPUFraction(tree)
+	return usages
 }
 
 func darwinProcesses() ([]unix.KinfoProc, bool) {
@@ -64,24 +102,45 @@ func darwinProcesses() ([]unix.KinfoProc, bool) {
 }
 
 func darwinProcessCPUFraction(pids []int) (float64, bool) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	args := []string{"-o", "pcpu=", "-p", darwinPIDList(pids)}
-	out, err := exec.CommandContext(ctx, "ps", args...).Output()
-	if err != nil {
+	fractions, ok := darwinProcessCPUFractions(pids)
+	if !ok {
 		return 0, false
 	}
 	var total float64
-	var sampled bool
-	for _, field := range strings.Fields(string(out)) {
-		percent, err := strconv.ParseFloat(field, 64)
+	for _, fraction := range fractions {
+		total += fraction
+	}
+	return total, len(fractions) > 0
+}
+
+func darwinProcessCPUFractions(pids []int) (map[int]float64, bool) {
+	if len(pids) == 0 {
+		return nil, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	args := []string{"-o", "pid=", "-o", "pcpu=", "-p", darwinPIDList(pids)}
+	out, err := exec.CommandContext(ctx, "ps", args...).Output()
+	if err != nil {
+		return nil, false
+	}
+	fractions := map[int]float64{}
+	for _, line := range strings.Split(string(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[0])
 		if err != nil {
 			continue
 		}
-		total += percent / 100.0
-		sampled = true
+		percent, err := strconv.ParseFloat(fields[1], 64)
+		if err != nil {
+			continue
+		}
+		fractions[pid] = percent / 100.0
 	}
-	return total, sampled
+	return fractions, len(fractions) > 0
 }
 
 func darwinPIDList(pids []int) string {
