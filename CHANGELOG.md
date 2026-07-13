@@ -47,6 +47,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** A host with no sparkwing holders now admits the queue
+  head even when external load leaves zero measured headroom. A saturated
+  machine falls back to one sparkwing run at a time instead of letting the
+  queue park forever.
 
 ## [v0.16.4] - 2026-07-12
 ### Fixed
