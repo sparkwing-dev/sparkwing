@@ -216,6 +216,14 @@ func attachRuns(byPrimary map[string]*Repo, order []string, runs []RunObservatio
 	}
 }
 
+// RunMatchesRepo reports whether an observed run belongs to a fleet repo,
+// matching the run's short name against the repo's directory name or the
+// basename of its remote URL. A deep-dive view reuses it to attach per-pipeline
+// run history to the same repo the fleet listing does.
+func RunMatchesRepo(obs RunObservation, r Repo) bool {
+	return runMatchesRepo(obs, r)
+}
+
 func runMatchesRepo(obs RunObservation, r Repo) bool {
 	if obs.Repo == "" {
 		return false

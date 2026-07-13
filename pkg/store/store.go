@@ -664,6 +664,15 @@ func readMinVersionTx(ctx context.Context, tx *storeTx) string {
 	return v
 }
 
+// MinBinaryVersion returns the minimum sparkwing binary version this database
+// requires -- the version stamped by the binary that last migrated it -- or
+// "" when no stamp exists (a database written before the stamp, or one last
+// migrated by a development build). It is the read-only counterpart of the
+// skew check: a repo pinned below this cannot open the database.
+func (s *Store) MinBinaryVersion(ctx context.Context) string {
+	return s.readMinVersion(ctx)
+}
+
 // CurrentSchemaVersion returns the schema version recorded in the
 // database (MAX of sparkwing_schema_version), or 0 when unrecorded.
 // A resident reader (the dashboard) polls this to notice a newer

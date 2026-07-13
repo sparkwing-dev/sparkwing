@@ -56,6 +56,15 @@ code change to unlock.
   until measured)", "(explicit pin)", "(re-measuring at 2x prior charge)" --
   so the number reads as a decision, not an edict. Holder and waiter rows gain
   a `cost_rationale` field in `-o json` for a dashboard to tooltip.
+- **cli:** `sparkwing repos` gains a per-repo deep dive. `sparkwing repos info`
+  reports one repo's SDK pin against the latest release, the migration guides
+  in between with their titles and summaries, its worktrees and any that pin a
+  different version, its branch, commit, and clean/dirty state, whether the pin
+  can open the machine's shared state database, and its pipelines with last-run
+  status -- and prints one suggested next step when something is off. It
+  defaults to the repo containing the current directory; `--repo` names another
+  fleet member. An explicit `sparkwing repos list` verb now names the bare
+  listing.
 
 ### Fixed
 

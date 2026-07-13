@@ -1,8 +1,8 @@
-// `sparkwing repos {list,update}` -- the machine's fleet of
-// sparkwing-bearing checkouts and a one-command SDK-pin bump with a
-// compiled per-repo verdict. See internal/repos for the derivation,
-// plan-diff, and verdict-ladder logic; this file owns flag parsing,
-// the side-effecting Ops implementation, and rendering.
+// `sparkwing repos {list,info,update}` -- the machine's fleet of
+// sparkwing-bearing checkouts, a single-repo deep dive, and a one-command
+// SDK-pin bump with a compiled per-repo verdict. See internal/repos for the
+// derivation, plan-diff, and verdict-ladder logic; this file owns flag
+// parsing, the side-effecting Ops implementation, and rendering.
 package main
 
 import (
@@ -26,13 +26,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// runRepos dispatches `sparkwing repos <verb>`.
+// runRepos dispatches `sparkwing repos <verb>`. Bare `repos` lists, the same
+// as the explicit `list` verb.
 func runRepos(args []string) error {
 	if handleParentHelp(cmdRepos, args) {
 		return nil
 	}
-	if len(args) > 0 && args[0] == "update" {
-		return runReposUpdate(args[1:])
+	if len(args) > 0 {
+		switch args[0] {
+		case "update":
+			return runReposUpdate(args[1:])
+		case "list":
+			return runReposList(args[1:])
+		case "info":
+			return runReposInfo(args[1:])
+		}
 	}
 	return runReposList(args)
 }

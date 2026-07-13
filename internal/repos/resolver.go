@@ -173,6 +173,15 @@ func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 	return got, true
 }
 
+// PipelineNamesIfBuilt returns a repo's declared pipeline names only when its
+// pipeline binary is already cached, never triggering a build. ok is false
+// when the repo has no .sparkwing/, its binary is not yet built, or the
+// describe fails -- a read-only caller (a repo deep-dive) can then fall back
+// to whatever pipelines run history reveals instead of paying to compile.
+func PipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
+	return pipelineNamesIfBuilt(absPath)
+}
+
 // describePipelineNames execs `<binary> --describe` and returns the
 // non-empty pipeline names it reports.
 func describePipelineNames(binPath, workDir string) ([]string, error) {
