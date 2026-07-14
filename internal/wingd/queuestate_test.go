@@ -2,6 +2,7 @@ package wingd_test
 
 import (
 	"context"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -163,6 +164,51 @@ func TestQueueState_ResourceRowsReconcile(t *testing.T) {
 	}
 }
 
+func TestQueueState_SoftCPUWaitPreservesReservedHeadroom(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{
+		Home:    home,
+		Sampler: newFakeSampler(14, 64<<30),
+	})
+
+	holderClient := ensure(t, home, "")
+	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID:      "land-checks",
+		Resources:  wingwire.HostResources{Cores: 11.2},
+		CostSource: wingwire.CostSourceMeasured,
+	})
+
+	waiterClient := ensure(t, home, "")
+	positions, _ := acquireAsync(waiterClient, wingwire.AdmissionRequest{
+		RunID:      "push-checks",
+		Resources:  wingwire.HostResources{Cores: 2.8},
+		CostSource: wingwire.CostSourceMeasured,
+	})
+	waitForQueue(t, positions)
+
+	qs, err := client.Query(context.Background(), client.Options{Home: home})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	cores, ok := resourceByKey(qs, "cores")
+	if !ok {
+		t.Fatal("no cores resource row")
+	}
+	if diff := math.Abs(cores.Held - 11.2); diff > 1e-9 {
+		t.Fatalf("held cores = %v, want 11.2", cores.Held)
+	}
+	if cores.Available < 0 {
+		t.Fatalf("available cores = %v, want nonnegative", cores.Available)
+	}
+	if balance := cores.Capacity - cores.Held - cores.Reserved - cores.External; math.Abs(balance-cores.Available) > 1e-9 {
+		t.Fatalf("cores row does not reconcile: cap %v - held %v - reserved %v - external %v = %v, available %v",
+			cores.Capacity, cores.Held, cores.Reserved, cores.External, balance, cores.Available)
+	}
+	if _, ok := waiterByRun(qs, "push-checks"); !ok {
+		t.Fatalf("push-checks was not queued: holders=%+v waiters=%+v", qs.Holders, qs.Waiters)
+	}
+}
+
 // fakeProcSampler feeds controllable per-pid CPU fractions so stall
 // flagging is exercised without a real busy or idle process.
 type fakeProcSampler struct {
@@ -196,6 +242,15 @@ func waiterByRun(qs wingwire.QueueState, runID string) (wingwire.Waiter, bool) {
 		}
 	}
 	return wingwire.Waiter{}, false
+}
+
+func resourceByKey(qs wingwire.QueueState, key string) (wingwire.ResourceState, bool) {
+	for _, r := range qs.Resources {
+		if r.Key == key {
+			return r, true
+		}
+	}
+	return wingwire.ResourceState{}, false
 }
 
 func TestQueueState_CarriesDaemonVersionAndUptime(t *testing.T) {

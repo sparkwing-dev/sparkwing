@@ -48,7 +48,7 @@ func (d *Daemon) stallTick() {
 	}
 	var holders []*conn
 	for c := range d.conns {
-		if c.role == roleHolder && c.pid > 0 {
+		if c.role == roleHolder && c.pid > 0 && c.drawsAdmission() {
 			holders = append(holders, c)
 		}
 	}
@@ -102,4 +102,8 @@ func (d *Daemon) stallTick() {
 			c.stalled = false
 		}
 	}
+}
+
+func (c *conn) drawsAdmission() bool {
+	return c.resources.Cores > 0 || c.resources.MemoryBytes > 0 || len(c.sems) > 0
 }

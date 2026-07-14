@@ -198,7 +198,7 @@ func TestLivenessFloor_SoleRunAdmitsUnderZeroHeadroom(t *testing.T) {
 	}
 }
 
-func TestSoftHostCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
+func TestSoftHostCPUDeficitQueuesBehindExistingWork(t *testing.T) {
 	l := testLedger(t, 8, 16<<30)
 	holder := mustGrant(t, l, Request{ID: "holder", Cores: 6, MemoryBytes: 2 << 30})
 
@@ -206,15 +206,61 @@ func TestSoftHostCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit head: %v", err)
 	}
-	if d.Kind != DecisionGranted {
-		t.Fatalf("head behind CPU pressure = %s, want granted", d.Kind)
+	if d.Kind != DecisionQueued {
+		t.Fatalf("head behind CPU pressure = %s, want queued", d.Kind)
 	}
-
-	mustQueue(t, l, Request{ID: "next", Cores: 1, SoftCores: true, MemoryBytes: 2 << 30})
 
 	events := mustRelease(t, l, holder.ID, "holder")
 	if !containsKind(events, EventPromoted) {
 		t.Fatalf("releasing the older holder did not promote the queued run: %v", eventKinds(events))
+	}
+}
+
+func TestSoftHostCPURespectsReservedHeadroom(t *testing.T) {
+	l := testLedger(t, 14, 16<<30)
+	if _, err := l.SetHeadroom(11.2, 16<<30); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+
+	mustGrant(t, l, Request{ID: "land-checks", Cores: 11.2, SoftCores: true})
+	d, _, err := l.Submit(Request{ID: "push-checks", Cores: 2.8, SoftCores: true})
+	if err != nil {
+		t.Fatalf("Submit push-checks: %v", err)
+	}
+	if d.Kind != DecisionQueued {
+		t.Fatalf("second soft CPU request = %s, want queued to preserve headroom", d.Kind)
+	}
+
+	snap := l.Snapshot()
+	if got, want := snap.Leases[0].MilliCores, int64(11200); got != want {
+		t.Fatalf("held millicores = %d, want %d", got, want)
+	}
+}
+
+func TestOversizedSoftHostCPUHeadBlocksYoungerBackfill(t *testing.T) {
+	l := testLedger(t, 8, 16<<30)
+	if _, err := l.SetHeadroom(3, 16<<30); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+
+	older := mustGrant(t, l, Request{ID: "older", Cores: 2, SoftCores: true})
+	mustQueue(t, l, Request{ID: "head", Cores: 4, SoftCores: true})
+
+	d, _, err := l.Submit(Request{ID: "younger", Cores: 1, SoftCores: true})
+	if err != nil {
+		t.Fatalf("Submit younger: %v", err)
+	}
+	if d.Kind != DecisionQueued {
+		t.Fatalf("younger soft CPU request = %s, want queued behind oversized head", d.Kind)
+	}
+
+	events := mustRelease(t, l, older.ID, "older")
+	if !containsKind(events, EventPromoted) {
+		t.Fatalf("releasing the older holder did not promote the oversized head: %v", eventKinds(events))
+	}
+	snap := l.Snapshot()
+	if len(snap.Leases) != 1 || snap.Leases[0].RequestID != "head" {
+		t.Fatalf("leases after release = %+v, want head promoted alone", snap.Leases)
 	}
 }
 

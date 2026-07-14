@@ -47,6 +47,25 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** Measured and default CPU costs now preserve the daemon's
+  reserved headroom once any work is already running. CPU still has an idle
+  liveness floor, so an idle host admits one run under pressure, but additional
+  CPU-bearing work waits unless it fits the grantable budget. This keeps
+  `sparkwing queue` capacity math nonnegative and prevents local admission from
+  overcommitting the host.
+- **admission:** `sparkwing queue` stall detection now ignores holder rows that
+  draw no host resources and hold no semaphores. Zero-resource summary rows no
+  longer receive stalled labels or cancel recovery advice.
+
+## [v0.17.5] - 2026-07-14
+### Fixed
+
+- **admission:** Runs whose cost is still being measured now reach local
+  admission instead of failing before their first node with an invalid-cost
+  rejection. The daemon accepts every cost source emitted by the resolver and
+  treats measuring and floor-derived CPU costs as backpressure.
 
 ## [v0.17.4] - 2026-07-14
 ### Fixed

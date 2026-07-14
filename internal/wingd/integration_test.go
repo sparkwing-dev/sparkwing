@@ -461,39 +461,40 @@ func TestLivenessFloor_AdmitsSoleRunUnderExternalLoad(t *testing.T) {
 	}
 }
 
-func TestMeasuredCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
+func TestMeasuredCPUDeficitQueuesBehindExistingWork(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30), HeadroomFraction: -1})
 
 	holderClient := ensure(t, home, "")
-	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+	holder := mustAcquire(t, holderClient, wingwire.AdmissionRequest{
 		RunID:      "holder",
 		CostSource: wingwire.CostSourceMeasured,
 		Resources:  wingwire.HostResources{Cores: 6, MemoryBytes: 2 << 30},
 	})
 
 	headClient := ensure(t, home, "")
-	lease := mustAcquire(t, headClient, wingwire.AdmissionRequest{
+	positions, result := acquireAsync(headClient, wingwire.AdmissionRequest{
 		RunID:      "head",
 		CostSource: wingwire.CostSourceMeasured,
 		Resources:  wingwire.HostResources{Cores: 6, MemoryBytes: 2 << 30},
 	})
-	if lease.Resources.Cores != 6 {
-		t.Fatalf("head cores = %v, want measured charge retained", lease.Resources.Cores)
-	}
-
-	nextClient := ensure(t, home, "")
-	positions, result := acquireAsync(nextClient, wingwire.AdmissionRequest{
-		RunID:      "next",
-		CostSource: wingwire.CostSourceMeasured,
-		Resources:  wingwire.HostResources{Cores: 1, MemoryBytes: 2 << 30},
-	})
 	select {
 	case <-positions:
 	case r := <-result:
-		t.Fatalf("next run resolved without queueing: lease=%v err=%v", r.lease, r.err)
+		t.Fatalf("head run resolved without queueing: lease=%v err=%v", r.lease, r.err)
 	case <-time.After(2 * time.Second):
-		t.Fatal("next run neither queued nor resolved")
+		t.Fatal("head run neither queued nor resolved")
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+	r := waitResult(t, result, 2*time.Second)
+	if r.err != nil {
+		t.Fatalf("head did not admit after release: %v", r.err)
+	}
+	if r.lease.Resources.Cores != 6 {
+		t.Fatalf("head cores = %v, want measured charge retained", r.lease.Resources.Cores)
 	}
 }
 

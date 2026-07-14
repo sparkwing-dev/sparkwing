@@ -380,7 +380,6 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 		seen[nc.key] = true
 		s.claims = append(s.claims, nc)
 	}
-	// Host demand over this box's total is capped and serialized alone.
 	if s.milliCores > l.totalMilliCores {
 		if s.strictCores {
 			return spec{}, fmt.Errorf("%w: cores %d exceed total %d", ErrNeverAdmissible, s.milliCores, l.totalMilliCores)
@@ -497,7 +496,20 @@ func (l *Ledger) starvedByYounger(w spec, r resource) bool {
 	if !ok {
 		return false
 	}
-	return !fitsCost(used, demand, capacity) && fitsCost(usedOlder, demand, capacity)
+	if fitsCost(used, demand, capacity) {
+		return false
+	}
+	if r == resourceCores && w.softCores && demand > capacity {
+		return true
+	}
+	return w.fitsResourceWithOlder(r, usedOlder, demand, capacity)
+}
+
+func (s spec) fitsResourceWithOlder(r resource, usedOlder, demand, capacity int64) bool {
+	if r == resourceCores && s.softCores && demand > 0 && usedOlder == 0 {
+		return true
+	}
+	return fitsCost(usedOlder, demand, capacity)
 }
 
 // resourceBudget returns waiter w's demand on resource r, the live cost
@@ -623,17 +635,8 @@ func (l *Ledger) coresFitSoft(s spec) bool {
 	if s.milliCores == 0 || l.usedMilliCores == 0 {
 		return true
 	}
-	if l.usedMilliCores >= l.totalMilliCores {
-		return false
-	}
 	effCores := min(l.totalMilliCores, l.headroomMilliCores)
-	if l.usedMilliCores > effCores {
-		return false
-	}
-	if fitsCost(l.usedMilliCores, s.milliCores, effCores) {
-		return true
-	}
-	return l.usedMilliCores <= effCores
+	return fitsCost(l.usedMilliCores, s.milliCores, effCores)
 }
 
 func (l *Ledger) semUsed(key string) int {

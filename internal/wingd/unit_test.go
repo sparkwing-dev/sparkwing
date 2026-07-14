@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -120,6 +121,38 @@ type fixedHostSampler struct {
 
 func (s fixedHostSampler) Sample() (HostStat, error) {
 	return s.stat, nil
+}
+
+type fixedProcSampler struct {
+	usage map[int]ProcUsage
+}
+
+func (s fixedProcSampler) CPUUsage(pid int) (ProcUsage, bool) {
+	v, ok := s.usage[pid]
+	return v, ok
+}
+
+func mustGrantAdmission(t *testing.T, l *admission.Ledger, req admission.Request) admission.Lease {
+	t.Helper()
+	dec, _, err := l.Submit(req)
+	if err != nil {
+		t.Fatalf("submit %q: %v", req.ID, err)
+	}
+	if dec.Kind != admission.DecisionGranted {
+		t.Fatalf("submit %q = %s, want %s", req.ID, dec.Kind, admission.DecisionGranted)
+	}
+	return dec.Lease
+}
+
+func mustQueueAdmission(t *testing.T, l *admission.Ledger, req admission.Request) {
+	t.Helper()
+	dec, _, err := l.Submit(req)
+	if err != nil {
+		t.Fatalf("submit %q: %v", req.ID, err)
+	}
+	if dec.Kind != admission.DecisionQueued {
+		t.Fatalf("submit %q = %s, want %s", req.ID, dec.Kind, admission.DecisionQueued)
+	}
 }
 
 func TestInitLedger_ResizesRestoredTotalsToCurrentBudget(t *testing.T) {
@@ -338,5 +371,57 @@ func TestApplyHeadroom_Hysteresis(t *testing.T) {
 	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 0.1, FreeMemoryBytes: 16 << 30})
 	if d.appliedCores != first {
 		t.Fatalf("a tiny load change (%v -> %v) should not move headroom past the deadband", first, d.appliedCores)
+	}
+}
+
+func TestStallTickIgnoresZeroResourceHolders(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0)
+	home := t.TempDir()
+	d, err := New(Config{
+		Home:             home,
+		HeadroomFraction: -1,
+		Now:              func() time.Time { return now },
+		ProcSampler:      fixedProcSampler{usage: map[int]ProcUsage{1001: {}, 1002: {}}},
+		StallWindow:      time.Second,
+	})
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+	lg, err := admission.New(admission.Config{TotalCores: 4, TotalMemoryBytes: 8 << 30})
+	if err != nil {
+		t.Fatalf("new ledger: %v", err)
+	}
+	d.ledger = lg
+
+	zero := &conn{runID: "summary", role: roleHolder, pid: 1001, finalizable: true}
+	d.conns[zero] = struct{}{}
+	d.byRun["summary"] = zero
+	mustGrantAdmission(t, d.ledger, admission.Request{ID: "summary"})
+
+	blocker := &conn{runID: "blocker", role: roleHolder, pid: 1002, finalizable: true, sems: []string{"deploy"}}
+	d.conns[blocker] = struct{}{}
+	d.byRun["blocker"] = blocker
+	mustGrantAdmission(t, d.ledger, admission.Request{
+		ID: "blocker",
+		Semaphores: []admission.SemaphoreClaim{
+			{Key: "deploy", Capacity: 1, Cost: 1, Policy: admission.PolicyQueue},
+		},
+	})
+	mustQueueAdmission(t, d.ledger, admission.Request{
+		ID: "waiter",
+		Semaphores: []admission.SemaphoreClaim{
+			{Key: "deploy", Capacity: 1, Cost: 1, Policy: admission.PolicyQueue},
+		},
+	})
+
+	d.stallTick()
+	now = now.Add(2 * time.Second)
+	d.stallTick()
+
+	if zero.stalled {
+		t.Fatal("zero-resource holder was flagged stalled")
+	}
+	if !blocker.stalled {
+		t.Fatal("resource holder was not flagged stalled")
 	}
 }
