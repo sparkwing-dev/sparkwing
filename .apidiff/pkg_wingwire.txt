@@ -16,6 +16,8 @@ type AdmissionRequest struct {
 
 	SemaphoresOnly bool
 
+	SubLease bool
+
 	CostSource CostSource
 
 	ExpectedDurationMS int64
@@ -55,6 +57,7 @@ type CapacityChange struct {
 
 	AtMS int64
 }
+const ChildLeaseTokenEnv = "SPARKWING_CHILD_LEASE_TOKEN"
 type ContainerLimit struct {
 	Cores float64
 
@@ -183,7 +186,7 @@ const PolicyCancelOthers Policy = "cancel_others"
 const PolicyFail Policy = "fail"
 const PolicyQueue Policy = "queue"
 const PolicySkip Policy = "skip"
-const ProtocolMajor = 1
+const ProtocolMajor = 2
 type QueueState struct {
 	Resources []ResourceState
 	Holders   []Holder
