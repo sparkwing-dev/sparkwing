@@ -170,7 +170,10 @@ func (r *InProcessRunner) executeNodeWithAdmission(ctx context.Context, req runn
 		return nil, err
 	}
 	defer lease.release()
-	_, childToken, _ := localAdmissionFromContext(ctx)
+	childToken := localAdmissionChildTokenFromContext(ctx)
+	if childToken == "" {
+		childToken = lease.token
+	}
 	nodeCtx := withLocalAdmission(ctx, la, lease.token, childToken, lease.hostAdmitted)
 	return r.executeNode(nodeCtx, req.RunID, req.Node, req.Delegate)
 }

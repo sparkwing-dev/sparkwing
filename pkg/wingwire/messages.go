@@ -198,9 +198,9 @@ type Grant struct {
 	ExternalCores float64 `json:"external_cores,omitempty"`
 }
 
-// Queued reports a waiting run's position whenever it changes. Key
-// names what the run is waiting on -- a semaphore name, or a host
-// resource dimension ("cores", "memory").
+// Queued reports a waiting run's position whenever it changes. Key names
+// the semaphore whose live capacity blocks the run. Host pressure is
+// reported through BlockingReason.
 type Queued struct {
 	RunID string `json:"run_id"`
 	Key   string `json:"key"`

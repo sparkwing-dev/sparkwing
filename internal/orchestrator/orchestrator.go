@@ -491,6 +491,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	var lease *runLease
 	var leaseToken string
+	var leaseChildToken string
 	var leaseHostAdmitted bool
 	skipDispatch := false
 	if opts.Admission != nil {
@@ -512,6 +513,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			skipDispatch = true
 		} else {
 			leaseToken = lease.token
+			leaseChildToken = lease.childToken
 			leaseHostAdmitted = lease.hostAdmitted
 		}
 	}
@@ -522,7 +524,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		runErr = dispatch(
 			runCtx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf,
 			opts.Pipeline, opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip,
-			dispatchWaitTimeout, opts.Admission, leaseToken, leaseHostAdmitted,
+			dispatchWaitTimeout, opts.Admission, leaseToken, leaseChildToken, leaseHostAdmitted,
 		)
 	}
 
@@ -789,6 +791,7 @@ func dispatch(
 	dispatchWaitTimeout time.Duration,
 	admission *LocalAdmission,
 	leaseToken string,
+	leaseChildToken string,
 	leaseHostAdmitted bool,
 ) error {
 	runStart := time.Now()
@@ -814,7 +817,7 @@ func dispatch(
 
 	state := newDispatchState(
 		dispatchCtx, backends, r, runID, pipeline, plan, delegate, debug, retryOf,
-		masker, maxParallel, admission, leaseToken, leaseHostAdmitted,
+		masker, maxParallel, admission, leaseToken, leaseChildToken, leaseHostAdmitted,
 	)
 	state.pipelineRequires = snapMeta.PipelineRequires
 	state.snapMeta = snapMeta
@@ -1385,6 +1388,7 @@ func newDispatchState(
 	maxParallel int,
 	admission *LocalAdmission,
 	leaseToken string,
+	leaseChildToken string,
 	leaseHostAdmitted bool,
 ) *dispatchState {
 	if masker == nil {
@@ -1432,7 +1436,7 @@ func newDispatchState(
 	} else {
 		s.resolverCtx = ctx
 	}
-	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, leaseToken, leaseHostAdmitted)
+	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, leaseChildToken, leaseHostAdmitted)
 	s.resolverCtx = sparkwingruntime.WithResolver(s.resolverCtx, s.resolve)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())

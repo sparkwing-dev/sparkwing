@@ -74,8 +74,10 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 			out = append(out, delivery{c, grant})
 		case admission.EventQueued:
 			if c := d.byRun[ev.RequestID]; c != nil {
+				snap := d.ledger.Snapshot()
 				out = append(out, delivery{c, &wingwire.Queued{
 					RunID:          ev.RequestID,
+					Key:            blockingSemaphoreKeyForRun(snap, ev.RequestID),
 					Position:       ev.Position + 1,
 					QueueLength:    d.waiterCountLocked(),
 					BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
@@ -115,6 +117,7 @@ func (d *Daemon) waiterDeliveriesLocked() []delivery {
 		}
 		out = append(out, delivery{c, &wingwire.Queued{
 			RunID:          waiter.RequestID,
+			Key:            blockingSemaphoreKey(snap, waiter),
 			Position:       waiterPosition(snap.Waiters[:i], waiter) + 1,
 			QueueLength:    qlen,
 			BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
@@ -136,12 +139,50 @@ func (d *Daemon) queuedDeliveryLockedFromSnapshot(c *conn, snap admission.Snapsh
 		}
 		return &delivery{c, &wingwire.Queued{
 			RunID:          runID,
+			Key:            blockingSemaphoreKey(snap, waiter),
 			Position:       waiterPosition(snap.Waiters[:i], waiter) + 1,
 			QueueLength:    qlen,
 			BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
 		}}
 	}
 	return nil
+}
+
+func blockingSemaphoreKeyForRun(snap admission.Snapshot, runID string) string {
+	for _, waiter := range snap.Waiters {
+		if waiter.RequestID == runID {
+			return blockingSemaphoreKey(snap, waiter)
+		}
+	}
+	return ""
+}
+
+func blockingSemaphoreKey(snap admission.Snapshot, waiter admission.WaiterState) string {
+	remaining := semaphoreRemaining(snap)
+	for _, claim := range waiter.Claims {
+		if claim.Policy == admission.PolicyCancelOthers {
+			continue
+		}
+		left, ok := remaining[claim.Key]
+		if ok && left < claim.Cost {
+			return claim.Key
+		}
+	}
+	return ""
+}
+
+func semaphoreRemaining(snap admission.Snapshot) map[string]int {
+	remaining := make(map[string]int, len(snap.Semaphores))
+	for _, sem := range snap.Semaphores {
+		used := 0
+		for _, hold := range sem.Holds {
+			if !hold.Superseded {
+				used += hold.Cost
+			}
+		}
+		remaining[sem.Key] = effectiveCapacity(sem) - used
+	}
+	return remaining
 }
 
 func waiterPosition(earlier []admission.WaiterState, waiter admission.WaiterState) int {

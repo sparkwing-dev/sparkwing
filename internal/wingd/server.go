@@ -558,17 +558,14 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if existing := d.byRun[req.RunID]; existing != nil && existing != c {
 		switch existing.role {
 		case roleWaiter:
-			snap := d.ledger.Snapshot()
-			if !requestMetadataMatches(existing, req) ||
-				!queuedRequestPresent(snap, req.RunID) {
+			if !requestIdentityMatches(existing, req) ||
+				existing.queueTimeoutMS != tightestQueueTimeoutMS(req.Semaphores) ||
+				!queuedRequestPresent(d.ledger.Snapshot(), req.RunID) {
 				d.mu.Unlock()
 				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
 				return
 			}
 			c.role = roleWaiter
-			c.resources = existing.resources
-			c.ownerRunID = existing.ownerRunID
-			c.displayRunID = existing.displayRunID
 			if !existing.startAt.IsZero() {
 				c.startAt = existing.startAt
 			}
@@ -577,13 +574,30 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			existing.members = nil
 			existing.finalizable = false
 			d.byRun[req.RunID] = c
-			queued := d.queuedDeliveryLockedFromSnapshot(c, snap, req.RunID)
+			events, err := d.ledger.ReplaceWaiter(ar)
+			if err != nil {
+				existing.role = roleWaiter
+				existing.runID = req.RunID
+				existing.finalizable = c.finalizable
+				d.byRun[req.RunID] = existing
+				c.role = roleNone
+				c.runID = ""
+				c.finalizable = false
+				d.mu.Unlock()
+				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: submitErrorKey(err), Policy: wingwire.PolicyFail})
+				return
+			}
+			deliveries := d.routeLocked(events)
+			snap := d.ledger.Snapshot()
+			if c.role == roleWaiter {
+				if queued := d.queuedDeliveryLockedFromSnapshot(c, snap, req.RunID); queued != nil {
+					deliveries = append(deliveries, *queued)
+				}
+			}
 			d.touchLocked()
 			d.mu.Unlock()
 			existing.close()
-			if queued != nil {
-				d.flush([]delivery{*queued}, snap)
-			}
+			d.flush(deliveries, snap)
 			return
 		case roleHolder:
 			if len(existing.members) != 1 {
@@ -718,22 +732,26 @@ func tightestQueueTimeoutMS(sems []wingwire.SemaphoreClaim) int64 {
 
 func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
 	requested := chargedResources(req.Resources)
-	return existing.finalizable == !req.SubLease &&
-		existing.pipeline == req.Pipeline &&
-		existing.repo == req.Repo &&
-		existing.pid == req.PID &&
+	return requestIdentityMatches(existing, req) &&
 		existing.costSource == string(req.CostSource) &&
 		existing.expectedDurationMS == req.ExpectedDurationMS &&
 		existing.expectedP99MS == req.ExpectedP99MS &&
 		existing.sampleCount == req.SampleCount &&
 		existing.driftWarning == req.DriftWarning &&
+		existing.requestResources == requested &&
+		existing.queueTimeoutMS == tightestQueueTimeoutMS(req.Semaphores)
+}
+
+func requestIdentityMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
+	return existing.finalizable == !req.SubLease &&
+		existing.pipeline == req.Pipeline &&
+		existing.repo == req.Repo &&
+		existing.pid == req.PID &&
 		existing.origin == req.Origin &&
 		existing.ownerRunID == req.OwnerRunID &&
 		existing.displayRunID == req.DisplayRunID &&
-		existing.requestResources == requested &&
 		claimRequestsMatch(existing.requestSemaphores, req.Semaphores) &&
-		existing.semaphoresOnly == req.SemaphoresOnly &&
-		existing.queueTimeoutMS == tightestQueueTimeoutMS(req.Semaphores)
+		existing.semaphoresOnly == req.SemaphoresOnly
 }
 
 func grantedRequestPresent(snap admission.Snapshot, leaseID admission.LeaseID, runID string) bool {

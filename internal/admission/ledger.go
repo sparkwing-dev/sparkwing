@@ -211,6 +211,36 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 	return Decision{Kind: DecisionQueued, Position: position}, []Event{ev}, nil
 }
 
+// ReplaceWaiter updates an existing queued participant before it is
+// granted. The waiter keeps its FIFO arrival, but its resource demand is
+// the latest request. If the new demand now fits, eligible waiters are
+// promoted.
+func (l *Ledger) ReplaceWaiter(req Request) ([]Event, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	s, err := l.normalize(req)
+	if err != nil {
+		return nil, err
+	}
+	for _, le := range l.leases {
+		if _, ok := le.members[s.id]; ok {
+			return nil, ErrDuplicateID
+		}
+	}
+	for _, w := range l.waiters {
+		if w.spec.id != s.id {
+			continue
+		}
+		s.admit = w.spec.admit
+		w.spec = s
+		events := l.promote()
+		l.mustHoldInvariants()
+		return events, nil
+	}
+	return nil, ErrUnknownMember
+}
+
 // Attach joins memberID to a live lease, drawing zero new budget. The
 // lease stays alive until every member, the original requester included,
 // has released.

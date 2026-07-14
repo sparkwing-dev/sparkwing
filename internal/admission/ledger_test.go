@@ -589,6 +589,26 @@ func TestAllOrNothing_WaiterHoldsNothingWhileQueued(t *testing.T) {
 	}
 }
 
+func TestReplaceWaiterUpdatesDemandBeforePromotion(t *testing.T) {
+	l := testLedger(t, 4, 0)
+	holder := mustGrant(t, l, Request{ID: "holder", Cores: 2})
+	mustQueue(t, l, Request{ID: "waiter", Cores: 3})
+
+	events, err := l.ReplaceWaiter(Request{ID: "waiter", Cores: 1})
+	if err != nil {
+		t.Fatalf("replace waiter: %v", err)
+	}
+	wantKinds(t, events, EventPromoted)
+	if events[0].RequestID != "waiter" {
+		t.Fatalf("promoted %q, want waiter", events[0].RequestID)
+	}
+	snap := l.Snapshot()
+	if len(snap.Leases) != 2 || snap.Leases[1].RequestID != "waiter" || snap.Leases[1].MilliCores != 1000 {
+		t.Fatalf("promoted lease = %+v, want waiter at updated one-core demand", snap.Leases)
+	}
+	mustRelease(t, l, holder.ID, "holder")
+}
+
 func TestWeighted_LightArrivalBackfillsPastHeavyHead(t *testing.T) {
 	l := testLedger(t, 0, 0)
 	leaseA := mustGrant(t, l, Request{ID: "a", Semaphores: []SemaphoreClaim{sem("k", 3, 2, PolicyQueue)}})

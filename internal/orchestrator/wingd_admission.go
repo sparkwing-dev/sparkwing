@@ -138,6 +138,7 @@ const localPlanSemsID = "/plan"
 // semaphores-only lease.
 type runLease struct {
 	token        string
+	childToken   string
 	hostAdmitted bool
 	leases       []*wingdclient.Lease
 	// driftWarning, when set, is the one-line note that this run's explicit
@@ -228,6 +229,9 @@ func (la *LocalAdmission) admitRun(
 		_ = st.RecordWaitObservation(ctx, pipeline, time.Since(submitted))
 	}
 	rl := &runLease{token: lease.Token, hostAdmitted: hostPinned, leases: []*wingdclient.Lease{lease}}
+	if hostPinned || len(req.Semaphores) > 0 {
+		rl.childToken = lease.Token
+	}
 	rl.driftWarning = warning
 	rl.charge = runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes}
 	if lease.SoleRunUnderLoad {
@@ -317,7 +321,12 @@ func (la *LocalAdmission) admitNode(
 	if err != nil || outcome != admitProceed {
 		return nil, err
 	}
-	rl := &runLease{token: lease.Token, hostAdmitted: leaseCarriesHost(lease), leases: []*wingdclient.Lease{lease}}
+	rl := &runLease{
+		token:        lease.Token,
+		childToken:   lease.Token,
+		hostAdmitted: leaseCarriesHost(lease),
+		leases:       []*wingdclient.Lease{lease},
+	}
 	return rl, nil
 }
 
@@ -796,9 +805,6 @@ func withLocalAdmission(
 	if la == nil {
 		return ctx
 	}
-	if childToken == "" {
-		childToken = leaseToken
-	}
 	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{
 		la:           la,
 		token:        leaseToken,
@@ -821,6 +827,14 @@ func localAdmissionFromContext(ctx context.Context) (*LocalAdmission, string, bo
 		return nil, "", false
 	}
 	return state.la, state.token, state.hostAdmitted
+}
+
+func localAdmissionChildTokenFromContext(ctx context.Context) string {
+	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	if !ok {
+		return ""
+	}
+	return state.childToken
 }
 
 // leaseTriggerEnv is the env a parent stamps onto spawned child
@@ -865,11 +879,7 @@ func (la *LocalAdmission) acquireNodeSlot(
 	claim wingwire.SemaphoreClaim,
 	onQueued func(wingwire.Queued),
 ) (*wingdclient.Lease, error) {
-	cl, err := wingdclient.EnsureDaemon(ctx, la.clientOptions())
-	if err != nil {
-		return nil, fmt.Errorf("local admission: %w", err)
-	}
-	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
+	return la.acquireNodeAdmission(ctx, wingwire.AdmissionRequest{
 		RunID:          nodeSemaphoreRunID(runID, nodeID),
 		OwnerRunID:     runID,
 		DisplayRunID:   nodeDisplayRunID(runID, nodeID),
@@ -877,6 +887,44 @@ func (la *LocalAdmission) acquireNodeSlot(
 		Semaphores:     []wingwire.SemaphoreClaim{claim},
 		SubLease:       true,
 	}, onQueued)
+}
+
+func (la *LocalAdmission) acquireNodeHostSlot(
+	ctx context.Context,
+	backends Backends,
+	pipeline, runID, nodeID string,
+	node *sparkwing.JobNode,
+	claim wingwire.SemaphoreClaim,
+	onQueued func(wingwire.Queued),
+) (*wingdclient.Lease, error) {
+	res, _, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
+	return la.acquireNodeAdmission(ctx, wingwire.AdmissionRequest{
+		RunID:              nodeHostRunID(runID, nodeID),
+		OwnerRunID:         runID,
+		DisplayRunID:       nodeDisplayRunID(runID, nodeID),
+		Pipeline:           pipeline,
+		Repo:               currentRepoShortName(),
+		PID:                os.Getpid(),
+		Resources:          wingwire.HostResources{Cores: res.Cores, MemoryBytes: res.MemoryBytes},
+		Semaphores:         []wingwire.SemaphoreClaim{claim},
+		CostSource:         wingwire.CostSource(res.Source),
+		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
+		Origin:             la.Origin,
+		DriftWarning:       overCap,
+		SubLease:           true,
+	}, onQueued)
+}
+
+func (la *LocalAdmission) acquireNodeAdmission(
+	ctx context.Context,
+	req wingwire.AdmissionRequest,
+	onQueued func(wingwire.Queued),
+) (*wingdclient.Lease, error) {
+	cl, err := wingdclient.EnsureDaemon(ctx, la.clientOptions())
+	if err != nil {
+		return nil, fmt.Errorf("local admission: %w", err)
+	}
+	lease, err := cl.Acquire(ctx, req, onQueued)
 	if err != nil {
 		cl.Close()
 		return nil, err
