@@ -795,6 +795,49 @@ func TestResizeTotals_GatesNewAdmission(t *testing.T) {
 	mustQueue(t, l, Request{ID: "waiter", Cores: 2, MemoryBytes: 1024})
 }
 
+func TestResizeTotals_CPUOvercommitDrainsInsteadOfRejectingRestore(t *testing.T) {
+	l := testLedger(t, 24, 8<<30)
+	first := mustGrant(t, l, Request{ID: "first", Cores: 11.2})
+	second := mustGrant(t, l, Request{ID: "second", Cores: 11.2})
+
+	if err := l.ResizeTotals(14, 8<<30); err != nil {
+		t.Fatalf("ResizeTotals: %v", err)
+	}
+	mustQueue(t, l, Request{ID: "queued", Cores: 11.2})
+
+	mustRelease(t, l, first.ID, "first")
+	mustRelease(t, l, second.ID, "second")
+	snap := l.Snapshot()
+	if len(snap.Leases) != 1 || snap.Leases[0].RequestID != "queued" {
+		t.Fatalf("queued run after drain = %+v, want promoted", snap.Leases)
+	}
+}
+
+func TestResizeTotals_ClampsQueuedCPUToCurrentTotal(t *testing.T) {
+	l := testLedger(t, 24, 8<<30)
+	holder := mustGrant(t, l, Request{ID: "holder", Cores: 24})
+	mustQueue(t, l, Request{ID: "waiter", Cores: 18})
+
+	if err := l.ResizeTotals(14, 8<<30); err != nil {
+		t.Fatalf("ResizeTotals: %v", err)
+	}
+	mustRelease(t, l, holder.ID, "holder")
+
+	snap := l.Snapshot()
+	if len(snap.Leases) != 1 || snap.Leases[0].RequestID != "waiter" || snap.Leases[0].MilliCores != 14000 {
+		t.Fatalf("waiter after resize/release = %+v, want promoted at current total", snap.Leases)
+	}
+}
+
+func TestResizeTotals_MemoryOvercommitStillRejectsRestore(t *testing.T) {
+	l := testLedger(t, 14, 8<<30)
+	mustGrant(t, l, Request{ID: "holder", MemoryBytes: 6 << 30})
+
+	if err := l.ResizeTotals(14, 4<<30); !errors.Is(err, ErrInvalidResize) {
+		t.Fatalf("ResizeTotals error = %v, want %v", err, ErrInvalidResize)
+	}
+}
+
 // TestLivenessFloor_IdleBoxAdmitsChargeAboveHeadroom reproduces a field
 // incident: a restored ledger whose headroom sits one millicore below a
 // run's measured cost (3199 vs 3200) must still admit that run on an

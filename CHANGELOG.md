@@ -55,6 +55,9 @@ code change to unlock.
   dispatch instead of reserving the measured peak for the whole DAG. Fast
   early nodes can run while a later memory-heavy node waits for capacity;
   explicit whole-run resource pins still reserve at run scope.
+- **admission:** Daemon restart now restores CPU-overcommitted ledgers so
+  current work can drain instead of blocking host admission. Memory remains a
+  hard restore bound.
 
 ## [v0.17.3] - 2026-07-14
 ### Fixed

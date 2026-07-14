@@ -570,6 +570,15 @@ func findWingdHolder(t *testing.T, home, runID string) wingwire.Holder {
 	return wingwire.Holder{}
 }
 
+func hasWingdHolder(qs wingwire.QueueState, runID string) bool {
+	for _, h := range qs.Holders {
+		if h.RunID == runID {
+			return true
+		}
+	}
+	return false
+}
+
 // findQueuedWaiter returns the queued waiter with runID and whether it is
 // present, without blocking.
 func findQueuedWaiter(qs wingwire.QueueState, runID string) (wingwire.Waiter, bool) {
@@ -689,8 +698,9 @@ func TestWingd_ZeroCPUPipelineAdmitsAtTinyMeasuredCostAlongsideHeavyWork(t *test
 	if h.Resources.Cores != 0.1 {
 		t.Errorf("admitted cores = %v, want the 0.1 measured core floor", h.Resources.Cores)
 	}
-	if qs := queryWingd(t, home); len(qs.Holders) != 2 {
-		t.Fatalf("holders = %d, want 2 (heavy work and the sleep-heavy run concurrently)", len(qs.Holders))
+	qs := queryWingd(t, home)
+	if !hasWingdHolder(qs, "heavy-holder") || !hasWingdHolder(qs, "sleepy-run/hold") {
+		t.Fatalf("holders = %+v, want heavy work and the sleep-heavy node concurrently", qs.Holders)
 	}
 
 	close(gate.release)

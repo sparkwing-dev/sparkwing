@@ -146,6 +146,69 @@ func TestInitLedger_ResizesRestoredTotalsToCurrentBudget(t *testing.T) {
 	}
 }
 
+func TestInitLedger_RestoresCPUOvercommitToDrain(t *testing.T) {
+	home := t.TempDir()
+	original, err := admission.New(admission.Config{TotalCores: 24, TotalMemoryBytes: 8 << 30})
+	if err != nil {
+		t.Fatalf("new ledger: %v", err)
+	}
+	dec, _, err := original.Submit(admission.Request{ID: "first", Cores: 11.2})
+	if err != nil {
+		t.Fatalf("grant first: %v", err)
+	}
+	if dec.Kind != admission.DecisionGranted {
+		t.Fatalf("first = %s, want %s", dec.Kind, admission.DecisionGranted)
+	}
+	first := dec.Lease
+	dec, _, err = original.Submit(admission.Request{ID: "second", Cores: 11.2})
+	if err != nil {
+		t.Fatalf("grant second: %v", err)
+	}
+	if dec.Kind != admission.DecisionGranted {
+		t.Fatalf("second = %s, want %s", dec.Kind, admission.DecisionGranted)
+	}
+	second := dec.Lease
+
+	d, err := New(Config{
+		Home: home,
+		Sampler: fixedHostSampler{stat: HostStat{
+			TotalCores:       14,
+			TotalMemoryBytes: 8 << 30,
+			FreeMemoryBytes:  8 << 30,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("new daemon: %v", err)
+	}
+	if err := d.layout.ensureDir(); err != nil {
+		t.Fatalf("ensure dir: %v", err)
+	}
+	if err := writeState(d.layout.state, original.Snapshot(), nil); err != nil {
+		t.Fatalf("write state: %v", err)
+	}
+	if err := d.initLedger(); err != nil {
+		t.Fatalf("init ledger: %v", err)
+	}
+
+	dec, _, err = d.ledger.Submit(admission.Request{ID: "queued", Cores: 11.2})
+	if err != nil {
+		t.Fatalf("submit queued: %v", err)
+	}
+	if dec.Kind != admission.DecisionQueued {
+		t.Fatalf("queued = %s, want %s", dec.Kind, admission.DecisionQueued)
+	}
+	if _, err := d.ledger.Release(first.ID, "first"); err != nil {
+		t.Fatalf("release first: %v", err)
+	}
+	if _, err := d.ledger.Release(second.ID, "second"); err != nil {
+		t.Fatalf("release second: %v", err)
+	}
+	snap := d.ledger.Snapshot()
+	if len(snap.Leases) != 1 || snap.Leases[0].RequestID != "queued" {
+		t.Fatalf("queued after drain = %+v, want promoted", snap.Leases)
+	}
+}
+
 // newHeadroomDaemon builds a daemon with a ready ledger but no listener,
 // for exercising the headroom controller in isolation.
 func newHeadroomDaemon(t *testing.T, totalCores float64, frac float64) *Daemon {

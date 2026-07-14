@@ -122,6 +122,19 @@ func TestRestore_MintedLeaseIDsDoNotCollide(t *testing.T) {
 	}
 }
 
+func TestRestore_AllowsCPUOvercommit(t *testing.T) {
+	l := testLedger(t, 24, 8<<30)
+	mustGrant(t, l, Request{ID: "first", Cores: 11.2})
+	mustGrant(t, l, Request{ID: "second", Cores: 11.2})
+	snap := l.Snapshot()
+	snap.TotalMilliCores = 14000
+	snap.HeadroomMilliCores = 14000
+
+	if _, err := Restore(snap, nil); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+}
+
 func TestRestore_RejectsCorruptSnapshots(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -161,7 +174,7 @@ func TestRestore_RejectsCorruptSnapshots(t *testing.T) {
 		}},
 		{"waiter arrival above counter", func(s *Snapshot) { s.Waiters[1].Arrival = s.ArrivalSeq + 1 }},
 		{"stranded promotable waiter", func(s *Snapshot) { s.Waiters[0].MilliCores = 0 }},
-		{"used cores above total", func(s *Snapshot) { s.TotalMilliCores = 100; s.HeadroomMilliCores = 100; s.Waiters = nil }},
+		{"used memory above total", func(s *Snapshot) { s.TotalMemoryBytes = 100; s.HeadroomMemoryBytes = 100; s.Waiters = nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

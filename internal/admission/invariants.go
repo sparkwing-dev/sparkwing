@@ -55,9 +55,6 @@ func (l *Ledger) hostInvariant() error {
 	if memory != l.usedMemory {
 		return fmt.Errorf("used memory %d does not match lease sum %d", l.usedMemory, memory)
 	}
-	if l.usedMilliCores > l.totalMilliCores && !l.softCoreOvercommit() {
-		return fmt.Errorf("granted hard cores %d exceed total %d", l.usedMilliCores, l.totalMilliCores)
-	}
 	if l.usedMemory > l.totalMemory {
 		return fmt.Errorf("granted memory %d exceeds total %d", l.usedMemory, l.totalMemory)
 	}
@@ -68,15 +65,6 @@ func (l *Ledger) hostInvariant() error {
 		return fmt.Errorf("headroom cores %d negative", l.headroomMilliCores)
 	}
 	return nil
-}
-
-func (l *Ledger) softCoreOvercommit() bool {
-	for _, le := range l.leases {
-		if le.softCores {
-			return true
-		}
-	}
-	return false
 }
 
 func (l *Ledger) leaseInvariants() error {

@@ -320,8 +320,8 @@ func (l *Ledger) SetHeadroom(cores float64, memoryBytes uint64) ([]Event, error)
 
 // ResizeTotals replaces the fixed host capacity after a daemon restore
 // on a machine with different effective limits. It preserves current
-// grants and waiters; if the new totals cannot represent that state, it
-// returns [ErrInvalidResize].
+// grants and waiters. Memory remains a hard safety bound; CPU overcommit
+// is tolerated for existing grants and drains before new CPU work admits.
 func (l *Ledger) ResizeTotals(cores float64, memoryBytes uint64) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -330,16 +330,10 @@ func (l *Ledger) ResizeTotals(cores float64, memoryBytes uint64) error {
 	if err != nil {
 		return fmt.Errorf("%w: cores %v", ErrInvalidResize, cores)
 	}
-	if l.usedMilliCores > mc {
-		return fmt.Errorf("%w: granted cores %d exceed total %d", ErrInvalidResize, l.usedMilliCores, mc)
-	}
 	if l.usedMemory > memoryBytes {
 		return fmt.Errorf("%w: granted memory %d exceeds total %d", ErrInvalidResize, l.usedMemory, memoryBytes)
 	}
 	for _, w := range l.waiters {
-		if w.spec.milliCores > mc {
-			return fmt.Errorf("%w: waiter %q cores %d exceed total %d", ErrInvalidResize, w.spec.id, w.spec.milliCores, mc)
-		}
 		if w.spec.memory > memoryBytes {
 			return fmt.Errorf("%w: waiter %q memory %d exceeds total %d", ErrInvalidResize, w.spec.id, w.spec.memory, memoryBytes)
 		}
@@ -349,6 +343,9 @@ func (l *Ledger) ResizeTotals(cores float64, memoryBytes uint64) error {
 	l.totalMemory = memoryBytes
 	l.headroomMilliCores = min(l.headroomMilliCores, mc)
 	l.headroomMemory = min(l.headroomMemory, memoryBytes)
+	for _, w := range l.waiters {
+		w.spec.milliCores = min(w.spec.milliCores, mc)
+	}
 	l.mustHoldInvariants()
 	return nil
 }
