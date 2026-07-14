@@ -142,3 +142,11 @@ func TestStripRestoreRoundTrip(t *testing.T) {
 		t.Errorf("restored body missing replace:\n%s", restored)
 	}
 }
+
+func TestGitTrackedPathsSplitsNULOutput(t *testing.T) {
+	got := gitTrackedPaths("go.mod\x00internal/store/store.go\x00docs/file with spaces.md\x00")
+	want := []string{"go.mod", "internal/store/store.go", "docs/file with spaces.md"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("gitTrackedPaths = %#v, want %#v", got, want)
+	}
+}

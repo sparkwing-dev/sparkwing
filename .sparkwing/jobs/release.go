@@ -518,11 +518,11 @@ func createSelfModuleZip(ctx context.Context, repoDir, version string) ([]byte, 
 }
 
 func selfModuleZipFiles(ctx context.Context, repoDir string) ([]modzip.File, error) {
-	out, err := runGitIn(ctx, repoDir, "ls-files")
+	out, err := runGitIn(ctx, repoDir, "ls-files", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("release: list tracked files: %w", err)
 	}
-	paths := strings.Split(out, "\n")
+	paths := gitTrackedPaths(out)
 	nestedModules := map[string]struct{}{}
 	for _, path := range paths {
 		if path == "" || path == "go.mod" || filepath.Base(path) != "go.mod" {
@@ -546,6 +546,20 @@ func selfModuleZipFiles(ctx context.Context, repoDir string) ([]modzip.File, err
 		files = append(files, trackedModuleFile{repoDir: repoDir, path: path, info: info})
 	}
 	return files, nil
+}
+
+func gitTrackedPaths(out string) []string {
+	if out == "" {
+		return nil
+	}
+	parts := strings.Split(out, "\x00")
+	paths := parts[:0]
+	for _, path := range parts {
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 func nestedModulePath(path string, nestedModules map[string]struct{}) bool {
