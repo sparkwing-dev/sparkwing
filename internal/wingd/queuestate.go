@@ -172,6 +172,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			BlockingReason: hostBlockingReason(float64(w.MilliCores)/1000.0, float64(w.MemoryBytes), available, rationale),
 			CostRationale:  rationale,
 		}
+		waiter.BlockingReason = queueBlockingReason(waiter.BlockingReason, waiter.WaitingOn, i+1)
 		if c != nil {
 			waiter.Pipeline = c.pipeline
 			waiter.Repo = c.repo
@@ -188,6 +189,13 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 
 	annotateETA(&qs, snap)
 	return qs
+}
+
+func queueBlockingReason(hostReason string, waitingOn []string, position int) string {
+	if hostReason != "" || len(waitingOn) > 0 || position <= 1 {
+		return hostReason
+	}
+	return "waiting behind earlier queued work"
 }
 
 // attachedChildHoldersLocked renders the child runs riding a lease as
@@ -245,9 +253,10 @@ func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 			continue
 		}
 		waiters = append(waiters, simRun{
-			cores:    w.Resources.Cores,
-			mem:      float64(w.Resources.MemoryBytes),
-			duration: durationMS(w.ExpectedDurationMS),
+			cores:     w.Resources.Cores,
+			softCores: snap.Waiters[i].SoftCores,
+			mem:       float64(w.Resources.MemoryBytes),
+			duration:  durationMS(w.ExpectedDurationMS),
 		})
 		waiterIdx = append(waiterIdx, i)
 	}
@@ -269,10 +278,11 @@ func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 // milliseconds; duration is a waiter's run length. Either is +Inf when the
 // run's duration is unmeasured.
 type simRun struct {
-	cores    float64
-	mem      float64
-	finish   float64
-	duration float64
+	cores     float64
+	softCores bool
+	mem       float64
+	finish    float64
+	duration  float64
 }
 
 // simEvent is a scheduled resource release at a point in simulated time.
@@ -302,12 +312,20 @@ func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts 
 
 	starts = make([]float64, len(waiters))
 	now := 0.0
+	blocked := false
 	for i, w := range waiters {
-		if w.cores > capCores+eps || w.mem > capMem+eps {
+		if blocked {
 			starts[i] = math.Inf(1)
+			clear = math.Inf(1)
 			continue
 		}
-		for w.cores > freeCores+eps || w.mem > freeMem+eps {
+		if (!w.softCores && w.cores > capCores+eps) || w.mem > capMem+eps {
+			starts[i] = math.Inf(1)
+			clear = math.Inf(1)
+			blocked = true
+			continue
+		}
+		for !simFits(w, capCores, freeCores, freeMem, eps) {
 			e, ok := popEarliest(&events)
 			if !ok {
 				now = math.Inf(1)
@@ -320,6 +338,7 @@ func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts 
 		starts[i] = now
 		if math.IsInf(now, 1) {
 			clear = math.Inf(1)
+			blocked = true
 			continue
 		}
 		freeCores -= w.cores
@@ -329,6 +348,20 @@ func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts 
 		clear = math.Max(clear, finish)
 	}
 	return starts, clear
+}
+
+func simFits(w simRun, capCores, freeCores, freeMem, eps float64) bool {
+	memOK := w.mem <= freeMem+eps
+	if !memOK {
+		return false
+	}
+	if w.cores <= eps {
+		return true
+	}
+	if w.cores <= freeCores+eps {
+		return true
+	}
+	return w.softCores && freeCores >= capCores-eps
 }
 
 // popEarliest removes and returns the event with the smallest time.
