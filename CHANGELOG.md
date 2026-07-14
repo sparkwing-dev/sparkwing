@@ -47,6 +47,13 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** `sparkwing queue` now leaves the clear-time estimate unknown
+  when FIFO admission cannot model a queue drain, instead of reporting zero
+  milliseconds. Waiters blocked only by earlier queued work now say so, while
+  soft CPU waiters and zero-core work follow the same fit rules the admission
+  daemon uses.
 
 ## [v0.17.7] - 2026-07-14
 ### Fixed

@@ -49,6 +49,15 @@ code change to unlock.
 ## [Unreleased]
 ### Fixed
 
+- **admission:** `sparkwing queue` now leaves the clear-time estimate unknown
+  when FIFO admission cannot model a queue drain, instead of reporting zero
+  milliseconds. Waiters blocked only by earlier queued work now say so, while
+  soft CPU waiters and zero-core work follow the same fit rules the admission
+  daemon uses.
+
+## [v0.17.7] - 2026-07-14
+### Fixed
+
 - **admission:** Queued local-admission retries now reattach to the existing
   waiter only when the retry matches the queued request exactly. A reconnect no
   longer fails a waiting node with `duplicate`, and a different process cannot
