@@ -3,15 +3,17 @@ package jobs
 import (
 	"context"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
 )
 
 // sdkModulePath is the SDK module whose latest release the scaffold
@@ -136,7 +138,54 @@ func checkScaffoldFallbackPin(ctx context.Context, repoRoot string) string {
 	if err != nil {
 		return fmt.Sprintf("scaffold fallback pin: cannot resolve latest %s release (%v)", sdkModulePath, err)
 	}
-	return scaffoldFallbackProblem(scaffold.FallbackSDKVersion, latest)
+	pinned, err := readScaffoldFallbackVersion(repoRoot)
+	if err != nil {
+		return fmt.Sprintf("scaffold fallback pin: %v", err)
+	}
+	return scaffoldFallbackProblem(pinned, latest)
+}
+
+func readScaffoldFallbackVersion(repoRoot string) (string, error) {
+	path := filepath.Join(repoRoot, "pkg", "scaffold", "version.go")
+	f, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+	if err != nil {
+		return "", fmt.Errorf("parse %s: %w", path, err)
+	}
+	for _, decl := range f.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok || gen.Tok != token.CONST {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			value, ok := scaffoldFallbackValue(spec)
+			if ok {
+				return value, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("FallbackSDKVersion not found in %s", path)
+}
+
+func scaffoldFallbackValue(spec ast.Spec) (string, bool) {
+	vs, ok := spec.(*ast.ValueSpec)
+	if !ok {
+		return "", false
+	}
+	for i, name := range vs.Names {
+		if name.Name != "FallbackSDKVersion" || i >= len(vs.Values) {
+			continue
+		}
+		lit, ok := vs.Values[i].(*ast.BasicLit)
+		if !ok || lit.Kind != token.STRING {
+			return "", false
+		}
+		value, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return "", false
+		}
+		return value, true
+	}
+	return "", false
 }
 
 // latestReleasedTag returns the highest stable semver git tag in the

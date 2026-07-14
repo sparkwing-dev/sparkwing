@@ -1,6 +1,10 @@
 package jobs
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestScaffoldFallbackProblem(t *testing.T) {
 	cases := []struct {
@@ -26,6 +30,28 @@ func TestScaffoldFallbackProblem(t *testing.T) {
 				t.Errorf("scaffoldFallbackProblem(%q, %q) reported no problem, want one", c.pinned, c.latest)
 			}
 		})
+	}
+}
+
+func TestReadScaffoldFallbackVersionReadsCheckoutSource(t *testing.T) {
+	repoRoot := t.TempDir()
+	dir := filepath.Join(repoRoot, "pkg", "scaffold")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "version.go"), []byte(`package scaffold
+
+const FallbackSDKVersion = "v0.99.0"
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := readScaffoldFallbackVersion(repoRoot)
+	if err != nil {
+		t.Fatalf("readScaffoldFallbackVersion: %v", err)
+	}
+	if got != "v0.99.0" {
+		t.Fatalf("readScaffoldFallbackVersion() = %q, want v0.99.0", got)
 	}
 }
 
