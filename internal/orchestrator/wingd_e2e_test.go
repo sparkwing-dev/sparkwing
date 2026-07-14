@@ -1362,34 +1362,64 @@ func TestWingd_NodeGroupSerializesAcrossRuns(t *testing.T) {
 }
 
 func TestWingd_NodeHostAdmissionAndNodeSemaphoreUseDistinctParticipants(t *testing.T) {
-	home := wingdTestHome(t)
-	startWingd(t, home, 8)
-	backends, _, _ := openWingdBackends(t, home)
-	la := testWingdAdmission(home, nil)
-
-	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
-	defer cancel()
-
-	hostLease, err := la.admitNode(ctx, backends, "runner-mode", "run-1", "shard-1/semaphore", nil)
-	if err != nil {
-		t.Fatalf("admit node host resources: %v", err)
+	cases := []struct {
+		name          string
+		runID         string
+		hostNodeID    string
+		semNodeID     string
+		semName       string
+		collisionNote string
+	}{
+		{
+			name:          "same-node",
+			runID:         "run-same-node",
+			hostNodeID:    "shard-1",
+			semNodeID:     "shard-1",
+			semName:       "node-shard-lock",
+			collisionNote: "same node host and semaphore participants",
+		},
+		{
+			name:          "namespace-like-node",
+			runID:         "run-namespace-node",
+			hostNodeID:    "node-semaphore/shard-1",
+			semNodeID:     "shard-1",
+			semName:       "node-namespace-lock",
+			collisionNote: "node id and semaphore namespace participants",
+		},
 	}
-	defer hostLease.release()
 
-	claim := wingwire.SemaphoreClaim{
-		Name:     "node-shard-lock",
-		Capacity: 1,
-		Cost:     1,
-		Policy:   wingwire.PolicyQueue,
-	}
-	semLease, err := la.acquireNodeSlot(ctx, "run-1", "shard-1", claim, nil)
-	if err != nil {
-		t.Fatalf("acquire node semaphore after host admission: %v", err)
-	}
-	defer func() { _ = semLease.Release() }()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := wingdTestHome(t)
+			startWingd(t, home, 8)
+			backends, _, _ := openWingdBackends(t, home)
+			la := testWingdAdmission(home, nil)
 
-	if hostLease.leases[0].RunID == semLease.RunID {
-		t.Fatalf("node host and node semaphore participants collided at %q", semLease.RunID)
+			ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+			defer cancel()
+
+			hostLease, err := la.admitNode(ctx, backends, "runner-mode", tc.runID, tc.hostNodeID, nil)
+			if err != nil {
+				t.Fatalf("admit node host resources: %v", err)
+			}
+			defer hostLease.release()
+
+			claim := wingwire.SemaphoreClaim{
+				Name:     tc.semName,
+				Capacity: 1,
+				Cost:     1,
+				Policy:   wingwire.PolicyQueue,
+			}
+			semLease, err := la.acquireNodeSlot(ctx, tc.runID, tc.semNodeID, claim, nil)
+			if err != nil {
+				t.Fatalf("acquire node semaphore after host admission: %v", err)
+			}
+			defer func() { _ = semLease.Release() }()
+
+			if hostLease.leases[0].RunID == semLease.RunID {
+				t.Fatalf("%s collided at %q", tc.collisionNote, semLease.RunID)
+			}
+		})
 	}
 }
 
