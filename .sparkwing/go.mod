@@ -87,3 +87,4 @@ require (
 // pattern follows the standard "consumer .sparkwing/ uses a local
 // replace during development" convention; here the parent IS the
 // SDK rather than a sibling.
+replace github.com/sparkwing-dev/sparkwing => ..
