@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -518,11 +519,11 @@ func createSelfModuleZip(ctx context.Context, repoDir, version string) ([]byte, 
 }
 
 func selfModuleZipFiles(ctx context.Context, repoDir string) ([]modzip.File, error) {
-	out, err := runGitIn(ctx, repoDir, "ls-files", "-z")
+	out, err := runGitRawIn(ctx, repoDir, "ls-files", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("release: list tracked files: %w", err)
 	}
-	paths := gitTrackedPaths(out)
+	paths := gitTrackedPaths(string(out))
 	nestedModules := map[string]struct{}{}
 	for _, path := range paths {
 		if path == "" || path == "go.mod" || filepath.Base(path) != "go.mod" {
@@ -994,6 +995,23 @@ func runGitIn(ctx context.Context, dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
 	}
 	return res.Stdout, nil
+}
+
+func runGitRawIn(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			msg := strings.TrimSpace(string(exitErr.Stderr))
+			if msg != "" {
+				return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
+			}
+		}
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return out, nil
 }
 
 // releaseTagCeiling is the exclusive upper bound on tags the release
