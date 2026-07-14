@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.4] - 2026-07-14
 ### Fixed
 
 - **admission:** Unpinned local runs now acquire host resources at node
