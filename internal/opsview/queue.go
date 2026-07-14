@@ -142,7 +142,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 		fmt.Fprintln(tw, "(none holding)\t\t\t\t\t\t\t")
 	}
 	for _, h := range qs.Holders {
-		run := h.RunID
+		run := queueDisplayRunID(h.RunID, h.DisplayRunID)
 		if h.Parent != "" {
 			run = "  " + run + " (attached)"
 		}
@@ -166,7 +166,8 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 		fmt.Fprintln(tw, "-\t(no one queued)\t\t\t\t\t\t\t\t")
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.RunID, orDash(wt.Pipeline),
+		run := queueDisplayRunID(wt.RunID, wt.DisplayRunID)
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, run, orDash(wt.Pipeline),
 			orDash(wt.Repo), orDash(OriginWord(wt.Origin)), fmtCost(wt.Resources), orDash(wt.CostSource),
 			fmtETA(wt.ExpectedStartMS), orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
 	}
@@ -174,7 +175,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 
 	for _, wt := range qs.Waiters {
 		if wt.BlockingReason != "" {
-			fmt.Fprintf(out, "\n%s waiting: %s\n", wt.RunID, wt.BlockingReason)
+			fmt.Fprintf(out, "\n%s waiting: %s\n", queueDisplayRunID(wt.RunID, wt.DisplayRunID), wt.BlockingReason)
 		}
 	}
 	for _, h := range qs.Holders {
@@ -521,4 +522,11 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func queueDisplayRunID(runID, displayRunID string) string {
+	if displayRunID != "" {
+		return displayRunID
+	}
+	return runID
 }

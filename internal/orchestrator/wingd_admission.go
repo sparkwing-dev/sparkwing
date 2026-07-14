@@ -301,6 +301,8 @@ func (la *LocalAdmission) admitNode(
 	res, _, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
 	req := wingwire.AdmissionRequest{
 		RunID:              nodeHostRunID(runID, nodeID),
+		OwnerRunID:         runID,
+		DisplayRunID:       nodeDisplayRunID(runID, nodeID),
 		Pipeline:           pipeline,
 		Repo:               currentRepoShortName(),
 		PID:                os.Getpid(),
@@ -867,6 +869,8 @@ func (la *LocalAdmission) acquireNodeSlot(
 	}
 	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
 		RunID:          nodeSemaphoreRunID(runID, nodeID),
+		OwnerRunID:     runID,
+		DisplayRunID:   nodeDisplayRunID(runID, nodeID),
 		SemaphoresOnly: true,
 		Semaphores:     []wingwire.SemaphoreClaim{claim},
 		SubLease:       true,
@@ -884,6 +888,10 @@ func nodeSemaphoreRunID(runID, nodeID string) string {
 
 func nodeHostRunID(runID, nodeID string) string {
 	return runID + "/node-host/" + encodeNodeAdmissionID(nodeID)
+}
+
+func nodeDisplayRunID(runID, nodeID string) string {
+	return runID + "/" + nodeID
 }
 
 func encodeNodeAdmissionID(nodeID string) string {

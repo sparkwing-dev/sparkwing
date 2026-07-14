@@ -498,7 +498,7 @@ func awaitWaiter(t *testing.T, home, runID string) {
 	deadline := time.Now().Add(wingdTestWait)
 	for time.Now().Before(deadline) {
 		for _, w := range queryWingd(t, home).Waiters {
-			if w.RunID == runID {
+			if queueRowMatchesRun(w.RunID, w.ParticipantID, runID) {
 				return
 			}
 		}
@@ -514,12 +514,12 @@ func awaitWaiterOrHolder(t *testing.T, home, runID string) wingwire.QueueState {
 	for time.Now().Before(deadline) {
 		last = queryWingd(t, home)
 		for _, w := range last.Waiters {
-			if w.RunID == runID {
+			if queueRowMatchesRun(w.RunID, w.ParticipantID, runID) {
 				return last
 			}
 		}
 		for _, h := range last.Holders {
-			if h.RunID == runID {
+			if queueRowMatchesRun(h.RunID, h.ParticipantID, runID) {
 				t.Fatalf("run %q was admitted as holder; queue state: %+v", runID, last)
 			}
 		}
@@ -560,7 +560,7 @@ func findWingdHolder(t *testing.T, home, runID string) wingwire.Holder {
 	deadline := time.Now().Add(wingdTestWait)
 	for time.Now().Before(deadline) {
 		for _, h := range queryWingd(t, home).Holders {
-			if h.RunID == runID {
+			if queueRowMatchesRun(h.RunID, h.ParticipantID, runID) {
 				return h
 			}
 		}
@@ -572,18 +572,22 @@ func findWingdHolder(t *testing.T, home, runID string) wingwire.Holder {
 
 func hasWingdHolder(qs wingwire.QueueState, runID string) bool {
 	for _, h := range qs.Holders {
-		if h.RunID == runID {
+		if queueRowMatchesRun(h.RunID, h.ParticipantID, runID) {
 			return true
 		}
 	}
 	return false
 }
 
+func queueRowMatchesRun(runID, participantID, want string) bool {
+	return runID == want || participantID == want
+}
+
 // findQueuedWaiter returns the queued waiter with runID and whether it is
 // present, without blocking.
 func findQueuedWaiter(qs wingwire.QueueState, runID string) (wingwire.Waiter, bool) {
 	for _, w := range qs.Waiters {
-		if w.RunID == runID {
+		if queueRowMatchesRun(w.RunID, w.ParticipantID, runID) {
 			return w, true
 		}
 	}

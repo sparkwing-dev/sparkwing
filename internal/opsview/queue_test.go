@@ -45,6 +45,44 @@ func TestRenderQueuePretty_ResourceRowReconciles(t *testing.T) {
 	}
 }
 
+func TestRenderQueuePretty_UsesDisplayRunID(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{
+			{
+				RunID:         "run-1",
+				ParticipantID: "internal-holder",
+				DisplayRunID:  "run-1/build",
+				Resources:     wingwire.HostResources{Cores: 1},
+			},
+		},
+		Waiters: []wingwire.Waiter{
+			{
+				RunID:          "run-2",
+				ParticipantID:  "internal-waiter",
+				DisplayRunID:   "run-2/test",
+				Position:       1,
+				Resources:      wingwire.HostResources{Cores: 1},
+				BlockingReason: "needs 1.0 cores; 0.0 available",
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"run-1/build", "run-2/test"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("pretty queue omitted %q:\n%s", want, out)
+		}
+	}
+	for _, internal := range []string{"internal-holder", "internal-waiter"} {
+		if strings.Contains(out, internal) {
+			t.Fatalf("pretty queue leaked participant id %q:\n%s", internal, out)
+		}
+	}
+}
+
 func parseCoresRow(out string) (cap, held, reserved, external, available float64, ok bool) {
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)

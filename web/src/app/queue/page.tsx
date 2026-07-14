@@ -327,7 +327,7 @@ function HolderRow({ h, attached }: { h: QueueHolder; attached?: boolean }) {
               ↳
             </span>
           )}
-          <RunLink id={h.run_id} />
+          <RunLink id={h.run_id} label={queueRunLabel(h)} />
           {attached && (
             <Tooltip content="Rides its parent's lease; draws no budget of its own">
               <span className="text-[10px] font-mono text-[var(--muted)] cursor-default">
@@ -414,7 +414,7 @@ function WaitersSection({ waiters }: { waiters: QueueWaiter[] }) {
                     {w.position}
                   </Td>
                   <Td>
-                    <RunLink id={w.run_id} />
+                    <RunLink id={w.run_id} label={queueRunLabel(w)} />
                   </Td>
                   <Td hideSm mono muted>
                     {w.pipeline || "-"}
@@ -487,15 +487,19 @@ function SourceChip({ source }: { source: string }) {
   );
 }
 
-function RunLink({ id }: { id: string }) {
+function RunLink({ id, label }: { id: string; label?: string }) {
   return (
     <Link
       href={`/runs?run=${encodeURIComponent(id)}`}
       className="font-mono text-xs text-violet-300 hover:underline"
     >
-      {id}
+      {label || id}
     </Link>
   );
+}
+
+function queueRunLabel(row: { run_id: string; display_run_id?: string }) {
+  return row.display_run_id || row.run_id;
 }
 
 function Callout({

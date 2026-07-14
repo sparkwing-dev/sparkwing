@@ -34,15 +34,17 @@ type conn struct {
 	closeOnce      sync.Once
 	disconnectOnce sync.Once
 
-	runID     string
-	pipeline  string
-	pid       int
-	role      connRole
-	leaseID   admission.LeaseID
-	members   []string
-	resources wingwire.HostResources
-	sems      []string
-	startAt   time.Time
+	runID        string
+	ownerRunID   string
+	displayRunID string
+	pipeline     string
+	pid          int
+	role         connRole
+	leaseID      admission.LeaseID
+	members      []string
+	resources    wingwire.HostResources
+	sems         []string
+	startAt      time.Time
 
 	// parentRun names the holder this connection's run attached to, for
 	// child leases riding a parent's grant. Empty for top-level runs.

@@ -104,6 +104,12 @@ type SemaphoreClaim struct {
 // policies.
 type AdmissionRequest struct {
 	RunID string `json:"run_id"`
+	// OwnerRunID is the real run that owns an internal participant. Empty
+	// means the participant is the run.
+	OwnerRunID string `json:"owner_run_id,omitempty"`
+	// DisplayRunID is the label queue views print for this participant.
+	// Empty means display the owner run.
+	DisplayRunID string `json:"display_run_id,omitempty"`
 	// Pipeline is the pipeline name behind the run, carried purely for
 	// display in the queue view. Empty for requests that have no
 	// pipeline (a semaphores-only node acquisition inherits the run's).
@@ -279,6 +285,11 @@ type ResourceState struct {
 // [QueueState].
 type Holder struct {
 	RunID string `json:"run_id"`
+	// ParticipantID is the daemon lease key when it differs from RunID.
+	ParticipantID string `json:"participant_id,omitempty"`
+	// DisplayRunID is the label queue views print for this row. Empty
+	// means display RunID.
+	DisplayRunID string `json:"display_run_id,omitempty"`
 	// Pipeline is the pipeline name behind the run, for display. Empty
 	// when the run did not report one.
 	Pipeline string `json:"pipeline,omitempty"`
@@ -342,6 +353,11 @@ type Holder struct {
 // 1-based place in that order.
 type Waiter struct {
 	RunID string `json:"run_id"`
+	// ParticipantID is the daemon lease key when it differs from RunID.
+	ParticipantID string `json:"participant_id,omitempty"`
+	// DisplayRunID is the label queue views print for this row. Empty
+	// means display RunID.
+	DisplayRunID string `json:"display_run_id,omitempty"`
 	// Pipeline is the pipeline name behind the run, for display. Empty
 	// when the run did not report one.
 	Pipeline string `json:"pipeline,omitempty"`

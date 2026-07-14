@@ -1139,6 +1139,8 @@ export interface QueueResource {
 // (parent set) rides its parent's lease and draws no budget of its own.
 export interface QueueHolder {
   run_id: string;
+  participant_id?: string;
+  display_run_id?: string;
   pipeline?: string;
   repo?: string;
   parent?: string;
@@ -1158,6 +1160,8 @@ export interface QueueHolder {
 // order; position is the 1-based place, 1 admitted next.
 export interface QueueWaiter {
   run_id: string;
+  participant_id?: string;
+  display_run_id?: string;
   pipeline?: string;
   repo?: string;
   position: number;

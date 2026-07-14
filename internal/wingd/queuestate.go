@@ -1,8 +1,10 @@
 package wingd
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
@@ -91,8 +93,11 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 
 	now := d.now()
 	for _, ls := range snap.Leases {
+		rowID := queueRowIdentity(ls.RequestID, d.byRun[ls.RequestID])
 		h := wingwire.Holder{
-			RunID: ls.RequestID,
+			RunID:         rowID.runID,
+			ParticipantID: rowID.participantID,
+			DisplayRunID:  rowID.displayRunID,
 			Resources: wingwire.HostResources{
 				Cores:       float64(ls.MilliCores) / 1000.0,
 				MemoryBytes: int64(ls.MemoryBytes),
@@ -159,10 +164,13 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	}
 	for i, w := range snap.Waiters {
 		c := d.byRun[w.RequestID]
+		rowID := queueRowIdentity(w.RequestID, c)
 		rationale := d.costRationale(c)
 		waiter := wingwire.Waiter{
-			RunID:    w.RequestID,
-			Position: i + 1,
+			RunID:         rowID.runID,
+			ParticipantID: rowID.participantID,
+			DisplayRunID:  rowID.displayRunID,
+			Position:      i + 1,
 			Resources: wingwire.HostResources{
 				Cores:       float64(w.MilliCores) / 1000.0,
 				MemoryBytes: int64(w.MemoryBytes),
@@ -209,8 +217,16 @@ func (d *Daemon) attachedChildHoldersLocked(ls admission.LeaseState, now time.Ti
 		if member == ls.RequestID {
 			continue
 		}
-		child := wingwire.Holder{RunID: member, Parent: ls.RequestID}
-		if c := d.byRun[member]; c != nil {
+		c := d.byRun[member]
+		childID := queueRowIdentity(member, c)
+		parentID := queueRowIdentity(ls.RequestID, d.byRun[ls.RequestID])
+		child := wingwire.Holder{
+			RunID:         childID.runID,
+			ParticipantID: childID.participantID,
+			DisplayRunID:  childID.displayRunID,
+			Parent:        parentID.runID,
+		}
+		if c != nil {
 			child.Pipeline = c.pipeline
 			child.Repo = c.repo
 			child.Origin = c.origin
@@ -221,6 +237,51 @@ func (d *Daemon) attachedChildHoldersLocked(ls admission.LeaseState, now time.Ti
 		out = append(out, child)
 	}
 	return out
+}
+
+type queueIdentity struct {
+	runID         string
+	participantID string
+	displayRunID  string
+}
+
+func queueRowIdentity(participantID string, c *conn) queueIdentity {
+	runID := participantID
+	displayRunID := ""
+	if c != nil {
+		if c.ownerRunID != "" {
+			runID = c.ownerRunID
+		}
+		displayRunID = c.displayRunID
+	}
+	if runID == participantID {
+		if owner, label, ok := decodeNodeParticipantID(participantID); ok {
+			runID = owner
+			if displayRunID == "" {
+				displayRunID = label
+			}
+		}
+	}
+	id := queueIdentity{runID: runID, displayRunID: displayRunID}
+	if participantID != runID {
+		id.participantID = participantID
+	}
+	return id
+}
+
+func decodeNodeParticipantID(participantID string) (ownerRunID, displayRunID string, ok bool) {
+	for _, marker := range []string{"/node-host/", "/node-semaphore/"} {
+		owner, encoded, found := strings.Cut(participantID, marker)
+		if !found || owner == "" || encoded == "" {
+			continue
+		}
+		node, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", "", false
+		}
+		return owner, owner + "/" + string(node), true
+	}
+	return "", "", false
 }
 
 // annotateETA fills each waiter's ExpectedStartMS and the queue's

@@ -536,6 +536,8 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	ar := requestFromWire(req.RunID, charged, req.Semaphores, req.CostSource)
 	c.runID = req.RunID
+	c.ownerRunID = req.OwnerRunID
+	c.displayRunID = req.DisplayRunID
 	c.pipeline = req.Pipeline
 	c.repo = req.Repo
 	c.pid = req.PID
@@ -565,6 +567,8 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			}
 			c.role = roleWaiter
 			c.resources = existing.resources
+			c.ownerRunID = existing.ownerRunID
+			c.displayRunID = existing.displayRunID
 			if !existing.startAt.IsZero() {
 				c.startAt = existing.startAt
 			}
@@ -605,6 +609,8 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			c.leaseID = leaseID
 			c.members = cloneStrings(existing.members)
 			c.resources = existing.resources
+			c.ownerRunID = existing.ownerRunID
+			c.displayRunID = existing.displayRunID
 			if !existing.startAt.IsZero() {
 				c.startAt = existing.startAt
 			}
@@ -722,6 +728,8 @@ func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest) bool
 		existing.sampleCount == req.SampleCount &&
 		existing.driftWarning == req.DriftWarning &&
 		existing.origin == req.Origin &&
+		existing.ownerRunID == req.OwnerRunID &&
+		existing.displayRunID == req.DisplayRunID &&
 		existing.requestResources == requested &&
 		claimRequestsMatch(existing.requestSemaphores, req.Semaphores) &&
 		existing.semaphoresOnly == req.SemaphoresOnly &&
@@ -860,6 +868,8 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
 	c.runID = req.RunID
+	c.ownerRunID = req.OwnerRunID
+	c.displayRunID = req.DisplayRunID
 	c.pipeline = req.Pipeline
 	c.repo = req.Repo
 	c.pid = req.PID

@@ -131,6 +131,90 @@ func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
 	}
 }
 
+func TestQueueState_CarriesOwnerAndParticipantIdentity(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1})
+
+	holderClient := ensure(t, home, "v1")
+	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID:        "internal-holder",
+		OwnerRunID:   "run-1",
+		DisplayRunID: "run-1/build",
+		Resources:    wingwire.HostResources{MemoryBytes: 48 << 30},
+	})
+
+	waiterClient := ensure(t, home, "v1")
+	positions, _ := acquireAsync(waiterClient, wingwire.AdmissionRequest{
+		RunID:        "internal-waiter",
+		OwnerRunID:   "run-2",
+		DisplayRunID: "run-2/test",
+		Resources:    wingwire.HostResources{MemoryBytes: 8 << 30},
+	})
+	waitForQueue(t, positions)
+
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(qs.Holders) != 1 {
+		t.Fatalf("holders = %d, want 1: %+v", len(qs.Holders), qs.Holders)
+	}
+	h := qs.Holders[0]
+	if h.RunID != "run-1" || h.ParticipantID != "internal-holder" || h.DisplayRunID != "run-1/build" {
+		t.Fatalf("holder identity = %+v, want run_id run-1, participant internal-holder, display run-1/build", h)
+	}
+	if len(qs.Waiters) != 1 {
+		t.Fatalf("waiters = %d, want 1: %+v", len(qs.Waiters), qs.Waiters)
+	}
+	w := qs.Waiters[0]
+	if w.RunID != "run-2" || w.ParticipantID != "internal-waiter" || w.DisplayRunID != "run-2/test" {
+		t.Fatalf("waiter identity = %+v, want run_id run-2, participant internal-waiter, display run-2/test", w)
+	}
+}
+
+func TestQueueState_DecodesNodeParticipantIdentity(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1})
+
+	holderClient := ensure(t, home, "v1")
+	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID:     "run-1/node-host/YnVpbGQvc2hhcmQtMQ",
+		Resources: wingwire.HostResources{MemoryBytes: 48 << 30},
+	})
+
+	waiterClient := ensure(t, home, "v1")
+	positions, _ := acquireAsync(waiterClient, wingwire.AdmissionRequest{
+		RunID:     "run-2/node-semaphore/dGVzdC9zaGFyZC0y",
+		Resources: wingwire.HostResources{MemoryBytes: 8 << 30},
+	})
+	waitForQueue(t, positions)
+
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(qs.Holders) != 1 {
+		t.Fatalf("holders = %d, want 1: %+v", len(qs.Holders), qs.Holders)
+	}
+	h := qs.Holders[0]
+	if h.RunID != "run-1" || h.DisplayRunID != "run-1/build/shard-1" {
+		t.Fatalf("holder identity = %+v, want decoded owner and node label", h)
+	}
+	if h.ParticipantID != "run-1/node-host/YnVpbGQvc2hhcmQtMQ" {
+		t.Fatalf("holder participant = %q, want encoded daemon key", h.ParticipantID)
+	}
+	if len(qs.Waiters) != 1 {
+		t.Fatalf("waiters = %d, want 1: %+v", len(qs.Waiters), qs.Waiters)
+	}
+	w := qs.Waiters[0]
+	if w.RunID != "run-2" || w.DisplayRunID != "run-2/test/shard-2" {
+		t.Fatalf("waiter identity = %+v, want decoded owner and node label", w)
+	}
+	if w.ParticipantID != "run-2/node-semaphore/dGVzdC9zaGFyZC0y" {
+		t.Fatalf("waiter participant = %q, want encoded daemon key", w.ParticipantID)
+	}
+}
+
 // TestQueueState_ResourceRowsReconcile puts a host under external load with a
 // run holding, then asserts the reported cores row balances exactly:
 // capacity - held - reserved - external = available. The external the queue
