@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -18,6 +17,7 @@ import (
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 	"golang.org/x/mod/sumdb/dirhash"
+	modzip "golang.org/x/mod/zip"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -503,27 +503,14 @@ func selfModuleSums(ctx context.Context, repoDir, version string) (string, strin
 }
 
 func createSelfModuleZip(ctx context.Context, repoDir, version string) ([]byte, error) {
-	escapedPath, err := module.EscapePath(sparkwingModulePath)
-	if err != nil {
+	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	escapedVersion, err := module.EscapeVersion(version)
-	if err != nil {
+	var out bytes.Buffer
+	if err := modzip.CreateFromDir(&out, module.Version{Path: sparkwingModulePath, Version: version}, repoDir); err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, "git", "archive", "--format=zip", "--prefix="+escapedPath+"@"+escapedVersion+"/", "HEAD")
-	cmd.Dir = repoDir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			return nil, fmt.Errorf("git archive HEAD: %w", err)
-		}
-		return nil, fmt.Errorf("git archive HEAD: %w: %s", err, msg)
-	}
-	return out, nil
+	return out.Bytes(), nil
 }
 
 // restoreSelfReplaceJob undoes prepareSelfReplaceJob's mutation after
