@@ -47,6 +47,14 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** Runner-mode nodes now use separate daemon participant IDs
+  for host admission and node-local semaphore admission, so a node that also
+  enters a local concurrency group no longer fails with `duplicate` before its
+  work starts. Queue rows keep the owning run as `run_id`, include the daemon
+  participant key separately, and display the run/node label in human-facing
+  queue views.
 
 ## [v0.17.9] - 2026-07-14
 ### Fixed
