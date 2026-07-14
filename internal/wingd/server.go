@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"os"
 	"sync"
@@ -520,7 +519,8 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		d.handleChildAttach(c, req)
 		return
 	}
-	charged := chargedResources(req.Resources)
+	requested := chargedResources(req.Resources)
+	charged := requested
 
 	d.mu.Lock()
 	if d.draining {
@@ -550,31 +550,99 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.driftWarning = req.DriftWarning
 	c.origin = req.Origin
 	c.queueTimeoutMS = tightestQueueTimeoutMS(req.Semaphores)
-	if existing := d.byRun[req.RunID]; existing != nil && existing != c && existing.role == roleWaiter {
-		snap := d.ledger.Snapshot()
-		if !queuedRequestMetadataMatches(existing, req) ||
-			!queuedRequestMatches(snap, req.RunID, charged, req.Semaphores, req.CostSource) {
+	c.requestResources = requested
+	c.requestSemaphores = cloneSemaphoreClaims(req.Semaphores)
+	c.semaphoresOnly = req.SemaphoresOnly
+	if existing := d.byRun[req.RunID]; existing != nil && existing != c {
+		switch existing.role {
+		case roleWaiter:
+			snap := d.ledger.Snapshot()
+			if !requestMetadataMatches(existing, req) ||
+				!queuedRequestPresent(snap, req.RunID) {
+				d.mu.Unlock()
+				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				return
+			}
+			c.role = roleWaiter
+			c.resources = existing.resources
+			if !existing.startAt.IsZero() {
+				c.startAt = existing.startAt
+			}
+			existing.role = roleNone
+			existing.runID = ""
+			existing.members = nil
+			existing.finalizable = false
+			d.byRun[req.RunID] = c
+			queued := d.queuedDeliveryLockedFromSnapshot(c, snap, req.RunID)
+			d.touchLocked()
+			d.mu.Unlock()
+			existing.close()
+			if queued != nil {
+				d.flush([]delivery{*queued}, snap)
+			}
+			return
+		case roleHolder:
+			if len(existing.members) != 1 {
+				d.mu.Unlock()
+				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				return
+			}
+			snap := d.ledger.Snapshot()
+			if !requestMetadataMatches(existing, req) ||
+				!grantedRequestPresent(snap, existing.leaseID, req.RunID) {
+				d.mu.Unlock()
+				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				return
+			}
+			leaseID := existing.leaseID
+			lease, ok := d.ledger.LeaseByID(leaseID)
+			if !ok {
+				d.mu.Unlock()
+				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				return
+			}
+			c.role = roleHolder
+			c.leaseID = leaseID
+			c.members = cloneStrings(existing.members)
+			c.resources = existing.resources
+			if !existing.startAt.IsZero() {
+				c.startAt = existing.startAt
+			}
+			c.holdSampledMS = existing.holdSampledMS
+			c.holdSaturatedMS = existing.holdSaturatedMS
+			c.contended = existing.contended
+			c.contentionReason = existing.contentionReason
+			c.stalled = existing.stalled
+			c.lowSince = existing.lowSince
+			existing.role = roleNone
+			existing.runID = ""
+			existing.members = nil
+			existing.finalizable = false
+			for _, member := range c.members {
+				d.byRun[member] = c
+			}
+			soleUnderLoad := d.soleRunUnderLoadLocked(c)
+			externalCores := d.externalCores
+			d.touchLocked()
+			d.mu.Unlock()
+			existing.close()
+			grant := &wingwire.Grant{
+				RunID:      req.RunID,
+				LeaseToken: lease.Token,
+				Resources:  c.resources,
+				Semaphores: leaseSemaphores(snap, leaseID),
+			}
+			if soleUnderLoad {
+				grant.SoleRunUnderLoad = true
+				grant.ExternalCores = externalCores
+			}
+			_ = c.send(grant)
+			return
+		default:
 			d.mu.Unlock()
 			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
 			return
 		}
-		c.role = roleWaiter
-		if !existing.startAt.IsZero() {
-			c.startAt = existing.startAt
-		}
-		existing.role = roleNone
-		existing.runID = ""
-		existing.members = nil
-		existing.finalizable = false
-		d.byRun[req.RunID] = c
-		queued := d.queuedDeliveryLockedFromSnapshot(c, snap, req.RunID)
-		d.touchLocked()
-		d.mu.Unlock()
-		existing.close()
-		if queued != nil {
-			d.flush([]delivery{*queued}, snap)
-		}
-		return
 	}
 	d.byRun[req.RunID] = c
 	dec, events, err := d.ledger.Submit(ar)
@@ -642,7 +710,8 @@ func tightestQueueTimeoutMS(sems []wingwire.SemaphoreClaim) int64 {
 	return t
 }
 
-func queuedRequestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
+func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
+	requested := chargedResources(req.Resources)
 	return existing.finalizable == !req.SubLease &&
 		existing.pipeline == req.Pipeline &&
 		existing.repo == req.Repo &&
@@ -653,47 +722,63 @@ func queuedRequestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest
 		existing.sampleCount == req.SampleCount &&
 		existing.driftWarning == req.DriftWarning &&
 		existing.origin == req.Origin &&
+		existing.requestResources == requested &&
+		claimRequestsMatch(existing.requestSemaphores, req.Semaphores) &&
+		existing.semaphoresOnly == req.SemaphoresOnly &&
 		existing.queueTimeoutMS == tightestQueueTimeoutMS(req.Semaphores)
 }
 
-func queuedRequestMatches(
-	snap admission.Snapshot,
-	runID string,
-	res wingwire.HostResources,
-	sems []wingwire.SemaphoreClaim,
-	costSource wingwire.CostSource,
-) bool {
-	for _, w := range snap.Waiters {
-		if w.RequestID != runID {
+func grantedRequestPresent(snap admission.Snapshot, leaseID admission.LeaseID, runID string) bool {
+	for _, lease := range snap.Leases {
+		if lease.ID != leaseID || lease.RequestID != runID {
 			continue
-		}
-		if res.MemoryBytes < 0 {
-			return false
-		}
-		if w.MilliCores != int64(math.Round(res.Cores*1000)) || w.MemoryBytes != uint64(res.MemoryBytes) {
-			return false
-		}
-		if w.SoftCores != softCoreCostSource(costSource) ||
-			w.StrictCores != strictCoreCostSource(costSource) {
-			return false
-		}
-		if len(w.Claims) != len(sems) {
-			return false
-		}
-		for i, got := range w.Claims {
-			want := sems[i]
-			policy := want.Policy
-			if policy == "" {
-				policy = wingwire.PolicyQueue
-			}
-			if got.Key != want.Name || got.Capacity != want.Capacity || got.Cost != want.Cost ||
-				string(got.Policy) != string(policy) {
-				return false
-			}
 		}
 		return true
 	}
 	return false
+}
+
+func queuedRequestPresent(snap admission.Snapshot, runID string) bool {
+	for _, w := range snap.Waiters {
+		if w.RequestID != runID {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func cloneSemaphoreClaims(in []wingwire.SemaphoreClaim) []wingwire.SemaphoreClaim {
+	if len(in) == 0 {
+		return nil
+	}
+	return append([]wingwire.SemaphoreClaim(nil), in...)
+}
+
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	return append([]string(nil), in...)
+}
+
+func claimRequestsMatch(got []wingwire.SemaphoreClaim, want []wingwire.SemaphoreClaim) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i, claim := range got {
+		expected := want[i]
+		if claim.Policy == "" {
+			claim.Policy = wingwire.PolicyQueue
+		}
+		if expected.Policy == "" {
+			expected.Policy = wingwire.PolicyQueue
+		}
+		if claim != expected {
+			return false
+		}
+	}
+	return true
 }
 
 // cancelTimeoutFor returns the smallest positive CancelTimeout declared

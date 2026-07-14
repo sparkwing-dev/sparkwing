@@ -62,6 +62,9 @@ type conn struct {
 	expectedDurationMS int64
 	driftWarning       string
 	origin             wingwire.Origin
+	requestResources   wingwire.HostResources
+	requestSemaphores  []wingwire.SemaphoreClaim
+	semaphoresOnly     bool
 
 	// stalled and lowSince track the holder-idle verdict, guarded by the
 	// owning Daemon's mutex. lowSince is when the holder's CPU first fell

@@ -47,6 +47,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** A client that reconnects after receiving a local-admission
+  grant now reclaims the matching live lease instead of failing with
+  `duplicate`. The daemon still rejects mismatched retries and restored
+  multi-member leases fail closed rather than transferring partial ownership.
 
 ## [v0.17.8] - 2026-07-14
 ### Fixed

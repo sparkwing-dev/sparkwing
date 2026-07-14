@@ -847,6 +847,178 @@ func TestExplicitRelease_Promotes(t *testing.T) {
 	}
 }
 
+func TestGrantedSubmitReconnectReclaimsLiveGrant(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	first := ensure(t, home, "")
+	lease := mustAcquire(t, first, semReq("shard", "lock", 1, 1, wingwire.PolicyQueue))
+
+	waiter := ensure(t, home, "")
+	waiterPos, waiterResult := acquireAsync(waiter, semReq("waiter", "lock", 1, 1, wingwire.PolicyQueue))
+	waitForQueue(t, waiterPos)
+
+	replacement := ensure(t, home, "")
+	reclaimed, err := replacement.Acquire(context.Background(), semReq("shard", "lock", 1, 1, wingwire.PolicyQueue), nil)
+	if err != nil {
+		t.Fatalf("replacement acquire: %v", err)
+	}
+	if reclaimed.Token != lease.Token {
+		t.Fatalf("replacement token = %q, want original token %q", reclaimed.Token, lease.Token)
+	}
+
+	if err := reclaimed.Release(); err != nil {
+		t.Fatalf("replacement release: %v", err)
+	}
+	r := waitResult(t, waiterResult, 2*time.Second)
+	if r.err != nil {
+		t.Fatalf("waiter should promote after replacement release, got %v", r.err)
+	}
+}
+
+func TestGrantedSubmitReconnectRejectsMismatchedRequest(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	first := ensure(t, home, "")
+	lease := mustAcquire(t, first, semReq("shard", "lock", 1, 1, wingwire.PolicyQueue))
+	t.Cleanup(func() { _ = lease.Release() })
+
+	replacement := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := replacement.Acquire(ctx, semReq("shard", "different-lock", 1, 1, wingwire.PolicyQueue), nil)
+	if err == nil {
+		t.Fatal("mismatched granted duplicate admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("mismatched granted duplicate error = %q, want duplicate failure", got)
+	}
+}
+
+func TestGrantedSubmitReconnectMatchesRequestedChargeBeforeClamp(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{
+		Home:             home,
+		Sampler:          newFakeSampler(2, 8<<30),
+		HeadroomFraction: -1,
+	})
+
+	req := coreReq("oversized", 10)
+	req.CostSource = wingwire.CostSourceMeasured
+	first := ensure(t, home, "")
+	lease := mustAcquire(t, first, req)
+
+	replacement := ensure(t, home, "")
+	reclaimed, err := replacement.Acquire(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("replacement acquire: %v", err)
+	}
+	if reclaimed.Token != lease.Token {
+		t.Fatalf("replacement token = %q, want original token %q", reclaimed.Token, lease.Token)
+	}
+
+	mismatch := req
+	mismatch.Resources.Cores = 9
+	third := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = third.Acquire(ctx, mismatch, nil)
+	if err == nil {
+		t.Fatal("different raw request with same clamped charge admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("mismatched clamped duplicate error = %q, want duplicate failure", got)
+	}
+
+	if err := reclaimed.Release(); err != nil {
+		t.Fatalf("replacement release: %v", err)
+	}
+}
+
+func TestGrantedSubmitReconnectRejectsSemaphoresOnlyMismatch(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	req := semReq("shard", "lock", 1, 1, wingwire.PolicyQueue)
+	req.SemaphoresOnly = true
+	first := ensure(t, home, "")
+	lease := mustAcquire(t, first, req)
+	t.Cleanup(func() { _ = lease.Release() })
+
+	mismatch := req
+	mismatch.SemaphoresOnly = false
+	replacement := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := replacement.Acquire(ctx, mismatch, nil)
+	if err == nil {
+		t.Fatal("semaphores-only mismatch admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("semaphores-only mismatch error = %q, want duplicate failure", got)
+	}
+}
+
+func TestGrantedSubmitReconnectRejectsRestoredMultiMemberLease(t *testing.T) {
+	home := shortHome(t)
+	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 2 * time.Second})
+
+	parentReq := semReq("parent", "lock", 1, 1, wingwire.PolicyQueue)
+	parentClient := ensure(t, home, "")
+	parentLease := mustAcquire(t, parentClient, parentReq)
+
+	childClient := ensure(t, home, "")
+	childLease := mustAcquire(t, childClient, wingwire.AdmissionRequest{
+		RunID:            "child",
+		ParentLeaseToken: parentLease.Token,
+	})
+	if childLease.Token != parentLease.Token {
+		t.Fatalf("child token = %q, want parent token %q", childLease.Token, parentLease.Token)
+	}
+
+	td1.stop()
+	if err := td1.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("daemon1 exit: %v", err)
+	}
+
+	startDaemon(t, wingd.Config{Home: home, GraceWindow: 2 * time.Second})
+
+	reattachedClient := ensure(t, home, "")
+	reattached, err := reattachedClient.Reattach(context.Background(), parentLease.Token)
+	if err != nil {
+		t.Fatalf("reattach: %v", err)
+	}
+	if reattached.RunID != "parent" {
+		t.Fatalf("reattached run id = %q, want parent", reattached.RunID)
+	}
+
+	replacementClient := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = replacementClient.Acquire(ctx, parentReq, nil)
+	if err == nil {
+		t.Fatal("multi-member submit reconnect admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("multi-member submit reconnect error = %q, want duplicate failure", got)
+	}
+	if err := reattached.Release(); err != nil {
+		t.Fatalf("reattached release: %v", err)
+	}
+
+	waiterClient := ensure(t, home, "")
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	waiter, err := waiterClient.Acquire(ctx, semReq("waiter", "lock", 1, 1, wingwire.PolicyQueue), nil)
+	if err != nil {
+		t.Fatalf("waiter acquire after reattached release: %v", err)
+	}
+	if err := waiter.Release(); err != nil {
+		t.Fatalf("waiter release: %v", err)
+	}
+}
+
 // TestWaiterDisconnect_UnblocksProtectedFollower drives the weighted
 // backfill guard end to end: a lighter run backfills past a queued heavy
 // head, which protects the head from being starved, so a later waiter
