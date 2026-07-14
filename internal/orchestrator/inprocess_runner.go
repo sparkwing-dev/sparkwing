@@ -496,7 +496,11 @@ func (r *InProcessRunner) markFailed(ctx context.Context, runID, nodeID string, 
 
 func (r *InProcessRunner) markFailedIfUnfinished(ctx context.Context, runID, nodeID string, reason error) {
 	writeCtx := context.WithoutCancel(ctx)
-	if n, err := r.backends.State.GetNode(writeCtx, runID, nodeID); err == nil && n != nil && n.Outcome != "" {
+	n, err := r.backends.State.GetNode(writeCtx, runID, nodeID)
+	if err != nil {
+		return
+	}
+	if n != nil && n.Outcome != "" {
 		return
 	}
 	r.markFailed(writeCtx, runID, nodeID, reason)
