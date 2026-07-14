@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.10] - 2026-07-14
 ### Fixed
 
 - **admission:** Runner-mode nodes now use separate daemon participant IDs
