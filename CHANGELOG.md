@@ -53,6 +53,9 @@ code change to unlock.
   grant now reclaims the matching live lease instead of failing with
   `duplicate`. The daemon still rejects mismatched retries and restored
   multi-member leases fail closed rather than transferring partial ownership.
+- **cli:** Fresh source-built scaffolds now pin the latest published SDK
+  fallback, so projects created from an unreleased local binary still build
+  against a resolvable module version.
 
 ## [v0.17.8] - 2026-07-14
 ### Fixed
