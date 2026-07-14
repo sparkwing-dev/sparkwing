@@ -348,6 +348,72 @@ func TestQueuedSubmitReconnectRejectsMismatchedCostSemantics(t *testing.T) {
 	}
 }
 
+func TestQueuedSubmitReconnectRejectsMismatchedSubLease(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	firstReq := semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue)
+	first := openRawQueuedAdmission(t, home, firstReq)
+	defer func() { _ = first.Close() }()
+	if msg := readRawMessage(t, first); msg == nil {
+		t.Fatal("first admission returned no queue message")
+	}
+
+	mismatch := firstReq
+	mismatch.SubLease = true
+	second := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := second.Acquire(ctx, mismatch, nil)
+	if err == nil {
+		t.Fatal("mismatched sublease admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("mismatched sublease error = %q, want duplicate failure", got)
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+}
+
+func TestQueuedSubmitReconnectRejectsMismatchedDisplayMetadata(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	measured := semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue)
+	measured.Resources = wingwire.HostResources{Cores: 1}
+	measured.CostSource = wingwire.CostSourceMeasured
+	first := openRawQueuedAdmission(t, home, measured)
+	defer func() { _ = first.Close() }()
+	if msg := readRawMessage(t, first); msg == nil {
+		t.Fatal("first admission returned no queue message")
+	}
+
+	displayMismatch := measured
+	displayMismatch.CostSource = wingwire.CostSourceDefault
+	second := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := second.Acquire(ctx, displayMismatch, nil)
+	if err == nil {
+		t.Fatal("mismatched display metadata admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("mismatched display metadata error = %q, want duplicate failure", got)
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+}
+
 func openRawQueuedAdmission(t *testing.T, home string, req wingwire.AdmissionRequest) net.Conn {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)

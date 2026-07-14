@@ -552,7 +552,8 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.queueTimeoutMS = tightestQueueTimeoutMS(req.Semaphores)
 	if existing := d.byRun[req.RunID]; existing != nil && existing != c && existing.role == roleWaiter {
 		snap := d.ledger.Snapshot()
-		if !queuedRequestMatches(snap, req.RunID, charged, req.Semaphores, req.CostSource) {
+		if !queuedRequestMetadataMatches(existing, req) ||
+			!queuedRequestMatches(snap, req.RunID, charged, req.Semaphores, req.CostSource) {
 			d.mu.Unlock()
 			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
 			return
@@ -639,6 +640,19 @@ func tightestQueueTimeoutMS(sems []wingwire.SemaphoreClaim) int64 {
 		}
 	}
 	return t
+}
+
+func queuedRequestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
+	return existing.finalizable == !req.SubLease &&
+		existing.pipeline == req.Pipeline &&
+		existing.repo == req.Repo &&
+		existing.costSource == string(req.CostSource) &&
+		existing.expectedDurationMS == req.ExpectedDurationMS &&
+		existing.expectedP99MS == req.ExpectedP99MS &&
+		existing.sampleCount == req.SampleCount &&
+		existing.driftWarning == req.DriftWarning &&
+		existing.origin == req.Origin &&
+		existing.queueTimeoutMS == tightestQueueTimeoutMS(req.Semaphores)
 }
 
 func queuedRequestMatches(
