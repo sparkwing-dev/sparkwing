@@ -58,6 +58,13 @@ code change to unlock.
 - **admission:** `sparkwing queue` stall detection now ignores holder rows that
   draw no host resources and hold no semaphores. Zero-resource summary rows no
   longer receive stalled labels or cancel recovery advice.
+- **admission:** Queued local-admission retries now reattach to the existing
+  waiter only when the retry matches the queued request exactly. A reconnect no
+  longer fails a waiting node with `duplicate`, and a different process cannot
+  take over a queued request by reusing its run id.
+- **orchestrator:** Node terminal results are written with cancellation-detached
+  state updates, so a run that starts tearing down does not lose the original
+  failure reason and later display the node as orphaned.
 - **release:** The built-in release pipeline no longer declares a stale local
   CPU pin. Local admission can now use the daemon's measured profile for release
   runs instead of an outdated hand-written budget.
