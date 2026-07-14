@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.6] - 2026-07-14
 ### Fixed
 
 - **admission:** Measured and default CPU costs now preserve the daemon's
