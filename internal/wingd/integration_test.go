@@ -527,6 +527,28 @@ func TestUnknownCostSourceFails(t *testing.T) {
 	}
 }
 
+func TestResolvedCostSourcesAdmit(t *testing.T) {
+	for _, source := range []wingwire.CostSource{
+		wingwire.CostSourceMeasuring,
+		wingwire.CostSourceFloor,
+	} {
+		t.Run(string(source), func(t *testing.T) {
+			home := shortHome(t)
+			startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})
+
+			cl := ensure(t, home, "")
+			lease := mustAcquire(t, cl, wingwire.AdmissionRequest{
+				RunID:      "resolved-" + string(source),
+				CostSource: source,
+				Resources:  wingwire.HostResources{Cores: 1, MemoryBytes: 1 << 30},
+			})
+			if lease.Resources.Cores != 1 {
+				t.Fatalf("lease cores = %v, want resolved charge retained", lease.Resources.Cores)
+			}
+		})
+	}
+}
+
 func TestUnknownCostSourceFailsOnChildAttach(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})

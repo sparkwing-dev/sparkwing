@@ -434,7 +434,12 @@ func strictCoreCostSource(costSource wingwire.CostSource) bool {
 }
 
 func softCoreCostSource(costSource wingwire.CostSource) bool {
-	return costSource == wingwire.CostSourceMeasured || costSource == wingwire.CostSourceDefault
+	switch costSource {
+	case wingwire.CostSourceMeasured, wingwire.CostSourceDefault, wingwire.CostSourceMeasuring, wingwire.CostSourceFloor:
+		return true
+	default:
+		return false
+	}
 }
 
 func requestFromWire(runID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource) admission.Request {
@@ -582,7 +587,12 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 
 func validCostSource(source wingwire.CostSource) bool {
 	switch source {
-	case "", wingwire.CostSourcePin, wingwire.CostSourceMeasured, wingwire.CostSourceDefault:
+	case "",
+		wingwire.CostSourcePin,
+		wingwire.CostSourceMeasured,
+		wingwire.CostSourceDefault,
+		wingwire.CostSourceMeasuring,
+		wingwire.CostSourceFloor:
 		return true
 	default:
 		return false
