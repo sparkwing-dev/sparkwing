@@ -70,7 +70,6 @@ func (Release) Examples() []sparkwing.Example {
 
 func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, _ sparkwing.RunContext) error {
 	r.args = in
-	plan.Resources(sparkwing.Cores(2), sparkwing.MemoryGB(4))
 
 	repoDir, err := repoRoot()
 	if err != nil {

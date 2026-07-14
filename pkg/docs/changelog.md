@@ -58,6 +58,9 @@ code change to unlock.
 - **admission:** `sparkwing queue` stall detection now ignores holder rows that
   draw no host resources and hold no semaphores. Zero-resource summary rows no
   longer receive stalled labels or cancel recovery advice.
+- **release:** The built-in release pipeline no longer declares a stale local
+  CPU pin. Local admission can now use the daemon's measured profile for release
+  runs instead of an outdated hand-written budget.
 
 ## [v0.17.5] - 2026-07-14
 ### Fixed
