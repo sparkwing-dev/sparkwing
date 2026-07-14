@@ -1366,7 +1366,7 @@ func TestWingd_NodeHostAdmissionAndNodeSemaphoreUseDistinctParticipants(t *testi
 	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 	defer cancel()
 
-	hostLease, err := la.admitNode(ctx, backends, "runner-mode", "run-1", "shard-1", nil)
+	hostLease, err := la.admitNode(ctx, backends, "runner-mode", "run-1", "shard-1/semaphore", nil)
 	if err != nil {
 		t.Fatalf("admit node host resources: %v", err)
 	}
@@ -1383,6 +1383,10 @@ func TestWingd_NodeHostAdmissionAndNodeSemaphoreUseDistinctParticipants(t *testi
 		t.Fatalf("acquire node semaphore after host admission: %v", err)
 	}
 	defer func() { _ = semLease.Release() }()
+
+	if hostLease.leases[0].RunID == semLease.RunID {
+		t.Fatalf("node host and node semaphore participants collided at %q", semLease.RunID)
+	}
 }
 
 func TestWingd_NodeGroupCancelOthersEvictsAcrossRuns(t *testing.T) {

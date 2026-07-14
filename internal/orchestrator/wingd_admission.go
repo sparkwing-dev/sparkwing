@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -299,7 +300,7 @@ func (la *LocalAdmission) admitNode(
 ) (*runLease, error) {
 	res, _, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
 	req := wingwire.AdmissionRequest{
-		RunID:              runID + "/" + nodeID,
+		RunID:              nodeHostRunID(runID, nodeID),
 		Pipeline:           pipeline,
 		Repo:               currentRepoShortName(),
 		PID:                os.Getpid(),
@@ -878,7 +879,15 @@ func (la *LocalAdmission) acquireNodeSlot(
 }
 
 func nodeSemaphoreRunID(runID, nodeID string) string {
-	return runID + "/" + nodeID + "/semaphore"
+	return runID + "/node-semaphore/" + encodeNodeAdmissionID(nodeID)
+}
+
+func nodeHostRunID(runID, nodeID string) string {
+	return runID + "/node-host/" + encodeNodeAdmissionID(nodeID)
+}
+
+func encodeNodeAdmissionID(nodeID string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(nodeID))
 }
 
 // childQueueStatus reports whether a spawned child run is currently
