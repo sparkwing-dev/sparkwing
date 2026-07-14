@@ -1339,7 +1339,7 @@ func TestWingd_NodeGroupSerializesAcrossRuns(t *testing.T) {
 	if first == second {
 		second = "wingd-sem-b"
 	}
-	awaitWaiter(t, home, second+"/locked")
+	awaitWaiter(t, home, nodeSemaphoreRunID(second, "locked"))
 
 	close(gate.release)
 	for range 2 {
@@ -1355,6 +1355,34 @@ func TestWingd_NodeGroupSerializesAcrossRuns(t *testing.T) {
 	if got := gate.peak.Load(); got != 1 {
 		t.Fatalf("peak concurrent locked nodes = %d, want the daemon semaphore to serialize them", got)
 	}
+}
+
+func TestWingd_NodeHostAdmissionAndNodeSemaphoreUseDistinctParticipants(t *testing.T) {
+	home := wingdTestHome(t)
+	startWingd(t, home, 8)
+	backends, _, _ := openWingdBackends(t, home)
+	la := testWingdAdmission(home, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
+	defer cancel()
+
+	hostLease, err := la.admitNode(ctx, backends, "runner-mode", "run-1", "shard-1", nil)
+	if err != nil {
+		t.Fatalf("admit node host resources: %v", err)
+	}
+	defer hostLease.release()
+
+	claim := wingwire.SemaphoreClaim{
+		Name:     "node-shard-lock",
+		Capacity: 1,
+		Cost:     1,
+		Policy:   wingwire.PolicyQueue,
+	}
+	semLease, err := la.acquireNodeSlot(ctx, "run-1", "shard-1", claim, nil)
+	if err != nil {
+		t.Fatalf("acquire node semaphore after host admission: %v", err)
+	}
+	defer func() { _ = semLease.Release() }()
 }
 
 func TestWingd_NodeGroupCancelOthersEvictsAcrossRuns(t *testing.T) {

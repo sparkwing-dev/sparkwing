@@ -865,7 +865,7 @@ func (la *LocalAdmission) acquireNodeSlot(
 		return nil, fmt.Errorf("local admission: %w", err)
 	}
 	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
-		RunID:          runID + "/" + nodeID,
+		RunID:          nodeSemaphoreRunID(runID, nodeID),
 		SemaphoresOnly: true,
 		Semaphores:     []wingwire.SemaphoreClaim{claim},
 		SubLease:       true,
@@ -875,6 +875,10 @@ func (la *LocalAdmission) acquireNodeSlot(
 		return nil, err
 	}
 	return lease, nil
+}
+
+func nodeSemaphoreRunID(runID, nodeID string) string {
+	return runID + "/" + nodeID + "/semaphore"
 }
 
 // childQueueStatus reports whether a spawned child run is currently
