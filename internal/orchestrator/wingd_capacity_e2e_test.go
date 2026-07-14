@@ -96,7 +96,7 @@ func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
 	}()
 	gate.awaitStarted(t, "oversized-a")
 
-	h := findWingdHolder(t, home, "oversized-a/hold")
+	h := findWingdHolder(t, home, nodeHostRunID("oversized-a", "hold"))
 	if h.CostSource != "measured" {
 		t.Errorf("CostSource = %q, want measured", h.CostSource)
 	}
@@ -113,7 +113,7 @@ func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
 		})
 		runB <- res
 	}()
-	awaitWaiter(t, home, "oversized-b/hold")
+	awaitWaiter(t, home, nodeHostRunID("oversized-b", "hold"))
 
 	close(gate.release)
 	for _, ch := range []chan *Result{runA, runB} {

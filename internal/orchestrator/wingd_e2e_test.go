@@ -626,7 +626,7 @@ func TestWingd_SecondRunAdmittedWithMeasuredCost(t *testing.T) {
 	}()
 	gate.awaitStarted(t, "measured-run")
 
-	h := findWingdHolder(t, home, "measured-run/hold")
+	h := findWingdHolder(t, home, nodeHostRunID("measured-run", "hold"))
 	if h.CostSource != "measured" {
 		t.Errorf("CostSource = %q, want measured", h.CostSource)
 	}
@@ -691,7 +691,7 @@ func TestWingd_ZeroCPUPipelineAdmitsAtTinyMeasuredCostAlongsideHeavyWork(t *test
 	}()
 	gate.awaitStarted(t, "sleepy-run")
 
-	h := findWingdHolder(t, home, "sleepy-run/hold")
+	h := findWingdHolder(t, home, nodeHostRunID("sleepy-run", "hold"))
 	if h.CostSource != "measured" {
 		t.Errorf("CostSource = %q, want measured (healthy-sampler zero-CPU profile)", h.CostSource)
 	}
@@ -699,7 +699,7 @@ func TestWingd_ZeroCPUPipelineAdmitsAtTinyMeasuredCostAlongsideHeavyWork(t *test
 		t.Errorf("admitted cores = %v, want the 0.1 measured core floor", h.Resources.Cores)
 	}
 	qs := queryWingd(t, home)
-	if !hasWingdHolder(qs, "heavy-holder") || !hasWingdHolder(qs, "sleepy-run/hold") {
+	if !hasWingdHolder(qs, "heavy-holder") || !hasWingdHolder(qs, nodeHostRunID("sleepy-run", "hold")) {
 		t.Fatalf("holders = %+v, want heavy work and the sleep-heavy node concurrently", qs.Holders)
 	}
 
@@ -904,8 +904,9 @@ func TestWingd_SemaphoresOnlyRunStillAdmitsNodeHostCost(t *testing.T) {
 		done <- res
 	}()
 
-	qs := awaitWaiterOrHolder(t, home, "sem-node-run/hold")
-	if w, ok := findQueuedWaiter(qs, "sem-node-run/hold"); !ok || w.Position != 1 {
+	semNodeHostID := nodeHostRunID("sem-node-run", "hold")
+	qs := awaitWaiterOrHolder(t, home, semNodeHostID)
+	if w, ok := findQueuedWaiter(qs, semNodeHostID); !ok || w.Position != 1 {
 		t.Fatalf("node host waiter position = %d (present=%v), want queued behind external holder", w.Position, ok)
 	}
 
