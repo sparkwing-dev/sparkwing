@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.17.3] - 2026-07-14
 ### Fixed
 
 - **admission:** Measured and default CPU costs now act as backpressure, not
