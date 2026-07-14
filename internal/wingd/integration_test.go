@@ -242,6 +242,141 @@ func TestPositionRebroadcastKeepsIndependentQueuesSeparate(t *testing.T) {
 	}
 }
 
+func TestSemaphoresOnlyRunLeaseFinalizesOnDisconnect(t *testing.T) {
+	home := shortHome(t)
+	finalized := make(chan string, 1)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeRun: func(runID string) {
+			finalized <- runID
+		},
+	})
+
+	cl := ensure(t, home, "")
+	mustAcquire(t, cl, wingwire.AdmissionRequest{
+		RunID:          "run-semaphore",
+		SemaphoresOnly: true,
+		Semaphores: []wingwire.SemaphoreClaim{{
+			Name: "deploy", Cost: 1, Capacity: 1, Policy: wingwire.PolicyQueue,
+		}},
+	})
+	cl.Close()
+
+	select {
+	case got := <-finalized:
+		if got != "run-semaphore" {
+			t.Fatalf("finalized %q, want run-semaphore", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("semaphores-only run lease was not finalized on disconnect")
+	}
+}
+
+func TestSubLeaseDoesNotFinalizeOnDisconnect(t *testing.T) {
+	home := shortHome(t)
+	finalized := make(chan string, 1)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeRun: func(runID string) {
+			finalized <- runID
+		},
+	})
+
+	cl := ensure(t, home, "")
+	mustAcquire(t, cl, wingwire.AdmissionRequest{
+		RunID:     "parent/node",
+		Resources: wingwire.HostResources{Cores: 1},
+		SubLease:  true,
+	})
+	cl.Close()
+
+	select {
+	case got := <-finalized:
+		t.Fatalf("sub-lease finalized %q", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestRunRegistrationFinalizesWhileNodeSubLeaseDoesNot(t *testing.T) {
+	home := shortHome(t)
+	finalized := make(chan string, 2)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeRun: func(runID string) {
+			finalized <- runID
+		},
+	})
+
+	runClient := ensure(t, home, "")
+	mustAcquire(t, runClient, wingwire.AdmissionRequest{
+		RunID:          "run-unpinned",
+		SemaphoresOnly: true,
+	})
+	nodeClient := ensure(t, home, "")
+	mustAcquire(t, nodeClient, wingwire.AdmissionRequest{
+		RunID:     "run-unpinned/node",
+		Resources: wingwire.HostResources{Cores: 1},
+		SubLease:  true,
+	})
+
+	nodeClient.Close()
+	select {
+	case got := <-finalized:
+		t.Fatalf("node sub-lease finalized %q", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	runClient.Close()
+	select {
+	case got := <-finalized:
+		if got != "run-unpinned" {
+			t.Fatalf("finalized %q, want run-unpinned", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run registration was not finalized on disconnect")
+	}
+}
+
+func TestChildAttachReportsParentHostResources(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	hostParent := ensure(t, home, "")
+	hostLease := mustAcquire(t, hostParent, wingwire.AdmissionRequest{
+		RunID:     "host-parent",
+		Resources: wingwire.HostResources{Cores: 1, MemoryBytes: 256 << 20},
+	})
+	hostChild := ensure(t, home, "")
+	hostChildLease := mustAcquire(t, hostChild, wingwire.AdmissionRequest{
+		RunID:            "host-child",
+		ParentLeaseToken: hostLease.Token,
+	})
+	if hostChildLease.Resources.Cores != 1 || hostChildLease.Resources.MemoryBytes != 256<<20 {
+		t.Fatalf("host child resources = %+v, want parent host resources", hostChildLease.Resources)
+	}
+	_ = hostChildLease.Release()
+	_ = hostLease.Release()
+
+	semParent := ensure(t, home, "")
+	semLease := mustAcquire(t, semParent, wingwire.AdmissionRequest{
+		RunID:          "sem-parent",
+		SemaphoresOnly: true,
+		Semaphores: []wingwire.SemaphoreClaim{{
+			Name: "deploy", Cost: 1, Capacity: 1, Policy: wingwire.PolicyQueue,
+		}},
+	})
+	semChild := ensure(t, home, "")
+	semChildLease := mustAcquire(t, semChild, wingwire.AdmissionRequest{
+		RunID:            "sem-child",
+		ParentLeaseToken: semLease.Token,
+	})
+	if semChildLease.Resources.Cores != 0 || semChildLease.Resources.MemoryBytes != 0 {
+		t.Fatalf("semaphore child resources = %+v, want zero host resources", semChildLease.Resources)
+	}
+	_ = semChildLease.Release()
+	_ = semLease.Release()
+}
+
 func TestMeasuredRequestAboveIdleGrantableCapacityIsAdmitted(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})

@@ -35,15 +35,17 @@ import (
 // and a client interoperate exactly when they share this value; a
 // mismatch means the client must trigger a daemon takeover (client
 // newer) or fail with a clear upgrade message (client older).
-const ProtocolMajor = 1
+const ProtocolMajor = 2
 
-// LeaseTokenEnv is the environment variable a parent run sets on child
-// processes it spawns. A child that finds it presents the token in
-// [AdmissionRequest].ParentLeaseToken; the daemon attaches the child to
-// the parent's live lease instead of charging the host budget twice.
-// This single variable is the whole inheritance surface -- child runs
-// carry no other admission state.
+// LeaseTokenEnv is the current execution lease token inherited by child
+// processes. A child presents this token as [AdmissionRequest].ParentLeaseToken
+// unless [ChildLeaseTokenEnv] carries a more specific child-attach token.
 const LeaseTokenEnv = "SPARKWING_LEASE_TOKEN"
+
+// ChildLeaseTokenEnv is the token child Sparkwing runs attach to when it
+// differs from the current execution lease. A node can hold a short-lived host
+// lease while its children must attach to the run-scope semaphore lease.
+const ChildLeaseTokenEnv = "SPARKWING_CHILD_LEASE_TOKEN"
 
 // MessageType discriminates the concrete payload carried by an
 // [Envelope].

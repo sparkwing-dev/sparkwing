@@ -96,11 +96,12 @@ type SemaphoreClaim struct {
 	CancelTimeoutMS int64 `json:"cancel_timeout_ms,omitempty"`
 }
 
-// AdmissionRequest asks the daemon for everything a run needs in one
-// all-or-nothing grant: host resources plus every logical semaphore.
-// There is no partial admission and no ordered-acquisition dance; the
-// daemon answers with [Grant], a stream of [Queued] positions followed
-// by a [Grant], or an [Evicted] terminal event, per the policies.
+// AdmissionRequest asks the daemon for one admission lease. A request
+// may combine host resources and logical semaphores, draw only host
+// resources for a node, or draw only semaphores for a run-level claim.
+// The daemon answers with [Grant], a stream of [Queued] positions
+// followed by a [Grant], or an [Evicted] terminal event, per the
+// policies.
 type AdmissionRequest struct {
 	RunID string `json:"run_id"`
 	// Pipeline is the pipeline name behind the run, carried purely for
@@ -117,9 +118,9 @@ type AdmissionRequest struct {
 	// is alive but idle while waiters queue behind it. Zero disables
 	// stall sampling for the holder.
 	PID int `json:"pid,omitempty"`
-	// Resources is the host capacity the run is expected to occupy.
-	// A zero value means the run declared no hints and the daemon
-	// charges its conservative default.
+	// Resources is the host capacity the lease is expected to occupy. A
+	// zero value means the request declared no hints and the daemon
+	// charges its conservative default unless SemaphoresOnly is set.
 	Resources  HostResources    `json:"resources"`
 	Semaphores []SemaphoreClaim `json:"semaphores,omitempty"`
 	// ParentLeaseToken attaches this run to a live parent lease (see
@@ -128,23 +129,25 @@ type AdmissionRequest struct {
 	ParentLeaseToken string `json:"parent_lease_token,omitempty"`
 	// SemaphoresOnly marks a request that draws no host budget even when
 	// Resources is zero: the daemon must not substitute its conservative
-	// default charge. Used for short-lived semaphore acquisitions made
-	// from inside an already-admitted run (node-level concurrency
-	// groups).
+	// default charge. Used for run-level semaphore claims and short-lived
+	// semaphore acquisitions made from inside an already-admitted run.
 	SemaphoresOnly bool `json:"semaphores_only,omitempty"`
+	// SubLease marks an internal lease whose parent run owns finalization.
+	// The daemon releases it on disconnect but never finalizes a run row for it.
+	SubLease bool `json:"sub_lease,omitempty"`
 	// CostSource names how Resources was resolved so the queue view can show
 	// where a charge came from. The daemon may cap measured costs to the
 	// largest idle-grantable request.
 	CostSource CostSource `json:"cost_source,omitempty"`
-	// ExpectedDurationMS is the pipeline's measured p50 run duration in
-	// milliseconds, used by the daemon to estimate queue ETAs. Zero means
-	// no measured duration exists yet, so the run contributes no ETA.
+	// ExpectedDurationMS is the admitted work item's measured p50 duration
+	// in milliseconds, used by the daemon to estimate queue ETAs. Zero means
+	// no measured duration exists yet, so the request contributes no ETA.
 	ExpectedDurationMS int64 `json:"expected_duration_ms,omitempty"`
-	// ExpectedP99MS is the pipeline's measured p99 run duration in
+	// ExpectedP99MS is the admitted work item's measured p99 duration in
 	// milliseconds. The daemon flags a holder as contended only once its
-	// elapsed time runs well past this baseline, so a run that is merely at
+	// elapsed time runs well past this baseline, so work that is merely at
 	// the slow end of its own distribution is never mistaken for throttled.
-	// Zero means no measured p99, which disqualifies the run from flagging.
+	// Zero means no measured p99, which disqualifies the holder from flagging.
 	ExpectedP99MS int64 `json:"expected_p99_ms,omitempty"`
 	// SampleCount is how many runs back the duration percentiles. The
 	// contention detector requires a minimum count so an unprofiled or
@@ -164,7 +167,9 @@ type AdmissionRequest struct {
 // Grant is the daemon's admission of a request. The lease lives as
 // long as the client's connection; LeaseToken additionally lets the
 // holder [Reattach] within the grace window after a daemon restart or
-// takeover, and lets child runs inherit via [LeaseTokenEnv].
+// takeover. Child runs inherit it via [LeaseTokenEnv], or inherit a
+// separate child-attach token via [ChildLeaseTokenEnv] when the current
+// execution lease differs from the run-scope lease.
 type Grant struct {
 	RunID      string `json:"run_id"`
 	LeaseToken string `json:"lease_token"`

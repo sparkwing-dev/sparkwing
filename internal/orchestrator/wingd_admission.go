@@ -28,12 +28,10 @@ import (
 // a laptop it owns, while in-cluster work was already admitted by the
 // Kubernetes scheduler and must never engage the daemon.
 //
-// At run start the orchestrator submits one all-or-nothing admission
-// request composed from the plan (host resources plus every box- and
-// run-scoped plan-level concurrency group) and blocks on the pushed
-// grant. The lease is held by the open daemon connection for the run's
-// whole lifetime and released after the run row is finalized. A child
-// run carrying ParentLeaseToken attaches to the parent's lease instead
+// Run-level admission holds explicit whole-run resources and plan-level
+// semaphores. Unpinned local runs acquire host resources per node, so a cheap
+// ready node is not queued behind a later expensive node in the same DAG. A
+// child run carrying ParentLeaseToken attaches to the parent's lease instead
 // of re-admitting.
 type LocalAdmission struct {
 	// Home is the sparkwing home whose daemon arbitrates. Empty resolves
@@ -138,8 +136,9 @@ const localPlanSemsID = "/plan"
 // plan claims semaphores the parent lease does not hold, the extra
 // semaphores-only lease.
 type runLease struct {
-	token  string
-	leases []*wingdclient.Lease
+	token        string
+	hostAdmitted bool
+	leases       []*wingdclient.Lease
 	// driftWarning, when set, is the one-line note that this run's explicit
 	// pin has drifted from its measured profile, surfaced at run end.
 	driftWarning string
@@ -187,7 +186,14 @@ func (la *LocalAdmission) admitRun(
 	if la.ParentLeaseToken != "" {
 		return la.attachChildRun(ctx, backends, runID, pipeline, plan, onEvicted)
 	}
-	res, prof, drift, overCap := la.resolveHostCost(ctx, backends, pipeline, plan)
+	var res capacity.Resolution
+	var prof *store.PipelineProfile
+	var drift *capacity.Drift
+	var overCap string
+	hostPinned := planHasResourcePin(plan)
+	if hostPinned {
+		res, prof, drift, overCap = la.resolveHostCost(ctx, backends, pipeline, plan)
+	}
 	req := wingwire.AdmissionRequest{
 		RunID:              runID,
 		Pipeline:           pipeline,
@@ -195,6 +201,7 @@ func (la *LocalAdmission) admitRun(
 		PID:                os.Getpid(),
 		Resources:          wingwire.HostResources{Cores: res.Cores, MemoryBytes: res.MemoryBytes},
 		Semaphores:         planSemaphoreClaims(plan, runID),
+		SemaphoresOnly:     !hostPinned,
 		CostSource:         wingwire.CostSource(res.Source),
 		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
 		Origin:             la.Origin,
@@ -219,7 +226,7 @@ func (la *LocalAdmission) admitRun(
 	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
 		_ = st.RecordWaitObservation(ctx, pipeline, time.Since(submitted))
 	}
-	rl := &runLease{token: lease.Token, leases: []*wingdclient.Lease{lease}}
+	rl := &runLease{token: lease.Token, hostAdmitted: hostPinned, leases: []*wingdclient.Lease{lease}}
 	rl.driftWarning = warning
 	rl.charge = runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes}
 	if lease.SoleRunUnderLoad {
@@ -229,6 +236,14 @@ func (la *LocalAdmission) admitRun(
 	}
 	go lease.WatchControl(evictionHandler(runID, onEvicted), cancelHandler(onEvicted))
 	return rl, admitProceed, nil
+}
+
+func planHasResourcePin(plan *sparkwing.Plan) bool {
+	if plan == nil {
+		return false
+	}
+	h := plan.ResourceHints()
+	return h != nil && (h.Cores > 0 || h.MemoryBytes > 0)
 }
 
 // measuringNarration is the one-line note shown when a run is charged by
@@ -293,12 +308,13 @@ func (la *LocalAdmission) admitNode(
 		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
 		Origin:             la.Origin,
 		DriftWarning:       overCap,
+		SubLease:           true,
 	}
-	lease, outcome, err := la.acquireBlocking(ctx, backends, req.RunID, req)
+	lease, outcome, err := la.acquireBlocking(ctx, backends, runID, req)
 	if err != nil || outcome != admitProceed {
 		return nil, err
 	}
-	rl := &runLease{token: lease.Token, leases: []*wingdclient.Lease{lease}}
+	rl := &runLease{token: lease.Token, hostAdmitted: leaseCarriesHost(lease), leases: []*wingdclient.Lease{lease}}
 	return rl, nil
 }
 
@@ -395,7 +411,7 @@ func (la *LocalAdmission) attachChildRun(
 		cl.Close()
 		return nil, admitProceed, fmt.Errorf("local admission: attach to parent lease: %w", err)
 	}
-	rl := &runLease{token: lease.Token, leases: []*wingdclient.Lease{lease}}
+	rl := &runLease{token: lease.Token, hostAdmitted: leaseCarriesHost(lease), leases: []*wingdclient.Lease{lease}}
 	go lease.WatchControl(evictionHandler(runID, onEvicted), cancelHandler(onEvicted))
 
 	inherited := make(map[string]bool, len(lease.Semaphores))
@@ -415,6 +431,7 @@ func (la *LocalAdmission) attachChildRun(
 		RunID:          runID + localPlanSemsID,
 		SemaphoresOnly: true,
 		Semaphores:     extra,
+		SubLease:       true,
 	})
 	if err != nil || outcome != admitProceed {
 		rl.release()
@@ -423,6 +440,13 @@ func (la *LocalAdmission) attachChildRun(
 	rl.leases = append(rl.leases, extraLease)
 	go extraLease.Watch(evictionHandler(runID, onEvicted))
 	return rl, admitProceed, nil
+}
+
+func leaseCarriesHost(lease *wingdclient.Lease) bool {
+	if lease == nil {
+		return false
+	}
+	return lease.Resources.Cores > 0 || lease.Resources.MemoryBytes > 0
 }
 
 // acquireBlocking connects to the daemon and blocks on one admission
@@ -448,6 +472,7 @@ func (la *LocalAdmission) acquireBlocking(
 		return nil, admitProceed, fmt.Errorf("local admission unreachable: could not reach the admission daemon: %w; run `sparkwing queue` to check the local admission state", err)
 	}
 	reporter := &queueWaitReporter{la: la, ctx: ctx, backends: backends, runID: runID}
+	reporter.requestID = req.RunID
 	stopHeartbeat := reporter.startHeartbeat(acquireCtx)
 	lease, err := cl.Acquire(acquireCtx, req, reporter.onQueued)
 	stopHeartbeat()
@@ -491,10 +516,11 @@ func (la *LocalAdmission) acquireBlocking(
 // daemon position push, plus a heartbeat re-emit of the last-known
 // position on an interval so a long silent wait never reads as a hang.
 type queueWaitReporter struct {
-	la       *LocalAdmission
-	ctx      context.Context
-	backends Backends
-	runID    string
+	la        *LocalAdmission
+	ctx       context.Context
+	backends  Backends
+	runID     string
+	requestID string
 
 	mu     sync.Mutex
 	latest wingwire.Queued
@@ -512,7 +538,7 @@ func (r *queueWaitReporter) onQueued(q wingwire.Queued) {
 	}
 	r.latest = q
 	r.mu.Unlock()
-	r.la.reportQueued(r.ctx, r.backends, r.runID, q)
+	r.la.reportQueued(r.ctx, r.backends, r.runID, r.requestID, q)
 }
 
 // waited reports whether the run was ever queued, gating the terminal
@@ -559,12 +585,12 @@ func (r *queueWaitReporter) emitHeartbeat() {
 
 // reportQueued renders one queue-position update: a single stderr line
 // plus an admission_wait event on the run row.
-func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, runID string, q wingwire.Queued) {
+func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, runID, requestID string, q wingwire.Queued) {
 	ahead, noun, reason := queuePositionParts(q)
 	fmt.Fprintf(la.stderr(),
 		"queued for local admission: position %d of %d (%d %s ahead)%s; run `sparkwing queue` to see the full queue\n",
 		q.Position, q.QueueLength, ahead, noun, reason)
-	payload := fmt.Appendf(nil, `{"position":%d,"queue_length":%d}`, q.Position, q.QueueLength)
+	payload := fmt.Appendf(nil, `{"position":%d,"queue_length":%d,"request_id":%q}`, q.Position, q.QueueLength, requestID)
 	appendPlanEvent(ctx, backends, runID, "admission_wait", payload)
 }
 
@@ -749,38 +775,79 @@ func groupUsesLocalDaemon(group *sparkwing.ConcurrencyGroup) bool {
 type localAdmissionCtxKey struct{}
 
 type localAdmissionState struct {
-	la    *LocalAdmission
-	token string
+	la           *LocalAdmission
+	token        string
+	childToken   string
+	hostAdmitted bool
 }
 
-func withLocalAdmission(ctx context.Context, la *LocalAdmission, leaseToken string) context.Context {
+func withLocalAdmission(
+	ctx context.Context,
+	la *LocalAdmission,
+	leaseToken string,
+	childToken string,
+	hostAdmitted bool,
+) context.Context {
 	if la == nil {
 		return ctx
 	}
-	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{la: la, token: leaseToken})
+	if childToken == "" {
+		childToken = leaseToken
+	}
+	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{
+		la:           la,
+		token:        leaseToken,
+		childToken:   childToken,
+		hostAdmitted: hostAdmitted,
+	})
 	if leaseToken != "" {
-		ctx = sparkwing.WithCommandEnv(ctx, map[string]string{wingwire.LeaseTokenEnv: leaseToken})
+		env := map[string]string{wingwire.LeaseTokenEnv: leaseToken}
+		if childToken != "" {
+			env[wingwire.ChildLeaseTokenEnv] = childToken
+		}
+		ctx = sparkwing.WithCommandEnv(ctx, env)
 	}
 	return ctx
 }
 
-func localAdmissionFromContext(ctx context.Context) (*LocalAdmission, string) {
+func localAdmissionFromContext(ctx context.Context) (*LocalAdmission, string, bool) {
 	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
 	if !ok {
-		return nil, ""
+		return nil, "", false
 	}
-	return state.la, state.token
+	return state.la, state.token, state.hostAdmitted
 }
 
 // leaseTriggerEnv is the env a parent stamps onto spawned child
 // triggers so the child attaches to the parent's lease. Nil when the
 // run holds no daemon lease.
 func leaseTriggerEnv(ctx context.Context) map[string]string {
-	_, token := localAdmissionFromContext(ctx)
+	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	if !ok || state.childToken == "" {
+		return nil
+	}
+	token := state.childToken
 	if token == "" {
 		return nil
 	}
 	return map[string]string{wingwire.LeaseTokenEnv: token}
+}
+
+func childAttachTokenFromEnv(env map[string]string) string {
+	if env == nil {
+		return ""
+	}
+	if token := env[wingwire.ChildLeaseTokenEnv]; token != "" {
+		return token
+	}
+	return env[wingwire.LeaseTokenEnv]
+}
+
+func childAttachTokenFromProcessEnv() string {
+	if token := os.Getenv(wingwire.ChildLeaseTokenEnv); token != "" {
+		return token
+	}
+	return os.Getenv(wingwire.LeaseTokenEnv)
 }
 
 // acquireNodeSlot submits one short-lived, semaphores-only admission
@@ -801,6 +868,7 @@ func (la *LocalAdmission) acquireNodeSlot(
 		RunID:          runID + "/" + nodeID,
 		SemaphoresOnly: true,
 		Semaphores:     []wingwire.SemaphoreClaim{claim},
+		SubLease:       true,
 	}, onQueued)
 	if err != nil {
 		cl.Close()

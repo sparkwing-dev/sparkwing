@@ -535,7 +535,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.pid = req.PID
 	c.resources = charged
 	c.sems = semNames(req.Semaphores)
-	c.finalizable = !req.SemaphoresOnly
+	c.finalizable = !req.SubLease
 	c.startAt = d.now()
 	c.costSource = string(req.CostSource)
 	c.expectedDurationMS = req.ExpectedDurationMS
@@ -692,6 +692,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	c.members = []string{req.RunID}
 	c.startAt = d.now()
 	c.finalizable = true
+	c.resources = d.leaseCharge[leaseID]
 	c.origin = req.Origin
 	c.parentRun = d.leaseRun[leaseID]
 	d.byRun[req.RunID] = c
@@ -704,7 +705,12 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
-	_ = c.send(&wingwire.Grant{RunID: req.RunID, LeaseToken: lease.Token, Semaphores: leaseSemaphores(snap, leaseID)})
+	_ = c.send(&wingwire.Grant{
+		RunID:      req.RunID,
+		LeaseToken: lease.Token,
+		Resources:  c.resources,
+		Semaphores: leaseSemaphores(snap, leaseID),
+	})
 }
 
 // leaseSemaphores names every semaphore a lease holds, read from a

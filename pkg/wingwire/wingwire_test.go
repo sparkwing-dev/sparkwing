@@ -10,8 +10,8 @@ import (
 
 func roundTripMessages() []Message {
 	return []Message{
-		&Hello{ProtocolMajor: 1, BinaryVersion: "v0.15.6"},
-		&HelloAck{ProtocolMajor: 1, BinaryVersion: "v0.16.0", Draining: true},
+		&Hello{ProtocolMajor: ProtocolMajor, BinaryVersion: "v0.15.6"},
+		&HelloAck{ProtocolMajor: ProtocolMajor, BinaryVersion: "v0.16.0", Draining: true},
 		&AdmissionRequest{
 			RunID:     "deploy-20260710-120000",
 			Resources: HostResources{Cores: 2.5, MemoryBytes: 4 << 30},
@@ -186,5 +186,8 @@ func TestEncode_RejectsNilMessage(t *testing.T) {
 func TestLeaseTokenEnv_IsStable(t *testing.T) {
 	if LeaseTokenEnv != "SPARKWING_LEASE_TOKEN" {
 		t.Fatalf("LeaseTokenEnv = %q", LeaseTokenEnv)
+	}
+	if ChildLeaseTokenEnv != "SPARKWING_CHILD_LEASE_TOKEN" {
+		t.Fatalf("ChildLeaseTokenEnv = %q", ChildLeaseTokenEnv)
 	}
 }

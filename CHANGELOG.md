@@ -47,6 +47,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** Unpinned local runs now acquire host resources at node
+  dispatch instead of reserving the measured peak for the whole DAG. Fast
+  early nodes can run while a later memory-heavy node waits for capacity;
+  explicit whole-run resource pins still reserve at run scope.
 
 ## [v0.17.3] - 2026-07-14
 ### Fixed

@@ -443,7 +443,7 @@ func sanitizeTriggerEnv(env map[string]string) map[string]string {
 	}
 	cleaned := make(map[string]string, len(env))
 	for key, value := range env {
-		if key == wingwire.LeaseTokenEnv {
+		if key == wingwire.LeaseTokenEnv || key == wingwire.ChildLeaseTokenEnv {
 			continue
 		}
 		cleaned[key] = value

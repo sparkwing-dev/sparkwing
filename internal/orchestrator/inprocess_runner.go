@@ -135,11 +135,39 @@ func (r *InProcessRunner) RunNode(ctx context.Context, req runner.Request) runne
 		return runner.Result{Outcome: sparkwing.Skipped}
 	}
 
-	output, err := r.executeNode(ctx, req.RunID, node, req.Delegate)
+	output, err := r.executeNodeWithAdmission(ctx, req)
 	if err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
 	return runner.Result{Outcome: sparkwing.Success, Output: output}
+}
+
+func (r *InProcessRunner) executeNodeWithAdmission(ctx context.Context, req runner.Request) (any, error) {
+	la, _, hostAdmitted := localAdmissionFromContext(ctx)
+	if la == nil || hostAdmitted {
+		return r.executeNode(ctx, req.RunID, req.Node, req.Delegate)
+	}
+	nodeID := req.NodeID
+	if nodeID == "" {
+		nodeID = req.Node.ID()
+	}
+	if req.ReleaseWorkerSlot != nil {
+		req.ReleaseWorkerSlot()
+	}
+	lease, err := la.admitNode(ctx, r.backends, req.Pipeline, req.RunID, nodeID, req.Node)
+	if req.ReacquireWorkerSlot != nil && !req.ReacquireWorkerSlot() {
+		if lease != nil {
+			lease.release()
+		}
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer lease.release()
+	_, childToken, _ := localAdmissionFromContext(ctx)
+	nodeCtx := withLocalAdmission(ctx, la, lease.token, childToken, lease.hostAdmitted)
+	return r.executeNode(nodeCtx, req.RunID, req.Node, req.Delegate)
 }
 
 // executeNode runs the job with modifiers + hooks and persists state.

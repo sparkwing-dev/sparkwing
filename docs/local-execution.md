@@ -140,37 +140,38 @@ from a running older daemon, and the daemon exits on its own once the
 machine has been idle for a while, coming back the next time a run needs
 it.
 
-At run start the process connects and submits one admission request
-covering everything the run needs: host CPU and memory plus any logical
-`.Concurrency()` groups the plan claims. The grant is all-or-nothing,
-and the lease is held by the open connection for the run's lifetime.
-While a run waits it prints a single queue-position line on stderr
-(`queued for local admission: position 2 of 3 ...`) and Ctrl-C cancels
-the wait cleanly. When a run process dies -- crash, kill, or power event
--- the kernel closes the connection and the daemon releases the lease
-immediately, finalizes the orphaned run record, and admits the next
-waiter. There are no heartbeats, leases to tune, or polling loops.
-Nested runs never double-charge the host: a parent passes its lease to
-children it spawns (via `RunAndAwait` or a step that shells out to
-`sparkwing run`), and each child attaches to the parent's lease instead
-of re-admitting.
+The process connects when it needs admission. Explicit run resources and
+plan-level `.Concurrency()` groups are admitted at run start and held by
+the open connection for the run's lifetime. Unpinned host CPU and memory
+are admitted per node as the DAG dispatches, so a fast early node can run
+while a later heavy node waits for capacity. While work waits it prints a
+single queue-position line on stderr (`queued for local admission:
+position 2 of 3 ...`) and Ctrl-C cancels the wait cleanly. When a run
+process dies -- crash, kill, or power event -- the kernel closes the
+connection and the daemon releases the lease immediately, finalizes the
+orphaned run record, and admits the next waiter. There are no heartbeats,
+leases to tune, or polling loops. Nested runs never double-charge the
+host: a parent passes its active lease to children it spawns (via
+`RunAndAwait` or a step that shells out to `sparkwing run`), and each
+child attaches to the parent's lease instead of re-admitting.
 
 ### Declare nothing; sparkwing measures
 
 The daemon measures the machine's real cores and memory and admits into
 the headroom that is actually free, counting non-sparkwing load against
-capacity. It also measures each pipeline's own cost over its first few
-runs, so "one heavy build at a time" emerges from measurement with no
-configuration. Declare nothing and it works.
+capacity. It also measures each pipeline and node over their first few
+runs. Explicit run resources use the pipeline profile. Unpinned local
+work uses the node profile at dispatch, so "one heavy build at a time"
+emerges from measurement with no configuration. Declare nothing and it
+works.
 
-`sparkwing runs stats --capacity` shows what was learned: each
-pipeline's duration percentiles, its CPU and memory distributions
-(p50/p95/peak across recent runs), and its queue-wait p50/p99. The
-distributions tell you whether a pipeline is steady or spiky and whether
-the box is too small; admission always charges the measured peak, never
-a percentile, because under-reserving a spiky pipeline recreates exactly
-the oversubscription the daemon exists to prevent. Percentiles inform,
-peak admits.
+`sparkwing runs stats --capacity` shows what was learned: duration
+percentiles, CPU and memory distributions (p50/p95/peak across recent
+runs), and queue-wait p50/p99. The distributions tell you whether work
+is steady or spiky and whether the box is too small; admission always
+charges the measured peak, never a percentile, because under-reserving a
+spiky node recreates exactly the oversubscription the daemon exists to
+prevent. Percentiles inform, peak admits.
 
 A pipeline may pass a cold-start hint with
 `.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n))`, and may pin an

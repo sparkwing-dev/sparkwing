@@ -98,7 +98,7 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		return runner.Result{Outcome: sparkwing.Skipped}
 	}
 
-	output, err := r.executeNode(execCtx, req.RunID, node, req.Delegate)
+	output, err := r.executeNodeWithAdmission(execCtx, req)
 	if ev := evicted.Load(); ev != nil {
 		serr := fmt.Errorf("concurrency key %q: superseded by run %s under %s", ev.Key, ev.SupersededBy, ev.Policy)
 		_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "node_superseded", []byte(serr.Error()))

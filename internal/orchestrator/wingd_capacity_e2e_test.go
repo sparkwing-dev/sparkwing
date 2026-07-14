@@ -78,7 +78,7 @@ func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
 	home := wingdTestHome(t)
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
-	seedProfile(t, st, "wingd-e2e-unpinned", store.ProfileObservation{
+	seedNodeProfile(t, st, "wingd-e2e-unpinned", "hold", store.ProfileObservation{
 		Duration: 10 * time.Second, PeakCores: 18.9, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}, capacity.MinSamples)
 
@@ -96,7 +96,7 @@ func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
 	}()
 	gate.awaitStarted(t, "oversized-a")
 
-	h := findWingdHolder(t, home, "oversized-a")
+	h := findWingdHolder(t, home, "oversized-a/hold")
 	if h.CostSource != "measured" {
 		t.Errorf("CostSource = %q, want measured", h.CostSource)
 	}
@@ -113,7 +113,7 @@ func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
 		})
 		runB <- res
 	}()
-	awaitWaiter(t, home, "oversized-b")
+	awaitWaiter(t, home, "oversized-b/hold")
 
 	close(gate.release)
 	for _, ch := range []chan *Result{runA, runB} {
