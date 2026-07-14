@@ -337,6 +337,9 @@ func (l *Ledger) ResizeTotals(cores float64, memoryBytes uint64) error {
 		if w.spec.memory > memoryBytes {
 			return fmt.Errorf("%w: waiter %q memory %d exceeds total %d", ErrInvalidResize, w.spec.id, w.spec.memory, memoryBytes)
 		}
+		if w.spec.strictCores && w.spec.milliCores > mc {
+			return fmt.Errorf("%w: strict waiter %q cores %d exceed total %d", ErrInvalidResize, w.spec.id, w.spec.milliCores, mc)
+		}
 	}
 
 	l.totalMilliCores = mc

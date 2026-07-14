@@ -829,6 +829,20 @@ func TestResizeTotals_ClampsQueuedCPUToCurrentTotal(t *testing.T) {
 	}
 }
 
+func TestResizeTotals_StrictQueuedCPUAboveTotalRejectsResize(t *testing.T) {
+	l := testLedger(t, 24, 8<<30)
+	mustGrant(t, l, Request{ID: "holder", Cores: 10})
+	mustQueue(t, l, Request{ID: "strict", Cores: 18, StrictCores: true})
+
+	before := l.Snapshot()
+	if err := l.ResizeTotals(14, 8<<30); !errors.Is(err, ErrInvalidResize) {
+		t.Fatalf("ResizeTotals error = %v, want %v", err, ErrInvalidResize)
+	}
+	if got := l.Snapshot(); !reflect.DeepEqual(got, before) {
+		t.Fatalf("failed resize mutated ledger:\n got %+v\nwant %+v", got, before)
+	}
+}
+
 func TestResizeTotals_MemoryOvercommitStillRejectsRestore(t *testing.T) {
 	l := testLedger(t, 14, 8<<30)
 	mustGrant(t, l, Request{ID: "holder", MemoryBytes: 6 << 30})
