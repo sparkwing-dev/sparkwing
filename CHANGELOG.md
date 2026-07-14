@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.7] - 2026-07-14
 ### Fixed
 
 - **admission:** Queued local-admission retries now reattach to the existing
