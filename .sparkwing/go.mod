@@ -3,7 +3,7 @@ module sparkwing-pipelines
 go 1.26.0
 
 require (
-	github.com/sparkwing-dev/sparkwing v0.17.1
+	github.com/sparkwing-dev/sparkwing v0.17.3
 	golang.org/x/mod v0.35.0
 )
 
@@ -80,11 +80,3 @@ require (
 	modernc.org/memory v1.11.0 // indirect
 	modernc.org/sqlite v1.50.0 // indirect
 )
-
-// The pipelines tree is consumed as the same module path the SDK
-// itself ships, so the require above is a placeholder; this replace
-// pins it to the parent checkout (the sparkwing repo root). The
-// pattern follows the standard "consumer .sparkwing/ uses a local
-// replace during development" convention; here the parent IS the
-// SDK rather than a sibling.
-replace github.com/sparkwing-dev/sparkwing => ..
