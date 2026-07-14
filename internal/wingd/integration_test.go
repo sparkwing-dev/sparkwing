@@ -414,6 +414,39 @@ func TestQueuedSubmitReconnectRejectsMismatchedDisplayMetadata(t *testing.T) {
 	}
 }
 
+func TestQueuedSubmitReconnectRejectsMismatchedPID(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	firstReq := semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue)
+	firstReq.PID = 101
+	first := openRawQueuedAdmission(t, home, firstReq)
+	defer func() { _ = first.Close() }()
+	if msg := readRawMessage(t, first); msg == nil {
+		t.Fatal("first admission returned no queue message")
+	}
+
+	mismatch := firstReq
+	mismatch.PID = 202
+	second := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := second.Acquire(ctx, mismatch, nil)
+	if err == nil {
+		t.Fatal("mismatched pid admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("mismatched pid error = %q, want duplicate failure", got)
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+}
+
 func openRawQueuedAdmission(t *testing.T, home string, req wingwire.AdmissionRequest) net.Conn {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)

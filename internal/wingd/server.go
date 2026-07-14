@@ -646,6 +646,7 @@ func queuedRequestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest
 	return existing.finalizable == !req.SubLease &&
 		existing.pipeline == req.Pipeline &&
 		existing.repo == req.Repo &&
+		existing.pid == req.PID &&
 		existing.costSource == string(req.CostSource) &&
 		existing.expectedDurationMS == req.ExpectedDurationMS &&
 		existing.expectedP99MS == req.ExpectedP99MS &&
