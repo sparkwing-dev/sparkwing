@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.11] - 2026-07-14
 ### Fixed
 
 - **admission:** Queued retries can now update a waiting request's measured
