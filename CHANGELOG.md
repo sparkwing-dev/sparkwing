@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.17.5] - 2026-07-14
 ### Fixed
 
 - **admission:** Runs whose cost is still being measured now reach local
