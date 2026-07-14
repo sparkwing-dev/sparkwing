@@ -1144,6 +1144,7 @@ export interface QueueHolder {
   pipeline?: string;
   repo?: string;
   parent?: string;
+  parent_participant_id?: string;
   elapsed_ms: number;
   resources: HostResources;
   semaphores?: string[];

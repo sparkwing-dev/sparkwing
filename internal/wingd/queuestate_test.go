@@ -172,6 +172,62 @@ func TestQueueState_CarriesOwnerAndParticipantIdentity(t *testing.T) {
 	}
 }
 
+func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
+	home := shortHome(t)
+	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{9003: {}}}
+	startDaemon(t, wingd.Config{
+		Home:             home,
+		Version:          "v1",
+		GraceWindow:      -1,
+		Sampler:          newFakeSampler(4, 8<<30),
+		HeadroomFraction: -1,
+		ProcSampler:      proc,
+		StallInterval:    5 * time.Millisecond,
+		StallWindow:      20 * time.Millisecond,
+	})
+
+	holderClient := ensure(t, home, "v1")
+	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID:        "internal-holder",
+		OwnerRunID:   "run-1",
+		DisplayRunID: "run-1/build",
+		PID:          9003,
+		Resources:    wingwire.HostResources{Cores: 1},
+		Semaphores: []wingwire.SemaphoreClaim{
+			{Name: "deploy", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
+		},
+	})
+
+	waiterClient := ensure(t, home, "v1")
+	positions, _ := acquireAsync(waiterClient, wingwire.AdmissionRequest{
+		RunID:     "waiter",
+		Resources: wingwire.HostResources{Cores: 1},
+		Semaphores: []wingwire.SemaphoreClaim{
+			{Name: "deploy", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
+		},
+	})
+	waitForQueue(t, positions)
+
+	q := ensure(t, home, "v1")
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		qs, err := q.QueueState(context.Background())
+		if err != nil {
+			t.Fatalf("queue state: %v", err)
+		}
+		if len(qs.Holders) == 1 && qs.Holders[0].Stalled {
+			if got, want := qs.Holders[0].Recovery, "sparkwing runs cancel --run run-1"; got != want {
+				t.Fatalf("recovery = %q, want %q", got, want)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("idle holder never flagged stalled: %+v", qs.Holders)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestQueueState_DecodesNodeParticipantIdentity(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1})

@@ -68,14 +68,16 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 		fmt.Fprintln(w, "external\tignored")
 	}
 	for _, h := range qs.Holders {
-		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			h.RunID, orDash(h.Pipeline), orDash(h.Repo), orDash(OriginWord(h.Origin)),
+		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			h.RunID, orDash(h.ParticipantID), queueDisplayRunID(h.RunID, h.DisplayRunID),
+			orDash(h.Pipeline), orDash(h.Repo), orDash(OriginWord(h.Origin)),
 			fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
-			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h), orDash(h.Parent))
+			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h), orDash(queueParentID(h)))
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			wt.Position, wt.RunID, orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)),
+		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			wt.Position, wt.RunID, orDash(wt.ParticipantID), queueDisplayRunID(wt.RunID, wt.DisplayRunID),
+			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)),
 			fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
 			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason))
 	}
@@ -529,4 +531,11 @@ func queueDisplayRunID(runID, displayRunID string) string {
 		return displayRunID
 	}
 	return runID
+}
+
+func queueParentID(h wingwire.Holder) string {
+	if h.ParentParticipantID != "" {
+		return h.ParentParticipantID
+	}
+	return h.Parent
 }

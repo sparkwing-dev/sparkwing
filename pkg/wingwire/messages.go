@@ -300,6 +300,9 @@ type Holder struct {
 	// Parent, when non-empty, names the holder this run is attached to:
 	// the run rides its parent's lease and draws no budget of its own.
 	Parent string `json:"parent,omitempty"`
+	// ParentParticipantID is the daemon lease key for Parent when that
+	// key differs from Parent.
+	ParentParticipantID string `json:"parent_participant_id,omitempty"`
 	// ElapsedMS is how long the run has held its lease, in
 	// milliseconds.
 	ElapsedMS int64 `json:"elapsed_ms"`

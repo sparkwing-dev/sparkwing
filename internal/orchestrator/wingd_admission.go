@@ -432,6 +432,8 @@ func (la *LocalAdmission) attachChildRun(
 	}
 	extraLease, outcome, err := la.acquireBlocking(ctx, backends, runID, wingwire.AdmissionRequest{
 		RunID:          runID + localPlanSemsID,
+		OwnerRunID:     runID,
+		DisplayRunID:   runID,
 		SemaphoresOnly: true,
 		Semaphores:     extra,
 		SubLease:       true,

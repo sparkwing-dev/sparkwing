@@ -117,7 +117,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			h.Origin = c.origin
 			if c.stalled {
 				h.Stalled = true
-				h.Recovery = stallRecoveryCommand(ls.RequestID)
+				h.Recovery = stallRecoveryCommand(rowID.runID)
 			}
 			if c.contended {
 				h.Contended = true
@@ -221,10 +221,11 @@ func (d *Daemon) attachedChildHoldersLocked(ls admission.LeaseState, now time.Ti
 		childID := queueRowIdentity(member, c)
 		parentID := queueRowIdentity(ls.RequestID, d.byRun[ls.RequestID])
 		child := wingwire.Holder{
-			RunID:         childID.runID,
-			ParticipantID: childID.participantID,
-			DisplayRunID:  childID.displayRunID,
-			Parent:        parentID.runID,
+			RunID:               childID.runID,
+			ParticipantID:       childID.participantID,
+			DisplayRunID:        childID.displayRunID,
+			Parent:              parentID.runID,
+			ParentParticipantID: parentID.participantID,
 		}
 		if c != nil {
 			child.Pipeline = c.pipeline

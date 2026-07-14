@@ -29,6 +29,7 @@ import {
   fmtHolderCost,
   groupHolders,
   hasDaemon,
+  queueRowID,
   resourceAvailable,
 } from "@/lib/queue";
 import Tooltip from "@/components/Tooltip";
@@ -289,9 +290,9 @@ function HoldersSection({ groups }: { groups: HolderGroup[] }) {
               </tr>
             ) : (
               groups.flatMap((g) => [
-                <HolderRow key={g.holder.run_id} h={g.holder} />,
+                <HolderRow key={queueRowID(g.holder)} h={g.holder} />,
                 ...g.children.map((c) => (
-                  <HolderRow key={c.run_id} h={c} attached />
+                  <HolderRow key={queueRowID(c)} h={c} attached />
                 )),
               ])
             )}
@@ -302,7 +303,7 @@ function HoldersSection({ groups }: { groups: HolderGroup[] }) {
         [g.holder, ...g.children]
           .filter((h) => h.stalled && h.recovery)
           .map((h) => (
-            <div key={`rec-${h.run_id}`} className="mt-2">
+            <div key={`rec-${queueRowID(h)}`} className="mt-2">
               <Callout tone="danger">
                 <span className="font-mono text-violet-300">{h.run_id}</span> is
                 stalled (idle while runs wait). Recover with:
@@ -407,7 +408,7 @@ function WaitersSection({ waiters }: { waiters: QueueWaiter[] }) {
             ) : (
               waiters.map((w) => (
                 <tr
-                  key={w.run_id}
+                  key={queueRowID(w)}
                   className="border-t border-[var(--border)] bg-[var(--surface)] align-top"
                 >
                   <Td right mono muted>

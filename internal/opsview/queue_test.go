@@ -83,6 +83,38 @@ func TestRenderQueuePretty_UsesDisplayRunID(t *testing.T) {
 	}
 }
 
+func TestRenderQueuePlain_IncludesParticipantAndDisplayIdentity(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{
+			{
+				RunID:         "run-1",
+				ParticipantID: "internal-holder",
+				DisplayRunID:  "run-1/build",
+				Resources:     wingwire.HostResources{Cores: 1},
+			},
+		},
+		Waiters: []wingwire.Waiter{
+			{
+				RunID:         "run-1",
+				ParticipantID: "internal-waiter",
+				DisplayRunID:  "run-1/test",
+				Position:      1,
+				Resources:     wingwire.HostResources{Cores: 1},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueue(&buf, qs, "plain"); err != nil {
+		t.Fatalf("render plain: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"holder\trun-1\tinternal-holder\trun-1/build", "waiter\t1\trun-1\tinternal-waiter\trun-1/test"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("plain queue omitted %q:\n%s", want, out)
+		}
+	}
+}
+
 func parseCoresRow(out string) (cap, held, reserved, external, available float64, ok bool) {
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
