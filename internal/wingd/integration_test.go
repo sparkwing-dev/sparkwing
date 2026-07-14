@@ -314,6 +314,40 @@ func TestQueuedSubmitReconnectRejectsMismatchedRequest(t *testing.T) {
 	}
 }
 
+func TestQueuedSubmitReconnectRejectsMismatchedCostSemantics(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	measured := semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue)
+	measured.Resources = wingwire.HostResources{Cores: 1}
+	measured.CostSource = wingwire.CostSourceMeasured
+	first := openRawQueuedAdmission(t, home, measured)
+	defer func() { _ = first.Close() }()
+	if msg := readRawMessage(t, first); msg == nil {
+		t.Fatal("first admission returned no queue message")
+	}
+
+	pinned := measured
+	pinned.CostSource = wingwire.CostSourcePin
+	second := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := second.Acquire(ctx, pinned, nil)
+	if err == nil {
+		t.Fatal("mismatched cost semantics admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("mismatched cost semantics error = %q, want duplicate failure", got)
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+}
+
 func openRawQueuedAdmission(t *testing.T, home string, req wingwire.AdmissionRequest) net.Conn {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)

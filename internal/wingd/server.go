@@ -552,7 +552,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.queueTimeoutMS = tightestQueueTimeoutMS(req.Semaphores)
 	if existing := d.byRun[req.RunID]; existing != nil && existing != c && existing.role == roleWaiter {
 		snap := d.ledger.Snapshot()
-		if !queuedRequestMatches(snap, req.RunID, charged, req.Semaphores) {
+		if !queuedRequestMatches(snap, req.RunID, charged, req.Semaphores, req.CostSource) {
 			d.mu.Unlock()
 			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
 			return
@@ -646,6 +646,7 @@ func queuedRequestMatches(
 	runID string,
 	res wingwire.HostResources,
 	sems []wingwire.SemaphoreClaim,
+	costSource wingwire.CostSource,
 ) bool {
 	for _, w := range snap.Waiters {
 		if w.RequestID != runID {
@@ -655,6 +656,10 @@ func queuedRequestMatches(
 			return false
 		}
 		if w.MilliCores != int64(math.Round(res.Cores*1000)) || w.MemoryBytes != uint64(res.MemoryBytes) {
+			return false
+		}
+		if w.SoftCores != softCoreCostSource(costSource) ||
+			w.StrictCores != strictCoreCostSource(costSource) {
 			return false
 		}
 		if len(w.Claims) != len(sems) {
