@@ -549,6 +549,26 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.driftWarning = req.DriftWarning
 	c.origin = req.Origin
 	c.queueTimeoutMS = tightestQueueTimeoutMS(req.Semaphores)
+	if existing := d.byRun[req.RunID]; existing != nil && existing != c && existing.role == roleWaiter {
+		c.role = roleWaiter
+		if !existing.startAt.IsZero() {
+			c.startAt = existing.startAt
+		}
+		existing.role = roleNone
+		existing.runID = ""
+		existing.members = nil
+		existing.finalizable = false
+		d.byRun[req.RunID] = c
+		queued := d.queuedDeliveryLocked(c, req.RunID)
+		snap := d.ledger.Snapshot()
+		d.touchLocked()
+		d.mu.Unlock()
+		existing.close()
+		if queued != nil {
+			d.flush([]delivery{*queued}, snap)
+		}
+		return
+	}
 	d.byRun[req.RunID] = c
 	dec, events, err := d.ledger.Submit(ar)
 	if err != nil {

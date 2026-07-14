@@ -123,6 +123,23 @@ func (d *Daemon) waiterDeliveriesLocked() []delivery {
 	return out
 }
 
+func (d *Daemon) queuedDeliveryLocked(c *conn, runID string) *delivery {
+	snap := d.ledger.Snapshot()
+	qlen := len(snap.Waiters)
+	for i, waiter := range snap.Waiters {
+		if waiter.RequestID != runID {
+			continue
+		}
+		return &delivery{c, &wingwire.Queued{
+			RunID:          runID,
+			Position:       waiterPosition(snap.Waiters[:i], waiter) + 1,
+			QueueLength:    qlen,
+			BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
+		}}
+	}
+	return nil
+}
+
 func waiterPosition(earlier []admission.WaiterState, waiter admission.WaiterState) int {
 	mine := waiterResources(waiter)
 	n := 0

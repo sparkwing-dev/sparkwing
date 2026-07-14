@@ -477,11 +477,13 @@ func runVerify(ctx context.Context, fn sparkwing.VerifyFn) (err error) {
 }
 
 func (r *InProcessRunner) markSkipped(ctx context.Context, runID, nodeID, reason string) {
-	_ = r.backends.State.FinishNode(ctx, runID, nodeID, string(sparkwing.Skipped), reason, nil)
-	_ = r.backends.State.AppendEvent(ctx, runID, nodeID, "node_skipped", []byte(reason))
+	writeCtx := context.WithoutCancel(ctx)
+	_ = r.backends.State.FinishNode(writeCtx, runID, nodeID, string(sparkwing.Skipped), reason, nil)
+	_ = r.backends.State.AppendEvent(writeCtx, runID, nodeID, "node_skipped", []byte(reason))
 }
 
 func (r *InProcessRunner) markFailed(ctx context.Context, runID, nodeID string, reason error) {
-	_ = r.backends.State.FinishNode(ctx, runID, nodeID, string(sparkwing.Failed), reason.Error(), nil)
-	_ = r.backends.State.AppendEvent(ctx, runID, nodeID, "node_failed", []byte(reason.Error()))
+	writeCtx := context.WithoutCancel(ctx)
+	_ = r.backends.State.FinishNode(writeCtx, runID, nodeID, string(sparkwing.Failed), reason.Error(), nil)
+	_ = r.backends.State.AppendEvent(writeCtx, runID, nodeID, "node_failed", []byte(reason.Error()))
 }

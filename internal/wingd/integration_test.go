@@ -1,8 +1,10 @@
 package wingd_test
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -240,6 +242,98 @@ func TestPositionRebroadcastKeepsIndependentQueuesSeparate(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("wait-c never received refreshed queue position")
 	}
+}
+
+func TestQueuedSubmitReconnectReplacesStaleWaiter(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	first := openRawQueuedAdmission(t, home, semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue))
+	defer func() { _ = first.Close() }()
+
+	qmsg := readRawMessage(t, first)
+	q, ok := qmsg.(*wingwire.Queued)
+	if !ok {
+		t.Fatalf("first admission message = %T, want queued", qmsg)
+	}
+	if q.Position != 1 {
+		t.Fatalf("initial position = %d, want 1", q.Position)
+	}
+
+	second := ensure(t, home, "")
+	secondResult := make(chan acquireResult, 1)
+	go func() {
+		lease, err := second.Acquire(context.Background(), semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue), nil)
+		secondResult <- acquireResult{lease: lease, err: err}
+	}()
+
+	select {
+	case r := <-secondResult:
+		t.Fatalf("replacement acquire resolved while holder still owns the semaphore: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+	r := waitResult(t, secondResult, 2*time.Second)
+	if r.err != nil {
+		t.Fatalf("replacement acquire should be promoted after stale waiter closes, got %v", r.err)
+	}
+}
+
+func openRawQueuedAdmission(t *testing.T, home string, req wingwire.AdmissionRequest) net.Conn {
+	t.Helper()
+	sock, err := wingd.SocketPath(home)
+	if err != nil {
+		t.Fatalf("socket path: %v", err)
+	}
+	nc, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial daemon: %v", err)
+	}
+	if err := writeRawMessage(nc, &wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "test"}); err != nil {
+		_ = nc.Close()
+		t.Fatalf("write hello: %v", err)
+	}
+	msg := readRawMessage(t, nc)
+	if _, ok := msg.(*wingwire.HelloAck); !ok {
+		_ = nc.Close()
+		t.Fatalf("hello response = %T, want hello_ack", msg)
+	}
+	if err := writeRawMessage(nc, &req); err != nil {
+		_ = nc.Close()
+		t.Fatalf("write admission request: %v", err)
+	}
+	return nc
+}
+
+func writeRawMessage(nc net.Conn, msg wingwire.Message) error {
+	line, err := wingwire.Encode(msg)
+	if err != nil {
+		return err
+	}
+	_, err = nc.Write(line)
+	return err
+}
+
+func readRawMessage(t *testing.T, nc net.Conn) wingwire.Message {
+	t.Helper()
+	if err := nc.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	sc := bufio.NewScanner(nc)
+	if !sc.Scan() {
+		t.Fatalf("read frame: %v", sc.Err())
+	}
+	msg, err := wingwire.Decode(sc.Bytes())
+	if err != nil {
+		t.Fatalf("decode frame: %v", err)
+	}
+	return msg
 }
 
 func TestSemaphoresOnlyRunLeaseFinalizesOnDisconnect(t *testing.T) {
