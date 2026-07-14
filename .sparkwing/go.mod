@@ -3,7 +3,7 @@ module sparkwing-pipelines
 go 1.26.0
 
 require (
-	github.com/sparkwing-dev/sparkwing v0.17.4
+	github.com/sparkwing-dev/sparkwing v0.17.5
 	golang.org/x/mod v0.35.0
 )
 
