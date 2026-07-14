@@ -849,8 +849,9 @@ func TestWingd_LocalRunAdmitsReadyNodeAtNodeCost(t *testing.T) {
 	}()
 
 	awaitNodeOutcome(t, st, "profiled-stage-run", "quick", string(sparkwing.Success))
-	qs := awaitWaiterOrHolder(t, home, "profiled-stage-run/heavy")
-	if w, ok := findQueuedWaiter(qs, "profiled-stage-run/heavy"); !ok || w.Position != 1 {
+	heavyHostID := nodeHostRunID("profiled-stage-run", "heavy")
+	qs := awaitWaiterOrHolder(t, home, heavyHostID)
+	if w, ok := findQueuedWaiter(qs, heavyHostID); !ok || w.Position != 1 {
 		t.Fatalf("heavy stage waiter position = %d (present=%v), want queued behind external holder", w.Position, ok)
 	}
 
@@ -960,8 +961,9 @@ func TestWingd_RecoveryNodeAdmitsHostCost(t *testing.T) {
 		done <- res
 	}()
 
-	qs := awaitWaiterOrHolder(t, home, "recovery-node-run/recover")
-	if w, ok := findQueuedWaiter(qs, "recovery-node-run/recover"); !ok || w.Position != 1 {
+	recoverHostID := nodeHostRunID("recovery-node-run", "recover")
+	qs := awaitWaiterOrHolder(t, home, recoverHostID)
+	if w, ok := findQueuedWaiter(qs, recoverHostID); !ok || w.Position != 1 {
 		t.Fatalf("recovery host waiter position = %d (present=%v), want queued behind external holder", w.Position, ok)
 	}
 
@@ -1055,8 +1057,9 @@ func TestWingd_CachedNodeMissAdmitsHostCost(t *testing.T) {
 		done <- res
 	}()
 
-	qs := awaitWaiterOrHolder(t, home, "cached-node-run/cached")
-	if w, ok := findQueuedWaiter(qs, "cached-node-run/cached"); !ok || w.Position != 1 {
+	cachedHostID := nodeHostRunID("cached-node-run", "cached")
+	qs := awaitWaiterOrHolder(t, home, cachedHostID)
+	if w, ok := findQueuedWaiter(qs, cachedHostID); !ok || w.Position != 1 {
 		t.Fatalf("cached node waiter position = %d (present=%v), want queued behind external holder", w.Position, ok)
 	}
 
