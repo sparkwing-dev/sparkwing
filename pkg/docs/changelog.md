@@ -47,6 +47,17 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+### Fixed
+
+- **admission:** Measured and default CPU costs now act as backpressure, not
+  a hard admission gate. Memory and explicit resource pins still gate
+  admission strictly, while CPU pressure admits one memory-fitting run before
+  stopping additional CPU-bearing work. A saturated host therefore keeps
+  making progress instead of parking every queued run behind a CPU-only
+  deficit.
+
+## [v0.17.1] - 2026-07-13
 ### Added
 
 - **admission:** A queued run now explains where its charge came from, not

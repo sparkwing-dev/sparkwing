@@ -48,14 +48,14 @@ func TestWeighted_BackfillStopsWhenYoungerHolderBlocksHead(t *testing.T) {
 	}
 }
 
-func TestWeighted_HostCoresBackfillPastHeavyHead(t *testing.T) {
-	l := testLedger(t, 8, 0)
-	holder := mustGrant(t, l, Request{ID: "holder", Cores: 6})
-	mustQueue(t, l, Request{ID: "heavy", Cores: 6})
+func TestWeighted_HostMemoryBackfillPastHeavyHead(t *testing.T) {
+	l := testLedger(t, 0, 8<<30)
+	holder := mustGrant(t, l, Request{ID: "holder", MemoryBytes: 6 << 30})
+	mustQueue(t, l, Request{ID: "heavy", MemoryBytes: 6 << 30})
 
-	d, _ := submit(t, l, Request{ID: "light", Cores: 2})
+	d, _ := submit(t, l, Request{ID: "light", MemoryBytes: 2 << 30})
 	if d.Kind != DecisionGranted {
-		t.Fatalf("light = %+v, want granted: 2 free cores backfill past the heavy head blocked by the older holder", d)
+		t.Fatalf("light = %+v, want granted: free memory backfills past the heavy head blocked by the older holder", d)
 	}
 	if snap := l.Snapshot(); len(snap.Waiters) != 1 || snap.Waiters[0].RequestID != "heavy" {
 		t.Fatalf("waiters = %+v, want only heavy queued", snap.Waiters)
@@ -64,6 +64,6 @@ func TestWeighted_HostCoresBackfillPastHeavyHead(t *testing.T) {
 	events := mustRelease(t, l, holder.ID, "holder")
 	wantKinds(t, events, EventReleased, EventPromoted)
 	if events[1].RequestID != "heavy" {
-		t.Fatalf("promoted %q, want heavy once the older holder frees its cores", events[1].RequestID)
+		t.Fatalf("promoted %q, want heavy once the older holder frees its memory", events[1].RequestID)
 	}
 }

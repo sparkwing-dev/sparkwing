@@ -28,9 +28,15 @@ func TestChargedResources(t *testing.T) {
 
 func TestRequestFromWire(t *testing.T) {
 	req := requestFromWire("r1", wingwire.HostResources{Cores: 1.5, MemoryBytes: 2048},
-		[]wingwire.SemaphoreClaim{{Name: "k", Capacity: 3, Cost: 2, Policy: wingwire.PolicyCancelOthers}})
+		[]wingwire.SemaphoreClaim{{Name: "k", Capacity: 3, Cost: 2, Policy: wingwire.PolicyCancelOthers}}, "")
 	if req.ID != "r1" || req.Cores != 1.5 || req.MemoryBytes != 2048 {
 		t.Fatalf("host fields wrong: %+v", req)
+	}
+	if req.SoftCores {
+		t.Fatalf("explicit core request should stay hard: %+v", req)
+	}
+	if req.StrictCores {
+		t.Fatalf("unknown cost source should not be a strict pin: %+v", req)
 	}
 	if len(req.Semaphores) != 1 {
 		t.Fatalf("want 1 semaphore, got %d", len(req.Semaphores))
@@ -41,15 +47,30 @@ func TestRequestFromWire(t *testing.T) {
 	}
 }
 
+func TestRequestFromWire_ProfiledCoresAreSoft(t *testing.T) {
+	for _, source := range []wingwire.CostSource{wingwire.CostSourceMeasured, wingwire.CostSourceDefault} {
+		req := requestFromWire("r1", wingwire.HostResources{Cores: 1.5}, nil, source)
+		if !req.SoftCores {
+			t.Fatalf("%s core request should use CPU as backpressure", source)
+		}
+	}
+	req := requestFromWire("r1", wingwire.HostResources{Cores: 1.5}, nil, wingwire.CostSourcePin)
+	if req.SoftCores || !req.StrictCores {
+		t.Fatalf("pinned core request = soft %v strict %v, want hard strict", req.SoftCores, req.StrictCores)
+	}
+}
+
 func TestRequestFromWaiter_RoundTrips(t *testing.T) {
 	w := admission.WaiterState{
 		RequestID:   "w",
 		MilliCores:  2500,
+		SoftCores:   true,
+		StrictCores: true,
 		MemoryBytes: 4096,
 		Claims:      []admission.ClaimState{{Key: "k", Capacity: 2, Cost: 1, Policy: admission.PolicyQueue}},
 	}
 	req := requestFromWaiter(w)
-	if req.ID != "w" || req.Cores != 2.5 || req.MemoryBytes != 4096 {
+	if req.ID != "w" || req.Cores != 2.5 || !req.SoftCores || !req.StrictCores || req.MemoryBytes != 4096 {
 		t.Fatalf("host fields wrong: %+v", req)
 	}
 	if len(req.Semaphores) != 1 || req.Semaphores[0].Key != "k" {

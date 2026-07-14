@@ -250,18 +250,39 @@ func TestMeasuredRequestAboveIdleGrantableCapacityIsAdmitted(t *testing.T) {
 	lease := mustAcquire(t, cl, wingwire.AdmissionRequest{
 		RunID:      "measured-heavy",
 		CostSource: wingwire.CostSourceMeasured,
-		Resources: wingwire.HostResources{
-			Cores:       10,
-			MemoryBytes: 20 << 30,
-		},
+		Resources:  wingwire.HostResources{Cores: 10},
 	})
 	if lease.Resources.Cores != 6.4 {
 		t.Fatalf("admitted cores = %v, want idle grantable ceiling 6.4", lease.Resources.Cores)
 	}
-	totalMemory := int64(16 << 30)
-	wantMemory := int64(float64(totalMemory) * 0.8)
-	if lease.Resources.MemoryBytes != wantMemory {
-		t.Fatalf("admitted memory = %d, want idle grantable ceiling %d", lease.Resources.MemoryBytes, wantMemory)
+}
+
+func TestOversizedMeasuredCPURequestQueuesFollower(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30), HeadroomFraction: -1})
+
+	holderClient := ensure(t, home, "")
+	lease := mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID:      "oversized",
+		CostSource: wingwire.CostSourceMeasured,
+		Resources:  wingwire.HostResources{Cores: 10},
+	})
+	if lease.Resources.Cores != 8 {
+		t.Fatalf("oversized charge = %v, want full host charge 8", lease.Resources.Cores)
+	}
+
+	followerClient := ensure(t, home, "")
+	positions, result := acquireAsync(followerClient, wingwire.AdmissionRequest{
+		RunID:      "follower",
+		CostSource: wingwire.CostSourceMeasured,
+		Resources:  wingwire.HostResources{Cores: 1},
+	})
+	select {
+	case <-positions:
+	case r := <-result:
+		t.Fatalf("follower resolved without queueing: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("follower neither queued nor resolved")
 	}
 }
 
@@ -305,18 +326,54 @@ func TestLivenessFloor_AdmitsSoleRunUnderExternalLoad(t *testing.T) {
 	}
 }
 
-func TestPinnedRequestAboveCapacityAdmitsAlone(t *testing.T) {
+func TestMeasuredCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30), HeadroomFraction: -1})
+
+	holderClient := ensure(t, home, "")
+	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID:      "holder",
+		CostSource: wingwire.CostSourceMeasured,
+		Resources:  wingwire.HostResources{Cores: 6, MemoryBytes: 2 << 30},
+	})
+
+	headClient := ensure(t, home, "")
+	lease := mustAcquire(t, headClient, wingwire.AdmissionRequest{
+		RunID:      "head",
+		CostSource: wingwire.CostSourceMeasured,
+		Resources:  wingwire.HostResources{Cores: 6, MemoryBytes: 2 << 30},
+	})
+	if lease.Resources.Cores != 6 {
+		t.Fatalf("head cores = %v, want measured charge retained", lease.Resources.Cores)
+	}
+
+	nextClient := ensure(t, home, "")
+	positions, result := acquireAsync(nextClient, wingwire.AdmissionRequest{
+		RunID:      "next",
+		CostSource: wingwire.CostSourceMeasured,
+		Resources:  wingwire.HostResources{Cores: 1, MemoryBytes: 2 << 30},
+	})
+	select {
+	case <-positions:
+	case r := <-result:
+		t.Fatalf("next run resolved without queueing: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("next run neither queued nor resolved")
+	}
+}
+
+func TestPinnedRequestAboveCapacityFails(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})
 
 	cl := ensure(t, home, "")
-	lease := mustAcquire(t, cl, wingwire.AdmissionRequest{
+	_, err := cl.Acquire(context.Background(), wingwire.AdmissionRequest{
 		RunID:      "pinned-heavy",
 		CostSource: wingwire.CostSourcePin,
 		Resources:  wingwire.HostResources{Cores: 10},
-	})
-	if lease.Resources.Cores != 6.4 {
-		t.Fatalf("pinned charge = %v, want clamped to idle grantable 6.4 (running alone)", lease.Resources.Cores)
+	}, nil)
+	if err == nil {
+		t.Fatal("oversized pin admitted, want never-admissible failure")
 	}
 }
 

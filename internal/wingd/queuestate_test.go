@@ -85,14 +85,14 @@ func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
 	holderClient := ensure(t, home, "v1")
 	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
 		RunID:      "holder",
-		Resources:  wingwire.HostResources{Cores: 1},
+		Resources:  wingwire.HostResources{MemoryBytes: 48 << 30},
 		CostSource: wingwire.CostSourcePin,
 	})
 
 	cl := ensure(t, home, "v1")
 	_, result := acquireAsync(cl, wingwire.AdmissionRequest{
 		RunID:       "heavy",
-		Resources:   wingwire.HostResources{Cores: 5},
+		Resources:   wingwire.HostResources{MemoryBytes: 8 << 30},
 		CostSource:  wingwire.CostSourceMeasured,
 		SampleCount: 12,
 	})

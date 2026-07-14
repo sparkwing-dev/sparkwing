@@ -33,6 +33,8 @@ type LeaseState struct {
 	Token       string       `json:"token"`
 	RequestID   string       `json:"request_id"`
 	MilliCores  int64        `json:"milli_cores"`
+	SoftCores   bool         `json:"soft_cores,omitempty"`
+	StrictCores bool         `json:"strict_cores,omitempty"`
 	MemoryBytes uint64       `json:"memory_bytes"`
 	Claims      []ClaimState `json:"claims,omitempty"`
 	Members     []string     `json:"members"`
@@ -71,6 +73,8 @@ type WaiterState struct {
 	Admit       uint64       `json:"admit,omitempty"`
 	RequestID   string       `json:"request_id"`
 	MilliCores  int64        `json:"milli_cores"`
+	SoftCores   bool         `json:"soft_cores,omitempty"`
+	StrictCores bool         `json:"strict_cores,omitempty"`
 	MemoryBytes uint64       `json:"memory_bytes"`
 	Claims      []ClaimState `json:"claims,omitempty"`
 }
@@ -106,6 +110,8 @@ func (l *Ledger) Snapshot() Snapshot {
 			Token:       le.token,
 			RequestID:   le.requestID,
 			MilliCores:  le.milliCores,
+			SoftCores:   le.softCores,
+			StrictCores: le.strictCores,
 			MemoryBytes: le.memory,
 			Claims:      claimStates(le.claims),
 			Members:     members,
@@ -136,6 +142,8 @@ func (l *Ledger) Snapshot() Snapshot {
 			Admit:       w.spec.admit,
 			RequestID:   w.spec.id,
 			MilliCores:  w.spec.milliCores,
+			SoftCores:   w.spec.softCores,
+			StrictCores: w.spec.strictCores,
 			MemoryBytes: w.spec.memory,
 			Claims:      claimStates(w.spec.claims),
 		})
@@ -219,15 +227,17 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 		return fmt.Errorf("%w: lease %s: %v", ErrInvalidSnapshot, ls.ID, err)
 	}
 	le := &lease{
-		seq:        ls.Seq,
-		admit:      ls.Admit,
-		id:         ls.ID,
-		token:      ls.Token,
-		requestID:  ls.RequestID,
-		milliCores: ls.MilliCores,
-		memory:     ls.MemoryBytes,
-		claims:     claims,
-		members:    make(map[string]struct{}, len(ls.Members)),
+		seq:         ls.Seq,
+		admit:       ls.Admit,
+		id:          ls.ID,
+		token:       ls.Token,
+		requestID:   ls.RequestID,
+		milliCores:  ls.MilliCores,
+		softCores:   ls.SoftCores,
+		strictCores: ls.StrictCores,
+		memory:      ls.MemoryBytes,
+		claims:      claims,
+		members:     make(map[string]struct{}, len(ls.Members)),
 	}
 	for _, m := range ls.Members {
 		if m == "" {
@@ -287,11 +297,13 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 	l.waiters = append(l.waiters, &waiter{
 		arrival: ws.Arrival,
 		spec: spec{
-			id:         ws.RequestID,
-			admit:      ws.Admit,
-			milliCores: ws.MilliCores,
-			memory:     ws.MemoryBytes,
-			claims:     claims,
+			id:          ws.RequestID,
+			admit:       ws.Admit,
+			milliCores:  ws.MilliCores,
+			softCores:   ws.SoftCores,
+			strictCores: ws.StrictCores,
+			memory:      ws.MemoryBytes,
+			claims:      claims,
 		},
 	})
 	return nil

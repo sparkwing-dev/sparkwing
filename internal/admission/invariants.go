@@ -17,12 +17,12 @@ func (l *Ledger) mustHoldInvariants() {
 
 // invariantViolation checks the full invariant set and returns the first
 // violation found, or nil. The checks: host accounting matches the lease
-// set and never exceeds the totals; every lease has at least one member,
+// set, memory never exceeds the total, every lease has at least one member,
 // consistent membership indexing, and exactly one hold per claim; every
-// semaphore's live cost fits its effective capacity and every hold
-// belongs to a live lease; waiters are unique, strictly FIFO-ordered,
-// and hold nothing; no waiter is left behind free capacity that fits it;
-// and no sequence counter has fallen behind the state it numbers.
+// semaphore's live cost fits its effective capacity and every hold belongs
+// to a live lease; waiters are unique, strictly FIFO-ordered, and hold
+// nothing; no waiter is left behind free capacity that fits it; and no
+// sequence counter has fallen behind the state it numbers.
 func (l *Ledger) invariantViolation() error {
 	if err := l.hostInvariant(); err != nil {
 		return err
@@ -55,8 +55,8 @@ func (l *Ledger) hostInvariant() error {
 	if memory != l.usedMemory {
 		return fmt.Errorf("used memory %d does not match lease sum %d", l.usedMemory, memory)
 	}
-	if l.usedMilliCores > l.totalMilliCores {
-		return fmt.Errorf("granted cores %d exceed total %d", l.usedMilliCores, l.totalMilliCores)
+	if l.usedMilliCores > l.totalMilliCores && !l.softCoreOvercommit() {
+		return fmt.Errorf("granted hard cores %d exceed total %d", l.usedMilliCores, l.totalMilliCores)
 	}
 	if l.usedMemory > l.totalMemory {
 		return fmt.Errorf("granted memory %d exceeds total %d", l.usedMemory, l.totalMemory)
@@ -68,6 +68,15 @@ func (l *Ledger) hostInvariant() error {
 		return fmt.Errorf("headroom cores %d negative", l.headroomMilliCores)
 	}
 	return nil
+}
+
+func (l *Ledger) softCoreOvercommit() bool {
+	for _, le := range l.leases {
+		if le.softCores {
+			return true
+		}
+	}
+	return false
 }
 
 func (l *Ledger) leaseInvariants() error {

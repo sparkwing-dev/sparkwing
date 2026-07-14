@@ -19,12 +19,12 @@ func TestApplyHostCeiling(t *testing.T) {
 		wantWarning string
 	}{
 		{
-			name:        "pin over capacity clamps with loud warning",
+			name:        "pin over capacity stays hard with loud warning",
 			res:         Resolution{Cores: 16, Source: store.CostSourcePin},
 			machine:     10,
 			grantCores:  8,
-			wantCores:   8,
-			wantWarning: "pin 16.0 cores exceeds this machine (10.0); running alone - consider a smaller pin or a machine budget",
+			wantCores:   16,
+			wantWarning: "pin 16.0 cores exceeds this machine (10.0); use a smaller pin or a larger machine",
 		},
 		{
 			name:       "measured over capacity clamps silently",
@@ -47,12 +47,12 @@ func TestApplyHostCeiling(t *testing.T) {
 			wantCores:  16,
 		},
 		{
-			name:       "memory clamps to grantable",
+			name:       "memory remains unchanged",
 			res:        Resolution{Cores: 1, MemoryBytes: 32 << 30, Source: store.CostSourceMeasured},
 			grantCores: 8,
 			grantMem:   16 << 30,
 			wantCores:  1,
-			wantMem:    16 << 30,
+			wantMem:    32 << 30,
 		},
 	}
 	for _, tc := range cases {

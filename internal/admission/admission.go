@@ -43,11 +43,10 @@ var (
 	// ErrInvalidRequest reports a malformed [Request]: empty IDs, negative
 	// or non-finite values, duplicate semaphore keys, or unknown policies.
 	ErrInvalidRequest = errors.New("admission: invalid request")
-	// ErrNeverAdmissible reports a machine-independent logic error that no
-	// release can ever satisfy: a semaphore claim whose cost exceeds its own
-	// declared capacity. Host demand above the box's totals is not this error
-	// -- it is capped to the totals and serialized alone, since a machine is
-	// one box in a heterogeneous fleet and must never refuse a run outright.
+	// ErrNeverAdmissible reports a request no release can satisfy: a
+	// semaphore claim whose cost exceeds its own declared capacity, or host
+	// memory demand above this machine's memory budget. Host CPU demand above
+	// this machine's total is capped and serialized alone.
 	ErrNeverAdmissible = errors.New("admission: request exceeds a semaphore's own capacity")
 	// ErrDuplicateID reports a participant ID that already holds or waits.
 	ErrDuplicateID = errors.New("admission: participant id already holds or waits")
@@ -123,6 +122,12 @@ type Request struct {
 	// Cores is the host CPU demand in cores; fractional values are
 	// allowed and are accounted in millicores. Zero requests no CPU.
 	Cores float64
+	// SoftCores makes CPU demand backpressure instead of a hard safety
+	// budget. Memory and semaphores still gate admission strictly.
+	SoftCores bool
+	// StrictCores rejects CPU demand above this machine's CPU budget instead
+	// of capping it down to run alone.
+	StrictCores bool
 	// MemoryBytes is the host memory demand. Zero requests no memory.
 	MemoryBytes uint64
 	// Semaphores are the named-semaphore holds the request needs.

@@ -116,41 +116,58 @@ func TestSubmit_RejectsInvalidRequests(t *testing.T) {
 	}
 }
 
-// TestSubmit_HostDemandAboveTotalAdmitsClampedAlone pins the fleet
-// invariant: no run is ever rejected for exceeding host capacity. A cost
-// above this box's totals is capped to the totals and admitted alone rather
-// than refused, so an oversized measured peak or a fleet-wide pin still runs.
-func TestSubmit_HostDemandAboveTotalAdmitsClampedAlone(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		req       Request
-		wantCores float64
-		wantMem   uint64
-	}{
-		{"cores above total", Request{ID: "r", Cores: 10}, 4, 0},
-		{"memory above total", Request{ID: "r", MemoryBytes: 2048}, 0, 1024},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			l := testLedger(t, 4, 1024)
-			d, _, err := l.Submit(tc.req)
-			if err != nil {
-				t.Fatalf("Submit = %v, want a clamped grant", err)
-			}
-			if d.Kind != DecisionGranted {
-				t.Fatalf("Submit kind = %v, want granted alone", d.Kind)
-			}
-			snap := l.Snapshot()
-			if len(snap.Leases) != 1 {
-				t.Fatalf("leases = %d, want 1", len(snap.Leases))
-			}
-			le := snap.Leases[0]
-			if got := float64(le.MilliCores) / 1000.0; got != tc.wantCores {
-				t.Fatalf("granted cores = %v, want clamped %v", got, tc.wantCores)
-			}
-			if le.MemoryBytes != tc.wantMem {
-				t.Fatalf("granted memory = %d, want clamped %d", le.MemoryBytes, tc.wantMem)
-			}
-		})
+// TestSubmit_HostCPUAboveTotalAdmitsClampedAlone records the admission
+// invariant: CPU demand above this box's total is capped to the total and
+// admitted alone rather than refused.
+func TestSubmit_HostCPUAboveTotalAdmitsClampedAlone(t *testing.T) {
+	l := testLedger(t, 4, 1024)
+	d, _, err := l.Submit(Request{ID: "r", Cores: 10})
+	if err != nil {
+		t.Fatalf("Submit = %v, want a clamped grant", err)
+	}
+	if d.Kind != DecisionGranted {
+		t.Fatalf("Submit kind = %v, want granted alone", d.Kind)
+	}
+	snap := l.Snapshot()
+	if len(snap.Leases) != 1 {
+		t.Fatalf("leases = %d, want 1", len(snap.Leases))
+	}
+	le := snap.Leases[0]
+	if got := float64(le.MilliCores) / 1000.0; got != 4 {
+		t.Fatalf("granted cores = %v, want clamped 4", got)
+	}
+	if le.MemoryBytes != 0 {
+		t.Fatalf("granted memory = %d, want 0", le.MemoryBytes)
+	}
+}
+
+func TestSubmit_HostMemoryAboveTotalFails(t *testing.T) {
+	l := testLedger(t, 4, 1024)
+	before := l.Snapshot()
+	d, events, err := l.Submit(Request{ID: "r", MemoryBytes: 2048})
+	if !errors.Is(err, ErrNeverAdmissible) {
+		t.Fatalf("Submit = (%+v, %v), want %v", d, err, ErrNeverAdmissible)
+	}
+	if len(events) != 0 {
+		t.Fatalf("rejected submit emitted events %v", events)
+	}
+	if !reflect.DeepEqual(before, l.Snapshot()) {
+		t.Fatal("rejected submit mutated the ledger")
+	}
+}
+
+func TestSubmit_StrictHostCPUAboveTotalFails(t *testing.T) {
+	l := testLedger(t, 4, 1024)
+	before := l.Snapshot()
+	d, events, err := l.Submit(Request{ID: "r", Cores: 10, StrictCores: true})
+	if !errors.Is(err, ErrNeverAdmissible) {
+		t.Fatalf("Submit = (%+v, %v), want %v", d, err, ErrNeverAdmissible)
+	}
+	if len(events) != 0 {
+		t.Fatalf("rejected submit emitted events %v", events)
+	}
+	if !reflect.DeepEqual(before, l.Snapshot()) {
+		t.Fatal("rejected submit mutated the ledger")
 	}
 }
 
@@ -178,6 +195,54 @@ func TestLivenessFloor_SoleRunAdmitsUnderZeroHeadroom(t *testing.T) {
 	events := mustRelease(t, l, d.Lease.ID, "head")
 	if !containsKind(events, EventPromoted) {
 		t.Fatalf("releasing the sole run did not promote the waiter: %v", eventKinds(events))
+	}
+}
+
+func TestSoftHostCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
+	l := testLedger(t, 8, 16<<30)
+	holder := mustGrant(t, l, Request{ID: "holder", Cores: 6, MemoryBytes: 2 << 30})
+
+	d, _, err := l.Submit(Request{ID: "head", Cores: 6, SoftCores: true, MemoryBytes: 2 << 30})
+	if err != nil {
+		t.Fatalf("Submit head: %v", err)
+	}
+	if d.Kind != DecisionGranted {
+		t.Fatalf("head behind CPU pressure = %s, want granted", d.Kind)
+	}
+
+	mustQueue(t, l, Request{ID: "next", Cores: 1, SoftCores: true, MemoryBytes: 2 << 30})
+
+	events := mustRelease(t, l, holder.ID, "holder")
+	if !containsKind(events, EventPromoted) {
+		t.Fatalf("releasing the older holder did not promote the queued run: %v", eventKinds(events))
+	}
+}
+
+func TestHostMemoryDeficitStillQueues(t *testing.T) {
+	l := testLedger(t, 8, 8<<30)
+	mustGrant(t, l, Request{ID: "holder", Cores: 1, MemoryBytes: 6 << 30})
+
+	d, _, err := l.Submit(Request{ID: "head", Cores: 1, MemoryBytes: 6 << 30})
+	if err != nil {
+		t.Fatalf("Submit head: %v", err)
+	}
+	if d.Kind != DecisionQueued {
+		t.Fatalf("head behind memory pressure = %s, want queued", d.Kind)
+	}
+}
+
+func TestHostMemoryHeadroomDeficitQueuesSoleRun(t *testing.T) {
+	l := testLedger(t, 8, 8<<30)
+	if _, err := l.SetHeadroom(8, 0); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+
+	d, _, err := l.Submit(Request{ID: "head", MemoryBytes: 1 << 30})
+	if err != nil {
+		t.Fatalf("Submit head: %v", err)
+	}
+	if d.Kind != DecisionQueued {
+		t.Fatalf("head behind memory headroom = %s, want queued", d.Kind)
 	}
 }
 
@@ -684,14 +749,14 @@ func TestSetHeadroom_ShrinkBelowGrantedNeverEvicts(t *testing.T) {
 	mustQueue(t, l, Request{ID: "c", Cores: 1})
 }
 
-func TestSetHeadroom_EmptyHostAdmitsQueueHead(t *testing.T) {
+func TestSetHeadroom_EmptyHostAdmitsCPUQueueHead(t *testing.T) {
 	l := testLedger(t, 4, 1024)
 	if _, err := l.SetHeadroom(0, 0); err != nil {
 		t.Fatalf("SetHeadroom: %v", err)
 	}
 
-	lease := mustGrant(t, l, Request{ID: "a", Cores: 2, MemoryBytes: 512})
-	mustQueue(t, l, Request{ID: "b", Cores: 2, MemoryBytes: 512})
+	lease := mustGrant(t, l, Request{ID: "a", Cores: 2})
+	mustQueue(t, l, Request{ID: "b", Cores: 2})
 
 	events := mustRelease(t, l, lease.ID, "a")
 	wantKinds(t, events, EventReleased, EventPromoted)
@@ -700,39 +765,24 @@ func TestSetHeadroom_EmptyHostAdmitsQueueHead(t *testing.T) {
 	}
 }
 
-// TestSetHeadroom_PerResourceFloorAdmitsUnheldAxis pins the floor's
-// per-resource shape: a lease on one host axis leaves the other axis's
-// zero-holder floor intact, so under collapsed headroom a waiter on the
-// still-idle axis admits rather than parking behind an unrelated holder.
-func TestSetHeadroom_PerResourceFloorAdmitsUnheldAxis(t *testing.T) {
-	tests := []struct {
-		name   string
-		holder Request
-		waiter Request
-	}{
-		{
-			name:   "memory holder still admits a cpu waiter",
-			holder: Request{ID: "holder", MemoryBytes: 1},
-			waiter: Request{ID: "waiter", Cores: 1},
-		},
-		{
-			name:   "cpu holder still admits a memory waiter",
-			holder: Request{ID: "holder", Cores: 1},
-			waiter: Request{ID: "waiter", MemoryBytes: 1},
-		},
+func TestSetHeadroom_CPUFloorSurvivesMemoryHolder(t *testing.T) {
+	l := testLedger(t, 4, 1024)
+	if _, err := l.SetHeadroom(0, 1024); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			l := testLedger(t, 4, 1024)
-			if _, err := l.SetHeadroom(0, 0); err != nil {
-				t.Fatalf("SetHeadroom: %v", err)
-			}
+	mustGrant(t, l, Request{ID: "holder", MemoryBytes: 1})
+	mustGrant(t, l, Request{ID: "waiter", Cores: 1})
+}
 
-			mustGrant(t, l, tt.holder)
-			mustGrant(t, l, tt.waiter)
-		})
+func TestSetHeadroom_MemoryHasNoLivenessFloor(t *testing.T) {
+	l := testLedger(t, 4, 1024)
+	if _, err := l.SetHeadroom(4, 0); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
 	}
+
+	mustGrant(t, l, Request{ID: "holder", Cores: 1})
+	mustQueue(t, l, Request{ID: "waiter", MemoryBytes: 1})
 }
 
 func TestResizeTotals_GatesNewAdmission(t *testing.T) {

@@ -417,22 +417,56 @@ func chargedResources(r wingwire.HostResources) wingwire.HostResources {
 	return r
 }
 
-// clampHostChargeLocked caps a request's host charge at the box's idle
-// grantable ceiling so no run is ever rejected for exceeding host capacity:
-// an oversized cost -- a measured peak or an explicit pin -- is charged the
-// whole grantable budget and serializes alone instead. It reports whether an
-// explicit pin was the thing capped so the caller can log it loudly, since a
-// pin the machine cannot honor verbatim is an operator-visible surprise.
+// clampHostChargeLocked caps measured/default CPU charge at the box's idle
+// grantable ceiling. Explicit pins and memory are not clamped here; the
+// ledger enforces both as hard budgets.
 func (d *Daemon) clampHostChargeLocked(r wingwire.HostResources, costSource wingwire.CostSource) (wingwire.HostResources, bool) {
-	pinClamped := false
-	if maxCores := d.idleGrantableCoresLocked(); maxCores > 0 && r.Cores > maxCores {
-		pinClamped = costSource == wingwire.CostSourcePin
-		r.Cores = maxCores
+	if costSource != wingwire.CostSourcePin {
+		if maxCores := d.idleGrantableCoresLocked(); maxCores > 0 && r.Cores > maxCores {
+			r.Cores = maxCores
+		}
 	}
-	if maxMemory := d.idleGrantableMemoryLocked(); maxMemory > 0 && r.MemoryBytes > int64(maxMemory) {
-		r.MemoryBytes = int64(maxMemory)
+	return r, false
+}
+
+func strictCoreCostSource(costSource wingwire.CostSource) bool {
+	return costSource == wingwire.CostSourcePin
+}
+
+func softCoreCostSource(costSource wingwire.CostSource) bool {
+	return costSource == wingwire.CostSourceMeasured || costSource == wingwire.CostSourceDefault
+}
+
+func requestFromWire(runID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource) admission.Request {
+	req := admission.Request{
+		ID:          runID,
+		Cores:       res.Cores,
+		SoftCores:   softCoreCostSource(costSource),
+		StrictCores: strictCoreCostSource(costSource),
 	}
-	return r, pinClamped
+	if res.MemoryBytes > 0 {
+		req.MemoryBytes = uint64(res.MemoryBytes)
+	}
+	for _, s := range sems {
+		req.Semaphores = append(req.Semaphores, admission.SemaphoreClaim{
+			Key:      s.Name,
+			Capacity: s.Capacity,
+			Cost:     s.Cost,
+			Policy:   admission.Policy(s.Policy),
+		})
+	}
+	return req
+}
+
+func semNames(sems []wingwire.SemaphoreClaim) []string {
+	if len(sems) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(sems))
+	for _, s := range sems {
+		out = append(out, s.Name)
+	}
+	return out
 }
 
 func (d *Daemon) idleGrantableCoresLocked() float64 {
@@ -468,33 +502,6 @@ func (d *Daemon) idleGrantableMemoryLocked() uint64 {
 	return grantable
 }
 
-func requestFromWire(runID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim) admission.Request {
-	req := admission.Request{ID: runID, Cores: res.Cores}
-	if res.MemoryBytes > 0 {
-		req.MemoryBytes = uint64(res.MemoryBytes)
-	}
-	for _, s := range sems {
-		req.Semaphores = append(req.Semaphores, admission.SemaphoreClaim{
-			Key:      s.Name,
-			Capacity: s.Capacity,
-			Cost:     s.Cost,
-			Policy:   admission.Policy(s.Policy),
-		})
-	}
-	return req
-}
-
-func semNames(sems []wingwire.SemaphoreClaim) []string {
-	if len(sems) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(sems))
-	for _, s := range sems {
-		out = append(out, s.Name)
-	}
-	return out
-}
-
 // handleAdmission submits a run's all-or-nothing request. A granted or
 // queued outcome is delivered through the event stream; fail and skip
 // terminate the request with an [wingwire.Evicted] carrying the policy.
@@ -521,7 +528,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	} else {
 		charged, pinClamped = d.clampHostChargeLocked(charged, req.CostSource)
 	}
-	ar := requestFromWire(req.RunID, charged, req.Semaphores)
+	ar := requestFromWire(req.RunID, charged, req.Semaphores, req.CostSource)
 	c.runID = req.RunID
 	c.pipeline = req.Pipeline
 	c.repo = req.Repo

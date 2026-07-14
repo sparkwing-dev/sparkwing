@@ -179,28 +179,22 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 	return res
 }
 
-// ApplyHostCeiling clamps a resolution's host charge down to the machine's
-// idle grantable ceiling (host capacity minus the reserved margin) so no run
-// is ever rejected for exceeding host capacity: an oversized cost -- a
-// measured peak or an explicit pin -- serializes alone at the grantable budget
-// instead. When an explicit pin is what gets clamped it returns a loud
-// one-line warning naming the pin and the machine, so the operator sees why
-// their pin is not honored verbatim; a measured or default clamp is silent
-// (the queue view already shows the capped charge). A non-positive ceiling
-// (an unknown grantable, e.g. no daemon to ask) or a charge already within it
-// leaves the resolution unchanged and returns no warning.
+// ApplyHostCeiling caps measured/default CPU charge at the machine's idle
+// grantable ceiling so oversized measured CPU serializes alone. Explicit CPU
+// pins and all memory demand are left intact; admission enforces both as hard
+// budgets. A non-positive CPU ceiling or a charge already within it leaves the
+// resolution unchanged and returns no warning.
 func ApplyHostCeiling(res Resolution, machineCores, grantableCores float64, grantableMemoryBytes int64) (Resolution, string) {
 	warning := ""
-	if grantableCores > 0 && res.Cores > grantableCores {
-		if res.Source == store.CostSourcePin {
-			warning = fmt.Sprintf(
-				"pin %.1f cores exceeds this machine (%.1f); running alone - consider a smaller pin or a machine budget",
+	if res.Source == store.CostSourcePin {
+		if machineCores > 0 && res.Cores > machineCores {
+			warning = fmt.Sprintf("pin %.1f cores exceeds this machine (%.1f); use a smaller pin or a larger machine",
 				res.Cores, machineCores)
 		}
-		res.Cores = grantableCores
+		return res, warning
 	}
-	if grantableMemoryBytes > 0 && res.MemoryBytes > grantableMemoryBytes {
-		res.MemoryBytes = grantableMemoryBytes
+	if grantableCores > 0 && res.Cores > grantableCores {
+		res.Cores = grantableCores
 	}
 	return res, warning
 }

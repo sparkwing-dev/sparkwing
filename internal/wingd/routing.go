@@ -195,6 +195,8 @@ func requestFromWaiter(w admission.WaiterState) admission.Request {
 	req := admission.Request{
 		ID:          w.RequestID,
 		Cores:       float64(w.MilliCores) / 1000.0,
+		SoftCores:   w.SoftCores,
+		StrictCores: w.StrictCores,
 		MemoryBytes: w.MemoryBytes,
 	}
 	for _, c := range w.Claims {

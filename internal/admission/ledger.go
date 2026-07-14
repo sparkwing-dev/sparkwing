@@ -51,11 +51,13 @@ type Ledger struct {
 }
 
 type spec struct {
-	id         string
-	admit      uint64
-	milliCores int64
-	memory     uint64
-	claims     []claim
+	id          string
+	admit       uint64
+	milliCores  int64
+	softCores   bool
+	strictCores bool
+	memory      uint64
+	claims      []claim
 }
 
 type claim struct {
@@ -66,15 +68,17 @@ type claim struct {
 }
 
 type lease struct {
-	seq        uint64
-	admit      uint64
-	id         LeaseID
-	token      string
-	requestID  string
-	milliCores int64
-	memory     uint64
-	claims     []claim
-	members    map[string]struct{}
+	seq         uint64
+	admit       uint64
+	id          LeaseID
+	token       string
+	requestID   string
+	milliCores  int64
+	softCores   bool
+	strictCores bool
+	memory      uint64
+	claims      []claim
+	members     map[string]struct{}
 }
 
 type semaphore struct {
@@ -357,7 +361,13 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 	if err != nil {
 		return spec{}, err
 	}
-	s := spec{id: req.ID, milliCores: mc, memory: req.MemoryBytes}
+	s := spec{
+		id:          req.ID,
+		milliCores:  mc,
+		softCores:   req.SoftCores,
+		strictCores: req.StrictCores,
+		memory:      req.MemoryBytes,
+	}
 	seen := make(map[string]bool, len(req.Semaphores))
 	for _, c := range req.Semaphores {
 		nc, err := normalizeClaim(c.Key, c.Capacity, c.Cost, c.Policy)
@@ -370,12 +380,15 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 		seen[nc.key] = true
 		s.claims = append(s.claims, nc)
 	}
-	// hack: host demand over the box total is capped, not rejected -- one box is not the whole fleet, and the floor runs it alone.
+	// Host demand over this box's total is capped and serialized alone.
 	if s.milliCores > l.totalMilliCores {
+		if s.strictCores {
+			return spec{}, fmt.Errorf("%w: cores %d exceed total %d", ErrNeverAdmissible, s.milliCores, l.totalMilliCores)
+		}
 		s.milliCores = l.totalMilliCores
 	}
 	if s.memory > l.totalMemory {
-		s.memory = l.totalMemory
+		return spec{}, fmt.Errorf("%w: memory %d exceeds total %d", ErrNeverAdmissible, s.memory, l.totalMemory)
 	}
 	return s, nil
 }
@@ -589,21 +602,38 @@ func touchesAny(s spec, set map[resource]bool) bool {
 	return false
 }
 
-// hostFits reports whether a spec's host cores and memory fit right now. It
-// enforces the liveness floor: a host resource with zero current holders never
-// blocks, so the queue head always admits on an otherwise-idle box regardless
-// of the reserve, external load, or an oversized cost. Headroom and external
-// sensing gate only concurrency beyond that first admission. Because normalize
-// caps a spec's demand at the totals, admitting a sole run can never push used
-// past capacity.
+// hostFits reports whether a spec's host cores and memory fit right now.
+// Memory is always a hard safety budget. A soft CPU request uses cores as
+// backpressure: it limits additional admissions once the host is already
+// overcommitted, but it never turns a memory-fitting head run into a
+// permanent CPU-only wait.
 func (l *Ledger) hostFits(s spec) bool {
-	effCores := min(l.totalMilliCores, l.headroomMilliCores)
 	effMemory := min(l.totalMemory, l.headroomMemory)
+	effCores := min(l.totalMilliCores, l.headroomMilliCores)
 	coresOK := s.milliCores == 0 || l.usedMilliCores == 0 ||
 		(l.usedMilliCores <= effCores && s.milliCores <= effCores-l.usedMilliCores)
-	memoryOK := s.memory == 0 || l.usedMemory == 0 ||
-		(l.usedMemory <= effMemory && s.memory <= effMemory-l.usedMemory)
+	if s.softCores {
+		coresOK = l.coresFitSoft(s)
+	}
+	memoryOK := s.memory == 0 || (l.usedMemory <= effMemory && s.memory <= effMemory-l.usedMemory)
 	return coresOK && memoryOK
+}
+
+func (l *Ledger) coresFitSoft(s spec) bool {
+	if s.milliCores == 0 || l.usedMilliCores == 0 {
+		return true
+	}
+	if l.usedMilliCores >= l.totalMilliCores {
+		return false
+	}
+	effCores := min(l.totalMilliCores, l.headroomMilliCores)
+	if l.usedMilliCores > effCores {
+		return false
+	}
+	if fitsCost(l.usedMilliCores, s.milliCores, effCores) {
+		return true
+	}
+	return l.usedMilliCores <= effCores
 }
 
 func (l *Ledger) semUsed(key string) int {
@@ -691,15 +721,17 @@ func (l *Ledger) grant(s spec, kind EventKind) (Lease, []LeaseID, []Event) {
 	l.usedMilliCores += s.milliCores
 	l.usedMemory += s.memory
 	l.leases[id] = &lease{
-		seq:        l.leaseSeq,
-		admit:      s.admit,
-		id:         id,
-		token:      token,
-		requestID:  s.id,
-		milliCores: s.milliCores,
-		memory:     s.memory,
-		claims:     s.claims,
-		members:    map[string]struct{}{s.id: {}},
+		seq:         l.leaseSeq,
+		admit:       s.admit,
+		id:          id,
+		token:       token,
+		requestID:   s.id,
+		milliCores:  s.milliCores,
+		softCores:   s.softCores,
+		strictCores: s.strictCores,
+		memory:      s.memory,
+		claims:      s.claims,
+		members:     map[string]struct{}{s.id: {}},
 	}
 	l.tokens[token] = id
 	l.memberOf[s.id] = id
