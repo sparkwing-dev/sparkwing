@@ -285,6 +285,35 @@ func TestQueuedSubmitReconnectReplacesStaleWaiter(t *testing.T) {
 	}
 }
 
+func TestQueuedSubmitReconnectRejectsMismatchedRequest(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	first := openRawQueuedAdmission(t, home, semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue))
+	defer func() { _ = first.Close() }()
+	if msg := readRawMessage(t, first); msg == nil {
+		t.Fatal("first admission returned no queue message")
+	}
+
+	second := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := second.Acquire(ctx, semReq("shard", "different-lock", 1, 1, wingwire.PolicyQueue), nil)
+	if err == nil {
+		t.Fatal("mismatched duplicate request admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("mismatched duplicate error = %q, want duplicate failure", got)
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+}
+
 func openRawQueuedAdmission(t *testing.T, home string, req wingwire.AdmissionRequest) net.Conn {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)

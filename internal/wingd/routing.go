@@ -125,6 +125,10 @@ func (d *Daemon) waiterDeliveriesLocked() []delivery {
 
 func (d *Daemon) queuedDeliveryLocked(c *conn, runID string) *delivery {
 	snap := d.ledger.Snapshot()
+	return d.queuedDeliveryLockedFromSnapshot(c, snap, runID)
+}
+
+func (d *Daemon) queuedDeliveryLockedFromSnapshot(c *conn, snap admission.Snapshot, runID string) *delivery {
 	qlen := len(snap.Waiters)
 	for i, waiter := range snap.Waiters {
 		if waiter.RequestID != runID {

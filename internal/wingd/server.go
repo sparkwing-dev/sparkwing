@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"os"
 	"sync"
@@ -550,6 +551,12 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.origin = req.Origin
 	c.queueTimeoutMS = tightestQueueTimeoutMS(req.Semaphores)
 	if existing := d.byRun[req.RunID]; existing != nil && existing != c && existing.role == roleWaiter {
+		snap := d.ledger.Snapshot()
+		if !queuedRequestMatches(snap, req.RunID, charged, req.Semaphores) {
+			d.mu.Unlock()
+			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+			return
+		}
 		c.role = roleWaiter
 		if !existing.startAt.IsZero() {
 			c.startAt = existing.startAt
@@ -559,8 +566,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		existing.members = nil
 		existing.finalizable = false
 		d.byRun[req.RunID] = c
-		queued := d.queuedDeliveryLocked(c, req.RunID)
-		snap := d.ledger.Snapshot()
+		queued := d.queuedDeliveryLockedFromSnapshot(c, snap, req.RunID)
 		d.touchLocked()
 		d.mu.Unlock()
 		existing.close()
@@ -633,6 +639,41 @@ func tightestQueueTimeoutMS(sems []wingwire.SemaphoreClaim) int64 {
 		}
 	}
 	return t
+}
+
+func queuedRequestMatches(
+	snap admission.Snapshot,
+	runID string,
+	res wingwire.HostResources,
+	sems []wingwire.SemaphoreClaim,
+) bool {
+	for _, w := range snap.Waiters {
+		if w.RequestID != runID {
+			continue
+		}
+		if res.MemoryBytes < 0 {
+			return false
+		}
+		if w.MilliCores != int64(math.Round(res.Cores*1000)) || w.MemoryBytes != uint64(res.MemoryBytes) {
+			return false
+		}
+		if len(w.Claims) != len(sems) {
+			return false
+		}
+		for i, got := range w.Claims {
+			want := sems[i]
+			policy := want.Policy
+			if policy == "" {
+				policy = wingwire.PolicyQueue
+			}
+			if got.Key != want.Name || got.Capacity != want.Capacity || got.Cost != want.Cost ||
+				string(got.Policy) != string(policy) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // cancelTimeoutFor returns the smallest positive CancelTimeout declared
