@@ -506,11 +506,73 @@ func createSelfModuleZip(ctx context.Context, repoDir, version string) ([]byte, 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
+	files, err := selfModuleZipFiles(ctx, repoDir)
+	if err != nil {
+		return nil, err
+	}
 	var out bytes.Buffer
-	if err := modzip.CreateFromDir(&out, module.Version{Path: sparkwingModulePath, Version: version}, repoDir); err != nil {
+	if err := modzip.Create(&out, module.Version{Path: sparkwingModulePath, Version: version}, files); err != nil {
 		return nil, err
 	}
 	return out.Bytes(), nil
+}
+
+func selfModuleZipFiles(ctx context.Context, repoDir string) ([]modzip.File, error) {
+	out, err := runGitIn(ctx, repoDir, "ls-files")
+	if err != nil {
+		return nil, fmt.Errorf("release: list tracked files: %w", err)
+	}
+	paths := strings.Split(out, "\n")
+	nestedModules := map[string]struct{}{}
+	for _, path := range paths {
+		if path == "" || path == "go.mod" || filepath.Base(path) != "go.mod" {
+			continue
+		}
+		nestedModules[filepath.ToSlash(filepath.Dir(path))+"/"] = struct{}{}
+	}
+
+	files := make([]modzip.File, 0, len(paths))
+	for _, path := range paths {
+		if path == "" || nestedModulePath(path, nestedModules) {
+			continue
+		}
+		info, err := os.Lstat(filepath.Join(repoDir, filepath.FromSlash(path)))
+		if err != nil {
+			return nil, fmt.Errorf("release: stat tracked file %s: %w", path, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		files = append(files, trackedModuleFile{repoDir: repoDir, path: path, info: info})
+	}
+	return files, nil
+}
+
+func nestedModulePath(path string, nestedModules map[string]struct{}) bool {
+	for dir := range nestedModules {
+		if strings.HasPrefix(path, dir) {
+			return true
+		}
+	}
+	return false
+}
+
+type trackedModuleFile struct {
+	repoDir string
+	path    string
+	info    os.FileInfo
+}
+
+func (f trackedModuleFile) Path() string {
+	return f.path
+}
+
+func (f trackedModuleFile) Lstat() (os.FileInfo, error) {
+	return f.info, nil
+}
+
+func (f trackedModuleFile) Open() (io.ReadCloser, error) {
+	return os.Open(filepath.Join(f.repoDir, filepath.FromSlash(f.path)))
 }
 
 // restoreSelfReplaceJob undoes prepareSelfReplaceJob's mutation after

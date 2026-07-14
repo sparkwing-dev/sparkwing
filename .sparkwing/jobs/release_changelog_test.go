@@ -311,6 +311,28 @@ func TestSelfModuleSumsIgnoreNestedPipelineModule(t *testing.T) {
 	}
 }
 
+func TestSelfModuleSumsIgnoreUntrackedFiles(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	writeSelfModuleSumsFixture(t, repo)
+
+	const version = "v0.1.0"
+	before, _, err := selfModuleSums(context.Background(), repo, version)
+	if err != nil {
+		t.Fatalf("selfModuleSums before untracked file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "local-output.bin"), []byte(strings.Repeat("x", 1024)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	after, _, err := selfModuleSums(context.Background(), repo, version)
+	if err != nil {
+		t.Fatalf("selfModuleSums after untracked file: %v", err)
+	}
+	if after != before {
+		t.Fatalf("root module zip hash changed after untracked file:\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
 func writeSelfModuleSumsFixture(t *testing.T, repo string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
