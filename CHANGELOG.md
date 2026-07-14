@@ -47,6 +47,13 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** Queued retries can now update a waiting request's measured
+  host cost before grant instead of failing with `duplicate` or running with a
+  stale charge. Node-level host resources and concurrency semaphores now admit
+  together, so a node no longer holds a semaphore while still waiting for host
+  capacity.
 
 ## [v0.17.10] - 2026-07-14
 ### Fixed
