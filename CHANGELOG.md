@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.8] - 2026-07-14
 ### Fixed
 
 - **admission:** `sparkwing queue` now leaves the clear-time estimate unknown
