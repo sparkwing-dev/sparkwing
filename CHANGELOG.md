@@ -62,12 +62,10 @@ code change to unlock.
 ## [v0.17.3] - 2026-07-14
 ### Fixed
 
-- **admission:** Measured and default CPU costs now act as backpressure, not
-  a hard admission gate. Memory and explicit resource pins still gate
-  admission strictly, while CPU pressure admits one memory-fitting run before
-  stopping additional CPU-bearing work. A saturated host therefore keeps
-  making progress instead of parking every queued run behind a CPU-only
-  deficit.
+- **admission:** Runs whose cost is still being measured now reach local
+  admission instead of failing before their first node with an invalid-cost
+  rejection. The daemon accepts every cost source emitted by the resolver and
+  treats measuring and floor-derived CPU costs as backpressure.
 
 ## [v0.17.1] - 2026-07-13
 ### Added
