@@ -55,6 +55,9 @@ code change to unlock.
   work starts. Queue rows keep the owning run as `run_id`, include the daemon
   participant key separately, and display the run/node label in human-facing
   queue views.
+- **cli:** Fresh source-built scaffolds now pin the latest published SDK
+  fallback, so projects created from an unreleased local binary still build
+  against a resolvable module version.
 
 ## [v0.17.9] - 2026-07-14
 ### Fixed

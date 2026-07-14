@@ -3,6 +3,10 @@
 type AdmissionRequest struct {
 	RunID string
 
+	OwnerRunID string
+
+	DisplayRunID string
+
 	Pipeline string
 
 	Repo string
@@ -136,11 +140,17 @@ type HelloAck struct {
 type Holder struct {
 	RunID string
 
+	ParticipantID string
+
+	DisplayRunID string
+
 	Pipeline string
 
 	Repo string
 
 	Parent string
+
+	ParentParticipantID string
 
 	ElapsedMS int64
 
@@ -272,6 +282,10 @@ const TypeStatsReset MessageType = "stats_reset"
 const TypeStatsResetAck MessageType = "stats_reset_ack"
 type Waiter struct {
 	RunID string
+
+	ParticipantID string
+
+	DisplayRunID string
 
 	Pipeline string
 
