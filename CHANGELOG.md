@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.9] - 2026-07-14
 ### Fixed
 
 - **admission:** A client that reconnects after receiving a local-admission
