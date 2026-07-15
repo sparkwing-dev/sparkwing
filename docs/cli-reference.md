@@ -158,7 +158,7 @@ sparkwing cluster agents list --profile prod -q
 Inspect a single concurrency namespace: holders + queue
 
 Shows who currently holds a concurrency namespace's slots
-and the queue of waiters behind it, each with its arrival-rank
+and the queue of waiters behind it, each with its admission-rank
 position. Weighted admission can run a later fitting waiter before
 an earlier non-fitting waiter, so position is not always run order.
 Use it to tell whether a node is wedged or waiting for budget.
@@ -2826,8 +2826,8 @@ Reads the local admission daemon and prints one honest picture of
 where every run stands: each resource (host cores, memory, and every
 named concurrency semaphore) with its capacity and how much is in use;
 every run currently holding admission, with the repo it came from, how
-long it has held, and what it is charged; and every waiter in arrival
-order, with its position, its cost, and exactly what it is waiting on.
+long it has held, and what it is charged; and every waiter in admission
+order, with its position, priority, cost, and exactly what it is waiting on.
 A child run attached to its parent's lease renders indented under that
 parent. The header carries a one-line summary of the daemon's recent
 admission outcomes -- runs granted, median wait, evictions, queue

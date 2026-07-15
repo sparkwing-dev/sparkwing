@@ -181,13 +181,11 @@ func leaseClaims(le *lease, key string) bool {
 }
 
 func (l *Ledger) waiterInvariants() error {
-	var lastArrival uint64
 	seen := make(map[string]bool, len(l.waiters))
-	for _, w := range l.waiters {
-		if w.arrival <= lastArrival {
-			return fmt.Errorf("waiter %q arrival %d not after %d", w.spec.id, w.arrival, lastArrival)
+	for i, w := range l.waiters {
+		if i > 0 && !waiterLess(l.waiters[i-1], w) {
+			return fmt.Errorf("waiter %q is out of priority order", w.spec.id)
 		}
-		lastArrival = w.arrival
 		if w.arrival > l.arrivalSeq {
 			return fmt.Errorf("waiter %q arrival %d outside counter %d", w.spec.id, w.arrival, l.arrivalSeq)
 		}
@@ -200,6 +198,13 @@ func (l *Ledger) waiterInvariants() error {
 		}
 	}
 	return nil
+}
+
+func waiterLess(a, b *waiter) bool {
+	if a.spec.priority != b.spec.priority {
+		return a.spec.priority > b.spec.priority
+	}
+	return a.arrival < b.arrival
 }
 
 func (l *Ledger) sortedLeaseIDs() []LeaseID {

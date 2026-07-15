@@ -844,7 +844,9 @@ What a member does when its group is at capacity:
 - `Queue` (default) -- wait for room, then run. Waiters that fit run
   oldest-first; a waiter that cannot fit in the currently available
   weighted budget does not block later waiters that do fit unless younger
-  backfilled holders are what keep the older waiter from fitting.
+  backfilled holders are what keep the older waiter from fitting. This
+  ordering is scoped to the `Concurrency()` group; local admission priority
+  is a separate run-level order.
 - `Fail` -- error immediately.
 - `Skip` -- resolve as a no-op without running.
 - `CancelOthers` -- evict running members oldest-first until this one

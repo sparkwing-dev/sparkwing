@@ -106,10 +106,12 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 
 	var lease *wingdclient.Lease
 	var err error
+	priority := localAdmissionPriorityFromContext(ctx)
 	if hostAdmitted {
-		lease, err = la.acquireNodeSlot(acquireCtx, req.RunID, node.ID(), claim, onQueued)
+		lease, err = la.acquireNodeSlot(acquireCtx, req.RunID, node.ID(), claim, priority, onQueued)
 	} else {
-		lease, err = la.acquireNodeHostSlot(acquireCtx, r.backends, req.Pipeline, req.RunID, node.ID(), node, claim, onQueued)
+		lease, err = la.acquireNodeHostSlot(acquireCtx, r.backends, req.Pipeline, req.RunID, node.ID(), node, claim,
+			priority, onQueued)
 	}
 	if err != nil {
 		return r.failedDaemonAcquire(ctx, acquireCtx, req, key, limit.QueueTimeout, err)
@@ -145,7 +147,7 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		if childToken == "" {
 			childToken = lease.Token
 		}
-		runCtx = withLocalAdmission(execCtx, la, lease.Token, childToken, leaseCarriesHost(lease))
+		runCtx = withLocalAdmission(execCtx, la, lease.Token, childToken, leaseCarriesHost(lease), localAdmissionPriorityFromContext(execCtx))
 	}
 	output, err := r.executeNodeWithAdmission(runCtx, req)
 	if ev := evicted.Load(); ev != nil {

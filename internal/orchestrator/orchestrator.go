@@ -1436,7 +1436,7 @@ func newDispatchState(
 	} else {
 		s.resolverCtx = ctx
 	}
-	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, leaseChildToken, leaseHostAdmitted)
+	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, leaseChildToken, leaseHostAdmitted, s.plan.PriorityValue())
 	s.resolverCtx = sparkwingruntime.WithResolver(s.resolverCtx, s.resolve)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())
@@ -2738,6 +2738,7 @@ func runOnePredicate(ctx context.Context, pred sparkwing.SkipPredicate, index in
 type planSnapshot struct {
 	Pipeline  string         `json:"pipeline"`
 	RunID     string         `json:"run_id"`
+	Priority  int            `json:"priority,omitempty"`
 	Nodes     []snapshotNode `json:"nodes"`
 	PlanConc  *snapshotConc  `json:"plan_concurrency,omitempty"`
 	PlanConcs []snapshotConc `json:"plan_concurrency_groups,omitempty"`
@@ -2888,6 +2889,7 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 	snap := planSnapshot{
 		Pipeline: rc.Pipeline,
 		RunID:    rc.RunID,
+		Priority: p.PriorityValue(),
 		Secrets:  meta.Secrets,
 	}
 	if group := p.ConcurrencyGroupRef(); group != nil {
@@ -2961,6 +2963,19 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 		seen[rec.ID()] = true
 	}
 	return json.Marshal(snap)
+}
+
+func planPriorityFromSnapshot(raw []byte) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var snap struct {
+		Priority int `json:"priority,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		return 0
+	}
+	return snap.Priority
 }
 
 // effectiveClaimLabels is the combined Requires + WhenRunner label

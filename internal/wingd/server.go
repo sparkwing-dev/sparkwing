@@ -442,9 +442,10 @@ func softCoreCostSource(costSource wingwire.CostSource) bool {
 	}
 }
 
-func requestFromWire(runID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource) admission.Request {
+func requestFromWire(runID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int) admission.Request {
 	req := admission.Request{
 		ID:          runID,
+		Priority:    priority,
 		Cores:       res.Cores,
 		SoftCores:   softCoreCostSource(costSource),
 		StrictCores: strictCoreCostSource(costSource),
@@ -534,11 +535,12 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	} else {
 		charged, pinClamped = d.clampHostChargeLocked(charged, req.CostSource)
 	}
-	ar := requestFromWire(req.RunID, charged, req.Semaphores, req.CostSource)
+	ar := requestFromWire(req.RunID, charged, req.Semaphores, req.CostSource, req.Priority)
 	c.runID = req.RunID
 	c.ownerRunID = req.OwnerRunID
 	c.displayRunID = req.DisplayRunID
 	c.pipeline = req.Pipeline
+	c.priority = req.Priority
 	c.repo = req.Repo
 	c.pid = req.PID
 	c.resources = charged
@@ -623,6 +625,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			c.leaseID = leaseID
 			c.members = cloneStrings(existing.members)
 			c.resources = existing.resources
+			c.priority = existing.priority
 			c.ownerRunID = existing.ownerRunID
 			c.displayRunID = existing.displayRunID
 			if !existing.startAt.IsZero() {
@@ -748,6 +751,7 @@ func requestIdentityMatches(existing *conn, req *wingwire.AdmissionRequest) bool
 		existing.repo == req.Repo &&
 		existing.pid == req.PID &&
 		existing.origin == req.Origin &&
+		existing.priority == req.Priority &&
 		existing.ownerRunID == req.OwnerRunID &&
 		existing.displayRunID == req.DisplayRunID &&
 		claimRequestsMatch(existing.requestSemaphores, req.Semaphores) &&

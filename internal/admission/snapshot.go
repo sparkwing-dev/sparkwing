@@ -67,11 +67,12 @@ type HoldState struct {
 	SupersededBy LeaseID `json:"superseded_by,omitempty"`
 }
 
-// WaiterState is one queued request in a [Snapshot], in arrival order.
+// WaiterState is one queued request in a [Snapshot], in admission order.
 type WaiterState struct {
 	Arrival     uint64       `json:"arrival"`
 	Admit       uint64       `json:"admit,omitempty"`
 	RequestID   string       `json:"request_id"`
+	Priority    int          `json:"priority,omitempty"`
 	MilliCores  int64        `json:"milli_cores"`
 	SoftCores   bool         `json:"soft_cores,omitempty"`
 	StrictCores bool         `json:"strict_cores,omitempty"`
@@ -80,7 +81,7 @@ type WaiterState struct {
 }
 
 // Snapshot captures the full ledger state deterministically: leases in
-// grant order, semaphores sorted by key, waiters in arrival order,
+// grant order, semaphores sorted by key, waiters in admission order,
 // members sorted.
 func (l *Ledger) Snapshot() Snapshot {
 	l.mu.Lock()
@@ -141,6 +142,7 @@ func (l *Ledger) Snapshot() Snapshot {
 			Arrival:     w.arrival,
 			Admit:       w.spec.admit,
 			RequestID:   w.spec.id,
+			Priority:    w.spec.priority,
 			MilliCores:  w.spec.milliCores,
 			SoftCores:   w.spec.softCores,
 			StrictCores: w.spec.strictCores,
@@ -299,6 +301,7 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 		spec: spec{
 			id:          ws.RequestID,
 			admit:       ws.Admit,
+			priority:    ws.Priority,
 			milliCores:  ws.MilliCores,
 			softCores:   ws.SoftCores,
 			strictCores: ws.StrictCores,

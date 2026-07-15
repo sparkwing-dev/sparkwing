@@ -75,11 +75,12 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h), orDash(queueParentID(h)))
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			wt.Position, wt.RunID, orDash(wt.ParticipantID), queueDisplayRunID(wt.RunID, wt.DisplayRunID),
+		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+			wt.Position, wt.RunID, orDash(wt.ParticipantID),
+			queueDisplayRunID(wt.RunID, wt.DisplayRunID),
 			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)),
 			fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
-			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason))
+			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason), wt.Priority)
 	}
 	for _, r := range qs.Runners {
 		fmt.Fprintf(w, "runner\t%s\t%.3f\t%d\t%d\n", r.Name, r.Cores, r.MemoryBytes, r.QueueDepth)
@@ -163,15 +164,16 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Waiting")
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "POS\tRUN\tPIPELINE\tREPO\tORIGIN\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
+	fmt.Fprintln(tw, "POS\tPRI\tRUN\tPIPELINE\tREPO\tORIGIN\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
 	if len(qs.Waiters) == 0 {
-		fmt.Fprintln(tw, "-\t(no one queued)\t\t\t\t\t\t\t\t")
+		fmt.Fprintln(tw, "-\t-\t(no one queued)\t\t\t\t\t\t\t\t")
 	}
 	for _, wt := range qs.Waiters {
 		run := queueDisplayRunID(wt.RunID, wt.DisplayRunID)
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, run, orDash(wt.Pipeline),
-			orDash(wt.Repo), orDash(OriginWord(wt.Origin)), fmtCost(wt.Resources), orDash(wt.CostSource),
-			fmtETA(wt.ExpectedStartMS), orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
+		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.Priority, run,
+			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)), fmtCost(wt.Resources),
+			orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS), orDash(joinKeys(wt.WaitingOn)),
+			fmtElapsed(wt.WaitingMS))
 	}
 	_ = tw.Flush()
 

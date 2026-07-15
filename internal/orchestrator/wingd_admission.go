@@ -207,6 +207,7 @@ func (la *LocalAdmission) admitRun(
 		CostSource:         wingwire.CostSource(res.Source),
 		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
 		Origin:             la.Origin,
+		Priority:           plan.PriorityValue(),
 	}
 	if prof != nil {
 		req.ExpectedP99MS = prof.P99Duration.Milliseconds()
@@ -301,6 +302,7 @@ func (la *LocalAdmission) admitNode(
 	backends Backends,
 	pipeline, runID, nodeID string,
 	node *sparkwing.JobNode,
+	priority int,
 ) (*runLease, error) {
 	res, _, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
 	req := wingwire.AdmissionRequest{
@@ -316,6 +318,7 @@ func (la *LocalAdmission) admitNode(
 		Origin:             la.Origin,
 		DriftWarning:       overCap,
 		SubLease:           true,
+		Priority:           priority,
 	}
 	lease, outcome, err := la.acquireBlocking(ctx, backends, runID, req)
 	if err != nil || outcome != admitProceed {
@@ -446,6 +449,7 @@ func (la *LocalAdmission) attachChildRun(
 		SemaphoresOnly: true,
 		Semaphores:     extra,
 		SubLease:       true,
+		Priority:       plan.PriorityValue(),
 	})
 	if err != nil || outcome != admitProceed {
 		rl.release()
@@ -793,6 +797,7 @@ type localAdmissionState struct {
 	token        string
 	childToken   string
 	hostAdmitted bool
+	priority     int
 }
 
 func withLocalAdmission(
@@ -801,6 +806,7 @@ func withLocalAdmission(
 	leaseToken string,
 	childToken string,
 	hostAdmitted bool,
+	priority int,
 ) context.Context {
 	if la == nil {
 		return ctx
@@ -810,6 +816,7 @@ func withLocalAdmission(
 		token:        leaseToken,
 		childToken:   childToken,
 		hostAdmitted: hostAdmitted,
+		priority:     priority,
 	})
 	if leaseToken != "" {
 		env := map[string]string{wingwire.LeaseTokenEnv: leaseToken}
@@ -835,6 +842,14 @@ func localAdmissionChildTokenFromContext(ctx context.Context) string {
 		return ""
 	}
 	return state.childToken
+}
+
+func localAdmissionPriorityFromContext(ctx context.Context) int {
+	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	if !ok {
+		return 0
+	}
+	return state.priority
 }
 
 // leaseTriggerEnv is the env a parent stamps onto spawned child
@@ -877,6 +892,7 @@ func (la *LocalAdmission) acquireNodeSlot(
 	ctx context.Context,
 	runID, nodeID string,
 	claim wingwire.SemaphoreClaim,
+	priority int,
 	onQueued func(wingwire.Queued),
 ) (*wingdclient.Lease, error) {
 	return la.acquireNodeAdmission(ctx, wingwire.AdmissionRequest{
@@ -886,6 +902,7 @@ func (la *LocalAdmission) acquireNodeSlot(
 		SemaphoresOnly: true,
 		Semaphores:     []wingwire.SemaphoreClaim{claim},
 		SubLease:       true,
+		Priority:       priority,
 	}, onQueued)
 }
 
@@ -895,6 +912,7 @@ func (la *LocalAdmission) acquireNodeHostSlot(
 	pipeline, runID, nodeID string,
 	node *sparkwing.JobNode,
 	claim wingwire.SemaphoreClaim,
+	priority int,
 	onQueued func(wingwire.Queued),
 ) (*wingdclient.Lease, error) {
 	res, _, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
@@ -912,6 +930,7 @@ func (la *LocalAdmission) acquireNodeHostSlot(
 		Origin:             la.Origin,
 		DriftWarning:       overCap,
 		SubLease:           true,
+		Priority:           priority,
 	}, onQueued)
 }
 

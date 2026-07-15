@@ -38,6 +38,7 @@ type conn struct {
 	ownerRunID   string
 	displayRunID string
 	pipeline     string
+	priority     int
 	pid          int
 	role         connRole
 	leaseID      admission.LeaseID

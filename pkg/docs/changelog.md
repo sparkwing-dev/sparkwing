@@ -47,6 +47,14 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **admission:** Plans can now declare a local admission priority with
+  `Plan.Priority(n)`. Higher-priority queued runs admit before lower-priority
+  runs while equal-priority runs keep FIFO order; `sparkwing queue` now shows
+  waiter priority in human and plain output.
+- **cli:** Source-built scaffolds now fall back to the latest published SDK in
+  this release line when the running binary has no stamped version.
 
 ## [v0.17.11] - 2026-07-14
 ### Fixed

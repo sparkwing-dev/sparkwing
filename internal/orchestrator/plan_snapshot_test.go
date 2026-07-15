@@ -317,6 +317,20 @@ func TestMarshalPlanSnapshot_CarriesResourceHints(t *testing.T) {
 	}
 }
 
+func TestMarshalPlanSnapshot_CarriesPriority(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	plan.Priority(100)
+	sparkwing.Job(plan, "build", func(context.Context) error { return nil })
+
+	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"}, planSnapshotMeta{})
+	if err != nil {
+		t.Fatalf("marshalPlanSnapshot: %v", err)
+	}
+	if got := planPriorityFromSnapshot(raw); got != 100 {
+		t.Fatalf("priority = %d, want 100", got)
+	}
+}
+
 func TestMarshalPlanSnapshot_OmitsResourcesWhenUndeclared(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "build", func(ctx context.Context) error { return nil })

@@ -168,6 +168,9 @@ type AdmissionRequest struct {
 	// is treated as [OriginLocal]. Display metadata only; the daemon treats
 	// every requester equally.
 	Origin Origin `json:"origin,omitempty"`
+	// Priority orders queued work. Larger values admit before smaller
+	// values; equal values keep FIFO order.
+	Priority int `json:"priority,omitempty"`
 }
 
 // Grant is the daemon's admission of a request. The lease lives as
@@ -209,7 +212,7 @@ type Queued struct {
 	QueueLength int `json:"queue_length"`
 	// BlockingReason is a one-line explanation of what the run is waiting
 	// on -- naming needed versus available host capacity and external
-	// load when host pressure is the cause. Empty for a pure arrival-order
+	// load when host pressure is the cause. Empty for a pure admission-order
 	// wait or an older daemon.
 	BlockingReason string `json:"blocking_reason,omitempty"`
 }
@@ -352,7 +355,7 @@ type Holder struct {
 }
 
 // Waiter is one run queued for admission, as reported in a
-// [QueueState]. Waiters appear in arrival order; Position is its
+// [QueueState]. Waiters appear in admission order; Position is its
 // 1-based place in that order.
 type Waiter struct {
 	RunID string `json:"run_id"`
@@ -367,20 +370,21 @@ type Waiter struct {
 	// Repo is the short repo name the run was launched from, for
 	// display. Empty when the run did not report one.
 	Repo string `json:"repo,omitempty"`
-	// Position is the waiter's 1-based place in arrival order; 1 is
+	// Position is the waiter's 1-based place in admission order; 1 is
 	// admitted next.
 	Position   int           `json:"position"`
+	Priority   int           `json:"priority,omitempty"`
 	Resources  HostResources `json:"resources"`
 	Semaphores []string      `json:"semaphores,omitempty"`
 	// WaitingOn names the resources the waiter lacks room for right now
 	// -- host dimensions ("cores", "memory") and full semaphore keys.
-	// Empty means the waiter is held only by arrival order behind a
+	// Empty means the waiter is held only by admission order behind a
 	// heavier request ahead of it.
 	WaitingOn []string `json:"waiting_on,omitempty"`
 	// BlockingReason is a one-line, human explanation of why this waiter
 	// is not yet admitted, naming what it needs against what is available
 	// and any external load ("needs 5.0 cores; 4.8 available (external
-	// load 3.2)"). Empty when the wait is pure arrival-order queueing or
+	// load 3.2)"). Empty when the wait is pure admission-order queueing or
 	// the daemon predates this field.
 	BlockingReason string `json:"blocking_reason,omitempty"`
 	// WaitingMS is how long the run has been queued, in milliseconds.

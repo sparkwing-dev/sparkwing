@@ -1484,7 +1484,7 @@ func TestWingd_NodeGroupDoesNotHoldSemaphoreWhileWaitingForHostAdmission(t *test
 		Resources(sparkwing.Cores(1)).
 		Concurrency(group)
 	r := NewInProcessRunner(backends)
-	ctx := withLocalAdmission(context.Background(), la, "", "", false)
+	ctx := withLocalAdmission(context.Background(), la, "", "", false, 0)
 
 	result := make(chan runner.Result, 1)
 	go func() {
@@ -1555,7 +1555,7 @@ func TestWingd_NodeHostAdmissionAndNodeSemaphoreUseDistinctParticipants(t *testi
 			ctx, cancel := context.WithTimeout(context.Background(), wingdTestWait)
 			defer cancel()
 
-			hostLease, err := la.admitNode(ctx, backends, "runner-mode", tc.runID, tc.hostNodeID, nil)
+			hostLease, err := la.admitNode(ctx, backends, "runner-mode", tc.runID, tc.hostNodeID, nil, 0)
 			if err != nil {
 				t.Fatalf("admit node host resources: %v", err)
 			}
@@ -1567,7 +1567,7 @@ func TestWingd_NodeHostAdmissionAndNodeSemaphoreUseDistinctParticipants(t *testi
 				Cost:     1,
 				Policy:   wingwire.PolicyQueue,
 			}
-			semLease, err := la.acquireNodeSlot(ctx, tc.runID, tc.semNodeID, claim, nil)
+			semLease, err := la.acquireNodeSlot(ctx, tc.runID, tc.semNodeID, claim, 0, nil)
 			if err != nil {
 				t.Fatalf("acquire node semaphore after host admission: %v", err)
 			}

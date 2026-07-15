@@ -95,7 +95,7 @@ func TestInProcessRunnerRunNodeAdmissionFailurePersistsAfterContextCancel(t *tes
 		Home:   home,
 		Stderr: io.Discard,
 		Spawn:  func(string, string) error { return errors.New("daemon unavailable") },
-	}, "", "", false)
+	}, "", "", false, 0)
 
 	r := &InProcessRunner{backends: LocalBackends(paths, st, nil)}
 	res := r.RunNode(cancelled, runner.Request{

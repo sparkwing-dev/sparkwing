@@ -1,8 +1,6 @@
 package wingd
 
 import (
-	"fmt"
-
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -222,40 +220,16 @@ func waiterResources(waiter admission.WaiterState) map[string]struct{} {
 	return resources
 }
 
-// cancelWaiterLocked removes a queued run whose connection died. The
-// ledger has no waiter-removal primitive, so the queue is rebuilt from a
-// snapshot: restore the holders alone, then re-submit every surviving
-// waiter in arrival order. Per the ledger's FIFO guarantees this
-// reproduces the exact post-cancellation state -- including promoting a
-// lighter waiter that the dead one was blocking -- and the re-submits'
-// events carry those promotions and position changes back out. The caller
+// cancelWaiterLocked removes a queued run whose connection died. The caller
 // holds d.mu.
 func (d *Daemon) cancelWaiterLocked(runID string) []admission.Event {
-	snap := d.ledger.Snapshot()
-	base := snap
-	base.Waiters = nil
-	lg, err := admission.Restore(base, nil)
-	if err != nil {
-		panic(fmt.Sprintf("wingd: rebuild ledger without holders failed: %v", err))
-	}
-	var events []admission.Event
-	for _, w := range snap.Waiters {
-		if w.RequestID == runID {
-			continue
-		}
-		_, evs, err := lg.Submit(requestFromWaiter(w))
-		if err != nil {
-			panic(fmt.Sprintf("wingd: re-submit waiter %q during rebuild: %v", w.RequestID, err))
-		}
-		events = append(events, evs...)
-	}
-	d.ledger = lg
-	return events
+	return d.ledger.CancelWaiter(runID)
 }
 
 func requestFromWaiter(w admission.WaiterState) admission.Request {
 	req := admission.Request{
 		ID:          w.RequestID,
+		Priority:    w.Priority,
 		Cores:       float64(w.MilliCores) / 1000.0,
 		SoftCores:   w.SoftCores,
 		StrictCores: w.StrictCores,

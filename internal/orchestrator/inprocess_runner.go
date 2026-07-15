@@ -159,7 +159,8 @@ func (r *InProcessRunner) executeNodeWithAdmission(ctx context.Context, req runn
 	if req.ReleaseWorkerSlot != nil {
 		req.ReleaseWorkerSlot()
 	}
-	lease, err := la.admitNode(ctx, r.backends, req.Pipeline, req.RunID, nodeID, req.Node)
+	priority := localAdmissionPriorityFromContext(ctx)
+	lease, err := la.admitNode(ctx, r.backends, req.Pipeline, req.RunID, nodeID, req.Node, priority)
 	if req.ReacquireWorkerSlot != nil && !req.ReacquireWorkerSlot() {
 		if lease != nil {
 			lease.release()
@@ -174,7 +175,7 @@ func (r *InProcessRunner) executeNodeWithAdmission(ctx context.Context, req runn
 	if childToken == "" {
 		childToken = lease.token
 	}
-	nodeCtx := withLocalAdmission(ctx, la, lease.token, childToken, lease.hostAdmitted)
+	nodeCtx := withLocalAdmission(ctx, la, lease.token, childToken, lease.hostAdmitted, priority)
 	return r.executeNode(nodeCtx, req.RunID, req.Node, req.Delegate)
 }
 

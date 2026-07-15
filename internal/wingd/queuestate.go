@@ -171,6 +171,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			ParticipantID: rowID.participantID,
 			DisplayRunID:  rowID.displayRunID,
 			Position:      i + 1,
+			Priority:      w.Priority,
 			Resources: wingwire.HostResources{
 				Cores:       float64(w.MilliCores) / 1000.0,
 				MemoryBytes: int64(w.MemoryBytes),
@@ -495,7 +496,7 @@ func reconciledExternal(capacity, held, reserved, available float64) float64 {
 // waitingOn names the resources a waiter cannot fit into right now: host
 // dimensions and full semaphore keys whose remaining room is smaller than
 // what the waiter draws. An empty result means the waiter is blocked only
-// by arrival order behind a heavier request ahead of it.
+// by admission order behind a heavier request ahead of it.
 func waitingOn(w admission.WaiterState, remaining map[string]float64) []string {
 	var keys []string
 	if cores := float64(w.MilliCores) / 1000.0; cores > 0 && remaining["cores"] < cores {
@@ -569,7 +570,7 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale 
 // Cores bind before memory. rationale, when non-empty, explains where the
 // charge came from and is folded in right after the need ("needs 5.0 cores
 // (measured p99 over 12 runs); ..."). Empty when neither host dimension
-// blocks the run (a pure semaphore or arrival-order wait).
+// blocks the run (a pure semaphore or admission-order wait).
 func hostBlockingReason(needCores, needMem float64, available map[string]wingwire.ResourceState, rationale string) string {
 	if needCores > 0 {
 		if r, ok := available["cores"]; ok && r.Available < needCores {

@@ -34,6 +34,9 @@ type Plan struct {
 	// Plan.Resources; nil when the plan declared none.
 	resources *ResourceHints
 
+	// priority is the run's local admission priority.
+	priority int
+
 	// lintWarnings accumulates non-fatal Plan-time advisories.
 	lintWarnings []LintWarning
 

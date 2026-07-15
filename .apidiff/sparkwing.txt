@@ -439,6 +439,8 @@ func (p *Plan) JobGroupNames(id string) []string
 func (p *Plan) LintWarnings() []LintWarning
 func (p *Plan) Nodes() []*JobNode
 func (p *Plan) PlanConcurrency() []PlanConcurrency
+func (p *Plan) Priority(n int) *Plan
+func (p *Plan) PriorityValue() int
 func (p *Plan) ResolvedArgs() map[string]any
 func (p *Plan) ResourceHints() *ResourceHints
 func (p *Plan) Resources(hints ...ResourceHint) *Plan
