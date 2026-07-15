@@ -130,6 +130,8 @@ github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 h1:GHRpF1pTW19a
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46/go.mod h1:uAQ5PCi+MFsC7HjREoAz1BU+Mq60+05gifQSsHSDG/8=
 github.com/sparkwing-dev/sparkwing v0.17.11 h1:EymJfPWHubfmKr0LWszKlAVFN6CQrRLGekbjvacN5BQ=
 github.com/sparkwing-dev/sparkwing v0.17.11/go.mod h1:IMJRmtvYCaV2KH17w6MJ30CuIwgeUdatX3NSSO6Umeo=
+github.com/sparkwing-dev/sparkwing v0.17.12 h1:dZd8H3F6r3eoNX8LXFPS+hWJijCIczpZRT5u8Nq9ukI=
+github.com/sparkwing-dev/sparkwing v0.17.12/go.mod h1:IMJRmtvYCaV2KH17w6MJ30CuIwgeUdatX3NSSO6Umeo=
 github.com/stretchr/objx v0.1.0/go.mod h1:HFkY916IF+rwdDfMAkV7OtwuqBVzrE8GR6GFx+wExME=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
