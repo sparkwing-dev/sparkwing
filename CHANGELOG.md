@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.12] - 2026-07-15
 ### Added
 
 - **admission:** Plans can now declare a local admission priority with
