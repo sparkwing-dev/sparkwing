@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.14] - 2026-07-16
 ### Fixed
 
 - **cluster:** Remote pipeline triggers can seed a controller-backed gitcache
