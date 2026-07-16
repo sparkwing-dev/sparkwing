@@ -10,14 +10,9 @@ import (
 	"os/signal"
 	"time"
 
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
@@ -108,12 +103,17 @@ func runWorkerCLI(args []string) error {
 	switch *runnerKind {
 	case "", "inprocess":
 	case "k8s":
-		factory, err := buildK8sRunnerFactory(*kubeconfig, *k8sNamespace, *k8sImage,
-			*k8sSA, *k8sPullSecret,
-			firstNonEmpty(*k8sCtrlURL, *controllerURL),
-			firstNonEmpty(*k8sLogsURL, *logsURL),
-			*artifactStoreURL,
-			*token)
+		factory, err := orchestrator.BuildK8sRunnerFactory(orchestrator.K8sRunnerFactoryConfig{
+			Kubeconfig:       *kubeconfig,
+			Namespace:        *k8sNamespace,
+			Image:            *k8sImage,
+			ServiceAccount:   *k8sSA,
+			ImagePullSecret:  *k8sPullSecret,
+			ControllerURL:    firstNonEmpty(*k8sCtrlURL, *controllerURL),
+			LogsURL:          firstNonEmpty(*k8sLogsURL, *logsURL),
+			ArtifactStoreURL: *artifactStoreURL,
+			AgentToken:       *token,
+		})
 		if err != nil {
 			return fmt.Errorf("k8s runner: %w", err)
 		}
@@ -121,12 +121,17 @@ func runWorkerCLI(args []string) error {
 	case "warm":
 		var k8sFactory func(orchestrator.Backends, *store.Trigger) runner.Runner
 		if *k8sImage != "" {
-			f, err := buildK8sRunnerFactory(*kubeconfig, *k8sNamespace, *k8sImage,
-				*k8sSA, *k8sPullSecret,
-				firstNonEmpty(*k8sCtrlURL, *controllerURL),
-				firstNonEmpty(*k8sLogsURL, *logsURL),
-				*artifactStoreURL,
-				*token)
+			f, err := orchestrator.BuildK8sRunnerFactory(orchestrator.K8sRunnerFactoryConfig{
+				Kubeconfig:       *kubeconfig,
+				Namespace:        *k8sNamespace,
+				Image:            *k8sImage,
+				ServiceAccount:   *k8sSA,
+				ImagePullSecret:  *k8sPullSecret,
+				ControllerURL:    firstNonEmpty(*k8sCtrlURL, *controllerURL),
+				LogsURL:          firstNonEmpty(*k8sLogsURL, *logsURL),
+				ArtifactStoreURL: *artifactStoreURL,
+				AgentToken:       *token,
+			})
 			if err != nil {
 				return fmt.Errorf("warm runner (fallback k8s): %w", err)
 			}
@@ -142,63 +147,6 @@ func runWorkerCLI(args []string) error {
 	}
 
 	return RunWorker(ctx, opts)
-}
-
-// buildK8sRunnerFactory wires a kubernetes.Interface and closes over
-// the shared K8sRunner config so every claimed trigger gets its own
-// runner bound to the same cluster / namespace / image. The agentToken
-// argument is stamped into each Job pod so the spawned runner's
-// controller + logs calls authenticate under FOLLOWUPS #2 auth.
-func buildK8sRunnerFactory(kubeconfig, namespace, image, sa, pullSecret, ctrlURL, logsURL, artifactStoreURL, agentToken string) (func(orchestrator.Backends, *store.Trigger) runner.Runner, error) {
-	if image == "" {
-		return nil, fmt.Errorf("--image (or SPARKWING_RUNNER_IMAGE) is required with --runner k8s")
-	}
-	if namespace == "" {
-		return nil, fmt.Errorf("--namespace (or POD_NAMESPACE) is required with --runner k8s")
-	}
-	if ctrlURL == "" {
-		return nil, fmt.Errorf("runner must be given a controller URL (via --runner-controller-url or --controller)")
-	}
-	var rc *rest.Config
-	var err error
-	if kubeconfig != "" {
-		rc, err = clientcmd.BuildConfigFromFlags("", kubeconfig)
-	} else {
-		rc, err = rest.InClusterConfig()
-	}
-	if err != nil {
-		return nil, fmt.Errorf("kube config: %w", err)
-	}
-	kcli, err := kubernetes.NewForConfig(rc)
-	if err != nil {
-		return nil, fmt.Errorf("kube client: %w", err)
-	}
-	cfg := k8srunner.Config{
-		Namespace:          namespace,
-		Image:              image,
-		ImagePullSecret:    pullSecret,
-		ServiceAccountName: sa,
-		ControllerURL:      ctrlURL,
-		LogsURL:            logsURL,
-		ArtifactStoreURL:   artifactStoreURL,
-		AgentToken:         agentToken,
-		CPURequest:         "100m",
-		MemoryRequest:      "128Mi",
-		CPULimit:           "2",
-		MemoryLimit:        "2Gi",
-		PollInterval:       time.Second,
-	}
-	logger := slog.Default()
-	return func(_ orchestrator.Backends, _ *store.Trigger) runner.Runner {
-		httpClient := &http.Client{Timeout: 30 * time.Second}
-		var ctrl *client.Client
-		if agentToken != "" {
-			ctrl = client.NewWithToken(ctrlURL, httpClient, agentToken)
-		} else {
-			ctrl = client.New(ctrlURL, httpClient)
-		}
-		return k8srunner.New(kcli, ctrl, cfg, logger)
-	}, nil
 }
 
 // buildWarmPoolFactory wraps a K8sRunner factory with the warm-pool

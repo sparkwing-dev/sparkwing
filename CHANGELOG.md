@@ -48,6 +48,14 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.17.16] - 2026-07-16
+### Fixed
+
+- **cluster:** Trigger workers can pass `--trigger-runner=k8s` with
+  `--claim-nodes=false` so claimed triggers dispatch pipeline nodes through
+  Kubernetes Jobs instead of running each node inside the long-lived trigger
+  worker.
+
 ## [v0.17.15] - 2026-07-16
 ### Fixed
 

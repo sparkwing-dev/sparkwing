@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -146,5 +147,16 @@ func TestRunPoolLoop_EmptyPollsDoNotTickCounter(t *testing.T) {
 
 	if got := executed.Load(); got != 2 {
 		t.Errorf("exec calls: got %d, want 2 (empty/error should not count toward MaxClaims)", got)
+	}
+}
+
+func TestRunRunnerCLI_ClaimNodesFalseRequiresTriggerLoop(t *testing.T) {
+	err := runRunnerCLI([]string{
+		"--controller=http://controller",
+		"--metrics-addr=",
+		"--claim-nodes=false",
+	})
+	if err == nil || !strings.Contains(err.Error(), "--claim-nodes=false requires --also-claim-triggers") {
+		t.Fatalf("runRunnerCLI() error = %v, want claim-nodes/trigger-loop validation", err)
 	}
 }

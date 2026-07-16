@@ -245,10 +245,30 @@ func runRunnerCLI(args []string) error {
 		"exit the loop after N successful claims so kubelet restarts the container (0 = unlimited; FOLLOWUPS #12)")
 	alsoClaimTriggers := fs.Bool("also-claim-triggers", false,
 		"run the trigger-loop (claim triggers, clone repo, compile, exec handle-trigger) as a goroutine alongside the node-claim loop. Lets one warm-runner pool handle both trigger and node layers.")
+	claimNodes := fs.Bool("claim-nodes", true,
+		"claim and execute controller node work in this runner process")
 	gitcacheURL := fs.String("gitcache", os.Getenv("SPARKWING_GITCACHE_URL"),
 		"sparkwing-cache URL for the trigger-loop (required when --also-claim-triggers is set)")
 	triggerSources := fs.String("trigger-sources", "",
 		"comma-separated trigger_source values the trigger loop handles (e.g. github); empty = accept any source")
+	triggerRunnerKind := fs.String("trigger-runner", os.Getenv("SPARKWING_TRIGGER_RUNNER"),
+		"node runner used by claimed triggers: inprocess | k8s")
+	triggerRunnerNamespace := fs.String("trigger-runner-namespace", os.Getenv("POD_NAMESPACE"),
+		"namespace for trigger-spawned runner Jobs (k8s)")
+	triggerRunnerImage := fs.String("trigger-runner-image", os.Getenv("SPARKWING_RUNNER_IMAGE"),
+		"runner image for trigger-spawned runner Jobs (k8s)")
+	triggerRunnerSA := fs.String("trigger-runner-sa", os.Getenv("SPARKWING_RUNNER_SA"),
+		"service account for trigger-spawned runner Jobs (k8s)")
+	triggerRunnerPullSecret := fs.String("trigger-runner-image-pull-secret", os.Getenv("SPARKWING_IMAGE_PULL_SECRET"),
+		"imagePullSecret for trigger-spawned runner Jobs (k8s)")
+	triggerRunnerCtrlURL := fs.String("trigger-runner-controller-url", os.Getenv("SPARKWING_RUNNER_CONTROLLER_URL"),
+		"controller URL for trigger-spawned runner Jobs (defaults to --controller)")
+	triggerRunnerLogsURL := fs.String("trigger-runner-logs-url", os.Getenv("SPARKWING_RUNNER_LOGS_URL"),
+		"logs-service URL for trigger-spawned runner Jobs (defaults to --logs)")
+	triggerRunnerKubeconfig := fs.String("trigger-runner-kubeconfig", os.Getenv("KUBECONFIG"),
+		"kubeconfig path for creating trigger-spawned Jobs (empty = in-cluster)")
+	triggerArtifactStore := fs.String("trigger-artifact-store", os.Getenv("SPARKWING_CACHE_URL"),
+		"artifact/cache store URL passed to trigger-spawned runner Jobs")
 	localAdmission := fs.Bool("local-admission", false,
 		"route claimed nodes through this box's local admission daemon (for a runner on a box that also runs local pipelines; off for in-cluster pods)")
 	localReserve := fs.String("local-reserve", os.Getenv("SPARKWING_LOCAL_RESERVE"),
@@ -300,6 +320,15 @@ func runRunnerCLI(args []string) error {
 				LogsURL:       *logsURL,
 				GitcacheURL:   *gitcacheURL,
 				Token:         *token,
+				RunnerKind:    *triggerRunnerKind,
+				K8sNamespace:  *triggerRunnerNamespace,
+				K8sImage:      *triggerRunnerImage,
+				K8sRunnerSA:   *triggerRunnerSA,
+				K8sPullSecret: *triggerRunnerPullSecret,
+				K8sCtrlURL:    firstNonEmpty(*triggerRunnerCtrlURL, *controllerURL),
+				K8sLogsURL:    firstNonEmpty(*triggerRunnerLogsURL, *logsURL),
+				Kubeconfig:    *triggerRunnerKubeconfig,
+				ArtifactStore: *triggerArtifactStore,
 				Poll:          *poll,
 				Logger:        slog.Default().With("loop", "trigger"),
 				Sources:       splitCSV(*triggerSources),
@@ -307,6 +336,13 @@ func runRunnerCLI(args []string) error {
 				slog.Default().Error("trigger loop exited with error", "err", err)
 			}
 		}()
+	}
+	if !*claimNodes {
+		if !*alsoClaimTriggers {
+			return errors.New("--claim-nodes=false requires --also-claim-triggers")
+		}
+		<-ctx.Done()
+		return nil
 	}
 
 	return RunPoolLoop(ctx, PoolLoopConfig{

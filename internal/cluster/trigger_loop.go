@@ -34,6 +34,15 @@ type TriggerLoopOptions struct {
 	LogsURL       string
 	GitcacheURL   string
 	Token         string
+	RunnerKind    string
+	K8sNamespace  string
+	K8sImage      string
+	K8sRunnerSA   string
+	K8sPullSecret string
+	K8sCtrlURL    string
+	K8sLogsURL    string
+	Kubeconfig    string
+	ArtifactStore string
 	WorkRoot      string
 	Poll          time.Duration
 	Logger        *slog.Logger
@@ -195,14 +204,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 // execHandleTrigger runs the child pipeline binary with workDir as cwd.
 // Git metadata isn't forwarded via env; the child reads the cloned .git directly.
 func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *store.Trigger, opts TriggerLoopOptions, logger *slog.Logger) error {
-	childArgs := []string{
-		"handle-trigger", trigger.ID,
-		"--controller", opts.ControllerURL,
-		"--token", opts.Token,
-	}
-	if opts.LogsURL != "" {
-		childArgs = append(childArgs, "--logs", opts.LogsURL)
-	}
+	childArgs := handleTriggerArgs(trigger.ID, opts)
 
 	childCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
@@ -229,6 +231,41 @@ func execHandleTrigger(ctx context.Context, binPath, workDir string, trigger *st
 		return fmt.Errorf("child pipeline binary: %w", err)
 	}
 	return nil
+}
+
+func handleTriggerArgs(triggerID string, opts TriggerLoopOptions) []string {
+	childArgs := []string{
+		"handle-trigger",
+		"--controller", opts.ControllerURL,
+		"--token", opts.Token,
+	}
+	if opts.LogsURL != "" {
+		childArgs = append(childArgs, "--logs", opts.LogsURL)
+	}
+	childArgs = append(childArgs, triggerRunnerArgs(opts)...)
+	childArgs = append(childArgs, triggerID)
+	return childArgs
+}
+
+func triggerRunnerArgs(opts TriggerLoopOptions) []string {
+	if opts.RunnerKind == "" || opts.RunnerKind == "inprocess" {
+		return nil
+	}
+	args := []string{"--runner", opts.RunnerKind}
+	appendFlag := func(name, val string) {
+		if val != "" {
+			args = append(args, name, val)
+		}
+	}
+	appendFlag("--namespace", opts.K8sNamespace)
+	appendFlag("--image", opts.K8sImage)
+	appendFlag("--runner-sa", opts.K8sRunnerSA)
+	appendFlag("--image-pull-secret", opts.K8sPullSecret)
+	appendFlag("--runner-controller-url", opts.K8sCtrlURL)
+	appendFlag("--runner-logs-url", opts.K8sLogsURL)
+	appendFlag("--kubeconfig", opts.Kubeconfig)
+	appendFlag("--artifact-store", opts.ArtifactStore)
+	return args
 }
 
 // shipCompileOutput posts the captured `go build` output for a
