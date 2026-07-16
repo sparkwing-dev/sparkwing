@@ -433,7 +433,7 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		Name:            "runner",
 		Image:           r.cfg.Image,
 		ImagePullPolicy: corev1.PullAlways,
-		Command:         []string{"sparkwing"},
+		Command:         []string{"sparkwing-runner"},
 		Args:            []string{"run-node", req.RunID, req.NodeID},
 		Env:             env,
 		Resources:       podResources(res, r.cfg),

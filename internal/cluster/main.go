@@ -21,6 +21,8 @@ func Main() {
 		err = runWorkerCLI(os.Args[2:])
 	case "runner":
 		err = runRunnerCLI(os.Args[2:])
+	case "run-node":
+		err = runNodeCLI(os.Args[2:])
 	case "agent":
 		err = RunAgentCLI(os.Args[2:])
 	case "wingd":
@@ -40,7 +42,7 @@ func Main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: sparkwing-runner <runner|worker|agent> [flags]")
+	fmt.Fprintln(os.Stderr, "usage: sparkwing-runner <runner|worker|agent|run-node> [flags]")
 	fmt.Fprintln(os.Stderr, "  runner  - long-lived warm pool pod (claims triggers + nodes)")
 	fmt.Fprintln(os.Stderr, "  worker  - legacy trigger-only claim loop (prefer 'runner --also-claim-triggers')")
 	fmt.Fprintln(os.Stderr, "  agent   - laptop agent (YAML-configured, off-cluster)")

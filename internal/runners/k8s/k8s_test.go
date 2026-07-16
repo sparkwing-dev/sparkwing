@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -44,6 +45,18 @@ func TestBuildJob_OmitsArtifactStoreURLWhenEmpty(t *testing.T) {
 	env := jobEnv(t, Config{Image: "img"})
 	if _, ok := env["SPARKWING_CACHE_URL"]; ok {
 		t.Fatalf("SPARKWING_CACHE_URL should be absent when ArtifactStoreURL is empty")
+	}
+}
+
+func TestBuildJob_RunsNodeThroughRunnerBinary(t *testing.T) {
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	container := job.Spec.Template.Spec.Containers[0]
+	if !reflect.DeepEqual(container.Command, []string{"sparkwing-runner"}) {
+		t.Fatalf("command = %#v, want sparkwing-runner", container.Command)
+	}
+	if !reflect.DeepEqual(container.Args, []string{"run-node", "run-1", "node-1"}) {
+		t.Fatalf("args = %#v, want run-node run-1 node-1", container.Args)
 	}
 }
 
