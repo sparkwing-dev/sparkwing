@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.17.15] - 2026-07-16
 ### Fixed
 
 - **cache:** Gitcache seed uploads stream bundle bodies to disk instead of
