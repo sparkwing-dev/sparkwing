@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
@@ -48,6 +49,10 @@ type TriggerLoopOptions struct {
 	WorkRoot        string
 	Poll            time.Duration
 	Logger          *slog.Logger
+	// MaxConcurrent bounds in-flight trigger handlers in one worker.
+	// Values below 1 use the default. A value above 1 lets a worker claim
+	// RunAndAwait child triggers while the parent handler waits.
+	MaxConcurrent int
 	// Sources filters claim requests by trigger_source; empty = any.
 	// The warm-runner sets ["github"] so it only claims webhook-originated
 	// triggers and doesn't swallow manual/schedule work.
@@ -68,6 +73,9 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	if opts.Poll <= 0 {
 		opts.Poll = time.Second
 	}
+	if opts.MaxConcurrent < 1 {
+		opts.MaxConcurrent = 4
+	}
 	if opts.WorkRoot == "" {
 		opts.WorkRoot = filepath.Join(bincache.SparkwingHome(), "trigger-loop")
 	}
@@ -86,7 +94,14 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 		"gitcache", opts.GitcacheURL,
 		"poll", opts.Poll,
 		"work_root", opts.WorkRoot,
+		"max_concurrent", opts.MaxConcurrent,
 	)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sem := make(chan struct{}, opts.MaxConcurrent)
+	var wg sync.WaitGroup
+	defer wg.Wait()
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -94,8 +109,15 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			return nil
 		}
 
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			return nil
+		}
+
 		trigger, err := cli.ClaimTriggerFor(ctx, nil, opts.Sources)
 		if err != nil {
+			<-sem
 			if errors.Is(err, context.Canceled) {
 				return nil
 			}
@@ -104,6 +126,7 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			continue
 		}
 		if trigger == nil {
+			<-sem
 			sleepOrCancel(ctx, opts.Poll)
 			continue
 		}
@@ -112,23 +135,29 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			"pipeline", trigger.Pipeline,
 			"repo", trigger.TriggerEnv["GITHUB_REPOSITORY"])
 
-		selfTerminate, err := handleOneTrigger(ctx, cli, trigger, opts, logger)
-		if err != nil {
-			logger.Error("trigger loop: trigger failed",
-				"run_id", trigger.ID, "err", err)
-			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-			if ferr := cli.FinishRun(finishCtx, trigger.ID, "failed", err.Error()); ferr != nil {
-				logger.Warn("trigger loop: FinishRun failed",
-					"run_id", trigger.ID, "err", ferr)
+		wg.Add(1)
+		go func(trigger *store.Trigger) {
+			defer wg.Done()
+			defer func() { <-sem }()
+
+			selfTerminate, err := handleOneTrigger(ctx, cli, trigger, opts, logger)
+			if err != nil {
+				logger.Error("trigger loop: trigger failed",
+					"run_id", trigger.ID, "err", err)
+				finishCtx, finishCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				if ferr := cli.FinishRun(finishCtx, trigger.ID, "failed", err.Error()); ferr != nil {
+					logger.Warn("trigger loop: FinishRun failed",
+						"run_id", trigger.ID, "err", ferr)
+				}
+				finishCancel()
+				_ = cli.FinishTrigger(context.WithoutCancel(ctx), trigger.ID)
 			}
-			cancel()
-			_ = cli.FinishTrigger(ctx, trigger.ID)
-		}
-		if selfTerminate {
-			logger.Error("trigger loop: self-terminating after prolonged controller silence",
-				"run_id", trigger.ID)
-			return nil
-		}
+			if selfTerminate {
+				logger.Error("trigger loop: self-terminating after prolonged controller silence",
+					"run_id", trigger.ID)
+				cancel()
+			}
+		}(trigger)
 	}
 }
 

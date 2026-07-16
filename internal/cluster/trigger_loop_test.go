@@ -1,9 +1,19 @@
 package cluster
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
 	"reflect"
 	"slices"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 func TestTriggerRunnerArgsK8s(t *testing.T) {
@@ -66,5 +76,71 @@ func TestHandleTriggerArgsPutFlagsBeforeTriggerID(t *testing.T) {
 	}
 	if got[len(got)-1] != "trigger-1" {
 		t.Fatalf("handleTriggerArgs() last arg = %q, want trigger id", got[len(got)-1])
+	}
+}
+
+func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
+	if os.Getenv("SPARKWING_TRIGGER_LOOP_HELPER") == "1" {
+		time.Sleep(500 * time.Millisecond)
+		os.Exit(0)
+	}
+
+	oldBaked := BakedBinary
+	BakedBinary = os.Args[0]
+	t.Cleanup(func() { BakedBinary = oldBaked })
+	t.Setenv("SPARKWING_TRIGGER_LOOP_HELPER", "1")
+
+	var claims atomic.Int32
+	var mu sync.Mutex
+	claimTimes := make([]time.Time, 0, 2)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/claim":
+			n := claims.Add(1)
+			if n > 2 {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			mu.Lock()
+			claimTimes = append(claimTimes, time.Now())
+			mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(store.Trigger{
+				ID:            "trigger-" + string(rune('0'+n)),
+				Pipeline:      "demo",
+				TriggerSource: "test",
+				Status:        "claimed",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/trigger-1/heartbeat":
+			_ = json.NewEncoder(w).Encode(map[string]bool{"cancel_requested": false})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/trigger-2/heartbeat":
+			_ = json.NewEncoder(w).Encode(map[string]bool{"cancel_requested": false})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
+	defer cancel()
+
+	err := RunTriggerLoop(ctx, TriggerLoopOptions{
+		ControllerURL: srv.URL,
+		GitcacheURL:   srv.URL,
+		WorkRoot:      t.TempDir(),
+		Poll:          10 * time.Millisecond,
+		MaxConcurrent: 2,
+	})
+	if err != nil {
+		t.Fatalf("RunTriggerLoop: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(claimTimes) < 2 {
+		t.Fatalf("claims = %d, want at least 2", len(claimTimes))
+	}
+	if gap := claimTimes[1].Sub(claimTimes[0]); gap > 250*time.Millisecond {
+		t.Fatalf("second claim gap = %s, want concurrent claim while first handler is running", gap)
 	}
 }
