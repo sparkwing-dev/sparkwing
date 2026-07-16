@@ -48,6 +48,13 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.17.21] - 2026-07-16
+### Fixed
+
+- **storage:** Artifact-store URLs with `http://` or `https://` now open the
+  `sparkwing-cache` HTTP backend, so cluster runner pods can reuse the shared
+  cache service for node artifacts.
+
 ## [v0.17.20] - 2026-07-16
 ### Fixed
 

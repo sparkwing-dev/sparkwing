@@ -3,6 +3,9 @@ package storeurl
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 )
@@ -93,6 +96,54 @@ func TestOpenArtifactStore_FS(t *testing.T) {
 	}
 	if s == nil {
 		t.Fatal("nil store")
+	}
+}
+
+func TestOpenArtifactStore_HTTP(t *testing.T) {
+	t.Parallel()
+	blobs := map[string]string{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := strings.TrimPrefix(r.URL.Path, "/bin/")
+		switch r.Method {
+		case http.MethodPut:
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			blobs[key] = string(body)
+			w.WriteHeader(http.StatusCreated)
+		case http.MethodGet:
+			body, ok := blobs[key]
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			_, _ = w.Write([]byte(body))
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	}))
+	defer srv.Close()
+
+	s, err := OpenArtifactStore(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if err := s.Put(context.Background(), "artifact-key", strings.NewReader("payload")); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	rc, err := s.Get(context.Background(), "artifact-key")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	defer rc.Close()
+	got, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(got) != "payload" {
+		t.Fatalf("payload = %q, want payload", got)
 	}
 }
 
