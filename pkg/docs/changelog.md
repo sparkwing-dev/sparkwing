@@ -48,12 +48,18 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.17.20] - 2026-07-16
+### Fixed
+
+- **cluster:** Kubernetes runner Jobs can execute node work through the
+  generic `sparkwing run-node` entrypoint, so runner job images can fetch the
+  triggered source and run a single claimed node.
+
 ## [v0.17.19] - 2026-07-16
 ### Fixed
 
 - **cluster:** Kubernetes runner Jobs now execute node work through the
-  `sparkwing-runner run-node` entrypoint, so generic runner images can fetch
-  the triggered source and run a single claimed node.
+  `sparkwing-runner run-node` entrypoint.
 
 ## [v0.17.18] - 2026-07-16
 ### Fixed

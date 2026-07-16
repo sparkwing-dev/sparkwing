@@ -238,6 +238,8 @@ func runSparkwing(args []string) error {
 		return runPipeline(args[1:])
 	case "run":
 		return dispatchRun(args[1:])
+	case "run-node":
+		return runNodeCommand(args[1:])
 	case "runs":
 		return runJobs(args[1:])
 	case "queue":

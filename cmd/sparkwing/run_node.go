@@ -1,4 +1,4 @@
-package cluster
+package main
 
 import (
 	"context"
@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
-func runNodeCLI(args []string) error {
+func runNodeCommand(args []string) error {
 	fs := flag.NewFlagSet("run-node", flag.ExitOnError)
 	controllerURL := fs.String("controller", orchestrator.ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"), "controller base URL")
 	logsURL := fs.String("logs", orchestrator.ResolveDevEnvURL("SPARKWING_LOGS_URL"), "logs-service URL")
@@ -38,7 +38,7 @@ func runNodeCLI(args []string) error {
 
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
 	res, err := orchestrator.RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID,
-		fmt.Sprintf("pod:%s:%s", runID, nodeID), token, &stdoutLogger{}, slog.Default(), nil)
+		fmt.Sprintf("pod:%s:%s", runID, nodeID), token, orchestrator.NewJSONRenderer(), slog.Default(), nil)
 	if err != nil {
 		return err
 	}
