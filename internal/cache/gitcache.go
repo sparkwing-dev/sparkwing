@@ -1202,9 +1202,19 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bundleData, err := io.ReadAll(io.LimitReader(r.Body, 500<<20))
+	tmpBundle, err := os.CreateTemp("", "seed-*.bundle")
 	if err != nil {
-		http.Error(w, "read failed: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "temp file: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer func() { _ = os.Remove(tmpBundle.Name()) }()
+	body := http.MaxBytesReader(w, r.Body, 500<<20)
+	size, err := io.Copy(tmpBundle, body)
+	if closeErr := tmpBundle.Close(); err == nil {
+		err = closeErr
+	}
+	if err != nil {
+		http.Error(w, "read bundle: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -1215,19 +1225,6 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 
 	bareRepo := filepath.Join(repoDir, hash+".git")
 	seedRef := "refs/sparkwing-seed/" + sha
-
-	tmpBundle, err := os.CreateTemp("", "seed-*.bundle")
-	if err != nil {
-		http.Error(w, "temp file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer func() { _ = os.Remove(tmpBundle.Name()) }()
-	if _, err := tmpBundle.Write(bundleData); err != nil {
-		tmpBundle.Close()
-		http.Error(w, "write bundle: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	tmpBundle.Close()
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
 		log.Printf("seed: creating bare repo from bundle for %s at %s", hash, sha[:8])
@@ -1256,9 +1253,9 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("seed: %s seeded %s (%d bytes)", hash, sha[:8], len(bundleData))
+	log.Printf("seed: %s seeded %s (%d bytes)", hash, sha[:8], size)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "size": len(bundleData)})
+	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "size": size})
 }
 
 func pruneUnreachableSeedObjects(bareRepo string) {

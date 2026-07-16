@@ -47,6 +47,11 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **cache:** Gitcache seed uploads stream bundle bodies to disk instead of
+  buffering them in memory, so large private-repo seeds stay within normal
+  cache pod memory limits.
 
 ## [v0.17.14] - 2026-07-16
 ### Fixed

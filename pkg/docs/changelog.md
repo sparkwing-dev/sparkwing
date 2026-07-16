@@ -49,6 +49,13 @@ code change to unlock.
 ## [Unreleased]
 ### Fixed
 
+- **cache:** Gitcache seed uploads stream bundle bodies to disk instead of
+  buffering them in memory, so large private-repo seeds stay within normal
+  cache pod memory limits.
+
+## [v0.17.14] - 2026-07-16
+### Fixed
+
 - **cluster:** Remote pipeline triggers can seed a controller-backed gitcache
   from the submitting checkout when the cache cannot fetch a private origin
   directly. Seed uploads are scoped to the triggered commit and require the
