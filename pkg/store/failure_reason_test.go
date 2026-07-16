@@ -38,6 +38,68 @@ func TestFinishNodeWithReason_PersistsStructuredMetadata(t *testing.T) {
 	}
 }
 
+func TestFinishNodeWithReason_DoesNotOverwriteTerminalNode(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	seedRunAndNode(t, s, "run-1", "node-a")
+
+	if err := s.FinishNode(ctx, "run-1", "node-a", "success", "", []byte(`"ok"`)); err != nil {
+		t.Fatalf("FinishNode: %v", err)
+	}
+	code := 137
+	if err := s.FinishNodeWithReason(ctx, "run-1", "node-a",
+		"failed", "late infrastructure failure", nil, store.FailureOOMKilled, &code); err != nil {
+		t.Fatalf("FinishNodeWithReason: %v", err)
+	}
+
+	n, err := s.GetNode(ctx, "run-1", "node-a")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if n.Status != "done" || n.Outcome != "success" {
+		t.Fatalf("status/outcome: %q %q, want done/success", n.Status, n.Outcome)
+	}
+	if n.Error != "" {
+		t.Fatalf("error = %q, want empty", n.Error)
+	}
+	if string(n.Output) != `"ok"` {
+		t.Fatalf("output = %s, want original output", n.Output)
+	}
+	if n.FailureReason != store.FailureUnknown {
+		t.Fatalf("failure_reason = %q, want original empty reason", n.FailureReason)
+	}
+	if n.ExitCode != nil {
+		t.Fatalf("exit_code = %v, want nil", *n.ExitCode)
+	}
+}
+
+func TestFinishNodeWithReason_FinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	if err := s.CreateRun(ctx, store.Run{
+		ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := s.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "node-a", Status: "done"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+
+	if err := s.FinishNode(ctx, "run-1", "node-a", "success", "", []byte(`"ok"`)); err != nil {
+		t.Fatalf("FinishNode: %v", err)
+	}
+	n, err := s.GetNode(ctx, "run-1", "node-a")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if n.Status != "done" || n.Outcome != "success" {
+		t.Fatalf("status/outcome: %q %q, want done/success", n.Status, n.Outcome)
+	}
+	if string(n.Output) != `"ok"` {
+		t.Fatalf("output = %s, want finalized output", n.Output)
+	}
+}
+
 // TestFinishNode_LeavesReasonEmpty is the backwards-compat check:
 // callers that never opt into the new signature get the same row
 // shape as before (empty reason, NULL exit_code).

@@ -1882,12 +1882,12 @@ func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome
 	}
 	_, err := s.exec(ctx, `
 UPDATE nodes
-   SET status = ?, outcome = ?, error = ?, output_json = ?, finished_at = ?,
-       failure_reason = ?, exit_code = ?
- WHERE run_id = ? AND node_id = ?`,
+	   SET status = ?, outcome = ?, error = ?, output_json = ?, finished_at = ?,
+	       failure_reason = ?, exit_code = ?
+	 WHERE run_id = ? AND node_id = ? AND NOT (status = ? AND outcome != '')`,
 		nodeStatusDone, outcome, errMsg, output, time.Now().UnixNano(),
 		reason, code,
-		runID, nodeID)
+		runID, nodeID, nodeStatusDone)
 	return err
 }
 

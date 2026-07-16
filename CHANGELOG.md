@@ -48,6 +48,12 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.17.24] - 2026-07-16
+### Fixed
+
+- **cluster:** Kubernetes runner Jobs that disappear before terminal state now
+  fail their node instead of leaving the orchestrator waiting on a missing Job.
+
 ## [v0.17.23] - 2026-07-16
 ### Added
 

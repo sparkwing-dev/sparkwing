@@ -2,9 +2,11 @@ package k8s
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,7 +18,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
 func jobEnv(t *testing.T, cfg Config) map[string]string {
@@ -99,6 +106,175 @@ func TestBuildJob_UsesRestrictedPodSecurityContext(t *testing.T) {
 	}
 	if container.SecurityContext.Capabilities == nil || len(container.SecurityContext.Capabilities.Drop) != 1 || container.SecurityContext.Capabilities.Drop[0] != "ALL" {
 		t.Fatalf("container dropped capabilities = %#v, want [ALL]", container.SecurityContext.Capabilities)
+	}
+}
+
+func TestRunNode_MissingJobReturnsFailed(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "running"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	kcli := fake.NewSimpleClientset()
+	kcli.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "batch", Resource: "jobs"}, action.(k8stesting.GetAction).GetName())
+	})
+	r := New(kcli, client.New(srv.URL, nil), Config{
+		Namespace:             "default",
+		Image:                 "runner",
+		ControllerURL:         srv.URL,
+		PollInterval:          time.Millisecond,
+		MissingJobGracePeriod: 5 * time.Millisecond,
+	}, nil)
+
+	res := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	if res.Outcome != sparkwing.Failed {
+		t.Fatalf("outcome = %s, want failed", res.Outcome)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "disappeared before reaching a terminal condition") {
+		t.Fatalf("err = %v, want missing-job failure", res.Err)
+	}
+	n, err := st.GetNode(ctx, "run-1", "build")
+	if err != nil {
+		t.Fatalf("GetNode: %v", err)
+	}
+	if n.Status != "done" || n.Outcome != string(sparkwing.Failed) {
+		t.Fatalf("node terminal = status %q outcome %q, want done/failed", n.Status, n.Outcome)
+	}
+}
+
+func TestRunNode_MissingJobFinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "done"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	kcli := fake.NewSimpleClientset()
+	kcli.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "batch", Resource: "jobs"}, action.(k8stesting.GetAction).GetName())
+	})
+	r := New(kcli, client.New(srv.URL, nil), Config{
+		Namespace:             "default",
+		Image:                 "runner",
+		ControllerURL:         srv.URL,
+		PollInterval:          time.Millisecond,
+		MissingJobGracePeriod: time.Millisecond,
+	}, nil)
+
+	res := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	if res.Outcome != sparkwing.Failed {
+		t.Fatalf("outcome = %q, want failed", res.Outcome)
+	}
+	if res.Err == nil || !strings.Contains(res.Err.Error(), "disappeared before reaching a terminal condition") {
+		t.Fatalf("err = %v, want missing-job failure", res.Err)
+	}
+}
+
+func TestRunNode_MissingJobUsesTerminalNodeDuringGrace(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "running"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+
+	kcli := fake.NewSimpleClientset()
+	kcli.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "batch", Resource: "jobs"}, action.(k8stesting.GetAction).GetName())
+	})
+	r := New(kcli, client.New(srv.URL, nil), Config{
+		Namespace:             "default",
+		Image:                 "runner",
+		ControllerURL:         srv.URL,
+		PollInterval:          time.Millisecond,
+		MissingJobGracePeriod: 100 * time.Millisecond,
+	}, nil)
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		_ = st.FinishNode(ctx, "run-1", "build", string(sparkwing.Success), "", []byte(`{"ok":true}`))
+	}()
+
+	res := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	if res.Outcome != sparkwing.Success {
+		t.Fatalf("outcome = %s, want success from terminal node row (err=%v)", res.Outcome, res.Err)
+	}
+	output, ok := res.Output.([]byte)
+	if !ok || string(output) != `{"ok":true}` {
+		t.Fatalf("output = %#v, want terminal node output", res.Output)
+	}
+}
+
+func TestRunNode_MissingJobReturnsLateTerminalNodeAfterGrace(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	if err := st.CreateRun(ctx, store.Run{ID: "run-1", Pipeline: "demo", Status: "running", StartedAt: time.Now()}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "run-1", NodeID: "build", Status: "running"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	controllerHandler := controller.New(st, nil).Handler()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/nodes/build/finish") {
+			if err := st.FinishNode(ctx, "run-1", "build", string(sparkwing.Success), "", []byte(`{"late":true}`)); err != nil {
+				t.Errorf("FinishNode: %v", err)
+			}
+		}
+		controllerHandler.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	kcli := fake.NewSimpleClientset()
+	kcli.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "batch", Resource: "jobs"}, action.(k8stesting.GetAction).GetName())
+	})
+	r := New(kcli, client.New(srv.URL, nil), Config{
+		Namespace:             "default",
+		Image:                 "runner",
+		ControllerURL:         srv.URL,
+		PollInterval:          time.Millisecond,
+		MissingJobGracePeriod: time.Millisecond,
+	}, nil)
+
+	res := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	if res.Outcome != sparkwing.Success {
+		t.Fatalf("outcome = %s, want late terminal success (err=%v)", res.Outcome, res.Err)
+	}
+	output, ok := res.Output.([]byte)
+	if !ok || string(output) != `{"late":true}` {
+		t.Fatalf("output = %#v, want late terminal node output", res.Output)
 	}
 }
 

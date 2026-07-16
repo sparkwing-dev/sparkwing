@@ -111,6 +111,12 @@ type Config struct {
 	// sane default: short enough to keep the cluster tidy, long
 	// enough for an operator to poke at a failed pod.
 	TTLSecondsAfterFinished int32
+
+	// MissingJobGracePeriod is how long a poller that sees a missing
+	// Job waits for the pod's terminal node write to appear on the
+	// controller before treating the missing Job as infrastructure
+	// failure.
+	MissingJobGracePeriod time.Duration
 }
 
 // Runner is a runner.Runner backed by one K8s Job per node.
@@ -132,6 +138,9 @@ func New(kcli kubernetes.Interface, ctrl *client.Client, cfg Config, logger *slo
 	}
 	if cfg.TTLSecondsAfterFinished == 0 {
 		cfg.TTLSecondsAfterFinished = 300
+	}
+	if cfg.MissingJobGracePeriod <= 0 {
+		cfg.MissingJobGracePeriod = 30 * time.Second
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -189,6 +198,9 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 		case <-t.C:
 			j, err := r.client.BatchV1().Jobs(r.cfg.Namespace).Get(ctx, name, metav1.GetOptions{})
 			if err != nil {
+				if apierrors.IsNotFound(err) {
+					return r.readMissingJobResult(ctx, req, name)
+				}
 				r.logger.Warn("job poll failed", "job", name, "err", err)
 				continue
 			}
@@ -251,6 +263,48 @@ func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID strin
 	}
 }
 
+// readMissingJobResult handles Jobs removed outside this runner. A TTL reap can
+// delete the Job after the pod wrote the terminal node row; an operator delete
+// before terminal state must fail the node so the orchestrator does not poll
+// forever.
+func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, jobName string) runner.Result {
+	deadline := time.NewTimer(r.cfg.MissingJobGracePeriod)
+	defer deadline.Stop()
+	t := time.NewTicker(r.cfg.PollInterval)
+	defer t.Stop()
+	graceExpired := false
+	msg := fmt.Sprintf("K8sRunner: Job %s disappeared before reaching a terminal condition", jobName)
+	for {
+		n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID)
+		if err == nil && nodeTerminal(n) {
+			return mapNodeResult(n)
+		}
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			r.logger.Warn("node poll after missing job failed",
+				"job", jobName, "run_id", req.RunID, "node_id", req.NodeID, "err", err)
+		}
+		if graceExpired {
+			if err := r.ctrl.FinishNodeWithReason(ctx, req.RunID, req.NodeID,
+				string(sparkwing.Failed), msg, nil, store.FailureUnknown, nil); err != nil {
+				r.logger.Warn("finish node after missing job failed",
+					"job", jobName, "run_id", req.RunID, "node_id", req.NodeID, "err", err)
+			} else if n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID); err == nil && nodeTerminal(n) {
+				return mapNodeResult(n)
+			} else if err != nil && !errors.Is(err, store.ErrNotFound) {
+				r.logger.Warn("node poll after missing job finish failed",
+					"job", jobName, "run_id", req.RunID, "node_id", req.NodeID, "err", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return runner.Result{Outcome: sparkwing.Cancelled, Err: ctx.Err()}
+		case <-deadline.C:
+			graceExpired = true
+		case <-t.C:
+		}
+	}
+}
+
 // readFinalResult fetches the node row the pod wrote and maps it.
 // If the pod crashed before writing, the node is still "running" on
 // the controller side; we return a synthesized Failed result so the
@@ -270,17 +324,9 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 		}
 	}
 
-	// safety: pass Output as raw []byte; unmarshaling here would erase the typed shape and break Ref[T].Get
-	oc := sparkwing.Outcome(n.Outcome)
-	res := runner.Result{Outcome: oc}
-	if n.Error != "" {
-		res.Err = errors.New(n.Error)
-	}
-	if len(n.Output) > 0 {
-		res.Output = n.Output
-	}
+	res := mapNodeResult(n)
 	// safety: pod crashed before writing terminal state; synthesize Failed so the orchestrator sees something deterministic
-	if n.Status != "done" {
+	if !nodeTerminal(n) {
 		res.Outcome = sparkwing.Failed
 		reason, exitCode := r.inspectTerminatedPod(ctx, j)
 		errMsg := fmt.Sprintf("pod %s exited without writing terminal state", j.Name)
@@ -292,6 +338,22 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 		}
 		_ = r.ctrl.FinishNodeWithReason(ctx, req.RunID, req.NodeID,
 			string(sparkwing.Failed), errMsg, nil, reason, exitCode)
+	}
+	return res
+}
+
+func nodeTerminal(n *store.Node) bool {
+	return n != nil && n.Status == "done" && n.Outcome != ""
+}
+
+func mapNodeResult(n *store.Node) runner.Result {
+	res := runner.Result{Outcome: sparkwing.Outcome(n.Outcome)}
+	if n.Error != "" {
+		res.Err = errors.New(n.Error)
+	}
+	if len(n.Output) > 0 {
+		// safety: pass Output as raw []byte; unmarshaling here would erase the typed shape and break Ref[T].Get
+		res.Output = n.Output
 	}
 	return res
 }
