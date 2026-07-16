@@ -48,6 +48,14 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.17.17] - 2026-07-16
+### Fixed
+
+- **release:** The bundled `.sparkwing` module metadata includes the
+  Kubernetes client dependencies required by trigger-side k8s dispatch, so
+  remote trigger workers can compile released pipeline sources without
+  modifying `go.mod`.
+
 ## [v0.17.16] - 2026-07-16
 ### Fixed
 
