@@ -47,6 +47,35 @@ func TestBuildJob_OmitsArtifactStoreURLWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildJob_UsesRestrictedPodSecurityContext(t *testing.T) {
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	pod := job.Spec.Template.Spec
+	if pod.SecurityContext == nil {
+		t.Fatal("pod security context is nil")
+	}
+	if pod.SecurityContext.RunAsNonRoot == nil || !*pod.SecurityContext.RunAsNonRoot {
+		t.Fatal("pod runAsNonRoot is not true")
+	}
+	if pod.SecurityContext.SeccompProfile == nil || pod.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeRuntimeDefault {
+		t.Fatalf("pod seccomp profile = %#v, want RuntimeDefault", pod.SecurityContext.SeccompProfile)
+	}
+
+	container := pod.Containers[0]
+	if container.SecurityContext == nil {
+		t.Fatal("container security context is nil")
+	}
+	if container.SecurityContext.AllowPrivilegeEscalation == nil || *container.SecurityContext.AllowPrivilegeEscalation {
+		t.Fatal("container allowPrivilegeEscalation is not false")
+	}
+	if container.SecurityContext.RunAsNonRoot == nil || !*container.SecurityContext.RunAsNonRoot {
+		t.Fatal("container runAsNonRoot is not true")
+	}
+	if container.SecurityContext.Capabilities == nil || len(container.SecurityContext.Capabilities.Drop) != 1 || container.SecurityContext.Capabilities.Drop[0] != "ALL" {
+		t.Fatalf("container dropped capabilities = %#v, want [ALL]", container.SecurityContext.Capabilities)
+	}
+}
+
 // defaultsCfg is the conservative fallback the cold-start tier and any
 // unset dimension resolve to.
 var defaultsCfg = Config{

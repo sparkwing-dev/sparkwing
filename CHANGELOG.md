@@ -48,6 +48,13 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.17.18] - 2026-07-16
+### Fixed
+
+- **cluster:** Kubernetes runner Jobs now set restricted-compatible pod and
+  container security contexts, so clusters enforcing the restricted Pod
+  Security Standard can admit spawned runner pods.
+
 ## [v0.17.17] - 2026-07-16
 ### Fixed
 

@@ -437,6 +437,13 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		Args:            []string{"run-node", req.RunID, req.NodeID},
 		Env:             env,
 		Resources:       podResources(res, r.cfg),
+		SecurityContext: &corev1.SecurityContext{
+			AllowPrivilegeEscalation: boolPtr(false),
+			RunAsNonRoot:             boolPtr(true),
+			Capabilities: &corev1.Capabilities{
+				Drop: []corev1.Capability{"ALL"},
+			},
+		},
 	}
 
 	podSpec := corev1.PodSpec{
@@ -445,6 +452,12 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		NodeSelector:       r.cfg.NodeSelector,
 		Tolerations:        r.cfg.Tolerations,
 		Containers:         []corev1.Container{container},
+		SecurityContext: &corev1.PodSecurityContext{
+			RunAsNonRoot: boolPtr(true),
+			SeccompProfile: &corev1.SeccompProfile{
+				Type: corev1.SeccompProfileTypeRuntimeDefault,
+			},
+		},
 	}
 	if r.cfg.ImagePullSecret != "" {
 		podSpec.ImagePullSecrets = []corev1.LocalObjectReference{
@@ -477,6 +490,8 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		},
 	}
 }
+
+func boolPtr(v bool) *bool { return &v }
 
 // podResources maps a resolved admission cost onto a runner pod's
 // requests and limits, so one .Resources() declaration drives both the
