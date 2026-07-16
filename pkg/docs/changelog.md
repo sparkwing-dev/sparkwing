@@ -47,6 +47,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **cluster:** Remote pipeline triggers can seed a controller-backed gitcache
+  from the submitting checkout when the cache cannot fetch a private origin
+  directly. Seed uploads are scoped to the triggered commit and require the
+  controller's admin scope.
 
 ## [v0.17.13] - 2026-07-16
 ### Fixed
