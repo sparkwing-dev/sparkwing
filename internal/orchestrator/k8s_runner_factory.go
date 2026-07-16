@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -26,6 +27,8 @@ type K8sRunnerFactoryConfig struct {
 	LogsURL          string
 	ArtifactStoreURL string
 	AgentToken       string
+	NodeSelector     map[string]string
+	Tolerations      []corev1.Toleration
 }
 
 func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Trigger) runner.Runner, error) {
@@ -61,6 +64,8 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		LogsURL:            cfg.LogsURL,
 		ArtifactStoreURL:   cfg.ArtifactStoreURL,
 		AgentToken:         cfg.AgentToken,
+		NodeSelector:       cfg.NodeSelector,
+		Tolerations:        cfg.Tolerations,
 		CPURequest:         "100m",
 		MemoryRequest:      "128Mi",
 		CPULimit:           "2",

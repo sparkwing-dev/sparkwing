@@ -17,6 +17,12 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		K8sLogsURL:    "http://logs:4344",
 		Kubeconfig:    "/tmp/kubeconfig",
 		ArtifactStore: "http://cache:4344",
+		K8sNodeSelector: []string{
+			"sparkwing.io/node-pool=runner",
+		},
+		K8sTolerations: []string{
+			"sparkwing.io/node-pool=runner:NoSchedule",
+		},
 	})
 	want := []string{
 		"--runner", "k8s",
@@ -28,6 +34,8 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		"--runner-logs-url", "http://logs:4344",
 		"--kubeconfig", "/tmp/kubeconfig",
 		"--artifact-store", "http://cache:4344",
+		"--runner-node-selector", "sparkwing.io/node-pool=runner",
+		"--runner-toleration", "sparkwing.io/node-pool=runner:NoSchedule",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("triggerRunnerArgs() = %#v, want %#v", got, want)

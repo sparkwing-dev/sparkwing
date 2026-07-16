@@ -269,6 +269,12 @@ func runRunnerCLI(args []string) error {
 		"kubeconfig path for creating trigger-spawned Jobs (empty = in-cluster)")
 	triggerArtifactStore := fs.String("trigger-artifact-store", os.Getenv("SPARKWING_CACHE_URL"),
 		"artifact/cache store URL passed to trigger-spawned runner Jobs")
+	var triggerRunnerNodeSelector multiFlag = splitCSV(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR"))
+	fs.Var(&triggerRunnerNodeSelector, "trigger-runner-node-selector",
+		"node selector for trigger-spawned runner Jobs, key=value (repeatable; env: SPARKWING_RUNNER_NODE_SELECTOR)")
+	var triggerRunnerTolerations multiFlag = splitCSV(os.Getenv("SPARKWING_RUNNER_TOLERATION"))
+	fs.Var(&triggerRunnerTolerations, "trigger-runner-toleration",
+		"toleration for trigger-spawned runner Jobs, key[=value]:Effect (repeatable; env: SPARKWING_RUNNER_TOLERATION)")
 	localAdmission := fs.Bool("local-admission", false,
 		"route claimed nodes through this box's local admission daemon (for a runner on a box that also runs local pipelines; off for in-cluster pods)")
 	localReserve := fs.String("local-reserve", os.Getenv("SPARKWING_LOCAL_RESERVE"),
@@ -316,22 +322,24 @@ func runRunnerCLI(args []string) error {
 		}
 		go func() {
 			if err := RunTriggerLoop(ctx, TriggerLoopOptions{
-				ControllerURL: *controllerURL,
-				LogsURL:       *logsURL,
-				GitcacheURL:   *gitcacheURL,
-				Token:         *token,
-				RunnerKind:    *triggerRunnerKind,
-				K8sNamespace:  *triggerRunnerNamespace,
-				K8sImage:      *triggerRunnerImage,
-				K8sRunnerSA:   *triggerRunnerSA,
-				K8sPullSecret: *triggerRunnerPullSecret,
-				K8sCtrlURL:    firstNonEmpty(*triggerRunnerCtrlURL, *controllerURL),
-				K8sLogsURL:    firstNonEmpty(*triggerRunnerLogsURL, *logsURL),
-				Kubeconfig:    *triggerRunnerKubeconfig,
-				ArtifactStore: *triggerArtifactStore,
-				Poll:          *poll,
-				Logger:        slog.Default().With("loop", "trigger"),
-				Sources:       splitCSV(*triggerSources),
+				ControllerURL:   *controllerURL,
+				LogsURL:         *logsURL,
+				GitcacheURL:     *gitcacheURL,
+				Token:           *token,
+				RunnerKind:      *triggerRunnerKind,
+				K8sNamespace:    *triggerRunnerNamespace,
+				K8sImage:        *triggerRunnerImage,
+				K8sRunnerSA:     *triggerRunnerSA,
+				K8sPullSecret:   *triggerRunnerPullSecret,
+				K8sCtrlURL:      firstNonEmpty(*triggerRunnerCtrlURL, *controllerURL),
+				K8sLogsURL:      firstNonEmpty(*triggerRunnerLogsURL, *logsURL),
+				Kubeconfig:      *triggerRunnerKubeconfig,
+				ArtifactStore:   *triggerArtifactStore,
+				K8sNodeSelector: triggerRunnerNodeSelector,
+				K8sTolerations:  triggerRunnerTolerations,
+				Poll:            *poll,
+				Logger:          slog.Default().With("loop", "trigger"),
+				Sources:         splitCSV(*triggerSources),
 			}); err != nil {
 				slog.Default().Error("trigger loop exited with error", "err", err)
 			}

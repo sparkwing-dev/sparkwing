@@ -32,6 +32,12 @@ func runHandleTriggerCLI(args []string) error {
 	k8sLogsURL := fs.String("runner-logs-url", os.Getenv("SPARKWING_RUNNER_LOGS_URL"), "logs-service URL the runner pod should talk to (defaults to --logs)")
 	artifactStoreURL := fs.String("artifact-store", os.Getenv("SPARKWING_CACHE_URL"), "artifact/cache store URL passed to runner pods (k8s)")
 	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
+	var k8sNodeSelector stringSliceFlag
+	k8sNodeSelector = splitEnvList(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR"))
+	fs.Var(&k8sNodeSelector, "runner-node-selector", "node selector for runner pods, key=value (repeatable; env: SPARKWING_RUNNER_NODE_SELECTOR)")
+	var k8sTolerations stringSliceFlag
+	k8sTolerations = splitEnvList(os.Getenv("SPARKWING_RUNNER_TOLERATION"))
+	fs.Var(&k8sTolerations, "runner-toleration", "toleration for runner pods, key[=value]:Effect (repeatable; env: SPARKWING_RUNNER_TOLERATION)")
 	local := fs.Bool("local", false,
 		"run against the laptop SQLite store; no controller required")
 	profileName := fs.String("profile", "",
@@ -67,6 +73,14 @@ func runHandleTriggerCLI(args []string) error {
 	switch *runnerKind {
 	case "", "inprocess":
 	case "k8s":
+		nodeSelector, err := parseK8sNodeSelector(k8sNodeSelector)
+		if err != nil {
+			return err
+		}
+		tolerations, err := parseK8sTolerations(k8sTolerations)
+		if err != nil {
+			return err
+		}
 		factory, err := BuildK8sRunnerFactory(K8sRunnerFactoryConfig{
 			Kubeconfig:       *kubeconfig,
 			Namespace:        *k8sNamespace,
@@ -77,6 +91,8 @@ func runHandleTriggerCLI(args []string) error {
 			LogsURL:          firstNonEmpty(*k8sLogsURL, *logsURL),
 			ArtifactStoreURL: *artifactStoreURL,
 			AgentToken:       *token,
+			NodeSelector:     nodeSelector,
+			Tolerations:      tolerations,
 		})
 		if err != nil {
 			return fmt.Errorf("k8s runner: %w", err)

@@ -30,22 +30,24 @@ const CompileLogNode = "_compile"
 
 // TriggerLoopOptions configures RunTriggerLoop.
 type TriggerLoopOptions struct {
-	ControllerURL string
-	LogsURL       string
-	GitcacheURL   string
-	Token         string
-	RunnerKind    string
-	K8sNamespace  string
-	K8sImage      string
-	K8sRunnerSA   string
-	K8sPullSecret string
-	K8sCtrlURL    string
-	K8sLogsURL    string
-	Kubeconfig    string
-	ArtifactStore string
-	WorkRoot      string
-	Poll          time.Duration
-	Logger        *slog.Logger
+	ControllerURL   string
+	LogsURL         string
+	GitcacheURL     string
+	Token           string
+	RunnerKind      string
+	K8sNamespace    string
+	K8sImage        string
+	K8sRunnerSA     string
+	K8sPullSecret   string
+	K8sCtrlURL      string
+	K8sLogsURL      string
+	Kubeconfig      string
+	ArtifactStore   string
+	K8sNodeSelector []string
+	K8sTolerations  []string
+	WorkRoot        string
+	Poll            time.Duration
+	Logger          *slog.Logger
 	// Sources filters claim requests by trigger_source; empty = any.
 	// The warm-runner sets ["github"] so it only claims webhook-originated
 	// triggers and doesn't swallow manual/schedule work.
@@ -265,6 +267,12 @@ func triggerRunnerArgs(opts TriggerLoopOptions) []string {
 	appendFlag("--runner-logs-url", opts.K8sLogsURL)
 	appendFlag("--kubeconfig", opts.Kubeconfig)
 	appendFlag("--artifact-store", opts.ArtifactStore)
+	for _, val := range opts.K8sNodeSelector {
+		appendFlag("--runner-node-selector", val)
+	}
+	for _, val := range opts.K8sTolerations {
+		appendFlag("--runner-toleration", val)
+	}
 	return args
 }
 

@@ -48,6 +48,12 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.17.23] - 2026-07-16
+### Added
+
+- **cluster:** Trigger-side Kubernetes runner Jobs can now receive node
+  selectors and tolerations through CLI flags or environment variables.
+
 ## [v0.17.22] - 2026-07-16
 ### Fixed
 
