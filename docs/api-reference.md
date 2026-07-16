@@ -24,6 +24,8 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/concurrency/{key}/release` | `admin` |
 | `GET` | `/api/v1/concurrency/{key}/resolve` | `admin` |
 | `GET` | `/api/v1/concurrency/{key}/state` | `runs.read` |
+| `POST` | `/api/v1/gitcache/refresh` | `runs.write` |
+| `POST` | `/api/v1/gitcache/seed` | `admin` |
 | `GET` | `/api/v1/health` | `public` |
 | `POST` | `/api/v1/nodes/claim` | `nodes.claim` |
 | `GET` | `/api/v1/pipelines/{name}/latest` | `runs.read` |

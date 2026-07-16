@@ -79,6 +79,7 @@ func (s *Server) Handler() http.Handler
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
 func (s *Server) WithAuthenticator(a *Authenticator) *Server
 func (s *Server) WithCachePodURL(url string) *Server
+func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
