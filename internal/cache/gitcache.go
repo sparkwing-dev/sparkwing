@@ -22,6 +22,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 var (
@@ -363,6 +364,12 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "repo and branch required", http.StatusBadRequest)
 		return
 	}
+	var err error
+	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
+	if err != nil {
+		http.Error(w, "invalid repo URL: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 	if err := validateGitRef(branch); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -376,7 +383,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 	bareRepo := filepath.Join(repoDir, hash+".git")
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		log.Printf("background fetch: cloning %s → %s", repoURL, hash)
+		log.Printf("background fetch: cloning %s → %s", sourceurl.Redact(repoURL), hash)
 		if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
 			http.Error(w, fmt.Sprintf("clone failed: %s\n%s", err, sshHint(out)), http.StatusInternalServerError)
 			return
@@ -1277,6 +1284,12 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "name and repo required", http.StatusBadRequest)
 		return
 	}
+	var err error
+	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
+	if err != nil {
+		http.Error(w, "invalid repo URL: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	hash := repoHash(repoURL)
 
@@ -1292,7 +1305,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		lock.Lock()
 		defer lock.Unlock()
 
-		log.Printf("git register: cloning %s as %q", repoURL, name)
+		log.Printf("git register: cloning %s as %q", sourceurl.Redact(repoURL), name)
 		if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
 			log.Printf("git register: clone failed (will need seed): %s %s", err, sshHint(out))
 			w.Header().Set("Content-Type", "application/json")
@@ -1304,7 +1317,7 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 		enableSHAFetch(bareRepo)
 	}
 
-	log.Printf("git register: %s → %s (%s)", name, repoURL, hash)
+	log.Printf("git register: %s → %s (%s)", name, sourceurl.Redact(repoURL), hash)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "hash": hash, "cloned": true})
 }
@@ -1380,6 +1393,12 @@ func autoRegisterRepos() {
 			continue
 		}
 		name, repoURL := parts[0], parts[1]
+		var err error
+		repoURL, err = sourceurl.ValidateCloneURL(repoURL)
+		if err != nil {
+			log.Printf("auto-register: skipping invalid repo URL for %s: %v", name, err)
+			continue
+		}
 		hash := repoHash(repoURL)
 
 		repoNamesMu.Lock()
@@ -1395,7 +1414,7 @@ func autoRegisterRepos() {
 		}
 		lock := repoLock(hash)
 		lock.Lock()
-		log.Printf("auto-register: cloning %s (%s)", name, repoURL)
+		log.Printf("auto-register: cloning %s (%s)", name, sourceurl.Redact(repoURL))
 		if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
 			log.Printf("auto-register: clone failed for %s: %v %s", name, err, sshHint(out))
 		} else {

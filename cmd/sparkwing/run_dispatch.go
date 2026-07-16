@@ -17,6 +17,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
@@ -347,13 +348,23 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 	}
 
 	branch, sha, repoSlug, repoURL := detectRemoteGit()
-	if repoSlug == "" {
-		return nil, fmt.Errorf("pipeline trigger %q: no github repository detected from cwd. "+
-			"The cluster runner needs GITHUB_REPOSITORY to clone the pipeline source. "+
-			"Run from inside a checkout of a github repo, or pass --repo OWNER/NAME explicitly", pipelineName)
+	if repoURL == "" {
+		return nil, fmt.Errorf("pipeline trigger %q: no git origin detected from cwd. "+
+			"The cluster runner needs a repository URL to clone the pipeline source. "+
+			"Run from inside a checkout with an origin remote", pipelineName)
 	}
-	envMap := map[string]string{
-		"GITHUB_REPOSITORY": repoSlug,
+	if repoSlug != "" {
+		repoURL = bincache.RepoURLFromGitHub(repoSlug)
+	} else {
+		var err error
+		repoURL, err = sourceurl.ValidateCloneURL(repoURL)
+		if err != nil {
+			return nil, fmt.Errorf("pipeline trigger %q: invalid git origin: %w", pipelineName, err)
+		}
+	}
+	envMap := map[string]string{}
+	if repoSlug != "" {
+		envMap["GITHUB_REPOSITORY"] = repoSlug
 	}
 	if wf.startAt != "" {
 		envMap["SPARKWING_START_AT"] = wf.startAt
@@ -376,9 +387,12 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		triggerBranch = branch
 	}
 
-	owner, name := "", ""
+	owner, githubRepo, name := "", "", ""
 	if slash := strings.IndexByte(repoSlug, '/'); slash > 0 {
-		owner, name = repoSlug[:slash], repoSlug[slash+1:]
+		owner, githubRepo = repoSlug[:slash], repoSlug[slash+1:]
+		name = githubRepo
+	} else {
+		name = repoNameFromURL(repoURL)
 	}
 
 	req := client.TriggerRequest{
@@ -395,7 +409,7 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 			Repo:        name,
 			RepoURL:     repoURL,
 			GithubOwner: owner,
-			GithubRepo:  name,
+			GithubRepo:  githubRepo,
 		},
 	}
 
@@ -456,4 +470,16 @@ func parseGithubOwnerRepo(url string) string {
 		}
 	}
 	return ""
+}
+
+func repoNameFromURL(url string) string {
+	url = strings.TrimSpace(strings.TrimSuffix(url, ".git"))
+	if url == "" {
+		return ""
+	}
+	i := strings.LastIndexAny(url, "/:")
+	if i < 0 || i == len(url)-1 {
+		return url
+	}
+	return url[i+1:]
 }

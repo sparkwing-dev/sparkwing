@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -132,10 +133,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		Pipeline: trigger.Pipeline,
 	})
 
-	repo := trigger.TriggerEnv["GITHUB_REPOSITORY"]
-	if repo == "" && trigger.GithubOwner != "" && trigger.GithubRepo != "" {
-		repo = trigger.GithubOwner + "/" + trigger.GithubRepo
-	}
+	repoURL, sourceErr := triggerSourceURL(trigger)
 
 	childCtx, cancelChild := context.WithCancel(ctx)
 	defer cancelChild()
@@ -151,15 +149,17 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		return outcome == triggerClaimSilenced
 	}
 
-	if repo == "" {
+	if sourceErr != nil {
+		return awaitHeartbeat(), sourceErr
+	}
+	if repoURL == "" {
 		if BakedBinary == "" {
-			return awaitHeartbeat(), fmt.Errorf("trigger %s has no GITHUB_REPOSITORY and SPARKWING_BAKED_BINARY is unset (no in-image pipeline binary to fall back on)", trigger.ID)
+			return awaitHeartbeat(), fmt.Errorf("trigger %s has no repo_url and SPARKWING_BAKED_BINARY is unset (no in-image pipeline binary to fall back on)", trigger.ID)
 		}
 		execErr := execHandleTrigger(childCtx, BakedBinary, "", trigger, opts, logger)
 		return awaitHeartbeat(), execErr
 	}
 
-	repoURL := bincache.RepoURLFromGitHub(repo)
 	branch := trigger.GitBranch
 	if branch == "" {
 		branch = "main"
@@ -170,7 +170,7 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 
 	sha := trigger.GitSHA
 	logger.Info("trigger loop: fetching source",
-		"run_id", trigger.ID, "repo", repoURL, "branch", branch, "sha", sha)
+		"run_id", trigger.ID, "repo", sourceurl.Redact(repoURL), "branch", branch, "sha", sha)
 	if sha == "" {
 		logger.Info("trigger loop: no trigger SHA, falling back to branch-tip clone",
 			"run_id", trigger.ID, "branch", branch)
@@ -343,6 +343,23 @@ func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, log
 		logger.Warn("trigger loop: bin cache upload failed", "err", err, "hash", key)
 	}
 	return binPath, nil
+}
+
+func triggerSourceURL(trigger *store.Trigger) (string, error) {
+	if trigger == nil {
+		return "", nil
+	}
+	repo := trigger.TriggerEnv["GITHUB_REPOSITORY"]
+	if repo == "" && trigger.GithubOwner != "" && trigger.GithubRepo != "" {
+		repo = trigger.GithubOwner + "/" + trigger.GithubRepo
+	}
+	if repo != "" {
+		return sourceurl.ValidateCloneURL(bincache.RepoURLFromGitHub(repo))
+	}
+	if trigger.RepoURL != "" {
+		return sourceurl.ValidateCloneURL(trigger.RepoURL)
+	}
+	return "", nil
 }
 
 type triggerClaimOutcome int

@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -22,8 +23,8 @@ import (
 const remoteChildMarker = "SPARKWING_REMOTE_CHILD"
 
 // shouldRunRemote decides between in-process execution and the remote
-// clone+compile path. Triggers from GitHub webhooks carry
-// GITHUB_REPOSITORY, the signal that source is needed on disk.
+// clone+compile path. Triggers carrying repo_url or GitHub metadata provide
+// enough source information to compile a missing pipeline from disk.
 func shouldRunRemote(trigger *store.Trigger) bool {
 	if os.Getenv(remoteChildMarker) == "1" {
 		return false
@@ -31,7 +32,7 @@ func shouldRunRemote(trigger *store.Trigger) bool {
 	if trigger == nil {
 		return false
 	}
-	return trigger.TriggerEnv["GITHUB_REPOSITORY"] != ""
+	return remoteTriggerSourceURLRaw(trigger) != ""
 }
 
 // runNodeRemote is RunNodeOnce's fallback for pipelines not baked
@@ -53,13 +54,15 @@ func runNodeRemote(
 				run.Pipeline)
 	}
 
-	repo := trigger.TriggerEnv["GITHUB_REPOSITORY"]
-	if repo == "" {
+	repoURL, sourceErr := remoteTriggerSourceURL(trigger)
+	if sourceErr != nil {
+		return runner.Result{}, sourceErr
+	}
+	if repoURL == "" {
 		return runner.Result{},
-			fmt.Errorf("pipeline %q not registered locally, and trigger has no GITHUB_REPOSITORY for remote fallback",
+			fmt.Errorf("pipeline %q not registered locally, and trigger has no repo_url for remote fallback",
 				run.Pipeline)
 	}
-	repoURL := bincache.RepoURLFromGitHub(repo)
 	branch := trigger.GitBranch
 	if branch == "" {
 		branch = run.GitBranch
@@ -69,7 +72,7 @@ func runNodeRemote(
 	}
 
 	logger.Info("runNodeRemote: fetching source",
-		"run_id", runID, "node_id", nodeID, "repo", repoURL, "branch", branch)
+		"run_id", runID, "node_id", nodeID, "repo", sourceurl.Redact(repoURL), "branch", branch)
 
 	workDir := filepath.Join(bincache.SparkwingHome(), "node-runner", runID+"-"+nodeID)
 	defer func() { _ = os.RemoveAll(workDir) }()
@@ -109,6 +112,28 @@ func runNodeRemote(
 		}, nil
 	}
 	return runner.Result{Outcome: sparkwing.Success}, nil
+}
+
+func remoteTriggerSourceURL(trigger *store.Trigger) (string, error) {
+	raw := remoteTriggerSourceURLRaw(trigger)
+	if raw == "" {
+		return "", nil
+	}
+	return sourceurl.ValidateCloneURL(raw)
+}
+
+func remoteTriggerSourceURLRaw(trigger *store.Trigger) string {
+	if trigger == nil {
+		return ""
+	}
+	repo := trigger.TriggerEnv["GITHUB_REPOSITORY"]
+	if repo == "" && trigger.GithubOwner != "" && trigger.GithubRepo != "" {
+		repo = trigger.GithubOwner + "/" + trigger.GithubRepo
+	}
+	if repo != "" {
+		return bincache.RepoURLFromGitHub(repo)
+	}
+	return trigger.RepoURL
 }
 
 // resolveRemoteBinary tries local disk, then remote /bin/<hash>, then

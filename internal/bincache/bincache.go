@@ -33,6 +33,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"golang.org/x/mod/modfile"
 )
 
@@ -134,8 +135,9 @@ func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwi
 	if gcURL == "" {
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
 	}
-	if repoSSH == "" {
-		return "", fmt.Errorf("FetchPipelineSource: repo URL required")
+	repoSSH, err = sourceurl.ValidateCloneURL(repoSSH)
+	if err != nil {
+		return "", fmt.Errorf("FetchPipelineSource: invalid repo URL: %w", err)
 	}
 	if branch == "" {
 		branch = "main"
@@ -267,8 +269,10 @@ func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
 	if gcURL == "" {
 		return fmt.Errorf("RefreshRepo: gitcache URL required")
 	}
-	if repoURL == "" {
-		return fmt.Errorf("RefreshRepo: repo URL required")
+	var err error
+	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
+	if err != nil {
+		return fmt.Errorf("RefreshRepo: invalid repo URL: %w", err)
 	}
 	q := neturl.Values{}
 	q.Set("repo", repoURL)

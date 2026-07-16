@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -158,6 +159,75 @@ func TestPipelineTrigger_DetachFiresTriggerOnly(t *testing.T) {
 	}
 }
 
+func TestPipelineTrigger_DetachAcceptsNonGitHubOrigin(t *testing.T) {
+	spy := &triggerSpy{}
+	srv := httptest.NewServer(spy.handler())
+	defer srv.Close()
+	writeTriggerProfiles(t, srv.URL)
+	origin := "https://git.netwits.com/InevitableAI/regent.git"
+	withGitCheckout(t, origin, func() {
+		out := captureStdout(t, func() {
+			if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--detach"}); err != nil {
+				t.Errorf("trigger: %v", err)
+			}
+		})
+		if strings.TrimSpace(out) != "run-test" {
+			t.Errorf("detach stdout = %q, want run id", out)
+		}
+	})
+
+	if len(spy.bodies) != 1 {
+		t.Fatalf("expected 1 trigger body, got %d", len(spy.bodies))
+	}
+	var req client.TriggerRequest
+	if err := json.Unmarshal(spy.bodies[0], &req); err != nil {
+		t.Fatalf("decode trigger body: %v", err)
+	}
+	if req.Git.RepoURL != origin {
+		t.Fatalf("repo_url = %q, want %q", req.Git.RepoURL, origin)
+	}
+	if req.Git.GithubOwner != "" || req.Git.GithubRepo != "" {
+		t.Fatalf("github fields = %q/%q, want empty for non-GitHub origin", req.Git.GithubOwner, req.Git.GithubRepo)
+	}
+	if got := req.Trigger.Env["GITHUB_REPOSITORY"]; got != "" {
+		t.Fatalf("GITHUB_REPOSITORY = %q, want empty for non-GitHub origin", got)
+	}
+}
+
+func TestPipelineTrigger_DetachCanonicalizesGitHubHTTPOrigin(t *testing.T) {
+	spy := &triggerSpy{}
+	srv := httptest.NewServer(spy.handler())
+	defer srv.Close()
+	writeTriggerProfiles(t, srv.URL)
+	withGitCheckout(t, "http://github.com/sparkwing-dev/sparkwing.git", func() {
+		out := captureStdout(t, func() {
+			if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--detach"}); err != nil {
+				t.Errorf("trigger: %v", err)
+			}
+		})
+		if strings.TrimSpace(out) != "run-test" {
+			t.Errorf("detach stdout = %q, want run id", out)
+		}
+	})
+
+	if len(spy.bodies) != 1 {
+		t.Fatalf("expected 1 trigger body, got %d", len(spy.bodies))
+	}
+	var req client.TriggerRequest
+	if err := json.Unmarshal(spy.bodies[0], &req); err != nil {
+		t.Fatalf("decode trigger body: %v", err)
+	}
+	if req.Git.RepoURL != "git@github.com:sparkwing-dev/sparkwing.git" {
+		t.Fatalf("repo_url = %q, want canonical GitHub SSH URL", req.Git.RepoURL)
+	}
+	if got := req.Trigger.Env["GITHUB_REPOSITORY"]; got != "sparkwing-dev/sparkwing" {
+		t.Fatalf("GITHUB_REPOSITORY = %q, want sparkwing-dev/sparkwing", got)
+	}
+	if req.Git.GithubOwner != "sparkwing-dev" || req.Git.GithubRepo != "sparkwing" {
+		t.Fatalf("github fields = %q/%q, want sparkwing-dev/sparkwing", req.Git.GithubOwner, req.Git.GithubRepo)
+	}
+}
+
 func TestPipelineTrigger_DefaultFollows(t *testing.T) {
 	spy := &triggerSpy{}
 	srv := httptest.NewServer(spy.handler())
@@ -186,4 +256,42 @@ func TestPipelineTrigger_DefaultFollows(t *testing.T) {
 	if !sawFollow {
 		t.Fatalf("non-detach should follow the run (GET /api/v1/runs/run-test); got %v", reqs)
 	}
+}
+
+func withGitCheckout(t *testing.T, origin string, fn func()) {
+	t.Helper()
+	dir := t.TempDir()
+	run := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+	}
+	run("init")
+	run("config", "user.email", "sparkwing@example.invalid")
+	run("config", "user.name", "Sparkwing Test")
+	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte("test\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run("add", "README.md")
+	run("commit", "-m", "init")
+	run("branch", "-M", "main")
+	run("remote", "add", "origin", origin)
+
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(old); err != nil {
+			t.Fatalf("restore cwd: %v", err)
+		}
+	})
+	fn()
 }
