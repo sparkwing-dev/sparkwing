@@ -164,7 +164,7 @@ func TestPipelineTrigger_DetachAcceptsNonGitHubOrigin(t *testing.T) {
 	srv := httptest.NewServer(spy.handler())
 	defer srv.Close()
 	writeTriggerProfiles(t, srv.URL)
-	origin := "https://git.netwits.com/InevitableAI/regent.git"
+	origin := "https://git.example.com/acme/widgets.git"
 	withGitCheckout(t, origin, func() {
 		out := captureStdout(t, func() {
 			if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--detach"}); err != nil {

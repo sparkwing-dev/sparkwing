@@ -8,7 +8,7 @@ import (
 
 func TestTriggerSourceURLPrefersGitHubMetadata(t *testing.T) {
 	trigger := &store.Trigger{
-		RepoURL: "https://git.netwits.com/InevitableAI/regent.git",
+		RepoURL: "https://git.example.com/acme/widgets.git",
 		TriggerEnv: map[string]string{
 			"GITHUB_REPOSITORY": "sparkwing-dev/sparkwing",
 		},
@@ -24,13 +24,13 @@ func TestTriggerSourceURLPrefersGitHubMetadata(t *testing.T) {
 }
 
 func TestTriggerSourceURLUsesStoredRepoURLWithoutGitHubMetadata(t *testing.T) {
-	trigger := &store.Trigger{RepoURL: "https://git.netwits.com/InevitableAI/regent.git"}
+	trigger := &store.Trigger{RepoURL: "https://git.example.com/acme/widgets.git"}
 
 	got, err := triggerSourceURL(trigger)
 	if err != nil {
 		t.Fatalf("triggerSourceURL: %v", err)
 	}
-	if got != "https://git.netwits.com/InevitableAI/regent.git" {
+	if got != "https://git.example.com/acme/widgets.git" {
 		t.Fatalf("triggerSourceURL = %q, want stored repo URL", got)
 	}
 }

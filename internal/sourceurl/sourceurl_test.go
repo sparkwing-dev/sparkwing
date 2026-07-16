@@ -4,7 +4,7 @@ import "testing"
 
 func TestValidateCloneURLAcceptsHTTPSAndGitSSH(t *testing.T) {
 	cases := []string{
-		"https://git.netwits.com/InevitableAI/regent.git",
+		"https://git.example.com/acme/widgets.git",
 		"git@github.com:sparkwing-dev/sparkwing.git",
 		"ssh://git@github.com/sparkwing-dev/sparkwing.git",
 	}

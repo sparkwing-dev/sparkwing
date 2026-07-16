@@ -7,7 +7,7 @@ import (
 )
 
 func TestShouldRunRemoteAcceptsStoredRepoURL(t *testing.T) {
-	trigger := &store.Trigger{RepoURL: "https://git.netwits.com/InevitableAI/regent.git"}
+	trigger := &store.Trigger{RepoURL: "https://git.example.com/acme/widgets.git"}
 	if !shouldRunRemote(trigger) {
 		t.Fatal("shouldRunRemote = false, want true for stored repo URL")
 	}
@@ -15,7 +15,7 @@ func TestShouldRunRemoteAcceptsStoredRepoURL(t *testing.T) {
 
 func TestRemoteTriggerSourceURLPrefersGitHubMetadata(t *testing.T) {
 	trigger := &store.Trigger{
-		RepoURL: "https://git.netwits.com/InevitableAI/regent.git",
+		RepoURL: "https://git.example.com/acme/widgets.git",
 		TriggerEnv: map[string]string{
 			"GITHUB_REPOSITORY": "sparkwing-dev/sparkwing",
 		},
@@ -31,13 +31,13 @@ func TestRemoteTriggerSourceURLPrefersGitHubMetadata(t *testing.T) {
 }
 
 func TestRemoteTriggerSourceURLUsesStoredRepoURLWithoutGitHubMetadata(t *testing.T) {
-	trigger := &store.Trigger{RepoURL: "https://git.netwits.com/InevitableAI/regent.git"}
+	trigger := &store.Trigger{RepoURL: "https://git.example.com/acme/widgets.git"}
 
 	got, err := remoteTriggerSourceURL(trigger)
 	if err != nil {
 		t.Fatalf("remoteTriggerSourceURL: %v", err)
 	}
-	if got != "https://git.netwits.com/InevitableAI/regent.git" {
+	if got != "https://git.example.com/acme/widgets.git" {
 		t.Fatalf("remoteTriggerSourceURL = %q, want stored repo URL", got)
 	}
 }
