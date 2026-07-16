@@ -71,6 +71,10 @@ type Server struct {
 	// hardcoding it in profiles.yaml. Empty = endpoint returns 404,
 	// callers fall back to "no cache pod configured."
 	cachePodURL string
+	// cacheURL is the controller-reachable sparkwing-cache URL. It can
+	// be an in-cluster service URL because only controller proxy routes
+	// use it.
+	cacheURL string
 
 	// reconcileHook runs before list/get-run reads when non-nil.
 	// Laptop mode sets this to a closure over
@@ -136,6 +140,13 @@ func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
 // the announcement (clients fall back to "no cache pod").
 func (s *Server) WithCachePodURL(url string) *Server {
 	s.cachePodURL = url
+	return s
+}
+
+// WithCacheURL configures the controller-to-cache proxy target used by
+// gitcache seed and refresh routes.
+func (s *Server) WithCacheURL(url string) *Server {
+	s.cacheURL = url
 	return s
 }
 
@@ -310,6 +321,8 @@ func (s *Server) Handler() http.Handler {
 	// hack: static segment prevents {id} from consuming "spawned-child" as a trigger ID.
 	mux.Handle("GET /api/v1/triggers/spawned-child", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleFindSpawnedChildTrigger)))
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleGetTrigger)))
+	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
+	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
 
 	mux.Handle("POST /api/v1/runs/{id}/cancel", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCancelRun)))
 

@@ -63,8 +63,12 @@ If the cache doesn't have SSH access, seed from a machine that does:
 
 ```bash
 git clone --bare git@github.com:user/repo.git /tmp/repo-seed
-cd /tmp/repo-seed && git bundle create /tmp/repo.bundle --all
-curl -X POST "http://gitcache:8090/sync/seed?repo=git@github.com:user/repo.git" \
+cd /tmp/repo-seed
+sha=$(git rev-parse HEAD)
+git update-ref "refs/sparkwing-seed/$sha" "$sha"
+git bundle create /tmp/repo.bundle "refs/sparkwing-seed/$sha"
+git update-ref -d "refs/sparkwing-seed/$sha"
+curl -X POST "http://gitcache:8090/sync/seed?repo=git@github.com:user/repo.git&sha=$sha" \
   --data-binary @/tmp/repo.bundle
 ```
 
@@ -180,7 +184,7 @@ the ingress sets.
 | POST | `/upload?repo=X&base=Y` | Incremental upload on base commit |
 | GET | `/uploads/<id>` | Download uploaded tarball |
 | POST | `/sync/negotiate` | Find common ancestor (auth required) |
-| POST | `/sync/seed?repo=X` | Seed repo from git bundle (auth required) |
+| POST | `/sync/seed?repo=X&sha=Y` | Seed repo from a SHA-scoped git bundle (auth required) |
 
 ### Artifacts
 

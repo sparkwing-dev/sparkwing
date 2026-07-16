@@ -417,15 +417,7 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		discoverCtx, dCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		services, derr := discovery.ServicesFor(discoverCtx, prof.ControllerURL(), prof.ControllerToken())
 		dCancel()
-		if derr == nil && services.CachePod != "" {
-			refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if err := bincache.RefreshRepo(refreshCtx, services.CachePod, repoURL); err != nil {
-				fmt.Fprintf(os.Stderr,
-					"sparkwing run: gitcache eager refresh failed (%v); proceeding -- runner will retry on stale-SHA\n",
-					err)
-			}
-			cancel()
-		}
+		seedTriggerSource(prof, services.CachePod, derr, repoURL, sha)
 	}
 
 	c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
@@ -434,6 +426,61 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		return nil, fmt.Errorf("create trigger on %s: %w", prof.Name, err)
 	}
 	return resp, nil
+}
+
+func seedTriggerSource(prof *profile.Profile, cacheURL string, discoveryErr error, repoURL, sha string) {
+	repoDir, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sparkwing run: gitcache seed skipped (cwd: %v)\n", err)
+		return
+	}
+	if cacheURL != "" {
+		refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = bincache.RefreshRepo(refreshCtx, cacheURL, repoURL)
+		cancel()
+		if err == nil {
+			return
+		}
+		seedCtx, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		seedErr := bincache.SeedRepo(seedCtx, cacheURL, bincache.CacheToken(), repoURL, repoDir, sha)
+		seedCancel()
+		if seedErr == nil {
+			return
+		}
+		fmt.Fprintf(os.Stderr,
+			"sparkwing run: gitcache refresh failed (%v), seed failed (%v); proceeding -- runner will retry on stale-SHA\n",
+			err, seedErr)
+		return
+	}
+
+	refreshCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	err = bincache.RefreshRepoViaController(refreshCtx, prof.ControllerURL(), prof.ControllerToken(), repoURL)
+	cancel()
+	if err == nil {
+		return
+	}
+	seedCtx, seedCancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	seedErr := bincache.SeedRepoViaController(seedCtx, prof.ControllerURL(), prof.ControllerToken(), repoURL, repoDir, sha)
+	seedCancel()
+	if seedErr == nil {
+		return
+	}
+	if isHTTPNotFound(seedErr) {
+		return
+	}
+	if discoveryErr != nil {
+		fmt.Fprintf(os.Stderr,
+			"sparkwing run: service discovery failed (%v), controller gitcache refresh failed (%v), seed failed (%v); proceeding -- runner will retry on stale-SHA\n",
+			discoveryErr, err, seedErr)
+		return
+	}
+	fmt.Fprintf(os.Stderr,
+		"sparkwing run: controller gitcache refresh failed (%v), seed failed (%v); proceeding -- runner will retry on stale-SHA\n",
+		err, seedErr)
+}
+
+func isHTTPNotFound(err error) bool {
+	return err != nil && strings.HasPrefix(err.Error(), "404 ")
 }
 
 // detectRemoteGit reads cwd's git state. Unresolved fields return empty.

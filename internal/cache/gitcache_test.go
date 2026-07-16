@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -254,6 +255,76 @@ func TestResolveGitRepo_AutoCloneFailureKeepsSeedHint(t *testing.T) {
 	if !strings.Contains(err.Error(), "/sync/seed") {
 		t.Fatalf("error should still point operators at /sync/seed; got %v", err)
 	}
+}
+
+func TestSyncSeed_ImportsOnlyRequestedSeedRef(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	runGit(t, src, "init")
+	runGit(t, src, "config", "user.email", "sparkwing@example.invalid")
+	runGit(t, src, "config", "user.name", "Sparkwing Test")
+	if err := os.WriteFile(filepath.Join(src, "wanted.txt"), []byte("wanted\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, src, "add", "wanted.txt")
+	runGit(t, src, "commit", "-m", "wanted")
+	wanted := strings.TrimSpace(runGit(t, src, "rev-parse", "HEAD"))
+	if err := os.WriteFile(filepath.Join(src, "private.txt"), []byte("private\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, src, "add", "private.txt")
+	runGit(t, src, "commit", "-m", "private")
+	private := strings.TrimSpace(runGit(t, src, "rev-parse", "HEAD"))
+	runGit(t, src, "update-ref", "refs/sparkwing-seed/"+wanted, wanted)
+	runGit(t, src, "update-ref", "refs/sparkwing-seed/"+private, private)
+	bundle := filepath.Join(root, "seed.bundle")
+	runGit(t, src, "bundle", "create", bundle, "refs/sparkwing-seed/"+wanted, "refs/sparkwing-seed/"+private)
+
+	oldRepoDir := repoDir
+	oldNamesFile := namesFile
+	repoDir = filepath.Join(root, "cache")
+	namesFile = filepath.Join(root, "names.json")
+	if err := os.MkdirAll(repoDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		repoDir = oldRepoDir
+		namesFile = oldNamesFile
+	})
+
+	f, err := os.Open(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	req := httptest.NewRequest(http.MethodPost, "/sync/seed?repo=https://git.example.com/acme/widgets.git&sha="+wanted, f)
+	w := httptest.NewRecorder()
+	handleSyncSeed(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+
+	bareRepo := filepath.Join(repoDir, repoHash("https://git.example.com/acme/widgets.git")+".git")
+	runGit(t, bareRepo, "cat-file", "-e", wanted+"^{commit}")
+	if out, err := exec.Command("git", "-C", bareRepo, "cat-file", "-e", private+"^{commit}").CombinedOutput(); err == nil {
+		t.Fatalf("private commit was imported unexpectedly: %s", out)
+	}
+}
+
+func runGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	if args[0] == "init" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
 }
 
 func TestRepoHash_Deterministic(t *testing.T) {

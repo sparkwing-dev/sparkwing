@@ -26,6 +26,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strings"
@@ -39,6 +40,8 @@ import (
 
 // ErrMiss is the sentinel for 404 from /bin/<hash>.
 var ErrMiss = errors.New("remote binary cache: miss")
+
+var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
 // CacheURL returns the sparkwing-cache base URL from
 // SPARKWING_GITCACHE_URL, stripped of trailing slashes. Empty means
@@ -280,6 +283,187 @@ func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
 	if err != nil {
 		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// SeedRepo creates a git bundle from repoDir and uploads it to
+// sparkwing-cache. It is the fallback when the cache cannot clone the
+// origin itself.
+func SeedRepo(ctx context.Context, gcURL, token, repoURL, repoDir, sha string) error {
+	if gcURL == "" {
+		return fmt.Errorf("SeedRepo: gitcache URL required")
+	}
+	var err error
+	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
+	if err != nil {
+		return fmt.Errorf("SeedRepo: invalid repo URL: %w", err)
+	}
+	sha, err = validateGitObject(sha)
+	if err != nil {
+		return err
+	}
+	bundle, err := createRepoBundle(ctx, repoDir, sha)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(bundle) }()
+
+	f, err := os.Open(bundle)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	q := neturl.Values{}
+	q.Set("repo", repoURL)
+	q.Set("sha", sha)
+	url := strings.TrimRight(gcURL, "/") + "/sync/seed?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, f)
+	if err != nil {
+		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+func createRepoBundle(ctx context.Context, repoDir, sha string) (string, error) {
+	sha, err := validateGitObject(sha)
+	if err != nil {
+		return "", err
+	}
+	if out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "rev-parse", "--verify", sha+"^{commit}").CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git verify seed commit: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	tmp, err := os.CreateTemp("", "sparkwing-repo-*.bundle")
+	if err != nil {
+		return "", err
+	}
+	path := tmp.Name()
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	_ = os.Remove(path)
+
+	ref := "refs/sparkwing-seed/" + sha
+	if out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "update-ref", ref, sha).CombinedOutput(); err != nil {
+		return "", fmt.Errorf("git seed ref: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	defer func() {
+		_ = exec.CommandContext(context.Background(), "git", "-C", repoDir, "update-ref", "-d", ref).Run()
+	}()
+
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "bundle", "create", path, ref)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		_ = os.Remove(path)
+		return "", fmt.Errorf("git bundle create: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return path, nil
+}
+
+func validateGitObject(sha string) (string, error) {
+	sha = strings.ToLower(strings.TrimSpace(sha))
+	if !gitObjectRE.MatchString(sha) {
+		return "", fmt.Errorf("git sha must be a 40-64 character hex object id")
+	}
+	return sha, nil
+}
+
+// RefreshRepoViaController asks a controller to proxy a refresh to its
+// configured cache.
+func RefreshRepoViaController(ctx context.Context, controllerURL, token, repoURL string) error {
+	if controllerURL == "" {
+		return fmt.Errorf("RefreshRepoViaController: controller URL required")
+	}
+	var err error
+	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
+	if err != nil {
+		return fmt.Errorf("RefreshRepoViaController: invalid repo URL: %w", err)
+	}
+	q := neturl.Values{}
+	q.Set("repo", repoURL)
+	url := strings.TrimRight(controllerURL, "/") + "/api/v1/gitcache/refresh?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+	if err != nil {
+		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// SeedRepoViaController uploads a git bundle through the controller to
+// its configured cache.
+func SeedRepoViaController(ctx context.Context, controllerURL, token, repoURL, repoDir, sha string) error {
+	if controllerURL == "" {
+		return fmt.Errorf("SeedRepoViaController: controller URL required")
+	}
+	var err error
+	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
+	if err != nil {
+		return fmt.Errorf("SeedRepoViaController: invalid repo URL: %w", err)
+	}
+	sha, err = validateGitObject(sha)
+	if err != nil {
+		return err
+	}
+	bundle, err := createRepoBundle(ctx, repoDir, sha)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.Remove(bundle) }()
+
+	f, err := os.Open(bundle)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	q := neturl.Values{}
+	q.Set("repo", repoURL)
+	q.Set("sha", sha)
+	url := strings.TrimRight(controllerURL, "/") + "/api/v1/gitcache/seed?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, f)
+	if err != nil {
+		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

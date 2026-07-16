@@ -2,11 +2,14 @@ package main
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -16,14 +19,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
+var triggerTestGitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
+
 // triggerSpy is a minimal controller stand-in. It records request lines
 // and captures trigger POST bodies, and serves just enough of the
 // status-follow surface (GetRun returns a terminal run, ListNodes
 // returns empty) for a non-detach follow to render once and exit.
 type triggerSpy struct {
-	mu     sync.Mutex
-	reqs   []string
-	bodies [][]byte
+	mu             sync.Mutex
+	reqs           []string
+	bodies         [][]byte
+	failRefresh    bool
+	seedBodyBytes  int
+	seedRepoValues []string
+	seedSHAValues  []string
 }
 
 func (s *triggerSpy) handler() http.Handler {
@@ -33,6 +42,22 @@ func (s *triggerSpy) handler() http.Handler {
 		s.mu.Unlock()
 
 		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/gitcache/refresh":
+			if s.failRefresh {
+				http.Error(w, "refresh failed", http.StatusBadGateway)
+				return
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/gitcache/seed":
+			body, _ := io.ReadAll(r.Body)
+			s.mu.Lock()
+			s.seedBodyBytes += len(body)
+			s.seedRepoValues = append(s.seedRepoValues, r.URL.Query().Get("repo"))
+			s.seedSHAValues = append(s.seedSHAValues, r.URL.Query().Get("sha"))
+			s.mu.Unlock()
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"ok":true}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers":
 			body := make([]byte, r.ContentLength)
 			_, _ = r.Body.Read(body)
@@ -56,6 +81,12 @@ func (s *triggerSpy) requests() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.reqs...)
+}
+
+func (s *triggerSpy) seedStats() (int, []string, []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.seedBodyBytes, append([]string(nil), s.seedRepoValues...), append([]string(nil), s.seedSHAValues...)
 }
 
 func writeTriggerProfiles(t *testing.T, controllerURL string) {
@@ -131,6 +162,7 @@ func TestPipelineTrigger_DetachFiresTriggerOnly(t *testing.T) {
 		case r == "POST /api/v1/triggers":
 			sawTrigger = true
 		case r == "GET /api/v1/services":
+		case r == "POST /api/v1/gitcache/refresh":
 		case strings.HasPrefix(r, "GET /api/v1/runs"):
 			t.Fatalf("detach should not follow the run; got %v", reqs)
 		}
@@ -191,6 +223,42 @@ func TestPipelineTrigger_DetachAcceptsNonGitHubOrigin(t *testing.T) {
 	}
 	if got := req.Trigger.Env["GITHUB_REPOSITORY"]; got != "" {
 		t.Fatalf("GITHUB_REPOSITORY = %q, want empty for non-GitHub origin", got)
+	}
+}
+
+func TestPipelineTrigger_SeedsControllerGitcacheWhenRefreshFails(t *testing.T) {
+	spy := &triggerSpy{failRefresh: true}
+	srv := httptest.NewServer(spy.handler())
+	defer srv.Close()
+	writeTriggerProfiles(t, srv.URL)
+	origin := "https://git.example.com/acme/widgets.git"
+	withGitCheckout(t, origin, func() {
+		out := captureStdout(t, func() {
+			if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--detach"}); err != nil {
+				t.Errorf("trigger: %v", err)
+			}
+		})
+		if strings.TrimSpace(out) != "run-test" {
+			t.Errorf("detach stdout = %q, want run id", out)
+		}
+	})
+
+	size, repos, shas := spy.seedStats()
+	if size == 0 {
+		t.Fatal("expected non-empty git bundle seed body")
+	}
+	if len(repos) != 1 || repos[0] != origin {
+		t.Fatalf("seed repos = %v, want [%s]", repos, origin)
+	}
+	if len(shas) != 1 || !triggerTestGitObjectRE.MatchString(shas[0]) {
+		t.Fatalf("seed shas = %v, want one git object id", shas)
+	}
+	reqs := spy.requests()
+	if !slices.Contains(reqs, "POST /api/v1/gitcache/refresh") {
+		t.Fatalf("expected refresh before seed; got %v", reqs)
+	}
+	if !slices.Contains(reqs, "POST /api/v1/gitcache/seed") {
+		t.Fatalf("expected seed fallback; got %v", reqs)
 	}
 }
 

@@ -82,6 +82,8 @@ func initProxyMetrics() {
 // validGitRef matches safe git branch/tag names -- no shell metacharacters.
 var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9_./-]+$`)
 
+var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
+
 func validateGitRef(ref string) error {
 	if ref == "" {
 		return fmt.Errorf("empty git ref")
@@ -1181,7 +1183,7 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ancestor": "", "found": false})
 }
 
-// POST /sync/seed?repo=git@github.com:user/repo.git -- receive a git bundle and create/update a bare repo.
+// POST /sync/seed?repo=git@github.com:user/repo.git&sha=<commit> -- receive a git bundle and create/update a bare repo.
 // This lets the gitcache have git history without needing SSH access to clone.
 func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -1192,6 +1194,11 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	repoURL := r.URL.Query().Get("repo")
 	if repoURL == "" {
 		http.Error(w, "repo query param required", http.StatusBadRequest)
+		return
+	}
+	sha := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sha")))
+	if !gitObjectRE.MatchString(sha) {
+		http.Error(w, "sha query param must be a 40-64 character hex object id", http.StatusBadRequest)
 		return
 	}
 
@@ -1207,6 +1214,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	defer lock.Unlock()
 
 	bareRepo := filepath.Join(repoDir, hash+".git")
+	seedRef := "refs/sparkwing-seed/" + sha
 
 	tmpBundle, err := os.CreateTemp("", "seed-*.bundle")
 	if err != nil {
@@ -1222,25 +1230,44 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	tmpBundle.Close()
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
-		log.Printf("seed: creating bare repo from bundle for %s", hash)
-		if out, err := gitCmd("clone", "--bare", tmpBundle.Name(), bareRepo); err != nil {
-			http.Error(w, fmt.Sprintf("clone from bundle failed: %s\n%s", err, out), http.StatusInternalServerError)
+		log.Printf("seed: creating bare repo from bundle for %s at %s", hash, sha[:8])
+		if out, err := gitCmd("init", "--bare", bareRepo); err != nil {
+			http.Error(w, fmt.Sprintf("init bare repo failed: %s\n%s", err, out), http.StatusInternalServerError)
+			return
+		}
+		if out, err := gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), seedRef+":"+seedRef); err != nil {
+			_ = os.RemoveAll(bareRepo)
+			http.Error(w, fmt.Sprintf("fetch seed ref failed: %s\n%s", err, out), http.StatusBadRequest)
 			return
 		}
 		_, _ = gitCmd("-C", bareRepo, "remote", "set-url", "origin", repoURL)
 		enableSHAFetch(bareRepo)
 	} else {
 		enableSHAFetch(bareRepo)
-		log.Printf("seed: updating bare repo from bundle for %s", hash)
-		if out, err := gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), "+refs/*:refs/*"); err != nil {
-			log.Printf("seed: bulk fetch failed (%s), trying refs/heads/*", out)
-			_, _ = gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), "+refs/heads/*:refs/heads/*")
+		log.Printf("seed: updating bare repo from bundle for %s at %s", hash, sha[:8])
+		if out, err := gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), seedRef+":"+seedRef); err != nil {
+			http.Error(w, fmt.Sprintf("fetch seed ref failed: %s\n%s", err, out), http.StatusBadRequest)
+			return
 		}
 	}
+	pruneUnreachableSeedObjects(bareRepo)
+	if out, err := gitCmd("-C", bareRepo, "cat-file", "-e", sha+"^{commit}"); err != nil {
+		http.Error(w, fmt.Sprintf("seeded commit missing: %s\n%s", err, out), http.StatusBadRequest)
+		return
+	}
 
-	log.Printf("seed: %s seeded (%d bytes)", hash, len(bundleData))
+	log.Printf("seed: %s seeded %s (%d bytes)", hash, sha[:8], len(bundleData))
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "size": len(bundleData)})
+}
+
+func pruneUnreachableSeedObjects(bareRepo string) {
+	if out, err := gitCmd("-C", bareRepo, "reflog", "expire", "--expire=now", "--all"); err != nil {
+		log.Printf("warning: seed reflog prune failed: %v %s", err, out)
+	}
+	if out, err := gitCmd("-C", bareRepo, "gc", "--prune=now"); err != nil {
+		log.Printf("warning: seed object prune failed: %v %s", err, out)
+	}
 }
 
 var (
@@ -1491,7 +1518,7 @@ func resolveGitRepo(name string) (string, error) {
 	log.Printf("gitcache: registered repo %q missing on disk; auto-cloning %s", name, repoURL)
 	if out, err := gitCmd("clone", "--bare", repoURL, bareRepo); err != nil {
 		return "", fmt.Errorf(
-			"repo %q registered but not cloned -- auto-clone failed (%w%s); seed manually via POST /sync/seed?repo=%s",
+			"repo %q registered but not cloned -- auto-clone failed (%w%s); seed manually via POST /sync/seed?repo=%s&sha=<commit>",
 			name, err, sshHint(out), repoURL,
 		)
 	}
