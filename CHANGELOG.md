@@ -50,6 +50,9 @@ code change to unlock.
 
 ### Fixed
 
+- **cluster:** Remote pipeline triggers can now fetch source from non-GitHub
+  Git origins through the stored `repo_url` while preserving the canonical
+  GitHub clone path for GitHub-backed triggers.
 - **admission:** Measured and default CPU costs now act as backpressure, not
   a hard admission gate. Memory and explicit resource pins still gate
   admission strictly, while CPU pressure admits one memory-fitting run before
