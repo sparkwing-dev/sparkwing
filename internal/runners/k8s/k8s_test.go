@@ -48,6 +48,19 @@ func TestBuildJob_OmitsArtifactStoreURLWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestBuildJob_UsesWritableGoCachePaths(t *testing.T) {
+	env := jobEnv(t, Config{Image: "img"})
+	for key, want := range map[string]string{
+		"HOME":       "/tmp",
+		"GOCACHE":    "/tmp/go-build",
+		"GOMODCACHE": "/tmp/go-mod",
+	} {
+		if got := env[key]; got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
 func TestBuildJob_RunsNodeThroughRunnerBinary(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})

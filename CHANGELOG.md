@@ -48,6 +48,12 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.17.22] - 2026-07-16
+### Fixed
+
+- **cluster:** Kubernetes runner Jobs now set writable Go cache paths under
+  `/tmp`, so non-root job pods can compile fetched pipeline sources.
+
 ## [v0.17.21] - 2026-07-16
 ### Fixed
 

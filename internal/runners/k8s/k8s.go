@@ -418,6 +418,9 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 		{Name: "SPARKWING_NODE_ID", Value: req.NodeID},
 		// safety: pod runs as nonroot; SPARKWING_HOME must be a writable path or DefaultPaths mkdir fails
 		{Name: "SPARKWING_HOME", Value: "/tmp/sparkwing"},
+		{Name: "HOME", Value: "/tmp"},
+		{Name: "GOCACHE", Value: "/tmp/go-build"},
+		{Name: "GOMODCACHE", Value: "/tmp/go-mod"},
 	}
 	if r.cfg.LogsURL != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_LOGS_URL", Value: r.cfg.LogsURL})
