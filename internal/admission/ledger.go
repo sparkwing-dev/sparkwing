@@ -380,7 +380,6 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 		seen[nc.key] = true
 		s.claims = append(s.claims, nc)
 	}
-	// Host demand over this box's total is capped and serialized alone.
 	if s.milliCores > l.totalMilliCores {
 		if s.strictCores {
 			return spec{}, fmt.Errorf("%w: cores %d exceed total %d", ErrNeverAdmissible, s.milliCores, l.totalMilliCores)
