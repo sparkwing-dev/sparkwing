@@ -90,7 +90,7 @@ func TestPipelineCacheKey_ChangesWhenReplaceTargetChanges(t *testing.T) {
 	}
 }
 
-func TestPipelineCacheKey_IgnoresNonGoFilesInReplaceTarget(t *testing.T) {
+func TestPipelineCacheKey_ReplaceTargetNonGoFilesBustCache(t *testing.T) {
 	pipDir := scaffoldPipelineRepo(t)
 	k1, _ := bincache.PipelineCacheKey(pipDir)
 
@@ -98,8 +98,8 @@ func TestPipelineCacheKey_IgnoresNonGoFilesInReplaceTarget(t *testing.T) {
 	writeFile(t, sdkReadme, "hello world")
 
 	k2, _ := bincache.PipelineCacheKey(pipDir)
-	if k1 != k2 {
-		t.Fatalf("README change should not bust cache: %q vs %q", k1, k2)
+	if k1 == k2 {
+		t.Fatalf("replace-target file change should bust cache (embedded assets count): %q vs %q", k1, k2)
 	}
 }
 
