@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -52,7 +53,7 @@ func (TemplateVerify) ShortHelp() string {
 }
 
 func (TemplateVerify) Help() string {
-	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline explain`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with. Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module or a Dockerfile); a docker-fixture template's run is skipped when no Docker daemon is available. The pipeline is green only when every template passes, which is why the release pipeline gates on it."
+	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline explain`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with. Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, or a Python package); verify: dry-runnable templates run the same way with SPARKWING_DRY_RUN=1 exported so cloud mutations echo instead of executing. When a fixture's toolchain is missing on the host (Docker daemon, node/npm, or python3) the run step is skipped, not failed, so the gate stays green. The pipeline is green only when every template passes, which is why the release pipeline gates on it."
 }
 
 func (TemplateVerify) Examples() []sparkwing.Example {
@@ -174,17 +175,24 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 			sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained (compile-only)", m.Name))
 			return nil
 		case templates.VerifyRunnable, templates.VerifyDryRunnable:
-			if m.Fixture() == templates.FixtureDocker && !dockerAvailable(ctx) {
-				sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained; run skipped (no Docker)", m.Name))
+			if ready, missing := fixtureToolchainReady(ctx, m.Fixture()); !ready {
+				sparkwing.Info(ctx, "%s: run SKIPPED -- %s not available on host; keeping gate green (compiled + linted + explained only)", m.Name, missing)
+				sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained; run skipped (%s unavailable)", m.Name, missing))
 				return nil
 			}
 			if err := seedFixture(scratch, m.Fixture()); err != nil {
 				return fmt.Errorf("%s: fixture: %w", m.Name, err)
 			}
-			if _, err := sparkwing.Exec(ctx, bin, "run", m.Name).Dir(scratch).Run(); err != nil {
+			runCmd := sparkwing.Exec(ctx, bin, "run", m.Name).Dir(scratch)
+			mode := "ran green"
+			if m.Tier() == templates.VerifyDryRunnable {
+				runCmd = runCmd.Env("SPARKWING_DRY_RUN", "1")
+				mode = "ran green (dry-run)"
+			}
+			if _, err := runCmd.Run(); err != nil {
 				return fmt.Errorf("%s: run: %w", m.Name, err)
 			}
-			sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained + ran green", m.Name))
+			sparkwing.Annotate(ctx, fmt.Sprintf("%s: compiled + linted + explained + %s", m.Name, mode))
 			return nil
 		default:
 			return fmt.Errorf("%s: unknown verify tier %q", m.Name, m.Tier())
@@ -339,9 +347,34 @@ func sortedKeys(m map[string]string) []string {
 	return out
 }
 
-// dockerAvailable reports whether a Docker daemon is reachable. A
-// docker-fixture template's run is skipped (not failed) when it isn't,
-// so the gate stays green on machines without Docker.
+// fixtureToolchainReady reports whether the host has the toolchain a
+// fixture's run needs, naming the missing tool otherwise. When it is
+// absent the run step is skipped (not failed), so the gate stays green
+// on a machine that lacks Docker, Node, or Python -- the same policy for
+// every fixture. The interpreter each fixture synthesizes against is the
+// contract: the node fixture drives npm, the python fixture stdlib
+// python3, the docker fixture the daemon.
+func fixtureToolchainReady(ctx context.Context, fixture string) (bool, string) {
+	switch fixture {
+	case templates.FixtureDocker:
+		if !dockerAvailable(ctx) {
+			return false, "docker daemon"
+		}
+	case templates.FixtureNodeModule:
+		for _, tool := range []string{"node", "npm"} {
+			if _, err := exec.LookPath(tool); err != nil {
+				return false, tool
+			}
+		}
+	case templates.FixturePythonModule:
+		if _, err := exec.LookPath("python3"); err != nil {
+			return false, "python3"
+		}
+	}
+	return true, ""
+}
+
+// dockerAvailable reports whether a Docker daemon is reachable.
 func dockerAvailable(ctx context.Context) bool {
 	_, err := sparkwing.Exec(ctx, "docker", "info").Capture()
 	return err == nil
@@ -362,6 +395,10 @@ func seedFixture(root, fixture string) error {
 			return err
 		}
 		return seedDocker(root)
+	case templates.FixtureNodeModule:
+		return seedNodeModule(root)
+	case templates.FixturePythonModule:
+		return seedPythonModule(root)
 	default:
 		return fmt.Errorf("unknown fixture %q", fixture)
 	}
@@ -381,6 +418,53 @@ func seedDocker(root string) error {
 	files := map[string]string{
 		"Dockerfile":    "FROM alpine:3.20\nCMD [\"true\"]\n",
 		".dockerignore": ".sparkwing\ndist\n",
+	}
+	return writeFixtureFiles(root, files)
+}
+
+// seedNodeModule writes a dependency-free Node project at the repo root:
+// a package.json whose install / lint / typecheck / build / test scripts
+// all pass with only the Node runtime (no npm install, no network -- the
+// lockfile has zero dependencies and the test runs the stdlib test
+// runner), plus a passing test file.
+func seedNodeModule(root string) error {
+	files := map[string]string{
+		"package.json": `{
+  "name": "verify-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "build": "node -e \"process.exit(0)\"",
+    "lint": "node -e \"process.exit(0)\"",
+    "typecheck": "node -e \"process.exit(0)\"",
+    "test": "node --test"
+  }
+}
+`,
+		"package-lock.json": `{
+  "name": "verify-fixture",
+  "version": "0.0.0",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": { "name": "verify-fixture", "version": "0.0.0" }
+  }
+}
+`,
+		filepath.Join("test", "smoke.test.js"): "const { test } = require(\"node:test\");\n\ntest(\"fixture smoke\", () => {});\n",
+	}
+	return writeFixtureFiles(root, files)
+}
+
+// seedPythonModule writes a dependency-free Python project at the repo
+// root: a pyproject.toml, a trivial importable package, and a passing
+// stdlib unittest that `python3 -m unittest discover` finds -- no pip,
+// uv, pytest, or network required.
+func seedPythonModule(root string) error {
+	files := map[string]string{
+		"pyproject.toml": "[project]\nname = \"verify-fixture\"\nversion = \"0.0.0\"\n",
+		filepath.Join("verify_fixture", "__init__.py"): "",
+		"test_smoke.py": "import unittest\n\n\nclass SmokeTest(unittest.TestCase):\n    def test_ok(self) -> None:\n        self.assertTrue(True)\n",
 	}
 	return writeFixtureFiles(root, files)
 }
