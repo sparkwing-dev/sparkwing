@@ -21,7 +21,8 @@ unauthenticated endpoints, and first-visit admin bootstrap are in
 `POST /webhooks/github/{pipeline}` ingests GitHub deliveries. It is
 verified by HMAC (`X-Hub-Signature-256` against `GITHUB_WEBHOOK_SECRET`)
 rather than a bearer token, since GitHub can't carry one; the handler
-acts on `push` and answers `ping`. See [security.md](security.md).
+acts on `push` and `pull_request` (opened/synchronize/reopened) and
+answers `ping`. See [security.md](security.md).
 
 ## Logs service
 

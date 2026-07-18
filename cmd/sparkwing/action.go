@@ -393,6 +393,13 @@ func summarizeTriggerList(t pipelines.Triggers) []string {
 			out = append(out, "push")
 		}
 	}
+	if t.PullRequest != nil {
+		if len(t.PullRequest.Branches) > 0 {
+			out = append(out, "pull_request:"+strings.Join(t.PullRequest.Branches, ","))
+		} else {
+			out = append(out, "pull_request")
+		}
+	}
 	if t.Webhook != nil {
 		out = append(out, "webhook:"+t.Webhook.Path)
 	}

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,8 +54,9 @@ type githubPushPayload struct {
 // body; GitHub cannot carry a bearer token.
 //
 // Events: "ping" -> pong; "push" on a refs/heads/ branch -> enqueue
-// a trigger; anything else -> 202 ignored. Tag pushes and branch
-// deletions are ignored.
+// a trigger; "pull_request" on the opened/synchronize/reopened actions
+// -> enqueue a trigger against the PR head; anything else -> 202
+// ignored. Tag pushes and branch deletions are ignored.
 func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 	if s.githubWebhookSecret == "" {
 		writeError(w, http.StatusServiceUnavailable,
@@ -88,6 +90,9 @@ func (s *Server) handleGitHubWebhook(w http.ResponseWriter, r *http.Request) {
 		return
 	case "push":
 		s.handleGitHubPush(w, r, pipeline, delivery, body)
+		return
+	case "pull_request":
+		s.handleGitHubPullRequest(w, r, pipeline, delivery, body)
 		return
 	default:
 		s.logger.Info("github webhook ignored",
@@ -178,6 +183,124 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeli
 		"repo", payload.Repository.FullName,
 		"branch", branch,
 		"sha", payload.After,
+		"delivery", delivery,
+	)
+	writeJSON(w, http.StatusAccepted, triggerResp{
+		RunID:  runID,
+		Status: "dispatched",
+	})
+}
+
+type githubPullRequestPayload struct {
+	Action      string `json:"action"`
+	Number      int    `json:"number"`
+	PullRequest struct {
+		Head struct {
+			Ref string `json:"ref"`
+			SHA string `json:"sha"`
+		} `json:"head"`
+		Base struct {
+			Ref string `json:"ref"`
+			SHA string `json:"sha"`
+		} `json:"base"`
+		User struct {
+			Login string `json:"login"`
+		} `json:"user"`
+	} `json:"pull_request"`
+	Repository struct {
+		FullName string `json:"full_name"`
+	} `json:"repository"`
+}
+
+// defaultPullRequestActions are the pull_request actions that dispatch
+// a run. Other actions (labeled, closed, edited, ...) are acknowledged
+// and ignored so a build only fires when the diff itself changed.
+var defaultPullRequestActions = map[string]struct{}{
+	"opened":      {},
+	"synchronize": {},
+	"reopened":    {},
+}
+
+func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request, pipeline, delivery string, body []byte) {
+	var payload githubPullRequestPayload
+	if err := json.Unmarshal(body, &payload); err != nil {
+		writeError(w, http.StatusBadRequest, fmt.Errorf("decode pull_request payload: %w", err))
+		return
+	}
+
+	if _, ok := defaultPullRequestActions[payload.Action]; !ok {
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"status": "ignored",
+			"reason": "pull_request action not built",
+			"action": payload.Action,
+		})
+		return
+	}
+
+	runID := newRunID()
+	trigger := sparkwing.TriggerInfo{
+		Source: "github",
+		User:   payload.PullRequest.User.Login,
+	}
+	triggerEnv := map[string]string{
+		"GITHUB_DELIVERY":            delivery,
+		"GITHUB_REPOSITORY":          payload.Repository.FullName,
+		sparkwing.EnvGitHubEventName: sparkwing.EventPullRequest,
+		sparkwing.EnvPRNumber:        strconv.Itoa(payload.Number),
+		sparkwing.EnvPRAction:        payload.Action,
+		sparkwing.EnvPRBaseRef:       payload.PullRequest.Base.Ref,
+		sparkwing.EnvPRBaseSHA:       payload.PullRequest.Base.SHA,
+		sparkwing.EnvPRHeadRef:       payload.PullRequest.Head.Ref,
+		sparkwing.EnvPRHeadSHA:       payload.PullRequest.Head.SHA,
+	}
+	owner, repoName := "", ""
+	if parts := strings.SplitN(payload.Repository.FullName, "/", 2); len(parts) == 2 {
+		owner, repoName = parts[0], parts[1]
+	}
+	g := &sparkwing.Git{
+		Branch: payload.PullRequest.Head.Ref,
+		SHA:    payload.PullRequest.Head.SHA,
+		Repo:   repoName,
+	}
+	trigger.PullRequest = sparkwing.PullRequestFromEnv(triggerEnv)
+
+	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
+		ID:            runID,
+		Pipeline:      pipeline,
+		TriggerSource: trigger.Source,
+		TriggerUser:   trigger.User,
+		TriggerEnv:    triggerEnv,
+		GitBranch:     g.Branch,
+		GitSHA:        g.SHA,
+		Repo:          g.Repo,
+		GithubOwner:   owner,
+		GithubRepo:    repoName,
+		CreatedAt:     time.Now(),
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist trigger: %w", err))
+		return
+	}
+
+	if err := s.dispatcher.Dispatch(r.Context(), RunRequest{
+		RunID:    runID,
+		Pipeline: pipeline,
+		Trigger:  trigger,
+		Git:      g,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+
+	s.logger.Info(
+		"github pull_request webhook accepted",
+		"pipeline", pipeline,
+		"run_id", runID,
+		"repo", payload.Repository.FullName,
+		"pr", payload.Number,
+		"action", payload.Action,
+		"base", payload.PullRequest.Base.Ref,
+		"head", payload.PullRequest.Head.Ref,
+		"sha", payload.PullRequest.Head.SHA,
 		"delivery", delivery,
 	)
 	writeJSON(w, http.StatusAccepted, triggerResp{

@@ -169,6 +169,10 @@ func nodeKindName(k yaml.Kind) string {
 type Triggers struct {
 	// Push fires on a git push the controller receives via webhook.
 	Push *PushTrigger `yaml:"push,omitempty"`
+	// PullRequest fires on a GitHub pull_request event the controller
+	// receives via webhook. The run checks out the PR head; base ref
+	// and PR number reach the pipeline on RunContext.Trigger.PullRequest.
+	PullRequest *PullRequestTrigger `yaml:"pull_request,omitempty"`
 	// Schedule is a cron expression the controller evaluates.
 	Schedule string `yaml:"schedule,omitempty"`
 	// Webhook exposes a custom HTTP path that fires the pipeline.
@@ -191,6 +195,27 @@ type PushTrigger struct {
 	// Paths limits the trigger to pushes touching these path globs;
 	// empty matches any path.
 	Paths []string `yaml:"paths,omitempty"`
+}
+
+// PullRequestTrigger fires on GitHub pull_request events. The
+// controller dispatches on the opened, synchronize, and reopened
+// actions; other actions (labeled, closed, ...) are acknowledged and
+// ignored. The run checks out the PR head commit, and the pipeline
+// reads the base ref, head ref, and PR number from
+// RunContext.Trigger.PullRequest.
+//
+// Actions and Branches are declarative filters that record intent.
+// Like on.push's branches/paths, the controller does not gate on them
+// today (it applies the default action set and dispatches whichever
+// pipeline the webhook URL names); scope a pull_request trigger by
+// pointing its GitHub webhook only at the pipeline you want it to fire.
+type PullRequestTrigger struct {
+	// Actions limits the trigger to these pull_request actions; empty
+	// means the default set (opened, synchronize, reopened).
+	Actions []string `yaml:"actions,omitempty"`
+	// Branches limits the trigger to pull requests whose base branch
+	// matches these globs; empty matches any base branch.
+	Branches []string `yaml:"branches,omitempty"`
 }
 
 // WebhookTrigger exposes an HTTP path that fires the pipeline. The

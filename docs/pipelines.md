@@ -43,7 +43,7 @@ hard parse error):
 - **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", ...)` string
 - **entrypoint** - the Go pipeline struct type implementing it (required); equals the struct name
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
-- **on** - declarative trigger block: `push` (branches/paths), `schedule` (cron), `webhook`, `pre_commit`, `pre_push`. Absent means "manual only" (a command).
+- **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (cron), `webhook`, `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
 - **guards** - gate dispatch on profile + args (`reject` / `require` token lists)
 - **args** - per-arg default values, keyed by CLI flag name
 - **profile** - the project profile this pipeline uses (from the `profiles:` map)
@@ -67,6 +67,13 @@ pipelines:
       push:
         branches: [main]
         paths: ["*.go", "go.mod"]        # optional path filter
+
+  # Run on every pull request (checks out the PR head)
+  - name: pr-gate
+    entrypoint: PRGate
+    on:
+      pull_request:
+        branches: [main]
 
   # Custom HTTP trigger (controller exposes this path)
   - name: review

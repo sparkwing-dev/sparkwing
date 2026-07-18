@@ -289,6 +289,13 @@ func summarizePipelineTriggers(t pipelines.Triggers) string {
 			bits = append(bits, "push")
 		}
 	}
+	if t.PullRequest != nil {
+		if len(t.PullRequest.Branches) > 0 {
+			bits = append(bits, "pull_request="+strings.Join(t.PullRequest.Branches, ","))
+		} else {
+			bits = append(bits, "pull_request")
+		}
+	}
 	if t.Webhook != nil {
 		bits = append(bits, "webhook="+t.Webhook.Path)
 	}

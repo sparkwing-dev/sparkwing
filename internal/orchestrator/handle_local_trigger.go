@@ -81,8 +81,9 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		RetrySource: trigger.RetrySource,
 		Full:        trigger.Full,
 		Trigger: sparkwing.TriggerInfo{
-			Source: trigger.TriggerSource,
-			User:   trigger.TriggerUser,
+			Source:      trigger.TriggerSource,
+			User:        trigger.TriggerUser,
+			PullRequest: sparkwing.PullRequestFromEnv(trigger.TriggerEnv),
 		},
 		Git: sparkwing.NewGit(
 			sparkwing.CurrentRuntime().WorkDir,

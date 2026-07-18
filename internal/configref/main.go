@@ -48,6 +48,7 @@ func main() {
 	section(&b, "`guards`", structFields(pf, "Guards"))
 	section(&b, "Triggers (`on:`)", structFields(pf, "Triggers"))
 	section(&b, "`on.push`", structFields(pf, "PushTrigger"))
+	section(&b, "`on.pull_request`", structFields(pf, "PullRequestTrigger"))
 	section(&b, "`on.webhook`", structFields(pf, "WebhookTrigger"))
 
 	fmt.Print(b.String())

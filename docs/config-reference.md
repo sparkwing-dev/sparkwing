@@ -48,6 +48,7 @@ The complete `.sparkwing/sparkwing.yaml` schema, generated from the Go structs t
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `push` | `PushTrigger` | no | Push fires on a git push the controller receives via webhook. |
+| `pull_request` | `PullRequestTrigger` | no | PullRequest fires on a GitHub pull_request event the controller receives via webhook. The run checks out the PR head; base ref and PR number reach the pipeline on RunContext.Trigger.PullRequest. |
 | `schedule` | `string` | no | Schedule is a cron expression the controller evaluates. |
 | `webhook` | `WebhookTrigger` | no | Webhook exposes a custom HTTP path that fires the pipeline. |
 | `pre_commit` | `PreHookTrigger` | no | PreHook fires from the installed git pre-commit hook. |
@@ -60,6 +61,13 @@ The complete `.sparkwing/sparkwing.yaml` schema, generated from the Go structs t
 |---|---|---|---|
 | `branches` | `[]string` | no | Branches limits the trigger to pushes on these branches (glob patterns); empty matches any branch. |
 | `paths` | `[]string` | no | Paths limits the trigger to pushes touching these path globs; empty matches any path. |
+
+## `on.pull_request`
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `actions` | `[]string` | no | Actions limits the trigger to these pull_request actions; empty means the default set (opened, synchronize, reopened). |
+| `branches` | `[]string` | no | Branches limits the trigger to pull requests whose base branch matches these globs; empty matches any base branch. |
 
 ## `on.webhook`
 

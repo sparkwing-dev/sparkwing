@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -235,17 +236,111 @@ func TestWebhookGitHub_BranchDeleteIgnored(t *testing.T) {
 	expectNoTrigger(t, st)
 }
 
-// TestWebhookGitHub_UnknownEventIgnored acks pull_request and other
+// TestWebhookGitHub_UnknownEventIgnored acks issue and other unhandled
 // events without dispatching, so GitHub sees a green delivery.
 func TestWebhookGitHub_UnknownEventIgnored(t *testing.T) {
 	ts, st := newWebhookServer(t, testWebhookSecret)
 	body := []byte(`{"action":"opened"}`)
-	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "pull_request", body, signWebhook(testWebhookSecret, body))
+	resp := postWebhook(t, ts.URL+"/webhooks/github/demo", "issues", body, signWebhook(testWebhookSecret, body))
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusAccepted {
 		t.Errorf("status=%d want 202", resp.StatusCode)
 	}
 	expectNoTrigger(t, st)
+}
+
+func prWebhookBody(action string, number int) []byte {
+	return []byte(fmt.Sprintf(`{
+		"action": %q,
+		"number": %d,
+		"pull_request": {
+			"head": {"ref": "feature/login", "sha": "1111111111111111111111111111111111111111"},
+			"base": {"ref": "main", "sha": "2222222222222222222222222222222222222222"},
+			"user": {"login": "bob"}
+		},
+		"repository": {"full_name": "acme/sample-app"}
+	}`, action, number))
+}
+
+// TestWebhookGitHub_PullRequestDispatches covers the built PR actions:
+// each enqueues a trigger against the PR head with the base ref and PR
+// number stamped into the trigger env.
+func TestWebhookGitHub_PullRequestDispatches(t *testing.T) {
+	for _, action := range []string{"opened", "synchronize", "reopened"} {
+		t.Run(action, func(t *testing.T) {
+			ts, st := newWebhookServer(t, testWebhookSecret)
+			body := prWebhookBody(action, 42)
+			resp := postWebhook(t, ts.URL+"/webhooks/github/pr-gate", "pull_request", body, signWebhook(testWebhookSecret, body))
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusAccepted {
+				raw, _ := io.ReadAll(resp.Body)
+				t.Fatalf("status=%d want 202 (body %s)", resp.StatusCode, raw)
+			}
+			var decoded struct {
+				RunID  string `json:"run_id"`
+				Status string `json:"status"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			if decoded.Status != "dispatched" {
+				t.Fatalf("status=%q want dispatched", decoded.Status)
+			}
+			tr, err := st.GetTrigger(context.Background(), decoded.RunID)
+			if err != nil {
+				t.Fatalf("GetTrigger: %v", err)
+			}
+			if tr.Pipeline != "pr-gate" {
+				t.Errorf("pipeline=%q want pr-gate", tr.Pipeline)
+			}
+			if tr.GitBranch != "feature/login" {
+				t.Errorf("branch=%q want feature/login (PR head)", tr.GitBranch)
+			}
+			if tr.GitSHA != "1111111111111111111111111111111111111111" {
+				t.Errorf("sha=%q want PR head sha", tr.GitSHA)
+			}
+			if tr.TriggerUser != "bob" {
+				t.Errorf("user=%q want bob", tr.TriggerUser)
+			}
+			want := map[string]string{
+				"GITHUB_EVENT_NAME": "pull_request",
+				"GITHUB_PR_NUMBER":  "42",
+				"GITHUB_PR_ACTION":  action,
+				"GITHUB_BASE_REF":   "main",
+				"GITHUB_HEAD_REF":   "feature/login",
+				"GITHUB_HEAD_SHA":   "1111111111111111111111111111111111111111",
+				"GITHUB_BASE_SHA":   "2222222222222222222222222222222222222222",
+				"GITHUB_REPOSITORY": "acme/sample-app",
+			}
+			for k, v := range want {
+				if tr.TriggerEnv[k] != v {
+					t.Errorf("env[%s]=%q want %q", k, tr.TriggerEnv[k], v)
+				}
+			}
+		})
+	}
+}
+
+// TestWebhookGitHub_PullRequestActionIgnored proves non-diff actions
+// (closed, labeled, ...) are ack'd without dispatching a run.
+func TestWebhookGitHub_PullRequestActionIgnored(t *testing.T) {
+	for _, action := range []string{"closed", "labeled", "edited", "assigned"} {
+		t.Run(action, func(t *testing.T) {
+			ts, st := newWebhookServer(t, testWebhookSecret)
+			body := prWebhookBody(action, 7)
+			resp := postWebhook(t, ts.URL+"/webhooks/github/pr-gate", "pull_request", body, signWebhook(testWebhookSecret, body))
+			defer func() { _ = resp.Body.Close() }()
+			if resp.StatusCode != http.StatusAccepted {
+				t.Errorf("status=%d want 202", resp.StatusCode)
+			}
+			var decoded map[string]string
+			_ = json.NewDecoder(resp.Body).Decode(&decoded)
+			if decoded["status"] != "ignored" {
+				t.Errorf("status=%q want ignored", decoded["status"])
+			}
+			expectNoTrigger(t, st)
+		})
+	}
 }
 
 // TestWebhookGitHub_BodyTooLarge guards against memory blow-up from a

@@ -3,6 +3,7 @@ package sparkwing
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -40,6 +41,69 @@ type RunContext struct {
 type TriggerInfo struct {
 	Source string // "manual", "push", "schedule", "webhook"
 	User   string // invoker identity, when known
+
+	// PullRequest is non-nil when the run was started by a GitHub
+	// pull_request event. RunContext.Git already carries the PR head
+	// (SHA, Branch); this adds the base ref and PR number a gate needs
+	// to diff against the target branch or post back to the PR.
+	PullRequest *PullRequest
+}
+
+// PullRequest carries the GitHub pull_request fields a PR gate reads.
+// The run checks out HeadSHA / HeadRef (mirrored onto RunContext.Git),
+// so BaseRef and Number are the values not otherwise reachable from the
+// working tree.
+type PullRequest struct {
+	// Number is the pull request number (e.g. 42).
+	Number int
+	// Action is the pull_request event action that fired the run
+	// (opened, synchronize, reopened).
+	Action string
+	// BaseRef is the branch the PR targets (e.g. "main").
+	BaseRef string
+	// BaseSHA is the tip commit of the base branch at event time.
+	BaseSHA string
+	// HeadRef is the PR's source branch.
+	HeadRef string
+	// HeadSHA is the PR head commit the run checks out.
+	HeadSHA string
+}
+
+// Trigger-env keys carrying GitHub pull_request metadata. The
+// controller stamps these onto the persisted trigger; the orchestrator
+// reads them back via PullRequestFromEnv when it builds the run
+// context. Kept here so writer and reader share one source of truth.
+const (
+	EnvGitHubEventName = "GITHUB_EVENT_NAME"
+	EnvPRNumber        = "GITHUB_PR_NUMBER"
+	EnvPRAction        = "GITHUB_PR_ACTION"
+	EnvPRBaseRef       = "GITHUB_BASE_REF"
+	EnvPRBaseSHA       = "GITHUB_BASE_SHA"
+	EnvPRHeadRef       = "GITHUB_HEAD_REF"
+	EnvPRHeadSHA       = "GITHUB_HEAD_SHA"
+)
+
+// EventPullRequest is the EnvGitHubEventName value that marks a
+// pull_request-triggered run.
+const EventPullRequest = "pull_request"
+
+// PullRequestFromEnv reconstructs a PullRequest from a trigger's env
+// map, or returns nil when the map does not describe a pull_request
+// event. A malformed number degrades to zero rather than failing the
+// run.
+func PullRequestFromEnv(env map[string]string) *PullRequest {
+	if env[EnvGitHubEventName] != EventPullRequest {
+		return nil
+	}
+	num, _ := strconv.Atoi(env[EnvPRNumber])
+	return &PullRequest{
+		Number:  num,
+		Action:  env[EnvPRAction],
+		BaseRef: env[EnvPRBaseRef],
+		BaseSHA: env[EnvPRBaseSHA],
+		HeadRef: env[EnvPRHeadRef],
+		HeadSHA: env[EnvPRHeadSHA],
+	}
 }
 
 // LogRecord is the structured unit every Logger receives. The

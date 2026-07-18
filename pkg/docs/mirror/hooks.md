@@ -33,6 +33,58 @@ in the generated [config-reference.md](config-reference.md); this page
 covers how each fires. See [api.md](api.md) for
 `POST /webhooks/github/{pipeline}` and HMAC verification.
 
+Both `push` and `pull_request` arrive on the same GitHub webhook
+endpoint (`POST /webhooks/github/{pipeline}`) and fire the pipeline the
+URL names. The controller does not read your `sparkwing.yaml`, so the
+`branches` / `paths` / `actions` filters under `on:` are declarative:
+they document intent, but the controller does not gate on them. Scope a
+trigger by configuring the GitHub webhook to deliver only the events you
+want to that pipeline's URL.
+
+## Pull request triggers
+
+```yaml
+# .sparkwing/sparkwing.yaml
+pipelines:
+  - name: pr-gate
+    entrypoint: PRGate
+    description: Lint and test every pull request
+    on:
+      pull_request:
+        branches: [main]               # declarative: PRs targeting main
+```
+
+A `pull_request` trigger fires on the `opened`, `synchronize`, and
+`reopened` actions -- the ones that change the diff. Other actions
+(`labeled`, `closed`, `edited`, ...) are acknowledged and ignored, so a
+gate does not re-run every time someone relabels the PR. This default
+action set is applied by the controller; the `actions` field records
+intent but is not yet enforced.
+
+The run checks out the **PR head** commit. The pipeline reads the PR
+context from `RunContext.Trigger.PullRequest`:
+
+```go
+type PRGate struct{ sw.Base }
+
+func (p *PRGate) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.RunContext) error {
+    if pr := rc.Trigger.PullRequest; pr != nil {
+        sw.Job(plan, "diff-base", func(ctx context.Context) error {
+            _, err := sw.Bash(ctx, "git diff --stat origin/"+pr.BaseRef).Run()
+            return err
+        })
+    }
+    return nil
+}
+```
+
+**Status reporting.** sparkwing does not yet report a run's result back
+to the pull request as a GitHub commit status or check. A `pull_request`
+run executes and shows up on the sparkwing dashboard, but GitHub's
+merge-blocking required-checks UI will not see it. Gate merges on the
+sparkwing side (or via a thin GitHub Action that waits on the run) until
+native status reporting lands.
+
 ## Manual / API invocation
 
 ```bash

@@ -71,6 +71,17 @@ code change to unlock.
   deploying an open controller. Off by default so first-run bootstrap and
   laptop-local use keep working.
 
+- **config:** New `on: pull_request` trigger. A pipeline declaring it
+  fires on GitHub `pull_request` deliveries (the controller dispatches on
+  the `opened`, `synchronize`, and `reopened` actions; other actions are
+  acknowledged and ignored). The run checks out the PR head commit, and
+  the pipeline reads the pull request from
+  `RunContext.Trigger.PullRequest` (number, base ref, head ref, head and
+  base SHA, action). The block accepts declarative `actions` and
+  `branches` filters. sparkwing does not yet report the run's result back
+  to GitHub as a commit status or check; see
+  [docs/hooks.md](docs/hooks.md).
+
 ### Changed
 
 - **cli:** `sparkwing pipeline templates` pretty output now groups entries
