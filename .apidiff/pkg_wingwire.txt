@@ -97,6 +97,8 @@ type EventsWindow struct {
 	Cancellations int
 
 	Contended int
+
+	Rejections []RejectionCount
 }
 type Evicted struct {
 	RunID string
@@ -104,6 +106,8 @@ type Evicted struct {
 
 	SupersededBy string
 	Policy       Policy
+
+	Reason string
 }
 type EvictionCount struct {
 	Key   string
@@ -218,6 +222,10 @@ type Queued struct {
 }
 type Reattach struct {
 	LeaseToken string
+}
+type RejectionCount struct {
+	Cause string
+	Count int
 }
 type Release struct {
 	LeaseToken string

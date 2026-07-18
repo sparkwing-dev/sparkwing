@@ -1042,6 +1042,30 @@ type ProfileResolutionContext struct {
 ```
 
 
+### type PullRequest
+
+PullRequest carries the GitHub pull_request fields a PR gate reads.
+
+```
+type PullRequest struct {
+    // Number is the pull request number (e.g. 42).
+    Number int
+    // Action is the pull_request event action that fired the run
+    // (opened, synchronize, reopened).
+    Action string
+    // BaseRef is the branch the PR targets (e.g. "main").
+    BaseRef string
+    // BaseSHA is the tip commit of the base branch at event time.
+    BaseSHA string
+    // HeadRef is the PR's source branch.
+    HeadRef string
+    // HeadSHA is the PR head commit the run checks out.
+    HeadSHA string
+}
+```
+
+- `func PullRequestFromEnv(env map[string]string) *PullRequest` -- PullRequestFromEnv reconstructs a PullRequest from a trigger's env map, or returns nil when the map does not describe a pull_request event.
+
 ### type Ref
 
 Ref is a typed reference to another node's output.
@@ -1635,6 +1659,12 @@ TriggerInfo describes the trigger that started the run.
 type TriggerInfo struct {
     Source string // "manual", "push", "schedule", "webhook"
     User   string // invoker identity, when known
+
+    // PullRequest is non-nil when the run was started by a GitHub
+    // pull_request event. RunContext.Git already carries the PR head
+    // (SHA, Branch); this adds the base ref and PR number a gate needs
+    // to diff against the target branch or post back to the PR.
+    PullRequest *PullRequest
 }
 ```
 
@@ -1759,6 +1789,18 @@ type Workable interface {
 
 ```
 const (
+    EnvGitHubEventName = "GITHUB_EVENT_NAME"
+    EnvPRNumber        = "GITHUB_PR_NUMBER"
+    EnvPRAction        = "GITHUB_PR_ACTION"
+    EnvPRBaseRef       = "GITHUB_BASE_REF"
+    EnvPRBaseSHA       = "GITHUB_BASE_SHA"
+    EnvPRHeadRef       = "GITHUB_HEAD_REF"
+    EnvPRHeadSHA       = "GITHUB_HEAD_SHA"
+)
+```
+
+```
+const (
     EventStepStart   = "step_start"
     EventStepEnd     = "step_end"
     EventStepSkipped = "step_skipped"
@@ -1775,6 +1817,10 @@ const EventNodeAnnotation = "node_annotation"
 
 ```
 const EventNodeSummary = "node_summary"
+```
+
+```
+const EventPullRequest = "pull_request"
 ```
 
 ```

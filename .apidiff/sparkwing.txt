@@ -147,6 +147,13 @@ type DescribeStepRisks struct {
 	StepID string
 	Labels []string
 }
+const EnvGitHubEventName = "GITHUB_EVENT_NAME"
+const EnvPRAction = "GITHUB_PR_ACTION"
+const EnvPRBaseRef = "GITHUB_BASE_REF"
+const EnvPRBaseSHA = "GITHUB_BASE_SHA"
+const EnvPRHeadRef = "GITHUB_HEAD_REF"
+const EnvPRHeadSHA = "GITHUB_HEAD_SHA"
+const EnvPRNumber = "GITHUB_PR_NUMBER"
 type EnvVarDoc struct {
 	Name        string
 	Description string
@@ -160,6 +167,7 @@ var ErrSecretMissing = errors.New("sparkwing: secret not found")
 func Error(ctx context.Context, format string, args ...any)
 const EventNodeAnnotation = "node_annotation"
 const EventNodeSummary = "node_summary"
+const EventPullRequest = "pull_request"
 const EventStepEnd = "step_end"
 const EventStepSkipped = "step_skipped"
 const EventStepStart = "step_start"
@@ -472,6 +480,20 @@ type ProfileResolutionContext struct {
 
 	IsLocal bool
 }
+type PullRequest struct {
+	Number int
+
+	Action string
+
+	BaseRef string
+
+	BaseSHA string
+
+	HeadRef string
+
+	HeadSHA string
+}
+func PullRequestFromEnv(env map[string]string) *PullRequest
 const Queue OnLimit = "queue"
 func Range(min, max any) Constraint
 func ReadFile(path string) ([]byte, error)
@@ -728,6 +750,8 @@ type TransitiveArg struct {
 type TriggerInfo struct {
 	Source string
 	User   string
+
+	PullRequest *PullRequest
 }
 func TypeName(p any) string
 type VerifyError struct{ Err error }

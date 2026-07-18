@@ -68,6 +68,11 @@ func (p *Pipeline) UnmarshalYAML(node *yaml.Node) error
 type PostCommitHookTrigger struct{}
 type PostHookTrigger struct{}
 type PreHookTrigger struct{}
+type PullRequestTrigger struct {
+	Actions []string
+
+	Branches []string
+}
 type PushTrigger struct {
 	Branches []string
 
@@ -82,6 +87,8 @@ func (e SecretEntry) IsRequired() bool
 type SecretsField []SecretEntry
 type Triggers struct {
 	Push *PushTrigger
+
+	PullRequest *PullRequestTrigger
 
 	Schedule string
 

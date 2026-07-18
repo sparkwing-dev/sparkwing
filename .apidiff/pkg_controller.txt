@@ -74,6 +74,7 @@ func ServeWith(ctx context.Context, s *Server, addr string) error
 type Server struct {
 }
 func (s *Server) AttachPool(cfg PoolConfig) *Server
+func (s *Server) AuthEnabled() bool
 func (s *Server) EnableAuthFromStore() *Server
 func (s *Server) Handler() http.Handler
 func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server
