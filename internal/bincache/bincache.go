@@ -741,6 +741,15 @@ func PipelineCacheKey(sparkwingDir string) (string, error) {
 // PipelineCacheKeyForPlatform is PipelineCacheKey with explicit
 // GOOS/GOARCH inputs (runtime.GOOS/GOARCH are baked at host-build time
 // and don't reflect post-Setenv changes).
+//
+// Local replace targets are folded in by content, not by version: a
+// module replaced to a filesystem path (via the pipeline's go.mod or an
+// in-scope go.work) carries no version the key could pin, so the whole
+// directory is hashed. All files are hashed, not just Go source, so
+// editing an embedded asset (a replaced template registry's manifests)
+// invalidates the compiled binary. With no local replace targets and no
+// covering workspace the walk is skipped entirely and the key stays a
+// hash of the module tree, go.mod, and the overlays.
 func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
 	h := sha256.New()
 
@@ -756,10 +765,29 @@ func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, err
 	if err != nil {
 		return "", err
 	}
+	workTargets, workFile, err := localWorkspaceTargets(sparkwingDir)
+	if err != nil {
+		return "", err
+	}
+	if workFile != "" {
+		data, err := os.ReadFile(workFile)
+		if err != nil {
+			return "", err
+		}
+		fmt.Fprint(h, "go.work:")
+		h.Write(data)
+		fmt.Fprintln(h)
+	}
+	replaceTargets = append(replaceTargets, workTargets...)
 	sort.Strings(replaceTargets)
+	var last string
 	for _, t := range replaceTargets {
+		if t == last {
+			continue
+		}
+		last = t
 		fmt.Fprintf(h, "replace:%s\n", t)
-		if err := hashDirInto(h, t, goSourceOnly); err != nil {
+		if err := hashDirInto(h, t, allFiles); err != nil {
 			return "", err
 		}
 	}
@@ -832,10 +860,6 @@ func execChildWindows(bin string, args, env []string) error {
 type fileFilter func(name string) bool
 
 func allFiles(string) bool { return true }
-
-func goSourceOnly(name string) bool {
-	return strings.HasSuffix(name, ".go") || name == "go.mod" || name == "go.sum"
-}
 
 // goMajorMinor returns runtime.Version()'s "go1.26" prefix, stripping
 // the patch component.
@@ -915,4 +939,57 @@ func localReplaceTargets(goModPath string) ([]string, error) {
 
 func isLocalPath(p string) bool {
 	return strings.HasPrefix(p, ".") || strings.HasPrefix(p, "/")
+}
+
+// localWorkspaceTargets returns the local module directories an
+// in-scope go.work contributes to the pipeline build -- its `use`
+// modules and any filesystem-path `replace` targets -- along with the
+// go.work file itself so its own contents fold into the key. It mirrors
+// CompilePipeline's workspace decision: a workspace that does not cover
+// sparkwingDir is ignored (the build disables it via GOWORK=off), and
+// sparkwingDir itself is excluded because the caller already hashes it.
+// When no workspace applies, both results are empty and the caller's
+// no-replace fast path is untouched.
+func localWorkspaceTargets(sparkwingDir string) (dirs []string, workFile string, err error) {
+	work, ok := goWorkInScope(sparkwingDir)
+	if !ok || !goWorkCovers(work, sparkwingDir) {
+		return nil, "", nil
+	}
+	raw, err := os.ReadFile(work)
+	if err != nil {
+		return nil, "", err
+	}
+	wf, err := modfile.ParseWork(work, raw, nil)
+	if err != nil {
+		return nil, "", err
+	}
+	absSparkwing, err := filepath.Abs(sparkwingDir)
+	if err != nil {
+		return nil, "", err
+	}
+	absSparkwing = filepath.Clean(absSparkwing)
+	workDir := filepath.Dir(work)
+	add := func(p string) {
+		if p == "" {
+			return
+		}
+		abs := p
+		if !filepath.IsAbs(abs) {
+			abs = filepath.Join(workDir, p)
+		}
+		abs = filepath.Clean(abs)
+		if abs == absSparkwing {
+			return
+		}
+		dirs = append(dirs, abs)
+	}
+	for _, u := range wf.Use {
+		add(u.Path)
+	}
+	for _, r := range wf.Replace {
+		if isLocalPath(r.New.Path) {
+			add(r.New.Path)
+		}
+	}
+	return dirs, work, nil
 }

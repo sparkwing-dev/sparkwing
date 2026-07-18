@@ -69,6 +69,19 @@ code change to unlock.
   are discoverable without reading the source. The `-o json` shape is
   unchanged.
 
+### Fixed
+
+- **cache:** the compiled-pipeline binary cache now invalidates when a
+  module replaced to a local filesystem path changes. Replace targets
+  from the pipeline's `go.mod` and from an in-scope, covering `go.work`
+  (both its `use` modules and its local `replace` directives) are hashed
+  by content -- all files, so edits to embedded assets such as a
+  template registry's manifests count -- rather than by a version the
+  local checkout doesn't carry. Previously a `go.work` replace was
+  ignored entirely and edits under a `go.mod` replace only counted when
+  they touched Go source, so a run could execute a stale binary compiled
+  before the change.
+
 ## [v0.18.0] - 2026-07-18
 ### Added
 

@@ -356,6 +356,123 @@ func TestCompilePipeline_FailureCapturesStdoutAndStderr(t *testing.T) {
 	}
 }
 
+// writeFile is a fatal-on-error os.WriteFile for test fixtures.
+func writeFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// newWorkspaceScenario lays out a pipeline module plus a sibling local
+// module linked through a covering go.work, and points GOWORK at that
+// workspace. link is a go.work directive line ("replace ..." or
+// "use ..."). Returns the pipeline dir and the local module dir.
+func newWorkspaceScenario(t *testing.T, link string) (pipelineDir, moduleDir string) {
+	t.Helper()
+	root := t.TempDir()
+	pipelineDir = filepath.Join(root, "svc")
+	writeFile(t, filepath.Join(pipelineDir, "go.mod"), "module example.com/pipeline\n\ngo 1.22\n\nrequire example.com/tmpl v0.0.0\n")
+	writeFile(t, filepath.Join(pipelineDir, "main.go"), "package main\n\nfunc main() {}\n")
+
+	moduleDir = filepath.Join(root, "tmpl")
+	writeFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com/tmpl\n\ngo 1.22\n")
+	writeFile(t, filepath.Join(moduleDir, "registry.go"), "package tmpl\n")
+	writeFile(t, filepath.Join(moduleDir, "registry.yaml"), "count: 14\n")
+
+	work := filepath.Join(root, "go.work")
+	writeFile(t, work, "go 1.26\n\nuse ./svc\n\n"+link+"\n")
+	t.Setenv("GOWORK", work)
+	return pipelineDir, moduleDir
+}
+
+func TestPipelineCacheKey_InvalidatesOnGoWorkReplaceTargetEdit(t *testing.T) {
+	pipelineDir, moduleDir := newWorkspaceScenario(t, "replace example.com/tmpl => ./tmpl")
+	keyA := mustKey(t, pipelineDir)
+
+	writeFile(t, filepath.Join(moduleDir, "registry.go"), "package tmpl\n\nvar Added = 1\n")
+	keyB := mustKey(t, pipelineDir)
+	if keyA == keyB {
+		t.Fatalf("editing a go.work replace target's source must change the key; got %s twice", keyA)
+	}
+}
+
+func TestPipelineCacheKey_InvalidatesOnGoWorkUseTargetEdit(t *testing.T) {
+	pipelineDir, moduleDir := newWorkspaceScenario(t, "use ./tmpl")
+	keyA := mustKey(t, pipelineDir)
+
+	writeFile(t, filepath.Join(moduleDir, "registry.go"), "package tmpl\n\nvar Added = 1\n")
+	keyB := mustKey(t, pipelineDir)
+	if keyA == keyB {
+		t.Fatalf("editing a go.work use-module's source must change the key; got %s twice", keyA)
+	}
+}
+
+// Adding a template to a replaced registry lands as an embedded,
+// non-Go asset; the key must still turn over.
+func TestPipelineCacheKey_InvalidatesOnGoWorkTargetEmbeddedAssetEdit(t *testing.T) {
+	pipelineDir, moduleDir := newWorkspaceScenario(t, "replace example.com/tmpl => ./tmpl")
+	keyA := mustKey(t, pipelineDir)
+
+	writeFile(t, filepath.Join(moduleDir, "registry.yaml"), "count: 38\n")
+	keyB := mustKey(t, pipelineDir)
+	if keyA == keyB {
+		t.Fatalf("editing a replace target's embedded asset must change the key; got %s twice", keyA)
+	}
+}
+
+func TestPipelineCacheKey_StableWhenGoWorkTargetUnchanged(t *testing.T) {
+	pipelineDir, _ := newWorkspaceScenario(t, "replace example.com/tmpl => ./tmpl")
+	if first, second := mustKey(t, pipelineDir), mustKey(t, pipelineDir); first != second {
+		t.Fatalf("key should be stable when nothing changes: %s vs %s", first, second)
+	}
+}
+
+// A workspace that does not cover the pipeline module is disabled at
+// build time (GOWORK=off), so its targets must not feed the key.
+func TestPipelineCacheKey_IgnoresNonCoveringGoWorkTargets(t *testing.T) {
+	root := t.TempDir()
+	pipelineDir := filepath.Join(root, "svc")
+	writeFile(t, filepath.Join(pipelineDir, "go.mod"), "module example.com/pipeline\n\ngo 1.22\n")
+	writeFile(t, filepath.Join(pipelineDir, "main.go"), "package main\n\nfunc main() {}\n")
+	otherDir := filepath.Join(root, "other")
+	writeFile(t, filepath.Join(otherDir, "go.mod"), "module example.com/other\n\ngo 1.22\n")
+	writeFile(t, filepath.Join(otherDir, "data.go"), "package other\n")
+	work := filepath.Join(root, "go.work")
+	writeFile(t, work, "go 1.26\n\nuse ./other\n")
+	t.Setenv("GOWORK", work)
+
+	keyA := mustKey(t, pipelineDir)
+	writeFile(t, filepath.Join(otherDir, "data.go"), "package other\n\nvar X = 1\n")
+	keyB := mustKey(t, pipelineDir)
+	if keyA != keyB {
+		t.Fatalf("a non-covering workspace's modules must not affect the key: %s vs %s", keyA, keyB)
+	}
+}
+
+// The go.mod-local replace path must also cover embedded, non-Go
+// assets in the replaced module.
+func TestPipelineCacheKey_InvalidatesOnGoModReplaceTargetEmbeddedAssetEdit(t *testing.T) {
+	t.Setenv("GOWORK", "off")
+	root := t.TempDir()
+	pipelineDir := filepath.Join(root, "svc")
+	moduleDir := filepath.Join(root, "tmpl")
+	writeFile(t, filepath.Join(pipelineDir, "go.mod"), "module example.com/pipeline\n\ngo 1.22\n\nrequire example.com/tmpl v0.0.0\n\nreplace example.com/tmpl => ../tmpl\n")
+	writeFile(t, filepath.Join(pipelineDir, "main.go"), "package main\n\nfunc main() {}\n")
+	writeFile(t, filepath.Join(moduleDir, "go.mod"), "module example.com/tmpl\n\ngo 1.22\n")
+	writeFile(t, filepath.Join(moduleDir, "registry.yaml"), "count: 14\n")
+
+	keyA := mustKey(t, pipelineDir)
+	writeFile(t, filepath.Join(moduleDir, "registry.yaml"), "count: 38\n")
+	keyB := mustKey(t, pipelineDir)
+	if keyA == keyB {
+		t.Fatalf("editing a go.mod replace target's embedded asset must change the key; got %s twice", keyA)
+	}
+}
+
 func TestPipelineCacheKey_IgnoresMissingOverlay(t *testing.T) {
 	dir := newPipelineDir(t)
 	keyA := mustKey(t, dir)
