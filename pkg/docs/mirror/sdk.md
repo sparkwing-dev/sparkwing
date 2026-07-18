@@ -236,10 +236,9 @@ collapsible bucket in the CLI and dashboard.
 
 These four helpers are sparkwing's pipeline-observability channel,
 not a general-purpose logger -- they exist so node output, run
-records, and the dashboard see the same stream. The `Logger`
-interface is pluggable: install your own backend (slog, zerolog,
-zap, OTel) via `sparkwing.WithLogger(ctx, impl)` and the call sites
-stay the same.
+records, and the dashboard see the same stream. They are the whole
+public logging surface; there is no public installer for swapping in
+your own backend.
 
 ## Plan - the outer DAG
 
@@ -419,7 +418,7 @@ only declaration site for typing.
 Step modifiers (chainable on `*WorkStep`):
 
 ```
-step.Needs(deps...) *WorkStep                             // accepts *WorkStep, *StepGroup, *SpawnSpec, *SpawnGenSpec, []*WorkStep, string
+step.Needs(deps...) *WorkStep                             // accepts *WorkStep, *StepGroup, *SpawnSpec, *SpawnGenSpec; splat a slice: s.Needs(steps...)
 step.SkipIf(predicate) *WorkStep                          // OR-accumulating skip predicate
 step.DryRun(fn func(ctx) error) *WorkStep                 // no-mutation body run instead of the apply Fn under sparkwing X --dry-run
 step.SafeWithoutDryRun() *WorkStep                        // mark the apply Fn as side-effect-free; runs unmodified under --dry-run
@@ -427,9 +426,9 @@ step.SafeWithoutDryRun() *WorkStep                        // mark the apply Fn a
 
 ### Dry-run contract
 
-`sparkwing X --dry-run` (and `pipeline plan --dry-run`) installs
-`sparkwing.WithDryRun(ctx)` on the run-wide ctx. Each step's
-dispatch then picks one of three paths:
+`sparkwing X --dry-run` (and `pipeline plan --dry-run`) installs a
+dry-run flag on the run-wide ctx -- detect it with `IsDryRun(ctx)`.
+Each step's dispatch then picks one of three paths:
 
 - `step.DryRun(fn)` declared -> `fn` runs in place of the apply Fn.
   The closure must NEVER mutate state; it answers "what *would* the
@@ -666,8 +665,9 @@ Panics outside a dispatch ctx (no installer) or on a wrong concrete
 type. The orchestrator installs the parsed Inputs on every node's
 runner ctx automatically.
 
-For tests outside the orchestrator boundary:
-`WithInputs(ctx, args) context.Context`.
+There is no public helper for installing inputs on a ctx from
+external test code; inputs reach a node's ctx only through the
+orchestrator.
 
 ## Pipeline registration
 

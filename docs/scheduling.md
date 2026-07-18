@@ -95,7 +95,7 @@ Cluster-mode runners (`sparkwing-runner`) advertise labels with the
 repeatable `--label` flag:
 
 ```bash
-sparkwing-runner --label arm64 --label os=linux --label gpu
+sparkwing-runner runner --label arm64 --label os=linux --label gpu
 ```
 
 The controller's claim query keeps only runners whose advertised set
@@ -107,8 +107,11 @@ no warm runner advertises these labels; start a runner with
 --label matching or remove .Requires()
 ```
 
-The laptop-side drainer `sparkwing cluster worker` runs claimed jobs
-in-process and is the local counterpart to the cluster runner.
+`sparkwing cluster worker` is a laptop-side loop that claims triggers
+from a profile's controller and dispatches each one to `handle-trigger`,
+a child process that compiles and runs the pipeline. It works at the
+trigger layer, unlike the cluster runner (`sparkwing-runner runner`),
+which claims nodes.
 
 ## Direct (`sparkwing run`) vs dispatched (`trigger`)
 

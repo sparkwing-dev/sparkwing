@@ -1,7 +1,7 @@
 # Pipelines
 
 Pipelines are the core of sparkwing. They define what happens when you run
-`sparkwing run <name>` (or `sparkwing run <name>`). This page is the user-facing
+`sparkwing run <name>` (or `sparkwing pipeline run <name>`). This page is the user-facing
 tour; for the full Go SDK reference see [sdk.md](sdk.md), and for the rules
 that keep a `Plan` pure and deterministic -- enforced by `sparkwing pipeline
 lint` -- see [authoring-pipelines.md](authoring-pipelines.md).
@@ -83,8 +83,11 @@ pipelines:
 ```
 
 Webhook delivery is handled by the controller - see
-`POST /webhooks/github/{pipeline}` in [api](api.md). Git hooks are
-**not** installed by sparkwing; see [hooks](hooks.md) for context.
+`POST /webhooks/github/{pipeline}` in [api](api.md). Git hooks are not
+installed automatically -- declaring an `on: pre_commit` / `pre_push` /
+`post_commit` trigger does nothing until you run `sparkwing pipeline hooks
+install`, which writes the hook files into `.git/hooks/`; see
+[hooks](hooks.md) for context.
 
 ## The two-layer model
 

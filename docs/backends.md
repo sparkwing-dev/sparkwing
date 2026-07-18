@@ -84,23 +84,33 @@ resolve from (laptop dotenv or controller-stored); see
 ## Per-pipeline backend selection
 
 A pipeline pins its backends by pointing at a profile that declares
-them. Put the surface override in a `profiles:` entry and set `profile:`
-on the pipeline; that profile's `state` / `cache` / `logs` then apply to
-its runs (typically for an audit requirement):
+them. Put the profile in a `profiles:` entry and set `profile:` on the
+pipeline; that profile then applies to its runs (typically for an audit
+requirement). Project profiles in `.sparkwing/sparkwing.yaml` are
+validated on load and must declare all four surfaces -- secrets, state,
+cache, and logs -- even when only one differs from the shared backends
+(laptop `profiles.yaml` entries are not validated this way):
 
 ```yaml
 # .sparkwing/sparkwing.yaml
 profiles:
   prod-audit:
-    logs: { type: s3, bucket: prod-audit-logs, prefix: "${RUN_ID}/" }
+    secrets: { type: env }
+    state:   { type: s3, bucket: prod, prefix: state }
+    cache:   { type: s3, bucket: prod, prefix: cache }
+    logs:    { type: s3, bucket: prod-audit-logs, prefix: "${RUN_ID}/" }
 pipelines:
   - name: release-prod
     entrypoint: Release
     profile: prod-audit
 ```
 
-Selection precedence per surface: the pipeline's profile first, then the
-resolved default profile's `state` / `cache` / `logs`.
+The selected profile applies wholesale -- the pipeline's `profile:` when
+set, otherwise the project's `defaults.profile`. Project defaults are
+not layered in per surface; the chosen profile's own surfaces are what
+apply. Any surface the chosen profile leaves unset falls back to the
+built-in local default (sqlite state, no shared cache or logs), not to
+another profile.
 
 ## Pipeline binary distribution
 

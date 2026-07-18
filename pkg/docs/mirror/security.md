@@ -39,8 +39,8 @@ ingress. In-cluster callers reach it directly without a token.
 ## Container hardening
 
 The Helm charts run the long-lived services as non-root with explicit
-`securityContext` settings (the controller as uid 65534, read-only root
-filesystem where the workload allows it). The Docker-in-Docker sidecar
+`securityContext` settings (the controller as uid 65534, privilege
+escalation disabled, all Linux capabilities dropped). The Docker-in-Docker sidecar
 is the exception: it needs `privileged: true` to build images, an
 accepted risk isolated to the build pod.
 

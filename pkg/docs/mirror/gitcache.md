@@ -47,9 +47,11 @@ env:
     value: "gitops=git@github.com:user/gitops.git,app=git@github.com:user/app.git"
 ```
 
-On startup, the cache registers the name-to-URL mappings. Repos are
-cloned on-demand when first requested (e.g. via `/archive` or `/upload`).
-If the PVC is nuked, repos are re-cloned automatically on next access.
+On startup, the cache registers the name-to-URL mappings and eagerly
+clones each repo (best-effort). If a startup clone fails (e.g. no SSH
+access), that repo falls back to being cloned on-demand when first
+requested or seeded manually. If the PVC is nuked, repos are re-cloned
+automatically on next startup or access.
 
 ### Manual registration
 

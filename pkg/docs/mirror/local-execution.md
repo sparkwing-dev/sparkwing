@@ -281,7 +281,7 @@ Linux the daemon reads its own cgroup v2 limits at startup (`cpu.max` and
 6 GiB container on a 24 GiB host plans against 6 GiB, never the host it
 sits on. External-load sensing follows suit, measuring the container's own
 CPU and memory usage rather than the machine's. `sparkwing queue` shows the
-clamp as a `container limit: 6.0 cores (host 24.0), 6.0 GiB (host 24.0 GiB)`
+clamp as a `container limit: 6.0 cores (host 24.0), 6.0 GiB memory (host 24.0 GiB)`
 row, and a `SPARKWING_BUDGET` still caps below the detected limit. macOS has
 no cgroups and so no container path -- capacity there is always the host.
 
@@ -332,5 +332,5 @@ If a pipeline is locally-runnable (most are), `sparkwing run build-test-deploy`
 just works. If a step needs cluster credentials it cannot reach from a
 laptop, the pipeline author either dispatches the whole run remotely with
 `sparkwing pipeline trigger`, or splits the deploy into a sub-pipeline that
-runs on the cluster (`PipelineRef` / `AwaitPipelineJob`; see
-[pipelines.md](pipelines.md)).
+runs on the cluster (`RunAndAwait`, reading typed output via `Ref[T]`; see
+[sdk.md](sdk.md)).

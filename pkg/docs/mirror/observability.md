@@ -147,5 +147,5 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing.gitcache.archives_served` | Counter | Archive downloads |
 | `sparkwing.gitcache.files_served` | Counter | Single-file downloads |
 | `sparkwing.gitcache.fetch_duration` | Histogram | Background fetch time |
-| `sparkwing.gitcache.cache_hits` | Counter | Binary/dependency cache hits |
-| `sparkwing.gitcache.cache_misses` | Counter | Binary/dependency cache misses |
+| `sparkwing.gitcache.cache_hits` | Counter | Cache hits (git archive and binary/dependency, distinguished by `type` attribute) |
+| `sparkwing.gitcache.cache_misses` | Counter | Cache misses (git archive and binary/dependency, distinguished by `type` attribute) |

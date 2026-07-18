@@ -112,7 +112,8 @@ migration. Stable anchor slugs matter; rename with care.
 ### Index
 
 `docs/migrations/README.md` is an append-only chronological index.
-The release pipeline appends an entry on every release.
+The pre-release manicuring agent appends an entry when it generates
+the release's migration guide.
 
 ## What the linter enforces vs what the agent does
 
