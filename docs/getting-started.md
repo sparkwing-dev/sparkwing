@@ -88,6 +88,19 @@ For a build/test/deploy DAG instead of a single node, pass
 sparkwing pipeline new --name release --template build-test-deploy
 ```
 
+Beyond the built-in stubs, `sparkwing pipeline templates` lists a
+registry of curated, real-world starters (static-site deploys,
+containerized deploys to Kubernetes, migrate+deploy, CI-hygiene gates,
+and more). Filter with `--category` / `--cloud`, inspect one with
+`--name <template>` (add `--body` to preview the rendered pipeline), then
+scaffold with `--template <name> --param k=v`. See the
+[template catalog](sparks.md#the-template-catalog) for the full workflow.
+
+If you want to own and edit a spark library's helper code directly rather
+than importing it, `sparkwing pipeline sparks vendor --module <name>`
+copies its source into your repo. See
+[vendoring](sparks.md#vendoring-a-spark-module).
+
 Each `sparkwing` invocation compiles `.sparkwing/` and runs the pipeline as a host
 subprocess. Run state lives under `~/.sparkwing/` (SQLite + log files).
 `sparkwing dashboard start` spawns a detached local web server (`pkg/localws`,
