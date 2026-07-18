@@ -59,6 +59,10 @@ func main() {
 	ok = checkFrozenCounts(contentDir) && ok
 	fmt.Println()
 	ok = checkLinks(contentDir) && ok
+	fmt.Println()
+	ok = checkCLIVerbs(contentDir, repoRoot) && ok
+	fmt.Println()
+	ok = checkServicePorts(contentDir, repoRoot) && ok
 	if !ok {
 		os.Exit(1)
 	}

@@ -47,6 +47,18 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **docs:** the docs drift gate (`internal/doccheck`, run in pre-push)
+  gains two mechanical sub-gates. `cli-verbs` resolves every `sparkwing
+  <verb> <subverb>` invocation shown in the docs against the CLI command
+  tree and fails on any subcommand that doesn't exist. `service-ports`
+  checks that wherever a doc names a cluster service by its DNS label and
+  states the port its Service targets, the port matches that binary's
+  default `--addr` bind port. Both anchor to a single in-repo source of
+  truth (the help registry and the service `main.go` files), so a renamed
+  verb or a changed service port that the docs still cite fails the gate
+  instead of misleading a reader.
 
 ## [v0.18.0] - 2026-07-18
 ### Added
