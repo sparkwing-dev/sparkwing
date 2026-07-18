@@ -143,8 +143,8 @@ github.com/rogpeppe/go-internal v1.15.0 h1:D0RCU5rMAp+SpgkiNdrjfJ+LX4J1M32V2NeCY
 github.com/rogpeppe/go-internal v1.15.0/go.mod h1:DrUVZyrJU+txYW5/1kwtXQSMFio52ZOxX7yM1VHvnxs=
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 h1:GHRpF1pTW19a8tTFrMLUcfWwyC0pnifVo2ClaLq+hP8=
 github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46/go.mod h1:uAQ5PCi+MFsC7HjREoAz1BU+Mq60+05gifQSsHSDG/8=
-github.com/sparkwing-dev/sparks-core/templates v0.27.0 h1:ev32WJ+o+12MgmmdSw8d7f1tRrclM/aXjRSBQKKotEA=
-github.com/sparkwing-dev/sparks-core/templates v0.27.0/go.mod h1:lSkz5wUBkHu9RhcPtt3jgKQV2XmSoOBKo1cfwA526gA=
+github.com/sparkwing-dev/sparks-core/templates v0.28.0 h1:a8WCRm+NeAs82RgGlUhuD91vpnrZA7f6dv7xb1rMmus=
+github.com/sparkwing-dev/sparks-core/templates v0.28.0/go.mod h1:lSkz5wUBkHu9RhcPtt3jgKQV2XmSoOBKo1cfwA526gA=
 github.com/spf13/afero v1.2.1 h1:qgMbHoJbPbw579P+1zVY+6n4nIFuIchaIjzZ/I/Yq8M=
 github.com/spf13/afero v1.2.1/go.mod h1:9ZxEEn6pIJ8Rxe320qSDBk6AsU0r9pR7Q4OcevTdifk=
 github.com/spf13/pflag v1.0.10 h1:4EBh2KAYBwaONj6b2Ye1GiHfwjqyROoF4RwYO+vPwFk=
