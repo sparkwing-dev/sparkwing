@@ -67,6 +67,10 @@ CREATE TABLE IF NOT EXISTS outbox_writes (
 		_ = db.Close()
 		return nil, fmt.Errorf("s3state: outbox migrate: %w", err)
 	}
+	if _, err := db.Exec(`CREATE INDEX IF NOT EXISTS idx_outbox_key ON outbox_writes(key);`); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("s3state: outbox index: %w", err)
+	}
 	o := &Outbox{
 		db:       db,
 		art:      art,
@@ -93,6 +97,26 @@ INSERT INTO outbox_writes (kind, key, body, enqueued_at)
 VALUES (?, ?, ?, ?)`,
 		string(kind), key, body, time.Now().UnixNano())
 	return err
+}
+
+// HasPending reports whether any queued write targets key. The state
+// backend consults it before a direct PUT so that, while the outbox
+// still holds writes for a key, every subsequent write keeps flowing
+// through the FIFO queue instead of racing a direct PUT ahead of the
+// drain.
+func (o *Outbox) HasPending(ctx context.Context, key string) (bool, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	row := o.db.QueryRowContext(ctx, `SELECT 1 FROM outbox_writes WHERE key = ? LIMIT 1`, key)
+	var one int
+	err := row.Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Pending returns the count of queued writes. Test helper.

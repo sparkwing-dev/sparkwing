@@ -261,19 +261,47 @@ func (b *Backend) flushRun(ctx context.Context, runID string) error {
 		rs.mu.Unlock()
 		return err
 	}
-	putErr := b.art.Put(ctx, stateKey(runID), bytes.NewReader(body))
+	key := stateKey(runID)
+
+	// safety: while the outbox holds writes for this key, keep flushing through it so the FIFO drain isn't overtaken by a direct PUT.
+	if b.outbox != nil {
+		if pending, perr := b.outbox.HasPending(ctx, key); perr == nil && pending {
+			serr := b.outbox.Stage(ctx, OutboxKindState, key, body)
+			b.markFlushed(rs, serr == nil)
+			return serr
+		}
+	}
+
+	putErr := b.art.Put(ctx, key, bytes.NewReader(body))
+	if putErr == nil {
+		b.markFlushed(rs, true)
+		return nil
+	}
+
+	if b.outbox != nil && isTransient(putErr) {
+		if serr := b.outbox.Stage(ctx, OutboxKindState, key, body); serr != nil {
+			b.markFlushed(rs, false)
+			return serr
+		}
+		b.markFlushed(rs, true)
+		return nil
+	}
+	b.markFlushed(rs, false)
+	return putErr
+}
+
+// markFlushed clears the flushing latch and, when delivered is true,
+// marks the run clean. A run handed off to the outbox counts as
+// delivered: the outbox owns replay from there, and the next append
+// re-dirties the run so the following flush stages a fresh superset.
+func (b *Backend) markFlushed(rs *runState, delivered bool) {
 	rs.mu.Lock()
 	rs.flushing = false
-	if putErr == nil {
+	if delivered {
 		rs.dirty = false
 		rs.bufSize = 0
 	}
 	rs.mu.Unlock()
-
-	if putErr != nil && b.outbox != nil && isTransient(putErr) {
-		return b.outbox.Stage(ctx, OutboxKindState, stateKey(runID), body)
-	}
-	return putErr
 }
 
 func (b *Backend) flushLoop() {

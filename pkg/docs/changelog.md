@@ -82,6 +82,15 @@ code change to unlock.
   they touched Go source, so a run could execute a stale binary compiled
   before the change.
 
+- **config:** S3-backed run state (Mode 2, shared object storage) now
+  wires the local SQLite outbox that the deployment docs promise. When
+  the bucket is briefly unreachable, run state writes stage to
+  `~/.sparkwing/outbox.db` (one per host, honoring `SPARKWING_HOME`) and
+  replay in order once connectivity returns, so a transient blip no
+  longer fails the run or drops state. While the outbox holds queued
+  writes for a run, later flushes keep flowing through it, so the
+  replay can't be overtaken by a direct write.
+
 ## [v0.18.0] - 2026-07-18
 ### Added
 

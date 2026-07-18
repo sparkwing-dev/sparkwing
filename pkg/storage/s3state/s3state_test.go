@@ -27,6 +27,12 @@ type memArt struct {
 
 func newMemArt() *memArt { return &memArt{data: map[string][]byte{}} }
 
+func (m *memArt) setPutErr(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.putErr = err
+}
+
 func (m *memArt) Get(_ context.Context, key string) (io.ReadCloser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -308,6 +314,136 @@ func TestS3StateBackend_Close_FlushesPending(t *testing.T) {
 	}
 	if ok, _ := art.Has(ctx, "runs/r/state.ndjson"); !ok {
 		t.Fatal("Close did not flush pending state")
+	}
+}
+
+func TestS3StateBackend_StagesToOutboxDuringOutage_AndDrains(t *testing.T) {
+	art := newMemArt()
+	dir := t.TempDir()
+	outbox, err := s3state.OpenOutbox(filepath.Join(dir, "outbox.db"), art, time.Hour)
+	if err != nil {
+		t.Fatalf("OpenOutbox: %v", err)
+	}
+	b := s3state.New(art,
+		s3state.WithOutbox(outbox),
+		s3state.WithFlushInterval(time.Hour),
+		s3state.WithBufferThreshold(1),
+	)
+	ctx := context.Background()
+
+	art.setPutErr(errors.New("connection refused"))
+	if err := b.CreateRun(ctx, store.Run{ID: "r", Pipeline: "p", Status: "running", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("CreateRun during outage: %v", err)
+	}
+	if ok, _ := art.Has(ctx, "runs/r/state.ndjson"); ok {
+		t.Fatal("state reached the store during the simulated outage")
+	}
+	if n, _ := outbox.Pending(ctx); n == 0 {
+		t.Fatal("write did not stage to the outbox during the outage")
+	}
+
+	art.setPutErr(nil)
+	if err := outbox.Drain(ctx); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if n, _ := outbox.Pending(ctx); n != 0 {
+		t.Fatalf("outbox not empty after drain: %d", n)
+	}
+	if ok, _ := art.Has(ctx, "runs/r/state.ndjson"); !ok {
+		t.Fatal("drain did not deliver the staged state to the store")
+	}
+
+	if err := b.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	b2 := s3state.New(art)
+	t.Cleanup(func() { _ = b2.Close() })
+	got, err := b2.GetRun(ctx, "r")
+	if err != nil {
+		t.Fatalf("GetRun after drain: %v", err)
+	}
+	if got.Pipeline != "p" || got.Status != "running" {
+		t.Errorf("reconstructed run = %+v, want pipeline=p status=running", got)
+	}
+}
+
+func TestS3StateBackend_OutboxRouting_KeepsFIFOAfterRecovery(t *testing.T) {
+	art := newMemArt()
+	dir := t.TempDir()
+	outbox, err := s3state.OpenOutbox(filepath.Join(dir, "outbox.db"), art, time.Hour)
+	if err != nil {
+		t.Fatalf("OpenOutbox: %v", err)
+	}
+	b := s3state.New(art,
+		s3state.WithOutbox(outbox),
+		s3state.WithFlushInterval(time.Hour),
+		s3state.WithBufferThreshold(1),
+	)
+	ctx := context.Background()
+
+	art.setPutErr(errors.New("connection refused"))
+	if err := b.CreateRun(ctx, store.Run{ID: "r", Pipeline: "p", Status: "running", StartedAt: time.Now().UTC()}); err != nil {
+		t.Fatalf("CreateRun during outage: %v", err)
+	}
+
+	art.setPutErr(nil)
+	if err := b.SetNodeStatus(ctx, "r", "n", "running"); err != nil {
+		t.Fatalf("SetNodeStatus after recovery: %v", err)
+	}
+	if ok, _ := art.Has(ctx, "runs/r/state.ndjson"); ok {
+		t.Fatal("a follow-up write jumped ahead of the still-pending outbox queue")
+	}
+	if n, _ := outbox.Pending(ctx); n < 2 {
+		t.Fatalf("follow-up write did not queue behind the pending one; pending=%d", n)
+	}
+
+	if err := outbox.Drain(ctx); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	if err := b.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	b2 := s3state.New(art)
+	t.Cleanup(func() { _ = b2.Close() })
+	n, err := b2.GetNode(ctx, "r", "n")
+	if err != nil {
+		t.Fatalf("GetNode after drain: %v", err)
+	}
+	if n.Status != "running" {
+		t.Errorf("node status = %q after drain, want running (latest superset lost)", n.Status)
+	}
+}
+
+func TestOutbox_Drain_AppliesQueuedWritesInOrder(t *testing.T) {
+	art := newMemArt()
+	dir := t.TempDir()
+	outbox, err := s3state.OpenOutbox(filepath.Join(dir, "outbox.db"), art, time.Hour)
+	if err != nil {
+		t.Fatalf("OpenOutbox: %v", err)
+	}
+	t.Cleanup(func() { _ = outbox.Close() })
+	ctx := context.Background()
+
+	key := "runs/r/state.ndjson"
+	older := []byte("older-snapshot")
+	newer := []byte("older-snapshot-plus-more-envelopes")
+	if err := outbox.Stage(ctx, s3state.OutboxKindState, key, older); err != nil {
+		t.Fatalf("Stage older: %v", err)
+	}
+	if err := outbox.Stage(ctx, s3state.OutboxKindState, key, newer); err != nil {
+		t.Fatalf("Stage newer: %v", err)
+	}
+	if err := outbox.Drain(ctx); err != nil {
+		t.Fatalf("Drain: %v", err)
+	}
+	rc, err := art.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	got, _ := io.ReadAll(rc)
+	_ = rc.Close()
+	if string(got) != string(newer) {
+		t.Errorf("store = %q, want the later superset %q (older overwrote newer)", got, newer)
 	}
 }
 

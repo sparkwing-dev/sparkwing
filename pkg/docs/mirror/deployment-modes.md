@@ -74,9 +74,13 @@ and releases as compare-and-swap retries against a single object; an
 uncontended key touches it once. When that tail latency matters,
 Mode 3's Postgres row locks are the upgrade.
 
-If a runner's object store is briefly unreachable, state writes,
-cache PUTs, and log appends stage to a local SQLite outbox
-(`~/.sparkwing/outbox.db`) and replay when connectivity returns.
+If a runner's object store is briefly unreachable, run state writes
+stage to a local SQLite outbox (`~/.sparkwing/outbox.db`, one per host,
+honoring `SPARKWING_HOME`) and replay in order when connectivity
+returns, so a transient blip neither fails the run nor loses state.
+Cache and log writes are not buffered this way: a cache write that
+can't reach the bucket surfaces the error, and the step recomputes on
+a later run rather than reading a half-written result.
 
 ```yaml
 # ~/.config/sparkwing/profiles.yaml

@@ -3,8 +3,11 @@ package storeurl
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -139,7 +142,7 @@ func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Prof
 			return nil, err
 		}
 		art := s3store.NewArtifactStore(spec.Bucket, spec.Prefix, s3client)
-		return s3state.New(art), nil
+		return s3state.New(art, s3StateOutboxOptions(art)...), nil
 	case backends.TypeController:
 		url, token, err := resolveControllerProfile("state", spec.Controller, lookup)
 		if err != nil {
@@ -159,6 +162,73 @@ func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Prof
 	default:
 		return nil, fmt.Errorf("state backend type %q is not recognized", spec.Type)
 	}
+}
+
+// outboxWarnOnce keeps the "outbox unavailable" warning to one line per
+// process even if several S3 state stores are opened.
+var outboxWarnOnce sync.Once
+
+// s3StateOutboxOptions opens the local durability outbox that lets an
+// S3 state store absorb writes while the object store is briefly
+// unreachable and replay them when it returns. The outbox and the
+// state store share the same artifact store, so drained writes land on
+// the same bucket and prefix.
+//
+// A single per-host database (SPARKWING_HOME, else ~/.sparkwing) backs
+// every runner on the machine; SQLite's file locking serializes them.
+// If the database cannot be opened -- home unresolved, disk unwritable
+// -- state writes still work, degraded to surfacing transient
+// object-store errors rather than buffering them, so a non-openable
+// outbox never fails a run. That degradation is loud, not silent: it
+// logs one warning naming the underlying cause and stating that the
+// documented outage resilience is not in effect.
+func s3StateOutboxOptions(art storage.ArtifactStore) []s3state.Option {
+	opts, err := openStateOutbox(art)
+	if err != nil {
+		outboxWarnOnce.Do(func() { logOutboxUnavailable(slog.Default(), err) })
+		return nil
+	}
+	return opts
+}
+
+// openStateOutbox resolves the shared outbox path and opens it. On
+// success it returns the WithOutbox option; on failure it returns a
+// non-nil error explaining why the outbox is unavailable.
+func openStateOutbox(art storage.ArtifactStore) ([]s3state.Option, error) {
+	path, err := outboxDBPath()
+	if err != nil {
+		return nil, fmt.Errorf("resolve outbox path: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, fmt.Errorf("create outbox dir %s: %w", filepath.Dir(path), err)
+	}
+	ob, err := s3state.OpenOutbox(path, art, 0)
+	if err != nil {
+		return nil, fmt.Errorf("open outbox %s: %w", path, err)
+	}
+	return []s3state.Option{s3state.WithOutbox(ob)}, nil
+}
+
+// logOutboxUnavailable warns that the S3 state store's durability
+// outbox could not be opened, so the object-store outage resilience
+// documented for shared-object-storage mode is not in effect. State
+// writes still work; a transient object-store error surfaces to the
+// caller instead of buffering.
+func logOutboxUnavailable(log *slog.Logger, err error) {
+	log.Warn("s3 state durability outbox unavailable; object-store outage resilience is not in effect", "error", err)
+}
+
+// outboxDBPath resolves the shared local outbox database, honoring
+// SPARKWING_HOME and otherwise rooting at ~/.sparkwing.
+func outboxDBPath() (string, error) {
+	if root := os.Getenv("SPARKWING_HOME"); root != "" {
+		return filepath.Join(root, "outbox.db"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".sparkwing", "outbox.db"), nil
 }
 
 func unimplemented(surface, t string) error {
