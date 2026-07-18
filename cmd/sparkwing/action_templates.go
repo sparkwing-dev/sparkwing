@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -20,6 +21,10 @@ import (
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
+
+// uncategorizedLabel is the bucket header for templates whose manifest
+// declares no applicability category.
+const uncategorizedLabel = "uncategorized"
 
 // templateDetailJSON is the -o json shape for the --name detail view.
 // RenderedBody is populated only when --body is passed.
@@ -84,19 +89,119 @@ func listTemplates(category, cloud, output string) error {
 	case "pretty", "":
 		if len(filtered) == 0 {
 			fmt.Println("no templates match the given filters")
+			fmt.Printf("%s sparkwing pipeline templates%s\n",
+				color.Dim("browse all:"), clearedFilterSuffix(category, cloud))
 			return nil
 		}
-		for _, t := range filtered {
-			printTemplateSummary(t.Manifest)
-		}
-		fmt.Printf("%s sparkwing pipeline templates --name <template> [--body]\n",
-			color.Dim("detail:"))
-		fmt.Printf("%s sparkwing pipeline new --name <name> --template <template> --param k=v ...\n",
-			color.Dim("scaffold:"))
+		renderTemplateList(filtered)
 		return nil
 	default:
 		return fmt.Errorf("unknown output format %q (valid: pretty, json)", output)
 	}
+}
+
+// renderTemplateList prints the pretty catalog: templates grouped under
+// category headers, followed by the affordance footer.
+func renderTemplateList(filtered []templates.Template) {
+	groups := groupTemplatesByCategory(filtered)
+	for i, g := range groups {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Println(color.Bold(strings.ToUpper(g.category)))
+		for _, t := range g.templates {
+			printTemplateSummary(t.Manifest)
+		}
+	}
+	printTemplateListFooter(len(filtered), len(groups))
+}
+
+// templateCategoryGroup is one category header plus the templates filed
+// under it, as rendered by the pretty list.
+type templateCategoryGroup struct {
+	category  string
+	templates []templates.Template
+}
+
+// groupTemplatesByCategory buckets templates by their applicability
+// category, preserving each template's incoming order within a bucket.
+// Categories sort alphabetically; the uncategorized bucket sorts last.
+func groupTemplatesByCategory(list []templates.Template) []templateCategoryGroup {
+	order := make([]string, 0)
+	byCat := make(map[string][]templates.Template)
+	for _, t := range list {
+		cat := strings.TrimSpace(t.Manifest.Applicability.Category)
+		if cat == "" {
+			cat = uncategorizedLabel
+		}
+		if _, seen := byCat[cat]; !seen {
+			order = append(order, cat)
+		}
+		byCat[cat] = append(byCat[cat], t)
+	}
+	sort.SliceStable(order, func(i, j int) bool {
+		a, b := order[i], order[j]
+		if a == uncategorizedLabel {
+			return false
+		}
+		if b == uncategorizedLabel {
+			return true
+		}
+		return a < b
+	})
+	groups := make([]templateCategoryGroup, 0, len(order))
+	for _, cat := range order {
+		groups = append(groups, templateCategoryGroup{category: cat, templates: byCat[cat]})
+	}
+	return groups
+}
+
+// printTemplateListFooter advertises the list's own affordances: the
+// counts just shown, the narrowing filters, the detail view, and the
+// scaffold command. It mirrors the tip footers other verbs print so a
+// reader never has to grep the raw list to discover the flags.
+func printTemplateListFooter(shown, categories int) {
+	fmt.Println()
+	labels := []struct{ tag, cmd string }{
+		{"shown:", fmt.Sprintf("%s across %s", countNoun(shown, "template", "templates"), countNoun(categories, "category", "categories"))},
+		{"filter:", "sparkwing pipeline templates --category <category> --cloud <aws|gcp>"},
+		{"detail:", "sparkwing pipeline templates --name <template> [--body]"},
+		{"scaffold:", "sparkwing pipeline new --name <name> --template <template> --param k=v ..."},
+	}
+	width := 0
+	for _, l := range labels {
+		if n := len(l.tag); n > width {
+			width = n
+		}
+	}
+	for _, l := range labels {
+		pad := strings.Repeat(" ", width-len(l.tag))
+		fmt.Printf("%s%s %s\n", color.Dim(l.tag), pad, l.cmd)
+	}
+}
+
+// countNoun formats a count with the singular or plural noun.
+func countNoun(n int, singular, plural string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, singular)
+	}
+	return fmt.Sprintf("%d %s", n, plural)
+}
+
+// clearedFilterSuffix echoes back the filters that produced an empty
+// list so the no-match hint shows what to drop.
+func clearedFilterSuffix(category, cloud string) string {
+	var parts []string
+	if strings.TrimSpace(category) != "" {
+		parts = append(parts, "--category "+category)
+	}
+	if strings.TrimSpace(cloud) != "" {
+		parts = append(parts, "--cloud "+cloud)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return color.Dim(" (without " + strings.Join(parts, " ") + ")")
 }
 
 // printTemplateSummary renders one template's catalog row: name, the

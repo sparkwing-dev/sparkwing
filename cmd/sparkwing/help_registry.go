@@ -1160,6 +1160,9 @@ var cmdPipelineTemplates = Command{
 sparks-core/templates registry -- the values usable as
 'sparkwing pipeline new --template <name>'. Each entry shows a
 "when to use" signal and its required / optional parameters.
+The pretty list groups entries under category headers and ends
+with a footer of the filters, the detail view, and the scaffold
+command, so the whole surface is visible without a second look.
 
 These are distinct from the two built-in stubs (minimal,
 build-test-deploy) that ship in the CLI itself: the registry

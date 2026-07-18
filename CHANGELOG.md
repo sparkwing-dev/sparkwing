@@ -60,6 +60,15 @@ code change to unlock.
   verb or a changed service port that the docs still cite fails the gate
   instead of misleading a reader.
 
+### Changed
+
+- **cli:** `sparkwing pipeline templates` pretty output now groups entries
+  under category headers and ends with a footer advertising its own
+  affordances (the `--category` / `--cloud` filters, the `--name` detail
+  view, and the shown counts), so the catalog is scannable and its flags
+  are discoverable without reading the source. The `-o json` shape is
+  unchanged.
+
 ## [v0.18.0] - 2026-07-18
 ### Added
 

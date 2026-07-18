@@ -47,6 +47,27 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **docs:** the docs drift gate (`internal/doccheck`, run in pre-push)
+  gains two mechanical sub-gates. `cli-verbs` resolves every `sparkwing
+  <verb> <subverb>` invocation shown in the docs against the CLI command
+  tree and fails on any subcommand that doesn't exist. `service-ports`
+  checks that wherever a doc names a cluster service by its DNS label and
+  states the port its Service targets, the port matches that binary's
+  default `--addr` bind port. Both anchor to a single in-repo source of
+  truth (the help registry and the service `main.go` files), so a renamed
+  verb or a changed service port that the docs still cite fails the gate
+  instead of misleading a reader.
+
+### Changed
+
+- **cli:** `sparkwing pipeline templates` pretty output now groups entries
+  under category headers and ends with a footer advertising its own
+  affordances (the `--category` / `--cloud` filters, the `--name` detail
+  view, and the shown counts), so the catalog is scannable and its flags
+  are discoverable without reading the source. The `-o json` shape is
+  unchanged.
 
 ## [v0.18.0] - 2026-07-18
 ### Added
