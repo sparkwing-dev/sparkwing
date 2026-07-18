@@ -101,6 +101,15 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	})
 	gatePrePush.Needs(clean)
 
+	gateTemplates := sparkwing.Job(plan, "gate-template-verify", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[TemplateVerifySummary, sparkwing.NoInputs](
+			ctx, "template-verify", "summary",
+			sparkwing.WithFreshTimeout(20*time.Minute),
+		)
+		return err
+	})
+	gateTemplates.Needs(clean)
+
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,
 		Version: versionRef,
@@ -123,7 +132,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		Version: versionRef,
 		RepoDir: repoDir,
 	})
-	pushTag.Needs(validate, clean, changelog, bumpSelf, schemaGate)
+	pushTag.Needs(validate, clean, changelog, bumpSelf, schemaGate, gateTemplates)
 
 	restoreSelf := sparkwing.Job(plan, "restore-self-replace", &restoreSelfReplaceJob{
 		RepoDir: repoDir,

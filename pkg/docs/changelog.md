@@ -61,19 +61,25 @@ code change to unlock.
   `.sparkwing/go.mod` so imports stay unchanged while the code becomes
   yours to edit. A bare name resolves to a sparks-core block; a full
   module path is accepted as-is.
+- **template-verify:** new pipeline (`sparkwing run template-verify`)
+  that builds the CLI from the working tree, then scaffolds every
+  sparks-core registry template into a throwaway repo and checks it
+  compiles, lints, and explains. Templates whose manifest marks them
+  `verify: runnable` also run end-to-end against a synthesized fixture
+  (a go module or a Dockerfile); a docker-fixture template's run is
+  skipped when no Docker daemon is present. Templates that import
+  sparks-core blocks are built against the local sparks-core checkout so
+  they can be verified against unreleased library APIs they co-develop
+  with.
+- **release:** the release pipeline now gates on `template-verify` being
+  green (via a cross-pipeline await) before it will push a tag, so a
+  broken template can't ship.
 
 ### Docs
 
 - **docs:** Document the template catalog workflow and the spark-module
   vendoring flow in the sparks reference, with pointers from
   getting-started.
-
-## [v0.17.25] - 2026-07-16
-### Fixed
-
-- **cluster:** Trigger workers now keep claiming work while earlier trigger
-  handlers run, so nested `RunAndAwait` child triggers are not stranded behind
-  their waiting parent.
 
 ## [v0.17.25] - 2026-07-16
 ### Fixed
