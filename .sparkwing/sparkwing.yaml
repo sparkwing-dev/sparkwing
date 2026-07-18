@@ -56,6 +56,14 @@ pipelines:
   - name: release
     entrypoint: Release
 
+  # template-verify: proves every sparks-core template is a working
+  # pipeline. Builds the CLI from the working tree, then scaffolds,
+  # compiles, lints, explains (and for runnable templates, runs) each
+  # registry template in a throwaway repo. The release pipeline gates
+  # on this being green.
+  - name: template-verify
+    entrypoint: TemplateVerify
+
   # example: reference pipeline that exercises the two-layer
   # Plan/Work model -- a Plan with two Nodes where the first Node's
   # Work mixes a sequential chain with a parallel group. Anyone

@@ -47,6 +47,19 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+- **template-verify:** new pipeline (`sparkwing run template-verify`)
+  that builds the CLI from the working tree, then scaffolds every
+  sparks-core registry template into a throwaway repo and checks it
+  compiles, lints, and explains. Templates whose manifest marks them
+  `verify: runnable` also run end-to-end against a synthesized fixture
+  (a go module or a Dockerfile); a docker-fixture template's run is
+  skipped when no Docker daemon is present. Templates that import
+  sparks-core blocks are built against the local sparks-core checkout so
+  they can be verified against unreleased library APIs they co-develop
+  with.
+- **release:** the release pipeline now gates on `template-verify` being
+  green (via a cross-pipeline await) before it will push a tag, so a
+  broken template can't ship.
 
 ## [v0.17.25] - 2026-07-16
 ### Fixed
