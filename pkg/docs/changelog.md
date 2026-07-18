@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 ### Added
+### Added
 
 - **docs:** the docs drift gate (`internal/doccheck`, run in pre-push)
   gains two mechanical sub-gates. `cli-verbs` resolves every `sparkwing
@@ -60,6 +61,16 @@ code change to unlock.
   verb or a changed service port that the docs still cite fails the gate
   instead of misleading a reader.
 
+- **controller:** the health endpoint now reports an `auth` field
+  (`"enabled"` / `"disabled"`) so operators can see at a glance whether
+  the controller is serving open. `sparkwing cluster status` and
+  `sparkwing profiles test` flag the controller probe as a warning when
+  auth is disabled.
+- **controller:** `SPARKWING_REQUIRE_AUTH` (or `--require-auth`) makes an
+  empty tokens table a hard startup error, guarding against accidentally
+  deploying an open controller. Off by default so first-run bootstrap and
+  laptop-local use keep working.
+
 ### Changed
 
 - **cli:** `sparkwing pipeline templates` pretty output now groups entries
@@ -68,6 +79,10 @@ code change to unlock.
   view, and the shown counts), so the catalog is scannable and its flags
   are discoverable without reading the source. The `-o json` shape is
   unchanged.
+
+- **controller:** a controller that starts with an empty tokens table now
+  logs a loud warning that every endpoint is served unauthenticated,
+  instead of falling into open-serving mode silently.
 
 ### Fixed
 
@@ -90,6 +105,12 @@ code change to unlock.
   longer fails the run or drops state. While the outbox holds queued
   writes for a run, later flushes keep flowing through it, so the
   replay can't be overtaken by a direct write.
+
+### Docs
+
+- **docs:** `security.md` now states plainly that secret encryption at
+  rest is opt-in (off until `SPARKWING_SECRETS_KEY` / `--secrets-key-file`
+  is set) and documents the open-serving warning surfaces.
 
 ## [v0.18.0] - 2026-07-18
 ### Added

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	flag "github.com/spf13/pflag"
@@ -46,6 +47,11 @@ func run(args []string) error {
 			"hardcoding it in profiles.yaml. Empty disables the announcement.")
 	cacheURL := fs.String("cache-url", os.Getenv("SPARKWING_CACHE_URL"),
 		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
+	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
+		"refuse to start when the tokens table is empty, guarding against "+
+			"accidentally deploying an open controller. Leave unset for "+
+			"first-run bootstrap (minting the first token needs an open "+
+			"controller) and for laptop-local use.")
 	_ = fs.Parse(args)
 
 	emitStartupProvenance(os.Stderr)
@@ -88,6 +94,11 @@ func run(args []string) error {
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {
 		srv = srv.WithSecretsCipher(cipher)
+	}
+	if *requireAuth && !srv.AuthEnabled() {
+		return fmt.Errorf("--require-auth (SPARKWING_REQUIRE_AUTH) is set but " +
+			"the tokens table is empty; mint an admin token with the controller " +
+			"started unauthenticated, then restart with --require-auth")
 	}
 	if *poolEnabled {
 		if *poolNamespace == "" {
@@ -141,6 +152,18 @@ func checkStorageClasses(ctx context.Context, kcli kubernetes.Interface, namespa
 			"Pending. Set storageClassName on the PVCs (helm: "+
 			"--set storage.className=<class>) or mark a StorageClass "+
 			"default with storageclass.kubernetes.io/is-default-class=true.")
+}
+
+// envTruthy reports whether an environment variable is set to a
+// recognized affirmative value. Unset, empty, and negative spellings
+// (0, false, no, off) all read as false.
+func envTruthy(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 // loadSecretsCipher resolves the controller's secret-encryption key

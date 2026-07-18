@@ -23,14 +23,23 @@ import (
 // handleHealth is the liveness probe. Returns 200 when the process is
 // up; component failures land in problems[] so callers can surface them
 // without a blanket outage banner. Only DB-unreachable flips to 503.
+// The auth field reports "enabled" or "disabled" so an operator can see
+// at a glance whether the controller is serving open.
 //
-// Response: {"status": "ok" | "degraded", "problems": ["comp: detail"]}.
+// Response: {"status": "ok" | "degraded", "auth": "enabled" |
+// "disabled", "problems": ["comp: detail"]}.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var problems []string
+
+	authState := "disabled"
+	if s.auth != nil {
+		authState = "enabled"
+	}
 
 	if _, err := s.store.ListRuns(r.Context(), store.RunFilter{Limit: 1}); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
 			"status":   "degraded",
+			"auth":     authState,
 			"problems": []string{"db: " + err.Error()},
 		})
 		return
@@ -76,7 +85,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp := map[string]any{"status": "ok"}
+	resp := map[string]any{"status": "ok", "auth": authState}
 	if len(problems) > 0 {
 		resp["status"] = "degraded"
 		resp["problems"] = problems

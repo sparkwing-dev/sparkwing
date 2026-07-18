@@ -109,25 +109,30 @@ func runProfilesTest(args []string) error {
 type healthResp struct {
 	Status   string   `json:"status"`
 	Problems []string `json:"problems,omitempty"`
+	// Auth is "enabled" or "disabled"; the controller sets it so
+	// tooling can warn when a deployment is serving open. Empty from
+	// services that don't report it.
+	Auth string `json:"auth,omitempty"`
 }
 
 // interpretHealthBody reads a GET /health response and folds it into
 // the probe result: non-200 → fail; 200 with "degraded" → warn +
-// joined problems; 200 + ok → no-op. Returns true if the caller
+// joined problems; 200 + ok → no-op. Returns the decoded body (so
+// callers can inspect extra fields like auth) and true if the caller
 // should stop (status was set to fail or warn).
-func interpretHealthBody(r *profileProbeResult, resp *http.Response) bool {
+func interpretHealthBody(r *profileProbeResult, resp *http.Response) (healthResp, bool) {
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		r.Status = "fail"
 		r.Detail = fmt.Sprintf("health returned %s: %s",
-			resp.Status, strings.TrimSpace(string(body)))
-		return true
+			resp.Status, strings.TrimSpace(string(raw)))
+		return healthResp{}, true
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
 	if err != nil {
 		r.Status = "fail"
 		r.Detail = fmt.Sprintf("read health body: %v", err)
-		return true
+		return healthResp{}, true
 	}
 	var body healthResp
 	_ = json.Unmarshal(raw, &body)
@@ -137,9 +142,9 @@ func interpretHealthBody(r *profileProbeResult, resp *http.Response) bool {
 		if r.Detail == "" {
 			r.Detail = "service reports degraded"
 		}
-		return true
+		return body, true
 	}
-	return false
+	return body, false
 }
 
 // probeController GETs <controller>/api/v1/health. The route is
@@ -161,7 +166,13 @@ func probeController(ctx context.Context, prof *profile.Profile) profileProbeRes
 		return r
 	}
 	defer resp.Body.Close()
-	if interpretHealthBody(&r, resp) {
+	body, stop := interpretHealthBody(&r, resp)
+	if stop {
+		return r
+	}
+	if body.Auth == "disabled" {
+		r.Status = "warn"
+		r.Detail = "serving unauthenticated: no tokens configured, every endpoint is open"
 		return r
 	}
 	r.Status = "ok"
@@ -269,7 +280,7 @@ func probeGitcache(ctx context.Context, prof *profile.Profile) profileProbeResul
 		return r
 	}
 	defer resp.Body.Close()
-	if interpretHealthBody(&r, resp) {
+	if _, stop := interpretHealthBody(&r, resp); stop {
 		return r
 	}
 	r.Status = "ok"

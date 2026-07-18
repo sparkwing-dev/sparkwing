@@ -22,11 +22,19 @@ ignored.
 
 ## Secrets at rest
 
-Secret values are encrypted with an XChaCha20-Poly1305 AEAD cipher
-(`internal/secrets`) under a master key, so they are never stored in
-plaintext. Values leave the server only through the authenticated
-secrets API; pipelines read them with `sparkwing.Secret` (see
-[sdk.md](sdk.md)).
+Encryption at rest is **opt-in and off by default.** Configure a master
+key and secret values are encrypted with an XChaCha20-Poly1305 AEAD
+cipher (`internal/secrets`) before they hit the database. With no key
+configured the controller stores secret values as plaintext and logs a
+warning at startup. Provide the key one of two ways:
+
+- `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key, or
+- `--secrets-key-file <path>` -- a file holding the raw or base64 key.
+
+Rotating the key is not automatic: values written under an old key stay
+readable, values written after the switch use the new key. Either way,
+values leave the server only through the authenticated secrets API;
+pipelines read them with `sparkwing.Secret` (see [sdk.md](sdk.md)).
 
 ## Cache service
 
@@ -46,9 +54,17 @@ accepted risk isolated to the build pod.
 
 ## Operator checklist
 
-- **Set the auth tokens.** With no token configured the controller
-  serves open (it logs a warning) -- fine for a laptop, not for a shared
-  deployment. See [auth.md](auth.md).
+- **Set the auth tokens.** With an empty tokens table the controller
+  serves every endpoint unauthenticated. It logs a warning at startup,
+  reports `"auth": "disabled"` on `GET /api/v1/health`, and `sparkwing
+  cluster status` flags the controller probe as a warning -- fine for a
+  laptop, not for a shared deployment. Minting the first token needs the
+  controller open (there is no token to authenticate with yet), so it
+  bootstraps unauthenticated by design; enable auth by creating an admin
+  token and restarting. To make an open controller a hard startup error
+  instead -- once you are past bootstrap -- set `SPARKWING_REQUIRE_AUTH=1`
+  (or `--require-auth`) so the pod refuses to start with an empty tokens
+  table. See [auth.md](auth.md).
 - **Terminate TLS at your ingress.** Sparkwing speaks plain HTTP; put it
   behind an ingress/proxy that enforces HTTPS.
 - **Pin image digests** rather than floating tags.

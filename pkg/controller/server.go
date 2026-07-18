@@ -247,17 +247,27 @@ func (s *Server) WithDispatcher(d Dispatcher) *Server {
 
 // EnableAuthFromStore wires the Authenticator against the server's
 // tokens table IF the table has any non-revoked rows. Empty table =
-// auth stays disabled (pass-through).
+// auth stays disabled (pass-through), and the server logs a loud
+// warning so an operator has a signal that every endpoint is open.
 //
 // The tokens-table check happens ONCE at startup: a fresh row added
 // via POST /api/v1/tokens takes effect on the next controller restart.
 func (s *Server) EnableAuthFromStore() *Server {
 	if !s.tokensTableNonEmpty() {
 		s.auth = nil
+		s.logger.Warn("controller serving unauthenticated: tokens table is empty, every endpoint is open; mint an admin token and restart to enable auth")
 		return s
 	}
 	s.auth = NewAuthenticator(s.store, 60*time.Second)
 	return s
+}
+
+// AuthEnabled reports whether the controller is enforcing bearer-token
+// auth. False means every endpoint is served unauthenticated -- either
+// laptop-local mode (auth never wired) or a cluster whose tokens table
+// was empty at startup.
+func (s *Server) AuthEnabled() bool {
+	return s.auth != nil
 }
 
 // tokensTableNonEmpty reports whether the tokens table has any
