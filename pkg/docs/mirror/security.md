@@ -26,7 +26,7 @@ Encryption at rest is **opt-in and off by default.** Configure a master
 key and secret values are encrypted with an XChaCha20-Poly1305 AEAD
 cipher (`internal/secrets`) before they hit the database. With no key
 configured the controller stores secret values as plaintext and logs a
-warning at startup. Provide the key one of two ways:
+warning at startup. Provide the key via:
 
 - `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key, or
 - `--secrets-key-file <path>` -- a file holding the raw or base64 key.
