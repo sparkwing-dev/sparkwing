@@ -194,9 +194,9 @@ If none apply, we don't extract. If two or more apply, we plan it.
 
 The expected trajectory, no specific dates:
 
-1. **v0.2 → v0.5.** Iterate the contract. Breaking changes ship in
+1. **Early v0.** Iterate the contract. Breaking changes ship in
    minor bumps with migration recipes.
-2. **v0.6 → v0.9.** Contract churn slows. Convention shifts toward
+2. **Later v0.** Contract churn slows. Convention shifts toward
    "no breaks within a minor; additive changes only."
 3. **Extraction.** sparkwing-sdk gets carved out. Aliases ease the
    transition.

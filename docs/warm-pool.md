@@ -67,15 +67,20 @@ report ready.
 | Endpoint | Method | Scope | Description |
 |----------|--------|-------|-------------|
 | `GET /api/v1/pool` | List | `runs.read` | Full pool state with all PVCs |
-| `POST /api/v1/pool/checkout?job_id=<id>` | Checkout | `admin` | Atomically claim a `clean` PVC for a job (409 when none free) |
+| `POST /api/v1/pool/checkout?job_id=<id>` | Checkout | `admin` | Atomically claim a `clean` PVC for a job (200 with an empty `pvc` field when none is free; 409 only on an underlying claim error) |
 | `POST /api/v1/pool/return?pvc=<name>` | Return | `admin` | Release a PVC back to `clean` |
 | `POST /api/v1/pool/heartbeat?pvc=<name>&job_id=<id>` | Heartbeat | `admin` | Renew the checkout lease |
 
 ### Configuration
 
 The controller reads pool config from the `config.yaml` key of a
-ConfigMap named `sparkwing-cache-config`, reloaded every reconciliation
-cycle. The YAML below is the value stored under `data.config.yaml`:
+ConfigMap named `sparkwing-cache-config`. The warming parameters
+(`warm_images` and `refresh_interval`) are re-read continuously by the
+warming loop, so changes take effect without a restart. The remaining
+parameters (`pool_size`, `pvc_size`, `heartbeat_timeout`, and
+`startup_grace`) are read once at controller startup and require a
+restart to change. The YAML below is the value stored under
+`data.config.yaml`:
 
 ```yaml
 # Images to pre-pull into each pool PVC
@@ -108,8 +113,10 @@ startup_grace: 2m       # Grace period before first heartbeat expected
 A consumer claims a PVC through the checkout API for the duration of a
 build:
 
-1. `POST /api/v1/pool/checkout?job_id=<id>` returns a `clean` PVC's name,
-   or 409 when none is free.
+1. `POST /api/v1/pool/checkout?job_id=<id>` returns HTTP 200 with a
+   `clean` PVC's name, or HTTP 200 with an empty `pvc` field when none is
+   free — consumers must check for an empty name. A 409 is returned only
+   when the underlying claim fails.
 2. The build mounts that PVC as its Docker layer cache and renews the
    lease via `POST /api/v1/pool/heartbeat` so the reconcile loop doesn't
    reclaim it mid-build.
@@ -118,8 +125,8 @@ build:
 
 The pod spec that mounts the claimed PVC and wires the Docker daemon is
 part of the cluster deployment (the Helm chart ships separately from this
-repo), not the CLI. The pool is optional: a 409 on checkout means the
-build runs without a warm cache rather than failing.
+repo), not the CLI. The pool is optional: an empty PVC name on checkout
+means the build runs without a warm cache rather than failing.
 
 ## Metrics
 

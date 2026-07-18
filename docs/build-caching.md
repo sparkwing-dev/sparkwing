@@ -170,7 +170,7 @@ RUN --mount=type=cache,target=/root/.npm \
 
 # pip
 RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install --index-url ${PROXY_URL:-https://pypi.org}/simple/ \
+    pip install --index-url ${PROXY_URL:-https://pypi.org}/proxy/pypi/simple/ \
     --trusted-host sparkwing-cache.sparkwing.svc.cluster.local \
     -r requirements.txt
 
@@ -228,7 +228,8 @@ registries:
 
 **Cache policy:**
 
-- Immutable content (.tgz, .whl, .gem, .zip, .jar, .apk): cached indefinitely
+- Immutable content (.tgz, .whl, .gem, .zip, .jar, .apk): cached until the
+  max-age cleanup threshold (default 168h / 7 days)
 - Metadata (JSON, HTML): 10-minute TTL, stale-on-error fallback
 - Background cleanup: removes expired entries hourly
 

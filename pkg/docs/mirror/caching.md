@@ -150,9 +150,10 @@ groups do not have this interaction.
 
 - **No partial-node caching.** Caching is per node; you cannot skip one
   step inside a job. Split the cachable work into its own node.
-- **No GC.** Stored outputs live in the runs store under the content
-  hash; retention is bounded by `TTL` but the store does not compact
-  expired rows automatically.
+- **Bounded retention.** Cache entries expire after their `TTL`. The
+  controller sweeps expired entries automatically on a schedule, and the
+  cache is additionally capped at roughly ten thousand rows, evicting the
+  least recently used entries past that cap.
 - **No dependency-cache helper.** There is no first-class save/restore
   for gems / node_modules / pip tarballs. Use the dependency proxy
   (gitcache `/proxy/...`) or a warm PVC.

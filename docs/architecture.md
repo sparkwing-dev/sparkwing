@@ -18,33 +18,30 @@ team, not once per developer.
 ---
 
 Sparkwing (prod deployment) is a self-hosted CI/CD platform that runs on
-Kubernetes. The stack is five pods plus an in-cluster registry.
+Kubernetes. The stack is five pods: a controller, cache, web, runner,
+and logs. Building container images (Docker-in-Docker) and hosting an
+image registry, when a pipeline needs them, are external infrastructure
+the chart does not deploy.
 
 ## Components
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
-│                      Kubernetes Cluster                           │
-│                                                                  │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │  Controller   │  │   Cache      │  │   Web        │           │
-│  │ (API + queue  │  │  (git HTTP + │  │  (dashboard) │           │
-│  │  + webhooks   │  │   blob store │  │              │           │
-│  │  + pool mgmt  │  │   + pkg proxy│  │              │           │
-│  │  + dispatcher)│  │            │  │              │           │
-│  └──────┬───────┘  └──────────────┘  └──────────────┘           │
-│         │                                                        │
-│  ┌──────┴───────┐  ┌──────────────┐  ┌──────────────┐           │
-│  │  Runner (k8s  │  │   DinD       │  │   Logs       │           │
-│  │  Job)         │  │ (Docker in   │  │  (log store) │           │
-│  │              │  │  Docker)     │  │              │           │
-│  └──────────────┘  └──────────────┘  └──────────────┘           │
-│                                                                  │
-│  ┌──────────────┐                                                │
-│  │  Registry    │                                                │
-│  │ (container   │                                                │
-│  │  images)     │                                                │
-│  └──────────────┘                                                │
+│                      Kubernetes Cluster                            │
+│                                                                    │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
+│  │  Controller  │  │   Cache      │  │   Web        │             │
+│  │ (API + queue │  │  (git HTTP + │  │  (dashboard) │             │
+│  │  + webhooks  │  │   blob store │  │              │             │
+│  │  + pool mgmt)│  │   + pkg proxy│  │              │             │
+│  └──────┬───────┘  └──────────────┘  └──────────────┘             │
+│         │                                                          │
+│  ┌──────┴───────┐  ┌──────────────┐                               │
+│  │  Runner      │  │   Logs       │                               │
+│  │  (warm pool, │  │  (log store) │                               │
+│  │   polls +    │  │              │                               │
+│  │   claims)    │  │              │                               │
+│  └──────────────┘  └──────────────┘                               │
 └──────────────────────────────────────────────────────────────────┘
          ▲                    ▲
          │                    │
@@ -55,14 +52,14 @@ Kubernetes. The stack is five pods plus an in-cluster registry.
 ```
 
 Five pods: sparkwing-controller, sparkwing-cache, sparkwing-web,
-sparkwing-logs, and dind.
+sparkwing-runner, and sparkwing-logs.
 
 ### Controller
 
 The central coordinator. Receives job triggers, queues work, and
-dispatches runners.
+serves it to runners that poll and claim.
 
-- **API server** (port 8080): HTTP endpoints for triggers, run status,
+- **API server** (port 4344): HTTP endpoints for triggers, run status,
   agent polling, secrets, and authorization
 - **Job queue**: in-memory queue with SQLite persistence
   (`/data/state.db`) for run state, metadata, secrets, and tokens
@@ -70,10 +67,10 @@ dispatches runners.
   signatures, and triggers matching pipelines
 - **Pool management**: maintains a pool of PVCs pre-loaded with Docker
   build cache; handles checkout and return for runner jobs
-- **Dispatcher**: background goroutine that claims pending jobs and
-  creates Kubernetes Jobs to run them
+- **Run backend**: holds pending runs for runners to poll and claim; the
+  controller does not push work to runners
 - **Heartbeat monitor**: reclaims a node whose runner stops renewing its
-  lease (default 5-minute timeout, 2-minute startup grace)
+  lease (default 3-minute lease)
 - **Queue timeout**: fails pending nodes that exceed their `queue_timeout`
   (default 15 minutes)
 - **Metrics collector**: stores the per-node CPU/memory samples runners
@@ -81,11 +78,11 @@ dispatches runners.
 
 ### Runner
 
-Executes pipeline binaries. The dispatcher creates a Kubernetes Job
-running the unified `sparkwing-runner` binary (its `runner`, `worker`,
-and `agent` subcommands cover the warm pool, single-claim, and
-off-cluster cases). The runner downloads code from the cache, compiles
-and runs the pipeline, reports results, exits.
+Executes pipeline binaries. A standing warm-pool Deployment runs the
+unified `sparkwing-runner` binary, which polls the controller and claims
+pending nodes. For per-node isolation it launches a Kubernetes Job that
+runs `sparkwing run-node`. The runner downloads code from the cache,
+compiles and runs the pipeline, and reports results.
 
 Off-cluster runners (laptops, bare-metal) connect to the controller and
 claim nodes through its claim API; the route set and scopes are in
@@ -115,14 +112,17 @@ documentation.
 
 ### DinD (Docker-in-Docker)
 
-Shared Docker daemon for building container images. Runner jobs connect
-to the DinD service, optionally with a warm PVC mounted for Docker cache.
+Optional, external infrastructure the chart does not deploy. When a
+pipeline builds container images, point runners at a shared Docker
+daemon; runner jobs connect to it, optionally with a warm PVC mounted for
+Docker cache.
 
 ### Registry
 
-Container image registry (NodePort 30500). Images push here from builds.
-Pipelines can also push to external registries (ECR, GCR, Docker Hub,
-etc.) - that is up to the pipeline author.
+Optional, external infrastructure the chart does not deploy. Pipelines
+that build images push them to a registry you provide - an in-cluster one
+you run yourself, or an external service (ECR, GCR, Docker Hub, etc.).
+That is up to the pipeline author.
 
 ### Logs
 
@@ -164,7 +164,7 @@ component has explicit allow rules:
 | Controller | External (webhooks), Dashboard, Runners |
 | Cache | Controller, Runners |
 | DinD | Runners, Controller (cache warmers) |
-| Dashboard | External (port 3100) |
+| Dashboard | External (port 4343) |
 | Logs | Runners, Dashboard |
 | Registry | Runners, Nodes (image pulls) |
 
@@ -174,16 +174,16 @@ All components discover each other via k8s DNS. No hardcoded IPs.
 
 | Service | Internal address | Port |
 |---------|-----------------|------|
-| Controller | `sparkwing-controller.sparkwing.svc.cluster.local` | 80 -> 8080 |
+| Controller | `sparkwing-controller.sparkwing.svc.cluster.local` | 80 -> 4344 |
 | Cache | `sparkwing-cache.sparkwing.svc.cluster.local` | 80 -> 8090 |
-| Logs | `sparkwing-logs.sparkwing.svc.cluster.local` | 80 -> 8091 |
+| Logs | `sparkwing-logs.sparkwing.svc.cluster.local` | 80 -> 4345 |
 | DinD | `dind.sparkwing.svc.cluster.local` | 2375 |
-| Dashboard | `sparkwing-web.sparkwing.svc.cluster.local` | 3100 |
+| Dashboard | `sparkwing-web.sparkwing.svc.cluster.local` | 80 -> 4343 |
 | Registry | `registry.registry.svc.cluster.local` | 5000 (NodePort 30500) |
 
 ### Environment variables set on runners
 
-The dispatcher injects these into every runner pod:
+These are set on every runner pod:
 
 | Variable | Purpose |
 |----------|---------|
@@ -218,11 +218,11 @@ sparkwing pipeline trigger build-deploy --profile <cluster>
   2. sparkwing uploads code tarball to cache (incremental when possible)
   3. sparkwing POST /trigger to controller (with upload_ref)
   4. controller enqueues run
-  5. dispatcher creates a k8s Job
+  5. a runner polls the controller and claims the run
   6. runner downloads code from cache
   7. runner compiles and runs the pipeline binary
   8. runner streams logs to logs service
-  9. runner sends heartbeats every 5s to controller
+  9. runner sends periodic heartbeats to controller to hold its claim
   10. runner reports completion to controller
   11. sparkwing run polls the controller for run state and displays result
 ```
@@ -235,7 +235,7 @@ git push origin main
   2. Controller verifies HMAC signature
   3. Controller matches push against sparkwing.yaml triggers
   4. Controller enqueues matching runs
-  5. Same dispatch flow as steps 5-11 above
+  5. Same execution flow as steps 5-11 above
 ```
 
 ## Storage
@@ -250,11 +250,11 @@ git push origin main
 
 ## Cluster Setup
 
-The Helm chart for the cluster topology ships separately from this
-repo (which holds the CLI + SDK only). Once the chart is on disk:
+The Helm chart for the cluster topology lives in this repo under
+`charts/sparkwing-full`:
 
 ```bash
-helm install sparkwing <path-to-chart> -n sparkwing --create-namespace
+helm install sparkwing ./charts/sparkwing-full -n sparkwing --create-namespace
 ```
 
 Then add a profile pointing at the controller's URL:

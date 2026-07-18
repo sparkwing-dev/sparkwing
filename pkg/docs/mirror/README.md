@@ -25,7 +25,7 @@ docs/
   getting-started.md     install, quick start, run targets
   sdk.md                 Go DSL: Plan, Job, Work, Step, modifiers
   pipelines.md           pipeline YAML, registration, triggers
-  cli.md                 sparkwing + sparkwing CLI reference
+  cli.md                 sparkwing CLI command-group guide
   api.md                 controller HTTP API reference
   architecture.md        in-cluster deployment architecture
   deployment.md          deploy targets, gitops, ArgoCD, registries
@@ -52,9 +52,10 @@ docs/
 
 ## CLI surface
 
-The top-level commands: `info`, `pipeline`, `run`, `runs`, `version`,
-`dashboard`, `cluster`, `secrets`, `configure`, `debug`, `docs`,
-`commands`, `completion`. Cross-repo registry under `configure
+The top-level commands: `info`, `pipeline`, `run`, `runs`, `queue`,
+`version`, `update`, `dashboard`, `cluster`, `repos`, `secrets`,
+`configure`, `profile`, `debug`, `doctor`, `docs`, `commands`,
+`completion`. Cross-repo registry under `configure
 xrepo`; sparks library mgmt under `pipeline sparks`. Run any verb
 with `--help` for its full spec, or `sparkwing commands -o json` for
 the agent-readable surface dump.

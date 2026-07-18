@@ -70,7 +70,7 @@ The script is interactive. It'll ask for:
 - Controller URL (public URL of your team's sparkwing server)
 - Logs URL (same)
 - API token (from your team's sparkwing admin)
-- Runner name (defaults to your hostname)
+- Runner name (defaults to `<hostname>-runner` -- the lowercased short hostname with a `-runner` suffix)
 - Max concurrent jobs
 
 On **macOS** it writes a LaunchAgent plist to `~/Library/LaunchAgents/`
@@ -180,8 +180,9 @@ hardware.
 ## Troubleshooting
 
 **Runner says "401 unauthorized" on poll.** Token mismatch. Verify the
-value in `~/Library/LaunchAgents/com.sparkwing.runner.plist` (or the
-systemd unit) matches what's set in the server's `.env`.
+`token:` field in `~/.config/sparkwing/agent.yaml` matches what's set in
+the server's `.env`. The launchd plist and systemd unit never hold the
+token themselves -- they only point at the config file.
 
 **Runner connects but never claims a job.** Check that you're actually
 triggering jobs -- `POST https://api.example.com/api/v1/triggers` with the

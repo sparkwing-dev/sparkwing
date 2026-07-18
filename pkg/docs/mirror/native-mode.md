@@ -20,12 +20,12 @@ Run IDs are timestamp-prefixed, so they sort chronologically.
 ## Running the dashboard
 
 ```
-sparkwing dashboard start    # spawn detached server (idempotent)
+sparkwing dashboard start    # spawn detached server (replaces any running one)
 sparkwing dashboard status   # report liveness, print URL
 sparkwing dashboard kill     # stop it
 ```
 
-The CLI binary ships with the dashboard embedded; nothing else needs to be installed. `start` detaches a child process, writes its PID to `$SPARKWING_HOME/dashboard.pid`, appends output to `$SPARKWING_HOME/dashboard.log`, and returns once the listener accepts connections. It is idempotent: if a live server is already on file, it prints the URL and returns without spawning a duplicate.
+The CLI binary ships with the dashboard embedded; nothing else needs to be installed. `start` detaches a child process, writes its PID to `$SPARKWING_HOME/dashboard.pid`, appends output to `$SPARKWING_HOME/dashboard.log`, and returns once the listener accepts connections. Re-running it drains any dashboard already on file -- stopping the running server -- and starts a fresh one in its place. It refuses only when the resident dashboard is a newer version than the CLI, telling you to run `sparkwing version update --cli` or `sparkwing dashboard kill` first.
 
 For the bind address and the other `dashboard start` flags, see [cli-reference.md](cli-reference.md).
 

@@ -41,7 +41,7 @@ sparkwing run build-deploy --profile prod                   # local, state via p
 sparkwing pipeline trigger build-deploy --profile prod      # remote dispatch
 ```
 
-`sparkwing runs triggers list --profile prod` surfaces queued / claimed /
+`sparkwing runs triggers list --profile prod` surfaces pending / claimed /
 done triggers on the controller; `sparkwing runs triggers get --id ...`
 inspects one. To fire a fresh trigger (the sparkwing equivalent of
 `gh workflow run`), use `sparkwing pipeline trigger <pipeline> --profile PROF`.

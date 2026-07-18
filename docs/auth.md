@@ -102,19 +102,19 @@ sparkwing cluster tokens list
 sparkwing cluster tokens list --include-revoked
 
 # Revoke a token by its non-secret prefix.
-sparkwing cluster tokens revoke --prefix swu_6cF9r
+sparkwing cluster tokens revoke --prefix swu_6cF9r2Kp
 
 # Look up metadata for a prefix.
-sparkwing cluster tokens lookup --prefix swu_6cF9r
+sparkwing cluster tokens lookup --prefix swu_6cF9r2Kp
 
 # Rotate: mint a replacement, with a grace window before the old one 401s.
-sparkwing cluster tokens rotate --prefix swu_6cF9r --grace 48h
+sparkwing cluster tokens rotate --prefix swu_6cF9r2Kp --grace 48h
 ```
 
-`sparkwing configure profiles` is the only place connection config lives.
-No `--controller` / `--token` / `SPARKWING_CONTROLLER_URL` paths exist
-on human-facing commands; the single source-of-truth keeps it
-impossible to accidentally point at the wrong cluster.
+Profiles are the only path for targeting a remote cluster, which keeps
+it hard to accidentally point at the wrong one. The
+`SPARKWING_CONTROLLER_URL` environment variable is a fallback only for
+the local dashboard dev flow, not for remote-cluster targeting.
 
 ## Argon2 parameters
 
@@ -133,8 +133,8 @@ only runs on cold lookups.
 
 - **OIDC / SSO**: not implemented. The `users` + `sessions` tables are
   shape-compatible; an OIDC callback can populate sessions directly.
-- **Audit trail**: structured HTTP logs include the principal + prefix.
-  There is no dedicated audit database.
+- **Audit trail**: the principal name is stamped onto the OTel trace
+  span. There is no dedicated audit database.
 - **Per-user multi-tenancy**: principals are a free-form label. Adding a
   roles model is orthogonal and doesn't require a wire-shape change.
 - **Fine-grained `admin` split**: the `admin` scope is intentionally

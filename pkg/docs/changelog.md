@@ -75,6 +75,13 @@ code change to unlock.
   handlers run, so nested `RunAndAwait` child triggers are not stranded behind
   their waiting parent.
 
+## [v0.17.25] - 2026-07-16
+### Fixed
+
+- **cluster:** Trigger workers now keep claiming work while earlier trigger
+  handlers run, so nested `RunAndAwait` child triggers are not stranded behind
+  their waiting parent.
+
 ## [v0.17.24] - 2026-07-16
 ### Fixed
 
