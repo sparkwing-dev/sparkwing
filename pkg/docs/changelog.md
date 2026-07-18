@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.18.0] - 2026-07-18
 ### Added
 
 - **cli:** `sparkwing pipeline templates` gains `--category` and `--cloud`
