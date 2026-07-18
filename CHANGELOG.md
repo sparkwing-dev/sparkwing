@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.19.0] - 2026-07-18
 ### Added
 
 - **docs:** the docs drift gate (`internal/doccheck`, run in pre-push)
