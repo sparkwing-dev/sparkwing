@@ -115,7 +115,7 @@ build:
 
 1. `POST /api/v1/pool/checkout?job_id=<id>` returns HTTP 200 with a
    `clean` PVC's name, or HTTP 200 with an empty `pvc` field when none is
-   free — consumers must check for an empty name. A 409 is returned only
+   free -- consumers must check for an empty name. A 409 is returned only
    when the underlying claim fails.
 2. The build mounts that PVC as its Docker layer cache and renews the
    lease via `POST /api/v1/pool/heartbeat` so the reconcile loop doesn't
