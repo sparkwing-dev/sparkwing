@@ -34,6 +34,7 @@ const (
 	eventQueueTimeout = "queue_timeout"
 	eventCancellation = "cancellation"
 	eventContended    = "contended"
+	eventRejection    = "rejection"
 )
 
 // eventWindow is the daemon's bounded rolling record of admission
@@ -104,6 +105,7 @@ func (w *eventWindow) summary(now time.Time) *wingwire.EventsWindow {
 	out := &wingwire.EventsWindow{WindowMS: eventWindowSpan.Milliseconds()}
 	var waits []int64
 	evictions := map[string]int{}
+	rejections := map[string]int{}
 	for _, e := range w.entries {
 		switch e.Kind {
 		case eventGrant:
@@ -117,6 +119,8 @@ func (w *eventWindow) summary(now time.Time) *wingwire.EventsWindow {
 			out.Cancellations++
 		case eventContended:
 			out.Contended++
+		case eventRejection:
+			rejections[e.Key]++
 		}
 	}
 	if len(waits) > 0 {
@@ -130,6 +134,14 @@ func (w *eventWindow) summary(now time.Time) *wingwire.EventsWindow {
 	sort.Strings(keys)
 	for _, k := range keys {
 		out.Evictions = append(out.Evictions, wingwire.EvictionCount{Key: k, Count: evictions[k]})
+	}
+	causes := make([]string, 0, len(rejections))
+	for k := range rejections {
+		causes = append(causes, k)
+	}
+	sort.Strings(causes)
+	for _, k := range causes {
+		out.Rejections = append(out.Rejections, wingwire.RejectionCount{Cause: k, Count: rejections[k]})
 	}
 	return out
 }

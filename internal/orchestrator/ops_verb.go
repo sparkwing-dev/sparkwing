@@ -145,7 +145,7 @@ func runOpsDoctor(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	report, err := opsview.Diagnose(ctx, p, *home, *dryRun)
+	report, err := opsview.Diagnose(ctx, p, *home, sparkwingModuleVersion(), *dryRun)
 	if err != nil {
 		return fmt.Errorf("ops doctor: %w", err)
 	}

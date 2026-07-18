@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -30,6 +31,33 @@ func TestVersionNewer(t *testing.T) {
 		if got := versionNewer(tt.client, tt.daemon); got != tt.want {
 			t.Errorf("versionNewer(%q,%q)=%v, want %v", tt.client, tt.daemon, got, tt.want)
 		}
+	}
+}
+
+func TestAdmissionError_FillsVersionSkewOnOpaqueInvalid(t *testing.T) {
+	cl := &Client{opts: Options{Version: "(devel)"}, ack: wingwire.HelloAck{BinaryVersion: "v0.18.0"}}
+	e := cl.admissionError(&wingwire.Evicted{Key: "invalid", Policy: wingwire.PolicyFail})
+	if e.Reason == "" {
+		t.Fatal("opaque invalid rejection under version skew left no reason")
+	}
+	if !strings.Contains(e.Reason, "v0.18.0") || !strings.Contains(e.Reason, "(devel)") {
+		t.Fatalf("skew reason %q does not name both versions", e.Reason)
+	}
+}
+
+func TestAdmissionError_KeepsDaemonReasonWhenGiven(t *testing.T) {
+	cl := &Client{opts: Options{Version: "(devel)"}, ack: wingwire.HelloAck{BinaryVersion: "v0.18.0"}}
+	e := cl.admissionError(&wingwire.Evicted{Key: "invalid", Policy: wingwire.PolicyFail, Reason: "admission request invalid: named cause"})
+	if e.Reason != "admission request invalid: named cause" {
+		t.Fatalf("daemon-provided reason was overwritten: %q", e.Reason)
+	}
+}
+
+func TestAdmissionError_NoSkewHintWhenVersionsMatch(t *testing.T) {
+	cl := &Client{opts: Options{Version: "v0.18.0"}, ack: wingwire.HelloAck{BinaryVersion: "v0.18.0"}}
+	e := cl.admissionError(&wingwire.Evicted{Key: "invalid", Policy: wingwire.PolicyFail})
+	if e.Reason != "" {
+		t.Fatalf("matched versions produced a skew hint: %q", e.Reason)
 	}
 }
 

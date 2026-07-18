@@ -99,13 +99,47 @@ type AdmissionError struct {
 	Policy       wingwire.Policy
 	Key          string
 	SupersededBy string
+	// Reason is the daemon's one-line explanation naming the offending
+	// input and its value for a malformed request. Empty for ordinary
+	// policy rejections and older daemons, where only Policy and Key carry.
+	Reason string
 }
 
 func (e *AdmissionError) Error() string {
+	if e.Reason != "" {
+		return "wingd: " + e.Reason
+	}
 	if e.SupersededBy != "" {
 		return fmt.Sprintf("wingd: %s on %q, superseded by %s", e.Policy, e.Key, e.SupersededBy)
 	}
 	return fmt.Sprintf("wingd: %s on %q", e.Policy, e.Key)
+}
+
+// admissionError builds the terminal error for an eviction frame. When the
+// daemon rejected the request as invalid but named no cause -- an older daemon
+// that predates the reason field -- and this client is a different build than
+// that daemon, it fills in a version-skew explanation so the opaque rejection
+// is not the only thing the run sees.
+func (cl *Client) admissionError(m *wingwire.Evicted) *AdmissionError {
+	e := &AdmissionError{Policy: m.Policy, Key: m.Key, SupersededBy: m.SupersededBy, Reason: m.Reason}
+	if e.Reason == "" && m.Key == "invalid" {
+		if hint := cl.versionSkewHint(); hint != "" {
+			e.Reason = hint
+		}
+	}
+	return e
+}
+
+// versionSkewHint returns an explanation when this client and the daemon it is
+// talking to are provably different builds, else "". A newer or development
+// build does not always take over an older daemon, and the older daemon then
+// rejects requests it cannot honor with a bare "invalid".
+func (cl *Client) versionSkewHint() string {
+	self, daemon := cl.opts.Version, cl.ack.BinaryVersion
+	if self == "" || daemon == "" || self == daemon {
+		return ""
+	}
+	return fmt.Sprintf("admission request rejected as invalid by daemon %s while this sparkwing is %s; a version skew can leave a running daemon unable to admit a newer client. Stop the daemon so the next run brings up a matching one, or run in an isolated SPARKWING_HOME", daemon, self)
 }
 
 // CancelledError reports that the daemon cancelled a run while it was

@@ -42,6 +42,24 @@ func TestEventWindow_SummaryFoldsOutcomes(t *testing.T) {
 	}
 }
 
+func TestEventWindow_SummaryFoldsRejectionsByCause(t *testing.T) {
+	var w eventWindow
+	now := time.Now()
+	w.record(now, admissionEvent{Kind: eventRejection, Key: rejectCauseCostSource})
+	w.record(now, admissionEvent{Kind: eventRejection, Key: rejectCauseCostSource})
+	w.record(now, admissionEvent{Kind: eventRejection, Key: rejectCauseRequest})
+
+	s := w.summary(now)
+	if s == nil {
+		t.Fatal("summary nil for a populated window")
+	}
+	if len(s.Rejections) != 2 ||
+		s.Rejections[0].Cause != rejectCauseCostSource || s.Rejections[0].Count != 2 ||
+		s.Rejections[1].Cause != rejectCauseRequest || s.Rejections[1].Count != 1 {
+		t.Errorf("Rejections = %+v, want cost_source:2, request:1 sorted by cause", s.Rejections)
+	}
+}
+
 func TestEventWindow_EmptyYieldsNilSummary(t *testing.T) {
 	var w eventWindow
 	if s := w.summary(time.Now()); s != nil {

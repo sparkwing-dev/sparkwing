@@ -74,7 +74,7 @@ func (cl *Client) readGrant(req wingwire.AdmissionRequest, onQueued func(wingwir
 				onQueued(*m)
 			}
 		case *wingwire.Evicted:
-			return nil, &AdmissionError{Policy: m.Policy, Key: m.Key, SupersededBy: m.SupersededBy}, nil
+			return nil, cl.admissionError(m), nil
 		case *wingwire.Cancel:
 			return nil, &CancelledError{Reason: m.Reason}, nil
 		default:

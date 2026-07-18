@@ -23,6 +23,12 @@ import (
 // finalized out from under itself.
 const doctorRunOrphanGrace = 2 * time.Minute
 
+// doctorRejectionPatternThreshold is how many malformed-request rejections
+// of one cause the daemon must have tallied in its outcome window before
+// doctor calls it a pattern worth surfacing. A lone rejection is noise; a
+// repeat is a standing misconfiguration or version skew.
+const doctorRejectionPatternThreshold = 3
+
 // DoctorReport is what a doctor sweep found and repaired, and the wire shape
 // of its -o json output.
 type DoctorReport struct {
@@ -45,6 +51,32 @@ type DoctorReport struct {
 	// DanglingRunDirs are run artifact directories removed because their run
 	// row no longer exists.
 	DanglingRunDirs []string `json:"dangling_run_dirs,omitempty"`
+	// AdmissionRejections are repeated malformed-request rejections the local
+	// admission daemon tallied in its outcome window -- a standing pattern,
+	// not a one-off. Reported with an explanation, never repaired.
+	AdmissionRejections []DoctorRejection `json:"admission_rejections,omitempty"`
+	// DaemonVersionSkew is set when the running binary and the live admission
+	// daemon are different builds -- a skew that does not always resolve by
+	// takeover and can leave the daemon rejecting a newer client's requests.
+	// Reported with an explanation, never repaired.
+	DaemonVersionSkew *DoctorVersionSkew `json:"daemon_version_skew,omitempty"`
+}
+
+// DoctorRejection is one repeated malformed-request rejection cause in the
+// report: the stable cause label the daemon tallied and how many times it
+// fired in the window.
+type DoctorRejection struct {
+	Cause string `json:"cause"`
+	Count int    `json:"count"`
+}
+
+// DoctorVersionSkew names a mismatch between the running binary and the live
+// admission daemon it talks to.
+type DoctorVersionSkew struct {
+	// Self is the running binary's version.
+	Self string `json:"self"`
+	// Daemon is the live daemon's reported version.
+	Daemon string `json:"daemon"`
 }
 
 // DoctorLegacyHolder is one live legacy box-slot holder in the report.
@@ -62,13 +94,17 @@ func (r DoctorReport) Clean() bool {
 		len(r.LiveLegacyHolders) == 0 &&
 		r.DeadConcurrencyHolders == 0 &&
 		r.DeadConcurrencyWaiters == 0 &&
-		len(r.DanglingRunDirs) == 0
+		len(r.DanglingRunDirs) == 0 &&
+		len(r.AdmissionRejections) == 0 &&
+		r.DaemonVersionSkew == nil
 }
 
 // Diagnose runs every doctor check against the sparkwing home and repairs what
 // it safely can (unless dryRun). It never returns early on a single check's
-// failure so a healthy check still reports even if another errors.
-func Diagnose(ctx context.Context, p paths.Paths, home string, dryRun bool) (DoctorReport, error) {
+// failure so a healthy check still reports even if another errors. selfVersion
+// is the running binary's own version, compared against the live daemon's to
+// flag a version skew; pass "" to skip that check.
+func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryRun bool) (DoctorReport, error) {
 	report := DoctorReport{DryRun: dryRun}
 
 	daemonLive := liveDaemonRuns(ctx, home)
@@ -102,7 +138,56 @@ func Diagnose(ctx context.Context, p paths.Paths, home string, dryRun bool) (Doc
 	if err := diagnoseDanglingRunDirs(ctx, st, p, dryRun, &report); err != nil {
 		return report, err
 	}
+	diagnoseDaemonHealth(ctx, home, selfVersion, &report)
 	return report, nil
+}
+
+// diagnoseDaemonHealth reads the local daemon's live state once and reports
+// two standing problems a fresh user on the happy path otherwise only sees as
+// an opaque per-run failure: a repeated malformed-request rejection pattern
+// (from the outcome window), and a version skew between this binary and the
+// resident daemon (which does not always take over, leaving the daemon unable
+// to admit a newer client's requests). It is read-only; an absent daemon
+// yields nothing.
+func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report *DoctorReport) {
+	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home})
+	if err != nil {
+		return
+	}
+	if qs.Events != nil {
+		for _, r := range qs.Events.Rejections {
+			if r.Count >= doctorRejectionPatternThreshold {
+				report.AdmissionRejections = append(report.AdmissionRejections,
+					DoctorRejection{Cause: r.Cause, Count: r.Count})
+			}
+		}
+	}
+	if versionSkewed(selfVersion, qs.DaemonVersion) {
+		report.DaemonVersionSkew = &DoctorVersionSkew{Self: selfVersion, Daemon: qs.DaemonVersion}
+	}
+}
+
+// versionSkewed reports whether the running binary and the live daemon are
+// provably different builds. Empty or unknown versions on either side are not
+// a provable skew, so they never flag.
+func versionSkewed(self, daemon string) bool {
+	if self == "" || daemon == "" || self == "(unknown)" || daemon == "(unknown)" {
+		return false
+	}
+	return self != daemon
+}
+
+// rejectionExplanation renders the human cause and recommended action for a
+// repeated admission-rejection cause.
+func rejectionExplanation(cause string) string {
+	switch cause {
+	case "cost_source":
+		return "runs named a cost source this box's daemon does not recognize (the launching sparkwing is newer than the resident daemon); align the two builds, or pin resources explicitly with plan.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n))"
+	case "request":
+		return "runs submitted a malformed admission request (the daemon log names the offending input); usually a version skew between the run and the daemon"
+	default:
+		return "the daemon log names the offending input for each"
+	}
 }
 
 // liveDaemonRuns returns the set of run ids the local admission daemon is
@@ -273,6 +358,16 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	fmt.Fprintf(w, "dead_concurrency_holders\t%d\n", r.DeadConcurrencyHolders)
 	fmt.Fprintf(w, "dead_concurrency_waiters\t%d\n", r.DeadConcurrencyWaiters)
 	fmt.Fprintf(w, "dangling_run_dirs\t%d\n", len(r.DanglingRunDirs))
+	rejections := 0
+	for _, rej := range r.AdmissionRejections {
+		rejections += rej.Count
+	}
+	fmt.Fprintf(w, "admission_rejections\t%d\n", rejections)
+	skew := 0
+	if r.DaemonVersionSkew != nil {
+		skew = 1
+	}
+	fmt.Fprintf(w, "daemon_version_skew\t%d\n", skew)
 	return nil
 }
 
@@ -300,6 +395,15 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 		fmt.Fprintf(tw, "dangling run directories %s\t%d\n", verb, n)
 	}
 	_ = tw.Flush()
+
+	for _, rej := range r.AdmissionRejections {
+		fmt.Fprintf(w, "\nwarning: %d admission request(s) rejected as invalid (%s)\n  %s\n",
+			rej.Count, rej.Cause, rejectionExplanation(rej.Cause))
+	}
+	if s := r.DaemonVersionSkew; s != nil {
+		fmt.Fprintf(w, "\nwarning: version skew -- this sparkwing is %s but the running admission daemon is %s\n  a newer or development build does not automatically take over an older daemon, so requests it cannot honor fail as invalid; stop the daemon so the next run brings up a matching one, or run in an isolated SPARKWING_HOME\n",
+			s.Self, s.Daemon)
+	}
 
 	if legacyLine != "" {
 		fmt.Fprintf(w, "\nwarning: %s\n", legacyLine)

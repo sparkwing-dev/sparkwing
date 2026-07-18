@@ -213,6 +213,11 @@ type Evicted struct {
 	// SupersededBy is the run whose admission evicted this holder.
 	SupersededBy string `json:"superseded_by"`
 	Policy       Policy `json:"policy"`
+	// Reason is a one-line human explanation naming the offending input
+	// and its value when the daemon rejects a request as malformed, so the
+	// client surfaces a cause rather than a bare policy key. Empty for
+	// ordinary cancel_others evictions and older daemons.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Release returns a lease before the connection closes -- the explicit
@@ -512,12 +517,25 @@ type EventsWindow struct {
 	// Contended is how many runs the daemon flagged as throttled by host
 	// contention while they held admission in the window.
 	Contended int `json:"contended,omitempty"`
+	// Rejections counts requests the daemon refused as malformed, per
+	// cause, so a repeated invalid-request pattern is visible to the queue
+	// view and doctor. Empty when no request was rejected and for older
+	// daemons.
+	Rejections []RejectionCount `json:"rejections,omitempty"`
 }
 
 // EvictionCount is one contested key's eviction tally in an
 // [EventsWindow].
 type EvictionCount struct {
 	Key   string `json:"key"`
+	Count int    `json:"count"`
+}
+
+// RejectionCount is one malformed-request cause's tally in an
+// [EventsWindow]. Cause is a short stable label ("cost_source", "request")
+// the queue view and doctor aggregate on.
+type RejectionCount struct {
+	Cause string `json:"cause"`
 	Count int    `json:"count"`
 }
 

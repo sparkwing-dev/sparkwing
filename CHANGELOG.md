@@ -48,7 +48,6 @@ code change to unlock.
 
 ## [Unreleased]
 ### Added
-### Added
 
 - **docs:** the docs drift gate (`internal/doccheck`, run in pre-push)
   gains two mechanical sub-gates. `cli-verbs` resolves every `sparkwing
@@ -95,6 +94,16 @@ code change to unlock.
   logs a loud warning that every endpoint is served unauthenticated,
   instead of falling into open-serving mode silently.
 
+
+- **cli:** when the local admission daemon rejects a request as invalid it
+  now names the offending input and value (an unrecognized cost source, a
+  malformed field) instead of a bare `invalid`, logs the rejected request,
+  and `sparkwing doctor` flags a repeat-rejection pattern with its cause.
+  Doctor additionally reports a version skew between the running binary and
+  the resident daemon -- a development or newer build that did not take over
+  an older daemon, and would otherwise fail opaquely -- with the two
+  versions and how to resolve it.
+
 ### Fixed
 
 - **cache:** the compiled-pipeline binary cache now invalidates when a
@@ -116,6 +125,15 @@ code change to unlock.
   longer fails the run or drops state. While the outbox holds queued
   writes for a run, later flushes keep flowing through it, so the
   replay can't be overtaken by a direct write.
+
+
+- **cli:** an unpinned pipeline whose host cost is being auto-measured no
+  longer dies before its first node with an opaque `local admission: wingd:
+  fail on "invalid"` when the box has ample free capacity. The local
+  admission daemon now accepts every cost source its own resolver produces
+  (the re-measuring and demand-floor charges were rejected as unknown), so
+  the documented happy path admits without an explicit `plan.Resources(...)`
+  pin.
 
 ### Docs
 

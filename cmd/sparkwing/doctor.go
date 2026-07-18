@@ -58,7 +58,7 @@ func runDoctor(args []string) error {
 }
 
 func diagnose(ctx context.Context, p paths.Paths, home string, dryRun bool) (doctorReport, error) {
-	return opsview.Diagnose(ctx, p, home, dryRun)
+	return opsview.Diagnose(ctx, p, home, installedVersion(), dryRun)
 }
 
 func renderDoctor(w io.Writer, r doctorReport, format string) error {

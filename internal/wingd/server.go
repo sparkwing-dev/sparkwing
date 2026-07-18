@@ -434,7 +434,13 @@ func strictCoreCostSource(costSource wingwire.CostSource) bool {
 }
 
 func softCoreCostSource(costSource wingwire.CostSource) bool {
-	return costSource == wingwire.CostSourceMeasured || costSource == wingwire.CostSourceDefault
+	switch costSource {
+	case wingwire.CostSourceMeasured, wingwire.CostSourceDefault,
+		wingwire.CostSourceMeasuring, wingwire.CostSourceFloor:
+		return true
+	default:
+		return false
+	}
 }
 
 func requestFromWire(runID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource) admission.Request {
@@ -507,7 +513,9 @@ func (d *Daemon) idleGrantableMemoryLocked() uint64 {
 // terminate the request with an [wingwire.Evicted] carrying the policy.
 func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if !validCostSource(req.CostSource) {
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "invalid", Policy: wingwire.PolicyFail})
+		d.rejectInvalid(c, req, rejectCauseCostSource, fmt.Sprintf(
+			"admission request invalid: unrecognized cost source %q; pin resources explicitly with plan.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n)), or upgrade this box's sparkwing so its daemon knows the source",
+			req.CostSource))
 		return
 	}
 	if req.ParentLeaseToken != "" {
@@ -549,7 +557,12 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if err != nil {
 		delete(d.byRun, req.RunID)
 		d.mu.Unlock()
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: submitErrorKey(err), Policy: wingwire.PolicyFail})
+		key := submitErrorKey(err)
+		if key == "invalid" {
+			d.rejectInvalid(c, req, rejectCauseRequest, "admission request invalid: "+err.Error())
+			return
+		}
+		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: key, Policy: wingwire.PolicyFail, Reason: err.Error()})
 		return
 	}
 	switch dec.Kind {
@@ -582,7 +595,8 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 
 func validCostSource(source wingwire.CostSource) bool {
 	switch source {
-	case "", wingwire.CostSourcePin, wingwire.CostSourceMeasured, wingwire.CostSourceDefault:
+	case "", wingwire.CostSourcePin, wingwire.CostSourceMeasured, wingwire.CostSourceDefault,
+		wingwire.CostSourceMeasuring, wingwire.CostSourceFloor:
 		return true
 	default:
 		return false
@@ -947,6 +961,24 @@ func (d *Daemon) flush(deliveries []delivery, snap admission.Snapshot) {
 			go d.handleDisconnect(dl.c)
 		}
 	}
+}
+
+// Stable cause labels for malformed-request rejections, aggregated in the
+// admission-outcome window so doctor can flag a repeat pattern.
+const (
+	rejectCauseCostSource = "cost_source"
+	rejectCauseRequest    = "request"
+)
+
+// rejectInvalid answers a malformed request with a descriptive terminal
+// error, logs the offending request's contents, and tallies the rejection
+// in the outcome window. It touches neither the ledger nor d.mu, so callers
+// may invoke it either before taking the daemon lock or after releasing it.
+func (d *Daemon) rejectInvalid(c *conn, req *wingwire.AdmissionRequest, cause, reason string) {
+	_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "invalid", Policy: wingwire.PolicyFail, Reason: reason})
+	d.cfg.logf("rejected run %s: %s [cost_source=%q cores=%.2f memory_bytes=%d semaphores=%d]",
+		req.RunID, reason, req.CostSource, req.Resources.Cores, req.Resources.MemoryBytes, len(req.Semaphores))
+	d.events.record(d.now(), admissionEvent{Kind: eventRejection, Key: cause})
 }
 
 func submitErrorKey(err error) string {

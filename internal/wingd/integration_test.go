@@ -3,11 +3,14 @@ package wingd_test
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -410,6 +413,84 @@ func TestUnknownCostSourceFailsOnChildAttach(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Fatal("child attach with unknown cost source admitted, want invalid request failure")
+	}
+}
+
+func TestAutoMeasuredCostSourcesAdmitOnIdleBox(t *testing.T) {
+	for _, source := range []wingwire.CostSource{wingwire.CostSourceMeasuring, wingwire.CostSourceFloor} {
+		t.Run(string(source), func(t *testing.T) {
+			home := shortHome(t)
+			startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})
+
+			cl := ensure(t, home, "")
+			lease, err := cl.Acquire(context.Background(), wingwire.AdmissionRequest{
+				RunID:      "auto-measured",
+				CostSource: source,
+				Resources:  wingwire.HostResources{Cores: 1.5},
+			}, nil)
+			if err != nil {
+				t.Fatalf("auto-measured %s request rejected on an idle box: %v", source, err)
+			}
+			if lease == nil {
+				t.Fatalf("auto-measured %s request returned no lease", source)
+			}
+		})
+	}
+}
+
+func TestUnknownCostSourceNamesTheOffendingInput(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})
+
+	cl := ensure(t, home, "")
+	_, err := cl.Acquire(context.Background(), wingwire.AdmissionRequest{
+		RunID:      "unknown-source",
+		CostSource: wingwire.CostSource("typo"),
+		Resources:  wingwire.HostResources{Cores: 1},
+	}, nil)
+	if err == nil {
+		t.Fatal("unknown cost source admitted, want invalid request failure")
+	}
+	var ae *client.AdmissionError
+	if !errors.As(err, &ae) {
+		t.Fatalf("want *client.AdmissionError, got %T: %v", err, err)
+	}
+	if !strings.Contains(ae.Reason, "typo") {
+		t.Fatalf("rejection reason %q does not name the offending cost source %q", ae.Reason, "typo")
+	}
+}
+
+func TestRepeatedInvalidRequestsSurfaceInQueueStateWindow(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30)})
+
+	for i := 0; i < 3; i++ {
+		cl := ensure(t, home, "")
+		_, err := cl.Acquire(context.Background(), wingwire.AdmissionRequest{
+			RunID:      "bad-" + strconv.Itoa(i),
+			CostSource: wingwire.CostSource("typo"),
+			Resources:  wingwire.HostResources{Cores: 1},
+		}, nil)
+		if err == nil {
+			t.Fatal("invalid request admitted")
+		}
+	}
+
+	qs, err := client.Query(context.Background(), client.Options{Home: home})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if qs.Events == nil {
+		t.Fatal("events window nil after rejections")
+	}
+	var count int
+	for _, r := range qs.Events.Rejections {
+		if r.Cause == "cost_source" {
+			count = r.Count
+		}
+	}
+	if count != 3 {
+		t.Fatalf("cost_source rejection count = %d, want 3 (window: %+v)", count, qs.Events.Rejections)
 	}
 }
 

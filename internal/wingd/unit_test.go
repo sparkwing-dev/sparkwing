@@ -48,15 +48,37 @@ func TestRequestFromWire(t *testing.T) {
 }
 
 func TestRequestFromWire_ProfiledCoresAreSoft(t *testing.T) {
-	for _, source := range []wingwire.CostSource{wingwire.CostSourceMeasured, wingwire.CostSourceDefault} {
+	autoMeasured := []wingwire.CostSource{
+		wingwire.CostSourceMeasured, wingwire.CostSourceDefault,
+		wingwire.CostSourceMeasuring, wingwire.CostSourceFloor,
+	}
+	for _, source := range autoMeasured {
 		req := requestFromWire("r1", wingwire.HostResources{Cores: 1.5}, nil, source)
 		if !req.SoftCores {
 			t.Fatalf("%s core request should use CPU as backpressure", source)
+		}
+		if req.StrictCores {
+			t.Fatalf("%s core request should not be a strict pin", source)
 		}
 	}
 	req := requestFromWire("r1", wingwire.HostResources{Cores: 1.5}, nil, wingwire.CostSourcePin)
 	if req.SoftCores || !req.StrictCores {
 		t.Fatalf("pinned core request = soft %v strict %v, want hard strict", req.SoftCores, req.StrictCores)
+	}
+}
+
+func TestValidCostSource_AcceptsEveryResolvedSource(t *testing.T) {
+	valid := []wingwire.CostSource{
+		"", wingwire.CostSourcePin, wingwire.CostSourceMeasured, wingwire.CostSourceDefault,
+		wingwire.CostSourceMeasuring, wingwire.CostSourceFloor,
+	}
+	for _, source := range valid {
+		if !validCostSource(source) {
+			t.Errorf("validCostSource(%q) = false, want true", source)
+		}
+	}
+	if validCostSource(wingwire.CostSource("typo")) {
+		t.Error("validCostSource(\"typo\") = true, want false")
 	}
 }
 
