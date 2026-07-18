@@ -2495,6 +2495,7 @@ sparks.yaml shape, resolution rules, warmup).
 - `add` -- Add a library to sparks.yaml
 - `remove` -- Remove a library from sparks.yaml
 - `warmup` -- Pre-compile pipeline binaries and upload to gitcache
+- `vendor` -- Eject a spark module's source into the repo to own and edit it
 
 ### Examples
 
@@ -2671,6 +2672,47 @@ sparkwing pipeline sparks update
 
 # Update one by name
 sparkwing pipeline sparks update --name sparks-core
+```
+
+## `sparkwing pipeline sparks vendor`
+
+Eject a spark module's source into the repo so you can own and edit it
+
+Copies a spark block module's source out of the Go module
+cache and into .sparkwing/sparks/<name>/, then adds a
+'replace <module> => ./sparks/<name>' directive to
+.sparkwing/go.mod and runs 'go mod tidy'.
+
+--module takes a sparks-core block name (e.g. 'templates',
+which resolves to github.com/sparkwing-dev/sparks-core/templates)
+or a full module path for any other spark library.
+
+The version is read from .sparkwing/go.mod's require list, or
+'latest' when the module is not yet required.
+
+Because the replace directive points at the copied tree, your
+import paths do not change and transitive dependencies keep
+resolving -- the code is simply yours now, editable in place.
+The command refuses to overwrite an existing destination. To
+undo, delete .sparkwing/sparks/<name>/ and drop the replace
+directive.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--module NAME` | Sparks-core block name (e.g. templates) or a full module path (required) |
+| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
+| `-o, --output FMT` | Output format: pretty\|json |
+
+### Examples
+
+```sh
+# Vendor the sparks-core templates module
+sparkwing pipeline sparks vendor --module templates
+
+# Vendor a full module path
+sparkwing pipeline sparks vendor --module github.com/example/my-sparks
 ```
 
 ## `sparkwing pipeline sparks warmup`

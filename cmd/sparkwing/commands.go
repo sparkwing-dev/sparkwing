@@ -52,7 +52,7 @@ var allCommands = []*Command{
 	&cmdWebhooks, &cmdWebhooksList, &cmdWebhooksDeliveries, &cmdWebhooksReplay,
 	&cmdAgents, &cmdAgentsList, &cmdClusterConcurrency,
 	&cmdSparks, &cmdSparksList, &cmdSparksLint, &cmdSparksResolve,
-	&cmdSparksUpdate, &cmdSparksAdd, &cmdSparksRemove, &cmdSparksWarmup,
+	&cmdSparksUpdate, &cmdSparksAdd, &cmdSparksRemove, &cmdSparksWarmup, &cmdSparksVendor,
 	&cmdApprove, &cmdDeny, &cmdApprovals, &cmdApprovalsList,
 	&cmdAnnotations, &cmdAnnotationsList, &cmdAnnotationsAdd,
 	&cmdRepos, &cmdReposList, &cmdReposInfo, &cmdReposUpdate,

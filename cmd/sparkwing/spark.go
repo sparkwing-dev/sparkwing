@@ -37,7 +37,7 @@ func runSparks(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdSparks, os.Stderr)
-		return errors.New("spark: subcommand required (list|lint|resolve|update|add|remove|warmup)")
+		return errors.New("spark: subcommand required (list|lint|resolve|update|add|remove|warmup|vendor)")
 	}
 	switch args[0] {
 	case "list", "ls":
@@ -54,6 +54,8 @@ func runSparks(args []string) error {
 		return runSparksRemove(args[1:])
 	case "warmup":
 		return runSparksWarmup(args[1:])
+	case "vendor":
+		return runSparksVendor(args[1:])
 	default:
 		PrintHelp(cmdSparks, os.Stderr)
 		return fmt.Errorf("spark: unknown subcommand %q", args[0])
@@ -570,6 +572,76 @@ func runSparksWarmup(args []string) error {
 	} else {
 		fmt.Fprintln(os.Stdout, "SPARKWING_GITCACHE_URL not set; skipping upload")
 	}
+	return nil
+}
+
+// sparksCoreModulePrefix is prepended to a bare --module name to form
+// the full module path of a sparks-core block module.
+const sparksCoreModulePrefix = "github.com/sparkwing-dev/sparks-core/"
+
+// resolveVendorModulePath turns a --module value into a full Go module
+// path. A value that already contains a slash is treated as a complete
+// module path; a bare name resolves to a sparks-core block module.
+func resolveVendorModulePath(module string) string {
+	module = strings.TrimSpace(module)
+	if strings.Contains(module, "/") {
+		return module
+	}
+	return sparksCoreModulePrefix + module
+}
+
+func runSparksVendor(args []string) error {
+	fs := flag.NewFlagSet(cmdSparksVendor.Path, flag.ContinueOnError)
+	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
+	moduleFlag := fs.String("module", "", "block module to vendor: a sparks-core name (e.g. templates) or a full module path")
+	outFmt := fs.StringP("output", "o", "", "output format: pretty|json (default: pretty)")
+	if err := parseAndCheck(cmdSparksVendor, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	if rest := fs.Args(); len(rest) > 0 {
+		return fmt.Errorf("spark vendor: unexpected positional %q (use --module)", rest[0])
+	}
+	module := strings.TrimSpace(*moduleFlag)
+	if module == "" {
+		return errors.New("spark vendor: --module is required (e.g. --module templates)")
+	}
+	format, err := resolveOutputFormat(*outFmt, "spark vendor")
+	if err != nil {
+		return err
+	}
+	sparkwingDir := *dir
+	if sparkwingDir == "" {
+		sparkwingDir = defaultSparkwingDir()
+	}
+	modulePath := resolveVendorModulePath(module)
+
+	res, err := sparks.Vendor(context.Background(), sparkwingDir, modulePath)
+	if err != nil {
+		return err
+	}
+
+	if format == "json" {
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(map[string]any{
+			"module":  res.ModulePath,
+			"version": res.Version,
+			"dest":    res.Dest,
+			"replace": res.RelReplace,
+		})
+	}
+
+	fmt.Printf("vendored %s@%s\n", res.ModulePath, res.Version)
+	fmt.Printf("  source copied to %s\n", res.Dest)
+	fmt.Printf("  added `replace %s => %s` to %s and ran go mod tidy\n",
+		res.ModulePath, res.RelReplace, filepath.Join(sparkwingDir, "go.mod"))
+	fmt.Println()
+	fmt.Println("your imports are unchanged -- the code now lives in your repo and is editable.")
+	fmt.Printf("to undo: delete %s and drop the replace directive from %s.\n",
+		res.Dest, filepath.Join(sparkwingDir, "go.mod"))
 	return nil
 }
 
