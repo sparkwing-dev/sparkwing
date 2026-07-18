@@ -1166,14 +1166,35 @@ build-test-deploy) that ship in the CLI itself: the registry
 templates are richer, real-world shapes (build-test-deploy to
 k8s, static-site, migrate+deploy, ...).
 
--o json emits the manifests (name, description, whenToUse,
-parameters, applicability) -- prefer it for agent consumption.`,
+--category and --cloud narrow the list. A cloud-agnostic
+template (one that declares no cloud) always passes a --cloud
+filter.
+
+--name switches to a full detail view for one template:
+description, when-to-use, prerequisite, a parameters table
+(name / type / required / default / description), applicability,
+and the template's README. Add --body to also print the
+pipeline body rendered with each parameter's default, using
+<param> placeholders for required parameters that have no
+default.
+
+-o json emits the manifests for the list, or the manifest +
+README (+ rendered body with --body) for a detail view --
+prefer it for agent consumption.`,
 	Flags: []FlagSpec{
+		{Name: "name", Argument: "TEMPLATE", Desc: "Show full detail for one template instead of the list", Group: "Target"},
+		{Name: "body", Desc: "With --name, also print the rendered pipeline body (default + <placeholder> params)", Group: "Target"},
+		{Name: "category", Argument: "CATEGORY", Desc: "Filter the list by applicability category", Group: "Filter"},
+		{Name: "cloud", Argument: "CLOUD", Desc: "Filter the list by cloud (aws | gcp); cloud-agnostic templates always match", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
 	},
-	GroupOrder: []string{"Output", "Other"},
+	GroupOrder: []string{"Target", "Filter", "Output", "Other"},
 	Examples: []Example{
 		{"Browse the registry", "sparkwing pipeline templates"},
+		{"Only AWS templates", "sparkwing pipeline templates --cloud aws"},
+		{"Only CI-hygiene templates", "sparkwing pipeline templates --category ci-hygiene"},
+		{"Full detail for one template", "sparkwing pipeline templates --name lint-test-go"},
+		{"Detail plus the rendered body", "sparkwing pipeline templates --name lint-test-go --body"},
 		{"Agent-readable manifests", "sparkwing pipeline templates -o json"},
 		{"Scaffold from one", "sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s --param image=myapp"},
 	},
@@ -2921,6 +2942,7 @@ sparks.yaml shape, resolution rules, warmup).`,
 		{"add", "Add a library to sparks.yaml"},
 		{"remove", "Remove a library from sparks.yaml"},
 		{"warmup", "Pre-compile pipeline binaries and upload to gitcache"},
+		{"vendor", "Eject a spark module's source into the repo to own and edit it"},
 	},
 	Examples: []Example{
 		{"List declared sparks libraries", "sparkwing pipeline sparks list"},
@@ -3060,6 +3082,39 @@ new sparks version is published.`,
 	Examples: []Example{
 		{"Warm up the current repo's pipelines", "sparkwing pipeline sparks warmup"},
 		{"Force a fresh compile", "sparkwing pipeline sparks warmup --clear-cache"},
+	},
+}
+
+var cmdSparksVendor = Command{
+	Path:     "sparkwing pipeline sparks vendor",
+	Synopsis: "Eject a spark module's source into the repo so you can own and edit it",
+	Description: `Copies a spark block module's source out of the Go module
+cache and into .sparkwing/sparks/<name>/, then adds a
+'replace <module> => ./sparks/<name>' directive to
+.sparkwing/go.mod and runs 'go mod tidy'.
+
+--module takes a sparks-core block name (e.g. 'templates',
+which resolves to github.com/sparkwing-dev/sparks-core/templates)
+or a full module path for any other spark library.
+
+The version is read from .sparkwing/go.mod's require list, or
+'latest' when the module is not yet required.
+
+Because the replace directive points at the copied tree, your
+import paths do not change and transitive dependencies keep
+resolving -- the code is simply yours now, editable in place.
+The command refuses to overwrite an existing destination. To
+undo, delete .sparkwing/sparks/<name>/ and drop the replace
+directive.`,
+	Flags: []FlagSpec{
+		{Name: "module", Argument: "NAME", Desc: "Sparks-core block name (e.g. templates) or a full module path", Required: true, Group: "Input"},
+		{Name: "sparkwing-dir", Argument: "DIR", Desc: "Path to .sparkwing/ (default: <cwd>/.sparkwing)", Group: "Input"},
+		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json", Group: "Output"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Vendor the sparks-core templates module", "sparkwing pipeline sparks vendor --module templates"},
+		{"Vendor a full module path", "sparkwing pipeline sparks vendor --module github.com/example/my-sparks"},
 	},
 }
 

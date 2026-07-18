@@ -582,6 +582,7 @@ func nextStepsFor(info Info, agentMode bool) []InfoNextStep {
 		{Command: "sparkwing pipeline list", Purpose: "see every pipeline this repo defines"},
 		{Command: "sparkwing pipeline describe --name <name>", Purpose: "full metadata for one pipeline"},
 		{Command: "sparkwing run <name>", Purpose: "run a pipeline"},
+		{Command: "sparkwing pipeline templates", Purpose: "browse curated starter templates for `pipeline new --template`"},
 		{Command: "sparkwing pipeline new --name <name>", Purpose: "scaffold a new pipeline"},
 		{Command: "sparkwing docs list", Purpose: "browse embedded docs (offline)"},
 		{Command: "sparkwing dashboard start", Purpose: "start the local dashboard at http://127.0.0.1:4343"},
@@ -593,6 +594,8 @@ var infoForAgents = []InfoNextStep{
 	{Command: "sparkwing info --json", Purpose: "machine-readable copy of this card (alias: -o json)"},
 	{Command: "sparkwing info --for-agent", Purpose: "paste-ready block for CLAUDE.md / AGENTS.md"},
 	{Command: "sparkwing pipeline list --json", Purpose: "this repo's pipelines as JSON"},
+	{Command: "sparkwing pipeline templates -o json", Purpose: "curated starter templates (filter --category/--cloud, detail --name --body)"},
+	{Command: "sparkwing pipeline sparks vendor --module <name>", Purpose: "eject a spark library's source into your repo to own and edit it"},
 	{Command: "sparkwing <verb> --help --json", Purpose: "any verb's spec as JSON"},
 }
 

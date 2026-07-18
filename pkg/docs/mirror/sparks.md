@@ -326,6 +326,9 @@ and the overlay. What each subcommand does:
 - **add** / **remove** -- add or remove a library entry in the `sparks:` block.
 - **warmup** -- pre-compile pipeline binaries across consumer repos after a
   release (see [Warmup](#warmup) below).
+- **vendor** -- eject a spark module's source into your repo so you can own
+  and edit it (see [Vendoring a spark module](#vendoring-a-spark-module)
+  below).
 
 For the exact flags each subcommand takes, see
 [cli-reference.md](cli-reference.md).
@@ -352,6 +355,98 @@ for repo in repo-a repo-b repo-c; do
     cd ~/code/$repo && sparkwing pipeline sparks warmup
 done
 ```
+
+### Vendoring a spark module
+
+Most of the time you consume a spark library by importing it and letting
+the overlay pin its version. Sometimes you want the opposite: to take a
+module's source into your own repo, edit it freely, and stop tracking
+upstream. `sparkwing pipeline sparks vendor` does that ejection.
+
+```bash
+# eject the sparks-core templates module
+sparkwing pipeline sparks vendor --module templates
+
+# eject any other spark library by full module path
+sparkwing pipeline sparks vendor --module github.com/example/my-sparks
+```
+
+A bare `--module` name resolves to a sparks-core block module
+(`templates` -> `github.com/sparkwing-dev/sparks-core/templates`); a value
+containing a slash is treated as a complete module path.
+
+What it does:
+
+1. Reads the module's version from `.sparkwing/go.mod`'s `require` list
+   (falling back to `latest` when the module is not yet required) and runs
+   `go mod download` to locate it in the module cache.
+2. Copies the module source (everything except a top-level `vendor/`) into
+   `.sparkwing/sparks/<name>/` and makes the copied tree writable -- module
+   cache files are read-only, so this step is what makes the code editable.
+3. Adds a `replace <module> => ./sparks/<name>` directive to
+   `.sparkwing/go.mod` and runs `go mod tidy`.
+
+Because the build now resolves the module through the `replace` directive
+pointing at your local copy, **your import paths do not change** and the
+module's transitive dependencies keep resolving normally. Nothing in your
+pipeline code needs editing -- the same imports now compile against source
+you own.
+
+The command refuses to overwrite an existing
+`.sparkwing/sparks/<name>/` directory. To undo a vendor: delete that
+directory and remove the `replace` directive from `.sparkwing/go.mod`.
+
+Unlike the overlay resolver, vendoring **deliberately edits the
+git-tracked `.sparkwing/go.mod`** (it adds the `replace`). That is the
+whole point -- you are opting out of upstream version tracking for this
+module and committing the source into your repo. Commit
+`.sparkwing/sparks/<name>/` and the `replace` line together.
+
+## The template catalog
+
+Templates are curated, parameterized pipeline starters shipped as the
+`templates` block module of sparks-core. They are the richer counterpart
+to the two stubs built into the CLI (`minimal`, `build-test-deploy`):
+real-world shapes like static-site deploys, containerized deploys to
+Kubernetes, migrate+deploy flows, and CI-hygiene gates.
+
+Browse and inspect them with `sparkwing pipeline templates`:
+
+```bash
+# list every template with its "when to use" signal and parameters
+sparkwing pipeline templates
+
+# narrow the list
+sparkwing pipeline templates --cloud aws
+sparkwing pipeline templates --category ci-hygiene
+
+# full detail for one template: description, parameters table,
+# applicability, and its README
+sparkwing pipeline templates --name lint-test-go
+
+# ... plus the pipeline body rendered with default / <placeholder> params
+sparkwing pipeline templates --name lint-test-go --body
+```
+
+Filters are advisory metadata on each template. A template that declares
+no cloud is cloud-agnostic and always passes a `--cloud` filter; a
+`--category` filter matches templates that declare that exact category.
+Every view has an `-o json` form for agent consumption -- the list emits
+the manifests, and a `--name` detail view emits the manifest, README, and
+(with `--body`) the rendered body.
+
+Once you have picked one, scaffold it into your repo:
+
+```bash
+sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s \
+  --param image=myapp --param namespace=myapp --param app-name=myapp \
+  --param health-url=http://myapp.myapp.svc:8080/health
+```
+
+The scaffolder renders the template body into `.sparkwing/jobs/<name>.go`,
+wires the `sparkwing.yaml` entry, and prints any prerequisite the template
+declares. To own and modify the template registry itself, vendor it (see
+[Vendoring a spark module](#vendoring-a-spark-module)).
 
 ## Authoring a sparks library
 
@@ -392,10 +487,14 @@ Explicit scope limits, baked in to avoid drift:
 - **No auto-discovery.** Consumers explicitly list every sparks library they
   use in the `sparks:` block. There is no classpath scan, no `go.mod` walk to
   detect libraries by manifest presence, no implicit enrollment.
-- **No modification of git-tracked files.** `go.mod`, `go.sum`, and the rest
-  of the repo stay pristine after any `sparkwing pipeline sparks *` or `sparkwing` run.
-  Generated files live under `.sparkwing/` with names starting `.resolved.`
-  and are gitignored.
+- **No modification of git-tracked files during resolution.** Version
+  resolution, the overlay, and every `sparkwing` run leave `go.mod`,
+  `go.sum`, and the rest of the repo pristine. Generated files live under
+  `.sparkwing/` with names starting `.resolved.` and are gitignored. The
+  one deliberate exception is `sparkwing pipeline sparks vendor`, which you
+  invoke explicitly to eject a module's source and which does edit the
+  git-tracked `.sparkwing/go.mod` (see
+  [Vendoring a spark module](#vendoring-a-spark-module)).
 - **No cross-module locking.** Each consumer resolves independently. There
   is no workspace-level lock that spans multiple consumer repos.
 

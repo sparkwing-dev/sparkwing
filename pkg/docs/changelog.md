@@ -47,6 +47,33 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **cli:** `sparkwing pipeline templates` gains `--category` and `--cloud`
+  filters and a `--name <template>` detail view (description, when-to-use,
+  prerequisite, a parameters table, applicability, and the template
+  README). `--body` additionally renders the pipeline body using parameter
+  defaults, with `<placeholder>` values for required params. All views
+  support `-o json`.
+- **cli:** `sparkwing pipeline sparks vendor --module <name>` ejects a
+  spark block module's source into `.sparkwing/sparks/<name>/`, makes it
+  writable, and adds a `replace <module> => ./sparks/<name>` directive to
+  `.sparkwing/go.mod` so imports stay unchanged while the code becomes
+  yours to edit. A bare name resolves to a sparks-core block; a full
+  module path is accepted as-is.
+
+### Docs
+
+- **docs:** Document the template catalog workflow and the spark-module
+  vendoring flow in the sparks reference, with pointers from
+  getting-started.
+
+## [v0.17.25] - 2026-07-16
+### Fixed
+
+- **cluster:** Trigger workers now keep claiming work while earlier trigger
+  handlers run, so nested `RunAndAwait` child triggers are not stranded behind
+  their waiting parent.
 
 ## [v0.17.24] - 2026-07-16
 ### Fixed

@@ -2495,6 +2495,7 @@ sparks.yaml shape, resolution rules, warmup).
 - `add` -- Add a library to sparks.yaml
 - `remove` -- Remove a library from sparks.yaml
 - `warmup` -- Pre-compile pipeline binaries and upload to gitcache
+- `vendor` -- Eject a spark module's source into the repo to own and edit it
 
 ### Examples
 
@@ -2673,6 +2674,47 @@ sparkwing pipeline sparks update
 sparkwing pipeline sparks update --name sparks-core
 ```
 
+## `sparkwing pipeline sparks vendor`
+
+Eject a spark module's source into the repo so you can own and edit it
+
+Copies a spark block module's source out of the Go module
+cache and into .sparkwing/sparks/<name>/, then adds a
+'replace <module> => ./sparks/<name>' directive to
+.sparkwing/go.mod and runs 'go mod tidy'.
+
+--module takes a sparks-core block name (e.g. 'templates',
+which resolves to github.com/sparkwing-dev/sparks-core/templates)
+or a full module path for any other spark library.
+
+The version is read from .sparkwing/go.mod's require list, or
+'latest' when the module is not yet required.
+
+Because the replace directive points at the copied tree, your
+import paths do not change and transitive dependencies keep
+resolving -- the code is simply yours now, editable in place.
+The command refuses to overwrite an existing destination. To
+undo, delete .sparkwing/sparks/<name>/ and drop the replace
+directive.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--module NAME` | Sparks-core block name (e.g. templates) or a full module path (required) |
+| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
+| `-o, --output FMT` | Output format: pretty\|json |
+
+### Examples
+
+```sh
+# Vendor the sparks-core templates module
+sparkwing pipeline sparks vendor --module templates
+
+# Vendor a full module path
+sparkwing pipeline sparks vendor --module github.com/example/my-sparks
+```
+
 ## `sparkwing pipeline sparks warmup`
 
 Pre-compile pipeline binaries after a sparks release
@@ -2719,13 +2761,30 @@ build-test-deploy) that ship in the CLI itself: the registry
 templates are richer, real-world shapes (build-test-deploy to
 k8s, static-site, migrate+deploy, ...).
 
--o json emits the manifests (name, description, whenToUse,
-parameters, applicability) -- prefer it for agent consumption.
+--category and --cloud narrow the list. A cloud-agnostic
+template (one that declares no cloud) always passes a --cloud
+filter.
+
+--name switches to a full detail view for one template:
+description, when-to-use, prerequisite, a parameters table
+(name / type / required / default / description), applicability,
+and the template's README. Add --body to also print the
+pipeline body rendered with each parameter's default, using
+<param> placeholders for required parameters that have no
+default.
+
+-o json emits the manifests for the list, or the manifest +
+README (+ rendered body with --body) for a detail view --
+prefer it for agent consumption.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
+| `--name TEMPLATE` | Show full detail for one template instead of the list |
+| `--body` | With --name, also print the rendered pipeline body (default + <placeholder> params) |
+| `--category CATEGORY` | Filter the list by applicability category |
+| `--cloud CLOUD` | Filter the list by cloud (aws \| gcp); cloud-agnostic templates always match |
 | `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
 
 ### Examples
@@ -2733,6 +2792,18 @@ parameters, applicability) -- prefer it for agent consumption.
 ```sh
 # Browse the registry
 sparkwing pipeline templates
+
+# Only AWS templates
+sparkwing pipeline templates --cloud aws
+
+# Only CI-hygiene templates
+sparkwing pipeline templates --category ci-hygiene
+
+# Full detail for one template
+sparkwing pipeline templates --name lint-test-go
+
+# Detail plus the rendered body
+sparkwing pipeline templates --name lint-test-go --body
 
 # Agent-readable manifests
 sparkwing pipeline templates -o json
