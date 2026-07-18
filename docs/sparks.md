@@ -25,11 +25,11 @@ The split is deliberate and stable.
 primitives.
 
 - Docker: `Build`, `BuildAndPush`, `Push`, `Login`, `ComputeTags`
-- Git: `ShortCommit`, `IsDirty`, `FilesetHash`, `CurrentBranch`, `Tags`, `PushTag`
+- Git: `ShortCommit`, `IsDirty`, `FilesetHash`, `CurrentBranch`, `TagsAtHead`, `PushTag`
 - Services: `WithServices` (docker-run backed sidecars)
 - Approval gates: `JobApproval` with `ApprovalConfig` (`ApprovalApprove` /
   `ApprovalDeny` / `ApprovalFail` expiry policies)
-- Plan / modifiers: `ExpandFrom`, `CacheKey`, `Requires`, `AwaitPipelineJob`,
+- Plan / modifiers: `CacheKey`, `Requires`, `RunAndAwait`,
   typed `Ref[T]` outputs
 
 **In a sparks library:** anything with deep opinions on specific tooling.
@@ -52,7 +52,7 @@ valid JSON with the following fields.
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `name` | string | yes | Short library name. Must be unique in a consumer's `sparks:` block. Conventionally matches the last path segment of the module (e.g. `sparks-core` for `github.com/sparkwing-dev/sparks-core`). |
-| `description` | string | yes | One-sentence summary. Shown in `sparkwing pipeline sparks list` and registry tooling. |
+| `description` | string | yes | One-sentence summary. Used by registry and discovery tooling. |
 | `author` | string | yes | GitHub handle, org, or author name. Used only for display. |
 | `version` | string | no | Current library version, semver with `v` prefix (e.g. `v0.4.6`). When absent, the resolver uses the latest Go module tag as truth. Kept in `spark.json` mostly for local inspection; the Go module tag is authoritative. |
 | `sdk_min_version` | string | no | Minimum compatible sparkwing SDK version (semver with `v` prefix). The resolver warns when a consumer's SDK is older. Omit during pre-1.0 churn. |
@@ -118,7 +118,7 @@ Per-entry fields:
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `name` | string | yes | Must match the library's declared `name` in its `spark.json`. |
+| `name` | string | no | Advisory display label. When set it should match the library's declared `name` in its `spark.json`. Only `source` and `version` are enforced; a missing `name` is accepted. |
 | `source` | string | yes | Go module path. Private modules need GOPRIVATE + netrc/SSH configured as usual. |
 | `version` | string | yes | `latest`, an exact tag (`v0.10.3`), or a semver range (`^v0.10.0`, `~v0.10.3`). Range syntax follows standard semver (caret: same major, tilde: same minor). |
 
@@ -184,15 +184,14 @@ On every `sparkwing run <pipeline>` run (and on explicit `sparkwing pipeline spa
    - exact tag: no network call, used as-is
    - range: module-proxy call to list tags, pick highest that matches
    - `latest`: module-proxy call for newest non-prerelease tag
-3. Compare resolution against the current `go.mod` require lines. If every
-   resolved version already matches what is in `go.mod`, take the fast path -
-   no overlay is written, compile as normal.
-4. Otherwise materialize an overlay modfile at `.sparkwing/.resolved.mod`
+3. Materialize an overlay modfile at `.sparkwing/.resolved.mod`
    (gitignored). It is a copy of the user's `go.mod` with `require` lines
-   for drifted sparks libraries rewritten to the resolved versions.
-5. Run `go mod download -modfile=.sparkwing/.resolved.mod` to populate
+   for drifted sparks libraries rewritten to the resolved versions. If the
+   freshly built overlay is byte-identical to the one already on disk it is
+   left untouched (the fast path); otherwise it is rewritten.
+4. Run `go mod download -modfile=.sparkwing/.resolved.mod` to populate
    `.sparkwing/.resolved.sum`.
-6. Compile the pipeline with
+5. Compile the pipeline with
    `go build -modfile=.sparkwing/.resolved.mod ...`.
 
 The git-tracked `go.mod` and `go.sum` remain pristine; `git status` after a
@@ -201,11 +200,13 @@ behavior identical to plain Go builds.
 
 ### Fast-path skip
 
-When the resolved versions match `go.mod` exactly (including for `latest`
-entries where the module proxy returns the same tag already pinned), no
-overlay is generated and no overlay-driven `go build` indirection happens.
-This keeps the common case - exact pins, or a `latest` that has not moved -
-zero-cost beyond the proxy lookup itself.
+Whenever the `sparks:` block is non-empty the overlay is materialized and
+compile builds with `-modfile`. The fast path is not skipping the overlay,
+it is skipping the *rewrite*: when a freshly resolved overlay is
+byte-identical to the one already on disk (exact pins, or a `latest` that
+has not moved), the existing `.resolved.mod` / `.resolved.sum` are reused
+untouched and the build proceeds against them. The only cost beyond
+compilation is the proxy lookup itself.
 
 ### `latest` resolution
 
@@ -222,12 +223,14 @@ nothing.
 ### GOPROXY and GOPRIVATE
 
 Both `latest` and semver-range resolution go through `proxy.golang.org` by
-default. Modules whose path matches `GOPRIVATE` (or `GONOPROXY`) bypass the
-proxy; for those, sparkwing resolves tags by invoking `go list -m -json
-<module>@<query>`, which walks the git remote directly using the user's
-configured auth. Set `GOPROXY=direct` to force direct resolution for everything. No
-separate sparkwing auth flow exists - if `go get` works, sparks resolution
-works.
+default. Modules whose path matches `GOPRIVATE` bypass the proxy; for those,
+sparkwing resolves tags by invoking `go list -m -json <module>@<query>`,
+which walks the git remote directly using the user's configured auth. Only
+`GOPRIVATE` triggers this direct path -- `GONOPROXY` is not consulted, and a
+bare `GOPROXY=direct` (or `off`) entry is dropped, so resolution falls back
+to `proxy.golang.org` rather than going VCS-direct for everything. No
+separate sparkwing auth flow exists - if `go get` works for a `GOPRIVATE`
+module, sparks resolution works.
 
 ### Offline work: `--sw-no-update`
 
@@ -282,10 +285,11 @@ pinning is suspended for the duration. The pre-push gate refuses to
 push a committed `go.work` or `go.work.sum`, so this stays a local-only
 convenience -- shipped builds always go through the overlay.
 
-`sparkwing pipeline sparks resolve` itself refuses to run while a workspace is
-in scope (the same toolchain limitation applies to `go mod download
--modfile=X`). Remove the workspace file or set `GOWORK=off` in your
-shell to refresh pins.
+`sparkwing pipeline sparks resolve` still runs while a workspace is in
+scope: it writes `.resolved.mod` as usual but skips materializing
+`.resolved.sum` (the toolchain refuses `go mod download -modfile=X` under
+`go.work`), printing a one-line notice. Remove the workspace file or set
+`GOWORK=off` in your shell to also refresh the sum.
 
 ## Cache tiers
 
@@ -321,8 +325,10 @@ and the overlay. What each subcommand does:
 - **resolve** -- resolve versions per the `sparks:` block and materialize the
   overlay modfile at `.sparkwing/.resolved.mod` + `.resolved.sum`. Idempotent,
   cheap when nothing has drifted, and never touches git-tracked `go.mod`.
-- **update** -- bump one or all libraries to the latest version within their
-  declared range. Edits the `sparks:` block only.
+- **update** -- re-resolve one or all libraries against the module proxy and
+  re-materialize the overlay modfile (`.resolved.mod` / `.resolved.sum`).
+  For a range or `latest` constraint this picks up any newer tag; for an
+  exact pin it is a no-op. Does not edit the `sparks:` block.
 - **add** / **remove** -- add or remove a library entry in the `sparks:` block.
 - **warmup** -- pre-compile pipeline binaries across consumer repos after a
   release (see [Warmup](#warmup) below).

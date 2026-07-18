@@ -47,21 +47,26 @@ both admin / inspection (`sparkwing dashboard start`,
 
 ### Windows
 
-No prebuilt Windows binary yet. The CLI does build cleanly from
-source on Windows; install [Git for Windows](https://git-scm.com/download/win)
-(needed at runtime: pipelines call out to `sparkwing.Bash` / `sparkwing.Exec`)
-plus a Go toolchain, then in a Git Bash terminal:
+Prebuilt Windows binaries are published to GitHub Releases:
+`sparkwing-windows-amd64.exe` and `sparkwing-windows-arm64.exe`. They
+embed the dashboard bundle, so `sparkwing dashboard start` runs locally
+just as it does on macOS/Linux. Download the one for your architecture,
+rename it to `sparkwing.exe`, and put it on PATH. Install
+[Git for Windows](https://git-scm.com/download/win) as well -- pipelines
+call out to `sparkwing.Bash` / `sparkwing.Exec` at runtime.
+
+To build from source instead, with a Go toolchain on PATH, in a Git Bash
+terminal:
 
 ```bash
 go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest
 ```
 
-A source build like this does not include the Next.js dashboard
-bundle, so `sparkwing dashboard start` will refuse to run on a
-Windows source-built CLI. Windows users typically point at a remote
-dashboard (a Linux/macOS host running `sparkwing dashboard start`,
-or the cluster-mode `sparkwing-web` container) and use the local
-`sparkwing` binary for `run`, `pipeline`, and `runs` commands only.
+A source build does not include the Next.js dashboard bundle (it is a
+generated artifact, not checked into the repository), so
+`sparkwing dashboard start` on a source-built CLI refuses to start unless
+you run `bash bin/build-web.sh` from a repo checkout first. The prebuilt
+release binary has no such limitation.
 
 The cluster-mode runner Service (`sparkwing-runner`) is Linux/macOS
 only; Windows users dispatch pipelines to remote Linux/macOS runners
@@ -142,8 +147,9 @@ and the cluster has no default StorageClass.
 .sparkwing/
   sparkwing.yaml    # registry of every pipeline this repo defines
   main.go           # registers Go jobs
+  README.md         # generated package README
   go.mod            # Go module for pipeline code
-  go.sum            # dependency checksums
+  go.sum            # dependency checksums (from go mod tidy)
   jobs/             # pipeline implementations
 ```
 
@@ -238,12 +244,18 @@ Sparkwing tags itself via the in-repo `release` pipeline (no consumer
 repo involvement). From the sparkwing checkout:
 
 ```bash
-sparkwing run release                          # auto-bump from latest tag (default --bump minor),
-                                      #   or pick the top unreleased CHANGELOG entry
-sparkwing run release --bump patch             # auto-bump patch instead
-sparkwing run release --version v0.55.0        # explicit version
-sparkwing run release --dry-run                # full validation chain, skip tag+push
+# preview: full validation chain, stop before tag+push (no allowance needed)
+sparkwing run release --sw-dry-run
+
+# real release -- push-tag is risk-gated, so --sw-allow is required:
+sparkwing run release --sw-allow destructive,prod                    # auto-bump (default --bump minor) or top unreleased CHANGELOG entry
+sparkwing run release --bump patch --sw-allow destructive,prod       # auto-bump patch instead
+sparkwing run release --version v0.55.0 --sw-allow destructive,prod  # explicit version
 ```
+
+The `push-tag` step declares `destructive` and `prod` risk labels, so an
+actual tag+push requires `--sw-allow destructive,prod`; `--sw-dry-run` runs
+every gate but stops before tagging and needs no allowance.
 
 The pipeline runs validation gates before tagging, including:
 

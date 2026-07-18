@@ -65,7 +65,8 @@ checks.GoTestShort(ctx, "./api/...") // multi-module
 Docker build, push, and ECR helpers.
 
 `BuildAndPush` builds an image and pushes it to one or more registries,
-handling ECR login and repository creation automatically. Its `Tags`
+handling ECR login automatically (the target ECR repository must already
+exist; a push to a missing repo fails). Its `Tags`
 field takes a `docker.ImageTag` value from the **SDK** (`sparkwing/docker`,
 via `docker.ComputeTags`) -- see [sdk-reference.md](sdk-reference.md) for
 how content-addressed tags are derived. sparks-core itself does not
