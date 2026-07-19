@@ -88,7 +88,7 @@ func TestBumpFallbackSDKVersionFile(t *testing.T) {
 			if readErr != nil {
 				t.Fatal(readErr)
 			}
-			if !strings.Contains(string(got), c.wantResult) {
+			if string(got) != c.wantResult {
 				t.Errorf("version.go content = %q, want %q", string(got), c.wantResult)
 			}
 		})
