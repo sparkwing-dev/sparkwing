@@ -458,7 +458,7 @@ func bumpFallbackSDKVersionFile(repoRoot, version string) error {
 	if !re.Match(data) {
 		return fmt.Errorf("FallbackSDKVersion pattern not found in %s", path)
 	}
-	updated := re.ReplaceAll(data, []byte(`FallbackSDKVersion = "`+version+`"`))
+	updated := re.ReplaceAllLiteral(data, []byte(`FallbackSDKVersion = "`+version+`"`))
 	return os.WriteFile(path, updated, 0o644)
 }
 
