@@ -180,6 +180,52 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 	})
 }
 
+func TestAutoBumpSparkwingPinIfStale_RollsBackVersionFileOnPartialFailure(t *testing.T) {
+	dir := t.TempDir()
+
+	mustGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	mustGit("init")
+	mustGit("config", "user.email", "test@example.com")
+	mustGit("config", "user.name", "Test")
+	placeholder := filepath.Join(dir, ".keep")
+	if err := os.WriteFile(placeholder, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit("add", ".keep")
+	mustGit("commit", "-m", "init")
+	mustGit("tag", "v0.99.0")
+
+	scaffoldDir := filepath.Join(dir, "pkg", "scaffold")
+	if err := os.MkdirAll(scaffoldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	versionFile := filepath.Join(scaffoldDir, "version.go")
+	original := `const FallbackSDKVersion = "v0.18.0"` + "\n"
+	if err := os.WriteFile(versionFile, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := autoBumpSparkwingPinIfStale(context.Background(), dir)
+	if err == nil {
+		t.Fatal("autoBumpSparkwingPinIfStale() returned nil, want error")
+	}
+
+	got, readErr := os.ReadFile(versionFile)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != original {
+		t.Errorf("version.go after partial failure = %q, want original %q (rollback failed)", string(got), original)
+	}
+}
+
 func TestShouldCheckLocalReplaceFreshness(t *testing.T) {
 	repoRoot := t.TempDir()
 	cases := []struct {

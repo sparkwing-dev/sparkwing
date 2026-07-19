@@ -422,7 +422,7 @@ func captureCmd(ctx context.Context, dir, name string, args ...string) (string, 
 // the triggering push. Returns ("", nil) when already current, or
 // (bumpedVersion, nil) on a successful bump. Only the sparkwing self-pin
 // is touched; other watched modules are left for the freshness check.
-func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (string, error) {
+func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string, retErr error) {
 	latest, err := latestReleasedTag(ctx, repoRoot, majorCapFor(sdkModulePath))
 	if err != nil {
 		return "", fmt.Errorf("resolve latest sparkwing release: %w", err)
@@ -430,6 +430,18 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (string, 
 	if semver.Compare(scaffold.FallbackSDKVersion, latest) >= 0 {
 		return "", nil
 	}
+
+	versionFilePath := filepath.Join(repoRoot, "pkg", "scaffold", "version.go")
+	original, err := os.ReadFile(versionFilePath)
+	if err != nil {
+		return "", fmt.Errorf("read version.go for rollback: %w", err)
+	}
+	defer func() {
+		if retErr != nil {
+			_ = os.WriteFile(versionFilePath, original, 0o644)
+		}
+	}()
+
 	if err := bumpFallbackSDKVersionFile(repoRoot, latest); err != nil {
 		return "", fmt.Errorf("bump FallbackSDKVersion: %w", err)
 	}
