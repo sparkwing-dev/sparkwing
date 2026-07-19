@@ -1,6 +1,13 @@
 package jobs
 
-import "testing"
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestScaffoldFallbackProblem(t *testing.T) {
 	cases := []struct {
@@ -26,6 +33,196 @@ func TestScaffoldFallbackProblem(t *testing.T) {
 				t.Errorf("scaffoldFallbackProblem(%q, %q) reported no problem, want one", c.pinned, c.latest)
 			}
 		})
+	}
+}
+
+func TestBumpFallbackSDKVersionFile(t *testing.T) {
+	cases := []struct {
+		name       string
+		src        string
+		version    string
+		wantErr    bool
+		wantResult string
+	}{
+		{
+			name:       "bumps current version to newer",
+			src:        `const FallbackSDKVersion = "v0.18.0"` + "\n",
+			version:    "v0.19.0",
+			wantResult: `const FallbackSDKVersion = "v0.19.0"` + "\n",
+		},
+		{
+			name:       "bumps to same version (idempotent)",
+			src:        `const FallbackSDKVersion = "v0.19.0"` + "\n",
+			version:    "v0.19.0",
+			wantResult: `const FallbackSDKVersion = "v0.19.0"` + "\n",
+		},
+		{
+			name:    "missing pattern returns error",
+			src:     "package scaffold\n",
+			version: "v0.19.0",
+			wantErr: true,
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			scaffoldDir := filepath.Join(dir, "pkg", "scaffold")
+			if err := os.MkdirAll(scaffoldDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(scaffoldDir, "version.go")
+			if err := os.WriteFile(path, []byte(c.src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			err := bumpFallbackSDKVersionFile(dir, c.version)
+			if c.wantErr {
+				if err == nil {
+					t.Error("bumpFallbackSDKVersionFile() returned nil, want error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("bumpFallbackSDKVersionFile() error: %v", err)
+			}
+			got, readErr := os.ReadFile(path)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if string(got) != c.wantResult {
+				t.Errorf("version.go content = %q, want %q", string(got), c.wantResult)
+			}
+		})
+	}
+}
+
+func TestCommitSparkwingPinBump(t *testing.T) {
+	mustGit := func(t *testing.T, dir string, args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	initRepo := func(t *testing.T) string {
+		t.Helper()
+		dir := t.TempDir()
+		mustGit(t, dir, "init")
+		mustGit(t, dir, "config", "user.email", "test@example.com")
+		mustGit(t, dir, "config", "user.name", "Test")
+		return dir
+	}
+
+	createBumpFiles := func(t *testing.T, dir string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Join(dir, "pkg", "scaffold"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, ".sparkwing"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		for path, content := range map[string]string{
+			filepath.Join("pkg", "scaffold", "version.go"): "v0.19.0",
+			filepath.Join(".sparkwing", "go.mod"):           "module test",
+			filepath.Join(".sparkwing", "go.sum"):           "",
+		} {
+			if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	t.Run("creates commit with correct message and staged files", func(t *testing.T) {
+		dir := initRepo(t)
+		createBumpFiles(t, dir)
+
+		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err != nil {
+			t.Fatalf("commitSparkwingPinBump() error: %v", err)
+		}
+
+		subject, err := captureGit(context.Background(), dir, "log", "--format=%s", "-1")
+		if err != nil {
+			t.Fatalf("git log: %v", err)
+		}
+		if got := strings.TrimSpace(subject); got != "chore: bump sparkwing pin to v0.19.0" {
+			t.Errorf("commit subject = %q, want %q", got, "chore: bump sparkwing pin to v0.19.0")
+		}
+
+		filesOut, err := captureGit(context.Background(), dir, "show", "--name-only", "--format=", "HEAD")
+		if err != nil {
+			t.Fatalf("git show: %v", err)
+		}
+		for _, f := range []string{"pkg/scaffold/version.go", ".sparkwing/go.mod", ".sparkwing/go.sum"} {
+			if !strings.Contains(filesOut, f) {
+				t.Errorf("committed files: %q not found in output %q", f, filesOut)
+			}
+		}
+	})
+
+	t.Run("returns error when staged paths do not exist", func(t *testing.T) {
+		dir := initRepo(t)
+
+		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err == nil {
+			t.Error("commitSparkwingPinBump() returned nil, want error")
+		}
+	})
+
+	t.Run("returns error when nothing is staged for commit", func(t *testing.T) {
+		dir := initRepo(t)
+		createBumpFiles(t, dir)
+
+		mustGit(t, dir, "add", "--", "pkg/scaffold/version.go", ".sparkwing/go.mod", ".sparkwing/go.sum")
+		mustGit(t, dir, "commit", "-m", "initial")
+
+		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err == nil {
+			t.Error("commitSparkwingPinBump() returned nil, want error when nothing to commit")
+		}
+	})
+}
+
+func TestAutoBumpSparkwingPinIfStale_RollsBackVersionFileOnPartialFailure(t *testing.T) {
+	dir := t.TempDir()
+
+	mustGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	mustGit("init")
+	mustGit("config", "user.email", "test@example.com")
+	mustGit("config", "user.name", "Test")
+	placeholder := filepath.Join(dir, ".keep")
+	if err := os.WriteFile(placeholder, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit("add", ".keep")
+	mustGit("commit", "-m", "init")
+	mustGit("tag", "v0.99.0")
+
+	scaffoldDir := filepath.Join(dir, "pkg", "scaffold")
+	if err := os.MkdirAll(scaffoldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	versionFile := filepath.Join(scaffoldDir, "version.go")
+	original := `const FallbackSDKVersion = "v0.18.0"` + "\n"
+	if err := os.WriteFile(versionFile, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := autoBumpSparkwingPinIfStale(context.Background(), dir)
+	if err == nil {
+		t.Fatal("autoBumpSparkwingPinIfStale() returned nil, want error")
+	}
+
+	got, readErr := os.ReadFile(versionFile)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if string(got) != original {
+		t.Errorf("version.go after partial failure = %q, want original %q (rollback failed)", string(got), original)
 	}
 }
 
