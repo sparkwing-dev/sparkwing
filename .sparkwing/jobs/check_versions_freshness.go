@@ -1,11 +1,13 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"golang.org/x/mod/modfile"
@@ -410,4 +412,69 @@ func captureCmd(ctx context.Context, dir, name string, args ...string) (string, 
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	return string(out), err
+}
+
+// autoBumpSparkwingPinIfStale detects whether the scaffold fallback pin
+// (pkg/scaffold/version.go:FallbackSDKVersion) is behind the latest
+// released sparkwing tag. When it is, it bumps FallbackSDKVersion, the
+// .sparkwing/go.mod require-version placeholder, and .sparkwing/go.sum
+// (via go mod tidy), then commits all three so the bump rides along with
+// the triggering push. Returns ("", nil) when already current, or
+// (bumpedVersion, nil) on a successful bump. Only the sparkwing self-pin
+// is touched; other watched modules are left for the freshness check.
+func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (string, error) {
+	latest, err := latestReleasedTag(ctx, repoRoot, majorCapFor(sdkModulePath))
+	if err != nil {
+		return "", fmt.Errorf("resolve latest sparkwing release: %w", err)
+	}
+	if semver.Compare(scaffold.FallbackSDKVersion, latest) >= 0 {
+		return "", nil
+	}
+	if err := bumpFallbackSDKVersionFile(repoRoot, latest); err != nil {
+		return "", fmt.Errorf("bump FallbackSDKVersion: %w", err)
+	}
+	if _, err := captureCmd(ctx, repoRoot, "go", "-C", ".sparkwing", "mod", "edit",
+		"-require", sdkModulePath+"@"+latest); err != nil {
+		return "", fmt.Errorf("go mod edit .sparkwing/go.mod: %w", err)
+	}
+	if _, err := captureCmd(ctx, repoRoot, "go", "-C", ".sparkwing", "mod", "tidy"); err != nil {
+		return "", fmt.Errorf("go mod tidy .sparkwing: %w", err)
+	}
+	if err := commitSparkwingPinBump(ctx, repoRoot, latest); err != nil {
+		return "", fmt.Errorf("commit sparkwing pin bump: %w", err)
+	}
+	return latest, nil
+}
+
+// bumpFallbackSDKVersionFile rewrites the FallbackSDKVersion assignment
+// in pkg/scaffold/version.go to the given semver string.
+func bumpFallbackSDKVersionFile(repoRoot, version string) error {
+	path := filepath.Join(repoRoot, "pkg", "scaffold", "version.go")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	re := regexp.MustCompile(`FallbackSDKVersion = "v[^"]*"`)
+	if !re.Match(data) {
+		return fmt.Errorf("FallbackSDKVersion pattern not found in %s", path)
+	}
+	updated := re.ReplaceAll(data, []byte(`FallbackSDKVersion = "`+version+`"`))
+	return os.WriteFile(path, updated, 0o644)
+}
+
+// commitSparkwingPinBump stages the auto-bump artefacts and commits them.
+func commitSparkwingPinBump(ctx context.Context, repoRoot, version string) error {
+	addArgs := []string{"-C", repoRoot, "add", "--",
+		"pkg/scaffold/version.go",
+		".sparkwing/go.mod",
+		".sparkwing/go.sum",
+	}
+	if out, err := exec.CommandContext(ctx, "git", addArgs...).CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %w\n%s", err, bytes.TrimSpace(out))
+	}
+	msg := "chore: bump sparkwing pin to " + version
+	if out, err := exec.CommandContext(ctx, "git", "-C", repoRoot, "commit", "-m", msg).CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit: %w\n%s", err, bytes.TrimSpace(out))
+	}
+	return nil
 }

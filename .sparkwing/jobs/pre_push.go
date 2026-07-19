@@ -85,6 +85,12 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "go mod tidy: no drift")
 	}
 
+	if bumpedTo, err := autoBumpSparkwingPinIfStale(ctx, sparkwing.WorkDir()); err != nil {
+		failures = append(failures, fmt.Sprintf("auto-bump sparkwing pin: %v", err))
+	} else if bumpedTo != "" {
+		sparkwing.Info(ctx, "sparkwing pin: auto-bumped to %s (commit added to push)", bumpedTo)
+	}
+
 	versionOptions := VersionFreshnessOptions{
 		AllowReleaseLineSelfReplace: p.AllowReleaseLineSelfReplace,
 	}
