@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.20.0] - 2026-07-21
 ### Fixed
 
 - **admission:** a persisted ledger the daemon cannot restore no longer
