@@ -837,6 +837,45 @@ func TestResizeTotals_GrowAdmitsSecondRunAgainstRealBudget(t *testing.T) {
 	}
 }
 
+// TestResizeTotals_SoftOvercommitSurvivesShrink covers a field incident:
+// soft-core grants may legally overcommit the core total (the ledger
+// invariant permits it), and a daemon restart persists that state. The
+// restore-time resize must accept it, same as the invariant does, or the
+// state file wedges the daemon at startup.
+func TestResizeTotals_SoftOvercommitSurvivesShrink(t *testing.T) {
+	l := testLedger(t, 14, 4<<30)
+	a := mustGrant(t, l, Request{ID: "a", Cores: 11.2, SoftCores: true})
+	b := mustGrant(t, l, Request{ID: "b", Cores: 11.2, SoftCores: true})
+
+	if err := l.ResizeTotals(14, 4<<30); err != nil {
+		t.Fatalf("ResizeTotals same totals under soft overcommit: %v", err)
+	}
+	if err := l.ResizeTotals(10, 4<<30); err != nil {
+		t.Fatalf("ResizeTotals shrink under soft overcommit: %v", err)
+	}
+	for _, id := range []LeaseID{a.ID, b.ID} {
+		if _, ok := l.LeaseByID(id); !ok {
+			t.Fatalf("lease %s lost across resize", id)
+		}
+	}
+}
+
+func TestResizeTotals_HardOvercommitStillRejected(t *testing.T) {
+	l := testLedger(t, 4, 2048)
+	mustGrant(t, l, Request{ID: "holder", Cores: 3})
+	if err := l.ResizeTotals(2, 2048); !errors.Is(err, ErrInvalidResize) {
+		t.Fatalf("ResizeTotals under hard overcommit = %v, want %v", err, ErrInvalidResize)
+	}
+}
+
+func TestResizeTotals_MemoryOvercommitRejectedEvenWithSoftCores(t *testing.T) {
+	l := testLedger(t, 4, 2048)
+	mustGrant(t, l, Request{ID: "holder", Cores: 1, MemoryBytes: 512, SoftCores: true})
+	if err := l.ResizeTotals(4, 256); !errors.Is(err, ErrInvalidResize) {
+		t.Fatalf("ResizeTotals under memory overcommit = %v, want %v", err, ErrInvalidResize)
+	}
+}
+
 func TestSetHeadroom_RejectsInvalidValues(t *testing.T) {
 	l := testLedger(t, 4, 0)
 	for _, cores := range []float64{-1, math.NaN(), math.Inf(1)} {

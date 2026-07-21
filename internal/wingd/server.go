@@ -241,7 +241,8 @@ func (d *Daemon) finalShutdown() {
 func (d *Daemon) initLedger() error {
 	snap, events, err := readState(d.layout.state)
 	if err != nil {
-		return err
+		d.discardState(err)
+		snap, events = nil, nil
 	}
 	d.events.restore(d.now(), events)
 	stat, serr := d.sampler.Sample()
@@ -270,7 +271,17 @@ func (d *Daemon) initLedger() error {
 	if d.cfg.Budget.IgnoreExternal {
 		d.cfg.logf("budget: ignoring external load in admission headroom (operator setting)")
 	}
-	if snap == nil {
+	var restored []admission.LeaseState
+	if snap != nil {
+		lg, kept, rerr := d.restoreLedger(*snap)
+		if rerr != nil {
+			d.discardState(rerr)
+		} else {
+			d.ledger = lg
+			restored = kept
+		}
+	}
+	if d.ledger == nil {
 		lg, err := admission.New(admission.Config{
 			TotalCores:       d.budgetCores,
 			TotalMemoryBytes: d.budgetMemory,
@@ -279,29 +290,68 @@ func (d *Daemon) initLedger() error {
 			return fmt.Errorf("wingd: new ledger: %w", err)
 		}
 		d.ledger = lg
-	} else {
-		lg, err := admission.Restore(*snap, nil)
-		if err != nil {
-			return fmt.Errorf("wingd: restore ledger: %w", err)
+	}
+	for _, ls := range restored {
+		d.leaseRun[ls.ID] = ls.RequestID
+		d.leaseCharge[ls.ID] = wingwire.HostResources{
+			Cores:       float64(ls.MilliCores) / 1000.0,
+			MemoryBytes: int64(ls.MemoryBytes),
 		}
-		if err := lg.ResizeTotals(d.budgetCores, d.budgetMemory); err != nil {
-			return fmt.Errorf("wingd: resize restored ledger: %w", err)
-		}
-		d.ledger = lg
-		for _, ls := range snap.Leases {
-			d.leaseRun[ls.ID] = ls.RequestID
-			d.leaseCharge[ls.ID] = wingwire.HostResources{
-				Cores:       float64(ls.MilliCores) / 1000.0,
-				MemoryBytes: int64(ls.MemoryBytes),
-			}
-			d.leaseMembers[ls.ID] = append([]string(nil), ls.Members...)
-			d.reattachWait[ls.ID] = struct{}{}
-		}
+		d.leaseMembers[ls.ID] = append([]string(nil), ls.Members...)
+		d.reattachWait[ls.ID] = struct{}{}
 	}
 	d.mu.Lock()
 	d.lastActivity = d.now()
 	d.mu.Unlock()
 	return nil
+}
+
+// restoreLedger rebuilds the ledger from snap and fits it to the current
+// budget. When the budget cannot hold every restored grant, it sheds the
+// newest grants until the rest fit, so one oversized or leaked lease
+// costs at most itself, never host-wide admission. The returned leases
+// are the ones still in the ledger, eligible for reclaim. A snapshot
+// that cannot be restored at all returns an error; the caller
+// quarantines the state file and serves with a fresh ledger.
+func (d *Daemon) restoreLedger(snap admission.Snapshot) (*admission.Ledger, []admission.LeaseState, error) {
+	lg, err := admission.Restore(snap, nil)
+	if err != nil {
+		return nil, nil, fmt.Errorf("restore ledger: %w", err)
+	}
+	kept := snap.Leases
+	for {
+		err := lg.ResizeTotals(d.budgetCores, d.budgetMemory)
+		if err == nil {
+			return lg, kept, nil
+		}
+		if len(kept) == 0 {
+			return nil, nil, fmt.Errorf("resize restored ledger: %w", err)
+		}
+		shed := kept[len(kept)-1]
+		kept = kept[:len(kept)-1]
+		for _, m := range shed.Members {
+			if _, rerr := lg.Release(shed.ID, m); rerr != nil {
+				return nil, nil, fmt.Errorf("shed restored lease %s: %w", shed.ID, rerr)
+			}
+		}
+		d.cfg.logf("restore: shed lease %s (run %s, %.1f cores, %s) to fit budget %.1f cores, %s",
+			shed.ID, shed.RequestID, float64(shed.MilliCores)/1000.0, humanBytesLog(shed.MemoryBytes),
+			d.budgetCores, humanBytesLog(d.budgetMemory))
+	}
+}
+
+// discardState quarantines an unusable state file and logs the reason,
+// so a bad ledger snapshot costs its leases, never the daemon: the
+// daemon serves with a fresh ledger and the next persist writes a clean
+// file. A failed rename is logged and otherwise ignored because the next
+// persist overwrites the bad file in place.
+func (d *Daemon) discardState(reason error) {
+	dst, err := quarantineState(d.layout.state, d.now())
+	if err != nil {
+		d.cfg.logf("state file unusable (%v); quarantine failed: %v; serving with a fresh ledger", reason, err)
+		return
+	}
+	d.cfg.logf("state file unusable: %v; quarantined to %s, serving with a fresh ledger", reason, dst)
 }
 
 func (d *Daemon) startGrace() {

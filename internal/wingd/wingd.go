@@ -25,6 +25,13 @@
 // daemon, which snapshots and exits, and the successor restores the same
 // state and honors the same grace window.
 //
+// A state file can never prevent the daemon from serving. Restored
+// grants the current budget cannot hold are shed newest-first until the
+// rest fit, and a snapshot that cannot be restored at all is quarantined
+// under a .corrupt-<unixtime> suffix while the daemon serves with a
+// fresh ledger. Worst case a client loses its re-attach and re-requests
+// admission.
+//
 // # Host sensing
 //
 // A [HostSampler] feeds measured load and free memory into

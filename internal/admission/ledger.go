@@ -320,8 +320,10 @@ func (l *Ledger) SetHeadroom(cores float64, memoryBytes uint64) ([]Event, error)
 
 // ResizeTotals replaces the fixed host capacity after a daemon restore
 // on a machine with different effective limits. It preserves current
-// grants and waiters; if the new totals cannot represent that state, it
-// returns [ErrInvalidResize].
+// grants and waiters. Soft-core grants may overcommit the new core
+// total, exactly as the ledger's own invariant permits them to
+// overcommit the current one; hard grants may not. If the new totals
+// cannot represent the current state, it returns [ErrInvalidResize].
 func (l *Ledger) ResizeTotals(cores float64, memoryBytes uint64) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -330,7 +332,7 @@ func (l *Ledger) ResizeTotals(cores float64, memoryBytes uint64) error {
 	if err != nil {
 		return fmt.Errorf("%w: cores %v", ErrInvalidResize, cores)
 	}
-	if l.usedMilliCores > mc {
+	if l.usedMilliCores > mc && !l.softCoreOvercommit() {
 		return fmt.Errorf("%w: granted cores %d exceed total %d", ErrInvalidResize, l.usedMilliCores, mc)
 	}
 	if l.usedMemory > memoryBytes {

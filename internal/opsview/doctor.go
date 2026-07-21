@@ -13,6 +13,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/boxslot"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -60,6 +61,10 @@ type DoctorReport struct {
 	// takeover and can leave the daemon rejecting a newer client's requests.
 	// Reported with an explanation, never repaired.
 	DaemonVersionSkew *DoctorVersionSkew `json:"daemon_version_skew,omitempty"`
+	// QuarantinedLedgers are admission state files the daemon moved aside
+	// because it could not restore them, serving with a fresh ledger instead.
+	// They are forensic copies: reported with an explanation, never removed.
+	QuarantinedLedgers []string `json:"quarantined_ledgers,omitempty"`
 }
 
 // DoctorRejection is one repeated malformed-request rejection cause in the
@@ -96,7 +101,8 @@ func (r DoctorReport) Clean() bool {
 		r.DeadConcurrencyWaiters == 0 &&
 		len(r.DanglingRunDirs) == 0 &&
 		len(r.AdmissionRejections) == 0 &&
-		r.DaemonVersionSkew == nil
+		r.DaemonVersionSkew == nil &&
+		len(r.QuarantinedLedgers) == 0
 }
 
 // Diagnose runs every doctor check against the sparkwing home and repairs what
@@ -139,7 +145,24 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 		return report, err
 	}
 	diagnoseDaemonHealth(ctx, home, selfVersion, &report)
+	diagnoseQuarantinedLedgers(home, &report)
 	return report, nil
+}
+
+// diagnoseQuarantinedLedgers reports admission state files the daemon
+// quarantined after failing to restore them. They are evidence of a past
+// bad shutdown or ledger defect, kept for inspection; doctor names them
+// so they are found, and leaves removal to the operator.
+func diagnoseQuarantinedLedgers(home string, report *DoctorReport) {
+	dir, err := wingd.StateDir(home)
+	if err != nil {
+		return
+	}
+	matches, err := filepath.Glob(filepath.Join(dir, "state.json.corrupt-*"))
+	if err != nil {
+		return
+	}
+	report.QuarantinedLedgers = matches
 }
 
 // diagnoseDaemonHealth reads the local daemon's live state once and reports
@@ -368,6 +391,7 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 		skew = 1
 	}
 	fmt.Fprintf(w, "daemon_version_skew\t%d\n", skew)
+	fmt.Fprintf(w, "quarantined_ledgers\t%d\n", len(r.QuarantinedLedgers))
 	return nil
 }
 
@@ -403,6 +427,14 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	if s := r.DaemonVersionSkew; s != nil {
 		fmt.Fprintf(w, "\nwarning: version skew -- this sparkwing is %s but the running admission daemon is %s\n  a newer or development build does not automatically take over an older daemon, so requests it cannot honor fail as invalid; stop the daemon so the next run brings up a matching one, or run in an isolated SPARKWING_HOME\n",
 			s.Self, s.Daemon)
+	}
+
+	if n := len(r.QuarantinedLedgers); n > 0 {
+		fmt.Fprintf(w, "\nwarning: %d quarantined admission ledger file(s) -- the daemon could not restore them and started fresh\n", n)
+		for _, f := range r.QuarantinedLedgers {
+			fmt.Fprintf(w, "  %s\n", f)
+		}
+		fmt.Fprintf(w, "  kept for inspection; safe to delete once reviewed\n")
 	}
 
 	if legacyLine != "" {

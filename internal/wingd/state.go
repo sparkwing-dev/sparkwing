@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
@@ -60,6 +61,18 @@ func writeState(path string, snap admission.Snapshot, events []admissionEvent) e
 		return fmt.Errorf("wingd: rename state: %w", err)
 	}
 	return nil
+}
+
+// quarantineState moves an unusable state file aside under a
+// .corrupt-<unixtime> suffix so the next start does not reread it, and
+// returns the quarantine path. The original bytes are preserved for
+// forensics; sparkwing doctor reports quarantined files.
+func quarantineState(path string, now time.Time) (string, error) {
+	dst := fmt.Sprintf("%s.corrupt-%d", path, now.Unix())
+	if err := os.Rename(path, dst); err != nil {
+		return "", err
+	}
+	return dst, nil
 }
 
 // readState loads a persisted snapshot and event window. It returns

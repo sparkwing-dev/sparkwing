@@ -64,6 +64,35 @@ func TestRenderDoctorPretty_ExplainsVersionSkew(t *testing.T) {
 	}
 }
 
+func TestDoctorReport_QuarantinedLedgersAreNotClean(t *testing.T) {
+	r := opsview.DoctorReport{
+		QuarantinedLedgers: []string{"/home/.sparkwing/wingd/state.json.corrupt-1784666506"},
+	}
+	if r.Clean() {
+		t.Fatal("report with quarantined ledgers reported clean")
+	}
+}
+
+func TestRenderDoctorPretty_ListsQuarantinedLedgers(t *testing.T) {
+	r := opsview.DoctorReport{
+		QuarantinedLedgers: []string{"/home/.sparkwing/wingd/state.json.corrupt-1784666506"},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "state.json.corrupt-1784666506") || !strings.Contains(out, "could not restore") {
+		t.Errorf("pretty output does not name and explain the quarantined ledger:\n%s", out)
+	}
+	if !strings.Contains(out, "safe to delete") {
+		t.Errorf("pretty output does not tell the operator the file is deletable:\n%s", out)
+	}
+	if strings.Contains(out, "healthy") {
+		t.Errorf("a report with quarantined ledgers should not read healthy:\n%s", out)
+	}
+}
+
 func TestRenderDoctorJSON_CarriesRejections(t *testing.T) {
 	r := opsview.DoctorReport{
 		AdmissionRejections: []opsview.DoctorRejection{{Cause: "request", Count: 3}},

@@ -155,6 +155,15 @@ children it spawns (via `RunAndAwait` or a step that shells out to
 `sparkwing run`), and each child attaches to the parent's lease instead
 of re-admitting.
 
+The ledger survives daemon restarts the same way runs survive daemon
+handoffs: every transition is persisted, and a restarting daemon
+restores the ledger and holds a short window for clients to reclaim
+their leases before releasing the unclaimed rest. A state file can
+never block admission: restored grants the current budget cannot hold
+are shed, a file the daemon cannot restore at all is set aside as
+`state.json.corrupt-<time>` (reported by `sparkwing doctor`), and the
+daemon serves either way -- worst case a run re-requests admission.
+
 ### Declare nothing; sparkwing measures
 
 The daemon measures the machine's real cores and memory and admits into

@@ -47,6 +47,29 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** a persisted ledger the daemon cannot restore no longer
+  wedges host-wide admission. Restored grants the current budget cannot
+  hold are shed newest-first (each shed is logged with its run and size),
+  and a state file that cannot be restored at all is quarantined to
+  `state.json.corrupt-<unixtime>` while the daemon serves with a fresh
+  ledger. Previously one leaked or oversized lease made every daemon
+  start exit with an invalid-resize error before serving, blocking every
+  run on the box until an operator removed the state file by hand.
+- **admission:** restoring a snapshot whose soft-core grants overcommit
+  the core total (a legal ledger state) no longer fails the startup
+  resize; the allowance the live ledger gives soft-core grants now also
+  applies when capacity is re-derived after a restore.
+
+### Added
+
+- **cli:** `sparkwing doctor` reports quarantined admission ledger files
+  (`state.json.corrupt-*`) left behind after a failed restore, naming
+  each so it is found and reviewed instead of sitting in the home
+  forever. Reported with an explanation, never removed.
+
+## [v0.19.0] - 2026-07-18
 ### Added
 
 - **docs:** the docs drift gate (`internal/doccheck`, run in pre-push)

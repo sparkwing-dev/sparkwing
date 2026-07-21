@@ -61,6 +61,32 @@ func TestDiagnose_CleanHomeFindsNothing(t *testing.T) {
 	}
 }
 
+func TestDiagnose_ReportsQuarantinedLedgersWithoutRemoving(t *testing.T) {
+	p := doctorHome(t)
+	dir := filepath.Join(p.Root, "wingd")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatalf("mkdir wingd dir: %v", err)
+	}
+	quarantined := filepath.Join(dir, "state.json.corrupt-1784666506")
+	if err := os.WriteFile(quarantined, []byte("{}"), 0o600); err != nil {
+		t.Fatalf("write quarantined ledger: %v", err)
+	}
+
+	rep, err := diagnose(context.Background(), p, p.Root, false)
+	if err != nil {
+		t.Fatalf("diagnose: %v", err)
+	}
+	if len(rep.QuarantinedLedgers) != 1 || rep.QuarantinedLedgers[0] != quarantined {
+		t.Fatalf("QuarantinedLedgers = %v, want [%s]", rep.QuarantinedLedgers, quarantined)
+	}
+	if rep.Clean() {
+		t.Fatal("report with a quarantined ledger reported clean")
+	}
+	if _, err := os.Stat(quarantined); err != nil {
+		t.Fatalf("doctor removed the quarantined ledger: %v", err)
+	}
+}
+
 func TestDiagnose_FinalizesOrphanedRunKeepsRecent(t *testing.T) {
 	p := doctorHome(t)
 	ctx := context.Background()
