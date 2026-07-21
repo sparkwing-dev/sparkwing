@@ -474,9 +474,10 @@ func bumpFallbackSDKVersionFile(repoRoot, version string) error {
 	return os.WriteFile(path, updated, 0o644)
 }
 
-// commitSparkwingPinBump stages the auto-bump artefacts and commits them.
+// commitSparkwingPinBump stages the auto-bump artifacts and commits them.
 func commitSparkwingPinBump(ctx context.Context, repoRoot, version string) error {
-	addArgs := []string{"-C", repoRoot, "add", "--",
+	addArgs := []string{
+		"-C", repoRoot, "add", "--",
 		"pkg/scaffold/version.go",
 		".sparkwing/go.mod",
 		".sparkwing/go.sum",

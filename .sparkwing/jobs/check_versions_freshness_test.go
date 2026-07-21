@@ -123,8 +123,8 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		}
 		for path, content := range map[string]string{
 			filepath.Join("pkg", "scaffold", "version.go"): "v0.19.0",
-			filepath.Join(".sparkwing", "go.mod"):           "module test",
-			filepath.Join(".sparkwing", "go.sum"):           "",
+			filepath.Join(".sparkwing", "go.mod"):          "module test",
+			filepath.Join(".sparkwing", "go.sum"):          "",
 		} {
 			if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
 				t.Fatal(err)
