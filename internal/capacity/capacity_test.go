@@ -99,11 +99,11 @@ func TestResolve_Order(t *testing.T) {
 		},
 		{
 			name: "below threshold falls to default", pin: nil, profile: thin, numCPU: 8,
-			wantCores: 4, wantSource: store.CostSourceDefault,
+			wantCores: 8, wantSource: store.CostSourceDefault,
 		},
 		{
 			name: "no profile falls to default", pin: nil, profile: nil, numCPU: 16,
-			wantCores: 8, wantSource: store.CostSourceDefault,
+			wantCores: 16, wantSource: store.CostSourceDefault,
 		},
 		{
 			name: "empty pin ignored", pin: &Pin{}, profile: measured, numCPU: 8,
@@ -176,8 +176,8 @@ func TestResolve_MeasuredPeakBelowFloorLiftsToFloor(t *testing.T) {
 
 func TestResolve_ColdStartSerializesOnBigMachine(t *testing.T) {
 	got := Resolve(nil, nil, 32, "")
-	if got.Cores != 16 {
-		t.Errorf("cold-start cores = %v, want 16 (half of 32)", got.Cores)
+	if got.Cores != 32 {
+		t.Errorf("cold-start cores = %v, want 32", got.Cores)
 	}
 	if got.Cores*2 < 32 {
 		t.Errorf("cold-start charge %v does not serialize two unknown runs", got.Cores)

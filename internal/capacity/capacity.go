@@ -25,16 +25,14 @@ const (
 	// admission trusts it over the cold-start default, and before a pin is
 	// judged against it. Small enough to learn fast, large enough that one
 	// odd run cannot flip a decision.
-	MinSamples = 3
+	MinSamples = 5
 	// DriftFraction is the relative gap between a pin and the measured p99
 	// peak that trips a drift warning. Below it, the pin and reality agree
 	// closely enough to stay quiet.
 	DriftFraction = 0.25
-	// coldStartFraction is the share of the machine an unknown pipeline's
-	// first run is charged. Half the machine means two unknown runs cannot
-	// both hold capacity at once, so unknown heavy work serializes until
-	// the sampler has profiled it.
-	coldStartFraction = 0.5
+	// coldStartFraction is the share of the machine an unknown execution
+	// shape receives until the sampler has enough clean observations.
+	coldStartFraction = 1.0
 	// measuredCoreFloor is the minimum core charge for a measured profile,
 	// so a pipeline the sampler observed drawing near-zero CPU (a poller,
 	// approval waiter, or lock holder) is still accounted for rather than
@@ -212,8 +210,8 @@ func measurementQualifies(profile *store.PipelineProfile) bool {
 // coldStartCores is the conservative charge for an unknown pipeline: half
 // the machine, never below one core.
 func coldStartCores(numCPU int) float64 {
-	half := math.Ceil(coldStartFraction * float64(numCPU))
-	return math.Max(1, half)
+	cores := math.Ceil(coldStartFraction * float64(numCPU))
+	return math.Max(1, cores)
 }
 
 // DriftClass names how a pin has diverged from measurement.
