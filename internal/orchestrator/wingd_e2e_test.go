@@ -356,7 +356,7 @@ func awaitWaiter(t *testing.T, home, runID string) {
 	deadline := time.Now().Add(wingdTestWait)
 	for time.Now().Before(deadline) {
 		for _, w := range queryWingd(t, home).Waiters {
-			if w.RunID == runID {
+			if w.RunID == runID || strings.HasPrefix(w.RunID, runID+"/") {
 				return
 			}
 		}
@@ -369,10 +369,18 @@ func findWingdHolder(t *testing.T, home, runID string) wingwire.Holder {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
 	for time.Now().Before(deadline) {
+		var control *wingwire.Holder
 		for _, h := range queryWingd(t, home).Holders {
-			if h.RunID == runID {
+			if strings.HasPrefix(h.RunID, runID+"/") {
 				return h
 			}
+			if h.RunID == runID {
+				copy := h
+				control = &copy
+			}
+		}
+		if control != nil {
+			return *control
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -494,8 +502,14 @@ func TestWingd_ZeroCPUPipelineAdmitsAtTinyMeasuredCostAlongsideHeavyWork(t *test
 	if h.Resources.Cores != 0.1 {
 		t.Errorf("admitted cores = %v, want the 0.1 measured core floor", h.Resources.Cores)
 	}
-	if qs := queryWingd(t, home); len(qs.Holders) != 2 {
-		t.Fatalf("holders = %d, want 2 (heavy work and the sleep-heavy run concurrently)", len(qs.Holders))
+	active := 0
+	for _, holder := range queryWingd(t, home).Holders {
+		if holder.Resources.Cores > 0 || holder.Resources.MemoryBytes > 0 {
+			active++
+		}
+	}
+	if active != 2 {
+		t.Fatalf("resource-holding executions = %d, want 2", active)
 	}
 
 	close(gate.release)

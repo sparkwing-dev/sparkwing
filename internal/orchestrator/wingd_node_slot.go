@@ -38,6 +38,9 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		Policy:          wingwire.Policy(limit.OnLimit),
 		CancelTimeoutMS: limit.CancelTimeout.Milliseconds(),
 	}
+	resolved, _, drift, overCap := la.resolveNodeHostCost(ctx, r.backends, req.Pipeline, node.ID(), node, localPlanPinFromContext(ctx))
+	resources := wingwire.HostResources{Cores: resolved.Cores, MemoryBytes: resolved.MemoryBytes}
+	warning := hostChargeWarning(drift, overCap)
 
 	acquireCtx := ctx
 	if limit.OnLimit == sparkwing.Queue && limit.QueueTimeout > 0 {
@@ -69,7 +72,7 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		}
 	}
 
-	lease, err := la.acquireNodeSlot(acquireCtx, req.RunID, node.ID(), claim, onQueued)
+	lease, err := la.acquireNodeExecution(acquireCtx, req.Pipeline, req.RunID, node.ID(), resources, wingwire.CostSource(resolved.Source), resolved.ExpectedDuration, warning, []wingwire.SemaphoreClaim{claim}, onQueued)
 	if err != nil {
 		return r.failedDaemonAcquire(ctx, acquireCtx, req, key, limit.QueueTimeout, err)
 	}
@@ -98,7 +101,7 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		return runner.Result{Outcome: sparkwing.Skipped}
 	}
 
-	output, err := r.executeNode(execCtx, req.RunID, node, req.Delegate)
+	output, err := r.executeNode(withExecutionAdmission(execCtx), req.RunID, node, req.Delegate)
 	if ev := evicted.Load(); ev != nil {
 		serr := fmt.Errorf("concurrency key %q: superseded by run %s under %s", ev.Key, ev.SupersededBy, ev.Policy)
 		_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "node_superseded", []byte(serr.Error()))
@@ -109,6 +112,38 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
 	return runner.Result{Outcome: sparkwing.Success, Output: output}
+}
+
+type executionAdmissionCtxKey struct{}
+
+func withExecutionAdmission(ctx context.Context) context.Context {
+	return context.WithValue(ctx, executionAdmissionCtxKey{}, true)
+}
+
+func executionAdmissionFromContext(ctx context.Context) bool {
+	admitted, _ := ctx.Value(executionAdmissionCtxKey{}).(bool)
+	return admitted
+}
+
+func (r *InProcessRunner) acquireNodeResources(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
+	la, _ := localAdmissionFromContext(ctx)
+	if la == nil || executionAdmissionFromContext(ctx) {
+		return r.executeNodeAdmitted(ctx, runID, node, delegate)
+	}
+	pipeline := localPipelineFromContext(ctx)
+	resolved, _, drift, overCap := la.resolveNodeHostCost(ctx, r.backends, pipeline, node.ID(), node, localPlanPinFromContext(ctx))
+	resources := wingwire.HostResources{Cores: resolved.Cores, MemoryBytes: resolved.MemoryBytes}
+	warning := hostChargeWarning(drift, overCap)
+	reporter := &queueWaitReporter{la: la, ctx: ctx, backends: r.backends, runID: runID}
+	lease, err := la.acquireNodeExecution(ctx, pipeline, runID, node.ID(), resources, wingwire.CostSource(resolved.Source), resolved.ExpectedDuration, warning, nil, reporter.onQueued)
+	if err != nil {
+		return nil, err
+	}
+	if reporter.waited() {
+		fmt.Fprintln(la.stderr(), "admitted; starting run")
+	}
+	defer func() { _ = lease.Release() }()
+	return r.executeNodeAdmitted(withExecutionAdmission(ctx), runID, node, delegate)
 }
 
 // failedDaemonAcquire maps a failed daemon acquisition onto the node's

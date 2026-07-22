@@ -132,6 +132,8 @@ type AdmissionRequest struct {
 	// from inside an already-admitted run (node-level concurrency
 	// groups).
 	SemaphoresOnly bool `json:"semaphores_only,omitempty"`
+	ControlOnly    bool `json:"control_only,omitempty"`
+	ExecutionOnly  bool `json:"execution_only,omitempty"`
 	// CostSource names how Resources was resolved so the queue view can show
 	// where a charge came from. The daemon may cap measured costs to the
 	// largest idle-grantable request.

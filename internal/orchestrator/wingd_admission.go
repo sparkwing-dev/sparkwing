@@ -198,6 +198,7 @@ func (la *LocalAdmission) admitRun(
 		CostSource:         wingwire.CostSource(res.Source),
 		ExpectedDurationMS: res.ExpectedDuration.Milliseconds(),
 		Origin:             la.Origin,
+		ControlOnly:        true,
 	}
 	if prof != nil {
 		req.ExpectedP99MS = prof.P99Duration.Milliseconds()
@@ -282,7 +283,7 @@ func (la *LocalAdmission) admitNode(
 	pipeline, runID, nodeID string,
 	node *sparkwing.JobNode,
 ) (*runLease, error) {
-	res, _, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node)
+	res, _, _, overCap := la.resolveNodeHostCost(ctx, backends, pipeline, nodeID, node, nil)
 	req := wingwire.AdmissionRequest{
 		RunID:              runID + "/" + nodeID,
 		Pipeline:           pipeline,
@@ -308,11 +309,16 @@ func (la *LocalAdmission) admitNode(
 // missing local store (the common runner-mode case, where state is a
 // controller client) simply means no measured profile, so the pin-or-
 // default order still holds.
-func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Backends, pipeline, nodeID string, node *sparkwing.JobNode) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift, string) {
+func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Backends, pipeline, nodeID string, node *sparkwing.JobNode, fallback *capacity.Pin) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift, string) {
 	pin := nodePin(node)
+	if pin == nil {
+		pin = fallback
+	}
 	var profile *store.PipelineProfile
 	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
-		if p, err := st.GetPipelineProfile(ctx, pipeline, nodeID); err == nil {
+		if p, err := st.GetPipelineProfile(ctx, pipeline, nodeID); err == nil && p != nil {
+			profile = p
+		} else if p, runErr := st.GetPipelineProfile(ctx, pipeline, ""); runErr == nil {
 			profile = p
 		}
 	}
@@ -749,19 +755,31 @@ func groupUsesLocalDaemon(group *sparkwing.ConcurrencyGroup) bool {
 type localAdmissionCtxKey struct{}
 
 type localAdmissionState struct {
-	la    *LocalAdmission
-	token string
+	la       *LocalAdmission
+	token    string
+	pipeline string
+	fallback *capacity.Pin
 }
 
-func withLocalAdmission(ctx context.Context, la *LocalAdmission, leaseToken string) context.Context {
+func withLocalAdmission(ctx context.Context, la *LocalAdmission, leaseToken, pipeline string, fallback *capacity.Pin) context.Context {
 	if la == nil {
 		return ctx
 	}
-	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{la: la, token: leaseToken})
+	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{la: la, token: leaseToken, pipeline: pipeline, fallback: fallback})
 	if leaseToken != "" {
 		ctx = sparkwing.WithCommandEnv(ctx, map[string]string{wingwire.LeaseTokenEnv: leaseToken})
 	}
 	return ctx
+}
+
+func localPipelineFromContext(ctx context.Context) string {
+	state, _ := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	return state.pipeline
+}
+
+func localPlanPinFromContext(ctx context.Context) *capacity.Pin {
+	state, _ := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	return state.fallback
 }
 
 func localAdmissionFromContext(ctx context.Context) (*LocalAdmission, string) {
@@ -787,10 +805,14 @@ func leaseTriggerEnv(ctx context.Context) map[string]string {
 // request for a node-level concurrency group and blocks until granted.
 // The returned lease is released at node end; its Watch surfaces a
 // cancel_others eviction while the node runs.
-func (la *LocalAdmission) acquireNodeSlot(
+func (la *LocalAdmission) acquireNodeExecution(
 	ctx context.Context,
-	runID, nodeID string,
-	claim wingwire.SemaphoreClaim,
+	pipeline, runID, nodeID string,
+	resources wingwire.HostResources,
+	costSource wingwire.CostSource,
+	expectedDuration time.Duration,
+	driftWarning string,
+	claims []wingwire.SemaphoreClaim,
 	onQueued func(wingwire.Queued),
 ) (*wingdclient.Lease, error) {
 	cl, err := wingdclient.EnsureDaemon(ctx, la.clientOptions())
@@ -798,9 +820,15 @@ func (la *LocalAdmission) acquireNodeSlot(
 		return nil, fmt.Errorf("local admission: %w", err)
 	}
 	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
-		RunID:          runID + "/" + nodeID,
-		SemaphoresOnly: true,
-		Semaphores:     []wingwire.SemaphoreClaim{claim},
+		RunID:              runID + "/" + nodeID,
+		Pipeline:           pipeline,
+		PID:                os.Getpid(),
+		Resources:          resources,
+		Semaphores:         claims,
+		CostSource:         costSource,
+		ExpectedDurationMS: expectedDuration.Milliseconds(),
+		DriftWarning:       driftWarning,
+		ExecutionOnly:      true,
 	}, onQueued)
 	if err != nil {
 		cl.Close()

@@ -581,7 +581,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		return
 	}
 	pinClamped := false
-	if req.SemaphoresOnly {
+	if req.SemaphoresOnly || req.ControlOnly {
 		charged = wingwire.HostResources{}
 	} else {
 		charged, pinClamped = d.clampHostChargeLocked(charged, req.CostSource)
@@ -593,7 +593,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.pid = req.PID
 	c.resources = charged
 	c.sems = semNames(req.Semaphores)
-	c.finalizable = !req.SemaphoresOnly
+	c.finalizable = !req.SemaphoresOnly && !req.ExecutionOnly
 	c.startAt = d.now()
 	c.costSource = string(req.CostSource)
 	c.expectedDurationMS = req.ExpectedDurationMS

@@ -519,7 +519,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	var runErr error
 	if !skipDispatch {
 		runErr = dispatch(
-			runCtx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf,
+			runCtx, backends, r, opts.Pipeline, runID, plan, delegate, opts.Debug, opts.RetryOf,
 			opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip,
 			dispatchWaitTimeout, opts.Admission, leaseToken,
 		)
@@ -774,6 +774,7 @@ func dispatch(
 	ctx context.Context,
 	backends Backends,
 	r runner.Runner,
+	pipeline string,
 	runID string,
 	plan *sparkwing.Plan,
 	delegate sparkwing.Logger,
@@ -810,7 +811,7 @@ func dispatch(
 	defer func() { planRelease(planReleaseOutcome) }()
 
 	state := newDispatchState(
-		dispatchCtx, backends, r, runID, plan, delegate, debug, retryOf,
+		dispatchCtx, backends, r, pipeline, runID, plan, delegate, debug, retryOf,
 		masker, maxParallel, admission, leaseToken,
 	)
 	state.pipelineRequires = snapMeta.PipelineRequires
@@ -1371,6 +1372,7 @@ func newDispatchState(
 	ctx context.Context,
 	backends Backends,
 	r runner.Runner,
+	pipeline string,
 	runID string,
 	plan *sparkwing.Plan,
 	delegate sparkwing.Logger,
@@ -1425,7 +1427,7 @@ func newDispatchState(
 	} else {
 		s.resolverCtx = ctx
 	}
-	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken)
+	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, pipeline, planPin(plan))
 	s.resolverCtx = sparkwingruntime.WithResolver(s.resolverCtx, s.resolve)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())
@@ -2098,6 +2100,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 			return activeRunner.RunNode(runnerCtx, runner.Request{
 				RunID:               s.runID,
 				NodeID:              node.ID(),
+				Pipeline:            localPipelineFromContext(runnerCtx),
 				Node:                node,
 				Delegate:            s.delegate,
 				ReleaseWorkerSlot:   slot.release,
@@ -2470,6 +2473,7 @@ func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFail
 		return s.runner.RunNode(ctx, runner.Request{
 			RunID:               s.runID,
 			NodeID:              node.ID(),
+			Pipeline:            localPipelineFromContext(ctx),
 			Node:                node,
 			Delegate:            s.delegate,
 			ReleaseWorkerSlot:   slot.release,
