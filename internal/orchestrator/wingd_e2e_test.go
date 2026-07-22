@@ -165,9 +165,10 @@ func (g *wingdGate) awaitStarted(t *testing.T, want string) {
 }
 
 var (
-	wingdE2EGate     atomic.Pointer[wingdGate]
-	wingdE2EChild    atomic.Pointer[wingdChildLaunch]
-	wingdE2ERegister sync.Once
+	wingdE2EGate      atomic.Pointer[wingdGate]
+	wingdDispatchGate atomic.Pointer[wingdGate]
+	wingdE2EChild     atomic.Pointer[wingdChildLaunch]
+	wingdE2ERegister  sync.Once
 )
 
 type wingdChildLaunch struct {
@@ -207,6 +208,19 @@ type wingdQuickPipe struct{ sparkwing.Base }
 func (wingdQuickPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	plan.Resources(sparkwing.Cores(0.5))
 	sparkwing.Job(plan, "quick", func(context.Context) error { return nil })
+	return nil
+}
+
+type wingdDispatchPipe struct{ sparkwing.Base }
+
+func (wingdDispatchPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	plan.Resources(sparkwing.Cores(0.5))
+	for _, id := range []string{"a", "b"} {
+		id := id
+		sparkwing.Job(plan, id, func(ctx context.Context) error {
+			return wingdDispatchGate.Load().run(ctx, id)
+		})
+	}
 	return nil
 }
 
@@ -325,6 +339,8 @@ func registerWingdE2EPipelines() {
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdHoldPipe{cores: 1.5} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-quick",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdQuickPipe{} })
+		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-dispatch",
+			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdDispatchPipe{} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-unpinned",
 			func() sparkwing.Pipeline[sparkwing.NoInputs] { return wingdUnpinnedHoldPipe{} })
 		sparkwing.Register[sparkwing.NoInputs]("wingd-e2e-attach-parent",
@@ -914,6 +930,59 @@ func TestWingd_NodeGroupSerializesAcrossRuns(t *testing.T) {
 	}
 	if got := gate.peak.Load(); got != 1 {
 		t.Fatalf("peak concurrent locked nodes = %d, want the daemon semaphore to serialize them", got)
+	}
+}
+
+func TestWingd_DispatchCapacityParticipatesInExecutionAdmission(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingd(t, home, 8)
+	backends, _, _ := openWingdBackends(t, home)
+	gate := newWingdGate()
+	wingdDispatchGate.Store(gate)
+
+	done := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(context.Background(), backends, Options{
+			Pipeline:    "wingd-e2e-dispatch",
+			RunID:       "wingd-dispatch",
+			MaxParallel: 1,
+			Admission:   testWingdAdmission(home, nil),
+		})
+		done <- res
+	}()
+
+	select {
+	case <-gate.started:
+	case <-time.After(wingdTestWait):
+		t.Fatal("no node started")
+	}
+
+	deadline := time.Now().Add(time.Second)
+	found := false
+	for time.Now().Before(deadline) {
+		for _, waiter := range queryWingd(t, home).Waiters {
+			if strings.HasPrefix(waiter.RunID, "wingd-dispatch/") {
+				found = true
+			}
+		}
+		if found {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !found {
+		t.Fatal("ready node never entered atomic dispatcher admission")
+	}
+
+	close(gate.release)
+	select {
+	case res := <-done:
+		if res == nil || res.Status != "success" {
+			t.Fatalf("run result = %+v", res)
+		}
+	case <-time.After(wingdTestWait):
+		t.Fatal("run did not finish")
 	}
 }
 
