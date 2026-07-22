@@ -25,6 +25,12 @@ import (
 // ranges over its compiled-in binary list.
 var verifyTemplates, verifyTemplatesErr = templates.List()
 
+var templateVerifyGroup = sparkwing.NewConcurrencyGroup("template-verify", sparkwing.ConcurrencyLimit{
+	Capacity: 4,
+	Scope:    sparkwing.ScopeRun,
+	OnLimit:  sparkwing.Queue,
+})
+
 // TemplateVerifySummary is the gate node's typed output: proof that
 // every registered template passed. Cross-pipeline callers (the release
 // gate) receive it via sparkwing.RunAndAwait.
@@ -83,7 +89,7 @@ func (TemplateVerify) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.
 	deps := make([]sparkwing.Dep, 0, len(verifyTemplates))
 	for _, tmpl := range verifyTemplates {
 		m := tmpl.Manifest
-		node := sparkwing.Job(plan, "verify-"+m.Name, verifyTemplateFn(m, envRef)).Needs(build)
+		node := sparkwing.Job(plan, "verify-"+m.Name, verifyTemplateFn(m, envRef)).Needs(build).Concurrency(templateVerifyGroup)
 		deps = append(deps, node)
 	}
 
