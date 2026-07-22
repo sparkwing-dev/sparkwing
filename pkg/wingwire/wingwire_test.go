@@ -8,6 +8,12 @@ import (
 	"testing"
 )
 
+func TestProtocolMajorFencesPhaseScopedAccounting(t *testing.T) {
+	if ProtocolMajor != 2 {
+		t.Fatalf("ProtocolMajor = %d, want 2", ProtocolMajor)
+	}
+}
+
 func roundTripMessages() []Message {
 	return []Message{
 		&Hello{ProtocolMajor: 1, BinaryVersion: "v0.15.6"},
