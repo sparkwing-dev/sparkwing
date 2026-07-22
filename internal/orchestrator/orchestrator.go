@@ -544,7 +544,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			if lease != nil {
 				charge = lease.charge
 			}
-			recordRunProfile(finishCtx, st, opts.Pipeline, runID, planPin(plan), planTopologyHash(plan.Nodes()), charge, contended, execStart, time.Now())
+			recordRunProfile(finishCtx, st, opts.Pipeline, runID, planPin(plan), capacityFingerprint(plan), charge, contended, execStart, time.Now())
 		}
 	}
 	if lease != nil && lease.driftWarning != "" && opts.Delegate != nil {
@@ -1205,23 +1205,89 @@ func emitRunPlan(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 	})
 }
 
+// planEdge is one node's place in the DAG: its id plus its sorted
+// dependency ids.
+type planEdge struct {
+	ID   string   `json:"id"`
+	Deps []string `json:"deps"`
+}
+
+func planEdges(nodes []*sparkwing.JobNode) []planEdge {
+	edges := make([]planEdge, 0, len(nodes))
+	for _, n := range nodes {
+		deps := append([]string(nil), n.DepIDs()...)
+		sort.Strings(deps)
+		edges = append(edges, planEdge{ID: n.ID(), Deps: deps})
+	}
+	sort.Slice(edges, func(i, j int) bool { return edges[i].ID < edges[j].ID })
+	return edges
+}
+
 // planTopologyHash hashes (id, sorted-deps) edges so two plans with
 // the same DAG shape produce the same hash regardless of which run
 // emitted them. Mirrors orchestrator/receipt's plan_hash so an agent
 // can compare a live run_plan record against a post-hoc receipt.
 func planTopologyHash(nodes []*sparkwing.JobNode) string {
-	type edge struct {
-		ID   string   `json:"id"`
-		Deps []string `json:"deps"`
+	return hashCanonicalJSON(planEdges(nodes))
+}
+
+// capacityFingerprint hashes the plan facets that shape its measured
+// resource profile: the DAG edges plus every concurrency declaration --
+// group name, capacity, scope, policy, and member cost, at plan and
+// node level. Capacity profiles are versioned by this fingerprint, so a
+// concurrency change re-measures the pipeline instead of pricing it on
+// samples of the old shape. Queue and cancel timeouts are excluded:
+// they bound waiting, not how much runs at once.
+func capacityFingerprint(plan *sparkwing.Plan) string {
+	type membership struct {
+		Node     string `json:"node,omitempty"`
+		Group    string `json:"group"`
+		Capacity int    `json:"capacity"`
+		Scope    string `json:"scope"`
+		Policy   string `json:"policy"`
+		Cost     int    `json:"cost"`
 	}
-	edges := make([]edge, 0, len(nodes))
-	for _, n := range nodes {
-		deps := append([]string(nil), n.DepIDs()...)
-		sort.Strings(deps)
-		edges = append(edges, edge{ID: n.ID(), Deps: deps})
+	doc := struct {
+		Edges       []planEdge   `json:"edges"`
+		Concurrency []membership `json:"concurrency,omitempty"`
+	}{Edges: planEdges(plan.Nodes())}
+	appendGroup := func(node string, g *sparkwing.ConcurrencyGroup, cost int) {
+		limit := g.Limit()
+		scope := limit.Scope
+		if scope == "" {
+			scope = sparkwing.ScopeGlobal
+		}
+		policy := limit.OnLimit
+		if policy == "" {
+			policy = sparkwing.Queue
+		}
+		doc.Concurrency = append(doc.Concurrency, membership{
+			Node:     node,
+			Group:    g.Name(),
+			Capacity: limit.Capacity,
+			Scope:    string(scope),
+			Policy:   string(policy),
+			Cost:     cost,
+		})
 	}
-	sort.Slice(edges, func(i, j int) bool { return edges[i].ID < edges[j].ID })
-	return hashCanonicalJSON(edges)
+	for _, pc := range plan.PlanConcurrency() {
+		if pc.Group != nil {
+			appendGroup("", pc.Group, pc.Cost)
+		}
+	}
+	for _, n := range plan.Nodes() {
+		if g := n.ConcurrencyGroupRef(); g != nil {
+			appendGroup(n.ID(), g, n.ConcurrencyCost())
+		}
+	}
+	sort.Slice(doc.Concurrency, func(i, j int) bool {
+		a, b := doc.Concurrency[i], doc.Concurrency[j]
+		if a.Node != b.Node {
+			return a.Node < b.Node
+		}
+		return a.Group < b.Group
+	})
+	return hashCanonicalJSON(doc)
 }
 
 // emitRunSummary sends an end-of-run summary record.

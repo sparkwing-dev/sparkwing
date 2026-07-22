@@ -26,7 +26,7 @@ const (
 	// judged against it. Small enough to learn fast, large enough that one
 	// odd run cannot flip a decision.
 	MinSamples = 3
-	// DriftFraction is the relative gap between a pin and the measured p99
+	// DriftFraction is the relative gap between a pin and the measured p95
 	// peak that trips a drift warning. Below it, the pin and reality agree
 	// closely enough to stay quiet.
 	DriftFraction = 0.25
@@ -40,13 +40,17 @@ const (
 	// approval waiter, or lock holder) is still accounted for rather than
 	// admitted for free, while costing far less than the cold-start default.
 	measuredCoreFloor = 0.1
-	// SafetyMultiple prices a still-measuring version: its charge is this
-	// multiple of the best evidence available -- the predecessor peak across a
-	// structural change, or the demand floor learned from contended runs. It
-	// sets ramp speed, not safety: ceiling-hit escalation makes each contended
-	// run that consumes its whole charge double the next, a log2 search that
-	// converges on true demand from below, the same doubling reasoning as TCP
-	// slow-start. One named constant so it stays tunable.
+	// WarmStartMultiple prices a version whose fingerprint changed: this
+	// multiple of the predecessor's measured peak, charged until the new
+	// version graduates its own clean samples. Parity rather than padding,
+	// because an under-charge self-corrects -- a contended run raises the
+	// demand floor and SafetyMultiple escalation climbs from there.
+	WarmStartMultiple = 1.0
+	// SafetyMultiple prices a still-measuring version from the demand floor
+	// its contended runs proved. It sets ramp speed, not safety: ceiling-hit
+	// escalation makes each contended run that consumes its whole charge
+	// double the next, a log2 search that converges on true demand from
+	// below, the same doubling reasoning as TCP slow-start.
 	SafetyMultiple = 2.0
 	// CeilingHitFraction is how much of its admitted charge a contended run
 	// must consume for the charge to count as a proven demand minimum: at or
@@ -89,8 +93,9 @@ type Resolution struct {
 // measured profile of the run's own version (matching plan hash) with at
 // least MinSamples clean samples supplies the measured peaks; a version that
 // changed structurally or has not yet graduated is priced by measurement --
-// a safety multiple of its predecessor peak or its contended-run demand
-// floor, whichever is larger; otherwise the cold-start default is charged.
+// a warm start at its predecessor peak or a safety multiple of its
+// contended-run demand floor, whichever is larger; otherwise the cold-start
+// default is charged.
 // ExpectedDuration is filled from the profile whenever one exists, even when
 // a pin sets the cost, so ETA still has a duration to simulate with.
 //
@@ -136,10 +141,10 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 
 // measuringResolution prices a version that has not finalized a measured
 // price for the run's structure: one that changed shape, or one still short
-// of MinSamples clean runs. The charge is the largest of a warm start (a
-// safety multiple of the predecessor peak, else the half-machine default for
-// a pipeline with no prior measurement), the safety multiple of the demand
-// floor its own contended runs proved, and the small absolute core floor.
+// of MinSamples clean runs. The charge is the largest of a warm start (the
+// predecessor peak, else the half-machine default for a pipeline with no
+// prior measurement), the safety multiple of the demand floor its own
+// contended runs proved, and the small absolute core floor.
 // The floor's evidence belongs to the current version only, so a structural
 // change ignores it and re-measures from the predecessor.
 func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU int, versionChanged bool) Resolution {
@@ -160,7 +165,7 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 	cores := coldStartCores(numCPU)
 	res.Source = store.CostSourceDefault
 	if prevCores > 0 {
-		cores = SafetyMultiple * prevCores
+		cores = WarmStartMultiple * prevCores
 		res.Source = store.CostSourceMeasuring
 	}
 	if floorCores > 0 {
@@ -171,7 +176,7 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 	}
 	res.Cores = math.Max(cores, measuredCoreFloor)
 
-	mem := int64(SafetyMultiple * float64(prevMem))
+	mem := int64(WarmStartMultiple * float64(prevMem))
 	if fm := int64(SafetyMultiple * float64(floorMem)); fm > mem {
 		mem = fm
 	}
@@ -268,7 +273,7 @@ func coreDrift(pinCores, measuredCores float64, samples int) *Drift {
 		MeasuredCores: measuredCores,
 		SampleCount:   samples,
 		Message: fmt.Sprintf(
-			"resource pin: %s cores; measured p99 %s cores over %d runs - update or remove the pin",
+			"resource pin: %s cores; measured p95 %s cores over %d runs - update or remove the pin",
 			trimFloat(pinCores), trimFloat(measuredCores), samples),
 	}
 }
@@ -283,7 +288,7 @@ func memoryDrift(pinBytes, measuredBytes int64, samples int) *Drift {
 		Class:       class,
 		SampleCount: samples,
 		Message: fmt.Sprintf(
-			"resource pin: %s memory; measured p99 %s over %d runs - update or remove the pin",
+			"resource pin: %s memory; measured p95 %s over %d runs - update or remove the pin",
 			gib(pinBytes), gib(measuredBytes), samples),
 	}
 }

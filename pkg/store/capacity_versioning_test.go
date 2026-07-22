@@ -115,3 +115,57 @@ func TestRecordProfileObservation_PlanHashChangeResetsWindow(t *testing.T) {
 		t.Errorf("FloorCores = %v, want 0 (predecessor floor does not carry to the new version)", prof.FloorCores)
 	}
 }
+
+// TestRecordProfileObservation_PeakIgnoresSingleOutlier confirms the charged
+// peak is the window's p95, so one freak run cannot pin the price for the
+// whole window.
+func TestRecordProfileObservation_PeakIgnoresSingleOutlier(t *testing.T) {
+	st, ctx := openTestStore(t)
+	if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+		Duration: time.Second, PeakCores: 40, CPUMeasured: true, PlanHash: "A",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for range profileWindow - 1 {
+		if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+			Duration: time.Second, PeakCores: 2, CPUMeasured: true, PlanHash: "A",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prof, _ := st.GetPipelineProfile(ctx, "demo", "")
+	if prof.SampleCount != profileWindow {
+		t.Fatalf("SampleCount = %d, want %d", prof.SampleCount, profileWindow)
+	}
+	if prof.PeakCores != 2 {
+		t.Errorf("PeakCores = %v, want 2 (p95 drops the single outlier)", prof.PeakCores)
+	}
+}
+
+// TestRecordProfileObservation_WindowAgesOutOldCost confirms an old
+// expensive generation stops influencing the charge once profileWindow
+// cheaper runs have folded in.
+func TestRecordProfileObservation_WindowAgesOutOldCost(t *testing.T) {
+	st, ctx := openTestStore(t)
+	for range 5 {
+		if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+			Duration: time.Second, PeakCores: 10, CPUMeasured: true, PlanHash: "A",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for range profileWindow {
+		if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+			Duration: time.Second, PeakCores: 2, CPUMeasured: true, PlanHash: "A",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	prof, _ := st.GetPipelineProfile(ctx, "demo", "")
+	if prof.SampleCount != profileWindow {
+		t.Fatalf("SampleCount = %d, want %d (window bounded)", prof.SampleCount, profileWindow)
+	}
+	if prof.PeakCores != 2 {
+		t.Errorf("PeakCores = %v, want 2 (old expensive samples aged out)", prof.PeakCores)
+	}
+}

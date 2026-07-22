@@ -110,10 +110,10 @@ func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
 	if !ok {
 		t.Fatal("heavy run not queued")
 	}
-	if want := "measured p99 over 12 runs"; !strings.Contains(w.BlockingReason, want) {
+	if want := "measured p95 over 12 runs"; !strings.Contains(w.BlockingReason, want) {
 		t.Fatalf("blocking reason = %q, want it to contain %q", w.BlockingReason, want)
 	}
-	if w.CostRationale != "measured p99 over 12 runs" {
+	if w.CostRationale != "measured p95 over 12 runs" {
 		t.Fatalf("waiter CostRationale = %q, want measured phrase", w.CostRationale)
 	}
 	var holder *wingwire.Holder

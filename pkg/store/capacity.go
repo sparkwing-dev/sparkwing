@@ -28,8 +28,8 @@ const (
 	CostSourceDefault CostSource = "default"
 	// CostSourceMeasuring is a version still being measured: it has a
 	// predecessor peak (a structural change) but not yet the clean samples
-	// that finalize a measured price, so it is charged a safety multiple of
-	// the predecessor and re-measures until clean.
+	// that finalize a measured price, so it is charged from the predecessor
+	// peak and re-measures until clean.
 	CostSourceMeasuring CostSource = "measuring"
 	// CostSourceFloor is a still-measuring version whose operative charge is
 	// the demand floor learned from its contended runs -- a lower bound that
@@ -39,8 +39,17 @@ const (
 
 // profileWindow bounds how many recent run observations back a profile's
 // percentiles. Old observations age out so the profile tracks the
-// pipeline as its cost drifts.
-const profileWindow = 50
+// pipeline as its cost drifts; the window is short enough that a real
+// cost change re-prices within a couple dozen runs instead of lingering
+// for fifty.
+const profileWindow = 20
+
+// peakPercentile is the rank the admission charge takes from the window
+// of per-run peaks. Nearest-rank p99 of a window this small is the
+// maximum, which lets one freak run pin the price until it ages fully
+// out; p95 drops the single largest sample while still charging
+// near-worst-case.
+const peakPercentile = 0.95
 
 // PipelineProfile is the measured resource fingerprint of a
 // (pipeline, node) pair over a bounded window of recent runs: duration
@@ -98,11 +107,12 @@ type PipelineProfile struct {
 	// it gives the pipeline's contended share. Meaningful only on the
 	// rollup row.
 	ContendedCount int `json:"contended_count,omitempty"`
-	// PlanHash is the DAG-topology fingerprint of the pipeline version these
-	// clean samples were measured on. A structural change stamps a new hash
-	// and clears the learned window, so admission re-measures the changed
-	// version rather than pricing it on stale samples. Meaningful only on the
-	// rollup row.
+	// PlanHash is the capacity fingerprint of the pipeline version these
+	// clean samples were measured on: the DAG shape plus the concurrency
+	// declarations that bound how much of it runs at once. A change stamps a
+	// new hash and clears the learned window, so admission re-measures the
+	// changed version rather than pricing it on stale samples. Meaningful
+	// only on the rollup row.
 	PlanHash string `json:"plan_hash,omitempty"`
 	// FloorCores and FloorMemoryBytes are the demand lower bound learned from
 	// this version's contended runs: a starved run's peak is what it got, not
@@ -114,8 +124,8 @@ type PipelineProfile struct {
 	FloorMemoryBytes int64   `json:"floor_memory_bytes,omitempty"`
 	// PrevPeakCores and PrevPeakMemoryBytes carry the previous version's
 	// measured peak across a plan-hash change, so the changed version warm-
-	// starts at a safety multiple of what its predecessor cost instead of the
-	// blind half-machine default. Meaningful only on the rollup row.
+	// starts at what its predecessor cost instead of the blind half-machine
+	// default. Meaningful only on the rollup row.
 	PrevPeakCores       float64 `json:"prev_peak_cores,omitempty"`
 	PrevPeakMemoryBytes int64   `json:"prev_peak_memory_bytes,omitempty"`
 }
@@ -753,8 +763,8 @@ func profileFromWindow(window []profileSample) PipelineProfile {
 	return PipelineProfile{
 		P50Duration:     time.Duration(int64(percentile(durations, 0.50))),
 		P99Duration:     time.Duration(int64(percentile(durations, 0.99))),
-		PeakCores:       percentile(cores, 0.99),
-		PeakMemoryBytes: int64(percentile(mems, 0.99)),
+		PeakCores:       percentile(cores, peakPercentile),
+		PeakMemoryBytes: int64(percentile(mems, peakPercentile)),
 		SampleCount:     len(window),
 	}
 }
