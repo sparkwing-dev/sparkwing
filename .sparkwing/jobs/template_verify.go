@@ -14,6 +14,7 @@ import (
 	"time"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -215,8 +216,10 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 			}
 			defer cleanup()
 			runCmd := sparkwing.Exec(ctx, bin, "run", m.Name).
-				Dir(scratch).
-				Env("SPARKWING_HOME", templateRunHome(scratch))
+				Dir(scratch)
+			for name, value := range templateRunAdmissionEnv(scratch) {
+				runCmd = runCmd.Env(name, value)
+			}
 			mode := "ran green"
 			if m.Tier() == templates.VerifyDryRunnable {
 				runCmd = runCmd.Env("SPARKWING_DRY_RUN", "1")
@@ -238,6 +241,14 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 
 func templateRunHome(scratch string) string {
 	return filepath.Join(scratch, ".sparkwing-state")
+}
+
+func templateRunAdmissionEnv(scratch string) map[string]string {
+	return map[string]string{
+		"SPARKWING_HOME":            templateRunHome(scratch),
+		wingwire.LeaseTokenEnv:      "",
+		wingwire.ChildLeaseTokenEnv: "",
+	}
 }
 
 // sortedParamFlags renders a verify_params map as sorted "k=v" strings
