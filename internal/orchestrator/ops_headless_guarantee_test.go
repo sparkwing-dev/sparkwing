@@ -86,6 +86,7 @@ import (
 type Noop struct{ sparkwing.Base }
 
 func (p *Noop) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	plan.Resources(sparkwing.Cores(0.25), sparkwing.MemoryGB(0.25))
 	sparkwing.Job(plan, "noop", func(ctx context.Context) error {
 		sparkwing.Info(ctx, "noop ok")
 		return nil

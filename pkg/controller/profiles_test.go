@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -27,7 +28,7 @@ func TestFinishRun_FoldsProfilesAndEmitsPinDrift(t *testing.T) {
 	ctx := context.Background()
 
 	pipeline := "deploy"
-	for range 2 {
+	for range capacity.MinSamples - 1 {
 		if err := st.RecordProfileObservation(ctx, pipeline, "node-1", store.ProfileObservation{
 			Duration: time.Minute, PeakCores: 1, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 		}); err != nil {
@@ -66,8 +67,8 @@ func TestFinishRun_FoldsProfilesAndEmitsPinDrift(t *testing.T) {
 	if err != nil || prof == nil {
 		t.Fatalf("profile after fold: %v", err)
 	}
-	if prof.SampleCount != 3 {
-		t.Errorf("folded sample count = %d, want 3", prof.SampleCount)
+	if prof.SampleCount != capacity.MinSamples {
+		t.Errorf("folded sample count = %d, want %d", prof.SampleCount, capacity.MinSamples)
 	}
 
 	events, err := st.ListEventsAfter(ctx, "run-1", 0, 100)
