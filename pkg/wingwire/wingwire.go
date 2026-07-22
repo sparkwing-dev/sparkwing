@@ -35,7 +35,7 @@ import (
 // and a client interoperate exactly when they share this value; a
 // mismatch means the client must trigger a daemon takeover (client
 // newer) or fail with a clear upgrade message (client older).
-const ProtocolMajor = 1
+const ProtocolMajor = 2
 
 // LeaseTokenEnv is the environment variable a parent run sets on child
 // processes it spawns. A child that finds it presents the token in

@@ -19,8 +19,9 @@ func roundTripMessages() []Message {
 		&Hello{ProtocolMajor: 1, BinaryVersion: "v0.15.6"},
 		&HelloAck{ProtocolMajor: 1, BinaryVersion: "v0.16.0", Draining: true},
 		&AdmissionRequest{
-			RunID:     "deploy-20260710-120000",
-			Resources: HostResources{Cores: 2.5, MemoryBytes: 4 << 30},
+			RunID:         "deploy-20260710-120000/build/1",
+			ExecutionOnly: true,
+			Resources:     HostResources{Cores: 2.5, MemoryBytes: 4 << 30},
 			Semaphores: []SemaphoreClaim{
 				{Name: "deploy-lock", Cost: 1, Capacity: 1, Policy: PolicyQueue, QueueTimeoutMS: 60_000},
 				{Name: "db", Cost: 4, Capacity: 8, Policy: PolicyCancelOthers},
