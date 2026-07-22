@@ -892,6 +892,15 @@ func TestWingd_NodeGroupSerializesAcrossRuns(t *testing.T) {
 		}
 	}
 
+	unrelated, err := Run(context.Background(), backends, Options{
+		Pipeline:  "wingd-e2e-quick",
+		RunID:     "wingd-sem-unrelated",
+		Admission: testWingdAdmission(home, nil),
+	})
+	if err != nil || unrelated.Status != "success" {
+		t.Fatalf("unrelated run = %+v, %v; want admission while the competing node waits", unrelated, err)
+	}
+
 	close(gate.release)
 	for range 2 {
 		select {
