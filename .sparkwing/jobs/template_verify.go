@@ -26,7 +26,7 @@ import (
 var verifyTemplates, verifyTemplatesErr = templates.List()
 
 var templateVerifyGroup = sparkwing.NewConcurrencyGroup("template-verify", sparkwing.ConcurrencyLimit{
-	Capacity: 4,
+	Capacity: 1,
 	Scope:    sparkwing.ScopeRun,
 	OnLimit:  sparkwing.Queue,
 })

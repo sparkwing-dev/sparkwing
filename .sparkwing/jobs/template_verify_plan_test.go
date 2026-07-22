@@ -25,7 +25,7 @@ func TestTemplateVerifyPlanBoundsTemplateFanout(t *testing.T) {
 			t.Fatalf("%s has no fanout bound", node.ID())
 		}
 		limit := group.Limit()
-		if group.Name() != "template-verify" || limit.Scope != sparkwing.ScopeRun || limit.OnLimit != sparkwing.Queue || limit.Capacity != 4 {
+		if group.Name() != "template-verify" || limit.Scope != sparkwing.ScopeRun || limit.OnLimit != sparkwing.Queue || limit.Capacity != 1 {
 			t.Fatalf("%s concurrency = %q %+v", node.ID(), group.Name(), limit)
 		}
 	}
