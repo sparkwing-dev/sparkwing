@@ -48,6 +48,25 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **admission:** unpinned local work admits CPU and memory per node instead of
+  reserving one host charge for the run's lifetime. Node concurrency and host
+  resources grant atomically, so a node waiting on a concurrency limit holds
+  neither and unrelated work can use the box.
+- **admission:** capacity learning records node demand and re-measures plans
+  when their concurrency declarations change. Explicit run resources retain
+  run-lifetime admission semantics.
+- **admission:** higher-priority plans admit before lower-priority plans, while
+  equal priorities retain FIFO order. Bounded backfill admits work that fits
+  without starving the oldest compatible waiter.
+- **cli:** queue views expose execution holders and waiters with node identity,
+  priority, blocking resources, and separate capacity/concurrency wait data.
+- **admission:** (Breaking) the local daemon wire protocol advances to v2 for
+  phase-scoped leases and child attachment. Clients and daemons using different
+  protocol majors refuse to share a live ledger; upgrade every Sparkwing
+  process on a host together.
+
 ## [v0.20.0] - 2026-07-21
 ### Fixed
 
