@@ -337,6 +337,7 @@ func (la *LocalAdmission) applyHostCeiling(ctx context.Context, res capacity.Res
 	if !ok {
 		return res, ""
 	}
+	res = capacity.ApplyUnknownHostEnvelope(res, grantCores, grantMem)
 	return capacity.ApplyHostCeiling(res, machineCores, grantCores, grantMem)
 }
 

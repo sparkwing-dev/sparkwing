@@ -83,6 +83,19 @@ type Resolution struct {
 	ExpectedDuration time.Duration
 }
 
+func ApplyUnknownHostEnvelope(res Resolution, grantableCores float64, grantableMemoryBytes int64) Resolution {
+	if res.Source != store.CostSourceDefault {
+		return res
+	}
+	if grantableCores > 0 {
+		res.Cores = grantableCores
+	}
+	if grantableMemoryBytes > 0 {
+		res.MemoryBytes = grantableMemoryBytes
+	}
+	return res
+}
+
 // Resolve applies the resolution order. A non-empty pin wins verbatim; a
 // measured profile of the run's own version (matching plan hash) with at
 // least MinSamples clean samples supplies the measured peaks; a version that
