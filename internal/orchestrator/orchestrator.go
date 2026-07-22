@@ -265,7 +265,18 @@ type Result struct {
 
 // Run executes the pipeline to terminal state through Backends.
 // Caller owns Backends lifecycle. See RunLocal for a managed wrapper.
-func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) {
+func Run(ctx context.Context, backends Backends, opts Options) (result *Result, returnedErr error) {
+	if controller := executionLeaseControllerFromContext(ctx); controller != nil {
+		if err := controller.yield(); err != nil {
+			return nil, fmt.Errorf("yield parent execution lease: %w", err)
+		}
+		defer func() {
+			if err := controller.resume(nodeParentContextFromContext(ctx)); err != nil && returnedErr == nil {
+				result = nil
+				returnedErr = fmt.Errorf("resume parent execution lease: %w", err)
+			}
+		}()
+	}
 	ctx = withoutExecutionAdmission(ctx)
 	reg, ok := sparkwing.Lookup(opts.Pipeline)
 	if !ok {
