@@ -39,7 +39,7 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	}
 
 	pin := &capacity.Pin{Cores: 1}
-	recordRunProfile(ctx, st, "demo", "r1", pin, "", runCharge{}, false, start, start.Add(6*time.Second))
+	recordRunProfile(ctx, st, "demo", "r1", pin, "plan-shape", runCharge{}, false, start, start.Add(6*time.Second), map[string]string{"build": "node-shape"})
 
 	rollup, err := st.GetPipelineProfile(ctx, "demo", "")
 	if err != nil || rollup == nil {
@@ -61,6 +61,12 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	}
 	if node.PeakMemoryBytes != 3<<30 {
 		t.Errorf("node PeakMemoryBytes = %d, want %d", node.PeakMemoryBytes, 3<<30)
+	}
+	if node.PlanHash != "node-shape" {
+		t.Errorf("node PlanHash = %q, want node-shape", node.PlanHash)
+	}
+	if rollup.PlanHash != "plan-shape" {
+		t.Errorf("rollup PlanHash = %q, want plan-shape", rollup.PlanHash)
 	}
 }
 

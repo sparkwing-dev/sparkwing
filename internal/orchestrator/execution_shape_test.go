@@ -10,10 +10,17 @@ import (
 
 type executionShapeJob struct {
 	sparkwing.Base
-	variant string
+	Variant string
 }
 
 func (*executionShapeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", func(context.Context) error { return nil })
+	return nil, nil
+}
+
+type alternateExecutionShapeJob struct{ sparkwing.Base }
+
+func (*alternateExecutionShapeJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "run", func(context.Context) error { return nil })
 	return nil, nil
 }
@@ -31,6 +38,21 @@ func TestExecutionShapeHash_IsStableAcrossDependencyDeclarationOrder(t *testing.
 
 	if got, want := executionShapeHash(left), executionShapeHash(right); got != want {
 		t.Fatalf("dependency declaration order changed shape: %q != %q", got, want)
+	}
+}
+
+func TestExecutionShapeHash_Golden(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	dep := sparkwing.Job(plan, "source", &executionShapeJob{})
+	node := sparkwing.Job(plan, "target", &executionShapeJob{}).
+		Needs(dep).
+		Resources(sparkwing.Cores(2), sparkwing.MemoryGB(1)).
+		Retry(2, sparkwing.RetryBackoff(time.Second)).
+		Timeout(time.Minute).
+		Requires("linux")
+	const want = "a37ac7f01d061c33f6d3045fe3eac27f954e8baec1c6ed411f2b961d22b74e69"
+	if got := executionShapeHash(node); got != want {
+		t.Fatalf("execution shape = %q, want %q", got, want)
 	}
 }
 
@@ -60,8 +82,6 @@ func TestExecutionShapeHash_ChangesWithCostBearingExecutionPolicy(t *testing.T) 
 }
 
 func TestExecutionShapeHash_ChangesWithActionType(t *testing.T) {
-	type alternateExecutionShapeJob struct{ sparkwing.Base }
-
 	leftPlan := sparkwing.NewPlan()
 	left := sparkwing.Job(leftPlan, "target", &executionShapeJob{})
 	rightPlan := sparkwing.NewPlan()
@@ -72,3 +92,13 @@ func TestExecutionShapeHash_ChangesWithActionType(t *testing.T) {
 	}
 }
 
+func TestExecutionShapeHash_ChangesWithActionConfiguration(t *testing.T) {
+	leftPlan := sparkwing.NewPlan()
+	left := sparkwing.Job(leftPlan, "target", &executionShapeJob{Variant: "small"})
+	rightPlan := sparkwing.NewPlan()
+	right := sparkwing.Job(rightPlan, "target", &executionShapeJob{Variant: "large"})
+
+	if got, wantNot := executionShapeHash(right), executionShapeHash(left); got == wantNot {
+		t.Fatalf("action configuration left shape unchanged: %q", got)
+	}
+}

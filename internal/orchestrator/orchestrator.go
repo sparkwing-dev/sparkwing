@@ -544,7 +544,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			if lease != nil {
 				charge = lease.charge
 			}
-			recordRunProfile(finishCtx, st, opts.Pipeline, runID, planPin(plan), planTopologyHash(plan.Nodes()), charge, contended, execStart, time.Now())
+			recordRunProfile(finishCtx, st, opts.Pipeline, runID, planPin(plan), planTopologyHash(plan.Nodes()), charge, contended, execStart, time.Now(), executionShapeHashes(plan.Nodes()))
 		}
 	}
 	if lease != nil && lease.driftWarning != "" && opts.Delegate != nil {

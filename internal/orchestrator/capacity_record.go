@@ -36,7 +36,7 @@ type runCharge struct {
 // measured its allocation, not its demand, so it never folds into the clean
 // window or per-node peaks -- it only raises the rollup's demand floor, and
 // escalates that floor to its whole charge when it hit the ceiling.
-func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID string, pin *capacity.Pin, planHash string, charge runCharge, contended bool, execStart, execEnd time.Time) {
+func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID string, pin *capacity.Pin, planHash string, charge runCharge, contended bool, execStart, execEnd time.Time, nodeShapeSets ...map[string]string) {
 	if st == nil || pipeline == "" {
 		return
 	}
@@ -73,12 +73,16 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 		if contended {
 			continue
 		}
+		nodeShape := planHash
+		if len(nodeShapeSets) > 0 {
+			nodeShape = nodeShapeSets[0][n.NodeID]
+		}
 		_ = st.RecordProfileObservation(ctx, pipeline, n.NodeID, store.ProfileObservation{
 			Duration:        nodeDuration(n, samples),
 			PeakCores:       peakCores,
 			PeakMemoryBytes: peakMem,
 			CPUMeasured:     cpuMeasured,
-			PlanHash:        planHash,
+			PlanHash:        nodeShape,
 		})
 	}
 	if !measured {

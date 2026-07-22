@@ -322,7 +322,7 @@ func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Back
 			profile = p
 		}
 	}
-	res := capacity.Resolve(pin, profile, runtime.NumCPU(), "")
+	res := capacity.Resolve(pin, profile, runtime.NumCPU(), executionShapeHash(node))
 	res, overCap := la.applyHostCeiling(ctx, res)
 	return res, profile, capacity.CheckDrift(pin, profile), overCap
 }
