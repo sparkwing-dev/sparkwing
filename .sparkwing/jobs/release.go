@@ -110,6 +110,10 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	})
 	gateTemplates.Needs(clean)
 
+	gateLineage := sparkwing.Job(plan, "gate-release-lineage", &checkReleaseLineageJob{
+		RepoDir: repoDir,
+	})
+
 	changelog := sparkwing.Job(plan, "prepare-changelog", &prepareChangelogJob{
 		RepoDir: repoDir,
 		Version: versionRef,
@@ -132,7 +136,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		Version: versionRef,
 		RepoDir: repoDir,
 	})
-	pushTag.Needs(validate, clean, changelog, bumpSelf, schemaGate, gateTemplates)
+	pushTag.Needs(validate, clean, changelog, bumpSelf, schemaGate, gateTemplates, gateLineage)
 
 	restoreSelf := sparkwing.Job(plan, "restore-self-replace", &restoreSelfReplaceJob{
 		RepoDir: repoDir,
@@ -893,6 +897,60 @@ func ensureBranchContainsRemote(ctx context.Context, repoDir, branch string) err
 		return fmt.Errorf("release: local %s does not contain %s; pull/rebase before releasing", branch, remoteRef)
 	}
 	return nil
+}
+
+// checkReleaseLineageJob refuses to cut a release from a line whose
+// history does not contain the latest published release. That state
+// means an earlier release was cut from a branch that never landed
+// here; shipping over it would silently drop that release's work.
+type checkReleaseLineageJob struct {
+	sparkwing.Base
+	RepoDir string
+}
+
+func (j *checkReleaseLineageJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", j.run).SafeWithoutDryRun()
+	return nil, nil
+}
+
+func (j *checkReleaseLineageJob) run(ctx context.Context) error {
+	return ensureLineageContainsLatestRelease(ctx, j.RepoDir)
+}
+
+// ensureLineageContainsLatestRelease verifies the latest release tag on
+// origin is an ancestor of HEAD. Tags are read from origin (never the
+// local tag list) so a stale checkout cannot pass; the retracted v1.x
+// tombstone line is excluded by the same rule the bump resolver uses. A
+// repo with no release tags passes: there is no lineage to contain yet.
+func ensureLineageContainsLatestRelease(ctx context.Context, repoDir string) error {
+	latest, err := latestSemverTagIn(ctx, repoDir)
+	if err != nil {
+		return fmt.Errorf("release: resolve latest release tag: %w", err)
+	}
+	if latest == "" {
+		return nil
+	}
+	if _, err := runGitIn(ctx, repoDir, "fetch", "--quiet", "origin", "refs/tags/"+latest); err != nil {
+		return fmt.Errorf("release: fetch tag %s for lineage check: %w", latest, err)
+	}
+	sha, err := runGitIn(ctx, repoDir, "rev-parse", "FETCH_HEAD^{commit}")
+	if err != nil {
+		return fmt.Errorf("release: resolve %s commit: %w", latest, err)
+	}
+	sha = strings.TrimSpace(sha)
+	_, err = sparkwing.Exec(ctx, "git", "merge-base", "--is-ancestor", sha, "HEAD").Dir(repoDir).Run()
+	if err == nil {
+		sparkwing.Info(ctx, "history contains the latest release %s", latest)
+		return nil
+	}
+	var ee *sparkwing.ExecError
+	if errors.As(err, &ee) && ee.ExitCode == 1 {
+		return fmt.Errorf("release: the latest release %s is not in this line's history. "+
+			"An earlier release was cut from a branch that never landed here, so releasing now would ship without that work and silently drop it. "+
+			"Bring the %s line back first -- `git fetch --tags origin && git log %s --not HEAD` lists the missing commits; merge or cherry-pick them -- then re-run",
+			latest, latest, latest)
+	}
+	return fmt.Errorf("release: lineage check for %s: %w", latest, err)
 }
 
 func validateReleaseVersion(v string) error {
