@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.21.0] - 2026-07-22
 ### Changed
 
 - **admission:** unpinned local work admits CPU and memory per node instead of
