@@ -3,6 +3,7 @@ package wingd
 import (
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
@@ -13,6 +14,9 @@ import (
 // advertises for a wedged holder. It cancels one run by id and never
 // touches shared host state.
 func stallRecoveryCommand(runID string) string {
+	if parent, _, ok := strings.Cut(runID, "/"); ok {
+		runID = parent
+	}
 	return fmt.Sprintf("sparkwing runs cancel --run %s", runID)
 }
 

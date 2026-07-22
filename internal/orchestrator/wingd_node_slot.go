@@ -192,7 +192,9 @@ func (r *InProcessRunner) acquireNodeResources(ctx context.Context, runID string
 	acquire := func(acquireCtx context.Context) (executionLease, error) {
 		return la.acquireNodeExecution(acquireCtx, pipeline, runID, node.ID(), resources, wingwire.CostSource(resolved.Source), resolved.ExpectedDuration, warning, claims, reporter.onQueued)
 	}
+	stopHeartbeat := reporter.startHeartbeat(ctx)
 	lease, err := acquire(ctx)
+	stopHeartbeat()
 	if err != nil {
 		return nil, err
 	}

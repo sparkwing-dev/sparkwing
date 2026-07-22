@@ -78,7 +78,9 @@ func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
 	home := wingdTestHome(t)
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
-	seedProfile(t, st, "wingd-e2e-unpinned", store.ProfileObservation{
+	profilePlan := sparkwing.NewPlan()
+	_ = (wingdUnpinnedHoldPipe{}).Plan(context.Background(), profilePlan, sparkwing.NoInputs{}, sparkwing.RunContext{})
+	seedProfile(t, st, "wingd-e2e-unpinned", profilePlan.Job("hold"), store.ProfileObservation{
 		Duration: 10 * time.Second, PeakCores: 18.9, PeakMemoryBytes: 1 << 30, CPUMeasured: true,
 	}, capacity.MinSamples)
 

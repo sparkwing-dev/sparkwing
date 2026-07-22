@@ -408,17 +408,28 @@ func findWingdHolder(t *testing.T, home, runID string) wingwire.Holder {
 // present, without blocking.
 func findQueuedWaiter(qs wingwire.QueueState, runID string) (wingwire.Waiter, bool) {
 	for _, w := range qs.Waiters {
-		if w.RunID == runID {
+		if w.RunID == runID || strings.HasPrefix(w.RunID, runID+"/") {
 			return w, true
 		}
 	}
 	return wingwire.Waiter{}, false
 }
 
-func seedProfile(t *testing.T, st *store.Store, pipeline string, obs store.ProfileObservation, runs int) {
+func resourceHoldingExecutions(qs wingwire.QueueState) []wingwire.Holder {
+	var holders []wingwire.Holder
+	for _, holder := range qs.Holders {
+		if holder.Resources.Cores > 0 || holder.Resources.MemoryBytes > 0 {
+			holders = append(holders, holder)
+		}
+	}
+	return holders
+}
+
+func seedProfile(t *testing.T, st *store.Store, pipeline string, node *sparkwing.JobNode, obs store.ProfileObservation, runs int) {
 	t.Helper()
+	obs.PlanHash = executionShapeHash(node)
 	for range runs {
-		if err := st.RecordProfileObservation(context.Background(), pipeline, "", obs); err != nil {
+		if err := st.RecordProfileObservation(context.Background(), pipeline, node.ID(), obs); err != nil {
 			t.Fatalf("seed profile: %v", err)
 		}
 	}
@@ -429,9 +440,11 @@ func TestWingd_SecondRunAdmittedWithMeasuredCost(t *testing.T) {
 	home := wingdTestHome(t)
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
-	seedProfile(t, st, "wingd-e2e-unpinned", store.ProfileObservation{
+	profilePlan := sparkwing.NewPlan()
+	_ = (wingdUnpinnedHoldPipe{}).Plan(context.Background(), profilePlan, sparkwing.NoInputs{}, sparkwing.RunContext{})
+	seedProfile(t, st, "wingd-e2e-unpinned", profilePlan.Job("hold"), store.ProfileObservation{
 		Duration: 20 * time.Second, PeakCores: 1.5, PeakMemoryBytes: 1 << 30,
-	}, 3)
+	}, capacity.MinSamples)
 
 	gate := newWingdGate()
 	wingdE2EGate.Store(gate)
@@ -481,7 +494,9 @@ func TestWingd_ZeroCPUPipelineAdmitsAtTinyMeasuredCostAlongsideHeavyWork(t *test
 	home := wingdTestHome(t)
 	startWingd(t, home, 2)
 	backends, st, _ := openWingdBackends(t, home)
-	seedProfile(t, st, "wingd-e2e-unpinned", store.ProfileObservation{
+	profilePlan := sparkwing.NewPlan()
+	_ = (wingdUnpinnedHoldPipe{}).Plan(context.Background(), profilePlan, sparkwing.NoInputs{}, sparkwing.RunContext{})
+	seedProfile(t, st, "wingd-e2e-unpinned", profilePlan.Job("hold"), store.ProfileObservation{
 		Duration: 5 * time.Second, PeakCores: 0, PeakMemoryBytes: 64 << 20, CPUMeasured: true,
 	}, capacity.MinSamples)
 
@@ -546,9 +561,11 @@ func TestWingd_UnderPinnedRunCarriesDriftWarning(t *testing.T) {
 	home := wingdTestHome(t)
 	startWingd(t, home, 8)
 	backends, st, _ := openWingdBackends(t, home)
-	seedProfile(t, st, "wingd-e2e-hold", store.ProfileObservation{
+	profilePlan := sparkwing.NewPlan()
+	_ = (wingdHoldPipe{cores: 1.5}).Plan(context.Background(), profilePlan, sparkwing.NoInputs{}, sparkwing.RunContext{})
+	seedProfile(t, st, "wingd-e2e-hold", profilePlan.Job("hold"), store.ProfileObservation{
 		Duration: 10 * time.Second, PeakCores: 9, PeakMemoryBytes: 1 << 30,
-	}, 4)
+	}, capacity.MinSamples)
 
 	gate := newWingdGate()
 	wingdE2EGate.Store(gate)
@@ -1201,7 +1218,8 @@ func TestWingd_DaemonFirstCancelRemovesQueuedWaiterWithoutDashboard(t *testing.T
 			continue
 		}
 		b, ok := findQueuedWaiter(qs, "cancel-waiter-b")
-		if ok && b.Position == 1 && len(qs.Holders) == 1 && qs.Holders[0].RunID == "cancel-holder" {
+		holders := resourceHoldingExecutions(qs)
+		if ok && b.Position == 1 && len(holders) == 1 && strings.HasPrefix(holders[0].RunID, "cancel-holder/") {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -1214,7 +1232,8 @@ func TestWingd_DaemonFirstCancelRemovesQueuedWaiterWithoutDashboard(t *testing.T
 	if !ok || b.Position != 1 {
 		t.Fatalf("waiter-b position after cancel = %d (present=%v), want 1 (positions re-stated)", b.Position, ok)
 	}
-	if len(qs.Holders) != 1 || qs.Holders[0].RunID != "cancel-holder" {
+	holders := resourceHoldingExecutions(qs)
+	if len(holders) != 1 || !strings.HasPrefix(holders[0].RunID, "cancel-holder/") {
 		t.Fatalf("holder disturbed by waiter cancel: holders = %+v", qs.Holders)
 	}
 
