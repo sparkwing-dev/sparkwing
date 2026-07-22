@@ -82,6 +82,10 @@ code change to unlock.
 
 ### Fixed
 
+- **release:** template verification now runs after the pre-push gate and
+  isolates each generated pipeline's daemon state and lease environment.
+  Release validation no longer races Terraform providers for host capacity
+  or attaches generated pipelines to a daemon with an incompatible protocol.
 - **admission:** a queued run that reconnects (client restart, daemon
   takeover) reattaches to its existing waiter instead of losing its
   place or duplicating itself; retry matching validates request shape,
