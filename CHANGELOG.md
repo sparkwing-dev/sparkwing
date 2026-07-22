@@ -48,6 +48,30 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **admission:** local runs hold host CPU and memory only while a node is
+  executable. Host resources, node concurrency, and dispatcher capacity enter
+  one atomic admission request, so work queued on a concurrency limit retains
+  none of those resources and unrelated work can use the box.
+- **admission:** capacity profiles are keyed by a canonical execution shape.
+  Lightweight plans no longer inherit heavyweight estimates from another plan
+  using the same pipeline name, while unknown shapes reserve the host's
+  grantable CPU and memory until five clean observations establish a profile.
+- **admission:** execution leases survive client disconnects and daemon
+  restarts through a bounded reattachment window. Nested synchronous runs
+  release the parent's execution resources while awaiting child work and
+  reacquire them before resuming.
+
+### Added
+
+- **concurrency:** shared coordination backends support durable reservation
+  tickets, preserving queue age while local execution admission completes.
+
+- **admission:** (Breaking) the local daemon wire protocol advances to v2 for phase-scoped
+  accounting. Clients and daemons using different protocol majors refuse to
+  share a live ledger; upgrade every Sparkwing process on a host together.
+
 ## [v0.20.0] - 2026-07-21
 ### Fixed
 
