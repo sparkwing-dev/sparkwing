@@ -124,7 +124,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 		Version: versionRef,
 	})
-	bumpSelf.Needs(discover, gatePreCommit, gatePrePush, changelog)
+	bumpSelf.Needs(discover, gatePreCommit, gatePrePush, gateTemplates, changelog)
 
 	schemaGate := sparkwing.Job(plan, "gate-schema-changelog", &checkSchemaBreakJob{
 		RepoDir: repoDir,
