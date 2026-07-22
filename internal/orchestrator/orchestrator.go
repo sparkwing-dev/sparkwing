@@ -266,6 +266,7 @@ type Result struct {
 // Run executes the pipeline to terminal state through Backends.
 // Caller owns Backends lifecycle. See RunLocal for a managed wrapper.
 func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) {
+	ctx = withoutExecutionAdmission(ctx)
 	reg, ok := sparkwing.Lookup(opts.Pipeline)
 	if !ok {
 		return nil, fmt.Errorf("pipeline %q is not registered", opts.Pipeline)
@@ -1444,7 +1445,7 @@ func newDispatchState(
 // pipelineAwaiter enqueues a child trigger, polls until terminal,
 // returns the target node's output bytes.
 func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
-	return sparkwing.PipelineAwaiterFunc(func(ctx context.Context, req sparkwing.AwaitRequest) (*sparkwing.ResolvedPipelineRef, error) {
+	return sparkwing.PipelineAwaiterFunc(func(ctx context.Context, req sparkwing.AwaitRequest) (resolved *sparkwing.ResolvedPipelineRef, returnedErr error) {
 		currentNode := sparkwing.NodeFromContext(ctx)
 
 		var childRetryOf string
@@ -1500,6 +1501,17 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				"child_run_start", payload); ev != nil {
 				sparkwing.Warn(ctx, "child_run_start audit event append failed: %v", ev)
 			}
+		}
+		if controller := executionLeaseControllerFromContext(ctx); controller != nil {
+			if err := controller.yield(); err != nil {
+				return nil, fmt.Errorf("yield parent execution lease: %w", err)
+			}
+			defer func() {
+				if err := controller.resume(nodeParentContextFromContext(ctx)); err != nil && returnedErr == nil {
+					resolved = nil
+					returnedErr = fmt.Errorf("resume parent execution lease: %w", err)
+				}
+			}()
 		}
 
 		pollCtx := ctx

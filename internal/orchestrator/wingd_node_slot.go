@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -116,14 +117,65 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 }
 
 type executionAdmissionCtxKey struct{}
+type executionLeaseControllerCtxKey struct{}
+
+type executionLease interface {
+	Release() error
+}
+
+type executionLeaseController struct {
+	mu      sync.Mutex
+	lease   executionLease
+	acquire func(context.Context) (executionLease, error)
+}
+
+func newExecutionLeaseController(lease executionLease, acquire func(context.Context) (executionLease, error)) *executionLeaseController {
+	return &executionLeaseController{lease: lease, acquire: acquire}
+}
+
+func (c *executionLeaseController) yield() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lease == nil {
+		return nil
+	}
+	err := c.lease.Release()
+	c.lease = nil
+	return err
+}
+
+func (c *executionLeaseController) resume(ctx context.Context) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.lease != nil {
+		return nil
+	}
+	lease, err := c.acquire(ctx)
+	if err != nil {
+		return err
+	}
+	c.lease = lease
+	return nil
+}
+
+func (c *executionLeaseController) release() error { return c.yield() }
 
 func withExecutionAdmission(ctx context.Context) context.Context {
 	return context.WithValue(ctx, executionAdmissionCtxKey{}, true)
 }
 
+func withoutExecutionAdmission(ctx context.Context) context.Context {
+	return context.WithValue(ctx, executionAdmissionCtxKey{}, false)
+}
+
 func executionAdmissionFromContext(ctx context.Context) bool {
 	admitted, _ := ctx.Value(executionAdmissionCtxKey{}).(bool)
 	return admitted
+}
+
+func executionLeaseControllerFromContext(ctx context.Context) *executionLeaseController {
+	controller, _ := ctx.Value(executionLeaseControllerCtxKey{}).(*executionLeaseController)
+	return controller
 }
 
 func (r *InProcessRunner) acquireNodeResources(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
@@ -137,15 +189,20 @@ func (r *InProcessRunner) acquireNodeResources(ctx context.Context, runID string
 	warning := hostChargeWarning(drift, overCap)
 	reporter := &queueWaitReporter{la: la, ctx: ctx, backends: r.backends, runID: runID}
 	claims := executionClaims(runID, localMaxParallelFromContext(ctx))
-	lease, err := la.acquireNodeExecution(ctx, pipeline, runID, node.ID(), resources, wingwire.CostSource(resolved.Source), resolved.ExpectedDuration, warning, claims, reporter.onQueued)
+	acquire := func(acquireCtx context.Context) (executionLease, error) {
+		return la.acquireNodeExecution(acquireCtx, pipeline, runID, node.ID(), resources, wingwire.CostSource(resolved.Source), resolved.ExpectedDuration, warning, claims, reporter.onQueued)
+	}
+	lease, err := acquire(ctx)
 	if err != nil {
 		return nil, err
 	}
 	if reporter.waited() {
 		fmt.Fprintln(la.stderr(), "admitted; starting run")
 	}
-	defer func() { _ = lease.Release() }()
-	return r.executeNodeAdmitted(withExecutionAdmission(ctx), runID, node, delegate)
+	controller := newExecutionLeaseController(lease, acquire)
+	defer func() { _ = controller.release() }()
+	execCtx := context.WithValue(withExecutionAdmission(ctx), executionLeaseControllerCtxKey{}, controller)
+	return r.executeNodeAdmitted(execCtx, runID, node, delegate)
 }
 
 func executionClaims(runID string, maxParallel int, claims ...wingwire.SemaphoreClaim) []wingwire.SemaphoreClaim {
