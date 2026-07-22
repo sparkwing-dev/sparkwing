@@ -96,13 +96,20 @@ type SemaphoreClaim struct {
 	CancelTimeoutMS int64 `json:"cancel_timeout_ms,omitempty"`
 }
 
-// AdmissionRequest asks the daemon for everything a run needs in one
-// all-or-nothing grant: host resources plus every logical semaphore.
-// There is no partial admission and no ordered-acquisition dance; the
-// daemon answers with [Grant], a stream of [Queued] positions followed
-// by a [Grant], or an [Evicted] terminal event, per the policies.
+// AdmissionRequest asks the daemon for one admission lease. A request
+// may combine host resources and logical semaphores, draw only host
+// resources for a node, or draw only semaphores for a run-level claim.
+// The daemon answers with [Grant], a stream of [Queued] positions
+// followed by a [Grant], or an [Evicted] terminal event, per the
+// policies.
 type AdmissionRequest struct {
 	RunID string `json:"run_id"`
+	// OwnerRunID is the real run that owns an internal participant. Empty
+	// means the participant is the run.
+	OwnerRunID string `json:"owner_run_id,omitempty"`
+	// DisplayRunID is the label queue views print for this participant.
+	// Empty means display the owner run.
+	DisplayRunID string `json:"display_run_id,omitempty"`
 	// Pipeline is the pipeline name behind the run, carried purely for
 	// display in the queue view. Empty for requests that have no
 	// pipeline (a semaphores-only node acquisition inherits the run's).
@@ -117,9 +124,9 @@ type AdmissionRequest struct {
 	// is alive but idle while waiters queue behind it. Zero disables
 	// stall sampling for the holder.
 	PID int `json:"pid,omitempty"`
-	// Resources is the host capacity the run is expected to occupy.
-	// A zero value means the run declared no hints and the daemon
-	// charges its conservative default.
+	// Resources is the host capacity the lease is expected to occupy. A
+	// zero value means the request declared no hints and the daemon
+	// charges its conservative default unless SemaphoresOnly is set.
 	Resources  HostResources    `json:"resources"`
 	Semaphores []SemaphoreClaim `json:"semaphores,omitempty"`
 	// ParentLeaseToken attaches this run to a live parent lease (see
@@ -128,23 +135,25 @@ type AdmissionRequest struct {
 	ParentLeaseToken string `json:"parent_lease_token,omitempty"`
 	// SemaphoresOnly marks a request that draws no host budget even when
 	// Resources is zero: the daemon must not substitute its conservative
-	// default charge. Used for short-lived semaphore acquisitions made
-	// from inside an already-admitted run (node-level concurrency
-	// groups).
+	// default charge. Used for run-level semaphore claims and short-lived
+	// semaphore acquisitions made from inside an already-admitted run.
 	SemaphoresOnly bool `json:"semaphores_only,omitempty"`
+	// SubLease marks an internal lease whose parent run owns finalization.
+	// The daemon releases it on disconnect but never finalizes a run row for it.
+	SubLease bool `json:"sub_lease,omitempty"`
 	// CostSource names how Resources was resolved so the queue view can show
 	// where a charge came from. The daemon may cap measured costs to the
 	// largest idle-grantable request.
 	CostSource CostSource `json:"cost_source,omitempty"`
-	// ExpectedDurationMS is the pipeline's measured p50 run duration in
-	// milliseconds, used by the daemon to estimate queue ETAs. Zero means
-	// no measured duration exists yet, so the run contributes no ETA.
+	// ExpectedDurationMS is the admitted work item's measured p50 duration
+	// in milliseconds, used by the daemon to estimate queue ETAs. Zero means
+	// no measured duration exists yet, so the request contributes no ETA.
 	ExpectedDurationMS int64 `json:"expected_duration_ms,omitempty"`
-	// ExpectedP99MS is the pipeline's measured p99 run duration in
+	// ExpectedP99MS is the admitted work item's measured p99 duration in
 	// milliseconds. The daemon flags a holder as contended only once its
-	// elapsed time runs well past this baseline, so a run that is merely at
+	// elapsed time runs well past this baseline, so work that is merely at
 	// the slow end of its own distribution is never mistaken for throttled.
-	// Zero means no measured p99, which disqualifies the run from flagging.
+	// Zero means no measured p99, which disqualifies the holder from flagging.
 	ExpectedP99MS int64 `json:"expected_p99_ms,omitempty"`
 	// SampleCount is how many runs back the duration percentiles. The
 	// contention detector requires a minimum count so an unprofiled or
@@ -159,12 +168,17 @@ type AdmissionRequest struct {
 	// is treated as [OriginLocal]. Display metadata only; the daemon treats
 	// every requester equally.
 	Origin Origin `json:"origin,omitempty"`
+	// Priority orders queued work. Larger values admit before smaller
+	// values; equal values keep FIFO order.
+	Priority int `json:"priority,omitempty"`
 }
 
 // Grant is the daemon's admission of a request. The lease lives as
 // long as the client's connection; LeaseToken additionally lets the
 // holder [Reattach] within the grace window after a daemon restart or
-// takeover, and lets child runs inherit via [LeaseTokenEnv].
+// takeover. Child runs inherit it via [LeaseTokenEnv], or inherit a
+// separate child-attach token via [ChildLeaseTokenEnv] when the current
+// execution lease differs from the run-scope lease.
 type Grant struct {
 	RunID      string `json:"run_id"`
 	LeaseToken string `json:"lease_token"`
@@ -187,9 +201,9 @@ type Grant struct {
 	ExternalCores float64 `json:"external_cores,omitempty"`
 }
 
-// Queued reports a waiting run's position whenever it changes. Key
-// names what the run is waiting on -- a semaphore name, or a host
-// resource dimension ("cores", "memory").
+// Queued reports a waiting run's position whenever it changes. Key names
+// the semaphore whose live capacity blocks the run. Host pressure is
+// reported through BlockingReason.
 type Queued struct {
 	RunID string `json:"run_id"`
 	Key   string `json:"key"`
@@ -198,7 +212,7 @@ type Queued struct {
 	QueueLength int `json:"queue_length"`
 	// BlockingReason is a one-line explanation of what the run is waiting
 	// on -- naming needed versus available host capacity and external
-	// load when host pressure is the cause. Empty for a pure arrival-order
+	// load when host pressure is the cause. Empty for a pure admission-order
 	// wait or an older daemon.
 	BlockingReason string `json:"blocking_reason,omitempty"`
 }
@@ -279,6 +293,11 @@ type ResourceState struct {
 // [QueueState].
 type Holder struct {
 	RunID string `json:"run_id"`
+	// ParticipantID is the daemon lease key when it differs from RunID.
+	ParticipantID string `json:"participant_id,omitempty"`
+	// DisplayRunID is the label queue views print for this row. Empty
+	// means display RunID.
+	DisplayRunID string `json:"display_run_id,omitempty"`
 	// Pipeline is the pipeline name behind the run, for display. Empty
 	// when the run did not report one.
 	Pipeline string `json:"pipeline,omitempty"`
@@ -289,6 +308,9 @@ type Holder struct {
 	// Parent, when non-empty, names the holder this run is attached to:
 	// the run rides its parent's lease and draws no budget of its own.
 	Parent string `json:"parent,omitempty"`
+	// ParentParticipantID is the daemon lease key for Parent when that
+	// key differs from Parent.
+	ParentParticipantID string `json:"parent_participant_id,omitempty"`
 	// ElapsedMS is how long the run has held its lease, in
 	// milliseconds.
 	ElapsedMS int64 `json:"elapsed_ms"`
@@ -338,30 +360,36 @@ type Holder struct {
 }
 
 // Waiter is one run queued for admission, as reported in a
-// [QueueState]. Waiters appear in arrival order; Position is its
+// [QueueState]. Waiters appear in admission order; Position is its
 // 1-based place in that order.
 type Waiter struct {
 	RunID string `json:"run_id"`
+	// ParticipantID is the daemon lease key when it differs from RunID.
+	ParticipantID string `json:"participant_id,omitempty"`
+	// DisplayRunID is the label queue views print for this row. Empty
+	// means display RunID.
+	DisplayRunID string `json:"display_run_id,omitempty"`
 	// Pipeline is the pipeline name behind the run, for display. Empty
 	// when the run did not report one.
 	Pipeline string `json:"pipeline,omitempty"`
 	// Repo is the short repo name the run was launched from, for
 	// display. Empty when the run did not report one.
 	Repo string `json:"repo,omitempty"`
-	// Position is the waiter's 1-based place in arrival order; 1 is
+	// Position is the waiter's 1-based place in admission order; 1 is
 	// admitted next.
 	Position   int           `json:"position"`
+	Priority   int           `json:"priority,omitempty"`
 	Resources  HostResources `json:"resources"`
 	Semaphores []string      `json:"semaphores,omitempty"`
 	// WaitingOn names the resources the waiter lacks room for right now
 	// -- host dimensions ("cores", "memory") and full semaphore keys.
-	// Empty means the waiter is held only by arrival order behind a
+	// Empty means the waiter is held only by admission order behind a
 	// heavier request ahead of it.
 	WaitingOn []string `json:"waiting_on,omitempty"`
 	// BlockingReason is a one-line, human explanation of why this waiter
 	// is not yet admitted, naming what it needs against what is available
 	// and any external load ("needs 5.0 cores; 4.8 available (external
-	// load 3.2)"). Empty when the wait is pure arrival-order queueing or
+	// load 3.2)"). Empty when the wait is pure admission-order queueing or
 	// the daemon predates this field.
 	BlockingReason string `json:"blocking_reason,omitempty"`
 	// WaitingMS is how long the run has been queued, in milliseconds.

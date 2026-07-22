@@ -140,8 +140,9 @@ func TestTrigger_StripsClientSuppliedLeaseTokenEnv(t *testing.T) {
 		"trigger": map[string]any{
 			"source": "manual",
 			"env": map[string]string{
-				"SPARKWING_LEASE_TOKEN": "stale-local-token",
-				"SAFE":                  "kept",
+				"SPARKWING_LEASE_TOKEN":       "stale-local-token",
+				"SPARKWING_CHILD_LEASE_TOKEN": "stale-child-token",
+				"SAFE":                        "kept",
 			},
 		},
 	})
@@ -161,6 +162,9 @@ func TestTrigger_StripsClientSuppliedLeaseTokenEnv(t *testing.T) {
 	}
 	if trigger.TriggerEnv["SPARKWING_LEASE_TOKEN"] != "" {
 		t.Fatalf("local lease token persisted from public env: %+v", trigger.TriggerEnv)
+	}
+	if trigger.TriggerEnv["SPARKWING_CHILD_LEASE_TOKEN"] != "" {
+		t.Fatalf("child lease token persisted from public env: %+v", trigger.TriggerEnv)
 	}
 	if trigger.TriggerEnv["SAFE"] != "kept" {
 		t.Fatalf("safe env = %q, want kept", trigger.TriggerEnv["SAFE"])

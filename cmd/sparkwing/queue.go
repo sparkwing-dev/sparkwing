@@ -1,7 +1,7 @@
 // `sparkwing queue` -- the one truthful view of local admission. It
 // reads the local daemon's queue state and renders every resource with
 // its capacity and in-use amount, every holder with elapsed time and
-// cost, and every waiter in arrival order with what it is waiting on. A
+// cost, and every waiter in admission order with what it is waiting on. A
 // holder that is alive but idle while runs queue behind it is flagged
 // with the exact non-destructive recovery command. With no daemon
 // running there is nothing to arbitrate, so the command reports an empty

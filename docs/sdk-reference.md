@@ -936,6 +936,8 @@ type Plan struct {
 - `func (p *Plan) LintWarnings() []LintWarning` -- LintWarnings returns the non-fatal Plan-time advisories accumulated while building this Plan.
 - `func (p *Plan) Nodes() []*JobNode` -- Nodes returns the plan's nodes in insertion order.
 - `func (p *Plan) PlanConcurrency() []PlanConcurrency` -- PlanConcurrency returns every whole-run gate declared via Plan.Concurrency.
+- `func (p *Plan) Priority(n int) *Plan` -- Priority sets this run's local admission priority.
+- `func (p *Plan) PriorityValue() int` -- PriorityValue returns the run's local admission priority.
 - `func (p *Plan) ResolvedArgs() map[string]any` -- ResolvedArgs returns the merged map of every job's typed-args resolution result, keyed by CLI flag name.
 - `func (p *Plan) ResourceHints() *ResourceHints` -- ResourceHints returns a copy of the plan-level resource pin declared via Plan.Resources, or nil when the plan declared none.
 - `func (p *Plan) Resources(hints ...ResourceHint) *Plan` -- Resources pins the whole run's peak CPU and memory: an explicit, authoritative charge admission uses verbatim instead of measuring the pipeline.

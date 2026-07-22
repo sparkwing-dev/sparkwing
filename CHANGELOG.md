@@ -297,6 +297,114 @@ code change to unlock.
   making progress instead of parking every queued run behind a CPU-only
   deficit.
 
+## [v0.17.12] - 2026-07-15
+### Added
+
+- **admission:** Plans can now declare a local admission priority with
+  `Plan.Priority(n)`. Higher-priority queued runs admit before lower-priority
+  runs while equal-priority runs keep FIFO order; `sparkwing queue` now shows
+  waiter priority in human and plain output.
+- **cli:** Source-built scaffolds now fall back to the latest published SDK in
+  this release line when the running binary has no stamped version.
+
+## [v0.17.11] - 2026-07-14
+### Fixed
+
+- **admission:** Queued retries can now update a waiting request's measured
+  host cost before grant instead of failing with `duplicate` or running with a
+  stale charge. Node-level host resources and concurrency semaphores now admit
+  together, so a node no longer holds a semaphore while still waiting for host
+  capacity.
+
+## [v0.17.10] - 2026-07-14
+### Fixed
+
+- **admission:** Runner-mode nodes now use separate daemon participant IDs
+  for host admission and node-local semaphore admission, so a node that also
+  enters a local concurrency group no longer fails with `duplicate` before its
+  work starts. Queue rows keep the owning run as `run_id`, include the daemon
+  participant key separately, and display the run/node label in human-facing
+  queue views.
+- **cli:** Fresh source-built scaffolds now pin the latest published SDK
+  fallback, so projects created from an unreleased local binary still build
+  against a resolvable module version.
+
+## [v0.17.9] - 2026-07-14
+### Fixed
+
+- **admission:** A client that reconnects after receiving a local-admission
+  grant now reclaims the matching live lease instead of failing with
+  `duplicate`. The daemon still rejects mismatched retries and restored
+  multi-member leases fail closed rather than transferring partial ownership.
+- **cli:** Fresh source-built scaffolds now pin the latest published SDK
+  fallback, so projects created from an unreleased local binary still build
+  against a resolvable module version.
+
+## [v0.17.8] - 2026-07-14
+### Fixed
+
+- **admission:** `sparkwing queue` now leaves the clear-time estimate unknown
+  when FIFO admission cannot model a queue drain, instead of reporting zero
+  milliseconds. Waiters blocked only by earlier queued work now say so, while
+  soft CPU waiters and zero-core work follow the same fit rules the admission
+  daemon uses.
+
+## [v0.17.7] - 2026-07-14
+### Fixed
+
+- **admission:** Queued local-admission retries now reattach to the existing
+  waiter only when the retry matches the queued request exactly. A reconnect no
+  longer fails a waiting node with `duplicate`, and a different process cannot
+  take over a queued request by reusing its run id.
+- **orchestrator:** Node terminal results are written with cancellation-detached
+  state updates, so a run that starts tearing down does not lose the original
+  failure reason and later display the node as orphaned.
+
+## [v0.17.6] - 2026-07-14
+### Fixed
+
+- **admission:** Measured and default CPU costs now preserve the daemon's
+  reserved headroom once any work is already running. CPU still has an idle
+  liveness floor, so an idle host admits one run under pressure, but additional
+  CPU-bearing work waits unless it fits the grantable budget. This keeps
+  `sparkwing queue` capacity math nonnegative and prevents local admission from
+  overcommitting the host.
+- **admission:** `sparkwing queue` stall detection now ignores holder rows that
+  draw no host resources and hold no semaphores. Zero-resource summary rows no
+  longer receive stalled labels or cancel recovery advice.
+- **release:** The built-in release pipeline no longer declares a stale local
+  CPU pin. Local admission can now use the daemon's measured profile for release
+  runs instead of an outdated hand-written budget.
+
+## [v0.17.5] - 2026-07-14
+### Fixed
+
+- **admission:** Runs whose cost is still being measured now reach local
+  admission instead of failing before their first node with an invalid-cost
+  rejection. The daemon accepts every cost source emitted by the resolver and
+  treats measuring and floor-derived CPU costs as backpressure.
+
+## [v0.17.4] - 2026-07-14
+### Fixed
+
+- **admission:** Unpinned local runs now acquire host resources at node
+  dispatch instead of reserving the measured peak for the whole DAG. Fast
+  early nodes can run while a later memory-heavy node waits for capacity;
+  explicit whole-run resource pins still reserve at run scope.
+- **admission:** Daemon restart now restores CPU-overcommitted ledgers so
+  current work can drain instead of blocking host admission. Memory remains a
+  hard restore bound.
+
+## [v0.17.3] - 2026-07-14
+### Fixed
+
+- **admission:** Measured and default CPU costs now act as backpressure, not
+  a hard admission gate. Memory and explicit resource pins still gate
+  admission strictly, while CPU pressure admits one memory-fitting run before
+  stopping additional CPU-bearing work. A saturated host therefore keeps
+  making progress instead of parking every queued run behind a CPU-only
+  deficit.
+
 ## [v0.17.1] - 2026-07-13
 ### Added
 

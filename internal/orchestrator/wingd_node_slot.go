@@ -20,15 +20,18 @@ import (
 var errNodeQueueTimeout = errors.New("queue timeout")
 
 // runNodeUnderDaemonSem runs a node whose concurrency group is
-// arbitrated by the local admission daemon: one short-lived,
-// semaphores-only acquisition held for the node's execution and
-// released at node end. Node timeouts are armed inside executeNode,
-// after the grant, so time spent queued for admission is never charged
-// against the node's timeout. An eviction pushed while the node runs
-// (a cancel_others arrival) cancels execution and finalizes the node
-// as superseded, naming the key and the superseding run.
+// arbitrated by the local admission daemon. When the run already holds
+// host admission, the node acquires only the concurrency semaphore.
+// Otherwise the node acquires host resources and the concurrency
+// semaphore in one daemon request. Node timeouts are armed inside
+// executeNode, after the grant, so time spent queued for admission is
+// never charged against the node's timeout. An eviction pushed while
+// the node runs (a cancel_others arrival) cancels execution and
+// finalizes the node as superseded, naming the key and the superseding
+// run.
 func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.Request, la *LocalAdmission, group *sparkwing.ConcurrencyGroup) runner.Result {
 	node := req.Node
+	_, _, hostAdmitted := localAdmissionFromContext(ctx)
 	limit := group.Limit()
 	key := scopedGroupKey(group, req.RunID)
 	claim := wingwire.SemaphoreClaim{
@@ -40,20 +43,37 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 	}
 
 	acquireCtx := ctx
-	if limit.OnLimit == sparkwing.Queue && limit.QueueTimeout > 0 {
+	if hostAdmitted && limit.OnLimit == sparkwing.Queue && limit.QueueTimeout > 0 {
 		var cancel context.CancelFunc
 		acquireCtx, cancel = context.WithTimeoutCause(ctx, limit.QueueTimeout, errNodeQueueTimeout)
 		defer cancel()
 	}
+	var cancelCombined context.CancelCauseFunc
+	var combinedSemTimer *time.Timer
+	if !hostAdmitted && limit.OnLimit == sparkwing.Queue && limit.QueueTimeout > 0 {
+		acquireCtx, cancelCombined = context.WithCancelCause(ctx)
+		defer cancelCombined(nil)
+		defer func() {
+			if combinedSemTimer != nil {
+				combinedSemTimer.Stop()
+			}
+		}()
+	}
 
 	waited := false
 	lastDetail := ""
+	releasedWorker := false
+	releaseWorker := func() {
+		if releasedWorker || req.ReleaseWorkerSlot == nil {
+			return
+		}
+		req.ReleaseWorkerSlot()
+		releasedWorker = true
+	}
 	onQueued := func(q wingwire.Queued) {
 		if !waited {
 			waited = true
-			if req.ReleaseWorkerSlot != nil {
-				req.ReleaseWorkerSlot()
-			}
+			releaseWorker()
 			payload, _ := json.Marshal(map[string]any{
 				"key":          key,
 				"kind":         "queued",
@@ -62,6 +82,17 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 			})
 			_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "concurrency_wait", payload)
 		}
+		if cancelCombined != nil {
+			if q.Key == key && combinedSemTimer == nil {
+				combinedSemTimer = time.AfterFunc(limit.QueueTimeout, func() {
+					cancelCombined(errNodeQueueTimeout)
+				})
+			}
+			if q.Key != key && combinedSemTimer != nil {
+				combinedSemTimer.Stop()
+				combinedSemTimer = nil
+			}
+		}
 		if detail := fmt.Sprintf("queued in %s: %d ahead", key, max(0, q.Position-1)); detail != lastDetail {
 			lastDetail = detail
 			_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, node.ID(), detail)
@@ -69,12 +100,24 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		}
 	}
 
-	lease, err := la.acquireNodeSlot(acquireCtx, req.RunID, node.ID(), claim, onQueued)
+	if !hostAdmitted {
+		releaseWorker()
+	}
+
+	var lease *wingdclient.Lease
+	var err error
+	priority := localAdmissionPriorityFromContext(ctx)
+	if hostAdmitted {
+		lease, err = la.acquireNodeSlot(acquireCtx, req.RunID, node.ID(), claim, priority, onQueued)
+	} else {
+		lease, err = la.acquireNodeHostSlot(acquireCtx, r.backends, req.Pipeline, req.RunID, node.ID(), node, claim,
+			priority, onQueued)
+	}
 	if err != nil {
 		return r.failedDaemonAcquire(ctx, acquireCtx, req, key, limit.QueueTimeout, err)
 	}
 
-	if waited {
+	if releasedWorker || waited {
 		if req.ReacquireWorkerSlot != nil && !req.ReacquireWorkerSlot() {
 			_ = lease.Release()
 			r.markFailed(ctx, req.RunID, node.ID(), context.Canceled)
@@ -98,7 +141,15 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		return runner.Result{Outcome: sparkwing.Skipped}
 	}
 
-	output, err := r.executeNode(execCtx, req.RunID, node, req.Delegate)
+	runCtx := execCtx
+	if !hostAdmitted {
+		childToken := localAdmissionChildTokenFromContext(ctx)
+		if childToken == "" {
+			childToken = lease.Token
+		}
+		runCtx = withLocalAdmission(execCtx, la, lease.Token, childToken, leaseCarriesHost(lease), localAdmissionPriorityFromContext(execCtx))
+	}
+	output, err := r.executeNodeWithAdmission(runCtx, req)
 	if ev := evicted.Load(); ev != nil {
 		serr := fmt.Errorf("concurrency key %q: superseded by run %s under %s", ev.Key, ev.SupersededBy, ev.Policy)
 		_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "node_superseded", []byte(serr.Error()))

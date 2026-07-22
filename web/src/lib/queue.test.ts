@@ -12,6 +12,7 @@ import {
   groupHolders,
   hasDaemon,
   humanBytes,
+  queueRowID,
   resourceAvailable,
   trimFloat,
 } from "./queue.ts";
@@ -177,6 +178,38 @@ describe("groupHolders", () => {
     assert.equal(groups.length, 1);
     assert.equal(groups[0].holder.run_id, "c");
     assert.equal(groups[0].children.length, 0);
+  });
+  it("keeps participant rows distinct when they share an owner run", () => {
+    const holders: QueueHolder[] = [
+      {
+        run_id: "run-1",
+        participant_id: "run-1/node-host/YnVpbGQ",
+        elapsed_ms: 0,
+        resources: { cores: 1 },
+      },
+      {
+        run_id: "run-1",
+        participant_id: "run-1/node-semaphore/YnVpbGQ",
+        elapsed_ms: 0,
+        resources: {},
+      },
+      {
+        run_id: "run-1",
+        participant_id: "child-key",
+        parent: "run-1",
+        parent_participant_id: "run-1/node-host/YnVpbGQ",
+        elapsed_ms: 0,
+        resources: {},
+      },
+    ];
+    const groups = groupHolders(holders);
+    assert.equal(groups.length, 2);
+    assert.deepEqual(
+      groups.map((g) => queueRowID(g.holder)),
+      ["run-1/node-host/YnVpbGQ", "run-1/node-semaphore/YnVpbGQ"],
+    );
+    assert.deepEqual(groups[0].children.map(queueRowID), ["child-key"]);
+    assert.deepEqual(groups[1].children.map(queueRowID), []);
   });
 });
 

@@ -29,6 +29,7 @@ import {
   fmtHolderCost,
   groupHolders,
   hasDaemon,
+  queueRowID,
   resourceAvailable,
 } from "@/lib/queue";
 import Tooltip from "@/components/Tooltip";
@@ -289,9 +290,9 @@ function HoldersSection({ groups }: { groups: HolderGroup[] }) {
               </tr>
             ) : (
               groups.flatMap((g) => [
-                <HolderRow key={g.holder.run_id} h={g.holder} />,
+                <HolderRow key={queueRowID(g.holder)} h={g.holder} />,
                 ...g.children.map((c) => (
-                  <HolderRow key={c.run_id} h={c} attached />
+                  <HolderRow key={queueRowID(c)} h={c} attached />
                 )),
               ])
             )}
@@ -302,7 +303,7 @@ function HoldersSection({ groups }: { groups: HolderGroup[] }) {
         [g.holder, ...g.children]
           .filter((h) => h.stalled && h.recovery)
           .map((h) => (
-            <div key={`rec-${h.run_id}`} className="mt-2">
+            <div key={`rec-${queueRowID(h)}`} className="mt-2">
               <Callout tone="danger">
                 <span className="font-mono text-violet-300">{h.run_id}</span> is
                 stalled (idle while runs wait). Recover with:
@@ -327,7 +328,7 @@ function HolderRow({ h, attached }: { h: QueueHolder; attached?: boolean }) {
               ↳
             </span>
           )}
-          <RunLink id={h.run_id} />
+          <RunLink id={h.run_id} label={queueRunLabel(h)} />
           {attached && (
             <Tooltip content="Rides its parent's lease; draws no budget of its own">
               <span className="text-[10px] font-mono text-[var(--muted)] cursor-default">
@@ -407,14 +408,14 @@ function WaitersSection({ waiters }: { waiters: QueueWaiter[] }) {
             ) : (
               waiters.map((w) => (
                 <tr
-                  key={w.run_id}
+                  key={queueRowID(w)}
                   className="border-t border-[var(--border)] bg-[var(--surface)] align-top"
                 >
                   <Td right mono muted>
                     {w.position}
                   </Td>
                   <Td>
-                    <RunLink id={w.run_id} />
+                    <RunLink id={w.run_id} label={queueRunLabel(w)} />
                   </Td>
                   <Td hideSm mono muted>
                     {w.pipeline || "-"}
@@ -487,15 +488,19 @@ function SourceChip({ source }: { source: string }) {
   );
 }
 
-function RunLink({ id }: { id: string }) {
+function RunLink({ id, label }: { id: string; label?: string }) {
   return (
     <Link
       href={`/runs?run=${encodeURIComponent(id)}`}
       className="font-mono text-xs text-violet-300 hover:underline"
     >
-      {id}
+      {label || id}
     </Link>
   );
+}
+
+function queueRunLabel(row: { run_id: string; display_run_id?: string }) {
+  return row.display_run_id || row.run_id;
 }
 
 function Callout({

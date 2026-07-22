@@ -262,7 +262,7 @@ func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Reque
 // daemon, while global-scope groups (and every group on cluster paths,
 // which carry no local daemon) keep the shared-store acquire.
 func (r *InProcessRunner) runUnderGroup(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup) runner.Result {
-	if la, _ := localAdmissionFromContext(ctx); la != nil && groupUsesLocalDaemon(group) {
+	if la, _, _ := localAdmissionFromContext(ctx); la != nil && groupUsesLocalDaemon(group) {
 		return r.runNodeUnderDaemonSem(ctx, req, la, group)
 	}
 	return r.acquireAndRun(ctx, req, concParamsFor(req.Node, group, req.RunID))
@@ -488,7 +488,7 @@ func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, c
 		return runner.Result{Outcome: sparkwing.Skipped}
 	}
 
-	output, err := r.executeNode(execCtx, req.RunID, req.Node, req.Delegate)
+	output, err := r.executeNodeWithAdmission(execCtx, req)
 	if reason := wedgeAbort.Load(); reason != nil {
 		werr := errors.New(*reason)
 		_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_store_wedged", []byte(werr.Error()))

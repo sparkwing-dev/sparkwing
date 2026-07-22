@@ -1,8 +1,6 @@
 package wingd
 
 import (
-	"fmt"
-
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -74,8 +72,10 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 			out = append(out, delivery{c, grant})
 		case admission.EventQueued:
 			if c := d.byRun[ev.RequestID]; c != nil {
+				snap := d.ledger.Snapshot()
 				out = append(out, delivery{c, &wingwire.Queued{
 					RunID:          ev.RequestID,
+					Key:            blockingSemaphoreKeyForRun(snap, ev.RequestID),
 					Position:       ev.Position + 1,
 					QueueLength:    d.waiterCountLocked(),
 					BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
@@ -115,12 +115,72 @@ func (d *Daemon) waiterDeliveriesLocked() []delivery {
 		}
 		out = append(out, delivery{c, &wingwire.Queued{
 			RunID:          waiter.RequestID,
+			Key:            blockingSemaphoreKey(snap, waiter),
 			Position:       waiterPosition(snap.Waiters[:i], waiter) + 1,
 			QueueLength:    qlen,
 			BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
 		}})
 	}
 	return out
+}
+
+func (d *Daemon) queuedDeliveryLocked(c *conn, runID string) *delivery {
+	snap := d.ledger.Snapshot()
+	return d.queuedDeliveryLockedFromSnapshot(c, snap, runID)
+}
+
+func (d *Daemon) queuedDeliveryLockedFromSnapshot(c *conn, snap admission.Snapshot, runID string) *delivery {
+	qlen := len(snap.Waiters)
+	for i, waiter := range snap.Waiters {
+		if waiter.RequestID != runID {
+			continue
+		}
+		return &delivery{c, &wingwire.Queued{
+			RunID:          runID,
+			Key:            blockingSemaphoreKey(snap, waiter),
+			Position:       waiterPosition(snap.Waiters[:i], waiter) + 1,
+			QueueLength:    qlen,
+			BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
+		}}
+	}
+	return nil
+}
+
+func blockingSemaphoreKeyForRun(snap admission.Snapshot, runID string) string {
+	for _, waiter := range snap.Waiters {
+		if waiter.RequestID == runID {
+			return blockingSemaphoreKey(snap, waiter)
+		}
+	}
+	return ""
+}
+
+func blockingSemaphoreKey(snap admission.Snapshot, waiter admission.WaiterState) string {
+	remaining := semaphoreRemaining(snap)
+	for _, claim := range waiter.Claims {
+		if claim.Policy == admission.PolicyCancelOthers {
+			continue
+		}
+		left, ok := remaining[claim.Key]
+		if ok && left < claim.Cost {
+			return claim.Key
+		}
+	}
+	return ""
+}
+
+func semaphoreRemaining(snap admission.Snapshot) map[string]int {
+	remaining := make(map[string]int, len(snap.Semaphores))
+	for _, sem := range snap.Semaphores {
+		used := 0
+		for _, hold := range sem.Holds {
+			if !hold.Superseded {
+				used += hold.Cost
+			}
+		}
+		remaining[sem.Key] = effectiveCapacity(sem) - used
+	}
+	return remaining
 }
 
 func waiterPosition(earlier []admission.WaiterState, waiter admission.WaiterState) int {
@@ -160,40 +220,16 @@ func waiterResources(waiter admission.WaiterState) map[string]struct{} {
 	return resources
 }
 
-// cancelWaiterLocked removes a queued run whose connection died. The
-// ledger has no waiter-removal primitive, so the queue is rebuilt from a
-// snapshot: restore the holders alone, then re-submit every surviving
-// waiter in arrival order. Per the ledger's FIFO guarantees this
-// reproduces the exact post-cancellation state -- including promoting a
-// lighter waiter that the dead one was blocking -- and the re-submits'
-// events carry those promotions and position changes back out. The caller
+// cancelWaiterLocked removes a queued run whose connection died. The caller
 // holds d.mu.
 func (d *Daemon) cancelWaiterLocked(runID string) []admission.Event {
-	snap := d.ledger.Snapshot()
-	base := snap
-	base.Waiters = nil
-	lg, err := admission.Restore(base, nil)
-	if err != nil {
-		panic(fmt.Sprintf("wingd: rebuild ledger without holders failed: %v", err))
-	}
-	var events []admission.Event
-	for _, w := range snap.Waiters {
-		if w.RequestID == runID {
-			continue
-		}
-		_, evs, err := lg.Submit(requestFromWaiter(w))
-		if err != nil {
-			panic(fmt.Sprintf("wingd: re-submit waiter %q during rebuild: %v", w.RequestID, err))
-		}
-		events = append(events, evs...)
-	}
-	d.ledger = lg
-	return events
+	return d.ledger.CancelWaiter(runID)
 }
 
 func requestFromWaiter(w admission.WaiterState) admission.Request {
 	req := admission.Request{
 		ID:          w.RequestID,
+		Priority:    w.Priority,
 		Cores:       float64(w.MilliCores) / 1000.0,
 		SoftCores:   w.SoftCores,
 		StrictCores: w.StrictCores,

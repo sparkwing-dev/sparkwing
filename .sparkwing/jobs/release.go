@@ -18,6 +18,7 @@ import (
 	"golang.org/x/mod/module"
 	"golang.org/x/mod/semver"
 	"golang.org/x/mod/sumdb/dirhash"
+	modzip "golang.org/x/mod/zip"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -69,7 +70,6 @@ func (Release) Examples() []sparkwing.Example {
 
 func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, _ sparkwing.RunContext) error {
 	r.args = in
-	plan.Resources(sparkwing.Cores(2), sparkwing.MemoryGB(4))
 
 	repoDir, err := repoRoot()
 	if err != nil {
@@ -516,27 +516,90 @@ func selfModuleSums(ctx context.Context, repoDir, version string) (string, strin
 }
 
 func createSelfModuleZip(ctx context.Context, repoDir, version string) ([]byte, error) {
-	escapedPath, err := module.EscapePath(sparkwingModulePath)
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	files, err := selfModuleZipFiles(ctx, repoDir)
 	if err != nil {
 		return nil, err
 	}
-	escapedVersion, err := module.EscapeVersion(version)
-	if err != nil {
+	var out bytes.Buffer
+	if err := modzip.Create(&out, module.Version{Path: sparkwingModulePath, Version: version}, files); err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, "git", "archive", "--format=zip", "--prefix="+escapedPath+"@"+escapedVersion+"/", "HEAD")
-	cmd.Dir = repoDir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	return out.Bytes(), nil
+}
+
+func selfModuleZipFiles(ctx context.Context, repoDir string) ([]modzip.File, error) {
+	out, err := runGitRawIn(ctx, repoDir, "ls-files", "-z")
 	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
-		if msg == "" {
-			return nil, fmt.Errorf("git archive HEAD: %w", err)
+		return nil, fmt.Errorf("release: list tracked files: %w", err)
+	}
+	paths := gitTrackedPaths(string(out))
+	nestedModules := map[string]struct{}{}
+	for _, path := range paths {
+		if path == "" || path == "go.mod" || filepath.Base(path) != "go.mod" {
+			continue
 		}
-		return nil, fmt.Errorf("git archive HEAD: %w: %s", err, msg)
+		nestedModules[filepath.ToSlash(filepath.Dir(path))+"/"] = struct{}{}
 	}
-	return out, nil
+
+	files := make([]modzip.File, 0, len(paths))
+	for _, path := range paths {
+		if path == "" || nestedModulePath(path, nestedModules) {
+			continue
+		}
+		info, err := os.Lstat(filepath.Join(repoDir, filepath.FromSlash(path)))
+		if err != nil {
+			return nil, fmt.Errorf("release: stat tracked file %s: %w", path, err)
+		}
+		if info.IsDir() {
+			continue
+		}
+		files = append(files, trackedModuleFile{repoDir: repoDir, path: path, info: info})
+	}
+	return files, nil
+}
+
+func gitTrackedPaths(out string) []string {
+	if out == "" {
+		return nil
+	}
+	parts := strings.Split(out, "\x00")
+	paths := parts[:0]
+	for _, path := range parts {
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths
+}
+
+func nestedModulePath(path string, nestedModules map[string]struct{}) bool {
+	for dir := range nestedModules {
+		if strings.HasPrefix(path, dir) {
+			return true
+		}
+	}
+	return false
+}
+
+type trackedModuleFile struct {
+	repoDir string
+	path    string
+	info    os.FileInfo
+}
+
+func (f trackedModuleFile) Path() string {
+	return f.path
+}
+
+func (f trackedModuleFile) Lstat() (os.FileInfo, error) {
+	return f.info, nil
+}
+
+func (f trackedModuleFile) Open() (io.ReadCloser, error) {
+	return os.Open(filepath.Join(f.repoDir, filepath.FromSlash(f.path)))
 }
 
 // restoreSelfReplaceJob undoes prepareSelfReplaceJob's mutation after
@@ -998,6 +1061,23 @@ func runGitIn(ctx context.Context, dir string, args ...string) (string, error) {
 		return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
 	}
 	return res.Stdout, nil
+}
+
+func runGitRawIn(ctx context.Context, dir string, args ...string) ([]byte, error) {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			msg := strings.TrimSpace(string(exitErr.Stderr))
+			if msg != "" {
+				return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, msg)
+			}
+		}
+		return nil, fmt.Errorf("git %s: %w", strings.Join(args, " "), err)
+	}
+	return out, nil
 }
 
 // releaseTagCeiling is the exclusive upper bound on tags the release

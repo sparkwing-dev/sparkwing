@@ -27,6 +27,8 @@ type AdmissionRequest struct {
 	DriftWarning string
 
 	Origin Origin
+
+	Priority int
 }
 type BudgetState struct {
 	Cores float64
@@ -283,6 +285,7 @@ type Waiter struct {
 	Repo string
 
 	Position   int
+	Priority   int
 	Resources  HostResources
 	Semaphores []string
 

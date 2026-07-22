@@ -159,7 +159,7 @@ func Main() {
 	}
 	opts.Admission = &LocalAdmission{
 		Version:          sparkwingModuleVersion(),
-		ParentLeaseToken: os.Getenv(wingwire.LeaseTokenEnv),
+		ParentLeaseToken: childAttachTokenFromProcessEnv(),
 		Origin:           wingwire.OriginLocal,
 	}
 	if projectCfg != nil {

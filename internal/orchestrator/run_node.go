@@ -394,7 +394,7 @@ func RunNodeOnce(
 	}
 
 	if admission != nil {
-		lease, aerr := admission.admitNode(ctx, backends, run.Pipeline, runID, nodeID, node)
+		lease, aerr := admission.admitNode(ctx, backends, run.Pipeline, runID, nodeID, node, planPriorityFromSnapshot(run.PlanSnapshot))
 		if aerr != nil {
 			return runner.Result{}, fmt.Errorf("local admission: %w", aerr)
 		}

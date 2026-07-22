@@ -63,10 +63,9 @@ type Options struct {
 	// cross-pipeline cycle detection.
 	ParentRunID string
 
-	// Admission, when non-nil, routes the run through the local
-	// admission daemon: one all-or-nothing lease acquired after the plan
-	// is built, held by an open connection for the run's lifetime, and
-	// released after the run row is finalized.
+	// Admission, when non-nil, routes local host admission through the daemon.
+	// Explicit whole-run resources and plan-level semaphores are held at run
+	// scope. Unpinned local work acquires host resources around each node.
 	//
 	// Admission belongs to whoever owns the machine. The local entry
 	// points (a pipeline binary run and handle-trigger --local) set this
@@ -492,6 +491,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	var lease *runLease
 	var leaseToken string
+	var leaseChildToken string
+	var leaseHostAdmitted bool
 	skipDispatch := false
 	if opts.Admission != nil {
 		var outcome admitOutcome
@@ -512,6 +513,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			skipDispatch = true
 		} else {
 			leaseToken = lease.token
+			leaseChildToken = lease.childToken
+			leaseHostAdmitted = lease.hostAdmitted
 		}
 	}
 
@@ -520,8 +523,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if !skipDispatch {
 		runErr = dispatch(
 			runCtx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf,
-			opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip,
-			dispatchWaitTimeout, opts.Admission, leaseToken,
+			opts.Pipeline, opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip,
+			dispatchWaitTimeout, opts.Admission, leaseToken, leaseChildToken, leaseHostAdmitted,
 		)
 	}
 
@@ -779,6 +782,7 @@ func dispatch(
 	delegate sparkwing.Logger,
 	debug DebugDirectives,
 	retryOf string,
+	pipeline string,
 	full bool,
 	masker *secrets.Masker,
 	maxParallel int,
@@ -787,6 +791,8 @@ func dispatch(
 	dispatchWaitTimeout time.Duration,
 	admission *LocalAdmission,
 	leaseToken string,
+	leaseChildToken string,
+	leaseHostAdmitted bool,
 ) error {
 	runStart := time.Now()
 	dispatchCtx, cancelDispatch := context.WithCancelCause(ctx)
@@ -810,8 +816,8 @@ func dispatch(
 	defer func() { planRelease(planReleaseOutcome) }()
 
 	state := newDispatchState(
-		dispatchCtx, backends, r, runID, plan, delegate, debug, retryOf,
-		masker, maxParallel, admission, leaseToken,
+		dispatchCtx, backends, r, runID, pipeline, plan, delegate, debug, retryOf,
+		masker, maxParallel, admission, leaseToken, leaseChildToken, leaseHostAdmitted,
 	)
 	state.pipelineRequires = snapMeta.PipelineRequires
 	state.snapMeta = snapMeta
@@ -1387,6 +1393,7 @@ type dispatchState struct {
 	backends         Backends
 	runner           runner.Runner
 	runID            string
+	pipeline         string
 	plan             *sparkwing.Plan
 	delegate         sparkwing.Logger
 	pipelineRequires []string // pipeline-level label requirements unioned into every node's effective requires
@@ -1438,6 +1445,7 @@ func newDispatchState(
 	backends Backends,
 	r runner.Runner,
 	runID string,
+	pipeline string,
 	plan *sparkwing.Plan,
 	delegate sparkwing.Logger,
 	debug DebugDirectives,
@@ -1446,6 +1454,8 @@ func newDispatchState(
 	maxParallel int,
 	admission *LocalAdmission,
 	leaseToken string,
+	leaseChildToken string,
+	leaseHostAdmitted bool,
 ) *dispatchState {
 	if masker == nil {
 		masker = secrets.NewMasker()
@@ -1460,6 +1470,7 @@ func newDispatchState(
 		backends:  backends,
 		runner:    r,
 		runID:     runID,
+		pipeline:  pipeline,
 		plan:      plan,
 		delegate:  delegate,
 		retryOf:   retryOf,
@@ -1491,7 +1502,7 @@ func newDispatchState(
 	} else {
 		s.resolverCtx = ctx
 	}
-	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken)
+	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, leaseChildToken, leaseHostAdmitted, s.plan.PriorityValue())
 	s.resolverCtx = sparkwingruntime.WithResolver(s.resolverCtx, s.resolve)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())
@@ -1585,7 +1596,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			if statusCtx.Err() != nil {
 				return false
 			}
-			la, _ := localAdmissionFromContext(ctx)
+			la, _, _ := localAdmissionFromContext(ctx)
 			admission, statusErr := childAdmissionStatus(statusCtx, s.backends.State, s.backends.Concurrency, la, childRunID)
 			admissionMu.Lock()
 			defer admissionMu.Unlock()
@@ -2164,6 +2175,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 			return activeRunner.RunNode(runnerCtx, runner.Request{
 				RunID:               s.runID,
 				NodeID:              node.ID(),
+				Pipeline:            s.pipeline,
 				Node:                node,
 				Delegate:            s.delegate,
 				ReleaseWorkerSlot:   slot.release,
@@ -2526,7 +2538,13 @@ func approvalTimeoutToOutcome(onTimeout string) approvalResult {
 func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFailure sparkwing.Failure) runner.Result {
 	ctx := sparkwing.WithFailure(s.resolverCtx, parentFailure)
 	if ipr, ok := s.runner.(*InProcessRunner); ok {
-		out, err := ipr.executeNode(ctx, s.runID, node, s.delegate)
+		out, err := ipr.executeNodeWithAdmission(ctx, runner.Request{
+			RunID:    s.runID,
+			NodeID:   node.ID(),
+			Pipeline: s.pipeline,
+			Node:     node,
+			Delegate: s.delegate,
+		})
 		if err != nil {
 			return runner.Result{Outcome: sparkwing.Failed, Err: err}
 		}
@@ -2536,6 +2554,7 @@ func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFail
 		return s.runner.RunNode(ctx, runner.Request{
 			RunID:               s.runID,
 			NodeID:              node.ID(),
+			Pipeline:            s.pipeline,
 			Node:                node,
 			Delegate:            s.delegate,
 			ReleaseWorkerSlot:   slot.release,
@@ -2785,6 +2804,7 @@ func runOnePredicate(ctx context.Context, pred sparkwing.SkipPredicate, index in
 type planSnapshot struct {
 	Pipeline  string         `json:"pipeline"`
 	RunID     string         `json:"run_id"`
+	Priority  int            `json:"priority,omitempty"`
 	Nodes     []snapshotNode `json:"nodes"`
 	PlanConc  *snapshotConc  `json:"plan_concurrency,omitempty"`
 	PlanConcs []snapshotConc `json:"plan_concurrency_groups,omitempty"`
@@ -2935,6 +2955,7 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 	snap := planSnapshot{
 		Pipeline: rc.Pipeline,
 		RunID:    rc.RunID,
+		Priority: p.PriorityValue(),
 		Secrets:  meta.Secrets,
 	}
 	if group := p.ConcurrencyGroupRef(); group != nil {
@@ -3008,6 +3029,19 @@ func marshalPlanSnapshot(p *sparkwing.Plan, rc sparkwing.RunContext, meta planSn
 		seen[rec.ID()] = true
 	}
 	return json.Marshal(snap)
+}
+
+func planPriorityFromSnapshot(raw []byte) int {
+	if len(raw) == 0 {
+		return 0
+	}
+	var snap struct {
+		Priority int `json:"priority,omitempty"`
+	}
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		return 0
+	}
+	return snap.Priority
 }
 
 // effectiveClaimLabels is the combined Requires + WhenRunner label

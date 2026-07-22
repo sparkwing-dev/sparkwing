@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 )
@@ -53,6 +54,7 @@ type Ledger struct {
 type spec struct {
 	id          string
 	admit       uint64
+	priority    int
 	milliCores  int64
 	softCores   bool
 	strictCores bool
@@ -205,10 +207,61 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 	position := l.queuePosition(s)
 	l.arrivalSeq++
 	l.waiters = append(l.waiters, &waiter{arrival: l.arrivalSeq, spec: s})
+	l.sortWaiters()
 	ev := l.newEvent(EventQueued, s.id)
 	ev.Position = position
 	l.mustHoldInvariants()
 	return Decision{Kind: DecisionQueued, Position: position}, []Event{ev}, nil
+}
+
+// ReplaceWaiter updates an existing queued participant before it is
+// granted. The waiter keeps its FIFO arrival, but its resource demand is
+// the latest request. If the new demand now fits, eligible waiters are
+// promoted.
+func (l *Ledger) ReplaceWaiter(req Request) ([]Event, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	s, err := l.normalize(req)
+	if err != nil {
+		return nil, err
+	}
+	for _, le := range l.leases {
+		if _, ok := le.members[s.id]; ok {
+			return nil, ErrDuplicateID
+		}
+	}
+	for _, w := range l.waiters {
+		if w.spec.id != s.id {
+			continue
+		}
+		s.admit = w.spec.admit
+		w.spec = s
+		l.sortWaiters()
+		events := l.promote()
+		l.mustHoldInvariants()
+		return events, nil
+	}
+	return nil, ErrUnknownMember
+}
+
+// CancelWaiter removes a queued request and promotes any waiter unblocked by
+// the removal. Surviving waiters keep their original admission sequence.
+func (l *Ledger) CancelWaiter(id string) []Event {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for i, w := range l.waiters {
+		if w.spec.id != id {
+			continue
+		}
+		l.waiters = append(l.waiters[:i], l.waiters[i+1:]...)
+		events := l.promote()
+		l.mustHoldInvariants()
+		return events
+	}
+	l.mustHoldInvariants()
+	return nil
 }
 
 // Attach joins memberID to a live lease, drawing zero new budget. The
@@ -365,6 +418,7 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 	}
 	s := spec{
 		id:          req.ID,
+		priority:    req.Priority,
 		milliCores:  mc,
 		softCores:   req.SoftCores,
 		strictCores: req.StrictCores,
@@ -452,11 +506,11 @@ func (s spec) fifoResources() []resource {
 // starved on that resource by holders younger than the waiter; a resource
 // held only against older holders is left open for backfill.
 func (l *Ledger) fifoBlocked(s spec) bool {
-	_, blocked := l.scanWaiters(false)
+	_, blocked := l.scanWaiters(false, s)
 	return anyIn(blocked, s.fifoResources())
 }
 
-// scanWaiters walks queued waiters in arrival order and computes the set
+// scanWaiters walks queued waiters in admission order and computes the set
 // of resources on which promotion is blocked. A waiter that does not fit
 // blocks only the resources on which holders younger than it are what keep
 // it from fitting, so a later waiter can backfill a resource that only
@@ -464,9 +518,12 @@ func (l *Ledger) fifoBlocked(s spec) bool {
 // yields all its resources to preserve per-resource FIFO order. When
 // findFit is set, the index of the first waiter that both fits and is not
 // blocked is returned; otherwise the accumulated blocked set is returned.
-func (l *Ledger) scanWaiters(findFit bool) (int, map[resource]bool) {
+func (l *Ledger) scanWaiters(findFit bool, arrival spec) (int, map[resource]bool) {
 	blocked := map[resource]bool{}
 	for i, w := range l.waiters {
+		if arrival.id != "" && !waiterPrecedesSpec(w, arrival) {
+			break
+		}
 		rs := w.spec.fifoResources()
 		if anyIn(blocked, rs) {
 			markAll(blocked, rs)
@@ -579,6 +636,9 @@ func (l *Ledger) queuePosition(s spec) int {
 	mine := resourceSet(s.fifoResources())
 	n := 0
 	for _, w := range l.waiters {
+		if !waiterPrecedesSpec(w, s) {
+			break
+		}
 		if touchesAny(w.spec, mine) {
 			n++
 		}
@@ -796,7 +856,7 @@ func (l *Ledger) dropHold(key string, id LeaseID) {
 }
 
 // promote grants waiters until no further waiter is admissible. Each pass
-// scans in arrival order and grants the oldest waiter that fits and is not
+// scans in admission order and grants the highest-ranked waiter that fits and is not
 // blocked: a waiter that does not fit is backfilled past only while older
 // holders are what block it, and once holders younger than it are the
 // blocker its resources are protected so no later waiter starves it.
@@ -815,8 +875,16 @@ func (l *Ledger) promote() []Event {
 }
 
 func (l *Ledger) nextPromotable() int {
-	i, _ := l.scanWaiters(true)
+	i, _ := l.scanWaiters(true, spec{})
 	return i
+}
+
+func (l *Ledger) sortWaiters() {
+	sort.SliceStable(l.waiters, func(i, j int) bool { return waiterLess(l.waiters[i], l.waiters[j]) })
+}
+
+func waiterPrecedesSpec(w *waiter, s spec) bool {
+	return w.spec.priority > s.priority || w.spec.priority == s.priority
 }
 
 func anyIn(set map[resource]bool, rs []resource) bool {

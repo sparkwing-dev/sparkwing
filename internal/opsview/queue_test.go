@@ -45,6 +45,85 @@ func TestRenderQueuePretty_ResourceRowReconciles(t *testing.T) {
 	}
 }
 
+func TestRenderQueuePretty_UsesDisplayRunID(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{
+			{
+				RunID:         "run-1",
+				ParticipantID: "internal-holder",
+				DisplayRunID:  "run-1/build",
+				Resources:     wingwire.HostResources{Cores: 1},
+			},
+		},
+		Waiters: []wingwire.Waiter{
+			{
+				RunID:          "run-2",
+				ParticipantID:  "internal-waiter",
+				DisplayRunID:   "run-2/test",
+				Position:       1,
+				Priority:       50,
+				Resources:      wingwire.HostResources{Cores: 1},
+				BlockingReason: "needs 1.0 cores; 0.0 available",
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"run-1/build", "run-2/test"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("pretty queue omitted %q:\n%s", want, out)
+		}
+	}
+	for _, internal := range []string{"internal-holder", "internal-waiter"} {
+		if strings.Contains(out, internal) {
+			t.Fatalf("pretty queue leaked participant id %q:\n%s", internal, out)
+		}
+	}
+	if !strings.Contains(out, "POS  PRI") || !strings.Contains(out, "1    50") {
+		t.Fatalf("pretty queue omitted priority column:\n%s", out)
+	}
+}
+
+func TestRenderQueuePlain_IncludesParticipantAndDisplayIdentity(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{
+			{
+				RunID:         "run-1",
+				ParticipantID: "internal-holder",
+				DisplayRunID:  "run-1/build",
+				Resources:     wingwire.HostResources{Cores: 1},
+			},
+		},
+		Waiters: []wingwire.Waiter{
+			{
+				RunID:         "run-1",
+				ParticipantID: "internal-waiter",
+				DisplayRunID:  "run-1/test",
+				Position:      1,
+				Priority:      50,
+				Resources:     wingwire.HostResources{Cores: 1},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueue(&buf, qs, "plain"); err != nil {
+		t.Fatalf("render plain: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"holder\trun-1\tinternal-holder\trun-1/build",
+		"waiter\t1\trun-1\tinternal-waiter\trun-1/test",
+		"\t50\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("plain queue omitted %q:\n%s", want, out)
+		}
+	}
+}
+
 func parseCoresRow(out string) (cap, held, reserved, external, available float64, ok bool) {
 	for _, line := range strings.Split(out, "\n") {
 		fields := strings.Fields(line)
@@ -69,6 +148,7 @@ func TestRenderQueue_JSONRoundTrips(t *testing.T) {
 		DaemonVersion: "v9.9.9",
 		Resources:     []wingwire.ResourceState{{Key: "cores", Capacity: 8, Held: 2, Available: 6}},
 		Holders:       []wingwire.Holder{{RunID: "run-a", ElapsedMS: 1000}},
+		Waiters:       []wingwire.Waiter{{RunID: "run-b", Position: 1, Priority: 25}},
 	}
 	var buf bytes.Buffer
 	if err := opsview.RenderQueue(&buf, want, "json"); err != nil {
@@ -80,6 +160,9 @@ func TestRenderQueue_JSONRoundTrips(t *testing.T) {
 	}
 	if got.DaemonVersion != "v9.9.9" || len(got.Holders) != 1 || got.Holders[0].RunID != "run-a" {
 		t.Fatalf("round-trip lost fields: %+v", got)
+	}
+	if len(got.Waiters) != 1 || got.Waiters[0].Priority != 25 {
+		t.Fatalf("round-trip lost waiter priority: %+v", got.Waiters)
 	}
 }
 

@@ -74,7 +74,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		ParentRunID: trigger.ParentRunID,
 		Admission: &LocalAdmission{
 			Version:          sparkwingModuleVersion(),
-			ParentLeaseToken: trigger.TriggerEnv[wingwire.LeaseTokenEnv],
+			ParentLeaseToken: childAttachTokenFromEnv(trigger.TriggerEnv),
 			Origin:           wingwire.OriginLocal,
 		},
 		RetryOf:     trigger.RetryOf,

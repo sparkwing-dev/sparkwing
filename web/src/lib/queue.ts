@@ -60,6 +60,13 @@ export function fmtHolderCost(h: QueueHolder): string {
   return fmtCost(h.resources);
 }
 
+export function queueRowID(row: {
+  run_id: string;
+  participant_id?: string;
+}): string {
+  return row.participant_id || row.run_id;
+}
+
 // fmtDuration renders a millisecond span rounded to whole seconds:
 // "3s", "1m 30s", "2h 5m". Returns "-" for a non-positive span.
 export function fmtDuration(ms: number): string {
@@ -136,21 +143,22 @@ export interface HolderGroup {
 // never dropped.
 export function groupHolders(holders: QueueHolder[]): HolderGroup[] {
   const byRun = new Map<string, QueueHolder>();
-  for (const h of holders) byRun.set(h.run_id, h);
+  for (const h of holders) byRun.set(queueRowID(h), h);
   const childrenOf = new Map<string, QueueHolder[]>();
   const roots: QueueHolder[] = [];
   for (const h of holders) {
-    if (h.parent && byRun.has(h.parent)) {
-      const list = childrenOf.get(h.parent) ?? [];
+    const parent = h.parent_participant_id || h.parent;
+    if (parent && byRun.has(parent)) {
+      const list = childrenOf.get(parent) ?? [];
       list.push(h);
-      childrenOf.set(h.parent, list);
+      childrenOf.set(parent, list);
     } else {
       roots.push(h);
     }
   }
   return roots.map((holder) => ({
     holder,
-    children: childrenOf.get(holder.run_id) ?? [],
+    children: childrenOf.get(queueRowID(holder)) ?? [],
   }));
 }
 

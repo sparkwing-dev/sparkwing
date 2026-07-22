@@ -1,8 +1,10 @@
 package wingd_test
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -243,6 +245,495 @@ func TestPositionRebroadcastKeepsIndependentQueuesSeparate(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("wait-c never received refreshed queue position")
 	}
+}
+
+func TestQueuedSubmitReconnectReplacesStaleWaiter(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	first := openRawQueuedAdmission(t, home, semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue))
+	defer func() { _ = first.Close() }()
+
+	qmsg := readRawMessage(t, first)
+	q, ok := qmsg.(*wingwire.Queued)
+	if !ok {
+		t.Fatalf("first admission message = %T, want queued", qmsg)
+	}
+	if q.Key != "shared-lock" {
+		t.Fatalf("queued key = %q, want shared-lock", q.Key)
+	}
+	if q.Position != 1 {
+		t.Fatalf("initial position = %d, want 1", q.Position)
+	}
+
+	second := ensure(t, home, "")
+	secondResult := make(chan acquireResult, 1)
+	go func() {
+		lease, err := second.Acquire(context.Background(), semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue), nil)
+		secondResult <- acquireResult{lease: lease, err: err}
+	}()
+
+	select {
+	case r := <-secondResult:
+		t.Fatalf("replacement acquire resolved while holder still owns the semaphore: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+	r := waitResult(t, secondResult, 2*time.Second)
+	if r.err != nil {
+		t.Fatalf("replacement acquire should be promoted after stale waiter closes, got %v", r.err)
+	}
+}
+
+func TestQueuedHostPressureDoesNotReportColdSemaphoreKey(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{
+		Home:             home,
+		Sampler:          newFakeSampler(1, 8<<30),
+		HeadroomFraction: -1,
+	})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, coreReq("host-holder", 1))
+	defer func() { _ = holder.Release() }()
+
+	waiterReq := semReq("host-waiter", "cold-lock", 1, 1, wingwire.PolicyQueue)
+	waiterReq.Resources = wingwire.HostResources{Cores: 1}
+	waiter := openRawQueuedAdmission(t, home, waiterReq)
+	defer func() { _ = waiter.Close() }()
+	msg := readRawMessage(t, waiter)
+	q, ok := msg.(*wingwire.Queued)
+	if !ok {
+		t.Fatalf("waiter message = %T, want queued", msg)
+	}
+	if q.Key != "" {
+		t.Fatalf("queued key = %q, want empty while only host capacity blocks", q.Key)
+	}
+}
+
+func TestQueuedSubmitReconnectRejectsMismatchedRequest(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	first := openRawQueuedAdmission(t, home, semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue))
+	defer func() { _ = first.Close() }()
+	if msg := readRawMessage(t, first); msg == nil {
+		t.Fatal("first admission returned no queue message")
+	}
+
+	second := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := second.Acquire(ctx, semReq("shard", "different-lock", 1, 1, wingwire.PolicyQueue), nil)
+	if err == nil {
+		t.Fatal("mismatched duplicate request admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("mismatched duplicate error = %q, want duplicate failure", got)
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+}
+
+func TestQueuedSubmitReconnectAdoptsRemeasuredWaiter(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	firstReq := semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue)
+	firstReq.Resources = wingwire.HostResources{Cores: 1}
+	firstReq.CostSource = wingwire.CostSourceDefault
+	firstReq.ExpectedDurationMS = 1000
+	first := openRawQueuedAdmission(t, home, firstReq)
+	defer func() { _ = first.Close() }()
+	if msg := readRawMessage(t, first); msg == nil {
+		t.Fatal("first admission returned no queue message")
+	}
+
+	remeasured := firstReq
+	remeasured.Resources = wingwire.HostResources{Cores: 2}
+	remeasured.CostSource = wingwire.CostSourceMeasured
+	remeasured.ExpectedDurationMS = 2000
+	remeasured.ExpectedP99MS = 2500
+	remeasured.SampleCount = 12
+	second := ensure(t, home, "")
+	positions := make(chan wingwire.Queued, 8)
+	result := make(chan acquireResult, 1)
+	go func() {
+		lease, err := second.Acquire(context.Background(), remeasured, func(q wingwire.Queued) {
+			select {
+			case positions <- q:
+			default:
+			}
+		})
+		result <- acquireResult{lease: lease, err: err}
+	}()
+	waitForQueue(t, positions)
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+	r := waitResult(t, result, 2*time.Second)
+	if r.err != nil {
+		t.Fatalf("remeasured waiter should be adopted, got %v", r.err)
+	}
+	if r.lease == nil {
+		t.Fatal("remeasured waiter returned no lease")
+	}
+	if r.lease.Resources.Cores != 2 {
+		t.Fatalf("remeasured waiter cores = %v, want 2", r.lease.Resources.Cores)
+	}
+	if err := r.lease.Release(); err != nil {
+		t.Fatalf("release remeasured lease: %v", err)
+	}
+}
+
+func TestQueuedSubmitReconnectRejectsMismatchedSubLease(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	firstReq := semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue)
+	first := openRawQueuedAdmission(t, home, firstReq)
+	defer func() { _ = first.Close() }()
+	if msg := readRawMessage(t, first); msg == nil {
+		t.Fatal("first admission returned no queue message")
+	}
+
+	mismatch := firstReq
+	mismatch.SubLease = true
+	second := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := second.Acquire(ctx, mismatch, nil)
+	if err == nil {
+		t.Fatal("mismatched sublease admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("mismatched sublease error = %q, want duplicate failure", got)
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+}
+
+func TestQueuedSubmitReconnectAdoptsDisplayMetadataChange(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	measured := semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue)
+	measured.Resources = wingwire.HostResources{Cores: 1}
+	measured.CostSource = wingwire.CostSourceMeasured
+	first := openRawQueuedAdmission(t, home, measured)
+	defer func() { _ = first.Close() }()
+	if msg := readRawMessage(t, first); msg == nil {
+		t.Fatal("first admission returned no queue message")
+	}
+
+	displayMismatch := measured
+	displayMismatch.CostSource = wingwire.CostSourceDefault
+	second := ensure(t, home, "")
+	positions := make(chan wingwire.Queued, 8)
+	result := make(chan acquireResult, 1)
+	go func() {
+		lease, err := second.Acquire(context.Background(), displayMismatch, func(q wingwire.Queued) {
+			select {
+			case positions <- q:
+			default:
+			}
+		})
+		result <- acquireResult{lease: lease, err: err}
+	}()
+	waitForQueue(t, positions)
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+	r := waitResult(t, result, 2*time.Second)
+	if r.err != nil {
+		t.Fatalf("display metadata change should be adopted, got %v", r.err)
+	}
+	if r.lease == nil {
+		t.Fatal("display metadata change returned no lease")
+	}
+	if err := r.lease.Release(); err != nil {
+		t.Fatalf("release adopted lease: %v", err)
+	}
+}
+
+func TestQueuedSubmitReconnectFailurePreservesOriginalWaiter(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	firstReq := semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue)
+	first := openRawQueuedAdmission(t, home, firstReq)
+	defer func() { _ = first.Close() }()
+	if msg := readRawMessage(t, first); msg == nil {
+		t.Fatal("first admission returned no queue message")
+	}
+
+	invalid := firstReq
+	invalid.Resources = wingwire.HostResources{Cores: -1}
+	second := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := second.Acquire(ctx, invalid, nil)
+	if err == nil {
+		t.Fatal("invalid reconnect admitted, want failure")
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+	msg := readRawMessage(t, first)
+	grant, ok := msg.(*wingwire.Grant)
+	if !ok {
+		t.Fatalf("original waiter message = %T, want grant", msg)
+	}
+	if grant.RunID != "shard" {
+		t.Fatalf("grant run = %q, want shard", grant.RunID)
+	}
+}
+
+func TestQueuedSubmitReconnectRejectsMismatchedPID(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, semReq("holder", "shared-lock", 1, 1, wingwire.PolicyQueue))
+
+	firstReq := semReq("shard", "shared-lock", 1, 1, wingwire.PolicyQueue)
+	firstReq.PID = 101
+	first := openRawQueuedAdmission(t, home, firstReq)
+	defer func() { _ = first.Close() }()
+	if msg := readRawMessage(t, first); msg == nil {
+		t.Fatal("first admission returned no queue message")
+	}
+
+	mismatch := firstReq
+	mismatch.PID = 202
+	second := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := second.Acquire(ctx, mismatch, nil)
+	if err == nil {
+		t.Fatal("mismatched pid admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("mismatched pid error = %q, want duplicate failure", got)
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release holder: %v", err)
+	}
+}
+
+func openRawQueuedAdmission(t *testing.T, home string, req wingwire.AdmissionRequest) net.Conn {
+	t.Helper()
+	sock, err := wingd.SocketPath(home)
+	if err != nil {
+		t.Fatalf("socket path: %v", err)
+	}
+	nc, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatalf("dial daemon: %v", err)
+	}
+	if err := writeRawMessage(nc, &wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "test"}); err != nil {
+		_ = nc.Close()
+		t.Fatalf("write hello: %v", err)
+	}
+	msg := readRawMessage(t, nc)
+	if _, ok := msg.(*wingwire.HelloAck); !ok {
+		_ = nc.Close()
+		t.Fatalf("hello response = %T, want hello_ack", msg)
+	}
+	if err := writeRawMessage(nc, &req); err != nil {
+		_ = nc.Close()
+		t.Fatalf("write admission request: %v", err)
+	}
+	return nc
+}
+
+func writeRawMessage(nc net.Conn, msg wingwire.Message) error {
+	line, err := wingwire.Encode(msg)
+	if err != nil {
+		return err
+	}
+	_, err = nc.Write(line)
+	return err
+}
+
+func readRawMessage(t *testing.T, nc net.Conn) wingwire.Message {
+	t.Helper()
+	if err := nc.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set read deadline: %v", err)
+	}
+	sc := bufio.NewScanner(nc)
+	if !sc.Scan() {
+		t.Fatalf("read frame: %v", sc.Err())
+	}
+	msg, err := wingwire.Decode(sc.Bytes())
+	if err != nil {
+		t.Fatalf("decode frame: %v", err)
+	}
+	return msg
+}
+
+func TestSemaphoresOnlyRunLeaseFinalizesOnDisconnect(t *testing.T) {
+	home := shortHome(t)
+	finalized := make(chan string, 1)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeRun: func(runID string) {
+			finalized <- runID
+		},
+	})
+
+	cl := ensure(t, home, "")
+	mustAcquire(t, cl, wingwire.AdmissionRequest{
+		RunID:          "run-semaphore",
+		SemaphoresOnly: true,
+		Semaphores: []wingwire.SemaphoreClaim{{
+			Name: "deploy", Cost: 1, Capacity: 1, Policy: wingwire.PolicyQueue,
+		}},
+	})
+	cl.Close()
+
+	select {
+	case got := <-finalized:
+		if got != "run-semaphore" {
+			t.Fatalf("finalized %q, want run-semaphore", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("semaphores-only run lease was not finalized on disconnect")
+	}
+}
+
+func TestSubLeaseDoesNotFinalizeOnDisconnect(t *testing.T) {
+	home := shortHome(t)
+	finalized := make(chan string, 1)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeRun: func(runID string) {
+			finalized <- runID
+		},
+	})
+
+	cl := ensure(t, home, "")
+	mustAcquire(t, cl, wingwire.AdmissionRequest{
+		RunID:     "parent/node",
+		Resources: wingwire.HostResources{Cores: 1},
+		SubLease:  true,
+	})
+	cl.Close()
+
+	select {
+	case got := <-finalized:
+		t.Fatalf("sub-lease finalized %q", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
+func TestRunRegistrationFinalizesWhileNodeSubLeaseDoesNot(t *testing.T) {
+	home := shortHome(t)
+	finalized := make(chan string, 2)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeRun: func(runID string) {
+			finalized <- runID
+		},
+	})
+
+	runClient := ensure(t, home, "")
+	mustAcquire(t, runClient, wingwire.AdmissionRequest{
+		RunID:          "run-unpinned",
+		SemaphoresOnly: true,
+	})
+	nodeClient := ensure(t, home, "")
+	mustAcquire(t, nodeClient, wingwire.AdmissionRequest{
+		RunID:     "run-unpinned/node",
+		Resources: wingwire.HostResources{Cores: 1},
+		SubLease:  true,
+	})
+
+	nodeClient.Close()
+	select {
+	case got := <-finalized:
+		t.Fatalf("node sub-lease finalized %q", got)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	runClient.Close()
+	select {
+	case got := <-finalized:
+		if got != "run-unpinned" {
+			t.Fatalf("finalized %q, want run-unpinned", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("run registration was not finalized on disconnect")
+	}
+}
+
+func TestChildAttachReportsParentHostResources(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	hostParent := ensure(t, home, "")
+	hostLease := mustAcquire(t, hostParent, wingwire.AdmissionRequest{
+		RunID:     "host-parent",
+		Resources: wingwire.HostResources{Cores: 1, MemoryBytes: 256 << 20},
+	})
+	hostChild := ensure(t, home, "")
+	hostChildLease := mustAcquire(t, hostChild, wingwire.AdmissionRequest{
+		RunID:            "host-child",
+		ParentLeaseToken: hostLease.Token,
+	})
+	if hostChildLease.Resources.Cores != 1 || hostChildLease.Resources.MemoryBytes != 256<<20 {
+		t.Fatalf("host child resources = %+v, want parent host resources", hostChildLease.Resources)
+	}
+	_ = hostChildLease.Release()
+	_ = hostLease.Release()
+
+	semParent := ensure(t, home, "")
+	semLease := mustAcquire(t, semParent, wingwire.AdmissionRequest{
+		RunID:          "sem-parent",
+		SemaphoresOnly: true,
+		Semaphores: []wingwire.SemaphoreClaim{{
+			Name: "deploy", Cost: 1, Capacity: 1, Policy: wingwire.PolicyQueue,
+		}},
+	})
+	semChild := ensure(t, home, "")
+	semChildLease := mustAcquire(t, semChild, wingwire.AdmissionRequest{
+		RunID:            "sem-child",
+		ParentLeaseToken: semLease.Token,
+	})
+	if semChildLease.Resources.Cores != 0 || semChildLease.Resources.MemoryBytes != 0 {
+		t.Fatalf("semaphore child resources = %+v, want zero host resources", semChildLease.Resources)
+	}
+	_ = semChildLease.Release()
+	_ = semLease.Release()
 }
 
 func TestMeasuredRequestAboveIdleGrantableCapacityIsAdmitted(t *testing.T) {
@@ -511,6 +1002,178 @@ func TestExplicitRelease_Promotes(t *testing.T) {
 	r := waitResult(t, resultB, 2*time.Second)
 	if r.err != nil {
 		t.Fatalf("b should have been promoted after release, got %v", r.err)
+	}
+}
+
+func TestGrantedSubmitReconnectReclaimsLiveGrant(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	first := ensure(t, home, "")
+	lease := mustAcquire(t, first, semReq("shard", "lock", 1, 1, wingwire.PolicyQueue))
+
+	waiter := ensure(t, home, "")
+	waiterPos, waiterResult := acquireAsync(waiter, semReq("waiter", "lock", 1, 1, wingwire.PolicyQueue))
+	waitForQueue(t, waiterPos)
+
+	replacement := ensure(t, home, "")
+	reclaimed, err := replacement.Acquire(context.Background(), semReq("shard", "lock", 1, 1, wingwire.PolicyQueue), nil)
+	if err != nil {
+		t.Fatalf("replacement acquire: %v", err)
+	}
+	if reclaimed.Token != lease.Token {
+		t.Fatalf("replacement token = %q, want original token %q", reclaimed.Token, lease.Token)
+	}
+
+	if err := reclaimed.Release(); err != nil {
+		t.Fatalf("replacement release: %v", err)
+	}
+	r := waitResult(t, waiterResult, 2*time.Second)
+	if r.err != nil {
+		t.Fatalf("waiter should promote after replacement release, got %v", r.err)
+	}
+}
+
+func TestGrantedSubmitReconnectRejectsMismatchedRequest(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	first := ensure(t, home, "")
+	lease := mustAcquire(t, first, semReq("shard", "lock", 1, 1, wingwire.PolicyQueue))
+	t.Cleanup(func() { _ = lease.Release() })
+
+	replacement := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := replacement.Acquire(ctx, semReq("shard", "different-lock", 1, 1, wingwire.PolicyQueue), nil)
+	if err == nil {
+		t.Fatal("mismatched granted duplicate admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("mismatched granted duplicate error = %q, want duplicate failure", got)
+	}
+}
+
+func TestGrantedSubmitReconnectRejectsRequestedChargeChange(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{
+		Home:             home,
+		Sampler:          newFakeSampler(2, 8<<30),
+		HeadroomFraction: -1,
+	})
+
+	req := coreReq("oversized", 10)
+	req.CostSource = wingwire.CostSourceMeasured
+	first := ensure(t, home, "")
+	lease := mustAcquire(t, first, req)
+
+	replacement := ensure(t, home, "")
+	reclaimed, err := replacement.Acquire(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("replacement acquire: %v", err)
+	}
+	if reclaimed.Token != lease.Token {
+		t.Fatalf("replacement token = %q, want original token %q", reclaimed.Token, lease.Token)
+	}
+
+	mismatch := req
+	mismatch.Resources.Cores = 9
+	third := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = third.Acquire(ctx, mismatch, nil)
+	if err == nil {
+		t.Fatal("changed raw request reclaimed a granted lease, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("changed raw request error = %q, want duplicate failure", got)
+	}
+
+	if err := reclaimed.Release(); err != nil {
+		t.Fatalf("replacement release: %v", err)
+	}
+}
+
+func TestGrantedSubmitReconnectRejectsSemaphoresOnlyMismatch(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home})
+
+	req := semReq("shard", "lock", 1, 1, wingwire.PolicyQueue)
+	req.SemaphoresOnly = true
+	first := ensure(t, home, "")
+	lease := mustAcquire(t, first, req)
+	t.Cleanup(func() { _ = lease.Release() })
+
+	mismatch := req
+	mismatch.SemaphoresOnly = false
+	replacement := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := replacement.Acquire(ctx, mismatch, nil)
+	if err == nil {
+		t.Fatal("semaphores-only mismatch admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("semaphores-only mismatch error = %q, want duplicate failure", got)
+	}
+}
+
+func TestGrantedSubmitReconnectRejectsRestoredMultiMemberLease(t *testing.T) {
+	home := shortHome(t)
+	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 2 * time.Second})
+
+	parentReq := semReq("parent", "lock", 1, 1, wingwire.PolicyQueue)
+	parentClient := ensure(t, home, "")
+	parentLease := mustAcquire(t, parentClient, parentReq)
+
+	childClient := ensure(t, home, "")
+	childLease := mustAcquire(t, childClient, wingwire.AdmissionRequest{
+		RunID:            "child",
+		ParentLeaseToken: parentLease.Token,
+	})
+	if childLease.Token != parentLease.Token {
+		t.Fatalf("child token = %q, want parent token %q", childLease.Token, parentLease.Token)
+	}
+
+	td1.stop()
+	if err := td1.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("daemon1 exit: %v", err)
+	}
+
+	startDaemon(t, wingd.Config{Home: home, GraceWindow: 2 * time.Second})
+
+	reattachedClient := ensure(t, home, "")
+	reattached, err := reattachedClient.Reattach(context.Background(), parentLease.Token)
+	if err != nil {
+		t.Fatalf("reattach: %v", err)
+	}
+	if reattached.RunID != "parent" {
+		t.Fatalf("reattached run id = %q, want parent", reattached.RunID)
+	}
+
+	replacementClient := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err = replacementClient.Acquire(ctx, parentReq, nil)
+	if err == nil {
+		t.Fatal("multi-member submit reconnect admitted, want duplicate failure")
+	}
+	if got := err.Error(); got != `wingd: fail on "duplicate"` {
+		t.Fatalf("multi-member submit reconnect error = %q, want duplicate failure", got)
+	}
+	if err := reattached.Release(); err != nil {
+		t.Fatalf("reattached release: %v", err)
+	}
+
+	waiterClient := ensure(t, home, "")
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	waiter, err := waiterClient.Acquire(ctx, semReq("waiter", "lock", 1, 1, wingwire.PolicyQueue), nil)
+	if err != nil {
+		t.Fatalf("waiter acquire after reattached release: %v", err)
+	}
+	if err := waiter.Release(); err != nil {
+		t.Fatalf("waiter release: %v", err)
 	}
 }
 

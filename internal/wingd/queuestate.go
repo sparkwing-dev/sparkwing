@@ -1,8 +1,10 @@
 package wingd
 
 import (
+	"encoding/base64"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
@@ -91,8 +93,11 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 
 	now := d.now()
 	for _, ls := range snap.Leases {
+		rowID := queueRowIdentity(ls.RequestID, d.byRun[ls.RequestID])
 		h := wingwire.Holder{
-			RunID: ls.RequestID,
+			RunID:         rowID.runID,
+			ParticipantID: rowID.participantID,
+			DisplayRunID:  rowID.displayRunID,
 			Resources: wingwire.HostResources{
 				Cores:       float64(ls.MilliCores) / 1000.0,
 				MemoryBytes: int64(ls.MemoryBytes),
@@ -112,7 +117,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			h.Origin = c.origin
 			if c.stalled {
 				h.Stalled = true
-				h.Recovery = stallRecoveryCommand(ls.RequestID)
+				h.Recovery = stallRecoveryCommand(rowID.runID)
 			}
 			if c.contended {
 				h.Contended = true
@@ -159,10 +164,14 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	}
 	for i, w := range snap.Waiters {
 		c := d.byRun[w.RequestID]
+		rowID := queueRowIdentity(w.RequestID, c)
 		rationale := d.costRationale(c)
 		waiter := wingwire.Waiter{
-			RunID:    w.RequestID,
-			Position: i + 1,
+			RunID:         rowID.runID,
+			ParticipantID: rowID.participantID,
+			DisplayRunID:  rowID.displayRunID,
+			Position:      i + 1,
+			Priority:      w.Priority,
 			Resources: wingwire.HostResources{
 				Cores:       float64(w.MilliCores) / 1000.0,
 				MemoryBytes: int64(w.MemoryBytes),
@@ -172,6 +181,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			BlockingReason: hostBlockingReason(float64(w.MilliCores)/1000.0, float64(w.MemoryBytes), available, rationale),
 			CostRationale:  rationale,
 		}
+		waiter.BlockingReason = queueBlockingReason(waiter.BlockingReason, waiter.WaitingOn, i+1)
 		if c != nil {
 			waiter.Pipeline = c.pipeline
 			waiter.Repo = c.repo
@@ -190,6 +200,13 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	return qs
 }
 
+func queueBlockingReason(hostReason string, waitingOn []string, position int) string {
+	if hostReason != "" || len(waitingOn) > 0 || position <= 1 {
+		return hostReason
+	}
+	return "waiting behind earlier queued work"
+}
+
 // attachedChildHoldersLocked renders the child runs riding a lease as
 // zero-cost holders under their parent, so an attached child appears in
 // the queue as what it is rather than a run holding nothing. Members are
@@ -201,8 +218,17 @@ func (d *Daemon) attachedChildHoldersLocked(ls admission.LeaseState, now time.Ti
 		if member == ls.RequestID {
 			continue
 		}
-		child := wingwire.Holder{RunID: member, Parent: ls.RequestID}
-		if c := d.byRun[member]; c != nil {
+		c := d.byRun[member]
+		childID := queueRowIdentity(member, c)
+		parentID := queueRowIdentity(ls.RequestID, d.byRun[ls.RequestID])
+		child := wingwire.Holder{
+			RunID:               childID.runID,
+			ParticipantID:       childID.participantID,
+			DisplayRunID:        childID.displayRunID,
+			Parent:              parentID.runID,
+			ParentParticipantID: parentID.participantID,
+		}
+		if c != nil {
 			child.Pipeline = c.pipeline
 			child.Repo = c.repo
 			child.Origin = c.origin
@@ -213,6 +239,51 @@ func (d *Daemon) attachedChildHoldersLocked(ls admission.LeaseState, now time.Ti
 		out = append(out, child)
 	}
 	return out
+}
+
+type queueIdentity struct {
+	runID         string
+	participantID string
+	displayRunID  string
+}
+
+func queueRowIdentity(participantID string, c *conn) queueIdentity {
+	runID := participantID
+	displayRunID := ""
+	if c != nil {
+		if c.ownerRunID != "" {
+			runID = c.ownerRunID
+		}
+		displayRunID = c.displayRunID
+	}
+	if runID == participantID {
+		if owner, label, ok := decodeNodeParticipantID(participantID); ok {
+			runID = owner
+			if displayRunID == "" {
+				displayRunID = label
+			}
+		}
+	}
+	id := queueIdentity{runID: runID, displayRunID: displayRunID}
+	if participantID != runID {
+		id.participantID = participantID
+	}
+	return id
+}
+
+func decodeNodeParticipantID(participantID string) (ownerRunID, displayRunID string, ok bool) {
+	for _, marker := range []string{"/node-host/", "/node-semaphore/"} {
+		owner, encoded, found := strings.Cut(participantID, marker)
+		if !found || owner == "" || encoded == "" {
+			continue
+		}
+		node, err := base64.RawURLEncoding.DecodeString(encoded)
+		if err != nil {
+			return "", "", false
+		}
+		return owner, owner + "/" + string(node), true
+	}
+	return "", "", false
 }
 
 // annotateETA fills each waiter's ExpectedStartMS and the queue's
@@ -245,9 +316,10 @@ func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 			continue
 		}
 		waiters = append(waiters, simRun{
-			cores:    w.Resources.Cores,
-			mem:      float64(w.Resources.MemoryBytes),
-			duration: durationMS(w.ExpectedDurationMS),
+			cores:     w.Resources.Cores,
+			softCores: snap.Waiters[i].SoftCores,
+			mem:       float64(w.Resources.MemoryBytes),
+			duration:  durationMS(w.ExpectedDurationMS),
 		})
 		waiterIdx = append(waiterIdx, i)
 	}
@@ -269,10 +341,11 @@ func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 // milliseconds; duration is a waiter's run length. Either is +Inf when the
 // run's duration is unmeasured.
 type simRun struct {
-	cores    float64
-	mem      float64
-	finish   float64
-	duration float64
+	cores     float64
+	softCores bool
+	mem       float64
+	finish    float64
+	duration  float64
 }
 
 // simEvent is a scheduled resource release at a point in simulated time.
@@ -302,12 +375,20 @@ func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts 
 
 	starts = make([]float64, len(waiters))
 	now := 0.0
+	blocked := false
 	for i, w := range waiters {
-		if w.cores > capCores+eps || w.mem > capMem+eps {
+		if blocked {
 			starts[i] = math.Inf(1)
+			clear = math.Inf(1)
 			continue
 		}
-		for w.cores > freeCores+eps || w.mem > freeMem+eps {
+		if (!w.softCores && w.cores > capCores+eps) || w.mem > capMem+eps {
+			starts[i] = math.Inf(1)
+			clear = math.Inf(1)
+			blocked = true
+			continue
+		}
+		for !simFits(w, capCores, freeCores, freeMem, eps) {
 			e, ok := popEarliest(&events)
 			if !ok {
 				now = math.Inf(1)
@@ -320,6 +401,7 @@ func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts 
 		starts[i] = now
 		if math.IsInf(now, 1) {
 			clear = math.Inf(1)
+			blocked = true
 			continue
 		}
 		freeCores -= w.cores
@@ -329,6 +411,20 @@ func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts 
 		clear = math.Max(clear, finish)
 	}
 	return starts, clear
+}
+
+func simFits(w simRun, capCores, freeCores, freeMem, eps float64) bool {
+	memOK := w.mem <= freeMem+eps
+	if !memOK {
+		return false
+	}
+	if w.cores <= eps {
+		return true
+	}
+	if w.cores <= freeCores+eps {
+		return true
+	}
+	return w.softCores && freeCores >= capCores-eps
 }
 
 // popEarliest removes and returns the event with the smallest time.
@@ -400,7 +496,7 @@ func reconciledExternal(capacity, held, reserved, available float64) float64 {
 // waitingOn names the resources a waiter cannot fit into right now: host
 // dimensions and full semaphore keys whose remaining room is smaller than
 // what the waiter draws. An empty result means the waiter is blocked only
-// by arrival order behind a heavier request ahead of it.
+// by admission order behind a heavier request ahead of it.
 func waitingOn(w admission.WaiterState, remaining map[string]float64) []string {
 	var keys []string
 	if cores := float64(w.MilliCores) / 1000.0; cores > 0 && remaining["cores"] < cores {
@@ -474,7 +570,7 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale 
 // Cores bind before memory. rationale, when non-empty, explains where the
 // charge came from and is folded in right after the need ("needs 5.0 cores
 // (measured p95 over 12 runs); ..."). Empty when neither host dimension
-// blocks the run (a pure semaphore or arrival-order wait).
+// blocks the run (a pure semaphore or admission-order wait).
 func hostBlockingReason(needCores, needMem float64, available map[string]wingwire.ResourceState, rationale string) string {
 	if needCores > 0 {
 		if r, ok := available["cores"]; ok && r.Available < needCores {

@@ -132,6 +132,9 @@ type Request struct {
 	MemoryBytes uint64
 	// Semaphores are the named-semaphore holds the request needs.
 	Semaphores []SemaphoreClaim
+	// Priority orders queued work. Larger values admit before smaller
+	// values; equal values keep FIFO order.
+	Priority int
 }
 
 // LeaseID is the opaque identifier of a granted lease.

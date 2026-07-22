@@ -68,16 +68,19 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 		fmt.Fprintln(w, "external\tignored")
 	}
 	for _, h := range qs.Holders {
-		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			h.RunID, orDash(h.Pipeline), orDash(h.Repo), orDash(OriginWord(h.Origin)),
+		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			h.RunID, orDash(h.ParticipantID), queueDisplayRunID(h.RunID, h.DisplayRunID),
+			orDash(h.Pipeline), orDash(h.Repo), orDash(OriginWord(h.Origin)),
 			fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
-			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h), orDash(h.Parent))
+			orDash(h.CostSource), joinKeys(h.Semaphores), stalledWord(h), orDash(queueParentID(h)))
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			wt.Position, wt.RunID, orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)),
+		fmt.Fprintf(w, "waiter\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\n",
+			wt.Position, wt.RunID, orDash(wt.ParticipantID),
+			queueDisplayRunID(wt.RunID, wt.DisplayRunID),
+			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)),
 			fmtCost(wt.Resources), orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS),
-			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason))
+			joinKeys(wt.WaitingOn), fmtElapsed(wt.WaitingMS), orDash(wt.BlockingReason), wt.Priority)
 	}
 	for _, r := range qs.Runners {
 		fmt.Fprintf(w, "runner\t%s\t%.3f\t%d\t%d\n", r.Name, r.Cores, r.MemoryBytes, r.QueueDepth)
@@ -142,7 +145,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 		fmt.Fprintln(tw, "(none holding)\t\t\t\t\t\t\t")
 	}
 	for _, h := range qs.Holders {
-		run := h.RunID
+		run := queueDisplayRunID(h.RunID, h.DisplayRunID)
 		if h.Parent != "" {
 			run = "  " + run + " (attached)"
 		}
@@ -161,20 +164,22 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Waiting")
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "POS\tRUN\tPIPELINE\tREPO\tORIGIN\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
+	fmt.Fprintln(tw, "POS\tPRI\tRUN\tPIPELINE\tREPO\tORIGIN\tCOST\tSOURCE\tETA\tWAITING ON\tWAITED")
 	if len(qs.Waiters) == 0 {
-		fmt.Fprintln(tw, "-\t(no one queued)\t\t\t\t\t\t\t\t")
+		fmt.Fprintln(tw, "-\t-\t(no one queued)\t\t\t\t\t\t\t\t")
 	}
 	for _, wt := range qs.Waiters {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.RunID, orDash(wt.Pipeline),
-			orDash(wt.Repo), orDash(OriginWord(wt.Origin)), fmtCost(wt.Resources), orDash(wt.CostSource),
-			fmtETA(wt.ExpectedStartMS), orDash(joinKeys(wt.WaitingOn)), fmtElapsed(wt.WaitingMS))
+		run := queueDisplayRunID(wt.RunID, wt.DisplayRunID)
+		fmt.Fprintf(tw, "%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", wt.Position, wt.Priority, run,
+			orDash(wt.Pipeline), orDash(wt.Repo), orDash(OriginWord(wt.Origin)), fmtCost(wt.Resources),
+			orDash(wt.CostSource), fmtETA(wt.ExpectedStartMS), orDash(joinKeys(wt.WaitingOn)),
+			fmtElapsed(wt.WaitingMS))
 	}
 	_ = tw.Flush()
 
 	for _, wt := range qs.Waiters {
 		if wt.BlockingReason != "" {
-			fmt.Fprintf(out, "\n%s waiting: %s\n", wt.RunID, wt.BlockingReason)
+			fmt.Fprintf(out, "\n%s waiting: %s\n", queueDisplayRunID(wt.RunID, wt.DisplayRunID), wt.BlockingReason)
 		}
 	}
 	for _, h := range qs.Holders {
@@ -521,4 +526,18 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func queueDisplayRunID(runID, displayRunID string) string {
+	if displayRunID != "" {
+		return displayRunID
+	}
+	return runID
+}
+
+func queueParentID(h wingwire.Holder) string {
+	if h.ParentParticipantID != "" {
+		return h.ParentParticipantID
+	}
+	return h.Parent
 }

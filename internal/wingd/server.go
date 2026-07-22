@@ -493,9 +493,10 @@ func softCoreCostSource(costSource wingwire.CostSource) bool {
 	}
 }
 
-func requestFromWire(runID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource) admission.Request {
+func requestFromWire(runID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int) admission.Request {
 	req := admission.Request{
 		ID:          runID,
+		Priority:    priority,
 		Cores:       res.Cores,
 		SoftCores:   softCoreCostSource(costSource),
 		StrictCores: strictCoreCostSource(costSource),
@@ -572,7 +573,8 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		d.handleChildAttach(c, req)
 		return
 	}
-	charged := chargedResources(req.Resources)
+	requested := chargedResources(req.Resources)
+	charged := requested
 
 	d.mu.Lock()
 	if d.draining {
@@ -586,14 +588,17 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	} else {
 		charged, pinClamped = d.clampHostChargeLocked(charged, req.CostSource)
 	}
-	ar := requestFromWire(req.RunID, charged, req.Semaphores, req.CostSource)
+	ar := requestFromWire(req.RunID, charged, req.Semaphores, req.CostSource, req.Priority)
 	c.runID = req.RunID
+	c.ownerRunID = req.OwnerRunID
+	c.displayRunID = req.DisplayRunID
 	c.pipeline = req.Pipeline
+	c.priority = req.Priority
 	c.repo = req.Repo
 	c.pid = req.PID
 	c.resources = charged
 	c.sems = semNames(req.Semaphores)
-	c.finalizable = !req.SemaphoresOnly
+	c.finalizable = !req.SubLease
 	c.startAt = d.now()
 	c.costSource = string(req.CostSource)
 	c.expectedDurationMS = req.ExpectedDurationMS
@@ -602,6 +607,119 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.driftWarning = req.DriftWarning
 	c.origin = req.Origin
 	c.queueTimeoutMS = tightestQueueTimeoutMS(req.Semaphores)
+	c.requestResources = requested
+	c.requestSemaphores = cloneSemaphoreClaims(req.Semaphores)
+	c.semaphoresOnly = req.SemaphoresOnly
+	if existing := d.byRun[req.RunID]; existing != nil && existing != c {
+		switch existing.role {
+		case roleWaiter:
+			if !requestIdentityMatches(existing, req) ||
+				existing.queueTimeoutMS != tightestQueueTimeoutMS(req.Semaphores) ||
+				!queuedRequestPresent(d.ledger.Snapshot(), req.RunID) {
+				d.mu.Unlock()
+				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				return
+			}
+			c.role = roleWaiter
+			if !existing.startAt.IsZero() {
+				c.startAt = existing.startAt
+			}
+			existing.role = roleNone
+			existing.runID = ""
+			existing.members = nil
+			existing.finalizable = false
+			d.byRun[req.RunID] = c
+			events, err := d.ledger.ReplaceWaiter(ar)
+			if err != nil {
+				existing.role = roleWaiter
+				existing.runID = req.RunID
+				existing.finalizable = c.finalizable
+				d.byRun[req.RunID] = existing
+				c.role = roleNone
+				c.runID = ""
+				c.finalizable = false
+				d.mu.Unlock()
+				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: submitErrorKey(err), Policy: wingwire.PolicyFail})
+				return
+			}
+			deliveries := d.routeLocked(events)
+			snap := d.ledger.Snapshot()
+			if c.role == roleWaiter {
+				if queued := d.queuedDeliveryLockedFromSnapshot(c, snap, req.RunID); queued != nil {
+					deliveries = append(deliveries, *queued)
+				}
+			}
+			d.touchLocked()
+			d.mu.Unlock()
+			existing.close()
+			d.flush(deliveries, snap)
+			return
+		case roleHolder:
+			if len(existing.members) != 1 {
+				d.mu.Unlock()
+				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				return
+			}
+			snap := d.ledger.Snapshot()
+			if !requestMetadataMatches(existing, req) ||
+				!grantedRequestPresent(snap, existing.leaseID, req.RunID) {
+				d.mu.Unlock()
+				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				return
+			}
+			leaseID := existing.leaseID
+			lease, ok := d.ledger.LeaseByID(leaseID)
+			if !ok {
+				d.mu.Unlock()
+				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+				return
+			}
+			c.role = roleHolder
+			c.leaseID = leaseID
+			c.members = cloneStrings(existing.members)
+			c.resources = existing.resources
+			c.priority = existing.priority
+			c.ownerRunID = existing.ownerRunID
+			c.displayRunID = existing.displayRunID
+			if !existing.startAt.IsZero() {
+				c.startAt = existing.startAt
+			}
+			c.holdSampledMS = existing.holdSampledMS
+			c.holdSaturatedMS = existing.holdSaturatedMS
+			c.contended = existing.contended
+			c.contentionReason = existing.contentionReason
+			c.stalled = existing.stalled
+			c.lowSince = existing.lowSince
+			existing.role = roleNone
+			existing.runID = ""
+			existing.members = nil
+			existing.finalizable = false
+			for _, member := range c.members {
+				d.byRun[member] = c
+			}
+			soleUnderLoad := d.soleRunUnderLoadLocked(c)
+			externalCores := d.externalCores
+			d.touchLocked()
+			d.mu.Unlock()
+			existing.close()
+			grant := &wingwire.Grant{
+				RunID:      req.RunID,
+				LeaseToken: lease.Token,
+				Resources:  c.resources,
+				Semaphores: leaseSemaphores(snap, leaseID),
+			}
+			if soleUnderLoad {
+				grant.SoleRunUnderLoad = true
+				grant.ExternalCores = externalCores
+			}
+			_ = c.send(grant)
+			return
+		default:
+			d.mu.Unlock()
+			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
+			return
+		}
+	}
 	d.byRun[req.RunID] = c
 	dec, events, err := d.ledger.Submit(ar)
 	if err != nil {
@@ -667,6 +785,84 @@ func tightestQueueTimeoutMS(sems []wingwire.SemaphoreClaim) int64 {
 		}
 	}
 	return t
+}
+
+func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
+	requested := chargedResources(req.Resources)
+	return requestIdentityMatches(existing, req) &&
+		existing.costSource == string(req.CostSource) &&
+		existing.expectedDurationMS == req.ExpectedDurationMS &&
+		existing.expectedP99MS == req.ExpectedP99MS &&
+		existing.sampleCount == req.SampleCount &&
+		existing.driftWarning == req.DriftWarning &&
+		existing.requestResources == requested &&
+		existing.queueTimeoutMS == tightestQueueTimeoutMS(req.Semaphores)
+}
+
+func requestIdentityMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
+	return existing.finalizable == !req.SubLease &&
+		existing.pipeline == req.Pipeline &&
+		existing.repo == req.Repo &&
+		existing.pid == req.PID &&
+		existing.origin == req.Origin &&
+		existing.priority == req.Priority &&
+		existing.ownerRunID == req.OwnerRunID &&
+		existing.displayRunID == req.DisplayRunID &&
+		claimRequestsMatch(existing.requestSemaphores, req.Semaphores) &&
+		existing.semaphoresOnly == req.SemaphoresOnly
+}
+
+func grantedRequestPresent(snap admission.Snapshot, leaseID admission.LeaseID, runID string) bool {
+	for _, lease := range snap.Leases {
+		if lease.ID != leaseID || lease.RequestID != runID {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func queuedRequestPresent(snap admission.Snapshot, runID string) bool {
+	for _, w := range snap.Waiters {
+		if w.RequestID != runID {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func cloneSemaphoreClaims(in []wingwire.SemaphoreClaim) []wingwire.SemaphoreClaim {
+	if len(in) == 0 {
+		return nil
+	}
+	return append([]wingwire.SemaphoreClaim(nil), in...)
+}
+
+func cloneStrings(in []string) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	return append([]string(nil), in...)
+}
+
+func claimRequestsMatch(got []wingwire.SemaphoreClaim, want []wingwire.SemaphoreClaim) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i, claim := range got {
+		expected := want[i]
+		if claim.Policy == "" {
+			claim.Policy = wingwire.PolicyQueue
+		}
+		if expected.Policy == "" {
+			expected.Policy = wingwire.PolicyQueue
+		}
+		if claim != expected {
+			return false
+		}
+	}
+	return true
 }
 
 // cancelTimeoutFor returns the smallest positive CancelTimeout declared
@@ -748,6 +944,8 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	}
 	lease, _ := d.ledger.LeaseByID(leaseID)
 	c.runID = req.RunID
+	c.ownerRunID = req.OwnerRunID
+	c.displayRunID = req.DisplayRunID
 	c.pipeline = req.Pipeline
 	c.repo = req.Repo
 	c.pid = req.PID
@@ -756,6 +954,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	c.members = []string{req.RunID}
 	c.startAt = d.now()
 	c.finalizable = true
+	c.resources = d.leaseCharge[leaseID]
 	c.origin = req.Origin
 	c.parentRun = d.leaseRun[leaseID]
 	d.byRun[req.RunID] = c
@@ -768,7 +967,12 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
-	_ = c.send(&wingwire.Grant{RunID: req.RunID, LeaseToken: lease.Token, Semaphores: leaseSemaphores(snap, leaseID)})
+	_ = c.send(&wingwire.Grant{
+		RunID:      req.RunID,
+		LeaseToken: lease.Token,
+		Resources:  c.resources,
+		Semaphores: leaseSemaphores(snap, leaseID),
+	})
 }
 
 // leaseSemaphores names every semaphore a lease holds, read from a
