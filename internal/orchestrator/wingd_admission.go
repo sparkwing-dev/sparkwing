@@ -755,21 +755,27 @@ func groupUsesLocalDaemon(group *sparkwing.ConcurrencyGroup) bool {
 type localAdmissionCtxKey struct{}
 
 type localAdmissionState struct {
-	la       *LocalAdmission
-	token    string
-	pipeline string
-	fallback *capacity.Pin
+	la          *LocalAdmission
+	token       string
+	pipeline    string
+	fallback    *capacity.Pin
+	maxParallel int
 }
 
-func withLocalAdmission(ctx context.Context, la *LocalAdmission, leaseToken, pipeline string, fallback *capacity.Pin) context.Context {
+func withLocalAdmission(ctx context.Context, la *LocalAdmission, leaseToken, pipeline string, fallback *capacity.Pin, maxParallel int) context.Context {
 	if la == nil {
 		return ctx
 	}
-	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{la: la, token: leaseToken, pipeline: pipeline, fallback: fallback})
+	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{la: la, token: leaseToken, pipeline: pipeline, fallback: fallback, maxParallel: maxParallel})
 	if leaseToken != "" {
 		ctx = sparkwing.WithCommandEnv(ctx, map[string]string{wingwire.LeaseTokenEnv: leaseToken})
 	}
 	return ctx
+}
+
+func localMaxParallelFromContext(ctx context.Context) int {
+	state, _ := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	return state.maxParallel
 }
 
 func localPipelineFromContext(ctx context.Context) string {

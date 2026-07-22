@@ -1387,7 +1387,7 @@ func newDispatchState(
 		masker = secrets.NewMasker()
 	}
 	var sem chan struct{}
-	if maxParallel > 0 {
+	if maxParallel > 0 && admission == nil {
 		sem = make(chan struct{}, maxParallel)
 	}
 	s := &dispatchState{
@@ -1427,7 +1427,7 @@ func newDispatchState(
 	} else {
 		s.resolverCtx = ctx
 	}
-	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, pipeline, planPin(plan))
+	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, pipeline, planPin(plan), maxParallel)
 	s.resolverCtx = sparkwingruntime.WithResolver(s.resolverCtx, s.resolve)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())

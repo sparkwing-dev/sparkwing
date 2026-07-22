@@ -38,6 +38,7 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		Policy:          wingwire.Policy(limit.OnLimit),
 		CancelTimeoutMS: limit.CancelTimeout.Milliseconds(),
 	}
+	claims := executionClaims(req.RunID, localMaxParallelFromContext(ctx), claim)
 	resolved, _, drift, overCap := la.resolveNodeHostCost(ctx, r.backends, req.Pipeline, node.ID(), node, localPlanPinFromContext(ctx))
 	resources := wingwire.HostResources{Cores: resolved.Cores, MemoryBytes: resolved.MemoryBytes}
 	warning := hostChargeWarning(drift, overCap)
@@ -72,7 +73,7 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		}
 	}
 
-	lease, err := la.acquireNodeExecution(acquireCtx, req.Pipeline, req.RunID, node.ID(), resources, wingwire.CostSource(resolved.Source), resolved.ExpectedDuration, warning, []wingwire.SemaphoreClaim{claim}, onQueued)
+	lease, err := la.acquireNodeExecution(acquireCtx, req.Pipeline, req.RunID, node.ID(), resources, wingwire.CostSource(resolved.Source), resolved.ExpectedDuration, warning, claims, onQueued)
 	if err != nil {
 		return r.failedDaemonAcquire(ctx, acquireCtx, req, key, limit.QueueTimeout, err)
 	}
@@ -135,7 +136,8 @@ func (r *InProcessRunner) acquireNodeResources(ctx context.Context, runID string
 	resources := wingwire.HostResources{Cores: resolved.Cores, MemoryBytes: resolved.MemoryBytes}
 	warning := hostChargeWarning(drift, overCap)
 	reporter := &queueWaitReporter{la: la, ctx: ctx, backends: r.backends, runID: runID}
-	lease, err := la.acquireNodeExecution(ctx, pipeline, runID, node.ID(), resources, wingwire.CostSource(resolved.Source), resolved.ExpectedDuration, warning, nil, reporter.onQueued)
+	claims := executionClaims(runID, localMaxParallelFromContext(ctx))
+	lease, err := la.acquireNodeExecution(ctx, pipeline, runID, node.ID(), resources, wingwire.CostSource(resolved.Source), resolved.ExpectedDuration, warning, claims, reporter.onQueued)
 	if err != nil {
 		return nil, err
 	}
@@ -144,6 +146,18 @@ func (r *InProcessRunner) acquireNodeResources(ctx context.Context, runID string
 	}
 	defer func() { _ = lease.Release() }()
 	return r.executeNodeAdmitted(withExecutionAdmission(ctx), runID, node, delegate)
+}
+
+func executionClaims(runID string, maxParallel int, claims ...wingwire.SemaphoreClaim) []wingwire.SemaphoreClaim {
+	if maxParallel <= 0 {
+		return claims
+	}
+	return append(claims, wingwire.SemaphoreClaim{
+		Name:     qualifiedKey(scopeKeyRunPrefix, runID, "dispatcher"),
+		Cost:     1,
+		Capacity: maxParallel,
+		Policy:   wingwire.PolicyQueue,
+	})
 }
 
 // failedDaemonAcquire maps a failed daemon acquisition onto the node's
