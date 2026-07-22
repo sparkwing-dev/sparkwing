@@ -71,6 +71,25 @@ func TestApplyHostCeiling(t *testing.T) {
 	}
 }
 
+func TestApplyUnknownHostEnvelope_ReservesEveryUnmeasuredDimension(t *testing.T) {
+	got := ApplyUnknownHostEnvelope(Resolution{Cores: 12, Source: store.CostSourceDefault}, 10, 24<<30)
+	if got.Cores != 10 {
+		t.Errorf("cores = %v, want 10", got.Cores)
+	}
+	if got.MemoryBytes != 24<<30 {
+		t.Errorf("memory = %d, want %d", got.MemoryBytes, int64(24<<30))
+	}
+}
+
+func TestApplyUnknownHostEnvelope_LeavesMeasuredAndPinnedChargesAlone(t *testing.T) {
+	for _, source := range []store.CostSource{store.CostSourceMeasured, store.CostSourcePin} {
+		input := Resolution{Cores: 2, MemoryBytes: 3 << 30, Source: source}
+		if got := ApplyUnknownHostEnvelope(input, 10, 24<<30); got != input {
+			t.Errorf("source %q changed from %+v to %+v", source, input, got)
+		}
+	}
+}
+
 func TestResolve_Order(t *testing.T) {
 	measured := &store.PipelineProfile{
 		P50Duration:     30 * time.Second,
