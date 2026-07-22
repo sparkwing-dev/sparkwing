@@ -73,7 +73,8 @@ func TestExecutionLease_DisconnectRetainsChargeThroughReattachGrace(t *testing.T
 	holder := ensure(t, home, "")
 	request := coreReq("execution-disconnect", 1)
 	request.ExecutionOnly = true
-	if _, err := holder.Acquire(context.Background(), request, nil); err != nil {
+	lease, err := holder.Acquire(context.Background(), request, nil)
+	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
 	if err := holder.Close(); err != nil {
@@ -89,6 +90,21 @@ func TestExecutionLease_DisconnectRetainsChargeThroughReattachGrace(t *testing.T
 	if !holdsRun(state, "execution-disconnect") {
 		t.Fatal("execution charge released before reattach grace elapsed")
 	}
+	reconnected := ensure(t, home, "")
+	if _, err := reconnected.Reattach(context.Background(), lease.Token); err != nil {
+		t.Fatalf("reattach: %v", err)
+	}
+	if err := reconnected.Close(); err != nil {
+		t.Fatalf("close reattached client: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	state, err = query.QueueState(context.Background())
+	if err != nil {
+		t.Fatalf("queue state after second disconnect: %v", err)
+	}
+	if !holdsRun(state, "execution-disconnect") {
+		t.Fatal("reattached execution charge released before grace elapsed")
+	}
 
 	time.Sleep(350 * time.Millisecond)
 	state, err = query.QueueState(context.Background())
@@ -97,6 +113,40 @@ func TestExecutionLease_DisconnectRetainsChargeThroughReattachGrace(t *testing.T
 	}
 	if holdsRun(state, "execution-disconnect") {
 		t.Fatal("execution charge remained after reattach grace elapsed")
+	}
+}
+
+func TestExecutionLease_RestartPreservesDisconnectSemantics(t *testing.T) {
+	home := shortHome(t)
+	first := startDaemon(t, wingd.Config{Home: home, GraceWindow: 250 * time.Millisecond, HeadroomFraction: -1})
+	holder := ensure(t, home, "")
+	request := coreReq("execution-restart", 1)
+	request.ExecutionOnly = true
+	lease, err := holder.Acquire(context.Background(), request, nil)
+	if err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	first.stop()
+	if err := first.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("first daemon exit: %v", err)
+	}
+
+	startDaemon(t, wingd.Config{Home: home, GraceWindow: 250 * time.Millisecond, HeadroomFraction: -1})
+	reconnected := ensure(t, home, "")
+	if _, err := reconnected.Reattach(context.Background(), lease.Token); err != nil {
+		t.Fatalf("reattach: %v", err)
+	}
+	if err := reconnected.Close(); err != nil {
+		t.Fatalf("close reattached client: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond)
+	query := ensure(t, home, "")
+	state, err := query.QueueState(context.Background())
+	if err != nil {
+		t.Fatalf("queue state: %v", err)
+	}
+	if !holdsRun(state, "execution-restart") {
+		t.Fatal("restored execution charge released before grace elapsed")
 	}
 }
 

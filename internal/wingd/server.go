@@ -37,18 +37,19 @@ type Daemon struct {
 
 	events eventWindow
 
-	mu           sync.Mutex
-	ledger       *admission.Ledger
-	conns        map[*conn]struct{}
-	byRun        map[string]*conn
-	leaseRun     map[admission.LeaseID]string
-	leaseCharge  map[admission.LeaseID]wingwire.HostResources
-	leaseMembers map[admission.LeaseID][]string
-	reattachWait map[admission.LeaseID]struct{}
-	draining     bool
-	shuttingDown bool
-	lastActivity time.Time
-	startedAt    time.Time
+	mu             sync.Mutex
+	ledger         *admission.Ledger
+	conns          map[*conn]struct{}
+	byRun          map[string]*conn
+	leaseRun       map[admission.LeaseID]string
+	leaseCharge    map[admission.LeaseID]wingwire.HostResources
+	leaseMembers   map[admission.LeaseID][]string
+	leaseExecution map[admission.LeaseID]bool
+	reattachWait   map[admission.LeaseID]struct{}
+	draining       bool
+	shuttingDown   bool
+	lastActivity   time.Time
+	startedAt      time.Time
 
 	loadInit     bool
 	smoothedLoad float64
@@ -113,19 +114,20 @@ func New(cfg Config) (*Daemon, error) {
 		procSampler = newProcSampler()
 	}
 	return &Daemon{
-		cfg:          cfg,
-		layout:       lay,
-		sampler:      sampler,
-		procSampler:  procSampler,
-		container:    containerSensorFor(cfg),
-		ready:        make(chan struct{}),
-		quit:         make(chan struct{}),
-		conns:        map[*conn]struct{}{},
-		byRun:        map[string]*conn{},
-		leaseRun:     map[admission.LeaseID]string{},
-		leaseCharge:  map[admission.LeaseID]wingwire.HostResources{},
-		leaseMembers: map[admission.LeaseID][]string{},
-		reattachWait: map[admission.LeaseID]struct{}{},
+		cfg:            cfg,
+		layout:         lay,
+		sampler:        sampler,
+		procSampler:    procSampler,
+		container:      containerSensorFor(cfg),
+		ready:          make(chan struct{}),
+		quit:           make(chan struct{}),
+		conns:          map[*conn]struct{}{},
+		byRun:          map[string]*conn{},
+		leaseRun:       map[admission.LeaseID]string{},
+		leaseCharge:    map[admission.LeaseID]wingwire.HostResources{},
+		leaseMembers:   map[admission.LeaseID][]string{},
+		reattachWait:   map[admission.LeaseID]struct{}{},
+		leaseExecution: map[admission.LeaseID]bool{},
 	}, nil
 }
 
@@ -298,6 +300,7 @@ func (d *Daemon) initLedger() error {
 			MemoryBytes: int64(ls.MemoryBytes),
 		}
 		d.leaseMembers[ls.ID] = append([]string(nil), ls.Members...)
+		d.leaseExecution[ls.ID] = ls.Execution
 		d.reattachWait[ls.ID] = struct{}{}
 	}
 	d.mu.Lock()
@@ -587,6 +590,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		charged, pinClamped = d.clampHostChargeLocked(charged, req.CostSource)
 	}
 	ar := requestFromWire(req.RunID, charged, req.Semaphores, req.CostSource)
+	ar.Execution = req.ExecutionOnly
 	c.runID = req.RunID
 	c.pipeline = req.Pipeline
 	c.repo = req.Repo
@@ -594,6 +598,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.resources = charged
 	c.sems = semNames(req.Semaphores)
 	c.finalizable = !req.SemaphoresOnly && !req.ExecutionOnly
+	c.executionOnly = req.ExecutionOnly
 	c.startAt = d.now()
 	c.costSource = string(req.CostSource)
 	c.expectedDurationMS = req.ExpectedDurationMS
@@ -756,6 +761,10 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	c.members = []string{req.RunID}
 	c.startAt = d.now()
 	c.finalizable = true
+	c.executionOnly = d.leaseExecution[leaseID]
+	if c.executionOnly {
+		c.finalizable = false
+	}
 	c.origin = req.Origin
 	c.parentRun = d.leaseRun[leaseID]
 	d.byRun[req.RunID] = c
@@ -799,6 +808,10 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	c.runID = requestID
 	c.startAt = d.now()
 	c.finalizable = true
+	c.executionOnly = d.leaseExecution[leaseID]
+	if c.executionOnly {
+		c.finalizable = false
+	}
 	c.resources = d.leaseCharge[leaseID]
 	if members, ok := d.leaseMembers[leaseID]; ok {
 		c.members = members
@@ -941,6 +954,14 @@ func (d *Daemon) handleDisconnect(c *conn) {
 			d.mu.Unlock()
 			return
 		}
+		if c.role == roleHolder && c.executionOnly {
+			d.leaseMembers[c.leaseID] = append([]string(nil), c.members...)
+			d.reattachWait[c.leaseID] = struct{}{}
+			d.touchLocked()
+			d.mu.Unlock()
+			time.AfterFunc(d.cfg.graceWindow(), func() { d.expireDisconnectedExecution(c.leaseID) })
+			return
+		}
 		var orphaned []string
 		if c.finalizable && d.cfg.FinalizeRun != nil {
 			switch c.role {
@@ -970,6 +991,31 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		}
 		d.flush(deliveries, snap)
 	})
+}
+
+func (d *Daemon) expireDisconnectedExecution(id admission.LeaseID) {
+	d.mu.Lock()
+	if d.shuttingDown {
+		d.mu.Unlock()
+		return
+	}
+	if _, pending := d.reattachWait[id]; !pending {
+		d.mu.Unlock()
+		return
+	}
+	delete(d.reattachWait, id)
+	var events []admission.Event
+	for _, member := range d.leaseMembers[id] {
+		released, err := d.ledger.Release(id, member)
+		if err == nil {
+			events = append(events, released...)
+		}
+	}
+	deliveries := d.routeLocked(events)
+	snap := d.ledger.Snapshot()
+	d.touchLocked()
+	d.mu.Unlock()
+	d.flush(deliveries, snap)
 }
 
 // waiterDepartureKindLocked classifies why a queued run left without a

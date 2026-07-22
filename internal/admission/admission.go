@@ -130,6 +130,7 @@ type Request struct {
 	StrictCores bool
 	// MemoryBytes is the host memory demand. Zero requests no memory.
 	MemoryBytes uint64
+	Execution   bool
 	// Semaphores are the named-semaphore holds the request needs.
 	Semaphores []SemaphoreClaim
 }

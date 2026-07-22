@@ -57,6 +57,7 @@ type spec struct {
 	softCores   bool
 	strictCores bool
 	memory      uint64
+	execution   bool
 	claims      []claim
 }
 
@@ -77,6 +78,7 @@ type lease struct {
 	softCores   bool
 	strictCores bool
 	memory      uint64
+	execution   bool
 	claims      []claim
 	members     map[string]struct{}
 }
@@ -369,6 +371,7 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 		softCores:   req.SoftCores,
 		strictCores: req.StrictCores,
 		memory:      req.MemoryBytes,
+		execution:   req.Execution,
 	}
 	seen := make(map[string]bool, len(req.Semaphores))
 	for _, c := range req.Semaphores {
@@ -731,6 +734,7 @@ func (l *Ledger) grant(s spec, kind EventKind) (Lease, []LeaseID, []Event) {
 		softCores:   s.softCores,
 		strictCores: s.strictCores,
 		memory:      s.memory,
+		execution:   s.execution,
 		claims:      s.claims,
 		members:     map[string]struct{}{s.id: {}},
 	}

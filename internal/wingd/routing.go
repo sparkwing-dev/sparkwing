@@ -51,6 +51,7 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 			}
 			c.role = roleHolder
 			c.leaseID = ev.Lease
+			d.leaseExecution[ev.Lease] = c.executionOnly
 			c.members = []string{ev.RequestID}
 			c.startAt = now
 			c.holdSampledMS = 0
@@ -198,6 +199,7 @@ func requestFromWaiter(w admission.WaiterState) admission.Request {
 		SoftCores:   w.SoftCores,
 		StrictCores: w.StrictCores,
 		MemoryBytes: w.MemoryBytes,
+		Execution:   w.Execution,
 	}
 	for _, c := range w.Claims {
 		req.Semaphores = append(req.Semaphores, admission.SemaphoreClaim{

@@ -40,6 +40,7 @@ func busyLedger(t *testing.T) (*Ledger, Lease, Lease) {
 		ID:          "parent",
 		Cores:       1.5,
 		MemoryBytes: 256,
+		Execution:   true,
 		Semaphores:  []SemaphoreClaim{sem("deploy", 2, 1, PolicyQueue)},
 	})
 	if err := l.Attach(parent.ID, "child"); err != nil {

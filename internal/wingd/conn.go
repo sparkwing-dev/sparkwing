@@ -92,7 +92,8 @@ type conn struct {
 	// finalize when the connection drops while still holding or awaiting
 	// admission: top-level run requests and child attaches, but never
 	// semaphores-only sub-acquisitions from inside an admitted run.
-	finalizable bool
+	finalizable   bool
+	executionOnly bool
 }
 
 func newConn(d *Daemon, nc net.Conn) *conn {

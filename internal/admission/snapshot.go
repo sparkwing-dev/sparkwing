@@ -36,6 +36,7 @@ type LeaseState struct {
 	SoftCores   bool         `json:"soft_cores,omitempty"`
 	StrictCores bool         `json:"strict_cores,omitempty"`
 	MemoryBytes uint64       `json:"memory_bytes"`
+	Execution   bool         `json:"execution,omitempty"`
 	Claims      []ClaimState `json:"claims,omitempty"`
 	Members     []string     `json:"members"`
 }
@@ -76,6 +77,7 @@ type WaiterState struct {
 	SoftCores   bool         `json:"soft_cores,omitempty"`
 	StrictCores bool         `json:"strict_cores,omitempty"`
 	MemoryBytes uint64       `json:"memory_bytes"`
+	Execution   bool         `json:"execution,omitempty"`
 	Claims      []ClaimState `json:"claims,omitempty"`
 }
 
@@ -113,6 +115,7 @@ func (l *Ledger) Snapshot() Snapshot {
 			SoftCores:   le.softCores,
 			StrictCores: le.strictCores,
 			MemoryBytes: le.memory,
+			Execution:   le.execution,
 			Claims:      claimStates(le.claims),
 			Members:     members,
 		})
@@ -145,6 +148,7 @@ func (l *Ledger) Snapshot() Snapshot {
 			SoftCores:   w.spec.softCores,
 			StrictCores: w.spec.strictCores,
 			MemoryBytes: w.spec.memory,
+			Execution:   w.spec.execution,
 			Claims:      claimStates(w.spec.claims),
 		})
 	}
@@ -236,6 +240,7 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 		softCores:   ls.SoftCores,
 		strictCores: ls.StrictCores,
 		memory:      ls.MemoryBytes,
+		execution:   ls.Execution,
 		claims:      claims,
 		members:     make(map[string]struct{}, len(ls.Members)),
 	}
