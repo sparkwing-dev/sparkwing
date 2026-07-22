@@ -47,6 +47,61 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **sdk:** `Plan.Priority(n)` declares a local admission priority.
+  Higher-priority queued runs admit before lower-priority ones at the
+  local daemon, so a queue of cheap frequent work can no longer starve
+  the occasional important run behind it.
+- **release:** the release pipeline refuses to cut a version when the
+  latest published release tag is not in the checkout's history, naming
+  the missing tag and the recovery steps. A release cut from a stale
+  line can no longer silently ship without a prior release's work.
+
+### Changed
+
+- **admission:** unpinned local runs no longer reserve their whole
+  measured peak for the DAG's lifetime. The run admits on its plan-level
+  concurrency gates only; each node then acquires its own host cost at
+  dispatch and releases it at node end. Early cheap nodes run while a
+  later heavy node waits for capacity, and a run whose nodes are parked
+  on a concurrency group no longer holds idle cores that queue other
+  runs. Explicit whole-run `.Resources()` pins still reserve at run
+  scope for the whole run.
+- **admission:** capacity profiles are versioned by a fingerprint of the
+  DAG shape plus every concurrency declaration (group name, capacity,
+  scope, policy, member cost). Changing a declaration starts a new
+  measurement generation priced from the predecessor's peak instead of
+  pricing on samples measured under the old shape. On first run after
+  upgrade every pipeline re-measures once from its prior peak.
+- **admission:** the measured host charge is now the p95 of the last 20
+  clean runs (previously p99 of 50, which at that window size is the
+  maximum). One freak run no longer pins a pipeline's price for weeks,
+  and a genuine cost change re-prices within the shorter window. Queue
+  views and drift warnings say "measured p95" accordingly.
+
+### Fixed
+
+- **admission:** a queued run that reconnects (client restart, daemon
+  takeover) reattaches to its existing waiter instead of losing its
+  place or duplicating itself; retry matching validates request shape,
+  cost semantics, and process identity before replacing a stale waiter.
+- **admission:** node-level concurrency admissions are encoded as
+  distinct queue participants, fixing ID collisions between a run and
+  its nodes; queue views show stable participant identity, and node
+  participants stay internal to the queue rather than leaking as
+  phantom runs.
+- **admission:** a node killed by run teardown records `cancelled` and a
+  node evicted by a `cancel_others` group records the superseding run,
+  while a node that genuinely failed keeps its failure even when the
+  run is torn down moments later.
+- **cli:** `sparkwing queue` reports ETA as unknown while a run is
+  blocked instead of a fabricated clearing time.
+- **release:** tracked-file parsing preserves NUL-delimited git output,
+  self module sums are written canonically, and a stale release
+  resource pin no longer inflates the release run's admission charge.
+- **docs:** restored the v0.17.3 through v0.17.12 changelog sections,
+  which were missing from this line's history.
 
 ## [v0.20.0] - 2026-07-21
 ### Fixed
