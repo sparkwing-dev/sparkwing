@@ -756,18 +756,23 @@ func groupUsesLocalDaemon(group *sparkwing.ConcurrencyGroup) bool {
 type localAdmissionCtxKey struct{}
 
 type localAdmissionState struct {
-	la          *LocalAdmission
-	token       string
-	pipeline    string
-	fallback    *capacity.Pin
-	maxParallel int
+	la                      *LocalAdmission
+	token                   string
+	pipeline                string
+	fallback                *capacity.Pin
+	maxParallel             int
+	executionRequestPermits chan struct{}
 }
 
 func withLocalAdmission(ctx context.Context, la *LocalAdmission, leaseToken, pipeline string, fallback *capacity.Pin, maxParallel int) context.Context {
 	if la == nil {
 		return ctx
 	}
-	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{la: la, token: leaseToken, pipeline: pipeline, fallback: fallback, maxParallel: maxParallel})
+	var permits chan struct{}
+	if maxParallel > 0 {
+		permits = make(chan struct{}, 2*maxParallel)
+	}
+	ctx = context.WithValue(ctx, localAdmissionCtxKey{}, localAdmissionState{la: la, token: leaseToken, pipeline: pipeline, fallback: fallback, maxParallel: maxParallel, executionRequestPermits: permits})
 	if leaseToken != "" {
 		ctx = sparkwing.WithCommandEnv(ctx, map[string]string{wingwire.LeaseTokenEnv: leaseToken})
 	}
@@ -777,6 +782,19 @@ func withLocalAdmission(ctx context.Context, la *LocalAdmission, leaseToken, pip
 func localMaxParallelFromContext(ctx context.Context) int {
 	state, _ := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
 	return state.maxParallel
+}
+
+func acquireExecutionRequestPermit(ctx context.Context) (func(), error) {
+	state, _ := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	if state.executionRequestPermits == nil {
+		return func() {}, nil
+	}
+	select {
+	case state.executionRequestPermits <- struct{}{}:
+		return func() { <-state.executionRequestPermits }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func localPipelineFromContext(ctx context.Context) string {
@@ -822,6 +840,11 @@ func (la *LocalAdmission) acquireNodeExecution(
 	claims []wingwire.SemaphoreClaim,
 	onQueued func(wingwire.Queued),
 ) (*wingdclient.Lease, error) {
+	releasePermit, err := acquireExecutionRequestPermit(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer releasePermit()
 	cl, err := wingdclient.EnsureDaemon(ctx, la.clientOptions())
 	if err != nil {
 		return nil, fmt.Errorf("local admission: %w", err)
