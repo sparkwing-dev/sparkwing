@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.22.0] - 2026-07-22
 ### Added
 
 - **sdk:** `Plan.Priority(n)` declares a local admission priority.
