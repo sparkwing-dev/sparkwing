@@ -61,8 +61,8 @@ func TestRecordWaitObservation_AgesOutOldSamples(t *testing.T) {
 	if err != nil || prof == nil {
 		t.Fatalf("get profile: %v", err)
 	}
-	if prof.WaitSampleCount != 50 {
-		t.Errorf("WaitSampleCount = %d, want window cap 50", prof.WaitSampleCount)
+	if prof.WaitSampleCount != 20 {
+		t.Errorf("WaitSampleCount = %d, want the window cap", prof.WaitSampleCount)
 	}
 	if prof.WaitP99 != time.Second {
 		t.Errorf("WaitP99 = %s, want 1s once hour-long waits aged out", prof.WaitP99)

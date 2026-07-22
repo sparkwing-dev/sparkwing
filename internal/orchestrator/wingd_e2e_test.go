@@ -587,7 +587,7 @@ func TestWingd_UnderPinnedRunCarriesDriftWarning(t *testing.T) {
 	if h.Resources.Cores != 1.5 {
 		t.Errorf("admitted cores = %v, want the pinned 1.5", h.Resources.Cores)
 	}
-	if !strings.Contains(h.DriftWarning, "resource pin") || !strings.Contains(h.DriftWarning, "measured p99") {
+	if !strings.Contains(h.DriftWarning, "resource pin") || !strings.Contains(h.DriftWarning, "measured p95") {
 		t.Errorf("DriftWarning = %q, want the under-pinned note with the exact fix", h.DriftWarning)
 	}
 

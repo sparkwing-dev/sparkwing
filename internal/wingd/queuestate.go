@@ -477,7 +477,7 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale 
 // grantable and naming external load when it is the binding constraint.
 // Cores bind before memory. rationale, when non-empty, explains where the
 // charge came from and is folded in right after the need ("needs 5.0 cores
-// (measured p99 over 12 runs); ..."). Empty when neither host dimension
+// (measured p95 over 12 runs); ..."). Empty when neither host dimension
 // blocks the run (a pure semaphore or arrival-order wait).
 func hostBlockingReason(needCores, needMem float64, available map[string]wingwire.ResourceState, rationale string) string {
 	if needCores > 0 {

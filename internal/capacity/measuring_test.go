@@ -6,11 +6,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestResolve_PlanHashChangeReMeasuresAtTwicePrior pins BW-693: a
-// structural change (a new plan hash) prices the changed version at the
-// safety multiple of its predecessor's measured peak, not on the stale
-// measured peak, and labels the charge measuring.
-func TestResolve_PlanHashChangeReMeasuresAtTwicePrior(t *testing.T) {
+// TestResolve_PlanHashChangeReMeasuresAtPriorPeak confirms a structural
+// change (a new plan hash) warm-starts the changed version at its
+// predecessor's measured peak, not on the stale measured price, and
+// labels the charge measuring.
+func TestResolve_PlanHashChangeReMeasuresAtPriorPeak(t *testing.T) {
 	prof := &store.PipelineProfile{
 		PlanHash:    "shapeA",
 		PeakCores:   4,
@@ -21,8 +21,8 @@ func TestResolve_PlanHashChangeReMeasuresAtTwicePrior(t *testing.T) {
 	if got.Source != store.CostSourceMeasuring {
 		t.Fatalf("Source = %q, want measuring", got.Source)
 	}
-	if got.Cores != SafetyMultiple*4 {
-		t.Errorf("Cores = %v, want %v (2x prior peak)", got.Cores, SafetyMultiple*4)
+	if got.Cores != WarmStartMultiple*4 {
+		t.Errorf("Cores = %v, want %v (prior peak)", got.Cores, WarmStartMultiple*4)
 	}
 }
 
@@ -45,7 +45,7 @@ func TestResolve_SameHashGraduatedUsesMeasuredPeak(t *testing.T) {
 	}
 }
 
-// TestResolve_ContendedFloorChargesTwiceFloor pins BW-690: a version still
+// TestResolve_ContendedFloorChargesTwiceFloor confirms a version still
 // short of clean samples but with a demand floor from its contended runs is
 // charged the safety multiple of that floor, sourced as floor.
 func TestResolve_ContendedFloorChargesTwiceFloor(t *testing.T) {
@@ -65,8 +65,8 @@ func TestResolve_ContendedFloorChargesTwiceFloor(t *testing.T) {
 }
 
 // TestResolve_FloorOutranksPredecessorWarmStart confirms the larger of the
-// warm-start (2x predecessor) and the floor (2x floor) wins, and the source
-// names whichever drove the charge.
+// warm start (predecessor peak) and the floor (2x floor) wins, and the
+// source names whichever drove the charge.
 func TestResolve_FloorOutranksPredecessorWarmStart(t *testing.T) {
 	prof := &store.PipelineProfile{
 		PlanHash:      "shapeB",

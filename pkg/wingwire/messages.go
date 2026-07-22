@@ -303,7 +303,7 @@ type Holder struct {
 	// restart.
 	CostSource string `json:"cost_source,omitempty"`
 	// CostRationale is the short human phrase explaining that CostSource
-	// ("measured p99 over 12 runs", "explicit pin"), for a dashboard to
+	// ("measured p95 over 12 runs", "explicit pin"), for a dashboard to
 	// tooltip beside the charge. Empty when the source is unknown.
 	CostRationale string `json:"cost_rationale,omitempty"`
 	// ExpectedDurationMS is the holder's measured p50 run duration; zero
@@ -372,7 +372,7 @@ type Waiter struct {
 	// "default").
 	CostSource string `json:"cost_source,omitempty"`
 	// CostRationale is the short human phrase explaining that CostSource
-	// ("measured p99 over 12 runs", "first run, conservative default until
+	// ("measured p95 over 12 runs", "first run, conservative default until
 	// measured"), also folded into BlockingReason. Empty when the source is
 	// unknown.
 	CostRationale string `json:"cost_rationale,omitempty"`

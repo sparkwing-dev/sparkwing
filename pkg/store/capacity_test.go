@@ -87,8 +87,8 @@ func TestPipelineProfile_WindowAgesOutOldSamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if prof.SampleCount != 50 {
-		t.Errorf("SampleCount = %d, want capped at 50", prof.SampleCount)
+	if prof.SampleCount != 20 {
+		t.Errorf("SampleCount = %d, want capped at the window size", prof.SampleCount)
 	}
 	if prof.PeakCores < 70 {
 		t.Errorf("PeakCores = %v, want a recent-window value", prof.PeakCores)
