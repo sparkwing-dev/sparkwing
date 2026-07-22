@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -125,7 +126,7 @@ func TestDeriveSource_MeasuringAndFloorStates(t *testing.T) {
 		{"floor from contended runs", store.PipelineProfile{FloorCores: 3, SampleCount: 1, CPUMeasured: true}, store.CostSourceFloor},
 		{"measuring after structural change", store.PipelineProfile{PrevPeakCores: 2, SampleCount: 1, CPUMeasured: true}, store.CostSourceMeasuring},
 		{"default while gathering first samples", store.PipelineProfile{SampleCount: 1, CPUMeasured: true}, store.CostSourceDefault},
-		{"graduated wins over floor", store.PipelineProfile{FloorCores: 3, PeakCores: 4, SampleCount: 3, CPUMeasured: true}, store.CostSourceMeasured},
+		{"graduated wins over floor", store.PipelineProfile{FloorCores: 3, PeakCores: 4, SampleCount: capacity.MinSamples, CPUMeasured: true}, store.CostSourceMeasured},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
