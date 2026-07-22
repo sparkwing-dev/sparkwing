@@ -190,6 +190,25 @@ func TestResolve_ColdStartNeverBelowOne(t *testing.T) {
 	}
 }
 
+func TestResolve_ColdStartReservesTheWholeCPUEnvelope(t *testing.T) {
+	got := Resolve(nil, nil, 12, "shape")
+	if got.Cores != 12 {
+		t.Fatalf("cold-start cores = %v, want 12", got.Cores)
+	}
+}
+
+func TestResolve_ProfileRequiresFiveCleanSamples(t *testing.T) {
+	profile := &store.PipelineProfile{
+		PeakCores:   0.5,
+		SampleCount: 4,
+		CPUMeasured: true,
+	}
+	got := Resolve(nil, profile, 12, "shape")
+	if got.Source == store.CostSourceMeasured {
+		t.Fatalf("four-sample profile source = %q, want conservative measurement", got.Source)
+	}
+}
+
 func TestCheckDrift_Gating(t *testing.T) {
 	measured := func(cores float64, samples int) *store.PipelineProfile {
 		return &store.PipelineProfile{PeakCores: cores, SampleCount: samples}
