@@ -868,6 +868,16 @@ func TestWingd_NodeGroupSerializesAcrossRuns(t *testing.T) {
 	}
 	awaitWaiter(t, home, second+"/locked")
 
+	queuedState := queryWingd(t, home)
+	for _, holder := range queuedState.Holders {
+		if holder.RunID != second {
+			continue
+		}
+		if holder.Resources.Cores != 0 || holder.Resources.MemoryBytes != 0 {
+			t.Fatalf("concurrency-blocked run holds resources %+v, want zero host charge", holder.Resources)
+		}
+	}
+
 	close(gate.release)
 	for range 2 {
 		select {
