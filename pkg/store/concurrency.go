@@ -215,6 +215,185 @@ type AcquireSlotResponse struct {
 	Holders     []ConcurrencyHolder
 }
 
+type ConcurrencyReservationTicket struct {
+	Key      string
+	RunID    string
+	NodeID   string
+	HolderID string
+}
+
+type ConcurrencyReservation struct {
+	Ticket    ConcurrencyReservationTicket
+	ArrivedAt time.Time
+}
+
+type ConcurrencyReservationObservation struct {
+	Eligible bool
+	Position int
+	Holders  []ConcurrencyHolder
+}
+
+func (s *Store) ReserveConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (ConcurrencyReservation, error) {
+	if req.Key == "" || req.HolderID == "" || req.RunID == "" {
+		return ConcurrencyReservation{}, errors.New("concurrency: reservation requires key, holder_id, and run_id")
+	}
+	if req.Policy != "" && req.Policy != OnLimitQueue {
+		return ConcurrencyReservation{}, errors.New("concurrency: reservations require queue policy")
+	}
+	if req.Capacity <= 0 {
+		req.Capacity = 1
+	}
+	if req.Cost <= 0 {
+		req.Cost = 1
+	}
+	if req.Cost > req.Capacity {
+		return ConcurrencyReservation{}, errors.New("concurrency: reservation cost exceeds capacity")
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return ConcurrencyReservation{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := txLockEntry(ctx, tx, s.forUpdate(), req.Key); err != nil {
+		return ConcurrencyReservation{}, err
+	}
+	now := time.Now()
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO concurrency_entries
+		   (key, capacity, previous_capacity, last_write_run_id, last_write_node_id, updated_at)
+		 VALUES (?, ?, NULL, ?, ?, ?)
+		 ON CONFLICT (key) DO NOTHING`,
+		req.Key, req.Capacity, req.RunID, req.NodeID, now.UnixNano()); err != nil {
+		return ConcurrencyReservation{}, err
+	}
+	var arrivedNS int64
+	err = tx.QueryRowContext(ctx,
+		`SELECT arrived_at FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
+		req.Key, req.RunID, req.NodeID).Scan(&arrivedNS)
+	if errors.Is(err, sql.ErrNoRows) {
+		arrivedNS = now.UnixNano()
+		if err := txPark(ctx, tx, ConcurrencyWaiter{
+			Key: req.Key, RunID: req.RunID, NodeID: req.NodeID, HolderID: req.HolderID,
+			Policy: OnLimitQueue, Cost: req.Cost, DeclaredCapacity: req.Capacity,
+		}, arrivedNS); err != nil {
+			return ConcurrencyReservation{}, err
+		}
+	} else if err != nil {
+		return ConcurrencyReservation{}, err
+	}
+	if err := txCommitChecked(ctx, tx, now.UnixNano(), req.Key); err != nil {
+		return ConcurrencyReservation{}, err
+	}
+	return ConcurrencyReservation{
+		Ticket:    ConcurrencyReservationTicket{Key: req.Key, RunID: req.RunID, NodeID: req.NodeID, HolderID: req.HolderID},
+		ArrivedAt: time.Unix(0, arrivedNS),
+	}, nil
+}
+
+func (s *Store) ObserveConcurrencyReservation(ctx context.Context, ticket ConcurrencyReservationTicket) (ConcurrencyReservationObservation, error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return ConcurrencyReservationObservation{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	return observeConcurrencyReservation(ctx, tx, ticket, time.Now().UnixNano())
+}
+
+func observeConcurrencyReservation(ctx context.Context, tx *storeTx, ticket ConcurrencyReservationTicket, nowNS int64) (ConcurrencyReservationObservation, error) {
+	w, err := scanWaiter(tx.QueryRowContext(ctx,
+		`SELECT `+waiterColumns+` FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
+		ticket.Key, ticket.RunID, ticket.NodeID))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ConcurrencyReservationObservation{}, ErrNotFound
+	}
+	if err != nil {
+		return ConcurrencyReservationObservation{}, err
+	}
+	if w.HolderID != ticket.HolderID {
+		return ConcurrencyReservationObservation{}, errors.New("concurrency: stale reservation ticket")
+	}
+	acct, err := txConcurrencyAccounting(ctx, tx, ticket.Key, nowNS)
+	if err != nil {
+		return ConcurrencyReservationObservation{}, err
+	}
+	rows, err := tx.QueryContext(ctx,
+		`SELECT `+waiterColumns+` FROM concurrency_waiters WHERE key = ? AND policy = ? ORDER BY arrived_at ASC`,
+		ticket.Key, OnLimitQueue)
+	if err != nil {
+		return ConcurrencyReservationObservation{}, err
+	}
+	defer rows.Close()
+	position := 0
+	oldest := false
+	for rows.Next() {
+		candidate, err := scanWaiter(rows)
+		if err != nil {
+			return ConcurrencyReservationObservation{}, err
+		}
+		if candidate.RunID == ticket.RunID && candidate.NodeID == ticket.NodeID {
+			oldest = position == 0
+			break
+		}
+		position++
+	}
+	if err := rows.Err(); err != nil {
+		return ConcurrencyReservationObservation{}, err
+	}
+	cost, capacity := waiterBudget(w, acct.entryCap, acct.floor)
+	return ConcurrencyReservationObservation{
+		Eligible: oldest && fitsBudget(acct.used, cost, capacity),
+		Position: position,
+		Holders:  append([]ConcurrencyHolder(nil), acct.holders...),
+	}, nil
+}
+
+func (s *Store) ClaimConcurrencyReservation(ctx context.Context, ticket ConcurrencyReservationTicket, lease time.Duration) (AcquireSlotResponse, error) {
+	if lease <= 0 {
+		lease = DefaultConcurrencyLease
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := txLockEntry(ctx, tx, s.forUpdate(), ticket.Key); err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	now := time.Now()
+	observation, err := observeConcurrencyReservation(ctx, tx, ticket, now.UnixNano())
+	if err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	if !observation.Eligible {
+		return AcquireSlotResponse{Kind: AcquireQueued, Position: observation.Position, Holders: observation.Holders}, nil
+	}
+	w, err := scanWaiter(tx.QueryRowContext(ctx,
+		`SELECT `+waiterColumns+` FROM concurrency_waiters WHERE key = ? AND run_id = ? AND node_id = ?`,
+		ticket.Key, ticket.RunID, ticket.NodeID))
+	if err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	accounting, err := txConcurrencyAccounting(ctx, tx, ticket.Key, now.UnixNano())
+	if err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	if _, err := txDeleteWaiter(ctx, tx, w.Key, w.RunID, w.NodeID); err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	cost, capacity := waiterBudget(w, accounting.entryCap, accounting.floor)
+	expires := now.Add(lease)
+	if err := txInsertHolder(ctx, tx, holderRow{
+		key: w.Key, holderID: w.HolderID, runID: w.RunID, nodeID: w.NodeID,
+		cost: cost, declaredCapacity: capacity, queueArrivedNS: w.ArrivedAt.UnixNano(),
+	}, now.UnixNano(), expires.UnixNano()); err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	if err := txCommitChecked(ctx, tx, now.UnixNano(), ticket.Key); err != nil {
+		return AcquireSlotResponse{}, err
+	}
+	return AcquireSlotResponse{Kind: AcquireGranted, HolderID: w.HolderID, LeaseExpiresAt: expires}, nil
+}
+
 // ConcurrencyHolder mirrors the concurrency_holders row.
 type ConcurrencyHolder struct {
 	Key            string
