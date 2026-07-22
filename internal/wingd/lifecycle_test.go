@@ -66,6 +66,40 @@ func holdsRun(qs wingwire.QueueState, runID string) bool {
 	return false
 }
 
+func TestExecutionLease_DisconnectRetainsChargeThroughReattachGrace(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, GraceWindow: 250 * time.Millisecond, HeadroomFraction: -1})
+
+	holder := ensure(t, home, "")
+	request := coreReq("execution-disconnect", 1)
+	request.ExecutionOnly = true
+	if _, err := holder.Acquire(context.Background(), request, nil); err != nil {
+		t.Fatalf("acquire: %v", err)
+	}
+	if err := holder.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	query := ensure(t, home, "")
+	state, err := query.QueueState(context.Background())
+	if err != nil {
+		t.Fatalf("queue state during grace: %v", err)
+	}
+	if !holdsRun(state, "execution-disconnect") {
+		t.Fatal("execution charge released before reattach grace elapsed")
+	}
+
+	time.Sleep(350 * time.Millisecond)
+	state, err = query.QueueState(context.Background())
+	if err != nil {
+		t.Fatalf("queue state after grace: %v", err)
+	}
+	if holdsRun(state, "execution-disconnect") {
+		t.Fatal("execution charge remained after reattach grace elapsed")
+	}
+}
+
 func TestReattach_ReclaimsLeaseAfterRestart(t *testing.T) {
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 2 * time.Second})
