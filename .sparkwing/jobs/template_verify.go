@@ -214,7 +214,9 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 				return fmt.Errorf("%s: fixture: %w", m.Name, err)
 			}
 			defer cleanup()
-			runCmd := sparkwing.Exec(ctx, bin, "run", m.Name).Dir(scratch)
+			runCmd := sparkwing.Exec(ctx, bin, "run", m.Name).
+				Dir(scratch).
+				Env("SPARKWING_HOME", templateRunHome(scratch))
 			mode := "ran green"
 			if m.Tier() == templates.VerifyDryRunnable {
 				runCmd = runCmd.Env("SPARKWING_DRY_RUN", "1")
@@ -232,6 +234,10 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 			return fmt.Errorf("%s: unknown verify tier %q", m.Name, m.Tier())
 		}
 	}
+}
+
+func templateRunHome(scratch string) string {
+	return filepath.Join(scratch, ".sparkwing-state")
 }
 
 // sortedParamFlags renders a verify_params map as sorted "k=v" strings

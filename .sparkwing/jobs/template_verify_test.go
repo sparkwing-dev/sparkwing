@@ -32,6 +32,14 @@ func TestSeedFixture_WritesExpectedFiles(t *testing.T) {
 	}
 }
 
+func TestTemplateRunHome_IsolatedFromReleaseDaemon(t *testing.T) {
+	scratch := t.TempDir()
+	got := templateRunHome(scratch)
+	if got != filepath.Join(scratch, ".sparkwing-state") {
+		t.Fatalf("template run home = %q", got)
+	}
+}
+
 func TestSeedFixture_RejectsUnknown(t *testing.T) {
 	if err := seedFixture(t.TempDir(), "rust-crate"); err == nil {
 		t.Fatal("expected error for unknown fixture")
