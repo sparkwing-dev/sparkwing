@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestSeedFixture_WritesExpectedFiles(t *testing.T) {
@@ -37,6 +38,15 @@ func TestTemplateRunHome_IsolatedFromReleaseDaemon(t *testing.T) {
 	got := templateRunHome(scratch)
 	if got != filepath.Join(scratch, ".sparkwing-state") {
 		t.Fatalf("template run home = %q", got)
+	}
+}
+
+func TestTemplateRunLeaseTokens_AreClearedAtIsolatedDaemonBoundary(t *testing.T) {
+	env := templateRunAdmissionEnv(t.TempDir())
+	for _, name := range []string{wingwire.LeaseTokenEnv, wingwire.ChildLeaseTokenEnv} {
+		if got := env[name]; got != "" {
+			t.Fatalf("%s = %q, want empty", name, got)
+		}
 	}
 }
 
