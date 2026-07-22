@@ -233,14 +233,14 @@ func (la *LocalAdmission) admitRun(
 
 // measuringNarration is the one-line note shown when a run is charged by
 // measurement rather than a finalized measured price: a version being
-// re-measured after a structural change (charged a safety multiple of the
-// prior peak), or one priced from the demand floor its contended runs
-// proved. It returns "" for the finalized measured, pin, and cold-start
-// default sources, which the queue view already labels.
+// re-measured after a structural change (charged its predecessor's peak),
+// or one priced from the demand floor its contended runs proved. It
+// returns "" for the finalized measured, pin, and cold-start default
+// sources, which the queue view already labels.
 func measuringNarration(res capacity.Resolution, prof *store.PipelineProfile) string {
 	switch res.Source {
 	case store.CostSourceMeasuring:
-		return fmt.Sprintf("re-measuring at %.1f cores (2x prior charge); runs under contention only raise the floor, clean runs finalize the price",
+		return fmt.Sprintf("re-measuring at %.1f cores (prior charge); runs under contention only raise the floor, clean runs finalize the price",
 			res.Cores)
 	case store.CostSourceFloor:
 		n := 0
