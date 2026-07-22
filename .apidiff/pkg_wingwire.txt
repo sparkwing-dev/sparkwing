@@ -3,6 +3,10 @@
 type AdmissionRequest struct {
 	RunID string
 
+	OwnerRunID string
+
+	DisplayRunID string
+
 	Pipeline string
 
 	Repo string
@@ -15,6 +19,8 @@ type AdmissionRequest struct {
 	ParentLeaseToken string
 
 	SemaphoresOnly bool
+
+	SubLease bool
 
 	CostSource CostSource
 
@@ -57,6 +63,7 @@ type CapacityChange struct {
 
 	AtMS int64
 }
+const ChildLeaseTokenEnv = "SPARKWING_CHILD_LEASE_TOKEN"
 type ContainerLimit struct {
 	Cores float64
 
@@ -139,11 +146,17 @@ type HelloAck struct {
 type Holder struct {
 	RunID string
 
+	ParticipantID string
+
+	DisplayRunID string
+
 	Pipeline string
 
 	Repo string
 
 	Parent string
+
+	ParentParticipantID string
 
 	ElapsedMS int64
 
@@ -189,7 +202,7 @@ const PolicyCancelOthers Policy = "cancel_others"
 const PolicyFail Policy = "fail"
 const PolicyQueue Policy = "queue"
 const PolicySkip Policy = "skip"
-const ProtocolMajor = 1
+const ProtocolMajor = 2
 type QueueState struct {
 	Resources []ResourceState
 	Holders   []Holder
@@ -279,6 +292,10 @@ const TypeStatsReset MessageType = "stats_reset"
 const TypeStatsResetAck MessageType = "stats_reset_ack"
 type Waiter struct {
 	RunID string
+
+	ParticipantID string
+
+	DisplayRunID string
 
 	Pipeline string
 
