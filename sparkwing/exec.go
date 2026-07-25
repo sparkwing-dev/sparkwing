@@ -402,29 +402,40 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		Debug(ctx, "exec env: %s", formatEnvDiff(extraEnv))
 	}
 
-	stdout, err := cmd.StdoutPipe()
+	// safety: these pipes are ours rather than cmd.StdoutPipe's, because
+	// exec.Cmd.Wait closes the pipes it hands out the instant the child is
+	// reaped. That races the reader goroutines, and on a loaded box the
+	// readers lose: a command that exited 0 reports empty output. Pipes we
+	// own stay readable until the readers have actually drained them.
+	outR, outW, err := os.Pipe()
 	if err != nil {
 		return ExecResult{Command: display}, &ExecError{Command: display, ExitCode: ExitNotStarted, Cause: err}
 	}
-	stderr, err := cmd.StderrPipe()
+	errR, errW, err := os.Pipe()
 	if err != nil {
+		closeFiles(outR, outW)
 		return ExecResult{Command: display}, &ExecError{Command: display, ExitCode: ExitNotStarted, Cause: err}
 	}
+	cmd.Stdout, cmd.Stderr = outW, errW
 
 	startedAt := time.Now()
 	if err := cmd.Start(); err != nil {
+		closeFiles(outR, outW, errR, errW)
 		return ExecResult{Command: display}, &ExecError{Command: display, ExitCode: ExitNotStarted, Cause: err}
 	}
+	// safety: the child owns the write ends now; dropping the parent's copies
+	// is what lets the readers ever see EOF.
+	closeFiles(outW, errW)
 
 	var outBuf, errBuf strings.Builder
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go streamLines(ctx, &wg, stdout, "info", logger, &outBuf)
-	go streamLines(ctx, &wg, stderr, "info", logger, &errBuf)
+	go streamLines(ctx, &wg, outR, "info", logger, &outBuf)
+	go streamLines(ctx, &wg, errR, "info", logger, &errBuf)
 
 	waitErr := cmd.Wait()
 	wall := time.Since(startedAt)
-	wg.Wait()
+	drainStreams(&wg, outR, errR)
 
 	emitCommandResources(ctx, cmd, wall)
 
@@ -504,6 +515,41 @@ func amortizedMillicores(cpu, wall time.Duration) int64 {
 		return 0
 	}
 	return millicores
+}
+
+// streamDrainGrace bounds how long a reaped command's output is still
+// drained. A normal command never waits: it held the last write end, so EOF
+// is already pending when Wait returns and the readers only have to sweep up
+// bytes that are sitting in the pipe. The window exists for the forked
+// grandchild that outlives its parent and keeps the write end open, where
+// blocking on EOF would wedge the node forever. It is deliberately far larger
+// than the microseconds a buffered drain needs and far smaller than a step a
+// human would notice, since a daemonizing step pays it in full.
+const streamDrainGrace = 500 * time.Millisecond
+
+// drainStreams waits for the reader goroutines to finish draining a reaped
+// command's pipes, force-closing the read ends if a surviving grandchild is
+// still holding them open past the grace window.
+func drainStreams(wg *sync.WaitGroup, pipes ...*os.File) {
+	drained := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(drained)
+	}()
+	timer := time.NewTimer(streamDrainGrace)
+	defer timer.Stop()
+	select {
+	case <-drained:
+	case <-timer.C:
+		closeFiles(pipes...)
+		<-drained
+	}
+}
+
+func closeFiles(files ...*os.File) {
+	for _, f := range files {
+		_ = f.Close()
+	}
 }
 
 // streamLines reads r line-by-line, tees to buf, and pushes each line

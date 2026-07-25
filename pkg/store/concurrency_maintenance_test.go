@@ -33,6 +33,21 @@ func waiterCount(t *testing.T, s *store.Store, key string) int {
 	return n
 }
 
+// expireHolderLease drives a holder's lease into the past so the maintenance
+// sweep sees it as dead. Aging the row is what keeps these tests honest under
+// load: a short real lease plus a sleep also has to outlive the test's own
+// setup, and on a saturated box two SQLite writes can straddle a 40ms lease,
+// so the waiter gets granted a slot instead of queueing behind the holder.
+func expireHolderLease(t *testing.T, s *store.Store, key, holderID string) {
+	t.Helper()
+	if _, err := s.DB().Exec(
+		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`,
+		time.Now().Add(-time.Minute).UnixNano(), key, holderID,
+	); err != nil {
+		t.Fatalf("expire holder lease: %v", err)
+	}
+}
+
 func seedCacheRow(t *testing.T, s *store.Store, key, hash string, expiresAt, lastHitAt time.Time) {
 	t.Helper()
 	now := time.Now()
@@ -53,7 +68,7 @@ func TestMaintainConcurrency_ReapsExpiredHolderAndPromotesWaiter(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
-		Capacity: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
+		Capacity: 1, Policy: store.OnLimitQueue,
 	})
 	if r := acquireBareT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
@@ -62,7 +77,7 @@ func TestMaintainConcurrency_ReapsExpiredHolderAndPromotesWaiter(t *testing.T) {
 		t.Fatalf("B: want Queued, got %s", r.Kind)
 	}
 	createLiveRunT(t, s, "rB")
-	time.Sleep(80 * time.Millisecond)
+	expireHolderLease(t, s, "k", "rA/n")
 
 	res, err := s.MaintainConcurrency(ctxT(t), store.ConcurrencyMaintenanceOptions{})
 	if err != nil {
@@ -162,7 +177,7 @@ func TestMaintainConcurrency_DoesNotPromoteAbandonedWaiterAfterHolderReap(t *tes
 	ctx := ctxT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "holder/-", RunID: "holder", NodeID: "",
-		Capacity: 1, Policy: store.OnLimitQueue, Lease: 30 * time.Millisecond,
+		Capacity: 1, Policy: store.OnLimitQueue,
 	})
 	if r := acquireBareT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "queued/-", RunID: "queued", NodeID: "",
@@ -176,7 +191,7 @@ func TestMaintainConcurrency_DoesNotPromoteAbandonedWaiterAfterHolderReap(t *tes
 	); err != nil {
 		t.Fatalf("age waiter: %v", err)
 	}
-	time.Sleep(60 * time.Millisecond)
+	expireHolderLease(t, s, "k", "holder/-")
 
 	res, err := s.MaintainConcurrency(ctx, store.ConcurrencyMaintenanceOptions{WaiterMaxAge: time.Millisecond})
 	if err != nil {

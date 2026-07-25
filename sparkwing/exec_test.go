@@ -3,9 +3,11 @@ package sparkwing_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -109,6 +111,51 @@ func TestBash_RunsBashOnlyFeatures(t *testing.T) {
 	}
 	if !strings.Contains(res.Stdout, "matched") {
 		t.Fatalf("Bash output missing match: %q", res.Stdout)
+	}
+}
+
+// Enough commands in flight at once to starve the reader goroutines, which is
+// what it takes to see output loss: a cmd.StdoutPipe is closed by Wait the
+// instant the child is reaped, so a reader that has not been scheduled yet
+// finds a dead pipe and reports empty stdout for a command that exited 0.
+// Sequential runs never reproduce it.
+func TestExec_ConcurrentCommandsKeepTheirOwnStdout(t *testing.T) {
+	const (
+		workers  = 16
+		perGroup = 16
+	)
+	dir := t.TempDir()
+	var wg sync.WaitGroup
+	failures := make(chan string, workers*perGroup)
+	for w := range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			// safety: each goroutine needs its own logger; the recorders append unguarded.
+			ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+			for i := range perGroup {
+				want := fmt.Sprintf("marker-%d-%d", w, i)
+				res, err := sparkwing.Exec(ctx, "sh", "-c", "echo "+want).Dir(dir).Capture()
+				if err != nil {
+					failures <- fmt.Sprintf("%s: Capture: %v", want, err)
+					continue
+				}
+				if !strings.Contains(res.Stdout, want) {
+					failures <- fmt.Sprintf("%s: stdout = %q, want the command's own output", want, res.Stdout)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	close(failures)
+
+	var lost []string
+	for f := range failures {
+		lost = append(lost, f)
+	}
+	if len(lost) > 0 {
+		t.Fatalf("%d of %d concurrent commands lost their output; first: %s",
+			len(lost), workers*perGroup, lost[0])
 	}
 }
 
