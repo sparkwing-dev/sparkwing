@@ -38,6 +38,7 @@ Every exported symbol in the `sparkwing` package (the SDK you import as `sw`), g
 - `func StepFromContext(ctx context.Context) string` -- StepFromContext returns the active step ID, or "" outside a step.
 - `func StepGet[T any](ctx context.Context, step *WorkStep) T` -- StepGet blocks until step has completed, then returns its typed output as T. Used inside another step's body when composing values from upstream typed steps.
 - `func Summary(ctx context.Context, markdown string)` -- Summary records a persistent markdown run summary on the currently-executing Job or Step.
+- `func ToolCacheDir(tool string) string` -- ToolCacheDir returns a cache directory for an external tool, scoped to the worktree the pipeline is running in.
 - `func TypeName(p any) string` -- TypeName returns the Go type name of p, suitable for matching against a sparkwing.yaml `entrypoint:` field.
 - `func Warn(ctx context.Context, format string, args ...any)` -- Warn emits a warn-level message.
 - `func WithCommandEnv(ctx context.Context, env map[string]string) context.Context` -- WithCommandEnv returns a context whose sparkwing.Exec/Bash calls inherit env.

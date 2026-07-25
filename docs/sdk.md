@@ -195,6 +195,37 @@ sparkwing.Exec(ctx, "go", "test", "./...").Dir("internal").Env("CGO_ENABLED", "0
 wrapped `Cause`. `errors.As(err, &ee)` works through every terminator
 (including `JSON` and `MustBeEmpty`).
 
+### Tool caches
+
+```
+ToolCacheDir(tool) string           // cache dir for an external tool, scoped to this worktree
+```
+
+A tool that keys its cache on file content alone - golangci-lint among
+them - replays a stored result for identical input no matter which
+checkout produced it. Two worktrees of one repo sharing that tool's
+default cache therefore see each other's results: a run in one reports
+the other's file paths, including paths from a worktree that has since
+been deleted. Hand the tool a cache scoped to the worktree instead:
+
+```go
+sparkwing.Bash(ctx, "golangci-lint run ./...").
+    Env("GOLANGCI_LINT_CACHE", sparkwing.ToolCacheDir("golangci-lint")).
+    Run()
+```
+
+The path is derived from `WorkDir()`, so it is stable run to run in one
+worktree - the cache still earns its keep - and disjoint between
+worktrees.
+
+Running two lint jobs at once is a separate problem this does not
+solve. golangci-lint takes its parallel-runner lock on
+`golangci-lint.lock` in the OS temp directory, wherever
+`GOLANGCI_LINT_CACHE` points, so a job that starts while another holds
+that lock exits with `parallel golangci-lint is running`. Pass
+`--allow-parallel-runners`, or serialize the jobs behind a lock of your
+own.
+
 ## Files
 
 ```

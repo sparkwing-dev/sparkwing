@@ -47,6 +47,22 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **sdk:** `sparkwing.ToolCacheDir(tool)` returns a cache directory for an
+  external tool, scoped to the worktree the pipeline runs in. Tools that key
+  their cache on file content alone -- golangci-lint among them -- replay a
+  stored result for identical input regardless of which checkout produced it,
+  so two worktrees of one repo sharing the default cache report each other's
+  file paths. Pass the directory through the tool's cache variable
+  (`Env("GOLANGCI_LINT_CACHE", sparkwing.ToolCacheDir("golangci-lint"))`) to
+  keep the caches disjoint while each worktree still reuses its own. Running
+  two lint jobs at once stays unaddressed: golangci-lint takes its
+  parallel-runner lock in the OS temp directory, wherever
+  `GOLANGCI_LINT_CACHE` points, so a job that starts while another holds that
+  lock still exits with `parallel golangci-lint is running`. Pass
+  `--allow-parallel-runners` or serialize the jobs to cover that.
+
 ### Fixed
 
 - **cli:** `pipeline hooks install` no longer leaves a dead gate on machines

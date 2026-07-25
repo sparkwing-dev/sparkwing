@@ -742,6 +742,7 @@ const Success Outcome = "success"
 func Summary(ctx context.Context, markdown string)
 const Superseded Outcome = "superseded"
 func TTL(d time.Duration) CacheOption
+func ToolCacheDir(tool string) string
 type TransitiveArg struct {
 	Flag      string
 	JobID     string
