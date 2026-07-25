@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 )
 
@@ -123,6 +124,66 @@ func TestRenderDoctorPretty_NamesPoisonedProfileAndReset(t *testing.T) {
 	}
 	if strings.Contains(out, "healthy") {
 		t.Errorf("a report with a poisoned profile should not read healthy:\n%s", out)
+	}
+}
+
+func TestDoctorReport_ShadowedHooksAreNotClean(t *testing.T) {
+	r := opsview.DoctorReport{ShadowedHooks: &githooks.Shadow{Gates: []string{"pre-push"}}}
+	if r.Clean() {
+		t.Fatal("report with a shadowed hook directory reported clean")
+	}
+}
+
+func TestRenderDoctorPretty_ExplainsShadowedHooks(t *testing.T) {
+	r := opsview.DoctorReport{
+		ShadowedHooks: &githooks.Shadow{
+			Repo:      "/home/dev/proj",
+			HooksDir:  "/home/dev/proj/.git/hooks",
+			ActiveDir: "/home/dev/.config/git/hooks",
+			Scope:     "global",
+			Gates:     []string{"pre-commit", "pre-push"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "/home/dev/.config/git/hooks") || !strings.Contains(out, "/home/dev/proj/.git/hooks") {
+		t.Errorf("pretty output does not name both hook directories:\n%s", out)
+	}
+	if !strings.Contains(out, "pre-commit, pre-push") {
+		t.Errorf("pretty output does not name the gates that stopped firing:\n%s", out)
+	}
+	if !strings.Contains(out, "sparkwing pipeline hooks install") {
+		t.Errorf("pretty output does not carry the fix:\n%s", out)
+	}
+	if strings.Contains(out, "healthy") {
+		t.Errorf("a report with shadowed hooks should not read healthy:\n%s", out)
+	}
+}
+
+func TestRenderDoctorJSON_CarriesShadowedHooks(t *testing.T) {
+	r := opsview.DoctorReport{
+		ShadowedHooks: &githooks.Shadow{
+			Repo:      "/home/dev/proj",
+			HooksDir:  "/home/dev/proj/.git/hooks",
+			ActiveDir: "/home/dev/.config/git/hooks",
+			Scope:     "global",
+			Gates:     []string{"pre-push"},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderDoctor(&buf, r, "json", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	var got opsview.DoctorReport
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.ShadowedHooks == nil || got.ShadowedHooks.Scope != "global" ||
+		len(got.ShadowedHooks.Gates) != 1 || got.ShadowedHooks.Gates[0] != "pre-push" {
+		t.Errorf("round-tripped shadowed hooks = %+v, want the global-scope pre-push finding", got.ShadowedHooks)
 	}
 }
 

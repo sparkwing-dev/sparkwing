@@ -47,6 +47,31 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **cli:** `pipeline hooks install` no longer leaves a dead gate on machines
+  whose global git config sets `core.hooksPath`. That setting replaces
+  `.git/hooks` for every repository, so installed hooks were silently never
+  run. Install now points the repository at its own hook directory and
+  chains the machine's hooks from it: a hook both layers define runs the
+  pipelines first and hands off afterwards, and a hook only the machine
+  defines (`prepare-commit-msg` and friends) gets a forwarder, so nothing
+  stops firing. Only names git itself runs as hooks are forwarded, so a
+  helper script kept in that directory is not turned into one. When a
+  hand-written hook blocks one of those forwarders, install refuses the
+  claim and names the hook rather than silencing the machine's copy; both
+  install and `pipeline hooks status` report a machine hook nothing hands
+  off to, including in a repository that already carries the claim. A
+  `core.hooksPath` the repository set itself is left alone
+  and reported instead. `pipeline hooks uninstall` removes the forwarders
+  with the rest and releases the claim, so the machine's hooks apply again,
+  including when the hooks are already gone by other means. All three verbs
+  now resolve the hook directory through git's common directory, so they
+  also work from a linked worktree.
+- **cli:** `sparkwing doctor` reports a hook directory git is not reading,
+  naming the gates that stopped firing and how to restore them, so a
+  disabled commit or push gate surfaces instead of going unnoticed.
+
 ### Changed
 
 - **admission:** a still-measuring pipeline's contended-run demand floor

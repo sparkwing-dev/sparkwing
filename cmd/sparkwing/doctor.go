@@ -13,10 +13,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"time"
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
@@ -58,7 +60,28 @@ func runDoctor(args []string) error {
 }
 
 func diagnose(ctx context.Context, p paths.Paths, home string, dryRun bool) (doctorReport, error) {
-	return opsview.Diagnose(ctx, p, home, installedVersion(), dryRun)
+	report, err := opsview.Diagnose(ctx, p, home, installedVersion(), dryRun)
+	if err != nil {
+		return report, err
+	}
+	report.ShadowedHooks = shadowedHooks(runGit)
+	return report, nil
+}
+
+// shadowedHooks reports the sparkwing hooks installed in the checkout doctor
+// was run from that git will never execute, because core.hooksPath points
+// elsewhere. Nothing is reported outside a sparkwing project, or when git
+// reads the directory the hooks live in.
+func shadowedHooks(git githooks.Git) *githooks.Shadow {
+	sparkwingDir, err := findSparkwingDir()
+	if err != nil {
+		return nil
+	}
+	shadow, err := githooks.Detect(git, filepath.Dir(sparkwingDir))
+	if err != nil {
+		return nil
+	}
+	return shadow
 }
 
 func renderDoctor(w io.Writer, r doctorReport, format string) error {

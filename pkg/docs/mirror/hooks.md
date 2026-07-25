@@ -114,6 +114,50 @@ Each managed hook carries a marker comment so `uninstall` and `status`
 can distinguish sparkwing-installed hooks from hand-written ones.
 Existing unmanaged hooks are skipped on install with a warning.
 
+### When your machine sets `core.hooksPath`
+
+A `core.hooksPath` in your global git config replaces `.git/hooks` for
+every repository on the machine. Hooks written into `.git/hooks` are then
+never read, and a gate disappears without a message.
+
+`pipeline hooks install` handles this. When it finds a global
+`core.hooksPath`, it sets `core.hooksPath` for this repository to the
+repository's own hook directory -- a repository setting wins over the global
+one -- and chains the global hooks from there, so nothing is lost:
+
+- A hook name both layers define runs the pipelines first, then hands off
+  to the global hook. A failing blocking pipeline aborts before the
+  hand-off, so the commit or push still stops where you expect.
+- A hook name only the global config defines gets a forwarder, so hooks
+  like `prepare-commit-msg` keep firing. Only names git itself runs as
+  hooks are forwarded; a helper script or note kept in that directory is
+  left where it is.
+
+Forwarders resolve the global path when they run, so changing the machine's
+hooks directory does not mean reinstalling. They carry the same marker as
+any other managed hook, so `uninstall` removes them -- and releases the
+repository's `core.hooksPath` at the same time, putting the machine's hooks
+back in charge rather than stranding them behind a claim with nothing left
+to forward.
+
+If the repository already sets its own `core.hooksPath` pointing somewhere
+else, install leaves it alone -- that setting was deliberate -- and warns
+that the hooks it just wrote will not run. Clear it with
+`git config --unset core.hooksPath` and re-run.
+
+Claiming `core.hooksPath` is also what would stop a global hook firing if
+nothing in `.git/hooks` hands off to it, so install refuses the claim while
+any global hook name is unforwarded -- a hand-written hook of that name is
+the usual reason, since install never overwrites one. It names the hook and
+leaves the machine's hooks in charge; remove that file and re-run to get
+both layers. Once the claim is already in place there is no such decision to
+make, so install and `pipeline hooks status` both report a global hook
+nothing forwards to, however it came about.
+
+`sparkwing pipeline hooks status` and `sparkwing doctor` both report a hook
+directory git is not reading, naming the gates that stopped firing and how
+to restore them.
+
 `pre_commit` and `pre_push` are blocking: the hook aborts the commit or
 push when a pipeline fails. `post_commit` is non-blocking -- the commit
 has already landed, so the hook runs its pipelines, tolerates failures,

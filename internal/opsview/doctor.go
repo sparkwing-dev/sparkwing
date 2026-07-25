@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/boxslot"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
+	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -73,6 +74,12 @@ type DoctorReport struct {
 	// resets the profile. Reported with the reset command, never repaired --
 	// discarding learned measurements is the operator's call.
 	PoisonedProfiles []DoctorPoisonedProfile `json:"poisoned_profiles,omitempty"`
+	// ShadowedHooks is set when the checkout doctor runs in has sparkwing
+	// hooks installed that git will not run, because core.hooksPath points at
+	// another directory -- a commit or push gate that is silently gone.
+	// Reported with the fix, never repaired: rewriting an operator's git
+	// config is not doctor's call.
+	ShadowedHooks *githooks.Shadow `json:"shadowed_hooks,omitempty"`
 }
 
 // DoctorPoisonedProfile is one contention-poisoned capacity profile in the
@@ -121,7 +128,8 @@ func (r DoctorReport) Clean() bool {
 		len(r.AdmissionRejections) == 0 &&
 		r.DaemonVersionSkew == nil &&
 		len(r.QuarantinedLedgers) == 0 &&
-		len(r.PoisonedProfiles) == 0
+		len(r.PoisonedProfiles) == 0 &&
+		r.ShadowedHooks == nil
 }
 
 // Diagnose runs every doctor check against the sparkwing home and repairs what
@@ -457,6 +465,11 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	fmt.Fprintf(w, "daemon_version_skew\t%d\n", skew)
 	fmt.Fprintf(w, "quarantined_ledgers\t%d\n", len(r.QuarantinedLedgers))
 	fmt.Fprintf(w, "poisoned_profiles\t%d\n", len(r.PoisonedProfiles))
+	shadowed := 0
+	if r.ShadowedHooks != nil {
+		shadowed = len(r.ShadowedHooks.Gates)
+	}
+	fmt.Fprintf(w, "shadowed_hooks\t%d\n", shadowed)
 	return nil
 }
 
@@ -500,6 +513,10 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 			fmt.Fprintf(w, "  %s\n", f)
 		}
 		fmt.Fprintf(w, "  kept for inspection; safe to delete once reviewed\n")
+	}
+
+	if s := r.ShadowedHooks; s != nil {
+		fmt.Fprintf(w, "\nwarning: %s\n  %s\n", s.Summary(), s.Remedy())
 	}
 
 	for _, p := range r.PoisonedProfiles {
