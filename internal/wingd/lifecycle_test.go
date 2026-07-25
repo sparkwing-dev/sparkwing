@@ -191,6 +191,72 @@ func TestVersionTakeover_DrainsOldAndReattaches(t *testing.T) {
 	}
 }
 
+// TestVersionTakeover_DevBuildDrainsReleaseDaemon runs the takeover with a
+// source-built client: a "(devel)" client drains the v1.0.0 daemon, brings
+// up a "(devel)" successor via the spawn hook, and the original holder
+// reattaches to it inside the grace window.
+func TestVersionTakeover_DevBuildDrainsReleaseDaemon(t *testing.T) {
+	home := shortHome(t)
+	td1 := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0"})
+
+	holder := ensure(t, home, "")
+	lease := mustAcquire(t, holder, coreReq("a", 1))
+	token := lease.Token
+
+	successor := newSuccessor(t, home, "(devel)")
+
+	dev, err := client.EnsureDaemon(context.Background(), client.Options{
+		Home:        home,
+		Version:     "(devel)",
+		Spawn:       successor.spawn,
+		DialTimeout: time.Second,
+		Backoff:     20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("takeover ensure: %v", err)
+	}
+	defer dev.Close()
+	if dev.DaemonVersion() != "(devel)" {
+		t.Fatalf("connected daemon version %q, want (devel)", dev.DaemonVersion())
+	}
+
+	if err := td1.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("release daemon should have drained and exited: %v", err)
+	}
+
+	reconnect := ensure(t, home, "(devel)")
+	reclaimed, err := reconnect.Reattach(context.Background(), token)
+	if err != nil {
+		t.Fatalf("reattach after takeover: %v", err)
+	}
+	if reclaimed.RunID != "a" {
+		t.Fatalf("reattached %q, want a", reclaimed.RunID)
+	}
+}
+
+// TestVersionTakeover_ReleaseLeavesDevDaemon is the other half of the
+// dev-build rule: a strictly newer release client connects to a daemon
+// built from source and leaves it running. If it drained one, the two
+// builds would supersede each other and each would respawn its own
+// daemon over the other's for as long as both were in use. The ensure
+// helper's spawn hook fails the test if it fires, so an attempted
+// takeover shows up as a spawn the client had no business making.
+func TestVersionTakeover_ReleaseLeavesDevDaemon(t *testing.T) {
+	home := shortHome(t)
+	td := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0+dirty"})
+
+	rel := ensure(t, home, "v1.1.0")
+	if rel.DaemonVersion() != "v1.0.0+dirty" {
+		t.Fatalf("connected daemon version %q, want the source-built v1.0.0+dirty still resident", rel.DaemonVersion())
+	}
+
+	select {
+	case err := <-td.done:
+		t.Fatalf("source-built daemon exited (%v); the release client drained it", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 func TestIdleExit_NoWork(t *testing.T) {
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 250 * time.Millisecond})

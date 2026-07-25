@@ -233,9 +233,9 @@ func diagnoseQuarantinedLedgers(home string, report *DoctorReport) {
 // two standing problems a fresh user on the happy path otherwise only sees as
 // an opaque per-run failure: a repeated malformed-request rejection pattern
 // (from the outcome window), and a version skew between this binary and the
-// resident daemon (which does not always take over, leaving the daemon unable
-// to admit a newer client's requests). It is read-only; an absent daemon
-// yields nothing.
+// resident daemon (takeover resolves a skew only when the client build
+// supersedes the daemon's; otherwise the daemon stays and may reject requests
+// it cannot honor). It is read-only; an absent daemon yields nothing.
 func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report *DoctorReport) {
 	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home})
 	if err != nil {
@@ -490,7 +490,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 			rej.Count, rej.Cause, rejectionExplanation(rej.Cause))
 	}
 	if s := r.DaemonVersionSkew; s != nil {
-		fmt.Fprintf(w, "\nwarning: version skew -- this sparkwing is %s but the running admission daemon is %s\n  a newer or development build does not automatically take over an older daemon, so requests it cannot honor fail as invalid; stop the daemon so the next run brings up a matching one, or run in an isolated SPARKWING_HOME\n",
+		fmt.Fprintf(w, "\nwarning: version skew -- this sparkwing is %s but the running admission daemon is %s\n  a client build that supersedes the daemon (a newer release, or a build from source) takes it over on its next run; when the daemon is the newer or source-built side, requests it cannot honor fail as invalid -- stop the daemon so the next run brings up a matching one, or run in an isolated SPARKWING_HOME\n",
 			s.Self, s.Daemon)
 	}
 

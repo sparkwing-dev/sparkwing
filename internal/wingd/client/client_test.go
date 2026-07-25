@@ -13,7 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-func TestVersionNewer(t *testing.T) {
+func TestSupersedes(t *testing.T) {
 	tests := []struct {
 		client, daemon string
 		want           bool
@@ -26,10 +26,48 @@ func TestVersionNewer(t *testing.T) {
 		{"", "v1.0.0", false},
 		{"v1.0.0", "", false},
 		{"garbage", "v1.0.0", false},
+		{"(devel)", "v1.0.0", true},
+		{"(devel)", "(devel)", false},
+		{"(devel)", "", false},
+		{"(unknown)", "v1.0.0", false},
+		{"v1.0.0+dirty", "v1.0.0", true},
+		{"v1.0.0+dirty", "v1.0.0+dirty", false},
+		{"v0.9.0+dirty", "v1.0.0", true},
+		{"v1.0.0", "(devel)", false},
+		{"v1.0.0", "v1.0.0+dirty", false},
+		{"v1.1.0", "v1.0.0+dirty", false},
+		{"v0.23.0", "v0.22.1-0.20260724005950-041d1c11f150+dirty", false},
+		{"(devel)", "v1.0.0+dirty", false},
+		{"v1.0.0+dirty", "(devel)", false},
+		{"v0.23.0+dirty", "v0.22.0+dirty", true},
+		{"v0.22.0+dirty", "v0.23.0+dirty", false},
+		{"v0.22.1-0.20260724005950-041d1c11f150+dirty", "v0.22.1-0.20260723005950-041d1c11f150+dirty", true},
 	}
 	for _, tt := range tests {
-		if got := versionNewer(tt.client, tt.daemon); got != tt.want {
-			t.Errorf("versionNewer(%q,%q)=%v, want %v", tt.client, tt.daemon, got, tt.want)
+		if got := supersedes(tt.client, tt.daemon); got != tt.want {
+			t.Errorf("supersedes(%q,%q)=%v, want %v", tt.client, tt.daemon, got, tt.want)
+		}
+	}
+}
+
+// TestSupersedes_NeverMutual pins the property the takeover loop depends
+// on: no two builds may each supersede the other. A mutual pair makes two
+// concurrently running sparkwings drain and respawn each other's daemon
+// without end, since connect() re-takes-over on every reconnect and
+// nothing bounds the exchange.
+func TestSupersedes_NeverMutual(t *testing.T) {
+	versions := []string{
+		"", "(devel)", "(unknown)", "garbage",
+		"v1.0.0", "v1.1.0", "v2.0.0",
+		"v0.22.0", "v0.23.0",
+		"v1.0.0+dirty", "v0.22.0+dirty",
+		"v0.22.1-0.20260724005950-041d1c11f150+dirty",
+	}
+	for _, a := range versions {
+		for _, b := range versions {
+			if supersedes(a, b) && supersedes(b, a) {
+				t.Errorf("%q and %q supersede each other; a live pair of these builds would drain each other's daemon forever", a, b)
+			}
 		}
 	}
 }

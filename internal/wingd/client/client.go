@@ -34,8 +34,8 @@ type Options struct {
 	// default ($SPARKWING_HOME or ~/.sparkwing).
 	Home string
 	// Version is this binary's version, sent in the handshake and used to
-	// decide whether to take over an older daemon. Empty never triggers
-	// takeover.
+	// decide whether to take over a daemon this build supersedes. Empty
+	// never triggers takeover.
 	Version string
 	// Spawn starts a detached daemon for Home. Nil uses the default, which
 	// re-execs this binary as `sparkwing wingd run`.
@@ -131,9 +131,10 @@ func (cl *Client) admissionError(m *wingwire.Evicted) *AdmissionError {
 }
 
 // versionSkewHint returns an explanation when this client and the daemon it is
-// talking to are provably different builds, else "". A newer or development
-// build does not always take over an older daemon, and the older daemon then
-// rejects requests it cannot honor with a bare "invalid".
+// talking to are provably different builds, else "". Takeover replaces a
+// daemon this client's build supersedes, but it cannot fire when either
+// side's version is unknown or the daemon is the newer or dev-built side,
+// and such a daemon rejects requests it cannot honor with a bare "invalid".
 func (cl *Client) versionSkewHint() string {
 	self, daemon := cl.opts.Version, cl.ack.BinaryVersion
 	if self == "" || daemon == "" || self == daemon {
@@ -194,13 +195,16 @@ func daemonUnreachable(home string, spawns int, cause error) error {
 }
 
 // EnsureDaemon connects to Home's daemon, spawning one and retrying with
-// backoff when none is reachable. When this client's version is ahead of
-// the daemon's it drains the old daemon and brings up its own binary as
-// the successor before returning a connection to it. The returned Client
-// speaks the same protocol major and is ready for [Client.Acquire],
-// [Client.Reattach], or [Client.QueueState]. When a spawned daemon dies at
-// startup, the returned error carries the tail of its log and names the
-// log path rather than reporting an unrelated spawn-layer failure.
+// backoff when none is reachable. When this client's build supersedes the
+// daemon's -- a strictly newer release, or a build from source against any
+// release daemon or an older source build -- it drains the old daemon and
+// brings up its own binary as the successor before returning a connection
+// to it.
+// The returned Client speaks the same protocol major and is ready for
+// [Client.Acquire], [Client.Reattach], or [Client.QueueState]. When a
+// spawned daemon dies at startup, the returned error carries the tail of
+// its log and names the log path rather than reporting an unrelated
+// spawn-layer failure.
 func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 	sock, err := wingd.SocketPath(opts.Home)
 	if err != nil {
@@ -269,7 +273,7 @@ func (cl *Client) connect(ctx context.Context) error {
 			cl.Close()
 			return ErrProtocolTooOld
 		}
-		if versionNewer(opts.Version, ack.BinaryVersion) {
+		if supersedes(opts.Version, ack.BinaryVersion) {
 			cl.ack = ack
 			cl.takeover(ctx, opts)
 			continue

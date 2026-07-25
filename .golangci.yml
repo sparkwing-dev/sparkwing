@@ -290,6 +290,12 @@ linters:
         linters:
           - all
 
+issues:
+  # Baseline the pre-existing findings on main so lint only fails on NEW
+  # issues a change introduces. Unchanged code is grandfathered; the whole
+  # diff is still linted. Same convention as the sibling wing repos.
+  new-from-merge-base: origin/main
+
 formatters:
   enable:
     - gofumpt

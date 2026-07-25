@@ -73,6 +73,18 @@ code change to unlock.
   or above the machine's grantable ceiling -- naming the profile and the
   reset command.
 
+### Fixed
+
+- **admission:** a sparkwing built from source (a `(devel)` or `+dirty`
+  build) now takes over a running release admission daemon whatever the
+  two version tags say, through the same drain-and-succeed path a newer
+  release takes. Runs launched by a source build no longer die with
+  opaque `invalid` rejections against a daemon from an older install. A
+  release never takes a source-built daemon back, and an unorderable
+  version (`(devel)`, `(unknown)`) never takes anything over, so no two
+  builds can drain each other in a loop; `sparkwing ops doctor`'s
+  version-skew warning explains the cases takeover leaves alone.
+
 ## [v0.22.0] - 2026-07-22
 ### Added
 
