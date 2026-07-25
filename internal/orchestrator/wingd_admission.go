@@ -227,7 +227,7 @@ func (la *LocalAdmission) admitRun(
 		return nil, outcome, err
 	}
 	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
-		_ = st.RecordWaitObservation(ctx, pipeline, time.Since(submitted))
+		_ = st.RecordWaitObservation(ctx, currentProfileKey(pipeline), time.Since(submitted))
 	}
 	rl := &runLease{token: lease.Token, hostAdmitted: hostPinned, leases: []*wingdclient.Lease{lease}}
 	if hostPinned || len(req.Semaphores) > 0 {
@@ -341,28 +341,30 @@ func (la *LocalAdmission) admitNode(
 // default order still holds.
 func (la *LocalAdmission) resolveNodeHostCost(ctx context.Context, backends Backends, pipeline, nodeID string, node *sparkwing.JobNode) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift, string) {
 	pin := nodePin(node)
+	key := currentProfileKey(pipeline)
 	var profile *store.PipelineProfile
 	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
-		if p, err := st.GetPipelineProfile(ctx, pipeline, nodeID); err == nil {
+		if p, err := st.GetPipelineProfile(ctx, key, nodeID); err == nil {
 			profile = p
 		}
 	}
 	res := capacity.Resolve(pin, profile, runtime.NumCPU(), "")
-	res, overCap := la.applyHostCeiling(ctx, res)
+	res, overCap := la.applyHostCeiling(ctx, res, key)
 	return res, profile, capacity.CheckDrift(pin, profile), overCap
 }
 
 // applyHostCeiling caps a resolved host charge at the daemon's idle grantable
 // ceiling so an oversized cost runs alone rather than being rejected, and
-// returns the loud warning when an explicit pin is what was capped. It asks
-// the running daemon for the ceiling; when none answers the charge is left
+// returns the loud warning when what was capped is an explicit pin or a
+// still-measuring charge (the poisoned-profile signature). It asks the
+// running daemon for the ceiling; when none answers the charge is left
 // unclamped and the daemon caps it at submit.
-func (la *LocalAdmission) applyHostCeiling(ctx context.Context, res capacity.Resolution) (capacity.Resolution, string) {
+func (la *LocalAdmission) applyHostCeiling(ctx context.Context, res capacity.Resolution, profileKey string) (capacity.Resolution, string) {
 	machineCores, grantCores, grantMem, ok := la.idleGrantableHost(ctx)
 	if !ok {
 		return res, ""
 	}
-	return capacity.ApplyHostCeiling(res, machineCores, grantCores, grantMem)
+	return capacity.ApplyHostCeiling(res, profileKey, machineCores, grantCores, grantMem)
 }
 
 // idleGrantableHost asks the running daemon for the largest host charge it
@@ -712,14 +714,15 @@ func tightestQueueTimeout(claims []wingwire.SemaphoreClaim) (string, time.Durati
 // this machine's grantable ceiling and was capped to run alone.
 func (la *LocalAdmission) resolveHostCost(ctx context.Context, backends Backends, pipeline string, plan *sparkwing.Plan) (capacity.Resolution, *store.PipelineProfile, *capacity.Drift, string) {
 	pin := planPin(plan)
+	key := currentProfileKey(pipeline)
 	var profile *store.PipelineProfile
 	if st := canonicalLocalStore(backends.State); st != nil && pipeline != "" {
-		if p, err := st.GetPipelineProfile(ctx, pipeline, ""); err == nil {
+		if p, err := st.GetPipelineProfile(ctx, key, ""); err == nil {
 			profile = p
 		}
 	}
 	res := capacity.Resolve(pin, profile, runtime.NumCPU(), capacityFingerprint(plan))
-	res, overCap := la.applyHostCeiling(ctx, res)
+	res, overCap := la.applyHostCeiling(ctx, res, key)
 	return res, profile, capacity.CheckDrift(pin, profile), overCap
 }
 

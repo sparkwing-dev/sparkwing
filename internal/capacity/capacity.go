@@ -189,7 +189,14 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 // pins and all memory demand are left intact; admission enforces both as hard
 // budgets. A non-positive CPU ceiling or a charge already within it leaves the
 // resolution unchanged and returns no warning.
-func ApplyHostCeiling(res Resolution, machineCores, grantableCores float64, grantableMemoryBytes int64) (Resolution, string) {
+//
+// pipeline is the stored profile key, named in the warning when a
+// still-measuring charge (floor or warm-start priced) is what got capped:
+// that is the poisoned-profile signature -- a contention-ratcheted floor or a
+// stale predecessor peak holding the whole machine -- and the run would
+// otherwise serialize silently, with nothing pointing at the reset that
+// clears it.
+func ApplyHostCeiling(res Resolution, pipeline string, machineCores, grantableCores float64, grantableMemoryBytes int64) (Resolution, string) {
 	warning := ""
 	if res.Source == store.CostSourcePin {
 		if machineCores > 0 && res.Cores > machineCores {
@@ -199,6 +206,10 @@ func ApplyHostCeiling(res Resolution, machineCores, grantableCores float64, gran
 		return res, warning
 	}
 	if grantableCores > 0 && res.Cores > grantableCores {
+		if res.Source == store.CostSourceFloor || res.Source == store.CostSourceMeasuring {
+			warning = fmt.Sprintf("measuring charge %.1f cores exceeds this machine's grantable %.1f, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline %s",
+				res.Cores, grantableCores, pipeline)
+		}
 		res.Cores = grantableCores
 	}
 	return res, warning
@@ -212,6 +223,26 @@ func ApplyHostCeiling(res Resolution, machineCores, grantableCores float64, gran
 func measurementQualifies(profile *store.PipelineProfile) bool {
 	return profile != nil && profile.SampleCount >= MinSamples &&
 		(profile.PeakCores > 0 || profile.CPUMeasured)
+}
+
+// FloorPoisoned reports whether a rollup profile is in the poisoned state
+// contention ratchets a still-measuring version into: no finalized measured
+// price, no pin to override it, and a contended-run demand floor whose
+// SafetyMultiple charge is at or above the machine's grantable ceiling --
+// every run admitted alone until the floor decays or the profile is reset.
+// Doctor surfaces it with the reset command, since at admission time the
+// only trace is a per-run warning that is easy to miss.
+func FloorPoisoned(profile *store.PipelineProfile, grantableCores float64) bool {
+	if profile == nil || grantableCores <= 0 {
+		return false
+	}
+	if profile.PinnedCores > 0 || profile.PinnedMemoryBytes > 0 {
+		return false
+	}
+	if measurementQualifies(profile) {
+		return false
+	}
+	return profile.FloorCores > 0 && SafetyMultiple*profile.FloorCores >= grantableCores
 }
 
 // coldStartCores is the conservative charge for an unknown pipeline: half

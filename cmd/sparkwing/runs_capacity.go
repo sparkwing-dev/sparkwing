@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
@@ -43,13 +44,24 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 	if err != nil {
 		return err
 	}
+	if len(profiles) == 0 && pipeline != "" && !strings.Contains(pipeline, "/") {
+		all, err := st.ListPipelineProfiles(ctx, "")
+		if err != nil {
+			return err
+		}
+		profiles = matchBarePipeline(all, pipeline)
+	}
 	stats := groupCapacityStats(profiles)
-	cachedExcluded, err := st.CacheExcludedCounts(ctx, pipeline, string(sparkwing.Cached), capacity.CacheDominantFraction)
+	cachedExcluded, err := st.CacheExcludedCounts(ctx, barePipeline(pipeline), string(sparkwing.Cached), capacity.CacheDominantFraction)
 	if err != nil {
 		return err
 	}
 	for i := range stats {
-		stats[i].CachedExcluded = cachedExcluded[stats[i].Pipeline]
+		n, ok := cachedExcluded[stats[i].Pipeline]
+		if !ok {
+			n = cachedExcluded[barePipeline(stats[i].Pipeline)]
+		}
+		stats[i].CachedExcluded = n
 	}
 
 	if emitJSON {
@@ -137,6 +149,32 @@ func runCapacityReset(ctx context.Context, paths orchestrator.Paths, pipeline st
 		fmt.Println("pins were kept; those pipelines re-learn from cold start while admission keeps charging the pin")
 	}
 	return nil
+}
+
+// barePipeline strips the repo scope from a stored profile key: profiles are
+// keyed "repo/pipeline" for runs launched inside a git repo, while run rows
+// keep the bare pipeline name the cache-exclusion counts group by. The bare
+// count pools same-named pipelines across repos, so it is a fallback for
+// display only, never an admission input.
+func barePipeline(key string) string {
+	if i := strings.LastIndex(key, "/"); i >= 0 {
+		return key[i+1:]
+	}
+	return key
+}
+
+// matchBarePipeline returns the profiles whose bare pipeline name matches
+// name, so `--pipeline ci` still finds repo-scoped rows ("myrepo/ci") when
+// no row is stored under the bare name. Display convenience only; the
+// destructive reset path stays exact-match.
+func matchBarePipeline(profiles []store.PipelineProfile, name string) []store.PipelineProfile {
+	var out []store.PipelineProfile
+	for _, p := range profiles {
+		if barePipeline(p.Pipeline) == name {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // fmtCPUCells renders a profile's CPU distribution as p50/p95/peak. The

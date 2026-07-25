@@ -47,6 +47,31 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **admission:** a still-measuring pipeline's contended-run demand floor
+  now decays: a contended run that measures below the floor halves it
+  (never past the run's own evidence), mirroring the ceiling-hit doubling
+  that raises it. Sustained external load can no longer ratchet a
+  pipeline's charge to the machine ceiling permanently -- the price
+  converges back to measured demand once the load passes, without
+  `runs stats --reset`.
+- **admission:** capacity profiles are keyed `repo/pipeline` for runs
+  launched inside a git repo (bare pipeline name outside one), so
+  same-named pipelines in different repos -- every scaffolded repo's
+  `ci` -- no longer pool measurements and contended floors on one
+  machine-global row. Existing bare-keyed rows are left behind and
+  ignored by in-repo runs; each pipeline re-measures once under its
+  scoped key, and stale rows can be cleared with
+  `runs stats --reset --all --yes`.
+- **admission:** capping a still-measuring charge at the machine's
+  grantable ceiling is no longer silent: the run prints the capped
+  charge with the exact `runs stats --reset --pipeline <name>` that
+  clears a contention-poisoned profile.
+- **cli:** `sparkwing doctor` reports (never repairs) a poisoned
+  capacity profile -- a contended-run demand floor pricing every run at
+  or above the machine's grantable ceiling -- naming the profile and the
+  reset command.
 
 ## [v0.22.0] - 2026-07-22
 ### Added

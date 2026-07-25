@@ -55,12 +55,11 @@ func TestRecordProfileObservation_ContendedRaisesFloorNotPeak(t *testing.T) {
 	}
 }
 
-// TestRecordProfileObservation_FloorOnlyRises confirms the floor is a
-// monotone lower bound within a version: a smaller later contended reading
-// never lowers it.
-func TestRecordProfileObservation_FloorOnlyRises(t *testing.T) {
+// TestRecordProfileObservation_FloorRisesOnHigherEvidence confirms contended
+// evidence at or above the stored floor raises it outright.
+func TestRecordProfileObservation_FloorRisesOnHigherEvidence(t *testing.T) {
 	st, ctx := openTestStore(t)
-	for _, c := range []float64{5, 2, 7, 3} {
+	for _, c := range []float64{5, 7} {
 		if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
 			CPUMeasured: true, PlanHash: "A", Contended: true, FloorCores: c,
 		}); err != nil {
@@ -69,7 +68,58 @@ func TestRecordProfileObservation_FloorOnlyRises(t *testing.T) {
 	}
 	prof, _ := st.GetPipelineProfile(ctx, "demo", "")
 	if prof.FloorCores != 7 {
-		t.Errorf("FloorCores = %v, want 7 (highest contended lower bound)", prof.FloorCores)
+		t.Errorf("FloorCores = %v, want 7 (higher contended evidence raises the floor)", prof.FloorCores)
+	}
+}
+
+// TestRecordProfileObservation_FloorDecaysTowardLowerEvidence pins the BW-849
+// remedy: a contended run that measured well below the stored floor decays it
+// by half per run -- never past the run's own evidence -- so a floor ratcheted
+// up by transient external load converges back to demand instead of pricing
+// the pipeline at the machine ceiling until a manual reset.
+func TestRecordProfileObservation_FloorDecaysTowardLowerEvidence(t *testing.T) {
+	st, ctx := openTestStore(t)
+	fold := func(cores float64, memBytes int64) {
+		t.Helper()
+		if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
+			CPUMeasured: true, PlanHash: "A", Contended: true,
+			FloorCores: cores, FloorMemoryBytes: memBytes,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	fold(8, 8<<30)
+	fold(1, 1<<30)
+	prof, _ := st.GetPipelineProfile(ctx, "demo", "")
+	if prof.FloorCores != 4 {
+		t.Errorf("FloorCores = %v, want 4 (one under-floor run halves the floor)", prof.FloorCores)
+	}
+	if prof.FloorMemoryBytes != 4<<30 {
+		t.Errorf("FloorMemoryBytes = %d, want %d (memory floor decays alongside cores)", prof.FloorMemoryBytes, int64(4<<30))
+	}
+
+	fold(1, 1<<30)
+	fold(1, 1<<30)
+	prof, _ = st.GetPipelineProfile(ctx, "demo", "")
+	if prof.FloorCores != 1 {
+		t.Errorf("FloorCores = %v, want 1 (three halvings reach the run's own evidence)", prof.FloorCores)
+	}
+	if prof.FloorMemoryBytes != 1<<30 {
+		t.Errorf("FloorMemoryBytes = %d, want %d (memory reaches its evidence alongside cores)", prof.FloorMemoryBytes, int64(1<<30))
+	}
+
+	// Evidence between half the floor and the floor stops the halving short:
+	// unclamped it would land on 4 and price the pipeline below the 5 cores
+	// this run proved it wanted.
+	fold(8, 8<<30)
+	fold(5, 5<<30)
+	prof, _ = st.GetPipelineProfile(ctx, "demo", "")
+	if prof.FloorCores != 5 {
+		t.Errorf("FloorCores = %v, want 5 (decay never falls below the run's own evidence)", prof.FloorCores)
+	}
+	if prof.FloorMemoryBytes != 5<<30 {
+		t.Errorf("FloorMemoryBytes = %d, want %d (decay never falls below the run's own evidence)", prof.FloorMemoryBytes, int64(5<<30))
 	}
 }
 

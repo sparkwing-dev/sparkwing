@@ -1878,6 +1878,13 @@ If an older-pinned pipeline binary is still admitting outside the daemon
 through a held box-slot lock, doctor reports it and points at the fix --
 bump that repo's sparkwing pin -- rather than deleting live state.
 
+It also reports (never repairs) standing problems that otherwise surface
+only as opaque per-run failures: repeated admission rejections, a version
+skew with the resident daemon, quarantined admission ledgers, and a
+capacity profile poisoned by contention -- one whose learned demand floor
+prices every run at the whole machine, named with the exact
+runs stats --reset command that clears it.
+
 Use --dry-run to report what it would repair without changing anything.
 
 ### Flags
@@ -3897,9 +3904,9 @@ Aggregate run counts, success %, avg + p95 duration
 
 Per-pipeline aggregates across the last 500 root runs (or the --since window). In-flight runs count toward RUN (running) but do not contribute to timing percentiles.
 
---capacity switches to the measured capacity profiles admission learns from: each pipeline's p50/p99 duration, its CPU and memory distributions (p50/p95/peak across recent runs), its queue-wait p50/p99, sample count, and whether the admission charge comes from a pin, measurement, or the cold-start default. The resource percentiles show whether a pipeline is steady or spiky; admission always charges the peak, because under-reserving a spiky pipeline recreates the oversubscription admission exists to prevent. A pipeline whose pin has drifted from its measured peaks carries the exact fix. Capacity profiles are local-only.
+--capacity switches to the measured capacity profiles admission learns from: each pipeline's p50/p99 duration, its CPU and memory distributions (p50/p95/peak across recent runs), its queue-wait p50/p99, sample count, and whether the admission charge comes from a pin, measurement, or the cold-start default. The resource percentiles show whether a pipeline is steady or spiky; admission always charges the peak, because under-reserving a spiky pipeline recreates the oversubscription admission exists to prevent. A pipeline whose pin has drifted from its measured peaks carries the exact fix. Capacity profiles are local-only and keyed repo/pipeline for runs launched inside a git repo, so same-named pipelines in different repos never share a profile.
 
---reset clears a pipeline's learned capacity profile so it re-learns from a cold start, the escape hatch for a poisoned measurement (one freak run that recorded an absurd peak). Name the pipeline with --pipeline NAME, or reset every pipeline with --all --yes. An explicit .Resources() pin is preserved: admission keeps charging the pin while the profile re-learns. The command prints how many rows were dropped, how many pinned rows were cleared, and how many samples were discarded.
+--reset clears a pipeline's learned capacity profile so it re-learns from a cold start, the escape hatch for a poisoned measurement -- one freak run that recorded an absurd peak, or a contention-ratcheted demand floor (sparkwing doctor flags those). Name the pipeline with --pipeline NAME exactly as --capacity shows it (repo/pipeline inside a git repo), or reset every pipeline with --all --yes. An explicit .Resources() pin is preserved: admission keeps charging the pin while the profile re-learns. The command prints how many rows were dropped, how many pinned rows were cleared, and how many samples were discarded.
 
 ### Flags
 
@@ -3927,7 +3934,7 @@ sparkwing runs stats --profile prod -o json
 sparkwing runs stats --capacity
 
 # Reset a poisoned profile
-sparkwing runs stats --reset --pipeline build
+sparkwing runs stats --reset --pipeline myrepo/build
 
 # Reset every learned profile
 sparkwing runs stats --reset --all --yes

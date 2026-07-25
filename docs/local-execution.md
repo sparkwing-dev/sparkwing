@@ -224,12 +224,20 @@ that does not mean "wait for the window to age out." There are two:
   the real saturation. Use it alone (`SPARKWING_BUDGET=ignore-external`) or
   alongside a cap (`SPARKWING_BUDGET=50%,ignore-external`).
 - **A poisoned learned profile.** One freak run can record an absurd peak
-  that inflates a pipeline's charge for the rest of the window. Reset it
-  with `sparkwing runs stats --reset --pipeline <name>`: the learned
-  samples, peaks, waits, and contention tally are dropped so the pipeline
-  re-learns from a cold start, and the command prints what it removed. An
-  explicit `.Resources()` pin is preserved -- admission keeps charging the
-  pin while the profile re-learns. To reset every pipeline at once, use
+  that inflates a pipeline's charge for the rest of the window, and
+  sustained external load can ratchet a still-measuring pipeline's demand
+  floor toward the whole machine. The floor self-corrects -- each contended
+  run that measures below it halves it, mirroring the ceiling-hit doubling
+  that raised it -- and when its charge is capped at the machine's
+  grantable ceiling the run says so, naming the profile; `sparkwing doctor`
+  flags the same state. To clear it immediately, reset with
+  `sparkwing runs stats --reset --pipeline <name>` (profiles are keyed
+  `repo/pipeline` for runs launched inside a git repo, exactly as
+  `runs stats --capacity` shows them): the learned samples, peaks, floors,
+  waits, and contention tally are dropped so the pipeline re-learns from a
+  cold start, and the command prints what it removed. An explicit
+  `.Resources()` pin is preserved -- admission keeps charging the pin
+  while the profile re-learns. To reset every pipeline at once, use
   `sparkwing runs stats --reset --all --yes`.
 
 ### Operating it
@@ -252,9 +260,12 @@ machine:
   older-pinned pipeline binary is admitting outside the daemon.
 - `sparkwing doctor` -- the one repair verb. It removes only provably-
   dead state (an interrupted run's leftover row, an orphaned lock file
-  whose owner is gone) and reports what it found and did. It never kills
-  a process and never touches live admission, so it is safe to run at any
-  time; on a healthy machine it finds nothing and says so.
+  whose owner is gone) and reports what it found and did. Standing
+  problems it cannot safely repair -- repeated admission rejections, a
+  daemon version skew, a contention-poisoned capacity profile -- are
+  reported with the exact fix instead. It never kills a process and never
+  touches live admission, so it is safe to run at any time; on a healthy
+  machine it finds nothing and says so.
 
 The daemon writes an operational log to `wingd/d.log` under the sparkwing
 home (`~/.sparkwing/wingd/d.log` by default) for when you want to see

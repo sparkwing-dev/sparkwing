@@ -93,6 +93,39 @@ func TestRenderDoctorPretty_ListsQuarantinedLedgers(t *testing.T) {
 	}
 }
 
+func TestDoctorReport_PoisonedProfilesAreNotClean(t *testing.T) {
+	r := opsview.DoctorReport{
+		PoisonedProfiles: []opsview.DoctorPoisonedProfile{
+			{Pipeline: "myrepo/ci", FloorCores: 6.9, ChargeCores: 13.8, GrantableCores: 7.5},
+		},
+	}
+	if r.Clean() {
+		t.Fatal("report with a poisoned capacity profile reported clean")
+	}
+}
+
+func TestRenderDoctorPretty_NamesPoisonedProfileAndReset(t *testing.T) {
+	r := opsview.DoctorReport{
+		PoisonedProfiles: []opsview.DoctorPoisonedProfile{
+			{Pipeline: "myrepo/ci", FloorCores: 6.9, ChargeCores: 13.8, GrantableCores: 7.5},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, `"myrepo/ci"`) || !strings.Contains(out, "poisoned by contention") {
+		t.Errorf("pretty output does not name the poisoned profile:\n%s", out)
+	}
+	if !strings.Contains(out, "sparkwing runs stats --reset --pipeline myrepo/ci") {
+		t.Errorf("pretty output does not carry the exact reset command:\n%s", out)
+	}
+	if strings.Contains(out, "healthy") {
+		t.Errorf("a report with a poisoned profile should not read healthy:\n%s", out)
+	}
+}
+
 func TestRenderDoctorJSON_CarriesRejections(t *testing.T) {
 	r := opsview.DoctorReport{
 		AdmissionRejections: []opsview.DoctorRejection{{Cause: "request", Count: 3}},

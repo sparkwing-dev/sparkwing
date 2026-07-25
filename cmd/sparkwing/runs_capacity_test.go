@@ -64,6 +64,30 @@ func TestRunCapacityReset_DropsProfileAndReportsCounts(t *testing.T) {
 	}
 }
 
+func TestBarePipeline_StripsRepoScope(t *testing.T) {
+	if got := barePipeline("myrepo/ci"); got != "ci" {
+		t.Errorf("barePipeline(myrepo/ci) = %q, want ci", got)
+	}
+	if got := barePipeline("ci"); got != "ci" {
+		t.Errorf("barePipeline(ci) = %q, want ci", got)
+	}
+}
+
+func TestMatchBarePipeline_FindsScopedRowsForBareName(t *testing.T) {
+	profiles := []store.PipelineProfile{
+		{Pipeline: "alpha/ci"},
+		{Pipeline: "beta/ci", NodeID: "build"},
+		{Pipeline: "alpha/deploy"},
+	}
+	got := matchBarePipeline(profiles, "ci")
+	if len(got) != 2 {
+		t.Fatalf("matched %d profiles, want the two scoped ci rows", len(got))
+	}
+	if got := matchBarePipeline(profiles, "release"); len(got) != 0 {
+		t.Errorf("matched %d profiles for an unknown name, want none", len(got))
+	}
+}
+
 func TestFmtCPUCells_ShowsDistributionThenPeak(t *testing.T) {
 	got := fmtCPUCells(store.PipelineProfile{CPUP50: 0.5, CPUP95: 1.25, PeakCores: 2})
 	if got != "0.5/1.2/2.0" {

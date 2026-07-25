@@ -44,3 +44,22 @@ func TestRepoShortName_EmptyOutsideAnyRepo(t *testing.T) {
 		t.Errorf("outside a repo: got %q, want empty", got)
 	}
 }
+
+// TestScopedProfileKey_SeparatesReposAndKeepsBareNameOutsideOne pins the
+// BW-849 keying fix: two repos' identically named pipelines get distinct
+// capacity-profile rows, so contention in one repo cannot poison the
+// other's pricing.
+func TestScopedProfileKey_SeparatesReposAndKeepsBareNameOutsideOne(t *testing.T) {
+	if a, b := scopedProfileKey("alpha", "ci"), scopedProfileKey("beta", "ci"); a == b {
+		t.Errorf("scopedProfileKey pooled %q and %q onto one key %q", "alpha/ci", "beta/ci", a)
+	}
+	if got := scopedProfileKey("alpha", "ci"); got != "alpha/ci" {
+		t.Errorf("scopedProfileKey = %q, want alpha/ci", got)
+	}
+	if got := scopedProfileKey("", "ci"); got != "ci" {
+		t.Errorf("outside a repo: got %q, want the bare pipeline name", got)
+	}
+	if got := scopedProfileKey("alpha", ""); got != "" {
+		t.Errorf("empty pipeline: got %q, want empty", got)
+	}
+}

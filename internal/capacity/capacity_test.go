@@ -54,10 +54,33 @@ func TestApplyHostCeiling(t *testing.T) {
 			wantCores:  1,
 			wantMem:    32 << 30,
 		},
+		{
+			name:        "capped floor charge names the poisoned profile and reset",
+			res:         Resolution{Cores: 15, Source: store.CostSourceFloor},
+			machine:     8,
+			grantCores:  7.5,
+			wantCores:   7.5,
+			wantWarning: "measuring charge 15.0 cores exceeds this machine's grantable 7.5, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline repo/ci",
+		},
+		{
+			name:        "capped warm-start charge warns the same way",
+			res:         Resolution{Cores: 9, Source: store.CostSourceMeasuring},
+			machine:     8,
+			grantCores:  7.5,
+			wantCores:   7.5,
+			wantWarning: "measuring charge 9.0 cores exceeds this machine's grantable 7.5, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline repo/ci",
+		},
+		{
+			name:       "floor charge within ceiling stays quiet",
+			res:        Resolution{Cores: 4, Source: store.CostSourceFloor},
+			machine:    8,
+			grantCores: 7.5,
+			wantCores:  4,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, warning := ApplyHostCeiling(tc.res, tc.machine, tc.grantCores, tc.grantMem)
+			got, warning := ApplyHostCeiling(tc.res, "repo/ci", tc.machine, tc.grantCores, tc.grantMem)
 			if got.Cores != tc.wantCores {
 				t.Errorf("cores = %v, want %v", got.Cores, tc.wantCores)
 			}
@@ -187,6 +210,41 @@ func TestResolve_ColdStartSerializesOnBigMachine(t *testing.T) {
 func TestResolve_ColdStartNeverBelowOne(t *testing.T) {
 	if got := Resolve(nil, nil, 1, ""); got.Cores != 1 {
 		t.Errorf("single-core machine cold-start = %v, want 1", got.Cores)
+	}
+}
+
+func TestFloorPoisoned_Gating(t *testing.T) {
+	poisoned := &store.PipelineProfile{FloorCores: 4, SampleCount: 1, CPUMeasured: true}
+
+	cases := []struct {
+		name      string
+		profile   *store.PipelineProfile
+		grantable float64
+		want      bool
+	}{
+		{name: "floor charge at the ceiling flags", profile: poisoned, grantable: 8, want: true},
+		{name: "floor charge over the ceiling flags", profile: poisoned, grantable: 7.5, want: true},
+		{name: "floor charge under the ceiling stays quiet", profile: poisoned, grantable: 8.1},
+		{name: "nil profile never flags", profile: nil, grantable: 8},
+		{name: "unknown ceiling never flags", profile: poisoned, grantable: 0},
+		{name: "no floor never flags", profile: &store.PipelineProfile{SampleCount: 1}, grantable: 8},
+		{
+			name:      "graduated measured price overrides the floor",
+			profile:   &store.PipelineProfile{FloorCores: 4, PeakCores: 1, SampleCount: MinSamples, CPUMeasured: true},
+			grantable: 8,
+		},
+		{
+			name:      "pin overrides the floor",
+			profile:   &store.PipelineProfile{FloorCores: 4, PinnedCores: 2, SampleCount: 1},
+			grantable: 8,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := FloorPoisoned(tc.profile, tc.grantable); got != tc.want {
+				t.Errorf("FloorPoisoned = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

@@ -547,7 +547,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			if lease != nil {
 				charge = lease.charge
 			}
-			recordRunProfile(finishCtx, st, opts.Pipeline, runID, planPin(plan), capacityFingerprint(plan), charge, contended, execStart, time.Now())
+			recordRunProfile(finishCtx, st, currentProfileKey(opts.Pipeline), runID, planPin(plan), capacityFingerprint(plan), charge, contended, execStart, time.Now())
 		}
 	}
 	if lease != nil && lease.driftWarning != "" && opts.Delegate != nil {
@@ -560,7 +560,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	if contended {
 		if st := canonicalLocalStore(backends.State); st != nil && opts.Pipeline != "" {
-			_ = st.RecordContention(finishCtx, opts.Pipeline)
+			_ = st.RecordContention(finishCtx, currentProfileKey(opts.Pipeline))
 		}
 		if opts.Delegate != nil {
 			opts.Delegate.Emit(sparkwing.LogRecord{

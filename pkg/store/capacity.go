@@ -51,6 +51,15 @@ const profileWindow = 20
 // near-worst-case.
 const peakPercentile = 0.95
 
+// floorDecayFactor shrinks the demand floor when a contended run measures
+// below it: the run was given the whole floor-derived charge and used less,
+// so the floor overestimates demand. Halving mirrors the ceiling-hit
+// doubling on the admission side -- one under-floor run undoes one
+// escalation -- so a floor ratcheted up by transient external load decays
+// back toward measured demand instead of pricing the pipeline at the
+// machine ceiling until an operator resets the profile.
+const floorDecayFactor = 0.5
+
 // PipelineProfile is the measured resource fingerprint of a
 // (pipeline, node) pair over a bounded window of recent runs: duration
 // percentiles and peak host usage. The pipeline-level rollup used by
@@ -116,9 +125,11 @@ type PipelineProfile struct {
 	PlanHash string `json:"plan_hash,omitempty"`
 	// FloorCores and FloorMemoryBytes are the demand lower bound learned from
 	// this version's contended runs: a starved run's peak is what it got, not
-	// what it wanted, so it can only raise a floor, never set the measured
-	// peak or graduate the version. Admission charges a safety multiple of the
-	// floor while the version is still measuring. Meaningful only on the
+	// what it wanted, so it never sets the measured peak or graduates the
+	// version. Contended evidence above the floor raises it; evidence below
+	// decays it by floorDecayFactor, so a floor inflated by transient external
+	// load converges back to demand. Admission charges a safety multiple of
+	// the floor while the version is still measuring. Meaningful only on the
 	// rollup row.
 	FloorCores       float64 `json:"floor_cores,omitempty"`
 	FloorMemoryBytes int64   `json:"floor_memory_bytes,omitempty"`
@@ -149,9 +160,9 @@ type ProfileObservation struct {
 	PlanHash string
 	// Contended marks a run the admission daemon flagged as throttled by host
 	// contention. Such a run measured its allocation, not its demand, so its
-	// reading is a one-sided lower bound: it raises FloorCores/FloorMemoryBytes
-	// only and never enters the clean window, sets the peak, or graduates the
-	// version. A clean run folds normally.
+	// reading feeds FloorCores/FloorMemoryBytes only and never enters the
+	// clean window, sets the peak, or graduates the version. A clean run
+	// folds normally.
 	Contended bool
 	// FloorCores and FloorMemoryBytes are the demand lower bound a contended
 	// run proves: its measured peak, raised to the charge it was admitted at
@@ -201,9 +212,10 @@ type profileMutState struct {
 
 // RecordProfileObservation folds one run's observation into the
 // (pipeline, node) profile. A clean run ages into the windowed percentiles
-// as before; a contended run raises the demand floor only, leaving the
-// window, peaks, and sample count untouched so contention never sets a
-// measured price or graduates a version. A plan-hash change clears the
+// as before; a contended run feeds the demand floor only (raising or
+// decaying it toward its evidence), leaving the window, peaks, and sample
+// count untouched so contention never sets a measured price or graduates a
+// version. A plan-hash change clears the
 // version's learned window and floor and carries its peak into PrevPeak, so
 // the changed version re-measures from a warm start.
 func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID string, obs ProfileObservation) error {
@@ -229,10 +241,8 @@ func (s *Store) RecordProfileObservation(ctx context.Context, pipeline, nodeID s
 
 	cpuMeasured := obs.CPUMeasured
 	if obs.Contended {
-		floorCores = math.Max(floorCores, obs.FloorCores)
-		if obs.FloorMemoryBytes > floorMemoryBytes {
-			floorMemoryBytes = obs.FloorMemoryBytes
-		}
+		floorCores = foldFloor(floorCores, obs.FloorCores)
+		floorMemoryBytes = int64(foldFloor(float64(floorMemoryBytes), float64(obs.FloorMemoryBytes)))
 		cpuMeasured = st.cpuMeasured || obs.CPUMeasured
 	} else {
 		window = append(window, profileSample{D: obs.Duration.Nanoseconds(), C: obs.PeakCores, M: obs.PeakMemoryBytes})
@@ -272,6 +282,18 @@ ON CONFLICT (pipeline, node_id) DO UPDATE SET
 			planHash, floorCores, floorMemoryBytes, prevPeakCores, prevPeakMemoryBytes)
 		return err
 	})
+}
+
+// foldFloor folds one contended run's proven demand into the stored floor.
+// Evidence at or above the floor raises it outright (a ceiling hit arrives
+// here already escalated to the whole charge). Evidence below it decays the
+// floor by floorDecayFactor, but never past the evidence itself: the run
+// still proved it wanted at least that much.
+func foldFloor(stored, observed float64) float64 {
+	if observed >= stored {
+		return observed
+	}
+	return math.Max(observed, floorDecayFactor*stored)
 }
 
 func (s *Store) loadProfileMutState(ctx context.Context, pipeline, nodeID string) (profileMutState, error) {

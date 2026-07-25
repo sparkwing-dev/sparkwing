@@ -33,3 +33,22 @@ func currentRepoShortName() string {
 	}
 	return repoShortName(wd)
 }
+
+// scopedProfileKey is the identity a pipeline's capacity profile is stored
+// under in the machine-global state database: repo-scoped, because pipeline
+// names repeat across repos (every scaffolded repo ships a "ci") and pooling
+// their samples and contended floors lets contention in one repo poison
+// another's pricing. A run outside any git repo keeps the bare pipeline name.
+func scopedProfileKey(repo, pipeline string) string {
+	if repo == "" || pipeline == "" {
+		return pipeline
+	}
+	return repo + "/" + pipeline
+}
+
+// currentProfileKey scopes a pipeline's profile identity to the repo the
+// process runs from. Every profile read and write in one run goes through
+// this, so pricing, folds, and contention tallies always land on one row.
+func currentProfileKey(pipeline string) string {
+	return scopedProfileKey(currentRepoShortName(), pipeline)
+}

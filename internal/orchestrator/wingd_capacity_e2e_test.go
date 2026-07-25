@@ -55,7 +55,7 @@ func TestWingd_ParallelBurnerProfilePeakStaysWithinHost(t *testing.T) {
 		t.Fatalf("burner run: status=%v err=%v", res, err)
 	}
 
-	prof, err := st.GetPipelineProfile(context.Background(), "wingd-e2e-burner", "")
+	prof, err := st.GetPipelineProfile(context.Background(), currentProfileKey("wingd-e2e-burner"), "")
 	if err != nil || prof == nil {
 		t.Fatalf("burner profile missing: %v", err)
 	}

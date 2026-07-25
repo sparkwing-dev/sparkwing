@@ -34,8 +34,10 @@ type runCharge struct {
 // planHash versions the rollup: a structural change re-measures the pipeline
 // rather than pricing it on the predecessor's samples. A contended run
 // measured its allocation, not its demand, so it never folds into the clean
-// window or per-node peaks -- it only raises the rollup's demand floor, and
-// escalates that floor to its whole charge when it hit the ceiling.
+// window or per-node peaks -- it only feeds the rollup's demand floor,
+// escalated to its whole charge when it hit the ceiling. pipeline is the
+// stored profile key (repo-scoped for a run inside a git repo), the same
+// identity the admission read resolved the charge from.
 func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID string, pin *capacity.Pin, planHash string, charge runCharge, contended bool, execStart, execEnd time.Time) {
 	if st == nil || pipeline == "" {
 		return

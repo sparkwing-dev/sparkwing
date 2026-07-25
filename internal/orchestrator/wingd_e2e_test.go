@@ -649,10 +649,14 @@ func seedProfile(t *testing.T, st *store.Store, pipeline string, obs store.Profi
 	seedNodeProfile(t, st, pipeline, "", obs, runs)
 }
 
+// seedNodeProfile writes a learned profile under the same repo-scoped key
+// admission resolves from, so a seeded measurement is one the run under test
+// can actually find; seeding the bare pipeline name would store a row no
+// in-repo run ever reads.
 func seedNodeProfile(t *testing.T, st *store.Store, pipeline, nodeID string, obs store.ProfileObservation, runs int) {
 	t.Helper()
 	for range runs {
-		if err := st.RecordProfileObservation(context.Background(), pipeline, nodeID, obs); err != nil {
+		if err := st.RecordProfileObservation(context.Background(), currentProfileKey(pipeline), nodeID, obs); err != nil {
 			t.Fatalf("seed profile: %v", err)
 		}
 	}

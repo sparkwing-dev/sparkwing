@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -200,6 +201,41 @@ func TestDiagnose_SecondRunIsClean(t *testing.T) {
 	if !rep.Clean() {
 		t.Fatalf("second run not clean: %+v", rep)
 	}
+}
+
+// TestDiagnose_FlagsPoisonedProfileWithoutRepair seeds the BW-849 poisoned
+// state -- a still-measuring profile whose contended-run floor prices runs at
+// the whole machine -- and expects doctor to name it (and only report: the
+// learned row must survive, since discarding measurements is the operator's
+// reset to run).
+func TestDiagnose_FlagsPoisonedProfileWithoutRepair(t *testing.T) {
+	p := doctorHome(t)
+	ctx := context.Background()
+	floor := float64(runtime.NumCPU())
+	withStore(t, p, func(st *store.Store) {
+		if err := st.RecordProfileObservation(ctx, "myrepo/ci", "", store.ProfileObservation{
+			CPUMeasured: true, PlanHash: "A", Contended: true, FloorCores: floor,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	rep, err := diagnose(ctx, p, p.Root, false)
+	if err != nil {
+		t.Fatalf("diagnose: %v", err)
+	}
+	if len(rep.PoisonedProfiles) != 1 || rep.PoisonedProfiles[0].Pipeline != "myrepo/ci" {
+		t.Fatalf("PoisonedProfiles = %+v, want the myrepo/ci rollup flagged", rep.PoisonedProfiles)
+	}
+	if rep.PoisonedProfiles[0].FloorCores != floor {
+		t.Errorf("FloorCores = %v, want %v", rep.PoisonedProfiles[0].FloorCores, floor)
+	}
+	withStore(t, p, func(st *store.Store) {
+		prof, err := st.GetPipelineProfile(ctx, "myrepo/ci", "")
+		if err != nil || prof == nil || prof.FloorCores != floor {
+			t.Fatalf("profile after diagnose = %+v (err %v), want the learned floor untouched", prof, err)
+		}
+	})
 }
 
 func TestDiagnose_DryRunChangesNothing(t *testing.T) {

@@ -8,10 +8,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"text/tabwriter"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/boxslot"
+	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
@@ -65,6 +67,22 @@ type DoctorReport struct {
 	// because it could not restore them, serving with a fresh ledger instead.
 	// They are forensic copies: reported with an explanation, never removed.
 	QuarantinedLedgers []string `json:"quarantined_ledgers,omitempty"`
+	// PoisonedProfiles are capacity profiles whose contended-run demand floor
+	// prices every run at or above the machine's grantable ceiling, so the
+	// pipeline serializes the whole box until the floor decays or an operator
+	// resets the profile. Reported with the reset command, never repaired --
+	// discarding learned measurements is the operator's call.
+	PoisonedProfiles []DoctorPoisonedProfile `json:"poisoned_profiles,omitempty"`
+}
+
+// DoctorPoisonedProfile is one contention-poisoned capacity profile in the
+// report: the stored profile key, the floor and the charge it prices, and
+// the grantable ceiling that charge meets or exceeds.
+type DoctorPoisonedProfile struct {
+	Pipeline       string  `json:"pipeline"`
+	FloorCores     float64 `json:"floor_cores"`
+	ChargeCores    float64 `json:"charge_cores"`
+	GrantableCores float64 `json:"grantable_cores"`
 }
 
 // DoctorRejection is one repeated malformed-request rejection cause in the
@@ -102,7 +120,8 @@ func (r DoctorReport) Clean() bool {
 		len(r.DanglingRunDirs) == 0 &&
 		len(r.AdmissionRejections) == 0 &&
 		r.DaemonVersionSkew == nil &&
-		len(r.QuarantinedLedgers) == 0
+		len(r.QuarantinedLedgers) == 0 &&
+		len(r.PoisonedProfiles) == 0
 }
 
 // Diagnose runs every doctor check against the sparkwing home and repairs what
@@ -144,9 +163,54 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 	if err := diagnoseDanglingRunDirs(ctx, st, p, dryRun, &report); err != nil {
 		return report, err
 	}
+	if err := diagnosePoisonedProfiles(ctx, st, home, &report); err != nil {
+		return report, err
+	}
 	diagnoseDaemonHealth(ctx, home, selfVersion, &report)
 	diagnoseQuarantinedLedgers(home, &report)
 	return report, nil
+}
+
+// diagnosePoisonedProfiles scans the stored capacity rollups for profiles
+// whose contended-run demand floor prices runs at or above the machine's
+// grantable ceiling -- contention poisoning that otherwise surfaces only as
+// a per-run warning while every run silently holds the whole box. Read-only:
+// the remedy discards learned measurements, so it is named, not applied. The
+// ceiling comes from the live daemon; with none running, the raw core count
+// stands in (a higher bar, so absence of the daemon never over-flags).
+func diagnosePoisonedProfiles(ctx context.Context, st *store.Store, home string, report *DoctorReport) error {
+	profiles, err := st.ListPipelineProfiles(ctx, "")
+	if err != nil {
+		return err
+	}
+	grantable := grantableCores(ctx, home)
+	for _, prof := range profiles {
+		if prof.NodeID != "" || !capacity.FloorPoisoned(&prof, grantable) {
+			continue
+		}
+		report.PoisonedProfiles = append(report.PoisonedProfiles, DoctorPoisonedProfile{
+			Pipeline:       prof.Pipeline,
+			FloorCores:     prof.FloorCores,
+			ChargeCores:    capacity.SafetyMultiple * prof.FloorCores,
+			GrantableCores: grantable,
+		})
+	}
+	return nil
+}
+
+// grantableCores is the largest CPU charge the local daemon grants a single
+// run on an idle box (capacity minus its reserve), else the machine's core
+// count when no daemon answers.
+func grantableCores(ctx context.Context, home string) float64 {
+	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home})
+	if err == nil {
+		for _, r := range qs.Resources {
+			if r.Key == "cores" && r.Capacity > r.Reserved {
+				return r.Capacity - r.Reserved
+			}
+		}
+	}
+	return float64(runtime.NumCPU())
 }
 
 // diagnoseQuarantinedLedgers reports admission state files the daemon
@@ -392,6 +456,7 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	}
 	fmt.Fprintf(w, "daemon_version_skew\t%d\n", skew)
 	fmt.Fprintf(w, "quarantined_ledgers\t%d\n", len(r.QuarantinedLedgers))
+	fmt.Fprintf(w, "poisoned_profiles\t%d\n", len(r.PoisonedProfiles))
 	return nil
 }
 
@@ -435,6 +500,11 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 			fmt.Fprintf(w, "  %s\n", f)
 		}
 		fmt.Fprintf(w, "  kept for inspection; safe to delete once reviewed\n")
+	}
+
+	for _, p := range r.PoisonedProfiles {
+		fmt.Fprintf(w, "\nwarning: capacity profile %q looks poisoned by contention -- its demand floor %.1f cores prices runs at %.1f, at or over the grantable %.1f, so every run holds the whole machine\n  reset it: sparkwing runs stats --reset --pipeline %s\n",
+			p.Pipeline, p.FloorCores, p.ChargeCores, p.GrantableCores, p.Pipeline)
 	}
 
 	if legacyLine != "" {
