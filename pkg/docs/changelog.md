@@ -101,6 +101,35 @@ code change to unlock.
 - **cli:** `sparkwing doctor` reports a hook directory git is not reading,
   naming the gates that stopped firing and how to restore them, so a
   disabled commit or push gate surfaces instead of going unnoticed.
+- **cli:** a pipeline started by a git hook no longer inherits the
+  repository git bound the hook to. git hands a hook `GIT_INDEX_FILE` (and,
+  on other paths, `GIT_DIR` and friends), every process the pipeline starts
+  inherits them, and a step that builds a scratch repository then works on
+  the gated repository instead: staging in a temp directory writes into the
+  commit being gated, which fails it outright when partial-commit paths hand
+  over an absolute index. sparkwing now drops the repository-binding `GIT_*`
+  variables before dispatching any command, so steps -- and the third-party
+  tools they call -- resolve repositories from their own working directory.
+  Identity (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`) and config selection
+  (`GIT_CONFIG_*`) are untouched. No reinstall is needed: the fix travels
+  with the binary. Managed hooks scrub them a second time, in a subshell
+  around the pipeline invocations, so a hook written by a current install
+  also protects an older `sparkwing` on `PATH`; the hand-off to a global
+  hook stays outside that subshell and keeps the environment git gave it.
+  `pipeline hooks install` rewrites managed hooks, so re-running it picks
+  the second layer up.
+- **cli:** the index a commit is being composed in survives that unbind as
+  `SPARKWING_GATE_INDEX`, an absolute path, so a check scoped to the staged
+  change still sees the change. Only a commit of already-staged content
+  hands a hook the repository's own index; `git commit -a` and
+  `git commit -- <path>` hand over a lock file that holds the content, and a
+  step reading `git diff --cached` without it is shown an empty commit and
+  passes it. Steps opt in per command
+  (`GIT_INDEX_FILE="$SPARKWING_GATE_INDEX" git diff --cached`) rather than
+  inheriting the binding, which is what keeps a stray `git add` in a scratch
+  checkout out of the commit being gated. `commentcheck -staged` reads it,
+  preferring a `GIT_INDEX_FILE` a caller set deliberately and falling back to
+  the repository's index when no hook is running.
 
 ### Changed
 

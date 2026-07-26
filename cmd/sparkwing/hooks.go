@@ -13,6 +13,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
@@ -502,6 +503,16 @@ func resolveHooksRepo(repo string) (repoRoot, sparkwingDir string, err error) {
 //
 // The global path is resolved when the hook runs rather than baked in, so
 // changing the machine's hooks directory does not require reinstalling.
+//
+// The pipelines run in a subshell that drops the repository-binding GIT_*
+// variables git hands every hook, keeping the index git is composing the
+// commit in as SPARKWING_GATE_INDEX, so a step that runs git elsewhere is not
+// silently redirected at the repository being gated and a step that wants what
+// is being committed can still ask for it. sparkwing unbinds itself too; doing
+// it here as well covers the sparkwing on PATH being older than the install
+// that wrote this file. The subshell is what keeps the scrub off the hand-off:
+// the global hook is git's to configure, and it gets the environment git meant
+// it to have.
 func renderHookScript(hookName string, pipes []string, chainGlobal bool) string {
 	blocking := hookName != "post-commit"
 	var b strings.Builder
@@ -520,8 +531,13 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool) string 
 	if !blocking {
 		tolerate = " || true"
 	}
-	for _, p := range pipes {
-		fmt.Fprintf(&b, "sparkwing run %s%s%s\n", p, stdin, tolerate)
+	if len(pipes) > 0 {
+		b.WriteString("(\n")
+		b.WriteString(gitenv.ShellUnbind())
+		for _, p := range pipes {
+			fmt.Fprintf(&b, "sparkwing run %s%s%s\n", p, stdin, tolerate)
+		}
+		b.WriteString(")\n")
 	}
 	if chainGlobal {
 		b.WriteString(renderGlobalChain(hookName))

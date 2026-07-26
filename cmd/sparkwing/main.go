@@ -14,6 +14,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
@@ -235,7 +236,13 @@ func dispatchRun(args []string) error {
 		compileOptions{NoUpdate: wf.noUpdate})
 }
 
+// runSparkwing dispatches a command line. It unbinds the process from any
+// repository first: a hook-launched run arrives with git's GIT_DIR and
+// GIT_INDEX_FILE pointing at the repository being gated, and everything a
+// pipeline goes on to run would inherit them and operate there instead of
+// where it was pointed.
 func runSparkwing(args []string) error {
+	gitenv.Unbind()
 	if len(args) == 0 {
 		PrintHelp(cmdSparkwing, os.Stderr)
 		os.Exit(2)

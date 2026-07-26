@@ -38,6 +38,11 @@
 // The -staged and -base modes scope the gate to lines a change introduces, so
 // the pre-existing comment corpus is never charged to a new commit. They fail
 // open (warn and pass) if git can't produce the diff.
+//
+// Under a git hook the staged change lives in the index git is composing the
+// commit in, not in the repository's own index, so -staged reads the one
+// sparkwing put in SPARKWING_GATE_INDEX when it unbound the pipeline from the
+// gated repository.
 package main
 
 import (
@@ -54,6 +59,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
 )
 
 var tagRE = regexp.MustCompile(`(?i)^// ?(hack|safety|bug|perf):`)
@@ -266,7 +273,9 @@ func firstLine(text string) string {
 // after the branch forked aren't charged to the branch.
 func scopedAdds(root string, staged bool, base string) (map[string]map[int]bool, error) {
 	args := []string{"diff", "--unified=0", "--no-color"}
+	var index string
 	if staged {
+		index = stagedIndex()
 		args = append(args, "--cached")
 	} else {
 		forkPoint := base
@@ -277,11 +286,24 @@ func scopedAdds(root string, staged bool, base string) (map[string]map[int]bool,
 	}
 	args = append(args, "--", "*.go")
 
-	diff, err := git(root, args...)
+	diff, err := gitWithIndex(root, index, args...)
 	if err != nil {
 		return nil, err
 	}
 	return parseAddedLines(diff), nil
+}
+
+// stagedIndex returns the index a staged read has to go through, or "" to use
+// whichever index git would pick on its own. An inherited GIT_INDEX_FILE is a
+// caller binding this run deliberately and wins; failing that, a hook-launched
+// run reads the gate's index, because the repository's own index is stale under
+// `git commit -a` and under a partial commit -- it would report an empty change
+// and pass a commit nobody checked.
+func stagedIndex() string {
+	if os.Getenv("GIT_INDEX_FILE") != "" {
+		return ""
+	}
+	return gitenv.GateIndex()
 }
 
 func parseAddedLines(diff string) map[string]map[int]bool {
@@ -332,7 +354,17 @@ func onlyAdded(violations []violation, root string, added map[string]map[int]boo
 }
 
 func git(root string, args ...string) (string, error) {
+	return gitWithIndex(root, "", args...)
+}
+
+// gitWithIndex runs git against a named index file, or against the repository's
+// own when index is empty. The binding is set on the one command rather than
+// exported, so nothing else in the process tree can write through it.
+func gitWithIndex(root, index string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	if index != "" {
+		cmd.Env = append(os.Environ(), "GIT_INDEX_FILE="+index)
+	}
 	var out strings.Builder
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {

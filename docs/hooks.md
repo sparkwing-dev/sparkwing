@@ -114,6 +114,20 @@ Each managed hook carries a marker comment so `uninstall` and `status`
 can distinguish sparkwing-installed hooks from hand-written ones.
 Existing unmanaged hooks are skipped on install with a warning.
 
+`pre_commit` and `pre_push` are blocking: the hook aborts the commit or
+push when a pipeline fails. `post_commit` is non-blocking -- the commit
+has already landed, so the hook runs its pipelines, tolerates failures,
+and always exits zero. Keep post-commit pipelines fast or detach their
+slow work; the hook runs in the commit's foreground.
+
+Managed hooks render quietly by default: each run prints one progress
+line and a one-line pass/fail status with the run id, instead of
+streaming every step into the commit or push. On failure the hook
+surfaces the failing step's error; the full log stays retrievable with
+`sparkwing runs logs --run <id>`. The hook sets
+`SPARKWING_LOG_FORMAT=quiet`; export a different value (`pretty` or
+`json`) before the git command to see the full stream.
+
 ### When your machine sets `core.hooksPath`
 
 A `core.hooksPath` in your global git config replaces `.git/hooks` for
@@ -158,19 +172,70 @@ nothing forwards to, however it came about.
 directory git is not reading, naming the gates that stopped firing and how
 to restore them.
 
-`pre_commit` and `pre_push` are blocking: the hook aborts the commit or
-push when a pipeline fails. `post_commit` is non-blocking -- the commit
-has already landed, so the hook runs its pipelines, tolerates failures,
-and always exits zero. Keep post-commit pipelines fast or detach their
-slow work; the hook runs in the commit's foreground.
+### Hook-launched pipelines are unbound from the repository
 
-Managed hooks render quietly by default: each run prints one progress
-line and a one-line pass/fail status with the run id, instead of
-streaming every step into the commit or push. On failure the hook
-surfaces the failing step's error; the full log stays retrievable with
-`sparkwing runs logs --run <id>`. The hook sets
-`SPARKWING_LOG_FORMAT=quiet`; export a different value (`pretty` or
-`json`) before the git command to see the full stream.
+git tells a hook which repository it is acting on through the environment:
+`GIT_INDEX_FILE` on the commit paths, `GIT_DIR`, `GIT_WORK_TREE`,
+`GIT_PREFIX` and friends elsewhere. Those variables are inherited by
+everything the hook starts, and they outrank a directory argument -- a step
+that runs `git -C /tmp/scratch add -A` from inside a gate stages into the
+commit being gated, not into the scratch repository. A partial commit
+(`git commit -- path`) hands over an absolute index path, and that case
+fails the commit outright.
+
+sparkwing removes the repository-binding `GIT_*` variables from its own
+environment before doing anything else, so pipelines, their steps, and the
+third-party tools those call all discover a repository the way they would
+from a plain shell. Nothing in a pipeline needs to opt in, and no hook needs
+reinstalling for it -- the behavior lives in the binary. The one thing that
+would be lost with them, the index holding the commit under test, is kept
+under a name git does not act on; see below.
+
+Managed hooks scrub them a second time, in a subshell around the pipeline
+invocations, which covers the `sparkwing` on `PATH` being older than the
+install that wrote the hook. The subshell is also what keeps the scrub off
+the hand-off to a global hook: that hook is git's to configure, so it gets
+the environment git meant it to have.
+
+Identity (`GIT_AUTHOR_*`, `GIT_COMMITTER_*`) and config selection
+(`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_NOSYSTEM`, ...) are left alone: they carry
+your intent rather than a repository, and test fixtures that isolate
+themselves rely on them.
+
+### Reading what is being committed
+
+The working directory is no substitute for the index git handed the hook.
+git points a commit hook at the index it is composing that commit in, and
+only a commit of already-staged content points at the repository's own:
+
+| how the commit was made | `GIT_INDEX_FILE` git exports |
+|---|---|
+| content staged first, then `git commit` | `.git/index` |
+| `git commit -a` | `<repo>/.git/index.lock` |
+| `git commit -- <path>` | `<repo>/.git/next-index-<n>.lock` |
+
+Where git names a lock file, the repository's own index is stale: it does not
+yet hold what is being committed, so `git diff --cached` read through it
+reports an empty change. A staged-diff check that simply lost the binding
+would pass every such commit without looking at it.
+
+So the binding survives the unbind under a name git does not act on.
+sparkwing exports `SPARKWING_GATE_INDEX`, an absolute path, before dropping
+`GIT_INDEX_FILE`, and a step that wants the staged content binds it to the one
+command that should see it:
+
+```bash
+GIT_INDEX_FILE="$SPARKWING_GATE_INDEX" git diff --cached --name-only
+```
+
+Bind it per command rather than exporting it: ambient, it is exactly the
+binding that lets a `git add` in a scratch checkout write into the commit
+being gated. Treat an empty value as "no gate is running" and fall back to the
+repository's index, and check the file still exists before using it -- git
+deletes that index when the commit finishes, and a git pointed at a missing
+index quietly reads an empty one. sparkwing's own comment gate does this: it
+reads `GIT_INDEX_FILE` when a caller set one deliberately, the gate index when
+a hook started the run, and the repository's index otherwise.
 
 ## Running checks locally without a hook
 
