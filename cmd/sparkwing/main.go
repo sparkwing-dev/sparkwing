@@ -170,12 +170,22 @@ func dispatchRun(args []string) error {
 	}
 
 	env := os.Environ()
-	if os.Getenv("SPARKWING_LOG_FORMAT") == "" {
+	logFormat := os.Getenv("SPARKWING_LOG_FORMAT")
+	if logFormat == "" {
+		logFormat = logFormatJSON
 		if color.IsInteractiveStdout() {
-			env = append(env, "SPARKWING_LOG_FORMAT=pretty")
-		} else {
-			env = append(env, "SPARKWING_LOG_FORMAT=json")
+			logFormat = logFormatPretty
 		}
+		env = append(env, "SPARKWING_LOG_FORMAT="+logFormat)
+	}
+	// Bound after the format is settled: the receipt is part of this run's
+	// output, so it is rendered the way the rest of the run will be.
+	if wf.index != "" {
+		bound, bindErr := bindRunIndex(env, wf.index, os.Stdout, logFormat)
+		if bindErr != nil {
+			return bindErr
+		}
+		env = bound
 	}
 	if wf.verbose {
 		env = append(env, "SPARKWING_LOG_LEVEL=debug")

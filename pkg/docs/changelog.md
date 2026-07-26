@@ -49,6 +49,20 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **cli:** `sparkwing run --sw-index PATH` runs a pipeline against a git index
+  the caller supplies instead of the repository's own, so a verifier can have
+  steps scoped to the staged diff -- comment checks, `git diff --cached`
+  sweeps -- judge a snapshot of work that is not committed yet. The flag is
+  the deliberate counterpart to the `GIT_INDEX_FILE` git exports to every hook
+  it launches, which sparkwing drops on startup so the gated repository cannot
+  leak into a pipeline's own work; an argument is how a caller says the
+  binding is intent rather than inheritance. A bound run writes an
+  `index_bound` event naming the absolute index before the pipeline starts,
+  and a caller that requires that receipt can tell a run that judged its
+  snapshot from one that judged the repository's index; a run rendering for a
+  person says the same thing in prose. A path that does not exist is refused,
+  since git reads a missing index as an empty one.
+
 - **sdk:** `sparkwing.ToolCacheDir(tool)` returns a cache directory for an
   external tool, scoped to the worktree the pipeline runs in. Tools that key
   their cache on file content alone -- golangci-lint among them -- replay a

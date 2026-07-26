@@ -5,7 +5,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"os/user"
@@ -19,6 +21,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func atoiNonNeg(s string) (int, error) {
@@ -91,6 +94,16 @@ type runFlags struct {
 	// Postgres, unreachable controller, broken bucket policy) and the
 	// operator wants to run against the laptop only.
 	localOnly bool
+	// index is a git index the caller wants this run's steps to read
+	// and write instead of the repository's own, from --sw-index. A
+	// verifier uses it to hand a pipeline a staged snapshot of work
+	// that is not committed yet, so steps scoped to the staged diff
+	// judge that snapshot. Deliberately a flag and not an environment
+	// variable: git exports GIT_INDEX_FILE to every hook it launches,
+	// sparkwing drops it on startup so the gated repository cannot
+	// leak into a pipeline's own work, and an argument is how a caller
+	// says the binding is intent rather than inheritance.
+	index string
 }
 
 // collectPipelineArgs parses passthrough into TriggerRequest.Args.
@@ -270,6 +283,17 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		case strings.HasPrefix(a, "--sw-allow="):
 			wf.allow = appendCSV(wf.allow, strings.TrimPrefix(a, "--sw-allow="))
 			i++
+		case a == "--sw-index":
+			if i+1 < len(args) {
+				wf.index = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--sw-index="):
+			wf.index = strings.TrimPrefix(a, "--sw-index=")
+			i++
 		case a == "-C", a == "--sw-cd":
 			if i+1 < len(args) {
 				wf.changeDir = args[i+1]
@@ -287,6 +311,66 @@ func parseRunFlags(args []string) (runFlags, []string) {
 		}
 	}
 	return wf, pass
+}
+
+// EventIndexBound is the run-stream event `sparkwing run --sw-index`
+// writes once the binding is in place, when the run's stream is JSON.
+// Its `path` attribute is the absolute index the run's steps will read.
+//
+// It is a receipt, and callers are meant to require it. Binding an
+// index is a request to have a pipeline judge that index; a binary
+// with no --sw-index forwards the flag to the pipeline and judges the
+// repository's own index instead, and nothing in the exit code tells
+// those apart. A caller that sees no index_bound knows the index it
+// supplied went unread, and can report that it verified nothing rather
+// than reporting a pass.
+const EventIndexBound = "index_bound"
+
+// The run stream formats a receipt can be written in. quiet and any
+// unrecognized spelling render as prose, since only a caller parsing
+// the stream asks for json.
+const (
+	logFormatJSON   = "json"
+	logFormatPretty = "pretty"
+)
+
+// bindRunIndex points a run's steps at the git index at path by
+// setting GIT_INDEX_FILE in env, and writes the index_bound receipt to
+// out in logFormat. The returned env replaces any inherited
+// GIT_INDEX_FILE, so the caller's index wins over the ambient one
+// rather than shadowing it.
+//
+// A path that does not exist is refused: git reads a missing index as
+// an empty one, so the steps would report a clean tree they were never
+// shown.
+func bindRunIndex(env []string, path string, out io.Writer, logFormat string) ([]string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("--sw-index %s: %w", path, err)
+	}
+	if _, err := os.Stat(abs); err != nil {
+		return nil, fmt.Errorf("--sw-index %s: %w", path, err)
+	}
+	if err := announceIndexBound(out, abs, logFormat); err != nil {
+		return nil, fmt.Errorf("--sw-index %s: announce binding: %w", path, err)
+	}
+	return setEnv(env, "GIT_INDEX_FILE", abs), nil
+}
+
+// announceIndexBound writes the receipt in the format the rest of the
+// run speaks: the record a caller parses when the stream is json, a
+// line when a person is reading the run go by.
+func announceIndexBound(out io.Writer, abs, logFormat string) error {
+	if logFormat != logFormatJSON {
+		_, err := fmt.Fprintf(out, "index bound: %s\n", abs)
+		return err
+	}
+	rec := sparkwing.LogRecord{
+		TS:    time.Now(),
+		Event: EventIndexBound,
+		Attrs: map[string]any{"path": abs},
+	}
+	return json.NewEncoder(out).Encode(&rec)
 }
 
 // setupRefWorktree creates a git worktree at ref. Caller must defer cleanup.
