@@ -29,6 +29,8 @@ package wingwire
 import (
 	"encoding/json"
 	"fmt"
+
+	"golang.org/x/mod/semver"
 )
 
 // ProtocolMajor is the wire protocol's compatibility version. A daemon
@@ -36,6 +38,28 @@ import (
 // mismatch means the client must trigger a daemon takeover (client
 // newer) or fail with a clear upgrade message (client older).
 const ProtocolMajor = 2
+
+// MinVersionSpeakingProtocolMajor is the lowest released SDK version whose
+// clients speak [ProtocolMajor]. A pipeline binary compiled against an
+// earlier release speaks an earlier major, so a daemon at this major
+// refuses it and no takeover can resolve it -- the repo's own
+// .sparkwing/go.mod pin has to move.
+//
+// Bumping [ProtocolMajor] without moving this constant in the same commit
+// leaves every diagnostic that reads it pointing at the wrong release.
+const MinVersionSpeakingProtocolMajor = "v0.22.0"
+
+// SpeaksCurrentProtocol reports whether a client or daemon built from SDK
+// release version speaks [ProtocolMajor]. version is a semver string as it
+// appears in a .sparkwing/go.mod require. An unparseable or empty version
+// is not provably behind, so it reports true and callers stay silent
+// rather than accusing a repo they could not read.
+func SpeaksCurrentProtocol(version string) bool {
+	if !semver.IsValid(version) {
+		return true
+	}
+	return semver.Compare(semver.Canonical(version), MinVersionSpeakingProtocolMajor) >= 0
+}
 
 // LeaseTokenEnv is the current execution lease token inherited by child
 // processes. A child presents this token as [AdmissionRequest].ParentLeaseToken

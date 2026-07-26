@@ -9,17 +9,22 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/boxslot"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // doctorRunOrphanGrace is how long a running run row must have gone without a
@@ -65,6 +70,13 @@ type DoctorReport struct {
 	// takeover and can leave the daemon rejecting a newer client's requests.
 	// Reported with an explanation, never repaired.
 	DaemonVersionSkew *DoctorVersionSkew `json:"daemon_version_skew,omitempty"`
+	// LockedOutRepos are registered repos whose SDK pin speaks an older wire
+	// protocol than the resident daemon, so every gate they run is refused
+	// until the pin moves. This is the skew that blocks work: DaemonVersionSkew
+	// compares the CLI, which is not a party to a pipeline's handshake.
+	// Reported with the pin to raise, never repaired -- editing another repo's
+	// go.mod is not doctor's call.
+	LockedOutRepos []DoctorLockedOutRepo `json:"locked_out_repos,omitempty"`
 	// QuarantinedLedgers are admission state files the daemon moved aside
 	// because it could not restore them, serving with a fresh ledger instead.
 	// They are forensic copies: reported with an explanation, never removed.
@@ -133,6 +145,18 @@ type DoctorVersionSkew struct {
 	Daemon string `json:"daemon"`
 }
 
+// DoctorLockedOutRepo is one registered repo the resident daemon will refuse:
+// its pinned SDK speaks an older wire protocol major, which no takeover can
+// resolve because takeover runs from the client side.
+type DoctorLockedOutRepo struct {
+	// Name is the repo directory's base name.
+	Name string `json:"name"`
+	// Path is the primary checkout root.
+	Path string `json:"path"`
+	// Pin is the SDK version in the repo's .sparkwing/go.mod.
+	Pin string `json:"pin"`
+}
+
 // DoctorLegacyHolder is one live legacy box-slot holder in the report.
 type DoctorLegacyHolder struct {
 	PID   int    `json:"pid"`
@@ -161,6 +185,7 @@ func (r DoctorReport) Clean() bool {
 		len(r.DanglingRunDirs) == 0 &&
 		len(r.AdmissionRejections) == 0 &&
 		r.DaemonVersionSkew == nil &&
+		len(r.LockedOutRepos) == 0 &&
 		len(r.QuarantinedLedgers) == 0 &&
 		len(r.PoisonedProfiles) == 0 &&
 		r.ShadowedHooks == nil
@@ -333,6 +358,55 @@ func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report 
 	if versionSkewed(selfVersion, qs.DaemonVersion) {
 		report.DaemonVersionSkew = &DoctorVersionSkew{Self: selfVersion, Daemon: qs.DaemonVersion}
 	}
+	diagnoseLockedOutRepos(qs.DaemonVersion, report)
+}
+
+// diagnoseLockedOutRepos names the registered repos the resident daemon will
+// refuse because their pinned SDK speaks an older protocol major.
+//
+// This is the skew that actually stops work, and it is invisible from inside
+// the repo that hits it: the daemon is machine-wide and the first run needing
+// one brings it up, so a single current repo can lock out every older one and
+// the error surfaces in the victim rather than the cause. Read-only -- the
+// remedy edits another repo's go.mod, which is the operator's call.
+//
+// Silent unless the daemon itself speaks the current major: an older daemon
+// serves every older client fine, and a daemon version that will not parse is
+// not evidence against anyone. Repos whose SDK is supplied by a replace
+// directive or a go.work `use` are skipped too -- those build the pipeline
+// from a local checkout, so the declared pin describes nothing that runs and
+// naming it would send an operator to edit a line that changes no behavior.
+func diagnoseLockedOutRepos(daemonVersion string, report *DoctorReport) {
+	if daemonVersion == "" || !semver.IsValid(daemonVersion) || !wingwire.SpeaksCurrentProtocol(daemonVersion) {
+		return
+	}
+	cands, err := repos.CandidatePaths()
+	if err != nil {
+		return
+	}
+	seen := map[string]bool{}
+	for _, c := range cands {
+		sparkwingDir := filepath.Join(c.Path, ".sparkwing")
+		pin, replace := repos.SDKPin(sparkwingDir)
+		if replace != "" || repos.SDKWorkspaceOverride(sparkwingDir) != "" {
+			continue
+		}
+		if pin == "" || wingwire.SpeaksCurrentProtocol(pin) {
+			continue
+		}
+		if seen[c.Path] {
+			continue
+		}
+		seen[c.Path] = true
+		report.LockedOutRepos = append(report.LockedOutRepos, DoctorLockedOutRepo{
+			Name: filepath.Base(c.Path),
+			Path: c.Path,
+			Pin:  pin,
+		})
+	}
+	sort.Slice(report.LockedOutRepos, func(i, j int) bool {
+		return report.LockedOutRepos[i].Path < report.LockedOutRepos[j].Path
+	})
 }
 
 // versionSkewed reports whether the running binary and the live daemon are
@@ -536,6 +610,7 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 		skew = 1
 	}
 	fmt.Fprintf(w, "daemon_version_skew\t%d\n", skew)
+	fmt.Fprintf(w, "locked_out_repos\t%d\n", len(r.LockedOutRepos))
 	fmt.Fprintf(w, "quarantined_ledgers\t%d\n", len(r.QuarantinedLedgers))
 	fmt.Fprintf(w, "poisoned_profiles\t%d\n", len(r.PoisonedProfiles))
 	shadowed := 0
@@ -582,6 +657,15 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	if s := r.DaemonVersionSkew; s != nil {
 		fmt.Fprintf(w, "\nwarning: version skew -- this sparkwing is %s but the running admission daemon is %s\n  a client build that supersedes the daemon (a newer release, or a build from source) takes it over on its next run; when the daemon is the newer or source-built side, requests it cannot honor fail as invalid -- stop the daemon so the next run brings up a matching one, or run in an isolated SPARKWING_HOME\n",
 			s.Self, s.Daemon)
+	}
+
+	if n := len(r.LockedOutRepos); n > 0 {
+		fmt.Fprintf(w, "\nwarning: %d repo(s) cannot gate against the resident admission daemon -- their pinned SDK speaks an older wire protocol\n", n)
+		for _, lr := range r.LockedOutRepos {
+			fmt.Fprintf(w, "  %s\tpinned %s\t%s\n", lr.Name, lr.Pin, lr.Path)
+		}
+		fmt.Fprintf(w, "  every pipeline run in these repos is refused until the pin reaches %s; the sparkwing CLI is not the client here and upgrading it does not help\n",
+			wingwire.MinVersionSpeakingProtocolMajor)
 	}
 
 	if n := len(r.QuarantinedLedgers); n > 0 {

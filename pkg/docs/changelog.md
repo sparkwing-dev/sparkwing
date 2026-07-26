@@ -152,6 +152,22 @@ code change to unlock.
   readers through `--help` and through the generated CLI reference, and a
   test now fails when a doc or the README names a command the CLI does not
   dispatch.
+- **cli:** the admission handshake now names the side that has to move when a
+  daemon speaks a newer wire protocol. The old message said "upgrade
+  sparkwing", which pointed at the CLI on `PATH` -- but the client in that
+  handshake is the pipeline binary compiled from the calling repository's
+  `.sparkwing/go.mod`, so upgrading the CLI cannot change the outcome. The
+  error now reports both sides' protocol major and version, names the pin to
+  raise and the release to raise it to, offers `SPARKWING_HOME` for an
+  isolated daemon, and says outright that the CLI is not a party to it.
+- **cli:** `doctor` reports the version skew that actually blocks work.
+  It compared the running CLI against the resident daemon and said nothing
+  about registered repositories whose pinned SDK speaks an older protocol
+  major -- the skew that refuses every gate those repositories run. The new
+  `locked_out_repos` section names each one with its pin. A repository whose
+  `.sparkwing` carries a `replace` or a `go.work` using a local SDK checkout
+  is skipped: its declared pin is not what gets built, so reporting it would
+  send an operator to edit a line that changes nothing.
 
 - **cli:** `pipeline hooks install` no longer leaves a dead gate on machines
   whose global git config sets `core.hooksPath`. That setting replaces
