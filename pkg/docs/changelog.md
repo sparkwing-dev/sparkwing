@@ -49,6 +49,31 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **cli:** `sparkwing pipeline hooks survey` reports what git does with the
+  hooks every registered repo declares, and `sparkwing pipeline hooks install
+  --fleet` arms them all in one pass. Each repo reads as `armed` (git runs a
+  gate), `shadowed` (gates installed, but `core.hooksPath` sends git
+  elsewhere), `uninstalled` (a declared hook was never written), or
+  `undeclared` (no pipeline asks for one). Both read the machine's repo
+  registry -- `repos.yaml`, filled by `sparkwing pipeline add` and by any
+  `fallback_paths` it lists -- rather than a list scoped by hand, which is how
+  a repo ends up ungated for weeks with nothing reporting it. A checkout the
+  registry does not list is not surveyed and not swept; register it first.
+  `-o json` for the machine-readable form, `--ungated` for just the
+  actionable rows. Ungated means a hook that can refuse work does not fire, so
+  `--ungated`, `doctor` and the `--fleet` summary all count `pre-commit` and
+  `pre-push` and nothing else: a repo whose only missing hook is `post-commit`
+  loses a notification rather than a gate, and a repo that declares no
+  blocking hook is counted apart from the ones `--fleet` armed rather than
+  among them.
+
+- **cli:** `sparkwing doctor` names the registered repos that accept commits
+  with no gate, under `ungated_repos` in `-o json`. It reports them on a run
+  that finds nothing else to repair too, since a healthy home is exactly where
+  an ungated repo would otherwise go unmentioned. Which repos git gates is
+  machine configuration rather than a sparkwing home's state, so it is
+  reported alongside the sweep and does not decide the home's verdict.
+
 - **cli:** `sparkwing doctor` (and `ops doctor` in a pipeline binary) now
   reports admission daemons running for other sparkwing homes that were
   built from a scratch module -- the ones reporting version `v0.0.0`, which
@@ -89,6 +114,21 @@ code change to unlock.
   `GOLANGCI_LINT_CACHE` points, so a job that starts while another holds that
   lock still exits with `parallel golangci-lint is running`. Pass
   `--allow-parallel-runners` or serialize the jobs to cover that.
+
+### Changed
+
+- **cli:** `sparkwing pipeline hooks install` now runs a repo's blocking gates
+  once before those gates can fire. While a repo's hooks are inert a gate that
+  cannot execute -- a red pipeline, an admission daemon the repo's pinned SDK
+  cannot speak to -- is indistinguishable from one that passes; arming turns
+  the first into a commit that fails every time, which is worse than the
+  silence it replaces. A gate that does not pass is withdrawn by name and the
+  rest are still armed, so a red push gate no longer costs you a working
+  commit gate. The proof runs on every install that leaves a gate live,
+  including a re-install of an already-armed repo -- an install rewrites every
+  declared hook, and there the rewritten file is live the moment it lands. A
+  repo nothing can arm keeps the hooks it already had and its `core.hooksPath`
+  untouched. `--no-prove` arms without the proof.
 
 ### Fixed
 

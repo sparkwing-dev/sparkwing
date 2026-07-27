@@ -73,7 +73,7 @@ func installInto(t *testing.T, git githooks.Git, repo string) string {
 	t.Helper()
 	var err error
 	out := captureStdout(t, func() {
-		err = installHooks(git, repo, filepath.Join(repo, ".sparkwing"))
+		_, err = installHooks(git, repo, filepath.Join(repo, ".sparkwing"), installOptions{})
 	})
 	if err != nil {
 		t.Fatalf("install: %v", err)

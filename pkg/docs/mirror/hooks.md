@@ -107,6 +107,7 @@ once per checkout:
 ```bash
 sparkwing pipeline hooks install     # writes .git/hooks/pre-commit, pre-push, post-commit
 sparkwing pipeline hooks status      # report which sparkwing hooks are installed
+sparkwing pipeline hooks survey      # report which registered repos git gates at all
 sparkwing pipeline hooks uninstall   # remove sparkwing-managed hooks only
 ```
 
@@ -171,6 +172,74 @@ nothing forwards to, however it came about.
 `sparkwing pipeline hooks status` and `sparkwing doctor` both report a hook
 directory git is not reading, naming the gates that stopped firing and how
 to restore them.
+
+### Which repositories are gated at all
+
+One repository at a time is how a repository gets forgotten. `hooks survey`
+answers for every checkout in the local registry at once:
+
+```bash
+sparkwing pipeline hooks survey            # every registered repo, classified
+sparkwing pipeline hooks survey --ungated  # just the ones accepting ungated commits
+sparkwing pipeline hooks install --fleet   # arm all of them
+```
+
+Each repository lands in one of four states: **armed** (git runs a gate for
+every hook it declares), **shadowed** (gates are installed but
+`core.hooksPath` sends git elsewhere), **uninstalled** (a declared hook was
+never written), or **undeclared** (no pipeline asks for a hook, so there is
+nothing to arm). `sparkwing doctor` reports the ungated ones too, including on
+a run that finds nothing else to repair.
+
+Ungated means a hook that can refuse work does not fire. Only `pre-commit` and
+`pre-push` can, so those are the hooks `--ungated`, `doctor` and the `--fleet`
+summary count: a repository whose only missing hook is `post-commit` loses a
+notification rather than a gate, and one that declares no blocking hook has no
+gate to arm -- `--fleet` counts it apart from the repositories it armed rather
+than among them, because a sweep that reports it as armed reports a gated
+fleet while every commit in that repository still goes unchecked.
+
+The list is the machine's repo registry -- `~/.config/sparkwing/repos.yaml`,
+which `sparkwing pipeline add <dir>` writes to and which can name
+`fallback_paths` directories to scan for `*/.sparkwing/`. That is the whole
+extent of the survey: a checkout the registry does not reach is not surveyed,
+not swept by `--fleet`, and not reported by `doctor`. Register it, or add the
+directory it lives under to `fallback_paths`, before reading a clean survey as
+a clean machine.
+
+### Arming a repository whose gate cannot run
+
+An ungated repository still accepts work; a repository whose gate is armed but
+cannot execute rejects every commit. The second is worse, and installing a
+hook is what converts the first into the second.
+
+So before those gates can fire, install runs the repository's blocking gates
+once. A gate that does not pass -- a red pipeline, an admission daemon the
+repository's pinned SDK cannot speak to -- is withdrawn by name: its hook file
+is removed, the hooks that did pass are still armed, and the failure is
+printed with the command to re-run. `--no-prove` skips the proof for an
+operator who has already made it.
+
+Withdrawal is per hook because arming is not: git reads one hook directory per
+repository, so leaving a failing hook file in place would arm it along with
+everything else. A red `pre-push` costs you the push gate, not the commit
+gate.
+
+Only hooks sparkwing wrote are withdrawn. A hand-written hook of the same name
+is one install already refused to overwrite, so it is not sparkwing's to
+delete either; it is left exactly as it was and the withdrawal says so.
+
+The proof runs on every install that leaves a gate live, not only the one that
+claims `core.hooksPath`. An install rewrites every hook the repository
+declares, so on a repository git already reads -- one an earlier install
+armed, including one that withdrew a hook for failing -- the rewritten file is
+live the moment it lands and there is no claim left to hold it back.
+
+A repository nothing can arm comes out of an install as it went in: the hooks
+it already had are still there, `core.hooksPath` is untouched, and it accepts
+commits exactly as before. Withdrawing hooks git was never going to read would
+be the only lasting effect of the run, and the next install proves them again
+before anything can arm them.
 
 ### Hook-launched pipelines are unbound from the repository
 

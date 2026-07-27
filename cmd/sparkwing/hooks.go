@@ -3,18 +3,24 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
+	"text/tabwriter"
 
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
+	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
@@ -29,7 +35,7 @@ func runHooks(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdHooks, os.Stderr)
-		return errors.New("hooks: subcommand required (install|uninstall|status)")
+		return errors.New("hooks: subcommand required (install|uninstall|status|survey)")
 	}
 	switch args[0] {
 	case "install":
@@ -38,6 +44,8 @@ func runHooks(args []string) error {
 		return runHooksUninstall(args[1:])
 	case "status":
 		return runHooksStatus(args[1:])
+	case "survey":
+		return runHooksSurvey(args[1:])
 	default:
 		PrintHelp(cmdHooks, os.Stderr)
 		return fmt.Errorf("hooks: unknown subcommand %q", args[0])
@@ -47,20 +55,166 @@ func runHooks(args []string) error {
 func runHooksInstall(args []string) error {
 	fs := flag.NewFlagSet(cmdHooksInstall.Path, flag.ContinueOnError)
 	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
+	fleet := fs.Bool("fleet", false, "install into every registered repo")
+	noProve := fs.Bool("no-prove", false, "claim core.hooksPath without running the gate first")
 	if err := parseAndCheck(cmdHooksInstall, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
+	opts := installOptions{prove: runPipelineForProof}
+	if *noProve {
+		opts.prove = nil
+	}
+	if *fleet {
+		if *repo != "" {
+			return errors.New("hooks install: --fleet installs into every registered repo; drop --repo or drop --fleet")
+		}
+		return installFleet(opts)
+	}
 	repoRoot, sparkwingDir, err := resolveHooksRepo(*repo)
 	if err != nil {
 		return fmt.Errorf("hooks install: %w", err)
 	}
-	if err := installHooks(runGit, repoRoot, sparkwingDir); err != nil {
+	if _, err := installHooks(runGit, repoRoot, sparkwingDir, opts); err != nil {
 		return fmt.Errorf("hooks install: %w", err)
 	}
 	return nil
+}
+
+// installFleet runs the install in every repo the machine has registered.
+//
+// The sweep enumerates the registry rather than taking a list of repositories
+// from its caller, so a checkout registered after this code was written is
+// swept without anyone remembering it exists -- the failure that left single
+// repositories ungated for weeks each time a sweep was scoped by hand.
+//
+// One repository's failure does not stop the others: a sweep that aborts
+// partway leaves exactly the silent, partial coverage it was run to end.
+//
+// The summary counts what each install left behind rather than that it
+// returned without an error. An install that proves a repository's gates,
+// finds none of them able to run and therefore arms nothing is a complete,
+// unexceptional run -- counting it as armed would report a swept fleet as
+// gated while every commit in it still goes ungated. A repository that
+// declares no hook git can refuse work with is counted apart for the same
+// reason, and is not a repository the sweep left ungated: there is nothing
+// there for a re-run to arm.
+func installFleet(opts installOptions) error {
+	roots := fleetRepoRoots(runGit)
+	if len(roots) == 0 {
+		fmt.Fprintln(os.Stdout, "hooks install: no repos registered; run `sparkwing pipeline add <dir>` first")
+		return nil
+	}
+	armed, noGate := 0, 0
+	var ungated, failed []string
+	for _, root := range roots {
+		sparkwingDir := filepath.Join(root, ".sparkwing")
+		declared := declaredHookNames(root)
+		if len(declared) == 0 {
+			noGate++
+			continue
+		}
+		fmt.Fprintf(os.Stdout, "\n=== %s\n", root)
+		gated, err := installHooks(runGit, root, sparkwingDir, opts)
+		switch {
+		case err != nil:
+			fmt.Fprintf(os.Stdout, "error: %v\n", err)
+			failed = append(failed, filepath.Base(root))
+		case gated:
+			armed++
+		case len(declaredGates(declared)) == 0:
+			noGate++
+		default:
+			ungated = append(ungated, filepath.Base(root))
+		}
+	}
+	fmt.Fprintf(os.Stdout, "\n%d repo(s) armed, %d with no gate to arm, %d left ungated, %d failed\n",
+		armed, noGate, len(ungated), len(failed))
+	if len(ungated) > 0 {
+		fmt.Fprintf(os.Stdout, "still ungated: %s\n"+
+			"  each one printed why above; a gate that cannot run is left unarmed because arming it would fail every commit rather than gate one\n",
+			strings.Join(ungated, ", "))
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("hooks install: %s", strings.Join(failed, ", "))
+	}
+	return nil
+}
+
+// fleetRepoRoots enumerates the machine's sparkwing checkouts, canonicalized
+// to primary repositories so a linked worktree does not become a row of its
+// own -- git keeps one hook directory per repository, and arming it twice
+// through two paths is the same claim made twice.
+func fleetRepoRoots(git repos.Git) []string {
+	cands, err := repos.CandidatePaths()
+	if err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, c := range cands {
+		root, err := repos.PrimaryRoot(git, c.Path)
+		if err != nil || root == "" {
+			root = c.Path
+		}
+		if seen[root] {
+			continue
+		}
+		seen[root] = true
+		out = append(out, root)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Prover runs one of repoRoot's pipelines the way an installed hook will. An
+// install takes it as a dependency so the proof can be faked in tests and
+// skipped by an operator who has already made it.
+type Prover func(repoRoot, pipeline string) error
+
+// installOptions carry what an install needs beyond the repository itself.
+type installOptions struct {
+	// prove runs a blocking gate before core.hooksPath is claimed. Nil arms
+	// the repository without the proof.
+	prove Prover
+}
+
+// declaredHooks maps every git hook name repoRoot's pipelines ask for to the
+// pipelines that asked for it.
+func declaredHooks(sparkwingDir string) (map[string][]string, error) {
+	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
+	if err != nil {
+		return nil, err
+	}
+	if cfg == nil {
+		return map[string][]string{}, nil
+	}
+	out := map[string][]string{}
+	for _, p := range cfg.Pipelines {
+		if p.On.PreHook != nil {
+			out["pre-commit"] = append(out["pre-commit"], p.Name)
+		}
+		if p.On.PostHook != nil {
+			out["pre-push"] = append(out["pre-push"], p.Name)
+		}
+		if p.On.PostCommitHook != nil {
+			out["post-commit"] = append(out["post-commit"], p.Name)
+		}
+	}
+	return out, nil
+}
+
+// declaredHookNames returns the hook names repoRoot asks git to run, sorted.
+// A project that cannot be read declares nothing, so a survey still reports
+// the repository instead of dropping it.
+func declaredHookNames(repoRoot string) []string {
+	declared, err := declaredHooks(filepath.Join(repoRoot, ".sparkwing"))
+	if err != nil {
+		return nil
+	}
+	return slices.Sorted(maps.Keys(declared))
 }
 
 // installHooks writes a managed hook for every trigger repoRoot's pipelines
@@ -79,38 +233,29 @@ func runHooksInstall(args []string) error {
 // sits there -- holds the claim back rather than silencing the machine's
 // hook. A repository already carrying the claim reaches no such decision, so
 // the install reports any global hook nothing hands off to on its way out.
-func installHooks(git githooks.Git, repoRoot, sparkwingDir string) error {
-	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
+//
+// It reports whether git ends up running a gate for every one the repository
+// declares, which is not the same question as whether the install failed:
+// proving a repository's gates and finding none of them able to run is a
+// complete run that arms nothing. A repository that declares no gate reports
+// false too -- there was never one to arm, and a commit in it goes unchecked
+// whatever this run did.
+func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installOptions) (bool, error) {
+	hooksToRun, err := declaredHooks(sparkwingDir)
 	if err != nil {
-		return err
-	}
-	if cfg == nil {
-		cfg = &projectconfig.Config{}
-	}
-
-	hooksToRun := map[string][]string{}
-	for _, p := range cfg.Pipelines {
-		if p.On.PreHook != nil {
-			hooksToRun["pre-commit"] = append(hooksToRun["pre-commit"], p.Name)
-		}
-		if p.On.PostHook != nil {
-			hooksToRun["pre-push"] = append(hooksToRun["pre-push"], p.Name)
-		}
-		if p.On.PostCommitHook != nil {
-			hooksToRun["post-commit"] = append(hooksToRun["post-commit"], p.Name)
-		}
+		return false, err
 	}
 	if len(hooksToRun) == 0 {
 		fmt.Fprintln(os.Stdout, "hooks install: no pipelines declare pre_commit, pre_push, or post_commit triggers")
-		return nil
+		return false, nil
 	}
 
 	hooksDir, err := githooks.Dir(repoRoot)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
-		return err
+		return false, err
 	}
 
 	globalHooks := chainableGlobalHooks(git, hooksDir)
@@ -120,7 +265,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string) error {
 		pipes := hooksToRun[hookName]
 		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, pipes, globalHooks[hookName]))
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !wrote {
 			skipped++
@@ -136,7 +281,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string) error {
 		}
 		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, nil, true))
 		if err != nil {
-			return err
+			return false, err
 		}
 		if !wrote {
 			skipped++
@@ -146,11 +291,12 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string) error {
 		installed++
 	}
 	fmt.Fprintf(os.Stdout, "\n%d hook(s) installed, %d skipped\n", installed, skipped)
-	if err := claimHooksPath(git, repoRoot, hooksDir, unforwardedGlobalHooks(globalHooks, hooksDir)); err != nil {
-		return err
+	gated, err := armHooks(git, repoRoot, hooksDir, unforwardedGlobalHooks(globalHooks, hooksDir), hooksToRun, opts.prove)
+	if err != nil {
+		return false, err
 	}
 	reportSilencedGlobalHooks(git, repoRoot, hooksDir)
-	return nil
+	return gated, nil
 }
 
 // unforwardedGlobalHooks returns the global hook names hooksDir does not hand
@@ -239,38 +385,209 @@ func writeManagedHook(hooksDir, name, content string) (bool, error) {
 	return true, nil
 }
 
-// claimHooksPath points git at hooksDir for this repository when a
-// core.hooksPath override would otherwise shadow the hooks just installed.
-// A machine-wide override is claimed away, since the install has already
-// chained its hooks; an override the repository itself carries was set
-// deliberately, so it is reported instead of overwritten.
+// armHooks makes the hooks just written the ones git runs for this
+// repository, and reports whether git ends up running a gate for every one
+// the repository declares.
 //
-// unforwarded names the machine's hooks nothing in hooksDir hands off to.
-// Claiming the path while any remain would trade one silent gate for another,
-// so the claim is refused and the hook to clear is named.
-func claimHooksPath(git githooks.Git, repoRoot, hooksDir string, unforwarded []string) error {
-	shadow, err := githooks.Detect(git, repoRoot)
-	if err != nil || shadow == nil {
-		return err
+// Two things stand between a written hook and a firing one. A core.hooksPath
+// override sends git to another directory, which the install claims away when
+// the machine set it -- an override the repository itself carries was set
+// deliberately, so it is reported instead. unforwarded names the machine's
+// hooks nothing in hooksDir hands off to; claiming the path while any remain
+// would trade one silent gate for another, so the claim is refused and the
+// hook to clear is named.
+//
+// The gates are proven whenever they will fire, which is not only when this
+// install makes the claim. An install rewrites every hook the repository
+// declares, so on a repository git already reads -- one an earlier install
+// armed, including one that withdrew a hook for failing -- the files are live
+// the moment they land and there is no claim left to hold them back. Skipping
+// the proof there is what put an unproven gate straight into a repository's
+// commit path.
+//
+// A repository nothing can arm is left as it was found. Withdrawing hooks
+// that were never going to fire would be the only lasting effect of the run,
+// and the next install proves them again before any claim can arm them.
+func armHooks(git githooks.Git, repoRoot, hooksDir string, unforwarded []string, hooksToRun map[string][]string, prove Prover) (bool, error) {
+	active, scope := githooks.ActivePath(git, repoRoot)
+	reads := active == "" || githooks.SameDir(active, hooksDir)
+	if !reads {
+		if scope == "local" {
+			fmt.Fprintf(os.Stdout, "\nwarning: git reads hooks from %s, not %s, so the hooks installed here never fire\n"+
+				"  this repo sets its own core.hooksPath, which was deliberate, so the install leaves it alone; clear it with `git -C %s config --unset core.hooksPath`, then re-run `sparkwing pipeline hooks install`\n",
+				active, hooksDir, repoRoot)
+			return false, nil
+		}
+		if len(unforwarded) > 0 {
+			fmt.Fprintf(os.Stdout, "\nwarning: core.hooksPath left alone: nothing here hands off to the machine's %s\n"+
+				"  claiming it would stop that hook firing in this repo; remove the hook(s) of that name from %s so the install can forward them, then re-run `sparkwing pipeline hooks install`\n"+
+				"  until then git keeps reading %s, so the hooks just installed do not fire\n",
+				strings.Join(unforwarded, ", "), hooksDir, active)
+			return false, nil
+		}
 	}
-	if shadow.Scope == "local" {
-		fmt.Fprintf(os.Stdout, "\nwarning: %s\n  %s\n", shadow.Summary(), shadow.Remedy())
-		return nil
+
+	gates := declaredGates(slices.Sorted(maps.Keys(hooksToRun)))
+	unproven := proveGates(prove, repoRoot, hooksToRun)
+	nothingLeftToArm := len(gates) > 0 && len(unproven) == len(gates)
+	if !reads && nothingLeftToArm {
+		fmt.Fprintln(os.Stdout, "\nwarning: core.hooksPath left alone: no gate here passes")
+		for _, hookName := range slices.Sorted(maps.Keys(unproven)) {
+			fmt.Fprintf(os.Stdout, "  %s: %v\n", hookName, unproven[hookName])
+		}
+		fmt.Fprintf(os.Stdout, "  git keeps reading %s, which is what it did before this install, so this repo accepts commits exactly as it did\n"+
+			"  fix the gate(s), then re-run `sparkwing pipeline hooks install`; `--no-prove` arms them without the proof\n", active)
+		return false, nil
 	}
-	if len(unforwarded) > 0 {
-		fmt.Fprintf(os.Stdout, "\nwarning: core.hooksPath left alone: nothing here hands off to the machine's %s\n"+
-			"  claiming it would stop that hook firing in this repo; remove the hook(s) of that name from %s so the install can forward them, then re-run `sparkwing pipeline hooks install`\n"+
-			"  until then git keeps reading %s, so the hooks just installed do not fire\n",
-			strings.Join(unforwarded, ", "), hooksDir, shadow.ActiveDir)
-		return nil
+	if err := withdrawGates(unproven, hooksDir); err != nil {
+		return false, err
 	}
-	if _, err := git(repoRoot, "config", "core.hooksPath", hooksDir); err != nil {
-		return fmt.Errorf("claim core.hooksPath for this repo: %w", err)
+	if len(githooks.Gates(hooksDir)) == 0 {
+		fmt.Fprintf(os.Stdout, "\nwarning: no gate runs in %s, so this repo's commits stay ungated\n", hooksDir)
+		return false, nil
 	}
-	fmt.Fprintf(os.Stdout, "\ncore.hooksPath -> %s\n"+
-		"  the global core.hooksPath (%s) would otherwise shadow these hooks; its own hooks still fire, chained after this repo's\n",
-		hooksDir, shadow.ActiveDir)
+	if !reads {
+		if _, err := git(repoRoot, "config", "core.hooksPath", hooksDir); err != nil {
+			return false, fmt.Errorf("claim core.hooksPath for this repo: %w", err)
+		}
+		fmt.Fprintf(os.Stdout, "\ncore.hooksPath -> %s\n"+
+			"  the global core.hooksPath (%s) would otherwise shadow these hooks; its own hooks still fire, chained after this repo's\n",
+			hooksDir, active)
+	}
+	return gatesLive(hooksDir, gates), nil
+}
+
+// declaredGates returns the hooks among hookNames that can refuse work, in
+// the order they are proven.
+//
+// It is what the arming path counts rather than every declared hook: only a
+// blocking hook is ever proven, so a repository that also declares
+// post-commit could never fail as many proofs as it declares hooks, and read
+// as having something left to arm with every gate it owns red.
+func declaredGates(hookNames []string) []string {
+	var gates []string
+	for _, name := range githooks.BlockingHooks {
+		if slices.Contains(hookNames, name) {
+			gates = append(gates, name)
+		}
+	}
+	return gates
+}
+
+// gatesLive reports whether hooksDir -- by now the directory git reads for
+// this repository -- holds a managed hook for every gate in declared.
+//
+// It answers [githooks.RepoGates.Gated]'s question of a directory an install
+// has just written rather than of a survey, so a sweep and a survey say the
+// same thing about the same repository. They part on one that declares no
+// gate: the survey has nothing missing to report, while the install armed
+// nothing and says so rather than let a fleet summary count it among the
+// repositories a gate now fires in.
+func gatesLive(hooksDir string, declared []string) bool {
+	if len(declared) == 0 {
+		return false
+	}
+	live := githooks.Gates(hooksDir)
+	for _, name := range declared {
+		if !slices.Contains(live, name) {
+			return false
+		}
+	}
+	return true
+}
+
+// withdrawGates removes the hooks whose gate did not pass, leaving the rest
+// to fire.
+//
+// Arming is per-repository -- git reads one hook directory -- so a gate that
+// cannot pass has to be withdrawn by name rather than by holding the whole
+// repository back. A red push gate is not a reason to leave a working commit
+// gate unarmed, and leaving the file in place would arm it anyway.
+//
+// Only a hook sparkwing wrote is withdrawn. A hand-written hook of the same
+// name is one the install already refused to overwrite, so it is not
+// sparkwing's to delete either -- and it is not what the failing proof was
+// about.
+func withdrawGates(unproven map[string]error, hooksDir string) error {
+	for _, hookName := range slices.Sorted(maps.Keys(unproven)) {
+		path := filepath.Join(hooksDir, hookName)
+		switch body, err := os.ReadFile(path); {
+		case err != nil && !os.IsNotExist(err):
+			return fmt.Errorf("withdraw %s: %w", hookName, err)
+		case err == nil && !strings.Contains(string(body), sparkwingHookMarker):
+			fmt.Fprintf(os.Stdout, "\nwarning: %s did not pass (%v), and the hook of that name is not sparkwing's to remove\n"+
+				"  it is left exactly as it was; nothing sparkwing installed will fire for %s\n", hookName, unproven[hookName], hookName)
+			continue
+		case err == nil:
+			if err := os.Remove(path); err != nil {
+				return fmt.Errorf("withdraw %s: %w", hookName, err)
+			}
+		}
+		fmt.Fprintf(os.Stdout, "\nwarning: %s withdrawn: %v\n"+
+			"  arming it would fail every %s rather than gate one; the other hooks here are unaffected\n"+
+			"  fix the gate, then re-run `sparkwing pipeline hooks install`; `--no-prove` arms it anyway\n",
+			hookName, unproven[hookName], strings.TrimPrefix(hookName, "pre-"))
+	}
 	return nil
+}
+
+// proveGates runs each blocking gate once, before the hooks that run it can
+// fire, and returns the hook names whose gate did not pass.
+//
+// While a repository's hooks are inert a gate that cannot execute at all --
+// an admission daemon it cannot speak to, a pipeline red on the default
+// branch -- is indistinguishable from a gate that passes. Arming converts the
+// first case into a commit that fails every time, which is worse than the
+// silence it replaces: an ungated repository still accepts work. Running the
+// gate first is what separates the two, and it costs one run per install of a
+// repository that is about to gate its own commits.
+//
+// Every blocking hook is proven even after one fails, so the caller can arm
+// the gates that work rather than the whole repository or none of it.
+func proveGates(prove Prover, repoRoot string, hooksToRun map[string][]string) map[string]error {
+	failed := map[string]error{}
+	if prove == nil {
+		return failed
+	}
+	for _, hookName := range githooks.BlockingHooks {
+		for _, pipeline := range hooksToRun[hookName] {
+			fmt.Fprintf(os.Stdout, "\nproving %s (%s) before arming it...\n", pipeline, hookName)
+			if err := prove(repoRoot, pipeline); err != nil {
+				failed[hookName] = fmt.Errorf("%s did not pass: %w", pipeline, err)
+				break
+			}
+			fmt.Fprintf(os.Stdout, "  %s passed\n", pipeline)
+		}
+	}
+	return failed
+}
+
+// runPipelineForProof runs a pipeline the way the installed hook will: the
+// `sparkwing` on PATH, in the repository being armed. Reusing the hook's own
+// command is what makes the proof cover the binary that will actually run,
+// which for a pipeline built from the repository's own SDK pin is not the
+// process making the install.
+func runPipelineForProof(repoRoot, pipeline string) error {
+	cmd := exec.Command("sparkwing", "run", pipeline)
+	cmd.Dir = repoRoot
+	cmd.Env = append(os.Environ(), "SPARKWING_LOG_FORMAT=quiet")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %s", err, lastLine(out))
+}
+
+// lastLine is the final non-empty line of a command's output, which for a
+// failed pipeline run is the message worth repeating.
+func lastLine(out []byte) string {
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return s
+		}
+	}
+	return "no output"
 }
 
 func runHooksUninstall(args []string) error {
@@ -441,6 +758,87 @@ func reportSilencedGlobalHooks(git githooks.Git, repoRoot, hooksDir string) {
 	fmt.Fprintf(os.Stdout, "\nwarning: the machine's global %s does not fire here: git reads %s and nothing there hands off to it\n"+
 		"  re-run `sparkwing pipeline hooks install` to restore the forwarder, clearing any hand-written hook of that name first -- install will not overwrite one\n",
 		strings.Join(silenced, ", "), hooksDir)
+}
+
+func runHooksSurvey(args []string) error {
+	fs := flag.NewFlagSet(cmdHooksSurvey.Path, flag.ContinueOnError)
+	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
+	ungatedOnly := fs.Bool("ungated", false, "list only the repos git runs no gate for")
+	if err := parseAndCheck(cmdHooksSurvey, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	format, err := resolveTTYAwareOutput(*outFmt, cmdHooksSurvey.Path)
+	if err != nil {
+		return err
+	}
+	rows := surveyFleet(runGit)
+	if *ungatedOnly {
+		rows = githooks.Ungated(rows)
+	}
+	return renderHooksSurvey(os.Stdout, rows, format)
+}
+
+// surveyFleet classifies every registered repository's gates. It is the one
+// place the fleet is enumerated, so `survey`, `install --fleet` and `doctor`
+// all answer for the same set of repositories.
+func surveyFleet(git githooks.Git) []githooks.RepoGates {
+	return githooks.SurveyFleet(git, fleetRepoRoots(repos.Git(git)), declaredHookNames)
+}
+
+func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) error {
+	switch format {
+	case "json":
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		if rows == nil {
+			rows = []githooks.RepoGates{}
+		}
+		return enc.Encode(rows)
+	case "plain":
+		// One tab-separated row per repo, no summary and no alignment, so
+		// `cut` and `awk` get a stable shape whatever the fleet looks like.
+		for _, r := range rows {
+			fmt.Fprintf(w, "%s\t%s\t%s\n", r.Repo, r.State, strings.Join(r.Missing, ","))
+		}
+		return nil
+	}
+	if len(rows) == 0 {
+		fmt.Fprintln(w, "no repos registered; run `sparkwing pipeline add <dir>` first")
+		return nil
+	}
+	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "REPO\tSTATE\tDECLARED\tNOT FIRING")
+	ungated := 0
+	for _, r := range rows {
+		if !r.Gated() {
+			ungated++
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", filepath.Base(r.Repo), r.State,
+			joinOrDash(r.Declared), joinOrDash(r.Missing))
+	}
+	_ = tw.Flush()
+	if ungated == 0 {
+		fmt.Fprintf(w, "\n%d repo(s), every declared gate fires\n", len(rows))
+		return nil
+	}
+	fmt.Fprintf(w, "\n%d of %d repo(s) accept commits with no gate:\n", ungated, len(rows))
+	for _, r := range rows {
+		if r.Gated() {
+			continue
+		}
+		fmt.Fprintf(w, "  %s\n    %s\n", r.Summary(), r.Remedy())
+	}
+	return nil
+}
+
+func joinOrDash(names []string) string {
+	if len(names) == 0 {
+		return "-"
+	}
+	return strings.Join(names, ",")
 }
 
 // describeManagedHook reads back what a managed hook script does: the

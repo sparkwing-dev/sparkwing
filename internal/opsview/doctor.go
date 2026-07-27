@@ -81,6 +81,14 @@ type DoctorReport struct {
 	// Reported with the fix, never repaired: rewriting an operator's git
 	// config is not doctor's call.
 	ShadowedHooks *githooks.Shadow `json:"shadowed_hooks,omitempty"`
+	// UngatedRepos are the registered checkouts whose pipelines declare a
+	// commit or push hook that git runs nothing for -- shadowed by a
+	// core.hooksPath, or never installed. It answers for the whole registry
+	// rather than the checkout doctor was run from, so a repo registered
+	// after the last sweep reports itself instead of waiting to be noticed.
+	// Reported with the fix, never repaired: arming a repo runs its gate,
+	// and a gate that cannot run turns every commit there into a failure.
+	UngatedRepos []githooks.RepoGates `json:"ungated_repos,omitempty"`
 	// StrayDaemons are admission daemons serving other sparkwing homes that
 	// report a version no released build carries -- scratch binaries left
 	// running, which look like the machine's resident daemon in a process
@@ -138,6 +146,12 @@ type DoctorLegacyHolder struct {
 // state says nothing about -- deliberately does not count: a clean home
 // stays clean whatever else is running on the machine, and the stray is
 // reported alongside rather than folded in.
+//
+// [DoctorReport.UngatedRepos] is excluded for the same reason. Which
+// repositories git gates is the machine's git configuration, not this home's
+// state, and folding it in would make a home's verdict depend on checkouts it
+// has never run. It is rendered on the healthy path too, so an ungated repo
+// is still reported by a doctor run that finds nothing to repair.
 func (r DoctorReport) Clean() bool {
 	return len(r.OrphanedRuns) == 0 &&
 		r.LegacyBoxSlotFilesRemoved == 0 &&
@@ -529,6 +543,7 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 		shadowed = len(r.ShadowedHooks.Gates)
 	}
 	fmt.Fprintf(w, "shadowed_hooks\t%d\n", shadowed)
+	fmt.Fprintf(w, "ungated_repos\t%d\n", len(r.UngatedRepos))
 	fmt.Fprintf(w, "stray_daemons\t%d\n", len(r.StrayDaemons))
 	return nil
 }
@@ -540,6 +555,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 	if r.Clean() {
 		fmt.Fprintf(w, "healthy: nothing to repair%s\n", would)
+		renderUngatedRepos(w, r)
 		renderStrayDaemons(w, r)
 		return nil
 	}
@@ -580,6 +596,8 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 		fmt.Fprintf(w, "\nwarning: %s\n  %s\n", s.Summary(), s.Remedy())
 	}
 
+	renderUngatedRepos(w, r)
+
 	for _, p := range r.PoisonedProfiles {
 		fmt.Fprintf(w, "\nwarning: capacity profile %q looks poisoned by contention -- its demand floor %.1f cores prices runs at %.1f, at or over the grantable %.1f, so every run holds the whole machine\n  reset it: sparkwing runs stats --reset --pipeline %s\n",
 			p.Pipeline, p.FloorCores, p.ChargeCores, p.GrantableCores, p.Pipeline)
@@ -593,6 +611,28 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 	renderStrayDaemons(w, r)
 	return nil
+}
+
+// renderUngatedRepos writes the fleet-wide ungated warning, skipping the
+// checkout ShadowedHooks already described in full so one repository is not
+// reported twice under two headings.
+func renderUngatedRepos(w io.Writer, r DoctorReport) {
+	rows := r.UngatedRepos
+	if s := r.ShadowedHooks; s != nil {
+		rows = nil
+		for _, g := range r.UngatedRepos {
+			if !githooks.SameDir(g.Repo, s.Repo) {
+				rows = append(rows, g)
+			}
+		}
+	}
+	if len(rows) == 0 {
+		return
+	}
+	fmt.Fprintf(w, "\nwarning: %d registered repo(s) accept commits with no gate\n", len(rows))
+	for _, g := range rows {
+		fmt.Fprintf(w, "  %s\n    %s\n", g.Summary(), g.Remedy())
+	}
 }
 
 // renderStrayDaemons writes the stray-daemon warnings. It runs on both the

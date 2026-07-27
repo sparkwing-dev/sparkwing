@@ -2137,6 +2137,7 @@ them with a warning.
 - `install` -- Write pre-commit / pre-push / post-commit hooks for the enclosing repo
 - `uninstall` -- Remove sparkwing-managed git hooks
 - `status` -- Report which sparkwing hooks are installed
+- `survey` -- Report which registered repos git actually runs a gate for
 
 ## `sparkwing pipeline hooks install`
 
@@ -2147,11 +2148,24 @@ pre_commit / pre_push / post_commit triggers, and writes one hook
 file per hook name that fans out to the matching pipelines. Existing
 non-sparkwing hooks are skipped so hand-written ones survive.
 
+Before a gate can fire, install runs it once. While a repo's hooks are inert
+a gate that cannot execute looks the same as one that passes, and arming it
+turns every commit into a failing one. A gate that does not pass is withdrawn
+by name and the rest are still armed; a repo where nothing passes keeps its
+hooks and its core.hooksPath exactly as they were. --no-prove arms anyway.
+
+--fleet counts as armed only the repos a gate now fires in. A repo whose gates
+could not run is named as left ungated, and one that declares no pre_commit or
+pre_push trigger is counted apart: nothing there can refuse a commit, so there
+was never a gate to arm.
+
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
+| `--fleet` | Install into every registered repo instead of one |
+| `--no-prove` | Claim core.hooksPath without running the gate first |
 
 ### Examples
 
@@ -2161,6 +2175,9 @@ sparkwing pipeline hooks install
 
 # Install in a different repo
 sparkwing pipeline hooks install --repo /path/to/repo
+
+# Arm every registered repo
+sparkwing pipeline hooks install --fleet
 ```
 
 ## `sparkwing pipeline hooks status`
@@ -2180,6 +2197,44 @@ Lists every managed hook file under .git/hooks/ along with the pipelines it invo
 ```sh
 # Show hook status
 sparkwing pipeline hooks status
+```
+
+## `sparkwing pipeline hooks survey`
+
+Report which registered repos git actually runs a gate for
+
+Classifies every repo in the local registry by what git does
+with the hooks its pipelines declare: armed (a gate runs), shadowed (a gate is
+installed but core.hooksPath sends git elsewhere), uninstalled (a declared
+hook was never written), or undeclared (no pipeline asks for one).
+
+The repos are the ones repos.yaml reaches: what sparkwing pipeline add
+registered, plus any fallback_paths it scans. A checkout it does not list is
+not surveyed, so register it before reading a clean survey as a clean
+machine.
+
+--ungated lists the repos a commit or a push goes through unchecked in. Only
+pre-commit and pre-push count, since a post-commit hook runs after the commit
+has landed and cannot refuse one.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FMT` | Output format: pretty\|json\|plain |
+| `--ungated` | List only the repos git runs no gate for |
+
+### Examples
+
+```sh
+# Survey the fleet
+sparkwing pipeline hooks survey
+
+# Just the ungated repos
+sparkwing pipeline hooks survey --ungated
+
+# Machine-readable
+sparkwing pipeline hooks survey -o json
 ```
 
 ## `sparkwing pipeline hooks uninstall`

@@ -138,7 +138,7 @@ func TestHooksInstall_GateAndGlobalHookBothFireUnderAGlobalHooksPath(t *testing.
 	f := newChainFixture(t)
 
 	captureStdout(t, func() {
-		if err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing")); err != nil {
+		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 	})
@@ -167,7 +167,7 @@ func TestHooksInstall_KeepsTheGlobalHookFiringWhenItCannotForwardIt(t *testing.T
 		"#!/bin/sh\n: > "+f.sentinelOf("repo-prepare")+"\nexit 0\n")
 
 	out := captureStdout(t, func() {
-		if err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing")); err != nil {
+		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 	})
@@ -253,7 +253,7 @@ func TestHooksInstall_FailingGateAbortsTheCommit(t *testing.T) {
 		"#!/bin/sh\necho \"$@\" >> "+f.ranFile+"\nexit 1\n")
 
 	captureStdout(t, func() {
-		if err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing")); err != nil {
+		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 	})
@@ -288,7 +288,7 @@ func TestHooksInstall_DoctorStopsReportingAShadowedGate(t *testing.T) {
 	}
 
 	captureStdout(t, func() {
-		if err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing")); err != nil {
+		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 	})

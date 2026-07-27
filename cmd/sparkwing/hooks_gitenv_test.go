@@ -88,7 +88,7 @@ func newGateIndexFixture(t *testing.T) (f *chainFixture, gateView, inherited str
 	f.git(t, "add", "-A")
 	f.git(t, "commit", "-m", "base")
 	captureStdout(t, func() {
-		if err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing")); err != nil {
+		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
 			t.Fatalf("install: %v", err)
 		}
 	})
@@ -124,7 +124,7 @@ func TestHooksGate_AStepStagingElsewhereLeavesTheGatedRepository(t *testing.T) {
 	t.Run("the managed hook keeps the step's work out of the commit", func(t *testing.T) {
 		f, elsewhere := newStagingFixture(t)
 		captureStdout(t, func() {
-			if err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing")); err != nil {
+			if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
 				t.Fatalf("install: %v", err)
 			}
 		})
