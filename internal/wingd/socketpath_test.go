@@ -2,7 +2,9 @@ package wingd
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -49,6 +51,46 @@ func TestSocketPath_DistinctPerHome(t *testing.T) {
 	b, _ := SocketPath(t.TempDir())
 	if a == b {
 		t.Fatalf("distinct homes shared socket %q", a)
+	}
+}
+
+// bindPlaceholderSocket creates the socket file a daemon serving home
+// would have bound, so socket discovery has something to find without a
+// daemon process.
+func bindPlaceholderSocket(t *testing.T, home string) string {
+	t.Helper()
+	sock, err := SocketPath(home)
+	if err != nil {
+		t.Fatalf("socket path for %s: %v", home, err)
+	}
+	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+		t.Fatalf("make socket dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(filepath.Dir(sock)) })
+	if err := os.WriteFile(sock, nil, 0o600); err != nil {
+		t.Fatalf("write socket placeholder: %v", err)
+	}
+	return sock
+}
+
+// TestPeerSockets_FindsOtherHomesAndOmitsOwn covers the discovery a tool
+// needs to see a daemon serving a home that is not its own, which that
+// home's socket alone never reveals.
+func TestPeerSockets_FindsOtherHomesAndOmitsOwn(t *testing.T) {
+	own := t.TempDir()
+	other := t.TempDir()
+	ownSock := bindPlaceholderSocket(t, own)
+	otherSock := bindPlaceholderSocket(t, other)
+
+	peers, err := PeerSockets(own)
+	if err != nil {
+		t.Fatalf("peer sockets: %v", err)
+	}
+	if !slices.Contains(peers, otherSock) {
+		t.Errorf("peers %v missing another home's socket %q", peers, otherSock)
+	}
+	if slices.Contains(peers, ownSock) {
+		t.Errorf("peers %v include this home's own socket %q", peers, ownSock)
 	}
 }
 

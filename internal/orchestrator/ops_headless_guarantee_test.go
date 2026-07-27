@@ -1,14 +1,18 @@
 package orchestrator_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
@@ -48,6 +52,7 @@ func TestHeadless_ScaffoldedModuleServesOpsAndRuns(t *testing.T) {
 	runGo(t, mod, buildEnv, "build", "-o", bin, ".")
 
 	home := t.TempDir()
+	stopHomeDaemon(t, home)
 	runEnv := append(os.Environ(), "SPARKWING_HOME="+home, "SPARKWING_LOG_FORMAT=quiet")
 
 	if out := runBin(t, mod, runEnv, bin, "ops", "version"); strings.TrimSpace(out) == "" {
@@ -108,6 +113,30 @@ import (
 
 func main() { runner.Main() }
 `
+
+// daemonStopTimeout bounds the teardown drain, generously enough to cover
+// a daemon still writing its final state snapshot.
+const daemonStopTimeout = 15 * time.Second
+
+// stopHomeDaemon registers the teardown that stops the admission daemon
+// the binary under test spawns for home, and fails the test when one is
+// still answering afterwards. Register it before anything runs against
+// home: the daemon detaches from the test process and outlives it, so a
+// teardown that only runs on the success path leaks a daemon exactly when
+// someone is already debugging -- and a stray daemon reads as the
+// machine's resident one to whoever inspects it next.
+func stopHomeDaemon(t *testing.T, home string) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), daemonStopTimeout)
+		defer cancel()
+		err := wingdclient.Stop(ctx, wingdclient.Options{Home: home})
+		if err == nil || errors.Is(err, wingdclient.ErrNoDaemon) {
+			return
+		}
+		t.Errorf("admission daemon for %s outlived the test: %v", home, err)
+	})
+}
 
 func repoRootDir(t *testing.T) string {
 	t.Helper()

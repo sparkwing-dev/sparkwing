@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -80,6 +81,21 @@ type DoctorReport struct {
 	// Reported with the fix, never repaired: rewriting an operator's git
 	// config is not doctor's call.
 	ShadowedHooks *githooks.Shadow `json:"shadowed_hooks,omitempty"`
+	// StrayDaemons are admission daemons serving other sparkwing homes that
+	// report a version no released build carries -- scratch binaries left
+	// running, which look like the machine's resident daemon in a process
+	// list. Reported with an explanation, never stopped: doctor does not end
+	// processes it does not own.
+	StrayDaemons []DoctorStrayDaemon `json:"stray_daemons,omitempty"`
+}
+
+// DoctorStrayDaemon is one live admission daemon serving another sparkwing
+// home whose reported version marks it as a scratch build.
+type DoctorStrayDaemon struct {
+	// Socket is the address the daemon answered on.
+	Socket string `json:"socket"`
+	// Version is the version it reported for its own build.
+	Version string `json:"version"`
 }
 
 // DoctorPoisonedProfile is one contention-poisoned capacity profile in the
@@ -117,7 +133,11 @@ type DoctorLegacyHolder struct {
 }
 
 // Clean reports whether the sweep found nothing to repair and no legacy binary
-// admitting outside the daemon.
+// admitting outside the daemon. It answers for the home that was swept, so
+// [DoctorReport.StrayDaemons] -- other homes' processes, which this home's
+// state says nothing about -- deliberately does not count: a clean home
+// stays clean whatever else is running on the machine, and the stray is
+// reported alongside rather than folded in.
 func (r DoctorReport) Clean() bool {
 	return len(r.OrphanedRuns) == 0 &&
 		r.LegacyBoxSlotFilesRemoved == 0 &&
@@ -176,7 +196,46 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 	}
 	diagnoseDaemonHealth(ctx, home, selfVersion, &report)
 	diagnoseQuarantinedLedgers(home, &report)
+	diagnoseStrayDaemons(ctx, home, &report)
 	return report, nil
+}
+
+// scratchModuleVersion is the version a binary reports for the sparkwing
+// SDK when its module requires the placeholder and points a replace
+// directive at a local checkout. No release carries it and no ordinary
+// project builds with it, so a daemon reporting it came from a scratch
+// module -- in practice one a test scaffolded under a temp directory,
+// ran, and left behind.
+const scratchModuleVersion = "v0.0.0"
+
+// diagnoseStrayDaemons probes this user's daemons for other sparkwing
+// homes and reports any built from a scratch module. Such a daemon is
+// invisible from this home, which reaches only its own socket, yet it
+// stands beside the resident daemon in any process listing and is easily
+// read as production state -- its log and its bind failures then explain
+// outages it has nothing to do with. Read-only: doctor names it and
+// leaves stopping it to the operator, who owns that process.
+func diagnoseStrayDaemons(ctx context.Context, home string, report *DoctorReport) {
+	socks, err := wingd.PeerSockets(home)
+	if err != nil {
+		return
+	}
+	for _, sock := range socks {
+		info, err := wingdclient.Probe(ctx, sock)
+		if err != nil || !scratchBuild(info.BinaryVersion) {
+			continue
+		}
+		report.StrayDaemons = append(report.StrayDaemons,
+			DoctorStrayDaemon{Socket: sock, Version: info.BinaryVersion})
+	}
+}
+
+// scratchBuild reports whether a daemon's version marks it as a scratch
+// build. A daemon on a release or a source build of the SDK is somebody's
+// deliberate second home -- an isolated one is a documented remedy here --
+// so only the placeholder counts.
+func scratchBuild(version string) bool {
+	return strings.TrimSpace(version) == scratchModuleVersion
 }
 
 // diagnosePoisonedProfiles scans the stored capacity rollups for profiles
@@ -470,6 +529,7 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 		shadowed = len(r.ShadowedHooks.Gates)
 	}
 	fmt.Fprintf(w, "shadowed_hooks\t%d\n", shadowed)
+	fmt.Fprintf(w, "stray_daemons\t%d\n", len(r.StrayDaemons))
 	return nil
 }
 
@@ -480,6 +540,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 	if r.Clean() {
 		fmt.Fprintf(w, "healthy: nothing to repair%s\n", would)
+		renderStrayDaemons(w, r)
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
@@ -530,5 +591,18 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 			fmt.Fprintf(w, "  pid %d holding %s\n", h.PID, h.Lock)
 		}
 	}
+	renderStrayDaemons(w, r)
 	return nil
+}
+
+// renderStrayDaemons writes the stray-daemon warnings. It runs on both the
+// healthy and the unhealthy path, since a stray belongs to no home and a
+// home with nothing to repair is exactly where one goes unnoticed.
+func renderStrayDaemons(w io.Writer, r DoctorReport) {
+	for _, d := range r.StrayDaemons {
+		fmt.Fprintf(w, "\nwarning: an admission daemon for another sparkwing home reports version %s, which no release carries\n"+
+			"  %s is what a binary built from a module that replaces the sparkwing SDK with a local checkout reports, so this daemon came from a scratch module -- typically one a test scaffolded under a temp directory and left running, whose process arguments still name that temp path\n"+
+			"  it is not this machine's resident daemon: its log, its bind failures, and its queue describe nothing in production. Stop that process before diagnosing anything from it\n"+
+			"  socket: %s\n", d.Version, d.Version, d.Socket)
+	}
 }

@@ -262,10 +262,19 @@ machine:
   dead state (an interrupted run's leftover row, an orphaned lock file
   whose owner is gone) and reports what it found and did. Standing
   problems it cannot safely repair -- repeated admission rejections, a
-  daemon version skew, a contention-poisoned capacity profile -- are
+  daemon version skew, a contention-poisoned capacity profile, a daemon
+  serving another sparkwing home at a version no release carries -- are
   reported with the exact fix instead. It never kills a process and never
   touches live admission, so it is safe to run at any time; on a healthy
   machine it finds nothing and says so.
+
+Each sparkwing home keeps its own daemon, so a daemon for one home is
+invisible from another even though both show up side by side in a process
+listing. That makes a scratch daemon -- one a build with a local `replace`
+directive left running, which reports version `v0.0.0` -- easy to mistake
+for the machine's resident one and read its log as production state.
+`sparkwing doctor` names any it finds, with the socket it answers on, so
+the mistake is caught before it explains an unrelated failure.
 
 The daemon writes an operational log to `wingd/d.log` under the sparkwing
 home (`~/.sparkwing/wingd/d.log` by default) for when you want to see

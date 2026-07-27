@@ -281,12 +281,46 @@ func (l layout) ensureDir() error {
 func socketPathForHome(home string) string {
 	sum := sha256.Sum256([]byte(home))
 	hash := hex.EncodeToString(sum[:])[:12]
+	dir := filepath.Join(socketBaseDir(), socketDirPrefix()+hash)
+	return filepath.Join(dir, "d.sock")
+}
+
+// socketDirPrefix is the leading, home-independent part of a socket
+// directory's name: the family and this user, so one user's daemons never
+// collide with another's and every one of a user's daemons is findable
+// from the prefix alone.
+func socketDirPrefix() string {
 	uid := os.Getuid()
 	if uid < 0 {
 		uid = 0
 	}
-	dir := filepath.Join(socketBaseDir(), fmt.Sprintf("sparkwing-%d-%s", uid, hash))
-	return filepath.Join(dir, "d.sock")
+	return fmt.Sprintf("sparkwing-%d-", uid)
+}
+
+// PeerSockets returns the socket paths of this user's daemons for every
+// sparkwing home other than the given one. A home's daemon is reachable
+// only at that home's own socket, so a tool inspecting one home is blind
+// to a daemon serving another until it looks here.
+//
+// A returned path is where a daemon was last seen, not proof one is
+// listening: an exiting daemon leaves its directory behind, and a daemon
+// killed outright leaves the socket file too. Callers dial to find out.
+func PeerSockets(home string) ([]string, error) {
+	own, err := SocketPath(home)
+	if err != nil {
+		return nil, err
+	}
+	matches, err := filepath.Glob(filepath.Join(socketBaseDir(), socketDirPrefix()+"*", "d.sock"))
+	if err != nil {
+		return nil, fmt.Errorf("wingd: scan daemon sockets: %w", err)
+	}
+	peers := make([]string, 0, len(matches))
+	for _, sock := range matches {
+		if sock != own {
+			peers = append(peers, sock)
+		}
+	}
+	return peers, nil
 }
 
 // socketBaseDir is the short directory family unix sockets live under.

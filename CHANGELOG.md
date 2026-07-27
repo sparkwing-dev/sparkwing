@@ -49,6 +49,19 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **cli:** `sparkwing doctor` (and `ops doctor` in a pipeline binary) now
+  reports admission daemons running for other sparkwing homes that were
+  built from a scratch module -- the ones reporting version `v0.0.0`, which
+  no release carries and only a module with a local `replace` directive
+  produces. Each home keeps its own daemon on its own socket, so such a
+  daemon is unreachable from the home you are inspecting yet sits beside
+  the resident daemon in any process listing, where its log and its bind
+  failures read as production state. Doctor names the version tell, the
+  socket it answers on, and where its binary usually lives (a temp
+  directory, from the process arguments); it never stops the process, which
+  stays the operator's call. The `-o json` report carries the same under
+  `stray_daemons`.
+
 - **cli:** `sparkwing run --sw-index PATH` runs a pipeline against a git index
   the caller supplies instead of the repository's own, so a verifier can have
   steps scoped to the staged diff -- comment checks, `git diff --cached`
