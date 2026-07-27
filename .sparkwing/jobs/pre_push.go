@@ -113,10 +113,8 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "gofmt: clean")
 	}
 
-	if _, err := sparkwing.Bash(ctx, "cd .sparkwing && golangci-lint run ./...").
-		Env("GOLANGCI_LINT_CACHE", sparkwing.ToolCacheDir("golangci-lint")).
-		Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("golangci-lint: %v", err))
+	if err := runGolangciLint(ctx); err != nil {
+		failures = append(failures, err.Error())
 	} else {
 		sparkwing.Info(ctx, "golangci-lint: clean")
 	}

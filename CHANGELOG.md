@@ -123,11 +123,17 @@ code change to unlock.
   file paths. Pass the directory through the tool's cache variable
   (`Env("GOLANGCI_LINT_CACHE", sparkwing.ToolCacheDir("golangci-lint"))`) to
   keep the caches disjoint while each worktree still reuses its own. Running
-  two lint jobs at once stays unaddressed: golangci-lint takes its
-  parallel-runner lock in the OS temp directory, wherever
-  `GOLANGCI_LINT_CACHE` points, so a job that starts while another holds that
-  lock still exits with `parallel golangci-lint is running`. Pass
-  `--allow-parallel-runners` or serialize the jobs to cover that.
+  two lint jobs at once is a different problem and a scoped cache does not
+  touch it: golangci-lint takes its parallel-runner lock on one file in the OS
+  temp directory, so every run on the box contends for it no matter where
+  `GOLANGCI_LINT_CACHE` points -- only `TMPDIR` moves it -- and a run that
+  cannot take the lock retries for 5s and then exits `parallel golangci-lint is
+  running`, which a gate reports as a lint failure against a tree that is fine.
+  Pass `--allow-serial-runners` so the run waits its turn instead. It queues on
+  golangci-lint's own lock, so one pipeline adopting it stops failing straight
+  away with no fleet-wide agreement needed; the flag waits indefinitely, so
+  bound it with a context deadline, and report a deadline that fires as
+  could-not-run with the time waited rather than as a finding in the tree.
 
 ### Changed
 

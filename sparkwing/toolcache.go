@@ -34,12 +34,32 @@ const toolCacheRoot = "sparkwing-toolcache"
 // creation failure is left to surface from the tool, which is what
 // needs the directory and reports its own cache errors.
 //
-// Running two lint jobs at once is a separate problem this does not
-// solve. golangci-lint takes its parallel-runner lock on a file in the
-// OS temp directory, wherever GOLANGCI_LINT_CACHE points, so a second
-// run started while another holds that lock still exits with "parallel
-// golangci-lint is running". Pass --allow-parallel-runners, or
-// serialize the jobs behind a lock of your own.
+// Running two lint jobs at once is a different problem, and a scoped
+// cache does not touch it. golangci-lint takes its parallel-runner
+// lock on golangci-lint.lock in the OS temp directory, so every run on
+// the box contends on one file no matter where GOLANGCI_LINT_CACHE
+// points -- only TMPDIR moves it. By default a run that cannot take
+// the lock retries for 5s and then exits "parallel golangci-lint is
+// running", which a gate reports as a lint failure against a tree that
+// is fine.
+//
+// Pass --allow-serial-runners so the run waits its turn instead. It
+// waits on golangci-lint's own lock, so it queues behind every other
+// golangci-lint on the box, including runs that know nothing about
+// sparkwing. The flag waits indefinitely, so bound it with a context
+// deadline, or one wedged linter pins every gate on the machine. A
+// deadline that fires establishes that the step did not finish, never
+// why: report it as could-not-run with the time waited, and keep the
+// word contention for a run that printed "parallel golangci-lint is
+// running":
+//
+//	sparkwing.Bash(ctx, "golangci-lint run --allow-serial-runners ./...").
+//		Env("GOLANGCI_LINT_CACHE", sparkwing.ToolCacheDir("golangci-lint")).
+//		Run()
+//
+// --allow-parallel-runners drops the lock instead of waiting on it,
+// which lets N linters share the box's CPU and memory at once. Prefer
+// it only where the machine has headroom to spare.
 func ToolCacheDir(tool string) string {
 	scope := WorkDir()
 	if scope == "" {
