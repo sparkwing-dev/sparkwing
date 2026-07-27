@@ -188,12 +188,26 @@ code change to unlock.
   its primary would hide the pin that is actually refused. A checkout whose
   `.sparkwing` carries a `replace` or a `go.work` using a local SDK checkout
   is skipped: its declared pin is not what gets built, so reporting it would
-  send an operator to edit a line that changes nothing. The comparison reads
-  both the daemon's protocol major and each pin's from a release-to-major
-  table rather than testing either against the CLI's own compiled-in
-  boundary, so the check keeps working after the next bump -- a daemon left
-  resident at the previous major still locks out every pin below it, which a
-  single boundary constant could not see.
+  send an operator to edit a line that changes nothing. The daemon's protocol
+  major is read from its handshake ack, and each pin is compared against the
+  lowest release known to speak that major, so the check keeps working across
+  every cliff rather than the one current when the CLI was built: a daemon
+  left resident at an older major still locks out every pin below it, and a
+  daemon speaking a major *newer* than the CLI is diagnosed too. Reading the
+  ack rather than the queue state is what makes that second case visible at
+  all: such a daemon refuses the CLI's queue query outright, but answers the
+  handshake before it refuses anything.
+- **cli:** `doctor` names a resident daemon whose wire protocol this build
+  does not know, in a new `daemon_protocol_gap` section. This build cannot
+  query that daemon, and it cannot name the release that first spoke that
+  protocol -- which release carried a bump is decided after the build being
+  asked was cut -- so each locked-out checkout is measured against the
+  daemon's own release, which speaks that protocol but need not be the lowest
+  release that does. The remedy printed there is to update the sparkwing CLI,
+  which carries the release table this diagnosis reads. It is the one state in
+  which upgrading the CLI helps, so the `locked_out_repos` warning leaves out
+  its note that it does not, and says instead that the target on each row is
+  the daemon's own release.
 
 - **cli:** `pipeline hooks install` no longer leaves a dead gate on machines
   whose global git config sets `core.hooksPath`. That setting replaces

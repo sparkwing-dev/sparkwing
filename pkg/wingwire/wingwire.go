@@ -29,8 +29,6 @@ package wingwire
 import (
 	"encoding/json"
 	"fmt"
-
-	"golang.org/x/mod/semver"
 )
 
 // ProtocolMajor is the wire protocol's compatibility version. A daemon
@@ -56,6 +54,12 @@ type ProtocolFloor struct {
 // is a third party: a daemon two majors behind the current release still
 // locks out every pin behind *it*, and a boundary constant naming only the
 // current cliff cannot see that at all.
+//
+// Every lookup here is keyed by major, never by version. A table can place a
+// release only below its newest row -- which major a later release speaks was
+// decided after the table was written -- so mapping a version to a major
+// silently returns a floor dressed up as an answer. Ask instead for the
+// release a known major starts at, and compare versions against that.
 type ProtocolFloors []ProtocolFloor
 
 // releasedProtocolFloors is the table this build shipped with. A bump of
@@ -73,36 +77,15 @@ func ReleasedProtocolFloors() ProtocolFloors {
 	return releasedProtocolFloors
 }
 
-// MajorSpokenBy reports the wire protocol major a client or daemon built
-// from SDK release version speaks. version is a semver string as it appears
-// in a .sparkwing/go.mod require; ok is false when it does not parse, which
-// is not evidence about any major, so callers stay silent rather than
-// accusing a repo they could not read.
-//
-// The answer is a floor rather than an equality: a version past the newest
-// row reports that row's major, because a table cannot describe a major
-// first released after it was written. Callers therefore compare two majors
-// -- a daemon's against a pin's -- and never test one against the
-// compiled-in [ProtocolMajor], which describes only the cliff current at
-// compile time and goes blind at the next bump.
-func (f ProtocolFloors) MajorSpokenBy(version string) (major int, ok bool) {
-	if len(f) == 0 || !semver.IsValid(version) {
-		return 0, false
-	}
-	canon := semver.Canonical(version)
-	major = f[0].Major
-	for _, floor := range f {
-		if semver.Compare(canon, floor.MinVersion) >= 0 {
-			major = floor.Major
-		}
-	}
-	return major, true
-}
-
 // MinVersionSpeaking returns the lowest released SDK version whose clients
 // speak protocol major. ok is false when the table has no row for major,
 // which is what a daemon newer than the binary reading it looks like; only
 // that daemon's own version is then known to name a release speaking to it.
+//
+// Because the table's majors run 1..n with ascending floors, a release below
+// the answer speaks a major below major, and a release at or above it speaks
+// major or newer. That is the comparison a caller holding a peer's major
+// wants, and unlike a version-to-major lookup it stays exact.
 func (f ProtocolFloors) MinVersionSpeaking(major int) (version string, ok bool) {
 	for _, floor := range f {
 		if floor.Major == major {
@@ -110,6 +93,17 @@ func (f ProtocolFloors) MinVersionSpeaking(major int) (version string, ok bool) 
 		}
 	}
 	return "", false
+}
+
+// Newest returns the table's newest row: the highest protocol major it
+// covers and the release that introduced it. ok is false for an empty table.
+// A caller comparing itself against a peer uses this to tell whether the peer
+// speaks a major this build has heard of at all.
+func (f ProtocolFloors) Newest() (floor ProtocolFloor, ok bool) {
+	if len(f) == 0 {
+		return ProtocolFloor{}, false
+	}
+	return f[len(f)-1], true
 }
 
 // LeaseTokenEnv is the current execution lease token inherited by child

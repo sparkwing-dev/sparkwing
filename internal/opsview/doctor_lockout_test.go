@@ -1,8 +1,10 @@
 package opsview
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -58,6 +60,15 @@ func repoPinned(t *testing.T, base, name, pin string) string {
 // this build has not reached yet declare their own.
 func shippedFloors() wingwire.ProtocolFloors { return wingwire.ReleasedProtocolFloors() }
 
+func renderPretty(t *testing.T, r DoctorReport) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := RenderDoctor(&buf, r, "", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	return buf.String()
+}
+
 func TestDiagnoseLockedOutRepos_NamesReposPinnedBelowTheDaemonsProtocol(t *testing.T) {
 	base := t.TempDir()
 	behind := repoPinned(t, base, "workwing", "v0.17.25")
@@ -65,7 +76,7 @@ func TestDiagnoseLockedOutRepos_NamesReposPinnedBelowTheDaemonsProtocol(t *testi
 	registerRepos(t, behind, current)
 
 	var report DoctorReport
-	diagnoseLockedOutRepos("v0.22.0", shippedFloors(), &report)
+	diagnoseLockedOutRepos(2, "v0.22.0", shippedFloors(), &report)
 
 	if len(report.LockedOutRepos) != 1 {
 		t.Fatalf("want exactly the behind repo reported; got %+v", report.LockedOutRepos)
@@ -73,6 +84,9 @@ func TestDiagnoseLockedOutRepos_NamesReposPinnedBelowTheDaemonsProtocol(t *testi
 	got := report.LockedOutRepos[0]
 	if got.Name != "workwing" || got.Pin != "v0.17.25" || got.RaiseTo != "v0.22.0" {
 		t.Errorf("locked-out row = %+v, want workwing pinned v0.17.25 raising to v0.22.0", got)
+	}
+	if report.DaemonProtocolGap != nil {
+		t.Errorf("the table covers protocol 2; got a gap %+v", report.DaemonProtocolGap)
 	}
 	if report.Clean() {
 		t.Error("a report naming locked-out repos must not be clean")
@@ -95,7 +109,7 @@ func TestDiagnoseLockedOutRepos_ReportsACliffOlderThanTheNewestOne(t *testing.T)
 	registerRepos(t, behind, served)
 
 	var report DoctorReport
-	diagnoseLockedOutRepos("v0.22.0", afterNextBump, &report)
+	diagnoseLockedOutRepos(2, "v0.22.0", afterNextBump, &report)
 
 	if len(report.LockedOutRepos) != 1 {
 		t.Fatalf("a protocol-2 daemon locks out every protocol-1 pin; got %+v", report.LockedOutRepos)
@@ -106,28 +120,92 @@ func TestDiagnoseLockedOutRepos_ReportsACliffOlderThanTheNewestOne(t *testing.T)
 	}
 }
 
-// A daemon past the newest floor speaks a major the table cannot name, so the
-// remedy falls back to the one release known to speak it: the daemon's own.
-func TestDiagnoseLockedOutRepos_RaisesToTheDaemonsVersionWhenTheTableEndsBelowIt(t *testing.T) {
-	shortTable := wingwire.ProtocolFloors{{Major: 1, MinVersion: "v0.0.0"}}
+// A daemon whose major the table does not carry cannot be answered with a
+// release from that table: the one release known to speak its major is the one
+// it is running. Raising to the floor of the newest major the table does carry
+// would leave every named checkout refused.
+func TestDiagnoseLockedOutRepos_RaisesToTheDaemonsOwnReleaseWhenTheTableEndsBelowItsProtocol(t *testing.T) {
 	base := t.TempDir()
 	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
 
 	var report DoctorReport
-	diagnoseLockedOutRepos("v0.22.0", shortTable, &report)
+	diagnoseLockedOutRepos(3, "v0.30.0", shippedFloors(), &report)
 
-	if len(report.LockedOutRepos) != 0 {
-		t.Fatalf("a table with one major cannot place two builds on opposite sides; got %+v", report.LockedOutRepos)
+	if len(report.LockedOutRepos) != 1 {
+		t.Fatalf("a protocol-3 daemon locks out a protocol-1 pin; got %+v", report.LockedOutRepos)
 	}
+	if got := report.LockedOutRepos[0].RaiseTo; got != "v0.30.0" {
+		t.Errorf("row raises to %q; v0.22.0 speaks protocol 2 and stays refused by a protocol-3 daemon", got)
+	}
+}
 
-	twoOfThree := wingwire.ProtocolFloors{
-		{Major: 1, MinVersion: "v0.0.0"},
-		{Major: 2, MinVersion: "v0.22.0"},
+// Reading the daemon's major off its version places every pin at the newest
+// major the table carries and clears it, so the checkouts a newer daemon
+// refuses go unreported. The major comes from the handshake instead, and the
+// pins are placed against the release that answers it.
+func TestDiagnoseLockedOutRepos_NamesPinsAtTheNewestKnownMajorWhenTheDaemonIsPastIt(t *testing.T) {
+	base := t.TempDir()
+	registerRepos(t,
+		repoPinned(t, base, "workwing", "v0.17.25"),
+		repoPinned(t, base, "bitwing", "v0.23.0"),
+		repoPinned(t, base, "dowing", "v0.30.0"),
+	)
+
+	var report DoctorReport
+	diagnoseLockedOutRepos(3, "v0.30.0", shippedFloors(), &report)
+
+	got := map[string]string{}
+	for _, row := range report.LockedOutRepos {
+		got[row.Name] = row.RaiseTo
 	}
-	report = DoctorReport{}
-	diagnoseLockedOutRepos("v0.40.0", twoOfThree, &report)
-	if len(report.LockedOutRepos) != 1 || report.LockedOutRepos[0].RaiseTo != "v0.22.0" {
-		t.Fatalf("a daemon past the newest floor still speaks that floor's major; got %+v", report.LockedOutRepos)
+	want := map[string]string{"workwing": "v0.30.0", "bitwing": "v0.30.0"}
+	if len(got) != len(want) {
+		t.Fatalf("locked-out rows = %+v, want workwing and bitwing -- dowing already carries the daemon's release", report.LockedOutRepos)
+	}
+	for name, raiseTo := range want {
+		if got[name] != raiseTo {
+			t.Errorf("row %s raises to %q, want %q", name, got[name], raiseTo)
+		}
+	}
+}
+
+// The gap is a finding in its own right: this build cannot query that daemon
+// either, and the release table it reads is the one that has to be refreshed.
+func TestDiagnoseLockedOutRepos_ReportsADaemonSpeakingAMajorTheTableDoesNotCarry(t *testing.T) {
+	base := t.TempDir()
+	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
+
+	var report DoctorReport
+	diagnoseLockedOutRepos(3, "v0.30.0", shippedFloors(), &report)
+
+	gap := report.DaemonProtocolGap
+	if gap == nil {
+		t.Fatal("a daemon at protocol 3 against a table ending at 2 is a gap this build must name")
+	}
+	if gap.Self != wingwire.ProtocolMajor || gap.Daemon != 3 || gap.DaemonVersion != "v0.30.0" {
+		t.Errorf("gap = %+v, want self %d against daemon 3 (v0.30.0)", gap, wingwire.ProtocolMajor)
+	}
+	if report.Clean() {
+		t.Error("a build that cannot speak to the resident daemon is not a clean report")
+	}
+}
+
+// With no release name to raise to, naming checkouts would hand the operator a
+// target that does not exist; the gap still reports, so the run is not silent.
+func TestDiagnoseLockedOutRepos_NamesNoTargetWhenANewerDaemonReportsNoRelease(t *testing.T) {
+	base := t.TempDir()
+	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
+
+	for _, version := range []string{"", "(unknown)", scratchModuleVersion} {
+		var report DoctorReport
+		diagnoseLockedOutRepos(3, version, shippedFloors(), &report)
+
+		if len(report.LockedOutRepos) != 0 {
+			t.Errorf("daemon version %q names no release to raise to; got %+v", version, report.LockedOutRepos)
+		}
+		if report.DaemonProtocolGap == nil {
+			t.Errorf("daemon version %q still speaks a protocol this build does not", version)
+		}
 	}
 }
 
@@ -138,7 +216,7 @@ func TestDiagnoseLockedOutRepos_GivesARegisteredWorktreeItsOwnRow(t *testing.T) 
 	registerRepos(t, primary, worktree)
 
 	var report DoctorReport
-	diagnoseLockedOutRepos("v0.22.0", shippedFloors(), &report)
+	diagnoseLockedOutRepos(2, "v0.22.0", shippedFloors(), &report)
 
 	if len(report.LockedOutRepos) != 1 {
 		t.Fatalf("the worktree carries its own refused pin; got %+v", report.LockedOutRepos)
@@ -173,7 +251,7 @@ func TestDiagnoseLockedOutRepos_SkipsARepoWhoseWorkspaceOverridesThePin(t *testi
 	registerRepos(t, repo)
 
 	var report DoctorReport
-	diagnoseLockedOutRepos("v0.22.0", shippedFloors(), &report)
+	diagnoseLockedOutRepos(2, "v0.22.0", shippedFloors(), &report)
 
 	if len(report.LockedOutRepos) != 0 {
 		t.Fatalf("a workspace-overridden pin must not be reported; got %+v", report.LockedOutRepos)
@@ -185,22 +263,113 @@ func TestDiagnoseLockedOutRepos_SilentWhenTheDaemonSpeaksTheOlderProtocol(t *tes
 	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
 
 	var report DoctorReport
-	diagnoseLockedOutRepos("v0.20.0", shippedFloors(), &report)
+	diagnoseLockedOutRepos(1, "v0.20.0", shippedFloors(), &report)
 
 	if len(report.LockedOutRepos) != 0 {
 		t.Fatalf("no repo is locked out by a protocol-1 daemon; got %+v", report.LockedOutRepos)
 	}
 }
 
-func TestDiagnoseLockedOutRepos_SilentWithoutAReadableDaemonVersion(t *testing.T) {
+// The daemon's version answers "which release do I raise to" and nothing else;
+// the major it speaks came from the handshake, so a daemon too old to report a
+// version is still diagnosed.
+func TestDiagnoseLockedOutRepos_NamesReposAgainstADaemonThatReportsNoVersion(t *testing.T) {
 	base := t.TempDir()
 	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
 
-	for _, v := range []string{"", "(unknown)"} {
-		var report DoctorReport
-		diagnoseLockedOutRepos(v, shippedFloors(), &report)
-		if len(report.LockedOutRepos) != 0 {
-			t.Errorf("daemon version %q is not evidence; got %+v", v, report.LockedOutRepos)
+	var report DoctorReport
+	diagnoseLockedOutRepos(2, "", shippedFloors(), &report)
+
+	if len(report.LockedOutRepos) != 1 || report.LockedOutRepos[0].RaiseTo != "v0.22.0" {
+		t.Fatalf("the table names protocol 2's floor without help from the daemon's version; got %+v", report.LockedOutRepos)
+	}
+}
+
+func TestDiagnoseLockedOutRepos_SilentWithoutAReadableProtocolMajor(t *testing.T) {
+	base := t.TempDir()
+	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
+
+	var report DoctorReport
+	diagnoseLockedOutRepos(0, "v0.30.0", shippedFloors(), &report)
+
+	if len(report.LockedOutRepos) != 0 || report.DaemonProtocolGap != nil {
+		t.Fatalf("a daemon that named no protocol major is not evidence; got %+v", report)
+	}
+}
+
+func TestRenderDoctorPretty_GivesEveryLockedOutRowItsOwnRaiseTarget(t *testing.T) {
+	out := renderPretty(t, DoctorReport{LockedOutRepos: []DoctorLockedOutRepo{
+		{Name: "workwing", Path: "/code/workwing", Pin: "v0.17.25", RaiseTo: "v0.22.0"},
+		{Name: "bw-1200", Path: "/code/bw-1200", Pin: "v0.15.4", RaiseTo: "v0.22.0", Worktree: true},
+	}})
+
+	for _, want := range []string{
+		"workwing", "pinned v0.17.25", "/code/workwing",
+		"bw-1200 (worktree)", "pinned v0.15.4", "/code/bw-1200",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("pretty output does not mention %q:\n%s", want, out)
+		}
+	}
+	if got := strings.Count(out, "raise to v0.22.0"); got != 2 {
+		t.Errorf("raise target named %d times, want once per row:\n%s", got, out)
+	}
+}
+
+// With the daemon's protocol known, the CLI really is a bystander: it is not
+// the client in that handshake and no CLI upgrade moves the pins.
+func TestRenderDoctorPretty_SaysUpgradingTheCLIDoesNotHelpWhenItKnowsTheDaemonsProtocol(t *testing.T) {
+	out := renderPretty(t, DoctorReport{LockedOutRepos: []DoctorLockedOutRepo{
+		{Name: "workwing", Path: "/code/workwing", Pin: "v0.17.25", RaiseTo: "v0.22.0"},
+	}})
+
+	if !strings.Contains(out, "the sparkwing CLI is not the client here and upgrading it does not help") {
+		t.Errorf("pretty output stopped naming the CLI as a bystander:\n%s", out)
+	}
+	if strings.Contains(out, "update the sparkwing CLI") {
+		t.Errorf("nothing here is fixed by updating the CLI:\n%s", out)
+	}
+}
+
+// With the daemon past this build's table, updating the CLI is the action that
+// sharpens the diagnosis, so the bystander sentence would argue against the
+// one lever that moves.
+func TestRenderDoctorPretty_PointsAtUpdatingTheCLIWhenTheDaemonSpeaksPastItsTable(t *testing.T) {
+	out := renderPretty(t, DoctorReport{
+		LockedOutRepos: []DoctorLockedOutRepo{
+			{Name: "workwing", Path: "/code/workwing", Pin: "v0.17.25", RaiseTo: "v0.30.0"},
+		},
+		DaemonProtocolGap: &DoctorProtocolGap{Self: 2, Daemon: 3, DaemonVersion: "v0.30.0"},
+	})
+
+	if strings.Contains(out, "upgrading it does not help") {
+		t.Errorf("the CLI is what has to move here; the report argues against it:\n%s", out)
+	}
+	for _, want := range []string{
+		"update the sparkwing CLI",
+		"speaks wire protocol 3 and this sparkwing speaks 2",
+		"cannot name the lowest release that would do",
+		"raise to v0.30.0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("pretty output does not mention %q:\n%s", want, out)
+		}
+	}
+}
+
+// The gap stands alone when no checkout is behind: this build still cannot
+// talk to the resident daemon, and saying nothing is how the incident starts.
+func TestRenderDoctorPretty_ReportsTheProtocolGapWithNoLockedOutCheckouts(t *testing.T) {
+	out := renderPretty(t, DoctorReport{
+		DaemonProtocolGap: &DoctorProtocolGap{Self: 2, Daemon: 3, DaemonVersion: "v0.30.0"},
+	})
+
+	if strings.Contains(out, "healthy") {
+		t.Errorf("a daemon this build cannot speak to is not a healthy home:\n%s", out)
+	}
+	for _, want := range []string{"(sparkwing v0.30.0)", "update the sparkwing CLI"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("pretty output does not mention %q:\n%s", want, out)
 		}
 	}
 }

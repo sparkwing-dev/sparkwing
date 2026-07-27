@@ -28,50 +28,46 @@ func TestReleasedProtocolFloors_CoverEveryMajorUpToTheCurrentOne(t *testing.T) {
 	}
 }
 
-func TestMajorSpokenBy_SplitsReleasesAtEveryFloor(t *testing.T) {
+// Every release below a major's floor speaks a major below it, and every
+// release at or above it speaks that major or newer. That ordering is what
+// lets a caller holding a peer's major place a pin with one comparison.
+func TestMinVersionSpeaking_SortsEveryReleaseOntoTheRightSideOfAFloor(t *testing.T) {
 	floors := ProtocolFloors{
 		{Major: 1, MinVersion: "v0.0.0"},
 		{Major: 2, MinVersion: "v0.22.0"},
 		{Major: 3, MinVersion: "v0.30.0"},
 	}
-	want := map[string]int{
-		"v0.15.4":  1,
-		"v0.17.25": 1,
-		"v0.20.0":  1,
-		"v0.22.0":  2,
-		"v0.23.0":  2,
-		"v0.29.9":  2,
-		"v0.30.0":  3,
-		"v1.0.0":   3,
+	floor, ok := floors.MinVersionSpeaking(3)
+	if !ok {
+		t.Fatal("MinVersionSpeaking(3) has no answer for a major the table carries")
 	}
-	for version, wantMajor := range want {
-		if major, ok := floors.MajorSpokenBy(version); !ok || major != wantMajor {
-			t.Errorf("MajorSpokenBy(%q) = %d, %v; want %d, true", version, major, ok, wantMajor)
+	below := []string{"v0.15.4", "v0.17.25", "v0.22.0", "v0.23.0", "v0.29.9", "v0.30.0-dev+1c4a5646"}
+	atOrAbove := []string{"v0.30.0", "v0.31.2", "v1.0.0"}
+	for _, v := range below {
+		if semver.Compare(v, floor) >= 0 {
+			t.Errorf("%q sorts at or above the protocol-3 floor %q; it speaks an older major", v, floor)
+		}
+	}
+	for _, v := range atOrAbove {
+		if semver.Compare(v, floor) < 0 {
+			t.Errorf("%q sorts below the protocol-3 floor %q; it speaks protocol 3", v, floor)
 		}
 	}
 }
 
-// A release past the newest floor reports that floor's major: a table cannot
-// describe a major first released after it was written.
-func TestMajorSpokenBy_ReportsTheNewestKnownMajorForLaterReleases(t *testing.T) {
-	major, ok := ReleasedProtocolFloors().MajorSpokenBy("v99.0.0")
-	if !ok || major != ProtocolMajor {
-		t.Fatalf("MajorSpokenBy(v99.0.0) = %d, %v; want %d, true", major, ok, ProtocolMajor)
+func TestNewest_NamesTheHighestMajorTheTableCovers(t *testing.T) {
+	floor, ok := ReleasedProtocolFloors().Newest()
+	if !ok {
+		t.Fatal("the shipped table has no newest row")
+	}
+	if floor.Major != ProtocolMajor {
+		t.Fatalf("newest row is major %d; this build speaks %d", floor.Major, ProtocolMajor)
 	}
 }
 
-func TestMajorSpokenBy_TreatsAPrereleaseOfAFloorAsTheMajorBelow(t *testing.T) {
-	major, ok := ReleasedProtocolFloors().MajorSpokenBy("v0.22.0-dev+1c4a5646")
-	if !ok || major != 1 {
-		t.Fatalf("MajorSpokenBy(v0.22.0-dev) = %d, %v; want 1, true -- a prerelease sorts below its release", major, ok)
-	}
-}
-
-func TestMajorSpokenBy_RefusesToGuessAtUnreadableVersions(t *testing.T) {
-	for _, v := range []string{"", "latest", "not-a-version"} {
-		if major, ok := ReleasedProtocolFloors().MajorSpokenBy(v); ok {
-			t.Errorf("MajorSpokenBy(%q) = %d, true; an unreadable version is not evidence of any major", v, major)
-		}
+func TestNewest_HasNoAnswerForAnEmptyTable(t *testing.T) {
+	if floor, ok := (ProtocolFloors{}).Newest(); ok {
+		t.Fatalf("Newest() = %+v, true; an empty table covers no major", floor)
 	}
 }
 

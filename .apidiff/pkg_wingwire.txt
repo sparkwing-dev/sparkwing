@@ -207,8 +207,8 @@ type ProtocolFloor struct {
 	MinVersion string
 }
 type ProtocolFloors []ProtocolFloor
-func (f ProtocolFloors) MajorSpokenBy(version string) (major int, ok bool)
 func (f ProtocolFloors) MinVersionSpeaking(major int) (version string, ok bool)
+func (f ProtocolFloors) Newest() (floor ProtocolFloor, ok bool)
 const ProtocolMajor = 2
 type QueueState struct {
 	Resources []ResourceState
