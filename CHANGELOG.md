@@ -49,6 +49,20 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **dashboard:** the embedded documentation is served at `/docs` on whatever
+  address `sparkwing dashboard start` (or `sparkwing-web`) is listening on.
+  It is the same set `sparkwing docs list` and `sparkwing docs read` print,
+  rendered as HTML with the pages cross-linked, so a reader on a machine with
+  no route to sparkwing.dev has the full reference from the binary they are
+  already running. The route sits inside the dashboard's authenticated mux:
+  a deployment that requires a login to see runs requires one to read the
+  docs, and one that does not, does not.
+
+- **sdk:** `docs.ReadRaw` returns an embedded page's markdown exactly as it
+  ships. `docs.Read` still rewrites cross-page links into `sparkwing docs
+  read` commands for terminal output; `ReadRaw` is for renderers that resolve
+  those links themselves.
+
 - **cli:** `sparkwing pipeline hooks survey` reports what git does with the
   hooks every registered repo declares, and `sparkwing pipeline hooks install
   --fleet` arms them all in one pass. Each repo reads as `armed` (git runs a
@@ -131,6 +145,13 @@ code change to unlock.
   untouched. `--no-prove` arms without the proof.
 
 ### Fixed
+
+- **cli:** three help entries named commands that do not exist --
+  `sparkwing users add`, `sparkwing profiles set` and `sparkwing profiles
+  use`, whose real paths sit under `cluster` and `configure`. They reached
+  readers through `--help` and through the generated CLI reference, and a
+  test now fails when a doc or the README names a command the CLI does not
+  dispatch.
 
 - **cli:** `pipeline hooks install` no longer leaves a dead gate on machines
   whose global git config sets `core.hooksPath`. That setting replaces

@@ -520,7 +520,7 @@ interactively.
 sparkwing cluster users add --name alice
 
 # Non-interactive add for CI
-sparkwing users add --name ci-bot --password "$CI_BOT_PW"
+sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW"
 ```
 
 ## `sparkwing cluster users delete`
@@ -960,7 +960,7 @@ sparkwing configure profiles list
 
 Delete a profile
 
-Removes the entry from profiles.yaml. If the removed profile was the default, no new default is auto-picked -- operators must pass --profile on every call or set one via 'sparkwing profiles use --name <X>'.
+Removes the entry from profiles.yaml. If the removed profile was the default, no new default is auto-picked -- operators must pass --profile on every call or set one via 'sparkwing configure profiles use --name <X>'.
 
 ### Flags
 
@@ -1001,7 +1001,7 @@ clears the token (empty value, not an omitted flag). Use
 sparkwing configure profiles set --name prod --token $NEW_TOKEN
 
 # Clear a stale logs URL
-sparkwing profiles set --name prod --logs=""
+sparkwing configure profiles set --name prod --logs=""
 
 # Point a profile at a different default runner
 sparkwing configure profiles set --name prod --default-runner cloud-gpu

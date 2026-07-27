@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/docsweb"
 	swpaths "github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -176,6 +177,11 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 		authedMux.HandleFunc("GET /api/v1/runs/{id}", GetRunHandler(opts.Backend))
 		authedMux.HandleFunc("/api/v1/", notImplementedHandler)
 	}
+
+	// safety: /docs belongs on authedMux, above the catch-all: the outer router is
+	// unauthenticated, so mounting it there would publish the pages to anyone who can
+	// reach the listener while the rest of the dashboard needs a session.
+	authedMux.Handle("GET /docs", docsweb.Handler())
 
 	subFS, err := fs.Sub(nextBundle, "next-out")
 	if err != nil {

@@ -1718,7 +1718,7 @@ default status.`,
 var cmdProfilesRemove = Command{
 	Path:        "sparkwing configure profiles remove",
 	Synopsis:    "Delete a profile",
-	Description: `Removes the entry from profiles.yaml. If the removed profile was the default, no new default is auto-picked -- operators must pass --profile on every call or set one via 'sparkwing profiles use --name <X>'.`,
+	Description: `Removes the entry from profiles.yaml. If the removed profile was the default, no new default is auto-picked -- operators must pass --profile on every call or set one via 'sparkwing configure profiles use --name <X>'.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Profile name to remove", Required: true, Group: "Input"},
 	},
@@ -1757,7 +1757,7 @@ clears the token (empty value, not an omitted flag). Use
 	GroupOrder: []string{"Input", "Connection", "Dispatch", "System", "Other"},
 	Examples: []Example{
 		{"Rotate a profile's token", "sparkwing configure profiles set --name prod --token $NEW_TOKEN"},
-		{"Clear a stale logs URL", `sparkwing profiles set --name prod --logs=""`},
+		{"Clear a stale logs URL", `sparkwing configure profiles set --name prod --logs=""`},
 		{"Point a profile at a different default runner", "sparkwing configure profiles set --name prod --default-runner cloud-gpu"},
 	},
 }
@@ -1896,7 +1896,7 @@ interactively.`,
 	},
 	Examples: []Example{
 		{"Interactive add", "sparkwing cluster users add --name alice"},
-		{"Non-interactive add for CI", `sparkwing users add --name ci-bot --password "$CI_BOT_PW"`},
+		{"Non-interactive add for CI", `sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW"`},
 	},
 }
 

@@ -77,16 +77,32 @@ func List() []Entry {
 // markdown links rewritten into actionable CLI commands (see
 // rewriteCLILinks). Returns ErrNotFound when the slug is unknown.
 func Read(slug string) (string, error) {
+	body, err := ReadRaw(slug)
+	if err != nil {
+		return "", err
+	}
+	return rewriteCLILinks(body), nil
+}
+
+// ReadRaw returns the embedded markdown for the given slug exactly as it
+// ships, with no link rewriting. Returns ErrNotFound when the slug is
+// unknown.
+//
+// [Read] is the right call for a terminal, where a cross-doc link is only
+// useful as the command that opens the other page. ReadRaw is for a renderer
+// that resolves those links itself -- an HTML view turns them into anchors,
+// and would otherwise have to parse the CLI commands [Read] leaves behind.
+func ReadRaw(slug string) (string, error) {
 	slug = strings.TrimSuffix(slug, ".md")
 	if slug == ChangelogSlug {
-		return rewriteCLILinks(changelogMD), nil
+		return changelogMD, nil
 	}
 	p := path.Join("mirror", slug+".md")
 	body, err := fs.ReadFile(allDocs, p)
 	if err != nil {
 		return "", fmt.Errorf("docs: %q: %w", slug, ErrNotFound)
 	}
-	return rewriteCLILinks(string(body)), nil
+	return string(body), nil
 }
 
 // crossDocLinkPattern matches markdown links to a *.md file with an
