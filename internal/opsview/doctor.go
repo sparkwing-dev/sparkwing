@@ -14,8 +14,6 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"golang.org/x/mod/semver"
-
 	"github.com/sparkwing-dev/sparkwing/internal/boxslot"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
@@ -149,12 +147,24 @@ type DoctorVersionSkew struct {
 // its pinned SDK speaks an older wire protocol major, which no takeover can
 // resolve because takeover runs from the client side.
 type DoctorLockedOutRepo struct {
-	// Name is the repo directory's base name.
+	// Name is the checkout directory's base name.
 	Name string `json:"name"`
-	// Path is the primary checkout root.
+	// Path is the registered checkout root whose .sparkwing/go.mod carries
+	// Pin. A linked worktree gets its own row rather than folding into its
+	// primary: the pipeline binary is built from the .sparkwing of whichever
+	// checkout runs the gate, and a worktree's pin can differ from the
+	// primary's, so canonicalizing here would report a pin nothing runs and
+	// hide the one that is refused.
 	Path string `json:"path"`
-	// Pin is the SDK version in the repo's .sparkwing/go.mod.
+	// Worktree marks a row whose Path is a linked worktree, so a Name that
+	// reads as a branch rather than a repo is not a surprise.
+	Worktree bool `json:"worktree,omitempty"`
+	// Pin is the SDK version in the checkout's .sparkwing/go.mod.
 	Pin string `json:"pin"`
+	// RaiseTo is the SDK release this pin has to reach to speak to the
+	// resident daemon: the lowest release at the daemon's protocol major, or
+	// the daemon's own version when this build predates that major.
+	RaiseTo string `json:"raise_to"`
 }
 
 // DoctorLegacyHolder is one live legacy box-slot holder in the report.
@@ -358,7 +368,7 @@ func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report 
 	if versionSkewed(selfVersion, qs.DaemonVersion) {
 		report.DaemonVersionSkew = &DoctorVersionSkew{Self: selfVersion, Daemon: qs.DaemonVersion}
 	}
-	diagnoseLockedOutRepos(qs.DaemonVersion, report)
+	diagnoseLockedOutRepos(qs.DaemonVersion, wingwire.ReleasedProtocolFloors(), report)
 }
 
 // diagnoseLockedOutRepos names the registered repos the resident daemon will
@@ -370,38 +380,47 @@ func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report 
 // the error surfaces in the victim rather than the cause. Read-only -- the
 // remedy edits another repo's go.mod, which is the operator's call.
 //
-// Silent unless the daemon itself speaks the current major: an older daemon
-// serves every older client fine, and a daemon version that will not parse is
-// not evidence against anyone. Repos whose SDK is supplied by a replace
-// directive or a go.work `use` are skipped too -- those build the pipeline
-// from a local checkout, so the declared pin describes nothing that runs and
-// naming it would send an operator to edit a line that changes no behavior.
-func diagnoseLockedOutRepos(daemonVersion string, report *DoctorReport) {
-	if daemonVersion == "" || !semver.IsValid(daemonVersion) || !wingwire.SpeaksCurrentProtocol(daemonVersion) {
+// The comparison is between the daemon's major and each pin's major, never
+// against this binary's compiled-in major: the CLI running doctor is a third
+// party to the refusal, so a daemon older than the CLI still locks out every
+// pin older than itself. A daemon version that will not parse is not evidence
+// against anyone. Repos whose SDK is supplied by a replace directive or a
+// go.work `use` are exonerated last, after the pin has already been found
+// wanting -- those build the pipeline from a local checkout, so the declared
+// pin describes nothing that runs and naming it would send an operator to
+// edit a line that changes no behavior.
+func diagnoseLockedOutRepos(daemonVersion string, floors wingwire.ProtocolFloors, report *DoctorReport) {
+	daemonMajor, ok := floors.MajorSpokenBy(daemonVersion)
+	if !ok {
 		return
+	}
+	raiseTo := daemonVersion
+	if floor, known := floors.MinVersionSpeaking(daemonMajor); known {
+		raiseTo = floor
 	}
 	cands, err := repos.CandidatePaths()
 	if err != nil {
 		return
 	}
-	seen := map[string]bool{}
 	for _, c := range cands {
 		sparkwingDir := filepath.Join(c.Path, ".sparkwing")
 		pin, replace := repos.SDKPin(sparkwingDir)
-		if replace != "" || repos.SDKWorkspaceOverride(sparkwingDir) != "" {
+		if pin == "" || replace != "" {
 			continue
 		}
-		if pin == "" || wingwire.SpeaksCurrentProtocol(pin) {
+		pinMajor, ok := floors.MajorSpokenBy(pin)
+		if !ok || pinMajor >= daemonMajor {
 			continue
 		}
-		if seen[c.Path] {
+		if repos.SDKWorkspaceOverride(sparkwingDir) != "" {
 			continue
 		}
-		seen[c.Path] = true
 		report.LockedOutRepos = append(report.LockedOutRepos, DoctorLockedOutRepo{
-			Name: filepath.Base(c.Path),
-			Path: c.Path,
-			Pin:  pin,
+			Name:     filepath.Base(c.Path),
+			Path:     c.Path,
+			Pin:      pin,
+			RaiseTo:  raiseTo,
+			Worktree: c.Worktree,
 		})
 	}
 	sort.Slice(report.LockedOutRepos, func(i, j int) bool {
@@ -660,12 +679,16 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 
 	if n := len(r.LockedOutRepos); n > 0 {
-		fmt.Fprintf(w, "\nwarning: %d repo(s) cannot gate against the resident admission daemon -- their pinned SDK speaks an older wire protocol\n", n)
+		fmt.Fprintf(w, "\nwarning: %d checkout(s) cannot gate against the resident admission daemon -- their pinned SDK speaks an older wire protocol\n", n)
 		for _, lr := range r.LockedOutRepos {
-			fmt.Fprintf(w, "  %s\tpinned %s\t%s\n", lr.Name, lr.Pin, lr.Path)
+			kind := ""
+			if lr.Worktree {
+				kind = " (worktree)"
+			}
+			fmt.Fprintf(w, "  %s%s\tpinned %s\t%s\n", lr.Name, kind, lr.Pin, lr.Path)
 		}
-		fmt.Fprintf(w, "  every pipeline run in these repos is refused until the pin reaches %s; the sparkwing CLI is not the client here and upgrading it does not help\n",
-			wingwire.MinVersionSpeakingProtocolMajor)
+		fmt.Fprintf(w, "  every pipeline run in these checkouts is refused until the pin in that checkout's .sparkwing/go.mod reaches %s; the sparkwing CLI is not the client here and upgrading it does not help\n",
+			r.LockedOutRepos[0].RaiseTo)
 	}
 
 	if n := len(r.QuarantinedLedgers); n > 0 {

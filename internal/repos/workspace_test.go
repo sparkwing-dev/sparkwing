@@ -31,9 +31,6 @@ func writeWork(t *testing.T, sparkwingDir string, uses ...string) {
 	}
 }
 
-// TestSDKWorkspaceOverride_FindsALocalSDKUse covers the real shape found in
-// four checkouts: .sparkwing/go.work using ../../sparkwing, which makes the
-// go.mod pin describe nothing that actually gets built.
 func TestSDKWorkspaceOverride_FindsALocalSDKUse(t *testing.T) {
 	base := t.TempDir()
 	repo := filepath.Join(base, "app")

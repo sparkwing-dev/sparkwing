@@ -63,6 +63,13 @@ code change to unlock.
   read` commands for terminal output; `ReadRaw` is for renderers that resolve
   those links themselves.
 
+- **sdk:** `wingwire.ProtocolFloors` maps SDK releases to the wire protocol
+  major their clients speak, and `wingwire.ReleasedProtocolFloors` returns the
+  table this build ships. Explaining a refused handshake means comparing two
+  versions that are both free to be old -- the resident daemon's and the
+  calling repository's pin -- so it needs the whole history of protocol
+  cliffs, not just the one current when the binary was compiled.
+
 - **cli:** `sparkwing pipeline hooks survey` reports what git does with the
   hooks every registered repo declares, and `sparkwing pipeline hooks install
   --fleet` arms them all in one pass. Each repo reads as `armed` (git runs a
@@ -160,14 +167,33 @@ code change to unlock.
   error now reports both sides' protocol major and version, names the pin to
   raise and the release to raise it to, offers `SPARKWING_HOME` for an
   isolated daemon, and says outright that the CLI is not a party to it.
+  This wording does not reach any repository that is locked out today. The
+  message is compiled into the client, and the clients that hit this error
+  are pipeline binaries pinned below the boundary, which carry the old text
+  and keep printing it; a repository sees the new message only once its pin
+  has moved past the boundary, at which point it is no longer refused. The
+  benefit is for the next protocol bump, not this one -- for repositories
+  currently refused, the `doctor` entry below is the surface that reaches
+  them, because it runs from the machine's CLI rather than from the pinned
+  binary being turned away.
 - **cli:** `doctor` reports the version skew that actually blocks work.
   It compared the running CLI against the resident daemon and said nothing
-  about registered repositories whose pinned SDK speaks an older protocol
-  major -- the skew that refuses every gate those repositories run. The new
-  `locked_out_repos` section names each one with its pin. A repository whose
+  about registered checkouts whose pinned SDK speaks an older protocol
+  major -- the skew that refuses every gate those checkouts run. The new
+  `locked_out_repos` section names each one with its pin and the release the
+  pin has to reach. This is the diagnosis that reaches an operator who is
+  locked out right now. A linked worktree gets its own row, marked
+  `worktree`: the pipeline binary is built from the `.sparkwing` of whichever
+  checkout runs the gate, so a worktree's pin is its own and folding it into
+  its primary would hide the pin that is actually refused. A checkout whose
   `.sparkwing` carries a `replace` or a `go.work` using a local SDK checkout
   is skipped: its declared pin is not what gets built, so reporting it would
-  send an operator to edit a line that changes nothing.
+  send an operator to edit a line that changes nothing. The comparison reads
+  both the daemon's protocol major and each pin's from a release-to-major
+  table rather than testing either against the CLI's own compiled-in
+  boundary, so the check keeps working after the next bump -- a daemon left
+  resident at the previous major still locks out every pin below it, which a
+  single boundary constant could not see.
 
 - **cli:** `pipeline hooks install` no longer leaves a dead gate on machines
   whose global git config sets `core.hooksPath`. That setting replaces

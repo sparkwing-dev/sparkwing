@@ -34,6 +34,11 @@ var ErrProtocolTooOld = errors.New("wingd/client: daemon speaks a newer protocol
 // can follow to no effect. The daemon is machine-wide and the first run to
 // need one brings it up, so the repo that spawned it need not be the repo
 // now being refused.
+//
+// The release to raise to is looked up from the daemon's major rather than
+// assumed to be this build's own boundary: a daemon can speak a major whose
+// first release was cut after this binary, and then the only release known
+// to speak to it is the one the daemon is running.
 func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	self := selfVersion
 	if self == "" {
@@ -43,10 +48,18 @@ func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	if daemon == "" {
 		daemon = "(unknown)"
 	}
+	raiseTo, known := wingwire.ReleasedProtocolFloors().MinVersionSpeaking(ack.ProtocolMajor)
+	if !known {
+		raiseTo = ack.BinaryVersion
+	}
+	pinAdvice := fmt.Sprintf("Raise this repo's .sparkwing/go.mod pin to %s or newer", raiseTo)
+	if raiseTo == "" {
+		pinAdvice = fmt.Sprintf("Raise this repo's .sparkwing/go.mod pin to a release speaking protocol %d", ack.ProtocolMajor)
+	}
 	return fmt.Errorf("%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
-		"Raise this repo's .sparkwing/go.mod pin to %s or newer and re-run, or set SPARKWING_HOME to run against a daemon of your own; "+
+		"%s and re-run, or set SPARKWING_HOME to run against a daemon of your own; "+
 		"upgrading the sparkwing CLI does not affect this handshake",
-		ErrProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, wingwire.MinVersionSpeakingProtocolMajor)
+		ErrProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, pinAdvice)
 }
 
 // ErrReattachRejected is returned by [Client.Reattach] when the grace

@@ -42,6 +42,7 @@ func MigrationsList() []MigrationEntry
 func MigrationsRead(version string) (string, error)
 func NewWebClient() *WebClient
 func Read(slug string) (string, error)
+func ReadRaw(slug string) (string, error)
 func Search(query string) []Entry
 var Version string
 type Versions struct {
