@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 )
 
@@ -237,6 +238,9 @@ func TestRun_ArtifactsEndpoint(t *testing.T) {
 // under -parallel: the port is held continuously from pick to serve.
 func startLocalws(t *testing.T, opts Options) string {
 	t.Helper()
+	if reason := web.BundleSkipReason(); reason != "" {
+		t.Skip(reason)
+	}
 	ln := pickListener(t)
 	opts.Listener = ln
 	addr := ln.Addr().String()
