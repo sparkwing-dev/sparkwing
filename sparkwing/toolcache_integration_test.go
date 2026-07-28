@@ -69,20 +69,45 @@ func seedLintWorktree(t *testing.T, dir string) string {
 
 // lintWithScopedCache runs golangci-lint in dir with the cache
 // ToolCacheDir hands that worktree, the way a gate's lint step does,
-// and returns the combined output. Findings are expected, so a
+// and returns the combined output.
+func lintWithScopedCache(t *testing.T, dir string) string {
+	t.Helper()
+	useWorkDir(t, dir)
+
+	out := lintWithCache(t, dir, toolCacheDir(t, "golangci-lint"))
+	if !strings.Contains(out, "unusedHelper") {
+		t.Fatalf("golangci-lint in %s reported no finding:\n%s", dir, out)
+	}
+	return out
+}
+
+// lintWithCache runs golangci-lint in dir against an explicit cache
+// directory and returns the combined output, so a caller can hand it a
+// cache some other worktree filled. Findings are expected, so a
 // non-zero exit is not a test failure. --no-config pins the default
 // linter set regardless of what sits above the temp dir, and
 // --path-mode abs makes the reported location unambiguous. TMPDIR is
 // private because golangci-lint's parallel-runner lock is one file per
 // temp directory: on the shared default this run is refused by any
 // gate linting alongside it, and the refusal reads as a test failure.
-func lintWithScopedCache(t *testing.T, dir string) string {
+func lintWithCache(t *testing.T, dir, cache string) string {
 	t.Helper()
-	useWorkDir(t, dir)
+	return lintWithCacheConfig(t, dir, cache, "")
+}
 
-	res, err := sparkwing.Bash(context.Background(), "golangci-lint run --no-config --path-mode abs ./...").
+// lintWithCacheConfig is lintWithCache with an explicit config file, so a
+// caller can exercise the exclusion rules a real repo carries rather than
+// the default set.
+func lintWithCacheConfig(t *testing.T, dir, cache, config string) string {
+	t.Helper()
+
+	configFlag := "--no-config"
+	if config != "" {
+		configFlag = "--config " + config
+	}
+	res, err := sparkwing.Bash(context.Background(), "golangci-lint run "+configFlag+" --path-mode abs ./...").
 		Dir(dir).
-		Env("GOLANGCI_LINT_CACHE", toolCacheDir(t, "golangci-lint")).
+		Env("GOLANGCI_LINT_CACHE", cache).
 		Env("TMPDIR", t.TempDir()).
 		Capture()
 	out := res.Stdout + res.Stderr
@@ -91,9 +116,6 @@ func lintWithScopedCache(t *testing.T, dir string) string {
 		out = execErr.Stdout + execErr.Stderr
 	} else if err != nil {
 		t.Fatalf("golangci-lint in %s: %v", dir, err)
-	}
-	if !strings.Contains(out, "unusedHelper") {
-		t.Fatalf("golangci-lint in %s reported no finding:\n%s", dir, out)
 	}
 	return out
 }

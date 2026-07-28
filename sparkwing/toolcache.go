@@ -34,6 +34,18 @@ const toolCacheRoot = "sparkwing-toolcache"
 // creation failure is left to surface from the tool, which is what
 // needs the directory and reports its own cache errors.
 //
+// A new worktree therefore starts cold, and the obvious remedy is to
+// seed it by copying a cache some other worktree already filled. That
+// does not work. A stored issue carries the absolute path of the tree
+// that produced it, so a copy replays those paths exactly as a shared
+// directory does, and the seeded run reports a tree it never linted.
+//
+// Restricting the seed to a run that reported nothing does not rescue
+// it. Exclusion rules and diff baselines are applied when results are
+// reported, while the cache stores what the analyzers returned, so a
+// run can print "0 issues" and still leave path-bearing issues behind.
+// Seeding is only sound between trees at the same absolute path.
+//
 // Running two lint jobs at once is a different problem, and a scoped
 // cache does not touch it. golangci-lint takes its parallel-runner
 // lock on golangci-lint.lock in the OS temp directory, so every run on
