@@ -9,28 +9,31 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// PreCommit gates local commits with fast deterministic checks. The
-// gofmt + go vet pair covers the .sparkwing/ Go module; the two regex
-// sweeps cover the whole tracked tree for em dashes and internal
-// tracker IDs (IMP-, SDK-, LOCAL-, RUN-, ORG-, REG-, TOD-); the
-// docs-mirror check fails when docs/ (the source) and pkg/docs/mirror/
-// (the embedded copy) have drifted, so an edit to docs/ can't be
-// committed without re-running bin/sync-docs.sh; the comment check
-// fails when the staged diff adds a comment the policy disallows.
+// PreCommit gates local commits with fast deterministic checks. gofmt,
+// vet, build and test cover every committed Go module -- the repo root,
+// where the SDK, CLI and server live, as well as .sparkwing/ -- so a
+// commit cannot introduce product code that does not compile or does not
+// pass its tests; the two regex sweeps cover the whole tracked tree for
+// em dashes and internal tracker IDs (IMP-, SDK-, LOCAL-, RUN-, ORG-,
+// REG-, TOD-); the docs-mirror check fails when docs/ (the source) and
+// pkg/docs/mirror/ (the embedded copy) have drifted, so an edit to docs/
+// can't be committed without re-running bin/sync-docs.sh; the comment
+// check fails when the staged diff adds a comment the policy disallows.
 //
 // Wire it to git: declare the `pre_commit:` trigger in sparkwing.yaml
 // and run `sparkwing pipeline hooks install`.
 type PreCommit struct{ sparkwing.Base }
 
 func (PreCommit) ShortHelp() string {
-	return "Fast pre-commit gate: format, vet, em-dash + tracker-ID sweeps, docs-mirror sync, comment policy"
+	return "Fast pre-commit gate: format, vet, build, test, em-dash + tracker-ID sweeps, docs-mirror sync, comment policy"
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt and go vet on the .sparkwing/ module, plus repo-wide checks: no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted), and that the staged change adds no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags)."
+	return "Runs gofmt over the tree and go vet / go build / go test in every committed Go module (today the repo root and .sparkwing/), plus repo-wide checks: no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted), and that the staged change adds no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags)."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -44,14 +47,21 @@ func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.No
 	return nil
 }
 
-// Work declares one step per check so they dispatch in parallel. A
-// failed step doesn't block its siblings; the node's terminal outcome
-// rolls up from the steps, and the dashboard surfaces each check's
-// status independently. No Needs() edges between steps -- they're
-// fully independent.
+// Work orders the chain cheapest-first, each step waiting on the one
+// before it, so the first failure stops the run and the author waits on
+// the cheapest verdict a broken tree can produce rather than on the
+// whole suite. Measured on this repo, warm: gofmt 0.2s, vet 1.7s,
+// build 24s, test 88s.
+//
+// The four sweeps stay parallel. Nothing downstream waits on them and
+// each finishes in well under a second (docs-mirror 0.02s, comments
+// 0.5s), so ordering them would only delay their verdict without saving
+// any work.
 func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "gofmt", runGofmt)
-	sparkwing.Step(w, "vet", runVet)
+	gofmtStep := sparkwing.Step(w, "gofmt", runGofmt)
+	vetStep := sparkwing.Step(w, "vet", runVet).Needs(gofmtStep)
+	buildStep := sparkwing.Step(w, "build", runBuild).Needs(vetStep)
+	sparkwing.Step(w, "test", runTest).Needs(buildStep)
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
@@ -70,7 +80,7 @@ func checkComments(ctx context.Context) error {
 }
 
 func runGofmt(ctx context.Context) error {
-	return sparkwing.Bash(ctx, `gofmt -l .sparkwing/`).MustBeEmpty("files need formatting")
+	return sparkwing.Bash(ctx, `gofmt -l .`).MustBeEmpty("files need formatting")
 }
 
 // checkDocsMirror fails when the embedded pkg/docs/mirror/ has drifted
@@ -84,9 +94,84 @@ func checkDocsMirror(ctx context.Context) error {
 	return nil
 }
 
+// productTestUnset names the bindings this gate's own run exports that the
+// suites it runs must not inherit. The gate is a sparkwing run, so a suite
+// that launches one attaches to the gate's admission lease instead of
+// admitting on its own and fails with "attach to parent lease"; the gate is
+// also a git run, and `sparkwing run --sw-index` binds GIT_INDEX_FILE, so
+// every git a suite spawns reads and writes the gate's index rather than its
+// own fixture's. Dropping them makes a suite behave exactly as it does when
+// run by hand outside a pipeline.
+var productTestUnset = []string{
+	wingwire.LeaseTokenEnv,
+	wingwire.ChildLeaseTokenEnv,
+	"GIT_INDEX_FILE",
+}
+
+// withoutInherited prefixes cmd with a shell unset of names, which removes
+// them from the environment cmd's children see. Emptying them instead is not
+// the same thing and is worse for GIT_INDEX_FILE, which git acts on: an empty
+// value makes `git add` fail with "unable to write new index file" and
+// `git status` report every tracked file as deleted.
+func withoutInherited(cmd string, names []string) string {
+	if len(names) == 0 {
+		return cmd
+	}
+	return "unset " + strings.Join(names, " ") + "; " + cmd
+}
+
+// Checking only .sparkwing/ would prove nothing: sparkwing compiles the
+// pipeline module before it can run this gate at all, so a pipeline-scoped
+// step re-reports a prerequisite of the run as a result of it.
 func runVet(ctx context.Context) error {
-	_, err := sparkwing.Bash(ctx, "go -C .sparkwing vet ./...").Run()
-	return err
+	return forEachGoModule(ctx, "go vet", "go vet ./...", nil)
+}
+
+func runBuild(ctx context.Context) error {
+	return forEachGoModule(ctx, "go build", "go build ./...", nil)
+}
+
+func runTest(ctx context.Context) error {
+	return forEachGoModule(ctx, "go test", "go test ./...", productTestUnset)
+}
+
+// forEachGoModule runs cmd in every committed module directory that holds
+// buildable packages, with the variables in unset dropped, and reports all
+// failures, so one broken module does not hide another's verdict.
+func forEachGoModule(ctx context.Context, label, cmd string, unset []string) error {
+	dirs, err := committedModuleDirs(ctx)
+	if err != nil {
+		return err
+	}
+	var failures []string
+	for _, dir := range dirs {
+		if empty, err := moduleHasNoPackages(ctx, dir); err == nil && empty {
+			continue
+		}
+		script := withoutInherited(fmt.Sprintf("cd %q && %s", dir, cmd), unset)
+		if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %v", dir, err))
+		}
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%s failed in %d module(s):\n  - %s",
+		label, len(failures), strings.Join(failures, "\n  - "))
+}
+
+// moduleHasNoPackages reports whether dir's module holds nothing to build --
+// a committed go.mod whose packages are all behind build tags, or none yet.
+// `go vet` and `go test` exit 1 on such a module ("no packages to vet") while
+// `go build` exits 0, so walking into it would red two steps for a reason no
+// change to the author's tree can clear.
+func moduleHasNoPackages(ctx context.Context, dir string) (bool, error) {
+	out, err := sparkwing.Bash(ctx, fmt.Sprintf(`cd %q && go list ./... 2>&1 || true`, dir)).String()
+	if err != nil {
+		return false, err
+	}
+	out = strings.TrimSpace(out)
+	return out == "" || strings.Contains(out, "matched no packages"), nil
 }
 
 var trackerIDPattern = regexp.MustCompile(`\b(IMP|SDK|LOCAL|RUN|ORG|REG|TOD)-[0-9]+\b`)

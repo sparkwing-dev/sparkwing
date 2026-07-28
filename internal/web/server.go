@@ -39,10 +39,25 @@ var nextBundle embed.FS
 // that compiles cleanly but serves a 404 on every dashboard page --
 // this guard surfaces that condition at startup instead.
 func VerifyBundleEmbedded() error {
-	if _, err := fs.Stat(nextBundle, "next-out/index.html"); err != nil {
+	if bundleSkipReason(nextBundle) != "" {
 		return errors.New(missingBundleMessage)
 	}
 	return nil
+}
+
+// BundleSkipReason returns why a test that needs a served dashboard cannot run
+// against this binary, or "" when it can. A checkout that has never run
+// bin/build-web.sh embeds only the .gitkeep, and no change to the tree under
+// test can clear that, so a suite reads this and skips rather than failing.
+func BundleSkipReason() string {
+	return bundleSkipReason(nextBundle)
+}
+
+func bundleSkipReason(bundle fs.FS) string {
+	if _, err := fs.Stat(bundle, "next-out/index.html"); err != nil {
+		return "dashboard bundle not built in this checkout; run: bash bin/build-web.sh"
+	}
+	return ""
 }
 
 const missingBundleMessage = `dashboard assets are missing from this binary.

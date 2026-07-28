@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"golang.org/x/mod/modfile"
@@ -208,6 +209,43 @@ func (p *PrePush) run(ctx context.Context) error {
 	return nil
 }
 
+// committedGoMods returns every go.mod git tracks, as repo-root-relative
+// paths. Asking the index rather than the filesystem keeps scratch modules
+// that are never pushed out of the checks that walk this list.
+func committedGoMods(ctx context.Context) ([]string, error) {
+	// safety: git -C anchors paths to repo root regardless of process cwd.
+	out, err := sparkwing.Bash(ctx,
+		`git -C "$SPARKWING_WORKDIR" ls-files '*go.mod'`,
+	).Env("SPARKWING_WORKDIR", sparkwing.Path()).String()
+	if err != nil {
+		return nil, fmt.Errorf("list go.mod files: %w", err)
+	}
+	var mods []string
+	for _, rel := range strings.Split(strings.TrimSpace(out), "\n") {
+		if rel != "" {
+			mods = append(mods, rel)
+		}
+	}
+	return mods, nil
+}
+
+// committedModuleDirs returns the directory of every committed go.mod,
+// repo-root-relative, with the root module reported as ".". Every check
+// that runs per module reads this one answer, so a module added later is
+// covered on the day its go.mod lands rather than on the day someone
+// remembers to extend a list.
+func committedModuleDirs(ctx context.Context) ([]string, error) {
+	mods, err := committedGoMods(ctx)
+	if err != nil {
+		return nil, err
+	}
+	dirs := make([]string, 0, len(mods))
+	for _, m := range mods {
+		dirs = append(dirs, filepath.Dir(m))
+	}
+	return dirs, nil
+}
+
 // checkNoReplaceDirectivesInCommittedGoMods refuses to let any
 // committed go.mod ship with a `replace` line. Replace directives
 // are intended for local iteration; once they leak into main they
@@ -222,18 +260,12 @@ func (p *PrePush) run(ctx context.Context) error {
 // resolves to the parent checkout for anyone who could possibly
 // build it. See isSparkwingDogfoodReplace for the exact pattern.
 func checkNoReplaceDirectivesInCommittedGoMods(ctx context.Context) error {
-	// safety: git -C anchors paths to repo root regardless of process cwd.
-	out, err := sparkwing.Bash(ctx,
-		`git -C "$SPARKWING_WORKDIR" ls-files '*go.mod'`,
-	).Env("SPARKWING_WORKDIR", sparkwing.Path()).String()
+	mods, err := committedGoMods(ctx)
 	if err != nil {
-		return fmt.Errorf("list go.mod files: %w", err)
+		return err
 	}
 	var offenders []string
-	for _, rel := range strings.Split(strings.TrimSpace(out), "\n") {
-		if rel == "" {
-			continue
-		}
+	for _, rel := range mods {
 		abs := sparkwing.Path(rel)
 		data, rerr := os.ReadFile(abs)
 		if rerr != nil {
