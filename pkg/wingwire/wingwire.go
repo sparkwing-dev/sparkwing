@@ -19,11 +19,14 @@
 //
 // The first message in each direction on a fresh connection is the
 // version handshake ([Hello] from the client, [HelloAck] from the
-// daemon). Compatibility is governed by [ProtocolMajor] alone: a daemon
-// serves any client within the same protocol major, because compiled
-// pipeline binaries pin SDK versions and may be older than the daemon.
-// The binary version travels alongside for observability and for the
-// newer-client takeover decision, never for compatibility gating.
+// daemon). The client states the protocol major it speaks and the
+// daemon answers on the newest major the two share, anywhere in
+// [MinProtocolMajor]..[ProtocolMajor]. Compiled pipeline binaries pin
+// SDK versions and keep running long after the daemon upgrades past
+// them, so the daemon meets such a client on its own major rather than
+// refusing it. The binary version travels alongside for observability
+// and for the newer-client takeover decision, never for compatibility
+// gating.
 package wingwire
 
 import (
@@ -31,11 +34,33 @@ import (
 	"fmt"
 )
 
-// ProtocolMajor is the wire protocol's compatibility version. A daemon
-// and a client interoperate exactly when they share this value; a
-// mismatch means the client must trigger a daemon takeover (client
-// newer) or fail with a clear upgrade message (client older).
+// ProtocolMajor is the newest wire protocol major this build speaks.
+// Clients send it in [Hello]; a daemon answers on it whenever the client
+// speaks it too.
 const ProtocolMajor = 2
+
+// MinProtocolMajor is the oldest wire protocol major a daemon of this
+// build still serves. Every major from here up to [ProtocolMajor] is
+// answered, so a repo whose pinned SDK predates the daemon keeps getting
+// admission grants instead of being locked out the moment the daemon
+// upgrades. Raising it is what turns a stale pin into a hard failure, so
+// raise it only for a change that genuinely cannot be served in the old
+// major's terms, and document the cut as a break.
+const MinProtocolMajor = 1
+
+// ServedMajor reports the protocol major a daemon of this build answers a
+// client on, given the major that client sent in [Hello]. A client inside
+// the served range is met on its own major; anything else is answered
+// with this build's own, leaving the client to take the daemon over (it
+// is newer) or to fail with a version error (it is older than the floor).
+// No map from release to protocol major is needed anywhere: every client
+// states its own major on every connection.
+func ServedMajor(client int) int {
+	if client >= MinProtocolMajor && client < ProtocolMajor {
+		return client
+	}
+	return ProtocolMajor
+}
 
 // ProtocolFloor is one cliff in the wire protocol's history: the lowest
 // released SDK version whose clients speak Major.

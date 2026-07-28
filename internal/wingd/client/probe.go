@@ -14,9 +14,9 @@ const probeTimeout = time.Second
 type DaemonInfo struct {
 	// Socket is the address that answered.
 	Socket string
-	// ProtocolMajor is the wire protocol major the daemon speaks. It may
-	// differ from this build's, which is why a probe reads it rather than
-	// assuming it.
+	// ProtocolMajor is the newest wire protocol major the daemon speaks,
+	// not the one it agreed to speak with the probe. It may differ from
+	// this build's, which is why a probe reads it rather than assuming it.
 	ProtocolMajor int
 	// BinaryVersion is the version the daemon reports for its own build.
 	// Empty for a daemon that predates the field.
@@ -45,9 +45,13 @@ func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 	if err != nil {
 		return DaemonInfo{}, fmt.Errorf("wingd/client: probe %s: %w", sock, err)
 	}
+	native := ack.NativeProtocolMajor
+	if native == 0 {
+		native = ack.ProtocolMajor
+	}
 	return DaemonInfo{
 		Socket:        sock,
-		ProtocolMajor: ack.ProtocolMajor,
+		ProtocolMajor: native,
 		BinaryVersion: ack.BinaryVersion,
 		Draining:      ack.Draining,
 	}, nil

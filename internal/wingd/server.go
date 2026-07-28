@@ -409,16 +409,20 @@ func (d *Daemon) serveConn(c *conn) {
 	if err != nil {
 		return
 	}
-	if _, ok := msg.(*wingwire.Hello); !ok {
+	hello, ok := msg.(*wingwire.Hello)
+	if !ok {
 		return
 	}
 	d.mu.Lock()
 	draining := d.isDrainingLocked()
+	c.protocolMajor = wingwire.ServedMajor(hello.ProtocolMajor)
+	served := c.protocolMajor
 	d.mu.Unlock()
 	ack := &wingwire.HelloAck{
-		ProtocolMajor: ProtocolMajor,
-		BinaryVersion: d.cfg.Version,
-		Draining:      draining,
+		ProtocolMajor:       served,
+		NativeProtocolMajor: ProtocolMajor,
+		BinaryVersion:       d.cfg.Version,
+		Draining:            draining,
 	}
 	if err := c.send(ack); err != nil {
 		return
@@ -562,6 +566,24 @@ func (d *Daemon) idleGrantableMemoryLocked() uint64 {
 // handleAdmission submits a run's all-or-nothing request. A granted or
 // queued outcome is delivered through the event stream; fail and skip
 // terminate the request with an [wingwire.Evicted] carrying the policy.
+// subLeaseMajor is the first protocol major whose clients mark an
+// internal, non-finalizing lease with SubLease. Before it the daemon read
+// that from SemaphoresOnly, which this major freed up for run-level claims
+// that do finalize; reading an older client's request by the newer rule
+// would finalize a run row for every node-level semaphore acquisition it
+// makes, duplicating the row the run writes for itself.
+const subLeaseMajor = 2
+
+// finalizesRun reports whether a lease admitted for req owns the terminal
+// row of its run, reading the request in the terms of the protocol major
+// the connection speaks.
+func finalizesRun(protocolMajor int, req *wingwire.AdmissionRequest) bool {
+	if protocolMajor < subLeaseMajor {
+		return !req.SemaphoresOnly
+	}
+	return !req.SubLease
+}
+
 func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if !validCostSource(req.CostSource) {
 		d.rejectInvalid(c, req, rejectCauseCostSource, fmt.Sprintf(
@@ -598,7 +620,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.pid = req.PID
 	c.resources = charged
 	c.sems = semNames(req.Semaphores)
-	c.finalizable = !req.SubLease
+	c.finalizable = finalizesRun(c.protocolMajor, req)
 	c.startAt = d.now()
 	c.costSource = string(req.CostSource)
 	c.expectedDurationMS = req.ExpectedDurationMS
@@ -800,7 +822,7 @@ func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest) bool
 }
 
 func requestIdentityMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
-	return existing.finalizable == !req.SubLease &&
+	return existing.finalizable == finalizesRun(existing.protocolMajor, req) &&
 		existing.pipeline == req.Pipeline &&
 		existing.repo == req.Repo &&
 		existing.pid == req.PID &&

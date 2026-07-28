@@ -397,6 +397,10 @@ func LogPath(home string) (string, error) {
 	return l.log, nil
 }
 
-// ProtocolMajor is the wire protocol major this daemon speaks; it mirrors
-// [wingwire.ProtocolMajor].
+// ProtocolMajor is the newest wire protocol major this daemon speaks; it
+// mirrors [wingwire.ProtocolMajor].
 const ProtocolMajor = wingwire.ProtocolMajor
+
+// MinProtocolMajor is the oldest wire protocol major this daemon still
+// serves; it mirrors [wingwire.MinProtocolMajor].
+const MinProtocolMajor = wingwire.MinProtocolMajor

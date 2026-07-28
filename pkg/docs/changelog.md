@@ -142,6 +142,15 @@ code change to unlock.
   bound it with a context deadline, and report a deadline that fires as
   could-not-run with the time waited rather than as a finding in the tree.
 
+- **admission:** the `hello_ack` handshake frame carries
+  `native_protocol_major`, the newest wire protocol major the daemon speaks,
+  alongside the existing `protocol_major`, which now reports the major agreed
+  for that one connection. A client reads the two together to know it is the
+  older side and must not take the daemon over -- replacing a newer daemon
+  with an older one would be undone by the next native client, with nothing
+  bounding the exchange. Daemons predating the field omit it, and a reader
+  falls back to `protocol_major`.
+
 ### Changed
 
 - **cli:** `sparkwing pipeline hooks install` now runs a repo's blocking gates
@@ -158,6 +167,23 @@ code change to unlock.
   untouched. `--no-prove` arms without the proof.
 
 ### Fixed
+
+- **admission:** upgrading sparkwing no longer locks out every repo whose
+  pipeline pins an older SDK. The daemon now answers the handshake on the
+  newest wire protocol major it shares with the client rather than only on
+  its own, so a repo pinning v0.17.25 keeps getting admission grants from a
+  v0.22.0 daemon instead of failing its gates with `daemon speaks a newer
+  protocol; upgrade sparkwing` -- advice that could not work, because the
+  client that failed was the repo's compiled pipeline binary, not the CLI.
+  The served range is `wingwire.MinProtocolMajor` through
+  `wingwire.ProtocolMajor`; the client states its own major on every
+  connection, so nothing maps releases to protocol majors. Raising the floor
+  is what makes a stale pin fail, and is a break to be announced as one.
+
+- **admission:** a run-lease request from a client on a pre-`sub_lease`
+  protocol major is read in that major's terms, so the node-level semaphore
+  acquisitions such a client makes no longer get a daemon-written terminal
+  run row on top of the one the run writes for itself.
 
 - **cli:** three help entries named commands that do not exist --
   `sparkwing users add`, `sparkwing profiles set` and `sparkwing profiles
