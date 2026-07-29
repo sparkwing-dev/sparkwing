@@ -3,7 +3,10 @@ package jobs
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -67,6 +70,28 @@ func TestDescribeLintFailureReportsRealFindingsUnchanged(t *testing.T) {
 	}
 	if !strings.Contains(got, "golangci-lint:") {
 		t.Fatalf("finding lost its golangci-lint attribution: %s", got)
+	}
+}
+
+// TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint verifies that
+// runGolangciLint sends a GET to the cache endpoint before golangci-lint runs.
+// The server returns 404 (no cached blob), so lint proceeds and is allowed to
+// fail if the binary is not installed; the assertion is on the GET itself.
+func TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint(t *testing.T) {
+	var gets atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/cache/lint-cache-") {
+			gets.Add(1)
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(srv.Close)
+
+	t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
+	_ = runGolangciLint(context.Background())
+
+	if gets.Load() == 0 {
+		t.Fatal("blob store GET not sent before golangci-lint ran")
 	}
 }
 
