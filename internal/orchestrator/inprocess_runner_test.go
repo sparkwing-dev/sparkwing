@@ -92,9 +92,9 @@ func TestInProcessRunnerRunNodeCancelledLeavesRowForTeardownClassifier(t *testin
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
 	cancelled = withLocalAdmission(cancelled, &LocalAdmission{
-		Home:   home,
-		Stderr: io.Discard,
-		Spawn:  func(string, string) error { return errors.New("daemon unavailable") },
+		Home:  home,
+		Out:   io.Discard,
+		Spawn: func(string, string) error { return errors.New("daemon unavailable") },
 	}, "", "", false, 0)
 
 	r := &InProcessRunner{backends: LocalBackends(paths, st, nil)}

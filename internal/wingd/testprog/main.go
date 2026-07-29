@@ -158,6 +158,7 @@ func runHold(args []string) {
 	} else {
 		req.Resources = wingwire.HostResources{Cores: *cores}
 	}
+	// hack: test driver program; queue position updates have no run log to write to.
 	lease, err := cl.Acquire(context.Background(), req, nil)
 	if err != nil {
 		fail("acquire: %v", err)

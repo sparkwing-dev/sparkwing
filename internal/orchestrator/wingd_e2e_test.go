@@ -96,14 +96,14 @@ func startWingdCfg(t *testing.T, cfg wingd.Config) {
 	}
 }
 
-func testWingdAdmission(home string, stderr io.Writer) *LocalAdmission {
-	if stderr == nil {
-		stderr = io.Discard
+func testWingdAdmission(home string, out io.Writer) *LocalAdmission {
+	if out == nil {
+		out = io.Discard
 	}
 	return &LocalAdmission{
 		Home:    home,
 		Version: "test",
-		Stderr:  stderr,
+		Out:     out,
 		Spawn:   func(string, string) error { return errors.New("no daemon running for test home") },
 	}
 }
@@ -230,7 +230,7 @@ func (wingdAttachParentPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spa
 				Home:             launch.home,
 				Version:          "test",
 				ParentLeaseToken: token,
-				Stderr:           io.Discard,
+				Out:              io.Discard,
 				Spawn:            func(string, string) error { return errors.New("no daemon running for test home") },
 			},
 		})
@@ -347,7 +347,7 @@ func (wingdPlanSemSpawnChildPipe) Plan(
 				Home:             launch.home,
 				Version:          "test",
 				ParentLeaseToken: token,
-				Stderr:           io.Discard,
+				Out:              io.Discard,
 				Spawn:            func(string, string) error { return errors.New("no daemon running for test home") },
 			},
 		})
@@ -394,7 +394,7 @@ func (wingdNodeHostSpawnChildPipe) Plan(
 				Home:             launch.home,
 				Version:          "test",
 				ParentLeaseToken: token,
-				Stderr:           io.Discard,
+				Out:              io.Discard,
 				Spawn:            func(string, string) error { return errors.New("no daemon running for test home") },
 			},
 		})
@@ -830,13 +830,13 @@ func TestWingd_SecondRunQueuesUntilFirstReleases(t *testing.T) {
 	}()
 	gate.awaitStarted(t, "wingd-q-a")
 
-	var stderrB strings.Builder
+	var outB strings.Builder
 	runB := make(chan *Result, 1)
 	go func() {
 		res, _ := Run(context.Background(), backends, Options{
 			Pipeline:  "wingd-e2e-hold",
 			RunID:     "wingd-q-b",
-			Admission: testWingdAdmission(home, &stderrB),
+			Admission: testWingdAdmission(home, &outB),
 		})
 		runB <- res
 	}()
@@ -857,8 +857,8 @@ func TestWingd_SecondRunQueuesUntilFirstReleases(t *testing.T) {
 			t.Fatal("run did not finish after release")
 		}
 	}
-	if !strings.Contains(stderrB.String(), "queued for local admission") {
-		t.Fatalf("queued run stderr = %q, want a queue-position line", stderrB.String())
+	if !strings.Contains(outB.String(), "queued for local admission") {
+		t.Fatalf("queued run out = %q, want a queue-position line", outB.String())
 	}
 	if got := gate.peak.Load(); got != 1 {
 		t.Fatalf("peak concurrent holds = %d, want host capacity to admit one at a time", got)
@@ -1176,8 +1176,8 @@ func TestWingd_CachedNodeMissAdmitsHostCost(t *testing.T) {
 	}
 }
 
-// syncBuffer is a concurrency-safe stderr sink so a test can poll the
-// queue output a run goroutine writes while the run is still blocked.
+// syncBuffer is a concurrency-safe writer so a test can poll the
+// admission output a run goroutine writes while the run is still blocked.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf strings.Builder
@@ -1220,8 +1220,8 @@ func TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission(t *testing.T) {
 	}()
 	gate.awaitStarted(t, "wingd-hb-a")
 
-	stderrB := &syncBuffer{}
-	adm := testWingdAdmission(home, stderrB)
+	outB := &syncBuffer{}
+	adm := testWingdAdmission(home, outB)
 	adm.QueueHeartbeat = 20 * time.Millisecond
 	runB := make(chan *Result, 1)
 	go func() {
@@ -1235,9 +1235,9 @@ func TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission(t *testing.T) {
 	awaitWaiter(t, home, "wingd-hb-b")
 
 	deadline := time.Now().Add(wingdTestWait)
-	for stderrB.count("still queued for local admission after") < 2 {
+	for outB.count("still queued for local admission after") < 2 {
 		if time.Now().After(deadline) {
-			t.Fatalf("queued run never re-emitted its wait status; stderr = %q", stderrB.String())
+			t.Fatalf("queued run never re-emitted its wait status; out = %q", outB.String())
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -1254,13 +1254,102 @@ func TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission(t *testing.T) {
 		}
 	}
 
-	out := stderrB.String()
+	out := outB.String()
 	if !strings.Contains(out, "queued for local admission: position") {
 		t.Fatalf("missing the initial queue-position line: %q", out)
 	}
 	if !strings.Contains(out, "admitted; starting run") {
 		t.Fatalf("admitted line must print unconditionally after any wait: %q", out)
 	}
+}
+
+// TestWingd_QueuedRunEmitsAdmissionWaitToDelegate verifies that when a run
+// waits for admission, the position update reaches both the Out writer
+// (for operator / agent visibility on stdout) and the Delegate logger
+// (so it appears in the envelope log via the Run-wired delegate).
+func TestWingd_QueuedRunEmitsAdmissionWaitToDelegate(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingd(t, home, 2)
+	backends, _, _ := openWingdBackends(t, home)
+	gate := newWingdGate()
+	wingdE2EGate.Store(gate)
+
+	runA := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(context.Background(), backends, Options{
+			Pipeline:  "wingd-e2e-hold",
+			RunID:     "wingd-delegate-a",
+			Admission: testWingdAdmission(home, nil),
+		})
+		runA <- res
+	}()
+	gate.awaitStarted(t, "wingd-delegate-a")
+
+	var delegateMu sync.Mutex
+	var delegateEvents []sparkwing.LogRecord
+	del := &captureLogger{mu: &delegateMu, events: &delegateEvents}
+	outB := &syncBuffer{}
+
+	runB := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(context.Background(), backends, Options{
+			Pipeline:  "wingd-e2e-hold",
+			RunID:     "wingd-delegate-b",
+			Admission: testWingdAdmission(home, outB),
+			Delegate:  del,
+		})
+		runB <- res
+	}()
+	awaitWaiter(t, home, "wingd-delegate-b")
+
+	deadline := time.Now().Add(wingdTestWait)
+	for !strings.Contains(outB.String(), "queued for local admission") {
+		if time.Now().After(deadline) {
+			t.Fatalf("queued run never printed position on Out; out = %q", outB.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	delegateMu.Lock()
+	var hasWait bool
+	for _, ev := range delegateEvents {
+		if ev.Event == "admission_wait" {
+			hasWait = true
+			break
+		}
+	}
+	delegateMu.Unlock()
+	if !hasWait {
+		t.Error("delegate: no admission_wait event emitted; position update must reach the envelope log")
+	}
+
+	close(gate.release)
+	for name, ch := range map[string]chan *Result{"a": runA, "b": runB} {
+		select {
+		case res := <-ch:
+			if res == nil || res.Status != "success" {
+				t.Fatalf("run %s result = %+v, want success", name, res)
+			}
+		case <-time.After(wingdTestWait):
+			t.Fatalf("run %s did not finish", name)
+		}
+	}
+}
+
+type captureLogger struct {
+	mu     *sync.Mutex
+	events *[]sparkwing.LogRecord
+}
+
+func (c *captureLogger) Log(level, msg string) {
+	c.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
+}
+
+func (c *captureLogger) Emit(rec sparkwing.LogRecord) {
+	c.mu.Lock()
+	*c.events = append(*c.events, rec)
+	c.mu.Unlock()
 }
 
 func TestWingd_ChildRunAttachesToParentLease(t *testing.T) {

@@ -51,9 +51,15 @@ type LocalAdmission struct {
 	// runner-mode path sets it to [wingwire.OriginController] so the shared
 	// daemon's queue attributes contended work to whoever launched it.
 	Origin wingwire.Origin
-	// Stderr receives the single-line queue status while the run waits
-	// for admission. Nil uses os.Stderr.
-	Stderr io.Writer
+	// Out receives admission status lines (queue position, heartbeats,
+	// grant announcements) written while a run waits for or is granted
+	// admission. Nil writes to os.Stdout so the lines are visible to
+	// agents reading the run's standard output.
+	Out io.Writer
+	// Delegate, when non-nil, receives structured admission events
+	// (admission_wait, admission_granted) so they appear in the run's
+	// envelope log alongside the other run lifecycle records.
+	Delegate sparkwing.Logger
 	// Spawn overrides how a missing daemon is started. Nil uses the
 	// default, which re-execs this binary as `wingd run`. Tests inject
 	// an in-process daemon here.
@@ -63,7 +69,7 @@ type LocalAdmission struct {
 	DialTimeout time.Duration
 	Backoff     time.Duration
 	// QueueHeartbeat is how often a still-queued run re-emits its wait
-	// status on stderr so a long admission wait never reads as a hang.
+	// status so a long admission wait never reads as a hang.
 	// Zero uses defaultQueueHeartbeat.
 	QueueHeartbeat time.Duration
 }
@@ -89,11 +95,11 @@ func (la *LocalAdmission) clientOptions() wingdclient.Options {
 	}
 }
 
-func (la *LocalAdmission) stderr() io.Writer {
-	if la.Stderr != nil {
-		return la.Stderr
+func (la *LocalAdmission) out() io.Writer {
+	if la.Out != nil {
+		return la.Out
 	}
-	return os.Stderr
+	return os.Stdout
 }
 
 // contentionAttribution asks the daemon, before the run's lease is
@@ -216,10 +222,10 @@ func (la *LocalAdmission) admitRun(
 	warning := hostChargeWarning(drift, overCap)
 	if warning != "" {
 		req.DriftWarning = warning
-		fmt.Fprintln(la.stderr(), warning)
+		fmt.Fprintln(la.out(), warning)
 	}
 	if note := measuringNarration(res, prof); note != "" {
-		fmt.Fprintln(la.stderr(), note)
+		fmt.Fprintln(la.out(), note)
 	}
 	submitted := time.Now()
 	lease, outcome, err := la.acquireBlocking(ctx, backends, runID, req)
@@ -236,7 +242,7 @@ func (la *LocalAdmission) admitRun(
 	rl.driftWarning = warning
 	rl.charge = runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes}
 	if lease.SoleRunUnderLoad {
-		fmt.Fprintf(la.stderr(),
+		fmt.Fprintf(la.out(),
 			"admitted as sole run; host under external load %.1f cores - additional runs will queue\n",
 			lease.ExternalCores)
 	}
@@ -416,6 +422,9 @@ func (la *LocalAdmission) attachChildRun(
 	if err != nil {
 		return nil, admitProceed, fmt.Errorf("local admission: %w", err)
 	}
+	// safety: the server handles a ParentLeaseToken by granting immediately
+	// (or rejecting); it never queues a child attach, so onQueued is never
+	// called and nil is safe here.
 	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
 		RunID:            runID,
 		Pipeline:         pipeline,
@@ -527,7 +536,7 @@ func (la *LocalAdmission) acquireBlocking(
 	}
 	if reporter.waited() {
 		appendPlanEvent(ctx, backends, runID, "admission_granted", nil)
-		fmt.Fprintf(la.stderr(), "admitted; starting run\n")
+		fmt.Fprintf(la.out(), "admitted; starting run\n")
 	}
 	return lease, admitProceed, nil
 }
@@ -603,24 +612,39 @@ func (r *queueWaitReporter) emitHeartbeat() {
 	r.la.reportStillQueued(q, waited)
 }
 
-// reportQueued renders one queue-position update: a single stderr line
-// plus an admission_wait event on the run row.
+// reportQueued renders one queue-position update: a stdout line, an
+// admission_wait event on the run row, and a structured event to the
+// envelope delegate so the position appears in the run's log.
 func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, runID, requestID string, q wingwire.Queued) {
 	ahead, noun, reason := queuePositionParts(q)
-	fmt.Fprintf(la.stderr(),
-		"queued for local admission: position %d of %d (%d %s ahead)%s; run `sparkwing queue` to see the full queue\n",
+	msg := fmt.Sprintf(
+		"queued for local admission: position %d of %d (%d %s ahead)%s; run `sparkwing queue` to see the full queue",
 		q.Position, q.QueueLength, ahead, noun, reason)
+	fmt.Fprintln(la.out(), msg)
 	payload := fmt.Appendf(nil, `{"position":%d,"queue_length":%d,"request_id":%q}`, q.Position, q.QueueLength, requestID)
 	appendPlanEvent(ctx, backends, runID, "admission_wait", payload)
+	if la.Delegate != nil {
+		la.Delegate.Emit(sparkwing.LogRecord{
+			TS:    time.Now(),
+			Level: "info",
+			Event: "admission_wait",
+			Msg:   msg,
+			Attrs: map[string]any{
+				"position":     q.Position,
+				"queue_length": q.QueueLength,
+				"request_id":   requestID,
+			},
+		})
+	}
 }
 
 // reportStillQueued re-emits the last-known position as a heartbeat,
 // naming how long the run has waited so a stalled-looking queue reads as
-// healthy backpressure. Stderr only -- no run-row event, to avoid
-// flooding the row with duplicate waits.
+// healthy backpressure. No run-row event or delegate emit -- heartbeats
+// are stdout-only to avoid flooding the log with duplicate waits.
 func (la *LocalAdmission) reportStillQueued(q wingwire.Queued, waited time.Duration) {
 	ahead, noun, reason := queuePositionParts(q)
-	fmt.Fprintf(la.stderr(),
+	fmt.Fprintf(la.out(),
 		"still queued for local admission after %s: position %d of %d (%d %s ahead)%s; run `sparkwing queue` to see the full queue\n",
 		waited.Round(time.Second), q.Position, q.QueueLength, ahead, noun, reason)
 }

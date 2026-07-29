@@ -189,6 +189,7 @@ func (h *holder) run() {
 		fail("ensure daemon: %v", err)
 	}
 	req := h.request()
+	// hack: chaos-test driver; queue position updates have no run log to write to.
 	lease, err := cl.Acquire(context.Background(), req, nil)
 	if err != nil {
 		var ae *client.AdmissionError

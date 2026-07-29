@@ -495,6 +495,9 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	var leaseHostAdmitted bool
 	skipDispatch := false
 	if opts.Admission != nil {
+		if opts.Admission.Delegate == nil {
+			opts.Admission.Delegate = opts.Delegate
+		}
 		var outcome admitOutcome
 		var admitErr error
 		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, opts.Pipeline, runID, plan, opts.MaxParallel, cancelRun)
