@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -26,13 +27,13 @@ func TestSupersedes(t *testing.T) {
 		{"", "v1.0.0", false},
 		{"v1.0.0", "", false},
 		{"garbage", "v1.0.0", false},
-		{"(devel)", "v1.0.0", true},
+		{"(devel)", "v1.0.0", false},
 		{"(devel)", "(devel)", false},
 		{"(devel)", "", false},
 		{"(unknown)", "v1.0.0", false},
-		{"v1.0.0+dirty", "v1.0.0", true},
+		{"v1.0.0+dirty", "v1.0.0", false},
 		{"v1.0.0+dirty", "v1.0.0+dirty", false},
-		{"v0.9.0+dirty", "v1.0.0", true},
+		{"v0.9.0+dirty", "v1.0.0", false},
 		{"v1.0.0", "(devel)", false},
 		{"v1.0.0", "v1.0.0+dirty", false},
 		{"v1.1.0", "v1.0.0+dirty", false},
@@ -62,6 +63,7 @@ func TestSupersedes_NeverMutual(t *testing.T) {
 		"v0.22.0", "v0.23.0",
 		"v1.0.0+dirty", "v0.22.0+dirty",
 		"v0.22.1-0.20260724005950-041d1c11f150+dirty",
+		"v0.22.1-0.20260724005950-041d1c11f150",
 	}
 	for _, a := range versions {
 		for _, b := range versions {
@@ -153,6 +155,97 @@ func TestEnsureDaemon_SpawnsWhenAbsent(t *testing.T) {
 	}
 	if lease.RunID != "r1" {
 		t.Fatalf("lease run id %q, want r1", lease.RunID)
+	}
+}
+
+// TestEnsureDaemon_DevClientJoinsReleaseDaemon verifies that dev builds
+// connect to a release daemon without triggering a takeover. Two concurrent
+// dev clients must both succeed and see the release daemon version, not a
+// spawned replacement.
+func TestEnsureDaemon_DevClientJoinsReleaseDaemon(t *testing.T) {
+	home := shortHome(t)
+	spawn := spawnInProcess(t, home)
+
+	connect := func(id string) (string, error) {
+		cl, err := EnsureDaemon(context.Background(), Options{
+			Home:        home,
+			Version:     "(devel)",
+			Spawn:       spawn,
+			DialTimeout: 500 * time.Millisecond,
+			Backoff:     20 * time.Millisecond,
+		})
+		if err != nil {
+			return "", err
+		}
+		defer cl.Close()
+		ver := cl.DaemonVersion()
+		_, err = cl.Acquire(context.Background(), wingwire.AdmissionRequest{
+			RunID:     id,
+			Resources: wingwire.HostResources{Cores: 0.5},
+		}, nil)
+		return ver, err
+	}
+
+	type result struct {
+		ver string
+		err error
+	}
+	results := make([]result, 2)
+	var wg sync.WaitGroup
+	for i, id := range []string{"dev-run-a", "dev-run-b"} {
+		wg.Add(1)
+		go func(idx int, runID string) {
+			defer wg.Done()
+			ver, err := connect(runID)
+			results[idx] = result{ver, err}
+		}(i, id)
+	}
+	wg.Wait()
+	for i, r := range results {
+		if r.err != nil {
+			t.Errorf("client %d: %v", i, r.err)
+		}
+		if r.ver != "v1.0.0" {
+			t.Errorf("client %d: daemon version %q after dev connect, want v1.0.0 (takeover must not have fired)", i, r.ver)
+		}
+	}
+}
+
+func TestEnsureDaemon_DevClientLogsWhenJoiningReleaseDaemon(t *testing.T) {
+	home := shortHome(t)
+	spawn := func(string, string) error {
+		d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0"})
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		go func() { _ = d.Run(ctx) }()
+		return nil
+	}
+
+	var logged []string
+	cl, err := EnsureDaemon(context.Background(), Options{
+		Home:        home,
+		Version:     "(devel)",
+		Spawn:       spawn,
+		DialTimeout: 500 * time.Millisecond,
+		Backoff:     20 * time.Millisecond,
+		Logf:        func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) },
+	})
+	if err != nil {
+		t.Fatalf("ensure daemon: %v", err)
+	}
+	cl.Close()
+	found := false
+	for _, msg := range logged {
+		if strings.Contains(msg, "v1.0.0") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected a log message naming the release daemon version; got %v", logged)
 	}
 }
 

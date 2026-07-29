@@ -191,46 +191,24 @@ func TestVersionTakeover_DrainsOldAndReattaches(t *testing.T) {
 	}
 }
 
-// TestVersionTakeover_DevBuildDrainsReleaseDaemon runs the takeover with a
-// source-built client: a "(devel)" client drains the v1.0.0 daemon, brings
-// up a "(devel)" successor via the spawn hook, and the original holder
-// reattaches to it inside the grace window.
-func TestVersionTakeover_DevBuildDrainsReleaseDaemon(t *testing.T) {
+// TestVersionTakeover_DevBuildJoinsReleaseDaemon verifies that a source-built
+// "(devel)" client joins a release daemon without draining it. A fleet of
+// identically-named dev binaries would otherwise each drain the shared release
+// daemon, race to win the flock, and all fail. The ensure helper's errSpawn
+// fires if any spawn occurs, pinning the no-takeover invariant.
+func TestVersionTakeover_DevBuildJoinsReleaseDaemon(t *testing.T) {
 	home := shortHome(t)
-	td1 := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0"})
+	td := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0"})
 
-	holder := ensure(t, home, "")
-	lease := mustAcquire(t, holder, coreReq("a", 1))
-	token := lease.Token
-
-	successor := newSuccessor(t, home, "(devel)")
-
-	dev, err := client.EnsureDaemon(context.Background(), client.Options{
-		Home:        home,
-		Version:     "(devel)",
-		Spawn:       successor.spawn,
-		DialTimeout: time.Second,
-		Backoff:     20 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatalf("takeover ensure: %v", err)
-	}
-	defer dev.Close()
-	if dev.DaemonVersion() != "(devel)" {
-		t.Fatalf("connected daemon version %q, want (devel)", dev.DaemonVersion())
+	dev := ensure(t, home, "(devel)")
+	if dev.DaemonVersion() != "v1.0.0" {
+		t.Fatalf("connected daemon version %q, want v1.0.0 (dev build must not supersede)", dev.DaemonVersion())
 	}
 
-	if err := td1.waitExit(t, 3*time.Second); err != nil {
-		t.Fatalf("release daemon should have drained and exited: %v", err)
-	}
-
-	reconnect := ensure(t, home, "(devel)")
-	reclaimed, err := reconnect.Reattach(context.Background(), token)
-	if err != nil {
-		t.Fatalf("reattach after takeover: %v", err)
-	}
-	if reclaimed.RunID != "a" {
-		t.Fatalf("reattached %q, want a", reclaimed.RunID)
+	select {
+	case err := <-td.done:
+		t.Fatalf("release daemon exited (%v); the dev build drained it", err)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 
