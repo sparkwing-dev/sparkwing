@@ -422,9 +422,7 @@ func (la *LocalAdmission) attachChildRun(
 	if err != nil {
 		return nil, admitProceed, fmt.Errorf("local admission: %w", err)
 	}
-	// safety: the server handles a ParentLeaseToken by granting immediately
-	// (or rejecting); it never queues a child attach, so onQueued is never
-	// called and nil is safe here.
+	// safety: server grants or rejects a ParentLeaseToken immediately; child attach is never queued, so nil is safe.
 	lease, err := cl.Acquire(ctx, wingwire.AdmissionRequest{
 		RunID:            runID,
 		Pipeline:         pipeline,
@@ -536,6 +534,14 @@ func (la *LocalAdmission) acquireBlocking(
 	}
 	if reporter.waited() {
 		appendPlanEvent(ctx, backends, runID, "admission_granted", nil)
+		if la.Delegate != nil {
+			la.Delegate.Emit(sparkwing.LogRecord{
+				TS:    time.Now(),
+				Level: "info",
+				Event: "admission_granted",
+				Msg:   "admitted; starting run",
+			})
+		}
 		fmt.Fprintf(la.out(), "admitted; starting run\n")
 	}
 	return lease, admitProceed, nil
