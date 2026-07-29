@@ -271,6 +271,89 @@ func TestEachMandatoryStepWaitsOnTheOneBeforeIt(t *testing.T) {
 	}
 }
 
+// The sweeps read this file too, so the fixtures spell their patterns with an
+// escape and a join rather than literally. Written out, they are the real
+// thing; read as source, neither trips the check under test.
+const (
+	emDash    = "\u2014"
+	trackerID = "TOD" + "-42"
+)
+
+// gitCommitAll stages and commits everything under dir, so later staging
+// produces a diff against a real HEAD rather than against an empty tree.
+func gitCommitAll(t *testing.T, dir, message string) {
+	t.Helper()
+	gitAddAll(t, dir)
+	runTestGit(t, dir, "-c", "user.name=gate", "-c", "user.email=gate@example.com",
+		"-c", "commit.gpgsign=false", "commit", "-q", "-m", message)
+}
+
+// A commit is judged on what it changes. The sweeps once read the whole
+// tracked tree, so history nobody touched could refuse an unrelated commit.
+func TestRegexSweepsIgnoreAFileTheCommitDoesNotTouch(t *testing.T) {
+	root := gateFixtureRepo(t)
+	ctx := context.Background()
+
+	writeGoFile(t, filepath.Join(root, "FEEDBACK.md"), "a dash "+emDash+" and a "+trackerID+" id\n")
+	gitCommitAll(t, root, "history the commit does not touch")
+
+	writeGoFile(t, filepath.Join(root, "internal", "clean.go"),
+		"package internal\n\nfunc Clean() int { return 2 }\n")
+	gitAddAll(t, root)
+
+	if err := checkEmDashes(ctx); err != nil {
+		t.Errorf("em-dash sweep charged the commit for untouched history: %v", err)
+	}
+	if err := checkTrackerIDs(ctx); err != nil {
+		t.Errorf("tracker-id sweep charged the commit for untouched history: %v", err)
+	}
+}
+
+// The narrowing must not disarm the sweeps: content the commit actually
+// introduces is still refused.
+func TestRegexSweepsRefuseWhatTheStagedChangeIntroduces(t *testing.T) {
+	cases := []struct {
+		name  string
+		body  string
+		check func(context.Context) error
+	}{
+		{"em dash", "package internal\n\n// Note " + emDash + " here.\nfunc Bad() int { return 3 }\n", checkEmDashes},
+		{"tracker id", "package internal\n\n// See " + trackerID + ".\nfunc Bad() int { return 3 }\n", checkTrackerIDs},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := gateFixtureRepo(t)
+			gitCommitAll(t, root, "clean base")
+
+			writeGoFile(t, filepath.Join(root, "internal", "bad.go"), tc.body)
+			gitAddAll(t, root)
+
+			if err := tc.check(context.Background()); err == nil {
+				t.Fatal("the sweep passed a staged change that introduces the pattern")
+			}
+		})
+	}
+}
+
+// The whole-tree audit is how pre-existing drift still gets found, off the
+// critical path of an unrelated commit.
+func TestRegexSweepAllReadsPastTheStagedChange(t *testing.T) {
+	root := gateFixtureRepo(t)
+	ctx := context.Background()
+
+	writeGoFile(t, filepath.Join(root, "FEEDBACK.md"), "a dash "+emDash+" here\n")
+	gitCommitAll(t, root, "history the commit does not touch")
+
+	writeGoFile(t, filepath.Join(root, "internal", "clean.go"),
+		"package internal\n\nfunc Clean() int { return 2 }\n")
+	gitAddAll(t, root)
+
+	t.Setenv("SPARKWING_REGEX_SWEEP_ALL", "1")
+	if err := checkEmDashes(ctx); err == nil {
+		t.Fatal("the whole-tree audit missed an em dash outside the staged change")
+	}
+}
+
 // stepWaitsOn reports whether step depends on dep, directly or through
 // another step.
 func stepWaitsOn(w *sparkwing.Work, step, dep string) bool {

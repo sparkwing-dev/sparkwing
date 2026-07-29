@@ -17,7 +17,7 @@ import (
 // vet, build and test cover every committed Go module -- the repo root,
 // where the SDK, CLI and server live, as well as .sparkwing/ -- so a
 // commit cannot introduce product code that does not compile or does not
-// pass its tests; the two regex sweeps cover the whole tracked tree for
+// pass its tests; the two regex sweeps cover the staged change for
 // em dashes and internal tracker IDs (IMP-, SDK-, LOCAL-, RUN-, ORG-,
 // REG-, TOD-); the docs-mirror check fails when docs/ (the source) and
 // pkg/docs/mirror/ (the embedded copy) have drifted, so an edit to docs/
@@ -33,7 +33,7 @@ func (PreCommit) ShortHelp() string {
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test in every committed Go module (today the repo root and .sparkwing/), plus repo-wide checks: no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted), and that the staged change adds no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags)."
+	return "Runs gofmt over the tree and go vet / go build / go test in every committed Go module (today the repo root and .sparkwing/), plus checks on the staged change: no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted). Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -245,11 +245,22 @@ func checkTrackerIDs(ctx context.Context) error {
 	return fmt.Errorf("tracker IDs in %d file(s)", len(bad))
 }
 
-// regexCheckFiles returns the tracked-file list filtered for the
-// regex sweeps: tickets/ and archive/ are exempt because historical
-// content is allowed to carry whatever style it was written with.
+// regexCheckFiles returns the file list the regex sweeps judge: the staged
+// change, so a commit is never charged for content it did not touch. Swept
+// whole-tree, these checks refuse a clean commit over history it never went
+// near, and the only way past that is the bypass the gate exists to prevent.
+// Deletions are excluded because there is no content left to read. tickets/
+// and archive/ are exempt because historical content is allowed to carry
+// whatever style it was written with.
+//
+// Set SPARKWING_REGEX_SWEEP_ALL=1 for the whole-tree audit, which is how
+// pre-existing drift gets found without blocking an unrelated commit.
 func regexCheckFiles(ctx context.Context) ([]string, error) {
-	all, err := sparkwing.Bash(ctx, "git ls-files").Lines()
+	list := `git diff --cached --name-only --diff-filter=ACMR`
+	if os.Getenv("SPARKWING_REGEX_SWEEP_ALL") != "" {
+		list = "git ls-files"
+	}
+	all, err := sparkwing.Bash(ctx, list).Lines()
 	if err != nil {
 		return nil, err
 	}
