@@ -196,7 +196,7 @@ func TestDiagnoseLockedOutRepos_NamesNoTargetWhenANewerDaemonReportsNoRelease(t 
 	base := t.TempDir()
 	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
 
-	for _, version := range []string{"", "(unknown)", scratchModuleVersion} {
+	for _, version := range []string{"", "(unknown)", scratchModuleVersion, "v0.22.0-dev+b9ade496"} {
 		var report DoctorReport
 		diagnoseLockedOutRepos(3, version, shippedFloors(), &report)
 

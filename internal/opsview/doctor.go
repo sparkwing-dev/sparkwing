@@ -205,11 +205,15 @@ type DoctorLegacyHolder struct {
 // stays clean whatever else is running on the machine, and the stray is
 // reported alongside rather than folded in.
 //
-// [DoctorReport.UngatedRepos] is excluded for the same reason. Which
-// repositories git gates is the machine's git configuration, not this home's
-// state, and folding it in would make a home's verdict depend on checkouts it
-// has never run. It is rendered on the healthy path too, so an ungated repo
-// is still reported by a doctor run that finds nothing to repair.
+// [DoctorReport.LockedOutRepos] counts because the refusing daemon belongs to
+// this home: a pin that sits below what this home's daemon speaks is a defect
+// in this home's configuration, not a property of some other home.
+//
+// [DoctorReport.UngatedRepos] is excluded because the question of which
+// repositories git-gate their pipelines is answered by the machine's git
+// configuration, not by this home's daemon. It is rendered on the healthy path
+// too, so an ungated repo is still reported by a run that finds nothing to
+// repair.
 func (r DoctorReport) Clean() bool {
 	return len(r.OrphanedRuns) == 0 &&
 		r.LegacyBoxSlotFilesRemoved == 0 &&
@@ -436,8 +440,11 @@ func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report 
 // set of repos then errs wide rather than silent: a pin between the true
 // floor and the daemon's release is named although it may already be high
 // enough, which costs an operator a pin bump they did not need, against a
-// silence that costs them the whole diagnosis. A pin
-// or daemon version that will not parse is not evidence against anyone. Repos
+// silence that costs them the whole diagnosis. A pin that will not parse is
+// not evidence against anyone; neither is a daemon version that will not parse,
+// names a scratch build, or is a prerelease -- a prerelease sorts below the
+// release it names, which would clear pins at that release rather than flag
+// them, and a prerelease cannot be written into go.mod as a target. Repos
 // whose SDK is supplied by a replace directive or a go.work `use` are
 // exonerated last, after the pin has already been found wanting -- those
 // build the pipeline from a local checkout, so the declared pin describes
@@ -455,7 +462,7 @@ func diagnoseLockedOutRepos(daemonMajor int, daemonVersion string, floors wingwi
 			Daemon:        daemonMajor,
 			DaemonVersion: daemonVersion,
 		}
-		if !semver.IsValid(daemonVersion) || scratchBuild(daemonVersion) {
+		if !semver.IsValid(daemonVersion) || scratchBuild(daemonVersion) || semver.Prerelease(daemonVersion) != "" {
 			return
 		}
 		raiseTo = daemonVersion

@@ -14,6 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -50,7 +52,9 @@ func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	}
 	raiseTo, known := wingwire.ReleasedProtocolFloors().MinVersionSpeaking(ack.ProtocolMajor)
 	if !known {
-		raiseTo = ack.BinaryVersion
+		if v := ack.BinaryVersion; semver.IsValid(v) && semver.Prerelease(v) == "" {
+			raiseTo = v
+		}
 	}
 	pinAdvice := fmt.Sprintf("Raise this repo's .sparkwing/go.mod pin to %s or newer", raiseTo)
 	if raiseTo == "" {

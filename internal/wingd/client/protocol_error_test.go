@@ -60,3 +60,13 @@ func TestProtocolTooOld_LabelsUnknownVersionsRatherThanPrintingEmpty(t *testing.
 		t.Errorf("both unknown versions should be labeled; got: %s", err.Error())
 	}
 }
+
+// A prerelease daemon version sorts below the release it names and cannot be
+// written into go.mod, so it is not a usable pin target.
+func TestProtocolTooOld_AsksForAReleaseByProtocolWhenTheDaemonVersionIsAPrerelease(t *testing.T) {
+	err := protocolTooOld("v0.22.0", wingwire.HelloAck{ProtocolMajor: wingwire.ProtocolMajor + 1, BinaryVersion: "v0.22.0-dev+b9ade496"})
+	want := fmt.Sprintf("a release speaking protocol %d", wingwire.ProtocolMajor+1)
+	if !strings.Contains(err.Error(), want) {
+		t.Errorf("message names an unusable prerelease instead of asking for %q; got: %s", want, err.Error())
+	}
+}
