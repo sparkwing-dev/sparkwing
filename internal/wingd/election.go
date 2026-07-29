@@ -48,6 +48,37 @@ func (d *Daemon) releaseLock() {
 	d.lockFile = nil
 }
 
+// LockHeld reports whether a process still holds home's election lock. A
+// daemon holds it from election until after its final state write, so this
+// is what a caller waiting for a daemon to be completely gone must watch:
+// the listener closes earlier, while the daemon is still creating files
+// under the home. It tests the lock by taking it and letting go at once,
+// and reports false when no lock file exists, since no daemon has run for
+// this home.
+func LockHeld(home string) (bool, error) {
+	l, err := resolveLayout(home)
+	if err != nil {
+		return false, err
+	}
+	f, err := os.OpenFile(l.lock, os.O_RDWR, 0o600)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("wingd: open lock %s: %w", l.lock, err)
+	}
+	defer func() { _ = f.Close() }()
+	ok, err := flockTry(f)
+	if err != nil {
+		return false, fmt.Errorf("wingd: flock %s: %w", l.lock, err)
+	}
+	if !ok {
+		return true, nil
+	}
+	_ = flockUnlock(f)
+	return false, nil
+}
+
 // bindListener prepares the socket directory, records the resolved socket
 // path under the home for discovery, removes any stale socket left by a
 // dead predecessor (the election lock is held, so no live daemon owns it),

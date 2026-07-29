@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -54,6 +55,49 @@ func TestStop_EndsTheDaemonAndLeavesNothingAnswering(t *testing.T) {
 	}
 	if _, err := Query(ctx, Options{Home: home}); !errors.Is(err, ErrNoDaemon) {
 		t.Fatalf("query after stop: got %v, want ErrNoDaemon", err)
+	}
+}
+
+// stopReleaseRounds repeats the check because the window is a race the
+// daemon has to win: one round proves little, twenty is near-certain.
+const stopReleaseRounds = 20
+
+// TestStop_ReturnsOnlyAfterTheDaemonReleasedTheHome pins what a caller
+// that deletes the home needs and what a quiet socket does not give it: a
+// draining daemon closes its listener before writing its final snapshot
+// under the home. The election lock is released after that write, so a
+// lock still held here means the home came back too early.
+func TestStop_ReturnsOnlyAfterTheDaemonReleasedTheHome(t *testing.T) {
+	for round := range stopReleaseRounds {
+		home := shortHome(t)
+		done := runDaemon(t, home, "v1.0.0")
+
+		ctx, cancel := context.WithTimeout(context.Background(), stopTestWait)
+		if err := Stop(ctx, Options{Home: home}); err != nil {
+			cancel()
+			t.Fatalf("round %d: stop: %v", round, err)
+		}
+		cancel()
+
+		held, err := wingd.LockHeld(home)
+		if err != nil {
+			t.Fatalf("round %d: read election lock: %v", round, err)
+		}
+		if held {
+			t.Fatalf("round %d: stop returned while the daemon still held the home; its final state write can still land under %s", round, home)
+		}
+		if err := os.RemoveAll(home); err != nil {
+			t.Fatalf("round %d: remove home after stop: %v", round, err)
+		}
+
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("round %d: daemon Run returned %v, want a clean stop", round, err)
+			}
+		case <-time.After(stopTestWait):
+			t.Fatalf("round %d: daemon kept running after Stop returned", round)
+		}
 	}
 }
 

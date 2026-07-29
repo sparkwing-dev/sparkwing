@@ -13,9 +13,11 @@ import (
 // daemon's process to let go of its socket.
 const stopPoll = 25 * time.Millisecond
 
-// Stop drains the daemon serving opts.Home and waits until nothing
-// answers its socket, so the caller can rely on the home being daemon-free
-// when it returns. It returns [ErrNoDaemon] when none was running.
+// Stop drains the daemon serving opts.Home and waits until the daemon
+// process is gone -- nothing answering its socket and nothing holding its
+// election lock -- so the caller can rely on the home being daemon-free,
+// and safe to delete, when it returns. It returns [ErrNoDaemon] when none
+// was running.
 //
 // It never spawns, never hands off, and never takes over: a caller asking
 // for the daemon to be gone must not be left with a fresh one in its
@@ -47,7 +49,10 @@ func Stop(ctx context.Context, opts Options) error {
 	if _, err := cl.dec.read(); err != nil {
 		return fmt.Errorf("wingd/client: stop daemon: drain not acknowledged: %w", err)
 	}
-	return waitSocketQuiet(ctx, sock, opts.dialTimeout())
+	if err := waitSocketQuiet(ctx, sock, opts.dialTimeout()); err != nil {
+		return err
+	}
+	return waitLockFree(ctx, opts.Home)
 }
 
 // waitSocketQuiet blocks until nothing accepts on sock, or ctx ends. A
@@ -62,6 +67,26 @@ func waitSocketQuiet(ctx context.Context, sock string, timeout time.Duration) er
 		_ = nc.Close()
 		if err := sleep(ctx, stopPoll); err != nil {
 			return fmt.Errorf("wingd/client: daemon on %s did not exit after draining: %w", sock, err)
+		}
+	}
+}
+
+// waitLockFree blocks until no process holds home's election lock, or ctx
+// ends. A quiet socket is not enough: the daemon closes its listener
+// first and only then writes its final state snapshot under the home, so
+// a caller that deletes the home the moment the socket goes quiet races
+// that write. The lock outlives it and is released last.
+func waitLockFree(ctx context.Context, home string) error {
+	for {
+		held, err := wingd.LockHeld(home)
+		if err != nil {
+			return fmt.Errorf("wingd/client: stop daemon: %w", err)
+		}
+		if !held {
+			return nil
+		}
+		if err := sleep(ctx, stopPoll); err != nil {
+			return fmt.Errorf("wingd/client: daemon for home %s still held its election lock after draining: %w", home, err)
 		}
 	}
 }

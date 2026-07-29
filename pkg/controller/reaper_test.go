@@ -45,8 +45,18 @@ func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
 	reaperCtx, cancelReaper := context.WithCancel(ctx)
-	defer cancelReaper()
+	// safety: the reaper writes to st, so wait for it to be gone rather than
+	// only cancelled. Deferred, not t.Cleanup, so it runs before st.Close.
+	reaperDone := make(chan struct{})
+	defer func() {
+		cancelReaper()
+		<-reaperDone
+	}()
+	// safety: an id lands here only after its run is finished, so a receive
+	// means the whole reap of that trigger is done.
+	reaped := make(chan string, 4)
 	go func() {
+		defer close(reaperDone)
 		ticker := time.NewTicker(50 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -63,21 +73,30 @@ func TestReaper_RequeuesDeadWorkerTrigger(t *testing.T) {
 					if err == nil && run.FinishedAt == nil {
 						_ = st.FinishRun(reaperCtx, id, "failed", "worker lease expired")
 					}
+					select {
+					case reaped <- id:
+					case <-reaperCtx.Done():
+						return
+					}
 				}
 			}
 		}
 	}()
 
-	deadline := time.Now().Add(2 * time.Second)
-	var trig *store.Trigger
-	for time.Now().Before(deadline) {
-		trig, _ = st.GetTrigger(ctx, "run-dead-1")
-		if trig != nil && trig.Status == "pending" {
-			break
+	select {
+	case id := <-reaped:
+		if id != "run-dead-1" {
+			t.Fatalf("reaped %q, want run-dead-1", id)
 		}
-		time.Sleep(30 * time.Millisecond)
+	case <-time.After(2 * time.Second):
+		t.Fatal("trigger was not reaped after its lease expired")
 	}
-	if trig == nil || trig.Status != "pending" {
+
+	trig, err := st.GetTrigger(ctx, "run-dead-1")
+	if err != nil {
+		t.Fatalf("GetTrigger: %v", err)
+	}
+	if trig.Status != "pending" {
 		t.Fatalf("trigger not re-queued after lease expiry: %+v", trig)
 	}
 
@@ -137,7 +156,11 @@ func TestReaper_HeartbeatKeepsAlive(t *testing.T) {
 		}
 	}()
 
+	// safety: this loop outlasts the heartbeats, so it too has to be waited
+	// on -- left running it reaps against a closed store and a deleted dir.
+	reapDone := make(chan struct{})
 	go func() {
+		defer close(reapDone)
 		for range 10 {
 			_, _ = store.Maintenance.ReapExpiredTriggers(st, ctx)
 			time.Sleep(30 * time.Millisecond)
@@ -145,6 +168,7 @@ func TestReaper_HeartbeatKeepsAlive(t *testing.T) {
 	}()
 
 	<-hbDone
+	<-reapDone
 
 	got, err := st.GetTrigger(ctx, claimed.ID)
 	if err != nil {
