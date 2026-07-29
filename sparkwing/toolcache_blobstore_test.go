@@ -216,6 +216,50 @@ func TestRestoreLintCache_WorkdirMismatchIsRejected(t *testing.T) {
 	}
 }
 
+func TestSaveLintCache_SkipsNonRegularFiles(t *testing.T) {
+	srv, _ := newBlobServer(t)
+	workdir := t.TempDir()
+	useWorkDir(t, workdir)
+
+	cacheDir := sparkwing.ToolCacheDir("golangci-lint")
+	if err := os.MkdirAll(cacheDir, 0o700); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(cacheDir) })
+
+	regular := filepath.Join(cacheDir, "regular.json")
+	if err := os.WriteFile(regular, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write regular: %v", err)
+	}
+	link := filepath.Join(cacheDir, "link.json")
+	if err := os.Symlink(regular, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	saved, err := sparkwing.SaveLintCache(context.Background(), srv.URL, "")
+	if err != nil {
+		t.Fatalf("save with symlink in cache dir: %v", err)
+	}
+	if saved == 0 {
+		t.Fatalf("expected bytes saved, got 0")
+	}
+
+	if err := os.RemoveAll(cacheDir); err != nil {
+		t.Fatalf("clear cache: %v", err)
+	}
+
+	ok, _, err := sparkwing.RestoreLintCache(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected hit after save, got miss")
+	}
+	if _, statErr := os.Stat(regular); statErr != nil {
+		t.Fatalf("regular file missing after restore: %v", statErr)
+	}
+}
+
 func TestSaveLintCache_EmptyCacheDirIsNoop(t *testing.T) {
 	srv, bs := newBlobServer(t)
 	useWorkDir(t, t.TempDir())

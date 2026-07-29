@@ -186,6 +186,8 @@ func writeLintCacheArchive(w io.Writer, cacheDir, workdir string) error {
 		hdr.Name = "cache/" + filepath.ToSlash(rel)
 		if d.IsDir() {
 			hdr.Name += "/"
+		} else if !info.Mode().IsRegular() {
+			return nil
 		}
 		if err := tw.WriteHeader(hdr); err != nil {
 			return err
