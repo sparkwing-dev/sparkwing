@@ -274,6 +274,9 @@ func extractLintCacheArchive(r io.Reader, destDir, runningWorkdir string) error 
 			}
 			continue
 		}
+		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+			continue
+		}
 
 		if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 			return err

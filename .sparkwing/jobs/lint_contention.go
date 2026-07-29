@@ -65,7 +65,7 @@ func runGolangciLint(ctx context.Context) error {
 	case saveErr != nil:
 		sparkwing.Warn(ctx, "lint cache: save: %v", saveErr)
 	case savedBytes > 0:
-		sparkwing.Info(ctx, "lint cache: saved %d bytes to blob store in %s", savedBytes, lintDur.Round(time.Second))
+		sparkwing.Info(ctx, "lint cache: saved %d bytes (lint ran %s)", savedBytes, lintDur.Round(time.Second))
 	}
 	return nil
 }
