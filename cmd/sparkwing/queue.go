@@ -27,6 +27,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
+// runQueue prints the local admission view, or the controller's with
+// --profile. It has three outcomes, and they are deliberately not two: a
+// daemon that answered, an absent daemon (nothing to arbitrate, exit 0), and a
+// socket that could not be reached, which is not an idle queue and never
+// renders as one. The last exits 4, the infrastructure code, because nothing
+// about the queue was answered -- a script reading exit 0 as "the queue is
+// empty" was wrong before and is right now.
 func runQueue(args []string) error {
 	fs := flag.NewFlagSet(cmdQueue.Path, flag.ContinueOnError)
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
@@ -59,6 +66,13 @@ func runQueue(args []string) error {
 	legacy, _ := liveLegacyBoxSlots(*home)
 
 	if err != nil {
+		if errors.Is(err, wingdclient.ErrDaemonUnreachable) {
+			if rerr := renderUnreachableDaemon(os.Stdout, format, err); rerr != nil {
+				return rerr
+			}
+			warnLegacy(os.Stderr, len(legacy))
+			return exitError(4, fmt.Errorf("queue: %w", err))
+		}
 		if errors.Is(err, wingdclient.ErrNoDaemon) {
 			if rerr := renderNoDaemon(os.Stdout, format); rerr != nil {
 				return rerr
@@ -68,7 +82,7 @@ func runQueue(args []string) error {
 		}
 		return fmt.Errorf("queue: %w", err)
 	}
-	if rerr := renderQueue(os.Stdout, qs, format); rerr != nil {
+	if rerr := renderLocalQueue(os.Stdout, qs, format); rerr != nil {
 		return rerr
 	}
 	warnLegacy(os.Stderr, len(legacy))
@@ -134,6 +148,17 @@ func warnLegacy(w io.Writer, n int) {
 
 func renderNoDaemon(w io.Writer, format string) error {
 	return opsview.RenderNoDaemon(w, format)
+}
+
+func renderUnreachableDaemon(w io.Writer, format string, cause error) error {
+	return opsview.RenderUnreachableDaemon(w, format, cause)
+}
+
+// renderLocalQueue writes a queue the local daemon answered for. It is
+// separate from renderQueue, which serves --profile: a controller's view comes
+// from a different source and carries no local-daemon reachability.
+func renderLocalQueue(w io.Writer, qs wingwire.QueueState, format string) error {
+	return opsview.RenderLocalQueue(w, qs, opsview.Serving(), format)
 }
 
 func renderQueue(w io.Writer, qs wingwire.QueueState, format string) error {

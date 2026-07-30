@@ -31,10 +31,16 @@ type DaemonInfo struct {
 // holds no lease, so it is safe to point at a daemon serving a home other
 // than this process's -- including one whose protocol major this build
 // cannot otherwise talk to, since the handshake ack is read before
-// anything is asked of it. It returns [ErrNoDaemon] when nothing answers.
+// anything is asked of it. It returns [ErrNoDaemon] when nothing is listening
+// and [ErrDaemonUnreachable] when the socket could not be reached at all,
+// because a probe that cannot look must not report the same absence a probe
+// that looked and found nothing reports.
 func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 	nc, err := dial(ctx, sock, probeTimeout)
 	if err != nil {
+		if u := unreachable(sock, err); u != nil {
+			return DaemonInfo{}, u
+		}
 		return DaemonInfo{}, ErrNoDaemon
 	}
 	defer func() { _ = nc.Close() }()

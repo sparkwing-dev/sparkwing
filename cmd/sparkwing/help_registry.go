@@ -387,8 +387,13 @@ run for you and never points at a host-wide destructive verb.
 Pretty on a terminal, JSON when piped (add -o json to force it), and
 one tab-separated record per line with -o plain for shell pipelines.
 
-When no daemon is running there is nothing to arbitrate: the command
-reports an empty queue and exits 0 rather than erroring.
+Every view says outright whether it reached the daemon, because an empty
+queue and an unanswered one look identical otherwise. With no daemon
+running there is nothing to arbitrate, so the command reports an empty
+queue and exits 0. When the daemon's socket cannot be reached at all --
+blocked by a sandbox, wedged, gone mid-read -- what is queued is unknown
+rather than empty: the command says so, names the dial failure, and exits
+4 instead of reporting a quiet machine it never looked at.
 
 With --profile NAME the view switches to that profile's controller: the
 same renderer prints the controller's admission state -- every
@@ -1577,6 +1582,13 @@ run directories on disk whose run row no longer exists.
 If an older-pinned pipeline binary is still admitting outside the daemon
 through a held box-slot lock, doctor reports it and points at the fix --
 bump that repo's sparkwing pin -- rather than deleting live state.
+
+Every report opens with the admission daemon's state -- serving (with its
+version and protocol), none running, or unreachable. That line is always
+there, because a sweep that never reached the daemon otherwise printed
+the same counts a healthy machine prints. An unreachable daemon is not a
+clean bill: the checks below it did not run, and the run-row repair is
+skipped rather than risk finalizing a run that daemon is still holding.
 
 It also reports (never repairs) standing problems that otherwise surface
 only as opaque per-run failures: repeated admission rejections, a version

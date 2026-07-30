@@ -282,16 +282,25 @@ machine:
   evictions by key, queue timeouts, and how many runs were contended --
   so a chronic pattern shows up before it becomes an incident. It also
   names the serving daemon's version and uptime, and warns when an
-  older-pinned pipeline binary is admitting outside the daemon.
+  older-pinned pipeline binary is admitting outside the daemon. Every
+  view states whether the daemon was reached: an idle machine and a
+  socket that would not answer are different answers, and the second
+  exits 4 with the dial failure named rather than printing an empty
+  queue it never looked at.
 - `sparkwing doctor` -- the one repair verb. It removes only provably-
   dead state (an interrupted run's leftover row, an orphaned lock file
-  whose owner is gone) and reports what it found and did. Standing
-  problems it cannot safely repair -- repeated admission rejections, a
-  daemon version skew, a contention-poisoned capacity profile, a daemon
-  serving another sparkwing home at a version no release carries -- are
-  reported with the exact fix instead. It never kills a process and never
-  touches live admission, so it is safe to run at any time; on a healthy
-  machine it finds nothing and says so.
+  whose owner is gone) and reports what it found and did. Every report
+  opens with the daemon's state -- serving with its version and protocol,
+  none running, or unreachable -- because the checks below it only run
+  when the daemon answered, so their emptiness means nothing on its own.
+  An unreachable daemon is never a clean bill, and the run-row repair is
+  skipped there rather than risk finalizing a run that daemon is holding.
+  Standing problems it cannot safely repair -- repeated admission
+  rejections, a daemon version skew, a contention-poisoned capacity
+  profile, a daemon serving another sparkwing home at a version no
+  release carries -- are reported with the exact fix instead. It never
+  kills a process and never touches live admission, so it is safe to run
+  at any time; on a healthy machine it finds nothing and says so.
 
 Each sparkwing home keeps its own daemon, so a daemon for one home is
 invisible from another even though both show up side by side in a process

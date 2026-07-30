@@ -135,7 +135,40 @@ type DoctorReport struct {
 	// list. Reported with an explanation, never stopped: doctor does not end
 	// processes it does not own.
 	StrayDaemons []DoctorStrayDaemon `json:"stray_daemons,omitempty"`
+	// Daemon is what the sweep learned about this home's admission daemon. It
+	// carries no omitempty and is rendered on every path, because the whole
+	// point is that "the daemon is healthy" and "I never reached the daemon"
+	// stop looking alike. Every daemon-dependent check above -- the rejection
+	// pattern, the version skew, the lockouts -- can only run when this says
+	// the daemon answered, so their emptiness means nothing without it.
+	Daemon DoctorDaemon `json:"daemon"`
 }
+
+// DoctorDaemon is the sweep's answer about this home's admission daemon: was
+// it reached, and if so what is it.
+type DoctorDaemon struct {
+	// Reachable reports that the daemon answered a handshake. False covers
+	// both an absent daemon and one that could not be reached, which State
+	// tells apart.
+	Reachable bool `json:"reachable"`
+	// State is one of [ReachServing], [ReachAbsent], or [ReachUnreachable].
+	State string `json:"state"`
+	// Socket is the address the sweep looked at.
+	Socket string `json:"socket,omitempty"`
+	// Version is the daemon's reported build. Empty unless it answered.
+	Version string `json:"version,omitempty"`
+	// ProtocolMajor is the newest wire major it speaks. Zero unless it
+	// answered.
+	ProtocolMajor int `json:"protocol_major,omitempty"`
+	// Detail explains a state the reader has to act on: why the socket could
+	// not be reached, or that an absent daemon is the ordinary idle state.
+	Detail string `json:"detail,omitempty"`
+}
+
+// Blind reports that the sweep could not determine the daemon's state, so
+// every daemon-dependent finding in the report is unanswered rather than
+// clean. An absent daemon is not blind: nothing listening is a fact.
+func (d DoctorDaemon) Blind() bool { return d.State == ReachUnreachable }
 
 // DoctorStrayDaemon is one live admission daemon serving another sparkwing
 // home whose reported version marks it as a scratch build.
@@ -235,8 +268,14 @@ type DoctorLegacyHolder struct {
 // configuration, not by this home's daemon. It is rendered on the healthy path
 // too, so an ungated repo is still reported by a run that finds nothing to
 // repair.
+//
+// A daemon the sweep could not reach counts, and it is the one entry here that
+// is not a finding but the absence of one: with the daemon unreachable, four
+// of the checks below never ran, so "nothing to repair" would be a verdict
+// this run did not earn. A green that means nothing is worse than a red.
 func (r DoctorReport) Clean() bool {
-	return len(r.OrphanedRuns) == 0 &&
+	return !r.Daemon.Blind() &&
+		len(r.OrphanedRuns) == 0 &&
 		r.LegacyBoxSlotFilesRemoved == 0 &&
 		len(r.LiveLegacyHolders) == 0 &&
 		r.DeadConcurrencyHolders == 0 &&
@@ -256,9 +295,14 @@ func (r DoctorReport) Clean() bool {
 // failure so a healthy check still reports even if another errors. selfVersion
 // is the running binary's own version, compared against the live daemon's to
 // flag a version skew; pass "" to skip that check.
+//
+// The daemon is probed before anything else, because whether it answered
+// decides what the rest of the sweep is entitled to conclude: four checks can
+// only run against a live daemon, and one of those repairs.
 func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryRun bool) (DoctorReport, error) {
 	report := DoctorReport{DryRun: dryRun}
 
+	report.Daemon = probeDaemon(ctx, home)
 	daemonLive := liveDaemonRuns(ctx, home)
 
 	boxHolders, err := boxslot.Holders(p.BoxSlotDir())
@@ -278,7 +322,7 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 	}
 	defer func() { _ = st.Close() }()
 
-	if err := diagnoseOrphanRuns(ctx, st, daemonLive, legacyRuns, dryRun, &report); err != nil {
+	if err := diagnoseOrphanRuns(ctx, st, daemonLive, legacyRuns, report.Daemon.Blind(), dryRun, &report); err != nil {
 		return report, err
 	}
 	if err := diagnoseLegacyBoxSlots(p, boxHolders, dryRun, &report); err != nil {
@@ -402,7 +446,9 @@ func diagnoseQuarantinedLedgers(home string, report *DoctorReport) {
 // (takeover resolves a skew only when the client build supersedes the
 // daemon's; otherwise the daemon stays and may reject requests it cannot
 // honor), and the checkouts the daemon's protocol major locks out. It is
-// read-only; an absent daemon yields nothing.
+// read-only; a daemon that did not answer yields nothing, which is why
+// [probeDaemon]'s verdict is reported separately and unconditionally -- these
+// findings being empty says nothing on its own.
 //
 // Who the daemon is comes from the handshake ack, not from the queue state:
 // a daemon speaking a protocol major this build does not refuses the queue
@@ -410,13 +456,47 @@ func diagnoseQuarantinedLedgers(home string, report *DoctorReport) {
 // exists to explain. A probe reads the ack before asking the daemon for
 // anything, so it still learns which daemon is resident and what it speaks.
 // The queue state is then read separately, for the checks that need it.
-func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report *DoctorReport) {
+// probeDaemon answers what the resident daemon is, or why the sweep could not
+// find out. It is the report's one unconditional daemon finding: it returns a
+// filled-in state on every path, including the paths where the older code
+// simply returned and left the reader with no daemon fields at all.
+//
+// Only two outcomes count as absence -- a resolved socket with nothing
+// listening. Anything else is a socket that would not answer: blocked, wedged,
+// or speaking something this build cannot handshake. That daemon may well be
+// running and holding leases, so calling it absent is the false all-clear.
+func probeDaemon(ctx context.Context, home string) DoctorDaemon {
 	sock, err := wingd.SocketPath(home)
 	if err != nil {
-		return
+		return DoctorDaemon{State: ReachUnreachable, Detail: "could not resolve the daemon socket path: " + err.Error()}
 	}
 	info, err := wingdclient.Probe(ctx, sock)
-	if err != nil {
+	switch {
+	case err == nil:
+		return DoctorDaemon{
+			Reachable:     true,
+			State:         ReachServing,
+			Socket:        sock,
+			Version:       info.BinaryVersion,
+			ProtocolMajor: info.ProtocolMajor,
+		}
+	case errors.Is(err, wingdclient.ErrNoDaemon):
+		return DoctorDaemon{
+			State:  ReachAbsent,
+			Socket: sock,
+			Detail: "nothing is listening; no admission is being arbitrated on this home",
+		}
+	default:
+		return DoctorDaemon{State: ReachUnreachable, Socket: sock, Detail: err.Error()}
+	}
+}
+
+func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report *DoctorReport) {
+	info := wingdclient.DaemonInfo{
+		BinaryVersion: report.Daemon.Version,
+		ProtocolMajor: report.Daemon.ProtocolMajor,
+	}
+	if !report.Daemon.Reachable {
 		return
 	}
 	if versionSkewed(selfVersion, info.BinaryVersion) {
@@ -558,7 +638,18 @@ func liveDaemonRuns(ctx context.Context, home string) map[string]struct{} {
 	return live
 }
 
-func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive, legacyRuns map[string]struct{}, dryRun bool, report *DoctorReport) error {
+// diagnoseOrphanRuns finalizes run rows still marked running whose process is
+// gone and which the daemon does not know about.
+//
+// blind skips the whole check. An unreachable daemon yields an empty live-run
+// set, which is indistinguishable from a daemon holding no leases, and acting
+// on it would cancel the very runs the daemon is holding right now. Repairing
+// on evidence a blind sweep cannot have is worse than leaving the rows alone,
+// so the check reports nothing and the daemon section says why.
+func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive, legacyRuns map[string]struct{}, blind, dryRun bool, report *DoctorReport) error {
+	if blind {
+		return nil
+	}
 	running, err := st.ListRuns(ctx, store.RunFilter{Statuses: []string{"running"}, Limit: 1000})
 	if err != nil {
 		return err
@@ -702,6 +793,7 @@ func RenderDoctor(w io.Writer, r DoctorReport, format, legacyLine string) error 
 }
 
 func renderDoctorPlain(w io.Writer, r DoctorReport) error {
+	fmt.Fprintf(w, "daemon\t%s\n", r.Daemon.State)
 	fmt.Fprintf(w, "orphaned_runs\t%d\n", len(r.OrphanedRuns))
 	fmt.Fprintf(w, "legacy_box_slot_files_removed\t%d\n", r.LegacyBoxSlotFilesRemoved)
 	fmt.Fprintf(w, "live_legacy_holders\t%d\n", len(r.LiveLegacyHolders))
@@ -749,10 +841,12 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 	if r.Clean() {
 		fmt.Fprintf(w, "healthy: nothing to repair%s\n", would)
+		renderDaemonSection(w, r)
 		renderUngatedRepos(w, r)
 		renderStrayDaemons(w, r)
 		return nil
 	}
+	renderDaemonSection(w, r)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if n := len(r.OrphanedRuns); n > 0 {
 		fmt.Fprintf(tw, "orphaned runs finalized\t%d\n", n)
@@ -807,6 +901,33 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 	renderStrayDaemons(w, r)
 	return nil
+}
+
+// renderDaemonSection writes what the sweep learned about the admission
+// daemon, on every path and in every state.
+//
+// It runs on the healthy path too, and that is the point of the whole section:
+// a doctor run against a daemon it never reached used to print the same four
+// zeros a healthy machine prints, and an operator reading those zeros stops
+// looking. Three states, three different lines, none of them silence.
+func renderDaemonSection(w io.Writer, r DoctorReport) {
+	d := r.Daemon
+	switch d.State {
+	case ReachServing:
+		version := d.Version
+		if version == "" {
+			version = "version unreported"
+		}
+		fmt.Fprintf(w, "daemon: serving, %s, protocol %d (%s)\n", version, d.ProtocolMajor, d.Socket)
+	case ReachAbsent:
+		fmt.Fprintf(w, "daemon: none running -- %s\n", d.Detail)
+	default:
+		fmt.Fprintf(w, "\nwarning: could not reach the admission daemon, so its health is unknown\n  %s\n", d.Detail)
+		if d.Socket != "" {
+			fmt.Fprintf(w, "  socket: %s\n", d.Socket)
+		}
+		fmt.Fprint(w, "  the rejection-pattern, version-skew and lockout checks did not run, and orphaned run rows were left alone because a blind sweep cannot tell a dead run from one the daemon is holding\n")
+	}
 }
 
 // renderLockedOutRepos writes the checkouts the resident daemon refuses, each

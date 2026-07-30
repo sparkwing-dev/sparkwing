@@ -33,19 +33,106 @@ func RenderQueue(w io.Writer, qs wingwire.QueueState, format string) error {
 	}
 }
 
-// RenderNoDaemon reports the calm truth that nothing is queued: no daemon
-// means no admission is being arbitrated. JSON callers still get a
-// well-formed empty queue so a pipeline never special-cases the string.
-func RenderNoDaemon(w io.Writer, format string) error {
+// Daemon reach states. They are the answer to "did this view come from the
+// daemon?", which every local queue rendering states outright.
+const (
+	// ReachServing means the daemon answered and the queue below it is its
+	// own report.
+	ReachServing = "serving"
+	// ReachAbsent means nothing is listening, so no admission is being
+	// arbitrated and the empty queue is the truth.
+	ReachAbsent = "absent"
+	// ReachUnreachable means the socket could not be reached, so what is
+	// queued is unknown. It is never an empty queue.
+	ReachUnreachable = "unreachable"
+)
+
+// DaemonReach says whether a local queue view was read from the admission
+// daemon at all. Reachable and State carry no omitempty because an absent
+// field is exactly what let `sparkwing queue -o json` print `{}` for both an
+// idle machine and a command that never reached the daemon -- the reader
+// cannot tell those apart, and reads the second as the first.
+type DaemonReach struct {
+	Reachable bool   `json:"reachable"`
+	State     string `json:"state"`
+	// Detail explains a state the reader has to act on: why the socket could
+	// not be reached, or that an absent daemon means nothing is queued.
+	Detail string `json:"detail,omitempty"`
+}
+
+// Serving reports a daemon that answered.
+func Serving() DaemonReach {
+	return DaemonReach{Reachable: true, State: ReachServing}
+}
+
+// Absent reports that nothing is listening on the daemon's socket, which is
+// what an idle machine looks like: no daemon means no admission to arbitrate.
+func Absent() DaemonReach {
+	return DaemonReach{State: ReachAbsent, Detail: "no admission daemon is running for this home, so nothing is queued"}
+}
+
+// Unreachable reports that the daemon's socket could not be reached, so the
+// queue behind it is unknown. cause is the dial failure, which leads every
+// rendering of this state because it is the only thing that tells the reader
+// what to fix.
+func Unreachable(cause error) DaemonReach {
+	detail := "the admission daemon socket could not be reached"
+	if cause != nil {
+		detail = cause.Error()
+	}
+	return DaemonReach{State: ReachUnreachable, Detail: detail}
+}
+
+// queueView is the JSON shape of a local queue rendering: the daemon's queue
+// state with the reachability that produced it. The embedded state keeps every
+// field where callers already read it, so the block is purely additive.
+type queueView struct {
+	wingwire.QueueState
+	Daemon DaemonReach `json:"daemon"`
+}
+
+// RenderLocalQueue writes the local admission view together with an explicit
+// statement of whether the daemon was reached. Every format states it, because
+// silence about reachability is what makes a blind command look like an idle
+// machine -- in JSON as `{}`, in plain as no rows at all, and in pretty as a
+// table of zeros.
+func RenderLocalQueue(w io.Writer, qs wingwire.QueueState, reach DaemonReach, format string) error {
 	switch format {
 	case "json":
-		return RenderQueue(w, wingwire.QueueState{}, format)
+		enc := json.NewEncoder(w)
+		enc.SetIndent("", "  ")
+		return enc.Encode(queueView{QueueState: qs, Daemon: reach})
 	case "plain":
-		return nil
+		fmt.Fprintf(w, "daemon\t%s\n", reach.State)
+		if reach.State != ReachServing {
+			return nil
+		}
+		return renderQueuePlain(w, qs)
 	default:
-		fmt.Fprintln(w, "no admission daemon running; nothing is queued")
-		return nil
+		switch reach.State {
+		case ReachAbsent:
+			fmt.Fprintln(w, "no admission daemon running; nothing is queued")
+			return nil
+		case ReachUnreachable:
+			fmt.Fprintf(w, "cannot reach the admission daemon: %s\n", reach.Detail)
+			fmt.Fprintln(w, "the local queue is unknown, not empty -- nothing here says whether runs are holding or waiting")
+			return nil
+		default:
+			return RenderQueuePretty(w, qs)
+		}
 	}
+}
+
+// RenderNoDaemon reports the calm truth that nothing is queued: no daemon
+// means no admission is being arbitrated.
+func RenderNoDaemon(w io.Writer, format string) error {
+	return RenderLocalQueue(w, wingwire.QueueState{}, Absent(), format)
+}
+
+// RenderUnreachableDaemon reports that the daemon could not be reached, so the
+// queue is unknown. It never renders as an empty queue.
+func RenderUnreachableDaemon(w io.Writer, format string, cause error) error {
+	return RenderLocalQueue(w, wingwire.QueueState{}, Unreachable(cause), format)
 }
 
 func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {

@@ -129,6 +129,28 @@ code change to unlock.
   matter how much headroom the box had. `--allow-serial-runners` remains the
   fallback whenever the budget is not held, because dropping the tool's lock
   without a budget would leave nothing serializing lint at all.
+- **cli:** `sparkwing queue` tells "nothing is queued" apart from "I never
+  reached the daemon". It printed `{}` for both, which is what a quiet machine
+  prints, so the command whose help promises "the truthful view of local
+  admission" reported an idle queue while it was blind. Every format now states
+  reachability outright -- `daemon.reachable` and `daemon.state` in JSON, a
+  `daemon` row in plain, a leading line in pretty -- and a socket that cannot be
+  reached names the dial failure and exits 4 rather than exiting 0 with an empty
+  queue.
+
+- **cli:** `sparkwing doctor` always reports the admission daemon: serving with
+  its version and protocol, none running, or unreachable. It carried no daemon
+  field at all before, so a sweep that never reached the daemon printed the same
+  counts a healthy machine prints and read as a clean bill. An unreachable
+  daemon is no longer clean, because the rejection, skew and lockout checks
+  under it never ran, and the orphaned-run repair is skipped there rather than
+  finalize a run that daemon may be holding.
+
+- **cli:** an unreachable admission daemon leads with why. The error opened with
+  "admission daemon started but exited before serving", which reads as a crash,
+  and buried the real cause -- a bind the sandbox refused, a socket path over the
+  OS limit -- under the log tail. The daemon's own last logged line now leads,
+  with the log path still named.
 
 ## [v0.22.1] - 2026-07-30
 ### Added

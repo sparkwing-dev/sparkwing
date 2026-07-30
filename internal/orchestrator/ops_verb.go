@@ -67,6 +67,9 @@ func resolveOpsFormat(explicit string) string {
 	return "json"
 }
 
+// runOpsQueue prints the headless binary's view of local admission. A daemon
+// it could not reach renders as unreachable and fails, because an empty queue
+// is a claim this process is in no position to make.
 func runOpsQueue(args []string) error {
 	fs := flag.NewFlagSet("ops queue", flag.ContinueOnError)
 	getOut := opsOutputFlags(fs)
@@ -79,12 +82,18 @@ func runOpsQueue(args []string) error {
 	defer cancel()
 	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home})
 	if err != nil {
+		if errors.Is(err, wingdclient.ErrDaemonUnreachable) {
+			if rerr := opsview.RenderUnreachableDaemon(os.Stdout, format, err); rerr != nil {
+				return rerr
+			}
+			return fmt.Errorf("ops queue: %w", err)
+		}
 		if errors.Is(err, wingdclient.ErrNoDaemon) {
 			return opsview.RenderNoDaemon(os.Stdout, format)
 		}
 		return fmt.Errorf("ops queue: %w", err)
 	}
-	return opsview.RenderQueue(os.Stdout, qs, format)
+	return opsview.RenderLocalQueue(os.Stdout, qs, opsview.Serving(), format)
 }
 
 func runOpsStats(args []string) error {

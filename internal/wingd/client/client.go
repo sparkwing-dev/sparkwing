@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -226,7 +227,15 @@ const (
 // spawnFailed reports a spawn-syscall failure, folding in the daemon log
 // tail when a prior attempt left one so a bind-time death is visible even
 // when the final spawn is what erred.
-func spawnFailed(home string, serr error) error {
+//
+// A dial that failed for a reason no spawn can fix -- the socket path blocked,
+// a wedged listener -- outranks the spawn error, because that dial is the real
+// obstacle and a spawn error reported over it sends the reader after the wrong
+// process.
+func spawnFailed(home, sock string, serr, dialErr error) error {
+	if u := unreachable(sock, dialErr); u != nil {
+		return u
+	}
 	if tail := daemonLogTail(home); tail != "" {
 		path, _ := wingd.LogPath(home)
 		return fmt.Errorf("wingd/client: spawn daemon: %w; daemon log %s:\n%s", serr, path, tail)
@@ -234,19 +243,44 @@ func spawnFailed(home string, serr error) error {
 	return fmt.Errorf("wingd/client: spawn daemon: %w", serr)
 }
 
-// daemonUnreachable reports that no daemon became reachable. When one was
-// spawned it distinguishes a daemon that started then exited before
-// serving (surfacing the tail of its log) from a plain timeout, and always
-// names the log path so the real cause is one file away.
-func daemonUnreachable(home string, spawns int, cause error) error {
+// daemonUnreachable reports that no daemon became reachable. It always wraps
+// [ErrDaemonUnreachable], so every caller can tell this from an idle machine
+// with one errors.Is rather than by reading the message.
+//
+// When a daemon was spawned and died, its own last log line leads the message.
+// The daemon writes why it could not serve -- a bind a sandbox refused, a
+// socket path over the OS length limit -- as the last thing it does, and the
+// previous wording opened with "started but exited before serving", which
+// reads as a crash and buried the real cause under the log tail. Naming the
+// log path stays, so the rest of the evidence is one file away.
+func daemonUnreachable(home, sock string, spawns int, cause, dialErr error) error {
 	path, _ := wingd.LogPath(home)
 	if spawns > 0 {
 		if tail := daemonLogTail(home); tail != "" {
-			return fmt.Errorf("wingd/client: admission daemon started but exited before serving; daemon log %s:\n%s", path, tail)
+			return fmt.Errorf("%w: %s (it started and exited before serving); daemon log %s:\n%s",
+				ErrDaemonUnreachable, daemonDeathCause(tail), path, tail)
 		}
-		return fmt.Errorf("wingd/client: admission daemon did not become reachable after %d start attempts; see %s: %w", spawns, path, cause)
+		return fmt.Errorf("%w: no daemon answered after %d start attempts; see %s: %w",
+			ErrDaemonUnreachable, spawns, path, cause)
 	}
-	return fmt.Errorf("wingd/client: could not reach admission daemon: %w", cause)
+	if u := unreachable(sock, dialErr); u != nil {
+		return u
+	}
+	return fmt.Errorf("%w: %w", ErrDaemonUnreachable, cause)
+}
+
+// daemonDeathCause is the line of a dead daemon's log tail that names why it
+// died: the last non-empty one. A daemon that cannot serve writes its reason
+// and exits, so the reason is the last thing in the file, and the client has
+// nothing better to go on because it never saw that daemon answer.
+func daemonDeathCause(tail string) string {
+	lines := strings.Split(strings.TrimRight(tail, "\n"), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if s := strings.TrimSpace(lines[i]); s != "" {
+			return strings.TrimPrefix(s, "sparkwing error: ")
+		}
+	}
+	return "the daemon exited before serving"
 }
 
 // EnsureDaemon connects to Home's daemon, spawning one and retrying with
@@ -280,23 +314,30 @@ func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 // takeover. It is used both for the initial [EnsureDaemon] and to reconnect a
 // client whose connection dropped on a daemon blink, so a reconnect reuses the
 // exact spawn, handshake, and takeover path the first connect took.
+//
+// It carries the last dial failure out of the loop, because whether the socket
+// refused with "nothing is listening" or "I could not reach the path" is the
+// whole difference between an idle machine and a blind client, and the loop's
+// final error is the only place left to say which.
 func (cl *Client) connect(ctx context.Context) error {
 	opts := cl.opts
 	spawns := 0
 	dialsSinceSpawn := 0
+	var lastDial error
 	for {
 		if err := ctx.Err(); err != nil {
-			return daemonUnreachable(opts.Home, spawns, err)
+			return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 		}
 		nc, derr := dial(ctx, cl.sock, opts.dialTimeout())
 		if derr != nil {
+			lastDial = derr
 			if spawns == 0 || dialsSinceSpawn >= dialsPerSpawn {
 				if spawns >= maxSpawnAttempts {
-					return daemonUnreachable(opts.Home, spawns, derr)
+					return daemonUnreachable(opts.Home, cl.sock, spawns, derr, lastDial)
 				}
 				_, _ = wingd.RemoveStaleSocket(opts.Home)
 				if serr := opts.spawn(opts.Home, opts.Version); serr != nil {
-					return spawnFailed(opts.Home, serr)
+					return spawnFailed(opts.Home, cl.sock, serr, lastDial)
 				}
 				spawns++
 				dialsSinceSpawn = 0
@@ -304,7 +345,7 @@ func (cl *Client) connect(ctx context.Context) error {
 				dialsSinceSpawn++
 			}
 			if err := sleep(ctx, opts.backoff()); err != nil {
-				return daemonUnreachable(opts.Home, spawns, err)
+				return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 			}
 			continue
 		}
@@ -314,7 +355,7 @@ func (cl *Client) connect(ctx context.Context) error {
 		if herr != nil {
 			cl.Close()
 			if err := sleep(ctx, opts.backoff()); err != nil {
-				return daemonUnreachable(opts.Home, spawns, err)
+				return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 			}
 			continue
 		}
