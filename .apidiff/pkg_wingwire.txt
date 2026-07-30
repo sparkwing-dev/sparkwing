@@ -202,6 +202,13 @@ const PolicyCancelOthers Policy = "cancel_others"
 const PolicyFail Policy = "fail"
 const PolicyQueue Policy = "queue"
 const PolicySkip Policy = "skip"
+type ProtocolFloor struct {
+	Major      int
+	MinVersion string
+}
+type ProtocolFloors []ProtocolFloor
+func (f ProtocolFloors) MinVersionSpeaking(major int) (version string, ok bool)
+func (f ProtocolFloors) Newest() (floor ProtocolFloor, ok bool)
 const ProtocolMajor = 2
 type QueueState struct {
 	Resources []ResourceState
@@ -245,6 +252,7 @@ type RejectionCount struct {
 type Release struct {
 	LeaseToken string
 }
+func ReleasedProtocolFloors() ProtocolFloors
 type ResourceState struct {
 	Key      string
 	Capacity float64

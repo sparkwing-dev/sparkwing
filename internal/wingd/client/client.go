@@ -14,14 +14,57 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // ErrProtocolTooOld is returned when the running daemon speaks a newer
 // protocol major than this client, which cannot be resolved by takeover:
-// the client binary must be upgraded.
-var ErrProtocolTooOld = errors.New("wingd/client: daemon speaks a newer protocol; upgrade sparkwing")
+// the client binary must be upgraded. Errors from [EnsureDaemon] wrap it
+// with both sides' versions and the remedy, so match with [errors.Is]
+// rather than on the message.
+var ErrProtocolTooOld = errors.New("wingd/client: daemon speaks a newer protocol")
+
+// protocolTooOld explains a protocol major the client cannot speak, naming
+// both sides and the lever that actually moves.
+//
+// The client here is the pipeline binary compiled from the calling repo's
+// .sparkwing/go.mod, not the sparkwing CLI on PATH -- the CLI is not a
+// party to this handshake, so advice to upgrade it is advice the operator
+// can follow to no effect. The daemon is machine-wide and the first run to
+// need one brings it up, so the repo that spawned it need not be the repo
+// now being refused.
+//
+// The release to raise to is looked up from the daemon's major rather than
+// assumed to be this build's own boundary: a daemon can speak a major whose
+// first release was cut after this binary, and then the only release known
+// to speak to it is the one the daemon is running.
+func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
+	self := selfVersion
+	if self == "" {
+		self = "(unknown)"
+	}
+	daemon := ack.BinaryVersion
+	if daemon == "" {
+		daemon = "(unknown)"
+	}
+	raiseTo, known := wingwire.ReleasedProtocolFloors().MinVersionSpeaking(ack.ProtocolMajor)
+	if !known {
+		if v := ack.BinaryVersion; semver.IsValid(v) && semver.Prerelease(v) == "" {
+			raiseTo = v
+		}
+	}
+	pinAdvice := fmt.Sprintf("Raise this repo's .sparkwing/go.mod pin to %s or newer", raiseTo)
+	if raiseTo == "" {
+		pinAdvice = fmt.Sprintf("Raise this repo's .sparkwing/go.mod pin to a release speaking protocol %d", ack.ProtocolMajor)
+	}
+	return fmt.Errorf("%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
+		"%s and re-run, or set SPARKWING_HOME to run against a daemon of your own; "+
+		"upgrading the sparkwing CLI does not affect this handshake",
+		ErrProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, pinAdvice)
+}
 
 // ErrReattachRejected is returned by [Client.Reattach] when the grace
 // window has closed or the token is unknown; the caller should submit a
@@ -271,7 +314,7 @@ func (cl *Client) connect(ctx context.Context) error {
 				continue
 			}
 			cl.Close()
-			return ErrProtocolTooOld
+			return protocolTooOld(opts.Version, ack)
 		}
 		if supersedes(opts.Version, ack.BinaryVersion) {
 			cl.ack = ack

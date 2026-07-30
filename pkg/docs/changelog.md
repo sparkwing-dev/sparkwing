@@ -63,6 +63,13 @@ code change to unlock.
   read` commands for terminal output; `ReadRaw` is for renderers that resolve
   those links themselves.
 
+- **sdk:** `wingwire.ProtocolFloors` maps SDK releases to the wire protocol
+  major their clients speak, and `wingwire.ReleasedProtocolFloors` returns the
+  table this build ships. Explaining a refused handshake means comparing two
+  versions that are both free to be old -- the resident daemon's and the
+  calling repository's pin -- so it needs the whole history of protocol
+  cliffs, not just the one current when the binary was compiled.
+
 - **cli:** `sparkwing pipeline hooks survey` reports what git does with the
   hooks every registered repo declares, and `sparkwing pipeline hooks install
   --fleet` arms them all in one pass. Each repo reads as `armed` (git runs a
@@ -158,6 +165,55 @@ code change to unlock.
   readers through `--help` and through the generated CLI reference, and a
   test now fails when a doc or the README names a command the CLI does not
   dispatch.
+- **cli:** the admission handshake now names the side that has to move when a
+  daemon speaks a newer wire protocol. The old message said "upgrade
+  sparkwing", which pointed at the CLI on `PATH` -- but the client in that
+  handshake is the pipeline binary compiled from the calling repository's
+  `.sparkwing/go.mod`, so upgrading the CLI cannot change the outcome. The
+  error now reports both sides' protocol major and version, names the pin to
+  raise and the release to raise it to, offers `SPARKWING_HOME` for an
+  isolated daemon, and says outright that the CLI is not a party to it.
+  This wording does not reach any repository that is locked out today. The
+  message is compiled into the client, and the clients that hit this error
+  are pipeline binaries pinned below the boundary, which carry the old text
+  and keep printing it; a repository sees the new message only once its pin
+  has moved past the boundary, at which point it is no longer refused. The
+  benefit is for the next protocol bump, not this one -- for repositories
+  currently refused, the `doctor` entry below is the surface that reaches
+  them, because it runs from the machine's CLI rather than from the pinned
+  binary being turned away.
+- **cli:** `doctor` reports the version skew that actually blocks work.
+  It compared the running CLI against the resident daemon and said nothing
+  about registered checkouts whose pinned SDK speaks an older protocol
+  major -- the skew that refuses every gate those checkouts run. The new
+  `locked_out_repos` section names each one with its pin and the release the
+  pin has to reach. This is the diagnosis that reaches an operator who is
+  locked out right now. A linked worktree gets its own row, marked
+  `worktree`: the pipeline binary is built from the `.sparkwing` of whichever
+  checkout runs the gate, so a worktree's pin is its own and folding it into
+  its primary would hide the pin that is actually refused. A checkout whose
+  `.sparkwing` carries a `replace` or a `go.work` using a local SDK checkout
+  is skipped: its declared pin is not what gets built, so reporting it would
+  send an operator to edit a line that changes nothing. The daemon's protocol
+  major is read from its handshake ack, and each pin is compared against the
+  lowest release known to speak that major, so the check keeps working across
+  every cliff rather than the one current when the CLI was built: a daemon
+  left resident at an older major still locks out every pin below it, and a
+  daemon speaking a major *newer* than the CLI is diagnosed too. Reading the
+  ack rather than the queue state is what makes that second case visible at
+  all: such a daemon refuses the CLI's queue query outright, but answers the
+  handshake before it refuses anything.
+- **cli:** `doctor` names a resident daemon whose wire protocol this build
+  does not know, in a new `daemon_protocol_gap` section. This build cannot
+  query that daemon, and it cannot name the release that first spoke that
+  protocol -- which release carried a bump is decided after the build being
+  asked was cut -- so each locked-out checkout is measured against the
+  daemon's own release, which speaks that protocol but need not be the lowest
+  release that does. The remedy printed there is to update the sparkwing CLI,
+  which carries the release table this diagnosis reads. It is the one state in
+  which upgrading the CLI helps, so the `locked_out_repos` warning leaves out
+  its note that it does not, and says instead that the target on each row is
+  the daemon's own release.
 
 - **cli:** `pipeline hooks install` no longer leaves a dead gate on machines
   whose global git config sets `core.hooksPath`. That setting replaces

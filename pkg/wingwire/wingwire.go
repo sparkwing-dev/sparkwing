@@ -37,6 +37,75 @@ import (
 // newer) or fail with a clear upgrade message (client older).
 const ProtocolMajor = 2
 
+// ProtocolFloor is one cliff in the wire protocol's history: the lowest
+// released SDK version whose clients speak Major.
+type ProtocolFloor struct {
+	Major      int
+	MinVersion string
+}
+
+// ProtocolFloors is the release-to-major table, oldest major first. A
+// pipeline binary compiled against a release below a daemon's floor speaks
+// an older major, so the daemon refuses it and no takeover can resolve it --
+// the repo's own .sparkwing/go.mod pin has to move.
+//
+// It is a table rather than a single boundary because a diagnosis involves
+// two versions that are both free to be old. The binary doing the reasoning
+// is a third party: a daemon two majors behind the current release still
+// locks out every pin behind *it*, and a boundary constant naming only the
+// current cliff cannot see that at all.
+//
+// Every lookup here is keyed by major, never by version. A table can place a
+// release only below its newest row -- which major a later release speaks was
+// decided after the table was written -- so mapping a version to a major
+// silently returns a floor dressed up as an answer. Ask instead for the
+// release a known major starts at, and compare versions against that.
+type ProtocolFloors []ProtocolFloor
+
+// releasedProtocolFloors is the table this build shipped with. A bump of
+// [ProtocolMajor] appends a row naming the release that carries the bump,
+// and every past row stays: explaining a refusal between two older builds
+// needs the cliff between them long after both are behind.
+var releasedProtocolFloors = ProtocolFloors{
+	{Major: 1, MinVersion: "v0.0.0"},
+	{Major: 2, MinVersion: "v0.22.0"},
+}
+
+// ReleasedProtocolFloors returns the release-to-major table this build
+// shipped with, whose newest row is [ProtocolMajor].
+func ReleasedProtocolFloors() ProtocolFloors {
+	return releasedProtocolFloors
+}
+
+// MinVersionSpeaking returns the lowest released SDK version whose clients
+// speak protocol major. ok is false when the table has no row for major,
+// which is what a daemon newer than the binary reading it looks like; only
+// that daemon's own version is then known to name a release speaking to it.
+//
+// Because the table's majors run 1..n with ascending floors, a release below
+// the answer speaks a major below major, and a release at or above it speaks
+// major or newer. That is the comparison a caller holding a peer's major
+// wants, and unlike a version-to-major lookup it stays exact.
+func (f ProtocolFloors) MinVersionSpeaking(major int) (version string, ok bool) {
+	for _, floor := range f {
+		if floor.Major == major {
+			return floor.MinVersion, true
+		}
+	}
+	return "", false
+}
+
+// Newest returns the table's newest row: the highest protocol major it
+// covers and the release that introduced it. ok is false for an empty table.
+// A caller comparing itself against a peer uses this to tell whether the peer
+// speaks a major this build has heard of at all.
+func (f ProtocolFloors) Newest() (floor ProtocolFloor, ok bool) {
+	if len(f) == 0 {
+		return ProtocolFloor{}, false
+	}
+	return f[len(f)-1], true
+}
+
 // LeaseTokenEnv is the current execution lease token inherited by child
 // processes. A child presents this token as [AdmissionRequest].ParentLeaseToken
 // unless [ChildLeaseTokenEnv] carries a more specific child-attach token.

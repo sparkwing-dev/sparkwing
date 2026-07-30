@@ -136,6 +136,49 @@ func SDKPin(sparkwingDir string) (pin, replace string) {
 	return pin, replace
 }
 
+// SDKWorkspaceOverride returns the local directory a .sparkwing/go.work
+// substitutes for the SDK, or "" when there is no workspace or none of its
+// modules is the SDK.
+//
+// A workspace `use` directive outranks the go.mod require, so a repo with
+// one compiles its pipeline binary from that checkout and its declared pin
+// describes nothing that runs. Callers reasoning about what a repo will
+// actually execute must consult this before believing [SDKPin].
+func SDKWorkspaceOverride(sparkwingDir string) string {
+	body, err := os.ReadFile(filepath.Join(sparkwingDir, "go.work"))
+	if err != nil {
+		return ""
+	}
+	wf, err := modfile.ParseWork("go.work", body, nil)
+	if err != nil {
+		return ""
+	}
+	for _, use := range wf.Use {
+		dir := use.Path
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(sparkwingDir, dir)
+		}
+		if modulePathOf(dir) == sdkModulePath {
+			return filepath.Clean(dir)
+		}
+	}
+	return ""
+}
+
+// modulePathOf returns the module path declared by dir/go.mod, or "" when
+// the file is absent or unparseable.
+func modulePathOf(dir string) string {
+	body, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return ""
+	}
+	mf, err := modfile.Parse("go.mod", body, nil)
+	if err != nil || mf.Module == nil {
+		return ""
+	}
+	return mf.Module.Mod.Path
+}
+
 // DeriveFleet builds the deduped fleet from registered candidates and
 // observed runs. Candidates are canonicalized to their primary repo
 // via git; a primary is tracked once, with any additional worktrees

@@ -9,17 +9,22 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/boxslot"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
+	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // doctorRunOrphanGrace is how long a running run row must have gone without a
@@ -65,6 +70,20 @@ type DoctorReport struct {
 	// takeover and can leave the daemon rejecting a newer client's requests.
 	// Reported with an explanation, never repaired.
 	DaemonVersionSkew *DoctorVersionSkew `json:"daemon_version_skew,omitempty"`
+	// LockedOutRepos are registered repos whose SDK pin sits below the release
+	// that speaks to the resident daemon, so every gate they run is refused
+	// until the pin moves. This is the skew that blocks work: DaemonVersionSkew
+	// compares the CLI, which is not a party to a pipeline's handshake.
+	// Reported with the pin to raise, never repaired -- editing another repo's
+	// go.mod is not doctor's call.
+	LockedOutRepos []DoctorLockedOutRepo `json:"locked_out_repos,omitempty"`
+	// DaemonProtocolGap is set when the resident daemon speaks a wire protocol
+	// major newer than any this build's release table covers. This binary then
+	// cannot query that daemon at all, and cannot name the release that first
+	// spoke its major, so LockedOutRepos is measured against the daemon's own
+	// release rather than the lowest one that would do. Reported with the
+	// remedy -- update this CLI -- never repaired.
+	DaemonProtocolGap *DoctorProtocolGap `json:"daemon_protocol_gap,omitempty"`
 	// QuarantinedLedgers are admission state files the daemon moved aside
 	// because it could not restore them, serving with a fresh ledger instead.
 	// They are forensic copies: reported with an explanation, never removed.
@@ -133,6 +152,45 @@ type DoctorVersionSkew struct {
 	Daemon string `json:"daemon"`
 }
 
+// DoctorLockedOutRepo is one registered repo whose pinned SDK sits below the
+// release that speaks to the resident daemon, so the daemon refuses it and no
+// takeover can resolve that, because takeover runs from the client side.
+type DoctorLockedOutRepo struct {
+	// Name is the checkout directory's base name.
+	Name string `json:"name"`
+	// Path is the registered checkout root whose .sparkwing/go.mod carries
+	// Pin. A linked worktree gets its own row rather than folding into its
+	// primary: the pipeline binary is built from the .sparkwing of whichever
+	// checkout runs the gate, and a worktree's pin can differ from the
+	// primary's, so canonicalizing here would report a pin nothing runs and
+	// hide the one that is refused.
+	Path string `json:"path"`
+	// Worktree marks a row whose Path is a linked worktree, so a Name that
+	// reads as a branch rather than a repo is not a surprise.
+	Worktree bool `json:"worktree,omitempty"`
+	// Pin is the SDK version in the checkout's .sparkwing/go.mod.
+	Pin string `json:"pin"`
+	// RaiseTo is the SDK release this pin has to reach to speak to the
+	// resident daemon: the lowest release at the daemon's protocol major,
+	// or -- when this build's table ends below that major, which
+	// [DoctorReport.DaemonProtocolGap] then reports -- the daemon's own
+	// release, which speaks it but need not be the lowest that does.
+	RaiseTo string `json:"raise_to"`
+}
+
+// DoctorProtocolGap names a resident daemon speaking a wire protocol major
+// this build does not know, which is both why this CLI cannot query it and
+// why a lockout diagnosis against it can only give a floor.
+type DoctorProtocolGap struct {
+	// Self is the newest protocol major this build's release table covers,
+	// which is the major this build speaks.
+	Self int `json:"self"`
+	// Daemon is the protocol major the daemon reported in its handshake ack.
+	Daemon int `json:"daemon"`
+	// DaemonVersion is the release the daemon reports for its own build.
+	DaemonVersion string `json:"daemon_version"`
+}
+
 // DoctorLegacyHolder is one live legacy box-slot holder in the report.
 type DoctorLegacyHolder struct {
 	PID   int    `json:"pid"`
@@ -147,11 +205,15 @@ type DoctorLegacyHolder struct {
 // stays clean whatever else is running on the machine, and the stray is
 // reported alongside rather than folded in.
 //
-// [DoctorReport.UngatedRepos] is excluded for the same reason. Which
-// repositories git gates is the machine's git configuration, not this home's
-// state, and folding it in would make a home's verdict depend on checkouts it
-// has never run. It is rendered on the healthy path too, so an ungated repo
-// is still reported by a doctor run that finds nothing to repair.
+// [DoctorReport.LockedOutRepos] counts because the refusing daemon belongs to
+// this home: a pin that sits below what this home's daemon speaks is a defect
+// in this home's configuration, not a property of some other home.
+//
+// [DoctorReport.UngatedRepos] is excluded because the question of which
+// repositories git-gate their pipelines is answered by the machine's git
+// configuration, not by this home's daemon. It is rendered on the healthy path
+// too, so an ungated repo is still reported by a run that finds nothing to
+// repair.
 func (r DoctorReport) Clean() bool {
 	return len(r.OrphanedRuns) == 0 &&
 		r.LegacyBoxSlotFilesRemoved == 0 &&
@@ -161,6 +223,8 @@ func (r DoctorReport) Clean() bool {
 		len(r.DanglingRunDirs) == 0 &&
 		len(r.AdmissionRejections) == 0 &&
 		r.DaemonVersionSkew == nil &&
+		len(r.LockedOutRepos) == 0 &&
+		r.DaemonProtocolGap == nil &&
 		len(r.QuarantinedLedgers) == 0 &&
 		len(r.PoisonedProfiles) == 0 &&
 		r.ShadowedHooks == nil
@@ -310,29 +374,126 @@ func diagnoseQuarantinedLedgers(home string, report *DoctorReport) {
 	report.QuarantinedLedgers = matches
 }
 
-// diagnoseDaemonHealth reads the local daemon's live state once and reports
-// two standing problems a fresh user on the happy path otherwise only sees as
-// an opaque per-run failure: a repeated malformed-request rejection pattern
-// (from the outcome window), and a version skew between this binary and the
-// resident daemon (takeover resolves a skew only when the client build
-// supersedes the daemon's; otherwise the daemon stays and may reject requests
-// it cannot honor). It is read-only; an absent daemon yields nothing.
+// diagnoseDaemonHealth reads the resident daemon and reports the standing
+// problems a fresh user on the happy path otherwise only sees as an opaque
+// per-run failure: a repeated malformed-request rejection pattern (from the
+// outcome window), a version skew between this binary and the daemon
+// (takeover resolves a skew only when the client build supersedes the
+// daemon's; otherwise the daemon stays and may reject requests it cannot
+// honor), and the checkouts the daemon's protocol major locks out. It is
+// read-only; an absent daemon yields nothing.
+//
+// Who the daemon is comes from the handshake ack, not from the queue state:
+// a daemon speaking a protocol major this build does not refuses the queue
+// read outright, and that refusal is the very incident the lockout scan
+// exists to explain. A probe reads the ack before asking the daemon for
+// anything, so it still learns which daemon is resident and what it speaks.
+// The queue state is then read separately, for the checks that need it.
 func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report *DoctorReport) {
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home})
+	sock, err := wingd.SocketPath(home)
 	if err != nil {
 		return
 	}
-	if qs.Events != nil {
-		for _, r := range qs.Events.Rejections {
-			if r.Count >= doctorRejectionPatternThreshold {
-				report.AdmissionRejections = append(report.AdmissionRejections,
-					DoctorRejection{Cause: r.Cause, Count: r.Count})
-			}
+	info, err := wingdclient.Probe(ctx, sock)
+	if err != nil {
+		return
+	}
+	if versionSkewed(selfVersion, info.BinaryVersion) {
+		report.DaemonVersionSkew = &DoctorVersionSkew{Self: selfVersion, Daemon: info.BinaryVersion}
+	}
+	diagnoseLockedOutRepos(info.ProtocolMajor, info.BinaryVersion, wingwire.ReleasedProtocolFloors(), report)
+
+	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home})
+	if err != nil || qs.Events == nil {
+		return
+	}
+	for _, r := range qs.Events.Rejections {
+		if r.Count >= doctorRejectionPatternThreshold {
+			report.AdmissionRejections = append(report.AdmissionRejections,
+				DoctorRejection{Cause: r.Cause, Count: r.Count})
 		}
 	}
-	if versionSkewed(selfVersion, qs.DaemonVersion) {
-		report.DaemonVersionSkew = &DoctorVersionSkew{Self: selfVersion, Daemon: qs.DaemonVersion}
+}
+
+// diagnoseLockedOutRepos names the registered repos whose pinned SDK sits
+// below the release that speaks to the resident daemon, so it refuses them.
+//
+// This is the skew that actually stops work, and it is invisible from inside
+// the repo that hits it: the daemon is machine-wide and the first run needing
+// one brings it up, so a single current repo can lock out every older one and
+// the error surfaces in the victim rather than the cause. Read-only -- the
+// remedy edits another repo's go.mod, which is the operator's call.
+//
+// daemonMajor is what the daemon said in its handshake ack, never what its
+// version implies: a table can place a release only below its newest row, so
+// reading a major off a version quietly reports a floor and calls a daemon
+// past that row current. Each pin is then placed by one comparison against
+// raiseTo, the lowest release known to speak daemonMajor -- the table's
+// majors ascend with their floors, so a pin below that release speaks an
+// older major and a pin at or above it does not.
+//
+// When the table ends below daemonMajor this build cannot name that release:
+// which release first spoke a major was decided after this build was cut. The
+// daemon is running one that speaks it, so its own version stands in as a
+// target that provably works, and the gap is reported alongside
+// ([DoctorReport.DaemonProtocolGap]) so a floor is never read as exact. The
+// set of repos then errs wide rather than silent: a pin between the true
+// floor and the daemon's release is named although it may already be high
+// enough, which costs an operator a pin bump they did not need, against a
+// silence that costs them the whole diagnosis. A pin that will not parse is
+// not evidence against anyone; neither is a daemon version that will not parse,
+// names a scratch build, or is a prerelease -- a prerelease sorts below the
+// release it names, which would clear pins at that release rather than flag
+// them, and a prerelease cannot be written into go.mod as a target. Repos
+// whose SDK is supplied by a replace directive or a go.work `use` are
+// exonerated last, after the pin has already been found wanting -- those
+// build the pipeline from a local checkout, so the declared pin describes
+// nothing that runs and naming it would send an operator to edit a line that
+// changes no behavior.
+func diagnoseLockedOutRepos(daemonMajor int, daemonVersion string, floors wingwire.ProtocolFloors, report *DoctorReport) {
+	newest, covered := floors.Newest()
+	if !covered || daemonMajor <= 0 {
+		return
 	}
+	raiseTo, known := floors.MinVersionSpeaking(daemonMajor)
+	if !known {
+		report.DaemonProtocolGap = &DoctorProtocolGap{
+			Self:          newest.Major,
+			Daemon:        daemonMajor,
+			DaemonVersion: daemonVersion,
+		}
+		if !semver.IsValid(daemonVersion) || scratchBuild(daemonVersion) || semver.Prerelease(daemonVersion) != "" {
+			return
+		}
+		raiseTo = daemonVersion
+	}
+	cands, err := repos.CandidatePaths()
+	if err != nil {
+		return
+	}
+	for _, c := range cands {
+		sparkwingDir := filepath.Join(c.Path, ".sparkwing")
+		pin, replace := repos.SDKPin(sparkwingDir)
+		if pin == "" || replace != "" || !semver.IsValid(pin) {
+			continue
+		}
+		if semver.Compare(pin, raiseTo) >= 0 {
+			continue
+		}
+		if repos.SDKWorkspaceOverride(sparkwingDir) != "" {
+			continue
+		}
+		report.LockedOutRepos = append(report.LockedOutRepos, DoctorLockedOutRepo{
+			Name:     filepath.Base(c.Path),
+			Path:     c.Path,
+			Pin:      pin,
+			RaiseTo:  raiseTo,
+			Worktree: c.Worktree,
+		})
+	}
+	sort.Slice(report.LockedOutRepos, func(i, j int) bool {
+		return report.LockedOutRepos[i].Path < report.LockedOutRepos[j].Path
+	})
 }
 
 // versionSkewed reports whether the running binary and the live daemon are
@@ -536,6 +697,12 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 		skew = 1
 	}
 	fmt.Fprintf(w, "daemon_version_skew\t%d\n", skew)
+	fmt.Fprintf(w, "locked_out_repos\t%d\n", len(r.LockedOutRepos))
+	protocolGap := 0
+	if r.DaemonProtocolGap != nil {
+		protocolGap = 1
+	}
+	fmt.Fprintf(w, "daemon_protocol_gap\t%d\n", protocolGap)
 	fmt.Fprintf(w, "quarantined_ledgers\t%d\n", len(r.QuarantinedLedgers))
 	fmt.Fprintf(w, "poisoned_profiles\t%d\n", len(r.PoisonedProfiles))
 	shadowed := 0
@@ -584,6 +751,8 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 			s.Self, s.Daemon)
 	}
 
+	renderLockedOutRepos(w, r)
+
 	if n := len(r.QuarantinedLedgers); n > 0 {
 		fmt.Fprintf(w, "\nwarning: %d quarantined admission ledger file(s) -- the daemon could not restore them and started fresh\n", n)
 		for _, f := range r.QuarantinedLedgers {
@@ -611,6 +780,51 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	}
 	renderStrayDaemons(w, r)
 	return nil
+}
+
+// renderLockedOutRepos writes the checkouts the resident daemon refuses, each
+// with the release its own pin has to reach, and then the protocol gap when
+// this build is the older side of the handshake as well.
+//
+// Which lever moves is the whole point of the warning, and it is not the same
+// lever in both states. With the daemon's protocol known, the CLI is a
+// bystander to the refusal and upgrading it changes nothing. With the daemon
+// past this build's table, the CLI is refused too and carries the stale table
+// the targets were read from, so updating it is exactly what sharpens the
+// answer -- printing the bystander sentence there would argue against the one
+// action that helps.
+func renderLockedOutRepos(w io.Writer, r DoctorReport) {
+	if n := len(r.LockedOutRepos); n > 0 {
+		fmt.Fprintf(w, "\nwarning: %d checkout(s) cannot gate against the resident admission daemon -- their pinned SDK is below the release that speaks to it\n", n)
+		rows := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, lr := range r.LockedOutRepos {
+			kind := ""
+			if lr.Worktree {
+				kind = " (worktree)"
+			}
+			fmt.Fprintf(rows, "  %s%s\tpinned %s\traise to %s\t%s\n", lr.Name, kind, lr.Pin, lr.RaiseTo, lr.Path)
+		}
+		_ = rows.Flush()
+		fmt.Fprint(w, "  every pipeline run in these checkouts is refused until the pin in that checkout's .sparkwing/go.mod reaches the release named on its row")
+		if r.DaemonProtocolGap == nil {
+			fmt.Fprint(w, "; the sparkwing CLI is not the client here and upgrading it does not help")
+		} else {
+			fmt.Fprint(w, ", which is the daemon's own release -- this build cannot name the lowest release that would do")
+		}
+		fmt.Fprintln(w)
+	}
+	g := r.DaemonProtocolGap
+	if g == nil {
+		return
+	}
+	daemon := ""
+	if g.DaemonVersion != "" {
+		daemon = " (sparkwing " + g.DaemonVersion + ")"
+	}
+	fmt.Fprintf(w, "\nwarning: the resident admission daemon%s speaks wire protocol %d and this sparkwing speaks %d\n",
+		daemon, g.Daemon, g.Self)
+	fmt.Fprintf(w, "  that daemon refuses this CLI too, and the release table this build carries stops below protocol %d, so it cannot name which release first spoke it -- update the sparkwing CLI and re-run doctor for an exact answer\n",
+		g.Daemon)
 }
 
 // renderUngatedRepos writes the fleet-wide ungated warning, skipping the
