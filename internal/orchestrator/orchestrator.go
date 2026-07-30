@@ -507,6 +507,25 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			}
 			status := statusForRunError(admitErr)
 			_ = backends.State.FinishRun(context.WithoutCancel(ctx), runID, status, admitErr.Error())
+			if opts.Delegate != nil {
+				attrs := map[string]any{
+					"run_id": runID,
+					"status": status,
+					"error":  admitErr.Error(),
+				}
+				if runID != "" {
+					attrs["hints"] = map[string]string{
+						"status": "sparkwing runs status --run " + runID,
+						"logs":   "sparkwing runs logs --run " + runID,
+					}
+				}
+				opts.Delegate.Emit(sparkwing.LogRecord{
+					TS:    time.Now(),
+					Level: "error",
+					Event: "run_finish",
+					Attrs: attrs,
+				})
+			}
 			return &Result{RunID: runID, Status: status, Error: admitErr}, nil
 		}
 		// safety: release only after FinishRun below, so the daemon's

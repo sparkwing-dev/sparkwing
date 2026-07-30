@@ -333,6 +333,9 @@ func (cl *Client) connect(ctx context.Context) error {
 			cl.takeover(ctx, opts)
 			continue
 		}
+		if devBuild(opts.Version) != devBuild(ack.BinaryVersion) {
+			opts.logf("sharing running daemon %s (dev and release builds do not supersede each other)", ack.BinaryVersion)
+		}
 		if ack.Draining {
 			cl.Close()
 			if err := sleep(ctx, opts.backoff()); err != nil {

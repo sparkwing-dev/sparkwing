@@ -49,11 +49,24 @@ func TestServedDownLevelDetectsBeingTheOlderSide(t *testing.T) {
 // survive, however the two binary versions happen to order.
 func TestDownLevelServiceOutranksASupersedingVersion(t *testing.T) {
 	ack := wingwire.HelloAck{ProtocolMajor: 1, NativeProtocolMajor: 2, BinaryVersion: "v1.0.0"}
-	if !supersedes("(devel)", ack.BinaryVersion) {
-		t.Fatal("test premise lost: a dev build no longer supersedes a release")
+	if !supersedes("v2.0.0", ack.BinaryVersion) {
+		t.Fatal("test premise lost: a newer release no longer supersedes an older one")
 	}
 	if !servedDownLevel(ack) {
 		t.Error("a client served below the daemon's native major must not take it over")
+	}
+}
+
+// At a matching protocol major nothing outranks the version comparison, so
+// a dev build's refusal to supersede a release is the only thing keeping it
+// from taking the daemon over.
+func TestMatchingProtocolLeavesTheTakeoverToTheVersionComparison(t *testing.T) {
+	ack := wingwire.HelloAck{ProtocolMajor: 2, NativeProtocolMajor: 2, BinaryVersion: "v1.0.0"}
+	if servedDownLevel(ack) {
+		t.Fatal("test premise lost: a daemon on the client's own major is not down-level")
+	}
+	if supersedes("(devel)", ack.BinaryVersion) {
+		t.Error("a dev build must not take over a release daemon at matching protocol")
 	}
 }
 
@@ -121,7 +134,7 @@ func TestDownLevelServicePreventsLivelock(t *testing.T) {
 	spawned := make(chan struct{}, 1)
 	cl, err := EnsureDaemon(context.Background(), Options{
 		Home:        home,
-		Version:     "(devel)",
+		Version:     "v2.0.0",
 		Spawn:       func(string, string) error { spawned <- struct{}{}; return nil },
 		DialTimeout: 200 * time.Millisecond,
 	})
