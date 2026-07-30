@@ -65,6 +65,9 @@ func TestRunLocal_S3State_DispatchesToS3Backends(t *testing.T) {
 	if res.Status != "success" {
 		t.Fatalf("status = %q, want success (err=%v)", res.Status, res.Error)
 	}
+	if err := state.Close(); err != nil {
+		t.Fatalf("state.Close: %v", err)
+	}
 
 	reader := s3state.New(art)
 	t.Cleanup(func() { _ = reader.Close() })

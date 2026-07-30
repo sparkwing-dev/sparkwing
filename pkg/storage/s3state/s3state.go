@@ -137,7 +137,14 @@ type runState struct {
 	envelopes []envelope
 	bufSize   int
 	dirty     bool
-	flushing  bool
+
+	// flushing is non-nil while a flush holds this run and closes when
+	// that flush releases it, so a caller that needs durability can wait
+	// the flush out instead of dropping its own write. flushedLen and
+	// flushedSize are how much of the log that flush is carrying.
+	flushing    chan struct{}
+	flushedLen  int
+	flushedSize int
 
 	// Derived snapshot, kept up to date as envelopes are appended.
 	run       *store.Run
@@ -215,8 +222,9 @@ func (b *Backend) loadLocked(ctx context.Context, runID string, rs *runState) er
 
 // appendEnvelope appends an envelope to the run's log, updates the
 // derived snapshot, and marks the run dirty. If the pending buffer
-// exceeds bufferLimit, an immediate flush is triggered synchronously
-// (callers tolerate the latency in exchange for bounded memory).
+// exceeds bufferLimit, an opportunistic flush is triggered
+// synchronously (callers tolerate the latency in exchange for bounded
+// memory).
 func (b *Backend) appendEnvelope(ctx context.Context, runID string, env envelope) error {
 	rs, err := b.getRunState(ctx, runID, true)
 	if err != nil {
@@ -230,35 +238,91 @@ func (b *Backend) appendEnvelope(ctx context.Context, runID string, env envelope
 	shouldFlush := rs.bufSize >= b.bufferLimit
 	rs.mu.Unlock()
 	if shouldFlush {
-		return b.flushRun(ctx, runID)
+		return b.tryFlushRun(ctx, runID)
 	}
 	return nil
 }
 
-// flushRun serializes the run's full envelope log and PUTs it.
-// Idempotent; safe to call concurrently with appendEnvelope.
-func (b *Backend) flushRun(ctx context.Context, runID string) error {
+// lookupRun returns the in-memory state for runID, or nil when the
+// run has never been touched in this process.
+func (b *Backend) lookupRun(runID string) *runState {
 	b.mu.Lock()
-	rs, ok := b.runs[runID]
-	b.mu.Unlock()
-	if !ok {
-		return nil
-	}
+	defer b.mu.Unlock()
+	return b.runs[runID]
+}
+
+// claimFlush reserves the run for one flush. The caller that wins the
+// claim gets the envelopes to write. A caller that loses gets the
+// channel the current holder closes on release. A clean run yields
+// neither.
+func (rs *runState) claimFlush() ([]envelope, <-chan struct{}) {
 	rs.mu.Lock()
-	if !rs.dirty || rs.flushing {
-		rs.mu.Unlock()
-		return nil
+	defer rs.mu.Unlock()
+	if rs.flushing != nil {
+		return nil, rs.flushing
 	}
-	rs.flushing = true
+	if !rs.dirty {
+		return nil, nil
+	}
+	rs.flushing = make(chan struct{})
+	rs.flushedLen = len(rs.envelopes)
+	rs.flushedSize = rs.bufSize
 	envs := make([]envelope, len(rs.envelopes))
 	copy(envs, rs.envelopes)
-	rs.mu.Unlock()
+	return envs, nil
+}
 
+// flushRun makes every envelope appended before the call durable, and
+// only returns nil once that is true. When another flush holds the run
+// it waits for that flush to land and then re-claims, because the
+// holder snapshotted the log before this caller's envelopes existed
+// and cannot be trusted to carry them. Cancelling ctx while waiting
+// returns ctx.Err() rather than a false success.
+func (b *Backend) flushRun(ctx context.Context, runID string) error {
+	for {
+		rs := b.lookupRun(runID)
+		if rs == nil {
+			return nil
+		}
+		envs, wait := rs.claimFlush()
+		if wait != nil {
+			select {
+			case <-wait:
+				continue
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		if envs == nil {
+			return nil
+		}
+		return b.putEnvelopes(ctx, runID, rs, envs)
+	}
+}
+
+// tryFlushRun flushes the run unless another flush already holds it.
+// It is for callers that want the batching but promise nobody
+// durability: the ticker and the buffer-threshold path. Skipping is
+// safe for them because a run with envelopes past the in-flight
+// snapshot stays dirty, so the next flush picks them up.
+func (b *Backend) tryFlushRun(ctx context.Context, runID string) error {
+	rs := b.lookupRun(runID)
+	if rs == nil {
+		return nil
+	}
+	envs, wait := rs.claimFlush()
+	if wait != nil || envs == nil {
+		return nil
+	}
+	return b.putEnvelopes(ctx, runID, rs, envs)
+}
+
+// putEnvelopes serializes envs and PUTs them as the run's whole blob.
+// Callers must hold the run's flush claim; this releases it.
+func (b *Backend) putEnvelopes(ctx context.Context, runID string, rs *runState, envs []envelope) error {
 	body, err := encodeEnvelopes(envs)
 	if err != nil {
-		rs.mu.Lock()
-		rs.flushing = false
-		rs.mu.Unlock()
+		b.markFlushed(rs, false)
 		return err
 	}
 	key := stateKey(runID)
@@ -290,17 +354,25 @@ func (b *Backend) flushRun(ctx context.Context, runID string) error {
 	return putErr
 }
 
-// markFlushed clears the flushing latch and, when delivered is true,
-// marks the run clean. A run handed off to the outbox counts as
-// delivered: the outbox owns replay from there, and the next append
-// re-dirties the run so the following flush stages a fresh superset.
+// markFlushed releases the run's flush claim and, when delivered is
+// true, marks clean only the part of the log that was actually written.
+// Envelopes appended while the PUT was in flight keep the run dirty,
+// otherwise the last append before a terminal state could be marked
+// durable by a write that never contained it. A run handed off to the
+// outbox counts as delivered: the outbox owns replay from there.
 func (b *Backend) markFlushed(rs *runState, delivered bool) {
 	rs.mu.Lock()
-	rs.flushing = false
 	if delivered {
-		rs.dirty = false
-		rs.bufSize = 0
+		rs.dirty = len(rs.envelopes) != rs.flushedLen
+		rs.bufSize -= rs.flushedSize
+		if rs.bufSize < 0 {
+			rs.bufSize = 0
+		}
 	}
+	rs.flushedLen = 0
+	rs.flushedSize = 0
+	close(rs.flushing)
+	rs.flushing = nil
 	rs.mu.Unlock()
 }
 
@@ -318,28 +390,38 @@ func (b *Backend) flushLoop() {
 	}
 }
 
-func (b *Backend) flushAllDirty() {
+// dirtyRunIDs lists the runs with unwritten envelopes, including runs
+// a flush currently holds: a holder's snapshot may predate the newest
+// appends, so a durable caller still has work to do on them.
+func (b *Backend) dirtyRunIDs() []string {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	ids := make([]string, 0, len(b.runs))
 	for id, rs := range b.runs {
 		rs.mu.Lock()
-		if rs.dirty && !rs.flushing {
+		if rs.dirty {
 			ids = append(ids, id)
 		}
 		rs.mu.Unlock()
 	}
-	b.mu.Unlock()
-	for _, id := range ids {
-		_ = b.flushRun(context.Background(), id)
+	return ids
+}
+
+func (b *Backend) flushAllDirty() {
+	for _, id := range b.dirtyRunIDs() {
+		_ = b.tryFlushRun(context.Background(), id)
 	}
 }
 
 // Close stops the background flush goroutine and synchronously
-// flushes any runs still marked dirty.
+// flushes any runs still marked dirty, waiting out any flush still in
+// flight so nothing appended before Close is left unwritten.
 func (b *Backend) Close() error {
 	b.stopOnce.Do(func() { close(b.stopCh) })
 	b.wg.Wait()
-	b.flushAllDirty()
+	for _, id := range b.dirtyRunIDs() {
+		_ = b.flushRun(context.Background(), id)
+	}
 	if b.outbox != nil {
 		_ = b.outbox.Close()
 	}
@@ -468,6 +550,10 @@ func (b *Backend) CreateRun(ctx context.Context, r store.Run) error {
 	return b.appendEnvelope(ctx, r.ID, env)
 }
 
+// FinishRun records the run's terminal state and flushes it. A nil
+// return means the whole log including that terminal envelope is in the
+// object store, since in Mode 2 that store is the only copy. Callers
+// that see an error must treat the run's state as not yet persisted.
 func (b *Backend) FinishRun(ctx context.Context, runID, status, errMsg string) error {
 	rs, err := b.getRunState(ctx, runID, true)
 	if err != nil {
