@@ -76,7 +76,7 @@ code change to unlock.
   gate), `shadowed` (gates installed, but `core.hooksPath` sends git
   elsewhere), `uninstalled` (a declared hook was never written), or
   `undeclared` (no pipeline asks for one). Both read the machine's repo
-  registry -- `repos.yaml`, filled by `sparkwing pipeline add` and by any
+  registry -- `repos.yaml`, filled by `sparkwing configure xrepo add` and by any
   `fallback_paths` it lists -- rather than a list scoped by hand, which is how
   a repo ends up ungated for weeks with nothing reporting it. A checkout the
   registry does not list is not surveyed and not swept; register it first.

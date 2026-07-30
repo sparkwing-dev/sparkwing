@@ -2503,7 +2503,7 @@ with the hooks its pipelines declare: armed (a gate runs), shadowed (a gate is
 installed but core.hooksPath sends git elsewhere), uninstalled (a declared
 hook was never written), or undeclared (no pipeline asks for one).
 
-The repos are the ones repos.yaml reaches: what sparkwing pipeline add
+The repos are the ones repos.yaml reaches: what sparkwing configure xrepo add
 registered, plus any fallback_paths it scans. A checkout it does not list is
 not surveyed, so register it before reading a clean survey as a clean
 machine.

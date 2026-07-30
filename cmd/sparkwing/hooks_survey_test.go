@@ -110,7 +110,7 @@ func TestRenderHooksSurvey_EmptyFleetTellsTheOperatorToRegisterOne(t *testing.T)
 	if err := renderHooksSurvey(&buf, nil, "pretty"); err != nil {
 		t.Fatalf("renderHooksSurvey: %v", err)
 	}
-	if got := buf.String(); !strings.Contains(got, "sparkwing pipeline add") {
+	if got := buf.String(); !strings.Contains(got, "sparkwing configure xrepo add") {
 		t.Errorf("output = %q, want the registration hint", got)
 	}
 }

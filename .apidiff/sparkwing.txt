@@ -162,6 +162,7 @@ type EnvVarDoc struct {
 type EnvVarDocer interface {
 	EnvVars() []EnvVarDoc
 }
+var ErrLintCacheWorkdirMismatch = errors.New("lint cache archive was produced at a different workdir")
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
 var ErrSecretMissing = errors.New("sparkwing: secret not found")
 func Error(ctx context.Context, format string, args ...any)
@@ -368,6 +369,7 @@ func (n *JobNode) Work() *Work
 func JobSpawn(w *Work, id string, x any) *SpawnSpec
 func JobSpawnEach(w *Work, items, fn any) *SpawnGenSpec
 func Key(parts ...any) CacheKey
+func LintCacheBlobKey() string
 type LintWarning struct {
 	NodeID string
 	Code   string
@@ -560,6 +562,7 @@ type ResourceSample struct {
 
 	CPUTime time.Duration
 }
+func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error)
 func RetryAuto() RetryOption
 func RetryBackoff(d time.Duration) RetryOption
 type RetryConfig struct {
@@ -633,6 +636,7 @@ var RuntimePlumbing = struct {
 	},
 }
 const Satisfied Outcome = "satisfied"
+func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error)
 type Schema struct {
 }
 func (s *Schema) DescribeArgs() []DescribeArg
@@ -834,6 +838,7 @@ func (p argSetPredicate) Eval(ctx PredicateContext) bool
 func (p argSetPredicate) String() string
 func (p argUnsetPredicate) Eval(ctx PredicateContext) bool
 func (p argUnsetPredicate) String() string
+func (c *countReader) Read(p []byte) (int, error)
 func (e *envResolver) Resolve(_ context.Context, name string) (string, bool, error)
 func (f *fileResolver) Resolve(_ context.Context, name string) (string, bool, error)
 func (k groupKind) String() string

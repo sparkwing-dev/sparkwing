@@ -19,6 +19,7 @@ Every exported symbol in the `sparkwing` package (the SDK you import as `sw`), g
 - `func Info(ctx context.Context, format string, args ...any)` -- Info emits an info-level message to the active logger.
 - `func Inputs[T any](ctx context.Context) T` -- Inputs returns the typed Inputs struct that the orchestrator parsed for the current run -- the same value the pipeline's Plan(ctx, plan, in T, rc) method received.
 - `func IsDryRun(ctx context.Context) bool` -- IsDryRun reports whether ctx is in dry-run mode.
+- `func LintCacheBlobKey() string` -- LintCacheBlobKey returns the /cache/<key> identifier for the golangci-lint tool cache for the current WorkDir.
 - `func MustConfig(ctx context.Context, name string) string` -- MustConfig is Config that panics on error.
 - `func MustSecret(ctx context.Context, name string) string` -- MustSecret is Secret that panics on error.
 - `func NodeFromContext(ctx context.Context) string` -- NodeFromContext returns the currently-executing node ID, or "" if unset.
@@ -29,8 +30,10 @@ Every exported symbol in the `sparkwing` package (the SDK you import as `sw`), g
 - `func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T])` -- RegisterEntrypoint installs a Go work unit (the entrypoint) under the given type-name, matching the `entrypoint:` field in sparkwing.yaml.
 - `func Registered() []string` -- Registered returns the names of all registered pipelines, sorted.
 - `func ResolveAs[T any](s *Schema, in ResolveInputs) (T, error)` -- ResolveAs is the typed convenience wrapper: same semantics as Schema.Resolve but returns T directly so callers don't have to type-assert the reflect.Value.
+- `func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error)` -- RestoreLintCache downloads the blob-store seed for the current WorkDir and expands it into the golangci-lint tool-cache directory.
 - `func RunAndAwait[Out, In any](ctx context.Context, pipeline, nodeID string, opts ...AwaitOption) (Out, error)` -- RunAndAwait triggers a fresh run of pipeline and waits for it to reach terminal state, returning the typed output of nodeID from that run.
 - `func RunWork(ctx context.Context, w *Work) (any, error)` -- RunWork executes w's step + spawn DAG.
+- `func SaveLintCache(ctx context.Context, gcURL, token string) (int64, error)` -- SaveLintCache compresses the golangci-lint tool-cache directory for the current WorkDir and PUTs it to gcURL/cache/<key>.
 - `func Secret(ctx context.Context, name string) (string, error)` -- Secret resolves a masked value through the resolver installed on ctx.
 - `func SetGit(g *Git)` -- SetGit attaches a fully-populated Git to the runtime.
 - `func SetWorkDir(dir string)` -- SetWorkDir overrides the WorkDir field on the runtime singleton and updates the Git workDir so live methods follow.
@@ -1839,6 +1842,10 @@ const Paused = "paused"
 ```
 
 ## Variables
+
+```
+var ErrLintCacheWorkdirMismatch = errors.New("lint cache archive was produced at a different workdir")
+```
 
 ```
 var ErrNoProject = errors.New("sparkwing: no .sparkwing/ project found above cwd")
