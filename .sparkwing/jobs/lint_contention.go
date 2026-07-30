@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -30,21 +31,43 @@ const golangciContention = "parallel golangci-lint is running"
 const lintCommand = "cd .sparkwing && golangci-lint run --allow-serial-runners ./..."
 
 // runGolangciLint lints the .sparkwing module, waiting out any other
-// golangci-lint on the box for up to lintLockWait. The returned error
-// already reads as a gate failure line, so a caller collecting failures
-// can take it unchanged.
+// golangci-lint on the box for up to lintLockWait. On a fixed-workdir
+// k8s runner it seeds the cache from the blob store before running and
+// saves the result after a clean run. The returned error already reads as
+// a gate failure line, so a caller collecting failures can take it
+// unchanged.
 func runGolangciLint(ctx context.Context) error {
+	gcURL := os.Getenv("SPARKWING_GITCACHE_URL")
+	gcToken := os.Getenv("SPARKWING_CACHE_TOKEN")
+
+	restored, restoredBytes, restoreErr := sparkwing.RestoreLintCache(ctx, gcURL)
+	switch {
+	case restoreErr != nil:
+		sparkwing.Warn(ctx, "lint cache: restore: %v", restoreErr)
+	case restored:
+		sparkwing.Info(ctx, "lint cache: restored %d bytes from blob store", restoredBytes)
+	}
+
 	lintCtx, cancel := context.WithTimeout(ctx, lintLockWait)
 	defer cancel()
 
-	start := time.Now()
+	lintStart := time.Now()
 	_, err := sparkwing.Bash(lintCtx, lintCommand).
 		Env("GOLANGCI_LINT_CACHE", sparkwing.ToolCacheDir("golangci-lint")).
 		Run()
-	if err == nil {
-		return nil
+	lintDur := time.Since(lintStart)
+	if err != nil {
+		return errors.New(describeLintFailure(lintCtx, lintDur, err))
 	}
-	return errors.New(describeLintFailure(lintCtx, time.Since(start), err))
+
+	savedBytes, saveErr := sparkwing.SaveLintCache(ctx, gcURL, gcToken)
+	switch {
+	case saveErr != nil:
+		sparkwing.Warn(ctx, "lint cache: save: %v", saveErr)
+	case savedBytes > 0:
+		sparkwing.Info(ctx, "lint cache: saved %d bytes (lint ran %s)", savedBytes, lintDur.Round(time.Second))
+	}
+	return nil
 }
 
 // describeLintFailure says what is known about a failed lint step. The
