@@ -1,0 +1,147 @@
+package jobs
+
+import (
+	"context"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+const fakeRootGoMod = `module github.com/sparkwing-dev/sparkwing
+
+go 1.26.0
+`
+
+const fakePipelinesGoMod = `module sparkwing-pipelines
+
+go 1.26.0
+
+require github.com/sparkwing-dev/sparkwing v0.1.0
+
+` + selfReplaceComment + selfReplaceLine + `
+`
+
+// refuseUnpinnedGate stands in for this repo's pre-commit gate: it
+// refuses a `.sparkwing/go.mod` with no local replace, which is what
+// the real gate does by failing to build the pipeline module against a
+// pin whose tag does not exist yet.
+const refuseUnpinnedGate = `#!/bin/sh
+if git show ":.sparkwing/go.mod" | grep -q 'replace github.com/sparkwing-dev/sparkwing => \.\.'; then
+	exit 0
+fi
+echo "gate: .sparkwing module does not build without the local replace" >&2
+exit 1
+`
+
+func gitRun(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s in %s: %v\n%s", strings.Join(args, " "), dir, err, out)
+	}
+	return string(out)
+}
+
+// seedReleaseRepo builds a throwaway repo shaped like sparkwing (root
+// module plus a nested `.sparkwing` pipelines module on a local
+// replace) with a bare origin to push to, and returns its path.
+func seedReleaseRepo(t *testing.T) string {
+	t.Helper()
+	base := t.TempDir()
+	origin := filepath.Join(base, "origin.git")
+	repo := filepath.Join(base, "repo")
+
+	gitRun(t, base, "init", "--bare", "-b", "main", origin)
+	if err := os.MkdirAll(filepath.Join(repo, ".sparkwing"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(repo, "go.mod"), fakeRootGoMod)
+	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n")
+	writeFile(t, filepath.Join(repo, ".sparkwing", "go.mod"), fakePipelinesGoMod)
+	writeFile(t, filepath.Join(repo, ".sparkwing", "go.sum"), "")
+
+	gitRun(t, repo, "init", "-b", "main")
+	gitRun(t, repo, "config", "user.email", "test@example.invalid")
+	gitRun(t, repo, "config", "user.name", "test")
+	gitRun(t, repo, "config", "commit.gpgsign", "false")
+	gitRun(t, repo, "add", ".")
+	gitRun(t, repo, "commit", "-m", "seed")
+	gitRun(t, repo, "remote", "add", "origin", origin)
+	gitRun(t, repo, "push", "-u", "origin", "main")
+
+	hooks := filepath.Join(base, "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-commit"), []byte(refuseUnpinnedGate), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "config", "core.hooksPath", hooks)
+	return repo
+}
+
+func writeFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+func readPipelinesGoMod(t *testing.T, repo string) string {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(repo, ".sparkwing", "go.mod"))
+	if err != nil {
+		t.Fatalf("read .sparkwing/go.mod: %v", err)
+	}
+	return string(body)
+}
+
+func TestRestoreSelfReplaceRepairsAFailedBump(t *testing.T) {
+	repo := seedReleaseRepo(t)
+	ctx := context.Background()
+
+	if err := bumpSelfReplace(ctx, repo, "v0.9.9"); err == nil {
+		t.Fatal("bumpSelfReplace should have failed: the gate refuses a pin with no local replace")
+	}
+	if strings.Contains(readPipelinesGoMod(t, repo), selfReplaceLine) {
+		t.Fatal("test does not reproduce the defect: the bump left the local replace in place, so there is nothing to restore")
+	}
+
+	if err := restoreSelfReplaceIn(ctx, repo); err != nil {
+		t.Fatalf("restoreSelfReplaceIn after a failed bump: %v", err)
+	}
+
+	got := readPipelinesGoMod(t, repo)
+	if !strings.Contains(got, selfReplaceLine) {
+		t.Errorf(".sparkwing/go.mod does not carry the local replace after the restore:\n%s", got)
+	}
+	if !strings.Contains(got, sparkwingModulePath+" v0.9.9") {
+		t.Errorf(".sparkwing/go.mod lost the bumped require:\n%s", got)
+	}
+	if dirty := gitRun(t, repo, "status", "--porcelain"); strings.TrimSpace(dirty) != "" {
+		t.Errorf("working tree left dirty after the restore:\n%s", dirty)
+	}
+	if head := gitRun(t, repo, "log", "-1", "--pretty=%s"); !strings.Contains(head, "restore .sparkwing/ local self-replace") {
+		t.Errorf("restore did not commit; HEAD subject = %q", strings.TrimSpace(head))
+	}
+	if local, remote := gitRun(t, repo, "rev-parse", "main"), gitRun(t, repo, "rev-parse", "origin/main"); local != remote {
+		t.Error("restore did not push the repair to origin")
+	}
+}
+
+func TestRestoreSelfReplaceIsANoopWhenTheBumpNeverRan(t *testing.T) {
+	repo := seedReleaseRepo(t)
+	before := gitRun(t, repo, "rev-parse", "HEAD")
+
+	if err := restoreSelfReplaceIn(context.Background(), repo); err != nil {
+		t.Fatalf("restoreSelfReplaceIn on an untouched repo: %v", err)
+	}
+
+	if after := gitRun(t, repo, "rev-parse", "HEAD"); after != before {
+		t.Error("restore committed against an untouched repo; it must be a noop when the replace is already present")
+	}
+}

@@ -47,6 +47,34 @@ type ReleaseArgs struct {
 // The "never force-push a Go module tag" invariant from the
 // platform-repo release pipeline applies here too: validate-version
 // hard-refuses a tag that already exists on origin.
+//
+// # Node ordering: tag first, then pin
+//
+// push-tag runs BEFORE bump-self-replace pins `.sparkwing/go.mod` to
+// the released version. The pin names a version that exists only once
+// the tag does, and the pin commit fires this repo's pre-commit gate,
+// which rebuilds the pipeline module against that pin -- so pinning
+// first asks a gate to resolve a tag the pipeline has not created yet,
+// and the step is unsatisfiable by construction. Tag-then-pin is the
+// only order in which the gate can approve that commit honestly.
+//
+// The tradeoff: the tag no longer points at a tree carrying the
+// released pin, so reproducing this repo's own gate at a tag uses the
+// local replace instead of the published module. That is acceptable
+// because `.sparkwing/` is sparkwing's own pipeline configuration and
+// not something adopters consume; the published module and the
+// container images are unaffected. The rejected alternative was
+// exempting the pin commit from the gate, which buys a tree-accurate
+// tag with a bypass in the one place that is supposed to prove the
+// release is sound.
+//
+// bump-self-replace is ContinueOnError so restore-self-replace runs
+// even when the pin commit fails. The bump strips the local replace
+// before it commits, and a repo left in that state does not build at
+// all, which fails every later gate run in it until a human restores
+// the replace by hand. Cleanup is the other half of a mutation and
+// belongs on the failure path. ContinueOnError only unblocks that
+// cleanup: a failed bump still fails the run.
 type Release struct {
 	sparkwing.Base
 	args ReleaseArgs
@@ -120,12 +148,6 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	})
 	changelog.Needs(discover, gatePreCommit, gatePrePush)
 
-	bumpSelf := sparkwing.Job(plan, "bump-self-replace", &prepareSelfReplaceJob{
-		RepoDir: repoDir,
-		Version: versionRef,
-	})
-	bumpSelf.Needs(discover, gatePreCommit, gatePrePush, gateTemplates, changelog)
-
 	schemaGate := sparkwing.Job(plan, "gate-schema-changelog", &checkSchemaBreakJob{
 		RepoDir: repoDir,
 		Version: versionRef,
@@ -136,12 +158,19 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		Version: versionRef,
 		RepoDir: repoDir,
 	})
-	pushTag.Needs(validate, clean, changelog, bumpSelf, schemaGate, gateTemplates, gateLineage)
+	pushTag.Needs(validate, clean, changelog, schemaGate, gateTemplates, gateLineage)
+
+	bumpSelf := sparkwing.Job(plan, "bump-self-replace", &prepareSelfReplaceJob{
+		RepoDir: repoDir,
+		Version: versionRef,
+	})
+	bumpSelf.Needs(discover, gatePreCommit, gatePrePush, gateTemplates, changelog, pushTag)
+	bumpSelf.ContinueOnError()
 
 	restoreSelf := sparkwing.Job(plan, "restore-self-replace", &restoreSelfReplaceJob{
 		RepoDir: repoDir,
 	})
-	restoreSelf.Needs(pushTag)
+	restoreSelf.Needs(bumpSelf)
 	return nil
 }
 
@@ -402,11 +431,11 @@ const selfReplaceLine = "replace github.com/sparkwing-dev/sparkwing => .."
 const sparkwingModulePath = "github.com/sparkwing-dev/sparkwing"
 
 // prepareSelfReplaceJob bumps the sparkwing pin in `.sparkwing/go.mod`
-// to the release version and strips the local self-replace. Runs
-// pre-tag so the shipped commit's `.sparkwing/go.mod` is in
-// ready-to-ship shape (no relative-path replace, real version pin).
-// Pairs with restoreSelfReplaceJob which puts the replace back after
-// the tag is out.
+// to the release version and strips the local self-replace. Runs after
+// push-tag because the pin it writes cannot resolve until the tag it
+// names exists (see [Release] for the ordering and its tradeoff).
+// Pairs with restoreSelfReplaceJob, which puts the replace back
+// whether or not this step succeeded.
 type prepareSelfReplaceJob struct {
 	sparkwing.Base
 	RepoDir string
@@ -419,8 +448,15 @@ func (j *prepareSelfReplaceJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, er
 }
 
 func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
-	version := j.Version.Get(ctx)
-	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+	return bumpSelfReplace(ctx, j.RepoDir, j.Version.Get(ctx))
+}
+
+// bumpSelfReplace pins `.sparkwing/go.mod` to version, strips the local
+// self-replace, and commits the module pair. Split from the job body so
+// the half-applied failure state -- go.mod rewritten, commit refused --
+// is reachable in a test without a run-time Ref resolver.
+func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
+	path := filepath.Join(repoDir, ".sparkwing", "go.mod")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
@@ -436,13 +472,13 @@ func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 	}
-	if err := writeSelfModuleSums(ctx, j.RepoDir, version); err != nil {
+	if err := writeSelfModuleSums(ctx, repoDir, version); err != nil {
 		return err
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
+	if _, err := runGitIn(ctx, repoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
 		return fmt.Errorf("release: git add .sparkwing module files: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m",
+	if _, err := runGitIn(ctx, repoDir, "commit", "-m",
 		"release: pin .sparkwing/ to "+version+", drop local self-replace"); err != nil {
 		return fmt.Errorf("release: git commit .sparkwing module files: %w", err)
 	}
@@ -629,12 +665,14 @@ func (f trackedModuleFile) Open() (io.ReadCloser, error) {
 	return os.Open(filepath.Join(f.repoDir, filepath.FromSlash(f.path)))
 }
 
-// restoreSelfReplaceJob undoes prepareSelfReplaceJob's mutation after
-// the tag has been pushed. Adds the self-replace block back and
-// pushes the restore commit so subsequent local development picks up
-// SDK edits via the parent checkout instead of the freshly-tagged
-// module proxy version. Idempotent: noop if the replace is already
-// present.
+// restoreSelfReplaceJob undoes prepareSelfReplaceJob's mutation. Adds
+// the self-replace block back and pushes the restore commit so
+// subsequent local development picks up SDK edits via the parent
+// checkout instead of the freshly-tagged module proxy version. Runs on
+// the failure path too, because a half-applied bump leaves a repo that
+// does not build. Idempotent: noop when the replace is already
+// present, which is the state a run that never reached the bump leaves
+// behind.
 type restoreSelfReplaceJob struct {
 	sparkwing.Base
 	RepoDir string
@@ -646,7 +684,15 @@ func (j *restoreSelfReplaceJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, er
 }
 
 func (j *restoreSelfReplaceJob) run(ctx context.Context) error {
-	path := filepath.Join(j.RepoDir, ".sparkwing", "go.mod")
+	return restoreSelfReplaceIn(ctx, j.RepoDir)
+}
+
+// restoreSelfReplaceIn puts the local self-replace back in
+// `.sparkwing/go.mod`, commits it, and pushes the branch. Split from
+// the job body so the failure path -- the bump left the replace
+// stripped and this has to undo it -- is testable against a real repo.
+func restoreSelfReplaceIn(ctx context.Context, repoDir string) error {
+	path := filepath.Join(repoDir, ".sparkwing", "go.mod")
 	body, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
@@ -659,18 +705,18 @@ func (j *restoreSelfReplaceJob) run(ctx context.Context) error {
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
+	if _, err := runGitIn(ctx, repoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
 		return fmt.Errorf("release: git add .sparkwing module files: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m",
+	if _, err := runGitIn(ctx, repoDir, "commit", "-m",
 		"chore: restore .sparkwing/ local self-replace for next dev cycle"); err != nil {
 		return fmt.Errorf("release: git commit .sparkwing module files: %w", err)
 	}
-	branch, err := currentBranch(ctx, j.RepoDir)
+	branch, err := currentBranch(ctx, repoDir)
 	if err != nil {
 		return fmt.Errorf("release: detect branch for restore push: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "push", "origin", "refs/heads/"+branch); err != nil {
+	if _, err := runGitIn(ctx, repoDir, "push", "origin", "refs/heads/"+branch); err != nil {
 		return fmt.Errorf("release: push restore commit: %w", err)
 	}
 	sparkwing.Info(ctx, "restored .sparkwing/ self-replace + pushed to %s", branch)
