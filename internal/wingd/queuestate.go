@@ -197,6 +197,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	}
 
 	annotateETA(&qs, snap)
+	annotateSemaphoreETA(&qs, snap)
 	return qs
 }
 
@@ -337,6 +338,157 @@ func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 	}
 }
 
+// annotateSemaphoreETA fills ExpectedStartMS for the waiters the host
+// simulation has nothing to say about. A run charged no cores and no
+// memory waits only on the named semaphores it claims, so every key gets
+// its own FIFO simulation of integer cost against that semaphore's
+// effective capacity. A key stands alone in its own simulation because
+// the ledger promotes a waiter as soon as the resources it weighs on free
+// up, rather than making it sit out host-blocked work ahead of it. A
+// waiter on several keys starts when the last of them lets it in. An
+// estimate the host simulation already made is never overwritten, and an
+// unmeasured duration anywhere ahead of the waiter leaves the row nil
+// rather than guessing. qs.Waiters is index-aligned with snap.Waiters,
+// the same pairing annotateETA relies on.
+func annotateSemaphoreETA(qs *wingwire.QueueState, snap admission.Snapshot) {
+	rows := semaphoreETAHolderRows(qs, snap)
+	starts := map[int]float64{}
+	for _, key := range semaphoreETAKeys(snap) {
+		capacity := semaphoreETACapacity(snap, key)
+		if capacity <= 0 {
+			continue
+		}
+		holders := semaphoreETAHolders(snap, rows, key)
+		runs, idx := semaphoreETAWaiters(qs, snap, key)
+		for j, start := range simulateSemaphoreQueue(float64(capacity), holders, runs) {
+			if prev, seen := starts[idx[j]]; !seen || start > prev {
+				starts[idx[j]] = start
+			}
+		}
+	}
+	for i := range qs.Waiters {
+		w := &qs.Waiters[i]
+		// safety: a waiter that also draws host budget is admitted on the later of the two queues, so a semaphore-only number would understate its wait.
+		if w.ExpectedStartMS != nil || w.Resources.Cores > 0 || w.Resources.MemoryBytes > 0 {
+			continue
+		}
+		start, ok := starts[i]
+		if !ok || math.IsInf(start, 1) {
+			continue
+		}
+		ms := int64(start)
+		w.ExpectedStartMS = &ms
+	}
+}
+
+// semaphoreETAKeys names the semaphore keys queued waiters claim, in
+// first-seen admission order so the walk is deterministic.
+func semaphoreETAKeys(snap admission.Snapshot) []string {
+	var keys []string
+	seen := map[string]bool{}
+	for _, w := range snap.Waiters {
+		for _, c := range w.Claims {
+			if seen[c.Key] {
+				continue
+			}
+			seen[c.Key] = true
+			keys = append(keys, c.Key)
+		}
+	}
+	return keys
+}
+
+// semaphoreETACapacity is the capacity the simulation charges a key
+// against. It is the smallest capacity any live hold or queued claim
+// declares, matching the ledger's most-restrictive-wins rule. Zero means
+// nothing live names the key, so there is nothing to simulate.
+func semaphoreETACapacity(snap admission.Snapshot, key string) int {
+	eff := 0
+	for _, ss := range snap.Semaphores {
+		if ss.Key == key {
+			eff = effectiveCapacity(ss)
+			break
+		}
+	}
+	for _, w := range snap.Waiters {
+		for _, c := range w.Claims {
+			if c.Key == key && c.Capacity > 0 && (eff == 0 || c.Capacity < eff) {
+				eff = c.Capacity
+			}
+		}
+	}
+	return eff
+}
+
+// semaphoreETAHolderRows indexes holder rows by lease, so a semaphore
+// hold can be matched back to the run's measured duration and elapsed
+// time. A row is found by the participant id it was rendered from, which
+// is the lease's request id.
+func semaphoreETAHolderRows(qs *wingwire.QueueState, snap admission.Snapshot) map[admission.LeaseID]wingwire.Holder {
+	byParticipant := make(map[string]wingwire.Holder, len(qs.Holders))
+	for _, h := range qs.Holders {
+		id := h.ParticipantID
+		if id == "" {
+			id = h.RunID
+		}
+		byParticipant[id] = h
+	}
+	rows := make(map[admission.LeaseID]wingwire.Holder, len(snap.Leases))
+	for _, ls := range snap.Leases {
+		if h, ok := byParticipant[ls.RequestID]; ok {
+			rows[ls.ID] = h
+		}
+	}
+	return rows
+}
+
+// semaphoreETAHolders is the live occupancy of a key as simulation runs,
+// one entry per hold that still counts, charged its hold cost and
+// releasing it when the holding run is expected to end. A superseded hold
+// is skipped because it no longer occupies the semaphore and so frees
+// nothing, matching what the queue view reports as held. A hold with no
+// holder row has no measured duration, which the simulation reads as
+// never finishing.
+func semaphoreETAHolders(snap admission.Snapshot, rows map[admission.LeaseID]wingwire.Holder, key string) []simRun {
+	var out []simRun
+	for _, ss := range snap.Semaphores {
+		if ss.Key != key {
+			continue
+		}
+		for _, h := range ss.Holds {
+			if h.Superseded {
+				continue
+			}
+			row := rows[h.Lease]
+			out = append(out, simRun{
+				cores:  float64(h.Cost),
+				finish: remainingMS(row.ExpectedDurationMS, row.ElapsedMS),
+			})
+		}
+	}
+	return out
+}
+
+// semaphoreETAWaiters is the queue on a key in admission order, each
+// waiter charged its declared claim cost and running for its measured
+// duration, alongside the qs.Waiters index every simulated run came from.
+func semaphoreETAWaiters(qs *wingwire.QueueState, snap admission.Snapshot, key string) (runs []simRun, idx []int) {
+	for i, w := range snap.Waiters {
+		for _, c := range w.Claims {
+			if c.Key != key {
+				continue
+			}
+			runs = append(runs, simRun{
+				cores:    float64(c.Cost),
+				duration: durationMS(qs.Waiters[i].ExpectedDurationMS),
+			})
+			idx = append(idx, i)
+			break
+		}
+	}
+	return runs, idx
+}
+
 // simRun is one run in the ETA simulation. finish is a holder's remaining
 // milliseconds; duration is a waiter's run length. Either is +Inf when the
 // run's duration is unmeasured.
@@ -411,6 +563,18 @@ func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts 
 		clear = math.Max(clear, finish)
 	}
 	return starts, clear
+}
+
+// simulateSemaphoreQueue estimates the start offsets for one semaphore's
+// queue by running the same FIFO simulation over a single dimension. Cost
+// rides the core budget and memory is left unconstrained, because a
+// semaphore hold draws no memory. Costs are author-defined units rather
+// than a slot count, so each run is charged what it declares. The clear
+// time is dropped because ExpectedClearMS reports when the host queue
+// drains, which a semaphore wait does not bound.
+func simulateSemaphoreQueue(capacity float64, holders, waiters []simRun) []float64 {
+	starts, _ := simulateQueue(capacity, math.Inf(1), holders, waiters)
+	return starts
 }
 
 func simFits(w simRun, capCores, freeCores, freeMem, eps float64) bool {
