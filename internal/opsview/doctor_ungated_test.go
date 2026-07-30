@@ -12,11 +12,13 @@ import (
 
 func ungatedReport() opsview.DoctorReport {
 	return opsview.DoctorReport{
+		GatesSurveyed: 1,
 		UngatedRepos: []githooks.RepoGates{
 			{
 				Repo:      "/code/pulsewing",
 				Declared:  []string{"pre-commit"},
-				Missing:   []string{"pre-commit"},
+				Installed: []string{"pre-commit"},
+				Shadowed:  []string{"pre-commit"},
 				ActiveDir: "/config/git/hooks",
 				Scope:     "global",
 				State:     githooks.GateShadowed,
@@ -105,11 +107,49 @@ func TestRenderDoctorPretty_StillNamesOtherReposWhenTheLocalOneIsShadowed(t *tes
 
 func TestRenderDoctorPretty_SaysNothingAboutGatesWhenEveryRepoIsArmed(t *testing.T) {
 	var buf bytes.Buffer
-	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "", ""); err != nil {
+	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{GatesSurveyed: 3}, "", ""); err != nil {
 		t.Fatalf("render: %v", err)
 	}
 	if strings.Contains(buf.String(), "no gate") {
 		t.Errorf("clean fleet still produced a gate warning:\n%s", buf.String())
+	}
+}
+
+// A surveyed fleet with nothing ungated has to say so. Silence would be
+// identical to the output of a build that never ran the survey, and a reader
+// looking for problems finds none either way -- the false all-clear.
+func TestRenderDoctorPretty_StatesTheCleanGateVerdictRatherThanImplyingIt(t *testing.T) {
+	var buf bytes.Buffer
+	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{GatesSurveyed: 3}, "", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if got := buf.String(); !strings.Contains(got, "3 registered repo(s) surveyed, every declared gate fires") {
+		t.Errorf("clean gate verdict not stated:\n%s", got)
+	}
+}
+
+// The negative control for the line above: a report that never surveyed the
+// fleet must not claim a clean one.
+func TestRenderDoctorPretty_ClaimsNoGateVerdictWhenNothingWasSurveyed(t *testing.T) {
+	var buf bytes.Buffer
+	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if got := buf.String(); strings.Contains(got, "every declared gate fires") {
+		t.Errorf("an unsurveyed report claimed a gated fleet:\n%s", got)
+	}
+}
+
+// The count is the field that says the question was asked, so it has to be in
+// the JSON whatever its value -- an omitted zero reads as a build that cannot
+// survey, which is the distinction the field exists to draw.
+func TestRenderDoctorJSON_AlwaysCarriesTheSurveyedGateCount(t *testing.T) {
+	var buf bytes.Buffer
+	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "json", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(buf.String(), `"gates_surveyed"`) {
+		t.Errorf("json dropped gates_surveyed when it was zero:\n%s", buf.String())
 	}
 }
 

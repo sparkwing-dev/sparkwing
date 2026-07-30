@@ -35,7 +35,7 @@ func runHooks(args []string) error {
 	}
 	if len(args) == 0 {
 		PrintHelp(cmdHooks, os.Stderr)
-		return errors.New("hooks: subcommand required (install|uninstall|status|survey)")
+		return errors.New("hooks: subcommand required (install|uninstall|status|survey|fire)")
 	}
 	switch args[0] {
 	case "install":
@@ -46,6 +46,8 @@ func runHooks(args []string) error {
 		return runHooksStatus(args[1:])
 	case "survey":
 		return runHooksSurvey(args[1:])
+	case "fire":
+		return runHooksFire(args[1:])
 	default:
 		PrintHelp(cmdHooks, os.Stderr)
 		return fmt.Errorf("hooks: unknown subcommand %q", args[0])
@@ -800,8 +802,11 @@ func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) er
 	case "plain":
 		// One tab-separated row per repo, no summary and no alignment, so
 		// `cut` and `awk` get a stable shape whatever the fleet looks like.
+		// The column count stays put: a borrowed gate is already named by the
+		// state, and widening a shape `cut` reads would break the readers this
+		// format exists for.
 		for _, r := range rows {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", r.Repo, r.State, strings.Join(r.Missing, ","))
+			fmt.Fprintf(w, "%s\t%s\t%s\n", r.Repo, r.State, strings.Join(r.NotFiring(), ","))
 		}
 		return nil
 	}
@@ -810,21 +815,22 @@ func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) er
 		return nil
 	}
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "REPO\tSTATE\tDECLARED\tNOT FIRING")
+	fmt.Fprintln(tw, "REPO\tSTATE\tDECLARED\tNOT FIRING\tBORROWED")
 	ungated := 0
 	for _, r := range rows {
 		if !r.Gated() {
 			ungated++
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", filepath.Base(r.Repo), r.State,
-			joinOrDash(r.Declared), joinOrDash(r.Missing))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", filepath.Base(r.Repo), r.State,
+			joinOrDash(r.Declared), joinOrDash(r.NotFiring()), joinOrDash(r.Borrowed))
 	}
 	_ = tw.Flush()
 	if ungated == 0 {
 		fmt.Fprintf(w, "\n%d repo(s), every declared gate fires\n", len(rows))
+		fmt.Fprintln(w, "this is what the hook directories say; `sparkwing pipeline hooks fire --fleet` is what a commit says")
 		return nil
 	}
-	fmt.Fprintf(w, "\n%d of %d repo(s) accept commits with no gate:\n", ungated, len(rows))
+	fmt.Fprintf(w, "\n%d of %d repo(s) do not run a gate of their own:\n", ungated, len(rows))
 	for _, r := range rows {
 		if r.Gated() {
 			continue
@@ -902,6 +908,12 @@ func resolveHooksRepo(repo string) (repoRoot, sparkwingDir string, err error) {
 // The global path is resolved when the hook runs rather than baked in, so
 // changing the machine's hooks directory does not require reinstalling.
 //
+// A blocking hook that runs pipelines opens with the self-test guard, so
+// `sparkwing pipeline hooks fire` can see it refuse a commit without paying
+// for the gate. Nothing about a hook that only forwards is worth proving --
+// it gates nothing -- and the guard can only refuse, never allow, so it adds
+// no way past a gate.
+//
 // The pipelines run in a subshell that drops the repository-binding GIT_*
 // variables git hands every hook, keeping the index git is composing the
 // commit in as SPARKWING_GATE_INDEX, so a step that runs git elsewhere is not
@@ -916,6 +928,9 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool) string 
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
 	b.WriteString("# " + sparkwingHookMarker + " -- do not edit; use `sparkwing pipeline hooks (un)install`\n")
+	if blocking && len(pipes) > 0 {
+		b.WriteString(githooks.SelfTestScript())
+	}
 	if len(pipes) > 0 {
 		b.WriteString("export SPARKWING_LOG_FORMAT=\"${SPARKWING_LOG_FORMAT:-quiet}\"\n")
 	}

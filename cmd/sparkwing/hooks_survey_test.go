@@ -15,7 +15,8 @@ func surveyRows() []githooks.RepoGates {
 		{
 			Repo:      "/code/overwing",
 			Declared:  []string{"pre-commit"},
-			Missing:   []string{"pre-commit"},
+			Installed: []string{"pre-commit"},
+			Shadowed:  []string{"pre-commit"},
 			ActiveDir: "/config/git/hooks",
 			Scope:     "global",
 			State:     githooks.GateShadowed,
@@ -35,7 +36,7 @@ func TestRenderHooksSurvey_CountsAndNamesTheUngatedRepos(t *testing.T) {
 		t.Fatalf("renderHooksSurvey: %v", err)
 	}
 	got := buf.String()
-	if !strings.Contains(got, "2 of 3 repo(s) accept commits with no gate") {
+	if !strings.Contains(got, "2 of 3 repo(s) do not run a gate of their own") {
 		t.Errorf("output = %q, want the ungated count", got)
 	}
 	for _, want := range []string{"overwing", "pulsewing", "/config/git/hooks", "no gate is installed"} {

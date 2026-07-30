@@ -129,6 +129,30 @@ surfaces the failing step's error; the full log stays retrievable with
 `SPARKWING_LOG_FORMAT=quiet`; export a different value (`pretty` or
 `json`) before the git command to see the full stream.
 
+### Hooks are per repository, and the repository says so
+
+The rule, so a new checkout does not have to rediscover it: **every repository
+that declares a gate claims `core.hooksPath` for its own hook directory, and
+chains the machine's global hooks from there.** A machine-wide hooks directory
+is never where a gate lives.
+
+That is not a preference. `core.hooksPath` has no search path -- one directory
+wins outright -- so a global directory holding the gates would have to dispatch
+on which repository git happened to be in, and every repository's gate would
+change whenever that one directory did, with no commit anywhere to show it. The
+repository that a gate protects is the only place that can declare it, review
+it, and version it.
+
+The global directory keeps whatever the machine put there. It is reached
+through a forwarder in each repository's own hook directory, so `prepare-commit-msg`
+and friends still fire, and a repository is never asked to choose between its
+gate and the machine's hooks.
+
+Two failures follow from breaking the rule, and `hooks survey` names both:
+a repository whose hooks are **shadowed** by the global path holds a full set of
+gates and runs none, and one whose `core.hooksPath` points at a **sibling
+repository** runs that repository's gates instead of its own.
+
 ### When your machine sets `core.hooksPath`
 
 A `core.hooksPath` in your global git config replaces `.git/hooks` for
@@ -184,12 +208,73 @@ sparkwing pipeline hooks survey --ungated  # just the ones accepting ungated com
 sparkwing pipeline hooks install --fleet   # arm all of them
 ```
 
-Each repository lands in one of four states: **armed** (git runs a gate for
-every hook it declares), **shadowed** (gates are installed but
-`core.hooksPath` sends git elsewhere), **uninstalled** (a declared hook was
-never written), or **undeclared** (no pipeline asks for a hook, so there is
-nothing to arm). `sparkwing doctor` reports the ungated ones too, including on
-a run that finds nothing else to repair.
+Each repository gets one state:
+
+| State | What it means |
+| --- | --- |
+| `armed` | git runs the repository's own gate for every hook it declares |
+| `shadowed` | gates are installed and `core.hooksPath` sends git elsewhere, so none fire |
+| `uninstalled` | a declared hook was never written |
+| `borrowed` | git runs a gate for a declared hook out of another repository's hook directory |
+| `undeclared` | no pipeline asks for a hook, so there is nothing to arm |
+
+Each declared hook lands in exactly one of `firing`, `borrowed`, `shadowed` and
+`missing`, so a hook is never reported as both installed and missing. The
+one-word state takes the worst of them, and `borrowed` is the worst: a shadowed
+or uninstalled repository is honest about accepting ungated commits, while a
+borrowed gate refuses them under a state word that used to read as no gate at
+all.
+
+`borrowed` counts as ungated even though commits really are refused. Nothing in
+the repository declares the file that runs, so an uninstall in the repository
+that owns it disarms this one with no commit here and no warning, and the rules
+being enforced are the other repository's. Fixing it means clearing this
+repository's own override first -- install treats a repository-scoped
+`core.hooksPath` as deliberate and will not touch it:
+
+```bash
+git -C <repo> config --unset core.hooksPath
+sparkwing pipeline hooks install --repo <repo>
+```
+
+`sparkwing doctor` reports the ungated ones too, including on a run that finds
+nothing else to repair, and states the clean verdict when there are none -- a
+silent report is indistinguishable from one produced by a build too old to
+survey a fleet at all.
+
+### What a hook directory cannot tell you
+
+Everything above reads files. That is enough to find a gate nobody installed,
+and not enough to establish one that fires: a shadowed repository inspects as
+fully installed and refuses nothing, and a borrowed one inspects as installing
+nothing and refuses everything. Only a commit settles it.
+
+```bash
+sparkwing pipeline hooks fire            # this repo: make the gate refuse a commit
+sparkwing pipeline hooks fire --fleet    # every registered repo
+```
+
+`fire` stages a file and commits it with the gate told to refuse, then reports
+whether git refused it and which hook file did. Everything happens in a
+throwaway linked worktree, which shares the repository's config -- so the same
+`core.hooksPath` and the same hooks apply -- while carrying its own index and
+its own detached HEAD, so the repository's working tree, index, branches and
+HEAD are untouched whatever the gate does.
+
+Every refusal is checked against a control: the same staged change is committed
+again with hooks switched off, and has to land. Without that, a commit that
+failed for an unrelated reason reads exactly like a gate doing its job.
+
+Only a hook sparkwing wrote that carries the self-test guard is ever executed.
+A hand-written hook, or a managed one installed before the guard existed, is
+reported `unprovable` and `fire` exits non-zero -- an enforcement question that
+could not be answered is not a pass. Re-run `hooks install` to replace an older
+managed hook with one that can be asked.
+
+The guard is the `SPARKWING_HOOK_SELFTEST` environment variable, and it can only
+make a gate refuse. There is no value that lets a commit through, because a
+variable that skipped a gate would be a bypass with an environment variable for
+a key.
 
 Ungated means a hook that can refuse work does not fire. Only `pre-commit` and
 `pre-push` can, so those are the hooks `--ungated`, `doctor` and the `--fleet`

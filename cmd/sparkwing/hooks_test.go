@@ -154,6 +154,35 @@ func TestRenderHookScript_ForwarderOnlyChains(t *testing.T) {
 	}
 }
 
+// The guard is what lets `hooks fire` establish a gate without running one, so
+// a gate rendered without it can never be shown to work.
+func TestRenderHookScript_BlockingGatesCarryTheSelfTestGuard(t *testing.T) {
+	for _, hook := range []string{"pre-commit", "pre-push"} {
+		script := renderHookScript(hook, []string{"gate"}, false)
+		if !githooks.CarriesSelfTest(script) {
+			t.Errorf("%s hook cannot be asked to refuse:\n%s", hook, script)
+		}
+		guard := strings.Index(script, githooks.SelfTestEnv)
+		run := strings.Index(script, "sparkwing run gate")
+		if guard > run {
+			t.Errorf("the guard must exit before the gate runs, or the check costs a full gate:\n%s", script)
+		}
+	}
+}
+
+// Nothing that cannot refuse work is worth asking. A post-commit hook runs
+// after the commit landed and a forwarder gates nothing.
+func TestRenderHookScript_NothingButABlockingGateCarriesTheGuard(t *testing.T) {
+	for name, script := range map[string]string{
+		"post-commit": renderHookScript("post-commit", []string{"notify"}, false),
+		"forwarder":   renderHookScript("prepare-commit-msg", nil, true),
+	} {
+		if githooks.CarriesSelfTest(script) {
+			t.Errorf("%s carries a guard it has no gate to prove:\n%s", name, script)
+		}
+	}
+}
+
 func TestHooksInstall_WritesPostCommitHook(t *testing.T) {
 	repo := gateRepo(t)
 	installInto(t, (&fakeGit{}).run, repo)

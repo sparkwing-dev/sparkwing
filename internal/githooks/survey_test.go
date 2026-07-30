@@ -63,8 +63,11 @@ func TestSurvey_ShadowedWhenAGlobalHooksPathRedirectsGit(t *testing.T) {
 	if got.Gated() {
 		t.Error("Gated() = true, want false: the gate is installed but never runs")
 	}
-	if len(got.Missing) != 1 || got.Missing[0] != "pre-commit" {
-		t.Errorf("Missing = %v, want [pre-commit]", got.Missing)
+	if len(got.Shadowed) != 1 || got.Shadowed[0] != "pre-commit" {
+		t.Errorf("Shadowed = %v, want [pre-commit]", got.Shadowed)
+	}
+	if len(got.NotFiring()) != 1 || got.NotFiring()[0] != "pre-commit" {
+		t.Errorf("NotFiring() = %v, want [pre-commit]", got.NotFiring())
 	}
 	if got.Scope != "global" || got.ActiveDir != elsewhere {
 		t.Errorf("redirect = %s (%s), want %s (global)", got.ActiveDir, got.Scope, elsewhere)
@@ -225,12 +228,103 @@ func TestUngated_DropsTheRowsNoGateIsMissingFrom(t *testing.T) {
 		{Repo: "armed", State: githooks.GateArmed},
 		{Repo: "quiet", State: githooks.GateUndeclared},
 		{Repo: "notifier", State: githooks.GateUninstalled, Missing: []string{"post-commit"}},
-		{Repo: "shadowed", State: githooks.GateShadowed, Missing: []string{"pre-commit"}},
+		{Repo: "shadowed", State: githooks.GateShadowed, Shadowed: []string{"pre-commit"}},
 		{Repo: "bare", State: githooks.GateUninstalled, Missing: []string{"pre-push"}},
+		{Repo: "borrowed", State: githooks.GateBorrowed, Borrowed: []string{"pre-commit"}},
 	}
 	got := githooks.Ungated(rows)
-	if len(got) != 2 || got[0].Repo != "shadowed" || got[1].Repo != "bare" {
-		t.Errorf("Ungated = %+v, want the shadowed and uninstalled rows", got)
+	if len(got) != 3 || got[0].Repo != "shadowed" || got[1].Repo != "bare" || got[2].Repo != "borrowed" {
+		t.Errorf("Ungated = %+v, want the shadowed, uninstalled and borrowed rows", got)
+	}
+}
+
+// The report contradicted itself for every shadowed repo: the hook sat in both
+// installed and missing, and a reader who resolved that the wrong way saw a
+// repo with nothing to fix.
+func TestSurvey_NeverReportsOneHookAsBothInstalledAndMissing(t *testing.T) {
+	repo, _ := checkout(t, "pre-commit", "pre-push")
+	got := githooks.Survey(stubGit("", t.TempDir()), repo, []string{"pre-commit", "pre-push"})
+	installed := map[string]bool{}
+	for _, n := range got.Installed {
+		installed[n] = true
+	}
+	for _, n := range got.Missing {
+		if installed[n] {
+			t.Errorf("%s is reported as both installed and missing: %+v", n, got)
+		}
+	}
+	if len(got.Shadowed) != 2 {
+		t.Errorf("Shadowed = %v, want both declared hooks", got.Shadowed)
+	}
+	if len(got.Missing) != 0 {
+		t.Errorf("Missing = %v, want none: both hooks exist, they just do not run", got.Missing)
+	}
+}
+
+// A repo that declares two hooks, holds one and never wrote the other has one
+// of each, and the two reasons need separate lists to stay actionable.
+func TestSurvey_SeparatesAShadowedHookFromAnUnwrittenOne(t *testing.T) {
+	repo, _ := checkout(t, "pre-commit")
+	got := githooks.Survey(stubGit("", t.TempDir()), repo, []string{"pre-commit", "pre-push"})
+	if len(got.Shadowed) != 1 || got.Shadowed[0] != "pre-commit" {
+		t.Errorf("Shadowed = %v, want [pre-commit]", got.Shadowed)
+	}
+	if len(got.Missing) != 1 || got.Missing[0] != "pre-push" {
+		t.Errorf("Missing = %v, want [pre-push]", got.Missing)
+	}
+	if got.State != githooks.GateUninstalled {
+		t.Errorf("State = %s, want %s", got.State, githooks.GateUninstalled)
+	}
+}
+
+// The state that read as "no gate" while the gate was armed and blocking: a
+// core.hooksPath pointing at a sibling repo's hooks.
+func TestSurvey_BorrowedWhenTheGateThatFiresLivesInAnotherRepo(t *testing.T) {
+	repo, _ := checkout(t)
+	sibling, siblingHooks := checkout(t, "pre-commit")
+	got := githooks.Survey(stubGit(siblingHooks, ""), repo, []string{"pre-commit"})
+	if got.State != githooks.GateBorrowed {
+		t.Errorf("State = %s, want %s (hooks in %s)", got.State, githooks.GateBorrowed, sibling)
+	}
+	if len(got.Borrowed) != 1 || got.Borrowed[0] != "pre-commit" {
+		t.Errorf("Borrowed = %v, want [pre-commit]", got.Borrowed)
+	}
+	if len(got.Missing) != 0 {
+		t.Errorf("Missing = %v, want none: a gate does fire, it is just not this repo's", got.Missing)
+	}
+	if got.Gated() {
+		t.Error("Gated() = true, want false: nothing here declares or keeps the gate that fires")
+	}
+}
+
+// A borrowed gate is only fixable once the repo's own override is cleared:
+// install treats a repo-scoped core.hooksPath as deliberate and leaves it be,
+// so the install on its own changes nothing.
+func TestRepoGatesRemedy_ClearsTheOverrideBeforeInstallingForABorrowedGate(t *testing.T) {
+	r := githooks.RepoGates{Repo: "/code/sparkwing-platform", Borrowed: []string{"pre-commit"}, State: githooks.GateBorrowed}
+	got := r.Remedy()
+	for _, want := range []string{"--unset core.hooksPath", "hooks install --repo /code/sparkwing-platform"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Remedy = %q, want it to say %q", got, want)
+		}
+	}
+}
+
+// The one-word state cannot carry a repo with two different problems, so the
+// summary names every hook the repo does not run its own gate for.
+func TestRepoGatesSummary_NamesTheBorrowedGateAndTheMissingOneTogether(t *testing.T) {
+	r := githooks.RepoGates{
+		Repo:      "/code/sparkwing-platform",
+		ActiveDir: "/code/sparkwing/.git/hooks",
+		Borrowed:  []string{"pre-commit"},
+		Missing:   []string{"pre-push"},
+		State:     githooks.GateBorrowed,
+	}
+	got := r.Summary()
+	for _, want := range []string{"pre-commit", "/code/sparkwing/.git/hooks", "pre-push", "no gate is installed"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Summary = %q, want it to name %q", got, want)
+		}
 	}
 }
 
@@ -239,7 +333,7 @@ func TestRepoGatesSummary_NamesTheRedirectForAShadowedGate(t *testing.T) {
 		Repo:      "/code/overwing",
 		ActiveDir: "/config/git/hooks",
 		Scope:     "global",
-		Missing:   []string{"pre-commit"},
+		Shadowed:  []string{"pre-commit"},
 		State:     githooks.GateShadowed,
 	}
 	got := r.Summary()

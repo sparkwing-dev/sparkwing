@@ -51,6 +51,54 @@ code change to unlock.
 ## [v0.22.1] - 2026-07-30
 ### Added
 
+- **cli:** `sparkwing pipeline hooks fire` establishes a gate by making it
+  refuse a commit, which is the only check that can. Reading a hook directory
+  cannot: a repo whose hooks are shadowed inspects as fully installed and
+  refuses nothing, and one whose `core.hooksPath` points at a sibling repo
+  inspects as installing nothing and refuses everything. `fire` stages a file,
+  commits it with the gate told to refuse, and reports whether git refused it
+  and which hook file did -- all inside a throwaway linked worktree that shares
+  the repo's config and carries its own index and detached HEAD, so the repo's
+  working tree, branches and HEAD are untouched whatever the gate does. Every
+  refusal is checked against a control commit with hooks switched off, so an
+  unrelated failure is not read as a gate doing its job. Only a hook sparkwing
+  wrote that carries the self-test guard is ever executed; anything else is
+  reported `unprovable` and exits non-zero, because an enforcement question
+  that could not be answered is not a pass. `--fleet` for every registered
+  repo, `-o json` for the machine-readable form.
+
+- **cli:** managed blocking hooks carry a `SPARKWING_HOOK_SELFTEST` guard that
+  makes them refuse and name their own file, so `hooks fire` can see a gate
+  work without paying for the gate. The variable can only refuse -- there is no
+  value that lets a commit through, because one would be a bypass with an
+  environment variable for a key. Re-run `sparkwing pipeline hooks install` to
+  add the guard to hooks installed before this release.
+
+- **cli:** `sparkwing pipeline hooks survey` gained a `borrowed` state, for a
+  repo whose `core.hooksPath` points at another repo's hook directory. Its
+  commits are refused by a file nothing in it declares, installs or keeps, and
+  an uninstall in the owning repo disarms it with no commit here and no
+  warning, so it counts as ungated even though commits really are refused. It
+  used to report as `uninstalled`, which read as no gate while the gate was
+  armed and blocking. The remedy clears the repo's own override first: install
+  treats a repo-scoped `core.hooksPath` as deliberate and leaves it alone.
+
+- **cli:** `sparkwing doctor` reports `gates_surveyed`, and says on the healthy
+  path how many repos were surveyed and that every declared gate fires. An
+  empty ungated list on its own could not be read as a gated fleet, because a
+  build that never ran the survey omits the field entirely and a reader looking
+  for problems finds none either way.
+
+### Fixed
+
+- **cli:** `hooks survey` no longer reports one hook as both `installed` and
+  `missing`. Every shadowed repo did -- the gate sat in its hook directory and
+  in the list of hooks git runs nothing for -- and a reader who resolved that
+  contradiction the wrong way saw a repo with nothing to fix. Shadowed hooks
+  now have their own field, `missing` means no managed gate exists anywhere,
+  and the two are disjoint. `-o plain` keeps its column count and its meaning:
+  the third field is still every hook git runs no gate for.
+
 - **dashboard:** the embedded documentation is served at `/docs` on whatever
   address `sparkwing dashboard start` (or `sparkwing-web`) is listening on.
   It is the same set `sparkwing docs list` and `sparkwing docs read` print,

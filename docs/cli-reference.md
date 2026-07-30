@@ -2138,6 +2138,56 @@ them with a warning.
 - `uninstall` -- Remove sparkwing-managed git hooks
 - `status` -- Report which sparkwing hooks are installed
 - `survey` -- Report which registered repos git actually runs a gate for
+- `fire` -- Make the gate refuse a commit, to see that it can
+
+## `sparkwing pipeline hooks fire`
+
+Make the gate refuse a commit, to see that it can
+
+Stages a file and commits it with the gate told to refuse, then
+reports whether git refused the commit and which hook file did it.
+
+A hook directory cannot answer this. A repo whose core.hooksPath points at a
+sibling's hooks holds no gate of its own and refuses commits anyway; a repo
+whose hooks are shadowed holds a full set and refuses nothing. Both inspect as
+something they are not, so survey and status report what is installed and this
+reports what happens.
+
+The attempt runs in a throwaway linked worktree with its own index and its own
+detached HEAD, so the repo's working tree, index, branches and HEAD are
+untouched whatever the gate does. Only a hook sparkwing wrote that carries the
+self-test guard is ever executed -- anything else is reported as unprovable
+rather than run, because answering a diagnostic question is not a reason to run
+an operator's hook.
+
+Every refusal is checked against a control: the same staged change is committed
+again with hooks switched off and has to land, so an unrelated failure is not
+read as a gate doing its job.
+
+Exits non-zero unless every repo refused the commit with a gate of its own. A
+repo that declares no pre-commit trigger has no gate to fire and does not
+count. Pre-push gates are not covered -- firing one needs a remote.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
+| `--fleet` | Fire the gate in every registered repo instead of one |
+| `-o, --output FMT` | Output format: pretty\|json\|plain |
+
+### Examples
+
+```sh
+# Prove this repo's gate refuses a commit
+sparkwing pipeline hooks fire
+
+# Prove every registered repo's gate
+sparkwing pipeline hooks fire --fleet
+
+# Machine-readable
+sparkwing pipeline hooks fire -o json
+```
 
 ## `sparkwing pipeline hooks install`
 

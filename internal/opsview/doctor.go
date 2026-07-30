@@ -108,6 +108,17 @@ type DoctorReport struct {
 	// Reported with the fix, never repaired: arming a repo runs its gate,
 	// and a gate that cannot run turns every commit there into a failure.
 	UngatedRepos []githooks.RepoGates `json:"ungated_repos,omitempty"`
+	// GatesSurveyed is how many registered checkouts the gate survey
+	// classified. It carries no omitempty and is rendered on the healthy path
+	// so a clean answer is stated rather than implied by silence.
+	//
+	// An empty UngatedRepos alone cannot be read as a gated fleet: a build
+	// that never ran the survey omits the field entirely, and a reader looking
+	// for problems finds none either way. That is the false all-clear this
+	// whole report exists to refuse -- a surface that cannot answer must not
+	// look like one answering "fine" -- so the count is what says the question
+	// was asked, and zero surveyed says it was not.
+	GatesSurveyed int `json:"gates_surveyed"`
 	// StrayDaemons are admission daemons serving other sparkwing homes that
 	// report a version no released build carries -- scratch binaries left
 	// running, which look like the machine's resident daemon in a process
@@ -711,6 +722,7 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	}
 	fmt.Fprintf(w, "shadowed_hooks\t%d\n", shadowed)
 	fmt.Fprintf(w, "ungated_repos\t%d\n", len(r.UngatedRepos))
+	fmt.Fprintf(w, "gates_surveyed\t%d\n", r.GatesSurveyed)
 	fmt.Fprintf(w, "stray_daemons\t%d\n", len(r.StrayDaemons))
 	return nil
 }
@@ -841,12 +853,27 @@ func renderUngatedRepos(w io.Writer, r DoctorReport) {
 		}
 	}
 	if len(rows) == 0 {
+		renderGateSurveyClean(w, r)
 		return
 	}
 	fmt.Fprintf(w, "\nwarning: %d registered repo(s) accept commits with no gate\n", len(rows))
 	for _, g := range rows {
 		fmt.Fprintf(w, "  %s\n    %s\n", g.Summary(), g.Remedy())
 	}
+	if r.GatesSurveyed > 0 {
+		fmt.Fprintf(w, "  surveyed %d registered repo(s); confirm the armed ones with `sparkwing pipeline hooks fire --fleet`, which makes each gate refuse a commit\n", r.GatesSurveyed)
+	}
+}
+
+// renderGateSurveyClean states that the survey ran and found every declared
+// gate firing. Saying nothing would make a clean fleet look exactly like a
+// build too old to survey one, and the whole value of this report is that the
+// two are told apart.
+func renderGateSurveyClean(w io.Writer, r DoctorReport) {
+	if r.GatesSurveyed == 0 {
+		return
+	}
+	fmt.Fprintf(w, "gates: %d registered repo(s) surveyed, every declared gate fires\n", r.GatesSurveyed)
 }
 
 // renderStrayDaemons writes the stray-daemon warnings. It runs on both the

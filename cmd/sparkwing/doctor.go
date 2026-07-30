@@ -65,7 +65,9 @@ func diagnose(ctx context.Context, p paths.Paths, home string, dryRun bool) (doc
 		return report, err
 	}
 	report.ShadowedHooks = shadowedHooks(runGit)
-	report.UngatedRepos = githooks.Ungated(surveyFleet(runGit))
+	surveyed := surveyFleet(runGit)
+	report.GatesSurveyed = len(surveyed)
+	report.UngatedRepos = githooks.Ungated(surveyed)
 	return report, nil
 }
 
