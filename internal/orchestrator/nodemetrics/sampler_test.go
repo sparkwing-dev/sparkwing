@@ -93,27 +93,48 @@ func TestRun_CountsRawExecChildrenCPU(t *testing.T) {
 	}
 }
 
+// burnAndReap runs a CPU-burning child for d, then kills and waits for it so
+// its usage lands in RUSAGE_CHILDREN.
+func burnAndReap(t *testing.T, d time.Duration) {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", "while :; do :; done")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start burner: %v", err)
+	}
+	time.Sleep(d)
+	_ = cmd.Process.Kill()
+	_ = cmd.Wait()
+}
+
 // TestReadCPUTime_SubtractsReportedChildCPU pins the reconciliation: a reaped
 // child raises the cumulative reading through RUSAGE_CHILDREN, and reporting
 // its CPU (as the SDK per-command path does) brings the reading back down, so
 // the same usage is not counted twice.
+//
+// How much CPU a child wins inside one wall-clock window is the scheduler's to
+// decide, so the burn repeats until the reading has risen far enough to be
+// unambiguous instead of assuming one window earned it. A busy box needs more
+// windows, not a looser floor.
 func TestReadCPUTime_SubtractsReportedChildCPU(t *testing.T) {
 	base, ok := readCPUTime()
 	if !ok {
 		t.Skip("no CPU accounting on this platform")
 	}
-	cmd := exec.Command("sh", "-c", "while :; do :; done")
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start burner: %v", err)
-	}
-	time.Sleep(300 * time.Millisecond)
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
 
-	withChild, _ := readCPUTime()
-	childCPU := withChild - base
-	if childCPU < 100*time.Millisecond {
-		t.Fatalf("reaped child raised reading by %s, want a clear burn via RUSAGE_CHILDREN", childCPU)
+	const (
+		wantChildCPU = 100 * time.Millisecond
+		burnWindow   = 300 * time.Millisecond
+		burnDeadline = 5 * time.Second
+	)
+	var withChild, childCPU time.Duration
+	giveUp := time.Now().Add(burnDeadline)
+	for childCPU < wantChildCPU && time.Now().Before(giveUp) {
+		burnAndReap(t, burnWindow)
+		withChild, _ = readCPUTime()
+		childCPU = withChild - base
+	}
+	if childCPU < wantChildCPU {
+		t.Fatalf("reaped children raised reading by %s over %s, want at least %s via RUSAGE_CHILDREN", childCPU, burnDeadline, wantChildCPU)
 	}
 
 	AddReportedChildCPU(childCPU)
