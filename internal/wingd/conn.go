@@ -34,6 +34,12 @@ type conn struct {
 	closeOnce      sync.Once
 	disconnectOnce sync.Once
 
+	// protocolMajor is the wire major agreed for this connection at the
+	// handshake, which is below the daemon's own when an older pinned SDK
+	// is being served. Request fields added after that major are absent by
+	// definition, so the handlers read the request in its terms.
+	protocolMajor int
+
 	runID        string
 	ownerRunID   string
 	displayRunID string

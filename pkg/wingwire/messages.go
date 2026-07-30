@@ -17,25 +17,34 @@ const (
 	OriginController Origin = "controller"
 )
 
-// Hello is the client's opening message on a fresh connection: its
-// protocol major and binary version. The daemon answers with
-// [HelloAck]. A client whose ProtocolMajor is ahead of the daemon's
-// initiates a takeover (drain the old daemon, spawn its own binary);
-// a client behind the daemon's major fails with an upgrade message.
+// Hello is the client's opening message on a fresh connection: the
+// protocol major it speaks and its binary version. The daemon answers
+// with [HelloAck] on the newest major the two share. A client whose
+// ProtocolMajor is ahead of everything the daemon speaks initiates a
+// takeover (drain the old daemon, spawn its own binary); one below the
+// daemon's floor fails with a version error.
 type Hello struct {
 	ProtocolMajor int    `json:"protocol_major"`
 	BinaryVersion string `json:"binary_version"`
 }
 
-// HelloAck is the daemon's reply to [Hello], carrying the daemon's own
-// protocol major and binary version. Draining reports that the daemon
-// has stopped admitting new work (a takeover is in progress): existing
+// HelloAck is the daemon's reply to [Hello], carrying the majors in play
+// and the daemon's binary version. Draining reports that the daemon has
+// stopped admitting new work (a takeover is in progress): existing
 // leases keep being served, but a client that needs admission should
 // wait for the successor daemon and reconnect.
 type HelloAck struct {
-	ProtocolMajor int    `json:"protocol_major"`
-	BinaryVersion string `json:"binary_version"`
-	Draining      bool   `json:"draining,omitempty"`
+	// ProtocolMajor is the major this connection speaks: the client's own
+	// whenever the daemon still serves it, else the daemon's newest.
+	ProtocolMajor int `json:"protocol_major"`
+	// NativeProtocolMajor is the newest major the daemon itself speaks. It
+	// exceeds ProtocolMajor on a connection served down to an older client,
+	// which is how that client knows it is the older side and must not take
+	// the daemon over. Zero from daemons that predate the field, where
+	// ProtocolMajor is the only major there is.
+	NativeProtocolMajor int    `json:"native_protocol_major,omitempty"`
+	BinaryVersion       string `json:"binary_version"`
+	Draining            bool   `json:"draining,omitempty"`
 }
 
 // HostResources is an amount of machine capacity: CPU cores and

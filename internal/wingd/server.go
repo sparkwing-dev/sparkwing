@@ -409,16 +409,20 @@ func (d *Daemon) serveConn(c *conn) {
 	if err != nil {
 		return
 	}
-	if _, ok := msg.(*wingwire.Hello); !ok {
+	hello, ok := msg.(*wingwire.Hello)
+	if !ok {
 		return
 	}
 	d.mu.Lock()
 	draining := d.isDrainingLocked()
+	c.protocolMajor = wingwire.ServedMajor(hello.ProtocolMajor)
+	served := c.protocolMajor
 	d.mu.Unlock()
 	ack := &wingwire.HelloAck{
-		ProtocolMajor: ProtocolMajor,
-		BinaryVersion: d.cfg.Version,
-		Draining:      draining,
+		ProtocolMajor:       served,
+		NativeProtocolMajor: ProtocolMajor,
+		BinaryVersion:       d.cfg.Version,
+		Draining:            draining,
 	}
 	if err := c.send(ack); err != nil {
 		return
@@ -559,6 +563,24 @@ func (d *Daemon) idleGrantableMemoryLocked() uint64 {
 	return grantable
 }
 
+// subLeaseMajor is the first protocol major whose clients mark an
+// internal, non-finalizing lease with SubLease. Before it the daemon read
+// that from SemaphoresOnly, which this major freed up for run-level claims
+// that do finalize; reading an older client's request by the newer rule
+// would finalize a run row for every node-level semaphore acquisition it
+// makes, duplicating the row the run writes for itself.
+const subLeaseMajor = 2
+
+// finalizesRun reports whether a lease admitted for req owns the terminal
+// row of its run, reading the request in the terms of the protocol major
+// the connection speaks.
+func finalizesRun(protocolMajor int, req *wingwire.AdmissionRequest) bool {
+	if protocolMajor < subLeaseMajor {
+		return !req.SemaphoresOnly
+	}
+	return !req.SubLease
+}
+
 // handleAdmission submits a run's all-or-nothing request. A granted or
 // queued outcome is delivered through the event stream; fail and skip
 // terminate the request with an [wingwire.Evicted] carrying the policy.
@@ -598,7 +620,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	c.pid = req.PID
 	c.resources = charged
 	c.sems = semNames(req.Semaphores)
-	c.finalizable = !req.SubLease
+	c.finalizable = finalizesRun(c.protocolMajor, req)
 	c.startAt = d.now()
 	c.costSource = string(req.CostSource)
 	c.expectedDurationMS = req.ExpectedDurationMS
@@ -613,7 +635,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if existing := d.byRun[req.RunID]; existing != nil && existing != c {
 		switch existing.role {
 		case roleWaiter:
-			if !requestIdentityMatches(existing, req) ||
+			if !requestIdentityMatches(existing, req, c.finalizable) ||
 				existing.queueTimeoutMS != tightestQueueTimeoutMS(req.Semaphores) ||
 				!queuedRequestPresent(d.ledger.Snapshot(), req.RunID) {
 				d.mu.Unlock()
@@ -661,7 +683,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 				return
 			}
 			snap := d.ledger.Snapshot()
-			if !requestMetadataMatches(existing, req) ||
+			if !requestMetadataMatches(existing, req, c.finalizable) ||
 				!grantedRequestPresent(snap, existing.leaseID, req.RunID) {
 				d.mu.Unlock()
 				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
@@ -787,9 +809,9 @@ func tightestQueueTimeoutMS(sems []wingwire.SemaphoreClaim) int64 {
 	return t
 }
 
-func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
+func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest, newFinalizable bool) bool {
 	requested := chargedResources(req.Resources)
-	return requestIdentityMatches(existing, req) &&
+	return requestIdentityMatches(existing, req, newFinalizable) &&
 		existing.costSource == string(req.CostSource) &&
 		existing.expectedDurationMS == req.ExpectedDurationMS &&
 		existing.expectedP99MS == req.ExpectedP99MS &&
@@ -799,8 +821,8 @@ func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest) bool
 		existing.queueTimeoutMS == tightestQueueTimeoutMS(req.Semaphores)
 }
 
-func requestIdentityMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
-	return existing.finalizable == !req.SubLease &&
+func requestIdentityMatches(existing *conn, req *wingwire.AdmissionRequest, newFinalizable bool) bool {
+	return existing.finalizable == newFinalizable &&
 		existing.pipeline == req.Pipeline &&
 		existing.repo == req.Repo &&
 		existing.pid == req.PID &&

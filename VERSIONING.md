@@ -80,6 +80,28 @@ it). Keeping it in sync is human discipline today -- there is no
 automated drift gate for the HTTP surface yet (the snapshot gate
 below covers the Go surface only).
 
+### Local admission daemon
+
+The daemon socket protocol in [`pkg/wingwire`](./pkg/wingwire) is
+versioned by a protocol major rather than by the release it shipped in,
+because the clients are compiled pipeline binaries that pin an SDK
+version and keep running long after the box's daemon is upgraded past
+them. The promise:
+
+- A daemon serves every protocol major from `wingwire.MinProtocolMajor`
+  through `wingwire.ProtocolMajor`. The client states the major it
+  speaks in its `hello`; the daemon answers on the newest major the two
+  share. Nothing maps a release to a protocol major, in either process.
+- Adding an optional field is **non-breaking**: peers on both sides
+  ignore fields they do not know.
+- Bumping `ProtocolMajor` is **not** a break on its own -- older clients
+  keep being served on their own major.
+- Raising `MinProtocolMajor` **is** a break, and the one that matters:
+  it is what turns a pinned SDK below the floor into a hard admission
+  failure. Announce it with a `(Breaking)` marker and a migration
+  section naming the floor and the pin that has to move. Raise it only
+  when a change genuinely cannot be served in the old major's terms.
+
 ## API surface snapshot
 
 A deterministic text snapshot of the entire covered public API

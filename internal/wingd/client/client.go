@@ -20,12 +20,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// ErrProtocolTooOld is returned when the running daemon speaks a newer
-// protocol major than this client, which cannot be resolved by takeover:
-// the client binary must be upgraded. Errors from [EnsureDaemon] wrap it
-// with both sides' versions and the remedy, so match with [errors.Is]
-// rather than on the message.
-var ErrProtocolTooOld = errors.New("wingd/client: daemon speaks a newer protocol")
+// ErrProtocolTooOld is returned when this client's protocol major is
+// below the oldest the running daemon still serves. A daemon meets any
+// client inside its served range on that client's own major, so this is
+// the genuinely incompatible tail rather than any pin that merely lags
+// the daemon. It cannot be resolved by takeover: the client binary is
+// what must move.
+var ErrProtocolTooOld = errors.New("wingd/client: daemon no longer serves this client's protocol")
 
 // protocolTooOld explains a protocol major the client cannot speak, naming
 // both sides and the lever that actually moves.
@@ -64,6 +65,17 @@ func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 		"%s and re-run, or set SPARKWING_HOME to run against a daemon of your own; "+
 		"upgrading the sparkwing CLI does not affect this handshake",
 		ErrProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, pinAdvice)
+}
+
+// servedDownLevel reports that the daemon answered on an older major than
+// it natively speaks, which happens only when this client is the older
+// side. Such a client must not take the daemon over: replacing a newer
+// daemon with an older one is a downgrade, and the successor would be
+// taken over again by the next native client, with nothing bounding the
+// exchange. Daemons predating NativeProtocolMajor report zero and are
+// never treated as down-level.
+func servedDownLevel(ack wingwire.HelloAck) bool {
+	return ack.NativeProtocolMajor > ack.ProtocolMajor
 }
 
 // ErrReattachRejected is returned by [Client.Reattach] when the grace
@@ -316,7 +328,7 @@ func (cl *Client) connect(ctx context.Context) error {
 			cl.Close()
 			return protocolTooOld(opts.Version, ack)
 		}
-		if supersedes(opts.Version, ack.BinaryVersion) {
+		if !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
 			cl.ack = ack
 			cl.takeover(ctx, opts)
 			continue

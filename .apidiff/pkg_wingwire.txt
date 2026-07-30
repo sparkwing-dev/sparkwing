@@ -140,8 +140,10 @@ type Hello struct {
 }
 type HelloAck struct {
 	ProtocolMajor int
-	BinaryVersion string
-	Draining      bool
+
+	NativeProtocolMajor int
+	BinaryVersion       string
+	Draining            bool
 }
 type Holder struct {
 	RunID string
@@ -194,6 +196,7 @@ type Message interface {
 	wireType() MessageType
 }
 type MessageType string
+const MinProtocolMajor = 1
 type Origin string
 const OriginController Origin = "controller"
 const OriginLocal Origin = "local"
@@ -280,6 +283,7 @@ type SemaphoreClaim struct {
 
 	CancelTimeoutMS int64
 }
+func ServedMajor(client int) int
 type StatsReset struct{}
 type StatsResetAck struct{}
 const TypeAdmissionRequest MessageType = "admission_request"
