@@ -59,13 +59,24 @@ func runDoctor(args []string) error {
 	return renderDoctor(os.Stdout, report, format)
 }
 
+// diagnose runs the sweep and hangs the machine-wide gate findings off it.
+//
+// A gate survey that could not run is carried as its reason rather than as an
+// empty ungated list, which is what a fully gated fleet looks like. The rest
+// of the sweep still reports, because the registry says nothing about this
+// home's runs, locks or daemon and failing the whole command here would trade
+// one blind answer for a blind report.
 func diagnose(ctx context.Context, p paths.Paths, home string, dryRun bool) (doctorReport, error) {
 	report, err := opsview.Diagnose(ctx, p, home, installedVersion(), dryRun)
 	if err != nil {
 		return report, err
 	}
 	report.ShadowedHooks = shadowedHooks(runGit)
-	surveyed := surveyFleet(runGit)
+	surveyed, err := surveyFleet(runGit)
+	if err != nil {
+		report.GatesSurveyError = err.Error()
+		return report, nil
+	}
 	report.GatesSurveyed = len(surveyed)
 	report.UngatedRepos = githooks.Ungated(surveyed)
 	return report, nil

@@ -104,7 +104,10 @@ func runHooksInstall(args []string) error {
 // reason, and is not a repository the sweep left ungated: there is nothing
 // there for a re-run to arm.
 func installFleet(opts installOptions) error {
-	roots := fleetRepoRoots(runGit)
+	roots, err := fleetRepoRoots(runGit)
+	if err != nil {
+		return fmt.Errorf("hooks install: %w", err)
+	}
 	if len(roots) == 0 {
 		fmt.Fprintln(os.Stdout, "hooks install: no repos registered; run `sparkwing configure xrepo add <dir>` first")
 		return nil
@@ -149,10 +152,19 @@ func installFleet(opts installOptions) error {
 // to primary repositories so a linked worktree does not become a row of its
 // own -- git keeps one hook directory per repository, and arming it twice
 // through two paths is the same claim made twice.
-func fleetRepoRoots(git repos.Git) []string {
+//
+// A registry it could not read is an error, never an empty fleet. The two
+// answers render identically once the list is empty -- no rows, no ungated
+// repos, nothing to install -- so a corrupt repos.yaml reported a swept,
+// clean machine while every gate question went unasked. Whoever holds the
+// list decides which it was, because by the time the caller has a slice the
+// evidence is gone. Load treats a *missing* file as an empty config on
+// purpose, and that stays: a laptop that has registered nothing really has
+// an empty fleet.
+func fleetRepoRoots(git repos.Git) ([]string, error) {
 	cands, err := repos.CandidatePaths()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("read the repo registry: %w", err)
 	}
 	seen := map[string]bool{}
 	var out []string
@@ -168,7 +180,7 @@ func fleetRepoRoots(git repos.Git) []string {
 		out = append(out, root)
 	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
 // Prover runs one of repoRoot's pipelines the way an installed hook will. An
@@ -762,6 +774,13 @@ func reportSilencedGlobalHooks(git githooks.Git, repoRoot, hooksDir string) {
 		strings.Join(silenced, ", "), hooksDir)
 }
 
+// runHooksSurvey reports what git gates in every registered repository.
+//
+// A survey that could not read the registry writes nothing and exits
+// non-zero. Rendering an empty fleet would print "no repos registered", or
+// `[]` under -o json, which is what a genuinely clean machine prints, and a
+// reader who believes that stops looking. The error is the only output that
+// cannot be mistaken for an answer.
 func runHooksSurvey(args []string) error {
 	fs := flag.NewFlagSet(cmdHooksSurvey.Path, flag.ContinueOnError)
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
@@ -776,7 +795,10 @@ func runHooksSurvey(args []string) error {
 	if err != nil {
 		return err
 	}
-	rows := surveyFleet(runGit)
+	rows, err := surveyFleet(runGit)
+	if err != nil {
+		return fmt.Errorf("hooks survey: %w", err)
+	}
 	if *ungatedOnly {
 		rows = githooks.Ungated(rows)
 	}
@@ -786,8 +808,15 @@ func runHooksSurvey(args []string) error {
 // surveyFleet classifies every registered repository's gates. It is the one
 // place the fleet is enumerated, so `survey`, `install --fleet` and `doctor`
 // all answer for the same set of repositories.
-func surveyFleet(git githooks.Git) []githooks.RepoGates {
-	return githooks.SurveyFleet(git, fleetRepoRoots(repos.Git(git)), declaredHookNames)
+//
+// It returns the registry's error rather than an empty survey, so every one
+// of those three has to decide what to say when it could not look.
+func surveyFleet(git githooks.Git) ([]githooks.RepoGates, error) {
+	roots, err := fleetRepoRoots(repos.Git(git))
+	if err != nil {
+		return nil, err
+	}
+	return githooks.SurveyFleet(git, roots, declaredHookNames), nil
 }
 
 func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) error {

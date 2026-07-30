@@ -19,6 +19,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
+// runHooksFire makes a gate refuse a commit, here or across the fleet.
+//
+// The registry decides which repositories --fleet fires in, so a registry it
+// could not read leaves the fleet unfired rather than proven, and the sweep
+// refuses instead of enumerating nothing. Reporting zero results would say
+// every gate refused a commit having asked none of them.
 func runHooksFire(args []string) error {
 	fs := flag.NewFlagSet(cmdHooksFire.Path, flag.ContinueOnError)
 	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
@@ -40,7 +46,11 @@ func runHooksFire(args []string) error {
 
 	var results []githooks.FireResult
 	if *fleet {
-		for _, root := range fleetRepoRoots(runGit) {
+		roots, err := fleetRepoRoots(runGit)
+		if err != nil {
+			return fmt.Errorf("hooks fire: %w", err)
+		}
+		for _, root := range roots {
 			results = append(results, githooks.Fire(runGit, root, declaredHookNames(root)))
 		}
 	} else {

@@ -2509,6 +2509,10 @@ registered, plus any fallback_paths it scans. A checkout it does not list is
 not surveyed, so register it before reading a clean survey as a clean
 machine.
 
+A registry it cannot read is an error, not an empty fleet: the survey names
+the file and exits non-zero rather than printing the output of a machine with
+nothing registered.
+
 --ungated lists the repos a commit or a push goes through unchecked in. Only
 pre-commit and pre-push count, since a post-commit hook runs after the commit
 has landed and cannot refuse one.`,

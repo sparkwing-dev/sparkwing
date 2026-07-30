@@ -119,6 +119,16 @@ type DoctorReport struct {
 	// look like one answering "fine" -- so the count is what says the question
 	// was asked, and zero surveyed says it was not.
 	GatesSurveyed int `json:"gates_surveyed"`
+	// GatesSurveyError is why the gate survey could not run at all, most
+	// often a repo registry that would not parse. It is what the report says
+	// instead of a zero UngatedRepos count, because "no repo is ungated" and
+	// "I could not read the list of repos" are opposite answers that an
+	// empty list renders identically.
+	//
+	// GatesSurveyed stays zero alongside it. The count says the question was
+	// asked; this field says why the answer is missing, and a reader needs
+	// both to tell an unregistered machine from an unreadable one.
+	GatesSurveyError string `json:"gates_survey_error,omitempty"`
 	// StrayDaemons are admission daemons serving other sparkwing homes that
 	// report a version no released build carries -- scratch binaries left
 	// running, which look like the machine's resident daemon in a process
@@ -723,6 +733,11 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	fmt.Fprintf(w, "shadowed_hooks\t%d\n", shadowed)
 	fmt.Fprintf(w, "ungated_repos\t%d\n", len(r.UngatedRepos))
 	fmt.Fprintf(w, "gates_surveyed\t%d\n", r.GatesSurveyed)
+	surveyFailed := 0
+	if r.GatesSurveyError != "" {
+		surveyFailed = 1
+	}
+	fmt.Fprintf(w, "gates_survey_failed\t%d\n", surveyFailed)
 	fmt.Fprintf(w, "stray_daemons\t%d\n", len(r.StrayDaemons))
 	return nil
 }
@@ -842,7 +857,17 @@ func renderLockedOutRepos(w io.Writer, r DoctorReport) {
 // renderUngatedRepos writes the fleet-wide ungated warning, skipping the
 // checkout ShadowedHooks already described in full so one repository is not
 // reported twice under two headings.
+//
+// A survey that could not run at all comes first and replaces the whole gate
+// section, because every count under it is zero for the same reason and
+// printing them would offer a clean fleet as the finding.
 func renderUngatedRepos(w io.Writer, r DoctorReport) {
+	if r.GatesSurveyError != "" {
+		fmt.Fprintf(w, "\nwarning: the gate survey could not run, so no repo here was checked for a gate\n  %s\n"+
+			"  this is not a gated fleet, it is an unread one; fix the registry and re-run, or list it with `sparkwing configure xrepo list`\n",
+			r.GatesSurveyError)
+		return
+	}
 	rows := r.UngatedRepos
 	if s := r.ShadowedHooks; s != nil {
 		rows = nil

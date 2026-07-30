@@ -140,6 +140,48 @@ func TestRenderDoctorPretty_ClaimsNoGateVerdictWhenNothingWasSurveyed(t *testing
 	}
 }
 
+// The other negative control: a survey that could not run at all must read
+// nothing like a fleet whose gates all fire. Both leave UngatedRepos empty, so
+// without the reason the two machines render the same clean bill.
+func TestRenderDoctorPretty_AnUnreadableRegistryReadsNothingLikeAGatedFleet(t *testing.T) {
+	var gated, blind bytes.Buffer
+	if err := opsview.RenderDoctor(&gated, opsview.DoctorReport{GatesSurveyed: 3}, "", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	blindReport := opsview.DoctorReport{GatesSurveyError: "read the repo registry: parse repos.yaml: yaml: line 459"}
+	if err := opsview.RenderDoctor(&blind, blindReport, "", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if blind.String() == gated.String() {
+		t.Fatalf("an unread registry renders exactly like a gated fleet:\n%s", blind.String())
+	}
+	if strings.Contains(blind.String(), "every declared gate fires") {
+		t.Errorf("doctor claimed every gate fires having read no repos:\n%s", blind.String())
+	}
+	for _, want := range []string{"could not run", "repos.yaml"} {
+		if !strings.Contains(blind.String(), want) {
+			t.Errorf("output does not carry %q:\n%s", want, blind.String())
+		}
+	}
+}
+
+func TestRenderDoctorPlain_FlagsAGateSurveyThatDidNotRun(t *testing.T) {
+	var clean, blind bytes.Buffer
+	if err := opsview.RenderDoctor(&clean, opsview.DoctorReport{GatesSurveyed: 3}, "plain", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	blindReport := opsview.DoctorReport{GatesSurveyError: "read the repo registry: parse repos.yaml"}
+	if err := opsview.RenderDoctor(&blind, blindReport, "plain", ""); err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	if !strings.Contains(clean.String(), "gates_survey_failed\t0") {
+		t.Errorf("plain output does not state the survey ran:\n%s", clean.String())
+	}
+	if !strings.Contains(blind.String(), "gates_survey_failed\t1") {
+		t.Errorf("plain output does not flag the survey that never ran:\n%s", blind.String())
+	}
+}
+
 // The count is the field that says the question was asked, so it has to be in
 // the JSON whatever its value -- an omitted zero reads as a build that cannot
 // survey, which is the distinction the field exists to draw.

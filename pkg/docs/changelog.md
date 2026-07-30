@@ -69,6 +69,23 @@ code change to unlock.
   wire, and has nothing subtracted from available, so a run is never held
   back by pressure nobody measured.
 
+- **cli:** `sparkwing pipeline hooks survey` no longer reports an empty fleet
+  when it could not read the repo registry. A `repos.yaml` with one stray
+  character made it print `[]` and exit zero, which is exactly what a machine
+  with nothing registered prints, so a corrupt registry read as a swept, clean
+  fleet while every gate on it went unchecked. The survey now names the file
+  and exits non-zero, and writes no rows at all rather than a document a
+  script would parse as an answer. `hooks install --fleet` and
+  `hooks fire --fleet` refuse the same way instead of sweeping nothing and
+  reporting success.
+
+- **cli:** `sparkwing doctor` carries `gates_survey_error` when the gate
+  survey could not run, and says on the pretty path that no repo was checked.
+  The rest of the sweep still reports, because the registry says nothing about
+  this home's runs, locks or daemon. `-o plain` gains `gates_survey_failed`.
+  An empty `ungated_repos` alone could not tell a gated fleet from an unread
+  one.
+
 ### Added
 
 - **sdk:** `sparkwing.ToolSlot` takes a named box-wide budget from inside a

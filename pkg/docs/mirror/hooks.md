@@ -242,6 +242,14 @@ nothing else to repair, and states the clean verdict when there are none -- a
 silent report is indistinguishable from one produced by a build too old to
 survey a fleet at all.
 
+A survey that cannot read the registry says so and exits non-zero. It never
+answers with an empty fleet, because that is what a machine with nothing
+registered answers, and one stray character in `repos.yaml` used to make an
+unread fleet look like a swept one. `install --fleet` and `fire --fleet` refuse
+for the same reason. `doctor` keeps reporting the rest of its sweep and carries
+the reason in `gates_survey_error`, since the registry says nothing about this
+home's runs, locks or daemon.
+
 ### What a hook directory cannot tell you
 
 Everything above reads files. That is enough to find a gate nobody installed,
