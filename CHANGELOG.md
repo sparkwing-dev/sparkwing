@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.22.1] - 2026-07-30
 ### Added
 
 - **dashboard:** the embedded documentation is served at `/docs` on whatever
