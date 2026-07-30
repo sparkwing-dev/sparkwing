@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -555,6 +556,20 @@ func awaitWaiter(t *testing.T, home, runID string) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("run %q never appeared in the daemon queue", runID)
+}
+
+// awaitOutContains blocks until sub has been written to out, failing the
+// test when it never is.
+func awaitOutContains(t *testing.T, out *syncBuffer, sub string) {
+	t.Helper()
+	deadline := time.Now().Add(wingdTestWait)
+	for time.Now().Before(deadline) {
+		if out.count(sub) > 0 {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("out never contained %q; out = %q", sub, out.String())
 }
 
 func awaitWaiterOrHolder(t *testing.T, home, runID string) wingwire.QueueState {
@@ -1286,9 +1301,7 @@ func TestWingd_QueuedRunEmitsAdmissionWaitToDelegate(t *testing.T) {
 	}()
 	gate.awaitStarted(t, "wingd-delegate-a")
 
-	var delegateMu sync.Mutex
-	var delegateEvents []sparkwing.LogRecord
-	del := &captureLogger{mu: &delegateMu, events: &delegateEvents}
+	del := &captureLogger{}
 	outB := &syncBuffer{}
 
 	runB := make(chan *Result, 1)
@@ -1303,26 +1316,11 @@ func TestWingd_QueuedRunEmitsAdmissionWaitToDelegate(t *testing.T) {
 	}()
 	awaitWaiter(t, home, "wingd-delegate-b")
 
-	deadline := time.Now().Add(wingdTestWait)
-	for !strings.Contains(outB.String(), "queued for local admission") {
-		if time.Now().After(deadline) {
-			t.Fatalf("queued run never printed position on Out; out = %q", outB.String())
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	delegateMu.Lock()
-	var hasWait bool
-	for _, ev := range delegateEvents {
-		if ev.Event == "admission_wait" {
-			hasWait = true
-			break
-		}
-	}
-	delegateMu.Unlock()
-	if !hasWait {
-		t.Error("delegate: no admission_wait event emitted; position update must reach the envelope log")
-	}
+	// safety: the position update reaches Out and the delegate independently,
+	// with a run-row write between them, so seeing it on Out says nothing yet
+	// about the delegate. Wait on each sink on its own.
+	awaitOutContains(t, outB, "queued for local admission")
+	del.awaitEvent(t, "admission_wait")
 
 	close(gate.release)
 	for name, ch := range map[string]chan *Result{"a": runA, "b": runB} {
@@ -1338,8 +1336,8 @@ func TestWingd_QueuedRunEmitsAdmissionWaitToDelegate(t *testing.T) {
 }
 
 type captureLogger struct {
-	mu     *sync.Mutex
-	events *[]sparkwing.LogRecord
+	mu     sync.Mutex
+	events []sparkwing.LogRecord
 }
 
 func (c *captureLogger) Log(level, msg string) {
@@ -1348,8 +1346,38 @@ func (c *captureLogger) Log(level, msg string) {
 
 func (c *captureLogger) Emit(rec sparkwing.LogRecord) {
 	c.mu.Lock()
-	*c.events = append(*c.events, rec)
+	c.events = append(c.events, rec)
 	c.mu.Unlock()
+}
+
+// eventNames lists the events emitted so far, for failure messages.
+func (c *captureLogger) eventNames() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	names := make([]string, 0, len(c.events))
+	for _, ev := range c.events {
+		names = append(names, ev.Event)
+	}
+	return names
+}
+
+// awaitEvent blocks until the delegate has received event, failing the test
+// when it never arrives.
+func (c *captureLogger) awaitEvent(t *testing.T, event string) {
+	t.Helper()
+	deadline := time.Now().Add(wingdTestWait)
+	for time.Now().Before(deadline) {
+		c.mu.Lock()
+		got := slices.ContainsFunc(c.events, func(ev sparkwing.LogRecord) bool {
+			return ev.Event == event
+		})
+		c.mu.Unlock()
+		if got {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("delegate never emitted %q; got %v", event, c.eventNames())
 }
 
 func TestWingd_ChildRunAttachesToParentLease(t *testing.T) {
