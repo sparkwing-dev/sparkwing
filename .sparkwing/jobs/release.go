@@ -303,6 +303,33 @@ type prepareChangelogJob struct {
 	Version sparkwing.Ref[string]
 }
 
+// embeddedChangelogRel is where the CLI embeds the changelog so `docs read
+// --topic changelog` can serve it. bin/sync-docs.sh copies CHANGELOG.md here,
+// and a guard test byte-compares the two.
+const embeddedChangelogRel = "pkg/docs/changelog.md"
+
+func embeddedChangelogPath(repoDir string) string {
+	return filepath.Join(repoDir, filepath.FromSlash(embeddedChangelogRel))
+}
+
+// writeChangelogPair writes the rolled changelog to the root file and to the
+// embedded copy together.
+//
+// safety: a guard test byte-compares the two, and it runs inside the pre-commit
+// gate that the rewrite's own commit triggers. Writing one without the other
+// makes this step refuse the rewrite it just produced, leaving the roll on disk
+// with no commit -- which then fails every later attempt for a reason that names
+// neither the release nor the earlier failure.
+func writeChangelogPair(repoDir, body string) error {
+	if err := os.WriteFile(filepath.Join(repoDir, "CHANGELOG.md"), []byte(body), 0o644); err != nil {
+		return fmt.Errorf("write CHANGELOG.md: %w", err)
+	}
+	if err := os.WriteFile(embeddedChangelogPath(repoDir), []byte(body), 0o644); err != nil {
+		return fmt.Errorf("sync %s: %w", embeddedChangelogRel, err)
+	}
+	return nil
+}
+
 func (j *prepareChangelogJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "run", j.run).DryRun(j.dryRun)
 	return nil, nil
@@ -326,11 +353,11 @@ func (j *prepareChangelogJob) run(ctx context.Context) error {
 	case rewriteApply:
 		sparkwing.Info(ctx, "renaming CHANGELOG.md [Unreleased] -> [%s] (%d entries)", version, action.unreleasedEntries)
 	}
-	if err := os.WriteFile(path, []byte(action.newBody), 0o644); err != nil {
-		return fmt.Errorf("release: write CHANGELOG.md: %w", err)
+	if err := writeChangelogPair(j.RepoDir, action.newBody); err != nil {
+		return fmt.Errorf("release: %w", err)
 	}
-	if _, err := runGitIn(ctx, j.RepoDir, "add", "CHANGELOG.md"); err != nil {
-		return fmt.Errorf("release: git add CHANGELOG.md: %w", err)
+	if _, err := runGitIn(ctx, j.RepoDir, "add", "CHANGELOG.md", embeddedChangelogRel); err != nil {
+		return fmt.Errorf("release: git add changelog: %w", err)
 	}
 	if _, err := runGitIn(ctx, j.RepoDir, "commit", "-m", "release: "+version+" changelog"); err != nil {
 		return fmt.Errorf("release: git commit CHANGELOG.md: %w", err)
