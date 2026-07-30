@@ -563,9 +563,6 @@ func (d *Daemon) idleGrantableMemoryLocked() uint64 {
 	return grantable
 }
 
-// handleAdmission submits a run's all-or-nothing request. A granted or
-// queued outcome is delivered through the event stream; fail and skip
-// terminate the request with an [wingwire.Evicted] carrying the policy.
 // subLeaseMajor is the first protocol major whose clients mark an
 // internal, non-finalizing lease with SubLease. Before it the daemon read
 // that from SemaphoresOnly, which this major freed up for run-level claims
@@ -584,6 +581,9 @@ func finalizesRun(protocolMajor int, req *wingwire.AdmissionRequest) bool {
 	return !req.SubLease
 }
 
+// handleAdmission submits a run's all-or-nothing request. A granted or
+// queued outcome is delivered through the event stream; fail and skip
+// terminate the request with an [wingwire.Evicted] carrying the policy.
 func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if !validCostSource(req.CostSource) {
 		d.rejectInvalid(c, req, rejectCauseCostSource, fmt.Sprintf(
@@ -635,7 +635,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	if existing := d.byRun[req.RunID]; existing != nil && existing != c {
 		switch existing.role {
 		case roleWaiter:
-			if !requestIdentityMatches(existing, req) ||
+			if !requestIdentityMatches(existing, req, c.finalizable) ||
 				existing.queueTimeoutMS != tightestQueueTimeoutMS(req.Semaphores) ||
 				!queuedRequestPresent(d.ledger.Snapshot(), req.RunID) {
 				d.mu.Unlock()
@@ -683,7 +683,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 				return
 			}
 			snap := d.ledger.Snapshot()
-			if !requestMetadataMatches(existing, req) ||
+			if !requestMetadataMatches(existing, req, c.finalizable) ||
 				!grantedRequestPresent(snap, existing.leaseID, req.RunID) {
 				d.mu.Unlock()
 				_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "duplicate", Policy: wingwire.PolicyFail})
@@ -809,9 +809,9 @@ func tightestQueueTimeoutMS(sems []wingwire.SemaphoreClaim) int64 {
 	return t
 }
 
-func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
+func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest, newFinalizable bool) bool {
 	requested := chargedResources(req.Resources)
-	return requestIdentityMatches(existing, req) &&
+	return requestIdentityMatches(existing, req, newFinalizable) &&
 		existing.costSource == string(req.CostSource) &&
 		existing.expectedDurationMS == req.ExpectedDurationMS &&
 		existing.expectedP99MS == req.ExpectedP99MS &&
@@ -821,8 +821,8 @@ func requestMetadataMatches(existing *conn, req *wingwire.AdmissionRequest) bool
 		existing.queueTimeoutMS == tightestQueueTimeoutMS(req.Semaphores)
 }
 
-func requestIdentityMatches(existing *conn, req *wingwire.AdmissionRequest) bool {
-	return existing.finalizable == finalizesRun(existing.protocolMajor, req) &&
+func requestIdentityMatches(existing *conn, req *wingwire.AdmissionRequest, newFinalizable bool) bool {
+	return existing.finalizable == newFinalizable &&
 		existing.pipeline == req.Pipeline &&
 		existing.repo == req.Repo &&
 		existing.pid == req.PID &&

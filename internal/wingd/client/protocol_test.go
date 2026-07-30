@@ -1,9 +1,14 @@
 package client
 
 import (
+	"context"
 	"errors"
+	"net"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -52,16 +57,15 @@ func TestDownLevelServiceOutranksASupersedingVersion(t *testing.T) {
 	}
 }
 
-// The daemon's build stamp is not a resolvable module version, so the
-// refusal must never present it, or an upgrade the reader has already
-// done, as the lever that fixes this.
+// A daemon prerelease build version is not a usable module pin, so the
+// refusal must ask for a release by protocol number rather than the dev stamp.
 func TestProtocolTooOldNamesBothMajorsAndNoPinTarget(t *testing.T) {
 	ack := wingwire.HelloAck{
 		ProtocolMajor:       wingd.ProtocolMajor + 1,
 		NativeProtocolMajor: wingd.ProtocolMajor + 1,
 		BinaryVersion:       "v0.22.0-dev+b9ade496",
 	}
-	err := protocolTooOld(ack)
+	err := protocolTooOld("", ack)
 	if !errors.Is(err, ErrProtocolTooOld) {
 		t.Fatalf("error %v does not match the sentinel", err)
 	}
@@ -71,7 +75,64 @@ func TestProtocolTooOldNamesBothMajorsAndNoPinTarget(t *testing.T) {
 			t.Errorf("message %q omits %q", msg, want)
 		}
 	}
-	if strings.Contains(msg, "upgrade sparkwing") || strings.Contains(msg, "pin to") {
-		t.Errorf("message %q advises an upgrade the reader may already have done", msg)
+	if strings.Contains(msg, "v0.22.0-dev+b9ade496 or newer") {
+		t.Errorf("message %q pins to an unusable dev stamp", msg)
+	}
+}
+
+// A client whose binary supersedes the daemon's version must not take the
+// daemon over when the daemon is already on a newer protocol and is serving
+// this client down-level. Without the servedDownLevel guard the two processes
+// would drain and respawn each other's daemon without bound.
+func TestDownLevelServicePreventsLivelock(t *testing.T) {
+	home := shortHome(t)
+	sock, err := wingd.SocketPath(home)
+	if err != nil {
+		t.Fatalf("socket path: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(sock), 0o700); err != nil {
+		t.Fatalf("mkdir socket dir: %v", err)
+	}
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	go func() {
+		nc, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer nc.Close()
+		r := newFrameReader(nc)
+		if _, err := r.read(); err != nil {
+			return
+		}
+		line, _ := wingwire.Encode(&wingwire.HelloAck{
+			ProtocolMajor:       wingd.ProtocolMajor,
+			NativeProtocolMajor: wingd.ProtocolMajor + 1,
+			BinaryVersion:       "v1.0.0",
+		})
+		_, _ = nc.Write(line)
+		_, _ = r.read()
+	}()
+
+	spawned := make(chan struct{}, 1)
+	cl, err := EnsureDaemon(context.Background(), Options{
+		Home:        home,
+		Version:     "(devel)",
+		Spawn:       func(string, string) error { spawned <- struct{}{}; return nil },
+		DialTimeout: 200 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("ensure daemon: %v", err)
+	}
+	defer cl.Close()
+
+	select {
+	case <-spawned:
+		t.Fatal("down-level service triggered a takeover; livelock guard not working")
+	default:
 	}
 }
