@@ -789,7 +789,7 @@ func TestOversizedMeasuredCPURequestQueuesFollower(t *testing.T) {
 func TestLivenessFloor_AdmitsSoleRunUnderExternalLoad(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(8, 16<<30)
-	sampler.set(wingd.HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, FreeMemoryBytes: 16 << 30, LoadAverage: 100, LoadMeasured: true, MemoryMeasured: true})
+	sampler.set(wingd.HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, FreeMemoryBytes: 16 << 30, LoadAverage: 100, BusyCores: 100, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
 	startDaemon(t, wingd.Config{Home: home, Sampler: sampler})
 
 	cl := ensure(t, home, "")

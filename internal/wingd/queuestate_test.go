@@ -24,7 +24,7 @@ import (
 func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
-	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, LoadMeasured: true, MemoryMeasured: true})
+	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, BusyCores: 3.2, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
 
 	holderClient := ensure(t, home, "v1")
@@ -79,7 +79,7 @@ func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
-	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, LoadMeasured: true, MemoryMeasured: true})
+	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, BusyCores: 3.2, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
 
 	holderClient := ensure(t, home, "v1")
@@ -278,7 +278,7 @@ func TestQueueState_DecodesNodeParticipantIdentity(t *testing.T) {
 func TestQueueState_ResourceRowsReconcile(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
-	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, LoadMeasured: true, MemoryMeasured: true})
+	sampler.set(wingd.HostStat{TotalCores: 10, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30, LoadAverage: 3.2, BusyCores: 3.2, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
 
 	holderClient := ensure(t, home, "v1")

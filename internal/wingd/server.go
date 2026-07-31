@@ -52,6 +52,7 @@ type Daemon struct {
 
 	loadInit     bool
 	smoothedLoad float64
+	smoothedBusy float64
 	headroomInit bool
 	appliedCores float64
 	appliedMem   uint64
@@ -64,12 +65,12 @@ type Daemon struct {
 	externalCores float64
 	reservedMem   uint64
 	externalMem   uint64
-	// loadMeasured/memMeasured record whether that sample could read each
-	// dimension. False means the external figure is not a measurement and
-	// none was subtracted, which the queue view states rather than printing
-	// a number.
-	loadMeasured bool
-	memMeasured  bool
+	// cpuMeasured/memMeasured record whether that sample could read each
+	// dimension the external figures come from. False means the external
+	// figure is not a measurement and none was subtracted, which the queue
+	// view states rather than printing a number.
+	cpuMeasured bool
+	memMeasured bool
 	// headroomAt is when that sample was taken, so a reading the deadband
 	// has held in force can show its age instead of passing for live.
 	headroomAt time.Time
