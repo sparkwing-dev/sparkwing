@@ -32,7 +32,7 @@ import (
 // -- are deliberately absent. They belong to whatever sparkwing is
 // running on the machine, and on a developer laptop that is a wingd
 // daemon and a pre-commit pipeline on every commit. Asserting they are
-// byte-identical across a suite run measures the neighbours, not the
+// byte-identical across a suite run measures the neighbors, not the
 // suite. SandboxLeaks covers them soundly instead.
 func WatchedFiles(home string) []string {
 	return []string{
