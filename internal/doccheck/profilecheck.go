@@ -5,8 +5,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"gopkg.in/yaml.v3"
+
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
 // topLevelProfilesRE matches a ```yaml block that is a standalone

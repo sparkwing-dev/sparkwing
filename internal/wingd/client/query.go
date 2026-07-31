@@ -32,7 +32,7 @@ func (cl *Client) QueueState(ctx context.Context) (wingwire.QueueState, error) {
 // readQueueState runs one queue-state exchange. The third value is a transport
 // error the caller recovers by reconnecting, so a daemon blink during a status
 // read is retried against the fresh connection.
-func (cl *Client) readQueueState() (qs wingwire.QueueState, terminal error, transient error) {
+func (cl *Client) readQueueState() (qs wingwire.QueueState, terminal, transient error) {
 	if err := cl.write(&wingwire.QueueState{}); err != nil {
 		return wingwire.QueueState{}, nil, err
 	}

@@ -34,8 +34,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"golang.org/x/mod/modfile"
+
+	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
 // ErrMiss is the sentinel for 404 from /bin/<hash>.

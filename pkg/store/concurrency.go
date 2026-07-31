@@ -132,8 +132,10 @@ const (
 	AcquireCancellingOthers AcquireKind = "cancelling_others"
 )
 
-const inheritedHolderDeclaredCapacity = -1
-const inheritedHolderNodePrefix = "\x00inherited:"
+const (
+	inheritedHolderDeclaredCapacity = -1
+	inheritedHolderNodePrefix       = "\x00inherited:"
+)
 
 func inheritedHolderNodeID(holderID string) string {
 	return inheritedHolderNodePrefix + holderID

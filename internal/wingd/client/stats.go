@@ -25,7 +25,7 @@ func (cl *Client) ResetStats(ctx context.Context) error {
 	}
 }
 
-func (cl *Client) readResetStats() (terminal error, transient error) {
+func (cl *Client) readResetStats() (terminal, transient error) {
 	if err := cl.write(&wingwire.StatsReset{}); err != nil {
 		return nil, err
 	}

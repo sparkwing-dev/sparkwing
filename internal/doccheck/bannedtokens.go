@@ -25,44 +25,82 @@ type bannedPattern struct {
 }
 
 var banned = []bannedPattern{
-	{regexp.MustCompile(`pipelines\.yaml`),
-		"the config file is sparkwing.yaml; the legacy pipelines.yaml name is a hard error"},
-	{regexp.MustCompile(`\bsparkwing\.db\b`),
-		"the SQLite store file is state.db, not sparkwing.db"},
-	{regexp.MustCompile(`\.sparkwing/logs\b`),
-		"per-run logs live under ~/.sparkwing/runs/<runID>/, not ~/.sparkwing/logs/"},
-	{regexp.MustCompile(`ReservedFlagNames`),
-		"removed; run control flags are sw-* prefixed, so pipelines own the full unprefixed flag namespace (no reserved-name collision)"},
-	{regexp.MustCompile(`\bruns_on\b`),
-		"not a sparkwing.yaml field (the strict parser rejects it); use pipeline `requires:` or node `.Requires()`/`.Prefers()`/`.WhenRunner()`"},
-	{regexp.MustCompile(`(?:\brun\b|\btrigger\b)[^\n]*\s--from\b`),
-		"the git-ref flag is --sw-ref, not --from"},
-	{regexp.MustCompile(`--mode=`),
-		"the run-mode flag is --sw-mode, not --mode"},
-	{regexp.MustCompile(`--workers=`),
-		"the worker-cap flag is --sw-workers, not --workers"},
-	{regexp.MustCompile(`--no-update\b`),
-		"the skip-resolve flag is --sw-no-update, not --no-update"},
-	{regexp.MustCompile(`tokens (?:revoke|lookup|rotate) [^-\s]`),
-		"token verbs are flag-only: pass --prefix <prefix>, not a positional argument"},
-	{regexp.MustCompile(`--sw-box-slots\b`),
-		"removed; local host admission is owned by the admission daemon, not a per-run box-slot cap"},
-	{regexp.MustCompile(`--sw-no-wait\b`),
-		"removed; runs queue in the admission daemon and Ctrl-C cancels the wait cleanly"},
-	{regexp.MustCompile(`SPARKWING_BOX_SLOTS_PIN|SPARKWING_BOX_NO_WAIT`),
-		"removed; local host admission is owned by the admission daemon"},
-	{regexp.MustCompile(`SPARKWING_PLAN_ADMISSION`),
-		"removed; children inherit admission by attaching to the parent's daemon lease (SPARKWING_LEASE_TOKEN)"},
-	{regexp.MustCompile(`\bHostAdmission\b`),
-		"removed from the SDK; host admission is universal and implicit, never a flag"},
-	{regexp.MustCompile(`\bbox-slots\b`),
-		"removed; the admission daemon owns host admission -- read it with `sparkwing queue` and clear leftovers with `sparkwing doctor`"},
-	{regexp.MustCompile(`sparkwing maintenance\b`),
-		"removed; the admission daemon converges local state without a sweep -- `sparkwing doctor` clears provably-dead leftovers"},
-	{regexp.MustCompile(`SPARKWING_BOX_SLOT`),
-		"removed; the admission daemon measures host capacity, so there is no box-slot cap or stall-ttl env to set"},
-	{regexp.MustCompile(`sparkwing pipeline add\b`),
-		"there is no `sparkwing pipeline add` verb; register a repo with `sparkwing configure xrepo add <path>`"},
+	{
+		regexp.MustCompile(`pipelines\.yaml`),
+		"the config file is sparkwing.yaml; the legacy pipelines.yaml name is a hard error",
+	},
+	{
+		regexp.MustCompile(`\bsparkwing\.db\b`),
+		"the SQLite store file is state.db, not sparkwing.db",
+	},
+	{
+		regexp.MustCompile(`\.sparkwing/logs\b`),
+		"per-run logs live under ~/.sparkwing/runs/<runID>/, not ~/.sparkwing/logs/",
+	},
+	{
+		regexp.MustCompile(`ReservedFlagNames`),
+		"removed; run control flags are sw-* prefixed, so pipelines own the full unprefixed flag namespace (no reserved-name collision)",
+	},
+	{
+		regexp.MustCompile(`\bruns_on\b`),
+		"not a sparkwing.yaml field (the strict parser rejects it); use pipeline `requires:` or node `.Requires()`/`.Prefers()`/`.WhenRunner()`",
+	},
+	{
+		regexp.MustCompile(`(?:\brun\b|\btrigger\b)[^\n]*\s--from\b`),
+		"the git-ref flag is --sw-ref, not --from",
+	},
+	{
+		regexp.MustCompile(`--mode=`),
+		"the run-mode flag is --sw-mode, not --mode",
+	},
+	{
+		regexp.MustCompile(`--workers=`),
+		"the worker-cap flag is --sw-workers, not --workers",
+	},
+	{
+		regexp.MustCompile(`--no-update\b`),
+		"the skip-resolve flag is --sw-no-update, not --no-update",
+	},
+	{
+		regexp.MustCompile(`tokens (?:revoke|lookup|rotate) [^-\s]`),
+		"token verbs are flag-only: pass --prefix <prefix>, not a positional argument",
+	},
+	{
+		regexp.MustCompile(`--sw-box-slots\b`),
+		"removed; local host admission is owned by the admission daemon, not a per-run box-slot cap",
+	},
+	{
+		regexp.MustCompile(`--sw-no-wait\b`),
+		"removed; runs queue in the admission daemon and Ctrl-C cancels the wait cleanly",
+	},
+	{
+		regexp.MustCompile(`SPARKWING_BOX_SLOTS_PIN|SPARKWING_BOX_NO_WAIT`),
+		"removed; local host admission is owned by the admission daemon",
+	},
+	{
+		regexp.MustCompile(`SPARKWING_PLAN_ADMISSION`),
+		"removed; children inherit admission by attaching to the parent's daemon lease (SPARKWING_LEASE_TOKEN)",
+	},
+	{
+		regexp.MustCompile(`\bHostAdmission\b`),
+		"removed from the SDK; host admission is universal and implicit, never a flag",
+	},
+	{
+		regexp.MustCompile(`\bbox-slots\b`),
+		"removed; the admission daemon owns host admission -- read it with `sparkwing queue` and clear leftovers with `sparkwing doctor`",
+	},
+	{
+		regexp.MustCompile(`sparkwing maintenance\b`),
+		"removed; the admission daemon converges local state without a sweep -- `sparkwing doctor` clears provably-dead leftovers",
+	},
+	{
+		regexp.MustCompile(`SPARKWING_BOX_SLOT`),
+		"removed; the admission daemon measures host capacity, so there is no box-slot cap or stall-ttl env to set",
+	},
+	{
+		regexp.MustCompile(`sparkwing pipeline add\b`),
+		"there is no `sparkwing pipeline add` verb; register a repo with `sparkwing configure xrepo add <path>`",
+	},
 }
 
 // narrativeExempt names the one doc where change/deprecation vocabulary
@@ -79,16 +117,26 @@ const narrativeExempt = "changelog-style.md"
 // ("no longer"/"replaced"/"previously") have legitimate present-tense
 // uses and are left to review.
 var bannedNarrative = []bannedPattern{
-	{regexp.MustCompile(`(?i)(?:pre|post)-rewrite`),
-		"don't narrate the rewrite; describe current behavior directly (history goes in migrations/)"},
-	{regexp.MustCompile(`(?i)\bformerly\b`),
-		"don't narrate renames; describe the current name directly (history goes in migrations/)"},
-	{regexp.MustCompile(`(?i)^#+\s+historical`),
-		"remove historical sections; change history belongs in docs/migrations/"},
-	{regexp.MustCompile(`(?i)\bdeprecat(?:e|ed|es|ing|ion)\b`),
-		"don't mark things deprecated in the reference docs; remove the feature or document its replacement as current (deprecation notices go in the CHANGELOG / migrations/)"},
-	{regexp.MustCompile(`(?i)\bobsolete\b`),
-		"don't flag things obsolete in the reference docs; describe the current way directly (history goes in migrations/)"},
+	{
+		regexp.MustCompile(`(?i)(?:pre|post)-rewrite`),
+		"don't narrate the rewrite; describe current behavior directly (history goes in migrations/)",
+	},
+	{
+		regexp.MustCompile(`(?i)\bformerly\b`),
+		"don't narrate renames; describe the current name directly (history goes in migrations/)",
+	},
+	{
+		regexp.MustCompile(`(?i)^#+\s+historical`),
+		"remove historical sections; change history belongs in docs/migrations/",
+	},
+	{
+		regexp.MustCompile(`(?i)\bdeprecat(?:e|ed|es|ing|ion)\b`),
+		"don't mark things deprecated in the reference docs; remove the feature or document its replacement as current (deprecation notices go in the CHANGELOG / migrations/)",
+	},
+	{
+		regexp.MustCompile(`(?i)\bobsolete\b`),
+		"don't flag things obsolete in the reference docs; describe the current way directly (history goes in migrations/)",
+	},
 }
 
 // checkBannedTokens scans the docs (contentDir) and the CLI help

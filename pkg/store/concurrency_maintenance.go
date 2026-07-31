@@ -16,9 +16,11 @@ const DefaultConcurrencyCacheCap = 10_000
 // metaKeyConcurrencySwept records the wall-clock of the last full
 // concurrency maintenance pass so the daemonless run path can throttle the
 // global sweep across separate processes.
-const metaKeyConcurrencySwept = "concurrency_swept_at"
-const metaKeyConcurrencySweepClaim = "concurrency_sweep_claimed_at"
-const concurrencySweepClaimTTL = 15 * time.Second
+const (
+	metaKeyConcurrencySwept      = "concurrency_swept_at"
+	metaKeyConcurrencySweepClaim = "concurrency_sweep_claimed_at"
+	concurrencySweepClaimTTL     = 15 * time.Second
+)
 
 // ConcurrencyMaintenanceResult reports what one janitorial pass over the
 // concurrency tables touched. Counts are zero when a pass ran but found

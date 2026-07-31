@@ -217,10 +217,18 @@ func parseByteSize(tok string) (bytes uint64, ok bool, err error) {
 		scale float64
 	}
 	units := []unit{
-		{"tib", 1 << 40}, {"tb", 1 << 40}, {"t", 1 << 40},
-		{"gib", 1 << 30}, {"gb", 1 << 30}, {"g", 1 << 30},
-		{"mib", 1 << 20}, {"mb", 1 << 20}, {"m", 1 << 20},
-		{"kib", 1 << 10}, {"kb", 1 << 10}, {"k", 1 << 10},
+		{"tib", 1 << 40},
+		{"tb", 1 << 40},
+		{"t", 1 << 40},
+		{"gib", 1 << 30},
+		{"gb", 1 << 30},
+		{"g", 1 << 30},
+		{"mib", 1 << 20},
+		{"mb", 1 << 20},
+		{"m", 1 << 20},
+		{"kib", 1 << 10},
+		{"kb", 1 << 10},
+		{"k", 1 << 10},
 	}
 	for _, u := range units {
 		if !strings.HasSuffix(t, u.suf) {

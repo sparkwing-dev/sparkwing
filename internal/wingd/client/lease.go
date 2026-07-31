@@ -60,7 +60,7 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 // blink while queued therefore never surfaces as a closed-connection error;
 // the run keeps waiting across the restart. Position pushes are re-delivered
 // to onQueued each time, which is idempotent for the caller's status line.
-func (cl *Client) readGrant(req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (lease *Lease, terminal error, transient error) {
+func (cl *Client) readGrant(req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (lease *Lease, terminal, transient error) {
 	for {
 		msg, err := cl.dec.read()
 		if err != nil {
@@ -105,7 +105,7 @@ func (cl *Client) Reattach(ctx context.Context, token string) (*Lease, error) {
 // is a transport error the caller recovers by reconnecting; a rejected
 // re-attach ([ErrReattachRejected]) is a terminal answer, not a transient one,
 // since it means the grace window has genuinely closed.
-func (cl *Client) readReattach(token string) (lease *Lease, terminal error, transient error) {
+func (cl *Client) readReattach(token string) (lease *Lease, terminal, transient error) {
 	if err := cl.write(&wingwire.Reattach{LeaseToken: token}); err != nil {
 		return nil, nil, err
 	}
@@ -207,7 +207,7 @@ func (cl *Client) CancelLease(ctx context.Context, runID string) (bool, error) {
 // transport error the caller recovers by reconnecting, so a daemon blink
 // during the cancel exchange is retried against the fresh connection rather
 // than reported as a failed cancel.
-func (cl *Client) readCancelLease(runID string) (found bool, terminal error, transient error) {
+func (cl *Client) readCancelLease(runID string) (found bool, terminal, transient error) {
 	if err := cl.write(&wingwire.CancelLease{RunID: runID}); err != nil {
 		return false, nil, err
 	}

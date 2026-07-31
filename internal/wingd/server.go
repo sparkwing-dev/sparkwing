@@ -879,7 +879,7 @@ func cloneStrings(in []string) []string {
 	return append([]string(nil), in...)
 }
 
-func claimRequestsMatch(got []wingwire.SemaphoreClaim, want []wingwire.SemaphoreClaim) bool {
+func claimRequestsMatch(got, want []wingwire.SemaphoreClaim) bool {
 	if len(got) != len(want) {
 		return false
 	}

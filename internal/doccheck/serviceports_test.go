@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func writeFakeServiceMains(t *testing.T, root string, controllerPort string) {
+func writeFakeServiceMains(t *testing.T, root, controllerPort string) {
 	t.Helper()
 	mains := map[string]string{
 		"sparkwing-controller": controllerPort,

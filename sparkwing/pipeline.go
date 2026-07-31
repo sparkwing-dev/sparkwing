@@ -247,7 +247,8 @@ func RegisterEntrypoint[T any](entrypointName string, factory func() Pipeline[T]
 // API doesn't get clobbered by a YAML rebind).
 func BindPipelinesFromYAML(cfg interface {
 	EachPipeline(func(name, entrypoint string))
-}) {
+},
+) {
 	if cfg == nil {
 		return
 	}

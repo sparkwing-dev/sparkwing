@@ -93,7 +93,7 @@ func Run(ctx context.Context, interval time.Duration, sink Sink) {
 // dividing it by a single short interval reads as a rate no physical machine
 // could sustain; capping at host cores keeps that artifact from being stored
 // as a peak far above real concurrency. A non-positive interval draws nothing.
-func intervalMillicores(cpu time.Duration, wall time.Duration) int64 {
+func intervalMillicores(cpu, wall time.Duration) int64 {
 	if wall <= 0 {
 		return 0
 	}

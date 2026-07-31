@@ -5,8 +5,9 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"gopkg.in/yaml.v3"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // topLevelPipelinesRE matches a ```yaml block that is a sparkwing.yaml

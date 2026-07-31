@@ -6,9 +6,11 @@ import (
 	"time"
 )
 
-type nodeTimeoutDurationKey struct{}
-type nodeParentContextKey struct{}
-type nodeTimeoutControllerKey struct{}
+type (
+	nodeTimeoutDurationKey   struct{}
+	nodeParentContextKey     struct{}
+	nodeTimeoutControllerKey struct{}
+)
 
 type nodeTimeoutController struct {
 	parent context.Context
@@ -62,7 +64,7 @@ func nodeTimeoutDurationFromContext(ctx context.Context) time.Duration {
 	return timeout
 }
 
-func withNodeParentContext(ctx context.Context, parent context.Context) context.Context {
+func withNodeParentContext(ctx, parent context.Context) context.Context {
 	if parent == nil {
 		return ctx
 	}

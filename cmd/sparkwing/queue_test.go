@@ -17,12 +17,16 @@ func sampleQueueState() wingwire.QueueState {
 			{Key: "deploy-lock", Capacity: 1, Held: 1},
 		},
 		Holders: []wingwire.Holder{
-			{RunID: "run-holder", Pipeline: "deploy", ElapsedMS: 90000,
-				Resources: wingwire.HostResources{Cores: 6, MemoryBytes: 4 << 30}, Semaphores: []string{"deploy-lock"}},
+			{
+				RunID: "run-holder", Pipeline: "deploy", ElapsedMS: 90000,
+				Resources: wingwire.HostResources{Cores: 6, MemoryBytes: 4 << 30}, Semaphores: []string{"deploy-lock"},
+			},
 		},
 		Waiters: []wingwire.Waiter{
-			{RunID: "run-waiter", Pipeline: "build", Position: 1,
-				Resources: wingwire.HostResources{Cores: 4}, WaitingOn: []string{"cores"}, WaitingMS: 12000},
+			{
+				RunID: "run-waiter", Pipeline: "build", Position: 1,
+				Resources: wingwire.HostResources{Cores: 4}, WaitingOn: []string{"cores"}, WaitingMS: 12000,
+			},
 		},
 	}
 }
@@ -30,14 +34,20 @@ func sampleQueueState() wingwire.QueueState {
 func TestRenderQueue_PrettyShowsOrigin(t *testing.T) {
 	qs := wingwire.QueueState{
 		Holders: []wingwire.Holder{
-			{RunID: "local-run", Pipeline: "build", Origin: wingwire.OriginLocal,
-				Resources: wingwire.HostResources{Cores: 2}},
-			{RunID: "ctrl-run", Pipeline: "deploy", Origin: wingwire.OriginController,
-				Resources: wingwire.HostResources{Cores: 4}},
+			{
+				RunID: "local-run", Pipeline: "build", Origin: wingwire.OriginLocal,
+				Resources: wingwire.HostResources{Cores: 2},
+			},
+			{
+				RunID: "ctrl-run", Pipeline: "deploy", Origin: wingwire.OriginController,
+				Resources: wingwire.HostResources{Cores: 4},
+			},
 		},
 		Waiters: []wingwire.Waiter{
-			{RunID: "ctrl-waiter", Pipeline: "test", Position: 1, Origin: wingwire.OriginController,
-				Resources: wingwire.HostResources{Cores: 8}},
+			{
+				RunID: "ctrl-waiter", Pipeline: "test", Position: 1, Origin: wingwire.OriginController,
+				Resources: wingwire.HostResources{Cores: 8},
+			},
 		},
 	}
 	var buf bytes.Buffer
@@ -100,8 +110,10 @@ func TestRenderQueue_IgnoreExternalSuppressesPressureNote(t *testing.T) {
 			{Key: "cores", Capacity: 8, Held: 2, External: 5},
 		},
 		Waiters: []wingwire.Waiter{
-			{RunID: "w", Position: 1, Resources: wingwire.HostResources{Cores: 4},
-				BlockingReason: "needs 4.0 cores; 1.0 available"},
+			{
+				RunID: "w", Position: 1, Resources: wingwire.HostResources{Cores: 4},
+				BlockingReason: "needs 4.0 cores; 1.0 available",
+			},
 		},
 	}
 	if note := externalPressureNote(qs); note != "" {
@@ -172,8 +184,10 @@ func TestRenderQueue_PrettyExplainsHostPressureWait(t *testing.T) {
 			{Key: "cores", Capacity: 10, Held: 0, Reserved: 2, External: 3.2, Available: 4.8},
 		},
 		Waiters: []wingwire.Waiter{
-			{RunID: "run-waiter", Position: 1, Resources: wingwire.HostResources{Cores: 5},
-				WaitingOn: []string{"cores"}, BlockingReason: "needs 5.0 cores; 4.8 available (external load 3.2)"},
+			{
+				RunID: "run-waiter", Position: 1, Resources: wingwire.HostResources{Cores: 5},
+				WaitingOn: []string{"cores"}, BlockingReason: "needs 5.0 cores; 4.8 available (external load 3.2)",
+			},
 		},
 	}
 	var buf bytes.Buffer

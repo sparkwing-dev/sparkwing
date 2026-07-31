@@ -179,7 +179,7 @@ func TestInitLedger_ResizesRestoredTotalsToCurrentBudget(t *testing.T) {
 
 // newHeadroomDaemon builds a daemon with a ready ledger but no listener,
 // for exercising the headroom controller in isolation.
-func newHeadroomDaemon(t *testing.T, totalCores float64, frac float64) *Daemon {
+func newHeadroomDaemon(t *testing.T, totalCores, frac float64) *Daemon {
 	t.Helper()
 	home := t.TempDir()
 	d, err := New(Config{Home: home, HeadroomFraction: frac})

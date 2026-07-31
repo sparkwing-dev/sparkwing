@@ -120,8 +120,10 @@ func TestFmtWaitCells_DashBeforeAnyObservation(t *testing.T) {
 // keeps the rollup's percentile fields intact for the JSON view.
 func TestGroupCapacityStats_CarriesDistributionFields(t *testing.T) {
 	stats := groupCapacityStats([]store.PipelineProfile{
-		{Pipeline: "build", NodeID: "", CPUP50: 1, CPUP95: 2, PeakCores: 3,
-			WaitP50: time.Second, WaitP99: 5 * time.Second, WaitSampleCount: 4, SampleCount: 10},
+		{
+			Pipeline: "build", NodeID: "", CPUP50: 1, CPUP95: 2, PeakCores: 3,
+			WaitP50: time.Second, WaitP99: 5 * time.Second, WaitSampleCount: 4, SampleCount: 10,
+		},
 		{Pipeline: "build", NodeID: "node-a", CPUP50: 0.5, PeakCores: 1, SampleCount: 10},
 	})
 	if len(stats) != 1 {

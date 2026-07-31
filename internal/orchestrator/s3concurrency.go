@@ -126,8 +126,10 @@ type s3Holder struct {
 	DeclaredCapacity int    `json:"declared_capacity"`
 }
 
-const inheritedS3HolderDeclaredCapacity = -1
-const inheritedS3HolderNodePrefix = "\x00inherited:"
+const (
+	inheritedS3HolderDeclaredCapacity = -1
+	inheritedS3HolderNodePrefix       = "\x00inherited:"
+)
 
 func inheritedS3HolderNodeID(holderID string) string {
 	return inheritedS3HolderNodePrefix + holderID

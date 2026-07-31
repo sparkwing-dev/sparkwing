@@ -257,7 +257,8 @@ func (h *Harness) spawn(wedged bool) {
 	runID := "r" + strconv.Itoa(h.nextID)
 	h.mu.Unlock()
 
-	args := []string{"hold", "--home", h.home, "--run", runID, "--version", "v1.0.0",
+	args := []string{
+		"hold", "--home", h.home, "--run", runID, "--version", "v1.0.0",
 		"--daemon-idle-ms", strconv.Itoa(h.cfg.DaemonIdleMS),
 		"--daemon-grace-ms", strconv.Itoa(h.cfg.DaemonGraceMS),
 		"--daemon-total-cores", strconv.FormatFloat(h.cfg.DaemonCores, 'f', -1, 64),
@@ -397,7 +398,8 @@ func (h *Harness) takeover() {
 	h.daemonKilledAt = time.Now()
 	h.mu.Unlock()
 
-	args := []string{"hold", "--home", h.home, "--run", runID, "--version", ver,
+	args := []string{
+		"hold", "--home", h.home, "--run", runID, "--version", ver,
 		"--cores", "0.2", "--run-ms", strconv.Itoa(600 + h.rng.Intn(800)),
 		"--daemon-idle-ms", strconv.Itoa(h.cfg.DaemonIdleMS),
 		"--daemon-grace-ms", strconv.Itoa(h.cfg.DaemonGraceMS),
