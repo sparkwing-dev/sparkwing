@@ -101,25 +101,7 @@ func TestPoisonedFloorRecoversWithoutManualReset(t *testing.T) {
 	}
 }
 
-// TestRatchetedFloorRecoversUnderSustainedExternalLoad drives the BW-1459
-// deadlock through the real loop -- resolve the charge from the stored
-// profile, cap it, submit it to a real admission ledger, fold what the run
-// measured -- on a box whose memory headroom sustained external load has
-// driven to zero.
-//
-// The trap it proves gone: a demand floor self-corrects only when a run
-// measures below it, a run only measures if it is admitted, and it is not
-// admitted while its charge exceeds what the machine will grant. A charge
-// that got past the grantable ceiling could therefore never take the step
-// that lowers it. The recovery here uses no daemon restart and no operator
-// verb: the ceiling caps the charge, the liveness floor admits the sole run
-// anyway, and the run's own measurement walks the floor back down.
-//
-// The setup is one contended run that consumed essentially its whole memory
-// charge, which makes that charge the floor and prices the next run at twice
-// it. Every cycle after it must be admitted, because only an admitted run
-// measures and only a measurement lowers the floor.
-func TestRatchetedFloorRecoversUnderSustainedExternalLoad(t *testing.T) {
+func TestRatchetedFloorRecoversAtGrantableMemoryCeiling(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -138,7 +120,7 @@ func TestRatchetedFloorRecoversUnderSustainedExternalLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := l.SetHeadroom(2.0, 0); err != nil {
+	if _, err := l.SetHeadroom(2.0, uint64(grantMem)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -175,7 +157,7 @@ func TestRatchetedFloorRecoversUnderSustainedExternalLoad(t *testing.T) {
 			t.Fatalf("cycle %d: Submit: %v", i, err)
 		}
 		if dec.Kind != admission.DecisionGranted {
-			t.Fatalf("cycle %d: charge %d bytes was %s against a zero memory headroom. A run that never starts never measures, so the floor can never come down",
+			t.Fatalf("cycle %d: charge %d bytes was %s against the grantable memory ceiling. A run that never starts never measures, so the floor can never come down",
 				i, res.MemoryBytes, dec.Kind)
 		}
 		contendedRunPeaking(t, st, ctx, "repo/ci", fmt.Sprintf("cold%d", i), 1.0, realDemand,

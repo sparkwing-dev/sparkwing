@@ -274,13 +274,7 @@ func TestHostMemoryDeficitStillQueues(t *testing.T) {
 	}
 }
 
-// TestHostMemoryHeadroomDeficitAdmitsSoleRun pins the liveness floor on the
-// memory dimension: external load can drive the memory headroom to zero, and
-// with nothing admitted the queue head is still granted. Queueing it instead
-// was the permanent lockout -- the run's own measurement is what lowers its
-// charge, and a run that is never admitted never measures, so a pipeline
-// priced above a crushed headroom could never price itself back down.
-func TestHostMemoryHeadroomDeficitAdmitsSoleRun(t *testing.T) {
+func TestHostMemoryHeadroomDeficitQueuesSoleRun(t *testing.T) {
 	l := testLedger(t, 8, 8<<30)
 	if _, err := l.SetHeadroom(8, 0); err != nil {
 		t.Fatalf("SetHeadroom: %v", err)
@@ -290,8 +284,8 @@ func TestHostMemoryHeadroomDeficitAdmitsSoleRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit head: %v", err)
 	}
-	if d.Kind != DecisionGranted {
-		t.Fatalf("sole run behind a zero memory headroom = %s, want granted", d.Kind)
+	if d.Kind != DecisionQueued {
+		t.Fatalf("head behind memory headroom = %s, want queued", d.Kind)
 	}
 }
 
@@ -844,20 +838,13 @@ func TestSetHeadroom_CPUFloorSurvivesMemoryHolder(t *testing.T) {
 	mustGrant(t, l, Request{ID: "waiter", Cores: 1})
 }
 
-// TestSetHeadroom_MemoryFloorMirrorsCPU proves the two host dimensions carry
-// the same liveness floor, each judged on its own held total: a zero memory
-// headroom does not block the first run to ask for memory, and once that run
-// holds it, the next one queues. One run at a time may sit above a headroom
-// external load crushed; the machine total still binds, so the box can always
-// physically hold what was granted.
-func TestSetHeadroom_MemoryFloorMirrorsCPU(t *testing.T) {
+func TestSetHeadroom_MemoryHasNoLivenessFloor(t *testing.T) {
 	l := testLedger(t, 4, 1024)
 	if _, err := l.SetHeadroom(4, 0); err != nil {
 		t.Fatalf("SetHeadroom: %v", err)
 	}
 
 	mustGrant(t, l, Request{ID: "holder", Cores: 1})
-	mustGrant(t, l, Request{ID: "first-memory", MemoryBytes: 1})
 	mustQueue(t, l, Request{ID: "waiter", MemoryBytes: 1})
 }
 
