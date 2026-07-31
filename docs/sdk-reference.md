@@ -787,6 +787,31 @@ type JobNode struct {
 - `func (n *JobNode) WhenRunnerLabels() []string` -- WhenRunnerLabels returns the terms declared via WhenRunner.
 - `func (n *JobNode) Work() *Work` -- Work returns the materialized inner DAG for the node's job.
 
+### type LintSlot
+
+LintSlot is a lease on a canonical path to lint through, held until LintSlot.Release.
+
+```
+type LintSlot struct {
+    // Path is the directory the leased tree is visible at. Run the
+    // linter here rather than in [WorkDir].
+    Path string
+
+    // Cache is the tool cache directory that goes with Path.
+    Cache string
+
+    // Canonical reports whether Path is a shared slot. It is false
+    // when the lease fell back to a private per-worktree cache,
+    // which is correct but starts cold.
+    Canonical bool
+    // contains filtered or unexported fields
+}
+```
+
+- `func AcquireLintSlot(tool string) (*LintSlot, error)` -- AcquireLintSlot leases a canonical path for one lint run, so that a cache can be reused between worktrees without misreporting where a finding lives.
+- `func (s *LintSlot) Configure(c *Cmd, cacheVar string) *Cmd` -- Configure points c at the slot: the working directory, PWD and the tool's cache variable, set together because setting only some of them is silently wrong.
+- `func (s *LintSlot) Release()` -- Release drops the lease.
+
 ### type LintWarning
 
 LintWarning is a non-fatal Plan-time advisory attached to a node.
@@ -1845,6 +1870,10 @@ const EventPullRequest = "pull_request"
 
 ```
 const ExitNotStarted = -1
+```
+
+```
+const LintSlotsEnv = "SPARKWING_LINT_SLOTS"
 ```
 
 ```

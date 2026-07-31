@@ -198,7 +198,8 @@ wrapped `Cause`. `errors.As(err, &ee)` works through every terminator
 ### Tool caches
 
 ```
-ToolCacheDir(tool) string           // cache dir for an external tool, scoped to this worktree
+ToolCacheDir(tool) string              // cache dir for an external tool, scoped to this worktree
+AcquireLintSlot(tool) (*LintSlot, err) // lease a canonical path so worktrees can share one cache
 ```
 
 A tool that keys its cache on file content alone - golangci-lint among
@@ -229,6 +230,57 @@ either. Exclusion rules and diff baselines are applied when results are
 reported, while the cache stores what the analyzers returned - so a run
 can print `0 issues` and still leave path-bearing issues in its cache.
 Seeding is only sound between trees at the same absolute path.
+
+#### Lint slots: giving worktrees the same absolute path
+
+`AcquireLintSlot` supplies that same absolute path, so a cache can be
+reused between worktrees without any of the above. A slot is a fixed
+path - a symlink repointed at whichever worktree holds the lease - plus
+the cache that goes with it. Every run through a slot sees one path, so
+a replayed issue's stored filename lands under the current holder, and
+the lease is exclusive so the holder is never in doubt.
+
+```go
+slot, err := sparkwing.AcquireLintSlot("golangci-lint")
+if err != nil {
+    return err
+}
+defer slot.Release()
+
+cmd := sparkwing.Bash(ctx, "golangci-lint run --allow-serial-runners ./...")
+_, err = slot.Configure(cmd, "GOLANGCI_LINT_CACHE").Run()
+```
+
+Use `Configure` rather than setting the directory yourself. It sets
+`PWD` as well, and that is not decoration: Go's `os.Getwd` prefers
+`$PWD` when it names the same directory as `.`, so a bare change of
+directory resolves the symlink, the linter sees the worktree's own
+path, and the slot silently stops working.
+
+Measured on sparkwing, 205k Go lines, at load 18-32:
+
+| run | wall | paths reported |
+| --- | --- | --- |
+| cold, private cache | 95.86s | its own |
+| warm, same worktree | 2.22s | its own |
+| second worktree, shared cache directory | 9.08s | 49 of 49 name the first worktree |
+| second worktree, through a slot | 2.42s | its own |
+
+The slot cannot hide a finding. Content is part of golangci-lint's
+cache key, so a file that differs from the one that filled the cache is
+a miss and gets analyzed: a violation planted in the second worktree
+was reported on a warm slot in 1.76s.
+
+A lease always succeeds. With every slot busy, or on a platform that
+will not give an unprivileged process a symlink, it hands back the
+worktree's own path and its private `ToolCacheDir` - cold, and no less
+correct. `Canonical` says which. `SPARKWING_LINT_SLOTS` sets the pool
+size; the default is 4.
+
+Slots are for worktrees that move. A fixed-workdir runner already has a
+stable path, so it wants `ToolCacheDir` with `RestoreLintCache`
+instead - and a step that adopts slots must point its save/restore at
+`slot.Cache` too, or it will seed a directory the lint never reads.
 
 Running two lint jobs at once is a different problem, and a scoped
 cache does not touch it. golangci-lint takes its parallel-runner lock

@@ -47,6 +47,28 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **sdk:** `sparkwing.AcquireLintSlot(tool)` lets worktrees of one repo share a
+  golangci-lint cache without being told about each other's files. golangci-lint
+  keys a cached result on the import path and file content, deliberately
+  stripping the main module's directory, but stores the absolute filename of the
+  tree that produced the finding. Point two worktrees at one cache directory and
+  every replayed finding names the other tree -- 49 of 49 on sparkwing -- and
+  once that tree is deleted it names files nobody can open. A slot is a fixed
+  path, a symlink repointed at whichever worktree holds an exclusive lease, plus
+  the cache that goes with it, so every run sees one path and a replayed
+  filename lands under the current holder. Measured on 205k Go lines at load
+  18-32: a second worktree pays 94.65s with its own cache and 2.42s through a
+  slot, reporting only its own files. Nothing is hidden -- content is part of
+  the cache key, so a planted violation was still caught, warm, in 1.76s. Use
+  `slot.Configure(cmd, "GOLANGCI_LINT_CACHE")` rather than setting the
+  directory by hand: it sets `PWD` too, and without that Go's `os.Getwd`
+  resolves the symlink and the slot quietly does nothing. A lease always
+  succeeds -- with every slot busy it hands back the private `ToolCacheDir`,
+  cold and no less correct, and `Canonical` says which. `SPARKWING_LINT_SLOTS`
+  sets the pool size, default 4.
+
 ### Fixed
 
 - **config:** the repo registry is written through a uniquely named staging
@@ -165,7 +187,6 @@ code change to unlock.
   and buried the real cause -- a bind the sandbox refused, a socket path over the
   OS limit -- under the log tail. The daemon's own last logged line now leads,
   with the log path still named.
-
 ## [v0.22.1] - 2026-07-30
 ### Added
 
