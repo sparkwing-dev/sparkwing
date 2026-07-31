@@ -67,7 +67,11 @@ code change to unlock.
   resolves the symlink and the slot quietly does nothing. A lease always
   succeeds -- with every slot busy it hands back the private `ToolCacheDir`,
   cold and no less correct, and `Canonical` says which. `SPARKWING_LINT_SLOTS`
-  sets the pool size, default 4.
+  sets the pool size, default 4. A repo with more than one Go module takes one
+  lease and uses `slot.ConfigureIn(cmd, module, "GOLANGCI_LINT_CACHE")` per
+  module; a path that climbs out of the lease is ignored rather than honored,
+  because a command run outside the canonical path writes the worktree's own
+  paths into the shared cache.
 
 ### Fixed
 

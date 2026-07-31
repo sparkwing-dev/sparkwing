@@ -12,6 +12,49 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+// lintSlotIntegrationPool is the pool size the integration tests run
+// with. These tests are the only control over the PWD mechanism the
+// whole slot design rests on, so acquisition must not be able to fail
+// for want of a free slot: a control that stands down when the machine
+// is busy stands down exactly when slots are being used, and a skip
+// reports as a pass. Eight is well above the two any test needs.
+const lintSlotIntegrationPool = "8"
+
+// lintSlotFixtureRoot is lintFixtureRoot with a skip that says what
+// stopped being checked. These three tests are the end-to-end control
+// over the PWD mechanism and they need a real golangci-lint, so -short
+// legitimately drops them -- but a bare "skip" in a green run tells a
+// reader nothing, and the whole point of this control is that silence
+// must not read as health. The named test in the message runs in every
+// mode and needs no toolchain, so a reader can tell how much cover is
+// left.
+func lintSlotFixtureRoot(t *testing.T) string {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("NOT VERIFIED under -short: that golangci-lint reports slot paths " +
+			"rather than the worktree the symlink resolves to. The mechanism itself " +
+			"(os.Getwd preferring $PWD) is still covered by " +
+			"TestLintSlot_GetwdPrefersPWDOverTheResolvedPath, which needs no toolchain " +
+			"and never skips. Run without -short for the end-to-end control.")
+	}
+	return lintFixtureRoot(t)
+}
+
+// requireCanonicalSlot fails rather than skips when a lease came back
+// as the private-cache fallback. Every caller here uses a tool name no
+// other process knows and a pool of lintSlotIntegrationPool, so a
+// fallback is not a busy machine -- it is claimLintSlot failing to make
+// the slot, which is the design breaking and must be loud.
+func requireCanonicalSlot(t *testing.T, slot *sparkwing.LintSlot, what string) {
+	t.Helper()
+	if !slot.Canonical {
+		t.Fatalf("%s got the private-cache fallback (%+v) rather than a canonical slot. "+
+			"With a private tool name and a pool of %s this cannot be contention, so "+
+			"slot creation itself failed -- and this test is the only control over the "+
+			"PWD mechanism, so it must not pass quietly", what, slot, lintSlotIntegrationPool)
+	}
+}
+
 // seedLintTree writes a module whose only finding names symbol, so two
 // fixtures can be told apart by what they report rather than only by
 // where they are.
@@ -77,7 +120,8 @@ func reportedFiles(out string) []string {
 // directory fails this -- measured on sparkwing, all 49 findings in the
 // second worktree carried the first worktree's paths.
 func TestLintSlots_ConcurrentWorktreesEachReportOnlyTheirOwnPaths(t *testing.T) {
-	root := lintFixtureRoot(t)
+	t.Setenv(sparkwing.LintSlotsEnv, lintSlotIntegrationPool)
+	root := lintSlotFixtureRoot(t)
 	tool := lintSlotTool(t)
 
 	alpha := seedLintTree(t, filepath.Join(root, "alpha"), "unusedAlpha")
@@ -85,9 +129,8 @@ func TestLintSlots_ConcurrentWorktreesEachReportOnlyTheirOwnPaths(t *testing.T) 
 
 	alphaSlot := acquireFor(t, tool, alpha)
 	betaSlot := acquireFor(t, tool, beta)
-	if !alphaSlot.Canonical || !betaSlot.Canonical {
-		t.Skip("fewer than two lint slots available on this machine")
-	}
+	requireCanonicalSlot(t, alphaSlot, "alpha")
+	requireCanonicalSlot(t, betaSlot, "beta")
 
 	var wg sync.WaitGroup
 	var alphaOut, betaOut string
@@ -123,16 +166,15 @@ func TestLintSlots_ConcurrentWorktreesEachReportOnlyTheirOwnPaths(t *testing.T) 
 // path is the slot's, so it follows the new holder instead of naming a
 // tree that is gone.
 func TestLintSlot_ReusedCacheNamesTheNewHolderNotTheDeletedDonor(t *testing.T) {
-	root := lintFixtureRoot(t)
+	t.Setenv(sparkwing.LintSlotsEnv, lintSlotIntegrationPool)
+	root := lintSlotFixtureRoot(t)
 	tool := lintSlotTool(t)
 
 	donor := seedLintTree(t, filepath.Join(root, "donor"), "unusedHelper")
 	target := seedLintTree(t, filepath.Join(root, "target"), "unusedHelper")
 
 	donorSlot := acquireFor(t, tool, donor)
-	if !donorSlot.Canonical {
-		t.Skip("no lint slot available on this machine")
-	}
+	requireCanonicalSlot(t, donorSlot, "donor")
 	if out := lintThroughSlot(t, donorSlot); !strings.Contains(out, "unusedHelper") {
 		t.Fatalf("donor lint reported no finding, so nothing was cached:\n%s", out)
 	}
@@ -175,16 +217,15 @@ func TestLintSlot_ReusedCacheNamesTheNewHolderNotTheDeletedDonor(t *testing.T) {
 // warm cache, so only a run that actually analyzed the changed package
 // can report it.
 func TestLintSlot_WarmCacheStillCatchesANewViolation(t *testing.T) {
-	root := lintFixtureRoot(t)
+	t.Setenv(sparkwing.LintSlotsEnv, lintSlotIntegrationPool)
+	root := lintSlotFixtureRoot(t)
 	tool := lintSlotTool(t)
 
 	donor := seedLintTree(t, filepath.Join(root, "donor"), "unusedHelper")
 	target := seedLintTree(t, filepath.Join(root, "target"), "unusedHelper")
 
 	donorSlot := acquireFor(t, tool, donor)
-	if !donorSlot.Canonical {
-		t.Skip("no lint slot available on this machine")
-	}
+	requireCanonicalSlot(t, donorSlot, "donor")
 	lintThroughSlot(t, donorSlot)
 	donorSlot.Release()
 

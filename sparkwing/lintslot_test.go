@@ -2,7 +2,9 @@ package sparkwing_test
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -211,6 +213,149 @@ func TestLintSlotConfigure_SetsPWDAndTheCacheVariable(t *testing.T) {
 	if out[1] != slot.Cache {
 		t.Fatalf("TOOL_CACHE is %q, want %q", out[1], slot.Cache)
 	}
+}
+
+// A repo with more than one Go module lints each in turn under one
+// lease, so a submodule must get the canonical path too. Setting only
+// the directory here is the same silent failure as dropping PWD at the
+// top level.
+func TestLintSlotConfigureIn_KeepsTheSubmoduleOnTheCanonicalPath(t *testing.T) {
+	wt := t.TempDir()
+	sub := filepath.Join(wt, "tools")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatalf("seed submodule: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "who.txt"), []byte("submodule"), 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	useWorkDir(t, wt)
+	slot := acquireFor(t, lintSlotTool(t), wt)
+
+	cmd := slot.ConfigureIn(sparkwing.Bash(context.Background(), `echo "$PWD"; cat who.txt`), "tools", "TOOL_CACHE")
+	out, err := cmd.Lines()
+	if err != nil {
+		t.Fatalf("run in submodule: %v", err)
+	}
+	want := filepath.Join(slot.Path, "tools")
+	if out[0] != want {
+		t.Fatalf("PWD is %q, want the canonical submodule path %q -- the linter would "+
+			"resolve the symlink and cache the worktree's own path", out[0], want)
+	}
+	if out[1] != "submodule" {
+		t.Fatalf("read %q, want the submodule's own file", out[1])
+	}
+}
+
+// A rel that climbs out of the lease must not be honored: a command run
+// outside the canonical path writes worktree paths into the shared
+// cache, which is the failure the design exists to stop.
+func TestLintSlotConfigureIn_RefusesToLeaveTheLease(t *testing.T) {
+	wt := t.TempDir()
+	useWorkDir(t, wt)
+	slot := acquireFor(t, lintSlotTool(t), wt)
+
+	cmd := slot.ConfigureIn(sparkwing.Bash(context.Background(), `echo "$PWD"`), "../../elsewhere", "TOOL_CACHE")
+	out, err := cmd.Lines()
+	if err != nil {
+		t.Fatalf("run with an escaping rel: %v", err)
+	}
+	if out[0] != slot.Path {
+		t.Fatalf("an escaping rel put the command at %q, outside the lease %q", out[0], slot.Path)
+	}
+}
+
+// lintSlotGetwdProbeEnv turns a re-executed copy of this test binary
+// into a probe that prints its own os.Getwd and exits.
+const lintSlotGetwdProbeEnv = "SPARKWING_LINTSLOT_GETWD_PROBE"
+
+// The whole slot design rests on one behavior nobody here controls:
+// Go's os.Getwd returns $PWD when $PWD stats to the same directory as
+// ".", so a process placed in the slot by a bare chdir still reports
+// the slot path rather than the worktree the symlink resolves to.
+// golangci-lint inherits that from the runtime, not from anything
+// golangci-specific, so it can be checked without golangci-lint --
+// which matters, because the tests that check it end to end need a
+// toolchain and are allowed to skip under -short. This one needs
+// neither a toolchain nor a network and must never skip: it re-executes
+// this test binary as a probe, placed exactly the way exec.Cmd.Dir
+// places a command.
+//
+// Both directions are asserted. Without PWD the probe must report the
+// RESOLVED path, or the first assertion would hold for a slot that is
+// not a symlink at all and would prove nothing.
+func TestLintSlot_GetwdPrefersPWDOverTheResolvedPath(t *testing.T) {
+	if os.Getenv(lintSlotGetwdProbeEnv) != "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			fmt.Println("getwd-error " + err.Error())
+			os.Exit(1)
+		}
+		fmt.Println(wd)
+		os.Exit(0)
+	}
+
+	wt := t.TempDir()
+	useWorkDir(t, wt)
+	slot := acquireFor(t, lintSlotTool(t), wt)
+	if !slot.Canonical {
+		t.Fatalf("could not lease a canonical slot (%+v), so the mechanism under test "+
+			"cannot be exercised at all", slot)
+	}
+	resolved := resolves(t, wt)
+	if slot.Path == resolved {
+		t.Fatalf("slot path and worktree are the same directory (%q), so this test "+
+			"cannot tell $PWD from a resolved path", resolved)
+	}
+
+	withPWD := runGetwdProbe(t, slot.Path, slot.Path)
+	if withPWD != slot.Path {
+		t.Fatalf("with PWD=%q a process placed in the slot reported %q. Go no longer "+
+			"prefers $PWD, so LintSlot.Configure cannot make the linter see the slot "+
+			"and every shared cache goes back to holding foreign paths",
+			slot.Path, withPWD)
+	}
+
+	withoutPWD := runGetwdProbe(t, slot.Path, "")
+	if withoutPWD == slot.Path {
+		t.Fatalf("a process with no PWD also reported the slot path %q, so the "+
+			"assertion above is vacuous -- this fixture is not exercising a symlink",
+			slot.Path)
+	}
+	if withoutPWD != resolved {
+		t.Fatalf("with no PWD the probe reported %q, want the resolved worktree %q",
+			withoutPWD, resolved)
+	}
+}
+
+// runGetwdProbe re-executes this test binary in dir the way exec.Cmd.Dir
+// does -- a bare chdir, which lands the process in the resolved
+// directory -- and returns the os.Getwd it reports. pwd is set as $PWD
+// when non-empty and stripped from the environment when empty.
+func runGetwdProbe(t *testing.T, dir, pwd string) string {
+	t.Helper()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestLintSlot_GetwdPrefersPWDOverTheResolvedPath$")
+	cmd.Dir = dir
+	env := []string{lintSlotGetwdProbeEnv + "=1"}
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "PWD=") || strings.HasPrefix(kv, lintSlotGetwdProbeEnv+"=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	if pwd != "" {
+		env = append(env, "PWD="+pwd)
+	}
+	cmd.Env = env
+
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("getwd probe in %q: %v (%s)", dir, err, out)
+	}
+	lines := strings.Fields(strings.TrimSpace(string(out)))
+	if len(lines) == 0 {
+		t.Fatalf("getwd probe in %q printed nothing", dir)
+	}
+	return lines[len(lines)-1]
 }
 
 // A run through the slot must actually happen inside the holder's

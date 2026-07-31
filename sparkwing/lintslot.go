@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 )
 
 // lintSlotRoot is the directory under toolCacheRoot that parents every
@@ -177,7 +178,36 @@ func claimLintSlot(root string, i int, scope string) (*LintSlot, error) {
 // cacheVar is the tool's own cache environment variable, such as
 // GOLANGCI_LINT_CACHE.
 func (s *LintSlot) Configure(c *Cmd, cacheVar string) *Cmd {
-	return c.Dir(s.Path).Env("PWD", s.Path).Env(cacheVar, s.Cache)
+	return s.ConfigureIn(c, "", cacheVar)
+}
+
+// ConfigureIn is [LintSlot.Configure] for a command that runs in a
+// subdirectory of the leased tree, which is what a repo with more than
+// one Go module needs: one lease, then one invocation per module.
+//
+// rel is relative to the worktree. It must stay inside the lease -- a
+// path that climbs out gets the slot root instead, because a command
+// run outside the canonical path would write the worktree's own
+// absolute paths into the shared cache, which is the failure the whole
+// design exists to stop. An empty rel is the tree itself.
+func (s *LintSlot) ConfigureIn(c *Cmd, rel, cacheVar string) *Cmd {
+	dir := s.Path
+	if rel != "" && rel != "." {
+		// safety: Join cleans, so "../x" would escape the lease and
+		// silently reintroduce worktree paths into the shared cache.
+		if joined := filepath.Join(s.Path, rel); isWithin(s.Path, joined) {
+			dir = joined
+		}
+	}
+	return c.Dir(dir).Env("PWD", dir).Env(cacheVar, s.Cache)
+}
+
+// isWithin reports whether path is root or sits under it.
+func isWithin(root, path string) bool {
+	if path == root {
+		return true
+	}
+	return strings.HasPrefix(path, root+string(filepath.Separator))
 }
 
 // Release drops the lease. It is safe to call on a fallback slot and

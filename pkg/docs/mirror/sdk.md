@@ -200,6 +200,8 @@ wrapped `Cause`. `errors.As(err, &ee)` works through every terminator
 ```
 ToolCacheDir(tool) string              // cache dir for an external tool, scoped to this worktree
 AcquireLintSlot(tool) (*LintSlot, err) // lease a canonical path so worktrees can share one cache
+slot.Configure(cmd, cacheVar)          // point a command at the lease (dir + PWD + cache)
+slot.ConfigureIn(cmd, rel, cacheVar)   // the same, for one module of a multi-module repo
 ```
 
 A tool that keys its cache on file content alone - golangci-lint among
@@ -256,6 +258,23 @@ Use `Configure` rather than setting the directory yourself. It sets
 `$PWD` when it names the same directory as `.`, so a bare change of
 directory resolves the symlink, the linter sees the worktree's own
 path, and the slot silently stops working.
+
+A repo with more than one Go module takes one lease and lints each
+module in turn through `ConfigureIn`, which is `Configure` for a
+subdirectory of the leased tree:
+
+```go
+for _, mod := range []string{"", "tools"} {
+    cmd := sparkwing.Bash(ctx, "golangci-lint run --allow-serial-runners ./...")
+    if _, err := slot.ConfigureIn(cmd, mod, "GOLANGCI_LINT_CACHE").Run(); err != nil {
+        return err
+    }
+}
+```
+
+A `rel` that climbs out of the lease is ignored in favour of the slot
+root, because a command run outside the canonical path writes the
+worktree's own absolute paths into the shared cache.
 
 Measured on sparkwing, 205k Go lines, at load 18-32:
 

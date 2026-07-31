@@ -810,6 +810,7 @@ type LintSlot struct {
 
 - `func AcquireLintSlot(tool string) (*LintSlot, error)` -- AcquireLintSlot leases a canonical path for one lint run, so that a cache can be reused between worktrees without misreporting where a finding lives.
 - `func (s *LintSlot) Configure(c *Cmd, cacheVar string) *Cmd` -- Configure points c at the slot: the working directory, PWD and the tool's cache variable, set together because setting only some of them is silently wrong.
+- `func (s *LintSlot) ConfigureIn(c *Cmd, rel, cacheVar string) *Cmd` -- ConfigureIn is LintSlot.Configure for a command that runs in a subdirectory of the leased tree, which is what a repo with more than one Go module needs: one lease, then one invocation per module.
 - `func (s *LintSlot) Release()` -- Release drops the lease.
 
 ### type LintWarning
