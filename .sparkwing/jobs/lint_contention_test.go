@@ -16,7 +16,7 @@ import (
 func TestLintCommandWaitsForTheBoxWideLockInsteadOfFailingOnIt(t *testing.T) {
 	got := lintCommand(false)
 	if !strings.Contains(got, "--allow-serial-runners") {
-		t.Fatalf("the gate would fail on a neighbouring lint instead of waiting for it: %s", got)
+		t.Fatalf("the gate would fail on a neighboring lint instead of waiting for it: %s", got)
 	}
 }
 
