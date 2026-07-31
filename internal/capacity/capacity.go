@@ -184,11 +184,20 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 	return res
 }
 
-// ApplyHostCeiling caps measured/default CPU charge at the machine's idle
-// grantable ceiling so oversized measured CPU serializes alone. Explicit CPU
-// pins and all memory demand are left intact; admission enforces both as hard
-// budgets. A non-positive CPU ceiling or a charge already within it leaves the
-// resolution unchanged and returns no warning.
+// ApplyHostCeiling caps a measured/default charge at the machine's idle
+// grantable ceiling, on both cores and memory, so an oversized charge
+// serializes alone instead of never fitting. Explicit pins are left intact and
+// only warned about; admission enforces those as hard budgets. A non-positive
+// ceiling on a dimension, or a charge already within it, leaves that dimension
+// unchanged.
+//
+// Capping memory is what keeps the demand floor bounded by construction. A
+// contended run that consumes its whole charge raises the floor to that
+// charge, and the next run is charged a safety multiple of the floor, so an
+// uncapped memory charge doubles every contended run with nothing to stop it.
+// Memory admission has no sole-run escape the way cores do, so a floor that
+// climbed past what the machine grants was a permanent refusal that could
+// never measure its way back down.
 //
 // pipeline is the stored profile key, named in the warning when a
 // still-measuring charge (floor or warm-start priced) is what got capped:
@@ -205,12 +214,20 @@ func ApplyHostCeiling(res Resolution, pipeline string, machineCores, grantableCo
 		}
 		return res, warning
 	}
+	measuring := res.Source == store.CostSourceFloor || res.Source == store.CostSourceMeasuring
 	if grantableCores > 0 && res.Cores > grantableCores {
-		if res.Source == store.CostSourceFloor || res.Source == store.CostSourceMeasuring {
+		if measuring {
 			warning = fmt.Sprintf("measuring charge %.1f cores exceeds this machine's grantable %.1f, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline %s",
 				res.Cores, grantableCores, pipeline)
 		}
 		res.Cores = grantableCores
+	}
+	if grantableMemoryBytes > 0 && res.MemoryBytes > grantableMemoryBytes {
+		if measuring && warning == "" {
+			warning = fmt.Sprintf("measuring charge %s exceeds this machine's grantable %s, so runs are admitted alone; if contention poisoned the profile, reset it: sparkwing runs stats --reset --pipeline %s",
+				gib(res.MemoryBytes), gib(grantableMemoryBytes), pipeline)
+		}
+		res.MemoryBytes = grantableMemoryBytes
 	}
 	return res, warning
 }

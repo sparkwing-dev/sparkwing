@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -482,13 +483,22 @@ func chargedResources(r wingwire.HostResources) wingwire.HostResources {
 	return r
 }
 
-// clampHostChargeLocked caps measured/default CPU charge at the box's idle
-// grantable ceiling. Explicit pins and memory are not clamped here; the
-// ledger enforces both as hard budgets.
+// clampHostChargeLocked caps a measured/default charge at the box's idle
+// grantable ceiling, on cores and on memory. Explicit pins are not clamped
+// here; the ledger enforces those as hard budgets.
+//
+// Memory is clamped for the same reason cores are: a charge above what the
+// box grants a single run can never be admitted, and a still-measuring
+// pipeline derives its next charge from the last one, so an uncapped memory
+// charge ratchets away from the machine every contended run. Clamping here
+// covers a client that resolved its charge with no daemon answering.
 func (d *Daemon) clampHostChargeLocked(r wingwire.HostResources, costSource wingwire.CostSource) (wingwire.HostResources, bool) {
 	if costSource != wingwire.CostSourcePin {
 		if maxCores := d.idleGrantableCoresLocked(); maxCores > 0 && r.Cores > maxCores {
 			r.Cores = maxCores
+		}
+		if maxMem := d.idleGrantableMemoryLocked(); maxMem > 0 && r.MemoryBytes > int64(maxMem) {
+			r.MemoryBytes = int64(maxMem)
 		}
 	}
 	return r, false
@@ -763,7 +773,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 			d.rejectInvalid(c, req, rejectCauseRequest, "admission request invalid: "+err.Error())
 			return
 		}
-		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: key, Policy: wingwire.PolicyFail, Reason: err.Error()})
+		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: key, Policy: wingwire.PolicyFail, Reason: refusalReason(err)})
 		return
 	}
 	switch dec.Kind {
@@ -1266,6 +1276,20 @@ func (d *Daemon) rejectInvalid(c *conn, req *wingwire.AdmissionRequest, cause, r
 	d.cfg.logf("rejected run %s: %s [cost_source=%q cores=%.2f memory_bytes=%d semaphores=%d]",
 		req.RunID, reason, req.CostSource, req.Resources.Cores, req.Resources.MemoryBytes, len(req.Semaphores))
 	d.events.record(d.now(), admissionEvent{Kind: eventRejection, Key: cause})
+}
+
+// refusalReason is the operator-facing half of a terminal submit error: the
+// arithmetic the ledger settled it on, without the sentinel prefix. The
+// client puts its own context in front of this, and "admission: request can
+// never be admitted" twice in one line tells nobody anything.
+func refusalReason(err error) string {
+	msg := err.Error()
+	for _, sentinel := range []error{admission.ErrNeverAdmissible, admission.ErrDuplicateID} {
+		if rest, ok := strings.CutPrefix(msg, sentinel.Error()+": "); ok {
+			return rest
+		}
+	}
+	return msg
 }
 
 func submitErrorKey(err error) string {

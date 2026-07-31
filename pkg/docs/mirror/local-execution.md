@@ -238,19 +238,32 @@ that does not mean "wait for the window to age out." There are two:
 - **A poisoned learned profile.** One freak run can record an absurd peak
   that inflates a pipeline's charge for the rest of the window, and
   sustained external load can ratchet a still-measuring pipeline's demand
-  floor toward the whole machine. The floor self-corrects -- each contended
-  run that measures below it halves it, mirroring the ceiling-hit doubling
-  that raised it -- and when its charge is capped at the machine's
-  grantable ceiling the run says so, naming the profile; `sparkwing doctor`
-  flags the same state. To clear it immediately, reset with
+  floor upward. The floor self-corrects: each contended run that measures
+  below it halves it, mirroring the ceiling-hit doubling that raised it.
+  That correction only works if the run is admitted, so two rules keep it
+  reachable. A charge resolved from measurement is capped at the machine's
+  grantable ceiling on **both** cores and memory, and the run says so,
+  naming the profile; `sparkwing doctor` flags the same state. And with
+  nothing admitted, the queue head is granted on either dimension no matter
+  what external load is reading, so a pipeline can always measure its way
+  back down instead of being locked out by a floor it can never disprove.
+  To clear a floor immediately anyway, reset with
   `sparkwing runs stats --reset --pipeline <name>` (profiles are keyed
   `repo/pipeline` for runs launched inside a git repo, exactly as
-  `runs stats --capacity` shows them): the learned samples, peaks, floors,
-  waits, and contention tally are dropped so the pipeline re-learns from a
-  cold start, and the command prints what it removed. An explicit
-  `.Resources()` pin is preserved -- admission keeps charging the pin
-  while the profile re-learns. To reset every pipeline at once, use
+  `runs stats --capacity` shows them; a bare pipeline name reaches every
+  repo-scoped key that carries it and the summary names each one): the
+  learned samples, peaks, floors, waits, and contention tally are dropped
+  so the pipeline re-learns from a cold start, and the command prints what
+  it removed -- including a floor with no measured samples behind it, which
+  is the state a pipeline that never finished a clean run is priced off. An
+  explicit `.Resources()` pin is preserved -- admission keeps charging the
+  pin while the profile re-learns. To reset every pipeline at once, use
   `sparkwing runs stats --reset --all --yes`.
+
+A request that no release could ever satisfy -- a pin larger than the
+machine -- is refused at submit with the arithmetic (`needs 12GiB of
+memory, this machine has 8GiB`) rather than queued to a timeout. A box
+that is merely busy still queues, because a holder finishing fixes that.
 
 ### Operating it
 
