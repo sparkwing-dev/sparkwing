@@ -51,7 +51,8 @@ type BeforeRunFn func(ctx context.Context) error
 func Bind(argName string) Constraint
 func BindPipelinesFromYAML(cfg interface {
 	EachPipeline(func(name, entrypoint string))
-})
+},
+)
 func BoxToolBudget(tool string, grantableCores float64, queueTimeout time.Duration) *ConcurrencyGroup
 type Cache = storage.ArtifactStore
 type CacheConfig struct {
