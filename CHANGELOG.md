@@ -47,6 +47,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.22.2] - 2026-07-31
 ### Added
 
 - **sdk:** `ToolSlot` coordinates external tools through a named, box-wide CPU
