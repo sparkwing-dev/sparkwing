@@ -450,20 +450,32 @@ ON CONFLICT (pipeline, node_id) DO UPDATE SET
 // waits were zeroed but whose pin was kept, so admission keeps honoring
 // the pin while it re-learns. SamplesDropped is the total windowed
 // duration samples discarded across both.
+//
+// FloorsDropped counts rows that carried a contended-run demand floor,
+// counted separately because a floor is the one piece of a profile that can
+// exist with no measured samples behind it: a pipeline that never finished a
+// clean run still gets priced off its floor, so a reset that clears one has
+// changed what the next run is charged even when SamplesDropped is zero. The
+// reset verb reported only samples before, which made clearing a
+// ratcheted floor look like it had done nothing.
 type ProfileResetSummary struct {
 	Pipelines      []string `json:"pipelines"`
 	RowsDeleted    int      `json:"rows_deleted"`
 	RowsCleared    int      `json:"rows_cleared"`
 	SamplesDropped int      `json:"samples_dropped"`
+	FloorsDropped  int      `json:"floors_dropped"`
 }
 
 // ResetPipelineProfile clears one pipeline's learned capacity profile --
-// its windowed samples, duration and peak percentiles, queue waits, and
-// contention tally across the rollup and every node row -- so it re-learns
-// from a cold start. An explicit .Resources() pin is preserved: a pinned
-// row is zeroed in place rather than deleted, so admission keeps charging
-// the pin meanwhile. Resetting a pipeline with no stored profile is a
-// no-op that reports zero counts.
+// its windowed samples, duration and peak percentiles, queue waits,
+// contention tally, and contended-run demand floor across the rollup and
+// every node row -- so it re-learns from a cold start. The floor goes
+// whether or not measured samples sit behind it, since a pipeline can be
+// priced off a floor it earned before it ever finished a clean run. An
+// explicit .Resources() pin is preserved: a pinned row is zeroed in place
+// rather than deleted, so admission keeps charging the pin meanwhile.
+// Resetting a pipeline with no stored profile is a no-op that reports zero
+// counts.
 func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
 	return s.resetProfiles(ctx, pipeline)
 }
@@ -488,7 +500,7 @@ func (s *Store) resetProfiles(ctx context.Context, pipeline string) (ProfileRese
 	if pipeline != "" {
 		selWhere = " WHERE pipeline = ?"
 	}
-	rows, err := s.query(ctx, `SELECT pipeline, sample_count, pinned_cores, pinned_memory_bytes FROM pipeline_profiles`+selWhere, args...)
+	rows, err := s.query(ctx, `SELECT pipeline, sample_count, pinned_cores, pinned_memory_bytes, floor_cores, floor_memory_bytes FROM pipeline_profiles`+selWhere, args...)
 	if err != nil {
 		return ProfileResetSummary{}, err
 	}
@@ -498,11 +510,16 @@ func (s *Store) resetProfiles(ctx context.Context, pipeline string) (ProfileRese
 		var samples int
 		var pinCores float64
 		var pinMem int64
-		if err := rows.Scan(&p, &samples, &pinCores, &pinMem); err != nil {
+		var floorCores float64
+		var floorMem int64
+		if err := rows.Scan(&p, &samples, &pinCores, &pinMem, &floorCores, &floorMem); err != nil {
 			_ = rows.Close()
 			return ProfileResetSummary{}, err
 		}
 		summary.SamplesDropped += samples
+		if floorCores > 0 || floorMem > 0 {
+			summary.FloorsDropped++
+		}
 		if pinCores != 0 || pinMem != 0 {
 			summary.RowsCleared++
 		} else {

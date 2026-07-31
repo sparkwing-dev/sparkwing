@@ -39,6 +39,114 @@ func TestRepoShortName_GitFileMarksLinkedWorktree(t *testing.T) {
 	}
 }
 
+// linkedWorktree builds a repo checkout and a linked worktree of it laid out
+// the way git does: the worktree is a plain directory whose .git is a file
+// pointing at <repo>/.git/worktrees/<name>. It returns both directories.
+func linkedWorktree(t *testing.T, repoName, worktreeName string) (repo, worktree string) {
+	t.Helper()
+	root := t.TempDir()
+	repo = filepath.Join(root, repoName)
+	gitDir := filepath.Join(repo, ".git", "worktrees", worktreeName)
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	worktree = filepath.Join(root, "worktrees", worktreeName)
+	if err := os.MkdirAll(worktree, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: "+gitDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return repo, worktree
+}
+
+// TestRepoShortName_LinkedWorktreeResolvesToItsRepo is the keying half of the
+// BW-1459 fix. Every ticket gets its own worktree, so keying a capacity
+// profile by the directory a run launched from gave every ticket a cold
+// start, and threw the learning away exactly as often as work began.
+func TestRepoShortName_LinkedWorktreeResolvesToItsRepo(t *testing.T) {
+	repo, worktree := linkedWorktree(t, "bitwing", "bw-1459")
+
+	if got := repoShortName(repo); got != "bitwing" {
+		t.Errorf("main checkout: got %q, want bitwing", got)
+	}
+	if got := repoShortName(worktree); got != "bitwing" {
+		t.Errorf("linked worktree: got %q, want bitwing", got)
+	}
+	nested := filepath.Join(worktree, "backend", "cmd")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoShortName(nested); got != "bitwing" {
+		t.Errorf("inside a linked worktree: got %q, want bitwing", got)
+	}
+}
+
+// TestCurrentProfileKey_SurvivesABranchChange states the acceptance criterion
+// directly: the same pipeline in two worktrees of one repo reads and writes
+// one profile row, so a gate arrives already knowing what it costs.
+func TestCurrentProfileKey_SurvivesABranchChange(t *testing.T) {
+	repo, first := linkedWorktree(t, "bitwing", "bw-1458")
+	_, second := linkedWorktree(t, "bitwing", "bw-1459")
+
+	t.Chdir(repo)
+	want := currentProfileKey("pre-commit")
+	if want != "bitwing/pre-commit" {
+		t.Fatalf("main checkout keyed %q, want bitwing/pre-commit", want)
+	}
+	t.Chdir(first)
+	if got := currentProfileKey("pre-commit"); got != want {
+		t.Errorf("first worktree keyed %q, want %q", got, want)
+	}
+	t.Chdir(second)
+	if got := currentProfileKey("pre-commit"); got != want {
+		t.Errorf("second worktree keyed %q, want %q", got, want)
+	}
+}
+
+// TestRepoShortName_BareRepoWorktreeResolvesToTheRepoName covers the pointer
+// shape a worktree of a bare repo carries: <repo>.git/worktrees/<name>, with
+// no .git directory level to strip.
+func TestRepoShortName_BareRepoWorktreeResolvesToTheRepoName(t *testing.T) {
+	root := t.TempDir()
+	gitDir := filepath.Join(root, "bitwing.git", "worktrees", "bw-1459")
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(root, "bw-1459")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+gitDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoShortName(wt); got != "bitwing" {
+		t.Errorf("bare-repo worktree: got %q, want bitwing", got)
+	}
+}
+
+// TestRepoShortName_SubmoduleKeepsItsOwnIdentity guards the other .git file
+// shape. A submodule's pointer names <super>/.git/modules/<name> and has no
+// worktrees segment, so the submodule stays its own repo for pricing rather
+// than pooling its costs into its superproject.
+func TestRepoShortName_SubmoduleKeepsItsOwnIdentity(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "super", "vendor", "lib")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "super", ".git", "modules", "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pointer := "gitdir: " + filepath.Join(root, "super", ".git", "modules", "lib") + "\n"
+	if err := os.WriteFile(filepath.Join(sub, ".git"), []byte(pointer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoShortName(sub); got != "lib" {
+		t.Errorf("submodule: got %q, want lib", got)
+	}
+}
+
 func TestRepoShortName_EmptyOutsideAnyRepo(t *testing.T) {
 	if got := repoShortName(t.TempDir()); got != "" {
 		t.Errorf("outside a repo: got %q, want empty", got)

@@ -123,7 +123,7 @@ func runCapacityReset(ctx context.Context, paths orchestrator.Paths, pipeline st
 	if resetAll {
 		summary, err = st.ResetAllProfiles(ctx)
 	} else {
-		summary, err = st.ResetPipelineProfile(ctx, pipeline)
+		summary, err = resetNamedProfile(ctx, st, pipeline)
 	}
 	if err != nil {
 		return err
@@ -133,22 +133,66 @@ func runCapacityReset(ctx context.Context, paths orchestrator.Paths, pipeline st
 	}
 	if summary.RowsDeleted == 0 && summary.RowsCleared == 0 {
 		if resetAll {
-			fmt.Println("no measured capacity profiles to reset")
+			fmt.Println("no stored capacity profiles to reset")
 		} else {
-			fmt.Printf("no measured capacity profile for %q to reset\n", pipeline)
+			fmt.Printf("nothing stored under %q to reset: no measured samples and no demand floor\n", pipeline)
+			fmt.Println("run `sparkwing runs stats --capacity` for the keys that do exist")
 		}
 		return nil
 	}
-	scope := pipeline
+	scope := strings.Join(summary.Pipelines, ", ")
 	if resetAll {
 		scope = fmt.Sprintf("%d pipeline(s)", len(summary.Pipelines))
 	}
-	fmt.Printf("reset %s: dropped %d row(s) and cleared %d pinned row(s), discarding %d learned sample(s)\n",
-		scope, summary.RowsDeleted, summary.RowsCleared, summary.SamplesDropped)
+	fmt.Printf("reset %s: dropped %d row(s) and cleared %d pinned row(s), discarding %d learned sample(s) and %d demand floor(s)\n",
+		scope, summary.RowsDeleted, summary.RowsCleared, summary.SamplesDropped, summary.FloorsDropped)
+	if summary.FloorsDropped > 0 {
+		fmt.Println("a dropped demand floor was pricing runs on its own; the next run is charged the cold-start default instead")
+	}
 	if summary.RowsCleared > 0 {
 		fmt.Println("pins were kept; those pipelines re-learn from cold start while admission keeps charging the pin")
 	}
 	return nil
+}
+
+// resetNamedProfile resets the profile rows stored under name, falling back
+// to every repo-scoped key whose bare pipeline name matches when nothing is
+// stored under the name verbatim. Profiles are keyed "repo/pipeline", so an
+// operator who types the pipeline name they know -- the name in their own
+// source, not the key an internal scoping rule derived -- used to be told
+// there was nothing to reset while a ratcheted floor kept pricing their runs.
+// Every key actually reset is named in the summary, so the wider reach is
+// never silent.
+func resetNamedProfile(ctx context.Context, st *store.Store, name string) (store.ProfileResetSummary, error) {
+	exact, err := st.ListPipelineProfiles(ctx, name)
+	if err != nil {
+		return store.ProfileResetSummary{}, err
+	}
+	if len(exact) > 0 || strings.Contains(name, "/") {
+		return st.ResetPipelineProfile(ctx, name)
+	}
+	all, err := st.ListPipelineProfiles(ctx, "")
+	if err != nil {
+		return store.ProfileResetSummary{}, err
+	}
+	total := store.ProfileResetSummary{Pipelines: []string{}}
+	done := map[string]bool{}
+	for _, p := range matchBarePipeline(all, name) {
+		if done[p.Pipeline] {
+			continue
+		}
+		done[p.Pipeline] = true
+		one, err := st.ResetPipelineProfile(ctx, p.Pipeline)
+		if err != nil {
+			return store.ProfileResetSummary{}, err
+		}
+		total.Pipelines = append(total.Pipelines, one.Pipelines...)
+		total.RowsDeleted += one.RowsDeleted
+		total.RowsCleared += one.RowsCleared
+		total.SamplesDropped += one.SamplesDropped
+		total.FloorsDropped += one.FloorsDropped
+	}
+	return total, nil
 }
 
 // barePipeline strips the repo scope from a stored profile key: profiles are

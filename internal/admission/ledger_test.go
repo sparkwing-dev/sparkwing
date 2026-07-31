@@ -218,6 +218,49 @@ func TestSoftHostCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
 	}
 }
 
+// TestSubmit_UnsatisfiableRefusesWithArithmeticWhileBusyOnlyQueues separates
+// the two answers an operator kept seeing as one. A box that is merely busy
+// queues the request, and a release fixes it. A request larger than the box
+// is refused now, in the arithmetic that settled it, rather than queued to a
+// timeout that reads like progress for half an hour.
+func TestSubmit_UnsatisfiableRefusesWithArithmeticWhileBusyOnlyQueues(t *testing.T) {
+	l := testLedger(t, 8, 8<<30)
+	mustGrant(t, l, Request{ID: "holder", Cores: 1, MemoryBytes: 6 << 30})
+
+	busy, _, err := l.Submit(Request{ID: "busy", Cores: 1, MemoryBytes: 6 << 30})
+	if err != nil {
+		t.Fatalf("Submit busy: %v", err)
+	}
+	if busy.Kind != DecisionQueued {
+		t.Fatalf("busy request = %s, want queued: a holder releasing would satisfy it", busy.Kind)
+	}
+
+	_, _, err = l.Submit(Request{ID: "huge", MemoryBytes: 12 << 30})
+	if !errors.Is(err, ErrNeverAdmissible) {
+		t.Fatalf("oversized request err = %v, want %v", err, ErrNeverAdmissible)
+	}
+	const want = "admission: request can never be admitted: needs 12GiB of memory, this machine has 8GiB"
+	if err.Error() != want {
+		t.Errorf("refusal = %q, want %q", err.Error(), want)
+	}
+}
+
+// TestSubmit_UnsatisfiableCoresPinRefusesWithArithmetic is the CPU half: a
+// pin above the machine is strict, so it is refused with its own arithmetic
+// rather than capped and serialized the way a measured charge is.
+func TestSubmit_UnsatisfiableCoresPinRefusesWithArithmetic(t *testing.T) {
+	l := testLedger(t, 8, 8<<30)
+
+	_, _, err := l.Submit(Request{ID: "huge", Cores: 12.5, StrictCores: true})
+	if !errors.Is(err, ErrNeverAdmissible) {
+		t.Fatalf("oversized pin err = %v, want %v", err, ErrNeverAdmissible)
+	}
+	const want = "admission: request can never be admitted: needs 12.5 cores, this machine has 8"
+	if err.Error() != want {
+		t.Errorf("refusal = %q, want %q", err.Error(), want)
+	}
+}
+
 func TestHostMemoryDeficitStillQueues(t *testing.T) {
 	l := testLedger(t, 8, 8<<30)
 	mustGrant(t, l, Request{ID: "holder", Cores: 1, MemoryBytes: 6 << 30})

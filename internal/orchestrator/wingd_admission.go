@@ -674,9 +674,17 @@ func queuePositionParts(q wingwire.Queued) (ahead int, noun, reason string) {
 }
 
 // admissionFailure maps a terminal fail-policy answer to a named error.
+//
+// A never-admissible answer carries the daemon's own arithmetic when it has
+// one -- the demand against the machine, or the claim against its group -- so
+// a request that can never fit says why instead of queueing to a timeout. The
+// group wording is the fallback for a daemon too old to send a reason.
 func admissionFailure(admErr *wingdclient.AdmissionError) error {
 	switch admErr.Key {
 	case "never_admissible":
+		if admErr.Reason != "" {
+			return fmt.Errorf("local admission: this request can never be admitted on this box: %s", admErr.Reason)
+		}
 		return errors.New("local admission: a concurrency group's cost exceeds its own capacity; lower the cost or raise the group's limit")
 	case "duplicate", "invalid", "parent", "reattach":
 		return fmt.Errorf("local admission: %w", admErr)

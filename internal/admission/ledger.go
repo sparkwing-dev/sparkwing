@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -438,14 +439,28 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 	}
 	if s.milliCores > l.totalMilliCores {
 		if s.strictCores {
-			return spec{}, fmt.Errorf("%w: cores %d exceed total %d", ErrNeverAdmissible, s.milliCores, l.totalMilliCores)
+			return spec{}, fmt.Errorf("%w: needs %s cores, this machine has %s",
+				ErrNeverAdmissible, trimCores(s.milliCores), trimCores(l.totalMilliCores))
 		}
 		s.milliCores = l.totalMilliCores
 	}
 	if s.memory > l.totalMemory {
-		return spec{}, fmt.Errorf("%w: memory %d exceeds total %d", ErrNeverAdmissible, s.memory, l.totalMemory)
+		return spec{}, fmt.Errorf("%w: needs %s of memory, this machine has %s",
+			ErrNeverAdmissible, gibibytes(s.memory), gibibytes(l.totalMemory))
 	}
 	return s, nil
+}
+
+// trimCores renders a millicore count as cores for an operator-facing
+// refusal, dropping a trailing ".0" so whole core counts read cleanly.
+func trimCores(milli int64) string {
+	return strconv.FormatFloat(float64(milli)/1000.0, 'f', -1, 64)
+}
+
+// gibibytes renders a byte count in GiB to one decimal, the unit an
+// operator sizes a machine in.
+func gibibytes(b uint64) string {
+	return strconv.FormatFloat(math.Round(float64(b)/float64(1<<30)*10)/10, 'f', -1, 64) + "GiB"
 }
 
 func normalizeClaim(key string, capacity, cost int, policy Policy) (claim, error) {

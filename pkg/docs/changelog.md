@@ -48,6 +48,28 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cli:** capacity profiles are keyed by the repository a run launched
+  from, not by the directory. Every linked worktree of a repo now reads and
+  writes one profile, so a pipeline run from a fresh branch is priced from
+  what it already cost instead of starting from the conservative cold-start
+  default. Tooling that gives each ticket its own worktree was throwing the
+  learning away exactly as often as work began.
+- **cli:** a still-measuring pipeline can no longer be charged more memory
+  than the machine grants a single run. Only cores were capped before, so a
+  demand floor could climb past the ceiling and stay there: the floor comes
+  down only when a run measures below it, and a run priced above the ceiling
+  is never admitted, so it could never measure.
+- **cli:** `sparkwing runs stats --reset` reaches a demand floor with no
+  measured samples behind it and reports it, instead of answering "no
+  measured capacity profile to reset" about the exact profile that is
+  pricing the runs. A bare pipeline name now resets every repo-scoped key
+  that carries it, and the summary names each key it reached.
+- **cli:** a request no release could ever satisfy is refused at submit with
+  the arithmetic (`needs 12GiB of memory, this machine has 8GiB`) rather
+  than queued until it times out. An ordinarily busy box still queues.
+
 ## [v0.22.2] - 2026-07-31
 ### Added
 
