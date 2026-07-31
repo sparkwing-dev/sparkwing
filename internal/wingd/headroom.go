@@ -29,11 +29,12 @@ func (d *Daemon) sampleLoop(ctx context.Context) {
 		case <-d.quit:
 			return
 		case <-t.C:
-			if now := d.now(); now.Sub(lastCap) >= capEvery {
-				d.refreshCapacity()
+			now := d.now()
+			refreshCapacity := now.Sub(lastCap) >= capEvery
+			d.refreshHostSample(refreshCapacity)
+			if refreshCapacity {
 				lastCap = now
 			}
-			d.refreshHeadroom()
 		}
 	}
 }
@@ -41,10 +42,20 @@ func (d *Daemon) sampleLoop(ctx context.Context) {
 // refreshHeadroom samples the host and applies the result. Sampler errors
 // are logged and leave the last headroom in force.
 func (d *Daemon) refreshHeadroom() {
+	d.refreshHostSample(false)
+}
+
+// refreshHostSample uses one host reading for every calculation on a sample
+// tick. Stateful CPU counters advance when sampled, so separate capacity and
+// headroom reads would measure utilization over the few moments between them.
+func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 	stat, err := d.sampler.Sample()
 	if err != nil {
 		d.cfg.logf("host sample: %v", err)
 		return
+	}
+	if refreshCapacity {
+		d.applyCapacity(stat)
 	}
 	d.applyHeadroom(d.container.apply(stat))
 }
