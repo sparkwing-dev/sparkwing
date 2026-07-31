@@ -5,6 +5,7 @@
 package paths
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,11 +16,44 @@ type Paths struct {
 	Root string
 }
 
+// UnderTest reports whether the running binary is a Go test binary.
+//
+// It reads os.Args[0] instead of calling testing.Testing() because this
+// package is linked into every sparkwing binary and into the SDK users
+// embed, and importing testing there would pull the flag, regexp and
+// pprof trees in with it. `go test` always names the binary it builds
+// <pkg>.test, so the suffix is a reliable signal.
+func UnderTest() bool {
+	base := filepath.Base(os.Args[0])
+	return strings.HasSuffix(base, ".test") || strings.HasSuffix(base, ".test.exe")
+}
+
+// TestSandbox is the throwaway home a test binary is given in place of
+// the user's real one. It is keyed by pid so packages that `go test`
+// runs in parallel cannot collide, and it lives under os.TempDir() so
+// the operating system reclaims it.
+func TestSandbox() string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("sparkwing-test-home-%d", os.Getpid()))
+}
+
 // DefaultPaths returns paths rooted at ~/.sparkwing, honoring
 // SPARKWING_HOME when set.
+//
+// A test binary that set neither gets a disposable sandbox rather than
+// the developer's real home. Forgetting to set SPARKWING_HOME is a
+// mistake every new fixture can make once, and the cost of making it is
+// a suite that writes to the machine it is validating: BW-1457 was
+// opened over a fleet registry that had been corrupted and had grown 426
+// dead entries, and the dispatch test was writing the version stamp
+// under the real ~/.sparkwing the whole time. Redirecting rather than
+// erroring keeps a read returning the empty config a fresh laptop
+// legitimately has, so no test has to care.
 func DefaultPaths() (Paths, error) {
 	if root := os.Getenv("SPARKWING_HOME"); root != "" {
 		return PathsAt(root), nil
+	}
+	if UnderTest() {
+		return PathsAt(filepath.Join(TestSandbox(), ".sparkwing")), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

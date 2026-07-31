@@ -220,15 +220,41 @@ func logOutboxUnavailable(log *slog.Logger, err error) {
 
 // outboxDBPath resolves the shared local outbox database, honoring
 // SPARKWING_HOME and otherwise rooting at ~/.sparkwing.
+//
+// A test binary that set no SPARKWING_HOME gets a disposable sandbox
+// instead of the developer's real outbox. Before this, opening a state
+// store from a test created and wrote ~/.sparkwing/outbox.db on the
+// machine running the suite.
 func outboxDBPath() (string, error) {
 	if root := os.Getenv("SPARKWING_HOME"); root != "" {
 		return filepath.Join(root, "outbox.db"), nil
+	}
+	if underTest() {
+		return filepath.Join(testSandbox(), ".sparkwing", "outbox.db"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", err
 	}
 	return filepath.Join(home, ".sparkwing", "outbox.db"), nil
+}
+
+// underTest reports whether the running binary is a Go test binary, and
+// testSandbox is the throwaway home one is given.
+//
+// Both duplicate internal/paths on purpose. This package is part of the
+// public SDK surface and the pkg/ tree imports nothing from internal/;
+// four lines of duplication is a smaller price than routing an SDK
+// package through an internal one to reach them. Keep the sandbox naming
+// identical to internal/paths.TestSandbox so a test that inspects one
+// home finds the other.
+func underTest() bool {
+	base := filepath.Base(os.Args[0])
+	return strings.HasSuffix(base, ".test") || strings.HasSuffix(base, ".test.exe")
+}
+
+func testSandbox() string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("sparkwing-test-home-%d", os.Getpid()))
 }
 
 func unimplemented(surface, t string) error {
