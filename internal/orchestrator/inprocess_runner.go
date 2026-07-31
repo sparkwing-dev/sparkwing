@@ -237,6 +237,7 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 
 	nodeCtx := sparkwingruntime.WithLogger(ctx, nlog)
 	nodeCtx = sparkwingruntime.WithNode(nodeCtx, node.ID())
+	nodeCtx = sparkwing.WithToolSlotProvider(nodeCtx, r.toolSlotProvider(runID, node.ID(), delegate))
 	nodeCtx = sparkwing.WithResourceReporter(nodeCtx, func(s sparkwing.ResourceSample) {
 		nodemetrics.AddReportedChildCPU(s.CPUTime)
 		_ = r.backends.State.AddNodeMetricSample(ctx, runID, node.ID(), store.MetricSample{

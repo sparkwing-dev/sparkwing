@@ -69,6 +69,30 @@ code change to unlock.
   wire, and has nothing subtracted from available, so a run is never held
   back by pressure nobody measured.
 
+### Added
+
+- **sdk:** `sparkwing.ToolSlot` takes a named box-wide budget from inside a
+  running job, for external tools that ship their own machine-wide lock the
+  admission daemon cannot see. A waiting step reports its queue position the
+  way a queued node does. `sparkwing.BoxToolBudget` builds the matching
+  `ConcurrencyGroup`, counted in hundredths of a core so widening what a tool
+  covers re-derives the concurrency from one measured number instead of a
+  hand-tuned slot count.
+- **cli:** `sparkwing queue` estimates a start time for a run waiting on a
+  named semaphore. Previously only host-capacity waits carried an ETA, so a
+  step queued behind a tool budget could report its position but never how
+  long.
+
+### Changed
+
+- **sdk:** golangci-lint in this repo's own gates now runs under a box-wide
+  budget and passes `--allow-parallel-runners` while it holds one, instead of
+  serializing on golangci-lint's private lock. The private lock admits exactly
+  one linter per machine, so concurrent gates queued behind each other no
+  matter how much headroom the box had. `--allow-serial-runners` remains the
+  fallback whenever the budget is not held, because dropping the tool's lock
+  without a budget would leave nothing serializing lint at all.
+
 ## [v0.22.1] - 2026-07-30
 ### Added
 

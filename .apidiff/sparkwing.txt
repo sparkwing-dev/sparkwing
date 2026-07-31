@@ -52,6 +52,7 @@ func Bind(argName string) Constraint
 func BindPipelinesFromYAML(cfg interface {
 	EachPipeline(func(name, entrypoint string))
 })
+func BoxToolBudget(tool string, grantableCores float64, queueTimeout time.Duration) *ConcurrencyGroup
 type Cache = storage.ArtifactStore
 type CacheConfig struct {
 	Key CacheKeyFn
@@ -82,6 +83,7 @@ type ConcurrencyGroup struct {
 }
 func (g *ConcurrencyGroup) Limit() ConcurrencyLimit
 func (g *ConcurrencyGroup) Name() string
+func (g *ConcurrencyGroup) String() string
 type ConcurrencyLimit struct {
 	Capacity int
 
@@ -747,6 +749,9 @@ func Summary(ctx context.Context, markdown string)
 const Superseded Outcome = "superseded"
 func TTL(d time.Duration) CacheOption
 func ToolCacheDir(tool string) string
+func ToolCostCenticores(cores float64) int
+func ToolSlot(ctx context.Context, g *ConcurrencyGroup, cost ...int) (release func(), granted bool)
+type ToolSlotProvider func(ctx context.Context, group *ConcurrencyGroup, cost int) (release func(), err error)
 type TransitiveArg struct {
 	Flag      string
 	JobID     string
@@ -785,6 +790,7 @@ func WithResolvedArgs(ctx context.Context, args map[string]any) context.Context
 func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context
 func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context
 func WithStep(ctx context.Context, stepID string) context.Context
+func WithToolSlotProvider(ctx context.Context, p ToolSlotProvider) context.Context
 type Work struct {
 }
 func (w *Work) Groups() []*StepGroup

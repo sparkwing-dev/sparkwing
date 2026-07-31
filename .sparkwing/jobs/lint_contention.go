@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -23,19 +24,89 @@ const lintLockWait = 5 * time.Minute
 // default, still produces it, and it must not read as a finding.
 const golangciContention = "parallel golangci-lint is running"
 
-// lintCommand is the only golangci-lint command line this repo's gates
-// run. --allow-serial-runners is what makes a run that cannot take the
-// box-wide lock wait for it; without the flag the run retries for 5s
-// and exits, and the gate charges a neighbouring build to the change
-// under test.
-const lintCommand = "cd .sparkwing && golangci-lint run --allow-serial-runners ./..."
+// Lint concurrency is decided by two numbers measured on 2026-07-30 in
+// two real worktrees on this box (10 cores, 16 GB):
+//
+//	cold repo-wide lint   43.0s at 4.03 avg cores, 50.1s at 3.44, 2.5 GB peak RSS
+//	warm repo-wide lint    2.0s at ~3.5 avg cores, 134 MB peak RSS
+//
+// Cold is the number that matters because GOLANGCI_LINT_CACHE is scoped
+// per worktree (BW-1223), so every fresh agent worktree pays a cold lint
+// on its first gate. Cores set the budget rather than memory because
+// wingd's external memory reading is currently pinned at 80% of capacity
+// and is not a real measurement (BW-1454), while its core reading is.
+//
+// lintCoreCost ASSUMES THE CURRENT LINT SCOPE. BW-1455 will widen lint
+// from `.sparkwing/` alone to the whole product tree, which makes a lint
+// materially more expensive and must re-derive this one number. It is a
+// cost in cores rather than a slot count precisely so that widening the
+// scope changes one measured constant instead of a hand-tuned N.
+const lintCoreCost = 4.0
 
-// runGolangciLint lints the .sparkwing module, waiting out any other
-// golangci-lint on the box for up to lintLockWait. On a fixed-workdir
-// k8s runner it seeds the cache from the blob store before running and
-// saves the result after a clean run. The returned error already reads as
-// a gate failure line, so a caller collecting failures can take it
-// unchanged.
+// lintReserveCores is what the budget leaves for the rest of the machine,
+// matching the admission daemon's own reserve so the lint budget cannot
+// hand out capacity the daemon is deliberately holding back.
+const lintReserveCores = 2.0
+
+// lintBudget is the box-wide golangci-lint budget every gate in this
+// repo draws from. It is box-scoped because golangci-lint's own
+// parallel-runner lock is box-wide, so replacing that lock requires a
+// budget with the same reach.
+var lintBudget = sparkwing.BoxToolBudget("golangci-lint", grantableCores(), lintLockWait)
+
+// grantableCores is what this machine will lend to linting: its core
+// count less the daemon's reserve, floored at one core so a small box
+// still runs exactly one lint rather than none.
+func grantableCores() float64 {
+	c := float64(goruntime.NumCPU()) - lintReserveCores
+	if c < 1 {
+		c = 1
+	}
+	return c
+}
+
+// lintSlotCost is the budget one lint draws, clamped to the whole budget
+// so a machine too small to fit the measured cost runs one lint at a time
+// instead of panicking on a cost that could never be admitted.
+func lintSlotCost() int {
+	cost := sparkwing.ToolCostCenticores(lintCoreCost)
+	if capacity := lintBudget.Limit().Capacity; cost > capacity {
+		return capacity
+	}
+	return cost
+}
+
+// lintCommand builds this repo's only golangci-lint command line.
+//
+// The flag is the whole point of the budget. --allow-parallel-runners
+// drops golangci-lint's private box-wide lock, which is safe only while
+// something else bounds how many linters run at once; that something is
+// the wingd slot the caller holds. --allow-serial-runners keeps the
+// private lock and waits on it, which is correct but admits exactly one
+// linter per box no matter how much headroom there is.
+//
+// Passing the parallel flag without holding the slot would leave nothing
+// serializing lint at all, so the caller decides by whether it was
+// granted, never by configuration.
+func lintCommand(holdsBudget bool) string {
+	flag := "--allow-serial-runners"
+	if holdsBudget {
+		flag = "--allow-parallel-runners"
+	}
+	return "cd .sparkwing && golangci-lint run " + flag + " ./..."
+}
+
+// runGolangciLint lints the .sparkwing module under the box-wide
+// lintBudget, waiting out any other golangci-lint on the box for up to
+// lintLockWait. On a fixed-workdir k8s runner it seeds the cache from the
+// blob store before running and saves the result after a clean run. The
+// returned error already reads as a gate failure line, so a caller
+// collecting failures can take it unchanged.
+//
+// The budget is held around the linter only, not the whole job, because a
+// gate step that serializes a linter must free the budget the moment the
+// linter exits rather than pin it through the rest of a multi-minute
+// pre-push run.
 func runGolangciLint(ctx context.Context) error {
 	gcURL := os.Getenv("SPARKWING_GITCACHE_URL")
 	gcToken := os.Getenv("SPARKWING_CACHE_TOKEN")
@@ -48,12 +119,22 @@ func runGolangciLint(ctx context.Context) error {
 		sparkwing.Info(ctx, "lint cache: restored %d bytes from blob store", restoredBytes)
 	}
 
+	release, holdsBudget := sparkwing.ToolSlot(ctx, lintBudget, lintSlotCost())
+	defer release()
+
+	cacheDir := sparkwing.ToolCacheDir("golangci-lint")
+	if holdsBudget {
+		sparkwing.Info(ctx, "golangci-lint: holding %s; running parallel (cache %s)", lintBudget, cacheDir)
+	} else {
+		sparkwing.Warn(ctx, "golangci-lint: no box budget; falling back to the tool's own box-wide lock (cache %s)", cacheDir)
+	}
+
 	lintCtx, cancel := context.WithTimeout(ctx, lintLockWait)
 	defer cancel()
 
 	lintStart := time.Now()
-	_, err := sparkwing.Bash(lintCtx, lintCommand).
-		Env("GOLANGCI_LINT_CACHE", sparkwing.ToolCacheDir("golangci-lint")).
+	_, err := sparkwing.Bash(lintCtx, lintCommand(holdsBudget)).
+		Env("GOLANGCI_LINT_CACHE", cacheDir).
 		Run()
 	lintDur := time.Since(lintStart)
 	if err != nil {

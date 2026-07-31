@@ -42,6 +42,8 @@ Every exported symbol in the `sparkwing` package (the SDK you import as `sw`), g
 - `func StepGet[T any](ctx context.Context, step *WorkStep) T` -- StepGet blocks until step has completed, then returns its typed output as T. Used inside another step's body when composing values from upstream typed steps.
 - `func Summary(ctx context.Context, markdown string)` -- Summary records a persistent markdown run summary on the currently-executing Job or Step.
 - `func ToolCacheDir(tool string) string` -- ToolCacheDir returns a cache directory for an external tool, scoped to the worktree the pipeline is running in.
+- `func ToolCostCenticores(cores float64) int` -- ToolCostCenticores converts a measured per-invocation core cost into the integer units BoxToolBudget counts in, clamping to at least one so a tool measured at near-zero still draws a unit and cannot be admitted without limit.
+- `func ToolSlot(ctx context.Context, g *ConcurrencyGroup, cost ...int) (release func(), granted bool)` -- ToolSlot takes cost units of g for the duration of one step inside an already-running job, and reports whether it got them.
 - `func TypeName(p any) string` -- TypeName returns the Go type name of p, suitable for matching against a sparkwing.yaml `entrypoint:` field.
 - `func Warn(ctx context.Context, format string, args ...any)` -- Warn emits a warn-level message.
 - `func WithCommandEnv(ctx context.Context, env map[string]string) context.Context` -- WithCommandEnv returns a context whose sparkwing.Exec/Bash calls inherit env.
@@ -50,6 +52,7 @@ Every exported symbol in the `sparkwing` package (the SDK you import as `sw`), g
 - `func WithResourceReporter(ctx context.Context, fn ResourceReporter) context.Context` -- WithResourceReporter installs fn so that sparkwing.Bash / sparkwing.Exec report each finished command's measured CPU and memory.
 - `func WithSecretResolver(ctx context.Context, r SecretResolver) context.Context` -- WithSecretResolver returns a derived ctx carrying the given resolver.
 - `func WithStep(ctx context.Context, stepID string) context.Context` -- WithStep installs the active step ID into ctx so the breadcrumb on records emitted *inside* the step body carries it.
+- `func WithToolSlotProvider(ctx context.Context, p ToolSlotProvider) context.Context` -- WithToolSlotProvider returns ctx carrying p, so ToolSlot called from a job body reaches the daemon this run was admitted by.
 - `func WorkDir() string` -- WorkDir returns the pipeline working directory (the repo root).
 - `func WriteFile(path string, data []byte) error` -- WriteFile writes data to the named file with perm 0o644 (creating or truncating).
 
@@ -257,9 +260,11 @@ type ConcurrencyGroup struct {
 }
 ```
 
+- `func BoxToolBudget(tool string, grantableCores float64, queueTimeout time.Duration) *ConcurrencyGroup` -- BoxToolBudget builds the conventional ConcurrencyGroup for one external tool sharing one machine: a box-scoped budget measured in hundredths of a core, which queues rather than failing.
 - `func NewConcurrencyGroup(name string, limit ConcurrencyLimit) *ConcurrencyGroup` -- NewConcurrencyGroup constructs a ConcurrencyGroup named name with the given limit.
 - `func (g *ConcurrencyGroup) Limit() ConcurrencyLimit` -- Limit returns the group's declared budget.
 - `func (g *ConcurrencyGroup) Name() string` -- Name returns the group's coordination key.
+- `func (g *ConcurrencyGroup) String() string` -- String renders the group for a log line naming what a step is bounded by, so "the gate is slow" has an answer that names the budget.
 
 ### type ConcurrencyLimit
 
@@ -1641,6 +1646,15 @@ type StepGroup struct {
 - `func (g *StepGroup) Name() string` -- Name returns the group's declared name.
 - `func (g *StepGroup) Needs(deps ...WorkDep) *StepGroup` -- Needs declares an upstream dependency on every member of the group.
 - `func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup` -- SkipIf registers a predicate on every member of the group.
+
+### type ToolSlotProvider
+
+ToolSlotProvider acquires cost units of a ConcurrencyGroup from inside a running job body and returns the release.
+
+```
+type ToolSlotProvider func(ctx context.Context, group *ConcurrencyGroup, cost int) (release func(), err error)
+```
+
 
 ### type TransitiveArg
 
