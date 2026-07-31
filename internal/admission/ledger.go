@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 )
@@ -438,14 +439,28 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 	}
 	if s.milliCores > l.totalMilliCores {
 		if s.strictCores {
-			return spec{}, fmt.Errorf("%w: cores %d exceed total %d", ErrNeverAdmissible, s.milliCores, l.totalMilliCores)
+			return spec{}, fmt.Errorf("%w: needs %s cores, this machine has %s",
+				ErrNeverAdmissible, trimCores(s.milliCores), trimCores(l.totalMilliCores))
 		}
 		s.milliCores = l.totalMilliCores
 	}
 	if s.memory > l.totalMemory {
-		return spec{}, fmt.Errorf("%w: memory %d exceeds total %d", ErrNeverAdmissible, s.memory, l.totalMemory)
+		return spec{}, fmt.Errorf("%w: needs %s of memory, this machine has %s",
+			ErrNeverAdmissible, gibibytes(s.memory), gibibytes(l.totalMemory))
 	}
 	return s, nil
+}
+
+// trimCores renders a millicore count as cores for an operator-facing
+// refusal, dropping a trailing ".0" so whole core counts read cleanly.
+func trimCores(milli int64) string {
+	return strconv.FormatFloat(float64(milli)/1000.0, 'f', -1, 64)
+}
+
+// gibibytes renders a byte count in GiB to one decimal, the unit an
+// operator sizes a machine in.
+func gibibytes(b uint64) string {
+	return strconv.FormatFloat(math.Round(float64(b)/float64(1<<30)*10)/10, 'f', -1, 64) + "GiB"
 }
 
 func normalizeClaim(key string, capacity, cost int, policy Policy) (claim, error) {
@@ -664,10 +679,21 @@ func touchesAny(s spec, set map[resource]bool) bool {
 }
 
 // hostFits reports whether a spec's host cores and memory fit right now.
-// Memory is always a hard safety budget. A soft CPU request uses cores as
-// backpressure: it limits additional admissions once the host is already
-// overcommitted, but it never turns a memory-fitting head run into a
-// permanent CPU-only wait.
+// Memory is a hard safety budget between runs: once anything is admitted, a
+// new request must fit in the memory headroom that is left. A soft CPU
+// request uses cores as backpressure: it limits additional admissions once
+// the host is already overcommitted, but it never turns a memory-fitting head
+// run into a permanent CPU-only wait.
+//
+// Both dimensions share one liveness floor: with nothing admitted, the
+// request is granted. That is what stops external load from becoming a
+// permanent refusal. Headroom is machine total minus reserve minus whatever
+// the daemon did not admit, so sustained external load drives it toward zero,
+// and a dimension with no sole-run escape can then refuse every request
+// forever -- including the run whose measurement was the only thing that
+// would have lowered its own charge. [Ledger.normalize] already refuses a
+// request larger than the machine, so the floor can only grant something the
+// box can physically hold.
 func (l *Ledger) hostFits(s spec) bool {
 	effMemory := min(l.totalMemory, l.headroomMemory)
 	effCores := min(l.totalMilliCores, l.headroomMilliCores)
@@ -676,7 +702,8 @@ func (l *Ledger) hostFits(s spec) bool {
 	if s.softCores {
 		coresOK = l.coresFitSoft(s)
 	}
-	memoryOK := s.memory == 0 || (l.usedMemory <= effMemory && s.memory <= effMemory-l.usedMemory)
+	memoryOK := s.memory == 0 || l.usedMemory == 0 ||
+		(l.usedMemory <= effMemory && s.memory <= effMemory-l.usedMemory)
 	return coresOK && memoryOK
 }
 

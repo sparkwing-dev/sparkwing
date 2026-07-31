@@ -218,6 +218,49 @@ func TestSoftHostCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
 	}
 }
 
+// TestSubmit_UnsatisfiableRefusesWithArithmeticWhileBusyOnlyQueues separates
+// the two answers an operator kept seeing as one. A box that is merely busy
+// queues the request, and a release fixes it. A request larger than the box
+// is refused now, in the arithmetic that settled it, rather than queued to a
+// timeout that reads like progress for half an hour.
+func TestSubmit_UnsatisfiableRefusesWithArithmeticWhileBusyOnlyQueues(t *testing.T) {
+	l := testLedger(t, 8, 8<<30)
+	mustGrant(t, l, Request{ID: "holder", Cores: 1, MemoryBytes: 6 << 30})
+
+	busy, _, err := l.Submit(Request{ID: "busy", Cores: 1, MemoryBytes: 6 << 30})
+	if err != nil {
+		t.Fatalf("Submit busy: %v", err)
+	}
+	if busy.Kind != DecisionQueued {
+		t.Fatalf("busy request = %s, want queued: a holder releasing would satisfy it", busy.Kind)
+	}
+
+	_, _, err = l.Submit(Request{ID: "huge", MemoryBytes: 12 << 30})
+	if !errors.Is(err, ErrNeverAdmissible) {
+		t.Fatalf("oversized request err = %v, want %v", err, ErrNeverAdmissible)
+	}
+	const want = "admission: request can never be admitted: needs 12GiB of memory, this machine has 8GiB"
+	if err.Error() != want {
+		t.Errorf("refusal = %q, want %q", err.Error(), want)
+	}
+}
+
+// TestSubmit_UnsatisfiableCoresPinRefusesWithArithmetic is the CPU half: a
+// pin above the machine is strict, so it is refused with its own arithmetic
+// rather than capped and serialized the way a measured charge is.
+func TestSubmit_UnsatisfiableCoresPinRefusesWithArithmetic(t *testing.T) {
+	l := testLedger(t, 8, 8<<30)
+
+	_, _, err := l.Submit(Request{ID: "huge", Cores: 12.5, StrictCores: true})
+	if !errors.Is(err, ErrNeverAdmissible) {
+		t.Fatalf("oversized pin err = %v, want %v", err, ErrNeverAdmissible)
+	}
+	const want = "admission: request can never be admitted: needs 12.5 cores, this machine has 8"
+	if err.Error() != want {
+		t.Errorf("refusal = %q, want %q", err.Error(), want)
+	}
+}
+
 func TestHostMemoryDeficitStillQueues(t *testing.T) {
 	l := testLedger(t, 8, 8<<30)
 	mustGrant(t, l, Request{ID: "holder", Cores: 1, MemoryBytes: 6 << 30})
@@ -231,7 +274,13 @@ func TestHostMemoryDeficitStillQueues(t *testing.T) {
 	}
 }
 
-func TestHostMemoryHeadroomDeficitQueuesSoleRun(t *testing.T) {
+// TestHostMemoryHeadroomDeficitAdmitsSoleRun pins the liveness floor on the
+// memory dimension: external load can drive the memory headroom to zero, and
+// with nothing admitted the queue head is still granted. Queueing it instead
+// was the permanent lockout -- the run's own measurement is what lowers its
+// charge, and a run that is never admitted never measures, so a pipeline
+// priced above a crushed headroom could never price itself back down.
+func TestHostMemoryHeadroomDeficitAdmitsSoleRun(t *testing.T) {
 	l := testLedger(t, 8, 8<<30)
 	if _, err := l.SetHeadroom(8, 0); err != nil {
 		t.Fatalf("SetHeadroom: %v", err)
@@ -241,8 +290,8 @@ func TestHostMemoryHeadroomDeficitQueuesSoleRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit head: %v", err)
 	}
-	if d.Kind != DecisionQueued {
-		t.Fatalf("head behind memory headroom = %s, want queued", d.Kind)
+	if d.Kind != DecisionGranted {
+		t.Fatalf("sole run behind a zero memory headroom = %s, want granted", d.Kind)
 	}
 }
 
@@ -795,13 +844,20 @@ func TestSetHeadroom_CPUFloorSurvivesMemoryHolder(t *testing.T) {
 	mustGrant(t, l, Request{ID: "waiter", Cores: 1})
 }
 
-func TestSetHeadroom_MemoryHasNoLivenessFloor(t *testing.T) {
+// TestSetHeadroom_MemoryFloorMirrorsCPU proves the two host dimensions carry
+// the same liveness floor, each judged on its own held total: a zero memory
+// headroom does not block the first run to ask for memory, and once that run
+// holds it, the next one queues. One run at a time may sit above a headroom
+// external load crushed; the machine total still binds, so the box can always
+// physically hold what was granted.
+func TestSetHeadroom_MemoryFloorMirrorsCPU(t *testing.T) {
 	l := testLedger(t, 4, 1024)
 	if _, err := l.SetHeadroom(4, 0); err != nil {
 		t.Fatalf("SetHeadroom: %v", err)
 	}
 
 	mustGrant(t, l, Request{ID: "holder", Cores: 1})
+	mustGrant(t, l, Request{ID: "first-memory", MemoryBytes: 1})
 	mustQueue(t, l, Request{ID: "waiter", MemoryBytes: 1})
 }
 

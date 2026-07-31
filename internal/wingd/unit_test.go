@@ -288,3 +288,32 @@ func TestApplyHeadroom_Hysteresis(t *testing.T) {
 		t.Fatalf("a tiny load change (%v -> %v) should not move headroom past the deadband", first, d.appliedCores)
 	}
 }
+
+// TestClampHostChargeLocked_CapsMemoryLikeCores is the daemon-side backstop
+// for a charge resolved with no daemon answering: both host dimensions cap at
+// what the box grants a single run, so a still-measuring pipeline can never
+// submit a demand the machine will refuse forever. An explicit pin stays hard
+// on both dimensions, since a pin is the operator saying they mean it.
+func TestClampHostChargeLocked_CapsMemoryLikeCores(t *testing.T) {
+	d := &Daemon{
+		cfg:           Config{HeadroomFraction: 0.1},
+		machineCores:  8,
+		machineMemory: 16 << 30,
+	}
+
+	got, _ := d.clampHostChargeLocked(
+		wingwire.HostResources{Cores: 20, MemoryBytes: 32 << 30}, wingwire.CostSourceFloor)
+	if got.Cores != 7.2 {
+		t.Errorf("cores = %v, want the grantable 7.2", got.Cores)
+	}
+	total := uint64(16 << 30)
+	if want := int64(uint64(float64(total) * 0.9)); got.MemoryBytes != want {
+		t.Errorf("memory = %d, want the grantable %d", got.MemoryBytes, want)
+	}
+
+	pinned, _ := d.clampHostChargeLocked(
+		wingwire.HostResources{Cores: 20, MemoryBytes: 32 << 30}, wingwire.CostSourcePin)
+	if pinned.Cores != 20 || pinned.MemoryBytes != 32<<30 {
+		t.Errorf("pin clamped to %+v, want it left hard", pinned)
+	}
+}

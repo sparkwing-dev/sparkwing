@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -92,5 +95,27 @@ func TestRun_AdmissionFailureEmitsDelegateFinish(t *testing.T) {
 	errStr, _ := finishRec.Attrs["error"].(string)
 	if errStr == "" {
 		t.Fatalf("run_finish event missing error attr; attrs = %v", finishRec.Attrs)
+	}
+}
+
+// TestAdmissionFailure_NeverAdmissibleCarriesTheDaemonsArithmetic proves the
+// refusal an operator reads names what was asked for against what exists. The
+// old wording blamed a concurrency group for every never-admissible answer,
+// including the host-capacity ones, which sent the reader to look at limits
+// that had nothing to do with it.
+func TestAdmissionFailure_NeverAdmissibleCarriesTheDaemonsArithmetic(t *testing.T) {
+	err := admissionFailure(&wingdclient.AdmissionError{
+		Key:    "never_admissible",
+		Policy: wingwire.PolicyFail,
+		Reason: "needs 12GiB of memory, this machine has 8GiB",
+	})
+	want := "local admission: this request can never be admitted on this box: needs 12GiB of memory, this machine has 8GiB"
+	if err.Error() != want {
+		t.Errorf("refusal = %q, want %q", err.Error(), want)
+	}
+
+	bare := admissionFailure(&wingdclient.AdmissionError{Key: "never_admissible", Policy: wingwire.PolicyFail})
+	if !strings.Contains(bare.Error(), "concurrency group") {
+		t.Errorf("reasonless refusal = %q, want the concurrency-group fallback", bare.Error())
 	}
 }

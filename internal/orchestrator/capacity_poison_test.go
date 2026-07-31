@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -19,6 +20,13 @@ import (
 // it does in production.
 func contendedRun(t *testing.T, st *store.Store, ctx context.Context, key, runID string, peakCores float64, charge runCharge) {
 	t.Helper()
+	contendedRunPeaking(t, st, ctx, key, runID, peakCores, 1<<30, charge)
+}
+
+// contendedRunPeaking is contendedRun with the run's memory peak spelled out,
+// for the cases where memory is the dimension under test.
+func contendedRunPeaking(t *testing.T, st *store.Store, ctx context.Context, key, runID string, peakCores float64, peakMemory int64, charge runCharge) {
+	t.Helper()
 	start := time.Now()
 	if err := st.CreateRun(ctx, store.Run{ID: runID, Pipeline: "ci", Status: "running", StartedAt: start}); err != nil {
 		t.Fatal(err)
@@ -27,7 +35,7 @@ func contendedRun(t *testing.T, st *store.Store, ctx context.Context, key, runID
 		t.Fatal(err)
 	}
 	if err := st.AddNodeMetricSample(ctx, runID, "build", store.MetricSample{
-		TS: start, CPUMillicores: int64(peakCores * 1000), MemoryBytes: 1 << 30,
+		TS: start, CPUMillicores: int64(peakCores * 1000), MemoryBytes: peakMemory,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -90,6 +98,96 @@ func TestPoisonedFloorRecoversWithoutManualReset(t *testing.T) {
 	if c := charge(); c > capacity.SafetyMultiple*1.0 {
 		t.Errorf("charge = %v cores after six 1-core contended runs, want <= %v (floor decays toward evidence instead of poisoning the profile)",
 			c, capacity.SafetyMultiple*1.0)
+	}
+}
+
+// TestRatchetedFloorRecoversUnderSustainedExternalLoad drives the BW-1459
+// deadlock through the real loop -- resolve the charge from the stored
+// profile, cap it, submit it to a real admission ledger, fold what the run
+// measured -- on a box whose memory headroom sustained external load has
+// driven to zero.
+//
+// The trap it proves gone: a demand floor self-corrects only when a run
+// measures below it, a run only measures if it is admitted, and it is not
+// admitted while its charge exceeds what the machine will grant. A charge
+// that got past the grantable ceiling could therefore never take the step
+// that lowers it. The recovery here uses no daemon restart and no operator
+// verb: the ceiling caps the charge, the liveness floor admits the sole run
+// anyway, and the run's own measurement walks the floor back down.
+//
+// The setup is one contended run that consumed essentially its whole memory
+// charge, which makes that charge the floor and prices the next run at twice
+// it. Every cycle after it must be admitted, because only an admitted run
+// measures and only a measurement lowers the floor.
+func TestRatchetedFloorRecoversUnderSustainedExternalLoad(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+
+	const (
+		machineCores = 8.0
+		grantCores   = 7.2
+		machineMem   = int64(16 << 30)
+		grantMem     = int64(14 << 30)
+		realDemand   = int64(2 << 30)
+	)
+	l, err := admission.New(admission.Config{TotalCores: machineCores, TotalMemoryBytes: uint64(machineMem)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := l.SetHeadroom(2.0, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	charge := func() capacity.Resolution {
+		t.Helper()
+		prof, err := st.GetPipelineProfile(ctx, "repo/ci", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		res := capacity.Resolve(nil, prof, 8, "B")
+		res, _ = capacity.ApplyHostCeiling(res, "repo/ci", machineCores, grantCores, grantMem)
+		return res
+	}
+
+	contendedRunPeaking(t, st, ctx, "repo/ci", "hot", 1.0, 7500*(1<<20), runCharge{Cores: 1.0, MemoryBytes: 8 << 30})
+	ratcheted := charge()
+	if ratcheted.Source != store.CostSourceFloor {
+		t.Fatalf("charge source = %q, want the demand floor to be pricing this pipeline", ratcheted.Source)
+	}
+	if ratcheted.MemoryBytes > grantMem {
+		t.Fatalf("charge = %d bytes, want it capped at the grantable %d: an uncapped charge is a permanent refusal",
+			ratcheted.MemoryBytes, grantMem)
+	}
+
+	for i := range 4 {
+		res := charge()
+		dec, _, err := l.Submit(admission.Request{
+			ID:          fmt.Sprintf("cold%d", i),
+			Cores:       res.Cores,
+			SoftCores:   true,
+			MemoryBytes: uint64(res.MemoryBytes),
+		})
+		if err != nil {
+			t.Fatalf("cycle %d: Submit: %v", i, err)
+		}
+		if dec.Kind != admission.DecisionGranted {
+			t.Fatalf("cycle %d: charge %d bytes was %s against a zero memory headroom. A run that never starts never measures, so the floor can never come down",
+				i, res.MemoryBytes, dec.Kind)
+		}
+		contendedRunPeaking(t, st, ctx, "repo/ci", fmt.Sprintf("cold%d", i), 1.0, realDemand,
+			runCharge{Cores: res.Cores, MemoryBytes: res.MemoryBytes})
+		if _, err := l.Release(dec.Lease.ID, fmt.Sprintf("cold%d", i)); err != nil {
+			t.Fatalf("cycle %d: Release: %v", i, err)
+		}
+	}
+
+	if got := float64(charge().MemoryBytes); got > capacity.SafetyMultiple*float64(realDemand) {
+		t.Errorf("charge = %v bytes after four measured runs, want <= %v: the floor must converge on measured demand, not stay parked at the ceiling",
+			got, capacity.SafetyMultiple*float64(realDemand))
 	}
 }
 

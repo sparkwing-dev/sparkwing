@@ -64,6 +64,82 @@ func TestRunCapacityReset_DropsProfileAndReportsCounts(t *testing.T) {
 	}
 }
 
+// TestRunCapacityReset_ClearsAFloorWithNoSamplesBehindIt drives the state the
+// reset verb could not reach: a pipeline that was priced off a contended-run
+// demand floor without ever finishing a clean run, so it has a floor and no
+// measured samples. The reset must clear the floor and say it did, because a
+// line reporting only samples reads as "nothing happened" on exactly the
+// profile the operator is trying to unstick.
+func TestRunCapacityReset_ClearsAFloorWithNoSamplesBehindIt(t *testing.T) {
+	paths := orchestrator.PathsAt(t.TempDir())
+	ctx := context.Background()
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.RecordProfileObservation(ctx, "myrepo/ci", "", store.ProfileObservation{
+		CPUMeasured: true, PlanHash: "A", Contended: true,
+		FloorCores: 6.5, FloorMemoryBytes: 7 << 30,
+	}); err != nil {
+		t.Fatalf("seed floor: %v", err)
+	}
+	seeded, err := st.GetPipelineProfile(ctx, "myrepo/ci", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seeded.SampleCount != 0 || seeded.FloorCores == 0 {
+		t.Fatalf("seed = %+v, want a floor with no measured samples", seeded)
+	}
+	_ = st.Close()
+
+	out := captureStdout(t, func() {
+		if err := runCapacityReset(ctx, paths, "ci", false, false, false); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
+	})
+	if !strings.Contains(out, "1 demand floor(s)") {
+		t.Errorf("reset output should name the demand floor it cleared, got:\n%s", out)
+	}
+	if !strings.Contains(out, "myrepo/ci") {
+		t.Errorf("reset output should name the repo-scoped key it reached, got:\n%s", out)
+	}
+
+	st2, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st2.Close() }()
+	prof, err := st2.GetPipelineProfile(ctx, "myrepo/ci", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prof != nil {
+		t.Errorf("floor row should be gone after reset, got %+v", prof)
+	}
+}
+
+// TestRunCapacityReset_SaysNothingIsStoredWhenNothingIs holds the verb honest
+// in the other direction: the wider bare-name reach must not turn "there is
+// genuinely no profile" into a claim that something was cleared.
+func TestRunCapacityReset_SaysNothingIsStoredWhenNothingIs(t *testing.T) {
+	paths := orchestrator.PathsAt(t.TempDir())
+	ctx := context.Background()
+	out := captureStdout(t, func() {
+		if err := runCapacityReset(ctx, paths, "ci", false, false, false); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
+	})
+	if !strings.Contains(out, `nothing stored under "ci" to reset`) {
+		t.Errorf("reset output should say nothing is stored, got:\n%s", out)
+	}
+	if strings.Contains(out, "demand floor(s)") {
+		t.Errorf("reset output should not claim it cleared anything, got:\n%s", out)
+	}
+}
+
 func TestBarePipeline_StripsRepoScope(t *testing.T) {
 	if got := barePipeline("myrepo/ci"); got != "ci" {
 		t.Errorf("barePipeline(myrepo/ci) = %q, want ci", got)

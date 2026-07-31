@@ -46,8 +46,11 @@ var (
 	// ErrNeverAdmissible reports a request no release can satisfy: a
 	// semaphore claim whose cost exceeds its own declared capacity, or host
 	// memory demand above this machine's memory budget. Host CPU demand above
-	// this machine's total is capped and serialized alone.
-	ErrNeverAdmissible = errors.New("admission: request exceeds a semaphore's own capacity")
+	// this machine's total is capped and serialized alone. The wrapped text
+	// carries the arithmetic that settled it, so a caller can show the
+	// operator what was asked for against what exists rather than parking the
+	// request in a queue it can never leave.
+	ErrNeverAdmissible = errors.New("admission: request can never be admitted")
 	// ErrDuplicateID reports a participant ID that already holds or waits.
 	ErrDuplicateID = errors.New("admission: participant id already holds or waits")
 	// ErrUnknownLease reports an operation against a lease ID the ledger
