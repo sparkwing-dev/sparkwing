@@ -2,6 +2,7 @@ package localws
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path/filepath"
 
@@ -38,21 +39,21 @@ type pipelineArg struct {
 // repos.yaml order is preserved so users can promote a primary
 // checkout above feature worktrees of the same project.
 //
-// The handler is best-effort: an unreadable repos.yaml, a missing
-// `.sparkwing/`, or a malformed pipelines.yaml in any one repo
-// degrades to "skip that repo" rather than 5xx-ing the whole probe --
-// a broken side checkout shouldn't black-hole the picker.
+// A missing or malformed pipelines.yaml in one checkout is skipped so a
+// broken side checkout does not black-hole the picker. The registry itself
+// is authoritative: if it is unreadable, returning an empty fleet would hide
+// the failure and misrepresent every registered checkout as absent.
 func aggregatedPipelinesHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, _ *http.Request) {
 		out := pipelinesResponse{Pipelines: map[string]pipelineEntry{}}
 		path, err := repos.DefaultPath()
 		if err != nil {
-			writeJSON(w, out)
+			http.Error(w, fmt.Sprintf("resolve repository registry: %v", err), http.StatusInternalServerError)
 			return
 		}
 		cfg, err := repos.Load(path)
 		if err != nil {
-			writeJSON(w, out)
+			http.Error(w, fmt.Sprintf("read repository registry: %v", err), http.StatusInternalServerError)
 			return
 		}
 		for _, e := range cfg.Repos {

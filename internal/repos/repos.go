@@ -14,6 +14,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
 // Entry is one registered repo. Path is the only required field;
@@ -41,12 +43,20 @@ type Config struct {
 
 // DefaultPath returns the resolved repos.yaml path. Honors
 // SPARKWING_REPOS > XDG_CONFIG_HOME > $HOME, mirroring profile.go.
+//
+// A test binary that set neither override gets a disposable sandbox
+// instead of the developer's registry. This file is the laptop's fleet
+// registry, so a fixture that writes it does not just dirty a scratch
+// file: it decides what `hooks survey` and every --fleet sweep can see.
 func DefaultPath() (string, error) {
 	if v := os.Getenv("SPARKWING_REPOS"); v != "" {
 		return v, nil
 	}
 	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
 		return filepath.Join(v, "sparkwing", "repos.yaml"), nil
+	}
+	if paths.UnderTest() {
+		return filepath.Join(paths.TestSandbox(), "config", "sparkwing", "repos.yaml"), nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -73,9 +83,34 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Save writes cfg to path atomically: marshal, write tmp, rename.
-// Creates parent dirs as needed. 0644 because repos.yaml is just
-// pointers to checkouts -- no secrets, fine for casual sharing.
+// Save writes cfg to path atomically: marshal, write a private temp
+// file, fsync it, rename over the target. Creates parent dirs as needed.
+// 0644 because repos.yaml is just pointers to checkouts -- no secrets,
+// fine for casual sharing.
+//
+// The temp file gets a unique name from os.CreateTemp. It used to be the
+// fixed path+".tmp", which made the rename atomic against a crash but
+// not against a second writer. Concurrent registration is normal here,
+// because every `sparkwing run` auto-registers on startup and the
+// orchestrator runs pipeline jobs in parallel, and with one shared
+// staging name those writers collide: each opens it with O_TRUNC, and
+// the first rename moves it out from under everyone else, so the losers
+// fail with ENOENT. main.go discards AutoRegister's error, so that loss
+// was silent. The regression test beside this file reproduces it against
+// the old code on every run.
+//
+// Whether the same collision is what corrupted the registry BW-1457 was
+// opened over is not settled. Two writers sharing a descriptor target
+// can strand the tail of a longer write past the end of a shorter one,
+// which is the shape of the damage found (a stray "e" after the
+// fallback_paths key, where the file's last entry is "- ~/code"), but a
+// direct reproduction of the byte interleaving did not fire on APFS,
+// where each write lands in one syscall. The unique name removes the
+// whole class either way.
+//
+// The fsync is what makes the rename mean anything after a power loss:
+// without it the directory entry can land while the contents are still
+// in the page cache.
 func Save(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -85,9 +120,26 @@ func Save(path string, cfg *Config) error {
 	if err != nil {
 		return fmt.Errorf("marshal repos: %w", err)
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, buf, 0o644); err != nil {
+	f, err := os.CreateTemp(dir, ".repos-*.yaml")
+	if err != nil {
+		return fmt.Errorf("create temp file in %s: %w", dir, err)
+	}
+	tmp := f.Name()
+	defer func() { _ = os.Remove(tmp) }()
+	if _, err := f.Write(buf); err != nil {
+		_ = f.Close()
 		return fmt.Errorf("write %s: %w", tmp, err)
+	}
+	if err := f.Chmod(0o644); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("chmod %s: %w", tmp, err)
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("sync %s: %w", tmp, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close %s: %w", tmp, err)
 	}
 	if err := os.Rename(tmp, path); err != nil {
 		return fmt.Errorf("rename %s: %w", tmp, err)
@@ -101,6 +153,13 @@ func Save(path string, cfg *Config) error {
 // is set -- a feature-branch worktree shouldn't silently shadow
 // main's pipelines for cross-repo lookups, but power users who
 // orchestrate from worktrees can opt in.
+//
+// It also skips checkouts under the system temp directory, because a
+// scaffolded repo there is deleted minutes later and the entry it leaves
+// can never resolve again. 307 of the 457 entries in the registry
+// BW-1457 was opened over were exactly that: scratch repos the
+// template-verify pipeline job creates with os.MkdirTemp, runs
+// `sparkwing run` inside, and removes.
 func AutoRegister(absPath string) error {
 	if os.Getenv("SPARKWING_NO_AUTO_REGISTER") == "1" {
 		return nil
@@ -111,6 +170,9 @@ func AutoRegister(absPath string) error {
 	abs, err := filepath.Abs(absPath)
 	if err != nil {
 		return fmt.Errorf("absolute %s: %w", absPath, err)
+	}
+	if underTempDir(abs) {
+		return nil
 	}
 	kind, err := repoKind(abs)
 	if err != nil {
@@ -373,6 +435,49 @@ func hasSparkwingDir(absPath string) bool {
 		return false
 	}
 	return fi.IsDir()
+}
+
+// underTempDir reports whether abs sits inside the system temp
+// directory.
+//
+// Each side is compared in both its raw and its symlink-resolved form,
+// because macOS hands out /var/folders/... temp paths that are really
+// /private/var/folders/..., and EvalSymlinks only resolves a path that
+// already exists. A checkout sparkwing is about to create resolves to
+// nothing, so matching resolved-against-resolved alone would miss
+// exactly the scratch directories this filter is for.
+func underTempDir(abs string) bool {
+	roots := symlinkForms(os.TempDir())
+	targets := symlinkForms(abs)
+	for _, root := range roots {
+		for _, target := range targets {
+			if withinDir(root, target) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// symlinkForms returns the cleaned path and, when it resolves, its
+// symlink-resolved twin.
+func symlinkForms(p string) []string {
+	out := []string{filepath.Clean(p)}
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		if c := filepath.Clean(r); c != out[0] {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// withinDir reports whether target is dir or sits beneath it.
+func withinDir(dir, target string) bool {
+	rel, err := filepath.Rel(dir, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // pathsEqual compares two filesystem paths after Clean+Abs+

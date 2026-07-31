@@ -1,0 +1,212 @@
+package repos
+
+import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+)
+
+// TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile reproduces the
+// corruption BW-1457 was opened over. With the old fixed path+".tmp"
+// staging name, concurrent writers shared one file descriptor target,
+// interleaved their bytes and renamed the mixture over the registry.
+// Every writer here saves a config of a different length on purpose: it
+// is the length difference that strands a tail of the longer write past
+// the end of the shorter one, which is what a stray character after a
+// key actually is.
+func TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "repos.yaml")
+	const writers = 24
+
+	var wg sync.WaitGroup
+	errs := make([]error, writers)
+	start := make(chan struct{})
+	for i := range writers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cfg := &Config{FallbackPaths: []string{"~/code"}}
+			for j := 0; j <= i*8; j++ {
+				cfg.Repos = append(cfg.Repos, &Entry{Path: fmt.Sprintf("/checkout/number-%d-%d", i, j)})
+			}
+			<-start
+			errs[i] = Save(path, cfg)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("writer %d failed: %v", i, err)
+		}
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("the registry %d concurrent writers left does not parse: %v", writers, err)
+	}
+	if len(cfg.FallbackPaths) != 1 || cfg.FallbackPaths[0] != "~/code" {
+		t.Errorf("fallback_paths came out as %v, want exactly [~/code]: the file is a blend of two writes", cfg.FallbackPaths)
+	}
+	if len(cfg.Repos) == 0 {
+		t.Error("the surviving registry has no entries, so no single writer's config won")
+	}
+	for _, e := range cfg.Repos {
+		if !strings.HasPrefix(e.Path, "/checkout/number-") {
+			t.Fatalf("entry %q is not a whole path any writer wrote", e.Path)
+		}
+	}
+}
+
+// TestSave_LeavesNoStagingFilesBehind guards the cleanup: a temp name
+// per writer is only an improvement if the losers are removed, or the
+// config directory fills with .repos-*.yaml debris.
+func TestSave_LeavesNoStagingFilesBehind(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "repos.yaml")
+	for i := range 5 {
+		if err := Save(path, &Config{Repos: []*Entry{{Path: fmt.Sprintf("/r%d", i)}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "repos.yaml" {
+			t.Errorf("staging file %q survived the save", e.Name())
+		}
+	}
+}
+
+// TestSave_AFailedWriteLeavesThePreviousRegistryIntact is the mutation
+// check for the atomic write: make the save fail and confirm the file it
+// was replacing is still there and still parses. A read-only config
+// directory is the cheapest way to fail a save after the caller already
+// has a good file on disk.
+func TestSave_AFailedWriteLeavesThePreviousRegistryIntact(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "repos.yaml")
+	good := &Config{Repos: []*Entry{{Path: "/keep/me"}}, FallbackPaths: []string{"~/code"}}
+	if err := Save(path, good); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	if err := Save(path, &Config{Repos: []*Entry{{Path: "/never/lands"}}}); err == nil {
+		t.Fatal("Save into a read-only directory reported success")
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the previous registry is gone after a failed save: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Errorf("a failed save rewrote the registry:\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("the surviving registry does not parse: %v", err)
+	}
+	if len(cfg.Repos) != 1 || cfg.Repos[0].Path != "/keep/me" {
+		t.Errorf("the surviving registry lost its entry: %+v", cfg.Repos)
+	}
+}
+
+// killSentinel makes the test binary re-enter itself as the child of the
+// interrupt test below, saving to the registry named in the variable.
+const killSentinel = "SPARKWING_TEST_SAVE_UNTIL_KILLED"
+
+// TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact is the
+// harsher mutation check: a real process is SIGKILLed while it is
+// looping over Save, so it dies at an arbitrary point in the write
+// rather than at a seam the test chose. Whatever it was doing, the
+// registry has to be one of the two whole versions, never a blend.
+func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T) {
+	if os.Getenv(killSentinel) != "" {
+		saveUntilKilled(os.Getenv(killSentinel))
+		return
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "repos.yaml")
+	good := &Config{Repos: []*Entry{{Path: "/keep/me"}}, FallbackPaths: []string{"~/code"}}
+	if err := Save(path, good); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.Command(os.Args[0],
+		"-test.run", "^TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact$")
+	cmd.Env = append(os.Environ(), killSentinel+"="+path)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start child: %v", err)
+	}
+	waitForGrowth(t, path)
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill child: %v", err)
+	}
+	_ = cmd.Wait()
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("the registry a killed writer left does not parse: %v", err)
+	}
+	if len(cfg.Repos) == 0 {
+		t.Fatal("the registry came back empty, so the kill lost the file")
+	}
+	for _, e := range cfg.Repos {
+		if e.Path != "/keep/me" && !strings.HasPrefix(e.Path, "/child/") {
+			t.Errorf("entry %q belongs to neither the original nor the child config", e.Path)
+		}
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "repos.yaml" && !strings.HasPrefix(e.Name(), ".repos-") {
+			t.Errorf("unexpected leftover %q", e.Name())
+		}
+	}
+}
+
+// saveUntilKilled writes an ever-growing registry to path until the
+// parent kills the process. The config grows so each write takes long
+// enough that the kill has a good chance of landing inside one.
+func saveUntilKilled(path string) {
+	cfg := &Config{FallbackPaths: []string{"~/code"}}
+	for i := 0; ; i++ {
+		cfg.Repos = append(cfg.Repos, &Entry{Path: fmt.Sprintf("/child/checkout-%06d", i)})
+		if err := Save(path, cfg); err != nil {
+			return
+		}
+	}
+}
+
+// waitForGrowth blocks until the child has landed at least one save of
+// its own, so the kill lands during real work rather than during the
+// child's startup.
+func waitForGrowth(t *testing.T, path string) {
+	t.Helper()
+	for range 20000 {
+		cfg, err := Load(path)
+		if err == nil && len(cfg.Repos) > 200 {
+			return
+		}
+	}
+	t.Fatal("the child never wrote a registry large enough to interrupt")
+}

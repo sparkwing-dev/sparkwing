@@ -49,6 +49,20 @@ code change to unlock.
 ## [Unreleased]
 ### Fixed
 
+- **config:** the repo registry is written through a uniquely named staging
+  file instead of a shared `repos.yaml.tmp`. Concurrent writers no longer
+  collide on the staging file, and staged contents are synced before rename.
+
+- **config:** automatic registration skips checkouts under the system temp
+  directory so short-lived fixture repos do not accumulate as dead entries.
+  Explicit registration still accepts them, and `sparkwing xrepo prune`
+  removes entries after their checkouts disappear.
+
+- **config:** test binaries without an explicit Sparkwing config override use
+  a disposable sandbox instead of the developer's real configuration and
+  state directories. Behavior outside test binaries is unchanged.
+
+
 - **cli:** `sparkwing queue`'s `EXTERNAL` column reports the host reading
   again instead of a residual. It used to derive external as capacity minus
   held, reserved and available, so once pressure pushed available to its

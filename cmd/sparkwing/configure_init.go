@@ -159,7 +159,10 @@ func profileSummary(path string) string {
 
 func repoSummary(path string) string {
 	cfg, err := repos.Load(path)
-	if err != nil || cfg == nil {
+	if err != nil {
+		return "repository registry is unreadable"
+	}
+	if cfg == nil {
 		return "registered laptop checkouts for cross-repo pipeline lookup"
 	}
 	n := len(cfg.Repos)
