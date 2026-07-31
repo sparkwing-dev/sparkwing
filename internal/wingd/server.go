@@ -117,7 +117,7 @@ func New(cfg Config) (*Daemon, error) {
 	}
 	sampler := cfg.Sampler
 	if sampler == nil {
-		sampler = platformSampler{}
+		sampler = &platformSampler{}
 	}
 	procSampler := cfg.ProcSampler
 	if procSampler == nil {

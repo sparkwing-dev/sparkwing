@@ -14,18 +14,30 @@ type HostStat struct {
 	TotalCores float64
 	// TotalMemoryBytes is the machine's physical memory.
 	TotalMemoryBytes uint64
-	// LoadAverage is the 1-minute run-queue load average, an estimate of
-	// how many cores' worth of work is currently demanded.
+	// LoadAverage is the 1-minute run-queue load average: how many threads
+	// are runnable or waiting on uninterruptible I/O. It counts demand, not
+	// cores consumed, and the two diverge widely on an I/O-heavy box, so it
+	// drives the contention signal and never the capacity subtraction.
 	LoadAverage float64
+	// BusyCores is host CPU utilization expressed in cores, so 2.5 means
+	// two and a half cores' worth of instructions executing. This is the
+	// figure admission subtracts from capacity, because it is the one
+	// denominated in the same unit as the cores a run is granted.
+	BusyCores float64
 	// FreeMemoryBytes is memory the OS reports as available for new
 	// allocations.
 	FreeMemoryBytes uint64
 	// LoadMeasured reports that LoadAverage came from a host reading.
 	// False means the sampler could not look, so LoadAverage carries no
-	// measurement: admission subtracts no external cores and the queue
-	// view prints the dimension as unmeasured instead of a number. A
-	// sampler that leaves this false is read as blind, never as idle.
+	// measurement and the queue view prints the dimension as unmeasured
+	// instead of a number. A sampler that leaves this false is read as
+	// blind, never as idle.
 	LoadMeasured bool
+	// CPUMeasured is LoadMeasured's counterpart for BusyCores. False
+	// subtracts no external cores at all: admission may not charge a run
+	// against pressure nobody looked at, and a machine reported full by a
+	// sensor that never read is one no run can ever enter.
+	CPUMeasured bool
 	// MemoryMeasured is LoadMeasured's counterpart for FreeMemoryBytes.
 	MemoryMeasured bool
 }
@@ -39,11 +51,26 @@ type HostSampler interface {
 	Sample() (HostStat, error)
 }
 
-// platformSampler reads real host metrics for the current OS.
-type platformSampler struct{}
+// platformSampler reads real host metrics for the current OS. It carries
+// the CPU tracker across calls because platforms that expose cumulative
+// counters derive utilization from the change between two readings, so a
+// stateless sampler could only ever report the machine's since-boot
+// average rather than what it is doing now.
+type platformSampler struct {
+	cpu cpuTracker
+}
 
-// Sample returns a live [HostStat] for the host it runs on.
-func (platformSampler) Sample() (HostStat, error) { return sampleHost() }
+// Sample returns a live [HostStat] for the host it runs on. The first call
+// on a delta-based platform leaves CPU unmeasured, having nothing to
+// difference against yet; the next one reports.
+func (p *platformSampler) Sample() (HostStat, error) {
+	stat, err := sampleHost()
+	if err != nil {
+		return stat, err
+	}
+	stat.BusyCores, stat.CPUMeasured = p.cpu.busyCores(stat.TotalCores)
+	return stat, nil
+}
 
 // ProcSampler reads a process tree's recent CPU usage as a fraction of
 // one core (1.0 means one core fully busy). The daemon consults it at a
