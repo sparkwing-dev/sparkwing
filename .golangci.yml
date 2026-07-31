@@ -1,5 +1,15 @@
 # golangci-lint v2 configuration.
-# Run: golangci-lint run ./...
+#
+# Two invocations, because one does not read the whole file. The linters:
+# block runs under `golangci-lint run ./...`; the formatters: block at the
+# bottom of this file runs only under `golangci-lint fmt ./...`, which is a
+# separate subcommand in v2. A tree can pass `run` forever while every file
+# in it drifts from the formatters configured here, and for two months this
+# one did.
+#
+# Both are wired into the gate: the lint step walks every committed module
+# and the formatters step holds the staged Go files (.sparkwing/jobs/
+# lint_contention.go and pre_commit.go).
 #
 # The rule set is a balance between catching real bugs (staticcheck,
 # errcheck, errorlint, bodyclose) and avoiding noise on legitimate
@@ -294,6 +304,33 @@ issues:
   # Baseline the pre-existing findings on main so lint only fails on NEW
   # issues a change introduces. Unchanged code is grandfathered; the whole
   # diff is still linted. Same convention as the sibling wing repos.
+  #
+  # What it is currently forgiving, measured at ff9dc07e:
+  #
+  #   GOLANGCI_LINT_CACHE=$(mktemp -d) golangci-lint run ./... \
+  #     --new-from-merge-base= --max-issues-per-linter=0 --max-same-issues=0
+  #
+  # 111 findings in the root module, 0 in .sparkwing/. forbidigo 27,
+  # errorlint 20, gofumpt 17, errcheck 15, misspell 15, staticcheck 7,
+  # goimports 3, govet 3, unconvert 2, bodyclose 1, depguard 1. A loan whose
+  # size nobody restates is a loan nobody repays, so the command above is the
+  # pointer: anyone can regenerate the number rather than trust this comment.
+  #
+  # All three parts of that command line matter, which is why it is written
+  # out rather than described. Drop the two max- flags and the same tree
+  # reports 49, because golangci-lint truncates at 50 per linter and 3 per
+  # repeated finding by default and forbidigo alone loses 21. Drop the
+  # isolated cache and it reports 206, because a golangci-lint cache shared
+  # between sibling git worktrees returns findings from whichever worktree
+  # analyzed the content first: 63 of those 206 name paths under ../bw-*
+  # that do not exist in this checkout. 49, 111 and 206 are the same tree
+  # measured three ways, and only the middle one is the count.
+  #
+  # The gate resolves origin/main itself before it lints. Handed a ref it
+  # cannot resolve golangci-lint drops the baseline silently and reports the
+  # whole standing debt against whatever commit is in front of it, so the
+  # step fails on the missing ref instead -- see resolveLintBaseline in
+  # .sparkwing/jobs/lint_contention.go.
   new-from-merge-base: origin/main
 
 formatters:

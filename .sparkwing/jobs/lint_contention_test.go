@@ -14,7 +14,7 @@ import (
 )
 
 func TestLintCommandWaitsForTheBoxWideLockInsteadOfFailingOnIt(t *testing.T) {
-	got := lintCommand(false)
+	got := lintCommandFor(".", false)
 	if !strings.Contains(got, "--allow-serial-runners") {
 		t.Fatalf("the gate would fail on a neighboring lint instead of waiting for it: %s", got)
 	}
@@ -25,13 +25,17 @@ func TestLintCommandWaitsForTheBoxWideLockInsteadOfFailingOnIt(t *testing.T) {
 // thing serializing lint when no wingd slot is held, so dropping it
 // without the slot would leave concurrent linters with nothing bounding
 // them at all. This is the corruption case, not a performance case.
+//
+// It matters more now than when it was written. The step runs one command
+// per committed module, so a regression here drops the lock once per
+// module rather than once per gate.
 func TestLintCommandNeverDropsTheToolLockWithoutABudget(t *testing.T) {
-	withoutBudget := lintCommand(false)
+	withoutBudget := lintCommandFor(".", false)
 	if strings.Contains(withoutBudget, "--allow-parallel-runners") {
 		t.Fatalf("lint dropped its own lock while holding no budget: %s", withoutBudget)
 	}
 
-	withBudget := lintCommand(true)
+	withBudget := lintCommandFor(".", true)
 	if !strings.Contains(withBudget, "--allow-parallel-runners") {
 		t.Fatalf("lint kept the serializing lock while holding a budget, so the budget buys nothing: %s", withBudget)
 	}
@@ -64,6 +68,41 @@ func TestLintBudgetIsBoxScoped(t *testing.T) {
 	}
 	if got := lintBudget.Limit().OnLimit; got != sparkwing.Queue {
 		t.Fatalf("lint budget on-limit is %q, so a contended gate fails instead of waiting", got)
+	}
+}
+
+// Lint cost is bimodal: a cold run draws 2.67-4.84 average cores and a
+// warm one 1.04-2.60. Pricing the budget at the warm mode is the tempting
+// wrong answer, because it is the mode most runs exhibit once a cache is
+// hot, and it would let the box admit four concurrent linters that each
+// want three to four cores the moment any of them runs cold. Caches here
+// are per-worktree (BW-1223) and worktrees are disposable, so cold is the
+// common case and the safe one to price.
+//
+// This does not forbid re-pricing. It forbids re-pricing to a number below
+// what a cold lint was measured to draw without also changing what makes
+// cold rare, which is a cache that survives a worktree.
+func TestLintCostIsPricedForTheColdRunNotTheWarmOne(t *testing.T) {
+	if lintCoreCost < measuredColdCoreDemand {
+		t.Fatalf("lint is priced at %.2f cores against a cold run measured at %.2f, so a full "+
+			"budget of concurrent lints demands more cores than the box has",
+			lintCoreCost, measuredColdCoreDemand)
+	}
+}
+
+// The command has to name the module it lints, or the walk runs the same
+// directory once per module and the widened scope is decorative. The
+// budget flag must survive that, because the two concerns landed in this
+// one function from two different branches.
+func TestLintCommandNamesTheModuleItLints(t *testing.T) {
+	for _, dir := range []string{".", ".sparkwing", "tools"} {
+		got := lintCommandFor(dir, true)
+		if !strings.Contains(got, `cd "`+dir+`"`) {
+			t.Errorf("the command does not enter %q: %s", dir, got)
+		}
+		if !strings.Contains(got, "--allow-parallel-runners") {
+			t.Errorf("the per-module command lost the budget flag for %q: %s", dir, got)
+		}
 	}
 }
 

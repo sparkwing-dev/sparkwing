@@ -24,24 +24,70 @@ const lintLockWait = 5 * time.Minute
 // default, still produces it, and it must not read as a finding.
 const golangciContention = "parallel golangci-lint is running"
 
-// Lint concurrency is decided by two numbers measured on 2026-07-30 in
-// two real worktrees on this box (10 cores, 16 GB):
+// Lint concurrency is decided by two numbers, re-derived on 2026-07-30
+// against the widened scope this step now covers. Measured on this box
+// (10 cores, 16 GB) with `/usr/bin/time -l` and a fresh isolated cache,
+// under real agent load, so the core figures are floors rather than
+// ceilings: a linter that wants more than the box has spare cannot show
+// it wanted more.
 //
-//	cold repo-wide lint   43.0s at 4.03 avg cores, 50.1s at 3.44, 2.5 GB peak RSS
-//	warm repo-wide lint    2.0s at ~3.5 avg cores, 134 MB peak RSS
+//	cold root module   43.9s-67.3s at 2.67-3.80 avg cores, 2.1-2.7 GB peak RSS
+//	cold .sparkwing/   11.3s-18.5s at 3.25-4.84 avg cores, 2.6-2.7 GB peak RSS
+//	warm, either module     2s-3s at 1.04-2.60 avg cores, 100-130 MB peak RSS
 //
-// Cold is the number that matters because GOLANGCI_LINT_CACHE is scoped
-// per worktree (BW-1223), so every fresh agent worktree pays a cold lint
-// on its first gate. Cores set the budget rather than memory because
-// wingd's external memory reading is currently pinned at 80% of capacity
-// and is not a real measurement (BW-1454), while its core reading is.
+// Lint cost is bimodal, not distributed, and those two rows are the two
+// modes. 4.0 is the cold mode. It is deliberately NOT an average of the
+// two, because an average is a number no run ever exhibits: it
+// over-admits against cold and under-admits against warm, and the mode
+// that decides safety is the expensive one.
 //
-// lintCoreCost ASSUMES THE CURRENT LINT SCOPE. BW-1455 will widen lint
-// from `.sparkwing/` alone to the whole product tree, which makes a lint
-// materially more expensive and must re-derive this one number. It is a
-// cost in cores rather than a slot count precisely so that widening the
-// scope changes one measured constant instead of a hand-tuned N.
+// Cold is priced because cold is the common case here, not the rare one.
+// GOLANGCI_LINT_CACHE is scoped per worktree (BW-1223), so every fresh
+// agent worktree pays a cold lint on its first gate, and fresh worktrees
+// are how this fleet works. That premise is the whole justification, so
+// it is the thing to check before touching this number: if lint caches
+// ever become reusable across worktrees, cold becomes the exception and
+// this should be re-derived downward, deliberately rather than by
+// noticing the warm number and rounding to it.
+//
+// Pricing the warm mode today would be unsafe rather than merely
+// optimistic. At 2.0 the budget admits four concurrent lints; four cold
+// linters want 12-16 cores on a 10-core box, which is the
+// oversubscription the budget exists to prevent, on a machine that has
+// already been observed in swap.
+//
+// Cores set the budget rather than memory because wingd's external memory
+// reading is currently pinned at 80% of capacity and is not a real
+// measurement (BW-1454), while its core reading is.
+//
+// Widening the scope did not move this number, which is worth stating
+// because it is the opposite of what it looks like. lintCoreCost prices
+// what ONE linter demands while the slot is held, and the step below runs
+// its modules one at a time inside a single slot, so the instantaneous
+// demand is one linter's either way. `.sparkwing/` was never the small
+// module it reads as: its go.mod replaces the SDK with `..`, so linting it
+// already type-checked the whole parent tree, which is why it measures the
+// same 3-5 cores the root module does and why the widening roughly doubled
+// total CPU rather than multiplying it by ten.
+//
+// What the widening did move is how long the slot is held: about 15s cold
+// for `.sparkwing/` alone against about 55s cold for both modules. That is
+// paid in queue wait, not in cores, and it is not what this constant
+// expresses.
+//
+// Raising it anyway would be a regression rather than caution. Grantable
+// capacity here is 8 cores, so 4.0 admits two concurrent lints and 5.0
+// admits one, and admitting one is exactly the box-wide serialization the
+// budget was built to remove.
 const lintCoreCost = 4.0
+
+// measuredColdCoreDemand is the lowest average core draw a cold lint was
+// measured at, across both modules. It exists so the cold mode is a
+// number the tests can hold lintCoreCost against rather than a claim in
+// the comment above: pricing the budget below what a cold run actually
+// draws lets the box admit more concurrent linters than it has cores to
+// run, and the warm mode is the tempting wrong answer that would do it.
+const measuredColdCoreDemand = 2.67
 
 // lintReserveCores is what the budget leaves for the rest of the machine,
 // matching the admission daemon's own reserve so the lint budget cannot
@@ -76,7 +122,15 @@ func lintSlotCost() int {
 	return cost
 }
 
-// lintCommand builds this repo's only golangci-lint command line.
+// lintBaselineRef is the ref .golangci.yml grandfathers findings against
+// (issues.new-from-merge-base). The gate resolves it itself because
+// golangci-lint does not: handed a ref it cannot resolve, the linter
+// lints the whole tree and exits 1 without ever saying the baseline went
+// missing. Across the modules this step now covers that is every standing
+// finding in the repo reported as if the commit in front of it wrote them.
+const lintBaselineRef = "origin/main"
+
+// lintCommandFor builds the golangci-lint line for one module directory.
 //
 // The flag is the whole point of the budget. --allow-parallel-runners
 // drops golangci-lint's private box-wide lock, which is safe only while
@@ -88,25 +142,44 @@ func lintSlotCost() int {
 // Passing the parallel flag without holding the slot would leave nothing
 // serializing lint at all, so the caller decides by whether it was
 // granted, never by configuration.
-func lintCommand(holdsBudget bool) string {
+func lintCommandFor(dir string, holdsBudget bool) string {
 	flag := "--allow-serial-runners"
 	if holdsBudget {
 		flag = "--allow-parallel-runners"
 	}
-	return "cd .sparkwing && golangci-lint run " + flag + " ./..."
+	return fmt.Sprintf("cd %q && golangci-lint run %s ./...", dir, flag)
 }
 
-// runGolangciLint lints the .sparkwing module under the box-wide
+// runGolangciLint lints every committed Go module under the box-wide
 // lintBudget, waiting out any other golangci-lint on the box for up to
-// lintLockWait. On a fixed-workdir k8s runner it seeds the cache from the
-// blob store before running and saves the result after a clean run. The
-// returned error already reads as a gate failure line, so a caller
-// collecting failures can take it unchanged.
+// lintLockWait. It walks committedModuleDirs rather than naming a module,
+// so the product tree (cmd/, internal/, pkg/, sparkwing/) is covered
+// alongside .sparkwing/ and a module added later is covered the day its
+// go.mod lands. Before this walked the tree the step ran inside
+// .sparkwing/ alone and reported the repo healthy while never opening 90%
+// of it.
 //
-// The budget is held around the linter only, not the whole job, because a
-// gate step that serializes a linter must free the budget the moment the
-// linter exits rather than pin it through the rest of a multi-minute
-// pre-push run.
+// It prints the modules and the baseline it is judging against before it
+// runs any of them, because a step that narrows its own scope is
+// indistinguishable from a step that found nothing, and that is how the
+// .sparkwing-only scope survived for two months.
+//
+// One slot covers the whole walk rather than one per module. Taking and
+// releasing the budget per module would let another box-wide linter in
+// between this step's own modules, which is the oversubscription the
+// budget exists to prevent, and it would pay the queue wait once per
+// module on a busy box. The cost of that choice is that lintLockWait now
+// bounds every module together instead of one invocation.
+//
+// The walk and the baseline are resolved before the slot is taken. Both
+// are cheap local git reads, and a checkout that cannot name its baseline
+// should fail without first occupying box-wide capacity it is only going
+// to give back.
+//
+// On a fixed-workdir k8s runner it seeds the cache from the blob store
+// before running and saves the result after a clean run. The returned
+// error already reads as a gate failure line, so a caller collecting
+// failures can take it unchanged.
 func runGolangciLint(ctx context.Context) error {
 	gcURL := os.Getenv("SPARKWING_GITCACHE_URL")
 	gcToken := os.Getenv("SPARKWING_CACHE_TOKEN")
@@ -118,6 +191,16 @@ func runGolangciLint(ctx context.Context) error {
 	case restored:
 		sparkwing.Info(ctx, "lint cache: restored %d bytes from blob store", restoredBytes)
 	}
+
+	dirs, err := committedModuleDirs(ctx)
+	if err != nil {
+		return fmt.Errorf("golangci-lint: could not run -- listing the modules to lint failed: %w", err)
+	}
+	baseline, err := resolveLintBaseline(ctx)
+	if err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "golangci-lint: %s", describeLintScope(dirs, baseline))
 
 	release, holdsBudget := sparkwing.ToolSlot(ctx, lintBudget, lintSlotCost())
 	defer release()
@@ -133,12 +216,26 @@ func runGolangciLint(ctx context.Context) error {
 	defer cancel()
 
 	lintStart := time.Now()
-	_, err := sparkwing.Bash(lintCtx, lintCommand(holdsBudget)).
-		Env("GOLANGCI_LINT_CACHE", cacheDir).
-		Run()
+	var failures []string
+	for _, dir := range dirs {
+		if empty, emptyErr := moduleHasNoPackages(lintCtx, dir); emptyErr == nil && empty {
+			sparkwing.Info(lintCtx, "golangci-lint: %s holds no packages to lint", dir)
+			continue
+		}
+		stepStart := time.Now()
+		if _, runErr := sparkwing.Bash(lintCtx, lintCommandFor(dir, holdsBudget)).
+			Env("GOLANGCI_LINT_CACHE", cacheDir).
+			Run(); runErr != nil {
+			failures = append(failures,
+				fmt.Sprintf("%s: %s", dir, describeLintFailure(lintCtx, time.Since(stepStart), runErr)))
+			continue
+		}
+		sparkwing.Info(lintCtx, "golangci-lint: %s clean (%s)", dir, time.Since(stepStart).Round(time.Second))
+	}
 	lintDur := time.Since(lintStart)
-	if err != nil {
-		return errors.New(describeLintFailure(lintCtx, lintDur, err))
+	if len(failures) > 0 {
+		return fmt.Errorf("golangci-lint failed in %d of %d module(s):\n  - %s",
+			len(failures), len(dirs), strings.Join(failures, "\n  - "))
 	}
 
 	savedBytes, saveErr := sparkwing.SaveLintCache(ctx, gcURL, gcToken)
@@ -149,6 +246,54 @@ func runGolangciLint(ctx context.Context) error {
 		sparkwing.Info(ctx, "lint cache: saved %d bytes (lint ran %s)", savedBytes, lintDur.Round(time.Second))
 	}
 	return nil
+}
+
+// describeLintScope is the line the step prints before it lints anything.
+// It names every module it is about to cover and the baseline it will
+// judge them against, because an exit code cannot tell a reader whether
+// the step looked at the repo or at a tenth of it. That is not a
+// hypothetical distinction here: the step read .sparkwing/ alone from
+// 2026-05-20 and its silence was indistinguishable from a clean repo.
+func describeLintScope(dirs []string, baseline string) string {
+	return fmt.Sprintf("scope is %d committed module(s) -- %s (%s)",
+		len(dirs), strings.Join(dirs, ", "), baseline)
+}
+
+// resolveLintBaseline describes the baseline the lint run will be judged
+// against, and fails the step when the ref does not resolve. Failing here
+// is the cheaper red: the fix is one `git fetch origin main`, where the
+// alternative is golangci-lint quietly dropping the baseline and charging
+// the author for every finding the repo has ever grandfathered. A check
+// that cannot tell new code from old must say so rather than guess.
+func resolveLintBaseline(ctx context.Context) (string, error) {
+	sha, err := sparkwing.Bash(ctx,
+		`git -C "$SPARKWING_WORKDIR" rev-parse --verify --quiet "$LINT_BASELINE_REF^{commit}"`,
+	).Env("SPARKWING_WORKDIR", sparkwing.Path()).
+		Env("LINT_BASELINE_REF", lintBaselineRef).
+		String()
+	sha = strings.TrimSpace(sha)
+	if err != nil || sha == "" {
+		return "", fmt.Errorf("golangci-lint: could not run -- .golangci.yml baselines findings against "+
+			"%s and this checkout cannot resolve it, so the linter would report every standing "+
+			"finding in the tree against this change. Run `%s`", lintBaselineRef, fetchBaselineHint())
+	}
+	if len(sha) > 12 {
+		sha = sha[:12]
+	}
+	return fmt.Sprintf("baseline %s at %s", lintBaselineRef, sha), nil
+}
+
+// fetchBaselineHint turns the configured baseline ref into the fetch that
+// would make it resolvable. Derived rather than written out, because the
+// thing that went missing is whatever .golangci.yml names, and a hint that
+// says "git fetch origin main" to somebody whose baseline is a different
+// remote or default branch sends them to fix a ref they do not have.
+func fetchBaselineHint() string {
+	remote, branch, ok := strings.Cut(lintBaselineRef, "/")
+	if !ok || remote == "" || branch == "" {
+		return "git fetch --all"
+	}
+	return fmt.Sprintf("git fetch %s %s", remote, branch)
 }
 
 // describeLintFailure says what is known about a failed lint step. The

@@ -259,7 +259,7 @@ func TestEachMandatoryStepWaitsOnTheOneBeforeIt(t *testing.T) {
 	if _, err := (&PreCommit{}).Work(w); err != nil {
 		t.Fatal(err)
 	}
-	chain := []string{"gofmt", "vet", "build", "test"}
+	chain := []string{"gofmt", "formatters", "vet", "build", "test", "lint"}
 	for i := 1; i < len(chain); i++ {
 		if w.StepByID(chain[i]) == nil {
 			t.Errorf("the gate must run step %q", chain[i])
@@ -351,6 +351,120 @@ func TestRegexSweepAllReadsPastTheStagedChange(t *testing.T) {
 	t.Setenv("SPARKWING_REGEX_SWEEP_ALL", "1")
 	if err := checkEmDashes(ctx); err == nil {
 		t.Fatal("the whole-tree audit missed an em dash outside the staged change")
+	}
+}
+
+// gofumptDrift is formatted for gofmt and not for gofumpt: gofumpt's extra
+// rules collapse the empty line after the opening brace. gofmt passing it is
+// the point -- gofmt is the only formatting the gate enforced, and gofumpt
+// with extra-rules is a strict superset of it, so a tree stays gofmt-clean
+// and formatter-dirty indefinitely.
+const gofumptDrift = "package internal\n\nfunc Drifted() int {\n\n\treturn 1\n}\n"
+
+// formattersFixtureConfig is the formatters: block this repo ships. The
+// fixture needs it because `golangci-lint fmt` with no config runs gofmt
+// alone, which would pass every case below and prove nothing.
+const formattersFixtureConfig = `version: "2"
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra-rules: true
+    goimports:
+      local-prefixes:
+        - github.com/sparkwing-dev
+`
+
+// withFormattersConfig gives the fixture repo the formatters this repo
+// configures.
+func withFormattersConfig(t *testing.T, root string) {
+	t.Helper()
+	writeGoFile(t, filepath.Join(root, ".golangci.yml"), formattersFixtureConfig)
+}
+
+// The formatters step reads the staged change, so drift the commit did not
+// touch never charges an unrelated author. Twenty files in the product tree
+// are drifting today; a gate that reds on all of them is a gate somebody
+// passes --no-verify within a day.
+func TestFormattersIgnoreAFileTheCommitDoesNotTouch(t *testing.T) {
+	root := gateFixtureRepo(t)
+	ctx := context.Background()
+	requireGolangciLint(t)
+	withFormattersConfig(t, root)
+
+	writeGoFile(t, filepath.Join(root, "internal", "drifted.go"), gofumptDrift)
+	gitCommitAll(t, root, "drift the commit does not touch")
+
+	writeGoFile(t, filepath.Join(root, "internal", "clean.go"),
+		"package internal\n\nfunc Clean() int { return 2 }\n")
+	gitAddAll(t, root)
+
+	if err := runFormatters(ctx); err != nil {
+		t.Errorf("the formatters step charged the commit for untouched drift: %v", err)
+	}
+}
+
+// The narrowing must not disarm the check: drift the commit stages is still
+// refused, and gofmt passing the same file is what makes the step worth
+// running at all.
+func TestFormattersRefuseDriftTheStagedChangeIntroduces(t *testing.T) {
+	root := gateFixtureRepo(t)
+	ctx := context.Background()
+	requireGolangciLint(t)
+	withFormattersConfig(t, root)
+	gitCommitAll(t, root, "clean base")
+
+	writeGoFile(t, filepath.Join(root, "internal", "drifted.go"), gofumptDrift)
+	gitAddAll(t, root)
+
+	if err := runGofmt(ctx); err != nil {
+		t.Fatalf("gofmt must pass this file, or the step under test is redundant: %v", err)
+	}
+	err := runFormatters(ctx)
+	if err == nil {
+		t.Fatal("the formatters step passed staged gofumpt drift")
+	}
+	if !strings.Contains(err.Error(), "drifted.go") {
+		t.Errorf("the failure does not name the file to fix: %v", err)
+	}
+	if !strings.Contains(err.Error(), "golangci-lint fmt") {
+		t.Errorf("the failure does not name the command that fixes it: %v", err)
+	}
+}
+
+// Third-party Go arriving through npm is not this repo's to format, and a
+// dependency update must not be able to red a commit that did not cause it.
+func TestStagedGoFilesSkipsNodeModules(t *testing.T) {
+	root := gateFixtureRepo(t)
+	gitCommitAll(t, root, "clean base")
+
+	writeGoFile(t, filepath.Join(root, "web", "node_modules", "flatted", "golang", "f.go"), gofumptDrift)
+	writeGoFile(t, filepath.Join(root, "internal", "mine.go"),
+		"package internal\n\nfunc Mine() int { return 2 }\n")
+	gitAddAll(t, root)
+
+	files, err := stagedGoFiles(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range files {
+		if strings.Contains(f, "node_modules/") {
+			t.Errorf("the formatters step would format vendored npm Go: %s", f)
+		}
+	}
+	if len(files) != 1 || files[0] != "internal/mine.go" {
+		t.Errorf("the staged Go files are wrong: %v", files)
+	}
+}
+
+// requireGolangciLint skips when the linter is not installed, which is the
+// one honest thing to do: a step that cannot run must not report a pass.
+func requireGolangciLint(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("golangci-lint"); err != nil {
+		t.Skip("golangci-lint not available")
 	}
 }
 

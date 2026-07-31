@@ -6,9 +6,11 @@
 # build / lint / test / static-analysis / release pipelines that
 # operate on this repo's OSS surface (SDK, CLI, embedded docs).
 pipelines:
-  # pre-commit: fast local gate (gofmt + go vet on .sparkwing/, repo-
-  # wide regex sweeps for em dashes and internal tracker IDs). Fires
-  # automatically after `sparkwing pipeline hooks install`.
+  # pre-commit: fast local gate. gofmt, vet, build, test and golangci-lint
+  # run in every committed Go module (the repo root and .sparkwing/); the
+  # formatters check and the regex sweeps for em dashes and internal
+  # tracker IDs read the staged change. Fires automatically after
+  # `sparkwing pipeline hooks install`.
   - name: pre-commit
     entrypoint: PreCommit
     on:

@@ -3,6 +3,7 @@ package jobs
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -14,10 +15,12 @@ import (
 )
 
 // PreCommit gates local commits with fast deterministic checks. gofmt,
-// vet, build and test cover every committed Go module -- the repo root,
-// where the SDK, CLI and server live, as well as .sparkwing/ -- so a
-// commit cannot introduce product code that does not compile or does not
-// pass its tests; the two regex sweeps cover the staged change for
+// vet, build, test and lint cover every committed Go module -- the repo
+// root, where the SDK, CLI and server live, as well as .sparkwing/ -- so a
+// commit cannot introduce product code that does not compile, does not
+// pass its tests, or trips the blessed linter set; the formatters step
+// holds the staged Go files to gofumpt and goimports, which `golangci-lint
+// run` does not check; the two regex sweeps cover the staged change for
 // em dashes and internal tracker IDs (IMP-, SDK-, LOCAL-, RUN-, ORG-,
 // REG-, TOD-); the docs-mirror check fails when docs/ (the source) and
 // pkg/docs/mirror/ (the embedded copy) have drifted, so an edit to docs/
@@ -29,11 +32,11 @@ import (
 type PreCommit struct{ sparkwing.Base }
 
 func (PreCommit) ShortHelp() string {
-	return "Fast pre-commit gate: format, vet, build, test, em-dash + tracker-ID sweeps, docs-mirror sync, comment policy"
+	return "Fast pre-commit gate: format, vet, build, test, lint, em-dash + tracker-ID sweeps, docs-mirror sync, comment policy"
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test in every committed Go module (today the repo root and .sparkwing/), plus checks on the staged change: no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted). Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted). The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -50,8 +53,14 @@ func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.No
 // Work orders the chain cheapest-first, each step waiting on the one
 // before it, so the first failure stops the run and the author waits on
 // the cheapest verdict a broken tree can produce rather than on the
-// whole suite. Measured on this repo, warm: gofmt 0.2s, vet 1.7s,
-// build 24s, test 88s.
+// whole suite. Measured on this repo, warm: gofmt 0.2s, formatters 0.2s,
+// vet 1.7s, build 24s, test 88s, lint 2.6s.
+//
+// lint sits last against its warm cost because the cost that decides the
+// order is the cold one: a golangci-lint cache the box has not filled
+// yet takes 81s on the root module and 26s on .sparkwing/, which is the
+// same tier as test. It also needs a tree that compiles, which is what
+// build and test establish.
 //
 // The four sweeps stay parallel. Nothing downstream waits on them and
 // each finishes in well under a second (docs-mirror 0.02s, comments
@@ -59,9 +68,11 @@ func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.No
 // any work.
 func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	gofmtStep := sparkwing.Step(w, "gofmt", runGofmt)
-	vetStep := sparkwing.Step(w, "vet", runVet).Needs(gofmtStep)
+	formattersStep := sparkwing.Step(w, "formatters", runFormatters).Needs(gofmtStep)
+	vetStep := sparkwing.Step(w, "vet", runVet).Needs(formattersStep)
 	buildStep := sparkwing.Step(w, "build", runBuild).Needs(vetStep)
-	sparkwing.Step(w, "test", runTest).Needs(buildStep)
+	testStep := sparkwing.Step(w, "test", runTest).Needs(buildStep)
+	sparkwing.Step(w, "lint", runGolangciLint).Needs(testStep)
 	sparkwing.Step(w, "em-dashes", checkEmDashes)
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
@@ -81,6 +92,79 @@ func checkComments(ctx context.Context) error {
 
 func runGofmt(ctx context.Context) error {
 	return sparkwing.Bash(ctx, `gofmt -l .`).MustBeEmpty("files need formatting")
+}
+
+// runFormatters fails when a staged Go file does not match the formatters
+// .golangci.yml configures -- gofumpt with extra rules and goimports with
+// this repo's local prefix. `golangci-lint run` never reads that block: in
+// v2 the formatters apply only under the `fmt` subcommand, so the config
+// was decorative from the day it landed and gofmt, a strict subset of
+// gofumpt, was the only formatting the gate enforced.
+//
+// Scoped to the staged Go files, for cost. `golangci-lint fmt` has no
+// cache, so it re-reads whatever it is pointed at every time it runs:
+// measured on a clean tree, 37.5s and 38.3s over `./...` against 0.28s
+// over the five files a commit typically stages. That is a third of this
+// chain's runtime for a check that answers in a quarter of a second.
+//
+// The scope also forgives exactly the code the change did not touch and
+// stops forgiving it the moment somebody touches it, which is the bargain
+// issues.new-from-merge-base strikes for the linters, at file rather than
+// line granularity. That property is why re-drift cannot accumulate into
+// something that blocks an unrelated commit.
+//
+// The tree is fully formatted as of the 20-file cleanup, so a whole-tree
+// check would pass today and the cost is the only live argument for
+// staged scope. It was not always the only one, and it will not be if the
+// tree drifts again, which is worth knowing before anyone widens this on
+// the grounds that it is currently green. `golangci-lint fmt ./...` is the
+// whole-tree audit, off the critical path of an unrelated commit.
+func runFormatters(ctx context.Context) error {
+	files, err := stagedGoFiles(ctx)
+	if err != nil {
+		return err
+	}
+	if len(files) == 0 {
+		return nil
+	}
+	quoted := make([]string, 0, len(files))
+	for _, f := range files {
+		quoted = append(quoted, fmt.Sprintf("%q", f))
+	}
+	sparkwing.Info(ctx, "formatters: checking %d staged Go file(s)", len(files))
+
+	_, runErr := sparkwing.Bash(ctx, "golangci-lint fmt --diff "+strings.Join(quoted, " ")).Capture()
+	if runErr == nil {
+		return nil
+	}
+	var execErr *sparkwing.ExecError
+	if errors.As(runErr, &execErr) && strings.TrimSpace(execErr.Stdout) != "" {
+		return fmt.Errorf("staged files do not match the configured formatters; run `golangci-lint fmt %s`:\n%s",
+			strings.Join(files, " "), strings.TrimSpace(execErr.Stdout))
+	}
+	return fmt.Errorf("golangci-lint fmt: %w", runErr)
+}
+
+// stagedGoFiles returns the Go files the commit adds or changes, as paths
+// relative to the repo root. Deletions are excluded because there is no
+// content left to format, and web/node_modules is excluded because
+// third-party Go arriving through npm is not this repo's to format.
+func stagedGoFiles(ctx context.Context) ([]string, error) {
+	all, err := sparkwing.Bash(ctx, `git diff --cached --name-only --diff-filter=ACMR`).Lines()
+	if err != nil {
+		return nil, fmt.Errorf("list the staged change: %w", err)
+	}
+	out := make([]string, 0, len(all))
+	for _, f := range all {
+		if !strings.HasSuffix(f, ".go") || strings.Contains(f, "node_modules/") {
+			continue
+		}
+		if _, statErr := os.Stat(filepath.Join(regexCheckRoot(), f)); statErr != nil {
+			continue
+		}
+		out = append(out, f)
+	}
+	return out, nil
 }
 
 // checkDocsMirror fails when the embedded pkg/docs/mirror/ has drifted
