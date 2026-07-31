@@ -41,6 +41,8 @@ func TestParseProcStatCPU_RejectsNonNumericField(t *testing.T) {
 	}
 }
 
+// TestBusyCoresFromTotals_ScalesTheBusyShareAcrossCores works 250 busy ticks
+// of a 1000-tick span, a quarter of eight cores.
 func TestBusyCoresFromTotals_ScalesTheBusyShareAcrossCores(t *testing.T) {
 	t.Parallel()
 	prev := cpuTotals{busy: 100, total: 1000}
@@ -49,7 +51,6 @@ func TestBusyCoresFromTotals_ScalesTheBusyShareAcrossCores(t *testing.T) {
 	if !ok {
 		t.Fatal("a forward-moving span is a measurement")
 	}
-	// 250 busy ticks of a 1000-tick span is a quarter of eight cores.
 	if got != 2 {
 		t.Errorf("busy cores = %v, want 2", got)
 	}
