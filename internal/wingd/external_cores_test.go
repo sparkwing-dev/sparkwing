@@ -7,9 +7,38 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
+type countingHostSampler struct {
+	stat  HostStat
+	calls int
+}
+
+func (s *countingHostSampler) Sample() (HostStat, error) {
+	s.calls++
+	return s.stat, nil
+}
+
 // coresEpsilon absorbs the float error in a reserve computed as a fraction
 // of the core count and carried through the ledger's milli-core integers.
 const coresEpsilon = 0.01
+
+func TestCapacityRefreshReusesTheHeadroomSample(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0.2)
+	sampler := &countingHostSampler{stat: HostStat{
+		TotalCores:       8,
+		TotalMemoryBytes: ledgerMemory,
+		FreeMemoryBytes:  ledgerMemory,
+		LoadMeasured:     true,
+		CPUMeasured:      true,
+		MemoryMeasured:   true,
+	}}
+	d.sampler = sampler
+
+	d.refreshHostSample(true)
+
+	if sampler.calls != 1 {
+		t.Fatalf("capacity and headroom refresh sampled %d times, want one shared reading", sampler.calls)
+	}
+}
 
 // TestApplyHeadroom_ExternalCoresAreCoresNotQueuedThreads pins the defect
 // this sensor was added for. Admission subtracted the run-queue load
