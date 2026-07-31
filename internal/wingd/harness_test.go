@@ -25,6 +25,8 @@ func newFakeSampler(cores float64, mem uint64) *fakeSampler {
 		TotalCores:       cores,
 		TotalMemoryBytes: mem,
 		FreeMemoryBytes:  mem,
+		LoadMeasured:     true,
+		MemoryMeasured:   true,
 	}}
 }
 

@@ -59,6 +59,8 @@ func startWingd(t *testing.T, home string, cores float64) {
 			TotalCores:       cores,
 			TotalMemoryBytes: 64 << 30,
 			FreeMemoryBytes:  64 << 30,
+			LoadMeasured:     true,
+			MemoryMeasured:   true,
 		}},
 		HeadroomFraction: -1,
 		GraceWindow:      -1,
@@ -1757,6 +1759,7 @@ func TestWingd_DaemonFirstCancelRecoversStalledHolderWithoutDashboard(t *testing
 		Version: "test",
 		Sampler: stubSampler{wingd.HostStat{
 			TotalCores: 2, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30,
+			LoadMeasured: true, MemoryMeasured: true,
 		}},
 		HeadroomFraction: -1,
 		GraceWindow:      -1,

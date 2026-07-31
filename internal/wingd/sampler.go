@@ -20,6 +20,14 @@ type HostStat struct {
 	// FreeMemoryBytes is memory the OS reports as available for new
 	// allocations.
 	FreeMemoryBytes uint64
+	// LoadMeasured reports that LoadAverage came from a host reading.
+	// False means the sampler could not look, so LoadAverage carries no
+	// measurement: admission subtracts no external cores and the queue
+	// view prints the dimension as unmeasured instead of a number. A
+	// sampler that leaves this false is read as blind, never as idle.
+	LoadMeasured bool
+	// MemoryMeasured is LoadMeasured's counterpart for FreeMemoryBytes.
+	MemoryMeasured bool
 }
 
 // HostSampler reads the machine's capacity and live pressure. The daemon

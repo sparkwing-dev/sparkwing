@@ -281,6 +281,18 @@ type DrainAck struct {
 // so the queue view can explain a wait that free capacity alone cannot.
 // These headroom fields are zero for semaphore rows and for older daemons
 // that predate them.
+// Values for [ResourceState.ExternalSource].
+const (
+	// ExternalMeasured marks an External figure that came from a live host
+	// reading.
+	ExternalMeasured = "measured"
+	// ExternalUnmeasured marks a dimension the host sampler could not read.
+	// Renderers print the word, never a byte or core count, because a
+	// substituted number in a measurement's format is what made a healthy
+	// machine read as full.
+	ExternalUnmeasured = "unmeasured"
+)
+
 type ResourceState struct {
 	Key      string  `json:"key"`
 	Capacity float64 `json:"capacity"`
@@ -289,8 +301,16 @@ type ResourceState struct {
 	// reserve). Zero for semaphore rows.
 	Reserved float64 `json:"reserved,omitempty"`
 	// External is the measured load from processes the daemon did not
-	// admit -- other apps, the OS. Zero for semaphore rows.
+	// admit -- other apps, the OS. Zero for semaphore rows. Read it only
+	// together with ExternalSource: a zero here means "no external load"
+	// when the source is measured and "nobody looked" when it is not.
 	External float64 `json:"external,omitempty"`
+	// ExternalSource says where External came from:
+	// [ExternalMeasured] for a host reading, [ExternalUnmeasured] when the
+	// sampler could not read this dimension, in which case External carries
+	// no measurement and admission subtracted none. Empty for semaphore
+	// rows and for daemons that predate the field.
+	ExternalSource string `json:"external_source,omitempty"`
 	// Available is what a new run can actually draw right now: capacity
 	// minus the reserve, minus external load, minus what sparkwing
 	// already holds, floored at zero. This, not Capacity-Held, is what
@@ -461,6 +481,12 @@ type QueueState struct {
 	// reading, but admission does not subtract it. False for older daemons
 	// and the default configuration.
 	IgnoreExternal bool `json:"ignore_external,omitempty"`
+	// ExternalSampleAgeMS is how old the host reading behind the External
+	// and Available columns is, in milliseconds. The daemon re-applies a
+	// reading only once it moves past a deadband, so those columns can trail
+	// the newest sample and a figure with no age cannot be told from a live
+	// one. Zero when no reading has been applied yet.
+	ExternalSampleAgeMS int64 `json:"external_sample_age_ms,omitempty"`
 	// CapacityChange records the most recent time the daemon re-derived a
 	// different machine capacity while running (a hot VM resize or a cgroup
 	// quota edit), for the queue header. Nil when capacity has held steady

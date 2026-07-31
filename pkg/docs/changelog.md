@@ -47,6 +47,27 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **cli:** `sparkwing queue`'s `EXTERNAL` column reports the host reading
+  again instead of a residual. It used to derive external as capacity minus
+  held, reserved and available, so once pressure pushed available to its
+  zero floor the column stopped depending on the sensor at all and printed
+  capacity minus the reserve -- exactly 80.0% of the machine on a 20%
+  reserve -- byte-identical across reads while real demand fell. Both host
+  dimensions now carry the figure the availability math ran on, and the view
+  prints that reading's age, because a reading held in force by the deadband
+  cannot otherwise be told from a live one.
+
+- **cli:** a host dimension the sampler could not read now says so. The macOS
+  sampler seeded free memory from `vm.page_free_count` and only overwrote it
+  when `kern.memorystatus_level` came back sane, so an unreadable level left
+  the free-page count standing -- 0.31 GiB of 16 on an idle box, which
+  reports 98% of the machine consumed in the same format as a real reading.
+  There is no fallback now: an unread dimension renders as `unmeasured`
+  rather than a figure, carries `"external_source": "unmeasured"` on the
+  wire, and has nothing subtracted from available, so a run is never held
+  back by pressure nobody measured.
 
 ## [v0.22.1] - 2026-07-30
 ### Added

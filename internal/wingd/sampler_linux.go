@@ -183,6 +183,10 @@ func (p *procSampler) pruneTreeLocked(root int, live map[int]struct{}) {
 	p.tree[root] = live
 }
 
+// sampleHost reads the machine's capacity and live pressure from Sysinfo.
+// A Sysinfo that returns is a reading of both dimensions, so both are
+// marked measured; MemAvailable only refines the memory figure and never
+// stands in for a read that failed.
 func sampleHost() (HostStat, error) {
 	stat := HostStat{TotalCores: float64(runtime.NumCPU())}
 
@@ -197,6 +201,8 @@ func sampleHost() (HostStat, error) {
 	stat.TotalMemoryBytes = uint64(si.Totalram) * unit
 	stat.FreeMemoryBytes = uint64(si.Freeram) * unit
 	stat.LoadAverage = float64(si.Loads[0]) / 65536.0
+	stat.LoadMeasured = true
+	stat.MemoryMeasured = true
 
 	if avail, ok := readMemAvailable(); ok {
 		stat.FreeMemoryBytes = avail

@@ -21,7 +21,9 @@ import {
   daemonUptimeLabel,
   driftNotes,
   eventsLine,
+  externalCell,
   externalPressureNote,
+  externalUnmeasuredNote,
   fmtAmount,
   fmtCost,
   fmtDuration,
@@ -183,6 +185,7 @@ function ResourcesSection({
   pressure: string;
 }) {
   const rows = qs.resources ?? [];
+  const unmeasured = externalUnmeasuredNote(qs);
   return (
     <Section title="Resources">
       <div className="overflow-x-auto rounded-lg border border-[var(--border)]">
@@ -234,7 +237,7 @@ function ResourcesSection({
                       {host ? fmtAmount(r.key, r.reserved ?? 0) : "-"}
                     </Td>
                     <Td right mono hideSm muted>
-                      {host ? fmtAmount(r.key, r.external ?? 0) : "-"}
+                      {externalCell(r, fmtAmount)}
                     </Td>
                     <Td right mono>
                       <span
@@ -254,6 +257,11 @@ function ResourcesSection({
           </tbody>
         </table>
       </div>
+      {unmeasured && (
+        <div className="mt-2">
+          <Callout tone="warning">{unmeasured}</Callout>
+        </div>
+      )}
       {pressure && (
         <div className="mt-2">
           <Callout tone="warning">{pressure}</Callout>

@@ -43,7 +43,7 @@ func fetchAgents(t *testing.T, baseURL string) map[string]controller.Agent {
 type e2eSampler struct{ cores float64 }
 
 func (s e2eSampler) Sample() (wingd.HostStat, error) {
-	return wingd.HostStat{TotalCores: s.cores, TotalMemoryBytes: 16 << 30, FreeMemoryBytes: 16 << 30}, nil
+	return wingd.HostStat{TotalCores: s.cores, TotalMemoryBytes: 16 << 30, FreeMemoryBytes: 16 << 30, LoadMeasured: true, MemoryMeasured: true}, nil
 }
 
 func startE2EDaemon(t *testing.T, home string, cores float64) {

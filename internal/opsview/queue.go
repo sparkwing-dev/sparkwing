@@ -52,7 +52,7 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 	for _, r := range qs.Resources {
 		fmt.Fprintf(w, "resource\t%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
 			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
-			fmtHeadroomCell(r.Key, r.Reserved), fmtHeadroomCell(r.Key, r.External),
+			fmtHeadroomCell(r.Key, r.Reserved), externalCell(r),
 			fmtAmount(r.Key, resourceAvailable(r)))
 	}
 	if c := qs.Container; c != nil {
@@ -66,6 +66,14 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 	}
 	if qs.IgnoreExternal {
 		fmt.Fprintln(w, "external\tignored")
+	}
+	for _, r := range qs.Resources {
+		if isHostResource(r.Key) && r.ExternalSource == wingwire.ExternalUnmeasured {
+			fmt.Fprintf(w, "external\tunmeasured\t%s\n", r.Key)
+		}
+	}
+	if qs.ExternalSampleAgeMS > 0 {
+		fmt.Fprintf(w, "external-age\t%d\n", qs.ExternalSampleAgeMS)
 	}
 	for _, h := range qs.Holders {
 		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
@@ -116,7 +124,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	for _, r := range qs.Resources {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", r.Key,
 			fmtAmount(r.Key, r.Capacity), fmtAmount(r.Key, r.Held),
-			fmtHeadroomCell(r.Key, r.Reserved), fmtHeadroomCell(r.Key, r.External),
+			fmtHeadroomCell(r.Key, r.Reserved), externalCell(r),
 			fmtAmount(r.Key, resourceAvailable(r)))
 	}
 	_ = tw.Flush()
@@ -132,6 +140,12 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	}
 	if qs.IgnoreExternal {
 		fmt.Fprintln(out, "external: ignored (operator setting)")
+	}
+	if note := ExternalUnmeasuredNote(qs); note != "" {
+		fmt.Fprintln(out, note)
+	}
+	if note := ExternalAgeNote(qs); note != "" {
+		fmt.Fprintln(out, note)
 	}
 	if note := ExternalPressureNote(qs); note != "" {
 		fmt.Fprintf(out, "\n%s\n", note)
@@ -216,7 +230,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 // capacity-minus-held for a semaphore row (and for older daemons that sent no
 // Available).
 func resourceAvailable(r wingwire.ResourceState) float64 {
-	if isHostResource(r.Key) && (r.Available > 0 || r.Reserved > 0 || r.External > 0) {
+	if isHostResource(r.Key) && (r.Available > 0 || r.Reserved > 0 || r.External > 0 || r.ExternalSource != "") {
 		return r.Available
 	}
 	free := r.Capacity - r.Held
@@ -243,6 +257,51 @@ func fmtHeadroomCell(key string, v float64) string {
 		return "-"
 	}
 	return fmtAmount(key, v)
+}
+
+// externalCell renders the EXTERNAL column. A dimension the host sampler
+// could not read prints the word rather than a figure, because a
+// substituted number in the same format as a measurement is what made a
+// healthy machine read as fully consumed.
+func externalCell(r wingwire.ResourceState) string {
+	if !isHostResource(r.Key) {
+		return "-"
+	}
+	if r.ExternalSource == wingwire.ExternalUnmeasured {
+		return "unmeasured"
+	}
+	return fmtAmount(r.Key, r.External)
+}
+
+// ExternalUnmeasuredNote names the host dimensions the sampler could not
+// read, and states that nothing was subtracted for them. Empty when every
+// dimension was measured, and when the operator has already been told
+// external load is ignored outright.
+func ExternalUnmeasuredNote(qs wingwire.QueueState) string {
+	if qs.IgnoreExternal {
+		return ""
+	}
+	var keys []string
+	for _, r := range qs.Resources {
+		if isHostResource(r.Key) && r.ExternalSource == wingwire.ExternalUnmeasured {
+			keys = append(keys, r.Key)
+		}
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	return "external: unmeasured on " + strings.Join(keys, ", ") +
+		" (host sensor unavailable); no external load subtracted from available"
+}
+
+// ExternalAgeNote states how old the reading behind the external and
+// available columns is. Empty when the daemon reports no age, which is
+// every daemon that predates the field.
+func ExternalAgeNote(qs wingwire.QueueState) string {
+	if qs.ExternalSampleAgeMS <= 0 {
+		return ""
+	}
+	return "external reading: " + fmtElapsed(qs.ExternalSampleAgeMS) + " old"
 }
 
 func isHostResource(key string) bool { return key == "cores" || key == "memory" }

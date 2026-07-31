@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"context"
+	"fmt"
 	"math"
 	"time"
 )
@@ -67,10 +68,7 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	frac := d.cfg.headroomFraction()
 
 	reservedCores := frac * stat.TotalCores
-	externalCores := load - usedCores
-	if externalCores < 0 {
-		externalCores = 0
-	}
+	externalCores := coresExternal(stat, load, usedCores)
 	reservedMem, externalMem := memReserveAndExternal(stat, usedMem, frac)
 
 	admitExternalCores, admitExternalMem := externalCores, externalMem
@@ -83,11 +81,6 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	}
 	targetMem := headroomFromReserveExternal(stat.TotalMemoryBytes, reservedMem, admitExternalMem)
 
-	d.reservedCores = reservedCores
-	d.externalCores = externalCores
-	d.reservedMem = reservedMem
-	d.externalMem = externalMem
-
 	grantable := stat.TotalCores - reservedCores
 	saturated := grantable > 0 && externalCores >= contentionSaturationFraction*grantable
 	d.updateContentionLocked(saturated, d.cfg.sampleInterval().Milliseconds(), d.now())
@@ -96,11 +89,24 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	memBand := uint64(0.05 * float64(stat.TotalMemoryBytes))
 	changed := !d.headroomInit ||
 		math.Abs(targetCores-d.appliedCores) >= coresBand ||
-		absDiffU(targetMem, d.appliedMem) >= memBand
+		absDiffU(targetMem, d.appliedMem) >= memBand ||
+		d.loadMeasured != stat.LoadMeasured ||
+		d.memMeasured != stat.MemoryMeasured
 	if !changed {
 		d.mu.Unlock()
 		return
 	}
+	// safety: the decomposition is stored only past the deadband, with the
+	// headroom it produced. The queue view subtracts these from capacity to
+	// show what is available, so a fresher sample stored here would print a
+	// table that does not balance against the headroom admission is on.
+	d.reservedCores = reservedCores
+	d.externalCores = externalCores
+	d.reservedMem = reservedMem
+	d.externalMem = externalMem
+	d.loadMeasured = stat.LoadMeasured
+	d.memMeasured = stat.MemoryMeasured
+	d.headroomAt = d.now()
 	d.appliedCores = targetCores
 	d.appliedMem = targetMem
 	d.headroomInit = true
@@ -114,7 +120,11 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	deliveries := d.routeLocked(events)
 	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
-	d.cfg.logf("headroom: %.1f cores grantable (reserve %.1f, external %.1f)", targetCores, reservedCores, externalCores)
+	d.cfg.logf("headroom: %.1f cores grantable (reserve %.1f, external %s)", targetCores, reservedCores,
+		externalWord(stat.LoadMeasured, fmt.Sprintf("%.1f", externalCores)))
+	if !stat.MemoryMeasured {
+		d.cfg.logf("headroom: memory external unmeasured (host sensor unavailable); none subtracted")
+	}
 	d.flush(deliveries, snap)
 }
 
@@ -131,9 +141,15 @@ func headroomFromReserveExternal(total, reserved, external uint64) uint64 {
 
 // memReserveAndExternal decomposes the memory headroom into its reserve
 // margin and the memory consumed by processes the daemon did not admit,
-// for the queue view.
+// for the queue view. An unmeasured reading yields no external term at
+// all: subtracting a number the sampler never read is what pinned memory
+// headroom at zero on every box, and admission may not charge a run
+// against pressure nobody looked at.
 func memReserveAndExternal(stat HostStat, usedMem uint64, frac float64) (reserved, external uint64) {
 	reserved = uint64(frac * float64(stat.TotalMemoryBytes))
+	if !stat.MemoryMeasured {
+		return reserved, 0
+	}
 	if stat.TotalMemoryBytes >= stat.FreeMemoryBytes {
 		consumed := stat.TotalMemoryBytes - stat.FreeMemoryBytes
 		if consumed > usedMem {
@@ -141,6 +157,30 @@ func memReserveAndExternal(stat HostStat, usedMem uint64, frac float64) (reserve
 		}
 	}
 	return reserved, external
+}
+
+// coresExternal is the load the daemon did not admit: the smoothed run
+// queue minus what its own leases hold, floored at zero. It is zero when
+// the load average is unmeasured, on the same rule as the memory term.
+func coresExternal(stat HostStat, load, usedCores float64) float64 {
+	if !stat.LoadMeasured {
+		return 0
+	}
+	external := load - usedCores
+	if external < 0 {
+		return 0
+	}
+	return external
+}
+
+// externalWord renders an external-load figure for a log line, or the
+// word "unmeasured" when the sensor could not read the dimension, so a
+// blind reading never reads as a number in the log either.
+func externalWord(measured bool, value string) string {
+	if !measured {
+		return "unmeasured"
+	}
+	return value
 }
 
 // usedLocked sums the host resources currently held across all leases.

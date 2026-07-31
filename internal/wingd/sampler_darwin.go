@@ -156,29 +156,39 @@ func sampleHost() (HostStat, error) {
 		fscale := binary.LittleEndian.Uint64(raw[16:24])
 		if fscale > 0 {
 			stat.LoadAverage = float64(ldavg) / float64(fscale)
+			stat.LoadMeasured = true
 		}
 	}
 
-	pageSize := uint64(unix.Getpagesize())
-	if free, err := unix.SysctlUint32("vm.page_free_count"); err == nil {
-		stat.FreeMemoryBytes = uint64(free) * pageSize
-	}
-	if spec, err := unix.SysctlUint32("vm.page_speculative_count"); err == nil {
-		stat.FreeMemoryBytes += uint64(spec) * pageSize
-	}
-
-	// hack: page_free_count counts only truly free pages, so on macOS -- which
-	// parks most of RAM in reclaimable cache and the compressor -- it reads as
-	// near-zero even with gigabytes available, which would pin memory headroom
-	// at zero and wedge every memory-costed admission. memorystatus_level is
-	// the kernel's own percent-available figure (the darwin analog of Linux
-	// MemAvailable), so prefer it when sane.
-	if level, err := unix.SysctlUint32("kern.memorystatus_level"); err == nil && level > 0 && level <= 100 {
-		stat.FreeMemoryBytes = uint64(float64(stat.TotalMemoryBytes) * float64(level) / 100.0)
-	}
+	level, err := unix.SysctlUint32("kern.memorystatus_level")
+	stat.FreeMemoryBytes, stat.MemoryMeasured = darwinFreeMemory(stat.TotalMemoryBytes, level, err == nil)
 
 	if stat.TotalMemoryBytes == 0 {
 		return stat, fmt.Errorf("wingd: hw.memsize unavailable")
 	}
 	return stat, nil
+}
+
+// darwinFreeMemory turns kern.memorystatus_level, the kernel's own
+// percent-available figure, into an available-byte count. It is the darwin
+// analog of Linux MemAvailable and the only macOS reading that answers how
+// much memory new work can draw.
+//
+// There is deliberately no fallback under it. vm.page_free_count counts only
+// truly free pages, and macOS parks most of RAM in reclaimable cache and the
+// compressor, so on this repo's 16 GiB dev box it read 0.31 GiB free while
+// the machine sat idle (measured 2026-07-30). Standing that in reports 98% of
+// the box consumed, pins memory headroom at zero, and is indistinguishable
+// from a measurement of a full machine. A level outside 1..100 is treated the
+// same way, because a kernel figure of no memory at all on a box that is still
+// serving cannot be told apart from a sysctl nobody populated.
+//
+// An unreadable level reports (0, false): no bytes and no measurement, so
+// every caller has to decide what to do about the blindness rather than
+// inheriting a number.
+func darwinFreeMemory(total uint64, level uint32, read bool) (uint64, bool) {
+	if !read || level == 0 || level > 100 {
+		return 0, false
+	}
+	return uint64(float64(total) * float64(level) / 100.0), true
 }

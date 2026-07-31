@@ -122,6 +122,8 @@ type EvictionCount struct {
 	Key   string
 	Count int
 }
+const ExternalMeasured = "measured"
+const ExternalUnmeasured = "unmeasured"
 type Grant struct {
 	RunID      string
 	LeaseToken string
@@ -232,6 +234,8 @@ type QueueState struct {
 
 	IgnoreExternal bool
 
+	ExternalSampleAgeMS int64
+
 	CapacityChange *CapacityChange
 
 	Runners []RunnerHeadroom
@@ -264,6 +268,8 @@ type ResourceState struct {
 	Reserved float64
 
 	External float64
+
+	ExternalSource string
 
 	Available float64
 }

@@ -1132,6 +1132,11 @@ export interface QueueResource {
   held: number;
   reserved?: number;
   external?: number;
+  // external_source says where external came from: "measured" from a host
+  // reading, "unmeasured" when the sampler could not read this dimension,
+  // in which case external carries no measurement and admission subtracted
+  // none. Absent on semaphore rows and on daemons that predate the field.
+  external_source?: string;
   available?: number;
 }
 
@@ -1203,6 +1208,10 @@ export interface QueueState {
   daemon_version?: string;
   daemon_uptime_ms?: number;
   ignore_external?: boolean;
+  // external_sample_age_ms is how old the host reading behind the external
+  // and available columns is. The daemon re-applies a reading only once it
+  // moves past a deadband, so those columns can trail the newest sample.
+  external_sample_age_ms?: number;
   events?: QueueEvents | null;
 }
 

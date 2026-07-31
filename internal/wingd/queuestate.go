@@ -60,29 +60,29 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	heldCores := float64(usedMilli) / 1000.0
 	capMem := float64(snap.TotalMemoryBytes)
 	heldMem := float64(usedMem)
-	extCores, extMem := d.externalCores, float64(d.externalMem)
-	if !d.cfg.Budget.IgnoreExternal {
-		extCores = reconciledExternal(capCores, heldCores, d.reservedCores, grantCores)
-		extMem = reconciledExternal(capMem, heldMem, float64(d.reservedMem), grantMem)
-	}
 	qs.Resources = append(qs.Resources,
 		wingwire.ResourceState{
-			Key:       "cores",
-			Capacity:  capCores,
-			Held:      heldCores,
-			Reserved:  d.reservedCores,
-			External:  extCores,
-			Available: grantCores,
+			Key:            "cores",
+			Capacity:       capCores,
+			Held:           heldCores,
+			Reserved:       d.reservedCores,
+			External:       d.externalCores,
+			ExternalSource: externalSource(d.loadMeasured),
+			Available:      grantCores,
 		},
 		wingwire.ResourceState{
-			Key:       "memory",
-			Capacity:  capMem,
-			Held:      heldMem,
-			Reserved:  float64(d.reservedMem),
-			External:  extMem,
-			Available: grantMem,
+			Key:            "memory",
+			Capacity:       capMem,
+			Held:           heldMem,
+			Reserved:       float64(d.reservedMem),
+			External:       float64(d.externalMem),
+			ExternalSource: externalSource(d.memMeasured),
+			Available:      grantMem,
 		},
 	)
+	if d.headroomInit {
+		qs.ExternalSampleAgeMS = d.now().Sub(d.headroomAt).Milliseconds()
+	}
 	for _, ss := range snap.Semaphores {
 		qs.Resources = append(qs.Resources, wingwire.ResourceState{
 			Key:      ss.Key,
@@ -479,18 +479,14 @@ func minU64(a, b uint64) uint64 {
 	return b
 }
 
-// reconciledExternal is the external load implied by the headroom the
-// availability math used: capacity minus what is held, reserved, and left
-// grantable. Reporting this rather than the freshest raw sample keeps the
-// queue view's arithmetic exact -- capacity - held - reserved - external
-// equals available on screen -- since both the column and available then
-// derive from the same (deadbanded) headroom. Floored at zero.
-func reconciledExternal(capacity, held, reserved, available float64) float64 {
-	ext := capacity - held - reserved - available
-	if ext < 0 {
-		return 0
+// externalSource labels an external figure with where it came from, so a
+// dimension the sampler could not read is never read as one it measured
+// at zero.
+func externalSource(measured bool) string {
+	if measured {
+		return wingwire.ExternalMeasured
 	}
-	return ext
+	return wingwire.ExternalUnmeasured
 }
 
 // waitingOn names the resources a waiter cannot fit into right now: host
@@ -558,8 +554,8 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale 
 		extCores, extMem = 0, 0
 	}
 	avail := map[string]wingwire.ResourceState{
-		"cores":  {Key: "cores", Available: grantCores, External: extCores},
-		"memory": {Key: "memory", Available: grantMem, External: extMem},
+		"cores":  {Key: "cores", Available: grantCores, External: extCores, ExternalSource: externalSource(d.loadMeasured)},
+		"memory": {Key: "memory", Available: grantMem, External: extMem, ExternalSource: externalSource(d.memMeasured)},
 	}
 	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail, rationale)
 }
@@ -575,7 +571,7 @@ func hostBlockingReason(needCores, needMem float64, available map[string]wingwir
 	if needCores > 0 {
 		if r, ok := available["cores"]; ok && r.Available < needCores {
 			ext := ""
-			if r.External > 0 {
+			if r.External > 0 && r.ExternalSource != wingwire.ExternalUnmeasured {
 				ext = fmt.Sprintf(" (external load %s)", trimCores(r.External))
 			}
 			return fmt.Sprintf("needs %s cores%s; %s available%s", trimCores(needCores), costParen(rationale), trimCores(r.Available), ext)
@@ -584,7 +580,7 @@ func hostBlockingReason(needCores, needMem float64, available map[string]wingwir
 	if needMem > 0 {
 		if r, ok := available["memory"]; ok && r.Available < needMem {
 			ext := ""
-			if r.External > 0 {
+			if r.External > 0 && r.ExternalSource != wingwire.ExternalUnmeasured {
 				ext = fmt.Sprintf(" (external load %s)", humanBytesShort(r.External))
 			}
 			return fmt.Sprintf("needs %s%s; %s available%s", humanBytesShort(needMem), costParen(rationale), humanBytesShort(r.Available), ext)

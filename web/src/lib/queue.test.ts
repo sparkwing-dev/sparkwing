@@ -4,7 +4,9 @@ import type { QueueHolder, QueueState } from "./api.ts";
 import {
   daemonUptimeLabel,
   eventsLine,
+  externalCell,
   externalPressureNote,
+  externalUnmeasuredNote,
   fmtCost,
   fmtDuration,
   fmtETA,
@@ -105,6 +107,68 @@ describe("resourceAvailable", () => {
   });
   it("floors a negative remainder at zero", () => {
     assert.equal(resourceAvailable({ key: "deploy", capacity: 1, held: 3 }), 0);
+  });
+});
+
+describe("externalCell", () => {
+  // The measured and the unmeasured row carry identical figures, which is the
+  // whole problem: a sensor nobody could read and a machine with no external
+  // load produce the same numbers, so only the label separates them.
+  const row = { key: "memory", capacity: 17179869184, held: 0, external: 0 };
+  const fmt = (_key: string, v: number) => `${v} B`;
+
+  it("prints the word for a dimension nobody read", () => {
+    assert.equal(
+      externalCell({ ...row, external_source: "unmeasured" }, fmt),
+      "unmeasured",
+    );
+  });
+  it("prints the figure for a measured dimension", () => {
+    assert.equal(
+      externalCell({ ...row, external_source: "measured" }, fmt),
+      "0 B",
+    );
+  });
+  it("prints the figure for a daemon that predates the field", () => {
+    assert.equal(externalCell(row, fmt), "0 B");
+  });
+  it("leaves semaphore rows alone", () => {
+    assert.equal(
+      externalCell({ key: "deploy", capacity: 1, held: 0 }, fmt),
+      "-",
+    );
+  });
+});
+
+describe("externalUnmeasuredNote", () => {
+  it("names the dimension and says nothing was subtracted", () => {
+    const qs: QueueState = {
+      resources: [
+        { key: "cores", capacity: 8, held: 0, external_source: "measured" },
+        { key: "memory", capacity: 16, held: 0, external_source: "unmeasured" },
+      ],
+    };
+    assert.equal(
+      externalUnmeasuredNote(qs),
+      "External load is unmeasured on memory (host sensor unavailable); none was subtracted from available.",
+    );
+  });
+  it("stays quiet when every dimension was measured", () => {
+    const qs: QueueState = {
+      resources: [
+        { key: "cores", capacity: 8, held: 0, external_source: "measured" },
+      ],
+    };
+    assert.equal(externalUnmeasuredNote(qs), "");
+  });
+  it("stays quiet when the operator already turned external accounting off", () => {
+    const qs: QueueState = {
+      ignore_external: true,
+      resources: [
+        { key: "memory", capacity: 16, held: 0, external_source: "unmeasured" },
+      ],
+    };
+    assert.equal(externalUnmeasuredNote(qs), "");
   });
 });
 

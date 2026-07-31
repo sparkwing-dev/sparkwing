@@ -102,12 +102,44 @@ export function resourceAvailable(r: QueueResource): number {
   const available = r.available ?? 0;
   if (
     isHostResource(r.key) &&
-    (available > 0 || reserved > 0 || external > 0)
+    (available > 0 || reserved > 0 || external > 0 || !!r.external_source)
   ) {
     return available;
   }
   const free = r.capacity - r.held;
   return free < 0 ? 0 : free;
+}
+
+// EXTERNAL_UNMEASURED is the external_source a daemon sends for a host
+// dimension its sampler could not read.
+export const EXTERNAL_UNMEASURED = "unmeasured";
+
+// externalCell renders the EXTERNAL column. A dimension nobody read prints
+// the word rather than a figure, because a substituted number in the same
+// format as a measurement is what made a healthy machine read as fully
+// consumed.
+export function externalCell(
+  r: QueueResource,
+  fmtAmount: (key: string, v: number) => string,
+): string {
+  if (!isHostResource(r.key)) return "-";
+  if (r.external_source === EXTERNAL_UNMEASURED) return "unmeasured";
+  return fmtAmount(r.key, r.external ?? 0);
+}
+
+// externalUnmeasuredNote names the host dimensions the sampler could not
+// read and states that nothing was subtracted for them. Empty when every
+// dimension was measured, and when the operator has already been told
+// external load is ignored outright.
+export function externalUnmeasuredNote(qs: QueueState): string {
+  if (qs.ignore_external) return "";
+  const keys = (qs.resources ?? [])
+    .filter(
+      (r) => isHostResource(r.key) && r.external_source === EXTERNAL_UNMEASURED,
+    )
+    .map((r) => r.key);
+  if (keys.length === 0) return "";
+  return `External load is unmeasured on ${keys.join(", ")} (host sensor unavailable); none was subtracted from available.`;
 }
 
 // externalPressureNote returns the callout to show when non-sparkwing

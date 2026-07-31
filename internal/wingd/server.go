@@ -56,12 +56,23 @@ type Daemon struct {
 	appliedCores float64
 	appliedMem   uint64
 	// reservedCores/externalCores and their memory counterparts hold the
-	// most recent headroom decomposition for the queue view: the reserve
-	// margin and the measured non-sparkwing load per host dimension.
+	// headroom decomposition from the sample that set the applied headroom:
+	// the reserve margin and the measured non-sparkwing load per host
+	// dimension. They move only when the headroom does, so the queue view's
+	// external column and its available column come from the same reading.
 	reservedCores float64
 	externalCores float64
 	reservedMem   uint64
 	externalMem   uint64
+	// loadMeasured/memMeasured record whether that sample could read each
+	// dimension. False means the external figure is not a measurement and
+	// none was subtracted, which the queue view states rather than printing
+	// a number.
+	loadMeasured bool
+	memMeasured  bool
+	// headroomAt is when that sample was taken, so a reading the deadband
+	// has held in force can show its age instead of passing for live.
+	headroomAt time.Time
 
 	// machineCores/machineMemory are the effective capacity the budget and
 	// ledger are sized against: the host total, lowered to the container's

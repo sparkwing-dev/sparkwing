@@ -101,6 +101,7 @@ func (s *containerSensor) apply(stat HostStat) HostStat {
 	if coresClamped {
 		if load, ok := s.cpuUsageCores(); ok {
 			stat.LoadAverage = load
+			stat.LoadMeasured = true
 		}
 	}
 	if memClamped {
@@ -110,6 +111,7 @@ func (s *containerSensor) apply(stat HostStat) HostStat {
 				free = memBytes - used
 			}
 			stat.FreeMemoryBytes = free
+			stat.MemoryMeasured = true
 		}
 	}
 	if stat.FreeMemoryBytes > stat.TotalMemoryBytes {
