@@ -47,51 +47,26 @@ code change to unlock.
 ---
 
 ## [Unreleased]
-### Fixed
-
-- **cli:** `sparkwing queue`'s `EXTERNAL` column reports the host reading
-  again instead of a residual. It used to derive external as capacity minus
-  held, reserved and available, so once pressure pushed available to its
-  zero floor the column stopped depending on the sensor at all and printed
-  capacity minus the reserve -- exactly 80.0% of the machine on a 20%
-  reserve -- byte-identical across reads while real demand fell. Both host
-  dimensions now carry the figure the availability math ran on, and the view
-  prints that reading's age, because a reading held in force by the deadband
-  cannot otherwise be told from a live one.
-
-- **cli:** a host dimension the sampler could not read now says so. The macOS
-  sampler seeded free memory from `vm.page_free_count` and only overwrote it
-  when `kern.memorystatus_level` came back sane, so an unreadable level left
-  the free-page count standing -- 0.31 GiB of 16 on an idle box, which
-  reports 98% of the machine consumed in the same format as a real reading.
-  There is no fallback now: an unread dimension renders as `unmeasured`
-  rather than a figure, carries `"external_source": "unmeasured"` on the
-  wire, and has nothing subtracted from available, so a run is never held
-  back by pressure nobody measured.
-
 ### Added
 
-- **sdk:** `sparkwing.ToolSlot` takes a named box-wide budget from inside a
-  running job, for external tools that ship their own machine-wide lock the
-  admission daemon cannot see. A waiting step reports its queue position the
-  way a queued node does. `sparkwing.BoxToolBudget` builds the matching
-  `ConcurrencyGroup`, counted in hundredths of a core so widening what a tool
-  covers re-derives the concurrency from one measured number instead of a
-  hand-tuned slot count.
-- **cli:** `sparkwing queue` estimates a start time for a run waiting on a
-  named semaphore. Previously only host-capacity waits carried an ETA, so a
-  step queued behind a tool budget could report its position but never how
-  long.
+- **sdk:** `ToolSlot` coordinates external tools through a named, box-wide CPU
+  budget. Waiting steps report their queue position, and `BoxToolBudget`
+  derives concurrency from the tool's measured CPU cost.
+- **cli:** `sparkwing queue` now estimates start times for work waiting on
+  named concurrency limits.
 
-### Changed
+### Fixed
 
-- **sdk:** golangci-lint in this repo's own gates now runs under a box-wide
-  budget and passes `--allow-parallel-runners` while it holds one, instead of
-  serializing on golangci-lint's private lock. The private lock admits exactly
-  one linter per machine, so concurrent gates queued behind each other no
-  matter how much headroom the box had. `--allow-serial-runners` remains the
-  fallback whenever the budget is not held, because dropping the tool's lock
-  without a budget would leave nothing serializing lint at all.
+- **runner:** Host admission now subtracts measured CPU utilization instead
+  of run-queue length. I/O-bound workloads no longer make idle cores appear
+  occupied; contention detection still uses load average. Linux reads CPU
+  counters from `/proc/stat`, while macOS estimates utilization from the
+  process table.
+- **cli:** `sparkwing queue` reports the external-pressure reading used by
+  admission, including its age, instead of reconstructing a misleading
+  residual.
+- **cli:** Unread host metrics render as `unmeasured` and do not reduce
+  available capacity.
 
 ## [v0.22.1] - 2026-07-30
 ### Added
