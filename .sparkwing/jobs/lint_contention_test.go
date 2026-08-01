@@ -179,8 +179,8 @@ func TestDescribeLintFailureReportsRealFindingsUnchanged(t *testing.T) {
 
 // TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint verifies that
 // runGolangciLint sends a GET to the cache endpoint before golangci-lint runs.
-// The server returns 404 (no cached blob), so lint proceeds and is allowed to
-// fail if the binary is not installed; the assertion is on the GET itself.
+// The server returns 404 (no cached blob), then a stub linter keeps this cache
+// ordering test from paying for a full repository analysis.
 func TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint(t *testing.T) {
 	var gets atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -190,6 +190,12 @@ func TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint(t *testing.T) {
 		http.NotFound(w, r)
 	}))
 	t.Cleanup(srv.Close)
+	binDir := t.TempDir()
+	linter := filepath.Join(binDir, "golangci-lint")
+	if err := os.WriteFile(linter, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	t.Setenv("SPARKWING_GITCACHE_URL", srv.URL)
 	_ = runGolangciLint(context.Background())
