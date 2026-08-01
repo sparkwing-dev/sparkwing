@@ -111,7 +111,8 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 				Cores:       float64(ls.MilliCores) / 1000.0,
 				MemoryBytes: int64(ls.MemoryBytes),
 			},
-			Semaphores: claimKeys(ls.Claims),
+			Semaphores:     claimKeys(ls.Claims),
+			ConnectionOnly: !leaseHoldsResources(snap, ls),
 		}
 		if c := d.byRun[ls.RequestID]; c != nil {
 			h.Pipeline = c.pipeline
@@ -231,6 +232,23 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	annotateETA(&qs, snap)
 	annotateSemaphoreETA(&qs, snap)
 	return qs
+}
+
+// leaseHoldsResources reports whether a lease owns any positive live grant.
+// A run-registration lease can be present with zero host cost and no
+// semaphore cost; that is a connection, not admitted work.
+func leaseHoldsResources(snap admission.Snapshot, ls admission.LeaseState) bool {
+	if ls.MilliCores > 0 || ls.MemoryBytes > 0 {
+		return true
+	}
+	for _, sem := range snap.Semaphores {
+		for _, hold := range sem.Holds {
+			if hold.Lease == ls.ID && !hold.Superseded && hold.Cost > 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func annotateAdmissionWaiting(qs *wingwire.QueueState) {

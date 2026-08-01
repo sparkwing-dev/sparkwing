@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
@@ -817,6 +818,96 @@ func TestLivenessFloor_AdmitsSoleRunUnderExternalLoad(t *testing.T) {
 		t.Fatalf("second run resolved without queueing: lease=%v err=%v", r.lease, r.err)
 	case <-time.After(2 * time.Second):
 		t.Fatal("second run neither queued nor resolved")
+	}
+}
+
+// TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead reproduces the
+// multi-run stall from BW-1557. Run registrations keep several live daemon
+// connections and zero-cost leases while their node-level resource requests
+// wait behind one real grant. When that grant releases under total external
+// pressure, exactly the FIFO head must bootstrap; the remaining nodes stay
+// queued behind its positive host charge.
+func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
+	home := shortHome(t)
+	sampler := newFakeSampler(8, 16<<30)
+	sampler.set(wingd.HostStat{
+		TotalCores:       8,
+		TotalMemoryBytes: 16 << 30,
+		FreeMemoryBytes:  1 << 30,
+		LoadAverage:      100,
+		LoadMeasured:     true,
+		MemoryMeasured:   true,
+	})
+	startDaemon(t, wingd.Config{Home: home, Sampler: sampler})
+
+	for i := 1; i <= 3; i++ {
+		registration := ensure(t, home, "")
+		mustAcquire(t, registration, wingwire.AdmissionRequest{
+			RunID:          fmt.Sprintf("run-%d", i),
+			SemaphoresOnly: true,
+		})
+	}
+
+	blockerClient := ensure(t, home, "")
+	blocker := mustAcquire(t, blockerClient, wingwire.AdmissionRequest{
+		RunID:      "real-holder",
+		CostSource: wingwire.CostSourceMeasured,
+		Resources:  wingwire.HostResources{Cores: 1, MemoryBytes: 1 << 30},
+	})
+
+	results := make([]<-chan acquireResult, 3)
+	for i := range results {
+		cl := ensure(t, home, "")
+		positions, result := acquireAsync(cl, wingwire.AdmissionRequest{
+			RunID:        fmt.Sprintf("run-%d/node-host/bm9kZQ", i+1),
+			OwnerRunID:   fmt.Sprintf("run-%d", i+1),
+			DisplayRunID: fmt.Sprintf("run-%d/node", i+1),
+			SubLease:     true,
+			CostSource:   wingwire.CostSourceMeasured,
+			Resources:    wingwire.HostResources{Cores: 4, MemoryBytes: 4 << 30},
+		})
+		select {
+		case q := <-positions:
+			if q.Position != i+1 {
+				t.Fatalf("node %d position = %d, want FIFO position %d", i+1, q.Position, i+1)
+			}
+		case r := <-result:
+			t.Fatalf("node %d resolved before blocker release: lease=%v err=%v", i+1, r.lease, r.err)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("node %d neither queued nor resolved", i+1)
+		}
+		results[i] = result
+	}
+
+	if err := blocker.Release(); err != nil {
+		t.Fatalf("release blocker: %v", err)
+	}
+	first := waitResult(t, results[0], 2*time.Second)
+	if first.err != nil || first.lease == nil {
+		t.Fatalf("FIFO head did not bootstrap: lease=%v err=%v", first.lease, first.err)
+	}
+	for i := 1; i < len(results); i++ {
+		select {
+		case r := <-results[i]:
+			t.Fatalf("node %d also resolved while head holds resources: lease=%v err=%v", i+1, r.lease, r.err)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+
+	qs, err := client.Query(context.Background(), client.Options{Home: home})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	connected, holding := 0, 0
+	for _, h := range qs.Holders {
+		if h.ConnectionOnly {
+			connected++
+		} else {
+			holding++
+		}
+	}
+	if connected != 3 || holding != 1 || len(qs.Waiters) != 2 {
+		t.Fatalf("queue after bootstrap = %d connected, %d holding, %d waiting; want 3, 1, 2", connected, holding, len(qs.Waiters))
 	}
 }
 

@@ -281,7 +281,8 @@ There are exactly two operational commands, and neither can hurt the
 machine:
 
 - `sparkwing queue` -- the truthful view of local admission: every
-  holder with the repo it came from, how long it has held, and its cost,
+  resource holder with the repo it came from, how long it has held, and its
+  cost; connected run registrations that hold no resources, labeled separately;
   every waiter in admission order with its position, priority, estimated start,
   and the resources that actually hold it under the ledger's liveness rules,
   plus a health flag on any holder that is not running cleanly:

@@ -118,7 +118,7 @@ func TestRenderQueuePretty_ShowsAdmissionWaitingRunOnce(t *testing.T) {
 		t.Fatalf("render pretty: %v", err)
 	}
 	out := buf.String()
-	for _, want := range []string{"0 holding, 1 queued", "run-1/build", "cores", "30s", "needs 6.0 cores; 1.3 available"} {
+	for _, want := range []string{"0 holding, 0 connected, 1 queued", "run-1/build", "cores", "30s", "needs 6.0 cores; 1.3 available"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("admission wait omitted %q:\n%s", want, out)
 		}
@@ -192,6 +192,7 @@ func TestRenderQueue_JSONRoundTrips(t *testing.T) {
 		Resources:     []wingwire.ResourceState{{Key: "cores", Capacity: 8, Held: 2, Available: 6}},
 		Holders: []wingwire.Holder{{
 			RunID: "run-a", ElapsedMS: 1000, AdmissionWaiting: true,
+			ConnectionOnly:             true,
 			ActiveWaiterParticipantIDs: []string{"run-a/node-host/dGVzdA"},
 		}},
 		Waiters: []wingwire.Waiter{{RunID: "run-b", Position: 1, Priority: 25}},
@@ -212,6 +213,35 @@ func TestRenderQueue_JSONRoundTrips(t *testing.T) {
 	}
 	if !got.Holders[0].AdmissionWaiting || len(got.Holders[0].ActiveWaiterParticipantIDs) != 1 {
 		t.Fatalf("round-trip lost admission-wait hierarchy: %+v", got.Holders[0])
+	}
+	if !got.Holders[0].ConnectionOnly {
+		t.Fatalf("round-trip lost connection-only distinction: %+v", got.Holders[0])
+	}
+}
+
+func TestRenderQueue_SeparatesConnectionsFromResourceHolders(t *testing.T) {
+	qs := wingwire.QueueState{Holders: []wingwire.Holder{
+		{RunID: "connected-run", Pipeline: "pre-commit", ConnectionOnly: true},
+		{RunID: "holding-run", Pipeline: "checks", Resources: wingwire.HostResources{Cores: 1}},
+	}}
+
+	var pretty bytes.Buffer
+	if err := opsview.RenderQueuePretty(&pretty, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := pretty.String()
+	for _, want := range []string{"1 holding, 1 connected, 0 queued", "Connected (no resources held)", "connected-run", "holding-run"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("pretty queue omitted %q:\n%s", want, out)
+		}
+	}
+
+	var plain bytes.Buffer
+	if err := opsview.RenderQueue(&plain, qs, "plain"); err != nil {
+		t.Fatalf("render plain: %v", err)
+	}
+	if !strings.Contains(plain.String(), "connected\tconnected-run") || !strings.Contains(plain.String(), "holder\tholding-run") {
+		t.Fatalf("plain queue did not distinguish connection from holder:\n%s", plain.String())
 	}
 }
 

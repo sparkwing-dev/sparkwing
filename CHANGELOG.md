@@ -169,6 +169,13 @@ code change to unlock.
 
 ### Fixed
 
+- **admission:** Zero-cost run-registration connections no longer suppress the
+  empty-machine liveness floor. When external CPU or memory pressure leaves no
+  ordinary headroom and no Sparkwing host resource is held, exactly the FIFO
+  queue head starts; subsequent work stays queued behind that positive grant.
+  `sparkwing queue` now labels zero-cost leases as connected rather than
+  counting them as resource holders.
+
 - **queue:** waiter reasons now follow the admission ledger's CPU liveness
   floor. An otherwise-idle run that is really waiting for memory or a semaphore
   no longer blames external CPU merely because raw CPU headroom is below its

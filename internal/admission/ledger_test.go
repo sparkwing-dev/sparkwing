@@ -274,7 +274,7 @@ func TestHostMemoryDeficitStillQueues(t *testing.T) {
 	}
 }
 
-func TestHostMemoryHeadroomDeficitQueuesSoleRun(t *testing.T) {
+func TestHostMemoryHeadroomDeficitAdmitsSoleRun(t *testing.T) {
 	l := testLedger(t, 8, 8<<30)
 	if _, err := l.SetHeadroom(8, 0); err != nil {
 		t.Fatalf("SetHeadroom: %v", err)
@@ -284,8 +284,8 @@ func TestHostMemoryHeadroomDeficitQueuesSoleRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Submit head: %v", err)
 	}
-	if d.Kind != DecisionQueued {
-		t.Fatalf("head behind memory headroom = %s, want queued", d.Kind)
+	if d.Kind != DecisionGranted {
+		t.Fatalf("head behind memory headroom = %s, want granted by liveness floor", d.Kind)
 	}
 }
 
@@ -834,24 +834,35 @@ func TestSetHeadroom_EmptyHostAdmitsCPUQueueHead(t *testing.T) {
 	}
 }
 
-func TestSetHeadroom_CPUFloorSurvivesMemoryHolder(t *testing.T) {
+func TestSetHeadroom_AnyResourceHolderSuppressesCPUFloor(t *testing.T) {
 	l := testLedger(t, 4, 1024)
 	if _, err := l.SetHeadroom(0, 1024); err != nil {
 		t.Fatalf("SetHeadroom: %v", err)
 	}
 
 	mustGrant(t, l, Request{ID: "holder", MemoryBytes: 1})
-	mustGrant(t, l, Request{ID: "waiter", Cores: 1})
+	mustQueue(t, l, Request{ID: "waiter", Cores: 1, SoftCores: true})
 }
 
-func TestSetHeadroom_MemoryHasNoLivenessFloor(t *testing.T) {
+func TestSetHeadroom_MemorySharesEmptyLedgerLivenessFloor(t *testing.T) {
 	l := testLedger(t, 4, 1024)
 	if _, err := l.SetHeadroom(4, 0); err != nil {
 		t.Fatalf("SetHeadroom: %v", err)
 	}
 
-	mustGrant(t, l, Request{ID: "holder", Cores: 1})
+	mustGrant(t, l, Request{ID: "head", MemoryBytes: 1})
 	mustQueue(t, l, Request{ID: "waiter", MemoryBytes: 1})
+}
+
+func TestSetHeadroom_ZeroCostLeaseDoesNotSuppressLivenessFloor(t *testing.T) {
+	l := testLedger(t, 4, 1024)
+	if _, err := l.SetHeadroom(0, 0); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+
+	mustGrant(t, l, Request{ID: "connected"})
+	mustGrant(t, l, Request{ID: "head", Cores: 1, MemoryBytes: 1})
+	mustQueue(t, l, Request{ID: "next", Cores: 1, MemoryBytes: 1})
 }
 
 func TestResizeTotals_GatesNewAdmission(t *testing.T) {

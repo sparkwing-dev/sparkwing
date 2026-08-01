@@ -73,7 +73,8 @@ func TestWeighted_HostMemoryBackfillPastHeavyHead(t *testing.T) {
 
 func TestWeighted_OneBackfillProtectsOlderWaiterFromAStream(t *testing.T) {
 	l := testLedger(t, 0, 8<<30)
-	if _, err := l.SetHeadroom(0, 4<<30); err != nil {
+	mustGrant(t, l, Request{ID: "guard", MemoryBytes: 1})
+	if _, err := l.SetHeadroom(0, 5<<30); err != nil {
 		t.Fatalf("set headroom: %v", err)
 	}
 	mustQueue(t, l, Request{ID: "heavy", MemoryBytes: 6 << 30})
@@ -101,13 +102,14 @@ func TestWeighted_OneBackfillProtectsOlderWaiterFromAStream(t *testing.T) {
 
 func TestWeighted_QueuedBackfillProtectsOlderWaiter(t *testing.T) {
 	l := testLedger(t, 0, 8<<30)
+	mustGrant(t, l, Request{ID: "guard", MemoryBytes: 1})
 	if _, err := l.SetHeadroom(0, 0); err != nil {
 		t.Fatalf("clear headroom: %v", err)
 	}
 	mustQueue(t, l, Request{ID: "heavy", MemoryBytes: 6 << 30})
 	mustQueue(t, l, Request{ID: "light", MemoryBytes: 4 << 30})
 
-	events, err := l.SetHeadroom(0, 4<<30)
+	events, err := l.SetHeadroom(0, 5<<30)
 	if err != nil {
 		t.Fatalf("raise headroom: %v", err)
 	}

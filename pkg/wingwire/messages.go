@@ -318,8 +318,8 @@ type ResourceState struct {
 	Available float64 `json:"available,omitempty"`
 }
 
-// Holder is one run currently holding admission, as reported in a
-// [QueueState].
+// Holder is one run currently holding admission, or a connected run carrying
+// a zero-cost orchestration lease, as reported in a [QueueState].
 type Holder struct {
 	RunID string `json:"run_id"`
 	// ParticipantID is the daemon lease key when it differs from RunID.
@@ -347,6 +347,10 @@ type Holder struct {
 	Resources HostResources `json:"resources"`
 	// Semaphores names the semaphores the holder occupies.
 	Semaphores []string `json:"semaphores,omitempty"`
+	// ConnectionOnly marks a zero-cost orchestration lease. It keeps the run
+	// connected for lifecycle and finalization, but holds no host or semaphore
+	// resource. Older clients safely ignore this additive distinction.
+	ConnectionOnly bool `json:"connection_only,omitempty"`
 	// CostSource names how Resources was resolved ("pin", "measured",
 	// "default"). Empty for leases whose source did not survive a daemon
 	// restart.
