@@ -45,12 +45,13 @@ type InfoTip struct {
 // build provenance. Agents should branch on BuildType / IsRelease
 // rather than string-matching Installed.
 type InfoVersion struct {
-	Installed  string `json:"installed"`
-	Semver     string `json:"semver,omitempty"`
-	IsRelease  bool   `json:"is_release"`
-	IsDirty    bool   `json:"is_dirty"`
-	BuildType  string `json:"build_type"`
-	HumanLabel string `json:"human_label,omitempty"`
+	Installed   string `json:"installed"`
+	Semver      string `json:"semver,omitempty"`
+	VCSRevision string `json:"vcs_revision,omitempty"`
+	IsRelease   bool   `json:"is_release"`
+	IsDirty     bool   `json:"is_dirty"`
+	BuildType   string `json:"build_type"`
+	HumanLabel  string `json:"human_label,omitempty"`
 }
 
 type InfoDocs struct {
@@ -96,7 +97,7 @@ type InfoNextStep struct {
 const infoCapabilityEpoch = 1
 
 func parseInfoVersion(raw string) InfoVersion {
-	v := InfoVersion{Installed: raw}
+	v := InfoVersion{Installed: raw, VCSRevision: versionRevision(raw)}
 	switch raw {
 	case "(devel)":
 		v.BuildType = "devel"
@@ -134,6 +135,27 @@ func parseInfoVersion(raw string) InfoVersion {
 		v.HumanLabel = "local build (no semver tag)"
 	}
 	return v
+}
+
+func versionRevision(raw string) string {
+	const marker = "-dev+"
+	start := strings.Index(raw, marker)
+	if start < 0 {
+		return ""
+	}
+	revision := raw[start+len(marker):]
+	if end := strings.IndexByte(revision, '+'); end >= 0 {
+		revision = revision[:end]
+	}
+	if len(revision) < 7 || len(revision) > 40 {
+		return ""
+	}
+	for _, r := range revision {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'f') {
+			return ""
+		}
+	}
+	return revision
 }
 
 const (

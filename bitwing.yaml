@@ -1,0 +1,4 @@
+selfheal:
+  install: bash bin/install.sh
+  migrate: none
+  daemon: sparkwing daemon

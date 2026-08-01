@@ -191,6 +191,52 @@ func TestVersionTakeover_DrainsOldAndReattaches(t *testing.T) {
 	}
 }
 
+func TestRefreshRunning_ReplacesSameReleaseSourceBuildAndReattachesHolder(t *testing.T) {
+	home := shortHome(t)
+	oldVersion := "v0.22.2-dev+1111111"
+	newVersion := "v0.22.2-dev+2222222"
+	old := startDaemon(t, wingd.Config{Home: home, Version: oldVersion})
+
+	holder := ensure(t, home, "")
+	lease := mustAcquire(t, holder, coreReq("active", 1))
+	successor := newSuccessor(t, home, newVersion)
+
+	result, err := client.RefreshRunning(context.Background(), client.Options{
+		Home: home, Version: newVersion, Spawn: successor.spawn,
+		DialTimeout: time.Second, Backoff: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if !result.Restarted || result.PreviousVersion != oldVersion || result.RunningVersion != newVersion {
+		t.Fatalf("refresh result = %+v", result)
+	}
+	if err := old.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("old daemon should exit: %v", err)
+	}
+	reclaimed, err := holder.Reattach(context.Background(), lease.Token)
+	if err != nil {
+		t.Fatalf("holder reattach: %v", err)
+	}
+	if reclaimed.RunID != "active" {
+		t.Fatalf("reattached run = %q, want active", reclaimed.RunID)
+	}
+}
+
+func TestRefreshRunning_LeavesStoppedDaemonStopped(t *testing.T) {
+	spawned := false
+	_, err := client.RefreshRunning(context.Background(), client.Options{
+		Home: shortHome(t), Version: "v0.22.2-dev+2222222",
+		Spawn: func(string, string) error { spawned = true; return nil },
+	})
+	if !errors.Is(err, client.ErrNoDaemon) {
+		t.Fatalf("refresh error = %v, want ErrNoDaemon", err)
+	}
+	if spawned {
+		t.Fatal("refresh spawned a daemon for a stopped home")
+	}
+}
+
 // TestVersionTakeover_DevBuildJoinsReleaseDaemon verifies that a source-built
 // "(devel)" client joins a release daemon without draining it. A fleet of
 // identically-named dev binaries would otherwise each drain the shared release

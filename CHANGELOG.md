@@ -73,6 +73,13 @@ code change to unlock.
   enabled by `.ContinueOnError()`. The zero value remains fail-fast for
   compatibility.
 
+- **daemon:** `sparkwing daemon status -o json` reports whether the local
+  admission daemon is running and names its exact source revision when known.
+  `sparkwing daemon restart` refreshes only an already-running daemon through
+  the existing drain and lease-reattachment path; a stopped daemon stays
+  stopped. Post-merge self-heal uses this surface so the next pipeline no
+  longer pays the takeover cost.
+
 - **sdk:** `sparkwing.AcquireLintSlot(tool)` lets worktrees of one repo share a
   golangci-lint cache without being told about each other's files. golangci-lint
   keys a cached result on the import path and file content, deliberately
