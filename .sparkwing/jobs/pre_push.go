@@ -139,6 +139,12 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "govulncheck: clean")
 	}
 
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-shell-test.sh").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("shellcheck script portability: %v", err))
+	} else {
+		sparkwing.Info(ctx, "shellcheck script portability: clean")
+	}
+
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-shell.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("shellcheck: %v", err))
 	} else {
