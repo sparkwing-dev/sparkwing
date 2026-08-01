@@ -1949,7 +1949,7 @@ sparkwing info
 # Agent-readable record
 sparkwing info -o json
 
-# Load current discovery context for this wake
+# Load current agent discovery
 sparkwing info --for-agent
 
 # Reprint the post-install onboarding card
@@ -4647,3 +4647,4 @@ sparkwing version update --sdk
 # Pin the SDK to a specific release
 sparkwing version update --sdk --version v0.44.0
 ```
+
