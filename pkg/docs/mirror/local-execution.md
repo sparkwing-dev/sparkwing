@@ -290,8 +290,9 @@ machine:
   while the host is saturated. A child run riding its parent's lease
   renders indented under that parent. The header summarizes the last day
   of admission outcomes in one line -- runs granted, median wait,
-  evictions by key, queue timeouts, and how many runs were contended --
-  so a chronic pattern shows up before it becomes an incident. It also
+  evictions by key, queue timeouts, how many runs were contended, and how many
+  younger backfills activated waiter protection -- so a chronic pattern shows
+  up before it becomes an incident. It also
   names the serving daemon's version and uptime, and warns when an
   older-pinned pipeline binary is admitting outside the daemon. Every
   view states whether the daemon was reached: an idle machine and a

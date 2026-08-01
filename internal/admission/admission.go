@@ -197,6 +197,10 @@ const (
 	EventQueued EventKind = "queued"
 	// EventPromoted reports a waiter admitted after capacity opened.
 	EventPromoted EventKind = "promoted"
+	// EventBackfilled reports that a younger request consumed spare
+	// capacity ahead of an older non-fitting waiter. The event carries the
+	// younger request and the older waiter's resulting bypass count.
+	EventBackfilled EventKind = "backfilled"
 	// EventEvicted reports a holder superseded by a
 	// [PolicyCancelOthers] grant.
 	EventEvicted EventKind = "evicted"
@@ -225,4 +229,10 @@ type Event struct {
 	Key string `json:"key,omitempty"`
 	// SupersededBy is the superseding lease for evicted events.
 	SupersededBy LeaseID `json:"superseded_by,omitempty"`
+	// BypassedBy names the younger request admitted ahead of RequestID for
+	// backfilled events.
+	BypassedBy string `json:"bypassed_by,omitempty"`
+	// BackfillCount is RequestID's cumulative younger-grant count after a
+	// backfilled event. It survives snapshot/restore with the waiter.
+	BackfillCount uint64 `json:"backfill_count,omitempty"`
 }

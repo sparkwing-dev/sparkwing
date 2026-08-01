@@ -412,10 +412,14 @@ type Waiter struct {
 	Repo string `json:"repo,omitempty"`
 	// Position is the waiter's 1-based place in admission order; 1 is
 	// admitted next.
-	Position   int           `json:"position"`
-	Priority   int           `json:"priority,omitempty"`
-	Resources  HostResources `json:"resources"`
-	Semaphores []string      `json:"semaphores,omitempty"`
+	Position int `json:"position"`
+	Priority int `json:"priority,omitempty"`
+	// BackfillCount is how many younger requests have used spare capacity
+	// ahead of this waiter. A positive count reserves its resources against
+	// further backfill until it is admitted.
+	BackfillCount uint64        `json:"backfill_count,omitempty"`
+	Resources     HostResources `json:"resources"`
+	Semaphores    []string      `json:"semaphores,omitempty"`
 	// WaitingOn names the resources the waiter lacks room for right now
 	// -- host dimensions ("cores", "memory") and full semaphore keys.
 	// Empty means the waiter is held only by admission order behind a
@@ -639,6 +643,13 @@ type EventsWindow struct {
 	// Contended is how many runs the daemon flagged as throttled by host
 	// contention while they held admission in the window.
 	Contended int `json:"contended,omitempty"`
+	// Backfills is how many younger grants consumed spare capacity ahead
+	// of an older non-fitting waiter in the window.
+	Backfills int `json:"backfills,omitempty"`
+	// BackfillProtections is how many older waiters crossed the bounded-
+	// backfill threshold and became protected from further bypass in the
+	// window.
+	BackfillProtections int `json:"backfill_protections,omitempty"`
 	// Rejections counts requests the daemon refused as malformed, per
 	// cause, so a repeated invalid-request pattern is visible to the queue
 	// view and doctor. Empty when no request was rejected and for older

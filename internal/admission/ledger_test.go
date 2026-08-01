@@ -443,7 +443,10 @@ func TestFailPolicy_BackfillsPastWaiterBlockedByOlderHolder(t *testing.T) {
 	if d.Kind != DecisionGranted {
 		t.Fatalf("decision = %+v, want granted: budget fits and the heavy head waits only on an older holder", d)
 	}
-	wantKinds(t, events, EventGranted)
+	wantKinds(t, events, EventBackfilled, EventGranted)
+	if events[0].RequestID != "b" || events[0].BypassedBy != "c" || events[0].BackfillCount != 1 {
+		t.Fatalf("backfill event = %+v, want b bypassed once by c", events[0])
+	}
 }
 
 func TestFailPolicy_FailsBehindProtectedWaiter(t *testing.T) {
@@ -615,7 +618,10 @@ func TestWeighted_LightArrivalBackfillsPastHeavyHead(t *testing.T) {
 	if d.Kind != DecisionGranted {
 		t.Fatalf("light = %+v, want granted as backfill past the heavy head", d)
 	}
-	wantKinds(t, events, EventGranted)
+	wantKinds(t, events, EventBackfilled, EventGranted)
+	if events[0].RequestID != "heavy" || events[0].BypassedBy != "light" || events[0].BackfillCount != 1 {
+		t.Fatalf("backfill event = %+v, want heavy bypassed once by light", events[0])
+	}
 	if snap := l.Snapshot(); len(snap.Waiters) != 1 || snap.Waiters[0].RequestID != "heavy" {
 		t.Fatalf("waiters = %+v, want only the heavy head still queued", snap.Waiters)
 	}

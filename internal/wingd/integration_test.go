@@ -1222,6 +1222,103 @@ func TestWaiterDisconnect_UnblocksProtectedFollower(t *testing.T) {
 	}
 }
 
+// TestBackfillStream_ReconnectedOlderWaiterKeepsProtection drives the
+// starvation contract through a real daemon. An older one-core waiter is
+// blocked on memory, one newer four-core job consumes otherwise-idle CPU, and
+// a stream of further four-core jobs arrives. Reconnecting the older waiter
+// must retain its consumed bypass budget, so the stream stays behind it until
+// memory opens and the older waiter is granted.
+func TestBackfillStream_ReconnectedOlderWaiterKeepsProtection(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{
+		Home:             home,
+		Sampler:          newFakeSampler(8, 8<<30),
+		HeadroomFraction: -1,
+	})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID:     "older-holder",
+		Resources: wingwire.HostResources{Cores: 4, MemoryBytes: 4 << 30},
+	})
+
+	olderReq := wingwire.AdmissionRequest{
+		RunID:     "older-small",
+		Resources: wingwire.HostResources{Cores: 1, MemoryBytes: 6 << 30},
+	}
+	firstOlderConn := openRawQueuedAdmission(t, home, olderReq)
+	defer func() { _ = firstOlderConn.Close() }()
+	if msg := readRawMessage(t, firstOlderConn); msg == nil {
+		t.Fatal("older waiter returned no queue message")
+	}
+
+	firstNewerClient := ensure(t, home, "")
+	firstNewer := mustAcquire(t, firstNewerClient, coreReq("newer-high-core-0", 4))
+
+	reconnectedClient := ensure(t, home, "")
+	olderPositions, olderResult := acquireAsync(reconnectedClient, olderReq)
+	waitForQueue(t, olderPositions)
+
+	qs, err := client.Query(context.Background(), client.Options{Home: home})
+	if err != nil {
+		t.Fatalf("query after reconnect: %v", err)
+	}
+	olderWaiter, ok := waiterByRun(qs, "older-small")
+	if !ok || olderWaiter.BackfillCount != 1 {
+		t.Fatalf("reconnected older waiter = %+v, present=%v; want retained backfill count 1", olderWaiter, ok)
+	}
+	if qs.Events == nil || qs.Events.Backfills != 1 || qs.Events.BackfillProtections != 1 {
+		t.Fatalf("events after bypass = %+v, want one durable backfill/protection transition", qs.Events)
+	}
+
+	const streamSize = 6
+	newerResults := make([]<-chan acquireResult, 0, streamSize)
+	for i := 1; i <= streamSize; i++ {
+		cl := ensure(t, home, "")
+		positions, result := acquireAsync(cl, coreReq("newer-high-core-"+strconv.Itoa(i), 4))
+		waitForQueue(t, positions)
+		newerResults = append(newerResults, result)
+	}
+
+	if err := firstNewer.Release(); err != nil {
+		t.Fatalf("release first newer job: %v", err)
+	}
+	qs, err = client.Query(context.Background(), client.Options{Home: home})
+	if err != nil {
+		t.Fatalf("query protected stream: %v", err)
+	}
+	olderWaiter, ok = waiterByRun(qs, "older-small")
+	if !ok || olderWaiter.BackfillCount != 1 {
+		t.Fatalf("protected older waiter = %+v, present=%v; want one retained bypass", olderWaiter, ok)
+	}
+	for i, result := range newerResults {
+		select {
+		case r := <-result:
+			t.Fatalf("newer high-core job %d bypassed protected older waiter: lease=%v err=%v", i+1, r.lease, r.err)
+		default:
+		}
+	}
+
+	if err := holder.Release(); err != nil {
+		t.Fatalf("release memory holder: %v", err)
+	}
+	olderGrant := waitResult(t, olderResult, 2*time.Second)
+	if olderGrant.err != nil || olderGrant.lease == nil || olderGrant.lease.RunID != "older-small" {
+		t.Fatalf("older waiter grant = lease=%v err=%v, want bounded grant", olderGrant.lease, olderGrant.err)
+	}
+	if err := olderGrant.lease.Release(); err != nil {
+		t.Fatalf("release older waiter: %v", err)
+	}
+
+	qs, err = client.Query(context.Background(), client.Options{Home: home})
+	if err != nil {
+		t.Fatalf("query after older departure: %v", err)
+	}
+	if qs.Events == nil || qs.Events.Backfills != 1 || qs.Events.BackfillProtections != 1 {
+		t.Fatalf("events after older departure = %+v, want persisted starvation history", qs.Events)
+	}
+}
+
 func TestChildAttach_SharesLeaseWithoutDoubleCharge(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{

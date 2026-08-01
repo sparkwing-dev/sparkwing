@@ -25,6 +25,9 @@ type admissionEvent struct {
 	Kind   string    `json:"kind"`
 	WaitMS int64     `json:"wait_ms,omitempty"`
 	Key    string    `json:"key,omitempty"`
+	// BackfillCount is the older waiter's cumulative bypass count after a
+	// backfill event. A transition to one activates starvation protection.
+	BackfillCount uint64 `json:"backfill_count,omitempty"`
 }
 
 // Event kinds recorded in the window.
@@ -35,6 +38,7 @@ const (
 	eventCancellation = "cancellation"
 	eventContended    = "contended"
 	eventRejection    = "rejection"
+	eventBackfill     = "backfill"
 )
 
 // eventWindow is the daemon's bounded rolling record of admission
@@ -121,6 +125,11 @@ func (w *eventWindow) summary(now time.Time) *wingwire.EventsWindow {
 			out.Contended++
 		case eventRejection:
 			rejections[e.Key]++
+		case eventBackfill:
+			out.Backfills++
+			if e.BackfillCount == 1 {
+				out.BackfillProtections++
+			}
 		}
 	}
 	if len(waits) > 0 {

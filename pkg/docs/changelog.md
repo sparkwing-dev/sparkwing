@@ -155,6 +155,14 @@ code change to unlock.
   no longer blames external CPU merely because raw CPU headroom is below its
   measured charge; `waiting_on` names the binding headroom dimension.
 
+- **admission:** an older weighted waiter now allows one useful backfill and
+  then protects its complete resource request until admission. A stream of
+  younger jobs can no longer repeatedly consume transient headroom while the
+  queue reports the older job first; queue state exposes the backfill count and
+  the protection reason, including across daemon takeover, and the rolling
+  event window retains backfill and protection transitions after the waiter
+  departs.
+
 - **gate:** The changelog-required check now runs on macOS system Bash 3.2
   while preserving spaces, Unicode, and newlines in changed filenames. Its
   portability fixture runs in both the lint and pre-push gates so a newer Bash

@@ -40,3 +40,13 @@ func TestFmtEventsLine_OmitsContendedWhenZero(t *testing.T) {
 		t.Errorf("events line should not mention contended when none occurred: %q", line)
 	}
 }
+
+func TestFmtEventsLine_ShowsBackfillProtectionHistory(t *testing.T) {
+	line := fmtEventsLine(&wingwire.EventsWindow{
+		WindowMS: 24 * 60 * 60 * 1000, Runs: 1,
+		Backfills: 1, BackfillProtections: 1,
+	})
+	if !strings.Contains(line, "1 younger backfill") || !strings.Contains(line, "1 waiter protected") {
+		t.Fatalf("events line = %q, want durable backfill and protection counts", line)
+	}
+}

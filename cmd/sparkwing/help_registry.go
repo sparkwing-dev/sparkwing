@@ -378,7 +378,8 @@ order, with its position, priority, cost, and exactly what it is waiting on.
 A child run attached to its parent's lease renders indented under that
 parent. The header carries a one-line summary of the daemon's recent
 admission outcomes -- runs granted, median wait, evictions, queue
-timeouts -- so chronic patterns show up at a glance.
+timeouts, younger backfills, and protected waiters -- so chronic patterns show
+up at a glance.
 
 A holder that is alive but has burned near-zero CPU while runs queue
 behind it is flagged as stalled, together with the exact command to

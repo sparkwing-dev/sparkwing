@@ -98,8 +98,9 @@ type hold struct {
 }
 
 type waiter struct {
-	arrival uint64
-	spec    spec
+	arrival       uint64
+	backfillCount uint64
+	spec          spec
 }
 
 type resource string
@@ -181,9 +182,11 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 	}
 
 	if !l.fifoBlocked(s) && l.fits(s) {
+		backfillEvents := l.recordFreshBackfill(s)
 		l.admitSeq++
 		s.admit = l.admitSeq
 		grantedLease, evicted, events := l.grant(s, EventGranted)
+		events = append(backfillEvents, events...)
 		events = append(events, l.promote()...)
 		l.mustHoldInvariants()
 		return Decision{Kind: DecisionGranted, Lease: grantedLease, Evicted: evicted}, events, nil
@@ -551,6 +554,10 @@ func (l *Ledger) scanWaiters(findFit bool, arrival spec) (int, map[resource]bool
 			markAll(blocked, rs)
 			continue
 		}
+		if w.backfillCount > 0 {
+			markAll(blocked, rs)
+			continue
+		}
 		for _, r := range rs {
 			if l.starvedByYounger(w.spec, r) {
 				blocked[r] = true
@@ -558,6 +565,59 @@ func (l *Ledger) scanWaiters(findFit bool, arrival spec) (int, map[resource]bool
 		}
 	}
 	return -1, blocked
+}
+
+func (l *Ledger) recordFreshBackfill(s spec) []Event {
+	var events []Event
+	for _, w := range l.waiters {
+		if !waiterPrecedesSpec(w, s) {
+			break
+		}
+		if !l.fits(w.spec) && specsCompete(w.spec, s) {
+			w.backfillCount++
+			ev := l.newEvent(EventBackfilled, w.spec.id)
+			ev.BypassedBy = s.id
+			ev.BackfillCount = w.backfillCount
+			events = append(events, ev)
+		}
+	}
+	return events
+}
+
+func (l *Ledger) recordQueuedBackfill(index int) []Event {
+	var events []Event
+	s := l.waiters[index].spec
+	for i := 0; i < index; i++ {
+		w := l.waiters[i]
+		if !l.fits(w.spec) && specsCompete(w.spec, s) {
+			w.backfillCount++
+			ev := l.newEvent(EventBackfilled, w.spec.id)
+			ev.BypassedBy = s.id
+			ev.BackfillCount = w.backfillCount
+			events = append(events, ev)
+		}
+	}
+	return events
+}
+
+func specsCompete(a, b spec) bool {
+	if a.milliCores > 0 && b.milliCores > 0 {
+		return true
+	}
+	if a.memory > 0 && b.memory > 0 {
+		return true
+	}
+	for _, ac := range a.claims {
+		if ac.policy == PolicyCancelOthers || ac.cost == 0 {
+			continue
+		}
+		for _, bc := range b.claims {
+			if bc.policy != PolicyCancelOthers && bc.cost > 0 && ac.key == bc.key {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // starvedByYounger reports whether waiter w cannot currently claim
@@ -883,6 +943,7 @@ func (l *Ledger) promote() []Event {
 			return events
 		}
 		w := l.waiters[i]
+		events = append(events, l.recordQueuedBackfill(i)...)
 		l.waiters = append(l.waiters[:i], l.waiters[i+1:]...)
 		_, _, grantEvents := l.grant(w.spec, EventPromoted)
 		events = append(events, grantEvents...)
