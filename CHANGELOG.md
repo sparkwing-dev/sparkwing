@@ -75,6 +75,11 @@ code change to unlock.
 
 ### Fixed
 
+- **release:** the release pipeline updates the source-build scaffold fallback
+  and the pipeline module pin after publishing a tag. A release can no longer
+  leave the next unrelated gate red because generated projects still name the
+  preceding SDK version.
+
 - **gate:** local worktrees run golangci-lint through a leased canonical path,
   so a fresh checkout can reuse a warm cache without replaying another
   checkout's filenames. Blob-backed fixed runners keep their existing private

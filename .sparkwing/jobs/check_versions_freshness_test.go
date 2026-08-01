@@ -110,6 +110,9 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		mustGit(t, dir, "init")
 		mustGit(t, dir, "config", "user.email", "test@example.com")
 		mustGit(t, dir, "config", "user.name", "Test")
+		mustGit(t, dir, "config", "commit.gpgsign", "false")
+		mustGit(t, dir, "config", "tag.gpgsign", "false")
+		mustGit(t, dir, "config", "core.hooksPath", t.TempDir())
 		return dir
 	}
 
@@ -194,6 +197,9 @@ func TestAutoBumpSparkwingPinIfStale_RollsBackVersionFileOnPartialFailure(t *tes
 	mustGit("init")
 	mustGit("config", "user.email", "test@example.com")
 	mustGit("config", "user.name", "Test")
+	mustGit("config", "commit.gpgsign", "false")
+	mustGit("config", "tag.gpgsign", "false")
+	mustGit("config", "core.hooksPath", t.TempDir())
 	placeholder := filepath.Join(dir, ".keep")
 	if err := os.WriteFile(placeholder, []byte(""), 0o644); err != nil {
 		t.Fatal(err)
@@ -224,6 +230,83 @@ func TestAutoBumpSparkwingPinIfStale_RollsBackVersionFileOnPartialFailure(t *tes
 	if string(got) != original {
 		t.Errorf("version.go after partial failure = %q, want original %q (rollback failed)", string(got), original)
 	}
+}
+
+func TestAutoBumpSparkwingPinIfStaleRestoresIndexAfterCommitFailure(t *testing.T) {
+	dir := t.TempDir()
+	mustGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+
+	mustGit("init")
+	mustGit("config", "user.email", "test@example.com")
+	mustGit("config", "user.name", "Test")
+	mustGit("config", "commit.gpgsign", "false")
+	mustGit("config", "tag.gpgsign", "false")
+	mustGit("config", "core.hooksPath", t.TempDir())
+	for path, body := range map[string]string{
+		"go.mod":                 "module github.com/sparkwing-dev/sparkwing\n\ngo 1.26.0\n",
+		"doc.go":                 "package sparkwing\n",
+		".sparkwing/go.mod":      fakePipelinesGoMod,
+		".sparkwing/go.sum":      "",
+		".sparkwing/pipeline.go": "package pipelines\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n",
+		scaffoldFallbackRel:      "package scaffold\n\nconst FallbackSDKVersion = \"v0.18.0\"\n",
+	} {
+		path = filepath.Join(dir, filepath.FromSlash(path))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustGit("add", ".")
+	mustGit("commit", "-m", "seed")
+	mustGit("tag", "v0.99.0")
+	unrelated := filepath.Join(dir, "unrelated.txt")
+	if err := os.WriteFile(unrelated, []byte("keep me staged\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	mustGit("add", "unrelated.txt")
+	if _, err := autoBumpSparkwingPinIfStale(context.Background(), dir); err == nil {
+		t.Fatal("auto bump accepted unrelated staged work")
+	}
+	if status := strings.TrimSpace(captureGitOutput(t, dir, "status", "--porcelain")); status != "A  unrelated.txt" {
+		t.Fatalf("auto bump changed unrelated staged work: %q", status)
+	}
+	mustGit("reset", "--", "unrelated.txt")
+	if err := os.Remove(unrelated); err != nil {
+		t.Fatal(err)
+	}
+	hooks := filepath.Join(t.TempDir(), "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hooks, "pre-commit"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mustGit("config", "core.hooksPath", hooks)
+
+	if _, err := autoBumpSparkwingPinIfStale(context.Background(), dir); err == nil {
+		t.Fatal("auto bump succeeded despite refusing pre-commit hook")
+	}
+	if status := strings.TrimSpace(captureGitOutput(t, dir, "status", "--porcelain")); status != "" {
+		t.Fatalf("failed auto bump left worktree or index dirty:\n%s", status)
+	}
+}
+
+func captureGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return string(out)
 }
 
 func TestShouldCheckLocalReplaceFreshness(t *testing.T) {
