@@ -180,6 +180,9 @@ type Holder struct {
 
 	Recovery string
 
+	AdmissionWaiting           bool
+	ActiveWaiterParticipantIDs []string
+
 	Contended bool
 
 	ContentionReason string
