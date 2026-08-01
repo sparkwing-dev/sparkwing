@@ -281,6 +281,22 @@ func TestVersionTakeover_ReleaseLeavesDevDaemon(t *testing.T) {
 	}
 }
 
+func TestVersionTakeover_ReleaseLeavesCleanSourceDaemon(t *testing.T) {
+	home := shortHome(t)
+	td := startDaemon(t, wingd.Config{Home: home, Version: "v0.22.2-dev+e99c1800"})
+
+	release := ensure(t, home, "v0.22.2")
+	if release.DaemonVersion() != "v0.22.2-dev+e99c1800" {
+		t.Fatalf("connected daemon version %q, want clean source build still resident", release.DaemonVersion())
+	}
+
+	select {
+	case err := <-td.done:
+		t.Fatalf("clean source daemon exited (%v); release build drained it", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
 func TestIdleExit_NoWork(t *testing.T) {
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 250 * time.Millisecond})

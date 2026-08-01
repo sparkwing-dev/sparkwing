@@ -40,10 +40,10 @@ func supersedes(client, daemon string) bool {
 }
 
 // devBuild reports whether v names a build from source rather than a
-// release: the Go toolchain's "(devel)" stamp, or a VCS-derived version
-// carrying a +dirty suffix.
+// release: the Go toolchain's "(devel)" stamp, an installed clean source
+// build carrying -dev+revision, or a VCS-derived version carrying +dirty.
 func devBuild(v string) bool {
-	return v == "(devel)" || strings.Contains(v, "+dirty")
+	return v == "(devel)" || strings.Contains(v, "-dev+") || strings.Contains(v, "+dirty")
 }
 
 func canonical(v string) string {

@@ -37,6 +37,9 @@ func TestSupersedes(t *testing.T) {
 		{"v1.0.0", "(devel)", false},
 		{"v1.0.0", "v1.0.0+dirty", false},
 		{"v1.1.0", "v1.0.0+dirty", false},
+		{"v0.22.2", "v0.22.2-dev+e99c1800", false},
+		{"v0.22.2-dev+e99c1800", "v0.22.2", false},
+		{"v0.22.3-dev+22222222", "v0.22.2-dev+11111111", true},
 		{"v0.23.0", "v0.22.1-0.20260724005950-041d1c11f150+dirty", false},
 		{"(devel)", "v1.0.0+dirty", false},
 		{"v1.0.0+dirty", "(devel)", false},
@@ -62,6 +65,7 @@ func TestSupersedes_NeverMutual(t *testing.T) {
 		"v1.0.0", "v1.1.0", "v2.0.0",
 		"v0.22.0", "v0.23.0",
 		"v1.0.0+dirty", "v0.22.0+dirty",
+		"v0.22.2-dev+e99c1800", "v0.22.3-dev+22222222",
 		"v0.22.1-0.20260724005950-041d1c11f150+dirty",
 		"v0.22.1-0.20260724005950-041d1c11f150",
 	}

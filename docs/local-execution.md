@@ -61,7 +61,9 @@ demand and normally needs no operator attention. `sparkwing daemon status`
 reports whether it is running; JSON output includes the serving binary and its
 source revision. `sparkwing daemon restart` replaces only an answering daemon
 with the installed Sparkwing build. Existing holders reconnect and reattach to
-their durable leases, while a deliberately stopped daemon stays stopped.
+their durable leases, while a deliberately stopped daemon stays stopped. A
+release-pinned pipeline can use that refreshed daemon without replacing it
+with the older release build.
 
 When you run locally against a remote profile (`sparkwing run X --profile
 prod`), the run dual-writes state to both the profile's backend and the

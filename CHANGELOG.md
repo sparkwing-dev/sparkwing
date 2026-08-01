@@ -78,7 +78,8 @@ code change to unlock.
   `sparkwing daemon restart` refreshes only an already-running daemon through
   the existing drain and lease-reattachment path; a stopped daemon stays
   stopped. Post-merge self-heal uses this surface so the next pipeline no
-  longer pays the takeover cost.
+  longer pays the takeover cost, and release-pinned pipelines leave the
+  refreshed source build resident.
 
 - **sdk:** `sparkwing.AcquireLintSlot(tool)` lets worktrees of one repo share a
   golangci-lint cache without being told about each other's files. golangci-lint
