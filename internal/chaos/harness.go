@@ -295,12 +295,9 @@ func (h *Harness) spawn(wedged bool) {
 	}
 
 	cmd := exec.Command(h.dummyBin, args...)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return
-	}
 	cmd.Stderr = nil
-	if err := cmd.Start(); err != nil {
+	stdout, err := startActorCommand(cmd)
+	if err != nil {
 		return
 	}
 	a.cmd = cmd
@@ -313,24 +310,68 @@ func (h *Harness) spawn(wedged bool) {
 
 // watchActor tracks an actor's stdout for its grant or rejection, then
 // waits for the process to exit and records the terminal state.
-func (h *Harness) watchActor(a *actor, stdout io.Reader) {
-	sc := bufio.NewScanner(stdout)
-	for sc.Scan() {
-		line := sc.Text()
-		switch {
-		case strings.HasPrefix(line, "OK "):
-			h.mu.Lock()
-			a.granted = true
-			h.mu.Unlock()
-			h.jr.Append(Event{Kind: "grant", Run: a.runID})
-		case strings.HasPrefix(line, "REJECT"):
-			h.mu.Lock()
-			a.rejected = true
-			h.mu.Unlock()
-			h.jr.Append(Event{Kind: "reject", Run: a.runID, Detail: strings.TrimPrefix(line, "REJECT ")})
+func startActorCommand(cmd *exec.Cmd) (io.ReadCloser, error) {
+	stdout, childStdout, err := os.Pipe()
+	if err != nil {
+		return nil, err
+	}
+	cmd.Stdout = childStdout
+	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
+		_ = childStdout.Close()
+		return nil, err
+	}
+	_ = childStdout.Close()
+	return stdout, nil
+}
+
+func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
+	scanned := make(chan struct{})
+	terminal := make(chan struct{}, 1)
+	go func() {
+		defer close(scanned)
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			line := sc.Text()
+			switch {
+			case strings.HasPrefix(line, "OK "):
+				h.mu.Lock()
+				a.granted = true
+				h.mu.Unlock()
+				h.jr.Append(Event{Kind: "grant", Run: a.runID})
+				select {
+				case terminal <- struct{}{}:
+				default:
+				}
+			case strings.HasPrefix(line, "REJECT"):
+				h.mu.Lock()
+				a.rejected = true
+				h.mu.Unlock()
+				h.jr.Append(Event{Kind: "reject", Run: a.runID, Detail: strings.TrimPrefix(line, "REJECT ")})
+				select {
+				case terminal <- struct{}{}:
+				default:
+				}
+			}
+		}
+	}()
+	_ = a.cmd.Wait()
+	h.mu.Lock()
+	killed := a.killed
+	recordedTerminal := a.granted || a.rejected
+	h.mu.Unlock()
+	if !killed && !recordedTerminal {
+		settle := h.cfg.Settle
+		if settle <= 0 {
+			settle = time.Second
+		}
+		select {
+		case <-terminal:
+		case <-time.After(settle):
 		}
 	}
-	_ = a.cmd.Wait()
+	_ = stdout.Close()
+	<-scanned
 	h.mu.Lock()
 	a.exited = true
 	a.exitedAt = time.Now()
@@ -406,11 +447,8 @@ func (h *Harness) takeover() {
 		"--daemon-total-cores", strconv.FormatFloat(h.cfg.DaemonCores, 'f', -1, 64),
 	}
 	cmd := exec.Command(h.dummyBin, args...)
-	stdout, err := cmd.StdoutPipe()
+	stdout, err := startActorCommand(cmd)
 	if err != nil {
-		return
-	}
-	if err := cmd.Start(); err != nil {
 		return
 	}
 	a := &actor{runID: runID, cores: 0.2, cmd: cmd}

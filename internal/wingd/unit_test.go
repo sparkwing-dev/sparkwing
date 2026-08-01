@@ -1,7 +1,10 @@
 package wingd
 
 import (
+	"errors"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -130,6 +133,10 @@ type fixedHostSampler struct {
 func (s fixedHostSampler) Sample() (HostStat, error) {
 	return s.stat, nil
 }
+
+type hostSamplerFunc func() (HostStat, error)
+
+func (f hostSamplerFunc) Sample() (HostStat, error) { return f() }
 
 func TestInitLedger_ResizesRestoredTotalsToCurrentBudget(t *testing.T) {
 	home := t.TempDir()
@@ -286,6 +293,192 @@ func TestApplyHeadroom_Hysteresis(t *testing.T) {
 	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 0.1, FreeMemoryBytes: 16 << 30, LoadMeasured: true, MemoryMeasured: true})
 	if d.appliedCores != first {
 		t.Fatalf("a tiny load change (%v -> %v) should not move headroom past the deadband", first, d.appliedCores)
+	}
+}
+
+func TestApplyHeadroom_BoundedRefreshAdmitsSoleMemoryWaiter(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0.2)
+	now := time.Unix(1_700_000_000, 0)
+	d.cfg.Now = func() time.Time { return now }
+	d.cfg.HeadroomMaxAge = 30 * time.Second
+	high := HostStat{
+		TotalCores:       8,
+		TotalMemoryBytes: 16 << 30,
+		FreeMemoryBytes:  2 << 30,
+		LoadMeasured:     true,
+		MemoryMeasured:   true,
+	}
+	d.applyHeadroom(high)
+
+	server, peer := net.Pipe()
+	defer server.Close()
+	defer peer.Close()
+	waiter := newConn(d, server)
+	waiter.runID = "waiter"
+	waiter.role = roleWaiter
+	waiter.resources = wingwire.HostResources{MemoryBytes: 512 << 20}
+	d.byRun[waiter.runID] = waiter
+	dec, _, err := d.ledger.Submit(admission.Request{ID: waiter.runID, MemoryBytes: 512 << 20})
+	if err != nil {
+		t.Fatalf("submit waiter: %v", err)
+	}
+	if dec.Kind != admission.DecisionQueued {
+		t.Fatalf("high external memory decision = %s, want %s", dec.Kind, admission.DecisionQueued)
+	}
+
+	recovered := high
+	recovered.FreeMemoryBytes = 4065119436
+	now = now.Add(20 * time.Second)
+	d.applyHeadroom(recovered)
+	if waiter.role != roleWaiter {
+		t.Fatalf("sub-deadband recovery admitted before freshness bound: role = %d", waiter.role)
+	}
+
+	read := make(chan wingwire.Message, 1)
+	go func() {
+		msg, _ := newConn(d, peer).readMessage()
+		read <- msg
+	}()
+	now = now.Add(10 * time.Second)
+	d.applyHeadroom(recovered)
+	select {
+	case msg := <-read:
+		grant, ok := msg.(*wingwire.Grant)
+		if !ok || grant.RunID != waiter.runID {
+			t.Fatalf("bounded refresh delivery = %#v, want grant for %q", msg, waiter.runID)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("sole waiter was not admitted at the freshness bound")
+	}
+}
+
+func TestApplyHeadroom_MeasurementAndEffectiveAgesAreDistinct(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0.2)
+	now := time.Unix(1_700_000_000, 0)
+	d.cfg.Now = func() time.Time { return now }
+	d.cfg.HeadroomMaxAge = time.Minute
+	stat := HostStat{
+		TotalCores:       8,
+		TotalMemoryBytes: 16 << 30,
+		FreeMemoryBytes:  16 << 30,
+		LoadAverage:      1,
+		LoadMeasured:     true,
+		MemoryMeasured:   true,
+	}
+	d.applyHeadroom(stat)
+	now = now.Add(10 * time.Second)
+	stat.LoadAverage = 1.1
+	d.applyHeadroom(stat)
+	now = now.Add(5 * time.Second)
+
+	qs := queueState(t, d)
+	if qs.ExternalSampleAgeMS != 15000 {
+		t.Fatalf("effective age = %dms, want 15000ms", qs.ExternalSampleAgeMS)
+	}
+	if qs.ExternalMeasurementAgeMS != 5000 {
+		t.Fatalf("measurement age = %dms, want 5000ms", qs.ExternalMeasurementAgeMS)
+	}
+}
+
+func TestApplyHeadroom_UnmeasuredStatDoesNotRefreshMeasurementAge(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0.2)
+	now := time.Unix(1_700_000_000, 0)
+	d.cfg.Now = func() time.Time { return now }
+	stat := HostStat{
+		TotalCores:       8,
+		TotalMemoryBytes: 16 << 30,
+		FreeMemoryBytes:  16 << 30,
+		LoadAverage:      1,
+		LoadMeasured:     true,
+		MemoryMeasured:   true,
+	}
+	d.applyHeadroom(stat)
+	measuredAt := d.measuredAt
+
+	now = now.Add(10 * time.Second)
+	stat.LoadMeasured = false
+	stat.MemoryMeasured = false
+	d.applyHeadroom(stat)
+	if d.measuredAt != measuredAt {
+		t.Fatalf("unmeasured stat advanced measurement time from %v to %v", measuredAt, d.measuredAt)
+	}
+	if d.headroomAt != now {
+		t.Fatal("unmeasured state did not become the effective admission state")
+	}
+}
+
+func TestApplyHeadroom_DeadbandDoesNotFlapBeforeBound(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0.2)
+	now := time.Unix(1_700_000_000, 0)
+	d.cfg.Now = func() time.Time { return now }
+	d.cfg.HeadroomMaxAge = 30 * time.Second
+	stat := HostStat{
+		TotalCores:       8,
+		TotalMemoryBytes: 16 << 30,
+		FreeMemoryBytes:  16 << 30,
+		LoadAverage:      1,
+		LoadMeasured:     true,
+		MemoryMeasured:   true,
+	}
+	d.applyHeadroom(stat)
+	firstAt := d.headroomAt
+	firstCores := d.appliedCores
+
+	for i, load := range []float64{1.1, 0.9, 1.15, 0.85, 1.05} {
+		now = now.Add(5 * time.Second)
+		stat.LoadAverage = load
+		d.applyHeadroom(stat)
+		if d.headroomAt != firstAt || d.appliedCores != firstCores {
+			t.Fatalf("sample %d escaped deadband before bound: at=%v cores=%v", i, d.headroomAt, d.appliedCores)
+		}
+	}
+
+	now = now.Add(5 * time.Second)
+	d.applyHeadroom(stat)
+	if d.headroomAt != now {
+		t.Fatalf("effective timestamp = %v, want bounded refresh at %v", d.headroomAt, now)
+	}
+	refreshedAt := d.headroomAt
+	now = now.Add(5 * time.Second)
+	stat.LoadAverage = 0.9
+	d.applyHeadroom(stat)
+	if d.headroomAt != refreshedAt {
+		t.Fatal("bounded refresh disabled the deadband on the following sample")
+	}
+}
+
+func TestRefreshHeadroom_FailedSampleDoesNotRefreshOrAdmit(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0.2)
+	now := time.Unix(1_700_000_000, 0)
+	d.cfg.Now = func() time.Time { return now }
+	d.cfg.HeadroomMaxAge = 30 * time.Second
+	high := HostStat{
+		TotalCores:       8,
+		TotalMemoryBytes: 16 << 30,
+		FreeMemoryBytes:  2 << 30,
+		LoadMeasured:     true,
+		MemoryMeasured:   true,
+	}
+	d.applyHeadroom(high)
+	measuredAt, effectiveAt := d.measuredAt, d.headroomAt
+	dec, _, err := d.ledger.Submit(admission.Request{ID: "waiter", MemoryBytes: 512 << 20})
+	if err != nil || dec.Kind != admission.DecisionQueued {
+		t.Fatalf("submit waiter = (%s, %v), want queued", dec.Kind, err)
+	}
+
+	now = now.Add(31 * time.Second)
+	d.sampler = hostSamplerFunc(func() (HostStat, error) {
+		idle := high
+		idle.FreeMemoryBytes = idle.TotalMemoryBytes
+		return idle, errors.New("sensor unavailable")
+	})
+	d.refreshHeadroom()
+	if d.measuredAt != measuredAt || d.headroomAt != effectiveAt {
+		t.Fatalf("failed sample advanced timestamps: measured=%v effective=%v", d.measuredAt, d.headroomAt)
+	}
+	snap := d.ledger.Snapshot()
+	if len(snap.Waiters) != 1 || snap.Waiters[0].RequestID != "waiter" {
+		t.Fatalf("errored idle-looking sample admitted waiter: %+v", snap.Waiters)
 	}
 }
 

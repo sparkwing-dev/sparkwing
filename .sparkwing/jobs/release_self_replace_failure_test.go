@@ -63,11 +63,21 @@ func seedReleaseRepo(t *testing.T) string {
 	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n")
 	writeFile(t, filepath.Join(repo, ".sparkwing", "go.mod"), fakePipelinesGoMod)
 	writeFile(t, filepath.Join(repo, ".sparkwing", "go.sum"), "")
+	if err := os.MkdirAll(filepath.Join(repo, "pkg", "scaffold"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldFallbackRel)), "package scaffold\n\nconst FallbackSDKVersion = \"v0.1.0\"\n")
 
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "config", "user.email", "test@example.invalid")
 	gitRun(t, repo, "config", "user.name", "test")
 	gitRun(t, repo, "config", "commit.gpgsign", "false")
+	gitRun(t, repo, "config", "tag.gpgsign", "false")
+	seedHooks := filepath.Join(base, "seed-hooks")
+	if err := os.MkdirAll(seedHooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "config", "core.hooksPath", seedHooks)
 	gitRun(t, repo, "add", ".")
 	gitRun(t, repo, "commit", "-m", "seed")
 	gitRun(t, repo, "remote", "add", "origin", origin)
@@ -130,6 +140,35 @@ func TestRestoreSelfReplaceRepairsAFailedBump(t *testing.T) {
 	}
 	if local, remote := gitRun(t, repo, "rev-parse", "main"), gitRun(t, repo, "rev-parse", "origin/main"); local != remote {
 		t.Error("restore did not push the repair to origin")
+	}
+}
+
+func TestReleaseBumpLeavesVersionFreshnessGreen(t *testing.T) {
+	repo := seedReleaseRepo(t)
+	hooks := filepath.Join(t.TempDir(), "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "config", "core.hooksPath", hooks)
+	gitRun(t, repo, "tag", "v0.99.0")
+	if problem := checkScaffoldFallbackPin(context.Background(), repo); problem == "" {
+		t.Fatal("freshness before release bump = green, want stale fallback")
+	}
+
+	if err := bumpSelfReplace(context.Background(), repo, "v0.99.0"); err != nil {
+		t.Fatalf("bumpSelfReplace: %v", err)
+	}
+	if problem := checkScaffoldFallbackPin(context.Background(), repo); problem != "" {
+		t.Fatalf("freshness after release bump = %q, want green", problem)
+	}
+
+	committed := gitRun(t, repo, "show", "--name-only", "--format=", "HEAD")
+	if !strings.Contains(committed, scaffoldFallbackRel) {
+		t.Errorf("release bump commit omitted %s:\n%s", scaffoldFallbackRel, committed)
+	}
+	contents := gitRun(t, repo, "show", "HEAD:"+scaffoldFallbackRel)
+	if !strings.Contains(contents, `FallbackSDKVersion = "v0.99.0"`) {
+		t.Errorf("committed fallback does not contain v0.99.0:\n%s", contents)
 	}
 }
 

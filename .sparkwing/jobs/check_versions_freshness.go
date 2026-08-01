@@ -3,6 +3,7 @@ package jobs
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,13 +13,21 @@ import (
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/semver"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
 )
 
 // sdkModulePath is the SDK module whose latest release the scaffold
 // fallback pin is measured against.
 const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
+
+const scaffoldFallbackRel = "pkg/scaffold/version.go"
+
+var scaffoldFallbackVersionRe = regexp.MustCompile(`FallbackSDKVersion = "(v[^"]*)"`)
+
+var sparkwingPinArtifacts = []string{
+	scaffoldFallbackRel,
+	".sparkwing/go.mod",
+	".sparkwing/go.sum",
+}
 
 type VersionFreshnessOptions struct {
 	AllowReleaseLineSelfReplace bool
@@ -138,7 +147,11 @@ func checkScaffoldFallbackPin(ctx context.Context, repoRoot string) string {
 	if err != nil {
 		return fmt.Sprintf("scaffold fallback pin: cannot resolve latest %s release (%v)", sdkModulePath, err)
 	}
-	return scaffoldFallbackProblem(scaffold.FallbackSDKVersion, latest)
+	pinned, err := readFallbackSDKVersionFile(repoRoot)
+	if err != nil {
+		return fmt.Sprintf("scaffold fallback pin: %v", err)
+	}
+	return scaffoldFallbackProblem(pinned, latest)
 }
 
 // latestReleasedTag returns the highest stable semver git tag in the
@@ -427,18 +440,21 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 	if err != nil {
 		return "", fmt.Errorf("resolve latest sparkwing release: %w", err)
 	}
-	if semver.Compare(scaffold.FallbackSDKVersion, latest) >= 0 {
+	pinned, err := readFallbackSDKVersionFile(repoRoot)
+	if err != nil {
+		return "", err
+	}
+	if semver.Compare(pinned, latest) >= 0 {
 		return "", nil
 	}
-
-	versionFilePath := filepath.Join(repoRoot, "pkg", "scaffold", "version.go")
-	original, err := os.ReadFile(versionFilePath)
-	if err != nil {
-		return "", fmt.Errorf("read version.go for rollback: %w", err)
+	if err := requireCleanSparkwingPinArtifacts(ctx, repoRoot); err != nil {
+		return "", err
 	}
 	defer func() {
 		if retErr != nil {
-			_ = os.WriteFile(versionFilePath, original, 0o644)
+			if err := restoreSparkwingPinArtifacts(context.WithoutCancel(ctx), repoRoot); err != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("restore sparkwing pin artifacts: %w", err))
+			}
 		}
 	}()
 
@@ -458,30 +474,66 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 	return latest, nil
 }
 
+func requireCleanSparkwingPinArtifacts(ctx context.Context, repoRoot string) error {
+	for _, path := range sparkwingPinArtifacts {
+		if err := exec.CommandContext(ctx, "git", "-C", repoRoot, "ls-files", "--error-unmatch", "--", path).Run(); err != nil {
+			return fmt.Errorf("sparkwing pin artifact %s is not tracked", path)
+		}
+	}
+	checks := [][]string{
+		append([]string{"-C", repoRoot, "diff", "--quiet", "--"}, sparkwingPinArtifacts...),
+		{"-C", repoRoot, "diff", "--cached", "--quiet", "--"},
+	}
+	for _, args := range checks {
+		if err := exec.CommandContext(ctx, "git", args...).Run(); err != nil {
+			return fmt.Errorf("sparkwing pin artifacts have uncommitted changes")
+		}
+	}
+	return nil
+}
+
+func restoreSparkwingPinArtifacts(ctx context.Context, repoRoot string) error {
+	args := append([]string{"-C", repoRoot, "restore", "--source=HEAD", "--staged", "--worktree", "--"}, sparkwingPinArtifacts...)
+	if out, err := exec.CommandContext(ctx, "git", args...).CombinedOutput(); err != nil {
+		return fmt.Errorf("git restore: %w\n%s", err, bytes.TrimSpace(out))
+	}
+	return nil
+}
+
 // bumpFallbackSDKVersionFile rewrites the FallbackSDKVersion assignment
 // in pkg/scaffold/version.go to the given semver string.
 func bumpFallbackSDKVersionFile(repoRoot, version string) error {
-	path := filepath.Join(repoRoot, "pkg", "scaffold", "version.go")
+	path := filepath.Join(repoRoot, filepath.FromSlash(scaffoldFallbackRel))
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	re := regexp.MustCompile(`FallbackSDKVersion = "v[^"]*"`)
-	if !re.Match(data) {
+	if !scaffoldFallbackVersionRe.Match(data) {
 		return fmt.Errorf("FallbackSDKVersion pattern not found in %s", path)
 	}
-	updated := re.ReplaceAllLiteral(data, []byte(`FallbackSDKVersion = "`+version+`"`))
+	updated := scaffoldFallbackVersionRe.ReplaceAllLiteral(data, []byte(`FallbackSDKVersion = "`+version+`"`))
 	return os.WriteFile(path, updated, 0o644)
+}
+
+func readFallbackSDKVersionFile(repoRoot string) (string, error) {
+	path := filepath.Join(repoRoot, filepath.FromSlash(scaffoldFallbackRel))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", scaffoldFallbackRel, err)
+	}
+	match := scaffoldFallbackVersionRe.FindSubmatch(data)
+	if match == nil {
+		return "", fmt.Errorf("FallbackSDKVersion pattern not found in %s", path)
+	}
+	return string(match[1]), nil
 }
 
 // commitSparkwingPinBump stages the auto-bump artifacts and commits them.
 func commitSparkwingPinBump(ctx context.Context, repoRoot, version string) error {
 	addArgs := []string{
 		"-C", repoRoot, "add", "--",
-		"pkg/scaffold/version.go",
-		".sparkwing/go.mod",
-		".sparkwing/go.sum",
 	}
+	addArgs = append(addArgs, sparkwingPinArtifacts...)
 	if out, err := exec.CommandContext(ctx, "git", addArgs...).CombinedOutput(); err != nil {
 		return fmt.Errorf("git add: %w\n%s", err, bytes.TrimSpace(out))
 	}

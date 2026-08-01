@@ -36,6 +36,8 @@ func roundTripMessages() []Message {
 		&CancelLeaseAck{Found: true},
 		&Cancel{RunID: "deploy-20260710-120000", Reason: "cancelled via sparkwing runs cancel"},
 		&QueueState{
+			ExternalSampleAgeMS:      30000,
+			ExternalMeasurementAgeMS: 2000,
 			Resources: []ResourceState{
 				{Key: "cores", Capacity: 10, Held: 6.5, Reserved: 2, External: 1.5, Available: 0.5},
 				{Key: "memory", Capacity: 32 << 30, Held: 12 << 30},
@@ -50,6 +52,16 @@ func roundTripMessages() []Message {
 				{RunID: "r4", Resources: HostResources{Cores: 8, MemoryBytes: 16 << 30}, Semaphores: []string{"db"}, BlockingReason: "needs 8.0 cores; 0.5 available (external load 1.5)"},
 			},
 		},
+	}
+}
+
+func TestQueueState_EmptyMeasurementAgeStaysWireCompatible(t *testing.T) {
+	line, err := Encode(&QueueState{ExternalSampleAgeMS: 30000})
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if strings.Contains(string(line), "external_measurement_age_ms") {
+		t.Fatalf("zero measurement age was not omitted: %s", line)
 	}
 }
 

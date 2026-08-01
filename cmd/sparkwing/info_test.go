@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 func TestParseInfoVersion_Classification(t *testing.T) {
 	cases := []struct {
@@ -34,5 +38,19 @@ func TestParseInfoVersion_Classification(t *testing.T) {
 				t.Errorf("IsDirty = %v, want %v", got.IsDirty, c.isDirty)
 			}
 		})
+	}
+}
+
+func TestInfoLeadsWithMissingDeclaredHooks(t *testing.T) {
+	f := newChainFixture(t)
+	f.asProcessEnv(t)
+	info := Info{Project: InfoProject{
+		Found: true, SparkwingDir: filepath.Join(f.repo, ".sparkwing"),
+	}}
+
+	steps := nextStepsFor(info, false)
+	if len(steps) == 0 || !strings.Contains(steps[0].Command, "sparkwing pipeline hooks install") ||
+		!strings.Contains(steps[0].Purpose, "pre-commit") {
+		t.Fatalf("info next steps = %+v, want missing hook repair first", steps)
 	}
 }

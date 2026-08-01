@@ -52,9 +52,14 @@ func (d *Daemon) refreshHeadroom() {
 // applyHeadroom converts a host reading into a ledger headroom ceiling:
 // total capacity minus the reserved margin minus whatever load and memory
 // the machine is under from work the daemon did not admit. It only pushes
-// a change past a deadband, so small wiggles never disturb admission.
+// a change past a deadband. Small wiggles are absorbed until a bounded
+// refresh applies the newest effective value.
 func (d *Daemon) applyHeadroom(stat HostStat) {
 	d.mu.Lock()
+	now := d.now()
+	if stat.LoadMeasured || stat.MemoryMeasured {
+		d.measuredAt = now
+	}
 
 	if !d.loadInit {
 		d.smoothedLoad = stat.LoadAverage
@@ -83,7 +88,7 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 
 	grantable := stat.TotalCores - reservedCores
 	saturated := grantable > 0 && externalCores >= contentionSaturationFraction*grantable
-	d.updateContentionLocked(saturated, d.cfg.sampleInterval().Milliseconds(), d.now())
+	d.updateContentionLocked(saturated, d.cfg.sampleInterval().Milliseconds(), now)
 
 	coresBand := math.Max(0.5, 0.05*stat.TotalCores)
 	memBand := uint64(0.05 * float64(stat.TotalMemoryBytes))
@@ -91,7 +96,8 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 		math.Abs(targetCores-d.appliedCores) >= coresBand ||
 		absDiffU(targetMem, d.appliedMem) >= memBand ||
 		d.loadMeasured != stat.LoadMeasured ||
-		d.memMeasured != stat.MemoryMeasured
+		d.memMeasured != stat.MemoryMeasured ||
+		now.Sub(d.headroomAt) >= d.cfg.headroomMaxAge()
 	if !changed {
 		d.mu.Unlock()
 		return
@@ -106,7 +112,7 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	d.externalMem = externalMem
 	d.loadMeasured = stat.LoadMeasured
 	d.memMeasured = stat.MemoryMeasured
-	d.headroomAt = d.now()
+	d.headroomAt = now
 	d.appliedCores = targetCores
 	d.appliedMem = targetMem
 	d.headroomInit = true
@@ -118,6 +124,9 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 		return
 	}
 	deliveries := d.routeLocked(events)
+	if len(events) == 0 {
+		deliveries = append(deliveries, d.waiterDeliveriesLocked()...)
+	}
 	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
 	d.cfg.logf("headroom: %.1f cores grantable (reserve %.1f, external %s)", targetCores, reservedCores,

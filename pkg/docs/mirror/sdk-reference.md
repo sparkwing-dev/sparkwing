@@ -9,7 +9,7 @@ Every exported symbol in the `sparkwing` package (the SDK you import as `sw`), g
 - `func Annotate(ctx context.Context, msg string)` -- Annotate records a persistent, human-readable summary string on the currently-executing Job.
 - `func Arg[T any](ctx context.Context, name string) (T, error)` -- Arg returns a single resolved arg by its CLI flag name.
 - `func ArgOrDefault[T any](ctx context.Context, name string, d T) T` -- ArgOrDefault is the convenience wrapper that returns d when the arg isn't present or doesn't unmarshal to T. Useful for steps that want to read an optional arg without surfacing an error.
-- `func BindPipelinesFromYAML(cfg interface { EachPipeline(func(name, entrypoint string)) })` -- BindPipelinesFromYAML walks every pipeline entry in cfg and installs a Registration under the pipeline's name, sharing the Invoke / Schema / Instance of the registered entrypoint.
+- `func BindPipelinesFromYAML(cfg interface { EachPipeline(func(name, entrypoint string)) }, )` -- BindPipelinesFromYAML walks every pipeline entry in cfg and installs a Registration under the pipeline's name, sharing the Invoke / Schema / Instance of the registered entrypoint.
 - `func Config(ctx context.Context, name string) (string, error)` -- Config resolves a non-secret config value through the same store as Secret.
 - `func Debug(ctx context.Context, format string, args ...any)` -- Debug emits a debug-level LogRecord.
 - `func DebugEnabled() bool` -- DebugEnabled reports whether SDK-internal verbose logging is on.

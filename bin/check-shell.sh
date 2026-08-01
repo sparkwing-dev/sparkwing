@@ -19,23 +19,21 @@ if ! command -v shellcheck >/dev/null 2>&1; then
   exit 1
 fi
 
-# Tracked .sh files first.
-mapfile -t scripts < <(git ls-files '*.sh' 2>/dev/null | sort -u)
-
-# Plus any tracked file whose first line is a bash/sh shebang.
-# Common for `bin/` scripts that don't carry the .sh suffix.
-while IFS= read -r f; do
-  [[ -z "$f" || ! -f "$f" ]] && continue
+scripts=()
+while IFS= read -r -d '' f; do
+  include=
   case "$f" in
-    *.sh) continue ;;
+    *.sh) include=1 ;;
+    bin/*|scripts/*)
+      if [[ -f "$f" ]] && head -c 64 "$f" 2>/dev/null | head -n1 | grep -qE '^#!.*\b(bash|sh)\b'; then
+        include=1
+      fi
+      ;;
   esac
-  head -c 64 "$f" 2>/dev/null | head -n1 | grep -qE '^#!.*\b(bash|sh)\b' && scripts+=("$f")
-done < <(git ls-files | grep -E '^(bin|scripts)/' || true)
-
-# Dedupe.
-if [[ ${#scripts[@]} -gt 0 ]]; then
-  mapfile -t scripts < <(printf '%s\n' "${scripts[@]}" | sort -u)
-fi
+  if [[ -n "$include" ]]; then
+    scripts+=("$f")
+  fi
+done < <(git ls-files -z 2>/dev/null | sort -zu)
 
 if [[ ${#scripts[@]} -eq 0 ]]; then
   exit 0

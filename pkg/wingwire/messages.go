@@ -493,6 +493,12 @@ type QueueState struct {
 	// the newest sample and a figure with no age cannot be told from a live
 	// one. Zero when no reading has been applied yet.
 	ExternalSampleAgeMS int64 `json:"external_sample_age_ms,omitempty"`
+	// ExternalMeasurementAgeMS is how long it has been since the daemon
+	// successfully read at least one host-pressure dimension, regardless of
+	// whether the deadband applied that sample. A sampler response with every
+	// dimension unmeasured does not advance it. Zero when no measurement has
+	// succeeded yet, or when an older daemon predates this field.
+	ExternalMeasurementAgeMS int64 `json:"external_measurement_age_ms,omitempty"`
 	// CapacityChange records the most recent time the daemon re-derived a
 	// different machine capacity while running (a hot VM resize or a cgroup
 	// quota edit), for the queue header. Nil when capacity has held steady

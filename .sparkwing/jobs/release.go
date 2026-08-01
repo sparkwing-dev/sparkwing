@@ -430,12 +430,12 @@ const selfReplaceLine = "replace github.com/sparkwing-dev/sparkwing => .."
 
 const sparkwingModulePath = "github.com/sparkwing-dev/sparkwing"
 
-// prepareSelfReplaceJob bumps the sparkwing pin in `.sparkwing/go.mod`
-// to the release version and strips the local self-replace. Runs after
-// push-tag because the pin it writes cannot resolve until the tag it
-// names exists (see [Release] for the ordering and its tradeoff).
-// Pairs with restoreSelfReplaceJob, which puts the replace back
-// whether or not this step succeeded.
+// prepareSelfReplaceJob bumps the sparkwing pins in `.sparkwing/go.mod`
+// and the scaffold fallback to the release version, then strips the local
+// self-replace. Runs after push-tag because the module pin it writes cannot
+// resolve until the tag it names exists (see [Release] for the ordering and
+// its tradeoff). Pairs with restoreSelfReplaceJob, which puts the replace
+// back whether or not this step succeeded.
 type prepareSelfReplaceJob struct {
 	sparkwing.Base
 	RepoDir string
@@ -451,10 +451,10 @@ func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
 	return bumpSelfReplace(ctx, j.RepoDir, j.Version.Get(ctx))
 }
 
-// bumpSelfReplace pins `.sparkwing/go.mod` to version, strips the local
-// self-replace, and commits the module pair. Split from the job body so
-// the half-applied failure state -- go.mod rewritten, commit refused --
-// is reachable in a test without a run-time Ref resolver.
+// bumpSelfReplace pins `.sparkwing/go.mod` and fresh scaffolds to version,
+// strips the local self-replace, and commits the release-version artifacts.
+// Split from the job body so the half-applied failure state -- files rewritten,
+// commit refused -- is reachable in a test without a run-time Ref resolver.
 func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 	path := filepath.Join(repoDir, ".sparkwing", "go.mod")
 	body, err := os.ReadFile(path)
@@ -465,24 +465,36 @@ func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
-	if !changed {
-		sparkwing.Info(ctx, ".sparkwing/go.mod already in shipped shape; skipping")
+	pinned, err := readFallbackSDKVersionFile(repoDir)
+	if err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	fallbackChanged := pinned != version
+	if !changed && !fallbackChanged {
+		sparkwing.Info(ctx, "release-version artifacts already in shipped shape; skipping")
 		return nil
 	}
-	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
-		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
+	if changed {
+		if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
+			return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
+		}
+		if err := writeSelfModuleSums(ctx, repoDir, version); err != nil {
+			return err
+		}
 	}
-	if err := writeSelfModuleSums(ctx, repoDir, version); err != nil {
-		return err
+	if fallbackChanged {
+		if err := bumpFallbackSDKVersionFile(repoDir, version); err != nil {
+			return fmt.Errorf("release: bump scaffold fallback: %w", err)
+		}
 	}
-	if _, err := runGitIn(ctx, repoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
-		return fmt.Errorf("release: git add .sparkwing module files: %w", err)
+	if _, err := runGitIn(ctx, repoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum", scaffoldFallbackRel); err != nil {
+		return fmt.Errorf("release: git add release-version artifacts: %w", err)
 	}
 	if _, err := runGitIn(ctx, repoDir, "commit", "-m",
-		"release: pin .sparkwing/ to "+version+", drop local self-replace"); err != nil {
-		return fmt.Errorf("release: git commit .sparkwing module files: %w", err)
+		"release: pin SDK artifacts to "+version+", drop local self-replace"); err != nil {
+		return fmt.Errorf("release: git commit release-version artifacts: %w", err)
 	}
-	sparkwing.Info(ctx, "bumped .sparkwing/go.mod sparkwing pin -> %s, removed self-replace", version)
+	sparkwing.Info(ctx, "bumped .sparkwing/go.mod and scaffold fallback -> %s, removed self-replace", version)
 	return nil
 }
 
@@ -493,14 +505,18 @@ func (j *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release: read .sparkwing/go.mod: %w", err)
 	}
-	_, changed, err := stripSelfReplace(string(body), version)
+	_, moduleChanged, err := stripSelfReplace(string(body), version)
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
-	if !changed {
-		sparkwing.Info(ctx, "dry-run: .sparkwing/go.mod already in shipped shape; no rewrite")
+	pinned, err := readFallbackSDKVersionFile(j.RepoDir)
+	if err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	if !moduleChanged && pinned == version {
+		sparkwing.Info(ctx, "dry-run: release-version artifacts already in shipped shape; no rewrite")
 	} else {
-		sparkwing.Info(ctx, "dry-run: would bump .sparkwing/go.mod pin to %s and strip self-replace", version)
+		sparkwing.Info(ctx, "dry-run: would bump .sparkwing/go.mod and scaffold fallback to %s and strip self-replace", version)
 	}
 	return nil
 }
@@ -705,8 +721,8 @@ func restoreSelfReplaceIn(ctx context.Context, repoDir string) error {
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 	}
-	if _, err := runGitIn(ctx, repoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum"); err != nil {
-		return fmt.Errorf("release: git add .sparkwing module files: %w", err)
+	if _, err := runGitIn(ctx, repoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum", scaffoldFallbackRel); err != nil {
+		return fmt.Errorf("release: git add release-version artifacts: %w", err)
 	}
 	if _, err := runGitIn(ctx, repoDir, "commit", "-m",
 		"chore: restore .sparkwing/ local self-replace for next dev cycle"); err != nil {

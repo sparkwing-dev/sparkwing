@@ -78,10 +78,34 @@ code change to unlock.
 - **queue:** a semaphore-only orchestration lease is shown as part of its active
   node's admission wait instead of as a second, stalled run with a cancel hint.
   JSON keeps both participant rows and now links the holder to its active waiter.
+
+- **hooks:** `sparkwing pipeline hooks status` now names declared hooks that
+  are missing or not firing and prints the repair command. `sparkwing info`
+  leads its next steps with the same repair, so a missing blocking gate is
+  visible before a commit or push silently bypasses it. A failed install proof
+  now happens before any candidate hook filename or config value is published;
+  prior hooks remain callable during proof and unchanged if it fails. Complete
+  replacements publish by atomic rename, and later installation errors roll
+  the transaction back byte-for-byte, including managed gates, global-hook
+  forwarders, file modes, and the repository's `core.hooksPath`.
+
+- **release:** the release pipeline updates the source-build scaffold fallback
+  and the pipeline module pin after publishing a tag. A release can no longer
+  leave the next unrelated gate red because generated projects still name the
+  preceding SDK version.
 - **gate:** local worktrees run golangci-lint through a leased canonical path,
   so a fresh checkout can reuse a warm cache without replaying another
   checkout's filenames. Blob-backed fixed runners keep their existing private
   cache path so restore and save still operate on the directory lint reads.
+
+- **admission:** host-pressure hysteresis can no longer hold a recovered
+  reading indefinitely. The daemon keeps the deadband that absorbs noisy
+  samples, but reapplies its newest effective value within 30 seconds, so a
+  near-threshold waiter can proceed without a daemon restart. Queue JSON now
+  distinguishes the age of the effective admission value from the age of the
+  newest successful host-pressure measurement; older clients keep the existing
+  `external_sample_age_ms` field and safely ignore the additive
+  `external_measurement_age_ms` field.
 
 - **config:** the repo registry is written through a uniquely named staging
   file instead of a shared `repos.yaml.tmp`. Concurrent writers no longer
@@ -359,13 +383,12 @@ code change to unlock.
   cannot execute -- a red pipeline, an admission daemon the repo's pinned SDK
   cannot speak to -- is indistinguishable from one that passes; arming turns
   the first into a commit that fails every time, which is worse than the
-  silence it replaces. A gate that does not pass is withdrawn by name and the
-  rest are still armed, so a red push gate no longer costs you a working
-  commit gate. The proof runs on every install that leaves a gate live,
-  including a re-install of an already-armed repo -- an install rewrites every
-  declared hook, and there the rewritten file is live the moment it lands. A
-  repo nothing can arm keeps the hooks it already had and its `core.hooksPath`
-  untouched. `--no-prove` arms without the proof.
+  silence it replaces. Proof completes before hook or config publication, so a
+  failure changes nothing and cannot interrupt an already-working gate.
+  Complete replacements publish by atomic rename, and any later error restores
+  the prior hooks, forwarders, modes, and `core.hooksPath` exactly. The proof
+  runs on every install that leaves a gate live, including a re-install of an
+  already-armed repo. `--no-prove` arms without the proof.
 
 ### Fixed
 
