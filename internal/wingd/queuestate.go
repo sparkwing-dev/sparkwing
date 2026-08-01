@@ -165,7 +165,11 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 
 	remaining := map[string]float64{}
 	for _, r := range qs.Resources {
-		remaining[r.Key] = r.Capacity - r.Held
+		if r.Key == "cores" || r.Key == "memory" {
+			remaining[r.Key] = r.Available
+		} else {
+			remaining[r.Key] = r.Capacity - r.Held
+		}
 	}
 	available := map[string]wingwire.ResourceState{}
 	for _, r := range qs.Resources {
@@ -173,6 +177,12 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			r.External = 0
 		}
 		available[r.Key] = r
+	}
+	if usedMilli == 0 {
+		remaining["cores"] = capCores
+		cores := available["cores"]
+		cores.Available = capCores
+		available["cores"] = cores
 	}
 	for i, w := range snap.Waiters {
 		c := d.byRun[w.RequestID]
@@ -744,6 +754,9 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale 
 	grantCores := float64(min64(snap.TotalMilliCores, snap.HeadroomMilliCores)-usedMilli) / 1000.0
 	if grantCores < 0 {
 		grantCores = 0
+	}
+	if usedMilli == 0 {
+		grantCores = float64(snap.TotalMilliCores) / 1000.0
 	}
 	grantMem := float64(int64(minU64(snap.TotalMemoryBytes, snap.HeadroomMemoryBytes)) - int64(usedMem))
 	if grantMem < 0 {

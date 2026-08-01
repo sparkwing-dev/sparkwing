@@ -72,6 +72,70 @@ func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 	}
 }
 
+func TestQueueState_SoleRunNamesMemoryInsteadOfPermittedCPUDeficit(t *testing.T) {
+	home := shortHome(t)
+	sampler := newFakeSampler(10, 16<<30)
+	sampler.set(wingd.HostStat{
+		TotalCores:       10,
+		TotalMemoryBytes: 16 << 30,
+		FreeMemoryBytes:  1 << 30,
+		LoadAverage:      20,
+		LoadMeasured:     true,
+		MemoryMeasured:   true,
+	})
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
+
+	registration := ensure(t, home, "v1")
+	mustAcquire(t, registration, wingwire.AdmissionRequest{RunID: "pipeline", SemaphoresOnly: true})
+
+	participant := ensure(t, home, "v1")
+	positions, result := acquireAsync(participant, wingwire.AdmissionRequest{
+		RunID:        "pipeline/node-host/cHJlLXB1c2g",
+		OwnerRunID:   "pipeline",
+		DisplayRunID: "pipeline/pre-push",
+		SubLease:     true,
+		Resources:    wingwire.HostResources{Cores: 8, MemoryBytes: 2 << 30},
+	})
+	select {
+	case q := <-positions:
+		if strings.Contains(q.BlockingReason, "cores") || !strings.Contains(q.BlockingReason, "GiB") {
+			t.Fatalf("initial blocking reason = %q, want memory and no CPU claim", q.BlockingReason)
+		}
+	case r := <-result:
+		t.Fatalf("memory-bound participant resolved: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("memory-bound participant neither queued nor resolved")
+	}
+
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	w, ok := waiterByRun(qs, "pipeline")
+	if !ok {
+		t.Fatal("pipeline participant not queued")
+	}
+	if len(w.WaitingOn) != 1 || w.WaitingOn[0] != "memory" {
+		t.Fatalf("waiting_on = %v, want [memory]", w.WaitingOn)
+	}
+	if strings.Contains(w.BlockingReason, "cores") || !strings.Contains(w.BlockingReason, "GiB") {
+		t.Fatalf("queue blocking reason = %q, want memory and no CPU claim", w.BlockingReason)
+	}
+	var cores *wingwire.ResourceState
+	for i := range qs.Resources {
+		if qs.Resources[i].Key == "cores" {
+			cores = &qs.Resources[i]
+			break
+		}
+	}
+	if cores == nil {
+		t.Fatal("CPU resource row missing")
+	}
+	if cores.Available != 0 || cores.External <= 0 {
+		t.Fatalf("raw CPU row = %+v, want measured pressure preserved", *cores)
+	}
+}
+
 // TestQueueState_BlockingReasonExplainsChargeSource queues a run whose cost
 // was resolved from a measured profile and asserts the waiter's blocking
 // reason and its standalone CostRationale both explain where the charge came

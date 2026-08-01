@@ -282,8 +282,9 @@ machine:
 
 - `sparkwing queue` -- the truthful view of local admission: every
   holder with the repo it came from, how long it has held, and its cost,
-  every waiter in admission order with its position, priority, and estimated start,
-  and a health flag on any holder that is not running cleanly:
+  every waiter in admission order with its position, priority, estimated start,
+  and the resources that actually hold it under the ledger's liveness rules,
+  plus a health flag on any holder that is not running cleanly:
   `(stalled)` for one that is alive but idle while runs wait behind it,
   and `(contended)` for one that is measurably slower than its profile
   while the host is saturated. A child run riding its parent's lease

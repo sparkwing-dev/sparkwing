@@ -105,6 +105,11 @@ code change to unlock.
 
 ### Fixed
 
+- **queue:** waiter reasons now follow the admission ledger's CPU liveness
+  floor. An otherwise-idle run that is really waiting for memory or a semaphore
+  no longer blames external CPU merely because raw CPU headroom is below its
+  measured charge; `waiting_on` names the binding headroom dimension.
+
 - **gate:** The changelog-required check now runs on macOS system Bash 3.2
   while preserving spaces, Unicode, and newlines in changed filenames. Its
   portability fixture runs in both the lint and pre-push gates so a newer Bash
