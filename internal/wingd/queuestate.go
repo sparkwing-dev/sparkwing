@@ -83,6 +83,9 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	if d.headroomInit {
 		qs.ExternalSampleAgeMS = d.now().Sub(d.headroomAt).Milliseconds()
 	}
+	if !d.measuredAt.IsZero() {
+		qs.ExternalMeasurementAgeMS = d.now().Sub(d.measuredAt).Milliseconds()
+	}
 	for _, ss := range snap.Semaphores {
 		qs.Resources = append(qs.Resources, wingwire.ResourceState{
 			Key:      ss.Key,

@@ -71,6 +71,9 @@ const (
 	DefaultGraceWindow = 10 * time.Second
 	// DefaultSampleInterval is the period between host-load samples.
 	DefaultSampleInterval = 5 * time.Second
+	// DefaultHeadroomMaxAge bounds how long hysteresis may hold an applied
+	// host-pressure value before the newest successful sample is re-applied.
+	DefaultHeadroomMaxAge = 30 * time.Second
 	// DefaultCapacityInterval is how often the daemon re-derives machine
 	// capacity while running, so an instance resize or a cgroup-quota edit is
 	// picked up without a restart. Slower than the load sampler because fixed
@@ -132,6 +135,10 @@ type Config struct {
 	GraceWindow time.Duration
 	// SampleInterval overrides [DefaultSampleInterval] when non-zero.
 	SampleInterval time.Duration
+	// HeadroomMaxAge overrides [DefaultHeadroomMaxAge] when non-zero. It
+	// bounds deadband hysteresis; host measurements still run at
+	// SampleInterval.
+	HeadroomMaxAge time.Duration
 	// CapacityInterval overrides [DefaultCapacityInterval] when non-zero,
 	// setting how often capacity is re-derived while the daemon runs.
 	CapacityInterval time.Duration
@@ -176,6 +183,13 @@ func (c Config) sampleInterval() time.Duration {
 		return c.SampleInterval
 	}
 	return DefaultSampleInterval
+}
+
+func (c Config) headroomMaxAge() time.Duration {
+	if c.HeadroomMaxAge > 0 {
+		return c.HeadroomMaxAge
+	}
+	return DefaultHeadroomMaxAge
 }
 
 func (c Config) capacityInterval() time.Duration {

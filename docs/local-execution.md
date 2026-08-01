@@ -216,16 +216,20 @@ that does not mean "wait for the window to age out." There are two:
 
 - **A host sensor that cannot read.** The `EXTERNAL` column carries the
   reading the availability math ran on, and the view prints how old that
-  reading is, because a reading held in force by the deadband is otherwise
-  indistinguishable from a live one. When a dimension cannot be read at
-  all -- macOS with no `kern.memorystatus_level`, a platform with no
-  host-pressure sensor -- the cell prints `unmeasured` rather than a
-  figure, an `external: unmeasured on <dimension> (host sensor
-  unavailable); no external load subtracted from available` line says what
-  admission did about it, and the JSON row carries
-  `"external_source": "unmeasured"`. Nothing is subtracted for a dimension
-  nobody read, because a substituted figure in a measurement's format is
-  what pinned memory headroom at zero on every box.
+  effective reading is and how recently the host sensor successfully read
+  at least one pressure dimension. The deadband absorbs small wiggles, but
+  reapplies its newest effective value within 30 seconds, so a recovered
+  reading near an admission threshold cannot strand a waiter indefinitely.
+  A failed sample updates neither timestamp and cannot apply its returned values.
+  When a dimension cannot be read at all -- macOS with no
+  `kern.memorystatus_level`, a platform with no host-pressure sensor -- the
+  cell prints `unmeasured` rather than a figure, an `external: unmeasured on
+  <dimension> (host sensor unavailable); no external load subtracted from
+  available` line says what admission did about it, and the JSON row carries
+  `"external_source": "unmeasured"`. A sampler response with no measured
+  pressure dimension does not refresh the measurement age. Nothing is
+  subtracted for a dimension nobody read, because a substituted figure in a
+  measurement's format is what pinned memory headroom at zero on every box.
 - **A misreading host sensor.** If the external-load reading is wrong and
   admission is queuing runs against phantom pressure, add `ignore-external`
   to `SPARKWING_BUDGET`. Admission then plans against total capacity minus

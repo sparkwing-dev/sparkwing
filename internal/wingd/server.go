@@ -71,8 +71,10 @@ type Daemon struct {
 	// a number.
 	loadMeasured bool
 	memMeasured  bool
-	// headroomAt is when that sample was taken, so a reading the deadband
-	// has held in force can show its age instead of passing for live.
+	// measuredAt advances on every successful host measurement. headroomAt
+	// advances only when that measurement becomes the effective admission
+	// value, so sensor health and deadband hold time remain distinct.
+	measuredAt time.Time
 	headroomAt time.Time
 
 	// machineCores/machineMemory are the effective capacity the budget and

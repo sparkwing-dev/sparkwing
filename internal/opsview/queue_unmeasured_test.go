@@ -139,3 +139,13 @@ func TestExternalAgeNote_ShowsHowOldTheReadingIs(t *testing.T) {
 		t.Fatalf("age note = %q for a daemon that reports no age, want empty", got)
 	}
 }
+
+func TestExternalAgeNote_DistinguishesMeasurementFromEffectiveValue(t *testing.T) {
+	qs := wingwire.QueueState{
+		ExternalSampleAgeMS:      45000,
+		ExternalMeasurementAgeMS: 3000,
+	}
+	if got, want := opsview.ExternalAgeNote(qs), "external reading: 45s old (host sampled 3s ago)"; got != want {
+		t.Fatalf("ExternalAgeNote = %q, want %q", got, want)
+	}
+}

@@ -236,6 +236,8 @@ type QueueState struct {
 
 	ExternalSampleAgeMS int64
 
+	ExternalMeasurementAgeMS int64
+
 	CapacityChange *CapacityChange
 
 	Runners []RunnerHeadroom

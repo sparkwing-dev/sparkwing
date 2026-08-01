@@ -1212,6 +1212,10 @@ export interface QueueState {
   // and available columns is. The daemon re-applies a reading only once it
   // moves past a deadband, so those columns can trail the newest sample.
   external_sample_age_ms?: number;
+  // external_measurement_age_ms is the age of the newest successful reading
+  // of at least one host-pressure dimension, whether or not the deadband
+  // applied it.
+  external_measurement_age_ms?: number;
   events?: QueueEvents | null;
 }
 

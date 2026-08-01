@@ -1,5 +1,6 @@
 # sparkwing
 
+func AcquireLintSlot(tool string) (*LintSlot, error)
 type AfterRunFn func(ctx context.Context, err error)
 func Always() Predicate
 func And(preds ...Predicate) Predicate
@@ -51,7 +52,8 @@ type BeforeRunFn func(ctx context.Context) error
 func Bind(argName string) Constraint
 func BindPipelinesFromYAML(cfg interface {
 	EachPipeline(func(name, entrypoint string))
-})
+},
+)
 func BoxToolBudget(tool string, grantableCores float64, queueTimeout time.Duration) *ConcurrencyGroup
 type Cache = storage.ArtifactStore
 type CacheConfig struct {
@@ -372,6 +374,17 @@ func JobSpawn(w *Work, id string, x any) *SpawnSpec
 func JobSpawnEach(w *Work, items, fn any) *SpawnGenSpec
 func Key(parts ...any) CacheKey
 func LintCacheBlobKey() string
+type LintSlot struct {
+	Path string
+
+	Cache string
+
+	Canonical bool
+}
+func (s *LintSlot) Configure(c *Cmd, cacheVar string) *Cmd
+func (s *LintSlot) ConfigureIn(c *Cmd, rel, cacheVar string) *Cmd
+func (s *LintSlot) Release()
+const LintSlotsEnv = "SPARKWING_LINT_SLOTS"
 type LintWarning struct {
 	NodeID string
 	Code   string

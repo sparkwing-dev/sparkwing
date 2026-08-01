@@ -162,6 +162,9 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 	if qs.ExternalSampleAgeMS > 0 {
 		fmt.Fprintf(w, "external-age\t%d\n", qs.ExternalSampleAgeMS)
 	}
+	if qs.ExternalMeasurementAgeMS > 0 {
+		fmt.Fprintf(w, "external-measurement-age\t%d\n", qs.ExternalMeasurementAgeMS)
+	}
 	for _, h := range qs.Holders {
 		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			h.RunID, orDash(h.ParticipantID), queueDisplayRunID(h.RunID, h.DisplayRunID),
@@ -388,7 +391,11 @@ func ExternalAgeNote(qs wingwire.QueueState) string {
 	if qs.ExternalSampleAgeMS <= 0 {
 		return ""
 	}
-	return "external reading: " + fmtElapsed(qs.ExternalSampleAgeMS) + " old"
+	note := "external reading: " + fmtElapsed(qs.ExternalSampleAgeMS) + " old"
+	if qs.ExternalMeasurementAgeMS > 0 && qs.ExternalMeasurementAgeMS < qs.ExternalSampleAgeMS {
+		note += " (host sampled " + fmtElapsed(qs.ExternalMeasurementAgeMS) + " ago)"
+	}
+	return note
 }
 
 func isHostResource(key string) bool { return key == "cores" || key == "memory" }

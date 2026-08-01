@@ -85,6 +85,15 @@ code change to unlock.
   checkout's filenames. Blob-backed fixed runners keep their existing private
   cache path so restore and save still operate on the directory lint reads.
 
+- **admission:** host-pressure hysteresis can no longer hold a recovered
+  reading indefinitely. The daemon keeps the deadband that absorbs noisy
+  samples, but reapplies its newest effective value within 30 seconds, so a
+  near-threshold waiter can proceed without a daemon restart. Queue JSON now
+  distinguishes the age of the effective admission value from the age of the
+  newest successful host-pressure measurement; older clients keep the existing
+  `external_sample_age_ms` field and safely ignore the additive
+  `external_measurement_age_ms` field.
+
 - **config:** the repo registry is written through a uniquely named staging
   file instead of a shared `repos.yaml.tmp`. Concurrent writers no longer
   collide on the staging file, and staged contents are synced before rename.
