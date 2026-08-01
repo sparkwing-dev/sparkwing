@@ -2064,13 +2064,14 @@ func (s *Store) SetNodeSummary(ctx context.Context, runID, nodeID, md string) er
 }
 
 // Step status constants. Steps are inserted as StepRunning on
-// step_start and transitioned to passed/failed on step_end. Skipped
+// step_start and transitioned to passed/failed/cancelled on step_end. Skipped
 // steps insert directly as StepSkipped with started_at == finished_at.
 const (
-	StepRunning = "running"
-	StepPassed  = "passed"
-	StepFailed  = "failed"
-	StepSkipped = "skipped"
+	StepRunning   = "running"
+	StepPassed    = "passed"
+	StepFailed    = "failed"
+	StepCancelled = "cancelled"
+	StepSkipped   = "skipped"
 )
 
 // NodeStep is one row from the node_steps table: per-step runtime
@@ -2103,7 +2104,7 @@ ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
 	return err
 }
 
-// FinishNodeStep transitions a running step to passed/failed and
+// FinishNodeStep transitions a running step to passed/failed/cancelled and
 // stamps finished_at. Caller passes StepPassed or StepFailed.
 // Creates the row if missing so the rare reorder where step_end
 // lands before step_start still records terminal state.

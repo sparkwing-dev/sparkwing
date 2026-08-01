@@ -80,6 +80,7 @@ func (c *Cmd) MustBeEmpty(reason string) error
 func (c *Cmd) Run() (ExecResult, error)
 func (c *Cmd) String() (string, error)
 func CoerceSpawnEachJob(v any) (Workable, error)
+const CollectAll ParallelFailurePolicy = "collect-all"
 func Computed(fn any) Constraint
 type ConcurrencyGroup struct {
 }
@@ -176,6 +177,7 @@ const EventPullRequest = "pull_request"
 const EventStepEnd = "step_end"
 const EventStepSkipped = "step_skipped"
 const EventStepStart = "step_start"
+const EventWorkFailFast = "work_fail_fast"
 type Example struct {
 	Comment string
 	Command string
@@ -209,6 +211,7 @@ type Expansion struct {
 	Gen    ExpandGenerator
 }
 const Fail OnLimit = "fail"
+const FailFast ParallelFailurePolicy = "fail-fast"
 const Failed Outcome = "failed"
 type Failure struct {
 	Stage FailureStage
@@ -433,6 +436,7 @@ func Or(preds ...Predicate) Predicate
 type Outcome string
 func (o Outcome) OK() bool
 func (o Outcome) Terminal() bool
+type ParallelFailurePolicy string
 func Path(parts ...string) string
 const Paused = "paused"
 type Pipeline[T any] interface {
@@ -807,6 +811,8 @@ func WithToolSlotProvider(ctx context.Context, p ToolSlotProvider) context.Conte
 type Work struct {
 }
 func (w *Work) Groups() []*StepGroup
+func (w *Work) ParallelFailurePolicy() ParallelFailurePolicy
+func (w *Work) ParallelFailures(policy ParallelFailurePolicy) *Work
 func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string
 func (w *Work) SpawnGens() []*SpawnGenSpec
 func (w *Work) Spawns() []*SpawnSpec
@@ -822,9 +828,11 @@ type WorkStep struct {
 func (s *WorkStep) ContinueOnError() *WorkStep
 func (s *WorkStep) DepIDs() []string
 func (s *WorkStep) DryRun(fn func(ctx context.Context) error) *WorkStep
+func (s *WorkStep) Finally() *WorkStep
 func (s *WorkStep) HasDryRun() bool
 func (s *WorkStep) ID() string
 func (s *WorkStep) IsContinueOnError() bool
+func (s *WorkStep) IsFinally() bool
 func (s *WorkStep) IsOptional() bool
 func (s *WorkStep) IsSafeWithoutDryRun() bool
 func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep

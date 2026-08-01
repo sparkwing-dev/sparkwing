@@ -115,7 +115,7 @@ type LogRecord struct {
 	Level string         `json:"level,omitempty"` // "info" | "warn" | "error"
 	JobID string         `json:"node,omitempty"`  // set by jobLogger on writes to disk + delegate; wire tag stays "node" for log-format compat
 	Step  string         `json:"step,omitempty"`  // active step ID, set by recordEnvelope inside the step body
-	Event string         `json:"event,omitempty"` // "" (plain msg), "node_start", "node_end", "node_annotation", "node_summary", "step_start", "step_end", "step_skipped", "retry", "exec_line", "run_plan", "run_summary", "run_finish"
+	Event string         `json:"event,omitempty"` // "" (plain msg), "node_start", "node_end", "node_annotation", "node_summary", "step_start", "step_end", "step_skipped", "work_fail_fast", "retry", "exec_line", "run_plan", "run_summary", "run_finish"
 	Msg   string         `json:"msg,omitempty"`
 	Attrs map[string]any `json:"attrs,omitempty"`
 }
@@ -333,11 +333,13 @@ const EventNodeSummary = "node_summary"
 
 // Per-step lifecycle events. Emitted by the Work-runner before / after
 // each step body. EventStepSkipped fires for skipIf / dry-run guards
-// that short-circuit the step before its body runs.
+// that short-circuit the step before its body runs. EventWorkFailFast
+// summarizes the decisive failure and sibling cancellation latency.
 const (
-	EventStepStart   = "step_start"
-	EventStepEnd     = "step_end"
-	EventStepSkipped = "step_skipped"
+	EventStepStart    = "step_start"
+	EventStepEnd      = "step_end"
+	EventStepSkipped  = "step_skipped"
+	EventWorkFailFast = "work_fail_fast"
 )
 
 func emitLevel(ctx context.Context, level, format string, args ...any) {

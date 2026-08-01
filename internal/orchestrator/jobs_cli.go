@@ -500,6 +500,8 @@ func stepGlyph(status string) string {
 		return "✓"
 	case store.StepFailed:
 		return "✗"
+	case store.StepCancelled:
+		return "⊘"
 	case store.StepSkipped:
 		return "↷"
 	case store.StepRunning:

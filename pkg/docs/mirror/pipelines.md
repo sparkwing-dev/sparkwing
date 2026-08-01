@@ -410,6 +410,8 @@ suspended-runner cost) at the call site.
 | `Dynamic()` | Plan only | flag for renderers |
 | `Needs` | both | ordering inside its layer |
 | `SkipIf` | both | skip predicate |
+| parallel failures | Work only | `w.ParallelFailures(sw.FailFast)` or `sw.CollectAll` |
+| `Finally()` | Work only | cleanup after declared dependencies terminate, including failed or cancelled ones |
 | typed output | both | `Ref[T]` (Job) / `*WorkStep` returned from `Work` (Work) |
 
 A Step that needs Retry / Timeout / Requires is the canonical signal
@@ -571,4 +573,3 @@ stays `running` forever. Workaround: re-run, or keep `sparkwing
 dashboard start` up so the dispatcher lives in the long-lived local
 web server. Cluster mode has the same property via the controller
 pod.
-

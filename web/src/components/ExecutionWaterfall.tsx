@@ -85,7 +85,7 @@ interface StepRow {
   name: string;
   startMs: number;
   durationMs: number;
-  status: "passed" | "failed" | "running" | "skipped";
+  status: "passed" | "failed" | "cancelled" | "running" | "skipped";
 }
 
 // stepsForNode pulls every NodeWorkStep with timing data and projects
@@ -120,6 +120,8 @@ function stepBarColor(status: StepRow["status"]): string {
   switch (status) {
     case "failed":
       return "bg-red-300/80";
+    case "cancelled":
+      return "bg-amber-300/70";
     case "running":
       return "bg-indigo-300/80";
     case "skipped":

@@ -326,9 +326,9 @@ export interface NodeWorkStep {
   is_result?: boolean;
   has_skip_if?: boolean;
   // Runtime state joined in from node_steps rows server-side.
-  // status is one of "running" | "passed" | "failed" | "skipped";
+  // status is one of "running" | "passed" | "failed" | "cancelled" | "skipped";
   // missing/empty means the step hasn't started.
-  status?: "running" | "passed" | "failed" | "skipped";
+  status?: "running" | "passed" | "failed" | "cancelled" | "skipped";
   started_at?: string;
   finished_at?: string;
   duration_ms?: number;

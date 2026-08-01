@@ -2919,11 +2919,12 @@ type snapshotModifiers struct {
 
 // snapshotWork is the wire shape of a Job's inner DAG.
 type snapshotWork struct {
-	Steps      []snapshotStep      `json:"steps,omitempty"`
-	Spawns     []snapshotSpawn     `json:"spawns,omitempty"`
-	SpawnEach  []snapshotSpawnEach `json:"spawn_each,omitempty"`
-	StepGroups []snapshotStepGroup `json:"step_groups,omitempty"`
-	ResultStep string              `json:"result_step,omitempty"`
+	Steps         []snapshotStep      `json:"steps,omitempty"`
+	Spawns        []snapshotSpawn     `json:"spawns,omitempty"`
+	SpawnEach     []snapshotSpawnEach `json:"spawn_each,omitempty"`
+	StepGroups    []snapshotStepGroup `json:"step_groups,omitempty"`
+	ResultStep    string              `json:"result_step,omitempty"`
+	FailurePolicy string              `json:"failure_policy,omitempty"`
 }
 
 // snapshotStepGroup is the wire shape of a sparkwing.GroupSteps
@@ -2942,6 +2943,7 @@ type snapshotStep struct {
 	Needs     []string `json:"needs,omitempty"`
 	IsResult  bool     `json:"is_result,omitempty"`
 	HasSkipIf bool     `json:"has_skip_if,omitempty"`
+	Finally   bool     `json:"finally,omitempty"`
 	// Risks is the author-declared risk-label set on this step.
 	// Empty when no label was declared. Surfaced in the plan
 	// snapshot so `pipeline explain --json` consumers see the
@@ -3221,7 +3223,7 @@ func newWorkWalker() *workWalker {
 }
 
 func (w *workWalker) walk(work *sparkwing.Work, resultStep *sparkwing.WorkStep) (*snapshotWork, error) {
-	out := &snapshotWork{}
+	out := &snapshotWork{FailurePolicy: string(work.ParallelFailurePolicy())}
 	if resultStep != nil {
 		out.ResultStep = resultStep.ID()
 	}
@@ -3231,6 +3233,7 @@ func (w *workWalker) walk(work *sparkwing.Work, resultStep *sparkwing.WorkStep) 
 			Needs:     s.DepIDs(),
 			IsResult:  s == resultStep,
 			HasSkipIf: len(s.SkipPredicates()) > 0,
+			Finally:   s.IsFinally(),
 			Risks:     s.Risks(),
 		})
 	}

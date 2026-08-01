@@ -396,6 +396,7 @@ type SpawnedChild struct {
 	Pipeline     string
 	ChildRunID   string
 }
+const StepCancelled = "cancelled"
 const StepFailed = "failed"
 const StepPassed = "passed"
 const StepRunning = "running"

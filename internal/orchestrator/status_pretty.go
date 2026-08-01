@@ -23,7 +23,7 @@ func colorOutcome(outcome string) string {
 	switch outcome {
 	case "success":
 		return color.Green(outcome)
-	case "failed":
+	case "failed", "cancelled":
 		return color.Red(outcome)
 	case "skipped":
 		return color.Dim(outcome)
@@ -41,7 +41,7 @@ func colorStepGlyph(status string) string {
 	switch status {
 	case "passed":
 		return color.Green(g)
-	case "failed":
+	case "failed", "cancelled":
 		return color.Red(g)
 	case "skipped":
 		return color.Dim(g)

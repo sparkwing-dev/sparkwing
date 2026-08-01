@@ -54,6 +54,13 @@ code change to unlock.
   structured `info` includes `capability_epoch`, and new pipeline scaffolds
   point agents at the live command instead of copying a command catalog.
 
+- **sdk:** Work DAGs can declare `w.ParallelFailures(sparkwing.FailFast)` for
+  short local feedback or `sparkwing.CollectAll` for comprehensive diagnostics.
+  Fail-fast siblings now finish as cancelled instead of failed, telemetry names
+  the decisive step and cancellation latency, and `.Finally()` cleanup steps
+  run after their declared dependencies terminate without inheriting sibling
+  cancellation. The zero value remains fail-fast for compatibility.
+
 - **sdk:** `sparkwing.AcquireLintSlot(tool)` lets worktrees of one repo share a
   golangci-lint cache without being told about each other's files. golangci-lint
   keys a cached result on the import path and file content, deliberately

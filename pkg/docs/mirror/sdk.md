@@ -556,9 +556,24 @@ Step modifiers (chainable on `*WorkStep`):
 ```
 step.Needs(deps...) *WorkStep                             // accepts *WorkStep, *StepGroup, *SpawnSpec, *SpawnGenSpec; splat a slice: s.Needs(steps...)
 step.SkipIf(predicate) *WorkStep                          // OR-accumulating skip predicate
+step.Finally() *WorkStep                                 // cleanup after declared deps terminate, even after sibling failure
 step.DryRun(fn func(ctx) error) *WorkStep                 // no-mutation body run instead of the apply Fn under sparkwing X --dry-run
 step.SafeWithoutDryRun() *WorkStep                        // mark the apply Fn as side-effect-free; runs unmodified under --dry-run
 ```
+
+Choose the parallel failure policy once per Work:
+
+```go
+w.ParallelFailures(sw.FailFast)   // default: cancel ordinary siblings on the first decisive failure
+w.ParallelFailures(sw.CollectAll) // finish every ready sibling and report the full failure set
+```
+
+Fail-fast records the triggering step, cancelled sibling count, and
+cancellation latency in `work_fail_fast` telemetry. Cancelled steps end with
+`outcome=cancelled`, never `failed`. Cleanup steps should declare every item
+they clean up with `.Needs(...)` and add `.Finally()`; they run through the
+Job's parent context, so sibling failure does not cancel them while an operator
+cancellation still does.
 
 ### Dry-run contract
 
