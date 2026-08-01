@@ -47,6 +47,7 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
 ### Added
 
 - **agent discovery:** `info --for-agent` now emits current, one-wake context,
@@ -102,6 +103,50 @@ code change to unlock.
   `IgnoreExternal`, and the daemon now reports budget state whether or not a
   budget is set. An absent `BudgetState` means the daemon did not describe its
   budget, which is not the same answer as "no budget set".
+
+- **sdk:** `sparkwing.ToolSlot` takes a named box-wide budget from inside a
+  running job, for external tools that ship their own machine-wide lock the
+  admission daemon cannot see. A waiting step reports its queue position the
+  way a queued node does. `sparkwing.BoxToolBudget` builds the matching
+  `ConcurrencyGroup`, counted in hundredths of a core so widening what a tool
+  covers re-derives the concurrency from one measured number instead of a
+  hand-tuned slot count.
+- **cli:** `sparkwing queue` estimates a start time for a run waiting on a
+  named semaphore. Previously only host-capacity waits carried an ETA, so a
+  step queued behind a tool budget could report its position but never how
+  long.
+
+### Changed
+
+- **sdk:** golangci-lint in this repo's own gates now runs under a box-wide
+  budget and passes `--allow-parallel-runners` while it holds one, instead of
+  serializing on golangci-lint's private lock. The private lock admits exactly
+  one linter per machine, so concurrent gates queued behind each other no
+  matter how much headroom the box had. `--allow-serial-runners` remains the
+  fallback whenever the budget is not held, because dropping the tool's lock
+  without a budget would leave nothing serializing lint at all.
+- **cli:** `sparkwing queue` tells "nothing is queued" apart from "I never
+  reached the daemon". It printed `{}` for both, which is what a quiet machine
+  prints, so the command whose help promises "the truthful view of local
+  admission" reported an idle queue while it was blind. Every format now states
+  reachability outright -- `daemon.reachable` and `daemon.state` in JSON, a
+  `daemon` row in plain, a leading line in pretty -- and a socket that cannot be
+  reached names the dial failure and exits 4 rather than exiting 0 with an empty
+  queue.
+
+- **cli:** `sparkwing doctor` always reports the admission daemon: serving with
+  its version and protocol, none running, or unreachable. It carried no daemon
+  field at all before, so a sweep that never reached the daemon printed the same
+  counts a healthy machine prints and read as a clean bill. An unreachable
+  daemon is no longer clean, because the rejection, skew and lockout checks
+  under it never ran, and the orphaned-run repair is skipped there rather than
+  finalize a run that daemon may be holding.
+
+- **cli:** an unreachable admission daemon leads with why. The error opened with
+  "admission daemon started but exited before serving", which reads as a crash,
+  and buried the real cause -- a bind the sandbox refused, a socket path over the
+  OS limit -- under the log tail. The daemon's own last logged line now leads,
+  with the log path still named.
 
 ### Fixed
 
@@ -218,52 +263,8 @@ code change to unlock.
   the arithmetic (`needs 12GiB of memory, this machine has 8GiB`) rather
   than queued until it times out. An ordinarily busy box still queues.
 
-### Added
-
-- **sdk:** `sparkwing.ToolSlot` takes a named box-wide budget from inside a
-  running job, for external tools that ship their own machine-wide lock the
-  admission daemon cannot see. A waiting step reports its queue position the
-  way a queued node does. `sparkwing.BoxToolBudget` builds the matching
-  `ConcurrencyGroup`, counted in hundredths of a core so widening what a tool
-  covers re-derives the concurrency from one measured number instead of a
-  hand-tuned slot count.
-- **cli:** `sparkwing queue` estimates a start time for a run waiting on a
-  named semaphore. Previously only host-capacity waits carried an ETA, so a
-  step queued behind a tool budget could report its position but never how
-  long.
-
-### Changed
-
-- **sdk:** golangci-lint in this repo's own gates now runs under a box-wide
-  budget and passes `--allow-parallel-runners` while it holds one, instead of
-  serializing on golangci-lint's private lock. The private lock admits exactly
-  one linter per machine, so concurrent gates queued behind each other no
-  matter how much headroom the box had. `--allow-serial-runners` remains the
-  fallback whenever the budget is not held, because dropping the tool's lock
-  without a budget would leave nothing serializing lint at all.
-- **cli:** `sparkwing queue` tells "nothing is queued" apart from "I never
-  reached the daemon". It printed `{}` for both, which is what a quiet machine
-  prints, so the command whose help promises "the truthful view of local
-  admission" reported an idle queue while it was blind. Every format now states
-  reachability outright -- `daemon.reachable` and `daemon.state` in JSON, a
-  `daemon` row in plain, a leading line in pretty -- and a socket that cannot be
-  reached names the dial failure and exits 4 rather than exiting 0 with an empty
-  queue.
-
-- **cli:** `sparkwing doctor` always reports the admission daemon: serving with
-  its version and protocol, none running, or unreachable. It carried no daemon
-  field at all before, so a sweep that never reached the daemon printed the same
-  counts a healthy machine prints and read as a clean bill. An unreachable
-  daemon is no longer clean, because the rejection, skew and lockout checks
-  under it never ran, and the orphaned-run repair is skipped there rather than
-  finalize a run that daemon may be holding.
-
-- **cli:** an unreachable admission daemon leads with why. The error opened with
-  "admission daemon started but exited before serving", which reads as a crash,
-  and buried the real cause -- a bind the sandbox refused, a socket path over the
-  OS limit -- under the log tail. The daemon's own last logged line now leads,
-  with the log path still named.
 ## [v0.22.1] - 2026-07-30
+
 ### Added
 
 - **cli:** `sparkwing pipeline hooks fire` establishes a gate by making it
@@ -303,6 +304,44 @@ code change to unlock.
   empty ungated list on its own could not be read as a gated fleet, because a
   build that never ran the survey omits the field entirely and a reader looking
   for problems finds none either way.
+
+### Changed
+
+- **cli:** `sparkwing pipeline hooks install` now runs a repo's blocking gates
+  once before those gates can fire. While a repo's hooks are inert a gate that
+  cannot execute -- a red pipeline, an admission daemon the repo's pinned SDK
+  cannot speak to -- is indistinguishable from one that passes; arming turns
+  the first into a commit that fails every time, which is worse than the
+  silence it replaces. Proof completes before hook or config publication, so a
+  failure changes nothing and cannot interrupt an already-working gate.
+  Complete replacements publish by atomic rename, and any later error restores
+  the prior hooks, forwarders, modes, and `core.hooksPath` exactly. The proof
+  runs on every install that leaves a gate live, including a re-install of an
+  already-armed repo. `--no-prove` arms without the proof.
+
+- **admission:** a still-measuring pipeline's contended-run demand floor
+  now decays: a contended run that measures below the floor halves it
+  (never past the run's own evidence), mirroring the ceiling-hit doubling
+  that raises it. Sustained external load can no longer ratchet a
+  pipeline's charge to the machine ceiling permanently -- the price
+  converges back to measured demand once the load passes, without
+  `runs stats --reset`.
+- **admission:** capacity profiles are keyed `repo/pipeline` for runs
+  launched inside a git repo (bare pipeline name outside one), so
+  same-named pipelines in different repos -- every scaffolded repo's
+  `ci` -- no longer pool measurements and contended floors on one
+  machine-global row. Existing bare-keyed rows are left behind and
+  ignored by in-repo runs; each pipeline re-measures once under its
+  scoped key, and stale rows can be cleared with
+  `runs stats --reset --all --yes`.
+- **admission:** capping a still-measuring charge at the machine's
+  grantable ceiling is no longer silent: the run prints the capped
+  charge with the exact `runs stats --reset --pipeline <name>` that
+  clears a contention-poisoned profile.
+- **cli:** `sparkwing doctor` reports (never repairs) a poisoned
+  capacity profile -- a contended-run demand floor pricing every run at
+  or above the machine's grantable ceiling -- naming the profile and the
+  reset command.
 
 ### Fixed
 
@@ -415,22 +454,6 @@ code change to unlock.
   with an older one would be undone by the next native client, with nothing
   bounding the exchange. Daemons predating the field omit it, and a reader
   falls back to `protocol_major`.
-
-### Changed
-
-- **cli:** `sparkwing pipeline hooks install` now runs a repo's blocking gates
-  once before those gates can fire. While a repo's hooks are inert a gate that
-  cannot execute -- a red pipeline, an admission daemon the repo's pinned SDK
-  cannot speak to -- is indistinguishable from one that passes; arming turns
-  the first into a commit that fails every time, which is worse than the
-  silence it replaces. Proof completes before hook or config publication, so a
-  failure changes nothing and cannot interrupt an already-working gate.
-  Complete replacements publish by atomic rename, and any later error restores
-  the prior hooks, forwarders, modes, and `core.hooksPath` exactly. The proof
-  runs on every install that leaves a gate live, including a re-install of an
-  already-armed repo. `--no-prove` arms without the proof.
-
-### Fixed
 
 - **admission:** upgrading sparkwing no longer locks out every repo whose
   pipeline pins an older SDK. The daemon now answers the handshake on the
@@ -557,34 +580,6 @@ code change to unlock.
   preferring a `GIT_INDEX_FILE` a caller set deliberately and falling back to
   the repository's index when no hook is running.
 
-### Changed
-
-- **admission:** a still-measuring pipeline's contended-run demand floor
-  now decays: a contended run that measures below the floor halves it
-  (never past the run's own evidence), mirroring the ceiling-hit doubling
-  that raises it. Sustained external load can no longer ratchet a
-  pipeline's charge to the machine ceiling permanently -- the price
-  converges back to measured demand once the load passes, without
-  `runs stats --reset`.
-- **admission:** capacity profiles are keyed `repo/pipeline` for runs
-  launched inside a git repo (bare pipeline name outside one), so
-  same-named pipelines in different repos -- every scaffolded repo's
-  `ci` -- no longer pool measurements and contended floors on one
-  machine-global row. Existing bare-keyed rows are left behind and
-  ignored by in-repo runs; each pipeline re-measures once under its
-  scoped key, and stale rows can be cleared with
-  `runs stats --reset --all --yes`.
-- **admission:** capping a still-measuring charge at the machine's
-  grantable ceiling is no longer silent: the run prints the capped
-  charge with the exact `runs stats --reset --pipeline <name>` that
-  clears a contention-poisoned profile.
-- **cli:** `sparkwing doctor` reports (never repairs) a poisoned
-  capacity profile -- a contended-run demand floor pricing every run at
-  or above the machine's grantable ceiling -- naming the profile and the
-  reset command.
-
-### Fixed
-
 - **admission:** a sparkwing built from source (a `(devel)` or `+dirty`
   build) now takes over a running release admission daemon whatever the
   two version tags say, through the same drain-and-succeed path a newer
@@ -596,6 +591,7 @@ code change to unlock.
   version-skew warning explains the cases takeover leaves alone.
 
 ## [v0.22.0] - 2026-07-22
+
 ### Added
 
 - **sdk:** `Plan.Priority(n)` declares a local admission priority.
@@ -629,6 +625,23 @@ code change to unlock.
   and a genuine cost change re-prices within the shorter window. Queue
   views and drift warnings say "measured p95" accordingly.
 
+- **admission:** unpinned local work admits CPU and memory per node instead of
+  reserving one host charge for the run's lifetime. Node concurrency and host
+  resources grant atomically, so a node waiting on a concurrency limit holds
+  neither and unrelated work can use the box.
+- **admission:** capacity learning records node demand and re-measures plans
+  when their concurrency declarations change. Explicit run resources retain
+  run-lifetime admission semantics.
+- **admission:** higher-priority plans admit before lower-priority plans, while
+  equal priorities retain FIFO order. Bounded backfill admits work that fits
+  without starving the oldest compatible waiter.
+- **cli:** queue views expose execution holders and waiters with node identity,
+  priority, blocking resources, and separate capacity/concurrency wait data.
+- **admission:** (Breaking) the local daemon wire protocol advances to v2 for
+  phase-scoped leases and child attachment. Clients and daemons using different
+  protocol majors refuse to share a live ledger; upgrade every Sparkwing
+  process on a host together.
+
 ### Fixed
 
 - **release:** template verification now runs after the pre-push gate and
@@ -655,25 +668,6 @@ code change to unlock.
   resource pin no longer inflates the release run's admission charge.
 - **docs:** restored the v0.17.3 through v0.17.12 changelog sections,
   which were missing from this line's history.
-
-### Changed
-
-- **admission:** unpinned local work admits CPU and memory per node instead of
-  reserving one host charge for the run's lifetime. Node concurrency and host
-  resources grant atomically, so a node waiting on a concurrency limit holds
-  neither and unrelated work can use the box.
-- **admission:** capacity learning records node demand and re-measures plans
-  when their concurrency declarations change. Explicit run resources retain
-  run-lifetime admission semantics.
-- **admission:** higher-priority plans admit before lower-priority plans, while
-  equal priorities retain FIFO order. Bounded backfill admits work that fits
-  without starving the oldest compatible waiter.
-- **cli:** queue views expose execution holders and waiters with node identity,
-  priority, blocking resources, and separate capacity/concurrency wait data.
-- **admission:** (Breaking) the local daemon wire protocol advances to v2 for
-  phase-scoped leases and child attachment. Clients and daemons using different
-  protocol majors refuse to share a live ledger; upgrade every Sparkwing
-  process on a host together.
 
 ## [v0.20.0] - 2026-07-21
 ### Fixed
