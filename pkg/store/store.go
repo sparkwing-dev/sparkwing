@@ -2105,7 +2105,7 @@ ON CONFLICT(run_id, node_id, step_id) DO NOTHING`,
 }
 
 // FinishNodeStep transitions a running step to passed/failed/cancelled and
-// stamps finished_at. Caller passes StepPassed or StepFailed.
+// stamps finished_at. Caller passes StepPassed, StepFailed, or StepCancelled.
 // Creates the row if missing so the rare reorder where step_end
 // lands before step_start still records terminal state.
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error {
