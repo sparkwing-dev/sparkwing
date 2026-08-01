@@ -286,7 +286,7 @@ func renderCommandsMarkdown(cmds []CommandJSON) string {
 			b.WriteString("```\n\n")
 		}
 	}
-	return b.String()
+	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
 // descBlock makes a multi-line command description safe to emit as a

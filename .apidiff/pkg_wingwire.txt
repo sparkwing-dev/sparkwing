@@ -186,6 +186,8 @@ type Holder struct {
 
 	Semaphores []string
 
+	ConnectionOnly bool
+
 	CostSource string
 
 	CostRationale string
