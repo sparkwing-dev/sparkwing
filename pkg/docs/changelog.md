@@ -73,6 +73,32 @@ code change to unlock.
   because a command run outside the canonical path writes the worktree's own
   paths into the shared cache.
 
+- **cli:** the machine budget resolves from `~/.config/sparkwing/budget` (or
+  `$XDG_CONFIG_HOME/sparkwing/budget`) as well as `SPARKWING_BUDGET` and the
+  daemon's `--budget` flag, in that precedence: flag, then environment, then
+  file. The admission daemon is started on demand by whichever run needs it
+  first and inherits that process's environment, so an exported budget applies
+  to whatever daemon that shell happened to spawn and dies with it. A budget in
+  the file is read at every daemon startup, so it survives a kill and respawn
+  and needs no shell to have exported anything. The file holds one setting
+  line; blank lines and `#` comments are skipped, so the reason a budget is in
+  force can live beside it. A value that will not parse fails daemon startup
+  rather than being dropped, whichever setting it came from.
+
+- **cli:** `sparkwing queue` names the setting the active budget came from
+  (`budget 6.0 cores (machine 10.0) (from config ~/.config/sparkwing/budget)`),
+  and says so when no budget is set anywhere rather than staying silent -- a
+  machine admitting against everything it has reads exactly like a deliberate
+  whole-machine budget otherwise. The `external: ignored` line names its source
+  too. `sparkwing doctor` reports a non-default budget with the setting behind
+  it, including one that ignores external load, and flags a budget that came
+  from an environment the next respawn may not carry.
+
+- **wingwire:** `BudgetState` gained `Source`, `Origin`, `Raw`, and
+  `IgnoreExternal`, and the daemon now reports budget state whether or not a
+  budget is set. An absent `BudgetState` means the daemon did not describe its
+  budget, which is not the same answer as "no budget set".
+
 ### Fixed
 
 - **gate:** The changelog-required check now runs on macOS system Bash 3.2

@@ -35,7 +35,7 @@ func runWingdCLI(args []string) error {
 	fs := flag.NewFlagSet("wingd run", flag.ContinueOnError)
 	home := fs.String("home", "", "sparkwing home (default: $SPARKWING_HOME or ~/.sparkwing)")
 	version := fs.String("version", "", "binary version to advertise (default: the compiled SDK version)")
-	budget := fs.String("budget", "", "machine budget cap (default: $SPARKWING_BUDGET)")
+	budget := fs.String("budget", "", "machine budget cap (default: $SPARKWING_BUDGET, then the budget config file)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return err
 	}
@@ -43,19 +43,17 @@ func runWingdCLI(args []string) error {
 	if v == "" {
 		v = sparkwingModuleVersion()
 	}
-	budgetStr := *budget
-	if budgetStr == "" {
-		budgetStr = os.Getenv("SPARKWING_BUDGET")
-	}
-	parsedBudget, err := wingd.ParseBudget(budgetStr)
+	resolvedBudget, err := wingd.ResolveBudget(*budget)
 	if err != nil {
 		return err
 	}
 	d, err := wingd.New(wingd.Config{
-		Home:        *home,
-		Version:     v,
-		Budget:      parsedBudget,
-		FinalizeRun: NewOrphanRunFinalizer(*home),
+		Home:         *home,
+		Version:      v,
+		Budget:       resolvedBudget.Budget,
+		BudgetSource: resolvedBudget.Source,
+		BudgetOrigin: resolvedBudget.Origin,
+		FinalizeRun:  NewOrphanRunFinalizer(*home),
 		Logf: func(format string, a ...any) {
 			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
 				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))

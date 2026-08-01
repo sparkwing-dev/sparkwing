@@ -549,9 +549,41 @@ type ContainerLimit struct {
 	HostMemoryBytes int64 `json:"host_memory_bytes,omitempty"`
 }
 
+// BudgetSource names which setting a machine budget came from. It is
+// part of the wire vocabulary because the queue view reports it, and a
+// reader who cannot see which setting is in force cannot revoke it.
+type BudgetSource string
+
+const (
+	// BudgetSourceUnset means no budget is configured anywhere, so
+	// admission plans against the whole machine.
+	BudgetSourceUnset BudgetSource = "unset"
+	// BudgetSourceFlag means the budget came from the daemon's --budget
+	// flag.
+	BudgetSourceFlag BudgetSource = "flag"
+	// BudgetSourceEnv means the budget came from SPARKWING_BUDGET in the
+	// environment of whatever process spawned the daemon, and dies with
+	// that daemon.
+	BudgetSourceEnv BudgetSource = "env"
+	// BudgetSourceConfig means the budget came from the on-disk config
+	// file, the one source that survives a daemon respawn.
+	BudgetSourceConfig BudgetSource = "config"
+	// BudgetSourceUnknown means a budget is in force but nothing recorded
+	// which setting produced it -- a binary that built the daemon config
+	// directly. Reported as unknown rather than guessed.
+	BudgetSourceUnknown BudgetSource = "unknown"
+)
+
 // BudgetState reports the machine budget behind a [QueueState]: the
 // capped host capacity the ledger admits into, against the machine total
-// it was measured from. It is present only when a budget is configured.
+// it was measured from, and which setting put it there.
+//
+// A daemon reports it whether or not a budget is set, because "no budget"
+// and "a budget this build did not tell you about" are different answers
+// and a reader cannot tell them apart from silence. Source says which it
+// is. An absent BudgetState means the daemon predates the field or the
+// view came from a controller, and nothing about the budget should be
+// inferred from it.
 type BudgetState struct {
 	// Cores is the budgeted core cap the ledger admits into.
 	Cores float64 `json:"cores"`
@@ -565,6 +597,21 @@ type BudgetState struct {
 	// (a cgroup on Linux, background scheduling on macOS) in addition to
 	// capping admission.
 	Enforce bool `json:"enforce,omitempty"`
+	// IgnoreExternal reports that the budget tells admission to stop
+	// subtracting measured non-sparkwing load. It repeats
+	// [QueueState.IgnoreExternal] so the setting and its source travel
+	// together.
+	IgnoreExternal bool `json:"ignore_external,omitempty"`
+	// Source names which setting the active budget came from: "unset",
+	// "flag", "env", "config", or "unknown". Empty from a daemon built
+	// before the field existed.
+	Source string `json:"source,omitempty"`
+	// Origin is the exact setting behind Source -- the flag name, the
+	// environment variable, or the config file path -- so a reader knows
+	// what to edit to revoke it. Empty when nothing is set.
+	Origin string `json:"origin,omitempty"`
+	// Raw is the budget setting string as supplied, for display.
+	Raw string `json:"raw,omitempty"`
 }
 
 // EventsWindow summarizes the daemon's rolling window of admission

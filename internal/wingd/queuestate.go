@@ -23,6 +23,12 @@ func stallRecoveryCommand(runID string) string {
 // elapsed time and cost, and waiters in admission order, each annotated
 // with its cost source, drift warning, and -- for waiters -- an estimated
 // start time. The caller holds d.mu.
+//
+// The machine budget is reported whether or not one is set. An operator
+// reading the queue to find out why admission is capped needs "nothing is
+// set" to be an answer the view gives, not one they infer from a missing
+// row, and the source travels with it so a budget they did not set is one
+// they can locate and revoke.
 func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	snap := d.ledger.Snapshot()
 	var qs wingwire.QueueState
@@ -142,14 +148,17 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			HostMemoryBytes: int64(d.hostMemory),
 		}
 	}
-	if d.cfg.Budget.HasCap() {
-		qs.Budget = &wingwire.BudgetState{
-			Cores:              d.budgetCores,
-			MachineCores:       d.machineCores,
-			MemoryBytes:        int64(d.budgetMemory),
-			MachineMemoryBytes: int64(d.machineMemory),
-			Enforce:            d.cfg.Budget.Enforcing(),
-		}
+	rb := d.cfg.resolvedBudget()
+	qs.Budget = &wingwire.BudgetState{
+		Cores:              d.budgetCores,
+		MachineCores:       d.machineCores,
+		MemoryBytes:        int64(d.budgetMemory),
+		MachineMemoryBytes: int64(d.machineMemory),
+		Enforce:            d.cfg.Budget.Enforcing(),
+		IgnoreExternal:     d.cfg.Budget.IgnoreExternal,
+		Source:             string(rb.Source),
+		Origin:             rb.Origin,
+		Raw:                d.cfg.Budget.Raw,
 	}
 	qs.IgnoreExternal = d.cfg.Budget.IgnoreExternal
 	qs.CapacityChange = d.capacityChange

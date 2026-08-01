@@ -40,7 +40,7 @@ func runWingdRun(args []string) error {
 	home := fs.String("home", "", "sparkwing home (default: $SPARKWING_HOME or ~/.sparkwing)")
 	version := fs.String("version", "", "binary version to advertise (default: this build)")
 	headroom := fs.Float64("headroom", 0, "reserved host capacity fraction (0..1); 0 uses the default margin")
-	budget := fs.String("budget", "", "machine budget cap (default: $SPARKWING_BUDGET); e.g. 6, 50%, 6,8gb, 50%,enforce")
+	budget := fs.String("budget", "", "machine budget cap (default: $SPARKWING_BUDGET, then the budget config file); e.g. 6, 50%, 6,8gb, 50%,enforce")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -53,11 +53,7 @@ func runWingdRun(args []string) error {
 		v = installedVersion()
 	}
 
-	budgetStr := *budget
-	if budgetStr == "" {
-		budgetStr = os.Getenv("SPARKWING_BUDGET")
-	}
-	parsedBudget, err := wingd.ParseBudget(budgetStr)
+	resolvedBudget, err := wingd.ResolveBudget(*budget)
 	if err != nil {
 		return err
 	}
@@ -67,7 +63,9 @@ func runWingdRun(args []string) error {
 		Home:             *home,
 		Version:          v,
 		HeadroomFraction: *headroom,
-		Budget:           parsedBudget,
+		Budget:           resolvedBudget.Budget,
+		BudgetSource:     resolvedBudget.Source,
+		BudgetOrigin:     resolvedBudget.Origin,
 		FinalizeRun:      orchestrator.NewOrphanRunFinalizer(*home),
 		Logf:             func(format string, args ...any) { logger.Printf(format, args...) },
 	})
