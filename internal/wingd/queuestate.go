@@ -199,9 +199,33 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 		qs.Waiters = append(qs.Waiters, waiter)
 	}
 
+	annotateAdmissionWaiting(&qs)
 	annotateETA(&qs, snap)
 	annotateSemaphoreETA(&qs, snap)
 	return qs
+}
+
+func annotateAdmissionWaiting(qs *wingwire.QueueState) {
+	byOwner := make(map[string][]string)
+	for _, w := range qs.Waiters {
+		if w.ParticipantID != "" {
+			byOwner[w.RunID] = append(byOwner[w.RunID], w.ParticipantID)
+		}
+	}
+	for i := range qs.Holders {
+		h := &qs.Holders[i]
+		if h.ParticipantID != "" || h.Parent != "" || h.Resources.Cores > 0 || h.Resources.MemoryBytes > 0 {
+			continue
+		}
+		active := byOwner[h.RunID]
+		if len(active) == 0 {
+			continue
+		}
+		h.AdmissionWaiting = true
+		h.ActiveWaiterParticipantIDs = append([]string(nil), active...)
+		h.Stalled = false
+		h.Recovery = ""
+	}
 }
 
 func queueBlockingReason(hostReason string, waitingOn []string, position int) string {

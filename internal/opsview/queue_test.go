@@ -87,6 +87,49 @@ func TestRenderQueuePretty_UsesDisplayRunID(t *testing.T) {
 	}
 }
 
+func TestRenderQueuePretty_ShowsAdmissionWaitingRunOnce(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{
+			{
+				RunID:                      "run-1",
+				ElapsedMS:                  90_000,
+				Semaphores:                 []string{"gate"},
+				Stalled:                    true,
+				Recovery:                   "sparkwing runs cancel --run run-1",
+				AdmissionWaiting:           true,
+				ActiveWaiterParticipantIDs: []string{"run-1/node-host/YnVpbGQ"},
+			},
+		},
+		Waiters: []wingwire.Waiter{
+			{
+				RunID:          "run-1",
+				ParticipantID:  "run-1/node-host/YnVpbGQ",
+				DisplayRunID:   "run-1/build",
+				Position:       1,
+				WaitingMS:      30_000,
+				Resources:      wingwire.HostResources{Cores: 6},
+				WaitingOn:      []string{"cores"},
+				BlockingReason: "needs 6.0 cores; 1.3 available",
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"0 holding, 1 queued", "run-1/build", "cores", "30s", "needs 6.0 cores; 1.3 available"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("admission wait omitted %q:\n%s", want, out)
+		}
+	}
+	for _, absent := range []string{"(stalled)", "sparkwing runs cancel --run run-1"} {
+		if strings.Contains(out, absent) {
+			t.Fatalf("admission wait rendered contradictory %q:\n%s", absent, out)
+		}
+	}
+}
+
 func TestRenderQueuePlain_IncludesParticipantAndDisplayIdentity(t *testing.T) {
 	qs := wingwire.QueueState{
 		Holders: []wingwire.Holder{
@@ -147,8 +190,11 @@ func TestRenderQueue_JSONRoundTrips(t *testing.T) {
 	want := wingwire.QueueState{
 		DaemonVersion: "v9.9.9",
 		Resources:     []wingwire.ResourceState{{Key: "cores", Capacity: 8, Held: 2, Available: 6}},
-		Holders:       []wingwire.Holder{{RunID: "run-a", ElapsedMS: 1000}},
-		Waiters:       []wingwire.Waiter{{RunID: "run-b", Position: 1, Priority: 25}},
+		Holders: []wingwire.Holder{{
+			RunID: "run-a", ElapsedMS: 1000, AdmissionWaiting: true,
+			ActiveWaiterParticipantIDs: []string{"run-a/node-host/dGVzdA"},
+		}},
+		Waiters: []wingwire.Waiter{{RunID: "run-b", Position: 1, Priority: 25}},
 	}
 	var buf bytes.Buffer
 	if err := opsview.RenderQueue(&buf, want, "json"); err != nil {
@@ -163,6 +209,9 @@ func TestRenderQueue_JSONRoundTrips(t *testing.T) {
 	}
 	if len(got.Waiters) != 1 || got.Waiters[0].Priority != 25 {
 		t.Fatalf("round-trip lost waiter priority: %+v", got.Waiters)
+	}
+	if !got.Holders[0].AdmissionWaiting || len(got.Holders[0].ActiveWaiterParticipantIDs) != 1 {
+		t.Fatalf("round-trip lost admission-wait hierarchy: %+v", got.Holders[0])
 	}
 }
 

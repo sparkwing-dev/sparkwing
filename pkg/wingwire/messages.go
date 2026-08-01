@@ -369,6 +369,12 @@ type Holder struct {
 	// holder. Set only when Stalled is true; it never names a
 	// destructive host verb.
 	Recovery string `json:"recovery,omitempty"`
+	// AdmissionWaiting marks an orchestration lease whose active work is
+	// queued in a child admission request. ActiveWaiterParticipantIDs names
+	// those child requests so clients can present one run lifecycle while
+	// retaining the lease and queue hierarchy.
+	AdmissionWaiting           bool     `json:"admission_waiting,omitempty"`
+	ActiveWaiterParticipantIDs []string `json:"active_waiter_participant_ids,omitempty"`
 	// Contended marks a holder that is measurably slower than its profile
 	// while the host is saturated -- throttled by contention rather than
 	// wedged (which is Stalled) or legitimately long. It is a flag only;

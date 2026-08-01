@@ -75,6 +75,10 @@ code change to unlock.
 
 ### Fixed
 
+- **queue:** a semaphore-only orchestration lease is shown as part of its active
+  node's admission wait instead of as a second, stalled run with a cancel hint.
+  JSON keeps both participant rows and now links the holder to its active waiter.
+
 - **hooks:** `sparkwing pipeline hooks status` now names declared hooks that
   are missing or not firing and prints the repair command. `sparkwing info`
   leads its next steps with the same repair, so a missing blocking gate is
@@ -89,7 +93,6 @@ code change to unlock.
   and the pipeline module pin after publishing a tag. A release can no longer
   leave the next unrelated gate red because generated projects still name the
   preceding SDK version.
-
 - **gate:** local worktrees run golangci-lint through a leased canonical path,
   so a fresh checkout can reuse a warm cache without replaying another
   checkout's filenames. Blob-backed fixed runners keep their existing private

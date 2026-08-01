@@ -559,6 +559,83 @@ func TestQueueState_FlagsStalledHolderWithRecoveryCommand(t *testing.T) {
 	}
 }
 
+func TestQueueState_AdmissionWaitingParentIsNotStalled(t *testing.T) {
+	home := shortHome(t)
+	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{
+		9001: {Fraction: 0.9},
+		9002: {},
+	}}
+	startDaemon(t, wingd.Config{
+		Home:             home,
+		Sampler:          newFakeSampler(1, 8<<30),
+		HeadroomFraction: -1,
+		ProcSampler:      proc,
+		StallInterval:    5 * time.Millisecond,
+		StallWindow:      20 * time.Millisecond,
+	})
+
+	hostClient := ensure(t, home, "")
+	mustAcquire(t, hostClient, wingwire.AdmissionRequest{
+		RunID:     "host-holder",
+		PID:       9001,
+		Resources: wingwire.HostResources{Cores: 1},
+	})
+
+	parentClient := ensure(t, home, "")
+	mustAcquire(t, parentClient, wingwire.AdmissionRequest{
+		RunID:          "pipeline-run",
+		PID:            9002,
+		SemaphoresOnly: true,
+		Semaphores: []wingwire.SemaphoreClaim{
+			{Name: "gate", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
+		},
+	})
+
+	nodeClient := ensure(t, home, "")
+	positions, _ := acquireAsync(nodeClient, wingwire.AdmissionRequest{
+		RunID:        "pipeline-run/node-host/YnVpbGQ",
+		OwnerRunID:   "pipeline-run",
+		DisplayRunID: "pipeline-run/build",
+		PID:          9002,
+		Resources:    wingwire.HostResources{Cores: 1},
+		SubLease:     true,
+	})
+	waitForQueue(t, positions)
+	time.Sleep(150 * time.Millisecond)
+
+	q := ensure(t, home, "")
+	qs, err := q.QueueState(context.Background())
+	if err != nil {
+		t.Fatalf("queue state: %v", err)
+	}
+	if len(qs.Holders) != 2 || len(qs.Waiters) != 1 {
+		t.Fatalf("queue rows = %d holders, %d waiters; want 2 and 1: %+v", len(qs.Holders), len(qs.Waiters), qs)
+	}
+	var parent *wingwire.Holder
+	for i := range qs.Holders {
+		if qs.Holders[i].RunID == "pipeline-run" {
+			parent = &qs.Holders[i]
+		}
+	}
+	if parent == nil {
+		t.Fatal("orchestration parent missing")
+	}
+	if parent.Stalled || parent.Recovery != "" {
+		t.Fatalf("admission-waiting parent has stalled recovery: %+v", parent)
+	}
+	if !parent.AdmissionWaiting {
+		t.Fatalf("parent does not expose admission wait: %+v", parent)
+	}
+	wantParticipant := "pipeline-run/node-host/YnVpbGQ"
+	if len(parent.ActiveWaiterParticipantIDs) != 1 || parent.ActiveWaiterParticipantIDs[0] != wantParticipant {
+		t.Fatalf("active waiter participants = %v, want [%s]", parent.ActiveWaiterParticipantIDs, wantParticipant)
+	}
+	w := qs.Waiters[0]
+	if w.RunID != "pipeline-run" || w.ParticipantID != wantParticipant || w.DisplayRunID != "pipeline-run/build" {
+		t.Fatalf("waiter hierarchy = %+v", w)
+	}
+}
+
 func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
 	home := shortHome(t)
 	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{7001: {Fraction: 0.9}}}

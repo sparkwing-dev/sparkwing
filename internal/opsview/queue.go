@@ -190,6 +190,7 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 // resource table with headroom decomposition, holders, and waiters, plus
 // bottom-of-view callouts for stalled or contended holders and pin drift.
 func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
+	holders := queueLifecycleHolders(qs)
 	clear := ""
 	if qs.ExpectedClearMS != nil && *qs.ExpectedClearMS > 0 {
 		clear = fmt.Sprintf("; clears in ~%s", fmtElapsed(*qs.ExpectedClearMS))
@@ -200,7 +201,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	if cc := FmtCapacityChange(qs.CapacityChange); cc != "" {
 		fmt.Fprintln(out, cc)
 	}
-	fmt.Fprintf(out, "local admission: %d holding, %d queued%s\n", len(qs.Holders), len(qs.Waiters), clear)
+	fmt.Fprintf(out, "local admission: %d holding, %d queued%s\n", len(holders), len(qs.Waiters), clear)
 	if line := FmtEventsLine(qs.Events); line != "" {
 		fmt.Fprintln(out, line)
 	}
@@ -245,10 +246,10 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	fmt.Fprintln(out, "Running")
 	tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "RUN\tPIPELINE\tREPO\tORIGIN\tELAPSED\tCOST\tSOURCE\tSEMAPHORES")
-	if len(qs.Holders) == 0 {
+	if len(holders) == 0 {
 		fmt.Fprintln(tw, "(none holding)\t\t\t\t\t\t\t")
 	}
-	for _, h := range qs.Holders {
+	for _, h := range holders {
 		run := queueDisplayRunID(h.RunID, h.DisplayRunID)
 		if h.Parent != "" {
 			run = "  " + run + " (attached)"
@@ -286,12 +287,12 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 			fmt.Fprintf(out, "\n%s waiting: %s\n", queueDisplayRunID(wt.RunID, wt.DisplayRunID), wt.BlockingReason)
 		}
 	}
-	for _, h := range qs.Holders {
+	for _, h := range holders {
 		if h.Stalled && h.Recovery != "" {
 			fmt.Fprintf(out, "\n%s is stalled (idle while runs wait). Recover with:\n  %s\n", h.RunID, h.Recovery)
 		}
 	}
-	for _, h := range qs.Holders {
+	for _, h := range holders {
 		if h.Contended && h.ContentionReason != "" {
 			fmt.Fprintf(out, "\n%s is contended (%s).\n", h.RunID, h.ContentionReason)
 		}
@@ -313,6 +314,24 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 		_ = tw.Flush()
 	}
 	return nil
+}
+
+func queueLifecycleHolders(qs wingwire.QueueState) []wingwire.Holder {
+	waitingOwners := make(map[string]bool)
+	for _, w := range qs.Waiters {
+		if w.ParticipantID != "" {
+			waitingOwners[w.RunID] = true
+		}
+	}
+	holders := make([]wingwire.Holder, 0, len(qs.Holders))
+	for _, h := range qs.Holders {
+		orchestrationWait := h.AdmissionWaiting ||
+			(h.ParticipantID == "" && h.Parent == "" && h.Resources.Cores <= 0 && h.Resources.MemoryBytes <= 0 && waitingOwners[h.RunID])
+		if !orchestrationWait {
+			holders = append(holders, h)
+		}
+	}
+	return holders
 }
 
 // resourceAvailable is the grantable amount to show for a resource row: the
