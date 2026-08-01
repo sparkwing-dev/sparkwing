@@ -51,6 +51,10 @@ func (p *Lint) run(ctx context.Context) error {
 		return err
 	}
 	sparkwing.Info(ctx, "changelog gate: ok")
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-changelog-test.sh").Run(); err != nil {
+		return err
+	}
+	sparkwing.Info(ctx, "changelog gate portability: clean")
 
 	if err := CheckChangelogLint(ctx, sparkwing.WorkDir()); err != nil {
 		return err

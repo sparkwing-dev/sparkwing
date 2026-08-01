@@ -75,6 +75,11 @@ code change to unlock.
 
 ### Fixed
 
+- **gate:** The changelog-required check now runs on macOS system Bash 3.2
+  while preserving spaces, Unicode, and newlines in changed filenames. Its
+  portability fixture runs in both the lint and pre-push gates so a newer Bash
+  dependency cannot silently return.
+
 - **queue:** a semaphore-only orchestration lease is shown as part of its active
   node's admission wait instead of as a second, stalled run with a cancel hint.
   JSON keeps both participant rows and now links the holder to its active waiter.

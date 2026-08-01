@@ -40,12 +40,15 @@ fi
 
 # Compare base..HEAD union'd with the working tree so the check fires
 # on both committed work and staged-but-uncommitted changes.
-mapfile -t changed < <(
+changed=()
+while IFS= read -r -d '' f; do
+  changed+=("$f")
+done < <(
   {
-    git diff --name-only "$base"...HEAD
-    git diff --name-only HEAD
-    git diff --name-only --cached
-  } | sort -u
+    git diff --name-only -z "$base"...HEAD
+    git diff --name-only -z HEAD
+    git diff --name-only -z --cached
+  } | sort -zu
 )
 
 is_covered() {
