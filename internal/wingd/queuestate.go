@@ -194,6 +194,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			DisplayRunID:  rowID.displayRunID,
 			Position:      i + 1,
 			Priority:      w.Priority,
+			BackfillCount: w.BackfillCount,
 			Resources: wingwire.HostResources{
 				Cores:       float64(w.MilliCores) / 1000.0,
 				MemoryBytes: int64(w.MemoryBytes),
@@ -204,6 +205,14 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			CostRationale:  rationale,
 		}
 		waiter.BlockingReason = queueBlockingReason(waiter.BlockingReason, waiter.WaitingOn, i+1)
+		if w.BackfillCount > 0 {
+			protection := fmt.Sprintf("protected from further backfill after %d younger grant(s)", w.BackfillCount)
+			if waiter.BlockingReason == "" {
+				waiter.BlockingReason = protection
+			} else {
+				waiter.BlockingReason += "; " + protection
+			}
+		}
 		if c != nil {
 			waiter.Pipeline = c.pipeline
 			waiter.Repo = c.repo

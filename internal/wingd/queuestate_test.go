@@ -194,6 +194,51 @@ func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
 	}
 }
 
+func TestQueueState_ReportsBackfillProtection(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1})
+
+	holderClient := ensure(t, home, "v1")
+	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID: "older-holder",
+		Semaphores: []wingwire.SemaphoreClaim{
+			{Name: "weighted", Capacity: 8, Cost: 6, Policy: wingwire.PolicyQueue},
+		},
+	})
+
+	heavyClient := ensure(t, home, "v1")
+	positions, _ := acquireAsync(heavyClient, wingwire.AdmissionRequest{
+		RunID: "heavy",
+		Semaphores: []wingwire.SemaphoreClaim{
+			{Name: "weighted", Capacity: 8, Cost: 6, Policy: wingwire.PolicyQueue},
+		},
+	})
+	waitForQueue(t, positions)
+
+	lightClient := ensure(t, home, "v1")
+	mustAcquire(t, lightClient, wingwire.AdmissionRequest{
+		RunID: "light",
+		Semaphores: []wingwire.SemaphoreClaim{
+			{Name: "weighted", Capacity: 8, Cost: 2, Policy: wingwire.PolicyQueue},
+		},
+	})
+
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	w, ok := waiterByRun(qs, "heavy")
+	if !ok {
+		t.Fatal("heavy run not queued")
+	}
+	if w.BackfillCount != 1 {
+		t.Fatalf("backfill count = %d, want 1", w.BackfillCount)
+	}
+	if !strings.Contains(w.BlockingReason, "protected from further backfill after 1 younger grant") {
+		t.Fatalf("blocking reason = %q, want protection explanation", w.BlockingReason)
+	}
+}
+
 func TestQueueState_CarriesOwnerAndParticipantIdentity(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1})

@@ -412,10 +412,14 @@ type Waiter struct {
 	Repo string `json:"repo,omitempty"`
 	// Position is the waiter's 1-based place in admission order; 1 is
 	// admitted next.
-	Position   int           `json:"position"`
-	Priority   int           `json:"priority,omitempty"`
-	Resources  HostResources `json:"resources"`
-	Semaphores []string      `json:"semaphores,omitempty"`
+	Position int `json:"position"`
+	Priority int `json:"priority,omitempty"`
+	// BackfillCount is how many younger requests have used spare capacity
+	// ahead of this waiter. A positive count reserves its resources against
+	// further backfill until it is admitted.
+	BackfillCount uint64        `json:"backfill_count,omitempty"`
+	Resources     HostResources `json:"resources"`
+	Semaphores    []string      `json:"semaphores,omitempty"`
 	// WaitingOn names the resources the waiter lacks room for right now
 	// -- host dimensions ("cores", "memory") and full semaphore keys.
 	// Empty means the waiter is held only by admission order behind a

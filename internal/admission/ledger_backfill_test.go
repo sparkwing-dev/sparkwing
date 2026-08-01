@@ -68,6 +68,55 @@ func TestWeighted_HostMemoryBackfillPastHeavyHead(t *testing.T) {
 	}
 }
 
+func TestWeighted_OneBackfillProtectsOlderWaiterFromAStream(t *testing.T) {
+	l := testLedger(t, 0, 8<<30)
+	if _, err := l.SetHeadroom(0, 4<<30); err != nil {
+		t.Fatalf("set headroom: %v", err)
+	}
+	mustQueue(t, l, Request{ID: "heavy", MemoryBytes: 6 << 30})
+	first := mustGrant(t, l, Request{ID: "light-1", MemoryBytes: 4 << 30})
+
+	snap := l.Snapshot()
+	if len(snap.Waiters) != 1 || snap.Waiters[0].BackfillCount != 1 {
+		t.Fatalf("waiters = %+v, want heavy protected after one backfill", snap.Waiters)
+	}
+	mustRelease(t, l, first.ID, "light-1")
+	l = restoreRoundTrip(t, l)
+	if pos := mustQueue(t, l, Request{ID: "light-2", MemoryBytes: 4 << 30}); pos != 1 {
+		t.Fatalf("light-2 position = %d, want behind protected heavy", pos)
+	}
+
+	events, err := l.SetHeadroom(0, 8<<30)
+	if err != nil {
+		t.Fatalf("restore headroom: %v", err)
+	}
+	wantKinds(t, events, EventPromoted)
+	if events[0].RequestID != "heavy" {
+		t.Fatalf("promoted %q, want protected heavy", events[0].RequestID)
+	}
+}
+
+func TestWeighted_QueuedBackfillProtectsOlderWaiter(t *testing.T) {
+	l := testLedger(t, 0, 8<<30)
+	if _, err := l.SetHeadroom(0, 0); err != nil {
+		t.Fatalf("clear headroom: %v", err)
+	}
+	mustQueue(t, l, Request{ID: "heavy", MemoryBytes: 6 << 30})
+	mustQueue(t, l, Request{ID: "light", MemoryBytes: 4 << 30})
+
+	events, err := l.SetHeadroom(0, 4<<30)
+	if err != nil {
+		t.Fatalf("raise headroom: %v", err)
+	}
+	wantKinds(t, events, EventPromoted)
+	if events[0].RequestID != "light" {
+		t.Fatalf("promoted %q, want one light backfill", events[0].RequestID)
+	}
+	if got := l.Snapshot().Waiters[0].BackfillCount; got != 1 {
+		t.Fatalf("heavy backfill count = %d, want 1", got)
+	}
+}
+
 func TestPriority_PromotesHighPriorityWaiterBeforeLowerPriorityQueue(t *testing.T) {
 	l := testLedger(t, 8, 0)
 	holder := mustGrant(t, l, Request{ID: "holder", Cores: 8})

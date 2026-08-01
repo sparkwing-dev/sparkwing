@@ -338,10 +338,12 @@ type Waiter struct {
 
 	Repo string
 
-	Position   int
-	Priority   int
-	Resources  HostResources
-	Semaphores []string
+	Position int
+	Priority int
+
+	BackfillCount uint64
+	Resources     HostResources
+	Semaphores    []string
 
 	WaitingOn []string
 

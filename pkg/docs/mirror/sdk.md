@@ -1035,12 +1035,13 @@ fires so the skew is visible.
 When several runs contend for one shared resource -- a deploy slot, a
 migration lock, a single-writer index -- reach for a capacity-1 group
 with `OnLimit: Queue`, not `Fail`. `Fail` pushes a poll-and-retry loop
-onto every caller and aborts the loser with "slot full". With capacity
-1, `Queue` lines arrivals up FIFO and runs them one at a time, with
-`QueueTimeout` as the bounded way out. With weighted capacities, it can
-backfill later smaller waiters when the head waiter cannot currently fit,
-while stopping behind that older waiter once younger backfilled holders are
-what keep it from fitting.
+onto every caller and aborts the loser with "slot full". With capacity 1,
+`Queue` lines arrivals up FIFO and runs them one at a time, with `QueueTimeout`
+as the bounded way out. With weighted capacities, it can grant one later
+request when the head waiter cannot currently fit. After that backfill, the
+older waiter's full resource set is protected until it runs, even if external
+pressure still keeps it from fitting when the younger holder exits. Queue state
+reports the backfill count and protection reason.
 
 ### Whole-run coordination
 

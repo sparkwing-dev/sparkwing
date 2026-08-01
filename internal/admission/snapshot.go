@@ -69,15 +69,16 @@ type HoldState struct {
 
 // WaiterState is one queued request in a [Snapshot], in admission order.
 type WaiterState struct {
-	Arrival     uint64       `json:"arrival"`
-	Admit       uint64       `json:"admit,omitempty"`
-	RequestID   string       `json:"request_id"`
-	Priority    int          `json:"priority,omitempty"`
-	MilliCores  int64        `json:"milli_cores"`
-	SoftCores   bool         `json:"soft_cores,omitempty"`
-	StrictCores bool         `json:"strict_cores,omitempty"`
-	MemoryBytes uint64       `json:"memory_bytes"`
-	Claims      []ClaimState `json:"claims,omitempty"`
+	Arrival       uint64       `json:"arrival"`
+	Admit         uint64       `json:"admit,omitempty"`
+	BackfillCount uint64       `json:"backfill_count,omitempty"`
+	RequestID     string       `json:"request_id"`
+	Priority      int          `json:"priority,omitempty"`
+	MilliCores    int64        `json:"milli_cores"`
+	SoftCores     bool         `json:"soft_cores,omitempty"`
+	StrictCores   bool         `json:"strict_cores,omitempty"`
+	MemoryBytes   uint64       `json:"memory_bytes"`
+	Claims        []ClaimState `json:"claims,omitempty"`
 }
 
 // Snapshot captures the full ledger state deterministically: leases in
@@ -139,15 +140,16 @@ func (l *Ledger) Snapshot() Snapshot {
 	}
 	for _, w := range l.waiters {
 		snap.Waiters = append(snap.Waiters, WaiterState{
-			Arrival:     w.arrival,
-			Admit:       w.spec.admit,
-			RequestID:   w.spec.id,
-			Priority:    w.spec.priority,
-			MilliCores:  w.spec.milliCores,
-			SoftCores:   w.spec.softCores,
-			StrictCores: w.spec.strictCores,
-			MemoryBytes: w.spec.memory,
-			Claims:      claimStates(w.spec.claims),
+			Arrival:       w.arrival,
+			Admit:         w.spec.admit,
+			BackfillCount: w.backfillCount,
+			RequestID:     w.spec.id,
+			Priority:      w.spec.priority,
+			MilliCores:    w.spec.milliCores,
+			SoftCores:     w.spec.softCores,
+			StrictCores:   w.spec.strictCores,
+			MemoryBytes:   w.spec.memory,
+			Claims:        claimStates(w.spec.claims),
 		})
 	}
 	return snap
@@ -297,7 +299,8 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 		return fmt.Errorf("%w: waiter %q: %v", ErrInvalidSnapshot, ws.RequestID, err)
 	}
 	l.waiters = append(l.waiters, &waiter{
-		arrival: ws.Arrival,
+		arrival:       ws.Arrival,
+		backfillCount: ws.BackfillCount,
 		spec: spec{
 			id:          ws.RequestID,
 			admit:       ws.Admit,
