@@ -347,7 +347,7 @@ rest of the wing family uses -- the more specific setting wins:
 
 | Setting | Reaches | Lives until |
 |---|---|---|
-| `--budget` on `sparkwing wingd run` | the daemon you start by hand | that daemon exits |
+| Internal daemon `--budget` argument (not a public CLI command) | that daemon process | that daemon exits |
 | `SPARKWING_BUDGET` in the environment | any daemon spawned from that environment | that daemon exits |
 | `~/.config/sparkwing/budget` (or `$XDG_CONFIG_HOME/sparkwing/budget`) | every daemon on the machine | you edit or delete the file |
 
