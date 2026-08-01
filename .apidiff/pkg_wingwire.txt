@@ -36,6 +36,12 @@ type AdmissionRequest struct {
 
 	Priority int
 }
+type BudgetSource string
+const BudgetSourceConfig BudgetSource = "config"
+const BudgetSourceEnv BudgetSource = "env"
+const BudgetSourceFlag BudgetSource = "flag"
+const BudgetSourceUnknown BudgetSource = "unknown"
+const BudgetSourceUnset BudgetSource = "unset"
 type BudgetState struct {
 	Cores float64
 
@@ -46,6 +52,14 @@ type BudgetState struct {
 	MachineMemoryBytes int64
 
 	Enforce bool
+
+	IgnoreExternal bool
+
+	Source string
+
+	Origin string
+
+	Raw string
 }
 type Cancel struct {
 	RunID  string

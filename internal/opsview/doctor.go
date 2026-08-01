@@ -129,6 +129,18 @@ type DoctorReport struct {
 	// asked; this field says why the answer is missing, and a reader needs
 	// both to tell an unregistered machine from an unreadable one.
 	GatesSurveyError string `json:"gates_survey_error,omitempty"`
+	// MachineBudget is set when the resident admission daemon runs under a
+	// machine budget -- a cap on the capacity it admits into, OS-level
+	// enforcement, or `ignore-external`, which makes it admit against total
+	// capacity and disregard measured non-sparkwing load.
+	//
+	// It is a setting, not a fault, so it never makes a sweep unclean. It is
+	// reported because the daemon is spawned on demand by whichever gate
+	// runs first: the budget in force belongs to whatever that process's
+	// environment or config said, which is often not what the person now
+	// looking at a slow machine believes is set. Reported with the setting
+	// that produced it, never changed -- an operator's cap is theirs.
+	MachineBudget *DoctorMachineBudget `json:"machine_budget,omitempty"`
 	// StrayDaemons are admission daemons serving other sparkwing homes that
 	// report a version no released build carries -- scratch binaries left
 	// running, which look like the machine's resident daemon in a process
@@ -169,6 +181,31 @@ type DoctorDaemon struct {
 // every daemon-dependent finding in the report is unanswered rather than
 // clean. An absent daemon is not blind: nothing listening is a fact.
 func (d DoctorDaemon) Blind() bool { return d.State == ReachUnreachable }
+
+// DoctorMachineBudget is the non-default machine budget the resident
+// admission daemon is running under, with the setting it came from.
+type DoctorMachineBudget struct {
+	// Source names which kind of setting produced the budget: "flag",
+	// "env", "config", or "unknown".
+	Source string `json:"source"`
+	// Origin is the exact setting -- the flag, the environment variable,
+	// or the config file path.
+	Origin string `json:"origin,omitempty"`
+	// Raw is the budget setting string as the operator wrote it.
+	Raw string `json:"raw,omitempty"`
+	// Cores and MachineCores are the budgeted core cap and the machine's
+	// full measured cores. Equal when the budget caps no cores.
+	Cores        float64 `json:"cores,omitempty"`
+	MachineCores float64 `json:"machine_cores,omitempty"`
+	// MemoryBytes and MachineMemoryBytes are the same for memory.
+	MemoryBytes        int64 `json:"memory_bytes,omitempty"`
+	MachineMemoryBytes int64 `json:"machine_memory_bytes,omitempty"`
+	// Enforce reports OS-level hardening of the cap.
+	Enforce bool `json:"enforce,omitempty"`
+	// IgnoreExternal reports that admission is disregarding measured
+	// non-sparkwing load.
+	IgnoreExternal bool `json:"ignore_external,omitempty"`
+}
 
 // DoctorStrayDaemon is one live admission daemon serving another sparkwing
 // home whose reported version marks it as a scratch build.
@@ -505,7 +542,11 @@ func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report 
 	diagnoseLockedOutRepos(info.ProtocolMajor, info.BinaryVersion, wingwire.ReleasedProtocolFloors(), report)
 
 	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home})
-	if err != nil || qs.Events == nil {
+	if err != nil {
+		return
+	}
+	report.MachineBudget = machineBudget(qs)
+	if qs.Events == nil {
 		return
 	}
 	for _, r := range qs.Events.Rejections {
@@ -513,6 +554,28 @@ func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report 
 			report.AdmissionRejections = append(report.AdmissionRejections,
 				DoctorRejection{Cause: r.Cause, Count: r.Count})
 		}
+	}
+}
+
+// machineBudget lifts a non-default budget out of the daemon's queue
+// state for the doctor report. Nil when no budget is in force, and nil
+// when the daemon did not report its budget at all: doctor names settings
+// it can see, and says nothing about ones it cannot.
+func machineBudget(qs wingwire.QueueState) *DoctorMachineBudget {
+	b := qs.Budget
+	if b == nil || b.Source == "" || b.Source == string(wingwire.BudgetSourceUnset) {
+		return nil
+	}
+	return &DoctorMachineBudget{
+		Source:             b.Source,
+		Origin:             b.Origin,
+		Raw:                b.Raw,
+		Cores:              b.Cores,
+		MachineCores:       b.MachineCores,
+		MemoryBytes:        b.MemoryBytes,
+		MachineMemoryBytes: b.MachineMemoryBytes,
+		Enforce:            b.Enforce,
+		IgnoreExternal:     b.IgnoreExternal || qs.IgnoreExternal,
 	}
 }
 
@@ -830,6 +893,17 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 		surveyFailed = 1
 	}
 	fmt.Fprintf(w, "gates_survey_failed\t%d\n", surveyFailed)
+	budgetSource, budgetOrigin, ignoreExternal := "unset", "-", 0
+	if b := r.MachineBudget; b != nil {
+		budgetSource = b.Source
+		if b.Origin != "" {
+			budgetOrigin = b.Origin
+		}
+		if b.IgnoreExternal {
+			ignoreExternal = 1
+		}
+	}
+	fmt.Fprintf(w, "machine_budget\t%s\t%s\t%d\n", budgetSource, budgetOrigin, ignoreExternal)
 	fmt.Fprintf(w, "stray_daemons\t%d\n", len(r.StrayDaemons))
 	return nil
 }
@@ -842,6 +916,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	if r.Clean() {
 		fmt.Fprintf(w, "healthy: nothing to repair%s\n", would)
 		renderDaemonSection(w, r)
+		renderMachineBudget(w, r)
 		renderUngatedRepos(w, r)
 		renderStrayDaemons(w, r)
 		return nil
@@ -899,6 +974,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 			fmt.Fprintf(w, "  pid %d holding %s\n", h.PID, h.Lock)
 		}
 	}
+	renderMachineBudget(w, r)
 	renderStrayDaemons(w, r)
 	return nil
 }
@@ -927,6 +1003,45 @@ func renderDaemonSection(w io.Writer, r DoctorReport) {
 			fmt.Fprintf(w, "  socket: %s\n", d.Socket)
 		}
 		fmt.Fprint(w, "  the rejection-pattern, version-skew and lockout checks did not run, and orphaned run rows were left alone because a blind sweep cannot tell a dead run from one the daemon is holding\n")
+	}
+}
+
+// renderMachineBudget states the machine budget the resident daemon runs
+// under and the setting that put it there. It is a note, not a warning:
+// a cap an operator meant to set is not a fault. `ignore-external` gets
+// its own line, because a machine admitting against total capacity while
+// real external load goes unsubtracted is a state worth finding without
+// already suspecting it -- it is exactly what a slow, over-admitted
+// machine looks like from the inside.
+func renderMachineBudget(w io.Writer, r DoctorReport) {
+	b := r.MachineBudget
+	if b == nil {
+		return
+	}
+	setting := b.Origin
+	if setting == "" {
+		setting = "set directly by the binary that started the daemon"
+	}
+	fmt.Fprintf(w, "\nnote: the admission daemon runs under a machine budget (%s: %s)\n",
+		b.Source, setting)
+	if b.Raw != "" {
+		fmt.Fprintf(w, "  setting: %s\n", b.Raw)
+	}
+	if b.MachineCores > 0 && b.Cores < b.MachineCores {
+		fmt.Fprintf(w, "  cores capped at %.1f of the machine's %.1f\n", b.Cores, b.MachineCores)
+	}
+	if b.MachineMemoryBytes > 0 && b.MemoryBytes < b.MachineMemoryBytes {
+		fmt.Fprintf(w, "  memory capped at %s of the machine's %s\n",
+			humanBytes(b.MemoryBytes), humanBytes(b.MachineMemoryBytes))
+	}
+	if b.Enforce {
+		fmt.Fprintf(w, "  cap hardened at the OS level\n")
+	}
+	if b.IgnoreExternal {
+		fmt.Fprintf(w, "  external load ignored: admission plans against total capacity and subtracts no measured non-sparkwing load\n")
+	}
+	if b.Source == string(wingwire.BudgetSourceEnv) {
+		fmt.Fprintf(w, "  this source dies with the daemon: it came from the environment of whatever process spawned it, so the next respawn may not carry it\n")
 	}
 }
 

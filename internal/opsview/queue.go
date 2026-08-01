@@ -147,12 +147,13 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 			c.Cores, c.HostCores, c.MemoryBytes, c.HostMemoryBytes)
 	}
 	if qs.Budget != nil {
-		fmt.Fprintf(w, "budget\t%.3f\t%.3f\t%d\t%d\t%t\n",
+		fmt.Fprintf(w, "budget\t%.3f\t%.3f\t%d\t%d\t%t\t%s\t%s\n",
 			qs.Budget.Cores, qs.Budget.MachineCores,
-			qs.Budget.MemoryBytes, qs.Budget.MachineMemoryBytes, qs.Budget.Enforce)
+			qs.Budget.MemoryBytes, qs.Budget.MachineMemoryBytes, qs.Budget.Enforce,
+			orDash(qs.Budget.Source), orDash(qs.Budget.Origin))
 	}
 	if qs.IgnoreExternal {
-		fmt.Fprintln(w, "external\tignored")
+		fmt.Fprintf(w, "external\tignored\t%s\n", orDash(budgetOrigin(qs.Budget)))
 	}
 	for _, r := range qs.Resources {
 		if isHostResource(r.Key) && r.ExternalSource == wingwire.ExternalUnmeasured {
@@ -229,8 +230,8 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	if b := BudgetNote(qs.Budget); b != "" {
 		fmt.Fprintf(out, "%s\n", b)
 	}
-	if qs.IgnoreExternal {
-		fmt.Fprintln(out, "external: ignored (operator setting)")
+	if line := ExternalIgnoredNote(qs); line != "" {
+		fmt.Fprintln(out, line)
 	}
 	if note := ExternalUnmeasuredNote(qs); note != "" {
 		fmt.Fprintln(out, note)
@@ -440,10 +441,24 @@ func ContainerNote(c *wingwire.ContainerLimit) string {
 }
 
 // BudgetNote renders the machine-budget row for the queue's headroom
-// arithmetic. Empty when no budget caps anything below the machine.
+// arithmetic, naming the setting the active budget came from so an
+// operator can revoke a budget they did not set themselves.
+//
+// With no budget set anywhere the note says exactly that. Admission
+// against the whole machine looks identical to a deliberate
+// whole-machine budget from the outside, and a view that stays silent
+// leaves the reader to guess which one they are looking at.
+//
+// A nil state, or one from a daemon too old to name a source, is not an
+// answer: nothing is claimed about a budget the reporting daemon never
+// described. An old daemon still reports its caps, so those are rendered
+// without a source.
 func BudgetNote(b *wingwire.BudgetState) string {
 	if b == nil {
 		return ""
+	}
+	if b.Source == string(wingwire.BudgetSourceUnset) {
+		return "budget: none set (admission plans against the whole machine)"
 	}
 	var parts []string
 	if b.MachineCores > 0 && b.Cores < b.MachineCores {
@@ -453,14 +468,69 @@ func BudgetNote(b *wingwire.BudgetState) string {
 		parts = append(parts, fmt.Sprintf("%s memory (machine %s)",
 			humanBytes(b.MemoryBytes), humanBytes(b.MachineMemoryBytes)))
 	}
-	if len(parts) == 0 {
+	if len(parts) == 0 && b.Source == "" {
 		return ""
 	}
-	note := "budget " + strings.Join(parts, ", ")
+	note := "budget"
+	if len(parts) > 0 {
+		note += " " + strings.Join(parts, ", ")
+	} else {
+		note += ": no capacity cap"
+	}
 	if b.Enforce {
 		note += "; OS-enforced"
 	}
+	if src := BudgetSourceLabel(b); src != "" {
+		note += " (" + src + ")"
+	}
 	return note
+}
+
+// budgetOrigin is the exact setting behind a budget -- a file path, a
+// variable name, a flag -- for the machine-readable views, which want the
+// setting itself rather than a sentence about it.
+func budgetOrigin(b *wingwire.BudgetState) string {
+	if b == nil {
+		return ""
+	}
+	return b.Origin
+}
+
+// BudgetSourceLabel names where a budget came from, in the words an
+// operator needs to change it: the file to edit, the variable to unset,
+// the flag that was passed. Empty when the daemon did not say.
+func BudgetSourceLabel(b *wingwire.BudgetState) string {
+	if b == nil {
+		return ""
+	}
+	switch wingwire.BudgetSource(b.Source) {
+	case wingwire.BudgetSourceConfig:
+		return "from config " + b.Origin
+	case wingwire.BudgetSourceEnv:
+		return "from " + b.Origin + " in the environment of whatever spawned the daemon"
+	case wingwire.BudgetSourceFlag:
+		return "from the daemon's " + b.Origin + " flag"
+	case wingwire.BudgetSourceUnknown:
+		return "source unrecorded: set directly by the binary that started the daemon"
+	default:
+		return ""
+	}
+}
+
+// ExternalIgnoredNote states that admission is ignoring measured external
+// load, and which setting told it to. This is the escape hatch for a
+// misreading host sensor, and the one most worth naming a source for: it
+// makes the machine admit against total capacity, and an operator who
+// finds it on has no other way to learn who turned it on.
+func ExternalIgnoredNote(qs wingwire.QueueState) string {
+	if !qs.IgnoreExternal {
+		return ""
+	}
+	note := "external: ignored (operator setting"
+	if src := BudgetSourceLabel(qs.Budget); src != "" {
+		note += ", " + src
+	}
+	return note + ")"
 }
 
 // ExternalPressureNote returns a one-line callout when non-sparkwing load is

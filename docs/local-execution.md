@@ -232,13 +232,19 @@ that does not mean "wait for the window to age out." There are two:
   measurement's format is what pinned memory headroom at zero on every box.
 - **A misreading host sensor.** If the external-load reading is wrong and
   admission is queuing runs against phantom pressure, add `ignore-external`
-  to `SPARKWING_BUDGET`. Admission then plans against total capacity minus
+  to the machine budget. Admission then plans against total capacity minus
   the reserve, subtracting no external load. The `EXTERNAL` column in
   `sparkwing queue` still shows the real reading -- observability stays
-  truthful -- with an `external: ignored (operator setting)` line stating
-  that admission is not acting on it, and contention detection keeps using
-  the real saturation. Use it alone (`SPARKWING_BUDGET=ignore-external`) or
-  alongside a cap (`SPARKWING_BUDGET=50%,ignore-external`).
+  truthful -- with an `external: ignored (operator setting, ...)` line that
+  names which setting turned it on, and contention detection keeps using
+  the real saturation. Use it alone (`ignore-external`) or alongside a cap
+  (`50%,ignore-external`). Put it in the budget config file rather than the
+  environment when you want it to outlive the daemon running now: the
+  daemon is started on demand by whichever run needs it first and inherits
+  that process's environment, so an exported variable lasts only as long as
+  that one daemon. `sparkwing doctor` reports a machine admitting with
+  external load ignored, so the state is findable without suspecting it
+  first.
 - **A poisoned learned profile.** One freak run can record an absurd peak
   that inflates a pipeline's charge for the rest of the window, and
   sustained external load can ratchet a still-measuring pipeline's demand
@@ -322,24 +328,65 @@ what it did.
 
 Measured admission is the primary mechanism, and for most machines it is
 the only one you need. When you want a hard ceiling -- "CI may use at most
-half my laptop" -- set one machine budget with the `SPARKWING_BUDGET`
-environment variable. It takes a core count, a percentage, or both a core
-and a memory term, plus optional `enforce` and `ignore-external` terms:
+half my laptop" -- set one machine budget. It takes a core count, a
+percentage, or both a core and a memory term, plus optional `enforce` and
+`ignore-external` terms:
 
 ```
-SPARKWING_BUDGET=6               # at most 6 cores
-SPARKWING_BUDGET=50%             # at most half the machine's cores
-SPARKWING_BUDGET=6,8gb           # 6 cores and 8 GiB
-SPARKWING_BUDGET=50%,enforce     # half the cores, hardened at the OS level
-SPARKWING_BUDGET=ignore-external # admit against total capacity, ignoring external load
+6               # at most 6 cores
+50%             # at most half the machine's cores
+6,8gb           # 6 cores and 8 GiB
+50%,enforce     # half the cores, hardened at the OS level
+ignore-external # admit against total capacity, ignoring external load
 ```
+
+#### Where to set it
+
+The same value is read from several settings, resolved in the order the
+rest of the wing family uses -- the more specific setting wins:
+
+| Setting | Reaches | Lives until |
+|---|---|---|
+| `--budget` on `sparkwing wingd run` | the daemon you start by hand | that daemon exits |
+| `SPARKWING_BUDGET` in the environment | any daemon spawned from that environment | that daemon exits |
+| `~/.config/sparkwing/budget` (or `$XDG_CONFIG_HOME/sparkwing/budget`) | every daemon on the machine | you edit or delete the file |
+
+The config file is the durable one, and it is the setting to reach for
+when you mean "this machine, from now on". The admission daemon is
+started on demand by whichever run needs it first, inheriting that
+process's environment, so a budget exported in one shell applies to
+whatever daemon that shell happened to spawn and disappears with it. The
+file is read at daemon startup, so a budget written there is in force
+again the moment a daemon respawns.
+
+The file holds one setting line. Blank lines and `#` comments are
+skipped, so the reason a budget is in force can live next to the budget:
+
+```
+# host sensor over-reads external load on this box
+50%,ignore-external
+```
+
+A value that will not parse fails daemon startup rather than being
+dropped, whichever setting it came from. A budget that silently does
+nothing is worse than one that says it is wrong.
+
+#### Seeing which one is in force
 
 The budget caps the admission ledger below the machine total, so it holds
 everywhere admission already runs, with no other change to how runs are
 scheduled. `sparkwing queue` shows it as its own row in the headroom
-arithmetic (`budget 6.0 cores (machine 10.0)`) so the constraint is
-visible rather than mysterious. A requested cap above the machine total is
-clamped to the machine, and the daemon logs a one-line note when it does.
+arithmetic, naming the setting behind it
+(`budget 6.0 cores (machine 10.0) (from config ~/.config/sparkwing/budget)`),
+so an operator can revoke a cap they did not set themselves. With no
+budget set anywhere the row says so rather than staying silent, because a
+machine admitting against everything it has looks exactly like a
+deliberate whole-machine budget from the outside. `sparkwing doctor`
+reports a non-default budget too, and says out loud when the one in force
+came from an environment that the next respawn may not carry.
+
+A requested cap above the machine total is clamped to the machine, and the
+daemon logs a one-line note when it does.
 
 ### Containers: the daemon respects its own cgroup
 
@@ -350,7 +397,7 @@ Linux the daemon reads its own cgroup v2 limits at startup (`cpu.max` and
 sits on. External-load sensing follows suit, measuring the container's own
 CPU and memory usage rather than the machine's. `sparkwing queue` shows the
 clamp as a `container limit: 6.0 cores (host 24.0), 6.0 GiB memory (host 24.0 GiB)`
-row, and a `SPARKWING_BUDGET` still caps below the detected limit. macOS has
+row, and a machine budget still caps below the detected limit. macOS has
 no cgroups and so no container path -- capacity there is always the host.
 
 Add `enforce` to harden the cap at the operating-system level as well as

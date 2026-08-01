@@ -111,6 +111,13 @@ type Config struct {
 	// when it opts in, hardens the cap at the OS level. A zero Budget
 	// leaves the full machine available, the historical behavior.
 	Budget Budget
+	// BudgetSource and BudgetOrigin record where Budget was resolved
+	// from, for the queue and doctor views to report. Both come from
+	// [ResolveBudget]; a caller that builds a Budget itself leaves them
+	// empty and the daemon reports the source as unknown rather than
+	// guessing one.
+	BudgetSource BudgetSource
+	BudgetOrigin string
 	// Sampler reads host capacity and pressure. Nil uses the real
 	// platform sampler.
 	Sampler HostSampler
