@@ -49,6 +49,11 @@ func (d *Daemon) stallTick() {
 	var holders []*conn
 	for c := range d.conns {
 		if c.role == roleHolder && c.pid > 0 {
+			if d.orchestrationHolderWaitingLocked(c) {
+				c.stalled = false
+				c.lowSince = time.Time{}
+				continue
+			}
 			holders = append(holders, c)
 		}
 	}
@@ -85,6 +90,11 @@ func (d *Daemon) stallTick() {
 		if c.role != roleHolder || !sampled[c] {
 			continue
 		}
+		if d.orchestrationHolderWaitingLocked(c) {
+			c.stalled = false
+			c.lowSince = time.Time{}
+			continue
+		}
 		usage := readings[c]
 		stallWindow := window
 		if usage.HasDescendant {
@@ -102,4 +112,16 @@ func (d *Daemon) stallTick() {
 			c.stalled = false
 		}
 	}
+}
+
+func (d *Daemon) orchestrationHolderWaitingLocked(holder *conn) bool {
+	if holder.ownerRunID != "" || holder.resources.Cores > 0 || holder.resources.MemoryBytes > 0 {
+		return false
+	}
+	for c := range d.conns {
+		if c.role == roleWaiter && c.ownerRunID == holder.runID {
+			return true
+		}
+	}
+	return false
 }

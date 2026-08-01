@@ -11,6 +11,7 @@ import type {
   QueueHolder,
   QueueResource,
   QueueState,
+  QueueWaiter,
 } from "./api";
 
 export function isHostResource(key: string): boolean {
@@ -192,6 +193,25 @@ export function groupHolders(holders: QueueHolder[]): HolderGroup[] {
     holder,
     children: childrenOf.get(queueRowID(holder)) ?? [],
   }));
+}
+
+export function queueLifecycleHolders(
+  holders: QueueHolder[],
+  waiters: QueueWaiter[],
+): QueueHolder[] {
+  const waitingOwners = new Set(
+    waiters.filter((w) => !!w.participant_id).map((w) => w.run_id),
+  );
+  return holders.filter((h) => {
+    const orchestrationWait =
+      h.admission_waiting ||
+      (!h.participant_id &&
+        !h.parent &&
+        (h.resources?.cores ?? 0) <= 0 &&
+        (h.resources?.memory_bytes ?? 0) <= 0 &&
+        waitingOwners.has(h.run_id));
+    return !orchestrationWait;
+  });
 }
 
 // daemonUptimeLabel renders how long the serving daemon has been up:

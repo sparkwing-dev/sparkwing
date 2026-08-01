@@ -31,6 +31,7 @@ import {
   fmtHolderCost,
   groupHolders,
   hasDaemon,
+  queueLifecycleHolders,
   queueRowID,
   resourceAvailable,
 } from "@/lib/queue";
@@ -79,8 +80,9 @@ export default function QueuePage() {
 }
 
 function Header({ qs, pulse }: { qs: QueueState | null; pulse: boolean }) {
-  const holders = qs?.holders?.length ?? 0;
-  const waiters = qs?.waiters?.length ?? 0;
+  const waiterRows = qs?.waiters ?? [];
+  const holders = queueLifecycleHolders(qs?.holders ?? [], waiterRows).length;
+  const waiters = waiterRows.length;
   const running = qs != null && hasDaemon(qs);
   const version = qs?.daemon_version || "";
   const uptime = qs ? daemonUptimeLabel(qs) : "";
@@ -137,8 +139,8 @@ function Header({ qs, pulse }: { qs: QueueState | null; pulse: boolean }) {
 }
 
 function QueueBody({ qs }: { qs: QueueState }) {
-  const groups = groupHolders(qs.holders ?? []);
   const waiters = qs.waiters ?? [];
+  const groups = groupHolders(queueLifecycleHolders(qs.holders ?? [], waiters));
   const pressure = externalPressureNote(qs);
   const drifts = driftNotes(qs);
   return (

@@ -14,6 +14,7 @@ import {
   groupHolders,
   hasDaemon,
   humanBytes,
+  queueLifecycleHolders,
   queueRowID,
   resourceAvailable,
   trimFloat,
@@ -274,6 +275,48 @@ describe("groupHolders", () => {
     );
     assert.deepEqual(groups[0].children.map(queueRowID), ["child-key"]);
     assert.deepEqual(groups[1].children.map(queueRowID), []);
+  });
+});
+
+describe("queueLifecycleHolders", () => {
+  it("hides an orchestration lease while its active node waits", () => {
+    const holders: QueueHolder[] = [
+      {
+        run_id: "run-1",
+        elapsed_ms: 90_000,
+        resources: {},
+        semaphores: ["gate"],
+        stalled: true,
+        admission_waiting: true,
+        active_waiter_participant_ids: ["run-1/node-host/YnVpbGQ"],
+      },
+      {
+        run_id: "other",
+        elapsed_ms: 30_000,
+        resources: { cores: 1 },
+      },
+    ];
+    const visible = queueLifecycleHolders(holders, [
+      {
+        run_id: "run-1",
+        participant_id: "run-1/node-host/YnVpbGQ",
+        display_run_id: "run-1/build",
+        position: 1,
+        resources: { cores: 6 },
+        waiting_ms: 30_000,
+      },
+    ]);
+    assert.deepEqual(visible.map((h) => h.run_id), ["other"]);
+  });
+
+  it("keeps a genuinely idle holder visible", () => {
+    const holder: QueueHolder = {
+      run_id: "wedged",
+      elapsed_ms: 90_000,
+      resources: {},
+      stalled: true,
+    };
+    assert.deepEqual(queueLifecycleHolders([holder], []), [holder]);
   });
 });
 

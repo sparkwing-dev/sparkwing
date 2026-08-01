@@ -75,6 +75,9 @@ code change to unlock.
 
 ### Fixed
 
+- **queue:** a semaphore-only orchestration lease is shown as part of its active
+  node's admission wait instead of as a second, stalled run with a cancel hint.
+  JSON keeps both participant rows and now links the holder to its active waiter.
 - **gate:** local worktrees run golangci-lint through a leased canonical path,
   so a fresh checkout can reuse a warm cache without replaying another
   checkout's filenames. Blob-backed fixed runners keep their existing private

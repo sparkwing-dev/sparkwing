@@ -1157,6 +1157,8 @@ export interface QueueHolder {
   expected_duration_ms?: number;
   drift_warning?: string;
   stalled?: boolean;
+  admission_waiting?: boolean;
+  active_waiter_participant_ids?: string[];
   contended?: boolean;
   contention_reason?: string;
   recovery?: string;
