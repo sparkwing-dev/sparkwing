@@ -227,15 +227,10 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 				}
 			}
 			step := stepOf(it)
-			if policy == CollectAll || (step != nil && step.IsContinueOnError()) {
-				for _, c := range children[res.id] {
+			dependencySatisfied := step != nil && step.IsContinueOnError()
+			for _, c := range children[res.id] {
+				if dependencySatisfied || items[c].isFinally() {
 					indeg[c]--
-				}
-			} else {
-				for _, c := range children[res.id] {
-					if items[c].isFinally() {
-						indeg[c]--
-					}
 				}
 			}
 			schedule()

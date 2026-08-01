@@ -565,15 +565,17 @@ Choose the parallel failure policy once per Work:
 
 ```go
 w.ParallelFailures(sw.FailFast)   // default: cancel ordinary siblings on the first decisive failure
-w.ParallelFailures(sw.CollectAll) // finish every ready sibling and report the full failure set
+w.ParallelFailures(sw.CollectAll) // finish independent/ready siblings and report the full failure set
 ```
 
 Fail-fast records the triggering step, cancelled sibling count, and
 cancellation latency in `work_fail_fast` telemetry. Cancelled steps end with
-`outcome=cancelled`, never `failed`. Cleanup steps should declare every item
-they clean up with `.Needs(...)` and add `.Finally()`; they run through the
-Job's parent context, so sibling failure does not cancel them while an operator
-cancellation still does.
+`outcome=cancelled`, never `failed`. Collect-all never turns a failed `.Needs()`
+prerequisite into success; a dependent dispatches only after success or when
+the prerequisite explicitly uses `.ContinueOnError()`. Cleanup steps should
+declare every item they clean up with `.Needs(...)` and add `.Finally()`; they
+run through the Job's parent context, so sibling failure does not cancel them
+while an operator cancellation still does.
 
 ### Dry-run contract
 

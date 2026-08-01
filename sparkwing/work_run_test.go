@@ -123,20 +123,55 @@ func TestRunWork_ExplicitFailFastCancelsSiblingAndRunsFinally(t *testing.T) {
 
 func TestRunWork_CollectAllFinishesParallelSiblings(t *testing.T) {
 	w := sparkwing.NewWork().ParallelFailures(sparkwing.CollectAll)
-	var completed atomic.Bool
-	sparkwing.Step(w, "reject", func(context.Context) error { return errors.New("rejected") })
-	sparkwing.Step(w, "slow", func(context.Context) error {
-		time.Sleep(50 * time.Millisecond)
-		completed.Store(true)
+	independentStarted := make(chan struct{})
+	prerequisiteFailed := make(chan struct{})
+	var independentCompleted atomic.Bool
+	reject := sparkwing.Step(w, "reject", func(context.Context) error {
+		<-independentStarted
+		close(prerequisiteFailed)
+		return errors.New("rejected")
+	})
+	sparkwing.Step(w, "independent", func(context.Context) error {
+		close(independentStarted)
+		<-prerequisiteFailed
+		independentCompleted.Store(true)
 		return nil
 	})
+	var dependentRan atomic.Bool
+	sparkwing.Step(w, "dependent", func(context.Context) error {
+		dependentRan.Store(true)
+		return nil
+	}).Needs(reject)
 
 	_, err := sparkwing.RunWork(context.Background(), w)
 	if err == nil {
 		t.Fatal("CollectAll should preserve the failed rollup")
 	}
-	if !completed.Load() {
+	if !independentCompleted.Load() {
 		t.Fatal("CollectAll cancelled a sibling")
+	}
+	if dependentRan.Load() {
+		t.Fatal("CollectAll satisfied a hard Needs edge after its prerequisite failed")
+	}
+}
+
+func TestRunWork_CollectAllAllowsDependentAfterContinueOnError(t *testing.T) {
+	w := sparkwing.NewWork().ParallelFailures(sparkwing.CollectAll)
+	reject := sparkwing.Step(w, "reject", func(context.Context) error {
+		return errors.New("rejected")
+	}).ContinueOnError()
+	var dependentRan atomic.Bool
+	sparkwing.Step(w, "dependent", func(context.Context) error {
+		dependentRan.Store(true)
+		return nil
+	}).Needs(reject)
+
+	_, err := sparkwing.RunWork(context.Background(), w)
+	if err == nil {
+		t.Fatal("ContinueOnError should preserve the failed rollup")
+	}
+	if !dependentRan.Load() {
+		t.Fatal("ContinueOnError did not satisfy the dependent Needs edge")
 	}
 }
 

@@ -50,8 +50,9 @@ const (
 	// FailFast cancels ordinary in-flight siblings after the first decisive
 	// failure. It is the default and preserves the historical Work behavior.
 	FailFast ParallelFailurePolicy = "fail-fast"
-	// CollectAll lets every ready item finish so one run can report the full
-	// failure set. Individual Optional and ContinueOnError modifiers still apply.
+	// CollectAll lets every independent or already-ready item finish so one run
+	// can report the full failure set. It does not satisfy a failed prerequisite;
+	// downstream Needs still require success or an explicit ContinueOnError.
 	CollectAll ParallelFailurePolicy = "collect-all"
 )
 

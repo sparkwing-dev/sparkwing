@@ -59,7 +59,10 @@ code change to unlock.
   Fail-fast siblings now finish as cancelled instead of failed, telemetry names
   the decisive step and cancellation latency, and `.Finally()` cleanup steps
   run after their declared dependencies terminate without inheriting sibling
-  cancellation. The zero value remains fail-fast for compatibility.
+  cancellation. Collect-all preserves hard dependency semantics: a failed
+  prerequisite unlocks only `.Finally()` cleanup or a dependent explicitly
+  enabled by `.ContinueOnError()`. The zero value remains fail-fast for
+  compatibility.
 
 - **sdk:** `sparkwing.AcquireLintSlot(tool)` lets worktrees of one repo share a
   golangci-lint cache without being told about each other's files. golangci-lint
