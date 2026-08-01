@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"time"
@@ -41,14 +42,11 @@ const golangciContention = "parallel golangci-lint is running"
 // over-admits against cold and under-admits against warm, and the mode
 // that decides safety is the expensive one.
 //
-// Cold is priced because cold is the common case here, not the rare one.
-// GOLANGCI_LINT_CACHE is scoped per worktree (BW-1223), so every fresh
-// agent worktree pays a cold lint on its first gate, and fresh worktrees
-// are how this fleet works. That premise is the whole justification, so
-// it is the thing to check before touching this number: if lint caches
-// ever become reusable across worktrees, cold becomes the exception and
-// this should be re-derived downward, deliberately rather than by
-// noticing the warm number and rounding to it.
+// Local worktrees now reuse four canonical cache paths, so steady-state
+// lint is warm. Cold remains the safe admission price because all four
+// paths still need a first fill, and a run falls back to its private cache
+// whenever every path is leased. Admission has no cache-temperature
+// signal, so it cannot safely price one run as warm and the next as cold.
 //
 // Pricing the warm mode today would be unsafe rather than merely
 // optimistic. At 2.0 the budget admits four concurrent lints; four cold
@@ -130,7 +128,7 @@ func lintSlotCost() int {
 // finding in the repo reported as if the commit in front of it wrote them.
 const lintBaselineRef = "origin/main"
 
-// lintCommandFor builds the golangci-lint line for one module directory.
+// lintCommandFor builds the golangci-lint line for one module.
 //
 // The flag is the whole point of the budget. --allow-parallel-runners
 // drops golangci-lint's private box-wide lock, which is safe only while
@@ -142,12 +140,20 @@ const lintBaselineRef = "origin/main"
 // Passing the parallel flag without holding the slot would leave nothing
 // serializing lint at all, so the caller decides by whether it was
 // granted, never by configuration.
-func lintCommandFor(dir string, holdsBudget bool) string {
+func lintCommandFor(holdsBudget bool) string {
 	flag := "--allow-serial-runners"
 	if holdsBudget {
 		flag = "--allow-parallel-runners"
 	}
-	return fmt.Sprintf("cd %q && golangci-lint run %s ./...", dir, flag)
+	return fmt.Sprintf("golangci-lint run %s ./...", flag)
+}
+
+func shouldLeaseLintPath(gcURL string) bool {
+	if gcURL != "" {
+		return false
+	}
+	gitMarker, err := os.Stat(filepath.Join(sparkwing.WorkDir(), ".git"))
+	return err == nil && !gitMarker.IsDir()
 }
 
 // runGolangciLint lints every committed Go module under the box-wide
@@ -164,22 +170,21 @@ func lintCommandFor(dir string, holdsBudget bool) string {
 // indistinguishable from a step that found nothing, and that is how the
 // .sparkwing-only scope survived for two months.
 //
-// One slot covers the whole walk rather than one per module. Taking and
-// releasing the budget per module would let another box-wide linter in
-// between this step's own modules, which is the oversubscription the
-// budget exists to prevent, and it would pay the queue wait once per
-// module on a busy box. The cost of that choice is that lintLockWait now
-// bounds every module together instead of one invocation.
+// One admission grant and one cache-path lease cover the whole walk.
+// Releasing either between modules could over-admit another linter or
+// let another worktree repoint the canonical path while this run still
+// owns results from it. It would also pay the queue wait once per module.
 //
 // The walk and the baseline are resolved before the slot is taken. Both
 // are cheap local git reads, and a checkout that cannot name its baseline
 // should fail without first occupying box-wide capacity it is only going
 // to give back.
 //
-// On a fixed-workdir k8s runner it seeds the cache from the blob store
-// before running and saves the result after a clean run. The returned
-// error already reads as a gate failure line, so a caller collecting
-// failures can take it unchanged.
+// Fixed checkouts and blob-store-backed runners keep their private
+// ToolCacheDir so restore and save seed the directory lint reads; local
+// disposable worktrees lease a canonical path instead. The returned error
+// already reads as a gate failure line, so a caller collecting failures can
+// take it unchanged.
 func runGolangciLint(ctx context.Context) error {
 	gcURL := os.Getenv("SPARKWING_GITCACHE_URL")
 	gcToken := os.Getenv("SPARKWING_CACHE_TOKEN")
@@ -206,6 +211,15 @@ func runGolangciLint(ctx context.Context) error {
 	defer release()
 
 	cacheDir := sparkwing.ToolCacheDir("golangci-lint")
+	var lintSlot *sparkwing.LintSlot
+	if shouldLeaseLintPath(gcURL) {
+		lintSlot, err = sparkwing.AcquireLintSlot("golangci-lint")
+		if err != nil {
+			return fmt.Errorf("golangci-lint: could not acquire a reusable cache path: %w", err)
+		}
+		defer lintSlot.Release()
+		cacheDir = lintSlot.Cache
+	}
 	if holdsBudget {
 		sparkwing.Info(ctx, "golangci-lint: holding %s; running parallel (cache %s)", lintBudget, cacheDir)
 	} else {
@@ -223,9 +237,13 @@ func runGolangciLint(ctx context.Context) error {
 			continue
 		}
 		stepStart := time.Now()
-		if _, runErr := sparkwing.Bash(lintCtx, lintCommandFor(dir, holdsBudget)).
-			Env("GOLANGCI_LINT_CACHE", cacheDir).
-			Run(); runErr != nil {
+		cmd := sparkwing.Bash(lintCtx, lintCommandFor(holdsBudget))
+		if lintSlot != nil {
+			cmd = lintSlot.ConfigureIn(cmd, dir, "GOLANGCI_LINT_CACHE")
+		} else {
+			cmd = cmd.Dir(dir).Env("GOLANGCI_LINT_CACHE", cacheDir)
+		}
+		if _, runErr := cmd.Run(); runErr != nil {
 			failures = append(failures,
 				fmt.Sprintf("%s: %s", dir, describeLintFailure(lintCtx, time.Since(stepStart), runErr)))
 			continue

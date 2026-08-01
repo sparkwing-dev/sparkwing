@@ -5,6 +5,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -14,7 +16,7 @@ import (
 )
 
 func TestLintCommandWaitsForTheBoxWideLockInsteadOfFailingOnIt(t *testing.T) {
-	got := lintCommandFor(".", false)
+	got := lintCommandFor(false)
 	if !strings.Contains(got, "--allow-serial-runners") {
 		t.Fatalf("the gate would fail on a neighboring lint instead of waiting for it: %s", got)
 	}
@@ -30,17 +32,48 @@ func TestLintCommandWaitsForTheBoxWideLockInsteadOfFailingOnIt(t *testing.T) {
 // per committed module, so a regression here drops the lock once per
 // module rather than once per gate.
 func TestLintCommandNeverDropsTheToolLockWithoutABudget(t *testing.T) {
-	withoutBudget := lintCommandFor(".", false)
+	withoutBudget := lintCommandFor(false)
 	if strings.Contains(withoutBudget, "--allow-parallel-runners") {
 		t.Fatalf("lint dropped its own lock while holding no budget: %s", withoutBudget)
 	}
 
-	withBudget := lintCommandFor(".", true)
+	withBudget := lintCommandFor(true)
 	if !strings.Contains(withBudget, "--allow-parallel-runners") {
 		t.Fatalf("lint kept the serializing lock while holding a budget, so the budget buys nothing: %s", withBudget)
 	}
 	if strings.Contains(withBudget, "--allow-serial-runners") {
 		t.Fatalf("lint passed both runner flags: %s", withBudget)
+	}
+}
+
+func TestLinkedWorktreeLeasesReusableLintPath(t *testing.T) {
+	worktree := t.TempDir()
+	if err := os.WriteFile(filepath.Join(worktree, ".git"), []byte("gitdir: elsewhere"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	previous := sparkwing.WorkDir()
+	sparkwing.SetWorkDir(worktree)
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+
+	if !shouldLeaseLintPath("") {
+		t.Fatal("a disposable linked worktree would keep paying for a private cold cache")
+	}
+	if shouldLeaseLintPath("https://cache.invalid") {
+		t.Fatal("a blob-backed worktree would restore a cache directory lint does not read")
+	}
+}
+
+func TestFixedCheckoutDoesNotNeedLintAlias(t *testing.T) {
+	checkout := t.TempDir()
+	if err := os.Mkdir(filepath.Join(checkout, ".git"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	previous := sparkwing.WorkDir()
+	sparkwing.SetWorkDir(checkout)
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+
+	if shouldLeaseLintPath("") {
+		t.Fatal("a fixed checkout does not need a canonical alias")
 	}
 }
 
@@ -87,22 +120,6 @@ func TestLintCostIsPricedForTheColdRunNotTheWarmOne(t *testing.T) {
 		t.Fatalf("lint is priced at %.2f cores against a cold run measured at %.2f, so a full "+
 			"budget of concurrent lints demands more cores than the box has",
 			lintCoreCost, measuredColdCoreDemand)
-	}
-}
-
-// The command has to name the module it lints, or the walk runs the same
-// directory once per module and the widened scope is decorative. The
-// budget flag must survive that, because the two concerns landed in this
-// one function from two different branches.
-func TestLintCommandNamesTheModuleItLints(t *testing.T) {
-	for _, dir := range []string{".", ".sparkwing", "tools"} {
-		got := lintCommandFor(dir, true)
-		if !strings.Contains(got, `cd "`+dir+`"`) {
-			t.Errorf("the command does not enter %q: %s", dir, got)
-		}
-		if !strings.Contains(got, "--allow-parallel-runners") {
-			t.Errorf("the per-module command lost the budget flag for %q: %s", dir, got)
-		}
 	}
 }
 

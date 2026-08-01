@@ -75,6 +75,11 @@ code change to unlock.
 
 ### Fixed
 
+- **gate:** local worktrees run golangci-lint through a leased canonical path,
+  so a fresh checkout can reuse a warm cache without replaying another
+  checkout's filenames. Blob-backed fixed runners keep their existing private
+  cache path so restore and save still operate on the directory lint reads.
+
 - **config:** the repo registry is written through a uniquely named staging
   file instead of a shared `repos.yaml.tmp`. Concurrent writers no longer
   collide on the staging file, and staged contents are synced before rename.
