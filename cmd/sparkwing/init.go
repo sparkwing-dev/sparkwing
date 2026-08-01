@@ -183,9 +183,8 @@ func renderInitReadme() string {
 		"\n" +
 		"## Agents\n" +
 		"\n" +
-		agentBlockBody +
-		"\n" +
-		"Refresh this section after major sparkwing upgrades via `sparkwing info --for-agent`.\n"
+		"Run `sparkwing info --for-agent` for current, one-wake discovery context.\n" +
+		"Do not copy runtime command catalogs into durable instruction files.\n"
 }
 
 func renderInitPipelinesYAML() string {
@@ -349,5 +348,5 @@ func printInitReport(cwd, moduleName string, existedBefore bool, rep initFileRep
 	fmt.Println()
 	fmt.Printf("  %s\n", color.Dim("dashboard:    sparkwing dashboard start"))
 	fmt.Printf("  %s\n", color.Dim("docs:         sparkwing docs list  (or https://sparkwing.dev/docs)"))
-	fmt.Printf("  %s\n", color.Dim("AI agents:    sparkwing info --for-agent  (paste into CLAUDE.md / AGENTS.md)"))
+	fmt.Printf("  %s\n", color.Dim("AI agents:    sparkwing info --for-agent  (current one-wake context)"))
 }

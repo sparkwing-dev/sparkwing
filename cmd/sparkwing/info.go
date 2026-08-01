@@ -20,17 +20,18 @@ import (
 // Info is the JSON shape of `sparkwing info`. Stable contract: agents
 // parse this directly. Field renames here are breaking changes.
 type Info struct {
-	About         string         `json:"about"`
-	Version       InfoVersion    `json:"version"`
-	Binary        string         `json:"binary"`
-	Project       InfoProject    `json:"project"`
-	Toolchain     InfoToolchain  `json:"toolchain"`
-	NextSteps     []InfoNextStep `json:"next_steps"`
-	ForAgents     []InfoNextStep `json:"for_agents,omitempty"`
-	Tips          []InfoTip      `json:"tips,omitempty"`
-	Docs          InfoDocs       `json:"docs"`
-	FirstRunNote  string         `json:"first_run_note"`
-	UpgradeNotice string         `json:"upgrade_notice,omitempty"`
+	About           string         `json:"about"`
+	CapabilityEpoch int            `json:"capability_epoch"`
+	Version         InfoVersion    `json:"version"`
+	Binary          string         `json:"binary"`
+	Project         InfoProject    `json:"project"`
+	Toolchain       InfoToolchain  `json:"toolchain"`
+	NextSteps       []InfoNextStep `json:"next_steps"`
+	ForAgents       []InfoNextStep `json:"for_agents,omitempty"`
+	Tips            []InfoTip      `json:"tips,omitempty"`
+	Docs            InfoDocs       `json:"docs"`
+	FirstRunNote    string         `json:"first_run_note"`
+	UpgradeNotice   string         `json:"upgrade_notice,omitempty"`
 }
 
 type InfoTip struct {
@@ -91,6 +92,8 @@ type InfoNextStep struct {
 	Command string `json:"command"`
 	Purpose string `json:"purpose"`
 }
+
+const infoCapabilityEpoch = 1
 
 func parseInfoVersion(raw string) InfoVersion {
 	v := InfoVersion{Installed: raw}
@@ -157,7 +160,7 @@ const infoBat = `      /\                        /\
 func runInfo(args []string) error {
 	fs := flag.NewFlagSet(cmdInfo.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty | json | plain (default: table)")
-	forAgent := fs.Bool("for-agent", false, "emit a paste-ready block for CLAUDE.md / AGENTS.md (no ANSI, no extras)")
+	forAgent := fs.Bool("for-agent", false, "emit current discovery context for one agent wake (no ANSI, no extras)")
 	firstTime := fs.Bool("first-time", false, "print the post-install onboarding card (used by install.sh; re-runnable any time)")
 	if err := parseAndCheck(cmdInfo, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -203,9 +206,9 @@ func runInfo(args []string) error {
 	}
 }
 
-// agentBlockBody is the shared paste-ready agent context.
-// Reused by `sparkwing info --for-agent` and the README scaffolded by
-// `sparkwing pipeline new` so both stay in sync.
+const agentBlockHeader = "<!-- Current Sparkwing discovery context (capability epoch 1). Use for this agent wake only; do not persist it in instruction files. -->"
+
+// agentBlockBody is the current agent discovery context.
 const agentBlockBody = "This repo uses **sparkwing** for CI/CD (https://sparkwing.dev). Pipelines are Go\n" +
 	"programs in `.sparkwing/`. Ask the binary, don't scrape the repo:\n" +
 	"\n" +
@@ -216,7 +219,7 @@ const agentBlockBody = "This repo uses **sparkwing** for CI/CD (https://sparkwin
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n"
 
 func printAgentBlock() {
-	fmt.Println("<!-- Sparkwing context for AI agents. Paste into CLAUDE.md or AGENTS.md and commit. Refresh after major sparkwing upgrades via `sparkwing info --for-agent`. -->")
+	fmt.Println(agentBlockHeader)
 	fmt.Println()
 	fmt.Println("## Sparkwing")
 	fmt.Println()
@@ -336,9 +339,10 @@ func pathHintLines() []string {
 func gatherInfo(agentMode bool) Info {
 	binary, _ := os.Executable()
 	info := Info{
-		About:   infoAbout,
-		Version: parseInfoVersion(installedVersion()),
-		Binary:  binary,
+		About:           infoAbout,
+		CapabilityEpoch: infoCapabilityEpoch,
+		Version:         parseInfoVersion(installedVersion()),
+		Binary:          binary,
 		Docs: InfoDocs{
 			CLI:                     "sparkwing docs list / read --topic <slug> / all",
 			WebURL:                  "https://sparkwing.dev/docs/",
@@ -391,9 +395,6 @@ func gatherTips(info Info) []InfoTip {
 		tips = append(tips, t)
 	}
 	if t, ok := tipDashboardNotRunning(); ok {
-		tips = append(tips, t)
-	}
-	if t, ok := tipAgentBlockMissing(info); ok {
 		tips = append(tips, t)
 	}
 	if t, ok := tipCLIBehindLatest(info); ok {
@@ -490,27 +491,6 @@ func tipDashboardNotRunning() (InfoTip, bool) {
 		Title:   "Local dashboard is not running",
 		Command: "sparkwing dashboard start",
 		Note:    "runs at http://127.0.0.1:4343",
-	}, true
-}
-
-func tipAgentBlockMissing(info Info) (InfoTip, bool) {
-	if !info.Project.Found {
-		return InfoTip{}, false
-	}
-	root := info.Project.SparkwingDir
-	if i := strings.LastIndex(root, "/.sparkwing"); i >= 0 {
-		root = root[:i]
-	}
-	for _, name := range []string{"CLAUDE.md", "AGENTS.md"} {
-		if _, err := os.Stat(root + "/" + name); err == nil {
-			return InfoTip{}, false
-		}
-	}
-	return InfoTip{
-		ID:      "agent-block",
-		Title:   "No CLAUDE.md / AGENTS.md in this repo",
-		Command: "sparkwing info --for-agent",
-		Note:    "paste the output into CLAUDE.md so AI tools have sparkwing context",
 	}, true
 }
 
@@ -615,7 +595,7 @@ func missingHooksStep(info Info) (InfoNextStep, bool) {
 var infoForAgents = []InfoNextStep{
 	{Command: "sparkwing commands", Purpose: "full CLI surface as JSON (every verb + every flag)"},
 	{Command: "sparkwing info --json", Purpose: "machine-readable copy of this card (alias: -o json)"},
-	{Command: "sparkwing info --for-agent", Purpose: "paste-ready block for CLAUDE.md / AGENTS.md"},
+	{Command: "sparkwing info --for-agent", Purpose: "current discovery context for one agent wake"},
 	{Command: "sparkwing pipeline list --json", Purpose: "this repo's pipelines as JSON"},
 	{Command: "sparkwing pipeline templates -o json", Purpose: "curated starter templates (filter --category/--cloud, detail --name --body)"},
 	{Command: "sparkwing pipeline sparks vendor --module <name>", Purpose: "eject a spark library's source into your repo to own and edit it"},

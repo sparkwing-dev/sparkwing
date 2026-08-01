@@ -1937,7 +1937,7 @@ pipelines (head -n1 yields the most-likely next command).
 | Flag | Description |
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
-| `--for-agent` | Emit a paste-ready block for CLAUDE.md / AGENTS.md (no ANSI, no extras) |
+| `--for-agent` | Emit current discovery context for one agent wake (no ANSI, no extras) |
 | `--first-time` | Print the post-install onboarding card (used by install.sh; re-runnable any time) |
 
 ### Examples
@@ -1949,8 +1949,8 @@ sparkwing info
 # Agent-readable record
 sparkwing info -o json
 
-# Paste into CLAUDE.md / AGENTS.md
-sparkwing info --for-agent >> CLAUDE.md
+# Load current discovery context for this wake
+sparkwing info --for-agent
 
 # Reprint the post-install onboarding card
 sparkwing info --first-time
@@ -4647,4 +4647,3 @@ sparkwing version update --sdk
 # Pin the SDK to a specific release
 sparkwing version update --sdk --version v0.44.0
 ```
-

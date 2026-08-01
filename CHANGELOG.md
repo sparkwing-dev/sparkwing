@@ -49,6 +49,10 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **agent discovery:** `info --for-agent` now emits current, one-wake context,
+  structured `info` includes `capability_epoch`, and new pipeline scaffolds
+  point agents at the live command instead of copying a command catalog.
+
 - **sdk:** `sparkwing.AcquireLintSlot(tool)` lets worktrees of one repo share a
   golangci-lint cache without being told about each other's files. golangci-lint
   keys a cached result on the import path and file content, deliberately

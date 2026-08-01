@@ -48,7 +48,7 @@ Plain English. No internal jargon, no ticket IDs, no version-marker noise. CLI h
 
 Conventional commits (`type: subject`), under 72 chars, no ticket IDs in the subject or body. Valid types: `feat`, `fix`, `refactor`, `test`, `docs`, `chore`.
 
-<!-- Sparkwing context for AI agents. Paste into CLAUDE.md or AGENTS.md and commit. Refresh after major sparkwing upgrades via `sparkwing info --for-agent`. -->
+<!-- Sparkwing discovery context captured previously. Ask the current binary instead of copying this section elsewhere. -->
 
 ## Sparkwing
 

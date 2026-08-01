@@ -80,14 +80,14 @@ Use -o json for structured output that an agent can parse, or
 pipelines (head -n1 yields the most-likely next command).`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
-		{Name: "for-agent", Desc: "Emit a paste-ready block for CLAUDE.md / AGENTS.md (no ANSI, no extras)", Group: "Output"},
+		{Name: "for-agent", Desc: "Emit current discovery context for one agent wake (no ANSI, no extras)", Group: "Output"},
 		{Name: "first-time", Desc: "Print the post-install onboarding card (used by install.sh; re-runnable any time)", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
 		{"Human-readable card", "sparkwing info"},
 		{"Agent-readable record", "sparkwing info -o json"},
-		{"Paste into CLAUDE.md / AGENTS.md", "sparkwing info --for-agent >> CLAUDE.md"},
+		{"Load current agent discovery", "sparkwing info --for-agent"},
 		{"Reprint the post-install onboarding card", "sparkwing info --first-time"},
 	},
 }
