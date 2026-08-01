@@ -121,6 +121,10 @@ type EventsWindow struct {
 
 	Contended int
 
+	Backfills int
+
+	BackfillProtections int
+
 	Rejections []RejectionCount
 }
 type Evicted struct {

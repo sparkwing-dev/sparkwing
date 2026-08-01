@@ -11,9 +11,12 @@ func TestWeighted_PromotionBackfillsPastNonFittingHeavyHead(t *testing.T) {
 	_ = heavyHolder
 
 	events := mustRelease(t, l, lightHolder.ID, "holder-light")
-	wantKinds(t, events, EventReleased, EventPromoted)
-	if events[1].RequestID != "light" {
-		t.Fatalf("promoted %q, want light backfilling behind the non-fitting heavy head", events[1].RequestID)
+	wantKinds(t, events, EventReleased, EventBackfilled, EventPromoted)
+	if events[1].RequestID != "heavy" || events[1].BypassedBy != "light" || events[1].BackfillCount != 1 {
+		t.Fatalf("backfill event = %+v, want heavy bypassed once by light", events[1])
+	}
+	if events[2].RequestID != "light" {
+		t.Fatalf("promoted %q, want light backfilling behind the non-fitting heavy head", events[2].RequestID)
 	}
 	if snap := l.Snapshot(); len(snap.Waiters) != 1 || snap.Waiters[0].RequestID != "heavy" {
 		t.Fatalf("waiters = %+v, want only heavy still queued", snap.Waiters)
@@ -108,9 +111,12 @@ func TestWeighted_QueuedBackfillProtectsOlderWaiter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("raise headroom: %v", err)
 	}
-	wantKinds(t, events, EventPromoted)
-	if events[0].RequestID != "light" {
-		t.Fatalf("promoted %q, want one light backfill", events[0].RequestID)
+	wantKinds(t, events, EventBackfilled, EventPromoted)
+	if events[0].RequestID != "heavy" || events[0].BypassedBy != "light" || events[0].BackfillCount != 1 {
+		t.Fatalf("backfill event = %+v, want heavy bypassed once by light", events[0])
+	}
+	if events[1].RequestID != "light" {
+		t.Fatalf("promoted %q, want one light backfill", events[1].RequestID)
 	}
 	if got := l.Snapshot().Waiters[0].BackfillCount; got != 1 {
 		t.Fatalf("heavy backfill count = %d, want 1", got)

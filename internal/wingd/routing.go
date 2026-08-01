@@ -81,6 +81,8 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 					BlockingReason: d.hostBlockingReasonLocked(c.resources, d.costRationale(c)),
 				}})
 			}
+		case admission.EventBackfilled:
+			d.events.record(d.now(), admissionEvent{Kind: eventBackfill, BackfillCount: ev.BackfillCount})
 		case admission.EventEvicted:
 			d.events.record(d.now(), admissionEvent{Kind: eventEviction, Key: ev.Key})
 			if c := d.byRun[ev.RequestID]; c != nil {

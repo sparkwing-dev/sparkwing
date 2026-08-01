@@ -237,6 +237,9 @@ func TestQueueState_ReportsBackfillProtection(t *testing.T) {
 	if !strings.Contains(w.BlockingReason, "protected from further backfill after 1 younger grant") {
 		t.Fatalf("blocking reason = %q, want protection explanation", w.BlockingReason)
 	}
+	if qs.Events == nil || qs.Events.Backfills != 1 || qs.Events.BackfillProtections != 1 {
+		t.Fatalf("events = %+v, want one persisted backfill and protection transition", qs.Events)
+	}
 }
 
 func TestQueueState_CarriesOwnerAndParticipantIdentity(t *testing.T) {

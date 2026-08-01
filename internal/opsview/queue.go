@@ -603,7 +603,7 @@ func FmtCapacityChange(cc *wingwire.CapacityChange) string {
 // daemon's rolling window. Empty when the daemon sent no window.
 func FmtEventsLine(ev *wingwire.EventsWindow) string {
 	if ev == nil || (ev.Runs == 0 && len(ev.Evictions) == 0 && ev.QueueTimeouts == 0 &&
-		ev.Cancellations == 0 && ev.Contended == 0) {
+		ev.Cancellations == 0 && ev.Contended == 0 && ev.Backfills == 0 && ev.BackfillProtections == 0) {
 		return ""
 	}
 	span := (time.Duration(ev.WindowMS) * time.Millisecond).Round(time.Hour)
@@ -630,6 +630,14 @@ func FmtEventsLine(ev *wingwire.EventsWindow) string {
 	}
 	if ev.Contended > 0 {
 		parts = append(parts, fmt.Sprintf("%d contended", ev.Contended))
+	}
+	if ev.Backfills > 0 {
+		parts = append(parts, fmt.Sprintf("%d younger %s", ev.Backfills,
+			pluralWord(ev.Backfills, "backfill", "backfills")))
+	}
+	if ev.BackfillProtections > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s protected", ev.BackfillProtections,
+			pluralWord(ev.BackfillProtections, "waiter", "waiters")))
 	}
 	out := "last " + label + ": "
 	for i, p := range parts {

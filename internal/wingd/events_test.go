@@ -19,6 +19,8 @@ func TestEventWindow_SummaryFoldsOutcomes(t *testing.T) {
 	w.record(now, admissionEvent{Kind: eventEviction, Key: "deploy"})
 	w.record(now, admissionEvent{Kind: eventQueueTimeout})
 	w.record(now, admissionEvent{Kind: eventCancellation})
+	w.record(now, admissionEvent{Kind: eventBackfill, BackfillCount: 1})
+	w.record(now, admissionEvent{Kind: eventBackfill, BackfillCount: 2})
 
 	s := w.summary(now)
 	if s == nil {
@@ -36,6 +38,9 @@ func TestEventWindow_SummaryFoldsOutcomes(t *testing.T) {
 	}
 	if s.QueueTimeouts != 1 || s.Cancellations != 1 {
 		t.Errorf("timeouts/cancellations = %d/%d, want 1/1", s.QueueTimeouts, s.Cancellations)
+	}
+	if s.Backfills != 2 || s.BackfillProtections != 1 {
+		t.Errorf("backfills/protections = %d/%d, want 2/1", s.Backfills, s.BackfillProtections)
 	}
 	if s.WindowMS != eventWindowSpan.Milliseconds() {
 		t.Errorf("WindowMS = %d, want %d", s.WindowMS, eventWindowSpan.Milliseconds())
@@ -92,6 +97,7 @@ func TestEventWindow_SurvivesStateRoundTrip(t *testing.T) {
 	events := []admissionEvent{
 		{At: now, Kind: eventGrant, WaitMS: 1234},
 		{At: now, Kind: eventEviction, Key: "land"},
+		{At: now, Kind: eventBackfill, BackfillCount: 1},
 	}
 	if err := writeState(path, admission.Snapshot{TotalMilliCores: 8000, TotalMemoryBytes: 1 << 30}, events); err != nil {
 		t.Fatalf("writeState: %v", err)
@@ -103,15 +109,15 @@ func TestEventWindow_SurvivesStateRoundTrip(t *testing.T) {
 	if snap == nil || snap.TotalMilliCores != 8000 {
 		t.Fatalf("snapshot lost: %+v", snap)
 	}
-	if len(restored) != 2 || restored[0].WaitMS != 1234 || restored[1].Key != "land" {
+	if len(restored) != 3 || restored[0].WaitMS != 1234 || restored[1].Key != "land" || restored[2].BackfillCount != 1 {
 		t.Fatalf("events lost across round trip: %+v", restored)
 	}
 
 	var w eventWindow
 	w.restore(now, restored)
 	s := w.summary(now)
-	if s == nil || s.Runs != 1 || len(s.Evictions) != 1 {
-		t.Errorf("restored summary = %+v, want 1 run and 1 eviction", s)
+	if s == nil || s.Runs != 1 || len(s.Evictions) != 1 || s.Backfills != 1 || s.BackfillProtections != 1 {
+		t.Errorf("restored summary = %+v, want 1 run, 1 eviction, and 1 protected backfill", s)
 	}
 }
 

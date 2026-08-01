@@ -643,6 +643,13 @@ type EventsWindow struct {
 	// Contended is how many runs the daemon flagged as throttled by host
 	// contention while they held admission in the window.
 	Contended int `json:"contended,omitempty"`
+	// Backfills is how many younger grants consumed spare capacity ahead
+	// of an older non-fitting waiter in the window.
+	Backfills int `json:"backfills,omitempty"`
+	// BackfillProtections is how many older waiters crossed the bounded-
+	// backfill threshold and became protected from further bypass in the
+	// window.
+	BackfillProtections int `json:"backfill_protections,omitempty"`
 	// Rejections counts requests the daemon refused as malformed, per
 	// cause, so a repeated invalid-request pattern is visible to the queue
 	// view and doctor. Empty when no request was rejected and for older

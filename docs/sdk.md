@@ -1041,7 +1041,8 @@ as the bounded way out. With weighted capacities, it can grant one later
 request when the head waiter cannot currently fit. After that backfill, the
 older waiter's full resource set is protected until it runs, even if external
 pressure still keeps it from fitting when the younger holder exits. Queue state
-reports the backfill count and protection reason.
+reports the backfill count and protection reason; the rolling event summary
+retains younger-backfill and protected-waiter counts after the waiter departs.
 
 ### Whole-run coordination
 
