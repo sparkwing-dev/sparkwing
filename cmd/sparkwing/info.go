@@ -7,11 +7,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -578,7 +580,7 @@ func nextStepsFor(info Info, agentMode bool) []InfoNextStep {
 		}
 	}
 	_ = agentMode
-	return []InfoNextStep{
+	steps := []InfoNextStep{
 		{Command: "sparkwing pipeline list", Purpose: "see every pipeline this repo defines"},
 		{Command: "sparkwing pipeline describe --name <name>", Purpose: "full metadata for one pipeline"},
 		{Command: "sparkwing run <name>", Purpose: "run a pipeline"},
@@ -587,6 +589,27 @@ func nextStepsFor(info Info, agentMode bool) []InfoNextStep {
 		{Command: "sparkwing docs list", Purpose: "browse embedded docs (offline)"},
 		{Command: "sparkwing dashboard start", Purpose: "start the local dashboard at http://127.0.0.1:4343"},
 	}
+	if step, ok := missingHooksStep(info); ok {
+		steps = append([]InfoNextStep{step}, steps...)
+	}
+	return steps
+}
+
+func missingHooksStep(info Info) (InfoNextStep, bool) {
+	if !info.Project.Found || info.Project.SparkwingDir == "" {
+		return InfoNextStep{}, false
+	}
+	repoRoot := filepath.Dir(info.Project.SparkwingDir)
+	survey := githooks.Survey(runGit, repoRoot, declaredHookNames(repoRoot))
+	missing := append(append([]string(nil), survey.NotFiring()...), survey.Borrowed...)
+	if len(missing) == 0 {
+		return InfoNextStep{}, false
+	}
+	sort.Strings(missing)
+	return InfoNextStep{
+		Command: survey.Remedy(),
+		Purpose: "activate declared git hooks that are not firing: " + strings.Join(missing, ", "),
+	}, true
 }
 
 var infoForAgents = []InfoNextStep{

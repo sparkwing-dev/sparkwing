@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // localHooksPath is the claim an install makes so git reads the repo's own
@@ -187,15 +188,16 @@ func TestHooksInstall_ReportsARepoWithOnlyAPostCommitHookUngated(t *testing.T) {
 	}
 }
 
-// A repo git already reads has no claim left to hold an unproven hook back,
-// so the gate a re-install rewrites has to prove itself before it goes live.
-func TestHooksInstall_RemovesTheLiveGateThatStoppedPassing(t *testing.T) {
+func TestHooksInstall_FailedReinstallKeepsThePriorLiveGate(t *testing.T) {
 	f := newChainFixture(t)
 	captureStdout(t, func() {
 		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
 			t.Fatalf("installHooks: %v", err)
 		}
 	})
+	path := filepath.Join(f.repo, ".git", "hooks", "pre-commit")
+	prior := readRepoFile(t, path)
+	priorConfig := f.git(t, "config", "--local", "core.hooksPath")
 	var proved []string
 	var gated bool
 	out := captureStdout(t, func() {
@@ -209,20 +211,21 @@ func TestHooksInstall_RemovesTheLiveGateThatStoppedPassing(t *testing.T) {
 	if len(proved) != 1 || proved[0] != "gate" {
 		t.Errorf("proved = %v, want the gate proven again on a repo git already reads", proved)
 	}
-	if _, err := os.Stat(filepath.Join(f.repo, ".git", "hooks", "pre-commit")); !os.IsNotExist(err) {
-		t.Errorf("a gate that stopped passing stayed live after a re-install (stat err = %v)", err)
+	if got := readRepoFile(t, path); got != prior {
+		t.Errorf("failed reinstall changed the prior live gate:\n%s", got)
 	}
-	if gated {
-		t.Error("installHooks reported the repo gated with its only gate withdrawn")
+	if got := f.git(t, "config", "--local", "core.hooksPath"); got != priorConfig {
+		t.Errorf("failed reinstall changed core.hooksPath from %q to %q", priorConfig, got)
 	}
-	if !strings.Contains(out, "gate went red") {
-		t.Errorf("output = %q, want the failure that withdrew the gate", out)
+	if !gated {
+		t.Error("installHooks reported the restored live gate as ungated")
+	}
+	if !strings.Contains(out, "gate went red") || !strings.Contains(out, "remain unchanged") {
+		t.Errorf("output = %q, want the proof failure and unchanged prior state", out)
 	}
 }
 
-// Withdrawal has to survive the next install: rewriting every declared hook
-// is how a gate an earlier run took out comes back unproven.
-func TestHooksInstall_DoesNotRestoreAWithdrawnGateOnAReinstall(t *testing.T) {
+func TestHooksInstall_RepeatedFailedProofLeavesAFreshRepoUnchanged(t *testing.T) {
 	f := newChainFixture(t)
 	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), twoGateProject)
 	install := func() string {
@@ -237,19 +240,20 @@ func TestHooksInstall_DoesNotRestoreAWithdrawnGateOnAReinstall(t *testing.T) {
 	out := install()
 
 	hooks := filepath.Join(f.repo, ".git", "hooks")
-	if _, err := os.Stat(filepath.Join(hooks, "pre-push")); !os.IsNotExist(err) {
-		t.Errorf("the re-install put the withdrawn pre-push back (stat err = %v)", err)
+	for _, name := range []string{"pre-commit", "pre-push", "prepare-commit-msg"} {
+		if _, err := os.Stat(filepath.Join(hooks, name)); !os.IsNotExist(err) {
+			t.Errorf("failed proof left %s behind (stat err = %v)", name, err)
+		}
 	}
-	if body := readRepoFile(t, filepath.Join(hooks, "pre-commit")); !strings.Contains(body, "sparkwing run gate") {
-		t.Errorf("pre-commit hook = %q, want the passing gate still armed", body)
+	if got := localHooksPath(t, f); got != "" {
+		t.Errorf("failed proof left core.hooksPath = %q", got)
 	}
-	if !strings.Contains(out, "pre-push withdrawn") {
-		t.Errorf("output = %q, want the second install to name the withdrawal too", out)
+	if !strings.Contains(out, "remain unchanged") {
+		t.Errorf("output = %q, want the second rejected install to name unchanged prior state", out)
 	}
 }
 
-// A red push gate is not a reason to leave a working commit gate unarmed.
-func TestHooksInstall_ArmsThePassingGateAndWithdrawsOnlyTheFailingOne(t *testing.T) {
+func TestHooksInstall_FailedProofDoesNotInstallAPartialGate(t *testing.T) {
 	f := newChainFixture(t)
 	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), twoGateProject)
 	out := captureStdout(t, func() {
@@ -259,17 +263,289 @@ func TestHooksInstall_ArmsThePassingGateAndWithdrawsOnlyTheFailingOne(t *testing
 		}
 	})
 	hooks := filepath.Join(f.repo, ".git", "hooks")
-	if _, err := os.Stat(filepath.Join(hooks, "pre-push")); !os.IsNotExist(err) {
-		t.Errorf("pre-push survived a failed proof (stat err = %v)", err)
+	for _, name := range []string{"pre-commit", "pre-push", "prepare-commit-msg"} {
+		if _, err := os.Stat(filepath.Join(hooks, name)); !os.IsNotExist(err) {
+			t.Errorf("failed proof left partial hook %s behind (stat err = %v)", name, err)
+		}
 	}
-	if body := readRepoFile(t, filepath.Join(hooks, "pre-commit")); !strings.Contains(body, "sparkwing run gate") {
-		t.Errorf("pre-commit hook = %q, want the passing gate kept", body)
+	if got := localHooksPath(t, f); got != "" {
+		t.Errorf("failed proof left core.hooksPath = %q", got)
 	}
-	if got := localHooksPath(t, f); got != hooks {
-		t.Errorf("core.hooksPath = %q, want %q: the commit gate proved and should be armed", got, hooks)
+	if !strings.Contains(out, "remain unchanged") {
+		t.Errorf("output = %q, want unchanged prior state named", out)
 	}
-	if !strings.Contains(out, "pre-push withdrawn") {
-		t.Errorf("output = %q, want it to name the withdrawn hook", out)
+}
+
+func TestHooksInstall_FailedProofRestoresManagedHooksForwardersAndConfigByteForByte(t *testing.T) {
+	f := newChainFixture(t)
+	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), twoGateProject)
+	captureStdout(t, func() {
+		if _, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{}); err != nil {
+			t.Fatalf("initial install: %v", err)
+		}
+	})
+
+	hooks := filepath.Join(f.repo, ".git", "hooks")
+	names := []string{"pre-commit", "pre-push", "prepare-commit-msg"}
+	prior := map[string]string{}
+	modes := map[string]os.FileMode{}
+	for i, name := range names {
+		path := filepath.Join(hooks, name)
+		body := readRepoFile(t, path) + "# preserved prior " + name + "\n"
+		writeExec(t, path, body)
+		mode := os.FileMode(0o700 + i*0o10)
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+		prior[name] = body
+		modes[name] = mode
+	}
+	priorConfig := f.git(t, "config", "--local", "core.hooksPath")
+
+	out := captureStdout(t, func() {
+		gated, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{prove: redPushGate})
+		if err != nil {
+			t.Fatalf("failed reinstall: %v", err)
+		}
+		if !gated {
+			t.Error("restored managed gates were reported ungated")
+		}
+	})
+	for _, name := range names {
+		path := filepath.Join(hooks, name)
+		if got := readRepoFile(t, path); got != prior[name] {
+			t.Errorf("%s changed across failed proof", name)
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.Mode().Perm(); got != modes[name] {
+			t.Errorf("%s mode = %o, want %o", name, got, modes[name])
+		}
+	}
+	if got := f.git(t, "config", "--local", "core.hooksPath"); got != priorConfig {
+		t.Errorf("core.hooksPath changed from %q to %q", priorConfig, got)
+	}
+	if !strings.Contains(out, "remain unchanged") {
+		t.Errorf("output = %q, want unchanged prior state named", out)
+	}
+}
+
+func TestHooksInstall_PriorHookStaysLiveUntilProofPasses(t *testing.T) {
+	f := newChainFixture(t)
+	hooks := filepath.Join(f.repo, ".git", "hooks")
+	priorPath := filepath.Join(hooks, "pre-commit")
+	priorBody := renderHookScript("pre-commit", []string{"old-gate"}, false)
+	writeExec(t, priorPath, priorBody)
+	f.git(t, "config", "core.hooksPath", hooks)
+	priorConfig := f.git(t, "config", "--local", "core.hooksPath")
+
+	proofStarted := make(chan struct{})
+	releaseProof := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{
+			prove: func(_, _ string) error {
+				close(proofStarted)
+				<-releaseProof
+				return nil
+			},
+		})
+		done <- err
+	}()
+	select {
+	case <-proofStarted:
+	case <-time.After(time.Second):
+		t.Fatal("installer did not begin the blocking proof")
+	}
+	if got := readRepoFile(t, priorPath); got != priorBody {
+		t.Fatal("candidate hook was published while its proof was blocked")
+	}
+	if got := f.git(t, "config", "--local", "core.hooksPath"); got != priorConfig {
+		t.Fatalf("core.hooksPath changed during proof from %q to %q", priorConfig, got)
+	}
+	f.git(t, "add", "-A")
+	f.git(t, "commit", "-m", "invoke prior hook during proof")
+	if ran := f.ranPipelines(t); !strings.Contains(ran, "run old-gate") || strings.Contains(ran, "run gate\n") {
+		t.Fatalf("commit during proof did not run only the prior hook: %q", ran)
+	}
+
+	close(releaseProof)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("install after proof: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("installer did not publish after proof passed")
+	}
+	after := readRepoFile(t, priorPath)
+	if after == priorBody || !strings.Contains(after, "sparkwing run gate") {
+		t.Fatalf("passed proof did not atomically publish the replacement:\n%s", after)
+	}
+	if got := f.git(t, "config", "--local", "core.hooksPath"); got != priorConfig {
+		t.Fatalf("replacement changed core.hooksPath from %q to %q", priorConfig, got)
+	}
+	writeRepoFile(t, filepath.Join(f.repo, "after-proof"), "published\n")
+	f.git(t, "add", "-A")
+	f.git(t, "commit", "-m", "invoke replacement hook")
+	if ran := f.ranPipelines(t); !strings.Contains(ran, "run gate\n") {
+		t.Fatalf("published replacement hook did not fire: %q", ran)
+	}
+}
+
+func TestHooksInstall_GlobalHookChangesDuringProofPublishNothing(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*testing.T, *chainFixture)
+	}{
+		{
+			name: "addition",
+			mutate: func(t *testing.T, f *chainFixture) {
+				writeExec(t, filepath.Join(f.globalDir, "commit-msg"), "#!/bin/sh\nexit 0\n")
+			},
+		},
+		{
+			name: "removal",
+			mutate: func(t *testing.T, f *chainFixture) {
+				if err := os.Remove(filepath.Join(f.globalDir, "prepare-commit-msg")); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+		{
+			name: "identity",
+			mutate: func(t *testing.T, f *chainFixture) {
+				path := filepath.Join(f.globalDir, "pre-commit")
+				body := readRepoFile(t, path)
+				if err := os.Rename(path, path+".prior"); err != nil {
+					t.Fatal(err)
+				}
+				writeExec(t, path, body)
+			},
+		},
+		{
+			name: "content",
+			mutate: func(t *testing.T, f *chainFixture) {
+				if err := os.WriteFile(filepath.Join(f.globalDir, "pre-commit"), []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newChainFixture(t)
+			hooks := filepath.Join(f.repo, ".git", "hooks")
+			priorPath := filepath.Join(hooks, "pre-commit")
+			priorBody := renderHookScript("pre-commit", []string{"old-gate"}, false)
+			writeExec(t, priorPath, priorBody)
+			f.git(t, "config", "core.hooksPath", hooks)
+			priorConfig := f.git(t, "config", "--local", "core.hooksPath")
+
+			proofStarted := make(chan struct{})
+			releaseProof := make(chan struct{})
+			done := make(chan error, 1)
+			go func() {
+				_, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{
+					prove: func(_, _ string) error {
+						close(proofStarted)
+						<-releaseProof
+						return nil
+					},
+				})
+				done <- err
+			}()
+			select {
+			case <-proofStarted:
+			case <-time.After(time.Second):
+				t.Fatal("installer did not begin the blocking proof")
+			}
+			tt.mutate(t, f)
+			close(releaseProof)
+
+			select {
+			case err := <-done:
+				if err == nil || !strings.Contains(err.Error(), "global hooks changed while hook gates were proving") {
+					t.Fatalf("install error = %v, want the concurrent global-hook change", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("installer did not reject the changed global hooks")
+			}
+			if got := readRepoFile(t, priorPath); got != priorBody {
+				t.Fatalf("rejected install changed the prior hook:\n%s", got)
+			}
+			if got := f.git(t, "config", "--local", "core.hooksPath"); got != priorConfig {
+				t.Fatalf("rejected install changed core.hooksPath from %q to %q", priorConfig, got)
+			}
+			for _, name := range []string{"pre-push", "prepare-commit-msg"} {
+				if _, err := os.Stat(filepath.Join(hooks, name)); !os.IsNotExist(err) {
+					t.Errorf("rejected install published %s (stat err = %v)", name, err)
+				}
+			}
+		})
+	}
+}
+
+func TestHooksInstall_GlobalHooksPathChangesDuringProofPublishNothing(t *testing.T) {
+	f := newChainFixture(t)
+	hooks := filepath.Join(f.repo, ".git", "hooks")
+	priorPath := filepath.Join(hooks, "pre-commit")
+	priorBody := renderHookScript("pre-commit", []string{"old-gate"}, false)
+	writeExec(t, priorPath, priorBody)
+	f.git(t, "config", "core.hooksPath", hooks)
+	priorConfig := f.git(t, "config", "--local", "core.hooksPath")
+
+	replacement := filepath.Join(f.root, "replacement-globalhooks")
+	if err := os.Mkdir(replacement, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"pre-commit", "prepare-commit-msg"} {
+		if err := os.Link(filepath.Join(f.globalDir, name), filepath.Join(replacement, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	proofStarted := make(chan struct{})
+	releaseProof := make(chan struct{})
+	done := make(chan error, 1)
+	go func() {
+		_, err := installHooks(f.tryGit, f.repo, filepath.Join(f.repo, ".sparkwing"), installOptions{
+			prove: func(_, _ string) error {
+				close(proofStarted)
+				<-releaseProof
+				return nil
+			},
+		})
+		done <- err
+	}()
+	select {
+	case <-proofStarted:
+	case <-time.After(time.Second):
+		t.Fatal("installer did not begin the blocking proof")
+	}
+	f.git(t, "config", "--global", "core.hooksPath", replacement)
+	close(releaseProof)
+
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "global hooks changed while hook gates were proving") {
+			t.Fatalf("install error = %v, want the concurrent global hooks path change", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("installer did not reject the changed global hooks path")
+	}
+	if got := readRepoFile(t, priorPath); got != priorBody {
+		t.Fatalf("rejected install changed the prior hook:\n%s", got)
+	}
+	if got := f.git(t, "config", "--local", "core.hooksPath"); got != priorConfig {
+		t.Fatalf("rejected install changed core.hooksPath from %q to %q", priorConfig, got)
+	}
+	for _, name := range []string{"pre-push", "prepare-commit-msg"} {
+		if _, err := os.Stat(filepath.Join(hooks, name)); !os.IsNotExist(err) {
+			t.Errorf("rejected install published %s (stat err = %v)", name, err)
+		}
 	}
 }
 
@@ -302,9 +578,8 @@ func TestHooksInstall_ProvesBlockingGatesAndNotThePostCommitOne(t *testing.T) {
 	}
 }
 
-// Install refuses to overwrite a hand-written hook, so withdrawal must not
-// delete one either -- the file belongs to the operator, and a failing proof
-// says nothing about it.
+// Install refuses to overwrite a hand-written hook, and rollback must leave
+// it byte-for-byte unchanged.
 func TestHooksInstall_LeavesAHandWrittenHookAloneWhenItsGateDoesNotPass(t *testing.T) {
 	f := newChainFixture(t)
 	writeRepoFile(t, filepath.Join(f.repo, ".sparkwing", "sparkwing.yaml"), twoGateProject)
@@ -321,8 +596,8 @@ func TestHooksInstall_LeavesAHandWrittenHookAloneWhenItsGateDoesNotPass(t *testi
 	if got := readRepoFile(t, prePush); got != handWritten {
 		t.Errorf("hand-written pre-push = %q, want it untouched (%q)", got, handWritten)
 	}
-	if !strings.Contains(out, "not sparkwing's to remove") {
-		t.Errorf("output = %q, want it to say the hook was left alone", out)
+	if !strings.Contains(out, "remain unchanged") {
+		t.Errorf("output = %q, want it to say the prior state remained unchanged", out)
 	}
 }
 

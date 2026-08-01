@@ -310,6 +310,18 @@ func TestRepoGatesRemedy_ClearsTheOverrideBeforeInstallingForABorrowedGate(t *te
 	}
 }
 
+func TestRepoGatesRemedy_ClearsALocalOverrideBeforeInstallingAShadowedGate(t *testing.T) {
+	r := githooks.RepoGates{
+		Repo: "/code/sparkwing", Scope: "local", Shadowed: []string{"pre-commit"}, State: githooks.GateShadowed,
+	}
+	got := r.Remedy()
+	for _, want := range []string{"--unset core.hooksPath", "hooks install --repo /code/sparkwing"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Remedy = %q, want it to say %q", got, want)
+		}
+	}
+}
+
 // The one-word state cannot carry a repo with two different problems, so the
 // summary names every hook the repo does not run its own gate for.
 func TestRepoGatesSummary_NamesTheBorrowedGateAndTheMissingOneTogether(t *testing.T) {

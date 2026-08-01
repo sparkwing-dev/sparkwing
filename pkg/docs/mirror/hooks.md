@@ -106,7 +106,7 @@ once per checkout:
 
 ```bash
 sparkwing pipeline hooks install     # writes .git/hooks/pre-commit, pre-push, post-commit
-sparkwing pipeline hooks status      # report which sparkwing hooks are installed
+sparkwing pipeline hooks status      # report declared, installed, and missing hooks
 sparkwing pipeline hooks survey      # report which registered repos git gates at all
 sparkwing pipeline hooks uninstall   # remove sparkwing-managed hooks only
 ```
@@ -114,6 +114,8 @@ sparkwing pipeline hooks uninstall   # remove sparkwing-managed hooks only
 Each managed hook carries a marker comment so `uninstall` and `status`
 can distinguish sparkwing-installed hooks from hand-written ones.
 Existing unmanaged hooks are skipped on install with a warning.
+`sparkwing info` puts the repair command first in its next steps whenever a
+declared hook is missing or not firing.
 
 `pre_commit` and `pre_push` are blocking: the hook aborts the commit or
 push when a pipeline fails. `post_commit` is non-blocking -- the commit
@@ -181,17 +183,18 @@ to forward.
 
 If the repository already sets its own `core.hooksPath` pointing somewhere
 else, install leaves it alone -- that setting was deliberate -- and warns
-that the hooks it just wrote will not run. Clear it with
-`git config --unset core.hooksPath` and re-run.
+without publishing dormant candidate hooks. Clear it with
+`git -C <repo> config --unset core.hooksPath` and re-run
+`sparkwing pipeline hooks install --repo <repo>`.
 
 Claiming `core.hooksPath` is also what would stop a global hook firing if
 nothing in `.git/hooks` hands off to it, so install refuses the claim while
 any global hook name is unforwarded -- a hand-written hook of that name is
 the usual reason, since install never overwrites one. It names the hook and
-leaves the machine's hooks in charge; remove that file and re-run to get
-both layers. Once the claim is already in place there is no such decision to
-make, so install and `pipeline hooks status` both report a global hook
-nothing forwards to, however it came about.
+leaves the machine's hooks in charge without publishing candidates; remove
+that file and re-run to get both layers. Once the claim is already in place
+there is no such decision to make, so install and `pipeline hooks status`
+both report a global hook nothing forwards to, however it came about.
 
 `sparkwing pipeline hooks status` and `sparkwing doctor` both report a hook
 directory git is not reading, naming the gates that stopped firing and how
@@ -308,31 +311,23 @@ hook is what converts the first into the second.
 
 So before those gates can fire, install runs the repository's blocking gates
 once. A gate that does not pass -- a red pipeline, an admission daemon the
-repository's pinned SDK cannot speak to -- is withdrawn by name: its hook file
-is removed, the hooks that did pass are still armed, and the failure is
-printed with the command to re-run. `--no-prove` skips the proof for an
-operator who has already made it.
-
-Withdrawal is per hook because arming is not: git reads one hook directory per
-repository, so leaving a failing hook file in place would arm it along with
-everything else. A red `pre-push` costs you the push gate, not the commit
-gate.
-
-Only hooks sparkwing wrote are withdrawn. A hand-written hook of the same name
-is one install already refused to overwrite, so it is not sparkwing's to
-delete either; it is left exactly as it was and the withdrawal says so.
+repository's pinned SDK cannot speak to -- rejects the whole installation
+before any candidate hook filename or config value is published. Existing
+hooks remain callable throughout the proof. Once every proof passes, each
+complete hook replaces its predecessor with an atomic rename and only then may
+the repository's `core.hooksPath` change. A later write or config error restores
+every managed hook, global-hook forwarder, file mode, and repository
+`core.hooksPath` value exactly. A failed reinstall therefore cannot remove a
+previously working commit or push gate, and a first install cannot leave only
+the gates whose proofs happened to pass. The failure is printed with the
+command to re-run. `--no-prove` skips the proof for an operator who has already
+made it.
 
 The proof runs on every install that leaves a gate live, not only the one that
 claims `core.hooksPath`. An install rewrites every hook the repository
-declares, so on a repository git already reads -- one an earlier install
-armed, including one that withdrew a hook for failing -- the rewritten file is
-live the moment it lands and there is no claim left to hold it back.
-
-A repository nothing can arm comes out of an install as it went in: the hooks
-it already had are still there, `core.hooksPath` is untouched, and it accepts
-commits exactly as before. Withdrawing hooks git was never going to read would
-be the only lasting effect of the run, and the next install proves them again
-before anything can arm them.
+declares, so a repository git already reads needs the same proof as a newly
+armed one. Proof-before-publication keeps its prior gates live while that proof
+runs or if it fails.
 
 ### Hook-launched pipelines are unbound from the repository
 

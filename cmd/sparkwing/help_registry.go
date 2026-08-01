@@ -71,7 +71,8 @@ project, what should I run next" without prior knowledge. Prints
 the CLI version, whether the current directory is inside a
 sparkwing project (and how many pipelines it has), whether the Go
 toolchain is on PATH, a curated list of next-step commands, and
-the docs URL.
+the docs URL. When a project declares a git hook that is not
+firing, repairing it is the first next step.
 
 This is the canonical first command an agent runs after install.
 Use -o json for structured output that an agent can parse, or
@@ -2472,7 +2473,7 @@ them with a warning.`,
 	Subcommands: []SubcommandRef{
 		{"install", "Write pre-commit / pre-push / post-commit hooks for the enclosing repo"},
 		{"uninstall", "Remove sparkwing-managed git hooks"},
-		{"status", "Report which sparkwing hooks are installed"},
+		{"status", "Report declared, installed, and missing sparkwing hooks"},
 		{"survey", "Report which registered repos git actually runs a gate for"},
 		{"fire", "Make the gate refuse a commit, to see that it can"},
 	},
@@ -2488,9 +2489,12 @@ non-sparkwing hooks are skipped so hand-written ones survive.
 
 Before a gate can fire, install runs it once. While a repo's hooks are inert
 a gate that cannot execute looks the same as one that passes, and arming it
-turns every commit into a failing one. A gate that does not pass is withdrawn
-by name and the rest are still armed; a repo where nothing passes keeps its
-hooks and its core.hooksPath exactly as they were. --no-prove arms anyway.
+turns every commit into a failing one. Every proof finishes before candidate
+hook filenames or core.hooksPath are published, so prior hooks remain callable
+throughout a proof and unchanged if it fails. Complete replacements publish by
+atomic rename; a later installation error restores every prior managed hook,
+global-hook forwarder, file mode, and config value. No partial set is armed.
+--no-prove arms anyway.
 
 --fleet counts as armed only the repos a gate now fires in. A repo whose gates
 could not run is named as left ungated, and one that declares no pre_commit or
@@ -2591,8 +2595,8 @@ var cmdHooksUninstall = Command{
 
 var cmdHooksStatus = Command{
 	Path:        "sparkwing pipeline hooks status",
-	Synopsis:    "Report which sparkwing hooks are installed",
-	Description: `Lists every managed hook file under .git/hooks/ along with the pipelines it invokes. Prints a hint when nothing is installed.`,
+	Synopsis:    "Report declared, installed, and missing sparkwing hooks",
+	Description: `Lists every managed hook file under .git/hooks/ along with the pipelines it invokes. Declared hooks that are missing, shadowed, or borrowed are named with the command that repairs them.`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 	},

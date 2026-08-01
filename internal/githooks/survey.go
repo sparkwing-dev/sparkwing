@@ -136,7 +136,7 @@ func (r RepoGates) Summary() string {
 // repository-scoped core.hooksPath as deliberate and leaves it alone, so on a
 // borrowed gate the install alone is a no-op.
 func (r RepoGates) Remedy() string {
-	if len(r.Borrowed) > 0 {
+	if len(r.Borrowed) > 0 || (r.Scope == "local" && len(r.NotFiring()) > 0) {
 		return fmt.Sprintf("git -C %s config --unset core.hooksPath, then sparkwing pipeline hooks install --repo %s", r.Repo, r.Repo)
 	}
 	return fmt.Sprintf("sparkwing pipeline hooks install --repo %s", r.Repo)
