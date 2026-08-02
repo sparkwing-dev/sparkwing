@@ -3,13 +3,16 @@ package controller_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -30,7 +33,12 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 		Status:    "failed",
 		GitBranch: "main",
 		GitSHA:    "abc123",
-		StartedAt: time.Now().Add(-5 * time.Minute),
+		Repo:      "owner/repo-a",
+		Invocation: map[string]any{
+			"cwd": filepath.Join(dir, "repo-a"),
+		},
+		PlanSnapshot: []byte(`{"pipeline":"deploy","run_id":"src-run","nodes":[{"id":"deploy","deps":[]}]}`),
+		StartedAt:    time.Now().Add(-5 * time.Minute),
 	}
 	if err := st.CreateRun(ctx, src); err != nil {
 		t.Fatal(err)
@@ -80,6 +88,13 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 	}
 	if trig.GitSHA != src.GitSHA {
 		t.Errorf("git_sha=%s want %s", trig.GitSHA, src.GitSHA)
+	}
+	if got := trig.TriggerEnv[retryprovenance.RepoDirKey]; got != filepath.Join(dir, "repo-a") {
+		t.Errorf("retry repo dir=%q want %q", got, filepath.Join(dir, "repo-a"))
+	}
+	sum := sha256.Sum256(src.PlanSnapshot)
+	if got, want := trig.TriggerEnv[retryprovenance.PlanHashKey], fmt.Sprintf("sha256:%x", sum); got != want {
+		t.Errorf("retry plan hash=%q want %q", got, want)
 	}
 }
 

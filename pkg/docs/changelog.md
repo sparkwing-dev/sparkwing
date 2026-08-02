@@ -48,6 +48,14 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **controller:** local failed-run retries now execute from the source run's
+  exact recorded checkout and verify its complete plan snapshot before creating
+  a node. If that worktree or plan identity is unavailable, retry fails clearly
+  instead of falling back to an ambient checkout or another registered repo
+  that happens to declare the same pipeline name.
+
 ### Added
 
 - **agent discovery:** `info --for-agent` now emits current, one-wake context,

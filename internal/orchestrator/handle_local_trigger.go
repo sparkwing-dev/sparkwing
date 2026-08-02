@@ -11,6 +11,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -77,9 +78,11 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 			ParentLeaseToken: childAttachTokenFromEnv(trigger.TriggerEnv),
 			Origin:           wingwire.OriginLocal,
 		},
-		RetryOf:     trigger.RetryOf,
-		RetrySource: trigger.RetrySource,
-		Full:        trigger.Full,
+		RetryOf:       trigger.RetryOf,
+		RetrySource:   trigger.RetrySource,
+		RetryRepoDir:  trigger.TriggerEnv[retryprovenance.RepoDirKey],
+		RetryPlanHash: trigger.TriggerEnv[retryprovenance.PlanHashKey],
+		Full:          trigger.Full,
 		Trigger: sparkwing.TriggerInfo{
 			Source:      trigger.TriggerSource,
 			User:        trigger.TriggerUser,

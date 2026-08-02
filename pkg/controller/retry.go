@@ -1,11 +1,15 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -55,6 +59,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	full := r.URL.Query().Get("full") == "1"
+	retryEnv := retryProvenance(src)
 
 	newID := newRunID()
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
@@ -63,7 +68,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		Args:          src.Args,
 		TriggerSource: "retry",
 		TriggerUser:   "",
-		TriggerEnv:    nil,
+		TriggerEnv:    retryEnv,
 		GitBranch:     src.GitBranch,
 		GitSHA:        src.GitSHA,
 		Repo:          src.Repo,
@@ -130,4 +135,30 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		"duration_ms":    0,
 		"retry_of":       srcID,
 	})
+}
+
+// retryProvenance binds a local retry to the exact checkout and static plan
+// recorded by its source attempt. Cluster runs may not have a host-visible cwd;
+// leaving the keys absent preserves their remote dispatch path, while the local
+// consumer treats missing keys on a retry as an unavailable source worktree.
+func retryProvenance(src *store.Run) map[string]string {
+	if src == nil {
+		return nil
+	}
+	cwd, _ := src.Invocation["cwd"].(string)
+	if cwd == "" || len(src.PlanSnapshot) == 0 {
+		return nil
+	}
+	if abs, err := filepath.Abs(cwd); err == nil {
+		cwd = abs
+	}
+	cwd = filepath.Clean(cwd)
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
+	sum := sha256.Sum256(src.PlanSnapshot)
+	return map[string]string{
+		retryprovenance.RepoDirKey:  cwd,
+		retryprovenance.PlanHashKey: "sha256:" + hex.EncodeToString(sum[:]),
+	}
 }

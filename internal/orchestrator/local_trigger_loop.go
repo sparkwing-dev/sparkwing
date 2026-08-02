@@ -11,11 +11,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -242,6 +244,9 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 // Only when that fast path does not apply does it consult the cross-repo
 // registry and the "owner/name" slug fallback.
 func locateTriggerRepo(trig *store.Trigger, parentRepoDir string) (string, error) {
+	if trig.RetryOf != "" {
+		return locateRetryRepo(trig)
+	}
 	if parentRepoDir != "" && trig.Repo == "" && repoDeclaresPipeline(parentRepoDir, trig.Pipeline) {
 		return parentRepoDir, nil
 	}
@@ -258,6 +263,60 @@ func locateTriggerRepo(trig *store.Trigger, parentRepoDir string) (string, error
 		return slugPath, nil
 	}
 	return "", unlocatableChildError(trig.Pipeline)
+}
+
+// RetrySourceUnavailableError is returned when a local retry cannot prove that
+// it is about to execute in the source attempt's exact checkout. Retrying from
+// an ambient cwd, a same-named checkout, or the repo registry is intentionally
+// forbidden: all three can silently execute a different pipeline definition.
+type RetrySourceUnavailableError struct {
+	RepoDir string
+	Reason  string
+}
+
+func (e *RetrySourceUnavailableError) Error() string {
+	if e.RepoDir == "" {
+		return "retry source worktree unavailable: " + e.Reason
+	}
+	return fmt.Sprintf("retry source worktree unavailable at %s: %s", e.RepoDir, e.Reason)
+}
+
+func locateRetryRepo(trig *store.Trigger) (string, error) {
+	if trig.TriggerEnv[retryprovenance.PlanHashKey] == "" {
+		return "", &RetrySourceUnavailableError{Reason: "source run did not record a plan identity"}
+	}
+	repoDir := filepath.Clean(trig.TriggerEnv[retryprovenance.RepoDirKey])
+	if repoDir == "." || repoDir == "" {
+		return "", &RetrySourceUnavailableError{Reason: "source run did not record a repository root"}
+	}
+	if !filepath.IsAbs(repoDir) {
+		return "", &RetrySourceUnavailableError{RepoDir: repoDir, Reason: "recorded path is not absolute"}
+	}
+	resolved, err := filepath.EvalSymlinks(repoDir)
+	if err != nil {
+		return "", &RetrySourceUnavailableError{RepoDir: repoDir, Reason: err.Error()}
+	}
+	if err := assertGitDir(resolved); err != nil {
+		return "", &RetrySourceUnavailableError{RepoDir: resolved, Reason: "not a git checkout: " + err.Error()}
+	}
+	if info, err := os.Stat(filepath.Join(resolved, ".sparkwing")); err != nil || !info.IsDir() {
+		reason := "missing .sparkwing directory"
+		if err != nil {
+			reason += ": " + err.Error()
+		}
+		return "", &RetrySourceUnavailableError{RepoDir: resolved, Reason: reason}
+	}
+	if trig.Repo != "" {
+		expected := filepath.Base(strings.TrimSuffix(trig.Repo, ".git"))
+		actual := repoShortName(resolved)
+		if actual == "" || !strings.EqualFold(actual, expected) {
+			return "", &RetrySourceUnavailableError{
+				RepoDir: resolved,
+				Reason:  fmt.Sprintf("repository identity drift: recorded %q, checkout is %q", expected, actual),
+			}
+		}
+	}
+	return resolved, nil
 }
 
 // unlocatableChildError describes a same-repo child that resolved
