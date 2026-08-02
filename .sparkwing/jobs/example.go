@@ -207,25 +207,21 @@ func rollbackFn(ctx context.Context) error {
 // ExampleErrorCanary is the multi-step error fixture. Four parallel
 // shard steps each emit ~60 chatty progress lines (with graduated
 // WARN / ERROR-level entries near the end) and then return a
-// distinct failure mode. Every shard is marked .ContinueOnError()
-// so one shard's failure doesn't cancel its in-flight siblings, and
+// distinct failure mode. The Work collects every sibling failure, and
 // the surrounding Plan-layer Node is .Optional() so the run still
 // reports success while every per-step failure stays visible.
 type ExampleErrorCanary struct{ sparkwing.Base }
 
 func (j *ExampleErrorCanary) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	w.ParallelFailures(sparkwing.CollectAll)
 	sparkwing.Step(w, "shard-alpha", canaryShard("shard-alpha", 60, 2500,
-		"connection reset by peer at item 042 (after 3 retries)")).
-		ContinueOnError()
+		"connection reset by peer at item 042 (after 3 retries)"))
 	sparkwing.Step(w, "shard-bravo", canaryShard("shard-bravo", 55, 2200,
-		"timeout waiting for downstream service (10s deadline)")).
-		ContinueOnError()
+		"timeout waiting for downstream service (10s deadline)"))
 	sparkwing.Step(w, "shard-charlie", canaryShard("shard-charlie", 70, 2800,
-		"checksum mismatch on item 051: want sha256:abc... got sha256:def...")).
-		ContinueOnError()
+		"checksum mismatch on item 051: want sha256:abc... got sha256:def..."))
 	sparkwing.Step(w, "shard-delta", canaryShard("shard-delta", 50, 2000,
-		"out of memory: allocated 1.4GiB of 1.0GiB quota")).
-		ContinueOnError()
+		"out of memory: allocated 1.4GiB of 1.0GiB quota"))
 	return nil, nil
 }
 

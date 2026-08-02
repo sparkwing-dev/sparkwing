@@ -67,6 +67,7 @@ func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.No
 // 0.5s), so ordering them would only delay their verdict without saving
 // any work.
 func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	w.ParallelFailures(sparkwing.FailFast)
 	gofmtStep := sparkwing.Step(w, "gofmt", runGofmt)
 	formattersStep := sparkwing.Step(w, "formatters", runFormatters).Needs(gofmtStep)
 	vetStep := sparkwing.Step(w, "vet", runVet).Needs(formattersStep)

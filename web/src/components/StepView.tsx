@@ -19,6 +19,7 @@ function formatDuration(ns: number): string {
 const statusIcon: Record<string, { icon: string; color: string }> = {
   passed: { icon: "✓", color: "text-green-400" },
   failed: { icon: "✗", color: "text-red-400" },
+  cancelled: { icon: "⊘", color: "text-amber-400" },
   skipped: { icon: "–", color: "text-gray-500" },
   running: { icon: "●", color: "text-indigo-400 animate-pulse" },
 };

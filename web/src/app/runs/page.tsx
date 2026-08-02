@@ -1847,6 +1847,8 @@ function StepRow({
       ? "bg-green-400"
       : status === "failed"
         ? "bg-red-400"
+        : status === "cancelled"
+          ? "bg-amber-400"
         : status === "running"
           ? "bg-indigo-400 animate-pulse"
           : status === "skipped"
@@ -5004,10 +5006,10 @@ function stepColorFor(id: string): { fill: string; stroke: string } {
 }
 
 // Step rect coloring keyed by runtime status. Mirrors dagNodeColors:
-// skipped is the lightest, pending the dim default, failed/passed
-// use their dedicated hues. No "cancelled" state at the step layer.
+// skipped is the lightest, pending the dim default, and terminal
+// outcomes use dedicated hues.
 function stepStatusColors(
-  status?: "passed" | "failed" | "running" | "skipped",
+  status?: "passed" | "failed" | "cancelled" | "running" | "skipped",
 ): {
   fill: string;
   border: string;
@@ -5017,6 +5019,8 @@ function stepStatusColors(
       return { fill: "rgba(34,197,94,0.10)", border: "rgba(74,222,128,0.45)" };
     case "failed":
       return { fill: "rgba(239,68,68,0.12)", border: "rgba(248,113,113,0.55)" };
+    case "cancelled":
+      return { fill: "rgba(251,191,36,0.10)", border: "rgba(251,191,36,0.50)" };
     case "running":
       return {
         fill: "rgba(99,102,241,0.12)",
@@ -5606,6 +5610,8 @@ function StepTooltip({
       ? "bg-green-400"
       : status === "failed"
         ? "bg-red-400"
+        : status === "cancelled"
+          ? "bg-amber-400"
         : status === "running"
           ? "bg-indigo-400 animate-pulse"
           : status === "skipped"

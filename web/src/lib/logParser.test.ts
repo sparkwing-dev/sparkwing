@@ -53,7 +53,7 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
   const stepEnd = (
     node: string,
     name: string,
-    outcome: "success" | "failed",
+    outcome: "success" | "failed" | "cancelled",
     duration_ms: number,
     ts: string,
   ) =>
@@ -152,6 +152,19 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
     assert.equal(compile.status, "passed");
     assert.equal(push.status, "failed");
     assert.equal(push.duration, "1.0s");
+  });
+
+  it("keeps a cancelled step distinct from passed and failed", () => {
+    const lines = [
+      nodeStart("build", "2026-04-23T00:00:00Z"),
+      stepStart("build", "slow", "2026-04-23T00:00:00.100Z"),
+      stepEnd("build", "slow", "cancelled", 50, "2026-04-23T00:00:00.150Z"),
+      nodeEnd("build", "failed", 150, "2026-04-23T00:00:00.150Z"),
+    ];
+    const result = parseLogLines(lines);
+    const slow = result.sections[0] as StepSection;
+    assert.equal(slow.status, "cancelled");
+    assert.equal(slow.duration, "50ms");
   });
 
   it("renders step_skipped as a one-line skipped bucket with reason", () => {

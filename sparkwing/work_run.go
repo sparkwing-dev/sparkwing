@@ -2,8 +2,10 @@ package sparkwing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 	"time"
 )
@@ -26,10 +28,11 @@ import (
 // each executed step or spawn (Attrs: id, kind, duration_ms,
 // outcome, optional error).
 //
-// Fail-fast: the first item error fails the run; the shared ctx is
-// cancelled so in-flight siblings unwind. Skipped steps (any SkipIf
-// returns true) propagate to downstream as if they succeeded with
-// no output.
+// FailFast cancels ordinary siblings after the first decisive error;
+// CollectAll lets ready work finish. Finally steps survive sibling
+// cancellation but still honor cancellation of the parent context.
+// Skipped steps (any SkipIf returns true) propagate to downstream as
+// if they succeeded with no output.
 func RunWork(ctx context.Context, w *Work) (any, error) {
 	if w == nil {
 		return nil, nil
@@ -115,6 +118,7 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	policy := w.ParallelFailurePolicy()
 
 	done := make(chan stepResult, len(items))
 	pending := make(map[string]bool, len(items))
@@ -123,10 +127,15 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 	}
 
 	var (
-		mu       sync.Mutex
-		firstErr error
-		fatalErr error
-		running  int
+		mu                 sync.Mutex
+		firstErr           error
+		fatalErr           error
+		fatalStep          string
+		failFastAt         time.Time
+		cancelledSiblings  int
+		cancelledSteps     []string
+		cancellationFinish time.Time
+		running            int
 	)
 	setErr := func(it *workItem, err error) {
 		mu.Lock()
@@ -137,11 +146,21 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 				firstErr = err
 			}
 		}
-		if step == nil || !step.IsContinueOnError() {
+		collect := policy == CollectAll
+		if !collect && (step == nil || !step.IsContinueOnError()) {
 			if fatalErr == nil {
 				fatalErr = err
+				fatalStep = it.id
+				failFastAt = time.Now()
 			}
 			cancel()
+		}
+	}
+	setRunCancellation := func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr == nil {
+			firstErr = err
 		}
 	}
 	getErr := func() error {
@@ -154,18 +173,42 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 		defer mu.Unlock()
 		return fatalErr
 	}
+	cancelPending := func() {
+		for id := range pending {
+			it := items[id]
+			if it.isFinally() {
+				continue
+			}
+			delete(pending, id)
+			cancelledSiblings++
+			cancelledSteps = append(cancelledSteps, id)
+			cancellationFinish = time.Now()
+			if !it.isHidden {
+				emitStepTerminal(ctx, id, 0, context.Canceled, true)
+			}
+			for _, childID := range children[id] {
+				if items[childID].isFinally() {
+					indeg[childID]--
+				}
+			}
+		}
+	}
 
 	schedule := func() {
 		ready := make([]*workItem, 0, len(pending))
 		for id := range pending {
-			if indeg[id] == 0 {
+			if indeg[id] == 0 && (getFatalErr() == nil || items[id].isFinally()) {
 				ready = append(ready, items[id])
 			}
 		}
 		for _, it := range ready {
 			delete(pending, it.id)
 			running++
-			go runOneItem(runCtx, it, parentNodeID, handler, done)
+			itemCtx := runCtx
+			if it.isFinally() {
+				itemCtx = ctx
+			}
+			go runOneItem(itemCtx, it, parentNodeID, handler, done)
 		}
 	}
 
@@ -180,24 +223,53 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 
 		if res.err != nil {
 			it := items[res.id]
-			setErr(it, res.err)
+			if res.cancelled && getFatalErr() != nil {
+				cancelledSiblings++
+				cancelledSteps = append(cancelledSteps, res.id)
+				cancellationFinish = time.Now()
+			} else if res.cancelled && ctx.Err() != nil {
+				setRunCancellation(ctx.Err())
+				cancelPending()
+			} else {
+				setErr(it, res.err)
+				if getFatalErr() != nil {
+					cancelPending()
+				}
+			}
 			step := stepOf(it)
-			if step != nil && step.IsContinueOnError() {
-				for _, c := range children[res.id] {
+			dependencySatisfied := step != nil && step.IsContinueOnError()
+			for _, c := range children[res.id] {
+				if dependencySatisfied || items[c].isFinally() {
 					indeg[c]--
 				}
 			}
-			if getFatalErr() == nil {
-				schedule()
-			}
+			schedule()
 			continue
 		}
 		for _, c := range children[res.id] {
 			indeg[c]--
 		}
-		if getFatalErr() == nil {
-			schedule()
+		schedule()
+	}
+
+	if fatalStep != "" {
+		sort.Strings(cancelledSteps)
+		latency := time.Duration(0)
+		if !cancellationFinish.IsZero() {
+			latency = cancellationFinish.Sub(failFastAt)
 		}
+		LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
+			TS:    time.Now(),
+			Level: "info",
+			Event: EventWorkFailFast,
+			Msg:   fatalStep,
+			Attrs: map[string]any{
+				"trigger_step":            fatalStep,
+				"cancelled_siblings":      cancelledSiblings,
+				"cancelled_steps":         cancelledSteps,
+				"cancellation_latency_ms": latency.Milliseconds(),
+			},
+		}))
 	}
 
 	if err := getErr(); err != nil {
@@ -239,6 +311,10 @@ type workItem struct {
 	// Populated by RunWork when --start-at / --stop-at puts the item
 	// outside the selected range.
 	rangeSkipReason string
+}
+
+func (it *workItem) isFinally() bool {
+	return it != nil && it.step != nil && it.step.IsFinally()
 }
 
 // runOneItem executes a single item to terminal: range skip, SkipIf
@@ -291,10 +367,11 @@ func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler 
 	elapsed := time.Since(start)
 
 	if err != nil {
+		cancelled := ctx.Err() != nil && errors.Is(err, context.Canceled)
 		if !it.isHidden {
-			emitStepEvent(ctx, it.id, "step_end", elapsed, err)
+			emitStepTerminal(ctx, it.id, elapsed, err, cancelled)
 		}
-		done <- stepResult{id: it.id, err: &StepError{StepID: it.id, Cause: err}}
+		done <- stepResult{id: it.id, err: &StepError{StepID: it.id, Cause: err}, cancelled: cancelled}
 		return
 	}
 	it.markDone(out)
@@ -387,9 +464,10 @@ func runSpawnEach(ctx context.Context, spec *SpawnGenSpec, parentNodeID string, 
 }
 
 type stepResult struct {
-	id  string
-	out any
-	err error
+	id        string
+	out       any
+	err       error
+	cancelled bool
 }
 
 // StepError wraps a step body's error with the originating step ID.
@@ -438,5 +516,24 @@ func emitStepEvent(ctx context.Context, stepID, event string, elapsed time.Durat
 		Event: event,
 		Msg:   stepID,
 		Attrs: attrs,
+	}))
+}
+
+func emitStepTerminal(ctx context.Context, stepID string, elapsed time.Duration, err error, cancelled bool) {
+	if !cancelled {
+		emitStepEvent(ctx, stepID, "step_end", elapsed, err)
+		return
+	}
+	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
+		TS:    time.Now(),
+		Level: "info",
+		JobID: NodeFromContext(ctx),
+		Event: "step_end",
+		Msg:   stepID,
+		Attrs: map[string]any{
+			"step":        stepID,
+			"duration_ms": elapsed.Milliseconds(),
+			"outcome":     "cancelled",
+		},
 	}))
 }

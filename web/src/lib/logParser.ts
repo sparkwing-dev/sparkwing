@@ -24,7 +24,7 @@ export interface LogSection {
 export interface StepSection extends LogSection {
   type: "step";
   name: string;
-  status: "passed" | "failed" | "running";
+  status: "passed" | "failed" | "cancelled" | "running";
   duration: string | null;
   durationMs: number | null;
   // startedAtMs is the unix-millis at which the step began, parsed
@@ -178,6 +178,7 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
     if (!entry) return;
     const sec = entry.section;
     if (outcome === "failed") sec.status = "failed";
+    else if (outcome === "cancelled") sec.status = "cancelled";
     else if (outcome === "success") sec.status = "passed";
     else if (outcome === "skipped") sec.status = "passed";
     else if (done && sec.status === "running") sec.status = "passed";

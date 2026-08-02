@@ -41,8 +41,11 @@ func wrapNodeLogWithStepState(inner NodeLog, state StateBackend, runID, nodeID s
 				_ = state.StartNodeStep(ctx, runID, nodeID, stepID)
 			case sparkwing.EventStepEnd:
 				status := store.StepPassed
-				if outcome == "failed" {
+				switch outcome {
+				case string(sparkwing.Failed):
 					status = store.StepFailed
+				case string(sparkwing.Cancelled):
+					status = store.StepCancelled
 				}
 				_ = state.FinishNodeStep(ctx, runID, nodeID, stepID, status)
 			case sparkwing.EventStepSkipped:

@@ -3,6 +3,7 @@ package sparkwing_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -43,6 +44,193 @@ func newWorkCtx() (context.Context, *recordingWorkLogger) {
 	ctx := sparkwingruntime.WithLogger(context.Background(), l)
 	ctx = sparkwingruntime.WithNode(ctx, "test-node")
 	return ctx, l
+}
+
+func TestRunWork_ExplicitFailFastCancelsSiblingAndRunsFinally(t *testing.T) {
+	w := sparkwing.NewWork().ParallelFailures(sparkwing.FailFast)
+	started := make(chan struct{})
+	slow := sparkwing.Step(w, "slow", func(ctx context.Context) error {
+		close(started)
+		select {
+		case <-time.After(2 * time.Second):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	failed := sparkwing.Step(w, "reject", func(context.Context) error {
+		<-started
+		return errors.New("rejected")
+	})
+	var pendingRan atomic.Bool
+	pending := sparkwing.Step(w, "pending", func(context.Context) error {
+		pendingRan.Store(true)
+		return nil
+	}).Needs(slow)
+	var cleaned atomic.Bool
+	sparkwing.Step(w, "cleanup", func(context.Context) error {
+		cleaned.Store(true)
+		return nil
+	}).Needs(slow, failed, pending).Finally()
+
+	ctx, logs := newWorkCtx()
+	start := time.Now()
+	_, err := sparkwing.RunWork(ctx, w)
+	if err == nil {
+		t.Fatal("RunWork should fail")
+	}
+	if time.Since(start) >= time.Second {
+		t.Fatal("fail-fast waited for the slow sibling")
+	}
+	if !cleaned.Load() {
+		t.Fatal("finally cleanup did not run")
+	}
+	if pendingRan.Load() {
+		t.Fatal("pending sibling ran after fail-fast")
+	}
+
+	cancelled := map[string]bool{}
+	var summary bool
+	failureIndex := -1
+	firstCancellationIndex := -1
+	for i, rec := range logs.snapshot() {
+		if rec.Event == "step_end" && rec.Msg == "reject" && rec.Attrs["outcome"] == "failed" {
+			failureIndex = i
+		}
+		if rec.Event == "step_end" && (rec.Msg == "slow" || rec.Msg == "pending") && rec.Attrs["outcome"] == "cancelled" {
+			cancelled[rec.Msg] = true
+			if firstCancellationIndex == -1 {
+				firstCancellationIndex = i
+			}
+		}
+		if rec.Event == "work_fail_fast" && rec.Attrs["trigger_step"] == "reject" {
+			summary = true
+			if got := fmt.Sprint(rec.Attrs["cancelled_steps"]); got != "[pending slow]" {
+				t.Fatalf("cancelled_steps = %s, want [pending slow]", got)
+			}
+		}
+	}
+	if !cancelled["slow"] || !cancelled["pending"] {
+		t.Fatalf("cancelled sibling telemetry = %v", cancelled)
+	}
+	if !summary {
+		t.Fatal("fail-fast telemetry did not name the triggering step")
+	}
+	if failureIndex == -1 || firstCancellationIndex == -1 || failureIndex > firstCancellationIndex {
+		t.Fatalf("terminal event order: failure=%d first cancellation=%d", failureIndex, firstCancellationIndex)
+	}
+}
+
+func TestRunWork_ParentCancellationDoesNotEmitFailFastTrigger(t *testing.T) {
+	w := sparkwing.NewWork().ParallelFailures(sparkwing.FailFast)
+	started := make(chan string, 2)
+	for _, id := range []string{"first", "second"} {
+		sparkwing.Step(w, id, func(ctx context.Context) error {
+			started <- id
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	}
+
+	base, logs := newWorkCtx()
+	ctx, cancel := context.WithCancel(base)
+	done := make(chan error, 1)
+	go func() {
+		_, err := sparkwing.RunWork(ctx, w)
+		done <- err
+	}()
+
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case id := <-started:
+			seen[id] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("parallel steps did not both start: %v", seen)
+		}
+	}
+	cancel()
+
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunWork did not return after parent cancellation")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunWork error = %v, want context.Canceled", err)
+	}
+	var stepErr *sparkwing.StepError
+	if errors.As(err, &stepErr) {
+		t.Fatalf("parent cancellation attributed to step %q", stepErr.StepID)
+	}
+
+	cancelled := map[string]bool{}
+	for _, rec := range logs.snapshot() {
+		if rec.Event == "step_end" && rec.Attrs["outcome"] == "cancelled" {
+			cancelled[rec.Msg] = true
+		}
+		if rec.Event == sparkwing.EventWorkFailFast {
+			t.Fatalf("parent cancellation emitted fail-fast trigger: %+v", rec)
+		}
+	}
+	if !cancelled["first"] || !cancelled["second"] {
+		t.Fatalf("cancelled step telemetry = %v, want both parallel steps", cancelled)
+	}
+}
+
+func TestRunWork_CollectAllFinishesParallelSiblings(t *testing.T) {
+	w := sparkwing.NewWork().ParallelFailures(sparkwing.CollectAll)
+	independentStarted := make(chan struct{})
+	prerequisiteFailed := make(chan struct{})
+	var independentCompleted atomic.Bool
+	reject := sparkwing.Step(w, "reject", func(context.Context) error {
+		<-independentStarted
+		close(prerequisiteFailed)
+		return errors.New("rejected")
+	})
+	sparkwing.Step(w, "independent", func(context.Context) error {
+		close(independentStarted)
+		<-prerequisiteFailed
+		independentCompleted.Store(true)
+		return nil
+	})
+	var dependentRan atomic.Bool
+	sparkwing.Step(w, "dependent", func(context.Context) error {
+		dependentRan.Store(true)
+		return nil
+	}).Needs(reject)
+
+	_, err := sparkwing.RunWork(context.Background(), w)
+	if err == nil {
+		t.Fatal("CollectAll should preserve the failed rollup")
+	}
+	if !independentCompleted.Load() {
+		t.Fatal("CollectAll cancelled a sibling")
+	}
+	if dependentRan.Load() {
+		t.Fatal("CollectAll satisfied a hard Needs edge after its prerequisite failed")
+	}
+}
+
+func TestRunWork_CollectAllAllowsDependentAfterContinueOnError(t *testing.T) {
+	w := sparkwing.NewWork().ParallelFailures(sparkwing.CollectAll)
+	reject := sparkwing.Step(w, "reject", func(context.Context) error {
+		return errors.New("rejected")
+	}).ContinueOnError()
+	var dependentRan atomic.Bool
+	sparkwing.Step(w, "dependent", func(context.Context) error {
+		dependentRan.Store(true)
+		return nil
+	}).Needs(reject)
+
+	_, err := sparkwing.RunWork(context.Background(), w)
+	if err == nil {
+		t.Fatal("ContinueOnError should preserve the failed rollup")
+	}
+	if !dependentRan.Load() {
+		t.Fatal("ContinueOnError did not satisfy the dependent Needs edge")
+	}
 }
 
 func TestRunWork_SingleStepEmitsStartAndEnd(t *testing.T) {

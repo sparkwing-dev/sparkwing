@@ -39,11 +39,46 @@ type Work struct {
 	spawns    []*SpawnSpec
 	spawnGens []*SpawnGenSpec
 	groups    []*StepGroup
+	failures  ParallelFailurePolicy
 }
+
+// ParallelFailurePolicy controls whether independent Work items finish after
+// one of their siblings fails.
+type ParallelFailurePolicy string
+
+const (
+	// FailFast cancels ordinary in-flight siblings after the first decisive
+	// failure. It is the default and preserves the historical Work behavior.
+	FailFast ParallelFailurePolicy = "fail-fast"
+	// CollectAll lets every independent or already-ready item finish so one run
+	// can report the full failure set. It does not satisfy a failed prerequisite;
+	// downstream Needs still require success or an explicit ContinueOnError.
+	CollectAll ParallelFailurePolicy = "collect-all"
+)
 
 // NewWork returns an empty Work.
 func NewWork() *Work {
 	return &Work{byID: map[string]*WorkStep{}}
+}
+
+// ParallelFailures sets the policy for independent items in this Work.
+func (w *Work) ParallelFailures(policy ParallelFailurePolicy) *Work {
+	switch policy {
+	case FailFast, CollectAll:
+		w.failures = policy
+	default:
+		panic(fmt.Sprintf("sparkwing: Work.ParallelFailures: unsupported policy %q", policy))
+	}
+	return w
+}
+
+// ParallelFailurePolicy returns the configured policy. The zero value is
+// [FailFast] for backward compatibility.
+func (w *Work) ParallelFailurePolicy() ParallelFailurePolicy {
+	if w == nil || w.failures == "" {
+		return FailFast
+	}
+	return w.failures
 }
 
 // Steps returns the work's steps in insertion order.
@@ -429,6 +464,7 @@ type WorkStep struct {
 	skipIf          []SkipPredicate
 	continueOnError bool
 	optional        bool
+	finally         bool
 	// Dry-run contract. dryRunFn is installed via
 	// .DryRun(fn) and runs in place of fn when the orchestrator
 	// dispatches under WithDryRun(ctx). safeWithoutDryRun is the
@@ -585,6 +621,18 @@ func (s *WorkStep) Optional() *WorkStep {
 // IsOptional reports whether this step's failure is masked from the
 // Job's rollup outcome.
 func (s *WorkStep) IsOptional() bool { return s.optional }
+
+// Finally marks a step as cleanup. It runs after all declared dependencies
+// terminate, even when one failed and fail-fast cancelled ordinary siblings.
+// The cleanup uses the Job's parent context rather than the sibling-cancellation
+// context; an operator cancellation still stops it through the parent.
+func (s *WorkStep) Finally() *WorkStep {
+	s.finally = true
+	return s
+}
+
+// IsFinally reports whether this step is cleanup that survives sibling failure.
+func (s *WorkStep) IsFinally() bool { return s.finally }
 
 // markDone is called by the runner once the step terminates. Stores
 // the typed output so downstream sparkwing.StepGet[T](ctx, step) calls

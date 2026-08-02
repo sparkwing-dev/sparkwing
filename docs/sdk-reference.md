@@ -836,7 +836,7 @@ type LogRecord struct {
     Level string         `json:"level,omitempty"` // "info" | "warn" | "error"
     JobID string         `json:"node,omitempty"`  // set by jobLogger on writes to disk + delegate; wire tag stays "node" for log-format compat
     Step  string         `json:"step,omitempty"`  // active step ID, set by recordEnvelope inside the step body
-    Event string         `json:"event,omitempty"` // "" (plain msg), "node_start", "node_end", "node_annotation", "node_summary", "step_start", "step_end", "step_skipped", "retry", "exec_line", "run_plan", "run_summary", "run_finish"
+    Event string         `json:"event,omitempty"` // "" (plain msg), "node_start", "node_end", "node_annotation", "node_summary", "step_start", "step_end", "step_skipped", "work_fail_fast", "retry", "exec_line", "run_plan", "run_summary", "run_finish"
     Msg   string         `json:"msg,omitempty"`
     Attrs map[string]any `json:"attrs,omitempty"`
 }
@@ -893,6 +893,15 @@ type Outcome string
 
 - `func (o Outcome) OK() bool` -- OK reports whether the outcome satisfies downstream dependencies.
 - `func (o Outcome) Terminal() bool` -- Terminal reports whether the outcome ends the node's lifecycle.
+
+### type ParallelFailurePolicy
+
+ParallelFailurePolicy controls whether independent Work items finish after one of their siblings fails.
+
+```
+type ParallelFailurePolicy string
+```
+
 
 ### type Pipeline
 
@@ -1772,6 +1781,8 @@ type Work struct {
 
 - `func NewWork() *Work` -- NewWork returns an empty Work.
 - `func (w *Work) Groups() []*StepGroup` -- Groups returns the StepGroups declared on this Work in declaration order.
+- `func (w *Work) ParallelFailurePolicy() ParallelFailurePolicy` -- ParallelFailurePolicy returns the configured policy.
+- `func (w *Work) ParallelFailures(policy ParallelFailurePolicy) *Work` -- ParallelFailures sets the policy for independent items in this Work.
 - `func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string` -- PreviewSkipForRange computes the (id -> human-readable reason) skip set this Work would apply under the given --start-at / --stop-at bounds, WITHOUT executing any step body.
 - `func (w *Work) SpawnGens() []*SpawnGenSpec` -- SpawnGens returns the JobSpawnEach declarations.
 - `func (w *Work) Spawns() []*SpawnSpec` -- Spawns returns the static JobSpawn declarations registered on this Work.
@@ -1804,9 +1815,11 @@ type WorkStep struct {
 - `func (s *WorkStep) ContinueOnError() *WorkStep` -- ContinueOnError marks the step's failure as non-blocking for the rest of the Work: in-flight sibling steps are not cancelled, and downstream steps that .Needs() this one still dispatch.
 - `func (s *WorkStep) DepIDs() []string` -- DepIDs returns the step IDs this step depends on.
 - `func (s *WorkStep) DryRun(fn func(ctx context.Context) error) *WorkStep` -- DryRun installs a dry-run body on this WorkStep.
+- `func (s *WorkStep) Finally() *WorkStep` -- Finally marks a step as cleanup.
 - `func (s *WorkStep) HasDryRun() bool` -- HasDryRun reports whether a dry-run body has been installed.
 - `func (s *WorkStep) ID() string` -- ID returns the step's identifier.
 - `func (s *WorkStep) IsContinueOnError() bool` -- IsContinueOnError reports whether this step's failure is non- blocking for sibling cancellation and downstream Needs() dispatch.
+- `func (s *WorkStep) IsFinally() bool` -- IsFinally reports whether this step is cleanup that survives sibling failure.
 - `func (s *WorkStep) IsOptional() bool` -- IsOptional reports whether this step's failure is masked from the Job's rollup outcome.
 - `func (s *WorkStep) IsSafeWithoutDryRun() bool` -- IsSafeWithoutDryRun reports whether the step is marked safe.
 - `func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep` -- Needs declares hard upstream Step / Spawn dependencies inside the same Work.
@@ -1847,9 +1860,10 @@ const (
 
 ```
 const (
-    EventStepStart   = "step_start"
-    EventStepEnd     = "step_end"
-    EventStepSkipped = "step_skipped"
+    EventStepStart    = "step_start"
+    EventStepEnd      = "step_end"
+    EventStepSkipped  = "step_skipped"
+    EventWorkFailFast = "work_fail_fast"
 )
 ```
 
