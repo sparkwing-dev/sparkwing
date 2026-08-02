@@ -2,12 +2,10 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-WORKTREE="${CHAOS_SOAK_WORKTREE:-$ROOT}"
-REMOTE="${CHAOS_SOAK_REMOTE:-origin}"
-LOGDIR="${CHAOS_SOAK_LOGDIR:-$HOME/.cache/sparkwing/chaos-soak}"
+LOGDIR="${SPARKWING_CHAOS_LOG_DIR:-$HOME/.cache/sparkwing/chaos-soak}"
 SOAK="${SPARKWING_CHAOS_SOAK:-30m}"
-GO_TEST_TIMEOUT="${CHAOS_SOAK_TIMEOUT:-45m}"
-GUARD_BIN="${CHAOS_SOAK_GUARD_BIN:-}"
+GO_TEST_TIMEOUT="${SPARKWING_CHAOS_TEST_TIMEOUT:-45m}"
+GUARD_BIN="${SPARKWING_CHAOS_TEST_GUARD_BIN:-}"
 GUARD_PID=""
 OWN_GUARD_BIN=""
 
@@ -41,22 +39,17 @@ STAMP="$(date +%Y%m%d-%H%M%S)"
 SEED="${SPARKWING_CHAOS_SEED:-$(date +%Y%m%d)}"
 LOG="$LOGDIR/soak-$STAMP.log"
 
-echo "chaos-soak: worktree=$WORKTREE soak=$SOAK seed=$SEED log=$LOG"
-
-if [[ "${CHAOS_SOAK_SYNC:-}" == "1" ]]; then
-  git -C "$WORKTREE" fetch "$REMOTE" main --quiet || { echo "chaos-soak: fetch failed"; exit 2; }
-  git -C "$WORKTREE" reset --hard "$REMOTE/main" --quiet || { echo "chaos-soak: reset failed"; exit 2; }
-fi
+echo "chaos-soak: worktree=$ROOT soak=$SOAK seed=$SEED log=$LOG"
 
 if [[ -z "$GUARD_BIN" ]]; then
   OWN_GUARD_BIN="$(mktemp "$LOGDIR/soakguard.XXXXXX")"
-  go -C "$WORKTREE" build -o "$OWN_GUARD_BIN" ./internal/chaos/soakguard || exit 2
+  go -C "$ROOT" build -o "$OWN_GUARD_BIN" ./internal/chaos/soakguard || exit 2
   GUARD_BIN="$OWN_GUARD_BIN"
 fi
 
 export SPARKWING_CHAOS_SOAK="$SOAK"
 export SPARKWING_CHAOS_SEED="$SEED"
-"$GUARD_BIN" go -C "$WORKTREE" test -run TestChaos_Soak ./internal/chaos -count=1 -timeout "$GO_TEST_TIMEOUT" >"$LOG" 2>&1 &
+"$GUARD_BIN" go -C "$ROOT" test -run TestChaos_Soak ./internal/chaos -count=1 -timeout "$GO_TEST_TIMEOUT" >"$LOG" 2>&1 &
 GUARD_PID=$!
 wait "$GUARD_PID"
 RC=$?

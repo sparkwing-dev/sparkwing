@@ -16,19 +16,18 @@ trap cleanup EXIT
 
 cat >"$CASE_ROOT/fake-guard" <<'EOF'
 #!/usr/bin/env bash
-trap 'printf terminated >"$CHAOS_SOAK_TEST_MARKER"; exit 130' TERM INT HUP
-printf started >"$CHAOS_SOAK_TEST_STARTED"
+trap 'printf terminated >"$SPARKWING_CHAOS_TEST_MARKER"; exit 130' TERM INT HUP
+printf started >"$SPARKWING_CHAOS_TEST_STARTED"
 while :; do
   sleep 1
 done
 EOF
 chmod +x "$CASE_ROOT/fake-guard"
 
-CHAOS_SOAK_WORKTREE="$CASE_ROOT" \
-CHAOS_SOAK_LOGDIR="$CASE_ROOT/logs" \
-CHAOS_SOAK_GUARD_BIN="$CASE_ROOT/fake-guard" \
-CHAOS_SOAK_TEST_MARKER="$CASE_ROOT/terminated" \
-CHAOS_SOAK_TEST_STARTED="$CASE_ROOT/started" \
+SPARKWING_CHAOS_LOG_DIR="$CASE_ROOT/logs" \
+SPARKWING_CHAOS_TEST_GUARD_BIN="$CASE_ROOT/fake-guard" \
+SPARKWING_CHAOS_TEST_MARKER="$CASE_ROOT/terminated" \
+SPARKWING_CHAOS_TEST_STARTED="$CASE_ROOT/started" \
 bash "$ROOT/bin/chaos-soak-runner.sh" >"$CASE_ROOT/runner.log" 2>&1 &
 RUNNER_PID=$!
 

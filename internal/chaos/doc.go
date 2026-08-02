@@ -43,6 +43,8 @@
 //
 //	SPARKWING_CHAOS_SOAK=30m bash bin/chaos-soak-runner.sh
 //
-// Both accept SPARKWING_CHAOS_SEED to pin the schedule for replay; when
-// unset the harness derives a seed from the clock and prints it at start.
+// The runner accepts SPARKWING_CHAOS_SEED to pin the schedule,
+// SPARKWING_CHAOS_LOG_DIR for persistent logs, and
+// SPARKWING_CHAOS_TEST_TIMEOUT for the outer `go test` deadline. When the
+// seed is unset the harness derives one from the clock and prints it at start.
 package chaos
