@@ -3991,9 +3991,9 @@ Issues a new trigger per source run with the same pipeline, args,
 branch, and SHA. Each new run is tagged with retry_of=<old-id>.
 
 On a local dashboard, the retry is bound to the source run's exact recorded
-checkout and complete plan snapshot. If that checkout is gone, or its pipeline
-definition has drifted, the retry fails before any step starts; it never falls
-back to the current directory or a different registered repository.
+checkout, full origin identity, Git revision, and complete plan snapshot. If
+that checkout is gone or any identity has drifted, the retry fails before
+compilation; it never falls back to the current directory or another repo.
 
 Pick a rerun scope explicitly:
   --failed   reuse cached/passed nodes from the source run;

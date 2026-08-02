@@ -34,6 +34,7 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 		GitBranch: "main",
 		GitSHA:    "abc123",
 		Repo:      "owner/repo-a",
+		RepoURL:   "git@example.test:owner/repo-a.git",
 		Invocation: map[string]any{
 			"cwd": filepath.Join(dir, "repo-a"),
 		},
@@ -91,6 +92,12 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 	}
 	if got := trig.TriggerEnv[retryprovenance.RepoDirKey]; got != filepath.Join(dir, "repo-a") {
 		t.Errorf("retry repo dir=%q want %q", got, filepath.Join(dir, "repo-a"))
+	}
+	if got := trig.TriggerEnv[retryprovenance.RepoIdentityKey]; got != src.RepoURL {
+		t.Errorf("retry repo identity=%q want %q", got, src.RepoURL)
+	}
+	if got := trig.TriggerEnv[retryprovenance.RevisionKey]; got != src.GitSHA {
+		t.Errorf("retry revision=%q want %q", got, src.GitSHA)
 	}
 	sum := sha256.Sum256(src.PlanSnapshot)
 	if got, want := trig.TriggerEnv[retryprovenance.PlanHashKey], fmt.Sprintf("sha256:%x", sum); got != want {

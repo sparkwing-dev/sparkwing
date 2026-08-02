@@ -84,11 +84,14 @@ type Options struct {
 	// RetrySource is store.RetrySourceManual or RetrySourceAuto.
 	RetrySource string
 
-	// RetryRepoDir and RetryPlanHash are controller-bound provenance for a
-	// local retry. The checkout is selected before this process starts; Run
-	// independently verifies the plan snapshot before creating any node.
-	RetryRepoDir  string
-	RetryPlanHash string
+	// RetryRepoDir, RetryRepoIdentity, RetryRevision, and RetryPlanHash are
+	// controller-bound provenance for a local retry. The checkout is selected
+	// and identity-checked before this process starts; Run independently verifies
+	// the plan snapshot before creating any node.
+	RetryRepoDir      string
+	RetryRepoIdentity string
+	RetryRevision     string
+	RetryPlanHash     string
 
 	// Full disables skip-passed rehydration on retry.
 	Full bool
@@ -1037,10 +1040,12 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 		inv["args"] = args
 		inv["inputs_hash"] = hashCanonicalJSON(opts.Args)
 	}
-	if opts.RetryRepoDir != "" || opts.RetryPlanHash != "" {
+	if opts.RetryRepoDir != "" || opts.RetryRepoIdentity != "" || opts.RetryRevision != "" || opts.RetryPlanHash != "" {
 		inv["retry_provenance"] = map[string]string{
-			"repo_dir":  opts.RetryRepoDir,
-			"plan_hash": opts.RetryPlanHash,
+			"repo_dir":      opts.RetryRepoDir,
+			"repo_identity": opts.RetryRepoIdentity,
+			"revision":      opts.RetryRevision,
+			"plan_hash":     opts.RetryPlanHash,
 		}
 	}
 	if flags := buildRunFlags(opts); len(flags) > 0 {

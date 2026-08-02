@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
 
 // runLocalTriggerLoop polls for pending child triggers and dispatches
@@ -199,7 +200,7 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trigger,
 	profileName, parentRepoDir string, cache *localCompileCache, logger *slog.Logger,
 ) error {
-	repoDir, err := locateTriggerRepo(trig, parentRepoDir)
+	repoDir, err := locateTriggerRepo(ctx, trig, parentRepoDir)
 	if err != nil {
 		return err
 	}
@@ -243,9 +244,9 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 // neither a registry entry nor a git identity on the project directory.
 // Only when that fast path does not apply does it consult the cross-repo
 // registry and the "owner/name" slug fallback.
-func locateTriggerRepo(trig *store.Trigger, parentRepoDir string) (string, error) {
+func locateTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir string) (string, error) {
 	if trig.RetryOf != "" {
-		return locateRetryRepo(trig)
+		return locateRetryRepo(ctx, trig)
 	}
 	if parentRepoDir != "" && trig.Repo == "" && repoDeclaresPipeline(parentRepoDir, trig.Pipeline) {
 		return parentRepoDir, nil
@@ -281,9 +282,17 @@ func (e *RetrySourceUnavailableError) Error() string {
 	return fmt.Sprintf("retry source worktree unavailable at %s: %s", e.RepoDir, e.Reason)
 }
 
-func locateRetryRepo(trig *store.Trigger) (string, error) {
+func locateRetryRepo(ctx context.Context, trig *store.Trigger) (string, error) {
 	if trig.TriggerEnv[retryprovenance.PlanHashKey] == "" {
 		return "", &RetrySourceUnavailableError{Reason: "source run did not record a plan identity"}
+	}
+	expectedIdentity := strings.TrimSpace(trig.TriggerEnv[retryprovenance.RepoIdentityKey])
+	if expectedIdentity == "" {
+		return "", &RetrySourceUnavailableError{Reason: "source run did not record a full repository identity"}
+	}
+	expectedRevision := strings.TrimSpace(trig.TriggerEnv[retryprovenance.RevisionKey])
+	if expectedRevision == "" {
+		return "", &RetrySourceUnavailableError{Reason: "source run did not record a Git revision"}
 	}
 	repoDir := filepath.Clean(trig.TriggerEnv[retryprovenance.RepoDirKey])
 	if repoDir == "." || repoDir == "" {
@@ -306,14 +315,24 @@ func locateRetryRepo(trig *store.Trigger) (string, error) {
 		}
 		return "", &RetrySourceUnavailableError{RepoDir: resolved, Reason: reason}
 	}
-	if trig.Repo != "" {
-		expected := filepath.Base(strings.TrimSuffix(trig.Repo, ".git"))
-		actual := repoShortName(resolved)
-		if actual == "" || !strings.EqualFold(actual, expected) {
-			return "", &RetrySourceUnavailableError{
-				RepoDir: resolved,
-				Reason:  fmt.Sprintf("repository identity drift: recorded %q, checkout is %q", expected, actual),
-			}
+	actualIdentity, err := sparkwinggit.RemoteOriginURL(ctx, resolved)
+	if err != nil {
+		return "", &RetrySourceUnavailableError{RepoDir: resolved, Reason: "read repository identity: " + err.Error()}
+	}
+	if actualIdentity != expectedIdentity {
+		return "", &RetrySourceUnavailableError{
+			RepoDir: resolved,
+			Reason:  fmt.Sprintf("repository identity drift: recorded %q, checkout is %q", expectedIdentity, actualIdentity),
+		}
+	}
+	actualRevision, err := sparkwinggit.CurrentSHA(ctx, resolved)
+	if err != nil {
+		return "", &RetrySourceUnavailableError{RepoDir: resolved, Reason: "read checkout revision: " + err.Error()}
+	}
+	if !strings.EqualFold(actualRevision, expectedRevision) {
+		return "", &RetrySourceUnavailableError{
+			RepoDir: resolved,
+			Reason:  fmt.Sprintf("checkout revision drift: recorded %q, checkout is %q", expectedRevision, actualRevision),
 		}
 	}
 	return resolved, nil

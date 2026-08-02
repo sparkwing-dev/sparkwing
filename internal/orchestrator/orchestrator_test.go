@@ -369,11 +369,13 @@ func TestRun_RetryPlanDriftFailsBeforeCreatingNodes(t *testing.T) {
 	p := newPaths(t)
 	const runID = "retry-plan-drift"
 	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline:      "orch-fanout-ok",
-		RunID:         runID,
-		RetryOf:       "source-run",
-		RetryRepoDir:  "/recorded/repo-a",
-		RetryPlanHash: "sha256:not-the-source-plan",
+		Pipeline:          "orch-fanout-ok",
+		RunID:             runID,
+		RetryOf:           "source-run",
+		RetryRepoDir:      "/recorded/repo-a",
+		RetryRepoIdentity: "git@example.test:owner/repo-a.git",
+		RetryRevision:     "abc123",
+		RetryPlanHash:     "sha256:not-the-source-plan",
 	})
 	if err != nil {
 		t.Fatalf("RunLocal setup: %v", err)
@@ -401,6 +403,12 @@ func TestRun_RetryPlanDriftFailsBeforeCreatingNodes(t *testing.T) {
 	prov, _ := run.Invocation["retry_provenance"].(map[string]any)
 	if got := prov["repo_dir"]; got != "/recorded/repo-a" {
 		t.Fatalf("stored retry repo provenance=%v", got)
+	}
+	if got := prov["repo_identity"]; got != "git@example.test:owner/repo-a.git" {
+		t.Fatalf("stored retry repository identity=%v", got)
+	}
+	if got := prov["revision"]; got != "abc123" {
+		t.Fatalf("stored retry revision=%v", got)
 	}
 }
 

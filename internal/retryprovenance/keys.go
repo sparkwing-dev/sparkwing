@@ -4,6 +4,8 @@
 package retryprovenance
 
 const (
-	RepoDirKey  = "_SPARKWING_RETRY_REPO_DIR"
-	PlanHashKey = "_SPARKWING_RETRY_PLAN_HASH"
+	RepoDirKey      = "_SPARKWING_RETRY_REPO_DIR"
+	RepoIdentityKey = "_SPARKWING_RETRY_REPO_URL"
+	RevisionKey     = "_SPARKWING_RETRY_REVISION"
+	PlanHashKey     = "_SPARKWING_RETRY_PLAN_HASH"
 )

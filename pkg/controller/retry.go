@@ -158,7 +158,9 @@ func retryProvenance(src *store.Run) map[string]string {
 	}
 	sum := sha256.Sum256(src.PlanSnapshot)
 	return map[string]string{
-		retryprovenance.RepoDirKey:  cwd,
-		retryprovenance.PlanHashKey: "sha256:" + hex.EncodeToString(sum[:]),
+		retryprovenance.RepoDirKey:      cwd,
+		retryprovenance.RepoIdentityKey: src.RepoURL,
+		retryprovenance.RevisionKey:     src.GitSHA,
+		retryprovenance.PlanHashKey:     "sha256:" + hex.EncodeToString(sum[:]),
 	}
 }
