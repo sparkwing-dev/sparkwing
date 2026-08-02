@@ -130,6 +130,46 @@ func TestRenderQueuePretty_ShowsAdmissionWaitingRunOnce(t *testing.T) {
 	}
 }
 
+func TestRenderQueuePretty_ShowsConnectedRunWhileItsNodeWaits(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{
+			{
+				RunID:                      "run-connected",
+				Pipeline:                   "pre-push",
+				ConnectionOnly:             true,
+				AdmissionWaiting:           true,
+				ActiveWaiterParticipantIDs: []string{"run-connected/node-host/dGVzdA"},
+			},
+		},
+		Waiters: []wingwire.Waiter{
+			{
+				RunID:         "run-connected",
+				ParticipantID: "run-connected/node-host/dGVzdA",
+				DisplayRunID:  "run-connected/test",
+				Position:      1,
+				Resources:     wingwire.HostResources{Cores: 2},
+				WaitingOn:     []string{"cores"},
+			},
+		},
+	}
+
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{
+		"0 holding, 1 connected, 1 queued",
+		"Connected (no resources held)",
+		"run-connected",
+		"run-connected/test",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("connected admission wait omitted %q:\n%s", want, out)
+		}
+	}
+}
+
 func TestRenderQueuePlain_IncludesParticipantAndDisplayIdentity(t *testing.T) {
 	qs := wingwire.QueueState{
 		Holders: []wingwire.Holder{

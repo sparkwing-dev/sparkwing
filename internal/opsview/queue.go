@@ -357,6 +357,10 @@ func queueLifecycleRows(qs wingwire.QueueState, connectionOnly bool) []wingwire.
 		if h.ConnectionOnly != connectionOnly {
 			continue
 		}
+		if connectionOnly {
+			holders = append(holders, h)
+			continue
+		}
 		orchestrationWait := h.AdmissionWaiting ||
 			(h.ParticipantID == "" && h.Parent == "" && h.Resources.Cores <= 0 && h.Resources.MemoryBytes <= 0 && waitingOwners[h.RunID])
 		if !orchestrationWait {
