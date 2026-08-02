@@ -783,13 +783,13 @@ func (l *Ledger) resourcesIdle() bool {
 	return true
 }
 
+// coresFitSoft applies ordinary CPU headroom once hostFits has handled the
+// truly empty ledger. A memory-only grant is admitted work, so it must not
+// reopen the empty-ledger liveness floor.
 func (l *Ledger) coresFitSoft(s spec) bool {
 	if s.milliCores == 0 {
 		return true
 	}
-	// hostFits handles the truly empty ledger before reaching this helper.
-	// A memory-only grant is still admitted work, so a soft CPU request must
-	// fit current headroom rather than reopening the empty-ledger floor.
 	if l.usedMilliCores == 0 {
 		effCores := min(l.totalMilliCores, l.headroomMilliCores)
 		return fitsCost(0, s.milliCores, effCores)
