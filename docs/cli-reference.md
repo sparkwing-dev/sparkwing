@@ -1120,7 +1120,7 @@ Drain the current daemon, start this installed binary as its successor, and veri
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
 | `--home DIR` | Sparkwing state directory |
 
 ### Examples
@@ -1143,7 +1143,7 @@ Read-only daemon status. An absent daemon is a healthy stopped state and exits z
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+| `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
 | `--home DIR` | Sparkwing state directory |
 
 ### Examples

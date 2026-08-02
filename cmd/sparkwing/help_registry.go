@@ -83,7 +83,7 @@ var cmdDaemonStatus = Command{
 	Synopsis:    "Report whether wingd is running and which build it serves",
 	Description: `Read-only daemon status. An absent daemon is a healthy stopped state and exits zero. An unreachable socket fails instead of pretending the admission queue is empty. The JSON running_revision identifies the exact source build when available.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
@@ -97,7 +97,7 @@ var cmdDaemonRestart = Command{
 	Synopsis:    "Refresh an answering wingd to this installed build",
 	Description: `Drain the current daemon, start this installed binary as its successor, and verify the successor reports the exact target build. Existing holders reconnect and reattach through durable leases. If no daemon is running, nothing is started.`,
 	Flags: []FlagSpec{
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "Input"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},

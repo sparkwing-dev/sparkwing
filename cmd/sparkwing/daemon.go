@@ -47,7 +47,7 @@ func runDaemon(args []string) error {
 
 func runDaemonStatus(args []string) error {
 	fs := flag.NewFlagSet(cmdDaemonStatus.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "pretty", "output format: pretty|json|plain")
+	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 	home := fs.String("home", "", "sparkwing home to inspect")
 	if err := parseAndCheck(cmdDaemonStatus, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -61,7 +61,11 @@ func runDaemonStatus(args []string) error {
 	if err != nil {
 		return err
 	}
-	return emitDaemonReport(report, *output)
+	format, err := resolveTTYAwareOutput(*output, cmdDaemonStatus.Path)
+	if err != nil {
+		return err
+	}
+	return emitDaemonReport(report, format)
 }
 
 func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
@@ -87,7 +91,7 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 
 func runDaemonRestart(args []string) error {
 	fs := flag.NewFlagSet(cmdDaemonRestart.Path, flag.ContinueOnError)
-	output := fs.StringP("output", "o", "pretty", "output format: pretty|json|plain")
+	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 	home := fs.String("home", "", "sparkwing home to refresh")
 	if err := parseAndCheck(cmdDaemonRestart, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -97,6 +101,10 @@ func runDaemonRestart(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
+	format, err := resolveTTYAwareOutput(*output, cmdDaemonRestart.Path)
+	if err != nil {
+		return err
+	}
 	target := installedVersion()
 	result, err := wingdclient.RefreshRunning(ctx, wingdclient.Options{
 		Home:    *home,
@@ -108,7 +116,7 @@ func runDaemonRestart(args []string) error {
 		if inspectErr != nil {
 			return inspectErr
 		}
-		return emitDaemonReport(report, *output)
+		return emitDaemonReport(report, format)
 	}
 	if err != nil {
 		return fmt.Errorf("daemon restart: %w", err)
@@ -120,7 +128,7 @@ func runDaemonRestart(args []string) error {
 	report.Restarted = result.Restarted
 	report.PreviousVersion = result.PreviousVersion
 	report.PreviousRevision = versionRevision(result.PreviousVersion)
-	return emitDaemonReport(report, *output)
+	return emitDaemonReport(report, format)
 }
 
 func emitDaemonReport(report daemonReport, output string) error {

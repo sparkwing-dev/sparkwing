@@ -191,6 +191,38 @@ func TestVersionTakeover_DrainsOldAndReattaches(t *testing.T) {
 	}
 }
 
+func TestVersionTakeover_ExactSourceBuildDrainsSameReleaseAndReattaches(t *testing.T) {
+	home := shortHome(t)
+	old := startDaemon(t, wingd.Config{Home: home, Version: "v0.22.2"})
+
+	holder := ensure(t, home, "v0.22.2")
+	lease := mustAcquire(t, holder, coreReq("same-release-holder", 1))
+	newVersion := "v0.22.2-dev+1b9e5cd9"
+	successor := newSuccessor(t, home, newVersion)
+
+	newer, err := client.EnsureDaemon(context.Background(), client.Options{
+		Home: home, Version: newVersion, Spawn: successor.spawn,
+		DialTimeout: time.Second, Backoff: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("source takeover: %v", err)
+	}
+	defer newer.Close()
+	if newer.DaemonVersion() != newVersion {
+		t.Fatalf("connected daemon version %q, want %q", newer.DaemonVersion(), newVersion)
+	}
+	if err := old.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("release daemon should have drained and exited: %v", err)
+	}
+	reclaimed, err := holder.Reattach(context.Background(), lease.Token)
+	if err != nil {
+		t.Fatalf("holder reattach: %v", err)
+	}
+	if reclaimed.RunID != "same-release-holder" {
+		t.Fatalf("reattached %q, want same-release-holder", reclaimed.RunID)
+	}
+}
+
 func TestRefreshRunning_ReplacesSameReleaseSourceBuildAndReattachesHolder(t *testing.T) {
 	home := shortHome(t)
 	oldVersion := "v0.22.2-dev+1111111"

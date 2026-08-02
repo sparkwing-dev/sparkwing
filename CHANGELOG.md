@@ -50,6 +50,14 @@ code change to unlock.
 
 ### Fixed
 
+- **admission:** an exact clean source build now supersedes the release it was
+  built from while remaining older than later releases. Opaque worktree and
+  dirty builds remain unordered against releases, preserving shared-daemon
+  behavior without leaving an installed same-release source build behind its
+  resident daemon. Version-change notices now say `changed` rather than
+  claiming every transition is an upgrade.
+- **cli:** `daemon status` and `daemon restart` now default to pretty output on
+  a terminal and JSON when piped; an explicit `-o` continues to win.
 - **controller:** local failed-run retries now compile and execute from an
   immutable detached snapshot of the source run's recorded Git revision, and
   verify its full origin identity and complete plan snapshot before node

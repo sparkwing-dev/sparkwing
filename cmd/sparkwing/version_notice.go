@@ -26,7 +26,7 @@ var pendingUpgradeNotice string
 // never grow into a nag.
 func upgradeNoticeLine(prev, cur string) string {
 	return fmt.Sprintf(
-		"sparkwing upgraded %s -> %s: see `sparkwing docs read --topic %s`; "+
+		"sparkwing changed %s -> %s: see `sparkwing docs read --topic %s`; "+
 			"recovery controls: `sparkwing docs read --topic local-execution`",
 		prev, cur, "changelog")
 }
