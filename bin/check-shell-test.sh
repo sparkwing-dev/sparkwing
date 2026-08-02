@@ -67,3 +67,5 @@ if [[ $status -ne 23 ]]; then
   echo "check-shell-test: expected shellcheck exit 23, got $status" >&2
   exit 1
 fi
+
+bash "$ROOT/bin/chaos-soak-runner-test.sh"

@@ -51,9 +51,10 @@ code change to unlock.
 ### Fixed
 
 - **chaos:** soak actors and their descendants now stay in exact owned process
-  groups that are terminated and fully reaped after every churn cycle. The
-  harness also fails fast on bounded process or zombie growth instead of
-  exhausting the host during a long run.
+  groups whose unreaped leaders anchor cleanup until every descendant is gone.
+  Daemon queries are bounded, an independent process guard fails fast on
+  process or zombie growth, and the scheduled runner owns the entire isolated
+  test session so test timeouts and signals cannot orphan nested groups.
 - **admission:** an exact clean source build now supersedes the release it was
   built from while remaining older than later releases. Opaque worktree and
   dirty builds remain unordered against releases, preserving shared-daemon

@@ -41,7 +41,7 @@
 // SPARKWING_CHAOS_SOAK is set to a duration and injects faults more
 // aggressively for nightly or manual runs:
 //
-//	SPARKWING_CHAOS_SOAK=30m go test -run TestChaos_Soak ./internal/chaos
+//	SPARKWING_CHAOS_SOAK=30m bash bin/chaos-soak-runner.sh
 //
 // Both accept SPARKWING_CHAOS_SEED to pin the schedule for replay; when
 // unset the harness derives a seed from the clock and prints it at start.

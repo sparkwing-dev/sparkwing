@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -59,6 +60,9 @@ type Config struct {
 	// MaxOwnedZombies bounds transient zombies in harness-owned groups. A
 	// non-positive value uses a small default that catches failed reaping.
 	MaxOwnedZombies int
+	// OracleTimeout bounds each daemon query so a wedged server cannot stop
+	// the independent process-growth guard or teardown.
+	OracleTimeout time.Duration
 }
 
 // CIConfig returns a bounded configuration suitable for `go test`: a short
@@ -77,6 +81,7 @@ func CIConfig(seed int64) Config {
 		DaemonCores:       8,
 		MaxOwnedProcesses: 96,
 		MaxOwnedZombies:   4,
+		OracleTimeout:     750 * time.Millisecond,
 	}
 }
 
@@ -95,6 +100,7 @@ func SoakConfig(seed int64, d time.Duration) Config {
 		DaemonCores:       16,
 		MaxOwnedProcesses: 192,
 		MaxOwnedZombies:   4,
+		OracleTimeout:     750 * time.Millisecond,
 	}
 }
 
@@ -118,16 +124,18 @@ type Harness struct {
 	daemons        map[int]*daemonProcess
 	daemonKilledAt time.Time
 	verSeq         int
+	stateReader    func(context.Context) (wingwire.QueueState, error)
+	processReader  func() ([]procgroup.Info, error)
+	processFailure func([]string)
+	guardInterval  time.Duration
+	guardFailure   sync.Once
 }
 
 type daemonProcess struct {
-	pgid int
-	done chan struct{}
-}
-
-type processInfo struct {
-	pgid  int
-	state string
+	group      *procgroup.Group
+	done       chan struct{}
+	finalizeMu sync.Mutex
+	complete   bool
 }
 
 type actor struct {
@@ -140,7 +148,10 @@ type actor struct {
 	rejected bool
 	killed   bool
 	exited   bool
-	pgid     int
+	group    *procgroup.Group
+	stdout   io.ReadCloser
+	scanned  chan struct{}
+	finishMu sync.Mutex
 	killedAt time.Time
 	exitedAt time.Time
 }
@@ -149,7 +160,7 @@ type actor struct {
 // violation. On any failure it prints the seed and journal path so the run
 // is reproducible.
 func Run(t testing.TB, cfg Config) {
-	if err := processGroupSupport(); err != nil {
+	if err := procgroup.Supported(); err != nil {
 		t.Fatalf("chaos process ownership: %v", err)
 	}
 	if cfg.Seed == 0 {
@@ -184,11 +195,14 @@ func Run(t testing.TB, cfg Config) {
 	}
 	defer func() { _ = jr.Close() }()
 	defer h.cleanup()
+	stopGuard := h.startProcessGuard()
+	defer stopGuard()
 	t.Logf("chaos seed=%d journal=%s home=%s", cfg.Seed, jpath, home)
 	jr.Append(Event{Kind: "seed", Detail: strconv.FormatInt(cfg.Seed, 10)})
 
 	h.buildBinaries()
 	h.loop()
+	stopGuard()
 	h.quiesce()
 	if t.Failed() {
 		return
@@ -227,6 +241,9 @@ func (h *Harness) loop() {
 	deadline := time.Now().Add(h.cfg.Duration)
 	lastOS := time.Now()
 	for time.Now().Before(deadline) {
+		if h.t.Failed() {
+			return
+		}
 		h.step()
 		h.checkLedger()
 		if h.t.Failed() {
@@ -234,7 +251,6 @@ func (h *Harness) loop() {
 		}
 		if time.Since(lastOS) > 300*time.Millisecond {
 			h.checkOS()
-			h.checkProcessGrowth()
 			h.scanDaemonPanic()
 			lastOS = time.Now()
 		}
@@ -332,12 +348,14 @@ func (h *Harness) spawn(wedged bool) {
 
 	cmd := exec.Command(h.dummyBin, args...)
 	cmd.Stderr = nil
-	stdout, err := startActorCommand(cmd)
+	stdout, group, err := startActorCommand(cmd)
 	if err != nil {
 		return
 	}
 	a.cmd = cmd
-	a.pgid = cmd.Process.Pid
+	a.group = group
+	a.stdout = stdout
+	a.scanned = make(chan struct{})
 	h.mu.Lock()
 	h.actors[runID] = a
 	h.mu.Unlock()
@@ -345,30 +363,27 @@ func (h *Harness) spawn(wedged bool) {
 	go h.watchActor(a, stdout)
 }
 
-// watchActor tracks an actor's stdout for its grant or rejection, then
-// waits for the process to exit and records the terminal state.
-func startActorCommand(cmd *exec.Cmd) (io.ReadCloser, error) {
+// startActorCommand launches an actor in an exact owned process group.
+func startActorCommand(cmd *exec.Cmd) (io.ReadCloser, *procgroup.Group, error) {
 	stdout, childStdout, err := os.Pipe()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cmd.Stdout = childStdout
-	if err := configureOwnedProcessGroup(cmd); err != nil {
+	group, err := procgroup.Start(cmd)
+	if err != nil {
 		_ = stdout.Close()
 		_ = childStdout.Close()
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		_ = stdout.Close()
-		_ = childStdout.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	_ = childStdout.Close()
-	return stdout, nil
+	return stdout, group, nil
 }
 
+// watchActor tracks an actor's stdout for its grant or rejection, then
+// waits for the process to exit and records the terminal state.
 func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
-	scanned := make(chan struct{})
+	scanned := a.scanned
 	go func() {
 		defer close(scanned)
 		sc := bufio.NewScanner(stdout)
@@ -388,17 +403,44 @@ func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
 			}
 		}
 	}()
-	_ = a.cmd.Wait()
-	if err := terminateProcessGroup(a.pgid, 100*time.Millisecond, h.processWait()); err != nil {
-		h.t.Errorf("reap actor group %d: %v", a.pgid, err)
+	<-a.group.LeaderExited()
+	if err := h.finishActor(a, false); err != nil {
+		h.t.Errorf("reap actor group %d: %v", a.group.ID(), err)
 	}
-	_ = stdout.Close()
-	<-scanned
+}
+
+func (h *Harness) finishActor(a *actor, force bool) error {
+	a.finishMu.Lock()
+	defer a.finishMu.Unlock()
+	h.mu.Lock()
+	if a.exited {
+		h.mu.Unlock()
+		return nil
+	}
+	h.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), h.processWait())
+	defer cancel()
+	var err error
+	if force {
+		err = a.group.Terminate(ctx, 100*time.Millisecond)
+	} else {
+		err = a.group.Finish(ctx, 100*time.Millisecond)
+	}
+	if errors.Is(err, procgroup.ErrCleanup) {
+		return err
+	}
+	select {
+	case <-a.scanned:
+	case <-ctx.Done():
+		return fmt.Errorf("actor output for group %d did not close: %w", a.group.ID(), ctx.Err())
+	}
+	_ = a.stdout.Close()
 	h.mu.Lock()
 	a.exited = true
 	a.exitedAt = time.Now()
 	h.mu.Unlock()
 	h.jr.Append(Event{Kind: "exit", Run: a.runID})
+	return nil
 }
 
 func (h *Harness) killHolder() {
@@ -421,9 +463,9 @@ func (h *Harness) killActor(a *actor, kind string) {
 	}
 	a.killed = true
 	a.killedAt = time.Now()
-	pgid := a.pgid
+	group := a.group
 	h.mu.Unlock()
-	_ = killProcessGroup(pgid)
+	_ = group.Kill()
 	h.jr.Append(Event{Kind: kind, Run: a.runID})
 }
 
@@ -471,11 +513,11 @@ func (h *Harness) takeover() {
 		"--daemon-total-cores", strconv.FormatFloat(h.cfg.DaemonCores, 'f', -1, 64),
 	}
 	cmd := exec.Command(h.dummyBin, args...)
-	stdout, err := startActorCommand(cmd)
+	stdout, group, err := startActorCommand(cmd)
 	if err != nil {
 		return
 	}
-	a := &actor{runID: runID, cores: 0.2, cmd: cmd, pgid: cmd.Process.Pid}
+	a := &actor{runID: runID, cores: 0.2, cmd: cmd, group: group, stdout: stdout, scanned: make(chan struct{})}
 	h.mu.Lock()
 	h.actors[runID] = a
 	h.mu.Unlock()
@@ -571,6 +613,39 @@ func (h *Harness) checkOS() {
 	}
 }
 
+func (h *Harness) startProcessGuard() func() {
+	interval := h.guardInterval
+	if interval <= 0 {
+		interval = 100 * time.Millisecond
+	}
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	var stopOnce sync.Once
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			h.runProcessGuard()
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return func() {
+		stopOnce.Do(func() {
+			close(stop)
+			<-done
+		})
+	}
+}
+
+func (h *Harness) runProcessGuard() {
+	h.checkProcessGrowth()
+}
+
 // checkProcessGrowth fails fast before leaked descendants can exhaust the
 // machine's process table.
 func (h *Harness) checkProcessGrowth() {
@@ -578,7 +653,11 @@ func (h *Harness) checkProcessGrowth() {
 	if len(groups) == 0 {
 		return
 	}
-	processes, err := processTable()
+	processReader := h.processReader
+	if processReader == nil {
+		processReader = procgroup.List
+	}
+	processes, err := processReader()
 	if err != nil {
 		h.fail("process-growth", []string{fmt.Sprintf("inspect owned process groups: %v", err)}, wingwire.QueueState{})
 		return
@@ -586,11 +665,11 @@ func (h *Harness) checkProcessGrowth() {
 	maxProcesses, maxZombies := h.processLimits()
 	var owned, zombies int
 	for _, process := range processes {
-		if !groups[process.pgid] {
+		if !groups[process.Group] {
 			continue
 		}
 		owned++
-		if strings.HasPrefix(process.state, "Z") {
+		if strings.HasPrefix(process.State, "Z") {
 			zombies++
 		}
 	}
@@ -602,7 +681,13 @@ func (h *Harness) checkProcessGrowth() {
 		violations = append(violations, fmt.Sprintf("owned zombies %d exceed limit %d", zombies, maxZombies))
 	}
 	if len(violations) > 0 {
-		h.fail("process-growth", violations, wingwire.QueueState{})
+		h.guardFailure.Do(func() {
+			if h.processFailure != nil {
+				h.processFailure(violations)
+				return
+			}
+			h.fail("process-growth", violations, wingwire.QueueState{})
+		})
 	}
 }
 
@@ -623,13 +708,13 @@ func (h *Harness) ownedProcessGroups() map[int]bool {
 	defer h.mu.Unlock()
 	groups := make(map[int]bool, len(h.actors)+len(h.daemons))
 	for _, a := range h.actors {
-		if !a.exited && a.pgid > 1 {
-			groups[a.pgid] = true
+		if !a.exited && a.group != nil && !a.group.Reaped() {
+			groups[a.group.ID()] = true
 		}
 	}
-	for pgid := range h.daemons {
-		if pgid > 1 {
-			groups[pgid] = true
+	for _, daemon := range h.daemons {
+		if daemon.group != nil && !daemon.group.Reaped() {
+			groups[daemon.group.ID()] = true
 		}
 	}
 	return groups
@@ -705,7 +790,7 @@ func (h *Harness) quiesce() {
 			if !a.killed && a.cmd != nil && a.cmd.Process != nil {
 				a.killed = true
 				a.killedAt = time.Now()
-				_ = killProcessGroup(a.pgid)
+				_ = a.group.Kill()
 			}
 		}
 	}
@@ -741,22 +826,29 @@ func (h *Harness) cleanup() {
 	h.mu.Unlock()
 
 	for _, a := range actors {
-		_ = killProcessGroup(a.pgid)
-	}
-	for _, daemon := range daemons {
-		_ = killProcessGroup(daemon.pgid)
-	}
-	deadline := time.Now().Add(h.processWait())
-	for !h.allExited(actors) && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-	}
-	for _, daemon := range daemons {
-		select {
-		case <-daemon.done:
-		case <-time.After(time.Until(deadline)):
-			h.t.Errorf("daemon process group %d did not exit within cleanup bound", daemon.pgid)
+		if err := h.cleanupActor(a); err != nil {
+			h.t.Error(err)
 		}
 	}
+	for _, daemon := range daemons {
+		if err := h.cleanupDaemon(daemon); err != nil {
+			h.t.Error(err)
+		}
+	}
+}
+
+func (h *Harness) cleanupActor(a *actor) error {
+	if err := h.finishActor(a, true); err != nil {
+		return fmt.Errorf("actor process group %d did not exit within cleanup bound: %w", a.group.ID(), err)
+	}
+	return nil
+}
+
+func (h *Harness) cleanupDaemon(daemon *daemonProcess) error {
+	if err := h.finishDaemon(daemon, true); err != nil {
+		return fmt.Errorf("daemon process group %d did not exit within cleanup bound: %w", daemon.group.ID(), err)
+	}
+	return nil
 }
 
 func (h *Harness) processWait() time.Duration {
@@ -811,7 +903,10 @@ func (h *Harness) converge() {
 	idleWait := time.Duration(h.cfg.DaemonIdleMS)*time.Millisecond + time.Second
 	for attempt := 0; attempt < 4; attempt++ {
 		time.Sleep(idleWait)
-		if _, err := client.Query(context.Background(), h.readOpts()); errors.Is(err, client.ErrNoDaemon) {
+		ctx, cancel := context.WithTimeout(context.Background(), h.oracleTimeout())
+		_, err := client.Query(ctx, h.readOpts())
+		cancel()
+		if errors.Is(err, client.ErrNoDaemon) {
 			h.jr.Log("daemon_idle", "", "daemon exited after quiescence")
 			return
 		}
@@ -822,11 +917,16 @@ func (h *Harness) converge() {
 // readState returns the daemon's queue state over a reused read-only
 // control connection, re-establishing it after a daemon kill.
 func (h *Harness) readState() (wingwire.QueueState, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), h.oracleTimeout())
+	defer cancel()
+	if h.stateReader != nil {
+		return h.stateReader(ctx)
+	}
 	h.mu.Lock()
 	cl := h.ctl
 	h.mu.Unlock()
 	if cl != nil {
-		if qs, err := cl.QueueState(context.Background()); err == nil {
+		if qs, err := cl.QueueState(ctx); err == nil {
 			return qs, nil
 		}
 		h.mu.Lock()
@@ -836,8 +936,6 @@ func (h *Harness) readState() (wingwire.QueueState, error) {
 		}
 		h.mu.Unlock()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
 	cl, err := client.EnsureDaemon(ctx, h.readOpts())
 	if err != nil {
 		return wingwire.QueueState{}, err
@@ -845,7 +943,14 @@ func (h *Harness) readState() (wingwire.QueueState, error) {
 	h.mu.Lock()
 	h.ctl = cl
 	h.mu.Unlock()
-	return cl.QueueState(context.Background())
+	return cl.QueueState(ctx)
+}
+
+func (h *Harness) oracleTimeout() time.Duration {
+	if h.cfg.OracleTimeout > 0 {
+		return h.cfg.OracleTimeout
+	}
+	return 750 * time.Millisecond
 }
 
 func (h *Harness) readOpts() client.Options {
@@ -878,30 +983,48 @@ func (h *Harness) daemonSpawn() func(home, version string) error {
 }
 
 func (h *Harness) startDaemonCommand(cmd *exec.Cmd) error {
-	if err := configureOwnedProcessGroup(cmd); err != nil {
+	group, err := procgroup.Start(cmd)
+	if err != nil {
 		return err
 	}
-	if err := cmd.Start(); err != nil {
-		return err
-	}
-	process := &daemonProcess{pgid: cmd.Process.Pid, done: make(chan struct{})}
+	process := &daemonProcess{group: group, done: make(chan struct{})}
 	h.mu.Lock()
 	if h.daemons == nil {
 		h.daemons = map[int]*daemonProcess{}
 	}
-	h.daemons[process.pgid] = process
+	h.daemons[group.ID()] = process
 	h.mu.Unlock()
 	go func() {
-		_ = cmd.Wait()
-		err := terminateProcessGroup(process.pgid, 100*time.Millisecond, h.processWait())
-		h.mu.Lock()
-		delete(h.daemons, process.pgid)
-		h.mu.Unlock()
-		close(process.done)
-		if err != nil {
-			h.t.Errorf("reap daemon group %d: %v", process.pgid, err)
+		<-group.LeaderExited()
+		if err := h.finishDaemon(process, false); err != nil {
+			h.t.Errorf("reap daemon group %d: %v", group.ID(), err)
 		}
 	}()
+	return nil
+}
+
+func (h *Harness) finishDaemon(process *daemonProcess, force bool) error {
+	process.finalizeMu.Lock()
+	defer process.finalizeMu.Unlock()
+	if process.complete {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), h.processWait())
+	defer cancel()
+	var err error
+	if force {
+		err = process.group.Terminate(ctx, 100*time.Millisecond)
+	} else {
+		err = process.group.Finish(ctx, 100*time.Millisecond)
+	}
+	if errors.Is(err, procgroup.ErrCleanup) {
+		return err
+	}
+	process.complete = true
+	h.mu.Lock()
+	delete(h.daemons, process.group.ID())
+	h.mu.Unlock()
+	close(process.done)
 	return nil
 }
 
