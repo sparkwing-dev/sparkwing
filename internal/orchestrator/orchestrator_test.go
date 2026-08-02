@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -409,6 +410,9 @@ func TestRun_RetryPlanDriftFailsBeforeCreatingNodes(t *testing.T) {
 	}
 	if got := prov["revision"]; got != "abc123" {
 		t.Fatalf("stored retry revision=%v", got)
+	}
+	if got := prov["content_policy"]; got != retryprovenance.RecordedRevisionSnapshotPolicy {
+		t.Fatalf("stored retry content policy=%v", got)
 	}
 }
 

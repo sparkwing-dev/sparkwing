@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
@@ -145,8 +146,18 @@ func retryProvenance(src *store.Run) map[string]string {
 	if src == nil {
 		return nil
 	}
+	if len(src.PlanSnapshot) == 0 {
+		return nil
+	}
+	sum := sha256.Sum256(src.PlanSnapshot)
+	planHash := "sha256:" + hex.EncodeToString(sum[:])
+	if inherited := inheritedRetryProvenance(src.Invocation["retry_provenance"]); inherited != nil {
+		inherited[retryprovenance.PlanHashKey] = planHash
+		return inherited
+	}
+
 	cwd, _ := src.Invocation["cwd"].(string)
-	if cwd == "" || len(src.PlanSnapshot) == 0 {
+	if cwd == "" {
 		return nil
 	}
 	if abs, err := filepath.Abs(cwd); err == nil {
@@ -156,11 +167,40 @@ func retryProvenance(src *store.Run) map[string]string {
 	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
 		cwd = resolved
 	}
-	sum := sha256.Sum256(src.PlanSnapshot)
 	return map[string]string{
 		retryprovenance.RepoDirKey:      cwd,
 		retryprovenance.RepoIdentityKey: src.RepoURL,
 		retryprovenance.RevisionKey:     src.GitSHA,
-		retryprovenance.PlanHashKey:     "sha256:" + hex.EncodeToString(sum[:]),
+		retryprovenance.PlanHashKey:     planHash,
+	}
+}
+
+// inheritedRetryProvenance keeps a retry chain bound to its original durable
+// checkout. A retry run's cwd is an intentionally short-lived snapshot, so a
+// later retry must inherit the recorded source rather than capture that temp
+// directory. Invocation data may be freshly built or JSON-decoded from storage.
+func inheritedRetryProvenance(raw any) map[string]string {
+	var value func(string) string
+	switch provenance := raw.(type) {
+	case map[string]string:
+		value = func(key string) string { return provenance[key] }
+	case map[string]any:
+		value = func(key string) string {
+			v, _ := provenance[key].(string)
+			return v
+		}
+	default:
+		return nil
+	}
+	repoDir := strings.TrimSpace(value("repo_dir"))
+	repoIdentity := strings.TrimSpace(value("repo_identity"))
+	revision := strings.TrimSpace(value("revision"))
+	if repoDir == "" || repoIdentity == "" || revision == "" {
+		return nil
+	}
+	return map[string]string{
+		retryprovenance.RepoDirKey:      repoDir,
+		retryprovenance.RepoIdentityKey: repoIdentity,
+		retryprovenance.RevisionKey:     revision,
 	}
 }

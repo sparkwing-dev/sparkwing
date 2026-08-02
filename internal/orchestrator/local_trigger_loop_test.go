@@ -3,6 +3,9 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -165,6 +168,84 @@ func TestLocateTriggerRepo_RetryRejectsRevisionDriftBeforeCompilation(t *testing
 	}
 }
 
+func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *testing.T) {
+	repoDir, sha := writeRetryTestRepo(t, filepath.Join(t.TempDir(), "repo-a"), "git@example.test:owner/repo-a.git", "recorded-behavior")
+	behaviorPath := filepath.Join(repoDir, ".sparkwing", "behavior.txt")
+	executablePath := filepath.Join(repoDir, ".sparkwing", "main.go")
+	if err := os.WriteFile(behaviorPath, []byte("dirty-behavior-with-matching-plan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executablePath, []byte(retryExecutableSource("dirty-executable-with-matching-plan")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	trig := &store.Trigger{
+		Pipeline: "pre-push",
+		Repo:     "owner/repo-a",
+		RetryOf:  "source-run",
+		TriggerEnv: map[string]string{
+			retryprovenance.RepoDirKey:      repoDir,
+			retryprovenance.RepoIdentityKey: "git@example.test:owner/repo-a.git",
+			retryprovenance.RevisionKey:     sha,
+			retryprovenance.PlanHashKey:     "sha256:matching-plan-shape",
+		},
+	}
+
+	snapshotDir, cleanup, err := prepareTriggerRepo(context.Background(), trig, "")
+	if err != nil {
+		t.Fatalf("prepareTriggerRepo: %v", err)
+	}
+	if snapshotDir == repoDir {
+		cleanup()
+		t.Fatal("retry returned the mutable source checkout instead of a snapshot")
+	}
+	if err := os.WriteFile(behaviorPath, []byte("later-toctou-behavior"), 0o644); err != nil {
+		cleanup()
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executablePath, []byte(retryExecutableSource("later-toctou-executable")), 0o644); err != nil {
+		cleanup()
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(snapshotDir, ".sparkwing", "behavior.txt"))
+	if err != nil {
+		cleanup()
+		t.Fatal(err)
+	}
+	if string(raw) != "recorded-behavior" {
+		cleanup()
+		t.Fatalf("snapshot behavior=%q, want committed recorded behavior", raw)
+	}
+	if got := strings.TrimSpace(runGitForRetryTest(t, snapshotDir, "rev-parse", "HEAD")); !strings.EqualFold(got, sha) {
+		cleanup()
+		t.Fatalf("snapshot revision=%q, want %q", got, sha)
+	}
+	cleanup()
+	if _, err := os.Stat(snapshotDir); !os.IsNotExist(err) {
+		t.Fatalf("snapshot survived cleanup: %v", err)
+	}
+	raw, err = os.ReadFile(behaviorPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "later-toctou-behavior" {
+		t.Fatalf("cleanup changed source worktree behavior=%q", raw)
+	}
+
+	outputPath := filepath.Join(t.TempDir(), "executed-behavior")
+	t.Setenv("SPARKWING_RETRY_TEST_OUTPUT", outputPath)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if err := dispatchLocalTrigger(context.Background(), nil, trig, "", "", &localCompileCache{}, logger); err != nil {
+		t.Fatalf("dispatchLocalTrigger: %v", err)
+	}
+	raw, err = os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != "recorded-behavior" {
+		t.Fatalf("retry executed %q, want the recorded executable behavior", raw)
+	}
+}
+
 func writeRetryTestRepo(t *testing.T, dir, remoteURL, behavior string) (string, string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Join(dir, ".sparkwing"), 0o755); err != nil {
@@ -177,6 +258,12 @@ func writeRetryTestRepo(t *testing.T, dir, remoteURL, behavior string) (string, 
 	if err := os.WriteFile(filepath.Join(dir, ".sparkwing", "behavior.txt"), []byte(behavior), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, ".sparkwing", "go.mod"), []byte("module retrytest\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".sparkwing", "main.go"), []byte(retryExecutableSource(behavior)), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	runGitForRetryTest(t, dir, "init")
 	runGitForRetryTest(t, dir, "config", "user.email", "retry@example.test")
 	runGitForRetryTest(t, dir, "config", "user.name", "Retry Test")
@@ -185,6 +272,19 @@ func writeRetryTestRepo(t *testing.T, dir, remoteURL, behavior string) (string, 
 	runGitForRetryTest(t, dir, "commit", "-m", "initial")
 	sha := strings.TrimSpace(runGitForRetryTest(t, dir, "rev-parse", "HEAD"))
 	return dir, sha
+}
+
+func retryExecutableSource(behavior string) string {
+	return fmt.Sprintf(`package main
+
+import "os"
+
+func main() {
+	if err := os.WriteFile(os.Getenv("SPARKWING_RETRY_TEST_OUTPUT"), []byte(%q), 0o644); err != nil {
+		panic(err)
+	}
+}
+`, behavior)
 }
 
 func runGitForRetryTest(t *testing.T, dir string, args ...string) string {

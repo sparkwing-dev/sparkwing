@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -1042,10 +1043,11 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 	}
 	if opts.RetryRepoDir != "" || opts.RetryRepoIdentity != "" || opts.RetryRevision != "" || opts.RetryPlanHash != "" {
 		inv["retry_provenance"] = map[string]string{
-			"repo_dir":      opts.RetryRepoDir,
-			"repo_identity": opts.RetryRepoIdentity,
-			"revision":      opts.RetryRevision,
-			"plan_hash":     opts.RetryPlanHash,
+			"repo_dir":       opts.RetryRepoDir,
+			"repo_identity":  opts.RetryRepoIdentity,
+			"revision":       opts.RetryRevision,
+			"plan_hash":      opts.RetryPlanHash,
+			"content_policy": retryprovenance.RecordedRevisionSnapshotPolicy,
 		}
 	}
 	if flags := buildRunFlags(opts); len(flags) > 0 {

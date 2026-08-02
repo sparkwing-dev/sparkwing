@@ -105,6 +105,72 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 	}
 }
 
+func TestRetry_OfRetryInheritsOriginalCheckoutInsteadOfEphemeralSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	ctx := context.Background()
+	originalDir := filepath.Join(dir, "original-checkout")
+	src := store.Run{
+		ID:           "retry-attempt",
+		Pipeline:     "deploy",
+		Status:       "failed",
+		GitSHA:       "recorded-sha",
+		RepoURL:      "git@example.test:owner/repo.git",
+		PlanSnapshot: []byte(`{"pipeline":"deploy","nodes":[{"id":"deploy"}]}`),
+		Invocation: map[string]any{
+			"cwd": filepath.Join(dir, "deleted-sparkwing-retry-snapshot"),
+			"retry_provenance": map[string]any{
+				"repo_dir":       originalDir,
+				"repo_identity":  "git@example.test:owner/repo.git",
+				"revision":       "recorded-sha",
+				"plan_hash":      "sha256:prior-attempt-plan",
+				"content_policy": retryprovenance.RecordedRevisionSnapshotPolicy,
+			},
+		},
+		StartedAt: time.Now(),
+	}
+	if err := st.CreateRun(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+	resp, err := http.Post(srv.URL+"/api/v1/runs/"+src.ID+"/retry", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d want 202", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := st.GetTrigger(ctx, body["id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := trigger.TriggerEnv[retryprovenance.RepoDirKey]; got != originalDir {
+		t.Fatalf("retry chain repo dir=%q, want durable original %q", got, originalDir)
+	}
+	if got := trigger.TriggerEnv[retryprovenance.RepoIdentityKey]; got != "git@example.test:owner/repo.git" {
+		t.Fatalf("retry chain repo identity=%q", got)
+	}
+	if got := trigger.TriggerEnv[retryprovenance.RevisionKey]; got != "recorded-sha" {
+		t.Fatalf("retry chain revision=%q", got)
+	}
+	sum := sha256.Sum256(src.PlanSnapshot)
+	if got, want := trigger.TriggerEnv[retryprovenance.PlanHashKey], fmt.Sprintf("sha256:%x", sum); got != want {
+		t.Fatalf("retry chain plan hash=%q want %q", got, want)
+	}
+}
+
 // Retry pre-allocates a pending Run row at intake so the dashboard's
 // runs list surfaces the attempt instantly. Response body is the
 // canonical Run-shape (status=pending, trigger_source=retry).

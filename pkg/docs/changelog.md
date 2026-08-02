@@ -50,11 +50,12 @@ code change to unlock.
 
 ### Fixed
 
-- **controller:** local failed-run retries now execute from the source run's
-  exact recorded checkout and verify its full origin identity, Git revision,
-  and complete plan snapshot before compilation or node creation. If that
-  provenance is unavailable, retry fails clearly instead of falling back to an
-  ambient checkout or another registered repo with the same name or pipeline.
+- **controller:** local failed-run retries now compile and execute from an
+  immutable detached snapshot of the source run's recorded Git revision, and
+  verify its full origin identity and complete plan snapshot before node
+  creation. Dirty or subsequently edited working-tree files cannot change retry
+  behavior. If that provenance is unavailable, retry fails clearly instead of
+  falling back to an ambient checkout or another registered repo.
 
 ### Added
 

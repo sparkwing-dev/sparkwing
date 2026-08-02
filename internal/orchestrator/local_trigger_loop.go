@@ -200,10 +200,11 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trigger,
 	profileName, parentRepoDir string, cache *localCompileCache, logger *slog.Logger,
 ) error {
-	repoDir, err := locateTriggerRepo(ctx, trig, parentRepoDir)
+	repoDir, cleanup, err := prepareTriggerRepo(ctx, trig, parentRepoDir)
 	if err != nil {
 		return err
 	}
+	defer cleanup()
 	sparkwingDir := filepath.Join(repoDir, ".sparkwing")
 	if _, err := os.Stat(sparkwingDir); err != nil {
 		return fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
@@ -236,6 +237,57 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 		return fmt.Errorf("child exec: %w", err)
 	}
 	return nil
+}
+
+// prepareTriggerRepo returns the tree whose files may be compiled and executed.
+// Ordinary triggers use their located checkout directly. Retries instead use a
+// detached temporary worktree materialized at the source run's recorded commit.
+// This makes the recorded revision the content boundary: uncommitted changes in
+// the original checkout, including changes made after validation, cannot affect
+// the retry even when they preserve the pipeline plan's shape.
+func prepareTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir string) (string, func(), error) {
+	repoDir, err := locateTriggerRepo(ctx, trig, parentRepoDir)
+	if err != nil {
+		return "", func() {}, err
+	}
+	if trig.RetryOf == "" {
+		return repoDir, func() {}, nil
+	}
+
+	revision := strings.TrimSpace(trig.TriggerEnv[retryprovenance.RevisionKey])
+	tempRoot, err := os.MkdirTemp("", "sparkwing-retry-")
+	if err != nil {
+		return "", func() {}, &RetrySourceUnavailableError{
+			RepoDir: repoDir,
+			Reason:  "create recorded-revision snapshot: " + err.Error(),
+		}
+	}
+	snapshotDir := filepath.Join(tempRoot, "checkout")
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "add", "--detach", snapshotDir, revision)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		_ = os.RemoveAll(tempRoot)
+		return "", func() {}, &RetrySourceUnavailableError{
+			RepoDir: repoDir,
+			Reason:  fmt.Sprintf("materialize recorded revision %q: %v: %s", revision, err, strings.TrimSpace(string(out))),
+		}
+	}
+
+	cleanup := func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(cleanupCtx, "git", "-C", repoDir, "worktree", "remove", "--force", snapshotDir).Run()
+		_ = os.RemoveAll(tempRoot)
+	}
+	actualRevision, err := sparkwinggit.CurrentSHA(ctx, snapshotDir)
+	if err != nil || !strings.EqualFold(actualRevision, revision) {
+		cleanup()
+		reason := fmt.Sprintf("recorded-revision snapshot is %q, want %q", actualRevision, revision)
+		if err != nil {
+			reason = "verify recorded-revision snapshot: " + err.Error()
+		}
+		return "", func() {}, &RetrySourceUnavailableError{RepoDir: repoDir, Reason: reason}
+	}
+	return snapshotDir, cleanup, nil
 }
 
 // locateTriggerRepo maps a claimed trigger to the repo directory whose
