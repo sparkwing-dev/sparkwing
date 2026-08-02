@@ -121,6 +121,65 @@ func TestRunWork_ExplicitFailFastCancelsSiblingAndRunsFinally(t *testing.T) {
 	}
 }
 
+func TestRunWork_ParentCancellationDoesNotEmitFailFastTrigger(t *testing.T) {
+	w := sparkwing.NewWork().ParallelFailures(sparkwing.FailFast)
+	started := make(chan string, 2)
+	for _, id := range []string{"first", "second"} {
+		id := id
+		sparkwing.Step(w, id, func(ctx context.Context) error {
+			started <- id
+			<-ctx.Done()
+			return ctx.Err()
+		})
+	}
+
+	base, logs := newWorkCtx()
+	ctx, cancel := context.WithCancel(base)
+	done := make(chan error, 1)
+	go func() {
+		_, err := sparkwing.RunWork(ctx, w)
+		done <- err
+	}()
+
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case id := <-started:
+			seen[id] = true
+		case <-time.After(2 * time.Second):
+			t.Fatalf("parallel steps did not both start: %v", seen)
+		}
+	}
+	cancel()
+
+	var err error
+	select {
+	case err = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunWork did not return after parent cancellation")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("RunWork error = %v, want context.Canceled", err)
+	}
+	var stepErr *sparkwing.StepError
+	if errors.As(err, &stepErr) {
+		t.Fatalf("parent cancellation attributed to step %q", stepErr.StepID)
+	}
+
+	cancelled := map[string]bool{}
+	for _, rec := range logs.snapshot() {
+		if rec.Event == "step_end" && rec.Attrs["outcome"] == "cancelled" {
+			cancelled[rec.Msg] = true
+		}
+		if rec.Event == sparkwing.EventWorkFailFast {
+			t.Fatalf("parent cancellation emitted fail-fast trigger: %+v", rec)
+		}
+	}
+	if !cancelled["first"] || !cancelled["second"] {
+		t.Fatalf("cancelled step telemetry = %v, want both parallel steps", cancelled)
+	}
+}
+
 func TestRunWork_CollectAllFinishesParallelSiblings(t *testing.T) {
 	w := sparkwing.NewWork().ParallelFailures(sparkwing.CollectAll)
 	independentStarted := make(chan struct{})

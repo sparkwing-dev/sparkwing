@@ -156,6 +156,13 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 			cancel()
 		}
 	}
+	setRunCancellation := func(err error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if firstErr == nil {
+			firstErr = err
+		}
+	}
 	getErr := func() error {
 		mu.Lock()
 		defer mu.Unlock()
@@ -220,6 +227,9 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 				cancelledSiblings++
 				cancelledSteps = append(cancelledSteps, res.id)
 				cancellationFinish = time.Now()
+			} else if res.cancelled && ctx.Err() != nil {
+				setRunCancellation(ctx.Err())
+				cancelPending()
 			} else {
 				setErr(it, res.err)
 				if getFatalErr() != nil {
