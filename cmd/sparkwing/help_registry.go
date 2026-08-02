@@ -40,6 +40,7 @@ for agent-facing discovery.`,
 		{"runs", "Inspect or manage runs"},
 		{"repos", "The machine's fleet of sparkwing repos + SDK pins"},
 		{"queue", "The truthful view of local admission: holders + connections + waiters"},
+		{"daemon", "Inspect or refresh the local admission daemon"},
 		{"profile", "Show which profile sparkwing would use right now, and why"},
 		{"version", "Show + update versions"},
 		{"update", "Self-update the CLI binary"},
@@ -60,6 +61,49 @@ for agent-facing discovery.`,
 		{"Inspect one pipeline's full metadata", "sparkwing pipeline describe --name release -o json"},
 		{"Bootstrap + scaffold your first pipeline in a fresh repo", "sparkwing pipeline new --name release"},
 		{"Start the local dashboard", "sparkwing dashboard start"},
+	},
+}
+
+var cmdDaemon = Command{
+	Path:        "sparkwing daemon",
+	Synopsis:    "Inspect or refresh the local admission daemon",
+	Description: `The admission daemon starts on demand when a pipeline needs it. Status never starts one. Restart replaces only an answering daemon with this installed build, using the same drain, durable lease, and reattachment path as automatic version takeover; a stopped daemon stays stopped.`,
+	Subcommands: []SubcommandRef{
+		{"status", "Report whether wingd is running and which build it serves"},
+		{"restart", "Refresh an answering wingd to this installed build"},
+	},
+	Examples: []Example{
+		{"Machine-readable status", "sparkwing daemon status -o json"},
+		{"Refresh only if already running", "sparkwing daemon restart"},
+	},
+}
+
+var cmdDaemonStatus = Command{
+	Path:        "sparkwing daemon status",
+	Synopsis:    "Report whether wingd is running and which build it serves",
+	Description: `Read-only daemon status. An absent daemon is a healthy stopped state and exits zero. An unreachable socket fails instead of pretending the admission queue is empty. The JSON running_revision identifies the exact source build when available.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
+		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "Input"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Machine-readable status", "sparkwing daemon status -o json"},
+	},
+}
+
+var cmdDaemonRestart = Command{
+	Path:        "sparkwing daemon restart",
+	Synopsis:    "Refresh an answering wingd to this installed build",
+	Description: `Drain the current daemon, start this installed binary as its successor, and verify the successor reports the exact target build. Existing holders reconnect and reattach through durable leases. If no daemon is running, nothing is started.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
+		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "Input"},
+	},
+	GroupOrder: []string{"Input", "Output", "Other"},
+	Examples: []Example{
+		{"Refresh only if already running", "sparkwing daemon restart"},
+		{"Machine-readable result", "sparkwing daemon restart -o json"},
 	},
 }
 

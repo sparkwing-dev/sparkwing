@@ -191,6 +191,84 @@ func TestVersionTakeover_DrainsOldAndReattaches(t *testing.T) {
 	}
 }
 
+func TestVersionTakeover_ExactSourceBuildDrainsSameReleaseAndReattaches(t *testing.T) {
+	home := shortHome(t)
+	old := startDaemon(t, wingd.Config{Home: home, Version: "v0.22.2"})
+
+	holder := ensure(t, home, "v0.22.2")
+	lease := mustAcquire(t, holder, coreReq("same-release-holder", 1))
+	newVersion := "v0.22.2-dev+1b9e5cd9"
+	successor := newSuccessor(t, home, newVersion)
+
+	newer, err := client.EnsureDaemon(context.Background(), client.Options{
+		Home: home, Version: newVersion, Spawn: successor.spawn,
+		DialTimeout: time.Second, Backoff: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("source takeover: %v", err)
+	}
+	defer newer.Close()
+	if newer.DaemonVersion() != newVersion {
+		t.Fatalf("connected daemon version %q, want %q", newer.DaemonVersion(), newVersion)
+	}
+	if err := old.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("release daemon should have drained and exited: %v", err)
+	}
+	reclaimed, err := holder.Reattach(context.Background(), lease.Token)
+	if err != nil {
+		t.Fatalf("holder reattach: %v", err)
+	}
+	if reclaimed.RunID != "same-release-holder" {
+		t.Fatalf("reattached %q, want same-release-holder", reclaimed.RunID)
+	}
+}
+
+func TestRefreshRunning_ReplacesSameReleaseSourceBuildAndReattachesHolder(t *testing.T) {
+	home := shortHome(t)
+	oldVersion := "v0.22.2-dev+1111111"
+	newVersion := "v0.22.2-dev+2222222"
+	old := startDaemon(t, wingd.Config{Home: home, Version: oldVersion})
+
+	holder := ensure(t, home, "")
+	lease := mustAcquire(t, holder, coreReq("active", 1))
+	successor := newSuccessor(t, home, newVersion)
+
+	result, err := client.RefreshRunning(context.Background(), client.Options{
+		Home: home, Version: newVersion, Spawn: successor.spawn,
+		DialTimeout: time.Second, Backoff: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	if !result.Restarted || result.PreviousVersion != oldVersion || result.RunningVersion != newVersion {
+		t.Fatalf("refresh result = %+v", result)
+	}
+	if err := old.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("old daemon should exit: %v", err)
+	}
+	reclaimed, err := holder.Reattach(context.Background(), lease.Token)
+	if err != nil {
+		t.Fatalf("holder reattach: %v", err)
+	}
+	if reclaimed.RunID != "active" {
+		t.Fatalf("reattached run = %q, want active", reclaimed.RunID)
+	}
+}
+
+func TestRefreshRunning_LeavesStoppedDaemonStopped(t *testing.T) {
+	spawned := false
+	_, err := client.RefreshRunning(context.Background(), client.Options{
+		Home: shortHome(t), Version: "v0.22.2-dev+2222222",
+		Spawn: func(string, string) error { spawned = true; return nil },
+	})
+	if !errors.Is(err, client.ErrNoDaemon) {
+		t.Fatalf("refresh error = %v, want ErrNoDaemon", err)
+	}
+	if spawned {
+		t.Fatal("refresh spawned a daemon for a stopped home")
+	}
+}
+
 // TestVersionTakeover_DevBuildJoinsReleaseDaemon verifies that a source-built
 // "(devel)" client joins a release daemon without draining it. A fleet of
 // identically-named dev binaries would otherwise each drain the shared release
@@ -231,6 +309,22 @@ func TestVersionTakeover_ReleaseLeavesDevDaemon(t *testing.T) {
 	select {
 	case err := <-td.done:
 		t.Fatalf("source-built daemon exited (%v); the release client drained it", err)
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestVersionTakeover_ReleaseLeavesCleanSourceDaemon(t *testing.T) {
+	home := shortHome(t)
+	td := startDaemon(t, wingd.Config{Home: home, Version: "v0.22.2-dev+e99c1800"})
+
+	release := ensure(t, home, "v0.22.2")
+	if release.DaemonVersion() != "v0.22.2-dev+e99c1800" {
+		t.Fatalf("connected daemon version %q, want clean source build still resident", release.DaemonVersion())
+	}
+
+	select {
+	case err := <-td.done:
+		t.Fatalf("clean source daemon exited (%v); release build drained it", err)
 	case <-time.After(200 * time.Millisecond):
 	}
 }

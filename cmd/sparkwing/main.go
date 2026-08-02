@@ -261,6 +261,8 @@ func runSparkwing(args []string) error {
 		return runJobs(args[1:])
 	case "queue":
 		return runQueue(args[1:])
+	case "daemon":
+		return runDaemon(args[1:])
 	case "profile":
 		return runProfileCmd(args[1:])
 

@@ -44,11 +44,11 @@ func TestNoteVersionTransition_OnceOnly(t *testing.T) {
 
 	var first bytes.Buffer
 	noteVersionTransition(&first, "version")
-	if !strings.Contains(first.String(), "sparkwing upgraded v0.14.0 -> ") {
-		t.Fatalf("first run did not emit the upgrade line; got %q", first.String())
+	if !strings.Contains(first.String(), "sparkwing changed v0.14.0 -> ") {
+		t.Fatalf("first run did not emit the transition line; got %q", first.String())
 	}
 	if !strings.Contains(first.String(), "--topic changelog") {
-		t.Fatalf("upgrade line missing the changelog pointer; got %q", first.String())
+		t.Fatalf("transition line missing the changelog pointer; got %q", first.String())
 	}
 
 	stamp, _ := os.ReadFile(p.LastVersionFile())
@@ -80,8 +80,28 @@ func TestNoteVersionTransition_InfoSuppressesStderr(t *testing.T) {
 	if buf.Len() != 0 {
 		t.Fatalf("info verb should not write the line to the stream; got %q", buf.String())
 	}
-	if !strings.Contains(pendingUpgradeNotice, "sparkwing upgraded v0.14.0 -> ") {
+	if !strings.Contains(pendingUpgradeNotice, "sparkwing changed v0.14.0 -> ") {
 		t.Fatalf("info verb did not stash the notice; got %q", pendingUpgradeNotice)
+	}
+}
+
+func TestUpgradeNoticeLineDoesNotClaimVersionOrder(t *testing.T) {
+	tests := []struct {
+		previous string
+		current  string
+	}{
+		{"v0.22.2-0.20260801181107-3e089db19798", "v0.22.2-0.20260801163726-c86d57474ce4"},
+		{"(devel)", "v0.22.2-0.20260801163726-c86d57474ce4"},
+		{"v0.22.2-0.20260801181107-3e089db19798", "(devel)"},
+	}
+	for _, test := range tests {
+		line := upgradeNoticeLine(test.previous, test.current)
+		if strings.Contains(line, "upgraded") {
+			t.Fatalf("transition %q -> %q claimed an upgrade: %q", test.previous, test.current, line)
+		}
+		if !strings.Contains(line, "sparkwing changed "+test.previous+" -> "+test.current) {
+			t.Fatalf("transition line = %q", line)
+		}
 	}
 }
 

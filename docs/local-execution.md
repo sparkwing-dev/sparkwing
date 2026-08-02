@@ -56,6 +56,15 @@ under `~/.sparkwing/`, which is what `sparkwing dashboard start` reads.
 Run `sparkwing dashboard start` once and leave it up to watch
 concurrent runs in a browser without needing any remote service.
 
+Local pipelines share a small admission daemon named wingd. It starts on
+demand and normally needs no operator attention. `sparkwing daemon status`
+reports whether it is running; JSON output includes the serving binary and its
+source revision. `sparkwing daemon restart` replaces only an answering daemon
+with the installed Sparkwing build. Existing holders reconnect and reattach to
+their durable leases, while a deliberately stopped daemon stays stopped. A
+release-pinned pipeline can use that refreshed daemon without replacing it
+with the older release build.
+
 When you run locally against a remote profile (`sparkwing run X --profile
 prod`), the run dual-writes state to both the profile's backend and the
 local SQLite store. The remote is canonical; the local copy is a free

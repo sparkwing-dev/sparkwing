@@ -285,10 +285,10 @@ func daemonDeathCause(tail string) string {
 
 // EnsureDaemon connects to Home's daemon, spawning one and retrying with
 // backoff when none is reachable. When this client's build supersedes the
-// daemon's -- a strictly newer release, or a build from source against any
-// release daemon or an older source build -- it drains the old daemon and
-// brings up its own binary as the successor before returning a connection
-// to it.
+// daemon's -- a strictly newer release, an exact clean source build based on
+// the daemon's release or later, or an ordered newer source build -- it drains
+// the old daemon and brings up its own binary as the successor before returning
+// a connection to it.
 // The returned Client speaks the same protocol major and is ready for
 // [Client.Acquire], [Client.Reattach], or [Client.QueueState]. When a
 // spawned daemon dies at startup, the returned error carries the tail of
