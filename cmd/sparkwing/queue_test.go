@@ -167,7 +167,7 @@ func TestRenderQueue_PrettyShowsHoldersWaitersAndCapacity(t *testing.T) {
 	}
 	out := buf.String()
 	for _, want := range []string{
-		"1 holding, 1 queued",
+		"1 holding, 0 connected, 1 queued",
 		"RESOURCE", "cores", "deploy-lock",
 		"RUN", "run-holder", "deploy",
 		"POS", "run-waiter", "cores",

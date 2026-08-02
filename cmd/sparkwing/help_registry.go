@@ -39,7 +39,7 @@ for agent-facing discovery.`,
 		{"run", "Run a pipeline (shortcut for `pipeline run`)"},
 		{"runs", "Inspect or manage runs"},
 		{"repos", "The machine's fleet of sparkwing repos + SDK pins"},
-		{"queue", "The truthful view of local admission: holders + waiters"},
+		{"queue", "The truthful view of local admission: holders + connections + waiters"},
 		{"profile", "Show which profile sparkwing would use right now, and why"},
 		{"version", "Show + update versions"},
 		{"update", "Self-update the CLI binary"},
@@ -368,12 +368,13 @@ plain emits one path per line for shell consumption.`,
 
 var cmdQueue = Command{
 	Path:     "sparkwing queue",
-	Synopsis: "The truthful view of local admission: holders, waiters, and why",
+	Synopsis: "The truthful view of local admission: holders, connections, waiters, and why",
 	Description: `Reads the local admission daemon and prints one honest picture of
 where every run stands: each resource (host cores, memory, and every
 named concurrency semaphore) with its capacity and how much is in use;
-every run currently holding admission, with the repo it came from, how
-long it has held, and what it is charged; and every waiter in admission
+every run currently holding resources, with the repo it came from, how
+long it has held, and what it is charged; connected run registrations that
+hold no resources, labeled separately; and every waiter in admission
 order, with its position, priority, cost, and exactly what it is waiting on.
 A child run attached to its parent's lease renders indented under that
 parent. The header carries a one-line summary of the daemon's recent

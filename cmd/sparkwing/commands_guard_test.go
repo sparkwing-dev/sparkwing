@@ -48,6 +48,17 @@ func TestAllCommandsAreRegistered(t *testing.T) {
 	}
 }
 
+func TestCommandsMarkdownEndsWithOneNewline(t *testing.T) {
+	got := renderCommandsMarkdown([]CommandJSON{{
+		Path:     "sparkwing example",
+		Synopsis: "Example command",
+		Examples: []ExampleJSON{{Command: "sparkwing example"}},
+	}})
+	if !strings.HasSuffix(got, "\n") || strings.HasSuffix(got, "\n\n") {
+		t.Fatalf("generated Markdown must end with exactly one newline, got suffix %q", got[len(got)-min(4, len(got)):])
+	}
+}
+
 // commandVarsInSource parses path and returns every top-level
 // identifier matching `cmd[A-Z]...` whose declaration is `=
 // Command{...}`. Robust to formatter/comment changes since we walk

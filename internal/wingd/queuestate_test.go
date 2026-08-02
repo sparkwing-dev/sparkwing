@@ -72,7 +72,7 @@ func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 	}
 }
 
-func TestQueueState_SoleRunNamesMemoryInsteadOfPermittedCPUDeficit(t *testing.T) {
+func TestQueueState_PositiveGrantRestoresExternalPressureAccounting(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 16<<30)
 	sampler.set(wingd.HostStat{
@@ -84,6 +84,8 @@ func TestQueueState_SoleRunNamesMemoryInsteadOfPermittedCPUDeficit(t *testing.T)
 		MemoryMeasured:   true,
 	})
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1, Sampler: sampler})
+	blocker := ensure(t, home, "v1")
+	mustAcquire(t, blocker, wingwire.AdmissionRequest{RunID: "resource-holder", Resources: wingwire.HostResources{Cores: 0.1}})
 
 	registration := ensure(t, home, "v1")
 	mustAcquire(t, registration, wingwire.AdmissionRequest{RunID: "pipeline", SemaphoresOnly: true})
@@ -98,8 +100,8 @@ func TestQueueState_SoleRunNamesMemoryInsteadOfPermittedCPUDeficit(t *testing.T)
 	})
 	select {
 	case q := <-positions:
-		if strings.Contains(q.BlockingReason, "cores") || !strings.Contains(q.BlockingReason, "GiB") {
-			t.Fatalf("initial blocking reason = %q, want memory and no CPU claim", q.BlockingReason)
+		if !strings.Contains(q.BlockingReason, "cores") || !strings.Contains(q.BlockingReason, "external load") {
+			t.Fatalf("initial blocking reason = %q, want restored CPU pressure accounting", q.BlockingReason)
 		}
 	case r := <-result:
 		t.Fatalf("memory-bound participant resolved: lease=%v err=%v", r.lease, r.err)
@@ -115,11 +117,11 @@ func TestQueueState_SoleRunNamesMemoryInsteadOfPermittedCPUDeficit(t *testing.T)
 	if !ok {
 		t.Fatal("pipeline participant not queued")
 	}
-	if len(w.WaitingOn) != 1 || w.WaitingOn[0] != "memory" {
-		t.Fatalf("waiting_on = %v, want [memory]", w.WaitingOn)
+	if len(w.WaitingOn) != 2 || w.WaitingOn[0] != "cores" || w.WaitingOn[1] != "memory" {
+		t.Fatalf("waiting_on = %v, want [cores memory]", w.WaitingOn)
 	}
-	if strings.Contains(w.BlockingReason, "cores") || !strings.Contains(w.BlockingReason, "GiB") {
-		t.Fatalf("queue blocking reason = %q, want memory and no CPU claim", w.BlockingReason)
+	if !strings.Contains(w.BlockingReason, "cores") || !strings.Contains(w.BlockingReason, "external load") {
+		t.Fatalf("queue blocking reason = %q, want restored CPU pressure accounting", w.BlockingReason)
 	}
 	var cores *wingwire.ResourceState
 	for i := range qs.Resources {

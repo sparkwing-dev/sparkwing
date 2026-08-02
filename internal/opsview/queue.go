@@ -167,7 +167,11 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 		fmt.Fprintf(w, "external-measurement-age\t%d\n", qs.ExternalMeasurementAgeMS)
 	}
 	for _, h := range qs.Holders {
-		fmt.Fprintf(w, "holder\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		kind := "holder"
+		if h.ConnectionOnly {
+			kind = "connected"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n", kind,
 			h.RunID, orDash(h.ParticipantID), queueDisplayRunID(h.RunID, h.DisplayRunID),
 			orDash(h.Pipeline), orDash(h.Repo), orDash(OriginWord(h.Origin)),
 			fmtElapsed(h.ElapsedMS), fmtHolderCost(h),
@@ -192,6 +196,7 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 // bottom-of-view callouts for stalled or contended holders and pin drift.
 func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	holders := queueLifecycleHolders(qs)
+	connections := queueLifecycleConnections(qs)
 	clear := ""
 	if qs.ExpectedClearMS != nil && *qs.ExpectedClearMS > 0 {
 		clear = fmt.Sprintf("; clears in ~%s", fmtElapsed(*qs.ExpectedClearMS))
@@ -202,7 +207,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	if cc := FmtCapacityChange(qs.CapacityChange); cc != "" {
 		fmt.Fprintln(out, cc)
 	}
-	fmt.Fprintf(out, "local admission: %d holding, %d queued%s\n", len(holders), len(qs.Waiters), clear)
+	fmt.Fprintf(out, "local admission: %d holding, %d connected, %d queued%s\n", len(holders), len(connections), len(qs.Waiters), clear)
 	if line := FmtEventsLine(qs.Events); line != "" {
 		fmt.Fprintln(out, line)
 	}
@@ -266,6 +271,21 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 			orDash(h.CostSource), orDash(joinKeys(h.Semaphores)))
 	}
 	_ = tw.Flush()
+	if len(connections) > 0 {
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Connected (no resources held)")
+		tw = tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+		fmt.Fprintln(tw, "RUN\tPIPELINE\tREPO\tORIGIN\tELAPSED")
+		for _, h := range connections {
+			run := queueDisplayRunID(h.RunID, h.DisplayRunID)
+			if h.Parent != "" {
+				run = "  " + run + " (attached)"
+			}
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", run, orDash(h.Pipeline), orDash(h.Repo),
+				orDash(OriginWord(h.Origin)), fmtElapsed(h.ElapsedMS))
+		}
+		_ = tw.Flush()
+	}
 
 	fmt.Fprintln(out)
 	fmt.Fprintln(out, "Waiting")
@@ -318,6 +338,14 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 }
 
 func queueLifecycleHolders(qs wingwire.QueueState) []wingwire.Holder {
+	return queueLifecycleRows(qs, false)
+}
+
+func queueLifecycleConnections(qs wingwire.QueueState) []wingwire.Holder {
+	return queueLifecycleRows(qs, true)
+}
+
+func queueLifecycleRows(qs wingwire.QueueState, connectionOnly bool) []wingwire.Holder {
 	waitingOwners := make(map[string]bool)
 	for _, w := range qs.Waiters {
 		if w.ParticipantID != "" {
@@ -326,6 +354,13 @@ func queueLifecycleHolders(qs wingwire.QueueState) []wingwire.Holder {
 	}
 	holders := make([]wingwire.Holder, 0, len(qs.Holders))
 	for _, h := range qs.Holders {
+		if h.ConnectionOnly != connectionOnly {
+			continue
+		}
+		if connectionOnly {
+			holders = append(holders, h)
+			continue
+		}
 		orchestrationWait := h.AdmissionWaiting ||
 			(h.ParticipantID == "" && h.Parent == "" && h.Resources.Cores <= 0 && h.Resources.MemoryBytes <= 0 && waitingOwners[h.RunID])
 		if !orchestrationWait {

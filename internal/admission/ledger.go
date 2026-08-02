@@ -739,14 +739,24 @@ func touchesAny(s spec, set map[resource]bool) bool {
 }
 
 // hostFits reports whether a spec's host cores and memory fit right now.
-// Memory is always a hard safety budget. A soft CPU request uses cores as
-// backpressure: it limits additional admissions once the host is already
-// overcommitted, but it never turns a memory-fitting head run into a
-// permanent CPU-only wait.
+// With no positive resource grant in the ledger, the FIFO head is admitted
+// against the machine total even when external pressure has collapsed the
+// current headroom. Zero-cost orchestration leases do not suppress that
+// liveness floor: they represent connected runs, not admitted work. Once any
+// host or semaphore resource is held, ordinary headroom accounting applies on
+// both host dimensions. Semaphore capacity remains independently enforced.
+//
+// Memory remains a hard safety budget between admitted runs. A soft CPU
+// request uses cores as backpressure: it limits additional admissions once
+// the host is already overcommitted, but it never turns a memory-fitting head
+// run into a permanent CPU-only wait.
 func (l *Ledger) hostFits(s spec) bool {
+	if l.resourcesIdle() {
+		return true
+	}
 	effMemory := min(l.totalMemory, l.headroomMemory)
 	effCores := min(l.totalMilliCores, l.headroomMilliCores)
-	coresOK := s.milliCores == 0 || l.usedMilliCores == 0 ||
+	coresOK := s.milliCores == 0 ||
 		(l.usedMilliCores <= effCores && s.milliCores <= effCores-l.usedMilliCores)
 	if s.softCores {
 		coresOK = l.coresFitSoft(s)
@@ -755,9 +765,34 @@ func (l *Ledger) hostFits(s spec) bool {
 	return coresOK && memoryOK
 }
 
+// resourcesIdle distinguishes an empty resource ledger from one containing only
+// zero-cost run-registration leases. The latter keep connections and run
+// finalization alive, but hold no capacity and therefore must not prevent the
+// queue head from bootstrapping under external pressure.
+func (l *Ledger) resourcesIdle() bool {
+	if l.usedMilliCores != 0 || l.usedMemory != 0 {
+		return false
+	}
+	for _, sem := range l.sems {
+		for _, hold := range sem.holds {
+			if !hold.superseded && hold.cost > 0 {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// coresFitSoft applies ordinary CPU headroom once hostFits has handled the
+// truly empty ledger. A memory-only grant is admitted work, so it must not
+// reopen the empty-ledger liveness floor.
 func (l *Ledger) coresFitSoft(s spec) bool {
-	if s.milliCores == 0 || l.usedMilliCores == 0 {
+	if s.milliCores == 0 {
 		return true
+	}
+	if l.usedMilliCores == 0 {
+		effCores := min(l.totalMilliCores, l.headroomMilliCores)
+		return fitsCost(0, s.milliCores, effCores)
 	}
 	if l.usedMilliCores >= l.totalMilliCores {
 		return false

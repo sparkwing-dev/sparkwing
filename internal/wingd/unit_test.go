@@ -309,6 +309,10 @@ func TestApplyHeadroom_BoundedRefreshAdmitsSoleMemoryWaiter(t *testing.T) {
 		MemoryMeasured:   true,
 	}
 	d.applyHeadroom(high)
+	holder, _, err := d.ledger.Submit(admission.Request{ID: "holder", Cores: 0.1})
+	if err != nil || holder.Kind != admission.DecisionGranted {
+		t.Fatalf("submit holder = (%s, %v), want granted", holder.Kind, err)
+	}
 
 	server, peer := net.Pipe()
 	defer server.Close()
@@ -460,6 +464,10 @@ func TestRefreshHeadroom_FailedSampleDoesNotRefreshOrAdmit(t *testing.T) {
 		MemoryMeasured:   true,
 	}
 	d.applyHeadroom(high)
+	holder, _, err := d.ledger.Submit(admission.Request{ID: "holder", Cores: 0.1})
+	if err != nil || holder.Kind != admission.DecisionGranted {
+		t.Fatalf("submit holder = (%s, %v), want granted", holder.Kind, err)
+	}
 	measuredAt, effectiveAt := d.measuredAt, d.headroomAt
 	dec, _, err := d.ledger.Submit(admission.Request{ID: "waiter", MemoryBytes: 512 << 20})
 	if err != nil || dec.Kind != admission.DecisionQueued {
