@@ -3,13 +3,16 @@ package controller_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -30,7 +33,13 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 		Status:    "failed",
 		GitBranch: "main",
 		GitSHA:    "abc123",
-		StartedAt: time.Now().Add(-5 * time.Minute),
+		Repo:      "owner/repo-a",
+		RepoURL:   "git@example.test:owner/repo-a.git",
+		Invocation: map[string]any{
+			"cwd": filepath.Join(dir, "repo-a"),
+		},
+		PlanSnapshot: []byte(`{"pipeline":"deploy","run_id":"src-run","nodes":[{"id":"deploy","deps":[]}]}`),
+		StartedAt:    time.Now().Add(-5 * time.Minute),
 	}
 	if err := st.CreateRun(ctx, src); err != nil {
 		t.Fatal(err)
@@ -80,6 +89,85 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 	}
 	if trig.GitSHA != src.GitSHA {
 		t.Errorf("git_sha=%s want %s", trig.GitSHA, src.GitSHA)
+	}
+	if got := trig.TriggerEnv[retryprovenance.RepoDirKey]; got != filepath.Join(dir, "repo-a") {
+		t.Errorf("retry repo dir=%q want %q", got, filepath.Join(dir, "repo-a"))
+	}
+	if got := trig.TriggerEnv[retryprovenance.RepoIdentityKey]; got != src.RepoURL {
+		t.Errorf("retry repo identity=%q want %q", got, src.RepoURL)
+	}
+	if got := trig.TriggerEnv[retryprovenance.RevisionKey]; got != src.GitSHA {
+		t.Errorf("retry revision=%q want %q", got, src.GitSHA)
+	}
+	sum := sha256.Sum256(src.PlanSnapshot)
+	if got, want := trig.TriggerEnv[retryprovenance.PlanHashKey], fmt.Sprintf("sha256:%x", sum); got != want {
+		t.Errorf("retry plan hash=%q want %q", got, want)
+	}
+}
+
+func TestRetry_OfRetryInheritsOriginalCheckoutInsteadOfEphemeralSnapshot(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+
+	ctx := context.Background()
+	originalDir := filepath.Join(dir, "original-checkout")
+	src := store.Run{
+		ID:           "retry-attempt",
+		Pipeline:     "deploy",
+		Status:       "failed",
+		GitSHA:       "recorded-sha",
+		RepoURL:      "git@example.test:owner/repo.git",
+		PlanSnapshot: []byte(`{"pipeline":"deploy","nodes":[{"id":"deploy"}]}`),
+		Invocation: map[string]any{
+			"cwd": filepath.Join(dir, "deleted-sparkwing-retry-snapshot"),
+			"retry_provenance": map[string]any{
+				"repo_dir":       originalDir,
+				"repo_identity":  "git@example.test:owner/repo.git",
+				"revision":       "recorded-sha",
+				"plan_hash":      "sha256:prior-attempt-plan",
+				"content_policy": retryprovenance.RecordedRevisionSnapshotPolicy,
+			},
+		},
+		StartedAt: time.Now(),
+	}
+	if err := st.CreateRun(ctx, src); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+	resp, err := http.Post(srv.URL+"/api/v1/runs/"+src.ID+"/retry", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status=%d want 202", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := st.GetTrigger(ctx, body["id"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := trigger.TriggerEnv[retryprovenance.RepoDirKey]; got != originalDir {
+		t.Fatalf("retry chain repo dir=%q, want durable original %q", got, originalDir)
+	}
+	if got := trigger.TriggerEnv[retryprovenance.RepoIdentityKey]; got != "git@example.test:owner/repo.git" {
+		t.Fatalf("retry chain repo identity=%q", got)
+	}
+	if got := trigger.TriggerEnv[retryprovenance.RevisionKey]; got != "recorded-sha" {
+		t.Fatalf("retry chain revision=%q", got)
+	}
+	sum := sha256.Sum256(src.PlanSnapshot)
+	if got, want := trigger.TriggerEnv[retryprovenance.PlanHashKey], fmt.Sprintf("sha256:%x", sum); got != want {
+		t.Fatalf("retry chain plan hash=%q want %q", got, want)
 	}
 }
 

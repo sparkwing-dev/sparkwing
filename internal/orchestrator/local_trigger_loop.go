@@ -11,12 +11,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
 
 // runLocalTriggerLoop polls for pending child triggers and dispatches
@@ -197,10 +200,11 @@ func claimChildTrigger(ctx context.Context, st *store.Store, runID string) (*sto
 func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trigger,
 	profileName, parentRepoDir string, cache *localCompileCache, logger *slog.Logger,
 ) error {
-	repoDir, err := locateTriggerRepo(trig, parentRepoDir)
+	repoDir, cleanup, err := prepareTriggerRepo(ctx, trig, parentRepoDir)
 	if err != nil {
 		return err
 	}
+	defer cleanup()
 	sparkwingDir := filepath.Join(repoDir, ".sparkwing")
 	if _, err := os.Stat(sparkwingDir); err != nil {
 		return fmt.Errorf("no .sparkwing/ at %s: %w", sparkwingDir, err)
@@ -235,13 +239,67 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 	return nil
 }
 
+// prepareTriggerRepo returns the tree whose files may be compiled and executed.
+// Ordinary triggers use their located checkout directly. Retries instead use a
+// detached temporary worktree materialized at the source run's recorded commit.
+// This makes the recorded revision the content boundary: uncommitted changes in
+// the original checkout, including changes made after validation, cannot affect
+// the retry even when they preserve the pipeline plan's shape.
+func prepareTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir string) (string, func(), error) {
+	repoDir, err := locateTriggerRepo(ctx, trig, parentRepoDir)
+	if err != nil {
+		return "", func() {}, err
+	}
+	if trig.RetryOf == "" {
+		return repoDir, func() {}, nil
+	}
+
+	revision := strings.TrimSpace(trig.TriggerEnv[retryprovenance.RevisionKey])
+	tempRoot, err := os.MkdirTemp("", "sparkwing-retry-")
+	if err != nil {
+		return "", func() {}, &RetrySourceUnavailableError{
+			RepoDir: repoDir,
+			Reason:  "create recorded-revision snapshot: " + err.Error(),
+		}
+	}
+	snapshotDir := filepath.Join(tempRoot, "checkout")
+	cmd := exec.CommandContext(ctx, "git", "-C", repoDir, "worktree", "add", "--detach", snapshotDir, revision)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		_ = os.RemoveAll(tempRoot)
+		return "", func() {}, &RetrySourceUnavailableError{
+			RepoDir: repoDir,
+			Reason:  fmt.Sprintf("materialize recorded revision %q: %v: %s", revision, err, strings.TrimSpace(string(out))),
+		}
+	}
+
+	cleanup := func() {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		_ = exec.CommandContext(cleanupCtx, "git", "-C", repoDir, "worktree", "remove", "--force", snapshotDir).Run()
+		_ = os.RemoveAll(tempRoot)
+	}
+	actualRevision, err := sparkwinggit.CurrentSHA(ctx, snapshotDir)
+	if err != nil || !strings.EqualFold(actualRevision, revision) {
+		cleanup()
+		reason := fmt.Sprintf("recorded-revision snapshot is %q, want %q", actualRevision, revision)
+		if err != nil {
+			reason = "verify recorded-revision snapshot: " + err.Error()
+		}
+		return "", func() {}, &RetrySourceUnavailableError{RepoDir: repoDir, Reason: reason}
+	}
+	return snapshotDir, cleanup, nil
+}
+
 // locateTriggerRepo maps a claimed trigger to the repo directory whose
 // .sparkwing/ defines it. A same-repo child (no explicit repo slug)
 // resolves against the running parent's own tree first, so it needs
 // neither a registry entry nor a git identity on the project directory.
 // Only when that fast path does not apply does it consult the cross-repo
 // registry and the "owner/name" slug fallback.
-func locateTriggerRepo(trig *store.Trigger, parentRepoDir string) (string, error) {
+func locateTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir string) (string, error) {
+	if trig.RetryOf != "" {
+		return locateRetryRepo(ctx, trig)
+	}
 	if parentRepoDir != "" && trig.Repo == "" && repoDeclaresPipeline(parentRepoDir, trig.Pipeline) {
 		return parentRepoDir, nil
 	}
@@ -258,6 +316,78 @@ func locateTriggerRepo(trig *store.Trigger, parentRepoDir string) (string, error
 		return slugPath, nil
 	}
 	return "", unlocatableChildError(trig.Pipeline)
+}
+
+// RetrySourceUnavailableError is returned when a local retry cannot prove that
+// it is about to execute in the source attempt's exact checkout. Retrying from
+// an ambient cwd, a same-named checkout, or the repo registry is intentionally
+// forbidden: all three can silently execute a different pipeline definition.
+type RetrySourceUnavailableError struct {
+	RepoDir string
+	Reason  string
+}
+
+func (e *RetrySourceUnavailableError) Error() string {
+	if e.RepoDir == "" {
+		return "retry source worktree unavailable: " + e.Reason
+	}
+	return fmt.Sprintf("retry source worktree unavailable at %s: %s", e.RepoDir, e.Reason)
+}
+
+func locateRetryRepo(ctx context.Context, trig *store.Trigger) (string, error) {
+	if trig.TriggerEnv[retryprovenance.PlanHashKey] == "" {
+		return "", &RetrySourceUnavailableError{Reason: "source run did not record a plan identity"}
+	}
+	expectedIdentity := strings.TrimSpace(trig.TriggerEnv[retryprovenance.RepoIdentityKey])
+	if expectedIdentity == "" {
+		return "", &RetrySourceUnavailableError{Reason: "source run did not record a full repository identity"}
+	}
+	expectedRevision := strings.TrimSpace(trig.TriggerEnv[retryprovenance.RevisionKey])
+	if expectedRevision == "" {
+		return "", &RetrySourceUnavailableError{Reason: "source run did not record a Git revision"}
+	}
+	repoDir := filepath.Clean(trig.TriggerEnv[retryprovenance.RepoDirKey])
+	if repoDir == "." || repoDir == "" {
+		return "", &RetrySourceUnavailableError{Reason: "source run did not record a repository root"}
+	}
+	if !filepath.IsAbs(repoDir) {
+		return "", &RetrySourceUnavailableError{RepoDir: repoDir, Reason: "recorded path is not absolute"}
+	}
+	resolved, err := filepath.EvalSymlinks(repoDir)
+	if err != nil {
+		return "", &RetrySourceUnavailableError{RepoDir: repoDir, Reason: err.Error()}
+	}
+	if err := assertGitDir(resolved); err != nil {
+		return "", &RetrySourceUnavailableError{RepoDir: resolved, Reason: "not a git checkout: " + err.Error()}
+	}
+	if info, err := os.Stat(filepath.Join(resolved, ".sparkwing")); err != nil || !info.IsDir() {
+		reason := "missing .sparkwing directory"
+		if err != nil {
+			reason += ": " + err.Error()
+		}
+		return "", &RetrySourceUnavailableError{RepoDir: resolved, Reason: reason}
+	}
+	actualIdentity, err := sparkwinggit.RemoteOriginURL(ctx, resolved)
+	if err != nil {
+		return "", &RetrySourceUnavailableError{RepoDir: resolved, Reason: "read repository identity: " + err.Error()}
+	}
+	if actualIdentity != expectedIdentity {
+		return "", &RetrySourceUnavailableError{
+			RepoDir: resolved,
+			Reason:  fmt.Sprintf("repository identity drift: recorded %q, checkout is %q", expectedIdentity, actualIdentity),
+		}
+	}
+	actualRevision, err := sparkwinggit.CurrentSHA(ctx, resolved)
+	if err != nil {
+		return "", &RetrySourceUnavailableError{RepoDir: resolved, Reason: "read checkout revision: " + err.Error()}
+	}
+	if !strings.EqualFold(actualRevision, expectedRevision) {
+		return "", &RetrySourceUnavailableError{
+			RepoDir: resolved,
+			Reason:  fmt.Sprintf("checkout revision drift: recorded %q, checkout is %q", expectedRevision, actualRevision),
+		}
+	}
+	return resolved, nil
 }
 
 // unlocatableChildError describes a same-repo child that resolved

@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -361,6 +363,92 @@ func TestRun_PersistsPlanSnapshotAndRunRow(t *testing.T) {
 	}
 	if len(r.PlanSnapshot) == 0 {
 		t.Fatal("plan snapshot not persisted")
+	}
+}
+
+func TestRun_RetryPlanDriftFailsBeforeCreatingNodes(t *testing.T) {
+	p := newPaths(t)
+	const runID = "retry-plan-drift"
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		Pipeline:          "orch-fanout-ok",
+		RunID:             runID,
+		RetryOf:           "source-run",
+		RetryRepoDir:      "/recorded/repo-a",
+		RetryRepoIdentity: "git@example.test:owner/repo-a.git",
+		RetryRevision:     "abc123",
+		RetryPlanHash:     "sha256:not-the-source-plan",
+	})
+	if err != nil {
+		t.Fatalf("RunLocal setup: %v", err)
+	}
+	if res.Status != "failed" || res.Error == nil || !strings.Contains(res.Error.Error(), "retry provenance drift") {
+		t.Fatalf("result=%+v, want retry provenance drift failure", res)
+	}
+
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	nodes, err := st.ListNodes(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nodes) != 0 {
+		t.Fatalf("retry plan drift created %d nodes; no step may start", len(nodes))
+	}
+	run, err := st.GetRun(context.Background(), runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov, _ := run.Invocation["retry_provenance"].(map[string]any)
+	if got := prov["repo_dir"]; got != "/recorded/repo-a" {
+		t.Fatalf("stored retry repo provenance=%v", got)
+	}
+	if got := prov["repo_identity"]; got != "git@example.test:owner/repo-a.git" {
+		t.Fatalf("stored retry repository identity=%v", got)
+	}
+	if got := prov["revision"]; got != "abc123" {
+		t.Fatalf("stored retry revision=%v", got)
+	}
+	if got := prov["content_policy"]; got != retryprovenance.RecordedRevisionSnapshotPolicy {
+		t.Fatalf("stored retry content policy=%v", got)
+	}
+}
+
+func TestRun_RetryAcceptsMatchingSourcePlanSnapshot(t *testing.T) {
+	p := newPaths(t)
+	const sourceID = "retry-plan-source"
+	source, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		Pipeline: "orch-fanout-ok",
+		RunID:    sourceID,
+	})
+	if err != nil || source.Status != "success" {
+		t.Fatalf("source run=%+v err=%v", source, err)
+	}
+
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceRun, err := st.GetRun(context.Background(), sourceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = st.Close()
+	sum := sha256.Sum256(sourceRun.PlanSnapshot)
+
+	retry, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		Pipeline:      "orch-fanout-ok",
+		RunID:         "retry-plan-match",
+		RetryOf:       sourceID,
+		RetryPlanHash: fmt.Sprintf("sha256:%x", sum),
+	})
+	if err != nil {
+		t.Fatalf("retry setup: %v", err)
+	}
+	if retry.Status != "success" {
+		t.Fatalf("matching source plan rejected: %+v", retry)
 	}
 }
 

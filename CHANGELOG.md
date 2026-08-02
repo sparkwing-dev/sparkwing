@@ -48,6 +48,15 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **controller:** local failed-run retries now compile and execute from an
+  immutable detached snapshot of the source run's recorded Git revision, and
+  verify its full origin identity and complete plan snapshot before node
+  creation. Dirty or subsequently edited working-tree files cannot change retry
+  behavior. If that provenance is unavailable, retry fails clearly instead of
+  falling back to an ambient checkout or another registered repo.
+
 ### Added
 
 - **agent discovery:** `info --for-agent` now emits current, one-wake context,

@@ -18,6 +18,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -83,6 +84,15 @@ type Options struct {
 
 	// RetrySource is store.RetrySourceManual or RetrySourceAuto.
 	RetrySource string
+
+	// RetryRepoDir, RetryRepoIdentity, RetryRevision, and RetryPlanHash are
+	// controller-bound provenance for a local retry. The checkout is selected
+	// and identity-checked before this process starts; Run independently verifies
+	// the plan snapshot before creating any node.
+	RetryRepoDir      string
+	RetryRepoIdentity string
+	RetryRevision     string
+	RetryPlanHash     string
 
 	// Full disables skip-passed rehydration on retry.
 	Full bool
@@ -389,6 +399,21 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	}
 	if opts.PipelineYAML != nil {
 		snapMeta.PipelineRequires = opts.PipelineYAML.Requires
+	}
+	if opts.RetryPlanHash != "" {
+		comparisonRC := rc
+		comparisonRC.RunID = opts.RetryOf
+		comparison, cerr := marshalPlanSnapshot(plan, comparisonRC, snapMeta)
+		actual := hashBytes(comparison)
+		if cerr != nil || actual != opts.RetryPlanHash {
+			if cerr != nil {
+				err = fmt.Errorf("retry provenance drift: compare plan snapshot: %w", cerr)
+			} else {
+				err = fmt.Errorf("retry provenance drift: source plan %s, checkout plan %s", opts.RetryPlanHash, actual)
+			}
+			_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+			return &Result{RunID: runID, Status: "failed", Error: err}, nil
+		}
 	}
 
 	snapshot, err := marshalPlanSnapshot(plan, rc, snapMeta)
@@ -1016,6 +1041,15 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 		inv["args"] = args
 		inv["inputs_hash"] = hashCanonicalJSON(opts.Args)
 	}
+	if opts.RetryRepoDir != "" || opts.RetryRepoIdentity != "" || opts.RetryRevision != "" || opts.RetryPlanHash != "" {
+		inv["retry_provenance"] = map[string]string{
+			"repo_dir":       opts.RetryRepoDir,
+			"repo_identity":  opts.RetryRepoIdentity,
+			"revision":       opts.RetryRevision,
+			"plan_hash":      opts.RetryPlanHash,
+			"content_policy": retryprovenance.RecordedRevisionSnapshotPolicy,
+		}
+	}
 	if flags := buildRunFlags(opts); len(flags) > 0 {
 		inv["flags"] = flags
 	}
@@ -1114,6 +1148,14 @@ func buildRunFlags(opts Options) map[string]any {
 func hashCanonicalJSON(v any) string {
 	buf, err := json.Marshal(v)
 	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(buf)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func hashBytes(buf []byte) string {
+	if len(buf) == 0 {
 		return ""
 	}
 	sum := sha256.Sum256(buf)

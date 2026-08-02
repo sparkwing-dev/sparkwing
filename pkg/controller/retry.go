@@ -1,11 +1,16 @@
 package controller
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"net/http"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -55,6 +60,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 	}
 
 	full := r.URL.Query().Get("full") == "1"
+	retryEnv := retryProvenance(src)
 
 	newID := newRunID()
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
@@ -63,7 +69,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		Args:          src.Args,
 		TriggerSource: "retry",
 		TriggerUser:   "",
-		TriggerEnv:    nil,
+		TriggerEnv:    retryEnv,
 		GitBranch:     src.GitBranch,
 		GitSHA:        src.GitSHA,
 		Repo:          src.Repo,
@@ -130,4 +136,71 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		"duration_ms":    0,
 		"retry_of":       srcID,
 	})
+}
+
+// retryProvenance binds a local retry to the exact checkout and static plan
+// recorded by its source attempt. Cluster runs may not have a host-visible cwd;
+// leaving the keys absent preserves their remote dispatch path, while the local
+// consumer treats missing keys on a retry as an unavailable source worktree.
+func retryProvenance(src *store.Run) map[string]string {
+	if src == nil {
+		return nil
+	}
+	if len(src.PlanSnapshot) == 0 {
+		return nil
+	}
+	sum := sha256.Sum256(src.PlanSnapshot)
+	planHash := "sha256:" + hex.EncodeToString(sum[:])
+	if inherited := inheritedRetryProvenance(src.Invocation["retry_provenance"]); inherited != nil {
+		inherited[retryprovenance.PlanHashKey] = planHash
+		return inherited
+	}
+
+	cwd, _ := src.Invocation["cwd"].(string)
+	if cwd == "" {
+		return nil
+	}
+	if abs, err := filepath.Abs(cwd); err == nil {
+		cwd = abs
+	}
+	cwd = filepath.Clean(cwd)
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
+	return map[string]string{
+		retryprovenance.RepoDirKey:      cwd,
+		retryprovenance.RepoIdentityKey: src.RepoURL,
+		retryprovenance.RevisionKey:     src.GitSHA,
+		retryprovenance.PlanHashKey:     planHash,
+	}
+}
+
+// inheritedRetryProvenance keeps a retry chain bound to its original durable
+// checkout. A retry run's cwd is an intentionally short-lived snapshot, so a
+// later retry must inherit the recorded source rather than capture that temp
+// directory. Invocation data may be freshly built or JSON-decoded from storage.
+func inheritedRetryProvenance(raw any) map[string]string {
+	var value func(string) string
+	switch provenance := raw.(type) {
+	case map[string]string:
+		value = func(key string) string { return provenance[key] }
+	case map[string]any:
+		value = func(key string) string {
+			v, _ := provenance[key].(string)
+			return v
+		}
+	default:
+		return nil
+	}
+	repoDir := strings.TrimSpace(value("repo_dir"))
+	repoIdentity := strings.TrimSpace(value("repo_identity"))
+	revision := strings.TrimSpace(value("revision"))
+	if repoDir == "" || repoIdentity == "" || revision == "" {
+		return nil
+	}
+	return map[string]string{
+		retryprovenance.RepoDirKey:      repoDir,
+		retryprovenance.RepoIdentityKey: repoIdentity,
+		retryprovenance.RevisionKey:     revision,
+	}
 }
