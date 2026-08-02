@@ -346,9 +346,8 @@ func (h *holder) spawnChildren(token string) {
 			"--version", h.hf.version,
 			"--run-ms", strconv.Itoa(childMS),
 		)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		if err := cmd.Start(); err == nil {
-			_ = cmd.Process.Release()
+			go func() { _ = cmd.Wait() }()
 		}
 	}
 }
@@ -371,11 +370,11 @@ func (h *holder) daemonSpawner() func(home, version string) error {
 			"--total-cores", strconv.FormatFloat(h.hf.daemonCores, 'f', -1, 64),
 			"--total-mem-mb", strconv.Itoa(h.hf.daemonMemMB),
 		)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 		if err := cmd.Start(); err != nil {
 			return err
 		}
-		return cmd.Process.Release()
+		go func() { _ = cmd.Wait() }()
+		return nil
 	}
 }
 

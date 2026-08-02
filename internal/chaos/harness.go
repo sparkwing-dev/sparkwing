@@ -14,7 +14,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -54,6 +53,12 @@ type Config struct {
 	DaemonGraceMS int
 	// DaemonCores is the fixed host core capacity the daemon advertises.
 	DaemonCores float64
+	// MaxOwnedProcesses bounds the total number of processes in groups the
+	// harness owns. A non-positive value derives a limit from MaxActors.
+	MaxOwnedProcesses int
+	// MaxOwnedZombies bounds transient zombies in harness-owned groups. A
+	// non-positive value uses a small default that catches failed reaping.
+	MaxOwnedZombies int
 }
 
 // CIConfig returns a bounded configuration suitable for `go test`: a short
@@ -61,15 +66,17 @@ type Config struct {
 // hold on a loaded machine.
 func CIConfig(seed int64) Config {
 	return Config{
-		Seed:          seed,
-		Duration:      25 * time.Second,
-		MaxActors:     10,
-		Settle:        6 * time.Second,
-		EnableCLI:     true,
-		FaultBudget:   0.6,
-		DaemonIdleMS:  3000,
-		DaemonGraceMS: 2500,
-		DaemonCores:   8,
+		Seed:              seed,
+		Duration:          25 * time.Second,
+		MaxActors:         10,
+		Settle:            6 * time.Second,
+		EnableCLI:         true,
+		FaultBudget:       0.6,
+		DaemonIdleMS:      3000,
+		DaemonGraceMS:     2500,
+		DaemonCores:       8,
+		MaxOwnedProcesses: 96,
+		MaxOwnedZombies:   4,
 	}
 }
 
@@ -77,15 +84,17 @@ func CIConfig(seed int64) Config {
 // runs: the given duration, higher actor counts, and a heavier fault mix.
 func SoakConfig(seed int64, d time.Duration) Config {
 	return Config{
-		Seed:          seed,
-		Duration:      d,
-		MaxActors:     24,
-		Settle:        8 * time.Second,
-		EnableCLI:     true,
-		FaultBudget:   1.0,
-		DaemonIdleMS:  10000,
-		DaemonGraceMS: 3000,
-		DaemonCores:   16,
+		Seed:              seed,
+		Duration:          d,
+		MaxActors:         24,
+		Settle:            8 * time.Second,
+		EnableCLI:         true,
+		FaultBudget:       1.0,
+		DaemonIdleMS:      10000,
+		DaemonGraceMS:     3000,
+		DaemonCores:       16,
+		MaxOwnedProcesses: 192,
+		MaxOwnedZombies:   4,
 	}
 }
 
@@ -106,8 +115,19 @@ type Harness struct {
 	actors         map[string]*actor
 	nextID         int
 	ctl            *client.Client
+	daemons        map[int]*daemonProcess
 	daemonKilledAt time.Time
 	verSeq         int
+}
+
+type daemonProcess struct {
+	pgid int
+	done chan struct{}
+}
+
+type processInfo struct {
+	pgid  int
+	state string
 }
 
 type actor struct {
@@ -120,6 +140,7 @@ type actor struct {
 	rejected bool
 	killed   bool
 	exited   bool
+	pgid     int
 	killedAt time.Time
 	exitedAt time.Time
 }
@@ -128,6 +149,9 @@ type actor struct {
 // violation. On any failure it prints the seed and journal path so the run
 // is reproducible.
 func Run(t testing.TB, cfg Config) {
+	if err := processGroupSupport(); err != nil {
+		t.Fatalf("chaos process ownership: %v", err)
+	}
 	if cfg.Seed == 0 {
 		cfg.Seed = time.Now().UnixNano()
 	}
@@ -150,22 +174,27 @@ func Run(t testing.TB, cfg Config) {
 	}
 
 	h := &Harness{
-		cfg:    cfg,
-		t:      t,
-		home:   home,
-		rng:    rand.New(rand.NewSource(cfg.Seed)),
-		jr:     jr,
-		actors: map[string]*actor{},
+		cfg:     cfg,
+		t:       t,
+		home:    home,
+		rng:     rand.New(rand.NewSource(cfg.Seed)),
+		jr:      jr,
+		actors:  map[string]*actor{},
+		daemons: map[int]*daemonProcess{},
 	}
+	defer func() { _ = jr.Close() }()
+	defer h.cleanup()
 	t.Logf("chaos seed=%d journal=%s home=%s", cfg.Seed, jpath, home)
 	jr.Append(Event{Kind: "seed", Detail: strconv.FormatInt(cfg.Seed, 10)})
 
 	h.buildBinaries()
 	h.loop()
 	h.quiesce()
+	if t.Failed() {
+		return
+	}
 	h.converge()
 
-	_ = jr.Close()
 	if !t.Failed() {
 		t.Logf("chaos passed seed=%d", cfg.Seed)
 	}
@@ -200,10 +229,17 @@ func (h *Harness) loop() {
 	for time.Now().Before(deadline) {
 		h.step()
 		h.checkLedger()
+		if h.t.Failed() {
+			return
+		}
 		if time.Since(lastOS) > 300*time.Millisecond {
 			h.checkOS()
+			h.checkProcessGrowth()
 			h.scanDaemonPanic()
 			lastOS = time.Now()
+		}
+		if h.t.Failed() {
+			return
 		}
 		time.Sleep(time.Duration(15+h.rng.Intn(70)) * time.Millisecond)
 	}
@@ -301,6 +337,7 @@ func (h *Harness) spawn(wedged bool) {
 		return
 	}
 	a.cmd = cmd
+	a.pgid = cmd.Process.Pid
 	h.mu.Lock()
 	h.actors[runID] = a
 	h.mu.Unlock()
@@ -316,6 +353,11 @@ func startActorCommand(cmd *exec.Cmd) (io.ReadCloser, error) {
 		return nil, err
 	}
 	cmd.Stdout = childStdout
+	if err := configureOwnedProcessGroup(cmd); err != nil {
+		_ = stdout.Close()
+		_ = childStdout.Close()
+		return nil, err
+	}
 	if err := cmd.Start(); err != nil {
 		_ = stdout.Close()
 		_ = childStdout.Close()
@@ -327,7 +369,6 @@ func startActorCommand(cmd *exec.Cmd) (io.ReadCloser, error) {
 
 func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
 	scanned := make(chan struct{})
-	terminal := make(chan struct{}, 1)
 	go func() {
 		defer close(scanned)
 		sc := bufio.NewScanner(stdout)
@@ -339,36 +380,17 @@ func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
 				a.granted = true
 				h.mu.Unlock()
 				h.jr.Append(Event{Kind: "grant", Run: a.runID})
-				select {
-				case terminal <- struct{}{}:
-				default:
-				}
 			case strings.HasPrefix(line, "REJECT"):
 				h.mu.Lock()
 				a.rejected = true
 				h.mu.Unlock()
 				h.jr.Append(Event{Kind: "reject", Run: a.runID, Detail: strings.TrimPrefix(line, "REJECT ")})
-				select {
-				case terminal <- struct{}{}:
-				default:
-				}
 			}
 		}
 	}()
 	_ = a.cmd.Wait()
-	h.mu.Lock()
-	killed := a.killed
-	recordedTerminal := a.granted || a.rejected
-	h.mu.Unlock()
-	if !killed && !recordedTerminal {
-		settle := h.cfg.Settle
-		if settle <= 0 {
-			settle = time.Second
-		}
-		select {
-		case <-terminal:
-		case <-time.After(settle):
-		}
+	if err := terminateProcessGroup(a.pgid, 100*time.Millisecond, h.processWait()); err != nil {
+		h.t.Errorf("reap actor group %d: %v", a.pgid, err)
 	}
 	_ = stdout.Close()
 	<-scanned
@@ -399,9 +421,9 @@ func (h *Harness) killActor(a *actor, kind string) {
 	}
 	a.killed = true
 	a.killedAt = time.Now()
-	pid := a.cmd.Process.Pid
+	pgid := a.pgid
 	h.mu.Unlock()
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	_ = killProcessGroup(pgid)
 	h.jr.Append(Event{Kind: kind, Run: a.runID})
 }
 
@@ -419,7 +441,9 @@ func (h *Harness) killDaemon() {
 		h.ctl = nil
 	}
 	h.mu.Unlock()
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	if process, err := os.FindProcess(pid); err == nil {
+		_ = process.Kill()
+	}
 	h.jr.Append(Event{Kind: "kill_daemon", Detail: strconv.Itoa(pid)})
 }
 
@@ -451,7 +475,7 @@ func (h *Harness) takeover() {
 	if err != nil {
 		return
 	}
-	a := &actor{runID: runID, cores: 0.2, cmd: cmd}
+	a := &actor{runID: runID, cores: 0.2, cmd: cmd, pgid: cmd.Process.Pid}
 	h.mu.Lock()
 	h.actors[runID] = a
 	h.mu.Unlock()
@@ -547,6 +571,70 @@ func (h *Harness) checkOS() {
 	}
 }
 
+// checkProcessGrowth fails fast before leaked descendants can exhaust the
+// machine's process table.
+func (h *Harness) checkProcessGrowth() {
+	groups := h.ownedProcessGroups()
+	if len(groups) == 0 {
+		return
+	}
+	processes, err := processTable()
+	if err != nil {
+		h.fail("process-growth", []string{fmt.Sprintf("inspect owned process groups: %v", err)}, wingwire.QueueState{})
+		return
+	}
+	maxProcesses, maxZombies := h.processLimits()
+	var owned, zombies int
+	for _, process := range processes {
+		if !groups[process.pgid] {
+			continue
+		}
+		owned++
+		if strings.HasPrefix(process.state, "Z") {
+			zombies++
+		}
+	}
+	var violations []string
+	if owned > maxProcesses {
+		violations = append(violations, fmt.Sprintf("owned processes %d exceed limit %d", owned, maxProcesses))
+	}
+	if zombies > maxZombies {
+		violations = append(violations, fmt.Sprintf("owned zombies %d exceed limit %d", zombies, maxZombies))
+	}
+	if len(violations) > 0 {
+		h.fail("process-growth", violations, wingwire.QueueState{})
+	}
+}
+
+func (h *Harness) processLimits() (int, int) {
+	maxProcesses := h.cfg.MaxOwnedProcesses
+	if maxProcesses <= 0 {
+		maxProcesses = h.cfg.MaxActors*4 + 32
+	}
+	maxZombies := h.cfg.MaxOwnedZombies
+	if maxZombies <= 0 {
+		maxZombies = 4
+	}
+	return maxProcesses, maxZombies
+}
+
+func (h *Harness) ownedProcessGroups() map[int]bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	groups := make(map[int]bool, len(h.actors)+len(h.daemons))
+	for _, a := range h.actors {
+		if !a.exited && a.pgid > 1 {
+			groups[a.pgid] = true
+		}
+	}
+	for pgid := range h.daemons {
+		if pgid > 1 {
+			groups[pgid] = true
+		}
+	}
+	return groups
+}
+
 // leakStable reports whether enough time has passed since the last daemon
 // kill that no restored lease is still within its reattach grace window;
 // only then can a dead holder be judged a genuine leak.
@@ -617,7 +705,7 @@ func (h *Harness) quiesce() {
 			if !a.killed && a.cmd != nil && a.cmd.Process != nil {
 				a.killed = true
 				a.killedAt = time.Now()
-				_ = syscall.Kill(a.cmd.Process.Pid, syscall.SIGKILL)
+				_ = killProcessGroup(a.pgid)
 			}
 		}
 	}
@@ -625,10 +713,57 @@ func (h *Harness) quiesce() {
 	deadline := time.Now().Add(h.cfg.Settle + 3*time.Second)
 	for time.Now().Before(deadline) {
 		if h.allExited(pending) {
-			break
+			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	if !h.allExited(pending) {
+		h.fail("process-cleanup", []string{"actors did not exit within the quiescence bound"}, wingwire.QueueState{})
+	}
+}
+
+func (h *Harness) cleanup() {
+	h.mu.Lock()
+	if h.ctl != nil {
+		_ = h.ctl.Close()
+		h.ctl = nil
+	}
+	actors := make([]*actor, 0, len(h.actors))
+	for _, a := range h.actors {
+		if !a.exited {
+			actors = append(actors, a)
+		}
+	}
+	daemons := make([]*daemonProcess, 0, len(h.daemons))
+	for _, daemon := range h.daemons {
+		daemons = append(daemons, daemon)
+	}
+	h.mu.Unlock()
+
+	for _, a := range actors {
+		_ = killProcessGroup(a.pgid)
+	}
+	for _, daemon := range daemons {
+		_ = killProcessGroup(daemon.pgid)
+	}
+	deadline := time.Now().Add(h.processWait())
+	for !h.allExited(actors) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	for _, daemon := range daemons {
+		select {
+		case <-daemon.done:
+		case <-time.After(time.Until(deadline)):
+			h.t.Errorf("daemon process group %d did not exit within cleanup bound", daemon.pgid)
+		}
+	}
+}
+
+func (h *Harness) processWait() time.Duration {
+	if h.cfg.Settle > 0 {
+		return h.cfg.Settle
+	}
+	return time.Second
 }
 
 func (h *Harness) allExited(as []*actor) bool {
@@ -738,12 +873,36 @@ func (h *Harness) daemonSpawn() func(home, version string) error {
 			"--idle-ms", strconv.Itoa(h.cfg.DaemonIdleMS),
 			"--total-cores", strconv.FormatFloat(h.cfg.DaemonCores, 'f', -1, 64),
 		)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		return cmd.Process.Release()
+		return h.startDaemonCommand(cmd)
 	}
+}
+
+func (h *Harness) startDaemonCommand(cmd *exec.Cmd) error {
+	if err := configureOwnedProcessGroup(cmd); err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	process := &daemonProcess{pgid: cmd.Process.Pid, done: make(chan struct{})}
+	h.mu.Lock()
+	if h.daemons == nil {
+		h.daemons = map[int]*daemonProcess{}
+	}
+	h.daemons[process.pgid] = process
+	h.mu.Unlock()
+	go func() {
+		_ = cmd.Wait()
+		err := terminateProcessGroup(process.pgid, 100*time.Millisecond, h.processWait())
+		h.mu.Lock()
+		delete(h.daemons, process.pgid)
+		h.mu.Unlock()
+		close(process.done)
+		if err != nil {
+			h.t.Errorf("reap daemon group %d: %v", process.pgid, err)
+		}
+	}()
+	return nil
 }
 
 func (h *Harness) sockPath() string {

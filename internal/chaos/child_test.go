@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 
@@ -42,7 +41,7 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 		t.Fatalf("start parent: %v", err)
 	}
 	t.Cleanup(func() {
-		_ = syscall.Kill(parent.Process.Pid, syscall.SIGKILL)
+		_ = parent.Process.Kill()
 		_, _ = parent.Process.Wait()
 	})
 
