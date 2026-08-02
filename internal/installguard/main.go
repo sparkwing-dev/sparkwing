@@ -12,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -22,7 +21,6 @@ import (
 
 const (
 	defaultLockTimeout = 2 * time.Minute
-	staleLockAge       = 10 * time.Minute
 )
 
 type buildIdentity struct {
@@ -89,6 +87,7 @@ type installDecision int
 const (
 	installCandidate installDecision = iota
 	keepCurrent
+	unorderedBuilds
 )
 
 func decideInstall(candidate, current buildIdentity, allowDowngrade bool) installDecision {
@@ -112,7 +111,7 @@ func decideInstall(candidate, current buildIdentity, allowDowngrade bool) instal
 	}
 	// safety: equal timestamps with different or missing revisions are unordered.
 	// Fail closed rather than deciding from a semver label or invocation order.
-	return keepCurrent
+	return unorderedBuilds
 }
 
 type identityReader func(string) (buildIdentity, error)
@@ -127,10 +126,18 @@ func installLocked(candidate, target string, candidateID buildIdentity, allowDow
 	}
 	candidateID.SHA256 = candidateHash
 	currentID, err := read(target)
-	if err == nil && decideInstall(candidateID, currentID, allowDowngrade) == keepCurrent {
-		fmt.Printf("kept newer sparkwing: %s\n", currentID)
-		fmt.Printf("skipped older candidate: %s\n", candidateID)
-		return false, nil
+	if err == nil {
+		switch decideInstall(candidateID, currentID, allowDowngrade) {
+		case keepCurrent:
+			fmt.Printf("kept newer sparkwing: %s\n", currentID)
+			fmt.Printf("skipped older candidate: %s\n", candidateID)
+			return false, nil
+		case unorderedBuilds:
+			return false, fmt.Errorf(
+				"candidate %s and current binary %s are unordered; refusing replacement (set SPARKWING_INSTALL_ALLOW_DOWNGRADE=1 to recover explicitly)",
+				candidateID, currentID,
+			)
+		}
 	}
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		if !allowDowngrade {
@@ -182,27 +189,42 @@ func writeBuildIdentity(target string, id buildIdentity) error {
 }
 
 func withInstallLock(target string, timeout time.Duration, fn func() error) error {
-	lockDir := target + ".install.lock"
+	lockPath := target + ".install.lock"
+	lockFile, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("open install lock: %w", err)
+	}
+	defer lockFile.Close()
+
 	deadline := time.Now().Add(timeout)
 	for {
-		err := os.Mkdir(lockDir, 0o700)
-		if err == nil {
-			defer func() { _ = os.RemoveAll(lockDir) }()
-			_ = os.WriteFile(filepath.Join(lockDir, "owner"), []byte(fmt.Sprintf("pid=%d\n", os.Getpid())), 0o600)
-			return fn()
-		}
-		if !errors.Is(err, os.ErrExist) {
+		locked, err := tryInstallLock(lockFile)
+		if err != nil {
 			return fmt.Errorf("acquire install lock: %w", err)
 		}
-		if info, statErr := os.Stat(lockDir); statErr == nil && time.Since(info.ModTime()) > staleLockAge {
-			_ = os.RemoveAll(lockDir)
-			continue
+		if locked {
+			defer func() { _ = unlockInstallLock(lockFile) }()
+			if err := writeLockOwner(lockFile); err != nil {
+				return fmt.Errorf("record install lock owner: %w", err)
+			}
+			return fn()
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("timed out waiting for install lock %s", lockDir)
+			return fmt.Errorf("timed out waiting for install lock %s", lockPath)
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+}
+
+func writeLockOwner(lockFile *os.File) error {
+	if err := lockFile.Truncate(0); err != nil {
+		return err
+	}
+	if _, err := lockFile.Seek(0, 0); err != nil {
+		return err
+	}
+	_, err := fmt.Fprintf(lockFile, "pid=%d\n", os.Getpid())
+	return err
 }
 
 func main() {

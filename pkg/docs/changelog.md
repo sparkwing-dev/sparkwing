@@ -51,10 +51,11 @@ code change to unlock.
 ### Fixed
 
 - **install:** source installs now build a candidate and serialize the final
-  compare-and-swap using Git revision/time identity bound to the installed
-  binary's hash. An older consumer worktree exits successfully without
-  replacing a newer machine-global CLI; an unordered existing binary fails
-  with `SPARKWING_INSTALL_ALLOW_DOWNGRADE=1` as the explicit recovery escape.
+  compare-and-swap with an OS-owned lock using Git revision/time identity bound
+  to the installed binary's hash. An older consumer worktree exits successfully
+  without replacing a newer machine-global CLI; equal-time peer revisions and
+  other unordered identities fail closed with
+  `SPARKWING_INSTALL_ALLOW_DOWNGRADE=1` as the explicit recovery escape.
 
 ### Added
 
