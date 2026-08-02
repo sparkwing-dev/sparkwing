@@ -125,7 +125,6 @@ func TestRunWork_ParentCancellationDoesNotEmitFailFastTrigger(t *testing.T) {
 	w := sparkwing.NewWork().ParallelFailures(sparkwing.FailFast)
 	started := make(chan string, 2)
 	for _, id := range []string{"first", "second"} {
-		id := id
 		sparkwing.Step(w, id, func(ctx context.Context) error {
 			started <- id
 			<-ctx.Done()
