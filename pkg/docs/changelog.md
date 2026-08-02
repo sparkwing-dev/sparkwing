@@ -48,6 +48,14 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **install:** source installs now build a candidate and serialize the final
+  compare-and-swap using Git revision/time identity bound to the installed
+  binary's hash. An older consumer worktree exits successfully without
+  replacing a newer machine-global CLI; an unordered existing binary fails
+  with `SPARKWING_INSTALL_ALLOW_DOWNGRADE=1` as the explicit recovery escape.
+
 ### Added
 
 - **agent discovery:** `info --for-agent` now emits current, one-wake context,

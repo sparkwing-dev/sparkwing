@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Build the sparkwing CLI and install to ~/.local/bin so any previously
-# installed copy is replaced.
+# Build the sparkwing CLI and install to ~/.local/bin when this checkout is
+# newer than the installed build. Parallel source installs serialize their
+# final compare-and-swap, so an older worktree cannot overwrite a newer CLI.
 #
 # Only `sparkwing` lands on laptops. Cluster-side binaries (controller,
 # runner, cache, logs, web) ship as Docker images. The old standalone
@@ -36,12 +37,33 @@ fi
 BASE="$(git -C "$ROOT" tag -l 'v0.*' | sort -V | tail -1)"
 [ -n "$BASE" ] || BASE="v0.0.0"
 VERSION="$BASE-dev+$(git -C "$ROOT" rev-parse --short HEAD)"
-if ! git -C "$ROOT" diff --quiet HEAD 2>/dev/null; then
+REVISION="$(git -C "$ROOT" rev-parse HEAD)"
+COMMIT_TIME="$(git -C "$ROOT" show -s --format=%cI HEAD)"
+modified=0
+if [ -n "$(git -C "$ROOT" status --porcelain --untracked-files=normal 2>/dev/null)" ]; then
   VERSION="$VERSION+dirty"
+  modified=1
 fi
 
 echo "build sparkwing $VERSION"
-go -C "$ROOT" build -ldflags "-X main.Version=$VERSION" -o "$DEST/sparkwing" ./cmd/sparkwing
+candidate="$DEST/.sparkwing-candidate-$$"
+trap 'rm -f "$candidate"' EXIT
+go -C "$ROOT" build -ldflags "-X main.Version=$VERSION" -o "$candidate" ./cmd/sparkwing
+
+guard_args=(
+  --candidate "$candidate"
+  --target "$DEST/sparkwing"
+  --candidate-version "$VERSION"
+  --candidate-revision "$REVISION"
+  --candidate-time "$COMMIT_TIME"
+)
+if [ "$modified" = "1" ]; then
+  guard_args+=(--candidate-modified)
+fi
+if [ "${SPARKWING_INSTALL_ALLOW_DOWNGRADE:-0}" = "1" ]; then
+  guard_args+=(--allow-downgrade)
+fi
+go -C "$ROOT" run ./internal/installguard "${guard_args[@]}"
 
 # Sweep deprecated / cluster-only binaries that don't belong on a user
 # laptop. We check $DEST (install target) and $GOPATH/bin (where a
@@ -73,4 +95,4 @@ done
 
 echo
 echo "Installed to $DEST:"
-ls -1 "$DEST"/sparkwing*
+ls -1 "$DEST/sparkwing"
