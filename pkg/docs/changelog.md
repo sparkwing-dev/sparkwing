@@ -150,6 +150,12 @@ code change to unlock.
 
 ### Fixed
 
+- **queue:** the pretty CLI and dashboard now count one running pipeline once
+  when its resource-free orchestration lease and resource-holding node appear
+  as separate daemon participants. Raw JSON and plain accounting rows remain
+  unchanged, and a parent that independently owns host capacity or a semaphore
+  stays visible.
+
 - **queue:** waiter reasons now follow the admission ledger's CPU liveness
   floor. An otherwise-idle run that is really waiting for memory or a semaphore
   no longer blames external CPU merely because raw CPU headroom is below its

@@ -202,7 +202,7 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	if cc := FmtCapacityChange(qs.CapacityChange); cc != "" {
 		fmt.Fprintln(out, cc)
 	}
-	fmt.Fprintf(out, "local admission: %d holding, %d queued%s\n", len(holders), len(qs.Waiters), clear)
+	fmt.Fprintf(out, "local admission: %d holding, %d queued%s\n", holderLifecycleCount(holders), len(qs.Waiters), clear)
 	if line := FmtEventsLine(qs.Events); line != "" {
 		fmt.Fprintln(out, line)
 	}
@@ -320,19 +320,48 @@ func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 func queueLifecycleHolders(qs wingwire.QueueState) []wingwire.Holder {
 	waitingOwners := make(map[string]bool)
 	for _, w := range qs.Waiters {
-		if w.ParticipantID != "" {
+		if w.RunID != "" {
 			waitingOwners[w.RunID] = true
+		}
+	}
+	activeOwners := make(map[string]bool)
+	for _, h := range qs.Holders {
+		if h.Parent == "" && (h.ParticipantID != "" || holderOwnsCapacity(h)) {
+			activeOwners[h.RunID] = true
 		}
 	}
 	holders := make([]wingwire.Holder, 0, len(qs.Holders))
 	for _, h := range qs.Holders {
 		orchestrationWait := h.AdmissionWaiting ||
 			(h.ParticipantID == "" && h.Parent == "" && h.Resources.Cores <= 0 && h.Resources.MemoryBytes <= 0 && waitingOwners[h.RunID])
-		if !orchestrationWait {
+		redundantOrchestrationParent := h.ParticipantID == "" && h.Parent == "" &&
+			h.Resources.Cores <= 0 && h.Resources.MemoryBytes <= 0 && len(h.Semaphores) == 0 &&
+			activeOwners[h.RunID]
+		if !orchestrationWait && !redundantOrchestrationParent {
 			holders = append(holders, h)
 		}
 	}
 	return holders
+}
+
+func holderOwnsCapacity(h wingwire.Holder) bool {
+	return h.Resources.Cores > 0 || h.Resources.MemoryBytes > 0 || len(h.Semaphores) > 0
+}
+
+// holderLifecycleCount reports user-visible pipelines rather than daemon
+// participants. Several independently useful rows may share one owner RunID
+// (for example a parent semaphore and a node host lease), but the header still
+// describes one running pipeline.
+func holderLifecycleCount(holders []wingwire.Holder) int {
+	owners := make(map[string]struct{}, len(holders))
+	for _, h := range holders {
+		key := h.RunID
+		if key == "" {
+			key = h.ParticipantID
+		}
+		owners[key] = struct{}{}
+	}
+	return len(owners)
 }
 
 // resourceAvailable is the grantable amount to show for a resource row: the

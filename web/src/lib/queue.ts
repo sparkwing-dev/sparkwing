@@ -200,7 +200,19 @@ export function queueLifecycleHolders(
   waiters: QueueWaiter[],
 ): QueueHolder[] {
   const waitingOwners = new Set(
-    waiters.filter((w) => !!w.participant_id).map((w) => w.run_id),
+    waiters.filter((w) => !!w.run_id).map((w) => w.run_id),
+  );
+  const activeOwners = new Set(
+    holders
+      .filter(
+        (h) =>
+          !h.parent &&
+          (!!h.participant_id ||
+            (h.resources?.cores ?? 0) > 0 ||
+            (h.resources?.memory_bytes ?? 0) > 0 ||
+            (h.semaphores?.length ?? 0) > 0),
+      )
+      .map((h) => h.run_id),
   );
   return holders.filter((h) => {
     const orchestrationWait =
@@ -210,8 +222,24 @@ export function queueLifecycleHolders(
         (h.resources?.cores ?? 0) <= 0 &&
         (h.resources?.memory_bytes ?? 0) <= 0 &&
         waitingOwners.has(h.run_id));
-    return !orchestrationWait;
+    const redundantOrchestrationParent =
+      !h.participant_id &&
+      !h.parent &&
+      (h.resources?.cores ?? 0) <= 0 &&
+      (h.resources?.memory_bytes ?? 0) <= 0 &&
+      (h.semaphores?.length ?? 0) === 0 &&
+      activeOwners.has(h.run_id);
+    return !orchestrationWait && !redundantOrchestrationParent;
   });
+}
+
+// queueLifecycleHolderCount reports user-visible pipelines, not their daemon
+// participants. Distinct rows with one owner RunID still count as one running
+// lifecycle while attached child runs retain their own identity.
+export function queueLifecycleHolderCount(holders: QueueHolder[]): number {
+  return new Set(
+    holders.map((h) => h.run_id || h.participant_id || ""),
+  ).size;
 }
 
 // daemonUptimeLabel renders how long the serving daemon has been up:

@@ -130,6 +130,129 @@ func TestRenderQueuePretty_ShowsAdmissionWaitingRunOnce(t *testing.T) {
 	}
 }
 
+func TestRenderQueuePretty_ShowsOlderAdmissionWaitingPayloadOnce(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{{RunID: "run-1", Resources: wingwire.HostResources{}}},
+		Waiters: []wingwire.Waiter{{
+			RunID: "run-1", Position: 1, Resources: wingwire.HostResources{Cores: 4},
+		}},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "local admission: 0 holding, 1 queued") || strings.Contains(out, "0 cores") {
+		t.Fatalf("identity-less admission wait rendered as a holder and waiter:\n%s", out)
+	}
+}
+
+func TestRenderQueuePretty_CollapsesResourceFreeOrchestrationParent(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{
+			{
+				RunID:     "run-1",
+				Pipeline:  "pre-commit",
+				ElapsedMS: 90_000,
+				Resources: wingwire.HostResources{},
+			},
+			{
+				RunID:         "run-1",
+				ParticipantID: "run-1/node-host/cHJlLWNvbW1pdA",
+				DisplayRunID:  "run-1/pre-commit",
+				Pipeline:      "pre-commit",
+				ElapsedMS:     90_000,
+				Resources:     wingwire.HostResources{Cores: 4},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"local admission: 1 holding, 0 queued", "run-1/pre-commit", "4 cores"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("running lifecycle omitted %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "0 cores") {
+		t.Fatalf("resource-free orchestration parent rendered as a second holder:\n%s", out)
+	}
+}
+
+func TestRenderQueuePretty_CollapsesParentFromOlderParticipantPayload(t *testing.T) {
+	qs := wingwire.QueueState{Holders: []wingwire.Holder{
+		{RunID: "run-1", Pipeline: "pre-push", Resources: wingwire.HostResources{}},
+		{RunID: "run-1", Pipeline: "pre-push", Resources: wingwire.HostResources{Cores: 4}},
+	}}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "local admission: 1 holding, 0 queued") || strings.Contains(out, "0 cores") {
+		t.Fatalf("identity-less participant payload rendered twice:\n%s", out)
+	}
+}
+
+func TestRenderQueuePretty_RetainsIndependentParentOwnershipButCountsLifecycleOnce(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{
+			{
+				RunID:      "run-1",
+				Pipeline:   "deploy",
+				Resources:  wingwire.HostResources{},
+				Semaphores: []string{"production"},
+			},
+			{
+				RunID:         "run-1",
+				ParticipantID: "run-1/node-host/ZGVwbG95",
+				DisplayRunID:  "run-1/deploy",
+				Pipeline:      "deploy",
+				Resources:     wingwire.HostResources{Cores: 2},
+			},
+		},
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueuePretty(&buf, qs); err != nil {
+		t.Fatalf("render pretty: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"local admission: 1 holding, 0 queued", "production", "run-1/deploy", "2 cores"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("independent ownership omitted %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderQueueJSON_PreservesOrchestrationAndParticipantRows(t *testing.T) {
+	qs := wingwire.QueueState{Holders: []wingwire.Holder{
+		{RunID: "run-1", Pipeline: "pre-commit", Resources: wingwire.HostResources{}},
+		{
+			RunID:         "run-1",
+			ParticipantID: "run-1/node-host/cHJlLWNvbW1pdA",
+			DisplayRunID:  "run-1/pre-commit",
+			Pipeline:      "pre-commit",
+			Resources:     wingwire.HostResources{Cores: 4},
+		},
+	}}
+	var buf bytes.Buffer
+	if err := opsview.RenderQueue(&buf, qs, "json"); err != nil {
+		t.Fatalf("render json: %v", err)
+	}
+	var got wingwire.QueueState
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("decode json: %v", err)
+	}
+	if len(got.Holders) != 2 {
+		t.Fatalf("raw JSON collapsed accounting rows: %+v", got.Holders)
+	}
+	if got.Holders[0].ParticipantID != "" || got.Holders[1].ParticipantID != "run-1/node-host/cHJlLWNvbW1pdA" || got.Holders[1].RunID != "run-1" {
+		t.Fatalf("raw JSON lost owner/participant identity: %+v", got.Holders)
+	}
+}
+
 func TestRenderQueuePlain_IncludesParticipantAndDisplayIdentity(t *testing.T) {
 	qs := wingwire.QueueState{
 		Holders: []wingwire.Holder{

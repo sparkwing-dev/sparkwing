@@ -31,6 +31,7 @@ import {
   fmtHolderCost,
   groupHolders,
   hasDaemon,
+  queueLifecycleHolderCount,
   queueLifecycleHolders,
   queueRowID,
   resourceAvailable,
@@ -81,7 +82,9 @@ export default function QueuePage() {
 
 function Header({ qs, pulse }: { qs: QueueState | null; pulse: boolean }) {
   const waiterRows = qs?.waiters ?? [];
-  const holders = queueLifecycleHolders(qs?.holders ?? [], waiterRows).length;
+  const holders = queueLifecycleHolderCount(
+    queueLifecycleHolders(qs?.holders ?? [], waiterRows),
+  );
   const waiters = waiterRows.length;
   const running = qs != null && hasDaemon(qs);
   const version = qs?.daemon_version || "";

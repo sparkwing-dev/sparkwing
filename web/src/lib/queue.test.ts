@@ -14,6 +14,7 @@ import {
   groupHolders,
   hasDaemon,
   humanBytes,
+  queueLifecycleHolderCount,
   queueLifecycleHolders,
   queueRowID,
   resourceAvailable,
@@ -309,6 +310,22 @@ describe("queueLifecycleHolders", () => {
     assert.deepEqual(visible.map((h) => h.run_id), ["other"]);
   });
 
+  it("hides the parent when an older waiter payload lacks its internal id", () => {
+    const holder: QueueHolder = {
+      run_id: "run-1",
+      elapsed_ms: 90_000,
+      resources: {},
+    };
+    const visible = queueLifecycleHolders([holder], [
+      {
+        run_id: "run-1",
+        position: 1,
+        resources: { cores: 4 },
+      },
+    ]);
+    assert.deepEqual(visible, []);
+  });
+
   it("keeps a genuinely idle holder visible", () => {
     const holder: QueueHolder = {
       run_id: "wedged",
@@ -317,6 +334,62 @@ describe("queueLifecycleHolders", () => {
       stalled: true,
     };
     assert.deepEqual(queueLifecycleHolders([holder], []), [holder]);
+  });
+
+  it("collapses a resource-free orchestration parent into its active participant", () => {
+    const holders: QueueHolder[] = [
+      {
+        run_id: "run-1",
+        elapsed_ms: 90_000,
+        resources: {},
+      },
+      {
+        run_id: "run-1",
+        participant_id: "run-1/node-host/cHJlLWNvbW1pdA",
+        display_run_id: "run-1/pre-commit",
+        elapsed_ms: 90_000,
+        resources: { cores: 4 },
+      },
+    ];
+    assert.deepEqual(
+      queueLifecycleHolders(holders, []).map(queueRowID),
+      ["run-1/node-host/cHJlLWNvbW1pdA"],
+    );
+  });
+
+  it("collapses the parent when an older participant payload lacks its internal id", () => {
+    const holders: QueueHolder[] = [
+      { run_id: "run-1", elapsed_ms: 90_000, resources: {} },
+      {
+        run_id: "run-1",
+        elapsed_ms: 90_000,
+        resources: { cores: 4 },
+      },
+    ];
+    const visible = queueLifecycleHolders(holders, []);
+    assert.equal(visible.length, 1);
+    assert.equal(visible[0].resources.cores, 4);
+  });
+
+  it("keeps independent parent ownership while counting one pipeline lifecycle", () => {
+    const holders: QueueHolder[] = [
+      {
+        run_id: "run-1",
+        elapsed_ms: 90_000,
+        resources: {},
+        semaphores: ["production"],
+      },
+      {
+        run_id: "run-1",
+        participant_id: "run-1/node-host/ZGVwbG95",
+        display_run_id: "run-1/deploy",
+        elapsed_ms: 90_000,
+        resources: { cores: 2 },
+      },
+    ];
+    const visible = queueLifecycleHolders(holders, []);
+    assert.equal(visible.length, 2);
+    assert.equal(queueLifecycleHolderCount(visible), 1);
   });
 });
 
