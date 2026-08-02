@@ -739,12 +739,12 @@ func touchesAny(s spec, set map[resource]bool) bool {
 }
 
 // hostFits reports whether a spec's host cores and memory fit right now.
-// With no positive host-resource grant in the ledger, the FIFO head is admitted
+// With no positive resource grant in the ledger, the FIFO head is admitted
 // against the machine total even when external pressure has collapsed the
 // current headroom. Zero-cost orchestration leases do not suppress that
 // liveness floor: they represent connected runs, not admitted work. Once any
-// host resource is held, ordinary headroom accounting applies on both host
-// dimensions. Semaphore accounting remains independent.
+// host or semaphore resource is held, ordinary headroom accounting applies on
+// both host dimensions. Semaphore capacity remains independently enforced.
 //
 // Memory remains a hard safety budget between admitted runs. A soft CPU
 // request uses cores as backpressure: it limits additional admissions once
@@ -765,12 +765,22 @@ func (l *Ledger) hostFits(s spec) bool {
 	return coresOK && memoryOK
 }
 
-// resourcesIdle distinguishes an empty host-resource ledger from one containing
-// only zero-cost run-registration leases. The latter keep connections and run
+// resourcesIdle distinguishes an empty resource ledger from one containing only
+// zero-cost run-registration leases. The latter keep connections and run
 // finalization alive, but hold no capacity and therefore must not prevent the
 // queue head from bootstrapping under external pressure.
 func (l *Ledger) resourcesIdle() bool {
-	return l.usedMilliCores == 0 && l.usedMemory == 0
+	if l.usedMilliCores != 0 || l.usedMemory != 0 {
+		return false
+	}
+	for _, sem := range l.sems {
+		for _, hold := range sem.holds {
+			if !hold.superseded && hold.cost > 0 {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (l *Ledger) coresFitSoft(s spec) bool {

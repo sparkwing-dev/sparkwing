@@ -844,6 +844,20 @@ func TestSetHeadroom_AnyResourceHolderSuppressesCPUFloor(t *testing.T) {
 	mustQueue(t, l, Request{ID: "waiter", Cores: 1, SoftCores: true})
 }
 
+func TestSetHeadroom_PositiveSemaphoreHolderSuppressesLivenessFloor(t *testing.T) {
+	l := testLedger(t, 4, 1024)
+	if _, err := l.SetHeadroom(0, 0); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+
+	mustGrant(t, l, Request{ID: "connected"})
+	mustGrant(t, l, Request{
+		ID:         "semaphore-holder",
+		Semaphores: []SemaphoreClaim{sem("deploy", 1, 1, PolicyQueue)},
+	})
+	mustQueue(t, l, Request{ID: "host-waiter", Cores: 1, MemoryBytes: 1})
+}
+
 func TestSetHeadroom_MemorySharesEmptyLedgerLivenessFloor(t *testing.T) {
 	l := testLedger(t, 4, 1024)
 	if _, err := l.SetHeadroom(4, 0); err != nil {
