@@ -251,7 +251,7 @@ func (g *Group) waitDescendantsEmpty(ctx context.Context) error {
 		}
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("group %d descendants remained after %v", g.id, ctx.Err())
+			return fmt.Errorf("group %d descendants remained: %w", g.id, ctx.Err())
 		case <-ticker.C:
 		}
 	}
