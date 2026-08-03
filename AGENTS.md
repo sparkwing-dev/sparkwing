@@ -1,10 +1,10 @@
 # Agent orientation
 
-Keep this file small. Discover current behavior from the system that owns it instead of copying command catalogs or standards here.
+Sparkwing is standalone. Do not assume any other local service or machine-specific agent harness exists.
 
-- Start with `bitwing info --for-agent`. Find or create the ticket, claim it with `bitwing ticket workon`, and keep that session current while artifacts change.
-- Once a diff exists, run `bitwing doc standards route -i <ticket>` and read the returned standards before finishing the change.
-- Treat this repository's README, embedded docs, CLI `--help`, and tests as the current product truth. Use their native discovery commands before relying on remembered syntax.
-- When behavior changes, update the source documentation and its drift check in the same change.
+- Start with `sparkwing info --for-agent`; its output is current context for this wake, not documentation to copy.
+- Use `sparkwing commands` and `sparkwing pipeline list -o json` to discover the live CLI and repository pipelines.
+- Treat the README, embedded docs, CLI help, and tests as product truth. Run the relevant pipeline with `sparkwing run <name>`.
+- Update source documentation and its drift check when behavior changes.
 
 `AGENTS.md` is the repository's canonical harness guidance. `CLAUDE.md` only imports it with `@AGENTS.md`.
