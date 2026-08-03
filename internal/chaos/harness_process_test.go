@@ -54,6 +54,16 @@ func TestWatchActorHelperProcess(t *testing.T) {
 		ignoreProcessGroupTermination()
 		time.Sleep(30 * time.Second)
 		os.Exit(0)
+	case "zombie-parent":
+		child := exec.Command(os.Args[0], "-test.run=^TestWatchActorHelperProcess$")
+		child.Env = append(os.Environ(), actorHelperMode+"=exit")
+		if err := child.Start(); err != nil {
+			os.Exit(2)
+		}
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	case "exit":
+		os.Exit(0)
 	}
 }
 
@@ -245,7 +255,7 @@ func TestProcessGuardRunsWhileQueueStateIsStalled(t *testing.T) {
 	}
 }
 
-func TestActorCleanupTimeoutRetainsOwnershipForRetry(t *testing.T) {
+func TestActorCleanupFailureRetainsOwnershipForRetry(t *testing.T) {
 	requireProcessGroups(t)
 	h, journal := newProcessHarness(t)
 	defer journal.Close()
@@ -259,17 +269,25 @@ func TestActorCleanupTimeoutRetainsOwnershipForRetry(t *testing.T) {
 		_, _ = io.Copy(io.Discard, stdout)
 		close(a.scanned)
 	}()
-	h.cfg.Settle = time.Nanosecond
+	probeFailure := errors.New("injected descendant probe failure")
+	group.SetDescendantProbe(func(int, bool, bool) (bool, error) { return false, probeFailure })
 	err = h.cleanupActor(a)
-	if !errors.Is(err, procgroup.ErrCleanup) {
-		t.Fatalf("first cleanup error = %v, want cleanup failure", err)
+	if !errors.Is(err, procgroup.ErrCleanup) || !errors.Is(err, probeFailure) {
+		t.Fatalf("first cleanup error = %v, want the injected cleanup failure", err)
 	}
 	if !strings.Contains(err.Error(), "did not exit within cleanup bound") {
-		t.Fatalf("cleanup timeout was not surfaced: %v", err)
+		t.Fatalf("process-group cleanup failure was not surfaced: %v", err)
 	}
 	if group.Reaped() {
 		t.Fatal("cleanup failure discarded process-group ownership")
 	}
+	h.mu.Lock()
+	retained := a.cleanupFailed
+	h.mu.Unlock()
+	if !retained {
+		t.Fatal("cleanup failure did not mark the actor for a later retry")
+	}
+	group.SetDescendantProbe(nil)
 	h.cfg.Settle = 2 * time.Second
 	if err := h.finishActor(a, true); err != nil {
 		t.Fatalf("retry cleanup: %v", err)
@@ -281,16 +299,22 @@ func TestActorCleanupTimeoutRetainsOwnershipForRetry(t *testing.T) {
 
 func TestDaemonCleanupFailureRetainsLedgerForRetry(t *testing.T) {
 	requireProcessGroups(t)
-	h := &Harness{cfg: Config{Settle: time.Nanosecond}, t: t, daemons: map[int]*daemonProcess{}}
+	h := &Harness{cfg: Config{Settle: time.Second}, t: t, daemons: map[int]*daemonProcess{}}
 	group, err := procgroup.Start(helperCommand("hang", 0))
 	if err != nil {
 		t.Fatal(err)
 	}
 	daemon := &daemonProcess{group: group, done: make(chan struct{})}
 	h.daemons[group.ID()] = daemon
+	t.Cleanup(func() {
+		group.SetDescendantProbe(nil)
+		_ = h.finishDaemon(daemon, true)
+	})
+	probeFailure := errors.New("injected descendant probe failure")
+	group.SetDescendantProbe(func(int, bool, bool) (bool, error) { return false, probeFailure })
 	err = h.cleanupDaemon(daemon)
-	if !errors.Is(err, procgroup.ErrCleanup) {
-		t.Fatalf("first cleanup error = %v, want cleanup failure", err)
+	if !errors.Is(err, procgroup.ErrCleanup) || !errors.Is(err, probeFailure) {
+		t.Fatalf("first cleanup error = %v, want the injected cleanup failure", err)
 	}
 	if group.Reaped() {
 		t.Fatal("cleanup failure reaped the daemon ownership anchor")
@@ -298,7 +322,10 @@ func TestDaemonCleanupFailureRetainsLedgerForRetry(t *testing.T) {
 	if h.daemons[group.ID()] != daemon {
 		t.Fatal("cleanup failure deleted the daemon ledger entry")
 	}
-	h.cfg.Settle = 2 * time.Second
+	if !daemon.cleanupFailed {
+		t.Fatal("cleanup failure did not mark the daemon for a later retry")
+	}
+	group.SetDescendantProbe(nil)
 	if err := h.cleanupDaemon(daemon); err != nil {
 		t.Fatalf("retry cleanup: %v", err)
 	}
@@ -308,6 +335,187 @@ func TestDaemonCleanupFailureRetainsLedgerForRetry(t *testing.T) {
 	if _, ok := h.daemons[group.ID()]; ok {
 		t.Fatal("successful cleanup retained the daemon ledger entry")
 	}
+}
+
+func TestActorCleanupSeparatesOutputDrainFromProcessGroupFailure(t *testing.T) {
+	requireProcessGroups(t)
+	h, journal := newProcessHarness(t)
+	defer journal.Close()
+	h.cfg.Settle = 200 * time.Millisecond
+	cmd := helperCommand("exit", 0)
+	stdout, group, err := startActorCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = stdout.Close() }()
+	select {
+	case <-group.LeaderExited():
+	case <-time.After(10 * time.Second):
+		t.Fatal("helper did not exit")
+	}
+	// safety: scanned is never closed, so the drain phase is the only one that
+	// can fail and the assertion below cannot pass for the wrong reason.
+	a := &actor{runID: "drain-only", cmd: cmd, group: group, stdout: stdout, scanned: make(chan struct{})}
+	err = h.cleanupActor(a)
+	if !errors.Is(err, errActorDrain) {
+		t.Fatalf("cleanup error = %v, want an output-drain failure", err)
+	}
+	if errors.Is(err, procgroup.ErrCleanup) {
+		t.Fatalf("output-drain timeout was reported as a process-group cleanup failure: %v", err)
+	}
+	if strings.Contains(err.Error(), "did not exit within cleanup bound") {
+		t.Fatalf("output-drain timeout claimed the process group did not exit: %v", err)
+	}
+	if !group.Reaped() {
+		t.Fatal("the process group was not reaped before the drain bound elapsed")
+	}
+}
+
+func TestProcessGuardAcceptsSoakScaleLeaderAnchors(t *testing.T) {
+	requireProcessGroups(t)
+	h, journal := soakScaleHarness(t)
+	defer journal.Close()
+	var reported []string
+	h.processFailure = func(violations []string) { reported = append(reported, violations...) }
+
+	actors := make([]*actor, 0, h.cfg.MaxActors)
+	for i := range h.cfg.MaxActors {
+		actors = append(actors, startGuardedActor(t, h, fmt.Sprintf("anchor-%d", i), "actor", 1))
+	}
+	for _, a := range actors {
+		select {
+		case <-a.group.LeaderExited():
+		case <-time.After(30 * time.Second):
+			t.Fatalf("actor group %d leader did not exit", a.group.ID())
+		}
+		if a.group.Reaped() {
+			t.Fatalf("actor group %d was reaped before the guard sampled it", a.group.ID())
+		}
+	}
+
+	guard := newProcessGuard(h)
+	guard.check()
+	if len(reported) > 0 {
+		t.Fatalf("guard failed on %d retained ownership anchors: %s", len(actors), strings.Join(reported, "; "))
+	}
+	if len(guard.since) != len(actors) {
+		t.Fatalf("guard tracked %d owned zombies, want %d", len(guard.since), len(actors))
+	}
+}
+
+// TestProcessGuardAcceptsSoakScaleDescendantZombieBurst pins the burst the
+// nightly soak actually produces: one daemon kill makes every live actor fork a
+// replacement at once, and the losers are zombies until each actor's wait runs.
+func TestProcessGuardAcceptsSoakScaleDescendantZombieBurst(t *testing.T) {
+	requireProcessGroups(t)
+	h, journal := soakScaleHarness(t)
+	defer journal.Close()
+	var reported []string
+	h.processFailure = func(violations []string) { reported = append(reported, violations...) }
+
+	const burst = 12
+	actors := make([]*actor, 0, burst)
+	for i := range burst {
+		actors = append(actors, startGuardedActor(t, h, fmt.Sprintf("burst-%d", i), "zombie-parent", 0))
+	}
+	guard := newProcessGuard(h)
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		guard.check()
+		if len(guard.since) == len(actors) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(guard.since) != len(actors) {
+		t.Fatalf("guard saw %d descendant zombies, want %d", len(guard.since), len(actors))
+	}
+	if len(reported) > 0 {
+		t.Fatalf("guard failed on a %d-way descendant zombie burst: %s", burst, strings.Join(reported, "; "))
+	}
+}
+
+func TestProcessGuardFailsWhenADescendantZombieNeverDrains(t *testing.T) {
+	requireProcessGroups(t)
+	h, journal := soakScaleHarness(t)
+	defer journal.Close()
+	h.cfg.MaxZombieDrain = 100 * time.Millisecond
+	fired := make(chan []string, 1)
+	h.processFailure = func(violations []string) { fired <- violations }
+
+	a := startGuardedActor(t, h, "stalled-descendant", "zombie-parent", 0)
+	got := awaitGuardViolation(t, h, 30*time.Second, fired)
+	want := fmt.Sprintf("in owned group %d stayed unreaped", a.group.ID())
+	if !strings.Contains(got, want) || !strings.Contains(got, "descendant pid ") {
+		t.Fatalf("guard reported %q, want a stalled descendant in group %d", got, a.group.ID())
+	}
+}
+
+func TestProcessGuardFailsWhenALeaderAnchorNeverDrains(t *testing.T) {
+	requireProcessGroups(t)
+	h, journal := soakScaleHarness(t)
+	defer journal.Close()
+	h.cfg.MaxZombieDrain = 100 * time.Millisecond
+	fired := make(chan []string, 1)
+	h.processFailure = func(violations []string) { fired <- violations }
+
+	a := startGuardedActor(t, h, "stalled-anchor", "actor", 1)
+	select {
+	case <-a.group.LeaderExited():
+	case <-time.After(30 * time.Second):
+		t.Fatal("actor leader did not exit")
+	}
+	got := awaitGuardViolation(t, h, 10*time.Second, fired)
+	want := fmt.Sprintf("owned group %d leader anchor", a.group.ID())
+	if !strings.Contains(got, want) || !strings.Contains(got, "stayed unreaped") {
+		t.Fatalf("guard reported %q, want a stalled anchor for group %d", got, a.group.ID())
+	}
+}
+
+func TestProcessGuardExemptsZombiesRetainedByAReportedCleanupFailure(t *testing.T) {
+	requireProcessGroups(t)
+	h, journal := soakScaleHarness(t)
+	defer journal.Close()
+	h.cfg.MaxZombieDrain = 50 * time.Millisecond
+	var reported []string
+	h.processFailure = func(violations []string) { reported = append(reported, violations...) }
+
+	a := startGuardedActor(t, h, "already-reported", "actor", 1)
+	select {
+	case <-a.group.LeaderExited():
+	case <-time.After(30 * time.Second):
+		t.Fatal("actor leader did not exit")
+	}
+	h.mu.Lock()
+	a.cleanupFailed = true
+	h.mu.Unlock()
+
+	guard := newProcessGuard(h)
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		guard.check()
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(reported) > 0 {
+		t.Fatalf("guard re-reported an already-reported cleanup failure: %s", strings.Join(reported, "; "))
+	}
+}
+
+func awaitGuardViolation(t *testing.T, h *Harness, bound time.Duration, fired <-chan []string) string {
+	t.Helper()
+	guard := newProcessGuard(h)
+	deadline := time.Now().Add(bound)
+	for time.Now().Before(deadline) {
+		guard.check()
+		select {
+		case violations := <-fired:
+			return strings.Join(violations, "; ")
+		default:
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("process guard reported no violation within its bound")
+	return ""
 }
 
 func helperCommand(mode string, children int) *exec.Cmd {
@@ -325,6 +533,51 @@ func newProcessHarness(t *testing.T) (*Harness, *Journal) {
 		t.Fatal(err)
 	}
 	return &Harness{cfg: Config{Settle: time.Second}, t: t, jr: journal}, journal
+}
+
+// soakScaleHarness configures the harness exactly as the nightly soak does, so
+// a guard regression that only appears at that actor count is caught here
+// rather than by a 30-minute run.
+func soakScaleHarness(t *testing.T) (*Harness, *Journal) {
+	t.Helper()
+	journal, err := NewJournal(filepath.Join(t.TempDir(), "journal.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := &Harness{
+		cfg:     SoakConfig(20260801, 30*time.Minute),
+		t:       t,
+		jr:      journal,
+		actors:  map[string]*actor{},
+		daemons: map[int]*daemonProcess{},
+	}
+	return h, journal
+}
+
+func startGuardedActor(t *testing.T, h *Harness, runID, mode string, children int) *actor {
+	t.Helper()
+	cmd := helperCommand(mode, children)
+	stdout, group, err := startActorCommand(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := &actor{runID: runID, cmd: cmd, group: group, stdout: stdout, scanned: make(chan struct{})}
+	go func() {
+		_, _ = io.Copy(io.Discard, stdout)
+		close(a.scanned)
+	}()
+	h.mu.Lock()
+	h.actors[runID] = a
+	h.mu.Unlock()
+	t.Cleanup(func() {
+		h.mu.Lock()
+		a.cleanupFailed = false
+		h.mu.Unlock()
+		if err := h.finishActor(a, true); err != nil {
+			t.Errorf("cleanup actor %s: %v", runID, err)
+		}
+	})
+	return a
 }
 
 func requireProcessGroups(t *testing.T) {

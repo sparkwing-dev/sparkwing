@@ -25,6 +25,13 @@
 // daemon's own ledger panics on over-admission, so a panic in its log is a
 // caught bug.
 //
+// A guard on its own 100ms ticker also watches the process groups the harness
+// owns, so a wedged daemon cannot suppress it. It bounds the total owned
+// process count and requires every unreaped process to drain -- both the group
+// leaders deliberately held as ownership anchors and each actor's own exited
+// children. It deliberately does not cap how many exist at one instant, which
+// tracks actor churn rather than correctness.
+//
 // # Determinism
 //
 // The seed governs the scenario schedule, not OS timing: process starts and

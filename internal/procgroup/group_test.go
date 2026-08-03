@@ -135,7 +135,7 @@ func TestGroupCleanupFailureRetainsAnchorForRetry(t *testing.T) {
 		t.Fatal("leader did not exit")
 	}
 	want := errors.New("injected membership failure")
-	g.inspect = func(int, bool, bool) (bool, error) { return false, want }
+	g.SetDescendantProbe(func(int, bool, bool) (bool, error) { return false, want })
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	err := g.Finish(ctx, 20*time.Millisecond)
 	cancel()
@@ -148,7 +148,7 @@ func TestGroupCleanupFailureRetainsAnchorForRetry(t *testing.T) {
 	if err := validateAnchor(g.ID(), true); err != nil {
 		t.Fatalf("failed cleanup lost ownership anchor: %v", err)
 	}
-	g.inspect = descendantsEmpty
+	g.SetDescendantProbe(nil)
 	ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 	err = g.Finish(ctx, 20*time.Millisecond)
 	cancel()

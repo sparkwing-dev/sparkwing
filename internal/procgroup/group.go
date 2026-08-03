@@ -36,6 +36,7 @@ type Group struct {
 	reapedFlag atomic.Bool
 	waitErr    error
 	session    bool
+	inspectMu  sync.Mutex
 	inspect    func(int, bool, bool) (bool, error)
 }
 
@@ -89,6 +90,26 @@ func (g *Group) LeaderExited() <-chan struct{} { return g.leaderDone }
 // Reaped reports whether the group was proven empty and its leader reaped.
 func (g *Group) Reaped() bool {
 	return g.reapedFlag.Load()
+}
+
+// SetDescendantProbe replaces the probe that decides whether the group's
+// descendants are gone; a nil probe restores the kernel-backed one. Tests use
+// it to force a cleanup failure deterministically rather than racing a
+// deadline against a leader that may exit first.
+func (g *Group) SetDescendantProbe(probe func(group int, exited, session bool) (bool, error)) {
+	g.inspectMu.Lock()
+	defer g.inspectMu.Unlock()
+	if probe == nil {
+		g.inspect = descendantsEmpty
+		return
+	}
+	g.inspect = probe
+}
+
+func (g *Group) descendantProbe() func(int, bool, bool) (bool, error) {
+	g.inspectMu.Lock()
+	defer g.inspectMu.Unlock()
+	return g.inspect
 }
 
 // Kill sends SIGKILL only while the original unreaped leader still anchors
@@ -198,7 +219,7 @@ func boundedContext(parent context.Context, d time.Duration) (context.Context, c
 }
 
 func (g *Group) emptyDescendants(ctx context.Context, grace time.Duration) error {
-	empty, err := g.inspect(g.id, true, g.session)
+	empty, err := g.descendantProbe()(g.id, true, g.session)
 	if err != nil || empty {
 		return err
 	}
@@ -221,7 +242,7 @@ func (g *Group) waitDescendantsEmpty(ctx context.Context) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		empty, err := g.inspect(g.id, true, g.session)
+		empty, err := g.descendantProbe()(g.id, true, g.session)
 		if err != nil {
 			return err
 		}
