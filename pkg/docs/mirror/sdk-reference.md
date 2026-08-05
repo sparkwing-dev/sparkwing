@@ -120,6 +120,14 @@ ApprovalTimeoutPolicy enumerates the resolution applied to an unanswered approva
 type ApprovalTimeoutPolicy string
 ```
 
+```
+const (
+    ApprovalFail    ApprovalTimeoutPolicy = "fail"
+    ApprovalDeny    ApprovalTimeoutPolicy = "deny"
+    ApprovalApprove ApprovalTimeoutPolicy = "approve"
+)
+```
+
 
 ### type AwaitOption
 
@@ -204,6 +212,10 @@ CacheKey is the content-addressed identifier for a node's work.
 
 ```
 type CacheKey string
+```
+
+```
+const NoCache CacheKey = "ck:nocache"
 ```
 
 - `func Key(parts ...any) CacheKey` -- Key composes a CacheKey from arbitrary parts.
@@ -570,6 +582,17 @@ FailureStage identifies which lifecycle stage produced a node failure.
 type FailureStage int
 ```
 
+```
+const (
+    // StageAction marks a failure in the node's action: its Run exited
+    // non-zero, panicked, or hit its Timeout.
+    StageAction FailureStage = iota
+    // StageVerify marks a failure in the node's Verify postcondition: the
+    // action completed, but the check returned a non-nil error.
+    StageVerify
+)
+```
+
 - `func (s FailureStage) String() string` -- String returns "action" or "verify".
 
 ### type FieldBuilder
@@ -882,6 +905,28 @@ OnLimit is the closed set of behaviors for a node that finds its ConcurrencyGrou
 type OnLimit string
 ```
 
+```
+const (
+    // Queue waits for room, then runs. Waiters that fit run oldest-first; a
+    // waiter that cannot fit in the currently available weighted budget does
+    // not block later waiters that do fit unless younger backfilled holders
+    // are what keep the older waiter from fitting.
+    Queue OnLimit = "queue"
+    // Fail errors the node immediately.
+    Fail OnLimit = "fail"
+    // Skip resolves the node as a no-op without running it.
+    Skip OnLimit = "skip"
+    // CancelOthers is best-effort preemption ("newest wins"): it evicts
+    // running members oldest-first until this node fits, then takes the
+    // slot and runs immediately. Eviction is cooperative -- an evicted
+    // member is signaled to stop and winds down on its own -- so this node
+    // may briefly run alongside a still-draining victim, and side effects a
+    // member completed before the cancel signal are not rolled back. Use
+    // [Queue] when you need strict mutual exclusion with no overlap.
+    CancelOthers OnLimit = "cancel_others"
+)
+```
+
 
 ### type Outcome
 
@@ -889,6 +934,28 @@ Outcome is the terminal state of a node in a Plan run.
 
 ```
 type Outcome string
+```
+
+```
+const (
+    Success   Outcome = "success"
+    Failed    Outcome = "failed"
+    Satisfied Outcome = "satisfied"
+    Cached    Outcome = "cached"
+    Skipped   Outcome = "skipped"
+    Cancelled Outcome = "cancelled"
+
+    // SkippedConcurrent: .Cache() arrival hit a full slot under
+    // OnLimit:Skip. Distinct from Skipped (which comes from SkipIf)
+    // so dashboards can surface the cause.
+    SkippedConcurrent Outcome = "skipped-concurrent"
+
+    // Superseded: .Cache() holder was evicted by a newer arrival under
+    // OnLimit:CancelOthers. Distinct from Cancelled (operator-driven)
+    // so dashboards can surface "evicted by newer run" vs "operator
+    // cancelled".
+    Superseded Outcome = "superseded"
+)
 ```
 
 - `func (o Outcome) OK() bool` -- OK reports whether the outcome satisfies downstream dependencies.
@@ -900,6 +967,18 @@ ParallelFailurePolicy controls whether independent Work items finish after one o
 
 ```
 type ParallelFailurePolicy string
+```
+
+```
+const (
+    // FailFast cancels ordinary in-flight siblings after the first decisive
+    // failure. It is the default and preserves the historical Work behavior.
+    FailFast ParallelFailurePolicy = "fail-fast"
+    // CollectAll lets every independent or already-ready item finish so one run
+    // can report the full failure set. It does not satisfy a failed prerequisite;
+    // downstream Needs still require success or an explicit ContinueOnError.
+    CollectAll ParallelFailurePolicy = "collect-all"
+)
 ```
 
 
@@ -1014,6 +1093,14 @@ type Predicate interface {
     String() string
     // contains filtered or unexported methods
 }
+```
+
+```
+var Local Predicate = localPredicate{}
+```
+
+```
+var Remote Predicate = remotePredicate{}
 ```
 
 - `func Always() Predicate` -- Always holds unconditionally.
@@ -1458,6 +1545,19 @@ Scope selects how far a ConcurrencyGroup's budget reaches: only the nodes of one
 
 ```
 type Scope string
+```
+
+```
+const (
+    // ScopeRun bounds the budget to the nodes of a single run.
+    ScopeRun Scope = "run"
+    // ScopeBox bounds the budget to one machine, even when a controller
+    // dispatches several runs to it.
+    ScopeBox Scope = "box"
+    // ScopeGlobal pools the budget across every run that names the
+    // group, coordinated through the shared backend. The zero value.
+    ScopeGlobal Scope = "global"
+)
 ```
 
 

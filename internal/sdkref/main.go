@@ -79,6 +79,8 @@ func main() {
 				b.WriteString(s + "\n\n")
 			}
 			b.WriteString("```\n" + decl(fset, t.Decl) + "\n```\n\n")
+			writeValueBlocks(&b, fset, t.Consts)
+			writeValueBlocks(&b, fset, t.Vars)
 			for _, c := range t.Funcs {
 				b.WriteString(symbolLine(dpkg, fset, c.Decl, c.Doc))
 			}
@@ -110,6 +112,17 @@ func writeValues(b *strings.Builder, fset *token.FileSet, title string, vals []*
 		return
 	}
 	b.WriteString("## " + title + "\n\n")
+	writeValueBlocks(b, fset, vals)
+}
+
+// writeValueBlocks renders each const/var group as its own code block.
+//
+// go/doc files a constant declared with a named type under that type
+// (doc.Type.Consts) rather than under doc.Package.Consts, so the type
+// loop calls this too. Rendering only the package-level set drops every
+// enum value in the SDK, leaving a reader who has just been shown
+// `OnExpiry ApprovalTimeoutPolicy` no way to learn what to assign it.
+func writeValueBlocks(b *strings.Builder, fset *token.FileSet, vals []*doc.Value) {
 	for _, v := range vals {
 		b.WriteString("```\n" + decl(fset, v.Decl) + "\n```\n\n")
 	}

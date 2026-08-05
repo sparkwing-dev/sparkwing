@@ -58,6 +58,12 @@ code change to unlock.
   claiming every transition is an upgrade.
 - **cli:** `daemon status` and `daemon restart` now default to pretty output on
   a terminal and JSON when piped; an explicit `-o` continues to win.
+- **docs:** the SDK reference now lists constants declared with a named type,
+  so every enum in the SDK is spellable from the docs alone. `go/doc` files a
+  typed constant under its type rather than the package, and the generator
+  emitted only the package-level set, which silently dropped values such as
+  `ApprovalApprove`, `NoCache`, `Queue`, and `StageAction` -- a reader shown
+  `OnExpiry ApprovalTimeoutPolicy` had no way to learn what to assign it.
 - **controller:** local failed-run retries now compile and execute from an
   immutable detached snapshot of the source run's recorded Git revision, and
   verify its full origin identity and complete plan snapshot before node
