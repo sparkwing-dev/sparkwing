@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from "react";
 import { type Approval, getApproval, resolveApproval } from "@/lib/api";
+import { fmtAgo, fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 
 interface Props {
   runID: string;
@@ -68,6 +69,13 @@ export default function ApprovalPane({ runID, nodeID, onResolved }: Props) {
               : "Timed out"}
           {appr.approver ? ` by ${appr.approver}` : ""}
         </div>
+        <div
+          className="text-xs font-mono text-[var(--muted)] mb-1"
+          title={`Requested ${fmtFullDate(appr.requested_at)}\nResolved ${fmtFullDate(appr.resolved_at)}`}
+        >
+          requested {fmtDateTime(appr.requested_at)} · resolved{" "}
+          {fmtDateTime(appr.resolved_at)}
+        </div>
         {appr.comment ? (
           <div className="text-[var(--muted)] whitespace-pre-wrap">
             {appr.comment}
@@ -79,8 +87,19 @@ export default function ApprovalPane({ runID, nodeID, onResolved }: Props) {
 
   return (
     <div className="border border-yellow-500/40 bg-yellow-500/5 rounded-sm p-3 mb-3">
-      <div className="text-sm font-medium mb-2 text-yellow-300">
-        Awaiting approval
+      <div className="flex items-baseline gap-2 mb-2 flex-wrap">
+        <span className="text-sm font-medium text-yellow-300">
+          Awaiting approval
+        </span>
+        {/* An approval can sit pending for days -- say which day it
+          was asked for, not just how long ago. */}
+        <span
+          className="text-xs font-mono text-[var(--muted)]"
+          title={`Requested ${fmtFullDate(appr.requested_at)}`}
+        >
+          requested {fmtDateTime(appr.requested_at)} ·{" "}
+          {fmtAgo(appr.requested_at)}
+        </span>
       </div>
       <div className="text-sm mb-3 whitespace-pre-wrap">
         {appr.message || `Approve ${nodeID}?`}

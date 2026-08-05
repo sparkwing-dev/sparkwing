@@ -64,12 +64,32 @@ code change to unlock.
   creation. Dirty or subsequently edited working-tree files cannot change retry
   behavior. If that provenance is unavailable, retry fails clearly instead of
   falling back to an ambient checkout or another registered repo.
+- **dashboard:** following an approval link now selects the run it points at.
+  The Runs list holds the 200 most recent runs, so an approval that had been
+  waiting a while opened the detail pane while nothing on the left moved --
+  there was no row to highlight or scroll to. The run being viewed is now
+  spliced into the list when the window or the active filters would exclude
+  it. `?node=` is read as well as written, so a link lands on the node it
+  names and node selection survives a reload; following one from the
+  approvals dropdown while already on `/runs` re-selects instead of only
+  changing the address bar.
 
 ### Added
 
 - **agent discovery:** `info --for-agent` now emits current, one-wake context,
   structured `info` includes `capability_epoch`, and new pipeline scaffolds
   point agents at the live command instead of copying a command catalog.
+
+- **dashboard:** timestamps say which day they belong to. The run header,
+  Setup, Summary, the selected node, the approval banner, the attempts
+  dropdown, and the home page's approval and last-deploy rows now render a
+  dated stamp instead of a bare clock or a bare "66d ago", with the year
+  shown only when it isn't the current one. Setup gained a `finished` row.
+  Log lines keep their bare clock, which is the right default when every
+  line in a run shares a date, and gain a `date` toggle beside `ts` for the
+  runs where it doesn't -- an old run, one that crossed midnight, output
+  read next to another day's. Copied and downloaded logs always carry the
+  full date regardless of the toggle.
 
 - **sdk:** Work DAGs can declare `w.ParallelFailures(sparkwing.FailFast)` for
   short local feedback or `sparkwing.CollectAll` for comprehensive diagnostics.

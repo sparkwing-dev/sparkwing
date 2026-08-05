@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { type Run, getRunAttempts } from "@/lib/api";
+import { fmtDateTime } from "@/lib/timeFormat";
 
 // Fires the page-level select-run event so the runs list page swaps
 // to a different attempt. Keep this string in sync with
@@ -234,13 +235,10 @@ function modeTooltip(m: AttemptMode): string {
   }
 }
 
+// Attempts are labelled by when they started. fmtDateTime carries the
+// year when the attempt isn't from this one -- a retry chain can span
+// a year boundary and "Dec 31" alone would be ambiguous.
 function fmtAttemptTime(r: Run): string {
-  const t = r.started_at;
-  if (!t) return r.id;
-  try {
-    const d = new Date(t);
-    return `${d.toLocaleDateString(undefined, { month: "short", day: "numeric" })} ${d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}`;
-  } catch {
-    return r.id;
-  }
+  if (!r.started_at) return r.id;
+  return fmtDateTime(r.started_at);
 }

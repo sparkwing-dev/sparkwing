@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { type Approval, getPendingApprovals } from "@/lib/api";
+import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 
 type Tab = { href: string; label: string; external?: boolean };
 
@@ -174,6 +175,12 @@ function ApprovalsBadge({
                     <div className="font-medium">{a.node_id}</div>
                     <div className="text-xs text-[var(--muted)]">
                       {a.run_id}
+                    </div>
+                    <div
+                      className="text-xs text-[var(--muted)]"
+                      title={fmtFullDate(a.requested_at)}
+                    >
+                      requested {fmtDateTime(a.requested_at)}
                     </div>
                     {a.message ? (
                       <div className="text-xs mt-1 truncate">{a.message}</div>

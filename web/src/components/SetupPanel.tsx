@@ -13,6 +13,7 @@
 
 import { useState } from "react";
 import type { Run, RunInvocation } from "@/lib/api";
+import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 
 // runDurationMs is duplicated here rather than imported so the panel
 // stays self-contained and renders cleanly in Storybook / standalone
@@ -261,7 +262,9 @@ export default function SetupPanel({
             </LabelRow>
           )}
           <LabelRow label="started">
-            <span>{new Date(run.started_at).toLocaleTimeString()}</span>
+            <span title={fmtFullDate(run.started_at)}>
+              {fmtDateTime(run.started_at, { seconds: true })}
+            </span>
             {run.finished_at && (
               <span className="text-[var(--muted)]">
                 {" "}
@@ -269,6 +272,13 @@ export default function SetupPanel({
               </span>
             )}
           </LabelRow>
+          {run.finished_at && (
+            <LabelRow label="finished">
+              <span title={fmtFullDate(run.finished_at)}>
+                {fmtDateTime(run.finished_at, { seconds: true })}
+              </span>
+            </LabelRow>
+          )}
           {run.git_sha && (
             <LabelRow
               label="commit"

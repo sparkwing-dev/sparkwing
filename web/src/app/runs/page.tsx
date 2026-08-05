@@ -70,6 +70,7 @@ import {
   fmtAgoShort,
   fmtClock,
   fmtDatePrefix,
+  fmtDateTime,
   fmtFullDate,
   fmtMs,
   fmtMsCompact,
@@ -285,7 +286,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       return next;
     });
   };
-  const [selectedNode, setSelectedNode] = useState<string | null>(null);
+  // ?node= is written by every deep link into a specific node -- the
+  // Home "Needs attention" list, the Nav approvals dropdown. Seeding
+  // state from it is what makes those links land on the node instead
+  // of just the run.
+  const [selectedNode, setSelectedNode] = useState<string | null>(
+    searchParams.get("node"),
+  );
   // Selected step id within the selected node (or null if no step is
   // currently focused). Shared across:
   //   - the left Nodes panel (highlights the row + scrolls into view)
@@ -293,17 +300,83 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   //   - the Logs tab (expands+scrolls to the step bucket)
   // Cleared when the selected node changes via selectNode.
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
+  // Query strings this view wrote itself, oldest first. The
+  // adopt-from-URL effect below consumes them so it can tell an
+  // external navigation from the delayed echo of our own replace.
+  // Bounded because a coalesced replace may never echo back.
+  const selfWritten = useRef<string[]>([]);
+  // writeParams is the single writer for this view's URL state (run,
+  // node). It reads window.location.search rather than the
+  // searchParams snapshot because router.replace doesn't update the
+  // snapshot synchronously -- a second write in the same tick would
+  // otherwise resurrect the value the first one just changed. Callers
+  // that touch both keys pass them together for the same reason.
+  const writeParams = useCallback(
+    (updates: Record<string, string | null>) => {
+      const base =
+        typeof window === "undefined"
+          ? ""
+          : window.location.search.replace(/^\?/, "");
+      const next = new URLSearchParams(base);
+      for (const [k, v] of Object.entries(updates)) {
+        if (v) next.set(k, v);
+        else next.delete(k);
+      }
+      const qs = next.toString();
+      selfWritten.current = [...selfWritten.current.slice(-7), qs];
+      router.replace(qs ? `/runs?${qs}` : "/runs", { scroll: false });
+    },
+    [router],
+  );
   // Wrappers so callers don't have to remember to coordinate the two
   // pieces of state. selectNode clears any step focus; selectStep
   // assigns both at once so the post-render reads them consistently.
-  const selectNode = useCallback((id: string | null) => {
-    setSelectedNode(id);
-    setSelectedStep(null);
-  }, []);
-  const selectStep = useCallback((nodeId: string, stepId: string | null) => {
-    setSelectedNode(nodeId);
-    setSelectedStep(stepId);
-  }, []);
+  // Both keep ?node= current so a reload or a shared URL reopens what
+  // the user was looking at.
+  const selectNode = useCallback(
+    (id: string | null) => {
+      setSelectedNode(id);
+      setSelectedStep(null);
+      writeParams({ node: id });
+    },
+    [writeParams],
+  );
+  const selectStep = useCallback(
+    (nodeId: string, stepId: string | null) => {
+      setSelectedNode(nodeId);
+      setSelectedStep(stepId);
+      writeParams({ node: nodeId });
+    },
+    [writeParams],
+  );
+  // Adopt run/node from the URL when someone else navigates us. The
+  // Nav approvals dropdown links to /runs from the /runs page itself,
+  // so React never remounts this view and the useState seeds above
+  // never re-read -- the click used to change the address bar and
+  // nothing else. Echoes of our own writes are skipped so a selection
+  // can't be dragged backwards by a lagging snapshot.
+  const queryString = searchParams.toString();
+  const selectionRef = useRef({ run: selectedRun, node: selectedNode });
+  selectionRef.current = { run: selectedRun, node: selectedNode };
+  useEffect(() => {
+    const mine = selfWritten.current.indexOf(queryString);
+    if (mine >= 0) {
+      selfWritten.current.splice(mine, 1);
+      return;
+    }
+    const params = new URLSearchParams(queryString);
+    const urlRun = params.get("run");
+    const urlNode = params.get("node");
+    if (urlRun !== selectionRef.current.run) {
+      setSelectedRun(urlRun);
+      if (urlRun) setCheckedRuns(new Set([urlRun]));
+    }
+    if (urlNode !== selectionRef.current.node) {
+      setSelectedNode(urlNode);
+      setSelectedStep(null);
+    }
+  }, [queryString]);
+
   const filterState = useUrlFilterState();
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
   const [showTrigger, setShowTrigger] = useState(false);
@@ -464,24 +537,49 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setFinishedAfter: filterState.setFinishedAfter,
     setFinishedBefore: filterState.setFinishedBefore,
   };
-  const topLevel = useMemo(
-    () =>
-      runs
-        .filter((r) => runMatchesFilter(r, filterState, pipelineMeta))
-        .sort(
-          (a, b) =>
-            new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
-        ),
-    [runs, filterState, pipelineMeta],
-  );
+  // The list only holds the RUNS_WINDOW most recent runs, and the
+  // filters cut it down further. A run opened by deep link (Home
+  // "Needs attention", the Nav approvals dropdown, a shared URL) can
+  // easily fall outside both -- an approval left pending for weeks
+  // sits well behind the window. Without folding it back in, the
+  // detail pane shows the run while the list has no row to highlight
+  // and no row to scroll to, which reads as a broken link. So: splice
+  // the loaded detail's run in when the list is missing it, and never
+  // let a filter hide the run currently being viewed.
+  const detailRun = detail?.run ?? null;
+  const topLevel = useMemo(() => {
+    const withSelected =
+      detailRun &&
+      detailRun.id === selectedRun &&
+      !runs.some((r) => r.id === detailRun.id)
+        ? [detailRun, ...runs]
+        : runs;
+    return withSelected
+      .filter(
+        (r) =>
+          r.id === selectedRun ||
+          runMatchesFilter(r, filterState, pipelineMeta),
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.started_at).getTime() - new Date(a.started_at).getTime(),
+      );
+  }, [runs, detailRun, selectedRun, filterState, pipelineMeta]);
   const activeCount = activeFilterCount(filterState);
 
   // When a run is selected via URL (typically arriving from the By
   // pipeline view) and the row mounts in topLevel, scroll it into
   // view once. Tracked per-id so polls don't keep re-scrolling.
+  //
+  // The runs list and the run detail load in a race, and on a deep
+  // link the detail often wins. Scrolling then is wasted: the list is
+  // the single spliced-in row, already in view, and consuming the
+  // one-shot there means the row never gets scrolled to once the real
+  // 200 rows land above it. So wait for the list itself to arrive.
   const scrolledForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedRun) return;
+    if (runs.length === 0) return;
     if (scrolledForRef.current === selectedRun) return;
     if (!topLevel.some((r) => r.id === selectedRun)) return;
     const el = document.querySelector(
@@ -490,7 +588,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     if (!el) return;
     scrolledForRef.current = selectedRun;
     el.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [selectedRun, topLevel]);
+  }, [selectedRun, topLevel, runs.length]);
 
   const run = detail?.run || null;
   const nodes = detail?.nodes || [];
@@ -689,17 +787,18 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
-    selectNode(null);
+    // Switching runs drops the node selection: node ids are scoped to
+    // a run, so carrying one across would point at nothing. Cleared
+    // inline (not via selectNode) so run and node land in one URL
+    // write -- see writeParams on why two writes would race.
+    setSelectedNode(null);
+    setSelectedStep(null);
     // Row body click is single-select: replace the selection set so
     // only this row is highlighted. When exiting the collapsed view
     // (id=null), keep the previous selection in checkedRuns so the
     // user can spot where they came from on the expanded list.
     if (id) setCheckedRuns(new Set([id]));
-    const params = new URLSearchParams(searchParams.toString());
-    if (id) params.set("run", id);
-    else params.delete("run");
-    const qs = params.toString();
-    router.replace(qs ? `/runs?${qs}` : "/runs", { scroll: false });
+    writeParams({ run: id, node: null });
   };
   const selectRunRef = useRef(selectRun);
   selectRunRef.current = selectRun;
@@ -1849,11 +1948,11 @@ function StepRow({
         ? "bg-red-400"
         : status === "cancelled"
           ? "bg-amber-400"
-        : status === "running"
-          ? "bg-indigo-400 animate-pulse"
-          : status === "skipped"
-            ? "bg-slate-400"
-            : "bg-slate-600";
+          : status === "running"
+            ? "bg-indigo-400 animate-pulse"
+            : status === "skipped"
+              ? "bg-slate-400"
+              : "bg-slate-600";
   let durMs = s.duration_ms ?? 0;
   if (!durMs && status === "running" && s.started_at) {
     durMs = Math.max(0, Date.now() - new Date(s.started_at).getTime());
@@ -2786,6 +2885,20 @@ function RunDetailPane({
             title="copy run id"
           >
             #{run.id}
+          </span>
+          {/* When the run started, spelled out. The run id carries a
+            date but only as a packed YYYYMMDD, and every other stamp
+            in this pane is a bare clock -- without this the header
+            never says which day you're looking at. */}
+          <span
+            className="font-mono text-[var(--muted)] whitespace-nowrap"
+            title={`Started ${fmtFullDate(run.started_at)}${
+              run.finished_at
+                ? `\nFinished ${fmtFullDate(run.finished_at)}`
+                : ""
+            }`}
+          >
+            {fmtDateTime(run.started_at)}
           </span>
           <RerunModeChip run={run} />
           <span className="ml-auto flex items-center gap-2">
@@ -5612,11 +5725,11 @@ function StepTooltip({
         ? "bg-red-400"
         : status === "cancelled"
           ? "bg-amber-400"
-        : status === "running"
-          ? "bg-indigo-400 animate-pulse"
-          : status === "skipped"
-            ? "bg-slate-400"
-            : "bg-slate-600";
+          : status === "running"
+            ? "bg-indigo-400 animate-pulse"
+            : status === "skipped"
+              ? "bg-slate-400"
+              : "bg-slate-600";
   let dur = step.duration_ms ?? 0;
   if (!dur && status === "running" && step.started_at) {
     dur = Math.max(0, Date.now() - new Date(step.started_at).getTime());

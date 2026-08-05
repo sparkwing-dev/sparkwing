@@ -35,6 +35,27 @@ export function fmtFullDate(ts: string): string {
   });
 }
 
+// fmtDateTime is the default for any absolute timestamp that isn't in
+// a column narrow enough to need fmtClock. It always names the day --
+// "Aug 5, 3:46 PM" this year, "May 31, 2025, 11:53 PM" otherwise --
+// because a bare clock leaves the reader guessing which day a run
+// belongs to. Pass seconds when the exact second matters (run start).
+export function fmtDateTime(ts: string, opts?: { seconds?: boolean }): string {
+  if (!ts) return "--";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return ts;
+  return d.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    ...(d.getFullYear() === new Date().getFullYear()
+      ? {}
+      : { year: "numeric" }),
+    hour: "numeric",
+    minute: "2-digit",
+    ...(opts?.seconds ? { second: "2-digit" } : {}),
+  });
+}
+
 export function fmtClock(ts: string): string {
   if (!ts) return "--";
   return new Date(ts).toLocaleTimeString([], {

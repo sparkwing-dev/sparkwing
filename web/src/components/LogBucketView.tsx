@@ -69,15 +69,27 @@ const statusIcon: Record<string, { icon: string; color: string }> = {
   running: { icon: "●", color: "text-indigo-400 animate-pulse" },
 };
 
-// TS_PREFIX_RE matches the [HH:MM:SS.mmm] prefix baked into JSON-
-// derived log lines by recordToLine. The renderer splits this off so
-// it can be styled and toggled independently of the line body.
-const TS_PREFIX_RE = /^\[(\d{2}:\d{2}:\d{2}\.\d{3})\]\s/;
+// TS_PREFIX_RE matches the [YYYY-MM-DD HH:MM:SS.mmm] prefix baked
+// into JSON-derived log lines by recordToLine. The renderer splits
+// this off so it can be styled and toggled independently of the line
+// body. The date group is optional so lines produced before it was
+// added (a cached bundle, a pasted log) still render their clock.
+const TS_PREFIX_RE =
+  /^\[(?:(\d{4}-\d{2}-\d{2}) )?(\d{2}:\d{2}:\d{2}\.\d{3})\]\s/;
+
+// tsStamp turns a TS_PREFIX_RE match into what the line should show:
+// the clock alone, or the date in front of it. Lines that predate the
+// date in the prefix have nothing to add, so they stay clock-only
+// whatever the toggle says.
+function tsStamp(m: RegExpMatchArray, showDate: boolean): string {
+  return showDate && m[1] ? `${m[1]} ${m[2]}` : m[2];
+}
 
 function LogLines({
   lines,
   startLine,
   showTimestamps = true,
+  showDate = false,
   matchLineSet,
   currentMatchLine,
   visibleLineSet,
@@ -87,6 +99,7 @@ function LogLines({
   lines: string[];
   startLine: number;
   showTimestamps?: boolean;
+  showDate?: boolean;
   // When set, lines whose absolute number is in the set are painted
   // with a yellow wash; the currentMatchLine gets a brighter band.
   matchLineSet?: Set<number>;
@@ -120,6 +133,7 @@ function LogLines({
         line,
         absLine,
         showTimestamps,
+        showDate,
         matchLineSet,
         currentMatchLine,
         findLineSet,
@@ -138,13 +152,14 @@ function renderLogLine(
   line: string,
   absLine: number,
   showTimestamps: boolean,
+  showDate: boolean,
   matchLineSet: Set<number> | undefined,
   currentMatchLine: number | undefined,
   findLineSet?: Set<number>,
   findCurrentLine?: number | null,
 ): React.ReactElement {
   const tsMatch = line.match(TS_PREFIX_RE);
-  const ts = tsMatch ? tsMatch[1] : null;
+  const ts = tsMatch ? tsStamp(tsMatch, showDate) : null;
   const body = tsMatch ? line.slice(tsMatch[0].length) : line;
   const hasAnsi = body.includes("\x1b[");
   const stripped = hasAnsi ? stripAnsi(body) : body;
@@ -215,6 +230,7 @@ function StepBucket({
   expanded: expandedProp,
   onToggle,
   showTimestamps,
+  showDate,
   isResult,
   hasSkipIf,
   matchLineSet,
@@ -234,6 +250,7 @@ function StepBucket({
   expanded?: boolean;
   onToggle?: () => void;
   showTimestamps?: boolean;
+  showDate?: boolean;
   // Step-level attributes that mirror the StepDag pill set.
   isResult?: boolean;
   hasSkipIf?: boolean;
@@ -417,6 +434,7 @@ function StepBucket({
                 lines={section.lines}
                 startLine={lineOffset}
                 showTimestamps={showTimestamps}
+                showDate={showDate}
                 matchLineSet={matchLineSet}
                 currentMatchLine={currentMatchLine}
                 visibleLineSet={visibleLineSet}
@@ -437,6 +455,7 @@ function BetweenSection({
   section,
   lineOffset,
   showTimestamps,
+  showDate,
   matchLineSet,
   currentMatchLine,
   visibleLineSet,
@@ -446,6 +465,7 @@ function BetweenSection({
   section: LogSection;
   lineOffset: number;
   showTimestamps?: boolean;
+  showDate?: boolean;
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
   visibleLineSet?: Set<number> | null;
@@ -475,6 +495,7 @@ function BetweenSection({
             lines={section.lines}
             startLine={lineOffset}
             showTimestamps={showTimestamps}
+            showDate={showDate}
             matchLineSet={matchLineSet}
             currentMatchLine={currentMatchLine}
             visibleLineSet={visibleLineSet}
@@ -491,6 +512,7 @@ function SummarySection({
   section,
   lineOffset,
   showTimestamps,
+  showDate,
   matchLineSet,
   currentMatchLine,
   visibleLineSet,
@@ -500,6 +522,7 @@ function SummarySection({
   section: LogSection;
   lineOffset: number;
   showTimestamps?: boolean;
+  showDate?: boolean;
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
   visibleLineSet?: Set<number> | null;
@@ -525,6 +548,7 @@ function SummarySection({
             lines={section.lines}
             startLine={lineOffset}
             showTimestamps={showTimestamps}
+            showDate={showDate}
             matchLineSet={matchLineSet}
             currentMatchLine={currentMatchLine}
             visibleLineSet={visibleLineSet}
@@ -540,6 +564,7 @@ function SummarySection({
 function InlineLogView({
   sections,
   showTimestamps = true,
+  showDate = false,
   matchLineSet,
   currentMatchLine,
   visibleLineSet,
@@ -548,6 +573,7 @@ function InlineLogView({
 }: {
   sections: (LogSection | StepSection)[];
   showTimestamps?: boolean;
+  showDate?: boolean;
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
   visibleLineSet?: Set<number> | null;
@@ -567,7 +593,7 @@ function InlineLogView({
   ) => {
     if (visibleLineSet && !visibleLineSet.has(key)) return null;
     const tsMatch = line.match(TS_PREFIX_RE);
-    const ts = tsMatch ? tsMatch[1] : null;
+    const ts = tsMatch ? tsStamp(tsMatch, showDate) : null;
     const body = tsMatch ? line.slice(tsMatch[0].length) : line;
     const isMatch = matchLineSet?.has(key);
     const isCurrent = isMatch && currentMatchLine === key;
@@ -701,6 +727,11 @@ export default function LogBucketView({
   // first when debugging. The toggle parks them when prose-y log
   // bodies dominate a view.
   const [showTimestamps, setShowTimestamps] = useState(true);
+  // The date is off by default: within one run nearly every line
+  // shares a date, so it's a wide column that repeats itself. It
+  // earns its space when reading an old run, a run that crossed
+  // midnight, or logs pasted next to another day's.
+  const [showDate, setShowDate] = useState(false);
   const steps = parsed.sections.filter(
     (s) => s.type === "step",
   ) as StepSection[];
@@ -1160,6 +1191,22 @@ export default function LogBucketView({
         >
           ts
         </button>
+        {/* Turning the date on turns timestamps on with it -- asking
+          for the date while the whole stamp is hidden can only mean
+          you want to see it. */}
+        <button
+          onClick={() => {
+            const next = !showDate;
+            setShowDate(next);
+            if (next) setShowTimestamps(true);
+          }}
+          title={
+            showDate ? "hide date on timestamps" : "show date on timestamps"
+          }
+          className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${showDate && showTimestamps ? "bg-[#30363d] text-[#c9d1d9]" : "text-[var(--muted)] hover:text-[#c9d1d9]"}`}
+        >
+          date
+        </button>
         <CopyButton text={allLines.join("\n")} label="Copy all logs" />
         <DownloadButton
           text={allLines.join("\n")}
@@ -1172,6 +1219,7 @@ export default function LogBucketView({
           <InlineLogView
             sections={parsed.sections}
             showTimestamps={showTimestamps}
+            showDate={showDate}
             matchLineSet={matchLineSet}
             currentMatchLine={currentMatchLine}
             visibleLineSet={visibleLineSet}
@@ -1198,6 +1246,7 @@ export default function LogBucketView({
                 waterfallTotalMs={waterfallTotalMs}
                 expanded={filterMode ? true : override}
                 showTimestamps={showTimestamps}
+                showDate={showDate}
                 isResult={attrs?.is_result}
                 hasSkipIf={attrs?.has_skip_if}
                 matchLineSet={matchLineSet}
@@ -1224,6 +1273,7 @@ export default function LogBucketView({
                 section={section}
                 lineOffset={offset}
                 showTimestamps={showTimestamps}
+                showDate={showDate}
                 matchLineSet={matchLineSet}
                 currentMatchLine={currentMatchLine}
                 visibleLineSet={visibleLineSet}
@@ -1239,6 +1289,7 @@ export default function LogBucketView({
                 section={section}
                 lineOffset={offset}
                 showTimestamps={showTimestamps}
+                showDate={showDate}
                 matchLineSet={matchLineSet}
                 currentMatchLine={currentMatchLine}
                 visibleLineSet={visibleLineSet}

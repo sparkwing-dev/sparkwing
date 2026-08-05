@@ -27,7 +27,12 @@ import {
   deltaPct,
   summarize,
 } from "@/lib/overview";
-import { fmtAgo, fmtFullDate, fmtMsCompact } from "@/lib/timeFormat";
+import {
+  fmtAgo,
+  fmtDateTime,
+  fmtFullDate,
+  fmtMsCompact,
+} from "@/lib/timeFormat";
 import Tooltip from "@/components/Tooltip";
 
 const POLL_MS = 15000;
@@ -272,7 +277,7 @@ function LastDeployCard({ run }: { run: Run | null }) {
       </span>
       <Tooltip content={fmtFullDate(ts)}>
         <span className="text-[11px] font-mono text-[var(--muted)] shrink-0 cursor-default">
-          {fmtAgo(ts)}
+          {fmtDateTime(ts)} · {fmtAgo(ts)}
         </span>
       </Tooltip>
     </Link>
@@ -328,9 +333,12 @@ function NeedsAttention({
                 <span className="font-mono text-xs truncate flex-1">
                   {a.node_id}
                 </span>
+                {/* Approvals can sit for weeks -- "38d ago" alone
+                  doesn't tell you which day it was asked for, so the
+                  date rides along instead of hiding in the tooltip. */}
                 <Tooltip content={fmtFullDate(a.requested_at)}>
                   <span className="text-[11px] font-mono text-[var(--muted)] shrink-0 cursor-default">
-                    {fmtAgo(a.requested_at)}
+                    {fmtDateTime(a.requested_at)} · {fmtAgo(a.requested_at)}
                   </span>
                 </Tooltip>
               </Link>

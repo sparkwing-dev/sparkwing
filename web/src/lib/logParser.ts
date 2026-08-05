@@ -379,19 +379,23 @@ function recordToLine(rec: LogRecord): string {
 }
 
 // fmtTSInline renders a record's timestamp as a bracketed
-// HH:MM:SS.mmm prefix. The renderer detects this fixed shape and
-// either keeps it visible or strips it when the user toggles
-// timestamps off; baking it into the line keeps parseLogLines'
-// shape (string[]) intact.
+// YYYY-MM-DD HH:MM:SS.mmm prefix. The renderer detects this fixed
+// shape and shows the clock, the whole stamp, or nothing depending on
+// the viewer's toggles; baking it into the line keeps parseLogLines'
+// shape (string[]) intact. The date is always present in the string
+// so the copy/download path carries full timestamps even while the
+// on-screen default hides the date -- a pasted log with no date in it
+// is a recurring nuisance when reading old runs.
 function fmtTSInline(ts?: string): string {
   if (!ts) return "";
   const d = new Date(ts);
   if (isNaN(d.getTime())) return "";
+  const date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const h = String(d.getHours()).padStart(2, "0");
   const m = String(d.getMinutes()).padStart(2, "0");
   const s = String(d.getSeconds()).padStart(2, "0");
   const ms = String(d.getMilliseconds()).padStart(3, "0");
-  return `[${h}:${m}:${s}.${ms}]`;
+  return `[${date} ${h}:${m}:${s}.${ms}]`;
 }
 
 // stepNameFromSection extracts the bare step name out of a

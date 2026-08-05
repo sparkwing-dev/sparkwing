@@ -5,6 +5,7 @@ import { parseHolder } from "@/lib/api";
 import { HeartbeatLabel } from "@/components/HeartbeatDot";
 import StatusLabel from "@/components/StatusLabel";
 import FailureReasonBadge from "@/components/FailureReasonBadge";
+import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 
 function fmtMs(ms: number): string {
   if (!ms) return "";
@@ -39,6 +40,18 @@ export default function SelectedNodePanel({ node }: { node: RunNode }) {
         {holder.label && (
           <span className="text-[var(--muted)]">
             on <span className="font-mono text-[#c9d1d9]">{holder.label}</span>
+          </span>
+        )}
+        {node.started_at && (
+          <span
+            className="font-mono text-[var(--muted)]"
+            title={`Started ${fmtFullDate(node.started_at)}${
+              node.finished_at
+                ? `\nFinished ${fmtFullDate(node.finished_at)}`
+                : ""
+            }`}
+          >
+            {fmtDateTime(node.started_at)}
           </span>
         )}
         {dur && <span className="font-mono text-[var(--muted)]">{dur}</span>}

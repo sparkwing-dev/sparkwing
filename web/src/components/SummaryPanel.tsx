@@ -11,6 +11,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Node as RunNode, Run, RunInvocation } from "@/lib/api";
+import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 
 function fmtMs(ms: number): string {
   if (!ms) return "-";
@@ -312,6 +313,26 @@ export default function SummaryPanel({
       )}
       {(inline || !collapsed) && (
         <div className="px-4 pb-3 space-y-3">
+          {/* Dated window for the run. The summary is often read long
+            after the fact (a linked failure, a rerun comparison), so
+            the day matters as much as the duration. */}
+          <div
+            className="text-xs font-mono text-[var(--muted)]"
+            title={`Started ${fmtFullDate(run.started_at)}${
+              run.finished_at
+                ? `\nFinished ${fmtFullDate(run.finished_at)}`
+                : ""
+            }`}
+          >
+            started {fmtDateTime(run.started_at, { seconds: true })}
+            {run.finished_at && (
+              <>
+                {" · finished "}
+                {fmtDateTime(run.finished_at, { seconds: true })}
+              </>
+            )}
+            {dur > 0 && ` · ${fmtMs(dur)}`}
+          </div>
           {tally.total > 1 && (
             <div className="text-xs font-mono text-[var(--muted)]">
               {tally.total} node{tally.total === 1 ? "" : "s"}
