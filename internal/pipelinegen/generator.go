@@ -21,6 +21,19 @@ type Generator interface {
 	Label() string
 }
 
+// Reviser is a Generator that can take a second look: given the source
+// it produced and the oracle output that rejected it, produce a fix.
+//
+// The acceptance bar is "first or second try" -- an author may read one
+// round of failing output and revise. A one-shot harness measures
+// something stricter than the bar it claims to enforce, and stricter
+// than how a pipeline actually gets written, since `pipeline lint` is
+// right there. Generators that cannot use feedback (fixtures) simply
+// do not implement this.
+type Reviser interface {
+	Revise(ctx context.Context, spec Spec, prev, feedback string) (string, error)
+}
+
 // FixtureGenerator returns the source each spec ships in its corpus
 // directory (candidate.go). A run over fixtures is fully reproducible:
 // it scores fixed source, which makes the corpus a regression gate on
@@ -70,11 +83,27 @@ func (g CommandGenerator) Label() string {
 }
 
 func (g CommandGenerator) Generate(ctx context.Context, spec Spec) (string, error) {
+	return g.run(ctx, commandPrompt(spec))
+}
+
+// Revise re-invokes the same command with the rejected source and the
+// oracle output appended to the original spec, so the author fixes its
+// own attempt rather than starting over blind.
+func (g CommandGenerator) Revise(ctx context.Context, spec Spec, prev, feedback string) (string, error) {
+	prompt := fmt.Sprintf(
+		"%s\n\n=== YOUR PREVIOUS ATTEMPT ===\n%s\n\n=== IT WAS REJECTED ===\n%s\n\n"+
+			"Fix the problems above and output the corrected full Go source. Output ONLY the Go source.",
+		commandPrompt(spec), prev, feedback,
+	)
+	return g.run(ctx, prompt)
+}
+
+func (g CommandGenerator) run(ctx context.Context, prompt string) (string, error) {
 	if len(g.Argv) == 0 {
 		return "", fmt.Errorf("generator command is empty")
 	}
 	cmd := exec.CommandContext(ctx, g.Argv[0], g.Argv[1:]...)
-	cmd.Stdin = strings.NewReader(commandPrompt(spec))
+	cmd.Stdin = strings.NewReader(prompt)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

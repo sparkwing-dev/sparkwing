@@ -38,6 +38,9 @@ type options struct {
 	spec      string
 	base      string
 	sparkwing string
+	repeat    int
+	saveDir   string
+	revise    int
 }
 
 func main() {
@@ -48,6 +51,9 @@ func main() {
 	flag.StringVar(&opts.spec, "spec", "", "run only the named corpus spec (default: all)")
 	flag.StringVar(&opts.base, "base", "", "base .sparkwing dir seeding each candidate project (default: <repo>/.sparkwing)")
 	flag.StringVar(&opts.sparkwing, "sparkwing", "", "path to a prebuilt sparkwing binary (default: build ./cmd/sparkwing)")
+	flag.IntVar(&opts.repeat, "repeat", 1, "generate and score each spec this many times; a live cold author is stochastic, so >1 is what turns the pass rate into a measurement")
+	flag.StringVar(&opts.saveDir, "save-dir", "", "write every generation's source here as <spec>-<attempt>.go, so a failure can be reproduced instead of inferred from truncated tool output")
+	flag.IntVar(&opts.revise, "revise", 0, "feedback rounds a failing generation gets: the oracle output goes back to the generator and the fix is re-scored. 1 matches the documented first-or-second-try acceptance bar")
 	flag.Parse()
 
 	rep, err := run(context.Background(), opts)
@@ -103,7 +109,11 @@ func run(ctx context.Context, opts options) (pipelinegen.Report, error) {
 		return pipelinegen.Report{}, err
 	}
 	scorer := pipelinegen.NewProjectScorer(bin, base)
-	return pipelinegen.Run(ctx, specs, gen, scorer), nil
+	return pipelinegen.RunWith(ctx, specs, gen, scorer, pipelinegen.RunOptions{
+		Repeat:  opts.repeat,
+		SaveDir: opts.saveDir,
+		Revise:  opts.revise,
+	}), nil
 }
 
 // makeGenerator selects the generator from the flags. The fixture
@@ -202,6 +212,9 @@ func emit(w io.Writer, format string, rep pipelinegen.Report) error {
 	}
 }
 
+// emitPretty writes the human summary: one line per attempt, then a
+// per-spec rollup. The rollup is printed only when each spec got more
+// than one attempt, since at Repeat=1 it just restates the lines above.
 func emitPretty(w io.Writer, rep pipelinegen.Report) error {
 	if _, err := fmt.Fprintf(w, "generator: %s\n", rep.Generator); err != nil {
 		return err
@@ -213,7 +226,11 @@ func emitPretty(w io.Writer, rep pipelinegen.Report) error {
 		} else if !r.Passed {
 			status = "fail(expected)"
 		}
-		fmt.Fprintf(w, "  %-18s %-6s %-14s", r.Name, string(r.Expect), status)
+		name := r.Name
+		if rep.Repeat > 1 {
+			name = fmt.Sprintf("%s#%d", r.Name, r.Attempt)
+		}
+		fmt.Fprintf(w, "  %-22s %-6s %-14s", name, string(r.Expect), status)
 		if r.GenError != "" {
 			fmt.Fprintf(w, " gen-error: %s", firstLine(r.GenError))
 		}
@@ -221,6 +238,32 @@ func emitPretty(w io.Writer, rep pipelinegen.Report) error {
 			if !c.OK {
 				fmt.Fprintf(w, " [%s✗]", c.Name)
 			}
+		}
+		if r.Revisions > 0 {
+			fmt.Fprintf(w, " (+%d revision)", r.Revisions)
+		}
+		if r.SourcePath != "" && !r.Matched {
+			fmt.Fprintf(w, " src: %s", r.SourcePath)
+		}
+		fmt.Fprintln(w)
+	}
+
+	if rep.Repeat > 1 {
+		fmt.Fprintf(w, "\nper-spec over %d attempts:\n", rep.Repeat)
+		for _, s := range rep.Stats {
+			flag := ""
+			if s.Matched < s.Attempts {
+				flag = "  <-- flaky"
+				if s.Matched == 0 {
+					flag = "  <-- never matched"
+				}
+			}
+			first := ""
+			if s.Passed > 0 && s.FirstTry < s.Passed {
+				first = fmt.Sprintf("  [%d/%d first-try]", s.FirstTry, s.Passed)
+			}
+			fmt.Fprintf(w, "  %-22s %-6s %d/%d matched (%.0f%%)%s%s\n",
+				s.Name, string(s.Expect), s.Matched, s.Attempts, s.MatchRate*100, first, flag)
 		}
 		fmt.Fprintln(w)
 	}

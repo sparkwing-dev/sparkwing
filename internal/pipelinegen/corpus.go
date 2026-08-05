@@ -49,9 +49,19 @@ type Spec struct {
 	Shape string
 	// Expect is whether scoring should pass or fail.
 	Expect Expectation
+	// GuardRequire and GuardReject are the `guards:` tokens written into
+	// the scored project's sparkwing.yaml. They exist so the corpus can
+	// reach the guard-misuse lint rule, which reads the config rather
+	// than the Plan body and is otherwise unreachable from Go source
+	// alone. Specs that use them are necessarily fixture-only.
+	GuardRequire []string
+	GuardReject  []string
 	// Prompt is the natural-language spec a generator turns into source.
 	Prompt string
 }
+
+// HasGuards reports whether the spec declares a guards: block.
+func (s Spec) HasGuards() bool { return len(s.GuardRequire) > 0 || len(s.GuardReject) > 0 }
 
 // LoadCorpus reads every spec under root in fsys. Each immediate
 // subdirectory is one spec, identified by a spec.md carrying the
@@ -120,11 +130,27 @@ func parseSpec(name, content string) (Spec, error) {
 			spec.Entrypoint = val
 		case "expect":
 			spec.Expect = Expectation(val)
+		case "guard-require":
+			spec.GuardRequire = splitTokens(val)
+		case "guard-reject":
+			spec.GuardReject = splitTokens(val)
 		default:
 			return Spec{}, fmt.Errorf("unknown frontmatter key %q", key)
 		}
 	}
 	return Spec{}, fmt.Errorf("unterminated frontmatter (missing closing ---)")
+}
+
+// splitTokens parses a comma-separated frontmatter list, dropping empty
+// entries so a trailing comma is not read as a blank guard token.
+func splitTokens(val string) []string {
+	var out []string
+	for _, part := range strings.Split(val, ",") {
+		if t := strings.TrimSpace(part); t != "" {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 func validateSpec(s Spec) (Spec, error) {

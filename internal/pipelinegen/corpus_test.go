@@ -61,6 +61,46 @@ func TestParseSpecRejectsMalformed(t *testing.T) {
 	}
 }
 
+func TestParseSpecReadsGuardTokens(t *testing.T) {
+	s, err := parseSpec("t", "---\nexpect: fail\nentrypoint: P\n"+
+		"guard-require: profile:local, profile:controller\n"+
+		"guard-reject: profile:controller,\n---\ngated\n")
+	if err != nil {
+		t.Fatalf("parseSpec: %v", err)
+	}
+	if len(s.GuardRequire) != 2 || s.GuardRequire[0] != "profile:local" || s.GuardRequire[1] != "profile:controller" {
+		t.Errorf("GuardRequire = %q", s.GuardRequire)
+	}
+	if len(s.GuardReject) != 1 || s.GuardReject[0] != "profile:controller" {
+		t.Errorf("GuardReject = %q (a trailing comma must not yield a blank token)", s.GuardReject)
+	}
+	if !s.HasGuards() {
+		t.Error("HasGuards() = false for a spec declaring guards")
+	}
+}
+
+func TestPipelineYAMLEmitsGuardsOnlyWhenDeclared(t *testing.T) {
+	plain := pipelineYAML(Spec{Name: "n", Entrypoint: "E"})
+	if strings.Contains(plain, "guards") {
+		t.Errorf("a spec with no guards emitted a guards block:\n%s", plain)
+	}
+
+	gated := pipelineYAML(Spec{
+		Name: "n", Entrypoint: "E",
+		GuardRequire: []string{"profile:local", "profile:controller"},
+		GuardReject:  []string{"profile:controller"},
+	})
+	for _, want := range []string{
+		"    guards:\n",
+		"      require: [profile:local, profile:controller]\n",
+		"      reject: [profile:controller]\n",
+	} {
+		if !strings.Contains(gated, want) {
+			t.Errorf("guarded yaml missing %q:\n%s", want, gated)
+		}
+	}
+}
+
 func TestParseSpecDefaultsShape(t *testing.T) {
 	s, err := parseSpec("t", "---\nexpect: fail\nentrypoint: P\n---\ndo a thing\n")
 	if err != nil {

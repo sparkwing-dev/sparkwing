@@ -86,8 +86,7 @@ func (s *ProjectScorer) Score(ctx context.Context, spec Spec, source string) ([]
 			return nil, fmt.Errorf("copy base %s: %w", f, err)
 		}
 	}
-	yaml := fmt.Sprintf("pipelines:\n  - name: %s\n    entrypoint: %s\n", spec.Name, spec.Entrypoint)
-	if err := os.WriteFile(filepath.Join(proj, "sparkwing.yaml"), []byte(yaml), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(proj, "sparkwing.yaml"), []byte(pipelineYAML(spec)), 0o644); err != nil {
 		return nil, err
 	}
 	if err := os.WriteFile(filepath.Join(jobsDir, "candidate.go"), []byte(source), 0o644); err != nil {
@@ -102,6 +101,26 @@ func (s *ProjectScorer) Score(ctx context.Context, spec Spec, source string) ([]
 		runCheck(ctx, CheckLint, tmp, s.Sparkwing, "pipeline", "lint", "--all", "-o", "json"),
 	}
 	return checks, nil
+}
+
+// pipelineYAML renders the scored project's sparkwing.yaml: the single
+// pipeline entry, plus a guards: block when the spec declares one. The
+// guard-misuse lint rule reads this file rather than the Plan body, so a
+// spec that targets it can only express itself here.
+func pipelineYAML(spec Spec) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "pipelines:\n  - name: %s\n    entrypoint: %s\n", spec.Name, spec.Entrypoint)
+	if !spec.HasGuards() {
+		return b.String()
+	}
+	b.WriteString("    guards:\n")
+	if len(spec.GuardRequire) > 0 {
+		fmt.Fprintf(&b, "      require: [%s]\n", strings.Join(spec.GuardRequire, ", "))
+	}
+	if len(spec.GuardReject) > 0 {
+		fmt.Fprintf(&b, "      reject: [%s]\n", strings.Join(spec.GuardReject, ", "))
+	}
+	return b.String()
 }
 
 // runFormatCheck runs `gofmt -l` over dir. gofmt exits 0 even when files
