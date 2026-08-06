@@ -25,6 +25,13 @@
 // daemon's own ledger panics on over-admission, so a panic in its log is a
 // caught bug.
 //
+// A guard on its own 100ms ticker also watches the process groups the harness
+// owns, so a wedged daemon cannot suppress it. It bounds the total owned
+// process count and requires every unreaped process to drain -- both the group
+// leaders deliberately held as ownership anchors and each actor's own exited
+// children. It deliberately does not cap how many exist at one instant, which
+// tracks actor churn rather than correctness.
+//
 // # Determinism
 //
 // The seed governs the scenario schedule, not OS timing: process starts and
@@ -41,8 +48,10 @@
 // SPARKWING_CHAOS_SOAK is set to a duration and injects faults more
 // aggressively for nightly or manual runs:
 //
-//	SPARKWING_CHAOS_SOAK=30m go test -run TestChaos_Soak ./internal/chaos
+//	SPARKWING_CHAOS_SOAK=30m bash bin/chaos-soak-runner.sh
 //
-// Both accept SPARKWING_CHAOS_SEED to pin the schedule for replay; when
-// unset the harness derives a seed from the clock and prints it at start.
+// The runner accepts SPARKWING_CHAOS_SEED to pin the schedule,
+// SPARKWING_CHAOS_LOG_DIR for persistent logs, and
+// SPARKWING_CHAOS_TEST_TIMEOUT for the outer `go test` deadline. When the
+// seed is unset the harness derives one from the clock and prints it at start.
 package chaos
