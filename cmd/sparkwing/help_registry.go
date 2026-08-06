@@ -56,7 +56,7 @@ for agent-facing discovery.`,
 	},
 	Examples: []Example{
 		{"Run a pipeline (positional shortcut)", "sparkwing run build-test-deploy"},
-		{"First command an agent should run", "sparkwing info -o json"},
+		{"First command an agent should run", "sparkwing info --for-agent"},
 		{"List every invocable (agents)", "sparkwing pipeline list -o json"},
 		{"Inspect one pipeline's full metadata", "sparkwing pipeline describe --name release -o json"},
 		{"Bootstrap + scaffold your first pipeline in a fresh repo", "sparkwing pipeline new --name release"},

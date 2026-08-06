@@ -69,6 +69,12 @@ code change to unlock.
   claiming every transition is an upgrade.
 - **cli:** `daemon status` and `daemon restart` now default to pretty output on
   a terminal and JSON when piped; an explicit `-o` continues to win.
+- **cli:** `info --for-agent` now ends with this repo's state -- whether a
+  `.sparkwing/` exists, how many pipelines it holds, whether Go is on PATH --
+  and the CLI's own examples name it as the first command an agent should run,
+  rather than `info -o json`. The block used to send readers to `info -o json`
+  for exactly that, and every recorded trial made the second call before doing
+  anything else: a whole model round to learn one line.
 - **cli:** `pipeline lint` with no target now lints every pipeline instead of
   printing its help and exiting non-zero. Linting is read-only static
   analysis, so the whole repo is both the safe default and what the bare

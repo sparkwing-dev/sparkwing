@@ -250,12 +250,36 @@ const agentBlockBody = "This repo uses **sparkwing** for CI/CD (https://sparkwin
 	"- Creating a pipeline? `sparkwing pipeline new --help`\n" +
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n"
 
+// printAgentBlock writes the agent discovery context.
+//
+// It ends with this repo's state because the block used to send the
+// reader to `info -o json` for it, and every recorded trial obediently
+// made that second call before doing anything else -- a whole model
+// round to learn one line. Answering it here costs four lines and
+// removes a turn from every agent's first minute.
 func printAgentBlock() {
 	fmt.Println(agentBlockHeader)
 	fmt.Println()
 	fmt.Println("## Sparkwing")
 	fmt.Println()
 	fmt.Print(agentBlockBody)
+
+	info := gatherInfo(false)
+	fmt.Println()
+	fmt.Println("### This repo, right now")
+	fmt.Println()
+	switch {
+	case !info.Project.Found:
+		fmt.Println("- No `.sparkwing/` yet. `sparkwing pipeline new` bootstraps one; there is no separate init step.")
+	default:
+		p := info.Project.Pipelines
+		fmt.Printf("- `%s` -- %d pipeline(s): %d triggered, %d manual. `sparkwing pipeline list -o json` names them.\n",
+			info.Project.SparkwingDir, p.Total, p.Triggered, p.Manual)
+	}
+	if !info.Toolchain.Go.Found {
+		fmt.Println("- No Go toolchain on PATH. Pipelines are Go programs; authoring one needs it.")
+	}
+	fmt.Printf("- CLI %s. Docs shipped in this binary match it exactly.\n", info.Version.Installed)
 }
 
 func printFirstTimeCard() {

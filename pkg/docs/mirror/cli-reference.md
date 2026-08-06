@@ -43,7 +43,7 @@ for agent-facing discovery.
 sparkwing run build-test-deploy
 
 # First command an agent should run
-sparkwing info -o json
+sparkwing info --for-agent
 
 # List every invocable (agents)
 sparkwing pipeline list -o json
