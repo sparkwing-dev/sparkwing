@@ -341,6 +341,11 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 
 // finishScaffold is the shared post-write reporting + tidy step for both
 // the built-in string templates and the rendered registry templates.
+//
+// The tips name the "hooks" topic because a scaffold is manual-only
+// until it declares a trigger, and nothing about the word "hooks"
+// suggests that from here -- without the pointer the next move is a
+// `docs list` to go hunting for which topic covers firing a pipeline.
 func finishScaffold(sparkwingDir, file, name string, bootstrapped bool) error {
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
 	if err != nil {
@@ -369,10 +374,10 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool) error {
 	fmt.Println(color.Bold("TIPS"))
 	tips := []InfoNextStep{
 		{Command: "sparkwing run " + name, Purpose: "run it"},
+		{Command: "sparkwing docs read --topic hooks", Purpose: "fire it on push / pull_request / schedule"},
 		{Command: "sparkwing docs read --topic sdk", Purpose: "SDK reference for editing the stub"},
 		{Command: "sparkwing docs read --topic pipelines", Purpose: "sparkwing.yaml + DAG concepts"},
 		{Command: "sparkwing dashboard start", Purpose: "see runs in local dashboard"},
-		{Command: "sparkwing info", Purpose: "find out more about sparkwing"},
 	}
 	printAlignedSteps(tips)
 	return nil

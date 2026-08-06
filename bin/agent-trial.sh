@@ -249,4 +249,20 @@ else
   echo "  explain: PASS ($explain_ok pipelines)"
 fi
 echo
-echo "wall-clock: ${ELAPSED}s   trace: $TRACE   repo: $TRIAL"
+# The agent records its own elapsed time. A harness wall-clock much
+# larger than that is this machine being busy, not sparkwing being slow
+# -- a trial run alongside a build has been observed at 6x the agent's
+# own number. Print both so a contended run is obvious instead of
+# quietly becoming a data point.
+agent_ms=$(tail -1 "$TRACE" 2>/dev/null | jq -r '.duration_ms // empty' 2>/dev/null)
+if [[ -n "$agent_ms" ]]; then
+  agent_s=$((agent_ms / 1000))
+  echo "wall-clock: ${ELAPSED}s (agent reports ${agent_s}s)"
+  if [[ "$agent_s" -gt 0 && $((ELAPSED / agent_s)) -ge 2 ]]; then
+    echo "  -> harness clock is >=2x the agent's own: this machine was busy; rerun idle"
+  fi
+else
+  echo "wall-clock: ${ELAPSED}s"
+fi
+echo "trace: $TRACE"
+echo "repo:  $TRIAL"
