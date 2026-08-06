@@ -58,6 +58,13 @@ code change to unlock.
   claiming every transition is an upgrade.
 - **cli:** `daemon status` and `daemon restart` now default to pretty output on
   a terminal and JSON when piped; an explicit `-o` continues to win.
+- **docs:** the SDK reference now covers the SDK's subpackages
+  (`sparkwing/docker`, `sparkwing/git`, `sparkwing/inputs`,
+  `sparkwing/planguard`, `sparkwing/services`), each with its import alias.
+  The generator documented only the root package, so 42 exported
+  declarations an authoring agent needs for any pipeline that builds an
+  image or reads the branch were reachable only by opening the module
+  cache.
 - **docs:** the SDK reference now lists constants declared with a named type,
   so every enum in the SDK is spellable from the docs alone. `go/doc` files a
   typed constant under its type rather than the package, and the generator

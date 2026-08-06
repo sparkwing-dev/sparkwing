@@ -1,9 +1,15 @@
 // sdkref generates docs/sdk-reference.md from the author-facing
-// `sparkwing` package via go/doc: every exported function, type
-// (with its exported fields), method, constant, and var, with its
-// godoc synopsis. This is the same data pkg.go.dev renders, so the
-// signature reference is derived from source and can't drift from the
-// SDK -- unlike the hand-typed signature blocks it replaces in sdk.md.
+// `sparkwing` package and its subpackages via go/doc: every exported
+// function, type (with its exported fields), method, constant, and var,
+// with its godoc synopsis. This is the same data pkg.go.dev renders, so
+// the signature reference is derived from source and can't drift from
+// the SDK -- unlike the hand-typed signature blocks it replaces in
+// sdk.md.
+//
+// Subpackages (sparkwing/docker, sparkwing/git, ...) are part of the
+// authoring surface: a pipeline that builds an image or reads the
+// branch imports them. Documenting only the root package left them
+// reachable exclusively by reading the module cache.
 //
 // Usage: go run . <repo-root>   (writes markdown to stdout)
 package main
@@ -18,6 +24,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 )
 
@@ -28,29 +35,17 @@ func main() {
 		fmt.Fprintln(os.Stderr, "usage: sdkref <repo-root>")
 		os.Exit(2)
 	}
-	pkgDir := filepath.Join(os.Args[1], "sparkwing")
+	root := filepath.Join(os.Args[1], "sparkwing")
 
 	fset := token.NewFileSet()
-	matches, err := filepath.Glob(filepath.Join(pkgDir, "*.go"))
+	dpkg, err := loadPackage(fset, root, importPath)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "sdkref glob:", err)
+		fmt.Fprintln(os.Stderr, "sdkref:", err)
 		os.Exit(2)
 	}
-	var files []*ast.File
-	for _, m := range matches {
-		if strings.HasSuffix(m, "_test.go") {
-			continue
-		}
-		f, perr := parser.ParseFile(fset, m, nil, parser.ParseComments)
-		if perr != nil {
-			fmt.Fprintln(os.Stderr, "sdkref parse:", perr)
-			os.Exit(2)
-		}
-		files = append(files, f)
-	}
-	dpkg, err := doc.NewFromFiles(fset, files, importPath)
+	subs, err := loadSubpackages(fset, root)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "sdkref doc:", err)
+		fmt.Fprintln(os.Stderr, "sdkref:", err)
 		os.Exit(2)
 	}
 
@@ -63,8 +58,25 @@ func main() {
 		"on pkg.go.dev: <https://pkg.go.dev/" + importPath + ">. For concepts and " +
 		"usage examples, see [sdk.md](sdk.md).\n\n")
 
+	renderPackage(&b, fset, dpkg, "##")
+
+	for _, sub := range subs {
+		b.WriteString("## Package `" + sub.rel + "`\n\n")
+		if s := sub.pkg.Synopsis(sub.pkg.Doc); s != "" {
+			b.WriteString(s + "\n\n")
+		}
+		b.WriteString("Import as `" + sub.importAlias() + " \"" + sub.importPath + "\"`.\n\n")
+		renderPackage(&b, fset, sub.pkg, "###")
+	}
+
+	fmt.Print(b.String())
+}
+
+// renderPackage writes one package's exported surface under heading
+// level h (h+"#" for the per-type headings nested inside it).
+func renderPackage(b *strings.Builder, fset *token.FileSet, dpkg *doc.Package, h string) {
 	if len(dpkg.Funcs) > 0 {
-		b.WriteString("## Functions\n\n")
+		b.WriteString(h + " Functions\n\n")
 		for _, f := range dpkg.Funcs {
 			b.WriteString(symbolLine(dpkg, fset, f.Decl, f.Doc))
 		}
@@ -72,15 +84,15 @@ func main() {
 	}
 
 	if len(dpkg.Types) > 0 {
-		b.WriteString("## Types\n\n")
+		b.WriteString(h + " Types\n\n")
 		for _, t := range dpkg.Types {
-			b.WriteString("### type " + t.Name + "\n\n")
+			b.WriteString(h + "# type " + t.Name + "\n\n")
 			if s := dpkg.Synopsis(t.Doc); s != "" {
 				b.WriteString(s + "\n\n")
 			}
 			b.WriteString("```\n" + decl(fset, t.Decl) + "\n```\n\n")
-			writeValueBlocks(&b, fset, t.Consts)
-			writeValueBlocks(&b, fset, t.Vars)
+			writeValueBlocks(b, fset, t.Consts)
+			writeValueBlocks(b, fset, t.Vars)
 			for _, c := range t.Funcs {
 				b.WriteString(symbolLine(dpkg, fset, c.Decl, c.Doc))
 			}
@@ -91,10 +103,75 @@ func main() {
 		}
 	}
 
-	writeValues(&b, fset, "Constants", dpkg.Consts)
-	writeValues(&b, fset, "Variables", dpkg.Vars)
+	writeValues(b, fset, h, "Constants", dpkg.Consts)
+	writeValues(b, fset, h, "Variables", dpkg.Vars)
+}
 
-	fmt.Print(b.String())
+// subpackage is one importable package under sparkwing/, e.g.
+// sparkwing/docker.
+type subpackage struct {
+	rel        string // "sparkwing/docker"
+	importPath string
+	pkg        *doc.Package
+}
+
+// importAlias is the name authors bind the package to. The repo's own
+// pipelines alias these (swdocker, swgit) because the bare package name
+// collides with the upstream library it wraps.
+func (s subpackage) importAlias() string { return "sw" + s.pkg.Name }
+
+// loadPackage parses every non-test .go file in dir into a doc.Package.
+func loadPackage(fset *token.FileSet, dir, ipath string) (*doc.Package, error) {
+	matches, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		return nil, fmt.Errorf("glob %s: %w", dir, err)
+	}
+	var files []*ast.File
+	for _, m := range matches {
+		if strings.HasSuffix(m, "_test.go") {
+			continue
+		}
+		f, perr := parser.ParseFile(fset, m, nil, parser.ParseComments)
+		if perr != nil {
+			return nil, fmt.Errorf("parse: %w", perr)
+		}
+		files = append(files, f)
+	}
+	if len(files) == 0 {
+		return nil, nil
+	}
+	return doc.NewFromFiles(fset, files, ipath)
+}
+
+// loadSubpackages returns every importable package directly under the
+// SDK root, sorted by name.
+//
+// These are part of the authoring surface -- a pipeline that builds an
+// image or reads the branch imports sparkwing/docker or sparkwing/git --
+// but documenting only the root package left them invisible, so the only
+// way to learn their API was to open the module cache.
+func loadSubpackages(fset *token.FileSet, root string) ([]subpackage, error) {
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", root, err)
+	}
+	var subs []subpackage
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		ipath := importPath + "/" + e.Name()
+		pkg, perr := loadPackage(fset, filepath.Join(root, e.Name()), ipath)
+		if perr != nil {
+			return nil, perr
+		}
+		if pkg == nil || (len(pkg.Funcs) == 0 && len(pkg.Types) == 0) {
+			continue
+		}
+		subs = append(subs, subpackage{rel: "sparkwing/" + e.Name(), importPath: ipath, pkg: pkg})
+	}
+	sort.Slice(subs, func(i, j int) bool { return subs[i].rel < subs[j].rel })
+	return subs, nil
 }
 
 // symbolLine renders one func/method as a list item: signature in
@@ -107,11 +184,11 @@ func symbolLine(dpkg *doc.Package, fset *token.FileSet, fd *ast.FuncDecl, godoc 
 	return line + "\n"
 }
 
-func writeValues(b *strings.Builder, fset *token.FileSet, title string, vals []*doc.Value) {
+func writeValues(b *strings.Builder, fset *token.FileSet, h, title string, vals []*doc.Value) {
 	if len(vals) == 0 {
 		return
 	}
-	b.WriteString("## " + title + "\n\n")
+	b.WriteString(h + " " + title + "\n\n")
 	writeValueBlocks(b, fset, vals)
 }
 
