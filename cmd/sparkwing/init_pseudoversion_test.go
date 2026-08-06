@@ -17,6 +17,13 @@ func TestFallbackSDKVersionIsResolvable(t *testing.T) {
 	}
 }
 
+// TestIsResolvableModuleVersion covers the forms a local build
+// produces. A source build stamps v<semver>-dev+<sha>, which is neither
+// a "+dirty" marker nor a pseudo-version: it once passed this check and
+// was written into scaffolds that then could not be built, and that
+// `version update --sdk` could not repair, since `go get` parses the
+// broken go.mod first. "+incompatible" is the one build-metadata suffix
+// the module system accepts.
 func TestIsResolvableModuleVersion(t *testing.T) {
 	cases := []struct {
 		v    string
@@ -33,6 +40,11 @@ func TestIsResolvableModuleVersion(t *testing.T) {
 		{"v0.8.1-0.20260606014656-114f6846819b", false},
 		{"v0.6.3-pre.0.20260531005950-041d1c11f150", false},
 		{"v0.8.1-0.20260606014656-114f6846819b+dirty", false},
+
+		{"v0.22.2-dev+1f8a9b98", false},
+		{"v0.22.2-dev", false},
+		{"v1.0.0+20130313144700", false},
+		{"v2.0.0+incompatible", true},
 	}
 	for _, c := range cases {
 		if got := isResolvableModuleVersion(c.v); got != c.want {

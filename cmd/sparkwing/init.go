@@ -124,9 +124,20 @@ var pseudoVersionRE = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(\+dirty)?$`)
 
 // isResolvableModuleVersion reports whether v looks like a published
 // semver tag (e.g. "v0.6.2") that `go mod` can resolve from a fresh
-// repo. Rejects "(unknown)" / "(devel)" fallbacks, the "+dirty"
-// worktree marker, and pseudo-versions whose commit isn't on a
-// published branch yet.
+// repo. Rejects "(unknown)" / "(devel)" fallbacks, pseudo-versions
+// whose commit isn't on a published branch yet, and two forms a local
+// build produces:
+//
+// Build metadata other than "+incompatible" -- the module system
+// rejects it outright, so "+dirty" and the "+<sha>" a source build
+// stamps are both unusable in a require directive.
+//
+// Any "-dev" prerelease. No released tag carries one, and unlike the
+// above it is syntactically valid, which is what makes it dangerous:
+// `go get` accepts the require line and only then fails to find the
+// tag. A scaffold pinned this way did not build, and `version update
+// --sdk` could not repair it, because `go get` parses the broken
+// go.mod before it can bump anything.
 func isResolvableModuleVersion(v string) bool {
 	if v == "" || strings.HasPrefix(v, "(") {
 		return false
@@ -134,7 +145,13 @@ func isResolvableModuleVersion(v string) bool {
 	if !strings.HasPrefix(v, "v") {
 		return false
 	}
-	if strings.HasSuffix(v, "+dirty") || pseudoVersionRE.MatchString(v) {
+	if i := strings.IndexByte(v, '+'); i >= 0 && v[i:] != "+incompatible" {
+		return false
+	}
+	if strings.Contains(v, "-dev") {
+		return false
+	}
+	if pseudoVersionRE.MatchString(v) {
 		return false
 	}
 	return true

@@ -209,6 +209,17 @@ if [[ "$sdk_source" -gt 0 ]]; then
 fi
 echo
 
+# The agent is the only witness to what it had to guess at. A prompt
+# that asks for a FRICTION section turns that into a report line rather
+# than something to reconstruct from the trace afterwards.
+friction=$(jq -r 'select(.type=="result") | .result' "$TRACE" 2>/dev/null \
+  | awk '/^[^a-z]*FRICTION:/{found=1} found{print}')
+if [[ -n "$friction" ]]; then
+  echo "=== FRICTION (agent-reported) ==="
+  printf '%s\n' "$friction" | head -40
+  echo
+fi
+
 echo "=== RESULT ==="
 if [[ ! -d "$TRIAL/.sparkwing" ]]; then
   echo "  NO .sparkwing/ IN THE TRIAL REPO -- the agent built elsewhere."

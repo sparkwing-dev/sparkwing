@@ -58,6 +58,15 @@ code change to unlock.
   claiming every transition is an upgrade.
 - **cli:** `daemon status` and `daemon restart` now default to pretty output on
   a terminal and JSON when piped; an explicit `-o` continues to win.
+- **cli:** `pipeline new` run from a source-built CLI no longer pins an SDK
+  version the module proxy cannot resolve. A local build stamps
+  `v<semver>-dev+<sha>`, which is neither a `+dirty` marker nor a
+  pseudo-version, so it passed the resolvable-version check and was written
+  straight into the scaffold's `go.mod`. The result did not build, and
+  `version update --sdk` could not repair it: `go get` parses the broken
+  `go.mod` before it can bump anything, so the fix was blocked by the
+  problem. Build metadata other than `+incompatible`, and any `-dev`
+  prerelease, now fall back to the pinned release.
 - **docs:** the SDK reference now covers the SDK's subpackages
   (`sparkwing/docker`, `sparkwing/git`, `sparkwing/inputs`,
   `sparkwing/planguard`, `sparkwing/services`), each with its import alias.

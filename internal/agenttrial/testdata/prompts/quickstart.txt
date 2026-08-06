@@ -1,0 +1,15 @@
+Use sparkwing to add one pipeline to this repo: run `go test ./...` on
+pull requests.
+
+Keep it minimal and stop early:
+- Prefer an existing template over writing a pipeline by hand.
+- You are done as soon as `sparkwing pipeline lint` passes and one
+  `sparkwing run <name>` is green. Do not keep hardening it.
+- Do not install git hooks, do not commit anything, and do not add any
+  other pipeline, check, or file.
+
+Then print a final section headed exactly `FRICTION:` listing whatever
+cost you time or made you guess -- a command you expected and did not
+find, a doc that did not answer the question, an API you had to infer,
+output you had to read twice, a step that felt redundant. Be specific
+and blunt. `FRICTION: none` is a valid answer; do not pad it.
