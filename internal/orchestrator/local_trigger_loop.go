@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -41,6 +42,7 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileNam
 	}
 	wedge := newStoreWedgeGuard(wedgeBudget)
 	cache := &localCompileCache{}
+	defer cache.Close()
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
@@ -122,6 +124,7 @@ func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.
 // loop, split out so validation happens synchronously at startup.
 func consumeLocalTriggers(ctx context.Context, st *store.Store, logger *slog.Logger, wedge *storeWedgeGuard) {
 	cache := &localCompileCache{}
+	defer cache.Close()
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
@@ -228,12 +231,26 @@ func dispatchLocalTrigger(ctx context.Context, st *store.Store, trig *store.Trig
 		args = append(args, "--profile", profileName)
 	}
 	args = append(args, trig.ID)
+	return execLocalChild(ctx, binPath, repoDir, args)
+}
+
+func execLocalChild(ctx context.Context, binPath, repoDir string, args []string) error {
 	cmd := exec.CommandContext(ctx, binPath, args...)
 	cmd.Dir = repoDir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	cmd.Env = os.Environ()
 	if err := cmd.Run(); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if _, statErr := os.Stat(binPath); os.IsNotExist(statErr) {
+				return fmt.Errorf(
+					"child executable lease %q is unavailable (local pipeline-cache provenance). "+
+						"Re-run the parent pipeline to recreate its executable lease; if the shared cache is corrupt, "+
+						"run `sparkwing pipeline sparks warmup --clear-cache`: %w",
+					binPath, err,
+				)
+			}
+		}
 		return fmt.Errorf("child exec: %w", err)
 	}
 	return nil
@@ -419,20 +436,30 @@ func repoDeclaresPipeline(repoDir, pipeline string) bool {
 	return false
 }
 
-// localCompileCache memoizes sparkwingDir -> binPath for the loop's
-// lifetime so back-to-back awaits skip even the hash compute.
+// localCompileCache owns executable leases for one trigger-consumer lifetime.
+// A path under the shared binary cache is only a source: another process may
+// clear or replace that cache while a parent run is still alive. Before a path
+// reaches exec, the cache hard-links (or copies) it into a private temporary
+// directory that is removed only after every dispatched child has exited.
 type localCompileCache struct {
-	mu  sync.Mutex
-	hit map[string]string
+	mu       sync.Mutex
+	hit      map[string]string
+	bySource map[string]string
+	leaseDir string
 }
 
 func (c *localCompileCache) compile(sparkwingDir string) (string, error) {
+	source := filepath.Clean(sparkwingDir)
 	c.mu.Lock()
-	if c.hit != nil {
-		if p, ok := c.hit[sparkwingDir]; ok {
-			c.mu.Unlock()
-			return p, nil
+	if hash := c.bySource[source]; hash != "" {
+		if p := c.hit[hash]; p != "" {
+			if _, err := os.Stat(p); err == nil {
+				c.mu.Unlock()
+				return p, nil
+			}
+			delete(c.hit, hash)
 		}
+		delete(c.bySource, source)
 	}
 	c.mu.Unlock()
 
@@ -440,21 +467,126 @@ func (c *localCompileCache) compile(sparkwingDir string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("hash %s: %w", sparkwingDir, err)
 	}
-	binPath := bincache.CachedBinaryPath(hash)
-	if _, err := os.Stat(binPath); err != nil {
-		if !os.IsNotExist(err) {
-			return "", fmt.Errorf("stat binary cache: %w", err)
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if p := c.hit[hash]; p != "" {
+		if _, err := os.Stat(p); err == nil {
+			if c.bySource == nil {
+				c.bySource = map[string]string{}
+			}
+			c.bySource[source] = hash
+			return p, nil
 		}
-		if err := bincache.CompilePipeline(sparkwingDir, binPath); err != nil {
-			return "", err
+		delete(c.hit, hash)
+	}
+
+	binPath := bincache.CachedBinaryPath(hash)
+	var leaseErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		if _, err := os.Stat(binPath); err != nil {
+			if !os.IsNotExist(err) {
+				return "", fmt.Errorf("stat binary cache: %w", err)
+			}
+			if err := bincache.CompilePipeline(sparkwingDir, binPath); err != nil {
+				return "", err
+			}
+		}
+
+		if c.leaseDir == "" {
+			c.leaseDir, err = os.MkdirTemp("", "sparkwing-child-executables-")
+			if err != nil {
+				return "", fmt.Errorf("create child executable lease: %w", err)
+			}
+		}
+		leasedPath := filepath.Join(c.leaseDir, hash+"-"+filepath.Base(binPath))
+		leaseErr = leaseExecutable(binPath, leasedPath)
+		if leaseErr == nil {
+			if c.hit == nil {
+				c.hit = map[string]string{}
+			}
+			if c.bySource == nil {
+				c.bySource = map[string]string{}
+			}
+			c.hit[hash] = leasedPath
+			c.bySource[source] = hash
+			return leasedPath, nil
+		}
+		if !os.IsNotExist(leaseErr) {
+			return "", fmt.Errorf("lease cached pipeline executable %s: %w", binPath, leaseErr)
 		}
 	}
 
+	return "", fmt.Errorf(
+		"lease cached pipeline executable %s: cache entry disappeared while acquiring its lifetime lease; "+
+			"re-run the parent pipeline (or rebuild a corrupt cache with `sparkwing pipeline sparks warmup --clear-cache`): %w",
+		binPath, leaseErr,
+	)
+}
+
+// Close releases all executables after the trigger loop has waited for its
+// in-flight children. It is safe on a zero-value or already-closed cache.
+func (c *localCompileCache) Close() error {
 	c.mu.Lock()
-	if c.hit == nil {
-		c.hit = map[string]string{}
-	}
-	c.hit[sparkwingDir] = binPath
+	dir := c.leaseDir
+	c.leaseDir = ""
+	c.hit = nil
+	c.bySource = nil
 	c.mu.Unlock()
-	return binPath, nil
+	if dir == "" {
+		return nil
+	}
+	return os.RemoveAll(dir)
+}
+
+// leaseExecutable gives the consumer a pathname whose lifetime is independent
+// of the shared cache entry. A hard link is cheap and preserves the inode even
+// if the cache is cleared. Filesystems that cannot link across the temporary
+// boundary fall back to copying through an open descriptor, which remains
+// readable if the source name is concurrently unlinked.
+func leaseExecutable(src, dest string) error {
+	if err := os.Link(src, dest); err == nil {
+		return nil
+	} else if os.IsExist(err) {
+		return nil
+	}
+
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	info, err := in.Stat()
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".lease-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	removeTmp := true
+	defer func() {
+		_ = tmp.Close()
+		if removeTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+	if _, err := io.Copy(tmp, in); err != nil {
+		return err
+	}
+	if err := tmp.Chmod(info.Mode().Perm()); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpPath, dest); err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
+		return err
+	}
+	removeTmp = false
+	return nil
 }

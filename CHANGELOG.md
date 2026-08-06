@@ -50,6 +50,11 @@ code change to unlock.
 
 ### Fixed
 
+- **local execution/cache:** `RunAndAwait` children now execute from a
+  parent-owned binary lease instead of a pathname in the shared compile cache.
+  Clearing or replacing that cache while a parent is live can no longer strand
+  its children, and a missing lease now reports its cache provenance and the
+  recovery command.
 - **chaos:** soak actors and their descendants now stay in exact owned process
   groups whose unreaped leaders anchor cleanup until every descendant is gone.
   Daemon queries are bounded, an independent process guard fails fast when
