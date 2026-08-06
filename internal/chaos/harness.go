@@ -2,6 +2,7 @@ package chaos
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -11,13 +12,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -54,6 +56,21 @@ type Config struct {
 	DaemonGraceMS int
 	// DaemonCores is the fixed host core capacity the daemon advertises.
 	DaemonCores float64
+	// MaxOwnedProcesses bounds the total number of processes in groups the
+	// harness owns. A non-positive value derives a limit from MaxActors.
+	MaxOwnedProcesses int
+	// MaxZombieDrain bounds how long any one process in an owned group may
+	// stay unreaped. Both kinds of owned zombie are transient by design: a
+	// group leader is deliberately held as the ownership anchor until its
+	// descendants are proven empty, and a descendant is a zombie between its
+	// own exit and its parent's wait. How many exist at any instant therefore
+	// scales with actor churn rather than with correctness, so what is checked
+	// is that each one drains. A non-positive value derives a bound from
+	// Settle.
+	MaxZombieDrain time.Duration
+	// OracleTimeout bounds each daemon query so a wedged server cannot stop
+	// the independent process-growth guard or teardown.
+	OracleTimeout time.Duration
 }
 
 // CIConfig returns a bounded configuration suitable for `go test`: a short
@@ -61,15 +78,17 @@ type Config struct {
 // hold on a loaded machine.
 func CIConfig(seed int64) Config {
 	return Config{
-		Seed:          seed,
-		Duration:      25 * time.Second,
-		MaxActors:     10,
-		Settle:        6 * time.Second,
-		EnableCLI:     true,
-		FaultBudget:   0.6,
-		DaemonIdleMS:  3000,
-		DaemonGraceMS: 2500,
-		DaemonCores:   8,
+		Seed:              seed,
+		Duration:          25 * time.Second,
+		MaxActors:         10,
+		Settle:            6 * time.Second,
+		EnableCLI:         true,
+		FaultBudget:       0.6,
+		DaemonIdleMS:      3000,
+		DaemonGraceMS:     2500,
+		DaemonCores:       8,
+		MaxOwnedProcesses: 96,
+		OracleTimeout:     750 * time.Millisecond,
 	}
 }
 
@@ -77,15 +96,17 @@ func CIConfig(seed int64) Config {
 // runs: the given duration, higher actor counts, and a heavier fault mix.
 func SoakConfig(seed int64, d time.Duration) Config {
 	return Config{
-		Seed:          seed,
-		Duration:      d,
-		MaxActors:     24,
-		Settle:        8 * time.Second,
-		EnableCLI:     true,
-		FaultBudget:   1.0,
-		DaemonIdleMS:  10000,
-		DaemonGraceMS: 3000,
-		DaemonCores:   16,
+		Seed:              seed,
+		Duration:          d,
+		MaxActors:         24,
+		Settle:            8 * time.Second,
+		EnableCLI:         true,
+		FaultBudget:       1.0,
+		DaemonIdleMS:      10000,
+		DaemonGraceMS:     3000,
+		DaemonCores:       16,
+		MaxOwnedProcesses: 192,
+		OracleTimeout:     750 * time.Millisecond,
 	}
 }
 
@@ -106,8 +127,24 @@ type Harness struct {
 	actors         map[string]*actor
 	nextID         int
 	ctl            *client.Client
+	daemons        map[int]*daemonProcess
 	daemonKilledAt time.Time
 	verSeq         int
+	stateReader    func(context.Context) (wingwire.QueueState, error)
+	processReader  func() ([]procgroup.Info, error)
+	processFailure func([]string)
+	guardInterval  time.Duration
+	guardFailure   sync.Once
+}
+
+type daemonProcess struct {
+	group      *procgroup.Group
+	done       chan struct{}
+	finalizeMu sync.Mutex
+	complete   bool
+	// cleanupFailed marks a daemon whose teardown already failed and was
+	// reported; its anchor is deliberately retained for a later retry.
+	cleanupFailed bool
 }
 
 type actor struct {
@@ -120,14 +157,24 @@ type actor struct {
 	rejected bool
 	killed   bool
 	exited   bool
-	killedAt time.Time
-	exitedAt time.Time
+	// cleanupFailed marks an actor whose teardown already failed and was
+	// reported; its anchor is deliberately retained for a later retry.
+	cleanupFailed bool
+	group         *procgroup.Group
+	stdout        io.ReadCloser
+	scanned       chan struct{}
+	finishMu      sync.Mutex
+	killedAt      time.Time
+	exitedAt      time.Time
 }
 
 // Run executes the chaos scenario and fails t on the first invariant
 // violation. On any failure it prints the seed and journal path so the run
 // is reproducible.
 func Run(t testing.TB, cfg Config) {
+	if err := procgroup.Supported(); err != nil {
+		t.Fatalf("chaos process ownership: %v", err)
+	}
 	if cfg.Seed == 0 {
 		cfg.Seed = time.Now().UnixNano()
 	}
@@ -150,22 +197,30 @@ func Run(t testing.TB, cfg Config) {
 	}
 
 	h := &Harness{
-		cfg:    cfg,
-		t:      t,
-		home:   home,
-		rng:    rand.New(rand.NewSource(cfg.Seed)),
-		jr:     jr,
-		actors: map[string]*actor{},
+		cfg:     cfg,
+		t:       t,
+		home:    home,
+		rng:     rand.New(rand.NewSource(cfg.Seed)),
+		jr:      jr,
+		actors:  map[string]*actor{},
+		daemons: map[int]*daemonProcess{},
 	}
+	defer func() { _ = jr.Close() }()
+	defer h.cleanup()
+	stopGuard := h.startProcessGuard()
+	defer stopGuard()
 	t.Logf("chaos seed=%d journal=%s home=%s", cfg.Seed, jpath, home)
 	jr.Append(Event{Kind: "seed", Detail: strconv.FormatInt(cfg.Seed, 10)})
 
 	h.buildBinaries()
 	h.loop()
+	stopGuard()
 	h.quiesce()
+	if t.Failed() {
+		return
+	}
 	h.converge()
 
-	_ = jr.Close()
 	if !t.Failed() {
 		t.Logf("chaos passed seed=%d", cfg.Seed)
 	}
@@ -198,12 +253,21 @@ func (h *Harness) loop() {
 	deadline := time.Now().Add(h.cfg.Duration)
 	lastOS := time.Now()
 	for time.Now().Before(deadline) {
+		if h.t.Failed() {
+			return
+		}
 		h.step()
 		h.checkLedger()
+		if h.t.Failed() {
+			return
+		}
 		if time.Since(lastOS) > 300*time.Millisecond {
 			h.checkOS()
 			h.scanDaemonPanic()
 			lastOS = time.Now()
+		}
+		if h.t.Failed() {
+			return
 		}
 		time.Sleep(time.Duration(15+h.rng.Intn(70)) * time.Millisecond)
 	}
@@ -296,11 +360,14 @@ func (h *Harness) spawn(wedged bool) {
 
 	cmd := exec.Command(h.dummyBin, args...)
 	cmd.Stderr = nil
-	stdout, err := startActorCommand(cmd)
+	stdout, group, err := startActorCommand(cmd)
 	if err != nil {
 		return
 	}
 	a.cmd = cmd
+	a.group = group
+	a.stdout = stdout
+	a.scanned = make(chan struct{})
 	h.mu.Lock()
 	h.actors[runID] = a
 	h.mu.Unlock()
@@ -308,26 +375,27 @@ func (h *Harness) spawn(wedged bool) {
 	go h.watchActor(a, stdout)
 }
 
-// watchActor tracks an actor's stdout for its grant or rejection, then
-// waits for the process to exit and records the terminal state.
-func startActorCommand(cmd *exec.Cmd) (io.ReadCloser, error) {
+// startActorCommand launches an actor in an exact owned process group.
+func startActorCommand(cmd *exec.Cmd) (io.ReadCloser, *procgroup.Group, error) {
 	stdout, childStdout, err := os.Pipe()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cmd.Stdout = childStdout
-	if err := cmd.Start(); err != nil {
+	group, err := procgroup.Start(cmd)
+	if err != nil {
 		_ = stdout.Close()
 		_ = childStdout.Close()
-		return nil, err
+		return nil, nil, err
 	}
 	_ = childStdout.Close()
-	return stdout, nil
+	return stdout, group, nil
 }
 
+// watchActor tracks an actor's stdout for its grant or rejection, then
+// waits for the process to exit and records the terminal state.
 func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
-	scanned := make(chan struct{})
-	terminal := make(chan struct{}, 1)
+	scanned := a.scanned
 	go func() {
 		defer close(scanned)
 		sc := bufio.NewScanner(stdout)
@@ -339,44 +407,62 @@ func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
 				a.granted = true
 				h.mu.Unlock()
 				h.jr.Append(Event{Kind: "grant", Run: a.runID})
-				select {
-				case terminal <- struct{}{}:
-				default:
-				}
 			case strings.HasPrefix(line, "REJECT"):
 				h.mu.Lock()
 				a.rejected = true
 				h.mu.Unlock()
 				h.jr.Append(Event{Kind: "reject", Run: a.runID, Detail: strings.TrimPrefix(line, "REJECT ")})
-				select {
-				case terminal <- struct{}{}:
-				default:
-				}
 			}
 		}
 	}()
-	_ = a.cmd.Wait()
-	h.mu.Lock()
-	killed := a.killed
-	recordedTerminal := a.granted || a.rejected
-	h.mu.Unlock()
-	if !killed && !recordedTerminal {
-		settle := h.cfg.Settle
-		if settle <= 0 {
-			settle = time.Second
-		}
-		select {
-		case <-terminal:
-		case <-time.After(settle):
-		}
+	<-a.group.LeaderExited()
+	if err := h.finishActor(a, false); err != nil {
+		h.t.Errorf("reap actor group %d: %v", a.group.ID(), err)
 	}
-	_ = stdout.Close()
-	<-scanned
+}
+
+// errActorDrain identifies an actor whose process group was already proven
+// empty and reaped while its stdout reader had not finished. It is a distinct
+// cleanup phase from the process group failing to exit, and conflating the two
+// sends the next soak investigation hunting a process leak that is not there.
+var errActorDrain = errors.New("output stream did not drain within the cleanup bound")
+
+func (h *Harness) finishActor(a *actor, force bool) error {
+	a.finishMu.Lock()
+	defer a.finishMu.Unlock()
 	h.mu.Lock()
+	if a.exited {
+		h.mu.Unlock()
+		return nil
+	}
+	h.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), h.processWait())
+	defer cancel()
+	var err error
+	if force {
+		err = a.group.Terminate(ctx, 100*time.Millisecond)
+	} else {
+		err = a.group.Finish(ctx, 100*time.Millisecond)
+	}
+	if errors.Is(err, procgroup.ErrCleanup) {
+		h.mu.Lock()
+		a.cleanupFailed = true
+		h.mu.Unlock()
+		return err
+	}
+	select {
+	case <-a.scanned:
+	case <-ctx.Done():
+		return fmt.Errorf("%w: %w", errActorDrain, ctx.Err())
+	}
+	_ = a.stdout.Close()
+	h.mu.Lock()
+	a.cleanupFailed = false
 	a.exited = true
 	a.exitedAt = time.Now()
 	h.mu.Unlock()
 	h.jr.Append(Event{Kind: "exit", Run: a.runID})
+	return nil
 }
 
 func (h *Harness) killHolder() {
@@ -399,9 +485,9 @@ func (h *Harness) killActor(a *actor, kind string) {
 	}
 	a.killed = true
 	a.killedAt = time.Now()
-	pid := a.cmd.Process.Pid
+	group := a.group
 	h.mu.Unlock()
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	_ = group.Kill()
 	h.jr.Append(Event{Kind: kind, Run: a.runID})
 }
 
@@ -419,7 +505,9 @@ func (h *Harness) killDaemon() {
 		h.ctl = nil
 	}
 	h.mu.Unlock()
-	_ = syscall.Kill(pid, syscall.SIGKILL)
+	if process, err := os.FindProcess(pid); err == nil {
+		_ = process.Kill()
+	}
 	h.jr.Append(Event{Kind: "kill_daemon", Detail: strconv.Itoa(pid)})
 }
 
@@ -447,11 +535,11 @@ func (h *Harness) takeover() {
 		"--daemon-total-cores", strconv.FormatFloat(h.cfg.DaemonCores, 'f', -1, 64),
 	}
 	cmd := exec.Command(h.dummyBin, args...)
-	stdout, err := startActorCommand(cmd)
+	stdout, group, err := startActorCommand(cmd)
 	if err != nil {
 		return
 	}
-	a := &actor{runID: runID, cores: 0.2, cmd: cmd}
+	a := &actor{runID: runID, cores: 0.2, cmd: cmd, group: group, stdout: stdout, scanned: make(chan struct{})}
 	h.mu.Lock()
 	h.actors[runID] = a
 	h.mu.Unlock()
@@ -547,6 +635,197 @@ func (h *Harness) checkOS() {
 	}
 }
 
+func (h *Harness) startProcessGuard() func() {
+	interval := h.guardInterval
+	if interval <= 0 {
+		interval = 100 * time.Millisecond
+	}
+	guard := newProcessGuard(h)
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	var stopOnce sync.Once
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			guard.check()
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
+	return func() {
+		stopOnce.Do(func() {
+			close(stop)
+			<-done
+		})
+	}
+}
+
+// ownedGroup is one process group the harness still owns.
+type ownedGroup struct {
+	cleanupFailed bool
+}
+
+// zombie identifies one unreaped process in an owned group.
+type zombie struct {
+	pid   int
+	group int
+}
+
+// processGuard samples the owned process groups on its own cadence so a
+// wedged daemon cannot suppress leak detection. It is driven from a single
+// goroutine and keeps the first sighting of every owned zombie.
+type processGuard struct {
+	h     *Harness
+	since map[zombie]time.Time
+}
+
+func newProcessGuard(h *Harness) *processGuard {
+	return &processGuard{h: h, since: map[zombie]time.Time{}}
+}
+
+// check fails fast before leaked processes can exhaust the machine's process
+// table. Two bounds carry that, and neither is a ceiling on how many zombies
+// exist at once.
+//
+// Owned zombies are transient by design and their instantaneous count tracks
+// concurrency, not correctness. A group leader is deliberately left
+// exited-but-unreaped as the ownership anchor until its descendants are proven
+// empty, and each actor's own children are zombies between their exit and the
+// actor's wait -- a single daemon kill makes every live actor fork a
+// replacement at once, so a burst is expected. What must hold is that total
+// owned processes stay bounded and that every zombie drains.
+//
+// Ages come from the process table rather than from the harness's own
+// bookkeeping, so a leader whose exit the harness never observed is caught too.
+func (g *processGuard) check() {
+	h := g.h
+	groups := h.ownedProcessGroups()
+	if len(groups) == 0 {
+		clear(g.since)
+		return
+	}
+	processReader := h.processReader
+	if processReader == nil {
+		processReader = procgroup.List
+	}
+	processes, err := processReader()
+	if err != nil {
+		h.reportProcessGrowth([]string{fmt.Sprintf("inspect owned process groups: %v", err)})
+		return
+	}
+
+	now := time.Now()
+	owned := 0
+	present := make(map[zombie]bool)
+	for _, process := range processes {
+		if _, ok := groups[process.Group]; !ok {
+			continue
+		}
+		owned++
+		if !strings.HasPrefix(process.State, "Z") {
+			continue
+		}
+		found := zombie{pid: process.PID, group: process.Group}
+		present[found] = true
+		if _, seen := g.since[found]; !seen {
+			g.since[found] = now
+		}
+	}
+	for found := range g.since {
+		if !present[found] {
+			delete(g.since, found)
+		}
+	}
+
+	var violations []string
+	if limit := h.processLimit(); owned > limit {
+		violations = append(violations, fmt.Sprintf("owned processes %d exceed limit %d", owned, limit))
+	}
+	violations = append(violations, g.stalledZombies(groups, now)...)
+	if len(violations) > 0 {
+		h.reportProcessGrowth(violations)
+	}
+}
+
+// stalledZombies names every owned zombie that outlived the drain bound. A
+// group whose teardown already failed is skipped: that failure was reported
+// through the reap path, which retains the anchor on purpose for a later retry.
+func (g *processGuard) stalledZombies(groups map[int]ownedGroup, now time.Time) []string {
+	bound := g.h.zombieDrain()
+	stalled := make([]zombie, 0, len(g.since))
+	for found, since := range g.since {
+		if groups[found.group].cleanupFailed || now.Sub(since) <= bound {
+			continue
+		}
+		stalled = append(stalled, found)
+	}
+	slices.SortFunc(stalled, func(a, b zombie) int { return cmp.Compare(a.pid, b.pid) })
+	violations := make([]string, 0, len(stalled))
+	for _, found := range stalled {
+		violations = append(violations, fmt.Sprintf("%s stayed unreaped for %s, exceeding %s",
+			found, now.Sub(g.since[found]).Round(time.Millisecond), bound))
+	}
+	return violations
+}
+
+// String names a zombie the way an operator reading a soak failure needs it:
+// the exact pid, its group, and which of the two kinds it is.
+func (z zombie) String() string {
+	if z.pid == z.group {
+		return fmt.Sprintf("owned group %d leader anchor (pid %d)", z.group, z.pid)
+	}
+	return fmt.Sprintf("descendant pid %d in owned group %d", z.pid, z.group)
+}
+
+func (h *Harness) reportProcessGrowth(violations []string) {
+	h.guardFailure.Do(func() {
+		if h.processFailure != nil {
+			h.processFailure(violations)
+			return
+		}
+		h.fail("process-growth", violations, wingwire.QueueState{})
+	})
+}
+
+func (h *Harness) processLimit() int {
+	if h.cfg.MaxOwnedProcesses > 0 {
+		return h.cfg.MaxOwnedProcesses
+	}
+	return h.cfg.MaxActors*4 + 32
+}
+
+// zombieDrain bounds how long one owned process may stay unreaped. Teardown of
+// a single group is itself bounded by processWait, so twice that leaves room
+// for a loaded machine without letting a genuinely stuck process go unreported.
+func (h *Harness) zombieDrain() time.Duration {
+	if h.cfg.MaxZombieDrain > 0 {
+		return h.cfg.MaxZombieDrain
+	}
+	return max(2*h.processWait(), 2*time.Second)
+}
+
+func (h *Harness) ownedProcessGroups() map[int]ownedGroup {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	groups := make(map[int]ownedGroup, len(h.actors)+len(h.daemons))
+	for _, a := range h.actors {
+		if !a.exited && a.group != nil && !a.group.Reaped() {
+			groups[a.group.ID()] = ownedGroup{cleanupFailed: a.cleanupFailed}
+		}
+	}
+	for _, daemon := range h.daemons {
+		if daemon.group != nil && !daemon.group.Reaped() {
+			groups[daemon.group.ID()] = ownedGroup{cleanupFailed: daemon.cleanupFailed}
+		}
+	}
+	return groups
+}
+
 // leakStable reports whether enough time has passed since the last daemon
 // kill that no restored lease is still within its reattach grace window;
 // only then can a dead holder be judged a genuine leak.
@@ -617,7 +896,7 @@ func (h *Harness) quiesce() {
 			if !a.killed && a.cmd != nil && a.cmd.Process != nil {
 				a.killed = true
 				a.killedAt = time.Now()
-				_ = syscall.Kill(a.cmd.Process.Pid, syscall.SIGKILL)
+				_ = a.group.Kill()
 			}
 		}
 	}
@@ -625,10 +904,69 @@ func (h *Harness) quiesce() {
 	deadline := time.Now().Add(h.cfg.Settle + 3*time.Second)
 	for time.Now().Before(deadline) {
 		if h.allExited(pending) {
-			break
+			return
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	if !h.allExited(pending) {
+		h.fail("process-cleanup", []string{"actors did not exit within the quiescence bound"}, wingwire.QueueState{})
+	}
+}
+
+func (h *Harness) cleanup() {
+	h.mu.Lock()
+	if h.ctl != nil {
+		_ = h.ctl.Close()
+		h.ctl = nil
+	}
+	actors := make([]*actor, 0, len(h.actors))
+	for _, a := range h.actors {
+		if !a.exited {
+			actors = append(actors, a)
+		}
+	}
+	daemons := make([]*daemonProcess, 0, len(h.daemons))
+	for _, daemon := range h.daemons {
+		daemons = append(daemons, daemon)
+	}
+	h.mu.Unlock()
+
+	for _, a := range actors {
+		if err := h.cleanupActor(a); err != nil {
+			h.t.Error(err)
+		}
+	}
+	for _, daemon := range daemons {
+		if err := h.cleanupDaemon(daemon); err != nil {
+			h.t.Error(err)
+		}
+	}
+}
+
+func (h *Harness) cleanupActor(a *actor) error {
+	err := h.finishActor(a, true)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, errActorDrain):
+		return fmt.Errorf("actor group %d exited and was reaped, but its %w", a.group.ID(), err)
+	default:
+		return fmt.Errorf("actor process group %d did not exit within cleanup bound: %w", a.group.ID(), err)
+	}
+}
+
+func (h *Harness) cleanupDaemon(daemon *daemonProcess) error {
+	if err := h.finishDaemon(daemon, true); err != nil {
+		return fmt.Errorf("daemon process group %d did not exit within cleanup bound: %w", daemon.group.ID(), err)
+	}
+	return nil
+}
+
+func (h *Harness) processWait() time.Duration {
+	if h.cfg.Settle > 0 {
+		return h.cfg.Settle
+	}
+	return time.Second
 }
 
 func (h *Harness) allExited(as []*actor) bool {
@@ -676,7 +1014,10 @@ func (h *Harness) converge() {
 	idleWait := time.Duration(h.cfg.DaemonIdleMS)*time.Millisecond + time.Second
 	for attempt := 0; attempt < 4; attempt++ {
 		time.Sleep(idleWait)
-		if _, err := client.Query(context.Background(), h.readOpts()); errors.Is(err, client.ErrNoDaemon) {
+		ctx, cancel := context.WithTimeout(context.Background(), h.oracleTimeout())
+		_, err := client.Query(ctx, h.readOpts())
+		cancel()
+		if errors.Is(err, client.ErrNoDaemon) {
 			h.jr.Log("daemon_idle", "", "daemon exited after quiescence")
 			return
 		}
@@ -687,11 +1028,16 @@ func (h *Harness) converge() {
 // readState returns the daemon's queue state over a reused read-only
 // control connection, re-establishing it after a daemon kill.
 func (h *Harness) readState() (wingwire.QueueState, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), h.oracleTimeout())
+	defer cancel()
+	if h.stateReader != nil {
+		return h.stateReader(ctx)
+	}
 	h.mu.Lock()
 	cl := h.ctl
 	h.mu.Unlock()
 	if cl != nil {
-		if qs, err := cl.QueueState(context.Background()); err == nil {
+		if qs, err := cl.QueueState(ctx); err == nil {
 			return qs, nil
 		}
 		h.mu.Lock()
@@ -701,8 +1047,6 @@ func (h *Harness) readState() (wingwire.QueueState, error) {
 		}
 		h.mu.Unlock()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
 	cl, err := client.EnsureDaemon(ctx, h.readOpts())
 	if err != nil {
 		return wingwire.QueueState{}, err
@@ -710,7 +1054,14 @@ func (h *Harness) readState() (wingwire.QueueState, error) {
 	h.mu.Lock()
 	h.ctl = cl
 	h.mu.Unlock()
-	return cl.QueueState(context.Background())
+	return cl.QueueState(ctx)
+}
+
+func (h *Harness) oracleTimeout() time.Duration {
+	if h.cfg.OracleTimeout > 0 {
+		return h.cfg.OracleTimeout
+	}
+	return 750 * time.Millisecond
 }
 
 func (h *Harness) readOpts() client.Options {
@@ -738,12 +1089,58 @@ func (h *Harness) daemonSpawn() func(home, version string) error {
 			"--idle-ms", strconv.Itoa(h.cfg.DaemonIdleMS),
 			"--total-cores", strconv.FormatFloat(h.cfg.DaemonCores, 'f', -1, 64),
 		)
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
-		if err := cmd.Start(); err != nil {
-			return err
-		}
-		return cmd.Process.Release()
+		return h.startDaemonCommand(cmd)
 	}
+}
+
+func (h *Harness) startDaemonCommand(cmd *exec.Cmd) error {
+	group, err := procgroup.Start(cmd)
+	if err != nil {
+		return err
+	}
+	process := &daemonProcess{group: group, done: make(chan struct{})}
+	h.mu.Lock()
+	if h.daemons == nil {
+		h.daemons = map[int]*daemonProcess{}
+	}
+	h.daemons[group.ID()] = process
+	h.mu.Unlock()
+	go func() {
+		<-group.LeaderExited()
+		if err := h.finishDaemon(process, false); err != nil {
+			h.t.Errorf("reap daemon group %d: %v", group.ID(), err)
+		}
+	}()
+	return nil
+}
+
+func (h *Harness) finishDaemon(process *daemonProcess, force bool) error {
+	process.finalizeMu.Lock()
+	defer process.finalizeMu.Unlock()
+	if process.complete {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), h.processWait())
+	defer cancel()
+	var err error
+	if force {
+		err = process.group.Terminate(ctx, 100*time.Millisecond)
+	} else {
+		err = process.group.Finish(ctx, 100*time.Millisecond)
+	}
+	if errors.Is(err, procgroup.ErrCleanup) {
+		h.mu.Lock()
+		process.cleanupFailed = true
+		h.mu.Unlock()
+		return err
+	}
+	process.complete = true
+	h.mu.Lock()
+	process.cleanupFailed = false
+	delete(h.daemons, process.group.ID())
+	h.mu.Unlock()
+	close(process.done)
+	return nil
 }
 
 func (h *Harness) sockPath() string {
