@@ -9,9 +9,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -39,6 +41,111 @@ func TestRepoDeclaresPipeline_FalseWithoutSparkwingDir(t *testing.T) {
 		t.Fatal("a directory with no .sparkwing/ must not claim to declare a pipeline")
 	}
 }
+
+func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhileParentLives(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows does not allow the describe process to unlink its running executable")
+	}
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	repoDir := t.TempDir()
+	sparkwingDir := filepath.Join(repoDir, ".sparkwing")
+	if err := os.MkdirAll(sparkwingDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sparkwingDir, "go.mod"), []byte("module cacheleasefixture\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sparkwingDir, "main.go"), []byte(cacheLeaseExecutableSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	output := filepath.Join(repoDir, "child-runs")
+	t.Setenv("SPARKWING_CACHE_LEASE_TEST_OUTPUT", output)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	cache := &localCompileCache{}
+	t.Cleanup(func() { _ = cache.Close() })
+	dispatch := func(id string) error {
+		return dispatchLocalTrigger(context.Background(), nil, &store.Trigger{
+			ID:           id,
+			Pipeline:     "child",
+			ParentRunID:  "parent-live",
+			ParentNodeID: "spawn-child",
+		}, "", repoDir, cache, logger)
+	}
+
+	if err := dispatch("child-one"); err != nil {
+		t.Fatalf("prime cached child dispatch: %v", err)
+	}
+
+	// Pipeline discovery runs immediately before the dispatcher asks its
+	// long-lived compile cache for the executable. Simulate a concurrent
+	// cache clear at that exact boundary: the describe process unlinks the
+	// shared cache entry after proving which pipeline it contains.
+	t.Setenv("SPARKWING_CACHE_LEASE_TEST_REMOVE_SELF", "1")
+	if err := dispatch("child-two"); err != nil {
+		t.Fatalf("cached child dispatch after concurrent cache removal: %v", err)
+	}
+	hash, err := bincache.PipelineCacheKey(sparkwingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(bincache.CachedBinaryPath(hash)); !os.IsNotExist(err) {
+		t.Fatalf("fixture did not remove shared cache entry: %v", err)
+	}
+
+	raw, err := os.ReadFile(output)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := string(raw), "child-one\nchild-two\n"; got != want {
+		t.Fatalf("child executions = %q, want %q", got, want)
+	}
+}
+
+func TestExecLocalChild_MissingLeaseExplainsCacheProvenanceAndRecovery(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing-pipeline")
+	err := execLocalChild(context.Background(), missing, t.TempDir(), []string{"handle-trigger", "child"})
+	if err == nil {
+		t.Fatal("missing executable unexpectedly ran")
+	}
+	for _, want := range []string{
+		"child executable lease",
+		"pipeline-cache provenance",
+		"Re-run the parent pipeline",
+		"sparkwing pipeline sparks warmup --clear-cache",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("missing-executable error lacks %q: %v", want, err)
+		}
+	}
+}
+
+const cacheLeaseExecutableSource = `package main
+
+import (
+	"fmt"
+	"os"
+)
+
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--describe" {
+		fmt.Print("[{\"name\":\"child\"}]")
+		if os.Getenv("SPARKWING_CACHE_LEASE_TEST_REMOVE_SELF") != "" {
+			_ = os.Remove(os.Args[0])
+		}
+		return
+	}
+	f, err := os.OpenFile(os.Getenv("SPARKWING_CACHE_LEASE_TEST_OUTPUT"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	if _, err := fmt.Fprintln(f, os.Args[len(os.Args)-1]); err != nil {
+		panic(err)
+	}
+}
+`
 
 func TestLocateTriggerRepo_RetryUsesRecordedCheckoutAcrossSameNamedPipelines(t *testing.T) {
 	repoA, shaA := writeRetryTestRepo(t, filepath.Join(t.TempDir(), "repo-a"), "git@example.test:owner/repo-a.git", "step-from-a")
