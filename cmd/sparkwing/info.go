@@ -231,13 +231,32 @@ func runInfo(args []string) error {
 const agentBlockHeader = "<!-- Current Sparkwing discovery context (capability epoch 1). Use for this agent wake only; do not persist it in instruction files. -->"
 
 // agentBlockBody is the current agent discovery context.
+//
+// It names the scaffolding path before the docs. An agent asked to
+// create a pipeline reads this block and does the first thing that
+// looks like it applies; when the block listed only inspection verbs
+// and `docs read`, trials went to the docs and hand-wrote every
+// pipeline, never learning the template catalog existed. Starting from
+// a template is both faster and closer to idiomatic than composing the
+// SDK from a reference, so it belongs at the top.
 const agentBlockBody = "This repo uses **sparkwing** for CI/CD (https://sparkwing.dev). Pipelines are Go\n" +
 	"programs in `.sparkwing/`. Ask the binary, don't scrape the repo:\n" +
 	"\n" +
 	"- `sparkwing info -o json` -- context: binary, project, next steps (start here)\n" +
-	"- `sparkwing commands` -- full CLI surface as JSON (every verb + every flag)\n" +
 	"- `sparkwing pipeline list -o json` -- this repo's pipelines\n" +
 	"- `sparkwing run <name>` -- run a pipeline\n" +
+	"\n" +
+	"Creating a pipeline? Start from a template, not a blank file:\n" +
+	"\n" +
+	"- `sparkwing pipeline templates` -- the starter catalog (CI hygiene, docker and\n" +
+	"  static deploys for AWS + GCP, DB migrations, approval gates, test sharding).\n" +
+	"  Add `-o json`; filter with `--category`/`--cloud`; read one with `--name <t> --body`\n" +
+	"- `sparkwing pipeline new --name <n> --template <t> [--param k=v]` -- scaffold it.\n" +
+	"  Templates compile, lint, and run as scaffolded, so edit from something green\n" +
+	"- `sparkwing pipeline lint --all` and `sparkwing pipeline explain --name <n>` --\n" +
+	"  check the result without dispatching it\n" +
+	"\n" +
+	"- `sparkwing commands` -- full CLI surface as JSON (every verb + every flag)\n" +
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n"
 
 func printAgentBlock() {
