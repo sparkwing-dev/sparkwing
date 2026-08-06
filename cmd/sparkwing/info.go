@@ -228,7 +228,41 @@ func runInfo(args []string) error {
 	}
 }
 
-const agentBlockHeader = "<!-- Current Sparkwing discovery context (capability epoch 1). Use for this agent wake only; do not persist it in instruction files. -->"
+const agentBlockHeader = "<!-- Sparkwing discovery context (capability epoch 1). Only the block between the 8< markers is durable; everything after it describes this wake and must not be persisted. -->"
+
+// durableMarkerOpen and durableMarkerClose delimit the one part of this
+// output that is safe to keep in an instruction file.
+//
+// Everything else here names a version, a path, or a command set, and a
+// copy of that in someone's CLAUDE.md is a fossil the day the CLI moves
+// -- which is why this output used to forbid persisting any of it. But
+// a reader who is told only "don't keep this" still needs some durable
+// way back in, and without one the answer becomes scraping the repo.
+// The durable block is therefore exactly one thing: what this repo uses
+// and the single command that reports everything current.
+const (
+	durableMarkerOpen  = "--- 8< --- durable: copy into AGENTS.md or CLAUDE.md --- 8< ---"
+	durableMarkerClose = "--- 8< --- end durable --- 8< ---"
+)
+
+// agentBlockDurable is the persistable half: no versions, no paths, no
+// counts, and one command. Anything added here has to survive being
+// read a year from now.
+const agentBlockDurable = "This repo uses **sparkwing** for CI/CD (https://sparkwing.dev). Pipelines are\n" +
+	"Go programs in `.sparkwing/`. Run `sparkwing info --for-agent` for the current\n" +
+	"commands and this repo's state -- ask the binary rather than scraping the repo.\n"
+
+// agentBlockAuthoring is the quickstart for the task agents most often
+// arrive with. It sits outside the durable block because every command
+// in it is a command, and commands move.
+const agentBlockAuthoring = "### Writing a pipeline\n" +
+	"\n" +
+	"- `sparkwing pipeline templates` -- start from a starter, not a blank file\n" +
+	"- `sparkwing pipeline new --name <n> --template <t>` -- scaffold one; it compiles,\n" +
+	"  lints, and runs as generated, so you edit from something green\n" +
+	"- `sparkwing docs read --guide authoring` -- the DAG model, the idioms the linter\n" +
+	"  enforces, how a pipeline fires, and the config schema, in one call\n" +
+	"- `sparkwing pipeline lint` then `sparkwing run <n>` -- check it without guessing\n"
 
 // agentBlockBody is the current agent discovery context.
 //
@@ -240,15 +274,11 @@ const agentBlockHeader = "<!-- Current Sparkwing discovery context (capability e
 // pipeline, never learning the template catalog existed -- but
 // `pipeline new --help` already opens with the catalog, so repeating
 // it here would charge every agent for something one in ten needs.
-const agentBlockBody = "This repo uses **sparkwing** for CI/CD (https://sparkwing.dev). Pipelines are Go\n" +
-	"programs in `.sparkwing/`. Ask the binary, don't scrape the repo:\n" +
-	"\n" +
-	"- `sparkwing info -o json` -- context: binary, project, next steps (start here)\n" +
-	"- `sparkwing commands` -- full CLI surface as JSON (every verb + every flag)\n" +
+const agentBlockBody = "- `sparkwing commands` -- full CLI surface as JSON (every verb + every flag)\n" +
 	"- `sparkwing pipeline list -o json` -- this repo's pipelines\n" +
 	"- `sparkwing run <name>` -- run a pipeline\n" +
-	"- Creating a pipeline? `sparkwing pipeline new --help`\n" +
-	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n"
+	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n" +
+	"- `sparkwing info -o json` -- this same context as JSON, when you want to parse it\n"
 
 // printAgentBlock writes the agent discovery context.
 //
@@ -260,7 +290,11 @@ const agentBlockBody = "This repo uses **sparkwing** for CI/CD (https://sparkwin
 func printAgentBlock() {
 	fmt.Println(agentBlockHeader)
 	fmt.Println()
-	fmt.Println("## Sparkwing")
+	fmt.Println(durableMarkerOpen)
+	fmt.Print(agentBlockDurable)
+	fmt.Println(durableMarkerClose)
+	fmt.Println()
+	fmt.Println("## This wake only")
 	fmt.Println()
 	fmt.Print(agentBlockBody)
 
@@ -280,6 +314,8 @@ func printAgentBlock() {
 		fmt.Println("- No Go toolchain on PATH. Pipelines are Go programs; authoring one needs it.")
 	}
 	fmt.Printf("- CLI %s. Docs shipped in this binary match it exactly.\n", info.Version.Installed)
+	fmt.Println()
+	fmt.Print(agentBlockAuthoring)
 }
 
 func printFirstTimeCard() {

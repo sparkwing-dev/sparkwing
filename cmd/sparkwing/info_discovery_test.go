@@ -10,11 +10,8 @@ import (
 )
 
 func TestInfoDiscoveryIsEphemeralAndVersioned(t *testing.T) {
-	if !strings.Contains(agentBlockHeader, "Use for this agent wake only") {
-		t.Fatalf("agent discovery header has no one-wake lifetime: %q", agentBlockHeader)
-	}
-	if strings.Contains(strings.ToLower(agentBlockHeader), "paste") || strings.Contains(agentBlockHeader, "CLAUDE.md") || strings.Contains(agentBlockHeader, "AGENTS.md") {
-		t.Fatalf("agent discovery contains durable-copy guidance: %q", agentBlockHeader)
+	if !strings.Contains(agentBlockHeader, "must not be persisted") {
+		t.Fatalf("agent discovery header does not bound what may be kept: %q", agentBlockHeader)
 	}
 	raw, err := json.Marshal(Info{CapabilityEpoch: infoCapabilityEpoch})
 	if err != nil {
@@ -22,6 +19,49 @@ func TestInfoDiscoveryIsEphemeralAndVersioned(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), `"capability_epoch":1`) {
 		t.Fatalf("structured info has no capability epoch: %s", raw)
+	}
+}
+
+// The durable block is the only part of this output invited into an
+// instruction file, so it is the only part that can rot there. The old
+// guard refused durable-copy guidance outright, which kept the hazard
+// away but left a reader with no sanctioned way back in. Name the
+// hazard instead: anything version-, path-, or catalog-shaped is barred
+// from the durable block and belongs in the wake-scoped remainder.
+func TestDurableAgentBlockCarriesNothingThatRots(t *testing.T) {
+	if !strings.Contains(agentBlockDurable, "sparkwing info --for-agent") {
+		t.Error("durable block must name the command that reports everything current")
+	}
+	banned := map[string]string{
+		"capability epoch": "epoch",
+		"a version string": "v0.",
+		"an absolute path": "/Users",
+		"a pipeline count": "pipeline(s)",
+	}
+	for what, needle := range banned {
+		if strings.Contains(agentBlockDurable, needle) {
+			t.Errorf("durable block carries %s (%q); it will be stale in a pasted file", what, needle)
+		}
+	}
+	if n := strings.Count(agentBlockDurable, "sparkwing "); n > 1 {
+		t.Errorf("durable block names %d commands; one entry point means a stale copy can misdirect in exactly one way", n)
+	}
+	if lines := strings.Count(strings.TrimSpace(agentBlockDurable), "\n") + 1; lines > 5 {
+		t.Errorf("durable block is %d lines; it is pasted into every repo that adopts sparkwing", lines)
+	}
+}
+
+// The authoring quickstart names commands, which move, so it must stay
+// on the wake-scoped side of the markers.
+func TestAuthoringQuickstartIsNotDurable(t *testing.T) {
+	if strings.Contains(agentBlockDurable, "pipeline templates") ||
+		strings.Contains(agentBlockDurable, "--guide") {
+		t.Error("authoring commands leaked into the durable block")
+	}
+	for _, want := range []string{"pipeline templates", "--guide authoring", "pipeline lint"} {
+		if !strings.Contains(agentBlockAuthoring, want) {
+			t.Errorf("authoring quickstart does not mention %q", want)
+		}
 	}
 }
 

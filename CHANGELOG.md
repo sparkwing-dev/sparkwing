@@ -69,7 +69,13 @@ code change to unlock.
   claiming every transition is an upgrade.
 - **cli:** `daemon status` and `daemon restart` now default to pretty output on
   a terminal and JSON when piped; an explicit `-o` continues to win.
-- **cli:** `info --for-agent` now ends with this repo's state -- whether a
+- **cli:** `info --for-agent` now marks the one part of its output that is safe
+  to keep. A `8<` block carries what this repo uses and the single command that
+  reports everything current -- no versions, paths, or command catalogs, so a
+  copy in an instruction file cannot go stale. Everything after it is labelled
+  wake-scoped, and now includes an authoring quickstart (templates, the
+  `authoring` guide, lint/run) so a first-time author does not have to go
+  looking. The block also ends with this repo's state -- whether a
   `.sparkwing/` exists, how many pipelines it holds, whether Go is on PATH --
   and the CLI's own examples name it as the first command an agent should run,
   rather than `info -o json`. The block used to send readers to `info -o json`
