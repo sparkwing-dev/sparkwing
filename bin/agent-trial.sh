@@ -217,6 +217,25 @@ fi
 sparkwing pipeline list -o json 2>/dev/null | jq -r '.[] | "  \(.name)\t\(.short)"' 2>/dev/null || echo "  (no pipelines registered)"
 echo
 echo "  lint:    $(sparkwing pipeline lint --all >/dev/null 2>&1 && echo PASS || echo FAIL)"
-echo "  explain: $(sparkwing pipeline explain --all -o json >/dev/null 2>&1 && echo PASS || echo FAIL)"
+
+# Explain each pipeline separately under --sw-dry-run. `explain --all`
+# refuses a pipeline whose steps carry risk labels, and rejects the
+# --sw-dry-run that would waive them ("--all does not accept
+# pipeline-specific flags"), so scoring with it marks a correct
+# prod-deploy pipeline as broken.
+explain_ok=0
+explain_bad=""
+for p in $(sparkwing pipeline list -o json 2>/dev/null | jq -r '.[].name' 2>/dev/null); do
+  if sparkwing pipeline explain --name "$p" --sw-dry-run -o json >/dev/null 2>&1; then
+    explain_ok=$((explain_ok + 1))
+  else
+    explain_bad="$explain_bad $p"
+  fi
+done
+if [[ -n "$explain_bad" ]]; then
+  echo "  explain: FAIL ($explain_ok ok; failed:$explain_bad)"
+else
+  echo "  explain: PASS ($explain_ok pipelines)"
+fi
 echo
 echo "wall-clock: ${ELAPSED}s   trace: $TRACE   repo: $TRIAL"
