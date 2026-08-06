@@ -15,8 +15,11 @@
 # repeats, a doc it re-reads, or SDK source it opens out of the module
 # cache is a question the tooling should have answered the first time.
 #
-# The trial repo is materialized outside this checkout, so the agent
-# cannot read this repo's own pipelines or the acceptance corpus.
+# The trial repo is materialized outside this checkout so nothing in the
+# agent's working directory points at sparkwing's own pipelines. That is
+# a starting position, not a sandbox: the agent has a shell and can read
+# anything this user can, and trials have been observed listing the
+# sparkwing checkout. Read the orientation path before trusting a run.
 #
 # Two fixtures, measuring different things:
 #
