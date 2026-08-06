@@ -62,7 +62,7 @@ fi
 
 # A small but plausible service: something for requests about linting,
 # testing, image builds, and migrations to actually bite on.
-cd "$TRIAL"
+cd "$TRIAL" || exit 1
 git init -q .
 printf 'module example.com/app\n\ngo 1.26.0\n' > go.mod
 mkdir -p cmd/app migrations
