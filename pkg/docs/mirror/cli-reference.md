@@ -1517,10 +1517,15 @@ Discovery: `sparkwing docs list -o json` returns slug + title +
 summary for every topic. `sparkwing docs search --query "warm pool"`
 substring-matches across slug + title + body.
 
+When one page leaves you a lookup short, `sparkwing docs guides`
+lists task-sized sets of topics; `sparkwing docs read --guide authoring`
+returns the whole set in one call.
+
 ### Subcommands
 
 - `list` -- Enumerate every doc topic (slug, title, summary)
-- `read` -- Print one doc's markdown to stdout (--topic NAME)
+- `read` -- Print one doc's markdown to stdout (--topic NAME, or --guide NAME)
+- `guides` -- List task-sized topic sets (read one with `docs read --guide`)
 - `all` -- Concatenate every doc to stdout (full corpus dump)
 - `search` -- Substring search across docs (--query TEXT)
 - `migrations` -- Per-version migration guides (list / read / between)
@@ -1638,6 +1643,38 @@ sparkwing docs cache info
 
 # Agent-readable
 sparkwing docs cache info -o json
+```
+
+## `sparkwing docs guides`
+
+List the task-sized doc sets (--guide on `docs read`)
+
+A guide is a named set of topics that answer one task
+together, for the case where reading a single page leaves you one
+lookup short. `sparkwing docs read --guide authoring` returns the
+whole set in one call.
+
+Guides carry narrative topics only. The generated references
+(sdk-reference, cli-reference) are lookup tables rather than pages to
+read end to end; reach those with `sparkwing docs search`.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
+
+### Examples
+
+```sh
+# What sets exist
+sparkwing docs guides
+
+# Read the authoring set
+sparkwing docs read --guide authoring
+
+# Agent-readable
+sparkwing docs guides -o json
 ```
 
 ## `sparkwing docs list`
@@ -1841,7 +1878,8 @@ from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 
 | Flag | Description |
 |---|---|
-| `--topic NAME` | Doc slug (e.g. getting-started, pipelines, mcp) (required) |
+| `--topic NAME` | Doc slug (e.g. getting-started, pipelines, mcp) |
+| `--guide NAME` | Read a task-sized set of topics instead of one (`sparkwing docs guides`) |
 | `--web` | Fetch from sparkwing.dev instead of the embedded corpus |
 | `--version vX.Y.Z` | Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version. |
 | `--no-cache` | With --web, bypass the on-disk cache for this invocation |
@@ -1851,6 +1889,9 @@ from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 ```sh
 # Read the getting-started page
 sparkwing docs read --topic getting-started
+
+# Everything needed to write a pipeline, one call
+sparkwing docs read --guide authoring
 
 # Pipe through a pager
 sparkwing docs read --topic pipelines | less
@@ -2489,6 +2530,11 @@ Before building by hand, browse the ready-made starters:
 'sparkwing pipeline templates' lists task-shaped registry templates
 (Go CI hygiene, docker/static deploys for AWS+GCP, migrations, ...);
 scaffold one with --template <name> [--param k=v ...].
+
+New to authoring? 'sparkwing docs read --guide authoring' returns the
+DAG model, the idioms the linter enforces, how a pipeline fires, and
+the sparkwing.yaml schema in one call -- the four pages you would
+otherwise open one at a time.
 
 Pass --sw-cd/-C to scaffold into a repo other than the current
 directory (the .sparkwing search re-anchors there).

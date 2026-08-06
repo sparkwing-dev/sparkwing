@@ -473,10 +473,15 @@ the website explaining a flag your CLI doesn't have.
 
 Discovery: ` + "`sparkwing docs list -o json`" + ` returns slug + title +
 summary for every topic. ` + "`sparkwing docs search --query \"warm pool\"`" + `
-substring-matches across slug + title + body.`,
+substring-matches across slug + title + body.
+
+When one page leaves you a lookup short, ` + "`sparkwing docs guides`" + `
+lists task-sized sets of topics; ` + "`sparkwing docs read --guide authoring`" + `
+returns the whole set in one call.`,
 	Subcommands: []SubcommandRef{
 		{"list", "Enumerate every doc topic (slug, title, summary)"},
-		{"read", "Print one doc's markdown to stdout (--topic NAME)"},
+		{"read", "Print one doc's markdown to stdout (--topic NAME, or --guide NAME)"},
+		{"guides", "List task-sized topic sets (read one with `docs read --guide`)"},
 		{"all", "Concatenate every doc to stdout (full corpus dump)"},
 		{"search", "Substring search across docs (--query TEXT)"},
 		{"migrations", "Per-version migration guides (list / read / between)"},
@@ -530,7 +535,8 @@ Default source is the binary's embedded corpus. Use --web to fetch
 from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 --version latest.`,
 	Flags: []FlagSpec{
-		{Name: "topic", Argument: "NAME", Desc: "Doc slug (e.g. getting-started, pipelines, mcp)", Required: true, Group: "Selection"},
+		{Name: "topic", Argument: "NAME", Desc: "Doc slug (e.g. getting-started, pipelines, mcp)", Group: "Selection"},
+		{Name: "guide", Argument: "NAME", Desc: "Read a task-sized set of topics instead of one (`sparkwing docs guides`)", Group: "Selection"},
 		{Name: "web", Desc: "Fetch from sparkwing.dev instead of the embedded corpus", Group: "Source"},
 		{Name: "version", Argument: "vX.Y.Z", Desc: "Doc version (e.g. v0.4.0, 'latest'). Defaults to this CLI's embedded version.", Group: "Source"},
 		{Name: "no-cache", Desc: "With --web, bypass the on-disk cache for this invocation", Group: "Source"},
@@ -538,6 +544,7 @@ from sparkwing.dev, optionally pinned to --version vX.Y.Z or
 	GroupOrder: []string{"Selection", "Source", "Other"},
 	Examples: []Example{
 		{"Read the getting-started page", "sparkwing docs read --topic getting-started"},
+		{"Everything needed to write a pipeline, one call", "sparkwing docs read --guide authoring"},
 		{"Pipe through a pager", "sparkwing docs read --topic pipelines | less"},
 		{"Read v0.3.0's pipelines page online", "sparkwing docs read --topic pipelines --version v0.3.0 --web"},
 		{"Always fetch the freshest version", "sparkwing docs read --topic pipelines --version latest --web"},
@@ -552,6 +559,27 @@ headers. The "give me everything" path for an agent that wants
 the full corpus in context with one Bash invocation.`,
 	Examples: []Example{
 		{"Slurp every doc into context", "sparkwing docs all"},
+	},
+}
+
+var cmdDocsGuides = Command{
+	Path:     "sparkwing docs guides",
+	Synopsis: "List the task-sized doc sets (--guide on `docs read`)",
+	Description: `A guide is a named set of topics that answer one task
+together, for the case where reading a single page leaves you one
+lookup short. ` + "`sparkwing docs read --guide authoring`" + ` returns the
+whole set in one call.
+
+Guides carry narrative topics only. The generated references
+(sdk-reference, cli-reference) are lookup tables rather than pages to
+read end to end; reach those with ` + "`sparkwing docs search`" + `.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	Examples: []Example{
+		{"What sets exist", "sparkwing docs guides"},
+		{"Read the authoring set", "sparkwing docs read --guide authoring"},
+		{"Agent-readable", "sparkwing docs guides -o json"},
 	},
 }
 
@@ -1148,6 +1176,11 @@ Before building by hand, browse the ready-made starters:
 'sparkwing pipeline templates' lists task-shaped registry templates
 (Go CI hygiene, docker/static deploys for AWS+GCP, migrations, ...);
 scaffold one with --template <name> [--param k=v ...].
+
+New to authoring? 'sparkwing docs read --guide authoring' returns the
+DAG model, the idioms the linter enforces, how a pipeline fires, and
+the sparkwing.yaml schema in one call -- the four pages you would
+otherwise open one at a time.
 
 Pass --sw-cd/-C to scaffold into a repo other than the current
 directory (the .sparkwing search re-anchors there).

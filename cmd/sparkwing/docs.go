@@ -28,6 +28,8 @@ func runDocs(args []string) error {
 		return runDocsList(args[1:])
 	case "read":
 		return runDocsRead(args[1:])
+	case "guides":
+		return runDocsGuides(args[1:])
 	case "all":
 		return runDocsAll(args[1:])
 	case "search":
@@ -76,9 +78,47 @@ func runDocsList(args []string) error {
 	return renderDocsList(entries, output)
 }
 
+// runDocsGuides lists the guides. It is a separate verb from `docs
+// list` because a guide is not a document: listing them together would
+// imply you could `--topic` one.
+func runDocsGuides(args []string) error {
+	fs := flag.NewFlagSet(cmdDocsGuides.Path, flag.ContinueOnError)
+	var output string
+	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
+	if err := parseAndCheck(cmdDocsGuides, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	list := docs.Guides()
+	switch strings.ToLower(output) {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(list)
+	case "plain":
+		for _, g := range list {
+			fmt.Println(g.Name)
+		}
+		return nil
+	case "pretty", "":
+		for _, g := range list {
+			fmt.Printf("%s\n", color.Bold(g.Name))
+			fmt.Printf("  %s\n", g.Summary)
+			fmt.Printf("  %s %s\n", color.Dim("topics:"), strings.Join(g.Topics, ", "))
+			fmt.Printf("  %s\n\n", color.Cyan("sparkwing docs read --guide "+g.Name))
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown output format %q (valid: pretty, json, plain)", output)
+	}
+}
+
 func runDocsRead(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsRead.Path, flag.ContinueOnError)
 	topic := fs.String("topic", "", "doc slug (e.g. getting-started, pipelines, mcp)")
+	guide := fs.String("guide", "", "read a named set of topics instead of one (see `sparkwing docs guides`)")
 	var wf docsWebFlags
 	registerWebFlags(fs, &wf, true)
 	if err := parseAndCheck(cmdDocsRead, fs, args); err != nil {
@@ -90,9 +130,20 @@ func runDocsRead(args []string) error {
 	if *topic == "" && fs.NArg() > 0 {
 		*topic = fs.Arg(0)
 	}
+	if *guide != "" {
+		if *topic != "" {
+			return errors.New("docs read: --topic and --guide are mutually exclusive")
+		}
+		body, err := docs.ReadGuide(*guide)
+		if err != nil {
+			return err
+		}
+		fmt.Print(body)
+		return nil
+	}
 	if *topic == "" {
 		PrintHelp(cmdDocsRead, os.Stderr)
-		return errors.New("docs read: --topic is required (e.g. --topic getting-started)")
+		return errors.New("docs read: --topic is required (e.g. --topic getting-started), or --guide for a task-sized set")
 	}
 	ctx, cancel := newWebContext()
 	defer cancel()

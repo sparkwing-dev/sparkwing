@@ -598,6 +598,7 @@ func nextStepsFor(info Info, agentMode bool) []InfoNextStep {
 		{Command: "sparkwing run <name>", Purpose: "run a pipeline"},
 		{Command: "sparkwing pipeline templates", Purpose: "browse curated starter templates for `pipeline new --template`"},
 		{Command: "sparkwing pipeline new --name <name>", Purpose: "scaffold a new pipeline"},
+		{Command: "sparkwing docs read --guide authoring", Purpose: "everything needed to write a pipeline, in one call"},
 		{Command: "sparkwing docs list", Purpose: "browse embedded docs (offline)"},
 		{Command: "sparkwing dashboard start", Purpose: "start the local dashboard at http://127.0.0.1:4343"},
 	}

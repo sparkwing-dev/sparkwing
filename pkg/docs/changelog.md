@@ -106,6 +106,14 @@ code change to unlock.
 
 ### Added
 
+- **cli:** `sparkwing docs guides` and `docs read --guide <name>`: named sets of
+  topics that answer one task together, for when reading a single page leaves
+  you a lookup short. The first is `authoring` -- the DAG model, the idioms the
+  linter enforces, how a pipeline fires, and the config schema -- four pages in
+  one call rather than four calls. `docs read --topic` is unchanged and still
+  returns exactly the page asked for. Guides carry narrative topics only; the
+  generated references are lookup tables, and `docs search` is the path to
+  those.
 - **agent discovery:** `info --for-agent` now emits current, one-wake context,
   structured `info` includes `capability_epoch`, and new pipeline scaffolds
   point agents at the live command instead of copying a command catalog.

@@ -23,7 +23,7 @@ import (
 var allCommands = []*Command{
 	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdUpdate, &cmdVersion, &cmdVersionUpdate, &cmdVersionHold, &cmdRun, &cmdRunConfig,
 	&cmdConfigure, &cmdConfigureInit,
-	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsAll, &cmdDocsSearch,
+	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsGuides, &cmdDocsAll, &cmdDocsSearch,
 	&cmdDocsMigrations, &cmdDocsMigrationsList, &cmdDocsMigrationsRead, &cmdDocsMigrationsBetween,
 	&cmdDocsVersions, &cmdDocsCache, &cmdDocsCacheInfo, &cmdDocsCacheClear,
 	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,
