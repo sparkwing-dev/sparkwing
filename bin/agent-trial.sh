@@ -177,7 +177,13 @@ cmds | grep -oE '\bsparkwing [a-z][a-z0-9 _-]*' | sed 's/ *$//' | awk '!seen[$0]
 echo
 
 echo "=== WASTE SIGNALS ==="
-total_bash=$(cmds | wc -l | tr -d ' ')
+# Count tool calls, not lines of command text: a single call that writes
+# a file with a heredoc is dozens of lines, and counting those made a
+# run look three times busier than one that wrote the same file with the
+# Write tool.
+total_bash=$(jq -r 'select(.type=="assistant") | .message.content[]?
+                    | select(.type=="tool_use" and .name=="Bash") | .name' "$TRACE" 2>/dev/null \
+  | wc -l | tr -d ' ')
 docs_reads=$(cmds | grep -cE 'sparkwing docs read')
 docs_uniq=$(cmds | grep -oE 'docs read --topic [a-z/-]+' | sort -u | wc -l | tr -d ' ')
 sdk_source=$(cmds | grep -cE 'pkg/mod.*sparkwing|go doc ')
