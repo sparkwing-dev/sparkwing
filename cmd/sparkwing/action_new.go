@@ -80,20 +80,55 @@ func runPipelineNew(args []string) error {
 		fmt.Fprintln(os.Stderr)
 	}
 
+	var scaffoldErr error
 	switch *template {
 	case "minimal":
-		return scaffoldGoMinimal(sparkwingDir, name, *hidden, *short, bootstrapped)
+		scaffoldErr = scaffoldGoMinimal(sparkwingDir, name, *hidden, *short, bootstrapped)
 	case "build-test-deploy":
-		return scaffoldGoBuildTestDeploy(sparkwingDir, name, *hidden, *short, bootstrapped)
+		scaffoldErr = scaffoldGoBuildTestDeploy(sparkwingDir, name, *hidden, *short, bootstrapped)
 	case "ci-pr-check":
-		return scaffoldGoCIPRCheck(sparkwingDir, name, *hidden, *short, bootstrapped)
+		scaffoldErr = scaffoldGoCIPRCheck(sparkwingDir, name, *hidden, *short, bootstrapped)
 	case "release":
-		return scaffoldGoRelease(sparkwingDir, name, *hidden, *short, bootstrapped)
+		scaffoldErr = scaffoldGoRelease(sparkwingDir, name, *hidden, *short, bootstrapped)
 	case "scheduled-report":
-		return scaffoldGoScheduledReport(sparkwingDir, name, *hidden, *short, bootstrapped)
+		scaffoldErr = scaffoldGoScheduledReport(sparkwingDir, name, *hidden, *short, bootstrapped)
 	default:
-		return scaffoldFromRegistry(sparkwingDir, name, *template, *params, *hidden, bootstrapped)
+		scaffoldErr = scaffoldFromRegistry(sparkwingDir, name, *template, *params, *hidden, bootstrapped)
 	}
+	if scaffoldErr != nil {
+		return scaffoldErr
+	}
+	if !fs.Changed("template") {
+		printTemplateCatalogHint()
+	}
+	return nil
+}
+
+// printTemplateCatalogHint tells an author who scaffolded the default
+// stub that the task-shaped catalog exists.
+//
+// It prints here rather than in the standing agent-discovery block
+// because this is the only moment it is certainly relevant: whoever
+// just ran `pipeline new` is writing a pipeline right now, and everyone
+// else pays nothing. A default scaffold is also the one case where the
+// author demonstrably did not choose a template -- either they did not
+// know the catalog existed, or none of it fit, and only the first is
+// worth correcting.
+func printTemplateCatalogHint() {
+	list, err := templates.List()
+	if err != nil || len(list) == 0 {
+		return
+	}
+	fmt.Println()
+	fmt.Printf("%s scaffolded the %s stub. %d task-shaped templates are available\n",
+		color.Dim("note:"), color.Bold("minimal"), len(list))
+	fmt.Printf("      (CI hygiene, docker + static deploys for AWS/GCP, DB migrations,\n")
+	fmt.Printf("      approval gates, test sharding). They compile, lint, and run as\n")
+	fmt.Printf("      generated, so you edit from something green:\n")
+	printAlignedSteps([]InfoNextStep{
+		{Command: "sparkwing pipeline templates", Purpose: "browse the catalog"},
+		{Command: "sparkwing pipeline new --name " + "<name>" + " --template <t>", Purpose: "scaffold from one"},
+	})
 }
 
 // scaffoldFromRegistry renders a sparks-core registry template (anything
