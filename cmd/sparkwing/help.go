@@ -106,11 +106,39 @@ var helpFlag = FlagSpec{
 var errHelpRequested = errors.New("help requested")
 
 // parseAndCheck injects --help, parses args, and validates flag deps.
+// wantsHelp reports whether args contain a bare help request.
+//
+// It is checked before parsing, because parsing can swallow the
+// request: a value-taking flag consumes whatever follows it, so
+// `pipeline new --template --help` binds --help as the template name
+// and then fails on a missing --name. Someone reaching for --help does
+// not know the flag grammar yet -- that is why they are asking -- so it
+// cannot be the thing they have to get right first.
+//
+// Everything after a `--` terminator is an operand, not a flag, so a
+// pipeline argument that happens to be spelled --help is left alone.
+func wantsHelp(args []string) bool {
+	for _, a := range args {
+		if a == "--" {
+			return false
+		}
+		if a == "--help" || a == "-h" {
+			return true
+		}
+	}
+	return false
+}
+
 func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	fs.SetOutput(io.Discard)
 
 	if err := checkRetiredWhereFlags(args); err != nil {
 		return err
+	}
+
+	if wantsHelp(args) {
+		renderHelp(cmd, args, os.Stdout)
+		return errHelpRequested
 	}
 
 	if fs.Lookup("help") == nil {

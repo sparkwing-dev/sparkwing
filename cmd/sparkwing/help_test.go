@@ -207,3 +207,46 @@ func TestVisibleSubcommandsHidesHiddenChild(t *testing.T) {
 		}
 	}
 }
+
+// A value-taking flag consumes whatever follows it, so the parser binds
+// `--template --help` as a template named "--help" and then complains
+// about an unrelated missing flag. Someone reaching for --help does not
+// know the flag grammar yet, which is why they are asking, so the
+// request is answered before parsing.
+func TestWantsHelpIsPositionIndependent(t *testing.T) {
+	yes := [][]string{
+		{"--help"},
+		{"-h"},
+		{"--template", "--help"},
+		{"--name", "x", "--template", "--help"},
+		{"--topic", "-h"},
+	}
+	for _, args := range yes {
+		if !wantsHelp(args) {
+			t.Errorf("wantsHelp(%q) = false, want true", args)
+		}
+	}
+
+	no := [][]string{
+		{},
+		{"--name", "x"},
+		{"--short", "helpful things"},
+		{"--query", "help"},
+	}
+	for _, args := range no {
+		if wantsHelp(args) {
+			t.Errorf("wantsHelp(%q) = true, want false", args)
+		}
+	}
+}
+
+// Everything after `--` is an operand. A pipeline argument spelled
+// --help belongs to the pipeline, not to sparkwing.
+func TestWantsHelpStopsAtTheTerminator(t *testing.T) {
+	if wantsHelp([]string{"--", "--help"}) {
+		t.Error("--help after -- is an operand, not a help request")
+	}
+	if !wantsHelp([]string{"--help", "--", "x"}) {
+		t.Error("--help before -- is still a help request")
+	}
+}

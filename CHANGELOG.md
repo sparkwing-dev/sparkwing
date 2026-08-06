@@ -134,6 +134,11 @@ code change to unlock.
 
 ### Added
 
+- **cli:** `--help` is now honored wherever it appears. A value-taking flag
+  consumes whatever follows it, so `sparkwing pipeline new --template --help`
+  bound `--help` as the template name and then failed on an unrelated missing
+  `--name`. The request is answered before parsing; arguments after a `--`
+  terminator are still operands.
 - **cli:** `pipeline templates` now prints one line per template -- name and
   when to reach for it -- instead of every manifest in full, and lists the
   built-in shapes alongside them. The catalog was 606 lines, which is not a
