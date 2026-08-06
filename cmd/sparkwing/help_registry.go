@@ -472,8 +472,9 @@ context. The docs match the binary version exactly -- no risk of
 the website explaining a flag your CLI doesn't have.
 
 Discovery: ` + "`sparkwing docs list -o json`" + ` returns slug + title +
-summary for every topic. ` + "`sparkwing docs search --query \"warm pool\"`" + `
-substring-matches across slug + title + body.
+summary for every topic. ` + "`sparkwing docs search --query pull_request`" + `
+returns the matching sections -- topic, heading, line range -- so a
+narrow question does not cost a whole page.
 
 When one page leaves you a lookup short, ` + "`sparkwing docs guides`" + `
 lists task-sized sets of topics; ` + "`sparkwing docs read --guide authoring`" + `
@@ -483,7 +484,7 @@ returns the whole set in one call.`,
 		{"read", "Print one doc's markdown to stdout (--topic NAME, or --guide NAME)"},
 		{"guides", "List task-sized topic sets (read one with `docs read --guide`)"},
 		{"all", "Concatenate every doc to stdout (full corpus dump)"},
-		{"search", "Substring search across docs (--query TEXT)"},
+		{"search", "Find the section that answers a question (--query TEXT)"},
 		{"migrations", "Per-version migration guides (list / read / between)"},
 		{"versions", "List doc versions known to this CLI (and sparkwing.dev with --web)"},
 		{"cache", "Inspect / clear the on-disk cache used by --web"},
@@ -585,19 +586,31 @@ read end to end; reach those with ` + "`sparkwing docs search`" + `.`,
 
 var cmdDocsSearch = Command{
 	Path:     "sparkwing docs search",
-	Synopsis: "Substring search across embedded docs",
-	Description: `Returns every doc whose slug + title + body contains every
-space-separated token in --query (case-insensitive). Hits in
-title/slug rank above body-only matches. Output shape matches
-` + "`sparkwing docs list`" + ` so -o json composes the same way.`,
+	Synopsis: "Find the section that answers a question",
+	Description: `Returns the doc sections containing every space-separated
+token in --query (case-insensitive), best first: a heading hit outranks
+a body hit, and a shorter section outranks a longer one holding the same
+match. Each result names its topic, heading, and line range.
+
+Sections rather than whole topics because the reference pages run to
+tens of thousands of tokens, and the question is usually narrow -- what
+a ` + "`pull_request`" + ` trigger looks like, what fields ` + "`ApprovalConfig`" + ` has.
+Add --body to print the matching sections in full.
+
+--topics restores the old behavior, listing whole matching topics in the
+same shape as ` + "`sparkwing docs list`" + `.`,
 	Flags: []FlagSpec{
 		{Name: "query", Short: "q", Argument: "TEXT", Desc: "Search terms (every token must match)", Required: true, Group: "Selection"},
+		{Name: "body", Desc: "Print each matching section in full instead of a snippet", Group: "Selection"},
+		{Name: "topics", Desc: "List whole matching topics instead of sections", Group: "Selection"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 	},
 	GroupOrder: []string{"Selection", "Output", "Other"},
 	Examples: []Example{
-		{"Find docs about the warm pool", "sparkwing docs search --query \"warm pool\""},
-		{"JSON for agents", "sparkwing docs search -q approval -o json"},
+		{"Where a PR trigger is defined", "sparkwing docs search --query pull_request"},
+		{"Read the matching sections in full", "sparkwing docs search -q ApprovalConfig --body"},
+		{"JSON for agents (topic, heading, line range, body)", "sparkwing docs search -q approval -o json"},
+		{"Whole topics, as before", "sparkwing docs search -q \"warm pool\" --topics"},
 	},
 }
 

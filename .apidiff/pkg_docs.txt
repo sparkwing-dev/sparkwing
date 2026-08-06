@@ -55,6 +55,20 @@ func Read(slug string) (string, error)
 func ReadGuide(name string) (string, error)
 func ReadRaw(slug string) (string, error)
 func Search(query string) []Entry
+func SearchSections(query string) []Section
+type Section struct {
+	Slug string
+
+	Heading string
+
+	Level int
+
+	StartLine int
+	EndLine   int
+
+	Body string
+}
+func Sections(slug string) ([]Section, error)
 var Version string
 type Versions struct {
 	Latest   string

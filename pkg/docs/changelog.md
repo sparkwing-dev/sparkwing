@@ -134,6 +134,15 @@ code change to unlock.
 
 ### Added
 
+- **cli:** `docs search` now returns the matching **sections** -- topic, heading,
+  line range, snippet -- instead of a list of whole topics, with `--body` to
+  print them in full. The reference pages run to tens of thousands of tokens
+  while the question is usually narrow (what a `pull_request` trigger looks
+  like, what fields `ApprovalConfig` has), and answering it used to mean
+  reading a page, grepping it for line numbers, and slicing out the range.
+  A heading hit outranks a body hit and a shorter section outranks a longer
+  one, so the defining section ranks first. `--topics` restores the previous
+  whole-topic listing.
 - **cli:** `sparkwing docs guides` and `docs read --guide <name>`: named sets of
   topics that answer one task together, for when reading a single page leaves
   you a lookup short. The first is `authoring` -- the DAG model, the idioms the

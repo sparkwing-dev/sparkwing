@@ -198,8 +198,11 @@ func runDocsSearch(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsSearch.Path, flag.ContinueOnError)
 	var query string
 	var output string
+	var topicsOnly, withBody bool
 	fs.StringVarP(&query, "query", "q", "", "search terms (every token must match somewhere)")
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | plain")
+	fs.BoolVar(&withBody, "body", false, "print each matching section in full instead of a snippet")
+	fs.BoolVar(&topicsOnly, "topics", false, "list matching topics instead of sections")
 	if err := parseAndCheck(cmdDocsSearch, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -211,10 +214,94 @@ func runDocsSearch(args []string) error {
 	}
 	if query == "" {
 		PrintHelp(cmdDocsSearch, os.Stderr)
-		return errors.New("docs search: --query is required (e.g. --query \"warm pool\")")
+		return errors.New("docs search: --query is required (e.g. --query \"pull_request\")")
 	}
-	hits := docs.Search(query)
-	return renderDocsList(hits, output)
+	if topicsOnly {
+		return renderDocsList(docs.Search(query), output)
+	}
+	return renderDocsSections(docs.SearchSections(query), query, withBody, output)
+}
+
+// renderDocsSections prints section hits.
+//
+// The default is a snippet plus the topic, heading, and line range,
+// because that is the shape of the answer: which page, where in it, and
+// enough text to tell whether it is the right place. --body prints the
+// whole section for a caller that would otherwise go read it anyway.
+func renderDocsSections(hits []docs.Section, query string, withBody bool, output string) error {
+	switch strings.ToLower(output) {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		if hits == nil {
+			hits = []docs.Section{}
+		}
+		return enc.Encode(hits)
+	case "plain":
+		for _, h := range hits {
+			fmt.Printf("%s:%d\t%s\n", h.Slug, h.StartLine, h.Heading)
+		}
+		return nil
+	case "pretty", "":
+		if len(hits) == 0 {
+			fmt.Printf("no section matches %q\n", query)
+			fmt.Printf("%s sparkwing docs search --query %q --topics\n",
+				color.Dim("whole topics:"), query)
+			return nil
+		}
+		for _, h := range hits {
+			where := h.Slug
+			if h.Heading != "" {
+				where += "  " + color.Bold(h.Heading)
+			}
+			fmt.Printf("%s  %s\n", where, color.Dim(fmt.Sprintf("(lines %d-%d)", h.StartLine, h.EndLine)))
+			if withBody {
+				fmt.Printf("%s\n\n", h.Body)
+				continue
+			}
+			fmt.Printf("  %s\n\n", color.Dim(sectionSnippet(h, query)))
+		}
+		if !withBody {
+			fmt.Printf("%s %s\n", color.Dim("read them in full:"),
+				color.Cyan(fmt.Sprintf("sparkwing docs search -q %q --body", query)))
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown output format %q (valid: pretty, json, plain)", output)
+	}
+}
+
+// sectionSnippet returns the first body line that mentions a query
+// token, so the preview shows the match rather than the boilerplate
+// under the heading.
+func sectionSnippet(s docs.Section, query string) string {
+	tokens := strings.Fields(strings.ToLower(query))
+	lines := strings.Split(s.Body, "\n")
+	for _, line := range lines {
+		low := strings.ToLower(line)
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		for _, tok := range tokens {
+			if strings.Contains(low, tok) {
+				return truncateLine(strings.TrimSpace(line))
+			}
+		}
+	}
+	for _, line := range lines {
+		if t := strings.TrimSpace(line); t != "" && !strings.HasPrefix(t, "#") {
+			return truncateLine(t)
+		}
+	}
+	return ""
+}
+
+func truncateLine(s string) string {
+	const max = 110
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
 
 func renderDocsList(entries []docs.Entry, output string) error {

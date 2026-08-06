@@ -277,6 +277,7 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 const agentBlockBody = "- `sparkwing commands` -- full CLI surface as JSON (every verb + every flag)\n" +
 	"- `sparkwing pipeline list -o json` -- this repo's pipelines\n" +
 	"- `sparkwing run <name>` -- run a pipeline\n" +
+	"- `sparkwing docs search -q <symbol-or-key>` -- the section that answers it, not the whole page\n" +
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n" +
 	"- `sparkwing info -o json` -- this same context as JSON, when you want to parse it\n"
 
