@@ -50,6 +50,11 @@ code change to unlock.
 
 ### Fixed
 
+- **cli/portability:** `cluster image rollout` no longer guesses the author's
+  `~/code/gitops` checkout. Select the repository explicitly with
+  `--gitops-repo` or `SPARKWING_GITOPS_REPO`; if neither is set, the command
+  exits before reading or changing a repository. The public checkout also no
+  longer carries configuration for a private work manager.
 - **admission:** an exact clean source build now supersedes the release it was
   built from while remaining older than later releases. Opaque worktree and
   dirty builds remain unordered against releases, preserving shared-daemon

@@ -2844,7 +2844,10 @@ kubectl rollout status.
 
 Gitops repo resolution order:
   1. --gitops-repo PATH explicit flag
-  2. ~/code/gitops (the author's default layout)
+  2. SPARKWING_GITOPS_REPO explicit environment configuration
+
+If neither is set, rollout exits before reading or changing a repository.
+Sparkwing never guesses a path from the user's home-directory layout.
 
 The command is idempotent: if the newTag already matches --tag
 there is nothing to commit, and the pipeline continues to sync
@@ -2862,7 +2865,7 @@ image to the registry before calling rollout.`,
 		{Name: "image", Argument: "NAME", Desc: "Short image name (matches the suffix of the ECR URL)", Required: true, Group: "Input"},
 		{Name: "tag", Argument: "TAG", Desc: "New tag to write in kustomization.yaml", Required: true, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name. Reserved for future per-profile gitops repo + argocd context discovery.", Required: true, Group: "System"},
-		{Name: "gitops-repo", Argument: "PATH", Desc: "Gitops repo path (default: ~/code/gitops)", Group: "Input"},
+		{Name: "gitops-repo", Argument: "PATH", Desc: "Gitops repo path (or SPARKWING_GITOPS_REPO)", Group: "Input"},
 		{Name: "namespace", Argument: "NS", Desc: "Kubernetes namespace for rollout status + logs", Default: "sparkwing", Group: "Input"},
 		{Name: "argocd-app", Argument: "NAME", Desc: "ArgoCD app name (default: derived from --image)", Group: "Input"},
 		{Name: "message", Argument: "MSG", Desc: "Commit message (default: 'chore: bump <image> to <tag>')", Group: "Input"},

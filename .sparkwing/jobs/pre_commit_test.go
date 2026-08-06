@@ -220,8 +220,8 @@ func TestGitStagesIntoThisSuitesOwnIndex(t *testing.T) {
 }
 `
 
-// gateIndexSnapshot stages root into a throwaway index, which is what
-// `bitwing ticket verify` hands the gate through `sparkwing run --sw-index`.
+// gateIndexSnapshot stages root into the throwaway index accepted by
+// `sparkwing run --sw-index`.
 func gateIndexSnapshot(t *testing.T, root string) string {
 	t.Helper()
 	index := filepath.Join(t.TempDir(), "gate.index")
