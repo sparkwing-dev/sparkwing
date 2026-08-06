@@ -85,6 +85,13 @@ func parsePipelineLintArgs(args []string) (pipelineLintArgs, bool, error) {
 	return parsed, false, nil
 }
 
+// runPipelineLint lints the repo's pipelines.
+//
+// With no --name and no --all it lints everything. Linting is read-only
+// static analysis, so the whole repo is both the safe default and what
+// a bare `sparkwing pipeline lint` plainly means; requiring a target
+// made that command print a screen of help and exit non-zero, costing a
+// second invocation to say what the first already said.
 func runPipelineLint(args []string) error {
 	parsed, helpRequested, err := parsePipelineLintArgs(args)
 	if err != nil {
@@ -105,8 +112,7 @@ func runPipelineLint(args []string) error {
 		return errors.New("lint: --all and --name are mutually exclusive")
 	}
 	if !parsed.all && parsed.pipeline == "" {
-		PrintHelp(cmdPipelineLint, os.Stderr)
-		return errors.New("lint: --name or --all is required")
+		parsed.all = true
 	}
 	if err := applyChdir(parsed.chdir); err != nil {
 		return err

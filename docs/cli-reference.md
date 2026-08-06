@@ -2408,17 +2408,18 @@ The rule set (see --rules for each rule's charter):
   unused-ref           a RefTo result discarded into _ or a bare statement
   guard-misuse         pipeline guards that can never be satisfied together
 
---all sweeps every pipeline in .sparkwing/sparkwing.yaml and exits
-non-zero if any violates a rule -- designed as a CI gate alongside
-'explain --all'. --name lints a single pipeline. Source defaults
-to <.sparkwing>/jobs; override with --dir.
+With no target it sweeps every pipeline in .sparkwing/sparkwing.yaml
+and exits non-zero if any violates a rule -- designed as a CI gate
+alongside 'explain --all'. --all says the same thing explicitly.
+--name lints a single pipeline. Source defaults to <.sparkwing>/jobs;
+override with --dir.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--name NAME` | Pipeline to lint (one of --name or --all required) |
-| `--all` | Lint every pipeline in this repo's sparkwing.yaml; non-zero exit on any violation |
+| `--name NAME` | Pipeline to lint (default: every pipeline) |
+| `--all` | Lint every pipeline in this repo's sparkwing.yaml; the default, non-zero exit on any violation |
 | `--rules` | Print each rule's charter (what it forbids and why) and exit |
 | `--dir DIR` | Directory of pipeline source to scan (default: <.sparkwing>/jobs) |
 | `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |

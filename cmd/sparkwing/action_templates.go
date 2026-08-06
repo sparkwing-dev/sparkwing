@@ -65,6 +65,11 @@ func runPipelineTemplates(args []string) error {
 
 // listTemplates renders the registry, optionally filtered by category
 // and cloud.
+//
+// A filter that matches nothing prints the values that do exist. The
+// miss is nearly always a guessed filter, and without the list the only
+// way to recover is to dump the unfiltered registry and reverse-engineer
+// the vocabulary from it.
 func listTemplates(category, cloud, output string) error {
 	list, err := templates.List()
 	if err != nil {
@@ -89,6 +94,12 @@ func listTemplates(category, cloud, output string) error {
 	case "pretty", "":
 		if len(filtered) == 0 {
 			fmt.Println("no templates match the given filters")
+			if cats := templateCategories(list); category != "" && len(cats) > 0 {
+				fmt.Printf("%s %s\n", color.Dim("categories:"), strings.Join(cats, ", "))
+			}
+			if clouds := templateClouds(list); cloud != "" && len(clouds) > 0 {
+				fmt.Printf("%s %s\n", color.Dim("clouds:"), strings.Join(clouds, ", "))
+			}
 			fmt.Printf("%s sparkwing pipeline templates%s\n",
 				color.Dim("browse all:"), clearedFilterSuffix(category, cloud))
 			return nil
@@ -337,6 +348,38 @@ func renderTemplateWithPlaceholders(tmpl templates.Template) (string, error) {
 
 // templateMatchesCategory reports whether m passes the --category
 // filter. An empty filter matches everything.
+// templateCategories returns every category the registry declares,
+// sorted and deduplicated.
+func templateCategories(list []templates.Template) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range list {
+		if c := strings.TrimSpace(t.Manifest.Applicability.Category); c != "" && !seen[c] {
+			seen[c] = true
+			out = append(out, c)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// templateClouds returns every cloud the registry declares, sorted and
+// deduplicated.
+func templateClouds(list []templates.Template) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range list {
+		for _, c := range t.Manifest.Applicability.Cloud {
+			if c = strings.TrimSpace(c); c != "" && !seen[c] {
+				seen[c] = true
+				out = append(out, c)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func templateMatchesCategory(m templates.Manifest, category string) bool {
 	if category == "" {
 		return true

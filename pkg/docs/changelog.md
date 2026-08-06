@@ -58,6 +58,14 @@ code change to unlock.
   claiming every transition is an upgrade.
 - **cli:** `daemon status` and `daemon restart` now default to pretty output on
   a terminal and JSON when piped; an explicit `-o` continues to win.
+- **cli:** `pipeline lint` with no target now lints every pipeline instead of
+  printing its help and exiting non-zero. Linting is read-only static
+  analysis, so the whole repo is both the safe default and what the bare
+  command plainly meant; `--all` still says it explicitly.
+- **cli:** `pipeline templates` whose `--category`/`--cloud` filter matches
+  nothing now lists the values that do exist. Recovering from a guessed
+  filter previously meant dumping the unfiltered registry and
+  reverse-engineering the vocabulary from it.
 - **cli:** `pipeline new` run from a source-built CLI no longer pins an SDK
   version the module proxy cannot resolve. A local build stamps
   `v<semver>-dev+<sha>`, which is neither a `+dirty` marker nor a
