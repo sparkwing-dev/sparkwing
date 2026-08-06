@@ -223,6 +223,12 @@ func (p *PrePush) run(ctx context.Context) error {
 // committedGoMods returns every go.mod git tracks, as repo-root-relative
 // paths. Asking the index rather than the filesystem keeps scratch modules
 // that are never pushed out of the checks that walk this list.
+//
+// Modules under a testdata/ directory are excluded. Such a module is a
+// fixture -- input to a test, not part of this repo's build surface --
+// and it is deliberately absent from go.work, so building or vetting it
+// fails on a tree that is entirely correct. The go tool ignores
+// testdata for the same reason.
 func committedGoMods(ctx context.Context) ([]string, error) {
 	// safety: git -C anchors paths to repo root regardless of process cwd.
 	out, err := sparkwing.Bash(ctx,
@@ -233,11 +239,17 @@ func committedGoMods(ctx context.Context) ([]string, error) {
 	}
 	var mods []string
 	for _, rel := range strings.Split(strings.TrimSpace(out), "\n") {
-		if rel != "" {
+		if rel != "" && !isTestdataPath(rel) {
 			mods = append(mods, rel)
 		}
 	}
 	return mods, nil
+}
+
+// isTestdataPath reports whether rel lives under a testdata/ directory
+// at any depth.
+func isTestdataPath(rel string) bool {
+	return strings.HasPrefix(rel, "testdata/") || strings.Contains(rel, "/testdata/")
 }
 
 // committedModuleDirs returns the directory of every committed go.mod,

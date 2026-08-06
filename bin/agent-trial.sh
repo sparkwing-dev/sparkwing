@@ -15,8 +15,10 @@
 # repeats, a doc it re-reads, or SDK source it opens out of the module
 # cache is a question the tooling should have answered the first time.
 #
-# The trial repo is created outside this checkout, so the agent cannot
-# read this repo's own pipelines or the acceptance corpus.
+# The trial repo is a committed fixture (internal/agenttrial/testdata/
+# trial-repo) copied outside this checkout, so the agent cannot read
+# this repo's own pipelines or the acceptance corpus, and two runs
+# weeks apart stay comparable.
 #
 # Usage: agent-trial.sh --prompt-file <path> [--name <trial>]
 #        agent-trial.sh --prompt "build me a lint pipeline"
@@ -24,7 +26,11 @@
 # Requires: claude + jq on PATH. Costs real model calls.
 set -uo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel)"
+# Anchor on this script's own location rather than the caller's working
+# directory: the trial cd's into a throwaway repo, and resolving the
+# fixture through `git rev-parse` from wherever the caller happened to
+# stand silently yields the wrong tree (or an empty one).
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 prompt_file=""
 prompt_text=""
 name="trial"
@@ -60,23 +66,15 @@ if [[ -n "$prompt_text" ]]; then
 fi
 [[ -n "$prompt_file" && -r "$prompt_file" ]] || { echo "agent-trial: need --prompt or --prompt-file" >&2; exit 2; }
 
-# A small but plausible service: something for requests about linting,
-# testing, image builds, and migrations to actually bite on.
+# The fixture is a committed repository, not something generated here,
+# so two runs a week apart are comparable and a change in the number is
+# a change in sparkwing rather than in the scaffolding.
+FIXTURE="$REPO_ROOT/internal/agenttrial/testdata/trial-repo"
+[[ -d "$FIXTURE" ]] || { echo "agent-trial: missing fixture $FIXTURE" >&2; exit 1; }
+cp -R "$FIXTURE/." "$TRIAL/"
+
 cd "$TRIAL" || exit 1
 git init -q .
-printf 'module example.com/app\n\ngo 1.26.0\n' > go.mod
-mkdir -p cmd/app migrations
-printf 'package main\n\nimport "fmt"\n\nfunc main() { fmt.Println("hello") }\n' > cmd/app/main.go
-printf 'package main\n\nimport "testing"\n\nfunc TestNothing(t *testing.T) {}\n' > cmd/app/main_test.go
-cat > Dockerfile <<'DOCKERFILE'
-FROM golang:1.26 AS build
-WORKDIR /src
-COPY . .
-RUN go build -o /out/app ./cmd/app
-FROM gcr.io/distroless/base
-COPY --from=build /out/app /app
-ENTRYPOINT ["/app"]
-DOCKERFILE
 git add -A && git -c user.email=trial@example.com -c user.name=trial commit -qm init
 
 echo "trial repo: $TRIAL (no .sparkwing/)"
@@ -88,13 +86,15 @@ echo
 # unrestricted agent on this machine -- that is the cost of measuring
 # the real flow rather than a sandboxed imitation of it.
 #
-# The appended line keeps a machine-local agent bootstrap (a personal
-# ~/.claude/CLAUDE.md pointing at unrelated internal services) from
-# showing up as product latency. A customer repo has no such services.
+# A machine-local agent bootstrap (e.g. a personal ~/.claude/CLAUDE.md
+# pointing at internal tooling) will hijack the trial: an agent that
+# treats the prompt as tracked work moves into some other workspace and
+# the run measures that instead. Asking it not to via
+# --append-system-prompt does not hold, so the report detects the
+# escape below rather than pretending to prevent it.
 START=$(date +%s)
 claude --print --output-format stream-json --verbose \
   --permission-mode bypassPermissions \
-  --append-system-prompt 'This repository is standalone. No company-internal services, ticketing systems, or knowledge bases exist on this machine; do not attempt to consult any.' \
   < "$prompt_file" > "$TRACE" 2>"$WORK/$name.err"
 agent_exit=$?
 ELAPSED=$(( $(date +%s) - START ))
@@ -119,6 +119,14 @@ sdk_source=$(cmds | grep -cE 'pkg/mod.*sparkwing|go doc ')
 printf '  %-38s %s\n' "total shell commands:" "$total_bash"
 printf '  %-38s %s (%s distinct topics)\n' "docs read calls:" "$docs_reads" "$docs_uniq"
 printf '  %-38s %s\n' "reads of SDK source / go doc:" "$sdk_source"
+
+# An agent that cd's somewhere else is no longer being measured. Report
+# it as a failed trial, not as a slow one.
+escaped=$(cmds | grep -oE 'cd +/[^ &;|]*' | awk -v t="$TRIAL" '$2 !~ "^"t {print $2}' | sort -u)
+if [[ -n "$escaped" ]]; then
+  echo "  -> LEFT THE TRIAL REPO. Work done here is not being measured:"
+  printf '       %s\n' $escaped | head -5
+fi
 if [[ "$docs_reads" -gt "$docs_uniq" ]]; then
   echo "  -> re-read $(( docs_reads - docs_uniq )) doc topic(s): one pass did not answer the question"
 fi
@@ -128,6 +136,10 @@ fi
 echo
 
 echo "=== RESULT ==="
+if [[ ! -d "$TRIAL/.sparkwing" ]]; then
+  echo "  NO .sparkwing/ IN THE TRIAL REPO -- the agent built elsewhere."
+  echo "  Treat the timing above as void; see the escape note in WASTE SIGNALS."
+fi
 sparkwing pipeline list -o json 2>/dev/null | jq -r '.[] | "  \(.name)\t\(.short)"' 2>/dev/null || echo "  (no pipelines registered)"
 echo
 echo "  lint:    $(sparkwing pipeline lint --all >/dev/null 2>&1 && echo PASS || echo FAIL)"

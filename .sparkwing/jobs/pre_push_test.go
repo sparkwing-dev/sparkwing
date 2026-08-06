@@ -39,3 +39,31 @@ func TestReplaceBanAllowsTheDogfoodSelfReplace(t *testing.T) {
 		t.Fatalf("the dogfood self-replace must be allowed: %v", err)
 	}
 }
+
+// A go.mod under testdata/ is a fixture, not part of this repo's build
+// surface: it is absent from go.work on purpose, so vetting it fails on
+// a tree that is entirely correct.
+func TestIsTestdataPath(t *testing.T) {
+	inside := []string{
+		"testdata/trial-repo/go.mod",
+		"internal/agenttrial/testdata/trial-repo/go.mod",
+		"a/b/testdata/c/go.mod",
+	}
+	for _, p := range inside {
+		if !isTestdataPath(p) {
+			t.Errorf("isTestdataPath(%q) = false, want true", p)
+		}
+	}
+
+	outside := []string{
+		"go.mod",
+		".sparkwing/go.mod",
+		"web/go.mod",
+		"internal/testdatabase/go.mod",
+	}
+	for _, p := range outside {
+		if isTestdataPath(p) {
+			t.Errorf("isTestdataPath(%q) = true, want false", p)
+		}
+	}
+}
