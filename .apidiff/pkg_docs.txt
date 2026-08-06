@@ -25,6 +25,16 @@ type Entry struct {
 }
 const ErrNotFound = docsError("doc not found")
 var ErrUnavailable = errors.New("docs: web fetch unavailable")
+type Guide struct {
+	Name string
+
+	Summary string
+
+	Topics []string
+}
+func GuideByName(name string) (Guide, bool)
+func GuideNames() []string
+func Guides() []Guide
 const IndexTTL = 24 * time.Hour
 const LatestAlias = "latest"
 func List() []Entry
@@ -42,6 +52,7 @@ func MigrationsList() []MigrationEntry
 func MigrationsRead(version string) (string, error)
 func NewWebClient() *WebClient
 func Read(slug string) (string, error)
+func ReadGuide(name string) (string, error)
 func ReadRaw(slug string) (string, error)
 func Search(query string) []Entry
 var Version string
