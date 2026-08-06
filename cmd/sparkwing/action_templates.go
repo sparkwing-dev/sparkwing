@@ -113,6 +113,19 @@ func listTemplates(category, cloud, output string) error {
 
 // renderTemplateList prints the pretty catalog: templates grouped under
 // category headers, followed by the affordance footer.
+// renderTemplateList prints one line per template: the name and the
+// first line of when to reach for it.
+//
+// The full manifest for every template ran to six hundred lines, which
+// is not a list anyone reads -- agent trials grepped it, re-dumped it as
+// JSON, and parsed it with python before picking, four turns to answer
+// "which one runs go test". Choosing needs the name and one line;
+// everything else belongs behind --name.
+//
+// The built-in shapes are listed alongside, marked, because they were
+// the other half of that cost: `ci-pr-check` is named for a job a
+// registry template actually does, and reads as the answer until you
+// open it and find echo placeholders.
 func renderTemplateList(filtered []templates.Template) {
 	groups := groupTemplatesByCategory(filtered)
 	for i, g := range groups {
@@ -121,10 +134,57 @@ func renderTemplateList(filtered []templates.Template) {
 		}
 		fmt.Println(color.Bold(strings.ToUpper(g.category)))
 		for _, t := range g.templates {
-			printTemplateSummary(t.Manifest)
+			printTemplateLine(t.Manifest)
 		}
 	}
+	printBuiltinShapes()
 	printTemplateListFooter(len(filtered), len(groups))
+}
+
+// printTemplateLine is the one-line form: name, then the first sentence
+// of whenToUse.
+func printTemplateLine(m templates.Manifest) {
+	signal := strings.TrimSpace(m.WhenToUse)
+	if signal == "" {
+		signal = strings.TrimSpace(m.Description)
+	}
+	signal = strings.Join(strings.Fields(signal), " ")
+	if i := strings.Index(signal, ". "); i > 0 {
+		signal = signal[:i]
+	}
+	const width = 30
+	name := m.Name
+	pad := ""
+	if len(name) < width {
+		pad = strings.Repeat(" ", width-len(name))
+	}
+	fmt.Printf("  %s%s %s\n", color.Bold(name), pad, color.Dim(truncateLine(signal)))
+}
+
+// builtinShapes are the templates `pipeline new` renders itself. They
+// are DAG skeletons with echo bodies, useful when no task template
+// fits; naming that here is what keeps one from being mistaken for a
+// working pipeline.
+var builtinShapes = []struct{ name, when string }{
+	{"minimal", "single node, stubbed Run -- the smallest thing that runs"},
+	{"build-test-deploy", "three nodes in a line"},
+	{"ci-pr-check", "lint and test in parallel, converging on a gate"},
+	{"release", "version bump, changelog, publish"},
+	{"scheduled-report", "one collector fanning out to gatherers"},
+}
+
+func printBuiltinShapes() {
+	fmt.Println()
+	fmt.Println(color.Bold("SHAPES") + color.Dim("  (built into `pipeline new`; DAG skeletons with echo bodies --"))
+	fmt.Println(color.Dim("         start here only when no template above fits your task)"))
+	for _, s := range builtinShapes {
+		const width = 30
+		pad := ""
+		if len(s.name) < width {
+			pad = strings.Repeat(" ", width-len(s.name))
+		}
+		fmt.Printf("  %s%s %s\n", color.Bold(s.name), pad, color.Dim(s.when))
+	}
 }
 
 // templateCategoryGroup is one category header plus the templates filed
@@ -213,42 +273,6 @@ func clearedFilterSuffix(category, cloud string) string {
 		return ""
 	}
 	return color.Dim(" (without " + strings.Join(parts, " ") + ")")
-}
-
-// printTemplateSummary renders one template's catalog row: name, the
-// "when to use" signal, its parameters, applicability, and prerequisite.
-func printTemplateSummary(m templates.Manifest) {
-	fmt.Println(color.Bold(m.Name))
-	signal := strings.TrimSpace(m.WhenToUse)
-	if signal == "" {
-		signal = strings.TrimSpace(m.Description)
-	}
-	for _, line := range strings.Split(signal, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			fmt.Printf("  %s\n", color.Dim(line))
-		}
-	}
-	var req, opt []string
-	for _, p := range m.Parameters {
-		if p.Required {
-			req = append(req, p.Name)
-		} else {
-			opt = append(opt, p.Name)
-		}
-	}
-	if len(req) > 0 {
-		fmt.Printf("  %s %s\n", color.Bold("required:"), strings.Join(req, ", "))
-	}
-	if len(opt) > 0 {
-		fmt.Printf("  %s %s\n", color.Dim("optional:"), color.Dim(strings.Join(opt, ", ")))
-	}
-	if applies := applicabilityLine(m.Applicability); applies != "" {
-		fmt.Printf("  %s %s\n", color.Dim("applies:"), color.Dim(applies))
-	}
-	if pre := strings.TrimSpace(m.Prerequisite); pre != "" {
-		fmt.Printf("  %s %s\n", color.Bold("prerequisite:"), pre)
-	}
-	fmt.Println()
 }
 
 // showTemplateDetail renders one template in full: manifest metadata,

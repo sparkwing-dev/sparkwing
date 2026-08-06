@@ -134,6 +134,14 @@ code change to unlock.
 
 ### Added
 
+- **cli:** `pipeline templates` now prints one line per template -- name and
+  when to reach for it -- instead of every manifest in full, and lists the
+  built-in shapes alongside them. The catalog was 606 lines, which is not a
+  list anyone reads: agent trials grepped it, re-dumped it as JSON, and parsed
+  it with python before picking. Choosing needs a name and a line; the rest is
+  behind `--name`. The shapes are marked as DAG skeletons with echo bodies,
+  because `ci-pr-check` is named for a job a registry template actually does
+  and reads as the answer until you open it.
 - **cli:** `docs search` now returns the matching **sections** -- topic, heading,
   line range, snippet -- instead of a list of whole topics, with `--body` to
   print them in full. The reference pages run to tens of thousands of tokens
