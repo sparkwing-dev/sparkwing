@@ -90,6 +90,10 @@ if [[ -n "$prompt_text" ]]; then
   printf '%s\n' "$prompt_text" > "$prompt_file"
 fi
 [[ -n "$prompt_file" && -r "$prompt_file" ]] || { echo "agent-trial: need --prompt or --prompt-file" >&2; exit 2; }
+# Absolute before the cd below: a relative --prompt-file is relative to
+# the caller, and resolving it from inside the trial repo silently feeds
+# the agent nothing.
+prompt_file="$(cd "$(dirname "$prompt_file")" && pwd)/$(basename "$prompt_file")"
 
 # The fixture is fixed input, not something generated here, so two runs
 # a week apart are comparable and a change in the number is a change in
@@ -153,6 +157,15 @@ ELAPSED=$(( $(date +%s) - START ))
 
 echo "agent finished in ${ELAPSED}s (exit $agent_exit)"
 echo
+
+# A report for a run that never happened reads exactly like a report for
+# a run that failed on the merits. Stop here instead.
+if [[ "$agent_exit" -ne 0 ]] || [[ ! -s "$TRACE" ]]; then
+  echo "agent-trial: the agent did not run to completion; no measurement to report." >&2
+  echo "  stderr: $WORK/$name.err" >&2
+  tail -5 "$WORK/$name.err" >&2
+  exit 1
+fi
 
 cmds() {
   jq -r 'select(.type=="assistant") | .message.content[]?
