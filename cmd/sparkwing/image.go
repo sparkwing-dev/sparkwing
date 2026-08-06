@@ -38,8 +38,8 @@ func runImageRollout(args []string) error {
 	fs := flag.NewFlagSet(cmdImageRollout.Path, flag.ContinueOnError)
 	image := fs.String("image", "", "short image name (matches suffix of ECR URL)")
 	tag := fs.String("tag", "", "new tag to write")
-	on := fs.String("profile", "", "profile name")
-	gitopsRepo := fs.String("gitops-repo", "", "gitops repo path (default: ~/code/gitops)")
+	fs.String("profile", "", "profile name")
+	gitopsRepo := fs.String("gitops-repo", "", "gitops repo path (or SPARKWING_GITOPS_REPO)")
 	namespace := fs.String("namespace", "sparkwing", "kubernetes namespace for rollout + logs")
 	argocdApp := fs.String("argocd-app", "", "argocd app name (default: derived from --image)")
 	message := fs.String("message", "", "override the commit message")
@@ -53,7 +53,7 @@ func runImageRollout(args []string) error {
 		return err
 	}
 
-	repoRoot, err := resolveGitopsRepo(*gitopsRepo, *on)
+	repoRoot, err := resolveGitopsRepo(*gitopsRepo)
 	if err != nil {
 		return fmt.Errorf("image rollout: %w", err)
 	}
@@ -128,25 +128,24 @@ func runImageRollout(args []string) error {
 	return nil
 }
 
-// resolveGitopsRepo: explicit flag > ~/code/gitops fallback.
-func resolveGitopsRepo(explicit, profileName string) (string, error) {
-	_ = profileName
-	if explicit != "" {
-		abs, err := filepath.Abs(explicit)
-		if err != nil {
-			return "", fmt.Errorf("resolve --gitops-repo: %w", err)
-		}
-		return abs, nil
+// resolveGitopsRepo never guesses a workstation layout. The flag is best for
+// one-off use; SPARKWING_GITOPS_REPO provides explicit local configuration for
+// callers that repeatedly target the same repository.
+func resolveGitopsRepo(explicit string) (string, error) {
+	candidate := strings.TrimSpace(explicit)
+	source := "--gitops-repo"
+	if candidate == "" {
+		candidate = strings.TrimSpace(os.Getenv("SPARKWING_GITOPS_REPO"))
+		source = "SPARKWING_GITOPS_REPO"
 	}
-	home, err := os.UserHomeDir()
+	if candidate == "" {
+		return "", errors.New("gitops repo is not configured (pass --gitops-repo or set SPARKWING_GITOPS_REPO)")
+	}
+	abs, err := filepath.Abs(candidate)
 	if err != nil {
-		return "", fmt.Errorf("resolve home: %w", err)
+		return "", fmt.Errorf("resolve %s: %w", source, err)
 	}
-	candidate := filepath.Join(home, "code", "gitops")
-	if _, err := os.Stat(candidate); err != nil {
-		return "", fmt.Errorf("gitops repo not found at %s (pass --gitops-repo)", candidate)
-	}
-	return candidate, nil
+	return abs, nil
 }
 
 // findImageEntry walks the images: array of a kustomization.yaml
