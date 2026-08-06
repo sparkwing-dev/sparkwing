@@ -1,0 +1,3 @@
+Use sparkwing to build me a pipeline that lints my code before I commit,
+and a second pipeline that runs on a pull request: lint and test in
+parallel, then a gate that only passes if both succeeded.

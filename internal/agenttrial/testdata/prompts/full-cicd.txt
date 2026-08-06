@@ -1,0 +1,14 @@
+Use sparkwing to build me a pipeline that lints code before I commit,
+then a pipeline that lints after a PR is made and runs through some
+status checks - like making sure they didn't violate any of our repo
+rules. Examples - you cannot pair sql migrations with code. also build
+an image in that pipeline and store it in AWS ECR. Also test the code
+from the built image. Oh, and deploy it to a developer ephemeral
+environment. When a label is applied - like merge-to-dev, then run a
+workflow that resets the dev branch to the prod branch, and then commits
+in all the merge-to-dev labeled branches. On that branch when the push
+lands we do a build and deploy, but skip tests. Then whenever the branch
+is merged into prod, do a build, test, deploy, but run sql migrations
+before the deploy, and also have an approval step before the deploy goes
+out. Make sure testing fans out into a matrix of 10 workers because
+there's a lot of tests to run and it'll probably be a slow step.

@@ -29,6 +29,24 @@ sparkwing, no CI, no commentary about being a test.
 Keep it small. It is a measurement fixture, not a sample application:
 every file the agent has to read is time on the clock.
 
+## The prompt has to name sparkwing
+
+`testdata/prompts` holds the committed trial prompts, and each one says
+"use sparkwing" on purpose.
+
+Without it the agent has no reason to believe sparkwing exists: the
+fixture is an ordinary repo, and the obvious way to add CI to an
+ordinary repo is `.github/workflows`. A trial run against a prompt that
+did not name the tool produced seven GitHub Actions workflows and never
+invoked the CLI once. Earlier runs only found sparkwing because the
+fixture README leaked the name -- so every number from before that leak
+was fixed came from an accident.
+
+This matches how the flow really starts: someone who has installed
+sparkwing tells their agent to use it. Discovering the tool unprompted
+is a different question, worth asking separately, but it is not what
+these trials measure.
+
 ## The other fixture
 
 `agent-trial.sh --fixture miniflux` runs against a pinned commit of a
