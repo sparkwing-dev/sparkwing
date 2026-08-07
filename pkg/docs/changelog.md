@@ -385,8 +385,9 @@ code change to unlock.
   now owns that spelling, and the retired-flag pointer still fires everywhere
   else.
 
-- **cli:** `sparkwing commands` defaults to a one-line index instead of a
-  235KB JSON dump. It emitted the full record for all 139 verbs on the theory
+- **cli:** (Breaking) `sparkwing commands` defaults to a one-line index instead
+  of a 235KB JSON dump. Anything parsing its output must now pass `-o json`,
+  which is byte-identical to the old default. It emitted the full record for all 139 verbs on the theory
   that agents are the primary audience -- which is true, and is why JSON was
   the wrong default: agents do not size output before reading it. A trial fed
   the bare command into a narrow lookup, spent roughly 58,000 tokens, and got
