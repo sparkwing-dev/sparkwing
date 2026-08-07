@@ -188,9 +188,19 @@ case "$agent" in
     agent_exit=$?
     ;;
   codex)
+    # </dev/null because codex exec appends stdin to the prompt and
+    # waits for EOF to do it. With stdin inherited from a pipe that
+    # nobody closes -- a backgrounded sweep, say -- it prints "Reading
+    # additional input from stdin..." and blocks forever, which reads
+    # as a slow agent rather than a stuck harness.
+    #
+    # Reasoning effort goes through -c rather than a flag: a ChatGPT
+    # account rejects every --model but its default, so effort is the
+    # only axis that varies here.
     codex exec --json --dangerously-bypass-approvals-and-sandbox \
       ${model:+--model "$model"} \
-      "$(cat "$prompt_file")" > "$TRACE" 2>"$WORK/$name.err"
+      ${effort:+-c "model_reasoning_effort=\"$effort\""} \
+      "$(cat "$prompt_file")" < /dev/null > "$TRACE" 2>"$WORK/$name.err"
     agent_exit=$?
     ;;
   *)
