@@ -47,6 +47,22 @@ sparkwing tells their agent to use it. Discovering the tool unprompted
 is a different question, worth asking separately, but it is not what
 these trials measure.
 
+## Running more than one trial
+
+One agent's result is one agent's habits. `bin/agent-trial-matrix.sh`
+runs the quickstart prompt once per locally available configuration --
+three Claude models, three Codex reasoning efforts -- and prints one
+table, so a CLI change can be judged against more than a single set of
+reading habits. The trials are serialized: they contend for CPU, and a
+contended run has been measured at six times its uncontended time.
+
+`bin/agent-trial-report.sh <trace.jsonl>...` reads the traces those runs
+leave in `$TMPDIR/sparkwing-agent-trial/` and splits wall-clock into
+model time and tool time, then attributes calls to the phases of
+authoring a pipeline. Tool time is a small fraction of the total, which
+is the standing argument for spending CLI design effort on removing
+round-trips rather than on making any single command faster.
+
 ## The other fixture
 
 `agent-trial.sh --fixture miniflux` runs against a pinned commit of a
