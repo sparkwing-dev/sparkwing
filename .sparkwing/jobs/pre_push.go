@@ -12,18 +12,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// PrePush gates pushes to main with the slower checks that don't
-// belong in pre-commit: full golangci-lint, `go test -race`, the
+// PrePush provides slower release-boundary checks: full golangci-lint,
+// `go test -race`, the
 // version-freshness check against the sparkwing ecosystem, the
 // public API-surface drift gate (bin/check-api-snapshot.sh, which
 // covers the `pkg/` surfaces the generated-reference diffs miss),
 // and a hard ban on any `replace` directive in a committed `go.mod`.
 //
-// Push-to-main means this pipeline is the last gate before code is
-// shared, so it's stricter than a typical PR-time check.
-//
-// Wire it to git: declare `pre_push:` in sparkwing.yaml and run
-// `sparkwing pipeline hooks install`. Tooling assumed on PATH:
+// The repository keeps this pipeline manual so a lead can select it for a
+// dangerous change or release boundary. Tooling assumed on PATH:
 // golangci-lint, staticcheck (called by golangci-lint), govulncheck,
 // terraform (for the Mode 3 module gate; .tool-versions pins it).
 type PrePush struct {
@@ -32,11 +29,11 @@ type PrePush struct {
 }
 
 func (PrePush) ShortHelp() string {
-	return "Pre-push gate: lint, test -race, chaos, vuln, freshness, api-snapshot, no replace + no go.work"
+	return "Release-boundary verification: lint, test -race, chaos, vuln, freshness, api-snapshot, no replace + no go.work"
 }
 
 func (PrePush) Help() string {
-	return "Final gate before main. Runs the full golangci-lint set, " +
+	return "Explicit release-boundary verification. Runs the full golangci-lint set, " +
 		"`go test -race ./...`, `govulncheck ./...`, the " +
 		"sparkwing-ecosystem version-freshness check (deps must be at " +
 		"the latest released tag, or replaced with a not-behind local " +
