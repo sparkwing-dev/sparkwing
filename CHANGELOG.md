@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.22.3] - 2026-08-07
 ### Fixed
 
 - **cli:** capacity profiles are keyed by the repository a run launched
