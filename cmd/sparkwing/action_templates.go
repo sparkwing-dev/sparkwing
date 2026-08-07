@@ -353,8 +353,25 @@ func printTemplateDetail(tmpl templates.Template, rendered string, body bool) {
 		fmt.Printf("\n%s\n", color.Bold("rendered body (default + <placeholder> params):"))
 		fmt.Printf("\n%s\n", rendered)
 	}
-	fmt.Printf("\n%s sparkwing pipeline new --name <name> --template %s --param k=v ...\n",
-		color.Dim("scaffold:"), m.Name)
+	printExampleFooter(body)
+}
+
+// printExampleFooter closes a worked example with what to do next.
+//
+// It cannot offer to scaffold this example: `pipeline new --template`
+// takes a shape, and passing a registry name is now an error. Nor
+// should it -- an example is a finished pipeline for someone else's
+// repo, and starting from one means deleting its assumptions before
+// writing your own. Read it, scaffold the shape it uses, write the
+// bodies you need.
+func printExampleFooter(body bool) {
+	fmt.Println()
+	if !body {
+		fmt.Printf("%s sparkwing examples --name <name> --body\n",
+			color.Dim("read the code:"))
+	}
+	fmt.Printf("%s sparkwing pipeline new --name <name> --template <shape>  (%s)\n",
+		color.Dim("start your own:"), strings.Join(builtinShapeNames(), " | "))
 }
 
 // renderTemplateWithPlaceholders renders the template body using the

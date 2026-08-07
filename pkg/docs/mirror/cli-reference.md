@@ -2596,10 +2596,10 @@ jobs/<snake>.go plus a sparkwing.yaml entry. Auto-bootstraps
 up the package skeleton too -- no separate init step, no
 sample pipeline you didn't ask for.
 
-Before building by hand, browse the ready-made starters:
-'sparkwing examples' lists task-shaped registry templates
-(Go CI hygiene, docker/static deploys for AWS+GCP, migrations, ...);
-scaffold one with --template <name> [--param k=v ...].
+--template takes a shape, not a task. The five shapes below differ
+only in DAG structure; every one runs green in any repo before you
+edit it, because the Run bodies are echoes. Pick the structure you
+need and replace the bodies.
 
 New to authoring? 'sparkwing docs read --guide authoring' returns the
 DAG model, the idioms the linter enforces, how a pipeline fires, and
@@ -2609,7 +2609,7 @@ otherwise open one at a time.
 Pass --sw-cd/-C to scaffold into a repo other than the current
 directory (the .sparkwing search re-anchors there).
 
-Built-in templates (registry templates are listed by 'pipeline templates'):
+Shapes:
   - minimal (default): single-node Plan with a stubbed Run.
     Smallest viable shape; the editor's first move is replacing
     the placeholder Info() line with real logic.
@@ -2628,10 +2628,15 @@ Built-in templates (registry templates are listed by 'pipeline templates'):
     converges them. Prints the sparkwing.yaml 'on:' schedule trigger
     to add for cron runs.
 
-Each built-in template scaffolds a pipeline that compiles, renders
-clean under 'pipeline explain', and passes 'pipeline lint': pure
-Plan(), runner-label preferences over host branching, echo Run bodies
-so the first 'sparkwing run <name>' succeeds end-to-end.
+Every shape scaffolds a pipeline that compiles, renders clean under
+'pipeline explain', and passes 'pipeline lint': pure Plan(), runner-label
+preferences over host branching, echo Run bodies so the first
+'sparkwing run <name>' succeeds end-to-end.
+
+For how a real pipeline is written -- container deploys, migrations,
+canary rollouts -- read a worked one: 'sparkwing docs search -q <task>',
+then 'sparkwing examples --name <name> --body'. Those are for reading,
+not scaffolding; --template will not take one.
 
 Refuses to clobber: if the name already exists in sparkwing.yaml
 the command fails before writing anything.
@@ -2651,15 +2656,14 @@ See also:
 |---|---|
 | `--name NAME` | New pipeline's kebab-case name (a-z, 0-9, -) (required) |
 | `-C, --sw-cd DIR` | Scaffold as if started in this directory (re-anchors the .sparkwing search) |
-| `--template KIND` | minimal \| build-test-deploy \| ci-pr-check \| release \| scheduled-report \| any registry name from `sparkwing examples` (default: minimal) |
-| `--param K=V` | Registry template parameter (repeatable); see `sparkwing examples` |
+| `--template SHAPE` | minimal \| build-test-deploy \| ci-pr-check \| release \| scheduled-report (default: minimal) |
 | `--hidden` | Mark the entry hidden in default tab-complete menus |
-| `--short TEXT` | Pre-fill the ShortHelp / desc line (built-in templates only) |
+| `--short TEXT` | Pre-fill the ShortHelp / desc line |
 
 ### Examples
 
 ```sh
-# Single-node pipeline (default template)
+# Single-node pipeline (default shape)
 sparkwing pipeline new --name release
 
 # Build/test/deploy DAG (three-node)
@@ -2670,9 +2674,6 @@ sparkwing pipeline new --name pr-check --template ci-pr-check
 
 # Scheduled fan-out report
 sparkwing pipeline new --name daily-report --template scheduled-report
-
-# From a registry template
-sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s --param image=myapp --param namespace=myapp --param app-name=myapp --param health-url=http://myapp.myapp.svc:8080/health
 ```
 
 ## `sparkwing pipeline plan`

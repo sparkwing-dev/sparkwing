@@ -410,13 +410,24 @@ module and committing the source into your repo. Commit
 
 ## The template catalog
 
-Templates are curated, parameterized pipeline starters shipped as the
-`templates` block module of sparks-core. They are the richer counterpart
-to the two stubs built into the CLI (`minimal`, `build-test-deploy`):
-real-world shapes like static-site deploys, containerized deploys to
-Kubernetes, migrate+deploy flows, and CI-hygiene gates.
+The catalog is the corpus of worked pipelines shipped as the `templates`
+block module of sparks-core: static-site deploys, containerized deploys
+to Kubernetes, migrate+deploy flows, CI-hygiene gates, canary rollouts,
+test sharding. Every one compiles, lints, and runs -- the
+`template-verify` pipeline proves it -- so unlike prose they cannot
+quietly stop being true.
 
-Browse and inspect them with `sparkwing examples`:
+They are reference, not a starting point. `sparkwing pipeline new
+--template <shape>` begins a pipeline from one of five structural
+shapes; an example shows how a finished one is built. Reaching for an
+example to *start* means inheriting another repo's assumptions and
+deleting them one at a time, which is slower than writing the bodies
+you actually want into a shape that already runs green.
+
+Most arrivals should come through `sparkwing docs search`, which ranks
+examples alongside the documentation -- searching `"ecs fargate"`
+answers the question without anyone browsing a list. Browse and inspect
+directly with `sparkwing examples`:
 
 ```bash
 # list every template with its "when to use" signal and parameters
@@ -441,17 +452,17 @@ Every view has an `-o json` form for agent consumption -- the list emits
 the manifests, and a `--name` detail view emits the manifest, README, and
 (with `--body`) the rendered body.
 
-Once you have picked one, scaffold it into your repo:
+Once you have read one, start your own from the shape it uses:
 
 ```bash
-sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s \
-  --param image=myapp --param namespace=myapp --param app-name=myapp \
-  --param health-url=http://myapp.myapp.svc:8080/health
+sparkwing pipeline new --name deploy --template build-test-deploy
 ```
 
-The scaffolder renders the template body into `.sparkwing/jobs/<name>.go`,
-wires the `sparkwing.yaml` entry, and prints any prerequisite the template
-declares. To own and modify the template registry itself, inflate it (see
+`--template` takes a shape -- `minimal`, `build-test-deploy`,
+`ci-pr-check`, `release`, or `scheduled-report` -- and passing an
+example name is an error, with the `sparkwing examples --name <name>
+--body` command to read it instead. To own and modify the catalog
+itself, inflate it (see
 [Inflating a spark library](#inflating-a-spark-library)).
 
 ## Authoring a sparks library

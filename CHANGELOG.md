@@ -306,6 +306,19 @@ code change to unlock.
 
 ### Changed
 
+- **cli:** `sparkwing pipeline new --help` describes the surface that exists.
+  It still advertised scaffolding a registry template with `--template <name>
+  --param k=v` and pointed at a `pipeline templates` verb, neither of which
+  survives -- `--template` takes one of five shapes and `--param` is gone from
+  the verb. That help is the second thing anyone reads when authoring a
+  pipeline, so the stale copy sent readers to a removed command at exactly the
+  moment they were deciding what to do. `sparkwing examples --name <name>`
+  likewise closed by offering a scaffold command that now errors; it points at
+  reading the body and starting from a shape instead. `docs/getting-started.md`
+  and the sparks template-catalog section carry the same correction, and both
+  dead tokens are now on the docs-drift denylist so they cannot return
+  quietly.
+
 - **sdk:** golangci-lint in this repo's own gates now runs under a box-wide
   budget and passes `--allow-parallel-runners` while it holds one, instead of
   serializing on golangci-lint's private lock. The private lock admits exactly

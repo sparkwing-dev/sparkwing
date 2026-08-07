@@ -101,6 +101,14 @@ var banned = []bannedPattern{
 		regexp.MustCompile(`sparkwing pipeline add\b`),
 		"there is no `sparkwing pipeline add` verb; register a repo with `sparkwing configure xrepo add <path>`",
 	},
+	{
+		regexp.MustCompile(`pipeline templates\b`),
+		"the registry is browsed with `sparkwing examples`; `pipeline templates` is not a verb",
+	},
+	{
+		regexp.MustCompile(`--param\b`),
+		"removed; `pipeline new --template` takes one of five shapes and renders no parameters -- registry entries are read with `sparkwing examples --name <name> --body`, not scaffolded",
+	},
 }
 
 // narrativeExempt names the one doc where change/deprecation vocabulary

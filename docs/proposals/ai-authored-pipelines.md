@@ -17,10 +17,12 @@ An agent authoring a pipeline has all of this without new work:
 - `sparkwing pipeline new` scaffolds `jobs/<name>.go` plus a `sparkwing.yaml`
   entry and auto-bootstraps `.sparkwing/`. Five built-in starters: `minimal`,
   `build-test-deploy`, `ci-pr-check`, `release`, `scheduled-report`.
-- `sparkwing pipeline templates` lists 14 task-shaped registry starters
+- `sparkwing examples` lists the task-shaped registry pipelines
   (static-site and container deploys for AWS and GCP, Go CI hygiene, DB
   migrate-and-deploy, approval-gated deploy, test sharding, scheduled
-  cleanup). Scaffold one with `new --template <name> --param k=v`.
+  cleanup). They are read, not scaffolded: `sparkwing examples --name
+  <name> --body` prints the source, and `sparkwing docs search` ranks
+  them alongside the docs.
 - `docs/authoring-pipelines.md` is the idiom guide, keyed one-to-one to the
   linter rules (`plan-io`, `plan-runtime-branch`, `runner-label`,
   `unused-ref`, `guard-misuse`), each with a do/don't pair.

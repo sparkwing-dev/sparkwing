@@ -170,12 +170,15 @@ func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []stri
 }
 
 // parseTemplateParams turns repeated --param k=v flags into a map.
+//
+// Only `examples scaffold` reaches this now -- `pipeline new` takes a
+// shape and renders no parameters -- so the error names that verb.
 func parseTemplateParams(params []string) (map[string]string, error) {
 	out := make(map[string]string, len(params))
 	for _, p := range params {
 		k, v, ok := strings.Cut(p, "=")
 		if !ok || k == "" {
-			return nil, fmt.Errorf("new: --param %q must be k=v", p)
+			return nil, fmt.Errorf("examples scaffold: --param %q must be k=v", p)
 		}
 		out[k] = v
 	}

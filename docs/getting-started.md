@@ -93,18 +93,22 @@ For a build/test/deploy DAG instead of a single node, pass
 sparkwing pipeline new --name release --template build-test-deploy
 ```
 
-Beyond the built-in stubs, `sparkwing examples` lists a
-registry of curated, real-world starters (static-site deploys,
-containerized deploys to Kubernetes, migrate+deploy, CI-hygiene gates,
-and more). Filter with `--category` / `--cloud`, inspect one with
-`--name <template>` (add `--body` to preview the rendered pipeline), then
-scaffold with `--template <name> --param k=v`. See the
-[template catalog](sparks.md#the-template-catalog) for the full workflow.
+The five shapes are structure only -- they run green in any repo, and
+you replace the echo bodies with real work. For how a real pipeline is
+written, read a finished one: `sparkwing examples` lists the registry
+(static-site deploys, containerized deploys to Kubernetes,
+migrate+deploy, CI-hygiene gates, and more), and `--name <example>
+--body` prints the source. Usually `sparkwing docs search -q "<task>"`
+gets you there in one step, since it ranks examples alongside the docs.
+
+Examples are for reading, not scaffolding: `--template` takes a shape,
+not an example name. See the
+[template catalog](sparks.md#the-template-catalog) for the full picture.
 
 If you want to own and edit a spark library's helper code directly rather
 than importing it, `sparkwing pipeline sparks inflate --module <name>`
 copies its source into your repo. See
-[vendoring](sparks.md#vendoring-a-spark-module).
+[inflating a spark library](sparks.md#inflating-a-spark-library).
 
 Each `sparkwing` invocation compiles `.sparkwing/` and runs the pipeline as a host
 subprocess. Run state lives under `~/.sparkwing/` (SQLite + log files).
