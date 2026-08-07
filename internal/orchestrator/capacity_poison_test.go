@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // contendedRun folds one contended run of pipeline "ci" (plan hash B) that
@@ -185,6 +186,8 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 	}
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
+	previousWorkDir := sparkwing.CurrentRuntime().WorkDir
+	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
 
 	const grantable = 7.5
 	// resolve prices "ci" exactly as admission does from the current
@@ -201,7 +204,9 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 		return res
 	}
 
-	t.Chdir(gitRepoDir(t, "alpha"))
+	alpha := gitRepoDir(t, "alpha")
+	sparkwing.SetWorkDir(alpha)
+	t.Chdir(alpha)
 	for i := range 4 {
 		c := resolve().Cores
 		contendedRun(t, st, ctx, currentProfileKey("ci"), fmt.Sprintf("alpha%d", i), c, runCharge{Cores: c})
@@ -211,7 +216,9 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 			res.Cores, res.Source, grantable)
 	}
 
-	t.Chdir(gitRepoDir(t, "beta"))
+	beta := gitRepoDir(t, "beta")
+	sparkwing.SetWorkDir(beta)
+	t.Chdir(beta)
 	res := resolve()
 	if res.Source != store.CostSourceDefault {
 		t.Errorf("beta priced %v cores from %q, want the cold-start default: alpha's contention poisoned an unmeasured pipeline in another repo",
