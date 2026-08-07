@@ -36,8 +36,15 @@
 #                       setup, which is a different job than authoring
 #                       from scratch. Do not compare the two numbers.
 #
+# --agent selects the harness under test (claude, codex) and --model the
+# model within it. Command counts come from a PATH shim that logs every
+# `sparkwing` invocation, not from any agent's transcript format, so the
+# numbers mean the same thing across agents. Design conclusions drawn
+# from one agent's habits are worth exactly one agent.
+#
 # Usage: agent-trial.sh --prompt-file <path> [--name <trial>]
 #                       [--fixture small|miniflux]
+#                       [--agent claude|codex] [--model <model>] [--effort low|medium|high]
 #        agent-trial.sh --prompt "build me a lint pipeline"
 #
 # Requires: claude + jq on PATH. Costs real model calls.
@@ -52,6 +59,9 @@ prompt_file=""
 prompt_text=""
 name="trial"
 fixture="small"
+agent="claude"
+model=""
+effort=""
 
 # A real upstream project, pinned. Cloned at trial time rather than
 # vendored: this repo does not need to redistribute someone else's
@@ -65,6 +75,9 @@ while [[ $# -gt 0 ]]; do
     --prompt)      prompt_text="${2:-}"; shift ;;
     --name)        name="${2:-}"; shift ;;
     --fixture)     fixture="${2:-}"; shift ;;
+    --agent)       agent="${2:-}"; shift ;;
+    --model)       model="${2:-}"; shift ;;
+    --effort)      effort="${2:-}"; shift ;;
     -h|--help)
       awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"
       exit 0
@@ -148,12 +161,51 @@ echo
 # the run measures that instead. Asking it not to via
 # --append-system-prompt does not hold, so the report detects the
 # escape below rather than pretending to prevent it.
+# Every sparkwing invocation is logged by a shim ahead of the real
+# binary on PATH. Transcript formats differ per agent and change under
+# us; argv does not, so the command trace is the one measurement that
+# means the same thing for all of them.
+SHIM="$WORK/$name.shim"
+CMDLOG="$WORK/$name.commands"
+rm -rf "$SHIM"; mkdir -p "$SHIM"
+: > "$CMDLOG"
+real_sparkwing="$(command -v sparkwing)"
+cat > "$SHIM/sparkwing" <<SHIMEOF
+#!/usr/bin/env bash
+printf '%s\t%s\n' "\$(date +%s)" "\$*" >> "$CMDLOG"
+exec "$real_sparkwing" "\$@"
+SHIMEOF
+chmod +x "$SHIM/sparkwing"
+export PATH="$SHIM:$PATH"
+
 START=$(date +%s)
-claude --print --output-format stream-json --verbose \
-  --permission-mode bypassPermissions \
-  < "$prompt_file" > "$TRACE" 2>"$WORK/$name.err"
-agent_exit=$?
+case "$agent" in
+  claude)
+    claude --print --output-format stream-json --verbose \
+      --permission-mode bypassPermissions \
+      ${model:+--model "$model"} \
+      < "$prompt_file" > "$TRACE" 2>"$WORK/$name.err"
+    agent_exit=$?
+    ;;
+  codex)
+    codex exec --json --dangerously-bypass-approvals-and-sandbox \
+      ${model:+--model "$model"} \
+      "$(cat "$prompt_file")" > "$TRACE" 2>"$WORK/$name.err"
+    agent_exit=$?
+    ;;
+  *)
+    echo "agent-trial: unknown agent $agent (want claude or codex)" >&2
+    exit 2
+    ;;
+esac
 ELAPSED=$(( $(date +%s) - START ))
+
+# Stop logging before this script starts running sparkwing itself. The
+# scoring below is not the agent's work, and counting it made every
+# agent look like it ran four commands it never ran -- including one
+# that ran none.
+PATH="${PATH#"$SHIM":}"
+AGENT_CALLS=$(wc -l < "$CMDLOG" | tr -d ' ')
 
 echo "agent finished in ${ELAPSED}s (exit $agent_exit)"
 echo
@@ -172,24 +224,47 @@ cmds() {
          | select(.type=="tool_use" and .name=="Bash") | .input.command' "$TRACE" 2>/dev/null
 }
 
+# An agent whose shell rebuilds PATH from a login profile never sees the
+# shim. Fall back to its transcript, which is per-agent but is the only
+# record left; say which source the numbers came from either way.
+if [[ "$AGENT_CALLS" -eq 0 ]] && [[ -s "$TRACE" ]]; then
+  # Codex runs each command through `zsh -lc`, and a login shell
+  # rebuilds PATH from the profile, so the shim never sees it. Its
+  # transcript records executions as typed events; read those rather
+  # than grepping prose, which counted every mention of a command in
+  # the agent's own reasoning as a call and turned eleven into 176.
+  jq -r 'select(.type=="item.completed") | select(.item.type=="command_execution")
+         | .item.command' "$TRACE" 2>/dev/null \
+    | grep -oE '\bsparkwing [a-z][a-z0-9 ._=<>/-]*' \
+    | sed 's/^sparkwing //' | awk 'NF' > "$CMDLOG"
+  AGENT_CALLS=$(wc -l < "$CMDLOG" | tr -d ' ')
+  CMD_SOURCE="transcript (shim bypassed by login shell)"
+else
+  CMD_SOURCE="PATH shim"
+fi
+
 echo "=== ORIENTATION PATH (sparkwing invocations, in order) ==="
-cmds | grep -oE '\bsparkwing [a-z][a-z0-9 _-]*' | sed 's/ *$//' | awk '!seen[$0]++ || $0 != prev {print "  " NR ". " $0} {prev=$0}' | head -30
+cut -f2- "$CMDLOG" | awk '{print "  " NR ". sparkwing " $0}' | cut -c1-100 | head -30
 echo
 
 echo "=== WASTE SIGNALS ==="
-# Count tool calls, not lines of command text: a single call that writes
-# a file with a heredoc is dozens of lines, and counting those made a
-# run look three times busier than one that wrote the same file with the
-# Write tool.
-total_bash=$(jq -r 'select(.type=="assistant") | .message.content[]?
-                    | select(.type=="tool_use" and .name=="Bash") | .name' "$TRACE" 2>/dev/null \
-  | wc -l | tr -d ' ')
-docs_reads=$(cmds | grep -cE 'sparkwing docs read')
-docs_uniq=$(cmds | grep -oE 'docs read --topic [a-z/-]+' | sort -u | wc -l | tr -d ' ')
-sdk_source=$(cmds | grep -cE 'pkg/mod.*sparkwing|go doc ')
-printf '  %-38s %s\n' "total shell commands:" "$total_bash"
+printf '  %-38s %s (%s)\n' "sparkwing invocations:" "$AGENT_CALLS" "$CMD_SOURCE"
+printf '  %-38s %s\n' "  distinct:" "$(cut -f2- "$CMDLOG" | sort -u | wc -l | tr -d ' ')"
+printf '  %-38s %s\n' "  repeated verbatim:" "$(cut -f2- "$CMDLOG" | sort | uniq -d | wc -l | tr -d ' ')"
+docs_reads=$(cut -f2- "$CMDLOG" | grep -cE '^docs read')
+docs_uniq=$(cut -f2- "$CMDLOG" | grep -oE 'docs read --topic [a-z/-]+' | sort -u | wc -l | tr -d ' ')
 printf '  %-38s %s (%s distinct topics)\n' "docs read calls:" "$docs_reads" "$docs_uniq"
-printf '  %-38s %s\n' "reads of SDK source / go doc:" "$sdk_source"
+
+# Everything below reads the agent's own transcript, whose shape is
+# per-agent. Absent one, the shim numbers above still stand.
+if [[ "$agent" == "claude" ]]; then
+  total_bash=$(jq -r 'select(.type=="assistant") | .message.content[]?
+                      | select(.type=="tool_use") | .name' "$TRACE" 2>/dev/null \
+    | wc -l | tr -d ' ')
+  sdk_source=$(cmds | grep -cE 'pkg/mod.*sparkwing|go doc ')
+  printf '  %-38s %s\n' "total tool calls:" "$total_bash"
+  printf '  %-38s %s\n' "reads of SDK source / go doc:" "$sdk_source"
+fi
 
 # An agent that cd's somewhere else is no longer being measured. Report
 # it as a failed trial, not as a slow one.
@@ -210,16 +285,21 @@ fi
 if [[ "$docs_reads" -gt "$docs_uniq" ]]; then
   echo "  -> re-read $(( docs_reads - docs_uniq )) doc topic(s): one pass did not answer the question"
 fi
-if [[ "$sdk_source" -gt 0 ]]; then
+if [[ "${sdk_source:-0}" -gt 0 ]]; then
   echo "  -> fell back to reading source: an API it needed is not in the docs"
 fi
 echo
 
 # The agent is the only witness to what it had to guess at. A prompt
 # that asks for a FRICTION section turns that into a report line rather
-# than something to reconstruct from the trace afterwards.
+# than something to reconstruct from the trace afterwards. Claude's
+# transcript carries a final result field; other agents print the
+# closing message to stdout, so fall back to scanning the raw trace.
 friction=$(jq -r 'select(.type=="result") | .result' "$TRACE" 2>/dev/null \
   | awk '/^[^a-z]*FRICTION:/{found=1} found{print}')
+if [[ -z "$friction" ]]; then
+  friction=$(awk '/^[^a-z]*FRICTION:/{found=1} found{print}' "$TRACE" 2>/dev/null)
+fi
 if [[ -n "$friction" ]]; then
   echo "=== FRICTION (agent-reported) ==="
   printf '%s\n' "$friction" | head -40
