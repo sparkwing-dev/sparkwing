@@ -119,7 +119,7 @@ func dispatchRun(args []string) error {
 	wf, passthrough := parseRunFlags(args[1:])
 	var err error
 
-	if err := checkRetiredWhereFlags(passthrough); err != nil {
+	if err := checkRetiredWhereFlags(passthrough, nil); err != nil {
 		return err
 	}
 	if wf.profile != "" {
@@ -445,7 +445,7 @@ func runJobs(args []string) error {
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
 		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
-		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}
 		if err := parseAndCheck(cmdJobsList, fs, args[1:]); err != nil {
@@ -540,7 +540,7 @@ func runJobs(args []string) error {
 		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
-		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}
 		if err := parseAndCheck(cmdJobsStatus, fs, args[1:]); err != nil {
@@ -586,7 +586,7 @@ func runJobs(args []string) error {
 		tree := fs.Bool("tree", false, "merge parent run + descendants into one chronological stream (local only)")
 		eventsOnly := fs.Bool("events-only", false, "filter to run-level envelope events (run_start, node_start, node_end, step_start, step_end, run_finish, plan_warn, ...) -- the bracketing NDJSON the dispatcher streams to stdout")
 		noEvents := fs.Bool("no-events", false, "filter to per-node body output only -- useful when scripts depend on the legacy shape")
-		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}
 		if err := parseAndCheck(cmdJobsLogs, fs, args[1:]); err != nil {
@@ -630,7 +630,7 @@ func runJobs(args []string) error {
 		fs := flag.NewFlagSet(cmdJobsErrors.Path, flag.ContinueOnError)
 		runID := fs.String("run", "", "run identifier")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
-		if err := checkRetiredWhereFlags(args[1:]); err != nil {
+		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}
 		if err := parseAndCheck(cmdJobsErrors, fs, args[1:]); err != nil {

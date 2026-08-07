@@ -257,13 +257,16 @@ const agentBlockDurable = "This repo uses **sparkwing** for CI/CD (https://spark
 // in it is a command, and commands move.
 const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"\n" +
-	"- `sparkwing pipeline new --name <n> --template <shape>` -- scaffold a shape. It\n" +
-	"  compiles, lints, and runs as generated, so you edit from something green:\n" +
-	"    minimal           1 node\n" +
-	"    build-test-deploy 3 nodes, linear\n" +
-	"    ci-pr-check       3 nodes (lint+test -> gate); declares `on: pull_request`\n" +
-	"    release           3 nodes, linear\n" +
-	"    scheduled-report  5 nodes (fan-out); declares `on: schedule`\n" +
+	"- `sparkwing pipeline new --name <n> --template <shape> [--on <event>]` --\n" +
+	"  scaffold. It compiles, lints, and runs as generated, so you edit from\n" +
+	"  something green. --template picks the DAG, --on picks what fires it:\n" +
+	"    shapes: minimal (1 node) | build-test-deploy (3, linear) |\n" +
+	"            ci-pr-check (3, lint+test -> gate) | release (3, linear) |\n" +
+	"            scheduled-report (5, fan-out)\n" +
+	"    --on:   pull_request | push | schedule | manual\n" +
+	"    ci-pr-check defaults to pull_request and scheduled-report to schedule;\n" +
+	"    the rest to manual. Any shape takes any --on, so a PR-triggered single\n" +
+	"    check is `--template minimal --on pull_request`\n" +
 	"- `sparkwing docs search -q <what you are doing>` -- the doc section that\n" +
 	"  answers it, plus any worked pipeline that already does it\n" +
 	"- `sparkwing docs read --guide authoring` -- the DAG model, the idioms the linter\n" +
@@ -280,7 +283,8 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 // pipeline, never learning the template catalog existed -- but
 // `pipeline new --help` already opens with the catalog, so repeating
 // it here would charge every agent for something one in ten needs.
-const agentBlockBody = "- `sparkwing commands` -- full CLI surface as JSON (every verb + every flag)\n" +
+const agentBlockBody = "- `sparkwing commands` -- one-line index of every verb; `--path <prefix>` to\n" +
+	"  narrow, `<path> --help` for one verb, `-o json` for the full records\n" +
 	"- `sparkwing pipeline list -o json` -- this repo's pipelines\n" +
 	"- `sparkwing run <name>` -- run a pipeline\n" +
 	"- `sparkwing docs search -q <symbol-or-key>` -- the section that answers it, not the whole page\n" +
@@ -693,7 +697,7 @@ func missingHooksStep(info Info) (InfoNextStep, bool) {
 }
 
 var infoForAgents = []InfoNextStep{
-	{Command: "sparkwing commands", Purpose: "full CLI surface as JSON (every verb + every flag)"},
+	{Command: "sparkwing commands", Purpose: "one-line index of every verb (-o json for full records)"},
 	{Command: "sparkwing info --json", Purpose: "machine-readable copy of this card (alias: -o json)"},
 	{Command: "sparkwing info --for-agent", Purpose: "current discovery context for one agent wake"},
 	{Command: "sparkwing pipeline list --json", Purpose: "this repo's pipelines as JSON"},

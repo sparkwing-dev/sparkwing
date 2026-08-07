@@ -68,11 +68,18 @@ var retiredWhereFlags = map[string]string{
 // checkRetiredWhereFlags scans args for a flag the v0.5.0 cut removed or
 // renamed and, when found, returns a migration-pointer error instead of
 // letting the standard "unknown flag" handler fire with no guidance.
-func checkRetiredWhereFlags(args []string) error {
+//
+// owned names flags the current command declares itself; those are
+// skipped, because a retired global spelling is only wrong where
+// nothing else claims it.
+func checkRetiredWhereFlags(args []string, owned map[string]bool) error {
 	for _, a := range args {
 		name := a
 		if eq := strings.IndexByte(a, '='); eq >= 0 {
 			name = a[:eq]
+		}
+		if owned[strings.TrimPrefix(name, "--")] {
+			continue
 		}
 		if msg, ok := retiredWhereFlags[name]; ok {
 			return fmt.Errorf("unknown flag %s. %s\nSee %s", name, msg, migrationLinkWhereFlag)

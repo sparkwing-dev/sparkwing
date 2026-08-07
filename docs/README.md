@@ -57,8 +57,8 @@ The top-level commands: `info`, `pipeline`, `run`, `runs`, `queue`,
 `configure`, `profile`, `debug`, `doctor`, `docs`, `commands`,
 `completion`. Cross-repo registry under `configure
 xrepo`; sparks library mgmt under `pipeline sparks`. Run any verb
-with `--help` for its full spec, or `sparkwing commands -o json` for
-the agent-readable surface dump.
+with `--help` for its full spec, or `sparkwing commands` for a
+one-line index of every verb (`-o json` for the full records).
 
 ## Repo-local helpers vs sparkwing
 

@@ -27,6 +27,7 @@ func runPipelineNew(args []string) error {
 	template := fs.String("template", "minimal", "shape to scaffold: minimal | build-test-deploy | ci-pr-check | release | scheduled-report")
 	hidden := fs.Bool("hidden", false, "mark the entry hidden in tab-complete menus")
 	short := fs.String("short", "", "short one-line description (ShortHelp / frontmatter desc)")
+	on := fs.String("on", "", "trigger to declare: "+strings.Join(triggerEventNames, " | ")+" (default: the shape's own)")
 	changeDir := fs.StringP("sw-cd", "C", "", "scaffold as if started in this directory (re-anchors the .sparkwing search)")
 	if err := parseAndCheck(cmdPipelineNew, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -80,25 +81,18 @@ func runPipelineNew(args []string) error {
 		fmt.Fprintln(os.Stderr)
 	}
 
-	var scaffoldErr error
-	switch *template {
-	case "minimal":
-		scaffoldErr = scaffoldGoMinimal(sparkwingDir, name, *hidden, *short, bootstrapped)
-	case "build-test-deploy":
-		scaffoldErr = scaffoldGoBuildTestDeploy(sparkwingDir, name, *hidden, *short, bootstrapped)
-	case "ci-pr-check":
-		scaffoldErr = scaffoldGoCIPRCheck(sparkwingDir, name, *hidden, *short, bootstrapped)
-	case "release":
-		scaffoldErr = scaffoldGoRelease(sparkwingDir, name, *hidden, *short, bootstrapped)
-	case "scheduled-report":
-		scaffoldErr = scaffoldGoScheduledReport(sparkwingDir, name, *hidden, *short, bootstrapped)
-	default:
+	shape, ok := builtinShapeByName(*template)
+	if !ok {
 		return fmt.Errorf("new: unknown shape %q -- pipeline new takes a shape, one of: %s\n"+
 			"  a worked pipeline to read instead: sparkwing examples --name %s --body",
 			*template, strings.Join(builtinShapeNames(), ", "), *template)
 	}
-	if scaffoldErr != nil {
-		return scaffoldErr
+	trigger, err := resolveTrigger(shape, *on, fs.Changed("on"))
+	if err != nil {
+		return err
+	}
+	if err := scaffoldGoFromTemplate(sparkwingDir, name, *hidden, *short, shape.src, bootstrapped, trigger); err != nil {
+		return err
 	}
 	if !fs.Changed("template") {
 		printExamplesHint()
@@ -280,32 +274,113 @@ func goJobFilename(name string) string {
 	return snake + ".go"
 }
 
-// scaffoldGoMinimal emits a Plan-returning pipeline with one stubbed
-// node. Default template: smallest viable shape that still teaches
-// the canonical Plan() entry-point so editing means "add another
-// sparkwing.Job(plan, ...) line", not "refactor a one-step pipeline into Plan()".
-func scaffoldGoMinimal(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, minimalTemplate, bootstrapped, "")
+// builtinShape is one structural starting point: a DAG and the trigger
+// it declares when the author does not say otherwise.
+//
+// Shape and trigger are separate fields because they are separate
+// decisions. Welding them together is what three agent trials in a row
+// complained about: `ci-pr-check` was the only shape declaring
+// `on: pull_request`, so wanting a PR-triggered single check meant
+// scaffolding three nodes and deleting two. `--on` unwelds them.
+type builtinShape struct {
+	Name string
+	// Nodes is how many jobs the shape's Plan builds, surfaced
+	// wherever the shape is offered. Trials picked `ci-pr-check` on
+	// its name and discovered its three nodes after scaffolding.
+	Nodes int
+	// Structure is the one-phrase DAG summary shown beside Nodes.
+	Structure string
+	// DefaultOn is the trigger event the shape declares when --on is
+	// absent. Empty means the pipeline runs only when invoked.
+	DefaultOn string
+	src       string
 }
 
-// scaffoldGoBuildTestDeploy: build -> test -> deploy 3-node Plan.
-func scaffoldGoBuildTestDeploy(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, buildTestDeployTemplate, bootstrapped, "")
+func builtinShapeByName(name string) (builtinShape, bool) {
+	for _, s := range builtinShapes {
+		if s.Name == name {
+			return s, true
+		}
+	}
+	return builtinShape{}, false
 }
 
-// scaffoldGoCIPRCheck: lint + test in parallel converging on a gate.
-func scaffoldGoCIPRCheck(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, ciPRCheckTemplate, bootstrapped, prCheckTrigger)
+// Summary is the one-line form used everywhere a shape is offered:
+// what it builds, and what fires it.
+func (s builtinShape) Summary() string {
+	unit := "nodes"
+	if s.Nodes == 1 {
+		unit = "node"
+	}
+	out := fmt.Sprintf("%d %s, %s", s.Nodes, unit, s.Structure)
+	if s.DefaultOn != "" {
+		out += "; on: " + s.DefaultOn
+	}
+	return out
 }
 
-// scaffoldGoRelease: version-bump -> changelog -> publish linear Plan.
-func scaffoldGoRelease(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, releaseTemplate, bootstrapped, "")
+var builtinShapes = []builtinShape{
+	{"minimal", 1, "stubbed Run -- the smallest thing that runs", "", minimalTemplate},
+	{"build-test-deploy", 3, "in a line", "", buildTestDeployTemplate},
+	{"ci-pr-check", 3, "lint and test in parallel, converging on a gate", "pull_request", ciPRCheckTemplate},
+	{"release", 3, "version bump, changelog, publish", "", releaseTemplate},
+	{"scheduled-report", 5, "one collector fanning out to gatherers", "schedule", scheduledReportTemplate},
 }
 
-// scaffoldGoScheduledReport: collect -> fan-out gatherers -> publish-report.
-func scaffoldGoScheduledReport(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, scheduledReportTemplate, bootstrapped, scheduledReportTrigger)
+// triggerBlocks are the `on:` blocks --on can write, already indented
+// for appending under a sparkwing.yaml entry.
+//
+// Every value carries a comment naming the one thing its reader most
+// likely wants next: the filter it does not have, or the fact that a
+// webhook still has to point here. A scaffolded trigger that silently
+// matches everything is the same trap as no trigger at all.
+//
+// Filters stay empty. `branches: [main]` would bake in a branch name
+// the repo may not use, and shapes have to be correct anywhere.
+var triggerBlocks = map[string]string{
+	"pull_request": `    on:
+      # Fires on opened / synchronize / reopened. Add
+      # ` + "`branches: [main]`" + ` to record which base branches this is meant
+      # for, and point the repo's GitHub webhook at this pipeline.
+      pull_request: {}
+`,
+	"push": `    on:
+      # Fires on any branch. Add ` + "`branches: [main]`" + ` or
+      # ` + "`paths: [\"**/*.go\"]`" + ` to narrow it, and point the repo's
+      # GitHub webhook at this pipeline.
+      push: {}
+`,
+	"schedule": `    on:
+      # Cron, evaluated by the controller in UTC. 09:00 daily.
+      schedule: "0 9 * * *"
+`,
+	"manual": "",
+}
+
+// triggerEventNames is the --on vocabulary, in the order it is offered.
+// "manual" is last because it is the opt-out, and it is spelled rather
+// than left as an empty string so declining a trigger is something an
+// author can say out loud.
+var triggerEventNames = []string{"pull_request", "push", "schedule", "manual"}
+
+// resolveTrigger picks the `on:` block to write. An explicit --on wins;
+// otherwise the shape's own default applies, so `--template ci-pr-check`
+// keeps declaring pull_request without anyone repeating themselves.
+func resolveTrigger(shape builtinShape, on string, explicit bool) (string, error) {
+	event := shape.DefaultOn
+	if explicit {
+		event = on
+	}
+	if event == "" {
+		return "", nil
+	}
+	block, ok := triggerBlocks[event]
+	if !ok {
+		return "", fmt.Errorf("new: unknown trigger %q -- --on takes one of: %s\n"+
+			"  every trigger type and its fields: sparkwing docs search -q \"on: trigger\"",
+			event, strings.Join(triggerEventNames, ", "))
+	}
+	return block, nil
 }
 
 // renderBuiltinTemplate expands the {{STRUCT}} / {{NAME}} / {{SHORTLIT}}

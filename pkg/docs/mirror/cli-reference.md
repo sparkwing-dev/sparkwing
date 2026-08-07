@@ -721,24 +721,28 @@ sparkwing cluster worker --profile local --poll 250ms
 
 ## `sparkwing commands`
 
-Emit the full CLI surface as structured data (agent self-discovery)
+Index of every command: one path and synopsis per line
 
-Returns every registered verb -- path, synopsis, description,
-positional args, flags, examples, subcommand list -- as one
-JSON document. Designed as the agent's "what is this CLI"
-probe: one tool call replaces walking every -h page.
+The whole CLI as one index -- 139 verbs, one line each, so
+"what is this CLI" is answered by reading rather than by
+walking every -h page.
 
-The same Command record powers --help on every verb; this just
-emits all of them in one shot. Filter with --path PREFIX to
-narrow to a subtree (e.g. --path "sparkwing pipeline"). Default
-output is JSON because agents are the primary audience; -o
-plain emits one path per line for shell consumption.
+Drill down two ways: '<any path> --help' for one verb's flags,
+arguments, and examples, or --path PREFIX to narrow this list
+to a subtree (e.g. --path "sparkwing pipeline").
+
+-o json emits the full record for every verb -- path, synopsis,
+description, positional args, flags, examples, subcommands --
+from the same Command values that power --help. That is 235KB
+for the unfiltered surface, so pair it with --path unless you
+genuinely want all of it. -o plain is one path per line for
+shell consumption; -o markdown generates docs/cli-reference.md.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `-o, --output FORMAT` | Output format: json \| plain \| pretty (default: json) |
+| `-o, --output FORMAT` | Output format: pretty \| json \| markdown \| plain (default: pretty) |
 | `--path PREFIX` | Only emit commands whose Path starts with PREFIX |
 | `--include-hidden` | Also emit Hidden:true commands (default: skip) |
 
@@ -2596,13 +2600,21 @@ jobs/<snake>.go plus a sparkwing.yaml entry. Auto-bootstraps
 up the package skeleton too -- no separate init step, no
 sample pipeline you didn't ask for.
 
---template takes a shape, not a task. Every shape runs green in any
-repo before you edit it, because the Run bodies are echoes. Pick the
-structure you need and replace the bodies.
+--template takes a shape, not a task: it picks the DAG. --on picks
+what fires the pipeline, independently. Every combination runs green
+in any repo before you edit it, because the Run bodies are echoes.
 
-Shapes differ in the DAG they build, and the two named for an event
-also declare that event's trigger -- each entry below says what it
-writes. Nothing else varies.
+  --on pull_request   opened / synchronize / reopened
+  --on push           any branch
+  --on schedule       cron, 09:00 UTC daily
+  --on manual         no trigger; runs only when invoked
+
+Omit --on and the shape's own default applies (below). A trigger is
+declarative -- the controller dispatches whichever pipeline its webhook
+names -- so it changes nothing about 'sparkwing run <name>' locally,
+and the scaffolded block carries a comment naming the filter it does
+not have. Edit the 'on:' block in .sparkwing/sparkwing.yaml to change
+any of it.
 
 New to authoring? 'sparkwing docs read --guide authoring' returns the
 DAG model, the idioms the linter enforces, how a pipeline fires, and
@@ -2621,22 +2633,20 @@ Shapes:
     The canonical CI shape; first 'sparkwing run <name>' surfaces three
     exec banners + three echoed lines so the structure is
     visible end-to-end.
-  - ci-pr-check: pull-request gate. lint and test run in parallel and
-    a final gate job depends on both, so the pipeline is green only
-    when every check passes. test Prefers a CI runner label. Writes
-    an 'on: pull_request' trigger with no filters.
+  - ci-pr-check: 3 nodes. lint and test run in parallel and a final
+    gate job depends on both, so the pipeline is green only when every
+    check passes. test Prefers a CI runner label. Defaults to
+    '--on pull_request'.
   - release: linear version-bump -> changelog -> publish flow. The
     canonical release shape; publish Prefers a release runner label.
-  - scheduled-report: fan-out report. One collect job seeds three
-    parallel gatherers (metrics, errors, usage) and publish-report
-    converges them. Writes an 'on: schedule' trigger at 09:00 UTC
-    daily.
+  - scheduled-report: 5 nodes. One collect job seeds three parallel
+    gatherers (metrics, errors, usage) and publish-report converges
+    them. Defaults to '--on schedule'.
 
-The two shapes named for an event declare it; the other three run only
-when invoked. A trigger is declarative -- the controller dispatches
-whichever pipeline its webhook names -- so it changes nothing about
-'sparkwing run <name>' locally. Edit or delete the 'on:' block in
-.sparkwing/sparkwing.yaml to change it.
+The other three shapes default to no trigger. Any shape takes any
+--on, so "PR-triggered single check" is
+'--template minimal --on pull_request' rather than a three-node gate
+with two nodes deleted.
 
 Every shape scaffolds a pipeline that compiles, renders clean under
 'pipeline explain', and passes 'pipeline lint': pure Plan(), runner-label
@@ -2666,7 +2676,8 @@ See also:
 |---|---|
 | `--name NAME` | New pipeline's kebab-case name (a-z, 0-9, -) (required) |
 | `-C, --sw-cd DIR` | Scaffold as if started in this directory (re-anchors the .sparkwing search) |
-| `--template SHAPE` | minimal \| build-test-deploy \| ci-pr-check \| release \| scheduled-report (default: minimal) |
+| `--template SHAPE` | DAG to scaffold: minimal (1 node) \| build-test-deploy (3) \| ci-pr-check (3) \| release (3) \| scheduled-report (5) (default: minimal) |
+| `--on EVENT` | Trigger to declare: pull_request \| push \| schedule \| manual (default: the shape's own) |
 | `--hidden` | Mark the entry hidden in default tab-complete menus |
 | `--short TEXT` | Pre-fill the ShortHelp / desc line |
 
@@ -2684,6 +2695,12 @@ sparkwing pipeline new --name pr-check --template ci-pr-check
 
 # Scheduled fan-out report
 sparkwing pipeline new --name daily-report --template scheduled-report
+
+# One job, fired by pull requests
+sparkwing pipeline new --name pr-test --template minimal --on pull_request
+
+# A gate you invoke by hand, not on every PR
+sparkwing pipeline new --name gate --template ci-pr-check --on manual
 ```
 
 ## `sparkwing pipeline plan`

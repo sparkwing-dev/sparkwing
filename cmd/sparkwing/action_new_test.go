@@ -5,6 +5,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/pipelinelint"
@@ -65,7 +66,7 @@ func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 		trigger string
 		check   func(*testing.T, pipelines.Triggers)
 	}{
-		{"ci-pr-check", prCheckTrigger, func(t *testing.T, tr pipelines.Triggers) {
+		{"ci-pr-check", triggerBlocks["pull_request"], func(t *testing.T, tr pipelines.Triggers) {
 			if tr.PullRequest == nil {
 				t.Error("ci-pr-check declares no pull_request trigger; the shape is named for the event it does not fire on")
 			}
@@ -73,7 +74,7 @@ func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 				t.Errorf("pull_request pins branches %v; shapes must be correct in a repo that uses any branch name", tr.PullRequest.Branches)
 			}
 		}},
-		{"scheduled-report", scheduledReportTrigger, func(t *testing.T, tr pipelines.Triggers) {
+		{"scheduled-report", triggerBlocks["schedule"], func(t *testing.T, tr pipelines.Triggers) {
 			if tr.Schedule == "" {
 				t.Error("scheduled-report declares no schedule; its help says it prints one")
 			}
@@ -156,5 +157,90 @@ func TestGoJobFilename(t *testing.T) {
 				t.Fatalf("goJobFilename(%q) = %q; want %q", tc.in, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestEveryTriggerBlockParses holds the --on vocabulary to what the
+// strict config parser accepts. Hand-written yaml fails silently here:
+// `push:` with no value is legal and decodes to nothing, so a typo
+// produces a pipeline that lints, explains, and never fires.
+func TestEveryTriggerBlockParses(t *testing.T) {
+	for _, event := range triggerEventNames {
+		t.Run(event, func(t *testing.T) {
+			block, ok := triggerBlocks[event]
+			if !ok {
+				t.Fatalf("--on offers %q with no block to write", event)
+			}
+			dir := t.TempDir()
+			path := filepath.Join(dir, projectconfig.Filename)
+			if err := os.WriteFile(path, []byte("pipelines:\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := appendPipelinesYAML(dir, "sample", "Sample", false, block); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := projectconfig.Load(path)
+			if err != nil {
+				t.Fatalf("--on %s emits yaml the parser rejects: %v", event, err)
+			}
+			on := cfg.Pipelines[0].On
+			if event == "manual" {
+				if (on != pipelines.Triggers{}) {
+					t.Errorf("--on manual declared %+v; it is the opt-out", on)
+				}
+				return
+			}
+			if (on == pipelines.Triggers{}) {
+				t.Errorf("--on %s decoded to no trigger at all", event)
+			}
+		})
+	}
+}
+
+// Shape and trigger are independent choices. The combination three
+// agent trials asked for -- one node, fired by pull requests -- has to
+// be one command, not a three-node gate with two nodes deleted.
+func TestOnOverridesTheShapeDefault(t *testing.T) {
+	cases := []struct {
+		shape    string
+		on       string
+		explicit bool
+		want     string
+	}{
+		{"minimal", "pull_request", true, "pull_request"},
+		{"ci-pr-check", "manual", true, ""},
+		{"ci-pr-check", "", false, "pull_request"},
+		{"scheduled-report", "", false, "schedule"},
+		{"release", "", false, ""},
+		{"release", "push", true, "push"},
+	}
+	for _, tc := range cases {
+		shape, ok := builtinShapeByName(tc.shape)
+		if !ok {
+			t.Fatalf("no shape %q", tc.shape)
+		}
+		got, err := resolveTrigger(shape, tc.on, tc.explicit)
+		if err != nil {
+			t.Fatalf("%s --on %q: %v", tc.shape, tc.on, err)
+		}
+		if got != triggerBlocks[tc.want] && !(tc.want == "" && got == "") {
+			t.Errorf("%s --on %q (explicit=%v) wrote %q; want the %q block",
+				tc.shape, tc.on, tc.explicit, got, tc.want)
+		}
+	}
+}
+
+// An unknown --on must name the whole vocabulary. A rejection that does
+// not is a round-trip: the author still has to go find the list.
+func TestUnknownTriggerNamesEveryChoice(t *testing.T) {
+	shape, _ := builtinShapeByName("minimal")
+	_, err := resolveTrigger(shape, "on_merge", true)
+	if err == nil {
+		t.Fatal("accepted an unknown trigger")
+	}
+	for _, event := range triggerEventNames {
+		if !strings.Contains(err.Error(), event) {
+			t.Errorf("rejection does not offer %q: %v", event, err)
+		}
 	}
 }

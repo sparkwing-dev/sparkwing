@@ -306,6 +306,29 @@ code change to unlock.
 
 ### Changed
 
+- **cli:** `pipeline new` gains `--on pull_request|push|schedule|manual`, so the
+  DAG and the trigger are separate choices. They were welded together --
+  `ci-pr-check` was the only shape declaring `on: pull_request` -- which three
+  agent trials in a row complained about: wanting a PR-triggered single check
+  meant scaffolding three nodes and deleting two, and editing *down* from a
+  template means reasoning about which parts are load-bearing before cutting.
+  A PR-triggered single check is now `--template minimal --on pull_request`.
+  Omitting `--on` keeps each shape's own default, so nothing changes for
+  anyone not passing it, and an unknown value names the whole vocabulary
+  rather than sending the author off to find it. `--on` was a global flag
+  retired in v0.5.0; a command that declares a flag in its own registry entry
+  now owns that spelling, and the retired-flag pointer still fires everywhere
+  else.
+
+- **cli:** `sparkwing commands` defaults to a one-line index instead of a
+  235KB JSON dump. It emitted the full record for all 139 verbs on the theory
+  that agents are the primary audience -- which is true, and is why JSON was
+  the wrong default: agents do not size output before reading it. A trial fed
+  the bare command into a narrow lookup, spent roughly 58,000 tokens, and got
+  truncated anyway. The index is the same 139 verbs in 140 lines, and it now
+  ends by naming both ways down: `<path> --help` for one verb, `--path PREFIX`
+  to narrow. `-o json` is unchanged and one flag away.
+
 - **docs:** `docs search` stopped shredding sections on code-block comments. A
   `#` opening a line inside a fenced block is a comment, not a heading, and
   naming the file an example belongs in (`# .sparkwing/sparkwing.yaml`) is how

@@ -90,7 +90,7 @@ sparkwing pipeline list -o json                 # every invocable with metadata
 sparkwing pipeline describe --name X -o json    # one pipeline's full metadata
 sparkwing pipeline discover --query TEXT -o json # ranked fuzzy search
 sparkwing pipeline explain --name X -o json     # Plan DAG before running
-sparkwing commands                              # the entire CLI surface as JSON
+sparkwing commands                              # one-line index of every verb
 ```
 
 The describe schema matches `sparkwing.DescribePipeline` plus

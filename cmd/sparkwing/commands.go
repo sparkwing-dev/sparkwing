@@ -141,12 +141,22 @@ func toCommandJSON(c *Command) CommandJSON {
 }
 
 // runCommands handles `sparkwing commands [--include-hidden]
-// [--path PREFIX] [-o json|plain]`. Default --output json because
-// agents are the primary audience; -o plain emits one path per line.
+// [--path PREFIX] [-o pretty|json|markdown|plain]`.
+//
+// Default --output pretty, because the bare command has to be an index.
+// It defaulted to json on the theory that agents are the primary
+// audience -- which is true, and is exactly why json was the wrong
+// default: the full surface is 139 verbs and 235KB of JSON, and agents
+// do not size output before reading it. An agent trial piped this into
+// a narrow lookup, spent ~58,000 tokens, and got truncated anyway.
+// pretty is the same 139 verbs in 140 lines, one path and synopsis
+// each, which is what "what is this CLI" actually wants; --path narrows
+// to a subtree and -o json is one flag away for anything that needs the
+// full records.
 func runCommands(args []string) error {
 	fs := flag.NewFlagSet(cmdCommands.Path, flag.ContinueOnError)
 	var output string
-	fs.StringVarP(&output, "output", "o", "json", "json | markdown | plain")
+	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | markdown | plain")
 	includeHidden := fs.Bool("include-hidden", false, "also emit Hidden:true commands (default: skip)")
 	pathPrefix := fs.String("path", "", "only emit commands whose Path starts with this prefix")
 	if err := parseAndCheck(cmdCommands, fs, args); err != nil {
@@ -175,7 +185,7 @@ func runCommands(args []string) error {
 	}
 
 	switch strings.ToLower(output) {
-	case "json", "":
+	case "json":
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		return enc.Encode(picked)
@@ -187,7 +197,7 @@ func runCommands(args []string) error {
 			fmt.Println(c.Path)
 		}
 		return nil
-	case "pretty", "table":
+	case "pretty", "table", "":
 		w := 0
 		for _, c := range picked {
 			if n := len(c.Path); n > w {
@@ -200,9 +210,16 @@ func runCommands(args []string) error {
 		for _, c := range picked {
 			fmt.Printf("%-*s  %s\n", w, c.Path, color.Dim(c.Synopsis))
 		}
+		// An index that does not say how to drill is a dead end, and
+		// the two ways down are not guessable from a table of paths.
+		fmt.Println()
+		printAlignedSteps([]InfoNextStep{
+			{Command: "<any path above> --help", Purpose: "flags, arguments, examples for one verb"},
+			{Command: `sparkwing commands --path "sparkwing pipeline" -o json`, Purpose: "full records for a subtree"},
+		})
 		return nil
 	default:
-		return fmt.Errorf("unknown output format %q (valid: json, markdown, plain, table)", output)
+		return fmt.Errorf("unknown output format %q (valid: pretty, json, markdown, plain)", output)
 	}
 }
 

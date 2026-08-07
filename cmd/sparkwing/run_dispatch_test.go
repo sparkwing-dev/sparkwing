@@ -110,7 +110,24 @@ func TestParseRunFlags_RetiredSwProfileFallsThrough(t *testing.T) {
 	if wf.profile != "" {
 		t.Errorf("--sw-profile should not set profile; got %q", wf.profile)
 	}
-	if err := checkRetiredWhereFlags(pass); err == nil || !strings.Contains(err.Error(), "--sw-profile") {
+	if err := checkRetiredWhereFlags(pass, nil); err == nil || !strings.Contains(err.Error(), "--sw-profile") {
 		t.Errorf("checkRetiredWhereFlags: want --sw-profile pointer, got %v", err)
+	}
+}
+
+// A command that declares a flag owns that spelling, even one a past
+// release retired globally. `pipeline new --on` names the sparkwing.yaml
+// `on:` key it writes; the retired --on addressed a profile, so nothing
+// about the two overlaps except four characters.
+func TestRetiredFlagYieldsToTheCommandThatDeclaresIt(t *testing.T) {
+	args := []string{"--name", "x", "--on", "pull_request"}
+	if err := checkRetiredWhereFlags(args, map[string]bool{"on": true}); err != nil {
+		t.Errorf("a command declaring --on still hit the retired-flag guard: %v", err)
+	}
+	if err := checkRetiredWhereFlags(args, map[string]bool{"name": true}); err == nil {
+		t.Error("--on passed the guard on a command that does not declare it")
+	}
+	if err := checkRetiredWhereFlags([]string{"--on=prod"}, nil); err == nil {
+		t.Error("--on=value form escaped the guard")
 	}
 }

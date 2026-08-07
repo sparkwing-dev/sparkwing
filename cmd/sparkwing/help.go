@@ -129,10 +129,30 @@ func wantsHelp(args []string) bool {
 	return false
 }
 
+// declaredFlags is the set of long flag names this command documents,
+// used to let a command reclaim a retired global spelling.
+func (c Command) declaredFlags() map[string]bool {
+	if len(c.Flags) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(c.Flags))
+	for _, f := range c.Flags {
+		out[f.Name] = true
+	}
+	return out
+}
+
 func parseAndCheck(cmd Command, fs *flag.FlagSet, args []string) error {
 	fs.SetOutput(io.Discard)
 
-	if err := checkRetiredWhereFlags(args); err != nil {
+	// A command that declares a flag in its own registry entry owns
+	// that spelling, retired global or not. `pipeline new --on` names
+	// the sparkwing.yaml `on:` key it writes, which is the whole reason
+	// to spell it that way; the retired `--on` addressed a profile, so
+	// the two never take the same values and a stale invocation lands on
+	// this command's own "unknown trigger" error rather than a wrong
+	// scaffold.
+	if err := checkRetiredWhereFlags(args, cmd.declaredFlags()); err != nil {
 		return err
 	}
 

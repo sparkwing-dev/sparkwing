@@ -170,30 +170,19 @@ func printTemplateLine(m templates.Manifest) {
 	fmt.Printf("  %s%s %s\n", color.Bold(name), pad, color.Dim(truncateLine(signal)))
 }
 
-// builtinShapes are the templates `pipeline new` renders itself. They
-// are DAG skeletons with echo bodies, useful when no task template
-// fits; naming that here is what keeps one from being mistaken for a
-// working pipeline.
-var builtinShapes = []struct{ name, when string }{
-	{"minimal", "single node, stubbed Run -- the smallest thing that runs"},
-	{"build-test-deploy", "three nodes in a line"},
-	{"ci-pr-check", "lint and test in parallel, converging on a gate"},
-	{"release", "version bump, changelog, publish"},
-	{"scheduled-report", "one collector fanning out to gatherers"},
-}
-
 func printBuiltinShapes() {
 	fmt.Println()
 	fmt.Println(color.Bold("SHAPES") + color.Dim("  (built into `pipeline new`; DAG skeletons with echo bodies --"))
-	fmt.Println(color.Dim("         start here only when no template above fits your task)"))
+	fmt.Println(color.Dim("         start here only when no example above fits your task)"))
 	for _, s := range builtinShapes {
-		const width = 30
+		const width = 20
 		pad := ""
-		if len(s.name) < width {
-			pad = strings.Repeat(" ", width-len(s.name))
+		if len(s.Name) < width {
+			pad = strings.Repeat(" ", width-len(s.Name))
 		}
-		fmt.Printf("  %s%s %s\n", color.Bold(s.name), pad, color.Dim(s.when))
+		fmt.Printf("  %s%s %s\n", color.Bold(s.Name), pad, color.Dim(s.Summary()))
 	}
+	fmt.Printf("  %s\n", color.Cyan("sparkwing pipeline new --name <name> --template <shape> [--on <event>]"))
 }
 
 // templateCategoryGroup is one category header plus the templates filed
@@ -507,7 +496,7 @@ func runExampleScaffold(args []string) error {
 func builtinShapeNames() []string {
 	out := make([]string, 0, len(builtinShapes))
 	for _, s := range builtinShapes {
-		out = append(out, s.name)
+		out = append(out, s.Name)
 	}
 	return out
 }
