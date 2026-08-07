@@ -93,7 +93,7 @@ For a build/test/deploy DAG instead of a single node, pass
 sparkwing pipeline new --name release --template build-test-deploy
 ```
 
-Beyond the built-in stubs, `sparkwing pipeline templates` lists a
+Beyond the built-in stubs, `sparkwing examples` lists a
 registry of curated, real-world starters (static-site deploys,
 containerized deploys to Kubernetes, migrate+deploy, CI-hygiene gates,
 and more). Filter with `--category` / `--cloud`, inspect one with
@@ -102,7 +102,7 @@ scaffold with `--template <name> --param k=v`. See the
 [template catalog](sparks.md#the-template-catalog) for the full workflow.
 
 If you want to own and edit a spark library's helper code directly rather
-than importing it, `sparkwing pipeline sparks vendor --module <name>`
+than importing it, `sparkwing pipeline sparks inflate --module <name>`
 copies its source into your repo. See
 [vendoring](sparks.md#vendoring-a-spark-module).
 

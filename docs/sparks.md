@@ -367,14 +367,14 @@ done
 Most of the time you consume a spark library by importing it and letting
 the overlay pin its version. Sometimes you want the opposite: to take a
 module's source into your own repo, edit it freely, and stop tracking
-upstream. `sparkwing pipeline sparks vendor` does that ejection.
+upstream. `sparkwing pipeline sparks inflate` does that ejection.
 
 ```bash
 # eject the sparks-core templates module
-sparkwing pipeline sparks vendor --module templates
+sparkwing pipeline sparks inflate --module templates
 
 # eject any other spark library by full module path
-sparkwing pipeline sparks vendor --module github.com/example/my-sparks
+sparkwing pipeline sparks inflate --module github.com/example/my-sparks
 ```
 
 A bare `--module` name resolves to a sparks-core block module
@@ -416,22 +416,22 @@ to the two stubs built into the CLI (`minimal`, `build-test-deploy`):
 real-world shapes like static-site deploys, containerized deploys to
 Kubernetes, migrate+deploy flows, and CI-hygiene gates.
 
-Browse and inspect them with `sparkwing pipeline templates`:
+Browse and inspect them with `sparkwing examples`:
 
 ```bash
 # list every template with its "when to use" signal and parameters
-sparkwing pipeline templates
+sparkwing examples
 
 # narrow the list
-sparkwing pipeline templates --cloud aws
-sparkwing pipeline templates --category ci-hygiene
+sparkwing examples --cloud aws
+sparkwing examples --category ci-hygiene
 
 # full detail for one template: description, parameters table,
 # applicability, and its README
-sparkwing pipeline templates --name lint-test-go
+sparkwing examples --name lint-test-go
 
 # ... plus the pipeline body rendered with default / <placeholder> params
-sparkwing pipeline templates --name lint-test-go --body
+sparkwing examples --name lint-test-go --body
 ```
 
 Filters are advisory metadata on each template. A template that declares
@@ -497,7 +497,7 @@ Explicit scope limits, baked in to avoid drift:
   resolution, the overlay, and every `sparkwing` run leave `go.mod`,
   `go.sum`, and the rest of the repo pristine. Generated files live under
   `.sparkwing/` with names starting `.resolved.` and are gitignored. The
-  one deliberate exception is `sparkwing pipeline sparks vendor`, which you
+  one deliberate exception is `sparkwing pipeline sparks inflate`, which you
   invoke explicitly to eject a module's source and which does edit the
   git-tracked `.sparkwing/go.mod` (see
   [Vendoring a spark module](#vendoring-a-spark-module)).
