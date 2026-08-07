@@ -2,9 +2,26 @@ package orchestrator
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+func git(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Sparkwing Test",
+		"GIT_AUTHOR_EMAIL=sparkwing@example.invalid",
+		"GIT_COMMITTER_NAME=Sparkwing Test",
+		"GIT_COMMITTER_EMAIL=sparkwing@example.invalid",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
 
 func TestRepoShortName_FindsGitToplevelBasename(t *testing.T) {
 	root := t.TempDir()
@@ -125,25 +142,133 @@ func TestRepoShortName_BareRepoWorktreeResolvesToTheRepoName(t *testing.T) {
 	}
 }
 
+func TestRepoShortName_RealBareCloneSharesIdentityAcrossWorktrees(t *testing.T) {
+	root := t.TempDir()
+	seed := filepath.Join(root, "seed")
+	bare := filepath.Join(root, "repos", "regent.git")
+	first := filepath.Join(root, "worktrees", "first-branch")
+	second := filepath.Join(root, "worktrees", "second-branch")
+
+	if err := os.MkdirAll(seed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, seed, "init")
+	if err := os.WriteFile(filepath.Join(seed, "README"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, seed, "add", "README")
+	git(t, seed, "commit", "-m", "seed")
+	if err := os.MkdirAll(filepath.Dir(bare), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "clone", "--bare", seed, bare)
+	git(t, bare, "worktree", "add", "-b", "first-branch", first)
+	git(t, bare, "worktree", "add", "-b", "second-branch", second)
+
+	nested := filepath.Join(second, "internal", "worker")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{first, second, nested} {
+		if got := repoShortName(dir); got != "regent" {
+			t.Errorf("repoShortName(%q) = %q, want regent", dir, got)
+		}
+	}
+}
+
+func TestCurrentProfileKey_UsesRunWorkDirAfterProcessCWDChanges(t *testing.T) {
+	root := t.TempDir()
+	bare := filepath.Join(root, "repos", "regent.git")
+	first := filepath.Join(root, "worktrees", "first-branch")
+	second := filepath.Join(root, "worktrees", "second-branch")
+	seed := filepath.Join(root, "seed")
+	if err := os.MkdirAll(seed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, seed, "init")
+	if err := os.WriteFile(filepath.Join(seed, "README"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, seed, "add", "README")
+	git(t, seed, "commit", "-m", "seed")
+	if err := os.MkdirAll(filepath.Dir(bare), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "clone", "--bare", seed, bare)
+	git(t, bare, "worktree", "add", "-b", "first-branch", first)
+	git(t, bare, "worktree", "add", "-b", "second-branch", second)
+
+	previousWorkDir := sparkwing.CurrentRuntime().WorkDir
+	sparkwing.SetWorkDir(first)
+	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
+	t.Chdir(t.TempDir())
+	if got := currentProfileKey("push-checks"); got != "regent/push-checks" {
+		t.Fatalf("first worktree after cwd change keyed %q, want regent/push-checks", got)
+	}
+
+	sparkwing.SetWorkDir(second)
+	if got := currentProfileKey("push-checks"); got != "regent/push-checks" {
+		t.Fatalf("second worktree after cwd change keyed %q, want regent/push-checks", got)
+	}
+}
+
+func TestRepoShortName_RealNonBareCloneSharesIdentityAcrossWorktrees(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "regent")
+	first := filepath.Join(root, "worktrees", "first-branch")
+	second := filepath.Join(root, "worktrees", "second-branch")
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "init")
+	if err := os.WriteFile(filepath.Join(repo, "README"), []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, repo, "add", "README")
+	git(t, repo, "commit", "-m", "seed")
+	git(t, repo, "worktree", "add", "-b", "first-branch", first)
+	git(t, repo, "worktree", "add", "-b", "second-branch", second)
+
+	for _, dir := range []string{repo, first, second} {
+		if got := repoShortName(dir); got != "regent" {
+			t.Errorf("repoShortName(%q) = %q, want regent", dir, got)
+		}
+	}
+}
+
 // TestRepoShortName_SubmoduleKeepsItsOwnIdentity guards the other .git file
 // shape. A submodule's pointer names <super>/.git/modules/<name> and has no
 // worktrees segment, so the submodule stays its own repo for pricing rather
 // than pooling its costs into its superproject.
 func TestRepoShortName_SubmoduleKeepsItsOwnIdentity(t *testing.T) {
 	root := t.TempDir()
-	sub := filepath.Join(root, "super", "vendor", "lib")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatal(err)
+	source := filepath.Join(root, "lib-source")
+	super := filepath.Join(root, "super")
+	for _, dir := range []string{source, super} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		git(t, dir, "init")
+		if err := os.WriteFile(filepath.Join(dir, "README"), []byte("seed\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		git(t, dir, "add", "README")
+		git(t, dir, "commit", "-m", "seed")
 	}
-	if err := os.MkdirAll(filepath.Join(root, "super", ".git", "modules", "lib"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	pointer := "gitdir: " + filepath.Join(root, "super", ".git", "modules", "lib") + "\n"
-	if err := os.WriteFile(filepath.Join(sub, ".git"), []byte(pointer), 0o644); err != nil {
-		t.Fatal(err)
+	sub := filepath.Join(super, "vendor", "lib")
+	cmd := exec.Command("git", "-C", super, "-c", "protocol.file.allow=always", "submodule", "add", source, "vendor/lib")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git submodule add: %v\n%s", err, out)
 	}
 	if got := repoShortName(sub); got != "lib" {
 		t.Errorf("submodule: got %q, want lib", got)
+	}
+	nested := filepath.Join(sub, "src", "nested")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoShortName(nested); got != "lib" {
+		t.Errorf("submodule subdirectory: got %q, want lib", got)
 	}
 }
 
