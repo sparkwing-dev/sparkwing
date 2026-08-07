@@ -184,7 +184,7 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 		}
 		defer func() { _ = os.RemoveAll(scratch) }()
 
-		newArgs := []string{"pipeline", "new", "-C", scratch, "--name", m.Name, "--template", m.Name}
+		newArgs := []string{"examples", "scaffold", "-C", scratch, "--name", m.Name}
 		for _, p := range sortedParamFlags(m.VerifyParams) {
 			newArgs = append(newArgs, "--param", p)
 		}

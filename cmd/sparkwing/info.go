@@ -257,9 +257,11 @@ const agentBlockDurable = "This repo uses **sparkwing** for CI/CD (https://spark
 // in it is a command, and commands move.
 const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"\n" +
-	"- `sparkwing pipeline templates` -- start from a starter, not a blank file\n" +
-	"- `sparkwing pipeline new --name <n> --template <t>` -- scaffold one; it compiles,\n" +
-	"  lints, and runs as generated, so you edit from something green\n" +
+	"- `sparkwing pipeline new --name <n> --template <shape>` -- scaffold a shape\n" +
+	"  (minimal, ci-pr-check, build-test-deploy, release, scheduled-report). It\n" +
+	"  compiles, lints, and runs as generated, so you edit from something green\n" +
+	"- `sparkwing docs search -q <what you are doing>` -- the doc section that\n" +
+	"  answers it, plus any worked pipeline that already does it\n" +
 	"- `sparkwing docs read --guide authoring` -- the DAG model, the idioms the linter\n" +
 	"  enforces, how a pipeline fires, and the config schema, in one call\n" +
 	"- `sparkwing pipeline lint` then `sparkwing run <n>` -- check it without guessing\n"
@@ -657,7 +659,7 @@ func nextStepsFor(info Info, agentMode bool) []InfoNextStep {
 		{Command: "sparkwing pipeline list", Purpose: "see every pipeline this repo defines"},
 		{Command: "sparkwing pipeline describe --name <name>", Purpose: "full metadata for one pipeline"},
 		{Command: "sparkwing run <name>", Purpose: "run a pipeline"},
-		{Command: "sparkwing pipeline templates", Purpose: "browse curated starter templates for `pipeline new --template`"},
+		{Command: "sparkwing examples", Purpose: "browse curated starter templates for `pipeline new --template`"},
 		{Command: "sparkwing pipeline new --name <name>", Purpose: "scaffold a new pipeline"},
 		{Command: "sparkwing docs read --guide authoring", Purpose: "everything needed to write a pipeline, in one call"},
 		{Command: "sparkwing docs list", Purpose: "browse embedded docs (offline)"},
@@ -691,8 +693,8 @@ var infoForAgents = []InfoNextStep{
 	{Command: "sparkwing info --json", Purpose: "machine-readable copy of this card (alias: -o json)"},
 	{Command: "sparkwing info --for-agent", Purpose: "current discovery context for one agent wake"},
 	{Command: "sparkwing pipeline list --json", Purpose: "this repo's pipelines as JSON"},
-	{Command: "sparkwing pipeline templates -o json", Purpose: "curated starter templates (filter --category/--cloud, detail --name --body)"},
-	{Command: "sparkwing pipeline sparks vendor --module <name>", Purpose: "eject a spark library's source into your repo to own and edit it"},
+	{Command: "sparkwing examples -o json", Purpose: "curated starter templates (filter --category/--cloud, detail --name --body)"},
+	{Command: "sparkwing pipeline sparks inflate --module <name>", Purpose: "eject a spark library's source into your repo to own and edit it"},
 	{Command: "sparkwing <verb> --help --json", Purpose: "any verb's spec as JSON"},
 }
 

@@ -174,6 +174,17 @@ code change to unlock.
   behind `--name`. The shapes are marked as DAG skeletons with echo bodies,
   because `ci-pr-check` is named for a job a registry template actually does
   and reads as the answer until you open it.
+- **cli:** (Breaking) the sparks-core registry moved off the creation path.
+  `sparkwing examples` browses it; `pipeline new --template` now takes only a
+  shape (`minimal`, `build-test-deploy`, `ci-pr-check`, `release`,
+  `scheduled-report`) and rejects a registry name. Templates and examples were
+  one list doing two jobs: agent trials spent a quarter of their turns
+  choosing between forty entries, most of which are thin wiring over
+  sparks-core libraries rather than a place to start. A shape is what you
+  scaffold; an example is what you read, and `docs search` is how you find one.
+- **cli:** `pipeline sparks vendor` is now `pipeline sparks inflate` -- it
+  copies a spark library's source into your repo so you can edit it, which is
+  not what "vendor" says.
 - **cli:** `docs search` now answers from the example corpus as well as the
   docs. The registry pipelines are working, verified code, which answers "how
   does someone do ECS Fargate" more directly than a reference section defining

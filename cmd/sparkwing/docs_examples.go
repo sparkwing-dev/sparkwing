@@ -104,5 +104,5 @@ func printExampleHits(hits []exampleHit, limit int) {
 	for _, h := range hits {
 		fmt.Printf("  %-32s %s\n", color.Bold(h.Name), color.Dim(truncateLine(h.Summary)))
 	}
-	fmt.Printf("  %s\n\n", color.Cyan("sparkwing pipeline templates --name <name> --body"))
+	fmt.Printf("  %s\n\n", color.Cyan("sparkwing examples --name <name> --body"))
 }

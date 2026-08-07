@@ -283,6 +283,8 @@ func runSparkwing(args []string) error {
 		return runConfigure(args[1:])
 	case "completion":
 		return runCompletion(args[1:])
+	case "examples":
+		return runExamples(args[1:])
 	case "docs":
 		return runDocs(args[1:])
 	case "commands":

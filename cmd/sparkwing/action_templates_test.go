@@ -67,16 +67,19 @@ func TestRenderTemplateList_PrintsCategoryHeadersAndFooter(t *testing.T) {
 		}
 	}
 	for _, affordance := range []string{
-		"shown:", "2 templates across 2 categories",
-		"filter:", "--category <category> --cloud <aws|gcp>",
-		"detail:", "--name <template> [--body]",
-		"scaffold:", "sparkwing pipeline new",
+		"2 examples across 2 categories",
+		"docs search", "--name <example> --body",
+		"--category <c> --cloud <aws|gcp>",
+		"sparkwing pipeline new",
 	} {
 		if !strings.Contains(out, affordance) {
 			t.Errorf("footer missing %q\n%s", affordance, out)
 		}
 	}
-	if strings.Index(out, "BUILD") > strings.Index(out, "shown:") {
+	if !strings.Contains(out, "--template <shape>") {
+		t.Errorf("an example is read, not scaffolded from; the footer's scaffold line must name a shape\n%s", out)
+	}
+	if strings.Index(out, "BUILD") > strings.Index(out, "docs search") {
 		t.Errorf("footer should come after the listing\n%s", out)
 	}
 }
@@ -85,7 +88,7 @@ func TestRenderTemplateList_SingularCountsForOneTemplate(t *testing.T) {
 	color.SetEnabled(false)
 	in := []templates.Template{tmplWithCategory("solo", "build")}
 	out := captureStdout(t, func() { renderTemplateList(in) })
-	if !strings.Contains(out, "1 template across 1 category") {
+	if !strings.Contains(out, "1 example across 1 category") {
 		t.Errorf("expected singular counts, got:\n%s", out)
 	}
 }

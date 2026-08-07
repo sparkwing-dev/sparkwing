@@ -66,8 +66,6 @@ func runPipeline(args []string) error {
 		return runPipelineDiscover(args[1:])
 	case "new":
 		return runPipelineNew(args[1:])
-	case "templates":
-		return runPipelineTemplates(args[1:])
 	case "explain":
 		return runPipelineExplain(args[1:])
 	case "lint":

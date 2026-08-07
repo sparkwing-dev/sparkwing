@@ -1018,7 +1018,6 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 		{"describe", "Print one pipeline's full metadata"},
 		{"discover", "Fuzzy search over names, descriptions, tags"},
 		{"new", "Scaffold a new pipeline (auto-bootstraps .sparkwing/ if missing)"},
-		{"templates", "List the sparks-core template registry (starters for `new --template`)"},
 		{"explain", "Render the pipeline's Plan DAG without running"},
 		{"lint", "Check pipeline source for idiomatic anti-patterns (enforced gate)"},
 		{"plan", "Render the runtime-resolved DAG (would-run/would-skip) without running"},
@@ -1186,7 +1185,7 @@ up the package skeleton too -- no separate init step, no
 sample pipeline you didn't ask for.
 
 Before building by hand, browse the ready-made starters:
-'sparkwing pipeline templates' lists task-shaped registry templates
+'sparkwing examples' lists task-shaped registry templates
 (Go CI hygiene, docker/static deploys for AWS+GCP, migrations, ...);
 scaffold one with --template <name> [--param k=v ...].
 
@@ -1236,8 +1235,8 @@ See also:
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
 		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Scaffold as if started in this directory (re-anchors the .sparkwing search)", Group: "Target"},
-		{Name: "template", Argument: "KIND", Desc: "minimal | build-test-deploy | ci-pr-check | release | scheduled-report | any registry name from `sparkwing pipeline templates`", Default: "minimal", Group: "Scaffold"},
-		{Name: "param", Argument: "K=V", Desc: "Registry template parameter (repeatable); see `sparkwing pipeline templates`", Group: "Scaffold"},
+		{Name: "template", Argument: "KIND", Desc: "minimal | build-test-deploy | ci-pr-check | release | scheduled-report | any registry name from `sparkwing examples`", Default: "minimal", Group: "Scaffold"},
+		{Name: "param", Argument: "K=V", Desc: "Registry template parameter (repeatable); see `sparkwing examples`", Group: "Scaffold"},
 		{Name: "hidden", Desc: "Mark the entry hidden in default tab-complete menus", Group: "Scaffold"},
 		{Name: "short", Argument: "TEXT", Desc: "Pre-fill the ShortHelp / desc line (built-in templates only)", Group: "Scaffold"},
 	},
@@ -1251,56 +1250,51 @@ See also:
 	},
 }
 
-var cmdPipelineTemplates = Command{
-	Path:     "sparkwing pipeline templates",
-	Synopsis: "List the sparks-core template registry",
-	Description: `Lists the curated, parameterized pipeline starters in the
-sparks-core/templates registry -- the values usable as
-'sparkwing pipeline new --template <name>'. Each entry shows a
-"when to use" signal and its required / optional parameters.
-The pretty list groups entries under category headers and ends
-with a footer of the filters, the detail view, and the scaffold
-command, so the whole surface is visible without a second look.
+var cmdExamples = Command{
+	Path:     "sparkwing examples",
+	Synopsis: "Worked pipelines to read, not starting points to scaffold",
+	Description: `The sparks-core registry: complete, working pipelines --
+container deploys for AWS and GCP, migrations, canary rollouts,
+release publishing, test sharding. Every one compiles, lints, and
+runs, proven by the template-verify pipeline, so unlike prose they
+cannot quietly stop being true.
 
-These are distinct from the two built-in stubs (minimal,
-build-test-deploy) that ship in the CLI itself: the registry
-templates are richer, real-world shapes (build-test-deploy to
-k8s, static-site, migrate+deploy, ...).
+Read them, do not scaffold from them. 'sparkwing pipeline new
+--template <shape>' starts a pipeline; an example shows how a real
+one is built once you have the shape. Reach for one when you want
+to know how something is done rather than to begin.
 
---category and --cloud narrow the list. A cloud-agnostic
-template (one that declares no cloud) always passes a --cloud
-filter.
+Most arrivals should come through 'sparkwing docs search', which
+ranks examples alongside the docs -- searching "ecs fargate"
+answers the question without anyone browsing a list.
 
---name switches to a full detail view for one template:
-description, when-to-use, prerequisite, a parameters table
-(name / type / required / default / description), applicability,
-and the template's README. Add --body to also print the
-pipeline body rendered with each parameter's default, using
-<param> placeholders for required parameters that have no
-default.
+--category and --cloud narrow the list; a cloud-agnostic example
+always passes a --cloud filter. --name switches to a full detail
+view: description, when-to-use, prerequisite, parameters,
+applicability, and README. Add --body for the pipeline source
+rendered with each parameter's default.
 
--o json emits the manifests for the list, or the manifest +
-README (+ rendered body with --body) for a detail view --
-prefer it for agent consumption.`,
+-o json emits manifests for the list, or manifest + README
+(+ rendered body with --body) for one example.`,
 	Flags: []FlagSpec{
-		{Name: "name", Argument: "TEMPLATE", Desc: "Show full detail for one template instead of the list", Group: "Target"},
-		{Name: "body", Desc: "With --name, also print the rendered pipeline body (default + <placeholder> params)", Group: "Target"},
+		{Name: "name", Argument: "EXAMPLE", Desc: "Show full detail for one example instead of the list", Group: "Target"},
+		{Name: "body", Desc: "With --name, print the pipeline source (default + <placeholder> params)", Group: "Target"},
 		{Name: "category", Argument: "CATEGORY", Desc: "Filter the list by applicability category", Group: "Filter"},
-		{Name: "cloud", Argument: "CLOUD", Desc: "Filter the list by cloud (aws | gcp); cloud-agnostic templates always match", Group: "Filter"},
+		{Name: "cloud", Argument: "CLOUD", Desc: "Filter the list by cloud (aws | gcp); cloud-agnostic examples always match", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
 	},
-	GroupOrder: []string{"Target", "Filter", "Output", "Other"},
 	Examples: []Example{
-		{"Browse the registry", "sparkwing pipeline templates"},
-		{"Only AWS templates", "sparkwing pipeline templates --cloud aws"},
-		{"Only CI-hygiene templates", "sparkwing pipeline templates --category ci-hygiene"},
-		{"Full detail for one template", "sparkwing pipeline templates --name lint-test-go"},
-		{"Detail plus the rendered body", "sparkwing pipeline templates --name lint-test-go --body"},
-		{"Agent-readable manifests", "sparkwing pipeline templates -o json"},
-		{"Scaffold from one", "sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s --param image=myapp"},
+		{"Browse them", "sparkwing examples"},
+		{"Read one", "sparkwing examples --name canary-deploy-k8s --body"},
+		{"Usually you want this instead", "sparkwing docs search -q \"ecs fargate\""},
 	},
 }
 
+// cmdExampleScaffold materializes an example into a repo. It exists for
+// the template-verify pipeline, which proves every example still
+// compiles and runs by building one; it is hidden because scaffolding
+// from an example is not the path anyone should take to start a
+// pipeline.
 var cmdPipelineExplain = Command{
 	Path:     "sparkwing pipeline explain",
 	Synopsis: "Render the pipeline's Plan DAG without dispatching any jobs",
@@ -1333,6 +1327,22 @@ pipeline ever runs.`,
 		{"Preview with args (forwarded to the pipeline)", "sparkwing pipeline explain --name example-release --env prod"},
 		{"Agent-readable JSON", "sparkwing pipeline explain --name release-all -o json"},
 		{"Validate every pipeline (CI gate)", "sparkwing pipeline explain --all"},
+	},
+}
+
+var cmdExampleScaffold = Command{
+	Path:     "sparkwing examples scaffold",
+	Synopsis: "Materialize an example into a repo (verification path)",
+	Hidden:   true,
+	Description: `Renders one example's source into the target repo, the way
+'pipeline new' renders a shape. Used by the template-verify pipeline to
+prove every example still compiles, lints, and runs.
+
+To start a pipeline use 'sparkwing pipeline new --template <shape>'.`,
+	Flags: []FlagSpec{
+		{Name: "name", Argument: "EXAMPLE", Desc: "Example to materialize", Required: true, Group: "Target"},
+		{Name: "param", Argument: "K=V", Desc: "Example parameter (repeatable)", Group: "Target"},
+		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Operate as if started in this directory", Group: "System"},
 	},
 }
 
@@ -3156,7 +3166,7 @@ sparks.yaml shape, resolution rules, warmup).`,
 		{"add", "Add a library to sparks.yaml"},
 		{"remove", "Remove a library from sparks.yaml"},
 		{"warmup", "Pre-compile pipeline binaries and upload to gitcache"},
-		{"vendor", "Eject a spark module's source into the repo to own and edit it"},
+		{"inflate", "Copy a spark library's source into this repo so you can edit it"},
 	},
 	Examples: []Example{
 		{"List declared sparks libraries", "sparkwing pipeline sparks list"},
@@ -3299,11 +3309,11 @@ new sparks version is published.`,
 	},
 }
 
-var cmdSparksVendor = Command{
-	Path:     "sparkwing pipeline sparks vendor",
-	Synopsis: "Eject a spark module's source into the repo so you can own and edit it",
-	Description: `Copies a spark block module's source out of the Go module
-cache and into .sparkwing/sparks/<name>/, then adds a
+var cmdSparksInflate = Command{
+	Path:     "sparkwing pipeline sparks inflate",
+	Synopsis: "Copy a spark library's source into this repo so you can edit it",
+	Description: `Inflates a spark library: copies its source out of the Go
+module cache into .sparkwing/sparks/<name>/, then adds a
 'replace <module> => ./sparks/<name>' directive to
 .sparkwing/go.mod and runs 'go mod tidy'.
 
@@ -3327,8 +3337,8 @@ directive.`,
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
 	Examples: []Example{
-		{"Vendor the sparks-core templates module", "sparkwing pipeline sparks vendor --module templates"},
-		{"Vendor a full module path", "sparkwing pipeline sparks vendor --module github.com/example/my-sparks"},
+		{"Vendor the sparks-core templates module", "sparkwing pipeline sparks inflate --module templates"},
+		{"Vendor a full module path", "sparkwing pipeline sparks inflate --module github.com/example/my-sparks"},
 	},
 }
 

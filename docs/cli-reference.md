@@ -2041,6 +2041,57 @@ sparkwing doctor --dry-run
 sparkwing doctor -o json
 ```
 
+## `sparkwing examples`
+
+Worked pipelines to read, not starting points to scaffold
+
+The sparks-core registry: complete, working pipelines --
+container deploys for AWS and GCP, migrations, canary rollouts,
+release publishing, test sharding. Every one compiles, lints, and
+runs, proven by the template-verify pipeline, so unlike prose they
+cannot quietly stop being true.
+
+Read them, do not scaffold from them. 'sparkwing pipeline new
+--template <shape>' starts a pipeline; an example shows how a real
+one is built once you have the shape. Reach for one when you want
+to know how something is done rather than to begin.
+
+Most arrivals should come through 'sparkwing docs search', which
+ranks examples alongside the docs -- searching "ecs fargate"
+answers the question without anyone browsing a list.
+
+--category and --cloud narrow the list; a cloud-agnostic example
+always passes a --cloud filter. --name switches to a full detail
+view: description, when-to-use, prerequisite, parameters,
+applicability, and README. Add --body for the pipeline source
+rendered with each parameter's default.
+
+-o json emits manifests for the list, or manifest + README
+(+ rendered body with --body) for one example.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--name EXAMPLE` | Show full detail for one example instead of the list |
+| `--body` | With --name, print the pipeline source (default + <placeholder> params) |
+| `--category CATEGORY` | Filter the list by applicability category |
+| `--cloud CLOUD` | Filter the list by cloud (aws \| gcp); cloud-agnostic examples always match |
+| `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
+
+### Examples
+
+```sh
+# Browse them
+sparkwing examples
+
+# Read one
+sparkwing examples --name canary-deploy-k8s --body
+
+# Usually you want this instead
+sparkwing docs search -q "ecs fargate"
+```
+
 ## `sparkwing info`
 
 Self-describe sparkwing + the current project (agent entrypoint)
@@ -2111,7 +2162,6 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 - `describe` -- Print one pipeline's full metadata
 - `discover` -- Fuzzy search over names, descriptions, tags
 - `new` -- Scaffold a new pipeline (auto-bootstraps .sparkwing/ if missing)
-- `templates` -- List the sparks-core template registry (starters for `new --template`)
 - `explain` -- Render the pipeline's Plan DAG without running
 - `lint` -- Check pipeline source for idiomatic anti-patterns (enforced gate)
 - `plan` -- Render the runtime-resolved DAG (would-run/would-skip) without running
@@ -2547,7 +2597,7 @@ up the package skeleton too -- no separate init step, no
 sample pipeline you didn't ask for.
 
 Before building by hand, browse the ready-made starters:
-'sparkwing pipeline templates' lists task-shaped registry templates
+'sparkwing examples' lists task-shaped registry templates
 (Go CI hygiene, docker/static deploys for AWS+GCP, migrations, ...);
 scaffold one with --template <name> [--param k=v ...].
 
@@ -2601,8 +2651,8 @@ See also:
 |---|---|
 | `--name NAME` | New pipeline's kebab-case name (a-z, 0-9, -) (required) |
 | `-C, --sw-cd DIR` | Scaffold as if started in this directory (re-anchors the .sparkwing search) |
-| `--template KIND` | minimal \| build-test-deploy \| ci-pr-check \| release \| scheduled-report \| any registry name from `sparkwing pipeline templates` (default: minimal) |
-| `--param K=V` | Registry template parameter (repeatable); see `sparkwing pipeline templates` |
+| `--template KIND` | minimal \| build-test-deploy \| ci-pr-check \| release \| scheduled-report \| any registry name from `sparkwing examples` (default: minimal) |
+| `--param K=V` | Registry template parameter (repeatable); see `sparkwing examples` |
 | `--hidden` | Mark the entry hidden in default tab-complete menus |
 | `--short TEXT` | Pre-fill the ShortHelp / desc line (built-in templates only) |
 
@@ -2755,7 +2805,7 @@ sparks.yaml shape, resolution rules, warmup).
 - `add` -- Add a library to sparks.yaml
 - `remove` -- Remove a library from sparks.yaml
 - `warmup` -- Pre-compile pipeline binaries and upload to gitcache
-- `vendor` -- Eject a spark module's source into the repo to own and edit it
+- `inflate` -- Copy a spark library's source into this repo so you can edit it
 
 ### Examples
 
@@ -2798,6 +2848,47 @@ sparkwing pipeline sparks add --source github.com/sparkwing-dev/sparks-core
 
 # Add with a semver range
 sparkwing pipeline sparks add --source github.com/sparkwing-dev/sparks-core --version "^v0.10.0"
+```
+
+## `sparkwing pipeline sparks inflate`
+
+Copy a spark library's source into this repo so you can edit it
+
+Inflates a spark library: copies its source out of the Go
+module cache into .sparkwing/sparks/<name>/, then adds a
+'replace <module> => ./sparks/<name>' directive to
+.sparkwing/go.mod and runs 'go mod tidy'.
+
+--module takes a sparks-core block name (e.g. 'templates',
+which resolves to github.com/sparkwing-dev/sparks-core/templates)
+or a full module path for any other spark library.
+
+The version is read from .sparkwing/go.mod's require list, or
+'latest' when the module is not yet required.
+
+Because the replace directive points at the copied tree, your
+import paths do not change and transitive dependencies keep
+resolving -- the code is simply yours now, editable in place.
+The command refuses to overwrite an existing destination. To
+undo, delete .sparkwing/sparks/<name>/ and drop the replace
+directive.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--module NAME` | Sparks-core block name (e.g. templates) or a full module path (required) |
+| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
+| `-o, --output FMT` | Output format: pretty\|json |
+
+### Examples
+
+```sh
+# Vendor the sparks-core templates module
+sparkwing pipeline sparks inflate --module templates
+
+# Vendor a full module path
+sparkwing pipeline sparks inflate --module github.com/example/my-sparks
 ```
 
 ## `sparkwing pipeline sparks lint`
@@ -2934,47 +3025,6 @@ sparkwing pipeline sparks update
 sparkwing pipeline sparks update --name sparks-core
 ```
 
-## `sparkwing pipeline sparks vendor`
-
-Eject a spark module's source into the repo so you can own and edit it
-
-Copies a spark block module's source out of the Go module
-cache and into .sparkwing/sparks/<name>/, then adds a
-'replace <module> => ./sparks/<name>' directive to
-.sparkwing/go.mod and runs 'go mod tidy'.
-
---module takes a sparks-core block name (e.g. 'templates',
-which resolves to github.com/sparkwing-dev/sparks-core/templates)
-or a full module path for any other spark library.
-
-The version is read from .sparkwing/go.mod's require list, or
-'latest' when the module is not yet required.
-
-Because the replace directive points at the copied tree, your
-import paths do not change and transitive dependencies keep
-resolving -- the code is simply yours now, editable in place.
-The command refuses to overwrite an existing destination. To
-undo, delete .sparkwing/sparks/<name>/ and drop the replace
-directive.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--module NAME` | Sparks-core block name (e.g. templates) or a full module path (required) |
-| `--sparkwing-dir DIR` | Path to .sparkwing/ (default: <cwd>/.sparkwing) |
-| `-o, --output FMT` | Output format: pretty\|json |
-
-### Examples
-
-```sh
-# Vendor the sparks-core templates module
-sparkwing pipeline sparks vendor --module templates
-
-# Vendor a full module path
-sparkwing pipeline sparks vendor --module github.com/example/my-sparks
-```
-
 ## `sparkwing pipeline sparks warmup`
 
 Pre-compile pipeline binaries after a sparks release
@@ -3005,74 +3055,6 @@ sparkwing pipeline sparks warmup
 
 # Force a fresh compile
 sparkwing pipeline sparks warmup --clear-cache
-```
-
-## `sparkwing pipeline templates`
-
-List the sparks-core template registry
-
-Lists the curated, parameterized pipeline starters in the
-sparks-core/templates registry -- the values usable as
-'sparkwing pipeline new --template <name>'. Each entry shows a
-"when to use" signal and its required / optional parameters.
-The pretty list groups entries under category headers and ends
-with a footer of the filters, the detail view, and the scaffold
-command, so the whole surface is visible without a second look.
-
-These are distinct from the two built-in stubs (minimal,
-build-test-deploy) that ship in the CLI itself: the registry
-templates are richer, real-world shapes (build-test-deploy to
-k8s, static-site, migrate+deploy, ...).
-
---category and --cloud narrow the list. A cloud-agnostic
-template (one that declares no cloud) always passes a --cloud
-filter.
-
---name switches to a full detail view for one template:
-description, when-to-use, prerequisite, a parameters table
-(name / type / required / default / description), applicability,
-and the template's README. Add --body to also print the
-pipeline body rendered with each parameter's default, using
-<param> placeholders for required parameters that have no
-default.
-
--o json emits the manifests for the list, or the manifest +
-README (+ rendered body with --body) for a detail view --
-prefer it for agent consumption.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--name TEMPLATE` | Show full detail for one template instead of the list |
-| `--body` | With --name, also print the rendered pipeline body (default + <placeholder> params) |
-| `--category CATEGORY` | Filter the list by applicability category |
-| `--cloud CLOUD` | Filter the list by cloud (aws \| gcp); cloud-agnostic templates always match |
-| `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
-
-### Examples
-
-```sh
-# Browse the registry
-sparkwing pipeline templates
-
-# Only AWS templates
-sparkwing pipeline templates --cloud aws
-
-# Only CI-hygiene templates
-sparkwing pipeline templates --category ci-hygiene
-
-# Full detail for one template
-sparkwing pipeline templates --name lint-test-go
-
-# Detail plus the rendered body
-sparkwing pipeline templates --name lint-test-go --body
-
-# Agent-readable manifests
-sparkwing pipeline templates -o json
-
-# Scaffold from one
-sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s --param image=myapp
 ```
 
 ## `sparkwing pipeline trigger`

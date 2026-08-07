@@ -54,8 +54,8 @@ func runSparks(args []string) error {
 		return runSparksRemove(args[1:])
 	case "warmup":
 		return runSparksWarmup(args[1:])
-	case "vendor":
-		return runSparksVendor(args[1:])
+	case "inflate":
+		return runSparksInflate(args[1:])
 	default:
 		PrintHelp(cmdSparks, os.Stderr)
 		return fmt.Errorf("spark: unknown subcommand %q", args[0])
@@ -590,12 +590,12 @@ func resolveVendorModulePath(module string) string {
 	return sparksCoreModulePrefix + module
 }
 
-func runSparksVendor(args []string) error {
-	fs := flag.NewFlagSet(cmdSparksVendor.Path, flag.ContinueOnError)
+func runSparksInflate(args []string) error {
+	fs := flag.NewFlagSet(cmdSparksInflate.Path, flag.ContinueOnError)
 	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
 	moduleFlag := fs.String("module", "", "block module to vendor: a sparks-core name (e.g. templates) or a full module path")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json (default: pretty)")
-	if err := parseAndCheck(cmdSparksVendor, fs, args); err != nil {
+	if err := parseAndCheck(cmdSparksInflate, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}

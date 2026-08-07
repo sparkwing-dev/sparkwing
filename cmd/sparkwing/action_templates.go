@@ -1,9 +1,8 @@
-// `sparkwing pipeline templates` lists the sparks-core template registry
-// -- the curated, parameterized pipeline starters that `pipeline new
-// --template <name>` renders. Distinct from the two built-in stubs
-// (minimal, build-test-deploy): those ship in this binary; these come
-// from the sparks-core/templates module. --name switches to a detail
-// view; --category / --cloud filter the list.
+// `sparkwing examples` browses the sparks-core registry: complete,
+// working pipelines to read rather than starting points to scaffold.
+// `pipeline new --template <shape>` starts a pipeline; an example shows
+// how a real one is built. --name switches to a detail view, --body
+// prints the source, --category / --cloud filter.
 package main
 
 import (
@@ -11,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -34,8 +34,18 @@ type templateDetailJSON struct {
 	RenderedBody string             `json:"rendered_body,omitempty"`
 }
 
-func runPipelineTemplates(args []string) error {
-	fs := flag.NewFlagSet(cmdPipelineTemplates.Path, flag.ContinueOnError)
+// runExamples browses the worked-example corpus.
+//
+// These are working pipelines, not starting points. `pipeline new`
+// scaffolds a shape; an example shows how a real one is built, and is
+// read rather than copied wholesale -- which is why it lives under its
+// own verb instead of behind --template, where choosing between forty
+// of them was a quarter of an agent trial's turns.
+func runExamples(args []string) error {
+	if len(args) > 0 && args[0] == "scaffold" {
+		return runExampleScaffold(args[1:])
+	}
+	fs := flag.NewFlagSet(cmdExamples.Path, flag.ContinueOnError)
 	var output, category, cloud, name string
 	var body bool
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json")
@@ -44,17 +54,17 @@ func runPipelineTemplates(args []string) error {
 	fs.StringVar(&name, "name", "", "show full detail for one template instead of the list")
 	fs.BoolVar(&body, "body", false, "with --name, also print the rendered pipeline body")
 	_ = chdirFlag(fs)
-	if err := parseAndCheck(cmdPipelineTemplates, fs, args); err != nil {
+	if err := parseAndCheck(cmdExamples, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("templates: unexpected positional %q", fs.Arg(0))
+		return fmt.Errorf("examples: unexpected positional %q", fs.Arg(0))
 	}
 	if body && name == "" {
-		return errors.New("templates: --body requires --name <template>")
+		return errors.New("examples: --body requires --name <example>")
 	}
 
 	if name != "" {
@@ -100,7 +110,7 @@ func listTemplates(category, cloud, output string) error {
 			if clouds := templateClouds(list); cloud != "" && len(clouds) > 0 {
 				fmt.Printf("%s %s\n", color.Dim("clouds:"), strings.Join(clouds, ", "))
 			}
-			fmt.Printf("%s sparkwing pipeline templates%s\n",
+			fmt.Printf("%s sparkwing examples%s\n",
 				color.Dim("browse all:"), clearedFilterSuffix(category, cloud))
 			return nil
 		}
@@ -137,7 +147,6 @@ func renderTemplateList(filtered []templates.Template) {
 			printTemplateLine(t.Manifest)
 		}
 	}
-	printBuiltinShapes()
 	printTemplateListFooter(len(filtered), len(groups))
 }
 
@@ -233,22 +242,14 @@ func groupTemplatesByCategory(list []templates.Template) []templateCategoryGroup
 // reader never has to grep the raw list to discover the flags.
 func printTemplateListFooter(shown, categories int) {
 	fmt.Println()
-	labels := []struct{ tag, cmd string }{
-		{"shown:", fmt.Sprintf("%s across %s", countNoun(shown, "template", "templates"), countNoun(categories, "category", "categories"))},
-		{"filter:", "sparkwing pipeline templates --category <category> --cloud <aws|gcp>"},
-		{"detail:", "sparkwing pipeline templates --name <template> [--body]"},
-		{"scaffold:", "sparkwing pipeline new --name <name> --template <template> --param k=v ..."},
-	}
-	width := 0
-	for _, l := range labels {
-		if n := len(l.tag); n > width {
-			width = n
-		}
-	}
-	for _, l := range labels {
-		pad := strings.Repeat(" ", width-len(l.tag))
-		fmt.Printf("%s%s %s\n", color.Dim(l.tag), pad, l.cmd)
-	}
+	printAlignedSteps([]InfoNextStep{
+		{Command: "sparkwing docs search -q <what you are doing>", Purpose: "usually the faster way in than this list"},
+		{Command: "sparkwing examples --name <example> --body", Purpose: "read one in full"},
+		{Command: "sparkwing examples --category <c> --cloud <aws|gcp>", Purpose: "narrow the list"},
+		{Command: "sparkwing pipeline new --name <n> --template <shape>", Purpose: "start a pipeline (a shape, not an example)"},
+	})
+	fmt.Printf("\n%s\n", color.Dim(fmt.Sprintf("%s across %s -- working pipelines to read, not starting points",
+		countNoun(shown, "example", "examples"), countNoun(categories, "category", "categories"))))
 }
 
 // countNoun formats a count with the singular or plural noun.
@@ -281,7 +282,7 @@ func clearedFilterSuffix(category, cloud string) string {
 func showTemplateDetail(name string, body bool, output string) error {
 	tmpl, err := templates.Get(name)
 	if err != nil {
-		return fmt.Errorf("template %q not found -- run `sparkwing pipeline templates` to list available templates", name)
+		return fmt.Errorf("template %q not found -- run `sparkwing examples` to list them", name)
 	}
 	var rendered string
 	if body {
@@ -442,4 +443,54 @@ func applicabilityLine(a templates.Applicability) string {
 		parts = append(parts, "cloud-agnostic")
 	}
 	return strings.Join(parts, "  ")
+}
+
+// runExampleScaffold materializes an example into a repo.
+//
+// It exists so template-verify can keep proving every example
+// compiles, lints, and runs -- the property that makes them worth
+// reading. It is not the path to start a pipeline, which is why the
+// verb is hidden and `pipeline new --template` no longer accepts an
+// example name.
+func runExampleScaffold(args []string) error {
+	fs := flag.NewFlagSet(cmdExampleScaffold.Path, flag.ContinueOnError)
+	name := fs.String("name", "", "example to materialize")
+	params := fs.StringArray("param", nil, "example parameter, k=v (repeatable)")
+	changeDir := fs.StringP("sw-cd", "C", "", "operate as if started in this directory")
+	if err := parseAndCheck(cmdExampleScaffold, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	if *name == "" {
+		return errors.New("examples scaffold: --name is required")
+	}
+	if *changeDir != "" {
+		if err := os.Chdir(*changeDir); err != nil {
+			return fmt.Errorf("examples scaffold: --sw-cd %q: %w", *changeDir, err)
+		}
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	sparkwingDir, ok := walkUpForSparkwing(cwd)
+	bootstrapped := !ok
+	if !ok {
+		if err := bootstrapDotSparkwingOpts(cwd, filepath.Join(cwd, ".sparkwing"), true); err != nil {
+			return err
+		}
+		sparkwingDir = filepath.Join(cwd, ".sparkwing")
+	}
+	return scaffoldFromRegistry(sparkwingDir, *name, *name, *params, false, bootstrapped)
+}
+
+// builtinShapeNames is the set `pipeline new --template` accepts.
+func builtinShapeNames() []string {
+	out := make([]string, 0, len(builtinShapes))
+	for _, s := range builtinShapes {
+		out = append(out, s.name)
+	}
+	return out
 }

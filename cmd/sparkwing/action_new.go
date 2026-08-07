@@ -23,10 +23,9 @@ import (
 func runPipelineNew(args []string) error {
 	fs := flag.NewFlagSet(cmdPipelineNew.Path, flag.ContinueOnError)
 	pipelineName := fs.String("name", "", "new pipeline name (kebab-case, e.g. deploy-staging)")
-	template := fs.String("template", "minimal", "template: minimal | build-test-deploy | ci-pr-check | release | scheduled-report | any name from `sparkwing pipeline templates`")
+	template := fs.String("template", "minimal", "shape to scaffold: minimal | build-test-deploy | ci-pr-check | release | scheduled-report")
 	hidden := fs.Bool("hidden", false, "mark the entry hidden in tab-complete menus")
 	short := fs.String("short", "", "short one-line description (ShortHelp / frontmatter desc)")
-	params := fs.StringArray("param", nil, "registry template parameter, k=v (repeatable)")
 	changeDir := fs.StringP("sw-cd", "C", "", "scaffold as if started in this directory (re-anchors the .sparkwing search)")
 	if err := parseAndCheck(cmdPipelineNew, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -93,53 +92,51 @@ func runPipelineNew(args []string) error {
 	case "scheduled-report":
 		scaffoldErr = scaffoldGoScheduledReport(sparkwingDir, name, *hidden, *short, bootstrapped)
 	default:
-		scaffoldErr = scaffoldFromRegistry(sparkwingDir, name, *template, *params, *hidden, bootstrapped)
+		return fmt.Errorf("new: unknown shape %q -- pipeline new takes a shape, one of: %s\n"+
+			"  a worked pipeline to read instead: sparkwing examples --name %s --body",
+			*template, strings.Join(builtinShapeNames(), ", "), *template)
 	}
 	if scaffoldErr != nil {
 		return scaffoldErr
 	}
 	if !fs.Changed("template") {
-		printTemplateCatalogHint()
+		printExamplesHint()
 	}
 	return nil
 }
 
-// printTemplateCatalogHint tells an author who scaffolded the default
-// stub that the task-shaped catalog exists.
+// printExamplesHint tells an author who just scaffolded a bare shape
+// that worked pipelines exist to read.
 //
-// It prints here rather than in the standing agent-discovery block
-// because this is the only moment it is certainly relevant: whoever
-// just ran `pipeline new` is writing a pipeline right now, and everyone
-// else pays nothing. A default scaffold is also the one case where the
-// author demonstrably did not choose a template -- either they did not
-// know the catalog existed, or none of it fit, and only the first is
-// worth correcting.
-func printTemplateCatalogHint() {
+// It prints here because this is the only moment it is certainly
+// relevant: whoever just ran `pipeline new` is writing a pipeline right
+// now, and everyone else pays nothing. It points at search rather than
+// a listing -- browsing forty examples to pick one is the cost this
+// reorganization removed.
+func printExamplesHint() {
 	list, err := templates.List()
 	if err != nil || len(list) == 0 {
 		return
 	}
 	fmt.Println()
-	fmt.Printf("%s scaffolded the %s stub. %d task-shaped templates are available\n",
-		color.Dim("note:"), color.Bold("minimal"), len(list))
-	fmt.Printf("      (CI hygiene, docker + static deploys for AWS/GCP, DB migrations,\n")
-	fmt.Printf("      approval gates, test sharding). They compile, lint, and run as\n")
-	fmt.Printf("      generated, so you edit from something green:\n")
+	fmt.Printf("%s scaffolded the %s shape -- the bodies are placeholders to replace.\n",
+		color.Dim("note:"), color.Bold("minimal"))
+	fmt.Printf("      %d worked pipelines exist to read for how a real one is built:\n", len(list))
 	printAlignedSteps([]InfoNextStep{
-		{Command: "sparkwing pipeline templates", Purpose: "browse the catalog"},
-		{Command: "sparkwing pipeline new --name " + "<name>" + " --template <t>", Purpose: "scaffold from one"},
+		{Command: "sparkwing docs search -q <what you are doing>", Purpose: "usually the fastest way in"},
+		{Command: "sparkwing examples --name <name> --body", Purpose: "read one in full"},
 	})
 }
 
 // scaffoldFromRegistry renders a sparks-core registry template (anything
-// `sparkwing pipeline templates` lists) into jobs/<name>.go and wires the
+// `sparkwing examples` lists) into jobs/<name>.go and wires the
 // sparkwing.yaml entry. The pipeline's registered name is the --name
 // flag: when the template declares a `pipeline-name` param it's set from
 // --name, so the rendered Register() call and the yaml entry agree.
 func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []string, hidden, bootstrapped bool) error {
 	tmpl, err := templates.Get(templateName)
 	if err != nil {
-		return fmt.Errorf("new: unknown template %q -- run `sparkwing pipeline templates` to list available templates", templateName)
+		return fmt.Errorf("new: unknown template %q -- run `sparkwing examples` to list them", templateName)
 	}
 	pm, err := parseTemplateParams(params)
 	if err != nil {

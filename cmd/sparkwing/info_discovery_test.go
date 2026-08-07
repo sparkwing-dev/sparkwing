@@ -54,11 +54,11 @@ func TestDurableAgentBlockCarriesNothingThatRots(t *testing.T) {
 // The authoring quickstart names commands, which move, so it must stay
 // on the wake-scoped side of the markers.
 func TestAuthoringQuickstartIsNotDurable(t *testing.T) {
-	if strings.Contains(agentBlockDurable, "pipeline templates") ||
+	if strings.Contains(agentBlockDurable, "pipeline new") ||
 		strings.Contains(agentBlockDurable, "--guide") {
 		t.Error("authoring commands leaked into the durable block")
 	}
-	for _, want := range []string{"pipeline templates", "--guide authoring", "pipeline lint"} {
+	for _, want := range []string{"--template <shape>", "--guide authoring", "pipeline lint"} {
 		if !strings.Contains(agentBlockAuthoring, want) {
 			t.Errorf("authoring quickstart does not mention %q", want)
 		}
