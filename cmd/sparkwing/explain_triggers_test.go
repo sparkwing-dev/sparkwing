@@ -7,11 +7,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
-// explain is offline. It reads sparkwing.yaml and nothing else, so it
-// knows a trigger was declared and cannot know whether GitHub delivers
-// it. An earlier version said "not yet live", which told anyone with a
-// correctly configured webhook that their trigger did not work.
-func TestTriggerNotesClaimOnlyWhatExplainKnows(t *testing.T) {
+// explain says what is true of this pipeline. A note that delivery
+// depends on a GitHub webhook is true of every push and pull_request
+// trigger in every repo, so it describes the system rather than the
+// pipeline -- and printed under a heading with a command attached, it
+// reads as a defect to someone whose webhook is fine.
+//
+// explain is also offline: it reads sparkwing.yaml and nothing else, so
+// any claim here about GitHub's state would be unverified. An earlier
+// version asserted "not yet live".
+func TestTriggerLinesDescribeThePipelineOnly(t *testing.T) {
 	lines := describeTriggers(pipelines.Triggers{
 		PullRequest: &pipelines.PullRequestTrigger{},
 		Push:        &pipelines.PushTrigger{},
@@ -20,14 +25,12 @@ func TestTriggerNotesClaimOnlyWhatExplainKnows(t *testing.T) {
 		t.Fatalf("got %d trigger lines, want 2", len(lines))
 	}
 	for _, l := range lines {
-		low := strings.ToLower(l.Blocker)
-		for _, claim := range []string{"not yet live", "no webhook", "is not configured", "missing"} {
-			if strings.Contains(low, claim) {
-				t.Errorf("%s asserts %q about GitHub, which explain never checked: %q", l.Event, claim, l.Blocker)
+		blob := strings.ToLower(l.Event + " " + l.Detail + " " + l.Advisory)
+		for _, universal := range []string{"webhook", "not yet live", "controller", "install"} {
+			if strings.Contains(blob, universal) {
+				t.Errorf("%s mentions %q, which is true of every such trigger and says nothing about this pipeline: %+v",
+					l.Event, universal, l)
 			}
-		}
-		if l.Blocker == "" {
-			t.Errorf("%s says nothing about what delivery depends on", l.Event)
 		}
 	}
 }

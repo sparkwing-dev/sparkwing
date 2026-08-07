@@ -347,12 +347,15 @@ code change to unlock.
   plainly when nothing does. A trial produced a pipeline for "run go test on
   pull requests" that declared no trigger: it compiled, linted clean,
   explained clean, ran green, reported no friction, and was the fastest run in
-  its sweep -- every signal said it was the best result in the set. Triggers
-  that need something external say so (a webhook pointed at the pipeline, a
-  controller running to evaluate a cron), and `branches` / `paths` / `actions`
-  filters are marked as recording intent, since nothing reads them today. This
-  reports rather than judges: a manual-only pipeline is legitimate, which is
-  why it is not a lint rule.
+  its sweep -- every signal said it was the best result in the set.
+  `branches` / `paths` / `actions` filters are marked as recording intent,
+  since nothing reads them today. Only per-pipeline facts appear: that
+  delivery depends on a GitHub webhook is true of every such trigger in every
+  repo, so it belongs in the docs rather than in every explain, and
+  `sparkwing cluster webhooks list` is what answers it for a real repo.
+  Nothing here changes an exit code -- it reports rather than judges, since a
+  manual-only pipeline is legitimate, which is also why it is not a lint
+  rule.
 
 - **sdk/lint:** new `group-cache-shared` rule. `JobGroup.Cache` applies one key
   function to every member, so a `JobFanOut` matrix stores one result and

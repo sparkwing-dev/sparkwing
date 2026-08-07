@@ -17,9 +17,6 @@ type triggerLine struct {
 	// Detail is the trigger's own configuration, e.g. a cron
 	// expression, rendered for a reader.
 	Detail string `json:"detail,omitempty"`
-	// Blocker is what the declaration still needs from outside the
-	// repo. Empty when nothing does.
-	Blocker string `json:"blocker,omitempty"`
 	// Advisory names fields that record intent and are not gated on.
 	Advisory string `json:"advisory,omitempty"`
 }
@@ -39,29 +36,17 @@ type triggerLine struct {
 func describeTriggers(on pipelines.Triggers) []triggerLine {
 	var out []triggerLine
 
-	// Filters that record intent without being enforced are the quiet
-	// half of this: `branches: [main]` reads like it scopes the trigger,
-	// and today nothing outside the type definition reads it.
-	//
-	// The delivery note says what explain knows and names what answers
-	// the rest. An earlier version asserted "not yet live", which is a
-	// claim about GitHub that this command never checked -- it reads as
-	// a warning to someone whose webhook is configured correctly.
-	// `cluster webhooks list` does check, by deriving the pipeline from
-	// each hook's URL path, but it shells out to `gh` over the network:
-	// explain is offline and `explain --all` is a CI gate, so consulting
-	// it here would trade a fast local check for a flaky remote one.
-	const webhookBlocker = "delivery depends on a GitHub webhook posting to this pipeline"
-
-	// Git hooks are the one case explain could check locally, and
-	// `pipeline hooks status` already reports declared vs installed --
-	// so point at it rather than duplicating its answer badly.
-	const hookBlocker = "fires only once the git hook is installed"
-
+	// Only per-pipeline facts belong here. "Delivery depends on a
+	// GitHub webhook" is true of every push and pull_request trigger in
+	// every repo, so printing it on every explain says nothing about the
+	// pipeline being explained and gives the section the shape of a
+	// problem list -- which is how a reader with a perfectly good
+	// webhook comes to think something is wrong. The dependency is a
+	// property of the system and belongs in the docs; `sparkwing cluster
+	// webhooks list` is what answers it for a specific repo.
 	if t := on.Push; t != nil {
 		out = append(out, triggerLine{
 			Event:    "push",
-			Blocker:  webhookBlocker,
 			Advisory: advisoryFields("branches", len(t.Branches) > 0, "paths", len(t.Paths) > 0),
 		})
 	}
@@ -69,28 +54,26 @@ func describeTriggers(on pipelines.Triggers) []triggerLine {
 		out = append(out, triggerLine{
 			Event:    "pull_request",
 			Detail:   "opened / synchronize / reopened",
-			Blocker:  webhookBlocker,
 			Advisory: advisoryFields("branches", len(t.Branches) > 0, "actions", len(t.Actions) > 0),
 		})
 	}
 	if on.Schedule != "" {
 		out = append(out, triggerLine{
-			Event:   "schedule",
-			Detail:  on.Schedule + " (UTC)",
-			Blocker: "fires only while a controller is running to evaluate the cron",
+			Event:  "schedule",
+			Detail: on.Schedule + " (UTC)",
 		})
 	}
 	if t := on.Webhook; t != nil {
 		out = append(out, triggerLine{Event: "webhook", Detail: t.Path})
 	}
 	if on.PreHook != nil {
-		out = append(out, triggerLine{Event: "pre_commit", Blocker: hookBlocker})
+		out = append(out, triggerLine{Event: "pre_commit"})
 	}
 	if on.PostHook != nil {
-		out = append(out, triggerLine{Event: "pre_push", Blocker: hookBlocker})
+		out = append(out, triggerLine{Event: "pre_push"})
 	}
 	if on.PostCommitHook != nil {
-		out = append(out, triggerLine{Event: "post_commit", Blocker: hookBlocker})
+		out = append(out, triggerLine{Event: "post_commit"})
 	}
 	return out
 }
@@ -145,11 +128,6 @@ func printTriggers(name string) {
 		return
 	}
 	fmt.Println("Triggers:")
-	// Blockers are hoisted below the list and de-duplicated: push and
-	// pull_request share one, and repeating a two-line caveat per
-	// trigger buries the triggers themselves.
-	var blockers []string
-	seen := map[string]bool{}
 	for _, l := range lines {
 		head := "  " + color.Bold(l.Event)
 		if l.Detail != "" {
@@ -159,35 +137,5 @@ func printTriggers(name string) {
 		if l.Advisory != "" {
 			fmt.Printf("    %s\n", color.Dim(l.Advisory))
 		}
-		if l.Blocker != "" && !seen[l.Blocker] {
-			seen[l.Blocker] = true
-			blockers = append(blockers, l.Blocker)
-		}
-	}
-	if len(blockers) == 0 {
-		return
-	}
-	fmt.Println()
-	for _, b := range blockers {
-		fmt.Printf("  %s\n", color.Dim(b))
-	}
-	// Name the command that actually answers it. explain cannot: the
-	// check shells out to `gh` over the network, and this command is
-	// offline and gates CI via --all.
-	var steps []InfoNextStep
-	if seen["delivery depends on a GitHub webhook posting to this pipeline"] {
-		steps = append(steps, InfoNextStep{
-			Command: "sparkwing cluster webhooks list --repo OWNER/NAME",
-			Purpose: "which hooks point at which pipeline",
-		})
-	}
-	if seen["fires only once the git hook is installed"] {
-		steps = append(steps, InfoNextStep{
-			Command: "sparkwing pipeline hooks status",
-			Purpose: "declared, installed, and missing hooks",
-		})
-	}
-	if len(steps) > 0 {
-		printAlignedSteps(steps)
 	}
 }
