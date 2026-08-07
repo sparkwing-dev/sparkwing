@@ -263,7 +263,8 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"    shapes: minimal (1 node) | build-test-deploy (3, linear) |\n" +
 	"            ci-pr-check (3, lint+test -> gate) | release (3, linear) |\n" +
 	"            scheduled-report (5, fan-out)\n" +
-	"    --on:   pull_request | push | schedule | manual\n" +
+	"    --on:   pull_request | push | schedule | manual (combine with a\n" +
+	"            comma: --on push,pull_request)\n" +
 	"    ci-pr-check defaults to pull_request and scheduled-report to schedule;\n" +
 	"    the rest to manual. Any shape takes any --on, so a PR-triggered single\n" +
 	"    check is `--template minimal --on pull_request`\n" +

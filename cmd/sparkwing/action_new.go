@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -27,7 +28,7 @@ func runPipelineNew(args []string) error {
 	template := fs.String("template", "minimal", "shape to scaffold: minimal | build-test-deploy | ci-pr-check | release | scheduled-report")
 	hidden := fs.Bool("hidden", false, "mark the entry hidden in tab-complete menus")
 	short := fs.String("short", "", "short one-line description (ShortHelp / frontmatter desc)")
-	on := fs.String("on", "", "trigger to declare: "+strings.Join(triggerEventNames, " | ")+" (default: the shape's own)")
+	on := fs.StringArray("on", nil, "trigger to declare: "+strings.Join(triggerEventNames, " | ")+" (repeatable or comma-separated; default: the shape's own)")
 	changeDir := fs.StringP("sw-cd", "C", "", "scaffold as if started in this directory (re-anchors the .sparkwing search)")
 	if err := parseAndCheck(cmdPipelineNew, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -87,7 +88,7 @@ func runPipelineNew(args []string) error {
 			"  a worked pipeline to read instead: sparkwing examples --name %s --body",
 			*template, strings.Join(builtinShapeNames(), ", "), *template)
 	}
-	trigger, err := resolveTrigger(shape, *on, fs.Changed("on"))
+	trigger, err := resolveTrigger(shape, parseOnFlag(*on), fs.Changed("on"))
 	if err != nil {
 		return err
 	}
@@ -327,8 +328,8 @@ var builtinShapes = []builtinShape{
 	{"scheduled-report", 5, "one collector fanning out to gatherers", "schedule", scheduledReportTemplate},
 }
 
-// triggerBlocks are the `on:` blocks --on can write, already indented
-// for appending under a sparkwing.yaml entry.
+// triggerBlocks are the per-event entries that go under `on:`, indented
+// for a sparkwing.yaml pipeline entry.
 //
 // Every value carries a comment naming the one thing its reader most
 // likely wants next: the filter it does not have, or the fact that a
@@ -338,20 +339,17 @@ var builtinShapes = []builtinShape{
 // Filters stay empty. `branches: [main]` would bake in a branch name
 // the repo may not use, and shapes have to be correct anywhere.
 var triggerBlocks = map[string]string{
-	"pull_request": `    on:
-      # Fires on opened / synchronize / reopened. Add
-      # ` + "`branches: [main]`" + ` to record which base branches this is meant
-      # for, and point the repo's GitHub webhook at this pipeline.
+	"pull_request": `      # Fires on opened / synchronize / reopened. Add
+      # ` + "`branches: [main]`" + ` to record which base branches this is
+      # meant for, and point the repo's GitHub webhook at this pipeline.
       pull_request: {}
 `,
-	"push": `    on:
-      # Fires on any branch. Add ` + "`branches: [main]`" + ` or
+	"push": `      # Fires on any branch. Add ` + "`branches: [main]`" + ` or
       # ` + "`paths: [\"**/*.go\"]`" + ` to narrow it, and point the repo's
       # GitHub webhook at this pipeline.
       push: {}
 `,
-	"schedule": `    on:
-      # Cron, evaluated by the controller in UTC. 09:00 daily.
+	"schedule": `      # Cron, evaluated by the controller in UTC. 09:00 daily.
       schedule: "0 9 * * *"
 `,
 	"manual": "",
@@ -363,24 +361,82 @@ var triggerBlocks = map[string]string{
 // author can say out loud.
 var triggerEventNames = []string{"pull_request", "push", "schedule", "manual"}
 
-// resolveTrigger picks the `on:` block to write. An explicit --on wins;
+// manualTrigger is the spelling that means "no trigger". It is the only
+// value that cannot be combined, because it contradicts every other one.
+const manualTrigger = "manual"
+
+// parseOnFlag flattens repeated and comma-separated --on values.
+//
+// Both forms are accepted because both are things people type: GitHub
+// spells this `on: [push, pull_request]`, so a comma reads naturally,
+// while a repeatable flag is what shells and generated commands prefer.
+// Rejecting either would be a round-trip over punctuation.
+func parseOnFlag(values []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, v := range values {
+		for _, part := range strings.Split(v, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" || seen[part] {
+				continue
+			}
+			seen[part] = true
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// resolveTrigger builds the `on:` block. An explicit --on wins;
 // otherwise the shape's own default applies, so `--template ci-pr-check`
 // keeps declaring pull_request without anyone repeating themselves.
-func resolveTrigger(shape builtinShape, on string, explicit bool) (string, error) {
-	event := shape.DefaultOn
+//
+// One pipeline can declare several events -- `on:` is a map, and the
+// workflow that prompted this declares both push and pull_request. When
+// --on took a single value, reproducing that meant hand-editing the
+// yaml the scaffolder had just written.
+func resolveTrigger(shape builtinShape, on []string, explicit bool) (string, error) {
+	events := []string{shape.DefaultOn}
 	if explicit {
-		event = on
+		events = on
 	}
-	if event == "" {
+	var blocks []string
+	for _, event := range events {
+		if event == "" {
+			continue
+		}
+		block, ok := triggerBlocks[event]
+		if !ok {
+			return "", fmt.Errorf("new: unknown trigger %q -- --on takes any of: %s\n"+
+				"  combine them with a comma or by repeating --on\n"+
+				"  every trigger type and its fields: sparkwing docs search -q \"on: trigger\"",
+				event, strings.Join(triggerEventNames, ", "))
+		}
+		if event == manualTrigger {
+			if len(events) > 1 {
+				return "", fmt.Errorf("new: --on %s cannot be combined with %s -- "+
+					"manual means no trigger at all\n"+
+					"  drop it to declare the others, or pass it alone to declare none",
+					manualTrigger, strings.Join(without(events, manualTrigger), ", "))
+			}
+			continue
+		}
+		blocks = append(blocks, block)
+	}
+	if len(blocks) == 0 {
 		return "", nil
 	}
-	block, ok := triggerBlocks[event]
-	if !ok {
-		return "", fmt.Errorf("new: unknown trigger %q -- --on takes one of: %s\n"+
-			"  every trigger type and its fields: sparkwing docs search -q \"on: trigger\"",
-			event, strings.Join(triggerEventNames, ", "))
+	return "    on:\n" + strings.Join(blocks, ""), nil
+}
+
+func without(list []string, drop string) []string {
+	var out []string
+	for _, v := range list {
+		if v != drop {
+			out = append(out, v)
+		}
 	}
-	return block, nil
+	return out
 }
 
 // renderBuiltinTemplate expands the {{STRUCT}} / {{NAME}} / {{SHORTLIT}}
@@ -440,11 +496,16 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 	// output, did not open the yaml, and noted it would reasonably have
 	// reported the trigger as live -- so the output has to say which
 	// half it did.
-	if event := triggerEvent(trigger); event != "" {
-		fmt.Printf("  %s declared %s trigger in sparkwing.yaml\n", color.Green("+"), color.Bold(event))
-		if event == "schedule" {
-			fmt.Printf("    %s\n", color.Dim("a controller must be running for it to fire; edit the on: block to change the cron"))
-		} else {
+	if events := triggerEvents(trigger); len(events) > 0 {
+		fmt.Printf("  %s declared %s in sparkwing.yaml\n",
+			color.Green("+"), color.Bold(strings.Join(events, " + ")+" trigger"))
+		// Each says what it still needs, because they need different
+		// things: a webhook has to be pointed here, a schedule needs a
+		// controller running to evaluate the cron.
+		if slices.Contains(events, "schedule") {
+			fmt.Printf("    %s\n", color.Dim("schedule: needs a running controller to evaluate the cron"))
+		}
+		if slices.Contains(events, "push") || slices.Contains(events, "pull_request") {
 			fmt.Printf("    %s\n", color.Dim("not yet live: point the repo's GitHub webhook at this pipeline to deliver the event"))
 		}
 	}
@@ -474,7 +535,7 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 	// reading two full reference topics to find the `on:` schema, while
 	// the search that answers it in one hop went unused. Name the query,
 	// not the topic -- a search hit is a section, a topic is a page.
-	if triggerEvent(trigger) == "" {
+	if len(triggerEvents(trigger)) == 0 {
 		tips = append(tips, InfoNextStep{
 			Command: `sparkwing docs search -q "on: trigger"`,
 			Purpose: "fire it on push / pull request / schedule instead of by hand",
@@ -965,39 +1026,15 @@ func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool, tri
 // triggerEvent names the event a scaffolded `on:` block declares, for
 // the created-files line. It reads the block's own text so the two
 // cannot drift: a trigger nobody names here is a trigger nobody reports.
-func triggerEvent(trigger string) string {
-	for _, event := range []string{"pull_request", "schedule", "push", "webhook"} {
-		if strings.Contains(trigger, event+":") {
-			return event
+func triggerEvents(trigger string) []string {
+	var out []string
+	for _, event := range triggerEventNames {
+		if event == manualTrigger {
+			continue
+		}
+		if strings.Contains(trigger, "\n      "+event+":") {
+			out = append(out, event)
 		}
 	}
-	return ""
+	return out
 }
-
-// A shape named for an event writes that event's trigger. Six agent
-// trials -- three Claude models, three Codex efforts -- each reached
-// for ci-pr-check to satisfy "run go test on pull requests", and five
-// of the six then spent turns searching the docs for the `on:` syntax
-// the shape had not written. The sixth wrote no trigger at all and
-// shipped a manual-only pipeline that passed lint and explain, which
-// is the worse outcome: the gate cannot tell a pipeline that meets the
-// request from one that merely compiles.
-//
-// The filters stay empty on purpose. `branches: [main]` would bake in a
-// branch name the repo may not use, and these shapes have to be green
-// and correct anywhere. Triggers are declarative -- the controller
-// dispatches whichever pipeline the webhook names -- so an empty filter
-// changes nothing about local `sparkwing run`.
-const prCheckTrigger = `    on:
-      # Fires on opened / synchronize / reopened. Add
-      # ` + "`branches: [main]`" + ` to record which base branches this is meant
-      # for, and point the repo's GitHub webhook at this pipeline.
-      pull_request: {}
-`
-
-// scheduledReportSchedule is 09:00 UTC daily: a placeholder concrete
-// enough to edit rather than a syntax the author has to go look up.
-const scheduledReportTrigger = `    on:
-      # Cron, evaluated by the controller in UTC. 09:00 daily.
-      schedule: "0 9 * * *"
-`

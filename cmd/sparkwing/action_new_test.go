@@ -89,7 +89,7 @@ func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 			if err := os.WriteFile(path, []byte("pipelines:\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if err := appendPipelinesYAML(dir, "sample", "Sample", false, tc.trigger); err != nil {
+			if err := appendPipelinesYAML(dir, "sample", "Sample", false, "    on:\n"+tc.trigger); err != nil {
 				t.Fatal(err)
 			}
 			cfg, err := projectconfig.Load(path)
@@ -178,7 +178,11 @@ func TestEveryTriggerBlockParses(t *testing.T) {
 			if err := os.WriteFile(path, []byte("pipelines:\n"), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if err := appendPipelinesYAML(dir, "sample", "Sample", false, block); err != nil {
+			body := block
+			if body != "" {
+				body = "    on:\n" + body
+			}
+			if err := appendPipelinesYAML(dir, "sample", "Sample", false, body); err != nil {
 				t.Fatal(err)
 			}
 			cfg, err := projectconfig.Load(path)
@@ -205,16 +209,16 @@ func TestEveryTriggerBlockParses(t *testing.T) {
 func TestOnOverridesTheShapeDefault(t *testing.T) {
 	cases := []struct {
 		shape    string
-		on       string
+		on       []string
 		explicit bool
 		want     string
 	}{
-		{"minimal", "pull_request", true, "pull_request"},
-		{"ci-pr-check", "manual", true, ""},
-		{"ci-pr-check", "", false, "pull_request"},
-		{"scheduled-report", "", false, "schedule"},
-		{"release", "", false, ""},
-		{"release", "push", true, "push"},
+		{"minimal", []string{"pull_request"}, true, "pull_request"},
+		{"ci-pr-check", []string{"manual"}, true, ""},
+		{"ci-pr-check", nil, false, "pull_request"},
+		{"scheduled-report", nil, false, "schedule"},
+		{"release", nil, false, ""},
+		{"release", []string{"push"}, true, "push"},
 	}
 	for _, tc := range cases {
 		shape, ok := builtinShapeByName(tc.shape)
@@ -225,7 +229,11 @@ func TestOnOverridesTheShapeDefault(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s --on %q: %v", tc.shape, tc.on, err)
 		}
-		if got != triggerBlocks[tc.want] && !(tc.want == "" && got == "") {
+		want := ""
+		if tc.want != "" {
+			want = "    on:\n" + triggerBlocks[tc.want]
+		}
+		if got != want {
 			t.Errorf("%s --on %q (explicit=%v) wrote %q; want the %q block",
 				tc.shape, tc.on, tc.explicit, got, tc.want)
 		}
@@ -236,7 +244,7 @@ func TestOnOverridesTheShapeDefault(t *testing.T) {
 // not is a round-trip: the author still has to go find the list.
 func TestUnknownTriggerNamesEveryChoice(t *testing.T) {
 	shape, _ := builtinShapeByName("minimal")
-	_, err := resolveTrigger(shape, "on_merge", true)
+	_, err := resolveTrigger(shape, []string{"on_merge"}, true)
 	if err == nil {
 		t.Fatal("accepted an unknown trigger")
 	}
@@ -297,5 +305,80 @@ func TestScaffoldsNameOnlyRealSDKSymbols(t *testing.T) {
 				t.Errorf("%s names %s, which does not exist in the SDK", shape.Name, symbol)
 			}
 		}
+	}
+}
+
+// One pipeline, several events. The workflow that prompted this
+// declares both push and pull_request, and reproducing it used to mean
+// hand-editing the yaml the scaffolder had just written.
+func TestOnAcceptsSeveralTriggers(t *testing.T) {
+	shape, _ := builtinShapeByName("minimal")
+	for _, form := range [][]string{
+		{"push,pull_request"},
+		{"push", "pull_request"},
+		{" push , pull_request "},
+		{"push", "pull_request", "push"},
+	} {
+		got, err := resolveTrigger(shape, parseOnFlag(form), true)
+		if err != nil {
+			t.Fatalf("--on %v: %v", form, err)
+		}
+		if n := strings.Count(got, "    on:\n"); n != 1 {
+			t.Errorf("--on %v produced %d `on:` keys; a pipeline entry has one", form, n)
+		}
+		for _, want := range []string{"push: {}", "pull_request: {}"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("--on %v did not declare %q:\n%s", form, want, got)
+			}
+		}
+		if events := triggerEvents(got); len(events) != 2 {
+			t.Errorf("--on %v reported events %v; want both", form, events)
+		}
+	}
+}
+
+// manual means "no trigger", so combining it with a real one is a
+// contradiction rather than a merge. Silently honouring one half would
+// produce a pipeline that fires when the author said it should not.
+func TestManualCannotBeCombined(t *testing.T) {
+	shape, _ := builtinShapeByName("minimal")
+	_, err := resolveTrigger(shape, parseOnFlag([]string{"push,manual"}), true)
+	if err == nil {
+		t.Fatal("accepted --on push,manual")
+	}
+	for _, want := range []string{"manual", "push"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("rejection does not name %q: %v", want, err)
+		}
+	}
+	// Alone it is still the opt-out.
+	got, err := resolveTrigger(shape, parseOnFlag([]string{"manual"}), true)
+	if err != nil || got != "" {
+		t.Errorf("--on manual alone = (%q, %v); want no trigger", got, err)
+	}
+}
+
+// Several events must still parse as one entry through the strict loader.
+func TestMultiTriggerYAMLParses(t *testing.T) {
+	shape, _ := builtinShapeByName("minimal")
+	block, err := resolveTrigger(shape, parseOnFlag([]string{"push,pull_request,schedule"}), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, projectconfig.Filename)
+	if err := os.WriteFile(path, []byte("pipelines:\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendPipelinesYAML(dir, "sample", "Sample", false, block); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := projectconfig.Load(path)
+	if err != nil {
+		t.Fatalf("multi-trigger entry does not parse: %v\n%s", err, block)
+	}
+	on := cfg.Pipelines[0].On
+	if on.Push == nil || on.PullRequest == nil || on.Schedule == "" {
+		t.Errorf("decoded %+v; want all three declared", on)
 	}
 }

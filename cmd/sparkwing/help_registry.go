@@ -1197,6 +1197,9 @@ in any repo before you edit it, because the Run bodies are echoes.
   --on schedule       cron, 09:00 UTC daily
   --on manual         no trigger; runs only when invoked
 
+One pipeline can declare several: --on push,pull_request, or repeat
+the flag. 'manual' is the opt-out and cannot be combined with the rest.
+
 Omit --on and the shape's own default applies (below). A trigger is
 declarative -- the controller dispatches whichever pipeline its webhook
 names -- so it changes nothing about 'sparkwing run <name>' locally,
@@ -1261,7 +1264,7 @@ See also:
 		{Name: "name", Argument: "NAME", Desc: "New pipeline's kebab-case name (a-z, 0-9, -)", Required: true, Group: "Target"},
 		{Name: "sw-cd", Short: "C", Argument: "DIR", Desc: "Scaffold as if started in this directory (re-anchors the .sparkwing search)", Group: "Target"},
 		{Name: "template", Argument: "SHAPE", Desc: "DAG to scaffold: minimal (1 node) | build-test-deploy (3) | ci-pr-check (3) | release (3) | scheduled-report (5)", Default: "minimal", Group: "Scaffold"},
-		{Name: "on", Argument: "EVENT", Desc: "Trigger to declare: pull_request | push | schedule | manual", Default: "the shape's own", Group: "Scaffold"},
+		{Name: "on", Argument: "EVENT", Desc: "Trigger(s) to declare: pull_request | push | schedule | manual (repeatable or comma-separated)", Default: "the shape's own", Group: "Scaffold"},
 		{Name: "hidden", Desc: "Mark the entry hidden in default tab-complete menus", Group: "Scaffold"},
 		{Name: "short", Argument: "TEXT", Desc: "Pre-fill the ShortHelp / desc line", Group: "Scaffold"},
 	},
@@ -1272,6 +1275,7 @@ See also:
 		{"Pull-request gate (lint + test -> gate)", "sparkwing pipeline new --name pr-check --template ci-pr-check"},
 		{"Scheduled fan-out report", "sparkwing pipeline new --name daily-report --template scheduled-report"},
 		{"One job, fired by pull requests", "sparkwing pipeline new --name pr-test --template minimal --on pull_request"},
+		{"Fired by both push and pull requests", "sparkwing pipeline new --name ci --template ci-pr-check --on push,pull_request"},
 		{"A gate you invoke by hand, not on every PR", "sparkwing pipeline new --name gate --template ci-pr-check --on manual"},
 	},
 }

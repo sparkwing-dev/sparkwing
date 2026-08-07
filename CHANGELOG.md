@@ -343,6 +343,13 @@ code change to unlock.
 
 ### Changed
 
+- **cli:** `pipeline new --on` accepts several triggers -- `--on
+  push,pull_request`, or the flag repeated. `on:` is a map and real workflows
+  use more than one key; a migration trial reproducing a workflow that fires
+  on both had to hand-edit the yaml the scaffolder had just written. `manual`
+  stays exclusive, since combining "no trigger" with a trigger is a
+  contradiction rather than a merge, and is rejected by name.
+
 - **cli:** `pipeline new` gains `--on pull_request|push|schedule|manual`, so the
   DAG and the trigger are separate choices. They were welded together --
   `ci-pr-check` was the only shape declaring `on: pull_request` -- which three
