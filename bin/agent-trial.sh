@@ -302,13 +302,20 @@ echo
 
 # The agent is the only witness to what it had to guess at. A prompt
 # that asks for a FRICTION section turns that into a report line rather
-# than something to reconstruct from the trace afterwards. Claude's
-# transcript carries a final result field; other agents print the
-# closing message to stdout, so fall back to scanning the raw trace.
-friction=$(jq -r 'select(.type=="result") | .result' "$TRACE" 2>/dev/null \
-  | awk '/^[^a-z]*FRICTION:/{found=1} found{print}')
+# than something to reconstruct from the trace afterwards.
+#
+# Each harness buries the closing message somewhere different: claude in
+# a final `result` field, codex in the last `agent_message` item. Both
+# store it as one JSON-escaped line, so the raw-text fallback below only
+# catches an agent that prints it unencoded -- it cannot substitute for
+# knowing the shape.
+extract_friction() { awk '/^[^a-z]*FRICTION:/{found=1} found{print}'; }
+friction=$(jq -r 'select(.type=="result") | .result' "$TRACE" 2>/dev/null | extract_friction)
 if [[ -z "$friction" ]]; then
-  friction=$(awk '/^[^a-z]*FRICTION:/{found=1} found{print}' "$TRACE" 2>/dev/null)
+  friction=$(jq -r 'select(.item.type=="agent_message") | .item.text' "$TRACE" 2>/dev/null | extract_friction)
+fi
+if [[ -z "$friction" ]]; then
+  friction=$(extract_friction < "$TRACE" 2>/dev/null)
 fi
 if [[ -n "$friction" ]]; then
   echo "=== FRICTION (agent-reported) ==="
