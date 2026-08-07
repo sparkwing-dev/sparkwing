@@ -148,12 +148,12 @@ That only matters when they disagree, and they eventually do. PATH is
 not one list: an interactive shell orders it from your shell profile,
 while a launchd job, a systemd unit, or a cron entry carries whatever
 PATH its own configuration sets. The two can resolve `sparkwing` to
-different builds, so the same command run two ways is two different
-programs.
+different builds, so the same command resolves to a different program
+depending on how it was launched.
 
-Sparkwing handles this in two ways: it keeps the copies from corrupting
-each other's state, and it tells you they exist -- it never picks a
-winner or touches a binary it did not install.
+Sparkwing handles this by keeping the copies from corrupting each
+other's state and by telling you they exist -- it never picks a winner
+or touches a binary it did not install.
 
 ### Version memory is per install
 
