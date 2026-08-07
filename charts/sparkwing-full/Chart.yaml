@@ -25,7 +25,7 @@ type: application
 # Chart version: SemVer for this chart's *templates / values surface*.
 # Independent of appVersion. Bump on any user-facing values.yaml
 # change or template structural change.
-version: 0.1.0
+version: 0.1.1
 
 # appVersion: the sparkwing release this chart is *known to be tested
 # against*. Per-component image.tag in values.yaml overrides it.

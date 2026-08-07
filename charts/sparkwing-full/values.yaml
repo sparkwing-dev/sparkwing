@@ -133,6 +133,16 @@ web:
     # Service. Set explicitly if logs live elsewhere.
     url: ""
 
+  cache:
+    # Which sparkwing-cache the dashboard's services panel probes.
+    # Empty = auto-generate to point at the bundled
+    # sparkwing-runner-bundle's cache Service; if that sub-chart or
+    # its cache is disabled, the web pod runs without --cache and the
+    # panel simply omits the cache. Probe-only: the dashboard reads
+    # the cache's /health and nothing else, so pointing it at a cache
+    # you run yourself costs nothing but one GET per refresh.
+    url: ""
+
   # Bearer token the web pod uses when proxying to the controller
   # (so the controller's /api/v1/auth checks pass). Reference an
   # existing Secret; the chart does NOT create it.

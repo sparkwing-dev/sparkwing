@@ -135,13 +135,39 @@ sub-chart logs).
 {{- if .Values.web.logs.url -}}
 {{- .Values.web.logs.url -}}
 {{- else if and (index .Values "sparkwing-runner-bundle" "enabled") (index .Values "sparkwing-runner-bundle" "logs" "enabled") -}}
-{{- /* Sub-chart's logs Service name follows its own fullname helper:
-       <release-name>-sparkwing-runner-bundle-logs. We can't call into
-       the sub-chart's helpers from here, so reproduce the pattern. */ -}}
+{{- printf "http://%s-logs.%s.svc.cluster.local" (include "sparkwing-full.bundle.fullname" .) .Release.Namespace -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+Resolved web.cache.url: explicit override wins; otherwise the
+in-cluster cache Service from the runner-bundle sub-chart (only if
+that sub-chart is enabled and its cache component is enabled).
+Empty string when neither applies, in which case the web pod is
+started without --cache and its services panel simply does not list
+the cache -- the same panel a dashboard showed before the flag
+existed. The cache is probe-only: nothing else the dashboard does
+reads it, so an operator who runs their own git mirror can leave
+this empty without losing anything else.
+*/}}
+{{- define "sparkwing-full.web.cacheURL" -}}
+{{- if .Values.web.cache.url -}}
+{{- .Values.web.cache.url -}}
+{{- else if and (index .Values "sparkwing-runner-bundle" "enabled") (index .Values "sparkwing-runner-bundle" "cache" "enabled") -}}
+{{- printf "http://%s-cache.%s.svc.cluster.local" (include "sparkwing-full.bundle.fullname" .) .Release.Namespace -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+The runner-bundle sub-chart's release-qualified name, reproducing its
+own fullname helper (<release-name>-sparkwing-runner-bundle) because a
+parent chart cannot call into a sub-chart's helpers. Its Service names
+are that name plus a component suffix.
+*/}}
+{{- define "sparkwing-full.bundle.fullname" -}}
 {{- $bundleFull := printf "%s-sparkwing-runner-bundle" .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- if contains "sparkwing-runner-bundle" .Release.Name -}}
 {{- $bundleFull = .Release.Name | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
-{{- printf "http://%s-logs.%s.svc.cluster.local" $bundleFull .Release.Namespace -}}
-{{- end -}}
+{{- $bundleFull -}}
 {{- end }}

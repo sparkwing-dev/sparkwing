@@ -20,6 +20,7 @@ import (
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
+	"github.com/sparkwing-dev/sparkwing/internal/health"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
@@ -101,42 +102,36 @@ func runProfilesTest(args []string) error {
 	return nil
 }
 
-// healthResp is the uniform shape every sparkwing service returns on
-// its /health endpoint. Services that don't self-diagnose issues
-// leave problems empty; services that do (controller, logs-service,
-// gitcache) surface "component: detail" strings so CLI tooling can
-// bubble them up without a blanket outage banner.
-type healthResp struct {
-	Status   string   `json:"status"`
-	Problems []string `json:"problems,omitempty"`
-	// Auth is "enabled" or "disabled"; the controller sets it so
-	// tooling can warn when a deployment is serving open. Empty from
-	// services that don't report it.
-	Auth string `json:"auth,omitempty"`
-}
-
 // interpretHealthBody reads a GET /health response and folds it into
 // the probe result: non-200 → fail; 200 with "degraded" → warn +
 // joined problems; 200 + ok → no-op. Returns the decoded body (so
 // callers can inspect extra fields like auth) and true if the caller
 // should stop (status was set to fail or warn).
-func interpretHealthBody(r *profileProbeResult, resp *http.Response) (healthResp, bool) {
+//
+// A 200 body that is not the JSON contract is not itself a fault: the
+// status stands on its own. A body that could not be read is, though --
+// the operator asked this command for the service's own account of
+// itself and did not get one, so it fails rather than reporting health
+// it never saw.
+//
+// The shape and the degraded rule live in internal/health so this
+// command and the dashboard's services panel cannot drift into
+// disagreeing about the same service at the same moment.
+func interpretHealthBody(r *profileProbeResult, resp *http.Response) (health.Response, bool) {
 	if resp.StatusCode != http.StatusOK {
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		r.Status = "fail"
 		r.Detail = fmt.Sprintf("health returned %s: %s",
 			resp.Status, strings.TrimSpace(string(raw)))
-		return healthResp{}, true
+		return health.Response{}, true
 	}
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 1<<16))
-	if err != nil {
+	body, err := health.Decode(resp.Body)
+	if err != nil && !errors.Is(err, health.ErrNotContract) {
 		r.Status = "fail"
-		r.Detail = fmt.Sprintf("read health body: %v", err)
-		return healthResp{}, true
+		r.Detail = err.Error()
+		return health.Response{}, true
 	}
-	var body healthResp
-	_ = json.Unmarshal(raw, &body)
-	if body.Status == "degraded" || len(body.Problems) > 0 {
+	if body.Degraded() {
 		r.Status = "warn"
 		r.Detail = strings.Join(body.Problems, "; ")
 		if r.Detail == "" {

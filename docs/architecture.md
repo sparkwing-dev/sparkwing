@@ -110,6 +110,26 @@ See [Cache](gitcache.md) for endpoints and configuration.
 Next.js web app showing pipeline runs, logs, node status, and
 documentation.
 
+Its services panel (`GET /api/v1/health/services`) probes the health
+endpoint of each service it has been given a URL for: the controller
+and logs service from `--controller` / `--logs`, and the cache from
+`--cache` (probe-only; omit it and the cache is left off the panel).
+The `sparkwing-full` chart fills all three in: `web.cache.url` defaults
+to the runner-bundle's cache Service the same way `web.logs.url`
+defaults to its logs Service, and a release that deploys no cache
+starts the web pod without the flag.
+
+Services report partial failure in the body while still answering
+HTTP 200 -- a filling disk, a stalled fetch loop, an unwritable cache
+directory -- and reserve a 5xx for a total outage. The panel decodes
+that body, so a service reporting `{"status":"degraded","problems":
+[...]}` shows amber with its problems listed, not green. Slowness is
+measured here rather than reported by the service, so a service that is
+both slow and degraded lists both.
+`sparkwing configure profiles test` applies the same rule from the CLI,
+and additionally fails when a health body cannot be read at all: it
+answers an operator once, where the panel repaints on a cycle.
+
 ### DinD (Docker-in-Docker)
 
 Optional, external infrastructure the chart does not deploy. When a

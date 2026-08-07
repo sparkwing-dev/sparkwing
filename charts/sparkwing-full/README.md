@@ -132,6 +132,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `web.replicas` | Replica count (web is stateless). | `1` |
 | `web.controller.url` | Override controller URL. | (auto-computed in-cluster) |
 | `web.logs.url` | Override logs URL. | (auto-computed from sub-chart) |
+| `web.cache.url` | Cache the services panel probes. Probe-only; empty and no bundled cache leaves it off the panel. | (auto-computed from sub-chart) |
 | `web.tokenSecret.name` | Secret holding the controller-bearer token. | `""` |
 | `web.requireLogin` | Force /login redirect. Off until tokens table seeded. | `false` |
 

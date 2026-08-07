@@ -95,6 +95,7 @@ type HandlerOptions struct {
 	Paths         swpaths.Paths
 	ControllerURL string // if set, /api/v1/* proxies to this URL
 	LogsURL       string // sparkwing-logs base URL (for /api/v1/health/services probe)
+	CacheURL      string // sparkwing-cache base URL (probe only; empty leaves it off the panel)
 	Token         string // controller bearer token (cluster mode)
 	// APIURL is injected into the SPA HTML as window.__SPARKWING_API_URL__.
 	// Empty means same-origin.

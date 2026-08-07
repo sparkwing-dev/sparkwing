@@ -54,6 +54,10 @@ spec:
             {{- if $logsURL }}
             - {{ printf "--logs=%s" $logsURL | quote }}
             {{- end }}
+            {{- $cacheURL := include "sparkwing-full.web.cacheURL" . }}
+            {{- if $cacheURL }}
+            - {{ printf "--cache=%s" $cacheURL | quote }}
+            {{- end }}
             {{- if .Values.web.apiUrl }}
             - {{ printf "--api-url=%s" .Values.web.apiUrl | quote }}
             {{- end }}

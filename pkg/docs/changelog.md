@@ -50,6 +50,22 @@ code change to unlock.
 
 ### Fixed
 
+- **web:** the dashboard's services panel now reads the health body it
+  receives instead of classifying on the status code alone. Every sparkwing
+  service reports partial failure in-body while still answering HTTP 200 --
+  only a total outage turns into a 5xx -- so a filling log volume, a stalled
+  gitcache fetch loop, an unwritable cache directory, and a controller whose
+  runs are mostly failing all showed up as a healthy lamp. Those services now
+  render amber with the upstream `problems` listed beneath them, which is what
+  the panel was already built to display. A service answering 200 outside that
+  JSON contract still reads as healthy, so nothing that was green for a good
+  reason turns amber. `sparkwing configure profiles test` has always decoded
+  the body; the two now share one implementation of the contract and can no
+  longer disagree about the same service at the same moment. The panel's own
+  slow-response finding survives a degraded body rather than being folded into
+  it, so a service that is both slow and reporting problems lists both, and the
+  probe still drains what it did not read so the panel keeps reusing one
+  connection per service instead of opening a new one every refresh.
 - **local execution/cache:** `RunAndAwait` children now execute from a
   parent-owned binary lease instead of a pathname in the shared compile cache.
   Clearing or replacing that cache while a parent is live can no longer strand
@@ -134,6 +150,17 @@ code change to unlock.
 
 ### Added
 
+- **web/chart:** `sparkwing-web --cache <url>` adds sparkwing-cache to the
+  services health panel, and the `sparkwing-full` chart wires it up. The cache
+  reports background fetch failures and an unwritable cache directory on
+  `GET /health`, and nothing was probing it, so a cache whose fetch loop had
+  stalled was invisible while runner builds quietly degraded to cold clones.
+  The new `web.cache.url` value defaults to the bundled runner-bundle's cache
+  Service exactly as `web.logs.url` defaults to its logs Service; a release
+  that disables the bundled cache starts the web pod without the flag. The flag
+  is probe-only and defaults to empty, so a dashboard that is not given a cache
+  URL shows the same panel it always did. `sparkwing-full` is version `0.1.1`
+  for the new value.
 - **cli:** `--help` is now honored wherever it appears. A value-taking flag
   consumes whatever follows it, so `sparkwing pipeline new --template --help`
   bound `--help` as the template name and then failed on an unrelated missing
