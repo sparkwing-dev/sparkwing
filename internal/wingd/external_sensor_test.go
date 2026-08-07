@@ -53,7 +53,9 @@ func TestQueueState_ExternalIsTheReadingNotTheResidual(t *testing.T) {
 		TotalMemoryBytes: ledgerMemory,
 		FreeMemoryBytes:  1 << 30,
 		LoadAverage:      8,
+		BusyCores:        8,
 		LoadMeasured:     true,
+		CPUMeasured:      true,
 		MemoryMeasured:   true,
 	})
 
@@ -109,19 +111,19 @@ func TestQueueState_UnmeasuredMemorySaysSoAndIsNotSubtracted(t *testing.T) {
 	}
 }
 
-// TestQueueState_UnmeasuredLoadSaysSoAndIsNotSubtracted is the cores half of
-// the same rule: a sampler that could not read the load average reports no
+// TestQueueState_UnmeasuredCPUSaysSoAndIsNotSubtracted is the cores half of
+// the same rule: a sampler that could not read CPU utilization reports no
 // external cores and says the dimension is unmeasured, rather than passing a
-// zero off as an idle machine. The 7.5 load average here is the stale figure
-// the sampler never confirmed, and none of it may reach admission.
-func TestQueueState_UnmeasuredLoadSaysSoAndIsNotSubtracted(t *testing.T) {
+// zero off as an idle machine. The 7.5 figure here is the stale reading the
+// sampler never confirmed, and none of it may reach admission.
+func TestQueueState_UnmeasuredCPUSaysSoAndIsNotSubtracted(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	d.applyHeadroom(HostStat{
 		TotalCores:       8,
 		TotalMemoryBytes: ledgerMemory,
 		FreeMemoryBytes:  ledgerMemory,
-		LoadAverage:      7.5,
-		LoadMeasured:     false,
+		BusyCores:        7.5,
+		CPUMeasured:      false,
 		MemoryMeasured:   true,
 	})
 
@@ -147,7 +149,9 @@ func TestQueueState_MeasuredExternalIsLabeledMeasured(t *testing.T) {
 		TotalMemoryBytes: ledgerMemory,
 		FreeMemoryBytes:  8 << 30,
 		LoadAverage:      1,
+		BusyCores:        1,
 		LoadMeasured:     true,
+		CPUMeasured:      true,
 		MemoryMeasured:   true,
 	})
 
@@ -174,6 +178,7 @@ func TestApplyHeadroom_MeasuredFlipReappliesPastTheDeadband(t *testing.T) {
 		TotalMemoryBytes: ledgerMemory,
 		FreeMemoryBytes:  ledgerMemory,
 		LoadMeasured:     true,
+		CPUMeasured:      true,
 		MemoryMeasured:   true,
 	}
 	d.applyHeadroom(measured)

@@ -73,7 +73,7 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 			Held:           heldCores,
 			Reserved:       d.reservedCores,
 			External:       d.externalCores,
-			ExternalSource: externalSource(d.loadMeasured),
+			ExternalSource: externalSource(d.cpuMeasured),
 			Available:      grantCores,
 		},
 		wingwire.ResourceState{
@@ -794,7 +794,7 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale 
 		extCores, extMem = 0, 0
 	}
 	avail := map[string]wingwire.ResourceState{
-		"cores":  {Key: "cores", Available: grantCores, External: extCores, ExternalSource: externalSource(d.loadMeasured)},
+		"cores":  {Key: "cores", Available: grantCores, External: extCores, ExternalSource: externalSource(d.cpuMeasured)},
 		"memory": {Key: "memory", Available: grantMem, External: extMem, ExternalSource: externalSource(d.memMeasured)},
 	}
 	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail, rationale)
