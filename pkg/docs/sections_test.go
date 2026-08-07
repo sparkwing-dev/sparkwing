@@ -48,6 +48,99 @@ func TestSectionBodyIncludesItsHeading(t *testing.T) {
 	}
 }
 
+// A `#` inside a fenced block is a comment. Reading it as a heading
+// does not just add a junk section -- it truncates the real one to its
+// opening fence and strands the content under a filename. This is how
+// "pull request triggers" came to render as a bare ```yaml.
+func TestFencedCommentsAreNotHeadings(t *testing.T) {
+	for _, slug := range []string{"hooks", "pipelines", "getting-started", "cli-reference"} {
+		t.Run(slug, func(t *testing.T) {
+			secs, err := docs.Sections(slug)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, s := range secs {
+				// A slash with no spaces around it is a path, so a
+				// filename comment; "Manual / API invocation" is prose
+				// and "`.Inline()`" is a symbol.
+				if !strings.Contains(s.Heading, " ") && strings.Contains(s.Heading, "/") {
+					t.Errorf("section heading %q is a path; a fenced comment was read as a heading", s.Heading)
+				}
+				if s.Heading == "" {
+					continue
+				}
+				body := strings.TrimSpace(s.Body)
+				if _, rest, ok := strings.Cut(body, "\n"); ok {
+					if strings.HasPrefix(strings.TrimSpace(rest), "```") && strings.Count(rest, "```") < 2 {
+						t.Errorf("section %q is a heading plus an unclosed fence -- its content was split away: %q", s.Heading, s.Body)
+					}
+				}
+			}
+		})
+	}
+}
+
+// Every fenced block must survive splitting intact. A section that ends
+// mid-fence is a section whose example got cut in half.
+func TestSectionsDoNotSplitInsideAFence(t *testing.T) {
+	for _, e := range docs.List() {
+		secs, err := docs.Sections(e.Slug)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range secs {
+			if n := strings.Count(s.Body, "\n```"); n%2 != 0 {
+				t.Errorf("%s: section %q holds %d fence markers -- the block is cut across a section boundary",
+					e.Slug, s.Heading, n)
+			}
+		}
+	}
+}
+
+// A design sketch and a version-upgrade guide must never be the answer
+// to "how does this work" when a reference page also matched. Both are
+// short, and the tie-break favors short sections, so without a penalty
+// they win precisely the broad queries where the asker knows least.
+func TestNonCurrentDocsNeverOutrankReference(t *testing.T) {
+	for _, q := range []string{"trigger", "admission", "cache", "pipeline"} {
+		hits := docs.SearchSections(q)
+		if len(hits) == 0 {
+			t.Errorf("SearchSections(%q) found nothing", q)
+			continue
+		}
+		var current bool
+		for _, h := range hits {
+			if !strings.HasPrefix(h.Slug, "proposals/") && !strings.HasPrefix(h.Slug, "migrations/") {
+				current = true
+				break
+			}
+		}
+		if !current {
+			continue
+		}
+		if strings.HasPrefix(hits[0].Slug, "proposals/") || strings.HasPrefix(hits[0].Slug, "migrations/") {
+			t.Errorf("SearchSections(%q) ranked %q first while a reference section also matched",
+				q, hits[0].Slug)
+		}
+	}
+}
+
+// The scaffolder tells an author to run this query to learn the trigger
+// schema. If it stops landing on the schema, the tip is a dead end that
+// costs a round-trip -- the exact cost it was added to remove.
+func TestScaffoldTriggerQueryFindsTheSchema(t *testing.T) {
+	hits := docs.SearchSections("on: trigger")
+	if len(hits) == 0 {
+		t.Fatal("the query named in `pipeline new` output returns nothing")
+	}
+	if !strings.Contains(strings.ToLower(hits[0].Heading), "trigger") {
+		t.Errorf("top hit is %q/%q; expected a section about triggers", hits[0].Slug, hits[0].Heading)
+	}
+	if !strings.Contains(hits[0].Body, "pull_request") {
+		t.Errorf("top hit for the trigger query does not name pull_request:\n%s", hits[0].Body)
+	}
+}
+
 // The queries agents actually run are exact identifiers -- YAML keys and
 // Go symbols read out of an error or a struct -- so those are what the
 // ranking has to get right.

@@ -381,10 +381,29 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 	tips := []InfoNextStep{
 		{Command: "sparkwing run " + name, Purpose: "run it"},
 		{Command: "sparkwing docs read --topic sdk", Purpose: "SDK reference for editing the stub"},
-		{Command: "sparkwing docs read --topic pipelines", Purpose: "sparkwing.yaml + DAG concepts"},
-		{Command: "sparkwing dashboard start", Purpose: "see runs in local dashboard"},
-		{Command: "sparkwing info", Purpose: "find out more about sparkwing"},
 	}
+	// A shape that declared no trigger runs only when someone types its
+	// name, and nothing on this screen would say so. That is the gap
+	// worth one line: an agent trial that scaffolded `minimal` and
+	// wanted a pull-request gate spent twice the median number of calls
+	// reading two full reference topics to find the `on:` schema, while
+	// the search that answers it in one hop went unused. Name the query,
+	// not the topic -- a search hit is a section, a topic is a page.
+	if triggerEvent(trigger) == "" {
+		tips = append(tips, InfoNextStep{
+			Command: `sparkwing docs search -q "on: trigger"`,
+			Purpose: "fire it on push / pull request / schedule instead of by hand",
+		})
+	} else {
+		tips = append(tips, InfoNextStep{
+			Command: `sparkwing docs search -q "on: trigger"`,
+			Purpose: "the other trigger types, and the fields this one takes",
+		})
+	}
+	tips = append(tips,
+		InfoNextStep{Command: "sparkwing docs read --topic pipelines", Purpose: "sparkwing.yaml + DAG concepts"},
+		InfoNextStep{Command: "sparkwing dashboard start", Purpose: "see runs in local dashboard"},
+	)
 	printAlignedSteps(tips)
 	return nil
 }

@@ -36,11 +36,18 @@ type Section struct {
 // yields one preamble section covering the whole body, so every doc is
 // addressable the same way.
 //
-// A `#` opening a line inside a fenced code block would be read as a
-// heading. Tracking fences costs more than it saves on this corpus:
-// the generated references put fenced blocks under headings, never the
-// reverse, so the failure mode is a spurious split rather than a lost
-// section.
+// Fenced code blocks are tracked, because a `#` inside one is a
+// comment, not a heading, and the corpus is full of them: naming the
+// file an example belongs in (`# .sparkwing/sparkwing.yaml`) is how
+// nearly every YAML block opens. 453 such lines across 22 docs, 358 in
+// the generated CLI reference alone.
+//
+// Treating them as headings does not merely add a spurious section --
+// it destroys the real one. The heading keeps the opening fence and
+// nothing else, and the content it introduced becomes an orphan
+// section named after a filename. An agent trial found the top hit for
+// "pull request trigger" rendering as a bare ```yaml with the answer
+// stranded eight places below it.
 func Sections(slug string) ([]Section, error) {
 	body, err := Read(slug)
 	if err != nil {
@@ -67,16 +74,46 @@ func splitSections(slug, body string) []Section {
 		buf = nil
 	}
 
+	fence := ""
 	for i, line := range lines {
-		level, text, isHeading := parseHeading(line)
-		if isHeading {
-			flush(i)
-			cur = Section{Slug: slug, Heading: text, Level: level, StartLine: i + 1}
+		if marker := fenceMarker(line); marker != "" {
+			switch {
+			case fence == "":
+				fence = marker
+			case strings.HasPrefix(marker, fence):
+				fence = ""
+			}
+		}
+		if fence == "" {
+			if level, text, isHeading := parseHeading(line); isHeading {
+				flush(i)
+				cur = Section{Slug: slug, Heading: text, Level: level, StartLine: i + 1}
+			}
 		}
 		buf = append(buf, line)
 	}
 	flush(len(lines))
 	return out
+}
+
+// fenceMarker returns the run of backticks or tildes opening or closing
+// a fenced block, or "" for an ordinary line.
+//
+// The run is returned rather than a bool so a nested fence closes at
+// the right depth: a ``` inside a ````-fenced block is content, and a
+// closing fence must be at least as long as the one that opened it.
+func fenceMarker(line string) string {
+	t := strings.TrimLeft(line, " ")
+	for _, c := range []byte{'`', '~'} {
+		n := 0
+		for n < len(t) && t[n] == c {
+			n++
+		}
+		if n >= 3 {
+			return t[:n]
+		}
+	}
+	return ""
 }
 
 // parseHeading recognizes an ATX heading (#, ##, ...).
@@ -92,6 +129,25 @@ func parseHeading(line string) (level int, text string, ok bool) {
 		return 0, "", false
 	}
 	return i, strings.TrimSpace(line[i:]), true
+}
+
+// nonCurrentPenalty sinks documents that describe something other than
+// current behavior below every reference hit.
+//
+// A proposal records what someone wanted to build, tagged with a status
+// that is frequently "draft" or "not implemented"; a migration guide
+// records what changed between two versions. Ranked alongside reference
+// pages they are worse than noise, because both tend to be short and
+// the tie-break favors tight sections -- searching "trigger" returned a
+// redesign sketch above the schema that exists. Both stay searchable,
+// since "why is it like this" and "what changed in v0.16" are real
+// questions; they just never answer "how does this work" ahead of the
+// page that documents it.
+func nonCurrentPenalty(slug string) int {
+	if strings.HasPrefix(slug, "proposals/") || strings.HasPrefix(slug, "migrations/") {
+		return 1000
+	}
+	return 0
 }
 
 // SearchSections returns the sections matching every token in query,
@@ -135,7 +191,7 @@ func SearchSections(query string) []Section {
 				}
 			}
 			if all {
-				hits = append(hits, scored{Section: s, score: score})
+				hits = append(hits, scored{Section: s, score: score - nonCurrentPenalty(e.Slug)})
 			}
 		}
 	}

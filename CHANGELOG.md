@@ -306,6 +306,30 @@ code change to unlock.
 
 ### Changed
 
+- **docs:** `docs search` stopped shredding sections on code-block comments. A
+  `#` opening a line inside a fenced block is a comment, not a heading, and
+  naming the file an example belongs in (`# .sparkwing/sparkwing.yaml`) is how
+  nearly every YAML block in the corpus opens -- 453 such lines across 22 docs,
+  358 in the generated CLI reference alone. Each one truncated its real section
+  to the opening fence and stranded the content as an orphan section named
+  after a filename, so the top hit for "pull request trigger" rendered as a
+  bare ```` ```yaml ```` with the answer eight places below it. Sections now
+  track fences, including tildes and nesting depth.
+
+- **docs:** proposals and migration guides now rank below every reference hit
+  in `docs search`. A proposal records what someone wanted to build (often
+  tagged "draft" or "not implemented") and a migration guide records what
+  changed between two versions; both tend to be short, and the tie-break
+  favors short sections, so they won exactly the broad queries where the asker
+  knows least -- searching "trigger" returned a redesign sketch above the
+  schema that exists. Both remain searchable.
+
+- **cli:** `pipeline new` now names the query that answers "how do I fire
+  this", and `sparkwing info --for-agent` lists each shape's node count and
+  whether it declares a trigger. The shape list agents choose from was five
+  bare names, so `ci-pr-check` got picked on its name alone and its
+  three-node lint/test/gate structure came as a surprise after scaffolding.
+
 - **cli:** `pipeline new --template ci-pr-check` now writes the `on:
   pull_request` trigger it is named for, and `--template scheduled-report`
   writes an `on: schedule` at 09:00 UTC -- something its help already claimed

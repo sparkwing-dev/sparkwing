@@ -257,9 +257,13 @@ const agentBlockDurable = "This repo uses **sparkwing** for CI/CD (https://spark
 // in it is a command, and commands move.
 const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"\n" +
-	"- `sparkwing pipeline new --name <n> --template <shape>` -- scaffold a shape\n" +
-	"  (minimal, ci-pr-check, build-test-deploy, release, scheduled-report). It\n" +
-	"  compiles, lints, and runs as generated, so you edit from something green\n" +
+	"- `sparkwing pipeline new --name <n> --template <shape>` -- scaffold a shape. It\n" +
+	"  compiles, lints, and runs as generated, so you edit from something green:\n" +
+	"    minimal           1 node\n" +
+	"    build-test-deploy 3 nodes, linear\n" +
+	"    ci-pr-check       3 nodes (lint+test -> gate); declares `on: pull_request`\n" +
+	"    release           3 nodes, linear\n" +
+	"    scheduled-report  5 nodes (fan-out); declares `on: schedule`\n" +
 	"- `sparkwing docs search -q <what you are doing>` -- the doc section that\n" +
 	"  answers it, plus any worked pipeline that already does it\n" +
 	"- `sparkwing docs read --guide authoring` -- the DAG model, the idioms the linter\n" +
