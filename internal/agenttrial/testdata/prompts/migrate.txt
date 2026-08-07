@@ -1,0 +1,19 @@
+This repo's CI is in .github/workflows/ci.yml. Use sparkwing to
+reproduce it as sparkwing pipelines.
+
+Keep the same structure and the same triggers. Where GitHub Actions has
+something sparkwing does not, pick the closest sparkwing idiom rather
+than inventing one, and say what you dropped.
+
+You are done as soon as `sparkwing pipeline lint` passes and every
+pipeline you added runs green. The steps do not have to do real work --
+a placeholder that runs is fine where the real thing needs a cluster, a
+registry, or a database. Do not install git hooks, do not commit
+anything, and do not delete or edit the GitHub Actions workflow.
+
+Then print a final section headed exactly `FRICTION:` listing whatever
+cost you time or made you guess -- a GitHub Actions concept with no
+obvious sparkwing equivalent, a mapping you had to invent, a command you
+expected and did not find, a doc that did not answer the question,
+output you had to read twice. Be specific and blunt. `FRICTION: none` is
+a valid answer; do not pad it.

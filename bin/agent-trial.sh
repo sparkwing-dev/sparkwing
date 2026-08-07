@@ -21,20 +21,28 @@
 # anything this user can, and trials have been observed listing the
 # sparkwing checkout. Read the orientation path before trusting a run.
 #
-# Two fixtures, measuring different things:
+# Three fixtures, measuring different things. Do not compare their
+# numbers to each other:
 #
 #   --fixture small     (default) the committed
 #                       internal/agenttrial/testdata/trial-repo. Fast,
 #                       offline, no existing CI. Measures authoring a
 #                       pipeline from a description.
 #
+#   --fixture migrate   the same tree plus a GitHub Actions workflow,
+#                       applied as an overlay so the two differ in
+#                       exactly one thing. Measures translating CI that
+#                       already exists -- the agent has a spec to read
+#                       instead of a description to interpret, which is
+#                       the more common way anyone actually arrives.
+#
 #   --fixture miniflux  a pinned commit of miniflux/v2 (Apache-2.0, 87
 #                       packages, 133 SQL migrations), cloned and cached
 #                       on first use. It ships ten GitHub Actions
 #                       workflows, so an agent will read and translate
 #                       them: this measures migrating an existing CI
-#                       setup, which is a different job than authoring
-#                       from scratch. Do not compare the two numbers.
+#                       setup at real-world scale, against CI nobody
+#                       wrote for this test.
 #
 # --agent selects the harness under test (claude, codex) and --model the
 # model within it. Command counts come from a PATH shim that logs every
@@ -43,7 +51,7 @@
 # from one agent's habits are worth exactly one agent.
 #
 # Usage: agent-trial.sh --prompt-file <path> [--name <trial>]
-#                       [--fixture small|miniflux]
+#                       [--fixture small|migrate|miniflux]
 #                       [--agent claude|codex] [--model <model>] [--effort low|medium|high]
 #        agent-trial.sh --prompt "build me a lint pipeline"
 #
@@ -117,6 +125,18 @@ case "$fixture" in
     [[ -d "$FIXTURE" ]] || { echo "agent-trial: missing fixture $FIXTURE" >&2; exit 1; }
     cp -R "$FIXTURE/." "$TRIAL/"
     ;;
+  migrate)
+    # The same repo plus a GitHub Actions workflow, as an overlay rather
+    # than a second copy of the tree: migrating existing CI and authoring
+    # from nothing have to differ in exactly one thing, or the two
+    # numbers are not comparable.
+    FIXTURE="$REPO_ROOT/internal/agenttrial/testdata/trial-repo"
+    OVERLAY="$REPO_ROOT/internal/agenttrial/testdata/gha-overlay"
+    [[ -d "$FIXTURE" ]] || { echo "agent-trial: missing fixture $FIXTURE" >&2; exit 1; }
+    [[ -d "$OVERLAY" ]] || { echo "agent-trial: missing overlay $OVERLAY" >&2; exit 1; }
+    cp -R "$FIXTURE/." "$TRIAL/"
+    cp -R "$OVERLAY/." "$TRIAL/"
+    ;;
   miniflux)
     # Cache the pinned tree so repeat trials do not refetch it.
     CACHE="$WORK/cache-miniflux-$MINIFLUX_SHA"
@@ -137,7 +157,7 @@ case "$fixture" in
     cp -R "$CACHE/." "$TRIAL/"
     ;;
   *)
-    echo "agent-trial: unknown fixture $fixture (want small or miniflux)" >&2
+    echo "agent-trial: unknown fixture $fixture (want small, migrate, or miniflux)" >&2
     exit 2
     ;;
 esac
@@ -170,10 +190,18 @@ CMDLOG="$WORK/$name.commands"
 rm -rf "$SHIM"; mkdir -p "$SHIM"
 : > "$CMDLOG"
 real_sparkwing="$(command -v sparkwing)"
+# Logs when each invocation started AND finished. The finish time of
+# the last one is time-to-green: everything after it is the agent
+# composing its closing message, which is this harness's own overhead
+# and not something a user waits for. Reporting only total wall-clock
+# billed the product ~12s per run for writing a friction report.
 cat > "$SHIM/sparkwing" <<SHIMEOF
 #!/usr/bin/env bash
-printf '%s\t%s\n' "\$(date +%s)" "\$*" >> "$CMDLOG"
-exec "$real_sparkwing" "\$@"
+start=\$(date +%s)
+"$real_sparkwing" "\$@"
+rc=\$?
+printf '%s\t%s\t%s\t%s\n' "\$start" "\$(date +%s)" "\$rc" "\$*" >> "$CMDLOG"
+exit \$rc
 SHIMEOF
 chmod +x "$SHIM/sparkwing"
 export PATH="$SHIM:$PATH"
@@ -217,7 +245,20 @@ ELAPSED=$(( $(date +%s) - START ))
 PATH="${PATH#"$SHIM":}"
 AGENT_CALLS=$(wc -l < "$CMDLOG" | tr -d ' ')
 
-echo "agent finished in ${ELAPSED}s (exit $agent_exit)"
+# Time-to-green: the last sparkwing invocation's finish. Everything
+# after it is the agent writing its closing FRICTION report, which this
+# harness asked for and no user waits for -- ~12s a run, or a fifth of
+# the total, billed to the product for the privilege of being measured.
+GREEN=""
+if [[ -s "$CMDLOG" ]]; then
+  last_end=$(awk -F'\t' '$2 != "" {e=$2} END {print e}' "$CMDLOG")
+  [[ -n "$last_end" ]] && GREEN=$(( last_end - START ))
+fi
+if [[ -n "$GREEN" ]]; then
+  echo "agent finished in ${ELAPSED}s (exit $agent_exit); ${GREEN}s to the last sparkwing call"
+else
+  echo "agent finished in ${ELAPSED}s (exit $agent_exit)"
+fi
 echo
 
 # A report for a run that never happened reads exactly like a report for
@@ -246,7 +287,7 @@ if [[ "$AGENT_CALLS" -eq 0 ]] && [[ -s "$TRACE" ]]; then
   jq -r 'select(.type=="item.completed") | select(.item.type=="command_execution")
          | .item.command' "$TRACE" 2>/dev/null \
     | grep -oE '\bsparkwing [a-z][a-z0-9 ._=<>/-]*' \
-    | sed 's/^sparkwing //' | awk 'NF' > "$CMDLOG"
+    | sed 's/^sparkwing //' | awk 'NF {print "\t\t\t" $0}' > "$CMDLOG"
   AGENT_CALLS=$(wc -l < "$CMDLOG" | tr -d ' ')
   CMD_SOURCE="transcript (shim bypassed by login shell)"
 else
@@ -254,15 +295,15 @@ else
 fi
 
 echo "=== ORIENTATION PATH (sparkwing invocations, in order) ==="
-cut -f2- "$CMDLOG" | awk '{print "  " NR ". sparkwing " $0}' | cut -c1-100 | head -30
+cut -f4- "$CMDLOG" | awk '{print "  " NR ". sparkwing " $0}' | cut -c1-100 | head -30
 echo
 
 echo "=== WASTE SIGNALS ==="
 printf '  %-38s %s (%s)\n' "sparkwing invocations:" "$AGENT_CALLS" "$CMD_SOURCE"
-printf '  %-38s %s\n' "  distinct:" "$(cut -f2- "$CMDLOG" | sort -u | wc -l | tr -d ' ')"
-printf '  %-38s %s\n' "  repeated verbatim:" "$(cut -f2- "$CMDLOG" | sort | uniq -d | wc -l | tr -d ' ')"
-docs_reads=$(cut -f2- "$CMDLOG" | grep -cE '^docs read')
-docs_uniq=$(cut -f2- "$CMDLOG" | grep -oE 'docs read --topic [a-z/-]+' | sort -u | wc -l | tr -d ' ')
+printf '  %-38s %s\n' "  distinct:" "$(cut -f4- "$CMDLOG" | sort -u | wc -l | tr -d ' ')"
+printf '  %-38s %s\n' "  repeated verbatim:" "$(cut -f4- "$CMDLOG" | sort | uniq -d | wc -l | tr -d ' ')"
+docs_reads=$(cut -f4- "$CMDLOG" | grep -cE '^docs read')
+docs_uniq=$(cut -f4- "$CMDLOG" | grep -oE 'docs read --topic [a-z/-]+' | sort -u | wc -l | tr -d ' ')
 printf '  %-38s %s (%s distinct topics)\n' "docs read calls:" "$docs_reads" "$docs_uniq"
 
 # Everything below reads the agent's own transcript, whose shape is
@@ -358,14 +399,17 @@ echo
 # own number. Print both so a contended run is obvious instead of
 # quietly becoming a data point.
 agent_ms=$(tail -1 "$TRACE" 2>/dev/null | jq -r '.duration_ms // empty' 2>/dev/null)
+if [[ -n "$GREEN" ]]; then
+  echo "time-to-green: ${GREEN}s   (+$(( ELAPSED - GREEN ))s writing the FRICTION report: harness overhead, not product)"
+fi
 if [[ -n "$agent_ms" ]]; then
   agent_s=$((agent_ms / 1000))
-  echo "wall-clock: ${ELAPSED}s (agent reports ${agent_s}s)"
+  echo "wall-clock:    ${ELAPSED}s (agent reports ${agent_s}s)"
   if [[ "$agent_s" -gt 0 && $((ELAPSED / agent_s)) -ge 2 ]]; then
     echo "  -> harness clock is >=2x the agent's own: this machine was busy; rerun idle"
   fi
 else
-  echo "wall-clock: ${ELAPSED}s"
+  echo "wall-clock:    ${ELAPSED}s"
 fi
 echo "trace: $TRACE"
 echo "repo:  $TRIAL"

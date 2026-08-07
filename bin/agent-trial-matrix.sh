@@ -49,20 +49,23 @@ run_one() {
   printf '%s\n' "$out" > "$WORK/matrix-$label.report"
 
   local log="$WORK/matrix-$label.commands"
-  local calls distinct secs lint expl
+  local calls distinct secs wall lint expl
   calls=$(wc -l < "$log" 2>/dev/null | tr -d ' ')
   distinct=$(cut -f2- "$log" 2>/dev/null | sort -u | wc -l | tr -d ' ')
-  secs=$(printf '%s\n' "$out" | grep -oE 'wall-clock: [0-9]+s' | grep -oE '[0-9]+' | head -1)
+  # time-to-green is the headline: total wall-clock includes the agent
+  # writing this harness's FRICTION report, which no user waits for.
+  secs=$(printf '%s\n' "$out" | grep -oE 'time-to-green: [0-9]+s' | grep -oE '[0-9]+' | head -1)
+  wall=$(printf '%s\n' "$out" | grep -oE 'wall-clock: +[0-9]+s' | grep -oE '[0-9]+' | head -1)
   lint=$(printf '%s\n' "$out" | grep -oE 'lint: +[A-Z]+' | awk '{print $2}')
   expl=$(printf '%s\n' "$out" | grep -oE 'explain: +[A-Z]+' | awk '{print $2}')
-  printf '%-18s %5ss  %3s calls (%2s distinct)  lint=%-5s explain=%s\n' \
-    "$label" "${secs:-?}" "${calls:-0}" "${distinct:-0}" "${lint:-?}" "${expl:-?}"
+  printf '%-18s %5ss %5ss  %3s calls (%2s distinct)  lint=%-5s explain=%s\n' \
+    "$label" "${secs:-?}" "${wall:-?}" "${calls:-0}" "${distinct:-0}" "${lint:-?}" "${expl:-?}"
 }
 
 echo "prompt:  $prompt_file"
 echo "fixture: $fixture"
 echo
-printf '%-18s %6s  %s\n' config time result
+printf '%-18s %6s %6s  %s\n' config green wall result
 
 if command -v claude >/dev/null 2>&1; then
   run_one claude-opus   --agent claude --model opus
