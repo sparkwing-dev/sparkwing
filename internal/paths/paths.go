@@ -72,10 +72,26 @@ func (p Paths) StateDB() string { return filepath.Join(p.Root, "state.db") }
 // semaphore's lock files. See internal/boxslot.
 func (p Paths) BoxSlotDir() string { return filepath.Join(p.Root, "box-slots") }
 
-// LastVersionFile holds the CLI version of the most recent invocation.
-// The dispatcher compares it against the running binary to detect an
-// upgrade and surface a one-time pointer at the changelog.
-func (p Paths) LastVersionFile() string { return filepath.Join(p.Root, "last-version") }
+// VersionStampDir holds one small file per installed sparkwing binary,
+// recording the version that install last ran as. The dispatcher
+// compares the stamp against the running binary to detect an upgrade
+// and surface a one-time pointer at the changelog.
+//
+// The stamps are keyed by a digest of each binary's resolved path
+// (installsite.PathKey) rather than shared, because a machine with two
+// installs -- a `go install` build in GOBIN beside a source install in
+// ~/.local/bin -- resolves a different one from an interactive shell
+// than from a launchd job, and a shared record would be rewritten by
+// each in turn, reading as upgrades and downgrades that never happened.
+// The flat `last-version` file this directory supersedes is no longer
+// read or written.
+func (p Paths) VersionStampDir() string { return filepath.Join(p.Root, "last-version.d") }
+
+// VersionStampFile is the version stamp for one install, keyed by its
+// path digest.
+func (p Paths) VersionStampFile(key string) string {
+	return filepath.Join(p.VersionStampDir(), key)
+}
 
 // RunsDir is the parent directory for per-run artifacts.
 func (p Paths) RunsDir() string { return filepath.Join(p.Root, "runs") }

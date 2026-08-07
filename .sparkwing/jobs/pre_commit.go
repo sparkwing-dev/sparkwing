@@ -14,10 +14,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// PreCommit gates local commits with fast deterministic checks. gofmt,
+// PreCommit provides broad local verification with deterministic checks. gofmt,
 // vet, build, test and lint cover every committed Go module -- the repo
 // root, where the SDK, CLI and server live, as well as .sparkwing/ -- so a
-// commit cannot introduce product code that does not compile, does not
+// a selected run catches product code that does not compile, does not
 // pass its tests, or trips the blessed linter set; the formatters step
 // holds the staged Go files to gofumpt and goimports, which `golangci-lint
 // run` does not check; the two regex sweeps cover the staged change for
@@ -27,12 +27,12 @@ import (
 // can't be committed without re-running bin/sync-docs.sh; the comment
 // check fails when the staged diff adds a comment the policy disallows.
 //
-// Wire it to git: declare the `pre_commit:` trigger in sparkwing.yaml
-// and run `sparkwing pipeline hooks install`.
+// The repository keeps this pipeline manual so the lead can select it when the
+// changed boundary warrants broad verification.
 type PreCommit struct{ sparkwing.Base }
 
 func (PreCommit) ShortHelp() string {
-	return "Fast pre-commit gate: format, vet, build, test, lint, em-dash + tracker-ID sweeps, docs-mirror sync, comment policy"
+	return "Broad local verification: format, vet, build, test, lint, em-dash + tracker-ID sweeps, docs-mirror sync, comment policy"
 }
 
 func (PreCommit) Help() string {
@@ -41,7 +41,7 @@ func (PreCommit) Help() string {
 
 func (PreCommit) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Manually invoke the pre-commit gate", Command: "sparkwing run pre-commit"},
+		{Comment: "Run broad local verification", Command: "sparkwing run pre-commit"},
 	}
 }
 

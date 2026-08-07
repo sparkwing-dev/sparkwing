@@ -3,12 +3,37 @@ package main
 import (
 	"bytes"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
+
+// noticeHome points the process at a throwaway sparkwing home and
+// returns its paths plus the running test binary's own stamp file.
+func noticeHome(t *testing.T) (paths.Paths, string) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	pendingUpgradeNotice = ""
+	p := paths.PathsAt(home)
+	self, err := installsite.Self()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p, p.VersionStampFile(installsite.PathKey(self))
+}
+
+// seedStamp writes a stamp file as if the install at exe last ran as
+// version, the way writeVersionStamp lays it down.
+func seedStamp(t *testing.T, file, exe, version string) {
+	t.Helper()
+	writeVersionStamp(file, exe, version)
+	if got := readVersionStamp(file); got != version {
+		t.Fatalf("seed stamp round-trip = %q, want %q", got, version)
+	}
+}
 
 func TestVersionTransition(t *testing.T) {
 	cases := []struct {
@@ -34,13 +59,8 @@ func TestVersionTransition(t *testing.T) {
 // emits exactly one line and rewrites the stamp; the next invocation is
 // silent.
 func TestNoteVersionTransition_OnceOnly(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	pendingUpgradeNotice = ""
-	p := paths.PathsAt(home)
-	if err := os.WriteFile(p.LastVersionFile(), []byte("v0.14.0\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	_, stamp := noticeHome(t)
+	seedStamp(t, stamp, "test-binary", "v0.14.0")
 
 	var first bytes.Buffer
 	noteVersionTransition(&first, "version")
@@ -51,9 +71,8 @@ func TestNoteVersionTransition_OnceOnly(t *testing.T) {
 		t.Fatalf("transition line missing the changelog pointer; got %q", first.String())
 	}
 
-	stamp, _ := os.ReadFile(p.LastVersionFile())
-	if strings.TrimSpace(string(stamp)) != installedVersion() {
-		t.Fatalf("stamp = %q, want %q", strings.TrimSpace(string(stamp)), installedVersion())
+	if got := readVersionStamp(stamp); got != installedVersion() {
+		t.Fatalf("stamp = %q, want %q", got, installedVersion())
 	}
 
 	var second bytes.Buffer
@@ -67,13 +86,8 @@ func TestNoteVersionTransition_OnceOnly(t *testing.T) {
 // stashes the notice for inline rendering instead of duplicating it on
 // stderr.
 func TestNoteVersionTransition_InfoSuppressesStderr(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	pendingUpgradeNotice = ""
-	p := paths.PathsAt(home)
-	if err := os.WriteFile(p.LastVersionFile(), []byte("v0.14.0\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	_, stamp := noticeHome(t)
+	seedStamp(t, stamp, "test-binary", "v0.14.0")
 
 	var buf bytes.Buffer
 	noteVersionTransition(&buf, "info")
@@ -106,13 +120,9 @@ func TestUpgradeNoticeLineDoesNotClaimVersionOrder(t *testing.T) {
 }
 
 func TestNoteVersionTransition_QuietVerbsSkip(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	pendingUpgradeNotice = ""
-	p := paths.PathsAt(home)
-	if err := os.WriteFile(p.LastVersionFile(), []byte("v0.14.0\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	_, stamp := noticeHome(t)
+	seedStamp(t, stamp, "test-binary", "v0.14.0")
+
 	for _, verb := range []string{"completion", "_complete-verbs", "wingd", "handle-trigger"} {
 		var buf bytes.Buffer
 		noteVersionTransition(&buf, verb)
@@ -120,25 +130,20 @@ func TestNoteVersionTransition_QuietVerbsSkip(t *testing.T) {
 			t.Errorf("verb %q should be quiet; got %q", verb, buf.String())
 		}
 	}
-	stamp, _ := os.ReadFile(p.LastVersionFile())
-	if strings.TrimSpace(string(stamp)) != "v0.14.0" {
-		t.Fatalf("quiet verb rewrote the stamp: %q", strings.TrimSpace(string(stamp)))
+	if got := readVersionStamp(stamp); got != "v0.14.0" {
+		t.Fatalf("quiet verb rewrote the stamp: %q", got)
 	}
 }
 
 func TestNoteVersionTransition_FirstEverRunSilent(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("SPARKWING_HOME", home)
-	pendingUpgradeNotice = ""
-	p := paths.PathsAt(home)
+	_, stamp := noticeHome(t)
 
 	var buf bytes.Buffer
 	noteVersionTransition(&buf, "version")
 	if buf.Len() != 0 {
 		t.Fatalf("first-ever run (no stamp) should be silent; got %q", buf.String())
 	}
-	if _, err := os.Stat(p.LastVersionFile()); err != nil {
-		t.Fatalf("first run should have written the stamp: %v", err)
+	if _, err := os.Stat(stamp); err != nil {
+		t.Fatalf("first run should have written this install's stamp: %v", err)
 	}
-	_ = filepath.Base(home)
 }

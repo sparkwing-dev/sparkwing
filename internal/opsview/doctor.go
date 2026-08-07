@@ -19,6 +19,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/boxslot"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
+	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
@@ -147,6 +148,14 @@ type DoctorReport struct {
 	// list. Reported with an explanation, never stopped: doctor does not end
 	// processes it does not own.
 	StrayDaemons []DoctorStrayDaemon `json:"stray_daemons,omitempty"`
+	// InstallConflict is set when this machine has more than one sparkwing
+	// binary reachable on a search path, so which one a caller gets depends
+	// on whose PATH resolved it -- an interactive shell and a launchd job
+	// order theirs differently and can land on different builds. Reported
+	// with the remedy, never repaired: doctor removes state whose owner is
+	// provably gone, and a second binary is a file somebody installed on
+	// purpose, not a corpse. Retiring one is the operator's call.
+	InstallConflict *DoctorInstallConflict `json:"install_conflict,omitempty"`
 	// Daemon is what the sweep learned about this home's admission daemon. It
 	// carries no omitempty and is rendered on every path, because the whole
 	// point is that "the daemon is healthy" and "I never reached the daemon"
@@ -181,6 +190,34 @@ type DoctorDaemon struct {
 // every daemon-dependent finding in the report is unanswered rather than
 // clean. An absent daemon is not blind: nothing listening is a fact.
 func (d DoctorDaemon) Blind() bool { return d.State == ReachUnreachable }
+
+// DoctorInstallConflict names every other sparkwing binary the sweep
+// found on a search path, so a machine where the same command can be
+// two different builds stops reading as healthy. There is no verdict
+// about which install is the right one: each install keeps its own
+// version memory, and which copy a process runs is decided by that
+// process's PATH, which this sweep cannot see.
+type DoctorInstallConflict struct {
+	// Self is the running binary's own resolved path -- the one install
+	// the reader provably has in hand.
+	Self string `json:"self"`
+	// Competing are the other reachable installs, newest-modified first.
+	Competing []DoctorInstallCopy `json:"competing"`
+}
+
+// DoctorInstallCopy is one competing sparkwing binary.
+type DoctorInstallCopy struct {
+	// Path is where it was found; Resolved is that path with symlinks
+	// followed, present only when the two differ.
+	Path     string `json:"path"`
+	Resolved string `json:"resolved,omitempty"`
+	// Modified is its file modification time in RFC3339. It is the
+	// sweep's only evidence about which copy is stale, and it is a weak
+	// one -- doctor will not execute an unknown binary to ask its
+	// version -- so it is reported for a human to read, never compared
+	// to decide which install wins.
+	Modified string `json:"modified,omitempty"`
+}
 
 // DoctorMachineBudget is the non-default machine budget the resident
 // admission daemon is running under, with the setting it came from.
@@ -324,6 +361,7 @@ func (r DoctorReport) Clean() bool {
 		r.DaemonProtocolGap == nil &&
 		len(r.QuarantinedLedgers) == 0 &&
 		len(r.PoisonedProfiles) == 0 &&
+		r.InstallConflict == nil &&
 		r.ShadowedHooks == nil
 }
 
@@ -377,7 +415,56 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 	diagnoseDaemonHealth(ctx, home, selfVersion, &report)
 	diagnoseQuarantinedLedgers(home, &report)
 	diagnoseStrayDaemons(ctx, home, &report)
+	diagnoseInstallConflict(&report)
 	return report, nil
+}
+
+// diagnoseInstallConflict scans the machine for sparkwing binaries
+// other than the one running.
+//
+// It is skipped under a test binary. A `go test` process is not an
+// installed sparkwing, so every copy on the developer's real PATH would
+// answer as a rival to it and every doctor assertion on a laptop with a
+// normal install would fail on a conflict the suite invented. The
+// classification itself is exercised through [InstallConflict], which
+// takes the machine as an argument instead of reading it.
+func diagnoseInstallConflict(report *DoctorReport) {
+	if paths.UnderTest() {
+		return
+	}
+	self, err := installsite.Self()
+	if err != nil {
+		return
+	}
+	userHome, err := os.UserHomeDir()
+	if err != nil {
+		userHome = ""
+	}
+	report.InstallConflict = InstallConflict(self, installsite.SearchDirs(os.Getenv, userHome))
+}
+
+// InstallConflict reports the sparkwing binaries in dirs that are not
+// the running one, and returns nil when there is nothing to say -- one
+// install, or none the scan could see. Read-only: the scan decides
+// nothing about which install should win, it just refuses to let a
+// split machine read as clean.
+func InstallConflict(self string, dirs []string) *DoctorInstallConflict {
+	competing := installsite.Competing(installsite.Scan(dirs), self)
+	if len(competing) == 0 {
+		return nil
+	}
+	sort.Slice(competing, func(i, j int) bool {
+		return competing[i].ModTime.After(competing[j].ModTime)
+	})
+	out := &DoctorInstallConflict{Self: self}
+	for _, c := range competing {
+		row := DoctorInstallCopy{Path: c.Path, Modified: c.ModTime.UTC().Format(time.RFC3339)}
+		if c.Resolved != c.Path {
+			row.Resolved = c.Resolved
+		}
+		out.Competing = append(out.Competing, row)
+	}
+	return out
 }
 
 // scratchModuleVersion is the version a binary reports for the sparkwing
@@ -905,6 +992,11 @@ func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	}
 	fmt.Fprintf(w, "machine_budget\t%s\t%s\t%d\n", budgetSource, budgetOrigin, ignoreExternal)
 	fmt.Fprintf(w, "stray_daemons\t%d\n", len(r.StrayDaemons))
+	competing := 0
+	if r.InstallConflict != nil {
+		competing = len(r.InstallConflict.Competing)
+	}
+	fmt.Fprintf(w, "competing_installs\t%d\n", competing)
 	return nil
 }
 
@@ -921,6 +1013,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 		renderStrayDaemons(w, r)
 		return nil
 	}
+	renderInstallConflict(w, r)
 	renderDaemonSection(w, r)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 	if n := len(r.OrphanedRuns); n > 0 {
@@ -1135,6 +1228,35 @@ func renderGateSurveyClean(w io.Writer, r DoctorReport) {
 		return
 	}
 	fmt.Fprintf(w, "gates: %d registered repo(s) surveyed, every declared gate fires\n", r.GatesSurveyed)
+}
+
+// renderInstallConflict explains the competing installs and how to get
+// back to one. Each Unix copy gets an exact guarded rename and undo;
+// Windows gets manual shell-specific guidance. Doctor never runs either,
+// because it cannot know which binary the operator meant to keep.
+func renderInstallConflict(w io.Writer, r DoctorReport) {
+	c := r.InstallConflict
+	if c == nil {
+		return
+	}
+	noun := "binaries are"
+	if len(c.Competing) == 1 {
+		noun = "binary is"
+	}
+	fmt.Fprintf(w, "\nwarning: %d other sparkwing %s reachable on this machine besides the one running doctor\n",
+		len(c.Competing), noun)
+	fmt.Fprintf(w, "  this binary: %s\n", c.Self)
+	for _, cp := range c.Competing {
+		via := ""
+		if cp.Resolved != "" {
+			via = " -> " + cp.Resolved
+		}
+		fmt.Fprintf(w, "  also installed: %s%s (modified %s)\n", cp.Path, via, cp.Modified)
+		fmt.Fprintf(w, "    retire it: %s\n", installsite.RetireRemedy(cp.Path).Text())
+	}
+	fmt.Fprintf(w, "  which one a caller gets depends on whose PATH resolved it: an interactive shell and a launchd, systemd, or cron job order theirs differently, so the same command can be two different builds\n")
+	fmt.Fprintf(w, "  each install keeps its own version memory under the sparkwing home, so they cannot rewrite each other's records -- but their outputs are evidence from different builds\n")
+	fmt.Fprintf(w, "  to resolve: keep one and retire the rest with the guidance above, or point each job at the absolute path of the copy you mean\n")
 }
 
 // renderStrayDaemons writes the stray-daemon warnings. It runs on both the

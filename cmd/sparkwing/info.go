@@ -14,6 +14,8 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
+	"github.com/sparkwing-dev/sparkwing/internal/installsite"
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -32,6 +34,23 @@ type Info struct {
 	Docs            InfoDocs       `json:"docs"`
 	FirstRunNote    string         `json:"first_run_note"`
 	UpgradeNotice   string         `json:"upgrade_notice,omitempty"`
+	// Executable identifies the binary that produced this output, so a
+	// reader knows exactly which install the version above describes
+	// and whether some other invocation could resolve a different one.
+	Executable InfoExecutable `json:"executable"`
+}
+
+// InfoExecutable is the running binary's identity: its resolved path,
+// and any other sparkwing installs reachable on this machine. Plain
+// paths, no policy -- which copy a given process runs is decided by
+// that process's own PATH, which this binary cannot see.
+type InfoExecutable struct {
+	// Path is the running binary's path with symlinks resolved.
+	Path string `json:"path"`
+	// OtherInstalls are other sparkwing binaries reachable via PATH or
+	// the well-known install directories, if any. A process whose PATH
+	// orders one of these first runs it instead of Path.
+	OtherInstalls []string `json:"other_installs,omitempty"`
 }
 
 type InfoTip struct {
@@ -325,7 +344,12 @@ func printAgentBlock() {
 	if !info.Toolchain.Go.Found {
 		fmt.Println("- No Go toolchain on PATH. Pipelines are Go programs; authoring one needs it.")
 	}
-	fmt.Printf("- CLI %s. Docs shipped in this binary match it exactly.\n", info.Version.Installed)
+	fmt.Printf("- CLI %s, running from %s. Docs shipped in this binary match it exactly.\n",
+		info.Version.Installed, info.Executable.Path)
+	if n := len(info.Executable.OtherInstalls); n > 0 {
+		fmt.Printf("- %d other sparkwing install(s) on this machine: %s. A process with a different PATH may run one of those instead; use absolute paths in automation, and `sparkwing doctor` for the full picture.\n",
+			n, strings.Join(info.Executable.OtherInstalls, ", "))
+	}
 	fmt.Println()
 	fmt.Print(agentBlockAuthoring)
 }
@@ -485,9 +509,33 @@ func gatherInfo(agentMode bool) Info {
 	}
 
 	info.UpgradeNotice = pendingUpgradeNotice
+	info.Executable = gatherExecutable()
 	info.NextSteps = nextStepsFor(info, agentMode)
 	info.Tips = gatherTips(info)
 	return info
+}
+
+// gatherExecutable resolves the running binary and scans for other
+// sparkwing installs. The scan is skipped under a test binary for the
+// same reason doctor's is: `go test` is not an installed sparkwing, so
+// every copy on the developer's real PATH would read as a rival to it.
+func gatherExecutable() InfoExecutable {
+	self, err := installsite.Self()
+	if err != nil {
+		return InfoExecutable{}
+	}
+	out := InfoExecutable{Path: self}
+	if paths.UnderTest() {
+		return out
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	for _, c := range installsite.Competing(installsite.Scan(installsite.SearchDirs(os.Getenv, home)), self) {
+		out.OtherInstalls = append(out.OtherInstalls, c.Path)
+	}
+	return out
 }
 
 // gatherTips runs each tip gate. Each gate must be cheap and fail-soft;
@@ -731,6 +779,17 @@ func printInfoTable(info Info) {
 
 	if info.UpgradeNotice != "" {
 		fmt.Println(color.Yellow(info.UpgradeNotice))
+		fmt.Println()
+	}
+
+	if n := len(info.Executable.OtherInstalls); n > 0 {
+		noun := "installs"
+		if n == 1 {
+			noun = "install"
+		}
+		fmt.Println(color.Yellow(fmt.Sprintf(
+			"%d other sparkwing %s on this machine (%s); a process whose PATH orders one of them first runs that build instead of %s. `sparkwing doctor` explains.",
+			n, noun, strings.Join(info.Executable.OtherInstalls, ", "), info.Executable.Path)))
 		fmt.Println()
 	}
 
