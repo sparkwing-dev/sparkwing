@@ -50,6 +50,37 @@ code change to unlock.
 
 ### Fixed
 
+- **cli/portability:** the upgrade notice's version memory is now kept per
+  install instead of in one shared file. A machine with more than one sparkwing
+  binary -- a `go install` build in `$GOBIN` beside a source install in
+  `~/.local/bin` -- resolves a different one from an interactive shell than from
+  a launchd job, cron entry, or systemd unit, because PATH is not one list. Each
+  invocation used to stamp `~/.sparkwing/last-version` with its own version, so
+  the record read as an upgrade followed by a downgrade followed by an upgrade,
+  none of which happened. Each install now stamps its own file under
+  `~/.sparkwing/last-version.d/`, keyed by a digest of its resolved path
+  (symlinked names collapse into one install), so no copy can rewrite another's
+  memory; the old `last-version` file is no longer read and is safe to delete.
+  The split machine itself is reported, read-only, wherever it can be seen:
+  `sparkwing doctor` scans PATH plus the well-known install directories --
+  a scan limited to the caller's own PATH would call the machine clean from the
+  very shell whose neighbor is the rival -- makes the sweep unclean, and prints
+  the exact reversible `mv` that retires each extra copy; `sparkwing info`
+  reports the running binary's resolved path and any other installs
+  (`executable` in `-o json`, identity lines in `--for-agent`); `sparkwing
+  update` names other copies after installing, and its `go install` fallback now
+  states exactly where the new binary landed, including when the binary you ran
+  was not the one replaced; `bin/install.sh` reports copies outside its
+  destination, no longer modifies anything outside `$DEST`, reads `go
+  install`'s directory from the first `GOPATH` element when `GOPATH` is a
+  list, and succeeds with `$HOME` unset (the report just skips home-derived
+  directories). Unix remedies shell-quote each path and guard both the retire
+  destination and the undo source, so repeated cleanup cannot overwrite a
+  file. Windows reports both exact paths and asks for File Explorer or
+  shell-specific quoting instead of claiming one command is safe in cmd.exe
+  and PowerShell. Nothing deletes, renames, or picks between binaries. See
+  [docs/local-execution.md](docs/local-execution.md).
+
 - **web:** the dashboard's services panel now reads the health body it
   receives instead of classifying on the status code alone. Every sparkwing
   service reports partial failure in-body while still answering HTTP 200 --

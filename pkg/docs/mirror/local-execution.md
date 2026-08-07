@@ -137,6 +137,80 @@ sparkwing to block them.
 | `sparkwing pipeline trigger <pipeline> --profile prof` | Cluster | Medium (remote build) | Production deploys, deploys requiring cluster credentials, parity with webhook flow |
 | Git push -> webhook | Cluster | Medium | Automated CI/CD on every commit |
 
+## More than one sparkwing on one machine
+
+A machine can end up with more than one sparkwing binary. `go install`
+drops one in `$GOBIN`, the source installer builds one into
+`~/.local/bin`, a package manager may leave a third in `/usr/local/bin`.
+Each is a complete sparkwing.
+
+That only matters when they disagree, and they eventually do. PATH is
+not one list: an interactive shell orders it from your shell profile,
+while a launchd job, a systemd unit, or a cron entry carries whatever
+PATH its own configuration sets. The two can resolve `sparkwing` to
+different builds, so the same command run two ways is two different
+programs.
+
+Sparkwing handles this in two ways: it keeps the copies from corrupting
+each other's state, and it tells you they exist -- it never picks a
+winner or touches a binary it did not install.
+
+### Version memory is per install
+
+Each install records the version it last ran as in its own file under
+`~/.sparkwing/last-version.d/`, keyed by a digest of the binary's
+resolved path (so a symlink or a `/tmp` vs `/private/tmp` alias is one
+install, not two). The upgrade notice -- the one-line changelog pointer
+printed after a binary changes -- compares each install only against
+what it, itself, last ran as. Two copies taking turns can no longer
+rewrite a shared record into upgrades and downgrades that never
+happened. A separate `SPARKWING_HOME` keeps separate stamps.
+
+Earlier builds used a single shared `~/.sparkwing/last-version` file
+(and, briefly, an unreleased `~/.sparkwing/canonical-install` record).
+Neither is read or written anymore; both are safe to delete.
+
+### Finding a split install
+
+Every surface that knows about installs reports them, read-only:
+
+- `sparkwing doctor` scans your PATH *and* the well-known install
+  directories (`~/.local/bin`, `$GOBIN`, `$GOPATH/bin`,
+  `/usr/local/bin`, `/opt/homebrew/bin`) -- a scan that trusted only the
+  caller's PATH would report a clean machine from the very shell whose
+  neighbor is the conflict. Copies reachable through a symlink collapse
+  into one entry. The finding makes a sweep unclean, and each copy is
+  printed with the exact reversible `mv` that retires it.
+- `sparkwing info` reports the running binary's resolved path and any
+  other installs (`executable.path` / `executable.other_installs` in
+  `-o json`), and `sparkwing info --for-agent` includes the same
+  identity so an agent knows which build its evidence came from.
+- `sparkwing update` names any other copies after installing, and its
+  `go install` fallback states exactly where the new binary landed --
+  including when the binary you ran was *not* the one replaced.
+- `bin/install.sh` (the source installer) reports copies outside its
+  destination and never modifies anything outside `$DEST`.
+
+### Fixing it
+
+Pick one:
+
+- **Keep one copy.** On Unix, retire the others with the printed guarded
+  `mv -n`; it refuses when `<path>.superseded` already exists, and its printed
+  undo likewise refuses if the original path has been recreated. Paths with
+  whitespace or shell metacharacters are quoted as one shell word. On Windows,
+  Sparkwing prints both exact paths and asks you to rename with File Explorer
+  or a command quoted for the shell you chose. It does not pretend one command
+  can safely quote every legal filename in both cmd.exe and PowerShell. Nothing
+  in Sparkwing runs the remedy for you, because it cannot know which copy you
+  meant to keep.
+- **Keep both, fix the caller.** Point the launchd plist, systemd unit,
+  or cron entry at an absolute path rather than at a bare `sparkwing`
+  on a PATH you do not control. This is the right fix when the two
+  copies are deliberate.
+
+Nothing here ever deletes or renames a binary.
+
 ## Per-host concurrency
 
 Two `sparkwing run` invocations on the same machine compete for the same

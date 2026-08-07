@@ -149,6 +149,11 @@ func (p *PrePush) run(ctx context.Context) error {
 	} else {
 		sparkwing.Info(ctx, "changelog script portability: clean")
 	}
+	if _, err := sparkwing.Bash(ctx, "bash bin/install-test.sh").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("installer report: %v", err))
+	} else {
+		sparkwing.Info(ctx, "installer report: clean")
+	}
 
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-shell.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("shellcheck: %v", err))

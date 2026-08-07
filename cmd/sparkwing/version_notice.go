@@ -4,14 +4,25 @@
 // sparkwing home; the first invocation after the binary changes prints
 // one stderr line (and surfaces the same line in `sparkwing info`),
 // then never again for that transition.
+//
+// The stamp is per install, keyed by the running binary's resolved
+// path. A machine with two sparkwing binaries on two different PATHs --
+// the shell's and a launchd job's -- would otherwise have each rewrite
+// a shared stamp with its own version on every run, and the record
+// would read as a stream of upgrades and downgrades that never
+// happened. Each install comparing only against what it itself last
+// ran as makes the notice true no matter how many copies exist, without
+// any binary having to know about, own, or touch the others.
 package main
 
 import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
@@ -33,7 +44,8 @@ func upgradeNoticeLine(prev, cur string) string {
 
 // versionTransition reports whether prev->cur is a transition worth
 // announcing: both sides known and different. Unknown/missing versions
-// (a fresh home, a build without version metadata) never announce.
+// (a fresh home, a first run of this install, a build without version
+// metadata) never announce.
 func versionTransition(prev, cur string) bool {
 	if prev == "" || cur == "" {
 		return false
@@ -44,11 +56,12 @@ func versionTransition(prev, cur string) bool {
 	return prev != cur
 }
 
-// noteVersionTransition reads the last-run stamp, compares it to the
-// running binary, and stamps the current version. On a transition it
+// noteVersionTransition reads the running install's last-run stamp,
+// compares it to the running binary, and re-stamps. On a transition it
 // records the pointer in pendingUpgradeNotice and, unless the verb owns
 // its own rendering (info), writes the line to w. Best-effort: a
-// read-only or absent home never breaks dispatch.
+// read-only or absent home, or a binary whose own path will not
+// resolve, never breaks dispatch.
 func noteVersionTransition(w io.Writer, verb string) {
 	if quietNoticeVerb(verb) {
 		return
@@ -57,9 +70,18 @@ func noteVersionTransition(w io.Writer, verb string) {
 	if err != nil {
 		return
 	}
-	prev := readVersionStamp(p)
+	self, err := installsite.Self()
+	if err != nil {
+		return
+	}
+	noteVersionTransitionForExe(w, verb, p, self)
+}
+
+func noteVersionTransitionForExe(w io.Writer, verb string, p paths.Paths, exe string) {
+	stamp := p.VersionStampFile(installsite.PathKey(exe))
+	prev := readVersionStamp(stamp)
 	cur := installedVersion()
-	writeVersionStamp(p, cur)
+	writeVersionStamp(stamp, exe, cur)
 	if !versionTransition(prev, cur) {
 		return
 	}
@@ -70,22 +92,32 @@ func noteVersionTransition(w io.Writer, verb string) {
 	}
 }
 
-func readVersionStamp(p paths.Paths) string {
-	body, err := os.ReadFile(p.LastVersionFile())
+// readVersionStamp returns the version recorded in file: the first line
+// that is not blank and not a `#` comment, so the stamp can carry the
+// binary path it describes as a note to the operator reading the file.
+func readVersionStamp(file string) string {
+	body, err := os.ReadFile(file)
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(body))
+	for line := range strings.SplitSeq(string(body), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		return line
+	}
+	return ""
 }
 
-func writeVersionStamp(p paths.Paths, version string) {
+func writeVersionStamp(file, exe, version string) {
 	if version == "" {
 		return
 	}
-	if err := p.EnsureRoot(); err != nil {
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 		return
 	}
-	_ = os.WriteFile(p.LastVersionFile(), []byte(version+"\n"), 0o644)
+	_ = os.WriteFile(file, []byte("# "+exe+"\n"+version+"\n"), 0o644)
 }
 
 // quietNoticeVerb suppresses the transition line for machine-facing

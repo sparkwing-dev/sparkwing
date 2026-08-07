@@ -20,6 +20,8 @@ import (
 
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
+
+	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 )
 
 const (
@@ -167,8 +169,43 @@ func runUpdateBinary(version string, force, overrideHold bool) error {
 	}
 
 	fmt.Fprintf(os.Stdout, "sparkwing updated: %s -> %s\n", current, resolved)
+	reportOtherInstalls(os.Stdout, currentBin)
 	fmt.Fprintf(os.Stdout, "what's new: https://github.com/sparkwing-dev/sparkwing/releases\n")
 	return nil
+}
+
+// reportOtherInstalls names every other sparkwing binary reachable on
+// the machine after an install landed at installedBin, with the exact
+// remedy per copy. It is strictly read-only: renaming a binary
+// elsewhere on the user's machine is a bigger action than update was
+// asked for, and the operator may well have installed the other copy
+// on purpose. Nothing here is an error -- the install itself succeeded,
+// and failing after it would send the caller looking for a broken
+// binary that is fine.
+func reportOtherInstalls(w io.Writer, installedBin string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = ""
+	}
+	writeOtherInstallsNote(w, installedBin,
+		installsite.Competing(installsite.Scan(installsite.SearchDirs(os.Getenv, home)), installedBin))
+}
+
+func writeOtherInstallsNote(w io.Writer, installedBin string, others []installsite.Copy) {
+	if len(others) == 0 {
+		return
+	}
+	noun := "binaries are"
+	if len(others) == 1 {
+		noun = "binary is"
+	}
+	fmt.Fprintf(w, "\nnote: %d other sparkwing %s installed on this machine:\n", len(others), noun)
+	for _, c := range others {
+		fmt.Fprintf(w, "  %s (modified %s) -- retire it with: %s\n",
+			c.Path, c.ModTime.Format("2006-01-02 15:04"), installsite.RetireRemedy(c.Path).Text())
+	}
+	fmt.Fprintf(w, "  a shell and a background job can resolve different copies of `sparkwing`, so the same command can be two builds.\n")
+	fmt.Fprintf(w, "  keep one, or point each job at %s by absolute path. `sparkwing doctor` shows the full picture.\n", installedBin)
 }
 
 // runVersionUpdate dispatches `sparkwing version update`. Requires
@@ -369,6 +406,14 @@ func copyFile(src, dst string) error {
 }
 
 // updateCLIViaGoInstall is the go-toolchain fallback when download fails.
+//
+// Unlike the download path, `go install` does not replace the running
+// binary: it drops the new build in GOBIN (or GOPATH/bin), which may be
+// a different directory than the one that ran this command. The
+// fallback therefore names the exact file it installed, says when the
+// running binary was not the one replaced, and lists any other copies
+// -- silently leaving a second install behind is the split-PATH state
+// this reporting exists to surface.
 func updateCLIViaGoInstall(version string) error {
 	target := "github.com/" + updateRepo + "/cmd/sparkwing@"
 	if version == "" || version == "latest" {
@@ -383,8 +428,74 @@ func updateCLIViaGoInstall(version string) error {
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("go install: %w", err)
 	}
-	fmt.Fprintf(os.Stdout, "sparkwing updated via go install -> %s\n", version)
+	fmt.Fprintf(os.Stdout, "go install finished for %s\n", target)
+	self, err := installsite.Self()
+	if err != nil {
+		self = ""
+	}
+	reportGoInstallOutcome(os.Stdout, goInstallBinTarget(), self)
 	return nil
+}
+
+// goInstallBinTarget is the file `go install` just wrote: GOBIN when
+// set, else the first GOPATH element's bin. Asked of `go env` rather
+// than the process environment, because settings written with
+// `go env -w` never appear there. Empty when go env will not answer.
+func goInstallBinTarget() string {
+	out, err := exec.Command("go", "env", "GOBIN", "GOPATH").Output()
+	if err != nil {
+		return ""
+	}
+	return goInstallBinTargetFromEnv(string(out))
+}
+
+// goInstallBinTargetFromEnv parses `go env GOBIN GOPATH` output: one
+// value per line, in the order asked. The default machine -- GOBIN
+// unset -- answers with a LEADING EMPTY LINE, so the output is split
+// before any trimming; a whole-output TrimSpace would swallow that
+// line, leave GOPATH alone on line one, and read the answer as too
+// short. Each value is trimmed on its own, which also drops the \r
+// that go env emits on Windows.
+func goInstallBinTargetFromEnv(out string) string {
+	lines := strings.Split(out, "\n")
+	if len(lines) < 2 {
+		return ""
+	}
+	return goInstallBinPath(strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1]))
+}
+
+// goInstallBinPath resolves go's documented install target from the
+// GOBIN and GOPATH values go env reports.
+func goInstallBinPath(gobin, gopath string) string {
+	dir := gobin
+	if dir == "" {
+		for _, e := range filepath.SplitList(gopath) {
+			if e != "" {
+				dir = filepath.Join(e, "bin")
+				break
+			}
+		}
+	}
+	if dir == "" {
+		return ""
+	}
+	return filepath.Join(dir, installsite.ExeName())
+}
+
+// reportGoInstallOutcome says where the go-install fallback put the
+// binary and what that means for the install the caller actually ran.
+func reportGoInstallOutcome(w io.Writer, installedTo, self string) {
+	if installedTo == "" {
+		fmt.Fprintf(w, "note: could not determine where `go install` placed the binary; `sparkwing doctor` reports every install on this machine\n")
+		return
+	}
+	fmt.Fprintf(w, "installed to %s\n", installedTo)
+	if self != "" && !installsite.SamePath(installedTo, self) {
+		fmt.Fprintf(w, "note: the binary you ran (%s) was not replaced and is now a second install\n", self)
+		fmt.Fprintf(w, "  keep one: %s, or make sure each caller's PATH resolves %s first\n",
+			installsite.RetireRemedy(self).Text(), installedTo)
+	}
+	reportOtherInstalls(w, installedTo)
 }
 
 func runUpdateSDK(version string) error {

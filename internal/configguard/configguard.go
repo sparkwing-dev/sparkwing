@@ -28,7 +28,7 @@ import (
 // for: it is the laptop's fleet registry, and a single malformed line
 // makes every fleet-wide command see an empty fleet.
 //
-// The state files under ~/.sparkwing -- last-version, outbox.db, state.db
+// The state files under ~/.sparkwing -- last-version.d, outbox.db, state.db
 // -- are deliberately absent. They belong to whatever sparkwing is
 // running on the machine, and on a developer laptop that is a wingd
 // daemon and a pre-commit pipeline on every commit. Asserting they are
