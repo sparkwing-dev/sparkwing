@@ -314,6 +314,7 @@ type ProfileResetSummary struct {
 	RowsDeleted    int
 	RowsCleared    int
 	SamplesDropped int
+	FloorsDropped  int
 }
 const RetrySourceAuto = "auto"
 const RetrySourceManual = "manual"
