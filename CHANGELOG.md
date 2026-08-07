@@ -304,6 +304,17 @@ code change to unlock.
   step queued behind a tool budget could report its position but never how
   long.
 
+### Fixed
+
+- **cli:** the `minimal` scaffold's stub named `ExecIn` and `BashIn`, neither of
+  which the SDK has ever had -- it exports `Exec` and `Bash`. That comment is
+  the first thing an editor of a fresh pipeline reads, and every agent in a
+  six-config sweep searched the docs for those spellings, found nothing, and
+  fell back to reading the whole SDK reference. The stub also now shows the
+  shell-out-and-propagate-failure shape it was pointing at. A test holds every
+  scaffold's CamelCase identifiers -- in comments as well as calls, since this
+  one was prose -- to symbols the SDK actually exports.
+
 ### Changed
 
 - **cli:** `pipeline new` gains `--on pull_request|push|schedule|manual`, so the

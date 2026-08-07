@@ -5,6 +5,8 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -241,6 +243,59 @@ func TestUnknownTriggerNamesEveryChoice(t *testing.T) {
 	for _, event := range triggerEventNames {
 		if !strings.Contains(err.Error(), event) {
 			t.Errorf("rejection does not offer %q: %v", event, err)
+		}
+	}
+}
+
+// Generated code must not name SDK functions that do not exist. The
+// minimal stub pointed at `ExecIn` / `BashIn`, which the SDK has never
+// had -- it exports Exec and Bash -- and that comment is the first
+// thing an editor reads. Every agent in a six-config sweep searched the
+// docs for those spellings, found nothing, and fell back to reading the
+// whole SDK reference.
+func TestScaffoldsNameOnlyRealSDKSymbols(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate the SDK source")
+	}
+	sdk := filepath.Join(filepath.Dir(filename), "..", "..", "sparkwing")
+	entries, err := os.ReadDir(sdk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var src strings.Builder
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(sdk, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		src.Write(b)
+	}
+	sdkSrc := src.String()
+
+	// Comments count. The bug this guards was in prose -- "Paths in
+	// ExecIn / BashIn / ReadFile" -- not in a call, so checking only
+	// sw.-qualified calls would have passed while the defect shipped.
+	// Multi-segment CamelCase is the shape of an SDK symbol and not of
+	// English, so every such token in the rendered template has to
+	// resolve, whether it is called or merely mentioned.
+	ref := regexp.MustCompile(`\b(?:sw\.)?([A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+)\b`)
+	// The scaffolder's own generated identifiers, and the one stdlib
+	// name the templates use.
+	generated := map[string]bool{"Sample": true, "SampleJob": true, "Context": true}
+	for _, shape := range builtinShapes {
+		rendered := renderBuiltinTemplate("sample", "", shape.src)
+		for _, m := range ref.FindAllStringSubmatch(rendered, -1) {
+			symbol := m[1]
+			if generated[symbol] || strings.HasPrefix(symbol, "Sample") {
+				continue
+			}
+			if !strings.Contains(sdkSrc, symbol) {
+				t.Errorf("%s names %s, which does not exist in the SDK", shape.Name, symbol)
+			}
 		}
 	}
 }

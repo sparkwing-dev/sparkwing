@@ -35,7 +35,7 @@ func Path(parts ...string) string {
 }
 
 // ReadFile reads the named file. Relative paths resolve against
-// WorkDir() (the pipeline root), matching ShIn / ExecIn semantics.
+// WorkDir() (the pipeline root), matching Bash / Exec semantics.
 // Absolute paths are used as-is.
 //
 //	data, err := sparkwing.ReadFile("backend/config.yaml")

@@ -521,10 +521,14 @@ func (j *{{STRUCT}}Job) Work(w *sw.Work) (*sw.WorkStep, error) {
 	return nil, nil
 }
 
-// Paths in ExecIn / BashIn / ReadFile are relative to the repo root,
-// not .sparkwing/. See WorkDir().
+// Paths in Exec / Bash / ReadFile are relative to the repo root, not
+// .sparkwing/. See WorkDir().
 func ({{STRUCT}}Job) run(ctx context.Context) error {
 	sw.Info(ctx, "replace this stub with your logic")
+	// Shell out and propagate failure:
+	//   if _, err := sw.Bash(ctx, "go test ./...").Run(); err != nil {
+	//           return err
+	//   }
 	return nil
 }
 
