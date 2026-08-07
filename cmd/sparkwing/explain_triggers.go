@@ -42,7 +42,21 @@ func describeTriggers(on pipelines.Triggers) []triggerLine {
 	// Filters that record intent without being enforced are the quiet
 	// half of this: `branches: [main]` reads like it scopes the trigger,
 	// and today nothing outside the type definition reads it.
-	const webhookBlocker = "needs a GitHub webhook pointed at this pipeline"
+	//
+	// The delivery note says what explain knows and names what answers
+	// the rest. An earlier version asserted "not yet live", which is a
+	// claim about GitHub that this command never checked -- it reads as
+	// a warning to someone whose webhook is configured correctly.
+	// `cluster webhooks list` does check, by deriving the pipeline from
+	// each hook's URL path, but it shells out to `gh` over the network:
+	// explain is offline and `explain --all` is a CI gate, so consulting
+	// it here would trade a fast local check for a flaky remote one.
+	const webhookBlocker = "delivery depends on a GitHub webhook posting to this pipeline"
+
+	// Git hooks are the one case explain could check locally, and
+	// `pipeline hooks status` already reports declared vs installed --
+	// so point at it rather than duplicating its answer badly.
+	const hookBlocker = "fires only once the git hook is installed"
 
 	if t := on.Push; t != nil {
 		out = append(out, triggerLine{
@@ -63,20 +77,20 @@ func describeTriggers(on pipelines.Triggers) []triggerLine {
 		out = append(out, triggerLine{
 			Event:   "schedule",
 			Detail:  on.Schedule + " (UTC)",
-			Blocker: "needs a running controller to evaluate the cron",
+			Blocker: "fires only while a controller is running to evaluate the cron",
 		})
 	}
 	if t := on.Webhook; t != nil {
 		out = append(out, triggerLine{Event: "webhook", Detail: t.Path})
 	}
 	if on.PreHook != nil {
-		out = append(out, triggerLine{Event: "pre_commit", Blocker: "needs `sparkwing pipeline hooks install`"})
+		out = append(out, triggerLine{Event: "pre_commit", Blocker: hookBlocker})
 	}
 	if on.PostHook != nil {
-		out = append(out, triggerLine{Event: "pre_push", Blocker: "needs `sparkwing pipeline hooks install`"})
+		out = append(out, triggerLine{Event: "pre_push", Blocker: hookBlocker})
 	}
 	if on.PostCommitHook != nil {
-		out = append(out, triggerLine{Event: "post_commit", Blocker: "needs `sparkwing pipeline hooks install`"})
+		out = append(out, triggerLine{Event: "post_commit", Blocker: hookBlocker})
 	}
 	return out
 }
@@ -131,17 +145,49 @@ func printTriggers(name string) {
 		return
 	}
 	fmt.Println("Triggers:")
+	// Blockers are hoisted below the list and de-duplicated: push and
+	// pull_request share one, and repeating a two-line caveat per
+	// trigger buries the triggers themselves.
+	var blockers []string
+	seen := map[string]bool{}
 	for _, l := range lines {
 		head := "  " + color.Bold(l.Event)
 		if l.Detail != "" {
 			head += "  " + color.Dim(l.Detail)
 		}
 		fmt.Println(head)
-		if l.Blocker != "" {
-			fmt.Printf("    %s\n", color.Dim("not yet live: "+l.Blocker))
-		}
 		if l.Advisory != "" {
 			fmt.Printf("    %s\n", color.Dim(l.Advisory))
 		}
+		if l.Blocker != "" && !seen[l.Blocker] {
+			seen[l.Blocker] = true
+			blockers = append(blockers, l.Blocker)
+		}
+	}
+	if len(blockers) == 0 {
+		return
+	}
+	fmt.Println()
+	for _, b := range blockers {
+		fmt.Printf("  %s\n", color.Dim(b))
+	}
+	// Name the command that actually answers it. explain cannot: the
+	// check shells out to `gh` over the network, and this command is
+	// offline and gates CI via --all.
+	var steps []InfoNextStep
+	if seen["delivery depends on a GitHub webhook posting to this pipeline"] {
+		steps = append(steps, InfoNextStep{
+			Command: "sparkwing cluster webhooks list --repo OWNER/NAME",
+			Purpose: "which hooks point at which pipeline",
+		})
+	}
+	if seen["fires only once the git hook is installed"] {
+		steps = append(steps, InfoNextStep{
+			Command: "sparkwing pipeline hooks status",
+			Purpose: "declared, installed, and missing hooks",
+		})
+	}
+	if len(steps) > 0 {
+		printAlignedSteps(steps)
 	}
 }
