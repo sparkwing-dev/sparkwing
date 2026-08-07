@@ -2253,7 +2253,7 @@ Import as `swinputs "github.com/sparkwing-dev/sparkwing/sparkwing/inputs"`.
 
 ### Functions
 
-- `func Compose(fns ...sparkwing.CacheKeyFn) sparkwing.CacheKeyFn` -- Compose folds multiple sparkwing.CacheKeyFns into one via sparkwing.Key.
+- `func Compose(fns ...sparkwing.CacheKeyFn) sparkwing.CacheKeyFn` -- Compose folds multiple sparkwing.CacheKeyFn values into one via sparkwing.Key.
 - `func Const(s string) sparkwing.CacheKeyFn` -- Const returns a sparkwing.CacheKeyFn that always returns the same value.
 - `func Env(names ...string) sparkwing.CacheKeyFn` -- Env returns a sparkwing.CacheKeyFn that hashes the values of the named environment variables.
 - `func Files(globs ...string) sparkwing.CacheKeyFn` -- Files returns a sparkwing.CacheKeyFn that hashes the contents of tracked files matching the given globs.

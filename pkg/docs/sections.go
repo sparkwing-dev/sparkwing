@@ -150,6 +150,74 @@ func nonCurrentPenalty(slug string) int {
 	return 0
 }
 
+// wholeWord reports whether tok appears in hay as a word rather than
+// buried inside a longer one.
+//
+// The distinction decides the ranking. "command" is a substring of
+// "Subcommands", so substring-matching a heading made the generated CLI
+// reference's subcommand tables the top hit for "run shell command" --
+// a list of verb names ranked above the page explaining how to run a
+// shell command, because it was shorter and the heading "matched".
+func wholeWord(hay, tok string) bool {
+	return matchAt(hay, tok, false)
+}
+
+// wordPrefix reports whether tok starts a word in hay: "shell" matches
+// "shelling", "command" does not match "subcommands".
+//
+// This is the cheapest stand-in for stemming, and it is what closes the
+// gap between how someone asks and how a doc is titled. "How do I run a
+// shell command" has to reach a section headed "Exec -- shelling out";
+// requiring an exact word never gets there, and allowing any substring
+// gets there via every compound noun in the corpus.
+func wordPrefix(hay, tok string) bool {
+	return matchAt(hay, tok, true)
+}
+
+// matchAt finds tok at a word boundary. prefixOK allows the match to end
+// mid-word ("shell" in "shelling"); it must always start one.
+func matchAt(hay, tok string, prefixOK bool) bool {
+	for i := 0; i <= len(hay)-len(tok); {
+		j := strings.Index(hay[i:], tok)
+		if j < 0 {
+			return false
+		}
+		start := i + j
+		if !isWordByte(hay, start-1) && (prefixOK || !isWordByte(hay, start+len(tok))) {
+			return true
+		}
+		i = start + 1
+	}
+	return false
+}
+
+func isWordByte(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return false
+	}
+	c := s[i]
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
+// Match weights. A whole-word heading hit is the section that is *about*
+// the query; a substring heading hit is usually an accident of English
+// compounding, so it scores below a whole-word body hit -- the section
+// that at least discusses the thing beats the one whose title merely
+// contains its letters.
+const (
+	scoreHeadingWord   = 20
+	scoreHeadingPrefix = 12
+	scoreBodyWord      = 5
+	scoreBodyPrefix    = 3
+	scoreHeadingSubstr = 2
+	scoreBodySubstr    = 1
+)
+
+// minToken drops tokens too short to discriminate. "a" in "Exec run a
+// command" matches nearly every section in the corpus, so it
+// contributes only noise to the score while still narrowing nothing.
+const minToken = 2
+
 // SearchSections returns the sections matching every token in query,
 // best first.
 //
@@ -157,9 +225,17 @@ func nonCurrentPenalty(slug string) int {
 // wants the section that defines it, not the six that mention it in
 // passing. Within a rank, shorter sections win, because a match in a
 // tight section is a more precise answer than the same match inside a
-// long one.
+// long one -- but only as a tie-break, since a section that explains
+// something is long precisely because it explains it.
 func SearchSections(query string) []Section {
 	tokens := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
+	kept := tokens[:0]
+	for _, t := range tokens {
+		if len(t) >= minToken {
+			kept = append(kept, t)
+		}
+	}
+	tokens = kept
 	if len(tokens) == 0 {
 		return nil
 	}
@@ -179,10 +255,18 @@ func SearchSections(query string) []Section {
 			score, all := 0, true
 			for _, tok := range tokens {
 				switch {
+				case wholeWord(head, tok):
+					score += scoreHeadingWord
+				case wordPrefix(head, tok):
+					score += scoreHeadingPrefix
+				case wholeWord(hay, tok):
+					score += scoreBodyWord
+				case wordPrefix(hay, tok):
+					score += scoreBodyPrefix
 				case strings.Contains(head, tok):
-					score += 10
+					score += scoreHeadingSubstr
 				case strings.Contains(hay, tok):
-					score++
+					score += scoreBodySubstr
 				default:
 					all = false
 				}

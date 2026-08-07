@@ -204,3 +204,47 @@ func TestSearchSectionsPrefersHeadingMatches(t *testing.T) {
 		t.Errorf("top hit heading %q does not match the query; heading hits should outrank body hits", hits[0].Heading)
 	}
 }
+
+// The question every agent trial asked after scaffolding, in the
+// spellings they actually typed. Each has to reach a section about
+// running a shell command; before this, all of them reached a table of
+// CLI verb names and the agents fell back to reading the whole SDK
+// reference.
+func TestShellCommandQueriesReachTheRightSection(t *testing.T) {
+	queries := []string{
+		"run shell command",
+		"run shell command bash",
+		"Exec run a command",
+		"Bash step",
+		"go test command",
+	}
+	for _, q := range queries {
+		hits := docs.SearchSections(q)
+		if len(hits) == 0 {
+			t.Errorf("SearchSections(%q) found nothing", q)
+			continue
+		}
+		head := strings.ToLower(hits[0].Heading)
+		if !strings.Contains(head, "exec") && !strings.Contains(head, "bash") {
+			t.Errorf("SearchSections(%q) ranked %q/%q first; expected a section about Exec/Bash",
+				q, hits[0].Slug, hits[0].Heading)
+		}
+	}
+}
+
+// A one-letter token matches nearly every section, so it narrows
+// nothing while still contributing to the score.
+func TestSingleCharacterTokensAreIgnored(t *testing.T) {
+	with := docs.SearchSections("Exec run a command")
+	without := docs.SearchSections("Exec run command")
+	if len(with) == 0 || len(without) == 0 {
+		t.Fatal("expected hits for both forms")
+	}
+	if with[0].Slug != without[0].Slug || with[0].Heading != without[0].Heading {
+		t.Errorf("a stray %q changed the top hit: %q/%q vs %q/%q",
+			"a", with[0].Slug, with[0].Heading, without[0].Slug, without[0].Heading)
+	}
+	if docs.SearchSections("a") != nil {
+		t.Error("a query of only noise tokens should return nothing")
+	}
+}

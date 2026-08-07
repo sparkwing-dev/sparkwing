@@ -127,7 +127,7 @@ func (p *Release) publish(ctx context.Context) error {
 }
 ```
 
-## Choosing `Bash` versus `Exec`
+## Choosing `Bash` versus `Exec` to run a shell command
 
 Both run inside a job or step body; neither is a lint rule, so nothing
 flags a wrong choice. Pick by where the values in the command come from.

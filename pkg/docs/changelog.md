@@ -306,6 +306,18 @@ code change to unlock.
 
 ### Fixed
 
+- **docs:** `docs search` ranked a table of CLI verb names above the page that
+  answers the question. "command" is a substring of "Subcommands", and a
+  substring hit on a heading scored the same as a real one, so the generated
+  reference's subcommand tables won "run shell command" -- and won the
+  shorter-is-better tie-break too, because a table is short and an explanation
+  is not. Heading and body matches are now scored by whether the token matches
+  as a word, as a word prefix (so "shell" reaches "shelling"), or merely as a
+  substring, and single-character tokens are dropped since they match
+  everywhere and narrow nothing. The two sections about running a shell
+  command are also titled with the words people search for rather than with
+  the API's own vocabulary; ranking can only surface what is written.
+
 - **cli:** the `minimal` scaffold's stub named `ExecIn` and `BashIn`, neither of
   which the SDK has ever had -- it exports `Exec` and `Bash`. That comment is
   the first thing an editor of a fresh pipeline reads, and every agent in a

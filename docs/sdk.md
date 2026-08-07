@@ -132,7 +132,7 @@ pipeline libs) can opt their own ctx-taking entry points into the
 guard by calling `planguard.Guard(ctx, "yourpkg.Helper")` at the top
 (import `github.com/sparkwing-dev/sparkwing/sparkwing/planguard`).
 
-## Exec - shelling out
+## Exec and Bash - running a shell command
 
 Two entry points pick the kind of execution. Each returns a `*Cmd`
 builder you chain modifiers onto, then terminate with one verb that

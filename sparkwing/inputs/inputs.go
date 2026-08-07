@@ -148,7 +148,7 @@ func Const(s string) sparkwing.CacheKeyFn {
 	return func(_ context.Context) sparkwing.CacheKey { return sparkwing.CacheKey(s) }
 }
 
-// Compose folds multiple sparkwing.CacheKeyFns into one via
+// Compose folds multiple sparkwing.CacheKeyFn values into one via
 // sparkwing.Key. If any sub-fn returns the empty key, Compose returns
 // the empty key (signaling "no cache").
 func Compose(fns ...sparkwing.CacheKeyFn) sparkwing.CacheKeyFn {
