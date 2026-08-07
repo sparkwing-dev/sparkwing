@@ -2884,10 +2884,10 @@ directive.
 ### Examples
 
 ```sh
-# Vendor the sparks-core templates module
+# Inflate the sparks-core templates module
 sparkwing pipeline sparks inflate --module templates
 
-# Vendor a full module path
+# Inflate any spark library by module path
 sparkwing pipeline sparks inflate --module github.com/example/my-sparks
 ```
 

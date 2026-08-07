@@ -332,8 +332,8 @@ and the overlay. What each subcommand does:
 - **add** / **remove** -- add or remove a library entry in the `sparks:` block.
 - **warmup** -- pre-compile pipeline binaries across consumer repos after a
   release (see [Warmup](#warmup) below).
-- **vendor** -- eject a spark module's source into your repo so you can own
-  and edit it (see [Vendoring a spark module](#vendoring-a-spark-module)
+- **inflate** -- copy a spark library's source into your repo so you can own
+  and edit it (see [Inflating a spark library](#inflating-a-spark-library)
   below).
 
 For the exact flags each subcommand takes, see
@@ -362,18 +362,18 @@ for repo in repo-a repo-b repo-c; do
 done
 ```
 
-### Vendoring a spark module
+### Inflating a spark library
 
 Most of the time you consume a spark library by importing it and letting
 the overlay pin its version. Sometimes you want the opposite: to take a
 module's source into your own repo, edit it freely, and stop tracking
-upstream. `sparkwing pipeline sparks inflate` does that ejection.
+upstream. `sparkwing pipeline sparks inflate` does that.
 
 ```bash
-# eject the sparks-core templates module
+# inflate the sparks-core templates module
 sparkwing pipeline sparks inflate --module templates
 
-# eject any other spark library by full module path
+# inflate any other spark library by full module path
 sparkwing pipeline sparks inflate --module github.com/example/my-sparks
 ```
 
@@ -399,10 +399,10 @@ pipeline code needs editing -- the same imports now compile against source
 you own.
 
 The command refuses to overwrite an existing
-`.sparkwing/sparks/<name>/` directory. To undo a vendor: delete that
+`.sparkwing/sparks/<name>/` directory. To undo an inflate: delete that
 directory and remove the `replace` directive from `.sparkwing/go.mod`.
 
-Unlike the overlay resolver, vendoring **deliberately edits the
+Unlike the overlay resolver, inflating **deliberately edits the
 git-tracked `.sparkwing/go.mod`** (it adds the `replace`). That is the
 whole point -- you are opting out of upstream version tracking for this
 module and committing the source into your repo. Commit
@@ -451,8 +451,8 @@ sparkwing pipeline new --name deploy --template go-test-build-deploy-k8s \
 
 The scaffolder renders the template body into `.sparkwing/jobs/<name>.go`,
 wires the `sparkwing.yaml` entry, and prints any prerequisite the template
-declares. To own and modify the template registry itself, vendor it (see
-[Vendoring a spark module](#vendoring-a-spark-module)).
+declares. To own and modify the template registry itself, inflate it (see
+[Inflating a spark library](#inflating-a-spark-library)).
 
 ## Authoring a sparks library
 
@@ -498,9 +498,9 @@ Explicit scope limits, baked in to avoid drift:
   `go.sum`, and the rest of the repo pristine. Generated files live under
   `.sparkwing/` with names starting `.resolved.` and are gitignored. The
   one deliberate exception is `sparkwing pipeline sparks inflate`, which you
-  invoke explicitly to eject a module's source and which does edit the
+  invoke explicitly to inflate a library's source and which does edit the
   git-tracked `.sparkwing/go.mod` (see
-  [Vendoring a spark module](#vendoring-a-spark-module)).
+  [Inflating a spark library](#inflating-a-spark-library)).
 - **No cross-module locking.** Each consumer resolves independently. There
   is no workspace-level lock that spans multiple consumer repos.
 

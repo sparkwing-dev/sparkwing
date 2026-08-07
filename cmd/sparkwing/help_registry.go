@@ -3337,8 +3337,8 @@ directive.`,
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
 	Examples: []Example{
-		{"Vendor the sparks-core templates module", "sparkwing pipeline sparks inflate --module templates"},
-		{"Vendor a full module path", "sparkwing pipeline sparks inflate --module github.com/example/my-sparks"},
+		{"Inflate the sparks-core templates module", "sparkwing pipeline sparks inflate --module templates"},
+		{"Inflate any spark library by module path", "sparkwing pipeline sparks inflate --module github.com/example/my-sparks"},
 	},
 }
 
