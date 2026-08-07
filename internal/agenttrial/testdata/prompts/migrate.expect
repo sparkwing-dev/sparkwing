@@ -1,0 +1,6 @@
+# The fixture workflow has three jobs (lint, test, image) and fires on
+# both push and pull_request.
+pipelines 1
+trigger pull_request
+trigger push
+job go test

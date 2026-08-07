@@ -3,6 +3,7 @@ package pipelinelint
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
@@ -242,6 +243,7 @@ func TestRules_EveryRuleIsDocumented(t *testing.T) {
 	want := map[string]bool{
 		RulePlanIO: false, RulePlanRuntimeBranch: false, RuleRunnerLabel: false,
 		RuleUnusedRef: false, RuleGuardMisuse: false,
+		RuleGroupCacheShared: false,
 	}
 	for _, d := range Rules() {
 		if _, ok := want[d.Name]; !ok {
@@ -278,5 +280,68 @@ func TestAnalyze_SortsFindingsByLocation(t *testing.T) {
 	}
 	if findings[0].Line > findings[1].Line {
 		t.Fatalf("findings not sorted by line: %+v", findings)
+	}
+}
+
+// A group's Cache applies one key to every member, so a matrix stores
+// one result and replays it for every cell. It presents as a fast green
+// run, which is why nothing downstream catches it.
+func TestGroupCacheShared(t *testing.T) {
+	const src = `package jobs
+
+import (
+	"context"
+
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+type P struct{ sw.Base }
+
+func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
+	sw.JobFanOut(plan, "matrix", []string{"1.23", "1.24"}, func(v string) (string, any) {
+		return v, nil
+	}).Cache(func(ctx context.Context) sw.CacheKey { return sw.Key("tests") })
+	return nil
+}
+`
+	findings := lintSource(t, src)
+	var got int
+	for _, f := range findings {
+		if f.Rule == RuleGroupCacheShared {
+			got++
+			if !strings.Contains(f.Message, "Members()") {
+				t.Errorf("finding does not name the way out: %q", f.Message)
+			}
+		}
+	}
+	if got != 1 {
+		t.Fatalf("got %d %s findings, want 1: %+v", got, RuleGroupCacheShared, findings)
+	}
+}
+
+// Cache on a single job is the supported thing and must stay silent, or
+// the rule taxes the correct usage.
+func TestSingleJobCacheIsClean(t *testing.T) {
+	const src = `package jobs
+
+import (
+	"context"
+
+	sw "github.com/sparkwing-dev/sparkwing/sparkwing"
+)
+
+type P struct{ sw.Base }
+
+func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
+	sw.Job(plan, "test", &T{}).Cache(func(ctx context.Context) sw.CacheKey { return sw.Key("tests") })
+	return nil
+}
+
+type T struct{ sw.Base }
+`
+	for _, f := range lintSource(t, src) {
+		if f.Rule == RuleGroupCacheShared {
+			t.Errorf("flagged a single-job Cache: %+v", f)
+		}
 	}
 }

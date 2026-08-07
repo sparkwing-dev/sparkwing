@@ -392,6 +392,48 @@ if [[ -n "$explain_bad" ]]; then
 else
   echo "  explain: PASS ($explain_ok pipelines)"
 fi
+
+# lint and explain say a pipeline is well-formed. Neither knows what the
+# prompt asked for, and the gap is not theoretical: a trial scored clean
+# here having produced a pipeline with no trigger at all -- it compiled,
+# linted, explained, ran green, reported no friction, and was the
+# fastest run in its sweep. Every signal said it was the best result.
+#
+# The expectations live beside each prompt as <prompt>.expect and are
+# deliberately coarse. They answer "did it do the task", not "did it do
+# the task the way I would have".
+EXPECT="${prompt_file%.txt}.expect"
+if [[ -r "$EXPECT" ]]; then
+  yaml_all=$(cat "$TRIAL"/.sparkwing/sparkwing.yaml 2>/dev/null)
+  jobs_all=$(cat "$TRIAL"/.sparkwing/jobs/*.go 2>/dev/null)
+  pipeline_count=$(sparkwing pipeline list -o json 2>/dev/null | jq -r 'length' 2>/dev/null || echo 0)
+  task_fail=""
+  task_ok=0
+  while read -r kind arg; do
+    [[ -z "$kind" || "$kind" == \#* ]] && continue
+    ok=1
+    case "$kind" in
+      trigger)   grep -qE "^[[:space:]]*$arg:" <<<"$yaml_all" || ok=0 ;;
+      yaml)      grep -qE "$arg" <<<"$yaml_all" || ok=0 ;;
+      job)       grep -qE "$arg" <<<"$jobs_all" || ok=0 ;;
+      pipelines) [[ "${pipeline_count:-0}" -ge "$arg" ]] || ok=0 ;;
+      *)         echo "  (unknown expectation kind $kind)" ; continue ;;
+    esac
+    if [[ "$ok" -eq 1 ]]; then
+      task_ok=$((task_ok + 1))
+    else
+      task_fail="$task_fail
+    missing: $kind $arg"
+    fi
+  done < "$EXPECT"
+  if [[ -n "$task_fail" ]]; then
+    echo "  task:    FAIL -- compiles and lints, but does not do what was asked$task_fail"
+  else
+    echo "  task:    PASS ($task_ok expectation(s))"
+  fi
+else
+  echo "  task:    (no $(basename "$EXPECT"); lint+explain do not check whether the prompt was satisfied)"
+fi
 echo
 # The agent records its own elapsed time. A harness wall-clock much
 # larger than that is this machine being busy, not sparkwing being slow

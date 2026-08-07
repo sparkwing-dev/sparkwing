@@ -1,0 +1,3 @@
+# The prompt asks for five pipelines covering the CI/CD lifecycle.
+pipelines 5
+trigger pull_request

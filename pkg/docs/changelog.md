@@ -343,6 +343,24 @@ code change to unlock.
 
 ### Changed
 
+- **cli:** `pipeline explain` now reports what fires a pipeline, and says so
+  plainly when nothing does. A trial produced a pipeline for "run go test on
+  pull requests" that declared no trigger: it compiled, linted clean,
+  explained clean, ran green, reported no friction, and was the fastest run in
+  its sweep -- every signal said it was the best result in the set. Triggers
+  that need something external say so (a webhook pointed at the pipeline, a
+  controller running to evaluate a cron), and `branches` / `paths` / `actions`
+  filters are marked as recording intent, since nothing reads them today. This
+  reports rather than judges: a manual-only pipeline is legitimate, which is
+  why it is not a lint rule.
+
+- **sdk/lint:** new `group-cache-shared` rule. `JobGroup.Cache` applies one key
+  function to every member, so a `JobFanOut` matrix stores one result and
+  replays it for every cell -- a matrix over Go 1.23 and 1.24 serves 1.24's
+  pass for both. It presents as a fast green run, so nothing downstream catches
+  it. The finding names `Members()` as the way to key each job, which an agent
+  previously had to find by reading the SDK reference.
+
 - **cli:** `pipeline new --on` accepts several triggers -- `--on
   push,pull_request`, or the flag repeated. `on:` is a map and real workflows
   use more than one key; a migration trial reproducing a workflow that fires

@@ -1,0 +1,15 @@
+# What "did the task" means for this prompt, checked after the run.
+#
+# Coarse on purpose: this catches "did not do the task", not style. An
+# over-specified expectation turns a legitimate design choice into a
+# failure and gets switched off, which is worse than not having one.
+#
+# Format: <kind> <argument>
+#   trigger <event>   some pipeline declares this trigger
+#   yaml <regex>      sparkwing.yaml matches
+#   job <regex>       some file under .sparkwing/jobs/ matches
+#   pipelines <n>     at least n pipelines are registered
+
+pipelines 1
+trigger pull_request
+job go test

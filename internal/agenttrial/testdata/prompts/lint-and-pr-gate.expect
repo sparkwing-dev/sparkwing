@@ -1,0 +1,3 @@
+pipelines 1
+trigger pull_request
+job go test

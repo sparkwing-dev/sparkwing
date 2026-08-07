@@ -228,6 +228,11 @@ func runPipelineExplain(args []string) error {
 		return nil
 	}
 	printPlanSnapshot(&snap)
+	// After the DAG, because the DAG is what was asked for; before the
+	// prompt returns, because "when does this run" is the question the
+	// tree cannot answer.
+	fmt.Println()
+	printTriggers(pipeline)
 	return nil
 }
 

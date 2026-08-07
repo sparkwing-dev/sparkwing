@@ -224,6 +224,41 @@ func (a *analysis) checkChain(expr ast.Expr) {
 		a.add(RuleRunnerLabel, labelCalls[0].Pos(),
 			"job is Inline() (in-process) yet declares "+methodName(labelCalls[0])+"; a runner label can never be honored on an inline job.")
 	}
+	a.checkGroupCache(root, methods)
+}
+
+// checkGroupCache flags a content cache declared on a set of jobs rather
+// than on one job.
+//
+// JobGroup.Cache takes a single key function and applies it to every
+// member, so the members share one cache entry: the first to finish
+// stores a result the rest replay. On the shape this is most often
+// reached for -- a build matrix from JobFanOut -- that means one cell's
+// pass is served for all of them. It presents as a fast green run, which
+// is why nothing downstream catches it.
+//
+// No intent needs inferring here, which is what makes it a lint rule
+// rather than an advisory: one key across N members is wrong under every
+// reading of it.
+func (a *analysis) checkGroupCache(root *ast.CallExpr, methods []*ast.CallExpr) {
+	sel := selectorOf(root.Fun)
+	if sel == nil {
+		return
+	}
+	switch sel.Sel.Name {
+	case "JobFanOut", "JobFanOutDynamic", "GroupJobs":
+	default:
+		return
+	}
+	for _, m := range methods {
+		if methodName(m) != "Cache" {
+			continue
+		}
+		a.add(RuleGroupCacheShared, m.Pos(),
+			"Cache() here applies one key to every member of "+sel.Sel.Name+
+				", so the members share a cache entry and replay each other's results; "+
+				"key them individually by ranging over the group's Members().")
+	}
 }
 
 func (a *analysis) isJobConstructor(call *ast.CallExpr) bool {

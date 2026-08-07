@@ -29,6 +29,7 @@ const (
 	RuleRunnerLabel       = "runner-label"
 	RuleUnusedRef         = "unused-ref"
 	RuleGuardMisuse       = "guard-misuse"
+	RuleGroupCacheShared  = "group-cache-shared"
 )
 
 // Finding is one rule violation. File/Line/Col are zero for findings
@@ -73,6 +74,11 @@ func Rules() []RuleDoc {
 			Name:    RuleUnusedRef,
 			Forbids: "discarding a Ref result (RefTo) via blank assignment or a bare expression statement",
 			Why:     "A Ref is the typed handle a downstream job reads an upstream's output through. Creating one and throwing it away is dead code: either wire it into a job (as a field or closure capture) or drop the producing edge.",
+		},
+		{
+			Name:    RuleGroupCacheShared,
+			Forbids: "Cache() applied to a fan-out or grouped set of jobs",
+			Why:     "A group's Cache applies one key function to every member, so the members share a single cache entry and replay each other's results -- a matrix over Go 1.23 and 1.24 would store one pass and reuse it for both, which looks like a fast green build and is not a build at all. Key each member instead: range over JobGroup.Members() and call Cache on the *JobNode.",
 		},
 		{
 			Name:    RuleGuardMisuse,
