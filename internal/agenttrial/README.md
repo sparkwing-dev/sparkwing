@@ -47,13 +47,40 @@ sparkwing tells their agent to use it. Discovering the tool unprompted
 is a different question, worth asking separately, but it is not what
 these trials measure.
 
+## Running a trial
+
+Each scenario is a committed prompt plus a fixture. Nothing here needs
+arguments beyond these; the defaults are the measured configuration.
+
+| what you want to measure | command |
+|---|---|
+| simple pipeline, from a description | `bash bin/agent-trial.sh --prompt-file internal/agenttrial/testdata/prompts/quickstart.txt` |
+| a PR gate with lint + test | `bash bin/agent-trial.sh --prompt-file internal/agenttrial/testdata/prompts/lint-and-pr-gate.txt` |
+| complex: a five-pipeline CI/CD set | `bash bin/agent-trial.sh --prompt-file internal/agenttrial/testdata/prompts/full-cicd.txt` |
+| migrating existing GitHub Actions CI | `bash bin/agent-trial.sh --prompt-file internal/agenttrial/testdata/prompts/migrate.txt --fixture migrate` |
+| migration at real-world scale | `bash bin/agent-trial.sh --prompt-file internal/agenttrial/testdata/prompts/migrate.txt --fixture miniflux` |
+
+Add `--agent codex`, `--model sonnet`, or `--effort high` to vary the
+harness. `--name <label>` keeps a run's artifacts from overwriting the
+last one's.
+
+**Install the CLI you mean to measure first.** The trial runs whatever
+`sparkwing` is on PATH, so `bash bin/install.sh` before a trial, or the
+numbers describe the last release rather than the working tree. This has
+silently invalidated a sweep before.
+
+Read the number labelled `time-to-green`, not `wall-clock`. The prompts
+ask the agent to close with a FRICTION report, and writing it costs
+~12s that no real user waits for.
+
 ## Running more than one trial
 
 One agent's result is one agent's habits. `bin/agent-trial-matrix.sh`
 runs the quickstart prompt once per locally available configuration --
 three Claude models, three Codex reasoning efforts -- and prints one
 table, so a CLI change can be judged against more than a single set of
-reading habits. The trials are serialized: they contend for CPU, and a
+reading habits. Pass `--prompt-file` / `--fixture` to sweep a different
+scenario. The trials are serialized: they contend for CPU, and a
 contended run has been measured at six times its uncontended time.
 
 `bin/agent-trial-report.sh <trace.jsonl>...` reads the traces those runs
@@ -63,9 +90,35 @@ authoring a pipeline. Tool time is a small fraction of the total, which
 is the standing argument for spending CLI design effort on removing
 round-trips rather than on making any single command faster.
 
-## The other fixture
+## Reading a result
 
-`agent-trial.sh --fixture miniflux` runs against a pinned commit of a
-real upstream project instead. That one ships its own CI, so it measures
-translating an existing setup rather than authoring from a description.
-The two numbers are not comparable.
+The wall-clock says whether the flow is fast enough. The ORIENTATION
+PATH says why it wasn't, and the FRICTION section says what the agent
+had to guess at -- that one has been the most useful of the three, and
+every ticket in the GitHub Actions parity group came out of it.
+
+Two things worth checking before trusting a number:
+
+- **Did the agent stay in the trial repo?** The report says so
+  explicitly. Agents have been observed wandering into other checkouts
+  on this machine, and work done there is not being measured.
+- **Does lint+explain green actually mean the prompt was satisfied?** It
+  does not. The oracles check that a pipeline compiles and is
+  well-formed, not that it does what was asked. One trial scored clean
+  having produced a pipeline with no trigger at all.
+
+## The fixtures
+
+`testdata/trial-repo` is the default: small, offline, no existing CI.
+
+`--fixture migrate` overlays `testdata/gha-overlay` onto that same tree,
+so authoring and translating differ in exactly one thing. The workflow
+in it is deliberately ordinary and deliberately hard -- a build matrix,
+a postgres service, `actions/cache`, job-level `needs` and `if:`, an
+artifact upload, five third-party actions. Those are the parts with no
+one-to-one sparkwing equivalent, which is the point of measuring it.
+
+`--fixture miniflux` runs against a pinned commit of a real upstream
+project, which ships ten workflows nobody wrote for this test.
+
+The three measure different jobs. Do not compare their numbers.

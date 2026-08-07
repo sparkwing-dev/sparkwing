@@ -18,7 +18,7 @@
 # else running, and a contended run has been observed at six times the
 # agent's own reported duration.
 #
-# Usage: agent-trial-matrix.sh [--prompt-file <path>] [--fixture small|miniflux]
+# Usage: agent-trial-matrix.sh [--prompt-file <path>] [--fixture small|migrate|miniflux]
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
