@@ -1184,10 +1184,13 @@ jobs/<snake>.go plus a sparkwing.yaml entry. Auto-bootstraps
 up the package skeleton too -- no separate init step, no
 sample pipeline you didn't ask for.
 
---template takes a shape, not a task. The five shapes below differ
-only in DAG structure; every one runs green in any repo before you
-edit it, because the Run bodies are echoes. Pick the structure you
-need and replace the bodies.
+--template takes a shape, not a task. Every shape runs green in any
+repo before you edit it, because the Run bodies are echoes. Pick the
+structure you need and replace the bodies.
+
+Shapes differ in the DAG they build, and the two named for an event
+also declare that event's trigger -- each entry below says what it
+writes. Nothing else varies.
 
 New to authoring? 'sparkwing docs read --guide authoring' returns the
 DAG model, the idioms the linter enforces, how a pipeline fires, and
