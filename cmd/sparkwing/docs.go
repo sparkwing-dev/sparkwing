@@ -194,6 +194,13 @@ func runDocsAll(args []string) error {
 	return nil
 }
 
+// runDocsSearch answers a question from two corpora at once.
+//
+// Examples print first: a working pipeline that already does the thing
+// answers "how do I do X" more directly than the reference section
+// defining the symbols it uses, and the registry entries are executed
+// by template-verify, so unlike prose they cannot quietly stop being
+// true.
 func runDocsSearch(args []string) error {
 	fs := flag.NewFlagSet(cmdDocsSearch.Path, flag.ContinueOnError)
 	var query string
@@ -218,6 +225,9 @@ func runDocsSearch(args []string) error {
 	}
 	if topicsOnly {
 		return renderDocsList(docs.Search(query), output)
+	}
+	if strings.EqualFold(output, "pretty") || output == "" {
+		printExampleHits(searchExamples(query), 4)
 	}
 	return renderDocsSections(docs.SearchSections(query), query, withBody, output)
 }

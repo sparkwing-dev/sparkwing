@@ -174,6 +174,13 @@ code change to unlock.
   behind `--name`. The shapes are marked as DAG skeletons with echo bodies,
   because `ci-pr-check` is named for a job a registry template actually does
   and reads as the answer until you open it.
+- **cli:** `docs search` now answers from the example corpus as well as the
+  docs. The registry pipelines are working, verified code, which answers "how
+  does someone do ECS Fargate" more directly than a reference section defining
+  the symbols involved -- and unlike prose they are executed, so they cannot
+  quietly stop being true. They surface through search rather than a listing
+  on purpose: choosing from a catalog is the expensive part, consulting one
+  that search handed you is not.
 - **cli:** `docs search` now returns the matching **sections** -- topic, heading,
   line range, snippet -- instead of a list of whole topics, with `--body` to
   print them in full. The reference pages run to tens of thousands of tokens
