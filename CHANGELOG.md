@@ -50,6 +50,11 @@ code change to unlock.
 
 ### Fixed
 
+- **local execution/admission:** capacity profiles now retain the repository
+  identity captured in the run's configured worktree. In-process node code
+  that changes the process-wide working directory can no longer split one
+  repository's measurements across branch-named profile keys and repeatedly
+  return nodes to the conservative cold-start charge.
 - **web:** the dashboard's services panel now reads the health body it
   receives instead of classifying on the status code alone. Every sparkwing
   service reports partial failure in-body while still answering HTTP 200 --

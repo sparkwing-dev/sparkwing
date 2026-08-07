@@ -105,16 +105,21 @@ func TestRepoShortName_LinkedWorktreeResolvesToItsRepo(t *testing.T) {
 func TestCurrentProfileKey_SurvivesABranchChange(t *testing.T) {
 	repo, first := linkedWorktree(t, "bitwing", "bw-1458")
 	_, second := linkedWorktree(t, "bitwing", "bw-1459")
+	previousWorkDir := sparkwing.CurrentRuntime().WorkDir
+	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
 
+	sparkwing.SetWorkDir(repo)
 	t.Chdir(repo)
 	want := currentProfileKey("pre-commit")
 	if want != "bitwing/pre-commit" {
 		t.Fatalf("main checkout keyed %q, want bitwing/pre-commit", want)
 	}
+	sparkwing.SetWorkDir(first)
 	t.Chdir(first)
 	if got := currentProfileKey("pre-commit"); got != want {
 		t.Errorf("first worktree keyed %q, want %q", got, want)
 	}
+	sparkwing.SetWorkDir(second)
 	t.Chdir(second)
 	if got := currentProfileKey("pre-commit"); got != want {
 		t.Errorf("second worktree keyed %q, want %q", got, want)

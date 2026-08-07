@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // repoShortName derives the short repo identity of the directory a run
@@ -71,9 +73,14 @@ func worktreeRepoDir(gitFile, worktreeDir string) string {
 	return strings.TrimSuffix(common, ".git")
 }
 
-// currentRepoShortName is repoShortName for the process working
-// directory, the directory a local run is launched from.
+// currentRepoShortName is repoShortName for the run's configured working
+// directory. Node code may change the process-wide cwd while a run is active,
+// but every profile read and write must retain the repository that launched
+// the run. Calls outside a configured runtime fall back to the process cwd.
 func currentRepoShortName() string {
+	if wd := sparkwing.CurrentRuntime().WorkDir; wd != "" {
+		return repoShortName(wd)
+	}
 	wd, err := os.Getwd()
 	if err != nil {
 		return ""

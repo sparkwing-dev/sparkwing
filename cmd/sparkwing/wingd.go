@@ -1,7 +1,7 @@
 // `sparkwing wingd run` -- the resident local admission arbiter. This
 // verb is hidden: users never invoke it directly. The client library
-// spawns it on demand as a detached process, and because it is the same
-// binary as the CLI, the daemon and its clients can never skew versions.
+// spawns it on demand as a detached process. A resident daemon can outlive
+// an in-place CLI upgrade; newer clients drain and replace an older daemon.
 package main
 
 import (
