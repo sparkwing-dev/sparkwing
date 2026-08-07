@@ -337,6 +337,9 @@ code change to unlock.
 
 ### Fixed
 
+- **docs:** `pkg/docs.Section` gains a `Breadcrumb` field naming the headings a
+  section sits under. Additive; existing fields are unchanged.
+
 - **docs:** search hits carry the headings they sit under. The generated CLI
   reference has one `Examples` section per verb -- 139 identically titled --
   so a result list of them said nothing about which verb each belonged to, and

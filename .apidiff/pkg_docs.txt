@@ -67,6 +67,8 @@ type Section struct {
 	EndLine   int
 
 	Body string
+
+	Breadcrumb string
 }
 func Sections(slug string) ([]Section, error)
 var Version string

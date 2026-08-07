@@ -338,7 +338,7 @@ func TestOnAcceptsSeveralTriggers(t *testing.T) {
 }
 
 // manual means "no trigger", so combining it with a real one is a
-// contradiction rather than a merge. Silently honouring one half would
+// contradiction rather than a merge. Silently honoring one half would
 // produce a pipeline that fires when the author said it should not.
 func TestManualCannotBeCombined(t *testing.T) {
 	shape, _ := builtinShapeByName("minimal")
