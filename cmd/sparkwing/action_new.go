@@ -1,5 +1,6 @@
-// `sparkwing pipeline new` scaffolder. Templates: minimal (default) +
-// build-test-deploy. Goal: get to a compiling, runnable stub fast.
+// `sparkwing pipeline new` scaffolder. Five shapes, structural only:
+// minimal (default), build-test-deploy, ci-pr-check, release,
+// scheduled-report. Goal: get to a compiling, runnable stub fast.
 package main
 
 import (
@@ -157,10 +158,10 @@ func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []stri
 	if err := os.WriteFile(file, []byte(rendered), 0o644); err != nil {
 		return err
 	}
-	if err := appendPipelinesYAML(sparkwingDir, name, kebabToPascal(name), hidden); err != nil {
+	if err := appendPipelinesYAML(sparkwingDir, name, kebabToPascal(name), hidden, ""); err != nil {
 		return err
 	}
-	if err := finishScaffold(sparkwingDir, file, name, bootstrapped); err != nil {
+	if err := finishScaffold(sparkwingDir, file, name, bootstrapped, ""); err != nil {
 		return err
 	}
 	if pre := strings.TrimSpace(tmpl.Manifest.Prerequisite); pre != "" {
@@ -284,27 +285,27 @@ func goJobFilename(name string) string {
 // the canonical Plan() entry-point so editing means "add another
 // sparkwing.Job(plan, ...) line", not "refactor a one-step pipeline into Plan()".
 func scaffoldGoMinimal(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, minimalTemplate, bootstrapped)
+	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, minimalTemplate, bootstrapped, "")
 }
 
 // scaffoldGoBuildTestDeploy: build -> test -> deploy 3-node Plan.
 func scaffoldGoBuildTestDeploy(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, buildTestDeployTemplate, bootstrapped)
+	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, buildTestDeployTemplate, bootstrapped, "")
 }
 
 // scaffoldGoCIPRCheck: lint + test in parallel converging on a gate.
 func scaffoldGoCIPRCheck(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, ciPRCheckTemplate, bootstrapped)
+	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, ciPRCheckTemplate, bootstrapped, prCheckTrigger)
 }
 
 // scaffoldGoRelease: version-bump -> changelog -> publish linear Plan.
 func scaffoldGoRelease(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, releaseTemplate, bootstrapped)
+	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, releaseTemplate, bootstrapped, "")
 }
 
 // scaffoldGoScheduledReport: collect -> fan-out gatherers -> publish-report.
 func scaffoldGoScheduledReport(sparkwingDir, name string, hidden bool, short string, bootstrapped bool) error {
-	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, scheduledReportTemplate, bootstrapped)
+	return scaffoldGoFromTemplate(sparkwingDir, name, hidden, short, scheduledReportTemplate, bootstrapped, scheduledReportTrigger)
 }
 
 // renderBuiltinTemplate expands the {{STRUCT}} / {{NAME}} / {{SHORTLIT}}
@@ -323,7 +324,7 @@ func renderBuiltinTemplate(name, short, tmpl string) string {
 }
 
 // scaffoldGoFromTemplate is the shared write path.
-func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl string, bootstrapped bool) error {
+func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl string, bootstrapped bool, trigger string) error {
 	struct_ := kebabToPascal(name)
 	file := filepath.Join(sparkwingDir, "jobs", goJobFilename(name))
 	if _, err := os.Stat(file); err == nil {
@@ -333,15 +334,21 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 	if err := os.WriteFile(file, []byte(body), 0o644); err != nil {
 		return err
 	}
-	if err := appendPipelinesYAML(sparkwingDir, name, struct_, hidden); err != nil {
+	if err := appendPipelinesYAML(sparkwingDir, name, struct_, hidden, trigger); err != nil {
 		return err
 	}
-	return finishScaffold(sparkwingDir, file, name, bootstrapped)
+	return finishScaffold(sparkwingDir, file, name, bootstrapped, trigger)
 }
 
 // finishScaffold is the shared post-write reporting + tidy step for both
 // the built-in string templates and the rendered registry templates.
-func finishScaffold(sparkwingDir, file, name string, bootstrapped bool) error {
+//
+// A written trigger is reported in the created-files list rather than
+// left for the author to notice. `pipeline new` wiring a repo into a
+// GitHub event is exactly the kind of thing that should not happen
+// silently, and the line doubles as the answer to "how do I declare
+// this" for anyone who wants a different one.
+func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger string) error {
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
 	if err != nil {
 		rel = file
@@ -352,6 +359,10 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool) error {
 	fmt.Printf("%s Creating new pipeline\n", color.Cyan("==>"))
 	fmt.Printf("  %s %s\n", color.Green("+"), rel)
 	fmt.Printf("  %s added %q entry to .sparkwing/sparkwing.yaml\n", color.Green("+"), name)
+	if event := triggerEvent(trigger); event != "" {
+		fmt.Printf("  %s declared %s trigger (%s)\n",
+			color.Green("+"), color.Bold(event), color.Dim("edit the on: block to change it"))
+	}
 	tidy := tidySkeleton(sparkwingDir, true)
 	switch {
 	case tidy.Skipped:
@@ -821,7 +832,10 @@ func init() {
 // round-trip would reflow everything. Risk: the user's file could have
 // exotic yaml that we don't preserve; mitigated by the simplicity of
 // the append (we only add, never modify).
-func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool) error {
+//
+// trigger, when non-empty, is an already-indented `on:` block appended
+// under the entry.
+func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool, trigger string) error {
 	path := filepath.Join(sparkwingDir, projectconfig.Filename)
 	existing, err := os.ReadFile(path)
 	if err != nil {
@@ -836,5 +850,46 @@ func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool) err
 	if hidden {
 		b.WriteString("    hidden: true\n")
 	}
+	b.WriteString(trigger)
 	return os.WriteFile(path, b.Bytes(), 0o644)
 }
+
+// triggerEvent names the event a scaffolded `on:` block declares, for
+// the created-files line. It reads the block's own text so the two
+// cannot drift: a trigger nobody names here is a trigger nobody reports.
+func triggerEvent(trigger string) string {
+	for _, event := range []string{"pull_request", "schedule", "push", "webhook"} {
+		if strings.Contains(trigger, event+":") {
+			return event
+		}
+	}
+	return ""
+}
+
+// A shape named for an event writes that event's trigger. Six agent
+// trials -- three Claude models, three Codex efforts -- each reached
+// for ci-pr-check to satisfy "run go test on pull requests", and five
+// of the six then spent turns searching the docs for the `on:` syntax
+// the shape had not written. The sixth wrote no trigger at all and
+// shipped a manual-only pipeline that passed lint and explain, which
+// is the worse outcome: the gate cannot tell a pipeline that meets the
+// request from one that merely compiles.
+//
+// The filters stay empty on purpose. `branches: [main]` would bake in a
+// branch name the repo may not use, and these shapes have to be green
+// and correct anywhere. Triggers are declarative -- the controller
+// dispatches whichever pipeline the webhook names -- so an empty filter
+// changes nothing about local `sparkwing run`.
+const prCheckTrigger = `    on:
+      # Fires on opened / synchronize / reopened. Add
+      # ` + "`branches: [main]`" + ` to record which base branches this is meant
+      # for, and point the repo's GitHub webhook at this pipeline.
+      pull_request: {}
+`
+
+// scheduledReportSchedule is 09:00 UTC daily: a placeholder concrete
+// enough to edit rather than a syntax the author has to go look up.
+const scheduledReportTrigger = `    on:
+      # Cron, evaluated by the controller in UTC. 09:00 daily.
+      schedule: "0 9 * * *"
+`

@@ -209,10 +209,12 @@ func renderInitPipelinesYAML() string {
 # below becomes an invocable target for ` + "`sparkwing run <name>`" + `.
 #
 # Add an entry by running:
-#   sparkwing pipeline new --name <name>
+#   sparkwing pipeline new --name <name> [--template <shape>]
 #
-# (Default template is minimal; pass --template build-test-deploy
-# for a build/test/deploy DAG.)
+# Shapes: minimal (default) | build-test-deploy | ci-pr-check |
+# release | scheduled-report. An entry with no ` + "`on:`" + ` block runs only
+# when invoked; see ` + "`sparkwing docs read --topic pipelines`" + ` for the
+# trigger schema.
 pipelines:
 `
 }

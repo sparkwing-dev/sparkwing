@@ -306,6 +306,21 @@ code change to unlock.
 
 ### Changed
 
+- **cli:** `pipeline new --template ci-pr-check` now writes the `on:
+  pull_request` trigger it is named for, and `--template scheduled-report`
+  writes an `on: schedule` at 09:00 UTC -- something its help already claimed
+  it did. Six agent trials across two vendors each reached for `ci-pr-check`
+  to satisfy "run go test on pull requests", and five then spent turns
+  searching the docs for the `on:` syntax the shape had not written; the sixth
+  wrote no trigger at all and produced a manual-only pipeline that passed both
+  lint and explain. Filters stay empty, because a `branches: [main]` default
+  would bake in a branch name the repo may not use. Triggers are declarative
+  -- the controller dispatches whichever pipeline its webhook names -- so this
+  changes nothing about `sparkwing run <name>` locally, and the scaffolder now
+  names the trigger it declared in its created-files list rather than wiring a
+  repo into a GitHub event silently. The other three shapes remain purely
+  structural and still declare nothing.
+
 - **cli:** `sparkwing pipeline new --help` describes the surface that exists.
   It still advertised scaffolding a registry template with `--template <name>
   --param k=v` and pointed at a `pipeline templates` verb, neither of which

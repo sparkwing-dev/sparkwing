@@ -2620,13 +2620,20 @@ Shapes:
     visible end-to-end.
   - ci-pr-check: pull-request gate. lint and test run in parallel and
     a final gate job depends on both, so the pipeline is green only
-    when every check passes. test Prefers a CI runner label.
+    when every check passes. test Prefers a CI runner label. Writes
+    an 'on: pull_request' trigger with no filters.
   - release: linear version-bump -> changelog -> publish flow. The
     canonical release shape; publish Prefers a release runner label.
   - scheduled-report: fan-out report. One collect job seeds three
     parallel gatherers (metrics, errors, usage) and publish-report
-    converges them. Prints the sparkwing.yaml 'on:' schedule trigger
-    to add for cron runs.
+    converges them. Writes an 'on: schedule' trigger at 09:00 UTC
+    daily.
+
+The two shapes named for an event declare it; the other three run only
+when invoked. A trigger is declarative -- the controller dispatches
+whichever pipeline its webhook names -- so it changes nothing about
+'sparkwing run <name>' locally. Edit or delete the 'on:' block in
+.sparkwing/sparkwing.yaml to change it.
 
 Every shape scaffolds a pipeline that compiles, renders clean under
 'pipeline explain', and passes 'pipeline lint': pure Plan(), runner-label
