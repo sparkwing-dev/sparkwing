@@ -30,6 +30,16 @@ type Section struct {
 	EndLine   int `json:"end_line"`
 	// Body is the section including its heading line.
 	Body string `json:"body"`
+	// Breadcrumb is the enclosing headings, outermost first, joined by
+	// " > ". Empty for a top-level section.
+	//
+	// The generated CLI reference has one "Examples" section per verb --
+	// 139 of them, identically titled -- and a heading that repeats
+	// verbatim across a doc identifies nothing on its own. The
+	// breadcrumb is what makes "Examples" under `sparkwing pipeline run`
+	// a different thing from "Examples" under `sparkwing version`, both
+	// to a ranking function and to whoever reads the hit.
+	Breadcrumb string `json:"breadcrumb,omitempty"`
 }
 
 // Sections splits a doc into its headed parts. A doc with no headings
@@ -75,6 +85,9 @@ func splitSections(slug, body string) []Section {
 	}
 
 	fence := ""
+	// stack[d] is the innermost heading seen at depth d, so a new
+	// heading's ancestors are everything shallower still standing.
+	var stack []string
 	for i, line := range lines {
 		if marker := fenceMarker(line); marker != "" {
 			switch {
@@ -87,7 +100,26 @@ func splitSections(slug, body string) []Section {
 		if fence == "" {
 			if level, text, isHeading := parseHeading(line); isHeading {
 				flush(i)
-				cur = Section{Slug: slug, Heading: text, Level: level, StartLine: i + 1}
+				for len(stack) >= level {
+					stack = stack[:len(stack)-1]
+				}
+				for len(stack) < level-1 {
+					stack = append(stack, "")
+				}
+				// Skip the H1: it is the doc title, which the slug
+				// already carries, so repeating it costs width in every
+				// result line and distinguishes nothing.
+				var crumbs []string
+				for d, a := range stack {
+					if d > 0 && a != "" {
+						crumbs = append(crumbs, a)
+					}
+				}
+				cur = Section{
+					Slug: slug, Heading: text, Level: level, StartLine: i + 1,
+					Breadcrumb: strings.Join(crumbs, " > "),
+				}
+				stack = append(stack, text)
 			}
 		}
 		buf = append(buf, line)
@@ -207,7 +239,9 @@ func isWordByte(s string, i int) bool {
 const (
 	scoreHeadingWord   = 20
 	scoreHeadingPrefix = 12
+	scoreCrumbWord     = 8
 	scoreBodyWord      = 5
+	scoreCrumbPrefix   = 4
 	scoreBodyPrefix    = 3
 	scoreHeadingSubstr = 2
 	scoreBodySubstr    = 1
@@ -252,6 +286,12 @@ func SearchSections(query string) []Section {
 		for _, s := range secs {
 			hay := strings.ToLower(s.Body)
 			head := strings.ToLower(s.Heading + " " + s.Slug)
+			// The breadcrumb scores below the heading. It says what a
+			// section is *under*, not what it is about: every
+			// "Subcommands" table nested beneath `sparkwing runs
+			// triggers` would otherwise answer "triggers" as strongly as
+			// the section that documents them.
+			crumb := strings.ToLower(s.Breadcrumb)
 			score, all := 0, true
 			for _, tok := range tokens {
 				switch {
@@ -259,8 +299,12 @@ func SearchSections(query string) []Section {
 					score += scoreHeadingWord
 				case wordPrefix(head, tok):
 					score += scoreHeadingPrefix
+				case wholeWord(crumb, tok):
+					score += scoreCrumbWord
 				case wholeWord(hay, tok):
 					score += scoreBodyWord
+				case wordPrefix(crumb, tok):
+					score += scoreCrumbPrefix
 				case wordPrefix(hay, tok):
 					score += scoreBodyPrefix
 				case strings.Contains(head, tok):

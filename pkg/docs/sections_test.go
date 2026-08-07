@@ -248,3 +248,44 @@ func TestSingleCharacterTokensAreIgnored(t *testing.T) {
 		t.Error("a query of only noise tokens should return nothing")
 	}
 }
+
+// A heading that repeats across a doc identifies nothing. The generated
+// CLI reference has one "Examples" section per verb, so a result list of
+// them is unreadable without saying which verb each belongs to.
+func TestRepeatedHeadingsAreDisambiguatedByBreadcrumb(t *testing.T) {
+	secs, err := docs.Sections("cli-reference")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var examples int
+	for _, s := range secs {
+		if s.Heading != "Examples" {
+			continue
+		}
+		examples++
+		if s.Breadcrumb == "" {
+			t.Errorf("an %q section at line %d carries no breadcrumb", s.Heading, s.StartLine)
+		}
+		if strings.Contains(s.Breadcrumb, "CLI reference") {
+			t.Errorf("breadcrumb %q repeats the doc title, which the slug already carries", s.Breadcrumb)
+		}
+	}
+	if examples < 10 {
+		t.Fatalf("found only %d Examples sections; the check is not exercising the case", examples)
+	}
+}
+
+// A breadcrumb says what a section sits under, not what it is about, so
+// it must not answer a query as strongly as a heading. Every
+// "Subcommands" table beneath `sparkwing runs triggers` otherwise
+// outranks the section that documents triggers.
+func TestBreadcrumbMatchesRankBelowHeadingMatches(t *testing.T) {
+	hits := docs.SearchSections("Triggers")
+	if len(hits) == 0 {
+		t.Fatal("no hits")
+	}
+	if !strings.Contains(strings.ToLower(hits[0].Heading), "trigger") {
+		t.Errorf("top hit %q/%q matched on its breadcrumb, not its heading",
+			hits[0].Slug, hits[0].Heading)
+	}
+}

@@ -434,9 +434,19 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 	fmt.Printf("%s Creating new pipeline\n", color.Cyan("==>"))
 	fmt.Printf("  %s %s\n", color.Green("+"), rel)
 	fmt.Printf("  %s added %q entry to .sparkwing/sparkwing.yaml\n", color.Green("+"), name)
+	// "declared", not "enabled". The yaml records intent; the
+	// controller still has to receive the event, which means pointing a
+	// webhook at this pipeline by hand. An agent trial read the success
+	// output, did not open the yaml, and noted it would reasonably have
+	// reported the trigger as live -- so the output has to say which
+	// half it did.
 	if event := triggerEvent(trigger); event != "" {
-		fmt.Printf("  %s declared %s trigger (%s)\n",
-			color.Green("+"), color.Bold(event), color.Dim("edit the on: block to change it"))
+		fmt.Printf("  %s declared %s trigger in sparkwing.yaml\n", color.Green("+"), color.Bold(event))
+		if event == "schedule" {
+			fmt.Printf("    %s\n", color.Dim("a controller must be running for it to fire; edit the on: block to change the cron"))
+		} else {
+			fmt.Printf("    %s\n", color.Dim("not yet live: point the repo's GitHub webhook at this pipeline to deliver the event"))
+		}
 	}
 	tidy := tidySkeleton(sparkwingDir, true)
 	switch {

@@ -249,7 +249,7 @@ func renderDocsSections(hits []docs.Section, query string, withBody bool, output
 		return enc.Encode(hits)
 	case "plain":
 		for _, h := range hits {
-			fmt.Printf("%s:%d\t%s\n", h.Slug, h.StartLine, h.Heading)
+			fmt.Printf("%s:%d\t%s\n", h.Slug, h.StartLine, sectionLabel(h))
 		}
 		return nil
 	case "pretty", "":
@@ -261,8 +261,8 @@ func renderDocsSections(hits []docs.Section, query string, withBody bool, output
 		}
 		for _, h := range hits {
 			where := h.Slug
-			if h.Heading != "" {
-				where += "  " + color.Bold(h.Heading)
+			if label := sectionLabel(h); label != "" {
+				where += "  " + color.Bold(label)
 			}
 			fmt.Printf("%s  %s\n", where, color.Dim(fmt.Sprintf("(lines %d-%d)", h.StartLine, h.EndLine)))
 			if withBody {
@@ -362,4 +362,18 @@ func renderDocsList(entries []docs.Entry, output string) error {
 	default:
 		return fmt.Errorf("unknown output format %q (valid: pretty, json, plain)", output)
 	}
+}
+
+// sectionLabel identifies a hit. A heading alone does not: the
+// generated CLI reference has 139 sections titled "Examples", and a
+// result list of them tells a reader nothing about which verb each one
+// belongs to.
+func sectionLabel(h docs.Section) string {
+	if h.Breadcrumb == "" {
+		return h.Heading
+	}
+	if h.Heading == "" {
+		return h.Breadcrumb
+	}
+	return h.Breadcrumb + " > " + h.Heading
 }

@@ -306,6 +306,20 @@ code change to unlock.
 
 ### Fixed
 
+- **docs:** search hits carry the headings they sit under. The generated CLI
+  reference has one `Examples` section per verb -- 139 identically titled --
+  so a result list of them said nothing about which verb each belonged to, and
+  they were indistinguishable to the ranking too. Hits now read
+  `` `sparkwing debug run` > Examples ``. A breadcrumb match scores below a
+  heading match, since it says what a section sits under rather than what it
+  is about.
+
+- **cli:** `pipeline new` says a declared trigger is not yet live. The `on:`
+  block records intent; the controller still has to receive the event, which
+  means pointing a webhook at the pipeline. An agent trial read the success
+  output, did not open the yaml, and noted it would reasonably have reported
+  the trigger as working.
+
 - **docs:** `docs search` ranked a table of CLI verb names above the page that
   answers the question. "command" is a substring of "Subcommands", and a
   substring hit on a heading scored the same as a real one, so the generated
