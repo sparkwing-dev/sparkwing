@@ -1775,12 +1775,7 @@ func txDrainCoalesceFollowers(ctx context.Context, tx *storeTx, key, leaderRunID
 }
 
 func coalesceFollowersCanInherit(outcome string) bool {
-	switch outcome {
-	case "success", "satisfied", "skipped", "skipped-concurrent", "cached":
-		return true
-	default:
-		return false
-	}
+	return outcome == "success"
 }
 
 func txNodeOutcome(ctx context.Context, tx *storeTx, runID, nodeID string) (outcome, failureReason string, found bool, err error) {
