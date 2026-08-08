@@ -214,7 +214,7 @@ func TestApplyHeadroom_GatesUnderLoad(t *testing.T) {
 		t.Fatalf("initial holder = %s, want %s", dec.Kind, admission.DecisionGranted)
 	}
 
-	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 7.5, FreeMemoryBytes: 16 << 30, LoadMeasured: true, MemoryMeasured: true})
+	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 7.5, BusyCores: 7.5, FreeMemoryBytes: 16 << 30, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
 
 	dec, _, err = d.ledger.Submit(admission.Request{ID: "big", Cores: 2})
 	if err != nil {
@@ -227,7 +227,7 @@ func TestApplyHeadroom_GatesUnderLoad(t *testing.T) {
 
 func TestApplyHeadroom_AdmitsWithHeadroom(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
-	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 0, FreeMemoryBytes: 16 << 30, LoadMeasured: true, MemoryMeasured: true})
+	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 0, BusyCores: 0, FreeMemoryBytes: 16 << 30, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
 
 	dec, _, err := d.ledger.Submit(admission.Request{ID: "ok", Cores: 2})
 	if err != nil {
@@ -241,7 +241,7 @@ func TestApplyHeadroom_AdmitsWithHeadroom(t *testing.T) {
 func TestApplyHeadroom_IgnoreExternalAdmitsUnderLoad(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	d.cfg.Budget = Budget{IgnoreExternal: true}
-	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 7.5, FreeMemoryBytes: 16 << 30, LoadMeasured: true, MemoryMeasured: true})
+	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 7.5, BusyCores: 7.5, FreeMemoryBytes: 16 << 30, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
 
 	dec, _, err := d.ledger.Submit(admission.Request{ID: "ok", Cores: 2})
 	if err != nil {
@@ -265,7 +265,7 @@ func TestApplyHeadroom_IgnoreExternalStillDetectsSaturation(t *testing.T) {
 	holder := &conn{role: roleHolder, finalizable: true}
 	d.conns[holder] = struct{}{}
 
-	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 7.5, FreeMemoryBytes: 16 << 30, LoadMeasured: true, MemoryMeasured: true})
+	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 7.5, BusyCores: 7.5, FreeMemoryBytes: 16 << 30, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
 
 	if holder.holdSampledMS <= 0 {
 		t.Fatalf("holder should have accrued a sampled interval, got %d", holder.holdSampledMS)
@@ -285,12 +285,12 @@ func TestApplyHeadroom_IgnoreExternalStillDetectsSaturation(t *testing.T) {
 
 func TestApplyHeadroom_Hysteresis(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
-	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 0, FreeMemoryBytes: 16 << 30, LoadMeasured: true, MemoryMeasured: true})
+	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 0, BusyCores: 0, FreeMemoryBytes: 16 << 30, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
 	first := d.appliedCores
 	if !d.headroomInit {
 		t.Fatal("headroom should be initialized after first apply")
 	}
-	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 0.1, FreeMemoryBytes: 16 << 30, LoadMeasured: true, MemoryMeasured: true})
+	d.applyHeadroom(HostStat{TotalCores: 8, TotalMemoryBytes: 16 << 30, LoadAverage: 0.1, BusyCores: 0.1, FreeMemoryBytes: 16 << 30, LoadMeasured: true, CPUMeasured: true, MemoryMeasured: true})
 	if d.appliedCores != first {
 		t.Fatalf("a tiny load change (%v -> %v) should not move headroom past the deadband", first, d.appliedCores)
 	}

@@ -622,6 +622,9 @@ code change to unlock.
   An empty `ungated_repos` alone could not tell a gated fleet from an unread
   one.
 
+## [v0.22.3] - 2026-08-07
+### Fixed
+
 - **cli:** capacity profiles are keyed by the repository a run launched
   from, not by the directory. Every linked worktree of a repo now reads and
   writes one profile, so a pipeline run from a fresh branch is priced from
@@ -641,6 +644,28 @@ code change to unlock.
 - **cli:** a request no release could ever satisfy is refused at submit with
   the arithmetic (`needs 12GiB of memory, this machine has 8GiB`) rather
   than queued until it times out. An ordinarily busy box still queues.
+
+## [v0.22.2] - 2026-07-31
+### Added
+
+- **sdk:** `ToolSlot` coordinates external tools through a named, box-wide CPU
+  budget. Waiting steps report their queue position, and `BoxToolBudget`
+  derives concurrency from the tool's measured CPU cost.
+- **cli:** `sparkwing queue` now estimates start times for work waiting on
+  named concurrency limits.
+
+### Fixed
+
+- **runner:** Host admission now subtracts measured CPU utilization instead
+  of run-queue length. I/O-bound workloads no longer make idle cores appear
+  occupied; contention detection still uses load average. Linux reads CPU
+  counters from `/proc/stat`, while macOS estimates utilization from the
+  process table.
+- **cli:** `sparkwing queue` reports the external-pressure reading used by
+  admission, including its age, instead of reconstructing a misleading
+  residual.
+- **cli:** Unread host metrics render as `unmeasured` and do not reduce
+  available capacity.
 
 ## [v0.22.1] - 2026-07-30
 

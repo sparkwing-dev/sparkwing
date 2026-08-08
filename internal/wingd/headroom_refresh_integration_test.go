@@ -15,8 +15,14 @@ func liveCPUStat(load float64) wingd.HostStat {
 		TotalMemoryBytes: 16 << 30,
 		FreeMemoryBytes:  16 << 30,
 		LoadAverage:      load,
-		LoadMeasured:     true,
-		MemoryMeasured:   true,
+		// Capacity is sized from cores in use, not the run queue, so a
+		// fixture that says "loaded box" has to carry the utilization
+		// that load implies -- a load average alone now subtracts
+		// nothing and the run is admitted.
+		BusyCores:      load,
+		LoadMeasured:   true,
+		CPUMeasured:    true,
+		MemoryMeasured: true,
 	}
 }
 

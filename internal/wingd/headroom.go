@@ -29,11 +29,12 @@ func (d *Daemon) sampleLoop(ctx context.Context) {
 		case <-d.quit:
 			return
 		case <-t.C:
-			if now := d.now(); now.Sub(lastCap) >= capEvery {
-				d.refreshCapacity()
+			now := d.now()
+			refreshCapacity := now.Sub(lastCap) >= capEvery
+			d.refreshHostSample(refreshCapacity)
+			if refreshCapacity {
 				lastCap = now
 			}
-			d.refreshHeadroom()
 		}
 	}
 }
@@ -41,10 +42,20 @@ func (d *Daemon) sampleLoop(ctx context.Context) {
 // refreshHeadroom samples the host and applies the result. Sampler errors
 // are logged and leave the last headroom in force.
 func (d *Daemon) refreshHeadroom() {
+	d.refreshHostSample(false)
+}
+
+// refreshHostSample uses one host reading for every calculation on a sample
+// tick. Stateful CPU counters advance when sampled, so separate capacity and
+// headroom reads would measure utilization over the few moments between them.
+func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 	stat, err := d.sampler.Sample()
 	if err != nil {
 		d.cfg.logf("host sample: %v", err)
 		return
+	}
+	if refreshCapacity {
+		d.applyCapacity(stat)
 	}
 	d.applyHeadroom(d.container.apply(stat))
 }
@@ -63,17 +74,19 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 
 	if !d.loadInit {
 		d.smoothedLoad = stat.LoadAverage
+		d.smoothedBusy = stat.BusyCores
 		d.loadInit = true
 	} else {
 		d.smoothedLoad = loadEMAAlpha*stat.LoadAverage + (1-loadEMAAlpha)*d.smoothedLoad
+		d.smoothedBusy = loadEMAAlpha*stat.BusyCores + (1-loadEMAAlpha)*d.smoothedBusy
 	}
-	load := d.smoothedLoad
+	load, busy := d.smoothedLoad, d.smoothedBusy
 
 	usedCores, usedMem := d.usedLocked()
 	frac := d.cfg.headroomFraction()
 
 	reservedCores := frac * stat.TotalCores
-	externalCores := coresExternal(stat, load, usedCores)
+	externalCores := coresExternal(stat, busy, usedCores)
 	reservedMem, externalMem := memReserveAndExternal(stat, usedMem, frac)
 
 	admitExternalCores, admitExternalMem := externalCores, externalMem
@@ -87,7 +100,13 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	targetMem := headroomFromReserveExternal(stat.TotalMemoryBytes, reservedMem, admitExternalMem)
 
 	grantable := stat.TotalCores - reservedCores
-	saturated := grantable > 0 && externalCores >= contentionSaturationFraction*grantable
+	// Saturation reads the load average, not the utilization the
+	// subtraction above uses. Threads blocked on I/O are exactly what
+	// "work is queueing for this machine" should count, and they consume
+	// no cores -- keeping the two terms separate is what leaves
+	// saturation flagging unchanged while the arithmetic that sizes the
+	// machine moves to cores actually in use.
+	saturated := grantable > 0 && coresContention(stat, load, usedCores) >= contentionSaturationFraction*grantable
 	d.updateContentionLocked(saturated, d.cfg.sampleInterval().Milliseconds(), now)
 
 	coresBand := math.Max(0.5, 0.05*stat.TotalCores)
@@ -95,7 +114,7 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	changed := !d.headroomInit ||
 		math.Abs(targetCores-d.appliedCores) >= coresBand ||
 		absDiffU(targetMem, d.appliedMem) >= memBand ||
-		d.loadMeasured != stat.LoadMeasured ||
+		d.cpuMeasured != stat.CPUMeasured ||
 		d.memMeasured != stat.MemoryMeasured ||
 		now.Sub(d.headroomAt) >= d.cfg.headroomMaxAge()
 	if !changed {
@@ -110,7 +129,7 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	d.externalCores = externalCores
 	d.reservedMem = reservedMem
 	d.externalMem = externalMem
-	d.loadMeasured = stat.LoadMeasured
+	d.cpuMeasured = stat.CPUMeasured
 	d.memMeasured = stat.MemoryMeasured
 	d.headroomAt = now
 	d.appliedCores = targetCores
@@ -168,18 +187,40 @@ func memReserveAndExternal(stat HostStat, usedMem uint64, frac float64) (reserve
 	return reserved, external
 }
 
-// coresExternal is the load the daemon did not admit: the smoothed run
-// queue minus what its own leases hold, floored at zero. It is zero when
-// the load average is unmeasured, on the same rule as the memory term.
-func coresExternal(stat HostStat, load, usedCores float64) float64 {
-	if !stat.LoadMeasured {
+// coresExternal is the CPU the daemon did not admit: smoothed host
+// utilization in cores minus what its own leases hold, floored at zero. It
+// is zero when utilization is unmeasured, on the same rule as the memory
+// term -- admission may not charge a run against pressure nobody read.
+//
+// It reads utilization rather than the run queue because this figure is
+// subtracted from a core count. The run queue counts threads waiting,
+// including on uninterruptible I/O, so on an I/O-bound box it runs far
+// above the cores in use and erases a machine that is mostly idle.
+func coresExternal(stat HostStat, busy, usedCores float64) float64 {
+	if !stat.CPUMeasured {
 		return 0
 	}
-	external := load - usedCores
+	external := busy - usedCores
 	if external < 0 {
 		return 0
 	}
 	return external
+}
+
+// coresContention is the run-queue pressure the daemon did not admit. It
+// answers a different question from [coresExternal]: not how much of the
+// machine is consumed, but how hard work is queueing for it. Threads
+// waiting on I/O belong in that answer, which is why this one reads the
+// load average and the capacity subtraction does not.
+func coresContention(stat HostStat, load, usedCores float64) float64 {
+	if !stat.LoadMeasured {
+		return 0
+	}
+	contention := load - usedCores
+	if contention < 0 {
+		return 0
+	}
+	return contention
 }
 
 // externalWord renders an external-load figure for a log line, or the

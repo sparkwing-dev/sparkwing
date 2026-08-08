@@ -73,6 +73,10 @@ func (d *Daemon) refreshCapacity() {
 		d.cfg.logf("capacity sample: %v", err)
 		return
 	}
+	d.applyCapacity(stat)
+}
+
+func (d *Daemon) applyCapacity(stat HostStat) {
 	cap := d.deriveCapacity(stat)
 
 	d.mu.Lock()
