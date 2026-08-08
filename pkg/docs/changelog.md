@@ -137,8 +137,9 @@ code change to unlock.
   printing its help and exiting non-zero. Linting is read-only static
   analysis, so the whole repo is both the safe default and what the bare
   command plainly meant; `--all` still says it explicitly.
-- **cli:** `pipeline templates` whose `--category`/`--cloud` filter matches
-  nothing now lists the values that do exist. Recovering from a guessed
+- **cli:** `sparkwing examples` (the registry browser, renamed from `pipeline
+  templates` later in this release) whose `--category`/`--cloud` filter
+  matches nothing now lists the values that do exist. Recovering from a guessed
   filter previously meant dumping the unfiltered registry and
   reverse-engineering the vocabulary from it.
 - **cli:** `pipeline new` run from a source-built CLI no longer pins an SDK
@@ -197,7 +198,7 @@ code change to unlock.
   bound `--help` as the template name and then failed on an unrelated missing
   `--name`. The request is answered before parsing; arguments after a `--`
   terminator are still operands.
-- **cli:** `pipeline templates` now prints one line per template -- name and
+- **cli:** `sparkwing examples` prints one line per entry -- name and
   when to reach for it -- instead of every manifest in full, and lists the
   built-in shapes alongside them. The catalog was 606 lines, which is not a
   list anyone reads: agent trials grepped it, re-dumped it as JSON, and parsed
@@ -213,6 +214,7 @@ code change to unlock.
   choosing between forty entries, most of which are thin wiring over
   sparks-core libraries rather than a place to start. A shape is what you
   scaffold; an example is what you read, and `docs search` is how you find one.
+  See [the migration guide](docs/migrations/v0.23.0.md#pipeline-templates-is-now-sparkwing-examples-and---template-takes-a-shape).
 - **cli:** `pipeline sparks vendor` is now `pipeline sparks inflate` -- it
   copies a spark library's source into your repo so you can edit it, which is
   not what "vendor" says.
@@ -421,7 +423,8 @@ code change to unlock.
 
 - **cli:** (Breaking) `sparkwing commands` defaults to a one-line index instead
   of a 235KB JSON dump. Anything parsing its output must now pass `-o json`,
-  which is byte-identical to the old default. It emitted the full record for all 139 verbs on the theory
+  which is byte-identical to the old default. See
+  [the migration guide](docs/migrations/v0.23.0.md#sparkwing-commands-prints-an-index-pass--o-json-for-the-old-output). It emitted the full record for all 139 verbs on the theory
   that agents are the primary audience -- which is true, and is why JSON was
   the wrong default: agents do not size output before reading it. A trial fed
   the bare command into a narrow lookup, spent roughly 58,000 tokens, and got
