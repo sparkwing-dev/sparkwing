@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.23.0] - 2026-08-08
 ### Fixed
 
 - **cli/portability:** the upgrade notice's version memory is now kept per
