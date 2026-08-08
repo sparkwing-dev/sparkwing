@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -39,8 +40,9 @@ func TestPreCommitReservesAndBoundsItsCPU(t *testing.T) {
 	}
 
 	hints := plan.ResourceHints()
-	if hints == nil || hints.Cores != 7 {
-		t.Fatalf("reserved cores = %#v, want 7", hints)
+	wantCores := float64(preCommitCPUReservation(runtime.NumCPU()))
+	if hints == nil || hints.Cores != wantCores {
+		t.Fatalf("reserved cores = %#v, want %.0f", hints, wantCores)
 	}
 	if got := boundedGoCommand(14, "test", "./..."); got != "GOMAXPROCS=6 go test -p 6 ./..." {
 		t.Fatalf("bounded command = %q", got)
