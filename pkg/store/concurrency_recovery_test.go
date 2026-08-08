@@ -696,7 +696,7 @@ func TestConcurrency_CoalesceFollowerPromotesAfterLeaderAgentLostRelease(t *test
 	}
 }
 
-func TestConcurrency_CoalesceFollowerInheritsCanonicalCompletedOutcomes(t *testing.T) {
+func TestConcurrency_CoalesceFollowerRejectsNonReusableCompletedOutcomes(t *testing.T) {
 	for _, outcome := range []string{"satisfied", "skipped-concurrent"} {
 		t.Run(outcome, func(t *testing.T) {
 			s := newStoreT(t)
@@ -710,8 +710,8 @@ func TestConcurrency_CoalesceFollowerInheritsCanonicalCompletedOutcomes(t *testi
 			if err != nil {
 				t.Fatalf("ResolveWaiter: %v", err)
 			}
-			if resolution.Status != store.WaiterLeaderFinished || resolution.LeaderOutcome != outcome {
-				t.Fatalf("resolution = %+v, want leader_finished with outcome %q", resolution, outcome)
+			if resolution.Status != store.WaiterCancelled {
+				t.Fatalf("resolution = %+v, want cancelled", resolution)
 			}
 		})
 	}
