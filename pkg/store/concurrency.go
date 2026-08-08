@@ -1694,15 +1694,7 @@ func (s *Store) ReleaseAndNotify(ctx context.Context, key, holderID, outcome, ou
 	if err != nil {
 		return false, nil, nil, err
 	}
-	leaderFailureReason := ""
-	if released && outcome == "failed" {
-		if _, reason, _, err := txNodeOutcome(ctx, tx, runID, nodeID); err != nil {
-			return false, nil, nil, err
-		} else {
-			leaderFailureReason = reason
-		}
-	}
-	if released && coalesceFollowersCanInherit(outcome, leaderFailureReason) {
+	if released && coalesceFollowersCanInherit(outcome) {
 		followers, err = txDrainCoalesceFollowers(ctx, tx, key, runID, nodeID)
 		if err != nil {
 			return false, nil, nil, err
@@ -1782,12 +1774,9 @@ func txDrainCoalesceFollowers(ctx context.Context, tx *storeTx, key, leaderRunID
 	return out, nil
 }
 
-func coalesceFollowersCanInherit(outcome, failureReason string) bool {
+func coalesceFollowersCanInherit(outcome string) bool {
 	switch outcome {
-	case "success", "failed", "satisfied", "skipped", "skipped-concurrent", "cached":
-		if failureReason == FailureAgentLost {
-			return false
-		}
+	case "success", "satisfied", "skipped", "skipped-concurrent", "cached":
 		return true
 	default:
 		return false
@@ -1949,12 +1938,11 @@ type WaiterResolution struct {
 	LeaderNodeID       string
 	// LeaderOutcome is the leader node's terminal outcome, populated on
 	// WaiterLeaderFinished so a coalesced follower inherits the leader's
-	// actual node result (a Skipped/Failed leader must not stamp the
-	// follower Success). Empty when the leader row is gone.
+	// successful result. Empty when the leader row is gone or did not
+	// produce a reusable result.
 	LeaderOutcome string
-	// LeaderFailureReason is the leader's categorized failure reason,
-	// carried alongside a Failed LeaderOutcome so the follower records the
-	// same reason rather than uncategorized.
+	// LeaderFailureReason is retained in the resolution shape for wire
+	// compatibility. Reusable leader outcomes do not carry a failure.
 	LeaderFailureReason string
 
 	// Position and Holders are populated on WaiterStillWaiting (queue
@@ -2041,7 +2029,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 			if err != nil {
 				return WaiterResolution{}, err
 			}
-			if coalesceFollowersCanInherit(leaderOutcome, leaderReason) {
+			if coalesceFollowersCanInherit(leaderOutcome) {
 				if err := txCommitChecked(ctx, tx, nowNS, key); err != nil {
 					return WaiterResolution{}, err
 				}
@@ -2147,7 +2135,7 @@ func (s *Store) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyH
 		if err != nil {
 			return WaiterResolution{}, err
 		}
-		if !coalesceFollowersCanInherit(leaderOutcome, leaderReason) {
+		if !coalesceFollowersCanInherit(leaderOutcome) {
 			if err := tx.Commit(); err != nil {
 				return WaiterResolution{}, err
 			}
