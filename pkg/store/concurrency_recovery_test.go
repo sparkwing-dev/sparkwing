@@ -479,6 +479,61 @@ func TestConcurrency_CoalesceFollowerPromotesAfterFailedLeaderRelease(t *testing
 	}
 }
 
+func TestConcurrency_CoalesceFollowerPromotesAfterSkippedLeaderRelease(t *testing.T) {
+	s := newStoreT(t)
+	ctx := ctxT(t)
+
+	leader := acquireT(t, s, store.AcquireSlotRequest{
+		Key:          "cache-skipped-release",
+		HolderID:     "leader/node",
+		RunID:        "leader",
+		NodeID:       "node",
+		Capacity:     1,
+		Policy:       store.OnLimitQueue,
+		CacheKeyHash: "same-content",
+		Lease:        time.Hour,
+	})
+	if leader.Kind != store.AcquireGranted {
+		t.Fatalf("leader: want Granted got %s", leader.Kind)
+	}
+	if err := s.CreateNode(ctx, store.Node{RunID: "leader", NodeID: "node", Status: "pending"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	follower := acquireT(t, s, store.AcquireSlotRequest{
+		Key:          "cache-skipped-release",
+		HolderID:     "follower/node",
+		RunID:        "follower",
+		NodeID:       "node",
+		Capacity:     1,
+		Policy:       store.OnLimitCoalesce,
+		CacheKeyHash: "same-content",
+	})
+	if follower.Kind != store.AcquireCoalesced {
+		t.Fatalf("follower: want Coalesced got %s", follower.Kind)
+	}
+	if err := s.FinishNode(ctx, "leader", "node", "skipped", "", nil); err != nil {
+		t.Fatalf("FinishNode: %v", err)
+	}
+	released, followers, _, err := s.ReleaseAndNotify(ctx, "cache-skipped-release", "leader/node", "skipped", "", "same-content", time.Hour, 0)
+	if err != nil {
+		t.Fatalf("ReleaseAndNotify: %v", err)
+	}
+	if !released {
+		t.Fatalf("ReleaseAndNotify released=false")
+	}
+	if len(followers) != 0 {
+		t.Fatalf("skipped leader must not resolve followers, got %+v", followers)
+	}
+
+	resolution, err := s.ResolveWaiter(ctx, "cache-skipped-release", "follower", "node", "same-content", "leader", "node", false)
+	if err != nil {
+		t.Fatalf("ResolveWaiter: %v", err)
+	}
+	if resolution.Status != store.WaiterPromoted || resolution.HolderID != "follower/node" {
+		t.Fatalf("resolution = %+v, want follower promoted to execute", resolution)
+	}
+}
+
 func TestConcurrency_CoalesceFollowerSurvivesMaintenanceAfterCancelledLeaderRelease(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)

@@ -627,10 +627,7 @@ func TestS3Concurrency_CoalesceCacheHit(t *testing.T) {
 	}
 }
 
-// TestS3Concurrency_CoalesceLeaderFailed asserts a follower whose leader
-// finished without caching (a non-success outcome) inherits the
-// leader's terminal outcome rather than a false success.
-func TestS3Concurrency_CoalesceLeaderFailed(t *testing.T) {
+func TestS3Concurrency_CoalesceFollowerPromotesAfterFailedLeader(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
 	ctx := context.Background()
@@ -654,11 +651,11 @@ func TestS3Concurrency_CoalesceLeaderFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve follower: %v", err)
 	}
-	if res.Status != store.WaiterLeaderFinished {
-		t.Fatalf("follower status = %q, want leader_finished", res.Status)
+	if res.Status != store.WaiterPromoted {
+		t.Fatalf("follower status = %q, want promoted", res.Status)
 	}
-	if res.LeaderOutcome != "failed" {
-		t.Errorf("follower leader outcome = %q, want failed", res.LeaderOutcome)
+	if res.HolderID != "B/n" {
+		t.Errorf("follower holder = %q, want B/n", res.HolderID)
 	}
 }
 
