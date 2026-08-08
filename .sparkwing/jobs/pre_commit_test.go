@@ -32,6 +32,21 @@ func gateFixtureRepo(t *testing.T) string {
 	return root
 }
 
+func TestPreCommitReservesAndBoundsItsCPU(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	if err := (&PreCommit{}).Plan(context.Background(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-commit"}); err != nil {
+		t.Fatal(err)
+	}
+
+	hints := plan.ResourceHints()
+	if hints == nil || hints.Cores != 7 {
+		t.Fatalf("reserved cores = %#v, want 7", hints)
+	}
+	if got := boundedGoCommand(14, "test", "./..."); got != "GOMAXPROCS=6 go test -p 6 ./..." {
+		t.Fatalf("bounded command = %q", got)
+	}
+}
+
 // gitInit makes dir a git work tree.
 func gitInit(t *testing.T, dir string) {
 	t.Helper()
