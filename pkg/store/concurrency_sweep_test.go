@@ -178,9 +178,7 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	}
 }
 
-// D-B: a coalesced follower of a failed leader must inherit the leader's
-// categorized failure_reason, not record it as uncategorized.
-func TestConcurrency_ResolveWaiterCarriesLeaderFailureReason(t *testing.T) {
+func TestConcurrency_ResolveWaiterRejectsFailedLeaderOutcome(t *testing.T) {
 	s := newStoreT(t)
 	seedRunAndNode(t, s, "rLeader", "n")
 	if err := s.FinishNodeWithReason(ctxT(t), "rLeader", "n",
@@ -191,14 +189,8 @@ func TestConcurrency_ResolveWaiterCarriesLeaderFailureReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveWaiter: %v", err)
 	}
-	if res.Status != store.WaiterLeaderFinished {
-		t.Fatalf("status = %q, want LeaderFinished", res.Status)
-	}
-	if res.LeaderOutcome != "failed" {
-		t.Fatalf("leader outcome = %q, want failed", res.LeaderOutcome)
-	}
-	if res.LeaderFailureReason != store.FailureOOMKilled {
-		t.Fatalf("leader failure_reason = %q, want %q", res.LeaderFailureReason, store.FailureOOMKilled)
+	if res.Status != store.WaiterCancelled {
+		t.Fatalf("status = %q, want Cancelled", res.Status)
 	}
 }
 

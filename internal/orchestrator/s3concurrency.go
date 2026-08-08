@@ -656,6 +656,54 @@ func promoteWaiters(doc *s3SlotDoc, now time.Time, lease time.Duration) bool {
 	return true
 }
 
+func promoteCoalesceWaiter(doc *s3SlotDoc, runID, nodeID string, now time.Time, lease time.Duration) *s3Holder {
+	idx := -1
+	for i, w := range doc.Waiters {
+		if w.Policy == store.OnLimitCoalesce && w.RunID == runID && w.NodeID == nodeID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return nil
+	}
+
+	w := doc.Waiters[idx]
+	nowNS := now.UnixNano()
+	entryCap := doc.Capacity
+	if entryCap <= 0 {
+		entryCap = 1
+	}
+	cost, capacity := s3WaiterBudget(w, entryCap, liveFloor(doc.Holders, nowNS))
+	if !fitsBudget(liveHolderCost(doc.Holders, nowNS), cost, capacity) {
+		return nil
+	}
+	holderID := w.HolderID
+	if holderID == "" {
+		holderID = w.RunID + "/" + nodeOrDash(w.NodeID)
+	}
+	holder := s3Holder{
+		HolderID:         holderID,
+		RunID:            w.RunID,
+		NodeID:           w.NodeID,
+		ClaimedAtNS:      nowNS,
+		QueueArrivedAtNS: w.ArrivedAtNS,
+		LeaseExpiresNS:   now.Add(lease).UnixNano(),
+		Cost:             cost,
+		DeclaredCapacity: capacity,
+	}
+	upsertHolder(doc, holder)
+	doc.Waiters = append(doc.Waiters[:idx], doc.Waiters[idx+1:]...)
+	for i := range doc.Waiters {
+		follower := &doc.Waiters[i]
+		if follower.Policy == store.OnLimitCoalesce && follower.LeaderRunID == w.LeaderRunID && follower.LeaderNodeID == w.LeaderNodeID {
+			follower.LeaderRunID = w.RunID
+			follower.LeaderNodeID = w.NodeID
+		}
+	}
+	return &holder
+}
+
 func (c *s3Concurrency) AcquireSlot(ctx context.Context, req store.AcquireSlotRequest) (store.AcquireSlotResponse, error) {
 	if fb := c.fallback(ctx); fb != nil {
 		return fb.AcquireSlot(ctx, req)
@@ -1014,19 +1062,21 @@ func (c *s3Concurrency) ReleaseSlot(ctx context.Context, key, holderID, outcome,
 			changed = true
 		}
 
-		drained := false
-		kept := doc.Waiters[:0]
-		for _, w := range doc.Waiters {
-			if w.Policy == store.OnLimitCoalesce && w.LeaderRunID == rRun && w.LeaderNodeID == rNode {
-				drained = true
-				continue
+		if outcome == "success" {
+			drained := false
+			kept := doc.Waiters[:0]
+			for _, w := range doc.Waiters {
+				if w.Policy == store.OnLimitCoalesce && w.LeaderRunID == rRun && w.LeaderNodeID == rNode {
+					drained = true
+					continue
+				}
+				kept = append(kept, w)
 			}
-			kept = append(kept, w)
-		}
-		doc.Waiters = kept
-		if drained {
-			recordFinished(doc, rRun, rNode, outcome, nowNS)
-			changed = true
+			doc.Waiters = kept
+			if drained {
+				recordFinished(doc, rRun, rNode, outcome, nowNS)
+				changed = true
+			}
 		}
 
 		prune(doc, nowNS)
@@ -1085,6 +1135,25 @@ func (c *s3Concurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID, c
 		}
 
 		if w := findWaiter(doc, runID, nodeID); w != nil {
+			if w.Policy == store.OnLimitCoalesce {
+				leaderLive := false
+				for _, h := range doc.Holders {
+					if h.RunID == w.LeaderRunID && h.NodeID == w.LeaderNodeID && !h.Superseded && h.LeaseExpiresNS > nowNS {
+						leaderLive = true
+						break
+					}
+				}
+				if !leaderLive {
+					if holder := promoteCoalesceWaiter(doc, runID, nodeID, now, store.DefaultConcurrencyLease); holder != nil {
+						resolution = store.WaiterResolution{
+							Status:             store.WaiterPromoted,
+							HolderID:           holder.HolderID,
+							HolderLeaseExpires: time.Unix(0, holder.LeaseExpiresNS),
+						}
+						return true, nil
+					}
+				}
+			}
 			position := 0
 			queueLength := 0
 			for _, x := range doc.Waiters {

@@ -48,6 +48,12 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cache:** An in-flight-dedupe follower now runs after its leader fails,
+  is cancelled, or otherwise ends without a reusable result. A leader's
+  non-success outcome can no longer become the follower's verdict.
+
 ## [v0.23.0] - 2026-08-08
 ### Fixed
 

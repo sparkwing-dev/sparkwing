@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -30,6 +31,22 @@ func gateFixtureRepo(t *testing.T) string {
 	sparkwing.SetWorkDir(root)
 	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
 	return root
+}
+
+func TestPreCommitReservesAndBoundsItsCPU(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	if err := (&PreCommit{}).Plan(context.Background(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{Pipeline: "pre-commit"}); err != nil {
+		t.Fatal(err)
+	}
+
+	hints := plan.ResourceHints()
+	wantCores := float64(preCommitCPUReservation(runtime.NumCPU()))
+	if hints == nil || hints.Cores != wantCores {
+		t.Fatalf("reserved cores = %#v, want %.0f", hints, wantCores)
+	}
+	if got := boundedGoCommand(14, "test", "./..."); got != "GOMAXPROCS=6 go test -p 6 ./..." {
+		t.Fatalf("bounded command = %q", got)
+	}
 }
 
 // gitInit makes dir a git work tree.
