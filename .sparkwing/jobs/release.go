@@ -28,7 +28,7 @@ import (
 // pipeline bumps --bump (default minor) off the latest origin tag.
 //
 // Preview / no-mutation mode is delivered through sparkwing's reserved
-// `--dry-run` flag; each step below either marks itself
+// `--sw-dry-run` flag; each step below either marks itself
 // SafeWithoutDryRun (read-only checks) or provides a .DryRun(...)
 // body (the tag push), so the pipeline doesn't carry its own flag.
 type ReleaseArgs struct {
@@ -92,7 +92,7 @@ func (Release) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Auto-pick version by bumping latest origin tag", Command: "sparkwing run release"},
 		{Comment: "Tag and push an explicit version", Command: "sparkwing run release --version v1.5.5"},
-		{Comment: "Preview without pushing", Command: "sparkwing run release --dry-run"},
+		{Comment: "Preview without pushing", Command: "sparkwing run release --sw-dry-run"},
 	}
 }
 
