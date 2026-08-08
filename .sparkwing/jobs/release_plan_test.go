@@ -48,6 +48,13 @@ func mustNode(t *testing.T, plan *sparkwing.Plan, id string) *sparkwing.JobNode 
 	return n
 }
 
+func TestReleasePreviewExampleUsesTheReservedRunFlag(t *testing.T) {
+	examples := (Release{}).Examples()
+	if got := examples[len(examples)-1].Command; got != "sparkwing run release --sw-dry-run" {
+		t.Fatalf("preview command = %q", got)
+	}
+}
+
 // ancestors returns every node id that id depends on, directly or
 // transitively.
 func ancestors(t *testing.T, plan *sparkwing.Plan, id string) map[string]bool {
