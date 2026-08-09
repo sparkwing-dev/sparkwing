@@ -49,6 +49,23 @@ func TestAnnotateSemaphoreETA(t *testing.T) {
 			want: []int64{semaNone},
 		},
 		{
+			name: "overdue active holder leaves the estimate nil",
+			qs: wingwire.QueueState{
+				Holders: []wingwire.Holder{
+					{RunID: "run-a", ExpectedDurationMS: 10_000, ElapsedMS: 10_001, Semaphores: []string{"deploy"}},
+				},
+				Waiters: []wingwire.Waiter{
+					{RunID: "run-b", ExpectedDurationMS: 5_000, Semaphores: []string{"deploy"}},
+				},
+			},
+			snap: admission.Snapshot{
+				Leases:     []admission.LeaseState{semLease("L1", "run-a", "deploy", 1, 1)},
+				Semaphores: []admission.SemaphoreState{semState("deploy", 1, semHold("L1", 1, 1))},
+				Waiters:    []admission.WaiterState{semWaiter("run-b", "deploy", 1, 1)},
+			},
+			want: []int64{semaNone},
+		},
+		{
 			name: "cheap waiters start before an expensive one that does not fit",
 			qs: wingwire.QueueState{
 				Holders: []wingwire.Holder{
