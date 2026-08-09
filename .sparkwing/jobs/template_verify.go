@@ -12,6 +12,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
@@ -55,6 +57,12 @@ type verifyEnv struct {
 	// build and module caches instead of a cold HOME default.
 	GoEnv map[string]string `json:"go_env"`
 }
+
+var (
+	templateVerifyLockOnce sync.Once
+	templateVerifyLockErr  error
+	templateVerifyLockFile *os.File
+)
 
 // TemplateVerify proves that every sparks-core template is a working
 // pipeline: it builds the sparkwing CLI from the working tree, then for
@@ -116,6 +124,12 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	if root == "" {
 		return verifyEnv{}, errors.New("template-verify: sparkwing.WorkDir() is empty")
 	}
+	if err := acquireTemplateVerifyLock(os.TempDir()); err != nil {
+		return verifyEnv{}, fmt.Errorf("template-verify: acquire scratch ownership: %w", err)
+	}
+	if err := cleanupTemplateScratch(os.TempDir()); err != nil {
+		return verifyEnv{}, fmt.Errorf("template-verify: reclaim stale scratch: %w", err)
+	}
 	dir, err := os.MkdirTemp("", "sparkwing-template-verify-cli-*")
 	if err != nil {
 		return verifyEnv{}, fmt.Errorf("template-verify: temp dir: %w", err)
@@ -136,6 +150,37 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 		SparksCore: core,
 		GoEnv:      readGoEnv(ctx),
 	}, nil
+}
+
+func acquireTemplateVerifyLock(root string) error {
+	templateVerifyLockOnce.Do(func() {
+		path := filepath.Join(root, "sparkwing-template-verify.lock")
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
+			templateVerifyLockErr = err
+			return
+		}
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+			_ = f.Close()
+			templateVerifyLockErr = err
+			return
+		}
+		templateVerifyLockFile = f
+	})
+	return templateVerifyLockErr
+}
+
+func cleanupTemplateScratch(root string) error {
+	matches, err := filepath.Glob(filepath.Join(root, "sparkwing-tv-*"))
+	if err != nil {
+		return err
+	}
+	for _, path := range matches {
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("remove %s: %w", filepath.Base(path), err)
+		}
+	}
+	return nil
 }
 
 // readGoEnv captures the host's GOCACHE / GOMODCACHE / GOPATH so a job
