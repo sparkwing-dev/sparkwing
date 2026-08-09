@@ -48,13 +48,13 @@ func runWingdCLI(args []string) error {
 		return err
 	}
 	d, err := wingd.New(wingd.Config{
-		Home:                 *home,
-		Version:              v,
-		Budget:               resolvedBudget.Budget,
-		BudgetSource:         resolvedBudget.Source,
-		BudgetOrigin:         resolvedBudget.Origin,
-		FinalizeRun:          NewOrphanRunFinalizer(*home),
-		FinalizeCancelledRun: NewCancelledRunFinalizer(*home),
+		Home:                  *home,
+		Version:               v,
+		Budget:                resolvedBudget.Budget,
+		BudgetSource:          resolvedBudget.Source,
+		BudgetOrigin:          resolvedBudget.Origin,
+		FinalizeRun:           NewOrphanRunFinalizer(*home),
+		FinalizeCancelledRuns: NewCancelledRunsFinalizer(*home),
 		Logf: func(format string, a ...any) {
 			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
 				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))
@@ -85,12 +85,35 @@ func NewOrphanRunFinalizer(home string) func(runID string) {
 	}
 }
 
-// NewCancelledRunFinalizer returns the daemon hook that persists an explicit
-// operator cancellation before acknowledging it to the control client.
-func NewCancelledRunFinalizer(home string) func(runID, reason string) error {
-	return func(runID, reason string) error {
-		return finalizeRun(home, runID, reason)
+// NewCancelledRunsFinalizer returns the daemon hook that persists every run
+// sharing an explicitly cancelled lease in one transaction.
+func NewCancelledRunsFinalizer(home string) func([]string, string) error {
+	return func(runIDs []string, reason string) error {
+		return finalizeRuns(home, runIDs, reason)
 	}
+}
+
+func finalizeRuns(home string, runIDs []string, reason string) error {
+	p := PathsAt(home)
+	if home == "" {
+		var err error
+		p, err = DefaultPaths()
+		if err != nil {
+			return err
+		}
+	}
+	if _, err := os.Stat(p.StateDB()); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		return err
+	}
+	defer func() { _ = st.Close() }()
+	return st.FinishRunsIfActive(context.Background(), runIDs, "cancelled", reason)
 }
 
 func finalizeRun(home, runID, reason string) error {

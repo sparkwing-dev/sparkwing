@@ -75,8 +75,8 @@ func startWingdCfg(t *testing.T, cfg wingd.Config) {
 	if cfg.FinalizeRun == nil {
 		cfg.FinalizeRun = NewOrphanRunFinalizer(cfg.Home)
 	}
-	if cfg.FinalizeCancelledRun == nil {
-		cfg.FinalizeCancelledRun = NewCancelledRunFinalizer(cfg.Home)
+	if cfg.FinalizeCancelledRuns == nil {
+		cfg.FinalizeCancelledRuns = NewCancelledRunsFinalizer(cfg.Home)
 	}
 	d, err := wingd.New(cfg)
 	if err != nil {

@@ -74,7 +74,6 @@ type conn struct {
 	requestResources   wingwire.HostResources
 	requestSemaphores  []wingwire.SemaphoreClaim
 	semaphoresOnly     bool
-	explicitCancels    map[string]struct{}
 
 	// stalled and lowSince track the holder-idle verdict, guarded by the
 	// owning Daemon's mutex. lowSince is when the holder's CPU first fell

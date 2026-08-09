@@ -60,15 +60,15 @@ func runWingdRun(args []string) error {
 
 	logger := log.New(os.Stderr, "", log.LstdFlags|log.LUTC)
 	d, err := wingd.New(wingd.Config{
-		Home:                 *home,
-		Version:              v,
-		HeadroomFraction:     *headroom,
-		Budget:               resolvedBudget.Budget,
-		BudgetSource:         resolvedBudget.Source,
-		BudgetOrigin:         resolvedBudget.Origin,
-		FinalizeRun:          orchestrator.NewOrphanRunFinalizer(*home),
-		FinalizeCancelledRun: orchestrator.NewCancelledRunFinalizer(*home),
-		Logf:                 func(format string, args ...any) { logger.Printf(format, args...) },
+		Home:                  *home,
+		Version:               v,
+		HeadroomFraction:      *headroom,
+		Budget:                resolvedBudget.Budget,
+		BudgetSource:          resolvedBudget.Source,
+		BudgetOrigin:          resolvedBudget.Origin,
+		FinalizeRun:           orchestrator.NewOrphanRunFinalizer(*home),
+		FinalizeCancelledRuns: orchestrator.NewCancelledRunsFinalizer(*home),
+		Logf:                  func(format string, args ...any) { logger.Printf(format, args...) },
 	})
 	if err != nil {
 		return err
