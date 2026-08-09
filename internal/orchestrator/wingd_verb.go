@@ -48,12 +48,13 @@ func runWingdCLI(args []string) error {
 		return err
 	}
 	d, err := wingd.New(wingd.Config{
-		Home:         *home,
-		Version:      v,
-		Budget:       resolvedBudget.Budget,
-		BudgetSource: resolvedBudget.Source,
-		BudgetOrigin: resolvedBudget.Origin,
-		FinalizeRun:  NewOrphanRunFinalizer(*home),
+		Home:                 *home,
+		Version:              v,
+		Budget:               resolvedBudget.Budget,
+		BudgetSource:         resolvedBudget.Source,
+		BudgetOrigin:         resolvedBudget.Origin,
+		FinalizeRun:          NewOrphanRunFinalizer(*home),
+		FinalizeCancelledRun: NewCancelledRunFinalizer(*home),
 		Logf: func(format string, a ...any) {
 			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
 				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))
@@ -78,13 +79,23 @@ func runWingdCLI(args []string) error {
 // non-local state store are left alone.
 func NewOrphanRunFinalizer(home string) func(runID string) {
 	return func(runID string) {
-		if err := finalizeOrphanRun(home, runID); err != nil {
+		if err := finalizeRun(home, runID, "interrupted: run process exited without finalizing (admission connection lost)"); err != nil {
 			slog.Warn("wingd: finalize orphaned run", "run_id", runID, "err", err)
 		}
 	}
 }
 
-func finalizeOrphanRun(home, runID string) error {
+// NewCancelledRunFinalizer returns the daemon hook that persists an explicit
+// operator cancellation before acknowledging it to the control client.
+func NewCancelledRunFinalizer(home string) func(runID, reason string) {
+	return func(runID, reason string) {
+		if err := finalizeRun(home, runID, reason); err != nil {
+			slog.Warn("wingd: finalize cancelled run", "run_id", runID, "err", err)
+		}
+	}
+}
+
+func finalizeRun(home, runID, reason string) error {
 	p := PathsAt(home)
 	if home == "" {
 		var err error
@@ -115,6 +126,5 @@ func finalizeOrphanRun(home, runID string) error {
 	if isTerminalStatus(run.Status) {
 		return nil
 	}
-	return st.FinishRun(ctx, runID, "cancelled",
-		"interrupted: run process exited without finalizing (admission connection lost)")
+	return st.FinishRun(ctx, runID, "cancelled", reason)
 }

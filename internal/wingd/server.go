@@ -1128,6 +1128,10 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 		return
 	}
 	waiter := target.role == roleWaiter
+	if target.explicitCancels == nil {
+		target.explicitCancels = make(map[string]struct{})
+	}
+	target.explicitCancels[req.RunID] = struct{}{}
 	var deliveries []delivery
 	var snap admission.Snapshot
 	if waiter {
@@ -1141,8 +1145,12 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 		d.touchLocked()
 	}
 	d.mu.Unlock()
+	const reason = "cancelled via sparkwing runs cancel"
+	if d.cfg.FinalizeCancelledRun != nil {
+		d.cfg.FinalizeCancelledRun(req.RunID, reason)
+	}
 	d.cfg.logf("cancel: signalling run %s to wind down", req.RunID)
-	_ = target.send(&wingwire.Cancel{RunID: req.RunID, Reason: "cancelled via sparkwing runs cancel"})
+	_ = target.send(&wingwire.Cancel{RunID: req.RunID, Reason: reason})
 	if waiter {
 		d.flush(deliveries, snap)
 	}
@@ -1197,9 +1205,15 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		if c.finalizable && d.cfg.FinalizeRun != nil {
 			switch c.role {
 			case roleHolder:
-				orphaned = append(orphaned, c.members...)
+				for _, runID := range c.members {
+					if _, explicitlyCancelled := c.explicitCancels[runID]; !explicitlyCancelled {
+						orphaned = append(orphaned, runID)
+					}
+				}
 			case roleWaiter:
-				orphaned = append(orphaned, c.runID)
+				if _, explicitlyCancelled := c.explicitCancels[c.runID]; !explicitlyCancelled {
+					orphaned = append(orphaned, c.runID)
+				}
 			}
 		}
 		var events []admission.Event
