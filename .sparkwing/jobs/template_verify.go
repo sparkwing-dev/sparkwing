@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -270,9 +271,12 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 	}
 	lines := strings.Split(string(raw), "\n")
 	found := false
+	oldModule := ""
+	newModule := "example.com/sparkwing/verify/" + templateName + "/pipelines"
 	for i, line := range lines {
 		if strings.HasPrefix(strings.TrimSpace(line), "module ") {
-			lines[i] = "module example.com/sparkwing/verify/" + templateName + "/pipelines"
+			oldModule = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "module "))
+			lines[i] = "module " + newModule
 			found = true
 			break
 		}
@@ -280,7 +284,23 @@ func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
 	if !found {
 		return errors.New("go.mod has no module directive")
 	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600)
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		return err
+	}
+	return filepath.Walk(dotSparkwing, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || filepath.Ext(path) != ".go" {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		updated := bytes.ReplaceAll(data, []byte(oldModule+"/"), []byte(newModule+"/"))
+		if bytes.Equal(data, updated) {
+			return nil
+		}
+		return os.WriteFile(path, updated, info.Mode())
+	})
 }
 
 // sortedParamFlags renders a verify_params map as sorted "k=v" strings
