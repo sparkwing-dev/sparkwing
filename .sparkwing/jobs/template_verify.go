@@ -199,6 +199,9 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 		}
 
 		dotSparkwing := filepath.Join(scratch, ".sparkwing")
+		if err := normalizeVerifyModulePath(dotSparkwing, m.Name); err != nil {
+			return fmt.Errorf("%s: normalize module path: %w", m.Name, err)
+		}
 		if err := pinLocalSparksCore(ctx, dotSparkwing, env.SparksCore); err != nil {
 			return fmt.Errorf("%s: pin sparks-core: %w", m.Name, err)
 		}
@@ -257,6 +260,27 @@ func templateRunAdmissionEnv(stateHome string) map[string]string {
 		wingwire.LeaseTokenEnv:      "",
 		wingwire.ChildLeaseTokenEnv: "",
 	}
+}
+
+func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
+	path := filepath.Join(dotSparkwing, "go.mod")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(raw), "\n")
+	found := false
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "module ") {
+			lines[i] = "module example.com/sparkwing/verify/" + templateName + "/pipelines"
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.New("go.mod has no module directive")
+	}
+	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600)
 }
 
 // sortedParamFlags renders a verify_params map as sorted "k=v" strings
