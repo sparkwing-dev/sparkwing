@@ -362,6 +362,7 @@ type admissionWaitDetail struct {
 func latestAdmissionWait(ctx context.Context, b backend.Backend, runID string) (admissionWaitDetail, bool) {
 	const rootParticipant = "\x00root"
 	waits := map[string]admissionWaitDetail{}
+	legacyWaits := map[string]bool{}
 	var after int64
 	for {
 		events, err := b.ListEventsAfter(ctx, runID, after, 500)
@@ -373,6 +374,7 @@ func latestAdmissionWait(ctx context.Context, b backend.Backend, runID string) (
 		}
 		for _, event := range events {
 			after = event.Seq
+			eventNodeID := event.NodeID
 			participant := event.NodeID
 			var payload struct {
 				Position    int    `json:"position"`
@@ -385,14 +387,26 @@ func latestAdmissionWait(ctx context.Context, b backend.Backend, runID string) (
 					participant = payload.RequestID
 				}
 			}
-			if participant == "" || participant == runID {
+			if participant == "" || participant == runID || participant == runID+localPlanSemsID {
 				participant = rootParticipant
 			}
 			switch event.Kind {
 			case "admission_wait":
 				waits[participant] = admissionWaitDetail{Position: payload.Position, QueueLength: payload.QueueLength}
+				if eventNodeID == "" && payload.RequestID != "" && participant != rootParticipant {
+					legacyWaits[participant] = true
+				}
 			case "admission_granted", "admission_cancelled", "admission_queue_timeout":
+				if eventNodeID == "" && payload.RequestID == "" {
+					delete(waits, rootParticipant)
+					for legacyParticipant := range legacyWaits {
+						delete(waits, legacyParticipant)
+						delete(legacyWaits, legacyParticipant)
+					}
+					continue
+				}
 				delete(waits, participant)
+				delete(legacyWaits, participant)
 			}
 		}
 	}
