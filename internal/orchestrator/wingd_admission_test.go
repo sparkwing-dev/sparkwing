@@ -7,6 +7,22 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
+func TestAdmissionEventNodeIDUsesCanonicalParticipant(t *testing.T) {
+	for _, tc := range []struct {
+		name, participant, requestID, want string
+	}{
+		{name: "root", requestID: "run-1", want: ""},
+		{name: "plan", requestID: "run-1/plan", want: ""},
+		{name: "node", participant: "compile", requestID: "run-1/node-host/Y29tcGlsZQ", want: "compile"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := admissionEventNodeID(tc.participant, tc.requestID); got != tc.want {
+				t.Fatalf("admissionEventNodeID(%q, %q) = %q, want %q", tc.participant, tc.requestID, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLeaseCarriesHost(t *testing.T) {
 	tests := []struct {
 		name  string
