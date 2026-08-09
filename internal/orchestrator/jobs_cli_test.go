@@ -205,6 +205,74 @@ func TestListJobs_TracksInterleavedNodeAdmissionWaitsIndependently(t *testing.T)
 	}
 }
 
+func TestListJobs_PreservesPlanAdmissionAsRootWait(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	const runID = "run-plan-admission-list"
+	if err := st.CreateRun(ctx, store.Run{
+		ID: runID, Pipeline: "push-checks", Status: "running", StartedAt: time.Now().Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := st.AppendEvent(ctx, runID, runID+"/plan", "admission_wait", []byte(`{"position":3,"queue_length":7}`)); err != nil {
+		t.Fatalf("AppendEvent: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := orchestrator.ListJobs(ctx, p, orchestrator.ListOpts{Limit: 10}, &out); err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if !strings.Contains(out.String(), "queued (3/7)") {
+		t.Fatalf("plan-level admission should retain the run queue position, got:\n%s", out.String())
+	}
+	if strings.Contains(out.String(), "admission-waiting") {
+		t.Fatalf("plan-level admission must not be presented as a node wait, got:\n%s", out.String())
+	}
+}
+
+func TestListJobs_ClearsInterleavedNodeAdmissionTerminalsIndependently(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	const runID = "run-node-admission-terminals"
+	if err := st.CreateRun(ctx, store.Run{
+		ID: runID, Pipeline: "push-checks", Status: "running", StartedAt: time.Now().Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	for _, event := range []struct {
+		node, kind, payload string
+	}{
+		{node: "node-a", kind: "admission_wait", payload: `{"position":2,"queue_length":4}`},
+		{node: "node-b", kind: "admission_wait", payload: `{"position":3,"queue_length":4}`},
+		{node: "node-a", kind: "admission_cancelled"},
+		{node: "node-b", kind: "admission_queue_timeout"},
+	} {
+		if _, err := st.AppendEvent(ctx, runID, event.node, event.kind, []byte(event.payload)); err != nil {
+			t.Fatalf("AppendEvent %s %s: %v", event.node, event.kind, err)
+		}
+	}
+
+	var out bytes.Buffer
+	if err := orchestrator.ListJobs(ctx, p, orchestrator.ListOpts{Limit: 10}, &out); err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if strings.Contains(out.String(), "admission-waiting") || strings.Contains(out.String(), "queued (") {
+		t.Fatalf("terminal admission events should clear only their matching waits, got:\n%s", out.String())
+	}
+}
+
 func TestListJobs_IgnoresStaleAdmissionWaitForFinishedRun(t *testing.T) {
 	p := newPaths(t)
 	ctx := context.Background()
