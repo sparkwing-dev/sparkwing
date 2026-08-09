@@ -273,6 +273,42 @@ func TestListJobs_ClearsInterleavedNodeAdmissionTerminalsIndependently(t *testin
 	}
 }
 
+func TestListJobs_StaleAdmissionTerminalPreservesNewerRequest(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	const runID = "run-stale-admission-terminal"
+	if err := st.CreateRun(ctx, store.Run{
+		ID: runID, Pipeline: "push-checks", Status: "running", StartedAt: time.Now().Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	for _, event := range []struct {
+		kind, payload string
+	}{
+		{kind: "admission_wait", payload: `{"position":2,"queue_length":4,"request_id":"request-1"}`},
+		{kind: "admission_wait", payload: `{"position":3,"queue_length":5,"request_id":"request-2"}`},
+		{kind: "admission_granted", payload: `{"request_id":"request-1"}`},
+	} {
+		if _, err := st.AppendEvent(ctx, runID, "node-a", event.kind, []byte(event.payload)); err != nil {
+			t.Fatalf("AppendEvent %s: %v", event.kind, err)
+		}
+	}
+
+	var out bytes.Buffer
+	if err := orchestrator.ListJobs(ctx, p, orchestrator.ListOpts{Limit: 10}, &out); err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if !strings.Contains(out.String(), "running (1 admission-waiting)") {
+		t.Fatalf("a stale terminal must not clear the participant's newer request, got:\n%s", out.String())
+	}
+}
+
 func TestListJobs_ClearsLegacyAdmissionWaitOnLegacyTerminal(t *testing.T) {
 	p := newPaths(t)
 	ctx := context.Background()
