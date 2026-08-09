@@ -63,6 +63,7 @@ func seedReleaseRepo(t *testing.T) string {
 	writeFile(t, filepath.Join(repo, "doc.go"), "package sparkwing\n")
 	writeFile(t, filepath.Join(repo, ".sparkwing", "go.mod"), fakePipelinesGoMod)
 	writeFile(t, filepath.Join(repo, ".sparkwing", "go.sum"), "")
+	writeFile(t, filepath.Join(repo, ".sparkwing", "main.go"), "package main\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n\nfunc main() {}\n")
 	if err := os.MkdirAll(filepath.Join(repo, "pkg", "scaffold"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -123,6 +124,11 @@ func TestRestoreSelfReplaceRepairsAFailedBump(t *testing.T) {
 
 	if err := restoreSelfReplaceIn(ctx, repo); err != nil {
 		t.Fatalf("restoreSelfReplaceIn after a failed bump: %v", err)
+	}
+	tidy := exec.Command("go", "mod", "tidy", "-diff")
+	tidy.Dir = filepath.Join(repo, ".sparkwing")
+	if out, err := tidy.CombinedOutput(); err != nil {
+		t.Fatalf("restored pipeline module is not tidy:\n%s", out)
 	}
 
 	got := readPipelinesGoMod(t, repo)
