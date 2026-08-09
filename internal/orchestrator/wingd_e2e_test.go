@@ -1901,6 +1901,55 @@ func TestWingd_DaemonFirstCancelRecoversStalledHolderWithoutDashboard(t *testing
 	}
 }
 
+func TestWingd_DaemonFirstCancelSurvivesImmediateClientExit(t *testing.T) {
+	home := wingdTestHome(t)
+	startWingd(t, home, 2)
+	_, st, _ := openWingdBackends(t, home)
+	ctx := context.Background()
+	const runID = "cancel-exit-holder"
+
+	if err := st.CreateRun(ctx, store.Run{
+		ID: runID, Pipeline: "wingd-e2e-hold", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed run row: %v", err)
+	}
+	holder, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
+	if err != nil {
+		t.Fatalf("dial holder client: %v", err)
+	}
+	if _, err := holder.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: runID, Resources: wingwire.HostResources{Cores: 1},
+	}, nil); err != nil {
+		t.Fatalf("acquire holder: %v", err)
+	}
+	found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home, Version: "test"}, runID)
+	if err != nil {
+		t.Fatalf("daemon-first cancel: %v", err)
+	}
+	if !found {
+		t.Fatal("daemon did not find holder")
+	}
+	if err := holder.Close(); err != nil {
+		t.Fatalf("close holder immediately after cancel: %v", err)
+	}
+
+	deadline := time.Now().Add(wingdTestWait)
+	for time.Now().Before(deadline) {
+		run, getErr := st.GetRun(ctx, runID)
+		if getErr != nil {
+			t.Fatalf("get run: %v", getErr)
+		}
+		if run.Status == "cancelled" {
+			if run.Error != "cancelled via sparkwing runs cancel" {
+				t.Fatalf("stored cancellation = %q, want explicit operator attribution", run.Error)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("cancelled holder never finalized")
+}
+
 func TestWingd_DaemonFirstCancelRemovesQueuedWaiterWithoutDashboard(t *testing.T) {
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
