@@ -38,18 +38,21 @@ type Daemon struct {
 
 	events eventWindow
 
-	mu           sync.Mutex
-	ledger       *admission.Ledger
-	conns        map[*conn]struct{}
-	byRun        map[string]*conn
-	leaseRun     map[admission.LeaseID]string
-	leaseCharge  map[admission.LeaseID]wingwire.HostResources
-	leaseMembers map[admission.LeaseID][]string
-	reattachWait map[admission.LeaseID]struct{}
-	draining     bool
-	shuttingDown bool
-	lastActivity time.Time
-	startedAt    time.Time
+	mu                  sync.Mutex
+	ledger              *admission.Ledger
+	conns               map[*conn]struct{}
+	byRun               map[string]*conn
+	leaseRun            map[admission.LeaseID]string
+	leaseCharge         map[admission.LeaseID]wingwire.HostResources
+	leaseMembers        map[admission.LeaseID][]string
+	reattachWait        map[admission.LeaseID]struct{}
+	cancelPending       map[string]struct{}
+	cancelledRuns       map[string]struct{}
+	disconnectedPending map[string]struct{}
+	draining            bool
+	shuttingDown        bool
+	lastActivity        time.Time
+	startedAt           time.Time
 
 	loadInit     bool
 	smoothedLoad float64
@@ -130,19 +133,22 @@ func New(cfg Config) (*Daemon, error) {
 		procSampler = newProcSampler()
 	}
 	return &Daemon{
-		cfg:          cfg,
-		layout:       lay,
-		sampler:      sampler,
-		procSampler:  procSampler,
-		container:    containerSensorFor(cfg),
-		ready:        make(chan struct{}),
-		quit:         make(chan struct{}),
-		conns:        map[*conn]struct{}{},
-		byRun:        map[string]*conn{},
-		leaseRun:     map[admission.LeaseID]string{},
-		leaseCharge:  map[admission.LeaseID]wingwire.HostResources{},
-		leaseMembers: map[admission.LeaseID][]string{},
-		reattachWait: map[admission.LeaseID]struct{}{},
+		cfg:                 cfg,
+		layout:              lay,
+		sampler:             sampler,
+		procSampler:         procSampler,
+		container:           containerSensorFor(cfg),
+		ready:               make(chan struct{}),
+		quit:                make(chan struct{}),
+		conns:               map[*conn]struct{}{},
+		byRun:               map[string]*conn{},
+		leaseRun:            map[admission.LeaseID]string{},
+		leaseCharge:         map[admission.LeaseID]wingwire.HostResources{},
+		leaseMembers:        map[admission.LeaseID][]string{},
+		reattachWait:        map[admission.LeaseID]struct{}{},
+		cancelPending:       map[string]struct{}{},
+		cancelledRuns:       map[string]struct{}{},
+		disconnectedPending: map[string]struct{}{},
 	}, nil
 }
 
@@ -625,6 +631,11 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	charged := requested
 
 	d.mu.Lock()
+	if _, cancelled := d.cancelledRuns[req.RunID]; cancelled {
+		d.mu.Unlock()
+		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
+		return
+	}
 	if d.draining {
 		d.mu.Unlock()
 		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "draining", Policy: wingwire.Policy("draining")})
@@ -1121,6 +1132,11 @@ func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
 func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	d.mu.Lock()
 	target := d.byRun[req.RunID]
+	if _, pending := d.cancelPending[req.RunID]; pending {
+		d.mu.Unlock()
+		c.close()
+		return
+	}
 	if target == nil || !target.finalizable ||
 		(target.role != roleHolder && target.role != roleWaiter) {
 		d.mu.Unlock()
@@ -1128,24 +1144,85 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 		return
 	}
 	waiter := target.role == roleWaiter
-	var deliveries []delivery
-	var snap admission.Snapshot
-	if waiter {
-		d.events.record(d.now(), admissionEvent{Kind: eventCancellation})
-		events := d.cancelWaiterLocked(req.RunID)
-		delete(d.byRun, req.RunID)
-		target.role = roleNone
-		target.finalizable = false
-		deliveries = d.routeLocked(events)
-		snap = d.ledger.Snapshot()
-		d.touchLocked()
+	affected := []string{req.RunID}
+	if !waiter {
+		for _, lease := range d.ledger.Snapshot().Leases {
+			if lease.ID == target.leaseID {
+				affected = append([]string(nil), lease.Members...)
+				break
+			}
+		}
+	}
+	const reason = "cancelled via sparkwing runs cancel"
+	for _, runID := range affected {
+		d.cancelPending[runID] = struct{}{}
 	}
 	d.mu.Unlock()
-	d.cfg.logf("cancel: signalling run %s to wind down", req.RunID)
-	_ = target.send(&wingwire.Cancel{RunID: req.RunID, Reason: "cancelled via sparkwing runs cancel"})
-	if waiter {
-		d.flush(deliveries, snap)
+
+	if d.cfg.FinalizeCancelledRuns != nil {
+		if err := d.cfg.FinalizeCancelledRuns(append([]string(nil), affected...), reason); err != nil {
+			d.cfg.logf("cancel: finalize runs %s: %v", strings.Join(affected, ","), err)
+			var orphaned []string
+			d.mu.Lock()
+			for _, runID := range affected {
+				delete(d.cancelPending, runID)
+				if _, disconnected := d.disconnectedPending[runID]; disconnected {
+					delete(d.disconnectedPending, runID)
+					orphaned = append(orphaned, runID)
+				}
+			}
+			d.mu.Unlock()
+			for _, runID := range orphaned {
+				if d.cfg.FinalizeRun != nil {
+					go d.cfg.FinalizeRun(runID)
+				}
+			}
+			c.close()
+			return
+		}
+	} else if d.cfg.FinalizeRun != nil {
+		for _, runID := range affected {
+			d.cfg.FinalizeRun(runID)
+		}
 	}
+
+	d.mu.Lock()
+	current := make(map[*conn]string)
+	for _, runID := range affected {
+		delete(d.cancelPending, runID)
+		delete(d.disconnectedPending, runID)
+		d.cancelledRuns[runID] = struct{}{}
+		if owner := d.byRun[runID]; owner != nil {
+			if _, seen := current[owner]; !seen {
+				current[owner] = runID
+			}
+		}
+	}
+	var events []admission.Event
+	for owner := range current {
+		switch owner.role {
+		case roleWaiter:
+			d.events.record(d.now(), admissionEvent{Kind: eventCancellation})
+			events = append(events, d.cancelWaiterLocked(owner.runID)...)
+			delete(d.byRun, owner.runID)
+			owner.role = roleNone
+			owner.finalizable = false
+		case roleHolder:
+			events = append(events, d.releaseConnLocked(owner)...)
+		}
+	}
+	deliveries := d.routeLocked(events)
+	snap := d.ledger.Snapshot()
+	d.touchLocked()
+	d.mu.Unlock()
+	for owner, runID := range current {
+		d.cfg.logf("cancel: signalling run %s to wind down", runID)
+		if err := owner.send(&wingwire.Cancel{RunID: runID, Reason: reason}); err != nil {
+			c.close()
+			return
+		}
+	}
+	d.flush(deliveries, snap)
 	_ = c.send(&wingwire.CancelLeaseAck{Found: true})
 }
 
@@ -1197,9 +1274,19 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		if c.finalizable && d.cfg.FinalizeRun != nil {
 			switch c.role {
 			case roleHolder:
-				orphaned = append(orphaned, c.members...)
+				for _, runID := range c.members {
+					if _, pending := d.cancelPending[runID]; pending {
+						d.disconnectedPending[runID] = struct{}{}
+					} else {
+						orphaned = append(orphaned, runID)
+					}
+				}
 			case roleWaiter:
-				orphaned = append(orphaned, c.runID)
+				if _, pending := d.cancelPending[c.runID]; pending {
+					d.disconnectedPending[c.runID] = struct{}{}
+				} else {
+					orphaned = append(orphaned, c.runID)
+				}
 			}
 		}
 		var events []admission.Event
