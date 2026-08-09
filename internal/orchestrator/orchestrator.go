@@ -1607,6 +1607,10 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		if err != nil {
 			return nil, fmt.Errorf("enqueue trigger: %w", err)
 		}
+		watchdogWaits := admissionWaitTrackerFromContext(ctx)
+		watchdogParticipant := admissionWaitParticipantFromContext(ctx)
+		watchdogWaits.begin(watchdogParticipant)
+		defer watchdogWaits.end(watchdogParticipant)
 
 		sparkwing.Info(ctx,
 			"spawned child run %s (pipeline=%s%s)",
@@ -1657,7 +1661,8 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		nodeTimeout := nodeTimeoutControllerFromContext(ctx)
 		var admissionMu sync.Mutex
 		updateTimeoutForAdmission := func(statusCtx context.Context) bool {
-			if req.Timeout > 0 || nodeTimeout == nil || nodeTimeoutDurationFromContext(ctx) <= 0 {
+			trackNodeTimeout := req.Timeout == 0 && nodeTimeout != nil && nodeTimeoutDurationFromContext(ctx) > 0
+			if !trackNodeTimeout {
 				return false
 			}
 			if statusCtx.Err() != nil {
