@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -165,6 +166,41 @@ func TestEnsureDaemon_SpawnsWhenAbsent(t *testing.T) {
 	}
 	if lease.RunID != "r1" {
 		t.Fatalf("lease run id %q, want r1", lease.RunID)
+	}
+}
+
+func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
+	home := shortHome(t)
+	var calls atomic.Int32
+	spawn := func(string, string) error {
+		calls.Add(1)
+		go func() {
+			time.Sleep(750 * time.Millisecond)
+			d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0"})
+			if err != nil {
+				t.Errorf("spawn: new daemon: %v", err)
+				return
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			_ = d.Run(ctx)
+		}()
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	cl, err := EnsureDaemon(ctx, Options{
+		Home:        home,
+		Spawn:       spawn,
+		DialTimeout: 10 * time.Millisecond,
+		Backoff:     10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("ensure slow-starting daemon: %v", err)
+	}
+	defer cl.Close()
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("spawn calls = %d, want one startup attempt", got)
 	}
 }
 
