@@ -59,12 +59,12 @@ func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 		d.applyCapacity(stat)
 	}
 	stat = d.container.apply(stat)
-	roots := d.holderPIDs()
+	roots, cohort := d.holderSample()
 	ownedBusy, ownedMeasured := 0.0, true
 	if len(roots) > 0 {
 		ownedBusy, ownedMeasured = d.ownedSampler.CPUUsage(roots)
 	}
-	d.applyHeadroomSample(stat, roots, ownedBusy, ownedMeasured)
+	d.applyHeadroomSample(stat, cohort, ownedBusy, ownedMeasured)
 }
 
 // applyHeadroom converts a host reading into a ledger headroom ceiling:
@@ -76,9 +76,9 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	d.applyHeadroomSample(stat, nil, 0, false)
 }
 
-func (d *Daemon) applyHeadroomSample(stat HostStat, sampledRoots []int, ownedBusy float64, ownedMeasured bool) {
+func (d *Daemon) applyHeadroomSample(stat HostStat, sampled holderCohort, ownedBusy float64, ownedMeasured bool) {
 	d.mu.Lock()
-	if !sameInts(sampledRoots, d.holderPIDsLocked()) {
+	if !sameHolderCohort(sampled, d.holderCohortLocked()) {
 		ownedBusy = 0
 		ownedMeasured = false
 	}
@@ -225,33 +225,40 @@ func coresExternal(stat HostStat, busy, ownedBusy float64, ownedMeasured bool) f
 	return external
 }
 
-func (d *Daemon) holderPIDs() []int {
+type holderCohort map[*conn]int
+
+func (d *Daemon) holderSample() ([]int, holderCohort) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return d.holderPIDsLocked()
-}
-
-func (d *Daemon) holderPIDsLocked() []int {
+	cohort := d.holderCohortLocked()
 	seen := map[int]struct{}{}
-	for _, c := range d.byRun {
-		if c.role == roleHolder && c.pid > 0 {
-			seen[c.pid] = struct{}{}
-		}
+	for _, pid := range cohort {
+		seen[pid] = struct{}{}
 	}
 	pids := make([]int, 0, len(seen))
 	for pid := range seen {
 		pids = append(pids, pid)
 	}
 	sort.Ints(pids)
-	return pids
+	return pids, cohort
 }
 
-func sameInts(a, b []int) bool {
+func (d *Daemon) holderCohortLocked() holderCohort {
+	cohort := holderCohort{}
+	for _, c := range d.byRun {
+		if c.role == roleHolder && c.pid > 0 {
+			cohort[c] = c.pid
+		}
+	}
+	return cohort
+}
+
+func sameHolderCohort(a, b holderCohort) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	for i := range a {
-		if a[i] != b[i] {
+	for c, pid := range a {
+		if b[c] != pid {
 			return false
 		}
 	}
