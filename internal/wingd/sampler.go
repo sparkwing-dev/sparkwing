@@ -95,11 +95,12 @@ type OwnedCPUSampler interface {
 }
 
 type ownedProcSampler struct {
-	tracker *procSampler
+	mu   sync.Mutex
+	last map[processIdentity]cpuSample
 }
 
 func newOwnedCPUSampler() *ownedProcSampler {
-	return &ownedProcSampler{tracker: newProcSampler()}
+	return &ownedProcSampler{last: map[processIdentity]cpuSample{}}
 }
 
 func (s *ownedProcSampler) CPUUsage(pids []int) (float64, bool) {
@@ -126,6 +127,64 @@ type procSampler struct {
 type cpuSample struct {
 	cpuSeconds float64
 	at         time.Time
+}
+
+type processIdentity struct {
+	pid        int
+	startTicks uint64
+}
+
+type ownedProcess struct {
+	parentPID  int
+	identity   processIdentity
+	cpuSeconds float64
+}
+
+func ownedProcessIdentities(roots []int, processes map[int]ownedProcess) map[processIdentity]struct{} {
+	children := map[int][]int{}
+	for processID, process := range processes {
+		children[process.parentPID] = append(children[process.parentPID], processID)
+	}
+	owned := map[processIdentity]struct{}{}
+	for _, root := range roots {
+		if _, ok := processes[root]; !ok {
+			continue
+		}
+		for _, processID := range collectSubtree(root, children) {
+			owned[processes[processID].identity] = struct{}{}
+		}
+	}
+	return owned
+}
+
+func ownedCPUFromProcesses(
+	previous map[processIdentity]cpuSample,
+	processes map[int]ownedProcess,
+	owned map[processIdentity]struct{},
+	now time.Time,
+) (float64, bool, map[processIdentity]cpuSample) {
+	next := make(map[processIdentity]cpuSample, len(owned))
+	var fraction float64
+	var measured bool
+	for identity := range owned {
+		process, ok := processes[identity.pid]
+		if !ok || process.identity != identity {
+			continue
+		}
+		next[identity] = cpuSample{cpuSeconds: process.cpuSeconds, at: now}
+		prior, ok := previous[identity]
+		if !ok {
+			continue
+		}
+		wall := now.Sub(prior.at).Seconds()
+		delta := process.cpuSeconds - prior.cpuSeconds
+		if wall <= 0 || delta < 0 {
+			continue
+		}
+		fraction += delta / wall
+		measured = true
+	}
+	return fraction, measured, next
 }
 
 func newProcSampler() *procSampler {

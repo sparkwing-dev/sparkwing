@@ -106,52 +106,28 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (float64, bool) {
 	if !ok {
 		return 0, false
 	}
-	children := map[int][]int{}
+	processes := make(map[int]ownedProcess, len(procs))
 	for processID, proc := range procs {
-		children[proc.parentPID] = append(children[proc.parentPID], processID)
-	}
-	owned := map[int]struct{}{}
-	for _, root := range roots {
-		if _, ok := procs[root]; !ok {
-			continue
-		}
-		for _, processID := range collectSubtree(root, children) {
-			owned[processID] = struct{}{}
+		processes[processID] = ownedProcess{
+			parentPID:  proc.parentPID,
+			identity:   processIdentity{pid: processID, startTicks: proc.startTicks},
+			cpuSeconds: proc.selfCPUSeconds,
 		}
 	}
+	owned := ownedProcessIdentities(roots, processes)
 	now := time.Now()
-	s.tracker.mu.Lock()
-	defer s.tracker.mu.Unlock()
-	next := make(map[int]cpuSample, len(owned))
-	var fraction float64
-	var measured bool
-	for processID := range owned {
-		proc, ok := procs[processID]
-		if !ok {
-			continue
-		}
-		next[processID] = cpuSample{cpuSeconds: proc.cpuSeconds, at: now}
-		previous, ok := s.tracker.last[processID]
-		if !ok {
-			continue
-		}
-		wall := now.Sub(previous.at).Seconds()
-		if wall <= 0 {
-			continue
-		}
-		usage := (proc.cpuSeconds - previous.cpuSeconds) / wall
-		if usage > 0 {
-			fraction += usage
-		}
-		measured = true
-	}
-	s.tracker.last = next
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fraction, measured, next := ownedCPUFromProcesses(s.last, processes, owned, now)
+	s.last = next
 	return fraction, measured
 }
 
 type linuxProc struct {
-	parentPID  int
-	cpuSeconds float64
+	parentPID      int
+	startTicks     uint64
+	selfCPUSeconds float64
+	cpuSeconds     float64
 }
 
 func linuxProcesses() (map[int]linuxProc, bool) {
@@ -185,13 +161,16 @@ func linuxProcess(pid int) (linuxProc, bool) {
 	if err != nil {
 		return linuxProc{}, false
 	}
-	line := string(data)
+	return parseLinuxProcessStat(string(data))
+}
+
+func parseLinuxProcessStat(line string) (linuxProc, bool) {
 	rparen := strings.LastIndexByte(line, ')')
 	if rparen < 0 || rparen+2 >= len(line) {
 		return linuxProc{}, false
 	}
 	fields := strings.Fields(line[rparen+2:])
-	if len(fields) < 15 {
+	if len(fields) < 20 {
 		return linuxProc{}, false
 	}
 	parent, err := strconv.Atoi(fields[1])
@@ -202,10 +181,16 @@ func linuxProcess(pid int) (linuxProc, bool) {
 	stime, err2 := strconv.ParseFloat(fields[12], 64)
 	cutime, err3 := strconv.ParseFloat(fields[13], 64)
 	cstime, err4 := strconv.ParseFloat(fields[14], 64)
-	if err1 != nil || err2 != nil || err3 != nil || err4 != nil {
+	startTicks, err5 := strconv.ParseUint(fields[19], 10, 64)
+	if err1 != nil || err2 != nil || err3 != nil || err4 != nil || err5 != nil {
 		return linuxProc{}, false
 	}
-	return linuxProc{parentPID: parent, cpuSeconds: (utime + stime + cutime + cstime) / linuxClockTicks}, true
+	return linuxProc{
+		parentPID:      parent,
+		startTicks:     startTicks,
+		selfCPUSeconds: (utime + stime) / linuxClockTicks,
+		cpuSeconds:     (utime + stime + cutime + cstime) / linuxClockTicks,
+	}, true
 }
 
 // forget drops a dead pid's baseline so the map does not grow without
