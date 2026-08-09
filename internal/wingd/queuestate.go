@@ -414,21 +414,10 @@ func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 // resources, and each promotion uses the ledger's FIFO and backfill rules.
 // qs.Waiters is index-aligned with snap.Waiters, as annotateETA requires.
 func annotateSemaphoreETA(qs *wingwire.QueueState, snap admission.Snapshot) {
-	hostStarts := make([]*int64, len(qs.Waiters))
-	for i := range qs.Waiters {
-		hostStarts[i] = qs.Waiters[i].ExpectedStartMS
-	}
 	starts, clear := simulateAdmissionETA(qs, snap)
 	for i := range qs.Waiters {
 		qs.Waiters[i].ExpectedStartMS = nil
 		ms, ok := finiteETA(starts[i])
-		drawsHost := qs.Waiters[i].Resources.Cores > 0 || qs.Waiters[i].Resources.MemoryBytes > 0
-		if drawsHost && hostStarts[i] == nil {
-			continue
-		}
-		if ok && drawsHost && *hostStarts[i] > ms {
-			ms = *hostStarts[i]
-		}
 		if ok {
 			qs.Waiters[i].ExpectedStartMS = &ms
 		}

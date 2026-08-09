@@ -9,8 +9,8 @@ import (
 
 type etaClaim struct {
 	key      string
-	capacity int
-	cost     int
+	capacity uint64
+	cost     uint64
 	policy   admission.Policy
 }
 
@@ -18,32 +18,32 @@ type etaRun struct {
 	waiter    int
 	admit     uint64
 	backfill  uint64
-	cores     float64
+	cores     int64
 	softCores bool
-	mem       float64
+	mem       uint64
 	claims    []etaClaim
 	finish    float64
 	duration  float64
 }
 
 type etaSimulation struct {
-	totalCores float64
-	capCores   float64
-	capMem     float64
-	lastCap    map[string]int
+	totalCores int64
+	capCores   int64
+	capMem     uint64
+	lastCap    map[string]uint64
 	active     []*etaRun
 	waiting    []*etaRun
 }
 
 func simulateAdmissionETA(qs *wingwire.QueueState, snap admission.Snapshot) ([]float64, float64) {
 	sim := etaSimulation{
-		totalCores: float64(snap.TotalMilliCores) / 1000,
-		capCores:   float64(min64(snap.TotalMilliCores, snap.HeadroomMilliCores)) / 1000,
-		capMem:     float64(minU64(snap.TotalMemoryBytes, snap.HeadroomMemoryBytes)),
-		lastCap:    map[string]int{},
+		totalCores: snap.TotalMilliCores,
+		capCores:   min64(snap.TotalMilliCores, snap.HeadroomMilliCores),
+		capMem:     minU64(snap.TotalMemoryBytes, snap.HeadroomMemoryBytes),
+		lastCap:    map[string]uint64{},
 	}
 	for _, sem := range snap.Semaphores {
-		sim.lastCap[sem.Key] = sem.LastCapacity
+		sim.lastCap[sem.Key] = nonnegativeInt(sem.LastCapacity)
 	}
 	rows := semaphoreETAHolderRows(qs, snap)
 	for _, lease := range snap.Leases {
@@ -54,8 +54,8 @@ func simulateAdmissionETA(qs *wingwire.QueueState, snap admission.Snapshot) ([]f
 		row := rows[lease.ID]
 		sim.active = append(sim.active, &etaRun{
 			admit:  lease.Admit,
-			cores:  float64(lease.MilliCores) / 1000,
-			mem:    float64(lease.MemoryBytes),
+			cores:  lease.MilliCores,
+			mem:    lease.MemoryBytes,
 			claims: claims,
 			finish: remainingMS(row.ExpectedDurationMS, row.ElapsedMS),
 		})
@@ -65,9 +65,9 @@ func simulateAdmissionETA(qs *wingwire.QueueState, snap admission.Snapshot) ([]f
 			waiter:    i,
 			admit:     waiter.Admit,
 			backfill:  waiter.BackfillCount,
-			cores:     float64(waiter.MilliCores) / 1000,
+			cores:     waiter.MilliCores,
 			softCores: waiter.SoftCores,
-			mem:       float64(waiter.MemoryBytes),
+			mem:       waiter.MemoryBytes,
 			claims:    etaClaims(waiter.Claims),
 			duration:  durationMS(qs.Waiters[i].ExpectedDurationMS),
 		})
@@ -110,7 +110,7 @@ func simulateAdmissionETA(qs *wingwire.QueueState, snap admission.Snapshot) ([]f
 func etaClaims(claims []admission.ClaimState) []etaClaim {
 	out := make([]etaClaim, 0, len(claims))
 	for _, claim := range claims {
-		out = append(out, etaClaim{key: claim.Key, capacity: claim.Capacity, cost: claim.Cost, policy: claim.Policy})
+		out = append(out, etaClaim{key: claim.Key, capacity: nonnegativeInt(claim.Capacity), cost: nonnegativeInt(claim.Cost), policy: claim.Policy})
 	}
 	return out
 }
@@ -128,7 +128,7 @@ func liveETAClaims(snap admission.Snapshot, lease admission.LeaseState) []etaCla
 		}
 		for _, hold := range sem.Holds {
 			if hold.Lease == lease.ID && !hold.Superseded {
-				out = append(out, etaClaim{key: claim.Key, capacity: hold.Capacity, cost: hold.Cost, policy: claim.Policy})
+				out = append(out, etaClaim{key: claim.Key, capacity: nonnegativeInt(hold.Capacity), cost: nonnegativeInt(hold.Cost), policy: claim.Policy})
 				break
 			}
 		}
@@ -178,18 +178,19 @@ func (s *etaSimulation) fits(run *etaRun) bool {
 			continue
 		}
 		used, capacity := s.semaphoreBudget(claim.key, claim.capacity)
-		if used > float64(capacity) || float64(claim.cost) > float64(capacity)-used {
+		if !etaFitsCost(used, claim.cost, capacity) {
 			return false
 		}
 	}
 	return true
 }
 
-func (s *etaSimulation) hostUsed() (float64, float64) {
-	var cores, mem float64
+func (s *etaSimulation) hostUsed() (int64, uint64) {
+	var cores int64
+	var mem uint64
 	for _, run := range s.active {
-		cores += run.cores
-		mem += run.mem
+		cores = saturatingAddInt64(cores, run.cores)
+		mem = saturatingAddUint64(mem, run.mem)
 	}
 	return cores, mem
 }
@@ -208,7 +209,7 @@ func (s *etaSimulation) resourcesIdle() bool {
 	return true
 }
 
-func (s *etaSimulation) softCoresFit(cost, used float64) bool {
+func (s *etaSimulation) softCoresFit(cost, used int64) bool {
 	if cost == 0 {
 		return true
 	}
@@ -224,15 +225,15 @@ func (s *etaSimulation) softCoresFit(cost, used float64) bool {
 	return used <= s.capCores
 }
 
-func (s *etaSimulation) semaphoreBudget(key string, incomingCapacity int) (float64, int) {
-	capacity := 0
-	used := 0.0
+func (s *etaSimulation) semaphoreBudget(key string, incomingCapacity uint64) (uint64, uint64) {
+	var capacity uint64
+	var used uint64
 	for _, run := range s.active {
 		for _, claim := range run.claims {
 			if claim.key != key {
 				continue
 			}
-			used += float64(claim.cost)
+			used = saturatingAddUint64(used, claim.cost)
 			if claim.capacity > 0 && (capacity == 0 || claim.capacity < capacity) {
 				capacity = claim.capacity
 			}
@@ -257,7 +258,7 @@ func (s *etaSimulation) grant(run *etaRun) {
 		}
 		for {
 			used, capacity := s.semaphoreBudget(claim.key, claim.capacity)
-			if used <= float64(capacity) && float64(claim.cost) <= float64(capacity)-used {
+			if etaFitsCost(used, claim.cost, capacity) {
 				break
 			}
 			if !s.dropOldestClaim(claim.key) {
@@ -344,23 +345,23 @@ func (s *etaSimulation) starvedByYounger(run *etaRun, resource string) bool {
 	return ok && !etaFitsCost(used, demand, capacity) && etaFitsCost(older, demand, capacity)
 }
 
-func (s *etaSimulation) resourceBudget(run *etaRun, resource string) (demand, used, older, capacity float64, ok bool) {
+func (s *etaSimulation) resourceBudget(run *etaRun, resource string) (demand, used, older, capacity uint64, ok bool) {
 	switch resource {
 	case "cores":
-		demand, capacity, ok = run.cores, s.capCores, true
+		demand, capacity, ok = nonnegativeInt64(run.cores), nonnegativeInt64(s.capCores), true
 		for _, holder := range s.active {
-			used += holder.cores
+			used = saturatingAddUint64(used, nonnegativeInt64(holder.cores))
 			if holder.admit <= run.admit {
-				older += holder.cores
+				older = saturatingAddUint64(older, nonnegativeInt64(holder.cores))
 			}
 		}
 		return
 	case "memory":
 		demand, capacity, ok = run.mem, s.capMem, true
 		for _, holder := range s.active {
-			used += holder.mem
+			used = saturatingAddUint64(used, holder.mem)
 			if holder.admit <= run.admit {
-				older += holder.mem
+				older = saturatingAddUint64(older, holder.mem)
 			}
 		}
 		return
@@ -370,21 +371,21 @@ func (s *etaSimulation) resourceBudget(run *etaRun, resource string) (demand, us
 	if !found || claim.policy == admission.PolicyCancelOthers {
 		return 0, 0, 0, 0, false
 	}
-	demand = float64(claim.cost)
-	used, capInt := s.semaphoreBudget(key, claim.capacity)
-	capacity, ok = float64(capInt), true
+	demand = claim.cost
+	used, capacity = s.semaphoreBudget(key, claim.capacity)
+	ok = true
 	for _, holder := range s.active {
 		if holder.admit > run.admit {
 			continue
 		}
 		if held, has := etaClaimFor(holder, key); has {
-			older += float64(held.cost)
+			older = saturatingAddUint64(older, held.cost)
 		}
 	}
 	return
 }
 
-func etaFitsCost(used, cost, capacity float64) bool {
+func etaFitsCost(used, cost, capacity uint64) bool {
 	return used <= capacity && cost <= capacity-used
 }
 
@@ -408,15 +409,15 @@ func (s *etaSimulation) violatesReservation(candidate *etaRun, protected []*etaR
 			if !ok {
 				continue
 			}
-			var surviving float64
+			var surviving uint64
 			for _, holder := range s.active {
 				if holder.admit <= waiter.admit || etaRunsConflict(holder, waiter) {
 					continue
 				}
 				cost, _ := etaResourceCost(holder, resource)
-				surviving += cost
+				surviving = saturatingAddUint64(surviving, cost)
 			}
-			if !etaFitsCost(surviving, demand, capacity) || !etaFitsCost(surviving+demand, candidateCost, capacity) {
+			if !etaFitsCost(surviving, demand, capacity) || !etaFitsCost(saturatingAddUint64(surviving, demand), candidateCost, capacity) {
 				return true
 			}
 		}
@@ -424,15 +425,15 @@ func (s *etaSimulation) violatesReservation(candidate *etaRun, protected []*etaR
 	return false
 }
 
-func etaResourceCost(run *etaRun, resource string) (float64, bool) {
+func etaResourceCost(run *etaRun, resource string) (uint64, bool) {
 	switch resource {
 	case "cores":
-		return run.cores, run.cores > 0
+		return nonnegativeInt64(run.cores), run.cores > 0
 	case "memory":
 		return run.mem, run.mem > 0
 	default:
 		claim, ok := etaClaimFor(run, resource[len("semaphore:"):])
-		return float64(claim.cost), ok && claim.policy != admission.PolicyCancelOthers
+		return claim.cost, ok && claim.policy != admission.PolicyCancelOthers
 	}
 }
 
@@ -442,7 +443,7 @@ func etaRunsConflict(holder, waiter *etaRun) bool {
 			continue
 		}
 		for _, held := range holder.claims {
-			if held.key == wanted.key && held.policy != admission.PolicyCancelOthers && held.cost > 0 && held.cost+wanted.cost > wanted.capacity {
+			if held.key == wanted.key && held.policy != admission.PolicyCancelOthers && held.cost > 0 && !etaFitsCost(held.cost, wanted.cost, wanted.capacity) {
 				return true
 			}
 		}
@@ -465,6 +466,37 @@ func etaRunsCompete(left, right *etaRun) bool {
 		}
 	}
 	return false
+}
+
+func nonnegativeInt(v int) uint64 {
+	if v <= 0 {
+		return 0
+	}
+	return uint64(v)
+}
+
+func nonnegativeInt64(v int64) uint64 {
+	if v <= 0 {
+		return 0
+	}
+	return uint64(v)
+}
+
+func saturatingAddUint64(left, right uint64) uint64 {
+	if right > ^uint64(0)-left {
+		return ^uint64(0)
+	}
+	return left + right
+}
+
+func saturatingAddInt64(left, right int64) int64 {
+	if right > 0 && left > math.MaxInt64-right {
+		return math.MaxInt64
+	}
+	if right < 0 && left < math.MinInt64-right {
+		return math.MinInt64
+	}
+	return left + right
 }
 
 func finiteETA(v float64) (int64, bool) {
