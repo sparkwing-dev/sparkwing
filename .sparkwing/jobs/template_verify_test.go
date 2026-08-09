@@ -50,6 +50,10 @@ func TestNormalizeVerifyModulePath_IsStableAcrossScratchDirectories(t *testing.T
 		if err := os.WriteFile(path, []byte("module "+initial+"\n\ngo 1.26\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
+		mainPath := filepath.Join(dir, "main.go")
+		if err := os.WriteFile(mainPath, []byte("package main\nimport _ \""+initial+"/jobs\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
 		if err := normalizeVerifyModulePath(dir, "example"); err != nil {
 			t.Fatal(err)
 		}
@@ -58,6 +62,13 @@ func TestNormalizeVerifyModulePath_IsStableAcrossScratchDirectories(t *testing.T
 			t.Fatal(err)
 		}
 		got = append(got, string(data))
+		mainData, err := os.ReadFile(mainPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(mainData), initial) || !strings.Contains(string(mainData), "example.com/sparkwing/verify/example/pipelines/jobs") {
+			t.Fatalf("generated import was not normalized: %q", mainData)
+		}
 	}
 	if got[0] != got[1] || !strings.Contains(got[0], "module example.com/sparkwing/verify/example/pipelines") {
 		t.Fatalf("normalized modules differ or are not stable: %q, %q", got[0], got[1])
