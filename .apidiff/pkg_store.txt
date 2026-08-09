@@ -446,6 +446,7 @@ func (s *Store) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg s
 func (s *Store) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
 func (s *Store) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
 func (s *Store) FinishRun(ctx context.Context, runID, status, errMsg string) error
+func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error
 func (s *Store) FinishTrigger(ctx context.Context, id string) error
 func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) ([]ConcurrencyHolder, error)
 func (s *Store) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*DebugPause, error)
