@@ -12,7 +12,7 @@ docs don't.
 | **Reference** | generated from code | `docs/cli-reference.md` (command registry), `docs/config-reference.md` (schema structs), `docs/sdk-reference.md` (the `sparkwing` package via go/doc), `docs/api-reference.md` (controller + logs route registrations). Add more; don't hand-maintain reference. |
 | **Executable examples** | compile-checked | every ```` ```go ```` block in `docs/` is compiled against the SDK; every ```` ```yaml ```` `pipelines:` block is parsed by the real config parser. |
 | **Concepts** | hand-written, small | the *why* and the model (execution, profiles, the two-layer DAG, caching). Keep these short. |
-| **Tutorials** | real templates | `sparks-core/templates` + `sparkwing pipeline new`; CI compiles them. Prefer "scaffold this template" over prose steps. |
+| **Tutorials** | real templates | `sparks-core/templates` + `sparkwing pipeline new`; the `template-verify` pipeline scaffolds, builds, lints and explains every registry template (and runs the runnable-tier ones), and the release pipeline gates on it. Prefer "scaffold this template" over prose steps. |
 | **Architecture** | near code | contributor docs (`DESIGN-*.md`, `architecture.md`). |
 
 One question per page: tutorial = *how do I?*, reference = *what does it
@@ -25,12 +25,14 @@ answers several is hard to keep correct.
   sparkwing.dev site builds from. `pkg/docs/mirror/` is a generated copy
   the CLI embeds (`go:embed`); regenerate it with `bash bin/sync-docs.sh`
   and commit both. **Never hand-edit `pkg/docs/mirror/`.**
-- **Generated reference pages are generated.** `docs/cli-reference.md`
-  and `docs/config-reference.md` carry a "do not edit" banner. To change
-  them, change the code (the command registry in
-  `cmd/sparkwing/help_registry.go`, or the schema structs in
-  `pkg/pipelines` / `pkg/projectconfig`) and run the generator
-  (`bash bin/gen-cli-docs.sh` / `bash bin/gen-config-docs.sh`).
+- **Generated reference pages are generated.** Every page in the
+  Reference row carries a "do not edit" banner naming the code it
+  derives from and the script that regenerates it. To change one, change
+  that code (the command registry in `cmd/sparkwing/help_registry.go`,
+  the schema structs in `pkg/pipelines` / `pkg/projectconfig`, the
+  `sparkwing` package, or the route registrations in `pkg/controller` /
+  `pkg/logs`) and run the `bin/gen-*-docs.sh` the banner names. pre-push
+  regenerates each one and fails if the committed file is stale.
 
 ## Writing rules (hand-written pages)
 
@@ -60,11 +62,24 @@ CLI help registry, and is the durable guard:
 - history / deprecation narrative;
 - failure-reason completeness (every `pkg/store` `Failure*` constant is
   documented in `observability.md`);
-- frozen counts over open sets.
+- frozen counts over open sets;
+- sidebar completeness (`docs/_sidebar.json` and the docs tree agree in
+  both directions, so a new page can't be published unreachable);
+- aux docs: the root-level markdown (README, DELIVERY, VERSIONING,
+  DESIGN-*, ...) and the charts/install/web READMEs get the drift subset
+  (dead tokens, CLI-verb resolution, `.md`-link resolution); the
+  pipeline registrations in `.sparkwing/` and `examples/*.yaml` get dead
+  tokens and CLI-verb resolution over the `sparkwing ...` commands their
+  help strings and workflow steps quote, since link resolution is a
+  markdown-only check. The editorial checks stay `docs/`-only:
+  VERSIONING.md documents removal and breaking-change policy and
+  DESIGN-* docs record design evolution, so change vocabulary is their
+  subject matter. The CHANGELOG is excluded outright -- recording dead
+  names is its job.
 
 Plus: a pre-commit check that `docs/` and `pkg/docs/mirror/` are in
-sync, and pre-push drift gates that regenerate `cli-reference.md` /
-`config-reference.md` and fail if the committed file is stale.
+sync, and pre-push drift gates that regenerate the generated reference
+pages and fail if the committed file is stale.
 
 ## Adding a new generated reference
 

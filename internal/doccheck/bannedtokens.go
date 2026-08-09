@@ -106,8 +106,16 @@ var banned = []bannedPattern{
 		"the registry is browsed with `sparkwing examples`; `pipeline templates` is not a verb",
 	},
 	{
-		regexp.MustCompile(`--param\b`),
-		"removed; `pipeline new --template` takes one of five shapes and renders no parameters -- registry entries are read with `sparkwing examples --name <name> --body`, not scaffolded",
+		regexp.MustCompile(`sparkwing run [^\n]*\s--dry-run\b`),
+		"run-control flags are sw-prefixed: the dry-run flag is --sw-dry-run",
+	},
+	{
+		regexp.MustCompile(`jobs:(?:read|write)`),
+		"not a recognized token scope; the scope set is the runs./nodes./logs./triggers./approvals. family in auth.md (e.g. runs.read, runs.write)",
+	},
+	{
+		regexp.MustCompile(`pipeline new\b[^\n]*--param\b`),
+		"removed; `pipeline new --template` takes one of five shapes and renders no parameters (`--param` lives on `examples scaffold`, which registry entries are read through)",
 	},
 }
 

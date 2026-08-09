@@ -63,6 +63,10 @@ func main() {
 	ok = checkCLIVerbs(contentDir, repoRoot) && ok
 	fmt.Println()
 	ok = checkServicePorts(contentDir, repoRoot) && ok
+	fmt.Println()
+	ok = checkAuxDocs(repoRoot) && ok
+	fmt.Println()
+	ok = checkSidebar(contentDir) && ok
 	if !ok {
 		os.Exit(1)
 	}
