@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -629,6 +630,261 @@ func TestSemaphoresOnlyRunLeaseFinalizesOnDisconnect(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("semaphores-only run lease was not finalized on disconnect")
+	}
+}
+
+func TestExplicitCancelRetainsLegacyFinalizerCompatibility(t *testing.T) {
+	home := shortHome(t)
+	finalized := make(chan string, 1)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeRun: func(runID string) {
+			finalized <- runID
+		},
+	})
+
+	holder := ensure(t, home, "")
+	mustAcquire(t, holder, wingwire.AdmissionRequest{
+		RunID: "legacy-cancel-finalizer", Resources: wingwire.HostResources{Cores: 1},
+	})
+	control := ensure(t, home, "")
+	found, err := control.CancelLease(context.Background(), "legacy-cancel-finalizer")
+	if err != nil {
+		t.Fatalf("cancel lease: %v", err)
+	}
+	if !found {
+		t.Fatal("cancel did not find holder")
+	}
+	_ = holder.Close()
+
+	select {
+	case got := <-finalized:
+		if got != "legacy-cancel-finalizer" {
+			t.Fatalf("finalized %q, want legacy-cancel-finalizer", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("explicit cancellation suppressed the configured legacy finalizer")
+	}
+}
+
+func TestExplicitCancelPersistenceFailureIsNotAcknowledged(t *testing.T) {
+	home := shortHome(t)
+	legacyFinalized := make(chan string, 1)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeRun: func(runID string) {
+			legacyFinalized <- runID
+		},
+		FinalizeCancelledRuns: func([]string, string) error {
+			return errors.New("store unavailable")
+		},
+	})
+
+	holder := ensure(t, home, "")
+	mustAcquire(t, holder, wingwire.AdmissionRequest{
+		RunID: "cancel-finalize-failure", Resources: wingwire.HostResources{Cores: 1},
+	})
+	control := ensure(t, home, "")
+	cancelCtx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if found, err := control.CancelLease(cancelCtx, "cancel-finalize-failure"); err == nil {
+		t.Fatalf("CancelLease = (found=%v, nil), want persistence failure", found)
+	}
+	_ = holder.Close()
+
+	select {
+	case got := <-legacyFinalized:
+		if got != "cancel-finalize-failure" {
+			t.Fatalf("fallback finalized %q, want cancel-finalize-failure", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("failed explicit persistence suppressed disconnect finalization")
+	}
+}
+
+func TestExplicitCancelFinalizerDoesNotHoldDaemonMutex(t *testing.T) {
+	home := shortHome(t)
+	var query *client.Client
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeCancelledRuns: func([]string, string) error {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_, err := query.QueueState(ctx)
+			return err
+		},
+	})
+	holder := ensure(t, home, "")
+	mustAcquire(t, holder, coreReq("cancel-lock-liveness", 1))
+	query = ensure(t, home, "")
+	control := ensure(t, home, "")
+	found, err := control.CancelLease(context.Background(), "cancel-lock-liveness")
+	if err != nil || !found {
+		t.Fatalf("CancelLease = (%v, %v), want found", found, err)
+	}
+}
+
+func TestExplicitCancelSignalsConnectionThatReattachedDuringPersistence(t *testing.T) {
+	home := shortHome(t)
+	entered := make(chan struct{})
+	resume := make(chan struct{})
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeCancelledRuns: func([]string, string) error {
+			close(entered)
+			<-resume
+			return nil
+		},
+	})
+	req := coreReq("cancel-current-connection", 1)
+	old := ensure(t, home, "")
+	mustAcquire(t, old, req)
+	control := ensure(t, home, "")
+	result := make(chan error, 1)
+	go func() {
+		found, err := control.CancelLease(context.Background(), req.RunID)
+		if err == nil && !found {
+			err = errors.New("cancel did not find run")
+		}
+		result <- err
+	}()
+	<-entered
+	current := ensure(t, home, "")
+	lease, err := current.Acquire(context.Background(), req, nil)
+	if err != nil {
+		t.Fatalf("reattach current connection: %v", err)
+	}
+	cancelled := make(chan wingwire.Cancel, 1)
+	go lease.WatchControl(nil, func(c wingwire.Cancel) { cancelled <- c })
+	close(resume)
+	if err := <-result; err != nil {
+		t.Fatalf("CancelLease: %v", err)
+	}
+	select {
+	case got := <-cancelled:
+		if got.RunID != req.RunID {
+			t.Fatalf("cancel run = %q", got.RunID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("replacement connection did not receive cancellation")
+	}
+}
+
+func TestExplicitCancelFinalizesEverySharedLeaseMemberInOneBatch(t *testing.T) {
+	home := shortHome(t)
+	finalized := make(chan []string, 1)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeCancelledRuns: func(runIDs []string, _ string) error {
+			finalized <- append([]string(nil), runIDs...)
+			return nil
+		},
+	})
+	parent := ensure(t, home, "")
+	parentLease := mustAcquire(t, parent, coreReq("shared-parent", 1))
+	child := ensure(t, home, "")
+	childLease := mustAcquire(t, child, wingwire.AdmissionRequest{RunID: "shared-child", ParentLeaseToken: parentLease.Token})
+	parentCancelled := make(chan wingwire.Cancel, 1)
+	childCancelled := make(chan wingwire.Cancel, 1)
+	go parentLease.WatchControl(nil, func(c wingwire.Cancel) { parentCancelled <- c })
+	go childLease.WatchControl(nil, func(c wingwire.Cancel) { childCancelled <- c })
+	control := ensure(t, home, "")
+	found, err := control.CancelLease(context.Background(), "shared-parent")
+	if err != nil || !found {
+		t.Fatalf("CancelLease = (%v, %v), want found", found, err)
+	}
+	select {
+	case got := <-finalized:
+		slices.Sort(got)
+		if !slices.Equal(got, []string{"shared-child", "shared-parent"}) {
+			t.Fatalf("batch = %v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("shared lease was not finalized")
+	}
+	for name, ch := range map[string]<-chan wingwire.Cancel{"shared-parent": parentCancelled, "shared-child": childCancelled} {
+		select {
+		case got := <-ch:
+			if got.RunID != name {
+				t.Fatalf("%s connection got cancel for %q", name, got.RunID)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s connection was not signalled", name)
+		}
+	}
+	qs, err := control.QueueState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs.Holders) != 0 {
+		t.Fatalf("holders after acknowledged cancel = %+v", qs.Holders)
+	}
+}
+
+func TestSharedCancelPersistenceFailureFallsBackWithoutSuppression(t *testing.T) {
+	home := shortHome(t)
+	legacy := make(chan string, 2)
+	startDaemon(t, wingd.Config{
+		Home:        home,
+		FinalizeRun: func(runID string) { legacy <- runID },
+		FinalizeCancelledRuns: func(runIDs []string, _ string) error {
+			if len(runIDs) != 2 {
+				return fmt.Errorf("batch members = %v", runIDs)
+			}
+			return errors.New("second member failed")
+		},
+	})
+	parent := ensure(t, home, "")
+	parentLease := mustAcquire(t, parent, coreReq("failed-parent", 1))
+	child := ensure(t, home, "")
+	mustAcquire(t, child, wingwire.AdmissionRequest{RunID: "failed-child", ParentLeaseToken: parentLease.Token})
+	control := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if found, err := control.CancelLease(ctx, "failed-parent"); err == nil {
+		t.Fatalf("CancelLease = (%v, nil), want failure", found)
+	}
+	_ = parent.Close()
+	_ = child.Close()
+	got := []string{<-legacy, <-legacy}
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"failed-child", "failed-parent"}) {
+		t.Fatalf("legacy finalizations = %v", got)
+	}
+}
+
+func TestDisconnectDuringFailedCancelPersistenceGetsOrphanFallback(t *testing.T) {
+	home := shortHome(t)
+	entered := make(chan struct{})
+	resume := make(chan struct{})
+	legacy := make(chan string, 1)
+	startDaemon(t, wingd.Config{
+		Home:        home,
+		FinalizeRun: func(runID string) { legacy <- runID },
+		FinalizeCancelledRuns: func([]string, string) error {
+			close(entered)
+			<-resume
+			return errors.New("store unavailable")
+		},
+	})
+	holder := ensure(t, home, "")
+	mustAcquire(t, holder, coreReq("disconnect-during-persist", 1))
+	control := ensure(t, home, "")
+	done := make(chan error, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	go func() { _, err := control.CancelLease(ctx, "disconnect-during-persist"); done <- err }()
+	<-entered
+	_ = holder.Close()
+	close(resume)
+	<-done // the first exchange is closed without an acknowledgement; the client may reconnect and observe not-found.
+	select {
+	case got := <-legacy:
+		if got != "disconnect-during-persist" {
+			t.Fatalf("legacy finalized %q", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("pending disconnect stayed suppressed after persistence failed")
 	}
 }
 
