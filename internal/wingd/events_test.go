@@ -1,6 +1,7 @@
 package wingd
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -44,6 +45,22 @@ func TestEventWindow_SummaryFoldsOutcomes(t *testing.T) {
 	}
 	if s.WindowMS != eventWindowSpan.Milliseconds() {
 		t.Errorf("WindowMS = %d, want %d", s.WindowMS, eventWindowSpan.Milliseconds())
+	}
+}
+
+func TestCancelledRunTombstonesRemainBoundedAndKeepNewest(t *testing.T) {
+	d := &Daemon{cancelledRuns: map[string]struct{}{}}
+	for i := 0; i <= maxCancelledRunTombstones; i++ {
+		d.recordCancelledRunLocked(fmt.Sprintf("run-%05d", i))
+	}
+	if len(d.cancelledRunOrder) != maxCancelledRunTombstones {
+		t.Fatalf("tombstones = %d, want %d", len(d.cancelledRunOrder), maxCancelledRunTombstones)
+	}
+	if _, exists := d.cancelledRuns["run-00000"]; exists {
+		t.Fatal("oldest cancellation tombstone was not collected")
+	}
+	if _, exists := d.cancelledRuns[fmt.Sprintf("run-%05d", maxCancelledRunTombstones)]; !exists {
+		t.Fatal("newest cancellation tombstone was collected")
 	}
 }
 
