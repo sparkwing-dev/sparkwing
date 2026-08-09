@@ -225,16 +225,17 @@ func (cl *Client) readCancelLease(runID string) (found bool, terminal, transient
 // cancelOnDone arranges for a blocked read to fail once ctx is cancelled,
 // by setting a past read deadline. The returned stop cancels the watcher.
 func (cl *Client) cancelOnDone(ctx context.Context) (stop func()) {
+	nc := cl.nc
 	done := make(chan struct{})
 	go func() {
 		select {
 		case <-ctx.Done():
-			_ = cl.nc.SetReadDeadline(time.Now())
+			_ = nc.SetReadDeadline(time.Now())
 		case <-done:
 		}
 	}()
 	return func() {
 		close(done)
-		_ = cl.nc.SetReadDeadline(time.Time{})
+		_ = nc.SetReadDeadline(time.Time{})
 	}
 }

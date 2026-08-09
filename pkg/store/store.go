@@ -1465,6 +1465,27 @@ UPDATE runs
 	return err
 }
 
+// FinishRunsIfActive atomically finalizes the named non-terminal runs. A
+// failure rolls back every member, so one shared lease cannot be partly
+// cancelled.
+func (s *Store) FinishRunsIfActive(ctx context.Context, runIDs []string, status, errMsg string) error {
+	if len(runIDs) == 0 {
+		return nil
+	}
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UnixNano()
+	for _, runID := range runIDs {
+		if _, err := tx.ExecContext(ctx, `UPDATE runs SET status = ?, error = ?, finished_at = ? WHERE id = ? AND status NOT IN ('success','failed','cancelled')`, status, errMsg, now, runID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // TouchRunHeartbeat stamps last_heartbeat_at=now for the run row. The
 // dispatching orchestrator calls this on a ticker while the run is
 // active so the controller's reaper can detect a fully-orphaned run

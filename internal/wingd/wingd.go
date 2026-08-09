@@ -163,6 +163,9 @@ type Config struct {
 	// state forever; it must tolerate rows that are already terminal or
 	// absent. Called on its own goroutine, never under daemon locks.
 	FinalizeRun func(runID string)
+	// FinalizeCancelledRuns atomically records every run sharing a cancelled
+	// lease before the daemon acknowledges or signals the cancellation.
+	FinalizeCancelledRuns func(runIDs []string, reason string) error
 	// Logf, when set, receives one-line operational messages. Nil
 	// discards them.
 	Logf func(format string, args ...any)
