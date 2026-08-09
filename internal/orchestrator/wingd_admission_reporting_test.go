@@ -24,3 +24,17 @@ func TestQueueWaitHeartbeatIdentifiesInterleavedParticipants(t *testing.T) {
 		}
 	}
 }
+
+func TestQueuePositionReportsParticipantsAhead(t *testing.T) {
+	var out strings.Builder
+	la := &LocalAdmission{Out: &out}
+	la.reportStillQueued("run-123/node-b", wingwire.Queued{Position: 7, QueueLength: 64}, time.Minute)
+
+	got := out.String()
+	if !strings.Contains(got, "6 participants ahead") {
+		t.Fatalf("queue output must identify participant positions, not claim distinct runs: %s", got)
+	}
+	if strings.Contains(got, "runs ahead") {
+		t.Fatalf("queue output mislabels node participants as runs: %s", got)
+	}
+}
