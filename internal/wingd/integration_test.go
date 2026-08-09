@@ -632,6 +632,40 @@ func TestSemaphoresOnlyRunLeaseFinalizesOnDisconnect(t *testing.T) {
 	}
 }
 
+func TestExplicitCancelRetainsLegacyFinalizerCompatibility(t *testing.T) {
+	home := shortHome(t)
+	finalized := make(chan string, 1)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeRun: func(runID string) {
+			finalized <- runID
+		},
+	})
+
+	holder := ensure(t, home, "")
+	mustAcquire(t, holder, wingwire.AdmissionRequest{
+		RunID: "legacy-cancel-finalizer", Resources: wingwire.HostResources{Cores: 1},
+	})
+	control := ensure(t, home, "")
+	found, err := control.CancelLease(context.Background(), "legacy-cancel-finalizer")
+	if err != nil {
+		t.Fatalf("cancel lease: %v", err)
+	}
+	if !found {
+		t.Fatal("cancel did not find holder")
+	}
+	_ = holder.Close()
+
+	select {
+	case got := <-finalized:
+		if got != "legacy-cancel-finalizer" {
+			t.Fatalf("finalized %q, want legacy-cancel-finalizer", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("explicit cancellation suppressed the configured legacy finalizer")
+	}
+}
+
 func TestSubLeaseDoesNotFinalizeOnDisconnect(t *testing.T) {
 	home := shortHome(t)
 	finalized := make(chan string, 1)
