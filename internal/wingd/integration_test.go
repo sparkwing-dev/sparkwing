@@ -860,6 +860,62 @@ func TestChildAttachRejectsPreviouslyCancelledRunID(t *testing.T) {
 	}
 }
 
+func TestExplicitCancelRejectsTopLevelResurrectionAfterRestart(t *testing.T) {
+	home := shortHome(t)
+	cfg := wingd.Config{Home: home, FinalizeCancelledRuns: func([]string, string) error { return nil }}
+	first := startDaemon(t, cfg)
+	holder := ensure(t, home, "")
+	mustAcquire(t, holder, coreReq("cancelled-before-restart", 1))
+	control := ensure(t, home, "")
+	found, err := control.CancelLease(context.Background(), "cancelled-before-restart")
+	if err != nil || !found {
+		t.Fatalf("CancelLease = (%v, %v), want found", found, err)
+	}
+	first.stop()
+	if err := first.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("first daemon exit: %v", err)
+	}
+	startDaemon(t, cfg)
+
+	replacement := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if lease, err := replacement.Acquire(ctx, coreReq("cancelled-before-restart", 1), nil); err == nil {
+		_ = lease.Release()
+		t.Fatal("restart resurrected a cancelled top-level run")
+	}
+}
+
+func TestExplicitCancelRejectsChildResurrectionAfterRestart(t *testing.T) {
+	home := shortHome(t)
+	cfg := wingd.Config{Home: home, FinalizeCancelledRuns: func([]string, string) error { return nil }}
+	first := startDaemon(t, cfg)
+	holder := ensure(t, home, "")
+	mustAcquire(t, holder, coreReq("cancelled-child-before-restart", 1))
+	control := ensure(t, home, "")
+	found, err := control.CancelLease(context.Background(), "cancelled-child-before-restart")
+	if err != nil || !found {
+		t.Fatalf("CancelLease = (%v, %v), want found", found, err)
+	}
+	first.stop()
+	if err := first.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("first daemon exit: %v", err)
+	}
+	startDaemon(t, cfg)
+
+	parent := ensure(t, home, "")
+	parentLease := mustAcquire(t, parent, coreReq("parent-after-restart", 1))
+	child := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if lease, err := child.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: "cancelled-child-before-restart", ParentLeaseToken: parentLease.Token,
+	}, nil); err == nil {
+		_ = lease.Release()
+		t.Fatal("restart resurrected a cancelled run as a child")
+	}
+}
+
 func TestExplicitCancelFinalizesEverySharedLeaseMemberInOneBatch(t *testing.T) {
 	home := shortHome(t)
 	finalized := make(chan []string, 1)
