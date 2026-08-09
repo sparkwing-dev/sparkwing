@@ -22,17 +22,22 @@ const stateSchema = 1
 // window behind the queue view's health line; state files written before
 // the window existed simply restore it empty.
 type persistedState struct {
-	Schema   int                `json:"schema"`
-	Snapshot admission.Snapshot `json:"snapshot"`
-	Events   []admissionEvent   `json:"events,omitempty"`
+	Schema        int                `json:"schema"`
+	Snapshot      admission.Snapshot `json:"snapshot"`
+	Events        []admissionEvent   `json:"events,omitempty"`
+	CancelledRuns []string           `json:"cancelled_runs,omitempty"`
 }
 
 // writeState writes snap and the event window to path by atomic rename,
 // stripping waiters so a restored ledger contains only reclaimable
 // leases.
 func writeState(path string, snap admission.Snapshot, events []admissionEvent) error {
+	return writeStateWithCancellations(path, snap, events, nil)
+}
+
+func writeStateWithCancellations(path string, snap admission.Snapshot, events []admissionEvent, cancelledRuns []string) error {
 	snap.Waiters = nil
-	data, err := json.Marshal(persistedState{Schema: stateSchema, Snapshot: snap, Events: events})
+	data, err := json.Marshal(persistedState{Schema: stateSchema, Snapshot: snap, Events: events, CancelledRuns: cancelledRuns})
 	if err != nil {
 		return fmt.Errorf("wingd: marshal state: %w", err)
 	}
@@ -79,19 +84,24 @@ func quarantineState(path string, now time.Time) (string, error) {
 // (nil, nil, nil) when no state file exists, so a fresh daemon starts
 // empty.
 func readState(path string) (*admission.Snapshot, []admissionEvent, error) {
+	snap, events, _, err := readStateWithCancellations(path)
+	return snap, events, err
+}
+
+func readStateWithCancellations(path string) (*admission.Snapshot, []admissionEvent, []string, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	if err != nil {
-		return nil, nil, fmt.Errorf("wingd: read state: %w", err)
+		return nil, nil, nil, fmt.Errorf("wingd: read state: %w", err)
 	}
 	var st persistedState
 	if err := json.Unmarshal(data, &st); err != nil {
-		return nil, nil, fmt.Errorf("wingd: parse state: %w", err)
+		return nil, nil, nil, fmt.Errorf("wingd: parse state: %w", err)
 	}
 	if st.Schema != stateSchema {
-		return nil, nil, fmt.Errorf("wingd: state schema %d, want %d", st.Schema, stateSchema)
+		return nil, nil, nil, fmt.Errorf("wingd: state schema %d, want %d", st.Schema, stateSchema)
 	}
-	return &st.Snapshot, st.Events, nil
+	return &st.Snapshot, st.Events, st.CancelledRuns, nil
 }
