@@ -89,7 +89,7 @@ func TestAnnotateSemaphoreETA(t *testing.T) {
 			want: []int64{0, 0, 10000},
 		},
 		{
-			name: "a host-derived estimate is left alone",
+			name: "an unknown semaphore bound clears a host-derived estimate",
 			qs: wingwire.QueueState{
 				Waiters: []wingwire.Waiter{
 					{
@@ -105,7 +105,7 @@ func TestAnnotateSemaphoreETA(t *testing.T) {
 				Semaphores: []admission.SemaphoreState{semState("deploy", 2, semHold("L1", 2, 1))},
 				Waiters:    []admission.WaiterState{semWaiter("run-b", "deploy", 2, 1)},
 			},
-			want: []int64{7000},
+			want: []int64{semaNone},
 		},
 		{
 			name: "a host-drawing waiter the host simulation could not estimate stays nil",
@@ -199,6 +199,70 @@ func TestAnnotateSemaphoreETA(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestMixedResourceETAUsesTheLaterKnownBoundOrUnknown(t *testing.T) {
+	cases := []struct {
+		name         string
+		hostExpected int64
+		hostElapsed  int64
+		semExpected  int64
+		semElapsed   int64
+		wantStart    int64
+	}{
+		{name: "semaphore is later than immediate host admission", hostExpected: -1, semExpected: 7000, wantStart: 7000},
+		{name: "host is later than semaphore", hostExpected: 9000, semExpected: 4000, wantStart: 9000},
+		{name: "overdue semaphore holder makes the combined estimate unknown", hostExpected: -1, semExpected: 7000, semElapsed: 7001, wantStart: semaNone},
+		{name: "unknown host release makes the combined estimate unknown", semExpected: 4000, wantStart: semaNone},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			qs, snap := mixedETAState(tc.hostExpected, tc.hostElapsed, tc.semExpected, tc.semElapsed)
+			annotateETA(&qs, snap)
+			annotateSemaphoreETA(&qs, snap)
+			got := qs.Waiters[0].ExpectedStartMS
+			if tc.wantStart == semaNone {
+				if got != nil {
+					t.Fatalf("ExpectedStartMS = %d, want nil", *got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("ExpectedStartMS = nil, want %d", tc.wantStart)
+			}
+			if *got != tc.wantStart {
+				t.Fatalf("ExpectedStartMS = %d, want %d", *got, tc.wantStart)
+			}
+		})
+	}
+}
+
+func mixedETAState(hostExpected, hostElapsed, semExpected, semElapsed int64) (wingwire.QueueState, admission.Snapshot) {
+	qs := wingwire.QueueState{Waiters: []wingwire.Waiter{{
+		RunID:              "waiter",
+		Resources:          wingwire.HostResources{Cores: 1},
+		Semaphores:         []string{"deploy"},
+		ExpectedDurationMS: 1000,
+	}}}
+	snap := admission.Snapshot{
+		TotalMilliCores:     1000,
+		TotalMemoryBytes:    1 << 30,
+		HeadroomMilliCores:  1000,
+		HeadroomMemoryBytes: 1 << 30,
+		Waiters: []admission.WaiterState{{
+			RequestID:  "waiter",
+			MilliCores: 1000,
+			Claims:     []admission.ClaimState{{Key: "deploy", Capacity: 1, Cost: 1}},
+		}},
+	}
+	if hostExpected >= 0 {
+		qs.Holders = append(qs.Holders, wingwire.Holder{RunID: "host-holder", Resources: wingwire.HostResources{Cores: 1}, ExpectedDurationMS: hostExpected, ElapsedMS: hostElapsed})
+		snap.Leases = append(snap.Leases, admission.LeaseState{ID: "host-lease", RequestID: "host-holder", MilliCores: 1000})
+	}
+	qs.Holders = append(qs.Holders, wingwire.Holder{RunID: "sem-holder", Semaphores: []string{"deploy"}, ExpectedDurationMS: semExpected, ElapsedMS: semElapsed})
+	snap.Leases = append(snap.Leases, admission.LeaseState{ID: "sem-lease", RequestID: "sem-holder", Claims: []admission.ClaimState{{Key: "deploy", Capacity: 1, Cost: 1}}})
+	snap.Semaphores = []admission.SemaphoreState{semState("deploy", 1, semHold("sem-lease", 1, 1))}
+	return qs, snap
 }
 
 func TestSemaphoreETACapacity_TakesTheSmallestDeclaration(t *testing.T) {
