@@ -538,11 +538,16 @@ func (l *Ledger) fifoBlocked(s spec) bool {
 // blocked is returned; otherwise the accumulated blocked set is returned.
 func (l *Ledger) scanWaiters(findFit bool, arrival spec) (int, map[resource]bool) {
 	blocked := map[resource]bool{}
+	var protected []*waiter
 	for i, w := range l.waiters {
 		if arrival.id != "" && !waiterPrecedesSpec(w, arrival) {
 			break
 		}
 		rs := w.spec.fifoResources()
+		if l.violatesReservation(w.spec, protected) {
+			markAll(blocked, rs)
+			continue
+		}
 		if anyIn(blocked, rs) {
 			markAll(blocked, rs)
 			continue
@@ -555,7 +560,7 @@ func (l *Ledger) scanWaiters(findFit bool, arrival spec) (int, map[resource]bool
 			continue
 		}
 		if w.backfillCount > 0 {
-			markAll(blocked, rs)
+			protected = append(protected, w)
 			continue
 		}
 		for _, r := range rs {
@@ -564,7 +569,84 @@ func (l *Ledger) scanWaiters(findFit bool, arrival spec) (int, map[resource]bool
 			}
 		}
 	}
+	if arrival.id != "" && l.violatesReservation(arrival, protected) {
+		markAll(blocked, arrival.fifoResources())
+	}
 	return -1, blocked
+}
+
+// violatesReservation reports whether admitting candidate would consume
+// capacity needed by a protected waiter after its blockers release. Younger
+// leases that cannot coexist with the waiter because they hold a conflicting
+// semaphore are excluded: they must release before the waiter can run.
+func (l *Ledger) violatesReservation(candidate spec, protected []*waiter) bool {
+	for _, w := range protected {
+		for _, r := range w.spec.fifoResources() {
+			candidateCost, ok := specResourceCost(candidate, r)
+			if !ok || candidateCost == 0 {
+				continue
+			}
+			demand, _, _, capacity, ok := l.resourceBudget(w.spec, r)
+			if !ok {
+				continue
+			}
+			var surviving int64
+			for _, le := range l.leases {
+				if le.admit <= w.spec.admit || leaseConflictsWithWaiter(le, w.spec) {
+					continue
+				}
+				cost, _ := leaseResourceCost(le, r)
+				surviving += cost
+			}
+			if !fitsCost(surviving, demand, capacity) || !fitsCost(surviving+demand, candidateCost, capacity) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func specResourceCost(s spec, r resource) (int64, bool) {
+	switch r {
+	case resourceCores:
+		return s.milliCores, s.milliCores > 0
+	case resourceMemory:
+		return int64(s.memory), s.memory > 0
+	default:
+		c, ok := s.claim(semKeyOf(r))
+		return int64(c.cost), ok && c.policy != PolicyCancelOthers
+	}
+}
+
+func leaseResourceCost(le *lease, r resource) (int64, bool) {
+	switch r {
+	case resourceCores:
+		return le.milliCores, le.milliCores > 0
+	case resourceMemory:
+		return int64(le.memory), le.memory > 0
+	default:
+		key := semKeyOf(r)
+		for _, c := range le.claims {
+			if c.key == key && c.policy != PolicyCancelOthers {
+				return int64(c.cost), true
+			}
+		}
+		return 0, false
+	}
+}
+
+func leaseConflictsWithWaiter(le *lease, w spec) bool {
+	for _, wc := range w.claims {
+		if wc.policy == PolicyCancelOthers || wc.cost == 0 {
+			continue
+		}
+		for _, lc := range le.claims {
+			if lc.key == wc.key && lc.policy != PolicyCancelOthers && lc.cost > 0 && lc.cost+wc.cost > wc.capacity {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (l *Ledger) recordFreshBackfill(s spec) []Event {
