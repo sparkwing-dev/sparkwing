@@ -75,6 +75,9 @@ func startWingdCfg(t *testing.T, cfg wingd.Config) {
 	if cfg.FinalizeRun == nil {
 		cfg.FinalizeRun = NewOrphanRunFinalizer(cfg.Home)
 	}
+	if cfg.FinalizeCancelledRuns == nil {
+		cfg.FinalizeCancelledRuns = NewCancelledRunsFinalizer(cfg.Home)
+	}
 	d, err := wingd.New(cfg)
 	if err != nil {
 		t.Fatalf("wingd.New: %v", err)
@@ -1899,6 +1902,123 @@ func TestWingd_DaemonFirstCancelRecoversStalledHolderWithoutDashboard(t *testing
 	if run.Status != "cancelled" {
 		t.Fatalf("stored holder status = %q, want cancelled", run.Status)
 	}
+}
+
+func TestWingd_DaemonFirstCancelSurvivesImmediateClientExit(t *testing.T) {
+	home := wingdTestHome(t)
+	startWingd(t, home, 2)
+	_, st, _ := openWingdBackends(t, home)
+	ctx := context.Background()
+	const runID = "cancel-exit-holder"
+
+	if err := st.CreateRun(ctx, store.Run{
+		ID: runID, Pipeline: "wingd-e2e-hold", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed run row: %v", err)
+	}
+	holder, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
+	if err != nil {
+		t.Fatalf("dial holder client: %v", err)
+	}
+	if _, err := holder.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: runID, Resources: wingwire.HostResources{Cores: 1},
+	}, nil); err != nil {
+		t.Fatalf("acquire holder: %v", err)
+	}
+	found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home, Version: "test"}, runID)
+	if err != nil {
+		t.Fatalf("daemon-first cancel: %v", err)
+	}
+	if !found {
+		t.Fatal("daemon did not find holder")
+	}
+	if err := holder.Close(); err != nil {
+		t.Fatalf("close holder immediately after cancel: %v", err)
+	}
+
+	deadline := time.Now().Add(wingdTestWait)
+	for time.Now().Before(deadline) {
+		run, getErr := st.GetRun(ctx, runID)
+		if getErr != nil {
+			t.Fatalf("get run: %v", getErr)
+		}
+		if run.Status == "cancelled" {
+			if run.Error != "cancelled via sparkwing runs cancel" {
+				t.Fatalf("stored cancellation = %q, want explicit operator attribution", run.Error)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("cancelled holder never finalized")
+}
+
+func TestWingd_DaemonFirstCancelFinalizesQueuedClient(t *testing.T) {
+	home := wingdTestHome(t)
+	startWingd(t, home, 2)
+	_, st, _ := openWingdBackends(t, home)
+	ctx := context.Background()
+	const runID = "cancel-exit-waiter"
+
+	if err := st.CreateRun(ctx, store.Run{
+		ID: runID, Pipeline: "wingd-e2e-hold", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("seed run row: %v", err)
+	}
+	holder, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
+	if err != nil {
+		t.Fatalf("dial capacity holder: %v", err)
+	}
+	holderLease, err := holder.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: "cancel-waiter-blocker", Resources: wingwire.HostResources{Cores: 2},
+	}, nil)
+	if err != nil {
+		t.Fatalf("acquire capacity holder: %v", err)
+	}
+	defer func() { _ = holderLease.Release() }()
+
+	waiter, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Home: home, Version: "test"})
+	if err != nil {
+		t.Fatalf("dial waiter client: %v", err)
+	}
+	waitResult := make(chan error, 1)
+	go func() {
+		_, acquireErr := waiter.Acquire(ctx, wingwire.AdmissionRequest{
+			RunID: runID, Resources: wingwire.HostResources{Cores: 1},
+		}, nil)
+		waitResult <- acquireErr
+	}()
+	awaitWaiter(t, home, runID)
+
+	found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home, Version: "test"}, runID)
+	if err != nil {
+		t.Fatalf("daemon-first cancel: %v", err)
+	}
+	if !found {
+		t.Fatal("daemon did not find waiter")
+	}
+	select {
+	case <-waitResult:
+	case <-time.After(wingdTestWait):
+		t.Fatal("waiter did not receive cancellation")
+	}
+	_ = waiter.Close()
+
+	deadline := time.Now().Add(wingdTestWait)
+	for time.Now().Before(deadline) {
+		run, getErr := st.GetRun(ctx, runID)
+		if getErr != nil {
+			t.Fatalf("get run: %v", getErr)
+		}
+		if run.Status == "cancelled" {
+			if run.Error != "cancelled via sparkwing runs cancel" {
+				t.Fatalf("stored cancellation = %q, want explicit operator attribution", run.Error)
+			}
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("cancelled waiter never finalized")
 }
 
 func TestWingd_DaemonFirstCancelRemovesQueuedWaiterWithoutDashboard(t *testing.T) {
