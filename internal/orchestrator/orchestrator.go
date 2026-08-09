@@ -1609,8 +1609,12 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		}
 		watchdogWaits := admissionWaitTrackerFromContext(ctx)
 		watchdogParticipant := admissionWaitParticipantFromContext(ctx)
-		watchdogWaits.begin(watchdogParticipant)
-		defer watchdogWaits.end(watchdogParticipant)
+		_, contextBounded := ctx.Deadline()
+		awaitBounded := req.Timeout > 0 || nodeTimeoutDurationFromContext(ctx) > 0 || contextBounded
+		if awaitBounded {
+			watchdogWaits.begin(watchdogParticipant)
+			defer watchdogWaits.end(watchdogParticipant)
+		}
 
 		sparkwing.Info(ctx,
 			"spawned child run %s (pipeline=%s%s)",
