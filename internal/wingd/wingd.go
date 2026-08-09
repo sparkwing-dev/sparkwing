@@ -131,6 +131,9 @@ type Config struct {
 	// uses the real platform sampler; a sampler that reports not-sampled
 	// (unsupported platforms) simply leaves holders unflagged.
 	ProcSampler ProcSampler
+	// OwnedCPUSampler reads the combined CPU usage of live holder process
+	// trees for external-load accounting. Nil uses the platform sampler.
+	OwnedCPUSampler OwnedCPUSampler
 	// Now returns the current time; nil uses time.Now. Injected so tests
 	// can measure elapsed hold time deterministically.
 	Now func() time.Time

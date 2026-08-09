@@ -25,10 +25,11 @@ const maxCancelledRunTombstones = 4096
 // drive it with [Run]; it serves until it is drained, told to stop, or
 // idles out.
 type Daemon struct {
-	cfg         Config
-	layout      layout
-	sampler     HostSampler
-	procSampler ProcSampler
+	cfg          Config
+	layout       layout
+	sampler      HostSampler
+	procSampler  ProcSampler
+	ownedSampler OwnedCPUSampler
 
 	lockFile *os.File
 	ln       net.Listener
@@ -143,6 +144,7 @@ func New(cfg Config) (*Daemon, error) {
 		layout:              lay,
 		sampler:             sampler,
 		procSampler:         procSampler,
+		ownedSampler:        cfg.OwnedCPUSampler,
 		container:           containerSensorFor(cfg),
 		ready:               make(chan struct{}),
 		quit:                make(chan struct{}),

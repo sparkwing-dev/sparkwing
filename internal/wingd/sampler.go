@@ -88,6 +88,12 @@ type ProcBatchSampler interface {
 	CPUUsages(pids []int) map[int]ProcUsage
 }
 
+// OwnedCPUSampler measures the union of live process trees rooted at pids.
+// Overlapping trees count each process once.
+type OwnedCPUSampler interface {
+	CPUUsage(pids []int) (fraction float64, measured bool)
+}
+
 type ProcUsage struct {
 	Fraction      float64
 	HasDescendant bool
