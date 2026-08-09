@@ -1313,13 +1313,9 @@ func TestWaiterDisconnect_UnblocksProtectedFollower(t *testing.T) {
 	}
 }
 
-// TestBackfillStream_ReconnectedOlderWaiterKeepsProtection drives the
-// starvation contract through a real daemon. An older one-core waiter is
-// blocked on memory, one newer four-core job consumes otherwise-idle CPU, and
-// a stream of further four-core jobs arrives. Reconnecting the older waiter
-// must retain its consumed bypass budget, so the stream stays behind it until
-// memory opens and the older waiter is granted.
-func TestBackfillStream_ReconnectedOlderWaiterKeepsProtection(t *testing.T) {
+// The reconnect must retain enough reservation to admit the older waiter as
+// soon as memory opens while leaving genuinely spare cores usable.
+func TestBackfillStream_ReconnectedOlderWaiterUsesOnlyReservedSpareCapacity(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{
 		Home:             home,
@@ -1374,18 +1370,22 @@ func TestBackfillStream_ReconnectedOlderWaiterKeepsProtection(t *testing.T) {
 	if err := firstNewer.Release(); err != nil {
 		t.Fatalf("release first newer job: %v", err)
 	}
+	secondNewer := waitResult(t, newerResults[0], 2*time.Second)
+	if secondNewer.err != nil || secondNewer.lease == nil {
+		t.Fatalf("safe second backfill = lease=%v err=%v, want grant", secondNewer.lease, secondNewer.err)
+	}
 	qs, err = client.Query(context.Background(), client.Options{Home: home})
 	if err != nil {
 		t.Fatalf("query protected stream: %v", err)
 	}
 	olderWaiter, ok = waiterByRun(qs, "older-small")
-	if !ok || olderWaiter.BackfillCount != 1 {
-		t.Fatalf("protected older waiter = %+v, present=%v; want one retained bypass", olderWaiter, ok)
+	if !ok || olderWaiter.BackfillCount != 2 {
+		t.Fatalf("protected older waiter = %+v, present=%v; want one additional bypass inside reserved spare cores", olderWaiter, ok)
 	}
-	for i, result := range newerResults {
+	for i, result := range newerResults[1:] {
 		select {
 		case r := <-result:
-			t.Fatalf("newer high-core job %d bypassed protected older waiter: lease=%v err=%v", i+1, r.lease, r.err)
+			t.Fatalf("newer high-core job %d exceeded protected reservation: lease=%v err=%v", i+2, r.lease, r.err)
 		default:
 		}
 	}
@@ -1400,12 +1400,15 @@ func TestBackfillStream_ReconnectedOlderWaiterKeepsProtection(t *testing.T) {
 	if err := olderGrant.lease.Release(); err != nil {
 		t.Fatalf("release older waiter: %v", err)
 	}
+	if err := secondNewer.lease.Release(); err != nil {
+		t.Fatalf("release safe second backfill: %v", err)
+	}
 
 	qs, err = client.Query(context.Background(), client.Options{Home: home})
 	if err != nil {
 		t.Fatalf("query after older departure: %v", err)
 	}
-	if qs.Events == nil || qs.Events.Backfills != 1 || qs.Events.BackfillProtections != 1 {
+	if qs.Events == nil || qs.Events.Backfills != 2 || qs.Events.BackfillProtections != 1 {
 		t.Fatalf("events after older departure = %+v, want persisted starvation history", qs.Events)
 	}
 }
