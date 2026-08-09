@@ -46,6 +46,7 @@ type TemplateVerifySummary struct {
 // module proxy happens to serve.
 type verifyEnv struct {
 	CLI        string            `json:"cli"`
+	StateHome  string            `json:"state_home"`
 	SparksCore map[string]string `json:"sparks_core"`
 	// GoEnv carries GOCACHE / GOMODCACHE / GOPATH so a job that runs the
 	// inner pipeline under an overridden HOME (the postgres fixture, to
@@ -128,7 +129,12 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	} else {
 		sparkwing.Annotate(ctx, "built CLI; no local sparks-core checkout (using published modules)")
 	}
-	return verifyEnv{CLI: bin, SparksCore: core, GoEnv: readGoEnv(ctx)}, nil
+	return verifyEnv{
+		CLI:        bin,
+		StateHome:  filepath.Join(dir, "state"),
+		SparksCore: core,
+		GoEnv:      readGoEnv(ctx),
+	}, nil
 }
 
 // readGoEnv captures the host's GOCACHE / GOMODCACHE / GOPATH so a job
@@ -223,7 +229,7 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 			defer cleanup()
 			runCmd := sparkwing.Exec(ctx, bin, "run", m.Name).
 				Dir(scratch)
-			for name, value := range templateRunAdmissionEnv(scratch) {
+			for name, value := range templateRunAdmissionEnv(env.StateHome) {
 				runCmd = runCmd.Env(name, value)
 			}
 			mode := "ran green"
@@ -245,13 +251,9 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 	}
 }
 
-func templateRunHome(scratch string) string {
-	return filepath.Join(scratch, ".sparkwing-state")
-}
-
-func templateRunAdmissionEnv(scratch string) map[string]string {
+func templateRunAdmissionEnv(stateHome string) map[string]string {
 	return map[string]string{
-		"SPARKWING_HOME":            templateRunHome(scratch),
+		"SPARKWING_HOME":            stateHome,
 		wingwire.LeaseTokenEnv:      "",
 		wingwire.ChildLeaseTokenEnv: "",
 	}
