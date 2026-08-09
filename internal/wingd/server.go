@@ -1255,6 +1255,11 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
+	if err := d.persistState(snap); err != nil {
+		d.cfg.logf("cancel: persist tombstone: %v", err)
+		c.close()
+		return
+	}
 	for owner, runID := range current {
 		d.cfg.logf("cancel: signalling run %s to wind down", runID)
 		if err := owner.send(&wingwire.Cancel{RunID: runID, Reason: reason}); err != nil {
@@ -1262,7 +1267,11 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 			return
 		}
 	}
-	d.flush(deliveries, snap)
+	for _, dl := range deliveries {
+		if err := dl.c.send(dl.msg); err != nil {
+			go d.handleDisconnect(dl.c)
+		}
+	}
 	_ = c.send(&wingwire.CancelLeaseAck{Found: true})
 }
 
