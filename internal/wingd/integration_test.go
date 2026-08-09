@@ -783,7 +783,11 @@ func TestExplicitCancelFinalizesEverySharedLeaseMemberInOneBatch(t *testing.T) {
 	parent := ensure(t, home, "")
 	parentLease := mustAcquire(t, parent, coreReq("shared-parent", 1))
 	child := ensure(t, home, "")
-	mustAcquire(t, child, wingwire.AdmissionRequest{RunID: "shared-child", ParentLeaseToken: parentLease.Token})
+	childLease := mustAcquire(t, child, wingwire.AdmissionRequest{RunID: "shared-child", ParentLeaseToken: parentLease.Token})
+	parentCancelled := make(chan wingwire.Cancel, 1)
+	childCancelled := make(chan wingwire.Cancel, 1)
+	go parentLease.WatchControl(nil, func(c wingwire.Cancel) { parentCancelled <- c })
+	go childLease.WatchControl(nil, func(c wingwire.Cancel) { childCancelled <- c })
 	control := ensure(t, home, "")
 	found, err := control.CancelLease(context.Background(), "shared-parent")
 	if err != nil || !found {
@@ -797,6 +801,23 @@ func TestExplicitCancelFinalizesEverySharedLeaseMemberInOneBatch(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("shared lease was not finalized")
+	}
+	for name, ch := range map[string]<-chan wingwire.Cancel{"shared-parent": parentCancelled, "shared-child": childCancelled} {
+		select {
+		case got := <-ch:
+			if got.RunID != name {
+				t.Fatalf("%s connection got cancel for %q", name, got.RunID)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%s connection was not signalled", name)
+		}
+	}
+	qs, err := control.QueueState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(qs.Holders) != 0 {
+		t.Fatalf("holders after acknowledged cancel = %+v", qs.Holders)
 	}
 }
 

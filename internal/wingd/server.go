@@ -47,7 +47,6 @@ type Daemon struct {
 	leaseMembers        map[admission.LeaseID][]string
 	reattachWait        map[admission.LeaseID]struct{}
 	cancelPending       map[string]struct{}
-	explicitCancels     map[string]struct{}
 	disconnectedPending map[string]struct{}
 	draining            bool
 	shuttingDown        bool
@@ -147,7 +146,6 @@ func New(cfg Config) (*Daemon, error) {
 		leaseMembers:        map[admission.LeaseID][]string{},
 		reattachWait:        map[admission.LeaseID]struct{}{},
 		cancelPending:       map[string]struct{}{},
-		explicitCancels:     map[string]struct{}{},
 		disconnectedPending: map[string]struct{}{},
 	}, nil
 }
@@ -1175,40 +1173,48 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 			c.close()
 			return
 		}
+	} else if d.cfg.FinalizeRun != nil {
+		for _, runID := range affected {
+			d.cfg.FinalizeRun(runID)
+		}
 	}
 
 	d.mu.Lock()
+	current := make(map[*conn]string)
 	for _, runID := range affected {
 		delete(d.cancelPending, runID)
 		delete(d.disconnectedPending, runID)
-		if d.cfg.FinalizeCancelledRuns != nil {
-			d.explicitCancels[runID] = struct{}{}
+		if owner := d.byRun[runID]; owner != nil {
+			if _, seen := current[owner]; !seen {
+				current[owner] = runID
+			}
 		}
 	}
-	// A compatible reconnect may replace the connection while persistence is
-	// running. Signal the connection that owns the run now, not the stale one
-	// found before the callback.
-	target = d.byRun[req.RunID]
-	var deliveries []delivery
-	var snap admission.Snapshot
-	if target != nil && target.role == roleWaiter {
-		d.events.record(d.now(), admissionEvent{Kind: eventCancellation})
-		events := d.cancelWaiterLocked(req.RunID)
-		delete(d.byRun, req.RunID)
-		target.role = roleNone
-		target.finalizable = false
-		deliveries = d.routeLocked(events)
-		snap = d.ledger.Snapshot()
-		d.touchLocked()
+	var events []admission.Event
+	for owner := range current {
+		switch owner.role {
+		case roleWaiter:
+			d.events.record(d.now(), admissionEvent{Kind: eventCancellation})
+			events = append(events, d.cancelWaiterLocked(owner.runID)...)
+			delete(d.byRun, owner.runID)
+			owner.role = roleNone
+			owner.finalizable = false
+		case roleHolder:
+			events = append(events, d.releaseConnLocked(owner)...)
+		}
 	}
+	deliveries := d.routeLocked(events)
+	snap := d.ledger.Snapshot()
+	d.touchLocked()
 	d.mu.Unlock()
-	if target != nil {
-		d.cfg.logf("cancel: signalling run %s to wind down", req.RunID)
-		_ = target.send(&wingwire.Cancel{RunID: req.RunID, Reason: reason})
+	for owner, runID := range current {
+		d.cfg.logf("cancel: signalling run %s to wind down", runID)
+		if err := owner.send(&wingwire.Cancel{RunID: runID, Reason: reason}); err != nil {
+			c.close()
+			return
+		}
 	}
-	if len(deliveries) > 0 {
-		d.flush(deliveries, snap)
-	}
+	d.flush(deliveries, snap)
 	_ = c.send(&wingwire.CancelLeaseAck{Found: true})
 }
 
@@ -1263,18 +1269,16 @@ func (d *Daemon) handleDisconnect(c *conn) {
 				for _, runID := range c.members {
 					if _, pending := d.cancelPending[runID]; pending {
 						d.disconnectedPending[runID] = struct{}{}
-					} else if _, explicitlyCancelled := d.explicitCancels[runID]; !explicitlyCancelled {
+					} else {
 						orphaned = append(orphaned, runID)
 					}
-					delete(d.explicitCancels, runID)
 				}
 			case roleWaiter:
 				if _, pending := d.cancelPending[c.runID]; pending {
 					d.disconnectedPending[c.runID] = struct{}{}
-				} else if _, explicitlyCancelled := d.explicitCancels[c.runID]; !explicitlyCancelled {
+				} else {
 					orphaned = append(orphaned, c.runID)
 				}
-				delete(d.explicitCancels, c.runID)
 			}
 		}
 		var events []admission.Event
