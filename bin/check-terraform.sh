@@ -22,6 +22,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 MODULE="$ROOT/install/terraform/mode3-postgres"
 FIXTURE="$MODULE/test/plan"
+DATA_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/sparkwing-terraform.XXXXXX")"
+MODULE_DATA="$DATA_ROOT/module"
+FIXTURE_DATA="$DATA_ROOT/fixture"
+trap 'rm -rf "$DATA_ROOT"' EXIT
+mkdir -p "$MODULE_DATA" "$FIXTURE_DATA"
 
 if ! command -v terraform >/dev/null 2>&1; then
   echo "check-terraform: terraform not installed (see install/terraform/mode3-postgres/README.md)" >&2
@@ -31,20 +36,20 @@ fi
 fail=0
 
 echo "== fmt =="
-terraform -chdir="$MODULE" fmt -check -recursive || { echo "fmt: run 'terraform fmt -recursive' in $MODULE"; fail=1; }
+TF_DATA_DIR="$MODULE_DATA" terraform -chdir="$MODULE" fmt -check -recursive || { echo "fmt: run 'terraform fmt -recursive' in $MODULE"; fail=1; }
 
 echo "== validate =="
-terraform -chdir="$MODULE" init -backend=false -input=false >/dev/null
-terraform -chdir="$MODULE" validate || fail=1
+TF_DATA_DIR="$MODULE_DATA" terraform -chdir="$MODULE" init -backend=false -input=false >/dev/null
+TF_DATA_DIR="$MODULE_DATA" terraform -chdir="$MODULE" validate || fail=1
 
 echo "== plan (offline, both engines) =="
-terraform -chdir="$FIXTURE" init -backend=false -input=false >/dev/null
+TF_DATA_DIR="$FIXTURE_DATA" terraform -chdir="$FIXTURE" init -backend=false -input=false >/dev/null
 
 assert_plan() {
   local engine="$1"
   shift
   local plan addr
-  if ! plan="$(terraform -chdir="$FIXTURE" plan -input=false -no-color -var "engine=$engine")"; then
+  if ! plan="$(TF_DATA_DIR="$FIXTURE_DATA" terraform -chdir="$FIXTURE" plan -input=false -no-color -var "engine=$engine")"; then
     echo "plan engine=$engine: terraform plan failed"
     fail=1
     return
@@ -87,7 +92,7 @@ assert_plan aurora-serverless-v2 "${common[@]}" \
   "!module.db.aws_db_instance.this[0]"
 
 echo "== test (security attribute values, offline) =="
-if ! terraform -chdir="$MODULE" test; then
+if ! TF_DATA_DIR="$MODULE_DATA" terraform -chdir="$MODULE" test; then
   echo "test: security attribute assertions failed (tests/security.tftest.hcl)"
   fail=1
 fi

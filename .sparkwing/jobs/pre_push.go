@@ -162,6 +162,11 @@ func (p *PrePush) run(ctx context.Context) error {
 	} else {
 		sparkwing.Info(ctx, "shellcheck script portability: clean")
 	}
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-terraform-test.sh").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("terraform isolation regression: %v", err))
+	} else {
+		sparkwing.Info(ctx, "terraform isolation regression: clean")
+	}
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-changelog-test.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("changelog script portability: %v", err))
 	} else {
