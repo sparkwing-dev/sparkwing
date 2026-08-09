@@ -4,15 +4,16 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
 func TestMarkdownlintCommandIsPinnedAndSelfProvisioning(t *testing.T) {
-	for _, want := range []string{"npx --yes", "markdownlint-cli2@0.23.2"} {
-		if !strings.Contains(markdownlintCommand, want) {
-			t.Errorf("markdownlint command %q missing %q", markdownlintCommand, want)
-		}
+	const want = "npx --yes markdownlint-cli2@0.23.2"
+	if markdownlintCommand != want {
+		t.Fatalf("markdownlint command = %q, want exactly %q", markdownlintCommand, want)
+	}
+	if err := runMarkdownlint(context.Background()); err != nil {
+		t.Fatalf("self-provisioned markdown lint failed: %v", err)
 	}
 }
 
