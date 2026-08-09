@@ -90,10 +90,17 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, sampled holderCohort, ownedB
 	rawExternal := coresExternal(stat, stat.BusyCores, ownedBusy, ownedMeasured)
 	if !d.loadInit {
 		d.smoothedLoad = stat.LoadAverage
-		d.smoothedExternal = rawExternal
 		d.loadInit = true
 	} else {
 		d.smoothedLoad = loadEMAAlpha*stat.LoadAverage + (1-loadEMAAlpha)*d.smoothedLoad
+	}
+	if !stat.CPUMeasured {
+		d.smoothedExternal = 0
+		d.externalInit = false
+	} else if !d.externalInit {
+		d.smoothedExternal = rawExternal
+		d.externalInit = true
+	} else {
 		d.smoothedExternal = loadEMAAlpha*rawExternal + (1-loadEMAAlpha)*d.smoothedExternal
 	}
 	load, externalCores := d.smoothedLoad, d.smoothedExternal
