@@ -713,19 +713,37 @@ func TestExplicitCancelStateWriteFailureStillSignalsOwnerWithoutAcknowledging(t 
 	lease := mustAcquire(t, holder, coreReq("cancel-state-write-failure", 1))
 	cancelled := make(chan wingwire.Cancel, 1)
 	go lease.WatchControl(nil, func(c wingwire.Cancel) { cancelled <- c })
-	control := ensure(t, home, "")
-	if _, err := control.QueueState(context.Background()); err != nil {
+	sock, err := wingd.SocketPath(home)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chmod(home, 0o500); err != nil {
+	control, err := net.Dial("unix", sock)
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.Chmod(home, 0o700) })
+	defer control.Close()
+	if err := writeRawMessage(control, &wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readRawMessage(t, control).(*wingwire.HelloAck); !ok {
+		t.Fatal("control handshake failed")
+	}
+	moved := home + ".moved"
+	if err := os.Rename(home, moved); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(moved) })
+	if err := os.WriteFile(home, []byte("blocks state directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if found, err := control.CancelLease(ctx, "cancel-state-write-failure"); err == nil {
-		t.Fatalf("CancelLease = (%v, nil), want state persistence failure", found)
+	if err := writeRawMessage(control, &wingwire.CancelLease{RunID: "cancel-state-write-failure"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = control.SetReadDeadline(time.Now().Add(time.Second))
+	buf := make([]byte, 1)
+	if _, err := control.Read(buf); err == nil {
+		t.Fatal("cancel was acknowledged despite state persistence failure")
 	}
 	select {
 	case got := <-cancelled:
