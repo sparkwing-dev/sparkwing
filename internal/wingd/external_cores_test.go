@@ -3,6 +3,7 @@ package wingd
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
@@ -10,6 +11,18 @@ import (
 type countingHostSampler struct {
 	stat  HostStat
 	calls int
+}
+
+type blockingOwnedCPUSampler struct {
+	started  chan []int
+	release  chan struct{}
+	fraction float64
+}
+
+func (s *blockingOwnedCPUSampler) CPUUsage(pids []int) (float64, bool) {
+	s.started <- append([]int(nil), pids...)
+	<-s.release
+	return s.fraction, true
 }
 
 type fixedOwnedCPUSampler struct {
@@ -204,5 +217,53 @@ func TestRefreshHeadroomSubtractsMeasuredHolderUsageNotLeaseCapacity(t *testing.
 				t.Errorf("owned sampler roots = %v, want [4242]", owned.roots)
 			}
 		})
+	}
+}
+
+func TestRefreshHeadroomDiscardsOwnedCPUAcrossSamePIDHolderReplacement(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0)
+	d.sampler = &countingHostSampler{stat: HostStat{
+		TotalCores:       8,
+		TotalMemoryBytes: ledgerMemory,
+		FreeMemoryBytes:  ledgerMemory,
+		BusyCores:        3,
+		CPUMeasured:      true,
+		MemoryMeasured:   true,
+	}}
+	owned := &blockingOwnedCPUSampler{
+		started:  make(chan []int, 1),
+		release:  make(chan struct{}),
+		fraction: 3,
+	}
+	d.ownedSampler = owned
+	d.byRun["first"] = &conn{runID: "first", role: roleHolder, pid: 4242}
+	done := make(chan struct{})
+	go func() {
+		d.refreshHeadroom()
+		close(done)
+	}()
+
+	select {
+	case roots := <-owned.started:
+		if len(roots) != 1 || roots[0] != 4242 {
+			t.Fatalf("sampled roots = %v, want [4242]", roots)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("owned CPU sampling did not start")
+	}
+	d.mu.Lock()
+	delete(d.byRun, "first")
+	d.byRun["second"] = &conn{runID: "second", role: roleHolder, pid: 4242}
+	d.mu.Unlock()
+	close(owned.release)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("headroom refresh did not finish")
+	}
+
+	cores := queueRow(t, queueState(t, d), "cores")
+	if cores.External != 3 {
+		t.Errorf("external cores = %v, want 3 after the sampled holder was replaced", cores.External)
 	}
 }
