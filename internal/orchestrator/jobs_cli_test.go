@@ -273,6 +273,37 @@ func TestListJobs_ClearsInterleavedNodeAdmissionTerminalsIndependently(t *testin
 	}
 }
 
+func TestListJobs_ClearsLegacyAdmissionWaitOnLegacyTerminal(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	const runID = "run-legacy-admission-terminal"
+	if err := st.CreateRun(ctx, store.Run{
+		ID: runID, Pipeline: "push-checks", Status: "running", StartedAt: time.Now().Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if _, err := st.AppendEvent(ctx, runID, "", "admission_wait", []byte(`{"position":2,"queue_length":4,"request_id":"run-legacy-admission-terminal/node-host/Y29tcGlsZQ"}`)); err != nil {
+		t.Fatalf("AppendEvent wait: %v", err)
+	}
+	if _, err := st.AppendEvent(ctx, runID, "", "admission_granted", nil); err != nil {
+		t.Fatalf("AppendEvent terminal: %v", err)
+	}
+
+	var out bytes.Buffer
+	if err := orchestrator.ListJobs(ctx, p, orchestrator.ListOpts{Limit: 10}, &out); err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if strings.Contains(out.String(), "admission-waiting") || strings.Contains(out.String(), "queued (") {
+		t.Fatalf("legacy terminal should clear the legacy wait during rolling upgrades, got:\n%s", out.String())
+	}
+}
+
 func TestListJobs_IgnoresStaleAdmissionWaitForFinishedRun(t *testing.T) {
 	p := newPaths(t)
 	ctx := context.Background()
