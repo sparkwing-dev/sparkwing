@@ -134,10 +134,10 @@ func TestApplyHeadroom_UnreadCPUSubtractsNothing(t *testing.T) {
 	}
 }
 
-// TestApplyHeadroom_ExternalCoresDiscountWhatLeasesHold keeps the term to
-// load the daemon did not admit. Its own holders are already charged
-// against capacity, so counting their CPU again would bill them twice.
-func TestApplyHeadroom_ExternalCoresDiscountWhatLeasesHold(t *testing.T) {
+// TestApplyHeadroom_LeaseCapacityIsNotExecution proves a reservation cannot
+// stand in for measured process usage. Without an owned-process reading the
+// host's measured busy cores remain external for this sample.
+func TestApplyHeadroom_LeaseCapacityIsNotExecution(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	dec, _, err := d.ledger.Submit(admission.Request{ID: "holder", Cores: 3})
 	if err != nil {
@@ -158,8 +158,8 @@ func TestApplyHeadroom_ExternalCoresDiscountWhatLeasesHold(t *testing.T) {
 	})
 
 	cores := queueRow(t, queueState(t, d), "cores")
-	if cores.External != 1 {
-		t.Errorf("cores external = %v, want 1: of 4 busy cores the daemon's own lease holds 3", cores.External)
+	if cores.External != 4 {
+		t.Errorf("cores external = %v, want 4: the 3-core lease is capacity, not measured execution", cores.External)
 	}
 }
 
