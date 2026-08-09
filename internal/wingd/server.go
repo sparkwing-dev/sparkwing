@@ -19,6 +19,8 @@ import (
 // capacity rather than being admitted for free.
 const defaultChargeCores = 1.0
 
+const maxCancelledRunTombstones = 4096
+
 // Daemon is one elected sparkwingd instance. Construct it with [New] and
 // drive it with [Run]; it serves until it is drained, told to stop, or
 // idles out.
@@ -48,6 +50,7 @@ type Daemon struct {
 	reattachWait        map[admission.LeaseID]struct{}
 	cancelPending       map[string]struct{}
 	cancelledRuns       map[string]struct{}
+	cancelledRunOrder   []string
 	disconnectedPending map[string]struct{}
 	draining            bool
 	shuttingDown        bool
@@ -256,16 +259,25 @@ func (d *Daemon) finalShutdown() {
 	for _, c := range toClose {
 		c.close()
 	}
-	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
+	if err := d.persistState(snap); err != nil {
 		d.cfg.logf("final persist: %v", err)
 	}
 }
 
 func (d *Daemon) initLedger() error {
-	snap, events, err := readState(d.layout.state)
+	snap, events, cancelledRuns, err := readStateWithCancellations(d.layout.state)
 	if err != nil {
 		d.discardState(err)
-		snap, events = nil, nil
+		snap, events, cancelledRuns = nil, nil, nil
+	}
+	if len(cancelledRuns) > maxCancelledRunTombstones {
+		cancelledRuns = cancelledRuns[len(cancelledRuns)-maxCancelledRunTombstones:]
+	}
+	for _, runID := range cancelledRuns {
+		if _, exists := d.cancelledRuns[runID]; exists {
+			continue
+		}
+		d.recordCancelledRunLocked(runID)
 	}
 	d.events.restore(d.now(), events)
 	stat, serr := d.sampler.Sample()
@@ -1051,7 +1063,7 @@ func (d *Daemon) handleChildAttach(c *conn, req *wingwire.AdmissionRequest) {
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
+	if err := d.persistState(snap); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	_ = c.send(&wingwire.Grant{
@@ -1105,7 +1117,7 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
+	if err := d.persistState(snap); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	d.cfg.logf("reattach: run %s reclaimed lease %s", requestID, leaseID)
@@ -1136,7 +1148,7 @@ func (d *Daemon) handleDrain(c *conn, req *wingwire.DrainRequest) {
 	remaining := len(d.leaseRun)
 	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
-	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
+	if err := d.persistState(snap); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	d.cfg.logf("draining for successor %s", req.SuccessorVersion)
@@ -1219,7 +1231,7 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	for _, runID := range affected {
 		delete(d.cancelPending, runID)
 		delete(d.disconnectedPending, runID)
-		d.cancelledRuns[runID] = struct{}{}
+		d.recordCancelledRunLocked(runID)
 		if owner := d.byRun[runID]; owner != nil {
 			if _, seen := current[owner]; !seen {
 				current[owner] = runID
@@ -1270,7 +1282,7 @@ func (d *Daemon) handleStatsReset(c *conn) {
 	d.mu.Lock()
 	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
-	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
+	if err := d.persistState(snap); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	d.cfg.logf("stats reset: admission-outcome window cleared")
@@ -1370,7 +1382,7 @@ func (d *Daemon) releaseConnLocked(c *conn) []admission.Event {
 // State is written before grants are announced so a re-attach token is
 // durable before any client can act on it.
 func (d *Daemon) flush(deliveries []delivery, snap admission.Snapshot) {
-	if err := writeState(d.layout.state, snap, d.events.snapshot(d.now())); err != nil {
+	if err := d.persistState(snap); err != nil {
 		d.cfg.logf("persist: %v", err)
 	}
 	for _, dl := range deliveries {
@@ -1378,6 +1390,27 @@ func (d *Daemon) flush(deliveries []delivery, snap admission.Snapshot) {
 			go d.handleDisconnect(dl.c)
 		}
 	}
+}
+
+func (d *Daemon) recordCancelledRunLocked(runID string) {
+	if _, exists := d.cancelledRuns[runID]; exists {
+		return
+	}
+	d.cancelledRuns[runID] = struct{}{}
+	d.cancelledRunOrder = append(d.cancelledRunOrder, runID)
+	if len(d.cancelledRunOrder) <= maxCancelledRunTombstones {
+		return
+	}
+	oldest := d.cancelledRunOrder[0]
+	d.cancelledRunOrder = d.cancelledRunOrder[1:]
+	delete(d.cancelledRuns, oldest)
+}
+
+func (d *Daemon) persistState(snap admission.Snapshot) error {
+	d.mu.Lock()
+	cancelledRuns := append([]string(nil), d.cancelledRunOrder...)
+	d.mu.Unlock()
+	return writeStateWithCancellations(d.layout.state, snap, d.events.snapshot(d.now()), cancelledRuns)
 }
 
 // Stable cause labels for malformed-request rejections, aggregated in the
