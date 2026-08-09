@@ -12,6 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+const markdownlintCommand = "npx --yes markdownlint-cli2@0.23.2"
+
 // PrePush provides slower release-boundary checks: full golangci-lint,
 // `go test -race`, the
 // version-freshness check against the sparkwing ecosystem, the
@@ -164,7 +166,7 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "terraform: module valid + plans clean (both engines)")
 	}
 
-	if _, err := sparkwing.Bash(ctx, "markdownlint-cli2").Run(); err != nil {
+	if _, err := sparkwing.Bash(ctx, markdownlintCommand).Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("markdownlint: %v", err))
 	} else {
 		sparkwing.Info(ctx, "markdownlint: clean")
