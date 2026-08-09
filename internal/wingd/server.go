@@ -61,12 +61,12 @@ type Daemon struct {
 	lastActivity        time.Time
 	startedAt           time.Time
 
-	loadInit     bool
-	smoothedLoad float64
-	smoothedBusy float64
-	headroomInit bool
-	appliedCores float64
-	appliedMem   uint64
+	loadInit         bool
+	smoothedLoad     float64
+	smoothedExternal float64
+	headroomInit     bool
+	appliedCores     float64
+	appliedMem       uint64
 	// reservedCores/externalCores and their memory counterparts hold the
 	// headroom decomposition from the sample that set the applied headroom:
 	// the reserve margin and the measured non-sparkwing load per host
@@ -139,12 +139,16 @@ func New(cfg Config) (*Daemon, error) {
 	if procSampler == nil {
 		procSampler = newProcSampler()
 	}
+	ownedSampler := cfg.OwnedCPUSampler
+	if ownedSampler == nil {
+		ownedSampler = newOwnedCPUSampler()
+	}
 	return &Daemon{
 		cfg:                 cfg,
 		layout:              lay,
 		sampler:             sampler,
 		procSampler:         procSampler,
-		ownedSampler:        cfg.OwnedCPUSampler,
+		ownedSampler:        ownedSampler,
 		container:           containerSensorFor(cfg),
 		ready:               make(chan struct{}),
 		quit:                make(chan struct{}),

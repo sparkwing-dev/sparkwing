@@ -88,6 +88,45 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
+func (s *ownedProcSampler) sampleOwned(roots []int) (float64, bool) {
+	if len(roots) == 0 {
+		return 0, true
+	}
+	procs, ok := darwinProcesses()
+	if !ok {
+		return 0, false
+	}
+	children := map[int][]int{}
+	byPID := map[int]struct{}{}
+	for _, proc := range procs {
+		processID := int(proc.Proc.P_pid)
+		byPID[processID] = struct{}{}
+		children[int(proc.Eproc.Ppid)] = append(children[int(proc.Eproc.Ppid)], processID)
+	}
+	owned := map[int]struct{}{}
+	for _, root := range roots {
+		if _, ok := byPID[root]; !ok {
+			continue
+		}
+		for _, processID := range collectSubtree(root, children) {
+			owned[processID] = struct{}{}
+		}
+	}
+	pids := make([]int, 0, len(owned))
+	for processID := range owned {
+		pids = append(pids, processID)
+	}
+	cpu, ok := darwinProcessCPUFractions(pids)
+	if !ok {
+		return 0, false
+	}
+	var fraction float64
+	for _, usage := range cpu {
+		fraction += usage
+	}
+	return fraction, true
+}
+
 func darwinProcesses() ([]unix.KinfoProc, bool) {
 	raw, err := unix.SysctlRaw("kern.proc.all")
 	if err != nil {
