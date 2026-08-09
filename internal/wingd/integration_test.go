@@ -770,6 +770,32 @@ func TestExplicitCancelSignalsConnectionThatReattachedDuringPersistence(t *testi
 	}
 }
 
+func TestExplicitCancelRejectsReplacementAfterResolution(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeCancelledRuns: func([]string, string) error {
+			return nil
+		},
+	})
+	req := coreReq("cancel-no-replacement", 1)
+	holder := ensure(t, home, "")
+	mustAcquire(t, holder, req)
+	control := ensure(t, home, "")
+	found, err := control.CancelLease(context.Background(), req.RunID)
+	if err != nil || !found {
+		t.Fatalf("CancelLease = (%v, %v), want found", found, err)
+	}
+
+	replacement := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if lease, err := replacement.Acquire(ctx, req, nil); err == nil {
+		_ = lease.Release()
+		t.Fatal("replacement reacquired a durably cancelled run")
+	}
+}
+
 func TestExplicitCancelFinalizesEverySharedLeaseMemberInOneBatch(t *testing.T) {
 	home := shortHome(t)
 	finalized := make(chan []string, 1)
