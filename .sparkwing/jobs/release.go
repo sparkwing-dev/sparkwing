@@ -90,9 +90,9 @@ func (Release) Help() string {
 
 func (Release) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Auto-pick version by bumping latest origin tag", Command: "sparkwing run release"},
-		{Comment: "Tag and push an explicit version", Command: "sparkwing run release --version v1.5.5"},
-		{Comment: "Preview without pushing", Command: "sparkwing run release --sw-dry-run"},
+		{Comment: "Auto-pick version by bumping latest origin tag", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release"},
+		{Comment: "Tag and push an explicit version", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --version v1.5.5"},
+		{Comment: "Preview without pushing", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run"},
 	}
 }
 

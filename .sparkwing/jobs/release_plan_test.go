@@ -50,7 +50,7 @@ func mustNode(t *testing.T, plan *sparkwing.Plan, id string) *sparkwing.JobNode 
 
 func TestReleasePreviewExampleUsesTheReservedRunFlag(t *testing.T) {
 	examples := (Release{}).Examples()
-	if got := examples[len(examples)-1].Command; got != "sparkwing run release --sw-dry-run" {
+	if got := examples[len(examples)-1].Command; got != `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run` {
 		t.Fatalf("preview command = %q", got)
 	}
 }

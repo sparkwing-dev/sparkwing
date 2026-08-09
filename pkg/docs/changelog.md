@@ -48,6 +48,12 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **release:** Self-release validation now requires an isolated
+  `SPARKWING_HOME`, preventing a prerelease binary with a newer embedded schema
+  from migrating the operational runs store before installed readers upgrade.
+
 ## [v0.23.1] - 2026-08-09
 ### Fixed
 
