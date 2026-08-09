@@ -89,7 +89,7 @@ func TestAnnotateSemaphoreETA(t *testing.T) {
 			want: []int64{0, 0, 10000},
 		},
 		{
-			name: "an unknown semaphore bound clears a host-derived estimate",
+			name: "a host-derived estimate wins when spare semaphore capacity is available",
 			qs: wingwire.QueueState{
 				Waiters: []wingwire.Waiter{
 					{
@@ -105,7 +105,7 @@ func TestAnnotateSemaphoreETA(t *testing.T) {
 				Semaphores: []admission.SemaphoreState{semState("deploy", 2, semHold("L1", 2, 1))},
 				Waiters:    []admission.WaiterState{semWaiter("run-b", "deploy", 2, 1)},
 			},
-			want: []int64{semaNone},
+			want: []int64{7000},
 		},
 		{
 			name: "a host-drawing waiter the host simulation could not estimate stays nil",
