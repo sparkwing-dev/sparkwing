@@ -900,7 +900,7 @@ func dispatch(
 		state.scheduleExpansion(exp)
 	}
 
-	if waitForDispatch(&state.wg, dispatchWaitTimeout, state.admissionWaits) == dispatchWaitTimedOut {
+	if waitForDispatch(&state.wg, dispatchWaitTimeout, state.admissionWaits, state.watchdogActiveNodeIDs) == dispatchWaitTimedOut {
 		stuck := stuckNodeIDs(plan, state)
 		stack := dumpAllGoroutineStacks(dispatchStackDumpBytes)
 		summary, _ := json.Marshal(map[string]any{
@@ -2208,6 +2208,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 	s.markStarted(node.ID())
 	runnerCtx := sparkwingruntime.WithSpawnHandler(s.resolverCtx, s.newSpawnHandler(node.ID()))
 	runnerCtx = sparkwingruntime.WithRunner(runnerCtx, runnerInfoFor(activeRunner))
+	runnerCtx = withAdmissionWaitParticipant(runnerCtx, node.ID())
 
 	retryCfg := node.RetryConfig()
 	var autoAttempts int
@@ -2604,6 +2605,7 @@ func approvalTimeoutToOutcome(onTimeout string) approvalResult {
 // job-only path; cluster runners fall back to full RunNode.
 func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFailure sparkwing.Failure) runner.Result {
 	ctx := sparkwing.WithFailure(s.resolverCtx, parentFailure)
+	ctx = withAdmissionWaitParticipant(ctx, node.ID())
 	if ipr, ok := s.runner.(*InProcessRunner); ok {
 		out, err := ipr.executeNodeWithAdmission(ctx, runner.Request{
 			RunID:    s.runID,

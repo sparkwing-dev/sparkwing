@@ -488,8 +488,9 @@ func (la *LocalAdmission) acquireBlocking(
 	req wingwire.AdmissionRequest,
 ) (*wingdclient.Lease, admitOutcome, error) {
 	waits := admissionWaitTrackerFromContext(ctx)
-	waits.begin()
-	defer waits.end()
+	participant := admissionWaitParticipantFromContext(ctx)
+	waits.begin(participant)
+	defer waits.end(participant)
 	acquireCtx := ctx
 	if key, timeout := tightestQueueTimeout(req.Semaphores); timeout > 0 {
 		var cancel context.CancelFunc
