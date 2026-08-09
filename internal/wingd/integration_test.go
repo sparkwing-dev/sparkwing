@@ -1028,6 +1028,47 @@ func TestExplicitCancelRejectsChildResurrectionAfterRestart(t *testing.T) {
 	}
 }
 
+func TestConcurrentReattachClaimsRestoredLeaseOnlyOnce(t *testing.T) {
+	home := shortHome(t)
+	first := startDaemon(t, wingd.Config{Home: home})
+	holder := ensure(t, home, "")
+	lease := mustAcquire(t, holder, coreReq("concurrent-reattach", 1))
+	first.stop()
+	if err := first.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("first daemon exit: %v", err)
+	}
+	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
+	startDaemon(t, wingd.Config{
+		Home: home,
+		IsRunTerminal: func(string) (bool, error) {
+			entered <- struct{}{}
+			<-release
+			return false, nil
+		},
+	})
+	results := make(chan error, 2)
+	clients := []*client.Client{ensure(t, home, ""), ensure(t, home, "")}
+	for _, cl := range clients {
+		go func(cl *client.Client) {
+			_, err := cl.Reattach(context.Background(), lease.Token)
+			results <- err
+		}(cl)
+	}
+	<-entered
+	<-entered
+	close(release)
+	succeeded := 0
+	for range 2 {
+		if <-results == nil {
+			succeeded++
+		}
+	}
+	if succeeded != 1 {
+		t.Fatalf("successful reattach claims = %d, want 1", succeeded)
+	}
+}
+
 func TestExplicitCancelFinalizesEverySharedLeaseMemberInOneBatch(t *testing.T) {
 	home := shortHome(t)
 	finalized := make(chan []string, 1)
