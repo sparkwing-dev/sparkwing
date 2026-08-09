@@ -50,7 +50,8 @@ func (d *Daemon) refreshHeadroom() {
 // tick. Stateful CPU counters advance when sampled, so separate capacity and
 // headroom reads would measure utilization over the few moments between them.
 func (d *Daemon) refreshHostSample(refreshCapacity bool) {
-	stat, err := d.sampler.Sample()
+	roots, cohort := d.holderSample()
+	stat, ownedBusy, ownedMeasured, err := d.sampleHostAndOwned(roots)
 	if err != nil {
 		d.cfg.logf("host sample: %v", err)
 		return
@@ -59,12 +60,22 @@ func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 		d.applyCapacity(stat)
 	}
 	stat = d.container.apply(stat)
-	roots, cohort := d.holderSample()
-	ownedBusy, ownedMeasured := 0.0, true
-	if len(roots) > 0 {
-		ownedBusy, ownedMeasured = d.ownedSampler.CPUUsage(roots)
-	}
 	d.applyHeadroomSample(stat, cohort, ownedBusy, ownedMeasured)
+}
+
+func (d *Daemon) sampleHostAndOwned(roots []int) (HostStat, float64, bool, error) {
+	if paired, ok := d.sampler.(pairedHostOwnedSampler); ok {
+		return paired.SampleWithOwned(roots)
+	}
+	stat, err := d.sampler.Sample()
+	if err != nil {
+		return stat, 0, false, err
+	}
+	if len(roots) == 0 {
+		return stat, 0, true, nil
+	}
+	owned, measured := d.ownedSampler.CPUUsage(roots)
+	return stat, owned, measured, nil
 }
 
 // applyHeadroom converts a host reading into a ledger headroom ceiling:

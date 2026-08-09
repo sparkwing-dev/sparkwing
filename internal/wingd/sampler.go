@@ -1,6 +1,8 @@
 package wingd
 
 import (
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -49,6 +51,10 @@ type HostStat struct {
 // real machine.
 type HostSampler interface {
 	Sample() (HostStat, error)
+}
+
+type pairedHostOwnedSampler interface {
+	SampleWithOwned(roots []int) (HostStat, float64, bool, error)
 }
 
 // platformSampler reads real host metrics for the current OS. It carries
@@ -185,6 +191,63 @@ func ownedCPUFromProcesses(
 		measured = true
 	}
 	return fraction, measured, next
+}
+
+type darwinCPUProcess struct {
+	parentPID int
+	fraction  float64
+}
+
+func parseDarwinCPUSnapshot(output string) (map[int]darwinCPUProcess, bool) {
+	processes := map[int]darwinCPUProcess{}
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 {
+			continue
+		}
+		processID, pidErr := strconv.Atoi(fields[0])
+		parentPID, parentErr := strconv.Atoi(fields[1])
+		percent, cpuErr := strconv.ParseFloat(fields[2], 64)
+		if pidErr != nil || parentErr != nil || cpuErr != nil || processID <= 0 || parentPID < 0 || percent < 0 {
+			continue
+		}
+		processes[processID] = darwinCPUProcess{parentPID: parentPID, fraction: percent / 100}
+	}
+	return processes, len(processes) > 0
+}
+
+func darwinCPUFromSnapshot(
+	processes map[int]darwinCPUProcess,
+	roots []int,
+	totalCores float64,
+) (float64, bool, float64, bool) {
+	if len(processes) == 0 {
+		return 0, false, 0, false
+	}
+	var host float64
+	children := map[int][]int{}
+	for processID, process := range processes {
+		host += process.fraction
+		children[process.parentPID] = append(children[process.parentPID], processID)
+	}
+	host = clampCores(host, totalCores)
+	if len(roots) == 0 {
+		return host, true, 0, true
+	}
+	ownedIDs := map[int]struct{}{}
+	for _, root := range roots {
+		if _, ok := processes[root]; !ok {
+			return host, true, 0, false
+		}
+		for _, processID := range collectSubtree(root, children) {
+			ownedIDs[processID] = struct{}{}
+		}
+	}
+	var owned float64
+	for processID := range ownedIDs {
+		owned += processes[processID].fraction
+	}
+	return host, true, clampCores(owned, totalCores), true
 }
 
 func newProcSampler() *procSampler {
