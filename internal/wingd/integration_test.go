@@ -796,6 +796,70 @@ func TestExplicitCancelRejectsReplacementAfterResolution(t *testing.T) {
 	}
 }
 
+func TestChildAttachRejectsLeaseWhileCancellationPersistenceIsPending(t *testing.T) {
+	home := shortHome(t)
+	entered := make(chan struct{})
+	resume := make(chan struct{})
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeCancelledRuns: func([]string, string) error {
+			close(entered)
+			<-resume
+			return nil
+		},
+	})
+	parent := ensure(t, home, "")
+	parentLease := mustAcquire(t, parent, coreReq("cancel-parent-pending", 1))
+	control := ensure(t, home, "")
+	done := make(chan error, 1)
+	go func() {
+		_, err := control.CancelLease(context.Background(), "cancel-parent-pending")
+		done <- err
+	}()
+	<-entered
+
+	attacher := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if lease, err := attacher.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: "late-child", ParentLeaseToken: parentLease.Token,
+	}, nil); err == nil {
+		_ = lease.Release()
+		t.Fatal("child attached to a lease whose member cancellation was pending")
+	}
+	close(resume)
+	if err := <-done; err != nil {
+		t.Fatalf("CancelLease: %v", err)
+	}
+}
+
+func TestChildAttachRejectsPreviouslyCancelledRunID(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{
+		Home:                  home,
+		FinalizeCancelledRuns: func([]string, string) error { return nil },
+	})
+	cancelled := ensure(t, home, "")
+	mustAcquire(t, cancelled, coreReq("cancelled-child-id", 1))
+	control := ensure(t, home, "")
+	found, err := control.CancelLease(context.Background(), "cancelled-child-id")
+	if err != nil || !found {
+		t.Fatalf("CancelLease = (%v, %v), want found", found, err)
+	}
+
+	parent := ensure(t, home, "")
+	parentLease := mustAcquire(t, parent, coreReq("unrelated-live-parent", 1))
+	attacher := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if lease, err := attacher.Acquire(ctx, wingwire.AdmissionRequest{
+		RunID: "cancelled-child-id", ParentLeaseToken: parentLease.Token,
+	}, nil); err == nil {
+		_ = lease.Release()
+		t.Fatal("cancelled run ID resurrected as a child lease member")
+	}
+}
+
 func TestExplicitCancelFinalizesEverySharedLeaseMemberInOneBatch(t *testing.T) {
 	home := shortHome(t)
 	finalized := make(chan []string, 1)
