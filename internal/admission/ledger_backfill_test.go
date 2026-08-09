@@ -158,6 +158,70 @@ func TestPriority_PromotesHighPriorityWaiterBeforeLowerPriorityQueue(t *testing.
 	}
 }
 
+func TestOwnerAdmissionRankOrdersEqualPriorityDescendants(t *testing.T) {
+	l := testLedger(t, 1, 0)
+	older := mustGrant(t, l, Request{ID: "owner-older"})
+	newer := mustGrant(t, l, Request{ID: "owner-newer"})
+	holder := mustGrant(t, l, Request{ID: "holder", Cores: 1})
+
+	if pos := mustQueue(t, l, Request{ID: "newer-child", OwnerID: "owner-newer", Cores: 1}); pos != 0 {
+		t.Fatalf("newer child position = %d, want 0", pos)
+	}
+	if pos := mustQueue(t, l, Request{ID: "older-child", OwnerID: "owner-older", Cores: 1}); pos != 0 {
+		t.Fatalf("older child position = %d, want 0 ahead of the newer owner", pos)
+	}
+	if pos := mustQueue(t, l, Request{ID: "older-child-2", OwnerID: "owner-older", Cores: 1}); pos != 1 {
+		t.Fatalf("second older child position = %d, want 1 behind its sibling", pos)
+	}
+
+	snap := l.Snapshot()
+	if len(snap.Waiters) != 3 || snap.Waiters[0].RequestID != "older-child" ||
+		snap.Waiters[1].RequestID != "older-child-2" || snap.Waiters[2].RequestID != "newer-child" {
+		t.Fatalf("owner-ranked waiters = %+v", snap.Waiters)
+	}
+	if snap.Waiters[0].OwnerID != "owner-older" || snap.Waiters[0].OwnerAdmit != snap.Leases[0].Admit {
+		t.Fatalf("older owner identity/rank not persisted: waiter=%+v leases=%+v", snap.Waiters[0], snap.Leases)
+	}
+
+	restored, err := Restore(snap, func() string { return "restored" })
+	if err != nil {
+		t.Fatalf("restore: %v", err)
+	}
+	events := mustRelease(t, restored, holder.ID, "holder")
+	wantKinds(t, events, EventReleased, EventPromoted)
+	if events[1].RequestID != "older-child" {
+		t.Fatalf("first promoted after restore = %q, want older-child", events[1].RequestID)
+	}
+
+	_ = older
+	_ = newer
+}
+
+func TestOwnerAdmissionRankRespectsPriorityAndOwnerlessFIFO(t *testing.T) {
+	l := testLedger(t, 1, 0)
+	mustGrant(t, l, Request{ID: "owner-older"})
+	mustGrant(t, l, Request{ID: "owner-newer"})
+	holder := mustGrant(t, l, Request{ID: "holder", Cores: 1})
+	mustQueue(t, l, Request{ID: "ownerless-first", Cores: 1})
+	mustQueue(t, l, Request{ID: "newer-high", OwnerID: "owner-newer", Cores: 1, Priority: 10})
+	mustQueue(t, l, Request{ID: "older-low", OwnerID: "owner-older", Cores: 1})
+	mustQueue(t, l, Request{ID: "ownerless-second", Cores: 1})
+
+	events := mustRelease(t, l, holder.ID, "holder")
+	wantKinds(t, events, EventReleased, EventPromoted)
+	if events[1].RequestID != "newer-high" {
+		t.Fatalf("first promoted = %q, want higher-priority newer-high", events[1].RequestID)
+	}
+	snap := l.Snapshot()
+	got := []string{snap.Waiters[0].RequestID, snap.Waiters[1].RequestID, snap.Waiters[2].RequestID}
+	want := []string{"older-low", "ownerless-first", "ownerless-second"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("remaining order = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestCancelWaiterPreservesProtectedHeadAdmission(t *testing.T) {
 	l := testLedger(t, 0, 0)
 	older := mustGrant(t, l, Request{ID: "older", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})

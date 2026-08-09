@@ -1466,6 +1466,65 @@ func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
 	}
 }
 
+func TestOwnerRunAdmissionOrderPromotesOlderOwnerDescendant(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
+
+	olderOwnerClient := ensure(t, home, "")
+	olderOwner := mustAcquire(t, olderOwnerClient, wingwire.AdmissionRequest{
+		RunID: "owner-older", SemaphoresOnly: true,
+	})
+	newerOwnerClient := ensure(t, home, "")
+	newerOwner := mustAcquire(t, newerOwnerClient, wingwire.AdmissionRequest{
+		RunID: "owner-newer", SemaphoresOnly: true,
+	})
+	blockerClient := ensure(t, home, "")
+	blocker := mustAcquire(t, blockerClient, wingwire.AdmissionRequest{
+		RunID: "blocker", Resources: wingwire.HostResources{Cores: 4},
+	})
+
+	newerChildClient := ensure(t, home, "")
+	newerPositions, newerResult := acquireAsync(newerChildClient, wingwire.AdmissionRequest{
+		RunID: "newer-child", OwnerRunID: "owner-newer", SubLease: true,
+		Resources: wingwire.HostResources{Cores: 4},
+	})
+	select {
+	case <-newerPositions:
+	case <-time.After(2 * time.Second):
+		t.Fatal("newer child did not queue")
+	}
+
+	olderChildClient := ensure(t, home, "")
+	olderPositions, olderResult := acquireAsync(olderChildClient, wingwire.AdmissionRequest{
+		RunID: "older-child", OwnerRunID: "owner-older", SubLease: true,
+		Resources: wingwire.HostResources{Cores: 4},
+	})
+	select {
+	case q := <-olderPositions:
+		if q.Position != 1 {
+			t.Fatalf("older child position = %d, want 1 ahead of newer owner's child", q.Position)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("older child did not queue")
+	}
+
+	if err := blocker.Release(); err != nil {
+		t.Fatalf("release blocker: %v", err)
+	}
+	first := waitResult(t, olderResult, 2*time.Second)
+	if first.err != nil || first.lease == nil {
+		t.Fatalf("older owner's child was not promoted: lease=%v err=%v", first.lease, first.err)
+	}
+	select {
+	case r := <-newerResult:
+		t.Fatalf("newer owner's child resolved first: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	_ = olderOwner.Release()
+	_ = newerOwner.Release()
+}
+
 func TestMeasuredCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30), HeadroomFraction: -1})
