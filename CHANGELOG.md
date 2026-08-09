@@ -67,6 +67,9 @@ code change to unlock.
 
 ### Fixed
 
+- **queue:** External CPU now subtracts measured live holder process-tree usage
+  instead of reserved lease capacity. Process reuse, overlapping trees, sensor
+  loss, and macOS sampling no longer make queue headroom contradict host load.
 - **queue:** Start-time estimates now remain unknown when an active holder has
   outlived its measured duration, instead of promising immediate admission
   while capacity is still occupied.
