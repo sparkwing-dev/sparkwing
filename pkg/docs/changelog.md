@@ -54,6 +54,19 @@ code change to unlock.
 - **cache:** An in-flight-dedupe follower now runs after its leader fails,
   is cancelled, or otherwise ends without a reusable result. A leader's
   non-success outcome can no longer become the follower's verdict.
+- **local execution:** Same-repository child pipelines execute from the
+  parent's checkout even when repository metadata is inherited. A damaged or
+  missing cross-repository registry no longer blocks that handoff.
+- **orchestrator:** Admission waits pause the dispatch watchdog only for the
+  nodes they cover. Legitimately queued child pipelines no longer time out
+  their parent, while an admitted sibling that stops making progress still
+  reaches the dispatch deadline.
+- **queue telemetry:** Local admission messages identify the run and node for
+  each reported position, so interleaved waiters cannot look like one job
+  moving backward in the queue.
+- **release:** Independent gates finish before the changelog commit, failed
+  releases restore a tidy development module, and Markdown lint uses a pinned
+  self-provisioning command.
 
 ## [v0.23.0] - 2026-08-08
 ### Fixed
