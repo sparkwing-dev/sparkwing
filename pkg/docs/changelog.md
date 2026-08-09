@@ -51,6 +51,10 @@ code change to unlock.
 ## [v0.23.1] - 2026-08-09
 ### Fixed
 
+- **store (Breaking):** The runs-store schema advances from version 11 to 12
+  to persist child-trigger repository provenance. Every process that opens a
+  shared local store must run v0.23.1 or later before the store is migrated.
+  See the [migration guide](docs/migrations/v0.23.1.md#runs-store-schema-moves-to-version-12).
 - **cache:** An in-flight-dedupe follower now runs after its leader fails,
   is cancelled, or otherwise ends without a reusable result. A leader's
   non-success outcome can no longer become the follower's verdict.
