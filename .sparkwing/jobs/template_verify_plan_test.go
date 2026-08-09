@@ -13,6 +13,9 @@ func TestTemplateVerifyPlanBoundsTemplateFanout(t *testing.T) {
 	if err := (TemplateVerify{}).Plan(context.Background(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{}); err != nil {
 		t.Fatal(err)
 	}
+	if hints := plan.ResourceHints(); hints == nil || hints.Cores < 8 {
+		t.Fatalf("template verifier cores = %+v, want at least measured p95 rounded up to 8", hints)
+	}
 
 	count := 0
 	for _, node := range plan.Nodes() {
@@ -31,5 +34,15 @@ func TestTemplateVerifyPlanBoundsTemplateFanout(t *testing.T) {
 	}
 	if count != len(verifyTemplates) {
 		t.Fatalf("bounded templates = %d, want %d", count, len(verifyTemplates))
+	}
+}
+
+func TestRequireTemplateVerifyDisk_FailsBeforeWorkBelowFloor(t *testing.T) {
+	err := requireTemplateVerifyDisk(9 << 30)
+	if err == nil || !strings.Contains(err.Error(), "10 GiB") {
+		t.Fatalf("low-disk preflight = %v, want actionable 10 GiB floor", err)
+	}
+	if err := requireTemplateVerifyDisk(10 << 30); err != nil {
+		t.Fatalf("disk at floor rejected: %v", err)
 	}
 }
