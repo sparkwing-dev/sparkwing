@@ -359,9 +359,14 @@ type admissionWaitDetail struct {
 	WaitingNodes int `json:"-"`
 }
 
+type activeAdmissionWait struct {
+	detail    admissionWaitDetail
+	requestID string
+}
+
 func latestAdmissionWait(ctx context.Context, b backend.Backend, runID string) (admissionWaitDetail, bool) {
 	const rootParticipant = "\x00root"
-	waits := map[string]admissionWaitDetail{}
+	waits := map[string]activeAdmissionWait{}
 	legacyWaits := map[string]bool{}
 	var after int64
 	for {
@@ -392,7 +397,10 @@ func latestAdmissionWait(ctx context.Context, b backend.Backend, runID string) (
 			}
 			switch event.Kind {
 			case "admission_wait":
-				waits[participant] = admissionWaitDetail{Position: payload.Position, QueueLength: payload.QueueLength}
+				waits[participant] = activeAdmissionWait{
+					detail:    admissionWaitDetail{Position: payload.Position, QueueLength: payload.QueueLength},
+					requestID: payload.RequestID,
+				}
 				if eventNodeID == "" && payload.RequestID != "" && participant != rootParticipant {
 					legacyWaits[participant] = true
 				}
@@ -405,13 +413,16 @@ func latestAdmissionWait(ctx context.Context, b backend.Backend, runID string) (
 					}
 					continue
 				}
-				delete(waits, participant)
-				delete(legacyWaits, participant)
+				wait, ok := waits[participant]
+				if ok && (payload.RequestID == "" || wait.requestID == payload.RequestID) {
+					delete(waits, participant)
+					delete(legacyWaits, participant)
+				}
 			}
 		}
 	}
 	if root, ok := waits[rootParticipant]; ok {
-		return root, true
+		return root.detail, true
 	}
 	if len(waits) == 0 {
 		return admissionWaitDetail{}, false
