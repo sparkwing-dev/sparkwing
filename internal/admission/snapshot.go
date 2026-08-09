@@ -29,6 +29,8 @@ type Snapshot struct {
 type LeaseState struct {
 	Seq         uint64       `json:"seq"`
 	Admit       uint64       `json:"admit,omitempty"`
+	OwnerID     string       `json:"owner_id,omitempty"`
+	OwnerAdmit  uint64       `json:"owner_admit,omitempty"`
 	ID          LeaseID      `json:"id"`
 	Token       string       `json:"token"`
 	RequestID   string       `json:"request_id"`
@@ -71,6 +73,8 @@ type HoldState struct {
 type WaiterState struct {
 	Arrival       uint64       `json:"arrival"`
 	Admit         uint64       `json:"admit,omitempty"`
+	OwnerID       string       `json:"owner_id,omitempty"`
+	OwnerAdmit    uint64       `json:"owner_admit,omitempty"`
 	BackfillCount uint64       `json:"backfill_count,omitempty"`
 	RequestID     string       `json:"request_id"`
 	Priority      int          `json:"priority,omitempty"`
@@ -108,6 +112,8 @@ func (l *Ledger) Snapshot() Snapshot {
 		snap.Leases = append(snap.Leases, LeaseState{
 			Seq:         le.seq,
 			Admit:       le.admit,
+			OwnerID:     le.ownerID,
+			OwnerAdmit:  le.ownerAdmit,
 			ID:          le.id,
 			Token:       le.token,
 			RequestID:   le.requestID,
@@ -142,6 +148,8 @@ func (l *Ledger) Snapshot() Snapshot {
 		snap.Waiters = append(snap.Waiters, WaiterState{
 			Arrival:       w.arrival,
 			Admit:         w.spec.admit,
+			OwnerID:       w.spec.ownerID,
+			OwnerAdmit:    w.spec.ownerAdmit,
 			BackfillCount: w.backfillCount,
 			RequestID:     w.spec.id,
 			Priority:      w.spec.priority,
@@ -230,9 +238,15 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 	if err != nil {
 		return fmt.Errorf("%w: lease %s: %v", ErrInvalidSnapshot, ls.ID, err)
 	}
+	ownerAdmit := ls.OwnerAdmit
+	if ownerAdmit == 0 {
+		ownerAdmit = ls.Admit
+	}
 	le := &lease{
 		seq:         ls.Seq,
 		admit:       ls.Admit,
+		ownerID:     ls.OwnerID,
+		ownerAdmit:  ownerAdmit,
 		id:          ls.ID,
 		token:       ls.Token,
 		requestID:   ls.RequestID,
@@ -298,12 +312,18 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 	if err != nil {
 		return fmt.Errorf("%w: waiter %q: %v", ErrInvalidSnapshot, ws.RequestID, err)
 	}
+	ownerAdmit := ws.OwnerAdmit
+	if ownerAdmit == 0 {
+		ownerAdmit = ws.Admit
+	}
 	l.waiters = append(l.waiters, &waiter{
 		arrival:       ws.Arrival,
 		backfillCount: ws.BackfillCount,
 		spec: spec{
 			id:          ws.RequestID,
 			admit:       ws.Admit,
+			ownerID:     ws.OwnerID,
+			ownerAdmit:  ownerAdmit,
 			priority:    ws.Priority,
 			milliCores:  ws.MilliCores,
 			softCores:   ws.SoftCores,

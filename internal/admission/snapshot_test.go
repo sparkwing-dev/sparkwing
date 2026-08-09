@@ -155,6 +155,8 @@ func TestRestore_RejectsCorruptSnapshots(t *testing.T) {
 		{"waiter above total memory", func(s *Snapshot) { s.Waiters[1].MemoryBytes = s.TotalMemoryBytes + 1 }},
 		{"waiter with duplicate claims", func(s *Snapshot) { s.Waiters[1].Claims = append(s.Waiters[1].Claims, s.Waiters[1].Claims[0]) }},
 		{"waiter arrivals out of order", func(s *Snapshot) {
+			s.Waiters[1].OwnerID = s.Waiters[0].OwnerID
+			s.Waiters[1].OwnerAdmit = s.Waiters[0].OwnerAdmit
 			s.Waiters[0].Arrival, s.Waiters[1].Arrival = s.Waiters[1].Arrival, s.Waiters[0].Arrival
 		}},
 		{"waiter arrival above counter", func(s *Snapshot) { s.Waiters[1].Arrival = s.ArrivalSeq + 1 }},

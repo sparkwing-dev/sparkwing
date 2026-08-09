@@ -30,10 +30,13 @@ func TestChargedResources(t *testing.T) {
 }
 
 func TestRequestFromWire(t *testing.T) {
-	req := requestFromWire("r1", wingwire.HostResources{Cores: 1.5, MemoryBytes: 2048},
+	req := requestFromWire("r1", "owner", wingwire.HostResources{Cores: 1.5, MemoryBytes: 2048},
 		[]wingwire.SemaphoreClaim{{Name: "k", Capacity: 3, Cost: 2, Policy: wingwire.PolicyCancelOthers}}, "", 7)
 	if req.ID != "r1" || req.Cores != 1.5 || req.MemoryBytes != 2048 {
 		t.Fatalf("host fields wrong: %+v", req)
+	}
+	if req.OwnerID != "owner" {
+		t.Fatalf("owner id = %q, want owner", req.OwnerID)
 	}
 	if req.Priority != 7 {
 		t.Fatalf("priority = %d, want 7", req.Priority)
@@ -59,7 +62,7 @@ func TestRequestFromWire_ProfiledCoresAreSoft(t *testing.T) {
 		wingwire.CostSourceMeasuring, wingwire.CostSourceFloor,
 	}
 	for _, source := range autoMeasured {
-		req := requestFromWire("r1", wingwire.HostResources{Cores: 1.5}, nil, source, 0)
+		req := requestFromWire("r1", "", wingwire.HostResources{Cores: 1.5}, nil, source, 0)
 		if !req.SoftCores {
 			t.Fatalf("%s core request should use CPU as backpressure", source)
 		}
@@ -67,7 +70,7 @@ func TestRequestFromWire_ProfiledCoresAreSoft(t *testing.T) {
 			t.Fatalf("%s core request should not be a strict pin", source)
 		}
 	}
-	req := requestFromWire("r1", wingwire.HostResources{Cores: 1.5}, nil, wingwire.CostSourcePin, 0)
+	req := requestFromWire("r1", "", wingwire.HostResources{Cores: 1.5}, nil, wingwire.CostSourcePin, 0)
 	if req.SoftCores || !req.StrictCores {
 		t.Fatalf("pinned core request = soft %v strict %v, want hard strict", req.SoftCores, req.StrictCores)
 	}
@@ -91,6 +94,7 @@ func TestValidCostSource_AcceptsEveryResolvedSource(t *testing.T) {
 func TestRequestFromWaiter_RoundTrips(t *testing.T) {
 	w := admission.WaiterState{
 		RequestID:   "w",
+		OwnerID:     "owner",
 		Priority:    9,
 		MilliCores:  2500,
 		SoftCores:   true,
@@ -104,6 +108,9 @@ func TestRequestFromWaiter_RoundTrips(t *testing.T) {
 	}
 	if req.Priority != 9 {
 		t.Fatalf("priority = %d, want 9", req.Priority)
+	}
+	if req.OwnerID != "owner" {
+		t.Fatalf("owner id = %q, want owner", req.OwnerID)
 	}
 	if len(req.Semaphores) != 1 || req.Semaphores[0].Key != "k" {
 		t.Fatalf("claims wrong: %+v", req.Semaphores)

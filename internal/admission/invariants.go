@@ -216,6 +216,9 @@ func waiterLess(a, b *waiter) bool {
 	if a.spec.priority != b.spec.priority {
 		return a.spec.priority > b.spec.priority
 	}
+	if a.spec.ownerAdmit != b.spec.ownerAdmit {
+		return a.spec.ownerAdmit < b.spec.ownerAdmit
+	}
 	return a.arrival < b.arrival
 }
 

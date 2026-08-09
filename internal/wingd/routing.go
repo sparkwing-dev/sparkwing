@@ -231,6 +231,7 @@ func (d *Daemon) cancelWaiterLocked(runID string) []admission.Event {
 func requestFromWaiter(w admission.WaiterState) admission.Request {
 	req := admission.Request{
 		ID:          w.RequestID,
+		OwnerID:     w.OwnerID,
 		Priority:    w.Priority,
 		Cores:       float64(w.MilliCores) / 1000.0,
 		SoftCores:   w.SoftCores,

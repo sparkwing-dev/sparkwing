@@ -544,9 +544,10 @@ func softCoreCostSource(costSource wingwire.CostSource) bool {
 	}
 }
 
-func requestFromWire(runID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int) admission.Request {
+func requestFromWire(runID, ownerRunID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int) admission.Request {
 	req := admission.Request{
 		ID:          runID,
+		OwnerID:     ownerRunID,
 		Priority:    priority,
 		Cores:       res.Cores,
 		SoftCores:   softCoreCostSource(costSource),
@@ -678,7 +679,7 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	} else {
 		charged, pinClamped = d.clampHostChargeLocked(charged, req.CostSource)
 	}
-	ar := requestFromWire(req.RunID, charged, req.Semaphores, req.CostSource, req.Priority)
+	ar := requestFromWire(req.RunID, req.OwnerRunID, charged, req.Semaphores, req.CostSource, req.Priority)
 	c.runID = req.RunID
 	c.ownerRunID = req.OwnerRunID
 	c.displayRunID = req.DisplayRunID

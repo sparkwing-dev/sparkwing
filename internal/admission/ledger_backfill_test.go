@@ -192,6 +192,15 @@ func TestOwnerAdmissionRankOrdersEqualPriorityDescendants(t *testing.T) {
 	if events[1].RequestID != "older-child" {
 		t.Fatalf("first promoted after restore = %q, want older-child", events[1].RequestID)
 	}
+	var promoted LeaseState
+	for _, lease := range restored.Snapshot().Leases {
+		if lease.RequestID == "older-child" {
+			promoted = lease
+		}
+	}
+	if promoted.OwnerID != "owner-older" || promoted.OwnerAdmit != snap.Leases[0].Admit {
+		t.Fatalf("promoted lease lost owner identity/rank: %+v", promoted)
+	}
 
 	_ = older
 	_ = newer
