@@ -48,6 +48,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.23.1] - 2026-08-09
 ### Fixed
 
 - **cache:** An in-flight-dedupe follower now runs after its leader fails,
