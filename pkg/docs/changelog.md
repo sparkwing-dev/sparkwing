@@ -56,7 +56,9 @@ code change to unlock.
   non-success outcome can no longer become the follower's verdict.
 - **local execution:** Same-repository child pipelines execute from the
   parent's checkout even when repository metadata is inherited. A damaged or
-  missing cross-repository registry no longer blocks that handoff.
+  missing cross-repository registry no longer blocks that handoff. The
+  exported `store.Trigger.RepoInherited` field records that routing provenance
+  for trigger backends.
 - **orchestrator:** Admission waits pause the dispatch watchdog only for the
   nodes they cover. Legitimately queued child pipelines no longer time out
   their parent, while an admitted sibling that stops making progress still
