@@ -67,6 +67,9 @@ code change to unlock.
 
 ### Fixed
 
+- **queue:** Start-time estimates now remain unknown when an active holder has
+  outlived its measured duration, instead of promising immediate admission
+  while capacity is still occupied.
 - **release:** Self-release validation now requires an isolated
   `SPARKWING_HOME`, preventing a prerelease binary with a newer embedded schema
   from migrating the operational runs store before installed readers upgrade.
