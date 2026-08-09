@@ -354,13 +354,14 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 }
 
 type admissionWaitDetail struct {
-	Position    int `json:"position"`
-	QueueLength int `json:"queue_length"`
+	Position     int `json:"position"`
+	QueueLength  int `json:"queue_length"`
+	WaitingNodes int `json:"-"`
 }
 
 func latestAdmissionWait(ctx context.Context, b backend.Backend, runID string) (admissionWaitDetail, bool) {
-	var detail admissionWaitDetail
-	waiting := false
+	const rootParticipant = "\x00root"
+	waits := map[string]admissionWaitDetail{}
 	var after int64
 	for {
 		events, err := b.ListEventsAfter(ctx, runID, after, 500)
@@ -372,26 +373,42 @@ func latestAdmissionWait(ctx context.Context, b backend.Backend, runID string) (
 		}
 		for _, event := range events {
 			after = event.Seq
+			participant := event.NodeID
+			var payload struct {
+				Position    int    `json:"position"`
+				QueueLength int    `json:"queue_length"`
+				RequestID   string `json:"request_id"`
+			}
+			if len(event.Payload) > 0 {
+				_ = json.Unmarshal(event.Payload, &payload)
+				if participant == "" {
+					participant = payload.RequestID
+				}
+			}
+			if participant == "" || participant == runID {
+				participant = rootParticipant
+			}
 			switch event.Kind {
 			case "admission_wait":
-				waiting = true
-				detail = admissionWaitDetail{}
-				if len(event.Payload) > 0 {
-					_ = json.Unmarshal(event.Payload, &detail)
-				}
+				waits[participant] = admissionWaitDetail{Position: payload.Position, QueueLength: payload.QueueLength}
 			case "admission_granted", "admission_cancelled", "admission_queue_timeout":
-				waiting = false
-				detail = admissionWaitDetail{}
+				delete(waits, participant)
 			}
 		}
 	}
-	if !waiting {
+	if root, ok := waits[rootParticipant]; ok {
+		return root, true
+	}
+	if len(waits) == 0 {
 		return admissionWaitDetail{}, false
 	}
-	return detail, true
+	return admissionWaitDetail{WaitingNodes: len(waits)}, true
 }
 
 func (d admissionWaitDetail) listStatus() string {
+	if d.WaitingNodes > 0 {
+		return fmt.Sprintf("running (%d admission-waiting)", d.WaitingNodes)
+	}
 	if d.Position > 0 && d.QueueLength > 0 {
 		return fmt.Sprintf("queued (%d/%d)", d.Position, d.QueueLength)
 	}
@@ -399,6 +416,12 @@ func (d admissionWaitDetail) listStatus() string {
 }
 
 func (d admissionWaitDetail) statusLine() string {
+	if d.WaitingNodes == 1 {
+		return "1 node waiting for local admission"
+	}
+	if d.WaitingNodes > 1 {
+		return fmt.Sprintf("%d nodes waiting for local admission", d.WaitingNodes)
+	}
 	if d.Position > 0 && d.QueueLength > 0 {
 		return fmt.Sprintf("queued for local admission (position %d of %d)", d.Position, d.QueueLength)
 	}

@@ -517,12 +517,12 @@ func (la *LocalAdmission) acquireBlocking(
 	if err != nil {
 		cl.Close()
 		if cause := context.Cause(acquireCtx); cause != nil && ctx.Err() == nil {
-			appendPlanEvent(ctx, backends, runID, "admission_queue_timeout", nil)
+			appendAdmissionEvent(ctx, backends, runID, req.RunID, "admission_queue_timeout", nil)
 			return nil, admitProceed, cause
 		}
 		var cancelErr *wingdclient.CancelledError
 		if errors.As(err, &cancelErr) {
-			appendPlanEvent(ctx, backends, runID, "admission_cancelled", nil)
+			appendAdmissionEvent(ctx, backends, runID, req.RunID, "admission_cancelled", nil)
 			reason := cancelErr.Reason
 			if reason == "" {
 				reason = "cancelled via the admission daemon"
@@ -544,7 +544,7 @@ func (la *LocalAdmission) acquireBlocking(
 		return nil, admitProceed, fmt.Errorf("local admission: %w", err)
 	}
 	if reporter.waited() {
-		appendPlanEvent(ctx, backends, runID, "admission_granted", nil)
+		appendAdmissionEvent(ctx, backends, runID, req.RunID, "admission_granted", nil)
 		if la.Delegate != nil {
 			la.Delegate.Emit(sparkwing.LogRecord{
 				TS:    time.Now(),
@@ -640,7 +640,7 @@ func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, r
 		q.Position, q.QueueLength, ahead, noun, displayID, reason)
 	fmt.Fprintln(la.out(), msg)
 	payload := fmt.Appendf(nil, `{"position":%d,"queue_length":%d,"request_id":%q,"display_id":%q}`, q.Position, q.QueueLength, requestID, displayID)
-	appendPlanEvent(ctx, backends, runID, "admission_wait", payload)
+	appendAdmissionEvent(ctx, backends, runID, requestID, "admission_wait", payload)
 	if la.Delegate != nil {
 		la.Delegate.Emit(sparkwing.LogRecord{
 			TS:    time.Now(),
@@ -655,6 +655,13 @@ func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, r
 			},
 		})
 	}
+}
+
+func appendAdmissionEvent(ctx context.Context, backends Backends, runID, participantID, kind string, payload []byte) {
+	if backends.State == nil {
+		return
+	}
+	_ = backends.State.AppendEvent(ctx, runID, participantID, kind, payload)
 }
 
 // reportStillQueued re-emits the last-known position as a heartbeat,
