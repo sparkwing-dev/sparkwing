@@ -3,6 +3,9 @@ package wingd
 import (
 	"math"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestSimulateQueue_ETA(t *testing.T) {
@@ -107,6 +110,23 @@ func TestRemainingMS_OverdueHolderDoesNotPromiseImmediateRelease(t *testing.T) {
 			t.Errorf("remainingMS(10000, %d) = %v, want +Inf: a holder at or past its estimate is still active", elapsed, got)
 		}
 	}
+}
+
+func TestETAOverflowIsUnknown(t *testing.T) {
+	huge := int64(^uint64(0) >> 1)
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{{RunID: "holder", Resources: wingwire.HostResources{Cores: 1}, ExpectedDurationMS: huge}},
+		Waiters: []wingwire.Waiter{{RunID: "waiter", Resources: wingwire.HostResources{Cores: 1}, ExpectedDurationMS: huge}},
+	}
+	snap := admission.Snapshot{
+		TotalMilliCores:    1000,
+		HeadroomMilliCores: 1000,
+		Leases:             []admission.LeaseState{{ID: "lease", RequestID: "holder", MilliCores: 1000}},
+		Waiters:            []admission.WaiterState{{RequestID: "waiter", MilliCores: 1000}},
+	}
+	annotateETA(&qs, snap)
+	assertETA(t, "ExpectedStartMS", qs.Waiters[0].ExpectedStartMS, semaNone)
+	assertETA(t, "ExpectedClearMS", qs.ExpectedClearMS, semaNone)
 }
 
 func approxEqInf(a, b float64) bool {
