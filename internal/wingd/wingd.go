@@ -166,6 +166,9 @@ type Config struct {
 	// FinalizeCancelledRuns atomically records every run sharing a cancelled
 	// lease before the daemon acknowledges or signals the cancellation.
 	FinalizeCancelledRuns func(runIDs []string, reason string) error
+	// IsRunTerminal checks the durable run authority before admitting an ID
+	// that is not present in the daemon's bounded cancellation cache.
+	IsRunTerminal func(runID string) (bool, error)
 	// Logf, when set, receives one-line operational messages. Nil
 	// discards them.
 	Logf func(format string, args ...any)

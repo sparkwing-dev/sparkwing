@@ -55,6 +55,7 @@ func runWingdCLI(args []string) error {
 		BudgetOrigin:          resolvedBudget.Origin,
 		FinalizeRun:           NewOrphanRunFinalizer(*home),
 		FinalizeCancelledRuns: NewCancelledRunsFinalizer(*home),
+		IsRunTerminal:         NewTerminalRunChecker(*home),
 		Logf: func(format string, a ...any) {
 			fmt.Fprintf(os.Stderr, "%s wingd: %s\n",
 				time.Now().Format(time.RFC3339), fmt.Sprintf(format, a...))
@@ -90,6 +91,38 @@ func NewOrphanRunFinalizer(home string) func(runID string) {
 func NewCancelledRunsFinalizer(home string) func([]string, string) error {
 	return func(runIDs []string, reason string) error {
 		return finalizeRuns(home, runIDs, reason)
+	}
+}
+
+func NewTerminalRunChecker(home string) func(string) (bool, error) {
+	return func(runID string) (bool, error) {
+		p := PathsAt(home)
+		if home == "" {
+			var err error
+			p, err = DefaultPaths()
+			if err != nil {
+				return false, err
+			}
+		}
+		if _, err := os.Stat(p.StateDB()); err != nil {
+			if os.IsNotExist(err) {
+				return false, nil
+			}
+			return false, err
+		}
+		st, err := store.Open(p.StateDB())
+		if err != nil {
+			return false, err
+		}
+		defer func() { _ = st.Close() }()
+		run, err := st.GetRun(context.Background(), runID)
+		if errors.Is(err, store.ErrNotFound) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return isTerminalStatus(run.Status), nil
 	}
 }
 

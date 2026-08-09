@@ -41,6 +41,9 @@ type Daemon struct {
 	events eventWindow
 
 	mu                  sync.Mutex
+	persistMu           sync.Mutex
+	persistedEventSeq   uint64
+	persistWrite        func(string, admission.Snapshot, []admissionEvent, []string) error
 	ledger              *admission.Ledger
 	conns               map[*conn]struct{}
 	byRun               map[string]*conn
@@ -633,6 +636,22 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		d.rejectInvalid(c, req, rejectCauseCostSource, fmt.Sprintf(
 			"admission request invalid: unrecognized cost source %q; pin resources explicitly with plan.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n)), or upgrade this box's sparkwing so its daemon knows the source",
 			req.CostSource))
+		return
+	}
+	d.mu.Lock()
+	_, cancelled := d.cancelledRuns[req.RunID]
+	d.mu.Unlock()
+	if !cancelled && d.cfg.IsRunTerminal != nil {
+		var err error
+		cancelled, err = d.cfg.IsRunTerminal(req.RunID)
+		if err != nil {
+			d.cfg.logf("admission: terminal check for %s: %v", req.RunID, err)
+			_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "terminal-check", Policy: wingwire.PolicyFail})
+			return
+		}
+	}
+	if cancelled {
+		_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "cancelled", Policy: wingwire.PolicyFail})
 		return
 	}
 	if req.ParentLeaseToken != "" {
@@ -1255,10 +1274,9 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
 	d.mu.Unlock()
-	if err := d.persistState(snap); err != nil {
-		d.cfg.logf("cancel: persist tombstone: %v", err)
-		c.close()
-		return
+	persistErr := d.persistState(snap)
+	if persistErr != nil {
+		d.cfg.logf("cancel: persist tombstone: %v", persistErr)
 	}
 	for owner, runID := range current {
 		d.cfg.logf("cancel: signalling run %s to wind down", runID)
@@ -1266,6 +1284,10 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 			c.close()
 			return
 		}
+	}
+	if persistErr != nil {
+		c.close()
+		return
 	}
 	for _, dl := range deliveries {
 		if err := dl.c.send(dl.msg); err != nil {
@@ -1416,10 +1438,23 @@ func (d *Daemon) recordCancelledRunLocked(runID string) {
 }
 
 func (d *Daemon) persistState(snap admission.Snapshot) error {
+	d.persistMu.Lock()
+	defer d.persistMu.Unlock()
+	if snap.EventSeq < d.persistedEventSeq {
+		return nil
+	}
 	d.mu.Lock()
 	cancelledRuns := append([]string(nil), d.cancelledRunOrder...)
 	d.mu.Unlock()
-	return writeStateWithCancellations(d.layout.state, snap, d.events.snapshot(d.now()), cancelledRuns)
+	write := d.persistWrite
+	if write == nil {
+		write = writeStateWithCancellations
+	}
+	if err := write(d.layout.state, snap, d.events.snapshot(d.now()), cancelledRuns); err != nil {
+		return err
+	}
+	d.persistedEventSeq = snap.EventSeq
+	return nil
 }
 
 // Stable cause labels for malformed-request rejections, aggregated in the

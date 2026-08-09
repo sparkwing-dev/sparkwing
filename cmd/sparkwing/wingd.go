@@ -68,6 +68,7 @@ func runWingdRun(args []string) error {
 		BudgetOrigin:          resolvedBudget.Origin,
 		FinalizeRun:           orchestrator.NewOrphanRunFinalizer(*home),
 		FinalizeCancelledRuns: orchestrator.NewCancelledRunsFinalizer(*home),
+		IsRunTerminal:         orchestrator.NewTerminalRunChecker(*home),
 		Logf:                  func(format string, args ...any) { logger.Printf(format, args...) },
 	})
 	if err != nil {
