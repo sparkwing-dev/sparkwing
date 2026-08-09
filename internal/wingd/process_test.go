@@ -268,27 +268,35 @@ func TestProcess_SelfSpawnedDaemonWritesLogFile(t *testing.T) {
 	}
 }
 
-// TestProcess_DaemonKillRestoresAndReattaches SIGKILLs the daemon, then a
-// client reclaims its surviving lease from a fresh daemon within the
-// grace window.
+// TestProcess_DaemonKillRestoresAndReattaches SIGKILLs the daemon and proves
+// the surviving holder reclaims its lease from the successor. A second token
+// claimant would compete with the holder rather than exercise holder recovery.
 func TestProcess_DaemonKillRestoresAndReattaches(t *testing.T) {
 	if testing.Short() {
 		t.Skip("process test skipped in -short")
 	}
 	home := shortHome(t)
 	a := startProc(t, "hold", "--home", home, "--run", "a", "--cores", "0.5",
-		"--daemon-grace-ms", "4000", "--daemon-idle-ms", "3000")
-	token := a.waitOK(10 * time.Second)
+		"--daemon-grace-ms", "500", "--daemon-idle-ms", "3000")
+	a.waitOK(10 * time.Second)
 
 	dpid := readDaemonPid(t, home)
 	if err := syscall.Kill(dpid, syscall.SIGKILL); err != nil {
 		t.Fatalf("kill daemon %d: %v", dpid, err)
 	}
 
-	r := startProc(t, "reattach", "--home", home, "--token", token,
-		"--daemon-grace-ms", "4000", "--daemon-idle-ms", "3000")
-	reclaimed := r.waitOK(10 * time.Second)
-	if reclaimed != token {
-		t.Fatalf("reattached token %q, want %q", reclaimed, token)
+	deadline := time.Now().Add(10 * time.Second)
+	for daemonLineCount(t, home) < 2 && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
 	}
+	if daemonLineCount(t, home) < 2 {
+		t.Fatal("successor daemon was not elected")
+	}
+
+	// A restored lease that was not reclaimed would expire after this window.
+	time.Sleep(750 * time.Millisecond)
+	if err := a.cmd.Process.Signal(syscall.Signal(0)); err != nil {
+		t.Fatalf("original holder exited instead of reclaiming its lease: %v", err)
+	}
+	waitForHolder(t, home, "a")
 }
