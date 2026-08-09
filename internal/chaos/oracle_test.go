@@ -2,6 +2,7 @@ package chaos
 
 import (
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
@@ -80,6 +81,13 @@ func TestCheckOSTruth_LeakGatedByStability(t *testing.T) {
 	}
 	if v := checkOSTruth(qs, live, known, true); len(v) != 1 {
 		t.Fatalf("leak must flag once stable, got %v", v)
+	}
+}
+
+func TestDaemonGraceStable_RejectsFreshTakeover(t *testing.T) {
+	qs := wingwire.QueueState{DaemonUptimeMS: 61}
+	if daemonGraceStable(qs, 2500*time.Millisecond, 500*time.Millisecond) {
+		t.Fatal("fresh successor was treated as past its restored-lease grace window")
 	}
 }
 
