@@ -253,6 +253,70 @@ func TestAtomicMultiKeyETAAllowsBackfillWithoutPartialReservation(t *testing.T) 
 	assertETA(t, "ExpectedClearMS", qs.ExpectedClearMS, 15000)
 }
 
+func TestJointETAAllowsHostBackfill(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{{RunID: "holder", Resources: wingwire.HostResources{Cores: 3}, ExpectedDurationMS: 10000}},
+		Waiters: []wingwire.Waiter{
+			{RunID: "large", Resources: wingwire.HostResources{Cores: 4}, ExpectedDurationMS: 5000},
+			{RunID: "small", Resources: wingwire.HostResources{Cores: 1}, ExpectedDurationMS: 2000},
+		},
+	}
+	snap := admission.Snapshot{
+		TotalMilliCores: 4000, HeadroomMilliCores: 4000,
+		Leases: []admission.LeaseState{{ID: "holder", RequestID: "holder", Admit: 1, MilliCores: 3000}},
+		Waiters: []admission.WaiterState{
+			{RequestID: "large", Admit: 2, MilliCores: 4000},
+			{RequestID: "small", Admit: 3, MilliCores: 1000},
+		},
+	}
+	annotateETA(&qs, snap)
+	annotateSemaphoreETA(&qs, snap)
+	assertETA(t, "large ExpectedStartMS", qs.Waiters[0].ExpectedStartMS, 10000)
+	assertETA(t, "small ExpectedStartMS", qs.Waiters[1].ExpectedStartMS, 0)
+	assertETA(t, "ExpectedClearMS", qs.ExpectedClearMS, 15000)
+}
+
+func TestJointETAUsesExactLargeResourceBudgets(t *testing.T) {
+	const boundary = int64(1 << 53)
+	for _, tc := range []struct {
+		name string
+		qs   wingwire.QueueState
+		snap admission.Snapshot
+	}{
+		{
+			name: "memory",
+			qs: wingwire.QueueState{
+				Holders: []wingwire.Holder{{RunID: "holder", Resources: wingwire.HostResources{MemoryBytes: boundary + 1}, ExpectedDurationMS: 7000}},
+				Waiters: []wingwire.Waiter{{RunID: "waiter", Resources: wingwire.HostResources{MemoryBytes: 2}, ExpectedDurationMS: 1000}},
+			},
+			snap: admission.Snapshot{
+				TotalMemoryBytes: uint64(boundary + 2), HeadroomMemoryBytes: uint64(boundary + 2),
+				Leases:  []admission.LeaseState{{ID: "holder", RequestID: "holder", Admit: 1, MemoryBytes: uint64(boundary + 1)}},
+				Waiters: []admission.WaiterState{{RequestID: "waiter", Admit: 2, MemoryBytes: 2}},
+			},
+		},
+		{
+			name: "semaphore",
+			qs: wingwire.QueueState{
+				Holders: []wingwire.Holder{{RunID: "holder", Semaphores: []string{"pool"}, ExpectedDurationMS: 7000}},
+				Waiters: []wingwire.Waiter{{RunID: "waiter", Semaphores: []string{"pool"}, ExpectedDurationMS: 1000}},
+			},
+			snap: admission.Snapshot{
+				Leases:     []admission.LeaseState{{ID: "holder", RequestID: "holder", Admit: 1, Claims: []admission.ClaimState{{Key: "pool", Capacity: int(boundary + 2), Cost: int(boundary + 1)}}}},
+				Semaphores: []admission.SemaphoreState{semState("pool", int(boundary+2), semHold("holder", int(boundary+2), int(boundary+1)))},
+				Waiters:    []admission.WaiterState{{RequestID: "waiter", Admit: 2, Claims: []admission.ClaimState{{Key: "pool", Capacity: int(boundary + 2), Cost: 2}}}},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			annotateETA(&tc.qs, tc.snap)
+			annotateSemaphoreETA(&tc.qs, tc.snap)
+			assertETA(t, "ExpectedStartMS", tc.qs.Waiters[0].ExpectedStartMS, 7000)
+			assertETA(t, "ExpectedClearMS", tc.qs.ExpectedClearMS, 8000)
+		})
+	}
+}
+
 func assertETA(t *testing.T, field string, got *int64, want int64) {
 	t.Helper()
 	if want == semaNone {
