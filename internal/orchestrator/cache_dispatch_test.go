@@ -225,6 +225,26 @@ func (unboundedAwaitParentPipe) Plan(
 	return nil
 }
 
+type explicitTimeoutAwaitParentPipe struct{ sparkwing.Base }
+
+func (explicitTimeoutAwaitParentPipe) Plan(
+	_ context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	_ sparkwing.RunContext,
+) error {
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](
+			ctx,
+			"plan-level-queued-await-child",
+			"work",
+			sparkwing.WithFreshTimeout(3*time.Second),
+		)
+		return err
+	})
+	return nil
+}
+
 type planLevelQueuedAwaitThenContinueParentPipe struct{ sparkwing.Base }
 
 func (planLevelQueuedAwaitThenContinueParentPipe) Plan(
@@ -459,6 +479,9 @@ func init() {
 	})
 	register("unbounded-await-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return &unboundedAwaitParentPipe{}
+	})
+	register("explicit-timeout-await-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &explicitTimeoutAwaitParentPipe{}
 	})
 	register("plan-level-queued-await-then-continue-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return &planLevelQueuedAwaitThenContinueParentPipe{}
@@ -872,6 +895,19 @@ func TestConcurrency_PlanLevelEvictedBeforeDispatchCancelsRun(t *testing.T) {
 }
 
 func TestConcurrency_RunAndAwaitParentTimeoutDoesNotCountChildPlanAdmissionWait(t *testing.T) {
+	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "plan-level-queued-await-parent", 100*time.Millisecond)
+}
+
+func TestConcurrency_RunAndAwaitExplicitTimeoutProtectsParentDispatch(t *testing.T) {
+	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "explicit-timeout-await-parent", 100*time.Millisecond)
+}
+
+func TestConcurrency_RunAndAwaitUnboundedClaimedChildAdmissionProtectsParentDispatch(t *testing.T) {
+	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "unbounded-await-parent", 750*time.Millisecond)
+}
+
+func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeline string, dispatchTimeout time.Duration) {
+	t.Helper()
 	resetCacheCounter()
 	p := newPaths(t)
 	ctx := context.Background()
@@ -898,9 +934,9 @@ func TestConcurrency_RunAndAwaitParentTimeoutDoesNotCountChildPlanAdmissionWait(
 	parentDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
-			Pipeline:            "plan-level-queued-await-parent",
+			Pipeline:            parentPipeline,
 			RunID:               "queued-await-parent",
-			DispatchWaitTimeout: 100 * time.Millisecond,
+			DispatchWaitTimeout: dispatchTimeout,
 		})
 		parentDone <- res
 	}()
