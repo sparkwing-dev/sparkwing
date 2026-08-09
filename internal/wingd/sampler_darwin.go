@@ -127,6 +127,35 @@ func (s *ownedProcSampler) sampleOwned(roots []int) (float64, bool) {
 	return fraction, true
 }
 
+func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, float64, bool, error) {
+	stat, err := sampleHost()
+	if err != nil {
+		return stat, 0, false, err
+	}
+	snapshot, ok := darwinProcessCPUSnapshot()
+	if !ok {
+		return stat, 0, false, nil
+	}
+	host, hostMeasured, owned, ownedMeasured := darwinCPUFromSnapshot(
+		snapshot,
+		roots,
+		stat.TotalCores,
+	)
+	stat.BusyCores = host
+	stat.CPUMeasured = hostMeasured
+	return stat, owned, ownedMeasured, nil
+}
+
+func darwinProcessCPUSnapshot() (map[int]darwinCPUProcess, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, "ps", "-Ao", "pid=,ppid=,pcpu=").Output()
+	if err != nil {
+		return nil, false
+	}
+	return parseDarwinCPUSnapshot(string(output))
+}
+
 func darwinProcesses() ([]unix.KinfoProc, bool) {
 	raw, err := unix.SysctlRaw("kern.proc.all")
 	if err != nil {
