@@ -582,7 +582,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 11
+const expectedSchemaVersion = 12
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -979,6 +979,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.ensureColumns("pipeline_profiles", pipelineProfilesContendedCols)
 	case 11:
 		return s.ensureColumns("pipeline_profiles", pipelineProfilesVersioningCols)
+	case 12:
+		return s.ensureColumns("triggers", triggerRepoInheritedCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1019,6 +1021,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesContendedCols)
 	case 11:
 		return addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesVersioningCols)
+	case 12:
+		return addColumnsTx(ctx, tx, "triggers", triggerRepoInheritedCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1162,6 +1166,10 @@ var pipelineProfilesVersioningCols = map[string]string{
 	"floor_memory_bytes":     "INTEGER NOT NULL DEFAULT 0",
 	"prev_peak_cores":        "REAL NOT NULL DEFAULT 0",
 	"prev_peak_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
+}
+
+var triggerRepoInheritedCols = map[string]string{
+	"repo_inherited": "INTEGER NOT NULL DEFAULT 0",
 }
 
 func (s *Store) ensureColumnsAll() error {
