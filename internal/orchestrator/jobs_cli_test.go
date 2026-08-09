@@ -159,6 +159,52 @@ func TestListJobs_ShowsLocalAdmissionWait(t *testing.T) {
 	}
 }
 
+func TestListJobs_TracksInterleavedNodeAdmissionWaitsIndependently(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-node-admission-list", Pipeline: "push-checks", Status: "running", StartedAt: time.Now().Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	for _, event := range []struct {
+		node, kind, payload string
+	}{
+		{node: "node-a", kind: "admission_wait", payload: `{"position":2,"queue_length":13}`},
+		{node: "node-b", kind: "admission_wait", payload: `{"position":12,"queue_length":12}`},
+		{node: "node-a", kind: "admission_granted"},
+	} {
+		if _, err := st.AppendEvent(ctx, "run-node-admission-list", event.node, event.kind, []byte(event.payload)); err != nil {
+			t.Fatalf("AppendEvent %s %s: %v", event.node, event.kind, err)
+		}
+	}
+
+	var list bytes.Buffer
+	if err := orchestrator.ListJobs(ctx, p, orchestrator.ListOpts{Limit: 10}, &list); err != nil {
+		t.Fatalf("ListJobs: %v", err)
+	}
+	if !strings.Contains(list.String(), "running (1 admission-waiting)") {
+		t.Fatalf("list should retain node-b's active wait without presenting its position as the run's, got:\n%s", list.String())
+	}
+	if strings.Contains(list.String(), "queued (") {
+		t.Fatalf("node admission must not replace the running run's status with one participant's queue position, got:\n%s", list.String())
+	}
+
+	var status bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, "run-node-admission-list", orchestrator.StatusOpts{}, &status); err != nil {
+		t.Fatalf("JobStatus: %v", err)
+	}
+	if !strings.Contains(status.String(), "admission: 1 node waiting for local admission") {
+		t.Fatalf("status should report the active node count, got:\n%s", status.String())
+	}
+}
+
 func TestListJobs_IgnoresStaleAdmissionWaitForFinishedRun(t *testing.T) {
 	p := newPaths(t)
 	ctx := context.Background()
