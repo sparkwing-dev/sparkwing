@@ -682,14 +682,15 @@ func popEarliest(events *[]simEvent) (simEvent, bool) {
 }
 
 // remainingMS is a holder's estimated milliseconds left: its measured p50
-// minus elapsed, floored at zero. An unmeasured duration is +Inf.
+// minus elapsed. An unmeasured or exhausted duration is +Inf: an active
+// holder has disproved an estimate that says it has already finished.
 func remainingMS(expectedMS, elapsedMS int64) float64 {
 	if expectedMS <= 0 {
 		return math.Inf(1)
 	}
 	rem := float64(expectedMS - elapsedMS)
-	if rem < 0 {
-		return 0
+	if rem <= 0 {
+		return math.Inf(1)
 	}
 	return rem
 }
