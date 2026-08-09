@@ -1,6 +1,7 @@
 package jobs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	templates "github.com/sparkwing-dev/sparks-core/templates"
@@ -31,6 +34,8 @@ var templateVerifyGroup = sparkwing.NewConcurrencyGroup("template-verify", spark
 	OnLimit:  sparkwing.Queue,
 })
 
+const templateVerifyMinFreeDisk = uint64(10 << 30)
+
 // TemplateVerifySummary is the gate node's typed output: proof that
 // every registered template passed. Cross-pipeline callers (the release
 // gate) receive it via sparkwing.RunAndAwait.
@@ -46,6 +51,7 @@ type TemplateVerifySummary struct {
 // module proxy happens to serve.
 type verifyEnv struct {
 	CLI        string            `json:"cli"`
+	StateHome  string            `json:"state_home"`
 	SparksCore map[string]string `json:"sparks_core"`
 	// GoEnv carries GOCACHE / GOMODCACHE / GOPATH so a job that runs the
 	// inner pipeline under an overridden HOME (the postgres fixture, to
@@ -53,6 +59,12 @@ type verifyEnv struct {
 	// build and module caches instead of a cold HOME default.
 	GoEnv map[string]string `json:"go_env"`
 }
+
+var (
+	templateVerifyLockOnce sync.Once
+	templateVerifyLockErr  error
+	templateVerifyLockFile *os.File
+)
 
 // TemplateVerify proves that every sparks-core template is a working
 // pipeline: it builds the sparkwing CLI from the working tree, then for
@@ -81,7 +93,7 @@ func (TemplateVerify) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.
 	if verifyTemplatesErr != nil {
 		return fmt.Errorf("template-verify: load registry: %w", verifyTemplatesErr)
 	}
-	plan.Resources(sparkwing.Cores(2), sparkwing.MemoryGB(4))
+	plan.Resources(sparkwing.Cores(8), sparkwing.MemoryGB(4))
 
 	build := sparkwing.Job(plan, "build-cli", &buildVerifyCLIJob{})
 	envRef := sparkwing.RefTo[verifyEnv](build)
@@ -114,6 +126,19 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	if root == "" {
 		return verifyEnv{}, errors.New("template-verify: sparkwing.WorkDir() is empty")
 	}
+	if err := acquireTemplateVerifyLock(os.TempDir()); err != nil {
+		return verifyEnv{}, fmt.Errorf("template-verify: acquire scratch ownership: %w", err)
+	}
+	if err := cleanupTemplateScratch(os.TempDir()); err != nil {
+		return verifyEnv{}, fmt.Errorf("template-verify: reclaim stale scratch: %w", err)
+	}
+	free, err := availableTemplateVerifyDisk(os.TempDir())
+	if err != nil {
+		return verifyEnv{}, fmt.Errorf("template-verify: measure scratch capacity: %w", err)
+	}
+	if err := requireTemplateVerifyDisk(free); err != nil {
+		return verifyEnv{}, err
+	}
 	dir, err := os.MkdirTemp("", "sparkwing-template-verify-cli-*")
 	if err != nil {
 		return verifyEnv{}, fmt.Errorf("template-verify: temp dir: %w", err)
@@ -128,7 +153,59 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	} else {
 		sparkwing.Annotate(ctx, "built CLI; no local sparks-core checkout (using published modules)")
 	}
-	return verifyEnv{CLI: bin, SparksCore: core, GoEnv: readGoEnv(ctx)}, nil
+	return verifyEnv{
+		CLI:        bin,
+		StateHome:  filepath.Join(dir, "state"),
+		SparksCore: core,
+		GoEnv:      readGoEnv(ctx),
+	}, nil
+}
+
+func acquireTemplateVerifyLock(root string) error {
+	templateVerifyLockOnce.Do(func() {
+		path := filepath.Join(root, "sparkwing-template-verify.lock")
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+		if err != nil {
+			templateVerifyLockErr = err
+			return
+		}
+		if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
+			_ = f.Close()
+			templateVerifyLockErr = err
+			return
+		}
+		templateVerifyLockFile = f
+	})
+	return templateVerifyLockErr
+}
+
+func cleanupTemplateScratch(root string) error {
+	matches, err := filepath.Glob(filepath.Join(root, "sparkwing-tv-*"))
+	if err != nil {
+		return err
+	}
+	for _, path := range matches {
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("remove %s: %w", filepath.Base(path), err)
+		}
+	}
+	return nil
+}
+
+func availableTemplateVerifyDisk(path string) (uint64, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return 0, err
+	}
+	return uint64(stat.Bavail) * uint64(stat.Bsize), nil
+}
+
+func requireTemplateVerifyDisk(free uint64) error {
+	if free < templateVerifyMinFreeDisk {
+		return fmt.Errorf("template-verify: scratch filesystem has %.1f GiB free; at least 10 GiB is required before compiling templates",
+			float64(free)/(1<<30))
+	}
+	return nil
 }
 
 // readGoEnv captures the host's GOCACHE / GOMODCACHE / GOPATH so a job
@@ -193,6 +270,9 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 		}
 
 		dotSparkwing := filepath.Join(scratch, ".sparkwing")
+		if err := normalizeVerifyModulePath(dotSparkwing, m.Name); err != nil {
+			return fmt.Errorf("%s: normalize module path: %w", m.Name, err)
+		}
 		if err := pinLocalSparksCore(ctx, dotSparkwing, env.SparksCore); err != nil {
 			return fmt.Errorf("%s: pin sparks-core: %w", m.Name, err)
 		}
@@ -223,7 +303,7 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 			defer cleanup()
 			runCmd := sparkwing.Exec(ctx, bin, "run", m.Name).
 				Dir(scratch)
-			for name, value := range templateRunAdmissionEnv(scratch) {
+			for name, value := range templateRunAdmissionEnv(env.StateHome) {
 				runCmd = runCmd.Env(name, value)
 			}
 			mode := "ran green"
@@ -245,16 +325,52 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 	}
 }
 
-func templateRunHome(scratch string) string {
-	return filepath.Join(scratch, ".sparkwing-state")
-}
-
-func templateRunAdmissionEnv(scratch string) map[string]string {
+func templateRunAdmissionEnv(stateHome string) map[string]string {
 	return map[string]string{
-		"SPARKWING_HOME":            templateRunHome(scratch),
+		"SPARKWING_HOME":            stateHome,
 		wingwire.LeaseTokenEnv:      "",
 		wingwire.ChildLeaseTokenEnv: "",
 	}
+}
+
+func normalizeVerifyModulePath(dotSparkwing, templateName string) error {
+	path := filepath.Join(dotSparkwing, "go.mod")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	lines := strings.Split(string(raw), "\n")
+	found := false
+	oldModule := ""
+	newModule := "example.com/sparkwing/verify/" + templateName + "/pipelines"
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "module ") {
+			oldModule = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "module "))
+			lines[i] = "module " + newModule
+			found = true
+			break
+		}
+	}
+	if !found {
+		return errors.New("go.mod has no module directive")
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o600); err != nil {
+		return err
+	}
+	return filepath.Walk(dotSparkwing, func(path string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() || filepath.Ext(path) != ".go" {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		updated := bytes.ReplaceAll(data, []byte(oldModule+"/"), []byte(newModule+"/"))
+		if bytes.Equal(data, updated) {
+			return nil
+		}
+		return os.WriteFile(path, updated, info.Mode())
+	})
 }
 
 // sortedParamFlags renders a verify_params map as sorted "k=v" strings

@@ -627,10 +627,7 @@ func TestS3Concurrency_CoalesceCacheHit(t *testing.T) {
 	}
 }
 
-// TestS3Concurrency_CoalesceLeaderFailed asserts a follower whose leader
-// finished without caching (a non-success outcome) inherits the
-// leader's terminal outcome rather than a false success.
-func TestS3Concurrency_CoalesceLeaderFailed(t *testing.T) {
+func TestS3Concurrency_CoalesceFollowerPromotesAfterFailedLeader(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
 	ctx := context.Background()
@@ -654,11 +651,55 @@ func TestS3Concurrency_CoalesceLeaderFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve follower: %v", err)
 	}
-	if res.Status != store.WaiterLeaderFinished {
-		t.Fatalf("follower status = %q, want leader_finished", res.Status)
+	if res.Status != store.WaiterPromoted {
+		t.Fatalf("follower status = %q, want promoted", res.Status)
 	}
-	if res.LeaderOutcome != "failed" {
-		t.Errorf("follower leader outcome = %q, want failed", res.LeaderOutcome)
+	if res.HolderID != "B/n" {
+		t.Errorf("follower holder = %q, want B/n", res.HolderID)
+	}
+}
+
+func TestS3Concurrency_CoalesceFollowersReparentAfterFailedLeader(t *testing.T) {
+	art, _ := openIntegrationS3(t)
+	c := orchestrator.NewS3Concurrency(art)
+	ctx := context.Background()
+	key := "memo:leader-failed-reparent"
+	const hash = "content-v3"
+
+	a := acquire(t, c, store.AcquireSlotRequest{Key: key, RunID: "A", NodeID: "n", Capacity: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: hash})
+	b := acquire(t, c, store.AcquireSlotRequest{Key: key, RunID: "B", NodeID: "n", Capacity: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: hash})
+	cFollower := acquire(t, c, store.AcquireSlotRequest{Key: key, RunID: "C", NodeID: "n", Capacity: 1, Policy: store.OnLimitCoalesce, CacheKeyHash: hash})
+	if a.Kind != store.AcquireGranted || b.Kind != store.AcquireCoalesced || cFollower.Kind != store.AcquireCoalesced {
+		t.Fatalf("acquire kinds = %q, %q, %q; want granted, coalesced, coalesced", a.Kind, b.Kind, cFollower.Kind)
+	}
+	if err := c.ReleaseSlot(ctx, key, a.HolderID, "failed", "", hash, time.Minute); err != nil {
+		t.Fatalf("failed leader release: %v", err)
+	}
+
+	bResolution, err := c.ResolveWaiter(ctx, key, "B", "n", hash, "A", "n", false)
+	if err != nil {
+		t.Fatalf("resolve first follower: %v", err)
+	}
+	if bResolution.Status != store.WaiterPromoted {
+		t.Fatalf("first follower status = %q, want promoted", bResolution.Status)
+	}
+	cResolution, err := c.ResolveWaiter(ctx, key, "C", "n", hash, "A", "n", false)
+	if err != nil {
+		t.Fatalf("resolve second follower: %v", err)
+	}
+	if cResolution.Status != store.WaiterStillWaiting {
+		t.Fatalf("second follower status = %q, want still_waiting", cResolution.Status)
+	}
+
+	if err := c.ReleaseSlot(ctx, key, bResolution.HolderID, "success", "B/n", hash, time.Minute); err != nil {
+		t.Fatalf("promoted follower release: %v", err)
+	}
+	cResolution, err = c.ResolveWaiter(ctx, key, "C", "n", hash, "B", "n", false)
+	if err != nil {
+		t.Fatalf("resolve second follower after success: %v", err)
+	}
+	if cResolution.Status != store.WaiterCached || cResolution.OriginRunID != "B" {
+		t.Fatalf("second follower resolution = %+v, want cached result from B", cResolution)
 	}
 }
 

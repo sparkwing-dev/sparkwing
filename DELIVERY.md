@@ -34,10 +34,12 @@ this file is a menu and checklist, not a command that every change must run.
 - **Tests:** record the focused checks selected, or why execution was waived.
   Do not run every race, Docker, or integration suite by default.
 - **Release:** merging is not a release. A release is an explicit operator
-  decision: preview with `sparkwing run release --sw-dry-run`, then use
-  `sparkwing run release --version vX.Y.Z --sw-allow destructive,prod` to rewrite
-  the changelog and push the tag. GitHub Actions owns public binaries and images
-  after that tag.
+  decision: preview with `SPARKWING_HOME="$(mktemp -d)" sparkwing run release
+  --sw-dry-run`, then use `SPARKWING_HOME="$(mktemp -d)" sparkwing run release
+  --version vX.Y.Z --sw-allow destructive,prod` to rewrite the changelog and
+  push the tag; the isolated home keeps prerelease state out of the operational
+  runs store, which the release runner refuses to touch. GitHub Actions owns
+  public binaries and images after that tag.
 - **Independent verification:** for user-facing local-execution changes, build
   the intended revision with `SKIP_WEB_BUILD=1 bash bin/install.sh` when the web
   bundle is unchanged, then exercise the installed CLI and daemon. Verify SDK,

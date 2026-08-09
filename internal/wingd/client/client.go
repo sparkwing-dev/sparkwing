@@ -215,13 +215,14 @@ func (e *CancelledError) Error() string {
 	return "wingd: " + e.Reason
 }
 
-// dialsPerSpawn is how many times connect is retried after a spawn before
-// the daemon is presumed dead and respawned; maxSpawnAttempts bounds the
-// respawns so a daemon that dies at startup fails fast with its own logged
-// cause rather than spinning until a fork exhaustion error masks it.
+// A detached spawn cannot distinguish slow initialization from process death.
+// Keep one startup owner and allow its socket up to thirty seconds to appear
+// under the default backoff. Starting replacements during that interval adds
+// election contention and can prevent every otherwise healthy daemon from
+// reaching readiness.
 const (
-	dialsPerSpawn    = 5
-	maxSpawnAttempts = 4
+	dialsPerSpawn    = 600
+	maxSpawnAttempts = 1
 )
 
 // spawnFailed reports a spawn-syscall failure, folding in the daemon log
@@ -247,18 +248,20 @@ func spawnFailed(home, sock string, serr, dialErr error) error {
 // [ErrDaemonUnreachable], so every caller can tell this from an idle machine
 // with one errors.Is rather than by reading the message.
 //
-// When a daemon was spawned and died, its own last log line leads the message.
-// The daemon writes why it could not serve -- a bind a sandbox refused, a
-// socket path over the OS length limit -- as the last thing it does, and the
-// previous wording opened with "started but exited before serving", which
-// reads as a crash and buried the real cause under the log tail. Naming the
-// log path stays, so the rest of the evidence is one file away.
+// A detached spawn gives this client no reliable process-exit observation.
+// A non-empty log therefore proves only that startup began, not that the
+// daemon died. Report the failed readiness observation and retain the log as
+// evidence without converting its last line into an exit diagnosis.
 func daemonUnreachable(home, sock string, spawns int, cause, dialErr error) error {
 	path, _ := wingd.LogPath(home)
 	if spawns > 0 {
 		if tail := daemonLogTail(home); tail != "" {
-			return fmt.Errorf("%w: %s (it started and exited before serving); daemon log %s:\n%s",
-				ErrDaemonUnreachable, daemonDeathCause(tail), path, tail)
+			attempt := "attempts"
+			if spawns == 1 {
+				attempt = "attempt"
+			}
+			return fmt.Errorf("%w: daemon did not become reachable after %d start %s: %w; daemon log %s:\n%s",
+				ErrDaemonUnreachable, spawns, attempt, cause, path, tail)
 		}
 		return fmt.Errorf("%w: no daemon answered after %d start attempts; see %s: %w",
 			ErrDaemonUnreachable, spawns, path, cause)

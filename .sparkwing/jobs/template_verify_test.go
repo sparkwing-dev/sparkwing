@@ -33,11 +33,65 @@ func TestSeedFixture_WritesExpectedFiles(t *testing.T) {
 	}
 }
 
-func TestTemplateRunHome_IsolatedFromReleaseDaemon(t *testing.T) {
-	scratch := t.TempDir()
-	got := templateRunHome(scratch)
-	if got != filepath.Join(scratch, ".sparkwing-state") {
-		t.Fatalf("template run home = %q", got)
+func TestTemplateRunsShareOneDaemonOutsideTemplateScratch(t *testing.T) {
+	stateHome := filepath.Join(t.TempDir(), "shared-state")
+	first := templateRunAdmissionEnv(stateHome)["SPARKWING_HOME"]
+	second := templateRunAdmissionEnv(stateHome)["SPARKWING_HOME"]
+	if first != stateHome || second != stateHome {
+		t.Fatalf("template run homes = %q, %q; want shared %q", first, second, stateHome)
+	}
+}
+
+func TestNormalizeVerifyModulePath_IsStableAcrossScratchDirectories(t *testing.T) {
+	var got []string
+	for _, initial := range []string{"sparkwing-tv-example-123-pipelines", "sparkwing-tv-example-987-pipelines"} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "go.mod")
+		if err := os.WriteFile(path, []byte("module "+initial+"\n\ngo 1.26\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		mainPath := filepath.Join(dir, "main.go")
+		if err := os.WriteFile(mainPath, []byte("package main\nimport _ \""+initial+"/jobs\"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := normalizeVerifyModulePath(dir, "example"); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, string(data))
+		mainData, err := os.ReadFile(mainPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(mainData), initial) || !strings.Contains(string(mainData), "example.com/sparkwing/verify/example/pipelines/jobs") {
+			t.Fatalf("generated import was not normalized: %q", mainData)
+		}
+	}
+	if got[0] != got[1] || !strings.Contains(got[0], "module example.com/sparkwing/verify/example/pipelines") {
+		t.Fatalf("normalized modules differ or are not stable: %q, %q", got[0], got[1])
+	}
+}
+
+func TestCleanupTemplateScratch_RemovesOnlyVerifierDirectories(t *testing.T) {
+	root := t.TempDir()
+	stale := filepath.Join(root, "sparkwing-tv-example-123")
+	unrelated := filepath.Join(root, "other-tool-123")
+	for _, dir := range []string{stale, unrelated} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cleanupTemplateScratch(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("verifier scratch remains: %v", err)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Fatalf("unrelated temp data was removed: %v", err)
 	}
 }
 

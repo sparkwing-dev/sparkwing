@@ -317,7 +317,7 @@ func locateTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir s
 	if trig.RetryOf != "" {
 		return locateRetryRepo(ctx, trig)
 	}
-	if parentRepoDir != "" && trig.Repo == "" && repoDeclaresPipeline(parentRepoDir, trig.Pipeline) {
+	if parentRepoDir != "" && triggerUsesParentRepo(trig) && repoDeclaresPipeline(parentRepoDir, trig.Pipeline) {
 		return parentRepoDir, nil
 	}
 	path, err := repos.ResolveRepoForPipelineCached(trig.Pipeline)
@@ -333,6 +333,10 @@ func locateTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir s
 		return slugPath, nil
 	}
 	return "", unlocatableChildError(trig.Pipeline)
+}
+
+func triggerUsesParentRepo(trig *store.Trigger) bool {
+	return trig.Repo == "" || trig.RepoInherited
 }
 
 // RetrySourceUnavailableError is returned when a local retry cannot prove that

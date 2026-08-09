@@ -43,10 +43,7 @@ func TestHeadless_ScaffoldedModuleServesOpsAndRuns(t *testing.T) {
 	writeMod(t, filepath.Join(mod, "jobs", "jobs.go"), scaffoldJobs)
 	writeMod(t, filepath.Join(mod, "main.go"), scaffoldMain)
 
-	// hack: cache-only module resolution keeps the build hermetic -- every
-	// dependency is already in the shared module cache from building this test.
-	buildEnv := append(os.Environ(),
-		"GOFLAGS=-mod=mod", "GOPROXY=off", "GOSUMDB=off", "GOTOOLCHAIN=local")
+	buildEnv := append(os.Environ(), "GOFLAGS=-mod=mod", "GOTOOLCHAIN=local")
 	runGo(t, mod, buildEnv, "mod", "tidy")
 	bin := filepath.Join(mod, "headlessguarantee")
 	runGo(t, mod, buildEnv, "build", "-o", bin, ".")

@@ -900,7 +900,7 @@ func dispatch(
 		state.scheduleExpansion(exp)
 	}
 
-	if waitForDispatch(&state.wg, dispatchWaitTimeout) == dispatchWaitTimedOut {
+	if waitForDispatch(&state.wg, dispatchWaitTimeout, state.admissionWaits, state.watchdogActiveNodeIDs) == dispatchWaitTimedOut {
 		stuck := stuckNodeIDs(plan, state)
 		stack := dumpAllGoroutineStacks(dispatchStackDumpBytes)
 		summary, _ := json.Marshal(map[string]any{
@@ -1501,7 +1501,8 @@ type dispatchState struct {
 	// at dispatch entry. Empty map = no filter.
 	onlySkip map[string]string
 
-	wg sync.WaitGroup
+	wg             sync.WaitGroup
+	admissionWaits *admissionWaitTracker
 }
 
 func newDispatchState(
@@ -1529,27 +1530,28 @@ func newDispatchState(
 		sem = make(chan struct{}, maxParallel)
 	}
 	s := &dispatchState{
-		sem:       sem,
-		ctx:       ctx,
-		backends:  backends,
-		runner:    r,
-		runID:     runID,
-		pipeline:  pipeline,
-		plan:      plan,
-		delegate:  delegate,
-		retryOf:   retryOf,
-		masker:    masker,
-		doneCh:    map[string]chan struct{}{},
-		outputs:   map[string]any{},
-		outputsJS: map[string][]byte{},
-		outcomes:  map[string]sparkwing.Outcome{},
-		errors:    map[string]string{},
-		failures:  map[string]sparkwing.Failure{},
-		starts:    map[string]time.Time{},
-		durations: map[string]time.Duration{},
-		claimedBy: map[string]string{},
-		scheduled: map[string]*sparkwing.JobNode{},
-		debug:     debug,
+		sem:            sem,
+		ctx:            ctx,
+		backends:       backends,
+		runner:         r,
+		runID:          runID,
+		pipeline:       pipeline,
+		plan:           plan,
+		delegate:       delegate,
+		retryOf:        retryOf,
+		masker:         masker,
+		doneCh:         map[string]chan struct{}{},
+		outputs:        map[string]any{},
+		outputsJS:      map[string][]byte{},
+		outcomes:       map[string]sparkwing.Outcome{},
+		errors:         map[string]string{},
+		failures:       map[string]sparkwing.Failure{},
+		starts:         map[string]time.Time{},
+		durations:      map[string]time.Duration{},
+		claimedBy:      map[string]string{},
+		scheduled:      map[string]*sparkwing.JobNode{},
+		debug:          debug,
+		admissionWaits: newAdmissionWaitTracker(),
 	}
 	if ipr, ok := r.(*InProcessRunner); ok {
 		s.inlineRunner = ipr
@@ -1567,6 +1569,7 @@ func newDispatchState(
 		s.resolverCtx = ctx
 	}
 	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, leaseChildToken, leaseHostAdmitted, s.plan.PriorityValue())
+	s.resolverCtx = withAdmissionWaitTracker(s.resolverCtx, s.admissionWaits)
 	s.resolverCtx = sparkwingruntime.WithResolver(s.resolverCtx, s.resolve)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())
@@ -1603,6 +1606,14 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		)
 		if err != nil {
 			return nil, fmt.Errorf("enqueue trigger: %w", err)
+		}
+		watchdogWaits := admissionWaitTrackerFromContext(ctx)
+		watchdogParticipant := admissionWaitParticipantFromContext(ctx)
+		_, contextBounded := ctx.Deadline()
+		awaitBounded := req.Timeout > 0 || nodeTimeoutDurationFromContext(ctx) > 0 || contextBounded
+		if awaitBounded {
+			watchdogWaits.begin(watchdogParticipant)
+			defer watchdogWaits.end(watchdogParticipant)
 		}
 
 		sparkwing.Info(ctx,
@@ -1650,11 +1661,23 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		}
 		timeoutPausedForAdmission := false
 		timeoutAdjustedForAdmission := false
+		watchdogPausedForAdmission := false
 		var admissionStatusErr error
 		nodeTimeout := nodeTimeoutControllerFromContext(ctx)
 		var admissionMu sync.Mutex
+		defer func() {
+			admissionMu.Lock()
+			paused := watchdogPausedForAdmission
+			watchdogPausedForAdmission = false
+			admissionMu.Unlock()
+			if paused {
+				watchdogWaits.end(watchdogParticipant)
+			}
+		}()
 		updateTimeoutForAdmission := func(statusCtx context.Context) bool {
-			if req.Timeout > 0 || nodeTimeout == nil || nodeTimeoutDurationFromContext(ctx) <= 0 {
+			trackNodeTimeout := req.Timeout == 0 && nodeTimeout != nil && nodeTimeoutDurationFromContext(ctx) > 0
+			trackWatchdogAdmission := !awaitBounded && watchdogWaits != nil && watchdogParticipant != ""
+			if !trackNodeTimeout && !trackWatchdogAdmission {
 				return false
 			}
 			if statusCtx.Err() != nil {
@@ -1668,9 +1691,26 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				return false
 			}
 			if statusErr != nil {
-				if timeoutPausedForAdmission {
+				if timeoutPausedForAdmission || watchdogPausedForAdmission {
 					admissionStatusErr = statusErr
 				}
+				return false
+			}
+			if trackWatchdogAdmission {
+				switch admission.Status {
+				case childPlanAdmissionQueued:
+					if !watchdogPausedForAdmission {
+						watchdogWaits.begin(watchdogParticipant)
+						watchdogPausedForAdmission = true
+					}
+				case childPlanAdmissionAdmitted:
+					if watchdogPausedForAdmission {
+						watchdogWaits.end(watchdogParticipant)
+						watchdogPausedForAdmission = false
+					}
+				}
+			}
+			if !trackNodeTimeout {
 				return false
 			}
 			switch admission.Status {
@@ -1713,7 +1753,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		admissionPauseActive := func() bool {
 			admissionMu.Lock()
 			defer admissionMu.Unlock()
-			return timeoutPausedForAdmission
+			return timeoutPausedForAdmission || watchdogPausedForAdmission
 		}
 		currentAdmissionStatusErr := func() error {
 			admissionMu.Lock()
@@ -1901,6 +1941,7 @@ func (s *dispatchState) setOutcome(id string, o sparkwing.Outcome) {
 		s.durations[id] = time.Since(started)
 	}
 	s.mu.Unlock()
+	s.admissionWaits.signal()
 }
 
 // setError records a node's flattened error message.
@@ -1953,6 +1994,7 @@ func (s *dispatchState) markStarted(id string) {
 		s.starts[id] = time.Now()
 	}
 	s.mu.Unlock()
+	s.admissionWaits.signal()
 }
 
 func (s *dispatchState) getOutcome(id string) (sparkwing.Outcome, bool) {
@@ -2205,6 +2247,7 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 	s.markStarted(node.ID())
 	runnerCtx := sparkwingruntime.WithSpawnHandler(s.resolverCtx, s.newSpawnHandler(node.ID()))
 	runnerCtx = sparkwingruntime.WithRunner(runnerCtx, runnerInfoFor(activeRunner))
+	runnerCtx = withAdmissionWaitParticipant(runnerCtx, node.ID())
 
 	retryCfg := node.RetryConfig()
 	var autoAttempts int
@@ -2601,6 +2644,7 @@ func approvalTimeoutToOutcome(onTimeout string) approvalResult {
 // job-only path; cluster runners fall back to full RunNode.
 func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFailure sparkwing.Failure) runner.Result {
 	ctx := sparkwing.WithFailure(s.resolverCtx, parentFailure)
+	ctx = withAdmissionWaitParticipant(ctx, node.ID())
 	if ipr, ok := s.runner.(*InProcessRunner); ok {
 		out, err := ipr.executeNodeWithAdmission(ctx, runner.Request{
 			RunID:    s.runID,

@@ -2,9 +2,20 @@ package chaos
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
+
+// daemonGraceStable uses the serving daemon's own uptime to cover every
+// successor path, including version takeover. Harness-side kill timestamps
+// cannot observe a cooperative takeover initiated by a client.
+func daemonGraceStable(qs wingwire.QueueState, grace, settle time.Duration) bool {
+	if qs.DaemonUptimeMS == 0 {
+		return true
+	}
+	return time.Duration(qs.DaemonUptimeMS)*time.Millisecond > grace+settle
+}
 
 // capacityEpsilon absorbs float rounding when comparing held cost to
 // declared capacity; it is far below any real over-admission.

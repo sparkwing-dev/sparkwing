@@ -117,7 +117,7 @@ func TestDaemonDeathCause_LeadsWithTheLastLoggedReason(t *testing.T) {
 // It used to open with "started but exited before serving", which reads as a
 // crash, and left the bind failure buried under eight lines of log tail where
 // the reader stopped before reaching it.
-func TestDaemonUnreachable_LeadsWithTheCauseNotTheSymptom(t *testing.T) {
+func TestDaemonUnreachable_DoesNotClaimAnUnobservedExit(t *testing.T) {
 	home := shortHome(t)
 	logPath, err := wingd.LogPath(home)
 	if err != nil {
@@ -133,8 +133,11 @@ func TestDaemonUnreachable_LeadsWithTheCauseNotTheSymptom(t *testing.T) {
 
 	err = daemonUnreachable(home, "/tmp/x/d.sock", 1, errors.New("dial timeout"), nil)
 	first, _, _ := strings.Cut(err.Error(), "\n")
-	if !strings.Contains(first, "bind: operation not permitted") {
-		t.Fatalf("first line does not carry the real cause: %q", first)
+	if !strings.Contains(first, "did not become reachable after 1 start attempt") {
+		t.Fatalf("first line does not state the observed failure: %q", first)
+	}
+	if strings.Contains(err.Error(), "exited") {
+		t.Fatalf("error claims an unobserved process exit: %v", err)
 	}
 	if !strings.Contains(err.Error(), logPath) {
 		t.Errorf("error dropped the daemon log path %q: %v", logPath, err)

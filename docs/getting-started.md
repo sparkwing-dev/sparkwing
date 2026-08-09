@@ -266,17 +266,21 @@ repo involvement). From the sparkwing checkout:
 
 ```bash
 # preview: full validation chain, stop before tag+push (no allowance needed)
-sparkwing run release --sw-dry-run
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run
 
 # real release -- push-tag is risk-gated, so --sw-allow is required:
-sparkwing run release --sw-allow destructive,prod                    # auto-bump (default --bump minor) or top unreleased CHANGELOG entry
-sparkwing run release --bump patch --sw-allow destructive,prod       # auto-bump patch instead
-sparkwing run release --version v0.55.0 --sw-allow destructive,prod  # explicit version
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-allow destructive,prod                    # auto-bump (default --bump minor) or top unreleased CHANGELOG entry
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --bump patch --sw-allow destructive,prod       # auto-bump patch instead
+SPARKWING_HOME="$(mktemp -d)" sparkwing run release --version v0.55.0 --sw-allow destructive,prod  # explicit version
 ```
 
 The `push-tag` step declares `destructive` and `prod` risk labels, so an
 actual tag+push requires `--sw-allow destructive,prod`; `--sw-dry-run` runs
 every gate but stops before tagging and needs no allowance.
+
+The explicit temporary `SPARKWING_HOME` isolates prerelease state from the
+operational runs store. The release runner refuses the default home so a build
+with a newer embedded schema cannot migrate state used by installed readers.
 
 The pipeline runs validation gates before tagging, including:
 

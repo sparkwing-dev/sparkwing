@@ -85,7 +85,7 @@ func (p *Lint) run(ctx context.Context) error {
 	}
 	sparkwing.Info(ctx, "installer report: clean")
 
-	if _, err := sparkwing.Bash(ctx, "markdownlint-cli2").Run(); err != nil {
+	if err := runMarkdownlint(ctx); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "markdownlint: clean")

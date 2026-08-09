@@ -210,6 +210,41 @@ func (planLevelQueuedAwaitParentPipe) Plan(
 	return nil
 }
 
+type unboundedAwaitParentPipe struct{ sparkwing.Base }
+
+func (unboundedAwaitParentPipe) Plan(
+	_ context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	_ sparkwing.RunContext,
+) error {
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-child", "work")
+		return err
+	})
+	return nil
+}
+
+type explicitTimeoutAwaitParentPipe struct{ sparkwing.Base }
+
+func (explicitTimeoutAwaitParentPipe) Plan(
+	_ context.Context,
+	plan *sparkwing.Plan,
+	_ sparkwing.NoInputs,
+	_ sparkwing.RunContext,
+) error {
+	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](
+			ctx,
+			"plan-level-queued-await-child",
+			"work",
+			sparkwing.WithFreshTimeout(3*time.Second),
+		)
+		return err
+	})
+	return nil
+}
+
 type planLevelQueuedAwaitThenContinueParentPipe struct{ sparkwing.Base }
 
 func (planLevelQueuedAwaitThenContinueParentPipe) Plan(
@@ -441,6 +476,12 @@ func init() {
 	register("plan-level-skip-follower", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &planLevelSkipFollowerPipe{} })
 	register("plan-level-queued-await-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return &planLevelQueuedAwaitParentPipe{}
+	})
+	register("unbounded-await-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &unboundedAwaitParentPipe{}
+	})
+	register("explicit-timeout-await-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &explicitTimeoutAwaitParentPipe{}
 	})
 	register("plan-level-queued-await-then-continue-parent", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return &planLevelQueuedAwaitThenContinueParentPipe{}
@@ -854,6 +895,19 @@ func TestConcurrency_PlanLevelEvictedBeforeDispatchCancelsRun(t *testing.T) {
 }
 
 func TestConcurrency_RunAndAwaitParentTimeoutDoesNotCountChildPlanAdmissionWait(t *testing.T) {
+	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "plan-level-queued-await-parent", 100*time.Millisecond)
+}
+
+func TestConcurrency_RunAndAwaitExplicitTimeoutProtectsParentDispatch(t *testing.T) {
+	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "explicit-timeout-await-parent", 100*time.Millisecond)
+}
+
+func TestConcurrency_RunAndAwaitUnboundedClaimedChildAdmissionProtectsParentDispatch(t *testing.T) {
+	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "unbounded-await-parent", 750*time.Millisecond)
+}
+
+func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeline string, dispatchTimeout time.Duration) {
+	t.Helper()
 	resetCacheCounter()
 	p := newPaths(t)
 	ctx := context.Background()
@@ -880,8 +934,9 @@ func TestConcurrency_RunAndAwaitParentTimeoutDoesNotCountChildPlanAdmissionWait(
 	parentDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
-			Pipeline: "plan-level-queued-await-parent",
-			RunID:    "queued-await-parent",
+			Pipeline:            parentPipeline,
+			RunID:               "queued-await-parent",
+			DispatchWaitTimeout: dispatchTimeout,
 		})
 		parentDone <- res
 	}()
@@ -953,6 +1008,30 @@ childQueued:
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for child after releasing queued child")
+	}
+}
+
+func TestDispatchWatchdog_UnclaimedUnboundedChildStillTimesOutParent(t *testing.T) {
+	p := newPaths(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{
+			Pipeline:            "unbounded-await-parent",
+			DispatchWaitTimeout: 100 * time.Millisecond,
+		})
+		done <- res
+	}()
+
+	select {
+	case res := <-done:
+		if res == nil || res.Status != "failed" || res.Error == nil || !strings.Contains(res.Error.Error(), "dispatch_wait_timeout") {
+			t.Fatalf("result = %+v, want dispatch_wait_timeout for unclaimed unbounded child", res)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("unclaimed unbounded child disabled the parent dispatch watchdog")
 	}
 }
 

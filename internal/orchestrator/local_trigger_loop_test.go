@@ -42,6 +42,53 @@ func TestRepoDeclaresPipeline_FalseWithoutSparkwingDir(t *testing.T) {
 	}
 }
 
+func TestLocalImplicitAwaitRetainsParentProvenanceWithoutForcingRegistryLookup(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "parent", Pipeline: "release", Status: "running",
+		Repo: "sparkwing-dev/sparkwing", RepoURL: "git@github.com:sparkwing-dev/sparkwing.git",
+		GithubOwner: "sparkwing-dev", GithubRepo: "sparkwing",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	env := map[string]string{"CALLER_VALUE": "unchanged"}
+	id, err := (localState{st: st}).EnqueueTriggerWithEnv(
+		ctx, "template-verify", nil, "parent", "gate", "", "await-pipeline", "", "", "", env,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := st.GetTrigger(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trigger.Repo != "sparkwing-dev/sparkwing" {
+		t.Fatalf("Repo = %q, want inherited provenance", trigger.Repo)
+	}
+	if !trigger.RepoInherited {
+		t.Fatal("RepoInherited = false, want true")
+	}
+	if len(env) != 1 || env["CALLER_VALUE"] != "unchanged" {
+		t.Fatalf("caller trigger env mutated: %#v", env)
+	}
+}
+
+func TestExplicitAwaitNeverTrustsReservedLookingTriggerEnvironment(t *testing.T) {
+	trigger := &store.Trigger{
+		Repo:       "owner/other",
+		TriggerEnv: map[string]string{"SPARKWING_AWAIT_REPO_INHERITED": "1"},
+	}
+	if triggerUsesParentRepo(trigger) {
+		t.Fatal("explicit cross-repository await selected the parent checkout")
+	}
+}
+
 func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhileParentLives(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not allow the describe process to unlink its running executable")

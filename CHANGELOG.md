@@ -65,6 +65,38 @@ code change to unlock.
   `.sparkwing/`, `examples/`, and `docs/_sidebar.json` completeness (both
   directions, stale exclusions included).
 
+### Fixed
+
+- **release:** Self-release validation now requires an isolated
+  `SPARKWING_HOME`, preventing a prerelease binary with a newer embedded schema
+  from migrating the operational runs store before installed readers upgrade.
+
+## [v0.23.1] - 2026-08-09
+### Fixed
+
+- **store (Breaking):** The runs-store schema advances from version 11 to 12
+  to persist child-trigger repository provenance. Every process that opens a
+  shared local store must run v0.23.1 or later before the store is migrated.
+  See the [migration guide](docs/migrations/v0.23.1.md#runs-store-schema-moves-to-version-12).
+- **cache:** An in-flight-dedupe follower now runs after its leader fails,
+  is cancelled, or otherwise ends without a reusable result. A leader's
+  non-success outcome can no longer become the follower's verdict.
+- **local execution:** Same-repository child pipelines execute from the
+  parent's checkout even when repository metadata is inherited. A damaged or
+  missing cross-repository registry no longer blocks that handoff. The
+  exported `store.Trigger.RepoInherited` field records that routing provenance
+  for trigger backends.
+- **orchestrator:** Admission waits pause the dispatch watchdog only for the
+  nodes they cover. Legitimately queued child pipelines no longer time out
+  their parent, while an admitted sibling that stops making progress still
+  reaches the dispatch deadline.
+- **queue telemetry:** Local admission messages identify the run and node for
+  each reported position, so interleaved waiters cannot look like one job
+  moving backward in the queue.
+- **release:** Independent gates finish before the changelog commit, failed
+  releases restore a tidy development module, and Markdown lint uses a pinned
+  self-provisioning command.
+
 ## [v0.23.0] - 2026-08-08
 ### Added
 

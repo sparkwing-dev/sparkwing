@@ -615,7 +615,7 @@ func (h *Harness) checkLedger() {
 	// kill the successor is still restoring holders and re-admitting
 	// reconnecting waiters, a transient in which zero holders alongside a
 	// waiter is legitimate rather than a stranded run.
-	if h.leakStable() {
+	if h.leakStable() && h.daemonGraceStable(qs) {
 		if v := checkLivenessTruth(qs); len(v) > 0 {
 			h.fail("liveness", v, qs)
 		}
@@ -630,9 +630,14 @@ func (h *Harness) checkOS() {
 		return
 	}
 	live, known := h.processSets()
-	if v := checkOSTruth(qs, live, known, h.leakStable()); len(v) > 0 {
+	if v := checkOSTruth(qs, live, known, h.leakStable() && h.daemonGraceStable(qs)); len(v) > 0 {
 		h.fail("os-truth", v, qs)
 	}
+}
+
+func (h *Harness) daemonGraceStable(qs wingwire.QueueState) bool {
+	grace := time.Duration(h.cfg.DaemonGraceMS) * time.Millisecond
+	return daemonGraceStable(qs, grace, h.cfg.Settle)
 }
 
 func (h *Harness) startProcessGuard() func() {

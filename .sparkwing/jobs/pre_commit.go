@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -46,8 +47,28 @@ func (PreCommit) Examples() []sparkwing.Example {
 }
 
 func (p *PreCommit) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	plan.Resources(sparkwing.Cores(float64(preCommitCPUReservation(runtime.NumCPU()))))
 	sparkwing.Job(plan, rc.Pipeline, p)
 	return nil
+}
+
+// preCommitCPUReservation gives the gate half the host so admission can run
+// another gate beside it without oversubscribing the machine.
+func preCommitCPUReservation(cpuCount int) int {
+	if cpuCount < 2 {
+		return 1
+	}
+	return (cpuCount + 1) / 2
+}
+
+// boundedGoCommand leaves one reserved core for the pipeline runner and its
+// lightweight parallel checks while bounding the Go tool's worker fanout.
+func boundedGoCommand(cpuCount int, verb, args string) string {
+	parallelism := preCommitCPUReservation(cpuCount) - 1
+	if parallelism < 1 {
+		parallelism = 1
+	}
+	return fmt.Sprintf("GOMAXPROCS=%d go %s -p %d %s", parallelism, verb, parallelism, args)
 }
 
 // Work orders the chain cheapest-first, each step waiting on the one
@@ -209,15 +230,15 @@ func withoutInherited(cmd string, names []string) string {
 // pipeline module before it can run this gate at all, so a pipeline-scoped
 // step re-reports a prerequisite of the run as a result of it.
 func runVet(ctx context.Context) error {
-	return forEachGoModule(ctx, "go vet", "go vet ./...", nil)
+	return forEachGoModule(ctx, "go vet", boundedGoCommand(runtime.NumCPU(), "vet", "./..."), nil)
 }
 
 func runBuild(ctx context.Context) error {
-	return forEachGoModule(ctx, "go build", "go build ./...", nil)
+	return forEachGoModule(ctx, "go build", boundedGoCommand(runtime.NumCPU(), "build", "./..."), nil)
 }
 
 func runTest(ctx context.Context) error {
-	return forEachGoModule(ctx, "go test", "go test ./...", productTestUnset)
+	return forEachGoModule(ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), productTestUnset)
 }
 
 // forEachGoModule runs cmd in every committed module directory that holds

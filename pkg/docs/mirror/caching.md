@@ -135,16 +135,14 @@ sparkwing.Job(plan, "maybe", func(ctx context.Context) error { return nil }).
 while still writing results on success, so the next run hits a freshly
 populated cache.
 
-## Limitation: caching a node that is also in a Skip or Fail group
+## Caching a node that is also in a Skip or Fail group
 
 When a node declares both `.Cache()` and `.Concurrency()` on a group
 whose `OnLimit` is `Skip` or `Fail`, and the cached content is being
 computed in flight, the leader may resolve to the group's skip/fail
-outcome rather than a successful result. Its in-flight-dedupe followers
-then inherit that non-success outcome rather than a replayed value.
-This is a rare pairing; avoid combining `.Cache()` with a `Skip` or
-`Fail` concurrency group on the same node. `Queue` and `CancelOthers`
-groups do not have this interaction.
+outcome rather than a successful result. An in-flight-dedupe follower
+inherits a reusable successful outcome. After a failed, cancelled, or
+otherwise non-reusable leader outcome, the follower runs the node itself.
 
 ## Limitations
 

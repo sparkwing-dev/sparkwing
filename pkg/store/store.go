@@ -348,6 +348,7 @@ CREATE TABLE IF NOT EXISTS triggers (
     repo_url              TEXT NOT NULL DEFAULT '',
     github_owner          TEXT NOT NULL DEFAULT '',
     github_repo           TEXT NOT NULL DEFAULT '',
+    repo_inherited        INTEGER NOT NULL DEFAULT 0,
     retry_of              TEXT NOT NULL DEFAULT '',
     parent_node_id        TEXT NOT NULL DEFAULT ''
 );
@@ -581,7 +582,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 11
+const expectedSchemaVersion = 12
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -978,6 +979,8 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.ensureColumns("pipeline_profiles", pipelineProfilesContendedCols)
 	case 11:
 		return s.ensureColumns("pipeline_profiles", pipelineProfilesVersioningCols)
+	case 12:
+		return s.ensureColumns("triggers", triggerRepoInheritedCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1018,6 +1021,8 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesContendedCols)
 	case 11:
 		return addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesVersioningCols)
+	case 12:
+		return addColumnsTx(ctx, tx, "triggers", triggerRepoInheritedCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1098,6 +1103,7 @@ var columnMigrations = []columnSpec{
 		"repo_url":       "TEXT NOT NULL DEFAULT ''",
 		"github_owner":   "TEXT NOT NULL DEFAULT ''",
 		"github_repo":    "TEXT NOT NULL DEFAULT ''",
+		"repo_inherited": "INTEGER NOT NULL DEFAULT 0",
 		"retry_of":       "TEXT NOT NULL DEFAULT ''",
 		"retry_source":   "TEXT NOT NULL DEFAULT ''",
 		"parent_node_id": "TEXT NOT NULL DEFAULT ''",
@@ -1160,6 +1166,10 @@ var pipelineProfilesVersioningCols = map[string]string{
 	"floor_memory_bytes":     "INTEGER NOT NULL DEFAULT 0",
 	"prev_peak_cores":        "REAL NOT NULL DEFAULT 0",
 	"prev_peak_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
+}
+
+var triggerRepoInheritedCols = map[string]string{
+	"repo_inherited": "INTEGER NOT NULL DEFAULT 0",
 }
 
 func (s *Store) ensureColumnsAll() error {
@@ -2870,6 +2880,9 @@ type Trigger struct {
 	RepoURL     string `json:"repo_url,omitempty"`
 	GithubOwner string `json:"github_owner,omitempty"`
 	GithubRepo  string `json:"github_repo,omitempty"`
+	// RepoInherited distinguishes an implicit same-repository await from an
+	// explicit cross-repository request after parent provenance is copied.
+	RepoInherited bool `json:"repo_inherited,omitempty"`
 	// RetryOf is threaded into the persisted Run row.
 	RetryOf string `json:"retry_of,omitempty"`
 	// RetrySource is "manual" or "auto".
@@ -2905,15 +2918,19 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 	if t.Full {
 		fullInt = 1
 	}
+	repoInheritedInt := 0
+	if t.RepoInherited {
+		repoInheritedInt = 1
+	}
 	_, err := s.exec(
 		ctx, `
 INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-                      repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full")
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full")
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
-		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
+		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
 	)
 	return err
 }
@@ -3010,7 +3027,7 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pi
 	sel := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full"
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full"
   FROM triggers
  WHERE status = ?`
 	args := []any{triggerStatusPending}
@@ -3038,16 +3055,17 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	var argsJSON, envJSON []byte
 	var createdNS int64
 	var parent sql.NullString
-	var fullInt int
+	var fullInt, repoInheritedInt int
 	err = tx.QueryRowContext(ctx, sel, args...).Scan(
 		&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
 	)
 	if parent.Valid {
 		t.ParentRunID = parent.String
 	}
 	t.Full = fullInt != 0
+	t.RepoInherited = repoInheritedInt != 0
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -3557,16 +3575,16 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 	var argsJSON, envJSON []byte
 	var createdNS int64
 	var parent sql.NullString
-	var fullInt int
+	var fullInt, repoInheritedInt int
 	if err := tx.QueryRowContext(
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full"
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full"
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt); err != nil {
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -3576,6 +3594,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		t.ParentRunID = parent.String
 	}
 	t.Full = fullInt != 0
+	t.RepoInherited = repoInheritedInt != 0
 	t.CreatedAt = time.Unix(0, createdNS)
 	t.ClaimedAt = &now
 	t.LeaseExpiresAt = &expires
@@ -3595,16 +3614,16 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 	var createdNS int64
 	var claimedNS, leaseNS sql.NullInt64
 	var parent sql.NullString
-	var fullInt int
+	var fullInt, repoInheritedInt int
 	err := s.queryRow(
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, parent_run_id, "full"
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full"
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt)
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -3624,6 +3643,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		t.ParentRunID = parent.String
 	}
 	t.Full = fullInt != 0
+	t.RepoInherited = repoInheritedInt != 0
 	if len(argsJSON) > 0 {
 		_ = json.Unmarshal(argsJSON, &t.Args)
 	}
@@ -3697,7 +3717,7 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at,
        claimed_at, lease_expires_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, retry_of, retry_source, parent_node_id, "full"
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full"
   FROM triggers` + where + `
  ORDER BY created_at DESC
  LIMIT ?`
@@ -3714,14 +3734,15 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		var createdNS int64
 		var claimedNS, leaseNS sql.NullInt64
 		var parent sql.NullString
-		var fullInt int
+		var fullInt, repoInheritedInt int
 		if err := rows.Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 			&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS,
 			&claimedNS, &leaseNS, &parent,
-			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt); err != nil {
+			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt); err != nil {
 			return nil, err
 		}
 		t.Full = fullInt != 0
+		t.RepoInherited = repoInheritedInt != 0
 		t.CreatedAt = time.Unix(0, createdNS)
 		if claimedNS.Valid {
 			ct := time.Unix(0, claimedNS.Int64)

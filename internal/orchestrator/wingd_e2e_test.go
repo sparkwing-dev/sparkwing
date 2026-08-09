@@ -882,6 +882,59 @@ func TestWingd_SecondRunQueuesUntilFirstReleases(t *testing.T) {
 	}
 }
 
+func TestWingd_NodeAdmissionWaitDoesNotConsumeDispatchWatchdog(t *testing.T) {
+	registerWingdE2EPipelines()
+	home := wingdTestHome(t)
+	startWingd(t, home, 2)
+	backends, st, _ := openWingdBackends(t, home)
+	seedNodeProfile(t, st, "wingd-e2e-unpinned", "hold", store.ProfileObservation{
+		Duration: time.Second, PeakCores: 2, PeakMemoryBytes: 1 << 20,
+	}, 3)
+
+	gate := newWingdGate()
+	wingdE2EGate.Store(gate)
+	runA := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(context.Background(), backends, Options{
+			Pipeline:  "wingd-e2e-unpinned",
+			RunID:     "wingd-watchdog-holder",
+			Admission: testWingdAdmission(home, nil),
+		})
+		runA <- res
+	}()
+	gate.awaitStarted(t, "wingd-watchdog-holder")
+
+	runB := make(chan *Result, 1)
+	go func() {
+		res, _ := Run(context.Background(), backends, Options{
+			Pipeline:            "wingd-e2e-unpinned",
+			RunID:               "wingd-watchdog-waiter",
+			Admission:           testWingdAdmission(home, nil),
+			DispatchWaitTimeout: 50 * time.Millisecond,
+		})
+		runB <- res
+	}()
+	awaitWaiter(t, home, nodeHostRunID("wingd-watchdog-waiter", "hold"))
+
+	select {
+	case res := <-runB:
+		t.Fatalf("queued run ended while legitimate admission was pending: %+v", res)
+	case <-time.After(150 * time.Millisecond):
+	}
+
+	close(gate.release)
+	for _, ch := range []chan *Result{runA, runB} {
+		select {
+		case res := <-ch:
+			if res == nil || res.Status != "success" {
+				t.Fatalf("run result = %+v, want success", res)
+			}
+		case <-time.After(wingdTestWait):
+			t.Fatal("run did not finish after capacity returned")
+		}
+	}
+}
+
 func TestWingd_LocalRunAdmitsReadyNodeAtNodeCost(t *testing.T) {
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)

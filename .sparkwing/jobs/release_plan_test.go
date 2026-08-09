@@ -48,6 +48,13 @@ func mustNode(t *testing.T, plan *sparkwing.Plan, id string) *sparkwing.JobNode 
 	return n
 }
 
+func TestReleasePreviewExampleUsesTheReservedRunFlag(t *testing.T) {
+	examples := (Release{}).Examples()
+	if got := examples[len(examples)-1].Command; got != `SPARKWING_HOME="$(mktemp -d)" sparkwing run release --sw-dry-run` {
+		t.Fatalf("preview command = %q", got)
+	}
+}
+
 // ancestors returns every node id that id depends on, directly or
 // transitively.
 func ancestors(t *testing.T, plan *sparkwing.Plan, id string) map[string]bool {
@@ -104,6 +111,15 @@ func TestReleasePlanGatesBlockTagPush(t *testing.T) {
 		n := mustNode(t, plan, gate)
 		if n.IsContinueOnError() || n.IsOptional() {
 			t.Errorf("%s must block push-tag on failure, but is marked ContinueOnError/Optional", gate)
+		}
+	}
+}
+
+func TestReleasePlanDoesNotCommitChangelogBeforeIndependentGatesPass(t *testing.T) {
+	deps := ancestors(t, releasePlan(t), "prepare-changelog")
+	for _, gate := range []string{"gate-template-verify", "gate-release-lineage"} {
+		if !deps[gate] {
+			t.Errorf("prepare-changelog must depend on %s so a failed gate leaves HEAD unchanged", gate)
 		}
 	}
 }

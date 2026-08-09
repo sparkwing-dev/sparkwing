@@ -93,9 +93,9 @@ func (Release) Help() string {
 
 func (Release) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Auto-pick version by bumping latest origin tag", Command: "sparkwing run release --sw-allow destructive,prod"},
-		{Comment: "Tag and push an explicit version", Command: "sparkwing run release --version v0.24.0 --sw-allow destructive,prod"},
-		{Comment: "Preview without pushing", Command: "sparkwing run release --sw-dry-run"},
+		{Comment: "Auto-pick version by bumping latest origin tag", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-allow destructive,prod"},
+		{Comment: "Tag and push an explicit version", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --version v0.24.0 --sw-allow destructive,prod"},
+		{Comment: "Preview without pushing", Command: "SPARKWING_HOME=\"$(mktemp -d)\" sparkwing run release --sw-dry-run"},
 	}
 }
 
@@ -149,7 +149,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		RepoDir: repoDir,
 		Version: versionRef,
 	})
-	changelog.Needs(discover, gatePreCommit, gatePrePush)
+	changelog.Needs(discover, gatePreCommit, gatePrePush, gateTemplates, gateLineage)
 
 	schemaGate := sparkwing.Job(plan, "gate-schema-changelog", &checkSchemaBreakJob{
 		RepoDir: repoDir,
@@ -723,6 +723,13 @@ func restoreSelfReplaceIn(ctx context.Context, repoDir string) error {
 	}
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
+	}
+	if result, err := sparkwing.Exec(ctx, "go", "mod", "tidy").Dir(filepath.Join(repoDir, ".sparkwing")).Run(); err != nil {
+		detail := strings.TrimSpace(result.Stderr)
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("release: tidy restored .sparkwing module: %s", detail)
 	}
 	if _, err := runGitIn(ctx, repoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum", scaffoldFallbackRel); err != nil {
 		return fmt.Errorf("release: git add release-version artifacts: %w", err)

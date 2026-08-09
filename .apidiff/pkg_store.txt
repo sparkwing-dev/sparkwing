@@ -565,6 +565,8 @@ type Trigger struct {
 	GithubOwner string
 	GithubRepo  string
 
+	RepoInherited bool
+
 	RetryOf string
 
 	RetrySource string

@@ -2,9 +2,28 @@ package jobs
 
 import (
 	"context"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
+
+func TestMarkdownlintCommandIsPinnedAndSelfProvisioning(t *testing.T) {
+	const want = "npx --yes markdownlint-cli2@0.23.2"
+	if markdownlintCommand != want {
+		t.Fatalf("markdownlint command = %q, want exactly %q", markdownlintCommand, want)
+	}
+	if err := runMarkdownlint(context.Background()); err != nil {
+		t.Fatalf("self-provisioned markdown lint failed: %v", err)
+	}
+}
+
+func TestDogfoodPipelineModuleIsTidy(t *testing.T) {
+	cmd := exec.Command("go", "mod", "tidy", "-diff")
+	cmd.Dir = ".."
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf(".sparkwing module is not tidy:\n%s", out)
+	}
+}
 
 // The replace ban and the pre-commit Go steps read one module walk between
 // them, so a module added after the fact is checked by both.

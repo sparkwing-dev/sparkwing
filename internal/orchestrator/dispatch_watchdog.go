@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"log/slog"
 	"runtime"
 	"sync"
@@ -8,6 +9,86 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+type admissionWaitTracker struct {
+	mu      sync.Mutex
+	active  map[string]int
+	changed chan struct{}
+}
+
+func newAdmissionWaitTracker() *admissionWaitTracker {
+	return &admissionWaitTracker{active: make(map[string]int), changed: make(chan struct{}, 1)}
+}
+
+func (t *admissionWaitTracker) begin(participant string) {
+	if t == nil || participant == "" {
+		return
+	}
+	t.mu.Lock()
+	t.active[participant]++
+	t.mu.Unlock()
+	t.signal()
+}
+
+func (t *admissionWaitTracker) end(participant string) {
+	if t == nil || participant == "" {
+		return
+	}
+	t.mu.Lock()
+	if t.active[participant] <= 1 {
+		delete(t.active, participant)
+	} else {
+		t.active[participant]--
+	}
+	t.mu.Unlock()
+	t.signal()
+}
+
+func (t *admissionWaitTracker) signal() {
+	if t == nil {
+		return
+	}
+	select {
+	case t.changed <- struct{}{}:
+	default:
+	}
+}
+
+func (t *admissionWaitTracker) covers(participants []string) bool {
+	if t == nil || len(participants) == 0 {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for _, participant := range participants {
+		if t.active[participant] == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+type admissionWaitTrackerKey struct{}
+
+func withAdmissionWaitTracker(ctx context.Context, tracker *admissionWaitTracker) context.Context {
+	return context.WithValue(ctx, admissionWaitTrackerKey{}, tracker)
+}
+
+func admissionWaitTrackerFromContext(ctx context.Context) *admissionWaitTracker {
+	tracker, _ := ctx.Value(admissionWaitTrackerKey{}).(*admissionWaitTracker)
+	return tracker
+}
+
+type admissionWaitParticipantKey struct{}
+
+func withAdmissionWaitParticipant(ctx context.Context, participant string) context.Context {
+	return context.WithValue(ctx, admissionWaitParticipantKey{}, participant)
+}
+
+func admissionWaitParticipantFromContext(ctx context.Context) string {
+	participant, _ := ctx.Value(admissionWaitParticipantKey{}).(string)
+	return participant
+}
 
 // DefaultDispatchWaitTimeout bounds how long the dispatcher's
 // post-DAG drain (state.wg.Wait) may block before the run is declared
@@ -42,7 +123,12 @@ const (
 // Returning early is the entire point: a hung Wait holds the run's
 // concurrency-namespace slot indefinitely and locks the rest of the
 // fleet behind a process that will never make progress.
-func waitForDispatch(wg *sync.WaitGroup, timeout time.Duration) dispatchWaitResult {
+func waitForDispatch(
+	wg *sync.WaitGroup,
+	timeout time.Duration,
+	waits *admissionWaitTracker,
+	activeParticipants func() []string,
+) dispatchWaitResult {
 	if timeout <= 0 {
 		wg.Wait()
 		return dispatchWaitDone
@@ -52,11 +138,42 @@ func waitForDispatch(wg *sync.WaitGroup, timeout time.Duration) dispatchWaitResu
 		wg.Wait()
 		close(done)
 	}()
-	select {
-	case <-done:
-		return dispatchWaitDone
-	case <-time.After(timeout):
-		return dispatchWaitTimedOut
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		if waits != nil && waits.covers(activeParticipants()) {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			select {
+			case <-done:
+				return dispatchWaitDone
+			case <-waits.changed:
+			}
+			timer.Reset(timeout)
+			continue
+		}
+		select {
+		case <-done:
+			return dispatchWaitDone
+		case <-timer.C:
+			if waits != nil && waits.covers(activeParticipants()) {
+				timer.Reset(timeout)
+				continue
+			}
+			return dispatchWaitTimedOut
+		case <-waits.changed:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(timeout)
+		}
 	}
 }
 
@@ -77,6 +194,21 @@ func stuckNodeIDs(plan *sparkwing.Plan, state *dispatchState) []string {
 		}
 	}
 	return stuck
+}
+
+// watchdogActiveNodeIDs excludes nodes that have not started because they are
+// waiting on dependencies. Admission can pause the watchdog only when every
+// started, unfinished node is itself in the admission queue.
+func (s *dispatchState) watchdogActiveNodeIDs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	active := make([]string, 0, len(s.starts))
+	for id := range s.starts {
+		if _, done := s.outcomes[id]; !done {
+			active = append(active, id)
+		}
+	}
+	return active
 }
 
 // watchdogKnownNodes unions the static plan with the nodes the
