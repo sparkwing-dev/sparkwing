@@ -12,6 +12,17 @@ type countingHostSampler struct {
 	calls int
 }
 
+type fixedOwnedCPUSampler struct {
+	fraction float64
+	measured bool
+	roots    []int
+}
+
+func (s *fixedOwnedCPUSampler) CPUUsage(pids []int) (float64, bool) {
+	s.roots = append([]int(nil), pids...)
+	return s.fraction, s.measured
+}
+
 func (s *countingHostSampler) Sample() (HostStat, error) {
 	s.calls++
 	return s.stat, nil
@@ -149,5 +160,49 @@ func TestApplyHeadroom_ExternalCoresDiscountWhatLeasesHold(t *testing.T) {
 	cores := queueRow(t, queueState(t, d), "cores")
 	if cores.External != 1 {
 		t.Errorf("cores external = %v, want 1: of 4 busy cores the daemon's own lease holds 3", cores.External)
+	}
+}
+
+func TestRefreshHeadroomSubtractsMeasuredHolderUsageNotLeaseCapacity(t *testing.T) {
+	tests := []struct {
+		name          string
+		hostBusy      float64
+		ownedBusy     float64
+		ownedMeasured bool
+		wantExternal  float64
+	}{
+		{name: "idle oversized lease", hostBusy: 3, ownedMeasured: true, wantExternal: 3},
+		{name: "working holder", hostBusy: 4, ownedBusy: 1, ownedMeasured: true, wantExternal: 3},
+		{name: "holder sensor unavailable", hostBusy: 3, wantExternal: 3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newHeadroomDaemon(t, 8, 0)
+			d.sampler = &countingHostSampler{stat: HostStat{
+				TotalCores:       8,
+				TotalMemoryBytes: ledgerMemory,
+				FreeMemoryBytes:  ledgerMemory,
+				BusyCores:        tc.hostBusy,
+				CPUMeasured:      true,
+				MemoryMeasured:   true,
+			}}
+			owned := &fixedOwnedCPUSampler{fraction: tc.ownedBusy, measured: tc.ownedMeasured}
+			d.ownedSampler = owned
+			dec, _, err := d.ledger.Submit(admission.Request{ID: "holder", Cores: 4})
+			if err != nil || dec.Kind != admission.DecisionGranted {
+				t.Fatalf("submit holder = %s, %v", dec.Kind, err)
+			}
+			d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+
+			d.refreshHeadroom()
+
+			cores := queueRow(t, queueState(t, d), "cores")
+			if cores.External != tc.wantExternal {
+				t.Errorf("external cores = %v, want %v", cores.External, tc.wantExternal)
+			}
+			if len(owned.roots) != 1 || owned.roots[0] != 4242 {
+				t.Errorf("owned sampler roots = %v, want [4242]", owned.roots)
+			}
+		})
 	}
 }
