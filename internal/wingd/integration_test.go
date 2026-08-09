@@ -714,6 +714,9 @@ func TestExplicitCancelStateWriteFailureStillSignalsOwnerWithoutAcknowledging(t 
 	cancelled := make(chan wingwire.Cancel, 1)
 	go lease.WatchControl(nil, func(c wingwire.Cancel) { cancelled <- c })
 	control := ensure(t, home, "")
+	if _, err := control.QueueState(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	moved := home + ".moved"
 	if err := os.Rename(home, moved); err != nil {
 		t.Fatal(err)
