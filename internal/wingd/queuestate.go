@@ -400,76 +400,42 @@ func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 
 	starts, clear := simulateQueue(capCores, capMem, holders, waiters)
 	for j, orig := range waiterIdx {
-		if !math.IsInf(starts[j], 1) {
-			ms := int64(starts[j])
+		if ms, ok := finiteETA(starts[j]); ok {
 			qs.Waiters[orig].ExpectedStartMS = &ms
 		}
 	}
-	if !math.IsInf(clear, 1) {
-		ms := int64(clear)
+	if ms, ok := finiteETA(clear); ok {
 		qs.ExpectedClearMS = &ms
 	}
 }
 
-// annotateSemaphoreETA composes each waiter's semaphore estimate with the
-// host estimate already written by annotateETA. Every key gets its own FIFO
-// simulation of integer cost against that semaphore's effective capacity. A
-// key stands alone because the ledger promotes a waiter as soon as the
-// resources it weighs on free up, rather than making it sit out host-blocked
-// work ahead of it. A waiter on several keys starts when the last of them lets
-// it in, and a mixed-resource waiter starts at the later of its host and
-// semaphore bounds. If either required bound is unknown, the combined estimate
-// stays unknown rather than understating the wait. qs.Waiters is index-aligned
-// with snap.Waiters, the same pairing annotateETA relies on.
+// annotateSemaphoreETA replaces the host-only estimates with one simulation
+// of every host and semaphore resource. Admissions are atomic across all
+// resources, and each promotion uses the ledger's FIFO and backfill rules.
+// qs.Waiters is index-aligned with snap.Waiters, as annotateETA requires.
 func annotateSemaphoreETA(qs *wingwire.QueueState, snap admission.Snapshot) {
-	rows := semaphoreETAHolderRows(qs, snap)
-	starts := map[int]float64{}
-	unknown := map[int]bool{}
-	for _, key := range semaphoreETAKeys(snap) {
-		runs, idx := semaphoreETAWaiters(qs, snap, key)
-		capacity := semaphoreETACapacity(snap, key)
-		if capacity <= 0 {
-			for _, i := range idx {
-				unknown[i] = true
-			}
+	hostStarts := make([]*int64, len(qs.Waiters))
+	for i := range qs.Waiters {
+		hostStarts[i] = qs.Waiters[i].ExpectedStartMS
+	}
+	starts, clear := simulateAdmissionETA(qs, snap)
+	for i := range qs.Waiters {
+		qs.Waiters[i].ExpectedStartMS = nil
+		ms, ok := finiteETA(starts[i])
+		drawsHost := qs.Waiters[i].Resources.Cores > 0 || qs.Waiters[i].Resources.MemoryBytes > 0
+		if drawsHost && hostStarts[i] == nil {
 			continue
 		}
-		holders := semaphoreETAHolders(snap, rows, key)
-		for j, start := range simulateSemaphoreQueue(float64(capacity), holders, runs) {
-			if math.IsInf(start, 1) {
-				unknown[idx[j]] = true
-				continue
-			}
-			if prev, seen := starts[idx[j]]; !seen || start > prev {
-				starts[idx[j]] = start
-			}
+		if ok && drawsHost && *hostStarts[i] > ms {
+			ms = *hostStarts[i]
+		}
+		if ok {
+			qs.Waiters[i].ExpectedStartMS = &ms
 		}
 	}
-	for i := range qs.Waiters {
-		w := &qs.Waiters[i]
-		if len(snap.Waiters[i].Claims) == 0 {
-			continue
-		}
-		if unknown[i] {
-			w.ExpectedStartMS = nil
-			continue
-		}
-		start, ok := starts[i]
-		if !ok {
-			w.ExpectedStartMS = nil
-			continue
-		}
-		ms := int64(start)
-		if w.Resources.Cores > 0 || w.Resources.MemoryBytes > 0 {
-			if w.ExpectedStartMS == nil {
-				continue
-			}
-			if ms > *w.ExpectedStartMS {
-				w.ExpectedStartMS = &ms
-			}
-			continue
-		}
-		w.ExpectedStartMS = &ms
+	qs.ExpectedClearMS = nil
+	if ms, ok := finiteETA(clear); ok {
+		qs.ExpectedClearMS = &ms
 	}
 }
 
