@@ -34,6 +34,8 @@ var templateVerifyGroup = sparkwing.NewConcurrencyGroup("template-verify", spark
 	OnLimit:  sparkwing.Queue,
 })
 
+const templateVerifyMinFreeDisk = uint64(10 << 30)
+
 // TemplateVerifySummary is the gate node's typed output: proof that
 // every registered template passed. Cross-pipeline callers (the release
 // gate) receive it via sparkwing.RunAndAwait.
@@ -91,7 +93,7 @@ func (TemplateVerify) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.
 	if verifyTemplatesErr != nil {
 		return fmt.Errorf("template-verify: load registry: %w", verifyTemplatesErr)
 	}
-	plan.Resources(sparkwing.Cores(2), sparkwing.MemoryGB(4))
+	plan.Resources(sparkwing.Cores(8), sparkwing.MemoryGB(4))
 
 	build := sparkwing.Job(plan, "build-cli", &buildVerifyCLIJob{})
 	envRef := sparkwing.RefTo[verifyEnv](build)
@@ -129,6 +131,13 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	}
 	if err := cleanupTemplateScratch(os.TempDir()); err != nil {
 		return verifyEnv{}, fmt.Errorf("template-verify: reclaim stale scratch: %w", err)
+	}
+	free, err := availableTemplateVerifyDisk(os.TempDir())
+	if err != nil {
+		return verifyEnv{}, fmt.Errorf("template-verify: measure scratch capacity: %w", err)
+	}
+	if err := requireTemplateVerifyDisk(free); err != nil {
+		return verifyEnv{}, err
 	}
 	dir, err := os.MkdirTemp("", "sparkwing-template-verify-cli-*")
 	if err != nil {
@@ -179,6 +188,22 @@ func cleanupTemplateScratch(root string) error {
 		if err := os.RemoveAll(path); err != nil {
 			return fmt.Errorf("remove %s: %w", filepath.Base(path), err)
 		}
+	}
+	return nil
+}
+
+func availableTemplateVerifyDisk(path string) (uint64, error) {
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(path, &stat); err != nil {
+		return 0, err
+	}
+	return uint64(stat.Bavail) * uint64(stat.Bsize), nil
+}
+
+func requireTemplateVerifyDisk(free uint64) error {
+	if free < templateVerifyMinFreeDisk {
+		return fmt.Errorf("template-verify: scratch filesystem has %.1f GiB free; at least 10 GiB is required before compiling templates",
+			float64(free)/(1<<30))
 	}
 	return nil
 }
