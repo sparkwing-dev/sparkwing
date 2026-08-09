@@ -2,6 +2,7 @@ package wingd
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -342,5 +343,21 @@ func TestRefreshHeadroomUsesOnePairedHostAndOwnedReading(t *testing.T) {
 	}
 	if len(owned.roots) != 0 {
 		t.Fatalf("separate owned sampler received roots %v after paired sampling", owned.roots)
+	}
+}
+
+func TestNewRejectsPairedHostWithExplicitOwnedCPUSampler(t *testing.T) {
+	_, err := New(Config{
+		Home:            t.TempDir(),
+		Sampler:         &pairedHostSampler{},
+		OwnedCPUSampler: &fixedOwnedCPUSampler{},
+	})
+	if err == nil {
+		t.Fatal("New accepted two configured owned CPU authorities")
+	}
+	for _, field := range []string{"Sampler", "OwnedCPUSampler"} {
+		if !strings.Contains(err.Error(), field) {
+			t.Fatalf("New error = %q, want conflicting field %q named", err, field)
+		}
 	}
 }
