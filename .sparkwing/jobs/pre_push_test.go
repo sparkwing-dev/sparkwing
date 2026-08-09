@@ -4,8 +4,17 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestMarkdownlintCommandIsPinnedAndSelfProvisioning(t *testing.T) {
+	for _, want := range []string{"npx --yes", "markdownlint-cli2@0.23.2"} {
+		if !strings.Contains(markdownlintCommand, want) {
+			t.Errorf("markdownlint command %q missing %q", markdownlintCommand, want)
+		}
+	}
+}
 
 func TestDogfoodPipelineModuleIsTidy(t *testing.T) {
 	cmd := exec.Command("go", "mod", "tidy", "-diff")
