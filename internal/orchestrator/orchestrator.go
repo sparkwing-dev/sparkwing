@@ -900,7 +900,7 @@ func dispatch(
 		state.scheduleExpansion(exp)
 	}
 
-	if waitForDispatch(&state.wg, dispatchWaitTimeout) == dispatchWaitTimedOut {
+	if waitForDispatch(&state.wg, dispatchWaitTimeout, state.admissionWaits) == dispatchWaitTimedOut {
 		stuck := stuckNodeIDs(plan, state)
 		stack := dumpAllGoroutineStacks(dispatchStackDumpBytes)
 		summary, _ := json.Marshal(map[string]any{
@@ -1501,7 +1501,8 @@ type dispatchState struct {
 	// at dispatch entry. Empty map = no filter.
 	onlySkip map[string]string
 
-	wg sync.WaitGroup
+	wg             sync.WaitGroup
+	admissionWaits *admissionWaitTracker
 }
 
 func newDispatchState(
@@ -1529,27 +1530,28 @@ func newDispatchState(
 		sem = make(chan struct{}, maxParallel)
 	}
 	s := &dispatchState{
-		sem:       sem,
-		ctx:       ctx,
-		backends:  backends,
-		runner:    r,
-		runID:     runID,
-		pipeline:  pipeline,
-		plan:      plan,
-		delegate:  delegate,
-		retryOf:   retryOf,
-		masker:    masker,
-		doneCh:    map[string]chan struct{}{},
-		outputs:   map[string]any{},
-		outputsJS: map[string][]byte{},
-		outcomes:  map[string]sparkwing.Outcome{},
-		errors:    map[string]string{},
-		failures:  map[string]sparkwing.Failure{},
-		starts:    map[string]time.Time{},
-		durations: map[string]time.Duration{},
-		claimedBy: map[string]string{},
-		scheduled: map[string]*sparkwing.JobNode{},
-		debug:     debug,
+		sem:            sem,
+		ctx:            ctx,
+		backends:       backends,
+		runner:         r,
+		runID:          runID,
+		pipeline:       pipeline,
+		plan:           plan,
+		delegate:       delegate,
+		retryOf:        retryOf,
+		masker:         masker,
+		doneCh:         map[string]chan struct{}{},
+		outputs:        map[string]any{},
+		outputsJS:      map[string][]byte{},
+		outcomes:       map[string]sparkwing.Outcome{},
+		errors:         map[string]string{},
+		failures:       map[string]sparkwing.Failure{},
+		starts:         map[string]time.Time{},
+		durations:      map[string]time.Duration{},
+		claimedBy:      map[string]string{},
+		scheduled:      map[string]*sparkwing.JobNode{},
+		debug:          debug,
+		admissionWaits: newAdmissionWaitTracker(),
 	}
 	if ipr, ok := r.(*InProcessRunner); ok {
 		s.inlineRunner = ipr
@@ -1567,6 +1569,7 @@ func newDispatchState(
 		s.resolverCtx = ctx
 	}
 	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, leaseChildToken, leaseHostAdmitted, s.plan.PriorityValue())
+	s.resolverCtx = withAdmissionWaitTracker(s.resolverCtx, s.admissionWaits)
 	s.resolverCtx = sparkwingruntime.WithResolver(s.resolverCtx, s.resolve)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())

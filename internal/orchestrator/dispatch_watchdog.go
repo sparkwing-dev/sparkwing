@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"context"
 	"log/slog"
 	"runtime"
 	"sync"
@@ -8,6 +9,65 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+type admissionWaitTracker struct {
+	mu      sync.Mutex
+	active  int
+	changed chan struct{}
+}
+
+func newAdmissionWaitTracker() *admissionWaitTracker {
+	return &admissionWaitTracker{changed: make(chan struct{}, 1)}
+}
+
+func (t *admissionWaitTracker) begin() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.active++
+	t.mu.Unlock()
+	t.signal()
+}
+
+func (t *admissionWaitTracker) end() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	if t.active > 0 {
+		t.active--
+	}
+	t.mu.Unlock()
+	t.signal()
+}
+
+func (t *admissionWaitTracker) signal() {
+	select {
+	case t.changed <- struct{}{}:
+	default:
+	}
+}
+
+func (t *admissionWaitTracker) waiting() bool {
+	if t == nil {
+		return false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.active > 0
+}
+
+type admissionWaitTrackerKey struct{}
+
+func withAdmissionWaitTracker(ctx context.Context, tracker *admissionWaitTracker) context.Context {
+	return context.WithValue(ctx, admissionWaitTrackerKey{}, tracker)
+}
+
+func admissionWaitTrackerFromContext(ctx context.Context) *admissionWaitTracker {
+	tracker, _ := ctx.Value(admissionWaitTrackerKey{}).(*admissionWaitTracker)
+	return tracker
+}
 
 // DefaultDispatchWaitTimeout bounds how long the dispatcher's
 // post-DAG drain (state.wg.Wait) may block before the run is declared
@@ -42,7 +102,7 @@ const (
 // Returning early is the entire point: a hung Wait holds the run's
 // concurrency-namespace slot indefinitely and locks the rest of the
 // fleet behind a process that will never make progress.
-func waitForDispatch(wg *sync.WaitGroup, timeout time.Duration) dispatchWaitResult {
+func waitForDispatch(wg *sync.WaitGroup, timeout time.Duration, waits *admissionWaitTracker) dispatchWaitResult {
 	if timeout <= 0 {
 		wg.Wait()
 		return dispatchWaitDone
@@ -52,11 +112,42 @@ func waitForDispatch(wg *sync.WaitGroup, timeout time.Duration) dispatchWaitResu
 		wg.Wait()
 		close(done)
 	}()
-	select {
-	case <-done:
-		return dispatchWaitDone
-	case <-time.After(timeout):
-		return dispatchWaitTimedOut
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for {
+		if waits != nil && waits.waiting() {
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			select {
+			case <-done:
+				return dispatchWaitDone
+			case <-waits.changed:
+			}
+			timer.Reset(timeout)
+			continue
+		}
+		select {
+		case <-done:
+			return dispatchWaitDone
+		case <-timer.C:
+			if waits != nil && waits.waiting() {
+				timer.Reset(timeout)
+				continue
+			}
+			return dispatchWaitTimedOut
+		case <-waits.changed:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(timeout)
+		}
 	}
 }
 
