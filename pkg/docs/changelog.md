@@ -70,6 +70,18 @@ code change to unlock.
 - **queue:** Start-time estimates now remain unknown when an active holder has
   outlived its measured duration, instead of promising immediate admission
   while capacity is still occupied.
+- **queue:** Start and clear estimates now simulate host and semaphore
+  constraints together, including atomic multi-resource admission and
+  backfill. A waiter blocked by a semaphore no longer reports the earlier
+  host-only estimate, and unknown or overflowing resource bounds stay unknown.
+- **queue telemetry:** Run listings retain concurrent node admission waits,
+  distinguish plan-level admission from node admission, and correlate terminal
+  events with the matching request. Interleaved or stale events no longer erase
+  a live wait or make a run-level queue position look like node execution.
+- **local admission:** Explicit cancellation is persisted before execution is
+  signalled, applies atomically to every member of a shared lease, survives
+  daemon restart and connection replacement, and cannot resurrect a terminal
+  run through admission or reattachment.
 - **release:** Self-release validation now requires an isolated
   `SPARKWING_HOME`, preventing a prerelease binary with a newer embedded schema
   from migrating the operational runs store before installed readers upgrade.
