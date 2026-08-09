@@ -115,6 +115,15 @@ func TestReleasePlanGatesBlockTagPush(t *testing.T) {
 	}
 }
 
+func TestReleasePlanDoesNotCommitChangelogBeforeIndependentGatesPass(t *testing.T) {
+	deps := ancestors(t, releasePlan(t), "prepare-changelog")
+	for _, gate := range []string{"gate-template-verify", "gate-release-lineage"} {
+		if !deps[gate] {
+			t.Errorf("prepare-changelog must depend on %s so a failed gate leaves HEAD unchanged", gate)
+		}
+	}
+}
+
 func TestReleasePlanRestoreDoesNotGateTagPush(t *testing.T) {
 	plan := releasePlan(t)
 
