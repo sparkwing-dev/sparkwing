@@ -220,33 +220,42 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 }
 
 func upgradeLegacyAdmitRanks(snap *Snapshot) {
-	if snap.AdmitSeq != 0 {
+	if !ranklessLegacySnapshot(*snap) {
 		return
 	}
-	leaseOrder := make([]int, len(snap.Leases))
-	for i := range leaseOrder {
-		leaseOrder[i] = i
-	}
-	sort.Slice(leaseOrder, func(i, j int) bool {
-		return snap.Leases[leaseOrder[i]].Seq < snap.Leases[leaseOrder[j]].Seq
+	sort.Slice(snap.Leases, func(i, j int) bool {
+		return snap.Leases[i].Seq < snap.Leases[j].Seq
 	})
-	for _, i := range leaseOrder {
+	for i := range snap.Leases {
 		snap.AdmitSeq++
 		snap.Leases[i].Admit = snap.AdmitSeq
 		snap.Leases[i].OwnerAdmit = snap.AdmitSeq
 	}
-	waiterOrder := make([]int, len(snap.Waiters))
-	for i := range waiterOrder {
-		waiterOrder[i] = i
-	}
-	sort.Slice(waiterOrder, func(i, j int) bool {
-		return snap.Waiters[waiterOrder[i]].Arrival < snap.Waiters[waiterOrder[j]].Arrival
+	sort.Slice(snap.Waiters, func(i, j int) bool {
+		return snap.Waiters[i].Arrival < snap.Waiters[j].Arrival
 	})
-	for _, i := range waiterOrder {
+	for i := range snap.Waiters {
 		snap.AdmitSeq++
 		snap.Waiters[i].Admit = snap.AdmitSeq
 		snap.Waiters[i].OwnerAdmit = snap.AdmitSeq
 	}
+}
+
+func ranklessLegacySnapshot(snap Snapshot) bool {
+	if snap.AdmitSeq != 0 {
+		return false
+	}
+	for _, lease := range snap.Leases {
+		if lease.Admit != 0 || lease.OwnerAdmit != 0 || lease.OwnerID != "" {
+			return false
+		}
+	}
+	for _, waiter := range snap.Waiters {
+		if waiter.Admit != 0 || waiter.OwnerAdmit != 0 || waiter.OwnerID != "" {
+			return false
+		}
+	}
+	return true
 }
 
 func (l *Ledger) restoreLease(ls LeaseState) error {

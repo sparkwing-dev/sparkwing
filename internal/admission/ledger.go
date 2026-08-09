@@ -473,8 +473,7 @@ func (l *Ledger) ownerAdmissionRank(ownerID string) uint64 {
 	return l.leases[leaseID].admit
 }
 
-// ProvesOwner reports whether token belongs to the claimed top-level owner
-// or to an internal participant whose captured owner is that run.
+// ProvesOwner reports whether token's canonical top-level owner is ownerID.
 func (l *Ledger) ProvesOwner(token, ownerID string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -483,10 +482,12 @@ func (l *Ledger) ProvesOwner(token, ownerID string) bool {
 	if !ok {
 		return false
 	}
-	if l.memberOf[ownerID] == leaseID {
-		return true
+	proof := l.leases[leaseID]
+	canonicalOwnerID := proof.ownerID
+	if canonicalOwnerID == "" {
+		canonicalOwnerID = proof.requestID
 	}
-	return l.leases[leaseID].ownerID == ownerID
+	return canonicalOwnerID == ownerID
 }
 
 // trimCores renders a millicore count as cores for an operator-facing
