@@ -9,11 +9,12 @@ pipeline refuses to ship a new version without a matching entry below.
 
 Each entry leads with a bold scope (`**sdk:**`, `**cli:**`, `**controller:**`,
 `**cache:**`, `**config:**`, `**release:**`, `**docs:**`, ...) so you can
-scan for the surface that affects you. Breaking changes get an inline
-`(Breaking)` marker after the scope and a link to a section in that
-release's [migration guide](docs/migrations/) -- click through for
-before/after code, ordering guidance, and gotchas the inline summary can't
-fit.
+scan for the surface that affects you. Breaking changes are marked
+`- **scope (Breaking):**` -- the marker goes inside the bold scope, before
+the colon, which is the only form the changelog lint gate recognizes --
+plus a link to a section in that release's
+[migration guide](docs/migrations/) -- click through for before/after code,
+ordering guidance, and gotchas the inline summary can't fit.
 
 What belongs here:
 
@@ -47,140 +48,24 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Docs
+
+- **docs:** repository-wide accuracy audit. Every documentation surface was
+  verified against the code and corrected where it had drifted; the largest
+  fixes: the `Plan` interface signature and registration pattern in
+  getting-started, the README's public-API map (`pkg/...` is covered API, not
+  "may change at any time"), `schedule:` triggers documented as declarative
+  (nothing evaluates the cron; drive it with an external timer),
+  `run <pipeline> config` documented as the declared-secrets view, the token
+  `--scope` example corrected to real scopes, and the GitHub Actions
+  ci-embedded example rewritten around committed profiles with the real
+  `--sw-mode` / `--sw-workers` flags.
+- **docs:** the doc gates now also cover the surfaces outside `docs/`:
+  root-level markdown, chart/install/web READMEs, pipeline registrations in
+  `.sparkwing/`, `examples/`, and `docs/_sidebar.json` completeness (both
+  directions, stale exclusions included).
 
 ## [v0.23.0] - 2026-08-08
-### Fixed
-
-- **cli/portability:** the upgrade notice's version memory is now kept per
-  install instead of in one shared file. A machine with more than one sparkwing
-  binary -- a `go install` build in `$GOBIN` beside a source install in
-  `~/.local/bin` -- resolves a different one from an interactive shell than from
-  a launchd job, cron entry, or systemd unit, because PATH is not one list. Each
-  invocation used to stamp `~/.sparkwing/last-version` with its own version, so
-  the record read as an upgrade followed by a downgrade followed by an upgrade,
-  none of which happened. Each install now stamps its own file under
-  `~/.sparkwing/last-version.d/`, keyed by a digest of its resolved path
-  (symlinked names collapse into one install), so no copy can rewrite another's
-  memory; the old `last-version` file is no longer read and is safe to delete.
-  The split machine itself is reported, read-only, wherever it can be seen:
-  `sparkwing doctor` scans PATH plus the well-known install directories --
-  a scan limited to the caller's own PATH would call the machine clean from the
-  very shell whose neighbor is the rival -- makes the sweep unclean, and prints
-  the exact reversible `mv` that retires each extra copy; `sparkwing info`
-  reports the running binary's resolved path and any other installs
-  (`executable` in `-o json`, identity lines in `--for-agent`); `sparkwing
-  update` names other copies after installing, and its `go install` fallback now
-  states exactly where the new binary landed, including when the binary you ran
-  was not the one replaced; `bin/install.sh` reports copies outside its
-  destination, no longer modifies anything outside `$DEST`, reads `go
-  install`'s directory from the first `GOPATH` element when `GOPATH` is a
-  list, and succeeds with `$HOME` unset (the report just skips home-derived
-  directories). Unix remedies shell-quote each path and guard both the retire
-  destination and the undo source, so repeated cleanup cannot overwrite a
-  file. Windows reports both exact paths and asks for File Explorer or
-  shell-specific quoting instead of claiming one command is safe in cmd.exe
-  and PowerShell. Nothing deletes, renames, or picks between binaries. See
-  [docs/local-execution.md](docs/local-execution.md).
-
-- **web:** the dashboard's services panel now reads the health body it
-  receives instead of classifying on the status code alone. Every sparkwing
-  service reports partial failure in-body while still answering HTTP 200 --
-  only a total outage turns into a 5xx -- so a filling log volume, a stalled
-  gitcache fetch loop, an unwritable cache directory, and a controller whose
-  runs are mostly failing all showed up as a healthy lamp. Those services now
-  render amber with the upstream `problems` listed beneath them, which is what
-  the panel was already built to display. A service answering 200 outside that
-  JSON contract still reads as healthy, so nothing that was green for a good
-  reason turns amber. `sparkwing configure profiles test` has always decoded
-  the body; the two now share one implementation of the contract and can no
-  longer disagree about the same service at the same moment. The panel's own
-  slow-response finding survives a degraded body rather than being folded into
-  it, so a service that is both slow and reporting problems lists both, and the
-  probe still drains what it did not read so the panel keeps reusing one
-  connection per service instead of opening a new one every refresh.
-- **local execution/cache:** `RunAndAwait` children now execute from a
-  parent-owned binary lease instead of a pathname in the shared compile cache.
-  Clearing or replacing that cache while a parent is live can no longer strand
-  its children, and a missing lease now reports its cache provenance and the
-  recovery command.
-- **chaos:** soak actors and their descendants now stay in exact owned process
-  groups whose unreaped leaders anchor cleanup until every descendant is gone.
-  Daemon queries are bounded, an independent process guard fails fast when
-  owned processes grow past their limit or any one of them stays unreaped, and
-  the scheduled runner owns the entire isolated test session so test timeouts
-  and signals cannot orphan nested groups.
-- **cli/portability:** `cluster image rollout` no longer guesses the author's
-  `~/code/gitops` checkout. Select the repository explicitly with
-  `--gitops-repo` or `SPARKWING_GITOPS_REPO`; if neither is set, the command
-  exits before reading or changing a repository. The public checkout also no
-  longer carries configuration for a private work manager.
-- **admission:** an exact clean source build now supersedes the release it was
-  built from while remaining older than later releases. Opaque worktree and
-  dirty builds remain unordered against releases, preserving shared-daemon
-  behavior without leaving an installed same-release source build behind its
-  resident daemon. Version-change notices now say `changed` rather than
-  claiming every transition is an upgrade.
-- **cli:** `daemon status` and `daemon restart` now default to pretty output on
-  a terminal and JSON when piped; an explicit `-o` continues to win.
-- **cli:** `info --for-agent` now marks the one part of its output that is safe
-  to keep. A `8<` block carries what this repo uses and the single command that
-  reports everything current -- no versions, paths, or command catalogs, so a
-  copy in an instruction file cannot go stale. Everything after it is labelled
-  wake-scoped, and now includes an authoring quickstart (templates, the
-  `authoring` guide, lint/run) so a first-time author does not have to go
-  looking. The block also ends with this repo's state -- whether a
-  `.sparkwing/` exists, how many pipelines it holds, whether Go is on PATH --
-  and the CLI's own examples name it as the first command an agent should run,
-  rather than `info -o json`. The block used to send readers to `info -o json`
-  for exactly that, and every recorded trial made the second call before doing
-  anything else: a whole model round to learn one line.
-- **cli:** `pipeline lint` with no target now lints every pipeline instead of
-  printing its help and exiting non-zero. Linting is read-only static
-  analysis, so the whole repo is both the safe default and what the bare
-  command plainly meant; `--all` still says it explicitly.
-- **cli:** `sparkwing examples` (the registry browser, renamed from `pipeline
-  templates` later in this release) whose `--category`/`--cloud` filter
-  matches nothing now lists the values that do exist. Recovering from a guessed
-  filter previously meant dumping the unfiltered registry and
-  reverse-engineering the vocabulary from it.
-- **cli:** `pipeline new` run from a source-built CLI no longer pins an SDK
-  version the module proxy cannot resolve. A local build stamps
-  `v<semver>-dev+<sha>`, which is neither a `+dirty` marker nor a
-  pseudo-version, so it passed the resolvable-version check and was written
-  straight into the scaffold's `go.mod`. The result did not build, and
-  `version update --sdk` could not repair it: `go get` parses the broken
-  `go.mod` before it can bump anything, so the fix was blocked by the
-  problem. Build metadata other than `+incompatible`, and any `-dev`
-  prerelease, now fall back to the pinned release.
-- **docs:** the SDK reference now covers the SDK's subpackages
-  (`sparkwing/docker`, `sparkwing/git`, `sparkwing/inputs`,
-  `sparkwing/planguard`, `sparkwing/services`), each with its import alias.
-  The generator documented only the root package, so 42 exported
-  declarations an authoring agent needs for any pipeline that builds an
-  image or reads the branch were reachable only by opening the module
-  cache.
-- **docs:** the SDK reference now lists constants declared with a named type,
-  so every enum in the SDK is spellable from the docs alone. `go/doc` files a
-  typed constant under its type rather than the package, and the generator
-  emitted only the package-level set, which silently dropped values such as
-  `ApprovalApprove`, `NoCache`, `Queue`, and `StageAction` -- a reader shown
-  `OnExpiry ApprovalTimeoutPolicy` had no way to learn what to assign it.
-- **controller:** local failed-run retries now compile and execute from an
-  immutable detached snapshot of the source run's recorded Git revision, and
-  verify its full origin identity and complete plan snapshot before node
-  creation. Dirty or subsequently edited working-tree files cannot change retry
-  behavior. If that provenance is unavailable, retry fails clearly instead of
-  falling back to an ambient checkout or another registered repo.
-- **dashboard:** following an approval link now selects the run it points at.
-  The Runs list holds the 200 most recent runs, so an approval that had been
-  waiting a while opened the detail pane while nothing on the left moved --
-  there was no row to highlight or scroll to. The run being viewed is now
-  spliced into the list when the window or the active filters would exclude
-  it. `?node=` is read as well as written, so a link lands on the node it
-  names and node selection survives a reload; following one from the
-  approvals dropdown while already on `/runs` re-selects instead of only
-  changing the address bar.
-
 ### Added
 
 - **web/chart:** `sparkwing-web --cache <url>` adds sparkwing-cache to the
@@ -338,46 +223,6 @@ code change to unlock.
   step queued behind a tool budget could report its position but never how
   long.
 
-### Fixed
-
-- **docs:** `pkg/docs.Section` gains a `Breadcrumb` field naming the headings a
-  section sits under. Additive; existing fields are unchanged.
-
-- **docs:** search hits carry the headings they sit under. The generated CLI
-  reference has one `Examples` section per verb -- 139 identically titled --
-  so a result list of them said nothing about which verb each belonged to, and
-  they were indistinguishable to the ranking too. Hits now read
-  `` `sparkwing debug run` > Examples ``. A breadcrumb match scores below a
-  heading match, since it says what a section sits under rather than what it
-  is about.
-
-- **cli:** `pipeline new` says a declared trigger is not yet live. The `on:`
-  block records intent; the controller still has to receive the event, which
-  means pointing a webhook at the pipeline. An agent trial read the success
-  output, did not open the yaml, and noted it would reasonably have reported
-  the trigger as working.
-
-- **docs:** `docs search` ranked a table of CLI verb names above the page that
-  answers the question. "command" is a substring of "Subcommands", and a
-  substring hit on a heading scored the same as a real one, so the generated
-  reference's subcommand tables won "run shell command" -- and won the
-  shorter-is-better tie-break too, because a table is short and an explanation
-  is not. Heading and body matches are now scored by whether the token matches
-  as a word, as a word prefix (so "shell" reaches "shelling"), or merely as a
-  substring, and single-character tokens are dropped since they match
-  everywhere and narrow nothing. The two sections about running a shell
-  command are also titled with the words people search for rather than with
-  the API's own vocabulary; ranking can only surface what is written.
-
-- **cli:** the `minimal` scaffold's stub named `ExecIn` and `BashIn`, neither of
-  which the SDK has ever had -- it exports `Exec` and `Bash`. That comment is
-  the first thing an editor of a fresh pipeline reads, and every agent in a
-  six-config sweep searched the docs for those spellings, found nothing, and
-  fell back to reading the whole SDK reference. The stub also now shows the
-  shell-out-and-propagate-failure shape it was pointing at. A test holds every
-  scaffold's CamelCase identifiers -- in comments as well as calls, since this
-  one was prose -- to symbols the SDK actually exports.
-
 ### Changed
 
 - **cli:** `pipeline explain` now reports what fires a pipeline, and says so
@@ -516,6 +361,176 @@ code change to unlock.
   with the log path still named.
 
 ### Fixed
+
+- **cli/portability:** the upgrade notice's version memory is now kept per
+  install instead of in one shared file. A machine with more than one sparkwing
+  binary -- a `go install` build in `$GOBIN` beside a source install in
+  `~/.local/bin` -- resolves a different one from an interactive shell than from
+  a launchd job, cron entry, or systemd unit, because PATH is not one list. Each
+  invocation used to stamp `~/.sparkwing/last-version` with its own version, so
+  the record read as an upgrade followed by a downgrade followed by an upgrade,
+  none of which happened. Each install now stamps its own file under
+  `~/.sparkwing/last-version.d/`, keyed by a digest of its resolved path
+  (symlinked names collapse into one install), so no copy can rewrite another's
+  memory; the old `last-version` file is no longer read and is safe to delete.
+  The split machine itself is reported, read-only, wherever it can be seen:
+  `sparkwing doctor` scans PATH plus the well-known install directories --
+  a scan limited to the caller's own PATH would call the machine clean from the
+  very shell whose neighbor is the rival -- makes the sweep unclean, and prints
+  the exact reversible `mv` that retires each extra copy; `sparkwing info`
+  reports the running binary's resolved path and any other installs
+  (`executable` in `-o json`, identity lines in `--for-agent`); `sparkwing
+  update` names other copies after installing, and its `go install` fallback now
+  states exactly where the new binary landed, including when the binary you ran
+  was not the one replaced; `bin/install.sh` reports copies outside its
+  destination, no longer modifies anything outside `$DEST`, reads `go
+  install`'s directory from the first `GOPATH` element when `GOPATH` is a
+  list, and succeeds with `$HOME` unset (the report just skips home-derived
+  directories). Unix remedies shell-quote each path and guard both the retire
+  destination and the undo source, so repeated cleanup cannot overwrite a
+  file. Windows reports both exact paths and asks for File Explorer or
+  shell-specific quoting instead of claiming one command is safe in cmd.exe
+  and PowerShell. Nothing deletes, renames, or picks between binaries. See
+  [docs/local-execution.md](docs/local-execution.md).
+
+- **web:** the dashboard's services panel now reads the health body it
+  receives instead of classifying on the status code alone. Every sparkwing
+  service reports partial failure in-body while still answering HTTP 200 --
+  only a total outage turns into a 5xx -- so a filling log volume, a stalled
+  gitcache fetch loop, an unwritable cache directory, and a controller whose
+  runs are mostly failing all showed up as a healthy lamp. Those services now
+  render amber with the upstream `problems` listed beneath them, which is what
+  the panel was already built to display. A service answering 200 outside that
+  JSON contract still reads as healthy, so nothing that was green for a good
+  reason turns amber. `sparkwing configure profiles test` has always decoded
+  the body; the two now share one implementation of the contract and can no
+  longer disagree about the same service at the same moment. The panel's own
+  slow-response finding survives a degraded body rather than being folded into
+  it, so a service that is both slow and reporting problems lists both, and the
+  probe still drains what it did not read so the panel keeps reusing one
+  connection per service instead of opening a new one every refresh.
+- **local execution/cache:** `RunAndAwait` children now execute from a
+  parent-owned binary lease instead of a pathname in the shared compile cache.
+  Clearing or replacing that cache while a parent is live can no longer strand
+  its children, and a missing lease now reports its cache provenance and the
+  recovery command.
+- **chaos:** soak actors and their descendants now stay in exact owned process
+  groups whose unreaped leaders anchor cleanup until every descendant is gone.
+  Daemon queries are bounded, an independent process guard fails fast when
+  owned processes grow past their limit or any one of them stays unreaped, and
+  the scheduled runner owns the entire isolated test session so test timeouts
+  and signals cannot orphan nested groups.
+- **cli/portability:** `cluster image rollout` no longer guesses the author's
+  `~/code/gitops` checkout. Select the repository explicitly with
+  `--gitops-repo` or `SPARKWING_GITOPS_REPO`; if neither is set, the command
+  exits before reading or changing a repository. The public checkout also no
+  longer carries configuration for a private work manager.
+- **admission:** an exact clean source build now supersedes the release it was
+  built from while remaining older than later releases. Opaque worktree and
+  dirty builds remain unordered against releases, preserving shared-daemon
+  behavior without leaving an installed same-release source build behind its
+  resident daemon. Version-change notices now say `changed` rather than
+  claiming every transition is an upgrade.
+- **cli:** `daemon status` and `daemon restart` now default to pretty output on
+  a terminal and JSON when piped; an explicit `-o` continues to win.
+- **cli:** `info --for-agent` now marks the one part of its output that is safe
+  to keep. A `8<` block carries what this repo uses and the single command that
+  reports everything current -- no versions, paths, or command catalogs, so a
+  copy in an instruction file cannot go stale. Everything after it is labelled
+  wake-scoped, and now includes an authoring quickstart (templates, the
+  `authoring` guide, lint/run) so a first-time author does not have to go
+  looking. The block also ends with this repo's state -- whether a
+  `.sparkwing/` exists, how many pipelines it holds, whether Go is on PATH --
+  and the CLI's own examples name it as the first command an agent should run,
+  rather than `info -o json`. The block used to send readers to `info -o json`
+  for exactly that, and every recorded trial made the second call before doing
+  anything else: a whole model round to learn one line.
+- **cli:** `pipeline lint` with no target now lints every pipeline instead of
+  printing its help and exiting non-zero. Linting is read-only static
+  analysis, so the whole repo is both the safe default and what the bare
+  command plainly meant; `--all` still says it explicitly.
+- **cli:** `sparkwing examples` (the registry browser, renamed from `pipeline
+  templates` later in this release) whose `--category`/`--cloud` filter
+  matches nothing now lists the values that do exist. Recovering from a guessed
+  filter previously meant dumping the unfiltered registry and
+  reverse-engineering the vocabulary from it.
+- **cli:** `pipeline new` run from a source-built CLI no longer pins an SDK
+  version the module proxy cannot resolve. A local build stamps
+  `v<semver>-dev+<sha>`, which is neither a `+dirty` marker nor a
+  pseudo-version, so it passed the resolvable-version check and was written
+  straight into the scaffold's `go.mod`. The result did not build, and
+  `version update --sdk` could not repair it: `go get` parses the broken
+  `go.mod` before it can bump anything, so the fix was blocked by the
+  problem. Build metadata other than `+incompatible`, and any `-dev`
+  prerelease, now fall back to the pinned release.
+- **docs:** the SDK reference now covers the SDK's subpackages
+  (`sparkwing/docker`, `sparkwing/git`, `sparkwing/inputs`,
+  `sparkwing/planguard`, `sparkwing/services`), each with its import alias.
+  The generator documented only the root package, so 42 exported
+  declarations an authoring agent needs for any pipeline that builds an
+  image or reads the branch were reachable only by opening the module
+  cache.
+- **docs:** the SDK reference now lists constants declared with a named type,
+  so every enum in the SDK is spellable from the docs alone. `go/doc` files a
+  typed constant under its type rather than the package, and the generator
+  emitted only the package-level set, which silently dropped values such as
+  `ApprovalApprove`, `NoCache`, `Queue`, and `StageAction` -- a reader shown
+  `OnExpiry ApprovalTimeoutPolicy` had no way to learn what to assign it.
+- **controller:** local failed-run retries now compile and execute from an
+  immutable detached snapshot of the source run's recorded Git revision, and
+  verify its full origin identity and complete plan snapshot before node
+  creation. Dirty or subsequently edited working-tree files cannot change retry
+  behavior. If that provenance is unavailable, retry fails clearly instead of
+  falling back to an ambient checkout or another registered repo.
+- **dashboard:** following an approval link now selects the run it points at.
+  The Runs list holds the 200 most recent runs, so an approval that had been
+  waiting a while opened the detail pane while nothing on the left moved --
+  there was no row to highlight or scroll to. The run being viewed is now
+  spliced into the list when the window or the active filters would exclude
+  it. `?node=` is read as well as written, so a link lands on the node it
+  names and node selection survives a reload; following one from the
+  approvals dropdown while already on `/runs` re-selects instead of only
+  changing the address bar.
+
+
+- **docs:** `pkg/docs.Section` gains a `Breadcrumb` field naming the headings a
+  section sits under. Additive; existing fields are unchanged.
+
+- **docs:** search hits carry the headings they sit under. The generated CLI
+  reference has one `Examples` section per verb -- 139 identically titled --
+  so a result list of them said nothing about which verb each belonged to, and
+  they were indistinguishable to the ranking too. Hits now read
+  `` `sparkwing debug run` > Examples ``. A breadcrumb match scores below a
+  heading match, since it says what a section sits under rather than what it
+  is about.
+
+- **cli:** `pipeline new` says a declared trigger is not yet live. The `on:`
+  block records intent; the controller still has to receive the event, which
+  means pointing a webhook at the pipeline. An agent trial read the success
+  output, did not open the yaml, and noted it would reasonably have reported
+  the trigger as working.
+
+- **docs:** `docs search` ranked a table of CLI verb names above the page that
+  answers the question. "command" is a substring of "Subcommands", and a
+  substring hit on a heading scored the same as a real one, so the generated
+  reference's subcommand tables won "run shell command" -- and won the
+  shorter-is-better tie-break too, because a table is short and an explanation
+  is not. Heading and body matches are now scored by whether the token matches
+  as a word, as a word prefix (so "shell" reaches "shelling"), or merely as a
+  substring, and single-character tokens are dropped since they match
+  everywhere and narrow nothing. The two sections about running a shell
+  command are also titled with the words people search for rather than with
+  the API's own vocabulary; ranking can only surface what is written.
+
+- **cli:** the `minimal` scaffold's stub named `ExecIn` and `BashIn`, neither of
+  which the SDK has ever had -- it exports `Exec` and `Bash`. That comment is
+  the first thing an editor of a fresh pipeline reads, and every agent in a
+  six-config sweep searched the docs for those spellings, found nothing, and
+  fell back to reading the whole SDK reference. The stub also now shows the
+  shell-out-and-propagate-failure shape it was pointing at. A test holds every
+  scaffold's CamelCase identifiers -- in comments as well as calls, since this
+  one was prose -- to symbols the SDK actually exports.
+
 
 - **admission:** Zero-cost run-registration connections no longer suppress the
   empty-machine liveness floor. When external CPU or memory pressure leaves no

@@ -36,8 +36,9 @@ primitives.
 
 - ArgoCD sync, Kustomize patch, `deploy.Run` composite
 - ECR detection, AWS profile discovery, netrc seeding
-- Go-specific checks (`GoFmt`, `GoVet`, `GoTest`) - future `sparkwing-go` library
-- Ruby, Python, Java toolchain helpers - future per-language libraries
+- Go-specific checks (`GoFmt`, `GoVet`, `GoTest`) in sparks-core's `checks`
+  block module
+- Toolchain helpers for other languages (Ruby, Python, Java)
 - Anything that ties a pipeline to a specific registry, control plane, or
   cloud provider
 
@@ -55,7 +56,7 @@ valid JSON with the following fields.
 | `description` | string | yes | One-sentence summary. Used by registry and discovery tooling. |
 | `author` | string | yes | GitHub handle, org, or author name. Used only for display. |
 | `version` | string | no | Current library version, semver with `v` prefix (e.g. `v0.4.6`). When absent, the resolver uses the latest Go module tag as truth. Kept in `spark.json` mostly for local inspection; the Go module tag is authoritative. |
-| `sdk_min_version` | string | no | Minimum compatible sparkwing SDK version (semver with `v` prefix). The resolver warns when a consumer's SDK is older. Omit during pre-1.0 churn. |
+| `sdk_min_version` | string | no | Minimum compatible sparkwing SDK version (semver with `v` prefix). Declarative metadata for discovery tooling; no sparkwing command reads it. Omit during pre-1.0 churn. |
 | `stability` | string | no | One of `experimental`, `beta`, `stable`. Defaults to `experimental`. Informational only; does not affect resolution. |
 | `packages` | array | yes | Non-empty list of sub-packages within the module. Each entry documents an import path. See the `packages[]` schema below. |
 | `dependencies` | array | no | Other sparks libraries this one depends on. Pure metadata - actual Go module resolution still happens via the dependent library's own `go.mod`. Shape mirrors `sparks:` entries: `{name, source, version}`. |
@@ -70,15 +71,14 @@ valid JSON with the following fields.
 
 ### Example `spark.json`
 
-Current-truth reference is `sparks-core/spark.json`. Abbreviated:
+A manifest matching the schema above:
 
 ```json
 {
-  "name": "sparks-core",
-  "description": "Core pipeline library for sparkwing - Docker builds, GitOps deploys, AWS helpers, and pre-commit checks",
+  "name": "my-sparks",
+  "description": "Pipeline helpers for the acme stack - Docker builds, GitOps deploys, AWS helpers",
   "author": "your-github-handle",
-  "version": "v0.10.0",
-  "sdk_min_version": "v0.9.0",
+  "version": "v0.4.0",
   "stability": "beta",
   "packages": [
     {
@@ -88,14 +88,12 @@ Current-truth reference is `sparks-core/spark.json`. Abbreviated:
     {
       "path": "gitops",
       "description": "GitOps deployment with kustomize patching, retry, and ArgoCD sync"
-    },
-    {
-      "path": "aws",
-      "description": "AWS profile detection and ECR authentication"
     }
   ]
 }
 ```
+
+`sparkwing pipeline sparks lint` validates this shape.
 
 ## Consumer manifest: the `sparks:` block
 
@@ -109,8 +107,8 @@ consumer's `go.mod` and no overlay is created.
 ```yaml
 # .sparkwing/sparkwing.yaml
 sparks:
-  - name: <short name>            # must match the library's spark.json "name"
-    source: <go module path>      # e.g. github.com/sparkwing-dev/sparks-core
+  - name: <short name>            # advisory display label
+    source: <go module path>      # e.g. github.com/sparkwing-dev/sparks-core/docker
     version: <constraint>         # exact tag, range, or "latest"
 ```
 
@@ -122,16 +120,20 @@ Per-entry fields:
 | `source` | string | yes | Go module path. Private modules need GOPRIVATE + netrc/SSH configured as usual. |
 | `version` | string | yes | `latest`, an exact tag (`v0.10.3`), or a semver range (`^v0.10.0`, `~v0.10.3`). Range syntax follows standard semver (caret: same major, tilde: same minor). |
 
+sparks-core is a multi-module monorepo: each block is its own Go module
+with its own tag series, so pin the block modules you import rather than
+the umbrella root path, which holds no importable packages.
+
 ### Example: exact pins
 
 ```yaml
 sparks:
-  - name: sparks-core
-    source: github.com/sparkwing-dev/sparks-core
-    version: v0.10.3
-  - name: sparkwing-go
-    source: github.com/example/my-sparks
-    version: v0.2.1
+  - name: sparks-core-docker
+    source: github.com/sparkwing-dev/sparks-core/docker
+    version: v0.24.0
+  - name: sparks-core-templates
+    source: github.com/sparkwing-dev/sparks-core/templates
+    version: v0.28.0
 ```
 
 Deterministic: every build uses exactly these tags. No network call to the
@@ -141,8 +143,8 @@ module proxy on the hot path.
 
 ```yaml
 sparks:
-  - name: sparks-core
-    source: github.com/sparkwing-dev/sparks-core
+  - name: sparks-core-docker
+    source: github.com/sparkwing-dev/sparks-core/docker
     version: latest
 ```
 
@@ -154,19 +156,20 @@ the user opted in. Use `--sw-no-update` to bypass when offline.
 
 ```yaml
 sparks:
-  - name: sparks-core
-    source: github.com/sparkwing-dev/sparks-core
-    version: ^v0.10.0       # any v0.10.x or higher minor within v0.x
-  - name: sparkwing-go
+  - name: sparks-core-docker
+    source: github.com/sparkwing-dev/sparks-core/docker
+    version: ^v0.24.0      # any v0.24.x or higher minor within v0.x
+  - name: my-sparks
     source: github.com/example/my-sparks
-    version: ~v0.2.1        # any v0.2.x >= v0.2.1
-  - name: sparks-ruby
-    source: github.com/sparkwing-dev/sparks-ruby
-    version: v0.3.0         # exact
+    version: ~v0.2.1       # any v0.2.x >= v0.2.1
 ```
 
 Ranges trade off determinism for ergonomic updates. Resolution picks the
-highest tag satisfying the constraint at build time.
+highest tag satisfying the constraint at build time. For modules covered by
+`GOPRIVATE` there is no version list to scan: the range resolves to the
+module's latest tag and errors if that tag falls outside the constraint,
+rather than falling back to an older satisfying tag. Pin exact tags for
+private modules.
 
 ## Resolution and the overlay-modfile pattern
 
@@ -194,9 +197,11 @@ On every `sparkwing run <pipeline>` run (and on explicit `sparkwing pipeline spa
 5. Compile the pipeline with
    `go build -modfile=.sparkwing/.resolved.mod ...`.
 
-The git-tracked `go.mod` and `go.sum` remain pristine; `git status` after a
-`sparkwing` run shows no changes. Consumers who never declare a `sparks:` block see
-behavior identical to plain Go builds.
+The git-tracked `go.mod` and `go.sum` remain pristine. The one file
+resolution touches is `.gitignore`: when `.sparkwing/.resolved.*` is not
+already ignored, sparkwing appends it to the repo's `.gitignore`. Commit
+that line and later runs leave the tree clean. Consumers who never declare
+a `sparks:` block see behavior identical to plain Go builds.
 
 ### Fast-path skip
 
@@ -256,14 +261,16 @@ The Go toolchain refuses `-modfile` whenever a `go.work` is in scope
 ("go: -modfile cannot be used in workspace mode"). The overlay
 mechanism uses `-modfile=.resolved.mod`, so the two cannot coexist.
 
-When sparkwing detects a workspace, it skips the overlay and prints a
-warning to stderr:
+When sparkwing detects a workspace whose `use` list covers the `.sparkwing`
+module, it skips the overlay and prints a one-line warning to stderr:
 
 ```
-warning: /path/to/go.work in effect; skipping sparks resolution.
-         Modules resolve from go.mod + workspace, not .resolved.mod.
-         To use local copies of sparks libs too, add them to go.work.
+warning: /path/to/go.work in effect; skipping sparks resolution. Modules resolve from go.mod + workspace, not .resolved.mod. To use local copies of sparks libs too, add them to go.work.
 ```
+
+A `go.work` that is in scope but does *not* list `.sparkwing` is a
+different case: sparkwing builds with `GOWORK=off`, the overlay still
+applies, and the warning names that instead.
 
 Builds resolve sparks libs from `go.mod` (+ any workspace `use`
 directives) instead of `.resolved.mod`. This is the right call when
@@ -308,11 +315,10 @@ values below are order-of-magnitude on a developer laptop.
 | Go build cache hit | ~2-3s | New sparks version or drifted overlay, so the binary cache misses, but most dependency object files are still in the Go build cache. Only the changed module recompiles and the final link runs. |
 | Fully cold | ~10-15s | First-ever build in a fresh environment, a Go toolchain version change, or an invalidated build cache. Every object file is rebuilt from source. |
 
-In-cluster, the Go build cache is persisted in gitcache so that a new
-sparks version incurs the middle tier rather than the cold tier across
-worker pods. The build-cache key is derived from Go version, architecture,
-and sparks versions; it is stored via the existing `/cache/<key>` gitcache
-endpoint.
+In-cluster, only the compiled pipeline binary is shared, via the gitcache
+`/bin/<key>` endpoint (see [Warmup](#warmup)). The Go build cache lives on
+the worker pod's scratch volume and dies with the pod, so a fresh pod that
+misses the binary cache pays the cold tier.
 
 ## `sparkwing pipeline sparks` CLI
 
@@ -341,9 +347,10 @@ For the exact flags each subcommand takes, see
 
 ### Warmup
 
-`sparkwing pipeline sparks warmup` pre-compiles pipeline binaries across consumer repos
-after a sparks library release. It resolves the latest versions, compiles
-each pipeline in the repo, and uploads the binaries to gitcache (pass
+`sparkwing pipeline sparks warmup` pre-compiles the pipeline binary across consumer
+repos after a sparks library release. It resolves the declared versions,
+compiles the repo's `.sparkwing/` package into its single pipeline binary,
+and uploads that binary to gitcache under its cache key (pass
 `--clear-cache` to discard the existing local binary cache first). The next
 `sparkwing run <pipeline>` run - locally or in-cluster - gets a binary-cache hit
 instead of paying the full compile cost.
@@ -413,9 +420,10 @@ module and committing the source into your repo. Commit
 The catalog is the corpus of worked pipelines shipped as the `templates`
 block module of sparks-core: static-site deploys, containerized deploys
 to Kubernetes, migrate+deploy flows, CI-hygiene gates, canary rollouts,
-test sharding. Every one compiles, lints, and runs -- the
-`template-verify` pipeline proves it -- so unlike prose they cannot
-quietly stop being true.
+test sharding. The `template-verify` pipeline scaffolds every one and
+proves it compiles, lints, and explains; templates tagged runnable also
+execute end-to-end against a synthesized fixture -- so unlike prose they
+cannot quietly stop being true.
 
 They are reference, not a starting point. `sparkwing pipeline new
 --template <shape>` begins a pipeline from one of five structural
@@ -488,9 +496,9 @@ A sparks library is a Go module. Author steps:
 
 A sparks library can list others in its manifest `dependencies`. This is
 informational - actual Go module resolution happens through the library's
-own `go.mod`. Declaring a dependency in `spark.json` lets tooling show the
-relationship in `sparkwing pipeline sparks list` and lets future resolver work
-transitively check compatibility.
+own `go.mod`. `spark lint` checks that each entry has a `source` and a
+`version`; nothing else reads the list. `sparkwing pipeline sparks list`
+renders the consumer's `sparks:` block, not library manifests.
 
 ## Non-goals
 
@@ -506,9 +514,11 @@ Explicit scope limits, baked in to avoid drift:
   detect libraries by manifest presence, no implicit enrollment.
 - **No modification of git-tracked files during resolution.** Version
   resolution, the overlay, and every `sparkwing` run leave `go.mod`,
-  `go.sum`, and the rest of the repo pristine. Generated files live under
+  `go.sum`, and the rest of the repo pristine. The single write resolution
+  performs is a one-time append of `.sparkwing/.resolved.*` to `.gitignore`
+  when that entry is missing. Generated files live under
   `.sparkwing/` with names starting `.resolved.` and are gitignored. The
-  one deliberate exception is `sparkwing pipeline sparks inflate`, which you
+  other deliberate exception is `sparkwing pipeline sparks inflate`, which you
   invoke explicitly to inflate a library's source and which does edit the
   git-tracked `.sparkwing/go.mod` (see
   [Inflating a spark library](#inflating-a-spark-library)).

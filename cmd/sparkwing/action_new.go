@@ -349,7 +349,8 @@ var triggerBlocks = map[string]string{
       # GitHub webhook at this pipeline.
       push: {}
 `,
-	"schedule": `      # Cron, evaluated by the controller in UTC. 09:00 daily.
+	"schedule": `      # Cron cadence (UTC), declarative: drive it with an external
+      # timer that runs this pipeline. 09:00 daily.
       schedule: "0 9 * * *"
 `,
 	"manual": "",
@@ -501,9 +502,9 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 			color.Green("+"), color.Bold(strings.Join(events, " + ")+" trigger"))
 		// Each says what it still needs, because they need different
 		// things: a webhook has to be pointed here, a schedule needs a
-		// controller running to evaluate the cron.
+		// timer to fire the cadence it records.
 		if slices.Contains(events, "schedule") {
-			fmt.Printf("    %s\n", color.Dim("schedule: needs a running controller to evaluate the cron"))
+			fmt.Printf("    %s\n", color.Dim("schedule: declarative cadence; drive it with an external timer"))
 		}
 		if slices.Contains(events, "push") || slices.Contains(events, "pull_request") {
 			fmt.Printf("    %s\n", color.Dim("not yet live: point the repo's GitHub webhook at this pipeline to deliver the event"))

@@ -4,7 +4,7 @@ The warm pool pre-loads Docker build caches onto PVCs so pipeline builds start w
 
 ## How it works
 
-The controller maintains a pool of PVCs, warms them with Docker images, and handles checkout/return. All jobs dispatch as k8s Jobs - the controller's dispatcher creates a one-shot k8s Job and optionally attaches a warm PVC for Docker cache.
+The controller owns the pool's lifecycle -- the reconcile and warming loops that keep a pool of PVCs sized and loaded with Docker images -- and exposes checkout/return/heartbeat over HTTP. Which runner executes a node (in-process, a one-shot k8s Job, or a warm runner pod) is a worker-side choice (`sparkwing cluster worker --runner`), and the pod spec that claims and mounts a pool PVC ships with the cluster deployment, not with the CLI.
 
 ## PVC lifecycle
 
@@ -41,7 +41,7 @@ Pool management runs inside sparkwing-controller in the sparkwing namespace.
 - Ensures the configured number of PVCs exist (creates missing ones)
 - Scans all `in-use` PVCs for abandoned ownership
 - Reclaims PVCs where the heartbeat is older than `heartbeat_timeout` (default 5 minutes)
-- New checkouts get a `startup_grace` period (default 2 minutes) before the first heartbeat is expected
+- Falls back to `startup_grace` (default 2 minutes) measured from `checked-out-at` for an `in-use` PVC with no parseable heartbeat annotation; checkout stamps the first heartbeat itself, so a normally checked-out PVC is governed by `heartbeat_timeout` from the moment it is claimed
 
 ### Warming loop (continuous)
 

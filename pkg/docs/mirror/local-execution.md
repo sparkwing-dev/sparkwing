@@ -11,7 +11,8 @@ Actions is down you can't deploy; if your Jenkins server crashes,
 builds stop. Your ability to ship depends on their uptime.
 
 Sparkwing pipelines are Go programs. You can run them on any machine
-with Docker installed. This means:
+with a Go toolchain; Docker only matters when a pipeline step builds
+container images. This means:
 
 - **Deploys don't stop when services go down.** GitHub down? Your
   laptop can still build, push images, and update your cluster.
@@ -83,7 +84,7 @@ Your laptop:
   2. sparkwing POSTs the upload + a trigger to the profile's controller
 
 Cluster:
-  3. Controller dispatches a runner Job
+  3. Controller records the trigger; a polling runner claims it
   4. Runner clones the upload, compiles, runs the pipeline
   5. Your laptop streams logs back via the logs service
 ```
@@ -166,10 +167,6 @@ what it, itself, last ran as. Two copies taking turns can no longer
 rewrite a shared record into upgrades and downgrades that never
 happened. A separate `SPARKWING_HOME` keeps separate stamps.
 
-Earlier builds used a single shared `~/.sparkwing/last-version` file
-(and, briefly, an unreleased `~/.sparkwing/canonical-install` record).
-Neither is read or written anymore; both are safe to delete.
-
 ### Finding a split install
 
 Every surface that knows about installs reports them, read-only:
@@ -215,7 +212,7 @@ Nothing here ever deletes or renames a binary.
 
 Two `sparkwing run` invocations on the same machine compete for the same
 CPU. Local runs are arbitrated by a per-host admission daemon
-(`sparkwingd`) -- invisible infrastructure you never install, start, or
+(`wingd`) -- invisible infrastructure you never install, start, or
 tune. The first run that needs admission elects one: a lock file under
 the sparkwing home makes the race safe, so one process wins and the rest
 connect to the winner. A newer sparkwing binary transparently takes over
@@ -360,7 +357,7 @@ that is merely busy still queues, because a holder finishing fixes that.
 
 ### Operating it
 
-There are exactly two operational commands, and neither can hurt the
+Day-to-day operation runs through two commands, and neither can hurt the
 machine:
 
 - `sparkwing queue` -- the truthful view of local admission: every

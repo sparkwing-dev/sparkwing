@@ -1,7 +1,7 @@
 # Deployment
 
 Sparkwing is unopinionated about how your pipelines deploy. It provides
-the infrastructure - controller, runners, cache, registries - and your
+the infrastructure - controller, runners, cache, logs - and your
 pipeline code decides what to do with it.
 
 ## Run Targets
@@ -13,19 +13,25 @@ to a cluster via a profile's controller:
 |--------|--------|---------|
 | Local code | Local machine | `sparkwing run build` |
 | Local working tree at a git ref | Local machine | `sparkwing run build --sw-ref main` |
-| Local code | Any cluster | `sparkwing pipeline trigger build --profile dev` |
-| Controller-registered source | Any cluster | `sparkwing pipeline trigger build --profile prod` |
+| Committed ref at origin | Any cluster | `sparkwing pipeline trigger build --profile dev` |
 
 The `--profile` flag resolves a **profile** - a named cluster endpoint.
 Every profile with a controller follows the same dispatch flow:
 
 ```
 sparkwing pipeline trigger <pipeline> --profile <profile>
-  → upload code to controller (or trigger by SHA if clean)
-  → controller enqueues run
-  → dispatcher creates k8s Job
-  → runner executes pipeline
+  → CLI reads the origin URL + branch/SHA from your checkout and POSTs the trigger
+  → CLI seeds that commit into the cluster's gitcache (best effort, so an unpushed
+     SHA is still fetchable)
+  → controller enqueues the run
+  → a runner in the pool claims it on its next poll
+  → runner clones the ref and executes the pipeline
 ```
+
+The runner clones the named ref - your uncommitted working tree never
+leaves the laptop, and the command fails when cwd has no `origin` remote.
+A runner started with `--trigger-runner k8s` instead creates one Kubernetes
+Job per node; that is opt-in and neither Helm chart enables it.
 
 The runner does not care which cluster it lives in. The same pipeline
 binary runs everywhere - the only differences are the controller URL and
@@ -103,12 +109,13 @@ Terraform, Pulumi, `rsync`, custom APIs, etc.
 
 ## Container Registries
 
-Sparkwing creates an in-cluster registry at NodePort 30500. Pipelines can
-push to any registry they want:
+Sparkwing does not deploy a container registry. Pipelines push to whatever
+registry you provide - one you run in the cluster yourself, or a hosted
+service:
 
 | Registry | Example |
 |----------|---------|
-| In-cluster | `localhost:30500/myapp:latest` |
+| One you run in-cluster | `localhost:<nodeport>/myapp:latest` |
 | ECR | `<account>.dkr.ecr.<region>.amazonaws.com/myapp:v1` |
 | Docker Hub | `docker.io/myorg/myapp:v1` |
 | GCR / GAR | `gcr.io/myproject/myapp:v1` |

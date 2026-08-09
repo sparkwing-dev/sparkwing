@@ -58,10 +58,12 @@ if os.Getenv("KUBERNETES_SERVICE_HOST") != "" {
 ## 3. Use remote triggers for iteration
 
 `sparkwing pipeline trigger build-deploy --profile prod` runs the pipeline
-in-cluster against your current commit and streams live logs back. It
-sends the commit SHA to the controller and eagerly refreshes the cache so
-the runner sees your just-pushed commit without waiting for the
-background fetch -- no waiting on a CI queue between edits.
+in-cluster against your current commit and follows it to a terminal
+state -- streaming full logs when the profile defines a logs URL,
+node-status updates from the controller otherwise. It sends the commit
+SHA to the controller and eagerly refreshes the cache so the runner sees
+your just-pushed commit without waiting for the background fetch -- no
+waiting on a CI queue between edits.
 
 A git-push-driven webhook is the audited production path, but for
 "change a log line and re-run" the direct trigger is the faster gear.

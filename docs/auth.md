@@ -29,7 +29,7 @@ mapping is in the generated [api-reference.md](api-reference.md):
 | `logs.write`      | POST + DELETE on logs-service (`/api/v1/logs/{runID}/{nodeID}`, `/api/v1/logs/{runID}`)            |
 | `triggers.read`   | GET `/api/v1/triggers`, `/triggers/{id}`, `/triggers/spawned-child`                               |
 | `approvals.write` | POST `/api/v1/runs/{id}/approvals/{nodeID}` (approve / deny a gate)                                |
-| `admin`           | tokens CRUD, cache PUT, state mutation (Create/Start/Finish Job, Events, Locks, Pool, etc.)        |
+| `admin`           | tokens / users / secrets CRUD, run + node state mutation (create, start, finish, deps, events, delete), trigger lifecycle (claim, heartbeat, done), gitcache seed, warm-pool checkout / return / heartbeat, and the mutating concurrency routes -- see [api-reference.md](api-reference.md) for the per-route mapping |
 
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
@@ -37,21 +37,27 @@ scope check passes if the principal carries `admin`.
 Per-endpoint scope annotations live in `pkg/controller/server.go`. If
 you add a new route, annotate it with `requireScope`.
 
+`GET /api/v1/auth/whoami` is authenticated by the middleware like any
+other route but carries no scope check, so any valid token can read
+back its own principal, kind, scopes, and prefix. The logs service uses
+it to resolve tokens against the controller. It shows as `public` in
+[api-reference.md](api-reference.md) because that table is generated
+from `requireScope` wrappers -- there, `public` means no scope check,
+not no authentication.
+
 ## Unauthenticated endpoints
 
-Always open, regardless of auth config:
-
-- `GET /api/v1/health` on the controller -- k8s livenessProbe /
-  readinessProbe target. httpGet probes can't carry `Authorization`.
-- `GET /api/v1/health` on the logs-service -- same reasoning.
-- `GET /metrics` on the controller -- Prometheus scrape target.
-- `GET /metrics` on the logs-service -- Prometheus scrape target.
-- `GET /api/v1/auth/whoami` -- authenticated via the middleware just
-  like any other endpoint, but without a scope check. Used by the
-  logs-service to resolve tokens via the controller.
-- `GET /api/v1/auth/bootstrap-needed` -- probe for the first-visit
-  signup path (see below). Returns `{"needed": true}` while the
-  users table is empty.
+Routes registered on the controller's outer router are matched before
+the auth middleware runs, so they are open regardless of auth config:
+the health and metrics probes (k8s httpGet probes and Prometheus
+scrapes can't carry `Authorization`), the service-discovery endpoint
+the runner uses to find the cache pod, the browser session endpoints
+the dashboard needs before it holds a token (login, logout, session),
+the bootstrap probe and the bootstrap-or-admin `POST /api/v1/users`
+(see below), and the GitHub webhook, which is HMAC-verified instead of
+bearer-authenticated. The logs service opens its health and metrics
+probes the same way. Every registered route is listed in
+[api-reference.md](api-reference.md).
 
 ## First-visit signup
 

@@ -71,11 +71,14 @@ openssl rand -base64 32 > /tmp/sparkwing-key
 kubectl -n sparkwing create secret generic sparkwing-secrets-key \
     --from-file=key=/tmp/sparkwing-key
 
-# Bearer token used by sparkwing-web (proxying to controller) and
-# sparkwing-runner-bundle (claim-loop auth). Same token works for
-# both -- the controller's auth is single-tenant.
-kubectl -n sparkwing create secret generic sparkwing-token \
-    --from-literal=token=<random-32-byte-token>
+# Bearer token for sparkwing-web (controller proxy) and the runner
+# bundle (claim loop). The controller only accepts tokens IT minted,
+# so create this Secret AFTER the first `helm install` -- see Auth below.
+#   kubectl -n sparkwing create secret generic sparkwing-token \
+#       --from-literal=token=swr_...
+# Tokens carry scopes: a runner token needs `nodes.claim` +
+# `logs.write`, the web pod's needs `runs.read` + `logs.read`; an
+# `admin` token covers both.
 ```
 
 ## Quick install
@@ -134,7 +137,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `web.logs.url` | Override logs URL. | (auto-computed from sub-chart) |
 | `web.cache.url` | Cache the services panel probes. Probe-only; empty and no bundled cache leaves it off the panel. | (auto-computed from sub-chart) |
 | `web.tokenSecret.name` | Secret holding the controller-bearer token. | `""` |
-| `web.requireLogin` | Force /login redirect. Off until tokens table seeded. | `false` |
+| `web.requireLogin` | Gate the dashboard behind /login (first visit offers first-admin signup). | `false` |
 
 ### Ingress
 
@@ -161,31 +164,32 @@ for the full schema; a few commonly overridden keys:
 
 ## Auth
 
-The OSS controller's auth model is **single-tenant bearer token**.
-Per decision 0001, SSO and advanced RBAC are explicitly *not* paid
-gates -- they may land in OSS later. For now:
+API clients authenticate with **bearer tokens the controller mints**;
+each token carries scopes. Per decision 0001, SSO and advanced RBAC
+are explicitly *not* paid gates -- they may land in OSS later. For now:
 
-1. The first admin token is bootstrapped via the controller's CLI
-   (`sparkwing cluster tokens create`). Run it after the controller
-   pod is healthy:
+1. Until the tokens table has a row, the controller serves **every
+   endpoint unauthenticated** and logs a warning at boot. Mint the
+   first token through that open window, then restart to turn auth on:
 
    ```bash
-   kubectl -n sparkwing exec deploy/sparkwing-controller -- \
-       sparkwing-controller --help
-   # The controller pod ships only the daemon binary today -- to
-   # bootstrap a token, port-forward and use the local sparkwing
-   # CLI against the in-cluster controller, or seed the tokens
-   # table directly via the state DB.
+   kubectl -n sparkwing port-forward deploy/sparkwing-controller 9001:80 &
+   sparkwing cluster tokens create --profile <profile-pointing-at-localhost:9001> \
+       --type user --principal admin --scope admin
+   kubectl -n sparkwing rollout restart deploy/sparkwing-controller
    ```
+
+   Auth only takes effect on that restart -- the tokens table is read
+   once at startup.
 
 2. Stash the token in the `sparkwing-token` Secret (see Pre-install
    above) and reference it from `web.tokenSecret.name` /
    `sparkwing-runner-bundle.controller.tokenSecret.name`.
 
-3. Once the tokens table has at least one row, set
-   `web.requireLogin=true` in `helm upgrade` so the dashboard
-   redirects unauthenticated browsers to `/login`. Before that,
-   leaving it off avoids a redirect loop on a fresh install.
+3. Set `web.requireLogin=true` to gate the dashboard behind `/login`.
+   On a fresh cluster `/login` renders a "create first admin" form and
+   the account you create there becomes the admin; afterwards, seed
+   users with `sparkwing cluster users add`.
 
 ## Storage
 
@@ -215,6 +219,12 @@ with their own ingress controller / Gateway / cloud LB. Set
 points at `sparkwing-web` (port 80); the SPA proxies `/api/v1/*` to
 the controller, so you don't need a separate Ingress for the
 controller.
+
+The web pod proxies `/api/v1/*` only. GitHub webhooks are served by
+the controller at `POST /webhooks/github/{pipeline}`; if you expose
+them, add your own Ingress rule (or host) routing that path to the
+`<release>-controller` Service on port 80 -- this chart does not
+create one.
 
 ## Sub-chart dependency
 
@@ -318,9 +328,10 @@ controller Service. If you overrode it, confirm reachability from
 inside the runner pod. See
 [`sparkwing-runner-bundle/README.md`](../sparkwing-runner-bundle/README.md#troubleshooting).
 
-**Dashboard redirects to /login but I haven't bootstrapped a token**
-Set `web.requireLogin=false` (default) until you've seeded the
-tokens table.
+**Dashboard redirects to /login and I have no account**
+The first visit to /login on a fresh cluster offers a "create first
+admin" form. If the users table is already seeded, add accounts with
+`sparkwing cluster users add`.
 
 **`helm template` fails with "no chart found at file://../sparkwing-runner-bundle"**
 You skipped `helm dep up`. Run it once before lint / template /

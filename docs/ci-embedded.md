@@ -2,8 +2,9 @@
 
 Run sparkwing pipelines **inside** an existing CI job (GitHub Actions,
 Buildkite, GitLab CI, CircleCI, ...) without standing up a sparkwing
-cluster. Logs and artifacts go to S3-compatible storage so a remote
-dashboard can replay the run after the CI VM exits.
+cluster. State, logs, and artifacts go to S3-compatible storage so a
+remote dashboard can follow the run live and replay it after the CI VM
+exits.
 
 ## When to use
 
@@ -56,13 +57,14 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 2. The orchestrator resolves state, cache, and logs from the active
    profile (selected by `--profile` or `defaults.profile`) -- e.g. an
    S3-backed profile.
-3. SQLite handles fast lifecycle writes; state goes to the profile's
-   configured state backend.
+3. Run and node state goes to the profile's `state:` surface. A sqlite
+   state surface keeps records locally and uploads one
+   `runs/<runID>/state.ndjson` dump to the cache surface when the
+   pipeline exits; an S3 state surface writes that same NDJSON
+   continuously over the life of the run.
 4. Per-node log lines route to the resolved `Logs` backend instead
    of `~/.sparkwing/runs/<id>/`.
-5. When the pipeline exits, run + node records are serialized to
-   NDJSON and uploaded to `<cache>/runs/<runID>/state.ndjson`.
-6. A dashboard configured with the matching backends reads
+5. A dashboard configured with the matching backends reads
    everything back.
 
 ## Flags
@@ -70,8 +72,8 @@ A pipeline node that fails fails the GHA job (exit code propagates).
 | Flag | Default | Description |
 | ---- | ------- | ----------- |
 | `--sw-mode=ci-embedded` | (off) | Enables this mode. |
-| `--sw-workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. GHA hosted runners are 2-CPU; setting `--sw-workers=4` on small VMs over-subscribes -- pick deliberately. |
-| `--profile NAME` | `laptop` | Selects a profile from `~/.config/sparkwing/profiles.yaml`. Absent, the project's `defaults.profile` applies, else the built-in `laptop` defaults. |
+| `--sw-workers=N` | `runtime.NumCPU()` | Caps the local dispatcher. Takes effect only alongside `--sw-mode`; passed on its own the CLI consumes it and forwards nothing, so the cap silently stays at `runtime.NumCPU()`. GHA hosted runners are 2-CPU, so `--sw-workers=4` over-subscribes a small VM -- pick deliberately. |
+| `--profile NAME` | (none) | Selects a profile from `~/.config/sparkwing/profiles.yaml` (override the path with `SPARKWING_PROFILES`). Absent, the pipeline's own `profile:` field applies, then the project's `defaults.profile` in `.sparkwing/sparkwing.yaml`. With nothing selected the run falls back to local SQLite plus filesystem and never reaches the bucket. |
 
 State, cache, and logs come from the resolved profile; see
 [storage backends](backends.md) for the configuration shape.
@@ -131,9 +133,12 @@ sparkwing dashboard start \
 
 The dashboard reads `state.ndjson` for run metadata, the LogStore
 for per-node lines, and the ArtifactStore for any blobs the pipeline
-saved. **Live tail** during an in-flight run is **not yet supported**
-in ci-embedded mode. Today the dashboard renders once the CI job has
-finished writing the dump.
+saved. A profile whose `state:` surface is S3 streams run and node
+records to `runs/<runID>/state.ndjson` continuously (flushed on a
+sub-second interval, or earlier once enough envelopes buffer), so a
+dashboard pointed at the same bucket follows the run live. A sqlite
+`state:` surface has no live view: its NDJSON dump is written to the
+cache surface when the pipeline exits.
 
 ### Fresh laptop, no SQLite (`--no-local-store`)
 
@@ -181,9 +186,6 @@ node fails the CI step.
 
 ## Caveats
 
-- **Live tail not supported** during in-flight runs. State dump is
-  written on exit. Streaming run state to S3 incrementally is on
-  the roadmap.
 - **No webhooks**. ci-embedded mode is invoked by the host CI; let
   GitHub Actions / Buildkite handle the trigger.
 - **Caching across runs** depends on stable `bincache.PipelineCacheKey`
@@ -241,4 +243,3 @@ above).
 
 - The storage interface + filesystem / S3 backends.
 - The dashboard's storage-aware reads.
-- Live tail of in-flight ci-embedded runs (planned).

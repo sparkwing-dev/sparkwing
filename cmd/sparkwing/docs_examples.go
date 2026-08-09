@@ -13,8 +13,9 @@ import (
 // exampleHit is a registry pipeline that matched a search.
 //
 // The registry doubles as the worked-example corpus: every entry is a
-// real pipeline that compiles, lints, and runs, verified by the
-// template-verify pipeline. That makes it the best answer to "how does
+// real pipeline that compiles, lints, and explains (runnable-tier
+// entries also execute), verified by the template-verify pipeline.
+// That makes it the best answer to "how does
 // someone actually do ECS Fargate" -- better than prose, because prose
 // is not executed.
 //

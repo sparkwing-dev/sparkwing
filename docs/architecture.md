@@ -159,7 +159,8 @@ component talks over HTTP - there are no custom protocols.
 ```
 sparkwing CLI ──────► Controller   trigger a run; poll until terminal
 GitHub ────────► Controller        push webhook (HMAC verified)
-Controller ────► k8s API           create / watch Jobs
+Controller ────► k8s API           warm PVC pool (PVCs, warmer pods)
+Runner ────────► k8s API           create / watch per-node Jobs
 Runner ────────► Controller        claim node; heartbeat; report finish; fetch details
 Runner ────────► Cache             clone repo, download code + packages
 Runner ────────► Logs              stream step output
@@ -176,8 +177,8 @@ sparkwing CLI ──────► Cache             POST /upload (code tarball
 
 ### Network policies
 
-Default-deny ingress is applied to the sparkwing namespace. Each
-component has explicit allow rules:
+The charts deploy no NetworkPolicy. On a cluster that runs default-deny
+ingress, each component needs these allow rules:
 
 | Component | Accepts traffic from |
 |-----------|---------------------|

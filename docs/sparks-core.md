@@ -1,16 +1,20 @@
 # sparks-core (Example Spark Library)
 
-sparks-core is an example of a **spark library** -- a reusable Go module
-that provides pipeline helpers. It is not part of the sparkwing SDK and is
+sparks-core is an example of a **spark library** -- a multi-module monorepo
+of reusable Go modules that provide pipeline helpers, each versioned and
+consumed independently. It is not part of the sparkwing SDK and is
 not required to use sparkwing. It demonstrates the pattern of extracting
 common pipeline logic into shared libraries: your own spark libraries can
 provide whatever your team needs.
 
-**Install:** `go get github.com/sparkwing-dev/sparks-core@latest`
+**Install:** each block is its own Go module -- `go get
+github.com/sparkwing-dev/sparks-core/<block>@latest`, e.g.
+`go get github.com/sparkwing-dev/sparks-core/docker@latest`. The umbrella
+root path holds no importable packages.
 
 The exact, current API -- every function signature, type, and field -- is
-on pkg.go.dev:
-[pkg.go.dev/github.com/sparkwing-dev/sparks-core](https://pkg.go.dev/github.com/sparkwing-dev/sparks-core).
+on pkg.go.dev, one page per block module, e.g.
+[pkg.go.dev/github.com/sparkwing-dev/sparks-core/docker](https://pkg.go.dev/github.com/sparkwing-dev/sparks-core/docker).
 This page is a conceptual tour of what the library offers and how the
 pieces fit together; treat the godoc as authoritative for signatures.
 
@@ -18,9 +22,10 @@ Every helper that does work takes a `context.Context` as its first
 argument and returns an `error` (sparkwing reports the error as a step
 failure). They do not panic.
 
-## Packages
+## Block modules
 
-A representative set -- see the godoc for the full list:
+Each block is its own Go module; `spark.json` at the repo root is the full
+list:
 
 | Package | Purpose |
 |---------|---------|
@@ -36,6 +41,18 @@ A representative set -- see the godoc for the full list:
 | `probe` | HTTP health probes for post-deploy verification |
 | `services` | Ephemeral Docker services (e.g. Postgres) for tests |
 | `templates` | Pipeline template registry and rendering |
+| `gcp` | GCP project/auth resolution and Workload Identity detection |
+| `cloudrun` | Cloud Run deploy, traffic shifting, URL discovery, rollback |
+| `ecs` | ECS/Fargate task-definition rollout, wait-for-stable, rollback |
+| `lambda` | Lambda deploys (image and zip), version publish, alias shift |
+| `terraform` | Terraform init, plan-to-file, apply-saved-plan, change summaries |
+| `release` | Version gating, changelog parsing, checksums, GitHub/npm/PyPI publish |
+| `coverage` | Coverage report parsing (coverprofile, lcov, cobertura) and gating |
+| `contentkey` | Content-addressed cache keys and skip predicates for path-scoped work |
+| `migrate` | Schema migrations via the golang-migrate CLI |
+| `dbbackup` | Database dump, backup upload, and restore helpers |
+| `pipelines` | High-level primitives: DockerDeploy, StaticDeploy, NextJSBuild |
+| `step` | Shared step-banner and error-wrapped shell helpers |
 
 ## checks
 
@@ -99,9 +116,11 @@ reports whether it changed anything.
 read cache); the push always goes direct to GitHub over HTTPS with a PAT
 (`GITHUB_TOKEN`), falling back to SSH. gitcache is never a push target.
 
-Before pushing, `Deploy` calls the sparkwing controller's authorization
-endpoint for audit logging; set `SPARKWING_NO_VERIFY=1` to skip it
-(break-glass).
+When `SPARKWING_CONTROLLER` is set, `Deploy` asks the controller to
+authorize the push before it happens: a 403 blocks the deploy, while an
+unreachable or erroring controller logs and continues. With
+`SPARKWING_CONTROLLER` unset the check is skipped entirely.
+`SPARKWING_NO_VERIFY=1` is the break-glass opt-out.
 
 ```go
 import "github.com/sparkwing-dev/sparks-core/gitops"
@@ -140,7 +159,9 @@ kube.DeployKubectl(ctx,
 `ProfileFlag(defaultProfile)` returns `" --profile <name>"` for local
 development, or `""` under IRSA (EKS), so you can append it directly to an
 AWS CLI command. `ProfileArgs` is the slice form. `IsIRSA` reports whether
-a web-identity token is mounted. `aws.DefaultProfile` is `"default"`.
+a web-identity token is mounted. With `AWS_PROFILE` unset and an empty
+`defaultProfile`, both helpers return nothing, so the aws CLI falls back to
+its own credential chain (env keys, SSO cache, instance metadata).
 
 ```go
 import "github.com/sparkwing-dev/sparks-core/aws"
@@ -187,7 +208,8 @@ for CDN serving: non-HTML assets (JS, CSS, images -- bundler-fingerprinted)
 get a one-year immutable cache; HTML files get no-cache so visitors always
 get fresh markup. It returns per-pass upload counts so callers can detect
 an inconsistent deploy (new chunks shipped while HTML is unchanged).
-`AWSProfile` is required.
+`Bucket` is required; `OutDir` defaults to `out`. `AWSProfile` is optional --
+leave it empty in-cluster and the aws CLI uses its ambient credentials.
 
 ```go
 import "github.com/sparkwing-dev/sparks-core/s3"
@@ -195,7 +217,7 @@ import "github.com/sparkwing-dev/sparks-core/s3"
 res, err := s3.DeployStaticSite(ctx, s3.StaticSiteConfig{
     Bucket:     "my-website-bucket",
     OutDir:     "out",
-    AWSProfile: "prod",  // required
+    AWSProfile: "prod",  // optional; empty -> ambient credentials
 })
 ```
 
@@ -217,3 +239,6 @@ launches a runner):
 | `AWS_PROFILE` | `aws` | AWS profile name |
 | `AWS_WEB_IDENTITY_TOKEN_FILE` | `aws` | IRSA detection |
 | `KUBERNETES_SERVICE_HOST` | `kube` | In-cluster detection |
+| `SPARKWING_DRY_RUN` | `cloudrun`, `ecs`, `lambda`, `terraform`, `gcp`, `docker`, `kube`, `release`, `dbbackup`, `contentkey` | Non-empty makes mutating commands echo their argv instead of executing |
+| `SPARKWING_ARGOCD_SERVER` / `SPARKWING_ARGOCD_TOKEN` | `gitops` | ArgoCD API endpoint and bearer token for `SyncArgoCD` |
+| `SPARKWING_API_TOKEN` | `gitops` | Bearer sent to the controller authorization endpoint |

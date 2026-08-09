@@ -20,8 +20,10 @@ var publicBinaries = []string{
 	"sparkwing-web",
 }
 
-// Build verifies every cmd/* binary in the public sparkwing repo
-// compiles cleanly for the host platform. Sanity build only --
+// Build verifies every binary the public sparkwing repo ships from
+// cmd/ (publicBinaries above -- internal tools such as cmd/apidiff
+// are not covered) compiles cleanly for the host platform. Sanity
+// build only --
 // production multi-arch + container builds are owned by the GH-
 // Actions workflow at `.github/workflows/release.yaml`, which fires
 // on tag push (the tag the `release` pipeline below pushes).
@@ -33,11 +35,11 @@ var publicBinaries = []string{
 type Build struct{ sparkwing.Base }
 
 func (Build) ShortHelp() string {
-	return "Verify every cmd/* binary compiles (no publish)"
+	return "Verify every shipped cmd/ binary compiles (no publish)"
 }
 
 func (Build) Help() string {
-	return "Runs `go build` for each binary under cmd/ on the host platform. Local-only sanity check; the production multi-arch + container builds are owned by `.github/workflows/release.yaml`, which fires on tag push."
+	return "Runs `go build` for each binary sparkwing ships from cmd/ (the same list as the GH-Actions release matrix; internal tools such as cmd/apidiff are not covered) on the host platform. Local-only sanity check; the production multi-arch + container builds are owned by `.github/workflows/release.yaml`, which fires on tag push."
 }
 
 func (Build) Examples() []sparkwing.Example {

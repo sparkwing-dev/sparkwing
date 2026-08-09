@@ -68,15 +68,10 @@ var scrubPatterns = []struct {
 // immediately, and a recorded one that has been cleaned fails too, so the list
 // can only shrink.
 //
-// The entries here are all one finding -- three pages recommend a sibling tool
-// by name for work sparkwing does not do. Removing the recommendation means
-// deciding what to tell a reader instead, which is a content decision about a
-// published page rather than a scrub.
-var knownScrubHits = map[string][]string{
-	"README":          {"dowing"},
-	"cli":             {"dowing"},
-	"getting-started": {"dowing"},
-}
+// Empty: every recorded hit has been cleaned. The map stays so any
+// future deliberate exemption is recorded here rather than silently
+// weakening the pattern.
+var knownScrubHits = map[string][]string{}
 
 func TestEmbeddedDocsCarryNothingPrivate(t *testing.T) {
 	pages := docs.List()

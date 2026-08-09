@@ -10,9 +10,9 @@ import (
 )
 
 // BuildImages builds one Docker image per deployable sparkwing
-// component using build/Dockerfile.binary. The Dockerfile is
-// parameterized by a BINARY arg, so one source pass produces five
-// images.
+// component. The standard components share build/Dockerfile.binary,
+// which is parameterized by a BINARY arg so one recipe covers them
+// all; sparkwing-runner uses build/Dockerfile.runner instead.
 //
 // Modes:
 //   - local (default): single-arch image into the local docker daemon,
@@ -71,7 +71,7 @@ func (BuildImages) ShortHelp() string {
 }
 
 func (BuildImages) Help() string {
-	return "Builds sparkwing-controller, sparkwing-web, sparkwing-logs, sparkwing-cache, and sparkwing-runner images from build/Dockerfile.binary. By default produces single-arch images in the local daemon. With --registry --push, builds multi-arch (amd64 + arm64) and pushes directly to the configured registry; the caller must be logged in. Prints a final RELEASE_IMAGES line that cross-process consumers parse for the image refs."
+	return "Builds sparkwing-controller, sparkwing-web, sparkwing-logs and sparkwing-cache from build/Dockerfile.binary, and sparkwing-runner from build/Dockerfile.runner (it needs git plus a netrc-seeding entrypoint wrapper). By default produces single-arch images in the local daemon. With --registry --push, builds multi-arch (amd64 + arm64) and pushes directly to the configured registry; the caller must be logged in. Prints a final RELEASE_IMAGES line that cross-process consumers parse for the image refs."
 }
 
 func (BuildImages) Examples() []sparkwing.Example {

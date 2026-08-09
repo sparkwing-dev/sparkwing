@@ -88,9 +88,14 @@ func (j *buildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 ## I/O in `Plan` (`plan-io`)
 
 A `Plan` body that shells out, touches the filesystem, or makes an HTTP
-call runs that I/O every time the plan is read. The runtime plan-guard
-panics on it. Move the call into a job or step body, which runs at dispatch
-on the runner. That includes reading configuration: calling `os.Getenv`
+call runs that I/O every time the plan is read. The SDK's side-effect
+helpers refuse outright: `sparkwing.Bash` / `Exec` / `Shell` and
+anything in `sparkwing/docker`, `sparkwing/git`, or `sparkwing/services`
+panic through the runtime plan-guard, naming the call. Plain `os`,
+`os/exec`, and `net/http` calls have no such guard -- they run silently
+on every read, and this lint rule is what catches them. Move the call
+into a job or step body, which runs at dispatch on the runner. That
+includes reading configuration: calling `os.Getenv`
 inside a job or step body is sanctioned, since the body runs once, at
 dispatch, on the runner -- `Plan` is the only place it is forbidden.
 
@@ -276,12 +281,14 @@ restores directories so the job runs faster. Porting `actions/cache` to
 
 ## Unsatisfiable guards (`guard-misuse`)
 
-A pipeline's `guards:` block gates dispatch on the resolved profile and
-args. `require` blocks the run when not every token matches; `reject`
-blocks it when any token matches. A token in both lists, a `require` that
-names two mutually exclusive profiles, or a duplicate token describes a
-pipeline that can never dispatch. The config parser accepts the syntax; the
-linter catches the contradiction.
+A pipeline's `guards:` block gates dispatch on the resolved profile,
+args, and git branch -- `profile:local` / `profile:controller` /
+`profile:name=NAME`, `arg:FLAG=VALUE`, and `git:branch=NAME` /
+`git:branch=default`. `require` blocks the run when not every token
+matches; `reject` blocks it when any token matches. A token in both
+lists, a `require` that names two mutually exclusive profiles, or a
+duplicate token describes a pipeline that can never dispatch. The config
+parser accepts the syntax; the linter catches the contradiction.
 
 Don't write guards that can never all hold:
 

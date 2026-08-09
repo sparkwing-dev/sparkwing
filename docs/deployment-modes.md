@@ -29,9 +29,9 @@ triple (see [Storage backends](backends.md)) -- and applies uniformly to
 
 SQLite under `~/.sparkwing/state.db`, with per-run logs under
 `~/.sparkwing/runs/<runID>/`. Zero shared
-infrastructure. This is the default behavior -- the built-in `laptop`
-profile -- when no `--profile` is given and the project sets no
-`defaults.profile`.
+infrastructure. This is the default behavior -- no profile is selected and
+the built-in local sqlite + filesystem defaults apply -- when no
+`--profile` is given and the project sets no `defaults.profile`.
 
 For: a developer working on pipelines on their own laptop.
 
@@ -252,7 +252,8 @@ resolve a profile normally again.
 
 Profile selection is explicit: pass `--profile NAME`, or set
 `defaults.profile` in `.sparkwing/sparkwing.yaml` for the project's
-default. With neither, the built-in `laptop` profile (Mode 1) applies.
+default. With neither, no profile is active and the built-in local
+defaults (Mode 1) apply.
 There is no environment-based auto-selection -- a CI job picks its
 profile by passing `--profile` in the run command (see
 [ci-embedded.md](ci-embedded.md)).

@@ -28,11 +28,11 @@ import (
 // pipeline bumps --bump (default minor) off the latest origin tag.
 //
 // Preview / no-mutation mode is delivered through sparkwing's reserved
-// `--dry-run` flag; each step below either marks itself
+// `--sw-dry-run` flag; each step below either marks itself
 // SafeWithoutDryRun (read-only checks) or provides a .DryRun(...)
 // body (the tag push), so the pipeline doesn't carry its own flag.
 type ReleaseArgs struct {
-	Version string `flag:"version" desc:"Explicit release version (e.g. v1.5.5). When empty, derived from latest origin tag + --bump."`
+	Version string `flag:"version" desc:"Explicit release version (e.g. v0.24.0); sparkwing is locked to v0.x, so v1.0.0+ is refused. When empty, derived from latest origin tag + --bump."`
 	Bump    string `flag:"bump" desc:"Auto-bump kind when --version is empty: patch|minor|major. Default: minor"`
 }
 
@@ -40,9 +40,12 @@ type ReleaseArgs struct {
 // push triggers `.github/workflows/release.yaml`, which builds
 // cross-platform binaries (for GitHub Releases) and multi-arch
 // container images (for GHCR). This pipeline does NOT duplicate
-// that work -- its job is to validate the release shape (clean
-// tree, free tag, non-empty CHANGELOG [Unreleased] section) and
-// push a single tag, then step out of the way.
+// that work -- its job is to run the pre-commit, pre-push and
+// template-verify gates, validate the release shape (clean tree,
+// free tag, non-empty CHANGELOG [Unreleased] section), commit the
+// CHANGELOG rename, push the branch and the tag, then pin and
+// restore `.sparkwing/` in two further commits and push the branch
+// again before stepping out of the way.
 //
 // The "never force-push a Go module tag" invariant from the
 // platform-repo release pipeline applies here too: validate-version
@@ -85,14 +88,14 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "Validates the release shape (clean tree, free tag, non-empty CHANGELOG.md [Unreleased] section) and pushes a vX.Y.Z tag to origin. The .github/workflows/release.yaml workflow takes over from the tag push to build cross-platform binaries (uploaded to GH Releases) and multi-arch container images (published to GHCR). This pipeline never builds or publishes artifacts itself."
+	return "Runs the pre-commit, pre-push and template-verify gates, validates the release shape (clean tree, free tag, non-empty CHANGELOG.md [Unreleased] section), commits the CHANGELOG [Unreleased] rename, then pushes the branch and a vX.Y.Z tag to origin. Afterwards it pins .sparkwing/go.mod and pkg/scaffold to the released version and restores the dogfood self-replace, in two further commits, and pushes the branch again. The .github/workflows/release.yaml workflow takes over from the tag push to build cross-platform binaries (uploaded to GH Releases) and multi-arch container images (published to GHCR). This pipeline never builds or publishes artifacts itself."
 }
 
 func (Release) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
-		{Comment: "Auto-pick version by bumping latest origin tag", Command: "sparkwing run release"},
-		{Comment: "Tag and push an explicit version", Command: "sparkwing run release --version v1.5.5"},
-		{Comment: "Preview without pushing", Command: "sparkwing run release --dry-run"},
+		{Comment: "Auto-pick version by bumping latest origin tag", Command: "sparkwing run release --sw-allow destructive,prod"},
+		{Comment: "Tag and push an explicit version", Command: "sparkwing run release --version v0.24.0 --sw-allow destructive,prod"},
+		{Comment: "Preview without pushing", Command: "sparkwing run release --sw-dry-run"},
 	}
 }
 

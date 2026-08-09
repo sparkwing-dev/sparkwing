@@ -12,10 +12,10 @@ import (
 // orchestrator depends on.
 //
 // State is opened from a backends.Spec via
-// pkg/storage/storeurl.OpenStateStoreFromSpec. The SQLite-backed
-// *store.Store is the only implementation today; Postgres, HTTP
-// (controller), and object-store NDJSON backends plug in behind the
-// same interface as later units land. Methods whose wrappers add
+// pkg/storage/storeurl.OpenStateStoreFromSpec, which selects an
+// implementation by spec type: the SQLite- and Postgres-backed
+// *store.Store, the S3 NDJSON store (with a local durability outbox),
+// or the controller HTTP client. Methods whose wrappers add
 // adapter logic on top of the store (output extraction, trigger
 // cycle detection, simplified-error AppendEvent) live on the
 // orchestrator's runtime interface that embeds this one, not here.

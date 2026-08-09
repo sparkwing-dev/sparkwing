@@ -4,26 +4,39 @@
 
 ### macOS / Linux
 
-Pre-built binaries are published to GitHub Releases. Pick the one for
-your platform and drop it on PATH:
+```bash
+curl -fsSL https://sparkwing.dev/install.sh | sh
+```
+
+It detects your OS and architecture, pulls the matching release binary,
+and drops `sparkwing` into `~/.local/bin`. For a specific version:
+`curl -fsSL https://sparkwing.dev/install.sh | sh -s -- --version vX.Y.Z`.
+
+To place the binary yourself, download the asset for your platform from
+GitHub Releases:
 
 ```bash
 # macOS Apple Silicon
 curl -fsSL https://github.com/sparkwing-dev/sparkwing/releases/latest/download/sparkwing-darwin-arm64 \
-    -o /usr/local/bin/sparkwing && chmod +x /usr/local/bin/sparkwing
+    -o ~/.local/bin/sparkwing && chmod +x ~/.local/bin/sparkwing
 
 # macOS Intel
 curl -fsSL https://github.com/sparkwing-dev/sparkwing/releases/latest/download/sparkwing-darwin-amd64 \
-    -o /usr/local/bin/sparkwing && chmod +x /usr/local/bin/sparkwing
+    -o ~/.local/bin/sparkwing && chmod +x ~/.local/bin/sparkwing
 
 # Linux x86_64
 curl -fsSL https://github.com/sparkwing-dev/sparkwing/releases/latest/download/sparkwing-linux-amd64 \
-    -o /usr/local/bin/sparkwing && chmod +x /usr/local/bin/sparkwing
+    -o ~/.local/bin/sparkwing && chmod +x ~/.local/bin/sparkwing
 
 # Linux ARM64
 curl -fsSL https://github.com/sparkwing-dev/sparkwing/releases/latest/download/sparkwing-linux-arm64 \
-    -o /usr/local/bin/sparkwing && chmod +x /usr/local/bin/sparkwing
+    -o ~/.local/bin/sparkwing && chmod +x ~/.local/bin/sparkwing
 ```
+
+Keep to one location: `sparkwing doctor` reports competing copies on
+PATH, and a second copy shadows the first. Each release also publishes
+`SHA256SUMS` covering every asset; diff your download against it to
+verify.
 
 Or, if Go is on PATH, build from source:
 
@@ -150,7 +163,7 @@ and the cluster has no default StorageClass.
 ```
 .sparkwing/
   sparkwing.yaml    # registry of every pipeline this repo defines
-  main.go           # registers Go jobs
+  main.go           # thin entrypoint; blank-imports jobs/ and delegates to runner.Main
   README.md         # generated package README
   go.mod            # Go module for pipeline code
   go.sum            # dependency checksums (from go mod tidy)
@@ -166,14 +179,16 @@ shapes share the same surface:
 - **manual pipeline** - a YAML entry with no `on:` trigger. Runs only when explicitly invoked. Same Go registration; it's "triggered" vs "manual" distinguishes auto-firing from operator-initiated.
 
 Both produce a Run in the local store on each invocation. The dashboard's
-runs list and `sparkwing runs list` surface them uniformly. (For repo-local
-bash chores -- formatters, port-forwards, the small Makefile-style stuff --
-use dowing; sparkwing is the
-Go-pipeline platform.)
+runs list and `sparkwing runs list` surface them uniformly. (One-shot
+repo-local shell chores -- formatters, port-forwards, the small
+Makefile-style stuff -- do not need a run record; keep them in your
+existing task runner.)
 
-A Go pipeline is a struct that implements `Plan(ctx, run) (*Plan, error)`
-and returns a DAG of nodes. One-node pipelines return a Plan with a single
-`Step`. See [`sdk.md`](sdk.md) for the SDK reference and
+A Go pipeline is a struct that implements
+`Plan(ctx context.Context, plan *sw.Plan, in Inputs, run sw.RunContext) error`.
+It registers jobs on the passed-in `plan` and returns; it does not build
+and return one. A one-node pipeline registers a single `sw.Job`. See
+[`sdk.md`](sdk.md) for the SDK reference and
 [`pipelines.md`](pipelines.md) for the Plan/Work model.
 
 ```yaml
@@ -219,8 +234,10 @@ func (j *Build) Work(w *sw.Work) (*sw.WorkStep, error) {
     return nil, nil
 }
 
-// In .sparkwing/main.go:
-//     sw.Register[sw.NoInputs]("build-deploy", func() sw.Pipeline[sw.NoInputs] { return &BuildDeploy{} })
+// At the bottom of .sparkwing/jobs/build_deploy.go:
+//     func init() {
+//         sw.Register[sw.NoInputs]("build-deploy", func() sw.Pipeline[sw.NoInputs] { return &BuildDeploy{} })
+//     }
 ```
 
 Trivial single-step pipelines pass a `func(ctx) error` straight to `sw.Job`:
@@ -267,8 +284,12 @@ The pipeline runs validation gates before tagging, including:
   force-push)
 - `check-clean-tree` -- working tree must be clean
 - `gate-pre-commit` / `gate-pre-push` -- the same gate checks the git hooks run
-- `prepare-changelog` -- CHANGELOG.md must contain a matching `[vX.Y.Z]`
-  heading
+- `prepare-changelog` -- `## [Unreleased]` in CHANGELOG.md must hold at
+  least one entry. The step renames that section to
+  `## [vX.Y.Z] - DATE`, opens a fresh empty `## [Unreleased]` above it,
+  and commits the rewrite, so the tag lands on a tree that already
+  carries the release notes. Splitting entries by hand across both
+  `[Unreleased]` and `[vX.Y.Z]` is ambiguous and the step refuses.
 
 Only after they pass does `push-tag` create the annotated tag and push it
 to origin.

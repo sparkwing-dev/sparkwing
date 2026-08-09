@@ -50,11 +50,15 @@ The Go module pipeline authors import:
   Job, Work, Step, modifiers, runtime helpers (`sparkwing.Bash`,
   `sparkwing.Path`, etc.), wire types. This is the package with
   stability guarantees.
-- **Implementation packages** -- `orchestrator/`, `controller/client/`,
-  `bincache/`, `logs/`, `pkg/storage/`, `otelutil/`, `profile/`,
-  `repos/`, `secrets/`. Exported for technical reasons (the CLI
-  consumes them) but APIs may change in any release. Don't import
-  them from user pipeline code.
+- **Other `pkg/` packages** -- `pkg/controller/client`, `pkg/logs`,
+  `pkg/storage`, `pkg/runner`, `pkg/wingwire` and the rest. Exported
+  and covered by the same stability promise as `sparkwing/` (see
+  [VERSIONING.md](./VERSIONING.md)), but they are CLI and controller
+  plumbing rather than pipeline-authoring API.
+- **Everything under `internal/`** -- the orchestrator, admission,
+  bincache, otelutil, profile, repos, secrets and friends.
+  Implementation detail that changes at any time; Go forbids importing
+  it from outside this module.
 
 ## Authoring pipelines
 

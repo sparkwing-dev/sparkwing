@@ -272,6 +272,12 @@ throwaway linked worktree, which shares the repository's config -- so the same
 its own detached HEAD, so the repository's working tree, index, branches and
 HEAD are untouched whatever the gate does.
 
+`fire` settles the pre-commit gate only. A pre-push gate needs a remote to fire
+against, so it is left to the push that exercises it, and a repository that
+declares no pre-commit trigger has nothing for `fire` to prove -- `--fleet`
+counts it apart from the repositories whose gate refused rather than among
+them.
+
 Every refusal is checked against a control: the same staged change is committed
 again with hooks switched off, and has to land. Without that, a commit that
 failed for an unrelated reason reads exactly like a gate doing its job.

@@ -49,20 +49,26 @@ Top-level groups, each with its own `--help` and a full entry in
 | `pipeline` | This repo's pipelines: list / describe / discover / new / explain / run / trigger / hooks / sparks |
 | `run` | Shortcut for `pipeline run` (the positional form) |
 | `runs` | Inspect and manage runs: list / status / logs / retry / cancel, plus `approvals` and `triggers` |
+| `repos` | The machine's fleet of sparkwing repos and their SDK pins: list / info / update |
+| `queue` | Local admission: holders, connections, waiters, capacity |
+| `daemon` | The local admission daemon: status / restart |
 | `profile` | Show which profile would resolve right now, and why (read-only; never prints tokens) |
 | `version` | Composite CLI + SDK + sparks version card; `version update --sdk` bumps the pinned SDK |
 | `update` | Self-update the `sparkwing` CLI binary |
 | `dashboard` | Detached local dashboard server: start / kill / status |
+| `doctor` | Diagnose and repair provably-dead local state |
 | `cluster` | Cluster ops against a profile's controller: status / agents / worker / gc / users / tokens / image / webhooks / concurrency |
 | `secrets` | Secrets, laptop dotenv or controller-stored with `--profile`: set / get / list / delete |
 | `configure` | Laptop-local config: init / profiles / xrepo |
 | `debug` | Interactive run debugging: run / release / attach / env / rerun / replay |
 | `docs` | The embedded copy of this doc tree: list / read / all / search |
+| `examples` | The worked-pipeline registry; `--name <example> --body` prints the source |
 | `commands` | The full CLI surface as JSON (agent self-discovery) |
 | `completion` | Shell completion script (`--shell bash\|zsh\|fish`) |
 
-For repo-local shell chores (formatters, port-forwards, Makefile-style
-glue) use dowing; sparkwing is the Go-pipeline platform.
+One-shot repo-local shell chores -- formatters, port-forwards,
+Makefile-style glue -- belong in whatever task runner you already use;
+sparkwing is the Go-pipeline platform.
 
 ## Conventions
 

@@ -17,8 +17,9 @@ scope is the superset.
 GitHub webhook deliveries are verified by the controller: it checks the
 `X-Hub-Signature-256` HMAC against `GITHUB_WEBHOOK_SECRET` with a
 constant-time compare before doing any work. The handler acts on `push`
-events (and answers `ping`); other event types are accepted and
-ignored.
+and on `pull_request` (opened / synchronize / reopened, against the PR
+head), and answers `ping`; other event types and other `pull_request`
+actions are accepted and ignored.
 
 ## Secrets at rest
 
@@ -31,10 +32,17 @@ warning at startup. Provide the key via:
 - `SPARKWING_SECRETS_KEY` -- a base64-encoded 32-byte key, or
 - `--secrets-key-file <path>` -- a file holding the raw or base64 key.
 
-Rotating the key is not automatic: values written under an old key stay
-readable, values written after the switch use the new key. Either way,
-values leave the server only through the authenticated secrets API;
-pipelines read them with `sparkwing.Secret` (see [sdk.md](sdk.md)).
+There is no key rotation and no multi-key read path: the controller
+holds one key and the stored envelope carries no key id. Swapping the
+key makes every previously sealed value unreadable (`GET
+/api/v1/secrets/{name}` returns 500), and configuring a key for the
+first time against a database that already holds plaintext values fails
+the same way. Re-set every secret through the API after changing or
+first enabling the key.
+
+Encrypted or not, values leave the server only through the
+authenticated secrets API; pipelines read them with `sparkwing.Secret`
+(see [sdk.md](sdk.md)).
 
 ## Cache service
 
@@ -48,9 +56,12 @@ ingress. In-cluster callers reach it directly without a token.
 
 The Helm charts run the long-lived services as non-root with explicit
 `securityContext` settings (the controller as uid 65534, privilege
-escalation disabled, all Linux capabilities dropped). The Docker-in-Docker sidecar
-is the exception: it needs `privileged: true` to build images, an
-accepted risk isolated to the build pod.
+escalation disabled, all Linux capabilities dropped). The one exception
+is the warm-pool warmer: when the pool is enabled the controller
+launches an ephemeral `docker:27-dind` pod with `privileged: true` so
+it can run dockerd and pre-pull images into a warm PVC. It is
+short-lived, single-container, and the only privileged workload
+sparkwing creates. See [warm-pool.md](warm-pool.md).
 
 ## Operator checklist
 

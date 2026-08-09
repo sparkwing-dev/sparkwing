@@ -277,7 +277,7 @@ const agentBlockDurable = "This repo uses **sparkwing** for CI/CD (https://spark
 const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"\n" +
 	"- `sparkwing pipeline new --name <n> --template <shape> [--on <event>]` --\n" +
-	"  scaffold. It compiles, lints, and runs as generated, so you edit from\n" +
+	"  scaffold. It compiles, lints, and explains as generated, so you edit from\n" +
 	"  something green. --template picks the DAG, --on picks what fires it:\n" +
 	"    shapes: minimal (1 node) | build-test-deploy (3, linear) |\n" +
 	"            ci-pr-check (3, lint+test -> gate) | release (3, linear) |\n" +

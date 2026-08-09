@@ -10,7 +10,7 @@ description: |
   to the runner so logs / artifacts / git fanout never cross the VPC
   boundary.
   Does NOT include the controller or web SPA -- those ship in the
-  full-self-host chart (sparkwing-stack).
+  full-self-host chart (sparkwing-full).
 
 # application: this chart deploys runnable workloads (Deployments,
 # Services, PVCs). A library chart would be wrong here -- there is no

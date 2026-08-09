@@ -67,19 +67,27 @@ Mark inline with `(Breaking)` directly after the scope:
   by-name string references no longer accepted.
 ```
 
+The marker sits **inside** the bold scope: `- **sdk (Breaking):**`, not
+`- **sdk:** (Breaking)`. Only the first shape is recognized, so an entry
+written the other way is invisible to every check below -- including the
+one that requires a migration guide to exist.
+
 Every `(Breaking)` entry MUST link to a section in the release's
 migration guide. The agent generates the guide at release time from
 the breaking entries in `[Unreleased]`.
 
 ## Migration guides
 
-One file per release: `docs/migrations/v<X.Y.Z>.md`. Target version in
+One file per release that contains a breaking change:
+`docs/migrations/v<X.Y.Z>.md`. Target version in
 the filename; the "from" version is always the prior release. Adopters
 jumping multiple versions read the files in chronological order.
 
-Always created -- even for releases with one small breaking change --
-so `https://sparkwing.dev/docs/migration-guide/v<X.Y.Z>` resolves
-predictably and the surface is consistent.
+Created whenever the release contains a breaking change, so each
+`(Breaking)` entry's link resolves and
+`https://sparkwing.dev/docs/migration-guide/v<X.Y.Z>` is stable for the
+releases that need it. A release with no breaking changes has no guide
+file.
 
 ### File shape
 
@@ -125,9 +133,14 @@ Two layers, with deliberately separate concerns:
   version section, missing or wrong migration-guide links on
   `(Breaking)` entries (file must exist, anchor must resolve to an
   H2 in the file, version in the link path must match the section's
-  version). Output shape: `CHANGELOG.md:<line>: <category>: <message>`,
-  one issue per violation, exit non-zero with a final `<N> issue(s)`
-  summary. Always-on; no env-var gate.
+  version), and, at release time, an unmarked runs-store schema change:
+  when the embedded schema version differs from the previous release,
+  the section being cut -- or `[Unreleased]` before the rename -- must
+  carry a `(Breaking)` entry naming the schema, or the release is
+  refused (`unmarked-schema-break`). Output shape:
+  `CHANGELOG.md:<line>: <category>: <message>`, one issue per violation,
+  exit non-zero with a final `<N> issue(s)` summary. Always-on; no
+  env-var gate.
 - **The pre-release manicuring agent** does the judgment work: tightening
   prose, choosing scope prefixes, deciding which entries to merge,
   generating the migration-guide bodies, pulling internal-cleanup
@@ -165,4 +178,7 @@ tag, GH Actions extracts the section as the GitHub Release body.
 Same shape as a released section, just under the `[Unreleased]`
 heading. Breaking entries can omit the migration-guide link until
 release time -- the agent fills those in when it generates the
-guide. Or include a placeholder: `(migration guide TBD)`.
+guide. Or include a placeholder: `(migration guide TBD)`, or link
+`docs/migrations/_unreleased.md#<anchor>`, which the linter accepts
+inside `[Unreleased]` and rejects once the section is renamed to a
+version.

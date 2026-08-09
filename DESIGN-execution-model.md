@@ -1,10 +1,16 @@
 # Execution Model
 
+> **Status:** design record. Project config now lives in a single
+> `.sparkwing/sparkwing.yaml`; the standalone `runners.yaml`,
+> `sources.yaml`, and `backends.yaml` files this document assumes are
+> rejected by the loader. See docs/config-reference.md and
+> docs/backends.md for the shipped schema.
+
 Where a pipeline runs, what it acts upon, where its work physically executes, where its configuration and secrets come from, and where its artifacts, logs, and state are persisted -- modeled as orthogonal axes with a single, predictable resolution rule.
 
 ## Why this exists
 
-Today a sparkwing pipeline is dispatched against a `--on <profile>` (a controller URL) and inherits "am I local?" from environment-variable detection (`SPARKWING_HOST=cluster`, `KUBERNETES_SERVICE_HOST`). That single binary collapses several distinct concerns into one:
+The problem this design attacks: a pipeline dispatched against a single "where" selector (a controller URL) that also decides "am I local?" through environment-variable detection (`SPARKWING_HOST=cluster`, `KUBERNETES_SERVICE_HOST`). That single binary collapses several distinct concerns into one:
 
 1. Which controller orchestrates the run.
 2. Which runner physically executes each unit of work.
@@ -20,8 +26,8 @@ This design separates those concerns, gives each one a typed declaration site, a
 
 Four choices are load-bearing and shouldn't drift later.
 
-1. **Targets are declared as a map under each pipeline**, with per-target overrides for runners, approvals, source bindings, and config values. A pipeline without a `targets:` block legitimately has no concept of target (e.g. `lint`, `scaffold`); a pipeline with one target auto-selects it.
-2. **Runners are matched by labels.** "Local" and "remote" disappear as enum values. A `runners.yaml` declares named runners (templates for cluster-backed types, bindings for static machines, plus the implicit local one) that advertise labels and carry their backing spec; jobs declare label requirements and preferences via three verbs: `Requires`, `Prefers`, `WhenRunner`.
+1. **A target names the logical environment a run acts on**, selected per run rather than baked into the pipeline's identity. A pipeline that has no concept of target (e.g. `lint`, `scaffold`) simply ignores it.
+2. **Runners are matched by labels.** "Local" and "remote" disappear as enum values. Named runners (templates for cluster-backed types, bindings for static machines, plus the implicit local one) advertise labels and carry their backing spec; jobs declare label requirements and preferences via three verbs: `Requires`, `Prefers`, `WhenRunner`.
 3. **Defaults are explicit per controller.** Each profile in `profiles.yaml` names its `default_runner`. The scheduler uses that default only when a job hasn't picked a preference and the resolved allow-set has multiple valid choices. Ambiguity without a default fails at validation, not silently.
 4. **Single-controller per run for v1.** A run uses one orchestrating controller; every runner it touches must be reachable from that controller. Cross-controller and peered dispatch are deferred.
 
@@ -29,59 +35,46 @@ Four choices are load-bearing and shouldn't drift later.
 
 | Axis | Question it answers | Declared in | Picked by |
 |---|---|---|---|
-| Orchestration host | Where does the run record live and who drives dispatch? | `profiles.yaml` | `--on <profile>` (default: configured default profile) |
-| Runner | Which runner pool actually executes each job? | `runners.yaml` + per-job `Requires`/`WhenRunner`/`Prefers` | resolution rule, per job |
-| Target | What logical environment does this run act on? | `pipelines.yaml` `targets:` block | `--for <target>` (default: pipeline default) |
-| Source (config + secrets) | Where do dynamic values come from? | per-target `source:` | resolved at run start from the target |
-| Backend (cache, logs, state, binaries) | Where are artifacts, logs, and run state persisted? | `backends.yaml` + environment auto-detect | resolved at process start from the current environment |
+| Orchestration host | Where does the run record live and who drives dispatch? | `profiles.yaml` | `--profile <name>` (default: configured default profile) |
+| Runner | Which runner pool actually executes each job? | runner declarations + per-job `Requires`/`WhenRunner`/`Prefers` | resolution rule, per job |
+| Target | What logical environment does this run act on? | the pipeline's own args | `--target <name>` (default: the pipeline's arg default) |
+| Source (config + secrets) | Where do dynamic values come from? | the resolved profile's `secrets:` surface | resolved at run start |
+| Backend (cache, logs, state, binaries) | Where are artifacts, logs, and run state persisted? | the resolved profile's `state:` / `cache:` / `logs:` surfaces | resolved at process start from the selected profile |
 
 The axes are independently selectable. A run can orchestrate on the laptop's local controller, dispatch its build job to a cloud Linux runner and its publish job to a cloud Windows runner, target the staging environment, pull secrets from a shared vault, write logs to an s3 bucket, and store run state in remote Postgres -- all without any pipeline code branching on "local vs remote."
 
 ## Targets
 
-A target is a named logical environment a pipeline can act on. Targets live in `pipelines.yaml` as a map under the pipeline; each entry may carry its own overrides.
+A target is a named logical environment a pipeline can act on. **The shipped shape is not a config-declared environment map.** A pipeline entry in `.sparkwing/sparkwing.yaml` accepts `name`, `entrypoint`, `description`, `on`, `hidden`, `guards`, `args`, `profile`, and `requires`; the strict parser rejects everything else, including a `targets:` map and per-pipeline `runners:` / `values:` blocks.
+
+What the two declaration sites do instead:
+
+- `requires: [...]` -- the pipeline's runner-label allowlist. Every job in the pipeline must satisfy it in addition to its own `Requires()`. The reserved label `local` pins execution to the in-process runner.
+- `profile: <name>` -- binds the pipeline to a project profile, which carries its backend surfaces (`state:`, `cache:`, `logs:`) and its `secrets:` source. The profile applies wholesale; there is no per-surface layering.
 
 ```yaml
+# .sparkwing/sparkwing.yaml
 pipelines:
   - name: release
     entrypoint: Release
-    runners: [local, cloud-linux]     # pipeline-wide allowlist (default for all jobs)
-    targets:
-      dev:
-        values: { replicas: 1 }
-      staging:
-        values: { replicas: 3 }
-      prod:
-        runners: [prod-builders]      # narrows the pipeline allowlist for this target
-        approvals: required
-        protected: true
-        values: { replicas: 5 }
-      pi:
-        runners: [local]
-        source: local-keychain
-        values: { device_serial: ABCD1234 }
+    requires: [cloud-linux]
+    profile: prod-audit
+    args:
+      target: staging
 ```
 
-Per-target overrides:
-
-- `runners: [...]` -- narrows the pipeline-level runner allowlist. Intersection with `pipelines.runners`. Omitted means inherit the pipeline allowlist.
-- `source: <name>` -- which entry in `sources.yaml` resolves `sparkwing.Secret` / `sparkwing.Config` calls for this target. Defaults to the pipeline's default source (or the global default in `sources.yaml`).
-- `approvals: required` -- runs against this target pause for a human gate before any jobs dispatch.
-- `protected: true` -- refuses non-default-branch sources; flags the run loudly in the dashboard.
-- `values: { ... }` -- overlays values onto the pipeline's typed config struct (see Static configuration below).
-- `backend: { ... }` -- rare; overrides cache/logs/state destination for runs targeting this environment.
-
-Pipelines may declare zero targets. A pipeline without a `targets:` block rejects `--for` at the CLI and runs with the pipeline-level config only. A pipeline with exactly one target auto-selects it; `--for <name>` is accepted but redundant.
+`--target <name>` is a runtime value, not a config-declared environment. It flows into the pipeline's own typed args, so the pipeline decides what "staging" means; `args:` supplies its default. A pipeline with no target arg simply ignores the flag.
 
 ## Runners
 
-A runner is a named entry in `runners.yaml`. Each declares the labels it advertises and, for cluster-backed types, the spec used to materialize runner pods. The label model is shared with `Job.Requires(labels...)`: jobs declare label requirements; runners advertise labels they satisfy.
+A runner is a named, declared entry. Each declares the labels it advertises and, for cluster-backed types, the spec used to materialize runner pods. The label model is shared with `JobNode.Requires(labels...)`: jobs declare label requirements; runners advertise labels they satisfy.
 
 The runner's name is itself an implicit label, so `Requires("cloud-gpu")` matches the runner of that name, and `Requires("gpu", "linux")` matches any runner advertising both labels. Match semantics are AND across listed labels.
 
 ```yaml
-# .sparkwing/runners.yaml         (checked in, team-shared)
-# ~/.config/sparkwing/runners.yaml (per-user additions, merged)
+# Runner declarations. Project config lives in .sparkwing/sparkwing.yaml
+# and per-user config in ~/.config/sparkwing/profiles.yaml; neither
+# loader models a standalone `runners:` map (see the status banner).
 
 runners:
   local:
@@ -140,7 +133,7 @@ Future types (`docker`, `ec2-fleet`, `nomad`) follow the same shape: typed `spec
 
 ### Karpenter and node-pool routing
 
-For Kubernetes-backed runners, node-pool routing is fully expressed in the runner's `spec:` block. Pipeline authors declare what they need by runner name or label; cluster admins decide which Karpenter `NodePool` backs each runner by editing one entry in `runners.yaml`. Swapping A100s for H100s is a single-line edit; no pipeline changes.
+For Kubernetes-backed runners, node-pool routing is fully expressed in the runner's `spec:` block. Pipeline authors declare what they need by runner name or label; cluster admins decide which Karpenter `NodePool` backs each runner by editing that runner's entry. Swapping A100s for H100s is a single-line edit; no pipeline changes.
 
 Adding a new pool -- a Graviton ARM pool, a spot-priced burst pool, a per-team isolated pool -- is a new runner entry with the appropriate `nodeSelector` and `tolerations`, plus labels that describe its capabilities.
 
@@ -211,7 +204,7 @@ Job code should prefer asking specific capability questions over branching on `r
 
 ## Job-level selection: three verbs
 
-Three chainable methods on `*Job` (and on `*JobGroup`, where they delegate to every member). The renames lock in here: `RunsOn` becomes `Requires`; `*Node` becomes `*Job`; `*NodeGroup` becomes `*JobGroup`. Group delegation follows the existing pattern that `Needs`, `Retry`, `Timeout`, `Cache`, and the others already use.
+Three chainable methods on `*JobNode` (the type `sparkwing.Job` returns) and on `*JobGroup`, where they delegate to every member. `RunsOn` is spelled `Requires`; the node types are `*JobNode` and `*JobGroup`. Group delegation follows the existing pattern that `Needs`, `Retry`, `Timeout`, `Cache`, and the others already use.
 
 | Verb | Meaning | When no runner matches |
 |---|---|---|
@@ -287,7 +280,7 @@ func (BuildWindows) Run(ctx context.Context) error { /* ... */ }
 func (BuildWindows) Requires() []string { return []string{"cloud-windows"} }
 ```
 
-The orchestrator reads these methods when wrapping the Workable into a `*Job`. Constraints stated at the registration site take precedence on conflict; the Workable's own declaration is the floor.
+The orchestrator reads these methods when wrapping the Workable into a `*JobNode`. Constraints stated at the registration site take precedence on conflict; the Workable's own declaration is the floor.
 
 ### Heterogeneous fan-out
 
@@ -315,8 +308,7 @@ sparkwing.JobFanOutDynamic(plan, "bench", shardSource, func(shard ShardSpec) (st
 For each job (and each fan-out instance independently), the scheduler computes:
 
 ```
-1. allowed = pipeline.runners
-           ∩ (target.runners      if set, else all)
+1. allowed = pipeline.requires
            ∩ (job.Requires        if set, else all)
            ∩ (workable.Requires() if implemented, else all)
 
@@ -330,90 +322,69 @@ For each job (and each fan-out instance independently), the scheduler computes:
 
 The whole decision produces either one runner per job, a skip mark, or a clear error at run start -- before any work dispatches.
 
-## Static configuration: typed values, layered overlays
+## Static configuration: typed args, typed secrets
 
-Static configuration -- values code-reviewed in the repo -- flows through a typed Go struct declared by the pipeline. YAML supplies the values; the struct supplies the types.
+Static configuration -- values code-reviewed in the repo -- flows through the pipeline's typed `Inputs` struct. There is no separate `Config() any` provider and no `values:` layering: the typed struct supplies the field types and defaults, `args:` in `.sparkwing/sparkwing.yaml` supplies per-project defaults, and an explicit CLI flag wins over both.
 
 ```go
-type ReleaseConfig struct {
-    ImageRepo string `sw:"image_repo,required"`
-    Replicas  int    `sw:"replicas"  default:"2"`
-    Region    string `sw:"region"    default:"us-west-2"`
+type ReleaseArgs struct {
+    ImageRepo string `flag:"image-repo"`
+    Replicas  int    `flag:"replicas" default:"2"`
+    Region    string `flag:"region"   default:"us-west-2"`
 }
 
 type Release struct{}
 
-func (Release) Config() any { return &ReleaseConfig{} }
-
-func (Release) Plan(ctx context.Context, plan *sparkwing.Plan, in Inputs, rc sparkwing.RunContext) error {
-    cfg := sparkwing.PipelineConfig[ReleaseConfig](ctx)
-    build := sparkwing.Job(plan, "build", &Build{Repo: cfg.ImageRepo})
+func (Release) Plan(ctx context.Context, plan *sparkwing.Plan, in ReleaseArgs, rc sparkwing.RunContext) error {
+    build := sparkwing.Job(plan, "build", &Build{Repo: in.ImageRepo})
     sparkwing.Job(plan, "deploy", &Deploy{
-        Replicas: cfg.Replicas,
-        Region:   cfg.Region,
+        Replicas: in.Replicas,
+        Region:   in.Region,
     }).Needs(build)
     return nil
 }
 ```
 
 ```yaml
+# .sparkwing/sparkwing.yaml
 pipelines:
   - name: release
     entrypoint: Release
-    values:
-      base: { image_repo: example.dev/api }       # applied to every target
-    targets:
-      dev:     { values: { replicas: 1 } }
-      staging: { values: { replicas: 3 } }
-      prod:    { values: { replicas: 5 }, runners: [prod-builders] }
-      pi:      { values: { device_serial: ABCD1234 }, runners: [local] }
+    args:
+      image-repo: example.dev/api
+      replicas: "3"
 ```
 
-Layers applied in order; later layers win per field:
+Precedence, lowest to highest: the struct's `default:` tag, the pipeline's `args:` entry, the operator's CLI flag. Resolution happens once at run start, before any job dispatches.
 
-1. Pipeline `values.base`
-2. `targets.<selected>.values`
-3. Per-runner overlay if declared (rare): `values.runners.<name>`
-4. CLI flags from typed `Inputs`
-
-Resolution happens once at run start. The resolved struct is attached to ctx; jobs read it via `sparkwing.PipelineConfig[T](ctx)`. Missing `required` fields fail before any job dispatches, with a message naming the field and the layer it was expected from.
-
-`sparkwing run release config --for staging` prints the resolved struct plus the source of each field.
+The fail-fast typed surface that *is* declared alongside the pipeline is `Secrets()`; see the next section. `sparkwing run <pipeline> config` prints the declared secrets view -- each field with its provenance and resolution status -- not a resolved config struct.
 
 ## Dynamic configuration and secrets
 
-`sparkwing.Secret(ctx, name)` and `sparkwing.Config(ctx, name)` resolve through a `SecretResolver` installed on ctx. This design keeps that surface and adds explicit, per-target source selection.
+`sparkwing.Secret(ctx, name)` and `sparkwing.Config(ctx, name)` resolve through a `SecretResolver` installed on ctx. The source is the resolved profile's `secrets:` surface, so selecting a profile selects the vault.
 
 ```yaml
-# .sparkwing/sources.yaml
-default: team-vault
-
-sources:
-  team-vault:
-    type: remote-controller
-    controller: shared
-  prod-vault:
-    type: remote-controller
-    controller: prod
-  local-keychain:
-    type: macos-keychain
-    service: sparkwing-pi
-  dotenv:
-    type: file
-    path: .sparkwing/secrets.local.env
+# ~/.config/sparkwing/profiles.yaml
+profiles:
+  laptop:
+    secrets: { type: filesystem, path: .sparkwing/secrets.local.env }
+  shared:
+    secrets: { type: controller, url: https://shared.example.dev }
+  prod:
+    secrets: { type: controller, url: https://prod.example.com }
 ```
 
-Each target binds to a source:
+A pipeline pins its own source by naming a project profile:
 
 ```yaml
-targets:
-  dev:     { source: team-vault }
-  staging: { source: team-vault }
-  prod:    { source: prod-vault, runners: [prod-builders] }
-  pi:      { source: local-keychain, runners: [local] }
+# .sparkwing/sparkwing.yaml
+pipelines:
+  - name: release
+    entrypoint: Release
+    profile: prod
 ```
 
-At run start the orchestrator picks the source from `targets[selected].source` (falling back to `sources.default`), builds a resolver bound to it, and installs it on ctx via the existing `sparkwing.WithSecretResolver`. Job bodies stay unchanged:
+At run start the orchestrator resolves the profile, builds a resolver bound to its `secrets:` surface, and installs it on ctx via `sparkwing.WithSecretResolver`. Job bodies stay unchanged:
 
 ```go
 func (d *Deploy) Run(ctx context.Context) error {
@@ -424,71 +395,52 @@ func (d *Deploy) Run(ctx context.Context) error {
 }
 ```
 
-The same call hits the team vault when targeting staging from a laptop, hits the prod vault when targeting prod, and hits the macOS keychain when targeting pi. The pipeline never knows which.
+The same call hits the team vault under the `shared` profile, hits the prod vault under `prod`, and reads the local dotenv under `laptop`. The pipeline never knows which.
 
 ### Fail-fast for required secrets
 
-A pipeline can opt into eager resolution by declaring a secrets struct alongside its config:
+A pipeline opts into eager resolution by declaring a secrets struct:
 
 ```go
 type ReleaseSecrets struct {
     DeployToken string `sw:"DEPLOY_TOKEN,required"`
-    SlackHook   string `sw:"SLACK_HOOK"`
+    SlackHook   string `sw:"SLACK_HOOK,optional"`
 }
 
 func (Release) Secrets() any { return &ReleaseSecrets{} }
 ```
 
-At run start the orchestrator resolves every `required` entry against the chosen source and fails the run loudly if any are missing -- before the first job dispatches.
+At run start the orchestrator resolves every required entry against the chosen source and fails the run loudly if any are missing -- before the first job dispatches. Fields default to required when neither `,required` nor `,optional` is set. Job bodies read the populated struct with `sparkwing.PipelineSecrets[ReleaseSecrets](ctx)`.
 
 ### Same target, different credentials
 
-`release --for prod` and `investigate-prod --for prod` both target prod but legitimately need different IAM roles. They declare different secret names (`DEPLOY_TOKEN` vs `READ_TOKEN`); the same vault returns different values for each. Pipeline identity is the namespace.
+`release --target prod` and `investigate-prod --target prod` both target prod but legitimately need different IAM roles. They declare different secret names (`DEPLOY_TOKEN` vs `READ_TOKEN`); the same vault returns different values for each. Pipeline identity is the namespace.
 
 ## Storage backends
 
-Cache (content-addressed artifacts including compiled pipeline binaries), logs (per-job log streams), and state (the run-record store) each have a pluggable backend. Where they live depends on the environment -- GHA wants s3, cluster mode wants the controller's hosted services, laptop wants the local filesystem -- and any default can be overridden.
+Cache (content-addressed artifacts including compiled pipeline binaries), logs (per-job log streams), and state (the run-record store) each have a pluggable backend. Where they live is a property of the selected profile -- CI wants s3, cluster mode wants the controller's hosted services, laptop wants the local filesystem.
 
 ```yaml
-# .sparkwing/backends.yaml (checked in)
-# ~/.config/sparkwing/backends.yaml (per-user overlay)
+# ~/.config/sparkwing/profiles.yaml (per-user)
+# .sparkwing/sparkwing.yaml         (project, under `profiles:`)
 
-defaults:
-  cache:
-    type: filesystem
-    path: ~/.cache/sparkwing
-  logs:
-    type: filesystem
-    path: ~/.cache/sparkwing/logs
-  state:
-    type: sqlite
-    path: ~/.cache/sparkwing/state.db
+profiles:
+  laptop:
+    secrets: { type: env }
+    cache: { type: filesystem, path: ~/.cache/sparkwing }
+    logs:  { type: filesystem, path: ~/.cache/sparkwing/logs }
+    state: { type: sqlite }
 
-environments:
-  gha:
-    detect: { env_var: GITHUB_ACTIONS, equals: "true" }
-    cache:
-      type: s3
-      bucket: sparkwing-cache
-      prefix: ${GITHUB_REPOSITORY}/
-    logs:
-      type: s3
-      bucket: sparkwing-logs
-      prefix: ${GITHUB_REPOSITORY}/
-    state:
-      type: s3
-      bucket: sparkwing-state
-      prefix: ${GITHUB_REPOSITORY}/
+  ci:
+    secrets: { type: env }
+    cache: { type: s3, bucket: sparkwing-cache, prefix: "${GITHUB_REPOSITORY}/" }
+    logs:  { type: s3, bucket: sparkwing-logs,  prefix: "${GITHUB_REPOSITORY}/" }
+    state: { type: s3, bucket: sparkwing-state, prefix: "${GITHUB_REPOSITORY}/" }
 
-  kubernetes:
-    detect: { env_var: KUBERNETES_SERVICE_HOST, present: true }
+  cluster:
+    secrets: { type: controller, url: https://prod.example.com }
     cache: { type: controller }
     logs:  { type: controller }
-    state: { type: postgres, url_source: state_db_url }
-
-  cluster-shared:
-    cache: { type: s3, bucket: team-cache }
-    logs:  { type: s3, bucket: team-logs }
     state: { type: postgres, url_source: state_db_url }
 ```
 
@@ -504,11 +456,12 @@ Adding a new backend type is a new `type:` value with a typed spec block; pipeli
 
 ### Selection precedence
 
-First match wins:
+The resolved profile applies wholesale -- surfaces are not layered in one at a time. First match wins on the profile itself:
 
-1. Target-level overlay (`targets.<name>.backend: { ... }`) -- rare.
-2. Environment auto-detect -- first `environments:` entry whose `detect:` block evaluates true.
-3. `defaults:` block -- the fallback.
+1. `--profile <name>` on the command line.
+2. The pipeline's own `profile:` key.
+3. The project's `defaults.profile` in `.sparkwing/sparkwing.yaml`.
+4. The built-in local defaults (sqlite state, filesystem cache and logs).
 
 ### Pipeline binary distribution
 
@@ -522,28 +475,33 @@ Because compiled binaries live in the cache backend, the existing backend select
 An optional `cache.binaries` subspace isolates them for teams that want a shared binary cache while keeping local cache on disk:
 
 ```yaml
-defaults:
-  cache:
-    type: filesystem
-    path: ~/.cache/sparkwing
-    binaries:
-      type: s3
-      bucket: sparkwing-binaries
-      prefix: ${PIPELINE_NAME}/
+profiles:
+  shared-team:
+    cache:
+      type: filesystem
+      path: ~/.cache/sparkwing
+      binaries:
+        type: s3
+        bucket: sparkwing-binaries
+        prefix: "${PIPELINE_NAME}/"
 ```
 
-### Per-target backend override
+### Per-pipeline backend override
 
-For the rare case where a target needs a different destination (prod runs write logs to a prod-only bucket for audit), a `backend:` overlay on the target wins over the environment default:
+For the case where one pipeline needs a different destination (prod runs write logs to a prod-only bucket for audit), declare a project profile and point the pipeline at it with `profile:`:
 
 ```yaml
-targets:
-  prod:
-    runners: [prod-builders]
-    source: prod-vault
-    backend:
-      logs:  { type: s3, bucket: prod-audit-logs, prefix: ${RUN_ID}/ }
-      state: { type: postgres, url_source: prod_state_db }
+# .sparkwing/sparkwing.yaml
+profiles:
+  prod-audit:
+    secrets: { type: env }
+    state:   { type: postgres, url_source: prod_state_db }
+    cache:   { type: s3, bucket: prod, prefix: cache }
+    logs:    { type: s3, bucket: prod-audit-logs, prefix: "${RUN_ID}/" }
+pipelines:
+  - name: release-prod
+    entrypoint: Release
+    profile: prod-audit
 ```
 
 ## Writing adapters for genuinely-different code paths
@@ -615,25 +573,29 @@ The only coupling is practical: scheduled triggers require a controller with sch
 
 ## CLI surface
 
+`sparkwing run` always executes on the machine you invoke it from; `--profile` selects the storage/auth surfaces, and remote dispatch is `sparkwing pipeline trigger --profile <name>`.
+
 ```bash
 # Simple cases default cleanly: laptop CLI + default target + default runner.
 sparkwing run lint
-sparkwing run release --for dev
+sparkwing run release --target dev
 
-# Cross-controller dispatch (orchestrate on a different controller).
-sparkwing run release --on shared --for staging
-sparkwing run release --on prod   --for prod
+# Record state against a shared profile's backends.
+sparkwing run release --profile shared --target staging
 
-# Introspect resolved plan + runner choices + sources before pressing go.
-sparkwing run release --for staging --plan
-sparkwing run release config --for staging
+# Hand execution to a controller.
+sparkwing pipeline trigger release --profile prod --target prod
+
+# Introspect resolved plan + runner choices + secrets before pressing go.
+sparkwing run release --target staging --sw-dry-run
+sparkwing run release config --target staging
 ```
 
 Autocomplete:
 
-- `sparkwing run <TAB>` -- pipelines whose `runners:` intersects the current profile's `default_runner` (or all, if no default).
-- `sparkwing run <pipeline> --for <TAB>` -- the pipeline's declared targets.
-- `sparkwing run <pipeline> --on <TAB>` -- profiles whose `default_runner` is in the pipeline's allowed set.
+- `sparkwing run <TAB>` -- pipelines whose `requires:` intersects the current profile's `default_runner` (or all, if no default).
+- `sparkwing run <pipeline> --target <TAB>` -- the target values the pipeline's arg schema accepts.
+- `sparkwing run <pipeline> --profile <TAB>` -- profiles whose `default_runner` is in the pipeline's allowed set.
 
 ## Test scenarios
 
@@ -641,22 +603,22 @@ Each scenario is a concrete pipeline shape the design must support, with the con
 
 | Pipeline | What it tests |
 |---|---|
-| `release` (multi-target with prod-from-remote-only) | Per-target runner narrowing; approvals on prod; layered values per target |
-| `release-pi` (single-target, local-only, local keychain) | Single-target auto-selection; `source: local-keychain`; static-runner pinning by unique label |
-| `lint` (no target, runs anywhere) | Pipelines without a `targets:` block; `--for` rejected; CLI defaults pick cleanly |
-| `migrate-db` (remote-only, prod approval) | `runners:` excludes local; per-target approval gate fires before any job dispatches |
+| `release` (multi-target with prod-from-remote-only) | Runner narrowing via `requires:`; approvals on prod; typed args per target |
+| `release-pi` (local-only, local secrets source) | Profile-bound secrets source; static-runner pinning by unique label |
+| `lint` (no target, runs anywhere) | Pipelines with no target arg ignore `--target`; CLI defaults pick cleanly |
+| `migrate-db` (remote-only, prod approval) | `requires:` excludes local; the approval gate fires before any job dispatches |
 | `investigate-prod` (read-only against prod) | Same target as `release` but different secret names; vault returns different values |
-| `webhook-deploy` (target from payload) | Webhook trigger picks `--for` value from payload; rejected when payload target is outside the pipeline's allowed set |
+| `webhook-deploy` (target from payload) | Webhook trigger picks the target value from payload; rejected when the payload target is outside the pipeline's arg schema |
 | `revert-deploy --emergency` (orthogonal modifier) | CLI flag bypasses approval gate; run logs an "emergency override" record |
 | `train-model` (GPU pool) | `Requires("cloud-gpu")` routes to the Karpenter A100 pool; pod scheduled with correct tolerations/resources |
 | `report-weekly` (scheduled) | Schedule registered on shared controller fires; run dispatches to the controller's `default_runner` |
-| `scaffold-pipeline` (local-only, no target) | Local-only, no `targets:`, no `source:` resolution needed |
+| `scaffold-pipeline` (local-only, no target) | Local-only, no target arg, no secrets source to resolve |
 | `build-windows` inside `release` (step-level offload) | Local CLI orchestrates; the `build-windows` job alone routes to `cloud-windows` while peers stay local |
 | `preflight-sso` with `WhenRunner("local")` | Runs and may fail fast when on local runner; silently skipped on cloud-linux; `Needs` treats skip as satisfied |
-| `release --for pi` from laptop | Orchestration on laptop; secrets from macOS keychain; deploy job runs on local runner |
-| `release --for staging` from laptop | Orchestration on laptop; secrets from team vault (remote fetch); deploy job runs on cloud-linux |
-| GHA-driven smoke run | `backends.yaml` `environments.gha` auto-detects on `GITHUB_ACTIONS=true`; cache/logs/state land in s3; compiled binary fetched from `cache.bin/<hash>` |
-| Cluster-mode run (controller dispatch) | `KUBERNETES_SERVICE_HOST` auto-detect; logs and cache route via controller; runner pod materialized from runner `spec.nodeSelector` |
+| `release --target pi` from laptop | Orchestration on laptop; secrets from the laptop profile's source; deploy job runs on local runner |
+| `release --target staging` from laptop | Orchestration on laptop; secrets from team vault (remote fetch); deploy job runs on cloud-linux |
+| CI smoke run | A CI profile puts cache/logs/state in s3; compiled binary fetched from `cache.bin/<hash>` |
+| Cluster-mode run (controller dispatch) | A controller profile routes logs and cache via the controller; runner pod materialized from runner `spec.nodeSelector` |
 | Specific-machine pinning | Static runner declared with a unique label (`laptop=korey`); `Requires("laptop=korey")` only schedules on that machine; other runners ignored |
 | Karpenter pool swap | A100 pool replaced with H100 by editing one runner entry; no pipeline code changes; next run schedules onto new node type |
 | Heterogeneous fan-out | `JobFanOutDynamic` produces Workables that declare their own `Requires()`; each instance routes independently |
@@ -667,43 +629,30 @@ Each scenario is a concrete pipeline shape the design must support, with the con
 
 **`RuntimeConfig.IsLocal` and the `SPARKWING_HOST` / `KUBERNETES_SERVICE_HOST` env-var detection.** `RuntimeConfig` is trimmed in place: `WorkDir` and `Git` remain. `IsLocal`, `RunID`, `NodeID`, env-var-driven mode detection are removed. `Debug` moves to a free function `sparkwing.Debug()`. Pipeline code reads typed config, calls `sparkwing.Secret/Config`, declares runner constraints, and inspects `sparkwing.Runner(ctx)` only inside one-per-concern adapters.
 
-**The `Venue` enum** (`VenueEither`, `VenueLocalOnly`, `VenueClusterOnly`). Subsumed by the pipeline-level `runners:` allowlist plus per-target `runners:` overrides. The `Venue() sparkwing.Venue` optional method on pipeline values is removed.
+**The `Venue` enum** (`VenueEither`, `VenueLocalOnly`, `VenueClusterOnly`). Subsumed by the pipeline-level `requires:` allowlist plus the per-job verbs. The `Venue() sparkwing.Venue` optional method on pipeline values is removed.
 
-**`TriggerInfo.Env`** (the untyped string map carried on `RunContext.Trigger`). Trigger-supplied values now decode into the pipeline's typed config via a `trigger:` overlay in `pipelines.yaml`:
+**`TriggerInfo.Env`** (the untyped string map carried on `RunContext.Trigger`). A trigger spec declares only what it matches on (`branches:`, `paths:`); it carries no values of its own. Static per-project values live in the pipeline's `args:` map and reach job code through the typed `Inputs` struct, not through `rc.TriggerEnv("DEPLOY_ENV")`. The `TriggerInfo.Env` field and the `RunContext.TriggerEnv` accessor are removed.
 
-```yaml
-push:
-  branches: [main]
-  values: { deploy_env: staging }
-```
+**The `secrets:` list on `Pipeline`.** Now the fail-fast typed `Secrets()` provider; a pipeline declares a struct, and the orchestrator resolves every required field at run start.
 
-Job code reads `cfg.DeployEnv`, not `rc.TriggerEnv("DEPLOY_ENV")`. The `TriggerInfo.Env` field and the `RunContext.TriggerEnv` accessor have been removed.
-
-**The `secrets:` list on `Pipeline`.** Now the fail-fast typed list. Each entry is a mapping (`{name: FOO, required: true}`); free-form string lists are rejected at parse time with a migration message.
-
-**`SPARKWING_LOG_STORE` and `SPARKWING_ARTIFACT_STORE`** env vars. Replaced by `backends.yaml` with auto-detection. The env vars no longer influence backend selection.
+**`SPARKWING_LOG_STORE` and `SPARKWING_ARTIFACT_STORE`** env vars. Replaced by per-profile backend surfaces. The env vars no longer influence backend selection.
 
 ## Out of scope for v1
 
 - **Cross-controller dispatch.** A run uses one orchestration controller; every runner it touches must be reachable from that controller.
 - **Custom backend types beyond the listed cloud providers.** Type-discriminated structure is in place; concrete backends land as demand surfaces.
-- **Per-secret source override.** Today a target picks one source.
-- **Runtime runner advertisement updates.** Runners are loaded at process start; hot-reload of `runners.yaml` is not supported in v1.
+- **Per-secret source override.** A run picks one secrets source, from its resolved profile.
+- **Runtime runner advertisement updates.** Runners are loaded at process start; hot-reload of runner declarations is not supported in v1.
 
-## Migration
+## What shipped
 
-Complete. Eleven self-contained PRs landed the new execution model, plus a final cleanup PR that stripped every migration-era compatibility shim:
+The parts of this design that are the current model:
 
-1. **Rename `*Node` → `*Job`, `*NodeGroup` → `*JobGroup`, `RunsOn` → `Requires`.** Pure type/method rename; behavior unchanged.
-2. **Add `Prefers(labels...)` and `WhenRunner(labels...)`** as peers to `Requires` on `*Job` and `*JobGroup`. Wired preference ordering and skip-on-no-match through the scheduler.
-3. **Add `Workable.Requires() []string` and `Workable.Prefers() []string`** as optional interfaces; orchestrator reads them when wrapping a Workable into a `*Job`.
-4. **Add `runners.yaml`** parser + merge logic. Defined `type: local`, `type: kubernetes`, `type: static`. The local runner stays implicit.
-5. **Add `default_runner`** to `profiles.yaml`. Defaults to `local` for any profile without one.
-6. **Extend `pipelines.yaml`** with `targets:`, `runners:`, `values:`, and lift `secrets:` to a typed list.
-7. **Add optional `Config()` / `Secrets()` methods** to pipelines. Pipelines without them keep working; pipelines with them get the layered typed config + fail-fast resolution.
-8. **Add `sources.yaml`** parser and resolver-by-target wiring. Added the `backends.yaml` parser, auto-detect rules, and the `Cache` / `Logs` interfaces.
-9. **CLI surface**: `--for`, autocomplete updates, `sparkwing run <pipeline> config` introspection.
-10. **Trim `RuntimeConfig` in place.** Removed `IsLocal`, `RunID`, `NodeID`, the `Debug` field, and every env-var-based detection. `sparkwing.DebugEnabled()` exposes the SPARKWING_DEBUG flag; `sparkwing.Runner(ctx)` exposes the chosen runner. Deleted the `Venue` enum (the runner-resolution rule subsumes it).
-11. **Trigger typed values.** Added `on.<trigger>.values:` blocks on trigger specs; values flow through the pipeline's typed Config struct via the same layering as `values.base` and `targets.<name>.values`.
+- **Label-matched runner selection.** A pipeline states its allowlist with `requires:` in `.sparkwing/sparkwing.yaml`; jobs narrow it with `Requires`, `Prefers`, and `WhenRunner` on `*JobNode` and `*JobGroup` (groups delegate to every member). The reserved label `local` pins a pipeline to the in-process runner.
+- **Workable-declared constraints.** `Requires() []string` and `Prefers() []string` are optional interfaces (`sparkwing/workable_labels.go`); the orchestrator reads them when it wraps a Workable into a `*JobNode`, so a fan-out instance can carry its own contract.
+- **Typed runner inspection.** `sparkwing.Runner(ctx)` returns the `*RunnerInfo` the orchestrator installed at dispatch, with `HasLabel` for adapter branching. It is nil outside a dispatched job.
+- **A trimmed `RuntimeConfig`.** `WorkDir` and `Git` remain. `IsLocal`, `RunID`, `NodeID`, the `Debug` field, and every env-var venue detection are gone; `sparkwing.DebugEnabled()` reads the `SPARKWING_DEBUG` flag, and IDs live on `RunContext` and the per-job context. The `Venue` enum is deleted.
+- **Profile-scoped backends and secrets.** A pipeline's `profile:` (or `--profile`, or the project's `defaults.profile`) picks one profile, and that profile's `state:` / `cache:` / `logs:` / `secrets:` surfaces apply wholesale.
+- **Fail-fast typed secrets.** `Secrets() any` plus `sparkwing.PipelineSecrets[T](ctx)`; required fields resolve before the first job dispatches.
 
-**Cleanup PR (post-step-11).** Stripped every migration-era backward-compat surface: `TriggerInfo.Env`, `RunContext.TriggerEnv`, `PushTrigger.Env`, the `RunConfig` / `CurrentRunConfig` aliases, the `SPARKWING_LOG_STORE` / `SPARKWING_ARTIFACT_STORE` env-var shim and its deprecation warnings, and the bare-string form of `secrets:`. The persisted run record no longer carries `trigger_env_keys`. The post-migration surface is the only surface.
+What the design sketched but the shipped model does **not** have: the `targets:` map and its per-target `runners:` / `values:` / `source:` / `backend:` overrides, per-pipeline `runners:` and `values:` keys, the typed `Config()` provider and `sparkwing.PipelineConfig[T]`, the standalone `runners.yaml` / `sources.yaml` / `backends.yaml` files, and `values:` blocks on trigger specs. The v0.5.0 config flatten and the v0.6 Config removal took them out; the strict parser rejects each one by name.

@@ -11,10 +11,9 @@ These two together give you the "trusted team laptop fleet" deployment
 target: one cheap VPS + team laptops.
 
 > **Note:** the `docker-compose.yaml`, launchd plist template, systemd
-> unit template, and `install.sh` referenced below ship as separate
-> deployment assets. The paths in the snippets below assume you're
-> working from a checkout of those assets alongside the `sparkwing`
-> binary on PATH.
+> unit template, and `install.sh` below live under `install/` in the
+> sparkwing repository. Run the snippets from a checkout of the repo,
+> with the `sparkwing` binary on PATH.
 
 ## Server side: docker-compose
 
@@ -26,6 +25,11 @@ cp .env.example .env
 docker compose up -d
 docker compose logs -f
 ```
+
+The compose file ships with internal image refs. Replace each `image:`
+with the published GHCR equivalent --
+`ghcr.io/sparkwing-dev/sparkwing-{cache,logs,controller,web}:vX.Y.Z` --
+before `docker compose up`.
 
 You'll need a reverse proxy in front handling TLS. Caddy is recommended
 for the simplest setup -- see `install/docker-compose/Caddyfile.example`.

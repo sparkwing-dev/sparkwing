@@ -369,7 +369,7 @@ this command exits it cannot be recovered.
 |---|---|
 | `--type KIND` | Token type: user \| runner \| service (required) |
 | `--principal NAME` | Free-form label identifying the token holder (required) |
-| `--scope CSV` | Comma-separated scopes (e.g. jobs:read,jobs:write) |
+| `--scope CSV` | Comma-separated scopes (e.g. runs.read,runs.write); auth.md lists the full set |
 | `--ttl DURATION` | Token lifetime (e.g. 30d, 720h). 0 = never expires |
 | `--profile NAME` | Profile name (default: current default) |
 
@@ -377,7 +377,7 @@ this command exits it cannot be recovered.
 
 ```sh
 # Mint a service token with write scopes
-sparkwing cluster tokens create --type service --principal deploy-bot --scope jobs:read,jobs:write
+sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write
 
 # Mint a user token that expires in 30 days
 sparkwing cluster tokens create --type user --principal alice --scope admin --ttl 720h
@@ -1176,7 +1176,7 @@ CLI as well.
 
 ### Subcommands
 
-- `start` -- Spawn the detached dashboard server (idempotent)
+- `start` -- Spawn the detached dashboard server (replaces any running one)
 - `kill` -- Stop a running dashboard server
 - `status` -- Report whether the dashboard is running
 
@@ -1217,7 +1217,7 @@ sparkwing dashboard kill
 
 ## `sparkwing dashboard start`
 
-Spawn the detached dashboard server (idempotent)
+Spawn the detached dashboard server (replaces any running one)
 
 Detaches a child process that runs the in-process
 dashboard + API + logs server (pkg/localws). PID is written to
@@ -1225,8 +1225,9 @@ $SPARKWING_HOME/dashboard.pid; stdout/stderr are appended to
 $SPARKWING_HOME/dashboard.log. Returns once the listener is
 accepting TCP connections so callers can immediately curl it.
 
-Idempotent: if a live server is already on file, prints the URL
-and returns 0 without spawning a duplicate.
+Replaces any resident dashboard: a live server on file is drained
+and a fresh one takes its place. It refuses only when the resident
+dashboard is a newer version than this CLI.
 
 ### Flags
 
@@ -2051,9 +2052,10 @@ Worked pipelines to read, not starting points to scaffold
 
 The sparks-core registry: complete, working pipelines --
 container deploys for AWS and GCP, migrations, canary rollouts,
-release publishing, test sharding. Every one compiles, lints, and
-runs, proven by the template-verify pipeline, so unlike prose they
-cannot quietly stop being true.
+release publishing, test sharding. The template-verify pipeline
+proves every one compiles, lints, and explains, and runs the
+runnable-tier ones, so unlike prose they cannot quietly stop
+being true.
 
 Read them, do not scaffold from them. 'sparkwing pipeline new
 --template <shape>' starts a pipeline; an example shows how a real
@@ -3462,21 +3464,16 @@ sparkwing pipeline trigger deploy --profile prod
 
 ## `sparkwing run config`
 
-Print the resolved Config struct + declared Secrets for a pipeline + target
+Print a pipeline's declared Secrets with provenance
 
-Pure inspection: resolves the pipeline's typed Config
-struct through the same layering `sparkwing run` uses
-(struct defaults < sparkwing.yaml values.base < per-target values)
-and prints each field's resolved value alongside which layer
-contributed it. Also lists every declared Secret with its source
-binding -- useful before driving destructive `--for prod`
-runs to confirm you'd hit the right vault.
-
-Honors --for (the target selection). No Plan() runs, nothing
+Pure inspection: lists every Secret the pipeline
+declares, each with its source binding and resolution status when a
+source is configured -- useful before driving destructive runs to
+confirm you'd hit the right vault. No Plan() runs, nothing
 dispatches, nothing mutates.
 
-Invocation: `sparkwing run <pipeline> config --for <target>` --
-the pipeline binary handles the subverb directly.
+Invocation: `sparkwing run <pipeline> config` -- the
+pipeline binary handles the subverb directly.
 
 ### Flags
 
@@ -3487,11 +3484,11 @@ the pipeline binary handles the subverb directly.
 ### Examples
 
 ```sh
-# Inspect the staging config
-sparkwing run release config --for staging
+# Inspect the declared secrets
+sparkwing run release config
 
 # Agent-readable form
-sparkwing run release config --for prod -o json
+sparkwing run release config -o json
 ```
 
 ## `sparkwing runs`

@@ -95,9 +95,17 @@ the controller's command line.) The controller announces this URL
 via `GET /api/v1/services`; operator CLIs fetch it once per session
 and cache in-process.
 
-If unset, the announce endpoint returns 404 and operator flows that
-need the cache pod (eager-refresh, health probe) fail loud with a clear
-"controller announced no cache pod URL" message.
+If `CACHE_POD_URL` is unset the announce endpoint returns 404. The
+profile health probe then reports a warning (`controller announced no
+cache pod URL`) instead of a pass, and eager-refresh falls back to the
+controller's gitcache proxy routes (`POST /api/v1/gitcache/refresh`,
+then a SHA-scoped bundle seed via `POST /api/v1/gitcache/seed`); if
+those also fail the CLI prints a note and the runner retries on a stale
+SHA. The controller serves the proxy routes only when started with
+`--cache-url` (or `SPARKWING_CACHE_URL`) pointing at the in-cluster
+cache Service, so set both: `--cache-pod-url` for the
+externally-reachable URL operators hit directly, `--cache-url` for the
+controller-to-cache proxy target.
 
 ## Background Fetch
 
@@ -116,13 +124,15 @@ SHA: the CLI sends the branch + SHA to the controller, and the runner
 clones that SHA from the cache. To close the
 `git push && sparkwing pipeline trigger` race -- where the cache hasn't yet
 mirrored the just-pushed commit -- the CLI fires a best-effort eager
-refresh of the repo (`POST /git/refresh`) before returning; the runner
-also retries on a stale SHA.
+refresh of the repo (`POST /git/refresh`) before it creates the trigger,
+falling back to a SHA-scoped bundle seed (`POST /sync/seed`) if the
+refresh fails; the runner also retries on a stale SHA.
 
 ```
+sparkwing CLI -> cache POST /git/refresh     (eager mirror of the pushed SHA)
+  (on failure) -> cache POST /sync/seed      (bundle the SHA from the local checkout)
 sparkwing CLI -> controller /api/v1/triggers (branch + SHA)
-sparkwing CLI -> cache POST /git/refresh    (eager mirror of the pushed SHA)
-runner        -> cache /git/<name>          (clone at SHA)
+runner        -> cache /git/<name>           (clone at SHA)
 ```
 
 The cache also exposes tarball-upload and ancestor-negotiation endpoints
@@ -146,8 +156,11 @@ authenticate the push. The PAT needs write access to the gitops repo.
 ## Auth
 
 The cache is exposed externally via ingress at your dashboard host's
-`cache-` subdomain. Write endpoints (`/upload`,
-`/sync/negotiate`, `/sync/seed`) require a bearer token:
+`cache-` subdomain. The blob and sync endpoints require a bearer token
+-- `/bin/...`, `/cache/...`, `/upload`, `/uploads/...`,
+`/sync/negotiate`, and `/sync/seed` -- on reads as well as writes. Git
+protocol, archive/file, artifact, proxy, and status routes are
+unauthenticated. Authenticated requests carry the token as:
 
 ```
 Authorization: Bearer <SPARKWING_API_TOKEN>
@@ -184,7 +197,7 @@ the ingress sets.
 |--------|----------|-------------|
 | POST | `/upload` | Upload a tarball (auth required) |
 | POST | `/upload?repo=X&base=Y` | Incremental upload on base commit |
-| GET | `/uploads/<id>` | Download uploaded tarball |
+| GET | `/uploads/<id>` | Download uploaded tarball (auth required) |
 | POST | `/sync/negotiate` | Find common ancestor (auth required) |
 | POST | `/sync/seed?repo=X&sha=Y` | Seed repo from a SHA-scoped git bundle (auth required) |
 
@@ -200,11 +213,11 @@ the ingress sets.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/bin/<name>` | Download cached binary |
-| PUT | `/bin/<name>` | Upload binary to cache |
-| GET | `/cache/<key>` | Download cached dependency archive |
-| HEAD | `/cache/<key>` | Check if cache entry exists |
-| PUT | `/cache/<key>` | Upload dependency archive to cache |
+| GET | `/bin/<name>` | Download cached binary (auth required) |
+| PUT | `/bin/<name>` | Upload binary to cache (auth required) |
+| GET | `/cache/<key>` | Download cached dependency archive (auth required) |
+| HEAD | `/cache/<key>` | Check if cache entry exists (auth required) |
+| PUT | `/cache/<key>` | Upload dependency archive to cache (auth required) |
 
 ### Status
 

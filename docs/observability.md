@@ -1,21 +1,22 @@
 # Observability
 
-Sparkwing tracks job health, failure reasons, and resource usage so you
+Sparkwing tracks run health, failure reasons, and resource usage so you
 can debug failures fast and right-size containers.
 
 ## Failure reasons
 
-Every failed job carries a `failure_reason` in its result. The
-controller classifies failures automatically -- you never have to grep
-logs to figure out *why* a build died.
+A failed node carries a `failure_reason` when the controller could
+classify the failure. The classification is automatic, so the common
+infrastructure failures are named rather than left for you to find in
+the logs.
 
 | Reason | What happened | What to do |
 |---|---|---|
 | `oom_killed` | Container exceeded its memory limit and was killed by the kernel (exit 137). | Raise the runner memory limit or reduce the pipeline's memory use; check the resource chart. |
-| `timeout` | Job exceeded its configured execution timeout. | Raise the timeout or optimize the pipeline. |
+| `timeout` | Node exceeded its configured execution timeout. | Raise the timeout or optimize the pipeline. |
 | `agent_lost` | Runner stopped heartbeating (crashed, evicted, or lost network). | Check pod events with `kubectl describe pod`; may indicate node pressure or a pipeline bug. |
-| `queue_timeout` | No runner claimed the job within the queue timeout (default 15m). | Ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
-| `runner_lease_expired` | The runner holding the node's claim stopped renewing its lease, so the controller reclaimed it. | Check the runner's health; the node is safe to retry. |
+| `queue_timeout` | Either a node waited past its concurrency group's `OnLimit: Queue` timeout without getting a slot, or no runner claimed the node within the controller's queue deadline (default 15m). The node's error text names which. | For a concurrency wait, raise the group's capacity or its queue timeout. For an unclaimed node, ensure runners are up and their advertised `--label` set satisfies the pipeline's `requires:` / node `.Requires()`. |
+| `runner_lease_expired` | The worker that claimed this run's *trigger* stopped renewing its lease. The controller returns the trigger to the pending queue and cascade-fails every node the run had not finished. | Check the worker that claimed the trigger. The trigger is re-claimable; this run is terminal. |
 | `verify` | The node's action completed, but its `Verify` postcondition returned an error -- the failure is at the verify stage, not the action. | Inspect the `Verify` assertion and the action's actual output. |
 | `logs_auth` | The runner's log-append calls were rejected (401/403) by the controller, so the run's structured logs are unrecoverable. | Check the runner token's `logs.write` scope; the run fails loud rather than reporting success with no output. |
 
@@ -24,10 +25,15 @@ structured `failure_reason` -- read the logs.
 
 ### How detection works
 
-The Kubernetes runner polls its Job/pod status while a node runs. When
-it sees a terminated container (e.g. `OOMKilled`, non-zero exit), it
-fails the node **immediately** with the specific reason rather than
-waiting for the heartbeat timeout.
+The Kubernetes runner polls its Job while the node runs, surfacing the
+pod phase (including `ImagePullBackOff` and friends) as a status detail.
+When the Job reaches a terminal condition and the pod did not write its
+own terminal node row, the runner inspects the pod's terminated
+containers: an `OOMKilled` container records `oom_killed` with the
+container's exit code (137 when the API reports none), and any other
+non-zero exit records the exit code with no structured reason. Either
+way the node fails as soon as the Job terminates rather than waiting for
+the heartbeat sweep.
 
 For nodes where the pod disappears entirely (node failure, eviction),
 the controller's heartbeat sweep catches the missed lease and marks the
@@ -35,32 +41,45 @@ node `agent_lost`.
 
 ### API
 
-The failure reason is available in all job responses:
+`GET /api/v1/runs/{id}/nodes` returns each node with its reason and exit
+code as top-level fields:
 
 ```json
 {
-  "result": {
-    "success": false,
-    "failure_reason": "oom_killed",
-    "exit_code": 137,
-    "logs": "Container \"runner\" was killed by the kernel OOM killer..."
-  }
+  "nodes": [
+    {
+      "id": "build",
+      "status": "done",
+      "outcome": "failed",
+      "error": "pod sparkwing-build-0 OOMKilled",
+      "failure_reason": "oom_killed",
+      "exit_code": 137
+    }
+  ]
 }
 ```
 
+Logs are not part of this payload; fetch them separately with
+`sparkwing runs logs --run <id>` or from the logs service.
+
 ## Resource usage metrics
 
-While a node runs, the runner samples its own CPU and memory in-process
-(reading `/proc`) roughly every 2 seconds. Samples are stored and
-charted in the dashboard. No cluster metrics-server is involved.
+While a node runs, the runner samples the executing process in-process
+every 2 seconds. Samples are stored and charted in the dashboard. No
+cluster metrics-server is involved.
 
 ### What's measured
 
-- **CPU**: millicores, derived from the runner process's CPU time.
-- **Memory**: resident bytes (RSS).
+- **CPU**: millicores from `getrusage`, covering the runner process and
+  the commands it spawned, clamped to the host's core count so a large
+  reaped subtree cannot register as an impossible rate.
+- **Memory**: resident bytes -- `/proc/self/statm` on Linux, the
+  `getrusage` high-water mark on macOS, and the Go runtime's system
+  reservation where neither is available.
 
-The dashboard charts the samples over time with peak and average in the
-header.
+The signal is process-wide: nodes running in parallel share one series,
+so read a node's chart as the process's usage during that node rather
+than that node's alone.
 
 ### API
 
@@ -79,24 +98,25 @@ header.
 ### Using metrics to right-size containers
 
 1. Run your pipeline a few times
-2. Open the job detail in the dashboard and expand **Resources**
+2. Open the run detail in the dashboard and expand **Resources**
 3. Compare peak usage to your pod's configured limits:
    - If peak memory is close to the limit → increase the limit or
      optimize memory usage
    - If peak CPU is well below the limit → you can safely lower requests
      to save cluster resources
    - If CPU is consistently at the limit → the pipeline is CPU-bound;
-     increase the limit for faster builds
+     increase the limit so the run is not throttled
 
 ## Dashboard
 
-The dashboard shows failure information at every level:
+The dashboard shows failure information where a run's detail is:
 
-- **Home page**: failure reason badges in the recent builds table
-- **Pipelines page**: failure reason badge in the summary header, plus
-  a prominent banner with contextual help text
-- **Resources section**: collapsible CPU/memory charts in the job
-  detail panel (auto-refreshes for running jobs)
+- **Runs page**: a failure-reason badge on each failed node, both in the
+  node list and in the selected-node panel, with the exit code when one
+  was recorded.
+- **Resources**: a collapsible CPU/memory chart per node on the run
+  detail, with peak and average in the header; it refreshes while the
+  node is running.
 
 ## Data retention
 

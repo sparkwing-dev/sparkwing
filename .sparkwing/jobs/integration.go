@@ -25,8 +25,9 @@ import (
 // external S3). MinIO additionally unlocks the storeurl real-bucket
 // round-trip, which honors $SPARKWING_S3_ENDPOINT.
 //
-// Requires a running Docker daemon and the `go` toolchain. Designed for
-// local runs and CI alike.
+// Requires a running Docker daemon, the `go` toolchain, `curl` (the
+// MinIO readiness probe) and the `aws` CLI (creates the test bucket).
+// Designed for local runs and CI alike.
 type Integration struct{ sparkwing.Base }
 
 func (Integration) ShortHelp() string {
@@ -36,7 +37,8 @@ func (Integration) ShortHelp() string {
 func (Integration) Help() string {
 	return "Spins up Postgres + MinIO in Docker, waits for readiness via a Verify gate, " +
 		"runs the env-gated integration tests (SPARKWING_TEST_PG_URL + SPARKWING_S3_* ), " +
-		"and tears the containers down whether the run passes or fails. Requires Docker + go."
+		"and tears the containers down whether the run passes or fails. " +
+		"Requires Docker, go, curl (the MinIO readiness probe), and the aws CLI (creates the test bucket)."
 }
 
 const (

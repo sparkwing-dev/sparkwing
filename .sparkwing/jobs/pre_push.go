@@ -13,16 +13,23 @@ import (
 )
 
 // PrePush provides slower release-boundary checks: full golangci-lint,
-// `go test -race`, the
+// `go test -race` in the .sparkwing pipeline module, the
 // version-freshness check against the sparkwing ecosystem, the
 // public API-surface drift gate (bin/check-api-snapshot.sh, which
 // covers the `pkg/` surfaces the generated-reference diffs miss),
-// and a hard ban on any `replace` directive in a committed `go.mod`.
+// and a hard ban on `replace` directives in a committed `go.mod`
+// (excepting `.sparkwing/go.mod`'s dogfood self-replace to `..`).
+//
+// It is not purely a verification pipeline: a stale `.sparkwing`
+// sparkwing pin is auto-bumped, tidied and committed so the bump
+// rides along with the push.
 //
 // The repository keeps this pipeline manual so a lead can select it for a
 // dangerous change or release boundary. Tooling assumed on PATH:
-// golangci-lint, staticcheck (called by golangci-lint), govulncheck,
-// terraform (for the Mode 3 module gate; .tool-versions pins it).
+// golangci-lint, staticcheck (called by golangci-lint), shellcheck,
+// markdownlint-cli2, terraform (for the Mode 3 module gate;
+// .tool-versions pins it). govulncheck is fetched with `go run` and
+// needs no install.
 type PrePush struct {
 	sparkwing.Base
 	AllowReleaseLineSelfReplace bool
@@ -34,7 +41,9 @@ func (PrePush) ShortHelp() string {
 
 func (PrePush) Help() string {
 	return "Explicit release-boundary verification. Runs the full golangci-lint set, " +
-		"`go test -race ./...`, `govulncheck ./...`, the " +
+		"`go test -race ./...` in the .sparkwing pipeline module, " +
+		"govulncheck in package-scan mode from .sparkwing/ (symbol scan " +
+		"panics on go1.26 generics), the " +
 		"sparkwing-ecosystem version-freshness check (deps must be at " +
 		"the latest released tag, or replaced with a not-behind local " +
 		"path), the chaos gate (the adversarial admission suite in " +
@@ -42,11 +51,16 @@ func (PrePush) Help() string {
 		"the concurrency invariants), the public API-surface drift gate " +
 		"(the `pkg/` snapshot " +
 		"under .apidiff/ must match HEAD), refuses to push if any " +
-		"committed go.mod contains a `replace` line, and refuses to push " +
+		"committed go.mod contains a `replace` line other than " +
+		"`.sparkwing/go.mod`'s dogfood self-replace to `..`, and refuses to push " +
 		"if `go.work` / `go.work.sum` have been committed (workspaces are " +
 		"local-iteration scaffolding and can't be resolved by the Go " +
 		"module proxy), and validates + offline-plans the Mode 3 Postgres " +
-		"Terraform module for both engine knobs (bin/check-terraform.sh)."
+		"Terraform module for both engine knobs (bin/check-terraform.sh). " +
+		"Not read-only: when the .sparkwing sparkwing pin is behind the " +
+		"latest released tag, pre-push bumps the pin and pkg/scaffold's " +
+		"fallback version, tidies .sparkwing/go.mod, and commits the result " +
+		"so the bump rides along with the push."
 }
 
 func (PrePush) Examples() []sparkwing.Example {

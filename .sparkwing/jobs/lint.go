@@ -12,16 +12,20 @@ import (
 // CHANGELOG-style gate (dedupe sub-headings + breaking-entry migration
 // guides, per docs/changelog-style.md), and the API surface gate that
 // diffs HEAD's public API against the checked-in snapshots under
-// .apidiff/. Cross-repo callers (a downstream release-all orchestration
-// pipeline) can invoke `sparkwing run lint` here as a gate.
+// .apidiff/. It also runs the shell gates (bin/check-shell.sh via
+// shellcheck, bin/check-shell-test.sh, bin/check-changelog-test.sh),
+// the installer report (bin/install-test.sh) and markdownlint-cli2, so
+// shellcheck and markdownlint-cli2 must be on PATH. Cross-repo callers
+// (a downstream release-all orchestration pipeline) can invoke
+// `sparkwing run lint` here as a gate.
 type Lint struct{ sparkwing.Base }
 
 func (Lint) ShortHelp() string {
-	return "Fast static check: gofmt + go vet + changelog gates + API snapshot"
+	return "Fast static check: gofmt + go vet + changelog gates + API snapshot + shell/markdown lint"
 }
 
 func (Lint) Help() string {
-	return "Fast static checks across the public sparkwing module: gofmt compliance, go vet, the CHANGELOG-required gate (bin/check-changelog.sh), the CHANGELOG-style gate enforcing docs/changelog-style.md (dedupe sub-headings + breaking-entry migration links), and the API-surface drift gate (bin/check-api-snapshot.sh). See VERSIONING.md."
+	return "Fast static checks across the public sparkwing module: gofmt compliance, go vet, the CHANGELOG-required gate (bin/check-changelog.sh), the CHANGELOG-style gate enforcing docs/changelog-style.md (dedupe sub-headings + breaking-entry migration links), and the API-surface drift gate (bin/check-api-snapshot.sh). It also runs shellcheck over every tracked script (bin/check-shell.sh), the installer report (bin/install-test.sh), the shell and changelog script-portability checks (bin/check-shell-test.sh, bin/check-changelog-test.sh), and markdownlint over the markdown tree. shellcheck and markdownlint-cli2 must be on PATH. See VERSIONING.md."
 }
 
 func (Lint) Examples() []sparkwing.Example {

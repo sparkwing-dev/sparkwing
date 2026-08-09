@@ -38,11 +38,13 @@ type Pipeline struct {
 	// stays invocable by exact name and shows under `list --all`.
 	Hidden bool `yaml:"hidden,omitempty"`
 
-	// Guards gate dispatch on the resolved profile + args. Reject
-	// fires before any step runs when any token matches; Require
-	// fires when not every token matches. Token vocabulary:
-	// `profile:local`, `profile:controller`, `profile:name=<name>`,
-	// `arg:<flag>=<value>`. See pkg/pipelines/guards.go.
+	// Guards gate dispatch on the resolved profile, args, and git
+	// branch. Reject fires before any step runs when any token
+	// matches; Require fires when not every token matches. Token
+	// vocabulary: `profile:local`, `profile:controller`,
+	// `profile:name=<name>`, `arg:<flag>=<value>`,
+	// `git:branch=<name>`, `git:branch=default`. See
+	// pkg/pipelines/guards.go.
 	Guards Guards `yaml:"guards,omitempty"`
 
 	// Args supplies per-arg default values. Higher priority than
@@ -173,7 +175,10 @@ type Triggers struct {
 	// receives via webhook. The run checks out the PR head; base ref
 	// and PR number reach the pipeline on RunContext.Trigger.PullRequest.
 	PullRequest *PullRequestTrigger `yaml:"pull_request,omitempty"`
-	// Schedule is a cron expression the controller evaluates.
+	// Schedule is a cron expression (UTC) recorded on the pipeline.
+	// It is declarative: sparkwing stores and displays it but never
+	// evaluates it, so a scheduled pipeline fires only when an external
+	// timer invokes it.
 	Schedule string `yaml:"schedule,omitempty"`
 	// Webhook exposes a custom HTTP path that fires the pipeline.
 	Webhook *WebhookTrigger `yaml:"webhook,omitempty"`

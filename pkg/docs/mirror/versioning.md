@@ -109,9 +109,10 @@ gloss over this; it's a real ongoing tax.
 module shields plugins from runtime churn. That's real, but it
 scales with the size of the plugin ecosystem.
 
-**Sparkwing has fewer than ~20 plugins today.** Migration tooling
-is enough at this scale: we rebaselined nine consumers across one
-breaking-change minor in an afternoon.
+**The plugin ecosystem is still small enough for migration tooling
+to cover.** A breaking minor is rebaselined across the first-party
+consumers in a single pass; extraction starts paying for itself only
+once coordinating that pass stops being tractable.
 
 **Extraction is hardest while the contract is still evolving.**
 Locking in interface shapes early forces rework later. Doing it

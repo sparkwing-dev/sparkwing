@@ -15,12 +15,12 @@ control-plane traffic.
 The chart is **not** a full self-host install. It deliberately
 omits:
 
-- `sparkwing-controller` (orchestrator) -- ships in
-  `sparkwing-stack` (full self-host) chart.
+- `sparkwing-controller` (orchestrator) -- ships in the
+  `sparkwing-full` (full self-host) chart.
 - `sparkwing-web` (SPA host) -- same.
 
 If you want the whole stack in one cluster, install
-`sparkwing-stack`. Use this chart when the controller already
+`sparkwing-full`. Use this chart when the controller already
 exists somewhere else and you just need a runner pool.
 
 ## Topology
@@ -166,6 +166,12 @@ Default images:
 Override `<component>.image.repository` if you mirror images
 internally.
 
+> The runner Deployment's command is
+> `/usr/local/bin/runner-entrypoint.sh /usr/local/bin/sparkwing-runner`,
+> so the runner image must be built from `build/Dockerfile.runner`
+> (git + Go toolchain + the netrc-seeding entrypoint). Point
+> `runner.image.repository` at an image built from that Dockerfile.
+
 > **NOTE:** Multi-arch (linux/amd64 + linux/arm64) images are
 > published to GHCR on every `v*` tag push by
 > `.github/workflows/release.yaml`. Each release pushes
@@ -211,7 +217,7 @@ kubectl -n sparkwing delete pvc -l app.kubernetes.io/instance=runners
 
 ## Troubleshooting
 
-**Runner pods CrashLoopBackOff with "controller URL not set"**
+**Runner pods CrashLoopBackOff with "--controller is required"**
 You forgot `--set controller.url=...`.
 
 **Runner pods running but no claims happening**

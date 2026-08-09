@@ -18,12 +18,14 @@ import (
 //	  Job (multi-step, typed output)     .................. build (Produces[BuildOut])
 //	  JobFanOut -> NodeGroup             .................. checks, publish-images
 //	  GroupJobs -> NodeGroup             .................. post-deploy-verify
-//	  JobApproval (auto-approve in 2s)   .................. approve-deploy
+//	  JobApproval (auto-approve after 20s) ................ approve-deploy
 //	  modifiers: Retry · Timeout         .................. build, deploy
 //	  modifiers: Inline                  .................. configure, notify, audit-*, docs-snapshot, *-publish, *-report
 //	  modifiers: BeforeRun · AfterRun    .................. configure, notify
 //	  modifiers: OnFailure               .................. deploy -> deploy-rollback
 //	  Ref[T] / RefTo[T] typed values     .................. build -> publish, deploy
+//	  RunAndAwait (cross-pipeline)       .................. weather-check
+//	  Optional + ParallelFailures(CollectAll) ............. error-canary
 //
 //	Work layer (inside build)
 //	  Step (untyped + typed)             .................. fetch-*, compile, package
@@ -40,7 +42,8 @@ import (
 //	  Summary (markdown step summary)    .................. build/package, deploy/rollout, smoke-test, metrics-check
 //
 // Each step sleeps briefly so every node and step renders as its own
-// bar in the dashboard waterfall. Total run ~4-6s.
+// bar in the dashboard waterfall. The 20s approval gate dominates the
+// wall clock, so a full tour runs for about a minute.
 type Example struct{ sparkwing.Base }
 
 func (Example) ShortHelp() string {
@@ -48,7 +51,7 @@ func (Example) ShortHelp() string {
 }
 
 func (Example) Help() string {
-	return "A self-contained pipeline that exercises the SDK end-to-end: Plan-layer Jobs and JobFanOut (NodeGroup), JobApproval gate (auto-approves after 2s for demo purposes), multi-step Work with GroupSteps (StepGroup), typed Ref[T] outputs via Produces[T] and StepGet[T], the full modifier set (Retry, Timeout, BeforeRun, AfterRun, OnFailure), Plan-layer and Work-layer SkipIf, and Annotate for persistent node-level summaries. Every step sleeps briefly and emits an Annotate so the dashboard surfaces a readable narrative without digging into logs."
+	return "A self-contained pipeline that exercises the SDK end-to-end: Plan-layer Jobs and JobFanOut (NodeGroup), JobApproval gate (auto-approves 20s after it opens if nobody answers), multi-step Work with GroupSteps (StepGroup), typed Ref[T] outputs via Produces[T] and StepGet[T], the full modifier set (Retry, Timeout, BeforeRun, AfterRun, OnFailure), Plan-layer and Work-layer SkipIf, and Annotate for persistent node-level summaries. It also drives cross-pipeline RunAndAwait against the weather-report pipeline in this same module, an Optional() node whose Work collects every sibling failure (ParallelFailures(CollectAll)), and Summary markdown step summaries. Every step sleeps briefly and emits an Annotate so the dashboard surfaces a readable narrative without digging into logs."
 }
 
 func (Example) Examples() []sparkwing.Example {
@@ -143,7 +146,7 @@ func (p *Example) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 
 func configureFn(ctx context.Context) error {
 	if err := chatter(ctx, 800, []string{
-		"reading .sparkwing/pipelines.yaml",
+		"reading .sparkwing/sparkwing.yaml",
 		"resolving 14 config keys",
 		"merging trigger env (4 keys)",
 		"writing $SPARKWING_HOME/config.json",

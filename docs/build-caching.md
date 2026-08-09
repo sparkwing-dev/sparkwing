@@ -110,7 +110,10 @@ is run with a destructive reset (it currently doesn't -- see `warmer.go`).
 
 sparkwing-cache includes a package proxy that caches npm, pip, gem, Go
 module, and Alpine package downloads in-cluster. Runners fetch packages
-from the cache proxy instead of the public internet.
+from the cache proxy instead of the public internet when the pipeline
+points the package manager at it -- there is no automatic interception;
+see "For using the proxy in Dockerfiles" below for the build arg that
+wires it up.
 
 **Speed impact:** ~4s savings on a 104s EKS build. The proxy eliminates
 network egress for cached packages, but since package downloads are only
@@ -214,7 +217,7 @@ because **builds are CPU-bound, not network-bound**.
 
 ## Proxy service
 
-The package proxy is part of sparkwing-cache. It supports six upstream
+The package proxy is part of sparkwing-cache. It fronts these upstream
 registries:
 
 | Registry | Upstream | URL rewriting |

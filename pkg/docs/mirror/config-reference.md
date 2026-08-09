@@ -31,7 +31,7 @@ The complete `.sparkwing/sparkwing.yaml` schema, generated from the Go structs t
 | `description` | `string` | no | Description is the one-line summary surfaced by `pipeline list`. |
 | `on` | `Triggers` | no | On declares the triggers that auto-fire this pipeline. Absent means manual-only (a command invoked by name). |
 | `hidden` | `bool` | no | Hidden omits the entry from default `pipeline list` output; it stays invocable by exact name and shows under `list --all`. |
-| `guards` | `Guards` | no | Guards gate dispatch on the resolved profile + args. Reject fires before any step runs when any token matches; Require fires when not every token matches. Token vocabulary: `profile:local`, `profile:controller`, `profile:name=<name>`, `arg:<flag>=<value>`. See pkg/pipelines/guards.go. |
+| `guards` | `Guards` | no | Guards gate dispatch on the resolved profile, args, and git branch. Reject fires before any step runs when any token matches; Require fires when not every token matches. Token vocabulary: `profile:local`, `profile:controller`, `profile:name=<name>`, `arg:<flag>=<value>`, `git:branch=<name>`, `git:branch=default`. See pkg/pipelines/guards.go. |
 | `args` | `map[string]string` | no | Args supplies per-arg default values. Higher priority than schema Default and Computed; lower than an explicit operator CLI flag. Keyed by CLI flag name (kebab-case, matching what the SDK's WithArgs[T] field tags resolve to). |
 | `profile` | `string` | no | Profile names the project profile (from sparkwing.yaml's profiles map) this pipeline uses. Empty means "fall back to the project's defaults.profile selector". The CLI's --profile flag (which targets ~/.config/sparkwing/profiles.yaml) overrides this when present. |
 | `requires` | `[]string` | no | Requires are runner-label requirements all jobs in this pipeline must satisfy in addition to their own Job.Requires(). Wholesale replaces defaults.requires when non-empty. The reserved label "local" pins execution to the in-process runner (same effect as --sw-local-only). |
@@ -49,7 +49,7 @@ The complete `.sparkwing/sparkwing.yaml` schema, generated from the Go structs t
 |---|---|---|---|
 | `push` | `PushTrigger` | no | Push fires on a git push the controller receives via webhook. |
 | `pull_request` | `PullRequestTrigger` | no | PullRequest fires on a GitHub pull_request event the controller receives via webhook. The run checks out the PR head; base ref and PR number reach the pipeline on RunContext.Trigger.PullRequest. |
-| `schedule` | `string` | no | Schedule is a cron expression the controller evaluates. |
+| `schedule` | `string` | no | Schedule is a cron expression (UTC) recorded on the pipeline. It is declarative: sparkwing stores and displays it but never evaluates it, so a scheduled pipeline fires only when an external timer invokes it. |
 | `webhook` | `WebhookTrigger` | no | Webhook exposes a custom HTTP path that fires the pipeline. |
 | `pre_commit` | `PreHookTrigger` | no | PreHook fires from the installed git pre-commit hook. |
 | `pre_push` | `PostHookTrigger` | no | PostHook fires from the installed git pre-push hook. |

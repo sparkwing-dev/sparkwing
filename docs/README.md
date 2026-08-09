@@ -25,10 +25,13 @@ docs/
   getting-started.md     install, quick start, run targets
   sdk.md                 Go DSL: Plan, Job, Work, Step, modifiers
   pipelines.md           pipeline YAML, registration, triggers
+  authoring-pipelines.md idiomatic Plan/Work authoring
+  artifacts.md           moving files between nodes
   cli.md                 sparkwing CLI command-group guide
   api.md                 controller HTTP API reference
   architecture.md        in-cluster deployment architecture
   deployment.md          deploy targets, gitops, ArgoCD, registries
+  deployment-modes.md    the deployment shapes and what each gives you
   self-hosting.md        non-k8s self-host: docker-compose + laptop runners
   ci-embedded.md         run pipelines inside an existing CI job
   local-execution.md     how local vs remote execution interact
@@ -36,7 +39,7 @@ docs/
   hooks.md               triggers (webhooks + opt-in pipeline hooks)
   scheduling.md          runner labels, .Requires/.Prefers/.WhenRunner
   warm-pool.md           warm PVC pool
-  caching.md             node-level Cache modifier (CacheOptions)
+  caching.md             node-level Cache modifier (.Cache / CacheOption)
   backends.md            per-profile state / cache / logs destinations
   build-caching.md       Docker / BuildKit / proxy caching layers
   fast-builds.md         performance best practices
@@ -50,20 +53,29 @@ docs/
   mcp.md                 MCP server for AI agents
 ```
 
+Generated reference (do not hand-edit; regenerated from code and
+drift-gated):
+
+```
+docs/
+  cli-reference.md       every command, flag, and argument
+  config-reference.md    every YAML config field
+  sdk-reference.md       the sparkwing package
+  api-reference.md       controller + logs HTTP routes
+```
+
 ## CLI surface
 
-The top-level commands: `info`, `pipeline`, `run`, `runs`, `queue`,
-`version`, `update`, `dashboard`, `cluster`, `repos`, `secrets`,
-`configure`, `profile`, `debug`, `doctor`, `docs`, `commands`,
-`completion`. Cross-repo registry under `configure
-xrepo`; sparks library mgmt under `pipeline sparks`. Run any verb
-with `--help` for its full spec, or `sparkwing commands` for a
-one-line index of every verb (`-o json` for the full records).
+Every top-level verb is listed with a one-line synopsis in
+[cli-reference.md](cli-reference.md), generated from the command
+registry; `sparkwing commands` prints the same index offline (`-o json`
+for the full records). Cross-repo registry lives under `configure
+xrepo`; sparks library management under `pipeline sparks`. Run any verb
+with `--help` for its full spec.
 
 ## Repo-local helpers vs sparkwing
 
-For repo-local bash chores (formatters, port-forwards, the small
-Makefile-style stuff) use `dowing`; sparkwing is the Go-pipeline
-platform. The two coexist on the same laptop: dowing handles
-single-shell tasks, sparkwing handles DAG'd / triggered / cached
-work that benefits from a real run record.
+Sparkwing is for DAG'd, triggered, or cached work that earns a durable
+run record. One-shot repo-local shell chores -- formatters,
+port-forwards, Makefile-style glue -- stay cheaper in whatever task
+runner you already use; sparkwing does not try to replace it.

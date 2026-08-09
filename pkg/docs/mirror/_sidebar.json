@@ -51,5 +51,5 @@
       ]
     }
   ],
-  "excluded": ["design/", "proposals/", "migrations/", "changelog-style"]
+  "excluded": ["proposals/", "migrations/", "changelog-style"]
 }

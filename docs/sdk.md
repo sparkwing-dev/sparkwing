@@ -298,8 +298,11 @@ size; the default is 4.
 
 Slots are for worktrees that move. A fixed-workdir runner already has a
 stable path, so it wants `ToolCacheDir` with `RestoreLintCache`
-instead - and a step that adopts slots must point its save/restore at
-`slot.Cache` too, or it will seed a directory the lint never reads.
+instead. `SaveLintCache` and `RestoreLintCache` always operate on
+`ToolCacheDir("golangci-lint")` for the current `WorkDir()` and take no
+directory argument, so they do nothing for a run that lints through a
+slot: the restore seeds the private per-worktree cache the slot run
+never reads, and the save finds that cache empty.
 
 Running two lint jobs at once is a different problem, and a scoped
 cache does not touch it. golangci-lint takes its parallel-runner lock
@@ -341,8 +344,10 @@ Glob(pattern) ([]string, error)             // filepath.Glob, returns absolute p
 ```
 
 When invoked outside any sparkwing project (no `.sparkwing/`
-discoverable above cwd), the relative-path forms return
-`sparkwing.ErrNoProject`. Absolute inputs work without a project.
+discoverable above cwd), the relative-path forms of `ReadFile` /
+`WriteFile` / `Glob` return `sparkwing.ErrNoProject` (wrapped). `Path`
+has no error return, so it panics with `ErrNoProject` instead.
+Absolute inputs work without a project.
 
 ## Logging
 
@@ -476,7 +481,7 @@ Common Plan-layer modifiers (chainable on `*JobNode`):
 .Verify(fn)                        // postcondition checked after the action succeeds; non-nil fails at StageVerify
 .OnFailure(id, job)                // recovery node if this node fails; job may be func(ctx, sparkwing.Failure) error to branch on stage
 .SkipIf(pred, opts...)             // skip when pred(ctx) returns true; SkipBudget(d) overrides budget
-.Requires(labels...)                 // require runner labels (AND semantics)
+.Requires(labels...)               // require runner labels (comma = OR within a term, AND across terms)
 .Cache(key, TTL(d))                // content-addressed result memoization (+ in-flight dedupe)
 .Concurrency(group, cost...)       // join a shared concurrency budget (count-limit, gate, throttle)
 .BeforeRun(fn) / .AfterRun(fn)     // hooks
@@ -557,8 +562,8 @@ Step modifiers (chainable on `*WorkStep`):
 step.Needs(deps...) *WorkStep                             // accepts *WorkStep, *StepGroup, *SpawnSpec, *SpawnGenSpec; splat a slice: s.Needs(steps...)
 step.SkipIf(predicate) *WorkStep                          // OR-accumulating skip predicate
 step.Finally() *WorkStep                                 // cleanup after declared deps terminate, even after sibling failure
-step.DryRun(fn func(ctx) error) *WorkStep                 // no-mutation body run instead of the apply Fn under sparkwing X --dry-run
-step.SafeWithoutDryRun() *WorkStep                        // mark the apply Fn as side-effect-free; runs unmodified under --dry-run
+step.DryRun(fn func(ctx) error) *WorkStep                 // no-mutation body run instead of the apply Fn under --sw-dry-run
+step.SafeWithoutDryRun() *WorkStep                        // mark the apply Fn as side-effect-free; runs unmodified under --sw-dry-run
 ```
 
 Choose the parallel failure policy once per Work:
@@ -579,9 +584,9 @@ while an operator cancellation still does.
 
 ### Dry-run contract
 
-`sparkwing X --dry-run` (and `pipeline plan --dry-run`) installs a
-dry-run flag on the run-wide ctx -- detect it with `IsDryRun(ctx)`.
-Each step's dispatch then picks one of three paths:
+`sparkwing run <pipeline> --sw-dry-run` installs a dry-run flag on the
+run-wide ctx -- detect it with `IsDryRun(ctx)`. Each step's dispatch
+then picks one of three paths:
 
 - `step.DryRun(fn)` declared -> `fn` runs in place of the apply Fn.
   The closure must NEVER mutate state; it answers "what *would* the
@@ -593,9 +598,11 @@ Each step's dispatch then picks one of three paths:
   where authoring a separate dry-run shim would be redundant.
 - Neither declared -> the step soft-skips with `step_skipped` /
   `skip_reason: no_dry_run_defined`. Existing pipelines keep working
-  under `--dry-run` while the contract gap is visible in run logs.
-  When paired with risk labels (`step.Risk("destructive", "prod", ...)`),
-  this soft-skip tightens to a hard refusal.
+  under `--sw-dry-run` while the contract gap is visible in run logs.
+  Risk labels (`step.Risk("destructive", "prod", ...)`) are a separate
+  gate: they refuse a normal run unless every label is authorized with
+  `--sw-allow`, and `--sw-dry-run` bypasses that gate, so a
+  risk-labeled step with no dry-run contract still soft-skips.
 
 For step bodies that need to branch on the mode (e.g. emit a
 structured "would do X" log line for an op without a native
@@ -604,10 +611,12 @@ way to detect dry-run from inside a step.
 
 `PreviewPlan` (the pipeline-binary helper behind
 `sparkwing pipeline plan`) renders one of three decisions per step
-under `--dry-run`: `would_dry_run` (DryRunFn defined),
+under dry-run: `would_dry_run` (DryRunFn defined),
 `would_run` (SafeWithoutDryRun marker), or `would_skip` with
 `skip_reason: no_dry_run_defined` (neither contract). Runtime
-and preview always agree.
+and preview always agree. `sparkwing pipeline plan` has no dry-run
+flag of its own; the preview reads the dry-run mode from the
+environment `sparkwing run --sw-dry-run` sets.
 
 Do NOT add a `flag:"dry-run"` field to your pipeline's typed
 Inputs as a roll-your-own preview mode. Declare `step.DryRun(fn)`
@@ -690,7 +699,7 @@ field. The constructor in `Plan()` carries the routing detail:
 
 | Routing | Constructor | What it does |
 |---|---|---|
-| In-run sibling | `sw.RefTo[T](node)` | Read a `*JobNode` in the same DAG. Implies a `Needs()` edge. |
+| In-run sibling | `sw.RefTo[T](node)` | Read a `*JobNode` in the same DAG. A typed handle only: it does NOT create a dependency edge, so pair it with `.Needs(node)` on the consumer. |
 | Cross-pipeline, passive | `sw.RefToLastRun[T](pipeline, nodeID, opts...)` | Read another pipeline's latest successful run. Does not trigger. |
 | Cross-pipeline, active | `sw.RunAndAwait[Out, In](ctx, ...)` (free fn) | Trigger a fresh run of another pipeline, wait, return its output. |
 
@@ -712,7 +721,7 @@ type Deploy struct {
 
 build := sw.Job(plan, "build", &Build{})
 sw.Job(plan, "deploy", &Deploy{
-    Build:    sw.RefTo[BuildOut](build),                                 // wires the Needs edge
+    Build:    sw.RefTo[BuildOut](build),                                 // typed handle; the .Needs(build) below wires the edge
     Manifest: sw.RefToLastRun[Manifest]("manifest-pipe", "out",
                   sw.MaxAge(24*time.Hour)),                              // staleness guard
 }).Needs(build)
@@ -1013,14 +1022,17 @@ different work taking turns, never the same work. Result reuse is
 ### Scope
 
 `Scope` selects how far the budget reaches; it folds into the
-coordination key as `name@<id>`:
+coordination key as a scope tag plus a length-prefixed qualifier, so
+two scopes (or two qualifiers) can never fold onto one key:
 
-- `ScopeRun` -- key `name@<runID>`: only this run's nodes share the
-  budget.
-- `ScopeBox` -- key `name@<hostID>`: every run on one machine shares it,
-  even under a controller.
-- `ScopeGlobal` (the zero value) -- key `name`: the whole fleet shares
-  it through the coordination backend.
+- `ScopeRun` -- key `r:<len>:<runID><name>`: only this run's nodes
+  share the budget.
+- `ScopeBox` -- key `b:<len>:<hostID><name>`: every run on one machine
+  shares it, even under a controller.
+- `ScopeGlobal` (the zero value) -- key `g:<name>`: the whole fleet
+  shares it through the coordination backend.
+
+`<len>` is the byte length of the qualifier that follows.
 
 `hostID` for `ScopeBox` is `os.Hostname()`, overridable via
 `SPARKWING_BOX_ID`. Inside a container the hostname is per-container, so

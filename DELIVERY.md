@@ -9,12 +9,15 @@ this file is a menu and checklist, not a command that every change must run.
   example `go test ./internal/orchestrator -run RunAndAwait`. The `lint`,
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
-- **Normal broad check:** `sparkwing run pre-commit` covers both Go modules,
-  formatting, vet, build, tests, lint, documentation mirrors, and source policy.
+- **Normal broad check:** `sparkwing run pre-commit` covers every committed Go
+  module, formatting, vet, build, tests, lint, documentation mirrors, and source
+  policy.
 - **Expensive or release-boundary:** `sparkwing run pre-push` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
-  `integration`, `template-verify`, `static-analysis`, image builds, and browser
-  checks only when the change touches those boundaries.
+  `integration`, `template-verify`, `static-analysis`, and image builds only when
+  the change touches those boundaries. Dashboard changes have no automated
+  browser gate; verify them by hand with `bash bin/dev-start.sh` (dashboard
+  backend on :4343, `next dev` on :3100) and stop it with `bash bin/dev-stop.sh`.
 
 ## Decisions before landing
 
@@ -29,11 +32,12 @@ this file is a menu and checklist, not a command that every change must run.
   follows `docs/changelog-style.md`. Mark breaking changes and supply migration
   guidance before release. Keep the embedded changelog mirror byte-identical.
 - **Tests:** record the focused checks selected, or why execution was waived.
-  Do not run every race, Docker, integration, or browser suite by default.
+  Do not run every race, Docker, or integration suite by default.
 - **Release:** merging is not a release. A release is an explicit operator
-  decision: preview with `sparkwing run release --dry-run`, then use
-  `sparkwing run release --version vX.Y.Z` to rewrite the changelog and push the
-  tag. GitHub Actions owns public binaries and images after that tag.
+  decision: preview with `sparkwing run release --sw-dry-run`, then use
+  `sparkwing run release --version vX.Y.Z --sw-allow destructive,prod` to rewrite
+  the changelog and push the tag. GitHub Actions owns public binaries and images
+  after that tag.
 - **Independent verification:** for user-facing local-execution changes, build
   the intended revision with `SKIP_WEB_BUILD=1 bash bin/install.sh` when the web
   bundle is unchanged, then exercise the installed CLI and daemon. Verify SDK,

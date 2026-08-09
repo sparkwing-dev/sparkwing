@@ -43,8 +43,8 @@ hard parse error):
 - **name** - the pipeline name (`sparkwing run build-deploy`); must equal the `Register("name", ...)` string
 - **entrypoint** - the Go pipeline struct type implementing it (required); equals the struct name
 - **description** - one-line summary surfaced by `sparkwing pipeline list`
-- **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (cron), `webhook`, `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
-- **guards** - gate dispatch on profile + args (`reject` / `require` token lists)
+- **on** - declarative trigger block: `push` (branches/paths), `pull_request` (actions/branches), `schedule` (cron expression, UTC; declarative -- recorded, not evaluated), `webhook`, `pre_commit`, `pre_push`, `post_commit`. Absent means "manual only" (a command).
+- **guards** - gate dispatch on profile, args, and git branch (`reject` / `require` token lists)
 - **args** - per-arg default values, keyed by CLI flag name
 - **profile** - the project profile this pipeline uses (from the `profiles:` map)
 - **requires** - runner-label requirements for every job (e.g. `[local]` pins to the in-process runner)
@@ -60,34 +60,41 @@ Trigger types live under `on:`:
 ```yaml
 # .sparkwing/sparkwing.yaml
 pipelines:
-  # Run on git push to main
+  # Fires on a git push the controller receives via webhook
   - name: build
     entrypoint: Build
     on:
       push:
-        branches: [main]
-        paths: ["*.go", "go.mod"]        # optional path filter
+        branches: [main]                 # declarative: records intent, not gated on
+        paths: ["*.go", "go.mod"]        # declarative: records intent, not gated on
 
   # Run on every pull request (checks out the PR head)
   - name: pr-gate
     entrypoint: PRGate
     on:
       pull_request:
-        branches: [main]
+        branches: [main]                 # declarative: records intent, not gated on
 
-  # Custom HTTP trigger (controller exposes this path)
+  # Declarative path: the controller exposes POST /webhooks/github/{pipeline};
+  # this path is recorded, not routed
   - name: review
     entrypoint: Review
     on:
       webhook:
         path: /review
 
-  # Scheduled (cron)
+  # Cron in UTC, declarative -- nothing evaluates it; invoke with
+  # `sparkwing run nightly` or an external scheduler
   - name: nightly
     entrypoint: Nightly
     on:
       schedule: "0 2 * * *"
 ```
+
+`branches` / `paths` / `actions` record intent: the controller does not
+read your `sparkwing.yaml`, so it dispatches whichever pipeline the
+webhook URL names. Scope a trigger by pointing its GitHub webhook only
+at that pipeline's URL -- see [hooks](hooks.md).
 
 Webhook delivery is handled by the controller - see
 `POST /webhooks/github/{pipeline}` in [api](api.md). Git hooks are not
@@ -351,11 +358,15 @@ stranded compute.
 
 ### Group modifiers
 
-`*JobGroup` mirrors the chainable surface of `*JobNode` (Needs, Retry,
-Timeout, Requires, SkipIf, Env, Inline, ContinueOnError, Optional,
-BeforeRun, AfterRun, Cache, NeedsOptional). Each call delegates to
-every member and returns the same `*JobGroup` for chaining. `OnFailure`
-is intentionally per-Job; group-level recovery has unclear semantics.
+Every chainable `*JobNode` modifier has a `*JobGroup` twin: the call
+delegates to each member and returns the same `*JobGroup` for chaining.
+The generated [sdk-reference.md](sdk-reference.md) lists the current
+set. Two carve-outs: `OnFailure` is intentionally per-Job, since
+group-level recovery has unclear semantics; and `Cache` on a group is
+what the `group-cache-shared` lint rule rejects -- one key function
+across N members makes them share a single cache entry and replay each
+other's results. Key each member instead, by ranging over
+`group.Members()`; see [authoring-pipelines.md](authoring-pipelines.md).
 
 ## Layer escape: JobSpawn
 
@@ -406,8 +417,7 @@ suspended-runner cost) at the call site.
 | `BeforeRun` / `AfterRun` | Plan only | runner lifecycle hooks |
 | `Approval` | Plan only | gates dispatch on a human decision |
 | `Inline()` | Plan only | bypass the runner entirely |
-| `Group("name")` | Plan only | UI grouping (free-function form: `sw.GroupJobs`) |
-| `Dynamic()` | Plan only | flag for renderers |
+| grouping | Plan only | free function `sw.GroupJobs(plan, "name", nodes...)`; a named cluster in the DAG view and a `Needs` target -- there is no `.Group()` modifier |
 | `Needs` | both | ordering inside its layer |
 | `SkipIf` | both | skip predicate |
 | parallel failures | Work only | `w.ParallelFailures(sw.FailFast)` or `sw.CollectAll` |

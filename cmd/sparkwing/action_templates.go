@@ -454,7 +454,8 @@ func applicabilityLine(a templates.Applicability) string {
 // runExampleScaffold materializes an example into a repo.
 //
 // It exists so template-verify can keep proving every example
-// compiles, lints, and runs -- the property that makes them worth
+// compiles, lints, and explains (and that runnable-tier ones run) --
+// the property that makes them worth
 // reading. It is not the path to start a pipeline, which is why the
 // verb is hidden and `pipeline new --template` no longer accepts an
 // example name.

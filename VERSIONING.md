@@ -8,9 +8,9 @@ Sparkwing follows semantic versioning with explicit scope: only certain parts of
 |---|---|
 | `pkg/...` packages | Public API. Breaking changes only in major version bumps (or minor while pre-1.0). |
 | Top-level `sparkwing/` package | Author SDK. Same promise as `pkg/...`. |
-| CLI flags (`sparkwing` and subcommands) | Public surface. Renames or removals follow the deprecation procedure below. |
+| CLI flags (`sparkwing` and subcommands) | Public surface. Renames or removals follow the removal procedure below. |
 | Wire protocols (HTTP API request/response shapes, persisted JSON record shapes) | Treated as public API. JSON field renames or type changes are breaking. |
-| YAML config formats (`pipelines.yaml`, `runners.yaml`, `sources.yaml`, `backends.yaml`, `profiles.yaml`) | Public surface. Field renames or removals are breaking. |
+| YAML config formats (`.sparkwing/sparkwing.yaml`, `~/.config/sparkwing/profiles.yaml`) | Public surface. Field renames or removals are breaking. |
 
 ## What's NOT covered
 
@@ -34,29 +34,21 @@ Any of the following on covered surfaces:
 - Removing or renaming a YAML field that consumers write
 - Renaming or removing a binary
 
-## Deprecation procedure
+## Removal procedure
 
-When a covered API is on its way out:
-
-1. Mark it with a `// Deprecated: <reason>. Use X instead.` godoc comment (Go convention; IDEs surface this).
-2. For CLI flags and SDK functions, emit a runtime warning when the deprecated path is hit. Format: `WARN: <symbol> is deprecated; use <replacement> instead. See CHANGELOG.md.`
-3. Add a `Deprecated` entry to `CHANGELOG.md` in the same release.
-4. Keep the deprecated symbol working for at least one minor release.
-5. Remove the symbol in a subsequent major release (or minor while pre-1.0).
-
-The runtime warning is important -- it catches uses that the godoc comment misses (e.g., dynamic callers, generated code).
+Pre-1.0, a covered symbol is removed outright in the release that replaces it. The removal ships as a `### Removed` (or `### Changed`) CHANGELOG entry carrying a `(Breaking)` marker inside the bold scope, linked to an H2 in `docs/migrations/v<X.Y.Z>.md` with before/after code. Where the removed spelling can still be typed -- a retired CLI flag, a retired config file -- the binary recognizes it and fails with an error naming the replacement and the migration guide, rather than accepting it with a warning. There is no deprecation window.
 
 ## Pre-1.0 caveat
 
-While Sparkwing is at `v0.x.y`, minor bumps may contain breaking changes per Go semver convention. The deprecation procedure still applies -- breaking changes are announced with at least one release of warning before removal. Once Sparkwing reaches `v1.0.0`, breaking changes will be confined to major bumps.
+While Sparkwing is at `v0.x.y`, minor bumps may contain breaking changes per Go semver convention. Once Sparkwing reaches `v1.0.0`, breaking changes will be confined to major bumps.
 
 ## Release process
 
 - Every user-visible change requires a `CHANGELOG.md` entry under the current `[Unreleased]` section.
 - Sections follow [Keep a Changelog](https://keepachangelog.com/): `Added`, `Changed`, `Fixed`, `Removed`, `Security`, `Docs`. (`Deprecated` is omitted -- sparkwing is pre-1.0 and follows hard-cut semantics; removals go straight into `Removed` with a `(Breaking)` marker.)
 - Entry format: bold scope prefix, `(Breaking)` inline for breaks, link to migration guide. See [docs/changelog-style.md](./docs/changelog-style.md) for the rubric the pre-release manicuring agent applies.
-- Every breaking change in a release gets a corresponding section in `docs/migrations/v<X.Y.Z>.md`. Files are always created (even for single-break releases) so the migration-guide URL is consistent per release.
-- CI fails if a commit touches `pkg/`, `sparkwing/`, CLI flag definitions, or wire-format structs without including a `CHANGELOG.md` entry. The gate lives in `bin/check-changelog.sh` and runs as part of `sparkwing run lint`.
+- Every breaking change in a release gets a corresponding H2 in `docs/migrations/v<X.Y.Z>.md`; releases with no breaking changes have no guide file.
+- CI fails if a commit touches `pkg/`, `sparkwing/`, or any `cmd/<binary>/*.go` without including a `CHANGELOG.md` entry. Tests, testdata, `internal/`, `docs/`, `examples/`, `web/`, `charts/`, `install/`, `build/`, and `bench/` are exempt. The gate lives in `bin/check-changelog.sh` and runs as part of `sparkwing run lint`.
 - The release pipeline (`sparkwing run release --version vX.Y.Z`) renames `[Unreleased]` to `[vX.Y.Z] - YYYY-MM-DD` and commits before tagging. The GH-Actions release workflow extracts that section verbatim as the GitHub Release body via `bin/extract-changelog-section.sh`.
 
 ## Wire protocol
@@ -66,9 +58,9 @@ The controller's HTTP API has a formal contract at
 changes follow the same semver discipline as Go API changes:
 
 - Renaming a JSON field, removing a field, or changing a field's
-  type is a **breaking change**. The deprecation procedure above
-  applies -- announce in a `Changed` / `Deprecated` CHANGELOG entry
-  one release ahead of removal.
+  type is a **breaking change**. The removal procedure above
+  applies -- announce in a `Changed` / `Removed` CHANGELOG entry
+  with a `(Breaking)` marker and a migration-guide link.
 - Adding a new optional field, adding a new route, or adding a new
   status code is **non-breaking** when existing callers ignore it.
 - Changing a route's path, HTTP method, or required-vs-optional
@@ -124,7 +116,7 @@ Workflow when you change a covered API:
 3. Review the resulting `.apidiff/` diff -- that's the surface change
    reviewers will see.
 4. Add a `CHANGELOG.md` entry under `[Unreleased]` (Added / Changed /
-   Removed / Deprecated).
+   Removed).
 5. Commit both the source and the snapshot in the same PR.
 
 Snapshot diffs are the single most useful artifact in API-affecting
@@ -133,14 +125,18 @@ symbols moved, in what direction, with no other noise.
 
 ## Conformance suites for plug-in interfaces
 
-The plug-in interfaces under `pkg/storage` and `pkg/controller`
-ship portable test suites so adopters writing custom implementations
-can verify they honor the contract:
+The plug-in interfaces under `pkg/storage` and `pkg/controller` ship
+portable test suites so adopters writing custom implementations can
+verify they honor the contract. Every exported `TestX(t, factory)`
+function in `pkg/storage/conformance` and `pkg/controller/ciphertest`
+is one such suite; `go doc ./pkg/storage/conformance` lists the
+current set. The suites shipped today:
 
 | Interface | Suite |
 |---|---|
 | [`storage.ArtifactStore`](./pkg/storage/storage.go) | [`pkg/storage/conformance.TestArtifactStore`](./pkg/storage/conformance) |
 | [`storage.LogStore`](./pkg/storage/storage.go) | [`pkg/storage/conformance.TestLogStore`](./pkg/storage/conformance) |
+| [`storage.ConditionalWriter`](./pkg/storage/storage.go) | [`pkg/storage/conformance.TestConditionalWriter`](./pkg/storage/conformance) |
 | [`controller.Cipher`](./pkg/controller/cipher.go) | [`pkg/controller/ciphertest.TestCipher`](./pkg/controller/ciphertest) |
 
 Each suite is a single exported `TestX(t, factory)` function. A
@@ -151,7 +147,7 @@ the implementation opts out of (`storage.ErrNotSupported`,
 
 The conformance contract counts as part of the public API: changes
 to what an implementation must support to pass are breaking, and
-follow the same deprecation procedure as Go-level API changes.
+follow the same removal procedure as Go-level API changes.
 
 ## Migration help
 
@@ -159,6 +155,6 @@ When a breaking change ships:
 
 - The CHANGELOG entry includes the scope, a `(Breaking)` marker, the symbol/flag/field being removed or renamed, and a link to the matching section of `docs/migrations/v<X.Y.Z>.md`.
 - The migration guide carries the longer-form before/after code, multi-step ordering, gotchas, and any sibling-repo impact. Adopters scanning the release page see the short summary; adopters actively migrating click through to the detailed steps.
-- Every release has a migration guide file, even for releases with one small break -- the URL shape `https://sparkwing.dev/docs/migration-guide/v<X.Y.Z>` resolves predictably and lets downstream pages link reliably.
+- A release containing a breaking change ships `docs/migrations/v<X.Y.Z>.md`, and every `(Breaking)` CHANGELOG entry links to an H2 inside it, so `https://sparkwing.dev/docs/migration-guide/v<X.Y.Z>` resolves for the releases that need it. A release with no breaking changes has no guide file.
 
 Full format conventions live in [docs/changelog-style.md](./docs/changelog-style.md).

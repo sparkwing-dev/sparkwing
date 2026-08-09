@@ -8,8 +8,8 @@ logs, with a hosted dashboard that reflects everyone's activity in
 one place. Four deployment shapes are all valid and share the
 same codebase:
 
-1. **local-only** -- today's behavior. SQLite + on-disk caches + on-disk
-   logs. Zero shared infra. Used when `backends.yaml` is absent or
+1. **local-only** -- SQLite + on-disk caches + on-disk logs. Zero shared
+   infra. Used when the resolved profile declares no shared surfaces or
    the `--sw-local-only` flag is set.
 2. **S3-only shared** -- runners write their own run state, caches,
    and logs to a shared object store. No database, no controller.
@@ -39,43 +39,43 @@ abstract `StateBackend` + `LogBackend` + `ConcurrencyBackend`
 interfaces (`internal/orchestrator/backends.go`). Mode selection
 is just *which implementations* fill those slots.
 
-## What's already in place
+## How the pieces fit
 
-Before listing work, here is the existing architecture this design
-plugs into. Most of the shape is already correct.
+The architecture the four modes share.
 
-### Orchestrator abstraction (done)
+### Orchestrator abstraction
 
 `internal/orchestrator/backends.go` defines:
 
-- `StateBackend` -- ~40 methods covering runs, nodes, steps,
-  events, dispatches, debug pauses, approvals, triggers, metrics.
+- `StateBackend` -- the run/node/step/event/dispatch/debug-pause/
+  approval/trigger/metrics surface. It embeds `storage.StateStore`
+  and adds the wrapper-shaped methods (output extraction, trigger
+  cycle detection, simplified-error `AppendEvent`).
 - `LogBackend` -- opens per-node log sinks.
 - `ConcurrencyBackend` -- atomic acquire / heartbeat / release /
   waiter resolution for the `.Cache()` DSL.
-- `LocalBackends(paths, *store.Store)` constructs the bundle from a
-  SQLite store + filesystem logs.
 
-`internal/cluster/worker.go` already builds a *remote* bundle by
-passing `*pkg/controller/client.Client` as the `StateBackend`,
-`HTTPConcurrency` as the `ConcurrencyBackend`, and either a
-`LogStore`-backed or HTTP-backed log backend. **The
-hosted-controller path for the orchestrator is already wired.**
-It just isn't exposed to `sparkwing run` on a laptop yet.
+Three constructors fill those slots, one per shared-infra shape:
+`LocalBackends` (SQLite store + filesystem logs), `S3Backends`
+(NDJSON-over-object-store state + CAS concurrency), and
+`RemoteBackends` (a `*controller/client.Client` for state, HTTP
+concurrency, HTTP logs). The laptop path, the cluster worker, and the
+single-node runner all assemble Mode 4 through `RemoteBackends`.
 
-### Storage abstraction (done)
+### Storage abstraction
 
-`pkg/storage` defines `ArtifactStore` and `LogStore`. Backends:
-`fs`, `s3`, `sparkwingcache` (HTTP), `stdoutlogs`,
-`sparkwinglogs`. `pkg/backends` defines the YAML configuration
-surface -- including `state.type: postgres` and `state.type:
-controller`, both whitelisted but not yet implemented behind
-`pkg/storage/storeurl/spec.go:OpenStateStoreFromSpec`.
+`pkg/storage` defines `ArtifactStore`, `LogStore`, and `StateStore`.
+`storage.StateStore` (`pkg/storage/state.go`) is the interface every
+state backend implements; `storeurl.OpenStateStoreFromSpec` dispatches
+`sqlite`, `s3`, `postgres`, and `controller` specs through it,
+returning `*store.Store`, `*s3state.Backend`, or `*client.Client` as
+the spec demands. `gcs`, `azure-blob`, and `mysql` are recognized and
+report unimplemented at run start rather than falling back silently.
 
-### Cache reservation primitive (done)
+### Cache reservation primitive
 
-`pkg/store/concurrency.go` already implements exactly the
-cross-laptop cache reservation behavior we want:
+`pkg/store/concurrency.go` implements the cross-laptop cache
+reservation behavior:
 
 - `AcquireConcurrencySlot` atomically combines cache-lookup +
   capacity check + holder-count + policy branch.
@@ -86,65 +86,31 @@ cross-laptop cache reservation behavior we want:
 - Holder leases with heartbeats; reaper sweeps expired holders.
 - 35d TTL on the `concurrency_cache` rows.
 
-The `.Cache()` DSL routes through this. Once everyone shares one
+The `.Cache()` DSL routes through this. When everyone shares one
 Postgres, cross-laptop reservation and result-borrowing fall out
-for free -- no new code in this layer.
+for free -- no extra code in this layer.
 
-### Dashboard data abstraction (done)
+### Dashboard data abstraction
 
-`internal/backend/` defines a `Backend` interface with three
-existing impls: `StoreBackend` (direct SQLite), `ClientBackend`
-(HTTP-to-controller), `S3Backend` (reads `state.ndjson` dumps).
-The web binary already adapts; once `*store.Store` works against
-Postgres, the dashboard works against shared Postgres without
-extra glue.
+`internal/backend/` defines a `Backend` interface with three impls:
+`StoreBackend` (direct `*store.Store`, SQLite or Postgres),
+`ClientBackend` (HTTP-to-controller), and `S3Backend` (reads
+`state.ndjson`). `cmd/sparkwing-web` takes `--state-spec`,
+`--logs-spec`, and `--artifacts-spec` and resolves them through the
+same `storeurl` factories the orchestrator uses, so the dashboard
+serves any of the four modes without extra glue.
 
-### Final-state S3 dump (done)
+### S3 state dump
 
-`orchestrator.DumpRunState` already writes
-`runs/<id>/state.ndjson` to the artifact store at run completion.
-`S3Backend` already reads it. Means a *completely
-infrastructure-less* dashboard mode for **completed** runs
-already works today. Extending this to live state (Mode 2) is one
-of the work units below -- same file format, written incrementally
-as the run progresses instead of only at the end.
+`orchestrator.DumpRunState` writes `runs/<id>/state.ndjson` to the
+artifact store at run completion, and `S3Backend` reads it -- a
+completely infrastructure-less dashboard mode for finished runs. Mode 2
+uses the same file format, written incrementally as the run progresses
+instead of only at the end.
 
-## What is missing
-
-In order of impact:
-
-- **S3-only state backend** (Mode 2). A `StateBackend` impl that
-  serializes run/node/event writes to per-run NDJSON in the
-  artifact store, written incrementally as the run progresses
-  (not just on completion). Plus a matching read path so the
-  dashboard can serve live runs from S3.
-- **Postgres impl of `pkg/store`** (Mode 3). The schema is
-  SQLite-flavored but largely portable.
-  `storeurl/spec.go:OpenStateStoreFromSpec` has a `TypePostgres`
-  branch that returns "not implemented".
-- **`RemoteBackends` constructor** (Mode 4). Symmetric to
-  `LocalBackends`. Wraps a `*client.Client` + `HTTPConcurrency` plus
-  an HTTP log backend into a `Backends` bundle. The pieces all
-  exist; this is the assembly point. Naming a constructor and
-  adding a `var _ StateBackend = (*client.Client)(nil)` assertion
-  is most of the work.
-- **`sparkwing run --sw-local-only` flag**. Forces SQLite + fs
-  cache + fs logs regardless of `backends.yaml`. The opposite-end
-  escape hatch from the shared-backends story.
-- **Schema versioning** for direct-DB mode. A
-  `sparkwing_schema_version` row that runners check on connect so
-  N runner versions against one Postgres fail loudly on skew.
-- **Dashboard wiring** against shared Postgres and against live
-  S3 state. `cmd/sparkwing-web` needs to accept a state-backend
-  spec; existing `Backend` impls (`StoreBackend`, `S3Backend`)
-  cover both paths once the storage layer lands.
-- **Cross-process integration tests** -- for both Mode 2 and Mode 3.
-  Mode 2: two runs against the same bucket, second one sees the
-  first's live progress in the dashboard. Mode 3: same plus
-  verifying cache reservation produced an `AcquireCached` event.
-- **Docs**. `docs/` page explaining the four modes, when to use
-  each, what `backends.yaml` looks like for each, and the
-  reservation-vs-thundering-herd tradeoff in Mode 2.
+The operator-facing view of all of this is
+[docs/deployment-modes.md](docs/deployment-modes.md) and
+[docs/backends.md](docs/backends.md).
 
 ## Architecture by mode
 
@@ -158,12 +124,12 @@ sparkwing run (laptop)
             Logs:        localLogs{paths}
             Concurrency: localConcurrency{*store.Store(sqlite)}
           }
-       └─ ArtifactStore: fs:///~/.sparkwing/cache
-       └─ LogStore:      fs:///~/.sparkwing/logs
+       └─ ArtifactStore: fs:///~/.cache/sparkwing
+       └─ LogStore:      per-run files under ~/.sparkwing/runs/<runID>/
 ```
 
-Selected when: no `backends.yaml`, no shared-backend env vars, OR
-`--sw-local-only`.
+Selected when: the resolved profile's `state:` surface is `sqlite` (or
+the profile declares no surfaces), or `--sw-local-only` is set.
 
 ### Mode 2: S3-only shared
 
@@ -179,7 +145,7 @@ sparkwing run (laptop or CI runner)
        └─ LogStore:      s3://shared-bucket/logs
 
 sparkwing-web (anywhere)
-   └─ backend.S3Backend{S3 bucket}               // already exists
+   └─ backend.S3Backend{S3 bucket}
 ```
 
 Notes:
@@ -241,15 +207,11 @@ Notes:
   check failing routes the operation to the last-write-wins fallback.
 - **Dashboard live updates**: `S3Backend` polls
   `runs/<id>/state.ndjson` for changes. Refresh latency = poll
-  interval (default 2-5s). The existing
-  `S3Backend.loadState` already does the read; cache invalidation
-  on a per-run mtime check is the new piece.
+  interval (default 2-5s), with cache invalidation on a per-run
+  mtime check.
 
-Selected when: `backends.yaml` declares state as one of the
-object-store types (`s3`, `gcs`, `azure-blob`). Today
-`SurfaceState` only allows `sqlite`/`postgres`/`mysql`/
-`controller`; we'd add `s3`, `gcs`, `azure-blob` to that
-allow-list.
+Selected when: the resolved profile's `state:` surface is `s3` (`gcs`
+and `azure-blob` are recognized and report unimplemented).
 
 ### Mode 3: direct-DB
 
@@ -275,10 +237,12 @@ Notes:
   Postgres -- this is the central reason a `Store` interface
   refactor is *not* required. The Store stays a concrete type with
   a dialect-aware backing `*sql.DB`.
-- The same orchestrator code runs in CI runners; only the
-  `backends.yaml` differs.
+- The same orchestrator code runs in CI runners; only the selected
+  profile differs.
 - All runners need Postgres + S3 creds. Trust model: "anyone with
   DB creds is trusted." Fine for owned infra.
+
+Selected when: the resolved profile's `state:` surface is `postgres`.
 
 ### Mode 4: hosted controller
 
@@ -300,9 +264,9 @@ controller (k8s)
    └─ serves the dashboard
 ```
 
-Selected when: `backends.yaml` declares
-`state.type: controller, controller: <profile>` (or the env-var
-shim resolves a controller profile).
+Selected when: the resolved profile's `state:` surface is `controller`
+(or the profile carries only a `controller:` block, which routes every
+surface through it).
 
 Notes:
 
@@ -316,8 +280,9 @@ Notes:
 
 ## Postgres schema
 
-The SQLite schema in `pkg/store/store.go` (lines 70-380) ports
-cleanly with these substitutions, applied at migration time:
+The SQLite schema (the `schemaSQLite` constant in
+`pkg/store/store.go`) ports cleanly with these substitutions, applied
+at migration time:
 
 | SQLite | Postgres |
 |---|---|
@@ -334,13 +299,12 @@ cleanly with these substitutions, applied at migration time:
 | `PRAGMA foreign_keys(on)` | drop (always on in pg) |
 | `PRAGMA busy_timeout(5000)` | drop (no equivalent needed) |
 
-Tables (15): `runs`, `nodes`, `events`, `triggers`,
+Tables: `runs`, `nodes`, `events`, `triggers`,
 `concurrency_entries`, `concurrency_holders`,
 `concurrency_waiters`, `concurrency_cache`, `node_steps`,
 `node_metrics`, `tokens`, `sessions`, `users`, `secrets`,
-`debug_pauses`, `approvals`, `node_dispatches`.
-
-Plus one new table for direct-DB mode:
+`debug_pauses`, `approvals`, `node_dispatches`, plus
+`sparkwing_schema_version` (created separately on every Open):
 
 ```sql
 CREATE TABLE sparkwing_schema_version (
@@ -372,12 +336,12 @@ The SQLite implementation uses transaction-wrapped reads-then-writes
 that are serialized by SQLite's writer-locks-database model. The
 Postgres translations need explicit locks:
 
-- `ClaimNextReadyNode` (store.go:1567) -- SQLite version does a
+- `Store.ClaimNextReadyNode` -- SQLite version does a
   `SELECT ... LIMIT 1` then `UPDATE ... WHERE claimed_by IS NULL`.
   In Postgres, use `SELECT ... FOR UPDATE SKIP LOCKED` to avoid
   thundering-herd waiters and let multiple claimants make
   progress in parallel.
-- `AcquireConcurrencySlot` (concurrency.go:122) -- same pattern;
+- `Store.AcquireConcurrencySlot` (`pkg/store/concurrency.go`) -- same pattern;
   the inner transaction reads holders/waiters/cache, then writes.
   Use `SELECT FOR UPDATE` on the `concurrency_entries` row keyed
   by the slot key; pg row-level lock is the natural serialization
@@ -446,21 +410,19 @@ reservation under heavy contention.
 
 Behavior on `sparkwing run`:
 
-- When set: ignore `backends.yaml`, ignore env-var shim, force
-  `Spec{Type: sqlite, Path: opts.DefaultStateDB}` for state,
-  `fs://<paths.CacheDir>` for cache, `fs://<paths.LogsDir>` for
-  logs. The orchestrator runs as if no shared config existed.
-- When unset: existing precedence applies (target overlay →
-  detected environment → defaults → legacy env-var shim).
+- When set: ignore the resolved profile's surfaces and pin
+  `Spec{Type: sqlite, Path: opts.DefaultStateDB}` for state, with no
+  shared cache or log store. The orchestrator runs as if no shared
+  infrastructure were configured.
+- When unset: the resolved profile's `state:` / `cache:` / `logs:`
+  surfaces apply, falling back to the built-in local defaults.
 
-Naming: `--sw-local-only` matches the existing `--sw-` namespace
-convention for `sparkwing run` control flags. Help text: "Force
-local state, cache, and logs for this run; ignore the configured
-shared backends."
-
-Implementation: a one-field option on `orchestrator.Options`. In
-`ApplyBackendsConfig`, when set, return early after pinning the
-three local specs. No changes to other call paths.
+`--sw-local-only` matches the `--sw-` namespace convention for
+`sparkwing run` control flags. It is one field on
+`orchestrator.Options` (`LocalOnly`); `ApplyProfileBackends`
+short-circuits on it before any profile surface is opened, so an
+operator facing a stale or unreachable shared store can bypass the
+resolver entirely. `SPARKWING_LOCAL_ONLY=1` sets the same field.
 
 ## Trust and auth
 
@@ -478,401 +440,73 @@ against shared infra," use hosted-controller mode instead.
 
 ## Configuration surface
 
-`.sparkwing/backends.yaml` already has the right shape. Example
-for each mode:
+Each mode is one profile. Laptop profiles live in
+`~/.config/sparkwing/profiles.yaml`; project profiles in the
+`profiles:` map of `.sparkwing/sparkwing.yaml`, where all four
+surfaces are required. Selecting a profile selects a mode -- see
+[docs/backends.md](docs/backends.md).
 
 ```yaml
-# local-only -- no file needed, or:
-environments:
-  default:
-    cache:
-      type: filesystem
-      path: ~/.sparkwing/cache
-    logs:
-      type: filesystem
-      path: ~/.sparkwing/logs
-    state:
-      type: sqlite
-      path: ~/.sparkwing/state.db
-```
+# ~/.config/sparkwing/profiles.yaml
+profiles:
+  # Mode 1: local-only. Also the built-in default with no profile at all.
+  laptop:
+    secrets: { type: env }
+    state:   { type: sqlite }
+    cache:   { type: filesystem, path: ~/.cache/sparkwing }
+    logs:    { type: filesystem, path: ~/.cache/sparkwing/logs }
 
-```yaml
-# S3-only shared
-environments:
+  # Mode 2: S3-only shared.
   shared:
-    cache:
-      type: s3
-      bucket: my-org-sparkwing
-      prefix: cache
-    logs:
-      type: s3
-      bucket: my-org-sparkwing
-      prefix: logs
-    state:
-      type: s3
-      bucket: my-org-sparkwing
-      prefix: state
-```
+    secrets: { type: env }
+    state:   { type: s3, bucket: my-org-sparkwing, prefix: state }
+    cache:   { type: s3, bucket: my-org-sparkwing, prefix: cache }
+    logs:    { type: s3, bucket: my-org-sparkwing, prefix: logs }
 
-```yaml
-# direct-DB
-environments:
-  shared:
-    cache:
-      type: s3
-      bucket: my-org-sparkwing
-      prefix: cache
-    logs:
-      type: s3
-      bucket: my-org-sparkwing
-      prefix: logs
-    state:
-      type: postgres
-      url_source: env:SPARKWING_PG_URL
-```
+  # Mode 3: direct-DB.
+  shared-db:
+    secrets: { type: env }
+    state:   { type: postgres, url_source: env:SPARKWING_PG_URL }
+    cache:   { type: s3, bucket: my-org-sparkwing, prefix: cache }
+    logs:    { type: s3, bucket: my-org-sparkwing, prefix: logs }
 
-```yaml
-# hosted controller
-environments:
+  # Mode 4: hosted controller.
   prod:
-    cache:
-      type: controller
-      controller: prod
-    logs:
-      type: controller
-      controller: prod
-    state:
-      type: controller
-      controller: prod
+    controller: { url: https://prod.example.com, token: swu_xxx }
+    secrets: { type: controller, url: https://prod.example.com }
+    state:   { type: controller }
+    cache:   { type: controller }
+    logs:    { type: controller }
 ```
 
-`detect:` rules (already supported) auto-select environment based
-on env vars -- `GITHUB_ACTIONS=true` selects the shared env, local
-laptop falls through to default.
+The profile applies wholesale: `--profile <name>`, else the pipeline's
+own `profile:`, else the project's `defaults.profile`, else the
+built-in local defaults. Surfaces are not layered in one at a time,
+and there is no environment auto-detection -- CI selects its mode by
+naming a profile like any other caller.
 
-## Work breakdown
+## Operational notes
 
-The pieces below are sized for parallel agent execution. Each
-unit lists scope, files, acceptance, and dependencies.
-
-### Unit A0 -- S3-only state backend (Mode 2)
-
-**Scope**: add a `StateBackend` implementation that serializes
-state writes to per-run NDJSON in the artifact store, plus a
-`noopConcurrency` `ConcurrencyBackend`, plus a live-read path for
-the dashboard. This is what enables Mode 2 with no database.
-
-**Files**:
-
-- `internal/orchestrator/s3state.go` (new) -- `S3StateBackend`
-  implementing `StateBackend`. Each method appends a JSON envelope
-  to `runs/<runID>/state.ndjson`. Writes are coalesced with a
-  small in-memory buffer + periodic flush (e.g. 500ms or 16KB)
-  to keep S3 PUT cost bounded; final flush on run completion.
-  Methods that need CAS across runs (claim-trigger, ready-pool
-  claim, debug-pause writes) return `ErrNotSupported`.
-- `internal/orchestrator/noopconcurrency.go` (new) -- always
-  returns `AcquireGranted`; release/heartbeat are no-ops.
-- `internal/orchestrator/backends.go` -- new
-  `S3Backends(art storage.ArtifactStore, log storage.LogStore)
-  Backends` constructor.
-- `pkg/backends/backends.go` -- extend `allowedTypes[SurfaceState]`
-  to include `s3`, `gcs`, `azure-blob`.
-- `pkg/storage/storeurl/spec.go` -- new `OpenStateStoreFromSpec`
-  branches for the object-store types; return an opaque handle
-  the orchestrator can adapt to its `StateBackend`. The current
-  type alias `storage.StateStore = *store.Store` blocks this;
-  see Unit B-2 (becomes a prerequisite -- or fold the alias swap
-  into this unit).
-- `internal/backend/s3_backend.go` -- extend the existing
-  read-side `S3Backend` to:
-  - serve **live** runs (today it only loads complete dumps),
-  - return `ListEventsAfter` results parsed from the NDJSON tail
-    instead of the current empty stub.
-- `internal/orchestrator/s3state_test.go` -- unit tests covering
-  the buffer/flush behavior, NDJSON round-trips, and
-  `ErrNotSupported` for the CAS-requiring methods.
-- `internal/orchestrator/s3state_outbox.go` (new) -- local SQLite
-  outbox for offline operation. When an S3 write fails with a
-  network error, stage the operation (key + bytes for state,
-  artifact PUTs, log appends) in the outbox. A background
-  replayer drains the outbox when connectivity returns.
-- `internal/orchestrator/s3state_outbox_test.go` -- covers:
-  network failure stages the write, reconnection drains in
-  order, process restart resumes drain, idempotent replay
-  (re-running a PUT against the same key is harmless because
-  the key/bytes are unchanged for state, and content-addressed
-  for cache).
-
-**Acceptance**:
-
-- `sparkwing run` against a backends.yaml declaring `state.type:
-  s3` writes a live, growing `state.ndjson` for the run.
-- The dashboard server pointed at the same bucket reflects each
-  node's status changes within one poll interval.
-- `.Cache()` calls on a key whose blob is already in S3 fetch
-  without recomputing.
-- `.Cache()` calls on an absent key compute, upload, and the
-  next run (against the same bucket) hits the cache.
-- Trigger-spawning pipelines fail with a clear "S3-only mode
-  does not support triggers" error.
-- With S3 unreachable (simulated via fault injection), the run
-  completes successfully and writes accumulate in the outbox.
-  After S3 becomes reachable again, the outbox drains and the
-  bucket reflects the full run.
-
-**Dependencies**: needs the `StateStore` alias to become an
-interface (Unit B-2). Otherwise independent of Units A, B, C.
-
-### Unit A -- Postgres backend for `pkg/store`
-
-**Scope**: extend `pkg/store` to run against Postgres in addition to
-SQLite. The struct stays `*store.Store`; the constructor branches
-on a `Dialect` (sqlite/postgres) derived from the DSN. All query
-strings stay in `pkg/store/*.go`, parameterized where the two
-dialects diverge.
-
-**Files**:
-
-- `pkg/store/store.go` -- split the schema constant into
-  `schemaSQLite` + `schemaPostgres`; add `Dialect` enum; new
-  `OpenPostgres(dsn)` constructor; thread dialect through helpers.
-- `pkg/store/concurrency.go`, `pkg/store/store.go`,
-  `pkg/store/node_dispatches.go` -- dialect-aware locking clauses
-  (`FOR UPDATE SKIP LOCKED` on the pg path).
-- New `pkg/store/dialect.go` for the type + query-rewrite helpers.
-- `pkg/storage/storeurl/spec.go` -- fill in the `TypePostgres`
-  branch in `OpenStateStoreFromSpec`.
-- `pkg/store/postgres_test.go` -- full conformance against a real
-  Postgres (testcontainers-go or `PGURL` env var with skip).
-- `go.mod` -- add `github.com/jackc/pgx/v5/stdlib` (recommended) or
-  `github.com/lib/pq`.
-
-**Acceptance**:
-
-- All existing tests pass against SQLite.
-- A new `TestStore_AgainstPostgres` subtest runs the same suite
-  against a real Postgres and passes.
-- `OpenStateStoreFromSpec` no longer returns "not implemented"
-  for `TypePostgres`.
-
-**Dependencies**: none. Largest unit; ~1-2 weeks of focused work.
-
-### Unit B -- `RemoteBackends` constructor
-
-**Scope**: expose the hosted-controller path to `sparkwing run`
-the same way cluster workers already use it.
-
-**Files**:
-
-- `internal/orchestrator/backends.go` -- new
-  `RemoteBackends(controllerURL, logsURL, token, *http.Client) Backends`.
-  Asserts `var _ StateBackend = (*client.Client)(nil)` at package
-  scope; fix any drift (the client has ~95% of `StateBackend` but
-  spot-check coverage).
-- `internal/orchestrator/orchestrator.go` -- when
-  `opts.State` is a `*client.Client` (or a new state spec resolves
-  to `type: controller`), build `RemoteBackends` instead of
-  `LocalBackends` inside `RunLocal`.
-- `pkg/storage/storeurl/spec.go` -- `TypeController` branch returns
-  a `*client.Client` wrapped in something that satisfies
-  `storage.StateStore`. (Note: `StateStore` is currently aliased
-  to `*store.Store`; this alias may need to become an interface
-  with both `*store.Store` and `*client.Client` as impls. The
-  surface is broad -- see Unit B-2.)
-
-**Unit B-2 -- Optional: introduce `storage.StateStore` interface**.
-If Unit B finds that aliasing `StateStore = *store.Store` blocks
-the controller spec, split it into an interface with the methods
-the orchestrator actually needs. `internal/orchestrator/backends.go`
-already enumerates them -- copy the StateBackend interface into
-`pkg/storage` and use it.
-
-**Acceptance**:
-
-- `sparkwing run --sw-profile=prod foo` against a
-  `state.type: controller` configured profile drives the run via
-  HTTP, dashboard reflects it in real time.
-- Cluster worker path unchanged (still passes `*client.Client` as
-  State manually).
-
-**Dependencies**: none, can run in parallel with Unit A.
-
-### Unit C -- `--sw-local-only` flag
-
-**Scope**: add the escape hatch.
-
-**Files**:
-
-- `cmd/sparkwing/action_run.go` (or wherever `sparkwing run`
-  flags are parsed) -- parse `--sw-local-only`.
-- `internal/orchestrator/orchestrator.go` -- new
-  `Options.LocalOnly bool`.
-- `internal/orchestrator/backends_apply.go` -- early-return in
-  `ApplyBackendsConfig` when `LocalOnly` is true, pinning SQLite
-  - filesystem.
-- `docs/run.md` (or equivalent) -- document the flag.
-
-**Acceptance**:
-
-- `sparkwing run --sw-local-only pipeline-name` ignores
-  `backends.yaml` and runs against local SQLite + fs.
-- Tests verify backends.yaml that *would* fail to resolve (e.g.
-  references a controller profile not present) succeeds anyway
-  when the flag is set.
-
-**Dependencies**: none.
-
-### Unit D -- Schema versioning for direct-DB
-
-**Scope**: refuse to operate on a schema newer than the binary
-understands; auto-migrate when older.
-
-**Files**:
-
-- `pkg/store/store.go` -- add `expectedSchemaVersion` const;
-  populate the new `sparkwing_schema_version` table; check on
-  Open.
-- `pkg/store/migrate_test.go` -- test forward and backward skew.
-
-**Acceptance**:
-
-- DB at v17, binary at v15 → `store.Open` returns a clear error
-  naming both versions.
-- DB at v15, binary at v17 → `store.Open` runs migrations 16 and
-  17 atomically, then proceeds.
-- Concurrent `store.Open` from two old binaries against a fresh
-  DB → exactly one wins the migration; the other waits and
-  proceeds.
-
-**Dependencies**: Unit A (lands the schema-on-postgres concept).
-
-### Unit E -- Dashboard against shared Postgres
-
-**Scope**: let `sparkwing-web` serve from a Postgres-backed
-`*store.Store` over a shared S3 log/artifact bucket.
-
-**Files**:
-
-- `cmd/sparkwing-web/*.go` -- accept a `--state-spec` flag (or
-  `backends.yaml`-driven config) that resolves through
-  `storeurl.OpenStateStoreFromSpec`.
-- `internal/backend/store_backend.go` -- verify it works when the
-  underlying `*store.Store` is Postgres-backed (should be
-  no-op given Unit A).
-- `internal/backend/capabilities.go` -- advertise `runs:
-  "postgres"` instead of `"sqlite"` for the dashboard's frontend
-  hints.
-
-**Acceptance**:
-
-- `sparkwing-web --state-spec=postgres://... --logs-spec=s3://...`
-  starts and serves all runs the shared DB has.
-- Live runs appear in the dashboard as their write transactions
-  commit (no polling delay beyond browser refresh cadence).
-
-**Dependencies**: Unit A.
-
-### Unit F -- Cross-process integration tests
-
-**Scope**: prove Mode 2 and Mode 3 work end-to-end.
-
-**Files**:
-
-- `internal/orchestrator/sharedstate_s3_integration_test.go` --
-  minio/fakes3 via testcontainers, two `sparkwing run`
-  invocations against the same bucket, asserts:
-  1. Both runs visible in the dashboard-side S3 reader.
-  2. Second run reuses the cache blob produced by the first
-     (verify via `art.Has`-driven skip in the run's event log).
-  3. Logs from both runs are readable from the shared bucket.
-  4. A pipeline that uses `.Trigger()` fails with the expected
-     `ErrNotSupported` from `S3StateBackend`.
-- `internal/orchestrator/sharedstate_pg_integration_test.go` --
-  Postgres + minio via testcontainers, same scenario, plus:
-  1. Second run gets an `AcquireCached` outcome (not just
-     a blob HEAD hit). Verify by inspecting the
-     `concurrency_cache` row + captured event.
-  2. Concurrent runs that race on the same uncached key:
-     exactly one runs, the rest coalesce.
-
-**Dependencies**:
-
-- S3 test: Unit A0.
-- Postgres test: Units A, B, E.
-
-### Unit G -- Docs
-
-**Scope**: explain the three modes; show example `backends.yaml`
-for each; document `--sw-local-only`.
-
-**Files**:
-
-- `docs/backends.md` (or extend existing backend docs).
-- `pkg/docs/mirror/...` is regenerated from `docs/` via `bin/sync-docs.sh`.
-- Update `README.md` if it overviews deployment modes.
-
-**Dependencies**: Units A, B, C complete enough that examples are
-real.
-
-## Suggested execution order
-
-```
-B-2 ──┬─ A0 ─────────┐
-      ├─ A ─┬─ D ────┤
-      ├─ B ─┤        ├─ F ─ G
-      │     ├─ E ────┤
-      │     │        │
-C ────┘     └────────┘  (independent, ship any time)
-```
-
-- **B-2** (`StateStore` alias → interface) blocks every backend
-  implementation. Land it first; it's mostly mechanical.
-- **A0** (S3-only state) and **A** (Postgres state) and
-  **B** (RemoteBackends) can all proceed in parallel once B-2
-  is in.
-- **C** (`--sw-local-only`) is independent of everything; ship
-  whenever.
-- **D** (schema versioning) depends on A.
-- **E** (dashboard wiring) is a thin layer over A and A0.
-- **F** (integration tests) gates the release; needs A0 for the
-  S3 scenario and A+B+E for the Postgres scenario.
-- **G** (docs) lands last so examples are real.
-
-## Open questions to resolve before implementation
-
-1. **DSN style for Postgres**: do we accept a raw `postgres://`
-   URL in `Spec.Path`, or invent `Spec.URL` / `Spec.URLSource`
-   conventions consistent with cache and logs? Cache/Logs already
-   have `URL` + `URLSource: env:VAR`; reuse those on State.
-2. **pgx vs lib/pq**: pgx is the modern choice; lib/pq is in
-   maintenance mode. Recommend pgx with `pgx/v5/stdlib` so we
-   keep the `database/sql` interface.
-3. **Migration coordination**: under direct-DB, N runners may
-   open the store concurrently against a fresh DB. Pg advisory
-   locks (`pg_advisory_lock(hash('sparkwing_migrate'))`) around
-   the migrate path. SQLite path uses no lock today; behavior is
-   unchanged there.
-4. **Where does `cmd/sparkwing-web` live in the install story for
-   direct-DB?** Today the web binary expects to find a controller
-   or a local store. We need a clear "you can host the dashboard
-   anywhere; here's how" doc + a sane default.
-5. **Token model in direct-DB mode**: no controller means no
-   `tokens` table consumer. The `tokens` / `sessions` / `users`
-   tables are dead weight in direct-DB mode. Acceptable
-   (they're tiny), but worth noting.
-6. **S3 NDJSON write coalescing window**: short window means more
-   PUTs (cost) and lower dashboard latency; long window means
-   fewer PUTs but staler dashboards. Default 500ms / 16KB feels
-   right but should be configurable per environment.
-7. **In-process workflow features in Mode 2** -- resolved by the
-   conditional-write CAS semaphore. Plan-level concurrency
-   (`.Cache().Namespace()` at plan scope) relies on a slot key
-   shared across runs of the same pipeline; `s3Concurrency` holds
-   that slot in one versioned object, so concurrent runs serialize
-   on it where the endpoint enforces preconditions. The mutual-
-   exclusion gate holds in that case. Where the endpoint cannot
-   enforce them the backend degrades to granting every slot, and a
-   namespace used as a hard gate loses its guarantee -- warn at
-   startup when a pipeline declares namespace-level concurrency and
-   the selected Mode 2 endpoint fails the support probe.
+- **Postgres DSN style.** `state:` takes `url:` directly or
+  `url_source: env:VAR`, matching the cache and logs surfaces. The
+  driver is `pgx/v5`, so the store keeps the `database/sql` interface.
+- **Migration coordination.** Under direct-DB, N runners may open the
+  store concurrently against a fresh database. The migrate path runs
+  inside a transaction guarded by
+  `pg_advisory_xact_lock(hashtext('sparkwing_migrate'))`, so exactly
+  one runner applies the schema and the rest wait. The SQLite path
+  takes no such lock.
+- **Token tables in direct-DB mode.** With no controller there is no
+  consumer for `tokens` / `sessions` / `users`. They stay in the
+  schema (they are tiny) and sit empty.
+- **S3 NDJSON write coalescing.** A short window means more PUTs and a
+  fresher dashboard; a long one means fewer PUTs and staler reads.
+  `s3state.DefaultFlushInterval` is 500ms and
+  `s3state.DefaultBufferThreshold` is 16KiB; both are `Option`s on the
+  backend.
+- **Plan-level concurrency in Mode 2.** `.Cache().Namespace()` at plan
+  scope relies on a slot key shared across runs of the same pipeline.
+  `s3Concurrency` holds that slot in one versioned object, so
+  concurrent runs serialize on it wherever the endpoint enforces write
+  preconditions. Where it cannot, the backend degrades to granting
+  every slot and a namespace used as a hard gate loses its guarantee.

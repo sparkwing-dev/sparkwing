@@ -1285,9 +1285,10 @@ var cmdExamples = Command{
 	Synopsis: "Worked pipelines to read, not starting points to scaffold",
 	Description: `The sparks-core registry: complete, working pipelines --
 container deploys for AWS and GCP, migrations, canary rollouts,
-release publishing, test sharding. Every one compiles, lints, and
-runs, proven by the template-verify pipeline, so unlike prose they
-cannot quietly stop being true.
+release publishing, test sharding. The template-verify pipeline
+proves every one compiles, lints, and explains, and runs the
+runnable-tier ones, so unlike prose they cannot quietly stop
+being true.
 
 Read them, do not scaffold from them. 'sparkwing pipeline new
 --template <shape>' starts a pipeline; an example shows how a real
@@ -1366,7 +1367,8 @@ var cmdExampleScaffold = Command{
 	Hidden:   true,
 	Description: `Renders one example's source into the target repo, the way
 'pipeline new' renders a shape. Used by the template-verify pipeline to
-prove every example still compiles, lints, and runs.
+prove every example still compiles, lints, and explains (and that the
+runnable-tier ones run).
 
 To start a pipeline use 'sparkwing pipeline new --template <shape>'.`,
 	Flags: []FlagSpec{
@@ -1472,27 +1474,22 @@ with 'sparkwing run <name>' to actually dispatch.`,
 // and shell completion.
 var cmdRunConfig = Command{
 	Path:     "sparkwing run config",
-	Synopsis: "Print the resolved Config struct + declared Secrets for a pipeline + target",
-	Description: `Pure inspection: resolves the pipeline's typed Config
-struct through the same layering ` + "`sparkwing run`" + ` uses
-(struct defaults < sparkwing.yaml values.base < per-target values)
-and prints each field's resolved value alongside which layer
-contributed it. Also lists every declared Secret with its source
-binding -- useful before driving destructive ` + "`--for prod`" + `
-runs to confirm you'd hit the right vault.
-
-Honors --for (the target selection). No Plan() runs, nothing
+	Synopsis: "Print a pipeline's declared Secrets with provenance",
+	Description: `Pure inspection: lists every Secret the pipeline
+declares, each with its source binding and resolution status when a
+source is configured -- useful before driving destructive runs to
+confirm you'd hit the right vault. No Plan() runs, nothing
 dispatches, nothing mutates.
 
-Invocation: ` + "`sparkwing run <pipeline> config --for <target>`" + ` --
-the pipeline binary handles the subverb directly.`,
+Invocation: ` + "`sparkwing run <pipeline> config`" + ` -- the
+pipeline binary handles the subverb directly.`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
-		{"Inspect the staging config", "sparkwing run release config --for staging"},
-		{"Agent-readable form", "sparkwing run release config --for prod -o json"},
+		{"Inspect the declared secrets", "sparkwing run release config"},
+		{"Agent-readable form", "sparkwing run release config -o json"},
 	},
 	HideFromComplete: true,
 }
@@ -1581,7 +1578,7 @@ port. There is no separate Node process. The dashboard is purely
 for visualization -- everything it shows is reachable from the
 CLI as well.`,
 	Subcommands: []SubcommandRef{
-		{"start", "Spawn the detached dashboard server (idempotent)"},
+		{"start", "Spawn the detached dashboard server (replaces any running one)"},
 		{"kill", "Stop a running dashboard server"},
 		{"status", "Report whether the dashboard is running"},
 	},
@@ -1594,15 +1591,16 @@ CLI as well.`,
 
 var cmdDashboardStart = Command{
 	Path:     "sparkwing dashboard start",
-	Synopsis: "Spawn the detached dashboard server (idempotent)",
+	Synopsis: "Spawn the detached dashboard server (replaces any running one)",
 	Description: `Detaches a child process that runs the in-process
 dashboard + API + logs server (pkg/localws). PID is written to
 $SPARKWING_HOME/dashboard.pid; stdout/stderr are appended to
 $SPARKWING_HOME/dashboard.log. Returns once the listener is
 accepting TCP connections so callers can immediately curl it.
 
-Idempotent: if a live server is already on file, prints the URL
-and returns 0 without spawning a duplicate.`,
+Replaces any resident dashboard: a live server on file is drained
+and a fresh one takes its place. It refuses only when the resident
+dashboard is a newer version than this CLI.`,
 	Flags: []FlagSpec{
 		{Name: "addr", Argument: "HOST:PORT", Desc: "Bind address", Default: "127.0.0.1:4343", Group: "Bind"},
 		{Name: "home", Argument: "DIR", Desc: "State directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
@@ -1934,12 +1932,12 @@ this command exits it cannot be recovered.`,
 	Flags: []FlagSpec{
 		{Name: "type", Argument: "KIND", Desc: "Token type: user | runner | service", Required: true, Group: "Input"},
 		{Name: "principal", Argument: "NAME", Desc: "Free-form label identifying the token holder", Required: true, Group: "Input"},
-		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes (e.g. jobs:read,jobs:write)", Group: "Input"},
+		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes (e.g. runs.read,runs.write); auth.md lists the full set", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "Token lifetime (e.g. 30d, 720h). 0 = never expires", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
 	},
 	Examples: []Example{
-		{"Mint a service token with write scopes", "sparkwing cluster tokens create --type service --principal deploy-bot --scope jobs:read,jobs:write"},
+		{"Mint a service token with write scopes", "sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write"},
 		{"Mint a user token that expires in 30 days", "sparkwing cluster tokens create --type user --principal alice --scope admin --ttl 720h"},
 	},
 }
