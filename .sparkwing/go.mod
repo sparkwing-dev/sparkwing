@@ -7,6 +7,7 @@ require (
 	github.com/sparkwing-dev/sparkwing v0.23.0
 	golang.org/x/mod v0.37.0
 )
+
 require (
 	github.com/aws/aws-sdk-go-v2 v1.41.7 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.10 // indirect
