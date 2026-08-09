@@ -147,6 +147,32 @@ func TestApplyHeadroom_UnreadCPUSubtractsNothing(t *testing.T) {
 	}
 }
 
+func TestApplyHeadroom_MeasuredThenBlindCPUResetsEffectiveExternal(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0.2)
+	stat := HostStat{
+		TotalCores:       8,
+		TotalMemoryBytes: ledgerMemory,
+		FreeMemoryBytes:  ledgerMemory,
+		BusyCores:        4,
+		CPUMeasured:      true,
+		MemoryMeasured:   true,
+	}
+	d.applyHeadroom(stat)
+	stat.CPUMeasured = false
+	d.applyHeadroom(stat)
+
+	cores := queueRow(t, queueState(t, d), "cores")
+	if cores.ExternalSource != "unmeasured" {
+		t.Fatalf("external source = %q, want unmeasured", cores.ExternalSource)
+	}
+	if cores.External != 0 {
+		t.Fatalf("external cores = %v, want zero after the host sensor went blind", cores.External)
+	}
+	if want := 8 - 0.2*8; math.Abs(cores.Available-want) > coresEpsilon {
+		t.Fatalf("available cores = %v, want %v so telemetry and effective headroom agree", cores.Available, want)
+	}
+}
+
 // TestApplyHeadroom_LeaseCapacityIsNotExecution proves a reservation cannot
 // stand in for measured process usage. Without an owned-process reading the
 // host's measured busy cores remain external for this sample.
