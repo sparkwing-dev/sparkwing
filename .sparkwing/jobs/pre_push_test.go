@@ -2,9 +2,18 @@ package jobs
 
 import (
 	"context"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
+
+func TestDogfoodPipelineModuleIsTidy(t *testing.T) {
+	cmd := exec.Command("go", "mod", "tidy", "-diff")
+	cmd.Dir = ".."
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf(".sparkwing module is not tidy:\n%s", out)
+	}
+}
 
 // The replace ban and the pre-commit Go steps read one module walk between
 // them, so a module added after the fact is checked by both.
