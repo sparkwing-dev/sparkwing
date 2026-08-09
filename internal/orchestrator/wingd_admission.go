@@ -669,16 +669,16 @@ func (la *LocalAdmission) reportStillQueued(displayID string, q wingwire.Queued,
 }
 
 // queuePositionParts derives the shared pieces of a queue-position line:
-// the count of runs ahead, its singular/plural noun, and the "; reason"
+// the count of admission participants ahead, its singular/plural noun, and the "; reason"
 // suffix naming what the run is blocked on.
 func queuePositionParts(q wingwire.Queued) (ahead int, noun, reason string) {
 	ahead = q.Position - 1
 	if ahead < 0 {
 		ahead = 0
 	}
-	noun = "runs"
+	noun = "participants"
 	if ahead == 1 {
-		noun = "run"
+		noun = "participant"
 	}
 	if q.BlockingReason != "" {
 		reason = "; " + q.BlockingReason
