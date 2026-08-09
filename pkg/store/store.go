@@ -348,7 +348,7 @@ CREATE TABLE IF NOT EXISTS triggers (
     repo_url              TEXT NOT NULL DEFAULT '',
     github_owner          TEXT NOT NULL DEFAULT '',
     github_repo           TEXT NOT NULL DEFAULT '',
-	 repo_inherited        INTEGER NOT NULL DEFAULT 0,
+    repo_inherited        INTEGER NOT NULL DEFAULT 0,
     retry_of              TEXT NOT NULL DEFAULT '',
     parent_node_id        TEXT NOT NULL DEFAULT ''
 );
