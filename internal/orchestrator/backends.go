@@ -420,6 +420,12 @@ func (l localState) EnqueueTriggerWithEnv(
 		}
 	}
 	runID := localNewRunID()
+	if repo == "" && parentRunID != "" {
+		if triggerEnv == nil {
+			triggerEnv = make(map[string]string)
+		}
+		triggerEnv[implicitAwaitRepoKey] = "1"
+	}
 	tg := store.Trigger{
 		ID:            runID,
 		Pipeline:      pipeline,
