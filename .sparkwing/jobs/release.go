@@ -721,6 +721,13 @@ func restoreSelfReplaceIn(ctx context.Context, repoDir string) error {
 	if err := os.WriteFile(path, []byte(newBody), 0o644); err != nil {
 		return fmt.Errorf("release: write .sparkwing/go.mod: %w", err)
 	}
+	if result, err := sparkwing.Exec(ctx, "go", "mod", "tidy").Dir(filepath.Join(repoDir, ".sparkwing")).Run(); err != nil {
+		detail := strings.TrimSpace(result.Stderr)
+		if detail == "" {
+			detail = err.Error()
+		}
+		return fmt.Errorf("release: tidy restored .sparkwing module: %s", detail)
+	}
 	if _, err := runGitIn(ctx, repoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum", scaffoldFallbackRel); err != nil {
 		return fmt.Errorf("release: git add release-version artifacts: %w", err)
 	}
