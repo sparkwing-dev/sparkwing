@@ -160,6 +160,25 @@ func TestRestore_RejectsCorruptSnapshots(t *testing.T) {
 			s.Waiters[0].Arrival, s.Waiters[1].Arrival = s.Waiters[1].Arrival, s.Waiters[0].Arrival
 		}},
 		{"waiter arrival above counter", func(s *Snapshot) { s.Waiters[1].Arrival = s.ArrivalSeq + 1 }},
+		{"owned waiter with zero owner rank", func(s *Snapshot) {
+			s.Waiters[0].OwnerID = "parent"
+			s.Waiters[0].OwnerAdmit = 0
+		}},
+		{"owner rank above participant admit", func(s *Snapshot) {
+			s.Waiters[0].OwnerID = "parent"
+			s.Waiters[0].OwnerAdmit = s.Waiters[0].Admit + 1
+		}},
+		{"owner rank above ledger counter", func(s *Snapshot) {
+			s.Waiters[0].OwnerID = "parent"
+			s.Waiters[0].OwnerAdmit = s.AdmitSeq + 1
+		}},
+		{"ownerless waiter rank differs from own admit", func(s *Snapshot) {
+			s.Waiters[0].OwnerAdmit++
+		}},
+		{"live owner rank differs from owner lease", func(s *Snapshot) {
+			s.Waiters[0].OwnerID = "parent"
+			s.Waiters[0].OwnerAdmit = s.Leases[0].Admit + 1
+		}},
 		{"stranded promotable waiter", func(s *Snapshot) { s.Waiters[0].MilliCores = 0 }},
 		{"used cores above total", func(s *Snapshot) { s.TotalMilliCores = 100; s.HeadroomMilliCores = 100; s.Waiters = nil }},
 	}

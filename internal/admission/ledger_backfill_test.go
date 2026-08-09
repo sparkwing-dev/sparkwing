@@ -231,6 +231,30 @@ func TestOwnerAdmissionRankRespectsPriorityAndOwnerlessFIFO(t *testing.T) {
 	}
 }
 
+func TestOwnerAdmissionRankSurvivesOwnerReleaseAndRestore(t *testing.T) {
+	l := testLedger(t, 1, 0)
+	owner := mustGrant(t, l, Request{ID: "owner"})
+	holder := mustGrant(t, l, Request{ID: "holder", Cores: 1})
+	mustQueue(t, l, Request{ID: "owned-child", OwnerID: "owner", Cores: 1})
+	if events := mustRelease(t, l, owner.ID, "owner"); len(events) != 1 || events[0].Kind != EventReleased {
+		t.Fatalf("owner release events = %+v", events)
+	}
+
+	snap := l.Snapshot()
+	if snap.Waiters[0].OwnerAdmit == 0 || snap.Waiters[0].OwnerAdmit >= snap.Waiters[0].Admit {
+		t.Fatalf("captured owner rank = %+v", snap.Waiters[0])
+	}
+	restored, err := Restore(snap, func() string { return "restored-after-owner-release" })
+	if err != nil {
+		t.Fatalf("restore released owner descendant: %v", err)
+	}
+	events := mustRelease(t, restored, holder.ID, "holder")
+	wantKinds(t, events, EventReleased, EventPromoted)
+	if events[1].RequestID != "owned-child" {
+		t.Fatalf("promoted %q, want owned-child", events[1].RequestID)
+	}
+}
+
 func TestCancelWaiterPreservesProtectedHeadAdmission(t *testing.T) {
 	l := testLedger(t, 0, 0)
 	older := mustGrant(t, l, Request{ID: "older", Semaphores: []SemaphoreClaim{sem("k", 10, 5, PolicyQueue)}})

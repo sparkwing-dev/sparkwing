@@ -1485,7 +1485,7 @@ func TestOwnerRunAdmissionOrderPromotesOlderOwnerDescendant(t *testing.T) {
 
 	newerChildClient := ensure(t, home, "")
 	newerPositions, newerResult := acquireAsync(newerChildClient, wingwire.AdmissionRequest{
-		RunID: "newer-child", OwnerRunID: "owner-newer", SubLease: true,
+		RunID: "newer-child", OwnerRunID: "owner-newer", OwnerLeaseToken: newerOwner.Token, SubLease: true,
 		Resources: wingwire.HostResources{Cores: 4},
 	})
 	select {
@@ -1496,7 +1496,7 @@ func TestOwnerRunAdmissionOrderPromotesOlderOwnerDescendant(t *testing.T) {
 
 	olderChildClient := ensure(t, home, "")
 	olderPositions, olderResult := acquireAsync(olderChildClient, wingwire.AdmissionRequest{
-		RunID: "older-child", OwnerRunID: "owner-older", SubLease: true,
+		RunID: "older-child", OwnerRunID: "owner-older", OwnerLeaseToken: olderOwner.Token, SubLease: true,
 		Resources: wingwire.HostResources{Cores: 4},
 	})
 	select {
@@ -1523,6 +1523,86 @@ func TestOwnerRunAdmissionOrderPromotesOlderOwnerDescendant(t *testing.T) {
 
 	_ = olderOwner.Release()
 	_ = newerOwner.Release()
+}
+
+func TestOwnerRunAdmissionAuthorityRejectsRankTheft(t *testing.T) {
+	tests := []struct {
+		name       string
+		ownerSetup func(t *testing.T, home string) (claimedOwner, proofToken string)
+	}{
+		{
+			name: "wrong top-level owner",
+			ownerSetup: func(t *testing.T, home string) (string, string) {
+				claimed := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "claimed-owner", SemaphoresOnly: true,
+				})
+				actual := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "actual-owner", SemaphoresOnly: true,
+				})
+				t.Cleanup(func() { _ = claimed.Release(); _ = actual.Release() })
+				return "claimed-owner", actual.Token
+			},
+		},
+		{
+			name: "non-top-level participant",
+			ownerSetup: func(t *testing.T, home string) (string, string) {
+				owner := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "top-owner", SemaphoresOnly: true,
+				})
+				participant := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "internal-participant", OwnerRunID: "top-owner", OwnerLeaseToken: owner.Token,
+					SemaphoresOnly: true, SubLease: true,
+				})
+				t.Cleanup(func() { _ = participant.Release(); _ = owner.Release() })
+				return "internal-participant", participant.Token
+			},
+		},
+		{
+			name: "non-live owner",
+			ownerSetup: func(t *testing.T, home string) (string, string) {
+				owner := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "released-owner", SemaphoresOnly: true,
+				})
+				token := owner.Token
+				if err := owner.Release(); err != nil {
+					t.Fatalf("release owner: %v", err)
+				}
+				return "released-owner", token
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := shortHome(t)
+			startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
+			claimedOwner, proofToken := tt.ownerSetup(t, home)
+			blocker := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+				RunID: "blocker", Resources: wingwire.HostResources{Cores: 4},
+			})
+			t.Cleanup(func() { _ = blocker.Release() })
+
+			baselinePositions, _ := acquireAsync(ensure(t, home, ""), wingwire.AdmissionRequest{
+				RunID: "baseline", Resources: wingwire.HostResources{Cores: 4},
+			})
+			select {
+			case <-baselinePositions:
+			case <-time.After(2 * time.Second):
+				t.Fatal("baseline did not queue")
+			}
+			forgedPositions, _ := acquireAsync(ensure(t, home, ""), wingwire.AdmissionRequest{
+				RunID: "forged", OwnerRunID: claimedOwner, OwnerLeaseToken: proofToken, SubLease: true,
+				Resources: wingwire.HostResources{Cores: 4},
+			})
+			select {
+			case q := <-forgedPositions:
+				if q.Position != 2 {
+					t.Fatalf("forged position = %d, want 2 behind earlier fallback participant", q.Position)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("forged request did not queue")
+			}
+		})
+	}
 }
 
 func TestMeasuredCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
