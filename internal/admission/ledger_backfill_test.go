@@ -100,6 +100,22 @@ func TestWeighted_OneBackfillProtectsOlderWaiterFromAStream(t *testing.T) {
 	}
 }
 
+func TestWeighted_ProtectedWaiterAllowsBackfillInsideReservedCapacity(t *testing.T) {
+	l := testLedger(t, 11, 0)
+	older := mustGrant(t, l, Request{ID: "older", Cores: 7})
+	mustQueue(t, l, Request{ID: "protected", Cores: 7})
+	first := mustGrant(t, l, Request{ID: "light-1", Cores: 2})
+	mustRelease(t, l, first.ID, "light-1")
+
+	second := mustGrant(t, l, Request{ID: "light-2", Cores: 2})
+	events := mustRelease(t, l, older.ID, "older")
+	wantKinds(t, events, EventReleased, EventPromoted)
+	if events[1].RequestID != "protected" {
+		t.Fatalf("promoted %q, want protected while light-2 still holds reserved spare capacity", events[1].RequestID)
+	}
+	_ = second
+}
+
 func TestWeighted_QueuedBackfillProtectsOlderWaiter(t *testing.T) {
 	l := testLedger(t, 0, 8<<30)
 	mustGrant(t, l, Request{ID: "guard", MemoryBytes: 1})
