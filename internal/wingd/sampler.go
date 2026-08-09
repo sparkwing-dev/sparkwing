@@ -94,6 +94,18 @@ type OwnedCPUSampler interface {
 	CPUUsage(pids []int) (fraction float64, measured bool)
 }
 
+type ownedProcSampler struct {
+	tracker *procSampler
+}
+
+func newOwnedCPUSampler() *ownedProcSampler {
+	return &ownedProcSampler{tracker: newProcSampler()}
+}
+
+func (s *ownedProcSampler) CPUUsage(pids []int) (float64, bool) {
+	return s.sampleOwned(pids)
+}
+
 type ProcUsage struct {
 	Fraction      float64
 	HasDescendant bool

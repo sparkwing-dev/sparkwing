@@ -98,6 +98,57 @@ func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	return usages
 }
 
+func (s *ownedProcSampler) sampleOwned(roots []int) (float64, bool) {
+	if len(roots) == 0 {
+		return 0, true
+	}
+	procs, ok := linuxProcesses()
+	if !ok {
+		return 0, false
+	}
+	children := map[int][]int{}
+	for processID, proc := range procs {
+		children[proc.parentPID] = append(children[proc.parentPID], processID)
+	}
+	owned := map[int]struct{}{}
+	for _, root := range roots {
+		if _, ok := procs[root]; !ok {
+			continue
+		}
+		for _, processID := range collectSubtree(root, children) {
+			owned[processID] = struct{}{}
+		}
+	}
+	now := time.Now()
+	s.tracker.mu.Lock()
+	defer s.tracker.mu.Unlock()
+	next := make(map[int]cpuSample, len(owned))
+	var fraction float64
+	var measured bool
+	for processID := range owned {
+		proc, ok := procs[processID]
+		if !ok {
+			continue
+		}
+		next[processID] = cpuSample{cpuSeconds: proc.cpuSeconds, at: now}
+		previous, ok := s.tracker.last[processID]
+		if !ok {
+			continue
+		}
+		wall := now.Sub(previous.at).Seconds()
+		if wall <= 0 {
+			continue
+		}
+		usage := (proc.cpuSeconds - previous.cpuSeconds) / wall
+		if usage > 0 {
+			fraction += usage
+		}
+		measured = true
+	}
+	s.tracker.last = next
+	return fraction, measured
+}
+
 type linuxProc struct {
 	parentPID  int
 	cpuSeconds float64

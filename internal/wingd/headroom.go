@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 )
 
@@ -57,7 +58,13 @@ func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 	if refreshCapacity {
 		d.applyCapacity(stat)
 	}
-	d.applyHeadroom(d.container.apply(stat))
+	stat = d.container.apply(stat)
+	roots := d.holderPIDs()
+	ownedBusy, ownedMeasured := 0.0, true
+	if len(roots) > 0 {
+		ownedBusy, ownedMeasured = d.ownedSampler.CPUUsage(roots)
+	}
+	d.applyHeadroomSample(stat, roots, ownedBusy, ownedMeasured)
 }
 
 // applyHeadroom converts a host reading into a ledger headroom ceiling:
@@ -66,27 +73,35 @@ func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 // a change past a deadband. Small wiggles are absorbed until a bounded
 // refresh applies the newest effective value.
 func (d *Daemon) applyHeadroom(stat HostStat) {
+	d.applyHeadroomSample(stat, nil, 0, false)
+}
+
+func (d *Daemon) applyHeadroomSample(stat HostStat, sampledRoots []int, ownedBusy float64, ownedMeasured bool) {
 	d.mu.Lock()
+	if !sameInts(sampledRoots, d.holderPIDsLocked()) {
+		ownedBusy = 0
+		ownedMeasured = false
+	}
 	now := d.now()
 	if stat.LoadMeasured || stat.MemoryMeasured {
 		d.measuredAt = now
 	}
 
+	rawExternal := coresExternal(stat, stat.BusyCores, ownedBusy, ownedMeasured)
 	if !d.loadInit {
 		d.smoothedLoad = stat.LoadAverage
-		d.smoothedBusy = stat.BusyCores
+		d.smoothedExternal = rawExternal
 		d.loadInit = true
 	} else {
 		d.smoothedLoad = loadEMAAlpha*stat.LoadAverage + (1-loadEMAAlpha)*d.smoothedLoad
-		d.smoothedBusy = loadEMAAlpha*stat.BusyCores + (1-loadEMAAlpha)*d.smoothedBusy
+		d.smoothedExternal = loadEMAAlpha*rawExternal + (1-loadEMAAlpha)*d.smoothedExternal
 	}
-	load, busy := d.smoothedLoad, d.smoothedBusy
+	load, externalCores := d.smoothedLoad, d.smoothedExternal
 
 	usedCores, usedMem := d.usedLocked()
 	frac := d.cfg.headroomFraction()
 
 	reservedCores := frac * stat.TotalCores
-	externalCores := coresExternal(stat, busy, usedCores)
 	reservedMem, externalMem := memReserveAndExternal(stat, usedMem, frac)
 
 	admitExternalCores, admitExternalMem := externalCores, externalMem
@@ -149,7 +164,7 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
 	d.cfg.logf("headroom: %.1f cores grantable (reserve %.1f, external %s)", targetCores, reservedCores,
-		externalWord(stat.LoadMeasured, fmt.Sprintf("%.1f", externalCores)))
+		externalWord(stat.CPUMeasured, fmt.Sprintf("%.1f", externalCores)))
 	if !stat.MemoryMeasured {
 		d.cfg.logf("headroom: memory external unmeasured (host sensor unavailable); none subtracted")
 	}
@@ -187,24 +202,60 @@ func memReserveAndExternal(stat HostStat, usedMem uint64, frac float64) (reserve
 	return reserved, external
 }
 
-// coresExternal is the CPU the daemon did not admit: smoothed host
-// utilization in cores minus what its own leases hold, floored at zero. It
-// is zero when utilization is unmeasured, on the same rule as the memory
-// term -- admission may not charge a run against pressure nobody read.
+// coresExternal is host CPU consumed outside measured live holder process
+// trees. A blind holder reading credits no owned work, so transient sensor
+// loss may reduce admission but cannot erase external pressure. A blind host
+// reading subtracts nothing because no pressure was measured.
 //
 // It reads utilization rather than the run queue because this figure is
 // subtracted from a core count. The run queue counts threads waiting,
 // including on uninterruptible I/O, so on an I/O-bound box it runs far
 // above the cores in use and erases a machine that is mostly idle.
-func coresExternal(stat HostStat, busy, usedCores float64) float64 {
+func coresExternal(stat HostStat, busy, ownedBusy float64, ownedMeasured bool) float64 {
 	if !stat.CPUMeasured {
 		return 0
 	}
-	external := busy - usedCores
+	if !ownedMeasured {
+		return busy
+	}
+	external := busy - ownedBusy
 	if external < 0 {
 		return 0
 	}
 	return external
+}
+
+func (d *Daemon) holderPIDs() []int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.holderPIDsLocked()
+}
+
+func (d *Daemon) holderPIDsLocked() []int {
+	seen := map[int]struct{}{}
+	for _, c := range d.byRun {
+		if c.role == roleHolder && c.pid > 0 {
+			seen[c.pid] = struct{}{}
+		}
+	}
+	pids := make([]int, 0, len(seen))
+	for pid := range seen {
+		pids = append(pids, pid)
+	}
+	sort.Ints(pids)
+	return pids
+}
+
+func sameInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // coresContention is the run-queue pressure the daemon did not admit. It
