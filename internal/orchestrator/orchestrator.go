@@ -1661,12 +1661,23 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		}
 		timeoutPausedForAdmission := false
 		timeoutAdjustedForAdmission := false
+		watchdogPausedForAdmission := false
 		var admissionStatusErr error
 		nodeTimeout := nodeTimeoutControllerFromContext(ctx)
 		var admissionMu sync.Mutex
+		defer func() {
+			admissionMu.Lock()
+			paused := watchdogPausedForAdmission
+			watchdogPausedForAdmission = false
+			admissionMu.Unlock()
+			if paused {
+				watchdogWaits.end(watchdogParticipant)
+			}
+		}()
 		updateTimeoutForAdmission := func(statusCtx context.Context) bool {
 			trackNodeTimeout := req.Timeout == 0 && nodeTimeout != nil && nodeTimeoutDurationFromContext(ctx) > 0
-			if !trackNodeTimeout {
+			trackWatchdogAdmission := !awaitBounded && watchdogWaits != nil && watchdogParticipant != ""
+			if !trackNodeTimeout && !trackWatchdogAdmission {
 				return false
 			}
 			if statusCtx.Err() != nil {
@@ -1680,9 +1691,26 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				return false
 			}
 			if statusErr != nil {
-				if timeoutPausedForAdmission {
+				if timeoutPausedForAdmission || watchdogPausedForAdmission {
 					admissionStatusErr = statusErr
 				}
+				return false
+			}
+			if trackWatchdogAdmission {
+				switch admission.Status {
+				case childPlanAdmissionQueued:
+					if !watchdogPausedForAdmission {
+						watchdogWaits.begin(watchdogParticipant)
+						watchdogPausedForAdmission = true
+					}
+				case childPlanAdmissionAdmitted:
+					if watchdogPausedForAdmission {
+						watchdogWaits.end(watchdogParticipant)
+						watchdogPausedForAdmission = false
+					}
+				}
+			}
+			if !trackNodeTimeout {
 				return false
 			}
 			switch admission.Status {
@@ -1725,7 +1753,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		admissionPauseActive := func() bool {
 			admissionMu.Lock()
 			defer admissionMu.Unlock()
-			return timeoutPausedForAdmission
+			return timeoutPausedForAdmission || watchdogPausedForAdmission
 		}
 		currentAdmissionStatusErr := func() error {
 			admissionMu.Lock()
