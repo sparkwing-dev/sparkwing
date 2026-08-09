@@ -62,6 +62,7 @@ type Daemon struct {
 	startedAt           time.Time
 
 	loadInit         bool
+	externalInit     bool
 	smoothedLoad     float64
 	smoothedExternal float64
 	headroomInit     bool
