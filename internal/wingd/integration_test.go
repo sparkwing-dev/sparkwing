@@ -702,6 +702,41 @@ func TestExplicitCancelPersistenceFailureIsNotAcknowledged(t *testing.T) {
 	}
 }
 
+func TestExplicitCancelStateWriteFailureStillSignalsOwnerWithoutAcknowledging(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{
+		Home:                  home,
+		FinalizeCancelledRuns: func([]string, string) error { return nil },
+	})
+	holder := ensure(t, home, "")
+	lease := mustAcquire(t, holder, coreReq("cancel-state-write-failure", 1))
+	cancelled := make(chan wingwire.Cancel, 1)
+	go lease.WatchControl(nil, func(c wingwire.Cancel) { cancelled <- c })
+	control := ensure(t, home, "")
+	moved := home + ".moved"
+	if err := os.Rename(home, moved); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(moved) })
+	if err := os.WriteFile(home, []byte("blocks state directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if found, err := control.CancelLease(ctx, "cancel-state-write-failure"); err == nil {
+		t.Fatalf("CancelLease = (%v, nil), want state persistence failure", found)
+	}
+	select {
+	case got := <-cancelled:
+		if got.RunID != "cancel-state-write-failure" {
+			t.Fatalf("cancel run = %q", got.RunID)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("state persistence failure left cancelled execution running")
+	}
+}
+
 func TestExplicitCancelFinalizerDoesNotHoldDaemonMutex(t *testing.T) {
 	home := shortHome(t)
 	var query *client.Client
