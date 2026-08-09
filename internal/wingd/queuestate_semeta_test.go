@@ -209,31 +209,63 @@ func TestMixedResourceETAUsesTheLaterKnownBoundOrUnknown(t *testing.T) {
 		semExpected  int64
 		semElapsed   int64
 		wantStart    int64
+		wantClear    int64
 	}{
-		{name: "semaphore is later than immediate host admission", hostExpected: -1, semExpected: 7000, wantStart: 7000},
-		{name: "host is later than semaphore", hostExpected: 9000, semExpected: 4000, wantStart: 9000},
-		{name: "overdue semaphore holder makes the combined estimate unknown", hostExpected: -1, semExpected: 7000, semElapsed: 7001, wantStart: semaNone},
-		{name: "unknown host release makes the combined estimate unknown", semExpected: 4000, wantStart: semaNone},
+		{name: "semaphore is later than immediate host admission", hostExpected: -1, semExpected: 7000, wantStart: 7000, wantClear: 8000},
+		{name: "host is later than semaphore", hostExpected: 9000, semExpected: 4000, wantStart: 9000, wantClear: 10000},
+		{name: "overdue semaphore holder makes the combined estimate unknown", hostExpected: -1, semExpected: 7000, semElapsed: 7001, wantStart: semaNone, wantClear: semaNone},
+		{name: "unknown host release makes the combined estimate unknown", semExpected: 4000, wantStart: semaNone, wantClear: semaNone},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			qs, snap := mixedETAState(tc.hostExpected, tc.hostElapsed, tc.semExpected, tc.semElapsed)
 			annotateETA(&qs, snap)
 			annotateSemaphoreETA(&qs, snap)
-			got := qs.Waiters[0].ExpectedStartMS
-			if tc.wantStart == semaNone {
-				if got != nil {
-					t.Fatalf("ExpectedStartMS = %d, want nil", *got)
-				}
-				return
-			}
-			if got == nil {
-				t.Fatalf("ExpectedStartMS = nil, want %d", tc.wantStart)
-			}
-			if *got != tc.wantStart {
-				t.Fatalf("ExpectedStartMS = %d, want %d", *got, tc.wantStart)
-			}
+			assertETA(t, "ExpectedStartMS", qs.Waiters[0].ExpectedStartMS, tc.wantStart)
+			assertETA(t, "ExpectedClearMS", qs.ExpectedClearMS, tc.wantClear)
 		})
+	}
+}
+
+func TestAtomicMultiKeyETAAllowsBackfillWithoutPartialReservation(t *testing.T) {
+	qs := wingwire.QueueState{
+		Holders: []wingwire.Holder{{RunID: "holder-a", Semaphores: []string{"a"}, ExpectedDurationMS: 10000}},
+		Waiters: []wingwire.Waiter{
+			{RunID: "w1", Semaphores: []string{"a", "b"}, ExpectedDurationMS: 5000},
+			{RunID: "w2", Semaphores: []string{"b"}, ExpectedDurationMS: 2000},
+		},
+	}
+	snap := admission.Snapshot{
+		Leases: []admission.LeaseState{{ID: "lease-a", RequestID: "holder-a", Claims: []admission.ClaimState{{Key: "a", Capacity: 1, Cost: 1}}}},
+		Semaphores: []admission.SemaphoreState{
+			semState("a", 1, semHold("lease-a", 1, 1)),
+			semState("b", 1),
+		},
+		Waiters: []admission.WaiterState{
+			{RequestID: "w1", Admit: 2, Claims: []admission.ClaimState{{Key: "a", Capacity: 1, Cost: 1}, {Key: "b", Capacity: 1, Cost: 1}}},
+			{RequestID: "w2", Admit: 3, Claims: []admission.ClaimState{{Key: "b", Capacity: 1, Cost: 1}}},
+		},
+	}
+	annotateETA(&qs, snap)
+	annotateSemaphoreETA(&qs, snap)
+	assertETA(t, "w1 ExpectedStartMS", qs.Waiters[0].ExpectedStartMS, 10000)
+	assertETA(t, "w2 ExpectedStartMS", qs.Waiters[1].ExpectedStartMS, 0)
+	assertETA(t, "ExpectedClearMS", qs.ExpectedClearMS, 15000)
+}
+
+func assertETA(t *testing.T, field string, got *int64, want int64) {
+	t.Helper()
+	if want == semaNone {
+		if got != nil {
+			t.Fatalf("%s = %d, want nil", field, *got)
+		}
+		return
+	}
+	if got == nil {
+		t.Fatalf("%s = nil, want %d", field, want)
+	}
+	if *got != want {
+		t.Fatalf("%s = %d, want %d", field, *got, want)
 	}
 }
 
