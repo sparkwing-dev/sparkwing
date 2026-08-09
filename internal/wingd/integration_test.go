@@ -717,14 +717,10 @@ func TestExplicitCancelStateWriteFailureStillSignalsOwnerWithoutAcknowledging(t 
 	if _, err := control.QueueState(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	moved := home + ".moved"
-	if err := os.Rename(home, moved); err != nil {
+	if err := os.Chmod(home, 0o500); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(moved) })
-	if err := os.WriteFile(home, []byte("blocks state directory"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(func() { _ = os.Chmod(home, 0o700) })
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
