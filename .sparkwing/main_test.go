@@ -6,7 +6,7 @@ import (
 )
 
 func TestReleaseRequiresIsolatedSparkwingHome(t *testing.T) {
-	err := requireReleaseHome([]string{"sparkwing-pipelines", "release"}, func(string) string { return "" })
+	err := requireReleaseHome([]string{"sparkwing-pipelines", "release"}, func(string) string { return "" }, func() (string, error) { return "/home/operator", nil })
 	if err == nil {
 		t.Fatal("release accepted the default shared Sparkwing home")
 	}
@@ -21,14 +21,23 @@ func TestReleaseAcceptsExplicitSparkwingHome(t *testing.T) {
 			return "/tmp/sparkwing-release"
 		}
 		return ""
-	})
+	}, func() (string, error) { return "/home/operator", nil })
 	if err != nil {
 		t.Fatalf("release with isolated home: %v", err)
 	}
 }
 
 func TestOtherPipelinesDoNotRequireExplicitSparkwingHome(t *testing.T) {
-	if err := requireReleaseHome([]string{"sparkwing-pipelines", "pre-push"}, func(string) string { return "" }); err != nil {
+	if err := requireReleaseHome([]string{"sparkwing-pipelines", "pre-push"}, func(string) string { return "" }, func() (string, error) { return "/home/operator", nil }); err != nil {
 		t.Fatalf("pre-push: %v", err)
+	}
+}
+
+func TestReleaseRejectsExplicitDefaultSparkwingHome(t *testing.T) {
+	err := requireReleaseHome([]string{"sparkwing-pipelines", "release"}, func(string) string {
+		return "/home/operator/.sparkwing"
+	}, func() (string, error) { return "/home/operator", nil })
+	if err == nil {
+		t.Fatal("release accepted the operational default store through an explicit environment value")
 	}
 }
