@@ -31,6 +31,24 @@ type fixedOwnedCPUSampler struct {
 	roots    []int
 }
 
+type pairedHostSampler struct {
+	stat      HostStat
+	owned     float64
+	measured  bool
+	pairCalls int
+	hostCalls int
+}
+
+func (s *pairedHostSampler) Sample() (HostStat, error) {
+	s.hostCalls++
+	return s.stat, nil
+}
+
+func (s *pairedHostSampler) SampleWithOwned([]int) (HostStat, float64, bool, error) {
+	s.pairCalls++
+	return s.stat, s.owned, s.measured, nil
+}
+
 func (s *fixedOwnedCPUSampler) CPUUsage(pids []int) (float64, bool) {
 	s.roots = append([]int(nil), pids...)
 	return s.fraction, s.measured
@@ -291,5 +309,38 @@ func TestRefreshHeadroomDiscardsOwnedCPUAcrossSamePIDHolderReplacement(t *testin
 	cores := queueRow(t, queueState(t, d), "cores")
 	if cores.External != 3 {
 		t.Errorf("external cores = %v, want 3 after the sampled holder was replaced", cores.External)
+	}
+}
+
+func TestRefreshHeadroomUsesOnePairedHostAndOwnedReading(t *testing.T) {
+	d := newHeadroomDaemon(t, 8, 0)
+	paired := &pairedHostSampler{
+		stat: HostStat{
+			TotalCores:       8,
+			TotalMemoryBytes: ledgerMemory,
+			FreeMemoryBytes:  ledgerMemory,
+			BusyCores:        4,
+			CPUMeasured:      true,
+			MemoryMeasured:   true,
+		},
+		owned:    1,
+		measured: true,
+	}
+	owned := &fixedOwnedCPUSampler{fraction: 8, measured: true}
+	d.sampler = paired
+	d.ownedSampler = owned
+	d.byRun["holder"] = &conn{runID: "holder", role: roleHolder, pid: 4242}
+
+	d.refreshHeadroom()
+
+	cores := queueRow(t, queueState(t, d), "cores")
+	if cores.External != 3 {
+		t.Fatalf("external cores = %v, want paired host 4 minus owned 1", cores.External)
+	}
+	if paired.pairCalls != 1 || paired.hostCalls != 0 {
+		t.Fatalf("paired calls = %d, ordinary host calls = %d; want one paired snapshot", paired.pairCalls, paired.hostCalls)
+	}
+	if len(owned.roots) != 0 {
+		t.Fatalf("separate owned sampler received roots %v after paired sampling", owned.roots)
 	}
 }
