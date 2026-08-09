@@ -1115,6 +1115,11 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
 		return
 	}
+	if _, pending := d.reattachWait[leaseID]; !pending {
+		d.mu.Unlock()
+		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
+		return
+	}
 	members := append([]string(nil), d.leaseMembers[leaseID]...)
 	if len(members) == 0 {
 		for _, lease := range d.ledger.Snapshot().Leases {
@@ -1145,11 +1150,13 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	}
 	d.mu.Lock()
 	currentLeaseID, err := d.ledger.Reattach(req.LeaseToken)
-	if err != nil || currentLeaseID != leaseID {
+	_, pending := d.reattachWait[leaseID]
+	if err != nil || currentLeaseID != leaseID || !pending {
 		d.mu.Unlock()
 		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
 		return
 	}
+	delete(d.reattachWait, leaseID)
 	requestID := d.leaseRun[leaseID]
 	c.role = roleHolder
 	c.leaseID = leaseID
@@ -1166,7 +1173,6 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 	for _, m := range c.members {
 		d.byRun[m] = c
 	}
-	delete(d.reattachWait, leaseID)
 	lease, _ := d.ledger.LeaseByID(leaseID)
 	snap := d.ledger.Snapshot()
 	d.touchLocked()
