@@ -67,6 +67,52 @@ func TestSnapshotRoundTrip_BusyLedger(t *testing.T) {
 	restoreRoundTrip(t, l)
 }
 
+func TestRestore_UpgradesPreAdmitSequenceSnapshotByDurableOrder(t *testing.T) {
+	restored, err := Restore(Snapshot{
+		TotalMilliCores:    2000,
+		HeadroomMilliCores: 2000,
+		LeaseSeq:           2,
+		ArrivalSeq:         2,
+		Leases: []LeaseState{
+			{Seq: 2, ID: "lease-2", Token: "token-2", RequestID: "holder-2", MilliCores: 1000, Members: []string{"holder-2"}},
+			{Seq: 1, ID: "lease-1", Token: "token-1", RequestID: "holder-1", MilliCores: 1000, Members: []string{"holder-1"}},
+		},
+		Waiters: []WaiterState{
+			{Arrival: 2, RequestID: "waiter-2", MilliCores: 2000},
+			{Arrival: 1, RequestID: "waiter-1", MilliCores: 2000},
+		},
+	}, func() string { return "promoted-token" })
+	if err != nil {
+		t.Fatalf("restore legacy snapshot: %v", err)
+	}
+	snap := restored.Snapshot()
+	if snap.AdmitSeq != 4 {
+		t.Fatalf("admit sequence = %d, want 4", snap.AdmitSeq)
+	}
+	for i, lease := range snap.Leases {
+		want := uint64(i + 1)
+		if lease.Seq != want || lease.Admit != want || lease.OwnerAdmit != lease.Admit || lease.OwnerID != "" {
+			t.Fatalf("lease %d migration = %+v, want ownerless rank %d by lease sequence", i, lease, want)
+		}
+	}
+	for i, waiter := range snap.Waiters {
+		wantArrival := uint64(i + 1)
+		wantAdmit := uint64(i + 3)
+		if waiter.Arrival != wantArrival || waiter.Admit != wantAdmit ||
+			waiter.OwnerAdmit != waiter.Admit || waiter.OwnerID != "" {
+			t.Fatalf("waiter %d migration = %+v, want arrival %d ownerless rank %d", i, waiter, wantArrival, wantAdmit)
+		}
+	}
+	if events := mustRelease(t, restored, "lease-1", "holder-1"); len(events) != 1 {
+		t.Fatalf("first release events = %+v, want release only", events)
+	}
+	events := mustRelease(t, restored, "lease-2", "holder-2")
+	wantKinds(t, events, EventReleased, EventPromoted)
+	if events[1].RequestID != "waiter-1" {
+		t.Fatalf("first promoted legacy waiter = %q, want waiter-1", events[1].RequestID)
+	}
+}
+
 func TestSnapshot_IsRepeatable(t *testing.T) {
 	l, _, _ := busyLedger(t)
 	if !reflect.DeepEqual(l.Snapshot(), l.Snapshot()) {

@@ -1570,6 +1570,19 @@ func TestOwnerRunAdmissionAuthorityRejectsRankTheft(t *testing.T) {
 				return "released-owner", token
 			},
 		},
+		{
+			name: "attached child is not the canonical owner",
+			ownerSetup: func(t *testing.T, home string) (string, string) {
+				parent := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "canonical-parent", SemaphoresOnly: true,
+				})
+				child := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "attached-child", ParentLeaseToken: parent.Token,
+				})
+				t.Cleanup(func() { _ = child.Release(); _ = parent.Release() })
+				return "attached-child", parent.Token
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
