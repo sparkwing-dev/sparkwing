@@ -361,3 +361,17 @@ func TestNewRejectsPairedHostWithExplicitOwnedCPUSampler(t *testing.T) {
 		}
 	}
 }
+
+func TestNewHonorsExplicitOwnedCPUSamplerWithDefaultHost(t *testing.T) {
+	owned := &fixedOwnedCPUSampler{}
+	d, err := New(Config{Home: t.TempDir(), OwnedCPUSampler: owned})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if d.ownedSampler != owned {
+		t.Fatal("New replaced the explicit owned CPU sampler")
+	}
+	if _, paired := d.sampler.(pairedHostOwnedSampler); paired {
+		t.Fatal("default host retained paired owned sampling and would ignore the explicit sampler")
+	}
+}

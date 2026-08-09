@@ -57,6 +57,10 @@ type pairedHostOwnedSampler interface {
 	SampleWithOwned(roots []int) (HostStat, float64, bool, error)
 }
 
+type hostSamplerOnly struct {
+	HostSampler
+}
+
 // platformSampler reads real host metrics for the current OS. It carries
 // the CPU tracker across calls because platforms that expose cumulative
 // counters derive utilization from the change between two readings, so a

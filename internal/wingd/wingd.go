@@ -133,6 +133,8 @@ type Config struct {
 	ProcSampler ProcSampler
 	// OwnedCPUSampler reads the combined CPU usage of live holder process
 	// trees for external-load accounting. Nil uses the platform sampler.
+	// An explicit value uses separate host and owned readings; New rejects
+	// a Sampler that also provides paired owned CPU accounting.
 	OwnedCPUSampler OwnedCPUSampler
 	// Now returns the current time; nil uses time.Now. Injected so tests
 	// can measure elapsed hold time deterministically.
