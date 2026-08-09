@@ -411,29 +411,35 @@ func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 	}
 }
 
-// annotateSemaphoreETA fills ExpectedStartMS for the waiters the host
-// simulation has nothing to say about. A run charged no cores and no
-// memory waits only on the named semaphores it claims, so every key gets
-// its own FIFO simulation of integer cost against that semaphore's
-// effective capacity. A key stands alone in its own simulation because
-// the ledger promotes a waiter as soon as the resources it weighs on free
-// up, rather than making it sit out host-blocked work ahead of it. A
-// waiter on several keys starts when the last of them lets it in. An
-// estimate the host simulation already made is never overwritten, and an
-// unmeasured duration anywhere ahead of the waiter leaves the row nil
-// rather than guessing. qs.Waiters is index-aligned with snap.Waiters,
-// the same pairing annotateETA relies on.
+// annotateSemaphoreETA composes each waiter's semaphore estimate with the
+// host estimate already written by annotateETA. Every key gets its own FIFO
+// simulation of integer cost against that semaphore's effective capacity. A
+// key stands alone because the ledger promotes a waiter as soon as the
+// resources it weighs on free up, rather than making it sit out host-blocked
+// work ahead of it. A waiter on several keys starts when the last of them lets
+// it in, and a mixed-resource waiter starts at the later of its host and
+// semaphore bounds. If either required bound is unknown, the combined estimate
+// stays unknown rather than understating the wait. qs.Waiters is index-aligned
+// with snap.Waiters, the same pairing annotateETA relies on.
 func annotateSemaphoreETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 	rows := semaphoreETAHolderRows(qs, snap)
 	starts := map[int]float64{}
+	unknown := map[int]bool{}
 	for _, key := range semaphoreETAKeys(snap) {
+		runs, idx := semaphoreETAWaiters(qs, snap, key)
 		capacity := semaphoreETACapacity(snap, key)
 		if capacity <= 0 {
+			for _, i := range idx {
+				unknown[i] = true
+			}
 			continue
 		}
 		holders := semaphoreETAHolders(snap, rows, key)
-		runs, idx := semaphoreETAWaiters(qs, snap, key)
 		for j, start := range simulateSemaphoreQueue(float64(capacity), holders, runs) {
+			if math.IsInf(start, 1) {
+				unknown[idx[j]] = true
+				continue
+			}
 			if prev, seen := starts[idx[j]]; !seen || start > prev {
 				starts[idx[j]] = start
 			}
@@ -441,15 +447,28 @@ func annotateSemaphoreETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 	}
 	for i := range qs.Waiters {
 		w := &qs.Waiters[i]
-		// safety: a waiter that also draws host budget is admitted on the later of the two queues, so a semaphore-only number would understate its wait.
-		if w.ExpectedStartMS != nil || w.Resources.Cores > 0 || w.Resources.MemoryBytes > 0 {
+		if len(snap.Waiters[i].Claims) == 0 {
+			continue
+		}
+		if unknown[i] {
+			w.ExpectedStartMS = nil
 			continue
 		}
 		start, ok := starts[i]
-		if !ok || math.IsInf(start, 1) {
+		if !ok {
+			w.ExpectedStartMS = nil
 			continue
 		}
 		ms := int64(start)
+		if w.Resources.Cores > 0 || w.Resources.MemoryBytes > 0 {
+			if w.ExpectedStartMS == nil {
+				continue
+			}
+			if ms > *w.ExpectedStartMS {
+				w.ExpectedStartMS = &ms
+			}
+			continue
+		}
 		w.ExpectedStartMS = &ms
 	}
 }
