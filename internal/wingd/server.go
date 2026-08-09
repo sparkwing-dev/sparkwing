@@ -1115,6 +1115,41 @@ func (d *Daemon) handleReattach(c *conn, req *wingwire.Reattach) {
 		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
 		return
 	}
+	members := append([]string(nil), d.leaseMembers[leaseID]...)
+	if len(members) == 0 {
+		for _, lease := range d.ledger.Snapshot().Leases {
+			if lease.ID == leaseID {
+				members = append(members, lease.Members...)
+				break
+			}
+		}
+	}
+	d.mu.Unlock()
+	for _, member := range members {
+		if d.cfg.IsRunTerminal == nil {
+			continue
+		}
+		terminal, checkErr := d.cfg.IsRunTerminal(member)
+		if checkErr != nil {
+			d.cfg.logf("reattach: terminal check for %s: %v", member, checkErr)
+			_ = c.send(&wingwire.Evicted{RunID: member, Key: "terminal-check", Policy: wingwire.PolicyFail})
+			return
+		}
+		if terminal {
+			d.mu.Lock()
+			d.recordCancelledRunLocked(member)
+			d.mu.Unlock()
+			_ = c.send(&wingwire.Evicted{RunID: member, Key: "cancelled", Policy: wingwire.PolicyFail})
+			return
+		}
+	}
+	d.mu.Lock()
+	currentLeaseID, err := d.ledger.Reattach(req.LeaseToken)
+	if err != nil || currentLeaseID != leaseID {
+		d.mu.Unlock()
+		_ = c.send(&wingwire.Evicted{RunID: c.runID, Key: "reattach", Policy: wingwire.PolicyFail})
+		return
+	}
 	requestID := d.leaseRun[leaseID]
 	c.role = roleHolder
 	c.leaseID = leaseID
