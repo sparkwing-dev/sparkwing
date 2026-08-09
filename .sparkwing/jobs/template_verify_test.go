@@ -42,6 +42,28 @@ func TestTemplateRunsShareOneDaemonOutsideTemplateScratch(t *testing.T) {
 	}
 }
 
+func TestNormalizeVerifyModulePath_IsStableAcrossScratchDirectories(t *testing.T) {
+	var got []string
+	for _, initial := range []string{"sparkwing-tv-example-123-pipelines", "sparkwing-tv-example-987-pipelines"} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "go.mod")
+		if err := os.WriteFile(path, []byte("module "+initial+"\n\ngo 1.26\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := normalizeVerifyModulePath(dir, "example"); err != nil {
+			t.Fatal(err)
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, string(data))
+	}
+	if got[0] != got[1] || !strings.Contains(got[0], "module example.com/sparkwing/verify/example/pipelines") {
+		t.Fatalf("normalized modules differ or are not stable: %q, %q", got[0], got[1])
+	}
+}
+
 func TestTemplateRunLeaseTokens_AreClearedAtIsolatedDaemonBoundary(t *testing.T) {
 	env := templateRunAdmissionEnv(t.TempDir())
 	for _, name := range []string{wingwire.LeaseTokenEnv, wingwire.ChildLeaseTokenEnv} {
