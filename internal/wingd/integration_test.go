@@ -755,6 +755,65 @@ func TestExplicitCancelStateWriteFailureStillSignalsOwnerWithoutAcknowledging(t 
 	}
 }
 
+func TestCancelledLeaseCannotReattachAfterStateWriteFailureAndRestart(t *testing.T) {
+	home := shortHome(t)
+	cfg := wingd.Config{
+		Home:                  home,
+		FinalizeCancelledRuns: func([]string, string) error { return nil },
+	}
+	first := startDaemon(t, cfg)
+	holder := ensure(t, home, "")
+	lease := mustAcquire(t, holder, coreReq("cancelled-token-after-restart", 1))
+	sock, err := wingd.SocketPath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	control, err := net.Dial("unix", sock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRawMessage(control, &wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "test"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := readRawMessage(t, control).(*wingwire.HelloAck); !ok {
+		t.Fatal("control handshake failed")
+	}
+	moved := home + ".moved"
+	if err := os.Rename(home, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(home, []byte("blocks state directory"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeRawMessage(control, &wingwire.CancelLease{RunID: "cancelled-token-after-restart"}); err != nil {
+		t.Fatal(err)
+	}
+	_ = control.SetReadDeadline(time.Now().Add(time.Second))
+	_, _ = control.Read(make([]byte, 1))
+	_ = control.Close()
+	first.stop()
+	if err := first.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("first daemon exit: %v", err)
+	}
+	if err := os.Remove(home); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(moved, home); err != nil {
+		t.Fatal(err)
+	}
+	cfg.IsRunTerminal = func(runID string) (bool, error) {
+		return runID == "cancelled-token-after-restart", nil
+	}
+	startDaemon(t, cfg)
+	reconnector := ensure(t, home, "")
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if reclaimed, err := reconnector.Reattach(ctx, lease.Token); err == nil {
+		_ = reclaimed.Release()
+		t.Fatal("restart reattached a lease whose run is durably cancelled")
+	}
+}
+
 func TestExplicitCancelFinalizerDoesNotHoldDaemonMutex(t *testing.T) {
 	home := shortHome(t)
 	var query *client.Client
