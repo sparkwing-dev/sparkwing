@@ -1904,6 +1904,7 @@ func (s *dispatchState) setOutcome(id string, o sparkwing.Outcome) {
 		s.durations[id] = time.Since(started)
 	}
 	s.mu.Unlock()
+	s.admissionWaits.signal()
 }
 
 // setError records a node's flattened error message.
@@ -1956,6 +1957,7 @@ func (s *dispatchState) markStarted(id string) {
 		s.starts[id] = time.Now()
 	}
 	s.mu.Unlock()
+	s.admissionWaits.signal()
 }
 
 func (s *dispatchState) getOutcome(id string) (sparkwing.Outcome, bool) {

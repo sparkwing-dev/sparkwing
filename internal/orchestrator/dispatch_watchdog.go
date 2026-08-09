@@ -45,6 +45,9 @@ func (t *admissionWaitTracker) end(participant string) {
 }
 
 func (t *admissionWaitTracker) signal() {
+	if t == nil {
+		return
+	}
 	select {
 	case t.changed <- struct{}{}:
 	default:
