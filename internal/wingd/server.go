@@ -1128,10 +1128,27 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 		return
 	}
 	waiter := target.role == roleWaiter
-	if target.explicitCancels == nil {
-		target.explicitCancels = make(map[string]struct{})
+	affected := []string{req.RunID}
+	if !waiter {
+		affected = append([]string(nil), target.members...)
 	}
-	target.explicitCancels[req.RunID] = struct{}{}
+	const reason = "cancelled via sparkwing runs cancel"
+	if d.cfg.FinalizeCancelledRun != nil {
+		for _, runID := range affected {
+			if err := d.cfg.FinalizeCancelledRun(runID, reason); err != nil {
+				d.cfg.logf("cancel: finalize run %s: %v", runID, err)
+				d.mu.Unlock()
+				c.close()
+				return
+			}
+		}
+		if target.explicitCancels == nil {
+			target.explicitCancels = make(map[string]struct{}, len(affected))
+		}
+		for _, runID := range affected {
+			target.explicitCancels[runID] = struct{}{}
+		}
+	}
 	var deliveries []delivery
 	var snap admission.Snapshot
 	if waiter {
@@ -1144,13 +1161,13 @@ func (d *Daemon) handleCancelLease(c *conn, req *wingwire.CancelLease) {
 		snap = d.ledger.Snapshot()
 		d.touchLocked()
 	}
-	d.mu.Unlock()
-	const reason = "cancelled via sparkwing runs cancel"
-	if d.cfg.FinalizeCancelledRun != nil {
-		d.cfg.FinalizeCancelledRun(req.RunID, reason)
-	}
 	d.cfg.logf("cancel: signalling run %s to wind down", req.RunID)
-	_ = target.send(&wingwire.Cancel{RunID: req.RunID, Reason: reason})
+	if err := target.send(&wingwire.Cancel{RunID: req.RunID, Reason: reason}); err != nil {
+		d.mu.Unlock()
+		c.close()
+		return
+	}
+	d.mu.Unlock()
 	if waiter {
 		d.flush(deliveries, snap)
 	}

@@ -666,6 +666,41 @@ func TestExplicitCancelRetainsLegacyFinalizerCompatibility(t *testing.T) {
 	}
 }
 
+func TestExplicitCancelPersistenceFailureIsNotAcknowledged(t *testing.T) {
+	home := shortHome(t)
+	legacyFinalized := make(chan string, 1)
+	startDaemon(t, wingd.Config{
+		Home: home,
+		FinalizeRun: func(runID string) {
+			legacyFinalized <- runID
+		},
+		FinalizeCancelledRun: func(string, string) error {
+			return errors.New("store unavailable")
+		},
+	})
+
+	holder := ensure(t, home, "")
+	mustAcquire(t, holder, wingwire.AdmissionRequest{
+		RunID: "cancel-finalize-failure", Resources: wingwire.HostResources{Cores: 1},
+	})
+	control := ensure(t, home, "")
+	cancelCtx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	if found, err := control.CancelLease(cancelCtx, "cancel-finalize-failure"); err == nil {
+		t.Fatalf("CancelLease = (found=%v, nil), want persistence failure", found)
+	}
+	_ = holder.Close()
+
+	select {
+	case got := <-legacyFinalized:
+		if got != "cancel-finalize-failure" {
+			t.Fatalf("fallback finalized %q, want cancel-finalize-failure", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("failed explicit persistence suppressed disconnect finalization")
+	}
+}
+
 func TestSubLeaseDoesNotFinalizeOnDisconnect(t *testing.T) {
 	home := shortHome(t)
 	finalized := make(chan string, 1)

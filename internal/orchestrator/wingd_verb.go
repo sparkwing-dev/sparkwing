@@ -87,11 +87,9 @@ func NewOrphanRunFinalizer(home string) func(runID string) {
 
 // NewCancelledRunFinalizer returns the daemon hook that persists an explicit
 // operator cancellation before acknowledging it to the control client.
-func NewCancelledRunFinalizer(home string) func(runID, reason string) {
-	return func(runID, reason string) {
-		if err := finalizeRun(home, runID, reason); err != nil {
-			slog.Warn("wingd: finalize cancelled run", "run_id", runID, "err", err)
-		}
+func NewCancelledRunFinalizer(home string) func(runID, reason string) error {
+	return func(runID, reason string) error {
+		return finalizeRun(home, runID, reason)
 	}
 }
 
