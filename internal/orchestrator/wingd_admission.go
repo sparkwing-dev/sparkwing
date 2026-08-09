@@ -509,7 +509,7 @@ func (la *LocalAdmission) acquireBlocking(
 	if displayID == "" {
 		displayID = runID
 	}
-	reporter := &queueWaitReporter{la: la, ctx: ctx, backends: backends, runID: runID, displayID: displayID}
+	reporter := &queueWaitReporter{la: la, ctx: ctx, backends: backends, runID: runID, nodeID: participant, displayID: displayID}
 	reporter.requestID = req.RunID
 	stopHeartbeat := reporter.startHeartbeat(acquireCtx)
 	lease, err := cl.Acquire(acquireCtx, req, reporter.onQueued)
@@ -517,12 +517,12 @@ func (la *LocalAdmission) acquireBlocking(
 	if err != nil {
 		cl.Close()
 		if cause := context.Cause(acquireCtx); cause != nil && ctx.Err() == nil {
-			appendAdmissionEvent(ctx, backends, runID, req.RunID, "admission_queue_timeout", nil)
+			appendAdmissionEvent(ctx, backends, runID, participant, "admission_queue_timeout", admissionRequestPayload(req.RunID))
 			return nil, admitProceed, cause
 		}
 		var cancelErr *wingdclient.CancelledError
 		if errors.As(err, &cancelErr) {
-			appendAdmissionEvent(ctx, backends, runID, req.RunID, "admission_cancelled", nil)
+			appendAdmissionEvent(ctx, backends, runID, participant, "admission_cancelled", admissionRequestPayload(req.RunID))
 			reason := cancelErr.Reason
 			if reason == "" {
 				reason = "cancelled via the admission daemon"
@@ -544,7 +544,7 @@ func (la *LocalAdmission) acquireBlocking(
 		return nil, admitProceed, fmt.Errorf("local admission: %w", err)
 	}
 	if reporter.waited() {
-		appendAdmissionEvent(ctx, backends, runID, req.RunID, "admission_granted", nil)
+		appendAdmissionEvent(ctx, backends, runID, participant, "admission_granted", admissionRequestPayload(req.RunID))
 		if la.Delegate != nil {
 			la.Delegate.Emit(sparkwing.LogRecord{
 				TS:    time.Now(),
@@ -566,6 +566,7 @@ type queueWaitReporter struct {
 	ctx       context.Context
 	backends  Backends
 	runID     string
+	nodeID    string
 	requestID string
 	displayID string
 
@@ -585,7 +586,7 @@ func (r *queueWaitReporter) onQueued(q wingwire.Queued) {
 	}
 	r.latest = q
 	r.mu.Unlock()
-	r.la.reportQueued(r.ctx, r.backends, r.runID, r.requestID, r.displayID, q)
+	r.la.reportQueued(r.ctx, r.backends, r.runID, r.nodeID, r.requestID, r.displayID, q)
 }
 
 // waited reports whether the run was ever queued, gating the terminal
@@ -633,14 +634,14 @@ func (r *queueWaitReporter) emitHeartbeat() {
 // reportQueued renders one queue-position update: a stdout line, an
 // admission_wait event on the run row, and a structured event to the
 // envelope delegate so the position appears in the run's log.
-func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, runID, requestID, displayID string, q wingwire.Queued) {
+func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, runID, nodeID, requestID, displayID string, q wingwire.Queued) {
 	ahead, noun, reason := queuePositionParts(q)
 	msg := fmt.Sprintf(
 		"queued for local admission: position %d of %d (%d %s ahead); participant %s%s; run `sparkwing queue` to see the full queue",
 		q.Position, q.QueueLength, ahead, noun, displayID, reason)
 	fmt.Fprintln(la.out(), msg)
 	payload := fmt.Appendf(nil, `{"position":%d,"queue_length":%d,"request_id":%q,"display_id":%q}`, q.Position, q.QueueLength, requestID, displayID)
-	appendAdmissionEvent(ctx, backends, runID, requestID, "admission_wait", payload)
+	appendAdmissionEvent(ctx, backends, runID, nodeID, "admission_wait", payload)
 	if la.Delegate != nil {
 		la.Delegate.Emit(sparkwing.LogRecord{
 			TS:    time.Now(),
@@ -655,6 +656,10 @@ func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, r
 			},
 		})
 	}
+}
+
+func admissionRequestPayload(requestID string) []byte {
+	return fmt.Appendf(nil, `{"request_id":%q}`, requestID)
 }
 
 func appendAdmissionEvent(ctx context.Context, backends Backends, runID, participantID, kind string, payload []byte) {
