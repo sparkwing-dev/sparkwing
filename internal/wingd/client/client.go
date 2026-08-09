@@ -215,13 +215,14 @@ func (e *CancelledError) Error() string {
 	return "wingd: " + e.Reason
 }
 
-// dialsPerSpawn is how many times connect is retried after a spawn before
-// the daemon is presumed dead and respawned; maxSpawnAttempts bounds the
-// respawns so a daemon that dies at startup fails fast with its own logged
-// cause rather than spinning until a fork exhaustion error masks it.
+// A detached spawn cannot distinguish slow initialization from process death.
+// Keep one startup owner and allow its socket up to thirty seconds to appear
+// under the default backoff. Starting replacements during that interval adds
+// election contention and can prevent every otherwise healthy daemon from
+// reaching readiness.
 const (
-	dialsPerSpawn    = 5
-	maxSpawnAttempts = 4
+	dialsPerSpawn    = 600
+	maxSpawnAttempts = 1
 )
 
 // spawnFailed reports a spawn-syscall failure, folding in the daemon log
