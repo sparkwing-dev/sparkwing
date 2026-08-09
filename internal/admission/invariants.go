@@ -93,6 +93,9 @@ func (l *Ledger) leaseInvariants() error {
 		if le.seq == 0 || le.seq > l.leaseSeq {
 			return fmt.Errorf("lease %s seq %d outside counter %d", id, le.seq, l.leaseSeq)
 		}
+		if err := l.ownerRankInvariant(le.ownerID, le.ownerAdmit, le.admit, "lease "+string(id)); err != nil {
+			return err
+		}
 		if seenSeq[le.seq] {
 			return fmt.Errorf("lease %s reuses seq %d", id, le.seq)
 		}
@@ -201,6 +204,9 @@ func (l *Ledger) waiterInvariants() error {
 		if w.arrival > l.arrivalSeq {
 			return fmt.Errorf("waiter %q arrival %d outside counter %d", w.spec.id, w.arrival, l.arrivalSeq)
 		}
+		if err := l.ownerRankInvariant(w.spec.ownerID, w.spec.ownerAdmit, w.spec.admit, "waiter "+w.spec.id); err != nil {
+			return err
+		}
 		if seen[w.spec.id] {
 			return fmt.Errorf("participant %q waits twice", w.spec.id)
 		}
@@ -208,6 +214,24 @@ func (l *Ledger) waiterInvariants() error {
 		if _, holds := l.memberOf[w.spec.id]; holds {
 			return fmt.Errorf("participant %q both holds and waits", w.spec.id)
 		}
+	}
+	return nil
+}
+
+func (l *Ledger) ownerRankInvariant(ownerID string, ownerAdmit, admit uint64, subject string) error {
+	if ownerAdmit == 0 || ownerAdmit > admit || ownerAdmit > l.admitSeq {
+		return fmt.Errorf("%s owner admission %d outside participant admission %d and counter %d",
+			subject, ownerAdmit, admit, l.admitSeq)
+	}
+	if ownerID == "" {
+		if ownerAdmit != admit {
+			return fmt.Errorf("%s ownerless admission %d differs from participant admission %d", subject, ownerAdmit, admit)
+		}
+		return nil
+	}
+	if ownerLeaseID, ok := l.memberOf[ownerID]; ok && l.leases[ownerLeaseID].admit != ownerAdmit {
+		return fmt.Errorf("%s owner admission %d differs from live owner %q admission %d",
+			subject, ownerAdmit, ownerID, l.leases[ownerLeaseID].admit)
 	}
 	return nil
 }

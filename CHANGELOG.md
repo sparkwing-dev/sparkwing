@@ -67,6 +67,10 @@ code change to unlock.
 
 ### Fixed
 
+- **queue:** Internal nodes and barriers now retain their owning run's original
+  queue rank, so a newer run cannot overtake an older live run by submitting
+  its work first. The daemon verifies the live owner lease before applying
+  that rank; invalid or stale ownership claims keep ordinary arrival order.
 - **queue:** Start-time estimates now remain unknown when an active holder has
   outlived its measured duration, instead of promising immediate admission
   while capacity is still occupied.
