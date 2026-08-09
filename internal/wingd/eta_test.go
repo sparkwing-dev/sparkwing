@@ -100,6 +100,13 @@ func TestSimulateQueue_ETA(t *testing.T) {
 	}
 }
 
+func TestRemainingMS_OverdueHolderDoesNotPromiseImmediateRelease(t *testing.T) {
+	got := remainingMS(10_000, 10_001)
+	if !math.IsInf(got, 1) {
+		t.Fatalf("remainingMS(10000, 10001) = %v, want +Inf: a holder past its estimate is still active", got)
+	}
+}
+
 func approxEqInf(a, b float64) bool {
 	if math.IsInf(a, 1) || math.IsInf(b, 1) {
 		return math.IsInf(a, 1) && math.IsInf(b, 1)
