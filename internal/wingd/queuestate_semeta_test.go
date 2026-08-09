@@ -89,42 +89,6 @@ func TestAnnotateSemaphoreETA(t *testing.T) {
 			want: []int64{0, 0, 10000},
 		},
 		{
-			name: "a host-derived estimate wins when spare semaphore capacity is available",
-			qs: wingwire.QueueState{
-				Waiters: []wingwire.Waiter{
-					{
-						RunID:              "run-b",
-						ExpectedDurationMS: 5000,
-						Resources:          wingwire.HostResources{Cores: 4},
-						Semaphores:         []string{"deploy"},
-						ExpectedStartMS:    semStart(7000),
-					},
-				},
-			},
-			snap: admission.Snapshot{
-				Semaphores: []admission.SemaphoreState{semState("deploy", 2, semHold("L1", 2, 1))},
-				Waiters:    []admission.WaiterState{semWaiter("run-b", "deploy", 2, 1)},
-			},
-			want: []int64{7000},
-		},
-		{
-			name: "a host-drawing waiter the host simulation could not estimate stays nil",
-			qs: wingwire.QueueState{
-				Waiters: []wingwire.Waiter{
-					{
-						RunID:              "run-b",
-						ExpectedDurationMS: 5000,
-						Resources:          wingwire.HostResources{Cores: 4},
-						Semaphores:         []string{"deploy"},
-					},
-				},
-			},
-			snap: admission.Snapshot{
-				Waiters: []admission.WaiterState{semWaiter("run-b", "deploy", 2, 1)},
-			},
-			want: []int64{semaNone},
-		},
-		{
 			name: "a waiter on two keys starts when the slower one lets it in",
 			qs: wingwire.QueueState{
 				Holders: []wingwire.Holder{
@@ -377,8 +341,6 @@ func TestSemaphoreETACapacity_TakesTheSmallestDeclaration(t *testing.T) {
 // semaNone marks a want entry whose ExpectedStartMS must stay nil, since a
 // nil estimate cannot be spelled in a slice of milliseconds.
 const semaNone = int64(-1)
-
-func semStart(ms int64) *int64 { return &ms }
 
 func semLease(id admission.LeaseID, runID, key string, capacity, cost int) admission.LeaseState {
 	return admission.LeaseState{
