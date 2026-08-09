@@ -501,7 +501,14 @@ func (la *LocalAdmission) acquireBlocking(
 	if err != nil {
 		return nil, admitProceed, fmt.Errorf("local admission unreachable: could not reach the admission daemon: %w; run `sparkwing queue` to check the local admission state", err)
 	}
-	reporter := &queueWaitReporter{la: la, ctx: ctx, backends: backends, runID: runID}
+	displayID := req.DisplayRunID
+	if displayID == "" {
+		displayID = req.RunID
+	}
+	if displayID == "" {
+		displayID = runID
+	}
+	reporter := &queueWaitReporter{la: la, ctx: ctx, backends: backends, runID: runID, displayID: displayID}
 	reporter.requestID = req.RunID
 	stopHeartbeat := reporter.startHeartbeat(acquireCtx)
 	lease, err := cl.Acquire(acquireCtx, req, reporter.onQueued)
@@ -545,7 +552,7 @@ func (la *LocalAdmission) acquireBlocking(
 				Msg:   "admitted; starting run",
 			})
 		}
-		fmt.Fprintf(la.out(), "admitted; starting run\n")
+		fmt.Fprintf(la.out(), "admitted; starting run: participant %s\n", displayID)
 	}
 	return lease, admitProceed, nil
 }
@@ -559,6 +566,7 @@ type queueWaitReporter struct {
 	backends  Backends
 	runID     string
 	requestID string
+	displayID string
 
 	mu     sync.Mutex
 	latest wingwire.Queued
@@ -576,7 +584,7 @@ func (r *queueWaitReporter) onQueued(q wingwire.Queued) {
 	}
 	r.latest = q
 	r.mu.Unlock()
-	r.la.reportQueued(r.ctx, r.backends, r.runID, r.requestID, q)
+	r.la.reportQueued(r.ctx, r.backends, r.runID, r.requestID, r.displayID, q)
 }
 
 // waited reports whether the run was ever queued, gating the terminal
@@ -618,19 +626,19 @@ func (r *queueWaitReporter) emitHeartbeat() {
 	q := r.latest
 	waited := time.Since(r.since)
 	r.mu.Unlock()
-	r.la.reportStillQueued(q, waited)
+	r.la.reportStillQueued(r.displayID, q, waited)
 }
 
 // reportQueued renders one queue-position update: a stdout line, an
 // admission_wait event on the run row, and a structured event to the
 // envelope delegate so the position appears in the run's log.
-func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, runID, requestID string, q wingwire.Queued) {
+func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, runID, requestID, displayID string, q wingwire.Queued) {
 	ahead, noun, reason := queuePositionParts(q)
 	msg := fmt.Sprintf(
-		"queued for local admission: position %d of %d (%d %s ahead)%s; run `sparkwing queue` to see the full queue",
-		q.Position, q.QueueLength, ahead, noun, reason)
+		"queued for local admission: position %d of %d (%d %s ahead); participant %s%s; run `sparkwing queue` to see the full queue",
+		q.Position, q.QueueLength, ahead, noun, displayID, reason)
 	fmt.Fprintln(la.out(), msg)
-	payload := fmt.Appendf(nil, `{"position":%d,"queue_length":%d,"request_id":%q}`, q.Position, q.QueueLength, requestID)
+	payload := fmt.Appendf(nil, `{"position":%d,"queue_length":%d,"request_id":%q,"display_id":%q}`, q.Position, q.QueueLength, requestID, displayID)
 	appendPlanEvent(ctx, backends, runID, "admission_wait", payload)
 	if la.Delegate != nil {
 		la.Delegate.Emit(sparkwing.LogRecord{
@@ -642,6 +650,7 @@ func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, r
 				"position":     q.Position,
 				"queue_length": q.QueueLength,
 				"request_id":   requestID,
+				"display_id":   displayID,
 			},
 		})
 	}
@@ -651,11 +660,11 @@ func (la *LocalAdmission) reportQueued(ctx context.Context, backends Backends, r
 // naming how long the run has waited so a stalled-looking queue reads as
 // healthy backpressure. No run-row event or delegate emit -- heartbeats
 // are stdout-only to avoid flooding the log with duplicate waits.
-func (la *LocalAdmission) reportStillQueued(q wingwire.Queued, waited time.Duration) {
+func (la *LocalAdmission) reportStillQueued(displayID string, q wingwire.Queued, waited time.Duration) {
 	ahead, noun, reason := queuePositionParts(q)
 	fmt.Fprintf(la.out(),
-		"still queued for local admission after %s: position %d of %d (%d %s ahead)%s; run `sparkwing queue` to see the full queue\n",
-		waited.Round(time.Second), q.Position, q.QueueLength, ahead, noun, reason)
+		"still queued for local admission after %s: participant %s; position %d of %d (%d %s ahead)%s; run `sparkwing queue` to see the full queue\n",
+		waited.Round(time.Second), displayID, q.Position, q.QueueLength, ahead, noun, reason)
 }
 
 // queuePositionParts derives the shared pieces of a queue-position line:
