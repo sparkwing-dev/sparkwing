@@ -880,8 +880,9 @@ func TestConcurrency_RunAndAwaitParentTimeoutDoesNotCountChildPlanAdmissionWait(
 	parentDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
-			Pipeline: "plan-level-queued-await-parent",
-			RunID:    "queued-await-parent",
+			Pipeline:            "plan-level-queued-await-parent",
+			RunID:               "queued-await-parent",
+			DispatchWaitTimeout: 100 * time.Millisecond,
 		})
 		parentDone <- res
 	}()
