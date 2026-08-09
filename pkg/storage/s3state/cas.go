@@ -682,6 +682,7 @@ func (b *Backend) EnqueueTriggerWithEnv(
 		ParentNodeID:  parentNodeID,
 		RetryOf:       retryOf,
 		TriggerEnv:    triggerEnv,
+		RepoInherited: repo == "" && parentRunID != "",
 	}
 	if repo != "" {
 		tg.Repo = repo

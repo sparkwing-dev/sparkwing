@@ -57,8 +57,9 @@ func TestLocalImplicitAwaitRetainsParentProvenanceWithoutForcingRegistryLookup(t
 		t.Fatal(err)
 	}
 
+	env := map[string]string{"CALLER_VALUE": "unchanged"}
 	id, err := (localState{st: st}).EnqueueTriggerWithEnv(
-		ctx, "template-verify", nil, "parent", "gate", "", "await-pipeline", "", "", "", nil,
+		ctx, "template-verify", nil, "parent", "gate", "", "await-pipeline", "", "", "", env,
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -70,8 +71,21 @@ func TestLocalImplicitAwaitRetainsParentProvenanceWithoutForcingRegistryLookup(t
 	if trigger.Repo != "sparkwing-dev/sparkwing" {
 		t.Fatalf("Repo = %q, want inherited provenance", trigger.Repo)
 	}
-	if trigger.TriggerEnv[implicitAwaitRepoKey] != "1" {
-		t.Fatalf("TriggerEnv = %#v, want implicit-repository marker", trigger.TriggerEnv)
+	if !trigger.RepoInherited {
+		t.Fatal("RepoInherited = false, want true")
+	}
+	if len(env) != 1 || env["CALLER_VALUE"] != "unchanged" {
+		t.Fatalf("caller trigger env mutated: %#v", env)
+	}
+}
+
+func TestExplicitAwaitNeverTrustsReservedLookingTriggerEnvironment(t *testing.T) {
+	trigger := &store.Trigger{
+		Repo:       "owner/other",
+		TriggerEnv: map[string]string{"SPARKWING_AWAIT_REPO_INHERITED": "1"},
+	}
+	if triggerUsesParentRepo(trigger) {
+		t.Fatal("explicit cross-repository await selected the parent checkout")
 	}
 }
 

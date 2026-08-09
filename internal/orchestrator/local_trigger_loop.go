@@ -23,8 +23,6 @@ import (
 	sparkwinggit "github.com/sparkwing-dev/sparkwing/sparkwing/git"
 )
 
-const implicitAwaitRepoKey = "SPARKWING_AWAIT_REPO_INHERITED"
-
 // runLocalTriggerLoop polls for pending child triggers and dispatches
 // each. Compile cache is shared across triggers in the loop lifetime.
 // profileName, when non-empty, is forwarded to each child as
@@ -319,8 +317,7 @@ func locateTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir s
 	if trig.RetryOf != "" {
 		return locateRetryRepo(ctx, trig)
 	}
-	implicitRepo := trig.Repo == "" || trig.TriggerEnv[implicitAwaitRepoKey] == "1"
-	if parentRepoDir != "" && implicitRepo && repoDeclaresPipeline(parentRepoDir, trig.Pipeline) {
+	if parentRepoDir != "" && triggerUsesParentRepo(trig) && repoDeclaresPipeline(parentRepoDir, trig.Pipeline) {
 		return parentRepoDir, nil
 	}
 	path, err := repos.ResolveRepoForPipelineCached(trig.Pipeline)
@@ -336,6 +333,10 @@ func locateTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir s
 		return slugPath, nil
 	}
 	return "", unlocatableChildError(trig.Pipeline)
+}
+
+func triggerUsesParentRepo(trig *store.Trigger) bool {
+	return trig.Repo == "" || trig.RepoInherited
 }
 
 // RetrySourceUnavailableError is returned when a local retry cannot prove that
