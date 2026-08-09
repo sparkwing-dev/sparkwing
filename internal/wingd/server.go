@@ -128,6 +128,11 @@ type delivery struct {
 // New constructs a daemon for cfg without electing or serving. Run does
 // the election and blocks.
 func New(cfg Config) (*Daemon, error) {
+	if cfg.Sampler != nil && cfg.OwnedCPUSampler != nil {
+		if _, paired := cfg.Sampler.(pairedHostOwnedSampler); paired {
+			return nil, fmt.Errorf("wingd: Config.Sampler and Config.OwnedCPUSampler both provide owned CPU accounting")
+		}
+	}
 	lay, err := resolveLayout(cfg.Home)
 	if err != nil {
 		return nil, err
@@ -135,6 +140,9 @@ func New(cfg Config) (*Daemon, error) {
 	sampler := cfg.Sampler
 	if sampler == nil {
 		sampler = &platformSampler{}
+		if cfg.OwnedCPUSampler != nil {
+			sampler = hostSamplerOnly{HostSampler: sampler}
+		}
 	}
 	procSampler := cfg.ProcSampler
 	if procSampler == nil {
