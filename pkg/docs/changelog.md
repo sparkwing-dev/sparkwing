@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.24.0] - 2026-08-10
 ### Added
 
 - **local admission:** `sparkwing queue exec` admits bootstrap commands before
