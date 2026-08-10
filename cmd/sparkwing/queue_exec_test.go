@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,10 +38,12 @@ func TestQueueExecWaitsInDaemonBeforeStartingCommand(t *testing.T) {
 
 	marker := filepath.Join(t.TempDir(), "started")
 	result := make(chan error, 1)
+	submittedAt := time.Now()
 	go func() {
 		result <- runQueue([]string{
 			"exec", "--home", home,
 			"--run-id", "waiting-bootstrap",
+			"--cores", "0.1",
 			"--semaphore", "bootstrap",
 			"--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", marker, "23",
 		})
@@ -53,6 +56,19 @@ func TestQueueExecWaitsInDaemonBeforeStartingCommand(t *testing.T) {
 			t.Fatalf("query queue: %v", queryErr)
 		}
 		if len(qs.Waiters) == 1 && qs.Waiters[0].RunID == "waiting-bootstrap" {
+			if elapsed := time.Since(submittedAt); elapsed > 250*time.Millisecond {
+				t.Fatalf("queue visibility took %s, want at most 250ms", elapsed)
+			}
+			waiter := qs.Waiters[0]
+			if waiter.Position != 1 {
+				t.Errorf("position = %d, want 1", waiter.Position)
+			}
+			if len(waiter.WaitingOn) != 1 || waiter.WaitingOn[0] != "bootstrap" {
+				t.Errorf("waiting_on = %v, want bootstrap", waiter.WaitingOn)
+			}
+			if waiter.BlockingReason == "" {
+				t.Error("blocking reason is empty")
+			}
 			break
 		}
 		select {
@@ -92,7 +108,7 @@ func TestQueueExecHelperProcess(t *testing.T) {
 			separator = i
 		}
 	}
-	if separator < 0 || len(os.Args) != separator+3 {
+	if separator < 0 || (len(os.Args) != separator+3 && len(os.Args) != separator+4) {
 		return
 	}
 	if err := os.WriteFile(os.Args[separator+1], []byte("started"), 0o600); err != nil {
@@ -102,5 +118,164 @@ func TestQueueExecHelperProcess(t *testing.T) {
 	if err != nil {
 		os.Exit(98)
 	}
+	if len(os.Args) == separator+4 {
+		for {
+			if _, statErr := os.Stat(os.Args[separator+3]); statErr == nil {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
 	os.Exit(code)
+}
+
+func TestQueueExecSerializesFreshCommandsAndClearsAdmission(t *testing.T) {
+	home := queueHome(t)
+	serveQueueDaemon(t, home)
+	tmp := t.TempDir()
+	firstStarted := filepath.Join(tmp, "first-started")
+	firstRelease := filepath.Join(tmp, "first-release")
+	secondStarted := filepath.Join(tmp, "second-started")
+
+	first := make(chan error, 1)
+	go func() {
+		first <- runQueue([]string{
+			"exec", "--home", home, "--run-id", "bootstrap-first", "--cores", "0.1",
+			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", firstStarted, "0", firstRelease,
+		})
+	}()
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "bootstrap-first"
+	})
+	waitForFile(t, firstStarted)
+
+	second := make(chan error, 1)
+	secondSubmitted := time.Now()
+	go func() {
+		second <- runQueue([]string{
+			"exec", "--home", home, "--run-id", "bootstrap-second", "--cores", "0.1",
+			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", secondStarted, "0",
+		})
+	}()
+	queued := waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Waiters) == 1 && qs.Waiters[0].RunID == "bootstrap-second"
+	})
+	if elapsed := time.Since(secondSubmitted); elapsed > 250*time.Millisecond {
+		t.Fatalf("second command visibility took %s, want at most 250ms", elapsed)
+	}
+	waiter := queued.Waiters[0]
+	if waiter.Position != 1 || len(waiter.WaitingOn) != 1 || waiter.WaitingOn[0] != "bootstrap" ||
+		!strings.Contains(waiter.BlockingReason, "bootstrap") {
+		t.Fatalf("second waiter does not expose its blocking cause: %+v", waiter)
+	}
+	if _, err := os.Stat(secondStarted); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("second command started concurrently: %v", err)
+	}
+
+	if err := os.WriteFile(firstRelease, nil, 0o600); err != nil {
+		t.Fatalf("release first command: %v", err)
+	}
+	if err := <-first; err != nil {
+		t.Fatalf("first command: %v", err)
+	}
+	if err := <-second; err != nil {
+		t.Fatalf("second command: %v", err)
+	}
+	waitForFile(t, secondStarted)
+	cleared := waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 0 && len(qs.Waiters) == 0
+	})
+	if len(cleared.Holders) != 0 || len(cleared.Waiters) != 0 {
+		t.Fatalf("queue did not clear: %+v", cleared)
+	}
+}
+
+func TestQueueExecCancellationBeforeGrantNeverStartsCommand(t *testing.T) {
+	home := queueHome(t)
+	serveQueueDaemon(t, home)
+	holderClient, err := wingdclient.EnsureDaemon(context.Background(), wingdclient.Options{Home: home, Version: "v1.0.0"})
+	if err != nil {
+		t.Fatalf("connect holder: %v", err)
+	}
+	holder, err := holderClient.Acquire(context.Background(), wingwire.AdmissionRequest{
+		RunID: "cancel-blocker", SemaphoresOnly: true,
+		Semaphores: []wingwire.SemaphoreClaim{{Name: "bootstrap", Cost: 1, Capacity: 1, Policy: wingwire.PolicyQueue}},
+	}, nil)
+	if err != nil {
+		t.Fatalf("acquire holder: %v", err)
+	}
+	t.Cleanup(func() { _ = holder.Release() })
+
+	marker := filepath.Join(t.TempDir(), "cancelled-started")
+	result := make(chan error, 1)
+	go func() {
+		result <- runQueue([]string{
+			"exec", "--home", home, "--run-id", "cancelled-bootstrap", "--cores", "0.1",
+			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", marker, "0",
+		})
+	}()
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Waiters) == 1 && qs.Waiters[0].RunID == "cancelled-bootstrap"
+	})
+
+	control, err := wingdclient.EnsureDaemon(context.Background(), wingdclient.Options{Home: home, Version: "v1.0.0"})
+	if err != nil {
+		t.Fatalf("connect control: %v", err)
+	}
+	cancelledAt := time.Now()
+	found, err := control.CancelLease(context.Background(), "cancelled-bootstrap")
+	_ = control.Close()
+	if err != nil || !found {
+		t.Fatalf("cancel queued command: found=%v err=%v", found, err)
+	}
+	select {
+	case runErr := <-result:
+		if runErr == nil {
+			t.Fatal("cancelled queue exec returned success")
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("queued cancellation did not return within 250ms")
+	}
+	if elapsed := time.Since(cancelledAt); elapsed > 250*time.Millisecond {
+		t.Fatalf("queued cancellation took %s, want at most 250ms", elapsed)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("cancelled command started: %v", err)
+	}
+	state := waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool { return len(qs.Waiters) == 0 })
+	if len(state.Holders) != 1 || state.Holders[0].RunID != "cancel-blocker" {
+		t.Fatalf("cancellation disturbed the holder or leaked admission: %+v", state)
+	}
+}
+
+func waitForQueueExecState(t *testing.T, home string, ready func(wingwire.QueueState) bool) wingwire.QueueState {
+	t.Helper()
+	deadline := time.Now().Add(queueExecWait)
+	for {
+		qs, err := wingdclient.Query(context.Background(), wingdclient.Options{Home: home})
+		if err != nil {
+			t.Fatalf("query queue: %v", err)
+		}
+		if ready(qs) {
+			return qs
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("queue state did not converge: %+v", qs)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForFile(t *testing.T, path string) {
+	t.Helper()
+	deadline := time.Now().Add(queueExecWait)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("file did not appear: %s", path)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 }
