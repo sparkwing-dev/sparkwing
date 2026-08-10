@@ -143,8 +143,8 @@ func TestQueueBlockingReason_FillsArrivalOrderWait(t *testing.T) {
 	if got := queueBlockingReason("needs 4.0 cores; 1.0 available", nil, 2); got != "needs 4.0 cores; 1.0 available" {
 		t.Fatalf("queueBlockingReason replaced host reason with %q", got)
 	}
-	if got := queueBlockingReason("", []string{"deploy"}, 2); got != "" {
-		t.Fatalf("queueBlockingReason = %q, want semaphore reason to remain with WaitingOn", got)
+	if got := queueBlockingReason("", []string{"deploy"}, 2); got != `waiting for semaphore "deploy"` {
+		t.Fatalf("queueBlockingReason = %q, want named semaphore cause", got)
 	}
 	if got := queueBlockingReason("", nil, 1); got != "" {
 		t.Fatalf("queueBlockingReason = %q, want first waiter to remain unexplained by arrival order", got)

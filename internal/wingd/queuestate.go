@@ -275,8 +275,20 @@ func annotateAdmissionWaiting(qs *wingwire.QueueState) {
 }
 
 func queueBlockingReason(hostReason string, waitingOn []string, position int) string {
-	if hostReason != "" || len(waitingOn) > 0 || position <= 1 {
-		return hostReason
+	reason := hostReason
+	for _, resource := range waitingOn {
+		if resource == "cores" || resource == "memory" {
+			continue
+		}
+		semaphoreReason := fmt.Sprintf("waiting for semaphore %q", resource)
+		if reason == "" {
+			reason = semaphoreReason
+		} else {
+			reason += "; " + semaphoreReason
+		}
+	}
+	if reason != "" || position <= 1 {
+		return reason
 	}
 	return "waiting behind earlier queued work"
 }

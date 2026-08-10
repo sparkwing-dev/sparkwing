@@ -86,6 +86,10 @@ func TestQueueExecWaitsInDaemonBeforeStartingCommand(t *testing.T) {
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("command started before admission: %v", err)
 	}
+	waitForFile(t, ready)
+	if elapsed := time.Since(submittedAt); elapsed > 250*time.Millisecond {
+		t.Fatalf("readiness publication took %s, want at most 250ms", elapsed)
+	}
 	readyBody, err := os.ReadFile(ready)
 	if err != nil {
 		t.Fatalf("read readiness: %v", err)

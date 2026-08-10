@@ -35,6 +35,9 @@ import (
 // about the queue was answered -- a script reading exit 0 as "the queue is
 // empty" was wrong before and is right now.
 func runQueue(args []string) error {
+	if len(args) > 0 && args[0] == "exec" {
+		return runQueueExec(args[1:])
+	}
 	fs := flag.NewFlagSet(cmdQueue.Path, flag.ContinueOnError)
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	home := fs.String("home", "", "sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)")
