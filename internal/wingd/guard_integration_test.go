@@ -11,7 +11,8 @@ import (
 )
 
 type controlledSessionGuard struct {
-	empty atomic.Bool
+	empty      atomic.Bool
+	terminated atomic.Bool
 }
 
 func (*controlledSessionGuard) Validate(wingwire.ProcessSession) error { return nil }
@@ -25,8 +26,48 @@ func (g *controlledSessionGuard) Empty(wingwire.ProcessSession) (bool, error) {
 }
 
 func (g *controlledSessionGuard) Terminate(wingwire.ProcessSession) error {
+	g.terminated.Store(true)
 	g.empty.Store(true)
 	return nil
+}
+
+func TestDisconnectedGuardedSessionRemainsCancellable(t *testing.T) {
+	home := shortHome(t)
+	guard := &controlledSessionGuard{}
+	guard.empty.Store(true)
+	startDaemon(t, wingd.Config{
+		Home: home, SessionGuardInspector: guard, GuardInterval: 10 * time.Millisecond,
+	})
+
+	holderClient := ensure(t, home, "")
+	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID: "disconnected-guard", SemaphoresOnly: true,
+		Semaphores: []wingwire.SemaphoreClaim{{Name: "exclusive", Cost: 1, Capacity: 1, Policy: wingwire.PolicyQueue}},
+		Guard:      &wingwire.ProcessSession{LeaderPID: 63, SessionID: 63, BirthToken: "birth-63"},
+	})
+	guard.empty.Store(false)
+	if err := holderClient.Close(); err != nil {
+		t.Fatalf("disconnect guarded supervisor: %v", err)
+	}
+
+	followerClient := ensure(t, home, "")
+	_, follower := acquireAsync(followerClient, wingwire.AdmissionRequest{
+		RunID: "disconnected-follower", SemaphoresOnly: true,
+		Semaphores: []wingwire.SemaphoreClaim{{Name: "exclusive", Cost: 1, Capacity: 1, Policy: wingwire.PolicyQueue}},
+	})
+	control := ensure(t, home, "")
+	found, err := control.CancelLease(context.Background(), "disconnected-guard")
+	if err != nil || !found {
+		t.Fatalf("cancel disconnected guarded session: found=%v err=%v", found, err)
+	}
+	if !guard.terminated.Load() {
+		t.Fatal("daemon did not terminate the disconnected guarded session")
+	}
+	result := waitResult(t, follower, 2*time.Second)
+	if result.err != nil {
+		t.Fatalf("follower after disconnected cancellation: %v", result.err)
+	}
+	_ = result.lease.Release()
 }
 
 func TestGuardedCancellationRetainsAdmissionUntilSessionStops(t *testing.T) {
