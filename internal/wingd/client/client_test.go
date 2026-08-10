@@ -183,10 +183,11 @@ func TestEnsureDaemon_BoundsAnUnreachablePredecessorElection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	_, err = EnsureDaemon(ctx, Options{
-		Home:        home,
-		Spawn:       func(string, string) error { t.Fatal("spawned while predecessor held election"); return nil },
-		DialTimeout: time.Millisecond,
-		Backoff:     time.Nanosecond,
+		Home:                   home,
+		Spawn:                  func(string, string) error { t.Fatal("spawned while predecessor held election"); return nil },
+		DialTimeout:            time.Millisecond,
+		Backoff:                time.Nanosecond,
+		PredecessorWaitTimeout: 20 * time.Millisecond,
 	})
 	if err == nil {
 		t.Fatal("unreachable predecessor election waited forever")
