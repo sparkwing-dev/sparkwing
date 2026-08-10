@@ -1494,6 +1494,9 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		if c.role == roleHolder {
 			if guard := d.guards[c.leaseID]; guard != nil {
 				guard.disconnected = true
+				if guard.completion == c {
+					guard.completion = nil
+				}
 				d.touchLocked()
 				d.mu.Unlock()
 				return

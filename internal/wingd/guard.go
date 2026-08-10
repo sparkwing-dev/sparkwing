@@ -57,6 +57,13 @@ func procSessionIdentity(session wingwire.ProcessSession) procgroup.SessionIdent
 type sessionGuardState struct {
 	persistedGuard
 	disconnected bool
+	completion   *conn
+}
+
+type guardReconcileState struct {
+	persistedGuard
+	completion *conn
+	finalize   bool
 }
 
 func processSessionMatches(got, want *wingwire.ProcessSession) bool {
@@ -93,6 +100,7 @@ func (d *Daemon) handleGuardComplete(c *conn, req *wingwire.GuardComplete) {
 		c.close()
 		return
 	}
+	guard.completion = c
 	session := guard.Session
 	d.mu.Unlock()
 	empty, err := d.guardInspector.Empty(session)
@@ -102,14 +110,19 @@ func (d *Daemon) handleGuardComplete(c *conn, req *wingwire.GuardComplete) {
 		}
 		return
 	}
-	deliveries, released, err := d.releaseGuardDurably(c.leaseID, session)
+	d.completeEmptyGuard(guardReconcileState{persistedGuard: guard.persistedGuard, completion: c})
+}
+
+func (d *Daemon) completeEmptyGuard(guard guardReconcileState) {
+	deliveries, released, err := d.releaseGuardDurably(guard.LeaseID, guard.Session)
 	if err != nil {
 		d.cfg.logf("guard: persist completion for %s: %v", guard.RunID, err)
-		c.close()
+		if guard.completion != nil {
+			guard.completion.close()
+		}
 		return
 	}
 	if !released {
-		c.close()
 		return
 	}
 	for _, delivery := range deliveries {
@@ -117,7 +130,12 @@ func (d *Daemon) handleGuardComplete(c *conn, req *wingwire.GuardComplete) {
 			go d.handleDisconnect(delivery.c)
 		}
 	}
-	_ = c.send(&wingwire.GuardCompleteAck{})
+	if guard.completion != nil {
+		_ = guard.completion.send(&wingwire.GuardCompleteAck{})
+	}
+	if guard.finalize && d.cfg.FinalizeRun != nil {
+		go d.cfg.FinalizeRun(guard.RunID)
+	}
 }
 
 func (d *Daemon) disconnectedGuardForRunLocked(runID string) *sessionGuardState {
@@ -194,11 +212,13 @@ func (d *Daemon) persistedGuardsLocked() []persistedGuard {
 	return guards
 }
 
-func (d *Daemon) disconnectedGuardsLocked() []persistedGuard {
-	guards := make([]persistedGuard, 0, len(d.guards))
+func (d *Daemon) reconcilableGuardsLocked() []guardReconcileState {
+	guards := make([]guardReconcileState, 0, len(d.guards))
 	for _, guard := range d.guards {
-		if guard.disconnected {
-			guards = append(guards, guard.persistedGuard)
+		if guard.disconnected || guard.completion != nil {
+			guards = append(guards, guardReconcileState{
+				persistedGuard: guard.persistedGuard, completion: guard.completion, finalize: guard.disconnected,
+			})
 		}
 	}
 	sort.Slice(guards, func(i, j int) bool { return guards[i].LeaseID < guards[j].LeaseID })
@@ -222,7 +242,7 @@ func (d *Daemon) guardLoop(ctxDone <-chan struct{}) {
 
 func (d *Daemon) reconcileGuards() {
 	d.mu.Lock()
-	guards := d.disconnectedGuardsLocked()
+	guards := d.reconcilableGuardsLocked()
 	d.mu.Unlock()
 	for _, guard := range guards {
 		empty, err := d.guardInspector.Empty(guard.Session)
@@ -233,26 +253,7 @@ func (d *Daemon) reconcileGuards() {
 		if !empty {
 			continue
 		}
-		d.releaseEmptyGuard(guard)
-	}
-}
-
-func (d *Daemon) releaseEmptyGuard(guard persistedGuard) {
-	deliveries, released, err := d.releaseGuardDurably(guard.LeaseID, guard.Session)
-	if err != nil {
-		d.cfg.logf("guard: persist empty session for %s: %v", guard.RunID, err)
-		return
-	}
-	if !released {
-		return
-	}
-	for _, delivery := range deliveries {
-		if err := delivery.c.send(delivery.msg); err != nil {
-			go d.handleDisconnect(delivery.c)
-		}
-	}
-	if d.cfg.FinalizeRun != nil {
-		go d.cfg.FinalizeRun(guard.RunID)
+		d.completeEmptyGuard(guard)
 	}
 }
 
