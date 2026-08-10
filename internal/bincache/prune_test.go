@@ -1,6 +1,8 @@
 package bincache
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -204,5 +206,20 @@ func TestConfiguredLimits_HonorEnvironment(t *testing.T) {
 	}
 	if got := ConfiguredMaxEntries(); got != 5 {
 		t.Fatalf("ConfiguredMaxEntries = %d, want 5", got)
+	}
+}
+
+// The compile path falls through to a rebuild when a cached binary
+// vanishes between the stat and the exec, and it recognizes that case
+// by matching fs.ErrNotExist. syscall.Exec returns a bare errno and the
+// Windows fallback returns an *exec.Error, so this pins the property
+// both of those must keep for the retry to trigger.
+func TestExecReplace_MissingBinaryReportsNotExist(t *testing.T) {
+	err := ExecReplace(filepath.Join(t.TempDir(), "absent"), nil, "", os.Environ())
+	if err == nil {
+		t.Fatal("exec of a missing binary should fail rather than replace the process")
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("compileAndExec keys its rebuild retry on fs.ErrNotExist, got %#v", err)
 	}
 }
