@@ -60,6 +60,9 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 	if *semaphore != "" && *semaphoreCapacity <= 0 {
 		return fmt.Errorf("queue exec: --semaphore-capacity must be greater than zero")
 	}
+	if err := queueExecProcessSupport(); err != nil {
+		return fmt.Errorf("queue exec: process-session ownership: %w", err)
+	}
 
 	acquireCtx, cancelAcquire := context.WithCancel(ctx)
 	defer cancelAcquire()
