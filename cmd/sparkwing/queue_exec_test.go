@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -338,6 +339,140 @@ func TestQueueExecLeaseLossTerminatesBeforePromotingNextCommand(t *testing.T) {
 	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
 		return len(qs.Holders) == 0 && len(qs.Waiters) == 0
 	})
+}
+
+func TestQueueExecSupervisorDeathRetainsAdmissionUntilCommandSessionEnds(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exact process-session ownership is unavailable on Windows")
+	}
+	home := queueHome(t)
+	serveQueueDaemon(t, home)
+	tmp := t.TempDir()
+	ready := filepath.Join(tmp, "ready.json")
+	started := filepath.Join(tmp, "started")
+	release := filepath.Join(tmp, "release")
+
+	supervisor := exec.Command(os.Args[0], "-test.run=^TestQueueExecSupervisorProcess$", "--", home, ready, started, release)
+	if err := supervisor.Start(); err != nil {
+		t.Fatalf("start queue-exec supervisor: %v", err)
+	}
+	supervisorDone := make(chan error, 1)
+	go func() { supervisorDone <- supervisor.Wait() }()
+	acquireCtx, cancelAcquire := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancelAcquire()
+		_ = os.WriteFile(release, nil, 0o600)
+		waitForQueueExecProcessExit(t, started)
+		if supervisor.Process != nil {
+			_ = supervisor.Process.Kill()
+		}
+		select {
+		case <-supervisorDone:
+		default:
+		}
+	})
+
+	waitForFile(t, ready)
+	waitForFile(t, started)
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "guarded-command"
+	})
+
+	followerClient, err := wingdclient.EnsureDaemon(acquireCtx, wingdclient.Options{Home: home, Version: "v1.0.0"})
+	if err != nil {
+		t.Fatalf("connect follower: %v", err)
+	}
+	t.Cleanup(func() { _ = followerClient.Close() })
+	type acquireResult struct {
+		lease *wingdclient.Lease
+		err   error
+	}
+	followerResult := make(chan acquireResult, 1)
+	go func() {
+		lease, acquireErr := followerClient.Acquire(acquireCtx, wingwire.AdmissionRequest{
+			RunID: "guarded-follower", SemaphoresOnly: true,
+			Semaphores: []wingwire.SemaphoreClaim{{Name: "bootstrap", Cost: 1, Capacity: 1, Policy: wingwire.PolicyQueue}},
+		}, nil)
+		followerResult <- acquireResult{lease: lease, err: acquireErr}
+	}()
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Waiters) == 1 && qs.Waiters[0].RunID == "guarded-follower"
+	})
+
+	if err := supervisor.Process.Kill(); err != nil {
+		t.Fatalf("kill queue-exec supervisor: %v", err)
+	}
+	if err := <-supervisorDone; err == nil {
+		t.Fatal("killed queue-exec supervisor exited successfully")
+	}
+	select {
+	case result := <-followerResult:
+		if result.lease != nil {
+			_ = result.lease.Release()
+		}
+		t.Fatalf("follower promoted while the killed supervisor's command remained live: %v", result.err)
+	case <-time.After(250 * time.Millisecond):
+	}
+	state := waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 1 && len(qs.Waiters) == 1
+	})
+	if state.Holders[0].RunID != "guarded-command" || state.Waiters[0].RunID != "guarded-follower" {
+		t.Fatalf("supervisor death changed guarded admission: %+v", state)
+	}
+
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatalf("release guarded command: %v", err)
+	}
+	select {
+	case result := <-followerResult:
+		if result.err != nil {
+			t.Fatalf("follower admission after guarded command exit: %v", result.err)
+		}
+		if err := result.lease.Release(); err != nil {
+			t.Fatalf("release follower: %v", err)
+		}
+	case <-time.After(queueExecWait):
+		t.Fatal("follower did not promote after the guarded command exited")
+	}
+}
+
+func TestQueueExecSupervisorProcess(t *testing.T) {
+	separator := -1
+	for i, arg := range os.Args {
+		if arg == "--" {
+			separator = i
+		}
+	}
+	if separator < 0 || len(os.Args) != separator+5 {
+		return
+	}
+	err := runQueue([]string{
+		"exec", "--home", os.Args[separator+1], "--run-id", "guarded-command", "--cores", "0.1",
+		"--semaphore", "bootstrap", "--ready-file", os.Args[separator+2],
+		"--", os.Args[0], "-test.run=^TestQueueExecHelperProcess$", "--", os.Args[separator+3], "0", os.Args[separator+4],
+	})
+	os.Exit(exitCodeFor(err))
+}
+
+func waitForQueueExecProcessExit(t *testing.T, pidFile string) {
+	t.Helper()
+	body, err := os.ReadFile(pidFile)
+	if err != nil {
+		return
+	}
+	pid, err := strconv.Atoi(string(body))
+	if err != nil {
+		t.Errorf("parse queue-exec cleanup pid %q: %v", body, err)
+		return
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Errorf("queue-exec test process %d survived cleanup", pid)
 }
 
 func containsString(values []string, want string) bool {
