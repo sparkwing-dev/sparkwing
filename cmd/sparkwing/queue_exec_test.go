@@ -141,7 +141,7 @@ func TestQueueExecSerializesFreshCommandsAndClearsAdmission(t *testing.T) {
 	go func() {
 		first <- runQueue([]string{
 			"exec", "--home", home, "--run-id", "bootstrap-first", "--cores", "0.1",
-			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", firstStarted, "0", firstRelease,
+			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", firstStarted, "17", firstRelease,
 		})
 	}()
 	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
@@ -175,8 +175,8 @@ func TestQueueExecSerializesFreshCommandsAndClearsAdmission(t *testing.T) {
 	if err := os.WriteFile(firstRelease, nil, 0o600); err != nil {
 		t.Fatalf("release first command: %v", err)
 	}
-	if err := <-first; err != nil {
-		t.Fatalf("first command: %v", err)
+	if err := <-first; exitCodeFor(err) != 17 {
+		t.Fatalf("first command exit = %d, want 17: %v", exitCodeFor(err), err)
 	}
 	if err := <-second; err != nil {
 		t.Fatalf("second command: %v", err)
@@ -188,6 +188,46 @@ func TestQueueExecSerializesFreshCommandsAndClearsAdmission(t *testing.T) {
 	if len(cleared.Holders) != 0 || len(cleared.Waiters) != 0 {
 		t.Fatalf("queue did not clear: %+v", cleared)
 	}
+}
+
+func TestQueueExecCancellationAfterGrantFailsAndReapsCommand(t *testing.T) {
+	home := queueHome(t)
+	serveQueueDaemon(t, home)
+	tmp := t.TempDir()
+	started := filepath.Join(tmp, "started")
+	neverRelease := filepath.Join(tmp, "never-release")
+	result := make(chan error, 1)
+	go func() {
+		result <- runQueue([]string{
+			"exec", "--home", home, "--run-id", "running-bootstrap", "--cores", "0.1",
+			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", started, "0", neverRelease,
+		})
+	}()
+	waitForFile(t, started)
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "running-bootstrap"
+	})
+
+	control, err := wingdclient.EnsureDaemon(context.Background(), wingdclient.Options{Home: home, Version: "v1.0.0"})
+	if err != nil {
+		t.Fatalf("connect control: %v", err)
+	}
+	found, err := control.CancelLease(context.Background(), "running-bootstrap")
+	_ = control.Close()
+	if err != nil || !found {
+		t.Fatalf("cancel running command: found=%v err=%v", found, err)
+	}
+	select {
+	case runErr := <-result:
+		if runErr == nil {
+			t.Fatal("cancelled running command returned success")
+		}
+	case <-time.After(queueExecWait):
+		t.Fatal("cancelled running command did not terminate")
+	}
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 0 && len(qs.Waiters) == 0
+	})
 }
 
 func containsString(values []string, want string) bool {
