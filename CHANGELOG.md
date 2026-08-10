@@ -78,6 +78,9 @@ code change to unlock.
 
 ### Fixed
 
+- **queue:** External CPU now subtracts measured live holder process-tree usage
+  instead of reserved lease capacity. Process reuse, overlapping trees, sensor
+  loss, and macOS sampling no longer make queue headroom contradict host load.
 - **queue:** Internal nodes and barriers now retain their owning run's original
   queue rank, so a newer run cannot overtake an older live run by submitting
   its work first. The daemon verifies the live owner lease before applying

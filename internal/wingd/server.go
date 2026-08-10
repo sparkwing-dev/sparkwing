@@ -30,6 +30,7 @@ type Daemon struct {
 	layout         layout
 	sampler        HostSampler
 	procSampler    ProcSampler
+	ownedSampler   OwnedCPUSampler
 	guardInspector SessionGuardInspector
 
 	lockFile *os.File
@@ -63,12 +64,13 @@ type Daemon struct {
 	lastActivity        time.Time
 	startedAt           time.Time
 
-	loadInit     bool
-	smoothedLoad float64
-	smoothedBusy float64
-	headroomInit bool
-	appliedCores float64
-	appliedMem   uint64
+	loadInit         bool
+	externalInit     bool
+	smoothedLoad     float64
+	smoothedExternal float64
+	headroomInit     bool
+	appliedCores     float64
+	appliedMem       uint64
 	// reservedCores/externalCores and their memory counterparts hold the
 	// headroom decomposition from the sample that set the applied headroom:
 	// the reserve margin and the measured non-sparkwing load per host
@@ -129,6 +131,11 @@ type delivery struct {
 // New constructs a daemon for cfg without electing or serving. Run does
 // the election and blocks.
 func New(cfg Config) (*Daemon, error) {
+	if cfg.Sampler != nil && cfg.OwnedCPUSampler != nil {
+		if _, paired := cfg.Sampler.(pairedHostOwnedSampler); paired {
+			return nil, fmt.Errorf("wingd: Config.Sampler and Config.OwnedCPUSampler both provide owned CPU accounting")
+		}
+	}
 	lay, err := resolveLayout(cfg.Home)
 	if err != nil {
 		return nil, err
@@ -136,6 +143,9 @@ func New(cfg Config) (*Daemon, error) {
 	sampler := cfg.Sampler
 	if sampler == nil {
 		sampler = &platformSampler{}
+		if cfg.OwnedCPUSampler != nil {
+			sampler = hostSamplerOnly{HostSampler: sampler}
+		}
 	}
 	procSampler := cfg.ProcSampler
 	if procSampler == nil {
@@ -145,11 +155,16 @@ func New(cfg Config) (*Daemon, error) {
 	if guardInspector == nil {
 		guardInspector = processSessionInspector{}
 	}
+	ownedSampler := cfg.OwnedCPUSampler
+	if ownedSampler == nil {
+		ownedSampler = newOwnedCPUSampler()
+	}
 	return &Daemon{
 		cfg:                 cfg,
 		layout:              lay,
 		sampler:             sampler,
 		procSampler:         procSampler,
+		ownedSampler:        ownedSampler,
 		guardInspector:      guardInspector,
 		container:           containerSensorFor(cfg),
 		ready:               make(chan struct{}),
