@@ -37,6 +37,7 @@ func TestQueueExecWaitsInDaemonBeforeStartingCommand(t *testing.T) {
 	t.Cleanup(func() { _ = holder.Release() })
 
 	marker := filepath.Join(t.TempDir(), "started")
+	ready := filepath.Join(t.TempDir(), "ready.json")
 	result := make(chan error, 1)
 	submittedAt := time.Now()
 	go func() {
@@ -45,6 +46,7 @@ func TestQueueExecWaitsInDaemonBeforeStartingCommand(t *testing.T) {
 			"--run-id", "waiting-bootstrap",
 			"--cores", "0.1",
 			"--semaphore", "bootstrap",
+			"--ready-file", ready,
 			"--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", marker, "23",
 		})
 	}()
@@ -83,6 +85,14 @@ func TestQueueExecWaitsInDaemonBeforeStartingCommand(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("command started before admission: %v", err)
+	}
+	readyBody, err := os.ReadFile(ready)
+	if err != nil {
+		t.Fatalf("read readiness: %v", err)
+	}
+	if !strings.Contains(string(readyBody), `"run_id":"waiting-bootstrap"`) ||
+		!strings.Contains(string(readyBody), `"state":"queued"`) {
+		t.Fatalf("readiness does not bind the queued participant: %s", readyBody)
 	}
 
 	if err := holder.Release(); err != nil {
@@ -144,6 +154,7 @@ func TestQueueExecSerializesFreshCommandsAndClearsAdmission(t *testing.T) {
 			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", firstStarted, "17", firstRelease,
 		})
 	}()
+	t.Cleanup(func() { _ = os.WriteFile(firstRelease, nil, 0o600) })
 	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
 		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "bootstrap-first"
 	})
