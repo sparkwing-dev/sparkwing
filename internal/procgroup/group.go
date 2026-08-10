@@ -15,6 +15,10 @@ import (
 // ErrCleanup identifies a process group that could not be proven empty.
 var ErrCleanup = errors.New("process group cleanup failed")
 
+var sessionProcessTable = processTable
+
+var sessionIdentityLookup = sessionIdentity
+
 // Info describes one process-table entry.
 type Info struct {
 	PID     int
@@ -97,7 +101,7 @@ func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) 
 	if identity.LeaderPID <= 1 || identity.SessionID != identity.LeaderPID || identity.BirthToken == "" {
 		return false, fmt.Errorf("invalid guarded session identity")
 	}
-	processes, err := processTable(true)
+	processes, err := sessionProcessTable(true)
 	if err != nil {
 		return false, err
 	}
@@ -109,7 +113,7 @@ func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) 
 		}
 	}
 	if leaderInSession {
-		_, token, err := sessionIdentity(identity.LeaderPID)
+		_, token, err := sessionIdentityLookup(identity.LeaderPID)
 		if err != nil {
 			return false, err
 		}
