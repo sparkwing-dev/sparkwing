@@ -22,6 +22,8 @@ import (
 
 const queueExecCleanupTimeout = 10 * time.Second
 
+var errQueueExecLeaseLost = errors.New("admission lease connection lost")
+
 var queueExecProcessSupport = procgroup.Supported
 
 var queueExecWatchLease = func(lease *wingdclient.Lease, onCancel func(wingwire.Cancel)) {
@@ -126,12 +128,16 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 	}
 
 	cancelled := make(chan struct{}, 1)
-	go queueExecWatchLease(lease, func(wingwire.Cancel) {
-		select {
-		case cancelled <- struct{}{}:
-		default:
-		}
-	})
+	leaseEnded := make(chan struct{})
+	go func() {
+		queueExecWatchLease(lease, func(wingwire.Cancel) {
+			select {
+			case cancelled <- struct{}{}:
+			default:
+			}
+		})
+		close(leaseEnded)
+	}()
 	finished := make(chan error, 1)
 	go func() { finished <- group.Finish(context.Background(), queueExecCleanupTimeout) }()
 
@@ -140,6 +146,8 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 	case commandErr = <-finished:
 	case <-cancelled:
 		commandErr = terminateQueueExec(group)
+	case <-leaseEnded:
+		commandErr = errors.Join(errQueueExecLeaseLost, terminateQueueExec(group))
 	case <-ctx.Done():
 		commandErr = errors.Join(ctx.Err(), terminateQueueExec(group))
 	}

@@ -294,16 +294,18 @@ func TestQueueExecLeaseLossTerminatesBeforePromotingNextCommand(t *testing.T) {
 	started := filepath.Join(tmp, "started")
 	release := filepath.Join(tmp, "release")
 	result := make(chan error, 1)
+	resultDone := make(chan struct{})
 	go func() {
 		result <- runQueue([]string{
 			"exec", "--home", home, "--run-id", "lost-bootstrap", "--cores", "0.1",
 			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", started, "0", release,
 		})
+		close(resultDone)
 	}()
 	t.Cleanup(func() {
 		_ = os.WriteFile(release, nil, 0o600)
 		select {
-		case <-result:
+		case <-resultDone:
 		case <-time.After(queueExecWait):
 		}
 	})
