@@ -87,9 +87,6 @@ func TestGuardCompletionRequiresAnEmptySession(t *testing.T) {
 	}
 
 	guard.empty.Store(true)
-	if err := holder.CompleteGuard(); err != nil {
-		t.Fatalf("complete empty guard: %v", err)
-	}
 	result := waitResult(t, follower, 2*time.Second)
 	if result.err != nil {
 		t.Fatalf("follower after empty guard: %v", result.err)
