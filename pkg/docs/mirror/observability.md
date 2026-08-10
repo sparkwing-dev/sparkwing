@@ -174,7 +174,7 @@ The dashboard shows failure information where a run's detail is:
 
 Finished runs (and their metrics) are kept until you prune them. There
 is no automatic time-based cleanup; use `sparkwing runs prune` to delete
-runs past a threshold or by id (see [cli-reference.md](cli-reference.md)).
+runs past a threshold or by id (see [cli-runs.md](cli-runs.md)).
 
 ## OpenTelemetry
 

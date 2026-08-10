@@ -30,10 +30,12 @@ func TestGuideTopicsAllResolve(t *testing.T) {
 // every guide read expensive to deliver something nobody reads end to
 // end. `docs search` is the path to those.
 func TestGuidesExcludeGeneratedReferences(t *testing.T) {
-	banned := map[string]bool{"sdk-reference": true, "cli-reference": true, "changelog": true}
+	banned := map[string]bool{"sdk-reference": true, "changelog": true}
 	for _, g := range docs.Guides() {
 		for _, slug := range g.Topics {
-			if banned[slug] {
+			// cli-reference and its per-group cli-<group> pages are all
+			// generated lookup tables.
+			if banned[slug] || strings.HasPrefix(slug, "cli-") {
 				t.Errorf("guide %q includes generated reference %q", g.Name, slug)
 			}
 		}

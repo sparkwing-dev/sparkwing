@@ -381,7 +381,7 @@ and the overlay. What each subcommand does:
   below).
 
 For the exact flags each subcommand takes, see
-[cli-reference.md](cli-reference.md).
+[cli-pipeline.md](cli-pipeline.md).
 
 ### Warmup
 

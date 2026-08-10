@@ -58,7 +58,7 @@ drift-gated):
 
 ```
 docs/
-  cli-reference.md       every command, flag, and argument
+  cli-reference.md       command-group index; cli-<group>.md pages hold every flag and argument
   config-reference.md    every YAML config field
   sdk-reference.md       the sparkwing package
   api-reference.md       controller + logs HTTP routes

@@ -49,6 +49,31 @@
         "api-reference",
         "mcp"
       ]
+    },
+    {
+      "label": "CLI reference",
+      "slugs": [
+        "cli-cluster",
+        "cli-commands",
+        "cli-completion",
+        "cli-configure",
+        "cli-daemon",
+        "cli-dashboard",
+        "cli-debug",
+        "cli-docs",
+        "cli-doctor",
+        "cli-examples",
+        "cli-info",
+        "cli-pipeline",
+        "cli-profile",
+        "cli-queue",
+        "cli-repos",
+        "cli-run",
+        "cli-runs",
+        "cli-secrets",
+        "cli-update",
+        "cli-version"
+      ]
     }
   ],
   "excluded": ["proposals/", "migrations/", "changelog-style"]

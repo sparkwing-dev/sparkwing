@@ -274,9 +274,19 @@ code change to unlock.
   unreadable state file after the operator verifies guarded commands stopped,
   providing an explicit escape from fail-closed startup without silently
   discarding unknown lease authority.
+- **commands:** `sparkwing commands -o markdown --split-dir DIR` writes the
+  CLI reference as one page per top-level command group plus a
+  `cli-reference.md` index, pruning generated pages for groups that no longer
+  exist. `bin/gen-cli-docs.sh` and the pre-push drift gate use it.
 
 ### Docs
 
+- **cli-reference:** split into one page per command group (`cli-runs.md`,
+  `cli-pipeline.md`, ...) with `cli-reference.md` as the index. The single
+  page had grown to 155K characters, past the ~100K truncation limit of most
+  agent fetch tooling, so commands late in the alphabet were silently
+  invisible to agents reading the page; the largest per-group page is ~35K.
+  Offline: `sparkwing docs read --topic cli-<group>`.
 - **docs:** repository-wide accuracy audit. Every documentation surface was
   verified against the code and corrected where it had drifted; the largest
   fixes: the `Plan` interface signature and registration pattern in
@@ -303,6 +313,34 @@ code change to unlock.
   each `modules[]` entry's Go module path is cross-checked against that
   directory's `go.mod`. The path argument is also accepted positionally, as
   the command's own examples show it.
+- **queue:** External CPU now subtracts measured live holder process-tree usage
+  instead of reserved lease capacity. Process reuse, overlapping trees, sensor
+  loss, and macOS sampling no longer make queue headroom contradict host load.
+- **queue:** Internal nodes and barriers now retain their owning run's original
+  queue rank, so a newer run cannot overtake an older live run by submitting
+  its work first. The daemon verifies the live owner lease before applying
+  that rank; invalid or stale ownership claims keep ordinary arrival order.
+- **queue:** Start-time estimates now remain unknown when an active holder has
+  outlived its measured duration, instead of promising immediate admission
+  while capacity is still occupied.
+- **queue:** Start and clear estimates now simulate host and semaphore
+  constraints together, including atomic multi-resource admission and
+  backfill. A waiter blocked by a semaphore no longer reports the earlier
+  host-only estimate, and unknown or overflowing resource bounds stay unknown.
+- **queue telemetry:** Run listings retain concurrent node admission waits,
+  distinguish plan-level admission from node admission, and correlate terminal
+  events with the matching request. Interleaved or stale events no longer erase
+  a live wait or make a run-level queue position look like node execution.
+- **local admission:** Explicit cancellation is persisted before execution is
+  signalled, applies atomically to every member of a shared lease, survives
+  daemon restart and connection replacement, and cannot resurrect a terminal
+  run through admission or reattachment.
+- **local admission:** Guarded session inspection now retains capacity when a
+  recycled leader PID coexists with live session members, ordinary unguarded
+  state remains readable by the previous release, and disconnected
+  cancellation gets the same cooperative cleanup window as its supervisor.
+- **queue telemetry:** Semaphore constraints now appear in the blocking reason
+  instead of leaving a blocked waiter with only its host-capacity explanation.
 - **queue:** External CPU now subtracts measured live holder process-tree usage
   instead of reserved lease capacity. Process reuse, overlapping trees, sensor
   loss, and macOS sampling no longer make queue headroom contradict host load.

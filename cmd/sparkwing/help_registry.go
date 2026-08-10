@@ -415,9 +415,12 @@ description, positional args, flags, examples, subcommands --
 from the same Command values that power --help. That is 235KB
 for the unfiltered surface, so pair it with --path unless you
 genuinely want all of it. -o plain is one path per line for
-shell consumption; -o markdown generates docs/cli-reference.md.`,
+shell consumption; -o markdown renders a reference page, and
+with --split-dir writes the docs/cli-*.md reference (one page
+per top-level command group plus a cli-reference.md index).`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | markdown | plain", Default: "pretty", Group: "Output"},
+		{Name: "split-dir", Argument: "DIR", Desc: "With -o markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages", Group: "Output"},
 		{Name: "path", Argument: "PREFIX", Desc: "Only emit commands whose Path starts with PREFIX", Group: "Filter"},
 		{Name: "include-hidden", Desc: "Also emit Hidden:true commands (default: skip)", Group: "Filter"},
 	},

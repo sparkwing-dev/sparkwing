@@ -85,7 +85,7 @@ func checkCLIVerbs(contentDir, repoRoot string) bool {
 		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
 			return nil
 		}
-		if generatedDocs[filepath.Base(path)] {
+		if isGeneratedDoc(path) {
 			return nil
 		}
 		data, rerr := os.ReadFile(path)
