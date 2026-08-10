@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -594,7 +595,13 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	args := []string{"build"}
+	// -trimpath keeps the build directory out of the output. Without
+	// it two checkouts of one commit compile to different bytes, so a
+	// cache key shared between them would be a lie: the second checkout
+	// would run a binary carrying the first one's absolute paths. The
+	// cost is that panics and runtime.Caller report module-relative
+	// paths rather than paths on this machine.
+	args := []string{"build", "-trimpath"}
 	env := os.Environ()
 	overlay := overlayModfilePath(sparkwingDir)
 	work, workPresent := goWorkInScope(sparkwingDir)
@@ -766,29 +773,32 @@ func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, err
 	if err != nil {
 		return "", err
 	}
-	workTargets, workFile, err := localWorkspaceTargets(sparkwingDir)
+	workTargets, workSummary, err := localWorkspaceTargets(sparkwingDir)
 	if err != nil {
 		return "", err
 	}
-	if workFile != "" {
-		data, err := os.ReadFile(workFile)
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprint(h, "go.work:")
-		h.Write(data)
-		fmt.Fprintln(h)
+	if workSummary != "" {
+		fmt.Fprint(h, workSummary)
 	}
+
 	replaceTargets = append(replaceTargets, workTargets...)
-	sort.Strings(replaceTargets)
-	var last string
+	sort.Slice(replaceTargets, func(i, j int) bool {
+		if replaceTargets[i].Label != replaceTargets[j].Label {
+			return replaceTargets[i].Label < replaceTargets[j].Label
+		}
+		return replaceTargets[i].Dir < replaceTargets[j].Dir
+	})
+	var last replaceTarget
 	for _, t := range replaceTargets {
 		if t == last {
 			continue
 		}
 		last = t
-		fmt.Fprintf(h, "replace:%s\n", t)
-		if err := hashDirInto(h, t, allFiles); err != nil {
+		// Only the label reaches the digest. The directory is read for
+		// content on the next line but never recorded, so the same
+		// module at a different path still yields the same key.
+		fmt.Fprintf(h, "replace:%s\n", t.Label)
+		if err := hashDirInto(h, t.Dir, allFiles); err != nil {
 			return "", err
 		}
 	}
@@ -878,21 +888,23 @@ func goMajorMinor() string {
 	return v
 }
 
+// hashDirInto folds every build-relevant file under dir into h as
+// "<path relative to dir>\x00<sha256 of contents>". Paths are relative
+// and digests are content-only -- no mtime, size, or inode -- so two
+// checkouts holding identical files produce identical bytes here
+// regardless of where they sit on disk.
+//
+// Files git ignores are skipped; see [ignoredUnder] for why that is
+// what makes the result portable rather than merely cheaper.
 func hashDirInto(h io.Writer, dir string, keep fileFilter) error {
-	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		name := d.Name()
-		if d.IsDir() {
-			switch name {
-			case "node_modules", ".git", ".claude-scratch", "web":
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if !keep(name) {
-			return nil
+	files, err := walkHashable(dir, keep)
+	if err != nil {
+		return err
+	}
+	ignored := ignoredUnder(dir, files)
+	for _, path := range files {
+		if ignored[path] {
+			continue
 		}
 		rel, _ := filepath.Rel(dir, path)
 		f, err := os.Open(path)
@@ -906,14 +918,79 @@ func hashDirInto(h io.Writer, dir string, keep fileFilter) error {
 			return copyErr
 		}
 		fmt.Fprintf(h, "%s\x00%x\n", rel, fileH.Sum(nil))
-		return nil
-	})
+	}
+	return nil
 }
 
-// localReplaceTargets returns absolute paths of every local-path
-// replace directive in go.mod. Remote replaces are ignored (the go.mod
-// hash already covers them).
-func localReplaceTargets(goModPath string) ([]string, error) {
+// walkHashable lists the files under dir that keep admits, in the
+// lexical order [filepath.WalkDir] guarantees, so the digest a caller
+// builds from them is stable. Reading contents is deferred to the
+// caller because the ignore check is one batched call over the whole
+// list, and skipping a file is far cheaper than opening it.
+func walkHashable(dir string, keep fileFilter) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case "node_modules", ".git", ".claude-scratch", "web":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !keep(d.Name()) {
+			return nil
+		}
+		files = append(files, path)
+		return nil
+	})
+	return files, err
+}
+
+// replaceTarget is one local module folded into the cache key. Label is
+// the module identity recorded in the digest; Dir is where that module
+// happens to live on this machine and is read for content but never
+// written into the key. Keeping the two apart is what lets two
+// checkouts of one commit agree on a key from different paths.
+type replaceTarget struct {
+	Label string
+	Dir   string
+}
+
+// replaceLabel renders a replaced module's identity. The version is
+// part of it because `replace foo v1.2.3 => ./foo` and a blanket
+// `replace foo => ./foo` are different directives and must not collide.
+func replaceLabel(old module.Version) string {
+	if old.Version == "" {
+		return old.Path
+	}
+	return old.Path + "@" + old.Version
+}
+
+// moduleLabelOf reads the module path declared by dir's own go.mod. A
+// workspace `use` directive names a directory rather than a module, so
+// this is how such a target acquires a portable identity. Use.ModulePath
+// is deliberately not consulted: it is documented as the path found in a
+// comment and is not reliably populated.
+func moduleLabelOf(dir string) (string, error) {
+	p := filepath.Join(dir, "go.mod")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return "", fmt.Errorf("workspace module %s: %w", dir, err)
+	}
+	path := modfile.ModulePath(data)
+	if path == "" {
+		return "", fmt.Errorf("workspace module %s: no module directive in go.mod", dir)
+	}
+	return path, nil
+}
+
+// localReplaceTargets returns every local-path replace directive in
+// go.mod, labeled by the module it replaces. Remote replaces are
+// ignored (the go.mod hash already covers them).
+func localReplaceTargets(goModPath string) ([]replaceTarget, error) {
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
 		return nil, err
@@ -923,7 +1000,7 @@ func localReplaceTargets(goModPath string) ([]string, error) {
 		return nil, err
 	}
 	dir := filepath.Dir(goModPath)
-	var out []string
+	var out []replaceTarget
 	for _, r := range mf.Replace {
 		np := r.New.Path
 		if np == "" || !isLocalPath(np) {
@@ -933,7 +1010,7 @@ func localReplaceTargets(goModPath string) ([]string, error) {
 		if !filepath.IsAbs(abs) {
 			abs = filepath.Clean(filepath.Join(dir, np))
 		}
-		out = append(out, abs)
+		out = append(out, replaceTarget{Label: replaceLabel(r.Old), Dir: abs})
 	}
 	return out, nil
 }
@@ -942,16 +1019,24 @@ func isLocalPath(p string) bool {
 	return strings.HasPrefix(p, ".") || strings.HasPrefix(p, "/")
 }
 
-// localWorkspaceTargets returns the local module directories an
-// in-scope go.work contributes to the pipeline build -- its `use`
-// modules and any filesystem-path `replace` targets -- along with the
-// go.work file itself so its own contents fold into the key. It mirrors
+// localWorkspaceTargets returns the local modules an in-scope go.work
+// contributes to the pipeline build -- its `use` modules and any
+// filesystem-path `replace` targets -- along with a normalized summary
+// of the workspace's own build-affecting directives. It mirrors
 // CompilePipeline's workspace decision: a workspace that does not cover
 // sparkwingDir is ignored (the build disables it via GOWORK=off), and
 // sparkwingDir itself is excluded because the caller already hashes it.
 // When no workspace applies, both results are empty and the caller's
 // no-replace fast path is untouched.
-func localWorkspaceTargets(sparkwingDir string) (dirs []string, workFile string, err error) {
+//
+// The summary is normalized rather than a hash of the file's bytes so
+// that comments, directive order, and the spelling of a `use` path --
+// all of which differ between two checkouts of one commit -- do not
+// perturb the key. It enumerates every field [modfile.WorkFile] carries
+// (Go, Toolchain, Godebug, Use, Replace); hashing raw bytes covered
+// those by accident, so anything omitted here silently stops
+// invalidating the cache.
+func localWorkspaceTargets(sparkwingDir string) (targets []replaceTarget, summary string, err error) {
 	work, ok := goWorkInScope(sparkwingDir)
 	if !ok || !goWorkCovers(work, sparkwingDir) {
 		return nil, "", nil
@@ -970,9 +1055,10 @@ func localWorkspaceTargets(sparkwingDir string) (dirs []string, workFile string,
 	}
 	absSparkwing = filepath.Clean(absSparkwing)
 	workDir := filepath.Dir(work)
-	add := func(p string) {
+
+	resolve := func(p string) string {
 		if p == "" {
-			return
+			return ""
 		}
 		abs := p
 		if !filepath.IsAbs(abs) {
@@ -980,17 +1066,66 @@ func localWorkspaceTargets(sparkwingDir string) (dirs []string, workFile string,
 		}
 		abs = filepath.Clean(abs)
 		if abs == absSparkwing {
-			return
+			return ""
 		}
-		dirs = append(dirs, abs)
+		return abs
 	}
+
+	var b strings.Builder
+	b.WriteString("go.work\n")
+	if wf.Go != nil {
+		fmt.Fprintf(&b, "go:%s\n", wf.Go.Version)
+	}
+	if wf.Toolchain != nil {
+		fmt.Fprintf(&b, "toolchain:%s\n", wf.Toolchain.Name)
+	}
+	godebugs := make([]string, 0, len(wf.Godebug))
+	for _, g := range wf.Godebug {
+		godebugs = append(godebugs, g.Key+"="+g.Value)
+	}
+	sort.Strings(godebugs)
+	for _, g := range godebugs {
+		fmt.Fprintf(&b, "godebug:%s\n", g)
+	}
+
+	uses := make([]string, 0, len(wf.Use))
 	for _, u := range wf.Use {
-		add(u.Path)
-	}
-	for _, r := range wf.Replace {
-		if isLocalPath(r.New.Path) {
-			add(r.New.Path)
+		abs := resolve(u.Path)
+		if abs == "" {
+			continue
 		}
+		label, err := moduleLabelOf(abs)
+		if err != nil {
+			return nil, "", err
+		}
+		targets = append(targets, replaceTarget{Label: label, Dir: abs})
+		uses = append(uses, label)
 	}
-	return dirs, work, nil
+	sort.Strings(uses)
+	for _, u := range uses {
+		fmt.Fprintf(&b, "use:%s\n", u)
+	}
+
+	replaces := make([]string, 0, len(wf.Replace))
+	for _, r := range wf.Replace {
+		label := replaceLabel(r.Old)
+		if isLocalPath(r.New.Path) {
+			abs := resolve(r.New.Path)
+			if abs == "" {
+				continue
+			}
+			targets = append(targets, replaceTarget{Label: label, Dir: abs})
+			// The replacement's location is deliberately omitted; its
+			// contents are hashed through the target instead.
+			replaces = append(replaces, label+" => local")
+			continue
+		}
+		replaces = append(replaces, label+" => "+replaceLabel(r.New))
+	}
+	sort.Strings(replaces)
+	for _, r := range replaces {
+		fmt.Fprintf(&b, "replace:%s\n", r)
+	}
+
+	return targets, b.String(), nil
 }
