@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -189,6 +190,19 @@ func TestQueueExecSerializesFreshCommandsAndClearsAdmission(t *testing.T) {
 		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "bootstrap-first"
 	})
 	waitForFile(t, firstStarted)
+	if runtime.GOOS != "windows" {
+		body, err := os.ReadFile(firstStarted)
+		if err != nil {
+			t.Fatalf("read command pid: %v", err)
+		}
+		pid, err := strconv.Atoi(string(body))
+		if err != nil {
+			t.Fatalf("parse command pid %q: %v", body, err)
+		}
+		if _, err := procgroup.CaptureSession(pid); err == nil {
+			t.Fatal("command replaced the registered session leader instead of running beneath its stable anchor")
+		}
+	}
 
 	second := make(chan error, 1)
 	secondSubmitted := time.Now()
