@@ -49,7 +49,11 @@ func writeStateWithCancellations(path string, snap admission.Snapshot, events []
 
 func writeStateWithGuards(path string, snap admission.Snapshot, events []admissionEvent, cancelledRuns []string, guards []persistedGuard) error {
 	snap.Waiters = nil
-	data, err := json.Marshal(persistedState{Schema: stateSchema, Snapshot: snap, Events: events, CancelledRuns: cancelledRuns, Guards: guards})
+	schema := 1
+	if len(guards) > 0 {
+		schema = stateSchema
+	}
+	data, err := json.Marshal(persistedState{Schema: schema, Snapshot: snap, Events: events, CancelledRuns: cancelledRuns, Guards: guards})
 	if err != nil {
 		return fmt.Errorf("wingd: marshal state: %w", err)
 	}

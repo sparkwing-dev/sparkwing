@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -279,7 +280,8 @@ func (d *Daemon) finalShutdown() {
 func (d *Daemon) initLedger() error {
 	snap, events, cancelledRuns, guards, err := readStateWithGuards(d.layout.state)
 	if err != nil {
-		return err
+		home := filepath.Dir(d.layout.dir)
+		return fmt.Errorf("wingd: durable state %s is unreadable and may describe live guarded commands; after stopping them, run sparkwing daemon recover-state --yes --home %q: %w", d.layout.state, home, err)
 	}
 	if len(cancelledRuns) > maxCancelledRunTombstones {
 		cancelledRuns = cancelledRuns[len(cancelledRuns)-maxCancelledRunTombstones:]

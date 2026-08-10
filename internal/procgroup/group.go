@@ -19,7 +19,11 @@ var sessionProcessTable = processTable
 
 var sessionIdentityLookup = sessionIdentity
 
-const guardedSessionTerminateGrace = 250 * time.Millisecond
+// DefaultTerminationGrace is the cooperative window every queue-exec owner
+// gives a command after SIGTERM before escalating to SIGKILL.
+const DefaultTerminationGrace = time.Second
+
+const guardedSessionTerminateGrace = DefaultTerminationGrace
 
 const guardedSessionTerminateTimeout = 5 * time.Second
 
@@ -152,18 +156,25 @@ func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) 
 			break
 		}
 	}
+	leaderReused := false
 	if leaderInSession {
 		_, token, err := sessionIdentityLookup(identity.LeaderPID)
 		if err != nil {
 			return false, err
 		}
 		if token != identity.BirthToken {
-			return true, nil
+			leaderReused = true
 		}
 	}
 	for _, process := range processes {
 		if process.Session != identity.SessionID || processTerminated(process.State) {
 			continue
+		}
+		if leaderReused && process.PID == identity.LeaderPID {
+			continue
+		}
+		if leaderReused {
+			return false, fmt.Errorf("guarded session %d has live members after leader identity reuse", identity.SessionID)
 		}
 		if excludeLeader && process.PID == identity.LeaderPID && leaderInSession {
 			continue

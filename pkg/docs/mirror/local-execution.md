@@ -238,11 +238,14 @@ child attaches to the parent's lease instead of re-admitting.
 The ledger survives daemon restarts the same way runs survive daemon
 handoffs: every transition is persisted, and a restarting daemon
 restores the ledger and holds a short window for clients to reclaim
-their leases before releasing the unclaimed rest. A state file can
-never block admission: restored grants the current budget cannot hold
-are shed, a file the daemon cannot restore at all is set aside as
-`state.json.corrupt-<time>` (reported by `sparkwing doctor`), and the
-daemon serves either way -- worst case a run re-requests admission.
+their leases before releasing the unclaimed rest. Restored unguarded
+grants the current budget cannot hold are shed. A file that cannot be
+parsed may describe guarded commands, so the daemon refuses admission
+instead of guessing it is safe to release them. The startup error names
+the file and the explicit recovery command. After verifying those
+commands have stopped, `sparkwing daemon recover-state --yes` preserves
+the bytes as `state.json.corrupt-<time>` for `sparkwing doctor` to report
+and allows the next daemon to start cleanly.
 
 ### Declare nothing; sparkwing measures
 

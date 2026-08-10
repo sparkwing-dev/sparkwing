@@ -39,10 +39,33 @@ func runDaemon(args []string) error {
 		return runDaemonStatus(args[1:])
 	case "restart":
 		return runDaemonRestart(args[1:])
+	case "recover-state":
+		return runDaemonRecoverState(args[1:])
 	default:
 		PrintHelp(cmdDaemon, os.Stderr)
 		return fmt.Errorf("daemon: unknown subcommand %q", args[0])
 	}
+}
+
+func runDaemonRecoverState(args []string) error {
+	fs := flag.NewFlagSet(cmdDaemonRecoverState.Path, flag.ContinueOnError)
+	home := fs.String("home", "", "sparkwing home whose unreadable daemon state should be preserved")
+	yes := fs.Bool("yes", false, "confirm every guarded command described by the unreadable state has stopped")
+	if err := parseAndCheck(cmdDaemonRecoverState, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	if !*yes {
+		return errors.New("daemon recover-state: refusing without --yes; unreadable state may describe live guarded commands")
+	}
+	quarantined, err := wingd.RecoverUnreadableState(*home, time.Now())
+	if err != nil {
+		return fmt.Errorf("daemon recover-state: %w", err)
+	}
+	fmt.Fprintf(os.Stdout, "preserved unreadable daemon state at %s\n", quarantined)
+	return nil
 }
 
 func runDaemonStatus(args []string) error {

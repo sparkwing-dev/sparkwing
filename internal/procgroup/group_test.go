@@ -63,6 +63,9 @@ func TestGroupHelperProcess(t *testing.T) {
 	case "session-cooperative":
 		term := make(chan os.Signal, 1)
 		signal.Notify(term, syscall.SIGTERM)
+		if err := os.WriteFile(os.Getenv("SPARKWING_PROCGROUP_READY"), []byte("ready"), 0o600); err != nil {
+			os.Exit(2)
+		}
 		<-term
 		time.Sleep(500 * time.Millisecond)
 		if err := os.WriteFile(os.Getenv("SPARKWING_PROCGROUP_MARKER"), []byte("clean"), 0o600); err != nil {
@@ -151,8 +154,9 @@ func TestSessionEmptyRetainsAdmissionWhenReusedLeaderHasLiveSessionMembers(t *te
 
 func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "cleanup-complete")
+	ready := marker + ".ready"
 	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-	cmd.Env = append(os.Environ(), helperMode+"=session-cooperative", "SPARKWING_PROCGROUP_MARKER="+marker)
+	cmd.Env = append(os.Environ(), helperMode+"=session-cooperative", "SPARKWING_PROCGROUP_MARKER="+marker, "SPARKWING_PROCGROUP_READY="+ready)
 	group, err := StartSession(cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -161,6 +165,16 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 	identity, err := CaptureSession(group.ID())
 	if err != nil {
 		t.Fatalf("capture cooperative session: %v", err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("cooperative session did not install its signal handler")
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if err := TerminateSession(identity); err != nil {
 		t.Fatalf("terminate cooperative session: %v", err)

@@ -1106,6 +1106,7 @@ The admission daemon starts on demand when a pipeline needs it. Status never sta
 
 - `status` -- Report whether wingd is running and which build it serves
 - `restart` -- Refresh an answering wingd to this installed build
+- `recover-state` -- Preserve unreadable daemon state after guarded commands stop
 
 ### Examples
 
@@ -1115,6 +1116,26 @@ sparkwing daemon status -o json
 
 # Refresh only if already running
 sparkwing daemon restart
+```
+
+## `sparkwing daemon recover-state`
+
+Preserve unreadable daemon state after guarded commands stop
+
+Fail-closed recovery for a daemon that cannot parse its durable state. The unreadable bytes may describe guarded commands that are still running, so first stop or verify those commands, then pass --yes. Recovery holds the daemon election lock, moves state.json to a state.json.corrupt-<time> forensic copy, and never discards readable state.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--home DIR` | Sparkwing home whose unreadable daemon state should be preserved |
+| `--yes` | Confirm every guarded command described by the unreadable state has stopped (required) |
+
+### Examples
+
+```sh
+# Recover only after verifying guarded commands stopped
+sparkwing daemon recover-state --home /path/to/home --yes
 ```
 
 ## `sparkwing daemon restart`
@@ -3209,6 +3230,10 @@ concurrency key, its holders and waiters, and each registered runner's
 free capacity -- so one vocabulary reads local and cluster admission
 alike.
 
+### Subcommands
+
+- `exec` -- Run a command under local machine admission
+
 ### Flags
 
 | Flag | Description |
@@ -3231,6 +3256,37 @@ sparkwing queue -o plain
 
 # Inspect a controller's admission state
 sparkwing queue --profile prod
+```
+
+## `sparkwing queue exec`
+
+Run a command under local machine admission
+
+Submits the command to the local admission daemon before starting it. While blocked, the command is visible in sparkwing queue. Once granted, its complete process tree runs under the lease; interruption or cancellation terminates and reaps that tree before the lease is released. Exact process-session ownership is available on Linux and macOS; queue exec refuses before admission on Windows and other Unix platforms.
+
+### Arguments
+
+- `command` (required) -- Command and arguments to execute after --
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--run-id ID` | Unique admission participant identifier (required) |
+| `--name NAME` | Short operation name shown in the queue |
+| `--repo NAME` | Repository name shown in the queue |
+| `--cores N` | CPU cores reserved while the command runs (required) |
+| `--memory-bytes N` | Memory bytes reserved while the command runs |
+| `--semaphore NAME` | Logical semaphore shared with equivalent commands |
+| `--semaphore-capacity N` | Capacity declared for --semaphore (default: 1) |
+| `--ready-file PATH` | Write queued or granted readiness to a new JSON file |
+| `--home DIR` | Sparkwing state directory |
+
+### Examples
+
+```sh
+# Serialize a bootstrap command
+sparkwing queue exec --run-id build-123 --name bootstrap --cores 1 --semaphore bootstrap -- make prepare
 ```
 
 ## `sparkwing repos`

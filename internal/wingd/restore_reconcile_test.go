@@ -159,7 +159,7 @@ func TestStartup_QuarantinesUnrestorableState(t *testing.T) {
 					Schema   int                `json:"schema"`
 					Snapshot admission.Snapshot `json:"snapshot"`
 				}
-				if jerr := json.Unmarshal(blob, &fresh); jerr != nil || fresh.Schema != 2 || len(fresh.Snapshot.Leases) != 0 {
+				if jerr := json.Unmarshal(blob, &fresh); jerr != nil || fresh.Schema != 1 || len(fresh.Snapshot.Leases) != 0 {
 					t.Errorf("re-persisted state.json is not a clean snapshot (schema %d, %d leases, err %v)",
 						fresh.Schema, len(fresh.Snapshot.Leases), jerr)
 				}

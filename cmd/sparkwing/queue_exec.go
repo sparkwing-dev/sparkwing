@@ -308,5 +308,5 @@ func writeQueueExecReady(path, runID, state string) (resultErr error) {
 func terminateQueueExec(group *procgroup.Group) error {
 	ctx, cancel := context.WithTimeout(context.Background(), queueExecCleanupTimeout)
 	defer cancel()
-	return group.Terminate(ctx, time.Second)
+	return group.Terminate(ctx, procgroup.DefaultTerminationGrace)
 }
