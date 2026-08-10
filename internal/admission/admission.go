@@ -122,6 +122,9 @@ type Request struct {
 	// ID identifies the requesting participant (a run). It becomes the
 	// lease's first member on grant and must not already hold or wait.
 	ID string
+	// OwnerID identifies the live top-level run that owns an internal
+	// participant. Empty uses the participant's own admission rank.
+	OwnerID string
 	// Cores is the host CPU demand in cores; fractional values are
 	// allowed and are accounted in millicores. Zero requests no CPU.
 	Cores float64
@@ -136,7 +139,7 @@ type Request struct {
 	// Semaphores are the named-semaphore holds the request needs.
 	Semaphores []SemaphoreClaim
 	// Priority orders queued work. Larger values admit before smaller
-	// values; equal values keep FIFO order.
+	// values; equal values order by live owner rank, then participant FIFO.
 	Priority int
 }
 

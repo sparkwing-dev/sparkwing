@@ -572,9 +572,10 @@ func softCoreCostSource(costSource wingwire.CostSource) bool {
 	}
 }
 
-func requestFromWire(runID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int) admission.Request {
+func requestFromWire(runID, ownerRunID string, res wingwire.HostResources, sems []wingwire.SemaphoreClaim, costSource wingwire.CostSource, priority int) admission.Request {
 	req := admission.Request{
 		ID:          runID,
+		OwnerID:     ownerRunID,
 		Priority:    priority,
 		Cores:       res.Cores,
 		SoftCores:   softCoreCostSource(costSource),
@@ -727,7 +728,8 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 	} else {
 		charged, pinClamped = d.clampHostChargeLocked(charged, req.CostSource)
 	}
-	ar := requestFromWire(req.RunID, charged, req.Semaphores, req.CostSource, req.Priority)
+	req.OwnerRunID = d.validatedOwnerRunIDLocked(req.OwnerRunID, req.OwnerLeaseToken)
+	ar := requestFromWire(req.RunID, req.OwnerRunID, charged, req.Semaphores, req.CostSource, req.Priority)
 	c.runID = req.RunID
 	c.ownerRunID = req.OwnerRunID
 	c.displayRunID = req.DisplayRunID
@@ -902,6 +904,20 @@ func (d *Daemon) handleAdmission(c *conn, req *wingwire.AdmissionRequest) {
 		d.cfg.logf("cancel_others: run %s superseded %d holder(s)", req.RunID, len(dec.Evicted))
 		d.armCancelTimeout(dec.Evicted, cancelTimeoutFor(req.Semaphores))
 	}
+}
+
+func (d *Daemon) validatedOwnerRunIDLocked(ownerRunID, ownerLeaseToken string) string {
+	if ownerRunID == "" || ownerLeaseToken == "" {
+		return ""
+	}
+	owner := d.byRun[ownerRunID]
+	if owner == nil || !owner.finalizable || owner.role != roleHolder {
+		return ""
+	}
+	if d.ledger.ProvesOwner(ownerLeaseToken, ownerRunID) {
+		return ownerRunID
+	}
+	return ""
 }
 
 func validCostSource(source wingwire.CostSource) bool {

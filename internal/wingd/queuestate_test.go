@@ -250,20 +250,24 @@ func TestQueueState_CarriesOwnerAndParticipantIdentity(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1})
 
+	owner1 := mustAcquire(t, ensure(t, home, "v1"), wingwire.AdmissionRequest{RunID: "run-1", SemaphoresOnly: true})
+	owner2 := mustAcquire(t, ensure(t, home, "v1"), wingwire.AdmissionRequest{RunID: "run-2", SemaphoresOnly: true})
 	holderClient := ensure(t, home, "v1")
 	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
-		RunID:        "internal-holder",
-		OwnerRunID:   "run-1",
-		DisplayRunID: "run-1/build",
-		Resources:    wingwire.HostResources{MemoryBytes: 48 << 30},
+		RunID:           "internal-holder",
+		OwnerRunID:      "run-1",
+		OwnerLeaseToken: owner1.Token,
+		DisplayRunID:    "run-1/build",
+		Resources:       wingwire.HostResources{MemoryBytes: 48 << 30},
 	})
 
 	waiterClient := ensure(t, home, "v1")
 	positions, _ := acquireAsync(waiterClient, wingwire.AdmissionRequest{
-		RunID:        "internal-waiter",
-		OwnerRunID:   "run-2",
-		DisplayRunID: "run-2/test",
-		Resources:    wingwire.HostResources{MemoryBytes: 8 << 30},
+		RunID:           "internal-waiter",
+		OwnerRunID:      "run-2",
+		OwnerLeaseToken: owner2.Token,
+		DisplayRunID:    "run-2/test",
+		Resources:       wingwire.HostResources{MemoryBytes: 8 << 30},
 	})
 	waitForQueue(t, positions)
 
@@ -271,10 +275,12 @@ func TestQueueState_CarriesOwnerAndParticipantIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if len(qs.Holders) != 1 {
-		t.Fatalf("holders = %d, want 1: %+v", len(qs.Holders), qs.Holders)
+	var h wingwire.Holder
+	for _, holder := range qs.Holders {
+		if holder.ParticipantID == "internal-holder" {
+			h = holder
+		}
 	}
-	h := qs.Holders[0]
 	if h.RunID != "run-1" || h.ParticipantID != "internal-holder" || h.DisplayRunID != "run-1/build" {
 		t.Fatalf("holder identity = %+v, want run_id run-1, participant internal-holder, display run-1/build", h)
 	}
@@ -301,13 +307,15 @@ func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
 		StallWindow:      20 * time.Millisecond,
 	})
 
+	owner := mustAcquire(t, ensure(t, home, "v1"), wingwire.AdmissionRequest{RunID: "run-1", SemaphoresOnly: true})
 	holderClient := ensure(t, home, "v1")
 	mustAcquire(t, holderClient, wingwire.AdmissionRequest{
-		RunID:        "internal-holder",
-		OwnerRunID:   "run-1",
-		DisplayRunID: "run-1/build",
-		PID:          9003,
-		Resources:    wingwire.HostResources{Cores: 1},
+		RunID:           "internal-holder",
+		OwnerRunID:      "run-1",
+		OwnerLeaseToken: owner.Token,
+		DisplayRunID:    "run-1/build",
+		PID:             9003,
+		Resources:       wingwire.HostResources{Cores: 1},
 		Semaphores: []wingwire.SemaphoreClaim{
 			{Name: "deploy", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
 		},
@@ -330,8 +338,14 @@ func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
 		if err != nil {
 			t.Fatalf("queue state: %v", err)
 		}
-		if len(qs.Holders) == 1 && qs.Holders[0].Stalled {
-			if got, want := qs.Holders[0].Recovery, "sparkwing runs cancel --run run-1"; got != want {
+		var target wingwire.Holder
+		for _, holder := range qs.Holders {
+			if holder.ParticipantID == "internal-holder" {
+				target = holder
+			}
+		}
+		if target.Stalled {
+			if got, want := target.Recovery, "sparkwing runs cancel --run run-1"; got != want {
 				t.Fatalf("recovery = %q, want %q", got, want)
 			}
 			return

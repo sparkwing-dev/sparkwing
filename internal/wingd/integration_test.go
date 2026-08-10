@@ -1466,6 +1466,158 @@ func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
 	}
 }
 
+func TestOwnerRunAdmissionOrderPromotesOlderOwnerDescendant(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
+
+	olderOwnerClient := ensure(t, home, "")
+	olderOwner := mustAcquire(t, olderOwnerClient, wingwire.AdmissionRequest{
+		RunID: "owner-older", SemaphoresOnly: true,
+	})
+	newerOwnerClient := ensure(t, home, "")
+	newerOwner := mustAcquire(t, newerOwnerClient, wingwire.AdmissionRequest{
+		RunID: "owner-newer", SemaphoresOnly: true,
+	})
+	blockerClient := ensure(t, home, "")
+	blocker := mustAcquire(t, blockerClient, wingwire.AdmissionRequest{
+		RunID: "blocker", Resources: wingwire.HostResources{Cores: 4},
+	})
+
+	newerChildClient := ensure(t, home, "")
+	newerPositions, newerResult := acquireAsync(newerChildClient, wingwire.AdmissionRequest{
+		RunID: "newer-child", OwnerRunID: "owner-newer", OwnerLeaseToken: newerOwner.Token, SubLease: true,
+		Resources: wingwire.HostResources{Cores: 4},
+	})
+	select {
+	case <-newerPositions:
+	case <-time.After(2 * time.Second):
+		t.Fatal("newer child did not queue")
+	}
+
+	olderChildClient := ensure(t, home, "")
+	olderPositions, olderResult := acquireAsync(olderChildClient, wingwire.AdmissionRequest{
+		RunID: "older-child", OwnerRunID: "owner-older", OwnerLeaseToken: olderOwner.Token, SubLease: true,
+		Resources: wingwire.HostResources{Cores: 4},
+	})
+	select {
+	case q := <-olderPositions:
+		if q.Position != 1 {
+			t.Fatalf("older child position = %d, want 1 ahead of newer owner's child", q.Position)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("older child did not queue")
+	}
+
+	if err := blocker.Release(); err != nil {
+		t.Fatalf("release blocker: %v", err)
+	}
+	first := waitResult(t, olderResult, 2*time.Second)
+	if first.err != nil || first.lease == nil {
+		t.Fatalf("older owner's child was not promoted: lease=%v err=%v", first.lease, first.err)
+	}
+	select {
+	case r := <-newerResult:
+		t.Fatalf("newer owner's child resolved first: lease=%v err=%v", r.lease, r.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	_ = olderOwner.Release()
+	_ = newerOwner.Release()
+}
+
+func TestOwnerRunAdmissionAuthorityRejectsRankTheft(t *testing.T) {
+	tests := []struct {
+		name       string
+		ownerSetup func(t *testing.T, home string) (claimedOwner, proofToken string)
+	}{
+		{
+			name: "wrong top-level owner",
+			ownerSetup: func(t *testing.T, home string) (string, string) {
+				claimed := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "claimed-owner", SemaphoresOnly: true,
+				})
+				actual := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "actual-owner", SemaphoresOnly: true,
+				})
+				t.Cleanup(func() { _ = claimed.Release(); _ = actual.Release() })
+				return "claimed-owner", actual.Token
+			},
+		},
+		{
+			name: "non-top-level participant",
+			ownerSetup: func(t *testing.T, home string) (string, string) {
+				owner := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "top-owner", SemaphoresOnly: true,
+				})
+				participant := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "internal-participant", OwnerRunID: "top-owner", OwnerLeaseToken: owner.Token,
+					SemaphoresOnly: true, SubLease: true,
+				})
+				t.Cleanup(func() { _ = participant.Release(); _ = owner.Release() })
+				return "internal-participant", participant.Token
+			},
+		},
+		{
+			name: "non-live owner",
+			ownerSetup: func(t *testing.T, home string) (string, string) {
+				owner := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "released-owner", SemaphoresOnly: true,
+				})
+				token := owner.Token
+				if err := owner.Release(); err != nil {
+					t.Fatalf("release owner: %v", err)
+				}
+				return "released-owner", token
+			},
+		},
+		{
+			name: "attached child is not the canonical owner",
+			ownerSetup: func(t *testing.T, home string) (string, string) {
+				parent := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "canonical-parent", SemaphoresOnly: true,
+				})
+				child := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+					RunID: "attached-child", ParentLeaseToken: parent.Token,
+				})
+				t.Cleanup(func() { _ = child.Release(); _ = parent.Release() })
+				return "attached-child", parent.Token
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := shortHome(t)
+			startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(4, 8<<30)})
+			claimedOwner, proofToken := tt.ownerSetup(t, home)
+			blocker := mustAcquire(t, ensure(t, home, ""), wingwire.AdmissionRequest{
+				RunID: "blocker", Resources: wingwire.HostResources{Cores: 4},
+			})
+			t.Cleanup(func() { _ = blocker.Release() })
+
+			baselinePositions, _ := acquireAsync(ensure(t, home, ""), wingwire.AdmissionRequest{
+				RunID: "baseline", Resources: wingwire.HostResources{Cores: 4},
+			})
+			select {
+			case <-baselinePositions:
+			case <-time.After(2 * time.Second):
+				t.Fatal("baseline did not queue")
+			}
+			forgedPositions, _ := acquireAsync(ensure(t, home, ""), wingwire.AdmissionRequest{
+				RunID: "forged", OwnerRunID: claimedOwner, OwnerLeaseToken: proofToken, SubLease: true,
+				Resources: wingwire.HostResources{Cores: 4},
+			})
+			select {
+			case q := <-forgedPositions:
+				if q.Position != 2 {
+					t.Fatalf("forged position = %d, want 2 behind earlier fallback participant", q.Position)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatal("forged request did not queue")
+			}
+		})
+	}
+}
+
 func TestMeasuredCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Sampler: newFakeSampler(8, 16<<30), HeadroomFraction: -1})

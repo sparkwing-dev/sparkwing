@@ -55,6 +55,8 @@ type Ledger struct {
 type spec struct {
 	id          string
 	admit       uint64
+	ownerID     string
+	ownerAdmit  uint64
 	priority    int
 	milliCores  int64
 	softCores   bool
@@ -73,6 +75,8 @@ type claim struct {
 type lease struct {
 	seq         uint64
 	admit       uint64
+	ownerID     string
+	ownerAdmit  uint64
 	id          LeaseID
 	token       string
 	requestID   string
@@ -180,6 +184,10 @@ func (l *Ledger) Submit(req Request) (Decision, []Event, error) {
 	if err := l.checkFreshID(s.id); err != nil {
 		return Decision{}, nil, err
 	}
+	s.ownerAdmit = l.ownerAdmissionRank(s.ownerID)
+	if s.ownerAdmit == 0 {
+		s.ownerAdmit = l.admitSeq + 1
+	}
 
 	if !l.fifoBlocked(s) && l.fits(s) {
 		backfillEvents := l.recordFreshBackfill(s)
@@ -240,6 +248,8 @@ func (l *Ledger) ReplaceWaiter(req Request) ([]Event, error) {
 			continue
 		}
 		s.admit = w.spec.admit
+		s.ownerID = w.spec.ownerID
+		s.ownerAdmit = w.spec.ownerAdmit
 		w.spec = s
 		l.sortWaiters()
 		events := l.promote()
@@ -422,6 +432,7 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 	}
 	s := spec{
 		id:          req.ID,
+		ownerID:     req.OwnerID,
 		priority:    req.Priority,
 		milliCores:  mc,
 		softCores:   req.SoftCores,
@@ -452,6 +463,31 @@ func (l *Ledger) normalize(req Request) (spec, error) {
 			ErrNeverAdmissible, gibibytes(s.memory), gibibytes(l.totalMemory))
 	}
 	return s, nil
+}
+
+func (l *Ledger) ownerAdmissionRank(ownerID string) uint64 {
+	leaseID, ok := l.memberOf[ownerID]
+	if !ok {
+		return 0
+	}
+	return l.leases[leaseID].admit
+}
+
+// ProvesOwner reports whether token's canonical top-level owner is ownerID.
+func (l *Ledger) ProvesOwner(token, ownerID string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	leaseID, ok := l.tokens[token]
+	if !ok {
+		return false
+	}
+	proof := l.leases[leaseID]
+	canonicalOwnerID := proof.ownerID
+	if canonicalOwnerID == "" {
+		canonicalOwnerID = proof.requestID
+	}
+	return canonicalOwnerID == ownerID
 }
 
 // trimCores renders a millicore count as cores for an operator-facing
@@ -976,6 +1012,8 @@ func (l *Ledger) grant(s spec, kind EventKind) (Lease, []LeaseID, []Event) {
 	l.leases[id] = &lease{
 		seq:         l.leaseSeq,
 		admit:       s.admit,
+		ownerID:     s.ownerID,
+		ownerAdmit:  s.ownerAdmit,
 		id:          id,
 		token:       token,
 		requestID:   s.id,
@@ -1077,7 +1115,10 @@ func (l *Ledger) sortWaiters() {
 }
 
 func waiterPrecedesSpec(w *waiter, s spec) bool {
-	return w.spec.priority > s.priority || w.spec.priority == s.priority
+	if w.spec.priority != s.priority {
+		return w.spec.priority > s.priority
+	}
+	return w.spec.ownerAdmit <= s.ownerAdmit
 }
 
 func anyIn(set map[resource]bool, rs []resource) bool {
