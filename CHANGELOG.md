@@ -78,6 +78,15 @@ code change to unlock.
 
 ### Fixed
 
+- **controller:** `POST /api/v1/tokens` rejects unknown scopes with a `400`
+  naming the offending scope and the valid set, instead of minting a token
+  that authenticates but fails every scope check with `missing_scope`.
+- **cli:** `pipeline sparks lint` accepts a multi-module `spark.json`: a
+  manifest declares exactly one of `packages[]` (a library that is one Go
+  module) or `modules[]` (a monorepo of independently tagged modules), and
+  each `modules[]` entry's Go module path is cross-checked against that
+  directory's `go.mod`. The path argument is also accepted positionally, as
+  the command's own examples show it.
 - **queue:** External CPU now subtracts measured live holder process-tree usage
   instead of reserved lease capacity. Process reuse, overlapping trees, sensor
   loss, and macOS sampling no longer make queue headroom contradict host load.

@@ -75,6 +75,10 @@ func (s *Server) handleCreateToken(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, errors.New("kind required (user|runner|service)"))
 		return
 	}
+	if err := validateScopes(req.Scopes); err != nil {
+		writeError(w, http.StatusBadRequest, err)
+		return
+	}
 	ttl := time.Duration(req.TTLSecs) * time.Second
 	now := time.Now().UTC()
 	raw, tok, err := s.store.CreateToken(req.Principal, req.Kind, req.Scopes, ttl, now)

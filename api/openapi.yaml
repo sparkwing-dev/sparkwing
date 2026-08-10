@@ -1433,6 +1433,14 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/CreateTokenResponse" }
+        "400":
+          description: >-
+            Invalid request: missing principal or kind, or a scope the
+            controller does not honor (the message names the offending
+            scope and the valid set).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     get:
       tags: [tokens]
       summary: List all tokens (no raw values).

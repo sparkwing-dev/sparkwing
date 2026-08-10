@@ -47,8 +47,9 @@ stack, it belongs in a sparks library, not the SDK.
 
 ## `spark.json` schema
 
-Every sparks library places a `spark.json` file at its module root. It is
-valid JSON with the following fields.
+Every sparks library places a `spark.json` file at its root - the module
+root for a single-module library, the repository root for a multi-module
+monorepo. It is valid JSON with the following fields.
 
 | Field | Type | Required | Description |
 |---|---|---|---|
@@ -58,20 +59,34 @@ valid JSON with the following fields.
 | `version` | string | no | Current library version, semver with `v` prefix (e.g. `v0.4.6`). When absent, the resolver uses the latest Go module tag as truth. Kept in `spark.json` mostly for local inspection; the Go module tag is authoritative. |
 | `sdk_min_version` | string | no | Minimum compatible sparkwing SDK version (semver with `v` prefix). Declarative metadata for discovery tooling; no sparkwing command reads it. Omit during pre-1.0 churn. |
 | `stability` | string | no | One of `experimental`, `beta`, `stable`. Defaults to `experimental`. Informational only; does not affect resolution. |
-| `packages` | array | yes | Non-empty list of sub-packages within the module. Each entry documents an import path. See the `packages[]` schema below. |
+| `packages` | array | one of | Non-empty list of sub-packages within the library's single Go module. Each entry documents an import path. See the `packages[]` schema below. |
+| `modules` | array | one of | Non-empty list of the Go modules a multi-module monorepo holds, each with its own tag series. See the `modules[]` schema below. |
 | `dependencies` | array | no | Other sparks libraries this one depends on. Pure metadata - actual Go module resolution still happens via the dependent library's own `go.mod`. Shape mirrors `sparks:` entries: `{name, source, version}`. |
+
+A manifest declares exactly one of `packages` and `modules`. The choice
+follows the repository's module layout: one `go.mod` at the root means
+`packages[]`, a `go.mod` per subdirectory means `modules[]`.
 
 ### `packages[]` entry schema
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `path` | string | yes | Import path relative to the module root. E.g. `docker` for `github.com/sparkwing-dev/sparks-core/docker`. |
+| `path` | string | yes | Import path relative to the module root, naming a directory that exists. E.g. `docker` for `github.com/acme/my-sparks/docker`. |
 | `description` | string | yes | One-sentence summary of what the package provides. |
 | `stability` | string | no | Per-package override of the library-level `stability`. Useful when a library has one stable package and one experimental package. |
 
+### `modules[]` entry schema
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| `path` | string | yes | Subdirectory relative to the manifest, naming a directory that exists. E.g. `docker`. |
+| `module` | string | yes | The Go module path that subdirectory declares. When the directory holds a `go.mod`, this must equal its `module` line - that is the path consumers pin in their `sparks:` block. |
+| `description` | string | yes | One-sentence summary of what the module provides. |
+| `stability` | string | no | Per-module override of the library-level `stability`. |
+
 ### Example `spark.json`
 
-A manifest matching the schema above:
+A single-module library:
 
 ```json
 {
@@ -87,6 +102,28 @@ A manifest matching the schema above:
     },
     {
       "path": "gitops",
+      "description": "GitOps deployment with kustomize patching, retry, and ArgoCD sync"
+    }
+  ]
+}
+```
+
+A multi-module monorepo, the shape sparks-core uses:
+
+```json
+{
+  "name": "my-sparks",
+  "description": "Multi-module monorepo of pipeline libraries - each module versioned independently",
+  "author": "your-github-handle",
+  "modules": [
+    {
+      "path": "docker",
+      "module": "github.com/acme/my-sparks/docker",
+      "description": "Docker build, push, multi-registry tagging with deterministic content hashing"
+    },
+    {
+      "path": "gitops",
+      "module": "github.com/acme/my-sparks/gitops",
       "description": "GitOps deployment with kustomize patching, retry, and ArgoCD sync"
     }
   ]
@@ -327,7 +364,8 @@ and the overlay. What each subcommand does:
 
 - **list** -- show the declared sparks libraries and their resolved versions.
 - **lint** -- validate a library's `spark.json` (schema, required fields,
-  package-path existence).
+  entry-path existence, and the `module` a `modules[]` entry declares
+  against that directory's `go.mod`).
 - **resolve** -- resolve versions per the `sparks:` block and materialize the
   overlay modfile at `.sparkwing/.resolved.mod` + `.resolved.sum`. Idempotent,
   cheap when nothing has drifted, and never touches git-tracked `go.mod`.
@@ -475,11 +513,13 @@ itself, inflate it (see
 
 ## Authoring a sparks library
 
-A sparks library is a Go module. Author steps:
+A sparks library is a Go module, or a monorepo of them. Author steps:
 
 1. Create a Go module (normal `go mod init <module>`).
-2. Add `spark.json` at the module root, filling in the schema above.
-   `packages[]` must list every user-importable sub-package.
+2. Add `spark.json` at the manifest root, filling in the schema above.
+   `packages[]` must list every user-importable sub-package; a
+   multi-module monorepo uses `modules[]` instead and lists every
+   independently tagged module.
 3. Pick a version. Stay on `v0.x` until the public surface is stable; push
    through `v1.0.0` only when you are ready to commit to the surface under
    semver-major stability.
