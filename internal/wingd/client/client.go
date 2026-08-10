@@ -338,7 +338,16 @@ func (cl *Client) connect(ctx context.Context) error {
 				if spawns >= maxSpawnAttempts {
 					return daemonUnreachable(opts.Home, cl.sock, spawns, derr, lastDial)
 				}
-				_, _ = wingd.RemoveStaleSocket(opts.Home)
+				lockFree, lerr := wingd.RemoveStaleSocket(opts.Home)
+				if lerr != nil {
+					return spawnFailed(opts.Home, cl.sock, fmt.Errorf("check predecessor election: %w", lerr), lastDial)
+				}
+				if !lockFree {
+					if err := sleep(ctx, opts.backoff()); err != nil {
+						return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
+					}
+					continue
+				}
 				if serr := opts.spawn(opts.Home, opts.Version); serr != nil {
 					return spawnFailed(opts.Home, cl.sock, serr, lastDial)
 				}

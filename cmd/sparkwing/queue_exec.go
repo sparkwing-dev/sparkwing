@@ -28,6 +28,10 @@ var errQueueExecLeaseLost = errors.New("admission lease connection lost")
 
 var queueExecProcessSupport = procgroup.GuardedSessionSupported
 
+var queueExecClientOptions = func(home string) wingdclient.Options {
+	return wingdclient.Options{Home: home, Version: Version}
+}
+
 var queueExecGuardCommand = func(command []string) *exec.Cmd {
 	executable, err := os.Executable()
 	if err != nil {
@@ -78,7 +82,7 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 
 	acquireCtx, cancelAcquire := context.WithCancel(ctx)
 	defer cancelAcquire()
-	cl, err := wingdclient.EnsureDaemon(acquireCtx, wingdclient.Options{Home: *home, Version: Version})
+	cl, err := wingdclient.EnsureDaemon(acquireCtx, queueExecClientOptions(*home))
 	if err != nil {
 		return fmt.Errorf("queue exec: connect admission daemon: %w", err)
 	}

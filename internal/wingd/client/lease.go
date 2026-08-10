@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +28,8 @@ type Lease struct {
 	SoleRunUnderLoad bool
 	ExternalCores    float64
 	guardComplete    atomic.Bool
+	guardMu          sync.Mutex
+	guardSent        bool
 }
 
 // Acquire submits an all-or-nothing admission request and blocks until
@@ -137,7 +140,20 @@ func (l *Lease) Release() error {
 // claim and acknowledges only after the release is durable.
 func (l *Lease) CompleteGuard() error {
 	l.guardComplete.Store(true)
-	return l.cl.write(&wingwire.GuardComplete{LeaseToken: l.Token})
+	l.guardMu.Lock()
+	defer l.guardMu.Unlock()
+	return l.sendGuardCompleteLocked()
+}
+
+func (l *Lease) sendGuardCompleteLocked() error {
+	if l.guardSent {
+		return nil
+	}
+	if err := l.cl.write(&wingwire.GuardComplete{LeaseToken: l.Token}); err != nil {
+		return err
+	}
+	l.guardSent = true
+	return nil
 }
 
 // Watch reads the held connection until it closes, invoking onEvicted
@@ -201,19 +217,25 @@ func (l *Lease) WatchGuard(onEvicted func(wingwire.Evicted), onCancel func(wingw
 // the watcher stops -- the lease is genuinely gone.
 func (l *Lease) recoverWatch() (recovered, guardGone bool) {
 	if l.cl.closed.Load() {
+		l.cl.opts.logf("guard watch stopped: client was closed")
 		return false, false
 	}
+	l.guardMu.Lock()
+	defer l.guardMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), defaultReattachTimeout)
 	defer cancel()
 	if err := l.cl.connect(ctx); err != nil {
+		l.cl.opts.logf("guard watch reconnect failed: %v", err)
 		return false, false
 	}
 	_, terminal, transient := l.cl.readReattach(l.Token)
 	if terminal != nil || transient != nil {
+		l.cl.opts.logf("guard watch reattach failed: %v", errors.Join(terminal, transient))
 		return false, l.guardComplete.Load() && errors.Is(terminal, ErrReattachRejected)
 	}
+	l.guardSent = false
 	if l.guardComplete.Load() {
-		return l.cl.write(&wingwire.GuardComplete{LeaseToken: l.Token}) == nil, false
+		return l.sendGuardCompleteLocked() == nil, false
 	}
 	return true, false
 }

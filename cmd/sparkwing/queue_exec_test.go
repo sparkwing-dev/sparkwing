@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"testing"
@@ -479,6 +480,7 @@ func TestQueueExecSurvivesAdmissionDaemonRestart(t *testing.T) {
 	}
 	home := queueHome(t)
 	stopFirst := startRestartableQueueDaemon(t, home)
+	installQueueExecInProcessSuccessor(t, home)
 	tmp := t.TempDir()
 	started := filepath.Join(tmp, "started")
 	release := filepath.Join(tmp, "release")
@@ -501,7 +503,7 @@ func TestQueueExecSurvivesAdmissionDaemonRestart(t *testing.T) {
 			t.Errorf("stop restarted queue daemon: %v", err)
 		}
 	})
-	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+	waitForRestartedQueueExecState(t, home, result, func(qs wingwire.QueueState) bool {
 		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "restart-command"
 	})
 	if err := os.WriteFile(release, nil, 0o600); err != nil {
@@ -514,6 +516,77 @@ func TestQueueExecSurvivesAdmissionDaemonRestart(t *testing.T) {
 		}
 	case <-time.After(queueExecWait):
 		t.Fatal("queue exec did not finish after daemon restart")
+	}
+}
+
+func installQueueExecInProcessSuccessor(t *testing.T, home string) {
+	t.Helper()
+	original := queueExecClientOptions
+	var mu sync.Mutex
+	type daemonInstance struct {
+		cancel context.CancelFunc
+		done   chan error
+	}
+	var instances []daemonInstance
+	queueExecClientOptions = func(gotHome string) wingdclient.Options {
+		return wingdclient.Options{
+			Home: gotHome, Version: Version, Logf: t.Logf,
+			Spawn: func(spawnHome, _ string) error {
+				d, err := wingd.New(wingd.Config{Home: spawnHome, Version: "v1.0.0", GuardInterval: 10 * time.Millisecond})
+				if err != nil {
+					return err
+				}
+				ctx, stop := context.WithCancel(context.Background())
+				done := make(chan error, 1)
+				mu.Lock()
+				instances = append(instances, daemonInstance{cancel: stop, done: done})
+				mu.Unlock()
+				go func() { done <- d.Run(ctx) }()
+				return nil
+			},
+		}
+	}
+	t.Cleanup(func() {
+		queueExecClientOptions = original
+		mu.Lock()
+		spawned := append([]daemonInstance(nil), instances...)
+		mu.Unlock()
+		for _, instance := range spawned {
+			instance.cancel()
+		}
+		for _, instance := range spawned {
+			select {
+			case err := <-instance.done:
+				if err != nil && !errors.Is(err, wingd.ErrNotElected) {
+					t.Errorf("in-process successor exit: %v", err)
+				}
+			case <-time.After(queueExecWait):
+				t.Error("in-process successor did not stop")
+			}
+		}
+	})
+}
+
+func waitForRestartedQueueExecState(t *testing.T, home string, result <-chan error, ready func(wingwire.QueueState) bool) wingwire.QueueState {
+	t.Helper()
+	deadline := time.Now().Add(queueExecWait)
+	for {
+		select {
+		case err := <-result:
+			t.Fatalf("queue exec ended during daemon restart: %v", err)
+		default:
+		}
+		qs, err := wingdclient.Query(context.Background(), wingdclient.Options{Home: home})
+		if err == nil && ready(qs) {
+			return qs
+		}
+		if err != nil && !errors.Is(err, wingdclient.ErrNoDaemon) {
+			t.Fatalf("query restarted queue: %v", err)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("restarted queue did not converge: %+v (last error %v)", qs, err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
