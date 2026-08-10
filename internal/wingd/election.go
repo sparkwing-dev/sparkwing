@@ -101,21 +101,20 @@ func (d *Daemon) bindListener() (net.Listener, error) {
 	return ln, nil
 }
 
-// RemoveStaleSocket removes home's socket file when no live daemon holds
-// the election lock, and reports whether it did. Clients call it before
-// spawning so a crashed daemon's leftover socket cannot make connect
-// attempts fail forever. It never disturbs a live daemon: if the lock is
-// held, it leaves the socket alone and returns false.
+// RemoveStaleSocket prepares home's daemon directory and removes its socket
+// when no live daemon holds the election lock. It returns true when spawning
+// is safe, including for a home no daemon has used yet. If the lock is held,
+// it leaves the socket alone and returns false.
 func RemoveStaleSocket(home string) (bool, error) {
 	l, err := resolveLayout(home)
 	if err != nil {
 		return false, err
 	}
+	if err := l.ensureDir(); err != nil {
+		return false, err
+	}
 	f, err := os.OpenFile(l.lock, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
-		}
 		return false, err
 	}
 	defer func() { _ = f.Close() }()
