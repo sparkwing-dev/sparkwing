@@ -91,6 +91,28 @@ func TestSessionIdentityBindsInspectionToLeaderBirth(t *testing.T) {
 	}
 }
 
+func TestSessionEmptyTreatsReusedLeaderAsTheOriginalSessionGone(t *testing.T) {
+	originalTable := sessionProcessTable
+	originalIdentity := sessionIdentityLookup
+	t.Cleanup(func() {
+		sessionProcessTable = originalTable
+		sessionIdentityLookup = originalIdentity
+	})
+	sessionProcessTable = func(bool) ([]Info, error) {
+		return []Info{{PID: 81, Group: 81, Session: 81, State: "R"}}, nil
+	}
+	sessionIdentityLookup = func(int) (int, string, error) {
+		return 81, "new-birth", nil
+	}
+
+	empty, err := SessionEmpty(SessionIdentity{
+		LeaderPID: 81, SessionID: 81, BirthToken: "original-birth",
+	})
+	if err != nil || !empty {
+		t.Fatalf("reused session identity empty=%v err=%v, want original session gone", empty, err)
+	}
+}
+
 func TestSessionTerminateKillsStubbornLeaderAndNestedGroup(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
 	cmd.Env = append(os.Environ(), helperMode+"=session-stubborn")
