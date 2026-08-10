@@ -339,7 +339,7 @@ func (cl *Client) connect(ctx context.Context) error {
 					return daemonUnreachable(opts.Home, cl.sock, spawns, derr, lastDial)
 				}
 				lockFree, lerr := wingd.RemoveStaleSocket(opts.Home)
-				if lerr != nil {
+				if lerr != nil && !lockFree {
 					return spawnFailed(opts.Home, cl.sock, fmt.Errorf("check predecessor election: %w", lerr), lastDial)
 				}
 				if !lockFree {
@@ -347,6 +347,9 @@ func (cl *Client) connect(ctx context.Context) error {
 						return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 					}
 					continue
+				}
+				if lerr != nil {
+					opts.logf("stale daemon socket cleanup failed before spawn: %v", lerr)
 				}
 				if serr := opts.spawn(opts.Home, opts.Version); serr != nil {
 					return spawnFailed(opts.Home, cl.sock, serr, lastDial)

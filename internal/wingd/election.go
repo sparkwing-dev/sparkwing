@@ -127,7 +127,7 @@ func RemoveStaleSocket(home string) (bool, error) {
 	}
 	defer func() { _ = flockUnlock(f) }()
 	if err := os.Remove(l.sock); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return false, err
+		return true, err
 	}
 	return true, nil
 }
