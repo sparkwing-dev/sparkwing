@@ -494,7 +494,13 @@ func TestQueueExecSurvivesAdmissionDaemonRestart(t *testing.T) {
 		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "restart-command"
 	})
 	stopFirst()
-	startRestartableQueueDaemon(t, home)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), queueExecWait)
+		defer cancel()
+		if err := wingdclient.Stop(ctx, wingdclient.Options{Home: home}); err != nil && !errors.Is(err, wingdclient.ErrNoDaemon) {
+			t.Errorf("stop restarted queue daemon: %v", err)
+		}
+	})
 	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
 		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "restart-command"
 	})
