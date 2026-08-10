@@ -15,12 +15,34 @@ import (
 // ErrCleanup identifies a process group that could not be proven empty.
 var ErrCleanup = errors.New("process group cleanup failed")
 
+var sessionProcessTable = processTable
+
+var sessionIdentityLookup = sessionIdentity
+
+// DefaultTerminationGrace is the cooperative window every queue-exec owner
+// gives a command after SIGTERM before escalating to SIGKILL.
+const DefaultTerminationGrace = time.Second
+
+const guardedSessionTerminateGrace = DefaultTerminationGrace
+
+const guardedSessionTerminateTimeout = 5 * time.Second
+
+const guardedSessionPollInterval = 10 * time.Millisecond
+
 // Info describes one process-table entry.
 type Info struct {
 	PID     int
 	Group   int
 	Session int
 	State   string
+}
+
+// SessionIdentity binds a process session to the kernel creation identity of
+// its leader so a reused numeric PID cannot inherit cleanup authority.
+type SessionIdentity struct {
+	LeaderPID  int
+	SessionID  int
+	BirthToken string
 }
 
 // Group retains an unreaped group leader as the stable ownership anchor for
@@ -42,6 +64,137 @@ type Group struct {
 
 // Supported reports whether exact process-group ownership is available.
 func Supported() error { return platformSupport() }
+
+// GuardedSessionSupported reports whether the platform exposes a stable
+// session-leader birth identity suitable for durable admission ownership.
+func GuardedSessionSupported() error { return guardedSessionSupport() }
+
+// CaptureSession returns the exact session identity rooted at pid.
+func CaptureSession(pid int) (SessionIdentity, error) {
+	if err := GuardedSessionSupported(); err != nil {
+		return SessionIdentity{}, err
+	}
+	sid, token, err := sessionIdentity(pid)
+	if err != nil {
+		return SessionIdentity{}, err
+	}
+	if pid <= 1 || sid != pid || token == "" {
+		return SessionIdentity{}, fmt.Errorf("process %d is not a stable session leader", pid)
+	}
+	return SessionIdentity{LeaderPID: pid, SessionID: sid, BirthToken: token}, nil
+}
+
+// SessionQuiescent reports whether no live process other than the registered
+// leader remains in the session. Inspection errors are returned, never folded
+// into an empty verdict.
+func SessionQuiescent(identity SessionIdentity) (bool, error) {
+	return inspectSession(identity, true)
+}
+
+// SessionEmpty reports whether the registered session contains no live
+// process. Zombies do not execute and therefore do not retain admission.
+func SessionEmpty(identity SessionIdentity) (bool, error) {
+	return inspectSession(identity, false)
+}
+
+// TerminateSession signals every process group still belonging to the exact
+// registered session after validating its leader identity.
+func TerminateSession(identity SessionIdentity) error {
+	empty, err := inspectSession(identity, false)
+	if err != nil || empty {
+		return err
+	}
+	if err := signalGuardSession(identity.SessionID, false); err != nil {
+		return err
+	}
+	if empty, err := waitSessionEmpty(identity, guardedSessionTerminateGrace); err != nil || empty {
+		return err
+	}
+	if err := signalGuardSession(identity.SessionID, true); err != nil {
+		return err
+	}
+	empty, err = waitSessionEmpty(identity, guardedSessionTerminateTimeout)
+	if err != nil {
+		return err
+	}
+	if !empty {
+		return fmt.Errorf("guarded session %d remained live after termination", identity.SessionID)
+	}
+	return nil
+}
+
+func waitSessionEmpty(identity SessionIdentity, timeout time.Duration) (bool, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(guardedSessionPollInterval)
+	defer ticker.Stop()
+	for {
+		empty, err := inspectSession(identity, false)
+		if err != nil || empty {
+			return empty, err
+		}
+		select {
+		case <-deadline.C:
+			return false, nil
+		case <-ticker.C:
+		}
+	}
+}
+
+func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) {
+	if identity.LeaderPID <= 1 || identity.SessionID != identity.LeaderPID || identity.BirthToken == "" {
+		return false, fmt.Errorf("invalid guarded session identity")
+	}
+	processes, err := sessionProcessTable(true)
+	if err != nil {
+		return false, err
+	}
+	var leaderInSession bool
+	for _, process := range processes {
+		if process.PID == identity.LeaderPID && process.Session == identity.SessionID {
+			leaderInSession = true
+			break
+		}
+	}
+	leaderReused := false
+	if leaderInSession {
+		_, token, err := sessionIdentityLookup(identity.LeaderPID)
+		if err != nil {
+			return false, err
+		}
+		if token != identity.BirthToken {
+			leaderReused = true
+		}
+	}
+	for _, process := range processes {
+		if process.Session != identity.SessionID || processTerminated(process.State) {
+			continue
+		}
+		if leaderReused && process.PID == identity.LeaderPID {
+			continue
+		}
+		if leaderReused {
+			return false, fmt.Errorf("guarded session %d has live members after leader identity reuse", identity.SessionID)
+		}
+		if excludeLeader && process.PID == identity.LeaderPID && leaderInSession {
+			continue
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+func processTerminated(state string) bool {
+	if state == "" {
+		return false
+	}
+	switch state[0] {
+	case 'Z', 'X', 'x':
+		return true
+	default:
+		return false
+	}
+}
 
 // Start launches cmd as the leader of a new owned process group.
 func Start(cmd *exec.Cmd) (*Group, error) {

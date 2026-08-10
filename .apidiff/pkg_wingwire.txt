@@ -13,6 +13,8 @@ type AdmissionRequest struct {
 
 	PID int
 
+	Guard *ProcessSession
+
 	Resources  HostResources
 	Semaphores []SemaphoreClaim
 
@@ -154,6 +156,10 @@ type Grant struct {
 
 	ExternalCores float64
 }
+type GuardComplete struct {
+	LeaseToken string
+}
+type GuardCompleteAck struct{}
 type Hello struct {
 	ProtocolMajor int
 	BinaryVersion string
@@ -230,6 +236,11 @@ const PolicyCancelOthers Policy = "cancel_others"
 const PolicyFail Policy = "fail"
 const PolicyQueue Policy = "queue"
 const PolicySkip Policy = "skip"
+type ProcessSession struct {
+	LeaderPID  int
+	SessionID  int
+	BirthToken string
+}
 type ProtocolFloor struct {
 	Major      int
 	MinVersion string
@@ -237,7 +248,7 @@ type ProtocolFloor struct {
 type ProtocolFloors []ProtocolFloor
 func (f ProtocolFloors) MinVersionSpeaking(major int) (version string, ok bool)
 func (f ProtocolFloors) Newest() (floor ProtocolFloor, ok bool)
-const ProtocolMajor = 2
+const ProtocolMajor = 3
 type QueueState struct {
 	Resources []ResourceState
 	Holders   []Holder
@@ -325,6 +336,8 @@ const TypeDrainAck MessageType = "drain_ack"
 const TypeDrainRequest MessageType = "drain_request"
 const TypeEvicted MessageType = "evicted"
 const TypeGrant MessageType = "grant"
+const TypeGuardComplete MessageType = "guard_complete"
+const TypeGuardCompleteAck MessageType = "guard_complete_ack"
 const TypeHello MessageType = "hello"
 const TypeHelloAck MessageType = "hello_ack"
 const TypeQueueState MessageType = "queue_state"

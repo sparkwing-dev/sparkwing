@@ -46,6 +46,7 @@ type conn struct {
 	pipeline     string
 	priority     int
 	pid          int
+	guard        *wingwire.ProcessSession
 	role         connRole
 	leaseID      admission.LeaseID
 	members      []string

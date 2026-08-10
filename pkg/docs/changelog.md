@@ -48,6 +48,17 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **local admission:** `sparkwing queue exec` admits bootstrap commands before
+  they begin and binds each grant to the command's Linux or macOS process
+  session. Supervisor death and daemon restart retain capacity until the full
+  command tree stops; unsupported platforms refuse before admission.
+- **daemon recovery:** `sparkwing daemon recover-state --yes` preserves an
+  unreadable state file after the operator verifies guarded commands stopped,
+  providing an explicit escape from fail-closed startup without silently
+  discarding unknown lease authority.
+
 ### Docs
 
 - **docs:** repository-wide accuracy audit. Every documentation surface was
@@ -82,6 +93,12 @@ code change to unlock.
   signalled, applies atomically to every member of a shared lease, survives
   daemon restart and connection replacement, and cannot resurrect a terminal
   run through admission or reattachment.
+- **local admission:** Guarded session inspection now retains capacity when a
+  recycled leader PID coexists with live session members, ordinary unguarded
+  state remains readable by the previous release, and disconnected
+  cancellation gets the same cooperative cleanup window as its supervisor.
+- **queue telemetry:** Semaphore constraints now appear in the blocking reason
+  instead of leaving a blocked waiter with only its host-capacity explanation.
 - **release:** Self-release validation now requires an isolated
   `SPARKWING_HOME`, preventing a prerelease binary with a newer embedded schema
   from migrating the operational runs store before installed readers upgrade.

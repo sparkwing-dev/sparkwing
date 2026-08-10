@@ -9,11 +9,18 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // stateSchema versions the on-disk state file so a future format change
 // can be detected rather than misparsed.
-const stateSchema = 1
+const stateSchema = 2
+
+type persistedGuard struct {
+	LeaseID admission.LeaseID       `json:"lease_id"`
+	RunID   string                  `json:"run_id"`
+	Session wingwire.ProcessSession `json:"session"`
+}
 
 // persistedState is the durable form of the ledger. Only granted leases
 // survive a restart: waiters hold nothing and no re-attach token, so a
@@ -26,6 +33,7 @@ type persistedState struct {
 	Snapshot      admission.Snapshot `json:"snapshot"`
 	Events        []admissionEvent   `json:"events,omitempty"`
 	CancelledRuns []string           `json:"cancelled_runs,omitempty"`
+	Guards        []persistedGuard   `json:"guards,omitempty"`
 }
 
 // writeState writes snap and the event window to path by atomic rename,
@@ -36,8 +44,16 @@ func writeState(path string, snap admission.Snapshot, events []admissionEvent) e
 }
 
 func writeStateWithCancellations(path string, snap admission.Snapshot, events []admissionEvent, cancelledRuns []string) error {
+	return writeStateWithGuards(path, snap, events, cancelledRuns, nil)
+}
+
+func writeStateWithGuards(path string, snap admission.Snapshot, events []admissionEvent, cancelledRuns []string, guards []persistedGuard) error {
 	snap.Waiters = nil
-	data, err := json.Marshal(persistedState{Schema: stateSchema, Snapshot: snap, Events: events, CancelledRuns: cancelledRuns})
+	schema := 1
+	if len(guards) > 0 {
+		schema = stateSchema
+	}
+	data, err := json.Marshal(persistedState{Schema: schema, Snapshot: snap, Events: events, CancelledRuns: cancelledRuns, Guards: guards})
 	if err != nil {
 		return fmt.Errorf("wingd: marshal state: %w", err)
 	}
@@ -65,6 +81,9 @@ func writeStateWithCancellations(path string, snap admission.Snapshot, events []
 		_ = os.Remove(tmpName)
 		return fmt.Errorf("wingd: rename state: %w", err)
 	}
+	if err := syncStateDirectory(dir); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -89,19 +108,24 @@ func readState(path string) (*admission.Snapshot, []admissionEvent, error) {
 }
 
 func readStateWithCancellations(path string) (*admission.Snapshot, []admissionEvent, []string, error) {
+	snap, events, cancelledRuns, _, err := readStateWithGuards(path)
+	return snap, events, cancelledRuns, err
+}
+
+func readStateWithGuards(path string) (*admission.Snapshot, []admissionEvent, []string, []persistedGuard, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil, nil, nil
+		return nil, nil, nil, nil, nil
 	}
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("wingd: read state: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("wingd: read state: %w", err)
 	}
 	var st persistedState
 	if err := json.Unmarshal(data, &st); err != nil {
-		return nil, nil, nil, fmt.Errorf("wingd: parse state: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("wingd: parse state: %w", err)
 	}
-	if st.Schema != stateSchema {
-		return nil, nil, nil, fmt.Errorf("wingd: state schema %d, want %d", st.Schema, stateSchema)
+	if st.Schema != 1 && st.Schema != stateSchema {
+		return nil, nil, nil, nil, fmt.Errorf("wingd: state schema %d, want 1 or %d", st.Schema, stateSchema)
 	}
-	return &st.Snapshot, st.Events, st.CancelledRuns, nil
+	return &st.Snapshot, st.Events, st.CancelledRuns, st.Guards, nil
 }

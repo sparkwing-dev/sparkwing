@@ -7,6 +7,8 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/signal"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -54,6 +56,131 @@ func TestGroupHelperProcess(t *testing.T) {
 		IgnoreTermination()
 		time.Sleep(30 * time.Second)
 		os.Exit(0)
+	case "session-parked":
+		IgnoreTermination()
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	case "session-cooperative":
+		term := make(chan os.Signal, 1)
+		signal.Notify(term, syscall.SIGTERM)
+		if err := os.WriteFile(os.Getenv("SPARKWING_PROCGROUP_READY"), []byte("ready"), 0o600); err != nil {
+			os.Exit(2)
+		}
+		<-term
+		time.Sleep(500 * time.Millisecond)
+		if err := os.WriteFile(os.Getenv("SPARKWING_PROCGROUP_MARKER"), []byte("clean"), 0o600); err != nil {
+			os.Exit(2)
+		}
+		os.Exit(0)
+	}
+}
+
+func TestSessionIdentityBindsInspectionToLeaderBirth(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	cmd.Env = append(os.Environ(), helperMode+"=session-parked")
+	group, err := StartSession(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { terminateForTest(group) })
+	identity, err := CaptureSession(group.ID())
+	if err != nil {
+		t.Fatalf("capture session: %v", err)
+	}
+	if identity.LeaderPID != group.ID() || identity.SessionID != group.ID() || identity.BirthToken == "" {
+		t.Fatalf("session identity = %+v", identity)
+	}
+	quiescent, err := SessionQuiescent(identity)
+	if err != nil || !quiescent {
+		t.Fatalf("parked session quiescent=%v err=%v", quiescent, err)
+	}
+	empty, err := SessionEmpty(identity)
+	if err != nil || empty {
+		t.Fatalf("live parked session empty=%v err=%v", empty, err)
+	}
+	wrong := identity
+	wrong.BirthToken += "-reused"
+	if empty, err := SessionEmpty(wrong); err != nil || !empty {
+		t.Fatalf("changed leader birth identity empty=%v err=%v, want original session gone", empty, err)
+	}
+}
+
+func TestSessionEmptyTreatsReusedLeaderAsTheOriginalSessionGone(t *testing.T) {
+	originalTable := sessionProcessTable
+	originalIdentity := sessionIdentityLookup
+	t.Cleanup(func() {
+		sessionProcessTable = originalTable
+		sessionIdentityLookup = originalIdentity
+	})
+	sessionProcessTable = func(bool) ([]Info, error) {
+		return []Info{{PID: 81, Group: 81, Session: 81, State: "R"}}, nil
+	}
+	sessionIdentityLookup = func(int) (int, string, error) {
+		return 81, "new-birth", nil
+	}
+
+	empty, err := SessionEmpty(SessionIdentity{
+		LeaderPID: 81, SessionID: 81, BirthToken: "original-birth",
+	})
+	if err != nil || !empty {
+		t.Fatalf("reused session identity empty=%v err=%v, want original session gone", empty, err)
+	}
+}
+
+func TestSessionEmptyRetainsAdmissionWhenReusedLeaderHasLiveSessionMembers(t *testing.T) {
+	originalTable := sessionProcessTable
+	originalIdentity := sessionIdentityLookup
+	t.Cleanup(func() {
+		sessionProcessTable = originalTable
+		sessionIdentityLookup = originalIdentity
+	})
+	sessionProcessTable = func(bool) ([]Info, error) {
+		return []Info{
+			{PID: 81, Group: 81, Session: 81, State: "R"},
+			{PID: 93, Group: 93, Session: 81, State: "R"},
+		}, nil
+	}
+	sessionIdentityLookup = func(int) (int, string, error) {
+		return 81, "new-birth", nil
+	}
+
+	empty, err := SessionEmpty(SessionIdentity{
+		LeaderPID: 81, SessionID: 81, BirthToken: "original-birth",
+	})
+	if err == nil && empty {
+		t.Fatal("reused leader hid a live member of the guarded session")
+	}
+}
+
+func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "cleanup-complete")
+	ready := marker + ".ready"
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	cmd.Env = append(os.Environ(), helperMode+"=session-cooperative", "SPARKWING_PROCGROUP_MARKER="+marker, "SPARKWING_PROCGROUP_READY="+ready)
+	group, err := StartSession(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { terminateForTest(group) })
+	identity, err := CaptureSession(group.ID())
+	if err != nil {
+		t.Fatalf("capture cooperative session: %v", err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for {
+		if _, err := os.Stat(ready); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("cooperative session did not install its signal handler")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := TerminateSession(identity); err != nil {
+		t.Fatalf("terminate cooperative session: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("cooperative cleanup did not finish before escalation: %v", err)
 	}
 }
 
@@ -73,6 +200,27 @@ func TestSessionTerminateKillsStubbornLeaderAndNestedGroup(t *testing.T) {
 	}
 	if !g.Reaped() {
 		t.Fatal("stubborn session leader was not reaped")
+	}
+}
+
+func TestTerminateSessionReturnsOnlyAfterStubbornSessionIsEmpty(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	cmd.Env = append(os.Environ(), helperMode+"=session-stubborn")
+	group, err := StartSession(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { terminateForTest(group) })
+	identity, err := CaptureSession(group.ID())
+	if err != nil {
+		t.Fatalf("capture stubborn session: %v", err)
+	}
+	if err := TerminateSession(identity); err != nil {
+		t.Fatalf("terminate guarded session: %v", err)
+	}
+	empty, err := SessionEmpty(identity)
+	if err != nil || !empty {
+		t.Fatalf("terminated guarded session empty=%v err=%v", empty, err)
 	}
 }
 

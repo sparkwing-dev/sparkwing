@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -140,8 +141,6 @@ func TestStartup_QuarantinesUnrestorableState(t *testing.T) {
 		name string
 		blob []byte
 	}{
-		{"malformed json", []byte("{not json")},
-		{"wrong schema", []byte(`{"schema":99,"snapshot":{}}`)},
 		{"invalid snapshot", duplicateLease},
 	}
 	for _, tc := range cases {
@@ -173,5 +172,83 @@ func TestStartup_QuarantinesUnrestorableState(t *testing.T) {
 				t.Errorf("expected a quarantine log line, got:\n%s", log.joined())
 			}
 		})
+	}
+}
+
+func TestStartupRefusesUnreadableLeaseAuthority(t *testing.T) {
+	cases := []struct {
+		name string
+		blob []byte
+	}{
+		{"malformed json", []byte("{not json")},
+		{"unknown schema", []byte(`{"schema":99,"snapshot":{}}`)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := shortHome(t)
+			path := writeLedgerState(t, home, tc.blob)
+			d, err := wingd.New(wingd.Config{Home: home, Sampler: newFakeSampler(8, 8<<30)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if err := d.Run(ctx); err == nil {
+				t.Fatal("daemon served after losing durable lease authority")
+			} else if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "sparkwing daemon recover-state --yes") {
+				t.Fatalf("startup error is not actionable: %v", err)
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("unreadable authority was not preserved: %v", err)
+			}
+			matches, err := filepath.Glob(path + ".corrupt-*")
+			if err != nil || len(matches) != 0 {
+				t.Fatalf("unreadable authority was quarantined: %v (err %v)", matches, err)
+			}
+		})
+	}
+}
+
+func TestStartupRefusesUnrestorableGuardedAuthority(t *testing.T) {
+	snapshot := admission.Snapshot{
+		TotalMilliCores:  8000,
+		TotalMemoryBytes: 8 << 30,
+		LeaseSeq:         2,
+		Leases: []admission.LeaseState{
+			{Seq: 1, ID: "lease-1", Token: "tok-a", RequestID: "run-a", MilliCores: 1000, Members: []string{"run-a"}},
+			{Seq: 2, ID: "lease-1", Token: "tok-b", RequestID: "run-b", MilliCores: 1000, Members: []string{"run-b"}},
+		},
+	}
+	blob, err := json.Marshal(map[string]any{
+		"schema":   2,
+		"snapshot": snapshot,
+		"guards": []map[string]any{{
+			"lease_id": "lease-1",
+			"run_id":   "run-a",
+			"session": map[string]any{
+				"leader_pid": 73, "session_id": 73, "birth_token": "birth-73",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := shortHome(t)
+	path := writeLedgerState(t, home, blob)
+	d, err := wingd.New(wingd.Config{Home: home, Sampler: newFakeSampler(8, 8<<30)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := d.Run(ctx); err == nil {
+		t.Fatal("daemon served after discarding unrestorable guarded authority")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("guarded authority was not preserved: %v", err)
+	}
+	matches, err := filepath.Glob(path + ".corrupt-*")
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("guarded authority was quarantined: %v (err %v)", matches, err)
 	}
 }

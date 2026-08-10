@@ -1,10 +1,10 @@
 // Package wingd implements sparkwingd, the single local admission
 // arbiter. One daemon per sparkwing home owns the admission ledger
-// (internal/admission), serves clients over a unix socket speaking the
-// wingwire protocol (pkg/wingwire), and derives liveness from the socket
-// itself: a lease is held by an open connection, so a client's death is
-// reported by the kernel closing the socket, with no heartbeats or
-// polling anywhere.
+// (internal/admission) and serves clients over a unix socket speaking the
+// wingwire protocol (pkg/wingwire). Ordinary leases derive liveness from the
+// socket. A lease guarding an external process session instead survives its
+// supervisor connection and remains held until the kernel reports that exact
+// session empty.
 //
 // # Election and lifecycle
 //
@@ -25,12 +25,11 @@
 // daemon, which snapshots and exits, and the successor restores the same
 // state and honors the same grace window.
 //
-// A state file can never prevent the daemon from serving. Restored
-// grants the current budget cannot hold are shed newest-first until the
-// rest fit, and a snapshot that cannot be restored at all is quarantined
-// under a .corrupt-<unixtime> suffix while the daemon serves with a
-// fresh ledger. Worst case a client loses its re-attach and re-requests
-// admission.
+// Restored grants the current budget cannot hold are shed newest-first until
+// the rest fit. A structurally invalid legacy snapshot is quarantined. An
+// unreadable state file or unknown schema prevents startup because it may
+// contain guarded process authority; serving from an empty ledger could admit
+// overlapping work.
 //
 // # Host sensing
 //
@@ -131,6 +130,12 @@ type Config struct {
 	// uses the real platform sampler; a sampler that reports not-sampled
 	// (unsupported platforms) simply leaves holders unflagged.
 	ProcSampler ProcSampler
+	// SessionGuardInspector validates and controls exact process sessions for
+	// guarded admission. Nil uses the kernel-backed platform implementation.
+	SessionGuardInspector SessionGuardInspector
+	// GuardInterval controls how quickly an orphaned guarded session is
+	// observed empty. Zero uses the default.
+	GuardInterval time.Duration
 	// Now returns the current time; nil uses time.Now. Injected so tests
 	// can measure elapsed hold time deterministically.
 	Now func() time.Time
@@ -179,6 +184,13 @@ func (c Config) idleTimeout() time.Duration {
 		return c.IdleTimeout
 	}
 	return DefaultIdleTimeout
+}
+
+func (c Config) guardInterval() time.Duration {
+	if c.GuardInterval > 0 {
+		return c.GuardInterval
+	}
+	return defaultGuardInterval
 }
 
 func (c Config) graceWindow() time.Duration {

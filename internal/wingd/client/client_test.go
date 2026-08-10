@@ -169,6 +169,37 @@ func TestEnsureDaemon_SpawnsWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestEnsureDaemon_BoundsAnUnreachablePredecessorElection(t *testing.T) {
+	home := shortHome(t)
+	_ = runDaemon(t, home, "v1.0.0")
+	sock, err := wingd.SocketPath(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(sock); err != nil {
+		t.Fatalf("hide predecessor listener: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, err = EnsureDaemon(ctx, Options{
+		Home:                   home,
+		Spawn:                  func(string, string) error { t.Fatal("spawned while predecessor held election"); return nil },
+		DialTimeout:            time.Millisecond,
+		Backoff:                time.Nanosecond,
+		PredecessorWaitTimeout: 20 * time.Millisecond,
+	})
+	if err == nil {
+		t.Fatal("unreachable predecessor election waited forever")
+	}
+	if !errors.Is(err, ErrDaemonUnreachable) || !strings.Contains(err.Error(), "predecessor") || !strings.Contains(err.Error(), "election lock") {
+		t.Fatalf("unreachable predecessor error = %v; want bounded election-lock diagnostic", err)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("predecessor wait consumed the caller deadline: %v", err)
+	}
+}
+
 func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
 	home := shortHome(t)
 	var calls atomic.Int32

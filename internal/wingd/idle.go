@@ -36,7 +36,7 @@ func (d *Daemon) idleLoop(ctx context.Context) {
 func (d *Daemon) idleElapsed() time.Duration {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if len(d.conns) > 0 || len(d.reattachWait) > 0 {
+	if len(d.conns) > 0 || len(d.reattachWait) > 0 || len(d.guards) > 0 {
 		return 0
 	}
 	snap := d.ledger.Snapshot()
