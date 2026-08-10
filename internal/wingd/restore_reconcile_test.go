@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -194,6 +195,8 @@ func TestStartupRefusesUnreadableLeaseAuthority(t *testing.T) {
 			defer cancel()
 			if err := d.Run(ctx); err == nil {
 				t.Fatal("daemon served after losing durable lease authority")
+			} else if !strings.Contains(err.Error(), path) || !strings.Contains(err.Error(), "sparkwing daemon recover-state --yes") {
+				t.Fatalf("startup error is not actionable: %v", err)
 			}
 			if _, err := os.Stat(path); err != nil {
 				t.Fatalf("unreadable authority was not preserved: %v", err)

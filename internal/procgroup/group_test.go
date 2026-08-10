@@ -7,6 +7,8 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"os/signal"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -57,6 +59,15 @@ func TestGroupHelperProcess(t *testing.T) {
 	case "session-parked":
 		IgnoreTermination()
 		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	case "session-cooperative":
+		term := make(chan os.Signal, 1)
+		signal.Notify(term, syscall.SIGTERM)
+		<-term
+		time.Sleep(500 * time.Millisecond)
+		if err := os.WriteFile(os.Getenv("SPARKWING_PROCGROUP_MARKER"), []byte("clean"), 0o600); err != nil {
+			os.Exit(2)
+		}
 		os.Exit(0)
 	}
 }
@@ -110,6 +121,52 @@ func TestSessionEmptyTreatsReusedLeaderAsTheOriginalSessionGone(t *testing.T) {
 	})
 	if err != nil || !empty {
 		t.Fatalf("reused session identity empty=%v err=%v, want original session gone", empty, err)
+	}
+}
+
+func TestSessionEmptyRetainsAdmissionWhenReusedLeaderHasLiveSessionMembers(t *testing.T) {
+	originalTable := sessionProcessTable
+	originalIdentity := sessionIdentityLookup
+	t.Cleanup(func() {
+		sessionProcessTable = originalTable
+		sessionIdentityLookup = originalIdentity
+	})
+	sessionProcessTable = func(bool) ([]Info, error) {
+		return []Info{
+			{PID: 81, Group: 81, Session: 81, State: "R"},
+			{PID: 93, Group: 93, Session: 81, State: "R"},
+		}, nil
+	}
+	sessionIdentityLookup = func(int) (int, string, error) {
+		return 81, "new-birth", nil
+	}
+
+	empty, err := SessionEmpty(SessionIdentity{
+		LeaderPID: 81, SessionID: 81, BirthToken: "original-birth",
+	})
+	if err == nil && empty {
+		t.Fatal("reused leader hid a live member of the guarded session")
+	}
+}
+
+func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "cleanup-complete")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	cmd.Env = append(os.Environ(), helperMode+"=session-cooperative", "SPARKWING_PROCGROUP_MARKER="+marker)
+	group, err := StartSession(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { terminateForTest(group) })
+	identity, err := CaptureSession(group.ID())
+	if err != nil {
+		t.Fatalf("capture cooperative session: %v", err)
+	}
+	if err := TerminateSession(identity); err != nil {
+		t.Fatalf("terminate cooperative session: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("cooperative cleanup did not finish before escalation: %v", err)
 	}
 }
 
