@@ -245,6 +245,38 @@ func TestQueueExecCancellationAfterGrantFailsAndReapsCommand(t *testing.T) {
 	})
 }
 
+func TestQueueExecRefusesUnsupportedProcessOwnershipBeforeAdmission(t *testing.T) {
+	home := queueHome(t)
+	serveQueueDaemon(t, home)
+	originalSupport := queueExecProcessSupport
+	queueExecProcessSupport = func() error { return errors.New("session ownership unavailable") }
+	t.Cleanup(func() { queueExecProcessSupport = originalSupport })
+
+	tmp := t.TempDir()
+	marker := filepath.Join(tmp, "started")
+	ready := filepath.Join(tmp, "ready.json")
+	err := runQueue([]string{
+		"exec", "--home", home, "--run-id", "unsupported-bootstrap", "--cores", "0.1",
+		"--ready-file", ready, "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", marker, "0",
+	})
+	if err == nil || !strings.Contains(err.Error(), "session ownership unavailable") {
+		t.Fatalf("queue exec error = %v, want process-ownership refusal", err)
+	}
+	if _, statErr := os.Stat(marker); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unsupported command started: %v", statErr)
+	}
+	if _, statErr := os.Stat(ready); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("unsupported command published readiness: %v", statErr)
+	}
+	qs, queryErr := wingdclient.Query(context.Background(), wingdclient.Options{Home: home})
+	if queryErr != nil {
+		t.Fatalf("query queue: %v", queryErr)
+	}
+	if len(qs.Holders) != 0 || len(qs.Waiters) != 0 {
+		t.Fatalf("unsupported command touched admission: %+v", qs)
+	}
+}
+
 func containsString(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
