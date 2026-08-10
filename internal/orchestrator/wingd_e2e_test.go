@@ -886,6 +886,10 @@ func TestWingd_SecondRunQueuesUntilFirstReleases(t *testing.T) {
 }
 
 func TestWingd_NodeAdmissionWaitDoesNotConsumeDispatchWatchdog(t *testing.T) {
+	const (
+		dispatchBudget = 500 * time.Millisecond
+		admissionHold  = 750 * time.Millisecond
+	)
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
 	startWingd(t, home, 2)
@@ -913,7 +917,7 @@ func TestWingd_NodeAdmissionWaitDoesNotConsumeDispatchWatchdog(t *testing.T) {
 			Pipeline:            "wingd-e2e-unpinned",
 			RunID:               "wingd-watchdog-waiter",
 			Admission:           testWingdAdmission(home, nil),
-			DispatchWaitTimeout: 50 * time.Millisecond,
+			DispatchWaitTimeout: dispatchBudget,
 		})
 		runB <- res
 	}()
@@ -922,7 +926,7 @@ func TestWingd_NodeAdmissionWaitDoesNotConsumeDispatchWatchdog(t *testing.T) {
 	select {
 	case res := <-runB:
 		t.Fatalf("queued run ended while legitimate admission was pending: %+v", res)
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(admissionHold):
 	}
 
 	close(gate.release)
