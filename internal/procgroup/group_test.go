@@ -132,6 +132,27 @@ func TestSessionTerminateKillsStubbornLeaderAndNestedGroup(t *testing.T) {
 	}
 }
 
+func TestTerminateSessionReturnsOnlyAfterStubbornSessionIsEmpty(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	cmd.Env = append(os.Environ(), helperMode+"=session-stubborn")
+	group, err := StartSession(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { terminateForTest(group) })
+	identity, err := CaptureSession(group.ID())
+	if err != nil {
+		t.Fatalf("capture stubborn session: %v", err)
+	}
+	if err := TerminateSession(identity); err != nil {
+		t.Fatalf("terminate guarded session: %v", err)
+	}
+	empty, err := SessionEmpty(identity)
+	if err != nil || !empty {
+		t.Fatalf("terminated guarded session empty=%v err=%v", empty, err)
+	}
+}
+
 func TestSessionCleanupIncludesNestedProcessGroups(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
 	cmd.Env = append(os.Environ(), helperMode+"=session-leader")
