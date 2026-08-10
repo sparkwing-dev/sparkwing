@@ -58,6 +58,32 @@ code change to unlock.
   unreadable state file after the operator verifies guarded commands stopped,
   providing an explicit escape from fail-closed startup without silently
   discarding unknown lease authority.
+- **cache:** `sparkwing cache info` and `sparkwing cache prune` inspect and trim
+  the compiled pipeline binary cache. The cache is now bounded rather than
+  unbounded: after each compile, least recently used binaries are evicted to fit
+  `SPARKWING_CACHE_MAX_BYTES` (default `2GiB`) and `SPARKWING_CACHE_MAX_ENTRIES`
+  (default `20`), either set to `0` to disable. Eviction ranks entries by last
+  use rather than build time, so a binary in daily use survives regardless of
+  age, and entries used in the last few minutes are never evicted.
+
+### Changed
+
+- **cache:** the pipeline binary cache key no longer depends on where a checkout
+  lives. Local `replace` targets are recorded by module path instead of absolute
+  filesystem path, a covering `go.work` is folded in by its normalized directives
+  rather than its raw bytes, and builds pass `-trimpath`. Two checkouts of the
+  same commit now compute the same key and compile to byte-identical binaries, so
+  a worktree reuses the primary checkout's build instead of making its own.
+- **cache:** files git ignores are excluded from the pipeline binary cache key.
+  Untracked local debris -- provider plugins, release outputs, coverage data --
+  no longer perturbs the key or costs time to hash, which also makes the key
+  reproducible across machines and CI runners. Directories outside a git
+  repository still hash everything. Set `SPARKWING_HASH_ALL_FILES=1` to restore
+  full hashing if a build depends on a gitignored file, such as a generated asset
+  pulled in by `//go:embed`.
+
+  These two changes invalidate existing cached binaries once; the next
+  invocation of each pipeline recompiles.
 
 ### Docs
 

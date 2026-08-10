@@ -287,6 +287,8 @@ func runSparkwing(args []string) error {
 		return runExamples(args[1:])
 	case "docs":
 		return runDocs(args[1:])
+	case "cache":
+		return runCache(args[1:])
 	case "commands":
 		return runCommands(args[1:])
 	case "update":

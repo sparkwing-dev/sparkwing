@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -38,9 +39,19 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 	binPath := bincache.CachedBinaryPath(key)
 
 	if _, err := os.Stat(binPath); err == nil {
+		// Stamp the hit before exec'ing. The binary's mtime is the
+		// cache's only record of when an entry was last wanted, and
+		// pruning evicts by that stamp.
+		bincache.Touch(binPath)
 		ensureDescribeCache(sparkwingDir, binPath)
-		env = append(env, "SPARKWING_BINARY_SOURCE=cached")
-		return bincache.ExecReplace(binPath, args, sparkwingDir, env)
+		err := bincache.ExecReplace(binPath, args, sparkwingDir, append(env, "SPARKWING_BINARY_SOURCE=cached"))
+		if !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		// A concurrent prune removed the binary between the stat and
+		// the exec. The rest of this function rebuilds it, so falling
+		// through costs one compile instead of failing the run.
+		slog.Default().Debug("cached binary vanished before exec; rebuilding", "hash", key)
 	}
 
 	if cache, lookup := resolveEffectiveCacheSpec(sparkwingDir); cache != nil {
@@ -86,9 +97,31 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 		}
 	}
 
+	// A compile is the only thing that grows the cache, so it is the
+	// only place that needs to bound it. Keeping this off the cache-hit
+	// path means the common invocation pays nothing for it.
+	pruneCache()
+
 	ensureDescribeCache(sparkwingDir, binPath)
 	env = append(env, "SPARKWING_BINARY_SOURCE=compiled")
 	return bincache.ExecReplace(binPath, args, sparkwingDir, env)
+}
+
+// pruneCache trims the compiled-binary cache to its configured
+// ceilings. Failures are logged and swallowed: the cache is a
+// performance aid, and a run that just compiled successfully should not
+// fail because housekeeping did.
+func pruneCache() {
+	result, err := bincache.PruneToConfiguredLimits()
+	if err != nil {
+		slog.Default().Debug("pipeline cache prune failed", "err", err)
+		return
+	}
+	if result.Removed > 0 {
+		slog.Default().Debug("pruned pipeline cache",
+			"removed", result.Removed, "freed_bytes", result.Freed,
+			"kept", result.Kept, "kept_bytes", result.KeptBytes, "skipped", result.Skipped)
+	}
 }
 
 // ensureDescribeCache writes the describe-cache file if it's missing

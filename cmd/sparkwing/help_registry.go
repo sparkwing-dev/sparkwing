@@ -837,6 +837,73 @@ faster than the 24h TTL window, or when debugging --web behavior.`,
 	},
 }
 
+var cmdCache = Command{
+	Path:     "sparkwing cache",
+	Synopsis: "Inspect or trim the compiled pipeline binary cache",
+	Description: `Every pipeline invocation compiles .sparkwing/ to a binary keyed
+on a fingerprint of its source, and those binaries are cached under
+$SPARKWING_HOME/cache/pipelines. They are large -- often 90 MB or
+more each -- so the cache is bounded rather than allowed to grow.
+
+Pruning runs automatically after a compile, keeping the most
+recently used entries within a byte ceiling and an entry count.
+These verbs are for looking at what is cached and for reclaiming
+space on demand.`,
+	Subcommands: []SubcommandRef{
+		{"info", "Print cache location, size, ceilings, and recent entries"},
+		{"prune", "Evict least recently used entries down to the ceilings"},
+	},
+	Examples: []Example{
+		{"See what is cached", "sparkwing cache info"},
+		{"Reclaim space now", "sparkwing cache prune"},
+	},
+}
+
+var cmdCacheInfo = Command{
+	Path:     "sparkwing cache info",
+	Synopsis: "Print cache dir, size, ceilings, and recent entries",
+	Description: `Lists the cache directory, its total size, the configured
+ceilings, and the most recently used entries with their sizes and
+last-use times. Entries are ordered by last use, which is what
+pruning evicts on -- not by when they were built.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+		{Name: "all", Argument: "", Desc: "List every entry rather than the ten most recent", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"Human-readable", "sparkwing cache info"},
+		{"Agent-readable", "sparkwing cache info -o json"},
+		{"Every entry", "sparkwing cache info --all"},
+	},
+}
+
+var cmdCachePrune = Command{
+	Path:     "sparkwing cache prune",
+	Synopsis: "Evict least recently used binaries down to the ceilings",
+	Description: `Removes the least recently used cached binaries until the cache
+fits both the byte ceiling and the entry ceiling. Defaults come
+from $SPARKWING_CACHE_MAX_BYTES and $SPARKWING_CACHE_MAX_ENTRIES;
+either accepts 0 to disable that dimension.
+
+Entries used in the last few minutes are never evicted, because a
+run stats its binary just before exec'ing it. Entries that cannot
+be removed -- a running executable on Windows -- are reported as
+skipped and left for a later prune.`,
+	Flags: []FlagSpec{
+		{Name: "max-bytes", Argument: "SIZE", Desc: "Byte ceiling, e.g. 512MiB", Group: "Limits"},
+		{Name: "max-entries", Argument: "N", Desc: "Entry ceiling", Group: "Limits"},
+		{Name: "all", Argument: "", Desc: "Remove every entry, ignoring both ceilings", Group: "Limits"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Limits", "Output", "Other"},
+	Examples: []Example{
+		{"Trim to the configured ceilings", "sparkwing cache prune"},
+		{"Trim to a smaller budget", "sparkwing cache prune --max-bytes 512MiB"},
+		{"Reclaim everything", "sparkwing cache prune --all"},
+	},
+}
+
 var cmdDebug = Command{
 	Path:     "sparkwing debug",
 	Synopsis: "Interactive debugging for pipeline runs",
