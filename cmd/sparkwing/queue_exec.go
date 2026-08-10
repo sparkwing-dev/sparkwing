@@ -274,7 +274,7 @@ func runQueueExecGuard(command []string) error {
 	if closeErr != nil {
 		return fmt.Errorf("queue exec guard: close start gate: %w", closeErr)
 	}
-	return execQueueExecCommand(command)
+	return runQueueExecCommand(command)
 }
 
 type queueExecReady struct {

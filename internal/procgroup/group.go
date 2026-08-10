@@ -19,6 +19,12 @@ var sessionProcessTable = processTable
 
 var sessionIdentityLookup = sessionIdentity
 
+const guardedSessionTerminateGrace = 250 * time.Millisecond
+
+const guardedSessionTerminateTimeout = 5 * time.Second
+
+const guardedSessionPollInterval = 10 * time.Millisecond
+
 // Info describes one process-table entry.
 type Info struct {
 	PID     int
@@ -94,7 +100,41 @@ func TerminateSession(identity SessionIdentity) error {
 	if err != nil || empty {
 		return err
 	}
-	return terminateGuardSession(identity.SessionID)
+	if err := signalGuardSession(identity.SessionID, false); err != nil {
+		return err
+	}
+	if empty, err := waitSessionEmpty(identity, guardedSessionTerminateGrace); err != nil || empty {
+		return err
+	}
+	if err := signalGuardSession(identity.SessionID, true); err != nil {
+		return err
+	}
+	empty, err = waitSessionEmpty(identity, guardedSessionTerminateTimeout)
+	if err != nil {
+		return err
+	}
+	if !empty {
+		return fmt.Errorf("guarded session %d remained live after termination", identity.SessionID)
+	}
+	return nil
+}
+
+func waitSessionEmpty(identity SessionIdentity, timeout time.Duration) (bool, error) {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	ticker := time.NewTicker(guardedSessionPollInterval)
+	defer ticker.Stop()
+	for {
+		empty, err := inspectSession(identity, false)
+		if err != nil || empty {
+			return empty, err
+		}
+		select {
+		case <-deadline.C:
+			return false, nil
+		case <-ticker.C:
+		}
+	}
 }
 
 func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) {

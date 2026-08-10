@@ -35,6 +35,10 @@ func sessionIdentity(pid int) (int, string, error) {
 	return 0, "", fmt.Errorf("process %d is absent", pid)
 }
 
-func terminateGuardSession(sessionID int) error {
-	return signalSession(sessionID, syscall.SIGTERM)
+func signalGuardSession(sessionID int, kill bool) error {
+	signal := syscall.SIGTERM
+	if kill {
+		signal = syscall.SIGKILL
+	}
+	return signalSession(sessionID, signal)
 }
