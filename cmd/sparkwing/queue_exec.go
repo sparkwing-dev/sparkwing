@@ -22,6 +22,8 @@ import (
 
 const queueExecCleanupTimeout = 10 * time.Second
 
+var queueExecProcessSupport = procgroup.Supported
+
 func runQueueExec(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
