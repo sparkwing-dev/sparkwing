@@ -321,6 +321,9 @@ func (d *Daemon) initLedger() error {
 	if snap != nil {
 		lg, kept, rerr := d.restoreLedger(*snap)
 		if rerr != nil {
+			if len(guards) > 0 {
+				return fmt.Errorf("wingd: restore guarded authority: %w", rerr)
+			}
 			d.discardState(rerr)
 		} else {
 			d.ledger = lg
