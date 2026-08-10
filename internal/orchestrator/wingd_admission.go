@@ -314,6 +314,7 @@ func (la *LocalAdmission) admitNode(
 	req := wingwire.AdmissionRequest{
 		RunID:              nodeHostRunID(runID, nodeID),
 		OwnerRunID:         runID,
+		OwnerLeaseToken:    localAdmissionLeaseTokenFromContext(ctx),
 		DisplayRunID:       nodeDisplayRunID(runID, nodeID),
 		Pipeline:           pipeline,
 		Repo:               currentRepoShortName(),
@@ -452,13 +453,14 @@ func (la *LocalAdmission) attachChildRun(
 		return rl, admitProceed, nil
 	}
 	extraLease, outcome, err := la.acquireBlocking(ctx, backends, runID, wingwire.AdmissionRequest{
-		RunID:          runID + localPlanSemsID,
-		OwnerRunID:     runID,
-		DisplayRunID:   runID,
-		SemaphoresOnly: true,
-		Semaphores:     extra,
-		SubLease:       true,
-		Priority:       plan.PriorityValue(),
+		RunID:           runID + localPlanSemsID,
+		OwnerRunID:      runID,
+		OwnerLeaseToken: lease.Token,
+		DisplayRunID:    runID,
+		SemaphoresOnly:  true,
+		Semaphores:      extra,
+		SubLease:        true,
+		Priority:        plan.PriorityValue(),
 	})
 	if err != nil || outcome != admitProceed {
 		rl.release()
@@ -910,6 +912,14 @@ func localAdmissionChildTokenFromContext(ctx context.Context) string {
 	return state.childToken
 }
 
+func localAdmissionLeaseTokenFromContext(ctx context.Context) string {
+	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	if !ok {
+		return ""
+	}
+	return state.token
+}
+
 func localAdmissionPriorityFromContext(ctx context.Context) int {
 	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
 	if !ok {
@@ -962,13 +972,14 @@ func (la *LocalAdmission) acquireNodeSlot(
 	onQueued func(wingwire.Queued),
 ) (*wingdclient.Lease, error) {
 	return la.acquireNodeAdmission(ctx, wingwire.AdmissionRequest{
-		RunID:          nodeSemaphoreRunID(runID, nodeID),
-		OwnerRunID:     runID,
-		DisplayRunID:   nodeDisplayRunID(runID, nodeID),
-		SemaphoresOnly: true,
-		Semaphores:     []wingwire.SemaphoreClaim{claim},
-		SubLease:       true,
-		Priority:       priority,
+		RunID:           nodeSemaphoreRunID(runID, nodeID),
+		OwnerRunID:      runID,
+		OwnerLeaseToken: localAdmissionLeaseTokenFromContext(ctx),
+		DisplayRunID:    nodeDisplayRunID(runID, nodeID),
+		SemaphoresOnly:  true,
+		Semaphores:      []wingwire.SemaphoreClaim{claim},
+		SubLease:        true,
+		Priority:        priority,
 	}, onQueued)
 }
 
@@ -985,6 +996,7 @@ func (la *LocalAdmission) acquireNodeHostSlot(
 	return la.acquireNodeAdmission(ctx, wingwire.AdmissionRequest{
 		RunID:              nodeHostRunID(runID, nodeID),
 		OwnerRunID:         runID,
+		OwnerLeaseToken:    localAdmissionLeaseTokenFromContext(ctx),
 		DisplayRunID:       nodeDisplayRunID(runID, nodeID),
 		Pipeline:           pipeline,
 		Repo:               currentRepoShortName(),

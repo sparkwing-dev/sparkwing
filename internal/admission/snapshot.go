@@ -29,6 +29,8 @@ type Snapshot struct {
 type LeaseState struct {
 	Seq         uint64       `json:"seq"`
 	Admit       uint64       `json:"admit,omitempty"`
+	OwnerID     string       `json:"owner_id,omitempty"`
+	OwnerAdmit  uint64       `json:"owner_admit,omitempty"`
 	ID          LeaseID      `json:"id"`
 	Token       string       `json:"token"`
 	RequestID   string       `json:"request_id"`
@@ -71,6 +73,8 @@ type HoldState struct {
 type WaiterState struct {
 	Arrival       uint64       `json:"arrival"`
 	Admit         uint64       `json:"admit,omitempty"`
+	OwnerID       string       `json:"owner_id,omitempty"`
+	OwnerAdmit    uint64       `json:"owner_admit,omitempty"`
 	BackfillCount uint64       `json:"backfill_count,omitempty"`
 	RequestID     string       `json:"request_id"`
 	Priority      int          `json:"priority,omitempty"`
@@ -108,6 +112,8 @@ func (l *Ledger) Snapshot() Snapshot {
 		snap.Leases = append(snap.Leases, LeaseState{
 			Seq:         le.seq,
 			Admit:       le.admit,
+			OwnerID:     le.ownerID,
+			OwnerAdmit:  le.ownerAdmit,
 			ID:          le.id,
 			Token:       le.token,
 			RequestID:   le.requestID,
@@ -142,6 +148,8 @@ func (l *Ledger) Snapshot() Snapshot {
 		snap.Waiters = append(snap.Waiters, WaiterState{
 			Arrival:       w.arrival,
 			Admit:         w.spec.admit,
+			OwnerID:       w.spec.ownerID,
+			OwnerAdmit:    w.spec.ownerAdmit,
 			BackfillCount: w.backfillCount,
 			RequestID:     w.spec.id,
 			Priority:      w.spec.priority,
@@ -174,6 +182,7 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 	if snap.TotalMilliCores < 0 || snap.HeadroomMilliCores < 0 {
 		return nil, fmt.Errorf("%w: negative core capacity", ErrInvalidSnapshot)
 	}
+	upgradeLegacyAdmitRanks(&snap)
 	l := &Ledger{
 		totalMilliCores:    snap.TotalMilliCores,
 		totalMemory:        snap.TotalMemoryBytes,
@@ -210,6 +219,45 @@ func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 	return l, nil
 }
 
+func upgradeLegacyAdmitRanks(snap *Snapshot) {
+	if !ranklessLegacySnapshot(*snap) {
+		return
+	}
+	sort.Slice(snap.Leases, func(i, j int) bool {
+		return snap.Leases[i].Seq < snap.Leases[j].Seq
+	})
+	for i := range snap.Leases {
+		snap.AdmitSeq++
+		snap.Leases[i].Admit = snap.AdmitSeq
+		snap.Leases[i].OwnerAdmit = snap.AdmitSeq
+	}
+	sort.Slice(snap.Waiters, func(i, j int) bool {
+		return snap.Waiters[i].Arrival < snap.Waiters[j].Arrival
+	})
+	for i := range snap.Waiters {
+		snap.AdmitSeq++
+		snap.Waiters[i].Admit = snap.AdmitSeq
+		snap.Waiters[i].OwnerAdmit = snap.AdmitSeq
+	}
+}
+
+func ranklessLegacySnapshot(snap Snapshot) bool {
+	if snap.AdmitSeq != 0 {
+		return false
+	}
+	for _, lease := range snap.Leases {
+		if lease.Admit != 0 || lease.OwnerAdmit != 0 || lease.OwnerID != "" {
+			return false
+		}
+	}
+	for _, waiter := range snap.Waiters {
+		if waiter.Admit != 0 || waiter.OwnerAdmit != 0 || waiter.OwnerID != "" {
+			return false
+		}
+	}
+	return true
+}
+
 func (l *Ledger) restoreLease(ls LeaseState) error {
 	if ls.ID == "" || ls.Token == "" || ls.RequestID == "" {
 		return fmt.Errorf("%w: lease %q with empty id, token, or request id", ErrInvalidSnapshot, ls.ID)
@@ -223,6 +271,9 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 	if ls.MilliCores < 0 {
 		return fmt.Errorf("%w: lease %s negative cores", ErrInvalidSnapshot, ls.ID)
 	}
+	if err := validateStoredOwnerRank(ls.OwnerID, ls.OwnerAdmit, ls.Admit, l.admitSeq, "lease "+string(ls.ID)); err != nil {
+		return err
+	}
 	if len(ls.Members) == 0 {
 		return fmt.Errorf("%w: lease %s has no members", ErrInvalidSnapshot, ls.ID)
 	}
@@ -230,9 +281,15 @@ func (l *Ledger) restoreLease(ls LeaseState) error {
 	if err != nil {
 		return fmt.Errorf("%w: lease %s: %v", ErrInvalidSnapshot, ls.ID, err)
 	}
+	ownerAdmit := ls.OwnerAdmit
+	if ownerAdmit == 0 {
+		ownerAdmit = ls.Admit
+	}
 	le := &lease{
 		seq:         ls.Seq,
 		admit:       ls.Admit,
+		ownerID:     ls.OwnerID,
+		ownerAdmit:  ownerAdmit,
 		id:          ls.ID,
 		token:       ls.Token,
 		requestID:   ls.RequestID,
@@ -294,9 +351,16 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 	if ws.MemoryBytes > l.totalMemory {
 		return fmt.Errorf("%w: waiter %q memory %d outside total %d", ErrInvalidSnapshot, ws.RequestID, ws.MemoryBytes, l.totalMemory)
 	}
+	if err := validateStoredOwnerRank(ws.OwnerID, ws.OwnerAdmit, ws.Admit, l.admitSeq, "waiter "+ws.RequestID); err != nil {
+		return err
+	}
 	claims, err := restoreClaims(ws.Claims)
 	if err != nil {
 		return fmt.Errorf("%w: waiter %q: %v", ErrInvalidSnapshot, ws.RequestID, err)
+	}
+	ownerAdmit := ws.OwnerAdmit
+	if ownerAdmit == 0 {
+		ownerAdmit = ws.Admit
 	}
 	l.waiters = append(l.waiters, &waiter{
 		arrival:       ws.Arrival,
@@ -304,6 +368,8 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 		spec: spec{
 			id:          ws.RequestID,
 			admit:       ws.Admit,
+			ownerID:     ws.OwnerID,
+			ownerAdmit:  ownerAdmit,
 			priority:    ws.Priority,
 			milliCores:  ws.MilliCores,
 			softCores:   ws.SoftCores,
@@ -312,6 +378,24 @@ func (l *Ledger) restoreWaiter(ws WaiterState) error {
 			claims:      claims,
 		},
 	})
+	return nil
+}
+
+func validateStoredOwnerRank(ownerID string, ownerAdmit, admit, admitSeq uint64, subject string) error {
+	if ownerID != "" && ownerAdmit == 0 {
+		return fmt.Errorf("%w: %s has no owner admission", ErrInvalidSnapshot, subject)
+	}
+	if ownerAdmit == 0 {
+		return nil
+	}
+	if ownerAdmit > admit || ownerAdmit > admitSeq {
+		return fmt.Errorf("%w: %s owner admission %d outside participant admission %d and counter %d",
+			ErrInvalidSnapshot, subject, ownerAdmit, admit, admitSeq)
+	}
+	if ownerID == "" && ownerAdmit != admit {
+		return fmt.Errorf("%w: %s ownerless admission %d differs from participant admission %d",
+			ErrInvalidSnapshot, subject, ownerAdmit, admit)
+	}
 	return nil
 }
 

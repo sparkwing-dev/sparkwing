@@ -5,6 +5,8 @@ type AdmissionRequest struct {
 
 	OwnerRunID string
 
+	OwnerLeaseToken string
+
 	DisplayRunID string
 
 	Pipeline string

@@ -60,6 +60,13 @@ func repoPinned(t *testing.T, base, name, pin string) string {
 // this build has not reached yet declare their own.
 func shippedFloors() wingwire.ProtocolFloors { return wingwire.ReleasedProtocolFloors() }
 
+func floorsBeforeProtocol3() wingwire.ProtocolFloors {
+	return wingwire.ProtocolFloors{
+		{Major: 1, MinVersion: "v0.0.0"},
+		{Major: 2, MinVersion: "v0.22.0"},
+	}
+}
+
 func renderPretty(t *testing.T, r DoctorReport) string {
 	t.Helper()
 	var buf bytes.Buffer
@@ -129,7 +136,7 @@ func TestDiagnoseLockedOutRepos_RaisesToTheDaemonsOwnReleaseWhenTheTableEndsBelo
 	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
 
 	var report DoctorReport
-	diagnoseLockedOutRepos(3, "v0.30.0", shippedFloors(), &report)
+	diagnoseLockedOutRepos(3, "v0.30.0", floorsBeforeProtocol3(), &report)
 
 	if len(report.LockedOutRepos) != 1 {
 		t.Fatalf("a protocol-3 daemon locks out a protocol-1 pin; got %+v", report.LockedOutRepos)
@@ -152,7 +159,7 @@ func TestDiagnoseLockedOutRepos_NamesPinsAtTheNewestKnownMajorWhenTheDaemonIsPas
 	)
 
 	var report DoctorReport
-	diagnoseLockedOutRepos(3, "v0.30.0", shippedFloors(), &report)
+	diagnoseLockedOutRepos(3, "v0.30.0", floorsBeforeProtocol3(), &report)
 
 	got := map[string]string{}
 	for _, row := range report.LockedOutRepos {
@@ -176,14 +183,14 @@ func TestDiagnoseLockedOutRepos_ReportsADaemonSpeakingAMajorTheTableDoesNotCarry
 	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
 
 	var report DoctorReport
-	diagnoseLockedOutRepos(3, "v0.30.0", shippedFloors(), &report)
+	diagnoseLockedOutRepos(3, "v0.30.0", floorsBeforeProtocol3(), &report)
 
 	gap := report.DaemonProtocolGap
 	if gap == nil {
 		t.Fatal("a daemon at protocol 3 against a table ending at 2 is a gap this build must name")
 	}
-	if gap.Self != wingwire.ProtocolMajor || gap.Daemon != 3 || gap.DaemonVersion != "v0.30.0" {
-		t.Errorf("gap = %+v, want self %d against daemon 3 (v0.30.0)", gap, wingwire.ProtocolMajor)
+	if gap.Self != 2 || gap.Daemon != 3 || gap.DaemonVersion != "v0.30.0" {
+		t.Errorf("gap = %+v, want protocol-2 table against daemon 3 (v0.30.0)", gap)
 	}
 	if report.Clean() {
 		t.Error("a build that cannot speak to the resident daemon is not a clean report")
@@ -198,7 +205,7 @@ func TestDiagnoseLockedOutRepos_NamesNoTargetWhenANewerDaemonReportsNoRelease(t 
 
 	for _, version := range []string{"", "(unknown)", scratchModuleVersion, "v0.22.0-dev+b9ade496"} {
 		var report DoctorReport
-		diagnoseLockedOutRepos(3, version, shippedFloors(), &report)
+		diagnoseLockedOutRepos(3, version, floorsBeforeProtocol3(), &report)
 
 		if len(report.LockedOutRepos) != 0 {
 			t.Errorf("daemon version %q names no release to raise to; got %+v", version, report.LockedOutRepos)

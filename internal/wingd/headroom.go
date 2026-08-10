@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sort"
 	"time"
 )
 
@@ -49,7 +50,8 @@ func (d *Daemon) refreshHeadroom() {
 // tick. Stateful CPU counters advance when sampled, so separate capacity and
 // headroom reads would measure utilization over the few moments between them.
 func (d *Daemon) refreshHostSample(refreshCapacity bool) {
-	stat, err := d.sampler.Sample()
+	roots, cohort := d.holderSample()
+	stat, ownedBusy, ownedMeasured, err := d.sampleHostAndOwned(roots)
 	if err != nil {
 		d.cfg.logf("host sample: %v", err)
 		return
@@ -57,7 +59,23 @@ func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 	if refreshCapacity {
 		d.applyCapacity(stat)
 	}
-	d.applyHeadroom(d.container.apply(stat))
+	stat = d.container.apply(stat)
+	d.applyHeadroomSample(stat, cohort, ownedBusy, ownedMeasured)
+}
+
+func (d *Daemon) sampleHostAndOwned(roots []int) (HostStat, float64, bool, error) {
+	if paired, ok := d.sampler.(pairedHostOwnedSampler); ok {
+		return paired.SampleWithOwned(roots)
+	}
+	stat, err := d.sampler.Sample()
+	if err != nil {
+		return stat, 0, false, err
+	}
+	if len(roots) == 0 {
+		return stat, 0, true, nil
+	}
+	owned, measured := d.ownedSampler.CPUUsage(roots)
+	return stat, owned, measured, nil
 }
 
 // applyHeadroom converts a host reading into a ledger headroom ceiling:
@@ -66,27 +84,42 @@ func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 // a change past a deadband. Small wiggles are absorbed until a bounded
 // refresh applies the newest effective value.
 func (d *Daemon) applyHeadroom(stat HostStat) {
+	d.applyHeadroomSample(stat, nil, 0, false)
+}
+
+func (d *Daemon) applyHeadroomSample(stat HostStat, sampled holderCohort, ownedBusy float64, ownedMeasured bool) {
 	d.mu.Lock()
+	if !sameHolderCohort(sampled, d.holderCohortLocked()) {
+		ownedBusy = 0
+		ownedMeasured = false
+	}
 	now := d.now()
 	if stat.LoadMeasured || stat.MemoryMeasured {
 		d.measuredAt = now
 	}
 
+	rawExternal := coresExternal(stat, stat.BusyCores, ownedBusy, ownedMeasured)
 	if !d.loadInit {
 		d.smoothedLoad = stat.LoadAverage
-		d.smoothedBusy = stat.BusyCores
 		d.loadInit = true
 	} else {
 		d.smoothedLoad = loadEMAAlpha*stat.LoadAverage + (1-loadEMAAlpha)*d.smoothedLoad
-		d.smoothedBusy = loadEMAAlpha*stat.BusyCores + (1-loadEMAAlpha)*d.smoothedBusy
 	}
-	load, busy := d.smoothedLoad, d.smoothedBusy
+	if !stat.CPUMeasured {
+		d.smoothedExternal = 0
+		d.externalInit = false
+	} else if !d.externalInit {
+		d.smoothedExternal = rawExternal
+		d.externalInit = true
+	} else {
+		d.smoothedExternal = loadEMAAlpha*rawExternal + (1-loadEMAAlpha)*d.smoothedExternal
+	}
+	load, externalCores := d.smoothedLoad, d.smoothedExternal
 
 	usedCores, usedMem := d.usedLocked()
 	frac := d.cfg.headroomFraction()
 
 	reservedCores := frac * stat.TotalCores
-	externalCores := coresExternal(stat, busy, usedCores)
 	reservedMem, externalMem := memReserveAndExternal(stat, usedMem, frac)
 
 	admitExternalCores, admitExternalMem := externalCores, externalMem
@@ -149,7 +182,7 @@ func (d *Daemon) applyHeadroom(stat HostStat) {
 	snap := d.ledger.Snapshot()
 	d.mu.Unlock()
 	d.cfg.logf("headroom: %.1f cores grantable (reserve %.1f, external %s)", targetCores, reservedCores,
-		externalWord(stat.LoadMeasured, fmt.Sprintf("%.1f", externalCores)))
+		externalWord(stat.CPUMeasured, fmt.Sprintf("%.1f", externalCores)))
 	if !stat.MemoryMeasured {
 		d.cfg.logf("headroom: memory external unmeasured (host sensor unavailable); none subtracted")
 	}
@@ -187,24 +220,67 @@ func memReserveAndExternal(stat HostStat, usedMem uint64, frac float64) (reserve
 	return reserved, external
 }
 
-// coresExternal is the CPU the daemon did not admit: smoothed host
-// utilization in cores minus what its own leases hold, floored at zero. It
-// is zero when utilization is unmeasured, on the same rule as the memory
-// term -- admission may not charge a run against pressure nobody read.
+// coresExternal is host CPU consumed outside measured live holder process
+// trees. A blind holder reading credits no owned work, so transient sensor
+// loss may reduce admission but cannot erase external pressure. A blind host
+// reading subtracts nothing because no pressure was measured.
 //
 // It reads utilization rather than the run queue because this figure is
 // subtracted from a core count. The run queue counts threads waiting,
 // including on uninterruptible I/O, so on an I/O-bound box it runs far
 // above the cores in use and erases a machine that is mostly idle.
-func coresExternal(stat HostStat, busy, usedCores float64) float64 {
+func coresExternal(stat HostStat, busy, ownedBusy float64, ownedMeasured bool) float64 {
 	if !stat.CPUMeasured {
 		return 0
 	}
-	external := busy - usedCores
+	if !ownedMeasured {
+		return busy
+	}
+	external := busy - ownedBusy
 	if external < 0 {
 		return 0
 	}
 	return external
+}
+
+type holderCohort map[*conn]int
+
+func (d *Daemon) holderSample() ([]int, holderCohort) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	cohort := d.holderCohortLocked()
+	seen := map[int]struct{}{}
+	for _, pid := range cohort {
+		seen[pid] = struct{}{}
+	}
+	pids := make([]int, 0, len(seen))
+	for pid := range seen {
+		pids = append(pids, pid)
+	}
+	sort.Ints(pids)
+	return pids, cohort
+}
+
+func (d *Daemon) holderCohortLocked() holderCohort {
+	cohort := holderCohort{}
+	for _, c := range d.byRun {
+		if c.role == roleHolder && c.pid > 0 {
+			cohort[c] = c.pid
+		}
+	}
+	return cohort
+}
+
+func sameHolderCohort(a, b holderCohort) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for c, pid := range a {
+		if b[c] != pid {
+			return false
+		}
+	}
+	return true
 }
 
 // coresContention is the run-queue pressure the daemon did not admit. It

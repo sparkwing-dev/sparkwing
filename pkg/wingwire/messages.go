@@ -125,6 +125,10 @@ type AdmissionRequest struct {
 	// OwnerRunID is the real run that owns an internal participant. Empty
 	// means the participant is the run.
 	OwnerRunID string `json:"owner_run_id,omitempty"`
+	// OwnerLeaseToken proves the internal participant descends from the
+	// claimed owner's live admission authority. The daemon ignores an
+	// OwnerRunID whose proof is absent or invalid.
+	OwnerLeaseToken string `json:"owner_lease_token,omitempty"`
 	// DisplayRunID is the label queue views print for this participant.
 	// Empty means display the owner run.
 	DisplayRunID string `json:"display_run_id,omitempty"`
