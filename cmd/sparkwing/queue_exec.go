@@ -24,6 +24,10 @@ const queueExecCleanupTimeout = 10 * time.Second
 
 var queueExecProcessSupport = procgroup.Supported
 
+var queueExecWatchLease = func(lease *wingdclient.Lease, onCancel func(wingwire.Cancel)) {
+	lease.WatchControl(nil, onCancel)
+}
+
 func runQueueExec(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -122,7 +126,7 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 	}
 
 	cancelled := make(chan struct{}, 1)
-	go lease.WatchControl(nil, func(wingwire.Cancel) {
+	go queueExecWatchLease(lease, func(wingwire.Cancel) {
 		select {
 		case cancelled <- struct{}{}:
 		default:
