@@ -101,33 +101,44 @@ func (d *Daemon) bindListener() (net.Listener, error) {
 	return ln, nil
 }
 
-// RemoveStaleSocket prepares home's daemon directory and removes its socket
-// when no live daemon holds the election lock. It returns true when spawning
-// is safe, including for a home no daemon has used yet. If the lock is held,
-// it leaves the socket alone and returns false.
-func RemoveStaleSocket(home string) (bool, error) {
+// SocketPreparation names the mutually exclusive result of preparing a daemon
+// socket. Callers must handle every state before spawning.
+type SocketPreparation uint8
+
+const (
+	SocketPreparationUnknown SocketPreparation = iota
+	SocketPreparationElectionHeld
+	SocketPreparationReady
+	SocketPreparationCleanupFailed
+)
+
+// PrepareDaemonSocket prepares home's daemon directory and removes its socket
+// when no live daemon holds the election lock. CleanupFailed means election is
+// free but stale-path removal failed; the daemon may be spawned so its bind
+// authority reports the exact failure. Unknown always carries an error.
+func PrepareDaemonSocket(home string) (SocketPreparation, error) {
 	l, err := resolveLayout(home)
 	if err != nil {
-		return false, err
+		return SocketPreparationUnknown, err
 	}
 	if err := l.ensureDir(); err != nil {
-		return false, err
+		return SocketPreparationUnknown, err
 	}
 	f, err := os.OpenFile(l.lock, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
-		return false, err
+		return SocketPreparationUnknown, err
 	}
 	defer func() { _ = f.Close() }()
 	ok, err := flockTry(f)
 	if err != nil {
-		return false, err
+		return SocketPreparationUnknown, err
 	}
 	if !ok {
-		return false, nil
+		return SocketPreparationElectionHeld, nil
 	}
 	defer func() { _ = flockUnlock(f) }()
 	if err := os.Remove(l.sock); err != nil && !errors.Is(err, os.ErrNotExist) {
-		return true, err
+		return SocketPreparationCleanupFailed, err
 	}
-	return true, nil
+	return SocketPreparationReady, nil
 }

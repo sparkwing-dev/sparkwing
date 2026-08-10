@@ -350,11 +350,12 @@ func (cl *Client) connect(ctx context.Context) error {
 				if spawns >= maxSpawnAttempts {
 					return daemonUnreachable(opts.Home, cl.sock, spawns, derr, lastDial)
 				}
-				lockFree, lerr := wingd.RemoveStaleSocket(opts.Home)
-				if lerr != nil && !lockFree {
+				preparation, lerr := wingd.PrepareDaemonSocket(opts.Home)
+				if lerr != nil && preparation != wingd.SocketPreparationCleanupFailed {
 					return spawnFailed(opts.Home, cl.sock, fmt.Errorf("check predecessor election: %w", lerr), lastDial)
 				}
-				if !lockFree {
+				switch preparation {
+				case wingd.SocketPreparationElectionHeld:
 					if predecessorDeadline.IsZero() {
 						predecessorDeadline = time.Now().Add(opts.predecessorWaitTimeout())
 						opts.logf("waiting for predecessor daemon election lock for %s", opts.Home)
@@ -367,11 +368,19 @@ func (cl *Client) connect(ctx context.Context) error {
 						return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 					}
 					continue
+				case wingd.SocketPreparationCleanupFailed:
+					if lerr == nil {
+						return spawnFailed(opts.Home, cl.sock, errors.New("prepare daemon socket: cleanup failed without an error"), lastDial)
+					}
+					opts.logf("stale daemon socket cleanup failed before spawn: %v", lerr)
+				case wingd.SocketPreparationReady:
+					if lerr != nil {
+						return spawnFailed(opts.Home, cl.sock, fmt.Errorf("prepare daemon socket: ready with error: %w", lerr), lastDial)
+					}
+				default:
+					return spawnFailed(opts.Home, cl.sock, fmt.Errorf("prepare daemon socket: unexpected state %d", preparation), lastDial)
 				}
 				predecessorDeadline = time.Time{}
-				if lerr != nil {
-					opts.logf("stale daemon socket cleanup failed before spawn: %v", lerr)
-				}
 				if serr := opts.spawn(opts.Home, opts.Version); serr != nil {
 					return spawnFailed(opts.Home, cl.sock, serr, lastDial)
 				}

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestRemoveStaleSocketTreatsAFreshHomeAsSpawnSafe(t *testing.T) {
+func TestPrepareDaemonSocketTreatsAFreshHomeAsReady(t *testing.T) {
 	home := t.TempDir()
 	state, err := PrepareDaemonSocket(home)
 	if err != nil {
@@ -20,7 +20,7 @@ func TestRemoveStaleSocketTreatsAFreshHomeAsSpawnSafe(t *testing.T) {
 	}
 }
 
-func TestRemoveStaleSocketReportsFreeElectionWhenCleanupFails(t *testing.T) {
+func TestPrepareDaemonSocketDistinguishesCleanupFailure(t *testing.T) {
 	home := t.TempDir()
 	sock, err := SocketPath(home)
 	if err != nil {
