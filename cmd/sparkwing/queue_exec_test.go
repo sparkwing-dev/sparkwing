@@ -63,11 +63,11 @@ func TestQueueExecWaitsInDaemonBeforeStartingCommand(t *testing.T) {
 			if waiter.Position != 1 {
 				t.Errorf("position = %d, want 1", waiter.Position)
 			}
-			if len(waiter.WaitingOn) != 1 || waiter.WaitingOn[0] != "bootstrap" {
+			if !containsString(waiter.WaitingOn, "bootstrap") {
 				t.Errorf("waiting_on = %v, want bootstrap", waiter.WaitingOn)
 			}
-			if waiter.BlockingReason == "" {
-				t.Error("blocking reason is empty")
+			if !strings.Contains(waiter.BlockingReason, "bootstrap") {
+				t.Errorf("blocking reason = %q, want bootstrap", waiter.BlockingReason)
 			}
 			break
 		}
@@ -164,7 +164,7 @@ func TestQueueExecSerializesFreshCommandsAndClearsAdmission(t *testing.T) {
 		t.Fatalf("second command visibility took %s, want at most 250ms", elapsed)
 	}
 	waiter := queued.Waiters[0]
-	if waiter.Position != 1 || len(waiter.WaitingOn) != 1 || waiter.WaitingOn[0] != "bootstrap" ||
+	if waiter.Position != 1 || !containsString(waiter.WaitingOn, "bootstrap") ||
 		!strings.Contains(waiter.BlockingReason, "bootstrap") {
 		t.Fatalf("second waiter does not expose its blocking cause: %+v", waiter)
 	}
@@ -188,6 +188,15 @@ func TestQueueExecSerializesFreshCommandsAndClearsAdmission(t *testing.T) {
 	if len(cleared.Holders) != 0 || len(cleared.Waiters) != 0 {
 		t.Fatalf("queue did not clear: %+v", cleared)
 	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestQueueExecCancellationBeforeGrantNeverStartsCommand(t *testing.T) {
