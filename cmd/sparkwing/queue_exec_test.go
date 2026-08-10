@@ -5,8 +5,10 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -125,7 +127,7 @@ func TestQueueExecHelperProcess(t *testing.T) {
 	if separator < 0 || (len(os.Args) != separator+3 && len(os.Args) != separator+4) {
 		return
 	}
-	if err := os.WriteFile(os.Args[separator+1], []byte("started"), 0o600); err != nil {
+	if err := os.WriteFile(os.Args[separator+1], []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
 		os.Exit(97)
 	}
 	code, err := strconv.Atoi(os.Args[separator+2])
@@ -275,6 +277,65 @@ func TestQueueExecRefusesUnsupportedProcessOwnershipBeforeAdmission(t *testing.T
 	if len(qs.Holders) != 0 || len(qs.Waiters) != 0 {
 		t.Fatalf("unsupported command touched admission: %+v", qs)
 	}
+}
+
+func TestQueueExecLeaseLossTerminatesBeforePromotingNextCommand(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exact process-session ownership is unavailable on Windows")
+	}
+	home := queueHome(t)
+	serveQueueDaemon(t, home)
+	lost := make(chan struct{})
+	originalWatcher := queueExecWatchLease
+	queueExecWatchLease = func(*wingdclient.Lease, func(wingwire.Cancel)) { <-lost }
+	t.Cleanup(func() { queueExecWatchLease = originalWatcher })
+
+	tmp := t.TempDir()
+	started := filepath.Join(tmp, "started")
+	release := filepath.Join(tmp, "release")
+	result := make(chan error, 1)
+	go func() {
+		result <- runQueue([]string{
+			"exec", "--home", home, "--run-id", "lost-bootstrap", "--cores", "0.1",
+			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", started, "0", release,
+		})
+	}()
+	t.Cleanup(func() {
+		_ = os.WriteFile(release, nil, 0o600)
+		select {
+		case <-result:
+		case <-time.After(queueExecWait):
+		}
+	})
+	waitForFile(t, started)
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "lost-bootstrap"
+	})
+	close(lost)
+
+	var runErr error
+	select {
+	case runErr = <-result:
+	case <-time.After(time.Second):
+		t.Fatal("lease loss did not terminate the command within one second")
+	}
+	if runErr == nil || !strings.Contains(runErr.Error(), "admission lease") {
+		t.Fatalf("lease-loss result = %v, want admission lease failure", runErr)
+	}
+	body, err := os.ReadFile(started)
+	if err != nil {
+		t.Fatalf("read child pid: %v", err)
+	}
+	pid, err := strconv.Atoi(string(body))
+	if err != nil {
+		t.Fatalf("parse child pid %q: %v", body, err)
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("child %d survived lease loss: %v", pid, err)
+	}
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 0 && len(qs.Waiters) == 0
+	})
 }
 
 func containsString(values []string, want string) bool {
