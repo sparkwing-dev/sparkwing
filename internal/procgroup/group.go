@@ -118,7 +118,7 @@ func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) 
 			return false, err
 		}
 		if token != identity.BirthToken {
-			return false, fmt.Errorf("guarded session leader %d birth identity changed", identity.LeaderPID)
+			return true, nil
 		}
 	}
 	for _, process := range processes {

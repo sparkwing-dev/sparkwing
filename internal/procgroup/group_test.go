@@ -86,8 +86,8 @@ func TestSessionIdentityBindsInspectionToLeaderBirth(t *testing.T) {
 	}
 	wrong := identity
 	wrong.BirthToken += "-reused"
-	if _, err := SessionEmpty(wrong); err == nil {
-		t.Fatal("changed leader birth identity was accepted")
+	if empty, err := SessionEmpty(wrong); err != nil || !empty {
+		t.Fatalf("changed leader birth identity empty=%v err=%v, want original session gone", empty, err)
 	}
 }
 
