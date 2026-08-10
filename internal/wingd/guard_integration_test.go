@@ -31,6 +31,77 @@ func (g *controlledSessionGuard) Terminate(wingwire.ProcessSession) error {
 	return nil
 }
 
+type distinctSessionGuard struct {
+	empty atomic.Bool
+}
+
+func (*distinctSessionGuard) Validate(wingwire.ProcessSession) error { return nil }
+
+func (*distinctSessionGuard) Quiescent(wingwire.ProcessSession) (bool, error) { return true, nil }
+
+func (g *distinctSessionGuard) Empty(wingwire.ProcessSession) (bool, error) {
+	return g.empty.Load(), nil
+}
+
+func (g *distinctSessionGuard) Terminate(wingwire.ProcessSession) error {
+	g.empty.Store(true)
+	return nil
+}
+
+func TestGuardCompletionRequiresAnEmptySession(t *testing.T) {
+	home := shortHome(t)
+	guard := &distinctSessionGuard{}
+	startDaemon(t, wingd.Config{
+		Home: home, SessionGuardInspector: guard, GuardInterval: 10 * time.Millisecond,
+	})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID: "nonempty-guard", SemaphoresOnly: true,
+		Semaphores: []wingwire.SemaphoreClaim{{Name: "exclusive", Cost: 1, Capacity: 1, Policy: wingwire.PolicyQueue}},
+		Guard:      &wingwire.ProcessSession{LeaderPID: 37, SessionID: 37, BirthToken: "birth-37"},
+	})
+	followerClient := ensure(t, home, "")
+	_, follower := acquireAsync(followerClient, wingwire.AdmissionRequest{
+		RunID: "nonempty-follower", SemaphoresOnly: true,
+		Semaphores: []wingwire.SemaphoreClaim{{Name: "exclusive", Cost: 1, Capacity: 1, Policy: wingwire.PolicyQueue}},
+	})
+
+	completed := make(chan struct{})
+	go holder.WatchGuard(nil, nil, func() { close(completed) })
+	if err := holder.CompleteGuard(); err != nil {
+		t.Fatalf("declare nonempty completion: %v", err)
+	}
+	select {
+	case result := <-follower:
+		if result.lease != nil {
+			_ = result.lease.Release()
+		}
+		t.Fatalf("follower promoted while guarded session was nonempty: %v", result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	select {
+	case <-completed:
+		t.Fatal("daemon acknowledged completion while guarded session was nonempty")
+	default:
+	}
+
+	guard.empty.Store(true)
+	if err := holder.CompleteGuard(); err != nil {
+		t.Fatalf("complete empty guard: %v", err)
+	}
+	result := waitResult(t, follower, 2*time.Second)
+	if result.err != nil {
+		t.Fatalf("follower after empty guard: %v", result.err)
+	}
+	_ = result.lease.Release()
+	select {
+	case <-completed:
+	case <-time.After(time.Second):
+		t.Fatal("empty guarded completion was not acknowledged")
+	}
+}
+
 func TestDisconnectedGuardedSessionRemainsCancellable(t *testing.T) {
 	home := shortHome(t)
 	guard := &controlledSessionGuard{}

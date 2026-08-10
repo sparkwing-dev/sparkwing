@@ -19,12 +19,12 @@ func TestPersistStateSerializesDelayedOlderSnapshotBeforeNewerSnapshot(t *testin
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
-	d.persistWrite = func(path string, snap admission.Snapshot, events []admissionEvent, cancelled []string) error {
+	d.persistWrite = func(path string, snap admission.Snapshot, events []admissionEvent, cancelled []string, guards []persistedGuard) error {
 		if snap.EventSeq == 1 {
 			once.Do(func() { close(entered) })
 			<-release
 		}
-		return writeStateWithCancellations(path, snap, events, cancelled)
+		return writeStateWithGuards(path, snap, events, cancelled, guards)
 	}
 	oldDone := make(chan error, 1)
 	go func() { oldDone <- d.persistState(admission.Snapshot{EventSeq: 1}) }()

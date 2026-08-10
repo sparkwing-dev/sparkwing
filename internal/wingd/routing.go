@@ -49,7 +49,13 @@ func (d *Daemon) routeLocked(events []admission.Event) []delivery {
 			}
 			c.role = roleHolder
 			c.leaseID = ev.Lease
+			if c.guard != nil {
+				d.guards[ev.Lease] = &sessionGuardState{persistedGuard: persistedGuard{
+					LeaseID: ev.Lease, RunID: ev.RequestID, Session: *c.guard,
+				}}
+			}
 			c.members = []string{ev.RequestID}
+			d.leaseMembers[ev.Lease] = append([]string(nil), c.members...)
 			c.startAt = now
 			c.holdSampledMS = 0
 			c.holdSaturatedMS = 0

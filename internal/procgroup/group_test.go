@@ -54,6 +54,40 @@ func TestGroupHelperProcess(t *testing.T) {
 		IgnoreTermination()
 		time.Sleep(30 * time.Second)
 		os.Exit(0)
+	case "session-parked":
+		IgnoreTermination()
+		time.Sleep(30 * time.Second)
+		os.Exit(0)
+	}
+}
+
+func TestSessionIdentityBindsInspectionToLeaderBirth(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	cmd.Env = append(os.Environ(), helperMode+"=session-parked")
+	group, err := StartSession(cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { terminateForTest(group) })
+	identity, err := CaptureSession(group.ID())
+	if err != nil {
+		t.Fatalf("capture session: %v", err)
+	}
+	if identity.LeaderPID != group.ID() || identity.SessionID != group.ID() || identity.BirthToken == "" {
+		t.Fatalf("session identity = %+v", identity)
+	}
+	quiescent, err := SessionQuiescent(identity)
+	if err != nil || !quiescent {
+		t.Fatalf("parked session quiescent=%v err=%v", quiescent, err)
+	}
+	empty, err := SessionEmpty(identity)
+	if err != nil || empty {
+		t.Fatalf("live parked session empty=%v err=%v", empty, err)
+	}
+	wrong := identity
+	wrong.BirthToken += "-reused"
+	if _, err := SessionEmpty(wrong); err == nil {
+		t.Fatal("changed leader birth identity was accepted")
 	}
 }
 

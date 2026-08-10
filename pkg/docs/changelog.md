@@ -82,6 +82,10 @@ code change to unlock.
   signalled, applies atomically to every member of a shared lease, survives
   daemon restart and connection replacement, and cannot resurrect a terminal
   run through admission or reattachment.
+- **local admission:** `queue exec` now binds admission to the command's kernel
+  process session. Supervisor death and daemon restart no longer release
+  capacity while the command tree is still running, and cancellation waits for
+  the guarded session to stop before queued work is promoted.
 - **release:** Self-release validation now requires an isolated
   `SPARKWING_HOME`, preventing a prerelease binary with a newer embedded schema
   from migrating the operational runs store before installed readers upgrade.

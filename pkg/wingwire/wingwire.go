@@ -37,7 +37,7 @@ import (
 // ProtocolMajor is the newest wire protocol major this build speaks.
 // Clients send it in [Hello]; a daemon answers on it whenever the client
 // speaks it too.
-const ProtocolMajor = 2
+const ProtocolMajor = 3
 
 // MinProtocolMajor is the oldest wire protocol major a daemon of this
 // build still serves. Every major from here up to [ProtocolMajor] is
@@ -94,6 +94,7 @@ type ProtocolFloors []ProtocolFloor
 var releasedProtocolFloors = ProtocolFloors{
 	{Major: 1, MinVersion: "v0.0.0"},
 	{Major: 2, MinVersion: "v0.22.0"},
+	{Major: 3, MinVersion: "v0.24.0"},
 }
 
 // ReleasedProtocolFloors returns the release-to-major table this build
@@ -153,6 +154,8 @@ const (
 	TypeQueued           MessageType = "queued"
 	TypeEvicted          MessageType = "evicted"
 	TypeRelease          MessageType = "release"
+	TypeGuardComplete    MessageType = "guard_complete"
+	TypeGuardCompleteAck MessageType = "guard_complete_ack"
 	TypeReattach         MessageType = "reattach"
 	TypeDrainRequest     MessageType = "drain_request"
 	TypeDrainAck         MessageType = "drain_ack"
@@ -234,6 +237,10 @@ func emptyMessage(t MessageType) (Message, error) {
 		return &Evicted{}, nil
 	case TypeRelease:
 		return &Release{}, nil
+	case TypeGuardComplete:
+		return &GuardComplete{}, nil
+	case TypeGuardCompleteAck:
+		return &GuardCompleteAck{}, nil
 	case TypeReattach:
 		return &Reattach{}, nil
 	case TypeDrainRequest:

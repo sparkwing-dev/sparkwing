@@ -2,7 +2,9 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -24,6 +26,7 @@ type Lease struct {
 	// measured non-sparkwing load at grant time.
 	SoleRunUnderLoad bool
 	ExternalCores    float64
+	guardComplete    atomic.Bool
 }
 
 // Acquire submits an all-or-nothing admission request and blocks until
@@ -129,6 +132,14 @@ func (l *Lease) Release() error {
 	return l.cl.Close()
 }
 
+// CompleteGuard declares that the process session bound to this lease has
+// stopped executing. The daemon verifies the session before releasing the
+// claim and acknowledges only after the release is durable.
+func (l *Lease) CompleteGuard() error {
+	l.guardComplete.Store(true)
+	return l.cl.write(&wingwire.GuardComplete{LeaseToken: l.Token})
+}
+
 // Watch reads the held connection until it closes, invoking onEvicted
 // when the daemon pushes an eviction (a cancel_others requester
 // superseded this lease). It returns when the connection ends --
@@ -146,10 +157,21 @@ func (l *Lease) Watch(onEvicted func(wingwire.Evicted)) {
 // callback may be nil. Like Watch it is the connection's sole reader and
 // returns when the connection ends.
 func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel)) {
+	l.WatchGuard(onEvicted, onCancel, nil)
+}
+
+// WatchGuard is [Lease.WatchControl] with a completion acknowledgement for a
+// guarded lease. The acknowledgement callback runs after the daemon has
+// durably released the guarded process session.
+func (l *Lease) WatchGuard(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel), onComplete func()) {
 	for {
 		msg, err := l.cl.dec.read()
 		if err != nil {
-			if !l.recoverWatch() {
+			recovered, guardGone := l.recoverWatch()
+			if !recovered {
+				if guardGone && onComplete != nil {
+					onComplete()
+				}
 				return
 			}
 			continue
@@ -163,6 +185,11 @@ func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(win
 			if onCancel != nil {
 				onCancel(*m)
 			}
+		case *wingwire.GuardCompleteAck:
+			if onComplete != nil {
+				onComplete()
+			}
+			return
 		}
 	}
 }
@@ -172,17 +199,23 @@ func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(win
 // evictions and cancels across a restart. It returns false when the daemon
 // does not come back or the reattach grace window has closed, in which case
 // the watcher stops -- the lease is genuinely gone.
-func (l *Lease) recoverWatch() bool {
+func (l *Lease) recoverWatch() (recovered, guardGone bool) {
 	if l.cl.closed.Load() {
-		return false
+		return false, false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), defaultReattachTimeout)
 	defer cancel()
 	if err := l.cl.connect(ctx); err != nil {
-		return false
+		return false, false
 	}
 	_, terminal, transient := l.cl.readReattach(l.Token)
-	return terminal == nil && transient == nil
+	if terminal != nil || transient != nil {
+		return false, l.guardComplete.Load() && errors.Is(terminal, ErrReattachRejected)
+	}
+	if l.guardComplete.Load() {
+		return l.cl.write(&wingwire.GuardComplete{LeaseToken: l.Token}) == nil, false
+	}
+	return true, false
 }
 
 // CancelLease asks the daemon to cancel a local run it arbitrates, by run

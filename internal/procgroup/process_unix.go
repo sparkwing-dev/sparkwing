@@ -126,7 +126,7 @@ func signalSession(leader int, sig syscall.Signal) error {
 	}
 	for group := range groups {
 		err := syscall.Kill(-group, sig)
-		if err != nil && !errors.Is(err, syscall.ESRCH) && !errors.Is(err, syscall.EPERM) {
+		if err != nil && !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
 	}

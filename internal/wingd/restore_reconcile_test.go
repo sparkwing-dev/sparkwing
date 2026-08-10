@@ -140,8 +140,6 @@ func TestStartup_QuarantinesUnrestorableState(t *testing.T) {
 		name string
 		blob []byte
 	}{
-		{"malformed json", []byte("{not json")},
-		{"wrong schema", []byte(`{"schema":99,"snapshot":{}}`)},
 		{"invalid snapshot", duplicateLease},
 	}
 	for _, tc := range cases {
@@ -160,7 +158,7 @@ func TestStartup_QuarantinesUnrestorableState(t *testing.T) {
 					Schema   int                `json:"schema"`
 					Snapshot admission.Snapshot `json:"snapshot"`
 				}
-				if jerr := json.Unmarshal(blob, &fresh); jerr != nil || fresh.Schema != 1 || len(fresh.Snapshot.Leases) != 0 {
+				if jerr := json.Unmarshal(blob, &fresh); jerr != nil || fresh.Schema != 2 || len(fresh.Snapshot.Leases) != 0 {
 					t.Errorf("re-persisted state.json is not a clean snapshot (schema %d, %d leases, err %v)",
 						fresh.Schema, len(fresh.Snapshot.Leases), jerr)
 				}
@@ -171,6 +169,38 @@ func TestStartup_QuarantinesUnrestorableState(t *testing.T) {
 			}
 			if !log.contains("quarantined") {
 				t.Errorf("expected a quarantine log line, got:\n%s", log.joined())
+			}
+		})
+	}
+}
+
+func TestStartupRefusesUnreadableLeaseAuthority(t *testing.T) {
+	cases := []struct {
+		name string
+		blob []byte
+	}{
+		{"malformed json", []byte("{not json")},
+		{"unknown schema", []byte(`{"schema":99,"snapshot":{}}`)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := shortHome(t)
+			path := writeLedgerState(t, home, tc.blob)
+			d, err := wingd.New(wingd.Config{Home: home, Sampler: newFakeSampler(8, 8<<30)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if err := d.Run(ctx); err == nil {
+				t.Fatal("daemon served after losing durable lease authority")
+			}
+			if _, err := os.Stat(path); err != nil {
+				t.Fatalf("unreadable authority was not preserved: %v", err)
+			}
+			matches, err := filepath.Glob(path + ".corrupt-*")
+			if err != nil || len(matches) != 0 {
+				t.Fatalf("unreadable authority was quarantined: %v (err %v)", matches, err)
 			}
 		})
 	}

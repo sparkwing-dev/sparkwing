@@ -22,12 +22,18 @@ import (
 
 const queueExecCleanupTimeout = 10 * time.Second
 
+const queueExecGuardCommandName = "__queue-exec-guard"
+
 var errQueueExecLeaseLost = errors.New("admission lease connection lost")
 
-var queueExecProcessSupport = procgroup.Supported
+var queueExecProcessSupport = procgroup.GuardedSessionSupported
 
-var queueExecWatchLease = func(lease *wingdclient.Lease, onCancel func(wingwire.Cancel)) {
-	lease.WatchControl(nil, onCancel)
+var queueExecGuardCommand = func(command []string) *exec.Cmd {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil
+	}
+	return exec.Command(executable, append([]string{queueExecGuardCommandName}, command...)...)
 }
 
 func runQueueExec(args []string) error {
@@ -76,13 +82,28 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("queue exec: connect admission daemon: %w", err)
 	}
+	group, gate, session, err := startQueueExecGuard(command)
+	if err != nil {
+		_ = cl.Close()
+		return fmt.Errorf("queue exec: start guarded command: %w", err)
+	}
+	guardReleased := false
+	defer func() {
+		if !guardReleased {
+			_ = gate.Close()
+			_ = terminateQueueExec(group)
+		}
+	}()
 	request := wingwire.AdmissionRequest{
 		RunID:        *runID,
 		DisplayRunID: *runID,
 		Pipeline:     *name,
 		Repo:         *repo,
-		PID:          os.Getpid(),
+		PID:          session.LeaderPID,
 		Resources:    wingwire.HostResources{Cores: *cores, MemoryBytes: *memoryBytes},
+		Guard: &wingwire.ProcessSession{
+			LeaderPID: session.LeaderPID, SessionID: session.SessionID, BirthToken: session.BirthToken,
+		},
 	}
 	if *semaphore != "" {
 		request.Semaphores = []wingwire.SemaphoreClaim{{
@@ -115,27 +136,33 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 	}
 	publishReady("granted")
 	if readyErr != nil {
-		_ = lease.Release()
+		abortQueueExecGuard(group, gate, lease, cl)
+		guardReleased = true
 		return fmt.Errorf("queue exec: publish readiness: %w", readyErr)
 	}
-
-	cmd := exec.Command(command[0], command[1:]...)
-	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	group, err := procgroup.StartSession(cmd)
-	if err != nil {
-		_ = lease.Release()
-		return fmt.Errorf("queue exec: start command: %w", err)
+	if _, err := gate.Write([]byte{1}); err != nil {
+		abortQueueExecGuard(group, gate, lease, cl)
+		guardReleased = true
+		return fmt.Errorf("queue exec: start admitted command: %w", err)
 	}
+	if err := gate.Close(); err != nil {
+		abortQueueExecGuard(group, gate, lease, cl)
+		guardReleased = true
+		return fmt.Errorf("queue exec: close start gate: %w", err)
+	}
+	guardReleased = true
 
 	cancelled := make(chan struct{}, 1)
 	leaseEnded := make(chan struct{})
+	completionAck := make(chan struct{})
+	var completionOnce sync.Once
 	go func() {
-		queueExecWatchLease(lease, func(wingwire.Cancel) {
+		queueExecWatchGuard(lease, func(wingwire.Cancel) {
 			select {
 			case cancelled <- struct{}{}:
 			default:
 			}
-		})
+		}, func() { completionOnce.Do(func() { close(completionAck) }) })
 		close(leaseEnded)
 	}()
 	finished := make(chan error, 1)
@@ -151,7 +178,23 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 	case <-ctx.Done():
 		commandErr = errors.Join(ctx.Err(), terminateQueueExec(group))
 	}
-	releaseErr := lease.Release()
+	releaseErr := lease.CompleteGuard()
+	select {
+	case <-completionAck:
+		releaseErr = nil
+	case <-leaseEnded:
+		select {
+		case <-completionAck:
+			releaseErr = nil
+		default:
+			if releaseErr == nil {
+				releaseErr = errors.New("guard completion ended without acknowledgement")
+			}
+		}
+	case <-time.After(queueExecCleanupTimeout):
+		releaseErr = errors.Join(releaseErr, errors.New("guard completion acknowledgement timed out"))
+	}
+	_ = cl.Close()
 	if commandErr == nil && releaseErr != nil {
 		return fmt.Errorf("queue exec: release admission: %w", releaseErr)
 	}
@@ -163,6 +206,75 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 		return exitError(exitErr.ExitCode(), fmt.Errorf("queue exec: command: %w", commandErr))
 	}
 	return fmt.Errorf("queue exec: command: %w", errors.Join(commandErr, releaseErr))
+}
+
+func abortQueueExecGuard(group *procgroup.Group, gate *os.File, lease *wingdclient.Lease, cl *wingdclient.Client) {
+	_ = gate.Close()
+	_ = terminateQueueExec(group)
+	_ = lease.CompleteGuard()
+	_ = cl.Close()
+}
+
+var queueExecWatchGuard = func(lease *wingdclient.Lease, onCancel func(wingwire.Cancel), onComplete func()) {
+	lease.WatchGuard(func(eviction wingwire.Evicted) {
+		onCancel(wingwire.Cancel{RunID: eviction.RunID, Reason: "admission superseded"})
+	}, onCancel, onComplete)
+}
+
+func startQueueExecGuard(command []string) (*procgroup.Group, *os.File, procgroup.SessionIdentity, error) {
+	readGate, writeGate, err := os.Pipe()
+	if err != nil {
+		return nil, nil, procgroup.SessionIdentity{}, err
+	}
+	cmd := queueExecGuardCommand(command)
+	if cmd == nil {
+		_ = readGate.Close()
+		_ = writeGate.Close()
+		return nil, nil, procgroup.SessionIdentity{}, errors.New("resolve current executable")
+	}
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+	cmd.ExtraFiles = []*os.File{readGate}
+	group, err := procgroup.StartSession(cmd)
+	closeErr := readGate.Close()
+	if err != nil {
+		_ = writeGate.Close()
+		return nil, nil, procgroup.SessionIdentity{}, errors.Join(err, closeErr)
+	}
+	if closeErr != nil {
+		_ = writeGate.Close()
+		_ = terminateQueueExec(group)
+		return nil, nil, procgroup.SessionIdentity{}, closeErr
+	}
+	session, err := procgroup.CaptureSession(group.ID())
+	if err != nil {
+		_ = writeGate.Close()
+		_ = terminateQueueExec(group)
+		return nil, nil, procgroup.SessionIdentity{}, err
+	}
+	return group, writeGate, session, nil
+}
+
+func runQueueExecGuard(command []string) error {
+	if len(command) == 0 {
+		return errors.New("queue exec guard: command is required")
+	}
+	gate := os.NewFile(3, "queue-exec-start-gate")
+	if gate == nil {
+		return errors.New("queue exec guard: start gate is unavailable")
+	}
+	var signal [1]byte
+	_, err := gate.Read(signal[:])
+	closeErr := gate.Close()
+	if err != nil {
+		return errors.Join(fmt.Errorf("queue exec guard: await admission: %w", err), closeErr)
+	}
+	if signal[0] != 1 {
+		return errors.New("queue exec guard: invalid start signal")
+	}
+	if closeErr != nil {
+		return fmt.Errorf("queue exec guard: close start gate: %w", closeErr)
+	}
+	return execQueueExecCommand(command)
 }
 
 type queueExecReady struct {

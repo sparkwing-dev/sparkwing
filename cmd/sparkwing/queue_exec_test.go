@@ -9,15 +9,38 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 const queueExecWait = 10 * time.Second
+
+func init() {
+	queueExecGuardCommand = func(command []string) *exec.Cmd {
+		args := []string{"-test.run=^TestQueueExecGuardProcess$", "--"}
+		return exec.Command(os.Args[0], append(args, command...)...)
+	}
+}
+
+func TestQueueExecGuardProcess(t *testing.T) {
+	separator := -1
+	for i, arg := range os.Args {
+		if arg == "--" {
+			separator = i
+			break
+		}
+	}
+	if separator < 0 || separator == len(os.Args)-1 {
+		return
+	}
+	os.Exit(exitCodeFor(runQueueExecGuard(os.Args[separator+1:])))
+}
 
 func TestQueueExecWaitsInDaemonBeforeStartingCommand(t *testing.T) {
 	home := queueHome(t)
@@ -287,9 +310,9 @@ func TestQueueExecLeaseLossTerminatesBeforePromotingNextCommand(t *testing.T) {
 	home := queueHome(t)
 	serveQueueDaemon(t, home)
 	lost := make(chan struct{})
-	originalWatcher := queueExecWatchLease
-	queueExecWatchLease = func(*wingdclient.Lease, func(wingwire.Cancel)) { <-lost }
-	t.Cleanup(func() { queueExecWatchLease = originalWatcher })
+	originalWatcher := queueExecWatchGuard
+	queueExecWatchGuard = func(*wingdclient.Lease, func(wingwire.Cancel), func()) { <-lost }
+	t.Cleanup(func() { queueExecWatchGuard = originalWatcher })
 
 	tmp := t.TempDir()
 	started := filepath.Join(tmp, "started")
@@ -434,6 +457,79 @@ func TestQueueExecSupervisorDeathRetainsAdmissionUntilCommandSessionEnds(t *test
 	case <-time.After(queueExecWait):
 		t.Fatal("follower did not promote after the guarded command exited")
 	}
+}
+
+func TestQueueExecSurvivesAdmissionDaemonRestart(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exact process-session ownership is unavailable on Windows")
+	}
+	home := queueHome(t)
+	stopFirst := startRestartableQueueDaemon(t, home)
+	tmp := t.TempDir()
+	started := filepath.Join(tmp, "started")
+	release := filepath.Join(tmp, "release")
+	result := make(chan error, 1)
+	go func() {
+		result <- runQueue([]string{
+			"exec", "--home", home, "--run-id", "restart-command", "--cores", "0.1",
+			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", started, "0", release,
+		})
+	}()
+	waitForFile(t, started)
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "restart-command"
+	})
+	stopFirst()
+	startRestartableQueueDaemon(t, home)
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "restart-command"
+	})
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("queue exec after daemon restart: %v", err)
+		}
+	case <-time.After(queueExecWait):
+		t.Fatal("queue exec did not finish after daemon restart")
+	}
+}
+
+func startRestartableQueueDaemon(t *testing.T, home string) func() {
+	t.Helper()
+	d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0", GuardInterval: 10 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- d.Run(ctx) }()
+	select {
+	case <-d.Ready():
+	case err := <-done:
+		t.Fatalf("restartable daemon exited before ready: %v", err)
+	case <-time.After(queueExecWait):
+		t.Fatal("restartable daemon never became ready")
+	}
+	var stopped atomic.Bool
+	stop := func() {
+		if !stopped.CompareAndSwap(false, true) {
+			return
+		}
+		cancel()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("restartable daemon exit: %v", err)
+			}
+		case <-time.After(queueExecWait):
+			t.Error("restartable daemon did not stop")
+		}
+	}
+	t.Cleanup(stop)
+	return stop
 }
 
 func TestQueueExecSupervisorProcess(t *testing.T) {

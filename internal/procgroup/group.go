@@ -23,6 +23,14 @@ type Info struct {
 	State   string
 }
 
+// SessionIdentity binds a process session to the kernel creation identity of
+// its leader so a reused numeric PID cannot inherit cleanup authority.
+type SessionIdentity struct {
+	LeaderPID  int
+	SessionID  int
+	BirthToken string
+}
+
 // Group retains an unreaped group leader as the stable ownership anchor for
 // every signal and membership check.
 type Group struct {
@@ -42,6 +50,96 @@ type Group struct {
 
 // Supported reports whether exact process-group ownership is available.
 func Supported() error { return platformSupport() }
+
+// GuardedSessionSupported reports whether the platform exposes a stable
+// session-leader birth identity suitable for durable admission ownership.
+func GuardedSessionSupported() error { return guardedSessionSupport() }
+
+// CaptureSession returns the exact session identity rooted at pid.
+func CaptureSession(pid int) (SessionIdentity, error) {
+	if err := GuardedSessionSupported(); err != nil {
+		return SessionIdentity{}, err
+	}
+	sid, token, err := sessionIdentity(pid)
+	if err != nil {
+		return SessionIdentity{}, err
+	}
+	if pid <= 1 || sid != pid || token == "" {
+		return SessionIdentity{}, fmt.Errorf("process %d is not a stable session leader", pid)
+	}
+	return SessionIdentity{LeaderPID: pid, SessionID: sid, BirthToken: token}, nil
+}
+
+// SessionQuiescent reports whether no live process other than the registered
+// leader remains in the session. Inspection errors are returned, never folded
+// into an empty verdict.
+func SessionQuiescent(identity SessionIdentity) (bool, error) {
+	return inspectSession(identity, true)
+}
+
+// SessionEmpty reports whether the registered session contains no live
+// process. Zombies do not execute and therefore do not retain admission.
+func SessionEmpty(identity SessionIdentity) (bool, error) {
+	return inspectSession(identity, false)
+}
+
+// TerminateSession signals every process group still belonging to the exact
+// registered session after validating its leader identity.
+func TerminateSession(identity SessionIdentity) error {
+	empty, err := inspectSession(identity, false)
+	if err != nil || empty {
+		return err
+	}
+	return terminateGuardSession(identity.SessionID)
+}
+
+func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) {
+	if identity.LeaderPID <= 1 || identity.SessionID != identity.LeaderPID || identity.BirthToken == "" {
+		return false, fmt.Errorf("invalid guarded session identity")
+	}
+	processes, err := processTable(true)
+	if err != nil {
+		return false, err
+	}
+	var leaderInSession bool
+	for _, process := range processes {
+		if process.PID == identity.LeaderPID && process.Session == identity.SessionID {
+			leaderInSession = true
+			break
+		}
+	}
+	if leaderInSession {
+		_, token, err := sessionIdentity(identity.LeaderPID)
+		if err != nil {
+			return false, err
+		}
+		if token != identity.BirthToken {
+			return false, fmt.Errorf("guarded session leader %d birth identity changed", identity.LeaderPID)
+		}
+	}
+	for _, process := range processes {
+		if process.Session != identity.SessionID || processTerminated(process.State) {
+			continue
+		}
+		if excludeLeader && process.PID == identity.LeaderPID && leaderInSession {
+			continue
+		}
+		return false, nil
+	}
+	return true, nil
+}
+
+func processTerminated(state string) bool {
+	if state == "" {
+		return false
+	}
+	switch state[0] {
+	case 'Z', 'X', 'x':
+		return true
+	default:
+		return false
+	}
+}
 
 // Start launches cmd as the leader of a new owned process group.
 func Start(cmd *exec.Cmd) (*Group, error) {

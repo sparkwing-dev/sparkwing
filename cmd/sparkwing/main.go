@@ -301,6 +301,8 @@ func runSparkwing(args []string) error {
 		return dispatchRun(args)
 	case "wingd":
 		return runWingd(args[1:])
+	case queueExecGuardCommandName:
+		return runQueueExecGuard(args[1:])
 	case "__dashboard-supervise":
 		return runDashboardSupervise(args[1:])
 	case "_complete-profiles":
