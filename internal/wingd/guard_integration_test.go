@@ -97,3 +97,39 @@ func TestGuardedCancellationRetainsAdmissionUntilSessionStops(t *testing.T) {
 		t.Fatal("guarded completion was not acknowledged")
 	}
 }
+
+func TestGuardedLeaseReattachesAfterDaemonRestart(t *testing.T) {
+	home := shortHome(t)
+	guard := &controlledSessionGuard{}
+	guard.empty.Store(true)
+	first := startDaemon(t, wingd.Config{
+		Home: home, SessionGuardInspector: guard, GuardInterval: 10 * time.Millisecond,
+	})
+
+	holderClient := ensure(t, home, "")
+	holder := mustAcquire(t, holderClient, wingwire.AdmissionRequest{
+		RunID: "guarded-restart", Resources: wingwire.HostResources{Cores: 1},
+		Guard: &wingwire.ProcessSession{LeaderPID: 52, SessionID: 52, BirthToken: "birth-52"},
+	})
+	guard.empty.Store(false)
+	first.stop()
+	if err := first.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("stop first daemon: %v", err)
+	}
+
+	startDaemon(t, wingd.Config{
+		Home: home, SessionGuardInspector: guard, GuardInterval: 10 * time.Millisecond,
+	})
+	reconnector := ensure(t, home, "")
+	reclaimed, err := reconnector.Reattach(context.Background(), holder.Token)
+	if err != nil {
+		t.Fatalf("reattach guarded lease: %v", err)
+	}
+	if reclaimed.RunID != "guarded-restart" || reclaimed.Token != holder.Token {
+		t.Fatalf("reattached guarded lease = %+v", reclaimed)
+	}
+	guard.empty.Store(true)
+	if err := reclaimed.CompleteGuard(); err != nil {
+		t.Fatalf("complete guarded lease: %v", err)
+	}
+}
