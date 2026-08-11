@@ -252,6 +252,28 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			return result, sizeErr
 		}
 		result.ObservedBytes += size
+		if !candidate.retired {
+			retiredRoot := filepath.Join(root, "legacy-retired")
+			if mkdirErr := os.MkdirAll(retiredRoot, 0o700); mkdirErr != nil {
+				return result, mkdirErr
+			}
+			retiredPath := filepath.Join(retiredRoot, filepath.Base(candidate.path))
+			if renameErr := os.Rename(candidate.path, retiredPath); renameErr != nil {
+				if os.IsNotExist(renameErr) {
+					continue
+				}
+				pruneErr = errors.Join(pruneErr, renameErr)
+				continue
+			}
+			if timeErr := os.Chtimes(retiredPath, cacheNow(), cacheNow()); timeErr != nil {
+				pruneErr = errors.Join(pruneErr, timeErr)
+			}
+			continue
+		}
+		if cacheNow().Sub(time.Unix(0, candidate.modTime)) < legacyRetirementGrace {
+			result.Active++
+			continue
+		}
 		if removeErr := removeCacheEntry(candidate.path); removeErr != nil {
 			pruneErr = errors.Join(pruneErr, removeErr)
 			continue
@@ -571,17 +593,41 @@ func treeSizeContext(ctx context.Context, root string) (int64, error) {
 type legacyCacheCandidate struct {
 	path    string
 	modTime int64
+	retired bool
 }
 
 func legacyCacheCandidates(ctx context.Context, root string, limit int) ([]legacyCacheCandidate, bool, error) {
 	if filepath.Base(root) != pipelineCacheSchema {
 		return nil, false, nil
 	}
-	entries, exhausted, err := readDirBounded(ctx, filepath.Dir(root), limit+1)
+	retired, exhausted, err := readDirBounded(ctx, filepath.Join(root, "legacy-retired"), limit)
 	if err != nil {
 		return nil, false, err
 	}
-	candidates := make([]legacyCacheCandidate, 0, len(entries))
+	candidates := make([]legacyCacheCandidate, 0, limit)
+	for _, entry := range retired {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		if !entry.IsDir() || !pipelineEntryKeyRE.MatchString(entry.Name()) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil, false, err
+		}
+		candidates = append(candidates, legacyCacheCandidate{path: filepath.Join(root, "legacy-retired", entry.Name()), modTime: info.ModTime().UnixNano(), retired: true})
+	}
+	remaining := limit - len(candidates)
+	if remaining <= 0 || exhausted {
+		sortLegacyCandidates(candidates)
+		return candidates, true, nil
+	}
+	entries, liveExhausted, err := readDirBounded(ctx, filepath.Dir(root), remaining+1)
+	if err != nil {
+		return nil, false, err
+	}
+	exhausted = liveExhausted
 	for _, entry := range entries {
 		if err := ctx.Err(); err != nil {
 			return nil, false, err
@@ -599,13 +645,20 @@ func legacyCacheCandidates(ctx context.Context, root string, limit int) ([]legac
 			break
 		}
 	}
+	sortLegacyCandidates(candidates)
+	return candidates, exhausted, nil
+}
+
+func sortLegacyCandidates(candidates []legacyCacheCandidate) {
 	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].retired != candidates[j].retired {
+			return candidates[i].retired
+		}
 		if candidates[i].modTime == candidates[j].modTime {
 			return candidates[i].path < candidates[j].path
 		}
 		return candidates[i].modTime < candidates[j].modTime
 	})
-	return candidates, exhausted, nil
 }
 
 func readDirBounded(ctx context.Context, path string, limit int) ([]os.DirEntry, bool, error) {
