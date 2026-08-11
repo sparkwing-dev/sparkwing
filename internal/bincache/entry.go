@@ -39,7 +39,7 @@ type Lease struct {
 	file  *os.File
 }
 
-// PruneOptions bounds one cache-pressure reclamation attempt.
+// PruneOptions bounds one cache reclamation attempt.
 type PruneOptions struct {
 	Root         string
 	ReclaimBytes int64
