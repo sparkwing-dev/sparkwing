@@ -111,3 +111,29 @@ func TestLegacyRemovalCreditsOnlyObservedAllocatedCapacity(t *testing.T) {
 		t.Fatalf("reclaimed bytes = %d, want allocated cap %d", reclaimed, allocated)
 	}
 }
+
+func TestManagedRemovalDoesNotCreditUnobservedCapacity(t *testing.T) {
+	originalAvailable := legacyFilesystemAvailableBytes
+	t.Cleanup(func() { legacyFilesystemAvailableBytes = originalAvailable })
+	legacyFilesystemAvailableBytes = func(string) (int64, error) { return 100, nil }
+
+	root := filepath.Join(t.TempDir(), pipelineCacheSchema)
+	entry := testEntry(t, root, "11111111-11111111")
+	seedEntry(t, entry, "managed", time.Unix(1, 0))
+
+	result, err := Prune(context.Background(), PruneOptions{
+		Root: root, ReclaimBytes: 1, MaxEntries: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reclaimed != 1 {
+		t.Fatalf("removed entries = %d, want 1", result.Reclaimed)
+	}
+	if result.ReclaimedBytes != 0 || result.GoalSatisfied {
+		t.Fatalf("managed removal claimed unobserved capacity: %+v", result)
+	}
+	if _, err := os.Stat(entry.entryDir()); !os.IsNotExist(err) {
+		t.Fatalf("managed entry remains after removal: %v", err)
+	}
+}
