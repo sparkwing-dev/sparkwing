@@ -56,11 +56,15 @@ code change to unlock.
   run reached a terminal state but never read its status, so a failed remote run
   printed no failure and reported success to the CI job or script wrapping it.
   Exit codes now match a local `sparkwing run`: 0 for success, 1 for failed or
-  cancelled (with the run's status block and failing-node errors printed to
-  stderr, so piped log output stays clean), and 3 when the follow ends without a
-  readable terminal status rather than guessing an outcome. `--detach` is
-  unchanged -- it reports submission, not outcome. Scripts that relied on the old
-  always-zero exit need `|| true` to keep it.
+  cancelled. Both follow modes -- log streaming and node status -- print the
+  run's status block and failing-node errors to stderr, so the reason survives a
+  `> run.log` redirect (the status follow also renders to stdout as it polls, so
+  a terminal shows that block twice). A follow that ends without a readable
+  terminal status, including a controller that becomes unreachable mid-run,
+  exits 3 and names the run to re-check with `sparkwing runs status` rather than
+  reporting a possibly-succeeding run as failed. `--detach` is unchanged -- it
+  reports submission, not outcome. Scripts that relied on the old always-zero
+  exit need `|| true` to keep it.
 
 ## [v0.25.0] - 2026-08-11
 ### Added

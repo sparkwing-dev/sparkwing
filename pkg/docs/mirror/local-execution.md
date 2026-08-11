@@ -101,6 +101,16 @@ logs URL, node-status updates from the controller otherwise. Pass
 `--detach` to return as soon as the trigger is registered without
 following.
 
+A follow exits on the run's outcome, the same way a local `sparkwing run`
+does: 0 when the run succeeded, 1 when it failed or was cancelled, with the
+run's status block and failing-node errors printed to stderr so a
+`> run.log` redirect still shows why. If the follow ends without a readable
+terminal status -- a dropped connection, a controller restarting mid-run --
+the command exits 3 rather than guessing an outcome, and names the run to
+re-check with `sparkwing runs status --run <id> --profile <p>`. `--detach`
+always exits 0: it reports that the trigger was queued, not how the run
+ended.
+
 ## Authorization model
 
 Sparkwing intentionally does **not** try to be a permissions boundary
