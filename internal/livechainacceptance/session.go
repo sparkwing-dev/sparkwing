@@ -181,7 +181,8 @@ type SessionVerifier interface {
 type SessionSigner interface {
 	// InitialFactory owns canonicalization of the exact version-one genesis.
 	// The returned factory may be invoked only by
-	// the create-if-absent authority and replays one identical sealed result.
+	// the create-if-absent authority and must replay one byte-identical sealed
+	// result for the same seed across processes and restarts.
 	InitialFactory(SessionSeed) InitialSessionFactory
 	// SealSuccessor verifies current and enforces immutable identity,
 	// predecessor linkage, version+1, legal transition, append-only proof, and
