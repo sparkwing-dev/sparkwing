@@ -62,6 +62,39 @@ code as top-level fields:
 Logs are not part of this payload; fetch them separately with
 `sparkwing runs logs --run <id>` or from the logs service.
 
+## Failure excerpts
+
+A node that fails while running a command records a bounded excerpt of
+that command's output -- the last 20 lines, at most 4 KiB, with resolved
+secret values redacted. The node's `error` carries it as text, led by
+the failure headline and, when output was dropped, a marker naming the
+`sparkwing runs logs` command that prints the whole thing.
+
+`sparkwing runs errors -o json` and `sparkwing runs status -o json` also
+carry the excerpt as structured fields, so a consumer does not have to
+parse the error string:
+
+```json
+{
+  "node": "build",
+  "outcome": "failed",
+  "error": "build: command failed (exit 2): go build ./...\n… earlier output omitted (see: sparkwing runs logs --run run-... --node build)\npkg/thing/file_300.go:12: undefined: Helper\nFAIL",
+  "log_excerpt": "pkg/thing/file_300.go:12: undefined: Helper\nFAIL",
+  "log_excerpt_truncated": true
+}
+```
+
+`log_excerpt` is the raw excerpt without the headline or marker;
+`log_excerpt_truncated` reports whether output was dropped. Both fields
+are **absent together** when there is nothing to excerpt -- a node that
+failed with a plain error rather than a command, and any node that did
+not fail on its own (a cancelled or upstream-failed node never gets an
+excerpt, and nothing reads its logs to invent one). The failure itself
+is always reported; only the excerpt can be missing.
+
+Excerpts travel as a `node_failure_excerpt` run event, so they read back
+identically from a local run store and from a controller.
+
 ## Resource usage metrics
 
 While a node runs, the runner samples the executing process in-process

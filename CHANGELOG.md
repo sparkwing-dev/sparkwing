@@ -62,6 +62,15 @@ code change to unlock.
   `… earlier output omitted (see: sparkwing runs logs --run <id> --node <id>)`
   when anything was dropped. The node log still holds the full output;
   cancelled and upstream-failed nodes are untouched.
+- **cli:** `sparkwing runs errors -o json` and `sparkwing runs status -o json`
+  carry the excerpt as structured data per failed node: `log_excerpt` (the
+  masked bounded output, without the headline and marker that decorate the
+  error text) and `log_excerpt_truncated`. Both fields are absent together when
+  there is nothing to excerpt -- a failure with no captured output, or a node
+  that did not fail on its own -- so absence is reportable rather than
+  fabricated. Excerpts ride a new `node_failure_excerpt` run event, so local and
+  controller-backed reads render identically. See
+  [observability](docs/observability.md#failure-excerpts).
 
 ### Security
 

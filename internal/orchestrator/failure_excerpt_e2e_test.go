@@ -1,6 +1,7 @@
 package orchestrator_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -147,6 +148,70 @@ func TestRun_FailedNodeRecordsBoundedMaskedExcerpt(t *testing.T) {
 	}
 	if !sawStepEndError {
 		t.Fatal("expected a step_end record carrying the step's error in attrs")
+	}
+
+	// `runs errors -o json`: the same excerpt as structured data, so a
+	// consumer never has to parse the error string.
+	var errBuf bytes.Buffer
+	if err := orchestrator.JobErrors(ctx, p, res.RunID, true, &errBuf); err != nil {
+		t.Fatalf("JobErrors: %v", err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(errBuf.Bytes(), &rows); err != nil {
+		t.Fatalf("decode runs errors json: %v\n%s", err, errBuf.String())
+	}
+	if len(rows) != 1 || rows[0]["node"] != "build" {
+		t.Fatalf("runs errors should list the one owning failure, got: %s", errBuf.String())
+	}
+	excerpt, _ := rows[0]["log_excerpt"].(string)
+	if excerpt == "" {
+		t.Fatalf("log_excerpt missing:\n%s", errBuf.String())
+	}
+	if rows[0]["log_excerpt_truncated"] != true {
+		t.Fatalf("log_excerpt_truncated = %#v, want true", rows[0]["log_excerpt_truncated"])
+	}
+	if strings.Contains(excerpt, excerptSecretValue) {
+		t.Fatalf("log_excerpt leaked the secret value:\n%s", excerpt)
+	}
+	if strings.Contains(excerpt, "earlier output omitted") || strings.Contains(excerpt, "command failed") {
+		t.Fatalf("log_excerpt should be raw output, not decorated text:\n%s", excerpt)
+	}
+	if !strings.HasSuffix(excerpt, "FAIL\texit status 2") {
+		t.Fatalf("log_excerpt should end at the command's conclusion:\n%s", excerpt)
+	}
+	if n := strings.Count(excerpt, "\n") + 1; n > 20 {
+		t.Fatalf("log_excerpt is %d lines, want at most 20", n)
+	}
+
+	// `runs status -o json` carries the same pair per node, and only
+	// for the node that owns the failure.
+	var statusBuf bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, res.RunID,
+		orchestrator.StatusOpts{JSON: true}, &statusBuf); err != nil {
+		t.Fatalf("JobStatus: %v", err)
+	}
+	var detail struct {
+		Nodes []map[string]any `json:"nodes"`
+	}
+	if err := json.Unmarshal(statusBuf.Bytes(), &detail); err != nil {
+		t.Fatalf("decode runs status json: %v", err)
+	}
+	byID := map[string]map[string]any{}
+	for _, n := range detail.Nodes {
+		id, _ := n["id"].(string)
+		byID[id] = n
+	}
+	if got, _ := byID["build"]["log_excerpt"].(string); got != excerpt {
+		t.Fatalf("runs status log_excerpt differs from runs errors:\n%q\n%q", got, excerpt)
+	}
+	if byID["build"]["log_excerpt_truncated"] != true {
+		t.Fatalf("runs status log_excerpt_truncated = %#v", byID["build"]["log_excerpt_truncated"])
+	}
+	if _, present := byID["deploy"]["log_excerpt"]; present {
+		t.Fatalf("cancelled node must carry no excerpt: %#v", byID["deploy"])
+	}
+	if _, present := byID["deploy"]["log_excerpt_truncated"]; present {
+		t.Fatalf("cancelled node must carry no truncation flag: %#v", byID["deploy"])
 	}
 
 	deploy, err := st.GetNode(ctx, res.RunID, "deploy")

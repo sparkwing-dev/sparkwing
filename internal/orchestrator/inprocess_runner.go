@@ -260,6 +260,7 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 		fctx := failureWriteCtx(ctx, wrapped)
 		_ = r.backends.State.FinishNodeWithReason(fctx, runID, node.ID(), string(sparkwing.Failed), text, nil, store.FailureUnknown, nil)
 		_ = r.backends.State.AppendEvent(fctx, runID, node.ID(), "node_failed", []byte(text))
+		appendFailureExcerptEvent(fctx, r.backends.State, runID, node.ID(), wrapped)
 		return nil, wrapped
 	} else if staged > 0 {
 		payload, _ := json.Marshal(map[string]any{"files": staged})
@@ -276,6 +277,7 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 			fctx := failureWriteCtx(ctx, wrapped)
 			_ = r.backends.State.FinishNode(fctx, runID, node.ID(), string(sparkwing.Failed), text, nil)
 			_ = r.backends.State.AppendEvent(fctx, runID, node.ID(), "node_failed", []byte(text))
+			appendFailureExcerptEvent(fctx, r.backends.State, runID, node.ID(), wrapped)
 			return nil, wrapped
 		}
 	}
@@ -364,6 +366,7 @@ done:
 		fctx := failureWriteCtx(ctx, wrapped)
 		_ = r.backends.State.FinishNodeWithReason(fctx, runID, node.ID(), string(sparkwing.Failed), text, nil, store.FailureLogsAuth, nil)
 		_ = r.backends.State.AppendEvent(fctx, runID, node.ID(), "node_failed", []byte(text))
+		appendFailureExcerptEvent(fctx, r.backends.State, runID, node.ID(), wrapped)
 		return nil, wrapped
 	}
 
@@ -381,6 +384,7 @@ done:
 		fctx := failureWriteCtx(ctx, lastErr)
 		_ = r.backends.State.FinishNodeWithReason(fctx, runID, node.ID(), string(sparkwing.Failed), text, nil, reason, nil)
 		_ = r.backends.State.AppendEvent(fctx, runID, node.ID(), "node_failed", []byte(text))
+		appendFailureExcerptEvent(fctx, r.backends.State, runID, node.ID(), lastErr)
 		return nil, lastErr
 	}
 
@@ -403,6 +407,7 @@ done:
 		fctx := failureWriteCtx(ctx, wrapped)
 		_ = r.backends.State.FinishNodeWithReason(fctx, runID, node.ID(), string(sparkwing.Failed), text, nil, store.FailureUnknown, nil)
 		_ = r.backends.State.AppendEvent(fctx, runID, node.ID(), "node_failed", []byte(text))
+		appendFailureExcerptEvent(fctx, r.backends.State, runID, node.ID(), wrapped)
 		return nil, wrapped
 	} else if digest != "" {
 		if serr := r.backends.State.SetNodeArtifactManifest(writeCtx, runID, node.ID(), digest); serr != nil {
@@ -508,6 +513,7 @@ func (r *InProcessRunner) markFailed(ctx context.Context, runID, nodeID string, 
 	text := boundedFailureText(ctx, runID, nodeID, reason)
 	_ = r.backends.State.FinishNode(writeCtx, runID, nodeID, string(sparkwing.Failed), text, nil)
 	_ = r.backends.State.AppendEvent(writeCtx, runID, nodeID, "node_failed", []byte(text))
+	appendFailureExcerptEvent(writeCtx, r.backends.State, runID, nodeID, reason)
 }
 
 // failureWriteCtx picks the context a node-failure write uses. A genuine

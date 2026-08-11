@@ -2800,6 +2800,7 @@ func (s *dispatchState) markFailed(nodeID string, reason error) {
 	text := boundedFailureText(s.ctx, s.runID, nodeID, reason)
 	_ = s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Failed), text, nil)
 	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_failed", []byte(text))
+	appendFailureExcerptEvent(s.ctx, s.backends.State, s.runID, nodeID, reason)
 	s.setOutcome(nodeID, sparkwing.Failed)
 }
 
