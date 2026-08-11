@@ -149,8 +149,8 @@ func (c *conn) send(msg wingwire.Message) error {
 	}
 	if _, err := c.nc.Write(line); err != nil {
 		if errors.Is(err, os.ErrDeadlineExceeded) {
-			// safety: a timed-out write may have left a partial frame on the wire, so the stream can no longer be framed; close the socket and let the read loop's disconnect path release the connection's admission.
-			c.logf("client %s stopped reading; dropping connection after %s", c.runID, connWriteTimeout)
+			// safety: a timed-out write may have left a partial frame on the wire, so the stream can no longer be framed; close the socket and let the read loop's disconnect path release the connection's admission. The message names the peer address rather than the run: runID is guarded by the daemon mutex, which this path does not hold.
+			c.logf("client at %s stopped reading; dropping connection after %s", c.nc.RemoteAddr(), connWriteTimeout)
 			c.close()
 		}
 		return err
