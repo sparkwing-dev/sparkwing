@@ -63,6 +63,23 @@ code change to unlock.
   name a directory that is absent locally: the text output marks those, while
   the JSON reports the path as recorded.
 
+### Fixed
+
+- **cli:** `sparkwing pipeline trigger` without `--detach` now exits on the
+  triggered run's outcome instead of always exiting 0. The follow ended when the
+  run reached a terminal state but never read its status, so a failed remote run
+  printed no failure and reported success to the CI job or script wrapping it.
+  Exit codes now match a local `sparkwing run`: 0 for success, 1 for failed or
+  cancelled. Both follow modes -- log streaming and node status -- print the
+  run's status block and failing-node errors to stderr, so the reason survives a
+  `> run.log` redirect (the status follow also renders to stdout as it polls, so
+  a terminal shows that block twice). A follow that ends without a readable
+  terminal status, including a controller that becomes unreachable mid-run,
+  exits 3 and names the run to re-check with `sparkwing runs status` rather than
+  reporting a possibly-succeeding run as failed. `--detach` is unchanged -- it
+  reports submission, not outcome. Scripts that relied on the old always-zero
+  exit need `|| true` to keep it.
+
 ## [v0.25.0] - 2026-08-11
 ### Added
 

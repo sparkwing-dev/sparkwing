@@ -143,6 +143,82 @@ func renderRemoteStatus(run *store.Run, nodes []*store.Node, stepsByNode map[str
 	return nil
 }
 
+// RemoteRunOutcome reads a remote run's status after a follow has
+// ended and, for a run that did not succeed, renders the same status
+// block `sparkwing jobs status --run <id>` prints against a
+// controller -- run error, node outcomes, per-node errors -- so the
+// reason lands in the operator's terminal before the caller maps the
+// status onto an exit code.
+//
+// It exists because neither follow loop reports an outcome:
+// [followLogsRemote] ends when the run goes terminal and
+// [JobStatusRemote] paints the last frame it saw -- which can predate
+// the terminal transition -- so the caller needs one authoritative
+// read to decide the process exit status.
+//
+// The returned status is the run's status verbatim (possibly
+// non-terminal, if the follow ended for another reason); an error
+// means the status could not be read at all, which callers must not
+// treat as either success or failure. The status read gets one retry
+// (see [getRunRetrying]) so a transport blip does not masquerade as an
+// unknown outcome. Node/step/approval reads are best-effort: their
+// failure degrades the summary but still reports the status.
+func RemoteRunOutcome(ctx context.Context, controllerURL, token, runID string, out io.Writer) (string, error) {
+	if controllerURL == "" {
+		return "", errors.New("RemoteRunOutcome: controller URL required")
+	}
+	if out == nil {
+		out = io.Discard
+	}
+	c := client.NewWithToken(controllerURL, nil, token)
+	run, err := getRunRetrying(ctx, c, runID)
+	if err != nil {
+		return "", err
+	}
+	if run == nil {
+		return "", fmt.Errorf("run %s: controller returned no run record", runID)
+	}
+	if run.Status == "success" {
+		return run.Status, nil
+	}
+	nodes, err := c.ListNodes(ctx, runID)
+	if err != nil {
+		fmt.Fprintf(out, "\nrun %s finished %s (node detail unavailable: %v)\n", run.ID, run.Status, err)
+		return run.Status, nil
+	}
+	steps, _ := c.ListNodeSteps(ctx, runID)
+	approvals, _ := c.ListApprovalsForRun(ctx, runID)
+	fmt.Fprintln(out)
+	_ = renderRemoteStatus(run, nodes, groupStepsByNode(steps), approvals, out, false, false)
+	return run.Status, nil
+}
+
+// remoteOutcomeRetryDelay spaces RemoteRunOutcome's two status reads.
+// Long enough to outlast a proxy hiccup or a controller replica
+// rolling out, short enough that nobody notices it on the happy path
+// (where it never runs at all).
+const remoteOutcomeRetryDelay = 250 * time.Millisecond
+
+// getRunRetrying absorbs a single transport blip on the outcome read.
+// The follow that just returned watched this run reach a terminal
+// state, so one failed read here is far likelier to be a momentary
+// 5xx than a real answer, and reporting "outcome unknown" on that blip
+// would send a caller chasing a run that is sitting there, finished.
+// Two attempts, then the error stands: the point is to not guess, not
+// to retry until the controller comes back.
+func getRunRetrying(ctx context.Context, c *client.Client, runID string) (*store.Run, error) {
+	run, err := c.GetRun(ctx, runID)
+	if err == nil {
+		return run, nil
+	}
+	select {
+	case <-ctx.Done():
+		return nil, err
+	case <-time.After(remoteOutcomeRetryDelay):
+	}
+	return c.GetRun(ctx, runID)
+}
+
 // JobErrorsRemote is the cluster-mode counterpart to JobErrors.
 func JobErrorsRemote(ctx context.Context, controllerURL, token, runID string, asJSON bool, out io.Writer) error {
 	if controllerURL == "" {
@@ -299,6 +375,11 @@ func writeLogsTextRemote(ctx context.Context, logc storage.LogStore, runID strin
 // followLogsRemote tails live logs by polling ListNodes and spawning
 // per-node SSE goroutines. Exits when run is terminal (with a short
 // drain) or ctx cancels.
+//
+// A nil return means "the stream ended", never "the run succeeded":
+// `jobs logs -f` is a viewer and does not carry the run's outcome.
+// Callers that must exit on the run's outcome (`pipeline trigger`)
+// read it afterwards with [RemoteRunOutcome].
 func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.LogStore,
 	runID, nodeFilter string, out io.Writer,
 ) error {
