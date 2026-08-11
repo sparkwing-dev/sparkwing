@@ -759,26 +759,86 @@ func PipelineCacheKey(sparkwingDir string) (string, error) {
 // covering workspace the walk is skipped entirely and the key stays a
 // hash of the module tree, go.mod, and the overlays.
 func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
-	h := sha256.New()
-
-	fmt.Fprintf(h, "go:%s\n", goMajorMinor())
-	fmt.Fprintf(h, "arch:%s/%s\n", goos, goarch)
-
-	if err := hashDirInto(h, sparkwingDir, allFiles); err != nil {
+	parts, err := keyParts(sparkwingDir, goos, goarch)
+	if err != nil {
 		return "", err
 	}
+	return foldKey(parts), nil
+}
+
+// KeyPart is one labeled input to the cache key. Splitting the key into
+// named parts is what lets `sparkwing cache explain` say which input
+// changed, instead of reporting that an opaque hash moved.
+type KeyPart struct {
+	Label  string // what this input is, e.g. "module tree" or a module path
+	Digest string // sha256 of this part alone, for comparing across builds
+	Detail string // human note: file counts, sizes, what was excluded
+	// material is the exact bytes folded into the key. Parts carry it so
+	// the explanation and the key are computed from one source and
+	// cannot drift apart.
+	material []byte
+}
+
+// foldKey concatenates the parts' material in order and takes the
+// leading 16 hex digits, split for readability.
+func foldKey(parts []KeyPart) string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write(p.material)
+	}
+	raw := fmt.Sprintf("%x", h.Sum(nil))
+	return raw[:8] + "-" + raw[8:16]
+}
+
+func digestOf(b []byte) string {
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum[:])[:12]
+}
+
+// ExplainCacheKey returns the key together with the inputs that produced
+// it, so an operator can see why a rebuild happened without reading the
+// source of this package.
+func ExplainCacheKey(sparkwingDir string) (string, []KeyPart, error) {
+	parts, err := keyParts(sparkwingDir, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return "", nil, err
+	}
+	return foldKey(parts), parts, nil
+}
+
+// keyParts builds the ordered inputs to the cache key. The concatenated
+// material is the hashed preimage, so changing what is appended here
+// changes the key.
+func keyParts(sparkwingDir, goos, goarch string) ([]KeyPart, error) {
+	var parts []KeyPart
+	add := func(label, detail string, material []byte) {
+		parts = append(parts, KeyPart{
+			Label: label, Detail: detail,
+			Digest: digestOf(material), material: material,
+		})
+	}
+
+	add("go toolchain", goMajorMinor(), []byte(fmt.Sprintf("go:%s\n", goMajorMinor())))
+	add("platform", goos+"/"+goarch, []byte(fmt.Sprintf("arch:%s/%s\n", goos, goarch)))
+
+	var moduleBuf bytes.Buffer
+	moduleStats, err := hashDirIntoCounted(&moduleBuf, sparkwingDir, allFiles)
+	if err != nil {
+		return nil, err
+	}
+	add("module tree", moduleStats.String(), moduleBuf.Bytes())
 
 	goModPath := filepath.Join(sparkwingDir, "go.mod")
 	replaceTargets, err := localReplaceTargets(goModPath)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	workTargets, workSummary, err := localWorkspaceTargets(sparkwingDir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if workSummary != "" {
-		fmt.Fprint(h, workSummary)
+		add("go.work", "normalized directives", []byte(workSummary))
 	}
 
 	replaceTargets = append(replaceTargets, workTargets...)
@@ -794,13 +854,16 @@ func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, err
 			continue
 		}
 		last = t
+		var buf bytes.Buffer
 		// Only the label reaches the digest. The directory is read for
-		// content on the next line but never recorded, so the same
-		// module at a different path still yields the same key.
-		fmt.Fprintf(h, "replace:%s\n", t.Label)
-		if err := hashDirInto(h, t.Dir, allFiles); err != nil {
-			return "", err
+		// content below but never recorded, so the same module at a
+		// different path still yields the same key.
+		fmt.Fprintf(&buf, "replace:%s\n", t.Label)
+		stats, err := hashDirIntoCounted(&buf, t.Dir, allFiles)
+		if err != nil {
+			return nil, err
 		}
+		add("replace "+t.Label, stats.String()+" from "+t.Dir, buf.Bytes())
 	}
 
 	for _, overlay := range []struct {
@@ -816,15 +879,16 @@ func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, err
 			if os.IsNotExist(err) {
 				continue
 			}
-			return "", err
+			return nil, err
 		}
-		fmt.Fprint(h, overlay.prefix)
-		h.Write(data)
-		fmt.Fprintln(h)
+		var buf bytes.Buffer
+		fmt.Fprint(&buf, overlay.prefix)
+		buf.Write(data)
+		fmt.Fprintln(&buf)
+		add(overlay.name, "resolved module pins", buf.Bytes())
 	}
 
-	raw := fmt.Sprintf("%x", h.Sum(nil))
-	return raw[:8] + "-" + raw[8:16], nil
+	return parts, nil
 }
 
 // ExecReplace replaces the current process image with the target
@@ -897,29 +961,71 @@ func goMajorMinor() string {
 // Files git ignores are skipped; see [ignoredUnder] for why that is
 // what makes the result portable rather than merely cheaper.
 func hashDirInto(h io.Writer, dir string, keep fileFilter) error {
+	_, err := hashDirIntoCounted(h, dir, keep)
+	return err
+}
+
+// HashStats describes what a directory contributed to the key. It is
+// reported by `sparkwing cache explain` so the exclusion of gitignored
+// files is visible rather than a silent surprise when an edit fails to
+// trigger a rebuild.
+type HashStats struct {
+	Files   int   // files hashed
+	Bytes   int64 // their total size
+	Ignored int   // files skipped because git ignores them
+}
+
+func (s HashStats) String() string {
+	base := fmt.Sprintf("%d files, %s", s.Files, humanSize(s.Bytes))
+	if s.Ignored > 0 {
+		base += fmt.Sprintf(" (%d gitignored, excluded)", s.Ignored)
+	}
+	return base
+}
+
+// humanSize renders a byte count compactly for explain output.
+func humanSize(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for cur := n / unit; cur >= unit && exp < 3; cur /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGT"[exp])
+}
+
+// hashDirIntoCounted is hashDirInto with a report of what it covered.
+func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter) (HashStats, error) {
+	var stats HashStats
 	files, err := walkHashable(dir, keep)
 	if err != nil {
-		return err
+		return stats, err
 	}
 	ignored := ignoredUnder(dir, files)
 	for _, path := range files {
 		if ignored[path] {
+			stats.Ignored++
 			continue
 		}
 		rel, _ := filepath.Rel(dir, path)
 		f, err := os.Open(path)
 		if err != nil {
-			return err
+			return stats, err
 		}
 		fileH := sha256.New()
-		_, copyErr := io.Copy(fileH, f)
+		n, copyErr := io.Copy(fileH, f)
 		f.Close()
 		if copyErr != nil {
-			return copyErr
+			return stats, copyErr
 		}
+		stats.Files++
+		stats.Bytes += n
 		fmt.Fprintf(h, "%s\x00%x\n", rel, fileH.Sum(nil))
 	}
-	return nil
+	return stats, nil
 }
 
 // walkHashable lists the files under dir that keep admits, in the

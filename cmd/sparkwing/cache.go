@@ -13,6 +13,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	flag "github.com/spf13/pflag"
@@ -31,12 +33,14 @@ func runCache(args []string) error {
 		return runCacheInfo(args[1:])
 	case "prune":
 		return runCachePrune(args[1:])
+	case "explain":
+		return runCacheExplain(args[1:])
 	case "help", "-h", "--help":
 		PrintHelp(cmdCache, os.Stdout)
 		return nil
 	default:
 		PrintHelp(cmdCache, os.Stderr)
-		return fmt.Errorf("cache: unknown verb %q (valid: info, prune)", args[0])
+		return fmt.Errorf("cache: unknown verb %q (valid: info, prune, explain)", args[0])
 	}
 }
 
@@ -44,6 +48,7 @@ func runCache(args []string) error {
 type cacheInfoReport struct {
 	Dir        string           `json:"dir"`
 	Entries    int              `json:"entries"`
+	Shared     int              `json:"shared_entries"`
 	TotalBytes int64            `json:"total_bytes"`
 	MaxBytes   int64            `json:"max_bytes"`
 	MaxEntries int              `json:"max_entries"`
@@ -52,9 +57,17 @@ type cacheInfoReport struct {
 }
 
 type cacheInfoEntry struct {
-	Key      string `json:"key"`
-	Bytes    int64  `json:"bytes"`
-	LastUsed string `json:"last_used,omitempty"`
+	Key      string           `json:"key"`
+	Bytes    int64            `json:"bytes"`
+	LastUsed string           `json:"last_used,omitempty"`
+	Uses     int              `json:"uses"`
+	Shared   bool             `json:"shared"`
+	Owners   []cacheInfoOwner `json:"owners,omitempty"`
+}
+
+type cacheInfoOwner struct {
+	Dir  string `json:"dir"`
+	Uses int    `json:"uses"`
 }
 
 func runCacheInfo(args []string) error {
@@ -86,6 +99,9 @@ func runCacheInfo(args []string) error {
 	}
 	for _, e := range entries {
 		report.TotalBytes += e.Bytes
+		if len(e.Owners) > 1 {
+			report.Shared++
+		}
 	}
 	report.OverLimit = (report.MaxBytes > 0 && report.TotalBytes > report.MaxBytes) ||
 		(report.MaxEntries > 0 && report.Entries > report.MaxEntries)
@@ -98,6 +114,11 @@ func runCacheInfo(args []string) error {
 		item := cacheInfoEntry{Key: e.Key, Bytes: e.Bytes}
 		if !e.LastUsed.IsZero() {
 			item.LastUsed = e.LastUsed.UTC().Format(time.RFC3339)
+		}
+		item.Uses = bincache.TotalUses(e.Owners)
+		item.Shared = len(e.Owners) > 1
+		for _, o := range e.Owners {
+			item.Owners = append(item.Owners, cacheInfoOwner{Dir: o.Dir, Uses: o.Uses})
 		}
 		report.Items = append(report.Items, item)
 	}
@@ -115,6 +136,10 @@ func runCacheInfo(args []string) error {
 			return nil
 		}
 		fmt.Printf("  entries:  %d\n", report.Entries)
+		if report.Shared > 0 {
+			fmt.Printf("  shared:   %s\n",
+				color.Green(fmt.Sprintf("%d entries reused by more than one checkout", report.Shared)))
+		}
 		fmt.Printf("  total:    %s\n", humanBytes(report.TotalBytes))
 		fmt.Printf("  ceiling:  %s / %s\n", limitLabel(report.MaxBytes), entryLimitLabel(report.MaxEntries))
 		if report.OverLimit {
@@ -131,7 +156,10 @@ func runCacheInfo(args []string) error {
 			if !e.LastUsed.IsZero() {
 				last = humanAge(time.Since(e.LastUsed))
 			}
-			fmt.Printf("  %-20s %10s  %s\n", e.Key, humanBytes(e.Bytes), last)
+			fmt.Printf("  %-20s %10s  %-10s %4s  %s\n",
+				e.Key, humanBytes(e.Bytes), last,
+				color.Dim(fmt.Sprintf("x%d", bincache.TotalUses(e.Owners))),
+				ownerLabel(e.Owners, all))
 		}
 		if !all && len(entries) > len(shown) {
 			fmt.Printf("  %s\n", color.Dim(fmt.Sprintf("... and %d more (--all to list)", len(entries)-len(shown))))
@@ -203,6 +231,38 @@ func runCachePrune(args []string) error {
 	}
 }
 
+// ownerLabel names the checkouts an entry serves. A key is a content
+// fingerprint and -trimpath keeps build paths out of the binary, so
+// without this an entry is an unidentifiable 90 MB blob. One entry can
+// legitimately serve several checkouts, which is the point of a
+// path-independent key, so the extras are counted rather than hidden.
+func ownerLabel(owners []bincache.Owner, all bool) string {
+	if len(owners) == 0 {
+		return color.Dim("(unknown -- cached before owners were recorded)")
+	}
+	if all {
+		parts := make([]string, 0, len(owners))
+		for _, o := range owners {
+			parts = append(parts, fmt.Sprintf("%s (x%d)", abbreviateHome(o.Dir), o.Uses))
+		}
+		return strings.Join(parts, ", ")
+	}
+	label := abbreviateHome(owners[0].Dir)
+	if len(owners) > 1 {
+		label += color.Green(fmt.Sprintf(" +%d more checkout(s)", len(owners)-1))
+	}
+	return label
+}
+
+// abbreviateHome shortens $HOME to ~ so a listing stays readable.
+func abbreviateHome(p string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" || !strings.HasPrefix(p, home) {
+		return p
+	}
+	return "~" + strings.TrimPrefix(p, home)
+}
+
 func limitLabel(n int64) string {
 	if n <= 0 {
 		return "unlimited"
@@ -229,5 +289,120 @@ func humanAge(d time.Duration) string {
 		return fmt.Sprintf("%dh ago", int(d.Hours()))
 	default:
 		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
+}
+
+// cacheExplainReport is the -o json shape for `cache explain`.
+type cacheExplainReport struct {
+	Dir     string             `json:"dir"`
+	Key     string             `json:"key"`
+	Cached  bool               `json:"cached"`
+	Parts   []cacheExplainPart `json:"parts"`
+	Related []cacheExplainPrev `json:"related_entries,omitempty"`
+}
+
+type cacheExplainPart struct {
+	Label  string `json:"label"`
+	Digest string `json:"digest"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type cacheExplainPrev struct {
+	Key     string   `json:"key"`
+	Changed []string `json:"changed_inputs,omitempty"`
+}
+
+func runCacheExplain(args []string) error {
+	fs := flag.NewFlagSet(cmdCacheExplain.Path, flag.ContinueOnError)
+	var output, dir string
+	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json")
+	fs.StringVar(&dir, "dir", "", "Pipeline module directory (default: ./.sparkwing)")
+	if err := parseAndCheck(cmdCacheExplain, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("cache explain: unexpected positional %q", fs.Arg(0))
+	}
+	if dir == "" {
+		dir = defaultSparkwingDir()
+	}
+
+	key, parts, err := bincache.ExplainCacheKey(dir)
+	if err != nil {
+		return fmt.Errorf("cache explain: %w", err)
+	}
+	_, statErr := os.Stat(bincache.CachedBinaryPath(key))
+	report := cacheExplainReport{Dir: dir, Key: key, Cached: statErr == nil}
+	for _, p := range parts {
+		report.Parts = append(report.Parts, cacheExplainPart{Label: p.Label, Digest: p.Digest, Detail: p.Detail})
+	}
+
+	// Other entries this same checkout has produced. When the current
+	// key is a miss, the inputs that differ from those are the reason.
+	absDir, _ := filepath.Abs(dir)
+	entries, err := bincache.ScanCache()
+	if err != nil {
+		return fmt.Errorf("cache explain: %w", err)
+	}
+	for _, e := range entries {
+		if e.Key == key {
+			continue
+		}
+		owned := false
+		for _, o := range e.Owners {
+			if o.Dir == absDir {
+				owned = true
+				break
+			}
+		}
+		if !owned {
+			continue
+		}
+		prev := cacheExplainPrev{Key: e.Key}
+		if stored := bincache.StoredKeyParts(e.Key); stored != nil {
+			prev.Changed = bincache.DiffKeyParts(stored, parts)
+		}
+		report.Related = append(report.Related, prev)
+	}
+
+	switch output {
+	case "json":
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(report)
+	case "pretty", "":
+		fmt.Println(color.Bold("CACHE KEY"))
+		fmt.Printf("  pipeline: %s\n", color.Cyan(dir))
+		fmt.Printf("  key:      %s\n", color.Cyan(report.Key))
+		if report.Cached {
+			fmt.Printf("  status:   %s\n", color.Green("cached -- the next run reuses this binary"))
+		} else {
+			fmt.Printf("  status:   %s\n", color.Yellow("not cached -- the next run compiles"))
+		}
+		fmt.Println()
+		fmt.Println(color.Bold("INPUTS"))
+		for _, p := range report.Parts {
+			fmt.Printf("  %-28s %s  %s\n", p.Label, color.Dim(p.Digest), color.Dim(p.Detail))
+		}
+		if len(report.Related) > 0 {
+			fmt.Println()
+			fmt.Println(color.Bold("OTHER ENTRIES FROM THIS CHECKOUT"))
+			for _, r := range report.Related {
+				fmt.Printf("  %s\n", r.Key)
+				if len(r.Changed) == 0 {
+					fmt.Printf("    %s\n", color.Dim("(built before inputs were recorded)"))
+					continue
+				}
+				for _, c := range r.Changed {
+					fmt.Printf("    %s %s\n", color.Yellow("changed:"), c)
+				}
+			}
+		}
+		return nil
+	default:
+		return fmt.Errorf("cache explain: unknown output %q (valid: pretty, json)", output)
 	}
 }

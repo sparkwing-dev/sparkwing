@@ -43,6 +43,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 		// cache's only record of when an entry was last wanted, and
 		// pruning evicts by that stamp.
 		bincache.Touch(binPath)
+		bincache.RecordOwner(key, sparkwingDir)
 		ensureDescribeCache(sparkwingDir, binPath)
 		err := bincache.ExecReplace(binPath, args, sparkwingDir, append(env, "SPARKWING_BINARY_SOURCE=cached"))
 		if !errors.Is(err, fs.ErrNotExist) {
@@ -57,6 +58,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 	if cache, lookup := resolveEffectiveCacheSpec(sparkwingDir); cache != nil {
 		if as, err := storeurl.OpenArtifactStoreFromSpec(context.Background(), *cache, lookup); err == nil {
 			if err := bincache.FetchFromArtifactStore(context.Background(), as, key, binPath); err == nil {
+				bincache.RecordOwner(key, sparkwingDir)
 				ensureDescribeCache(sparkwingDir, binPath)
 				env = append(env, "SPARKWING_BINARY_SOURCE=artifact-store")
 				return bincache.ExecReplace(binPath, args, sparkwingDir, env)
@@ -70,6 +72,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 
 	if gcURL := bincache.CacheURL(); gcURL != "" {
 		if err := bincache.TryBinary(gcURL, key, binPath); err == nil {
+			bincache.RecordOwner(key, sparkwingDir)
 			ensureDescribeCache(sparkwingDir, binPath)
 			env = append(env, "SPARKWING_BINARY_SOURCE=gitcache")
 			return bincache.ExecReplace(binPath, args, sparkwingDir, env)
@@ -95,6 +98,12 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 		if err := bincache.UploadBinary(gcURL, bincache.CacheToken(), key, binPath); err != nil {
 			slog.Default().Warn("bin cache upload failed", "err", err, "hash", key)
 		}
+	}
+
+	bincache.RecordOwner(key, sparkwingDir)
+	if _, parts, err := bincache.ExplainCacheKey(sparkwingDir); err == nil {
+		// Stored so a later miss can name the input that changed.
+		bincache.RecordKeyParts(key, parts)
 	}
 
 	// A compile is the only thing that grows the cache, so it is the

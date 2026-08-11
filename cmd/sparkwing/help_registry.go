@@ -852,6 +852,7 @@ space on demand.`,
 	Subcommands: []SubcommandRef{
 		{"info", "Print cache location, size, ceilings, and recent entries"},
 		{"prune", "Evict least recently used entries down to the ceilings"},
+		{"explain", "Show the key for a pipeline and what went into it"},
 	},
 	Examples: []Example{
 		{"See what is cached", "sparkwing cache info"},
@@ -901,6 +902,32 @@ skipped and left for a later prune.`,
 		{"Trim to the configured ceilings", "sparkwing cache prune"},
 		{"Trim to a smaller budget", "sparkwing cache prune --max-bytes 512MiB"},
 		{"Reclaim everything", "sparkwing cache prune --all"},
+	},
+}
+
+var cmdCacheExplain = Command{
+	Path:     "sparkwing cache explain",
+	Synopsis: "Show a pipeline's cache key and the inputs behind it",
+	Description: `Prints the cache key for a pipeline module, whether that key is
+already cached, and every input that produced it -- the Go toolchain,
+the platform, the module tree, each local replace target, a covering
+go.work, and the resolved module pins -- each with its own digest and
+how much it covered.
+
+File counts note how many files git ignores and excluded, which is
+the usual explanation when an edit does not trigger a rebuild.
+
+When other cached entries came from the same checkout, each is listed
+with the inputs that differ from the current key. That is the direct
+answer to why a rebuild happened.`,
+	Flags: []FlagSpec{
+		{Name: "dir", Argument: "PATH", Desc: "Pipeline module directory", Default: "./.sparkwing", Group: "Target"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Target", "Output", "Other"},
+	Examples: []Example{
+		{"Why did this rebuild?", "sparkwing cache explain"},
+		{"Agent-readable", "sparkwing cache explain -o json"},
 	},
 }
 

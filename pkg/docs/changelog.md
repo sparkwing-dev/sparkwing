@@ -48,18 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
-
-## [v0.24.0] - 2026-08-10
 ### Added
 
-- **local admission:** `sparkwing queue exec` admits bootstrap commands before
-  they begin and binds each grant to the command's Linux or macOS process
-  session. Supervisor death and daemon restart retain capacity until the full
-  command tree stops; unsupported platforms refuse before admission.
-- **daemon recovery:** `sparkwing daemon recover-state --yes` preserves an
-  unreadable state file after the operator verifies guarded commands stopped,
-  providing an explicit escape from fail-closed startup without silently
-  discarding unknown lease authority.
 - **cache:** `sparkwing cache info` and `sparkwing cache prune` inspect and trim
   the compiled pipeline binary cache. The cache is now bounded rather than
   unbounded: after each compile, least recently used binaries are evicted to fit
@@ -67,6 +57,17 @@ code change to unlock.
   (default `20`), either set to `0` to disable. Eviction ranks entries by last
   use rather than build time, so a binary in daily use survives regardless of
   age, and entries used in the last few minutes are never evicted.
+- **cache:** `sparkwing cache explain` prints a pipeline's cache key, whether it
+  is cached, and every input behind it with its own digest and file counts --
+  including how many files git ignored and excluded, which is the usual reason
+  an edit does not trigger a rebuild. When other cached entries came from the
+  same checkout, it names the inputs that changed since, answering why the last
+  run recompiled.
+- **cache:** cached binaries record which checkouts have used them and how many
+  times, shown by `sparkwing cache info`. A cache key is a content fingerprint
+  and `-trimpath` keeps build paths out of the binary, so without this an entry
+  cannot be identified; entries listing more than one checkout are the
+  path-independent key paying off.
 
 ### Changed
 
@@ -86,6 +87,18 @@ code change to unlock.
 
   These two changes invalidate existing cached binaries once; the next
   invocation of each pipeline recompiles.
+
+## [v0.24.0] - 2026-08-10
+### Added
+
+- **local admission:** `sparkwing queue exec` admits bootstrap commands before
+  they begin and binds each grant to the command's Linux or macOS process
+  session. Supervisor death and daemon restart retain capacity until the full
+  command tree stops; unsupported platforms refuse before admission.
+- **daemon recovery:** `sparkwing daemon recover-state --yes` preserves an
+  unreadable state file after the operator verifies guarded commands stopped,
+  providing an explicit escape from fail-closed startup without silently
+  discarding unknown lease authority.
 
 ### Docs
 

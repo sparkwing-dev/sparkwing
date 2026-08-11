@@ -228,5 +228,43 @@ sparkwing cache prune --max-bytes 512MiB  # trim to a smaller budget
 sparkwing cache prune --all               # reclaim everything
 ```
 
+### Seeing what an entry is
+
+A key is a content fingerprint and `-trimpath` keeps build paths out of
+the binary, so an entry cannot be identified by inspecting it. Sparkwing
+therefore records which checkouts have used each entry, and how often:
+
+```
+MOST RECENTLY USED (2 of 2)
+  c1df5cd6-4789f450   91.8 MiB  just now   x7  ~/code/sparkwing/.sparkwing +1 more checkout(s)
+  322ecb34-31432125   91.9 MiB  2d ago     x1  ~/.xwing/envs/234/sparkwing/.sparkwing
+```
+
+An entry with more than one checkout is the portable key paying off: a
+worktree reused the primary checkout's build instead of compiling its
+own. `cache info` counts those entries on the `shared:` line.
+
+### Why did it recompile?
+
+`sparkwing cache explain` prints the key, whether it is cached, and every
+input behind it with its own digest:
+
+```
+INPUTS
+  go toolchain      669365bbd24f  go1.26
+  platform          8828cb814901  darwin/arm64
+  module tree       035b55fe2c64  36 files, 346.1 KiB
+  replace github.com/sparkwing-dev/sparkwing  e68a991b153a  1439 files, 10.0 MiB (19 gitignored, excluded)
+```
+
+Comparing two checkouts input by input shows exactly what differs -- if
+`module tree` matches and a replace target does not, the pipeline source
+is identical and a dependency is not. The gitignored count is usually
+the answer when an edit unexpectedly fails to trigger a rebuild.
+
+When other cached entries came from the same checkout, `explain` lists
+them with the inputs that changed since, which is the direct answer to
+why the last run recompiled.
+
 To skip the binary cache entirely for one invocation, set
 `SPARKWING_NO_BINCACHE=1`; sparkwing falls back to `go run .`.

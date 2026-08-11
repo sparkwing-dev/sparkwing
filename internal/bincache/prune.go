@@ -52,6 +52,7 @@ type CacheEntry struct {
 	Dir      string    // absolute path of the entry directory
 	Bytes    int64     // size of the binary, 0 for an orphaned directory
 	LastUsed time.Time // refreshed on every cache hit; zero when orphaned
+	Owners   []Owner   // checkouts known to have used it, most recent first
 }
 
 // PruneResult reports what a prune did.
@@ -87,6 +88,7 @@ func ScanCache() ([]CacheEntry, error) {
 		if fi, err := os.Stat(CachedBinaryPath(de.Name())); err == nil {
 			entry.Bytes = fi.Size()
 			entry.LastUsed = fi.ModTime()
+			entry.Owners = Owners(de.Name())
 		}
 		entries = append(entries, entry)
 	}
