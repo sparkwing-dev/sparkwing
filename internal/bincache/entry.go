@@ -566,6 +566,9 @@ func candidateKeyExists(candidates []cacheCandidate, key string) bool {
 }
 
 func boundedCacheDiscoveryLimit(limit int) int {
+	if limit > maxCacheDiscoveryEntries {
+		return maxCacheDiscoveryEntries
+	}
 	return limit
 }
 
