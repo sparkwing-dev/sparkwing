@@ -65,6 +65,8 @@ type durableEffects struct {
 	loseResponse   EffectKind
 	lost           bool
 	malformedFault bool
+	failKind       EffectKind
+	reconcileCalls map[EffectKind]int
 }
 
 func (e *durableEffects) Apply(ctx context.Context, request EffectRequest) (EffectResult, error) {
@@ -75,6 +77,9 @@ func (e *durableEffects) Apply(ctx context.Context, request EffectRequest) (Effe
 			return EffectResult{}, fmt.Errorf("conflicting request for durable effect %s", request.ID)
 		}
 		return result, nil
+	}
+	if request.Kind == e.failKind {
+		return EffectResult{}, fmt.Errorf("durable effect unavailable")
 	}
 
 	var result EffectResult
@@ -116,6 +121,55 @@ func (e *durableEffects) Apply(ctx context.Context, request EffectRequest) (Effe
 		return EffectResult{}, fmt.Errorf("response lost after durable effect")
 	}
 	return result, nil
+}
+
+func (e *durableEffects) Reconcile(_ context.Context, request EffectRequest) (EffectResult, bool, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.reconcileCalls == nil {
+		e.reconcileCalls = make(map[EffectKind]int)
+	}
+	e.reconcileCalls[request.Kind]++
+	result, found := e.results[request.ID]
+	if found && !reflect.DeepEqual(e.requests[request.ID], request) {
+		return EffectResult{}, false, fmt.Errorf("conflicting request for durable effect %s", request.ID)
+	}
+	return result, found, nil
+}
+
+func TestFaultInjectionResponseLossAtDeadlineRecoversExactFaultBeforeCleanup(t *testing.T) {
+	a, b, script := validTwoFlowScript(t)
+	store := &memorySessionStore{}
+	effects := &durableEffects{script: script, creates: make(map[EffectKind]int), loseResponse: EffectInjectFailure}
+	clock := &manualClock{now: time.Date(2026, 8, 11, 14, 0, 0, 0, time.UTC)}
+	deps := durableTestDependencies(script, store, effects)
+	deps.Clock = clock
+	seed := SessionSeed{ID: "acceptance-session-lost-injection", Events: [2]LandEvent{a, b}}
+
+	if _, err := RunSession(context.Background(), seed, deps); err == nil {
+		t.Fatal("lost injection response did not interrupt the driver")
+	}
+	clock.Advance(6 * time.Minute)
+	if _, err := RunSession(context.Background(), seed, deps); err == nil {
+		t.Fatal("expired fault intent produced a successful proof")
+	}
+
+	wantFaultID := effectID(seed.ID, EffectInjectFailure)
+	effects.mu.Lock()
+	defer effects.mu.Unlock()
+	if effects.creates[EffectInjectFailure] != 1 || effects.creates[EffectRemoveFailure] != 1 {
+		t.Fatalf("effect creations = inject %d cleanup %d, want 1 and 1", effects.creates[EffectInjectFailure], effects.creates[EffectRemoveFailure])
+	}
+	if effects.reconcileCalls[EffectInjectFailure] == 0 {
+		t.Fatal("expired fault intent did not reconcile the durable injection")
+	}
+	cleanup := effects.requests[effectID(seed.ID, EffectRemoveFailure)].Cleanup
+	if cleanup.FaultID != wantFaultID || cleanup.DeploymentUID == "" || cleanup.Digest == "" {
+		t.Fatalf("cleanup request = %+v, want exact recovered fault identity", cleanup)
+	}
+	if effects.creates[EffectRollback] != 0 {
+		t.Fatal("deadline cleanup continued into rollback")
+	}
 }
 
 func TestRunSessionResumesResponseLossWithoutRepeatingEffect(t *testing.T) {
@@ -235,6 +289,46 @@ func TestCompletedSessionIsReverifiedBeforeReturn(t *testing.T) {
 	store.mu.Unlock()
 	if _, err := RunSession(context.Background(), seed, deps); err == nil {
 		t.Fatal("corrupt completed proof was returned")
+	}
+}
+
+func TestCompletedSessionReconcilesEveryDurableEffect(t *testing.T) {
+	a, b, script := validTwoFlowScript(t)
+	store := &memorySessionStore{}
+	effects := &durableEffects{script: script, creates: make(map[EffectKind]int)}
+	deps := durableTestDependencies(script, store, effects)
+	seed := SessionSeed{ID: "acceptance-session-reconcile-complete", Events: [2]LandEvent{a, b}}
+	if _, err := RunSession(context.Background(), seed, deps); err != nil {
+		t.Fatal(err)
+	}
+
+	effects.mu.Lock()
+	delete(effects.results, effectID(seed.ID, EffectRollback))
+	effects.mu.Unlock()
+	if _, err := RunSession(context.Background(), seed, deps); err == nil {
+		t.Fatal("completed proof was returned with a missing durable rollback effect")
+	}
+}
+
+func TestCleanupDeadlineBecomesDurablePageableFailure(t *testing.T) {
+	a, b, script := validTwoFlowScript(t)
+	store := &memorySessionStore{}
+	effects := &durableEffects{script: script, creates: make(map[EffectKind]int), failKind: EffectRemoveFailure}
+	clock := &manualClock{now: time.Date(2026, 8, 11, 14, 0, 0, 0, time.UTC)}
+	deps := durableTestDependencies(script, store, effects)
+	deps.Clock = clock
+	seed := SessionSeed{ID: "acceptance-session-cleanup-deadline", Events: [2]LandEvent{a, b}}
+	if _, err := RunSession(context.Background(), seed, deps); err == nil {
+		t.Fatal("cleanup failure did not interrupt the driver")
+	}
+	clock.Advance(6 * time.Minute)
+	if _, err := RunSession(context.Background(), seed, deps); err == nil {
+		t.Fatal("expired cleanup produced a successful proof")
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.session.Phase != SessionCleanupFailed || store.session.Proof.Fault.ID == "" || store.session.TerminalError == "" {
+		t.Fatalf("cleanup deadline state = %+v", *store.session)
 	}
 }
 
