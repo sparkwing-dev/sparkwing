@@ -248,3 +248,35 @@ func TestAcquireOrMaterializeClosesPublicationToLeaseGap(t *testing.T) {
 		t.Fatalf("Release hit: %v", err)
 	}
 }
+
+func TestStatusMeasuresManagedLivenessAndLegacyBytes(t *testing.T) {
+	cacheRoot := t.TempDir()
+	root := filepath.Join(cacheRoot, pipelineCacheSchema)
+	active := testEntry(t, root, "11111111-11111111")
+	idle := testEntry(t, root, "22222222-22222222")
+	seedEntry(t, active, "old", time.Unix(1, 0))
+	seedEntry(t, idle, "newer", time.Unix(2, 0))
+	legacy := filepath.Join(cacheRoot, "33333333-33333333", "pipelines")
+	if err := os.MkdirAll(filepath.Dir(legacy), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(legacy, []byte("legacy!"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lease, found, err := active.Acquire(context.Background())
+	if err != nil || !found {
+		t.Fatalf("Acquire active entry = (%v, %v)", found, err)
+	}
+	defer func() { _ = lease.Release() }()
+
+	status, err := Status(context.Background(), root)
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if status.ObservedBytes != 8 || status.EntryCount != 2 || status.ActiveEntries != 1 || status.ActiveBytes != 3 {
+		t.Fatalf("managed status: %+v", status)
+	}
+	if status.LegacyBytes != 7 || status.LegacyEntries != 1 {
+		t.Fatalf("legacy status: %+v", status)
+	}
+}
