@@ -4,10 +4,9 @@ package cachepressure
 
 import (
 	"context"
-	"errors"
-)
 
-var errUnavailable = errors.New("pipeline cache pressure API unavailable")
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+)
 
 // PruneOptions bounds one reclamation attempt.
 type PruneOptions struct {
@@ -16,34 +15,20 @@ type PruneOptions struct {
 }
 
 // PruneResult reports observed pressure and completed work.
-type PruneResult struct {
-	ObservedBytes  int64 `json:"observed_bytes"`
-	ReclaimedBytes int64 `json:"reclaimed_bytes"`
-	Examined       int   `json:"examined_entries"`
-	Reclaimed      int   `json:"reclaimed_entries"`
-	Active         int   `json:"active_entries"`
-	Busy           int   `json:"busy_entries"`
-	GoalSatisfied  bool  `json:"goal_satisfied"`
-	Exhausted      bool  `json:"exhausted"`
-}
+type PruneResult = bincache.PruneResult
 
 // Status reports managed and legacy pipeline-cache pressure.
-type Status struct {
-	ObservedBytes int64 `json:"observed_bytes"`
-	EntryCount    int   `json:"entry_count"`
-	ActiveEntries int   `json:"active_entries"`
-	ActiveBytes   int64 `json:"active_bytes"`
-	BusyEntries   int   `json:"busy_entries"`
-	LegacyBytes   int64 `json:"legacy_bytes"`
-	LegacyEntries int   `json:"legacy_entries"`
-}
+type Status = bincache.CacheStatus
 
 // Measure reports pipeline-cache pressure.
-func Measure(context.Context) (Status, error) {
-	return Status{}, errUnavailable
+func Measure(ctx context.Context) (Status, error) {
+	return bincache.Status(ctx, "")
 }
 
 // Prune reclaims inactive entries within opts.
-func Prune(context.Context, PruneOptions) (PruneResult, error) {
-	return PruneResult{}, errUnavailable
+func Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	return bincache.Prune(ctx, bincache.PruneOptions{
+		ReclaimBytes: opts.ReclaimBytes,
+		MaxEntries:   opts.MaxEntries,
+	})
 }

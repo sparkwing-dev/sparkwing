@@ -9,7 +9,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
-	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/pkg/cachepressure"
 )
 
 func runCache(args []string) error {
@@ -43,7 +43,7 @@ func runCacheStatus(args []string) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("cache status: unexpected positional %q", fs.Arg(0))
 	}
-	status, err := bincache.Status(context.Background(), "")
+	status, err := cachepressure.Measure(context.Background())
 	if err != nil {
 		return fmt.Errorf("cache status: %w", err)
 	}
@@ -76,7 +76,7 @@ func runCachePrune(args []string) error {
 	if *maxEntries <= 0 {
 		return errors.New("cache prune: --max-entries must be greater than zero")
 	}
-	result, err := bincache.Prune(context.Background(), bincache.PruneOptions{
+	result, err := cachepressure.Prune(context.Background(), cachepressure.PruneOptions{
 		ReclaimBytes: *goalBytes,
 		MaxEntries:   *maxEntries,
 	})
