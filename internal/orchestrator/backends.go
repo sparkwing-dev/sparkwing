@@ -203,6 +203,22 @@ func canonicalLocalStore(b StateBackend) *store.Store {
 	return nil
 }
 
+// localRunLogDir returns the filesystem directory this log backend
+// writes the run's node logs into, or "" when the logs do not land on
+// this machine (controller HTTP logs, S3 log stores). Same shape as
+// canonicalLocalStore: unwrap to the concrete local implementation and
+// ask it, so the answer comes from the Paths the log writer actually
+// uses instead of a second guess about where a run "should" write.
+// Callers surface the result as the run's log_path; an empty string
+// means there is nothing local to point at and the field is omitted
+// rather than fabricated.
+func localRunLogDir(b LogBackend, runID string) string {
+	if l, ok := b.(localLogs); ok {
+		return l.paths.RunDir(runID)
+	}
+	return ""
+}
+
 type localState struct {
 	st *store.Store
 }

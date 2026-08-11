@@ -15,6 +15,8 @@ Run state lives in the SQLite store at `~/.sparkwing/state.db`. Per-run artifact
 
 Run IDs are timestamp-prefixed, so they sort chronologically.
 
+You do not have to assemble that path yourself. Each run records it as `log_path` on the `run_start` event and on the run's stored invocation, so `sparkwing runs status --run <id>` prints it (and `-o json` carries it as a top-level `log_path`). Runs whose logs go to a controller or object store instead of this machine leave the field out.
+
 `SPARKWING_HOME` overrides the `~/.sparkwing` root; see [config-reference.md](config-reference.md).
 
 ## Running the dashboard

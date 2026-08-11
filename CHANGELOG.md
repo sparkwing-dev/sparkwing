@@ -48,6 +48,17 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **cli + orchestrator:** Runs now report where their logs live instead of
+  making callers reconstruct the path. The `run_start` record carries a
+  top-level `log_path` attribute -- the run directory holding the per-node
+  `.log` files and `_envelope.ndjson` -- and the same value is persisted on the
+  run's invocation snapshot, so it also shows up in `sparkwing runs status`
+  (one `log_path:` line, or a top-level `log_path` field under `-o json`),
+  `sparkwing runs get`, and the run receipt. Only runs whose logs are written
+  to the local filesystem carry it; runs logging to a controller or an object
+  store omit the field rather than name a directory that holds nothing.
 
 ## [v0.25.0] - 2026-08-11
 ### Added

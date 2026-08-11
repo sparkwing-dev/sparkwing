@@ -243,7 +243,11 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 		if err != nil {
 			return err
 		}
-		return writeJSON(out, map[string]any{"run": run, "nodes": nodes})
+		payload := map[string]any{"run": run, "nodes": nodes}
+		if p := runLogPath(run); p != "" {
+			payload["log_path"] = p
+		}
+		return writeJSON(out, payload)
 	}
 
 	if !opts.Follow {
@@ -319,6 +323,9 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 	if run.GitBranch != "" || run.GitSHA != "" {
 		fmt.Fprintf(out, "%s %s @ %s\n", label("git:      "), run.GitBranch, shortSHA(run.GitSHA))
 	}
+	if p := runLogPath(run); p != "" {
+		fmt.Fprintf(out, "%s %s\n", label("log_path: "), p)
+	}
 	if runCanDisplayAdmissionWait(run) {
 		if detail, ok := latestAdmissionWait(ctx, b, runID); ok {
 			fmt.Fprintf(out, "%s %s\n", label("admission:"), detail.statusLine())
@@ -351,6 +358,20 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 		}
 	}
 	return nil
+}
+
+// runLogPath returns the local log directory the run recorded on its
+// invocation snapshot at run_start (see buildRunInvocation). Empty for
+// runs whose logs never touched a local filesystem, and for runs that
+// predate the field -- both cases drop the line rather than guessing a
+// path under this reader's sparkwing home, which would be someone
+// else's directory whenever the run executed elsewhere.
+func runLogPath(run *store.Run) string {
+	if run == nil {
+		return ""
+	}
+	p, _ := run.Invocation["log_path"].(string)
+	return p
 }
 
 type admissionWaitDetail struct {
@@ -1540,6 +1561,9 @@ func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out 
 	steps, _ := st.ListNodeSteps(ctx, runID)
 	wrapped := joinStepsByNode(nodes, steps)
 	payload := map[string]any{"run": run, "nodes": wrapped}
+	if p := runLogPath(run); p != "" {
+		payload["log_path"] = p
+	}
 	if approvals, err := st.ListApprovalsForRun(ctx, runID); err == nil && len(approvals) > 0 {
 		payload["approvals"] = approvals
 	}

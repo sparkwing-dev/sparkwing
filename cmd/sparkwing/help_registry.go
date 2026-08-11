@@ -2301,6 +2301,12 @@ var cmdJobsStatus = Command{
 With --follow, polls until the run reaches a terminal status. Pass
 --profile NAME to read from a remote controller.
 
+Runs that wrote their logs to this machine also report log_path: the
+directory holding the run's per-node .log files and _envelope.ndjson.
+With -o json it is a top-level field, so an agent holding a run id can
+read the logs off disk instead of scraping them out of a stream. Runs
+whose logs live on a controller or in an object store omit it.
+
 Exit code contract: after rendering, 'jobs status' exits 0 only when
 status == success. Any non-success terminal status (failed, cancelled)
 exits 1; a run that is still running when the (non-follow) read

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -439,6 +440,89 @@ func TestJobStatus_JSON(t *testing.T) {
 	run, _ := payload["run"].(map[string]any)
 	if run["id"] != res.RunID {
 		t.Fatalf("json run id mismatch: %v", run)
+	}
+}
+
+func TestJobStatus_ShowsLogPath(t *testing.T) {
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := p.RunDir(res.RunID)
+	if _, err := os.Stat(p.EnvelopeLog(res.RunID)); err != nil {
+		t.Fatalf("envelope log not under the advertised dir: %v", err)
+	}
+
+	var text bytes.Buffer
+	if err := orchestrator.JobStatus(context.Background(), p, res.RunID, orchestrator.StatusOpts{}, &text); err != nil {
+		t.Fatalf("JobStatus: %v", err)
+	}
+	if !strings.Contains(text.String(), want) {
+		t.Fatalf("status missing log_path %q in:\n%s", want, text.String())
+	}
+
+	var jsonOut bytes.Buffer
+	if err := orchestrator.JobStatus(context.Background(), p, res.RunID, orchestrator.StatusOpts{JSON: true}, &jsonOut); err != nil {
+		t.Fatalf("JobStatus json: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(jsonOut.Bytes(), &payload); err != nil {
+		t.Fatalf("json parse: %v\n%s", err, jsonOut.String())
+	}
+	if payload["log_path"] != want {
+		t.Errorf("json log_path = %v, want %q", payload["log_path"], want)
+	}
+	run, _ := payload["run"].(map[string]any)
+	inv, _ := run["invocation"].(map[string]any)
+	if inv["log_path"] != want {
+		t.Errorf("stored invocation log_path = %v, want %q", inv["log_path"], want)
+	}
+}
+
+// A run whose invocation carries no log_path (logs written to a
+// controller or object store, or a run predating the field) must drop
+// the line rather than point at this reader's own sparkwing home.
+func TestJobStatus_OmitsLogPathWhenRunHasNone(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	const runID = "run-remote-logs"
+	if err := st.CreateRun(ctx, store.Run{
+		ID:         runID,
+		Pipeline:   "orch-ok",
+		Status:     "running",
+		StartedAt:  time.Now(),
+		Invocation: map[string]any{"run_id": runID, "pipeline": "orch-ok"},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	var text bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, runID, orchestrator.StatusOpts{}, &text); err != nil {
+		t.Fatalf("JobStatus: %v", err)
+	}
+	if strings.Contains(text.String(), "log_path") {
+		t.Fatalf("status invented a log_path for a run without one:\n%s", text.String())
+	}
+	if strings.Contains(text.String(), p.RunDir(runID)) {
+		t.Fatalf("status leaked a local run dir for a run without one:\n%s", text.String())
+	}
+
+	var jsonOut bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, runID, orchestrator.StatusOpts{JSON: true}, &jsonOut); err != nil {
+		t.Fatalf("JobStatus json: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(jsonOut.Bytes(), &payload); err != nil {
+		t.Fatalf("json parse: %v\n%s", err, jsonOut.String())
+	}
+	if v, ok := payload["log_path"]; ok {
+		t.Errorf("json log_path present for a run without one: %v", v)
 	}
 }
 
