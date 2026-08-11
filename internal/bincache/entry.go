@@ -19,6 +19,8 @@ var errCacheAuthorityUnavailable = errors.New("pipeline cache authority unavaila
 
 var pipelineEntryKeyRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{8}$`)
 
+var removeCacheEntry = os.RemoveAll
+
 // Entry is the authority to inspect, materialize, and execute one managed
 // pipeline-cache entry.
 type Entry struct {
@@ -230,7 +232,7 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			}
 			continue
 		}
-		removeErr := os.RemoveAll(entry.entryDir())
+		removeErr := removeCacheEntry(entry.entryDir())
 		closeErr := errors.Join(cacheUnlock(lease), lease.Close(), cacheUnlock(writer), writer.Close())
 		if removeErr != nil || closeErr != nil {
 			return result, errors.Join(removeErr, closeErr)
