@@ -131,19 +131,23 @@ func compileAndPublishOne(ctx context.Context, sparkwingDir string, p platform, 
 	if err != nil {
 		return publishedBinary{}, fmt.Errorf("hash: %w", err)
 	}
-	binPath := bincache.CachedBinaryPath(key)
-
-	if _, err := os.Stat(binPath); err != nil {
-		if err := compileForPlatform(sparkwingDir, binPath, p); err != nil {
-			return publishedBinary{}, fmt.Errorf("compile: %w", err)
-		}
+	entry, err := bincache.PipelineEntry(key)
+	if err != nil {
+		return publishedBinary{}, fmt.Errorf("cache entry: %w", err)
 	}
+	lease, _, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
+		return compileForPlatform(sparkwingDir, tempPath, p)
+	})
+	if err != nil {
+		return publishedBinary{}, fmt.Errorf("compile: %w", err)
+	}
+	defer func() { _ = lease.Release() }()
 
-	if err := bincache.UploadToArtifactStore(ctx, store, key, binPath); err != nil {
+	if err := bincache.UploadToArtifactStore(ctx, store, key, lease.Path()); err != nil {
 		return publishedBinary{}, err
 	}
 
-	st, _ := os.Stat(binPath)
+	st, _ := os.Stat(lease.Path())
 	var size int64
 	if st != nil {
 		size = st.Size()
