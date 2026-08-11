@@ -4,6 +4,7 @@ package runner
 
 import (
 	"context"
+	"errors"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -37,6 +38,35 @@ type PlanValidationRequest struct {
 // can produce side effects.
 type PlanValidator interface {
 	ValidatePlan(context.Context, PlanValidationRequest) error
+}
+
+// RunFinalizer lets a runner close durable execution state after every
+// admitted run. FinalizeRun must be idempotent because callers may retry it
+// after losing the response.
+type RunFinalizer interface {
+	FinalizeRun(context.Context, RunFinalizationRequest) error
+}
+
+type terminalFinalizationError struct{ error }
+
+func (terminalFinalizationError) TerminalFinalization() {}
+
+func TerminalFinalizationError(err error) error {
+	if err == nil {
+		return nil
+	}
+	return terminalFinalizationError{error: err}
+}
+
+func IsTerminalFinalizationError(err error) bool {
+	var terminal interface{ TerminalFinalization() }
+	return errors.As(err, &terminal)
+}
+
+type RunFinalizationRequest struct {
+	RunID   string
+	Outcome sparkwing.Outcome
+	Error   error
 }
 
 // LabelAdvertiser is an optional interface a Runner can implement to

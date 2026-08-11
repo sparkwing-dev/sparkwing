@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -46,6 +47,8 @@ type labeledFailingRunner struct {
 	labels              []string
 	calls               atomic.Int32
 	forceReleaseAllowed atomic.Bool
+	finalizeCalls       atomic.Int32
+	finalization        runner.RunFinalizationRequest
 }
 
 func (r *labeledFailingRunner) AdvertisedLabels() []string { return r.labels }
@@ -56,9 +59,21 @@ func (r *labeledFailingRunner) RunNode(ctx context.Context, _ runner.Request) ru
 	return runner.Result{Outcome: sparkwing.Failed, Err: errDownstreamRunner}
 }
 
+func (r *labeledFailingRunner) FinalizeRun(_ context.Context, req runner.RunFinalizationRequest) error {
+	r.finalization = req
+	r.finalizeCalls.Add(1)
+	return nil
+}
+
 func TestCoordinatingRunnerPreservesLabelsAndDownstreamResult(t *testing.T) {
 	downstream := &labeledFailingRunner{labels: []string{"trusted", "arm64"}}
-	wrapped := newCoordinatingRunner(Backends{}, downstream)
+	paths := PathsAt(t.TempDir())
+	state, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open state: %v", err)
+	}
+	defer func() { _ = state.Close() }()
+	wrapped := newCoordinatingRunner(LocalBackends(paths, state, nil), downstream)
 	advertiser, ok := wrapped.(runner.LabelAdvertiser)
 	if !ok {
 		t.Fatal("coordinating runner dropped LabelAdvertiser")
@@ -68,7 +83,12 @@ func TestCoordinatingRunnerPreservesLabelsAndDownstreamResult(t *testing.T) {
 	}
 
 	plan := sparkwing.NewPlan()
-	node := sparkwing.Job(plan, "protected", func(context.Context) error { return nil })
+	group := sparkwing.NewConcurrencyGroup("protected-group", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		Scope:    sparkwing.ScopeRun,
+		OnLimit:  sparkwing.Queue,
+	})
+	node := sparkwing.Job(plan, "protected", func(context.Context) error { return nil }).Concurrency(group)
 	result := wrapped.RunNode(context.Background(), runner.Request{
 		RunID:  "run",
 		NodeID: node.ID(),
@@ -100,7 +120,7 @@ func (groupedFailurePipeline) Plan(_ context.Context, plan *sparkwing.Plan, _ sp
 	return nil
 }
 
-func TestCoordinatingRunnerPreservesGroupedDownstreamFailure(t *testing.T) {
+func TestCoordinatingRunnerFailsRunOnGroupedDownstreamFailure(t *testing.T) {
 	const pipeline = "coordinating-runner-grouped-failure"
 	sparkwing.Register[sparkwing.NoInputs](pipeline, func() sparkwing.Pipeline[sparkwing.NoInputs] { return groupedFailurePipeline{} })
 	downstream := &labeledFailingRunner{}
@@ -121,17 +141,11 @@ func TestCoordinatingRunnerPreservesGroupedDownstreamFailure(t *testing.T) {
 	if calls := downstream.calls.Load(); calls != 1 {
 		t.Fatalf("downstream calls = %d, want 1", calls)
 	}
-	state, err := store.Open(paths.StateDB())
-	if err != nil {
-		t.Fatalf("open state: %v", err)
+	if calls := downstream.finalizeCalls.Load(); calls != 1 {
+		t.Fatalf("finalize calls = %d, want 1", calls)
 	}
-	defer func() { _ = state.Close() }()
-	nodes, err := state.ListNodes(context.Background(), result.RunID)
-	if err != nil {
-		t.Fatalf("list nodes: %v", err)
-	}
-	if len(nodes) != 1 || nodes[0].NodeID != "protected" || nodes[0].Error != errDownstreamRunner.Error() {
-		t.Fatalf("persisted nodes = %+v, want protected sentinel failure", nodes)
+	if downstream.finalization.Outcome != sparkwing.Failed || !errors.Is(downstream.finalization.Error, errDownstreamRunner) {
+		t.Fatalf("finalization = %+v, want failed downstream sentinel", downstream.finalization)
 	}
 }
 
@@ -256,8 +270,8 @@ func TestCustomRunnerCancelTimeoutWaitsForCleanupAcknowledgement(t *testing.T) {
 	}
 	select {
 	case result := <-done:
-		if result.Status != "cancelled" {
-			t.Fatalf("run status = %q, error = %v; want cancelled after supersede", result.Status, result.Error)
+		if result.Status != "success" || result.Error != nil {
+			t.Fatalf("run status = %q, error = %v; want serialized success", result.Status, result.Error)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("cancel-cleanup run did not finish")
@@ -333,22 +347,150 @@ func TestRunValidatesRunnerPlanBeforeInlineOrCacheDispatch(t *testing.T) {
 type capturingValidationRunner struct {
 	validation          runner.PlanValidationRequest
 	node                runner.Request
+	finalization        runner.RunFinalizationRequest
+	finalizeCalls       int
+	finalizeErr         error
+	finalizeBlock       bool
 	validatedAcceptance string
 }
 
 func (r *capturingValidationRunner) ValidatePlan(_ context.Context, req runner.PlanValidationRequest) error {
 	r.validation = req
 	r.validatedAcceptance = req.Args["acceptance"]
-	req.Args["acceptance"] = "mutated-by-validator"
+	if req.Args != nil {
+		req.Args["acceptance"] = "mutated-by-validator"
+	}
 	if req.RunContext.Trigger.PullRequest != nil {
 		req.RunContext.Trigger.PullRequest.HeadSHA = "mutated-by-validator"
 	}
 	return nil
 }
 
+func TestRunnerFinalizationFailureFailsSuccessfulRun(t *testing.T) {
+	const pipeline = "runner-finalization-failure"
+	sparkwing.Register[sparkwing.NoInputs](pipeline, func() sparkwing.Pipeline[sparkwing.NoInputs] { return validationIdentityPipeline{} })
+	errFinalize := errors.New("trusted executor cleanup failed")
+	prior := runnerFinalizeTimeout
+	runnerFinalizeTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { runnerFinalizeTimeout = prior })
+	downstream := &capturingValidationRunner{finalizeErr: errFinalize}
+	result, err := RunLocal(context.Background(), PathsAt(t.TempDir()), Options{
+		Pipeline: pipeline,
+		Runner:   downstream,
+	})
+	if err != nil {
+		t.Fatalf("RunLocal setup: %v", err)
+	}
+	if result.Status != "failed" || !errors.Is(result.Error, errFinalize) {
+		t.Fatalf("result = %+v, want finalization failure", result)
+	}
+	if downstream.finalizeCalls == 0 {
+		t.Fatal("finalize was never attempted")
+	}
+}
+
+func TestRunnerDoesNotRetryTerminalFinalizationFailure(t *testing.T) {
+	const pipeline = "runner-terminal-finalization-failure"
+	sparkwing.Register[sparkwing.NoInputs](pipeline, func() sparkwing.Pipeline[sparkwing.NoInputs] { return validationIdentityPipeline{} })
+	errFinalize := errors.New("conflicting durable finalization")
+	downstream := &capturingValidationRunner{finalizeErr: runner.TerminalFinalizationError(errFinalize)}
+	result, err := RunLocal(context.Background(), PathsAt(t.TempDir()), Options{
+		Pipeline: pipeline,
+		Runner:   downstream,
+	})
+	if err != nil {
+		t.Fatalf("RunLocal setup: %v", err)
+	}
+	if result.Status != "failed" || !errors.Is(result.Error, errFinalize) {
+		t.Fatalf("result = %+v, want terminal finalization failure", result)
+	}
+	if downstream.finalizeCalls != 1 {
+		t.Fatalf("terminal finalize calls = %d, want 1", downstream.finalizeCalls)
+	}
+}
+
+func TestRunnerFinalizesAfterPostValidationFailure(t *testing.T) {
+	const pipeline = "runner-finalization-early-failure"
+	sparkwing.Register[sparkwing.NoInputs](pipeline, func() sparkwing.Pipeline[sparkwing.NoInputs] { return validationIdentityPipeline{} })
+	downstream := &capturingValidationRunner{}
+	result, err := RunLocal(context.Background(), PathsAt(t.TempDir()), Options{
+		Pipeline: pipeline,
+		Runner:   downstream,
+		StartAt:  "missing-step",
+	})
+	if err != nil {
+		t.Fatalf("RunLocal setup: %v", err)
+	}
+	if result.Status != "failed" || result.Error == nil {
+		t.Fatalf("result = %+v, want validation failure", result)
+	}
+	if downstream.finalizeCalls != 1 || downstream.finalization.Outcome != sparkwing.Failed || downstream.finalization.Error == nil {
+		t.Fatalf("finalization = %+v calls=%d", downstream.finalization, downstream.finalizeCalls)
+	}
+}
+
+func TestRunnerFinalizesAfterAdmissionFailure(t *testing.T) {
+	registerAdmitFailPipeline()
+	home := wingdTestHome(t)
+	backends, _, _ := openWingdBackends(t, home)
+	downstream := &capturingValidationRunner{}
+	result, err := Run(context.Background(), backends, Options{
+		Pipeline: "admit-fail-e2e",
+		RunID:    "runner-finalize-admission-failure",
+		Runner:   downstream,
+		Admission: &LocalAdmission{
+			Home: home, Version: "test", Out: io.Discard,
+			Spawn:       func(string, string) error { return errors.New("no daemon for test") },
+			DialTimeout: 100 * time.Millisecond,
+			Backoff:     10 * time.Millisecond,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Run setup: %v", err)
+	}
+	if result.Status != "failed" || result.Error == nil {
+		t.Fatalf("result = %+v, want admission failure", result)
+	}
+	if downstream.finalizeCalls != 1 || downstream.finalization.Outcome != sparkwing.Failed || downstream.finalization.Error == nil {
+		t.Fatalf("finalization = %+v calls=%d", downstream.finalization, downstream.finalizeCalls)
+	}
+}
+
 func (r *capturingValidationRunner) RunNode(_ context.Context, req runner.Request) runner.Result {
 	r.node = req
 	return runner.Result{Outcome: sparkwing.Success}
+}
+
+func (r *capturingValidationRunner) FinalizeRun(ctx context.Context, req runner.RunFinalizationRequest) error {
+	r.finalizeCalls++
+	r.finalization = req
+	if r.finalizeBlock {
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	return r.finalizeErr
+}
+
+func TestRunnerFinalizationHasBoundedDeadline(t *testing.T) {
+	const pipeline = "runner-finalization-deadline"
+	sparkwing.Register[sparkwing.NoInputs](pipeline, func() sparkwing.Pipeline[sparkwing.NoInputs] { return validationIdentityPipeline{} })
+	prior := runnerFinalizeTimeout
+	runnerFinalizeTimeout = 20 * time.Millisecond
+	t.Cleanup(func() { runnerFinalizeTimeout = prior })
+	downstream := &capturingValidationRunner{finalizeBlock: true}
+	result, err := RunLocal(context.Background(), PathsAt(t.TempDir()), Options{
+		Pipeline: pipeline,
+		Runner:   downstream,
+	})
+	if err != nil {
+		t.Fatalf("RunLocal setup: %v", err)
+	}
+	if result.Status != "failed" || !errors.Is(result.Error, context.DeadlineExceeded) {
+		t.Fatalf("result = %+v, want bounded finalization deadline", result)
+	}
+	if downstream.finalizeCalls == 0 {
+		t.Fatal("finalize was never attempted")
+	}
 }
 
 type validationIdentityPipeline struct{ sparkwing.Base }
@@ -404,5 +546,8 @@ func TestPlanValidationAndNodeDispatchShareAuthoritativeIdentity(t *testing.T) {
 	}
 	if downstream.node.Args["acceptance"] != "phase-b" {
 		t.Fatalf("node args = %v", downstream.node.Args)
+	}
+	if downstream.finalizeCalls != 1 || downstream.finalization.RunID != "authoritative-run" || downstream.finalization.Outcome != sparkwing.Success || downstream.finalization.Error != nil {
+		t.Fatalf("finalization = %+v calls=%d", downstream.finalization, downstream.finalizeCalls)
 	}
 }

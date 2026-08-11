@@ -272,9 +272,11 @@ type Result struct {
 	Error  error  // non-nil when at least one node failed
 }
 
+var runnerFinalizeTimeout = 30 * time.Second
+
 // Run executes the pipeline to terminal state through Backends.
 // Caller owns Backends lifecycle. See RunLocal for a managed wrapper.
-func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) {
+func Run(ctx context.Context, backends Backends, opts Options) (result *Result, returnErr error) {
 	reg, ok := sparkwing.Lookup(opts.Pipeline)
 	if !ok {
 		return nil, fmt.Errorf("pipeline %q is not registered", opts.Pipeline)
@@ -438,6 +440,59 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			return &Result{RunID: runID, Status: "failed", Error: err}, nil
 		}
 	}
+	finalizer, runnerAdmitted := opts.Runner.(runner.RunFinalizer)
+	finalizationDone := false
+	finalizeRunner := func(outcome sparkwing.Outcome, runErr error) error {
+		if !runnerAdmitted {
+			return nil
+		}
+		finalizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), runnerFinalizeTimeout)
+		defer cancel()
+		req := runner.RunFinalizationRequest{RunID: runID, Outcome: outcome, Error: runErr}
+		var lastErr error
+		for {
+			if err := finalizer.FinalizeRun(finalizeCtx, req); err == nil {
+				return nil
+			} else {
+				if runner.IsTerminalFinalizationError(err) {
+					return err
+				}
+				lastErr = err
+			}
+			timer := time.NewTimer(100 * time.Millisecond)
+			select {
+			case <-timer.C:
+			case <-finalizeCtx.Done():
+				timer.Stop()
+				return errors.Join(finalizeCtx.Err(), lastErr)
+			}
+		}
+	}
+	defer func() {
+		if !runnerAdmitted || finalizationDone {
+			return
+		}
+		outcome := sparkwing.Failed
+		var runErr error
+		if result != nil {
+			runErr = result.Error
+			if result.Status == "success" {
+				outcome = sparkwing.Success
+			}
+		}
+		if runErr == nil {
+			runErr = returnErr
+		}
+		if err := finalizeRunner(outcome, runErr); err != nil {
+			wrapped := fmt.Errorf("runner finalize after early exit: %w", err)
+			if result == nil {
+				result = &Result{RunID: runID}
+			}
+			result.Status = "failed"
+			result.Error = wrapped
+			_ = backends.State.FinishRun(context.WithoutCancel(ctx), runID, "failed", wrapped.Error())
+		}
+	}()
 	if err := backends.State.UpdatePlanSnapshot(ctx, runID, snapshot); err != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("persist snapshot: %v", err))
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
@@ -593,6 +648,20 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			dispatchWaitTimeout, opts.Admission, leaseToken, leaseChildToken, leaseHostAdmitted,
 			invokeArgs, rc, profName, profIsLocal, planDigest,
 		)
+	}
+	if runnerAdmitted {
+		finalizeOutcome := sparkwing.Success
+		if runErr != nil {
+			finalizeOutcome = sparkwing.Failed
+		}
+		if err := finalizeRunner(finalizeOutcome, runErr); err != nil {
+			if runErr == nil {
+				runErr = fmt.Errorf("runner finalize: %w", err)
+			} else {
+				runErr = fmt.Errorf("runner finalize after run error %q: %w", runErr, err)
+			}
+		}
+		finalizationDone = true
 	}
 
 	finalStatus := statusForRunError(runErr)
@@ -982,6 +1051,15 @@ func dispatch(
 
 	if len(failed) > 0 {
 		planReleaseOutcome = "failed"
+		causes := make([]error, 0, len(failed))
+		for _, nodeID := range failed {
+			if failure := state.getFailure(nodeID); failure.Err != nil {
+				causes = append(causes, failure.Err)
+			}
+		}
+		if len(causes) != 0 {
+			return fmt.Errorf("nodes failed: %v: %w", failed, errors.Join(causes...))
+		}
 		return fmt.Errorf("nodes failed: %v", failed)
 	}
 	if len(superseded) > 0 {
