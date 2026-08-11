@@ -420,9 +420,22 @@ func TestCleanupDeadlineBecomesDurablePageableFailure(t *testing.T) {
 		t.Fatal("expired cleanup produced a successful proof")
 	}
 	store.mu.Lock()
-	defer store.mu.Unlock()
-	if store.session.Phase != SessionCleanupFailed || store.session.Proof.Fault.ID == "" || store.session.TerminalError == "" {
-		t.Fatalf("cleanup deadline state = %+v", *store.session)
+	deadlineState := *store.session
+	store.mu.Unlock()
+	if deadlineState.Phase != SessionCleanupFailed || deadlineState.Proof.Fault.ID == "" || deadlineState.TerminalError == "" {
+		t.Fatalf("cleanup deadline state = %+v", deadlineState)
+	}
+	effects.mu.Lock()
+	effects.failKind = ""
+	effects.mu.Unlock()
+	if _, err := RunSession(context.Background(), seed, deps); err == nil {
+		t.Fatal("cleanup escalation incorrectly became a successful proof")
+	}
+	store.mu.Lock()
+	resumedState := *store.session
+	store.mu.Unlock()
+	if resumedState.Phase != SessionFailed || !resumedState.Proof.Cleanup.NoResidue {
+		t.Fatalf("resumed cleanup state = %+v", resumedState)
 	}
 }
 
