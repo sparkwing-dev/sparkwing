@@ -410,6 +410,14 @@ The daemon writes an operational log to `wingd/d.log` under the sparkwing
 home (`~/.sparkwing/wingd/d.log` by default) for when you want to see
 what it did.
 
+If a daemon is ever busy in a way its log does not explain -- burning CPU
+with nothing queued, or answering nothing -- send it `SIGUSR1`
+(`kill -USR1 <pid>`, POSIX only). It appends a line counting its
+connections, guards, leases, and waiters, followed by a stack for every
+goroutine, to that same log. The daemon keeps running, so you can capture
+the state before deciding whether to stop it, and the dump is what a bug
+report about a stuck or spinning daemon should carry.
+
 ### Capping sparkwing's share of the machine
 
 Measured admission is the primary mechanism, and for most machines it is
