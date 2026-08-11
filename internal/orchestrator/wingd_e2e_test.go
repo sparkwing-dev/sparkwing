@@ -1676,7 +1676,7 @@ func TestWingd_NodeGroupDoesNotHoldSemaphoreWhileWaitingForHostAdmission(t *test
 			NodeID:   node.ID(),
 			Pipeline: "wingd-e2e-host-first",
 			Node:     node,
-		}, la, group, r.executeInProcess)
+		}, la, group)
 	}()
 
 	awaitWaiter(t, home, nodeHostRunID("node-waiter", "locked"))
