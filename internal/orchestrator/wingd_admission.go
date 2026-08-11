@@ -502,6 +502,10 @@ func (la *LocalAdmission) acquireBlocking(
 	}
 	cl, err := wingdclient.EnsureDaemon(acquireCtx, la.clientOptions())
 	if err != nil {
+		// safety: an exhausted takeover reached the daemon and was answered; reporting it as unreachable sends the reader after a socket that is working and hides the version conflict that is the actual obstacle.
+		if errors.Is(err, wingdclient.ErrTakeoverExhausted) {
+			return nil, admitProceed, fmt.Errorf("local admission refused a version conflict: %w", err)
+		}
 		return nil, admitProceed, fmt.Errorf("local admission unreachable: could not reach the admission daemon: %w; run `sparkwing queue` to check the local admission state", err)
 	}
 	displayID := req.DisplayRunID

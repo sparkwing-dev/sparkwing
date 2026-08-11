@@ -226,15 +226,93 @@ func (e *CancelledError) Error() string {
 }
 
 // A detached spawn cannot distinguish slow initialization from process death.
-// Keep one startup owner and allow its socket up to thirty seconds to appear
-// under the default backoff. Starting replacements during that interval adds
-// election contention and can prevent every otherwise healthy daemon from
-// reaching readiness.
+// Keep one startup owner and allow its socket thirty seconds to appear.
+// Starting replacements during that interval adds election contention and can
+// prevent every otherwise healthy daemon from reaching readiness. The budget
+// is wall-clock: how long the socket may take is a property of the machine,
+// not of how often this client looks for it.
 const (
 	defaultBackoff   = 50 * time.Millisecond
 	dialsPerSpawn    = 600
 	maxSpawnAttempts = 1
 )
+
+// daemonStartupBudget is how long a spawned daemon has to bind its socket
+// before this client reports it unreachable.
+func daemonStartupBudget(opts Options) time.Duration {
+	return time.Duration(dialsPerSpawn) * opts.backoff()
+}
+
+// maxTakeoverAttempts bounds how many times one connect drains the same
+// daemon version and spawns its successor. A takeover that worked is
+// followed by a connection to the new daemon, so needing several means
+// the successor keeps coming up as the version it replaced -- a stuck
+// binary, a stale spawn path -- and repeating it is a drain-respawn
+// loop, not progress.
+const maxTakeoverAttempts = 3
+
+// maxTotalTakeovers bounds the drain-and-respawn exchanges one connect
+// may run across every version it meets. Replacing a different
+// predecessor each time is progress only while the population of
+// predecessors shrinks; two old clients on a shared box, each respawning
+// its own daemon, hand this one a version that is always new and never
+// exhausts a per-version budget.
+//
+// The ceiling counts exchanges rather than wall-clock time because what
+// this loop costs is not waiting: every attempt drains a live daemon and
+// starts a process. A thirty-second deadline would permit hundreds of
+// those; six bounds the side effect itself, while still covering a
+// genuine handful of predecessors.
+const maxTotalTakeovers = 2 * maxTakeoverAttempts
+
+// takeoverBudget decides whether one connect may take another daemon
+// over. It restarts the per-version allowance when the version changes,
+// so a shrinking population of predecessors is not mistaken for a loop,
+// and holds a total ceiling so an endless supply of new ones is.
+type takeoverBudget struct {
+	version    string
+	perVersion int
+	total      int
+}
+
+// spend records one takeover of the named daemon version, reporting
+// false when the budget is gone and the skew has to be reported instead.
+func (b *takeoverBudget) spend(version string) bool {
+	if version != b.version {
+		b.version, b.perVersion = version, 0
+	}
+	if b.perVersion >= maxTakeoverAttempts || b.total >= maxTotalTakeovers {
+		return false
+	}
+	b.perVersion++
+	b.total++
+	return true
+}
+
+// ErrTakeoverExhausted reports that repeated takeovers did not produce a
+// daemon this client can use. It is a version-skew fault an operator must
+// resolve, not a wait that will clear.
+var ErrTakeoverExhausted = errors.New("wingd/client: repeated daemon takeover did not resolve the version skew")
+
+// errDaemonDraining is the cause a wait for a draining daemon reports if
+// the caller's context ends first.
+var errDaemonDraining = errors.New("wingd/client: daemon is draining")
+
+// takeoverExhausted names both sides of the skew, because the useful fact
+// is which two versions kept replacing each other.
+func takeoverExhausted(selfVersion string, ack wingwire.HelloAck, attempts int) error {
+	self := selfVersion
+	if self == "" {
+		self = "(unknown)"
+	}
+	daemon := ack.BinaryVersion
+	if daemon == "" {
+		daemon = "(unknown)"
+	}
+	return fmt.Errorf("%w: after %d attempts the daemon still reports %s (protocol %d) while this binary is %s (protocol %d). "+
+		"Run `sparkwing daemon restart` to replace it, or set SPARKWING_HOME to run against a daemon of your own",
+		ErrTakeoverExhausted, attempts, daemon, ack.ProtocolMajor, self, wingd.ProtocolMajor)
+}
 
 // spawnFailed reports a spawn-syscall failure, folding in the daemon log
 // tail when a prior attempt left one so a bind-time death is visible even
@@ -336,9 +414,13 @@ func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 func (cl *Client) connect(ctx context.Context) error {
 	opts := cl.opts
 	spawns := 0
-	dialsSinceSpawn := 0
+	takeovers := &takeoverBudget{}
+	drainWait := newRetry("wait for draining daemon", 0)
+	dialWait := newRetryCapped("wait for daemon socket", 0, dialPaceMax)
+	electionWait := newRetryCapped("wait for predecessor daemon", 0, electionPaceMax)
 	var lastDial error
 	var predecessorDeadline time.Time
+	var socketDeadline time.Time
 	for {
 		if err := ctx.Err(); err != nil {
 			return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
@@ -346,7 +428,7 @@ func (cl *Client) connect(ctx context.Context) error {
 		nc, derr := dial(ctx, cl.sock, opts.dialTimeout())
 		if derr != nil {
 			lastDial = derr
-			if spawns == 0 || dialsSinceSpawn >= dialsPerSpawn {
+			if socketDeadline.IsZero() || !time.Now().Before(socketDeadline) {
 				if spawns >= maxSpawnAttempts {
 					return daemonUnreachable(opts.Home, cl.sock, spawns, derr, lastDial)
 				}
@@ -364,7 +446,7 @@ func (cl *Client) connect(ctx context.Context) error {
 						cause := fmt.Errorf("predecessor daemon still holds the election lock for %s after %s", opts.Home, opts.predecessorWaitTimeout())
 						return daemonUnreachable(opts.Home, cl.sock, spawns, cause, nil)
 					}
-					if err := sleep(ctx, opts.backoff()); err != nil {
+					if err := electionWait.wait(ctx, derr); err != nil {
 						return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 					}
 					continue
@@ -381,15 +463,15 @@ func (cl *Client) connect(ctx context.Context) error {
 					return spawnFailed(opts.Home, cl.sock, fmt.Errorf("prepare daemon socket: unexpected state %d", preparation), lastDial)
 				}
 				predecessorDeadline = time.Time{}
+				electionWait.reset()
 				if serr := opts.spawn(opts.Home, opts.Version); serr != nil {
 					return spawnFailed(opts.Home, cl.sock, serr, lastDial)
 				}
 				spawns++
-				dialsSinceSpawn = 0
-			} else {
-				dialsSinceSpawn++
+				socketDeadline = time.Now().Add(daemonStartupBudget(opts))
+				dialWait.reset()
 			}
-			if err := sleep(ctx, opts.backoff()); err != nil {
+			if err := dialWait.wait(ctx, derr); err != nil {
 				return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 			}
 			continue
@@ -408,6 +490,10 @@ func (cl *Client) connect(ctx context.Context) error {
 		if ack.ProtocolMajor != wingd.ProtocolMajor {
 			if wingd.ProtocolMajor > ack.ProtocolMajor {
 				cl.ack = ack
+				if !takeovers.spend(ack.BinaryVersion) {
+					cl.Close()
+					return takeoverExhausted(opts.Version, ack, takeovers.total)
+				}
 				cl.takeover(ctx, opts)
 				continue
 			}
@@ -416,6 +502,10 @@ func (cl *Client) connect(ctx context.Context) error {
 		}
 		if !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
 			cl.ack = ack
+			if !takeovers.spend(ack.BinaryVersion) {
+				cl.Close()
+				return takeoverExhausted(opts.Version, ack, takeovers.total)
+			}
 			cl.takeover(ctx, opts)
 			continue
 		}
@@ -424,7 +514,8 @@ func (cl *Client) connect(ctx context.Context) error {
 		}
 		if ack.Draining {
 			cl.Close()
-			if err := sleep(ctx, opts.backoff()); err != nil {
+			// safety: a drain finishes only when the last holder leaves, which can take as long as a run does, so this waits without a cap -- but with backoff, since re-dialing a draining daemon at full speed is the spin this loop must not become.
+			if err := drainWait.wait(ctx, errDaemonDraining); err != nil {
 				return err
 			}
 			continue

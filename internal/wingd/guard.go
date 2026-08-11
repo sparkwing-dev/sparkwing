@@ -13,6 +13,12 @@ import (
 
 const defaultGuardInterval = 100 * time.Millisecond
 
+// maxGuardInterval caps how far the guard sweep backs off while
+// inspection keeps failing. A failing kernel probe is retried, not
+// abandoned, but retrying it at full cadence turns one broken process
+// table into a daemon that burns a core doing nothing.
+const maxGuardInterval = 5 * time.Second
+
 // SessionGuardInspector is the kernel boundary behind durable guarded
 // admission. Every uncertain inspection returns an error so the daemon keeps
 // the claim rather than promoting overlapping work.
@@ -21,6 +27,15 @@ type SessionGuardInspector interface {
 	Quiescent(wingwire.ProcessSession) (bool, error)
 	Empty(wingwire.ProcessSession) (bool, error)
 	Terminate(wingwire.ProcessSession) error
+}
+
+// SessionGuardSnapshotInspector is the optional batch extension to
+// [SessionGuardInspector]. The daemon reconciles every guarded session
+// against one snapshot when its inspector offers one, so watching N
+// sessions costs one process-table listing per sweep instead of N. An
+// inspector that does not implement it is asked session by session.
+type SessionGuardSnapshotInspector interface {
+	EmptySnapshot() (func(wingwire.ProcessSession) (bool, error), error)
 }
 
 type processSessionInspector struct{}
@@ -42,6 +57,16 @@ func (processSessionInspector) Quiescent(session wingwire.ProcessSession) (bool,
 
 func (processSessionInspector) Empty(session wingwire.ProcessSession) (bool, error) {
 	return procgroup.SessionEmpty(procSessionIdentity(session))
+}
+
+func (processSessionInspector) EmptySnapshot() (func(wingwire.ProcessSession) (bool, error), error) {
+	table, err := procgroup.CaptureSessionTable()
+	if err != nil {
+		return nil, err
+	}
+	return func(session wingwire.ProcessSession) (bool, error) {
+		return table.SessionEmpty(procSessionIdentity(session))
+	}, nil
 }
 
 func (processSessionInspector) Terminate(session wingwire.ProcessSession) error {
@@ -225,29 +250,76 @@ func (d *Daemon) reconcilableGuardsLocked() []guardReconcileState {
 	return guards
 }
 
+// guardLoop sweeps guarded sessions at the configured interval and backs
+// the sweep off exponentially while inspection fails, so a process table
+// the daemon cannot read costs it a probe every few seconds rather than
+// ten a second. A successful sweep restores the full cadence, which is
+// what bounds how quickly an orphaned session is observed empty.
 func (d *Daemon) guardLoop(ctxDone <-chan struct{}) {
-	ticker := time.NewTicker(d.cfg.guardInterval())
-	defer ticker.Stop()
+	base := d.cfg.guardInterval()
+	delay := base
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
 	for {
 		select {
 		case <-ctxDone:
 			return
 		case <-d.quit:
 			return
-		case <-ticker.C:
-			d.reconcileGuards()
+		case <-timer.C:
+			if err := d.reconcileGuards(); err != nil {
+				delay = nextGuardDelay(delay, base)
+				d.cfg.logf("guard: %v; next sweep in %s", err, delay)
+			} else {
+				delay = base
+			}
+			timer.Reset(delay)
 		}
 	}
 }
 
-func (d *Daemon) reconcileGuards() {
+func nextGuardDelay(current, base time.Duration) time.Duration {
+	limit := maxGuardInterval
+	if base > limit {
+		limit = base
+	}
+	next := current * 2
+	if next < base {
+		next = base
+	}
+	if next > limit {
+		next = limit
+	}
+	return next
+}
+
+// reconcileGuards releases every guarded lease whose process session has
+// gone empty. The error it returns is the caller's signal to slow down,
+// so it reports only the failures that mean the kernel view itself is
+// unusable: a snapshot that could not be taken, or every guard in the
+// sweep failing. One broken guard among working ones is logged and left
+// to the next sweep at full cadence, because the daemon can still see the
+// machine and the other guarded runs are entitled to prompt release.
+func (d *Daemon) reconcileGuards() error {
 	d.mu.Lock()
 	guards := d.reconcilableGuardsLocked()
 	d.mu.Unlock()
+	if len(guards) == 0 {
+		return nil
+	}
+	sessionEmpty, err := d.guardEmptyProbe()
+	if err != nil {
+		return fmt.Errorf("snapshot guarded sessions: %w", err)
+	}
+	var failure error
+	failed := 0
 	for _, guard := range guards {
-		empty, err := d.guardInspector.Empty(guard.Session)
+		empty, err := sessionEmpty(guard.Session)
 		if err != nil {
-			d.cfg.logf("guard: inspect run %s: %v", guard.RunID, err)
+			failed++
+			if failure == nil {
+				failure = fmt.Errorf("inspect run %s: %w", guard.RunID, err)
+			}
 			continue
 		}
 		if !empty {
@@ -255,6 +327,23 @@ func (d *Daemon) reconcileGuards() {
 		}
 		d.completeEmptyGuard(guard)
 	}
+	if failed == len(guards) {
+		return failure
+	}
+	if failure != nil {
+		d.cfg.logf("guard: %v", failure)
+	}
+	return nil
+}
+
+// guardEmptyProbe returns the emptiness probe for one sweep: a snapshot
+// shared by every guarded session when the inspector supports one, else
+// the per-session inspection.
+func (d *Daemon) guardEmptyProbe() (func(wingwire.ProcessSession) (bool, error), error) {
+	if snapshotter, ok := d.guardInspector.(SessionGuardSnapshotInspector); ok {
+		return snapshotter.EmptySnapshot()
+	}
+	return d.guardInspector.Empty, nil
 }
 
 // releaseGuardDurably removes one guarded lease from durable state before

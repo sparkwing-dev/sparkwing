@@ -80,6 +80,66 @@ code change to unlock.
   reports submission, not outcome. Scripts that relied on the old always-zero
   exit need `|| true` to keep it.
 
+### Added
+
+- **wingd:** `SIGUSR1` makes the daemon write a full goroutine dump plus
+  a one-line count of its connections, holders, waiters, leases, and
+  guards to its log
+  (`~/.sparkwing/wingd/d.log`). A daemon that is burning CPU can now be
+  explained while it is still running -- `kill -USR1 <pid>`, then read
+  the log -- instead of only after the operator has killed the evidence.
+  POSIX only; Windows has no such signal.
+
+### Fixed
+
+- **wingd:** A daemon watching guarded runs no longer forks `ps` once per
+  guarded session per tick. Each sweep now takes a single kernel process
+  listing and judges every session -- membership and leader identity --
+  against that one view. On macOS the listing comes from `kern.proc.all`
+  rather than a `ps` fork: a full snapshot measured 0.7ms against 34ms on
+  a laptop with 669 processes, and the per-session identity lookups it
+  replaces are gone entirely. This is the largest contributor to the
+  reported case of a daemon pinned near 200% CPU while the queue appeared
+  hung.
+- **wingd:** Guard sweeps back off exponentially (to 5s) while the daemon
+  cannot read the process table at all, and return to full cadence on the
+  first success; a single guarded run whose inspection fails no longer
+  slows the sweep for the others, and a guarded leader that simply exits
+  between two observations is read as the answer it is rather than as a
+  failure. A process table the daemon cannot read used to be retried ten
+  times a second forever.
+- **wingd:** The `ps` listing -- used on Linux and other Unixes, and as
+  the macOS fallback -- is now bounded at two seconds, so a wedged `ps`
+  fails the inspection instead of blocking the daemon goroutine that
+  asked for it. A daemon that drops to that fallback says so once in its
+  log, since the fallback costs about fifty times more per listing and
+  rarely recovers. The post-`SIGKILL` wait for a process tree
+  to disappear backs off from 10ms to one second and logs once when it
+  slows down, so a descendant that cannot be killed costs about one
+  process-table read per second rather than a hundred.
+- **wingd:** Runs and CLI commands that lose their connection to the
+  daemon retry with capped exponential backoff and jitter instead of
+  reconnecting as fast as the socket allows. Every dropped connection
+  makes the daemon persist its state, so an unpaced client used to spin a
+  core on each side. Admission-critical exchanges (acquire, re-attach,
+  guard watch, cancel) still retry until they succeed or the caller gives
+  up; read-only ones (`sparkwing queue`, stats reset) now fail with a
+  clear error after ten attempts rather than retrying forever. The waits
+  inside connect -- for a spawned daemon's socket to appear, and for a
+  predecessor daemon to release the election during an upgrade -- are
+  paced the same way, keeping their thirty-second budgets while dialling
+  a few times a second instead of twenty.
+- **wingd:** A client that keeps finding the same older daemon gives up
+  after three takeover attempts, names both versions, and points at
+  `sparkwing daemon restart`, instead of draining and respawning in an
+  unbounded loop when the successor comes back as the version it
+  replaced. Meeting a different old daemon starts the budget again, so
+  losing a socket race to several predecessors is still resolved.
+- **wingd:** Frames the daemon sends a client are bounded by a ten-second
+  write deadline. A client that stops reading without closing its socket
+  is treated as gone rather than holding a daemon goroutine for as long
+  as it lives.
+
 ## [v0.25.0] - 2026-08-11
 ### Added
 
