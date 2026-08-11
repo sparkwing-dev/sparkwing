@@ -83,6 +83,17 @@ func TestExecReplaceRetainsHolderLock(t *testing.T) {
 	if err := target.Close(); err != nil {
 		t.Fatal(err)
 	}
+	sequence, err := enqueueCacheEntry(context.Background(), root, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryInfo, err := os.Stat(entry.entryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := markCacheQueueRecordCurrent(root, sequence, entryInfo.ModTime()); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
 	cmd.Env = append(os.Environ(),
