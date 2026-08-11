@@ -100,15 +100,18 @@ type ProductionSource interface {
 
 type ArtifactVerifier interface {
 	VerifyArtifact(context.Context, LandEvent) (Artifact, error)
+	AuthenticateArtifact(context.Context, LandEvent, Artifact) error
 }
 
 type HealthProbe interface {
 	Healthy(context.Context, Deployment) (HealthReceipt, error)
+	AuthenticateHealth(context.Context, Deployment, HealthReceipt) error
 }
 
 type FaultController interface {
 	InjectFailure(context.Context, Deployment) (Fault, error)
 	ObserveFailure(context.Context, Fault) (FailureReceipt, error)
+	AuthenticateFailure(context.Context, Fault, FailureReceipt) error
 	RemoveFailure(context.Context, CleanupRequest) (CleanupReceipt, error)
 }
 

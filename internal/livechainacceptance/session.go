@@ -136,6 +136,9 @@ func RunSession(ctx context.Context, seed SessionSeed, deps DurableDependencies)
 		if err := validateSessionPhase(session); err != nil {
 			return Proof{}, fmt.Errorf("validate acceptance session phase: %w", err)
 		}
+		if err := validateIntentAuthority(ctx, deps, session); err != nil {
+			return Proof{}, fmt.Errorf("authenticate acceptance session phase: %w", err)
+		}
 		if session.Phase == SessionComplete {
 			if err := validateCompleteSession(ctx, deps, session); err != nil {
 				return Proof{}, err
@@ -229,6 +232,81 @@ func RunSession(ctx context.Context, seed SessionSeed, deps DurableDependencies)
 			return Proof{}, fmt.Errorf("persist acceptance transition: %w", err)
 		}
 	}
+}
+
+func validateIntentAuthority(ctx context.Context, deps DurableDependencies, session Session) error {
+	switch session.Phase {
+	case SessionADeployIntent:
+		return reverifyPreparedFlow(ctx, deps, session, 0)
+	case SessionANotifyIntent:
+		if err := reconcilePriorEffect(ctx, deps.Effects, session, EffectDeployA); err != nil {
+			return err
+		}
+		return reverifyHealth(ctx, deps.Health, session.Proof.Deployments[0], session.Proof.Health[0])
+	case SessionBDeployIntent:
+		return reverifyPreparedFlow(ctx, deps, session, 1)
+	case SessionBNotifyIntent:
+		if err := reconcilePriorEffect(ctx, deps.Effects, session, EffectDeployB); err != nil {
+			return err
+		}
+		return reverifyHealth(ctx, deps.Health, session.Proof.Deployments[1], session.Proof.Health[1])
+	case SessionFaultIntent:
+		return reconcilePriorEffect(ctx, deps.Effects, session, EffectNotifyAcceptedB)
+	case SessionFailureNotifyIntent:
+		return deps.Faults.AuthenticateFailure(ctx, session.Proof.Fault, session.Proof.Failure)
+	case SessionCleanupIntent:
+		if session.Proof.Fault.ID != "" {
+			if err := reconcilePriorEffect(ctx, deps.Effects, session, EffectInjectFailure); err != nil {
+				return err
+			}
+		}
+		if session.Proof.FailureNotice.RequestID != "" {
+			return reconcilePriorEffect(ctx, deps.Effects, session, EffectNotifyFailure)
+		}
+	case SessionRollbackIntent:
+		return reconcilePriorEffect(ctx, deps.Effects, session, EffectRemoveFailure)
+	case SessionRollbackNotifyIntent:
+		if err := reconcilePriorEffect(ctx, deps.Effects, session, EffectRollback); err != nil {
+			return err
+		}
+		return reverifyHealth(ctx, deps.Health, session.Proof.Rollback, session.Proof.RollbackHealth)
+	}
+	return nil
+}
+
+func reverifyPreparedFlow(ctx context.Context, deps DurableDependencies, session Session, index int) error {
+	event := session.Events[index]
+	stored := session.Proof.Production[index]
+	verified, err := VerifySelectedChain(ctx, deps.Authority, event, stored.Acknowledgements)
+	if err != nil {
+		return fmt.Errorf("reverify production chain %d: %w", index, err)
+	}
+	if !reflect.DeepEqual(verified, stored) {
+		return fmt.Errorf("production chain %d differs from durable session", index)
+	}
+	if err := deps.Artifacts.AuthenticateArtifact(ctx, event, session.Proof.Artifacts[index]); err != nil {
+		return fmt.Errorf("authenticate artifact %d: %w", index, err)
+	}
+	return nil
+}
+
+func reverifyHealth(ctx context.Context, health HealthProbe, deployment Deployment, stored HealthReceipt) error {
+	return health.AuthenticateHealth(ctx, deployment, stored)
+}
+
+func reconcilePriorEffect(ctx context.Context, effects EffectExecutor, session Session, kind EffectKind) error {
+	request := effectRequest(session, kind)
+	result, found, err := effects.Reconcile(ctx, request)
+	if err != nil {
+		return fmt.Errorf("reconcile prerequisite effect %s: %w", kind, err)
+	}
+	if !found {
+		return fmt.Errorf("prerequisite effect %s is absent", kind)
+	}
+	if !reflect.DeepEqual(result, completedEffectResult(session, kind)) {
+		return fmt.Errorf("prerequisite effect %s differs from durable session", kind)
+	}
+	return nil
 }
 
 func validateSessionPhase(session Session) error {
@@ -342,6 +420,9 @@ func validateCompleteSession(ctx context.Context, deps DurableDependencies, sess
 		if artifact.EventID != event.EventID || artifact.Commit != event.Commit || artifact.Tree != event.Tree || artifact.Digest != event.ArtifactManifestDigest || !artifact.VerifiedAt.After(stored.SuccessAt) {
 			return fmt.Errorf("completed artifact %d differs from production identity", index)
 		}
+		if err := deps.Artifacts.AuthenticateArtifact(ctx, event, artifact); err != nil {
+			return fmt.Errorf("reauthenticate completed artifact %d: %w", index, err)
+		}
 		deployment := session.Proof.Deployments[index]
 		if err := validateDeployment(artifact, deployment, artifact.VerifiedAt); err != nil {
 			return err
@@ -349,12 +430,18 @@ func validateCompleteSession(ctx context.Context, deps DurableDependencies, sess
 		if err := validateHealthReceipt(deployment, session.Proof.Health[index]); err != nil {
 			return err
 		}
+		if err := deps.Health.AuthenticateHealth(ctx, deployment, session.Proof.Health[index]); err != nil {
+			return fmt.Errorf("reauthenticate completed health %d: %w", index, err)
+		}
 		if err := validateNotificationReceipt(acceptedNotification(session, index), session.Proof.Notifications[index]); err != nil {
 			return err
 		}
 	}
 	if err := validateFailureReceipt(session.Proof.Fault, session.Proof.Failure); err != nil {
 		return err
+	}
+	if err := deps.Faults.AuthenticateFailure(ctx, session.Proof.Fault, session.Proof.Failure); err != nil {
+		return fmt.Errorf("reauthenticate completed failure: %w", err)
 	}
 	if err := validateNotificationReceipt(failureNotification(session), session.Proof.FailureNotice); err != nil {
 		return err
@@ -370,6 +457,9 @@ func validateCompleteSession(ctx context.Context, deps DurableDependencies, sess
 	}
 	if err := validateHealthReceipt(session.Proof.Rollback, session.Proof.RollbackHealth); err != nil {
 		return err
+	}
+	if err := deps.Health.AuthenticateHealth(ctx, session.Proof.Rollback, session.Proof.RollbackHealth); err != nil {
+		return fmt.Errorf("reauthenticate completed rollback health: %w", err)
 	}
 	if err := validateNotificationReceipt(rollbackNotification(session), session.Proof.RollbackNotice); err != nil {
 		return err
