@@ -62,14 +62,9 @@ func (r *InProcessRunner) SetLabels(labels []string) {
 }
 
 var (
-	_ runner.Runner                = (*InProcessRunner)(nil)
-	_ runner.DownstreamCoordinator = (*InProcessRunner)(nil)
-	_ runner.LabelAdvertiser       = (*InProcessRunner)(nil)
+	_ runner.Runner          = (*InProcessRunner)(nil)
+	_ runner.LabelAdvertiser = (*InProcessRunner)(nil)
 )
-
-// CoordinatesDownstream reports that this runner already owns cache,
-// concurrency, and local admission for the node it executes.
-func (*InProcessRunner) CoordinatesDownstream() {}
 
 // runJobBody executes the node's materialized Work as a step DAG.
 // Returns the typed output of the *WorkStep the Job's Work returned
@@ -123,20 +118,65 @@ func (s stateMetricsSink) Push(ctx context.Context, sample nodemetrics.Sample) e
 // RunNode executes one node to a terminal outcome. ctx carries the
 // ref resolver and propagates cancellation to job + hooks + SkipIf.
 func (r *InProcessRunner) RunNode(ctx context.Context, req runner.Request) runner.Result {
-	return r.runCoordinated(ctx, req, r.executeInProcess)
-}
+	node := req.Node
+	if node == nil {
+		return runner.Result{
+			Outcome: sparkwing.Failed,
+			Err:     fmt.Errorf("InProcessRunner: Request.Node is nil for %s/%s", req.RunID, req.NodeID),
+		}
+	}
 
-func (r *InProcessRunner) executeInProcess(ctx context.Context, req runner.Request) runner.Result {
-	output, err := r.executeNode(ctx, req.RunID, req.Node, req.Delegate)
+	if result, handled := r.runNodeWithCache(ctx, req); handled {
+		return result
+	}
+
+	if reason, skip := evalSkipPredicates(ctx, node); skip {
+		r.markSkipped(ctx, req.RunID, node.ID(), reason)
+		return runner.Result{Outcome: sparkwing.Skipped}
+	}
+
+	output, err := r.executeNodeWithAdmission(ctx, req)
 	if err != nil {
 		nodeID := req.NodeID
 		if nodeID == "" {
-			nodeID = req.Node.ID()
+			nodeID = node.ID()
 		}
 		r.markFailedIfUnfinished(ctx, req.RunID, nodeID, err)
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
 	return runner.Result{Outcome: sparkwing.Success, Output: output}
+}
+
+func (r *InProcessRunner) executeNodeWithAdmission(ctx context.Context, req runner.Request) (any, error) {
+	la, _, hostAdmitted := localAdmissionFromContext(ctx)
+	if la == nil || hostAdmitted {
+		return r.executeNode(ctx, req.RunID, req.Node, req.Delegate)
+	}
+	nodeID := req.NodeID
+	if nodeID == "" {
+		nodeID = req.Node.ID()
+	}
+	if req.ReleaseWorkerSlot != nil {
+		req.ReleaseWorkerSlot()
+	}
+	priority := localAdmissionPriorityFromContext(ctx)
+	lease, err := la.admitNode(ctx, r.backends, req.Pipeline, req.RunID, nodeID, req.Node, priority)
+	if req.ReacquireWorkerSlot != nil && !req.ReacquireWorkerSlot() {
+		if lease != nil {
+			lease.release()
+		}
+		return nil, ctx.Err()
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer lease.release()
+	childToken := localAdmissionChildTokenFromContext(ctx)
+	if childToken == "" {
+		childToken = lease.token
+	}
+	nodeCtx := withLocalAdmission(ctx, la, lease.token, childToken, lease.hostAdmitted, priority)
+	return r.executeNode(nodeCtx, req.RunID, req.Node, req.Delegate)
 }
 
 // executeNode runs the job with modifiers + hooks and persists state.

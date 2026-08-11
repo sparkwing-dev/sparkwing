@@ -155,11 +155,6 @@ func New(kcli kubernetes.Interface, ctrl *client.Client, cfg Config, logger *slo
 }
 
 var _ runner.Runner = (*Runner)(nil)
-var _ runner.DownstreamCoordinator = (*Runner)(nil)
-
-// CoordinatesDownstream reports that the run-node process inside the Job owns
-// cache and concurrency coordination for the reconstructed node.
-func (*Runner) CoordinatesDownstream() {}
 
 // RunNode is the runner.Runner entry point. Creates the Job, polls
 // until it terminates, reads the terminal node row from the

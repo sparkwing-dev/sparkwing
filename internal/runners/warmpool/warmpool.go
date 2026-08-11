@@ -79,11 +79,6 @@ func New(ctrl *client.Client, fallback runner.Runner, cfg Config, logger *slog.L
 }
 
 var _ runner.Runner = (*Runner)(nil)
-var _ runner.DownstreamCoordinator = (*Runner)(nil)
-
-// CoordinatesDownstream reports that the claiming pool process owns cache and
-// concurrency coordination for the reconstructed node.
-func (*Runner) CoordinatesDownstream() {}
 
 // RunNode releases the node to the pool and waits for its terminal
 // state. Session 3's scope: the orchestrator remains the authority

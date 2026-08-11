@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.25.0] - 2026-08-11
 ### Added
 
 - **cache:** `sparkwing cache info` and `sparkwing cache prune` inspect and trim
