@@ -1229,6 +1229,12 @@ the trigger is registered (the trigger POST itself always
 completes before the command exits, so the run is guaranteed
 queued).
 
+A follow exits on the run's outcome, matching a local run:
+0 when the run succeeded, 1 when it failed or was cancelled
+(with the failing nodes printed), and 3 when the follow ended
+without a readable terminal status. --detach exits 0 once the
+trigger is queued -- it reports submission, not outcome.
+
 Any flag not recognized here is forwarded to the pipeline as a
 typed Arg, e.g. 'sparkwing pipeline trigger release --profile
 prod --version v1.2.3' passes --version through to the trigger

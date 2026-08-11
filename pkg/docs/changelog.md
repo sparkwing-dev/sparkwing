@@ -49,6 +49,19 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cli:** `sparkwing pipeline trigger` without `--detach` now exits on the
+  triggered run's outcome instead of always exiting 0. The follow ended when the
+  run reached a terminal state but never read its status, so a failed remote run
+  printed no failure and reported success to the CI job or script wrapping it.
+  Exit codes now match a local `sparkwing run`: 0 for success, 1 for failed or
+  cancelled (with the run's status block and failing-node errors printed to
+  stderr, so piped log output stays clean), and 3 when the follow ends without a
+  readable terminal status rather than guessing an outcome. `--detach` is
+  unchanged -- it reports submission, not outcome. Scripts that relied on the old
+  always-zero exit need `|| true` to keep it.
+
 ## [v0.25.0] - 2026-08-11
 ### Added
 
