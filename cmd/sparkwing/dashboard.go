@@ -67,11 +67,16 @@ type dashboardPaths struct {
 	log  string
 }
 
+// resolveDashboardPaths roots the dashboard's pid and log files at the
+// --home flag when given, and otherwise at the canonical resolution.
+//
+// It does not read SPARKWING_HOME itself. DefaultPaths already gives
+// that variable first refusal and returns its value verbatim, so the
+// direct read this replaces changed nothing for a real run -- but it
+// did skip the test-sandbox redirect underneath, which is the whole
+// reason the resolution is centralized.
 func resolveDashboardPaths(homeOverride string) (dashboardPaths, error) {
 	home := homeOverride
-	if home == "" {
-		home = os.Getenv("SPARKWING_HOME")
-	}
 	if home == "" {
 		paths, err := orchestrator.DefaultPaths()
 		if err != nil {

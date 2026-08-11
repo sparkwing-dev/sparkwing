@@ -499,3 +499,89 @@ func stepWaitsOn(w *sparkwing.Work, step, dep string) bool {
 	}
 	return false
 }
+
+// homeEnvViolation is a direct read of the sparkwing home variable,
+// spelled with a join so this file does not itself carry the pattern the
+// gate refuses. Written out it is the real thing, which is what makes it
+// a fixture rather than an approximation.
+const homeEnvViolation = "package internal\n\nimport \"os\"\n\n" +
+	"func Home() string { return os.Getenv(\"SPARKWING_" + "HOME\") }\n"
+
+// The gate has to refuse a fresh bypass, or it is decoration. This is
+// the exact shape internal/bincache carried: a package resolving the
+// home from the environment itself, which reads correctly for every real
+// run and quietly hands a test binary the developer's own ~/.sparkwing.
+func TestHomeResolutionRefusesADirectEnvironmentRead(t *testing.T) {
+	root := gateFixtureRepo(t)
+	ctx := context.Background()
+
+	if err := checkHomeResolution(ctx); err != nil {
+		t.Fatalf("the clean fixture must pass, or the failure below proves nothing: %v", err)
+	}
+
+	writeGoFile(t, filepath.Join(root, "internal", "bypass.go"), homeEnvViolation)
+	gitAddAll(t, root)
+
+	err := checkHomeResolution(ctx)
+	if err == nil {
+		t.Fatal("the gate passed a direct read of the sparkwing home variable")
+	}
+	if !strings.Contains(err.Error(), "paths.DefaultPaths") {
+		t.Errorf("the failure does not name the call that fixes it: %v", err)
+	}
+	if !strings.Contains(err.Error(), "internal/bypass.go") {
+		t.Errorf("the failure does not name the offending file: %v", err)
+	}
+	for allowed := range homeResolutionAllowed {
+		if !strings.Contains(err.Error(), allowed) {
+			t.Errorf("the failure does not list the allowlisted file %s: %v", allowed, err)
+		}
+	}
+}
+
+// The allowlist has to actually exempt its entries, and it has to key on
+// the path rather than on anything about the content, so an entry keeps
+// working when the file around it is edited.
+func TestHomeResolutionExemptsTheAllowlist(t *testing.T) {
+	root := gateFixtureRepo(t)
+	ctx := context.Background()
+
+	for allowed := range homeResolutionAllowed {
+		writeGoFile(t, filepath.Join(root, allowed), homeEnvViolation)
+	}
+	gitAddAll(t, root)
+
+	if err := checkHomeResolution(ctx); err != nil {
+		t.Fatalf("the gate refused an allowlisted file: %v", err)
+	}
+}
+
+// Three exemptions the gate has to hold, each for its own reason: a test
+// reading the variable is asserting something about it, .sparkwing/ is a
+// separate module that cannot import internal/paths at all, and setting
+// the variable is the isolation this rule exists to make reliable.
+func TestHomeResolutionExemptions(t *testing.T) {
+	setter := "package internal\n\nimport \"testing\"\n\n" +
+		"func Isolate(t *testing.T) { t.Setenv(\"SPARKWING_" + "HOME\", t.TempDir()) }\n"
+
+	cases := []struct {
+		name string
+		path string
+		body string
+	}{
+		{"a test reading the variable", filepath.Join("internal", "probe_test.go"), homeEnvViolation},
+		{"the pipeline module", filepath.Join(".sparkwing", "job.go"), homeEnvViolation},
+		{"setting the variable in product code", filepath.Join("internal", "isolate.go"), setter},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			root := gateFixtureRepo(t)
+			writeGoFile(t, filepath.Join(root, tc.path), tc.body)
+			gitAddAll(t, root)
+
+			if err := checkHomeResolution(context.Background()); err != nil {
+				t.Errorf("the gate refused %s: %v", tc.name, err)
+			}
+		})
+	}
+}
