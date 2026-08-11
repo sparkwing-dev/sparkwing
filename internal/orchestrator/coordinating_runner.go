@@ -77,11 +77,11 @@ func (r *InProcessRunner) executeWithLocalAdmission(ctx context.Context, req run
 		if lease != nil {
 			lease.release()
 		}
-		r.markFailed(ctx, req.RunID, nodeID, ctx.Err())
+		r.markFailedIfUnfinished(ctx, req.RunID, nodeID, ctx.Err())
 		return runner.Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
 	}
 	if err != nil {
-		r.markFailed(ctx, req.RunID, nodeID, err)
+		r.markFailedIfUnfinished(ctx, req.RunID, nodeID, err)
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	}
 	defer lease.release()
