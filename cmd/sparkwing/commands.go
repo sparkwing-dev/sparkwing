@@ -21,11 +21,12 @@ import (
 // Adding a new Command means adding it here too -- the
 // TestAllCommandsAreRegistered guard test fails CI if anyone forgets.
 var allCommands = []*Command{
-	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueExec, &cmdCache, &cmdCacheStatus, &cmdCachePrune, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonRecoverState, &cmdUpdate, &cmdVersion, &cmdVersionUpdate, &cmdVersionHold, &cmdRun, &cmdRunConfig,
+	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueExec, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonRecoverState, &cmdUpdate, &cmdVersion, &cmdVersionUpdate, &cmdVersionHold, &cmdRun, &cmdRunConfig,
 	&cmdConfigure, &cmdConfigureInit,
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsGuides, &cmdDocsAll, &cmdDocsSearch,
 	&cmdDocsMigrations, &cmdDocsMigrationsList, &cmdDocsMigrationsRead, &cmdDocsMigrationsBetween,
 	&cmdDocsVersions, &cmdDocsCache, &cmdDocsCacheInfo, &cmdDocsCacheClear,
+	&cmdCache, &cmdCacheInfo, &cmdCachePrune, &cmdCacheExplain,
 	&cmdDebug, &cmdDebugRun, &cmdDebugRelease, &cmdDebugAttach,
 	&cmdDebugRerun, &cmdDebugReplay, &cmdDebugEnv,
 	&cmdPipeline, &cmdPipelineList, &cmdPipelineDescribe, &cmdPipelineDiscover,

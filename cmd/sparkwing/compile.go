@@ -30,7 +30,7 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
 	}
 
-	key, err := bincache.PipelineCacheKey(sparkwingDir)
+	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir)
 	if err != nil {
 		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
 	}
@@ -86,20 +86,36 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 			}
 		}
 	}
-	ensureDescribeCache(sparkwingDir, lease.Path())
+	lease.RecordUse(sparkwingDir, keyParts)
+	if published {
+		pruneCache()
+	}
+	ensureDescribeCache(sparkwingDir, key, lease.Path())
 	env = append(env, "SPARKWING_BINARY_SOURCE="+source)
 	return lease.ExecReplace(args, sparkwingDir, env)
+}
+
+// pruneCache trims the compiled-binary cache after publication. Failures are
+// swallowed because a cache optimization cannot own the pipeline result.
+func pruneCache() {
+	result, err := bincache.PruneToConfiguredLimits(context.Background())
+	if err != nil {
+		slog.Default().Debug("pipeline cache prune failed", "err", err)
+		return
+	}
+	if result.Reclaimed > 0 {
+		slog.Default().Debug("pruned pipeline cache",
+			"removed", result.Reclaimed, "removed_bytes", result.RemovedBytes,
+			"observed_capacity_bytes", result.ReclaimedBytes,
+			"examined", result.Examined, "active", result.Active, "busy", result.Busy)
+	}
 }
 
 // ensureDescribeCache writes the describe-cache file if it's missing
 // for the current PipelineCacheKey. Failures are logged at debug-
 // level and swallowed -- the cache is a perf optimization, not a
 // correctness gate on the pipeline run.
-func ensureDescribeCache(sparkwingDir, binPath string) {
-	key, err := bincache.PipelineCacheKey(sparkwingDir)
-	if err != nil {
-		return
-	}
+func ensureDescribeCache(sparkwingDir, key, binPath string) {
 	if _, err := os.Stat(describeCachePath(key)); err == nil {
 		return
 	}

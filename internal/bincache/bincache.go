@@ -35,6 +35,7 @@ import (
 	"time"
 
 	"golang.org/x/mod/modfile"
+	"golang.org/x/mod/module"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -583,7 +584,13 @@ func CompilePipeline(sparkwingDir, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	args := []string{"build"}
+	// -trimpath keeps the build directory out of the output. Without
+	// it two checkouts of one commit compile to different bytes, so a
+	// cache key shared between them would be a lie: the second checkout
+	// would run a binary carrying the first one's absolute paths. The
+	// cost is that panics and runtime.Caller report module-relative
+	// paths rather than paths on this machine.
+	args := []string{"build", "-trimpath"}
 	env := os.Environ()
 	overlay := overlayModfilePath(sparkwingDir)
 	work, workPresent := goWorkInScope(sparkwingDir)
@@ -741,45 +748,111 @@ func PipelineCacheKey(sparkwingDir string) (string, error) {
 // covering workspace the walk is skipped entirely and the key stays a
 // hash of the module tree, go.mod, and the overlays.
 func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, error) {
-	h := sha256.New()
-
-	fmt.Fprintf(h, "go:%s\n", goMajorMinor())
-	fmt.Fprintf(h, "arch:%s/%s\n", goos, goarch)
-
-	if err := hashDirInto(h, sparkwingDir, allFiles); err != nil {
+	parts, err := keyParts(sparkwingDir, goos, goarch)
+	if err != nil {
 		return "", err
 	}
+	return foldKey(parts), nil
+}
+
+// KeyPart is one labeled input to the cache key. Splitting the key into
+// named parts is what lets `sparkwing cache explain` say which input
+// changed, instead of reporting that an opaque hash moved.
+type KeyPart struct {
+	Label  string // what this input is, e.g. "module tree" or a module path
+	Digest string // sha256 of this part alone, for comparing across builds
+	Detail string // human note: file counts, sizes, what was excluded
+	// material is the exact bytes folded into the key. Parts carry it so
+	// the explanation and the key are computed from one source and
+	// cannot drift apart.
+	material []byte
+}
+
+// foldKey concatenates the parts' material in order and takes the
+// leading 16 hex digits, split for readability.
+func foldKey(parts []KeyPart) string {
+	h := sha256.New()
+	for _, p := range parts {
+		h.Write(p.material)
+	}
+	raw := fmt.Sprintf("%x", h.Sum(nil))
+	return raw[:8] + "-" + raw[8:16]
+}
+
+func digestOf(b []byte) string {
+	sum := sha256.Sum256(b)
+	return fmt.Sprintf("%x", sum[:])[:12]
+}
+
+// ExplainCacheKey returns the key together with the inputs that produced
+// it, so an operator can see why a rebuild happened without reading the
+// source of this package.
+func ExplainCacheKey(sparkwingDir string) (string, []KeyPart, error) {
+	parts, err := keyParts(sparkwingDir, runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return "", nil, err
+	}
+	return foldKey(parts), parts, nil
+}
+
+// keyParts builds the ordered inputs to the cache key. The concatenated
+// material is the hashed preimage, so changing what is appended here
+// changes the key.
+func keyParts(sparkwingDir, goos, goarch string) ([]KeyPart, error) {
+	var parts []KeyPart
+	add := func(label, detail string, material []byte) {
+		parts = append(parts, KeyPart{
+			Label: label, Detail: detail,
+			Digest: digestOf(material), material: material,
+		})
+	}
+
+	add("go toolchain", goMajorMinor(), []byte(fmt.Sprintf("go:%s\n", goMajorMinor())))
+	add("platform", goos+"/"+goarch, []byte(fmt.Sprintf("arch:%s/%s\n", goos, goarch)))
+
+	var moduleBuf bytes.Buffer
+	moduleStats, err := hashDirIntoCounted(&moduleBuf, sparkwingDir, allFiles)
+	if err != nil {
+		return nil, err
+	}
+	add("module tree", moduleStats.String(), moduleBuf.Bytes())
 
 	goModPath := filepath.Join(sparkwingDir, "go.mod")
 	replaceTargets, err := localReplaceTargets(goModPath)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	workTargets, workFile, err := localWorkspaceTargets(sparkwingDir)
+	workTargets, workSummary, err := localWorkspaceTargets(sparkwingDir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	if workFile != "" {
-		data, err := os.ReadFile(workFile)
-		if err != nil {
-			return "", err
-		}
-		fmt.Fprint(h, "go.work:")
-		h.Write(data)
-		fmt.Fprintln(h)
+	if workSummary != "" {
+		add("go.work", "normalized directives", []byte(workSummary))
 	}
+
 	replaceTargets = append(replaceTargets, workTargets...)
-	sort.Strings(replaceTargets)
-	var last string
+	sort.Slice(replaceTargets, func(i, j int) bool {
+		if replaceTargets[i].Label != replaceTargets[j].Label {
+			return replaceTargets[i].Label < replaceTargets[j].Label
+		}
+		return replaceTargets[i].Dir < replaceTargets[j].Dir
+	})
+	var last replaceTarget
 	for _, t := range replaceTargets {
 		if t == last {
 			continue
 		}
 		last = t
-		fmt.Fprintf(h, "replace:%s\n", t)
-		if err := hashDirInto(h, t, allFiles); err != nil {
-			return "", err
+		var buf bytes.Buffer
+		// Only the label reaches the digest. The directory is read for
+		// content below but never recorded, so the same module at a
+		// different path still yields the same key.
+		fmt.Fprintf(&buf, "replace:%s\n", t.Label)
+		stats, err := hashDirIntoCounted(&buf, t.Dir, allFiles)
+		if err != nil {
+			return nil, err
 		}
+		add("replace "+t.Label, stats.String()+" from "+t.Dir, buf.Bytes())
 	}
 
 	for _, overlay := range []struct {
@@ -795,15 +868,16 @@ func PipelineCacheKeyForPlatform(sparkwingDir, goos, goarch string) (string, err
 			if os.IsNotExist(err) {
 				continue
 			}
-			return "", err
+			return nil, err
 		}
-		fmt.Fprint(h, overlay.prefix)
-		h.Write(data)
-		fmt.Fprintln(h)
+		var buf bytes.Buffer
+		fmt.Fprint(&buf, overlay.prefix)
+		buf.Write(data)
+		fmt.Fprintln(&buf)
+		add(overlay.name, "resolved module pins", buf.Bytes())
 	}
 
-	raw := fmt.Sprintf("%x", h.Sum(nil))
-	return raw[:8] + "-" + raw[8:16], nil
+	return parts, nil
 }
 
 // ExecReplace replaces the current process image with the target
@@ -867,42 +941,151 @@ func goMajorMinor() string {
 	return v
 }
 
+// hashDirInto folds every build-relevant file under dir into h as
+// "<path relative to dir>\x00<sha256 of contents>". Paths are relative
+// and digests are content-only -- no mtime, size, or inode -- so two
+// checkouts holding identical files produce identical bytes here
+// regardless of where they sit on disk.
+//
+// Files git ignores are skipped; see [ignoredUnder] for why that is
+// what makes the result portable rather than merely cheaper.
 func hashDirInto(h io.Writer, dir string, keep fileFilter) error {
-	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+	_, err := hashDirIntoCounted(h, dir, keep)
+	return err
+}
+
+// HashStats describes what a directory contributed to the key. It is
+// reported by `sparkwing cache explain` so the exclusion of gitignored
+// files is visible rather than a silent surprise when an edit fails to
+// trigger a rebuild.
+type HashStats struct {
+	Files   int   // files hashed
+	Bytes   int64 // their total size
+	Ignored int   // files skipped because git ignores them
+}
+
+func (s HashStats) String() string {
+	base := fmt.Sprintf("%d files, %s", s.Files, humanSize(s.Bytes))
+	if s.Ignored > 0 {
+		base += fmt.Sprintf(" (%d gitignored, excluded)", s.Ignored)
+	}
+	return base
+}
+
+// humanSize renders a byte count compactly for explain output.
+func humanSize(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for cur := n / unit; cur >= unit && exp < 3; cur /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGT"[exp])
+}
+
+// hashDirIntoCounted is hashDirInto with a report of what it covered.
+func hashDirIntoCounted(h io.Writer, dir string, keep fileFilter) (HashStats, error) {
+	var stats HashStats
+	files, err := walkHashable(dir, keep)
+	if err != nil {
+		return stats, err
+	}
+	ignored := ignoredUnder(dir, files)
+	for _, path := range files {
+		if ignored[path] {
+			stats.Ignored++
+			continue
+		}
+		rel, _ := filepath.Rel(dir, path)
+		f, err := os.Open(path)
+		if err != nil {
+			return stats, err
+		}
+		fileH := sha256.New()
+		n, copyErr := io.Copy(fileH, f)
+		f.Close()
+		if copyErr != nil {
+			return stats, copyErr
+		}
+		stats.Files++
+		stats.Bytes += n
+		fmt.Fprintf(h, "%s\x00%x\n", rel, fileH.Sum(nil))
+	}
+	return stats, nil
+}
+
+// walkHashable lists the files under dir that keep admits, in the
+// lexical order [filepath.WalkDir] guarantees, so the digest a caller
+// builds from them is stable. Reading contents is deferred to the
+// caller because the ignore check is one batched call over the whole
+// list, and skipping a file is far cheaper than opening it.
+func walkHashable(dir string, keep fileFilter) ([]string, error) {
+	var files []string
+	err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		name := d.Name()
 		if d.IsDir() {
-			switch name {
+			switch d.Name() {
 			case "node_modules", ".git", ".claude-scratch", "web":
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if !keep(name) {
+		if !keep(d.Name()) {
 			return nil
 		}
-		rel, _ := filepath.Rel(dir, path)
-		f, err := os.Open(path)
-		if err != nil {
-			return err
-		}
-		fileH := sha256.New()
-		_, copyErr := io.Copy(fileH, f)
-		f.Close()
-		if copyErr != nil {
-			return copyErr
-		}
-		fmt.Fprintf(h, "%s\x00%x\n", rel, fileH.Sum(nil))
+		files = append(files, path)
 		return nil
 	})
+	return files, err
 }
 
-// localReplaceTargets returns absolute paths of every local-path
-// replace directive in go.mod. Remote replaces are ignored (the go.mod
-// hash already covers them).
-func localReplaceTargets(goModPath string) ([]string, error) {
+// replaceTarget is one local module folded into the cache key. Label is
+// the module identity recorded in the digest; Dir is where that module
+// happens to live on this machine and is read for content but never
+// written into the key. Keeping the two apart is what lets two
+// checkouts of one commit agree on a key from different paths.
+type replaceTarget struct {
+	Label string
+	Dir   string
+}
+
+// replaceLabel renders a replaced module's identity. The version is
+// part of it because `replace foo v1.2.3 => ./foo` and a blanket
+// `replace foo => ./foo` are different directives and must not collide.
+func replaceLabel(old module.Version) string {
+	if old.Version == "" {
+		return old.Path
+	}
+	return old.Path + "@" + old.Version
+}
+
+// moduleLabelOf reads the module path declared by dir's own go.mod. A
+// workspace `use` directive names a directory rather than a module, so
+// this is how such a target acquires a portable identity. Use.ModulePath
+// is deliberately not consulted: it is documented as the path found in a
+// comment and is not reliably populated.
+func moduleLabelOf(dir string) (string, error) {
+	p := filepath.Join(dir, "go.mod")
+	data, err := os.ReadFile(p)
+	if err != nil {
+		return "", fmt.Errorf("workspace module %s: %w", dir, err)
+	}
+	path := modfile.ModulePath(data)
+	if path == "" {
+		return "", fmt.Errorf("workspace module %s: no module directive in go.mod", dir)
+	}
+	return path, nil
+}
+
+// localReplaceTargets returns every local-path replace directive in
+// go.mod, labeled by the module it replaces. Remote replaces are
+// ignored (the go.mod hash already covers them).
+func localReplaceTargets(goModPath string) ([]replaceTarget, error) {
 	data, err := os.ReadFile(goModPath)
 	if err != nil {
 		return nil, err
@@ -912,7 +1095,7 @@ func localReplaceTargets(goModPath string) ([]string, error) {
 		return nil, err
 	}
 	dir := filepath.Dir(goModPath)
-	var out []string
+	var out []replaceTarget
 	for _, r := range mf.Replace {
 		np := r.New.Path
 		if np == "" || !isLocalPath(np) {
@@ -922,7 +1105,7 @@ func localReplaceTargets(goModPath string) ([]string, error) {
 		if !filepath.IsAbs(abs) {
 			abs = filepath.Clean(filepath.Join(dir, np))
 		}
-		out = append(out, abs)
+		out = append(out, replaceTarget{Label: replaceLabel(r.Old), Dir: abs})
 	}
 	return out, nil
 }
@@ -931,16 +1114,24 @@ func isLocalPath(p string) bool {
 	return strings.HasPrefix(p, ".") || strings.HasPrefix(p, "/")
 }
 
-// localWorkspaceTargets returns the local module directories an
-// in-scope go.work contributes to the pipeline build -- its `use`
-// modules and any filesystem-path `replace` targets -- along with the
-// go.work file itself so its own contents fold into the key. It mirrors
+// localWorkspaceTargets returns the local modules an in-scope go.work
+// contributes to the pipeline build -- its `use` modules and any
+// filesystem-path `replace` targets -- along with a normalized summary
+// of the workspace's own build-affecting directives. It mirrors
 // CompilePipeline's workspace decision: a workspace that does not cover
 // sparkwingDir is ignored (the build disables it via GOWORK=off), and
 // sparkwingDir itself is excluded because the caller already hashes it.
 // When no workspace applies, both results are empty and the caller's
 // no-replace fast path is untouched.
-func localWorkspaceTargets(sparkwingDir string) (dirs []string, workFile string, err error) {
+//
+// The summary is normalized rather than a hash of the file's bytes so
+// that comments, directive order, and the spelling of a `use` path --
+// all of which differ between two checkouts of one commit -- do not
+// perturb the key. It enumerates every field [modfile.WorkFile] carries
+// (Go, Toolchain, Godebug, Use, Replace); hashing raw bytes covered
+// those by accident, so anything omitted here silently stops
+// invalidating the cache.
+func localWorkspaceTargets(sparkwingDir string) (targets []replaceTarget, summary string, err error) {
 	work, ok := goWorkInScope(sparkwingDir)
 	if !ok || !goWorkCovers(work, sparkwingDir) {
 		return nil, "", nil
@@ -959,9 +1150,10 @@ func localWorkspaceTargets(sparkwingDir string) (dirs []string, workFile string,
 	}
 	absSparkwing = filepath.Clean(absSparkwing)
 	workDir := filepath.Dir(work)
-	add := func(p string) {
+
+	resolve := func(p string) string {
 		if p == "" {
-			return
+			return ""
 		}
 		abs := p
 		if !filepath.IsAbs(abs) {
@@ -969,17 +1161,66 @@ func localWorkspaceTargets(sparkwingDir string) (dirs []string, workFile string,
 		}
 		abs = filepath.Clean(abs)
 		if abs == absSparkwing {
-			return
+			return ""
 		}
-		dirs = append(dirs, abs)
+		return abs
 	}
+
+	var b strings.Builder
+	b.WriteString("go.work\n")
+	if wf.Go != nil {
+		fmt.Fprintf(&b, "go:%s\n", wf.Go.Version)
+	}
+	if wf.Toolchain != nil {
+		fmt.Fprintf(&b, "toolchain:%s\n", wf.Toolchain.Name)
+	}
+	godebugs := make([]string, 0, len(wf.Godebug))
+	for _, g := range wf.Godebug {
+		godebugs = append(godebugs, g.Key+"="+g.Value)
+	}
+	sort.Strings(godebugs)
+	for _, g := range godebugs {
+		fmt.Fprintf(&b, "godebug:%s\n", g)
+	}
+
+	uses := make([]string, 0, len(wf.Use))
 	for _, u := range wf.Use {
-		add(u.Path)
-	}
-	for _, r := range wf.Replace {
-		if isLocalPath(r.New.Path) {
-			add(r.New.Path)
+		abs := resolve(u.Path)
+		if abs == "" {
+			continue
 		}
+		label, err := moduleLabelOf(abs)
+		if err != nil {
+			return nil, "", err
+		}
+		targets = append(targets, replaceTarget{Label: label, Dir: abs})
+		uses = append(uses, label)
 	}
-	return dirs, work, nil
+	sort.Strings(uses)
+	for _, u := range uses {
+		fmt.Fprintf(&b, "use:%s\n", u)
+	}
+
+	replaces := make([]string, 0, len(wf.Replace))
+	for _, r := range wf.Replace {
+		label := replaceLabel(r.Old)
+		if isLocalPath(r.New.Path) {
+			abs := resolve(r.New.Path)
+			if abs == "" {
+				continue
+			}
+			targets = append(targets, replaceTarget{Label: label, Dir: abs})
+			// The replacement's location is deliberately omitted; its
+			// contents are hashed through the target instead.
+			replaces = append(replaces, label+" => local")
+			continue
+		}
+		replaces = append(replaces, label+" => "+replaceLabel(r.New))
+	}
+	sort.Strings(replaces)
+	for _, r := range replaces {
+		fmt.Fprintf(&b, "replace:%s\n", r)
+	}
+
+	return targets, b.String(), nil
 }

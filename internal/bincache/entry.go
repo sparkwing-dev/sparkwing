@@ -43,12 +43,19 @@ type Lease struct {
 type PruneOptions struct {
 	Root         string
 	ReclaimBytes int64
-	MaxEntries   int
+	// RemoveBytes is the logical cache-byte goal used by configured ceilings.
+	// Pressure callers use ReclaimBytes and remeasure the filesystem instead.
+	RemoveBytes int64
+	// ReclaimEntries is an optional entry-count goal used by configured
+	// cache ceilings. Pressure callers normally leave it zero.
+	ReclaimEntries int
+	MaxEntries     int
 }
 
 // PruneResult reports observed pressure and work completed by Prune.
 type PruneResult struct {
 	ObservedBytes int64 `json:"observed_bytes"`
+	RemovedBytes  int64 `json:"removed_bytes"`
 	// ReclaimedBytes is capacity observed becoming available after removal.
 	// Admission must remeasure afterward because concurrent filesystem activity
 	// prevents attributing the observation to this prune attempt.
@@ -155,11 +162,21 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 	if err := ctx.Err(); err != nil {
 		return nil, false, err
 	}
+	if lease, found, acquireErr := e.Acquire(ctx); acquireErr != nil {
+		return nil, false, acquireErr
+	} else if found {
+		return lease, false, nil
+	}
 	writer, err := e.openLock("writer", cacheLockExclusive)
 	if err != nil {
 		return nil, false, err
 	}
 	defer func() { err = errors.Join(err, cacheUnlock(writer), writer.Close()) }()
+	if lease, found, acquireErr := e.Acquire(ctx); acquireErr != nil {
+		return nil, false, acquireErr
+	} else if found {
+		return lease, false, nil
+	}
 	lease, err := e.openLock("lease", cacheLockExclusive)
 	if err != nil {
 		return nil, false, err
@@ -213,8 +230,8 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 
 // Prune reclaims inactive entries within the requested bounds.
 func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err error) {
-	if opts.ReclaimBytes <= 0 {
-		return result, errors.New("reclaim bytes must be greater than zero")
+	if opts.ReclaimBytes <= 0 && opts.RemoveBytes <= 0 && opts.ReclaimEntries <= 0 {
+		return result, errors.New("a positive reclaim byte or entry goal is required")
 	}
 	if opts.MaxEntries <= 0 {
 		return result, errors.New("max entries must be greater than zero")
@@ -241,7 +258,7 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 	}
 	var pruneErr error
 	for _, candidate := range candidates {
-		if result.Examined >= opts.MaxEntries || result.ReclaimedBytes >= opts.ReclaimBytes {
+		if result.Examined >= opts.MaxEntries || pruneGoalSatisfied(result, opts) {
 			break
 		}
 		if err := ctx.Err(); err != nil {
@@ -290,19 +307,20 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			continue
 		}
 		result.Reclaimed++
+		result.RemovedBytes += size
 		result.ReclaimedBytes += reclaimedBytes
 	}
 	remaining := discoveryLimit - result.Examined
 	var legacy []legacyCacheCandidate
 	legacyExhausted := false
-	if remaining > 0 && result.ReclaimedBytes < opts.ReclaimBytes {
+	if remaining > 0 && !pruneGoalSatisfied(result, opts) {
 		legacy, legacyExhausted, err = legacyCacheCandidates(ctx, root, remaining)
 		if err != nil {
 			return result, err
 		}
 	}
 	for _, candidate := range legacy {
-		if result.Examined >= opts.MaxEntries || result.ReclaimedBytes >= opts.ReclaimBytes {
+		if result.Examined >= opts.MaxEntries || pruneGoalSatisfied(result, opts) {
 			break
 		}
 		if err := ctx.Err(); err != nil {
@@ -345,11 +363,19 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			continue
 		}
 		result.Reclaimed++
+		result.RemovedBytes += size
 		result.ReclaimedBytes += reclaimedBytes
 	}
-	result.GoalSatisfied = result.ReclaimedBytes >= opts.ReclaimBytes
+	result.GoalSatisfied = pruneGoalSatisfied(result, opts)
 	result.Exhausted = !result.GoalSatisfied && (legacyExhausted || managedExhausted || result.Examined >= opts.MaxEntries || result.Examined == len(legacy)+len(candidates))
 	return result, pruneErr
+}
+
+func pruneGoalSatisfied(result PruneResult, opts PruneOptions) bool {
+	bytesSatisfied := opts.ReclaimBytes <= 0 || result.ReclaimedBytes >= opts.ReclaimBytes
+	removedSatisfied := opts.RemoveBytes <= 0 || result.RemovedBytes >= opts.RemoveBytes
+	entriesSatisfied := opts.ReclaimEntries <= 0 || result.Reclaimed >= opts.ReclaimEntries
+	return bytesSatisfied && removedSatisfied && entriesSatisfied
 }
 
 // Status measures the pipeline cache without deleting entries.

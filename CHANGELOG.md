@@ -48,13 +48,50 @@ code change to unlock.
 ---
 
 ## [Unreleased]
-
 ### Added
 
-- **cache:** `pkg/cachepressure` and `sparkwing cache status|prune` measure the
-  managed pipeline-binary cache and reclaim inactive entries within caller-set
-  byte and entry bounds. Active executables and writers retain kernel-backed
-  leases, so pressure handling cannot delete their entries.
+- **cache:** `sparkwing cache info` and `sparkwing cache prune` inspect and trim
+  the compiled pipeline binary cache. The cache is now bounded rather than
+  unbounded: after each compile, least recently used binaries are evicted to fit
+  `SPARKWING_CACHE_MAX_BYTES` (default `2GiB`) and `SPARKWING_CACHE_MAX_ENTRIES`
+  (default `20`), either set to `0` to disable. Eviction ranks entries by last
+  use rather than build time. Kernel-backed execution and writer leases prevent
+  eviction of active entries.
+- **cache:** `sparkwing cache explain` prints a pipeline's cache key, whether it
+  is cached, and every input behind it with its own digest and file counts --
+  including how many files git ignored and excluded, which is the usual reason
+  an edit does not trigger a rebuild. When other cached entries came from the
+  same checkout, it names the inputs that changed since, answering why the last
+  run recompiled.
+- **cache:** cached binaries record which checkouts have used them and how many
+  times, shown by `sparkwing cache info`. A cache key is a content fingerprint
+  and `-trimpath` keeps build paths out of the binary, so without this an entry
+  cannot be identified; entries listing more than one checkout are the
+  path-independent key paying off.
+
+### Changed
+
+- **cache:** the pipeline binary cache key no longer depends on where a checkout
+  lives. Local `replace` targets are recorded by module path instead of absolute
+  filesystem path, a covering `go.work` is folded in by its normalized directives
+  rather than its raw bytes, and builds pass `-trimpath`. Two checkouts of the
+  same commit now compute the same key and compile to byte-identical binaries, so
+  a worktree reuses the primary checkout's build instead of making its own.
+- **cache:** files git ignores are excluded from the pipeline binary cache key.
+  Untracked local debris -- provider plugins, release outputs, coverage data --
+  no longer perturbs the key or costs time to hash, which also makes the key
+  reproducible across machines and CI runners. Directories outside a git
+  repository still hash everything. Set `SPARKWING_HASH_ALL_FILES=1` to restore
+  full hashing if a build depends on a gitignored file, such as a generated asset
+  pulled in by `//go:embed`.
+
+  These two changes invalidate existing cached binaries once; the next
+  invocation of each pipeline recompiles.
+
+- **cache:** `pkg/cachepressure` measures the managed pipeline-binary cache and
+  reclaims inactive entries within caller-set byte and entry-work bounds. The
+  result reports observed capacity separately from removed entries; admission
+  callers remeasure the filesystem after every attempt.
 
 ## [v0.24.0] - 2026-08-10
 ### Added

@@ -5,11 +5,53 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
-	"github.com/sparkwing-dev/sparkwing/pkg/cachepressure"
 )
+
+func TestCacheExplainJSONUsesStableEnvelope(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example.com/pipeline\n\ngo 1.26\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n\nfunc main() {}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runCacheExplain([]string{"--dir", dir, "-o", "json"})
+	})
+	if runErr != nil {
+		t.Fatalf("cache explain: %v", runErr)
+	}
+	payload := decodeCachePayload(t, out)
+	if payload["dir"] != dir || payload["key"] == "" {
+		t.Fatalf("explain payload = %#v", payload)
+	}
+}
+
+func TestCacheExplainJSONReportsParseFailureBeforeOutputFlag(t *testing.T) {
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runCacheExplain([]string{"--unknown", "-ojson"})
+	})
+	if runErr == nil {
+		t.Fatal("cache explain hid parse failure")
+	}
+	var envelope struct {
+		Payload any            `json:"payload"`
+		Error   map[string]any `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+		t.Fatalf("decode error envelope %q: %v", out, err)
+	}
+	if envelope.Payload != nil || envelope.Error["message"] == nil {
+		t.Fatalf("error envelope = %#v", envelope)
+	}
+}
 
 func seedCommandCacheEntry(t *testing.T, body string) *bincache.Lease {
 	t.Helper()
@@ -41,17 +83,17 @@ func decodeCachePayload(t *testing.T, raw string) map[string]any {
 	return envelope.Payload
 }
 
-func TestCacheStatusJSONReportsActiveBytes(t *testing.T) {
+func TestCacheInfoJSONReportsManagedBytes(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	lease := seedCommandCacheEntry(t, "active")
 	defer func() { _ = lease.Release() }()
 	var runErr error
-	out := captureStdout(t, func() { runErr = runCacheStatus([]string{"-o", "json"}) })
+	out := captureStdout(t, func() { runErr = runCacheInfo([]string{"-o", "json"}) })
 	if runErr != nil {
-		t.Fatalf("cache status: %v", runErr)
+		t.Fatalf("cache info: %v", runErr)
 	}
 	payload := decodeCachePayload(t, out)
-	if payload["observed_bytes"] != float64(6) || payload["active_bytes"] != float64(6) || payload["active_entries"] != float64(1) {
+	if payload["total_bytes"] != float64(6) || payload["entries"] != float64(1) {
 		t.Fatalf("status payload = %#v", payload)
 	}
 }
@@ -64,25 +106,25 @@ func TestCachePruneJSONReportsBoundedOutcome(t *testing.T) {
 	}
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCachePrune([]string{"--goal-bytes", "1", "--max-entries", "1", "-o", "json"})
+		runErr = runCachePrune([]string{"--all", "-o", "json"})
 	})
 	if runErr != nil {
 		t.Fatalf("cache prune: %v", runErr)
 	}
 	payload := decodeCachePayload(t, out)
-	if payload["reclaimed_bytes"] != float64(6) || payload["reclaimed_entries"] != float64(1) || payload["goal_satisfied"] != true {
+	if payload["reclaimed_entries"] != float64(1) || payload["goal_satisfied"] != true {
 		t.Fatalf("prune payload = %#v", payload)
 	}
 }
 
-func TestCachePruneRejectsInvalidBounds(t *testing.T) {
+func TestCachePruneRejectsInvalidLimit(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCachePrune([]string{"--goal-bytes", "0", "--max-entries", "1", "-o", "json"})
+		runErr = runCachePrune([]string{"--max-bytes", "invalid", "-o", "json"})
 	})
 	if runErr == nil {
-		t.Fatal("cache prune accepted a zero byte goal")
+		t.Fatal("cache prune accepted an invalid byte ceiling")
 	}
 	var envelope struct {
 		Payload any `json:"payload"`
@@ -97,14 +139,14 @@ func TestCachePruneRejectsInvalidBounds(t *testing.T) {
 }
 
 func TestCachePruneJSONReportsAPIFailure(t *testing.T) {
-	original := pruneCachePressure
-	t.Cleanup(func() { pruneCachePressure = original })
-	pruneCachePressure = func(context.Context, cachepressure.PruneOptions) (cachepressure.PruneResult, error) {
-		return cachepressure.PruneResult{}, errors.New("store unavailable")
+	original := pruneCacheToLimits
+	t.Cleanup(func() { pruneCacheToLimits = original })
+	pruneCacheToLimits = func(context.Context, int64, int, bool) (bincache.PruneResult, error) {
+		return bincache.PruneResult{}, errors.New("store unavailable")
 	}
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runCachePrune([]string{"--goal-bytes", "1", "--max-entries", "1", "-o", "json"})
+		runErr = runCachePrune([]string{"--all", "-o", "json"})
 	})
 	if runErr == nil {
 		t.Fatal("cache prune hid API failure")
@@ -170,14 +212,14 @@ func TestCachePruneJSONReportsParseFailureBeforeOutputFlag(t *testing.T) {
 }
 
 func TestCachePruneRejectsOutputBeforeMutation(t *testing.T) {
-	original := pruneCachePressure
-	t.Cleanup(func() { pruneCachePressure = original })
+	original := pruneCacheToLimits
+	t.Cleanup(func() { pruneCacheToLimits = original })
 	calls := 0
-	pruneCachePressure = func(context.Context, cachepressure.PruneOptions) (cachepressure.PruneResult, error) {
+	pruneCacheToLimits = func(context.Context, int64, int, bool) (bincache.PruneResult, error) {
 		calls++
-		return cachepressure.PruneResult{}, nil
+		return bincache.PruneResult{}, nil
 	}
-	if err := runCachePrune([]string{"--goal-bytes", "1", "--max-entries", "1", "-o", "bogus"}); err == nil {
+	if err := runCachePrune([]string{"--all", "-o", "bogus"}); err == nil {
 		t.Fatal("cache prune accepted an invalid output format")
 	}
 	if calls != 0 {

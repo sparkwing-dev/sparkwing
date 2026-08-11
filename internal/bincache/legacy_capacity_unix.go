@@ -11,21 +11,21 @@ import (
 	"syscall"
 )
 
-var legacyFilesystemAvailableBytes = filesystemAvailableBytes
+var cacheFilesystemAvailableBytes = filesystemAvailableBytes
 
 func removeCacheEntryWithCapacity(ctx context.Context, path string) (int64, error) {
 	allocated, err := cacheAllocatedBytes(ctx, path)
 	if err != nil {
 		return 0, err
 	}
-	before, err := legacyFilesystemAvailableBytes(filepath.Dir(path))
+	before, err := cacheFilesystemAvailableBytes(filepath.Dir(path))
 	if err != nil {
 		return 0, err
 	}
 	if err := removeCacheEntry(path); err != nil {
 		return 0, err
 	}
-	after, err := legacyFilesystemAvailableBytes(filepath.Dir(path))
+	after, err := cacheFilesystemAvailableBytes(filepath.Dir(path))
 	if err != nil {
 		return 0, err
 	}

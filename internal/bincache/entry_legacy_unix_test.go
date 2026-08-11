@@ -25,9 +25,9 @@ func TestPruneQuarantinesRunningLegacyExecutable(t *testing.T) {
 	t.Cleanup(func() { cacheNow = originalNow })
 	now := time.Unix(100, 0)
 	cacheNow = func() time.Time { return now }
-	originalAvailable := legacyFilesystemAvailableBytes
-	t.Cleanup(func() { legacyFilesystemAvailableBytes = originalAvailable })
-	legacyFilesystemAvailableBytes = func(string) (int64, error) { return 100, nil }
+	originalAvailable := cacheFilesystemAvailableBytes
+	t.Cleanup(func() { cacheFilesystemAvailableBytes = originalAvailable })
+	cacheFilesystemAvailableBytes = func(string) (int64, error) { return 100, nil }
 	cacheRoot := t.TempDir()
 	root := filepath.Join(cacheRoot, pipelineCacheSchema)
 	legacyDir := filepath.Join(cacheRoot, "11111111-11111111")
@@ -93,10 +93,10 @@ func TestLegacyRemovalCreditsOnlyObservedAllocatedCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	originalAvailable := legacyFilesystemAvailableBytes
-	t.Cleanup(func() { legacyFilesystemAvailableBytes = originalAvailable })
+	originalAvailable := cacheFilesystemAvailableBytes
+	t.Cleanup(func() { cacheFilesystemAvailableBytes = originalAvailable })
 	read := 0
-	legacyFilesystemAvailableBytes = func(string) (int64, error) {
+	cacheFilesystemAvailableBytes = func(string) (int64, error) {
 		read++
 		if read == 1 {
 			return 100, nil
@@ -113,9 +113,9 @@ func TestLegacyRemovalCreditsOnlyObservedAllocatedCapacity(t *testing.T) {
 }
 
 func TestManagedRemovalDoesNotCreditUnobservedCapacity(t *testing.T) {
-	originalAvailable := legacyFilesystemAvailableBytes
-	t.Cleanup(func() { legacyFilesystemAvailableBytes = originalAvailable })
-	legacyFilesystemAvailableBytes = func(string) (int64, error) { return 100, nil }
+	originalAvailable := cacheFilesystemAvailableBytes
+	t.Cleanup(func() { cacheFilesystemAvailableBytes = originalAvailable })
+	cacheFilesystemAvailableBytes = func(string) (int64, error) { return 100, nil }
 
 	root := filepath.Join(t.TempDir(), pipelineCacheSchema)
 	entry := testEntry(t, root, "11111111-11111111")

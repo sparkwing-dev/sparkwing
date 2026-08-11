@@ -6,7 +6,7 @@ Job-level caching is content-addressed result memoization via the
 reference and [pipelines.md](pipelines.md) for usage in the Plan/Work
 model.
 
-Sparkwing caches at two levels:
+Sparkwing caches at three levels:
 
 1. **Job-level content-addressed caching.** A node declares a content
    key; when a later node computes the same key, the orchestrator
@@ -15,8 +15,11 @@ Sparkwing caches at two levels:
 2. **Build-layer caching.** Docker layer cache, BuildKit cache mounts,
    warm PVC pool, and the dependency proxy. See
    [build-caching.md](build-caching.md) for that layer.
+3. **Pipeline binary caching.** Your `.sparkwing/` module is a Go
+   program; sparkwing compiles it and reuses the binary until the
+   source changes. See [the section below](#pipeline-binary-cache).
 
-This doc is about (1).
+This doc is about (1) and (3).
 
 Caching is keyed on **content alone**. It carries no scope and no group:
 it answers "is this the *same work*, so reuse the answer?" Bounding how
@@ -157,3 +160,117 @@ otherwise non-reusable leader outcome, the follower runs the node itself.
   (gitcache `/proxy/...`) or a warm PVC.
 - **Build-layer caching is separate.** See
   [build-caching.md](build-caching.md).
+
+## Pipeline binary cache
+
+Your `.sparkwing/` directory is a Go module, and sparkwing compiles it
+before it can run anything. Compiling on every invocation would be
+wasteful, so the binary is cached under
+`$SPARKWING_HOME/cache/pipelines/v1/entries/<key>/` and reused until the source
+changes.
+
+### The key
+
+The key is a fingerprint of everything that can change the compiled
+output: the Go major/minor version, `GOOS`/`GOARCH`, the contents of
+`.sparkwing/`, the contents of every local `replace` target, the
+directives of a covering `go.work`, and the resolved module overlays.
+
+Contents are hashed, not timestamps -- editing a file back to its
+previous bytes restores the previous key. Paths are recorded relative
+to the module, and local `replace` targets are recorded by module path
+rather than by where they sit on disk. Two checkouts of the same commit
+therefore compute the same key from different directories and share one
+compiled binary, instead of each building their own.
+
+**Files git ignores are excluded from the key.** A checkout accumulates
+untracked local debris -- provider plugins, release outputs, coverage
+data -- that no build reads and that differs on every machine. Hashing
+it would make the key machine-specific and would also mean hashing
+gigabytes on every invocation. `.gitignore` is committed, so every
+checkout and CI runner computes the same exclusion. Directories outside
+a git repository fall back to hashing everything.
+
+If a build genuinely depends on a gitignored file -- a generated asset
+pulled in by `//go:embed`, say -- set `SPARKWING_HASH_ALL_FILES=1` to
+restore full hashing. That file is already invisible to your teammates
+and to CI, so the durable fix is to track it.
+
+Builds pass `-trimpath`, which keeps the build directory out of the
+binary. That is what lets two checkouts produce byte-identical output;
+the cost is that panics report module-relative paths rather than paths
+on your machine.
+
+### Bounding the cache
+
+A compiled pipeline binary routinely exceeds 90 MB. The cache is
+therefore bounded: after each new entry, sparkwing reclaims inactive
+entries until the cache fits both a byte ceiling and an entry count.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SPARKWING_CACHE_MAX_BYTES` | `2GiB` | Total size ceiling. Accepts a suffix (`512MiB`, `4GB`). `0` disables. |
+| `SPARKWING_CACHE_MAX_ENTRIES` | `20` | Entry count ceiling. `0` disables. |
+
+Pruning advances through a bounded second-chance queue. An entry used
+since it entered the queue moves behind the other candidates, so use
+rather than build age drives retention without an unbounded directory
+scan. A kernel-backed lease spans lookup through process exit; prune
+skips active executions and writers rather than relying on a timing
+window.
+
+Prune bounds entry discovery and deletion. It reports logical cache bytes
+removed separately from observed filesystem capacity gained. The latter is
+evidence, not an admission decision: callers remeasure the filesystem after
+pruning because concurrent activity can change free space.
+
+Inspect and reclaim on demand:
+
+```bash
+sparkwing cache info                      # size, ceilings, recent entries
+sparkwing cache info --all -o json        # every entry, machine-readable
+sparkwing cache prune                     # trim to the configured ceilings
+sparkwing cache prune --max-bytes 512MiB  # trim to a smaller budget
+sparkwing cache prune --all               # reclaim everything
+```
+
+### Seeing what an entry is
+
+A key is a content fingerprint and `-trimpath` keeps build paths out of
+the binary, so an entry cannot be identified by inspecting it. Sparkwing
+therefore records which checkouts have used each entry, and how often:
+
+```
+MOST RECENTLY USED (2 of 2)
+  c1df5cd6-4789f450   91.8 MiB  just now   x7  ~/code/sparkwing/.sparkwing +1 more checkout(s)
+  322ecb34-31432125   91.9 MiB  2d ago     x1  ~/worktrees/feature-branch/.sparkwing
+```
+
+An entry with more than one checkout is the portable key paying off: a
+worktree reused the primary checkout's build instead of compiling its
+own. `cache info` counts those entries on the `shared:` line.
+
+### Why did it recompile?
+
+`sparkwing cache explain` prints the key, whether it is cached, and every
+input behind it with its own digest:
+
+```
+INPUTS
+  go toolchain      669365bbd24f  go1.26
+  platform          8828cb814901  darwin/arm64
+  module tree       035b55fe2c64  36 files, 346.1 KiB
+  replace github.com/sparkwing-dev/sparkwing  e68a991b153a  1439 files, 10.0 MiB (19 gitignored, excluded)
+```
+
+Comparing two checkouts input by input shows exactly what differs -- if
+`module tree` matches and a replace target does not, the pipeline source
+is identical and a dependency is not. The gitignored count is usually
+the answer when an edit unexpectedly fails to trigger a rebuild.
+
+When other cached entries came from the same checkout, `explain` lists
+them with the inputs that changed since, which is the direct answer to
+why the last run recompiled.
+
+To skip the binary cache entirely for one invocation, set
+`SPARKWING_NO_BINCACHE=1`; sparkwing falls back to `go run .`.

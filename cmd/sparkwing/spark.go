@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -619,11 +618,11 @@ func runSparksWarmup(args []string) error {
 	}
 
 	if *clearCache {
-		result, err := bincache.Prune(ctx, bincache.PruneOptions{ReclaimBytes: math.MaxInt64, MaxEntries: math.MaxInt})
+		result, err := bincache.PruneToLimits(ctx, 0, 0, true)
 		if err != nil {
 			return fmt.Errorf("spark warmup: clear cache: %w", err)
 		}
-		fmt.Fprintf(os.Stdout, "cache pruning reported %d reclaimed bytes\n", result.ReclaimedBytes)
+		fmt.Fprintf(os.Stdout, "cache pruning removed %d bytes across %d entries\n", result.RemovedBytes, result.Reclaimed)
 	}
 
 	_, cfg, err := projectconfig.DiscoverPipelines(sparkwingDir)
