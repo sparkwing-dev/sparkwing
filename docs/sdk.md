@@ -887,9 +887,31 @@ tool definitions.
 `default:"value"`        // Default when flag is not provided
 `required:"true"`        // Errors when missing (mutex with default)
 `enum:"a,b,c"`           // Allowed values; requires default-or-required
-`secret:"true"`          // Mask in logs and dashboard
+`secret:"true"`          // Redact in logs, run views, receipts, and dashboard
 `flag:",extra"`          // Catch-all for unknown flags; map[string]string only
 ```
+
+### What `secret:"true"` covers
+
+A secret-marked input is redacted to `***` on every read surface: the
+`run_start` setup block `sparkwing run` prints, `runs list`, `runs get`,
+`runs status`, `runs find`, `runs tree`, `runs wait`, `runs receipt`
+(including the `rerun` reproducer command), the controller's run API,
+and the dashboard's Setup panel. Node log bodies are masked separately
+by the run's masker, which replaces the value anywhere it appears in
+emitted text.
+
+Redaction is applied when a run is read, not when it is written. The
+run row keeps the plaintext argument, because the masker derives its
+redaction set from it and retrying or replaying a run re-executes with
+it. Treat the state database, its backups, and the `state.ndjson` run
+dumps as holding the value in the clear, and protect them accordingly.
+
+Two limits worth knowing. A `flag:",extra"` bag is never redacted --
+its keys are arbitrary and carry no per-key opt-in. And runs recorded
+before a pipeline declared the input secret render as they always did:
+the classification is stamped on the run at start, and there is no
+schema to reclassify an old row from.
 
 Supported field types: `string`, `bool`, `int`, `int64`, `float64`,
 `time.Duration`, `[]string` (comma-separated on the wire), and

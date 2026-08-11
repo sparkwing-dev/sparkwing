@@ -48,6 +48,22 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **cli, controller:** pipeline inputs tagged `secret:"true"` are now redacted to
+  `***` wherever a run is read back. Previously the tag only masked node log
+  bodies, so a secret passed as an argument was printed in full by the `Setup`
+  block of `sparkwing run`, by `runs list`, `runs get`, `runs status`,
+  `runs find`, `runs tree`, `runs wait`, and `runs receipt`, served by the
+  controller's run endpoints, and rendered by the dashboard's Setup panel --
+  including the copyable `rerun` reproducer command. Runs now record which
+  arguments their pipeline declared secret, and every read path redacts them;
+  retry and replay still re-execute with the real value.
+  Runs started before this release carry no such record and render unchanged.
+  Redaction is applied on read: the run row, its backups, and `state.ndjson`
+  dumps still hold the plaintext, so keep treating the state database as
+  secret-bearing. Trigger rows (`GET /api/v1/triggers`) are also unchanged --
+  the work-dispatch path serves them to runners verbatim.
 
 ## [v0.25.0] - 2026-08-11
 ### Added
