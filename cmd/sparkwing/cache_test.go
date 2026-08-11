@@ -141,6 +141,34 @@ func TestCachePruneJSONReportsParseFailure(t *testing.T) {
 	}
 }
 
+func TestCachePruneJSONReportsParseFailureBeforeOutputFlag(t *testing.T) {
+	for _, args := range [][]string{
+		{"--unknown", "-o", "json"},
+		{"--unknown", "-ojson"},
+		{"--unknown", "-o=json"},
+		{"--unknown", "--output", "json"},
+		{"--unknown", "--output=json"},
+	} {
+		var runErr error
+		out := captureStdout(t, func() {
+			runErr = runCachePrune(args)
+		})
+		if runErr == nil {
+			t.Fatalf("cache prune hid parse failure for %q", args)
+		}
+		var envelope struct {
+			Payload any            `json:"payload"`
+			Error   map[string]any `json:"error"`
+		}
+		if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+			t.Fatalf("decode error envelope %q: %v", out, err)
+		}
+		if envelope.Payload != nil || envelope.Error["message"] == nil {
+			t.Fatalf("error envelope = %#v", envelope)
+		}
+	}
+}
+
 func TestCachePruneRejectsOutputBeforeMutation(t *testing.T) {
 	original := pruneCachePressure
 	t.Cleanup(func() { pruneCachePressure = original })

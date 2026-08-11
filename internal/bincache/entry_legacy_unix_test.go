@@ -25,6 +25,9 @@ func TestPruneQuarantinesRunningLegacyExecutable(t *testing.T) {
 	t.Cleanup(func() { cacheNow = originalNow })
 	now := time.Unix(100, 0)
 	cacheNow = func() time.Time { return now }
+	originalAvailable := legacyFilesystemAvailableBytes
+	t.Cleanup(func() { legacyFilesystemAvailableBytes = originalAvailable })
+	legacyFilesystemAvailableBytes = func(string) (int64, error) { return 100, nil }
 	cacheRoot := t.TempDir()
 	root := filepath.Join(cacheRoot, pipelineCacheSchema)
 	legacyDir := filepath.Join(cacheRoot, "11111111-11111111")
@@ -63,12 +66,12 @@ func TestPruneQuarantinesRunningLegacyExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Reclaimed != 0 || result.GoalSatisfied {
-		t.Fatalf("live executable was reported reclaimed: %+v", result)
+	if result.Reclaimed != 1 || result.ReclaimedBytes != 0 || result.GoalSatisfied {
+		t.Fatalf("live executable removal claimed unavailable capacity: %+v", result)
 	}
 	quarantine := filepath.Join(root, "legacy-retired", "11111111-11111111")
-	if _, err := os.Stat(quarantine); err != nil {
-		t.Fatalf("live executable quarantine removed: %v", err)
+	if _, err := os.Stat(quarantine); !os.IsNotExist(err) {
+		t.Fatalf("live executable namespace remains: %v", err)
 	}
 	if err := stdin.Close(); err != nil {
 		t.Fatal(err)
@@ -76,11 +79,35 @@ func TestPruneQuarantinesRunningLegacyExecutable(t *testing.T) {
 	if err := cmd.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	result, err = Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+}
+
+func TestLegacyRemovalCreditsOnlyObservedAllocatedCapacity(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "legacy")
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(path, "pipelines"), make([]byte, 8192), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	allocated, err := legacyAllocatedBytes(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Reclaimed != 1 || !result.GoalSatisfied {
-		t.Fatalf("retired executable was not reclaimed: %+v", result)
+	originalAvailable := legacyFilesystemAvailableBytes
+	t.Cleanup(func() { legacyFilesystemAvailableBytes = originalAvailable })
+	read := 0
+	legacyFilesystemAvailableBytes = func(string) (int64, error) {
+		read++
+		if read == 1 {
+			return 100, nil
+		}
+		return 100 + allocated + 1, nil
+	}
+	reclaimed, err := removeLegacyCacheEntry(context.Background(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reclaimed != allocated {
+		t.Fatalf("reclaimed bytes = %d, want allocated cap %d", reclaimed, allocated)
 	}
 }

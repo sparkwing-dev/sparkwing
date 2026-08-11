@@ -48,7 +48,9 @@ type PruneOptions struct {
 
 // PruneResult reports observed pressure and work completed by Prune.
 type PruneResult struct {
-	ObservedBytes  int64 `json:"observed_bytes"`
+	ObservedBytes int64 `json:"observed_bytes"`
+	// ReclaimedBytes combines lease-protected managed bytes removed with legacy
+	// capacity observed becoming available. Admission must remeasure afterward.
 	ReclaimedBytes int64 `json:"reclaimed_bytes"`
 	Examined       int   `json:"examined_entries"`
 	Reclaimed      int   `json:"reclaimed_entries"`
@@ -232,65 +234,11 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 	defer func() { err = errors.Join(err, cacheUnlock(coordinator), coordinator.Close()) }()
 
 	discoveryLimit := boundedCacheDiscoveryLimit(opts.MaxEntries)
-	legacy, legacyExhausted, err := legacyCacheCandidates(ctx, root, discoveryLimit)
+	candidates, managedExhausted, err := cacheCandidatesBounded(ctx, root, discoveryLimit)
 	if err != nil {
 		return result, err
 	}
 	var pruneErr error
-	for _, candidate := range legacy {
-		if result.Examined >= opts.MaxEntries || result.ReclaimedBytes >= opts.ReclaimBytes {
-			break
-		}
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		result.Examined++
-		size, sizeErr := treeSizeContext(ctx, candidate.path)
-		if os.IsNotExist(sizeErr) {
-			continue
-		}
-		if sizeErr != nil {
-			return result, sizeErr
-		}
-		result.ObservedBytes += size
-		if !candidate.retired {
-			retiredRoot := filepath.Join(root, "legacy-retired")
-			if mkdirErr := os.MkdirAll(retiredRoot, 0o700); mkdirErr != nil {
-				return result, mkdirErr
-			}
-			retiredPath := filepath.Join(retiredRoot, filepath.Base(candidate.path))
-			if renameErr := os.Rename(candidate.path, retiredPath); renameErr != nil {
-				if os.IsNotExist(renameErr) {
-					continue
-				}
-				pruneErr = errors.Join(pruneErr, renameErr)
-				continue
-			}
-			if timeErr := os.Chtimes(retiredPath, cacheNow(), cacheNow()); timeErr != nil {
-				pruneErr = errors.Join(pruneErr, timeErr)
-			}
-			continue
-		}
-		if cacheNow().Sub(time.Unix(0, candidate.modTime)) < legacyRetirementGrace {
-			result.Active++
-			continue
-		}
-		if removeErr := removeCacheEntry(candidate.path); removeErr != nil {
-			pruneErr = errors.Join(pruneErr, removeErr)
-			continue
-		}
-		result.Reclaimed++
-		result.ReclaimedBytes += size
-	}
-	remaining := discoveryLimit - result.Examined
-	var candidates []cacheCandidate
-	managedExhausted := false
-	if remaining > 0 && result.ReclaimedBytes < opts.ReclaimBytes {
-		candidates, managedExhausted, err = cacheCandidatesBounded(ctx, root, remaining)
-		if err != nil {
-			return result, err
-		}
-	}
 	for _, candidate := range candidates {
 		if result.Examined >= opts.MaxEntries || result.ReclaimedBytes >= opts.ReclaimBytes {
 			break
@@ -342,6 +290,61 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 		}
 		result.Reclaimed++
 		result.ReclaimedBytes += size
+	}
+	remaining := discoveryLimit - result.Examined
+	var legacy []legacyCacheCandidate
+	legacyExhausted := false
+	if remaining > 0 && result.ReclaimedBytes < opts.ReclaimBytes {
+		legacy, legacyExhausted, err = legacyCacheCandidates(ctx, root, remaining)
+		if err != nil {
+			return result, err
+		}
+	}
+	for _, candidate := range legacy {
+		if result.Examined >= opts.MaxEntries || result.ReclaimedBytes >= opts.ReclaimBytes {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		result.Examined++
+		size, sizeErr := treeSizeContext(ctx, candidate.path)
+		if os.IsNotExist(sizeErr) {
+			continue
+		}
+		if sizeErr != nil {
+			return result, sizeErr
+		}
+		result.ObservedBytes += size
+		if !candidate.retired {
+			retiredRoot := filepath.Join(root, "legacy-retired")
+			if mkdirErr := os.MkdirAll(retiredRoot, 0o700); mkdirErr != nil {
+				return result, mkdirErr
+			}
+			retiredPath := filepath.Join(retiredRoot, filepath.Base(candidate.path))
+			if renameErr := os.Rename(candidate.path, retiredPath); renameErr != nil {
+				if os.IsNotExist(renameErr) {
+					continue
+				}
+				pruneErr = errors.Join(pruneErr, renameErr)
+				continue
+			}
+			if timeErr := os.Chtimes(retiredPath, cacheNow(), cacheNow()); timeErr != nil {
+				pruneErr = errors.Join(pruneErr, timeErr)
+			}
+			continue
+		}
+		if cacheNow().Sub(time.Unix(0, candidate.modTime)) < legacyRetirementGrace {
+			result.Active++
+			continue
+		}
+		reclaimedBytes, removeErr := removeLegacyCacheEntry(ctx, candidate.path)
+		if removeErr != nil {
+			pruneErr = errors.Join(pruneErr, removeErr)
+			continue
+		}
+		result.Reclaimed++
+		result.ReclaimedBytes += reclaimedBytes
 	}
 	result.GoalSatisfied = result.ReclaimedBytes >= opts.ReclaimBytes
 	result.Exhausted = !result.GoalSatisfied && (legacyExhausted || managedExhausted || result.Examined >= opts.MaxEntries || result.Examined == len(legacy)+len(candidates))

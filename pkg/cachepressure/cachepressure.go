@@ -25,7 +25,8 @@ func Measure(ctx context.Context) (Status, error) {
 	return bincache.Status(ctx, "")
 }
 
-// Prune reclaims inactive entries within opts.
+// Prune reclaims inactive entries within opts. Callers must remeasure filesystem
+// capacity before admission; GoalSatisfied is reclamation evidence, not authority.
 func Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
 	return bincache.Prune(ctx, bincache.PruneOptions{
 		ReclaimBytes: opts.ReclaimBytes,

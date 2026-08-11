@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	flag "github.com/spf13/pflag"
 
@@ -37,10 +38,14 @@ func runCache(args []string) error {
 func runCacheStatus(args []string) error {
 	fs := flag.NewFlagSet(cmdCacheStatus.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "pretty", "output format (pretty|json)")
+	requestedOutput := cacheOutputFromArgs(args, *output)
 	if err := parseAndCheck(cmdCacheStatus, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
+		return writeCacheError(requestedOutput, err)
+	}
+	if err := validateCacheOutput(*output); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -64,10 +69,14 @@ func runCachePrune(args []string) error {
 	goalBytes := fs.Int64("goal-bytes", 0, "minimum bytes to reclaim")
 	maxEntries := fs.Int("max-entries", 0, "maximum entries to examine")
 	output := fs.StringP("output", "o", "pretty", "output format (pretty|json)")
+	requestedOutput := cacheOutputFromArgs(args, *output)
 	if err := parseAndCheck(cmdCachePrune, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
+		return writeCacheError(requestedOutput, err)
+	}
+	if err := validateCacheOutput(*output); err != nil {
 		return err
 	}
 	if fs.NArg() != 0 {
@@ -107,6 +116,9 @@ func writeCacheError(output string, err error) error {
 }
 
 func writeCacheOutput(output string, payload any, pretty func()) error {
+	if err := validateCacheOutput(output); err != nil {
+		return err
+	}
 	switch output {
 	case "json":
 		encoded := struct {
@@ -117,7 +129,37 @@ func writeCacheOutput(output string, payload any, pretty func()) error {
 	case "pretty", "":
 		pretty()
 		return nil
+	}
+	return nil
+}
+
+func validateCacheOutput(output string) error {
+	switch output {
+	case "json", "pretty", "":
+		return nil
 	default:
 		return fmt.Errorf("unknown output format %q (valid: pretty, json)", output)
 	}
+}
+
+func cacheOutputFromArgs(args []string, fallback string) string {
+	output := fallback
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--":
+			return output
+		case args[i] == "-o" || args[i] == "--output":
+			if i+1 < len(args) {
+				output = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(args[i], "-o="):
+			output = strings.TrimPrefix(args[i], "-o=")
+		case strings.HasPrefix(args[i], "-o") && len(args[i]) > len("-o"):
+			output = strings.TrimPrefix(args[i], "-o")
+		case strings.HasPrefix(args[i], "--output="):
+			output = strings.TrimPrefix(args[i], "--output=")
+		}
+	}
+	return output
 }
