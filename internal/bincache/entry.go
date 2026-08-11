@@ -119,59 +119,76 @@ func (e Entry) Acquire(ctx context.Context) (*Lease, bool, error) {
 
 // Materialize publishes the entry through a private staging path.
 func (e Entry) Materialize(ctx context.Context, write func(string) error) (published bool, err error) {
-	if write == nil {
-		return false, errors.New("pipeline cache materializer is required")
+	lease, published, err := e.AcquireOrMaterialize(ctx, write)
+	if lease != nil {
+		err = errors.Join(err, lease.Release())
 	}
-	if err := ctx.Err(); err != nil {
-		return false, err
-	}
-	writer, err := e.openLock("writer", cacheLockExclusive)
-	if err != nil {
-		return false, err
-	}
-	defer func() { err = errors.Join(err, cacheUnlock(writer), writer.Close()) }()
-	lease, err := e.openLock("lease", cacheLockExclusive)
-	if err != nil {
-		return false, err
-	}
-	defer func() { err = errors.Join(err, cacheUnlock(lease), lease.Close()) }()
-	if _, statErr := os.Stat(e.binaryPath()); statErr == nil {
-		return false, nil
-	} else if !os.IsNotExist(statErr) {
-		return false, statErr
-	}
-	if err := os.MkdirAll(filepath.Join(e.root, "staging"), 0o700); err != nil {
-		return false, err
-	}
-	stage, err := os.MkdirTemp(filepath.Join(e.root, "staging"), e.key+"-")
-	if err != nil {
-		return false, err
-	}
-	defer func() { err = errors.Join(err, os.RemoveAll(stage)) }()
-	tempBinary := filepath.Join(stage, filepath.Base(e.binaryPath()))
-	if err := write(tempBinary); err != nil {
-		return false, err
-	}
-	info, err := os.Stat(tempBinary)
-	if err != nil {
-		return false, fmt.Errorf("materialized pipeline binary: %w", err)
-	}
-	if !info.Mode().IsRegular() {
-		return false, fmt.Errorf("materialized pipeline binary is not a regular file")
-	}
-	if err := os.MkdirAll(filepath.Dir(e.entryDir()), 0o700); err != nil {
-		return false, err
-	}
-	if err := os.Rename(stage, e.entryDir()); err != nil {
-		return false, err
-	}
-	return true, nil
+	return published, err
 }
 
 // AcquireOrMaterialize returns a held lease for an existing or newly
 // materialized entry.
-func (e Entry) AcquireOrMaterialize(context.Context, func(string) error) (*Lease, bool, error) {
-	return nil, false, errCacheAuthorityUnavailable
+func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) error) (_ *Lease, published bool, err error) {
+	if write == nil {
+		return nil, false, errors.New("pipeline cache materializer is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	writer, err := e.openLock("writer", cacheLockExclusive)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { err = errors.Join(err, cacheUnlock(writer), writer.Close()) }()
+	lease, err := e.openLock("lease", cacheLockExclusive)
+	if err != nil {
+		return nil, false, err
+	}
+	leaseReturned := false
+	defer func() {
+		if !leaseReturned {
+			err = errors.Join(err, cacheUnlock(lease), lease.Close())
+		}
+	}()
+	if _, statErr := os.Stat(e.binaryPath()); statErr == nil {
+		if err := cacheLeaseReady(lease); err != nil {
+			return nil, false, err
+		}
+		leaseReturned = true
+		return &Lease{entry: e, file: lease}, false, nil
+	} else if !os.IsNotExist(statErr) {
+		return nil, false, statErr
+	}
+	if err := os.MkdirAll(filepath.Join(e.root, "staging"), 0o700); err != nil {
+		return nil, false, err
+	}
+	stage, err := os.MkdirTemp(filepath.Join(e.root, "staging"), e.key+"-")
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { err = errors.Join(err, os.RemoveAll(stage)) }()
+	tempBinary := filepath.Join(stage, filepath.Base(e.binaryPath()))
+	if err := write(tempBinary); err != nil {
+		return nil, false, err
+	}
+	info, err := os.Stat(tempBinary)
+	if err != nil {
+		return nil, false, fmt.Errorf("materialized pipeline binary: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil, false, fmt.Errorf("materialized pipeline binary is not a regular file")
+	}
+	if err := os.MkdirAll(filepath.Dir(e.entryDir()), 0o700); err != nil {
+		return nil, false, err
+	}
+	if err := os.Rename(stage, e.entryDir()); err != nil {
+		return nil, false, err
+	}
+	if err := cacheLeaseReady(lease); err != nil {
+		return nil, false, err
+	}
+	leaseReturned = true
+	return &Lease{entry: e, file: lease}, true, nil
 }
 
 // Prune reclaims inactive entries within the requested bounds.

@@ -39,6 +39,11 @@ func cacheUnlock(file *os.File) error {
 	return syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 }
 
+func cacheLeaseReady(file *os.File) error {
+	_, err := cacheLock(file, cacheLockShared)
+	return err
+}
+
 func cacheRetainAcrossExec(file *os.File) (func() error, error) {
 	flags, err := unix.FcntlInt(file.Fd(), unix.F_GETFD, 0)
 	if err != nil {
