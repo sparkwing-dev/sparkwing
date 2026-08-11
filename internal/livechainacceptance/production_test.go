@@ -123,12 +123,15 @@ func (adapter *scriptedIdempotentAdapter) Apply(ctx context.Context, request Eff
 	var result EffectResult
 	var err error
 	switch request.Kind {
-	case EffectDeployA, EffectDeployB, EffectRollback:
+	case EffectDeployA, EffectDeployB:
 		result.Deployment, err = adapter.script.Deploy(ctx, request.Artifact)
+	case EffectRollback:
+		result.Deployment, err = adapter.script.Rollback(ctx, request.Deployment)
 	case EffectNotifyAcceptedA, EffectNotifyAcceptedB, EffectNotifyFailure, EffectNotifyRollback:
 		result.Notification, err = adapter.script.Notify(ctx, request.Notification)
 	case EffectInjectFailure:
 		result.Fault, err = adapter.script.InjectFailure(ctx, request.Deployment)
+		result.Fault.ID = request.ID
 	case EffectRemoveFailure:
 		result.Cleanup, err = adapter.script.RemoveFailure(ctx, request.Cleanup)
 	default:
