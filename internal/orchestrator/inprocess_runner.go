@@ -186,10 +186,19 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 	if err != nil {
 		return nil, err
 	}
-	nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
+	// Wrapper order is a security boundary, not a style choice. Each
+	// wrap makes the previous value its inner sink, so the LAST wrap is
+	// the outermost and sees the record first. The masker has to be
+	// outermost: the annotation and summary wrappers persist rec.Msg
+	// (and rec.Attrs) to the state store as they pass records through,
+	// so any wrapper installed outside the masker would persist the
+	// unredacted record. Every wrapper here forwards Fatal() / Drops()
+	// through the optional-interface probe, so the probe still reaches
+	// the real sink from outside.
 	nlog = wrapNodeLogWithAnnotations(nlog, r.backends.State, runID, node.ID())
 	nlog = wrapNodeLogWithSummary(nlog, r.backends.State, runID, node.ID())
 	nlog = wrapNodeLogWithStepState(nlog, r.backends.State, runID, node.ID())
+	nlog = wrapNodeLogWithMasker(nlog, secrets.MaskerFromContext(ctx))
 	defer func() { _ = nlog.Close() }()
 
 	if err := r.backends.State.StartNode(ctx, runID, node.ID()); err != nil {

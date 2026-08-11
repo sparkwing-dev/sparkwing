@@ -78,6 +78,14 @@ code change to unlock.
 
 ### Security
 
+- **orchestrator:** Redact secret values in persisted node and step annotations
+  and summaries. The node log's masking wrapper sat *inside* the wrappers that
+  write `sparkwing.Annotate` and `sparkwing.Summary` output to the state store,
+  so those wrappers persisted the record before it was redacted: the log file
+  showed `***` while the annotation and summary rows beside it -- read by
+  `runs status`, `runs summary`, and the dashboard -- held the plaintext value.
+  The masker is now outermost. Rotate any secret a job passed to `Annotate` or
+  `Summary`; existing rows are unchanged.
 - **orchestrator:** Redact secret values in the structured attributes of node log
   records, not just their messages. A failed step reports the command's whole
   error text in `attrs.error`, so a secret that reached a command line or its
