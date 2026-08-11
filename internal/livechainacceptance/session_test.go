@@ -45,11 +45,10 @@ type durableEffects struct {
 
 func (e *durableEffects) Apply(ctx context.Context, request EffectRequest) (EffectResult, error) {
 	e.mu.Lock()
+	defer e.mu.Unlock()
 	if result, ok := e.results[request.ID]; ok {
-		e.mu.Unlock()
 		return result, nil
 	}
-	e.mu.Unlock()
 
 	var result EffectResult
 	var err error
@@ -60,6 +59,7 @@ func (e *durableEffects) Apply(ctx context.Context, request EffectRequest) (Effe
 		result.Notification, err = e.script.Notify(ctx, request.Notification)
 	case EffectInjectFailure:
 		result.Fault, err = e.script.InjectFailure(ctx, request.Deployment)
+		result.Fault.ID = request.ID
 	case EffectRemoveFailure:
 		result.Cleanup, err = e.script.RemoveFailure(ctx, request.Cleanup)
 	case EffectRollback:
@@ -70,7 +70,6 @@ func (e *durableEffects) Apply(ctx context.Context, request EffectRequest) (Effe
 	if err != nil {
 		return EffectResult{}, err
 	}
-	e.mu.Lock()
 	if e.results == nil {
 		e.results = make(map[string]EffectResult)
 	}
@@ -80,7 +79,6 @@ func (e *durableEffects) Apply(ctx context.Context, request EffectRequest) (Effe
 	if lose {
 		e.lost = true
 	}
-	e.mu.Unlock()
 	if lose {
 		return EffectResult{}, fmt.Errorf("response lost after durable effect")
 	}
@@ -107,6 +105,34 @@ func TestRunSessionResumesResponseLossWithoutRepeatingEffect(t *testing.T) {
 	}
 	if proof.Rollback.Commit != a.Commit || proof.Production[1].Commit != b.Commit {
 		t.Fatalf("resumed proof = %+v", proof)
+	}
+	for kind, creates := range effects.creates {
+		if creates != 1 {
+			t.Fatalf("effect %s created %d times", kind, creates)
+		}
+	}
+}
+
+func TestConcurrentSessionDriversConvergeWithoutRepeatingEffects(t *testing.T) {
+	a, b, script := validTwoFlowScript(t)
+	store := &memorySessionStore{}
+	effects := &durableEffects{script: script, creates: make(map[EffectKind]int)}
+	deps := DurableDependencies{
+		Authority: testAuthority{}, Production: script, Artifacts: script, Health: script,
+		Faults: script, Sessions: store, Effects: effects,
+	}
+	seed := SessionSeed{ID: "acceptance-session-concurrent", Events: [2]LandEvent{a, b}}
+	results := make(chan error, 2)
+	for range 2 {
+		go func() {
+			_, err := RunSession(context.Background(), seed, deps)
+			results <- err
+		}()
+	}
+	for range 2 {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
 	}
 	for kind, creates := range effects.creates {
 		if creates != 1 {
