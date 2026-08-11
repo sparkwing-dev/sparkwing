@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"sync"
 	"sync/atomic"
@@ -28,6 +29,24 @@ const guardedSessionTerminateGrace = DefaultTerminationGrace
 const guardedSessionTerminateTimeout = 5 * time.Second
 
 const guardedSessionPollInterval = 10 * time.Millisecond
+
+// guardedSessionMaxPollInterval caps the bounded termination poll. The
+// wait it backs off is already limited by a deadline, so the cap only
+// needs to keep a five-second wait from costing hundreds of process-table
+// listings while still noticing an emptied session promptly.
+const guardedSessionMaxPollInterval = 100 * time.Millisecond
+
+// descendantMaxPollInterval caps the unbounded post-SIGKILL wait. A
+// descendant that cannot be killed -- uninterruptible I/O, a stopped
+// process -- makes that wait last as long as the caller's context, so its
+// steady-state cost has to be about one process-table listing per second
+// rather than a hundred.
+const descendantMaxPollInterval = time.Second
+
+// descendantEscalationInterval is the poll interval at which a wait is
+// reported once as slow, so an operator reading the log learns that a
+// process tree is refusing to die instead of only seeing the daemon busy.
+const descendantEscalationInterval = 200 * time.Millisecond
 
 // Info describes one process-table entry.
 type Info struct {
@@ -123,11 +142,44 @@ func TerminateSession(identity SessionIdentity) error {
 	return nil
 }
 
+// backoffPoll yields a poll interval that doubles from a base up to a
+// cap. Waiting for a process tree to disappear is cheap to start and
+// unbounded in the worst case, so the interval that answers quickly when
+// the wait is short must not be the interval a long wait keeps paying.
+type backoffPoll struct {
+	interval time.Duration
+	max      time.Duration
+}
+
+func newBackoffPoll(base, max time.Duration) *backoffPoll {
+	if base <= 0 {
+		base = guardedSessionPollInterval
+	}
+	if max < base {
+		max = base
+	}
+	return &backoffPoll{interval: base, max: max}
+}
+
+// next returns the interval to wait before the next poll and widens the
+// one after it.
+func (p *backoffPoll) next() time.Duration {
+	current := p.interval
+	if p.interval < p.max {
+		p.interval *= 2
+		if p.interval > p.max {
+			p.interval = p.max
+		}
+	}
+	return current
+}
+
 func waitSessionEmpty(identity SessionIdentity, timeout time.Duration) (bool, error) {
 	deadline := time.NewTimer(timeout)
 	defer deadline.Stop()
-	ticker := time.NewTicker(guardedSessionPollInterval)
-	defer ticker.Stop()
+	poll := newBackoffPoll(guardedSessionPollInterval, guardedSessionMaxPollInterval)
+	timer := time.NewTimer(poll.next())
+	defer timer.Stop()
 	for {
 		empty, err := inspectSession(identity, false)
 		if err != nil || empty {
@@ -136,17 +188,60 @@ func waitSessionEmpty(identity SessionIdentity, timeout time.Duration) (bool, er
 		select {
 		case <-deadline.C:
 			return false, nil
-		case <-ticker.C:
+		case <-timer.C:
+			timer.Reset(poll.next())
 		}
 	}
 }
 
+// SessionTable is one process-table snapshot several guarded sessions can
+// be judged against. A daemon watching many sessions at once pays one
+// listing per sweep with it, where asking per session pays one listing --
+// a `ps` fork and a syscall per live process -- for every session on
+// every sweep.
+type SessionTable struct {
+	processes []Info
+}
+
+// CaptureSessionTable snapshots the process table with session
+// identifiers populated.
+func CaptureSessionTable() (*SessionTable, error) {
+	processes, err := sessionProcessTable(true)
+	if err != nil {
+		return nil, err
+	}
+	return &SessionTable{processes: processes}, nil
+}
+
+// SessionEmpty answers [SessionEmpty] for identity against this snapshot,
+// as of the moment the snapshot was taken.
+func (t *SessionTable) SessionEmpty(identity SessionIdentity) (bool, error) {
+	if t == nil {
+		return false, fmt.Errorf("nil process session table")
+	}
+	return inspectSessionTable(t.processes, identity, false)
+}
+
 func inspectSession(identity SessionIdentity, excludeLeader bool) (bool, error) {
-	if identity.LeaderPID <= 1 || identity.SessionID != identity.LeaderPID || identity.BirthToken == "" {
-		return false, fmt.Errorf("invalid guarded session identity")
+	if err := validateSessionIdentity(identity); err != nil {
+		return false, err
 	}
 	processes, err := sessionProcessTable(true)
 	if err != nil {
+		return false, err
+	}
+	return inspectSessionTable(processes, identity, excludeLeader)
+}
+
+func validateSessionIdentity(identity SessionIdentity) error {
+	if identity.LeaderPID <= 1 || identity.SessionID != identity.LeaderPID || identity.BirthToken == "" {
+		return fmt.Errorf("invalid guarded session identity")
+	}
+	return nil
+}
+
+func inspectSessionTable(processes []Info, identity SessionIdentity, excludeLeader bool) (bool, error) {
+	if err := validateSessionIdentity(identity); err != nil {
 		return false, err
 	}
 	var leaderInSession bool
@@ -392,8 +487,10 @@ func (g *Group) emptyDescendants(ctx context.Context, grace time.Duration) error
 }
 
 func (g *Group) waitDescendantsEmpty(ctx context.Context) error {
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
+	poll := newBackoffPoll(guardedSessionPollInterval, descendantMaxPollInterval)
+	timer := time.NewTimer(poll.next())
+	defer timer.Stop()
+	reported := false
 	for {
 		empty, err := g.descendantProbe()(g.id, true, g.session)
 		if err != nil {
@@ -405,7 +502,14 @@ func (g *Group) waitDescendantsEmpty(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return fmt.Errorf("group %d descendants remained: %w", g.id, ctx.Err())
-		case <-ticker.C:
+		case <-timer.C:
+			next := poll.next()
+			if !reported && next >= descendantEscalationInterval {
+				reported = true
+				slog.Warn("process group descendants still live; slowing the wait",
+					"group", g.id, "poll_interval", next.String())
+			}
+			timer.Reset(next)
 		}
 	}
 }

@@ -3,6 +3,7 @@
 package procgroup
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os/exec"
@@ -10,9 +11,16 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+// processTableTimeout bounds one process-table listing. A wedged `ps` --
+// an unresponsive filesystem behind it, a stopped process table reader --
+// would otherwise block its caller forever, and every caller of this
+// package holds ownership of a process tree while it waits.
+const processTableTimeout = 2 * time.Second
 
 func platformSupport() error { return nil }
 
@@ -24,8 +32,13 @@ func configure(cmd *exec.Cmd, session bool) error {
 func ignoreTermination() { signal.Ignore(syscall.SIGTERM) }
 
 func processTable(withSessions bool) ([]Info, error) {
-	out, err := exec.Command("ps", "-axo", "pid=,pgid=,stat=").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), processTableTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,pgid=,stat=").Output()
 	if err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("process table listing did not finish within %s: %w", processTableTimeout, ctx.Err())
+		}
 		return nil, err
 	}
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
