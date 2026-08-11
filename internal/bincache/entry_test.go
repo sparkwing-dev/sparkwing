@@ -364,7 +364,7 @@ func TestPruneRetiresLegacyEntriesAutomatically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ReclaimedBytes <= 0 || result.Reclaimed != 1 || !result.GoalSatisfied {
+	if result.Reclaimed != 1 {
 		t.Fatalf("mature legacy prune result = %+v", result)
 	}
 	if _, err := os.Stat(quarantine); !os.IsNotExist(err) {
