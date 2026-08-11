@@ -1,6 +1,7 @@
 package livechainacceptance
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -34,11 +35,18 @@ type LandEvent struct {
 	Repository             string
 	DestinationRef         string
 	Commit                 string
+	ParentCommit           string
 	Tree                   string
 	CertificationID        string
 	ArtifactManifestDigest string
 	TrustManifestDigest    string
 	SourceDigest           string
+	GitLedgerID            string
+	LandRecordID           string
+	LandLedgerID           string
+	LandSequence           uint64
+	ChainLedgerID          string
+	ChainBasePosition      uint64
 	LandedAt               time.Time
 	Deadline               time.Time
 }
@@ -59,6 +67,36 @@ type Acknowledgement struct {
 	TrustManifestDigest    string
 	LandedAt               time.Time
 	Deadline               time.Time
+	AuthorityDomain        string
+	SignerKeyID            string
+	ImmutableVersion       string
+	LedgerPosition         uint64
+	Signature              string
+	DiscordDelivery        *DiscordDelivery
+}
+
+type DiscordDelivery struct {
+	BridgeIdentity string
+	RequestID      string
+	PayloadDigest  string
+	HTTPStatus     int
+	DeliveredAt    time.Time
+}
+
+type AuthorityReceipt struct {
+	Domain           string
+	LedgerID         string
+	SignerKeyID      string
+	ImmutableVersion string
+	LedgerPosition   uint64
+	VerifiedDigest   string
+	InclusionDigest  string
+	Signature        string
+}
+
+type AuthorityVerifier interface {
+	VerifyLand(context.Context, LandEvent) (AuthorityReceipt, error)
+	VerifyAcknowledgement(context.Context, LandEvent, Acknowledgement) (AuthorityReceipt, error)
 }
 
 type ProductionReceipt struct {
@@ -70,6 +108,7 @@ type ProductionReceipt struct {
 	SuccessAt        time.Time
 	LandToSuccess    time.Duration
 	Acknowledgements []Acknowledgement
+	Authority        []AuthorityReceipt
 }
 
 func DigestAcknowledgement(ack Acknowledgement) string {
@@ -82,15 +121,30 @@ func DigestAcknowledgement(ack Acknowledgement) string {
 	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
-func VerifySelectedChain(event LandEvent, acknowledgements []Acknowledgement) (ProductionReceipt, error) {
+func VerifySelectedChain(ctx context.Context, authority AuthorityVerifier, event LandEvent, acknowledgements []Acknowledgement) (ProductionReceipt, error) {
 	if err := validateLandEvent(event); err != nil {
 		return ProductionReceipt{}, err
+	}
+	if authority == nil {
+		return ProductionReceipt{}, fmt.Errorf("production authority verifier is nil")
+	}
+	landAuthority, err := authority.VerifyLand(ctx, event)
+	if err != nil {
+		return ProductionReceipt{}, fmt.Errorf("verify land authority: %w", err)
+	}
+	if err := validateAuthorityReceipt(landAuthority, event.LandLedgerID, event.SourceDigest, event.LandSequence); err != nil {
+		return ProductionReceipt{}, fmt.Errorf("land authority: %w", err)
+	}
+	if landAuthority.ImmutableVersion != event.GitLedgerID+":"+event.LandRecordID {
+		return ProductionReceipt{}, fmt.Errorf("land authority immutable version does not bind both source ledgers")
 	}
 	if len(acknowledgements) != len(selectedStages) {
 		return ProductionReceipt{}, fmt.Errorf("selected chain has %d acknowledgements, want %d", len(acknowledgements), len(selectedStages))
 	}
 	previousDigest := event.SourceDigest
 	previousTime := event.LandedAt
+	authorities := make([]AuthorityReceipt, 0, len(acknowledgements)+1)
+	authorities = append(authorities, landAuthority)
 	for index, ack := range acknowledgements {
 		if ack.Stage != selectedStages[index] {
 			return ProductionReceipt{}, fmt.Errorf("selected chain stage %d is %q, want %q", index+1, ack.Stage, selectedStages[index])
@@ -107,14 +161,32 @@ func VerifySelectedChain(event LandEvent, acknowledgements []Acknowledgement) (P
 		if ack.Digest != DigestAcknowledgement(ack) {
 			return ProductionReceipt{}, fmt.Errorf("selected chain stage %q body digest mismatch", ack.Stage)
 		}
+		authorityReceipt, err := authority.VerifyAcknowledgement(ctx, event, ack)
+		if err != nil {
+			return ProductionReceipt{}, fmt.Errorf("selected chain stage %q authority: %w", ack.Stage, err)
+		}
+		if err := validateAuthorityReceipt(authorityReceipt, event.ChainLedgerID, ack.Digest, event.ChainBasePosition+uint64(index)); err != nil {
+			return ProductionReceipt{}, fmt.Errorf("selected chain stage %q authority: %w", ack.Stage, err)
+		}
+		if authorityReceipt.Domain != ack.AuthorityDomain || authorityReceipt.SignerKeyID != ack.SignerKeyID || authorityReceipt.ImmutableVersion != ack.ImmutableVersion || authorityReceipt.LedgerPosition != ack.LedgerPosition || authorityReceipt.Signature != ack.Signature {
+			return ProductionReceipt{}, fmt.Errorf("selected chain stage %q claimed authority differs from authenticated authority", ack.Stage)
+		}
 		if ack.StageAt.Before(previousTime) {
 			return ProductionReceipt{}, fmt.Errorf("selected chain stage %q precedes its predecessor", ack.Stage)
 		}
-		if ack.StageAt.After(event.Deadline) {
+		if !ack.StageAt.Before(event.Deadline) {
 			return ProductionReceipt{}, fmt.Errorf("selected chain stage %q missed the production deadline", ack.Stage)
+		}
+		if ack.Stage == Discord {
+			if err := validateDiscordDelivery(event, ack); err != nil {
+				return ProductionReceipt{}, err
+			}
+		} else if ack.DiscordDelivery != nil {
+			return ProductionReceipt{}, fmt.Errorf("selected chain stage %q carries Discord delivery evidence", ack.Stage)
 		}
 		previousDigest = ack.Digest
 		previousTime = ack.StageAt
+		authorities = append(authorities, authorityReceipt)
 	}
 	terminal := acknowledgements[len(acknowledgements)-1]
 	return ProductionReceipt{
@@ -122,14 +194,15 @@ func VerifySelectedChain(event LandEvent, acknowledgements []Acknowledgement) (P
 		TerminalStage: terminal.Stage, TerminalDigest: terminal.Digest,
 		SuccessAt: terminal.StageAt, LandToSuccess: terminal.StageAt.Sub(event.LandedAt),
 		Acknowledgements: append([]Acknowledgement(nil), acknowledgements...),
+		Authority:        authorities,
 	}, nil
 }
 
 func validateLandEvent(event LandEvent) error {
-	if event.EventID == "" || event.Repository == "" || event.DestinationRef != "refs/heads/main" || event.CertificationID == "" {
+	if event.EventID == "" || event.Repository == "" || event.DestinationRef != "refs/heads/main" || event.CertificationID == "" || event.GitLedgerID == "" || event.LandRecordID == "" || event.LandLedgerID == "" || event.LandSequence == 0 || event.ChainLedgerID == "" || event.ChainBasePosition == 0 || event.LandLedgerID == event.ChainLedgerID {
 		return fmt.Errorf("land event identity is incomplete")
 	}
-	if !commitPattern.MatchString(event.Commit) || !commitPattern.MatchString(event.Tree) {
+	if !commitPattern.MatchString(event.Commit) || !commitPattern.MatchString(event.ParentCommit) || !commitPattern.MatchString(event.Tree) {
 		return fmt.Errorf("land event Git identity is invalid")
 	}
 	if !digestPattern.MatchString(event.ArtifactManifestDigest) || !digestPattern.MatchString(event.TrustManifestDigest) || !digestPattern.MatchString(event.SourceDigest) {
@@ -137,6 +210,21 @@ func validateLandEvent(event LandEvent) error {
 	}
 	if event.LandedAt.IsZero() || !event.Deadline.Equal(event.LandedAt.Add(productionDeadline)) {
 		return fmt.Errorf("land event deadline is not exactly five minutes after landing")
+	}
+	return nil
+}
+
+func validateAuthorityReceipt(receipt AuthorityReceipt, ledgerID, digest string, position uint64) error {
+	if receipt.Domain != "sparkwing-production-chain-v1" || receipt.LedgerID != ledgerID || receipt.SignerKeyID == "" || receipt.ImmutableVersion == "" || receipt.LedgerPosition != position || receipt.VerifiedDigest != digest || !digestPattern.MatchString(receipt.InclusionDigest) || receipt.Signature == "" {
+		return fmt.Errorf("authenticated append-only ledger receipt mismatch")
+	}
+	return nil
+}
+
+func validateDiscordDelivery(event LandEvent, ack Acknowledgement) error {
+	delivery := ack.DiscordDelivery
+	if delivery == nil || delivery.BridgeIdentity == "" || delivery.RequestID == "" || !digestPattern.MatchString(delivery.PayloadDigest) || delivery.HTTPStatus < 200 || delivery.HTTPStatus >= 300 || !delivery.DeliveredAt.Equal(ack.StageAt) || !delivery.DeliveredAt.Before(event.Deadline) {
+		return fmt.Errorf("terminal Discord acknowledgement lacks authenticated HTTP delivery")
 	}
 	return nil
 }
