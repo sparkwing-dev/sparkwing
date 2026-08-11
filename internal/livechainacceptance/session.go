@@ -264,6 +264,9 @@ func validateIntentAuthority(ctx context.Context, deps DurableDependencies, sess
 			return reconcilePriorEffect(ctx, deps.Effects, session, EffectNotifyFailure)
 		}
 	case SessionRollbackIntent:
+		if err := reconcilePriorEffect(ctx, deps.Effects, session, EffectDeployA); err != nil {
+			return err
+		}
 		return reconcilePriorEffect(ctx, deps.Effects, session, EffectRemoveFailure)
 	case SessionRollbackNotifyIntent:
 		if err := reconcilePriorEffect(ctx, deps.Effects, session, EffectRollback); err != nil {
