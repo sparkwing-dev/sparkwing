@@ -9,21 +9,34 @@ import (
 
 type testAuthority struct{}
 
+type countingAuthority struct{ acknowledgementCalls int }
+
+func (c *countingAuthority) VerifyLand(ctx context.Context, event LandEvent) (AuthorityReceipt, error) {
+	return testAuthority{}.VerifyLand(ctx, event)
+}
+
+func (c *countingAuthority) VerifyAcknowledgement(ctx context.Context, event LandEvent, ack Acknowledgement) (AuthorityReceipt, error) {
+	c.acknowledgementCalls++
+	return testAuthority{}.VerifyAcknowledgement(ctx, event, ack)
+}
+
 func (testAuthority) VerifyLand(_ context.Context, event LandEvent) (AuthorityReceipt, error) {
 	return AuthorityReceipt{
-		Domain: "sparkwing-production-chain-v1", SignerKeyID: "production-key",
+		Domain: "sparkwing-production-chain-v1", LedgerID: event.LandLedgerID, SignerKeyID: "production-key",
 		ImmutableVersion: event.GitLedgerID + ":" + event.LandRecordID,
-		LedgerPosition:   event.LedgerPosition, VerifiedDigest: event.SourceDigest, InclusionDigest: testDigest,
+		LedgerPosition:   event.LandSequence, VerifiedDigest: event.SourceDigest, InclusionDigest: testDigest,
+		Signature: "land-signature",
 	}, nil
 }
 
-func (testAuthority) VerifyAcknowledgement(_ context.Context, _ LandEvent, ack Acknowledgement) (AuthorityReceipt, error) {
+func (testAuthority) VerifyAcknowledgement(_ context.Context, event LandEvent, ack Acknowledgement) (AuthorityReceipt, error) {
 	if ack.AuthorityDomain != "sparkwing-production-chain-v1" || ack.SignerKeyID == "" || ack.ImmutableVersion == "" || ack.Signature == "" {
 		return AuthorityReceipt{}, fmt.Errorf("unauthenticated acknowledgement")
 	}
 	return AuthorityReceipt{
-		Domain: ack.AuthorityDomain, SignerKeyID: ack.SignerKeyID, ImmutableVersion: ack.ImmutableVersion,
+		Domain: ack.AuthorityDomain, LedgerID: event.ChainLedgerID, SignerKeyID: ack.SignerKeyID, ImmutableVersion: ack.ImmutableVersion,
 		LedgerPosition: ack.LedgerPosition, VerifiedDigest: ack.Digest, InclusionDigest: testDigest,
+		Signature: ack.Signature,
 	}, nil
 }
 
@@ -36,11 +49,13 @@ const (
 func validEvent() LandEvent {
 	landed := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
 	return LandEvent{
-		EventID: "land-event-1", Repository: "sparkwing-dev/regent", DestinationRef: "refs/heads/main",
+		EventID: "land-event-1", Repository: "sparkwing-dev/application", DestinationRef: "refs/heads/main",
 		Commit: testCommit, ParentCommit: "1123456789abcdef0123456789abcdef01234567", Tree: testTree, CertificationID: "ordinary-land-v1",
 		ArtifactManifestDigest: testDigest, TrustManifestDigest: testDigest,
 		SourceDigest: testDigest, GitLedgerID: "git-ledger-1", LandRecordID: "land-record-1",
-		LedgerPosition: 100, LandedAt: landed, Deadline: landed.Add(5 * time.Minute),
+		LandLedgerID: "ordinary-land-ledger", LandSequence: 100,
+		ChainLedgerID: "chain-ledger-1", ChainBasePosition: 500,
+		LandedAt: landed, Deadline: landed.Add(5 * time.Minute),
 	}
 }
 
@@ -58,7 +73,7 @@ func validChain(t *testing.T, event LandEvent) []Acknowledgement {
 			ArtifactManifestDigest: event.ArtifactManifestDigest,
 			TrustManifestDigest:    event.TrustManifestDigest, LandedAt: event.LandedAt, Deadline: event.Deadline,
 			AuthorityDomain: "sparkwing-production-chain-v1", SignerKeyID: "production-key",
-			ImmutableVersion: fmt.Sprintf("version-%d", i+1), LedgerPosition: event.LedgerPosition + uint64(i) + 1,
+			ImmutableVersion: fmt.Sprintf("version-%d", i+1), LedgerPosition: event.ChainBasePosition + uint64(i),
 			Signature: "authenticated-signature",
 		}
 		if stage == Discord {
@@ -172,5 +187,35 @@ func TestVerifySelectedAcknowledgementChainRejectsUnauthenticatedOrUndeliveredTe
 				t.Fatal("unauthenticated or undelivered terminal acknowledgement was accepted")
 			}
 		})
+	}
+}
+
+func TestVerifySelectedAcknowledgementChainAuthenticatesEveryStage(t *testing.T) {
+	event := validEvent()
+	authority := &countingAuthority{}
+	if _, err := VerifySelectedChain(context.Background(), authority, event, validChain(t, event)); err != nil {
+		t.Fatal(err)
+	}
+	if authority.acknowledgementCalls != len(selectedStages) {
+		t.Fatalf("authority calls = %d, want %d", authority.acknowledgementCalls, len(selectedStages))
+	}
+	mutations := map[string]func(*Acknowledgement){
+		"domain":            func(a *Acknowledgement) { a.AuthorityDomain = "other-domain" },
+		"signer":            func(a *Acknowledgement) { a.SignerKeyID = "" },
+		"immutable version": func(a *Acknowledgement) { a.ImmutableVersion = "" },
+		"position":          func(a *Acknowledgement) { a.LedgerPosition++ },
+		"signature":         func(a *Acknowledgement) { a.Signature = "" },
+	}
+	for stageIndex := range selectedStages {
+		for name, mutate := range mutations {
+			t.Run(fmt.Sprintf("%s/%s", selectedStages[stageIndex], name), func(t *testing.T) {
+				acks := validChain(t, event)
+				mutate(&acks[stageIndex])
+				acks[stageIndex].Digest = DigestAcknowledgement(acks[stageIndex])
+				if _, err := VerifySelectedChain(context.Background(), testAuthority{}, event, acks); err == nil {
+					t.Fatal("unauthenticated stage was accepted")
+				}
+			})
+		}
 	}
 }

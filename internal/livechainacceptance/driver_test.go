@@ -14,6 +14,16 @@ type scriptedAcceptance struct {
 	log         []string
 	notifyErr   NotificationKind
 	removeCalls int
+	clock       time.Time
+}
+
+func (s *scriptedAcceptance) tick() time.Time {
+	if s.clock.IsZero() {
+		s.clock = time.Date(2026, 8, 11, 13, 0, 0, 0, time.UTC)
+	} else {
+		s.clock = s.clock.Add(time.Second)
+	}
+	return s.clock
 }
 
 func (s *scriptedAcceptance) Next(_ context.Context) (LandEvent, error) {
@@ -32,17 +42,17 @@ func (s *scriptedAcceptance) SelectedChain(_ context.Context, event LandEvent) (
 
 func (s *scriptedAcceptance) VerifyArtifact(_ context.Context, event LandEvent) (Artifact, error) {
 	s.log = append(s.log, "verify:"+event.EventID)
-	return Artifact{EventID: event.EventID, Commit: event.Commit, Tree: event.Tree, Digest: event.ArtifactManifestDigest}, nil
+	return Artifact{EventID: event.EventID, Commit: event.Commit, Tree: event.Tree, Digest: event.ArtifactManifestDigest, VerifiedAt: s.tick()}, nil
 }
 
 func (s *scriptedAcceptance) Deploy(_ context.Context, artifact Artifact) (Deployment, error) {
 	s.log = append(s.log, "deploy:"+artifact.Commit)
-	return Deployment{EventID: artifact.EventID, Commit: artifact.Commit, Tree: artifact.Tree, Digest: artifact.Digest, UID: "deployment-" + artifact.Commit}, nil
+	return Deployment{EventID: artifact.EventID, Commit: artifact.Commit, Tree: artifact.Tree, Digest: artifact.Digest, UID: "deployment-" + artifact.Commit, DeployedAt: s.tick()}, nil
 }
 
 func (s *scriptedAcceptance) Healthy(_ context.Context, deployment Deployment) (HealthReceipt, error) {
 	s.log = append(s.log, "health:"+deployment.Commit)
-	return HealthReceipt{EventID: deployment.EventID, Commit: deployment.Commit, Tree: deployment.Tree, Digest: deployment.Digest, DeploymentUID: deployment.UID, Healthy: true, ObservedAt: time.Now()}, nil
+	return HealthReceipt{EventID: deployment.EventID, Commit: deployment.Commit, Tree: deployment.Tree, Digest: deployment.Digest, DeploymentUID: deployment.UID, Healthy: true, ObservedAt: s.tick()}, nil
 }
 
 func (s *scriptedAcceptance) Notify(_ context.Context, req NotificationRequest) (NotificationReceipt, error) {
@@ -50,28 +60,29 @@ func (s *scriptedAcceptance) Notify(_ context.Context, req NotificationRequest) 
 	if req.Kind == s.notifyErr {
 		return NotificationReceipt{}, fmt.Errorf("notification failed")
 	}
-	return NotificationReceipt{NotificationRequest: req, BridgeIdentity: "acceptance-discord-bridge", RequestID: "request-" + string(req.Kind), PayloadDigest: testDigest, HTTPStatus: 204, DeliveredAt: time.Now()}, nil
+	return NotificationReceipt{NotificationRequest: req, BridgeIdentity: "acceptance-discord-bridge", RequestID: "request-" + string(req.Kind), PayloadDigest: testDigest, HTTPStatus: 204, DeliveredAt: s.tick()}, nil
 }
 
 func (s *scriptedAcceptance) InjectFailure(_ context.Context, deployment Deployment) (Fault, error) {
 	s.log = append(s.log, "fault:"+deployment.Commit)
-	return Fault{ID: "fault-b", DeploymentUID: deployment.UID, Digest: deployment.Digest}, nil
+	return Fault{EventID: deployment.EventID, ID: "fault-b", DeploymentUID: deployment.UID, Digest: deployment.Digest, InjectedAt: s.tick()}, nil
 }
 
 func (s *scriptedAcceptance) ObserveFailure(_ context.Context, fault Fault) (FailureReceipt, error) {
 	s.log = append(s.log, "failure:"+fault.DeploymentUID)
-	return FailureReceipt{FaultID: fault.ID, DeploymentUID: fault.DeploymentUID, Digest: fault.Digest, Unhealthy: true, ObservedAt: time.Now()}, nil
+	return FailureReceipt{FaultID: fault.ID, DeploymentUID: fault.DeploymentUID, Digest: fault.Digest, Unhealthy: true, ObservedAt: s.tick()}, nil
 }
 
-func (s *scriptedAcceptance) RemoveFailure(_ context.Context, fault Fault) (CleanupReceipt, error) {
-	s.log = append(s.log, "remove:"+fault.ID)
+func (s *scriptedAcceptance) RemoveFailure(_ context.Context, request CleanupRequest) (CleanupReceipt, error) {
+	s.log = append(s.log, "remove:"+request.FaultID)
 	s.removeCalls++
-	return CleanupReceipt{FaultID: fault.ID, NoResidue: true, RemovedAt: time.Now()}, nil
+	return CleanupReceipt{FaultID: request.FaultID, EventID: request.EventID, DeploymentUID: request.DeploymentUID, Digest: request.Digest, NoResidue: true, RemovedAt: s.tick()}, nil
 }
 
 func (s *scriptedAcceptance) Rollback(_ context.Context, deployment Deployment) (Deployment, error) {
 	s.log = append(s.log, "rollback:"+deployment.Commit)
 	deployment.UID = "rollback-" + deployment.Commit
+	deployment.DeployedAt = s.tick()
 	return deployment, nil
 }
 
@@ -84,7 +95,7 @@ func TestRunTwoOrdinaryFlowsAndRollback(t *testing.T) {
 	b.Tree = "29abcdef0123456789abcdef0123456789abcdef"
 	b.GitLedgerID = "git-ledger-2"
 	b.LandRecordID = "land-record-2"
-	b.LedgerPosition = a.LedgerPosition + 1
+	b.LandSequence = a.LandSequence + 1
 	b.LandedAt = a.LandedAt.Add(30 * time.Second)
 	b.Deadline = b.LandedAt.Add(5 * time.Minute)
 	script := &scriptedAcceptance{
@@ -123,7 +134,7 @@ func TestRunTwoOrdinaryFlowsRejectsNonconsecutiveCommitBeforeEffects(t *testing.
 	b.ParentCommit = "3123456789abcdef0123456789abcdef01234567"
 	b.GitLedgerID = "git-ledger-2"
 	b.LandRecordID = "land-record-2"
-	b.LedgerPosition = a.LedgerPosition + 1
+	b.LandSequence = a.LandSequence + 1
 	b.LandedAt = a.LandedAt.Add(time.Second)
 	b.Deadline = b.LandedAt.Add(5 * time.Minute)
 	script := &scriptedAcceptance{events: []LandEvent{a, b}}
@@ -144,7 +155,7 @@ func TestRunTwoOrdinaryFlowsAlwaysRemovesInjectedFailure(t *testing.T) {
 	b.Tree = "29abcdef0123456789abcdef0123456789abcdef"
 	b.GitLedgerID = "git-ledger-2"
 	b.LandRecordID = "land-record-2"
-	b.LedgerPosition = a.LedgerPosition + 1
+	b.LandSequence = a.LandSequence + 1
 	b.LandedAt = a.LandedAt.Add(time.Second)
 	b.Deadline = b.LandedAt.Add(5 * time.Minute)
 	script := &scriptedAcceptance{
