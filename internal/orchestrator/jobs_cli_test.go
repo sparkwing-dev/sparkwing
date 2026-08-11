@@ -461,6 +461,9 @@ func TestJobStatus_ShowsLogPath(t *testing.T) {
 	if !strings.Contains(text.String(), want) {
 		t.Fatalf("status missing log_path %q in:\n%s", want, text.String())
 	}
+	if strings.Contains(text.String(), "not present on this machine") {
+		t.Errorf("a run whose dir is right here must not be marked absent:\n%s", text.String())
+	}
 
 	var jsonOut bytes.Buffer
 	if err := orchestrator.JobStatus(context.Background(), p, res.RunID, orchestrator.StatusOpts{JSON: true}, &jsonOut); err != nil {
@@ -523,6 +526,59 @@ func TestJobStatus_OmitsLogPathWhenRunHasNone(t *testing.T) {
 	}
 	if v, ok := payload["log_path"]; ok {
 		t.Errorf("json log_path present for a run without one: %v", v)
+	}
+}
+
+// The recorded path is the executing machine's. A cluster pod with no
+// logs backend records its own pod-local directory, and a laptop
+// reading that run back gets the string verbatim -- so the text output
+// says the directory is not here rather than inviting an `ls` against
+// someone else's filesystem. JSON still reports it as recorded.
+func TestJobStatus_MarksLogPathAbsentOnThisMachine(t *testing.T) {
+	p := newPaths(t)
+	ctx := context.Background()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	const runID = "run-executed-elsewhere"
+	const podPath = "/root/.sparkwing/runs/run-executed-elsewhere"
+	if err := st.CreateRun(ctx, store.Run{
+		ID:        runID,
+		Pipeline:  "orch-ok",
+		Status:    "success",
+		StartedAt: time.Now(),
+		Invocation: map[string]any{
+			"run_id":   runID,
+			"pipeline": "orch-ok",
+			"log_path": podPath,
+		},
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	var text bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, runID, orchestrator.StatusOpts{}, &text); err != nil {
+		t.Fatalf("JobStatus: %v", err)
+	}
+	if !strings.Contains(text.String(), podPath) {
+		t.Fatalf("status dropped the recorded log_path:\n%s", text.String())
+	}
+	if !strings.Contains(text.String(), "not present on this machine") {
+		t.Fatalf("status must mark a log_path that is not here:\n%s", text.String())
+	}
+
+	var jsonOut bytes.Buffer
+	if err := orchestrator.JobStatus(ctx, p, runID, orchestrator.StatusOpts{JSON: true}, &jsonOut); err != nil {
+		t.Fatalf("JobStatus json: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(jsonOut.Bytes(), &payload); err != nil {
+		t.Fatalf("json parse: %v\n%s", err, jsonOut.String())
+	}
+	if payload["log_path"] != podPath {
+		t.Errorf("json log_path = %v, want the recorded %q unannotated", payload["log_path"], podPath)
 	}
 }
 

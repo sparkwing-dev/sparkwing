@@ -324,7 +324,16 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 		fmt.Fprintf(out, "%s %s @ %s\n", label("git:      "), run.GitBranch, shortSHA(run.GitSHA))
 	}
 	if p := runLogPath(run); p != "" {
-		fmt.Fprintf(out, "%s %s\n", label("log_path: "), p)
+		line := p
+		if _, err := os.Stat(p); err != nil {
+			// The path is the executing machine's, and this reader may
+			// not be that machine (a cluster pod without a logs backend
+			// records its pod-local directory, which a laptop reading
+			// with --profile sees verbatim). Say so instead of letting
+			// the operator run `ls` on someone else's filesystem.
+			line += color.Dim(" (not present on this machine)")
+		}
+		fmt.Fprintf(out, "%s %s\n", label("log_path: "), line)
 	}
 	if runCanDisplayAdmissionWait(run) {
 		if detail, ok := latestAdmissionWait(ctx, b, runID); ok {
@@ -360,12 +369,13 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 	return nil
 }
 
-// runLogPath returns the local log directory the run recorded on its
-// invocation snapshot at run_start (see buildRunInvocation). Empty for
-// runs whose logs never touched a local filesystem, and for runs that
-// predate the field -- both cases drop the line rather than guessing a
-// path under this reader's sparkwing home, which would be someone
-// else's directory whenever the run executed elsewhere.
+// runLogPath returns the log directory the run recorded on its
+// invocation snapshot at run_start (see buildRunInvocation). The path
+// belongs to whichever machine executed the run, which is not
+// necessarily the one reading it here. Empty for runs whose logs never
+// touched a filesystem, and for runs that predate the field -- both
+// cases drop the line rather than guessing a path under this reader's
+// sparkwing home.
 func runLogPath(run *store.Run) string {
 	if run == nil {
 		return ""

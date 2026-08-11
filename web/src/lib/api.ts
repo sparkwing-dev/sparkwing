@@ -180,6 +180,7 @@ export interface RunInvocation {
   pipeline?: string;
   binary_source?: string; // cached | compiled | artifact-store | gitcache
   cwd?: string;
+  log_path?: string; // run log dir on the machine that executed the run
   args?: Record<string, string>;
   flags?: Record<string, unknown>;
   inputs_hash?: string;

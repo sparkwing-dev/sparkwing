@@ -1017,13 +1017,17 @@ func parentTriggerRepoDir() string {
 	return ""
 }
 
-// logDir is the run's local log directory as reported by the log
-// backend that will write it (see localRunLogDir). It is recorded as
-// log_path so a caller holding only the run id can read the logs
-// straight off disk instead of scraping them out of the stream. Runs
-// whose logs live on a controller or in an object store pass "" and
-// carry no log_path at all: a missing field is a truthful "not here",
-// a fabricated one sends readers to an empty directory.
+// logDir is the run's log directory on the machine executing it, as
+// reported by the log backend that will write it (see
+// localRunLogDir). It is recorded as log_path so a caller holding only
+// the run id can read the logs straight off disk instead of scraping
+// them out of the stream. It is the executor's path, not the reader's:
+// a cluster pod with no logs backend records its own pod-local
+// directory, and a laptop later reading that run through --profile
+// gets that string verbatim. Runs whose logs live on a controller or
+// in an object store pass "" and carry no log_path at all -- a missing
+// field is a truthful "not here", a fabricated one sends readers to a
+// directory that holds nothing.
 func buildRunInvocation(opts Options, runID, logDir string) map[string]any {
 	inv := map[string]any{
 		"run_id":   runID,

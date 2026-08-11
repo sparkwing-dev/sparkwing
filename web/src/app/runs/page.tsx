@@ -2643,6 +2643,7 @@ function RunDetailPane({
     const inv = run.invocation ?? {};
     if (has(inv.binary_source)) push("binary");
     if (has(inv.cwd)) push("cwd");
+    if (has(inv.log_path)) push("log_path");
     if (has(inv.reproducer)) push("reproducer");
     if (has(inv.inputs_hash)) push("inputs-hash");
     if (has(inv.plan_hash)) push("plan-hash");

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -203,20 +204,54 @@ func canonicalLocalStore(b StateBackend) *store.Store {
 	return nil
 }
 
-// localRunLogDir returns the filesystem directory this log backend
-// writes the run's node logs into, or "" when the logs do not land on
-// this machine (controller HTTP logs, S3 log stores). Same shape as
+// localRunLogDir returns the absolute filesystem directory this log
+// backend writes the run's node logs into, or "" when the logs do not
+// land on the executing machine's disk. Same shape as
 // canonicalLocalStore: unwrap to the concrete local implementation and
 // ask it, so the answer comes from the Paths the log writer actually
 // uses instead of a second guess about where a run "should" write.
-// Callers surface the result as the run's log_path; an empty string
-// means there is nothing local to point at and the field is omitted
-// rather than fabricated.
+// Any future decorator around LogBackend (a tee, a mirror) must be
+// added to the switch below, or runs behind it silently lose the
+// field.
+//
+// The directory is ensured, not just named: the entry points differ on
+// who creates it (RunLocal ensures it up front; the worker and local
+// trigger paths reach Run() directly and would otherwise not create it
+// until the first node opens a log), and a run that dies during
+// planning must not advertise a directory that never existed. Creating
+// it here is the same idempotent MkdirAll localLogs.OpenNodeLog already
+// performs, hoisted early enough that the recorded path is true when it
+// is recorded. Callers surface the result as the run's log_path; an
+// empty string means there is nothing local to point at, and the field
+// is omitted rather than fabricated.
+//
+// KNOWN FALSE NEGATIVE: a profile whose logs backend is a filesystem
+// log store (`logs: {type: fs}`) writes to local disk through
+// HTTPLogs/storage.LogStore, which exposes no run-directory accessor,
+// so those runs report no log_path even though the files are local.
+// Fixing it means adding a run-dir accessor to storage.LogStore and
+// threading it through HTTPLogs.
 func localRunLogDir(b LogBackend, runID string) string {
-	if l, ok := b.(localLogs); ok {
-		return l.paths.RunDir(runID)
+	var p Paths
+	switch l := b.(type) {
+	case localLogs:
+		p = l.paths
+	case *localLogs:
+		p = l.paths
+	default:
+		return ""
 	}
-	return ""
+	if err := p.EnsureRunDir(runID); err != nil {
+		return ""
+	}
+	dir, err := filepath.Abs(p.RunDir(runID))
+	if err != nil {
+		return ""
+	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return ""
+	}
+	return dir
 }
 
 type localState struct {

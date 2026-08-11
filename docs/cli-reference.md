@@ -4035,7 +4035,7 @@ sparkwing runs find --git-sha abc --wait -q --profile prod | xargs -n1 -I{} spar
 
 Emit one run's raw JSON (run + nodes)
 
-Prints a combined {run, nodes} JSON blob to stdout. Consumed by agents and scripts that need the full store shape rather than the summary 'status' command renders.
+Prints a combined {run, nodes} JSON blob to stdout, plus a top-level log_path when the run wrote its logs to a filesystem (the directory on the machine that executed it). Consumed by agents and scripts that need the full store shape rather than the summary 'status' command renders.
 
 ### Flags
 
@@ -4425,11 +4425,14 @@ Prints a summary of the run (pipeline, status, node states).
 With --follow, polls until the run reaches a terminal status. Pass
 --profile NAME to read from a remote controller.
 
-Runs that wrote their logs to this machine also report log_path: the
-directory holding the run's per-node .log files and _envelope.ndjson.
-With -o json it is a top-level field, so an agent holding a run id can
-read the logs off disk instead of scraping them out of a stream. Runs
-whose logs live on a controller or in an object store omit it.
+Runs that wrote their logs to a filesystem also report log_path: the
+directory holding the run's per-node .log files, on the machine that
+executed the run. With -o json it is a top-level field, so an agent
+holding a run id can read the logs off disk instead of scraping them
+out of a stream. That machine may not be this one -- a cluster run
+records its own pod-local path -- so the text output marks a directory
+that is not present here; the JSON reports it as recorded. Runs whose
+logs live on a controller or in an object store omit it.
 
 Exit code contract: after rendering, 'jobs status' exits 0 only when
 status == success. Any non-success terminal status (failed, cancelled)
