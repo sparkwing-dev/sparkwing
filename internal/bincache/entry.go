@@ -53,6 +53,17 @@ type PruneResult struct {
 	Exhausted      bool  `json:"exhausted"`
 }
 
+// CacheStatus reports the measured managed and legacy pipeline-cache state.
+type CacheStatus struct {
+	ObservedBytes int64 `json:"observed_bytes"`
+	EntryCount    int   `json:"entry_count"`
+	ActiveEntries int   `json:"active_entries"`
+	ActiveBytes   int64 `json:"active_bytes"`
+	BusyEntries   int   `json:"busy_entries"`
+	LegacyBytes   int64 `json:"legacy_bytes"`
+	LegacyEntries int   `json:"legacy_entries"`
+}
+
 // PipelineEntry resolves key inside Sparkwing's managed pipeline cache.
 func PipelineEntry(key string) (Entry, error) {
 	return pipelineEntryAt(filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema), key)
@@ -268,6 +279,11 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 	result.GoalSatisfied = result.ReclaimedBytes >= opts.ReclaimBytes
 	result.Exhausted = !result.GoalSatisfied && (result.Examined >= opts.MaxEntries || result.Examined == len(candidates))
 	return result, pruneErr
+}
+
+// Status measures the pipeline cache without deleting entries.
+func Status(context.Context, string) (CacheStatus, error) {
+	return CacheStatus{}, errCacheAuthorityUnavailable
 }
 
 func (e Entry) binaryPath() string {
