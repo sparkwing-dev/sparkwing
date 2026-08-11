@@ -43,6 +43,13 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 	stop := cl.cancelOnDone(ctx)
 	defer stop()
 	retry := newRetry("acquire", 0)
+	// safety: a queue position pushed by the daemon is proof this exchange is working, so it returns the pacing to its base the way a delivered frame does for a guard watch; without it a long queue wait inherits the backoff an earlier blink left behind.
+	progressed := func(q wingwire.Queued) {
+		retry.reset()
+		if onQueued != nil {
+			onQueued(q)
+		}
+	}
 	for {
 		if err := cl.write(&req); err != nil {
 			if werr := retry.wait(ctx, err); werr != nil {
@@ -53,7 +60,7 @@ func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, on
 			}
 			continue
 		}
-		lease, terminal, transient := cl.readGrant(req, onQueued)
+		lease, terminal, transient := cl.readGrant(req, progressed)
 		if transient == nil {
 			return lease, terminal
 		}

@@ -32,10 +32,21 @@ type retry struct {
 	limit    int
 	attempts int
 	delay    time.Duration
+	max      time.Duration
 }
 
 func newRetry(op string, limit int) *retry {
-	return &retry{op: op, limit: limit, delay: retryBaseDelay}
+	return newRetryCapped(op, limit, retryMaxDelay)
+}
+
+// newRetryCapped is [newRetry] with a tighter ceiling, for waits whose
+// own budget is measured in wall-clock time: pacing them to a full second
+// would spend that budget on sleeping rather than on looking.
+func newRetryCapped(op string, limit int, max time.Duration) *retry {
+	if max < retryBaseDelay {
+		max = retryBaseDelay
+	}
+	return &retry{op: op, limit: limit, delay: retryBaseDelay, max: max}
 }
 
 // wait records one failed attempt and sleeps before the next. It returns
@@ -48,10 +59,10 @@ func (r *retry) wait(ctx context.Context, cause error) error {
 		return fmt.Errorf("wingd/client: %s failed after %d attempts: %w", r.op, r.attempts, cause)
 	}
 	delay := jitter(r.delay)
-	if r.delay < retryMaxDelay {
+	if r.delay < r.max {
 		r.delay *= 2
-		if r.delay > retryMaxDelay {
-			r.delay = retryMaxDelay
+		if r.delay > r.max {
+			r.delay = r.max
 		}
 	}
 	return sleep(ctx, delay)
@@ -63,6 +74,13 @@ func (r *retry) reset() {
 	r.attempts = 0
 	r.delay = retryBaseDelay
 }
+
+// dialPaceMax caps the waits inside one connect: the socket-appears wait
+// after a spawn and the wait for a predecessor daemon to release the
+// election. Both already have a wall-clock budget, so their pacing only
+// needs to stop them re-dialling twenty times a second -- a quarter
+// second still notices a daemon that has just bound.
+const dialPaceMax = 250 * time.Millisecond
 
 // jitter spreads a delay over [d/2, d] so many runs reconnecting to the
 // same restarted daemon do not arrive in one burst.

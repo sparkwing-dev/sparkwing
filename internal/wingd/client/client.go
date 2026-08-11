@@ -226,15 +226,22 @@ func (e *CancelledError) Error() string {
 }
 
 // A detached spawn cannot distinguish slow initialization from process death.
-// Keep one startup owner and allow its socket up to thirty seconds to appear
-// under the default backoff. Starting replacements during that interval adds
-// election contention and can prevent every otherwise healthy daemon from
-// reaching readiness.
+// Keep one startup owner and allow its socket thirty seconds to appear.
+// Starting replacements during that interval adds election contention and can
+// prevent every otherwise healthy daemon from reaching readiness. The budget
+// is wall-clock: how long the socket may take is a property of the machine,
+// not of how often this client looks for it.
 const (
 	defaultBackoff   = 50 * time.Millisecond
 	dialsPerSpawn    = 600
 	maxSpawnAttempts = 1
 )
+
+// daemonStartupBudget is how long a spawned daemon has to bind its socket
+// before this client reports it unreachable.
+func daemonStartupBudget(opts Options) time.Duration {
+	return time.Duration(dialsPerSpawn) * opts.backoff()
+}
 
 // maxTakeoverAttempts bounds how many times one connect drains a daemon
 // and spawns its successor. A takeover that worked is followed by a
@@ -265,7 +272,7 @@ func takeoverExhausted(selfVersion string, ack wingwire.HelloAck, attempts int) 
 		daemon = "(unknown)"
 	}
 	return fmt.Errorf("%w: after %d attempts the daemon still reports %s (protocol %d) while this binary is %s (protocol %d). "+
-		"Stop the daemon by hand, or set SPARKWING_HOME to run against a daemon of your own",
+		"Run `sparkwing daemon restart` to replace it, or set SPARKWING_HOME to run against a daemon of your own",
 		ErrTakeoverExhausted, attempts, daemon, ack.ProtocolMajor, self, wingd.ProtocolMajor)
 }
 
@@ -370,10 +377,13 @@ func (cl *Client) connect(ctx context.Context) error {
 	opts := cl.opts
 	spawns := 0
 	takeovers := 0
-	dialsSinceSpawn := 0
+	takenOver := ""
 	drainWait := newRetry("wait for draining daemon", 0)
+	dialWait := newRetryCapped("wait for daemon socket", 0, dialPaceMax)
+	electionWait := newRetryCapped("wait for predecessor daemon", 0, dialPaceMax)
 	var lastDial error
 	var predecessorDeadline time.Time
+	var socketDeadline time.Time
 	for {
 		if err := ctx.Err(); err != nil {
 			return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
@@ -381,7 +391,7 @@ func (cl *Client) connect(ctx context.Context) error {
 		nc, derr := dial(ctx, cl.sock, opts.dialTimeout())
 		if derr != nil {
 			lastDial = derr
-			if spawns == 0 || dialsSinceSpawn >= dialsPerSpawn {
+			if socketDeadline.IsZero() || !time.Now().Before(socketDeadline) {
 				if spawns >= maxSpawnAttempts {
 					return daemonUnreachable(opts.Home, cl.sock, spawns, derr, lastDial)
 				}
@@ -399,7 +409,7 @@ func (cl *Client) connect(ctx context.Context) error {
 						cause := fmt.Errorf("predecessor daemon still holds the election lock for %s after %s", opts.Home, opts.predecessorWaitTimeout())
 						return daemonUnreachable(opts.Home, cl.sock, spawns, cause, nil)
 					}
-					if err := sleep(ctx, opts.backoff()); err != nil {
+					if err := electionWait.wait(ctx, derr); err != nil {
 						return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 					}
 					continue
@@ -416,15 +426,15 @@ func (cl *Client) connect(ctx context.Context) error {
 					return spawnFailed(opts.Home, cl.sock, fmt.Errorf("prepare daemon socket: unexpected state %d", preparation), lastDial)
 				}
 				predecessorDeadline = time.Time{}
+				electionWait.reset()
 				if serr := opts.spawn(opts.Home, opts.Version); serr != nil {
 					return spawnFailed(opts.Home, cl.sock, serr, lastDial)
 				}
 				spawns++
-				dialsSinceSpawn = 0
-			} else {
-				dialsSinceSpawn++
+				socketDeadline = time.Now().Add(daemonStartupBudget(opts))
+				dialWait.reset()
 			}
-			if err := sleep(ctx, opts.backoff()); err != nil {
+			if err := dialWait.wait(ctx, derr); err != nil {
 				return daemonUnreachable(opts.Home, cl.sock, spawns, err, lastDial)
 			}
 			continue
@@ -443,6 +453,9 @@ func (cl *Client) connect(ctx context.Context) error {
 		if ack.ProtocolMajor != wingd.ProtocolMajor {
 			if wingd.ProtocolMajor > ack.ProtocolMajor {
 				cl.ack = ack
+				if ack.BinaryVersion != takenOver {
+					takeovers, takenOver = 0, ack.BinaryVersion
+				}
 				if takeovers >= maxTakeoverAttempts {
 					cl.Close()
 					return takeoverExhausted(opts.Version, ack, takeovers)
@@ -456,6 +469,10 @@ func (cl *Client) connect(ctx context.Context) error {
 		}
 		if !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
 			cl.ack = ack
+			// safety: the cap catches one version that keeps coming back, not a series of different old daemons winning the socket race, so a new version resets the budget.
+			if ack.BinaryVersion != takenOver {
+				takeovers, takenOver = 0, ack.BinaryVersion
+			}
 			if takeovers >= maxTakeoverAttempts {
 				cl.Close()
 				return takeoverExhausted(opts.Version, ack, takeovers)
