@@ -195,6 +195,7 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 	if err != nil {
 		return result, err
 	}
+	var pruneErr error
 	for _, candidate := range candidates {
 		if result.Examined >= opts.MaxEntries || result.ReclaimedBytes >= opts.ReclaimBytes {
 			break
@@ -235,14 +236,15 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 		removeErr := removeCacheEntry(entry.entryDir())
 		closeErr := errors.Join(cacheUnlock(lease), lease.Close(), cacheUnlock(writer), writer.Close())
 		if removeErr != nil || closeErr != nil {
-			return result, errors.Join(removeErr, closeErr)
+			pruneErr = errors.Join(pruneErr, removeErr, closeErr)
+			continue
 		}
 		result.Reclaimed++
 		result.ReclaimedBytes += size
 	}
 	result.GoalSatisfied = result.ReclaimedBytes >= opts.ReclaimBytes
 	result.Exhausted = !result.GoalSatisfied && (result.Examined >= opts.MaxEntries || result.Examined == len(candidates))
-	return result, nil
+	return result, pruneErr
 }
 
 func (e Entry) binaryPath() string {
