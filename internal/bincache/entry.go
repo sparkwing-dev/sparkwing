@@ -12,16 +12,19 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
 	pipelineCacheSchema      = "v1"
 	maxCacheDiscoveryEntries = 4096
+	legacyRetirementGrace    = 20 * time.Minute
 )
 
 var pipelineEntryKeyRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{8}$`)
 
 var removeCacheEntry = os.RemoveAll
+var cacheNow = time.Now
 
 // Entry is the authority to inspect, materialize, and execute one managed
 // pipeline-cache entry.
