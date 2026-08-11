@@ -168,6 +168,12 @@ func (e Entry) Materialize(ctx context.Context, write func(string) error) (publi
 	return true, nil
 }
 
+// AcquireOrMaterialize returns a held lease for an existing or newly
+// materialized entry.
+func (e Entry) AcquireOrMaterialize(context.Context, func(string) error) (*Lease, bool, error) {
+	return nil, false, errCacheAuthorityUnavailable
+}
+
 // Prune reclaims inactive entries within the requested bounds.
 func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err error) {
 	if opts.ReclaimBytes <= 0 {
