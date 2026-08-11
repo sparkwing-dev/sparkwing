@@ -191,3 +191,43 @@ func TestSecretArgNames_ReadsClassification(t *testing.T) {
 		t.Errorf("empty run SecretArgNames = %v, want nil", got)
 	}
 }
+
+func TestInheritSecretArgs_CarriesClassificationToAMintedRun(t *testing.T) {
+	src := secretRun()
+	inv := store.InheritSecretArgs(nil, &src)
+	if inv == nil {
+		t.Fatal("no invocation allocated for a classified source")
+	}
+	minted := store.Run{ID: "r2", Args: map[string]string{"token": "hunter2"}, Invocation: inv}
+	if got := minted.SecretArgNames(); len(got) != 1 || got[0] != "token" {
+		t.Fatalf("minted classification = %v, want [token]", got)
+	}
+	if minted.RedactedForDisplay().Args["token"] != store.RedactedArgValue {
+		t.Error("minted run does not redact")
+	}
+	// Only the classification travels; the source's args must not.
+	if _, ok := inv["args"]; ok {
+		t.Errorf("InheritSecretArgs carried more than the classification: %v", inv)
+	}
+}
+
+func TestInheritSecretArgs_NoOpForUnclassifiedOrNilSource(t *testing.T) {
+	if got := store.InheritSecretArgs(nil, nil); got != nil {
+		t.Errorf("nil source produced %v, want nil", got)
+	}
+	plain := store.Run{ID: "r", Args: map[string]string{"env": "prod"}}
+	if got := store.InheritSecretArgs(nil, &plain); got != nil {
+		t.Errorf("unclassified source produced %v, want nil", got)
+	}
+}
+
+func TestInheritSecretArgs_PreservesExistingInvocationKeys(t *testing.T) {
+	src := secretRun()
+	inv := store.InheritSecretArgs(map[string]any{"cwd": "/repo"}, &src)
+	if inv["cwd"] != "/repo" {
+		t.Errorf("existing key lost: %v", inv)
+	}
+	if _, ok := inv[store.InvocationSecretArgsKey]; !ok {
+		t.Errorf("classification not added: %v", inv)
+	}
+}

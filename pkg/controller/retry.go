@@ -102,6 +102,13 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		RetrySource:   store.RetrySourceManual,
 		CreatedAt:     now,
 		StartedAt:     now,
+		// This pending row carries src.Args in the clear and is
+		// listable before any worker picks it up -- permanently if
+		// none ever does. Inherit the source's secret-arg
+		// classification so it redacts for the whole of that window;
+		// the orchestrator replaces the invocation wholesale when the
+		// run starts.
+		Invocation: store.InheritSecretArgs(nil, src),
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist run: %w", err))
 		return

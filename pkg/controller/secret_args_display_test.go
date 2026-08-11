@@ -177,6 +177,39 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 	if trig.Args["token"] != ctlSecretValue {
 		t.Errorf("retry trigger args[token] = %q, want plaintext", trig.Args["token"])
 	}
+
+	// The retry's own pending row is listable before any worker picks
+	// it up -- and forever if none does. It must redact for that whole
+	// window, which it can only do by inheriting the source's
+	// classification.
+	if got := retried.SecretArgNames(); len(got) != 1 || got[0] != "token" {
+		t.Fatalf("retry run classification = %v, want [token]", got)
+	}
+	assertRedactedResponse(t, "GET /api/v1/runs/{id} for a pending retry",
+		getBody(t, srv.URL+"/api/v1/runs/"+src.RetriedAs))
+}
+
+// The same window exists for a fresh trigger's pre-allocated pending
+// row, but the controller holds no pipeline schema to classify from,
+// so it stays plaintext until the orchestrator upgrades the row at run
+// start. Pinned so the gap is a recorded decision rather than a
+// surprise; closing it needs the classification to reach the
+// controller, which is a wire-protocol change.
+func TestSecretArgs_ControllerPendingTriggerRowIsNotYetClassified(t *testing.T) {
+	st, srv := secretArgController(t)
+	err := st.CreateRun(context.Background(), store.Run{
+		ID: "pending-1", Pipeline: "deploy", Status: "pending",
+		Args:      map[string]string{"token": ctlSecretValue},
+		StartedAt: time.Now(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := getBody(t, srv.URL+"/api/v1/runs/pending-1")
+	if !strings.Contains(body, ctlSecretValue) {
+		t.Errorf("pending trigger-intake rows are documented as unclassified; "+
+			"if this now redacts, update CHANGELOG.md and docs/sdk.md:\n%s", body)
+	}
 }
 
 // Runs written before the classification existed have no secret_args

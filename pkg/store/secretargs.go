@@ -25,12 +25,12 @@ const RedactedArgValue = "***"
 // SecretArgNames returns the arg names this run declared secret, or
 // nil when the run carries no classification.
 //
-// Nil is the grandfathered case, not an assertion that nothing is
-// secret: runs written before [InvocationSecretArgsKey] existed have
-// no list, and they render exactly as they did before -- redacting
-// them would need a schema this code cannot reach. Runs written since
-// carry the list even when it is empty, so absent and "no secrets"
-// stay distinguishable in the stored JSON.
+// Nil means "nothing to redact", which covers two cases this code
+// cannot tell apart and does not need to: a pipeline that declares no
+// secret inputs, and a run written before [InvocationSecretArgsKey]
+// existed. The second is the grandfathered one -- those rows render
+// exactly as they did before, because reclassifying them would need a
+// schema no read path can reach.
 func (r Run) SecretArgNames() []string {
 	if len(r.Invocation) == 0 {
 		return nil
@@ -67,7 +67,7 @@ func decodeStringSlice(v any) []string {
 	}
 }
 
-// RedactedForDisplay returns a copy of r safe to render to a human, to
+// RedactedForDisplay returns a value safe to render to a human, to
 // JSON, or over HTTP: every arg the run declared secret has its value
 // replaced by [RedactedArgValue] in Args, in Invocation["args"], and in
 // the Invocation["reproducer"] command line.
@@ -77,8 +77,11 @@ func decodeStringSlice(v any) []string {
 // and retry re-executes with it -- never route a re-execution path
 // through this function. Storage-at-rest is a separate decision.
 //
-// Returns r unchanged when the run declares no secret args, so the
-// common case allocates nothing.
+// Treat the result as read-only. Redacted fields are always freshly
+// allocated, so writing to them cannot corrupt the source; every other
+// field, and the whole value when there is nothing to redact, is
+// shared with r. Rendering never writes, so nothing needs the deeper
+// copy, and the no-secrets path stays allocation-free.
 func (r Run) RedactedForDisplay() Run {
 	names := r.SecretArgNames()
 	if len(names) == 0 {
@@ -227,17 +230,46 @@ func invocationArgs(inv map[string]any) map[string]string {
 	}
 }
 
-// RedactedRun returns a pointer to a redacted copy of run, the shape
+// RedactedRun returns a pointer to a redacted view of run, the shape
 // every handler and renderer holds. Nil-safe.
 //
-// A copy, never a mutation: the caller's *Run may be the same value a
-// retry or a trigger claim is about to re-execute from.
+// Never mutates the source, whose Args a retry or a trigger claim may
+// be about to re-execute from. See [Run.RedactedForDisplay] for what
+// the result shares with it and why that is safe to render.
 func RedactedRun(run *Run) *Run {
 	if run == nil {
 		return nil
 	}
 	redacted := run.RedactedForDisplay()
 	return &redacted
+}
+
+// InheritSecretArgs copies src's secret-arg classification onto inv,
+// returning inv (allocating it when nil) so a run minted from another
+// run redacts the same args as the run it came from.
+//
+// Retry and replay build their row straight from a source run rather
+// than through the orchestrator's invocation snapshot, so without this
+// the new row carries the same plaintext args with no classification
+// and renders them in the clear -- the original defect, reintroduced
+// one hop downstream. The classification is the only thing copied; the
+// orchestrator overwrites the whole invocation with the real snapshot
+// when the run actually starts.
+//
+// Returns inv untouched when src carries no classification.
+func InheritSecretArgs(inv map[string]any, src *Run) map[string]any {
+	if src == nil {
+		return inv
+	}
+	names := src.SecretArgNames()
+	if len(names) == 0 {
+		return inv
+	}
+	if inv == nil {
+		inv = make(map[string]any, 1)
+	}
+	inv[InvocationSecretArgsKey] = names
+	return inv
 }
 
 // RedactedRuns applies [RedactedRun] across a slice -- the shape every
