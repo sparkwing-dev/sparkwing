@@ -609,7 +609,7 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 	}
 	queueRefresh := initial.Kind == store.AcquireQueued
 
-	if initial.Kind == store.AcquireCancellingOthers && cp.cancelTimeout > 0 {
+	if initial.Kind == store.AcquireCancellingOthers && cp.cancelTimeout > 0 && forceReleaseAllowed(ctx) {
 		timer := time.AfterFunc(cp.cancelTimeout, func() {
 			bg, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()

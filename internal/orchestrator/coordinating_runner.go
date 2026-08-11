@@ -16,6 +16,9 @@ type coordinatingRunner struct {
 }
 
 func newCoordinatingRunner(backends Backends, downstream runner.Runner) runner.Runner {
+	if _, ok := downstream.(runner.DownstreamCoordinator); ok {
+		return downstream
+	}
 	base := &coordinatingRunner{
 		coordinator: NewInProcessRunner(backends),
 		downstream:  downstream,
@@ -27,7 +30,7 @@ func newCoordinatingRunner(backends Backends, downstream runner.Runner) runner.R
 }
 
 func (r *coordinatingRunner) RunNode(ctx context.Context, req runner.Request) runner.Result {
-	return r.coordinator.runCoordinated(ctx, req, r.downstream.RunNode)
+	return r.coordinator.runCoordinated(withForceReleaseDisabled(ctx), req, r.downstream.RunNode)
 }
 
 type labeledCoordinatingRunner struct {
