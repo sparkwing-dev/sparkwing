@@ -75,12 +75,17 @@ func (r *retry) reset() {
 	r.delay = retryBaseDelay
 }
 
-// dialPaceMax caps the waits inside one connect: the socket-appears wait
-// after a spawn and the wait for a predecessor daemon to release the
-// election. Both already have a wall-clock budget, so their pacing only
-// needs to stop them re-dialling twenty times a second -- a quarter
-// second still notices a daemon that has just bound.
-const dialPaceMax = 250 * time.Millisecond
+// dialPaceMax caps the wait for a spawned daemon's socket to appear. It
+// is deliberately tighter than the other connect waits: this one sits in
+// front of every cold run, where the pause between the daemon binding and
+// the next probe is latency the user pays before anything starts.
+const dialPaceMax = 100 * time.Millisecond
+
+// electionPaceMax caps the wait for a predecessor daemon to release the
+// election lock. That wait is genuinely long -- it lasts as long as the
+// old daemon takes to go -- and each cycle re-attempts a file lock, so
+// pacing it further is worth the quarter second it can add.
+const electionPaceMax = 250 * time.Millisecond
 
 // jitter spreads a delay over [d/2, d] so many runs reconnecting to the
 // same restarted daemon do not arrive in one burst.

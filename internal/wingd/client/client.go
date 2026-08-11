@@ -243,13 +243,51 @@ func daemonStartupBudget(opts Options) time.Duration {
 	return time.Duration(dialsPerSpawn) * opts.backoff()
 }
 
-// maxTakeoverAttempts bounds how many times one connect drains a daemon
-// and spawns its successor. A takeover that worked is followed by a
-// connection to the new daemon, so needing several means the successor
-// keeps coming up as the same version it replaced -- a stuck binary, a
-// stale spawn path -- and repeating it is a drain-respawn loop, not
-// progress.
+// maxTakeoverAttempts bounds how many times one connect drains the same
+// daemon version and spawns its successor. A takeover that worked is
+// followed by a connection to the new daemon, so needing several means
+// the successor keeps coming up as the version it replaced -- a stuck
+// binary, a stale spawn path -- and repeating it is a drain-respawn
+// loop, not progress.
 const maxTakeoverAttempts = 3
+
+// maxTotalTakeovers bounds the drain-and-respawn exchanges one connect
+// may run across every version it meets. Replacing a different
+// predecessor each time is progress only while the population of
+// predecessors shrinks; two old clients on a shared box, each respawning
+// its own daemon, hand this one a version that is always new and never
+// exhausts a per-version budget.
+//
+// The ceiling counts exchanges rather than wall-clock time because what
+// this loop costs is not waiting: every attempt drains a live daemon and
+// starts a process. A thirty-second deadline would permit hundreds of
+// those; six bounds the side effect itself, while still covering a
+// genuine handful of predecessors.
+const maxTotalTakeovers = 2 * maxTakeoverAttempts
+
+// takeoverBudget decides whether one connect may take another daemon
+// over. It restarts the per-version allowance when the version changes,
+// so a shrinking population of predecessors is not mistaken for a loop,
+// and holds a total ceiling so an endless supply of new ones is.
+type takeoverBudget struct {
+	version    string
+	perVersion int
+	total      int
+}
+
+// spend records one takeover of the named daemon version, reporting
+// false when the budget is gone and the skew has to be reported instead.
+func (b *takeoverBudget) spend(version string) bool {
+	if version != b.version {
+		b.version, b.perVersion = version, 0
+	}
+	if b.perVersion >= maxTakeoverAttempts || b.total >= maxTotalTakeovers {
+		return false
+	}
+	b.perVersion++
+	b.total++
+	return true
+}
 
 // ErrTakeoverExhausted reports that repeated takeovers did not produce a
 // daemon this client can use. It is a version-skew fault an operator must
@@ -376,11 +414,10 @@ func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 func (cl *Client) connect(ctx context.Context) error {
 	opts := cl.opts
 	spawns := 0
-	takeovers := 0
-	takenOver := ""
+	takeovers := &takeoverBudget{}
 	drainWait := newRetry("wait for draining daemon", 0)
 	dialWait := newRetryCapped("wait for daemon socket", 0, dialPaceMax)
-	electionWait := newRetryCapped("wait for predecessor daemon", 0, dialPaceMax)
+	electionWait := newRetryCapped("wait for predecessor daemon", 0, electionPaceMax)
 	var lastDial error
 	var predecessorDeadline time.Time
 	var socketDeadline time.Time
@@ -453,14 +490,10 @@ func (cl *Client) connect(ctx context.Context) error {
 		if ack.ProtocolMajor != wingd.ProtocolMajor {
 			if wingd.ProtocolMajor > ack.ProtocolMajor {
 				cl.ack = ack
-				if ack.BinaryVersion != takenOver {
-					takeovers, takenOver = 0, ack.BinaryVersion
-				}
-				if takeovers >= maxTakeoverAttempts {
+				if !takeovers.spend(ack.BinaryVersion) {
 					cl.Close()
-					return takeoverExhausted(opts.Version, ack, takeovers)
+					return takeoverExhausted(opts.Version, ack, takeovers.total)
 				}
-				takeovers++
 				cl.takeover(ctx, opts)
 				continue
 			}
@@ -469,15 +502,10 @@ func (cl *Client) connect(ctx context.Context) error {
 		}
 		if !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
 			cl.ack = ack
-			// safety: the cap catches one version that keeps coming back, not a series of different old daemons winning the socket race, so a new version resets the budget.
-			if ack.BinaryVersion != takenOver {
-				takeovers, takenOver = 0, ack.BinaryVersion
-			}
-			if takeovers >= maxTakeoverAttempts {
+			if !takeovers.spend(ack.BinaryVersion) {
 				cl.Close()
-				return takeoverExhausted(opts.Version, ack, takeovers)
+				return takeoverExhausted(opts.Version, ack, takeovers.total)
 			}
-			takeovers++
 			cl.takeover(ctx, opts)
 			continue
 		}
