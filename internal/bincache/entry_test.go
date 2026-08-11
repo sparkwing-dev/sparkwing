@@ -406,15 +406,57 @@ func TestPruneQuarantinesActiveLegacyWriterUntilGraceExpires(t *testing.T) {
 	if _, err := os.Stat(quarantine); err != nil {
 		t.Fatalf("active writer quarantine retired before grace: %v", err)
 	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
 	now = now.Add(time.Second)
 	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if result.Reclaimed != 0 || result.GoalSatisfied {
+		t.Fatalf("open legacy writer was reported reclaimed: %+v", result)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	result, err = Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
 	if result.Reclaimed != 1 || !result.GoalSatisfied {
 		t.Fatalf("closed writer quarantine was not reclaimed: %+v", result)
+	}
+}
+
+func TestDeferredLegacyDoesNotStarveManagedPressureReclaim(t *testing.T) {
+	originalNow := cacheNow
+	t.Cleanup(func() { cacheNow = originalNow })
+	now := time.Unix(100, 0)
+	cacheNow = func() time.Time { return now }
+	cacheRoot := t.TempDir()
+	root := filepath.Join(cacheRoot, pipelineCacheSchema)
+	managed := testEntry(t, root, "22222222-22222222")
+	seedEntry(t, managed, "managed", time.Unix(1, 0))
+	retired := filepath.Join(root, "legacy-retired", "11111111-11111111")
+	if err := os.MkdirAll(retired, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(retired, "pipelines"), []byte("legacy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(retired, now, now); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reclaimed != 1 || result.ReclaimedBytes != 7 || !result.GoalSatisfied {
+		t.Fatalf("managed pressure reclaim was starved: %+v", result)
+	}
+	if _, err := os.Stat(managed.entryDir()); !os.IsNotExist(err) {
+		t.Fatalf("managed entry remains: %v", err)
+	}
+	if _, err := os.Stat(retired); err != nil {
+		t.Fatalf("deferred legacy entry changed: %v", err)
 	}
 }

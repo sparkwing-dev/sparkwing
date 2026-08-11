@@ -58,14 +58,25 @@ func TestPruneQuarantinesRunningLegacyExecutable(t *testing.T) {
 	if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
 		t.Fatalf("legacy process did not survive quarantine: %v", err)
 	}
+	now = now.Add(legacyRetirementGrace)
+	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reclaimed != 0 || result.GoalSatisfied {
+		t.Fatalf("live executable was reported reclaimed: %+v", result)
+	}
+	quarantine := filepath.Join(root, "legacy-retired", "11111111-11111111")
+	if _, err := os.Stat(quarantine); err != nil {
+		t.Fatalf("live executable quarantine removed: %v", err)
+	}
 	if err := stdin.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := cmd.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	now = now.Add(legacyRetirementGrace)
-	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	result, err = Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatal(err)
 	}

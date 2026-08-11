@@ -120,3 +120,39 @@ func TestCachePruneJSONReportsAPIFailure(t *testing.T) {
 		t.Fatalf("error envelope = %#v", envelope)
 	}
 }
+
+func TestCachePruneJSONReportsParseFailure(t *testing.T) {
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runCachePrune([]string{"-o", "json", "--unknown"})
+	})
+	if runErr == nil {
+		t.Fatal("cache prune hid parse failure")
+	}
+	var envelope struct {
+		Payload any            `json:"payload"`
+		Error   map[string]any `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+		t.Fatalf("decode error envelope %q: %v", out, err)
+	}
+	if envelope.Payload != nil || envelope.Error["message"] == nil {
+		t.Fatalf("error envelope = %#v", envelope)
+	}
+}
+
+func TestCachePruneRejectsOutputBeforeMutation(t *testing.T) {
+	original := pruneCachePressure
+	t.Cleanup(func() { pruneCachePressure = original })
+	calls := 0
+	pruneCachePressure = func(context.Context, cachepressure.PruneOptions) (cachepressure.PruneResult, error) {
+		calls++
+		return cachepressure.PruneResult{}, nil
+	}
+	if err := runCachePrune([]string{"--goal-bytes", "1", "--max-entries", "1", "-o", "bogus"}); err == nil {
+		t.Fatal("cache prune accepted an invalid output format")
+	}
+	if calls != 0 {
+		t.Fatalf("prune calls = %d, want 0 before output validation", calls)
+	}
+}
