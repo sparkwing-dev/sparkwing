@@ -3,7 +3,10 @@
 package procgroup
 
 import (
+	"errors"
 	"os"
+	"strings"
+	"sync"
 	"syscall"
 	"testing"
 )
@@ -59,5 +62,67 @@ func TestNativeProcessTableReportsTerminatedChildren(t *testing.T) {
 		if got := darwinProcessState(live); processTerminated(got) {
 			t.Fatalf("live state %d = %q, want a state the terminated check rejects", live, got)
 		}
+	}
+}
+
+// TestProcessTableFallsBackAudiblyWhenTheKernelListingFails pins both
+// halves of the fallback: the portable reader still answers, and the
+// process says once that it has started paying fifty times more per
+// listing. A silent fallback is indistinguishable from the cost this
+// package removed.
+func TestProcessTableFallsBackAudiblyWhenTheKernelListingFails(t *testing.T) {
+	originalListing := darwinProcessListing
+	originalLog := nativeFallbackLog
+	t.Cleanup(func() {
+		darwinProcessListing = originalListing
+		nativeFallbackLog = originalLog
+		nativeFallbackOnce = sync.Once{}
+	})
+	nativeFallbackOnce = sync.Once{}
+	darwinProcessListing = func() ([]byte, error) { return nil, errors.New("sysctl refused") }
+	reported := 0
+	var reportedErr error
+	nativeFallbackLog = func(err error) {
+		reported++
+		reportedErr = err
+	}
+
+	for i := 0; i < 3; i++ {
+		processes, err := processTable(true)
+		if err != nil {
+			t.Fatalf("listing %d fell back but failed: %v", i, err)
+		}
+		if len(processes) == 0 {
+			t.Fatalf("listing %d returned no processes; the ps fallback did not answer", i)
+		}
+		if processes[0].Birth != "" {
+			t.Fatal("the ps fallback carried a birth token it cannot know")
+		}
+	}
+	if reported != 1 {
+		t.Fatalf("fallback reported %d times, want exactly one warning per process", reported)
+	}
+	if reportedErr == nil || !strings.Contains(reportedErr.Error(), "sysctl refused") {
+		t.Fatalf("fallback warning carried %v, want the kernel failure", reportedErr)
+	}
+}
+
+// TestShortKernelListingFallsBack keeps a truncated read on the fallback
+// path rather than letting it be parsed as an empty machine, which would
+// read as "every guarded session is gone".
+func TestShortKernelListingFallsBack(t *testing.T) {
+	originalListing := darwinProcessListing
+	originalLog := nativeFallbackLog
+	t.Cleanup(func() {
+		darwinProcessListing = originalListing
+		nativeFallbackLog = originalLog
+		nativeFallbackOnce = sync.Once{}
+	})
+	nativeFallbackOnce = sync.Once{}
+	darwinProcessListing = func() ([]byte, error) { return []byte{1, 2, 3}, nil }
+	nativeFallbackLog = func(error) {}
+
+	if _, ok := nativeProcessTable(true); ok {
+		t.Fatal("a truncated kernel listing was accepted as the process table")
 	}
 }

@@ -3,11 +3,37 @@
 package procgroup
 
 import (
+	"fmt"
+	"log/slog"
 	"strconv"
+	"sync"
 	"unsafe"
 
 	"golang.org/x/sys/unix"
 )
+
+// darwinProcessListing reads the raw kernel process table. It is a
+// variable so a test can prove the `ps` fallback still answers when the
+// kernel listing does not.
+var darwinProcessListing = func() ([]byte, error) {
+	return unix.SysctlRaw("kern.proc.all")
+}
+
+var (
+	nativeFallbackOnce sync.Once
+	nativeFallbackLog  = func(err error) {
+		slog.Warn("kernel process listing unavailable; falling back to a ps fork per listing", "err", err)
+	}
+)
+
+// reportNativeFallback says once that this process has dropped to the
+// portable reader. The fallback is roughly fifty times more expensive per
+// listing and, once it starts, it usually never stops, so a silent one
+// looks exactly like the cost this package went to some trouble to
+// remove.
+func reportNativeFallback(err error) {
+	nativeFallbackOnce.Do(func() { nativeFallbackLog(err) })
+}
 
 // nativeProcessTable reads the process table straight from the kernel.
 // The `ps` fork it replaces costs about twenty milliseconds of wall time
@@ -16,12 +42,14 @@ import (
 // the same snapshot it counts members in -- one kernel view per sweep,
 // consistent with itself, instead of one per session plus a fork.
 func nativeProcessTable(withSessions bool) ([]Info, bool) {
-	raw, err := unix.SysctlRaw("kern.proc.all")
+	raw, err := darwinProcessListing()
 	if err != nil {
+		reportNativeFallback(err)
 		return nil, false
 	}
 	size := int(unsafe.Sizeof(unix.KinfoProc{}))
-	if size == 0 || len(raw) < size {
+	if len(raw) < size {
+		reportNativeFallback(fmt.Errorf("kernel process listing returned %d bytes, short of one %d-byte record", len(raw), size))
 		return nil, false
 	}
 	processes := make([]Info, 0, len(raw)/size)
