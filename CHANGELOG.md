@@ -49,6 +49,13 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **cache:** `pkg/cachepressure` and `sparkwing cache status|prune` measure the
+  managed pipeline-binary cache and reclaim inactive entries within caller-set
+  byte and entry bounds. Active executables and writers retain kernel-backed
+  leases, so pressure handling cannot delete their entries.
+
 ## [v0.24.0] - 2026-08-10
 ### Added
 
