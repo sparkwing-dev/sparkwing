@@ -327,7 +327,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	sparkwing.SetGit(gitOpt)
 
 	owner, repo := sparkwing.GithubOwnerRepo(gitOpt.Repo)
-	invocation := buildRunInvocation(opts, runID)
+	invocation := buildRunInvocation(opts, runID, localRunLogDir(backends.Logs, runID))
 	if err := backends.State.CreateRun(ctx, store.Run{
 		ID:            runID,
 		Pipeline:      opts.Pipeline,
@@ -995,7 +995,8 @@ func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 // only the names are surfaced so secret-bearing variables don't leak
 // into the log/receipt.
 // buildRunInvocation snapshots how this run was started: run-id,
-// pipeline, args, flags, binary_source, cwd, hashes, hints, etc.
+// pipeline, args, flags, binary_source, cwd, log_path, hashes, hints,
+// etc.
 // The same map flows into BOTH the store.Run.Invocation column (so
 // runs status / receipt / dashboards can answer "how was this
 // started") and run_start.attrs (so the live JSONL stream agents
@@ -1016,7 +1017,18 @@ func parentTriggerRepoDir() string {
 	return ""
 }
 
-func buildRunInvocation(opts Options, runID string) map[string]any {
+// logDir is the run's log directory on the machine executing it, as
+// reported by the log backend that will write it (see
+// localRunLogDir). It is recorded as log_path so a caller holding only
+// the run id can read the logs straight off disk instead of scraping
+// them out of the stream. It is the executor's path, not the reader's:
+// a cluster pod with no logs backend records its own pod-local
+// directory, and a laptop later reading that run through --profile
+// gets that string verbatim. Runs whose logs live on a controller or
+// in an object store pass "" and carry no log_path at all -- a missing
+// field is a truthful "not here", a fabricated one sends readers to a
+// directory that holds nothing.
+func buildRunInvocation(opts Options, runID, logDir string) map[string]any {
 	inv := map[string]any{
 		"run_id":   runID,
 		"pipeline": opts.Pipeline,
@@ -1024,6 +1036,9 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 			"follow_logs": "sparkwing runs logs --run " + runID + " --follow",
 			"status":      "sparkwing runs status --run " + runID,
 		},
+	}
+	if logDir != "" {
+		inv["log_path"] = logDir
 	}
 	if src := os.Getenv("SPARKWING_BINARY_SOURCE"); src != "" {
 		inv["binary_source"] = src
