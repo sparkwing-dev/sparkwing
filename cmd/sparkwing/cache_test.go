@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/pkg/cachepressure"
 )
 
 func seedCommandCacheEntry(t *testing.T, body string) *bincache.Lease {
@@ -75,8 +77,46 @@ func TestCachePruneJSONReportsBoundedOutcome(t *testing.T) {
 
 func TestCachePruneRejectsInvalidBounds(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", t.TempDir())
-	err := runCachePrune([]string{"--goal-bytes", "0", "--max-entries", "1", "-o", "json"})
-	if err == nil {
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runCachePrune([]string{"--goal-bytes", "0", "--max-entries", "1", "-o", "json"})
+	})
+	if runErr == nil {
 		t.Fatal("cache prune accepted a zero byte goal")
+	}
+	var envelope struct {
+		Payload any `json:"payload"`
+		Error   any `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+		t.Fatalf("decode error envelope %q: %v", out, err)
+	}
+	if envelope.Payload != nil || envelope.Error == nil {
+		t.Fatalf("error envelope = %#v", envelope)
+	}
+}
+
+func TestCachePruneJSONReportsAPIFailure(t *testing.T) {
+	original := pruneCachePressure
+	t.Cleanup(func() { pruneCachePressure = original })
+	pruneCachePressure = func(context.Context, cachepressure.PruneOptions) (cachepressure.PruneResult, error) {
+		return cachepressure.PruneResult{}, errors.New("store unavailable")
+	}
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runCachePrune([]string{"--goal-bytes", "1", "--max-entries", "1", "-o", "json"})
+	})
+	if runErr == nil {
+		t.Fatal("cache prune hid API failure")
+	}
+	var envelope struct {
+		Payload any            `json:"payload"`
+		Error   map[string]any `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(out), &envelope); err != nil {
+		t.Fatalf("decode error envelope %q: %v", out, err)
+	}
+	if envelope.Payload != nil || envelope.Error["message"] != "cache prune: store unavailable" {
+		t.Fatalf("error envelope = %#v", envelope)
 	}
 }

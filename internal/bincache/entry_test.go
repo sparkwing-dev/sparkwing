@@ -105,6 +105,44 @@ func TestPruneIsBoundedAndUsesStableKeyOrder(t *testing.T) {
 	}
 }
 
+func TestPruneRemainsHealthyAfterRemovingAnEntry(t *testing.T) {
+	root := t.TempDir()
+	entry := testEntry(t, root, "11111111-11111111")
+	seedEntry(t, entry, "remove", time.Unix(1, 0))
+
+	first, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil || first.Reclaimed != 1 {
+		t.Fatalf("first Prune = (%+v, %v)", first, err)
+	}
+	second, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatalf("second Prune: %v", err)
+	}
+	if second.Reclaimed != 0 || !second.Exhausted {
+		t.Fatalf("second Prune = %+v", second)
+	}
+}
+
+func TestCacheCandidateDiscoveryHonorsWorkAndCancellationBounds(t *testing.T) {
+	root := t.TempDir()
+	for _, key := range []string{"11111111-11111111", "22222222-22222222", "33333333-33333333"} {
+		seedEntry(t, testEntry(t, root, key), key, time.Unix(1, 0))
+	}
+
+	candidates, err := cacheCandidates(context.Background(), root, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) > 2 {
+		t.Fatalf("candidate count = %d, want <= 2", len(candidates))
+	}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := cacheCandidates(canceled, root, 2); !errors.Is(err, context.Canceled) {
+		t.Fatalf("canceled discovery error = %v", err)
+	}
+}
+
 func TestPruneDoesNotRaceWriterOrExposePartialEntry(t *testing.T) {
 	root := t.TempDir()
 	entry := testEntry(t, root, "11111111-11111111")
@@ -278,5 +316,28 @@ func TestStatusMeasuresManagedLivenessAndLegacyBytes(t *testing.T) {
 	}
 	if status.LegacyBytes != 7 || status.LegacyEntries != 1 {
 		t.Fatalf("legacy status: %+v", status)
+	}
+}
+
+func TestPruneRetiresLegacyEntriesAutomatically(t *testing.T) {
+	cacheRoot := t.TempDir()
+	root := filepath.Join(cacheRoot, pipelineCacheSchema)
+	legacyDir := filepath.Join(cacheRoot, "11111111-11111111")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacyDir, "pipelines"), []byte("legacy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ReclaimedBytes != 6 || result.Reclaimed != 1 || !result.GoalSatisfied {
+		t.Fatalf("legacy prune result = %+v", result)
+	}
+	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
+		t.Fatalf("legacy entry remains: %v", err)
 	}
 }
