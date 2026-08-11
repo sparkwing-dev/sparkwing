@@ -37,6 +37,7 @@ import (
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 
+	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
 
@@ -506,23 +507,34 @@ func RepoURLFromGitHub(fullName string) string {
 }
 
 // SparkwingHome honors SPARKWING_HOME if set, otherwise ~/.sparkwing.
+//
+// It defers to internal/paths rather than reading the environment
+// itself so the one place that knows the home layout also owns the
+// test-sandbox redirect described there. This package resolved the home
+// on its own until now, which meant a test binary that forgot
+// SPARKWING_HOME compiled into -- and, once the LRU prune landed,
+// evicted from -- the developer's real ~/.sparkwing/cache/pipelines.
+//
+// paths.DefaultPaths only fails when os.UserHomeDir does, so the
+// fallback keeps this function's existing signature and its existing
+// answer in that case: the relative ".sparkwing" that joining an empty
+// home produced before.
 func SparkwingHome() string {
-	if h := os.Getenv("SPARKWING_HOME"); h != "" {
-		return h
+	p, err := paths.DefaultPaths()
+	if err != nil {
+		return ".sparkwing"
 	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".sparkwing")
+	return p.Root
 }
 
 // CachedBinaryPath returns where a pipeline binary with the given
 // hash lives.
 func CachedBinaryPath(hash string) string {
-	root := filepath.Join(SparkwingHome(), "cache", "pipelines", hash)
 	name := "pipelines"
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	return filepath.Join(root, name)
+	return filepath.Join(CacheRoot(), hash, name)
 }
 
 // ErrMissingGoSum is returned by CompilePipeline when `go build`
