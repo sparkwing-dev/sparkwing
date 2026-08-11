@@ -3,9 +3,12 @@ package orchestrator_test
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -108,6 +111,49 @@ func TestRemoteRunOutcome_UnreadableStatusIsAnError(t *testing.T) {
 	}
 	if status != "" {
 		t.Errorf("status = %q, want empty when the read failed", status)
+	}
+}
+
+// TestRemoteRunOutcome_RetriesOneTransportBlip guards the difference
+// between "the controller hiccuped" and "the outcome is unknown". The
+// follow just watched this run go terminal, so a single 503 from a
+// controller replica rolling out must not be promoted into an
+// unknown-outcome verdict for the caller.
+func TestRemoteRunOutcome_RetriesOneTransportBlip(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/nodes"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []any{}})
+		case r.URL.Path == "/api/v1/runs/run-blip":
+			if calls.Add(1) == 1 {
+				http.Error(w, "controller unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			now := time.Now()
+			_ = json.NewEncoder(w).Encode(store.Run{
+				ID: "run-blip", Pipeline: "release", Status: "failed", Error: "node build failed",
+				StartedAt: now.Add(-time.Second), FinishedAt: &now,
+			})
+		default:
+			_, _ = w.Write([]byte("{}"))
+		}
+	}))
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	status, err := orchestrator.RemoteRunOutcome(context.Background(), srv.URL, "", "run-blip", &buf)
+	if err != nil {
+		t.Fatalf("RemoteRunOutcome: %v", err)
+	}
+	if status != "failed" {
+		t.Errorf("status = %q, want failed (the retry should have read it)", status)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Errorf("GetRun calls = %d, want 2 (one blip, one retry)", got)
+	}
+	if !strings.Contains(buf.String(), "node build failed") {
+		t.Errorf("summary missing the run error; got:\n%s", buf.String())
 	}
 }
 

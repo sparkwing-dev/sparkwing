@@ -12,7 +12,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -114,37 +113,44 @@ func runPipelineTrigger(args []string) error {
 		if ferr != nil {
 			return ferr
 		}
-		if err := orchestrator.JobLogsRemoteWithTokens(ctx, prof.ControllerURL(), prof.ControllerURL(), prof.ControllerToken(),
-			resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout); err != nil {
-			return err
-		}
-		// The log stream ends when the run goes terminal but carries no
-		// outcome, so the exit status comes from one status read. The
-		// failure summary goes to stderr to keep stdout a pure log stream.
-		return remoteFollowExit(ctx, prof, resp.RunID, os.Stderr)
+		followErr := orchestrator.JobLogsRemoteWithTokens(ctx, prof.ControllerURL(), prof.ControllerURL(), prof.ControllerToken(),
+			resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
+		return remoteFollowExit(ctx, prof, resp.RunID, followErr)
 	}
 
 	fmt.Fprintln(os.Stderr, color.Dim(fmt.Sprintf(
 		"note: profile %q declares no logs: backend; following node status (no log bodies). "+
 			"Add a logs: spec in profiles.yaml to see streaming output.", prof.Name)))
-	if err := orchestrator.JobStatusRemote(ctx, prof.ControllerURL(), prof.ControllerToken(),
-		resp.RunID, orchestrator.StatusOpts{Follow: true}, os.Stdout); err != nil {
-		return err
-	}
-	// The status follow already painted the terminal status block, so
-	// take the exit code only and drop the duplicate summary.
-	return remoteFollowExit(ctx, prof, resp.RunID, io.Discard)
+	followErr := orchestrator.JobStatusRemote(ctx, prof.ControllerURL(), prof.ControllerToken(),
+		resp.RunID, orchestrator.StatusOpts{Follow: true}, os.Stdout)
+	return remoteFollowExit(ctx, prof, resp.RunID, followErr)
 }
 
 // remoteFollowExit is the remote counterpart of localStatusExitCheck:
-// once the follow ends, read the triggered run's terminal status and
-// map it onto the exit contract a local `sparkwing run` already
-// follows -- success exits 0, failed and cancelled exit 1. summary
-// receives the failure detail (io.Discard when the caller already
-// rendered it).
-func remoteFollowExit(ctx context.Context, prof *profile.Profile, runID string, summary io.Writer) error {
-	status, err := orchestrator.RemoteRunOutcome(ctx, prof.ControllerURL(), prof.ControllerToken(), runID, summary)
-	return followExitResult(runID, status, err)
+// once the follow ends, read the triggered run's outcome and map it
+// onto the exit contract a local `sparkwing run` already follows --
+// success exits 0, failed and cancelled exit 1.
+//
+// The failure summary goes to stderr on both arms. The log arm streams
+// bodies to stdout, so stderr is what survives a `> run.log` redirect;
+// the status arm renders to stdout as it polls, but the frame it
+// painted last can predate the terminal transition (its render and its
+// terminality check are two separate reads), so the authoritative
+// block is reprinted rather than assumed. On a terminal that means one
+// duplicated block on the status arm, which is the cheaper mistake:
+// the alternative loses the failure detail entirely under redirection.
+//
+// followErr is whatever ended the follow. A dropped stream is not
+// itself a verdict: when the run still reads terminal, that outcome
+// wins and the stream error is demoted to a note; otherwise the
+// outcome is unknown and exits 3, never 1, so a controller that 503s
+// during a rolling restart is never reported as a failed run.
+func remoteFollowExit(ctx context.Context, prof *profile.Profile, runID string, followErr error) error {
+	if followErr != nil {
+		fmt.Fprintf(os.Stderr, "note: follow of %s ended early (%v); reading the run's status\n", runID, followErr)
+	}
+	status, fetchErr := orchestrator.RemoteRunOutcome(ctx, prof.ControllerURL(), prof.ControllerToken(), runID, os.Stderr)
+	return followExitResult(prof.Name, runID, status, fetchErr, followErr)
 }
 
 // followExitResult maps an observed post-follow run state onto the CLI
@@ -153,18 +159,38 @@ func remoteFollowExit(ctx context.Context, prof *profile.Profile, runID string, 
 // cancelled context), is reported as unknown and exits 3 -- the code
 // `jobs wait` uses for a failed fetch -- because guessing either way
 // would hand CI a verdict the CLI never observed.
-func followExitResult(runID, status string, fetchErr error) error {
+func followExitResult(profileName, runID, status string, fetchErr, followErr error) error {
+	if fetchErr != nil || !isTerminalRunStatus(status) {
+		return exitError(3, unknownOutcomeError(profileName, runID, status, fetchErr, followErr))
+	}
+	// statusExitCode owns the shared success -> 0 / anything else -> 1
+	// mapping; the trigger only restates it with the run id, the way
+	// `jobs wait` names the run it gave up on.
+	if err := statusExitCode(status); err != nil {
+		return exitError(exitCodeFor(err), fmt.Errorf("pipeline trigger: run %s: %s", runID, status))
+	}
+	return nil
+}
+
+// unknownOutcomeError says what the CLI last saw, why it stopped
+// seeing it, and the one command that answers the question later. A
+// run whose outcome is unknown is frequently still executing, so the
+// message must not read like a failure.
+func unknownOutcomeError(profileName, runID, status string, fetchErr, followErr error) error {
+	cause := "last seen " + statusOrUnknown(status)
 	if fetchErr != nil {
-		return exitError(3, fmt.Errorf(
-			"pipeline trigger: run %s: follow ended but the run's terminal status could not be read: %w", runID, fetchErr))
+		cause = fmt.Sprintf("status read failed: %v", fetchErr)
 	}
-	if !isTerminalRunStatus(status) {
-		last := status
-		if last == "" {
-			last = "unknown"
-		}
-		return exitErrorf(3,
-			"pipeline trigger: run %s: follow ended with the run still %s; terminal state unknown", runID, last)
+	if followErr != nil {
+		cause += fmt.Sprintf("; follow ended: %v", followErr)
 	}
-	return statusExitCode(status)
+	return fmt.Errorf("pipeline trigger: run %s: outcome unknown (%s) -- the run may still be in progress; "+
+		"check it with `sparkwing runs status --run %s --profile %s`", runID, cause, runID, profileName)
+}
+
+func statusOrUnknown(status string) string {
+	if status == "" {
+		return "unknown"
+	}
+	return status
 }

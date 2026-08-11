@@ -39,6 +39,29 @@ type triggerSpy struct {
 	// "success"); runError is the run-level error that goes with it.
 	runStatus string
 	runError  string
+	// runStatuses, when set, is consumed one entry per GetRun with the
+	// last entry repeating -- enough to stage a run that flips terminal
+	// between the status follow's render and its terminality check.
+	runStatuses []string
+	getRunCalls int
+	// runHTTPStatus, when non-zero, is the HTTP error GetRun returns
+	// instead of a run (a controller mid-rolling-restart).
+	runHTTPStatus int
+}
+
+// nextRunStatus returns the status this GetRun call should report.
+func (s *triggerSpy) nextRunStatus() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	i := s.getRunCalls
+	s.getRunCalls++
+	if len(s.runStatuses) > 0 {
+		return s.runStatuses[min(i, len(s.runStatuses)-1)]
+	}
+	if s.runStatus == "" {
+		return "success"
+	}
+	return s.runStatus
 }
 
 func (s *triggerSpy) handler() http.Handler {
@@ -76,16 +99,20 @@ func (s *triggerSpy) handler() http.Handler {
 			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []any{}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/runs/run-test":
 			s.mu.Lock()
-			status, runErr := s.runStatus, s.runError
+			runErr, httpStatus := s.runError, s.runHTTPStatus
 			s.mu.Unlock()
-			if status == "" {
-				status = "success"
+			if httpStatus != 0 {
+				http.Error(w, "controller unavailable", httpStatus)
+				return
 			}
-			finished := time.Now()
-			_ = json.NewEncoder(w).Encode(store.Run{
-				ID: "run-test", Pipeline: "release", Status: status, Error: runErr,
-				StartedAt: finished.Add(-time.Second), FinishedAt: &finished,
-			})
+			status := s.nextRunStatus()
+			now := time.Now()
+			run := store.Run{ID: "run-test", Pipeline: "release", Status: status, StartedAt: now.Add(-time.Second)}
+			if isTerminalRunStatus(status) {
+				run.Error = runErr
+				run.FinishedAt = &now
+			}
+			_ = json.NewEncoder(w).Encode(run)
 		default:
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("{}"))
@@ -378,8 +405,10 @@ func TestPipelineTrigger_FollowExitsOnRunOutcome(t *testing.T) {
 			writeTriggerProfiles(t, srv.URL)
 
 			var err error
-			_ = captureStdout(t, func() {
-				err = runPipelineTrigger([]string{"release", "--profile", "prod"})
+			stderr := captureStderr(t, func() {
+				_ = captureStdout(t, func() {
+					err = runPipelineTrigger([]string{"release", "--profile", "prod"})
+				})
 			})
 
 			if got := exitCodeFor(err); got != tc.wantCode {
@@ -391,8 +420,16 @@ func TestPipelineTrigger_FollowExitsOnRunOutcome(t *testing.T) {
 				}
 				return
 			}
-			if !strings.Contains(err.Error(), tc.status) {
-				t.Errorf("error should name the run status; got %q", err.Error())
+			if !strings.Contains(err.Error(), tc.status) || !strings.Contains(err.Error(), "run-test") {
+				t.Errorf("error should name the run and its status; got %q", err.Error())
+			}
+			// The status arm renders to stdout as it polls, so the
+			// summary has to reach stderr too or `> run.log` swallows
+			// every trace of the failure.
+			for _, want := range []string{"run-test", "status:    " + tc.status, "node build failed"} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr summary missing %q; got:\n%s", want, stderr)
+				}
 			}
 		})
 	}
@@ -425,27 +462,97 @@ func TestPipelineTrigger_LogFollowReportsFailure(t *testing.T) {
 	}
 }
 
+// TestPipelineTrigger_StatusFollowRepaintsTerminalFrame covers the
+// window where the run flips terminal between the status follow's
+// render and its terminality check: the last frame on stdout still
+// says "running", so the authoritative summary must be reprinted or
+// the operator is left reading a stale frame next to exit 1.
+func TestPipelineTrigger_StatusFollowRepaintsTerminalFrame(t *testing.T) {
+	spy := &triggerSpy{runStatuses: []string{"running", "failed"}, runError: "node build failed"}
+	srv := httptest.NewServer(spy.handler())
+	defer srv.Close()
+	writeTriggerProfiles(t, srv.URL)
+
+	var err error
+	var stdout string
+	stderr := captureStderr(t, func() {
+		stdout = captureStdout(t, func() {
+			err = runPipelineTrigger([]string{"release", "--profile", "prod"})
+		})
+	})
+
+	if code := exitCodeFor(err); code != 1 {
+		t.Fatalf("exit code = %d (err=%v), want 1", code, err)
+	}
+	if !strings.Contains(stdout, "status:    running") {
+		t.Fatalf("test no longer stages a stale frame; stdout:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "status:    failed") {
+		t.Errorf("terminal summary missing from stderr; got:\n%s", stderr)
+	}
+}
+
+// TestPipelineTrigger_UnreachableControllerIsUnknownNotFailed pins the
+// distinction a rolling controller restart depends on: losing the
+// follow says nothing about the run, so it exits 3 with a pointer at
+// the command that answers later -- never 1, which would report a
+// possibly-succeeding run as failed.
+func TestPipelineTrigger_UnreachableControllerIsUnknownNotFailed(t *testing.T) {
+	spy := &triggerSpy{runHTTPStatus: http.StatusServiceUnavailable}
+	srv := httptest.NewServer(spy.handler())
+	defer srv.Close()
+	writeTriggerProfiles(t, srv.URL)
+
+	var err error
+	_ = captureStderr(t, func() {
+		_ = captureStdout(t, func() {
+			err = runPipelineTrigger([]string{"release", "--profile", "prod"})
+		})
+	})
+
+	if code := exitCodeFor(err); code != 3 {
+		t.Fatalf("exit code = %d (err=%v), want 3", code, err)
+	}
+	msg := err.Error()
+	for _, want := range []string{"outcome unknown", "may still be in progress", "sparkwing runs status --run run-test --profile prod"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message missing %q; got %q", want, msg)
+		}
+	}
+}
+
 // TestFollowExitResult_UnknownTerminalState pins the third arm: when
 // the follow ends without a readable terminal status (dropped
 // connection, cancelled context), the CLI reports what it knows and
-// exits 3 rather than inventing success or failure.
+// exits 3 rather than inventing success or failure. A follow that
+// broke on a run that still reads terminal is not that case -- the
+// outcome wins.
 func TestFollowExitResult_UnknownTerminalState(t *testing.T) {
-	fetchErr := followExitResult("run-test", "", errors.New("dial tcp: connection refused"))
+	fetchErr := followExitResult("prod", "run-test", "", errors.New("dial tcp: connection refused"), nil)
 	if code := exitCodeFor(fetchErr); code != 3 {
 		t.Errorf("unreadable status exit code = %d (err=%v), want 3", code, fetchErr)
 	}
-	if !strings.Contains(fetchErr.Error(), "connection refused") {
-		t.Errorf("error should carry the fetch failure; got %q", fetchErr.Error())
+	for _, want := range []string{"connection refused", "may still be in progress", "--profile prod"} {
+		if !strings.Contains(fetchErr.Error(), want) {
+			t.Errorf("error missing %q; got %q", want, fetchErr.Error())
+		}
 	}
 
-	stillRunning := followExitResult("run-test", "running", nil)
+	stillRunning := followExitResult("prod", "run-test", "running", nil, errors.New("unexpected EOF"))
 	if code := exitCodeFor(stillRunning); code != 3 {
 		t.Errorf("non-terminal status exit code = %d (err=%v), want 3", code, stillRunning)
 	}
-	if !strings.Contains(stillRunning.Error(), "running") {
-		t.Errorf("error should name the last known status; got %q", stillRunning.Error())
+	if !strings.Contains(stillRunning.Error(), "running") || !strings.Contains(stillRunning.Error(), "unexpected EOF") {
+		t.Errorf("error should name the last status and why the follow ended; got %q", stillRunning.Error())
 	}
-	if err := followExitResult("run-test", "success", nil); err != nil {
+
+	// A broken stream over a run that did reach a verdict reports the
+	// verdict: the stream is how output arrived, not what happened.
+	brokenButFailed := followExitResult("prod", "run-test", "failed", nil, errors.New("unexpected EOF"))
+	if code := exitCodeFor(brokenButFailed); code != 1 {
+		t.Errorf("terminal-despite-broken-follow exit code = %d (err=%v), want 1", code, brokenButFailed)
+	}
+	if err := followExitResult("prod", "run-test", "success", nil, nil); err != nil {
 		t.Errorf("success should map to a nil error; got %v", err)
 	}
 }
