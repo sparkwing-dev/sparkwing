@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -172,5 +173,37 @@ func TestEntryRejectsInvalidKeysAndPruneRejectsInvalidBounds(t *testing.T) {
 		if _, err := Prune(context.Background(), opts); err == nil || errors.Is(err, context.Canceled) {
 			t.Errorf("Prune(%+v) error = %v", opts, err)
 		}
+	}
+}
+
+func TestPruneAttemptsEveryCandidateAndJoinsRemovalFailures(t *testing.T) {
+	root := t.TempDir()
+	first := testEntry(t, root, "11111111-11111111")
+	second := testEntry(t, root, "22222222-22222222")
+	seedEntry(t, first, "first", time.Unix(1, 0))
+	seedEntry(t, second, "second", time.Unix(2, 0))
+
+	originalRemove := removeCacheEntry
+	t.Cleanup(func() { removeCacheEntry = originalRemove })
+	var attempted []string
+	removeCacheEntry = func(path string) error {
+		attempted = append(attempted, filepath.Base(path))
+		return errors.New("remove-" + filepath.Base(path))
+	}
+
+	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 100, MaxEntries: 2})
+	if err == nil {
+		t.Fatal("Prune succeeded despite persistent removal failures")
+	}
+	if strings.Join(attempted, ",") != "11111111-11111111,22222222-22222222" {
+		t.Fatalf("removal attempts = %v", attempted)
+	}
+	for _, diagnostic := range []string{"remove-11111111-11111111", "remove-22222222-22222222"} {
+		if !strings.Contains(err.Error(), diagnostic) {
+			t.Errorf("Prune error %q lacks %q", err, diagnostic)
+		}
+	}
+	if result.ObservedBytes != 11 || result.ReclaimedBytes != 0 || result.Reclaimed != 0 {
+		t.Fatalf("failed removal accounting: %+v", result)
 	}
 }
