@@ -40,6 +40,7 @@ for agent-facing discovery.`,
 		{"runs", "Inspect or manage runs"},
 		{"repos", "The machine's fleet of sparkwing repos + SDK pins"},
 		{"queue", "The truthful view of local admission: holders + connections + waiters"},
+		{"cache", "Measure and safely reclaim compiled pipeline entries"},
 		{"daemon", "Inspect or refresh the local admission daemon"},
 		{"profile", "Show which profile sparkwing would use right now, and why"},
 		{"version", "Show + update versions"},
@@ -62,6 +63,35 @@ for agent-facing discovery.`,
 		{"Bootstrap + scaffold your first pipeline in a fresh repo", "sparkwing pipeline new --name release"},
 		{"Start the local dashboard", "sparkwing dashboard start"},
 	},
+}
+
+var cmdCache = Command{
+	Path:        "sparkwing cache",
+	Synopsis:    "Measure and safely reclaim compiled pipeline entries",
+	Description: `Sparkwing owns pipeline-cache paths and holder liveness. Status measures managed and legacy bytes. Prune removes only managed entries whose writer and execution leases are free, stops at the requested byte or entry bound, and never requires callers to enumerate cache paths.`,
+	Subcommands: []SubcommandRef{
+		{"status", "Measure managed, active, busy, and legacy cache bytes"},
+		{"prune", "Reclaim inactive managed entries within explicit bounds"},
+	},
+}
+
+var cmdCacheStatus = Command{
+	Path:     "sparkwing cache status",
+	Synopsis: "Measure compiled pipeline-cache pressure",
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+	},
+}
+
+var cmdCachePrune = Command{
+	Path:     "sparkwing cache prune",
+	Synopsis: "Reclaim inactive compiled pipeline entries",
+	Flags: []FlagSpec{
+		{Name: "goal-bytes", Argument: "N", Desc: "Stop after reclaiming at least N bytes", Required: true, Group: "Bounds"},
+		{Name: "max-entries", Argument: "N", Desc: "Examine at most N entries", Required: true, Group: "Bounds"},
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Bounds", "Output", "Other"},
 }
 
 var cmdDaemon = Command{
