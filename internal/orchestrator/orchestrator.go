@@ -1652,6 +1652,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				attrs["error"] = errMsg
 			}
 			payload, _ := json.Marshal(attrs)
+			payload = maskEventPayload(s.masker, payload)
 			_ = s.backends.State.AppendEvent(context.WithoutCancel(ctx), s.runID, currentNode, "child_run_finish", payload)
 		}
 
@@ -1663,6 +1664,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				"args":            req.Args,
 				"timeout_seconds": int64(req.Timeout.Seconds()),
 			})
+			payload = maskEventPayload(s.masker, payload)
 			if ev := s.backends.State.AppendEvent(ctx, s.runID, currentNode,
 				"child_run_start", payload); ev != nil {
 				sparkwing.Warn(ctx, "child_run_start audit event append failed: %v", ev)

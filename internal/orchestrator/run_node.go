@@ -217,6 +217,7 @@ func RunNodeOnce(
 					attrs["error"] = errMsg
 				}
 				payload, _ := json.Marshal(attrs)
+				payload = maskEventPayload(masker, payload)
 				if evErr := stateClient.AppendEvent(context.WithoutCancel(innerCtx), runID, currentNode,
 					"child_run_finish", payload); evErr != nil {
 					logger.Warn("child_run_finish audit event append failed",
@@ -232,6 +233,7 @@ func RunNodeOnce(
 					"args":            req.Args,
 					"timeout_seconds": int64(req.Timeout.Seconds()),
 				})
+				payload = maskEventPayload(masker, payload)
 				if evErr := stateClient.AppendEvent(innerCtx, runID, currentNode,
 					"child_run_start", payload); evErr != nil {
 					logger.Warn("child_run_start audit event append failed",
