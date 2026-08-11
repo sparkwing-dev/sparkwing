@@ -226,9 +226,14 @@ func runCachePrune(args []string) error {
 		return writeCacheError(output, fmt.Errorf("cache prune: %w", err))
 	}
 	return writeCacheOutput(output, result, func() {
-		fmt.Printf("removed: %s across %d entries\n", humanBytes(result.RemovedBytes), result.Reclaimed)
-		fmt.Printf("observed capacity gained: %s\n", humanBytes(result.ReclaimedBytes))
-		fmt.Printf("examined: %d, active: %d, busy: %d\n", result.Examined, result.Active, result.Busy)
+		if result.PruneBusy {
+			fmt.Println("prune already in progress")
+			return
+		}
+		fmt.Printf("removed: %s across %d entries\n", humanBytes(result.LogicalRemovedBytes), result.ReclaimedEntries)
+		fmt.Printf("observed capacity gained: %s\n", humanBytes(result.ObservedCapacityGainedBytes))
+		fmt.Printf("examined: %d, active skipped: %d, busy skipped: %d\n",
+			result.ExaminedEntries, result.ActiveSkippedEntries, result.BusySkippedEntries)
 		fmt.Printf("goal satisfied: %t\n", result.GoalSatisfied)
 	})
 }

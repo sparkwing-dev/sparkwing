@@ -622,7 +622,8 @@ func runSparksWarmup(args []string) error {
 		if err != nil {
 			return fmt.Errorf("spark warmup: clear cache: %w", err)
 		}
-		fmt.Fprintf(os.Stdout, "cache pruning removed %d bytes across %d entries\n", result.RemovedBytes, result.Reclaimed)
+		fmt.Fprintf(os.Stdout, "cache pruning removed %d bytes across %d entries\n",
+			result.LogicalRemovedBytes, result.ReclaimedEntries)
 	}
 
 	_, cfg, err := projectconfig.DiscoverPipelines(sparkwingDir)

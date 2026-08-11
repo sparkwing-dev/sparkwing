@@ -75,7 +75,7 @@ func TestHolderLockDiesWithProcess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prune after holder death: %v", err)
 	}
-	if result.Active != 0 || result.Reclaimed != 1 {
+	if result.ActiveSkippedEntries != 0 || result.ReclaimedEntries != 1 {
 		t.Fatalf("stale holder result: %+v", result)
 	}
 }

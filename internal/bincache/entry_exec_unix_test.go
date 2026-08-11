@@ -123,7 +123,7 @@ func TestExecReplaceRetainsHolderLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prune while exec holder runs: %v", err)
 	}
-	if result.Active != 1 || result.Reclaimed != 0 {
+	if result.ActiveSkippedEntries != 1 || result.ReclaimedEntries != 0 {
 		t.Fatalf("exec replacement lost its lease: %+v", result)
 	}
 	if err := cmd.Process.Kill(); err != nil {
@@ -138,7 +138,7 @@ func TestExecReplaceRetainsHolderLock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prune after exec holder death: %v", err)
 	}
-	if result.Active != 0 || result.Reclaimed != 1 {
+	if result.ActiveSkippedEntries != 0 || result.ReclaimedEntries != 1 {
 		t.Fatalf("dead exec holder retained its lease: %+v", result)
 	}
 }

@@ -50,7 +50,7 @@ func TestPruneReclaimsWithinCallerBounds(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Reclaimed != 1 {
+	if result.ReclaimedEntries != 1 {
 		t.Fatalf("result = %#v", result)
 	}
 }

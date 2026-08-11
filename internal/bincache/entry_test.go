@@ -77,7 +77,7 @@ func TestPruneSkipsActiveHolderAndReclaimsAnotherEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
-	if result.Active != 1 || result.Reclaimed != 1 {
+	if result.ActiveSkippedEntries != 1 || result.ReclaimedEntries != 1 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
 	if _, err := os.Stat(old.binaryPath()); err != nil {
@@ -106,10 +106,10 @@ func TestPruneIsBoundedAndUsesStableQueueOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
-	if result.Examined != 1 || result.Reclaimed != 1 || result.ObservedBytes != 1 {
+	if result.ExaminedEntries != 1 || result.ReclaimedEntries != 1 || result.ObservedBytes != 1 {
 		t.Fatalf("unexpected bounded accounting: %+v", result)
 	}
-	if !result.Exhausted || result.GoalSatisfied {
+	if !result.WorkBoundExhausted || result.GoalSatisfied {
 		t.Fatalf("bounded miss must be exhausted without satisfying goal: %+v", result)
 	}
 	if _, err := os.Stat(first.binaryPath()); !os.IsNotExist(err) {
@@ -128,14 +128,14 @@ func TestPruneRemainsHealthyAfterRemovingAnEntry(t *testing.T) {
 	seedEntry(t, entry, "remove", time.Unix(1, 0))
 
 	first, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
-	if err != nil || first.Reclaimed != 1 {
+	if err != nil || first.ReclaimedEntries != 1 {
 		t.Fatalf("first Prune = (%+v, %v)", first, err)
 	}
 	second, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatalf("second Prune: %v", err)
 	}
-	if second.Reclaimed != 0 || !second.Exhausted {
+	if second.ReclaimedEntries != 0 || second.WorkBoundExhausted {
 		t.Fatalf("second Prune = %+v", second)
 	}
 }
@@ -156,14 +156,14 @@ func TestRepeatedBoundedPruneAdvancesPastAnActiveEntry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Active != 1 || first.Reclaimed != 0 {
+	if first.ActiveSkippedEntries != 1 || first.ReclaimedEntries != 0 {
 		t.Fatalf("first bounded prune = %+v", first)
 	}
 	second, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Reclaimed != 1 {
+	if second.ReclaimedEntries != 1 {
 		t.Fatalf("second bounded prune = %+v, want later entry reclaimed", second)
 	}
 	if _, err := os.Stat(reclaimable.binaryPath()); !os.IsNotExist(err) {
@@ -224,7 +224,7 @@ func TestPruneDoesNotRaceWriterOrExposePartialEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prune while writer active: %v", err)
 	}
-	if result.Busy != 1 || result.Reclaimed != 0 {
+	if result.BusySkippedEntries != 1 || result.ReclaimedEntries != 0 {
 		t.Fatalf("active writer was not skipped: %+v", result)
 	}
 	if _, err := os.Stat(entry.binaryPath()); !os.IsNotExist(err) {
@@ -289,7 +289,7 @@ func TestPruneAttemptsEveryCandidateAndJoinsRemovalFailures(t *testing.T) {
 			t.Errorf("Prune error %q lacks %q", err, diagnostic)
 		}
 	}
-	if result.ObservedBytes != 11 || result.RemovedBytes != 0 || result.ReclaimedBytes != 0 || result.Reclaimed != 0 {
+	if result.ObservedBytes != 11 || result.LogicalRemovedBytes != 0 || result.ObservedCapacityGainedBytes != 0 || result.ReclaimedEntries != 0 {
 		t.Fatalf("failed removal accounting: %+v", result)
 	}
 }
@@ -313,7 +313,7 @@ func TestAcquireOrMaterializeClosesPublicationToLeaseGap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Prune with returned lease: %v", err)
 	}
-	if result.Active != 1 || result.Reclaimed != 0 {
+	if result.ActiveSkippedEntries != 1 || result.ReclaimedEntries != 0 {
 		t.Fatalf("returned lease did not protect publication: %+v", result)
 	}
 	if err := lease.Release(); err != nil {
@@ -442,7 +442,7 @@ func TestPruneRetiresLegacyEntriesAutomatically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Reclaimed != 0 || result.GoalSatisfied {
+	if result.ReclaimedEntries != 0 || result.GoalSatisfied {
 		t.Fatalf("first legacy prune must quarantine without claiming bytes: %+v", result)
 	}
 	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
@@ -458,7 +458,7 @@ func TestPruneRetiresLegacyEntriesAutomatically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Reclaimed != 1 {
+	if result.ReclaimedEntries != 1 {
 		t.Fatalf("mature legacy prune result = %+v", result)
 	}
 	if _, err := os.Stat(quarantine); !os.IsNotExist(err) {
@@ -508,7 +508,7 @@ func TestPruneQuarantinesActiveLegacyWriterUntilGraceExpires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Reclaimed != 1 {
+	if result.ReclaimedEntries != 1 {
 		t.Fatalf("closed writer quarantine was not reclaimed: %+v", result)
 	}
 }
@@ -537,7 +537,7 @@ func TestDeferredLegacyDoesNotStarveManagedPressureReclaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Reclaimed != 1 {
+	if result.ReclaimedEntries != 1 {
 		t.Fatalf("managed pressure reclaim was starved: %+v", result)
 	}
 	if _, err := os.Stat(managed.entryDir()); !os.IsNotExist(err) {

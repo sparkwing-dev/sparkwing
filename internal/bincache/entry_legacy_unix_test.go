@@ -66,7 +66,7 @@ func TestPruneQuarantinesRunningLegacyExecutable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Reclaimed != 1 || result.ReclaimedBytes != 0 || result.GoalSatisfied {
+	if result.ReclaimedEntries != 1 || result.ObservedCapacityGainedBytes != 0 || result.GoalSatisfied {
 		t.Fatalf("live executable removal claimed unavailable capacity: %+v", result)
 	}
 	quarantine := filepath.Join(root, "legacy-retired", "11111111-11111111")
@@ -127,10 +127,10 @@ func TestManagedRemovalDoesNotCreditUnobservedCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Reclaimed != 1 {
-		t.Fatalf("removed entries = %d, want 1", result.Reclaimed)
+	if result.ReclaimedEntries != 1 {
+		t.Fatalf("removed entries = %d, want 1", result.ReclaimedEntries)
 	}
-	if result.ReclaimedBytes != 0 || result.GoalSatisfied {
+	if result.ObservedCapacityGainedBytes != 0 || result.GoalSatisfied {
 		t.Fatalf("managed removal claimed unobserved capacity: %+v", result)
 	}
 	if _, err := os.Stat(entry.entryDir()); !os.IsNotExist(err) {

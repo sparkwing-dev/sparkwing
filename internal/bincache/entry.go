@@ -52,20 +52,25 @@ type PruneOptions struct {
 	MaxEntries     int
 }
 
-// PruneResult reports observed pressure and work completed by Prune.
+// PruneResult reports observed pressure and work completed by Prune. A
+// successful attempt classifies every examined entry as reclaimed, active, or
+// busy. PruneBusy reports coordinator contention without examining an entry.
 type PruneResult struct {
-	ObservedBytes int64 `json:"observed_bytes"`
-	RemovedBytes  int64 `json:"removed_bytes"`
-	// ReclaimedBytes is capacity observed becoming available after removal.
+	ObservedBytes       int64 `json:"observed_bytes"`
+	LogicalRemovedBytes int64 `json:"logical_removed_bytes"`
+	// ObservedCapacityGainedBytes is capacity observed becoming available after removal.
 	// Admission must remeasure afterward because concurrent filesystem activity
 	// prevents attributing the observation to this prune attempt.
-	ReclaimedBytes int64 `json:"reclaimed_bytes"`
-	Examined       int   `json:"examined_entries"`
-	Reclaimed      int   `json:"reclaimed_entries"`
-	Active         int   `json:"active_entries"`
-	Busy           int   `json:"busy_entries"`
-	GoalSatisfied  bool  `json:"goal_satisfied"`
-	Exhausted      bool  `json:"exhausted"`
+	ObservedCapacityGainedBytes int64 `json:"observed_capacity_gained_bytes"`
+	ExaminedEntries             int   `json:"examined_entries"`
+	ReclaimedEntries            int   `json:"reclaimed_entries"`
+	ActiveSkippedEntries        int   `json:"active_skipped_entries"`
+	BusySkippedEntries          int   `json:"busy_skipped_entries"`
+	PruneBusy                   bool  `json:"prune_busy"`
+	GoalSatisfied               bool  `json:"goal_satisfied"`
+	// WorkBoundExhausted means discovery or examination reached a caller-set
+	// limit; an empty inventory leaves it false.
+	WorkBoundExhausted bool `json:"work_bound_exhausted"`
 }
 
 // CacheStatus reports the measured managed and legacy pipeline-cache state.
@@ -252,8 +257,7 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 		return result, err
 	}
 	if !acquired {
-		result.Busy = 1
-		result.Exhausted = true
+		result.PruneBusy = true
 		return result, nil
 	}
 	defer func() { err = errors.Join(err, cacheUnlock(coordinator), coordinator.Close()) }()
@@ -265,13 +269,12 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 	}
 	var pruneErr error
 	for _, candidate := range candidates {
-		if result.Examined >= opts.MaxEntries || pruneGoalSatisfied(result, opts) {
+		if result.ExaminedEntries >= opts.MaxEntries || pruneGoalSatisfied(result, opts) {
 			break
 		}
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		result.Examined++
 		if candidate.missing {
 			if err := consumeCacheQueueRecord(ctx, root, candidate.sequence); err != nil {
 				return result, err
@@ -284,7 +287,8 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			return result, lockErr
 		}
 		if !acquired {
-			result.Busy++
+			result.ExaminedEntries++
+			result.BusySkippedEntries++
 			if err := requeueCacheCandidate(ctx, root, candidate); err != nil {
 				return result, err
 			}
@@ -311,6 +315,8 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			_ = writer.Close()
 			return result, statErr
 		} else if info.ModTime().UnixNano() > candidate.modTime {
+			result.ExaminedEntries++
+			result.BusySkippedEntries++
 			if closeErr := errors.Join(cacheUnlock(writer), writer.Close()); closeErr != nil {
 				return result, closeErr
 			}
@@ -326,7 +332,8 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			return result, lockErr
 		}
 		if !acquired {
-			result.Active++
+			result.ExaminedEntries++
+			result.ActiveSkippedEntries++
 			if closeErr := errors.Join(cacheUnlock(writer), writer.Close()); closeErr != nil {
 				return result, closeErr
 			}
@@ -335,6 +342,7 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			}
 			continue
 		}
+		result.ExaminedEntries++
 		reclaimedBytes, removeErr := removeCacheEntryWithCapacity(ctx, entry.entryDir())
 		closeErr := errors.Join(cacheUnlock(lease), lease.Close(), cacheUnlock(writer), writer.Close())
 		if removeErr != nil || closeErr != nil {
@@ -344,14 +352,14 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			}
 			continue
 		}
-		result.Reclaimed++
-		result.RemovedBytes += size
-		result.ReclaimedBytes += reclaimedBytes
+		result.ReclaimedEntries++
+		result.LogicalRemovedBytes += size
+		result.ObservedCapacityGainedBytes += reclaimedBytes
 		if err := consumeCacheQueueRecord(ctx, root, candidate.sequence); err != nil {
 			return result, err
 		}
 	}
-	remaining := discoveryLimit - result.Examined
+	remaining := discoveryLimit - result.ExaminedEntries
 	var legacy []legacyCacheCandidate
 	legacyExhausted := false
 	if remaining > 0 && !pruneGoalSatisfied(result, opts) {
@@ -361,13 +369,12 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 		}
 	}
 	for _, candidate := range legacy {
-		if result.Examined >= opts.MaxEntries || pruneGoalSatisfied(result, opts) {
+		if result.ExaminedEntries >= opts.MaxEntries || pruneGoalSatisfied(result, opts) {
 			break
 		}
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		result.Examined++
 		size, sizeErr := treeSizeContext(ctx, candidate.path)
 		if os.IsNotExist(sizeErr) {
 			continue
@@ -392,23 +399,28 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			if timeErr := os.Chtimes(retiredPath, cacheNow(), cacheNow()); timeErr != nil {
 				pruneErr = errors.Join(pruneErr, timeErr)
 			}
+			result.ExaminedEntries++
+			result.ActiveSkippedEntries++
 			continue
 		}
 		if cacheNow().Sub(time.Unix(0, candidate.modTime)) < legacyRetirementGrace {
-			result.Active++
+			result.ExaminedEntries++
+			result.ActiveSkippedEntries++
 			continue
 		}
+		result.ExaminedEntries++
 		reclaimedBytes, removeErr := removeCacheEntryWithCapacity(ctx, candidate.path)
 		if removeErr != nil {
 			pruneErr = errors.Join(pruneErr, removeErr)
 			continue
 		}
-		result.Reclaimed++
-		result.RemovedBytes += size
-		result.ReclaimedBytes += reclaimedBytes
+		result.ReclaimedEntries++
+		result.LogicalRemovedBytes += size
+		result.ObservedCapacityGainedBytes += reclaimedBytes
 	}
 	result.GoalSatisfied = pruneGoalSatisfied(result, opts)
-	result.Exhausted = !result.GoalSatisfied && (legacyExhausted || managedExhausted || result.Examined >= opts.MaxEntries || result.Examined == len(legacy)+len(candidates))
+	result.WorkBoundExhausted = !result.GoalSatisfied &&
+		(legacyExhausted || managedExhausted || result.ExaminedEntries >= opts.MaxEntries)
 	return result, pruneErr
 }
 
@@ -420,9 +432,9 @@ func requeueCacheCandidate(ctx context.Context, root string, candidate queuedCac
 }
 
 func pruneGoalSatisfied(result PruneResult, opts PruneOptions) bool {
-	bytesSatisfied := opts.ReclaimBytes <= 0 || result.ReclaimedBytes >= opts.ReclaimBytes
-	removedSatisfied := opts.RemoveBytes <= 0 || result.RemovedBytes >= opts.RemoveBytes
-	entriesSatisfied := opts.ReclaimEntries <= 0 || result.Reclaimed >= opts.ReclaimEntries
+	bytesSatisfied := opts.ReclaimBytes <= 0 || result.ObservedCapacityGainedBytes >= opts.ReclaimBytes
+	removedSatisfied := opts.RemoveBytes <= 0 || result.LogicalRemovedBytes >= opts.RemoveBytes
+	entriesSatisfied := opts.ReclaimEntries <= 0 || result.ReclaimedEntries >= opts.ReclaimEntries
 	return bytesSatisfied && removedSatisfied && entriesSatisfied
 }
 

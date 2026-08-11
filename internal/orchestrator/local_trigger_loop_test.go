@@ -129,7 +129,7 @@ func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhi
 	if err != nil {
 		t.Fatalf("prune shared pipeline entry: %v", err)
 	}
-	if result.Reclaimed != 1 {
+	if result.ReclaimedEntries != 1 {
 		t.Fatalf("prune result = %+v, want one reclaimed entry", result)
 	}
 	if err := dispatch("child-two"); err != nil {

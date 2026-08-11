@@ -103,11 +103,14 @@ func pruneCache() {
 		slog.Default().Debug("pipeline cache prune failed", "err", err)
 		return
 	}
-	if result.Reclaimed > 0 {
+	if result.ReclaimedEntries > 0 {
 		slog.Default().Debug("pruned pipeline cache",
-			"removed", result.Reclaimed, "removed_bytes", result.RemovedBytes,
-			"observed_capacity_bytes", result.ReclaimedBytes,
-			"examined", result.Examined, "active", result.Active, "busy", result.Busy)
+			"removed", result.ReclaimedEntries, "logical_removed_bytes", result.LogicalRemovedBytes,
+			"observed_capacity_gained_bytes", result.ObservedCapacityGainedBytes,
+			"examined", result.ExaminedEntries, "active_skipped", result.ActiveSkippedEntries,
+			"busy_skipped", result.BusySkippedEntries)
+	} else if result.PruneBusy {
+		slog.Default().Debug("pipeline cache prune already in progress")
 	}
 }
 

@@ -27,7 +27,7 @@ func TestPruneToLimitsCannotSatisfyGoalFromPartialDiscovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.GoalSatisfied || !result.Exhausted {
+	if result.GoalSatisfied || !result.WorkBoundExhausted {
 		t.Fatalf("partial discovery result = %+v, want unsatisfied and exhausted", result)
 	}
 }
@@ -45,7 +45,7 @@ func TestPruneToLimitsUsesLogicalRemovalForCacheByteCeiling(t *testing.T) {
 	var request PruneOptions
 	pruneForLimits = func(_ context.Context, opts PruneOptions) (PruneResult, error) {
 		request = opts
-		return PruneResult{RemovedBytes: 60, Reclaimed: 1, GoalSatisfied: true}, nil
+		return PruneResult{LogicalRemovedBytes: 60, ReclaimedEntries: 1, GoalSatisfied: true}, nil
 	}
 
 	result, err := PruneToLimits(context.Background(), 50, 0, false)
@@ -55,7 +55,7 @@ func TestPruneToLimitsUsesLogicalRemovalForCacheByteCeiling(t *testing.T) {
 	if request.RemoveBytes != 50 || request.ReclaimBytes != 0 || request.MaxEntries != 2 {
 		t.Fatalf("prune request = %+v", request)
 	}
-	if !result.GoalSatisfied || result.RemovedBytes != 60 {
+	if !result.GoalSatisfied || result.LogicalRemovedBytes != 60 {
 		t.Fatalf("prune result = %+v", result)
 	}
 }

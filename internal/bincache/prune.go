@@ -131,7 +131,7 @@ func PruneToLimits(ctx context.Context, maxBytes int64, maxEntries int, removeAl
 	})
 	if status.DiscoveryExhausted {
 		result.GoalSatisfied = false
-		result.Exhausted = true
+		result.WorkBoundExhausted = true
 	}
 	return result, err
 }
