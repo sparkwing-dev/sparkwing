@@ -44,8 +44,12 @@ func cacheUnlock(file *os.File) error {
 	return windows.UnlockFileEx(windows.Handle(file.Fd()), 0, cacheLockBytes, 0, &overlapped)
 }
 
-func cacheLeaseReady(*os.File) error {
-	return nil
+func cacheLeaseReady(file *os.File) error {
+	if err := cacheUnlock(file); err != nil {
+		return err
+	}
+	_, err := cacheLock(file, cacheLockShared)
+	return err
 }
 
 func cacheRetainAcrossExec(*os.File) (func() error, error) {

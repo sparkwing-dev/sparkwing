@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -56,13 +57,14 @@ type PruneResult struct {
 
 // CacheStatus reports the measured managed and legacy pipeline-cache state.
 type CacheStatus struct {
-	ObservedBytes int64 `json:"observed_bytes"`
-	EntryCount    int   `json:"entry_count"`
-	ActiveEntries int   `json:"active_entries"`
-	ActiveBytes   int64 `json:"active_bytes"`
-	BusyEntries   int   `json:"busy_entries"`
-	LegacyBytes   int64 `json:"legacy_bytes"`
-	LegacyEntries int   `json:"legacy_entries"`
+	ObservedBytes      int64 `json:"observed_bytes"`
+	EntryCount         int   `json:"entry_count"`
+	ActiveEntries      int   `json:"active_entries"`
+	ActiveBytes        int64 `json:"active_bytes"`
+	BusyEntries        int   `json:"busy_entries"`
+	LegacyBytes        int64 `json:"legacy_bytes"`
+	LegacyEntries      int   `json:"legacy_entries"`
+	DiscoveryExhausted bool  `json:"discovery_exhausted"`
 }
 
 // PipelineEntry resolves key inside Sparkwing's managed pipeline cache.
@@ -226,11 +228,43 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 	}
 	defer func() { err = errors.Join(err, cacheUnlock(coordinator), coordinator.Close()) }()
 
-	candidates, err := cacheCandidates(ctx, root, opts.MaxEntries)
+	legacy, legacyExhausted, err := legacyCacheCandidates(ctx, root, opts.MaxEntries)
 	if err != nil {
 		return result, err
 	}
 	var pruneErr error
+	for _, candidate := range legacy {
+		if result.Examined >= opts.MaxEntries || result.ReclaimedBytes >= opts.ReclaimBytes {
+			break
+		}
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		result.Examined++
+		size, sizeErr := treeSizeContext(ctx, candidate.path)
+		if os.IsNotExist(sizeErr) {
+			continue
+		}
+		if sizeErr != nil {
+			return result, sizeErr
+		}
+		result.ObservedBytes += size
+		if removeErr := removeCacheEntry(candidate.path); removeErr != nil {
+			pruneErr = errors.Join(pruneErr, removeErr)
+			continue
+		}
+		result.Reclaimed++
+		result.ReclaimedBytes += size
+	}
+	remaining := opts.MaxEntries - result.Examined
+	var candidates []cacheCandidate
+	managedExhausted := false
+	if remaining > 0 && result.ReclaimedBytes < opts.ReclaimBytes {
+		candidates, managedExhausted, err = cacheCandidatesBounded(ctx, root, remaining)
+		if err != nil {
+			return result, err
+		}
+	}
 	for _, candidate := range candidates {
 		if result.Examined >= opts.MaxEntries || result.ReclaimedBytes >= opts.ReclaimBytes {
 			break
@@ -248,7 +282,13 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			result.Busy++
 			continue
 		}
-		size, sizeErr := treeSize(entry.entryDir())
+		size, sizeErr := treeSizeContext(ctx, entry.entryDir())
+		if os.IsNotExist(sizeErr) {
+			if closeErr := errors.Join(cacheUnlock(writer), writer.Close()); closeErr != nil {
+				return result, closeErr
+			}
+			continue
+		}
 		if sizeErr != nil {
 			_ = cacheUnlock(writer)
 			_ = writer.Close()
@@ -278,7 +318,7 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 		result.ReclaimedBytes += size
 	}
 	result.GoalSatisfied = result.ReclaimedBytes >= opts.ReclaimBytes
-	result.Exhausted = !result.GoalSatisfied && (result.Examined >= opts.MaxEntries || result.Examined == len(candidates))
+	result.Exhausted = !result.GoalSatisfied && (legacyExhausted || managedExhausted || result.Examined >= opts.MaxEntries || result.Examined == len(legacy)+len(candidates))
 	return result, pruneErr
 }
 
@@ -287,10 +327,11 @@ func Status(ctx context.Context, root string) (status CacheStatus, err error) {
 	if root == "" {
 		root = filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema)
 	}
-	candidates, err := cacheCandidates(ctx, root, maxCacheDiscoveryEntries)
+	candidates, exhausted, err := cacheCandidatesBounded(ctx, root, maxCacheDiscoveryEntries)
 	if err != nil {
 		return status, err
 	}
+	status.DiscoveryExhausted = exhausted
 	for _, candidate := range candidates {
 		if err := ctx.Err(); err != nil {
 			return status, err
@@ -304,7 +345,7 @@ func Status(ctx context.Context, root string) (status CacheStatus, err error) {
 			status.BusyEntries++
 			continue
 		}
-		size, sizeErr := treeSize(entry.entryDir())
+		size, sizeErr := treeSizeContext(ctx, entry.entryDir())
 		if os.IsNotExist(sizeErr) {
 			if closeErr := errors.Join(cacheUnlock(writer), writer.Close()); closeErr != nil {
 				return status, closeErr
@@ -339,18 +380,13 @@ func Status(ctx context.Context, root string) (status CacheStatus, err error) {
 	if filepath.Base(root) != pipelineCacheSchema {
 		return status, nil
 	}
-	legacy, err := os.ReadDir(filepath.Dir(root))
-	if os.IsNotExist(err) {
-		return status, nil
-	}
+	legacy, legacyExhausted, err := legacyCacheCandidates(ctx, root, maxCacheDiscoveryEntries)
 	if err != nil {
 		return status, err
 	}
+	status.DiscoveryExhausted = status.DiscoveryExhausted || legacyExhausted
 	for _, candidate := range legacy {
-		if !candidate.IsDir() || !pipelineEntryKeyRE.MatchString(candidate.Name()) {
-			continue
-		}
-		size, err := treeSize(filepath.Join(filepath.Dir(root), candidate.Name()))
+		size, err := treeSizeContext(ctx, candidate.path)
 		if err != nil {
 			return status, err
 		}
@@ -373,6 +409,9 @@ func (e Entry) entryDir() string {
 }
 
 func (e Entry) lockPath(kind string) string {
+	if kind == "writer" {
+		return filepath.Join(e.root, "writers", e.key+".lock")
+	}
 	return filepath.Join(e.root, "locks", e.key+"."+kind+".lock")
 }
 
@@ -421,51 +460,66 @@ type cacheCandidate struct {
 	modTime int64
 }
 
-func cacheCandidates(_ context.Context, root string, _ int) ([]cacheCandidate, error) {
-	entries, err := os.ReadDir(filepath.Join(root, "entries"))
-	if os.IsNotExist(err) {
-		entries = nil
-		err = nil
-	}
+func cacheCandidates(ctx context.Context, root string, limit int) ([]cacheCandidate, error) {
+	candidates, _, err := cacheCandidatesBounded(ctx, root, limit)
+	return candidates, err
+}
+
+func cacheCandidatesBounded(ctx context.Context, root string, limit int) ([]cacheCandidate, bool, error) {
+	entries, exhausted, err := readDirBounded(ctx, filepath.Join(root, "entries"), limit)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	byKey := make(map[string]cacheCandidate, len(entries))
+	candidates := make([]cacheCandidate, 0, len(entries))
 	for _, dir := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
 		if !dir.IsDir() || !pipelineEntryKeyRE.MatchString(dir.Name()) {
 			continue
 		}
 		info, err := dir.Info()
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		byKey[dir.Name()] = cacheCandidate{key: dir.Name(), modTime: info.ModTime().UnixNano()}
+		candidates = append(candidates, cacheCandidate{key: dir.Name(), modTime: info.ModTime().UnixNano()})
 	}
-	locks, err := os.ReadDir(filepath.Join(root, "locks"))
-	if err != nil && !os.IsNotExist(err) {
-		return nil, err
-	}
-	for _, lock := range locks {
-		const suffix = ".writer.lock"
-		if lock.IsDir() || !strings.HasSuffix(lock.Name(), suffix) {
-			continue
-		}
-		key := strings.TrimSuffix(lock.Name(), suffix)
-		if !pipelineEntryKeyRE.MatchString(key) {
-			continue
-		}
-		if _, exists := byKey[key]; exists {
-			continue
-		}
-		info, err := lock.Info()
+	remaining := limit - len(candidates)
+	if remaining > 0 && !exhausted {
+		locks, locksExhausted, err := readDirBounded(ctx, filepath.Join(root, "writers"), remaining)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
-		byKey[key] = cacheCandidate{key: key, modTime: info.ModTime().UnixNano()}
-	}
-	candidates := make([]cacheCandidate, 0, len(byKey))
-	for _, candidate := range byKey {
-		candidates = append(candidates, candidate)
+		exhausted = locksExhausted
+		for _, lock := range locks {
+			if err := ctx.Err(); err != nil {
+				return nil, false, err
+			}
+			const suffix = ".lock"
+			if lock.IsDir() || !strings.HasSuffix(lock.Name(), suffix) {
+				continue
+			}
+			key := strings.TrimSuffix(lock.Name(), suffix)
+			if !pipelineEntryKeyRE.MatchString(key) || candidateKeyExists(candidates, key) {
+				continue
+			}
+			entry := Entry{root: root, key: key}
+			writer, acquired, err := entry.tryLock("writer")
+			if err != nil {
+				return nil, false, err
+			}
+			if acquired {
+				if closeErr := errors.Join(cacheUnlock(writer), writer.Close()); closeErr != nil {
+					return nil, false, closeErr
+				}
+				continue
+			}
+			info, err := lock.Info()
+			if err != nil {
+				return nil, false, err
+			}
+			candidates = append(candidates, cacheCandidate{key: key, modTime: info.ModTime().UnixNano()})
+		}
 	}
 	sort.Slice(candidates, func(i, j int) bool {
 		if candidates[i].modTime == candidates[j].modTime {
@@ -473,12 +527,28 @@ func cacheCandidates(_ context.Context, root string, _ int) ([]cacheCandidate, e
 		}
 		return candidates[i].modTime < candidates[j].modTime
 	})
-	return candidates, nil
+	return candidates, exhausted, nil
+}
+
+func candidateKeyExists(candidates []cacheCandidate, key string) bool {
+	for _, candidate := range candidates {
+		if candidate.key == key {
+			return true
+		}
+	}
+	return false
 }
 
 func treeSize(root string) (int64, error) {
+	return treeSizeContext(context.Background(), root)
+}
+
+func treeSizeContext(ctx context.Context, root string) (int64, error) {
 	var size int64
 	err := filepath.WalkDir(root, func(_ string, dir fs.DirEntry, err error) error {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
 		if err != nil {
 			return err
 		}
@@ -493,4 +563,73 @@ func treeSize(root string) (int64, error) {
 		return nil
 	})
 	return size, err
+}
+
+type legacyCacheCandidate struct {
+	path    string
+	modTime int64
+}
+
+func legacyCacheCandidates(ctx context.Context, root string, limit int) ([]legacyCacheCandidate, bool, error) {
+	if filepath.Base(root) != pipelineCacheSchema {
+		return nil, false, nil
+	}
+	entries, exhausted, err := readDirBounded(ctx, filepath.Dir(root), limit+1)
+	if err != nil {
+		return nil, false, err
+	}
+	candidates := make([]legacyCacheCandidate, 0, len(entries))
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, false, err
+		}
+		if !entry.IsDir() || !pipelineEntryKeyRE.MatchString(entry.Name()) {
+			continue
+		}
+		info, err := entry.Info()
+		if err != nil {
+			return nil, false, err
+		}
+		candidates = append(candidates, legacyCacheCandidate{path: filepath.Join(filepath.Dir(root), entry.Name()), modTime: info.ModTime().UnixNano()})
+		if len(candidates) == limit {
+			exhausted = true
+			break
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].modTime == candidates[j].modTime {
+			return candidates[i].path < candidates[j].path
+		}
+		return candidates[i].modTime < candidates[j].modTime
+	})
+	return candidates, exhausted, nil
+}
+
+func readDirBounded(ctx context.Context, path string, limit int) ([]os.DirEntry, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, false, err
+	}
+	if limit <= 0 {
+		return nil, false, nil
+	}
+	dir, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	entries, readErr := dir.ReadDir(limit + 1)
+	closeErr := dir.Close()
+	if readErr != nil && !errors.Is(readErr, io.EOF) {
+		return nil, false, errors.Join(readErr, closeErr)
+	}
+	if closeErr != nil {
+		return nil, false, closeErr
+	}
+	exhausted := len(entries) > limit
+	if exhausted {
+		entries = entries[:limit]
+	}
+	return entries, exhausted, nil
 }

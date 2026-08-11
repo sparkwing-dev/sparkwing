@@ -44,11 +44,11 @@ func runCacheStatus(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("cache status: unexpected positional %q", fs.Arg(0))
+		return writeCacheError(*output, fmt.Errorf("cache status: unexpected positional %q", fs.Arg(0)))
 	}
 	status, err := measureCachePressure(context.Background())
 	if err != nil {
-		return fmt.Errorf("cache status: %w", err)
+		return writeCacheError(*output, fmt.Errorf("cache status: %w", err))
 	}
 	return writeCacheOutput(*output, status, func() {
 		fmt.Printf("managed: %s across %d entries (%s active across %d entries)\n",
@@ -71,26 +71,39 @@ func runCachePrune(args []string) error {
 		return err
 	}
 	if fs.NArg() != 0 {
-		return fmt.Errorf("cache prune: unexpected positional %q", fs.Arg(0))
+		return writeCacheError(*output, fmt.Errorf("cache prune: unexpected positional %q", fs.Arg(0)))
 	}
 	if *goalBytes <= 0 {
-		return errors.New("cache prune: --goal-bytes must be greater than zero")
+		return writeCacheError(*output, errors.New("cache prune: --goal-bytes must be greater than zero"))
 	}
 	if *maxEntries <= 0 {
-		return errors.New("cache prune: --max-entries must be greater than zero")
+		return writeCacheError(*output, errors.New("cache prune: --max-entries must be greater than zero"))
 	}
 	result, err := pruneCachePressure(context.Background(), cachepressure.PruneOptions{
 		ReclaimBytes: *goalBytes,
 		MaxEntries:   *maxEntries,
 	})
 	if err != nil {
-		return fmt.Errorf("cache prune: %w", err)
+		return writeCacheError(*output, fmt.Errorf("cache prune: %w", err))
 	}
 	return writeCacheOutput(*output, result, func() {
 		fmt.Printf("reclaimed: %s across %d entries\n", humanBytes(result.ReclaimedBytes), result.Reclaimed)
 		fmt.Printf("examined: %d, active: %d, busy: %d\n", result.Examined, result.Active, result.Busy)
 		fmt.Printf("goal satisfied: %t\n", result.GoalSatisfied)
 	})
+}
+
+func writeCacheError(output string, err error) error {
+	if output != "json" {
+		return err
+	}
+	encoded := struct {
+		Payload any `json:"payload"`
+		Error   any `json:"error"`
+	}{Error: struct {
+		Message string `json:"message"`
+	}{Message: err.Error()}}
+	return errors.Join(err, json.NewEncoder(os.Stdout).Encode(encoded))
 }
 
 func writeCacheOutput(output string, payload any, pretty func()) error {
