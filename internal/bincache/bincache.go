@@ -513,17 +513,6 @@ func SparkwingHome() string {
 	return filepath.Join(home, ".sparkwing")
 }
 
-// CachedBinaryPath returns where a pipeline binary with the given
-// hash lives.
-func CachedBinaryPath(hash string) string {
-	root := filepath.Join(SparkwingHome(), "cache", "pipelines", hash)
-	name := "pipelines"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	return filepath.Join(root, name)
-}
-
 // ErrMissingGoSum is returned by CompilePipeline when `go build`
 // fails because go.sum doesn't list every module that go.mod requires.
 // Recoverable by `go mod download`.

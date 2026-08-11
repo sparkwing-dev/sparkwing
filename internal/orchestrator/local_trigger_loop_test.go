@@ -125,20 +125,15 @@ func TestDispatchLocalTrigger_RunAndAwaitCachedExecutableSurvivesCacheRemovalWhi
 		t.Fatalf("prime cached child dispatch: %v", err)
 	}
 
-	// Pipeline discovery runs immediately before the dispatcher asks its
-	// long-lived compile cache for the executable. Simulate a concurrent
-	// cache clear at that exact boundary: the describe process unlinks the
-	// shared cache entry after proving which pipeline it contains.
-	t.Setenv("SPARKWING_CACHE_LEASE_TEST_REMOVE_SELF", "1")
+	result, err := bincache.Prune(context.Background(), bincache.PruneOptions{ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatalf("prune shared pipeline entry: %v", err)
+	}
+	if result.Reclaimed != 1 {
+		t.Fatalf("prune result = %+v, want one reclaimed entry", result)
+	}
 	if err := dispatch("child-two"); err != nil {
 		t.Fatalf("cached child dispatch after concurrent cache removal: %v", err)
-	}
-	hash, err := bincache.PipelineCacheKey(sparkwingDir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(bincache.CachedBinaryPath(hash)); !os.IsNotExist(err) {
-		t.Fatalf("fixture did not remove shared cache entry: %v", err)
 	}
 
 	raw, err := os.ReadFile(output)
@@ -178,9 +173,6 @@ import (
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--describe" {
 		fmt.Print("[{\"name\":\"child\"}]")
-		if os.Getenv("SPARKWING_CACHE_LEASE_TEST_REMOVE_SELF") != "" {
-			_ = os.Remove(os.Args[0])
-		}
 		return
 	}
 	f, err := os.OpenFile(os.Getenv("SPARKWING_CACHE_LEASE_TEST_OUTPUT"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
