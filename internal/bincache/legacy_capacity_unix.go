@@ -13,8 +13,8 @@ import (
 
 var legacyFilesystemAvailableBytes = filesystemAvailableBytes
 
-func removeLegacyCacheEntry(ctx context.Context, path string) (int64, error) {
-	allocated, err := legacyAllocatedBytes(ctx, path)
+func removeCacheEntryWithCapacity(ctx context.Context, path string) (int64, error) {
+	allocated, err := cacheAllocatedBytes(ctx, path)
 	if err != nil {
 		return 0, err
 	}
@@ -39,7 +39,7 @@ func removeLegacyCacheEntry(ctx context.Context, path string) (int64, error) {
 	return delta, nil
 }
 
-func legacyAllocatedBytes(ctx context.Context, root string) (int64, error) {
+func cacheAllocatedBytes(ctx context.Context, root string) (int64, error) {
 	var total int64
 	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {

@@ -6,7 +6,7 @@ import (
 	"context"
 )
 
-func removeLegacyCacheEntry(ctx context.Context, path string) (int64, error) {
+func removeCacheEntryWithCapacity(ctx context.Context, path string) (int64, error) {
 	if err := ctx.Err(); err != nil {
 		return 0, err
 	}

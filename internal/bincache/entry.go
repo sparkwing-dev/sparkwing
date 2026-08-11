@@ -49,8 +49,9 @@ type PruneOptions struct {
 // PruneResult reports observed pressure and work completed by Prune.
 type PruneResult struct {
 	ObservedBytes int64 `json:"observed_bytes"`
-	// ReclaimedBytes combines lease-protected managed bytes removed with legacy
-	// capacity observed becoming available. Admission must remeasure afterward.
+	// ReclaimedBytes is capacity observed becoming available after removal.
+	// Admission must remeasure afterward because concurrent filesystem activity
+	// prevents attributing the observation to this prune attempt.
 	ReclaimedBytes int64 `json:"reclaimed_bytes"`
 	Examined       int   `json:"examined_entries"`
 	Reclaimed      int   `json:"reclaimed_entries"`
@@ -282,14 +283,14 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			}
 			continue
 		}
-		removeErr := removeCacheEntry(entry.entryDir())
+		reclaimedBytes, removeErr := removeCacheEntryWithCapacity(ctx, entry.entryDir())
 		closeErr := errors.Join(cacheUnlock(lease), lease.Close(), cacheUnlock(writer), writer.Close())
 		if removeErr != nil || closeErr != nil {
 			pruneErr = errors.Join(pruneErr, removeErr, closeErr)
 			continue
 		}
 		result.Reclaimed++
-		result.ReclaimedBytes += size
+		result.ReclaimedBytes += reclaimedBytes
 	}
 	remaining := discoveryLimit - result.Examined
 	var legacy []legacyCacheCandidate
@@ -338,7 +339,7 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			result.Active++
 			continue
 		}
-		reclaimedBytes, removeErr := removeLegacyCacheEntry(ctx, candidate.path)
+		reclaimedBytes, removeErr := removeCacheEntryWithCapacity(ctx, candidate.path)
 		if removeErr != nil {
 			pruneErr = errors.Join(pruneErr, removeErr)
 			continue

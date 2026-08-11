@@ -89,7 +89,7 @@ func TestLegacyRemovalCreditsOnlyObservedAllocatedCapacity(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(path, "pipelines"), make([]byte, 8192), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	allocated, err := legacyAllocatedBytes(context.Background(), path)
+	allocated, err := cacheAllocatedBytes(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +103,7 @@ func TestLegacyRemovalCreditsOnlyObservedAllocatedCapacity(t *testing.T) {
 		}
 		return 100 + allocated + 1, nil
 	}
-	reclaimed, err := removeLegacyCacheEntry(context.Background(), path)
+	reclaimed, err := removeCacheEntryWithCapacity(context.Background(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
