@@ -1,6 +1,7 @@
 package livechainacceptance
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"reflect"
@@ -98,5 +99,100 @@ func TestDurableEffectExecutorRejectsConflictingStableRequest(t *testing.T) {
 	defer adapter.mu.Unlock()
 	if adapter.creates[request.ID] != 1 {
 		t.Fatalf("conflicting request recreated effect %d times", adapter.creates[request.ID])
+	}
+}
+
+func TestDurableEffectExecutorConcurrentApplyCreatesExternalEffectOnce(t *testing.T) {
+	writer, err := storagefs.NewArtifactStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &idempotentEffectAdapter{results: make(map[string]EffectResult), creates: make(map[string]int), loseResponse: make(map[string]bool)}
+	executor, err := NewDurableEffectExecutor("acceptance", distributedTestStore{writer}, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := EffectRequest{ID: "session/deploy_a", Kind: EffectDeployA, Artifact: Artifact{EventID: "event", Digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}
+	const callers = 8
+	var wait sync.WaitGroup
+	errorsByCaller := make(chan error, callers)
+	for range callers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			_, applyErr := executor.Apply(context.Background(), request)
+			errorsByCaller <- applyErr
+		}()
+	}
+	wait.Wait()
+	close(errorsByCaller)
+	for applyErr := range errorsByCaller {
+		if applyErr != nil {
+			t.Fatal(applyErr)
+		}
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if adapter.creates[request.ID] != 1 {
+		t.Fatalf("underlying effect creations = %d, want 1", adapter.creates[request.ID])
+	}
+}
+
+func TestDurableEffectExecutorFailsClosedOnStoredResultConflict(t *testing.T) {
+	writer, err := storagefs.NewArtifactStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	backend := distributedTestStore{writer}
+	adapter := &idempotentEffectAdapter{results: make(map[string]EffectResult), creates: make(map[string]int), loseResponse: make(map[string]bool)}
+	executor, err := NewDurableEffectExecutor("acceptance", backend, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := EffectRequest{ID: "session/deploy_a", Kind: EffectDeployA, Artifact: Artifact{EventID: "event"}}
+	if err := executor.persistIntent(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	original := EffectResult{Deployment: Deployment{UID: "original"}}
+	encoded, err := encodeEffectRecord(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backend.PutIfAbsent(context.Background(), executor.resultKey(request.ID), bytes.NewReader(encoded)); err != nil {
+		t.Fatal(err)
+	}
+	adapter.results[request.ID] = EffectResult{Deployment: Deployment{UID: "different"}}
+	result, err := executor.Apply(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(result, original) {
+		t.Fatalf("result = %+v, want original %+v", result, original)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if adapter.creates[request.ID] != 0 {
+		t.Fatalf("stored result invoked adapter %d times", adapter.creates[request.ID])
+	}
+}
+
+func TestDurableEffectExecutorRejectsUnsupportedConditionalStore(t *testing.T) {
+	writer, err := storagefs.NewArtifactStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter := &idempotentEffectAdapter{results: make(map[string]EffectResult), creates: make(map[string]int), loseResponse: make(map[string]bool)}
+	executor, err := NewDurableEffectExecutor("acceptance", unsupportedDistributedStore{distributedTestStore{writer}}, adapter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := EffectRequest{ID: "session/deploy_a", Kind: EffectDeployA}
+	if _, err := executor.Apply(context.Background(), request); err == nil {
+		t.Fatal("effect executor accepted a store without enforced conditional writes")
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if adapter.creates[request.ID] != 0 {
+		t.Fatalf("unsupported store invoked adapter %d times", adapter.creates[request.ID])
 	}
 }
