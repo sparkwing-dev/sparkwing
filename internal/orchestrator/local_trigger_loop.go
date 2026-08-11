@@ -485,47 +485,36 @@ func (c *localCompileCache) compile(sparkwingDir string) (string, error) {
 		delete(c.hit, hash)
 	}
 
-	binPath := bincache.CachedBinaryPath(hash)
-	var leaseErr error
-	for attempt := 0; attempt < 2; attempt++ {
-		if _, err := os.Stat(binPath); err != nil {
-			if !os.IsNotExist(err) {
-				return "", fmt.Errorf("stat binary cache: %w", err)
-			}
-			if err := bincache.CompilePipeline(sparkwingDir, binPath); err != nil {
-				return "", err
-			}
-		}
-
-		if c.leaseDir == "" {
-			c.leaseDir, err = os.MkdirTemp("", "sparkwing-child-executables-")
-			if err != nil {
-				return "", fmt.Errorf("create child executable lease: %w", err)
-			}
-		}
-		leasedPath := filepath.Join(c.leaseDir, hash+"-"+filepath.Base(binPath))
-		leaseErr = leaseExecutable(binPath, leasedPath)
-		if leaseErr == nil {
-			if c.hit == nil {
-				c.hit = map[string]string{}
-			}
-			if c.bySource == nil {
-				c.bySource = map[string]string{}
-			}
-			c.hit[hash] = leasedPath
-			c.bySource[source] = hash
-			return leasedPath, nil
-		}
-		if !os.IsNotExist(leaseErr) {
-			return "", fmt.Errorf("lease cached pipeline executable %s: %w", binPath, leaseErr)
+	entry, err := bincache.PipelineEntry(hash)
+	if err != nil {
+		return "", fmt.Errorf("cache entry: %w", err)
+	}
+	lease, _, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
+		return bincache.CompilePipeline(sparkwingDir, tempPath)
+	})
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = lease.Release() }()
+	if c.leaseDir == "" {
+		c.leaseDir, err = os.MkdirTemp("", "sparkwing-child-executables-")
+		if err != nil {
+			return "", fmt.Errorf("create child executable lease: %w", err)
 		}
 	}
-
-	return "", fmt.Errorf(
-		"lease cached pipeline executable %s: cache entry disappeared while acquiring its lifetime lease; "+
-			"re-run the parent pipeline (or rebuild a corrupt cache with `sparkwing pipeline sparks warmup --clear-cache`): %w",
-		binPath, leaseErr,
-	)
+	leasedPath := filepath.Join(c.leaseDir, hash+"-"+filepath.Base(lease.Path()))
+	if err := leaseExecutable(lease.Path(), leasedPath); err != nil {
+		return "", fmt.Errorf("lease cached pipeline executable %s: %w", lease.Path(), err)
+	}
+	if c.hit == nil {
+		c.hit = map[string]string{}
+	}
+	if c.bySource == nil {
+		c.bySource = map[string]string{}
+	}
+	c.hit[hash] = leasedPath
+	c.bySource[source] = hash
+	return leasedPath, nil
 }
 
 // Close releases all executables after the trigger loop has waited for its
