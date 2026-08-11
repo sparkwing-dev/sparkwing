@@ -154,7 +154,16 @@ func RunSession(ctx context.Context, seed SessionSeed, deps DurableDependencies)
 			return Proof{}, fmt.Errorf("acceptance session failed after cleanup: %s", session.TerminalError)
 		}
 		if session.Phase == SessionCleanupFailed {
-			return Proof{}, fmt.Errorf("acceptance cleanup deadline exhausted: %s", session.TerminalError)
+			next := session
+			next.Phase = SessionCleanupIntent
+			next.PhaseDeadline = deps.Clock.Now().Add(5 * time.Minute)
+			if err := deps.Sessions.CompareAndSwap(ctx, session.ID, session.Version, session.SeedDigest, next); err != nil {
+				if errors.Is(err, ErrSessionConflict) {
+					continue
+				}
+				return Proof{}, err
+			}
+			continue
 		}
 		if !session.PhaseDeadline.IsZero() && !deps.Clock.Now().Before(session.PhaseDeadline) && session.Phase != SessionCleanupIntent {
 			next := session
@@ -216,6 +225,9 @@ func RunSession(ctx context.Context, seed SessionSeed, deps DurableDependencies)
 				}
 				return Proof{}, err
 			}
+			if !found {
+				return Proof{}, fmt.Errorf("acceptance cleanup deadline exhausted: %s", next.TerminalError)
+			}
 			continue
 		}
 		next, err := advanceSession(ctx, session, deps)
@@ -235,44 +247,53 @@ func RunSession(ctx context.Context, seed SessionSeed, deps DurableDependencies)
 }
 
 func validateIntentAuthority(ctx context.Context, deps DurableDependencies, session Session) error {
-	switch session.Phase {
-	case SessionADeployIntent:
-		return reverifyPreparedFlow(ctx, deps, session, 0)
-	case SessionANotifyIntent:
-		if err := reconcilePriorEffect(ctx, deps.Effects, session, EffectDeployA); err != nil {
-			return err
+	if !isEffectIntent(session.Phase) {
+		return nil
+	}
+	return authenticateProofPrefix(ctx, deps, session, populatedProofPrefix(session))
+}
+
+func isEffectIntent(phase SessionPhase) bool {
+	switch phase {
+	case SessionADeployIntent, SessionANotifyIntent, SessionBDeployIntent, SessionBNotifyIntent,
+		SessionFaultIntent, SessionFailureNotifyIntent, SessionCleanupIntent,
+		SessionRollbackIntent, SessionRollbackNotifyIntent:
+		return true
+	default:
+		return false
+	}
+}
+
+func authenticateProofPrefix(ctx context.Context, deps DurableDependencies, session Session, level int) error {
+	checks := []func() error{
+		func() error { return reverifyPreparedFlow(ctx, deps, session, 0) },
+		func() error { return reconcilePriorEffect(ctx, deps.Effects, session, EffectDeployA) },
+		func() error {
+			return reverifyHealth(ctx, deps.Health, session.Proof.Deployments[0], session.Proof.Health[0])
+		},
+		func() error { return reconcilePriorEffect(ctx, deps.Effects, session, EffectNotifyAcceptedA) },
+		func() error { return reverifyPreparedFlow(ctx, deps, session, 1) },
+		func() error { return reconcilePriorEffect(ctx, deps.Effects, session, EffectDeployB) },
+		func() error {
+			return reverifyHealth(ctx, deps.Health, session.Proof.Deployments[1], session.Proof.Health[1])
+		},
+		func() error { return reconcilePriorEffect(ctx, deps.Effects, session, EffectNotifyAcceptedB) },
+		func() error { return reconcilePriorEffect(ctx, deps.Effects, session, EffectInjectFailure) },
+		func() error { return deps.Faults.AuthenticateFailure(ctx, session.Proof.Fault, session.Proof.Failure) },
+		func() error { return reconcilePriorEffect(ctx, deps.Effects, session, EffectNotifyFailure) },
+		func() error { return reconcilePriorEffect(ctx, deps.Effects, session, EffectRemoveFailure) },
+		func() error { return reconcilePriorEffect(ctx, deps.Effects, session, EffectRollback) },
+		func() error {
+			return reverifyHealth(ctx, deps.Health, session.Proof.Rollback, session.Proof.RollbackHealth)
+		},
+	}
+	if level < 0 || level > len(checks) {
+		return fmt.Errorf("invalid authenticated proof prefix %d", level)
+	}
+	for index := range level {
+		if err := checks[index](); err != nil {
+			return fmt.Errorf("authenticate proof prefix %d: %w", index+1, err)
 		}
-		return reverifyHealth(ctx, deps.Health, session.Proof.Deployments[0], session.Proof.Health[0])
-	case SessionBDeployIntent:
-		return reverifyPreparedFlow(ctx, deps, session, 1)
-	case SessionBNotifyIntent:
-		if err := reconcilePriorEffect(ctx, deps.Effects, session, EffectDeployB); err != nil {
-			return err
-		}
-		return reverifyHealth(ctx, deps.Health, session.Proof.Deployments[1], session.Proof.Health[1])
-	case SessionFaultIntent:
-		return reconcilePriorEffect(ctx, deps.Effects, session, EffectNotifyAcceptedB)
-	case SessionFailureNotifyIntent:
-		return deps.Faults.AuthenticateFailure(ctx, session.Proof.Fault, session.Proof.Failure)
-	case SessionCleanupIntent:
-		if session.Proof.Fault.ID != "" {
-			if err := reconcilePriorEffect(ctx, deps.Effects, session, EffectInjectFailure); err != nil {
-				return err
-			}
-		}
-		if session.Proof.FailureNotice.RequestID != "" {
-			return reconcilePriorEffect(ctx, deps.Effects, session, EffectNotifyFailure)
-		}
-	case SessionRollbackIntent:
-		if err := reconcilePriorEffect(ctx, deps.Effects, session, EffectDeployA); err != nil {
-			return err
-		}
-		return reconcilePriorEffect(ctx, deps.Effects, session, EffectRemoveFailure)
-	case SessionRollbackNotifyIntent:
-		if err := reconcilePriorEffect(ctx, deps.Effects, session, EffectRollback); err != nil {
-			return err
-		}
-		return reverifyHealth(ctx, deps.Health, session.Proof.Rollback, session.Proof.RollbackHealth)
 	}
 	return nil
 }
@@ -317,28 +338,9 @@ func validateSessionPhase(session Session) error {
 	if !ok {
 		return fmt.Errorf("unknown acceptance session phase %q", session.Phase)
 	}
-	present := []bool{
-		session.Proof.Production[0].EventID != "" && session.Proof.Artifacts[0].EventID != "",
-		session.Proof.Deployments[0].UID != "",
-		session.Proof.Health[0].DeploymentUID != "",
-		session.Proof.Notifications[0].RequestID != "",
-		session.Proof.Production[1].EventID != "" && session.Proof.Artifacts[1].EventID != "",
-		session.Proof.Deployments[1].UID != "",
-		session.Proof.Health[1].DeploymentUID != "",
-		session.Proof.Notifications[1].RequestID != "",
-		session.Proof.Fault.ID != "",
-		session.Proof.Failure.FaultID != "",
-		session.Proof.FailureNotice.RequestID != "",
-		session.Proof.Cleanup.FaultID != "",
-		session.Proof.Rollback.UID != "",
-		session.Proof.RollbackHealth.DeploymentUID != "",
-		session.Proof.RollbackNotice.RequestID != "",
-	}
+	present := proofPresence(session)
 	if session.Phase == SessionCleanupIntent || session.Phase == SessionCleanupFailed || session.Phase == SessionFailed {
-		level = 0
-		for level < len(present) && present[level] {
-			level++
-		}
+		level = populatedProofPrefix(session)
 		if session.Phase != SessionFailed && level < 8 {
 			return fmt.Errorf("phase %s lacks the accepted second deployment", session.Phase)
 		}
@@ -360,6 +362,35 @@ func validateSessionPhase(session Session) error {
 		return fmt.Errorf("phase %s carries a terminal error", session.Phase)
 	}
 	return nil
+}
+
+func proofPresence(session Session) []bool {
+	return []bool{
+		session.Proof.Production[0].EventID != "" && session.Proof.Artifacts[0].EventID != "",
+		session.Proof.Deployments[0].UID != "",
+		session.Proof.Health[0].DeploymentUID != "",
+		session.Proof.Notifications[0].RequestID != "",
+		session.Proof.Production[1].EventID != "" && session.Proof.Artifacts[1].EventID != "",
+		session.Proof.Deployments[1].UID != "",
+		session.Proof.Health[1].DeploymentUID != "",
+		session.Proof.Notifications[1].RequestID != "",
+		session.Proof.Fault.ID != "",
+		session.Proof.Failure.FaultID != "",
+		session.Proof.FailureNotice.RequestID != "",
+		session.Proof.Cleanup.FaultID != "",
+		session.Proof.Rollback.UID != "",
+		session.Proof.RollbackHealth.DeploymentUID != "",
+		session.Proof.RollbackNotice.RequestID != "",
+	}
+}
+
+func populatedProofPrefix(session Session) int {
+	present := proofPresence(session)
+	level := 0
+	for level < len(present) && present[level] {
+		level++
+	}
+	return level
 }
 
 func sessionPhaseLevel(phase SessionPhase) (int, bool) {
