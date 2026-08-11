@@ -49,6 +49,50 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **wingd:** `SIGUSR1` makes the daemon write a full goroutine dump plus
+  a one-line count of connections, guards, leases, and waiters to its log
+  (`~/.sparkwing/wingd/d.log`). A daemon that is burning CPU can now be
+  explained while it is still running -- `kill -USR1 <pid>`, then read
+  the log -- instead of only after the operator has killed the evidence.
+  POSIX only; Windows has no such signal.
+
+### Fixed
+
+- **wingd:** A daemon watching guarded runs no longer forks `ps` once per
+  guarded session per tick. Each sweep takes one process-table snapshot
+  and judges every session against it, so watching ten sessions costs one
+  listing every 100ms rather than ten. This is the largest contributor to
+  the reported case of a daemon pinned near 200% CPU while the queue
+  appeared hung.
+- **wingd:** Guard sweeps back off exponentially (to 5s) while session
+  inspection keeps failing, and return to full cadence on the first
+  success. A process table the daemon cannot read used to be retried ten
+  times a second forever.
+- **wingd:** Reading the process table is now bounded at two seconds, so
+  a wedged `ps` fails the inspection instead of blocking the daemon
+  goroutine that asked for it. The post-`SIGKILL` wait for a process tree
+  to disappear backs off from 10ms to one second and logs once when it
+  slows down, so a descendant that cannot be killed costs about one
+  process-table read per second rather than a hundred.
+- **wingd:** Runs and CLI commands that lose their connection to the
+  daemon retry with capped exponential backoff and jitter instead of
+  reconnecting as fast as the socket allows. Every dropped connection
+  makes the daemon persist its state, so an unpaced client used to spin a
+  core on each side. Admission-critical exchanges (acquire, re-attach,
+  guard watch, cancel) still retry until they succeed or the caller gives
+  up; read-only ones (`sparkwing queue`, stats reset) now fail with a
+  clear error after ten attempts rather than retrying forever.
+- **wingd:** A client that keeps finding an older daemon gives up after
+  three takeover attempts and names both versions, instead of draining
+  and respawning the daemon in an unbounded loop when the successor comes
+  back as the version it replaced.
+- **wingd:** Frames the daemon sends a client are bounded by a ten-second
+  write deadline. A client that stops reading without closing its socket
+  is treated as gone rather than holding a daemon goroutine for as long
+  as it lives.
+
 ## [v0.25.0] - 2026-08-11
 ### Added
 
