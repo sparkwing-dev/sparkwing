@@ -137,7 +137,11 @@ func RunNodeOnce(
 	})
 	ctx = sparkwing.WithSecretResolver(ctx,
 		secrets.NewCached(httpSource, masker).AsResolver())
-	_ = masker
+	// The masker has to reach the node log wrapper the same way it does
+	// on the local path (RunLocal, replay): through the context. Without
+	// this the cluster/pod path resolves secrets into a masker nothing
+	// ever reads, and node logs persist raw secret values.
+	ctx = secrets.WithMasker(ctx, masker)
 
 	if in := plan.Inputs(); in != nil {
 		ctx = sparkwingruntime.WithInputs(ctx, in)

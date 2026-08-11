@@ -49,6 +49,16 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Security
+
+- **orchestrator:** Redact secret values in node logs written by cluster and pod
+  node execution. `run-node` built the per-run masker from the pipeline's secret
+  arguments and wired it into secret resolution, but never installed it on the
+  context the node log wrapper reads, so a node running on a runner or in a pod
+  persisted secret values in plaintext where the same node run locally redacted
+  them. Already-written logs are unchanged: rotate any secret a job logged from
+  a remote node.
+
 ## [v0.25.0] - 2026-08-11
 ### Added
 
