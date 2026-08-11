@@ -34,6 +34,12 @@ mapping is in the generated [api-reference.md](api-reference.md):
 Scope checks are set membership. `admin` is a superset -- any handler's
 scope check passes if the principal carries `admin`.
 
+Token creation validates scopes against that same set: a scope the
+controller does not honor is rejected with a `400` naming the offending
+scope and the valid set, so a typo fails at mint time instead of
+producing a token that authenticates and then fails every scope check.
+A token with no scopes is still legal; it just unlocks nothing.
+
 Per-endpoint scope annotations live in `pkg/controller/server.go`. If
 you add a new route, annotate it with `requireScope`.
 

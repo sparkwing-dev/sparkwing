@@ -2954,17 +2954,25 @@ Validate a spark.json library manifest
 
 Loads spark.json from the given path (or the current directory
 if omitted) and checks: required fields (name, description,
-author, packages), that each packages[] path exists as a
-directory under the module root, stability values are valid,
-and package paths are not duplicated. Unknown fields are a
-soft warning, not an error. Exits non-zero on any hard
+author), that the manifest declares exactly one non-empty
+entry array -- packages[] for a library that is one Go module,
+modules[] for a monorepo of independently tagged modules --
+that each entry path exists as a directory under the manifest
+root and describes itself, that a modules[] entry names the Go
+module its directory's go.mod declares, that stability values
+are valid, and that paths are not duplicated. Unknown fields
+are a soft warning, not an error. Exits non-zero on any hard
 failure.
+
+### Arguments
+
+- `[path]` (optional) -- Library directory or spark.json path, when --path is not supplied
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--path PATH` | Library directory or direct spark.json path (default: .) |
+| `--path PATH` | Library directory or direct spark.json path. Positional fallback accepted. (default: .) |
 
 ### Examples
 
@@ -2974,6 +2982,9 @@ sparkwing pipeline sparks lint
 
 # Lint a sibling library by path
 sparkwing pipeline sparks lint --path ~/code/sparks-core
+
+# Lint a multi-module monorepo
+sparkwing pipeline sparks lint ~/code/sparks-core
 ```
 
 ## `sparkwing pipeline sparks list`

@@ -3,9 +3,11 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -43,6 +45,61 @@ const (
 	ScopeApprovalsWrite = "approvals.write"
 	ScopeAdmin          = "admin"
 )
+
+// allScopes is the canonical set of scope names the controller
+// honors, and the allowlist token creation validates against. A new
+// Scope* constant belongs in this list; there is no second copy to
+// keep in sync.
+var allScopes = []string{
+	ScopeRunsRead,
+	ScopeRunsWrite,
+	ScopeNodesClaim,
+	ScopeLogsRead,
+	ScopeLogsWrite,
+	ScopeTriggersRead,
+	ScopeApprovalsWrite,
+	ScopeAdmin,
+}
+
+// validateScopes rejects requested scopes the controller does not
+// honor, naming the offenders and the full valid set. A scope the
+// controller has never heard of would mint a token that authenticates
+// and then fails every scope check, so it is a creation-time error.
+// Surrounding whitespace and blank entries are tolerated because the
+// store drops them on write. An empty request is valid: a scopeless
+// token is a legal, if inert, credential.
+func validateScopes(scopes []string) error {
+	var unknown []string
+	for _, s := range scopes {
+		trimmed := strings.TrimSpace(s)
+		if trimmed == "" || slices.Contains(allScopes, trimmed) || slices.Contains(unknown, s) {
+			continue
+		}
+		unknown = append(unknown, s)
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	noun := "scope"
+	if len(unknown) > 1 {
+		noun = "scopes"
+	}
+	return fmt.Errorf(
+		"unknown %s %s (valid: %s)",
+		noun, quoteScopes(unknown), strings.Join(allScopes, ", "),
+	)
+}
+
+// quoteScopes renders scope names quoted and comma-separated so
+// stray whitespace or punctuation in an offender is visible in the
+// error message.
+func quoteScopes(scopes []string) string {
+	out := make([]string, 0, len(scopes))
+	for _, s := range scopes {
+		out = append(out, strconv.Quote(s))
+	}
+	return strings.Join(out, ", ")
+}
 
 // Authenticator converts a raw bearer token into a Principal. Hot
 // path: prefix-segment lookup in the tokens table (indexed) -> argon2

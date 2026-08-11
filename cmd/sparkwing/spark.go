@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 
 	flag "github.com/spf13/pflag"
+	"golang.org/x/mod/modfile"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sparks"
@@ -176,7 +177,9 @@ func shortErr(s string) string {
 // sparkManifest is the shape of spark.json. Kept inline rather than
 // imported from internal/sparks because that package is concerned
 // with the consumer-side sparks.yaml, not the library-side
-// spark.json. Fields follow docs/sparks.md.
+// spark.json. Fields follow docs/sparks.md. A manifest carries
+// exactly one of Packages (one Go module, many importable packages)
+// or Modules (a monorepo of independently tagged Go modules).
 type sparkManifest struct {
 	Name          string                `json:"name"`
 	Description   string                `json:"description"`
@@ -184,12 +187,18 @@ type sparkManifest struct {
 	Version       string                `json:"version"`
 	SDKMinVersion string                `json:"sdk_min_version"`
 	Stability     string                `json:"stability"`
-	Packages      []sparkManifestPkg    `json:"packages"`
+	Packages      []sparkManifestEntry  `json:"packages"`
+	Modules       []sparkManifestEntry  `json:"modules"`
 	Dependencies  []sparkManifestDepRaw `json:"dependencies"`
 }
 
-type sparkManifestPkg struct {
+// sparkManifestEntry is one `packages[]` or `modules[]` element.
+// Module names the Go module the subdirectory declares; it belongs to
+// a `modules[]` entry only, since every package of a single-module
+// library shares the manifest's own module path.
+type sparkManifestEntry struct {
 	Path        string `json:"path"`
+	Module      string `json:"module"`
 	Description string `json:"description"`
 	Stability   string `json:"stability"`
 }
@@ -209,10 +218,17 @@ func runSparksLint(args []string) error {
 		}
 		return err
 	}
+	target := *pathFlag
 	if rest := fs.Args(); len(rest) > 0 {
-		return fmt.Errorf("spark lint: unexpected positional %q (use --path)", rest[0])
+		if len(rest) > 1 {
+			return fmt.Errorf("spark lint: unexpected positional %q (lint takes one path)", rest[1])
+		}
+		if fs.Changed("path") {
+			return fmt.Errorf("spark lint: --path %s and positional %q both given (pass one)", *pathFlag, rest[0])
+		}
+		target = rest[0]
 	}
-	libDir, manifestPath, err := resolveSparkJSONPath(*pathFlag)
+	libDir, manifestPath, err := resolveSparkJSONPath(target)
 	if err != nil {
 		return err
 	}
@@ -244,47 +260,15 @@ func runSparksLint(args []string) error {
 	if strings.TrimSpace(m.Author) == "" {
 		problems = append(problems, "missing required field 'author'")
 	}
-	if len(m.Packages) == 0 {
-		problems = append(problems, "'packages' must be a non-empty array")
+	field, entries, shapeProblem := sparkManifestShape(m)
+	if shapeProblem != "" {
+		problems = append(problems, shapeProblem)
 	}
-	for i, p := range m.Packages {
-		if strings.TrimSpace(p.Path) == "" {
-			problems = append(problems, fmt.Sprintf("packages[%d]: 'path' is required", i))
-		} else {
-			abs := filepath.Join(libDir, p.Path)
-			if info, err := os.Stat(abs); err != nil || !info.IsDir() {
-				problems = append(problems, fmt.Sprintf(
-					"packages[%d] (%s): directory %s does not exist", i, p.Path, abs,
-				))
-			}
-		}
-		if strings.TrimSpace(p.Description) == "" {
-			problems = append(problems, fmt.Sprintf("packages[%d] (%s): 'description' is required", i, p.Path))
-		}
-		if p.Stability != "" && !validStability(p.Stability) {
-			problems = append(problems, fmt.Sprintf(
-				"packages[%d] (%s): stability must be experimental|beta|stable, got %q",
-				i, p.Path, p.Stability,
-			))
-		}
-	}
+	problems = append(problems, lintSparkEntries(libDir, field, entries)...)
 	if m.Stability != "" && !validStability(m.Stability) {
 		problems = append(problems, fmt.Sprintf(
 			"stability must be experimental|beta|stable, got %q", m.Stability,
 		))
-	}
-	seen := map[string]int{}
-	for i, p := range m.Packages {
-		if p.Path == "" {
-			continue
-		}
-		if prev, ok := seen[p.Path]; ok {
-			problems = append(problems, fmt.Sprintf(
-				"packages[%d] (%s): duplicate path; first seen at packages[%d]",
-				i, p.Path, prev,
-			))
-		}
-		seen[p.Path] = i
 	}
 	for i, d := range m.Dependencies {
 		if d.Source == "" {
@@ -303,8 +287,108 @@ func runSparksLint(args []string) error {
 		}
 		return fmt.Errorf("spark lint: %d problem(s) in %s", len(problems), manifestPath)
 	}
-	fmt.Fprintf(os.Stdout, "ok: %s (%d package%s)\n",
-		manifestPath, len(m.Packages), pluralS(len(m.Packages)))
+	fmt.Fprintf(os.Stdout, "ok: %s (%d %s%s)\n",
+		manifestPath, len(entries), strings.TrimSuffix(field, "s"), pluralS(len(entries)))
+	return nil
+}
+
+// sparkManifestShape picks the entry array the manifest declares. A
+// manifest carries exactly one of `packages` or `modules`; anything
+// else is the returned problem, and the entries are then not worth
+// checking one by one.
+func sparkManifestShape(m sparkManifest) (field string, entries []sparkManifestEntry, problem string) {
+	switch {
+	case len(m.Packages) > 0 && len(m.Modules) > 0:
+		return "packages", nil, "declares both 'packages' and 'modules'; use exactly one " +
+			"('packages' for a library that is one Go module, 'modules' for a monorepo of independently tagged modules)"
+	case len(m.Modules) > 0:
+		return "modules", m.Modules, ""
+	case len(m.Packages) > 0:
+		return "packages", m.Packages, ""
+	default:
+		return "packages", nil, "exactly one of 'packages' (a library that is one Go module) or " +
+			"'modules' (a monorepo of independently tagged modules) must be a non-empty array"
+	}
+}
+
+// lintSparkEntries validates the `packages[]` or `modules[]` array
+// named by field: every entry points at a real directory under libDir
+// and describes itself, paths are unique, and a `modules[]` entry
+// names the Go module its directory declares.
+func lintSparkEntries(libDir, field string, entries []sparkManifestEntry) []string {
+	wantModule := field == "modules"
+	var problems []string
+	seen := map[string]int{}
+	for i, e := range entries {
+		if strings.TrimSpace(e.Path) == "" {
+			problems = append(problems, fmt.Sprintf("%s[%d]: 'path' is required", field, i))
+		} else {
+			abs := filepath.Join(libDir, e.Path)
+			if info, err := os.Stat(abs); err != nil || !info.IsDir() {
+				problems = append(problems, fmt.Sprintf(
+					"%s[%d] (%s): directory %s does not exist", field, i, e.Path, abs,
+				))
+			} else if wantModule {
+				problems = append(problems, lintEntryGoMod(abs, field, i, e)...)
+			}
+			if prev, ok := seen[e.Path]; ok {
+				problems = append(problems, fmt.Sprintf(
+					"%s[%d] (%s): duplicate path; first seen at %s[%d]",
+					field, i, e.Path, field, prev,
+				))
+			}
+			seen[e.Path] = i
+		}
+		switch {
+		case wantModule && strings.TrimSpace(e.Module) == "":
+			problems = append(problems, fmt.Sprintf(
+				"%s[%d] (%s): 'module' is required (the Go module path this directory declares)",
+				field, i, e.Path,
+			))
+		case !wantModule && strings.TrimSpace(e.Module) != "":
+			problems = append(problems, fmt.Sprintf(
+				"%s[%d] (%s): 'module' belongs to a 'modules' entry; a 'packages' entry shares the library's own module path",
+				field, i, e.Path,
+			))
+		}
+		if strings.TrimSpace(e.Description) == "" {
+			problems = append(problems, fmt.Sprintf("%s[%d] (%s): 'description' is required", field, i, e.Path))
+		}
+		if e.Stability != "" && !validStability(e.Stability) {
+			problems = append(problems, fmt.Sprintf(
+				"%s[%d] (%s): stability must be experimental|beta|stable, got %q",
+				field, i, e.Path, e.Stability,
+			))
+		}
+	}
+	return problems
+}
+
+// lintEntryGoMod cross-checks a modules[] entry against the go.mod in
+// its directory. A directory without a go.mod is left alone: the
+// module may be tagged from a parent, or not yet initialized.
+func lintEntryGoMod(dir, field string, i int, e sparkManifestEntry) []string {
+	declared := strings.TrimSpace(e.Module)
+	if declared == "" {
+		return nil
+	}
+	goModPath := filepath.Join(dir, "go.mod")
+	data, err := os.ReadFile(goModPath)
+	if err != nil {
+		return nil
+	}
+	actual := modfile.ModulePath(data)
+	if actual == "" {
+		return []string{fmt.Sprintf(
+			"%s[%d] (%s): %s has no module line", field, i, e.Path, goModPath,
+		)}
+	}
+	if actual != declared {
+		return []string{fmt.Sprintf(
+			"%s[%d] (%s): 'module' is %q but %s declares %q",
+			field, i, e.Path, declared, goModPath, actual,
+		)}
+	}
 	return nil
 }
 
