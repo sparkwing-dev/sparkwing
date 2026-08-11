@@ -40,6 +40,7 @@ type PruneResult struct {
 	Reclaimed      int   `json:"reclaimed_entries"`
 	Active         int   `json:"active_entries"`
 	Busy           int   `json:"busy_entries"`
+	GoalSatisfied  bool  `json:"goal_satisfied"`
 	Exhausted      bool  `json:"exhausted"`
 }
 
