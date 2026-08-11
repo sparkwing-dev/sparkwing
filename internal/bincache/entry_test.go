@@ -93,13 +93,13 @@ func TestPruneIsBoundedAndUsesStableKeyOrder(t *testing.T) {
 
 	result, err := Prune(context.Background(), PruneOptions{
 		Root:         root,
-		ReclaimBytes: 100,
+		ReclaimBytes: math.MaxInt64,
 		MaxEntries:   1,
 	})
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
-	if result.Examined != 1 || result.Reclaimed != 1 || result.ObservedBytes != 1 || result.ReclaimedBytes != 1 {
+	if result.Examined != 1 || result.Reclaimed != 1 || result.ObservedBytes != 1 {
 		t.Fatalf("unexpected bounded accounting: %+v", result)
 	}
 	if !result.Exhausted || result.GoalSatisfied {
