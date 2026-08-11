@@ -67,3 +67,62 @@ func TestWeighted_HostMemoryBackfillPastHeavyHead(t *testing.T) {
 		t.Fatalf("promoted %q, want heavy once the older holder frees its memory", events[1].RequestID)
 	}
 }
+
+func TestWeighted_IndependentArrivalBackfillsPastSemaphoreWaiters(t *testing.T) {
+	l := testLedger(t, 14, 8<<30)
+	mustGrant(t, l, Request{
+		ID:         "shard-running",
+		Cores:      0.3,
+		Semaphores: []SemaphoreClaim{sem("db-shards", 1, 1, PolicyQueue)},
+	})
+	mustQueue(t, l, Request{
+		ID:         "shard-waiting",
+		Cores:      0.3,
+		Semaphores: []SemaphoreClaim{sem("db-shards", 1, 1, PolicyQueue)},
+	})
+	if _, err := l.SetHeadroom(0.3, 8<<30); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+	mustQueue(t, l, Request{ID: "aggregate", Cores: 0.1, MemoryBytes: 512 << 20})
+
+	events, err := l.SetHeadroom(14, 8<<30)
+	if err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+	if len(events) == 0 || events[0].Kind != EventPromoted || events[0].RequestID != "aggregate" {
+		t.Fatalf("events = %+v, want aggregate promoted past unrelated semaphore waiters", events)
+	}
+}
+
+func TestWeighted_IndependentArrivalBackfillsPastNonFittingHostWaiter(t *testing.T) {
+	l := testLedger(t, 14, 8<<30)
+	holder := mustGrant(t, l, Request{
+		ID:         "shard-running",
+		Cores:      0.3,
+		Semaphores: []SemaphoreClaim{sem("db-shards", 1, 1, PolicyQueue)},
+	})
+	mustQueue(t, l, Request{
+		ID:         "shard-waiting",
+		Cores:      0.3,
+		Semaphores: []SemaphoreClaim{sem("db-shards", 1, 1, PolicyQueue)},
+	})
+	if _, err := l.SetHeadroom(0.3, 8<<30); err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+	mustQueue(t, l, Request{ID: "prepare", Cores: 7, MemoryBytes: 1 << 30})
+	mustQueue(t, l, Request{ID: "aggregate", Cores: 0.1, MemoryBytes: 512 << 20})
+	events, err := l.SetHeadroom(6, 8<<30)
+	if err != nil {
+		t.Fatalf("SetHeadroom: %v", err)
+	}
+	foundAggregate := false
+	for _, ev := range events {
+		if ev.Kind == EventPromoted && ev.RequestID == "aggregate" {
+			foundAggregate = true
+		}
+	}
+	if !foundAggregate {
+		t.Fatalf("events = %+v, want aggregate promoted past non-fitting prepare waiter", events)
+	}
+	_ = holder
+}
