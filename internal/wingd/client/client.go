@@ -236,6 +236,39 @@ const (
 	maxSpawnAttempts = 1
 )
 
+// maxTakeoverAttempts bounds how many times one connect drains a daemon
+// and spawns its successor. A takeover that worked is followed by a
+// connection to the new daemon, so needing several means the successor
+// keeps coming up as the same version it replaced -- a stuck binary, a
+// stale spawn path -- and repeating it is a drain-respawn loop, not
+// progress.
+const maxTakeoverAttempts = 3
+
+// ErrTakeoverExhausted reports that repeated takeovers did not produce a
+// daemon this client can use. It is a version-skew fault an operator must
+// resolve, not a wait that will clear.
+var ErrTakeoverExhausted = errors.New("wingd/client: repeated daemon takeover did not resolve the version skew")
+
+// errDaemonDraining is the cause a wait for a draining daemon reports if
+// the caller's context ends first.
+var errDaemonDraining = errors.New("wingd/client: daemon is draining")
+
+// takeoverExhausted names both sides of the skew, because the useful fact
+// is which two versions kept replacing each other.
+func takeoverExhausted(selfVersion string, ack wingwire.HelloAck, attempts int) error {
+	self := selfVersion
+	if self == "" {
+		self = "(unknown)"
+	}
+	daemon := ack.BinaryVersion
+	if daemon == "" {
+		daemon = "(unknown)"
+	}
+	return fmt.Errorf("%w: after %d attempts the daemon still reports %s (protocol %d) while this binary is %s (protocol %d). "+
+		"Stop the daemon by hand, or set SPARKWING_HOME to run against a daemon of your own",
+		ErrTakeoverExhausted, attempts, daemon, ack.ProtocolMajor, self, wingd.ProtocolMajor)
+}
+
 // spawnFailed reports a spawn-syscall failure, folding in the daemon log
 // tail when a prior attempt left one so a bind-time death is visible even
 // when the final spawn is what erred.
@@ -336,7 +369,9 @@ func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 func (cl *Client) connect(ctx context.Context) error {
 	opts := cl.opts
 	spawns := 0
+	takeovers := 0
 	dialsSinceSpawn := 0
+	drainWait := newRetry("wait for draining daemon", 0)
 	var lastDial error
 	var predecessorDeadline time.Time
 	for {
@@ -408,6 +443,11 @@ func (cl *Client) connect(ctx context.Context) error {
 		if ack.ProtocolMajor != wingd.ProtocolMajor {
 			if wingd.ProtocolMajor > ack.ProtocolMajor {
 				cl.ack = ack
+				if takeovers >= maxTakeoverAttempts {
+					cl.Close()
+					return takeoverExhausted(opts.Version, ack, takeovers)
+				}
+				takeovers++
 				cl.takeover(ctx, opts)
 				continue
 			}
@@ -416,6 +456,11 @@ func (cl *Client) connect(ctx context.Context) error {
 		}
 		if !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
 			cl.ack = ack
+			if takeovers >= maxTakeoverAttempts {
+				cl.Close()
+				return takeoverExhausted(opts.Version, ack, takeovers)
+			}
+			takeovers++
 			cl.takeover(ctx, opts)
 			continue
 		}
@@ -424,7 +469,8 @@ func (cl *Client) connect(ctx context.Context) error {
 		}
 		if ack.Draining {
 			cl.Close()
-			if err := sleep(ctx, opts.backoff()); err != nil {
+			// safety: a drain finishes only when the last holder leaves, which can take as long as a run does, so this waits without a cap -- but with backoff, since re-dialing a draining daemon at full speed is the spin this loop must not become.
+			if err := drainWait.wait(ctx, errDaemonDraining); err != nil {
 				return err
 			}
 			continue
