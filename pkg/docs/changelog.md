@@ -72,9 +72,12 @@ code change to unlock.
   error text) and `log_excerpt_truncated`. Both fields are absent together when
   there is nothing to excerpt -- a failure with no captured output, or a node
   that did not fail on its own -- so absence is reportable rather than
-  fabricated. Excerpts ride a new `node_failure_excerpt` run event, so local and
-  controller-backed reads render identically. See
-  [observability](docs/observability.md#failure-excerpts).
+  fabricated. Where absence itself cannot be established (an event stream too
+  large to scan, or a controller that will not serve it) the node carries
+  `log_excerpt_unavailable` instead of a silent gap. Excerpts ride a new
+  `node_failure_excerpt` run event, so local and controller-backed reads render
+  identically; runs mirrored to S3-backed state carry no events and so no
+  excerpts. See [observability](docs/observability.md#failure-excerpts).
 
 ### Security
 

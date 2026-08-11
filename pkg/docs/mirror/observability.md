@@ -95,6 +95,25 @@ is always reported; only the excerpt can be missing.
 Excerpts travel as a `node_failure_excerpt` run event, so they read back
 identically from a local run store and from a controller.
 
+### When an excerpt cannot be read
+
+Absence normally means "this node published no excerpt". Where that
+cannot be established, the failed node carries
+`"log_excerpt_unavailable": true` instead, and never a fabricated
+excerpt. Two cases produce it:
+
+- **A run with more than ~50,000 events.** The lookup scans the run's
+  event stream and stops after 50 pages of 1,000. It also stops as soon
+  as every failed node has its excerpt, so only a run that is both
+  enormous and failing late is affected.
+- **An event stream that cannot be read** -- a controller that is down
+  or rejects the request.
+
+One case reports plain absence even though an excerpt might have
+existed: a run **mirrored to S3-backed state** (`DumpRunState`) carries
+its runs and nodes but no events, so a mirrored run reads back with no
+excerpts at all. The node's `error` still carries the excerpt as text.
+
 ## Resource usage metrics
 
 While a node runs, the runner samples the executing process in-process

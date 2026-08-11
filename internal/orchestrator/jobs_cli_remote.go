@@ -67,7 +67,8 @@ func JobStatusRemote(ctx context.Context, controllerURL, token, runID string, op
 		steps, _ := c.ListNodeSteps(ctx, runID)
 		approvals, _ := c.ListApprovalsForRun(ctx, runID)
 		if opts.JSON {
-			wrapped := withFailureExcerpts(joinStepsByNode(nodes, steps), failureExcerptsForRun(ctx, c, runID))
+			wrapped := withFailureExcerpts(joinStepsByNode(nodes, steps),
+				failureExcerptsFor(ctx, c, runID, failedNodeIDs(nodes)))
 			payload := map[string]any{"run": run, "nodes": wrapped}
 			if len(approvals) > 0 {
 				payload["approvals"] = approvals
@@ -154,7 +155,11 @@ func JobErrorsRemote(ctx context.Context, controllerURL, token, runID string, as
 	if err != nil {
 		return err
 	}
-	failed := failedNodeReports(nodes, failureExcerptsForRun(ctx, c, runID))
+	var excerpts failureExcerptIndex
+	if asJSON {
+		excerpts = failureExcerptsFor(ctx, c, runID, failedNodeIDs(nodes))
+	}
+	failed := failedNodeReports(nodes, excerpts)
 	if asJSON {
 		return writeJSON(out, failed)
 	}

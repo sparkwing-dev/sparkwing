@@ -204,47 +204,102 @@ type eventLister interface {
 	ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error)
 }
 
-// excerptPageSize / excerptMaxPages bound the event scan. A run with
-// more events than these cover loses excerpts for its tail, never
-// correctness: the node error still carries the human-readable
-// excerpt.
+// excerptPageSize / excerptMaxPages bound the event scan.
 const (
 	excerptPageSize = 1000
 	excerptMaxPages = 50
 )
 
-// failureExcerptsForRun indexes a run's published excerpts by node id.
-// Errors are swallowed: an excerpt is a decoration on an already
-// complete failure report, so a backend that cannot serve events must
-// degrade to "no excerpt", not to "no failure".
-func failureExcerptsForRun(ctx context.Context, src eventLister, runID string) map[string]failureExcerpt {
-	if src == nil || runID == "" {
-		return nil
+// failureExcerptIndex is the result of one excerpt lookup.
+//
+// Complete distinguishes the two ways a node can end up without an
+// excerpt. When the scan saw the whole event stream, a missing excerpt
+// means the node published none -- authoritative absence, which is the
+// documented contract. When the scan ran out of budget first, absence
+// is unknown, and saying nothing would be a claim the lookup cannot
+// support; callers report those nodes as excerpt-unavailable instead.
+type failureExcerptIndex struct {
+	byNode   map[string]failureExcerpt
+	Complete bool
+}
+
+// Get returns a node's excerpt, and whether the index can speak to its
+// absence.
+func (ix failureExcerptIndex) Get(nodeID string) (failureExcerpt, bool) {
+	ex, ok := ix.byNode[nodeID]
+	return ex, ok
+}
+
+// Unavailable reports whether nodeID's excerpt is missing *and* the
+// lookup could not prove it was never published.
+func (ix failureExcerptIndex) Unavailable(nodeID string) bool {
+	if ix.Complete {
+		return false
 	}
-	var out map[string]failureExcerpt
+	_, ok := ix.byNode[nodeID]
+	return !ok
+}
+
+// failureExcerptsFor indexes the published excerpts of the given failed
+// nodes. It is deliberately demanding about when it runs at all: it
+// scans a run's event stream, which on a controller profile is a
+// paged HTTP call, so callers pass only the nodes they will render and
+// only when they will render them. No failed nodes, no scan.
+//
+// The scan stops as soon as every wanted node has an excerpt, so the
+// usual case (one failing node early in a long run) costs one page.
+//
+// Errors are swallowed but not hidden: a backend that cannot serve
+// events yields an incomplete index, which renders as
+// excerpt-unavailable rather than as authoritative absence. An excerpt
+// is a decoration on an already complete failure report; losing it must
+// never turn into "no failure".
+func failureExcerptsFor(ctx context.Context, src eventLister, runID string, want map[string]struct{}) failureExcerptIndex {
+	if src == nil || runID == "" || len(want) == 0 {
+		// Nothing to look up: vacuously complete.
+		return failureExcerptIndex{Complete: true}
+	}
+	ix := failureExcerptIndex{byNode: map[string]failureExcerpt{}}
 	var after int64
 	for range excerptMaxPages {
 		events, err := src.ListEventsAfter(ctx, runID, after, excerptPageSize)
-		if err != nil || len(events) == 0 {
-			break
+		if err != nil {
+			return ix
 		}
 		for _, e := range events {
 			after = max(after, e.Seq)
 			if e.Kind != nodeFailureExcerptEvent || e.NodeID == "" || len(e.Payload) == 0 {
 				continue
 			}
+			if _, wanted := want[e.NodeID]; !wanted {
+				continue
+			}
 			var ex failureExcerpt
 			if json.Unmarshal(e.Payload, &ex) != nil || ex.LogExcerpt == "" {
 				continue
 			}
-			if out == nil {
-				out = make(map[string]failureExcerpt)
-			}
-			out[e.NodeID] = ex
+			ix.byNode[e.NodeID] = ex
 		}
-		if len(events) < excerptPageSize {
-			break
+		if len(ix.byNode) == len(want) || len(events) < excerptPageSize {
+			ix.Complete = true
+			return ix
 		}
+	}
+	return ix
+}
+
+// failedNodeIDs is the "should we scan at all" gate: the ids of the
+// nodes that own a failure, empty for a run with none.
+func failedNodeIDs(nodes []*store.Node) map[string]struct{} {
+	var out map[string]struct{}
+	for _, n := range nodes {
+		if n == nil || n.Outcome != string(sparkwing.Failed) {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]struct{}, 1)
+		}
+		out[n.NodeID] = struct{}{}
 	}
 	return out
 }
