@@ -549,6 +549,7 @@ type Registration struct {
 	Invoke func(ctx context.Context, args map[string]string, rc RunContext) (*Plan, error)
 }
 func (r *Registration) Instance() any
+func (r *Registration) SecretArgNames() []string
 func (r *Registration) SecretValues(args map[string]string) []string
 var Remote Predicate = remotePredicate{}
 func Required() Constraint

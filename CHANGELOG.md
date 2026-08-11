@@ -57,13 +57,23 @@ code change to unlock.
   `runs find`, `runs tree`, `runs wait`, and `runs receipt`, served by the
   controller's run endpoints, and rendered by the dashboard's Setup panel --
   including the copyable `rerun` reproducer command. Runs now record which
-  arguments their pipeline declared secret, and every read path redacts them;
-  retry and replay still re-execute with the real value.
+  arguments their pipeline declared secret, and the read paths redact them;
+  retry and replay still re-execute with the real value. Audit events
+  (`child_run_start`) that forward a parent's arguments to a child are masked
+  too.
   Runs started before this release carry no such record and render unchanged.
   Redaction is applied on read: the run row, its backups, and `state.ndjson`
   dumps still hold the plaintext, so keep treating the state database as
-  secret-bearing. Trigger rows (`GET /api/v1/triggers`) are also unchanged --
-  the work-dispatch path serves them to runners verbatim.
+  secret-bearing.
+  Three surfaces are deliberately not covered. Trigger rows carry no
+  classification and the dispatch path serves them to runners verbatim, so
+  `sparkwing runs triggers get|list` and `GET /api/v1/triggers` still show
+  argument values. A run pre-allocated by a fresh trigger is listable in `pending` before
+  a worker starts it, and the controller holds no pipeline schema to classify it
+  from, so it is unredacted for that window; retries and replays do inherit
+  their source's classification and are covered throughout. And redaction of the
+  reproducer is anchored on the argument name, so a secret value also passed to
+  a non-secret argument is masked in logs but shown under that other name.
 
 ## [v0.25.0] - 2026-08-11
 ### Added

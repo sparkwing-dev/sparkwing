@@ -1935,6 +1935,12 @@ components:
         git_sha: { type: string }
         args:
           type: object
+          description: >-
+            Arguments the run was started with. Values of arguments the
+            pipeline declared `secret:"true"` are replaced with `***`;
+            `invocation.secret_args` names them. Runs started before
+            that classification existed carry no `secret_args` and are
+            returned unredacted.
           additionalProperties: { type: string }
         error: { type: string }
         created_at: { type: string, format: date-time }
@@ -1954,7 +1960,13 @@ components:
         replay_of_node_id: { type: string }
         invocation:
           type: object
-          description: Free-form snapshot of run-start context (flags, args, binary_source, cwd, ...).
+          description: >-
+            Free-form snapshot of run-start context (flags, args,
+            binary_source, cwd, ...). `secret_args` lists the argument
+            names the pipeline declared secret; their values are
+            replaced with `***` in `invocation.args` and in the
+            `invocation.reproducer` command line before the response is
+            written.
           additionalProperties: true
         annotation_count: { type: integer }
         top_annotation: { type: string }

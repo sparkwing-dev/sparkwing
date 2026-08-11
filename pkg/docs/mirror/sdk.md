@@ -907,11 +907,25 @@ redaction set from it and retrying or replaying a run re-executes with
 it. Treat the state database, its backups, and the `state.ndjson` run
 dumps as holding the value in the clear, and protect them accordingly.
 
-Two limits worth knowing. A `flag:",extra"` bag is never redacted --
-its keys are arbitrary and carry no per-key opt-in. And runs recorded
-before a pipeline declared the input secret render as they always did:
-the classification is stamped on the run at start, and there is no
-schema to reclassify an old row from.
+Limits worth knowing:
+
+- A `flag:",extra"` bag is never redacted -- its keys are arbitrary and
+  carry no per-key opt-in.
+- Runs recorded before a pipeline declared the input secret render as
+  they always did. The classification is stamped on the run at start,
+  and there is no schema to reclassify an old row from.
+- Trigger rows are not redacted. `sparkwing runs triggers get`,
+  `sparkwing runs triggers list`, and `GET /api/v1/triggers` show
+  argument values, because the same endpoint hands them to the runner
+  claiming the work.
+- A run pre-allocated by a fresh trigger shows its arguments while it
+  sits in `pending`, until the worker that starts it stamps the
+  classification on. Retries and replays inherit their source run's
+  classification and are covered for that window.
+- Redaction of the `rerun` reproducer is anchored on the argument name,
+  not the value. Pass the same value to a non-secret argument as well
+  and it is masked in logs -- where masking is value-anchored -- but
+  shown under that other argument's name.
 
 Supported field types: `string`, `bool`, `int`, `int64`, `float64`,
 `time.Duration`, `[]string` (comma-separated on the wire), and
