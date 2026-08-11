@@ -2797,8 +2797,9 @@ func scaledBackoff(initial time.Duration, attempt int) time.Duration {
 // markFailed finalizes a node whose dispatch machinery errored
 // (Run was never invoked).
 func (s *dispatchState) markFailed(nodeID string, reason error) {
-	_ = s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Failed), reason.Error(), nil)
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_failed", []byte(reason.Error()))
+	text := boundedFailureText(s.ctx, s.runID, nodeID, reason)
+	_ = s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Failed), text, nil)
+	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_failed", []byte(text))
 	s.setOutcome(nodeID, sparkwing.Failed)
 }
 

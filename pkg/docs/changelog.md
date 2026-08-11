@@ -49,6 +49,20 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **orchestrator:** A failed node records a bounded, redacted excerpt of the
+  failing command's output instead of its raw text. Previously a failing
+  `sparkwing.Bash`/`Exec` step stored the command's entire stderr in the node's
+  error -- unbounded and unmasked, which a giant compiler or linter run turned
+  into a megabyte-sized state row that `runs status`, the dashboard, and
+  notifications all had to carry -- while a plain Go error stored no output at
+  all. Now every failed node keeps the last 20 lines (at most 4 KiB) of the
+  output, secret values redacted, prefixed with
+  `… earlier output omitted (see: sparkwing runs logs --run <id> --node <id>)`
+  when anything was dropped. The node log still holds the full output;
+  cancelled and upstream-failed nodes are untouched.
+
 ### Security
 
 - **orchestrator:** Redact secret values in node logs written by cluster and pod
