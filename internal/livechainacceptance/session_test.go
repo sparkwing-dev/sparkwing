@@ -67,11 +67,16 @@ type durableEffects struct {
 	malformedFault bool
 	failKind       EffectKind
 	reconcileCalls map[EffectKind]int
+	applyCalls     map[EffectKind]int
 }
 
 func (e *durableEffects) Apply(ctx context.Context, request EffectRequest) (EffectResult, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	if e.applyCalls == nil {
+		e.applyCalls = make(map[EffectKind]int)
+	}
+	e.applyCalls[request.Kind]++
 	if result, ok := e.results[request.ID]; ok {
 		if !reflect.DeepEqual(e.requests[request.ID], request) {
 			return EffectResult{}, fmt.Errorf("conflicting request for durable effect %s", request.ID)
@@ -121,6 +126,25 @@ func (e *durableEffects) Apply(ctx context.Context, request EffectRequest) (Effe
 		return EffectResult{}, fmt.Errorf("response lost after durable effect")
 	}
 	return result, nil
+}
+
+func TestIntermediateSessionIsValidatedBeforeEffects(t *testing.T) {
+	a, b, script := validTwoFlowScript(t)
+	seed := SessionSeed{ID: "acceptance-session-forged-intermediate", Events: [2]LandEvent{a, b}}
+	store := &memorySessionStore{session: &Session{
+		ID: seed.ID, SeedDigest: digestSessionSeed(seed), Version: 9,
+		Phase: SessionRollbackIntent, Events: seed.Events,
+	}}
+	effects := &durableEffects{script: script, creates: make(map[EffectKind]int)}
+
+	if _, err := RunSession(context.Background(), seed, durableTestDependencies(script, store, effects)); err == nil {
+		t.Fatal("forged rollback intent was accepted")
+	}
+	effects.mu.Lock()
+	defer effects.mu.Unlock()
+	if len(effects.applyCalls) != 0 || len(effects.reconcileCalls) != 0 {
+		t.Fatalf("forged intermediate state reached effect authority: apply=%v reconcile=%v", effects.applyCalls, effects.reconcileCalls)
+	}
 }
 
 func (e *durableEffects) Reconcile(_ context.Context, request EffectRequest) (EffectResult, bool, error) {
