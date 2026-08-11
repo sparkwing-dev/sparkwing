@@ -500,42 +500,72 @@ func stepWaitsOn(w *sparkwing.Work, step, dep string) bool {
 	return false
 }
 
-// homeEnvViolation is a direct read of the sparkwing home variable,
-// spelled with a join so this file does not itself carry the pattern the
-// gate refuses. Written out it is the real thing, which is what makes it
-// a fixture rather than an approximation.
-const homeEnvViolation = "package internal\n\nimport \"os\"\n\n" +
-	"func Home() string { return os.Getenv(\"SPARKWING_" + "HOME\") }\n"
+// The fixtures below spell the forbidden patterns with a join rather
+// than literally, so this file does not itself carry what the gate
+// refuses. Written out they are the real thing, which is what makes them
+// fixtures rather than approximations.
+const (
+	// homeEnvViolation reads the variable directly.
+	homeEnvViolation = "package internal\n\nimport \"os\"\n\n" +
+		"func Home() string { return os.Getenv(\"SPARKWING_" + "HOME\") }\n"
 
-// The gate has to refuse a fresh bypass, or it is decoration. This is
-// the exact shape internal/bincache carried: a package resolving the
-// home from the environment itself, which reads correctly for every real
-// run and quietly hands a test binary the developer's own ~/.sparkwing.
-func TestHomeResolutionRefusesADirectEnvironmentRead(t *testing.T) {
-	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	// homeJoinViolation skips the variable entirely and builds the path
+	// from the user's home directory, which is the half of the original
+	// bug an environment-only rule sails past.
+	homeJoinViolation = "package internal\n\nimport (\n\t\"os\"\n\t\"path/filepath\"\n)\n\n" +
+		"func Home() string {\n\thome, _ := os.UserHomeDir()\n\treturn filepath.Join(home, \"" + ".sparkwing\")\n}\n"
 
-	if err := checkHomeResolution(ctx); err != nil {
-		t.Fatalf("the clean fixture must pass, or the failure below proves nothing: %v", err)
-	}
+	// projectDirJoin builds the per-repo pipeline module directory from a
+	// checkout path. Same literal, different thing, and there are roughly
+	// two dozen of these in the tree.
+	projectDirJoin = "package internal\n\nimport \"path/filepath\"\n\n" +
+		"func Dir(cwd string) string { return filepath.Join(cwd, \"" + ".sparkwing\") }\n"
+)
 
-	writeGoFile(t, filepath.Join(root, "internal", "bypass.go"), homeEnvViolation)
-	gitAddAll(t, root)
+// homeRuleFixtures pairs each rule with source that violates it, so the
+// cases below stay in step with the rule table rather than restating it.
+var homeRuleFixtures = map[string]string{
+	"read SPARKWING_HOME from the environment":       homeEnvViolation,
+	"build the sparkwing home from a home directory": homeJoinViolation,
+}
 
-	err := checkHomeResolution(ctx)
-	if err == nil {
-		t.Fatal("the gate passed a direct read of the sparkwing home variable")
-	}
-	if !strings.Contains(err.Error(), "paths.DefaultPaths") {
-		t.Errorf("the failure does not name the call that fixes it: %v", err)
-	}
-	if !strings.Contains(err.Error(), "internal/bypass.go") {
-		t.Errorf("the failure does not name the offending file: %v", err)
-	}
-	for allowed := range homeResolutionAllowed {
-		if !strings.Contains(err.Error(), allowed) {
-			t.Errorf("the failure does not list the allowlisted file %s: %v", allowed, err)
+// The gate has to refuse a fresh bypass of either shape, or it is
+// decoration. These are the two shapes internal/bincache carried: it
+// read the variable, and when that was unset it built the path from the
+// user's home directory.
+func TestHomeResolutionRefusesEveryBypassShape(t *testing.T) {
+	for _, rule := range homeRules {
+		body, ok := homeRuleFixtures[rule.label]
+		if !ok {
+			t.Fatalf("rule %q has no fixture; add one so the rule cannot ship untested", rule.label)
 		}
+		t.Run(rule.label, func(t *testing.T) {
+			root := gateFixtureRepo(t)
+			ctx := context.Background()
+
+			if err := checkHomeResolution(ctx); err != nil {
+				t.Fatalf("the clean fixture must pass, or the failure below proves nothing: %v", err)
+			}
+
+			writeGoFile(t, filepath.Join(root, "internal", "bypass.go"), body)
+			gitAddAll(t, root)
+
+			err := checkHomeResolution(ctx)
+			if err == nil {
+				t.Fatal("the gate passed a bypass it is supposed to refuse")
+			}
+			if !strings.Contains(err.Error(), "internal/bypass.go") {
+				t.Errorf("the failure does not name the offending file: %v", err)
+			}
+			if !strings.Contains(err.Error(), "paths.DefaultPaths") {
+				t.Errorf("the failure does not name the call that fixes it: %v", err)
+			}
+			for allowed := range rule.allowed {
+				if !strings.Contains(err.Error(), allowed) {
+					t.Errorf("the failure does not list the allowlisted file %s: %v", allowed, err)
+				}
+			}
+		})
 	}
 }
 
@@ -543,16 +573,55 @@ func TestHomeResolutionRefusesADirectEnvironmentRead(t *testing.T) {
 // the path rather than on anything about the content, so an entry keeps
 // working when the file around it is edited.
 func TestHomeResolutionExemptsTheAllowlist(t *testing.T) {
-	root := gateFixtureRepo(t)
-	ctx := context.Background()
+	for _, rule := range homeRules {
+		t.Run(rule.label, func(t *testing.T) {
+			root := gateFixtureRepo(t)
+			for allowed := range rule.allowed {
+				writeGoFile(t, filepath.Join(root, allowed), homeRuleFixtures[rule.label])
+			}
+			gitAddAll(t, root)
 
-	for allowed := range homeResolutionAllowed {
-		writeGoFile(t, filepath.Join(root, allowed), homeEnvViolation)
+			if err := checkHomeResolution(context.Background()); err != nil {
+				t.Fatalf("the gate refused an allowlisted file: %v", err)
+			}
+		})
 	}
+}
+
+// The join rule keys on the argument, not the literal, because the same
+// literal names the per-repo pipeline module directory in roughly two
+// dozen correct call sites. Firing on those would make the gate noise
+// somebody silences rather than a rule anybody keeps.
+func TestHomeResolutionAllowsTheProjectPipelineDirectory(t *testing.T) {
+	root := gateFixtureRepo(t)
+	writeGoFile(t, filepath.Join(root, "internal", "projectdir.go"), projectDirJoin)
 	gitAddAll(t, root)
 
-	if err := checkHomeResolution(ctx); err != nil {
-		t.Fatalf("the gate refused an allowlisted file: %v", err)
+	if err := checkHomeResolution(context.Background()); err != nil {
+		t.Fatalf("the gate refused a checkout-relative pipeline directory: %v", err)
+	}
+}
+
+// Prose has to be able to quote the call it forbids. A rule nobody can
+// write about is one nobody can document, and the doc comments on the
+// fixed packages quote exactly these calls.
+func TestHomeResolutionIgnoresCommentsQuotingTheForbiddenCalls(t *testing.T) {
+	root := gateFixtureRepo(t)
+	quoted := "package internal\n\n"
+	for _, rule := range homeRules {
+		for _, line := range strings.Split(homeRuleFixtures[rule.label], "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			quoted += "// " + line + "\n"
+		}
+	}
+	quoted += "func Documented() int { return 1 }\n"
+	writeGoFile(t, filepath.Join(root, "internal", "documented.go"), quoted)
+	gitAddAll(t, root)
+
+	if err := checkHomeResolution(context.Background()); err != nil {
+		t.Fatalf("the gate refused a comment that only quotes the forbidden calls: %v", err)
 	}
 }
 
@@ -570,6 +639,7 @@ func TestHomeResolutionExemptions(t *testing.T) {
 		body string
 	}{
 		{"a test reading the variable", filepath.Join("internal", "probe_test.go"), homeEnvViolation},
+		{"a test joining the home directory", filepath.Join("internal", "join_test.go"), homeJoinViolation},
 		{"the pipeline module", filepath.Join(".sparkwing", "job.go"), homeEnvViolation},
 		{"setting the variable in product code", filepath.Join("internal", "isolate.go"), setter},
 	}
