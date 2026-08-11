@@ -29,7 +29,7 @@ var errNodeQueueTimeout = errors.New("queue timeout")
 // the node runs (a cancel_others arrival) cancels execution and
 // finalizes the node as superseded, naming the key and the superseding
 // run.
-func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.Request, la *LocalAdmission, group *sparkwing.ConcurrencyGroup) runner.Result {
+func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.Request, la *LocalAdmission, group *sparkwing.ConcurrencyGroup, execute nodeExecutor) runner.Result {
 	node := req.Node
 	_, _, hostAdmitted := localAdmissionFromContext(ctx)
 	limit := group.Limit()
@@ -149,17 +149,17 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 		}
 		runCtx = withLocalAdmission(execCtx, la, lease.Token, childToken, leaseCarriesHost(lease), localAdmissionPriorityFromContext(execCtx))
 	}
-	output, err := r.executeNodeWithAdmission(runCtx, req)
+	result := execute(runCtx, req)
 	if ev := evicted.Load(); ev != nil {
 		serr := fmt.Errorf("concurrency key %q: superseded by run %s under %s", ev.Key, ev.SupersededBy, ev.Policy)
 		_ = r.backends.State.AppendEvent(ctx, req.RunID, node.ID(), "node_superseded", []byte(serr.Error()))
 		_ = r.backends.State.FinishNode(ctx, req.RunID, node.ID(), string(sparkwing.Superseded), serr.Error(), nil)
 		return runner.Result{Outcome: sparkwing.Superseded, Err: serr}
 	}
-	if err != nil {
-		return runner.Result{Outcome: sparkwing.Failed, Err: err}
+	if result.Err != nil {
+		return result
 	}
-	return runner.Result{Outcome: sparkwing.Success, Output: output}
+	return result
 }
 
 // failedDaemonAcquire maps a failed daemon acquisition onto the node's

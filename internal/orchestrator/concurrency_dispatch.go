@@ -234,7 +234,7 @@ func (cp coordParams) acquireRequest(runID, nodeID string, bypassRead bool) stor
 // are independent: a node may have either, both, or neither. Returns
 // handled=false when the node needs no coordination so the caller runs
 // it on the normal path.
-func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Request) (runner.Result, bool) {
+func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Request, execute nodeExecutor) (runner.Result, bool) {
 	node := req.Node
 	group := node.ConcurrencyGroupRef()
 	cacheCfg := node.CacheConfig()
@@ -247,11 +247,11 @@ func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Reque
 
 	switch {
 	case hasMemo && group != nil:
-		return r.runMemoizedUnderConcurrency(ctx, req, group, cacheHash, cacheTTL), true
+		return r.runMemoizedUnderConcurrency(ctx, req, group, cacheHash, cacheTTL, execute), true
 	case hasMemo:
-		return r.acquireAndRun(ctx, req, memoParamsFor(cacheHash, cacheTTL)), true
+		return r.acquireAndRun(ctx, req, memoParamsFor(cacheHash, cacheTTL), execute), true
 	case group != nil:
-		return r.runUnderGroup(ctx, req, group), true
+		return r.runUnderGroup(ctx, req, group, execute), true
 	default:
 		return runner.Result{}, false
 	}
@@ -261,11 +261,11 @@ func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Reque
 // run-scoped groups on the local run path go through the admission
 // daemon, while global-scope groups (and every group on cluster paths,
 // which carry no local daemon) keep the shared-store acquire.
-func (r *InProcessRunner) runUnderGroup(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup) runner.Result {
+func (r *InProcessRunner) runUnderGroup(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, execute nodeExecutor) runner.Result {
 	if la, _, _ := localAdmissionFromContext(ctx); la != nil && groupUsesLocalDaemon(group) {
-		return r.runNodeUnderDaemonSem(ctx, req, la, group)
+		return r.runNodeUnderDaemonSem(ctx, req, la, group, execute)
 	}
-	return r.acquireAndRun(ctx, req, concParamsFor(req.Node, group, req.RunID))
+	return r.acquireAndRun(ctx, req, concParamsFor(req.Node, group, req.RunID), execute)
 }
 
 // resolveCacheHash evaluates the node's content key, returning the hash
@@ -293,7 +293,7 @@ func (r *InProcessRunner) resolveCacheHash(ctx context.Context, node *sparkwing.
 // acquireAndRun performs one store acquire for cp and dispatches on the
 // outcome: replay a hit, skip/fail under a full group, run a granted
 // slot, or wait then run a queued/coalesced/evicting arrival.
-func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
+func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request, cp coordParams, execute nodeExecutor) runner.Result {
 	node := req.Node
 	holderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
 	wedgeBudget, err := storeWedgeBudget()
@@ -328,9 +328,9 @@ func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request,
 		r.markFailed(ctx, req.RunID, node.ID(), err)
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
 	case store.AcquireGranted:
-		return r.runHeldSlot(ctx, req, cp, holderID, wedgeBudget)
+		return r.runHeldSlot(ctx, req, cp, holderID, wedgeBudget, execute)
 	case store.AcquireQueued, store.AcquireCoalesced, store.AcquireCancellingOthers:
-		return r.waitThenRun(ctx, req, cp, resp, wedgeBudget)
+		return r.waitThenRun(ctx, req, cp, resp, wedgeBudget, execute)
 	}
 
 	err = fmt.Errorf("concurrency acquire returned unknown kind %q", resp.Kind)
@@ -344,7 +344,7 @@ func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request,
 // identical work draws one budget unit, not one per duplicate). The
 // memo leader then competes for the group budget, runs, and on release
 // writes the shared cache entry.
-func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, cacheHash string, cacheTTL time.Duration) runner.Result {
+func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, cacheHash string, cacheTTL time.Duration, execute nodeExecutor) runner.Result {
 	node := req.Node
 	memoCP := memoParamsFor(cacheHash, cacheTTL)
 	memoHolderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
@@ -363,9 +363,9 @@ func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req r
 	case store.AcquireCached:
 		return r.applyCacheHit(ctx, req, memoCP, resp.OutputRef, resp.OriginRunID, resp.OriginNodeID)
 	case store.AcquireCoalesced:
-		return r.waitThenRun(ctx, req, memoCP, resp, wedgeBudget)
+		return r.waitThenRun(ctx, req, memoCP, resp, wedgeBudget, execute)
 	case store.AcquireQueued:
-		return r.waitThenRun(ctx, req, memoCP, resp, wedgeBudget)
+		return r.waitThenRun(ctx, req, memoCP, resp, wedgeBudget, execute)
 	case store.AcquireGranted:
 		execCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
@@ -373,7 +373,7 @@ func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req r
 		var lostWedge atomic.Pointer[string]
 		stopHB := r.startSlotHeartbeat(execCtx, memoCP.key, memoHolderID, memoCP.policy, &lost, &lostWedge, cancel, wedgeBudget)
 
-		result := r.runUnderGroup(execCtx, req, group)
+		result := r.runUnderGroup(execCtx, req, group, execute)
 
 		stopHB()
 		bg, bgCancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -463,7 +463,7 @@ func (r *InProcessRunner) applySkippedConcurrent(ctx context.Context, req runner
 // way but finalizes as failed, carrying the wedge verdict so the run
 // record names the true cause instead of a supersede that never
 // happened.
-func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string, wedgeBudget time.Duration) runner.Result {
+func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string, wedgeBudget time.Duration, execute nodeExecutor) runner.Result {
 	execCtx, cancelExec := context.WithCancel(ctx)
 	var superseded atomic.Bool
 	var wedgeAbort atomic.Pointer[string]
@@ -488,7 +488,7 @@ func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, c
 		return runner.Result{Outcome: sparkwing.Skipped}
 	}
 
-	output, err := r.executeNodeWithAdmission(execCtx, req)
+	result := r.executeWithLocalAdmission(execCtx, req, execute)
 	if reason := wedgeAbort.Load(); reason != nil {
 		werr := errors.New(*reason)
 		_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_store_wedged", []byte(werr.Error()))
@@ -502,12 +502,12 @@ func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, c
 		r.recordReleaseOutcome(req.RunID, req.Node.ID(), string(sparkwing.Superseded))
 		return runner.Result{Outcome: sparkwing.Superseded, Err: err}
 	}
-	if err != nil {
+	if result.Err != nil {
 		r.recordReleaseOutcome(req.RunID, req.Node.ID(), string(sparkwing.Failed))
-		return runner.Result{Outcome: sparkwing.Failed, Err: err}
+		return result
 	}
-	r.recordReleaseOutcome(req.RunID, req.Node.ID(), string(sparkwing.Success))
-	return runner.Result{Outcome: sparkwing.Success, Output: output}
+	r.recordReleaseOutcome(req.RunID, req.Node.ID(), string(result.Outcome))
+	return result
 }
 
 // startSlotHeartbeat extends the slot lease and watches for supersede.
@@ -583,7 +583,7 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 // a continuous failure streak past wedgeBudget (or one "locking
 // protocol" error) into a terminal node failure instead of a poll
 // loop spinning against a wedged store.
-func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, cp coordParams, initial store.AcquireSlotResponse, wedgeBudget time.Duration) runner.Result {
+func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, cp coordParams, initial store.AcquireSlotResponse, wedgeBudget time.Duration, execute nodeExecutor) runner.Result {
 	wedge := newStoreWedgeGuard(wedgeBudget)
 	leaderRun, leaderNode := initial.LeaderRunID, initial.LeaderNodeID
 
@@ -689,7 +689,7 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 			}
 			_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "concurrency_promoted", nil)
 			_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), "")
-			return r.runHeldSlot(ctx, req, cp, res.HolderID, wedgeBudget)
+			return r.runHeldSlot(ctx, req, cp, res.HolderID, wedgeBudget, execute)
 		case store.WaiterCached:
 			return r.applyCacheHit(ctx, req, cp, res.OutputRef, res.OriginRunID, res.OriginNodeID)
 		case store.WaiterLeaderFinished:

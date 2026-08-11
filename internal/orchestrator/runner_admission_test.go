@@ -37,7 +37,7 @@ func (runnerAdmissionPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spark
 
 type blockingRunner struct {
 	entered chan string
-	release <-chan struct{}
+	permits <-chan struct{}
 	active  atomic.Int32
 	peak    atomic.Int32
 
@@ -61,7 +61,7 @@ func (r *blockingRunner) RunNode(ctx context.Context, req runner.Request) runner
 	r.entered <- req.NodeID
 
 	select {
-	case <-r.release:
+	case <-r.permits:
 		return runner.Result{Outcome: sparkwing.Success}
 	case <-ctx.Done():
 		return runner.Result{Outcome: sparkwing.Failed, Err: ctx.Err()}
@@ -73,11 +73,10 @@ func TestRunnerAdmissionAppliesToNonInProcessRunner(t *testing.T) {
 		return runnerAdmissionPipe{}
 	})
 
-	release := make(chan struct{})
-	defer close(release)
+	permits := make(chan struct{}, runnerAdmissionNodes)
 	fake := &blockingRunner{
 		entered:  make(chan string, runnerAdmissionNodes),
-		release:  release,
+		permits:  permits,
 		attempts: make(map[string]int),
 	}
 
@@ -108,5 +107,40 @@ func TestRunnerAdmissionAppliesToNonInProcessRunner(t *testing.T) {
 	case nodeID := <-fake.entered:
 		t.Fatalf("runner call %s entered before a concurrency slot was released", nodeID)
 	case <-time.After(100 * time.Millisecond):
+	}
+
+	permits <- struct{}{}
+	select {
+	case <-fake.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("fifth runner call did not enter after a concurrency slot was released")
+	}
+	for range runnerAdmissionNodes - 1 {
+		permits <- struct{}{}
+	}
+
+	select {
+	case result := <-done:
+		if result.Status != "success" || result.Error != nil {
+			t.Fatalf("run status = %q, error = %v", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("coordinated run did not finish")
+	}
+	if got := fake.peak.Load(); got != runnerAdmissionCapacity {
+		t.Fatalf("peak runner calls = %d, want exactly %d", got, runnerAdmissionCapacity)
+	}
+	if got := fake.active.Load(); got != 0 {
+		t.Fatalf("active runner calls after completion = %d, want 0", got)
+	}
+	fake.mu.Lock()
+	defer fake.mu.Unlock()
+	if len(fake.attempts) != runnerAdmissionNodes {
+		t.Fatalf("runner attempts cover %d nodes, want %d", len(fake.attempts), runnerAdmissionNodes)
+	}
+	for nodeID, attempts := range fake.attempts {
+		if attempts != 1 {
+			t.Errorf("runner attempts for %s = %d, want 1", nodeID, attempts)
+		}
 	}
 }

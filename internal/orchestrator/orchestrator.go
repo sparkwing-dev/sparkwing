@@ -474,6 +474,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	r := opts.Runner
 	if r == nil {
 		r = NewInProcessRunner(backends)
+	} else {
+		r = newCoordinatingRunner(backends, r)
 	}
 	ctx = secrets.WithMasker(ctx, masker)
 	if resolver, rerr := selectSecretResolver(ctx, opts); rerr != nil {
@@ -2646,17 +2648,13 @@ func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFail
 	ctx := sparkwing.WithFailure(s.resolverCtx, parentFailure)
 	ctx = withAdmissionWaitParticipant(ctx, node.ID())
 	if ipr, ok := s.runner.(*InProcessRunner); ok {
-		out, err := ipr.executeNodeWithAdmission(ctx, runner.Request{
+		return ipr.executeWithLocalAdmission(ctx, runner.Request{
 			RunID:    s.runID,
 			NodeID:   node.ID(),
 			Pipeline: s.pipeline,
 			Node:     node,
 			Delegate: s.delegate,
-		})
-		if err != nil {
-			return runner.Result{Outcome: sparkwing.Failed, Err: err}
-		}
-		return runner.Result{Outcome: sparkwing.Success, Output: out}
+		}, ipr.executeInProcess)
 	}
 	return s.runWithCap(node, func(slot *workerSlot) runner.Result {
 		return s.runner.RunNode(ctx, runner.Request{
