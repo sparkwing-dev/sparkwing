@@ -237,7 +237,7 @@ therefore records which checkouts have used each entry, and how often:
 ```
 MOST RECENTLY USED (2 of 2)
   c1df5cd6-4789f450   91.8 MiB  just now   x7  ~/code/sparkwing/.sparkwing +1 more checkout(s)
-  322ecb34-31432125   91.9 MiB  2d ago     x1  ~/.xwing/envs/234/sparkwing/.sparkwing
+  322ecb34-31432125   91.9 MiB  2d ago     x1  ~/worktrees/feature-branch/.sparkwing
 ```
 
 An entry with more than one checkout is the portable key paying off: a
