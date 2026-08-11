@@ -2,7 +2,9 @@ package wingd
 
 import (
 	"bufio"
+	"errors"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -22,6 +24,11 @@ const (
 // maxFrame bounds a single wire frame so a runaway peer cannot exhaust
 // memory; the largest legitimate frame is a full queue-state dump.
 const maxFrame = 8 << 20
+
+// connWriteTimeout bounds one frame write to a client. It is generous
+// enough that no reading client meets it and short enough that a client
+// which stopped reading is recognised as gone rather than waited on.
+const connWriteTimeout = 10 * time.Second
 
 // conn is one client connection. Its network I/O is self-contained; its
 // admission role fields are guarded by the owning [Daemon]'s mutex.
@@ -127,7 +134,9 @@ func (c *conn) readMessage() (wingwire.Message, error) {
 }
 
 // send serializes msg and writes it as one frame. Writes are serialized
-// so frames from different goroutines never interleave.
+// so frames from different goroutines never interleave, and bounded by
+// [connWriteTimeout] so a client that stopped reading cannot hold a
+// daemon goroutine for the rest of its life.
 func (c *conn) send(msg wingwire.Message) error {
 	line, err := wingwire.Encode(msg)
 	if err != nil {
@@ -135,8 +144,26 @@ func (c *conn) send(msg wingwire.Message) error {
 	}
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
-	_, err = c.nc.Write(line)
-	return err
+	if err := c.nc.SetWriteDeadline(time.Now().Add(connWriteTimeout)); err != nil {
+		return err
+	}
+	if _, err := c.nc.Write(line); err != nil {
+		if errors.Is(err, os.ErrDeadlineExceeded) {
+			// safety: a timed-out write may have left a partial frame on the wire, so the stream can no longer be framed; close the socket and let the read loop's disconnect path release the connection's admission.
+			c.logf("client %s stopped reading; dropping connection after %s", c.runID, connWriteTimeout)
+			c.close()
+		}
+		return err
+	}
+	_ = c.nc.SetWriteDeadline(time.Time{})
+	return nil
+}
+
+func (c *conn) logf(format string, args ...any) {
+	if c.d == nil {
+		return
+	}
+	c.d.cfg.logf(format, args...)
 }
 
 // close shuts the underlying socket exactly once.
