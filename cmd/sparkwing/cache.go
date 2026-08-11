@@ -12,6 +12,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/cachepressure"
 )
 
+var measureCachePressure = cachepressure.Measure
+var pruneCachePressure = cachepressure.Prune
+
 func runCache(args []string) error {
 	if handleParentHelp(cmdCache, args) {
 		return nil
@@ -43,7 +46,7 @@ func runCacheStatus(args []string) error {
 	if fs.NArg() != 0 {
 		return fmt.Errorf("cache status: unexpected positional %q", fs.Arg(0))
 	}
-	status, err := cachepressure.Measure(context.Background())
+	status, err := measureCachePressure(context.Background())
 	if err != nil {
 		return fmt.Errorf("cache status: %w", err)
 	}
@@ -76,7 +79,7 @@ func runCachePrune(args []string) error {
 	if *maxEntries <= 0 {
 		return errors.New("cache prune: --max-entries must be greater than zero")
 	}
-	result, err := cachepressure.Prune(context.Background(), cachepressure.PruneOptions{
+	result, err := pruneCachePressure(context.Background(), cachepressure.PruneOptions{
 		ReclaimBytes: *goalBytes,
 		MaxEntries:   *maxEntries,
 	})

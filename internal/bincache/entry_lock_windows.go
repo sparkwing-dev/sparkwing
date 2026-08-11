@@ -13,6 +13,7 @@ type cacheLockMode uint8
 
 const (
 	cacheLockShared cacheLockMode = iota
+	cacheLockSharedNonblock
 	cacheLockExclusive
 	cacheLockExclusiveNonblock
 )
@@ -21,16 +22,16 @@ const cacheLockBytes = 1 << 30
 
 func cacheLock(file *os.File, mode cacheLockMode) (bool, error) {
 	var flags uint32
-	if mode != cacheLockShared {
+	if mode != cacheLockShared && mode != cacheLockSharedNonblock {
 		flags |= windows.LOCKFILE_EXCLUSIVE_LOCK
 	}
-	if mode == cacheLockExclusiveNonblock {
+	if mode == cacheLockSharedNonblock || mode == cacheLockExclusiveNonblock {
 		flags |= windows.LOCKFILE_FAIL_IMMEDIATELY
 	}
 	var overlapped windows.Overlapped
 	err := windows.LockFileEx(windows.Handle(file.Fd()), flags, 0, cacheLockBytes, 0, &overlapped)
 	if err != nil {
-		if mode == cacheLockExclusiveNonblock && errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
+		if (mode == cacheLockSharedNonblock || mode == cacheLockExclusiveNonblock) && errors.Is(err, windows.ERROR_LOCK_VIOLATION) {
 			return false, nil
 		}
 		return false, err

@@ -14,20 +14,21 @@ type cacheLockMode uint8
 
 const (
 	cacheLockShared cacheLockMode = iota
+	cacheLockSharedNonblock
 	cacheLockExclusive
 	cacheLockExclusiveNonblock
 )
 
 func cacheLock(file *os.File, mode cacheLockMode) (bool, error) {
 	flag := syscall.LOCK_SH
-	if mode != cacheLockShared {
+	if mode != cacheLockShared && mode != cacheLockSharedNonblock {
 		flag = syscall.LOCK_EX
 	}
-	if mode == cacheLockExclusiveNonblock {
+	if mode == cacheLockSharedNonblock || mode == cacheLockExclusiveNonblock {
 		flag |= syscall.LOCK_NB
 	}
 	if err := syscall.Flock(int(file.Fd()), flag); err != nil {
-		if mode == cacheLockExclusiveNonblock && (errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN)) {
+		if (mode == cacheLockSharedNonblock || mode == cacheLockExclusiveNonblock) && (errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN)) {
 			return false, nil
 		}
 		return false, err
