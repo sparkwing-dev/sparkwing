@@ -75,8 +75,8 @@ func TestPruneExaminedEntriesAreExactlyClassified(t *testing.T) {
 	if examined != classified {
 		t.Fatalf("examined_entries = %v, classified entries = %v: %s", examined, classified, raw)
 	}
-	if fields["work_bound_exhausted"] != true {
-		t.Fatalf("work_bound_exhausted = %#v, want true after consuming all candidates: %s",
+	if fields["work_bound_exhausted"] != false {
+		t.Fatalf("work_bound_exhausted = %#v, want false when inventory rather than a work bound is exhausted: %s",
 			fields["work_bound_exhausted"], raw)
 	}
 }
