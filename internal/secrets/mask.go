@@ -132,12 +132,34 @@ func (m *Masker) Mask(s string) string {
 // Log attributes are shallow JSON-ish data in practice; the cap is
 // insurance against a pathological (or cyclic) map rather than a
 // meaningful limit.
+//
+// Past the cap the value is replaced by maskedValue rather than passed
+// through. A redaction pass that gives up must give up closed: emitting
+// data it declined to inspect is the one outcome that turns a depth
+// guard into a leak.
 const maskAttrsMaxDepth = 8
 
+// maskedValue is what a redacted (or un-inspectable) value becomes.
+const maskedValue = "***"
+
 // MaskAttrs returns attrs with every string value redacted, recursing
-// into the container shapes an attribute value takes ([]string, []any,
-// nested map[string]any). Values of any other type pass through
-// untouched.
+// into the container shapes an attribute value takes: []string, []any,
+// map[string]any, map[string]string. Anything nested deeper than
+// maskAttrsMaxDepth is replaced wholesale with "***".
+//
+// Deliberately not inspected, and therefore passed through unchanged:
+//
+//   - numbers, bools, nil -- cannot carry a secret value
+//   - structs and pointers to them, []byte, map[any]byte and other
+//     non-string-keyed maps, error, fmt.Stringer
+//
+// The second group is a real (if narrow) gap: a struct or []byte
+// attribute holding a secret is emitted as-is. It is left open on
+// purpose -- reflecting over arbitrary values on every log record is
+// the wrong cost, and no emitter in the tree puts one in Attrs. Any new
+// emitter that wants to must pre-render the value to a string, which is
+// then covered here. Callers building attributes from untrusted or
+// unaudited data should mask before emitting rather than rely on this.
 //
 // Copy-on-write: the input map is never mutated, and when nothing
 // needed redacting the input map itself is returned, so the common
@@ -160,9 +182,11 @@ func (m *Masker) MaskAttrs(attrs map[string]any) map[string]any {
 }
 
 // maskAttrs is MaskAttrs's recursive half; the bool reports whether
-// anything was rewritten so callers can skip the copy.
+// anything was rewritten so callers can skip the copy. Depth is
+// checked by maskValue, which fails closed; this half only guards the
+// empty case.
 func (m *Masker) maskAttrs(attrs map[string]any, depth int) (map[string]any, bool) {
-	if len(attrs) == 0 || depth > maskAttrsMaxDepth {
+	if len(attrs) == 0 {
 		return attrs, false
 	}
 	var out map[string]any
@@ -184,9 +208,14 @@ func (m *Masker) maskAttrs(attrs map[string]any, depth int) (map[string]any, boo
 }
 
 // maskValue redacts one attribute value, reporting whether it changed.
+// Past the depth cap it fails closed: the whole sub-value is replaced
+// by "***" rather than emitted uninspected.
 func (m *Masker) maskValue(v any, depth int) (any, bool) {
 	if depth > maskAttrsMaxDepth {
-		return v, false
+		if s, ok := v.(string); ok && s == maskedValue {
+			return v, false
+		}
+		return maskedValue, true
 	}
 	switch t := v.(type) {
 	case string:

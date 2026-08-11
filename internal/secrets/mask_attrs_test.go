@@ -1,7 +1,9 @@
 package secrets
 
 import (
+	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -117,6 +119,60 @@ func TestMaskAttrs_RecursesIntoContainers(t *testing.T) {
 	}
 	if reflect.ValueOf(out["keep"].([]string)).Pointer() != reflect.ValueOf(attrs["keep"].([]string)).Pointer() {
 		t.Fatal("an untouched slice should not be cloned")
+	}
+}
+
+// The depth guard must fail closed. Anything the pass declines to
+// inspect is replaced wholesale rather than emitted, so nesting cannot
+// be used to carry a value past redaction.
+func TestMaskAttrs_FailsClosedPastDepthCap(t *testing.T) {
+	m := newTestMasker("s3cr3t")
+
+	// Level 1..8 are inspected; the value that sits at level 9 is not.
+	deep := map[string]any{"leaf": "token s3cr3t here"}
+	for range maskAttrsMaxDepth {
+		deep = map[string]any{"next": deep}
+	}
+	out := m.MaskAttrs(deep)
+
+	cur := out
+	for hop := range maskAttrsMaxDepth {
+		next, ok := cur["next"]
+		if !ok {
+			t.Fatalf("nesting lost after %d hops: %#v", hop, cur)
+		}
+		if s, isStr := next.(string); isStr {
+			// The whole sub-map was replaced.
+			if s != "***" {
+				t.Fatalf("uninspected level rendered as %q, want ***", s)
+			}
+			return
+		}
+		cur, ok = next.(map[string]any)
+		if !ok {
+			t.Fatalf("unexpected nested type %T", next)
+		}
+	}
+	// The leaf sits past the cap: it must be replaced wholesale, not
+	// merely have its secret substring rewritten.
+	leaf := cur["leaf"]
+	if leaf != "***" {
+		t.Fatalf("value past the depth cap = %#v, want the whole value replaced by ***", leaf)
+	}
+	if strings.Contains(fmt.Sprint(out), "token") {
+		t.Fatalf("surrounding text past the cap survived: %#v", out)
+	}
+}
+
+// A shallow value with the same secret is still masked normally --
+// failing closed at depth must not change ordinary behavior.
+func TestMaskAttrs_ShallowValuesUnaffectedByDepthGuard(t *testing.T) {
+	m := newTestMasker("s3cr3t")
+	attrs := map[string]any{"a": map[string]any{"b": map[string]any{"c": "x s3cr3t"}}}
+	out := m.MaskAttrs(attrs)
+	got := out["a"].(map[string]any)["b"].(map[string]any)["c"]
+	if got != "x ***" {
+		t.Fatalf("nested value = %#v, want masked", got)
 	}
 }
 
