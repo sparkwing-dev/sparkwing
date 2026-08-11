@@ -31,6 +31,7 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	runs = store.RedactedRuns(runs)
 	if runs == nil {
 		runs = []*store.Run{}
 	}

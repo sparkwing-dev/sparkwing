@@ -142,6 +142,10 @@ func renderRunList(
 	}
 
 	if opts.JSON {
+		// The table below prints no args, but -o json emits the whole
+		// row. Redact here rather than at the two call sites so the
+		// local and controller-backed list paths cannot drift.
+		runs = store.RedactedRuns(runs)
 		if runs == nil {
 			runs = []*store.Run{}
 		}
@@ -243,7 +247,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 		if err != nil {
 			return err
 		}
-		return writeJSON(out, map[string]any{"run": run, "nodes": nodes})
+		return writeJSON(out, map[string]any{"run": store.RedactedRun(run), "nodes": nodes})
 	}
 
 	if !opts.Follow {
@@ -1539,7 +1543,7 @@ func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out 
 	}
 	steps, _ := st.ListNodeSteps(ctx, runID)
 	wrapped := joinStepsByNode(nodes, steps)
-	payload := map[string]any{"run": run, "nodes": wrapped}
+	payload := map[string]any{"run": store.RedactedRun(run), "nodes": wrapped}
 	if approvals, err := st.ListApprovalsForRun(ctx, runID); err == nil && len(approvals) > 0 {
 		payload["approvals"] = approvals
 	}

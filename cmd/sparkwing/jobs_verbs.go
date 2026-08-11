@@ -468,7 +468,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 			return
 		}
 		if emitJSON {
-			_ = jsonEncode(os.Stdout, r)
+			_ = jsonEncode(os.Stdout, store.RedactedRun(r))
 			return
 		}
 		fmt.Printf("%s  %s  %s  (%s)\n",
@@ -569,7 +569,10 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 
 	var build func(r *store.Run) (*runNode, error)
 	build = func(r *store.Run) (*runNode, error) {
-		node := &runNode{Run: r}
+		// -o json emits the whole row per node; the text render below
+		// reads only id/pipeline/status. Redact once here so both
+		// shapes come off the same tree.
+		node := &runNode{Run: store.RedactedRun(r)}
 		kids, err := fetchChildren(r.ID)
 		if err != nil {
 			return nil, err
@@ -727,7 +730,7 @@ func emitWaitResult(run *store.Run, format string) {
 	}
 	switch format {
 	case "json":
-		_ = jsonEncode(os.Stdout, run)
+		_ = jsonEncode(os.Stdout, store.RedactedRun(run))
 	default:
 		dur := ""
 		if run.FinishedAt != nil {
@@ -924,6 +927,7 @@ func renderFindResults(runs []*store.Run, format string, quiet bool) error {
 		return nil
 	}
 	if format == "json" {
+		runs = store.RedactedRuns(runs)
 		if runs == nil {
 			runs = []*store.Run{}
 		}

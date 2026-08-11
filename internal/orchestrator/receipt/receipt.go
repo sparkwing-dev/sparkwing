@@ -82,7 +82,13 @@ func BuildReceipt(run *store.Run, nodes []*store.Node, rate float64, rateSource 
 		Status:     run.Status,
 		StartedAt:  run.StartedAt,
 		FinishedAt: run.FinishedAt,
-		Invocation: run.Invocation,
+		// Secret-declared args are redacted before the SHA is
+		// computed, not after, so receipt_sha certifies the document
+		// the caller actually receives -- a hash over bytes nobody is
+		// allowed to see would make verification impossible. Runs
+		// predating the invocation's secret-arg list carry no
+		// classification and hash exactly as they did before.
+		Invocation: store.RedactInvocation(run.Invocation),
 	}
 	if run.FinishedAt != nil {
 		r.DurationMS = run.FinishedAt.Sub(run.StartedAt).Milliseconds()

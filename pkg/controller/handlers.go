@@ -174,14 +174,16 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
+	runs = store.RedactedRuns(runs)
 	if runs == nil {
 		runs = []*store.Run{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
-// handleGetRun serves a single run by id. Default response is the raw
-// store.Run JSON. With ?include=nodes it returns {run, nodes}.
+// handleGetRun serves a single run by id. Default response is the
+// store.Run JSON with secret-declared args redacted. With
+// ?include=nodes it returns {run, nodes}.
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	run, err := s.store.GetRun(r.Context(), runID)
@@ -211,10 +213,10 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		approvals, _ := s.store.ListApprovalsForRun(r.Context(), runID)
 		spawned, _ := s.store.ListSpawnedChildrenByRun(r.Context(), runID)
 		decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, approvals, spawned)
-		writeJSON(w, http.StatusOK, map[string]any{"run": run, "nodes": decorated})
+		writeJSON(w, http.StatusOK, map[string]any{"run": store.RedactedRun(run), "nodes": decorated})
 		return
 	}
-	writeJSON(w, http.StatusOK, run)
+	writeJSON(w, http.StatusOK, store.RedactedRun(run))
 }
 
 // includeHas reports whether the comma-separated `include` query
@@ -264,7 +266,7 @@ func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, run)
+	writeJSON(w, http.StatusOK, store.RedactedRun(run))
 }
 
 func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
