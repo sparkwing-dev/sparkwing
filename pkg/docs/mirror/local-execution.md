@@ -413,10 +413,12 @@ what it did.
 If a daemon is ever busy in a way its log does not explain -- burning CPU
 with nothing queued, or answering nothing -- send it `SIGUSR1`
 (`kill -USR1 <pid>`, POSIX only). It appends a line counting its
-connections, guards, leases, and waiters, followed by a stack for every
-goroutine, to that same log. The daemon keeps running, so you can capture
-the state before deciding whether to stop it, and the dump is what a bug
-report about a stuck or spinning daemon should carry.
+connections, holders, waiters, leases, and guards, followed by a stack
+for every goroutine, to that same log. The daemon keeps running, so you
+can capture the state before deciding whether to stop it, and the dump is
+what a bug report about a stuck or spinning daemon should carry. Each
+dump adds up to 2MB to `d.log`, which is rotated only when a daemon
+starts, so ask for a few of them rather than a few hundred.
 
 ### Capping sparkwing's share of the machine
 

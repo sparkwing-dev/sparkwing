@@ -61,14 +61,20 @@ code change to unlock.
 ### Fixed
 
 - **wingd:** A daemon watching guarded runs no longer forks `ps` once per
-  guarded session per tick. Each sweep takes one process-table snapshot
-  and judges every session against it, so watching ten sessions costs one
-  listing every 100ms rather than ten. This is the largest contributor to
-  the reported case of a daemon pinned near 200% CPU while the queue
-  appeared hung.
-- **wingd:** Guard sweeps back off exponentially (to 5s) while session
-  inspection keeps failing, and return to full cadence on the first
-  success. A process table the daemon cannot read used to be retried ten
+  guarded session per tick. Each sweep now takes a single kernel process
+  listing and judges every session -- membership and leader identity --
+  against that one view. On macOS the listing comes from `kern.proc.all`
+  rather than a `ps` fork: a full snapshot measured 0.7ms against 34ms on
+  a laptop with 669 processes, and the per-session identity lookups it
+  replaces are gone entirely.
+  This is the largest contributor to the reported case of a daemon pinned
+  near 200% CPU while the queue appeared hung.
+- **wingd:** Guard sweeps back off exponentially (to 5s) while the daemon
+  cannot read the process table at all, and return to full cadence on the
+  first success; a single guarded run whose inspection fails no longer
+  slows the sweep for the others, and a guarded leader that simply exits
+  between two observations is read as the answer it is rather than as a
+  failure. A process table the daemon cannot read used to be retried ten
   times a second forever.
 - **wingd:** Reading the process table is now bounded at two seconds, so
   a wedged `ps` fails the inspection instead of blocking the daemon
@@ -83,11 +89,17 @@ code change to unlock.
   core on each side. Admission-critical exchanges (acquire, re-attach,
   guard watch, cancel) still retry until they succeed or the caller gives
   up; read-only ones (`sparkwing queue`, stats reset) now fail with a
-  clear error after ten attempts rather than retrying forever.
-- **wingd:** A client that keeps finding an older daemon gives up after
-  three takeover attempts and names both versions, instead of draining
-  and respawning the daemon in an unbounded loop when the successor comes
-  back as the version it replaced.
+  clear error after ten attempts rather than retrying forever. The waits
+  inside connect -- for a spawned daemon's socket to appear, and for a
+  predecessor daemon to release the election during an upgrade -- are
+  paced the same way, keeping their thirty-second budgets while dialling
+  a few times a second instead of twenty.
+- **wingd:** A client that keeps finding the same older daemon gives up
+  after three takeover attempts, names both versions, and points at
+  `sparkwing daemon restart`, instead of draining and respawning in an
+  unbounded loop when the successor comes back as the version it
+  replaced. Meeting a different old daemon starts the budget again, so
+  losing a socket race to several predecessors is still resolved.
 - **wingd:** Frames the daemon sends a client are bounded by a ten-second
   write deadline. A client that stops reading without closing its socket
   is treated as gone rather than holding a daemon goroutine for as long
