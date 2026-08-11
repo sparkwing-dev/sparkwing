@@ -32,6 +32,16 @@ func configure(cmd *exec.Cmd, session bool) error {
 func ignoreTermination() { signal.Ignore(syscall.SIGTERM) }
 
 func processTable(withSessions bool) ([]Info, error) {
+	if processes, ok := nativeProcessTable(withSessions); ok {
+		return processes, nil
+	}
+	return psProcessTable(withSessions)
+}
+
+// psProcessTable is the portable listing: one `ps` fork plus a session
+// lookup per process. It is the fallback for platforms with no kernel
+// listing of their own, and for a kernel listing that failed.
+func psProcessTable(withSessions bool) ([]Info, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), processTableTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "ps", "-axo", "pid=,pgid=,stat=").Output()

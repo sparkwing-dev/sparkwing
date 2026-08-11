@@ -16,6 +16,12 @@ import (
 // ErrCleanup identifies a process group that could not be proven empty.
 var ErrCleanup = errors.New("process group cleanup failed")
 
+// ErrProcessAbsent reports that a process the caller asked about is not
+// there. It is an answer, not a failure: a leader that exited between two
+// observations has exited, which is the outcome a guard sweep is waiting
+// for rather than a reason to distrust the kernel view.
+var ErrProcessAbsent = errors.New("process is absent")
+
 var sessionProcessTable = processTable
 
 var sessionIdentityLookup = sessionIdentity
@@ -54,6 +60,12 @@ type Info struct {
 	Group   int
 	Session int
 	State   string
+	// Birth is the process creation token, when the platform's listing
+	// carries it. A snapshot that has it can answer leader identity from
+	// the same kernel view it counts session members in, which is both
+	// cheaper and more truthful than a second lookup taken later. Empty
+	// means the caller must look the identity up itself.
+	Birth string
 }
 
 // SessionIdentity binds a process session to the kernel creation identity of
@@ -245,19 +257,28 @@ func inspectSessionTable(processes []Info, identity SessionIdentity, excludeLead
 		return false, err
 	}
 	var leaderInSession bool
+	var leaderBirth string
 	for _, process := range processes {
 		if process.PID == identity.LeaderPID && process.Session == identity.SessionID {
 			leaderInSession = true
+			leaderBirth = process.Birth
 			break
 		}
 	}
 	leaderReused := false
 	if leaderInSession {
-		_, token, err := sessionIdentityLookup(identity.LeaderPID)
-		if err != nil {
-			return false, err
+		token := leaderBirth
+		if token == "" {
+			var err error
+			_, token, err = sessionIdentityLookup(identity.LeaderPID)
+			if errors.Is(err, ErrProcessAbsent) {
+				// safety: the leader exited between the snapshot and this lookup. That is the answer the sweep waits for, not a failed observation, so judge the session on the snapshot with the leader treated as gone rather than reporting an inspection failure a caller would back off from.
+				leaderInSession = false
+			} else if err != nil {
+				return false, err
+			}
 		}
-		if token != identity.BirthToken {
+		if leaderInSession && token != identity.BirthToken {
 			leaderReused = true
 		}
 	}

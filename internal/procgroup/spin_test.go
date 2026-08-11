@@ -4,6 +4,7 @@ package procgroup
 
 import (
 	"context"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -105,5 +106,72 @@ func TestWaitDescendantsEmptyStillAnswersQuickly(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
 		t.Fatalf("observing an emptied group took %s, want about the base poll interval", elapsed)
+	}
+}
+
+// TestSessionTableAnswersLeaderIdentityFromItsOwnSnapshot pins the
+// atomicity the batch seam exists for: when the listing carries birth
+// tokens, the sweep must judge identity from the same kernel view it
+// counted members in rather than taking a second look later.
+func TestSessionTableAnswersLeaderIdentityFromItsOwnSnapshot(t *testing.T) {
+	originalTable := sessionProcessTable
+	originalIdentity := sessionIdentityLookup
+	t.Cleanup(func() {
+		sessionProcessTable = originalTable
+		sessionIdentityLookup = originalIdentity
+	})
+	sessionProcessTable = func(bool) ([]Info, error) {
+		return []Info{{PID: 81, Group: 81, Session: 81, State: "R", Birth: "birth-81"}}, nil
+	}
+	sessionIdentityLookup = func(int) (int, string, error) {
+		t.Fatal("a snapshot carrying birth tokens asked the kernel again")
+		return 0, "", nil
+	}
+
+	table, err := CaptureSessionTable()
+	if err != nil {
+		t.Fatalf("capture session table: %v", err)
+	}
+	empty, err := table.SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "birth-81"})
+	if err != nil || empty {
+		t.Fatalf("live guarded session empty=%v err=%v, want it held", empty, err)
+	}
+	reused, err := table.SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "older-birth"})
+	if err != nil || !reused {
+		t.Fatalf("reused leader empty=%v err=%v, want the original session gone", reused, err)
+	}
+}
+
+// TestLeaderExitDuringInspectionIsAnAnswerNotAFailure keeps a normal
+// exit off the failure path. A leader that goes away between the snapshot
+// and its identity lookup has exited -- which is what the sweep is
+// waiting for -- so reporting it as a failed observation would make the
+// daemon slow down at exactly the moment it should act.
+func TestLeaderExitDuringInspectionIsAnAnswerNotAFailure(t *testing.T) {
+	originalTable := sessionProcessTable
+	originalIdentity := sessionIdentityLookup
+	t.Cleanup(func() {
+		sessionProcessTable = originalTable
+		sessionIdentityLookup = originalIdentity
+	})
+	sessionProcessTable = func(bool) ([]Info, error) {
+		return []Info{{PID: 81, Group: 81, Session: 81, State: "R"}}, nil
+	}
+	sessionIdentityLookup = func(pid int) (int, string, error) {
+		return 0, "", fmt.Errorf("%w: process %d", ErrProcessAbsent, pid)
+	}
+
+	empty, err := SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "birth-81"})
+	if err != nil {
+		t.Fatalf("a leader that exited mid-inspection reported an error: %v", err)
+	}
+	if empty {
+		t.Fatal("session reported empty while the snapshot still showed a live member")
+	}
+
+	sessionProcessTable = func(bool) ([]Info, error) { return nil, nil }
+	empty, err = SessionEmpty(SessionIdentity{LeaderPID: 81, SessionID: 81, BirthToken: "birth-81"})
+	if err != nil || !empty {
+		t.Fatalf("departed session empty=%v err=%v, want it empty", empty, err)
 	}
 }

@@ -4,7 +4,6 @@ package procgroup
 
 import (
 	"fmt"
-	"strconv"
 	"syscall"
 	"unsafe"
 
@@ -28,11 +27,9 @@ func sessionIdentity(pid int) (int, string, error) {
 		if err != nil {
 			return 0, "", err
 		}
-		birth := strconv.FormatInt(process.Proc.P_starttime.Sec, 10) + ":" +
-			strconv.FormatInt(int64(process.Proc.P_starttime.Usec), 10)
-		return sid, birth, nil
+		return sid, darwinBirthToken(process), nil
 	}
-	return 0, "", fmt.Errorf("process %d is absent", pid)
+	return 0, "", fmt.Errorf("%w: process %d", ErrProcessAbsent, pid)
 }
 
 func signalGuardSession(sessionID int, kill bool) error {

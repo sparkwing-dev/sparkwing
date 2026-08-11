@@ -3,7 +3,9 @@
 package procgroup
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strconv"
 	"strings"
@@ -17,6 +19,9 @@ func guardedSessionSupport() error { return nil }
 func sessionIdentity(pid int) (int, string, error) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return 0, "", fmt.Errorf("%w: process %d", ErrProcessAbsent, pid)
+		}
 		return 0, "", err
 	}
 	line := string(data)
