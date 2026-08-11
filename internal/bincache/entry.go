@@ -231,7 +231,8 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 	}
 	defer func() { err = errors.Join(err, cacheUnlock(coordinator), coordinator.Close()) }()
 
-	legacy, legacyExhausted, err := legacyCacheCandidates(ctx, root, opts.MaxEntries)
+	discoveryLimit := boundedCacheDiscoveryLimit(opts.MaxEntries)
+	legacy, legacyExhausted, err := legacyCacheCandidates(ctx, root, discoveryLimit)
 	if err != nil {
 		return result, err
 	}
@@ -281,7 +282,7 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 		result.Reclaimed++
 		result.ReclaimedBytes += size
 	}
-	remaining := opts.MaxEntries - result.Examined
+	remaining := discoveryLimit - result.Examined
 	var candidates []cacheCandidate
 	managedExhausted := false
 	if remaining > 0 && result.ReclaimedBytes < opts.ReclaimBytes {
@@ -562,6 +563,10 @@ func candidateKeyExists(candidates []cacheCandidate, key string) bool {
 		}
 	}
 	return false
+}
+
+func boundedCacheDiscoveryLimit(limit int) int {
+	return limit
 }
 
 func treeSize(root string) (int64, error) {
