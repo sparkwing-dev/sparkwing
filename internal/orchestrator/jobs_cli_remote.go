@@ -143,6 +143,55 @@ func renderRemoteStatus(run *store.Run, nodes []*store.Node, stepsByNode map[str
 	return nil
 }
 
+// RemoteRunOutcome reads a remote run's status after a follow has
+// ended and, for a run that did not succeed, renders the same status
+// block `sparkwing jobs status --run <id>` prints against a
+// controller -- run error, node outcomes, per-node errors -- so the
+// reason lands in the operator's terminal before the caller maps the
+// status onto an exit code.
+//
+// It exists because neither follow loop reports an outcome:
+// [followLogsRemote] ends when the run goes terminal and
+// [JobStatusRemote] paints the last frame it saw, so the caller needs
+// one authoritative read to decide the process exit status. Callers
+// that already rendered the terminal status pass io.Discard for out.
+//
+// The returned status is the run's status verbatim (possibly
+// non-terminal, if the follow ended for another reason); an error
+// means the status could not be read at all, which callers must not
+// treat as either success or failure. Node/step/approval reads are
+// best-effort: their failure degrades the summary but still reports
+// the status.
+func RemoteRunOutcome(ctx context.Context, controllerURL, token, runID string, out io.Writer) (string, error) {
+	if controllerURL == "" {
+		return "", errors.New("RemoteRunOutcome: controller URL required")
+	}
+	if out == nil {
+		out = io.Discard
+	}
+	c := client.NewWithToken(controllerURL, nil, token)
+	run, err := c.GetRun(ctx, runID)
+	if err != nil {
+		return "", err
+	}
+	if run == nil {
+		return "", fmt.Errorf("run %s: controller returned no run record", runID)
+	}
+	if run.Status == "success" {
+		return run.Status, nil
+	}
+	nodes, err := c.ListNodes(ctx, runID)
+	if err != nil {
+		fmt.Fprintf(out, "\nrun %s finished %s (node detail unavailable: %v)\n", run.ID, run.Status, err)
+		return run.Status, nil
+	}
+	steps, _ := c.ListNodeSteps(ctx, runID)
+	approvals, _ := c.ListApprovalsForRun(ctx, runID)
+	fmt.Fprintln(out)
+	_ = renderRemoteStatus(run, nodes, groupStepsByNode(steps), approvals, out, false, false)
+	return run.Status, nil
+}
+
 // JobErrorsRemote is the cluster-mode counterpart to JobErrors.
 func JobErrorsRemote(ctx context.Context, controllerURL, token, runID string, asJSON bool, out io.Writer) error {
 	if controllerURL == "" {
@@ -299,6 +348,11 @@ func writeLogsTextRemote(ctx context.Context, logc storage.LogStore, runID strin
 // followLogsRemote tails live logs by polling ListNodes and spawning
 // per-node SSE goroutines. Exits when run is terminal (with a short
 // drain) or ctx cancels.
+//
+// A nil return means "the stream ended", never "the run succeeded":
+// `jobs logs -f` is a viewer and does not carry the run's outcome.
+// Callers that must exit on the run's outcome (`pipeline trigger`)
+// read it afterwards with [RemoteRunOutcome].
 func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.LogStore,
 	runID, nodeFilter string, out io.Writer,
 ) error {

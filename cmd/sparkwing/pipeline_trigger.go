@@ -3,18 +3,21 @@
 // the v0.5.0 successor to `sparkwing run --sw-profile prof`: it shares
 // the trigger-creation core (createRemoteTrigger) so the wire payload is
 // identical, then follows the remote run until terminal (logs when the
-// profile defines a logs URL, otherwise node-status). --detach skips the
-// follow and prints the run id once the trigger is registered.
+// profile defines a logs URL, otherwise node-status) and exits on the
+// run's outcome, the way a local `sparkwing run` does. --detach skips
+// the follow and prints the run id once the trigger is registered.
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
@@ -111,13 +114,57 @@ func runPipelineTrigger(args []string) error {
 		if ferr != nil {
 			return ferr
 		}
-		return orchestrator.JobLogsRemoteWithTokens(ctx, prof.ControllerURL(), prof.ControllerURL(), prof.ControllerToken(),
-			resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout)
+		if err := orchestrator.JobLogsRemoteWithTokens(ctx, prof.ControllerURL(), prof.ControllerURL(), prof.ControllerToken(),
+			resp.RunID, orchestrator.LogsOpts{Follow: true, Format: format, JSON: format == "json"}, os.Stdout); err != nil {
+			return err
+		}
+		// The log stream ends when the run goes terminal but carries no
+		// outcome, so the exit status comes from one status read. The
+		// failure summary goes to stderr to keep stdout a pure log stream.
+		return remoteFollowExit(ctx, prof, resp.RunID, os.Stderr)
 	}
 
 	fmt.Fprintln(os.Stderr, color.Dim(fmt.Sprintf(
 		"note: profile %q declares no logs: backend; following node status (no log bodies). "+
 			"Add a logs: spec in profiles.yaml to see streaming output.", prof.Name)))
-	return orchestrator.JobStatusRemote(ctx, prof.ControllerURL(), prof.ControllerToken(),
-		resp.RunID, orchestrator.StatusOpts{Follow: true}, os.Stdout)
+	if err := orchestrator.JobStatusRemote(ctx, prof.ControllerURL(), prof.ControllerToken(),
+		resp.RunID, orchestrator.StatusOpts{Follow: true}, os.Stdout); err != nil {
+		return err
+	}
+	// The status follow already painted the terminal status block, so
+	// take the exit code only and drop the duplicate summary.
+	return remoteFollowExit(ctx, prof, resp.RunID, io.Discard)
+}
+
+// remoteFollowExit is the remote counterpart of localStatusExitCheck:
+// once the follow ends, read the triggered run's terminal status and
+// map it onto the exit contract a local `sparkwing run` already
+// follows -- success exits 0, failed and cancelled exit 1. summary
+// receives the failure detail (io.Discard when the caller already
+// rendered it).
+func remoteFollowExit(ctx context.Context, prof *profile.Profile, runID string, summary io.Writer) error {
+	status, err := orchestrator.RemoteRunOutcome(ctx, prof.ControllerURL(), prof.ControllerToken(), runID, summary)
+	return followExitResult(runID, status, err)
+}
+
+// followExitResult maps an observed post-follow run state onto the CLI
+// exit contract. A status that could not be read, or a follow that
+// ended with the run still non-terminal (a dropped connection, a
+// cancelled context), is reported as unknown and exits 3 -- the code
+// `jobs wait` uses for a failed fetch -- because guessing either way
+// would hand CI a verdict the CLI never observed.
+func followExitResult(runID, status string, fetchErr error) error {
+	if fetchErr != nil {
+		return exitError(3, fmt.Errorf(
+			"pipeline trigger: run %s: follow ended but the run's terminal status could not be read: %w", runID, fetchErr))
+	}
+	if !isTerminalRunStatus(status) {
+		last := status
+		if last == "" {
+			last = "unknown"
+		}
+		return exitErrorf(3,
+			"pipeline trigger: run %s: follow ended with the run still %s; terminal state unknown", runID, last)
+	}
+	return statusExitCode(status)
 }

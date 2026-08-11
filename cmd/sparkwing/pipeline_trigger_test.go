@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -33,6 +35,10 @@ type triggerSpy struct {
 	seedBodyBytes  int
 	seedRepoValues []string
 	seedSHAValues  []string
+	// runStatus is the terminal status GetRun reports (default
+	// "success"); runError is the run-level error that goes with it.
+	runStatus string
+	runError  string
 }
 
 func (s *triggerSpy) handler() http.Handler {
@@ -69,7 +75,17 @@ func (s *triggerSpy) handler() http.Handler {
 		case r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/nodes"):
 			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []any{}})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/runs/run-test":
-			_ = json.NewEncoder(w).Encode(store.Run{ID: "run-test", Pipeline: "release", Status: "success", StartedAt: time.Now()})
+			s.mu.Lock()
+			status, runErr := s.runStatus, s.runError
+			s.mu.Unlock()
+			if status == "" {
+				status = "success"
+			}
+			finished := time.Now()
+			_ = json.NewEncoder(w).Encode(store.Run{
+				ID: "run-test", Pipeline: "release", Status: status, Error: runErr,
+				StartedAt: finished.Add(-time.Second), FinishedAt: &finished,
+			})
 		default:
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte("{}"))
@@ -95,6 +111,19 @@ func writeTriggerProfiles(t *testing.T, controllerURL string) {
 	body := "profiles:\n" +
 		"  prod: { controller: { url: " + controllerURL + " } }\n" +
 		"  laptop: { state: { type: sqlite } }\n"
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write profiles: %v", err)
+	}
+	t.Setenv("SPARKWING_PROFILES", path)
+}
+
+// writeTriggerProfilesWithLogs adds a logs: surface so the follow takes
+// the log-streaming arm (followLogsRemote) instead of the status arm.
+func writeTriggerProfilesWithLogs(t *testing.T, controllerURL string) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "profiles.yaml")
+	body := "profiles:\n" +
+		"  prod: { controller: { url: " + controllerURL + " }, logs: { type: controller } }\n"
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatalf("write profiles: %v", err)
 	}
@@ -324,6 +353,123 @@ func TestPipelineTrigger_DefaultFollows(t *testing.T) {
 	if !sawFollow {
 		t.Fatalf("non-detach should follow the run (GET /api/v1/runs/run-test); got %v", reqs)
 	}
+}
+
+// TestPipelineTrigger_FollowExitsOnRunOutcome is the scripted contract
+// CI wraps: a non-detach trigger must exit like the local run it
+// stands in for -- 0 only when the remote run succeeded, 1 when it
+// failed or was cancelled. Before this, the follow returned nil no
+// matter how the run ended and wrappers read a failed run as success.
+func TestPipelineTrigger_FollowExitsOnRunOutcome(t *testing.T) {
+	cases := []struct {
+		name     string
+		status   string
+		wantCode int
+	}{
+		{name: "success", status: "success", wantCode: 0},
+		{name: "failed", status: "failed", wantCode: 1},
+		{name: "cancelled", status: "cancelled", wantCode: 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			spy := &triggerSpy{runStatus: tc.status, runError: "node build failed"}
+			srv := httptest.NewServer(spy.handler())
+			defer srv.Close()
+			writeTriggerProfiles(t, srv.URL)
+
+			var err error
+			_ = captureStdout(t, func() {
+				err = runPipelineTrigger([]string{"release", "--profile", "prod"})
+			})
+
+			if got := exitCodeFor(err); got != tc.wantCode {
+				t.Fatalf("exit code = %d (err=%v), want %d", got, err, tc.wantCode)
+			}
+			if tc.wantCode == 0 {
+				if err != nil {
+					t.Fatalf("successful run should not error: %v", err)
+				}
+				return
+			}
+			if !strings.Contains(err.Error(), tc.status) {
+				t.Errorf("error should name the run status; got %q", err.Error())
+			}
+		})
+	}
+}
+
+// TestPipelineTrigger_LogFollowReportsFailure covers the log-streaming
+// arm of the follow, where the SSE stream simply ends when the run
+// goes terminal: the summary has to come from a status read, printed
+// to stderr so stdout stays a pure log stream.
+func TestPipelineTrigger_LogFollowReportsFailure(t *testing.T) {
+	spy := &triggerSpy{runStatus: "failed", runError: "node build failed"}
+	srv := httptest.NewServer(spy.handler())
+	defer srv.Close()
+	writeTriggerProfilesWithLogs(t, srv.URL)
+
+	var err error
+	stderr := captureStderr(t, func() {
+		_ = captureStdout(t, func() {
+			err = runPipelineTrigger([]string{"release", "--profile", "prod"})
+		})
+	})
+
+	if code := exitCodeFor(err); code != 1 {
+		t.Fatalf("exit code = %d (err=%v), want 1", code, err)
+	}
+	for _, want := range []string{"run-test", "status:    failed", "node build failed"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr summary missing %q; got:\n%s", want, stderr)
+		}
+	}
+}
+
+// TestFollowExitResult_UnknownTerminalState pins the third arm: when
+// the follow ends without a readable terminal status (dropped
+// connection, cancelled context), the CLI reports what it knows and
+// exits 3 rather than inventing success or failure.
+func TestFollowExitResult_UnknownTerminalState(t *testing.T) {
+	fetchErr := followExitResult("run-test", "", errors.New("dial tcp: connection refused"))
+	if code := exitCodeFor(fetchErr); code != 3 {
+		t.Errorf("unreadable status exit code = %d (err=%v), want 3", code, fetchErr)
+	}
+	if !strings.Contains(fetchErr.Error(), "connection refused") {
+		t.Errorf("error should carry the fetch failure; got %q", fetchErr.Error())
+	}
+
+	stillRunning := followExitResult("run-test", "running", nil)
+	if code := exitCodeFor(stillRunning); code != 3 {
+		t.Errorf("non-terminal status exit code = %d (err=%v), want 3", code, stillRunning)
+	}
+	if !strings.Contains(stillRunning.Error(), "running") {
+		t.Errorf("error should name the last known status; got %q", stillRunning.Error())
+	}
+	if err := followExitResult("run-test", "success", nil); err != nil {
+		t.Errorf("success should map to a nil error; got %v", err)
+	}
+}
+
+// captureStderr mirrors captureStdout for the failure summary, which
+// deliberately avoids stdout so piped log output stays clean.
+func captureStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	orig := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = orig }()
+	done := make(chan []byte, 1)
+	go func() {
+		var buf bytes.Buffer
+		_, _ = io.Copy(&buf, r)
+		done <- buf.Bytes()
+	}()
+	fn()
+	w.Close()
+	return string(<-done)
 }
 
 func withGitCheckout(t *testing.T, origin string, fn func()) {
