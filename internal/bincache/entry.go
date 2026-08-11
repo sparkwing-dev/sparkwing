@@ -196,6 +196,10 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 	} else if !os.IsNotExist(statErr) {
 		return nil, false, statErr
 	}
+	queueSequence, err := enqueueCacheEntry(ctx, e.root, e.key)
+	if err != nil {
+		return nil, false, err
+	}
 	if err := os.MkdirAll(filepath.Join(e.root, "staging"), 0o700); err != nil {
 		return nil, false, err
 	}
@@ -221,6 +225,9 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 	if err := os.Rename(stage, e.entryDir()); err != nil {
 		return nil, false, err
 	}
+	usedAt := cacheNow()
+	_ = os.Chtimes(e.entryDir(), usedAt, usedAt)
+	_ = markCacheQueueRecordCurrent(e.root, queueSequence, usedAt)
 	if err := cacheLeaseReady(lease); err != nil {
 		return nil, false, err
 	}
@@ -252,7 +259,7 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 	defer func() { err = errors.Join(err, cacheUnlock(coordinator), coordinator.Close()) }()
 
 	discoveryLimit := boundedCacheDiscoveryLimit(opts.MaxEntries)
-	candidates, managedExhausted, err := cacheCandidatesBounded(ctx, root, discoveryLimit)
+	candidates, managedExhausted, err := cacheQueueBatch(ctx, root, discoveryLimit)
 	if err != nil {
 		return result, err
 	}
@@ -265,6 +272,12 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			return result, err
 		}
 		result.Examined++
+		if candidate.missing {
+			if err := consumeCacheQueueRecord(ctx, root, candidate.sequence); err != nil {
+				return result, err
+			}
+			continue
+		}
 		entry := Entry{root: root, key: candidate.key}
 		writer, acquired, lockErr := entry.tryLock("writer")
 		if lockErr != nil {
@@ -272,12 +285,18 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 		}
 		if !acquired {
 			result.Busy++
+			if err := requeueCacheCandidate(ctx, root, candidate); err != nil {
+				return result, err
+			}
 			continue
 		}
 		size, sizeErr := treeSizeContext(ctx, entry.entryDir())
 		if os.IsNotExist(sizeErr) {
 			if closeErr := errors.Join(cacheUnlock(writer), writer.Close()); closeErr != nil {
 				return result, closeErr
+			}
+			if err := consumeCacheQueueRecord(ctx, root, candidate.sequence); err != nil {
+				return result, err
 			}
 			continue
 		}
@@ -287,6 +306,19 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			return result, sizeErr
 		}
 		result.ObservedBytes += size
+		if info, statErr := os.Stat(entry.entryDir()); statErr != nil {
+			_ = cacheUnlock(writer)
+			_ = writer.Close()
+			return result, statErr
+		} else if info.ModTime().UnixNano() > candidate.modTime {
+			if closeErr := errors.Join(cacheUnlock(writer), writer.Close()); closeErr != nil {
+				return result, closeErr
+			}
+			if err := requeueCacheCandidate(ctx, root, candidate); err != nil {
+				return result, err
+			}
+			continue
+		}
 		lease, acquired, lockErr := entry.tryLock("lease")
 		if lockErr != nil {
 			_ = cacheUnlock(writer)
@@ -298,17 +330,26 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 			if closeErr := errors.Join(cacheUnlock(writer), writer.Close()); closeErr != nil {
 				return result, closeErr
 			}
+			if err := requeueCacheCandidate(ctx, root, candidate); err != nil {
+				return result, err
+			}
 			continue
 		}
 		reclaimedBytes, removeErr := removeCacheEntryWithCapacity(ctx, entry.entryDir())
 		closeErr := errors.Join(cacheUnlock(lease), lease.Close(), cacheUnlock(writer), writer.Close())
 		if removeErr != nil || closeErr != nil {
 			pruneErr = errors.Join(pruneErr, removeErr, closeErr)
+			if queueErr := requeueCacheCandidate(ctx, root, candidate); queueErr != nil {
+				return result, errors.Join(pruneErr, queueErr)
+			}
 			continue
 		}
 		result.Reclaimed++
 		result.RemovedBytes += size
 		result.ReclaimedBytes += reclaimedBytes
+		if err := consumeCacheQueueRecord(ctx, root, candidate.sequence); err != nil {
+			return result, err
+		}
 	}
 	remaining := discoveryLimit - result.Examined
 	var legacy []legacyCacheCandidate
@@ -369,6 +410,13 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 	result.GoalSatisfied = pruneGoalSatisfied(result, opts)
 	result.Exhausted = !result.GoalSatisfied && (legacyExhausted || managedExhausted || result.Examined >= opts.MaxEntries || result.Examined == len(legacy)+len(candidates))
 	return result, pruneErr
+}
+
+func requeueCacheCandidate(ctx context.Context, root string, candidate queuedCacheCandidate) error {
+	if _, err := enqueueCacheEntry(ctx, root, candidate.key); err != nil {
+		return err
+	}
+	return consumeCacheQueueRecord(ctx, root, candidate.sequence)
 }
 
 func pruneGoalSatisfied(result PruneResult, opts PruneOptions) bool {
