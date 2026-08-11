@@ -31,6 +31,13 @@ func seedEntry(t *testing.T, entry Entry, body string, modTime time.Time) {
 	if err := os.Chtimes(filepath.Dir(entry.binaryPath()), modTime, modTime); err != nil {
 		t.Fatal(err)
 	}
+	sequence, err := enqueueCacheEntry(context.Background(), entry.root, entry.key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := markCacheQueueRecordCurrent(entry.root, sequence, modTime); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func testEntry(t *testing.T, root, key string) Entry {
@@ -81,15 +88,15 @@ func TestPruneSkipsActiveHolderAndReclaimsAnotherEntry(t *testing.T) {
 	}
 }
 
-func TestPruneIsBoundedAndUsesStableKeyOrder(t *testing.T) {
+func TestPruneIsBoundedAndUsesStableQueueOrder(t *testing.T) {
 	root := t.TempDir()
 	stamp := time.Unix(1, 0)
 	first := testEntry(t, root, "11111111-11111111")
 	second := testEntry(t, root, "22222222-22222222")
 	third := testEntry(t, root, "33333333-33333333")
-	seedEntry(t, third, "333", stamp)
-	seedEntry(t, second, "22", stamp)
 	seedEntry(t, first, "1", stamp)
+	seedEntry(t, second, "22", stamp)
+	seedEntry(t, third, "333", stamp)
 
 	result, err := Prune(context.Background(), PruneOptions{
 		Root:         root,
@@ -130,6 +137,37 @@ func TestPruneRemainsHealthyAfterRemovingAnEntry(t *testing.T) {
 	}
 	if second.Reclaimed != 0 || !second.Exhausted {
 		t.Fatalf("second Prune = %+v", second)
+	}
+}
+
+func TestRepeatedBoundedPruneAdvancesPastAnActiveEntry(t *testing.T) {
+	root := t.TempDir()
+	active := testEntry(t, root, "11111111-11111111")
+	reclaimable := testEntry(t, root, "22222222-22222222")
+	seedEntry(t, active, "active", time.Unix(1, 0))
+	seedEntry(t, reclaimable, "reclaimable", time.Unix(2, 0))
+	lease, found, err := active.Acquire(context.Background())
+	if err != nil || !found {
+		t.Fatalf("active Acquire = (%v, %v)", found, err)
+	}
+	defer func() { _ = lease.Release() }()
+
+	first, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Active != 1 || first.Reclaimed != 0 {
+		t.Fatalf("first bounded prune = %+v", first)
+	}
+	second, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Reclaimed != 1 {
+		t.Fatalf("second bounded prune = %+v, want later entry reclaimed", second)
+	}
+	if _, err := os.Stat(reclaimable.binaryPath()); !os.IsNotExist(err) {
+		t.Fatalf("later reclaimable entry remains: %v", err)
 	}
 }
 
@@ -251,7 +289,7 @@ func TestPruneAttemptsEveryCandidateAndJoinsRemovalFailures(t *testing.T) {
 			t.Errorf("Prune error %q lacks %q", err, diagnostic)
 		}
 	}
-	if result.ObservedBytes != 11 || result.ReclaimedBytes != 0 || result.Reclaimed != 0 {
+	if result.ObservedBytes != 11 || result.RemovedBytes != 0 || result.ReclaimedBytes != 0 || result.Reclaimed != 0 {
 		t.Fatalf("failed removal accounting: %+v", result)
 	}
 }
@@ -294,6 +332,62 @@ func TestAcquireOrMaterializeClosesPublicationToLeaseGap(t *testing.T) {
 	}
 	if err := lease.Release(); err != nil {
 		t.Fatalf("Release hit: %v", err)
+	}
+}
+
+func TestConcurrentMaterializationQueuesOnlyThePublisher(t *testing.T) {
+	root := t.TempDir()
+	entry := testEntry(t, root, "11111111-11111111")
+	started := make(chan struct{})
+	release := make(chan struct{})
+	type outcome struct {
+		lease     *Lease
+		published bool
+		err       error
+	}
+	results := make(chan outcome, 2)
+	go func() {
+		lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(path string) error {
+			if err := os.WriteFile(path, []byte("complete"), 0o755); err != nil {
+				return err
+			}
+			close(started)
+			<-release
+			return nil
+		})
+		results <- outcome{lease: lease, published: published, err: err}
+	}()
+	<-started
+	go func() {
+		lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(string) error {
+			return errors.New("contending materializer ran")
+		})
+		results <- outcome{lease: lease, published: published, err: err}
+	}()
+	close(release)
+
+	published := 0
+	for range 2 {
+		result := <-results
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		if result.published {
+			published++
+		}
+		if err := result.lease.Release(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if published != 1 {
+		t.Fatalf("publishers = %d, want 1", published)
+	}
+	state, err := readCacheQueueState(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if records := state.Next - state.Head; records != 1 {
+		t.Fatalf("queue records = %d, want 1", records)
 	}
 }
 
