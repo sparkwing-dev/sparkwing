@@ -62,9 +62,14 @@ func (r *InProcessRunner) SetLabels(labels []string) {
 }
 
 var (
-	_ runner.Runner          = (*InProcessRunner)(nil)
-	_ runner.LabelAdvertiser = (*InProcessRunner)(nil)
+	_ runner.Runner                = (*InProcessRunner)(nil)
+	_ runner.DownstreamCoordinator = (*InProcessRunner)(nil)
+	_ runner.LabelAdvertiser       = (*InProcessRunner)(nil)
 )
+
+// CoordinatesDownstream reports that this runner already owns cache,
+// concurrency, and local admission for the node it executes.
+func (*InProcessRunner) CoordinatesDownstream() {}
 
 // runJobBody executes the node's materialized Work as a step DAG.
 // Returns the typed output of the *WorkStep the Job's Work returned

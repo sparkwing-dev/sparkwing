@@ -28,6 +28,10 @@ func TestNewCoordinatingRunnerPreservesDownstreamCoordinator(t *testing.T) {
 	if got := newCoordinatingRunner(Backends{}, downstream); got != downstream {
 		t.Fatal("runner that coordinates in its execution process was wrapped by the upstream coordinator")
 	}
+	inProcess := NewInProcessRunner(Backends{})
+	if got := newCoordinatingRunner(Backends{}, inProcess); got != inProcess {
+		t.Fatal("explicit in-process runner was wrapped by a second in-process coordinator")
+	}
 }
 
 func TestForceReleaseDefaultsToExistingInProcessBehavior(t *testing.T) {
