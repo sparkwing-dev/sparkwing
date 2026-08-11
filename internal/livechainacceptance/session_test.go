@@ -2,6 +2,8 @@ package livechainacceptance
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"sync"
@@ -35,24 +37,37 @@ func (c *manualClock) Advance(duration time.Duration) {
 	c.mu.Unlock()
 }
 
-func (s *memorySessionStore) LoadOrCreate(_ context.Context, seed SessionSeed) (Session, error) {
+func (s *memorySessionStore) LoadOrCreate(_ context.Context, _ SessionSeed, initial Session) (Session, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.session == nil {
-		created := Session{ID: seed.ID, SeedDigest: digestSessionSeed(seed), Events: seed.Events, Phase: SessionStarted, Version: 1}
-		s.session = &created
+		s.session = &initial
 	}
 	return *s.session, nil
 }
 
-func (s *memorySessionStore) CompareAndSwap(_ context.Context, id string, expected uint64, seedDigest string, next Session) error {
+func (s *memorySessionStore) CompareAndSwap(_ context.Context, id string, expected uint64, expectedDigest, seedDigest string, next Session) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.session == nil || s.session.ID != id || s.session.SeedDigest != seedDigest || s.session.Version != expected {
+	if s.session == nil || s.session.ID != id || s.session.SeedDigest != seedDigest || s.session.Version != expected || s.session.StateDigest != expectedDigest || next.Version != expected+1 || next.PreviousStateDigest != expectedDigest {
 		return ErrSessionConflict
 	}
-	next.Version = expected + 1
 	s.session = &next
+	return nil
+}
+
+type testSessionAuthenticator struct{ secret string }
+
+func (a testSessionAuthenticator) Seal(_ context.Context, digest string) (string, error) {
+	sum := sha256.Sum256([]byte("live-chain/session-test/v1\x00" + a.secret + "\x00" + digest))
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func (a testSessionAuthenticator) Verify(ctx context.Context, digest, signature string) error {
+	want, _ := a.Seal(ctx, digest)
+	if signature != want {
+		return fmt.Errorf("session state signature mismatch")
+	}
 	return nil
 }
 
@@ -144,6 +159,36 @@ func TestIntermediateSessionIsValidatedBeforeEffects(t *testing.T) {
 	defer effects.mu.Unlock()
 	if len(effects.applyCalls) != 0 || len(effects.reconcileCalls) != 0 {
 		t.Fatalf("forged intermediate state reached effect authority: apply=%v reconcile=%v", effects.applyCalls, effects.reconcileCalls)
+	}
+}
+
+func TestSessionRejectsStructurallyValidUnsignedSuccessorBeforeEffects(t *testing.T) {
+	a, b, script := validTwoFlowScript(t)
+	store := &memorySessionStore{}
+	effects := &durableEffects{script: script, creates: make(map[EffectKind]int)}
+	deps := durableTestDependencies(script, store, effects)
+	seed := SessionSeed{ID: "acceptance-session-forged-successor", Events: [2]LandEvent{a, b}}
+	if _, err := RunSession(context.Background(), seed, deps); err != nil {
+		t.Fatal(err)
+	}
+	store.mu.Lock()
+	store.session.Phase = SessionRollbackIntent
+	store.session.Proof.Rollback = Deployment{}
+	store.session.Proof.RollbackHealth = HealthReceipt{}
+	store.session.Proof.RollbackNotice = NotificationReceipt{}
+	store.mu.Unlock()
+	effects.mu.Lock()
+	effects.applyCalls = make(map[EffectKind]int)
+	effects.reconcileCalls = make(map[EffectKind]int)
+	effects.mu.Unlock()
+
+	if _, err := RunSession(context.Background(), seed, deps); err == nil {
+		t.Fatal("unsigned structurally valid successor was accepted")
+	}
+	effects.mu.Lock()
+	defer effects.mu.Unlock()
+	if len(effects.applyCalls) != 0 || len(effects.reconcileCalls) != 0 {
+		t.Fatalf("unsigned successor reached effect authority: apply=%v reconcile=%v", effects.applyCalls, effects.reconcileCalls)
 	}
 }
 
@@ -509,7 +554,7 @@ func durableTestDependencies(script *scriptedAcceptance, store SessionStore, eff
 	return DurableDependencies{
 		Authority: testAuthority{}, Production: script, Artifacts: script, Health: script,
 		Faults: script, Sessions: store, Effects: effects,
-		Clock: fixedClock{now: time.Date(2026, 8, 11, 14, 0, 0, 0, time.UTC)},
+		Clock: fixedClock{now: time.Date(2026, 8, 11, 14, 0, 0, 0, time.UTC)}, StateAuth: testSessionAuthenticator{secret: "test-only"},
 	}
 }
 
