@@ -89,7 +89,11 @@ func (l *Lease) ExecReplace(args []string, dir string, env []string) error {
 	if l == nil || l.file == nil {
 		return errors.New("pipeline cache lease is not held")
 	}
-	return ExecReplace(l.Path(), args, dir, env)
+	restore, err := cacheRetainAcrossExec(l.file)
+	if err != nil {
+		return err
+	}
+	return errors.Join(ExecReplace(l.Path(), args, dir, env), restore())
 }
 
 // Acquire obtains a live-entry lease if the entry exists.

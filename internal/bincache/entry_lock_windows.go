@@ -42,3 +42,7 @@ func cacheUnlock(file *os.File) error {
 	var overlapped windows.Overlapped
 	return windows.UnlockFileEx(windows.Handle(file.Fd()), 0, cacheLockBytes, 0, &overlapped)
 }
+
+func cacheRetainAcrossExec(*os.File) (func() error, error) {
+	return func() error { return nil }, nil
+}

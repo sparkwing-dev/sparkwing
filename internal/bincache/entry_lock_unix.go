@@ -6,6 +6,8 @@ import (
 	"errors"
 	"os"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 type cacheLockMode uint8
@@ -35,4 +37,18 @@ func cacheLock(file *os.File, mode cacheLockMode) (bool, error) {
 
 func cacheUnlock(file *os.File) error {
 	return syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+}
+
+func cacheRetainAcrossExec(file *os.File) (func() error, error) {
+	flags, err := unix.FcntlInt(file.Fd(), unix.F_GETFD, 0)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := unix.FcntlInt(file.Fd(), unix.F_SETFD, flags&^unix.FD_CLOEXEC); err != nil {
+		return nil, err
+	}
+	return func() error {
+		_, err := unix.FcntlInt(file.Fd(), unix.F_SETFD, flags)
+		return err
+	}, nil
 }
