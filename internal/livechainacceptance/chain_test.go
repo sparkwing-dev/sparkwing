@@ -15,9 +15,10 @@ func validEvent() LandEvent {
 	landed := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
 	return LandEvent{
 		EventID: "land-event-1", Repository: "sparkwing-dev/regent", DestinationRef: "refs/heads/main",
-		Commit: testCommit, Tree: testTree, CertificationID: "ordinary-land-v1",
+		Commit: testCommit, ParentCommit: "1123456789abcdef0123456789abcdef01234567", Tree: testTree, CertificationID: "ordinary-land-v1",
 		ArtifactManifestDigest: testDigest, TrustManifestDigest: testDigest,
-		SourceDigest: testDigest, LandedAt: landed, Deadline: landed.Add(5 * time.Minute),
+		SourceDigest: testDigest, GitLedgerID: "git-ledger-1", LandRecordID: "land-record-1",
+		LandedAt: landed, Deadline: landed.Add(5 * time.Minute),
 	}
 }
 
