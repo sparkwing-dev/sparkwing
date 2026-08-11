@@ -136,3 +136,59 @@ func TestTailFileFrom_EmptyWhenNoNewOutput(t *testing.T) {
 		t.Errorf("tail = %q, want empty", got)
 	}
 }
+
+// TestResolveDashboardPaths_Precedence pins the order the dashboard
+// resolves its state directory in, which is the order it had when it
+// read the environment itself: an explicit --home beats SPARKWING_HOME,
+// and SPARKWING_HOME beats the default. Routing the last two through
+// DefaultPaths has to leave both answers byte-identical.
+func TestResolveDashboardPaths_Precedence(t *testing.T) {
+	env := t.TempDir()
+	explicit := t.TempDir()
+	t.Setenv("SPARKWING_HOME", env)
+
+	dp, err := resolveDashboardPaths(explicit)
+	if err != nil {
+		t.Fatalf("resolveDashboardPaths: %v", err)
+	}
+	if dp.home != explicit {
+		t.Errorf("--home = %q, want the explicit override %q", dp.home, explicit)
+	}
+	if want := filepath.Join(explicit, dashboardPIDFile); dp.pid != want {
+		t.Errorf("pid = %q, want %q", dp.pid, want)
+	}
+
+	dp, err = resolveDashboardPaths("")
+	if err != nil {
+		t.Fatalf("resolveDashboardPaths: %v", err)
+	}
+	if dp.home != env {
+		t.Errorf("home = %q, want the SPARKWING_HOME value %q", dp.home, env)
+	}
+	if want := filepath.Join(env, dashboardLogFile); dp.log != want {
+		t.Errorf("log = %q, want %q", dp.log, want)
+	}
+}
+
+// TestResolveDashboardPaths_UnsetHomeStaysOutOfTheRealHome is what the
+// direct environment read used to defeat: with nothing set, a test
+// binary got the developer's own ~/.sparkwing and the dashboard created
+// its pid and log files there.
+func TestResolveDashboardPaths_UnsetHomeStaysOutOfTheRealHome(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", "")
+
+	dp, err := resolveDashboardPaths("")
+	if err != nil {
+		t.Fatalf("resolveDashboardPaths: %v", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("resolve home: %v", err)
+	}
+	if dp.home == filepath.Join(home, ".sparkwing") {
+		t.Fatalf("resolveDashboardPaths would write into the developer's own home %s", dp.home)
+	}
+	if !strings.HasPrefix(dp.home, os.TempDir()) {
+		t.Errorf("home = %q, want a path under the test sandbox %s", dp.home, os.TempDir())
+	}
+}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -26,18 +27,22 @@ import (
 // REG-, TOD-); the docs-mirror check fails when docs/ (the source) and
 // pkg/docs/mirror/ (the embedded copy) have drifted, so an edit to docs/
 // can't be committed without re-running bin/sync-docs.sh; the comment
-// check fails when the staged diff adds a comment the policy disallows.
+// check fails when the staged diff adds a comment the policy disallows;
+// the home-resolution check fails when product code resolves the
+// sparkwing home itself -- reading SPARKWING_HOME, or building the path
+// from a home directory -- instead of through
+// internal/paths.DefaultPaths.
 //
 // The repository keeps this pipeline manual so the lead can select it when the
 // changed boundary warrants broad verification.
 type PreCommit struct{ sparkwing.Base }
 
 func (PreCommit) ShortHelp() string {
-	return "Broad local verification: format, vet, build, test, lint, em-dash + tracker-ID sweeps, docs-mirror sync, comment policy"
+	return "Broad local verification: format, vet, build, test, lint, em-dash + tracker-ID sweeps, docs-mirror sync, comment policy, home resolution"
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted). The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -83,10 +88,10 @@ func boundedGoCommand(cpuCount int, verb, args string) string {
 // same tier as test. It also needs a tree that compiles, which is what
 // build and test establish.
 //
-// The four sweeps stay parallel. Nothing downstream waits on them and
-// each finishes in well under a second (docs-mirror 0.02s, comments
-// 0.5s), so ordering them would only delay their verdict without saving
-// any work.
+// The five sweeps stay parallel. Nothing downstream waits on them and
+// each finishes in well under a second (docs-mirror 0.02s,
+// home-resolution 0.15s, comments 0.5s), so ordering them would only
+// delay their verdict without saving any work.
 func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.ParallelFailures(sparkwing.FailFast)
 	gofmtStep := sparkwing.Step(w, "gofmt", runGofmt)
@@ -99,6 +104,7 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "tracker-ids", checkTrackerIDs)
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
 	sparkwing.Step(w, "comments", checkComments)
+	sparkwing.Step(w, "home-resolution", checkHomeResolution)
 	return nil, nil
 }
 
@@ -110,6 +116,168 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 func checkComments(ctx context.Context) error {
 	_, err := sparkwing.Bash(ctx, `go run ./internal/commentcheck -staged .`).Run()
 	return err
+}
+
+// homeEnvRead matches a direct read of the SPARKWING_HOME variable,
+// with or without the os. qualifier. Setting it is not a read:
+// t.Setenv("SPARKWING_HOME", ...) is the isolation this rule exists to
+// make reliable, so the pattern deliberately does not match it.
+var homeEnvRead = regexp.MustCompile(`(?:os\.)?(?:Getenv|LookupEnv)\(\s*"SPARKWING_HOME"\s*\)`)
+
+// homeDirJoin matches the other half of the same mistake: building the
+// home path out of a home directory instead of asking for it. Reading
+// the environment is only one way in, and internal/bincache used both --
+// SPARKWING_HOME first, then filepath.Join(home, ".sparkwing") when it
+// was unset.
+//
+// The first Join argument has to look like a home for this to fire,
+// which is what separates it from the ~26 legitimate joins of the same
+// literal. Those build the per-repo .sparkwing/ pipeline module
+// directory from a checkout path -- cwd, root, repoDir, absPath,
+// workTree -- and are a completely different thing that happens to share
+// a name. No accident-catching regex can tell the two apart by the
+// literal alone, so this one keys on the argument, and the naming
+// convention it depends on is the one every home resolution in the tree
+// already follows.
+//
+// The limit that buys: a home held in a variable named something else
+// slips through. That is the honest trade for a gate that does not cry
+// wolf on two dozen correct call sites, and the env rule above covers
+// the path such code would most likely take to obtain the home anyway.
+var homeDirJoin = regexp.MustCompile(`filepath\.Join\([^,)]*[Hh]ome[^,)]*,\s*"\.sparkwing"`)
+
+// homeRule is one forbidden way to arrive at the sparkwing home, the
+// files allowed to use it anyway, and the advice an offender gets.
+type homeRule struct {
+	label   string
+	pattern *regexp.Regexp
+	allowed map[string]string
+	advice  string
+}
+
+// homeRules are the two shapes a bypass takes. Each carries its own
+// allowlist because the exemptions are not the same: configguard has to
+// build a home path from a directory it was handed, and must never read
+// the environment to do it.
+var homeRules = []homeRule{
+	{
+		label:   "read SPARKWING_HOME from the environment",
+		pattern: homeEnvRead,
+		allowed: map[string]string{
+			"internal/paths/paths.go":      "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
+			"pkg/storage/storeurl/spec.go": "public SDK surface, and the pkg/ tree imports nothing from internal/, so it carries a documented copy of the same rule including the redirect",
+		},
+		advice: "Call internal/paths.DefaultPaths() instead, which honors SPARKWING_HOME the same way and adds the test-sandbox redirect that keeps a test binary out of the developer's real ~/.sparkwing.",
+	},
+	{
+		label:   "build the sparkwing home from a home directory",
+		pattern: homeDirJoin,
+		allowed: map[string]string{
+			"internal/paths/paths.go":             "owns the resolution, and with it the test-sandbox redirect every other caller inherits",
+			"pkg/storage/storeurl/spec.go":        "public SDK surface, and the pkg/ tree imports nothing from internal/, so it carries a documented copy of the same rule including the redirect",
+			"internal/configguard/configguard.go": "watches the real user's home for writes a suite should not have made, so resolving anywhere else would measure the wrong directory; its package doc states this",
+		},
+		advice: "Call internal/paths.DefaultPaths() for the real home, or paths.PathsAt(root) when the root is already known.",
+	},
+}
+
+// checkHomeResolution fails when product code arrives at the sparkwing
+// home on its own instead of asking internal/paths.
+//
+// The rule has teeth because the bypass is invisible when it happens: a
+// package that resolves the home itself behaves identically to the
+// canonical resolution for every real run and differs only inside a test
+// binary, where it silently returns the developer's own ~/.sparkwing.
+// internal/bincache did exactly this and its suites compiled pipeline
+// binaries into the real cache; once the LRU prune landed on the same
+// resolution, they could evict from it too.
+//
+// Swept whole-tree rather than over the staged change, which the em-dash
+// and tracker-ID sweeps cannot afford: the tree satisfies these rules
+// today, with the allowlisted files and nothing else, so a whole-tree
+// sweep has no pre-existing corpus to charge an unrelated commit for. It
+// is also the only scope that makes this an invariant instead of a diff
+// filter, since a violation moved between files by a refactor would slip
+// past a staged-only check.
+//
+// Comment lines are skipped, so prose may quote a forbidden call without
+// the gate refusing the file. A comment cannot resolve a home, and a
+// rule that cannot be written about is one nobody can document.
+//
+// _test.go files are exempt. A test that reads the variable is asserting
+// something about it rather than resolving a home from it, and pointing
+// such a test at internal/paths would defeat what it is checking.
+//
+// .sparkwing/ is exempt because it is a separate module
+// (sparkwing-pipelines) and Go's internal rule bars it from importing
+// internal/paths at all, so the fix this gate names is not available
+// there.
+func checkHomeResolution(ctx context.Context) error {
+	root := regexCheckRoot()
+	files, err := sparkwing.Bash(ctx, `git ls-files -- '*.go'`).Lines()
+	if err != nil {
+		return fmt.Errorf("list the tracked Go files: %w", err)
+	}
+
+	offenders := make([][]string, len(homeRules))
+	for _, f := range files {
+		if f == "" || strings.HasSuffix(f, "_test.go") {
+			continue
+		}
+		if strings.HasPrefix(f, ".sparkwing/") || strings.Contains(f, "node_modules/") {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(root, f))
+		if err != nil {
+			continue
+		}
+		code := strippedGoComments(string(data))
+		for i, rule := range homeRules {
+			if _, ok := rule.allowed[f]; ok {
+				continue
+			}
+			if rule.pattern.MatchString(code) {
+				offenders[i] = append(offenders[i], f)
+			}
+		}
+	}
+
+	var failures []string
+	for i, rule := range homeRules {
+		if len(offenders[i]) == 0 {
+			continue
+		}
+		for _, f := range offenders[i] {
+			sparkwing.Info(ctx, "  %s: %s", rule.label, f)
+		}
+		allowed := make([]string, 0, len(rule.allowed))
+		for f, why := range rule.allowed {
+			allowed = append(allowed, fmt.Sprintf("%s (%s)", f, why))
+		}
+		sort.Strings(allowed)
+		failures = append(failures, fmt.Sprintf("%d file(s) %s:\n  - %s\n%s Only these may do it directly:\n  - %s",
+			len(offenders[i]), rule.label, strings.Join(offenders[i], "\n  - "),
+			rule.advice, strings.Join(allowed, "\n  - ")))
+	}
+	if len(failures) == 0 {
+		return nil
+	}
+	return fmt.Errorf("the sparkwing home must be resolved through internal/paths:\n\n%s",
+		strings.Join(failures, "\n\n"))
+}
+
+// strippedGoComments blanks out // comment lines so a rule cannot be
+// tripped by prose that quotes the call it forbids. Line count is
+// preserved but content is not read; the patterns match within a line,
+// so nothing else needs to survive.
+func strippedGoComments(src string) string {
+	lines := strings.Split(src, "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimSpace(l), "//") {
+			lines[i] = ""
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func runGofmt(ctx context.Context) error {

@@ -618,7 +618,7 @@ func runSparksWarmup(args []string) error {
 	}
 
 	if *clearCache {
-		cacheRoot := filepath.Join(bincache.SparkwingHome(), "cache", "pipelines")
+		cacheRoot := bincache.CacheRoot()
 		if err := os.RemoveAll(cacheRoot); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("spark warmup: clear cache %s: %w", cacheRoot, err)
 		}
