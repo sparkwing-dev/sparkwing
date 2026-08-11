@@ -52,7 +52,8 @@ code change to unlock.
 ### Added
 
 - **wingd:** `SIGUSR1` makes the daemon write a full goroutine dump plus
-  a one-line count of connections, guards, leases, and waiters to its log
+  a one-line count of its connections, holders, waiters, leases, and
+  guards to its log
   (`~/.sparkwing/wingd/d.log`). A daemon that is burning CPU can now be
   explained while it is still running -- `kill -USR1 <pid>`, then read
   the log -- instead of only after the operator has killed the evidence.
@@ -66,9 +67,9 @@ code change to unlock.
   against that one view. On macOS the listing comes from `kern.proc.all`
   rather than a `ps` fork: a full snapshot measured 0.7ms against 34ms on
   a laptop with 669 processes, and the per-session identity lookups it
-  replaces are gone entirely.
-  This is the largest contributor to the reported case of a daemon pinned
-  near 200% CPU while the queue appeared hung.
+  replaces are gone entirely. This is the largest contributor to the
+  reported case of a daemon pinned near 200% CPU while the queue appeared
+  hung.
 - **wingd:** Guard sweeps back off exponentially (to 5s) while the daemon
   cannot read the process table at all, and return to full cadence on the
   first success; a single guarded run whose inspection fails no longer
@@ -76,9 +77,12 @@ code change to unlock.
   between two observations is read as the answer it is rather than as a
   failure. A process table the daemon cannot read used to be retried ten
   times a second forever.
-- **wingd:** Reading the process table is now bounded at two seconds, so
-  a wedged `ps` fails the inspection instead of blocking the daemon
-  goroutine that asked for it. The post-`SIGKILL` wait for a process tree
+- **wingd:** The `ps` listing -- used on Linux and other Unixes, and as
+  the macOS fallback -- is now bounded at two seconds, so a wedged `ps`
+  fails the inspection instead of blocking the daemon goroutine that
+  asked for it. A daemon that drops to that fallback says so once in its
+  log, since the fallback costs about fifty times more per listing and
+  rarely recovers. The post-`SIGKILL` wait for a process tree
   to disappear backs off from 10ms to one second and logs once when it
   slows down, so a descendant that cannot be killed costs about one
   process-table read per second rather than a hundred.
