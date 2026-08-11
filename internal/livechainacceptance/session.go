@@ -162,6 +162,9 @@ func RunSession(ctx context.Context, seed SessionSeed, deps DurableDependencies)
 					return Proof{}, fmt.Errorf("reconcile expired fault injection: %w", err)
 				}
 				if found {
+					if err := validateFaultReceipt(session, result.Fault); err != nil {
+						return Proof{}, fmt.Errorf("reconcile expired fault injection: %w", err)
+					}
 					next.Proof.Fault = result.Fault
 					next.Phase = SessionCleanupIntent
 				} else {
@@ -183,8 +186,27 @@ func RunSession(ctx context.Context, seed SessionSeed, deps DurableDependencies)
 		}
 		if session.Phase == SessionCleanupIntent && !session.PhaseDeadline.IsZero() && !deps.Clock.Now().Before(session.PhaseDeadline) {
 			next := session
-			next.Phase = SessionCleanupFailed
-			next.TerminalError = "fault cleanup could not be durably acknowledged before deadline"
+			request := effectRequest(session, EffectRemoveFailure)
+			result, found, err := deps.Effects.Reconcile(ctx, request)
+			if err != nil {
+				return Proof{}, fmt.Errorf("reconcile expired fault cleanup: %w", err)
+			}
+			if found {
+				if err := validateCleanupReceipt(request.Cleanup, result.Cleanup); err != nil {
+					return Proof{}, fmt.Errorf("reconcile expired fault cleanup: %w", err)
+				}
+				next.Proof.Cleanup = result.Cleanup
+				if session.TerminalError == "" {
+					next.Phase = SessionCleaned
+					next.PhaseDeadline = deps.Clock.Now().Add(5 * time.Minute)
+				} else {
+					next.Phase = SessionFailed
+					next.PhaseDeadline = time.Time{}
+				}
+			} else {
+				next.Phase = SessionCleanupFailed
+				next.TerminalError = "fault cleanup could not be durably acknowledged before deadline"
+			}
 			if err := deps.Sessions.CompareAndSwap(ctx, session.ID, session.Version, session.SeedDigest, next); err != nil {
 				if errors.Is(err, ErrSessionConflict) {
 					continue
@@ -490,11 +512,9 @@ func advanceSession(ctx context.Context, session Session, deps DurableDependenci
 		if err != nil {
 			return Session{}, fmt.Errorf("apply fault injection: %w", err)
 		}
-		wantID := effectID(session.ID, EffectInjectFailure)
-		deployment := session.Proof.Deployments[1]
-		if result.Fault.ID != wantID || result.Fault.EventID != deployment.EventID || result.Fault.DeploymentUID != deployment.UID || result.Fault.Digest != deployment.Digest || !result.Fault.InjectedAt.After(session.Proof.Notifications[1].DeliveredAt) {
+		if err := validateFaultReceipt(session, result.Fault); err != nil {
 			next.Proof.Fault = result.Fault
-			next.TerminalError = "durable fault receipt differs from requested deployment"
+			next.TerminalError = err.Error()
 			next.Phase = SessionCleanupIntent
 			return next, nil
 		}
@@ -582,6 +602,14 @@ func advanceSession(ctx context.Context, session Session, deps DurableDependenci
 		return Session{}, fmt.Errorf("unknown acceptance session phase %q", session.Phase)
 	}
 	return next, nil
+}
+
+func validateFaultReceipt(session Session, fault Fault) error {
+	deployment := session.Proof.Deployments[1]
+	if fault.ID != effectID(session.ID, EffectInjectFailure) || fault.EventID != deployment.EventID || fault.DeploymentUID != deployment.UID || fault.Digest != deployment.Digest || !fault.InjectedAt.After(session.Proof.Notifications[1].DeliveredAt) {
+		return fmt.Errorf("durable fault receipt differs from requested deployment")
+	}
+	return nil
 }
 
 func prepareFlow(ctx context.Context, deps DurableDependencies, session *Session, index int) error {
