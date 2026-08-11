@@ -44,10 +44,10 @@ type PruneOptions struct {
 	Root         string
 	ReclaimBytes int64
 	// RemoveBytes is the logical cache-byte goal used by configured ceilings.
-	// Pressure callers use ReclaimBytes and remeasure the filesystem instead.
+	// Reclaim callers use ReclaimBytes and remeasure the filesystem instead.
 	RemoveBytes int64
 	// ReclaimEntries is an optional entry-count goal used by configured
-	// cache ceilings. Pressure callers normally leave it zero.
+	// cache ceilings. Reclaim callers normally leave it zero.
 	ReclaimEntries int
 	MaxEntries     int
 }

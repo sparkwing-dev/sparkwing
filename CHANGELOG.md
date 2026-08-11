@@ -90,7 +90,7 @@ code change to unlock.
   These two changes invalidate existing cached binaries once; the next
   invocation of each pipeline recompiles.
 
-- **cache:** `pkg/cachepressure` measures the managed pipeline-binary cache and
+- **cache:** `pkg/cachecontrol` measures the managed pipeline-binary cache and
   reclaims inactive entries within caller-set byte and entry-work bounds. The
   result reports observed capacity separately from removed entries; admission
   callers remeasure the filesystem after every attempt.

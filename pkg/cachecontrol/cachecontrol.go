@@ -1,6 +1,6 @@
-// Package cachepressure exposes Sparkwing-owned pipeline-cache measurement and
+// Package cachecontrol exposes Sparkwing-owned pipeline-cache measurement and
 // reclamation without exposing cache paths or entry layout.
-package cachepressure
+package cachecontrol
 
 import (
 	"context"
@@ -14,13 +14,13 @@ type PruneOptions struct {
 	MaxEntries   int
 }
 
-// PruneResult reports observed pressure and completed work.
+// PruneResult reports observed cache state and completed work.
 type PruneResult = bincache.PruneResult
 
-// Status reports managed and legacy pipeline-cache pressure.
+// Status reports managed and legacy pipeline-cache state.
 type Status = bincache.CacheStatus
 
-// Measure reports pipeline-cache pressure.
+// Measure reports pipeline-cache state.
 func Measure(ctx context.Context) (Status, error) {
 	return bincache.Status(ctx, "")
 }
