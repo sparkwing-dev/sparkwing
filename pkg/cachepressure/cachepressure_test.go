@@ -96,6 +96,7 @@ func TestPruneResultGoNamesAccountingAndWork(t *testing.T) {
 		"ReclaimedEntries",
 		"ActiveSkippedEntries",
 		"BusySkippedEntries",
+		"PruneBusy",
 		"GoalSatisfied",
 		"WorkBoundExhausted",
 	} {
