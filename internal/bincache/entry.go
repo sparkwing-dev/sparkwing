@@ -13,7 +13,10 @@ import (
 	"strings"
 )
 
-const pipelineCacheSchema = "v1"
+const (
+	pipelineCacheSchema      = "v1"
+	maxCacheDiscoveryEntries = 4096
+)
 
 var pipelineEntryKeyRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{8}$`)
 
@@ -223,7 +226,7 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 	}
 	defer func() { err = errors.Join(err, cacheUnlock(coordinator), coordinator.Close()) }()
 
-	candidates, err := cacheCandidates(root)
+	candidates, err := cacheCandidates(ctx, root, opts.MaxEntries)
 	if err != nil {
 		return result, err
 	}
@@ -284,7 +287,7 @@ func Status(ctx context.Context, root string) (status CacheStatus, err error) {
 	if root == "" {
 		root = filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema)
 	}
-	candidates, err := cacheCandidates(root)
+	candidates, err := cacheCandidates(ctx, root, maxCacheDiscoveryEntries)
 	if err != nil {
 		return status, err
 	}
@@ -418,7 +421,7 @@ type cacheCandidate struct {
 	modTime int64
 }
 
-func cacheCandidates(root string) ([]cacheCandidate, error) {
+func cacheCandidates(_ context.Context, root string, _ int) ([]cacheCandidate, error) {
 	entries, err := os.ReadDir(filepath.Join(root, "entries"))
 	if os.IsNotExist(err) {
 		entries = nil
