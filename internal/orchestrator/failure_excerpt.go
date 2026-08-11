@@ -13,31 +13,44 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Bounds on the failure text a node records. A failing compiler or
-// linter prints its conclusion last, so the tail is what a reader
-// wants; the full output stays in the node log. Both bounds apply --
-// whichever bites first wins.
+// Bounds on the failure text a node records. Both the line and byte
+// bound apply to the excerpted body -- whichever bites first wins --
+// and the headline carries its own, much tighter, byte bound.
+//
+// The headline bound is not cosmetic: sparkwing.Bash renders the entire
+// script into ExecError.Command, so a generated multi-hundred-kilobyte
+// script would otherwise land verbatim in the node's error, which is
+// exactly the unbounded state row this whole helper exists to prevent.
+// With these, boundedFailureText's output has a hard ceiling of roughly
+// 5 KiB regardless of input.
 const (
 	failureExcerptMaxLines = 20
 	failureExcerptMaxBytes = 4096
+	failureHeadMaxBytes    = 200
 )
 
 // boundedFailureText renders err as the text a failed node records in
 // its terminal state (node.Error, the node_failed event, the node_end
 // log record).
 //
-// Three things happen here that err.Error() alone does not do:
+// Four things happen here that err.Error() alone does not do:
 //
 //   - A [sparkwing.ExecError] carries the failed command's raw stderr
 //     (or stdout when stderr is empty) inside its message. That output
 //     is unbounded -- a failing build can bury the state row under
 //     megabytes -- so only its tail is kept, behind a marker pointing at
-//     the node log for the rest.
+//     the node log for the rest. The tail is the right end to keep:
+//     compilers and linters print their conclusion last.
+//   - The headline that identifies the failure is bounded too, because
+//     it embeds the command, and a command can be a whole script.
 //   - Every byte goes through the run's masker, so a secret that leaked
 //     into command output is redacted before it is persisted where
 //     `runs status`, the dashboard, and notifications read it.
-//   - A plain Go error keeps its text; it is masked and bounded the same
-//     way, which for the short messages this covers is a no-op.
+//   - A plain Go error is bounded from the *front*: with no captured
+//     output there is no conclusion at the end, the message itself is
+//     the diagnostic, and its first lines are what name the problem.
+//     Nothing points at the node log in that case -- the log does not
+//     contain the message.
 //
 // runID and nodeID only build the "where is the rest" pointer; an empty
 // pair degrades the marker rather than the excerpt.
@@ -45,15 +58,36 @@ func boundedFailureText(ctx context.Context, runID, nodeID string, err error) st
 	if err == nil {
 		return ""
 	}
-	head, body := splitExecErrorOutput(err)
-	head = secrets.MaskCtx(ctx, head)
+	head, body, isOutput := splitFailure(err)
+	head = boundedFailureHead(secrets.MaskCtx(ctx, head))
 	body = secrets.MaskCtx(ctx, body)
-
-	tail, truncated := failureExcerptTail(body, failureExcerptMaxLines, failureExcerptMaxBytes)
 
 	var b strings.Builder
 	if head != "" {
 		b.WriteString(head)
+	}
+
+	if !isOutput {
+		// Plain error: keep the head of the message, not its tail.
+		msg, truncated := failureMessageHead(body, failureExcerptMaxLines, failureExcerptMaxBytes)
+		if msg == "" {
+			return b.String()
+		}
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(msg)
+		if truncated {
+			b.WriteString("\n… (message truncated)")
+		}
+		return b.String()
+	}
+
+	tail, truncated := failureExcerptTail(body, failureExcerptMaxLines, failureExcerptMaxBytes)
+	if tail == "" {
+		return b.String()
+	}
+	if b.Len() > 0 {
 		b.WriteString("\n")
 	}
 	if truncated {
@@ -62,6 +96,38 @@ func boundedFailureText(ctx context.Context, runID, nodeID string, err error) st
 	}
 	b.WriteString(tail)
 	return b.String()
+}
+
+// boundedFailureHead trims the failure headline to one short line. The
+// headline is "<node>: <wrapping>: command failed (exit N): <command>",
+// and <command> is whatever was run -- for sparkwing.Bash, the entire
+// script. Keeping the first line up to failureHeadMaxBytes preserves
+// the part that identifies the failure (node, step, exit code, the
+// start of the command) and drops the part that has no business in a
+// state row.
+func boundedFailureHead(head string) string {
+	if head == "" {
+		return ""
+	}
+	head = normalizeNewlines(head)
+	first, rest, multiline := strings.Cut(head, "\n")
+	truncated := multiline && strings.TrimSpace(rest) != ""
+	if len(first) > failureHeadMaxBytes {
+		first = first[:failureHeadMaxBytes]
+		for len(first) > 0 && !utf8.RuneStart(first[len(first)-1]) {
+			first = first[:len(first)-1]
+		}
+		// The final rune may itself be incomplete; drop it.
+		if r, size := utf8.DecodeLastRuneInString(first); r == utf8.RuneError && size <= 1 {
+			first = first[:len(first)-size]
+		}
+		truncated = true
+	}
+	first = strings.TrimRight(first, " \t")
+	if truncated {
+		return first + " … (command truncated)"
+	}
+	return first
 }
 
 // nodeFailureExcerptEvent is the event kind carrying the machine-
@@ -87,15 +153,18 @@ type failureExcerpt struct {
 
 // nodeFailureExcerpt extracts the structured excerpt for err, reporting
 // ok=false when the error carried no command output to excerpt.
+//
+// It reads the same split boundedFailureText does, so the two carriers
+// cannot diverge: any error whose text is built from captured output
+// also publishes that output as data, however the error was wrapped.
 func nodeFailureExcerpt(ctx context.Context, err error) (failureExcerpt, bool) {
 	if err == nil {
 		return failureExcerpt{}, false
 	}
-	head, body := splitExecErrorOutput(err)
-	if head == "" {
-		// Not an ExecError with captured output: the whole message is
-		// the error, and the error is already recorded. Nothing to
-		// excerpt.
+	_, body, isOutput := splitFailure(err)
+	if !isOutput {
+		// No captured output: the whole message is the error, and the
+		// error is already recorded. Nothing to excerpt.
 		return failureExcerpt{}, false
 	}
 	tail, truncated := failureExcerptTail(secrets.MaskCtx(ctx, body),
@@ -180,40 +249,71 @@ func failureExcerptsForRun(ctx context.Context, src eventLister, runID string) m
 	return out
 }
 
-// splitExecErrorOutput separates err's message into the part that
-// identifies the failure (node prefix, wrapping context, the "command
-// failed (exit 1): go build ./..." headline) and the captured command
-// output that follows it. The head is kept whole -- it is short and it
-// is the line a reader needs first -- and only the body is bounded.
+// splitFailure separates err's message into the part that identifies
+// the failure (node prefix, wrapping context, the "command failed
+// (exit 1): go build ./..." headline) and the body to bound, reporting
+// whether that body is captured command output.
 //
-// For anything that is not an ExecError with captured output the whole
-// message is the body: nothing is exempt from masking, and a
-// multi-line plain error still gets its tail kept rather than its head.
-func splitExecErrorOutput(err error) (head, body string) {
+// isOutput drives everything downstream: captured output is bounded
+// from the tail, gets a marker pointing at the node log, and is
+// published as a structured excerpt. A plain error's message is bounded
+// from the front and published nowhere else.
+//
+// The output is located in the message rather than assumed to be its
+// suffix, so a caller that wrapped the ExecError on both sides --
+// fmt.Errorf("%w (attempt 3/3)", execErr) -- still gets its output
+// recognized. When the message does not contain the output at all
+// (a wrapper rewrote it), the whole message becomes the head, which
+// the caller bounds anyway, and the output still comes from the error.
+func splitFailure(err error) (head, body string, isOutput bool) {
 	full := err.Error()
 	var ee *sparkwing.ExecError
 	if !errors.As(err, &ee) {
-		return "", full
+		return "", full, false
 	}
 	out := strings.TrimSpace(ee.Stderr)
 	if out == "" {
 		out = strings.TrimSpace(ee.Stdout)
 	}
-	// ExecError.Error() appends the trimmed output after a newline. When
-	// that shape does not hold (a terminated or never-started command
-	// prints no output at all, or a caller rewrapped the message) treat
-	// the whole message as the body.
-	if out == "" || !strings.HasSuffix(full, "\n"+out) {
-		return "", full
+	if out == "" {
+		// A terminated or never-started command captured nothing; its
+		// message is all there is.
+		return "", full, false
 	}
-	return strings.TrimSuffix(full, "\n"+out), out
+	i := strings.LastIndex(full, out)
+	if i < 0 {
+		return full, out, true
+	}
+	head = strings.TrimRight(full[:i], "\n")
+	if suffix := strings.TrimSpace(full[i+len(out):]); suffix != "" {
+		head += " " + suffix
+	}
+	return head, out, true
+}
+
+// normalizeNewlines folds CRLF and lone CR line endings to LF so a
+// Windows-y or carriage-return-heavy command does not leave stray \r
+// bytes embedded in the persisted text.
+func normalizeNewlines(s string) string {
+	if !strings.ContainsRune(s, '\r') {
+		return s
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.ReplaceAll(s, "\r", "\n")
 }
 
 // failureExcerptTail keeps the last maxLines lines of s, then trims the
 // result to maxBytes from the end, preferring a line boundary so the
 // excerpt never starts mid-line. Reports whether anything was dropped.
+//
+// Whitespace-only output yields no excerpt at all: a body of blank
+// lines is not a diagnostic, and reporting one behind a "see the log"
+// marker would send a reader after nothing.
 func failureExcerptTail(s string, maxLines, maxBytes int) (string, bool) {
-	s = strings.TrimRight(s, "\n")
+	s = strings.TrimRight(normalizeNewlines(s), "\n")
+	if strings.TrimSpace(s) == "" {
+		return "", false
+	}
 	truncated := false
 
 	lines := strings.Split(s, "\n")
@@ -232,6 +332,45 @@ func failureExcerptTail(s string, maxLines, maxBytes int) (string, bool) {
 			// bytes of a split rune so the excerpt stays valid UTF-8.
 			for len(out) > 0 && !utf8.RuneStart(out[0]) {
 				out = out[1:]
+			}
+		}
+		truncated = true
+	}
+	if strings.TrimSpace(out) == "" {
+		return "", truncated
+	}
+	return out, truncated
+}
+
+// failureMessageHead is failureExcerptTail's counterpart for an error
+// message with no captured output: it keeps the *first* maxLines lines
+// and maxBytes bytes. A validation error leads with what failed and
+// follows with detail, so the front is the payload and the tail is the
+// expendable part -- the reverse of command output.
+func failureMessageHead(s string, maxLines, maxBytes int) (string, bool) {
+	s = strings.TrimRight(normalizeNewlines(s), "\n")
+	if strings.TrimSpace(s) == "" {
+		return "", false
+	}
+	truncated := false
+
+	lines := strings.Split(s, "\n")
+	if len(lines) > maxLines {
+		lines = lines[:maxLines]
+		truncated = true
+	}
+	out := strings.Join(lines, "\n")
+
+	if len(out) > maxBytes {
+		out = out[:maxBytes]
+		if i := strings.LastIndexByte(out, '\n'); i > 0 {
+			out = out[:i]
+		} else {
+			for len(out) > 0 && !utf8.RuneStart(out[len(out)-1]) {
+				out = out[:len(out)-1]
+			}
+			if r, size := utf8.DecodeLastRuneInString(out); r == utf8.RuneError && size <= 1 {
+				out = out[:len(out)-size]
 			}
 		}
 		truncated = true

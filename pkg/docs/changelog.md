@@ -51,17 +51,21 @@ code change to unlock.
 
 ### Changed
 
-- **orchestrator:** A failed node records a bounded, redacted excerpt of the
-  failing command's output instead of its raw text. Previously a failing
-  `sparkwing.Bash`/`Exec` step stored the command's entire stderr in the node's
-  error -- unbounded and unmasked, which a giant compiler or linter run turned
-  into a megabyte-sized state row that `runs status`, the dashboard, and
-  notifications all had to carry -- while a plain Go error stored no output at
-  all. Now every failed node keeps the last 20 lines (at most 4 KiB) of the
-  output, secret values redacted, prefixed with
-  `… earlier output omitted (see: sparkwing runs logs --run <id> --node <id>)`
-  when anything was dropped. The node log still holds the full output;
-  cancelled and upstream-failed nodes are untouched.
+- **orchestrator:** A failed node's recorded error is now bounded and redacted.
+  Previously a failing `sparkwing.Bash`/`Exec` step stored the command's entire
+  stderr *and* the entire command in the node's error -- both unbounded and
+  unmasked, so a large compiler run, or a generated script, turned a state row
+  into hundreds of kilobytes that `runs status`, the dashboard, and every
+  notification had to carry. The whole error text now has a hard ceiling of
+  about 5 KiB: the last 20 lines (at most 4 KiB) of command output, led by a
+  headline trimmed to one short line, with secret values redacted throughout.
+  When output was dropped the text says so and names the command that prints
+  the rest:
+  `… earlier output omitted (see: sparkwing runs logs --run <id> --node <id>)`.
+  An error with no captured output keeps its *first* lines instead -- there the
+  message is the diagnostic and its opening names the problem -- and points at
+  no log, because the log does not contain it. The node log still holds the
+  full output; cancelled and upstream-failed nodes are untouched.
 - **cli:** `sparkwing runs errors -o json` and `sparkwing runs status -o json`
   carry the excerpt as structured data per failed node: `log_excerpt` (the
   masked bounded output, without the headline and marker that decorate the

@@ -155,6 +155,143 @@ func TestBoundedFailureText_ShortOutputKeptWhole(t *testing.T) {
 	}
 }
 
+// sparkwing.Bash renders the whole script into ExecError.Command, so
+// the headline is attacker-sized input, not a label. A generated
+// several-hundred-kilobyte script must not reach the state row.
+func TestBoundedFailureText_HugeCommandIsBounded(t *testing.T) {
+	script := "set -euo pipefail\n" + strings.Repeat("echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", 8000)
+	if len(script) < 200_000 {
+		t.Fatalf("test fixture too small: %d bytes", len(script))
+	}
+	err := fmt.Errorf("build: step %q: %w", "compile", &sparkwing.ExecError{
+		Command:  script,
+		Stderr:   lines(500, "compile error on file %d"),
+		ExitCode: 2,
+	})
+
+	got := boundedFailureText(context.Background(), "run-1", "build", err)
+	if len(got) > 5*1024 {
+		t.Fatalf("failure text is %d bytes; the ceiling must hold regardless of command size", len(got))
+	}
+	if !strings.Contains(got, "build: step \"compile\": command failed (exit 2)") {
+		t.Fatalf("bounded headline lost the identifying prefix:\n%s", got[:min(len(got), 400)])
+	}
+	if !strings.Contains(got, "… (command truncated)") {
+		t.Fatalf("a truncated command must say so:\n%s", got[:min(len(got), 400)])
+	}
+	if !strings.Contains(got, "compile error on file 500") {
+		t.Fatalf("bounding the head must not cost the output tail:\n%s", got)
+	}
+	head, _, _ := strings.Cut(got, "\n")
+	if len(head) > failureHeadMaxBytes+len(" … (command truncated)") {
+		t.Fatalf("headline is %d bytes, want <= %d", len(head), failureHeadMaxBytes)
+	}
+}
+
+// A single-line command that is merely long is truncated the same way,
+// and one that fits is left alone.
+func TestBoundedFailureHead_BoundsAndPreserves(t *testing.T) {
+	short := "deploy: command failed (exit 1): kubectl apply -f app.yaml"
+	if got := boundedFailureHead(short); got != short {
+		t.Fatalf("short headline rewritten: %q", got)
+	}
+	long := "deploy: command failed (exit 1): " + strings.Repeat("x", 500)
+	got := boundedFailureHead(long)
+	if !strings.HasSuffix(got, "… (command truncated)") {
+		t.Fatalf("long headline missing the marker: %q", got)
+	}
+	if !strings.HasPrefix(got, "deploy: command failed (exit 1): x") {
+		t.Fatalf("long headline lost its prefix: %q", got)
+	}
+	if len(got) > failureHeadMaxBytes+len(" … (command truncated)") {
+		t.Fatalf("bounded headline is %d bytes", len(got))
+	}
+	if !utf8.ValidString(boundedFailureHead("deploy: " + strings.Repeat("é", 300))) {
+		t.Fatal("headline truncation produced invalid UTF-8")
+	}
+}
+
+// A plain error has no conclusion at the end: the message leads with
+// what failed, so the front is what must survive -- and nothing points
+// at a log that does not contain the message.
+func TestBoundedFailureText_PlainErrorKeepsHead(t *testing.T) {
+	body := "config validation failed for cluster prod-2 (3 fatal problems)\n" +
+		lines(40, "  - problem %d: field is required")
+	err := fmt.Errorf("validate: %w", errors.New(body))
+
+	got := boundedFailureText(context.Background(), "run-1", "validate", err)
+	if !strings.HasPrefix(got, "validate: config validation failed for cluster prod-2 (3 fatal problems)") {
+		t.Fatalf("plain error lost its head:\n%s", got)
+	}
+	if strings.Contains(got, "problem 40") {
+		t.Fatalf("plain error should drop its tail, not its head:\n%s", got)
+	}
+	if strings.Contains(got, "runs logs") || strings.Contains(got, "earlier output omitted") {
+		t.Fatalf("a plain error must not point at logs that lack the message:\n%s", got)
+	}
+	if !strings.HasSuffix(got, "… (message truncated)") {
+		t.Fatalf("a truncated message must say so:\n%s", got)
+	}
+	if n := strings.Count(got, "\n") + 1; n > failureExcerptMaxLines+2 {
+		t.Fatalf("plain error text is %d lines", n)
+	}
+}
+
+// The text and the structured excerpt read the same split, so a
+// wrapper that appends after the output cannot leave one carrier with
+// an excerpt and the other without.
+func TestNodeFailureExcerpt_SurvivesSuffixWrapping(t *testing.T) {
+	inner := &sparkwing.ExecError{
+		Command:  "go test ./...",
+		Stderr:   lines(100, "FAIL pkg/%d"),
+		ExitCode: 1,
+	}
+	for name, err := range map[string]error{
+		"prefix wrap": fmt.Errorf("test: %w", inner),
+		"suffix wrap": fmt.Errorf("%w (attempt 3/3)", inner),
+	} {
+		ex, ok := nodeFailureExcerpt(context.Background(), err)
+		if !ok {
+			t.Fatalf("%s: no structured excerpt published", name)
+		}
+		if !strings.Contains(ex.LogExcerpt, "FAIL pkg/100") || !ex.Truncated {
+			t.Fatalf("%s: excerpt = %q (truncated=%v)", name, ex.LogExcerpt, ex.Truncated)
+		}
+		text := boundedFailureText(context.Background(), "run-1", "test", err)
+		if !strings.Contains(text, "FAIL pkg/100") {
+			t.Fatalf("%s: text and excerpt disagree:\n%s", name, text)
+		}
+	}
+	if _, ok := nodeFailureExcerpt(context.Background(), errors.New("boom")); ok {
+		t.Fatal("a plain error must publish no excerpt")
+	}
+}
+
+// CRLF output must not leave stray carriage returns in the persisted
+// text, and output that is only whitespace is not a diagnostic.
+func TestBoundedFailureText_NormalizesAndDropsBlankOutput(t *testing.T) {
+	crlf := execErrorWithStderr("first line\r\nsecond line\r\n")
+	got := boundedFailureText(context.Background(), "run-1", "build", crlf)
+	if strings.Contains(got, "\r") {
+		t.Fatalf("carriage returns survived into the failure text: %q", got)
+	}
+	if !strings.HasSuffix(got, "second line") {
+		t.Fatalf("CRLF output mangled: %q", got)
+	}
+
+	blank := execErrorWithStderr("   \n\n \t \n")
+	got = boundedFailureText(context.Background(), "run-1", "build", blank)
+	if strings.Contains(got, "earlier output omitted") {
+		t.Fatalf("blank output must not get a marker: %q", got)
+	}
+	if strings.HasSuffix(got, "\n") {
+		t.Fatalf("blank output left trailing newlines: %q", got)
+	}
+	if _, ok := nodeFailureExcerpt(context.Background(), blank); ok {
+		t.Fatal("blank output must publish no excerpt")
+	}
+}
+
 // Without a run/node pair the marker degrades to a generic pointer
 // rather than emitting a command a reader cannot run.
 func TestFailureExcerptMarker_DegradesWithoutIDs(t *testing.T) {
