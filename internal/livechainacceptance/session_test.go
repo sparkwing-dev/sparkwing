@@ -360,6 +360,50 @@ func TestCompletedSessionReauthenticatesAcceptanceObservations(t *testing.T) {
 	}
 }
 
+func TestRollbackIntentAuthenticatesOriginalDeploymentBeforeEffect(t *testing.T) {
+	mutations := map[string]func(*Deployment){
+		"event":  func(deployment *Deployment) { deployment.EventID = "wrong" },
+		"commit": func(deployment *Deployment) { deployment.Commit = "1123456789abcdef0123456789abcdef01234567" },
+		"tree":   func(deployment *Deployment) { deployment.Tree = "99abcdef0123456789abcdef0123456789abcdef" },
+		"digest": func(deployment *Deployment) {
+			deployment.Digest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		},
+		"uid":  func(deployment *Deployment) { deployment.UID = "forged-deployment" },
+		"time": func(deployment *Deployment) { deployment.DeployedAt = deployment.DeployedAt.Add(time.Minute) },
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			a, b, script := validTwoFlowScript(t)
+			store := &memorySessionStore{}
+			effects := &durableEffects{script: script, creates: make(map[EffectKind]int)}
+			deps := durableTestDependencies(script, store, effects)
+			seed := SessionSeed{ID: "acceptance-session-rollback-target-" + name, Events: [2]LandEvent{a, b}}
+			if _, err := RunSession(context.Background(), seed, deps); err != nil {
+				t.Fatal(err)
+			}
+			store.mu.Lock()
+			store.session.Phase = SessionRollbackIntent
+			store.session.Proof.Rollback = Deployment{}
+			store.session.Proof.RollbackHealth = HealthReceipt{}
+			store.session.Proof.RollbackNotice = NotificationReceipt{}
+			mutate(&store.session.Proof.Deployments[0])
+			store.mu.Unlock()
+			effects.mu.Lock()
+			effects.applyCalls = make(map[EffectKind]int)
+			effects.mu.Unlock()
+
+			if _, err := RunSession(context.Background(), seed, deps); err == nil {
+				t.Fatal("forged rollback target was accepted")
+			}
+			effects.mu.Lock()
+			defer effects.mu.Unlock()
+			if effects.applyCalls[EffectRollback] != 0 {
+				t.Fatal("forged rollback target reached rollback effect")
+			}
+		})
+	}
+}
+
 func TestCleanupDeadlineBecomesDurablePageableFailure(t *testing.T) {
 	a, b, script := validTwoFlowScript(t)
 	store := &memorySessionStore{}
