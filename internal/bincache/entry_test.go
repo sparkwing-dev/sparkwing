@@ -3,12 +3,22 @@ package bincache
 import (
 	"context"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
+
+func TestCacheDiscoveryRejectsEffectivelyUnboundedCallerLimits(t *testing.T) {
+	if got := boundedCacheDiscoveryLimit(math.MaxInt); got != maxCacheDiscoveryEntries {
+		t.Fatalf("boundedCacheDiscoveryLimit(MaxInt) = %d, want %d", got, maxCacheDiscoveryEntries)
+	}
+	if got := boundedCacheDiscoveryLimit(7); got != 7 {
+		t.Fatalf("boundedCacheDiscoveryLimit(7) = %d, want 7", got)
+	}
+}
 
 func seedEntry(t *testing.T, entry Entry, body string, modTime time.Time) {
 	t.Helper()
