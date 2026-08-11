@@ -44,3 +44,35 @@ func TestPruneCoordinatorBusyDoesNotFabricateEntrySkip(t *testing.T) {
 		}
 	}
 }
+
+func TestPruneExaminedEntriesAreExactlyClassified(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	entry := testEntry(t, root, "11111111-11111111")
+	if _, err := enqueueCacheEntry(context.Background(), root, entry.key); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	examined, _ := fields["examined_entries"].(float64)
+	classified := 0.0
+	for _, name := range []string{"reclaimed_entries", "active_skipped_entries", "busy_skipped_entries"} {
+		value, _ := fields[name].(float64)
+		classified += value
+	}
+	if examined != classified {
+		t.Fatalf("examined_entries = %v, classified entries = %v: %s", examined, classified, raw)
+	}
+}
