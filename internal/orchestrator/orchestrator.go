@@ -393,7 +393,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan: %v", err))
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
 	}
-
 	snapMeta := planSnapshotMeta{
 		Secrets: sparkwingruntime.ReflectSecretsField(reg),
 	}
@@ -420,6 +419,24 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	if err != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("plan snapshot: %v", err))
 		return &Result{RunID: runID, Status: "failed", Error: err}, nil
+	}
+	planDigest := hashBytes(snapshot)
+	if validator, ok := opts.Runner.(runner.PlanValidator); ok {
+		projection := append([]byte(nil), snapshot...)
+		validationContext := rc
+		validationContext.Git = cloneGitIdentity(rc.Git)
+		validationContext.Trigger = cloneTriggerIdentity(rc.Trigger)
+		if err := validator.ValidatePlan(ctx, runner.PlanValidationRequest{
+			RunContext:       validationContext,
+			Args:             cloneStringMap(invokeArgs),
+			ProfileName:      profName,
+			ProfileIsLocal:   profIsLocal,
+			Projection:       projection,
+			ProjectionDigest: planDigest,
+		}); err != nil {
+			_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("runner plan validation: %v", err))
+			return &Result{RunID: runID, Status: "failed", Error: err}, nil
+		}
 	}
 	if err := backends.State.UpdatePlanSnapshot(ctx, runID, snapshot); err != nil {
 		_ = backends.State.FinishRun(ctx, runID, "failed", fmt.Sprintf("persist snapshot: %v", err))
@@ -474,6 +491,8 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	r := opts.Runner
 	if r == nil {
 		r = NewInProcessRunner(backends)
+	} else {
+		r = newCoordinatingRunner(backends, r)
 	}
 	ctx = secrets.WithMasker(ctx, masker)
 	if resolver, rerr := selectSecretResolver(ctx, opts); rerr != nil {
@@ -572,6 +591,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 			runCtx, backends, r, runID, plan, delegate, opts.Debug, opts.RetryOf,
 			opts.Pipeline, opts.Full, masker, opts.MaxParallel, snapMeta, onlySkip,
 			dispatchWaitTimeout, opts.Admission, leaseToken, leaseChildToken, leaseHostAdmitted,
+			invokeArgs, rc, profName, profIsLocal, planDigest,
 		)
 	}
 
@@ -840,6 +860,11 @@ func dispatch(
 	leaseToken string,
 	leaseChildToken string,
 	leaseHostAdmitted bool,
+	args map[string]string,
+	runContext sparkwing.RunContext,
+	profileName string,
+	profileIsLocal bool,
+	planDigest string,
 ) error {
 	runStart := time.Now()
 	dispatchCtx, cancelDispatch := context.WithCancelCause(ctx)
@@ -865,6 +890,7 @@ func dispatch(
 	state := newDispatchState(
 		dispatchCtx, backends, r, runID, pipeline, plan, delegate, debug, retryOf,
 		masker, maxParallel, admission, leaseToken, leaseChildToken, leaseHostAdmitted,
+		args, runContext, profileName, profileIsLocal, planDigest,
 	)
 	state.pipelineRequires = snapMeta.PipelineRequires
 	state.snapMeta = snapMeta
@@ -1160,6 +1186,33 @@ func hashBytes(buf []byte) string {
 	}
 	sum := sha256.Sum256(buf)
 	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func cloneStringMap(src map[string]string) map[string]string {
+	if src == nil {
+		return nil
+	}
+	out := make(map[string]string, len(src))
+	for key, value := range src {
+		out[key] = value
+	}
+	return out
+}
+
+func cloneGitIdentity(src *sparkwing.Git) *sparkwing.Git {
+	if src == nil {
+		return nil
+	}
+	return sparkwing.NewGit("", src.SHA, src.Branch, src.DefaultBranch, src.Repo, src.RepoURL)
+}
+
+func cloneTriggerIdentity(src sparkwing.TriggerInfo) sparkwing.TriggerInfo {
+	out := src
+	if src.PullRequest != nil {
+		pullRequest := *src.PullRequest
+		out.PullRequest = &pullRequest
+	}
+	return out
 }
 
 // buildReproducer assembles a `sparkwing run <pipeline> [flags] [args]` shell
@@ -1458,6 +1511,11 @@ type dispatchState struct {
 	runner           runner.Runner
 	runID            string
 	pipeline         string
+	args             map[string]string
+	runContext       sparkwing.RunContext
+	profileName      string
+	profileIsLocal   bool
+	planDigest       string
 	plan             *sparkwing.Plan
 	delegate         sparkwing.Logger
 	pipelineRequires []string // pipeline-level label requirements unioned into every node's effective requires
@@ -1521,6 +1579,11 @@ func newDispatchState(
 	leaseToken string,
 	leaseChildToken string,
 	leaseHostAdmitted bool,
+	args map[string]string,
+	runContext sparkwing.RunContext,
+	profileName string,
+	profileIsLocal bool,
+	planDigest string,
 ) *dispatchState {
 	if masker == nil {
 		masker = secrets.NewMasker()
@@ -1536,6 +1599,11 @@ func newDispatchState(
 		runner:         r,
 		runID:          runID,
 		pipeline:       pipeline,
+		args:           args,
+		runContext:     runContext,
+		profileName:    profileName,
+		profileIsLocal: profileIsLocal,
+		planDigest:     planDigest,
 		plan:           plan,
 		delegate:       delegate,
 		retryOf:        retryOf,
@@ -2283,6 +2351,12 @@ func (s *dispatchState) runOneNode(node *sparkwing.JobNode) {
 				RunID:               s.runID,
 				NodeID:              node.ID(),
 				Pipeline:            s.pipeline,
+				Args:                cloneStringMap(s.args),
+				Git:                 cloneGitIdentity(s.runContext.Git),
+				Trigger:             cloneTriggerIdentity(s.runContext.Trigger),
+				ProfileName:         s.profileName,
+				ProfileIsLocal:      s.profileIsLocal,
+				PlanDigest:          s.planDigest,
 				Node:                node,
 				Delegate:            s.delegate,
 				ReleaseWorkerSlot:   slot.release,
@@ -2646,23 +2720,25 @@ func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFail
 	ctx := sparkwing.WithFailure(s.resolverCtx, parentFailure)
 	ctx = withAdmissionWaitParticipant(ctx, node.ID())
 	if ipr, ok := s.runner.(*InProcessRunner); ok {
-		out, err := ipr.executeNodeWithAdmission(ctx, runner.Request{
+		return ipr.executeWithLocalAdmission(ctx, runner.Request{
 			RunID:    s.runID,
 			NodeID:   node.ID(),
 			Pipeline: s.pipeline,
 			Node:     node,
 			Delegate: s.delegate,
-		})
-		if err != nil {
-			return runner.Result{Outcome: sparkwing.Failed, Err: err}
-		}
-		return runner.Result{Outcome: sparkwing.Success, Output: out}
+		}, ipr.executeInProcess)
 	}
 	return s.runWithCap(node, func(slot *workerSlot) runner.Result {
 		return s.runner.RunNode(ctx, runner.Request{
 			RunID:               s.runID,
 			NodeID:              node.ID(),
 			Pipeline:            s.pipeline,
+			Args:                cloneStringMap(s.args),
+			Git:                 cloneGitIdentity(s.runContext.Git),
+			Trigger:             cloneTriggerIdentity(s.runContext.Trigger),
+			ProfileName:         s.profileName,
+			ProfileIsLocal:      s.profileIsLocal,
+			PlanDigest:          s.planDigest,
 			Node:                node,
 			Delegate:            s.delegate,
 			ReleaseWorkerSlot:   slot.release,
