@@ -17,10 +17,6 @@ import (
 // burning CPU can only be explained while it is still running, and the
 // operator's other option -- killing it -- is what destroys the evidence.
 func TestDiagnosticsDumpsOnSIGUSR1(t *testing.T) {
-	ledger, err := admission.New(admission.Config{TotalCores: 2, TotalMemoryBytes: 1 << 30})
-	if err != nil {
-		t.Fatal(err)
-	}
 	var mu sync.Mutex
 	var lines []string
 	d := &Daemon{
@@ -29,8 +25,7 @@ func TestDiagnosticsDumpsOnSIGUSR1(t *testing.T) {
 			defer mu.Unlock()
 			lines = append(lines, format)
 		}},
-		ledger: ledger,
-		quit:   make(chan struct{}),
+		quit: make(chan struct{}),
 	}
 	done := make(chan struct{})
 	defer close(done)
@@ -54,13 +49,13 @@ func TestDiagnosticsDumpsOnSIGUSR1(t *testing.T) {
 }
 
 func TestDiagnosticSummaryReportsWhatTheDaemonHolds(t *testing.T) {
-	ledger, err := admission.New(admission.Config{TotalCores: 2, TotalMemoryBytes: 1 << 30})
-	if err != nil {
-		t.Fatal(err)
+	d := &Daemon{
+		cfg:      Config{Version: "v1.2.3"},
+		conns:    map[*conn]struct{}{{role: roleHolder}: {}, {role: roleWaiter}: {}},
+		leaseRun: map[admission.LeaseID]string{"lease-1": "run-1"},
 	}
-	d := &Daemon{cfg: Config{Version: "v1.2.3"}, ledger: ledger}
 	summary := d.diagnosticSummary()
-	for _, want := range []string{"goroutines=", "conns=", "guards=", "waiters=", "v1.2.3"} {
+	for _, want := range []string{"goroutines=", "conns=2", "holders=1", "waiters=1", "leases=1", "guards=", "v1.2.3"} {
 		if !strings.Contains(summary, want) {
 			t.Fatalf("summary %q is missing %q", summary, want)
 		}

@@ -15,6 +15,10 @@ const diagnosticsStackBytes = 2 << 20
 // It never waits for the daemon mutex -- a dump requested because the
 // daemon is wedged must not wedge on the thing being investigated -- and
 // reports the contended mutex instead, which is itself the finding.
+//
+// What it reads under the lock is counting only, never a ledger snapshot
+// or any formatting: this runs on a daemon suspected of being stuck, so
+// the hold has to be as short as counting a few maps.
 func (d *Daemon) diagnosticSummary() string {
 	if !d.mu.TryLock() {
 		return fmt.Sprintf("goroutines=%d counts=unavailable (daemon mutex held) version=%s",
@@ -22,11 +26,20 @@ func (d *Daemon) diagnosticSummary() string {
 	}
 	conns := len(d.conns)
 	guards := len(d.guards)
+	leases := len(d.leaseRun)
 	reattach := len(d.reattachWait)
-	snap := d.ledger.Snapshot()
+	holders, waiters := 0, 0
+	for c := range d.conns {
+		switch c.role {
+		case roleHolder:
+			holders++
+		case roleWaiter:
+			waiters++
+		}
+	}
 	d.mu.Unlock()
-	return fmt.Sprintf("goroutines=%d conns=%d guards=%d leases=%d waiters=%d awaiting-reattach=%d version=%s",
-		runtime.NumGoroutine(), conns, guards, len(snap.Leases), len(snap.Waiters), reattach, d.cfg.Version)
+	return fmt.Sprintf("goroutines=%d conns=%d holders=%d waiters=%d leases=%d guards=%d awaiting-reattach=%d version=%s",
+		runtime.NumGoroutine(), conns, holders, waiters, leases, guards, reattach, d.cfg.Version)
 }
 
 // dumpGoroutineStacks returns every live goroutine's stack, truncated to
