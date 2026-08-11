@@ -210,3 +210,89 @@ func TestNextGuardDelayDoublesUpToTheCap(t *testing.T) {
 		t.Fatalf("backoff below a configured interval = %s, want %s", got, slow)
 	}
 }
+
+// partiallyFailingInspector answers one guarded session and fails the
+// other, which is what a single malformed guard among healthy ones looks
+// like -- and what a guarded leader exiting between two observations used
+// to look like before procgroup began reporting that as an answer.
+type partiallyFailingInspector struct {
+	mu        sync.Mutex
+	snapshots int
+	failPID   int
+}
+
+func (g *partiallyFailingInspector) Validate(wingwire.ProcessSession) error { return nil }
+
+func (g *partiallyFailingInspector) Quiescent(wingwire.ProcessSession) (bool, error) {
+	return false, nil
+}
+
+func (g *partiallyFailingInspector) Empty(session wingwire.ProcessSession) (bool, error) {
+	if session.LeaderPID == g.failPID {
+		return false, errors.New("inspection failed for this session")
+	}
+	return false, nil
+}
+
+func (g *partiallyFailingInspector) Terminate(wingwire.ProcessSession) error { return nil }
+
+func (g *partiallyFailingInspector) EmptySnapshot() (func(wingwire.ProcessSession) (bool, error), error) {
+	g.mu.Lock()
+	g.snapshots++
+	g.mu.Unlock()
+	return g.Empty, nil
+}
+
+func (g *partiallyFailingInspector) count() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.snapshots
+}
+
+// TestOneBrokenGuardDoesNotSlowTheSweep keeps the backoff pointed at the
+// condition it exists for. A daemon that can still read the machine owes
+// its other guarded runs a prompt release, so one session it cannot judge
+// is logged and left to the next sweep at full cadence.
+func TestOneBrokenGuardDoesNotSlowTheSweep(t *testing.T) {
+	const window = 300 * time.Millisecond
+	const interval = 10 * time.Millisecond
+	inspector := &partiallyFailingInspector{failPID: 1000}
+	d := guardSweepDaemon(inspector, 3, interval)
+
+	if err := d.reconcileGuards(); err != nil {
+		t.Fatalf("a sweep with one broken guard reported failure: %v", err)
+	}
+
+	done := make(chan struct{})
+	go d.guardLoop(done)
+	time.Sleep(window)
+	close(done)
+
+	if want := int(window/interval) / 3; inspector.count() < want {
+		t.Fatalf("sweeps = %d in %s, want at least %d; one broken guard slowed the whole loop", inspector.count(), window, want)
+	}
+}
+
+// TestEveryGuardFailingStillBacksOff is the other side: when no session
+// can be judged, the kernel view itself is unusable and retrying it at
+// full cadence is the spin this bounds.
+func TestEveryGuardFailingStillBacksOff(t *testing.T) {
+	const window = 500 * time.Millisecond
+	const interval = 10 * time.Millisecond
+	inspector := &partiallyFailingInspector{failPID: 1000}
+	d := guardSweepDaemon(inspector, 1, interval)
+
+	if err := d.reconcileGuards(); err == nil {
+		t.Fatal("a sweep whose only guard failed reported success")
+	}
+
+	done := make(chan struct{})
+	go d.guardLoop(done)
+	time.Sleep(window)
+	close(done)
+
+	unpaced := int(window / interval)
+	if got := inspector.count(); got >= unpaced/2 {
+		t.Fatalf("sweeps = %d in %s; unpaced would be about %d, so the backoff is not holding", got, window, unpaced)
+	}
+}

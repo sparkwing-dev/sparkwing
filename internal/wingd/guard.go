@@ -294,10 +294,12 @@ func nextGuardDelay(current, base time.Duration) time.Duration {
 }
 
 // reconcileGuards releases every guarded lease whose process session has
-// gone empty. It returns the first inspection failure so the caller can
-// slow down: an inspection error means the kernel view is unavailable,
-// and repeating it immediately neither answers the question nor leaves
-// the daemon idle.
+// gone empty. The error it returns is the caller's signal to slow down,
+// so it reports only the failures that mean the kernel view itself is
+// unusable: a snapshot that could not be taken, or every guard in the
+// sweep failing. One broken guard among working ones is logged and left
+// to the next sweep at full cadence, because the daemon can still see the
+// machine and the other guarded runs are entitled to prompt release.
 func (d *Daemon) reconcileGuards() error {
 	d.mu.Lock()
 	guards := d.reconcilableGuardsLocked()
@@ -310,9 +312,11 @@ func (d *Daemon) reconcileGuards() error {
 		return fmt.Errorf("snapshot guarded sessions: %w", err)
 	}
 	var failure error
+	failed := 0
 	for _, guard := range guards {
 		empty, err := sessionEmpty(guard.Session)
 		if err != nil {
+			failed++
 			if failure == nil {
 				failure = fmt.Errorf("inspect run %s: %w", guard.RunID, err)
 			}
@@ -323,7 +327,13 @@ func (d *Daemon) reconcileGuards() error {
 		}
 		d.completeEmptyGuard(guard)
 	}
-	return failure
+	if failed == len(guards) {
+		return failure
+	}
+	if failure != nil {
+		d.cfg.logf("guard: %v", failure)
+	}
+	return nil
 }
 
 // guardEmptyProbe returns the emptiness probe for one sweep: a snapshot
