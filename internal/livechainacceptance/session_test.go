@@ -334,6 +334,32 @@ func TestCompletedSessionReconcilesEveryDurableEffect(t *testing.T) {
 	}
 }
 
+func TestCompletedSessionReauthenticatesAcceptanceObservations(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		reject func(*scriptedAcceptance)
+	}{
+		{name: "artifact", reject: func(script *scriptedAcceptance) { script.rejectArtifactAuth = true }},
+		{name: "health", reject: func(script *scriptedAcceptance) { script.rejectHealthAuth = true }},
+		{name: "failure", reject: func(script *scriptedAcceptance) { script.rejectFailureAuth = true }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			a, b, script := validTwoFlowScript(t)
+			store := &memorySessionStore{}
+			effects := &durableEffects{script: script, creates: make(map[EffectKind]int)}
+			deps := durableTestDependencies(script, store, effects)
+			seed := SessionSeed{ID: "acceptance-session-reauth-" + test.name, Events: [2]LandEvent{a, b}}
+			if _, err := RunSession(context.Background(), seed, deps); err != nil {
+				t.Fatal(err)
+			}
+			test.reject(script)
+			if _, err := RunSession(context.Background(), seed, deps); err == nil {
+				t.Fatalf("completed proof survived %s authority rejection", test.name)
+			}
+		})
+	}
+}
+
 func TestCleanupDeadlineBecomesDurablePageableFailure(t *testing.T) {
 	a, b, script := validTwoFlowScript(t)
 	store := &memorySessionStore{}

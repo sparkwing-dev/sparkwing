@@ -8,13 +8,16 @@ import (
 )
 
 type scriptedAcceptance struct {
-	mu          sync.Mutex
-	events      []LandEvent
-	chains      map[string][]Acknowledgement
-	log         []string
-	notifyErr   NotificationKind
-	removeCalls int
-	clock       time.Time
+	mu                 sync.Mutex
+	events             []LandEvent
+	chains             map[string][]Acknowledgement
+	log                []string
+	notifyErr          NotificationKind
+	removeCalls        int
+	clock              time.Time
+	rejectArtifactAuth bool
+	rejectHealthAuth   bool
+	rejectFailureAuth  bool
 }
 
 func (s *scriptedAcceptance) tick() time.Time {
@@ -51,6 +54,16 @@ func (s *scriptedAcceptance) VerifyArtifact(_ context.Context, event LandEvent) 
 	return Artifact{EventID: event.EventID, Commit: event.Commit, Tree: event.Tree, Digest: event.ArtifactManifestDigest, VerifiedAt: s.tick()}, nil
 }
 
+func (s *scriptedAcceptance) AuthenticateArtifact(_ context.Context, event LandEvent, artifact Artifact) error {
+	if s.rejectArtifactAuth {
+		return fmt.Errorf("artifact authority rejected receipt")
+	}
+	if artifact.EventID != event.EventID || artifact.Commit != event.Commit || artifact.Tree != event.Tree || artifact.Digest != event.ArtifactManifestDigest || artifact.VerifiedAt.IsZero() {
+		return fmt.Errorf("artifact receipt is not authenticated")
+	}
+	return nil
+}
+
 func (s *scriptedAcceptance) Deploy(_ context.Context, artifact Artifact) (Deployment, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -63,6 +76,13 @@ func (s *scriptedAcceptance) Healthy(_ context.Context, deployment Deployment) (
 	defer s.mu.Unlock()
 	s.log = append(s.log, "health:"+deployment.Commit)
 	return HealthReceipt{EventID: deployment.EventID, Commit: deployment.Commit, Tree: deployment.Tree, Digest: deployment.Digest, DeploymentUID: deployment.UID, Healthy: true, ObservedAt: s.tick()}, nil
+}
+
+func (s *scriptedAcceptance) AuthenticateHealth(_ context.Context, deployment Deployment, receipt HealthReceipt) error {
+	if s.rejectHealthAuth {
+		return fmt.Errorf("health authority rejected receipt")
+	}
+	return validateHealthReceipt(deployment, receipt)
 }
 
 func (s *scriptedAcceptance) Notify(_ context.Context, req NotificationRequest) (NotificationReceipt, error) {
@@ -87,6 +107,13 @@ func (s *scriptedAcceptance) ObserveFailure(_ context.Context, fault Fault) (Fai
 	defer s.mu.Unlock()
 	s.log = append(s.log, "failure:"+fault.DeploymentUID)
 	return FailureReceipt{FaultID: fault.ID, DeploymentUID: fault.DeploymentUID, Digest: fault.Digest, Unhealthy: true, ObservedAt: s.tick()}, nil
+}
+
+func (s *scriptedAcceptance) AuthenticateFailure(_ context.Context, fault Fault, receipt FailureReceipt) error {
+	if s.rejectFailureAuth {
+		return fmt.Errorf("failure authority rejected receipt")
+	}
+	return validateFailureReceipt(fault, receipt)
 }
 
 func (s *scriptedAcceptance) RemoveFailure(_ context.Context, request CleanupRequest) (CleanupReceipt, error) {
