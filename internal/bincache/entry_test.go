@@ -320,6 +320,10 @@ func TestStatusMeasuresManagedLivenessAndLegacyBytes(t *testing.T) {
 }
 
 func TestPruneRetiresLegacyEntriesAutomatically(t *testing.T) {
+	originalNow := cacheNow
+	t.Cleanup(func() { cacheNow = originalNow })
+	now := time.Unix(100, 0)
+	cacheNow = func() time.Time { return now }
 	cacheRoot := t.TempDir()
 	root := filepath.Join(cacheRoot, pipelineCacheSchema)
 	legacyDir := filepath.Join(cacheRoot, "11111111-11111111")
@@ -334,10 +338,73 @@ func TestPruneRetiresLegacyEntriesAutomatically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.ReclaimedBytes != 6 || result.Reclaimed != 1 || !result.GoalSatisfied {
-		t.Fatalf("legacy prune result = %+v", result)
+	if result.Reclaimed != 0 || result.GoalSatisfied {
+		t.Fatalf("first legacy prune must quarantine without claiming bytes: %+v", result)
 	}
 	if _, err := os.Stat(legacyDir); !os.IsNotExist(err) {
-		t.Fatalf("legacy entry remains: %v", err)
+		t.Fatalf("legacy entry remains in its live namespace: %v", err)
+	}
+	quarantine := filepath.Join(root, "legacy-retired", "11111111-11111111")
+	if _, err := os.Stat(quarantine); err != nil {
+		t.Fatalf("quarantined entry: %v", err)
+	}
+
+	now = now.Add(legacyRetirementGrace)
+	result, err = Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ReclaimedBytes != 6 || result.Reclaimed != 1 || !result.GoalSatisfied {
+		t.Fatalf("mature legacy prune result = %+v", result)
+	}
+	if _, err := os.Stat(quarantine); !os.IsNotExist(err) {
+		t.Fatalf("mature quarantine remains: %v", err)
+	}
+}
+
+func TestPruneQuarantinesActiveLegacyWriterUntilGraceExpires(t *testing.T) {
+	originalNow := cacheNow
+	t.Cleanup(func() { cacheNow = originalNow })
+	now := time.Unix(100, 0)
+	cacheNow = func() time.Time { return now }
+	cacheRoot := t.TempDir()
+	root := filepath.Join(cacheRoot, pipelineCacheSchema)
+	legacyDir := filepath.Join(cacheRoot, "11111111-11111111")
+	if err := os.MkdirAll(legacyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := os.OpenFile(filepath.Join(legacyDir, "pipelines"), os.O_CREATE|os.O_WRONLY, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = writer.Close() }()
+	if _, err := writer.WriteString("before"); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1}); err != nil {
+		t.Fatal(err)
+	}
+	quarantine := filepath.Join(root, "legacy-retired", "11111111-11111111")
+	if _, err := writer.WriteString("after"); err != nil {
+		t.Fatalf("quarantine interrupted active writer: %v", err)
+	}
+	now = now.Add(legacyRetirementGrace - time.Second)
+	if _, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(quarantine); err != nil {
+		t.Fatalf("active writer quarantine retired before grace: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Reclaimed != 1 || !result.GoalSatisfied {
+		t.Fatalf("closed writer quarantine was not reclaimed: %+v", result)
 	}
 }
