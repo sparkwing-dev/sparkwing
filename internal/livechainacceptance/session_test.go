@@ -356,6 +356,72 @@ func TestCleanupDeadlineBecomesDurablePageableFailure(t *testing.T) {
 	}
 }
 
+func TestCleanupResponseLossAtDeadlineReconcilesNoResidue(t *testing.T) {
+	a, b, script := validTwoFlowScript(t)
+	store := &memorySessionStore{}
+	effects := &durableEffects{script: script, creates: make(map[EffectKind]int), loseResponse: EffectRemoveFailure}
+	clock := &manualClock{now: time.Date(2026, 8, 11, 14, 0, 0, 0, time.UTC)}
+	deps := durableTestDependencies(script, store, effects)
+	deps.Clock = clock
+	seed := SessionSeed{ID: "acceptance-session-cleanup-response-loss", Events: [2]LandEvent{a, b}}
+	if _, err := RunSession(context.Background(), seed, deps); err == nil {
+		t.Fatal("lost cleanup response did not interrupt the driver")
+	}
+	clock.Advance(6 * time.Minute)
+	proof, err := RunSession(context.Background(), seed, deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !proof.Cleanup.NoResidue || proof.Cleanup.FaultID != effectID(seed.ID, EffectInjectFailure) {
+		t.Fatalf("cleanup proof = %+v", proof.Cleanup)
+	}
+	effects.mu.Lock()
+	defer effects.mu.Unlock()
+	if effects.creates[EffectRemoveFailure] != 1 || effects.reconcileCalls[EffectRemoveFailure] == 0 {
+		t.Fatalf("cleanup create/reconcile = %d/%d, want 1/positive", effects.creates[EffectRemoveFailure], effects.reconcileCalls[EffectRemoveFailure])
+	}
+}
+
+func TestExpiredFaultIntentRejectsMalformedReconciledReceipt(t *testing.T) {
+	mutations := map[string]func(*Fault){
+		"id":             func(fault *Fault) { fault.ID = "wrong" },
+		"event":          func(fault *Fault) { fault.EventID = "wrong" },
+		"deployment_uid": func(fault *Fault) { fault.DeploymentUID = "wrong" },
+		"digest": func(fault *Fault) {
+			fault.Digest = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		},
+		"time": func(fault *Fault) { fault.InjectedAt = time.Time{} },
+	}
+	for name, mutate := range mutations {
+		t.Run(name, func(t *testing.T) {
+			a, b, script := validTwoFlowScript(t)
+			store := &memorySessionStore{}
+			effects := &durableEffects{script: script, creates: make(map[EffectKind]int), loseResponse: EffectInjectFailure}
+			clock := &manualClock{now: time.Date(2026, 8, 11, 14, 0, 0, 0, time.UTC)}
+			deps := durableTestDependencies(script, store, effects)
+			deps.Clock = clock
+			seed := SessionSeed{ID: "acceptance-session-corrupt-reconciled-fault-" + name, Events: [2]LandEvent{a, b}}
+			if _, err := RunSession(context.Background(), seed, deps); err == nil {
+				t.Fatal("lost injection response did not interrupt the driver")
+			}
+			effects.mu.Lock()
+			result := effects.results[effectID(seed.ID, EffectInjectFailure)]
+			mutate(&result.Fault)
+			effects.results[effectID(seed.ID, EffectInjectFailure)] = result
+			effects.mu.Unlock()
+			clock.Advance(6 * time.Minute)
+			if _, err := RunSession(context.Background(), seed, deps); err == nil {
+				t.Fatal("malformed reconciled fault was accepted")
+			}
+			effects.mu.Lock()
+			defer effects.mu.Unlock()
+			if effects.creates[EffectRemoveFailure] != 0 {
+				t.Fatal("malformed reconciled fault was credited to cleanup")
+			}
+		})
+	}
+}
+
 func durableTestDependencies(script *scriptedAcceptance, store SessionStore, effects EffectExecutor) DurableDependencies {
 	return DurableDependencies{
 		Authority: testAuthority{}, Production: script, Artifacts: script, Health: script,
