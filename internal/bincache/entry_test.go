@@ -207,3 +207,44 @@ func TestPruneAttemptsEveryCandidateAndJoinsRemovalFailures(t *testing.T) {
 		t.Fatalf("failed removal accounting: %+v", result)
 	}
 }
+
+func TestAcquireOrMaterializeClosesPublicationToLeaseGap(t *testing.T) {
+	root := t.TempDir()
+	entry := testEntry(t, root, "11111111-11111111")
+	writes := 0
+	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(path string) error {
+		writes++
+		return os.WriteFile(path, []byte("leased"), 0o755)
+	})
+	if err != nil {
+		t.Fatalf("AcquireOrMaterialize: %v", err)
+	}
+	if !published || writes != 1 {
+		t.Fatalf("published = %v, writes = %d", published, writes)
+	}
+
+	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatalf("Prune with returned lease: %v", err)
+	}
+	if result.Active != 1 || result.Reclaimed != 0 {
+		t.Fatalf("returned lease did not protect publication: %+v", result)
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+
+	lease, published, err = entry.AcquireOrMaterialize(context.Background(), func(string) error {
+		writes++
+		return errors.New("writer must not run on a hit")
+	})
+	if err != nil {
+		t.Fatalf("AcquireOrMaterialize hit: %v", err)
+	}
+	if published || writes != 1 {
+		t.Fatalf("hit published = %v, writes = %d", published, writes)
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatalf("Release hit: %v", err)
+	}
+}
