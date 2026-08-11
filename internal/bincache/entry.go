@@ -15,8 +15,6 @@ import (
 
 const pipelineCacheSchema = "v1"
 
-var errCacheAuthorityUnavailable = errors.New("pipeline cache authority unavailable")
-
 var pipelineEntryKeyRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{8}$`)
 
 var removeCacheEntry = os.RemoveAll
@@ -282,8 +280,81 @@ func Prune(ctx context.Context, opts PruneOptions) (result PruneResult, err erro
 }
 
 // Status measures the pipeline cache without deleting entries.
-func Status(context.Context, string) (CacheStatus, error) {
-	return CacheStatus{}, errCacheAuthorityUnavailable
+func Status(ctx context.Context, root string) (status CacheStatus, err error) {
+	if root == "" {
+		root = filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema)
+	}
+	candidates, err := cacheCandidates(root)
+	if err != nil {
+		return status, err
+	}
+	for _, candidate := range candidates {
+		if err := ctx.Err(); err != nil {
+			return status, err
+		}
+		entry := Entry{root: root, key: candidate.key}
+		writer, acquired, err := entry.tryLock("writer")
+		if err != nil {
+			return status, err
+		}
+		if !acquired {
+			status.BusyEntries++
+			continue
+		}
+		size, sizeErr := treeSize(entry.entryDir())
+		if os.IsNotExist(sizeErr) {
+			if closeErr := errors.Join(cacheUnlock(writer), writer.Close()); closeErr != nil {
+				return status, closeErr
+			}
+			continue
+		}
+		if sizeErr != nil {
+			_ = cacheUnlock(writer)
+			_ = writer.Close()
+			return status, sizeErr
+		}
+		status.EntryCount++
+		status.ObservedBytes += size
+		lease, acquired, lockErr := entry.tryLock("lease")
+		if lockErr != nil {
+			_ = cacheUnlock(writer)
+			_ = writer.Close()
+			return status, lockErr
+		}
+		if !acquired {
+			status.ActiveEntries++
+			status.ActiveBytes += size
+		} else if closeErr := errors.Join(cacheUnlock(lease), lease.Close()); closeErr != nil {
+			_ = cacheUnlock(writer)
+			_ = writer.Close()
+			return status, closeErr
+		}
+		if closeErr := errors.Join(cacheUnlock(writer), writer.Close()); closeErr != nil {
+			return status, closeErr
+		}
+	}
+	if filepath.Base(root) != pipelineCacheSchema {
+		return status, nil
+	}
+	legacy, err := os.ReadDir(filepath.Dir(root))
+	if os.IsNotExist(err) {
+		return status, nil
+	}
+	if err != nil {
+		return status, err
+	}
+	for _, candidate := range legacy {
+		if !candidate.IsDir() || !pipelineEntryKeyRE.MatchString(candidate.Name()) {
+			continue
+		}
+		size, err := treeSize(filepath.Join(filepath.Dir(root), candidate.Name()))
+		if err != nil {
+			return status, err
+		}
+		status.LegacyEntries++
+		status.LegacyBytes += size
+	}
+	return status, nil
 }
 
 func (e Entry) binaryPath() string {
