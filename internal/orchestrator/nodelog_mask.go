@@ -24,8 +24,13 @@ func (l *maskingNodeLog) Log(level, msg string) {
 	l.inner.Log(level, l.masker.Mask(msg))
 }
 
+// Emit redacts the message and the record's structured attributes.
+// Attributes are not decoration: step_end carries the failed command's
+// full output in attrs["error"], so masking Msg alone left the secret
+// in the persisted log one line below the redacted one.
 func (l *maskingNodeLog) Emit(rec sparkwing.LogRecord) {
 	rec.Msg = l.masker.Mask(rec.Msg)
+	rec.Attrs = l.masker.MaskAttrs(rec.Attrs)
 	l.inner.Emit(rec)
 }
 

@@ -6,6 +6,8 @@ package secrets
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 
@@ -65,9 +67,13 @@ func (l *WrappedLogger) Log(level, msg string) {
 	l.inner.Log(level, l.masker.Mask(msg))
 }
 
-// Emit satisfies sparkwing.Logger.
+// Emit satisfies sparkwing.Logger. Both the message and the record's
+// structured attributes are redacted: step_end carries the failing
+// command's output in attrs["error"], which is exactly the place a
+// secret that reached a command line surfaces.
 func (l *WrappedLogger) Emit(rec sparkwing.LogRecord) {
 	rec.Msg = l.masker.Mask(rec.Msg)
+	rec.Attrs = l.masker.MaskAttrs(rec.Attrs)
 	l.inner.Emit(rec)
 }
 
@@ -120,6 +126,125 @@ func (m *Masker) Mask(s string) string {
 		s = strings.ReplaceAll(s, v, "***")
 	}
 	return s
+}
+
+// maskAttrsMaxDepth bounds recursion into nested attribute values.
+// Log attributes are shallow JSON-ish data in practice; the cap is
+// insurance against a pathological (or cyclic) map rather than a
+// meaningful limit.
+const maskAttrsMaxDepth = 8
+
+// MaskAttrs returns attrs with every string value redacted, recursing
+// into the container shapes an attribute value takes ([]string, []any,
+// nested map[string]any). Values of any other type pass through
+// untouched.
+//
+// Copy-on-write: the input map is never mutated, and when nothing
+// needed redacting the input map itself is returned, so the common
+// case (no secrets registered, or none present in this record) costs
+// one map lookup and no allocation. That matters because attribute
+// maps are shared -- run_start hands the same invocation map to the
+// log record and to the persisted run row.
+func (m *Masker) MaskAttrs(attrs map[string]any) map[string]any {
+	if m == nil || len(attrs) == 0 {
+		return attrs
+	}
+	m.mu.RLock()
+	none := len(m.values) == 0
+	m.mu.RUnlock()
+	if none {
+		return attrs
+	}
+	out, _ := m.maskAttrs(attrs, 0)
+	return out
+}
+
+// maskAttrs is MaskAttrs's recursive half; the bool reports whether
+// anything was rewritten so callers can skip the copy.
+func (m *Masker) maskAttrs(attrs map[string]any, depth int) (map[string]any, bool) {
+	if len(attrs) == 0 || depth > maskAttrsMaxDepth {
+		return attrs, false
+	}
+	var out map[string]any
+	for k, v := range attrs {
+		mv, changed := m.maskValue(v, depth+1)
+		if !changed {
+			continue
+		}
+		if out == nil {
+			out = make(map[string]any, len(attrs))
+			maps.Copy(out, attrs)
+		}
+		out[k] = mv
+	}
+	if out == nil {
+		return attrs, false
+	}
+	return out, true
+}
+
+// maskValue redacts one attribute value, reporting whether it changed.
+func (m *Masker) maskValue(v any, depth int) (any, bool) {
+	if depth > maskAttrsMaxDepth {
+		return v, false
+	}
+	switch t := v.(type) {
+	case string:
+		masked := m.Mask(t)
+		return masked, masked != t
+	case []string:
+		var out []string
+		for i, s := range t {
+			masked := m.Mask(s)
+			if masked == s {
+				continue
+			}
+			if out == nil {
+				out = slices.Clone(t)
+			}
+			out[i] = masked
+		}
+		if out == nil {
+			return t, false
+		}
+		return out, true
+	case []any:
+		var out []any
+		for i, e := range t {
+			masked, changed := m.maskValue(e, depth+1)
+			if !changed {
+				continue
+			}
+			if out == nil {
+				out = slices.Clone(t)
+			}
+			out[i] = masked
+		}
+		if out == nil {
+			return t, false
+		}
+		return out, true
+	case map[string]any:
+		return m.maskAttrs(t, depth)
+	case map[string]string:
+		var out map[string]string
+		for k, s := range t {
+			masked := m.Mask(s)
+			if masked == s {
+				continue
+			}
+			if out == nil {
+				out = maps.Clone(t)
+			}
+			out[k] = masked
+		}
+		if out == nil {
+			return t, false
+		}
+		return out, true
+	default:
+		return v, false
+	}
 }
 
 // Values returns a snapshot of the registered values. Primarily for

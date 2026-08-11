@@ -2,7 +2,9 @@ package orchestrator_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -110,6 +112,41 @@ func TestRun_FailedNodeRecordsBoundedMaskedExcerpt(t *testing.T) {
 	wantPointer := "sparkwing runs logs --run " + res.RunID + " --node build"
 	if !strings.Contains(build.Error, wantPointer) {
 		t.Fatalf("persisted error missing %q:\n%s", wantPointer, build.Error)
+	}
+
+	// The node log holds the full output, and every record in it --
+	// including the structured attributes of step_end, which carry the
+	// failed command's whole error text -- is redacted.
+	logBody, err := os.ReadFile(p.NodeLog(res.RunID, "build"))
+	if err != nil {
+		t.Fatalf("read node log: %v", err)
+	}
+	if strings.Contains(string(logBody), excerptSecretValue) {
+		t.Fatalf("persisted node log leaks the raw secret value")
+	}
+	var sawStepEndError bool
+	for line := range strings.SplitSeq(strings.TrimSpace(string(logBody)), "\n") {
+		var rec struct {
+			Event string         `json:"event"`
+			Attrs map[string]any `json:"attrs"`
+		}
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatalf("decode log line %q: %v", line, err)
+		}
+		if rec.Event != "step_end" {
+			continue
+		}
+		msg, _ := rec.Attrs["error"].(string)
+		if msg == "" {
+			continue
+		}
+		sawStepEndError = true
+		if !strings.Contains(msg, "auth token *** rejected") {
+			t.Fatalf("step_end attrs.error is not redacted:\n%s", msg)
+		}
+	}
+	if !sawStepEndError {
+		t.Fatal("expected a step_end record carrying the step's error in attrs")
 	}
 
 	deploy, err := st.GetNode(ctx, res.RunID, "deploy")

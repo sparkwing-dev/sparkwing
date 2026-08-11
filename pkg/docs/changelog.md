@@ -65,6 +65,12 @@ code change to unlock.
 
 ### Security
 
+- **orchestrator:** Redact secret values in the structured attributes of node log
+  records, not just their messages. A failed step reports the command's whole
+  error text in `attrs.error`, so a secret that reached a command line or its
+  output was persisted in the node log one line below the redacted message --
+  on every execution path, local included. String attributes are now masked,
+  including strings nested in lists and maps.
 - **orchestrator:** Redact secret values in node logs written by cluster and pod
   node execution. `run-node` built the per-run masker from the pipeline's secret
   arguments and wired it into secret resolution, but never installed it on the
