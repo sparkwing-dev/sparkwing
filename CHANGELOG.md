@@ -50,6 +50,15 @@ code change to unlock.
 ## [Unreleased]
 ### Fixed
 
+- **orchestrator:** Make local and cluster argument semantics agree. A run row
+  records only the arguments the operator passed; the `defaults.args` and
+  pipeline `args:` layers are re-read from the checkout that executes, so a
+  retry picks up the project's current values. The cluster node entrypoint and
+  `debug replay` never performed that second read, so the same commit planned
+  with the project's arguments on a laptop and without them in a pod -- and a
+  `secret:"true"` input supplied by `sparkwing.yaml` was never registered with
+  the pod's log masker. Both paths now merge the checkout's layers under the
+  stored arguments, which still win per key.
 - **orchestrator:** Evaluate `arg:<flag>=<value>` guards against the arguments
   the run actually executes with. Guards were judged on the caller's arguments
   alone, so a value supplied by the project's `defaults.args` block or a

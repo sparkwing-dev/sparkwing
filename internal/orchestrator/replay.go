@@ -94,7 +94,13 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		Trigger:   sparkwing.TriggerInfo{Source: "replay"},
 		StartedAt: run.StartedAt,
 	}
-	plan, err := reg.Invoke(ctx, run.Args, rc)
+	// Same layering as the run being replayed: `replay-node` execs the
+	// pipeline binary out of the project's own .sparkwing/, so the yaml
+	// layers the original plan merged in are on disk here too. Planning
+	// from the bare run row instead would rebuild a different plan than
+	// the one whose dispatch snapshot is about to be replayed into it.
+	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args)
+	plan, err := reg.Invoke(ctx, invokeArgs, rc)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("build plan: %w", err)
 	}
@@ -144,8 +150,8 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		return nil, false
 	})
 
-	// Seeded from the same run.Args the reg.Invoke above planned with.
-	masker := maskerForInvokeArgs(reg, run.Args)
+	// Seeded from the same args the reg.Invoke above planned with.
+	masker := maskerForInvokeArgs(reg, invokeArgs)
 	src := secrets.NewDotenvSource("")
 	ctx = sparkwing.WithSecretResolver(ctx, secrets.NewCached(src, masker).AsResolver())
 	ctx = secrets.WithMasker(ctx, masker)
@@ -155,7 +161,7 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		RunID:    runID,
 		NodeID:   nodeID,
 		Pipeline: run.Pipeline,
-		Args:     run.Args,
+		Args:     invokeArgs,
 		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
 			run.GitSHA, run.GitBranch, "", run.Repo, run.RepoURL),
 		Trigger:  sparkwing.TriggerInfo{Source: "replay"},

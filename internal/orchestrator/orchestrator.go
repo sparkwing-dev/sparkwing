@@ -24,6 +24,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
@@ -1072,6 +1073,46 @@ func mergeInvokeArgs(opts Options) map[string]string {
 	maps.Copy(merged, pipelineArgs)
 	maps.Copy(merged, opts.Args)
 	return merged
+}
+
+// checkoutInvokeArgs is [mergeInvokeArgs] for the entry points that
+// execute a stored run row rather than a freshly built Options: the
+// cluster node entrypoint (RunNodeOnce) and replay. Those callers get
+// store.Run.Args, which is the operator's explicit layer and nothing
+// else, because that is deliberately all the run row records -- the
+// yaml layers are re-read from the checkout that runs, so a retry
+// picks up the project's current defaults instead of a months-old copy.
+//
+// Re-reading them is therefore not optional here; it is the other half
+// of that decision. Skip it and the same commit plans one way on a
+// laptop and another way in a pod, with the pod quietly missing every
+// value the project declared -- an image tag, a region, a `secret:"true"`
+// input the masker then never sees. Both callers execute out of the
+// project checkout (the pod's remote-compile child runs with the fetched
+// repo as its working directory; replay execs the pipeline binary from
+// the local .sparkwing/), so the layers are right there on disk.
+//
+// Degrades to stored when there is no discoverable project: a runner
+// image with the pipeline baked in has no sparkwing.yaml to read, and
+// the stored args remain the whole set, exactly as before.
+func checkoutInvokeArgs(pipeline string, stored map[string]string) map[string]string {
+	root := sparkwing.CurrentRuntime().WorkDir
+	if root == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return stored
+		}
+		root = cwd
+	}
+	_, cfg, err := projectconfig.Discover(root)
+	if err != nil || cfg == nil {
+		return stored
+	}
+	return mergeInvokeArgs(Options{
+		Args:         stored,
+		DefaultArgs:  cfg.Defaults.Args,
+		PipelineYAML: (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline),
+	})
 }
 
 // buildRunInvocation snapshots how this run was started: run-id,
