@@ -169,14 +169,87 @@ jobs:
           path: dist
           merge-multiple: true
 
+      # Ad-hoc-sign the macOS Mach-O assets BEFORE SHA256SUMS is
+      # computed, so the published+hashed bytes are already
+      # Gatekeeper-valid and `sparkwing update` installs them UNCHANGED
+      # (the client no longer codesigns after verification -- doing so
+      # would mutate the verified bytes). rcodesign is a pure-Rust,
+      # cross-platform Apple code-signer, so this runs on the Linux
+      # runner with no macOS host. Version pinned; the released binary is
+      # fetched rather than built to keep the step fast.
+      - name: Ad-hoc-sign macOS binaries (rcodesign)
+        working-directory: dist
+        run: |
+          set -euo pipefail
+          RCODESIGN_VERSION=0.27.0
+          url="https://github.com/indygreg/apple-platform-rs/releases/download/apple-codesign%2F${RCODESIGN_VERSION}/apple-codesign-${RCODESIGN_VERSION}-x86_64-unknown-linux-musl.tar.gz"
+          curl -fSL "$url" -o rcodesign.tar.gz
+          tar xzf rcodesign.tar.gz
+          rc="$(find . -type f -name rcodesign | head -1)"
+          chmod +x "$rc"
+          for f in *-darwin-*; do
+            echo "==> ad-hoc signing $f"
+            "$rc" sign "$f"
+          done
+          rm -rf rcodesign.tar.gz apple-codesign-*
+
       - name: Compute SHA256SUMS
         # Operators verifying via install.sh (or any third party) can
         # diff against this; the contents are fully reproducible from
-        # the GitHub-Actions-built binaries.
+        # the GitHub-Actions-built binaries. Computed AFTER the macOS
+        # ad-hoc signing above so the digests match the shipped bytes.
         working-directory: dist
         run: |
           sha256sum sparkwing-* > SHA256SUMS
           ls -la
+
+      # Sign SHA256SUMS with the ed25519 private key so `sparkwing
+      # update` can verify the manifest with the public key compiled
+      # into the CLI (cmd/sparkwing/update.go). cmd/sign-manifest is the
+      # auditable Go signer, using the same crypto/ed25519 as the client.
+      #
+      # ARMING (one time, by the release owner):
+      #   1. go run ./cmd/sign-manifest -genkey
+      #   2. paste the printed PUBLIC key into sparkwingUpdatePubKeyHex
+      #      in cmd/sparkwing/update.go and ship a release with it.
+      #   3. store the printed PRIVATE key (base64) as the repo secret
+      #      SPARKWING_UPDATE_SIGNING_KEY
+      #      (Settings -> Secrets and variables -> Actions).
+      #
+      # Until the secret is set this step skips with a warning and no
+      # SHA256SUMS.sig is uploaded, so a CLI carrying the real public key
+      # fails closed (it cannot verify an unsigned release) rather than
+      # installing unverified bytes.
+      - name: Sign SHA256SUMS (ed25519 detached signature)
+        env:
+          SPARKWING_UPDATE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SPARKWING_UPDATE_SIGNING_KEY:-}" ]; then
+            echo "::warning::SPARKWING_UPDATE_SIGNING_KEY is not set; skipping SHA256SUMS.sig. \
+          sparkwing update will fail closed until the signing key is armed (see cmd/sparkwing/update.go)."
+            exit 0
+          fi
+          go run ./cmd/sign-manifest -in dist/SHA256SUMS -out dist/SHA256SUMS.sig
+          ls -la dist/SHA256SUMS.sig
+
+      # Auditor convenience only: a cosign keyless signature over the
+      # manifest, committing the workflow+repo+tag identity via GitHub
+      # OIDC. The updater does NOT consume this -- its trust root is the
+      # embedded ed25519 key above -- so a cosign/Rekor hiccup must never
+      # fail the release; continue-on-error keeps it advisory.
+      - name: Sign SHA256SUMS for auditors (cosign keyless)
+        continue-on-error: true
+        uses: sigstore/cosign-installer@v3
+      - name: cosign sign-blob SHA256SUMS
+        continue-on-error: true
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          cosign sign-blob --yes \
+            --bundle dist/SHA256SUMS.cosign.bundle \
+            dist/SHA256SUMS
 
       - name: Verify release asset schema parity
         # Pre-publish gate: the uploaded linux/amd64 binary must embed
