@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -112,7 +113,16 @@ func ensureRunDaemon() {
 		return
 	}
 
-	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{Version: installedVersion()})
+	// Replacing a daemon disconnects every current holder into a
+	// reconnect/reattach cycle. That is a thing done to other people's
+	// running work, so it is announced rather than done quietly: the
+	// client's own takeover line names both versions.
+	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{
+		Version: installedVersion(),
+		Logf: func(format string, args ...any) {
+			fmt.Fprintf(os.Stderr, "sparkwing run: "+format+"\n", args...)
+		},
+	})
 	if err != nil {
 		return
 	}

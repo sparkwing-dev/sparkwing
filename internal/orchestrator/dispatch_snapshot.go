@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -151,7 +152,24 @@ func collectDispatchEnv(node *sparkwing.JobNode, runID string, run *store.Run) m
 	return out
 }
 
+// envDenyExact names variables the prefixes would otherwise sweep in but
+// that must not be persisted into a dispatch snapshot.
+//
+// A snapshot is replayed later, and by `sparkwing debug rerun` on a
+// different machine than the one that captured it. That makes any value
+// naming a local filesystem path to an executable actively harmful:
+// SPARKWING_WINGD_BIN is the binary a run spawns to host the admission
+// daemon, so a snapshot carrying it would send a replay on another host
+// to exec a path that is absent there, or -- worse -- present and
+// something else. The replaying machine must resolve its own daemon host.
+var envDenyExact = map[string]bool{
+	wingdclient.HostBinEnv: true,
+}
+
 func envAllowed(name string) bool {
+	if envDenyExact[name] {
+		return false
+	}
 	for _, p := range envAllowPrefixes {
 		if strings.HasPrefix(name, p) {
 			return true

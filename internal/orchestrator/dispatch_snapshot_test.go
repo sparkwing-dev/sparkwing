@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -298,6 +299,26 @@ func TestCollectDispatchEnv(t *testing.T) {
 	}
 	if got["CUSTOM"] != "node-value" {
 		t.Fatalf("node EnvMap not overlaid: %v", got)
+	}
+}
+
+// TestCollectDispatchEnv_ExcludesTheDaemonHostPath keeps a local
+// executable path out of a record that travels. The snapshot is
+// persisted and replayed by `sparkwing debug rerun`, potentially on
+// another machine, where the captured $SPARKWING_WINGD_BIN would name a
+// path that is absent -- or present and a different binary. The
+// replaying host has to resolve its own daemon host.
+func TestCollectDispatchEnv_ExcludesTheDaemonHostPath(t *testing.T) {
+	t.Setenv(wingdclient.HostBinEnv, "/opt/this-machine-only/bin/sparkwing")
+	t.Setenv("SPARKWING_FOO", "kept")
+
+	got := collectDispatchEnv(buildNode(t, "deploy", &stubJob{}), "run-7", nil)
+
+	if v, ok := got[wingdclient.HostBinEnv]; ok {
+		t.Fatalf("%s=%q was captured into the dispatch snapshot; a replay elsewhere would exec it", wingdclient.HostBinEnv, v)
+	}
+	if got["SPARKWING_FOO"] != "kept" {
+		t.Fatalf("the exclusion swept up the rest of the SPARKWING_ prefix: %v", got)
 	}
 }
 
