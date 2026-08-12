@@ -40,12 +40,17 @@ func main() {
 	}
 }
 
-// runWingdMode serves the `wingd run` subcommand the client's default
-// spawn re-execs, mirroring the shipped daemon's log wiring: operational
-// lines go to stderr, which the spawn points at the daemon log file.
+// runWingdMode serves the `wingd run` and `wingd supervise` subcommands
+// the client's default spawn re-execs, mirroring the shipped daemon's
+// log wiring: operational lines go to stderr, which the spawn points at
+// the daemon log file.
 func runWingdMode(args []string) {
-	if len(args) == 0 || args[0] != "run" {
-		fail("usage: wingd run [--home DIR]")
+	if len(args) == 0 || (args[0] != "run" && args[0] != "supervise") {
+		fail("usage: wingd run|supervise [--home DIR]")
+	}
+	if args[0] == "supervise" {
+		superviseMode(args[1:])
+		return
 	}
 	fs := flag.NewFlagSet("wingd run", flag.ExitOnError)
 	home := fs.String("home", "", "")
@@ -69,6 +74,27 @@ func runWingdMode(args []string) {
 	defer stop()
 	if err := d.Run(ctx); err != nil && err != wingd.ErrNotElected {
 		fail("run: %v", err)
+	}
+}
+
+// superviseMode mirrors the shipped `wingd supervise` verb just far
+// enough for the client's default spawn to work against this fixture:
+// it re-execs itself as `wingd run` with the same flags and inherits
+// stdout/stderr, so daemon lines still land in the spawn's log file.
+// Restart supervision is deliberately not mirrored -- the shipped
+// supervisor owns that behavior and carries its own tests.
+func superviseMode(args []string) {
+	self, err := os.Executable()
+	if err != nil {
+		fail("locate own binary: %v", err)
+	}
+	cmd := exec.Command(self, append([]string{"wingd", "run"}, args...)...)
+	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+	if err := cmd.Run(); err != nil {
+		if ee, ok := err.(*exec.ExitError); ok {
+			os.Exit(ee.ExitCode())
+		}
+		fail("supervised child: %v", err)
 	}
 }
 
