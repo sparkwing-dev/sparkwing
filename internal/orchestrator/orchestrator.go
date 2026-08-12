@@ -515,6 +515,24 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		var admitErr error
 		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, opts.Pipeline, runID, plan, opts.MaxParallel, cancelRun)
 		if admitErr != nil {
+			// This box offers no admission this client can use and cannot
+			// be made to. Whether that is fatal depends on what the plan
+			// reserved and on whether anything is arbitrating the box: see
+			// LocalAdmission.unhostedOutcome.
+			degrade, refusal := opts.Admission.unhostedOutcome(admitErr, plan, opts.DryRun)
+			switch {
+			case refusal != nil:
+				admitErr = refusal
+			case degrade:
+				// Clearing Admission puts the whole run on the existing
+				// no-daemon path -- node dispatch, tool slots, and
+				// contention attribution all already handle nil -- instead
+				// of re-meeting the same unusable box at every node.
+				opts.Admission = nil
+				lease, outcome, admitErr = nil, admitProceed, nil
+			}
+		}
+		if admitErr != nil {
 			if cause := context.Cause(runCtx); cause != nil && !errors.Is(cause, context.Canceled) {
 				admitErr = cause
 			}
@@ -546,7 +564,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		defer lease.release()
 		if outcome == admitSkipped {
 			skipDispatch = true
-		} else {
+		} else if lease != nil {
+			// safety: a run that degraded to unadmitted holds no lease and
+			// still proceeds, so this dereference is guarded rather than
+			// implied by admitErr == nil.
 			leaseToken = lease.token
 			leaseChildToken = lease.childToken
 			leaseHostAdmitted = lease.hostAdmitted

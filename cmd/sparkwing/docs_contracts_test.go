@@ -38,7 +38,6 @@ const envPrefix = "SPARKWING_"
 // configuration semantics written from call sites, reaching external readers
 // without a human having read them, is a bigger risk than the gap they close.
 var undocumentedEnvVars = []string{
-	"SPARKWING_ALLOW",
 	"SPARKWING_AUTO_REGISTER_WORKTREES",
 	"SPARKWING_BAKED_BINARY",
 	"SPARKWING_BINARY_SOURCE",

@@ -55,7 +55,12 @@ func runWingdMode(args []string) {
 	fs := flag.NewFlagSet("wingd run", flag.ExitOnError)
 	home := fs.String("home", "", "")
 	version := fs.String("version", "v1.0.0", "")
-	idleMS := fs.Int("idle-ms", 800, "")
+	// The host-spawn path builds its own argv and cannot pass --idle-ms, so
+	// this default also has to cover a daemon that a spawning client has
+	// not connected to yet. The client dials every few tens of
+	// milliseconds from the moment it spawns, so the window is generous
+	// even with the supervisor hop in between.
+	idleMS := fs.Int("idle-ms", 3000, "")
 	_ = fs.Parse(args[1:])
 
 	d, err := wingd.New(wingd.Config{
@@ -154,20 +159,40 @@ func runHold(args []string) {
 	idleMS := fs.Int("daemon-idle-ms", 30000, "")
 	semaphoresOnly := fs.Bool("semaphores-only", false, "")
 	realSpawn := fs.Bool("real-spawn", false, "")
+	// hostSpawn makes this fixture behave as a compiled pipeline binary:
+	// it never hosts the daemon, and starts one only by spawning the
+	// installed binary named by $SPARKWING_WINGD_BIN (else a `sparkwing`
+	// on PATH).
+	hostSpawn := fs.Bool("host-spawn", false, "")
+	version := fs.String("version", "", "")
 	_ = fs.Parse(args)
 
 	opts := client.Options{
 		Home:    *home,
+		Version: *version,
 		Spawn:   daemonSpawner(*graceMS, *idleMS),
 		Backoff: 30 * time.Millisecond,
 	}
 	if *realSpawn {
 		opts.Spawn = nil
 	}
+	if *hostSpawn {
+		opts.NoTakeover = true
+		opts.Spawn = client.NoHostSpawn
+		if spawn, ok := client.HostSpawn(); ok {
+			opts.Spawn = spawn
+		}
+	}
 	cl, err := client.EnsureDaemon(context.Background(), opts)
 	if err != nil {
-		fail("ensure daemon: %v", err)
+		// Printed rather than failed to stderr so a test can assert on the
+		// sentinel without parsing the process's error stream.
+		fmt.Printf("ENSURE-ERR %v\n", err)
+		_ = os.Stdout.Sync()
+		os.Exit(1)
 	}
+	fmt.Printf("DAEMON %s\n", cl.DaemonVersion())
+	_ = os.Stdout.Sync()
 
 	req := wingwire.AdmissionRequest{RunID: *run}
 	if *sem != "" {

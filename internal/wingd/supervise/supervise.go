@@ -1,4 +1,13 @@
-package main
+// Package supervise runs the external watchdog for the local admission
+// daemon: `<binary> wingd supervise` starts `<binary> wingd run` as a
+// child, probes it, and replaces it when it stops answering.
+//
+// It lives outside cmd/sparkwing because the spawn path re-execs whichever
+// binary hosts the daemon, and more than one installed binary does: the
+// sparkwing CLI and sparkwing-runner both serve `wingd supervise` from
+// here, so a daemon spawned by either gets the same recovery behavior
+// rather than one of them answering "usage: wingd run".
+package supervise
 
 import (
 	"context"
@@ -17,32 +26,38 @@ import (
 )
 
 const (
-	defaultWingdProbeInterval = 2 * time.Second
-	defaultWingdProbeTimeout  = time.Second
-	defaultWingdFailureLimit  = 3
-	defaultWingdTermGrace     = 3 * time.Second
+	defaultProbeInterval = 2 * time.Second
+	defaultProbeTimeout  = time.Second
+	defaultFailureLimit  = 3
+	defaultTermGrace     = 3 * time.Second
 )
 
-type wingdSupervisedChild interface {
+// Child is the supervised daemon process, as the loop needs to see it.
+type Child interface {
 	Wait() <-chan error
 	Terminate() error
 	Kill() error
 }
 
-type wingdSupervisorConfig struct {
+// Config tunes the watchdog: how often to probe, how long a probe may
+// take, how many consecutive failures condemn the child, and how long a
+// condemned child has to exit on its own before it is killed.
+type Config struct {
 	ProbeInterval time.Duration
 	ProbeTimeout  time.Duration
 	FailureLimit  int
 	TermGrace     time.Duration
 }
 
-type wingdSupervisorDeps struct {
-	Start func() (wingdSupervisedChild, error)
+// Deps are the injectable edges of the loop, so tests drive it without
+// starting processes or dialing sockets.
+type Deps struct {
+	Start func() (Child, error)
 	Probe func(context.Context) error
 	Logf  func(string, ...any)
 }
 
-func (c wingdSupervisorConfig) validate() error {
+func (c Config) validate() error {
 	if c.ProbeInterval <= 0 {
 		return fmt.Errorf("wingd supervisor: probe interval must be positive, got %s", c.ProbeInterval)
 	}
@@ -58,10 +73,10 @@ func (c wingdSupervisorConfig) validate() error {
 	return nil
 }
 
-// superviseWingd keeps recovery authority outside the serving runtime. A
-// daemon that stops scheduling cannot run its own signal handler or watchdog,
-// so only another process can bound recovery from that failure.
-func superviseWingd(ctx context.Context, cfg wingdSupervisorConfig, deps wingdSupervisorDeps) error {
+// Loop keeps recovery authority outside the serving runtime. A daemon that
+// stops scheduling cannot run its own signal handler or watchdog, so only
+// another process can bound recovery from that failure.
+func Loop(ctx context.Context, cfg Config, deps Deps) error {
 	if err := cfg.validate(); err != nil {
 		return err
 	}
@@ -73,7 +88,7 @@ func superviseWingd(ctx context.Context, cfg wingdSupervisorConfig, deps wingdSu
 		if err != nil {
 			return fmt.Errorf("wingd supervisor: start child: %w", err)
 		}
-		recoverChild, err := watchWingdChild(ctx, child, cfg, deps)
+		recoverChild, err := watchChild(ctx, child, cfg, deps)
 		if err != nil {
 			return err
 		}
@@ -83,14 +98,14 @@ func superviseWingd(ctx context.Context, cfg wingdSupervisorConfig, deps wingdSu
 	}
 }
 
-func watchWingdChild(ctx context.Context, child wingdSupervisedChild, cfg wingdSupervisorConfig, deps wingdSupervisorDeps) (bool, error) {
+func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (bool, error) {
 	ticker := time.NewTicker(cfg.ProbeInterval)
 	defer ticker.Stop()
 	failures := 0
 	for {
 		select {
 		case <-ctx.Done():
-			return false, stopWingdChild(child, cfg.TermGrace)
+			return false, stopChild(child, cfg.TermGrace)
 		case err := <-child.Wait():
 			return false, err
 		case <-ticker.C:
@@ -111,7 +126,7 @@ func watchWingdChild(ctx context.Context, child wingdSupervisedChild, cfg wingdS
 			if deps.Logf != nil {
 				deps.Logf("health probe failed %d times; replacing unresponsive daemon", failures)
 			}
-			if err := stopWingdChild(child, cfg.TermGrace); err != nil {
+			if err := stopChild(child, cfg.TermGrace); err != nil {
 				return false, err
 			}
 			return true, nil
@@ -119,7 +134,7 @@ func watchWingdChild(ctx context.Context, child wingdSupervisedChild, cfg wingdS
 	}
 }
 
-func stopWingdChild(child wingdSupervisedChild, grace time.Duration) error {
+func stopChild(child Child, grace time.Duration) error {
 	done := child.Wait()
 	if err := child.Terminate(); err != nil {
 		select {
@@ -143,12 +158,12 @@ func stopWingdChild(child wingdSupervisedChild, grace time.Duration) error {
 	return nil
 }
 
-type execWingdChild struct {
+type execChild struct {
 	cmd  *exec.Cmd
 	done chan error
 }
 
-func startExecWingdChild(self string, args []string) (wingdSupervisedChild, error) {
+func startExecChild(self string, args []string) (Child, error) {
 	cmd := exec.Command(self, args...)
 	cmd.Stdin = nil
 	cmd.Stdout = os.Stdout
@@ -157,16 +172,20 @@ func startExecWingdChild(self string, args []string) (wingdSupervisedChild, erro
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	child := &execWingdChild{cmd: cmd, done: make(chan error, 1)}
+	child := &execChild{cmd: cmd, done: make(chan error, 1)}
 	go func() { child.done <- cmd.Wait() }()
 	return child, nil
 }
 
-func (c *execWingdChild) Wait() <-chan error { return c.done }
-func (c *execWingdChild) Terminate() error   { return signalTerminate(c.cmd.Process.Pid) }
-func (c *execWingdChild) Kill() error        { return signalKill(c.cmd.Process.Pid) }
+func (c *execChild) Wait() <-chan error { return c.done }
+func (c *execChild) Terminate() error   { return signalTerminate(c.cmd.Process.Pid) }
+func (c *execChild) Kill() error        { return signalKill(c.cmd.Process.Pid) }
 
-func runWingdSupervise(args []string) error {
+// Run serves `<binary> wingd supervise [--home DIR] [--version V]` for
+// any binary that hosts the daemon. It re-execs itself as `wingd run`
+// with the same flags, so the serving daemon is always the same build as
+// the supervisor that owns its recovery.
+func Run(args []string) error {
 	fs := flag.NewFlagSet("wingd supervise", flag.ContinueOnError)
 	home := fs.String("home", "", "")
 	version := fs.String("version", "", "")
@@ -190,17 +209,17 @@ func runWingdSupervise(args []string) error {
 	logger := log.New(os.Stderr, "wingd supervisor: ", log.LstdFlags|log.LUTC)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	return superviseWingd(ctx, wingdSupervisorConfig{
-		ProbeInterval: defaultWingdProbeInterval,
-		ProbeTimeout:  defaultWingdProbeTimeout,
-		FailureLimit:  defaultWingdFailureLimit,
-		TermGrace:     defaultWingdTermGrace,
-	}, wingdSupervisorDeps{
-		Start: func() (wingdSupervisedChild, error) {
-			return startExecWingdChild(self, childArgs)
+	return Loop(ctx, Config{
+		ProbeInterval: defaultProbeInterval,
+		ProbeTimeout:  defaultProbeTimeout,
+		FailureLimit:  defaultFailureLimit,
+		TermGrace:     defaultTermGrace,
+	}, Deps{
+		Start: func() (Child, error) {
+			return startExecChild(self, childArgs)
 		},
 		Probe: func(ctx context.Context) error {
-			_, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home, DialTimeout: defaultWingdProbeTimeout})
+			_, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home, DialTimeout: defaultProbeTimeout})
 			return err
 		},
 		Logf: logger.Printf,

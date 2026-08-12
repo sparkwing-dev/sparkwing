@@ -61,13 +61,45 @@ type LocalAdmission struct {
 	// envelope log alongside the other run lifecycle records.
 	Delegate sparkwing.Logger
 	// Spawn overrides how a missing daemon is started. Nil uses the
-	// default, which re-execs this binary as `wingd run`. Tests inject
-	// an in-process daemon here.
+	// client default, which re-execs this binary as `wingd supervise` --
+	// right only for a binary that serves those verbs itself
+	// (sparkwing-runner's in-process client). The compiled pipeline
+	// binary's entry points build their LocalAdmission with
+	// pipelineAdmission, whose spawn starts the installed sparkwing
+	// instead. Tests inject an in-process daemon here.
 	Spawn func(home, version string) error
+	// PipelineClient marks this admission as belonging to a compiled
+	// pipeline binary: a client that uses the machine's daemon but never
+	// hosts, replaces, or upgrades it.
+	//
+	// It selects two behaviors together, because they are two halves of
+	// one stance and must not drift apart: the wire client shares a
+	// running daemon rather than draining one it supersedes
+	// ([wingdclient.Options.NoTakeover]), and a box that offers no usable
+	// daemon is resolved by [LocalAdmission.unhostedOutcome] rather than
+	// failing every run outright. Installed binaries -- the CLI and
+	// sparkwing-runner -- leave it false and keep takeover plus the hard
+	// error.
+	PipelineClient bool
+	// Logf receives one-line admission diagnostics: wire-client notes
+	// (daemon takeover, a lease watch that could not ride out a daemon
+	// restart) and the run-without-coordination warning. Nil writes them
+	// to stderr, prefixed -- never discards them, because every line here
+	// reports arbitration the operator expected and is not getting.
+	Logf func(format string, args ...any)
 	// DialTimeout and Backoff tune the client's connect loop; zero uses
 	// the client defaults.
 	DialTimeout time.Duration
 	Backoff     time.Duration
+
+	// unadmittedOnce collapses the "running without local coordination"
+	// announcement to one line per process, however many admission calls
+	// meet the same unusable box.
+	unadmittedOnce sync.Once
+	// logged records the diagnostics already written, so a standing
+	// condition is reported once rather than once per node connection.
+	loggedMu sync.Mutex
+	logged   map[string]bool
 	// QueueHeartbeat is how often a still-queued run re-emits its wait
 	// status so a long admission wait never reads as a hang.
 	// Zero uses defaultQueueHeartbeat.
@@ -86,13 +118,59 @@ func (la *LocalAdmission) heartbeatInterval() time.Duration {
 }
 
 func (la *LocalAdmission) clientOptions() wingdclient.Options {
+	spawn := la.Spawn
+	if la.PipelineClient && spawn == nil {
+		// safety: PipelineClient and a non-self-exec Spawn are two halves of
+		// one stance, and a caller that sets the first without the second
+		// must not fall through to a default that re-execs this binary as
+		// the daemon. Resolve it the way pipelineAdmission would.
+		if resolved, ok := wingdclient.HostSpawn(); ok {
+			spawn = resolved
+		} else {
+			spawn = wingdclient.NoHostSpawn
+		}
+	}
 	return wingdclient.Options{
 		Home:        la.Home,
 		Version:     la.Version,
-		Spawn:       la.Spawn,
+		Spawn:       spawn,
+		NoTakeover:  la.PipelineClient,
 		DialTimeout: la.DialTimeout,
 		Backoff:     la.Backoff,
+		Logf:        la.logf,
 	}
+}
+
+// logf writes one admission diagnostic. It defaults to stderr rather than
+// to [LocalAdmission.out]: these lines report that arbitration the
+// operator expected is degraded or absent, which belongs with the run's
+// errors, not interleaved into the stdout stream a caller may be parsing.
+//
+// A line is written once per admission. A run opens a fresh daemon
+// connection for the whole run and again for every node that needs host
+// capacity or a semaphore, and each one re-observes the same standing
+// condition -- a dev build sharing a release daemon, a predecessor still
+// holding the election. Repeating that per node buries the lines that
+// are about one node in copies of a line about the machine. Distinct
+// messages all still appear, and per-lease diagnostics name their lease,
+// so nothing specific is collapsed into anything else.
+func (la *LocalAdmission) logf(format string, args ...any) {
+	msg := fmt.Sprintf(format, args...)
+	la.loggedMu.Lock()
+	if la.logged == nil {
+		la.logged = map[string]bool{}
+	}
+	seen := la.logged[msg]
+	la.logged[msg] = true
+	la.loggedMu.Unlock()
+	if seen {
+		return
+	}
+	if la.Logf != nil {
+		la.Logf("%s", msg)
+		return
+	}
+	fmt.Fprintln(os.Stderr, "local admission: "+msg)
 }
 
 func (la *LocalAdmission) out() io.Writer {
@@ -505,6 +583,22 @@ func (la *LocalAdmission) acquireBlocking(
 		// safety: an exhausted takeover reached the daemon and was answered; reporting it as unreachable sends the reader after a socket that is working and hides the version conflict that is the actual obstacle.
 		if errors.Is(err, wingdclient.ErrTakeoverExhausted) {
 			return nil, admitProceed, fmt.Errorf("local admission refused a version conflict: %w", err)
+		}
+		// None of these is an unreachable socket, and none is helped by
+		// `sparkwing queue`. A protocol refusal means the daemon was
+		// reached and answered; a declared absence of any host means
+		// nothing was there to reach; a host binary that could not be
+		// started names a path the operator chose. Each already carries
+		// the advice that fits it, and re-wrapping them all as "could not
+		// reach the admission daemon" sends the reader to inspect a daemon
+		// in every case -- one that is healthy, one that does not exist,
+		// and one that never started.
+		if errors.Is(err, wingdclient.ErrDaemonTooOld) ||
+			errors.Is(err, wingdclient.ErrProtocolTooOld) ||
+			errors.Is(err, wingdclient.ErrNoDaemonHost) ||
+			errors.Is(err, wingdclient.ErrDaemonHostUnusable) ||
+			errors.Is(err, wingdclient.ErrDaemonHostFailed) {
+			return nil, admitProceed, fmt.Errorf("local admission: %w", err)
 		}
 		return nil, admitProceed, fmt.Errorf("local admission unreachable: could not reach the admission daemon: %w; run `sparkwing queue` to check the local admission state", err)
 	}

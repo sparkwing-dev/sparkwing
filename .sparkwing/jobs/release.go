@@ -277,8 +277,63 @@ func (j *validateVersionJob) run(ctx context.Context) error {
 	if exists {
 		return fmt.Errorf("release: tag %s already exists on origin (never force-push a module tag; increment to a new version)", version)
 	}
+	if err := j.checkHostingReleaseConstant(ctx, version); err != nil {
+		return err
+	}
 	sparkwing.Info(ctx, "version %s is free on origin", version)
 	return nil
+}
+
+// firstHostingReleaseSource is where the constant lives, and the pattern
+// that reads it. The pipeline module cannot import it -- internal/ is
+// closed to this module -- so the gate reads the declaration out of the
+// source it is about to tag, which is the text being shipped anyway.
+const firstHostingReleaseSource = "internal/wingd/client/client.go"
+
+var firstHostingReleasePattern = regexp.MustCompile(`(?m)^const FirstHostingRelease = "([^"]+)"`)
+
+// checkHostingReleaseConstant keeps wingdclient.FirstHostingRelease
+// honest across a slipped release.
+//
+// That constant names the first release whose installed binary can host
+// the admission daemon, and a pipeline binary that meets an older host
+// prints it as the version to install. Nothing in the build can derive
+// it, so if the feature slips -- v0.27.0 ships without it, or this work
+// lands in v0.28.0 instead -- the constant silently starts naming a
+// release that never carried the feature, which is worse advice than
+// none.
+//
+// The gate fires only while the constant still points at an unreleased
+// version. Once that tag exists the promise has been kept, and every
+// later release cuts without touching it.
+func (j *validateVersionJob) checkHostingReleaseConstant(ctx context.Context, version string) error {
+	path := filepath.Join(j.RepoDir, firstHostingReleaseSource)
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("release: read %s: %w", firstHostingReleaseSource, err)
+	}
+	m := firstHostingReleasePattern.FindSubmatch(src)
+	if m == nil {
+		return fmt.Errorf("release: no FirstHostingRelease declaration found in %s; "+
+			"the daemon-hosting release gate cannot verify what a too-old host is told to install "+
+			"(update firstHostingReleasePattern if the constant moved)", firstHostingReleaseSource)
+	}
+	declared := string(m[1])
+	if version == declared {
+		return nil
+	}
+	claimed, err := tagExistsOnRemote(ctx, j.RepoDir, declared)
+	if err != nil {
+		return fmt.Errorf("release: check daemon-hosting release tag: %w", err)
+	}
+	if claimed {
+		return nil
+	}
+	return fmt.Errorf("release: cutting %s while FirstHostingRelease still names the unreleased %s. "+
+		"That constant is what a pipeline binary tells an operator to install when their sparkwing is too old to host "+
+		"the admission daemon, so shipping it unchanged would name a release that never carried the feature. "+
+		"Set it to %s in %s (and update the migration note in CHANGELOG.md), or cut %s instead",
+		version, declared, version, firstHostingReleaseSource, declared)
 }
 
 // checkCleanTreeJob refuses to proceed if the working tree has
