@@ -15,6 +15,13 @@ const cacheQueueStateVersion = 1
 
 const cacheQueueLockRetry = 10 * time.Millisecond
 
+var cacheQueueLockTimeout = 2 * time.Second
+
+// ErrCacheQueueBusy reports that the bounded wait for the cache's
+// ordering lock expired. The caller can retry without guessing whether
+// an otherwise bounded cache operation is still making progress.
+var ErrCacheQueueBusy = errors.New("pipeline cache queue is busy")
+
 type cacheQueueState struct {
 	Version uint64 `json:"version"`
 	Head    uint64 `json:"head"`
@@ -155,6 +162,8 @@ func consumeCacheQueueRecord(ctx context.Context, root string, sequence uint64) 
 }
 
 func openCacheQueueLock(ctx context.Context, root string) (*os.File, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, cacheQueueLockTimeout)
+	defer cancel()
 	for {
 		lock, acquired, err := openCacheLock(root, "entry-queue", cacheLockExclusiveNonblock)
 		if err != nil {
@@ -164,8 +173,11 @@ func openCacheQueueLock(ctx context.Context, root string) (*os.File, error) {
 			return lock, nil
 		}
 		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
+		case <-waitCtx.Done():
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			return nil, ErrCacheQueueBusy
 		case <-time.After(cacheQueueLockRetry):
 		}
 	}
