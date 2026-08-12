@@ -321,6 +321,17 @@ func (g *JobGroup) Optional() *JobGroup {
 	return g
 }
 
+// CacheDir registers dependency-directory caches on every member.
+// Each member restores and saves independently under the shared key,
+// so the first member to succeed seeds the cache for later runs. See
+// [JobNode.CacheDir].
+func (g *JobGroup) CacheDir(caches ...DirCache) *JobGroup {
+	for _, m := range g.Members() {
+		m.CacheDir(caches...)
+	}
+	return g
+}
+
 // BeforeRun registers a pre-run hook on every member. See Job.BeforeRun.
 func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup {
 	for _, m := range g.Members() {
