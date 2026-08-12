@@ -292,6 +292,29 @@ func TestDownloadAndInstall_PlaceholderKey_FailsClosed(t *testing.T) {
 	assertBytes(t, currentBin, old)
 }
 
+// downloadFile bounds the body before verification: a response larger
+// than the ceiling is a terminal error, and one at/under it succeeds.
+func TestDownloadFile_BoundsBodySize(t *testing.T) {
+	var size int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(make([]byte, size))
+	}))
+	t.Cleanup(srv.Close)
+	dst := filepath.Join(t.TempDir(), "out")
+
+	size = 2000
+	if err := downloadFile(srv.URL, dst, 1000); err == nil {
+		t.Fatal("oversized body was accepted")
+	} else if !strings.Contains(err.Error(), "exceeds") {
+		t.Errorf("error did not name the size limit: %v", err)
+	}
+
+	size = 1000 // exactly at the ceiling
+	if err := downloadFile(srv.URL, dst, 1000); err != nil {
+		t.Fatalf("at-limit body was rejected: %v", err)
+	}
+}
+
 // --- small assertion helpers ---
 
 func bytesEqual(a, b []byte) bool {

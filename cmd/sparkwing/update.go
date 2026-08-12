@@ -369,15 +369,15 @@ func downloadAndInstall(version, currentBin string) (installResult, error) {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	binPath := filepath.Join(tmpDir, asset)
-	if err := downloadFile(base+"/"+asset, binPath); err != nil {
+	if err := downloadFile(base+"/"+asset, binPath, maxAssetBytes); err != nil {
 		return installResult{}, fmt.Errorf("download %s: %w", asset, err)
 	}
 	sumsPath := filepath.Join(tmpDir, "SHA256SUMS")
-	if err := downloadFile(base+"/SHA256SUMS", sumsPath); err != nil {
+	if err := downloadFile(base+"/SHA256SUMS", sumsPath, maxMetaBytes); err != nil {
 		return installResult{}, fmt.Errorf("download SHA256SUMS: %w", err)
 	}
 	sigPath := filepath.Join(tmpDir, "SHA256SUMS.sig")
-	if err := downloadFile(base+"/SHA256SUMS.sig", sigPath); err != nil {
+	if err := downloadFile(base+"/SHA256SUMS.sig", sigPath, maxMetaBytes); err != nil {
 		return installResult{}, fmt.Errorf("download SHA256SUMS.sig: %w\n"+
 			"  this release is not signed for verified self-update; install it out-of-band via bin/install.sh instead", err)
 	}
@@ -408,7 +408,10 @@ func downloadAndInstall(version, currentBin string) (installResult, error) {
 				"refusing to install (the running binary was not touched)")
 	}
 
-	expected, err := lookupSHA256(sumsPath, asset)
+	// One data path: the digest comes from the SAME in-memory bytes the
+	// signature was verified over -- never re-read from disk -- so nothing
+	// can swap the manifest between verification and lookup.
+	expected, err := lookupSHA256(sumsBytes, asset)
 	if err != nil {
 		return installResult{}, err
 	}
@@ -494,6 +497,12 @@ func installedOr(hash string, err error) string {
 //     .old at next launch.
 func installAtomic(stagedBin, currentBin string) (prev string, err error) {
 	if runtime.GOOS == "windows" {
+		// Windows cannot overwrite or delete a running .exe, so this is two
+		// renames rather than one. Between them there is a brief window
+		// where no binary sits at currentBin; a crash there leaves the new
+		// binary at currentBin (second rename) or the prior one recoverable
+		// at oldBin, and cleanupStaleUpdate reconciles .old at next launch.
+		// POSIX below is a single atomic rename with no such window.
 		oldBin := currentBin + ".old"
 		_ = os.Remove(oldBin)
 		if err := os.Rename(currentBin, oldBin); err != nil {
@@ -545,7 +554,15 @@ func cleanupStaleUpdate() {
 	_ = os.Remove(self + ".old")
 }
 
-func downloadFile(url, dst string) error {
+// Download size ceilings. Bodies are bounded BEFORE verification so a
+// hostile or broken endpoint cannot stream an unbounded response into
+// memory/disk; an over-limit body is a terminal download error.
+const (
+	maxAssetBytes = 512 << 20 // 512 MiB -- generous for the binary asset
+	maxMetaBytes  = 1 << 20   // 1 MiB -- tight for SHA256SUMS and .sig
+)
+
+func downloadFile(url, dst string, maxBytes int64) error {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -560,16 +577,23 @@ func downloadFile(url, dst string) error {
 		return err
 	}
 	defer f.Close()
-	_, err = io.Copy(f, resp.Body)
-	return err
+	// Read one byte past the ceiling so an exactly-at-limit body still
+	// succeeds while anything larger is caught and rejected.
+	n, err := io.Copy(f, io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		return err
+	}
+	if n > maxBytes {
+		return fmt.Errorf("response body exceeds %d bytes; refusing", maxBytes)
+	}
+	return nil
 }
 
-func lookupSHA256(sumsPath, filename string) (string, error) {
-	body, err := os.ReadFile(sumsPath)
-	if err != nil {
-		return "", err
-	}
-	for _, line := range strings.Split(string(body), "\n") {
+// lookupSHA256 extracts the digest for filename from already-verified
+// SHA256SUMS bytes. It deliberately takes bytes, not a path, so the digest
+// is read from the same content the signature covered (no disk re-read).
+func lookupSHA256(sums []byte, filename string) (string, error) {
+	for _, line := range strings.Split(string(sums), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 2 && fields[1] == filename {
 			return fields[0], nil
