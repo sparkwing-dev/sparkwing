@@ -290,9 +290,21 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		trigger.Source = "manual"
 	}
 
+	// The args the run will actually execute with, resolved once here
+	// and reused for the guard verdict, the masker seed, and reg.Invoke.
+	// See mergeInvokeArgs for the layering.
+	invokeArgs := mergeInvokeArgs(opts)
+
 	if opts.PipelineYAML != nil {
+		// Guards judge the args the run executes with, not the args the
+		// caller typed. An `arg:target=prod` guard has to fire whether
+		// "prod" arrived on the command line or out of the project's
+		// defaults.args / the pipeline entry's args: block -- the run is
+		// equally against prod either way, and a guard that only reads
+		// opts.Args waves through exactly the invocation an operator
+		// wrote the guard to stop.
 		guardCtx := pipelines.GuardContext{
-			Args: opts.Args,
+			Args: invokeArgs,
 		}
 		if opts.Profile != nil {
 			guardCtx.ProfileName = opts.Profile.Name
@@ -362,7 +374,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	// annotations and summaries, the node failure excerpt, and the
 	// child-run event payloads all write in the clear. invokeArgs is
 	// exactly what reg.Invoke is handed below; the two must not diverge.
-	invokeArgs := mergeInvokeArgs(opts)
 	masker := maskerForInvokeArgs(reg, invokeArgs)
 
 	var profName string

@@ -48,6 +48,17 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **orchestrator:** Evaluate `arg:<flag>=<value>` guards against the arguments
+  the run actually executes with. Guards were judged on the caller's arguments
+  alone, so a value supplied by the project's `defaults.args` block or a
+  pipeline entry's `args:` block was invisible to them and a guard written to
+  reject a protected target waved the dispatch through. Guards now read the
+  same merged set the pipeline is invoked with, with the command-line flag
+  still winning per key. Behavior change: a guard that silently passed because
+  its value came from `sparkwing.yaml` now fires; a guard on an argument no
+  layer supplies is unaffected.
 
 ## [v0.27.0] - 2026-08-12
 ### Security
