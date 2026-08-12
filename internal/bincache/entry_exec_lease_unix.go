@@ -67,7 +67,7 @@ func prepareExecLease(file *os.File, entry Entry, env []string) ([]string, func(
 // AdoptExecLeaseFromEnv confines the lease inherited across the pipeline exec
 // to this process. It restores close-on-exec before the runtime can spawn a
 // daemon or node process and retains the descriptor until process exit.
-func AdoptExecLeaseFromEnv() error {
+func AdoptExecLeaseFromEnv() (err error) {
 	raw, ok := os.LookupEnv(execLeaseEnv)
 	if !ok {
 		return nil
@@ -126,7 +126,7 @@ func AdoptExecLeaseFromEnv() error {
 	proofOwned := false
 	defer func() {
 		if !proofOwned {
-			_ = proof.Close()
+			err = errors.Join(err, cacheUnlock(proof), proof.Close(), os.Remove(proofPath))
 		}
 	}()
 	proofInfo, err := proof.Stat()
@@ -161,20 +161,18 @@ func AdoptExecLeaseFromEnv() error {
 		}
 		return errors.New("inherited pipeline cache lease proof is not owned by its descriptor")
 	}
-	leaseProbe, err := os.Open(entry.lockPath("lease"))
-	if err != nil {
-		return fmt.Errorf("open inherited pipeline cache lease probe: %w", err)
+	leaseFile := os.NewFile(uintptr(fd), "pipeline-cache-lease")
+	if leaseFile == nil {
+		return errors.New("inherited pipeline cache lease descriptor is unavailable")
 	}
-	leaseProbeAcquired, leaseProbeErr := cacheLock(leaseProbe, cacheLockExclusiveNonblock)
-	if leaseProbeAcquired {
-		_ = cacheUnlock(leaseProbe)
-	}
-	_ = leaseProbe.Close()
-	if leaseProbeErr != nil {
-		return fmt.Errorf("probe inherited pipeline cache lease authority: %w", leaseProbeErr)
-	}
-	if leaseProbeAcquired {
-		return errors.New("inherited pipeline cache lease was not retained across exec")
+	leaseOwned := false
+	defer func() {
+		if !leaseOwned {
+			err = errors.Join(err, cacheUnlock(leaseFile), leaseFile.Close())
+		}
+	}()
+	if _, err := cacheLock(leaseFile, cacheLockShared); err != nil {
+		return fmt.Errorf("establish inherited pipeline cache lease authority: %w", err)
 	}
 	proofOwned = true
 	if err := errors.Join(cacheUnlock(proof), proof.Close(), os.Remove(proofPath)); err != nil {
@@ -187,11 +185,8 @@ func AdoptExecLeaseFromEnv() error {
 	if _, err := unix.FcntlInt(uintptr(fd), unix.F_SETFD, flags|unix.FD_CLOEXEC); err != nil {
 		return fmt.Errorf("contain inherited pipeline cache lease: %w", err)
 	}
-	file := os.NewFile(uintptr(fd), "pipeline-cache-lease")
-	if file == nil {
-		return errors.New("inherited pipeline cache lease descriptor is unavailable")
-	}
-	processExecLease.file = file
+	leaseOwned = true
+	processExecLease.file = leaseFile
 	return nil
 }
 
