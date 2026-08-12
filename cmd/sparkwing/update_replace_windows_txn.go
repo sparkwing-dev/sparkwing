@@ -21,3 +21,7 @@ func replaceWindowsRunningImageWith(source, target string, move func(string, str
 	}
 	return nil
 }
+
+func restoreWindowsRunningImageWith(source, target string, move func(string, string, uint32) error, remove func(string) error) error {
+	return replaceWindowsRunningImageWith(source, target, move, remove)
+}
