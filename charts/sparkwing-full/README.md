@@ -161,6 +161,7 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.controller.tokenSecret.name` | Bearer-token Secret. | `""` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
+| `sparkwing-runner-bundle.cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 
 ## Auth
 
