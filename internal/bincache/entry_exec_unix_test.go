@@ -172,6 +172,7 @@ func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
 		"SPARKWING_ENTRY_HELPER_ROOT="+root,
 		"SPARKWING_ENTRY_HELPER_KEY="+key,
 	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +184,16 @@ func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
 	t.Cleanup(func() {
 		if cmd.ProcessState == nil {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-			_ = cmd.Wait()
+			waited := make(chan struct{})
+			go func() {
+				_ = cmd.Wait()
+				close(waited)
+			}()
+			select {
+			case <-waited:
+			case <-time.After(2 * time.Second):
+				t.Errorf("readiness fixture group %d was not reaped", cmd.Process.Pid)
+			}
 		}
 	})
 	line, err := readLineBefore(stdout, 5*time.Second)
