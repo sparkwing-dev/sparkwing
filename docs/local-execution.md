@@ -158,6 +158,55 @@ is passed to the pipeline as its own arguments.
 Submission is local-only. To hand a run to a cluster, use
 `sparkwing pipeline trigger --profile <p> --detach`.
 
+#### A submitted run uses the consumer's environment, not your shell's
+
+This is the sharpest difference between `sparkwing run` and
+`sparkwing runs submit`, and it will bite you if you skip it.
+
+A foreground `sparkwing run` inherits the environment of the shell you
+typed it in. A submitted run does not. It is executed by the resident
+consumer, and the consumer inherits the environment of whichever shell
+happened to start it -- possibly hours earlier, possibly in a different
+project, possibly with a different `AWS_PROFILE`, `KUBECONFIG`,
+`GITHUB_TOKEN`, or `PATH`. This is the same rule the admission daemon
+follows: a process started on demand keeps the environment of the run
+that needed it first.
+
+So this does **not** do what it looks like:
+
+```bash
+AWS_PROFILE=prod sparkwing runs submit deploy   # the run may NOT see AWS_PROFILE=prod
+```
+
+The acknowledgment names the process that will run it, so the
+divergence is at least visible:
+
+```
+  runner: consumer pid 4831 (started 2026-08-12T09:14:02Z); the run uses ITS environment, not this shell's
+```
+
+Until submitted runs carry their submitter's environment, the reliable
+options are:
+
+- Put the value in the pipeline's own configuration or a secret store,
+  where it does not depend on an ambient variable at all.
+- Pass it as a pipeline argument: `sparkwing runs submit deploy --env prod`.
+- Start the consumer deliberately from the environment you want, then
+  submit against it:
+
+  ```bash
+  AWS_PROFILE=prod sparkwing runs consumer start
+  sparkwing runs submit deploy
+  ```
+
+- Or run it in the foreground with `sparkwing run`, which always uses
+  your shell's environment.
+
+Carrying the submitter's environment on the trigger is deliberately not
+done: it would persist whatever happened to be exported -- tokens
+included -- into the runs store, which is a new place for secrets to
+live.
+
 #### Which checkout runs
 
 The checkout you are standing in wins, and `-C PATH` points at a
@@ -206,6 +255,18 @@ terminal; none is lost, and none runs twice.
 
 Stopping a consumer never cancels queued runs. Use `runs cancel` for
 that.
+
+A run that is *executing* when you stop the consumer is interrupted and
+returned to the queue, not failed: it never reached a verdict, so the
+next consumer re-executes it from the start. If you want it to stop for
+good, cancel it rather than stopping the consumer.
+
+The consumer is also replaced when it is out of date. It records the
+sparkwing version it was built from, and a submission from a different
+build stops the old consumer and starts one from the new binary --
+otherwise a home with a steady queue would keep serving every run from
+the build that happened to start first, and an upgrade would never take
+effect.
 
 ### Remote execution
 

@@ -61,12 +61,20 @@ code change to unlock.
   directory exists. `-o json` emits `{run_id, log_path, ...}`; `-o plain` emits
   the bare id.
 
-  Repeat submissions deduplicate through `--idempotency-key`: a second
-  submission carrying a key an earlier one used returns the original run id,
-  marked `already submitted`, and creates nothing. The runs store enforces it
-  with a unique constraint, so two callers racing with one key still produce one
-  run. `--request-id` is a separate tracing field recorded on the run that never
-  affects deduplication.
+  Repeat submissions deduplicate through `--idempotency-key`, scoped to the
+  pipeline: a second submission of the same pipeline carrying a key an earlier
+  one used returns the original run id, its current status, and creates nothing.
+  The runs store enforces it with a unique constraint, so two callers racing with
+  one key still produce one run. Reusing a key with different arguments is
+  refused, because a key names one intent and different arguments are a different
+  request. `--request-id` is a separate tracing field recorded on the run that
+  never affects deduplication.
+
+  A submitted run executes with the resident consumer's environment, not the
+  submitting shell's -- the same rule the admission daemon follows. The
+  acknowledgment names the consumer's pid so the difference is visible; see
+  [local-execution](docs/local-execution.md) for the ways to supply values a run
+  needs.
 
   Flags a detached run cannot honor -- `--sw-index`, `--sw-ref`, `--sw-dry-run`,
   the other run-shaping `--sw-` flags, and `--profile` -- are refused with the
@@ -78,9 +86,17 @@ code change to unlock.
   five idle minutes. A running dashboard consumes the same queue and stands down
   when a resident consumer holds the lock, so a run is never dispatched twice.
   Work queued while nothing is resident runs when a consumer returns, and a claim
-  whose consumer died mid-dispatch is swept back onto the queue once its lease
-  lapses -- unless the run already ended, in which case the claim is closed out
-  instead of re-executed.
+  whose consumer died before its run started is swept back onto the queue once
+  its lease lapses. A run that already started is left to the orphan reaper and a
+  run that already ended has its claim closed out, so recovery never re-executes
+  live or finished work -- the lease is wall-clock while the heartbeat defending
+  it is monotonic, so a suspended laptop can lapse the lease of a dispatch that
+  is perfectly alive. Stopping a consumer mid-dispatch returns that run to the
+  queue rather than failing it.
+
+  A consumer records the sparkwing version it was built from, and a submission
+  from a different build replaces it, so an upgrade takes effect instead of the
+  first build serving a busy home indefinitely.
 - **cli:** `sparkwing runs cancel --run <id>` now cancels a submitted run that no
   consumer has claimed, as a store transaction requiring neither a dashboard nor
   a profile. Cancellation names one run id and cannot reach a resubmission, which
