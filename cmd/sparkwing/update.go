@@ -29,6 +29,12 @@ const (
 	updateAssetBase = "https://github.com/" + updateRepo + "/releases/download"
 )
 
+var (
+	updateFetchLatest       = fetchLatestRelease
+	updateDownloadInstall   = downloadAndInstall
+	updateGoInstallFallback = updateCLIViaGoInstall
+)
+
 // runUpdate is the top-level binary self-update verb (CLI only; for
 // SDK pins, see `sparkwing version update --sdk`).
 func runUpdate(args []string) error {
@@ -117,10 +123,10 @@ func classifyDowngrade(current, resolved string) downgradeKind {
 func runUpdateBinary(version string, force, overrideHold bool) error {
 	resolved := strings.TrimSpace(version)
 	if resolved == "" {
-		v, err := fetchLatestRelease()
+		v, err := updateFetchLatest()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "update: could not fetch latest version (%v); falling back to go install\n", err)
-			return updateCLIViaGoInstall("latest")
+			return updateGoInstallFallback("latest")
 		}
 		resolved = v
 	}
@@ -163,9 +169,9 @@ func runUpdateBinary(version string, force, overrideHold bool) error {
 
 	fmt.Fprintf(os.Stdout, "updating sparkwing: %s -> %s\n", current, resolved)
 
-	if err := downloadAndInstall(resolved, currentBin); err != nil {
+	if err := updateDownloadInstall(resolved, currentBin); err != nil {
 		fmt.Fprintf(os.Stderr, "update: download path failed (%v); falling back to go install\n", err)
-		return updateCLIViaGoInstall(resolved)
+		return updateGoInstallFallback(resolved)
 	}
 
 	fmt.Fprintf(os.Stdout, "sparkwing updated: %s -> %s\n", current, resolved)
