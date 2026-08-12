@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.28.0] - 2026-08-12
 ### Added
 
 - **storage:** `fs.LogStore.RunDir(runID)` names the directory a filesystem
