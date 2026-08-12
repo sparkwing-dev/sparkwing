@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.29.0] - 2026-08-12
 ### Security
 
 - **cli:** `sparkwing update` now installs only bytes it can prove are the
