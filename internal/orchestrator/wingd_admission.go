@@ -118,10 +118,22 @@ func (la *LocalAdmission) heartbeatInterval() time.Duration {
 }
 
 func (la *LocalAdmission) clientOptions() wingdclient.Options {
+	spawn := la.Spawn
+	if la.PipelineClient && spawn == nil {
+		// safety: PipelineClient and a non-self-exec Spawn are two halves of
+		// one stance, and a caller that sets the first without the second
+		// must not fall through to a default that re-execs this binary as
+		// the daemon. Resolve it the way pipelineAdmission would.
+		if resolved, ok := wingdclient.HostSpawn(); ok {
+			spawn = resolved
+		} else {
+			spawn = wingdclient.NoHostSpawn
+		}
+	}
 	return wingdclient.Options{
 		Home:        la.Home,
 		Version:     la.Version,
-		Spawn:       la.Spawn,
+		Spawn:       spawn,
 		NoTakeover:  la.PipelineClient,
 		DialTimeout: la.DialTimeout,
 		Backoff:     la.Backoff,
@@ -572,15 +584,20 @@ func (la *LocalAdmission) acquireBlocking(
 		if errors.Is(err, wingdclient.ErrTakeoverExhausted) {
 			return nil, admitProceed, fmt.Errorf("local admission refused a version conflict: %w", err)
 		}
-		// A protocol refusal means the daemon was reached and answered, and
-		// a declared absence of any host means nothing was there to reach.
-		// Wrapping either as "unreachable" -- and pointing at `sparkwing
-		// queue`, which for the first would show a healthy daemon and for
-		// the second would report the same absence again -- contradicts the
-		// advice the error itself already carries.
+		// None of these is an unreachable socket, and none is helped by
+		// `sparkwing queue`. A protocol refusal means the daemon was
+		// reached and answered; a declared absence of any host means
+		// nothing was there to reach; a host binary that could not be
+		// started names a path the operator chose. Each already carries
+		// the advice that fits it, and re-wrapping them all as "could not
+		// reach the admission daemon" sends the reader to inspect a daemon
+		// in every case -- one that is healthy, one that does not exist,
+		// and one that never started.
 		if errors.Is(err, wingdclient.ErrDaemonTooOld) ||
 			errors.Is(err, wingdclient.ErrProtocolTooOld) ||
-			errors.Is(err, wingdclient.ErrNoDaemonHost) {
+			errors.Is(err, wingdclient.ErrNoDaemonHost) ||
+			errors.Is(err, wingdclient.ErrDaemonHostUnusable) ||
+			errors.Is(err, wingdclient.ErrDaemonHostFailed) {
 			return nil, admitProceed, fmt.Errorf("local admission: %w", err)
 		}
 		return nil, admitProceed, fmt.Errorf("local admission unreachable: could not reach the admission daemon: %w; run `sparkwing queue` to check the local admission state", err)

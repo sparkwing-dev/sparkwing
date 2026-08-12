@@ -21,12 +21,20 @@ const deadLocalPredicate = localScopeKeyClause +
 // fleet locks -- are never touched, so it is safe to run against a machine
 // that also drives cluster work.
 //
-// The local admission daemon owns live host admission and does not write
-// these rows; a non-empty result is leftover state from an interrupted
-// run under an older admission model, not anything the current run path
-// depends on. Deletes route through the canonical row helpers and commit
-// through the invariant check, so the repair cannot leave a key in a
-// state the rest of the subsystem rejects.
+// These rows belong to runs that coordinate through the store rather
+// than through the local admission daemon: cluster work, and local runs
+// with no daemon available, whose box- and run-scoped groups fall back to
+// the store. That fallback has no equivalent of the daemon's instant
+// release on socket close, so a killed run leaves its slot held and this
+// purge is what frees it -- which makes it live repair, not just cleanup
+// after an older admission model.
+//
+// A run inside the orphan grace window keeps its rows: the predicate asks
+// whether the owning run is still marked running, and the doctor's own
+// orphan sweep is what flips a crashed one first. Deletes route through
+// the canonical row helpers and commit through the invariant check, so
+// the repair cannot leave a key in a state the rest of the subsystem
+// rejects.
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {

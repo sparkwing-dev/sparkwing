@@ -68,115 +68,115 @@ func pipelineAdmission(parentLeaseToken string, origin wingwire.Origin) *LocalAd
 	}
 }
 
-// planDeclaresLocalAdmission reports whether a run explicitly asked the
-// local admission daemon for something, and names what, for the error
-// that fails such a run closed.
+// planPinsHostResources reports whether a run explicitly reserved host
+// capacity, and names where, for the error that fails such a run closed.
+// True when the plan carries a plan-level .Resources() pin
+// ([sparkwing.Plan.ResourceHints] with a non-zero core or memory figure)
+// or any node carries one.
 //
-// A plan declares explicitly when it carries at least one of:
+// A host-resource pin is the only declaration with no fallback. CPU and
+// memory are arbitrated by the daemon and by nothing else, so a pinned
+// run on a box with no daemon does not get a weaker version of what it
+// asked for -- it gets none of it, silently, while other work on the box
+// does the same.
 //
-//   - a plan-level .Resources() pin -- [sparkwing.Plan.ResourceHints] with
-//     a non-zero core or memory figure;
-//   - a node-level .Resources() pin on any node in the plan;
-//   - a plan-level .Concurrency() group the local daemon arbitrates, which
-//     is box or run scope ([groupUsesLocalDaemon]); global-scope groups
-//     pool across the fleet through the shared store and never reach the
-//     daemon, so they are not a local-daemon declaration;
-//   - a node-level .Concurrency() group with such a scope.
+// .Concurrency() groups are deliberately excluded, even box- and
+// run-scoped ones the daemon would otherwise arbitrate. Without an
+// admission the whole run takes the no-daemon path, where those groups
+// are honored by the shared store instead: acquirePlanSlot stops
+// filtering local scopes out when the run has no admission, and
+// runUnderGroup routes a node's group to the store acquire whenever the
+// context carries no LocalAdmission. Run scope is keyed by run id, so the
+// store enforces it completely. Refusing those runs would defend nothing
+// and would break the ordinary "one deploy at a time on this box" pipeline
+// on exactly the bare hosts this feature is supposed to keep working.
 //
-// Everything else is an implicit default reservation. A run that declared
-// nothing is still charged host cost per node -- from its measured
-// profile, else a conservative cold-start figure -- but that charge is a
-// courtesy the daemon supplies, not something the pipeline author asked
-// for, and it is the only thing lost when the run proceeds unadmitted. A
-// declaration, by contrast, is the author stating a correctness
-// requirement ("no two of these at once", "this needs 8 cores"), which
-// silently dropping would violate.
-func planDeclaresLocalAdmission(plan *sparkwing.Plan) (declared bool, why string) {
+// What the store path gives up is crash cleanup, not exclusion: the
+// daemon releases a dead holder's slot the moment the kernel closes its
+// socket, while a store slot outlives a killed run until `sparkwing
+// doctor` reclaims it. That is a real difference, and the degrade warning
+// says so -- but it is a reason to warn, not a reason to refuse.
+func planPinsHostResources(plan *sparkwing.Plan) (pinned bool, where string) {
 	if plan == nil {
 		return false, ""
 	}
-	var reasons []string
+	planLevel := false
 	if h := plan.ResourceHints(); h != nil && (h.Cores > 0 || h.MemoryBytes > 0) {
-		reasons = append(reasons, "a plan-level .Resources() pin")
+		planLevel = true
 	}
-	groups := map[string]bool{}
-	for _, membership := range plan.PlanConcurrency() {
-		if g := membership.Group; g != nil && groupUsesLocalDaemon(g) {
-			groups[g.Name()] = true
-		}
-	}
-	pinnedNode := false
+	var nodes []string
 	for _, n := range plan.Nodes() {
 		if h := n.ResourceHints(); h != nil && (h.Cores > 0 || h.MemoryBytes > 0) {
-			pinnedNode = true
-		}
-		if g := n.ConcurrencyGroupRef(); g != nil && groupUsesLocalDaemon(g) {
-			groups[g.Name()] = true
+			nodes = append(nodes, strconv.Quote(n.ID()))
 		}
 	}
-	if pinnedNode {
-		reasons = append(reasons, "a node-level .Resources() pin")
-	}
-	if len(groups) > 0 {
-		names := make([]string, 0, len(groups))
-		for name := range groups {
-			names = append(names, strconv.Quote(name))
+	switch {
+	case planLevel && len(nodes) > 0:
+		sort.Strings(nodes)
+		return true, "a plan-level .Resources() pin, and node-level pins on " + strings.Join(nodes, ", ")
+	case planLevel:
+		return true, "a plan-level .Resources() pin"
+	case len(nodes) > 0:
+		sort.Strings(nodes)
+		noun := "a node-level .Resources() pin on "
+		if len(nodes) > 1 {
+			noun = "node-level .Resources() pins on "
 		}
-		sort.Strings(names)
-		noun := "concurrency group"
-		if len(names) > 1 {
-			noun = "concurrency groups"
-		}
-		reasons = append(reasons, noun+" "+strings.Join(names, ", "))
+		return true, noun + strings.Join(nodes, ", ")
 	}
-	if len(reasons) == 0 {
-		return false, ""
-	}
-	return true, strings.Join(reasons, " and ")
+	return false, ""
 }
 
-// allowUnadmitted reports whether the operator has authorized a
-// declaring run to proceed uncoordinated. Any non-empty value other than
-// the explicit falses counts, matching how the rest of the tree reads its
-// boolean environment switches.
+// allowUnadmitted reports whether the operator has authorized a run to
+// proceed uncoordinated. Only the exact value "1" counts.
+//
+// Strict on purpose: this switch turns off a safety check, and every way
+// of writing it down that is not plainly "on" should leave the check on.
+// A lenient parser that reads "off" as unset -- non-empty, not one of the
+// spellings it happens to know -- disables the gate for someone trying to
+// keep it.
 func allowUnadmitted() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv(AllowUnadmittedEnv))) {
-	case "", "0", "false", "no":
-		return false
-	default:
-		return true
-	}
+	return os.Getenv(AllowUnadmittedEnv) == "1"
 }
 
 // unhostedOutcome classifies a run-start admission failure for a client
-// that cannot host the daemon, splitting on what the pipeline declared.
+// that cannot host the daemon.
 //
 // It answers only the two conditions that mean "this box offers no
 // admission this client can use, and no action of this client's can
-// change that":
+// change that", and it answers them differently, because they are not the
+// same situation:
 //
 //   - [wingdclient.ErrNoDaemonHost] -- nothing is listening and no
-//     installed sparkwing exists to start one. It is reached only after a
-//     dial failure meaning absence; a socket that could not be reached at
-//     all reports unreachable instead and stays a hard error for
-//     everyone, because a daemon may be arbitrating other runs behind it
-//     and joining them uncoordinated oversubscribes the box.
-//   - [wingdclient.ErrDaemonTooOld] -- a daemon answered but speaks an
-//     older protocol major than this client, and this client may not
-//     replace it.
+//     installed sparkwing exists to start one. Nothing is arbitrating this
+//     box, so an unadmitted run is not competing with an admitted one.
+//     A run that pinned host resources still fails closed: CPU and memory
+//     have no fallback arbiter, and quietly not reserving what a pipeline
+//     reserved is a different pipeline. Everything else degrades with one
+//     warning, which is what keeps a pipeline binary shipped alone to a
+//     deploy box a working product.
 //
-// A run whose plan declares resource claims or concurrency groups fails
-// closed on either: the declaration is a correctness requirement, and
-// dropping it silently would let two runs the author said must not
-// overlap overlap. A run with only implicit default reservations degrades
-// to unadmitted with one warning, which is what keeps a standalone
-// pipeline binary on a machine with no sparkwing installed a working
-// product. [AllowUnadmittedEnv] forces the degrade for a declaring run.
+//   - [wingdclient.ErrDaemonTooOld] -- a daemon answered, is arbitrating
+//     this box right now, and speaks a protocol this client cannot use.
+//     Every run refuses, pinned or not. Proceeding would put unadmitted
+//     work alongside runs the daemon is holding capacity for, which
+//     oversubscribes the box in exactly the way admission exists to
+//     prevent -- and unlike the case above, there is a live arbiter whose
+//     accounting we would be corrupting. A live arbiter you cannot join is
+//     not the same as no arbiter.
 //
-// Every other failure -- unreachable, exhausted takeover, a policy
-// rejection, a queue timeout -- returns (false, nil) and the caller keeps
-// the original error.
-func (la *LocalAdmission) unhostedOutcome(err error, plan *sparkwing.Plan) (degrade bool, failure error) {
+// [AllowUnadmittedEnv] forces the degrade in both cases: an operator who
+// knows what else runs on the box can overrule either judgment.
+//
+// A dry run is exempt. It executes DryRunFn bodies, mutates nothing, and
+// finishes in seconds, so it neither needs the capacity it declared nor
+// meaningfully competes for it -- and refusing it would block the one
+// command an operator reaches for to find out what a box would do.
+//
+// Every other failure -- unreachable, exhausted takeover, an unusable host
+// binary, a policy rejection, a queue timeout -- returns (false, nil) and
+// the caller keeps the original error.
+func (la *LocalAdmission) unhostedOutcome(err error, plan *sparkwing.Plan, dryRun bool) (degrade bool, failure error) {
 	if la == nil || !la.PipelineClient || err == nil {
 		return false, nil
 	}
@@ -185,34 +185,47 @@ func (la *LocalAdmission) unhostedOutcome(err error, plan *sparkwing.Plan) (degr
 	if !noHost && !tooOld {
 		return false, nil
 	}
-	declared, why := planDeclaresLocalAdmission(plan)
-	if declared && !allowUnadmitted() {
-		return false, unadmittedRefusal(err, why, tooOld)
+	if !dryRun && !allowUnadmitted() {
+		if tooOld {
+			return false, staleDaemonRefusal(err)
+		}
+		if pinned, where := planPinsHostResources(plan); pinned {
+			return false, unpinnedHostRefusal(where)
+		}
 	}
 	la.unadmittedOnce.Do(func() {
 		if tooOld {
 			la.logf("%v; running without local coordination", err)
 			return
 		}
-		la.logf("no admission daemon is running and no sparkwing is installed to host one; " +
-			"running without local coordination -- concurrent runs on this box will not queue against each other. " +
-			"To coordinate them, " + installAdvice)
+		la.logf("no admission daemon is running and no sparkwing is installed to host one; "+
+			"running without local coordination -- host CPU and memory are not arbitrated, so concurrent runs on this box "+
+			"can oversubscribe it. Box- and run-scoped .Concurrency() groups are still enforced, through the shared store "+
+			"rather than the daemon, which releases a killed run's slot only when `sparkwing doctor` reclaims it. "+
+			"To coordinate the rest, %s", installAdvice)
 	})
 	return true, nil
 }
 
-// unadmittedRefusal is the terminal error for a run that declared what it
-// needs from the local daemon on a box that cannot provide it. It names
-// the declaration, the fix, and the escape hatch, because a run refused
-// for infrastructure the operator may not know exists has to arrive with
-// all three.
-func unadmittedRefusal(err error, why string, tooOld bool) error {
-	cause := "no admission daemon is running and no sparkwing is installed to host one"
-	if tooOld {
-		cause = err.Error()
-	}
-	return fmt.Errorf("local admission: this pipeline declares %s, which the local admission daemon arbitrates, but %s. "+
-		"To coordinate this run, %s. "+
-		"To run it uncoordinated anyway -- concurrent runs on this box will not queue against each other -- set %s=1",
-		why, cause, installAdvice, AllowUnadmittedEnv)
+// unpinnedHostRefusal is the terminal error for a run that reserved host
+// capacity on a box with nothing to reserve it from. It names the pin, the
+// fix, and the escape hatch, because a run refused over infrastructure the
+// operator may not know exists has to arrive with all three.
+func unpinnedHostRefusal(where string) error {
+	return fmt.Errorf("local admission: this pipeline reserves host capacity with %s, but no admission daemon is running "+
+		"and no sparkwing is installed to host one, so nothing can hold that reservation. "+
+		"To honor it, %s. "+
+		"To run without it -- host CPU and memory unarbitrated, so concurrent runs on this box can oversubscribe it -- set %s=1",
+		where, installAdvice, AllowUnadmittedEnv)
+}
+
+// staleDaemonRefusal is the terminal error for a live daemon this client
+// cannot speak to. It leads with the client's own sentence, which already
+// names both versions and the release to install, and adds only what that
+// sentence cannot know: that something is arbitrating this box, so running
+// anyway is not free.
+func staleDaemonRefusal(err error) error {
+	return fmt.Errorf("local admission: %w. That daemon is arbitrating this box now, so running without it would "+
+		"oversubscribe the machine rather than merely go uncoordinated. "+
+		"To run anyway, set %s=1", err, AllowUnadmittedEnv)
 }

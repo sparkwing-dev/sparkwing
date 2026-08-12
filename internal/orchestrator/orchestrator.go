@@ -516,9 +516,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		lease, outcome, admitErr = opts.Admission.admitRun(runCtx, backends, opts.Pipeline, runID, plan, opts.MaxParallel, cancelRun)
 		if admitErr != nil {
 			// This box offers no admission this client can use and cannot
-			// be made to. What that means is a property of the plan: see
+			// be made to. Whether that is fatal depends on what the plan
+			// reserved and on whether anything is arbitrating the box: see
 			// LocalAdmission.unhostedOutcome.
-			degrade, refusal := opts.Admission.unhostedOutcome(admitErr, plan)
+			degrade, refusal := opts.Admission.unhostedOutcome(admitErr, plan, opts.DryRun)
 			switch {
 			case refusal != nil:
 				admitErr = refusal
