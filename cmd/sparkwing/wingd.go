@@ -27,6 +27,8 @@ func runWingd(args []string) error {
 	switch args[0] {
 	case "run":
 		return runWingdRun(args[1:])
+	case "supervise":
+		return runWingdSupervise(args[1:])
 	default:
 		return fmt.Errorf("wingd: unknown subcommand %q", args[0])
 	}
