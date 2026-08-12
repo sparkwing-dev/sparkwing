@@ -1,0 +1,26 @@
+# pkg/projectconfig
+
+func CheckLegacy(startDir string) error
+type Config struct {
+	Defaults Defaults
+
+	Profiles map[string]*profile.Profile
+
+	Pipelines []pipelines.Pipeline
+	Sparks    []sparks.Library
+}
+type Defaults struct {
+	Profile string
+
+	Args map[string]string
+
+	Guards pipelines.Guards
+
+	Requires []string
+}
+func Discover(startDir string) (path string, cfg *Config, err error)
+func DiscoverPipelines(startDir string) (path string, cfg *pipelines.Config, err error)
+const Filename = "sparkwing.yaml"
+func Load(path string) (*Config, error)
+func LoadSparksManifest(sparkwingDir string) (*sparks.Manifest, error)
+func WriteSparksSection(path string, libs []sparks.Library) error

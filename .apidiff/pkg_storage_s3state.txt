@@ -1,0 +1,90 @@
+# pkg/storage/s3state
+
+type Backend struct {
+}
+func (b *Backend) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error
+func (b *Backend) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
+func (b *Backend) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
+func (b *Backend) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error
+func (b *Backend) Close() error
+func (b *Backend) CreateApproval(ctx context.Context, a store.Approval) error
+func (b *Backend) CreateDebugPause(ctx context.Context, p store.DebugPause) error
+func (b *Backend) CreateNode(ctx context.Context, n store.Node) error
+func (b *Backend) CreateRun(ctx context.Context, r store.Run) error
+func (b *Backend) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error)
+func (b *Backend) EnqueueTriggerWithEnv(
+	ctx context.Context,
+	pipeline string,
+	args map[string]string,
+	parentRunID string,
+	parentNodeID string,
+	retryOf string,
+	source string,
+	user string,
+	repo string,
+	branch string,
+	triggerEnv map[string]string,
+) (string, error)
+func (b *Backend) FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
+func (b *Backend) FinishNode(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte) error
+func (b *Backend) FinishNodeStep(ctx context.Context, runID, nodeID, stepID, status string) error
+func (b *Backend) FinishNodeWithReason(ctx context.Context, runID, nodeID, outcome, errMsg string, output []byte, reason string, exitCode *int) error
+func (b *Backend) FinishRun(ctx context.Context, runID, status, errMsg string) error
+func (b *Backend) GetActiveDebugPause(ctx context.Context, runID, nodeID string) (*store.DebugPause, error)
+func (b *Backend) GetApproval(ctx context.Context, runID, nodeID string) (*store.Approval, error)
+func (b *Backend) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error)
+func (b *Backend) GetNode(ctx context.Context, runID, nodeID string) (*store.Node, error)
+func (b *Backend) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq int) (*store.NodeDispatch, error)
+func (b *Backend) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
+func (b *Backend) GetRun(ctx context.Context, runID string) (*store.Run, error)
+func (b *Backend) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error)
+func (b *Backend) ListDebugPauses(ctx context.Context, runID string) ([]*store.DebugPause, error)
+func (b *Backend) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*store.NodeDispatch, error)
+func (b *Backend) ListNodeSteps(ctx context.Context, runID string) ([]*store.NodeStep, error)
+func (b *Backend) ListPendingApprovals(ctx context.Context) ([]*store.Approval, error)
+func (b *Backend) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
+func (b *Backend) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
+func (b *Backend) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, manifestDigest string) error
+func (b *Backend) SetNodeStatus(ctx context.Context, runID, nodeID, status string) error
+func (b *Backend) SetNodeSummary(ctx context.Context, runID, nodeID, md string) error
+func (b *Backend) SetStepSummary(ctx context.Context, runID, nodeID, stepID, md string) error
+func (b *Backend) SkipNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+func (b *Backend) StartNode(ctx context.Context, runID, nodeID string) error
+func (b *Backend) StartNodeStep(ctx context.Context, runID, nodeID, stepID string) error
+func (b *Backend) TouchNodeHeartbeat(ctx context.Context, runID, nodeID string) error
+func (b *Backend) TouchRunHeartbeat(_ context.Context, _ string) error
+func (b *Backend) UpdateNodeActivity(ctx context.Context, runID, nodeID, detail string) error
+func (b *Backend) UpdateNodeDeps(ctx context.Context, runID, nodeID string, deps []string) error
+func (b *Backend) UpdatePlanSnapshot(ctx context.Context, runID string, snapshot []byte) error
+func (b *Backend) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) error
+const DefaultBufferThreshold = 16 * 1024
+const DefaultFlushInterval = 500 * time.Millisecond
+const DefaultOutboxDrainInterval = 5 * time.Second
+var ErrNotSupported = errors.New("s3state: operation not supported in S3-only mode")
+const KindEvent = "event"
+const KindMetricSample = "metric_sample"
+const KindNode = "node"
+const KindNodeStatus = "node_status"
+const KindNodeStep = "node_step"
+const KindRun = "run"
+func New(art storage.ArtifactStore, opts ...Option) *Backend
+func OpenOutbox(path string, art storage.ArtifactStore, interval time.Duration) (*Outbox, error)
+type Option func(*Backend)
+type Outbox struct {
+}
+func (o *Outbox) Close() error
+func (o *Outbox) Drain(ctx context.Context) error
+func (o *Outbox) HasPending(ctx context.Context, key string) (bool, error)
+func (o *Outbox) Pending(ctx context.Context) (int, error)
+func (o *Outbox) Stage(ctx context.Context, kind OutboxKind, key string, body []byte) error
+type OutboxKind string
+const OutboxKindArtifact OutboxKind = "artifact"
+const OutboxKindLog OutboxKind = "log"
+const OutboxKindState OutboxKind = "state"
+func RunIDFromStateKey(key string) (string, bool)
+func WithBufferThreshold(n int) Option
+func WithFlushInterval(d time.Duration) Option
+func WithOutbox(o *Outbox) Option
+
+# methods on un-declared receiver types (likely a bug)
+func (r *byteReaderImpl) Read(p []byte) (int, error)

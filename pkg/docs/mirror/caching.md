@@ -166,7 +166,7 @@ otherwise non-reusable leader outcome, the follower runs the node itself.
 Your `.sparkwing/` directory is a Go module, and sparkwing compiles it
 before it can run anything. Compiling on every invocation would be
 wasteful, so the binary is cached under
-`$SPARKWING_HOME/cache/pipelines/<key>/` and reused until the source
+`$SPARKWING_HOME/cache/pipelines/v1/entries/<key>/` and reused until the source
 changes.
 
 ### The key
@@ -204,19 +204,25 @@ on your machine.
 ### Bounding the cache
 
 A compiled pipeline binary routinely exceeds 90 MB. The cache is
-therefore bounded: after each compile, sparkwing evicts least recently
-used entries until the cache fits both a byte ceiling and an entry
-count.
+therefore bounded: after each new entry, sparkwing reclaims inactive
+entries until the cache fits both a byte ceiling and an entry count.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `SPARKWING_CACHE_MAX_BYTES` | `2GiB` | Total size ceiling. Accepts a suffix (`512MiB`, `4GB`). `0` disables. |
 | `SPARKWING_CACHE_MAX_ENTRIES` | `20` | Entry count ceiling. `0` disables. |
 
-Eviction ranks entries by when they were last *used*, not when they
-were built, so a binary you run daily survives regardless of age. An
-entry used in the last few minutes is never evicted, because a run
-stats its binary just before executing it.
+Pruning advances through a bounded second-chance queue. An entry used
+since it entered the queue moves behind the other candidates, so use
+rather than build age drives retention without an unbounded directory
+scan. A kernel-backed lease spans lookup through process exit; prune
+skips active executions and writers rather than relying on a timing
+window.
+
+Prune bounds entry discovery and deletion. It reports logical cache bytes
+removed separately from observed filesystem capacity gained. The latter is
+evidence, not an admission decision: callers remeasure the filesystem after
+pruning because concurrent activity can change free space.
 
 Inspect and reclaim on demand:
 

@@ -20,6 +20,11 @@ pipelines:
   - name: pre-push
     entrypoint: PrePush
 
+  # push-checks is the fleet wrapper's repository-neutral dispatch name.
+  # It preserves one gate implementation by binding to PrePush.
+  - name: push-checks
+    entrypoint: PrePush
+
   - name: lint
     entrypoint: Lint
 

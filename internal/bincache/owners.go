@@ -33,14 +33,22 @@ type Owner struct {
 }
 
 func ownersPath(key string) string {
-	return filepath.Join(filepath.Dir(CachedBinaryPath(key)), ownersFile)
+	entry, err := PipelineEntry(key)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(entry.entryDir(), ownersFile)
 }
 
 // Owners returns the checkouts recorded against a cache key, most
 // recently seen first. A missing or unreadable file yields nil: this is
 // descriptive data, and no caller should fail for lack of it.
 func Owners(key string) []Owner {
-	data, err := os.ReadFile(ownersPath(key))
+	return readOwners(ownersPath(key))
+}
+
+func readOwners(path string) []Owner {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}
@@ -54,20 +62,22 @@ func Owners(key string) []Owner {
 	return owners
 }
 
-// RecordOwner notes that sparkwingDir used the binary at key, counting
+// recordOwner notes that sparkwingDir used the leased binary, counting
 // the invocation. Called on compiles and on every cache hit, so the
 // count answers "how much has this entry actually saved?" -- the
 // question that decides whether a 90 MB entry is worth its space.
 //
 // Errors are swallowed. A read-only filesystem or a lost race costs
 // accuracy in `sparkwing cache info` and nothing else.
-func RecordOwner(key, sparkwingDir string) {
+func recordOwner(path, sparkwingDir string) {
 	abs, err := filepath.Abs(sparkwingDir)
 	if err != nil {
 		return
 	}
-	path := ownersPath(key)
-	owners := Owners(key)
+	if path == "" {
+		return
+	}
+	owners := readOwners(path)
 
 	now := time.Now()
 	for i, o := range owners {
@@ -105,13 +115,7 @@ func writeOwners(path string, owners []Owner) {
 	if err != nil {
 		return
 	}
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
-		return
-	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
-	}
+	writeDescriptiveFile(path, data)
 }
 
 // partsFile records the per-input digests that produced a cached
@@ -120,12 +124,22 @@ func writeOwners(path string, owners []Owner) {
 const partsFile = "key-parts.json"
 
 func partsPath(key string) string {
-	return filepath.Join(filepath.Dir(CachedBinaryPath(key)), partsFile)
+	entry, err := PipelineEntry(key)
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(entry.entryDir(), partsFile)
 }
 
-// RecordKeyParts stores the labeled digests behind key. Best effort:
+// recordKeyParts stores the labeled digests behind the leased entry. Best effort:
 // without it `cache explain` loses the comparison but nothing else.
-func RecordKeyParts(key string, parts []KeyPart) {
+func recordKeyParts(path string, parts []KeyPart) {
+	if path == "" {
+		return
+	}
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
 	m := make(map[string]string, len(parts))
 	for _, p := range parts {
 		m[p.Label] = p.Digest
@@ -134,19 +148,49 @@ func RecordKeyParts(key string, parts []KeyPart) {
 	if err != nil {
 		return
 	}
-	path := partsPath(key)
-	tmp := path + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	writeDescriptiveFile(path, data)
+}
+
+func writeDescriptiveFile(path string, data []byte) {
+	temp, err := os.CreateTemp(filepath.Dir(path), ".metadata-")
+	if err != nil {
 		return
 	}
-	if err := os.Rename(tmp, path); err != nil {
-		_ = os.Remove(tmp)
+	tempPath := temp.Name()
+	defer func() { _ = os.Remove(tempPath) }()
+	if err := temp.Chmod(0o600); err != nil {
+		_ = temp.Close()
+		return
 	}
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return
+	}
+	if err := temp.Close(); err != nil {
+		return
+	}
+	_ = replaceCacheMetadata(tempPath, path)
+}
+
+// RecordUse updates descriptive metadata while the caller's execution lease
+// keeps the entry stable.
+func (l *Lease) RecordUse(sparkwingDir string, parts []KeyPart) {
+	if l == nil || l.file == nil {
+		return
+	}
+	recordOwner(filepath.Join(l.entry.entryDir(), ownersFile), sparkwingDir)
+	recordKeyParts(filepath.Join(l.entry.entryDir(), partsFile), parts)
+	now := time.Now()
+	_ = os.Chtimes(l.entry.entryDir(), now, now)
 }
 
 // StoredKeyParts returns the digests recorded for key, or nil.
 func StoredKeyParts(key string) map[string]string {
-	data, err := os.ReadFile(partsPath(key))
+	path := partsPath(key)
+	if path == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil
 	}

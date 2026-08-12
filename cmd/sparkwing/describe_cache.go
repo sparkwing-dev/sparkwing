@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -43,9 +44,14 @@ func readDescribeCache(sparkwingDir string) ([]sparkwing.DescribePipeline, error
 	if out := readDescribeFile(describeCachePath(key)); out != nil {
 		return out, nil
 	}
-	if binPath := bincache.CachedBinaryPath(key); fileExists(binPath) {
-		if out, err := refreshDescribeFromBinary(sparkwingDir, binPath, key); err == nil && out != nil {
-			return out, nil
+	entry, entryErr := bincache.PipelineEntry(key)
+	if entryErr == nil {
+		lease, found, acquireErr := entry.Acquire(context.Background())
+		if acquireErr == nil && found {
+			defer func() { _ = lease.Release() }()
+			if out, err := refreshDescribeFromBinary(sparkwingDir, lease.Path(), key); err == nil && out != nil {
+				return out, nil
+			}
 		}
 	}
 	return readDescribeFile(byRepoDescribePath(sparkwingDir)), nil
@@ -62,11 +68,6 @@ func readDescribeFile(path string) []sparkwing.DescribePipeline {
 		return nil
 	}
 	return out
-}
-
-func fileExists(path string) bool {
-	fi, err := os.Stat(path)
-	return err == nil && fi.Mode().IsRegular()
 }
 
 // refreshDescribeFromBinary execs --describe and persists both cache files.

@@ -40,6 +40,7 @@ for agent-facing discovery.`,
 		{"runs", "Inspect or manage runs"},
 		{"repos", "The machine's fleet of sparkwing repos + SDK pins"},
 		{"queue", "The truthful view of local admission: holders + connections + waiters"},
+		{"cache", "Measure and safely reclaim compiled pipeline entries"},
 		{"daemon", "Inspect or refresh the local admission daemon"},
 		{"profile", "Show which profile sparkwing would use right now, and why"},
 		{"version", "Show + update versions"},
@@ -902,10 +903,10 @@ fits both the byte ceiling and the entry ceiling. Defaults come
 from $SPARKWING_CACHE_MAX_BYTES and $SPARKWING_CACHE_MAX_ENTRIES;
 either accepts 0 to disable that dimension.
 
-Entries used in the last few minutes are never evicted, because a
-run stats its binary just before exec'ing it. Entries that cannot
-be removed -- a running executable on Windows -- are reported as
-skipped and left for a later prune.`,
+An execution lease protects each running binary. Prune skips active
+and busy entries, bounds the number examined, and reports observed
+capacity separately from removed entries. Callers making admission
+decisions remeasure filesystem capacity after pruning.`,
 	Flags: []FlagSpec{
 		{Name: "max-bytes", Argument: "SIZE", Desc: "Byte ceiling, e.g. 512MiB", Group: "Limits"},
 		{Name: "max-entries", Argument: "N", Desc: "Entry ceiling", Group: "Limits"},

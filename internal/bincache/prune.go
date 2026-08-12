@@ -1,6 +1,7 @@
 package bincache
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -32,18 +33,15 @@ const (
 	MaxCacheEntriesEnv = "SPARKWING_CACHE_MAX_ENTRIES"
 )
 
-// pruneGrace protects an entry that was touched very recently. A run
-// stats its binary and then execs it; deleting in that window would
-// turn a cache hit into a spurious failure. Callers additionally
-// tolerate the exec losing that race (see the ErrNotExist retry in the
-// compile path), so this is defense in depth rather than the whole
-// answer.
-const pruneGrace = 5 * time.Minute
+var (
+	statusForLimits = Status
+	pruneForLimits  = Prune
+)
 
 // CacheRoot is the directory holding compiled pipeline binaries, one
 // subdirectory per cache key.
 func CacheRoot() string {
-	return filepath.Join(SparkwingHome(), "cache", "pipelines")
+	return filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema, "entries")
 }
 
 // CacheEntry is one cached pipeline binary.
@@ -53,16 +51,6 @@ type CacheEntry struct {
 	Bytes    int64     // size of the binary, 0 for an orphaned directory
 	LastUsed time.Time // refreshed on every cache hit; zero when orphaned
 	Owners   []Owner   // checkouts known to have used it, most recent first
-}
-
-// PruneResult reports what a prune did.
-type PruneResult struct {
-	Removed    int   // entries deleted
-	Freed      int64 // bytes their binaries occupied
-	Kept       int   // entries retained
-	KeptBytes  int64
-	Skipped    int // entries that could not be deleted, e.g. a running .exe
-	Considered int
 }
 
 // ScanCache lists the cache entries, newest use first. A missing cache
@@ -82,89 +70,75 @@ func ScanCache() ([]CacheEntry, error) {
 		if !de.IsDir() {
 			continue
 		}
+		managed, entryErr := PipelineEntry(de.Name())
+		if entryErr != nil {
+			continue
+		}
 		entry := CacheEntry{Key: de.Name(), Dir: filepath.Join(root, de.Name())}
-		// An entry directory with no binary is debris from an
-		// interrupted compile; it sorts oldest and gets swept first.
-		if fi, err := os.Stat(CachedBinaryPath(de.Name())); err == nil {
+		if fi, err := os.Stat(managed.binaryPath()); err == nil {
 			entry.Bytes = fi.Size()
-			entry.LastUsed = fi.ModTime()
+			if dirInfo, infoErr := de.Info(); infoErr == nil {
+				entry.LastUsed = dirInfo.ModTime()
+			}
 			entry.Owners = Owners(de.Name())
 		}
 		entries = append(entries, entry)
 	}
-
-	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].LastUsed.After(entries[j].LastUsed)
-	})
+	sortCacheEntries(entries)
 	return entries, nil
 }
 
-// Touch records that an entry was just used. The binary's modification
-// time doubles as its last-used stamp: nothing else writes to a cached
-// binary after it is built, so without this the timestamp would say
-// when it was compiled and a least-recently-used policy would evict
-// binaries that are in daily use.
-//
-// Failure is not worth surfacing -- a read-only or exotic filesystem
-// costs accuracy in eviction order, nothing more.
-func Touch(binPath string) {
-	now := time.Now()
-	_ = os.Chtimes(binPath, now, now)
+func sortCacheEntries(entries []CacheEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].LastUsed.After(entries[j].LastUsed)
+	})
 }
 
-// Prune deletes least-recently-used entries until the cache fits within
-// both ceilings. A ceiling of 0 disables that dimension. Entries used
-// within pruneGrace are never evicted.
-//
-// Deletion failures are counted and skipped rather than returned:
-// Windows refuses to unlink a running executable, and a concurrent
-// prune may have removed the entry already. Either way the next prune
-// picks it up.
-func Prune(maxBytes int64, maxEntries int) (PruneResult, error) {
-	entries, err := ScanCache()
+// PruneToConfiguredLimits translates configured ceilings into a bounded
+// request handled by the cache's sole deletion authority.
+func PruneToConfiguredLimits(ctx context.Context) (PruneResult, error) {
+	return PruneToLimits(ctx, ConfiguredMaxBytes(), ConfiguredMaxEntries(), false)
+}
+
+// PruneToLimits converts cache ceilings into a bounded request for the
+// lease-aware deletion authority. removeAll ignores both ceilings.
+func PruneToLimits(ctx context.Context, maxBytes int64, maxEntries int, removeAll bool) (PruneResult, error) {
+	return pruneToLimitsAtRoot(ctx, "", maxBytes, maxEntries, removeAll)
+}
+
+func pruneToLimitsAtRoot(ctx context.Context, root string, maxBytes int64, maxEntries int, removeAll bool) (PruneResult, error) {
+	status, err := statusForLimits(ctx, root)
 	if err != nil {
 		return PruneResult{}, err
 	}
-
-	result := PruneResult{Considered: len(entries)}
-	var total int64
-	for _, e := range entries {
-		total += e.Bytes
+	total := status.ObservedBytes + status.LegacyBytes
+	count := status.EntryCount + status.LegacyEntries
+	bytesGoal := total - maxBytes
+	if maxBytes <= 0 || bytesGoal < 0 {
+		bytesGoal = 0
 	}
-	count := len(entries)
-
-	// entries is newest-first; walk backwards to evict the coldest.
-	cutoff := time.Now().Add(-pruneGrace)
-	for i := len(entries) - 1; i >= 0; i-- {
-		overBytes := maxBytes > 0 && total > maxBytes
-		overCount := maxEntries > 0 && count > maxEntries
-		if !overBytes && !overCount {
-			break
-		}
-		e := entries[i]
-		if e.LastUsed.After(cutoff) {
-			// Everything above this point is even newer, so there is
-			// nothing colder left that is safe to take.
-			break
-		}
-		if err := os.RemoveAll(e.Dir); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			result.Skipped++
-			continue
-		}
-		result.Removed++
-		result.Freed += e.Bytes
-		total -= e.Bytes
-		count--
+	entriesGoal := count - maxEntries
+	if maxEntries <= 0 || entriesGoal < 0 {
+		entriesGoal = 0
 	}
-
-	result.Kept = count
-	result.KeptBytes = total
-	return result, nil
-}
-
-// PruneToConfiguredLimits applies the ceilings from the environment.
-func PruneToConfiguredLimits() (PruneResult, error) {
-	return Prune(ConfiguredMaxBytes(), ConfiguredMaxEntries())
+	if removeAll {
+		bytesGoal = 0
+		entriesGoal = count
+	}
+	if bytesGoal == 0 && entriesGoal == 0 && !status.DiscoveryExhausted {
+		return PruneResult{GoalSatisfied: true}, nil
+	}
+	result, err := pruneForLimits(ctx, PruneOptions{
+		Root:           root,
+		RemoveBytes:    bytesGoal,
+		ReclaimEntries: entriesGoal,
+		MaxEntries:     count,
+	})
+	if status.DiscoveryExhausted {
+		result.GoalSatisfied = false
+		result.WorkBoundExhausted = true
+	}
+	return result, err
 }
 
 // ConfiguredMaxBytes resolves the byte ceiling, falling back to the

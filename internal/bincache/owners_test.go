@@ -1,6 +1,8 @@
 package bincache
 
 import (
+	"context"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -9,16 +11,27 @@ import (
 // of the binary, so the owners record is the only thing that can say
 // what a cached 90 MB blob belongs to.
 func TestRecordOwner_TracksCheckoutsAndCounts(t *testing.T) {
-	isolateCache(t)
-	seedEntry(t, "shared", 10, 0)
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	const key = "11111111-11111111"
+	entry, err := PipelineEntry(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease, _, err := entry.AcquireOrMaterialize(context.Background(), func(path string) error {
+		return os.WriteFile(path, []byte("entry"), 0o755)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lease.Release() }()
 
 	primary := filepath.Join(t.TempDir(), "primary", ".sparkwing")
 	worktree := filepath.Join(t.TempDir(), "worktree", ".sparkwing")
-	RecordOwner("shared", primary)
-	RecordOwner("shared", primary)
-	RecordOwner("shared", worktree)
+	lease.RecordUse(primary, nil)
+	lease.RecordUse(primary, nil)
+	lease.RecordUse(worktree, nil)
 
-	owners := Owners("shared")
+	owners := Owners(key)
 	if len(owners) != 2 {
 		t.Fatalf("expected both checkouts recorded, got %+v", owners)
 	}
@@ -35,9 +48,34 @@ func TestRecordOwner_TracksCheckoutsAndCounts(t *testing.T) {
 }
 
 func TestOwners_MissingFileIsNotAnError(t *testing.T) {
-	isolateCache(t)
+	t.Setenv("SPARKWING_HOME", t.TempDir())
 	if owners := Owners("never-written"); owners != nil {
 		t.Fatalf("absent owners should read as nil, got %+v", owners)
+	}
+}
+
+func TestLeaseRecordUseMutatesOnlyItsEntry(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
+	root := t.TempDir()
+	entry := testEntry(t, root, "11111111-11111111")
+	lease, _, err := entry.AcquireOrMaterialize(context.Background(), func(path string) error {
+		return os.WriteFile(path, []byte("entry"), 0o755)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lease.Release() }()
+	lease.RecordUse(filepath.Join(t.TempDir(), ".sparkwing"), []KeyPart{{Label: "module", Digest: "digest"}})
+	if _, err := os.Stat(filepath.Join(entry.entryDir(), ownersFile)); err != nil {
+		t.Fatalf("leased owner metadata: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(entry.entryDir(), partsFile)); err != nil {
+		t.Fatalf("leased key metadata: %v", err)
+	}
+	if path := ownersPath(entry.key); path != "" {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("global cache metadata changed: %v", err)
+		}
 	}
 }
 
