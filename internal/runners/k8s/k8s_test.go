@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
@@ -52,6 +53,157 @@ func TestBuildJob_OmitsArtifactStoreURLWhenEmpty(t *testing.T) {
 	env := jobEnv(t, Config{Image: "img"})
 	if _, ok := env["SPARKWING_CACHE_URL"]; ok {
 		t.Fatalf("SPARKWING_CACHE_URL should be absent when ArtifactStoreURL is empty")
+	}
+}
+
+// The four values are load-bearing, not decorative: the "|" makes any
+// proxy error fall through to upstream, `direct` last keeps private
+// modules resolvable through ~/.netrc, and pip ignores a plain-HTTP
+// index whose host is not also in PIP_TRUSTED_HOST.
+func TestBuildJob_PointsPackageManagersAtTheDependencyProxy(t *testing.T) {
+	env := jobEnv(t, Config{Image: "img", DependencyProxyURL: "http://cache.sparkwing.svc.cluster.local"})
+	for key, want := range map[string]string{
+		"GOPROXY":             "http://cache.sparkwing.svc.cluster.local/proxy/golang|https://proxy.golang.org,direct",
+		"npm_config_registry": "http://cache.sparkwing.svc.cluster.local/proxy/npm",
+		"PIP_INDEX_URL":       "http://cache.sparkwing.svc.cluster.local/proxy/pypi/simple/",
+		"PIP_TRUSTED_HOST":    "cache.sparkwing.svc.cluster.local",
+	} {
+		if got := env[key]; got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+}
+
+// npm_config_registry is lowercase, which is legal for a K8s env name
+// and easy to assume otherwise; a rejected name would fail the Job at
+// admission, long after this code ran.
+func TestDependencyProxyEnv_NamesAreValidK8sEnvNames(t *testing.T) {
+	for _, e := range dependencyProxyEnv("http://cache") {
+		if errs := validation.IsEnvVarName(e.Name); len(errs) > 0 {
+			t.Errorf("env name %q rejected by K8s validation: %v", e.Name, errs)
+		}
+	}
+}
+
+func TestBuildJob_OmitsDependencyProxyEnvWhenUnset(t *testing.T) {
+	env := jobEnv(t, Config{Image: "img"})
+	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"} {
+		if _, ok := env[key]; ok {
+			t.Errorf("%s should be absent when DependencyProxyURL is empty", key)
+		}
+	}
+}
+
+func TestDependencyProxyEnv_URLJoin(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		base        string
+		wantGoproxy string
+		wantHost    string
+	}{
+		{
+			name:        "trailing slash does not double up",
+			base:        "http://cache/",
+			wantGoproxy: "http://cache/proxy/golang|https://proxy.golang.org,direct",
+			wantHost:    "cache",
+		},
+		{
+			name:        "explicit port travels into the trusted host",
+			base:        "http://cache:8090",
+			wantGoproxy: "http://cache:8090/proxy/golang|https://proxy.golang.org,direct",
+			wantHost:    "cache:8090",
+		},
+		{
+			name:        "path prefix is preserved for an ingress-mounted cache",
+			base:        "https://sparkwing.example.com/cache",
+			wantGoproxy: "https://sparkwing.example.com/cache/proxy/golang|https://proxy.golang.org,direct",
+			wantHost:    "sparkwing.example.com",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := map[string]string{}
+			for _, e := range dependencyProxyEnv(tc.base) {
+				got[e.Name] = e.Value
+			}
+			if got["GOPROXY"] != tc.wantGoproxy {
+				t.Errorf("GOPROXY = %q, want %q", got["GOPROXY"], tc.wantGoproxy)
+			}
+			if got["PIP_TRUSTED_HOST"] != tc.wantHost {
+				t.Errorf("PIP_TRUSTED_HOST = %q, want %q", got["PIP_TRUSTED_HOST"], tc.wantHost)
+			}
+		})
+	}
+}
+
+// A pod that cannot resolve its own registry is worse than one on
+// upstream defaults, so a base URL missing a scheme or host wires
+// nothing at all.
+func TestDependencyProxyEnv_RejectsUnusableBase(t *testing.T) {
+	for _, base := range []string{"", "cache.sparkwing.svc", "http://", "://cache"} {
+		if got := dependencyProxyEnv(base); got != nil {
+			t.Errorf("dependencyProxyEnv(%q) = %#v, want nil", base, got)
+		}
+	}
+}
+
+func TestResolveDependencyProxy(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		explicit string
+		cacheURL string
+		want     string
+	}{
+		{name: "explicit wins", explicit: "http://mirror", cacheURL: "http://cache", want: "http://mirror"},
+		{name: "off disables", explicit: "off", cacheURL: "http://cache", want: ""},
+		{name: "off is case-insensitive", explicit: "OFF", cacheURL: "http://cache", want: ""},
+		{name: "empty derives from the cache service", cacheURL: "http://cache", want: "http://cache"},
+		{name: "no cache service, no proxy", want: ""},
+		{name: "non-HTTP store is not a proxy", cacheURL: "s3://bucket/prefix", want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := ResolveDependencyProxy(tc.explicit, tc.cacheURL); got != tc.want {
+				t.Errorf("ResolveDependencyProxy(%q, %q) = %q, want %q", tc.explicit, tc.cacheURL, got, tc.want)
+			}
+		})
+	}
+}
+
+// PullAlways on a Job-per-node pod re-downloads a digest the kubelet
+// already has, once per node.
+func TestBuildJob_DefaultsToIfNotPresentPullPolicy(t *testing.T) {
+	r := &Runner{cfg: Config{Image: "img"}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	if got := job.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != corev1.PullIfNotPresent {
+		t.Fatalf("imagePullPolicy = %q, want IfNotPresent", got)
+	}
+}
+
+func TestBuildJob_HonoursConfiguredPullPolicy(t *testing.T) {
+	r := &Runner{cfg: Config{Image: "img", ImagePullPolicy: corev1.PullAlways}}
+	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
+	if got := job.Spec.Template.Spec.Containers[0].ImagePullPolicy; got != corev1.PullAlways {
+		t.Fatalf("imagePullPolicy = %q, want Always", got)
+	}
+}
+
+func TestParsePullPolicy(t *testing.T) {
+	for in, want := range map[string]corev1.PullPolicy{
+		"":              corev1.PullIfNotPresent,
+		"IfNotPresent":  corev1.PullIfNotPresent,
+		"ifnotpresent":  corev1.PullIfNotPresent,
+		"Always":        corev1.PullAlways,
+		"Never":         corev1.PullNever,
+		" IfNotPresent": corev1.PullIfNotPresent,
+	} {
+		got, err := ParsePullPolicy(in)
+		if err != nil || got != want {
+			t.Errorf("ParsePullPolicy(%q) = (%q, %v), want (%q, nil)", in, got, err, want)
+		}
+	}
+	for _, in := range []string{"always-ish", "IfPresent", "true"} {
+		if _, err := ParsePullPolicy(in); err == nil {
+			t.Errorf("ParsePullPolicy(%q) = nil error, want a rejection", in)
+		}
 	}
 }
 

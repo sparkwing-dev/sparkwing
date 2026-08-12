@@ -14,6 +14,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
@@ -269,6 +270,13 @@ func runRunnerCLI(args []string) error {
 		"kubeconfig path for creating trigger-spawned Jobs (empty = in-cluster)")
 	triggerArtifactStore := fs.String("trigger-artifact-store", os.Getenv("SPARKWING_CACHE_URL"),
 		"artifact/cache store URL passed to trigger-spawned runner Jobs")
+	triggerDependencyProxy := fs.String("dependency-proxy", os.Getenv("SPARKWING_DEPENDENCY_PROXY_URL"),
+		"base URL of the in-cluster pull-through package proxy stamped on trigger-spawned runner Jobs as "+
+			"GOPROXY / npm_config_registry / PIP_INDEX_URL; empty derives it from --gitcache, \"off\" disables "+
+			"(env: SPARKWING_DEPENDENCY_PROXY_URL)")
+	triggerRunnerPullPolicy := fs.String("trigger-runner-image-pull-policy", os.Getenv("SPARKWING_IMAGE_PULL_POLICY"),
+		"imagePullPolicy for trigger-spawned runner Jobs: Always | IfNotPresent | Never "+
+			"(default IfNotPresent; env: SPARKWING_IMAGE_PULL_POLICY)")
 	var triggerRunnerNodeSelector multiFlag = splitCSV(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR"))
 	fs.Var(&triggerRunnerNodeSelector, "trigger-runner-node-selector",
 		"node selector for trigger-spawned runner Jobs, key=value (repeatable; env: SPARKWING_RUNNER_NODE_SELECTOR)")
@@ -337,9 +345,14 @@ func runRunnerCLI(args []string) error {
 				ArtifactStore:   *triggerArtifactStore,
 				K8sNodeSelector: triggerRunnerNodeSelector,
 				K8sTolerations:  triggerRunnerTolerations,
-				Poll:            *poll,
-				Logger:          slog.Default().With("loop", "trigger"),
-				Sources:         splitCSV(*triggerSources),
+				// The cache pod serves both the gitcache and /proxy/,
+				// so --gitcache is the proxy base when nothing else
+				// names one.
+				DependencyProxy:    k8srunner.ResolveDependencyProxy(*triggerDependencyProxy, *gitcacheURL),
+				K8sImagePullPolicy: *triggerRunnerPullPolicy,
+				Poll:               *poll,
+				Logger:             slog.Default().With("loop", "trigger"),
+				Sources:            splitCSV(*triggerSources),
 			}); err != nil {
 				slog.Default().Error("trigger loop exited with error", "err", err)
 			}

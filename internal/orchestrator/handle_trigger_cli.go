@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/signal"
 	"time"
+
+	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 )
 
 // runHandleTriggerCLI handles `sparkwing handle-trigger <id> [flags]`.
@@ -31,6 +33,11 @@ func runHandleTriggerCLI(args []string) error {
 	k8sCtrlURL := fs.String("runner-controller-url", os.Getenv("SPARKWING_RUNNER_CONTROLLER_URL"), "controller URL the runner pod should talk to (defaults to --controller)")
 	k8sLogsURL := fs.String("runner-logs-url", os.Getenv("SPARKWING_RUNNER_LOGS_URL"), "logs-service URL the runner pod should talk to (defaults to --logs)")
 	artifactStoreURL := fs.String("artifact-store", os.Getenv("SPARKWING_CACHE_URL"), "artifact/cache store URL passed to runner pods (k8s)")
+	dependencyProxy := fs.String("dependency-proxy", os.Getenv("SPARKWING_DEPENDENCY_PROXY_URL"),
+		"base URL of the in-cluster pull-through package proxy stamped on runner pods as GOPROXY / npm_config_registry / PIP_INDEX_URL; "+
+			"empty derives it from SPARKWING_GITCACHE_URL, \"off\" disables (env: SPARKWING_DEPENDENCY_PROXY_URL)")
+	imagePullPolicy := fs.String("image-pull-policy", os.Getenv("SPARKWING_IMAGE_PULL_POLICY"),
+		"imagePullPolicy for runner pods: Always | IfNotPresent | Never (default IfNotPresent; env: SPARKWING_IMAGE_PULL_POLICY)")
 	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
 	var k8sNodeSelector stringSliceFlag
 	k8sNodeSelector = splitEnvList(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR"))
@@ -93,6 +100,9 @@ func runHandleTriggerCLI(args []string) error {
 			AgentToken:       *token,
 			NodeSelector:     nodeSelector,
 			Tolerations:      tolerations,
+			DependencyProxyURL: k8srunner.ResolveDependencyProxy(
+				*dependencyProxy, os.Getenv("SPARKWING_GITCACHE_URL")),
+			ImagePullPolicy: *imagePullPolicy,
 		})
 		if err != nil {
 			return fmt.Errorf("k8s runner: %w", err)

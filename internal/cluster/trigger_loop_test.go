@@ -33,6 +33,8 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		K8sTolerations: []string{
 			"sparkwing.io/node-pool=runner:NoSchedule",
 		},
+		DependencyProxy:    "http://cache:80",
+		K8sImagePullPolicy: "Always",
 	})
 	want := []string{
 		"--runner", "k8s",
@@ -44,11 +46,31 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 		"--runner-logs-url", "http://logs:4344",
 		"--kubeconfig", "/tmp/kubeconfig",
 		"--artifact-store", "http://cache:4344",
+		"--image-pull-policy", "Always",
+		"--dependency-proxy", "http://cache:80",
 		"--runner-node-selector", "sparkwing.io/node-pool=runner",
 		"--runner-toleration", "sparkwing.io/node-pool=runner:NoSchedule",
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("triggerRunnerArgs() = %#v, want %#v", got, want)
+	}
+}
+
+// The child inherits SPARKWING_GITCACHE_URL from this process and
+// would re-derive a proxy from it, so "no proxy" has to travel as an
+// explicit flag rather than an omitted one.
+func TestTriggerRunnerArgsForwardsDependencyProxyOptOut(t *testing.T) {
+	got := triggerRunnerArgs(TriggerLoopOptions{
+		RunnerKind:   "k8s",
+		K8sNamespace: "sparkwing",
+		K8sImage:     "example.com/sparkwing-runner:v1",
+	})
+	idx := slices.Index(got, "--dependency-proxy")
+	if idx == -1 || idx+1 >= len(got) || got[idx+1] != "off" {
+		t.Fatalf("triggerRunnerArgs() = %#v, want --dependency-proxy off", got)
+	}
+	if slices.Contains(got, "--image-pull-policy") {
+		t.Fatalf("triggerRunnerArgs() = %#v, want no --image-pull-policy when unset", got)
 	}
 }
 
