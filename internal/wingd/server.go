@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
@@ -35,6 +36,12 @@ type Daemon struct {
 
 	lockFile *os.File
 	ln       net.Listener
+
+	// connSeq numbers accepted connections so a per-conn log line names
+	// something an operator can correlate. A unix-socket peer that never
+	// bound an address renders as "@" through RemoteAddr, which makes
+	// every client look like the same client in the daemon log.
+	connSeq atomic.Uint64
 
 	ready       chan struct{}
 	quit        chan struct{}
@@ -1513,6 +1520,13 @@ func (d *Daemon) handleDisconnect(c *conn) {
 	c.disconnectOnce.Do(func() {
 		c.close()
 		d.mu.Lock()
+		// Snapshot what this connection was carrying so the log line can
+		// be written after the lock is released; every field below is
+		// guarded by d.mu and the teardown clears some of them.
+		role, runID := c.role, c.runID
+		if runID == "" && len(c.members) > 0 {
+			runID = c.members[0]
+		}
 		delete(d.conns, c)
 		for _, m := range c.members {
 			if d.byRun[m] == c {
@@ -1534,6 +1548,7 @@ func (d *Daemon) handleDisconnect(c *conn) {
 				}
 				d.touchLocked()
 				d.mu.Unlock()
+				d.logDisconnect(c, role, runID)
 				return
 			}
 		}
@@ -1570,12 +1585,31 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		snap := d.ledger.Snapshot()
 		d.touchLocked()
 		d.mu.Unlock()
-		for _, runID := range orphaned {
-			d.cfg.logf("orphan: run %s connection lost without release; finalizing", runID)
-			go d.cfg.FinalizeRun(runID)
+		d.logDisconnect(c, role, runID)
+		for _, orphan := range orphaned {
+			d.cfg.logf("orphan: conn %d lost run %s without release; finalizing", c.id, orphan)
+			go d.cfg.FinalizeRun(orphan)
 		}
 		d.flush(deliveries, snap)
 	})
+}
+
+// logDisconnect records which connection went away and what it was
+// carrying at the time. Only role-bearing connections are logged: a
+// client that connected, read the queue state, and left is not
+// something an operator ever needs to correlate, while a holder or a
+// waiter vanishing is the first half of every "why did my run get
+// released" question. The conn id is what makes the answer possible --
+// an unbound unix-socket peer's RemoteAddr is "@" for every client
+// alike, so the address identifies nothing.
+func (d *Daemon) logDisconnect(c *conn, role connRole, runID string) {
+	if role == roleNone {
+		return
+	}
+	if runID == "" {
+		runID = "-"
+	}
+	d.cfg.logf("conn %d disconnected while %s (run %s)", c.id, role, runID)
 }
 
 // waiterDepartureKindLocked classifies why a queued run left without a
@@ -1675,8 +1709,8 @@ const (
 // may invoke it either before taking the daemon lock or after releasing it.
 func (d *Daemon) rejectInvalid(c *conn, req *wingwire.AdmissionRequest, cause, reason string) {
 	_ = c.send(&wingwire.Evicted{RunID: req.RunID, Key: "invalid", Policy: wingwire.PolicyFail, Reason: reason})
-	d.cfg.logf("rejected run %s: %s [cost_source=%q cores=%.2f memory_bytes=%d semaphores=%d]",
-		req.RunID, reason, req.CostSource, req.Resources.Cores, req.Resources.MemoryBytes, len(req.Semaphores))
+	d.cfg.logf("conn %d rejected run %s: %s [cost_source=%q cores=%.2f memory_bytes=%d semaphores=%d]",
+		c.id, req.RunID, reason, req.CostSource, req.Resources.Cores, req.Resources.MemoryBytes, len(req.Semaphores))
 	d.events.record(d.now(), admissionEvent{Kind: eventRejection, Key: cause})
 }
 
