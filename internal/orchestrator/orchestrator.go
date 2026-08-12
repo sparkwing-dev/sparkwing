@@ -997,21 +997,6 @@ func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 	}
 }
 
-// emitRunStart sends a run_start record with follow-logs/status hints
-// plus enough invocation context (args, flags, trigger-env keys, cwd)
-// for an operator -- or an agent reading the JSONL stream -- to
-// reproduce the run. Values for trigger env are deliberately omitted;
-// only the names are surfaced so secret-bearing variables don't leak
-// into the log/receipt.
-// buildRunInvocation snapshots how this run was started: run-id,
-// pipeline, args, flags, binary_source, cwd, log_path, hashes, hints,
-// etc.
-// The same map flows into BOTH the store.Run.Invocation column (so
-// runs status / receipt / dashboards can answer "how was this
-// started") and run_start.attrs (so the live JSONL stream agents
-// read carries the same shape). Adding a new context field is a
-// one-line edit here -- no schema migration, no separate emit-vs-
-// store divergence.
 // parentTriggerRepoDir returns the running pipeline's own working
 // directory, whose .sparkwing/ tree lets a same-repo child trigger
 // dispatch from the parent's already-compiled binary without a repo
@@ -1078,6 +1063,17 @@ func mergeInvokeArgs(opts Options) map[string]string {
 	return merged
 }
 
+// buildRunInvocation snapshots how this run was started: run-id,
+// pipeline, args, flags, binary_source, cwd, log_path, hashes, hints,
+// etc.
+//
+// The same map flows into BOTH the store.Run.Invocation column (so
+// runs status / receipt / dashboards can answer "how was this
+// started") and run_start.attrs (so the live JSONL stream agents
+// read carries the same shape). Adding a new context field is a
+// one-line edit here -- no schema migration, no separate emit-vs-
+// store divergence.
+//
 // logDir is the run's log directory on the machine executing it, as
 // reported by the log backend that will write it (see
 // localRunLogDir). It is recorded as log_path so a caller holding only
@@ -1168,11 +1164,17 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	return inv
 }
 
-// emitRunStart sends a run_start record carrying the precomputed
-// invocation snapshot. Caller passes the same map that was stored on
-// store.Run.Invocation, so the live stream and the persisted row agree
-// on every field except the secret-declared args and the reproducer's
-// copy of them, which are redacted here.
+// emitRunStart sends a run_start record with follow-logs/status hints
+// plus enough invocation context (args, flags, trigger-env keys, cwd)
+// for an operator -- or an agent reading the JSONL stream -- to
+// reproduce the run. Values for trigger env are deliberately omitted;
+// only the names are surfaced so secret-bearing variables don't leak
+// into the log/receipt.
+//
+// It carries the precomputed invocation snapshot: the caller passes the
+// same map that was stored on store.Run.Invocation, so the live stream
+// and the persisted row agree on every field except the secret-declared
+// args and the reproducer's copy of them, which are redacted here.
 //
 // The envelope is a render surface, not a re-execution input: nothing
 // reconstructs a run from run_start.attrs (retry reads store.Run.Args),
