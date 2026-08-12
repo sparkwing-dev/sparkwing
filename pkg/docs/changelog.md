@@ -121,7 +121,8 @@ code change to unlock.
   existing trigger carries the empty key and generation zero. As with every
   schema advance, a binary older than this release refuses to open a database
   that has been migrated, so upgrade every sparkwing sharing a runs store
-  together.
+  together. See the [migration
+  guide](docs/migrations/v0.28.0.md#runs-store-schema-moves-to-version-13).
 
   Anyone who ran an interim build of this branch before the schema was
   finalized has a version-13 database missing `claim_seq`, which fails
