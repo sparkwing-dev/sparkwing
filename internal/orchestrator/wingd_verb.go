@@ -12,25 +12,36 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/internal/wingd/supervise"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// RunWingd serves the `wingd run` subcommand for any binary that engages
-// local admission. The wingd client spawns the daemon by re-execing the
-// current binary, so a binary that requests admission -- including the
-// cluster runner and laptop agent when they route controller work through
-// the local daemon -- must be able to serve `wingd run` too.
+// RunWingd serves the hidden `wingd` subcommands for installed binaries
+// that host the local admission daemon: sparkwing-runner, whose
+// in-process client self-spawns when it routes controller work through
+// the local daemon, dispatches here.
+//
+// Both verbs are served, because the client's self-spawn starts `wingd
+// supervise` and that supervisor re-execs `wingd run`: a binary that
+// serves only one half answers its own spawn with a usage error and
+// never brings a daemon up.
+//
+// Compiled pipeline binaries do not serve these verbs. The installed
+// Sparkwing distribution owns daemon lifecycle; pipeline clients declare
+// required capabilities and use the running daemon, but never host,
+// replace, or upgrade it (see pipelineAdmission), so a repo's
+// .sparkwing/go.mod pin never becomes the machine's daemon version.
 func RunWingd(args []string) error {
+	if len(args) > 0 && args[0] == "supervise" {
+		return supervise.Run(args[1:])
+	}
 	return runWingdCLI(args)
 }
 
-// runWingdCLI serves the hidden `<binary> wingd run` subcommand of
-// compiled pipeline binaries. The wingd client library spawns the local
-// admission daemon by re-execing the current binary, so any binary that
-// requests admission must also be able to serve it.
+// runWingdCLI elects and serves one daemon for a sparkwing home.
 func runWingdCLI(args []string) error {
 	if len(args) == 0 || args[0] != "run" {
-		return errors.New("usage: wingd run [--home DIR] [--version V]")
+		return errors.New("usage: wingd run|supervise [--home DIR] [--version V]")
 	}
 	fs := flag.NewFlagSet("wingd run", flag.ContinueOnError)
 	home := fs.String("home", "", "sparkwing home (default: $SPARKWING_HOME or ~/.sparkwing)")

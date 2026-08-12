@@ -1,4 +1,4 @@
-package main
+package supervise
 
 import (
 	"context"
@@ -53,16 +53,17 @@ func TestWingdSupervisorHardStopsOnlyAfterBoundedTermAndStartsOneSuccessor(t *te
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() {
-		done <- superviseWingd(ctx, wingdSupervisorConfig{
+		done <- Loop(ctx, Config{
 			ProbeInterval: time.Millisecond,
 			ProbeTimeout:  time.Millisecond,
 			FailureLimit:  2,
 			TermGrace:     time.Millisecond,
-		}, wingdSupervisorDeps{
-			Start: func() (wingdSupervisedChild, error) {
+		}, Deps{
+			Start: func() (Child, error) {
 				index := int(starts.Add(1) - 1)
 				if index >= len(children) {
-					t.Fatalf("started more than one successor")
+					t.Errorf("started more than one successor")
+					return nil, errors.New("too many starts")
 				}
 				child := children[index]
 				if index == 1 {
@@ -108,13 +109,13 @@ func TestWingdSupervisorDoesNotRestartAChildThatExitsWithoutWatchdogRecovery(t *
 	child := newSupervisorTestChild()
 	child.done <- nil
 	starts := 0
-	err := superviseWingd(context.Background(), wingdSupervisorConfig{
+	err := Loop(context.Background(), Config{
 		ProbeInterval: time.Hour,
 		ProbeTimeout:  time.Millisecond,
 		FailureLimit:  2,
 		TermGrace:     time.Millisecond,
-	}, wingdSupervisorDeps{
-		Start: func() (wingdSupervisedChild, error) {
+	}, Deps{
+		Start: func() (Child, error) {
 			starts++
 			return child, nil
 		},
