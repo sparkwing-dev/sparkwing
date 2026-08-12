@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.30.0] - 2026-08-12
 ### Added
 
 - **cache:** `pkg/cachecontrol` measures the managed pipeline-binary cache and
