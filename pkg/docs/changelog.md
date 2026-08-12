@@ -62,6 +62,13 @@ code change to unlock.
   Because the path is the executor's, a run read back through `--profile` may
   name a directory that is absent locally: the text output marks those, while
   the JSON reports the path as recorded.
+- **wingd:** `SIGUSR1` makes the daemon write a full goroutine dump plus
+  a one-line count of its connections, holders, waiters, leases, and
+  guards to its log
+  (`~/.sparkwing/wingd/d.log`). A daemon that is burning CPU can now be
+  explained while it is still running -- `kill -USR1 <pid>`, then read
+  the log -- instead of only after the operator has killed the evidence.
+  POSIX only; Windows has no such signal.
 
 ### Fixed
 
@@ -79,19 +86,6 @@ code change to unlock.
   reporting a possibly-succeeding run as failed. `--detach` is unchanged -- it
   reports submission, not outcome. Scripts that relied on the old always-zero
   exit need `|| true` to keep it.
-
-### Added
-
-- **wingd:** `SIGUSR1` makes the daemon write a full goroutine dump plus
-  a one-line count of its connections, holders, waiters, leases, and
-  guards to its log
-  (`~/.sparkwing/wingd/d.log`). A daemon that is burning CPU can now be
-  explained while it is still running -- `kill -USR1 <pid>`, then read
-  the log -- instead of only after the operator has killed the evidence.
-  POSIX only; Windows has no such signal.
-
-### Fixed
-
 - **wingd:** A daemon watching guarded runs no longer forks `ps` once per
   guarded session per tick. Each sweep now takes a single kernel process
   listing and judges every session -- membership and leader identity --
@@ -194,6 +188,39 @@ code change to unlock.
   persisted secret values in plaintext where the same node run locally redacted
   them. Already-written logs are unchanged: rotate any secret a job logged from
   a remote node.
+- **cli, controller:** pipeline inputs tagged `secret:"true"` are now redacted to
+  `***` wherever a run is read back. Previously the tag only masked node log
+  bodies, so a secret passed as an argument was printed in full by the `Setup`
+  block of `sparkwing run`, by `runs list`, `runs get`, `runs status`,
+  `runs find`, `runs tree`, `runs wait`, and `runs receipt`, served by the
+  controller's run endpoints, and rendered by the dashboard's Setup panel --
+  including the copyable `rerun` reproducer command. Runs now record which
+  arguments their pipeline declared secret, and the read paths redact them;
+  retry and replay still re-execute with the real value. Audit events
+  (`child_run_start`) that forward a parent's arguments to a child are masked
+  too.
+  Runs started before this release carry no such record and render unchanged.
+  Redaction is applied on read: the run row, its backups, and `state.ndjson`
+  dumps still hold the plaintext, so keep treating the state database as
+  secret-bearing. In a mixed-version fleet an older CLI or controller reading
+  the same database still renders those arguments in full and still computes
+  the pre-change `receipt_sha`, so upgrade every reader before relying on this.
+  Deliberately not covered. Trigger rows carry no classification and the
+  dispatch path serves them to runners verbatim, so
+  `sparkwing runs triggers get|list` and `GET /api/v1/triggers` still show
+  argument values. A run pre-allocated by a fresh trigger is listable in
+  `pending` before a worker starts it, and the controller holds no pipeline
+  schema to classify it from, so it is unredacted for that window -- which
+  includes a child retry spawned through a trigger's `retry_of`; only
+  `POST /api/v1/runs/{id}/retry` and replay inherit their source's
+  classification directly. And redaction of the reproducer is anchored on the
+  argument name, so a secret value also passed to a non-secret argument is
+  masked in logs but shown under that other name.
+- **controller:** `GET /api/v1/runs/{id}` accepts `?include=secret_values`,
+  which returns a run's real argument values instead of the redacted ones. It
+  is honored only for tokens carrying `nodes.claim` or `admin`, because cluster
+  executors fetch the arguments they run with from this endpoint; every other
+  caller, the dashboard included, keeps getting the redacted view.
 
 ## [v0.25.0] - 2026-08-11
 ### Added

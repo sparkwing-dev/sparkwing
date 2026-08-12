@@ -307,6 +307,30 @@ func (r *Registration) SecretValues(args map[string]string) []string {
 	return out
 }
 
+// SecretArgNames returns the flag names of every secret-marked Inputs
+// field, sorted, regardless of whether the run supplied a value for
+// them. This is the classification half of [Registration.SecretValues]:
+// the orchestrator records it on the run's invocation snapshot so read
+// paths (runs list / get / status / receipt, the controller API, the
+// dashboard) can redact those args without re-resolving the pipeline's
+// schema -- which they cannot do, since a run row outlives the process
+// that registered its pipeline.
+//
+// Bag-field secrets stay out of scope for the same reason
+// [Registration.SecretValues] skips them: `,extra` bags carry arbitrary
+// keys with no per-key opt-in.
+func (r *Registration) SecretArgNames() []string {
+	var out []string
+	for _, f := range r.Schema.Fields {
+		if !f.Secret || f.isExtraBag || f.Name == "" {
+			continue
+		}
+		out = append(out, f.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Instance returns a fresh pipeline value for this registration, used
 // by introspection helpers that query optional provider interfaces
 // (HelpProvider, ShortHelpProvider, ExampleProvider). The orchestrator

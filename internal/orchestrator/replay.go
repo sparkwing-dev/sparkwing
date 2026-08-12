@@ -221,6 +221,12 @@ func MintReplayRun(ctx context.Context, st *store.Store, originalRunID, nodeID s
 		StartedAt:      time.Now(),
 		ReplayOfRunID:  originalRunID,
 		ReplayOfNodeID: nodeID,
+		// A replay row is minted here, not through the orchestrator's
+		// invocation snapshot, so it inherits the source run's
+		// secret-arg classification or it would render orig.Args in
+		// the clear on every read surface -- permanently, since no
+		// later write fills it in.
+		Invocation: store.InheritSecretArgs(nil, orig),
 	}); err != nil {
 		return "", fmt.Errorf("create replay run: %w", err)
 	}

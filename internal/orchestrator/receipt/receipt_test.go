@@ -203,3 +203,58 @@ func TestBuildReceipt_NilRunReturnsZeroValue(t *testing.T) {
 		t.Fatalf("nil run should produce zero Receipt, got %+v", r)
 	}
 }
+
+// The receipt is the audit artifact `sparkwing runs receipt` prints and
+// GET /api/v1/runs/{id}/receipt serves; its invocation block carries
+// the args and the reproducer command.
+func TestBuildReceipt_RedactsSecretArgsInInvocation(t *testing.T) {
+	run := fixedRun()
+	run.Args = map[string]string{"token": "s3cr3t-token-value", "env": "prod"}
+	run.Invocation = map[string]any{
+		"args":                        map[string]string{"token": "s3cr3t-token-value", "env": "prod"},
+		"reproducer":                  "sparkwing run deploy --env=prod --token=s3cr3t-token-value",
+		store.InvocationSecretArgsKey: []string{"token"},
+	}
+
+	rec := receipt.BuildReceipt(run, nil, 0, "")
+	args, _ := rec.Invocation["args"].(map[string]string)
+	if args["token"] != store.RedactedArgValue {
+		t.Errorf("receipt invocation.args[token] = %q, want %q", args["token"], store.RedactedArgValue)
+	}
+	if args["env"] != "prod" {
+		t.Errorf("receipt redacted a non-secret arg: %q", args["env"])
+	}
+	if repro, _ := rec.Invocation["reproducer"].(string); strings.Contains(repro, "s3cr3t-token-value") {
+		t.Errorf("receipt reproducer leaked the secret: %q", repro)
+	}
+	// The source row must survive untouched: retry re-executes from it.
+	if run.Args["token"] != "s3cr3t-token-value" {
+		t.Errorf("BuildReceipt mutated the run: %q", run.Args["token"])
+	}
+	if inv, _ := run.Invocation["args"].(map[string]string); inv["token"] != "s3cr3t-token-value" {
+		t.Errorf("BuildReceipt mutated the run's invocation: %q", inv["token"])
+	}
+}
+
+// receipt_sha must certify the document the caller receives. Hashing
+// the plaintext and shipping the redaction would make the receipt
+// unverifiable by anyone who is allowed to read it.
+func TestBuildReceipt_SHACoversTheRedactedDocument(t *testing.T) {
+	run := fixedRun()
+	run.Invocation = map[string]any{
+		"args":                        map[string]string{"token": "s3cr3t-token-value"},
+		store.InvocationSecretArgsKey: []string{"token"},
+	}
+	redacted := receipt.BuildReceipt(run, nil, 0, "")
+
+	// Same run, already redacted at rest: identical delivered bytes
+	// must produce an identical receipt_sha.
+	plain := fixedRun()
+	plain.Invocation = map[string]any{
+		"args":                        map[string]string{"token": store.RedactedArgValue},
+		store.InvocationSecretArgsKey: []string{"token"},
+	}
+	if got, want := receipt.BuildReceipt(plain, nil, 0, "").ReceiptSHA, redacted.ReceiptSHA; got != want {
+		t.Errorf("receipt_sha does not commit to the delivered bytes: %q vs %q", got, want)
+	}
+}

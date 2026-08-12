@@ -17,7 +17,7 @@ func TestBuildRunInvocation_LogPathFromLocalLogBackend(t *testing.T) {
 	if want := p.RunDir("run-1"); dir != want {
 		t.Fatalf("localRunLogDir = %q, want %q", dir, want)
 	}
-	inv := buildRunInvocation(Options{Pipeline: "demo"}, "run-1", dir)
+	inv := buildRunInvocation(Options{Pipeline: "demo"}, "run-1", dir, nil)
 	got, ok := inv["log_path"].(string)
 	if !ok {
 		t.Fatalf("log_path missing or not a string: %#v", inv["log_path"])
@@ -83,7 +83,7 @@ func TestLocalRunLogDir_RelativeHomeRecordsAbsolutePath(t *testing.T) {
 }
 
 func TestBuildRunInvocation_NoLogPathWithoutLocalLogs(t *testing.T) {
-	inv := buildRunInvocation(Options{Pipeline: "demo"}, "run-1", "")
+	inv := buildRunInvocation(Options{Pipeline: "demo"}, "run-1", "", nil)
 	if v, ok := inv["log_path"]; ok {
 		t.Errorf("log_path must be omitted when the run writes no local logs; got %v", v)
 	}

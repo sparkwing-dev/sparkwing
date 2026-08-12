@@ -327,7 +327,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	sparkwing.SetGit(gitOpt)
 
 	owner, repo := sparkwing.GithubOwnerRepo(gitOpt.Repo)
-	invocation := buildRunInvocation(opts, runID, localRunLogDir(backends.Logs, runID))
+	invocation := buildRunInvocation(opts, runID, localRunLogDir(backends.Logs, runID), reg.SecretArgNames())
 	if err := backends.State.CreateRun(ctx, store.Run{
 		ID:            runID,
 		Pipeline:      opts.Pipeline,
@@ -1028,7 +1028,10 @@ func parentTriggerRepoDir() string {
 // in an object store pass "" and carry no log_path at all -- a missing
 // field is a truthful "not here", a fabricated one sends readers to a
 // directory that holds nothing.
-func buildRunInvocation(opts Options, runID, logDir string) map[string]any {
+//
+// secretArgs is the pipeline's declared secret arg names; see the
+// classification comment where it is recorded below.
+func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string) map[string]any {
 	inv := map[string]any{
 		"run_id":   runID,
 		"pipeline": opts.Pipeline,
@@ -1055,6 +1058,25 @@ func buildRunInvocation(opts Options, runID, logDir string) map[string]any {
 		}
 		inv["args"] = args
 		inv["inputs_hash"] = hashCanonicalJSON(opts.Args)
+	}
+	// Record which args the pipeline declared secret. The values stay
+	// plaintext here on purpose -- the masker derives its redaction set
+	// from them and retry re-executes with them -- so this list is what
+	// every read path uses to redact at render time. Written whenever
+	// the pipeline declares any secret input, even if this run supplied
+	// none of them, so a row's classification is unambiguous.
+	//
+	// CreateRun's pending upsert replaces invocation_json wholesale, so
+	// this is authoritative over any classification a retry or replay
+	// inherited onto the pre-allocated row. That cuts both ways: a
+	// worker whose registration of this pipeline has dropped the
+	// `secret:"true"` tag erases the inherited classification and the
+	// row starts rendering in the clear. Accepted rather than merged,
+	// because a merge would let a stale worker pin a classification the
+	// pipeline no longer declares; the registration that actually ran
+	// the pipeline is the one that knows what its inputs are.
+	if len(secretArgs) > 0 {
+		inv[store.InvocationSecretArgsKey] = secretArgs
 	}
 	if opts.RetryRepoDir != "" || opts.RetryRepoIdentity != "" || opts.RetryRevision != "" || opts.RetryPlanHash != "" {
 		inv["retry_provenance"] = map[string]string{
@@ -1086,9 +1108,17 @@ func buildRunInvocation(opts Options, runID, logDir string) map[string]any {
 }
 
 // emitRunStart sends a run_start record carrying the precomputed
-// invocation snapshot. Caller passes the same map that was stored
-// on store.Run.Invocation so the live stream and the persisted row
-// agree byte-for-byte.
+// invocation snapshot. Caller passes the same map that was stored on
+// store.Run.Invocation, so the live stream and the persisted row agree
+// on every field except the secret-declared args and the reproducer's
+// copy of them, which are redacted here.
+//
+// The envelope is a render surface, not a re-execution input: nothing
+// reconstructs a run from run_start.attrs (retry reads store.Run.Args),
+// and the record lands in the JSONL log an operator tails, `sparkwing
+// runs logs` replays, and the pretty renderer's Setup block prints. The
+// masker cannot cover it -- it rewrites rec.Msg only, and run_start
+// carries its payload in Attrs.
 func emitRunStart(delegate sparkwing.Logger, invocation map[string]any) {
 	if delegate == nil {
 		return
@@ -1097,7 +1127,7 @@ func emitRunStart(delegate sparkwing.Logger, invocation map[string]any) {
 		TS:    time.Now(),
 		Level: "info",
 		Event: "run_start",
-		Attrs: invocation,
+		Attrs: store.RedactInvocation(invocation),
 	})
 }
 
@@ -1650,6 +1680,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				attrs["error"] = errMsg
 			}
 			payload, _ := json.Marshal(attrs)
+			payload = maskEventPayload(s.masker, payload)
 			_ = s.backends.State.AppendEvent(context.WithoutCancel(ctx), s.runID, currentNode, "child_run_finish", payload)
 		}
 
@@ -1661,6 +1692,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				"args":            req.Args,
 				"timeout_seconds": int64(req.Timeout.Seconds()),
 			})
+			payload = maskEventPayload(s.masker, payload)
 			if ev := s.backends.State.AppendEvent(ctx, s.runID, currentNode,
 				"child_run_start", payload); ev != nil {
 				sparkwing.Warn(ctx, "child_run_start audit event append failed: %v", ev)

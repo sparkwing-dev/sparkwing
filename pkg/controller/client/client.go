@@ -134,8 +134,35 @@ func (c *Client) ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run,
 	return body.Runs, nil
 }
 
+// GetRun fetches a run for display. Values of args the pipeline
+// declared secret come back as "***"; see [Client.GetRunForExecution]
+// when the caller is going to run with them.
 func (c *Client) GetRun(ctx context.Context, runID string) (*store.Run, error) {
+	return c.getRun(ctx, runID, false)
+}
+
+// GetRunForExecution fetches a run with its real argument values, for
+// callers that are about to execute it: the node runner building a
+// plan, the retry path re-deriving args, and the replay sideload that
+// persists the run locally.
+//
+// Those callers cannot use [Client.GetRun]. Planning with a redacted
+// arg would run the pipeline with a literal "***", and seeding the
+// per-run masker from redacted args would stop it recognizing the real
+// secret -- turning a display leak into a log leak.
+//
+// Requires a token with nodes.claim or admin. A token without either
+// silently receives the redacted view, which is safe here because a
+// principal that cannot claim a node never reaches execution.
+func (c *Client) GetRunForExecution(ctx context.Context, runID string) (*store.Run, error) {
+	return c.getRun(ctx, runID, true)
+}
+
+func (c *Client) getRun(ctx context.Context, runID string, secretValues bool) (*store.Run, error) {
 	u := fmt.Sprintf("%s/api/v1/runs/%s", c.baseURL, url.PathEscape(runID))
+	if secretValues {
+		u += "?include=" + url.QueryEscape(store.IncludeSecretValues)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
 		return nil, err

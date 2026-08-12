@@ -69,7 +69,7 @@ func JobStatusRemote(ctx context.Context, controllerURL, token, runID string, op
 		if opts.JSON {
 			wrapped := withFailureExcerpts(joinStepsByNode(nodes, steps),
 				failureExcerptsFor(ctx, c, runID, failedNodeIDs(nodes)))
-			payload := map[string]any{"run": run, "nodes": wrapped}
+			payload := map[string]any{"run": store.RedactedRun(run), "nodes": wrapped}
 			if len(approvals) > 0 {
 				payload["approvals"] = approvals
 			}
@@ -264,7 +264,7 @@ func GetRunJSONRemote(ctx context.Context, controllerURL, token, runID string, o
 	if err != nil {
 		return err
 	}
-	return writeJSON(out, map[string]any{"run": run, "nodes": nodes})
+	return writeJSON(out, map[string]any{"run": store.RedactedRun(run), "nodes": nodes})
 }
 
 // GetRunJSONLocal is the local counterpart of GetRunJSONRemote.

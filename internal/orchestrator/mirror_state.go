@@ -110,6 +110,15 @@ func (m *mirrorStateBackend) GetRun(ctx context.Context, runID string) (*store.R
 	return m.canonical.GetRun(ctx, runID)
 }
 
+// GetRunForExecution forwards the execution read to the canonical
+// backend. Without it the mirror hides the controller client's
+// implementation of executionRunGetter behind a wrapper that does not
+// satisfy it, and a `sparkwing run --profile <controller>` retry from
+// a laptop would silently plan with redacted args.
+func (m *mirrorStateBackend) GetRunForExecution(ctx context.Context, runID string) (*store.Run, error) {
+	return runForExecution(ctx, m.canonical, runID)
+}
+
 func (m *mirrorStateBackend) GetLatestRun(ctx context.Context, pipeline string, statuses []string, maxAge time.Duration) (*store.Run, error) {
 	return m.canonical.GetLatestRun(ctx, pipeline, statuses, maxAge)
 }

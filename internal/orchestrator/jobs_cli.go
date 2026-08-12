@@ -142,6 +142,10 @@ func renderRunList(
 	}
 
 	if opts.JSON {
+		// The table below prints no args, but -o json emits the whole
+		// row. Redact here rather than at the two call sites so the
+		// local and controller-backed list paths cannot drift.
+		runs = store.RedactedRuns(runs)
 		if runs == nil {
 			runs = []*store.Run{}
 		}
@@ -284,7 +288,7 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 		}
 		wrapped := withFailureExcerpts(joinStepsByNode(nodes, nil),
 			failureExcerptsFor(ctx, b, runID, failedNodeIDs(nodes)))
-		payload := map[string]any{"run": run, "nodes": wrapped}
+		payload := map[string]any{"run": store.RedactedRun(run), "nodes": wrapped}
 		if p := runLogPath(run); p != "" {
 			payload["log_path"] = p
 		}
@@ -1651,7 +1655,7 @@ func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out 
 	steps, _ := st.ListNodeSteps(ctx, runID)
 	wrapped := withFailureExcerpts(joinStepsByNode(nodes, steps),
 		failureExcerptsFor(ctx, st, runID, failedNodeIDs(nodes)))
-	payload := map[string]any{"run": run, "nodes": wrapped}
+	payload := map[string]any{"run": store.RedactedRun(run), "nodes": wrapped}
 	if p := runLogPath(run); p != "" {
 		payload["log_path"] = p
 	}
