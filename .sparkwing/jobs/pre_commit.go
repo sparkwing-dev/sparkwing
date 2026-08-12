@@ -24,9 +24,10 @@ import (
 // holds the staged Go files to gofumpt and goimports, which `golangci-lint
 // run` does not check; the two regex sweeps cover the staged change for
 // em dashes and internal tracker IDs (IMP-, SDK-, LOCAL-, RUN-, ORG-,
-// REG-, TOD-); the docs-mirror check fails when docs/ (the source) and
-// pkg/docs/mirror/ (the embedded copy) have drifted, so an edit to docs/
-// can't be committed without re-running bin/sync-docs.sh; the comment
+// REG-, TOD-); the docs-mirror check runs `bin/sync-docs.sh --check` and
+// fails when docs/ or CHANGELOG.md (the sources) and pkg/docs/ (the
+// embedded copies) have drifted, so an edit to either source can't be
+// committed without re-running bin/sync-docs.sh; the comment
 // check fails when the staged diff adds a comment the policy disallows;
 // the home-resolution check fails when product code resolves the
 // sparkwing home itself -- reading SPARKWING_HOME, or building the path
@@ -42,7 +43,7 @@ func (PreCommit) ShortHelp() string {
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that pkg/docs/mirror/ matches the docs/ source (run bin/sync-docs.sh if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -357,13 +358,18 @@ func stagedGoFiles(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
-// checkDocsMirror fails when the embedded pkg/docs/mirror/ has drifted
-// from the canonical docs/ source. Read-only (a recursive diff, no
-// mutation) so it's safe to run alongside the other parallel steps. The
-// fix is `bash bin/sync-docs.sh && git add pkg/docs/mirror`.
+// checkDocsMirror fails when the embedded pkg/docs/mirror/ or
+// pkg/docs/changelog.md has drifted from its canonical source. Read-only
+// (a recursive diff, no mutation) so it's safe to run alongside the other
+// parallel steps. The fix is `bash bin/sync-docs.sh && git add pkg/docs`.
+//
+// It asks the sync script itself rather than re-implementing the
+// comparison, so the gate and the script can never disagree about what
+// "synced" means -- and so the script's check mode is exercised on every
+// gate run instead of only when someone remembers it exists.
 func checkDocsMirror(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "diff -rq docs pkg/docs/mirror").Run(); err != nil {
-		return fmt.Errorf("docs/ and pkg/docs/mirror/ are out of sync; run `bash bin/sync-docs.sh && git add pkg/docs/mirror` (edit docs/, never the mirror)")
+	if _, err := sparkwing.Bash(ctx, "bash bin/sync-docs.sh --check").Run(); err != nil {
+		return fmt.Errorf("the embedded docs mirror is out of sync; run `bash bin/sync-docs.sh && git add pkg/docs` (edit docs/ and CHANGELOG.md, never the mirror): %w", err)
 	}
 	return nil
 }
