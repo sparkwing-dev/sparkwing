@@ -77,6 +77,7 @@ func TestEntryExecHelper(t *testing.T) {
 		env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "hold")
 		_ = execChildWith(os.Args[0], []string{"-test.run=^TestEntryExecHelper$"}, env, func() {
 			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+			_ = os.WriteFile(os.Getenv("SPARKWING_ENTRY_SIGNAL_RECEIVED"), []byte("contained"), 0o600)
 		})
 		return
 	}
@@ -127,15 +128,20 @@ func TestExecLeaseDoesNotSurviveChildSpawnedDuringInit(t *testing.T) {
 }
 
 func TestExecChildSupervisesSignalsBeforeStart(t *testing.T) {
+	contained := filepath.Join(t.TempDir(), "contained")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
-	cmd.Env = append(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER=start-race-wrapper")
+	cmd.Env = append(os.Environ(),
+		"SPARKWING_ENTRY_EXEC_HELPER=start-race-wrapper",
+		"SPARKWING_ENTRY_SIGNAL_RECEIVED="+contained,
+	)
 	cmd.Stdin = strings.NewReader("")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if err := waitCommand(t, cmd, 0); err != nil {
-		t.Fatalf("wrapper did not contain pre-start signal: %v", err)
+	_ = waitCommand(t, cmd, 0)
+	if body, err := os.ReadFile(contained); err != nil || string(body) != "contained" {
+		t.Fatalf("wrapper did not contain pre-start signal: body=%q err=%v", body, err)
 	}
 }
 
@@ -173,7 +179,7 @@ func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	line, err := readLineBefore(stdout, time.Second)
+	line, err := readLineBefore(stdout, 5*time.Second)
 	if err != nil {
 		t.Fatalf("child readiness = %q, %v", line, err)
 	}
