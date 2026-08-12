@@ -914,6 +914,12 @@ Limits worth knowing:
 - Runs recorded before a pipeline declared the input secret render as
   they always did. The classification is stamped on the run at start,
   and there is no schema to reclassify an old row from.
+- A value that arrives from `sparkwing.yaml` -- the project's
+  `defaults.args` block or a pipeline entry's `args:` block -- is masked
+  in logs but does not appear on the run row at all, redacted or
+  otherwise. The row records the arguments the caller passed, and the
+  yaml layers are re-read from the checkout each run, so a retry picks
+  up the project's current value rather than a copy of the old one.
 - Trigger rows are not redacted. `sparkwing runs triggers get`,
   `sparkwing runs triggers list`, and `GET /api/v1/triggers` show
   argument values, because the same endpoint hands them to the runner
