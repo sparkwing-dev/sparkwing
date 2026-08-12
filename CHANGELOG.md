@@ -48,6 +48,31 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **cli:** `sparkwing update` now installs only bytes it can prove are the
+  release's bytes. The release signs its `SHA256SUMS` manifest with an ed25519
+  key and publishes a detached `SHA256SUMS.sig`; the updater verifies that
+  signature with a public key compiled into the binary (pure-Go
+  `crypto/ed25519`, no external tool) *before* trusting any digit in the
+  manifest, checks the download against the signed digest, installs atomically,
+  then re-hashes the installed file and requires it to equal the verified
+  digest -- restoring the prior binary and failing loudly on a mismatch. The
+  macOS ad-hoc codesign moved to the release, before the manifest is hashed, so
+  the verified bytes install unchanged: there is no post-verification mutation.
+  A signature, digest, download, or install failure is now terminal -- the
+  updater no longer falls back to `go install`, which was not bound to the
+  release manifest and could install to a different path than the running
+  binary. Success reports the installed path, version, and verified digest.
+- **release:** The release workflow ad-hoc-signs the macOS binaries with
+  `rcodesign` before computing `SHA256SUMS`, signs the manifest with the
+  `SPARKWING_UPDATE_SIGNING_KEY` secret via the auditable `cmd/sign-manifest`
+  helper, and uploads `SHA256SUMS.sig`. Generate the keypair with `go run
+  ./cmd/sign-manifest -genkey`. **One-time bootstrap:** the first release that
+  carries a new signing key must be installed out-of-band -- via `bin/install.sh`
+  or a direct download-and-verify -- because a CLI built before the key existed
+  cannot verify it. This is inherent to key pinning; see
+  [security.md](docs/security.md#verified-self-update).
 
 ## [v0.28.0] - 2026-08-12
 ### Added
