@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.26.0] - 2026-08-12
 ### Added
 
 - **cli + orchestrator:** Runs now report where their logs live instead of
