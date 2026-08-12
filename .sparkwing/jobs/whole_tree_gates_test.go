@@ -42,6 +42,10 @@ const wholeTreeGateBudget = time.Second
 // into it, run once, deleted. That answered "does my change work here,
 // now" and nothing else. This answers it on every run, in every
 // checkout, for free.
+//
+// The gates read the tree through the run's working directory, which no
+// sparkwing run has set here, so the test binds it to the located root
+// and puts it back afterwards.
 func TestThisRepoSatisfiesItsOwnWholeTreeGates(t *testing.T) {
 	root := sourceTreeRoot()
 	if root == "" {
@@ -49,8 +53,6 @@ func TestThisRepoSatisfiesItsOwnWholeTreeGates(t *testing.T) {
 			"if this package moved, check sourceTreeRoot's markers")
 	}
 
-	// The gates read the tree through the run's working directory, which
-	// no sparkwing run has set here.
 	prev := sparkwing.WorkDir()
 	sparkwing.SetWorkDir(root)
 	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })

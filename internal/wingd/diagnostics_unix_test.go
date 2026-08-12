@@ -53,6 +53,9 @@ func TestDiagnosticsDumpsOnSIGUSR1(t *testing.T) {
 // daemon that never restarts. Each dump appends up to 2MB and rotation
 // used to happen only at spawn, so a resident daemon asked for a handful
 // of dumps grew d.log without limit.
+//
+// The sink stands in for a spawned daemon's output, which the client
+// points at d.log before the process starts.
 func TestDiagnosticsRotatesAnOversizedLogBeforeDumping(t *testing.T) {
 	home := t.TempDir()
 	path, err := LogPath(home)
@@ -70,8 +73,6 @@ func TestDiagnosticsRotatesAnOversizedLogBeforeDumping(t *testing.T) {
 		t.Fatalf("seed oversized log: %v", err)
 	}
 
-	// Stand in for a spawned daemon, whose output the client points at
-	// d.log before the process starts.
 	sink, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		t.Fatalf("open log: %v", err)
