@@ -19,6 +19,7 @@ func TestReleaseWorkflowPublishesImmutableSignedUpdaterAssets(t *testing.T) {
 		"sparkwing-*.sig",
 		"SPARKWING_RELEASE_SIGNING_KEY",
 		"verify-release",
+		"--expected-public-key " + releasePublicKeyBase64,
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("release workflow missing %q", required)
