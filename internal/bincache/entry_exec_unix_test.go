@@ -5,13 +5,17 @@ package bincache
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 )
 
 func TestEntryExecHelper(t *testing.T) {
@@ -21,6 +25,28 @@ func TestEntryExecHelper(t *testing.T) {
 	}
 	if mode == "hold" {
 		if _, err := fmt.Fprintln(os.Stdout, "ready"); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		return
+	}
+	if mode == "child" {
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		return
+	}
+	if mode == "adopt-and-spawn" {
+		if err := AdoptExecLeaseFromEnv(); err != nil {
+			t.Fatal(err)
+		}
+		child := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
+		child.Env = replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "child")
+		child.Stdin = nil
+		child.Stdout = io.Discard
+		child.Stderr = os.Stderr
+		if err := child.Start(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := fmt.Fprintln(os.Stdout, child.Process.Pid); err != nil {
 			t.Fatal(err)
 		}
 		_, _ = io.Copy(io.Discard, os.Stdin)
@@ -43,6 +69,128 @@ func TestEntryExecHelper(t *testing.T) {
 	if err := lease.ExecReplace([]string{"-test.run=^TestEntryExecHelper$"}, "", env); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestExecLeaseDoesNotSurviveInPersistentChild(t *testing.T) {
+	root := t.TempDir()
+	key := "11111111-11111111"
+	entry := copyTestBinaryIntoEntry(t, root, key)
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
+	cmd.Env = append(os.Environ(),
+		"SPARKWING_ENTRY_EXEC_HELPER=acquire",
+		"SPARKWING_ENTRY_HELPER_ROOT="+root,
+		"SPARKWING_ENTRY_HELPER_KEY="+key,
+	)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(stdout)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	childPID, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil {
+		t.Fatalf("persistent child pid %q: %v", line, err)
+	}
+	cleanupProcess(t, childPID)
+
+	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ActiveSkippedEntries != 1 || result.ReclaimedEntries != 0 {
+		t.Fatalf("foreground execution did not retain lease: %+v", result)
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("killed foreground exited successfully")
+	}
+	_ = stdin.Close()
+	if err := syscall.Kill(childPID, 0); err != nil {
+		t.Fatalf("persistent child died with foreground: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		result, err = Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+		if err == nil && result.ActiveSkippedEntries == 0 && result.ReclaimedEntries == 1 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("persistent child retained foreground lease: result=%+v err=%v", result, err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if _, err := os.Stat(entry.binaryPath()); !os.IsNotExist(err) {
+		t.Fatalf("pruned entry still exists: %v", err)
+	}
+}
+
+func copyTestBinaryIntoEntry(t *testing.T, root, key string) Entry {
+	t.Helper()
+	entry := testEntry(t, root, key)
+	if err := os.MkdirAll(filepath.Dir(entry.binaryPath()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := os.Open(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer source.Close()
+	target, err := os.OpenFile(entry.binaryPath(), os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(target, source); err != nil {
+		_ = target.Close()
+		t.Fatal(err)
+	}
+	if err := target.Close(); err != nil {
+		t.Fatal(err)
+	}
+	sequence, err := enqueueCacheEntry(context.Background(), root, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	entryInfo, err := os.Stat(entry.entryDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := markCacheQueueRecordCurrent(root, sequence, entryInfo.ModTime()); err != nil {
+		t.Fatal(err)
+	}
+	return entry
+}
+
+func cleanupProcess(t *testing.T, pid int) {
+	t.Helper()
+	t.Cleanup(func() {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) {
+			if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
 }
 
 func replaceEnv(env []string, key, value string) []string {
