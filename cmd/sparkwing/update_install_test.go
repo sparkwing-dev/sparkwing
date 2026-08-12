@@ -20,9 +20,11 @@ func TestInstallVerifiedAssetRejectsMutationAfterVerification(t *testing.T) {
 
 	originalMutate := updateMutateStaged
 	originalReplace := updateReplace
+	originalRestore := updateRestore
 	t.Cleanup(func() {
 		updateMutateStaged = originalMutate
 		updateReplace = originalReplace
+		updateRestore = originalRestore
 	})
 	updateMutateStaged = func(path string) {
 		if err := os.WriteFile(path, []byte("mutated after verification"), 0o755); err != nil {
@@ -30,6 +32,7 @@ func TestInstallVerifiedAssetRejectsMutationAfterVerification(t *testing.T) {
 		}
 	}
 	updateReplace = os.Rename
+	updateRestore = os.Rename
 
 	if err := installVerifiedAsset(asset, target); err == nil {
 		t.Fatal("installVerifiedAsset() succeeded after staged bytes changed")
@@ -54,9 +57,11 @@ func TestInstallVerifiedAssetRestoresAfterInstalledDigestMismatch(t *testing.T) 
 
 	originalMutate := updateMutateStaged
 	originalReplace := updateReplace
+	originalRestore := updateRestore
 	t.Cleanup(func() {
 		updateMutateStaged = originalMutate
 		updateReplace = originalReplace
+		updateRestore = originalRestore
 	})
 	updateMutateStaged = func(string) {}
 	replacements := 0
@@ -70,6 +75,7 @@ func TestInstallVerifiedAssetRestoresAfterInstalledDigestMismatch(t *testing.T) 
 		}
 		return nil
 	}
+	updateRestore = updateReplace
 
 	if err := installVerifiedAsset(asset, target); err == nil {
 		t.Fatal("installVerifiedAsset() succeeded after installed bytes changed")
@@ -97,14 +103,17 @@ func TestInstallVerifiedAssetRestoresWhenDirectorySyncFails(t *testing.T) {
 
 	originalMutate := updateMutateStaged
 	originalReplace := updateReplace
+	originalRestore := updateRestore
 	originalSync := updateSyncDir
 	t.Cleanup(func() {
 		updateMutateStaged = originalMutate
 		updateReplace = originalReplace
+		updateRestore = originalRestore
 		updateSyncDir = originalSync
 	})
 	updateMutateStaged = func(string) {}
 	updateReplace = os.Rename
+	updateRestore = os.Rename
 	syncCalls := 0
 	updateSyncDir = func(string) error {
 		syncCalls++

@@ -30,9 +30,8 @@ const (
 )
 
 var (
-	updateFetchLatest       = fetchLatestRelease
-	updateDownloadInstall   = downloadAndInstall
-	updateGoInstallFallback = updateCLIViaGoInstall
+	updateFetchLatest     = fetchLatestRelease
+	updateDownloadInstall = downloadAndInstall
 )
 
 // runUpdate is the top-level binary self-update verb (CLI only; for
@@ -115,8 +114,7 @@ func classifyDowngrade(current, resolved string) downgradeKind {
 	return downgradeRebaseline
 }
 
-// runUpdateBinary downloads + verifies + atomically installs.
-// Falls back to `go install` when the download fails. An operator
+// runUpdateBinary downloads, authenticates, and installs a release. An operator
 // version hold is enforced here (unless overrideHold): the ceiling
 // binds every self-upgrade path, `sparkwing update` and
 // `sparkwing version update --cli` alike.
@@ -168,11 +166,12 @@ func runUpdateBinary(version string, force, overrideHold bool) error {
 
 	fmt.Fprintf(os.Stdout, "updating sparkwing: %s -> %s\n", current, resolved)
 
-	if err := updateDownloadInstall(resolved, currentBin); err != nil {
+	result, err := updateDownloadInstall(resolved, currentBin)
+	if err != nil {
 		return fmt.Errorf("update: verified release install failed: %w", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "sparkwing updated: %s -> %s\n", current, resolved)
+	fmt.Fprintf(os.Stdout, "sparkwing updated: %s -> %s\ninstalled: %s\nsha256: %s\n", current, resolved, result.path, result.digest)
 	reportOtherInstalls(os.Stdout, currentBin)
 	fmt.Fprintf(os.Stdout, "what's new: https://github.com/sparkwing-dev/sparkwing/releases\n")
 	return nil
@@ -259,9 +258,13 @@ func installedVersion() string {
 // Version is injected via -ldflags="-X main.Version=vX.Y.Z" at release.
 var Version string
 
-// downloadAndInstall fetches binary + SHA256SUMS, verifies, atomic-renames.
-// Ad-hoc codesigns on macOS to avoid arm64 SIGKILL on first run.
-func downloadAndInstall(version, currentBin string) error {
+type installedRelease struct {
+	path   string
+	digest string
+}
+
+// downloadAndInstall authenticates the manifest and platform asset before installation.
+func downloadAndInstall(version, currentBin string) (installedRelease, error) {
 	suffix := runtime.GOOS + "-" + runtime.GOARCH
 	ext := ""
 	if runtime.GOOS == "windows" {
@@ -272,51 +275,54 @@ func downloadAndInstall(version, currentBin string) error {
 
 	tmpDir, err := os.MkdirTemp("", "sparkwing-update-")
 	if err != nil {
-		return fmt.Errorf("mkdir tmp: %w", err)
+		return installedRelease{}, fmt.Errorf("mkdir tmp: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	binPath := filepath.Join(tmpDir, asset)
 	if err := downloadFile(base+"/"+asset, binPath); err != nil {
-		return fmt.Errorf("download %s: %w", asset, err)
+		return installedRelease{}, fmt.Errorf("download %s: %w", asset, err)
 	}
 	assetSigPath := binPath + ".sig"
 	if err := downloadFile(base+"/"+asset+".sig", assetSigPath); err != nil {
-		return fmt.Errorf("download %s.sig: %w", asset, err)
+		return installedRelease{}, fmt.Errorf("download %s.sig: %w", asset, err)
 	}
 	sumsPath := filepath.Join(tmpDir, "SHA256SUMS")
 	if err := downloadFile(base+"/SHA256SUMS", sumsPath); err != nil {
-		return fmt.Errorf("download SHA256SUMS: %w", err)
+		return installedRelease{}, fmt.Errorf("download SHA256SUMS: %w", err)
 	}
 	sumsSigPath := sumsPath + ".sig"
 	if err := downloadFile(base+"/SHA256SUMS.sig", sumsSigPath); err != nil {
-		return fmt.Errorf("download SHA256SUMS.sig: %w", err)
+		return installedRelease{}, fmt.Errorf("download SHA256SUMS.sig: %w", err)
 	}
 	assetBody, err := os.ReadFile(binPath)
 	if err != nil {
-		return err
+		return installedRelease{}, err
 	}
 	assetSig, err := os.ReadFile(assetSigPath)
 	if err != nil {
-		return err
+		return installedRelease{}, err
 	}
 	manifest, err := os.ReadFile(sumsPath)
 	if err != nil {
-		return err
+		return installedRelease{}, err
 	}
 	manifestSig, err := os.ReadFile(sumsSigPath)
 	if err != nil {
-		return err
+		return installedRelease{}, err
 	}
 	publicKeys, err := releasePublicKeys()
 	if err != nil {
-		return err
+		return installedRelease{}, err
 	}
 	verified, err := verifyReleaseAssetWithTrustSet(publicKeys, manifest, manifestSig, asset, assetBody, assetSig)
 	if err != nil {
-		return err
+		return installedRelease{}, err
 	}
-	return installVerifiedAsset(verified, currentBin)
+	if err := installVerifiedAsset(verified, currentBin); err != nil {
+		return installedRelease{}, err
+	}
+	return installedRelease{path: currentBin, digest: verified.digest}, nil
 }
 
 // replaceRunningBinary atomically swaps in the new binary. Windows
@@ -409,99 +415,6 @@ func copyFile(src, dst string) error {
 	defer out.Close()
 	_, err = io.Copy(out, in)
 	return err
-}
-
-// updateCLIViaGoInstall is the go-toolchain fallback when download fails.
-//
-// Unlike the download path, `go install` does not replace the running
-// binary: it drops the new build in GOBIN (or GOPATH/bin), which may be
-// a different directory than the one that ran this command. The
-// fallback therefore names the exact file it installed, says when the
-// running binary was not the one replaced, and lists any other copies
-// -- silently leaving a second install behind is the split-PATH state
-// this reporting exists to surface.
-func updateCLIViaGoInstall(version string) error {
-	target := "github.com/" + updateRepo + "/cmd/sparkwing@"
-	if version == "" || version == "latest" {
-		target += "latest"
-	} else {
-		target += version
-	}
-	fmt.Fprintf(os.Stdout, "go install -ldflags=\"-s -w\" -trimpath %s\n", target)
-	cmd := exec.Command("go", "install", "-ldflags=-s -w", "-trimpath", target)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("go install: %w", err)
-	}
-	fmt.Fprintf(os.Stdout, "go install finished for %s\n", target)
-	self, err := installsite.Self()
-	if err != nil {
-		self = ""
-	}
-	reportGoInstallOutcome(os.Stdout, goInstallBinTarget(), self)
-	return nil
-}
-
-// goInstallBinTarget is the file `go install` just wrote: GOBIN when
-// set, else the first GOPATH element's bin. Asked of `go env` rather
-// than the process environment, because settings written with
-// `go env -w` never appear there. Empty when go env will not answer.
-func goInstallBinTarget() string {
-	out, err := exec.Command("go", "env", "GOBIN", "GOPATH").Output()
-	if err != nil {
-		return ""
-	}
-	return goInstallBinTargetFromEnv(string(out))
-}
-
-// goInstallBinTargetFromEnv parses `go env GOBIN GOPATH` output: one
-// value per line, in the order asked. The default machine -- GOBIN
-// unset -- answers with a LEADING EMPTY LINE, so the output is split
-// before any trimming; a whole-output TrimSpace would swallow that
-// line, leave GOPATH alone on line one, and read the answer as too
-// short. Each value is trimmed on its own, which also drops the \r
-// that go env emits on Windows.
-func goInstallBinTargetFromEnv(out string) string {
-	lines := strings.Split(out, "\n")
-	if len(lines) < 2 {
-		return ""
-	}
-	return goInstallBinPath(strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1]))
-}
-
-// goInstallBinPath resolves go's documented install target from the
-// GOBIN and GOPATH values go env reports.
-func goInstallBinPath(gobin, gopath string) string {
-	dir := gobin
-	if dir == "" {
-		for _, e := range filepath.SplitList(gopath) {
-			if e != "" {
-				dir = filepath.Join(e, "bin")
-				break
-			}
-		}
-	}
-	if dir == "" {
-		return ""
-	}
-	return filepath.Join(dir, installsite.ExeName())
-}
-
-// reportGoInstallOutcome says where the go-install fallback put the
-// binary and what that means for the install the caller actually ran.
-func reportGoInstallOutcome(w io.Writer, installedTo, self string) {
-	if installedTo == "" {
-		fmt.Fprintf(w, "note: could not determine where `go install` placed the binary; `sparkwing doctor` reports every install on this machine\n")
-		return
-	}
-	fmt.Fprintf(w, "installed to %s\n", installedTo)
-	if self != "" && !installsite.SamePath(installedTo, self) {
-		fmt.Fprintf(w, "note: the binary you ran (%s) was not replaced and is now a second install\n", self)
-		fmt.Fprintf(w, "  keep one: %s, or make sure each caller's PATH resolves %s first\n",
-			installsite.RetireRemedy(self).Text(), installedTo)
-	}
-	reportOtherInstalls(w, installedTo)
 }
 
 func runUpdateSDK(version string) error {
