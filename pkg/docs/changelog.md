@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.27.0] - 2026-08-12
 ### Security
 
 - **orchestrator:** Redact secret values that a run's arguments inherit from
