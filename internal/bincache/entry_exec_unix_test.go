@@ -5,22 +5,33 @@ package bincache
 import (
 	"bufio"
 	"context"
-	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
-
-	"golang.org/x/sys/unix"
 )
+
+func init() {
+	if os.Getenv("SPARKWING_ENTRY_EXEC_HELPER") != "spawn-during-init" {
+		return
+	}
+	child := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
+	child.Env = replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "child")
+	child.Stdin = nil
+	child.Stdout = io.Discard
+	child.Stderr = os.Stderr
+	if err := child.Start(); err != nil {
+		panic(err)
+	}
+	_, _ = fmt.Fprintln(os.Stdout, child.Process.Pid)
+}
 
 func TestEntryExecHelper(t *testing.T) {
 	mode := os.Getenv("SPARKWING_ENTRY_EXEC_HELPER")
@@ -34,15 +45,16 @@ func TestEntryExecHelper(t *testing.T) {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		return
 	}
+	if mode == "spawn-during-init" {
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		return
+	}
 	if mode == "child" {
 		for {
 			time.Sleep(time.Hour)
 		}
 	}
-	if mode == "adopt-and-spawn" {
-		if err := AdoptExecLeaseFromEnv(); err != nil {
-			t.Fatal(err)
-		}
+	if mode == "spawn" {
 		child := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
 		child.Env = replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "child")
 		child.Stdin = nil
@@ -54,62 +66,6 @@ func TestEntryExecHelper(t *testing.T) {
 		if _, err := fmt.Fprintln(os.Stdout, child.Process.Pid); err != nil {
 			t.Fatal(err)
 		}
-		_, _ = io.Copy(io.Discard, os.Stdin)
-		return
-	}
-	if mode == "adopt-twice" {
-		raw := os.Getenv(execLeaseEnv)
-		if err := AdoptExecLeaseFromEnv(); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Setenv(execLeaseEnv, raw); err != nil {
-			t.Fatal(err)
-		}
-		if err := AdoptExecLeaseFromEnv(); err == nil || !strings.Contains(err.Error(), "more than once") {
-			t.Fatalf("duplicate adoption error = %v", err)
-		}
-		runtime.GC()
-		runtime.GC()
-		if _, err := unix.FcntlInt(processExecLease.file.Fd(), unix.F_GETFD, 0); err != nil {
-			t.Fatalf("duplicate adoption closed the retained lease: %v", err)
-		}
-		return
-	}
-	if mode == "adopt-unlocked-lease" {
-		root := os.Getenv("SPARKWING_ENTRY_HELPER_ROOT")
-		key := os.Getenv("SPARKWING_ENTRY_HELPER_KEY")
-		entry, err := pipelineEntryAt(root, key)
-		if err != nil {
-			t.Fatal(err)
-		}
-		unlocked, err := os.Open(entry.lockPath("lease"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer unlocked.Close()
-		proof, err := os.CreateTemp(filepath.Join(entry.root, "locks"), ".exec-proof-")
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() {
-			_ = cacheUnlock(proof)
-			_ = proof.Close()
-			_ = os.Remove(proof.Name())
-		}()
-		if acquired, err := cacheLock(proof, cacheLockExclusiveNonblock); err != nil || !acquired {
-			t.Fatalf("lock forged proof: acquired=%v err=%v", acquired, err)
-		}
-		coordinate := strconv.FormatUint(uint64(unlocked.Fd()), 10) + ":" + entry.key + ":" +
-			base64.RawURLEncoding.EncodeToString([]byte(entry.root)) + ":" +
-			strconv.FormatUint(uint64(proof.Fd()), 10) + ":" +
-			base64.RawURLEncoding.EncodeToString([]byte(proof.Name()))
-		if err := os.Setenv(execLeaseEnv, coordinate); err != nil {
-			t.Fatal(err)
-		}
-		if err := AdoptExecLeaseFromEnv(); err != nil {
-			t.Fatal(err)
-		}
-		_, _ = fmt.Fprintln(os.Stdout, "ready")
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		return
 	}
@@ -128,9 +84,9 @@ func TestEntryExecHelper(t *testing.T) {
 	}
 	nextMode := "hold"
 	if mode == "acquire-and-spawn" {
-		nextMode = "adopt-and-spawn"
-	} else if mode == "acquire-and-adopt-twice" {
-		nextMode = "adopt-twice"
+		nextMode = "spawn"
+	} else if mode == "acquire-and-init-spawn" {
+		nextMode = "spawn-during-init"
 	}
 	env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", nextMode)
 	if err := lease.ExecReplace([]string{"-test.run=^TestEntryExecHelper$"}, "", env); err != nil {
@@ -138,77 +94,23 @@ func TestEntryExecHelper(t *testing.T) {
 	}
 }
 
-func TestAdoptExecLeaseTwiceDoesNotCloseRetainedLease(t *testing.T) {
-	root := t.TempDir()
-	key := "11111111-11111111"
-	copyTestBinaryIntoEntry(t, root, key)
-
-	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
-	cmd.Env = append(os.Environ(),
-		"SPARKWING_ENTRY_EXEC_HELPER=acquire-and-adopt-twice",
-		"SPARKWING_ENTRY_HELPER_ROOT="+root,
-		"SPARKWING_ENTRY_HELPER_KEY="+key,
-	)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("duplicate adoption helper failed: %v\n%s", err, output)
-	}
-}
-
-func TestAdoptExecLeaseEstablishesAuthorityOnInheritedDescriptor(t *testing.T) {
-	root := t.TempDir()
-	key := "11111111-11111111"
-	entry := copyTestBinaryIntoEntry(t, root, key)
-	lease, err := entry.openLock("lease", cacheLockShared)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
-	cmd.Env = append(os.Environ(),
-		"SPARKWING_ENTRY_EXEC_HELPER=adopt-unlocked-lease",
-		"SPARKWING_ENTRY_HELPER_ROOT="+root,
-		"SPARKWING_ENTRY_HELPER_KEY="+key,
-	)
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || strings.TrimSpace(line) != "ready" {
-		t.Fatalf("forged adoption readiness = %q, %v", line, err)
-	}
-	if err := errors.Join(cacheUnlock(lease), lease.Close()); err != nil {
-		t.Fatal(err)
-	}
-	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.ActiveSkippedEntries != 1 || result.ReclaimedEntries != 0 {
-		t.Fatalf("adopted descriptor did not retain lease after other reader exited: %+v", result)
-	}
-	_ = stdin.Close()
-	if err := cmd.Wait(); err != nil {
-		t.Fatal(err)
-	}
+func TestExecLeaseDoesNotSurviveChildSpawnedDuringInit(t *testing.T) {
+	testExecLeaseDoesNotSurviveChild(t, "acquire-and-init-spawn")
 }
 
 func TestExecLeaseDoesNotSurviveInPersistentChild(t *testing.T) {
+	testExecLeaseDoesNotSurviveChild(t, "acquire-and-spawn")
+}
+
+func testExecLeaseDoesNotSurviveChild(t *testing.T, mode string) {
+	t.Helper()
 	root := t.TempDir()
 	key := "11111111-11111111"
 	entry := copyTestBinaryIntoEntry(t, root, key)
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
 	cmd.Env = append(os.Environ(),
-		"SPARKWING_ENTRY_EXEC_HELPER=acquire-and-spawn",
+		"SPARKWING_ENTRY_EXEC_HELPER="+mode,
 		"SPARKWING_ENTRY_HELPER_ROOT="+root,
 		"SPARKWING_ENTRY_HELPER_KEY="+key,
 	)
@@ -266,45 +168,6 @@ func TestExecLeaseDoesNotSurviveInPersistentChild(t *testing.T) {
 	}
 	if _, err := os.Stat(entry.binaryPath()); !os.IsNotExist(err) {
 		t.Fatalf("pruned entry still exists: %v", err)
-	}
-}
-
-func TestAdoptExecLeaseFailsClosedOnInvalidCoordinate(t *testing.T) {
-	t.Setenv("SPARKWING_INTERNAL_CACHE_LEASE", "not-a-coordinate")
-	if err := AdoptExecLeaseFromEnv(); err == nil || !strings.Contains(err.Error(), "invalid inherited") {
-		t.Fatalf("invalid coordinate error = %v", err)
-	}
-	if _, exists := os.LookupEnv("SPARKWING_INTERNAL_CACHE_LEASE"); exists {
-		t.Fatal("invalid coordinate remained available to descendants")
-	}
-}
-
-func TestAdoptExecLeaseFailsClosedOnMismatchedDescriptor(t *testing.T) {
-	root := t.TempDir()
-	entry := testEntry(t, root, "11111111-11111111")
-	lease, err := entry.openLock("lease", cacheLockShared)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() {
-		_ = cacheUnlock(lease)
-		_ = lease.Close()
-	}()
-	wrong, err := os.CreateTemp(t.TempDir(), "not-a-lease-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer wrong.Close()
-	coordinate := strconv.FormatUint(uint64(wrong.Fd()), 10) + ":" + entry.key + ":" +
-		base64.RawURLEncoding.EncodeToString([]byte(entry.root))
-	t.Setenv("SPARKWING_INTERNAL_CACHE_LEASE", coordinate)
-	if err := AdoptExecLeaseFromEnv(); err == nil || !strings.Contains(err.Error(), "invalid inherited") {
-		t.Fatalf("mismatched descriptor error = %v", err)
-	}
-	runtime.GC()
-	runtime.GC()
-	if _, err := wrong.WriteString("descriptor still owned by caller"); err != nil {
-		t.Fatalf("rejected coordinate retained descriptor ownership: %v", err)
 	}
 }
 
