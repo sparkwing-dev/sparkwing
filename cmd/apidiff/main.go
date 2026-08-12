@@ -67,7 +67,7 @@ func main() {
 // structure. A new package under pkg therefore enters the snapshot gate in the
 // same change that creates it; no second allowlist can silently omit it.
 func discoverPackagePaths(root string) ([]string, error) {
-	paths := []string{"sparkwing"}
+	packages := map[string]struct{}{"sparkwing": {}}
 	pkgRoot := filepath.Join(root, "pkg")
 	err := filepath.WalkDir(pkgRoot, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
@@ -85,13 +85,15 @@ func discoverPackagePaths(root string) ([]string, error) {
 			return err
 		}
 		importPath := filepath.ToSlash(rel)
-		if len(paths) == 0 || paths[len(paths)-1] != importPath {
-			paths = append(paths, importPath)
-		}
+		packages[importPath] = struct{}{}
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+	paths := make([]string, 0, len(packages))
+	for path := range packages {
+		paths = append(paths, path)
 	}
 	sort.Strings(paths)
 	return paths, nil
