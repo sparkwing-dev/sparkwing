@@ -48,6 +48,20 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **cache:** `pkg/cachecontrol` measures the managed pipeline-binary cache and
+  reclaims inactive entries within caller-set byte and entry-work bounds. The
+  result reports observed capacity separately from removed entries; admission
+  callers remeasure the filesystem after every attempt.
+
+### Security
+
+- **cli + release:** `sparkwing update` accepts only an Ed25519-authenticated
+  checksum manifest and platform asset. It verifies downloaded, staged, and
+  installed bytes, restores the prior binary when the final check fails, and
+  treats lookup or verification failure as terminal. Releases publish one
+  immutable, signed asset set after macOS codesigning.
 
 ## [v0.29.0] - 2026-08-12
 ### Security
@@ -224,16 +238,6 @@ code change to unlock.
   still winning per key. Behavior change: a guard that silently passed because
   its value came from `sparkwing.yaml` now fires; a guard on an argument no
   layer supplies is unaffected.
-
-### Security
-
-- **cli + release:** Authenticate `sparkwing update` with an embedded Ed25519
-  release key. Releases sign the checksum manifest and every final platform
-  asset after macOS codesigning; published asset names are immutable. The
-  updater verifies both signatures, the requested manifest entry, staged bytes,
-  and installed bytes, and restores the prior binary when the final check fails.
-  Lookup or verification failure is terminal instead of falling back to an
-  unsigned source build.
 
 ## [v0.27.0] - 2026-08-12
 ### Security
@@ -561,11 +565,6 @@ code change to unlock.
 
   These two changes invalidate existing cached binaries once; the next
   invocation of each pipeline recompiles.
-
-- **cache:** `pkg/cachecontrol` measures the managed pipeline-binary cache and
-  reclaims inactive entries within caller-set byte and entry-work bounds. The
-  result reports observed capacity separately from removed entries; admission
-  callers remeasure the filesystem after every attempt.
 
 ## [v0.24.0] - 2026-08-10
 ### Added
