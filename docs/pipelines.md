@@ -111,7 +111,7 @@ is a layer choice. Internalize this before reading the recipes below.
 - **Plan / Job** is the *outer* DAG - units of dispatch. Each Job runs
   on its own runner: a separate pod in cluster mode, a separate
   goroutine slot in local mode. Nodes carry the dispatch envelope -
-  `Retry`, `Timeout`, `OnFailure`, `Memoize`, `Requires`, `BeforeRun` /
+  `Retry`, `Timeout`, `OnFailure`, `Cache`, `Requires`, `BeforeRun` /
   `AfterRun`, `Approval` gating - because each Job *is* the unit the
   scheduler can retry, time out, or route to a labeled runner.
 - **Work / WorkStep** is the *inner* DAG - units of work *within* one
@@ -362,7 +362,7 @@ Every chainable `*JobNode` modifier has a `*JobGroup` twin: the call
 delegates to each member and returns the same `*JobGroup` for chaining.
 The generated [sdk-reference.md](sdk-reference.md) lists the current
 set. Two carve-outs: `OnFailure` is intentionally per-Job, since
-group-level recovery has unclear semantics; and `Memoize` on a group is
+group-level recovery has unclear semantics; and `Cache` on a group is
 what the `group-cache-shared` lint rule rejects -- one key function
 across N members makes them share a single cache entry and replay each
 other's results. Key each member instead, by ranging over
@@ -412,7 +412,7 @@ suspended-runner cost) at the call site.
 | `Retry(n, opts...)` | Plan only | `RetryBackoff(d)` + `RetryAuto()` options; `RetryAuto` re-dispatches the whole Job |
 | `Timeout` | Plan only | per-attempt cap |
 | `OnFailure(id, job)` | Plan only | constructs a detached recovery node fired on parent failure |
-| `Memoize` | Plan only | content-addressed result memoization |
+| `Cache` | Plan only | content-addressed result memoization |
 | `Requires(labels...)` | Plan only | scheduler routes by runner label |
 | `BeforeRun` / `AfterRun` | Plan only | runner lifecycle hooks |
 | `Approval` | Plan only | gates dispatch on a human decision |
@@ -494,7 +494,7 @@ reader - load it before designing a multi-Job pipeline.
 
 ## Cache
 
-`.Memoize(key, TTL(...))` turns a Job into a content-addressed cache
+`.Cache(key, TTL(...))` turns a Job into a content-addressed cache
 entry. The orchestrator computes the key after upstream deps complete,
 looks it up across runs, and short-circuits the job on a hit, replaying
 the cached output without running. Misses execute normally and record
@@ -502,7 +502,7 @@ the cached output without running. Misses execute normally and record
 time dedupes automatically.
 
 ```go
-sw.Job(plan, "build", &Build{}).Memoize(
+sw.Job(plan, "build", &Build{}).Cache(
     func(ctx context.Context) sparkwing.CacheKey {
         return sparkwing.Key("build", "v1")
     },
@@ -547,7 +547,7 @@ sw.Job(plan, "deploy-prod", &Deploy{Env: "prod"}).Needs(approve)
 `*Job` -- only the modifiers that make sense for a human gate are
 methods on it (`Needs`, `NeedsOptional`, `OnFailure`, `BeforeRun`,
 `AfterRun`, `SkipIf`, `Optional`, `ContinueOnError`). Modifiers
-that don't apply to gates -- `Retry`, `Timeout`, `Memoize`, `Requires`,
+that don't apply to gates -- `Retry`, `Timeout`, `Cache`, `Requires`,
 `Inline` -- are physically absent, so misuse is a compile error
 rather than a runtime panic / silent no-op.
 

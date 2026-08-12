@@ -447,7 +447,7 @@ type JobNode struct {
 	// contentCache memoizes the node's result on content (JobNode.Cache);
 	// concurrency enrolls it in a shared budget (JobNode.Concurrency).
 	// The two are independent: a node may set either, both, or neither.
-	contentCache *MemoizeConfig
+	contentCache *CacheConfig
 	concurrency  *concurrencyMembership
 
 	// dirCaches are the dependency-directory caches declared via
@@ -1016,7 +1016,7 @@ func (n *JobNode) AfterRun(fn AfterRunFn) *JobNode {
 //	    Verify(probe.HTTP(url).ExpectJSON("status", "ok").Check).
 //	    OnFailure("recover", recoverFn)
 //
-// On a node that also declares .Memoize(): a cache hit skips the action,
+// On a node that also declares .Cache(): a cache hit skips the action,
 // and the Verify with it -- the check is part of the cached unit. For a
 // health check that must run on every invocation, model it as its own
 // uncached node.

@@ -300,7 +300,7 @@ type P struct{ sw.Base }
 func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	sw.JobFanOut(plan, "matrix", []string{"1.23", "1.24"}, func(v string) (string, any) {
 		return v, nil
-	}).Memoize(func(ctx context.Context) sw.CacheKey { return sw.Key("tests") })
+	}).Cache(func(ctx context.Context) sw.CacheKey { return sw.Key("tests") })
 	return nil
 }
 `
@@ -333,7 +333,7 @@ import (
 type P struct{ sw.Base }
 
 func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-	sw.Job(plan, "test", &T{}).Memoize(func(ctx context.Context) sw.CacheKey { return sw.Key("tests") })
+	sw.Job(plan, "test", &T{}).Cache(func(ctx context.Context) sw.CacheKey { return sw.Key("tests") })
 	return nil
 }
 

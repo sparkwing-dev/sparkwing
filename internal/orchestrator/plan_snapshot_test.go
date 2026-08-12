@@ -45,7 +45,7 @@ func TestMarshalPlanSnapshot_SplitsCacheAndConcurrency(t *testing.T) {
 	})
 	sparkwing.Job(plan, "shard", func(ctx context.Context) error { return nil }).
 		Concurrency(g, 4).
-		Memoize(func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("coverage", "shard") },
+		Cache(func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("coverage", "shard") },
 			sparkwing.TTL(48*time.Hour))
 
 	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"}, planSnapshotMeta{})

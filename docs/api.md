@@ -33,6 +33,6 @@ stream for live tail. The routes and their scopes are in
 
 ## Concurrency
 
-The `.Memoize()` and `.Concurrency()` coordination primitives are backed
+The `.Cache()` and `.Concurrency()` coordination primitives are backed
 by the `/api/v1/concurrency/{key}/*` routes (acquire, heartbeat,
 release, state, resolve). See [caching.md](caching.md) for the model.

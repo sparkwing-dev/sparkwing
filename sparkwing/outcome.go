@@ -16,12 +16,12 @@ const (
 	Skipped   Outcome = "skipped"
 	Cancelled Outcome = "cancelled"
 
-	// SkippedConcurrent: .Memoize() arrival hit a full slot under
+	// SkippedConcurrent: .Cache() arrival hit a full slot under
 	// OnLimit:Skip. Distinct from Skipped (which comes from SkipIf)
 	// so dashboards can surface the cause.
 	SkippedConcurrent Outcome = "skipped-concurrent"
 
-	// Superseded: .Memoize() holder was evicted by a newer arrival under
+	// Superseded: .Cache() holder was evicted by a newer arrival under
 	// OnLimit:CancelOthers. Distinct from Cancelled (operator-driven)
 	// so dashboards can surface "evicted by newer run" vs "operator
 	// cancelled".

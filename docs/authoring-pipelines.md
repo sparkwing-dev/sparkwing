@@ -242,7 +242,7 @@ sparkwing.Job(plan, "deploy", &Deploy{Build: out}).Needs(build)
 
 ## Shared cache across a group (`group-cache-shared`)
 
-`JobGroup.Memoize` takes one key function and applies it to every member of
+`JobGroup.Cache` takes one key function and applies it to every member of
 the group, so the members share a single cache entry: the first to finish
 stores a result and the rest replay it. On a build matrix -- the shape
 `JobFanOut` exists for -- that means one cell's pass is served for all of
@@ -255,7 +255,7 @@ Don't cache the group:
 ```go
 sparkwing.JobFanOut(plan, "matrix", goVersions, func(v string) (string, any) {
     return v, &Test{GoVersion: v}
-}).Memoize(func(ctx context.Context) sparkwing.CacheKey {
+}).Cache(func(ctx context.Context) sparkwing.CacheKey {
     return sparkwing.Key("tests") // one key for every Go version
 })
 ```
@@ -268,7 +268,7 @@ matrix := sparkwing.JobFanOut(plan, "matrix", goVersions, func(v string) (string
 })
 for _, m := range matrix.Members() {
     version := m.ID()
-    m.Memoize(func(ctx context.Context) sparkwing.CacheKey {
+    m.Cache(func(ctx context.Context) sparkwing.CacheKey {
         return sparkwing.Key("tests", version)
     })
 }
@@ -277,7 +277,7 @@ for _, m := range matrix.Members() {
 This is not the same thing as GitHub's `actions/cache`. A sparkwing
 content cache *memoizes the node*: on a hit, the job does not run. GitHub
 restores directories so the job runs faster. Porting `actions/cache` to
-`.Memoize()` will stop your tests executing.
+`.Cache()` will stop your tests executing.
 
 ## Unsatisfiable guards (`guard-misuse`)
 

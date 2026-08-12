@@ -26,7 +26,7 @@ func (artifactProducerPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spar
 		return os.WriteFile(filepath.Join(dir, "out.txt"), []byte("artifact-bytes"), 0o644)
 	}).
 		Outputs("dist/**").
-		Memoize(func(_ context.Context) sparkwing.CacheKey { return sparkwing.Key("produce", "v1") })
+		Cache(func(_ context.Context) sparkwing.CacheKey { return sparkwing.Key("produce", "v1") })
 	return nil
 }
 

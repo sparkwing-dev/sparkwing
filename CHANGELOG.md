@@ -58,7 +58,7 @@ code change to unlock.
   store, so a build's dependency downloads stay inside the cluster instead of
   egressing every run. Caching is best-effort throughout: a missing lockfile,
   an unreachable backend, or an oversized archive logs a warning and never
-  fails the node. This is distinct from `.Memoize()`, which memoizes a node's
+  fails the node. This is distinct from `.Cache()`, which memoizes a node's
   result so the node does not run at all; `.CacheDir()` makes the work fast
   while the node still runs. Porting `actions/cache` maps to `.CacheDir()`. See
   [caching](docs/caching.md).
@@ -69,15 +69,6 @@ code change to unlock.
 
 ### Changed
 
-- **sdk (Breaking):** The result-memoization modifier `.Cache()` is renamed to
-  `.Memoize()` on both `JobNode` and `JobGroup`, with `CacheConfig` →
-  `MemoizeConfig`, `CacheOption` → `MemoizeOption`, and `CacheConfig()` →
-  `MemoizeConfig()`. `CacheKey`, `CacheKeyFn`, `Key`, `NoCache`, and `TTL` keep
-  their names. The old name read like GitHub Actions `actions/cache` while doing
-  the opposite (skipping the node instead of restoring a directory); the
-  `actions/cache` equivalent is the new `.CacheDir()`. No alias: every call site
-  is a compile error until updated. See
-  [migration guide](docs/migrations/v0.31.0.md).
 - **runner:** Dependency fetches now default to the in-cluster pull-through
   proxy. Wherever a cache URL is known, the runner container and every pod it
   spawns start with `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL`, and

@@ -56,9 +56,15 @@ func BindPipelinesFromYAML(cfg interface {
 )
 func BoxToolBudget(tool string, grantableCores float64, queueTimeout time.Duration) *ConcurrencyGroup
 type Cache = storage.ArtifactStore
+type CacheConfig struct {
+	Key CacheKeyFn
+
+	TTL time.Duration
+}
 type CacheKey string
 func (k CacheKey) IsNoCache() bool
 type CacheKeyFn func(ctx context.Context) CacheKey
+type CacheOption func(*CacheConfig)
 const Cached Outcome = "cached"
 const CancelOthers OnLimit = "cancel_others"
 const Cancelled Outcome = "cancelled"
@@ -294,6 +300,7 @@ type JobGroup struct {
 }
 func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup
 func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup
+func (g *JobGroup) Cache(key CacheKeyFn, opts ...CacheOption) *JobGroup
 func (g *JobGroup) CacheDir(caches ...DirCache) *JobGroup
 func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup
 func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup
@@ -303,7 +310,6 @@ func (g *JobGroup) Env(key, value string) *JobGroup
 func (g *JobGroup) Err() error
 func (g *JobGroup) Inline() *JobGroup
 func (g *JobGroup) Members() []*JobNode
-func (g *JobGroup) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobGroup
 func (g *JobGroup) Name() string
 func (g *JobGroup) Needs(deps ...Dep) *JobGroup
 func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup
@@ -325,6 +331,8 @@ func (n *JobNode) AfterRunHooks() []AfterRunFn
 func (n *JobNode) ApprovalConfig() *ApprovalConfig
 func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode
 func (n *JobNode) BeforeRunHooks() []BeforeRunFn
+func (n *JobNode) Cache(key CacheKeyFn, opts ...CacheOption) *JobNode
+func (n *JobNode) CacheConfig() *CacheConfig
 func (n *JobNode) CacheDir(caches ...DirCache) *JobNode
 func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode
 func (n *JobNode) ConcurrencyCost() int
@@ -343,8 +351,6 @@ func (n *JobNode) IsContinueOnError() bool
 func (n *JobNode) IsInline() bool
 func (n *JobNode) IsOptional() bool
 func (n *JobNode) Job() Workable
-func (n *JobNode) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobNode
-func (n *JobNode) MemoizeConfig() *MemoizeConfig
 func (n *JobNode) Needs(deps ...Dep) *JobNode
 func (n *JobNode) NeedsGroups() []*JobGroup
 func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode
@@ -417,12 +423,6 @@ func Lookup(name string) (*Registration, bool)
 func Max(v any) Constraint
 func MaxAge(d time.Duration) RefOption
 const MaxCacheTTL = 35 * 24 * time.Hour
-type MemoizeConfig struct {
-	Key CacheKeyFn
-
-	TTL time.Duration
-}
-type MemoizeOption func(*MemoizeConfig)
 func MemoryGB(n float64) ResourceHint
 func Min(v any) Constraint
 func MustConfig(ctx context.Context, name string) string
@@ -776,7 +776,7 @@ func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup
 const Success Outcome = "success"
 func Summary(ctx context.Context, markdown string)
 const Superseded Outcome = "superseded"
-func TTL(d time.Duration) MemoizeOption
+func TTL(d time.Duration) CacheOption
 func ToolCacheDir(tool string) string
 func ToolCostCenticores(cores float64) int
 func ToolSlot(ctx context.Context, g *ConcurrencyGroup, cost ...int) (release func(), granted bool)

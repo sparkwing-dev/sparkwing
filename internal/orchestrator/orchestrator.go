@@ -3499,7 +3499,7 @@ func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 	if rec := n.OnFailureNode(); rec != nil {
 		m.OnFailure = rec.ID()
 	}
-	if cc := n.MemoizeConfig(); cc != nil {
+	if cc := n.CacheConfig(); cc != nil {
 		m.Cache = true
 		m.CacheTTLMS = cc.TTL.Milliseconds()
 	}

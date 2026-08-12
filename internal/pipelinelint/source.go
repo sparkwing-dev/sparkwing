@@ -230,7 +230,7 @@ func (a *analysis) checkChain(expr ast.Expr) {
 // checkGroupCache flags a content cache declared on a set of jobs rather
 // than on one job.
 //
-// JobGroup.Memoize takes a single key function and applies it to every
+// JobGroup.Cache takes a single key function and applies it to every
 // member, so the members share one cache entry: the first to finish
 // stores a result the rest replay. On the shape this is most often
 // reached for -- a build matrix from JobFanOut -- that means one cell's
@@ -251,11 +251,11 @@ func (a *analysis) checkGroupCache(root *ast.CallExpr, methods []*ast.CallExpr) 
 		return
 	}
 	for _, m := range methods {
-		if methodName(m) != "Memoize" {
+		if methodName(m) != "Cache" {
 			continue
 		}
 		a.add(RuleGroupCacheShared, m.Pos(),
-			"Memoize() here applies one key to every member of "+sel.Sel.Name+
+			"Cache() here applies one key to every member of "+sel.Sel.Name+
 				", so the members share a cache entry and replay each other's results; "+
 				"key them individually by ranging over the group's Members().")
 	}
