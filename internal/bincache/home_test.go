@@ -86,10 +86,14 @@ func TestSparkwingHome_MatchesDefaultPaths(t *testing.T) {
 func TestPrune_UnisolatedRunsAgainstTheSandbox(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", "")
 
-	root := CacheRoot()
-	if !strings.HasPrefix(root, os.TempDir()) {
-		t.Fatalf("CacheRoot() = %q, want a path under the test sandbox", root)
+	defaultRoot := CacheRoot()
+	if !strings.HasPrefix(defaultRoot, os.TempDir()) {
+		t.Fatalf("CacheRoot() = %q, want a path under the test sandbox", defaultRoot)
 	}
+	// Isolate the destructive assertion from parallel package tests while keeping
+	// it beneath the same test-owned sandbox whose default was proved above.
+	t.Setenv("SPARKWING_HOME", filepath.Join(SparkwingHome(), t.Name()))
+	root := CacheRoot()
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
 	cold := mustPipelineEntry(t, "aaaaaaaa-00000001")
