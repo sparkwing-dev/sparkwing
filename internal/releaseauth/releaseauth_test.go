@@ -38,3 +38,13 @@ func TestPrivateKeyRejectsUnsupportedLength(t *testing.T) {
 		t.Fatal("unsupported key length accepted")
 	}
 }
+
+func TestPrivateKeyRejectsInconsistentExpandedKey(t *testing.T) {
+	seed := make([]byte, ed25519.SeedSize)
+	key := append([]byte(nil), ed25519.NewKeyFromSeed(seed)...)
+	key[ed25519.SeedSize] ^= 1
+	_, err := PrivateKey(base64.StdEncoding.EncodeToString(key))
+	if err == nil {
+		t.Fatal("expanded key with mismatched public half accepted")
+	}
+}
