@@ -125,7 +125,7 @@ func Run(ctx context.Context, opts Options) error {
 				_, err := orchestrator.ReconcileOrphanedLocalRuns(rctx, st, 0)
 				return err
 			})
-		if err := orchestrator.RunLocalTriggerConsumer(ctx, st, nil); err != nil {
+		if err := orchestrator.RunLocalTriggerConsumer(ctx, paths.Root, st, nil); err != nil {
 			return err
 		}
 	}
