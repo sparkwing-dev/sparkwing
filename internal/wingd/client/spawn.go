@@ -19,7 +19,7 @@ const daemonLogTailLines = 8
 // bound. One rotation keeps the previous run's tail for a post-mortem.
 const daemonLogCapBytes = 1 << 20
 
-// defaultSpawn re-execs this binary as a detached `sparkwing wingd run`
+// defaultSpawn re-execs this binary as a detached `sparkwing wingd supervise`
 // for home. The daemon's stdout and stderr go to a log file beside its
 // socket. Racing spawns are safe: the daemon's flock election lets only
 // one win, and the losers exit cleanly.
@@ -28,7 +28,7 @@ func defaultSpawn(home, version string) error {
 	if err != nil {
 		return fmt.Errorf("locate own binary: %w", err)
 	}
-	args := []string{"wingd", "run"}
+	args := []string{"wingd", "supervise"}
 	if home != "" {
 		args = append(args, "--home", home)
 	}
