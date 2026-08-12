@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.31.0] - 2026-08-12
 ### Added
 
 - **sdk:** Nodes and groups can declare dependency caches with
