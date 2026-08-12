@@ -338,32 +338,42 @@ func TestMinHostingRelease_TakesTheHigherOfBothBars(t *testing.T) {
 	}
 }
 
-// TestFirstHostingRelease_IsStillUnreleased is the live half of keeping
-// that constant honest. It names the release this feature ships in, so
-// while the feature is unreleased the tag must not exist yet. The moment
-// it does -- a v0.27.0 cut without this work, or this work landing a
-// release later -- the constant is naming a build that cannot host, and
-// this fails.
+// TestFirstHostingRelease_NamesAHostingCapableRelease is the live half
+// of keeping that constant honest. It names the first release able to
+// host a daemon on request, and it can be wrong in two ways: while the
+// feature is unreleased, the tag must not exist yet (a tag cut without
+// this work would send operators to a build that cannot host); once the
+// release ships, the tag must actually contain the hosting code (a
+// bumped constant naming some future release would fail the moment that
+// release shipped without it). The supervisor package is the marker --
+// it is what the spawn verb reaches, so a tag that carries it can host.
 //
-// The release pipeline carries the same check at tag time. This one is
-// what catches it on a branch, before anyone runs a release.
-func TestFirstHostingRelease_IsStillUnreleased(t *testing.T) {
+// The release pipeline carries the pre-release half at tag time. This
+// test is what catches both halves on a branch, before anyone releases.
+func TestFirstHostingRelease_NamesAHostingCapableRelease(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available; the release pipeline carries the same check")
 	}
+	root := repoRootForTest(t)
 	cmd := exec.Command("git", "tag", "--list", FirstHostingRelease)
-	cmd.Dir = repoRootForTest(t)
+	cmd.Dir = root
 	out, err := cmd.Output()
 	if err != nil {
 		t.Skipf("git tag --list: %v (not a checkout with tags; the release pipeline carries the same check)", err)
 	}
 	if strings.TrimSpace(string(out)) == "" {
+		// Unreleased: nothing to verify until the tag exists, and the
+		// release pipeline refuses to cut a mismatched version.
 		return
 	}
-	t.Fatalf("FirstHostingRelease names %s, which is already a released tag. Either that release shipped without "+
-		"daemon hosting -- in which case the constant now tells operators to install a build that cannot host -- or "+
-		"this feature landed in it and the constant is right but this test is stale. Point it at the release this "+
-		"work actually ships in.", FirstHostingRelease)
+	const marker = "internal/wingd/supervise/supervise.go"
+	probe := exec.Command("git", "cat-file", "-e", FirstHostingRelease+":"+marker)
+	probe.Dir = root
+	if err := probe.Run(); err != nil {
+		t.Fatalf("FirstHostingRelease names %s, a released tag that does not contain %s -- that build cannot host a "+
+			"daemon, so every error message naming it as the minimum sends operators to a release that will not help. "+
+			"Point the constant at the release that actually ships daemon hosting.", FirstHostingRelease, marker)
+	}
 }
 
 // repoRootForTest walks up to the module root so `git` runs inside the
