@@ -31,8 +31,9 @@ func TestEntryExecHelper(t *testing.T) {
 		return
 	}
 	if mode == "child" {
-		_, _ = io.Copy(io.Discard, os.Stdin)
-		return
+		for {
+			time.Sleep(time.Hour)
+		}
 	}
 	if mode == "adopt-and-spawn" {
 		if err := AdoptExecLeaseFromEnv(); err != nil {
@@ -190,6 +191,7 @@ func cleanupProcess(t *testing.T, pid int) {
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
+		t.Errorf("persistent child %d was not reaped before the cleanup deadline", pid)
 	})
 }
 
