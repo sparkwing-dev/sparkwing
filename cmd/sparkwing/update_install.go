@@ -9,6 +9,7 @@ import (
 
 var (
 	updateReplace      = atomicReplace
+	updateRestore      = atomicReplace
 	updateMutateStaged = func(string) {}
 	updateSyncDir      = syncDir
 )
@@ -70,7 +71,7 @@ func installVerifiedAsset(asset verifiedReleaseAsset, currentBin string) error {
 	if hashErr != nil {
 		primary = fmt.Errorf("rehash installed binary: %w", hashErr)
 	}
-	if err := updateReplace(backup, currentBin); err != nil {
+	if err := updateRestore(backup, currentBin); err != nil {
 		backupOwned = false
 		return errors.Join(primary, fmt.Errorf("restore rollback binary from %s: %w", backup, err))
 	}
