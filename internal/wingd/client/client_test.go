@@ -123,22 +123,33 @@ func shortHome(t *testing.T) string {
 }
 
 // spawnInProcess returns a Spawn hook that brings up a real daemon inside
-// the test process the first time it fires, so EnsureDaemon exercises its
-// spawn-and-retry path without a child process.
+// the test process, so EnsureDaemon exercises its spawn-and-retry path
+// without a child process. Each call makes its own election attempt, matching
+// spawnDetached: a clean election loss does not consume another client's
+// opportunity to start the daemon.
 func spawnInProcess(t *testing.T, home string) func(string, string) error {
-	var once sync.Once
 	return func(string, string) error {
-		once.Do(func() {
-			d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0"})
-			if err != nil {
-				t.Errorf("spawn: new daemon: %v", err)
-				return
+		d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0"})
+		if err != nil {
+			return err
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		exited := make(chan error, 1)
+		go func() { exited <- d.Run(ctx) }()
+		select {
+		case <-d.Ready():
+			t.Cleanup(func() {
+				cancel()
+				<-exited
+			})
+			return nil
+		case err := <-exited:
+			cancel()
+			if errors.Is(err, wingd.ErrNotElected) {
+				return nil
 			}
-			ctx, cancel := context.WithCancel(context.Background())
-			t.Cleanup(cancel)
-			go func() { _ = d.Run(ctx) }()
-		})
-		return nil
+			return err
+		}
 	}
 }
 
