@@ -12,15 +12,17 @@ import (
 	"testing"
 	"time"
 
+	"golang.org/x/mod/semver"
+
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 func TestResolveHostBin_EnvOutranksPath(t *testing.T) {
 	t.Setenv(HostBinEnv, "/opt/sparkwing/bin/sparkwing")
-	bin, ok := ResolveHostBin()
-	if !ok || bin != "/opt/sparkwing/bin/sparkwing" {
-		t.Fatalf("ResolveHostBin() = %q, %v; want the env value", bin, ok)
+	bin, fromEnv, ok := ResolveHostBin()
+	if !ok || bin != "/opt/sparkwing/bin/sparkwing" || !fromEnv {
+		t.Fatalf("ResolveHostBin() = %q, fromEnv=%v, ok=%v; want the env value", bin, fromEnv, ok)
 	}
 }
 
@@ -35,20 +37,118 @@ func TestResolveHostBin_FallsBackToPath(t *testing.T) {
 		t.Fatalf("write fake sparkwing: %v", err)
 	}
 	t.Setenv("PATH", dir)
-	bin, ok := ResolveHostBin()
-	if !ok || bin != fake {
-		t.Fatalf("ResolveHostBin() = %q, %v; want %q from PATH", bin, ok, fake)
+	bin, fromEnv, ok := ResolveHostBin()
+	if !ok || bin != fake || fromEnv {
+		t.Fatalf("ResolveHostBin() = %q, fromEnv=%v, ok=%v; want %q from PATH", bin, fromEnv, ok, fake)
 	}
 }
 
 func TestResolveHostBin_NothingResolvesReportsFalse(t *testing.T) {
 	t.Setenv(HostBinEnv, "")
 	t.Setenv("PATH", t.TempDir())
-	if bin, ok := ResolveHostBin(); ok {
+	if bin, _, ok := ResolveHostBin(); ok {
 		t.Fatalf("ResolveHostBin() = %q on a machine with no sparkwing; want none", bin)
 	}
 	if _, ok := HostSpawn(); ok {
 		t.Fatal("HostSpawn() resolved on a machine with no sparkwing; want none")
+	}
+}
+
+// A typo'd or stale $SPARKWING_WINGD_BIN is the common way to get a host
+// that cannot start. The error must name the variable and the value,
+// because "could not reach the admission daemon" sends the reader to
+// inspect a daemon when what is wrong is a path they typed.
+func TestHostSpawn_UnstartableHostNamesTheVariableAndValue(t *testing.T) {
+	home := shortHome(t)
+	missing := filepath.Join(t.TempDir(), "sparkwign") // deliberate typo
+	t.Setenv(HostBinEnv, missing)
+	spawn, ok := HostSpawn()
+	if !ok {
+		t.Fatal("HostSpawn() did not resolve an explicitly named binary")
+	}
+	err := spawn(home, "")
+	if !errors.Is(err, ErrDaemonHostUnusable) {
+		t.Fatalf("error %v does not match ErrDaemonHostUnusable", err)
+	}
+	for _, want := range []string{HostBinEnv, missing} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message %q omits %q", err.Error(), want)
+		}
+	}
+
+	// And it must reach a caller intact rather than as "unreachable".
+	_, cerr := EnsureDaemon(context.Background(), Options{
+		Home:        home,
+		Spawn:       spawn,
+		NoTakeover:  true,
+		DialTimeout: 200 * time.Millisecond,
+		Backoff:     10 * time.Millisecond,
+	})
+	if !errors.Is(cerr, ErrDaemonHostUnusable) {
+		t.Fatalf("connect reported %v, want the unusable-host sentinel", cerr)
+	}
+	if errors.Is(cerr, ErrDaemonUnreachable) {
+		t.Fatal("a bad host binary was reported as an unreachable daemon")
+	}
+}
+
+// A host binary that starts and immediately exits non-zero -- the shape
+// of an installed sparkwing too old to know the verb it was handed --
+// must fail the connect promptly, carrying the host's own reason, rather
+// than waiting out the full socket budget for a socket that will never
+// appear.
+func TestSpawn_HostThatExitsImmediatelyFailsFast(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fixture below is a unix shell script")
+	}
+	home := shortHome(t)
+	bin := filepath.Join(t.TempDir(), "sparkwing")
+	script := "#!/bin/sh\necho 'wingd: unknown subcommand \"" + DaemonSpawnVerb + "\"' >&2\nexit 1\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fixture host: %v", err)
+	}
+	t.Setenv(HostBinEnv, bin)
+	spawn, ok := HostSpawn()
+	if !ok {
+		t.Fatal("HostSpawn() did not resolve the fixture")
+	}
+
+	start := time.Now()
+	_, err := EnsureDaemon(context.Background(), Options{
+		Home:        home,
+		Spawn:       spawn,
+		NoTakeover:  true,
+		DialTimeout: 200 * time.Millisecond,
+		Backoff:     10 * time.Millisecond,
+	})
+	elapsed := time.Since(start)
+	if !errors.Is(err, ErrDaemonHostFailed) {
+		t.Fatalf("error %v does not match ErrDaemonHostFailed", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("waited %s for a host that died immediately; the socket budget is ~%s", elapsed, daemonStartupBudget(Options{}))
+	}
+	for _, want := range []string{bin, "unknown subcommand"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("message %q omits %q -- it must name the binary and carry the host's reason", err.Error(), want)
+		}
+	}
+}
+
+// A spawn that never runs must not leave an empty daemon log behind: a
+// zero-byte d.log reads as "a daemon ran here and said nothing", which
+// is the opposite of what happened.
+func TestSpawn_FailedStartLeavesNoEmptyDaemonLog(t *testing.T) {
+	home := shortHome(t)
+	logPath, err := wingd.LogPath(home)
+	if err != nil {
+		t.Fatalf("log path: %v", err)
+	}
+	if serr := spawnDetached(filepath.Join(t.TempDir(), "not-a-binary"), home, ""); serr == nil {
+		t.Fatal("spawning a nonexistent binary succeeded")
+	}
+	if _, err := os.Stat(logPath); err == nil {
+		t.Fatalf("a spawn that never started a process left a daemon log at %s", logPath)
 	}
 }
 
@@ -152,19 +252,39 @@ func TestEnsureDaemon_NoTakeoverDaemonProtocolTooOldFails(t *testing.T) {
 		t.Fatal("a client that never takes over reported an exhausted takeover budget")
 	}
 	msg := err.Error()
-	minVersion, ok := wingwire.ReleasedProtocolFloors().MinVersionSpeaking(wingd.ProtocolMajor)
-	if !ok {
-		t.Fatalf("no released floor for protocol %d", wingd.ProtocolMajor)
-	}
-	for _, want := range []string{"v0.9.0", "v2.0.0", minVersion, "daemon restart"} {
+	for _, want := range []string{"v0.9.0", "v2.0.0", minHostingRelease(), "daemon restart"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message %q omits %q", msg, want)
 		}
+	}
+	// A private home gets its own daemon from the same unusable
+	// installation, so suggesting one would send the reader in a circle.
+	if strings.Contains(msg, "SPARKWING_HOME") {
+		t.Errorf("message %q suggests an escape that does not escape anything", msg)
 	}
 	select {
 	case <-spawned:
 		t.Fatal("a no-takeover client spawned a successor for a too-old daemon")
 	default:
+	}
+}
+
+// The release an operator must install is the higher of two bars: new
+// enough to speak this client's protocol, and new enough to host a daemon
+// at all. Naming only the protocol floor would send them to a build that
+// clears the handshake and still cannot serve the spawn verb.
+func TestMinHostingRelease_TakesTheHigherOfBothBars(t *testing.T) {
+	got := minHostingRelease()
+	if semver.Compare(got, FirstHostingRelease) < 0 {
+		t.Errorf("minHostingRelease() = %s, below the first hosting-capable release %s", got, FirstHostingRelease)
+	}
+	if floor, ok := wingwire.ReleasedProtocolFloors().MinVersionSpeaking(wingd.ProtocolMajor); ok {
+		if semver.Compare(got, floor) < 0 {
+			t.Errorf("minHostingRelease() = %s, below the protocol floor %s for major %d", got, floor, wingd.ProtocolMajor)
+		}
+	}
+	if !semver.IsValid(FirstHostingRelease) {
+		t.Errorf("FirstHostingRelease %q is not a valid semver; the advice would name a version that does not exist", FirstHostingRelease)
 	}
 }
 

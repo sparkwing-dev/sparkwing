@@ -75,16 +75,52 @@ func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 // what separates it from [ErrProtocolTooOld].
 var ErrDaemonTooOld = errors.New("wingd/client: daemon protocol is older than this client")
 
+// FirstHostingRelease is the first sparkwing release whose installed
+// binary can host the daemon for a client that does not host its own:
+// the release that serves [DaemonSpawnVerb] and ships the host handoff.
+//
+// It is a hand-maintained fact, not something the build can derive, so
+// the release owner must keep it honest: this constant names the version
+// this work ships in, and a slipped release renames it here. Getting it
+// wrong sends an operator to install a version that will not fix their
+// problem, which is worse than saying nothing.
+//
+// It exists because the protocol floor is not the whole answer. A
+// v0.24.0 or v0.25.0 install speaks the current protocol and would clear
+// [wingwire.ProtocolFloors.MinVersionSpeaking], but serves no supervise
+// verb, so it cannot host. The advice has to name whichever bar is
+// higher.
+const FirstHostingRelease = "v0.27.0"
+
+// minHostingRelease is the release an operator must install for this
+// client to be able to use a daemon that binary hosts: the higher of the
+// protocol floor for this client's major and the first release that can
+// host at all.
+func minHostingRelease() string {
+	floor, known := wingwire.ReleasedProtocolFloors().MinVersionSpeaking(wingd.ProtocolMajor)
+	if !known {
+		return FirstHostingRelease
+	}
+	if semver.Compare(floor, FirstHostingRelease) > 0 {
+		return floor
+	}
+	return FirstHostingRelease
+}
+
 // daemonTooOld explains a daemon protocol major below what this client
 // speaks, for a client that may not take the daemon over. A pipeline
 // binary gets here when its SDK pin crossed a protocol boundary the
 // installed sparkwing hosting the daemon has not reached, so the advice
 // moves that installation, not the repo's go.mod pin.
 //
-// The minimum is looked up from this client's own major rather than
-// stated as a bare version, because what the operator has to install is
-// "a sparkwing new enough to speak protocol N", and the floors table is
-// the only place that mapping is recorded.
+// It names a release rather than a protocol number because "install
+// sparkwing X" is an instruction an operator can carry out, and it names
+// the hosting bar as well as the protocol one because clearing only the
+// protocol bar leaves them with a binary that still cannot host.
+//
+// It deliberately suggests no SPARKWING_HOME escape: a private home gets
+// its own daemon from the same unusable installation, so the suggestion
+// would send the reader in a circle.
 func daemonTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	self := selfVersion
 	if self == "" {
@@ -94,14 +130,9 @@ func daemonTooOld(selfVersion string, ack wingwire.HelloAck) error {
 	if daemon == "" {
 		daemon = "(unknown)"
 	}
-	minAdvice := fmt.Sprintf("protocol %d", wingd.ProtocolMajor)
-	if minVersion, known := wingwire.ReleasedProtocolFloors().MinVersionSpeaking(wingd.ProtocolMajor); known {
-		minAdvice = fmt.Sprintf("%s or newer", minVersion)
-	}
 	return fmt.Errorf("%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
-		"Install sparkwing %s and run `sparkwing daemon restart`; "+
-		"or set SPARKWING_HOME to run against a daemon of your own",
-		ErrDaemonTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, minAdvice)
+		"Install sparkwing %s or newer on this host, then run `sparkwing daemon restart`",
+		ErrDaemonTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, minHostingRelease())
 }
 
 // servedDownLevel reports that the daemon answered on an older major than
@@ -391,6 +422,13 @@ func spawnFailed(home, sock string, serr, dialErr error) error {
 		// start a daemon. The sentinel is the whole answer, and a leftover
 		// log from some earlier daemon would only send the reader after a
 		// process that is not the obstacle.
+		return serr
+	}
+	if errors.Is(serr, ErrDaemonHostUnusable) {
+		// The obstacle is the named host binary, and the error already
+		// names it, why it was chosen, and whatever the host managed to
+		// write. Re-wrapping it as a generic spawn failure would bury the
+		// one fact the operator has to act on.
 		return serr
 	}
 	if tail := daemonLogTail(home); tail != "" {

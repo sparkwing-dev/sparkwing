@@ -13,7 +13,7 @@ import (
 // the daemon's output.
 func TestOpenDaemonLog_CreatesDirWhenMissing(t *testing.T) {
 	home := t.TempDir()
-	f := openDaemonLog(home)
+	f, _ := openDaemonLog(home)
 	if f == nil {
 		t.Fatal("openDaemonLog returned nil; the daemon would have no log")
 	}
@@ -39,13 +39,13 @@ func TestOpenDaemonLog_RotatesOncePastCap(t *testing.T) {
 	if err != nil {
 		t.Fatalf("log path: %v", err)
 	}
-	if f := openDaemonLog(home); f != nil {
+	if f, _ := openDaemonLog(home); f != nil {
 		_ = f.Close()
 	}
 	if err := os.WriteFile(path, make([]byte, daemonLogCapBytes+1), 0o600); err != nil {
 		t.Fatalf("seed oversized log: %v", err)
 	}
-	if f := openDaemonLog(home); f != nil {
+	if f, _ := openDaemonLog(home); f != nil {
 		_ = f.Close()
 	}
 	if _, err := os.Stat(path + ".1"); err != nil {

@@ -12,6 +12,7 @@ package client
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 )
@@ -38,15 +39,21 @@ var ErrNoDaemonHost = errors.New("wingd/client: no admission daemon is running a
 
 // ResolveHostBin returns the daemon-host binary a non-hosting client
 // should spawn: $SPARKWING_WINGD_BIN when set, else a `sparkwing` found
-// on PATH. ok is false when neither resolves.
-func ResolveHostBin() (bin string, ok bool) {
+// on PATH. ok is false when neither resolves. fromEnv reports which of
+// the two answered, so a failure can name the thing the operator set.
+//
+// A value in [HostBinEnv] is taken as given rather than checked for
+// existence here. An operator who names a binary has said which one they
+// mean, and silently falling back to a different one on PATH would run a
+// daemon they did not choose; the spawn fails instead, naming the value.
+func ResolveHostBin() (bin string, fromEnv, ok bool) {
 	if bin := os.Getenv(HostBinEnv); bin != "" {
-		return bin, true
+		return bin, true, true
 	}
 	if bin, err := exec.LookPath("sparkwing"); err == nil {
-		return bin, true
+		return bin, false, true
 	}
-	return "", false
+	return "", false, false
 }
 
 // HostSpawn returns the Spawn for a client that cannot host the daemon
@@ -58,15 +65,36 @@ func ResolveHostBin() (bin string, ok bool) {
 // The spawn deliberately drops the client's version: the host binary
 // advertises its own build, so the daemon's version tracks the installed
 // sparkwing rather than whichever SDK pin happened to spawn it.
+//
+// A failure names where the binary came from. The common way to get here
+// is a typo'd or stale [HostBinEnv], and an error that says only "could
+// not reach the admission daemon" sends the reader to inspect a daemon
+// when what is wrong is a path they typed.
 func HostSpawn() (spawn func(home, version string) error, ok bool) {
-	bin, ok := ResolveHostBin()
+	bin, fromEnv, ok := ResolveHostBin()
 	if !ok {
 		return nil, false
 	}
+	source := "the `sparkwing` found on PATH"
+	if fromEnv {
+		source = "$" + HostBinEnv
+	}
 	return func(home, _ string) error {
-		return spawnDetached(bin, home, "")
+		err := spawnDetached(bin, home, "")
+		if err == nil {
+			return nil
+		}
+		return fmt.Errorf("%w: start the daemon host %s (from %s): %w",
+			ErrDaemonHostUnusable, bin, source, err)
 	}, true
 }
+
+// ErrDaemonHostUnusable reports that a daemon host binary was named but
+// could not be started -- a typo'd or stale [HostBinEnv], a path that is
+// not executable, a binary that exited without serving. The obstacle is
+// the named binary, not the socket, so callers must not report it as an
+// unreachable daemon.
+var ErrDaemonHostUnusable = errors.New("wingd/client: the named daemon host binary could not be started")
 
 // NoHostSpawn is the Spawn for a non-hosting client on a machine with no
 // installed sparkwing. It starts nothing and reports [ErrNoDaemonHost],
