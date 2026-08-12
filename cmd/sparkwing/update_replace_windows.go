@@ -12,6 +12,10 @@ func atomicReplace(source, target string) error {
 	return replaceWindowsRunningImage(source, target)
 }
 
+func atomicRestore(source, target string) error {
+	return restoreWindowsRunningImageWith(source, target, windowsMoveFileEx, os.Remove)
+}
+
 func replaceWindowsRunningImage(source, target string) error {
 	return replaceWindowsRunningImageWith(source, target, windowsMoveFileEx, os.Remove)
 }

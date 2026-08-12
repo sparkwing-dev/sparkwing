@@ -9,7 +9,7 @@ import (
 
 var (
 	updateReplace      = atomicReplace
-	updateRestore      = atomicReplace
+	updateRestore      = atomicRestore
 	updateMutateStaged = func(string) {}
 	updateSyncDir      = syncDir
 )
