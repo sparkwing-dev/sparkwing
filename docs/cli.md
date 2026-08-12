@@ -3,8 +3,9 @@
 Sparkwing ships a single `sparkwing` binary. This page is a map of what
 each command group is *for*; the complete, auto-generated listing of
 every command, flag, and argument lives in
-[cli-reference.md](cli-reference.md) (and offline via
-`sparkwing docs read --topic cli-reference`). Treat that generated
+[cli-reference.md](cli-reference.md), one `cli-<group>.md` page per
+command group (offline: `sparkwing docs read --topic cli-reference`,
+or `--topic cli-<group>` for one group). Treat that generated
 reference as authoritative -- when this page and it disagree, it wins.
 
 **Sparkwing does not require sparkwing.** The CLI is a developer
@@ -40,8 +41,8 @@ instead of `sparkwing run`.
 
 ## Command groups
 
-Top-level groups, each with its own `--help` and a full entry in
-[cli-reference.md](cli-reference.md):
+Top-level groups, each with its own `--help` and a full per-group page
+indexed in [cli-reference.md](cli-reference.md):
 
 | Group | For |
 |---|---|

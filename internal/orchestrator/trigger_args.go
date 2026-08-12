@@ -19,7 +19,9 @@ func resolveTriggerArgs(ctx context.Context, state StateBackend, trigger *store.
 	if state == nil {
 		return trigger.Args
 	}
-	orig, err := state.GetRun(ctx, trigger.RetryOf)
+	// Execution read: these args go straight into Plan(). A redacted
+	// fetch would re-run the retry with a literal "***".
+	orig, err := runForExecution(ctx, state, trigger.RetryOf)
 	if err != nil {
 		if logger == nil {
 			logger = slog.Default()

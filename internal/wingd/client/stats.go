@@ -14,10 +14,14 @@ import (
 func (cl *Client) ResetStats(ctx context.Context) error {
 	stop := cl.cancelOnDone(ctx)
 	defer stop()
+	retry := newRetry("stats reset", readOnlyRetryLimit)
 	for {
 		terminal, transient := cl.readResetStats()
 		if transient == nil {
 			return terminal
+		}
+		if err := retry.wait(ctx, transient); err != nil {
+			return err
 		}
 		if rerr := cl.recoverConn(ctx); rerr != nil {
 			return rerr

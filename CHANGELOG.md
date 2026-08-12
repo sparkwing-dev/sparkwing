@@ -48,6 +48,200 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **orchestrator:** Redact secret values that a run's arguments inherit from
+  `sparkwing.yaml`. A `secret:"true"` input can take its value from the
+  project's `defaults.args` block or a pipeline entry's `args:` block instead of
+  a command-line flag; the run's log masker was seeded from the arguments the
+  caller passed, while the pipeline was invoked with those layers merged in. A
+  secret supplied only by the project config was therefore never registered for
+  redaction, and a job that logged it wrote the plaintext to the node log, the
+  persisted annotations and summaries, the node's failure excerpt, and the
+  `child_run_start` audit payload -- while the same secret passed as a flag was
+  redacted. The masker is now seeded from the merged arguments the run actually
+  executes with. Already-written logs and rows are unchanged: rotate any secret
+  a job logged that reached it through `sparkwing.yaml`.
+  Display surfaces were never affected. A yaml-supplied value is not recorded on
+  the run row, and the secret-argument classification comes from the pipeline's
+  declared input names rather than from the values, so `runs list`, `runs get`,
+  `runs status`, the controller endpoints, and `run_start` redacted correctly
+  throughout.
+
+## [v0.26.0] - 2026-08-12
+### Added
+
+- **cli + orchestrator:** Runs now report where their logs live instead of
+  making callers reconstruct the path. The `run_start` record carries a
+  top-level `log_path` attribute -- the run directory holding the per-node
+  `.log` files, on the machine that executed the run -- and the same value is
+  persisted on the run's invocation snapshot, so it also shows up in
+  `sparkwing runs status` (one `log_path:` line, or a top-level `log_path`
+  field under `-o json`), `sparkwing runs get`, and the run receipt. Only runs
+  that write logs to a filesystem carry it; runs logging to a controller or an
+  object store omit the field rather than name a directory that holds nothing.
+  Because the path is the executor's, a run read back through `--profile` may
+  name a directory that is absent locally: the text output marks those, while
+  the JSON reports the path as recorded.
+- **wingd:** `SIGUSR1` makes the daemon write a full goroutine dump plus
+  a one-line count of its connections, holders, waiters, leases, and
+  guards to its log
+  (`~/.sparkwing/wingd/d.log`). A daemon that is burning CPU can now be
+  explained while it is still running -- `kill -USR1 <pid>`, then read
+  the log -- instead of only after the operator has killed the evidence.
+  POSIX only; Windows has no such signal.
+
+### Fixed
+
+- **cli:** `sparkwing pipeline trigger` without `--detach` now exits on the
+  triggered run's outcome instead of always exiting 0. The follow ended when the
+  run reached a terminal state but never read its status, so a failed remote run
+  printed no failure and reported success to the CI job or script wrapping it.
+  Exit codes now match a local `sparkwing run`: 0 for success, 1 for failed or
+  cancelled. Both follow modes -- log streaming and node status -- print the
+  run's status block and failing-node errors to stderr, so the reason survives a
+  `> run.log` redirect (the status follow also renders to stdout as it polls, so
+  a terminal shows that block twice). A follow that ends without a readable
+  terminal status, including a controller that becomes unreachable mid-run,
+  exits 3 and names the run to re-check with `sparkwing runs status` rather than
+  reporting a possibly-succeeding run as failed. `--detach` is unchanged -- it
+  reports submission, not outcome. Scripts that relied on the old always-zero
+  exit need `|| true` to keep it.
+- **wingd:** A daemon watching guarded runs no longer forks `ps` once per
+  guarded session per tick. Each sweep now takes a single kernel process
+  listing and judges every session -- membership and leader identity --
+  against that one view. On macOS the listing comes from `kern.proc.all`
+  rather than a `ps` fork: a full snapshot measured 0.7ms against 34ms on
+  a laptop with 669 processes, and the per-session identity lookups it
+  replaces are gone entirely. This is the largest contributor to the
+  reported case of a daemon pinned near 200% CPU while the queue appeared
+  hung.
+- **wingd:** Guard sweeps back off exponentially (to 5s) while the daemon
+  cannot read the process table at all, and return to full cadence on the
+  first success; a single guarded run whose inspection fails no longer
+  slows the sweep for the others, and a guarded leader that simply exits
+  between two observations is read as the answer it is rather than as a
+  failure. A process table the daemon cannot read used to be retried ten
+  times a second forever.
+- **wingd:** The `ps` listing -- used on Linux and other Unixes, and as
+  the macOS fallback -- is now bounded at two seconds, so a wedged `ps`
+  fails the inspection instead of blocking the daemon goroutine that
+  asked for it. A daemon that drops to that fallback says so once in its
+  log, since the fallback costs about fifty times more per listing and
+  rarely recovers. The post-`SIGKILL` wait for a process tree
+  to disappear backs off from 10ms to one second and logs once when it
+  slows down, so a descendant that cannot be killed costs about one
+  process-table read per second rather than a hundred.
+- **wingd:** Runs and CLI commands that lose their connection to the
+  daemon retry with capped exponential backoff and jitter instead of
+  reconnecting as fast as the socket allows. Every dropped connection
+  makes the daemon persist its state, so an unpaced client used to spin a
+  core on each side. Admission-critical exchanges (acquire, re-attach,
+  guard watch, cancel) still retry until they succeed or the caller gives
+  up; read-only ones (`sparkwing queue`, stats reset) now fail with a
+  clear error after ten attempts rather than retrying forever. The waits
+  inside connect -- for a spawned daemon's socket to appear, and for a
+  predecessor daemon to release the election during an upgrade -- are
+  paced the same way, keeping their thirty-second budgets while dialling
+  a few times a second instead of twenty.
+- **wingd:** A client that keeps finding the same older daemon gives up
+  after three takeover attempts, names both versions, and points at
+  `sparkwing daemon restart`, instead of draining and respawning in an
+  unbounded loop when the successor comes back as the version it
+  replaced. Meeting a different old daemon starts the budget again, so
+  losing a socket race to several predecessors is still resolved.
+- **wingd:** Frames the daemon sends a client are bounded by a ten-second
+  write deadline. A client that stops reading without closing its socket
+  is treated as gone rather than holding a daemon goroutine for as long
+  as it lives.
+
+### Changed
+
+- **orchestrator:** A failed node's recorded error is now bounded and redacted.
+  Previously a failing `sparkwing.Bash`/`Exec` step stored the command's entire
+  stderr *and* the entire command in the node's error -- both unbounded and
+  unmasked, so a large compiler run, or a generated script, turned a state row
+  into hundreds of kilobytes that `runs status`, the dashboard, and every
+  notification had to carry. The whole error text now has a hard ceiling of
+  about 5 KiB: the last 20 lines (at most 4 KiB) of command output, led by a
+  headline trimmed to one short line, with secret values redacted throughout.
+  When output was dropped the text says so and names the command that prints
+  the rest:
+  `… earlier output omitted (see: sparkwing runs logs --run <id> --node <id>)`.
+  An error with no captured output keeps its *first* lines instead -- there the
+  message is the diagnostic and its opening names the problem -- and points at
+  no log, because the log does not contain it. The node log still holds the
+  full output; cancelled and upstream-failed nodes are untouched.
+- **cli:** `sparkwing runs errors -o json` and `sparkwing runs status -o json`
+  carry the excerpt as structured data per failed node: `log_excerpt` (the
+  masked bounded output, without the headline and marker that decorate the
+  error text) and `log_excerpt_truncated`. Both fields are absent together when
+  there is nothing to excerpt -- a failure with no captured output, or a node
+  that did not fail on its own -- so absence is reportable rather than
+  fabricated. Where absence itself cannot be established (an event stream too
+  large to scan, or a controller that will not serve it) the node carries
+  `log_excerpt_unavailable` instead of a silent gap. Excerpts ride a new
+  `node_failure_excerpt` run event, so local and controller-backed reads render
+  identically; runs mirrored to S3-backed state carry no events and so no
+  excerpts. See [observability](docs/observability.md#failure-excerpts).
+
+### Security
+
+- **orchestrator:** Redact secret values in persisted node and step annotations
+  and summaries. The node log's masking wrapper sat *inside* the wrappers that
+  write `sparkwing.Annotate` and `sparkwing.Summary` output to the state store,
+  so those wrappers persisted the record before it was redacted: the log file
+  showed `***` while the annotation and summary rows beside it -- read by
+  `runs status`, `runs summary`, and the dashboard -- held the plaintext value.
+  The masker is now outermost. Rotate any secret a job passed to `Annotate` or
+  `Summary`; existing rows are unchanged.
+- **orchestrator:** Redact secret values in the structured attributes of node log
+  records, not just their messages. A failed step reports the command's whole
+  error text in `attrs.error`, so a secret that reached a command line or its
+  output was persisted in the node log one line below the redacted message --
+  on every execution path, local included. String attributes are now masked,
+  including strings nested in lists and maps; anything nested deeper than the
+  redaction pass inspects is replaced wholesale rather than emitted.
+- **orchestrator:** Redact secret values in node logs written by cluster and pod
+  node execution. `run-node` built the per-run masker from the pipeline's secret
+  arguments and wired it into secret resolution, but never installed it on the
+  context the node log wrapper reads, so a node running on a runner or in a pod
+  persisted secret values in plaintext where the same node run locally redacted
+  them. Already-written logs are unchanged: rotate any secret a job logged from
+  a remote node.
+- **cli, controller:** pipeline inputs tagged `secret:"true"` are now redacted to
+  `***` wherever a run is read back. Previously the tag only masked node log
+  bodies, so a secret passed as an argument was printed in full by the `Setup`
+  block of `sparkwing run`, by `runs list`, `runs get`, `runs status`,
+  `runs find`, `runs tree`, `runs wait`, and `runs receipt`, served by the
+  controller's run endpoints, and rendered by the dashboard's Setup panel --
+  including the copyable `rerun` reproducer command. Runs now record which
+  arguments their pipeline declared secret, and the read paths redact them;
+  retry and replay still re-execute with the real value. Audit events
+  (`child_run_start`) that forward a parent's arguments to a child are masked
+  too.
+  Runs started before this release carry no such record and render unchanged.
+  Redaction is applied on read: the run row, its backups, and `state.ndjson`
+  dumps still hold the plaintext, so keep treating the state database as
+  secret-bearing. In a mixed-version fleet an older CLI or controller reading
+  the same database still renders those arguments in full and still computes
+  the pre-change `receipt_sha`, so upgrade every reader before relying on this.
+  Deliberately not covered. Trigger rows carry no classification and the
+  dispatch path serves them to runners verbatim, so
+  `sparkwing runs triggers get|list` and `GET /api/v1/triggers` still show
+  argument values. A run pre-allocated by a fresh trigger is listable in
+  `pending` before a worker starts it, and the controller holds no pipeline
+  schema to classify it from, so it is unredacted for that window -- which
+  includes a child retry spawned through a trigger's `retry_of`; only
+  `POST /api/v1/runs/{id}/retry` and replay inherit their source's
+  classification directly. And redaction of the reproducer is anchored on the
+  argument name, so a secret value also passed to a non-secret argument is
+  masked in logs but shown under that other name.
+- **controller:** `GET /api/v1/runs/{id}` accepts `?include=secret_values`,
+  which returns a run's real argument values instead of the redacted ones. It
+  is honored only for tokens carrying `nodes.claim` or `admin`, because cluster
+  executors fetch the arguments they run with from this endpoint; every other
+  caller, the dashboard included, keeps getting the redacted view.
 
 ## [v0.25.0] - 2026-08-11
 ### Added
@@ -106,9 +300,19 @@ code change to unlock.
   unreadable state file after the operator verifies guarded commands stopped,
   providing an explicit escape from fail-closed startup without silently
   discarding unknown lease authority.
+- **commands:** `sparkwing commands -o markdown --split-dir DIR` writes the
+  CLI reference as one page per top-level command group plus a
+  `cli-reference.md` index, pruning generated pages for groups that no longer
+  exist. `bin/gen-cli-docs.sh` and the pre-push drift gate use it.
 
 ### Docs
 
+- **cli-reference:** split into one page per command group (`cli-runs.md`,
+  `cli-pipeline.md`, ...) with `cli-reference.md` as the index. The single
+  page had grown to 155K characters, past the ~100K truncation limit of most
+  agent fetch tooling, so commands late in the alphabet were silently
+  invisible to agents reading the page; the largest per-group page is ~35K.
+  Offline: `sparkwing docs read --topic cli-<group>`.
 - **docs:** repository-wide accuracy audit. Every documentation surface was
   verified against the code and corrected where it had drifted; the largest
   fixes: the `Plan` interface signature and registration pattern in
@@ -135,6 +339,34 @@ code change to unlock.
   each `modules[]` entry's Go module path is cross-checked against that
   directory's `go.mod`. The path argument is also accepted positionally, as
   the command's own examples show it.
+- **queue:** External CPU now subtracts measured live holder process-tree usage
+  instead of reserved lease capacity. Process reuse, overlapping trees, sensor
+  loss, and macOS sampling no longer make queue headroom contradict host load.
+- **queue:** Internal nodes and barriers now retain their owning run's original
+  queue rank, so a newer run cannot overtake an older live run by submitting
+  its work first. The daemon verifies the live owner lease before applying
+  that rank; invalid or stale ownership claims keep ordinary arrival order.
+- **queue:** Start-time estimates now remain unknown when an active holder has
+  outlived its measured duration, instead of promising immediate admission
+  while capacity is still occupied.
+- **queue:** Start and clear estimates now simulate host and semaphore
+  constraints together, including atomic multi-resource admission and
+  backfill. A waiter blocked by a semaphore no longer reports the earlier
+  host-only estimate, and unknown or overflowing resource bounds stay unknown.
+- **queue telemetry:** Run listings retain concurrent node admission waits,
+  distinguish plan-level admission from node admission, and correlate terminal
+  events with the matching request. Interleaved or stale events no longer erase
+  a live wait or make a run-level queue position look like node execution.
+- **local admission:** Explicit cancellation is persisted before execution is
+  signalled, applies atomically to every member of a shared lease, survives
+  daemon restart and connection replacement, and cannot resurrect a terminal
+  run through admission or reattachment.
+- **local admission:** Guarded session inspection now retains capacity when a
+  recycled leader PID coexists with live session members, ordinary unguarded
+  state remains readable by the previous release, and disconnected
+  cancellation gets the same cooperative cleanup window as its supervisor.
+- **queue telemetry:** Semaphore constraints now appear in the blocking reason
+  instead of leaving a blocked waiter with only its host-capacity explanation.
 - **queue:** External CPU now subtracts measured live holder process-tree usage
   instead of reserved lease capacity. Process reuse, overlapping trees, sensor
   loss, and macOS sampling no longer make queue headroom contradict host load.

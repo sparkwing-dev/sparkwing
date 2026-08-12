@@ -78,7 +78,9 @@ func RunNodeOnce(
 	}
 	backends := RemoteBackends(stateClient, logsBackend, art, httpClient, store.DefaultConcurrencyLease)
 
-	run, err := stateClient.GetRun(ctx, runID)
+	// Execution read: run.Args seeds the masker below and is handed to
+	// reg.Invoke and the runner.Request. The plain GetRun redacts.
+	run, err := stateClient.GetRunForExecution(ctx, runID)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("get run %s: %w", runID, err)
 	}
@@ -109,10 +111,9 @@ func RunNodeOnce(
 		StartedAt: run.StartedAt,
 	}
 	sparkwing.SetGit(rc.Git)
-	masker := secrets.NewMasker()
-	for _, v := range reg.SecretValues(run.Args) {
-		masker.Register(v)
-	}
+	// run.Args is both the seed and the Invoke input: a pod has no
+	// sparkwing.yaml to merge, so the stored row is the whole arg set.
+	masker := maskerForInvokeArgs(reg, run.Args)
 	plan, err := reg.Invoke(ctx, run.Args, rc)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("build plan: %w", err)
@@ -137,7 +138,11 @@ func RunNodeOnce(
 	})
 	ctx = sparkwing.WithSecretResolver(ctx,
 		secrets.NewCached(httpSource, masker).AsResolver())
-	_ = masker
+	// The masker has to reach the node log wrapper the same way it does
+	// on the local path (RunLocal, replay): through the context. Without
+	// this the cluster/pod path resolves secrets into a masker nothing
+	// ever reads, and node logs persist raw secret values.
+	ctx = secrets.WithMasker(ctx, masker)
 
 	if in := plan.Inputs(); in != nil {
 		ctx = sparkwingruntime.WithInputs(ctx, in)
@@ -217,6 +222,7 @@ func RunNodeOnce(
 					attrs["error"] = errMsg
 				}
 				payload, _ := json.Marshal(attrs)
+				payload = maskEventPayload(masker, payload)
 				if evErr := stateClient.AppendEvent(context.WithoutCancel(innerCtx), runID, currentNode,
 					"child_run_finish", payload); evErr != nil {
 					logger.Warn("child_run_finish audit event append failed",
@@ -232,6 +238,7 @@ func RunNodeOnce(
 					"args":            req.Args,
 					"timeout_seconds": int64(req.Timeout.Seconds()),
 				})
+				payload = maskEventPayload(masker, payload)
 				if evErr := stateClient.AppendEvent(innerCtx, runID, currentNode,
 					"child_run_start", payload); evErr != nil {
 					logger.Warn("child_run_start audit event append failed",

@@ -200,7 +200,21 @@ func (p *PrePush) run(ctx context.Context) error {
 	}
 
 	if _, err := sparkwing.Bash(ctx,
-		`cd "$ROOT" && go run ./cmd/sparkwing commands -o markdown | diff -u docs/cli-reference.md -`,
+		`cd "$ROOT" &&
+		TMP="$(mktemp -d)" &&
+		trap 'rm -rf "$TMP"' EXIT &&
+		go run ./cmd/sparkwing commands -o markdown --split-dir "$TMP" >/dev/null &&
+		fail=0 &&
+		for f in "$TMP"/*.md; do
+			diff -u "docs/$(basename "$f")" "$f" || fail=1
+		done;
+		for f in docs/cli-*.md; do
+			if [ ! -e "$TMP/$(basename "$f")" ] && head -n1 "$f" | grep -q "GENERATED from the CLI command registry"; then
+				echo "stale generated page: $f"
+				fail=1
+			fi
+		done;
+		exit "$fail"`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		failures = append(failures, "cli-reference: stale -- run `bash bin/gen-cli-docs.sh`")
 	} else {

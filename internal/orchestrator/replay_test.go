@@ -199,3 +199,98 @@ func TestRunReplayNode_NotAReplayRun(t *testing.T) {
 		t.Fatalf("expected failure on non-replay run")
 	}
 }
+
+// A replay row is minted straight from the source run rather than
+// through buildRunInvocation, so it must inherit the source's
+// secret-arg classification. Without it the replay renders the same
+// plaintext args the original redacts -- and permanently, since no
+// later write fills the classification in.
+func TestMintReplayRun_InheritsSecretArgClassification(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+
+	const secret = "s3cr3t-token-value"
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "orig-1", Pipeline: "deploy", Status: "failed",
+		StartedAt: time.Now(),
+		Args:      map[string]string{"token": secret, "env": "prod"},
+		Invocation: map[string]any{
+			"args":                        map[string]string{"token": secret, "env": "prod"},
+			store.InvocationSecretArgsKey: []string{"token"},
+		},
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "orig-1", NodeID: "build", Status: "done"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if err := st.WriteNodeDispatch(ctx, store.NodeDispatch{
+		RunID: "orig-1", NodeID: "build", Seq: 0,
+		InputEnvelope: []byte(`{"version":1,"type_name":"Build"}`),
+	}); err != nil {
+		t.Fatalf("WriteNodeDispatch: %v", err)
+	}
+
+	newRunID, err := MintReplayRun(ctx, st, "orig-1", "build")
+	if err != nil {
+		t.Fatalf("MintReplayRun: %v", err)
+	}
+	replay, err := st.GetRun(ctx, newRunID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if got := replay.SecretArgNames(); len(got) != 1 || got[0] != "token" {
+		t.Fatalf("replay classification = %v, want [token]", got)
+	}
+	if replay.RedactedForDisplay().Args["token"] != store.RedactedArgValue {
+		t.Errorf("replay run renders the secret arg in the clear")
+	}
+	// Replay still re-executes: the row keeps plaintext for reg.Invoke.
+	if replay.Args["token"] != secret {
+		t.Errorf("replay run args[token] = %q, want plaintext", replay.Args["token"])
+	}
+}
+
+// A source run with no classification must not sprout an invocation
+// on its replay -- that would change the shape of grandfathered rows.
+func TestMintReplayRun_UnclassifiedSourceStaysUnclassified(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "state.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "orig-1", Pipeline: "deploy", Status: "failed",
+		StartedAt: time.Now(), Args: map[string]string{"env": "prod"},
+	}); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "orig-1", NodeID: "build", Status: "done"}); err != nil {
+		t.Fatalf("CreateNode: %v", err)
+	}
+	if err := st.WriteNodeDispatch(ctx, store.NodeDispatch{
+		RunID: "orig-1", NodeID: "build", Seq: 0,
+		InputEnvelope: []byte(`{"version":1,"type_name":"Build"}`),
+	}); err != nil {
+		t.Fatalf("WriteNodeDispatch: %v", err)
+	}
+	newRunID, err := MintReplayRun(ctx, st, "orig-1", "build")
+	if err != nil {
+		t.Fatalf("MintReplayRun: %v", err)
+	}
+	replay, err := st.GetRun(ctx, newRunID)
+	if err != nil {
+		t.Fatalf("GetRun: %v", err)
+	}
+	if replay.Invocation != nil {
+		t.Errorf("unclassified source produced an invocation: %v", replay.Invocation)
+	}
+}

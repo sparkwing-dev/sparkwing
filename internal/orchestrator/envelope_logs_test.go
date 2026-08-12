@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -35,6 +36,45 @@ func TestEnvelopeLog_PersistsRunStartFinish(t *testing.T) {
 		if !bytes.Contains(data, []byte(`"event":"`+evt+`"`)) {
 			t.Errorf("envelope missing event %q\n%s", evt, data)
 		}
+	}
+}
+
+// TestEnvelopeLog_RunStartCarriesLogPath pins the agent-facing
+// contract: the run_start record names the directory it is itself
+// being written into, so a caller holding the stream (or just the run
+// id) can read the logs off disk without scraping them.
+func TestEnvelopeLog_RunStartCarriesLogPath(t *testing.T) {
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p,
+		orchestrator.Options{Pipeline: "orch-ok"})
+	if err != nil {
+		t.Fatalf("RunLocal: %v", err)
+	}
+
+	data, err := os.ReadFile(p.EnvelopeLog(res.RunID))
+	if err != nil {
+		t.Fatalf("read envelope: %v", err)
+	}
+	var runStart map[string]any
+	for _, line := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+		var rec map[string]any
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			continue
+		}
+		if evt, _ := rec["event"].(string); evt == "run_start" {
+			runStart, _ = rec["attrs"].(map[string]any)
+			break
+		}
+	}
+	if runStart == nil {
+		t.Fatalf("no run_start record with attrs in:\n%s", data)
+	}
+	want := p.RunDir(res.RunID)
+	if runStart["log_path"] != want {
+		t.Errorf("run_start log_path = %v, want %q", runStart["log_path"], want)
+	}
+	if filepath.Dir(p.EnvelopeLog(res.RunID)) != want {
+		t.Errorf("log_path %q does not contain the envelope log", want)
 	}
 }
 

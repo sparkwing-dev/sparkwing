@@ -220,6 +220,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 	close(d.ready)
 	d.cfg.logf("elected; serving %s (version %q)", d.layout.sock, d.cfg.Version)
 
+	d.startDiagnostics(ctx.Done())
+
 	go d.watchContext(ctx)
 	go d.sampleLoop(ctx)
 	go d.stallLoop(ctx)

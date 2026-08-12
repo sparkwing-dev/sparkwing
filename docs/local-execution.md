@@ -101,6 +101,16 @@ logs URL, node-status updates from the controller otherwise. Pass
 `--detach` to return as soon as the trigger is registered without
 following.
 
+A follow exits on the run's outcome, the same way a local `sparkwing run`
+does: 0 when the run succeeded, 1 when it failed or was cancelled, with the
+run's status block and failing-node errors printed to stderr so a
+`> run.log` redirect still shows why. If the follow ends without a readable
+terminal status -- a dropped connection, a controller restarting mid-run --
+the command exits 3 rather than guessing an outcome, and names the run to
+re-check with `sparkwing runs status --run <id> --profile <p>`. `--detach`
+always exits 0: it reports that the trigger was queued, not how the run
+ended.
+
 ## Authorization model
 
 Sparkwing intentionally does **not** try to be a permissions boundary
@@ -409,6 +419,16 @@ the mistake is caught before it explains an unrelated failure.
 The daemon writes an operational log to `wingd/d.log` under the sparkwing
 home (`~/.sparkwing/wingd/d.log` by default) for when you want to see
 what it did.
+
+If a daemon is ever busy in a way its log does not explain -- burning CPU
+with nothing queued, or answering nothing -- send it `SIGUSR1`
+(`kill -USR1 <pid>`, POSIX only). It appends a line counting its
+connections, holders, waiters, leases, and guards, followed by a stack
+for every goroutine, to that same log. The daemon keeps running, so you
+can capture the state before deciding whether to stop it, and the dump is
+what a bug report about a stuck or spinning daemon should carry. Each
+dump adds up to 2MB to `d.log`, which is rotated only when a daemon
+starts, so ask for a few of them rather than a few hundred.
 
 ### Capping sparkwing's share of the machine
 

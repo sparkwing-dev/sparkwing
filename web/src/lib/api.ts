@@ -180,6 +180,7 @@ export interface RunInvocation {
   pipeline?: string;
   binary_source?: string; // cached | compiled | artifact-store | gitcache
   cwd?: string;
+  log_path?: string; // run log dir on the machine that executed the run
   args?: Record<string, string>;
   flags?: Record<string, unknown>;
   inputs_hash?: string;
@@ -187,6 +188,14 @@ export interface RunInvocation {
   reproducer?: string;
   trigger_env_keys?: string[];
   hints?: Record<string, string>;
+  // Names of the args the pipeline declared `secret:"true"`. The
+  // server redacts those values to *** in `args` and in `reproducer`
+  // before sending them, so the browser never receives the plaintext
+  // and the panel needs no client-side masking. Present only on runs
+  // started by a pipeline that declares at least one secret input;
+  // runs predating the field carry no classification and are rendered
+  // as-is.
+  secret_args?: string[];
 }
 
 // runDurationMs computes a wall-clock duration from a Run's

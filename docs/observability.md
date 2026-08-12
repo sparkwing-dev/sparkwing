@@ -62,6 +62,58 @@ code as top-level fields:
 Logs are not part of this payload; fetch them separately with
 `sparkwing runs logs --run <id>` or from the logs service.
 
+## Failure excerpts
+
+A node that fails while running a command records a bounded excerpt of
+that command's output -- the last 20 lines, at most 4 KiB, with resolved
+secret values redacted. The node's `error` carries it as text, led by
+the failure headline and, when output was dropped, a marker naming the
+`sparkwing runs logs` command that prints the whole thing.
+
+`sparkwing runs errors -o json` and `sparkwing runs status -o json` also
+carry the excerpt as structured fields, so a consumer does not have to
+parse the error string:
+
+```json
+{
+  "node": "build",
+  "outcome": "failed",
+  "error": "build: command failed (exit 2): go build ./...\n… earlier output omitted (see: sparkwing runs logs --run run-... --node build)\npkg/thing/file_300.go:12: undefined: Helper\nFAIL",
+  "log_excerpt": "pkg/thing/file_300.go:12: undefined: Helper\nFAIL",
+  "log_excerpt_truncated": true
+}
+```
+
+`log_excerpt` is the raw excerpt without the headline or marker;
+`log_excerpt_truncated` reports whether output was dropped. Both fields
+are **absent together** when there is nothing to excerpt -- a node that
+failed with a plain error rather than a command, and any node that did
+not fail on its own (a cancelled or upstream-failed node never gets an
+excerpt, and nothing reads its logs to invent one). The failure itself
+is always reported; only the excerpt can be missing.
+
+Excerpts travel as a `node_failure_excerpt` run event, so they read back
+identically from a local run store and from a controller.
+
+### When an excerpt cannot be read
+
+Absence normally means "this node published no excerpt". Where that
+cannot be established, the failed node carries
+`"log_excerpt_unavailable": true` instead, and never a fabricated
+excerpt. Two cases produce it:
+
+- **A run with more than ~50,000 events.** The lookup scans the run's
+  event stream and stops after 50 pages of 1,000. It also stops as soon
+  as every failed node has its excerpt, so only a run that is both
+  enormous and failing late is affected.
+- **An event stream that cannot be read** -- a controller that is down
+  or rejects the request.
+
+One case reports plain absence even though an excerpt might have
+existed: a run **mirrored to S3-backed state** (`DumpRunState`) carries
+its runs and nodes but no events, so a mirrored run reads back with no
+excerpts at all. The node's `error` still carries the excerpt as text.
+
 ## Resource usage metrics
 
 While a node runs, the runner samples the executing process in-process
@@ -122,7 +174,7 @@ The dashboard shows failure information where a run's detail is:
 
 Finished runs (and their metrics) are kept until you prune them. There
 is no automatic time-based cleanup; use `sparkwing runs prune` to delete
-runs past a threshold or by id (see [cli-reference.md](cli-reference.md)).
+runs past a threshold or by id (see [cli-runs.md](cli-runs.md)).
 
 ## OpenTelemetry
 

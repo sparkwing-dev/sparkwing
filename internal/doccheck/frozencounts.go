@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -19,13 +20,25 @@ import (
 // off this list (layer, mode, ...) because stating them is fine.
 var frozenCountRE = regexp.MustCompile(`(?i)\b(?:one|two|three|four|five|six|seven|eight|nine|ten|[0-9]+)[ -](places|ways|kinds|sources|triggers|checks|reasons|steps|stages|backends)\b`)
 
-// generatedDocs are produced by a generator, not hand-authored; their
-// wording comes from code (command descriptions, struct godoc), so the
-// frozen-count rule -- a prose-style guideline -- doesn't apply.
-var generatedDocs = map[string]bool{
-	"cli-reference.md":    true,
-	"config-reference.md": true,
+// isGeneratedDoc reports whether the doc at path is produced by a
+// generator rather than hand-authored: generated docs (cli-reference
+// and its per-group pages, config-reference) open with an HTML comment
+// whose first line starts "<!-- GENERATED". Prose-style gates don't
+// apply to them -- their wording comes from code (command descriptions,
+// struct godoc). Detecting the marker instead of hardcoding names keeps
+// the exemption correct as generators add or remove pages.
+func isGeneratedDoc(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	buf := make([]byte, len(generatedMarkerPrefix))
+	n, _ := io.ReadFull(f, buf)
+	return strings.HasPrefix(string(buf[:n]), generatedMarkerPrefix)
 }
+
+const generatedMarkerPrefix = "<!-- GENERATED"
 
 // checkFrozenCounts flags hand-written docs that snapshot the size of an
 // open set. Returns false on any hit.
@@ -38,7 +51,7 @@ func checkFrozenCounts(contentDir string) bool {
 		if strings.Contains(path, "/migrations/") || strings.Contains(path, "/proposals/") {
 			return nil
 		}
-		if generatedDocs[filepath.Base(path)] {
+		if isGeneratedDoc(path) {
 			return nil
 		}
 		data, rerr := os.ReadFile(path)

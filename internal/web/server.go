@@ -874,7 +874,7 @@ func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 		runsMeta := make(map[string]*store.Run, len(hitRuns))
 		for id := range hitRuns {
 			if run := runIndex[id]; run != nil {
-				runsMeta[id] = run
+				runsMeta[id] = store.RedactedRun(run)
 			}
 		}
 		writeJSON(w, http.StatusOK, map[string]any{

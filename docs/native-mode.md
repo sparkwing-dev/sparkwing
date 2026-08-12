@@ -11,9 +11,11 @@ No daemon, no controller pod, no queue, no cluster lifecycle commands.
 
 ## What gets written per run
 
-Run state lives in the SQLite store at `~/.sparkwing/state.db`. Per-run artifacts live under `~/.sparkwing/runs/<runID>/`: one `.log` file per node, plus `_envelope.ndjson` for run-level events (run start, plan, finish). The dashboard reads both the store and the logs.
+Run state lives in the SQLite store at `~/.sparkwing/state.db`. Per-run artifacts live under `~/.sparkwing/runs/<runID>/`: one `.log` file per node. A run you invoke yourself also gets `_envelope.ndjson` there for run-level events (run start, plan, finish); a child run dispatched locally by `sparkwing.RunAndAwait` writes only its node logs, since the envelope belongs to the invocation that owns the terminal. The dashboard reads both the store and the logs.
 
 Run IDs are timestamp-prefixed, so they sort chronologically.
+
+You do not have to assemble that path yourself. Each run records the directory as `log_path` on the `run_start` event and on the run's stored invocation, so `sparkwing runs status --run <id>` prints it (and `-o json` carries it as a top-level `log_path`). The recorded path belongs to the machine that executed the run, so a run you read back through `--profile` may name a directory that does not exist here; the text output marks those. Runs whose logs go to a controller or an object store leave the field out entirely.
 
 `SPARKWING_HOME` overrides the `~/.sparkwing` root; see [config-reference.md](config-reference.md).
 
@@ -27,7 +29,7 @@ sparkwing dashboard kill     # stop it
 
 The CLI binary ships with the dashboard embedded; nothing else needs to be installed. `start` detaches a child process, writes its PID to `$SPARKWING_HOME/dashboard.pid`, appends output to `$SPARKWING_HOME/dashboard.log`, and returns once the listener accepts connections. Re-running it drains any dashboard already on file -- stopping the running server -- and starts a fresh one in its place. It refuses only when the resident dashboard is a newer version than the CLI, telling you to run `sparkwing version update --cli` or `sparkwing dashboard kill` first.
 
-For the bind address and the other `dashboard start` flags, see [cli-reference.md](cli-reference.md).
+For the bind address and the other `dashboard start` flags, see [cli-dashboard.md](cli-dashboard.md).
 
 ## Why no daemon
 

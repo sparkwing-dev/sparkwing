@@ -53,13 +53,22 @@ func unreachable(sock string, dialErr error) error {
 // QueueState asks the daemon for its current admission picture over this
 // client's connection. It is read-only and creates no lease. Use it on a
 // dedicated connection, not one already holding a lease.
+//
+// A daemon blink during the read is retried on a fresh connection, with
+// backoff between attempts and a bounded number of them: a status read
+// nothing depends on must report a daemon it cannot reach rather than
+// keep asking.
 func (cl *Client) QueueState(ctx context.Context) (wingwire.QueueState, error) {
 	stop := cl.cancelOnDone(ctx)
 	defer stop()
+	retry := newRetry("queue state", readOnlyRetryLimit)
 	for {
 		qs, terminal, transient := cl.readQueueState()
 		if transient == nil {
 			return qs, terminal
+		}
+		if err := retry.wait(ctx, transient); err != nil {
+			return wingwire.QueueState{}, err
 		}
 		if rerr := cl.recoverConn(ctx); rerr != nil {
 			return wingwire.QueueState{}, rerr

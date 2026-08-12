@@ -2,7 +2,7 @@
 
 // SetupPanel renders "how was this run started" -- run id, pipeline,
 // trigger source, git context, and the invocation snapshot
-// (binary_source, cwd, flags, args, reproducer, hashes) the
+// (binary_source, cwd, log_path, flags, args, reproducer, hashes) the
 // orchestrator persists on the run row at CreateRun time. Mirrors
 // the CLI's `--- Setup ---` section so the dashboard surfaces the
 // same reproducibility info an operator would see in `sparkwing run release`.
@@ -339,6 +339,16 @@ export default function SetupPanel({
               findActiveKey={findActiveKey}
             >
               {inv.cwd}
+            </LabelRow>
+          )}
+          {inv.log_path && (
+            <LabelRow
+              label="log_path"
+              fieldKey="log_path"
+              findMatchedFields={findMatchedFields}
+              findActiveKey={findActiveKey}
+            >
+              {inv.log_path}
             </LabelRow>
           )}
 

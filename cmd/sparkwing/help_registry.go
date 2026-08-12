@@ -416,9 +416,12 @@ description, positional args, flags, examples, subcommands --
 from the same Command values that power --help. That is 235KB
 for the unfiltered surface, so pair it with --path unless you
 genuinely want all of it. -o plain is one path per line for
-shell consumption; -o markdown generates docs/cli-reference.md.`,
+shell consumption; -o markdown renders a reference page, and
+with --split-dir writes the docs/cli-*.md reference (one page
+per top-level command group plus a cli-reference.md index).`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | markdown | plain", Default: "pretty", Group: "Output"},
+		{Name: "split-dir", Argument: "DIR", Desc: "With -o markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages", Group: "Output"},
 		{Name: "path", Argument: "PREFIX", Desc: "Only emit commands whose Path starts with PREFIX", Group: "Filter"},
 		{Name: "include-hidden", Desc: "Also emit Hidden:true commands (default: skip)", Group: "Filter"},
 	},
@@ -1229,6 +1232,16 @@ controller. --detach skips the follow and prints the run id once
 the trigger is registered (the trigger POST itself always
 completes before the command exits, so the run is guaranteed
 queued).
+
+A follow exits on the run's outcome, matching a local run:
+0 when the run succeeded, 1 when it failed or was cancelled,
+and 3 when the follow ended without a readable terminal status
+(the run may still be in progress -- re-check it with
+'sparkwing runs status --run <id> --profile <p>'). The status
+block and failing-node errors print to stderr on either follow
+mode, so redirecting stdout still shows why a run failed.
+--detach exits 0 once the trigger is queued -- it reports
+submission, not outcome.
 
 Any flag not recognized here is forwarded to the pipeline as a
 typed Arg, e.g. 'sparkwing pipeline trigger release --profile
@@ -2302,6 +2315,15 @@ var cmdJobsStatus = Command{
 With --follow, polls until the run reaches a terminal status. Pass
 --profile NAME to read from a remote controller.
 
+Runs that wrote their logs to a filesystem also report log_path: the
+directory holding the run's per-node .log files, on the machine that
+executed the run. With -o json it is a top-level field, so an agent
+holding a run id can read the logs off disk instead of scraping them
+out of a stream. That machine may not be this one -- a cluster run
+records its own pod-local path -- so the text output marks a directory
+that is not present here; the JSON reports it as recorded. Runs whose
+logs live on a controller or in an object store omit it.
+
 Exit code contract: after rendering, 'jobs status' exits 0 only when
 status == success. Any non-success terminal status (failed, cancelled)
 exits 1; a run that is still running when the (non-follow) read
@@ -2462,7 +2484,7 @@ var cmdJobsTree = Command{
 var cmdJobsGet = Command{
 	Path:        "sparkwing runs get",
 	Synopsis:    "Emit one run's raw JSON (run + nodes)",
-	Description: `Prints a combined {run, nodes} JSON blob to stdout. Consumed by agents and scripts that need the full store shape rather than the summary 'status' command renders.`,
+	Description: `Prints a combined {run, nodes} JSON blob to stdout, plus a top-level log_path when the run wrote its logs to a filesystem (the directory on the machine that executed it). Consumed by agents and scripts that need the full store shape rather than the summary 'status' command renders.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name; omit for local-only", Group: "System"},

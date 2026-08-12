@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
 	"sort"
@@ -327,7 +328,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	sparkwing.SetGit(gitOpt)
 
 	owner, repo := sparkwing.GithubOwnerRepo(gitOpt.Repo)
-	invocation := buildRunInvocation(opts, runID)
+	invocation := buildRunInvocation(opts, runID, localRunLogDir(backends.Logs, runID), reg.SecretArgNames())
 	if err := backends.State.CreateRun(ctx, store.Run{
 		ID:            runID,
 		Pipeline:      opts.Pipeline,
@@ -353,29 +354,16 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	defer cancelHeartbeat()
 	go runRunHeartbeatLoop(hbCtx, 30*time.Second, backends.State, runID, wedgeBudget)
 
-	masker := secrets.NewMasker()
-	for _, v := range reg.SecretValues(opts.Args) {
-		masker.Register(v)
-	}
-
-	invokeArgs := opts.Args
-	pipelineArgs := map[string]string(nil)
-	if opts.PipelineYAML != nil {
-		pipelineArgs = opts.PipelineYAML.Args
-	}
-	if len(opts.DefaultArgs) > 0 || len(pipelineArgs) > 0 {
-		merged := make(map[string]string, len(opts.DefaultArgs)+len(pipelineArgs)+len(invokeArgs))
-		for k, v := range opts.DefaultArgs {
-			merged[k] = v
-		}
-		for k, v := range pipelineArgs {
-			merged[k] = v
-		}
-		for k, v := range invokeArgs {
-			merged[k] = v
-		}
-		invokeArgs = merged
-	}
+	// Seed the masker from the args the run will actually execute with,
+	// not from the caller's. A `secret:"true"` input whose value comes
+	// from sparkwing.yaml never appears in opts.Args, so seeding from
+	// those left every yaml-supplied secret unregistered -- and an
+	// unregistered value is a value the node log, the persisted
+	// annotations and summaries, the node failure excerpt, and the
+	// child-run event payloads all write in the clear. invokeArgs is
+	// exactly what reg.Invoke is handed below; the two must not diverge.
+	invokeArgs := mergeInvokeArgs(opts)
+	masker := maskerForInvokeArgs(reg, invokeArgs)
 
 	var profName string
 	var profIsLocal bool
@@ -995,7 +983,8 @@ func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 // only the names are surfaced so secret-bearing variables don't leak
 // into the log/receipt.
 // buildRunInvocation snapshots how this run was started: run-id,
-// pipeline, args, flags, binary_source, cwd, hashes, hints, etc.
+// pipeline, args, flags, binary_source, cwd, log_path, hashes, hints,
+// etc.
 // The same map flows into BOTH the store.Run.Invocation column (so
 // runs status / receipt / dashboards can answer "how was this
 // started") and run_start.attrs (so the live JSONL stream agents
@@ -1016,7 +1005,73 @@ func parentTriggerRepoDir() string {
 	return ""
 }
 
-func buildRunInvocation(opts Options, runID string) map[string]any {
+// maskerForInvokeArgs builds a run's log masker from the pipeline's
+// `secret:"true"` inputs resolved against invokeArgs.
+//
+// invokeArgs must be the exact map the caller then hands to
+// reg.Invoke. That is the whole contract, and it is why this is a
+// function rather than three inlined loops: the local path seeds from
+// a merge of the CLI flags and both sparkwing.yaml layers, while the
+// pod and replay paths seed from the stored run row, and the one thing
+// every path must not do is seed from a different set of args than it
+// executes with. A value the pipeline receives but the masker never
+// saw is a value that reaches node logs, annotations, summaries, and
+// failure excerpts in the clear -- which is exactly what a
+// yaml-supplied secret used to do here.
+func maskerForInvokeArgs(reg *sparkwing.Registration, invokeArgs map[string]string) *secrets.Masker {
+	masker := secrets.NewMasker()
+	for _, v := range reg.SecretValues(invokeArgs) {
+		masker.Register(v)
+	}
+	return masker
+}
+
+// mergeInvokeArgs layers the argument sources into the single map
+// reg.Invoke is handed: the project's `defaults.args` block at the
+// bottom, the pipeline entry's `args:` block above it, and the caller's
+// explicit args (a CLI flag, a trigger payload, a retry's rehydrated
+// row) on top. Returns opts.Args itself when neither yaml layer applies,
+// so the common case allocates nothing.
+//
+// The run row and its invocation snapshot keep recording opts.Args
+// rather than this merge, on purpose: the reproducer is the command a
+// human typed, and the yaml layers are re-read from the checkout that
+// runs, so a retry picks up the project's current defaults instead of a
+// months-old copy of them.
+//
+// Every value-derived protection has to key off the merged set anyway.
+// What the pipeline receives is what can reach a log line, and where a
+// value came from is not something the redaction machinery can see.
+func mergeInvokeArgs(opts Options) map[string]string {
+	var pipelineArgs map[string]string
+	if opts.PipelineYAML != nil {
+		pipelineArgs = opts.PipelineYAML.Args
+	}
+	if len(opts.DefaultArgs) == 0 && len(pipelineArgs) == 0 {
+		return opts.Args
+	}
+	merged := make(map[string]string, len(opts.DefaultArgs)+len(pipelineArgs)+len(opts.Args))
+	maps.Copy(merged, opts.DefaultArgs)
+	maps.Copy(merged, pipelineArgs)
+	maps.Copy(merged, opts.Args)
+	return merged
+}
+
+// logDir is the run's log directory on the machine executing it, as
+// reported by the log backend that will write it (see
+// localRunLogDir). It is recorded as log_path so a caller holding only
+// the run id can read the logs straight off disk instead of scraping
+// them out of the stream. It is the executor's path, not the reader's:
+// a cluster pod with no logs backend records its own pod-local
+// directory, and a laptop later reading that run through --profile
+// gets that string verbatim. Runs whose logs live on a controller or
+// in an object store pass "" and carry no log_path at all -- a missing
+// field is a truthful "not here", a fabricated one sends readers to a
+// directory that holds nothing.
+//
+// secretArgs is the pipeline's declared secret arg names; see the
+// classification comment where it is recorded below.
+func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string) map[string]any {
 	inv := map[string]any{
 		"run_id":   runID,
 		"pipeline": opts.Pipeline,
@@ -1024,6 +1079,9 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 			"follow_logs": "sparkwing runs logs --run " + runID + " --follow",
 			"status":      "sparkwing runs status --run " + runID,
 		},
+	}
+	if logDir != "" {
+		inv["log_path"] = logDir
 	}
 	if src := os.Getenv("SPARKWING_BINARY_SOURCE"); src != "" {
 		inv["binary_source"] = src
@@ -1040,6 +1098,25 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 		}
 		inv["args"] = args
 		inv["inputs_hash"] = hashCanonicalJSON(opts.Args)
+	}
+	// Record which args the pipeline declared secret. The values stay
+	// plaintext here on purpose -- the masker derives its redaction set
+	// from them and retry re-executes with them -- so this list is what
+	// every read path uses to redact at render time. Written whenever
+	// the pipeline declares any secret input, even if this run supplied
+	// none of them, so a row's classification is unambiguous.
+	//
+	// CreateRun's pending upsert replaces invocation_json wholesale, so
+	// this is authoritative over any classification a retry or replay
+	// inherited onto the pre-allocated row. That cuts both ways: a
+	// worker whose registration of this pipeline has dropped the
+	// `secret:"true"` tag erases the inherited classification and the
+	// row starts rendering in the clear. Accepted rather than merged,
+	// because a merge would let a stale worker pin a classification the
+	// pipeline no longer declares; the registration that actually ran
+	// the pipeline is the one that knows what its inputs are.
+	if len(secretArgs) > 0 {
+		inv[store.InvocationSecretArgsKey] = secretArgs
 	}
 	if opts.RetryRepoDir != "" || opts.RetryRepoIdentity != "" || opts.RetryRevision != "" || opts.RetryPlanHash != "" {
 		inv["retry_provenance"] = map[string]string{
@@ -1071,9 +1148,17 @@ func buildRunInvocation(opts Options, runID string) map[string]any {
 }
 
 // emitRunStart sends a run_start record carrying the precomputed
-// invocation snapshot. Caller passes the same map that was stored
-// on store.Run.Invocation so the live stream and the persisted row
-// agree byte-for-byte.
+// invocation snapshot. Caller passes the same map that was stored on
+// store.Run.Invocation, so the live stream and the persisted row agree
+// on every field except the secret-declared args and the reproducer's
+// copy of them, which are redacted here.
+//
+// The envelope is a render surface, not a re-execution input: nothing
+// reconstructs a run from run_start.attrs (retry reads store.Run.Args),
+// and the record lands in the JSONL log an operator tails, `sparkwing
+// runs logs` replays, and the pretty renderer's Setup block prints. The
+// masker cannot cover it -- it rewrites rec.Msg only, and run_start
+// carries its payload in Attrs.
 func emitRunStart(delegate sparkwing.Logger, invocation map[string]any) {
 	if delegate == nil {
 		return
@@ -1082,7 +1167,7 @@ func emitRunStart(delegate sparkwing.Logger, invocation map[string]any) {
 		TS:    time.Now(),
 		Level: "info",
 		Event: "run_start",
-		Attrs: invocation,
+		Attrs: store.RedactInvocation(invocation),
 	})
 }
 
@@ -1635,6 +1720,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				attrs["error"] = errMsg
 			}
 			payload, _ := json.Marshal(attrs)
+			payload = maskEventPayload(s.masker, payload)
 			_ = s.backends.State.AppendEvent(context.WithoutCancel(ctx), s.runID, currentNode, "child_run_finish", payload)
 		}
 
@@ -1646,6 +1732,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 				"args":            req.Args,
 				"timeout_seconds": int64(req.Timeout.Seconds()),
 			})
+			payload = maskEventPayload(s.masker, payload)
 			if ev := s.backends.State.AppendEvent(ctx, s.runID, currentNode,
 				"child_run_start", payload); ev != nil {
 				sparkwing.Warn(ctx, "child_run_start audit event append failed: %v", ev)
@@ -2797,8 +2884,10 @@ func scaledBackoff(initial time.Duration, attempt int) time.Duration {
 // markFailed finalizes a node whose dispatch machinery errored
 // (Run was never invoked).
 func (s *dispatchState) markFailed(nodeID string, reason error) {
-	_ = s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Failed), reason.Error(), nil)
-	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_failed", []byte(reason.Error()))
+	text := boundedFailureText(s.ctx, s.runID, nodeID, reason)
+	_ = s.backends.State.FinishNode(s.ctx, s.runID, nodeID, string(sparkwing.Failed), text, nil)
+	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_failed", []byte(text))
+	appendFailureExcerptEvent(s.ctx, s.backends.State, s.runID, nodeID, reason)
 	s.setOutcome(nodeID, sparkwing.Failed)
 }
 

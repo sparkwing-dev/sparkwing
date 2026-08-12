@@ -21,6 +21,7 @@ func ListRunsHandler(b backend.Backend) http.HandlerFunc {
 			writeErr(w, http.StatusInternalServerError, err)
 			return
 		}
+		runs = store.RedactedRuns(runs)
 		if runs == nil {
 			runs = []*store.Run{}
 		}
@@ -58,10 +59,10 @@ func GetRunHandler(b backend.Backend) http.HandlerFunc {
 					n.Deps = []string{}
 				}
 			}
-			writeJSON(w, http.StatusOK, map[string]any{"run": run, "nodes": nodes})
+			writeJSON(w, http.StatusOK, map[string]any{"run": store.RedactedRun(run), "nodes": nodes})
 			return
 		}
-		writeJSON(w, http.StatusOK, run)
+		writeJSON(w, http.StatusOK, store.RedactedRun(run))
 	}
 }
 

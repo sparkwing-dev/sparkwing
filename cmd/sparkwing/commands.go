@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -160,6 +161,7 @@ func runCommands(args []string) error {
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json | markdown | plain")
 	includeHidden := fs.Bool("include-hidden", false, "also emit Hidden:true commands (default: skip)")
 	pathPrefix := fs.String("path", "", "only emit commands whose Path starts with this prefix")
+	splitDir := fs.String("split-dir", "", "with -o markdown: write one page per top-level command group into this directory")
 	if err := parseAndCheck(cmdCommands, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -168,6 +170,16 @@ func runCommands(args []string) error {
 	}
 	if fs.NArg() > 0 {
 		return fmt.Errorf("commands: unexpected positional %q", fs.Arg(0))
+	}
+	if *splitDir != "" {
+		if o := strings.ToLower(output); o != "markdown" && o != "md" {
+			return fmt.Errorf("commands: --split-dir requires -o markdown")
+		}
+		// The split writer prunes generated pages for groups it did not
+		// render, so a filtered surface would delete real pages.
+		if *pathPrefix != "" {
+			return fmt.Errorf("commands: --split-dir writes the full reference and conflicts with --path")
+		}
 	}
 
 	sorted := make([]*Command, len(allCommands))
@@ -191,6 +203,9 @@ func runCommands(args []string) error {
 		enc.SetIndent("", "  ")
 		return enc.Encode(picked)
 	case "markdown", "md":
+		if *splitDir != "" {
+			return writeSplitMarkdown(*splitDir, picked)
+		}
 		fmt.Print(renderCommandsMarkdown(picked))
 		return nil
 	case "plain":
@@ -231,14 +246,31 @@ func runCommands(args []string) error {
 // drift from the binary.
 func renderCommandsMarkdown(cmds []CommandJSON) string {
 	var b strings.Builder
-	b.WriteString("<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->\n")
-	b.WriteString("<!-- markdownlint-disable MD004 MD007 MD030 MD032 -->\n")
+	b.WriteString(generatedPageMarker)
 	b.WriteString("# CLI reference\n\n")
 	b.WriteString("Complete listing of every `sparkwing` command, flag, and argument, " +
 		"generated from the CLI's own command registry. For the conceptual " +
 		"overview -- which binaries exist, the flag-naming rule, and what to " +
 		"reach for when -- see [cli.md](cli.md).\n\n")
 	for _, c := range cmds {
+		writeCommandSection(&b, c, true)
+	}
+	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// generatedPageMarker opens every generated reference page. Its first
+// line doubles as the machine-readable "generated, not hand-authored"
+// signal: doccheck skips prose-style gates on pages that start with it,
+// and the split writer only prunes stale cli-*.md pages that carry it.
+const generatedPageMarker = "<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->\n" +
+	"<!-- markdownlint-disable MD004 MD007 MD030 MD032 -->\n"
+
+// writeCommandSection renders one command's reference section (## Path
+// through Examples). withSubcommands is false on the split index page,
+// where the linked "Command groups" list replaces the root command's
+// subcommand listing.
+func writeCommandSection(b *strings.Builder, c CommandJSON, withSubcommands bool) {
+	{
 		b.WriteString("## `" + c.Path + "`\n\n")
 		if s := strings.TrimSpace(c.Synopsis); s != "" {
 			b.WriteString(s + "\n\n")
@@ -246,7 +278,7 @@ func renderCommandsMarkdown(cmds []CommandJSON) string {
 		if d := strings.TrimSpace(c.Description); d != "" {
 			b.WriteString(descBlock(d) + "\n\n")
 		}
-		if len(c.Subcommands) > 0 {
+		if withSubcommands && len(c.Subcommands) > 0 {
 			b.WriteString("### Subcommands\n\n")
 			for _, s := range c.Subcommands {
 				b.WriteString("- `" + s.Name + "` -- " + cell(s.Synopsis) + "\n")
@@ -304,7 +336,137 @@ func renderCommandsMarkdown(cmds []CommandJSON) string {
 			b.WriteString("```\n\n")
 		}
 	}
-	return strings.TrimRight(b.String(), "\n") + "\n"
+}
+
+// splitCommandsMarkdown renders the reference as one page per top-level
+// command group plus a cli-reference.md index. The single-page render
+// hit 155K characters, past the ~100K truncation limit of most agent
+// fetch tooling -- everything alphabetically late was silently invisible.
+// Per-group pages keep the largest group around 35K and let an agent
+// fetch only the group it cares about.
+func splitCommandsMarkdown(cmds []CommandJSON) (map[string]string, error) {
+	var root *CommandJSON
+	var groupOrder []string
+	groups := map[string][]CommandJSON{}
+	for _, c := range cmds {
+		fields := strings.Fields(c.Path)
+		if len(fields) == 1 {
+			c := c
+			root = &c
+			continue
+		}
+		g := fields[1]
+		if g == "reference" {
+			return nil, fmt.Errorf("command group %q collides with the cli-reference.md index page", g)
+		}
+		if _, ok := groups[g]; !ok {
+			groupOrder = append(groupOrder, g)
+		}
+		groups[g] = append(groups[g], c)
+	}
+	sort.Strings(groupOrder)
+
+	// A group's one-line summary is the synopsis of its root command
+	// (path "sparkwing <group>"), which every group has.
+	synopsis := func(g string) string {
+		for _, c := range groups[g] {
+			if c.Path == "sparkwing "+g {
+				return c.Synopsis
+			}
+		}
+		return ""
+	}
+
+	files := make(map[string]string, len(groups)+1)
+
+	var idx strings.Builder
+	idx.WriteString(generatedPageMarker)
+	idx.WriteString("# CLI reference\n\n")
+	idx.WriteString("Every `sparkwing` command, flag, and argument, generated from the " +
+		"CLI's own command registry and split into one page per top-level " +
+		"command group. For the conceptual overview -- which binaries exist, " +
+		"the flag-naming rule, and what to reach for when -- see " +
+		"[cli.md](cli.md).\n\n")
+	idx.WriteString("## Command groups\n\n")
+	for _, g := range groupOrder {
+		line := "- [`sparkwing " + g + "`](cli-" + g + ".md)"
+		if s := cell(synopsis(g)); s != "" {
+			line += " -- " + s
+		}
+		idx.WriteString(line + "\n")
+	}
+	idx.WriteString("\n")
+	if root != nil {
+		writeCommandSection(&idx, *root, false)
+	}
+	files["cli-reference.md"] = strings.TrimRight(idx.String(), "\n") + "\n"
+
+	for _, g := range groupOrder {
+		var b strings.Builder
+		b.WriteString(generatedPageMarker)
+		b.WriteString("# CLI reference: sparkwing " + g + "\n\n")
+		b.WriteString("Every `sparkwing " + g + "` command, flag, and argument, " +
+			"generated from the CLI's own command registry. All command groups " +
+			"are indexed in [cli-reference.md](cli-reference.md).\n\n")
+		for _, c := range groups[g] {
+			writeCommandSection(&b, c, true)
+		}
+		files["cli-"+g+".md"] = strings.TrimRight(b.String(), "\n") + "\n"
+	}
+	return files, nil
+}
+
+// writeSplitMarkdown writes the split reference into dir, skipping
+// byte-identical pages, and prunes cli-*.md pages a previous run
+// generated for groups that no longer exist. Only pages opening with
+// the generated marker are ever pruned, so a hand-authored page whose
+// name happens to match cli-*.md survives.
+func writeSplitMarkdown(dir string, cmds []CommandJSON) error {
+	files, err := splitCommandsMarkdown(cmds)
+	if err != nil {
+		return err
+	}
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	var wrote, unchanged, removed int
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if prev, rerr := os.ReadFile(path); rerr == nil && string(prev) == files[name] {
+			unchanged++
+			continue
+		}
+		if err := os.WriteFile(path, []byte(files[name]), 0o644); err != nil {
+			return fmt.Errorf("commands: %w", err)
+		}
+		wrote++
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("commands: %w", err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "cli-") || !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		if _, ok := files[name]; ok {
+			continue
+		}
+		data, rerr := os.ReadFile(filepath.Join(dir, name))
+		if rerr != nil || !strings.HasPrefix(string(data), "<!-- GENERATED from the CLI command registry") {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			return fmt.Errorf("commands: %w", err)
+		}
+		fmt.Printf("removed stale generated page %s\n", filepath.Join(dir, name))
+		removed++
+	}
+	fmt.Printf("cli reference: wrote %d, unchanged %d, removed %d page(s) in %s\n", wrote, unchanged, removed, dir)
+	return nil
 }
 
 // descBlock makes a multi-line command description safe to emit as a

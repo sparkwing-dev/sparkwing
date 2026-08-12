@@ -53,7 +53,7 @@ func TestSectionBodyIncludesItsHeading(t *testing.T) {
 // opening fence and strands the content under a filename. This is how
 // "pull request triggers" came to render as a bare ```yaml.
 func TestFencedCommentsAreNotHeadings(t *testing.T) {
-	for _, slug := range []string{"hooks", "pipelines", "getting-started", "cli-reference"} {
+	for _, slug := range []string{"hooks", "pipelines", "getting-started", "cli-reference", "cli-runs"} {
 		t.Run(slug, func(t *testing.T) {
 			secs, err := docs.Sections(slug)
 			if err != nil {
@@ -249,11 +249,12 @@ func TestSingleCharacterTokensAreIgnored(t *testing.T) {
 	}
 }
 
-// A heading that repeats across a doc identifies nothing. The generated
-// CLI reference has one "Examples" section per verb, so a result list of
-// them is unreadable without saying which verb each belongs to.
+// A heading that repeats across a doc identifies nothing. A generated
+// CLI reference group page has one "Examples" section per verb, so a
+// result list of them is unreadable without saying which verb each
+// belongs to.
 func TestRepeatedHeadingsAreDisambiguatedByBreadcrumb(t *testing.T) {
-	secs, err := docs.Sections("cli-reference")
+	secs, err := docs.Sections("cli-runs")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +267,7 @@ func TestRepeatedHeadingsAreDisambiguatedByBreadcrumb(t *testing.T) {
 		if s.Breadcrumb == "" {
 			t.Errorf("an %q section at line %d carries no breadcrumb", s.Heading, s.StartLine)
 		}
-		if strings.Contains(s.Breadcrumb, "CLI reference") {
+		if strings.Contains(s.Breadcrumb, "CLI reference:") {
 			t.Errorf("breadcrumb %q repeats the doc title, which the slug already carries", s.Breadcrumb)
 		}
 	}

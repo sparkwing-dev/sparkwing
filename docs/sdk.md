@@ -887,9 +887,70 @@ tool definitions.
 `default:"value"`        // Default when flag is not provided
 `required:"true"`        // Errors when missing (mutex with default)
 `enum:"a,b,c"`           // Allowed values; requires default-or-required
-`secret:"true"`          // Mask in logs and dashboard
+`secret:"true"`          // Redact in logs, run views, receipts, and dashboard
 `flag:",extra"`          // Catch-all for unknown flags; map[string]string only
 ```
+
+### What `secret:"true"` covers
+
+A secret-marked input is redacted to `***` on every read surface: the
+`run_start` setup block `sparkwing run` prints, `runs list`, `runs get`,
+`runs status`, `runs find`, `runs tree`, `runs wait`, `runs receipt`
+(including the `rerun` reproducer command), the controller's run API,
+and the dashboard's Setup panel. Node log bodies are masked separately
+by the run's masker, which replaces the value anywhere it appears in
+emitted text.
+
+Redaction is applied when a run is read, not when it is written. The
+run row keeps the plaintext argument, because the masker derives its
+redaction set from it and retrying or replaying a run re-executes with
+it. Treat the state database, its backups, and the `state.ndjson` run
+dumps as holding the value in the clear, and protect them accordingly.
+
+Limits worth knowing:
+
+- A `flag:",extra"` bag is never redacted -- its keys are arbitrary and
+  carry no per-key opt-in.
+- Runs recorded before a pipeline declared the input secret render as
+  they always did. The classification is stamped on the run at start,
+  and there is no schema to reclassify an old row from.
+- A value that arrives from `sparkwing.yaml` -- the project's
+  `defaults.args` block or a pipeline entry's `args:` block -- is masked
+  in logs but does not appear on the run row at all, redacted or
+  otherwise. The row records the arguments the caller passed, and the
+  yaml layers are re-read from the checkout each run, so a retry picks
+  up the project's current value rather than a copy of the old one.
+- Trigger rows are not redacted. `sparkwing runs triggers get`,
+  `sparkwing runs triggers list`, and `GET /api/v1/triggers` show
+  argument values, because the same endpoint hands them to the runner
+  claiming the work.
+- A run pre-allocated by a fresh trigger shows its arguments while it
+  sits in `pending`, until the worker that starts it stamps the
+  classification on. Retries and replays inherit their source run's
+  classification and are covered for that window.
+- Redaction of the `rerun` reproducer is anchored on the argument name,
+  not the value. Pass the same value to a non-secret argument as well
+  and it is masked in logs -- where masking is value-anchored -- but
+  shown under that other argument's name.
+- `inputs_hash` is computed over the plaintext arguments and is shown
+  unredacted. For a low-entropy secret it is a brute-force oracle to
+  anyone who can read the run, so a receipt for a run with secret
+  arguments is not safe to hand to a party you would not give the
+  secret to.
+- Audit events are masked when they are written, not when they are
+  read. Events recorded before this behavior existed, and any future
+  event type that carries arguments without going through the masker,
+  are served as-is by `GET /api/v1/runs/{id}/events` and the dashboard
+  SSE stream.
+- Dispatch envelopes are masked only when a masker is present on the
+  context. A dispatch written outside a run's execution context is
+  stored as-is.
+
+Cluster executors are the one caller that needs the real values: a pod
+fetches the arguments it runs with from `GET /api/v1/runs/{id}`. They
+pass `?include=secret_values`, which the controller honors only for
+tokens carrying `nodes.claim` or `admin`. A token with just `runs.read`
+gets the redacted view whether or not it asks.
 
 Supported field types: `string`, `bool`, `int`, `int64`, `float64`,
 `time.Duration`, `[]string` (comma-separated on the wire), and

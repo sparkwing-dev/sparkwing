@@ -42,16 +42,30 @@ type Lease struct {
 func (cl *Client) Acquire(ctx context.Context, req wingwire.AdmissionRequest, onQueued func(wingwire.Queued)) (*Lease, error) {
 	stop := cl.cancelOnDone(ctx)
 	defer stop()
+	retry := newRetry("acquire", 0)
+	// safety: a queue position pushed by the daemon is proof this exchange is working, so it returns the pacing to its base the way a delivered frame does for a guard watch; without it a long queue wait inherits the backoff an earlier blink left behind.
+	progressed := func(q wingwire.Queued) {
+		retry.reset()
+		if onQueued != nil {
+			onQueued(q)
+		}
+	}
 	for {
 		if err := cl.write(&req); err != nil {
+			if werr := retry.wait(ctx, err); werr != nil {
+				return nil, werr
+			}
 			if rerr := cl.recoverConn(ctx); rerr != nil {
 				return nil, rerr
 			}
 			continue
 		}
-		lease, terminal, transient := cl.readGrant(req, onQueued)
+		lease, terminal, transient := cl.readGrant(req, progressed)
 		if transient == nil {
 			return lease, terminal
+		}
+		if err := retry.wait(ctx, transient); err != nil {
+			return nil, err
 		}
 		if rerr := cl.recoverConn(ctx); rerr != nil {
 			return nil, rerr
@@ -96,10 +110,14 @@ func (cl *Client) readGrant(req wingwire.AdmissionRequest, onQueued func(wingwir
 func (cl *Client) Reattach(ctx context.Context, token string) (*Lease, error) {
 	stop := cl.cancelOnDone(ctx)
 	defer stop()
+	retry := newRetry("re-attach", 0)
 	for {
 		lease, terminal, transient := cl.readReattach(token)
 		if transient == nil {
 			return lease, terminal
+		}
+		if err := retry.wait(ctx, transient); err != nil {
+			return nil, err
 		}
 		if rerr := cl.recoverConn(ctx); rerr != nil {
 			return nil, rerr
@@ -179,10 +197,22 @@ func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(win
 // WatchGuard is [Lease.WatchControl] with a completion acknowledgement for a
 // guarded lease. The acknowledgement callback runs after the daemon has
 // durably released the guarded process session.
+//
+// A connection that keeps dropping is re-established with backoff, so a
+// daemon that accepts and immediately closes cannot turn the watcher into
+// a reconnect loop running at socket speed. The pacing returns to its
+// base once a frame arrives, which is the only proof the watch is working
+// again.
 func (l *Lease) WatchGuard(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel), onComplete func()) {
+	retry := newRetry("guard watch", 0)
 	for {
 		msg, err := l.cl.dec.read()
 		if err != nil {
+			if !l.cl.closed.Load() {
+				if werr := retry.wait(context.Background(), err); werr != nil {
+					return
+				}
+			}
 			recovered, guardGone := l.recoverWatch()
 			if !recovered {
 				if guardGone && onComplete != nil {
@@ -192,6 +222,7 @@ func (l *Lease) WatchGuard(onEvicted func(wingwire.Evicted), onCancel func(wingw
 			}
 			continue
 		}
+		retry.reset()
 		switch m := msg.(type) {
 		case *wingwire.Evicted:
 			if onEvicted != nil {
@@ -247,10 +278,14 @@ func (l *Lease) recoverWatch() (recovered, guardGone bool) {
 func (cl *Client) CancelLease(ctx context.Context, runID string) (bool, error) {
 	stop := cl.cancelOnDone(ctx)
 	defer stop()
+	retry := newRetry("cancel lease", 0)
 	for {
 		found, terminal, transient := cl.readCancelLease(runID)
 		if transient == nil {
 			return found, terminal
+		}
+		if err := retry.wait(ctx, transient); err != nil {
+			return false, err
 		}
 		if rerr := cl.recoverConn(ctx); rerr != nil {
 			return false, rerr

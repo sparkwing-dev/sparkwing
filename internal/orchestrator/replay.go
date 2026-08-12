@@ -144,10 +144,8 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		return nil, false
 	})
 
-	masker := secrets.NewMasker()
-	for _, v := range reg.SecretValues(run.Args) {
-		masker.Register(v)
-	}
+	// Seeded from the same run.Args the reg.Invoke above planned with.
+	masker := maskerForInvokeArgs(reg, run.Args)
 	src := secrets.NewDotenvSource("")
 	ctx = sparkwing.WithSecretResolver(ctx, secrets.NewCached(src, masker).AsResolver())
 	ctx = secrets.WithMasker(ctx, masker)
@@ -221,6 +219,12 @@ func MintReplayRun(ctx context.Context, st *store.Store, originalRunID, nodeID s
 		StartedAt:      time.Now(),
 		ReplayOfRunID:  originalRunID,
 		ReplayOfNodeID: nodeID,
+		// A replay row is minted here, not through the orchestrator's
+		// invocation snapshot, so it inherits the source run's
+		// secret-arg classification or it would render orig.Args in
+		// the clear on every read surface -- permanently, since no
+		// later write fills it in.
+		Invocation: store.InheritSecretArgs(nil, orig),
 	}); err != nil {
 		return "", fmt.Errorf("create replay run: %w", err)
 	}

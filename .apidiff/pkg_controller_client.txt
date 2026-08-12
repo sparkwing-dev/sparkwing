@@ -95,6 +95,7 @@ func (c *Client) GetNodeDispatch(ctx context.Context, runID, nodeID string, seq 
 func (c *Client) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)
 func (c *Client) GetPipelineProfile(ctx context.Context, pipeline, nodeID string) (*store.PipelineProfile, error)
 func (c *Client) GetRun(ctx context.Context, runID string) (*store.Run, error)
+func (c *Client) GetRunForExecution(ctx context.Context, runID string) (*store.Run, error)
 func (c *Client) GetRunReceipt(ctx context.Context, runID string) ([]byte, error)
 func (c *Client) GetSecret(ctx context.Context, name string) (*Secret, error)
 func (c *Client) GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error)

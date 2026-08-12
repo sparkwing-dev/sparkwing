@@ -12,6 +12,30 @@ type maskingNodeLog struct {
 	masker *secrets.Masker
 }
 
+// maskEventPayload runs an audit-event payload through the run's
+// masker before it is appended.
+//
+// Audit events are a read surface -- `GET /api/v1/runs/{id}/events`
+// serves them and the dashboard streams them over SSE -- but nothing
+// routes them through the log masker, which only rewrites a log
+// record's Msg. child_run_start in particular carries the args a
+// parent forwards to a child, so a parent's secret arriving in a
+// child's argument list would otherwise be published verbatim.
+//
+// Value-anchored like the log masker, so it also covers a secret
+// embedded inside a larger argument rather than passed as one.
+// Returns payload unchanged when masker is nil or has no values.
+func maskEventPayload(masker *secrets.Masker, payload []byte) []byte {
+	if masker == nil || len(payload) == 0 {
+		return payload
+	}
+	masked := masker.Mask(string(payload))
+	if masked == string(payload) {
+		return payload
+	}
+	return []byte(masked)
+}
+
 // wrapNodeLogWithMasker returns inner unchanged when masker is nil.
 func wrapNodeLogWithMasker(inner NodeLog, masker *secrets.Masker) NodeLog {
 	if inner == nil || masker == nil {
@@ -24,8 +48,13 @@ func (l *maskingNodeLog) Log(level, msg string) {
 	l.inner.Log(level, l.masker.Mask(msg))
 }
 
+// Emit redacts the message and the record's structured attributes.
+// Attributes are not decoration: step_end carries the failed command's
+// full output in attrs["error"], so masking Msg alone left the secret
+// in the persisted log one line below the redacted one.
 func (l *maskingNodeLog) Emit(rec sparkwing.LogRecord) {
 	rec.Msg = l.masker.Mask(rec.Msg)
+	rec.Attrs = l.masker.MaskAttrs(rec.Attrs)
 	l.inner.Emit(rec)
 }
 

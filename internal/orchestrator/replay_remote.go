@@ -38,7 +38,10 @@ func sideloadRun(ctx context.Context, st *store.Store, c *client.Client, runID s
 	} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 		return fmt.Errorf("check local run: %w", err)
 	}
-	remote, err := c.GetRun(ctx, runID)
+	// Execution read: this row is written to the local store and
+	// replayed from. A redacted fetch would persist "***" permanently,
+	// since the idempotent early return above never refetches.
+	remote, err := c.GetRunForExecution(ctx, runID)
 	if err != nil {
 		return fmt.Errorf("fetch remote run %s: %w", runID, err)
 	}

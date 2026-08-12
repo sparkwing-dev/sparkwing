@@ -1276,6 +1276,7 @@ type Registration struct {
 
 - `func Lookup(name string) (*Registration, bool)` -- Lookup returns the Registration for a registered pipeline name, or ok=false if none.
 - `func (r *Registration) Instance() any` -- Instance returns a fresh pipeline value for this registration, used by introspection helpers that query optional provider interfaces (HelpProvider, ShortHelpProvider, ExampleProvider).
+- `func (r *Registration) SecretArgNames() []string` -- SecretArgNames returns the flag names of every secret-marked Inputs field, sorted, regardless of whether the run supplied a value for them.
 - `func (r *Registration) SecretValues(args map[string]string) []string` -- SecretValues resolves the schema's secret-marked Inputs fields against the wire-format args map (applying tag-declared defaults for unset keys) and returns the resolved string values.
 
 ### type RequiresProvider

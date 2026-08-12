@@ -158,7 +158,8 @@ func TestCheckCLIVerbs_PassesAndSkipsExemptDocs(t *testing.T) {
 	root := writeFakeRepo(t)
 	content := t.TempDir()
 	writeDoc(t, content, "good.md", "```bash\nsparkwing pipeline list\nsparkwing run my-pipeline --sw-dry-run\n```\n")
-	writeDoc(t, content, "cli-reference.md", "```bash\nsparkwing totally-made-up\n```\n")
+	writeDoc(t, content, "cli-reference.md", "<!-- GENERATED from the CLI command registry -->\n```bash\nsparkwing totally-made-up\n```\n")
+	writeDoc(t, content, "cli-cluster.md", "<!-- GENERATED from the CLI command registry -->\n```bash\nsparkwing also-made-up\n```\n")
 	writeDoc(t, content, "mcp.md", "> STATUS: design / not yet shipped.\n```bash\nsparkwing mcp serve\n```\n")
 	if !checkCLIVerbs(content, root) {
 		t.Fatal("expected pass: real commands resolve, generated + unshipped docs are skipped")
