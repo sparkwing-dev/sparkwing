@@ -118,16 +118,14 @@ func (l *Lease) Release() error {
 	return err
 }
 
-// ExecReplace replaces the current process with the leased entry.
+// ExecReplace runs the leased entry as the foreground child. This process
+// retains the lease until that child exits, so pipeline descendants cannot
+// inherit cache authority.
 func (l *Lease) ExecReplace(args []string, dir string, env []string) error {
 	if l == nil || l.file == nil {
 		return errors.New("pipeline cache lease is not held")
 	}
-	execEnv, restore, err := prepareExecLease(l.file, l.entry, env)
-	if err != nil {
-		return err
-	}
-	return errors.Join(ExecReplace(l.Path(), args, dir, execEnv), restore())
+	return ExecReplace(l.Path(), args, dir, env)
 }
 
 // Acquire obtains a live-entry lease if the entry exists.
