@@ -176,7 +176,12 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 	if err != nil {
 		return nil, false, err
 	}
-	defer func() { err = errors.Join(err, cacheUnlock(writer), writer.Close()) }()
+	writerOpen := true
+	defer func() {
+		if writerOpen {
+			err = errors.Join(err, cacheUnlock(writer), writer.Close())
+		}
+	}()
 	if lease, found, acquireErr := e.Acquire(ctx); acquireErr != nil {
 		return nil, false, acquireErr
 	} else if found {
@@ -236,7 +241,12 @@ func (e Entry) AcquireOrMaterialize(ctx context.Context, write func(string) erro
 	if err := cacheLeaseReady(lease); err != nil {
 		return nil, false, err
 	}
+	if err := errors.Join(cacheUnlock(writer), writer.Close()); err != nil {
+		return nil, false, err
+	}
+	writerOpen = false
 	leaseReturned = true
+	_, _ = pruneToLimitsAtRoot(ctx, e.root, ConfiguredMaxBytes(), ConfiguredMaxEntries(), false)
 	return &Lease{entry: e, file: lease}, true, nil
 }
 

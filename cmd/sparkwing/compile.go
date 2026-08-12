@@ -87,31 +87,9 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 		}
 	}
 	lease.RecordUse(sparkwingDir, keyParts)
-	if published {
-		pruneCache()
-	}
 	ensureDescribeCache(sparkwingDir, key, lease.Path())
 	env = append(env, "SPARKWING_BINARY_SOURCE="+source)
 	return lease.ExecReplace(args, sparkwingDir, env)
-}
-
-// pruneCache trims the compiled-binary cache after publication. Failures are
-// swallowed because a cache optimization cannot own the pipeline result.
-func pruneCache() {
-	result, err := bincache.PruneToConfiguredLimits(context.Background())
-	if err != nil {
-		slog.Default().Debug("pipeline cache prune failed", "err", err)
-		return
-	}
-	if result.ReclaimedEntries > 0 {
-		slog.Default().Debug("pruned pipeline cache",
-			"removed", result.ReclaimedEntries, "logical_removed_bytes", result.LogicalRemovedBytes,
-			"observed_capacity_gained_bytes", result.ObservedCapacityGainedBytes,
-			"examined", result.ExaminedEntries, "active_skipped", result.ActiveSkippedEntries,
-			"busy_skipped", result.BusySkippedEntries)
-	} else if result.PruneBusy {
-		slog.Default().Debug("pipeline cache prune already in progress")
-	}
 }
 
 // ensureDescribeCache writes the describe-cache file if it's missing

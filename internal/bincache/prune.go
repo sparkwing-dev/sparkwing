@@ -103,7 +103,11 @@ func PruneToConfiguredLimits(ctx context.Context) (PruneResult, error) {
 // PruneToLimits converts cache ceilings into a bounded request for the
 // lease-aware deletion authority. removeAll ignores both ceilings.
 func PruneToLimits(ctx context.Context, maxBytes int64, maxEntries int, removeAll bool) (PruneResult, error) {
-	status, err := statusForLimits(ctx, "")
+	return pruneToLimitsAtRoot(ctx, "", maxBytes, maxEntries, removeAll)
+}
+
+func pruneToLimitsAtRoot(ctx context.Context, root string, maxBytes int64, maxEntries int, removeAll bool) (PruneResult, error) {
+	status, err := statusForLimits(ctx, root)
 	if err != nil {
 		return PruneResult{}, err
 	}
@@ -125,6 +129,7 @@ func PruneToLimits(ctx context.Context, maxBytes int64, maxEntries int, removeAl
 		return PruneResult{GoalSatisfied: true}, nil
 	}
 	result, err := pruneForLimits(ctx, PruneOptions{
+		Root:           root,
 		RemoveBytes:    bytesGoal,
 		ReclaimEntries: entriesGoal,
 		MaxEntries:     count,
