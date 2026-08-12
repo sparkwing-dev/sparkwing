@@ -44,6 +44,18 @@ Encrypted or not, values leave the server only through the
 authenticated secrets API; pipelines read them with `sparkwing.Secret`
 (see [sdk.md](sdk.md)).
 
+## Release integrity
+
+GitHub Actions stores `SPARKWING_RELEASE_SIGNING_KEY` as a base64-encoded
+32-byte Ed25519 seed. Release jobs sign the final checksum manifest and
+every platform asset; the updater embeds only public keys. Rotate the key
+through three releases: add the replacement key to the updater trust set and
+ship that bridge release with the old signer; change the workflow secret to the
+replacement signer; remove the old key from the trust set after supported
+updaters trust the replacement. The release gate rejects a signer outside the
+embedded trust set. Updaters without the replacement key fail closed rather
+than accepting an unknown signer.
+
 ## Cache service
 
 `sparkwing-cache` requires a bearer token on its external **write**

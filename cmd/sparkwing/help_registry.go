@@ -327,19 +327,14 @@ being deferred.`,
 var cmdUpdate = Command{
 	Path:     "sparkwing update",
 	Synopsis: "Self-update the CLI binary",
-	Description: `Downloads, verifies (signature + digest), and atomically
-installs the latest (or a specific) sparkwing release from GitHub
-Releases.
+	Description: `Downloads, authenticates, and atomically installs the latest
+(or a specific) sparkwing release from GitHub Releases.
 
 By default the command fetches the latest version pointer, pulls
-the matching binary for the current OS/arch, verifies the ed25519
-signature over SHA256SUMS with the public key compiled into this
-binary, checks the download against the signed digest, replaces the
-running binary via an atomic rename, then re-hashes the installed
-file and requires it to equal the verified digest. macOS binaries
-are ad-hoc-codesigned by the release before hashing, so nothing is
-mutated after verification. A signature, digest, download, or install
-failure is terminal -- there is no 'go install' fallback.
+the matching binary for the current OS/arch, verifies Ed25519
+signatures over the manifest and asset plus the manifest digest,
+and replaces the running binary atomically. Verification failure
+is terminal; the updater never selects an unsigned fallback.
 
 --check is the read-only probe: it reports the installed version
 and the latest published release, exits 0 when already current,

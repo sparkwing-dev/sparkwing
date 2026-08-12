@@ -65,6 +65,7 @@ func newReleaseServer(t *testing.T, version string, assetBytes []byte, signKey e
 		key = opts.signWith
 	}
 	sig := ed25519.Sign(key, sums)
+	assetSig := ed25519.Sign(key, assetBytes)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/"+version+"/"+asset, func(w http.ResponseWriter, r *http.Request) {
@@ -73,6 +74,9 @@ func newReleaseServer(t *testing.T, version string, assetBytes []byte, signKey e
 			return
 		}
 		_, _ = w.Write(assetBytes)
+	})
+	mux.HandleFunc("/"+version+"/"+asset+".sig", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(assetSig)
 	})
 	mux.HandleFunc("/"+version+"/SHA256SUMS", func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(sums)
