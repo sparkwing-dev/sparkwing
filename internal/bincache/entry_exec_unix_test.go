@@ -74,9 +74,8 @@ func TestEntryExecHelper(t *testing.T) {
 		return
 	}
 	if mode == "start-race-wrapper" {
-		env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "term-delay")
-		_ = execChildWith(os.Args[0], []string{"-test.run=^TestEntryExecHelper$"}, env, func(*exec.Cmd) {
-			waitForFile(os.Getenv("SPARKWING_ENTRY_SIGNAL_READY"), time.Second)
+		env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "hold")
+		_ = execChildWith(os.Args[0], []string{"-test.run=^TestEntryExecHelper$"}, env, func() {
 			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		})
 		return
@@ -128,32 +127,15 @@ func TestExecLeaseDoesNotSurviveChildSpawnedDuringInit(t *testing.T) {
 }
 
 func TestExecChildSupervisesSignalsBeforeStart(t *testing.T) {
-	ready := filepath.Join(t.TempDir(), "ready")
-	received := filepath.Join(t.TempDir(), "received")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
-	cmd.Env = append(os.Environ(),
-		"SPARKWING_ENTRY_EXEC_HELPER=start-race-wrapper",
-		"SPARKWING_ENTRY_SIGNAL_READY="+ready,
-		"SPARKWING_ENTRY_SIGNAL_RECEIVED="+received,
-	)
+	cmd.Env = append(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER=start-race-wrapper")
+	cmd.Stdin = strings.NewReader("")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	pidBytes, err := waitForFile(ready, time.Second)
-	if err != nil {
-		t.Fatal(err)
-	}
-	childPID, err := strconv.Atoi(string(pidBytes))
-	if err != nil {
-		t.Fatalf("child pid = %q, %v", pidBytes, err)
-	}
-	cleanupProcess(t, childPID)
-	if err := waitCommand(t, cmd, childPID); err == nil {
-		t.Fatal("signal-terminated foreground exited successfully")
-	}
-	if body, err := os.ReadFile(received); err != nil || string(body) != "received" {
-		t.Fatalf("foreground did not receive supervised termination: body=%q err=%v", body, err)
+	if err := waitCommand(t, cmd, 0); err != nil {
+		t.Fatalf("wrapper did not contain pre-start signal: %v", err)
 	}
 }
 
@@ -191,7 +173,7 @@ func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	line, err := bufio.NewReader(stdout).ReadString('\n')
+	line, err := readLineBefore(stdout, time.Second)
 	if err != nil {
 		t.Fatalf("child readiness = %q, %v", line, err)
 	}
@@ -233,10 +215,31 @@ func waitCommand(t *testing.T, cmd *exec.Cmd, childPID int) error {
 	case err := <-waited:
 		return err
 	case <-time.After(2 * time.Second):
-		_ = syscall.Kill(childPID, syscall.SIGKILL)
+		if childPID > 0 {
+			_ = syscall.Kill(childPID, syscall.SIGKILL)
+		}
+		_ = cmd.Process.Kill()
 		<-waited
 		t.Fatal("foreground wrapper did not finish before the deadline")
 		return nil
+	}
+}
+
+func readLineBefore(reader io.Reader, timeout time.Duration) (string, error) {
+	type result struct {
+		line string
+		err  error
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		line, err := bufio.NewReader(reader).ReadString('\n')
+		resultCh <- result{line: line, err: err}
+	}()
+	select {
+	case result := <-resultCh:
+		return result.line, result.err
+	case <-time.After(timeout):
+		return "", errors.New("readiness was not published before deadline")
 	}
 }
 

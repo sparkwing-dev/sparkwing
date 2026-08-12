@@ -17,17 +17,17 @@ func execChild(bin string, args []string, env []string) error {
 	return execChildWith(bin, args, env, nil)
 }
 
-func execChildWith(bin string, args []string, env []string, started func(*exec.Cmd)) error {
+func execChildWith(bin string, args []string, env []string, beforeStart func()) error {
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	cmd := exec.Command(bin, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr, cmd.Env = os.Stdin, os.Stdout, os.Stderr, env
+	if beforeStart != nil {
+		beforeStart()
+	}
 	if err := cmd.Start(); err != nil {
 		signal.Stop(signals)
 		return err
-	}
-	if started != nil {
-		started(cmd)
 	}
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
