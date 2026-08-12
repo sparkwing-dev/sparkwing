@@ -186,15 +186,24 @@ func runCommands(args []string) error {
 	copy(sorted, allCommands)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
 
-	var picked []CommandJSON
+	prefix := strings.TrimSpace(*pathPrefix)
+	if blankPathFilter(*pathPrefix, prefix) {
+		return unmatchedPathError(*pathPrefix, 0)
+	}
+	picked := []CommandJSON{}
+	hiddenMatches := 0
 	for _, c := range sorted {
-		if c.Hidden && !*includeHidden {
+		if !matchesCommandPath(c.Path, prefix) {
 			continue
 		}
-		if *pathPrefix != "" && !strings.HasPrefix(c.Path, *pathPrefix) {
+		if c.Hidden && !*includeHidden {
+			hiddenMatches++
 			continue
 		}
 		picked = append(picked, toCommandJSON(c))
+	}
+	if len(picked) == 0 && prefix != "" {
+		return unmatchedPathError(prefix, hiddenMatches)
 	}
 
 	switch strings.ToLower(output) {
@@ -231,12 +240,64 @@ func runCommands(args []string) error {
 		fmt.Println()
 		printAlignedSteps([]InfoNextStep{
 			{Command: "<any path above> --help", Purpose: "flags, arguments, examples for one verb"},
-			{Command: `sparkwing commands --path "sparkwing pipeline" -o json`, Purpose: "full records for a subtree"},
+			{Command: "sparkwing commands --path pipeline -o json", Purpose: "full records for a subtree"},
 		})
 		return nil
 	default:
 		return fmt.Errorf("unknown output format %q (valid: pretty, json, markdown, plain)", output)
 	}
+}
+
+// matchesCommandPath reports whether a command's path is inside the
+// subtree --path named. Both the fully-qualified prefix ("sparkwing
+// runs") and the bare one ("runs") match.
+//
+// Accepting the bare form is not a convenience. Every path in the
+// registry begins with the same root word, so typing it carries no
+// information -- and `--path runs` matching nothing looks exactly like
+// "this CLI has no runs commands", which is what three separate agents
+// concluded before finding the quoted form. The unqualified spelling is
+// the one a reader reaches for first, so it has to be the one that works.
+func matchesCommandPath(path, prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+	return hasPathComponentPrefix(path, prefix) ||
+		hasPathComponentPrefix(path, cmdSparkwing.Path+" "+prefix)
+}
+
+// hasPathComponentPrefix reports whether prefix names path or an
+// ancestor of it, matching whole space-separated components rather than
+// characters.
+//
+// A plain string prefix reads "--path run" as also selecting the whole
+// `runs` group -- 31 paths for a filter that named two -- and the
+// surplus is not obviously surplus, since every line of it starts with
+// the word that was typed. A subtree filter that quietly returns a
+// different subtree is worse than one that returns nothing, because
+// nothing is visible.
+func hasPathComponentPrefix(path, prefix string) bool {
+	return path == prefix || strings.HasPrefix(path, prefix+" ")
+}
+
+// blankPathFilter reports whether --path was given but names nothing. A
+// prefix that is only whitespace was still typed, so it is a filter that
+// selected nothing rather than an absent one; letting it fall through to
+// the empty prefix would answer a mistyped `--path " "` with the entire
+// CLI, which is the same silent wrong answer an unmatched prefix used to
+// give.
+func blankPathFilter(raw, trimmed string) bool { return raw != "" && trimmed == "" }
+
+// unmatchedPathError reports a --path that selected nothing. Exiting 0
+// with an empty listing -- or with the literal `null` that -o json used
+// to print -- reads as an answer about the CLI rather than as a bad
+// filter, and an agent that believes it has enumerated a subtree it
+// misspelled does not go looking for the verb again.
+func unmatchedPathError(prefix string, hiddenMatches int) error {
+	if hiddenMatches > 0 {
+		return fmt.Errorf("commands: --path %q matched only hidden commands; pass --include-hidden to list them", prefix)
+	}
+	return fmt.Errorf("commands: --path %q matched no command; `sparkwing commands -o plain` lists every path", prefix)
 }
 
 // renderCommandsMarkdown renders the full CLI surface as a reference

@@ -25,8 +25,7 @@ func (d *Daemon) startDiagnostics(ctxDone <-chan struct{}) {
 			case <-d.quit:
 				return
 			case <-ch:
-				d.cfg.logf("diagnostics: %s", d.diagnosticSummary())
-				d.cfg.logf("diagnostics: goroutine dump\n%s", dumpGoroutineStacks(diagnosticsStackBytes))
+				d.writeDiagnosticDump()
 			}
 		}
 	}()

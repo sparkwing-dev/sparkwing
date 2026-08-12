@@ -42,6 +42,30 @@ func (d *Daemon) diagnosticSummary() string {
 		runtime.NumGoroutine(), conns, holders, waiters, leases, guards, reattach, d.cfg.Version)
 }
 
+// writeDiagnosticDump writes the daemon's counters and every goroutine
+// stack to its log, rotating the log first when it is already over cap.
+//
+// Rotating at spawn is not enough for this writer. One dump appends up
+// to 2MB, and the daemon it is asked of is by definition still running:
+// a resident daemon can be asked for dozens over the weeks between
+// restarts, and the spawn-time check never sees any of them.
+// [RotateLogOverCap] is the same helper the spawning client uses, so the
+// two rotations keep one cap and one once-rotated .1 shape, and it
+// empties the log in place so the daemon, its supervisor, and anything
+// else holding that descriptor all keep writing to d.log.
+//
+// A rotation that fails is reported into the dump rather than aborting
+// it. The dump is the thing the operator asked for and the reason the
+// daemon is still alive to be asked; an unbounded log is the smaller
+// problem of the two.
+func (d *Daemon) writeDiagnosticDump() {
+	if _, err := RotateLogOverCap(d.cfg.Home); err != nil {
+		d.cfg.logf("diagnostics: could not rotate the daemon log: %v", err)
+	}
+	d.cfg.logf("diagnostics: %s", d.diagnosticSummary())
+	d.cfg.logf("diagnostics: goroutine dump\n%s", dumpGoroutineStacks(diagnosticsStackBytes))
+}
+
 // dumpGoroutineStacks returns every live goroutine's stack, truncated to
 // maxBytes.
 func dumpGoroutineStacks(maxBytes int) string {

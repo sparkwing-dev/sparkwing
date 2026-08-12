@@ -48,6 +48,32 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **wingd:** The daemon log stays bounded between daemon restarts. Rotation
+  happened only when a daemon started, while each `SIGUSR1` diagnostics dump
+  appends up to 2MB to a daemon that by definition keeps running -- so a
+  resident daemon asked for dumps over the weeks between restarts grew
+  `wingd/d.log` without limit. A dump now rotates the log to `d.log.1` first
+  when it is already past the 1MB cap, using the same once-rotated shape as
+  the rotation at spawn. The rotation copies the log aside and empties it in
+  place rather than renaming it: the log is a descriptor its writers
+  inherited, not a path they reopen, and three processes hold it -- the
+  supervisor, the daemon it starts, and the client that opened it -- so a
+  rename would strand the ones that did not rotate on the archive and let
+  that archive grow without bound instead.
+
+- **cli:** `sparkwing commands --path` accepts the unqualified prefix and
+  refuses one that matches nothing. Every command path begins with
+  `sparkwing`, so `--path runs` is the spelling a reader reaches for first --
+  and it used to match nothing, which is indistinguishable from "this CLI has
+  no runs commands"; only `--path "sparkwing runs"` worked. Both forms now
+  select the same subtree, matched by whole path components -- `--path run`
+  selects `run` and its subcommands rather than also dragging in the separate
+  `runs` group. A prefix that selects no command is an error naming
+  the prefix with a non-zero exit, instead of an empty listing (or the literal
+  `null` under `-o json`) at exit 0; when the prefix matched only hidden
+  verbs, the error says to pass `--include-hidden`.
 
 ## [v0.27.0] - 2026-08-12
 ### Security

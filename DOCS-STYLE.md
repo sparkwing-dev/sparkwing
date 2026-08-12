@@ -24,7 +24,10 @@ answers several is hard to keep correct.
 - **Edit `docs/`.** It is the canonical tree and the source the
   sparkwing.dev site builds from. `pkg/docs/mirror/` is a generated copy
   the CLI embeds (`go:embed`); regenerate it with `bash bin/sync-docs.sh`
-  and commit both. **Never hand-edit `pkg/docs/mirror/`.**
+  and commit both. **Never hand-edit `pkg/docs/mirror/`.** To report drift
+  without touching the tree -- reviewing someone else's branch, say -- run
+  `bash bin/sync-docs.sh --check`, which writes nothing and exits non-zero
+  listing what differs.
 - **Generated reference pages are generated.** Every page in the
   Reference row carries a "do not edit" banner naming the code it
   derives from and the script that regenerates it. To change one, change
