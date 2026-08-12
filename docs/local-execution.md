@@ -192,9 +192,9 @@ Every surface that knows about installs reports them, read-only:
   other installs (`executable.path` / `executable.other_installs` in
   `-o json`), and `sparkwing info --for-agent` includes the same
   identity so an agent knows which build its evidence came from.
-- `sparkwing update` names any other copies after installing, and its
-  `go install` fallback states exactly where the new binary landed --
-  including when the binary you ran was *not* the one replaced.
+- `sparkwing update` names any other copies after installing. Release lookup,
+  signature, digest, or installation failure is terminal; it never selects an
+  unsigned `go install` fallback.
 - `bin/install.sh` (the source installer) reports copies outside its
   destination and never modifies anything outside `$DEST`.
 

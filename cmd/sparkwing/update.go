@@ -125,8 +125,7 @@ func runUpdateBinary(version string, force, overrideHold bool) error {
 	if resolved == "" {
 		v, err := updateFetchLatest()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "update: could not fetch latest version (%v); falling back to go install\n", err)
-			return updateGoInstallFallback("latest")
+			return fmt.Errorf("update: fetch latest version: %w", err)
 		}
 		resolved = v
 	}
@@ -170,8 +169,7 @@ func runUpdateBinary(version string, force, overrideHold bool) error {
 	fmt.Fprintf(os.Stdout, "updating sparkwing: %s -> %s\n", current, resolved)
 
 	if err := updateDownloadInstall(resolved, currentBin); err != nil {
-		fmt.Fprintf(os.Stderr, "update: download path failed (%v); falling back to go install\n", err)
-		return updateGoInstallFallback(resolved)
+		return fmt.Errorf("update: verified release install failed: %w", err)
 	}
 
 	fmt.Fprintf(os.Stdout, "sparkwing updated: %s -> %s\n", current, resolved)
@@ -282,41 +280,43 @@ func downloadAndInstall(version, currentBin string) error {
 	if err := downloadFile(base+"/"+asset, binPath); err != nil {
 		return fmt.Errorf("download %s: %w", asset, err)
 	}
+	assetSigPath := binPath + ".sig"
+	if err := downloadFile(base+"/"+asset+".sig", assetSigPath); err != nil {
+		return fmt.Errorf("download %s.sig: %w", asset, err)
+	}
 	sumsPath := filepath.Join(tmpDir, "SHA256SUMS")
 	if err := downloadFile(base+"/SHA256SUMS", sumsPath); err != nil {
 		return fmt.Errorf("download SHA256SUMS: %w", err)
 	}
-
-	expected, err := lookupSHA256(sumsPath, asset)
+	sumsSigPath := sumsPath + ".sig"
+	if err := downloadFile(base+"/SHA256SUMS.sig", sumsSigPath); err != nil {
+		return fmt.Errorf("download SHA256SUMS.sig: %w", err)
+	}
+	assetBody, err := os.ReadFile(binPath)
 	if err != nil {
 		return err
 	}
-	actual, err := sha256OfFile(binPath)
+	assetSig, err := os.ReadFile(assetSigPath)
 	if err != nil {
 		return err
 	}
-	if !strings.EqualFold(expected, actual) {
-		return fmt.Errorf("checksum mismatch for %s\n  expected: %s\n  actual:   %s", asset, expected, actual)
-	}
-
-	stagedBin := currentBin + ".update.tmp"
-	if err := copyFile(binPath, stagedBin); err != nil {
-		return fmt.Errorf("stage new binary: %w", err)
-	}
-	if err := os.Chmod(stagedBin, 0o755); err != nil {
-		_ = os.Remove(stagedBin)
+	manifest, err := os.ReadFile(sumsPath)
+	if err != nil {
 		return err
 	}
-
-	if runtime.GOOS == "darwin" {
-		_ = exec.Command("codesign", "--force", "--sign", "-", stagedBin).Run()
+	manifestSig, err := os.ReadFile(sumsSigPath)
+	if err != nil {
+		return err
 	}
-
-	if err := replaceRunningBinary(stagedBin, currentBin); err != nil {
-		_ = os.Remove(stagedBin)
-		return fmt.Errorf("replace binary: %w", err)
+	publicKey, err := releasePublicKey()
+	if err != nil {
+		return err
 	}
-	return nil
+	verified, err := verifyReleaseAsset(publicKey, manifest, manifestSig, asset, assetBody, assetSig)
+	if err != nil {
+		return err
+	}
+	return installVerifiedAsset(verified, currentBin)
 }
 
 // replaceRunningBinary atomically swaps in the new binary. Windows

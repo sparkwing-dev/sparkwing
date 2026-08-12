@@ -8,14 +8,14 @@ Every `sparkwing update` command, flag, and argument, generated from the CLI's o
 
 Self-update the CLI binary
 
-Downloads, checksum-verifies, and atomically installs the latest
+Downloads, authenticates, and atomically installs the latest
 (or a specific) sparkwing release from GitHub Releases.
 
 By default the command fetches the latest version pointer, pulls
-the matching tarball for the current OS/arch, verifies its SHA256
-against the published SHA256SUMS, and replaces the running binary
-via an atomic rename. macOS arm64 binaries are ad-hoc-codesigned
-after installation to avoid SIGKILL on first run.
+the matching binary for the current OS/arch, verifies Ed25519
+signatures over the manifest and asset plus the manifest digest,
+and replaces the running binary atomically. Verification failure
+is terminal; the updater never selects an unsigned fallback.
 
 --check is the read-only probe: it reports the installed version
 and the latest published release, exits 0 when already current,

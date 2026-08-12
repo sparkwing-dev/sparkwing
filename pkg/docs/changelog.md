@@ -49,6 +49,16 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Security
+
+- **cli + release:** Authenticate `sparkwing update` with an embedded Ed25519
+  release key. Releases sign the checksum manifest and every final platform
+  asset after macOS codesigning; published asset names are immutable. The
+  updater verifies both signatures, the requested manifest entry, staged bytes,
+  and installed bytes, and restores the prior binary when the final check fails.
+  Lookup or verification failure is terminal instead of falling back to an
+  unsigned source build.
+
 ## [v0.27.0] - 2026-08-12
 ### Security
 
