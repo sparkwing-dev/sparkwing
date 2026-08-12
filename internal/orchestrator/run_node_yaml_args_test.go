@@ -46,13 +46,25 @@ func registerPodYAMLPipe(t *testing.T) {
 // it the way a compiled pipeline binary's own walk-up would.
 func writeCheckout(t *testing.T, yaml string) string {
 	t.Helper()
-	root := t.TempDir()
+	root := isolateCheckout(t)
 	if err := os.MkdirAll(filepath.Join(root, ".sparkwing"), 0o755); err != nil {
 		t.Fatalf("mkdir .sparkwing: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, ".sparkwing", "sparkwing.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatalf("write sparkwing.yaml: %v", err)
 	}
+	return root
+}
+
+// isolateCheckout points the runtime at an empty directory this test
+// owns and restores the previous root afterwards. Any test that reaches
+// a path which re-reads the executing checkout's argument layers needs
+// it, or this repo's own .sparkwing/sparkwing.yaml becomes a live input
+// -- and a defaults.args block added to it later would break tests that
+// have nothing to do with project config.
+func isolateCheckout(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
 	prev := sparkwing.CurrentRuntime().WorkDir
 	sparkwing.SetWorkDir(root)
 	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })

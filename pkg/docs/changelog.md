@@ -71,7 +71,9 @@ code change to unlock.
   unknown-outcome exit (3). The follow now gives up after the run's status has
   been unreadable for 60 seconds and reports the transport error; any
   successful poll in between resets the clock, so a replica rolling out is
-  still ridden through.
+  still ridden through. This also bounds `sparkwing runs logs --follow`, which
+  shares the loop: a controller outage lasting more than 60 seconds now ends
+  the follow with a non-zero exit instead of tailing nothing indefinitely.
 - **orchestrator:** Make local and cluster argument semantics agree. A run row
   records only the arguments the operator passed; the `defaults.args` and
   pipeline `args:` layers are re-read from the checkout that executes, so a

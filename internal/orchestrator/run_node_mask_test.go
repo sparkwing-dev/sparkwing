@@ -50,6 +50,7 @@ func registerPodMaskPipe(t *testing.T) {
 func TestRunNodeOnce_MasksSecretsInNodeLog(t *testing.T) {
 	registerPodMaskPipe(t)
 	isolateProfiles(t)
+	isolateCheckout(t)
 
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
