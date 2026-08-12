@@ -53,6 +53,7 @@
     {
       "label": "CLI reference",
       "slugs": [
+        "cli-cache",
         "cli-cluster",
         "cli-commands",
         "cli-completion",
