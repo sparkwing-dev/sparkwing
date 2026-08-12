@@ -48,8 +48,6 @@ code change to unlock.
 ---
 
 ## [Unreleased]
-
-## [v0.30.0] - 2026-08-12
 ### Added
 
 - **sdk:** Nodes and groups can declare dependency caches with
@@ -137,6 +135,14 @@ code change to unlock.
   installed bytes, restores the prior binary when the final check fails, and
   treats lookup or verification failure as terminal. Releases publish one
   immutable, signed asset set after macOS codesigning.
+
+## [v0.30.0] - 2026-08-12 [YANKED]
+
+Never released. The tag was cut from a branch that never landed on `main`,
+its release build failed at asset signing, and no binaries were published.
+The Go module proxy cached the tag before it could be recalled, so the
+version cannot be deleted; `go.mod` retracts it instead, and `go get
+@latest` skips it. Everything intended for it ships in v0.31.0.
 
 ## [v0.29.0] - 2026-08-12
 ### Security
