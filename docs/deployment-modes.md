@@ -54,7 +54,7 @@ Where the bucket enforces write preconditions, Mode 2 coordinates
 across runners with no database -- cache reservation, pipeline
 triggers, approvals, and debug pauses all work. Each is an
 object-store record mutated under compare-and-swap (S3
-`If-None-Match` / `If-Match`); a contended `.Cache()` key elects one
+`If-None-Match` / `If-Match`); a contended `.Memoize()` key elects one
 leader and the rest coalesce onto its output, the same
 exactly-one-runs shape as Mode 3.
 
@@ -119,7 +119,7 @@ does.
 ## Mode 3: Postgres + object storage
 
 Runners write run state to a shared Postgres database and caches /
-logs to a shared object store. The `.Cache()` DSL routes through
+logs to a shared object store. The `.Memoize()` DSL routes through
 Postgres `concurrency_*` tables, so cross-runner reservation works
 properly: N runners arriving at the same key elect one leader, the
 rest coalesce and inherit the leader's output. Triggers, approvals,

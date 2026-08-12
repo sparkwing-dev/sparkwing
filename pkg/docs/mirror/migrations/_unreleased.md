@@ -87,3 +87,54 @@ tokens list`, `cluster agents list`, `cluster webhooks list`, `cluster
 webhooks deliveries`, `configure xrepo list`, `examples`, `docs list`,
 `docs guides`, `docs search`, `docs versions`, `docs migrations list`,
 `repos`, and `repos update`.
+
+## Cache becomes Memoize
+
+The result-memoization modifier `.Cache()` is renamed to `.Memoize()` on
+both `JobNode` and `JobGroup`. The behavior is unchanged: a key names the
+work, and a later node computing the same key replays the stored result
+instead of running. Only the name changes, and the supporting types change
+with it.
+
+| Before | After |
+|---|---|
+| `JobNode.Cache(key, opts...)` | `JobNode.Memoize(key, opts...)` |
+| `JobGroup.Cache(key, opts...)` | `JobGroup.Memoize(key, opts...)` |
+| `JobNode.CacheConfig()` | `JobNode.MemoizeConfig()` |
+| `sparkwing.CacheConfig` | `sparkwing.MemoizeConfig` |
+| `sparkwing.CacheOption` | `sparkwing.MemoizeOption` |
+
+`CacheKey`, `CacheKeyFn`, `Key(...)`, `NoCache`, `TTL`, `DefaultCacheTTL`,
+and `MaxCacheTTL` keep their names, because a memoized result is still
+stored under a content-addressed cache key.
+
+There is no deprecation alias. The old names are gone, so every call site
+is a compile error until updated. The change is mechanical:
+
+```go
+// before
+shard.Cache(func(ctx context.Context) sparkwing.CacheKey {
+    return sparkwing.Key("coverage", "shard-1")
+}, sparkwing.TTL(48*time.Hour))
+
+// after
+shard.Memoize(func(ctx context.Context) sparkwing.CacheKey {
+    return sparkwing.Key("coverage", "shard-1")
+}, sparkwing.TTL(48*time.Hour))
+```
+
+**Why:** `.Cache()` read like GitHub Actions `actions/cache`, and it is the
+opposite. `actions/cache` restores a directory so a step runs faster;
+`.Cache()` skipped the node entirely. A pipeline ported by reaching for the
+same-named modifier compiled, ran green, and stopped running the work, with
+nothing to flag it. The name now says what the modifier does: `.Memoize(key)`
+skips the node when its result is already known, while `.CacheDir(...)` keeps
+a dependency directory warm so the node runs faster while still running --
+that is the `actions/cache` equivalent.
+
+**Group members still need distinct keys.** `JobGroup.Memoize` applies one
+key function to every member, unchanged from `JobGroup.Cache`. A matrix built
+with `JobFanOut` still needs a key that depends on the per-member value, or
+every cell shares one entry and the first cell's result replays for the rest.
+The `group-cache-shared` lint rule catches a group-scope `.Memoize()` the same
+way it caught `.Cache()`.

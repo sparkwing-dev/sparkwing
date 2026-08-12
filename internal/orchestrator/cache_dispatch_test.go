@@ -117,7 +117,7 @@ func (cacheKeyedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwin
 	sparkwing.Job(plan, "build", func(ctx context.Context) error {
 		cacheCounter.inflight.Add(1)
 		return nil
-	}).Cache(
+	}).Memoize(
 		func(ctx context.Context) sparkwing.CacheKey { return "v-pinned" },
 		sparkwing.TTL(time.Hour))
 	return nil

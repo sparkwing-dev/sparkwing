@@ -98,7 +98,7 @@ func TestApproval_RegularNodeIsNotApproval(t *testing.T) {
 }
 
 // ApprovalGate exposes only the gate-appropriate modifiers.
-// .Inline() / .Retry() / .Timeout() / .Cache() / .Requires() are not
+// .Inline() / .Retry() / .Timeout() / .Memoize() / .Requires() are not
 // methods on *ApprovalGate -- the type system makes that class of
 // mistake a compile error rather than a runtime panic / silent
 // no-op. The negative cases would not compile, which is the point;

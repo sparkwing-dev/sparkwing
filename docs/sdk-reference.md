@@ -201,21 +201,6 @@ type Cache = storage.ArtifactStore
 ```
 
 
-### type CacheConfig
-
-CacheConfig is a node's resolved content-cache configuration: the key function that names the work plus the retention window for a stored result.
-
-```
-type CacheConfig struct {
-    // Key computes the content key after upstream dependencies
-    // complete. Return [NoCache] to opt this invocation out.
-    Key CacheKeyFn
-    // TTL bounds how long a stored result remains reusable.
-    TTL time.Duration
-}
-```
-
-
 ### type CacheKey
 
 CacheKey is the content-addressed identifier for a node's work.
@@ -239,16 +224,6 @@ CacheKeyFn computes a cache key after upstream dependencies complete.
 type CacheKeyFn func(ctx context.Context) CacheKey
 ```
 
-
-### type CacheOption
-
-CacheOption tunes a JobNode.Cache declaration.
-
-```
-type CacheOption func(*CacheConfig)
-```
-
-- `func TTL(d time.Duration) CacheOption` -- TTL sets how long a node's memoized result remains reusable.
 
 ### type Cmd
 
@@ -745,7 +720,6 @@ type JobGroup struct {
 - `func JobFanOutDynamic[T any](p *Plan, name string, source *JobNode, fn func(T) (string, any)) *JobGroup` -- JobFanOutDynamic is the runtime fan-out helper.
 - `func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup` -- AfterRun registers a post-run hook on every member.
 - `func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup` -- BeforeRun registers a pre-run hook on every member.
-- `func (g *JobGroup) Cache(key CacheKeyFn, opts ...CacheOption) *JobGroup` -- Cache memoizes every member of the group on content.
 - `func (g *JobGroup) CacheDir(caches ...DirCache) *JobGroup` -- CacheDir registers dependency-directory caches on every member.
 - `func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup` -- Concurrency enrolls every member of the group in concurrency group g with the given admission cost.
 - `func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup` -- Consumes stages the given producer's artifacts into every member's workspace before it runs, and implies Needs(producer) on each.
@@ -755,6 +729,7 @@ type JobGroup struct {
 - `func (g *JobGroup) Err() error` -- Err returns the expansion error, if any.
 - `func (g *JobGroup) Inline() *JobGroup` -- Inline marks every member for in-process execution.
 - `func (g *JobGroup) Members() []*JobNode` -- Members returns the group's current nodes.
+- `func (g *JobGroup) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobGroup` -- Memoize memoizes every member of the group.
 - `func (g *JobGroup) Name() string` -- Name returns the group's declared name, or "" for an unnamed (structural-only) group.
 - `func (g *JobGroup) Needs(deps ...Dep) *JobGroup` -- Needs declares an upstream dependency on every member of the group.
 - `func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup` -- NeedsOptional declares optional upstream dependencies on every member; unknown IDs are silently dropped at finalize.
@@ -787,8 +762,6 @@ type JobNode struct {
 - `func (n *JobNode) ApprovalConfig() *ApprovalConfig` -- ApprovalConfig returns the per-node approval configuration, or nil for non-approval nodes.
 - `func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode` -- BeforeRun registers a hook to run once before the node's Run method on the first attempt.
 - `func (n *JobNode) BeforeRunHooks() []BeforeRunFn` -- BeforeRunHooks returns the node's registered pre-run hooks.
-- `func (n *JobNode) Cache(key CacheKeyFn, opts ...CacheOption) *JobNode` -- Cache memoizes the node's result on content.
-- `func (n *JobNode) CacheConfig() *CacheConfig` -- CacheConfig returns the node's resolved content-cache configuration, or nil when JobNode.Cache was not called.
 - `func (n *JobNode) CacheDir(caches ...DirCache) *JobNode` -- CacheDir registers dependency-directory caches on the node: each declared directory is restored from the cache before the node's Run (on an exact key hit) and saved back after a successful Run whose restore missed.
 - `func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode` -- Concurrency enrolls the node in concurrency group g with the given admission cost (default 1).
 - `func (n *JobNode) ConcurrencyCost() int` -- ConcurrencyCost returns the admission cost declared via JobNode.Concurrency, or 0 when the node has no membership.
@@ -807,6 +780,8 @@ type JobNode struct {
 - `func (n *JobNode) IsInline() bool` -- IsInline reports whether the node was marked for orchestrator-local execution via Inline().
 - `func (n *JobNode) IsOptional() bool` -- IsOptional reports whether the node is marked non-essential.
 - `func (n *JobNode) Job() Workable` -- Job returns the underlying user-authored job struct.
+- `func (n *JobNode) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobNode` -- Memoize skips re-running the node when its result is already known.
+- `func (n *JobNode) MemoizeConfig() *MemoizeConfig` -- MemoizeConfig returns the node's resolved memoization configuration, or nil when JobNode.Memoize was not called.
 - `func (n *JobNode) Needs(deps ...Dep) *JobNode` -- Needs declares hard upstream dependencies.
 - `func (n *JobNode) NeedsGroups() []*JobGroup` -- NeedsGroups returns any dynamic groups (from ExpandFrom) this node is waiting on.
 - `func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode` -- NeedsOptional declares upstream dependencies that may or may not be present in the plan.
@@ -927,6 +902,31 @@ type Logs = storage.LogStore
 ```
 
 
+### type MemoizeConfig
+
+MemoizeConfig is a node's resolved memoization configuration: the key function that names the work plus the retention window for a stored result.
+
+```
+type MemoizeConfig struct {
+    // Key computes the content key after upstream dependencies
+    // complete. Return [NoCache] to opt this invocation out.
+    Key CacheKeyFn
+    // TTL bounds how long a stored result remains reusable.
+    TTL time.Duration
+}
+```
+
+
+### type MemoizeOption
+
+MemoizeOption tunes a JobNode.Memoize declaration.
+
+```
+type MemoizeOption func(*MemoizeConfig)
+```
+
+- `func TTL(d time.Duration) MemoizeOption` -- TTL sets how long a node's memoized result remains reusable.
+
 ### type NoInputs
 
 NoInputs is the empty-struct convention for pipelines that take no flags.
@@ -984,12 +984,12 @@ const (
     Skipped   Outcome = "skipped"
     Cancelled Outcome = "cancelled"
 
-    // SkippedConcurrent: .Cache() arrival hit a full slot under
+    // SkippedConcurrent: .Memoize() arrival hit a full slot under
     // OnLimit:Skip. Distinct from Skipped (which comes from SkipIf)
     // so dashboards can surface the cause.
     SkippedConcurrent Outcome = "skipped-concurrent"
 
-    // Superseded: .Cache() holder was evicted by a newer arrival under
+    // Superseded: .Memoize() holder was evicted by a newer arrival under
     // OnLimit:CancelOthers. Distinct from Cancelled (operator-driven)
     // so dashboards can surface "evicted by newer run" vs "operator
     // cancelled".
