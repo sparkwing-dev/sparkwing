@@ -50,6 +50,18 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **sdk:** Nodes and groups can declare dependency caches with
+  `.CacheDir(sparkwing.GoModules())`, `sparkwing.NpmCache()`, or the generic
+  `sparkwing.Dir(path, sparkwing.KeyFromFile(...))`. The declared directory is
+  restored before the node runs and saved after its first success, locally
+  under `$SPARKWING_HOME/depcache` and on clusters via the cache service's blob
+  store, so a build's dependency downloads stay inside the cluster instead of
+  egressing every run. Caching is best-effort throughout: a missing lockfile,
+  an unreachable backend, or an oversized archive logs a warning and never
+  fails the node. This is distinct from `.Cache()`, which memoizes a node's
+  result so the node does not run at all; `.CacheDir()` makes the work fast
+  while the node still runs. Porting `actions/cache` maps to `.CacheDir()`. See
+  [caching](docs/caching.md).
 - **cache:** `pkg/cachecontrol` measures the managed pipeline-binary cache and
   reclaims inactive entries within caller-set byte and entry-work bounds. The
   result reports observed capacity separately from removed entries; admission
