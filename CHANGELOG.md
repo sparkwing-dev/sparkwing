@@ -48,6 +48,25 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **orchestrator:** Redact secret values that a run's arguments inherit from
+  `sparkwing.yaml`. A `secret:"true"` input can take its value from the
+  project's `defaults.args` block or a pipeline entry's `args:` block instead of
+  a command-line flag; the run's log masker was seeded from the arguments the
+  caller passed, while the pipeline was invoked with those layers merged in. A
+  secret supplied only by the project config was therefore never registered for
+  redaction, and a job that logged it wrote the plaintext to the node log, the
+  persisted annotations and summaries, the node's failure excerpt, and the
+  `child_run_start` audit payload -- while the same secret passed as a flag was
+  redacted. The masker is now seeded from the merged arguments the run actually
+  executes with. Already-written logs and rows are unchanged: rotate any secret
+  a job logged that reached it through `sparkwing.yaml`.
+  Display surfaces were never affected. A yaml-supplied value is not recorded on
+  the run row, and the secret-argument classification comes from the pipeline's
+  declared input names rather than from the values, so `runs list`, `runs get`,
+  `runs status`, the controller endpoints, and `run_start` redacted correctly
+  throughout.
 
 ### Changed
 

@@ -111,10 +111,9 @@ func RunNodeOnce(
 		StartedAt: run.StartedAt,
 	}
 	sparkwing.SetGit(rc.Git)
-	masker := secrets.NewMasker()
-	for _, v := range reg.SecretValues(run.Args) {
-		masker.Register(v)
-	}
+	// run.Args is both the seed and the Invoke input: a pod has no
+	// sparkwing.yaml to merge, so the stored row is the whole arg set.
+	masker := maskerForInvokeArgs(reg, run.Args)
 	plan, err := reg.Invoke(ctx, run.Args, rc)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("build plan: %w", err)

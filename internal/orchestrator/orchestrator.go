@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"reflect"
 	"sort"
@@ -353,29 +354,16 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	defer cancelHeartbeat()
 	go runRunHeartbeatLoop(hbCtx, 30*time.Second, backends.State, runID, wedgeBudget)
 
-	masker := secrets.NewMasker()
-	for _, v := range reg.SecretValues(opts.Args) {
-		masker.Register(v)
-	}
-
-	invokeArgs := opts.Args
-	pipelineArgs := map[string]string(nil)
-	if opts.PipelineYAML != nil {
-		pipelineArgs = opts.PipelineYAML.Args
-	}
-	if len(opts.DefaultArgs) > 0 || len(pipelineArgs) > 0 {
-		merged := make(map[string]string, len(opts.DefaultArgs)+len(pipelineArgs)+len(invokeArgs))
-		for k, v := range opts.DefaultArgs {
-			merged[k] = v
-		}
-		for k, v := range pipelineArgs {
-			merged[k] = v
-		}
-		for k, v := range invokeArgs {
-			merged[k] = v
-		}
-		invokeArgs = merged
-	}
+	// Seed the masker from the args the run will actually execute with,
+	// not from the caller's. A `secret:"true"` input whose value comes
+	// from sparkwing.yaml never appears in opts.Args, so seeding from
+	// those left every yaml-supplied secret unregistered -- and an
+	// unregistered value is a value the node log, the persisted
+	// annotations and summaries, the node failure excerpt, and the
+	// child-run event payloads all write in the clear. invokeArgs is
+	// exactly what reg.Invoke is handed below; the two must not diverge.
+	invokeArgs := mergeInvokeArgs(opts)
+	masker := maskerForInvokeArgs(reg, invokeArgs)
 
 	var profName string
 	var profIsLocal bool
@@ -1035,6 +1023,58 @@ func parentTriggerRepoDir() string {
 		return cwd
 	}
 	return ""
+}
+
+// maskerForInvokeArgs builds a run's log masker from the pipeline's
+// `secret:"true"` inputs resolved against invokeArgs.
+//
+// invokeArgs must be the exact map the caller then hands to
+// reg.Invoke. That is the whole contract, and it is why this is a
+// function rather than three inlined loops: the local path seeds from
+// a merge of the CLI flags and both sparkwing.yaml layers, while the
+// pod and replay paths seed from the stored run row, and the one thing
+// every path must not do is seed from a different set of args than it
+// executes with. A value the pipeline receives but the masker never
+// saw is a value that reaches node logs, annotations, summaries, and
+// failure excerpts in the clear -- which is exactly what a
+// yaml-supplied secret used to do here.
+func maskerForInvokeArgs(reg *sparkwing.Registration, invokeArgs map[string]string) *secrets.Masker {
+	masker := secrets.NewMasker()
+	for _, v := range reg.SecretValues(invokeArgs) {
+		masker.Register(v)
+	}
+	return masker
+}
+
+// mergeInvokeArgs layers the argument sources into the single map
+// reg.Invoke is handed: the project's `defaults.args` block at the
+// bottom, the pipeline entry's `args:` block above it, and the caller's
+// explicit args (a CLI flag, a trigger payload, a retry's rehydrated
+// row) on top. Returns opts.Args itself when neither yaml layer applies,
+// so the common case allocates nothing.
+//
+// The run row and its invocation snapshot keep recording opts.Args
+// rather than this merge, on purpose: the reproducer is the command a
+// human typed, and the yaml layers are re-read from the checkout that
+// runs, so a retry picks up the project's current defaults instead of a
+// months-old copy of them.
+//
+// Every value-derived protection has to key off the merged set anyway.
+// What the pipeline receives is what can reach a log line, and where a
+// value came from is not something the redaction machinery can see.
+func mergeInvokeArgs(opts Options) map[string]string {
+	var pipelineArgs map[string]string
+	if opts.PipelineYAML != nil {
+		pipelineArgs = opts.PipelineYAML.Args
+	}
+	if len(opts.DefaultArgs) == 0 && len(pipelineArgs) == 0 {
+		return opts.Args
+	}
+	merged := make(map[string]string, len(opts.DefaultArgs)+len(pipelineArgs)+len(opts.Args))
+	maps.Copy(merged, opts.DefaultArgs)
+	maps.Copy(merged, pipelineArgs)
+	maps.Copy(merged, opts.Args)
+	return merged
 }
 
 // logDir is the run's log directory on the machine executing it, as
