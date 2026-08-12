@@ -92,9 +92,13 @@ func TestEntryExecHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer func() {
+			_ = cacheUnlock(proof)
 			_ = proof.Close()
 			_ = os.Remove(proof.Name())
 		}()
+		if acquired, err := cacheLock(proof, cacheLockExclusiveNonblock); err != nil || !acquired {
+			t.Fatalf("lock forged proof: acquired=%v err=%v", acquired, err)
+		}
 		coordinate := strconv.FormatUint(uint64(unlocked.Fd()), 10) + ":" + entry.key + ":" +
 			base64.RawURLEncoding.EncodeToString([]byte(entry.root)) + ":" +
 			strconv.FormatUint(uint64(proof.Fd()), 10) + ":" +
