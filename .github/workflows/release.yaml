@@ -241,6 +241,25 @@ jobs:
           go run ./cmd/sign-manifest -in dist/SHA256SUMS -out dist/SHA256SUMS.sig
           ls -la dist/SHA256SUMS.sig
 
+      # Cross-check that the private key that just signed is the mate of
+      # the public key compiled into the CLI. A keypair mismatch (a pubkey
+      # pasted from a different `-genkey` run than the stored secret) would
+      # sign cleanly here yet leave every client unable to verify -- a dead
+      # updater shipped to the fleet. Verifying the fresh signature against
+      # the embedded key catches that before publish. Skipped only when the
+      # key is unset (the sign step already warned and produced no .sig).
+      - name: Verify SHA256SUMS.sig matches the embedded updater key
+        env:
+          SPARKWING_UPDATE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SPARKWING_UPDATE_SIGNING_KEY:-}" ]; then
+            echo "signing key unset; no .sig to verify"; exit 0
+          fi
+          pub=$(sed -nE 's/.*sparkwingUpdatePubKeyHex = "([0-9a-f]+)".*/\1/p' cmd/sparkwing/update.go)
+          if [ -z "$pub" ]; then echo "::error::could not read sparkwingUpdatePubKeyHex"; exit 1; fi
+          go run ./cmd/sign-manifest -verify -in dist/SHA256SUMS -sig dist/SHA256SUMS.sig -pub "$pub"
+
       # Auditor convenience only: a cosign keyless signature over the
       # manifest, committing the workflow+repo+tag identity via GitHub
       # OIDC. The updater does NOT consume this -- its trust root is the

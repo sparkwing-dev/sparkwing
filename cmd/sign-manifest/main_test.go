@@ -2,7 +2,9 @@ package main
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
@@ -77,5 +79,35 @@ func TestLoadSigningKey(t *testing.T) {
 	}
 	if _, err := loadSigningKey(base64.StdEncoding.EncodeToString([]byte("too short"))); err == nil {
 		t.Fatal("wrong-length key was accepted")
+	}
+}
+
+func TestVerifyFile_MatchAndMismatch(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "SHA256SUMS")
+	sig := filepath.Join(dir, "SHA256SUMS.sig")
+	if err := os.WriteFile(in, []byte("deadbeef  sparkwing-linux-amd64\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := signFile(priv, in, sig); err != nil {
+		t.Fatal(err)
+	}
+	// Matching key verifies.
+	if err := verifyFile(hex.EncodeToString(pub), in, sig); err != nil {
+		t.Fatalf("matching key failed to verify: %v", err)
+	}
+	// A different key (the mismatch we are guarding against) fails.
+	otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	if err := verifyFile(hex.EncodeToString(otherPub), in, sig); err == nil {
+		t.Fatal("a mismatched public key verified; the CI guard would not catch a keypair mismatch")
+	}
+	// The all-zero placeholder is rejected as unarmed.
+	zero := hex.EncodeToString(make([]byte, ed25519.PublicKeySize))
+	if err := verifyFile(zero, in, sig); err == nil {
+		t.Fatal("placeholder key verified; unarmed build not rejected")
 	}
 }
