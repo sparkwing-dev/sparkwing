@@ -75,7 +75,7 @@ func TestEntryExecHelper(t *testing.T) {
 		}
 		return
 	}
-	if mode == "reject-unlocked-lease" {
+	if mode == "adopt-unlocked-lease" {
 		root := os.Getenv("SPARKWING_ENTRY_HELPER_ROOT")
 		key := os.Getenv("SPARKWING_ENTRY_HELPER_KEY")
 		entry, err := pipelineEntryAt(root, key)
@@ -106,9 +106,11 @@ func TestEntryExecHelper(t *testing.T) {
 		if err := os.Setenv(execLeaseEnv, coordinate); err != nil {
 			t.Fatal(err)
 		}
-		if err := AdoptExecLeaseFromEnv(); err == nil {
-			t.Fatal("unlocked lease descriptor was accepted")
+		if err := AdoptExecLeaseFromEnv(); err != nil {
+			t.Fatal(err)
 		}
+		_, _ = fmt.Fprintln(os.Stdout, "ready")
+		_, _ = io.Copy(io.Discard, os.Stdin)
 		return
 	}
 	root := os.Getenv("SPARKWING_ENTRY_HELPER_ROOT")
@@ -153,7 +155,7 @@ func TestAdoptExecLeaseTwiceDoesNotCloseRetainedLease(t *testing.T) {
 	}
 }
 
-func TestAdoptExecLeaseRejectsUnlockedLeaseDescriptor(t *testing.T) {
+func TestAdoptExecLeaseEstablishesAuthorityOnInheritedDescriptor(t *testing.T) {
 	root := t.TempDir()
 	key := "11111111-11111111"
 	entry := copyTestBinaryIntoEntry(t, root, key)
@@ -161,19 +163,41 @@ func TestAdoptExecLeaseRejectsUnlockedLeaseDescriptor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := errors.Join(cacheUnlock(lease), lease.Close()); err != nil {
-		t.Fatal(err)
-	}
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
 	cmd.Env = append(os.Environ(),
-		"SPARKWING_ENTRY_EXEC_HELPER=reject-unlocked-lease",
+		"SPARKWING_ENTRY_EXEC_HELPER=adopt-unlocked-lease",
 		"SPARKWING_ENTRY_HELPER_ROOT="+root,
 		"SPARKWING_ENTRY_HELPER_KEY="+key,
 	)
-	output, err := cmd.CombinedOutput()
+	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		t.Fatalf("unlocked lease helper failed: %v\n%s", err, output)
+		t.Fatal(err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || strings.TrimSpace(line) != "ready" {
+		t.Fatalf("forged adoption readiness = %q, %v", line, err)
+	}
+	if err := errors.Join(cacheUnlock(lease), lease.Close()); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ActiveSkippedEntries != 1 || result.ReclaimedEntries != 0 {
+		t.Fatalf("adopted descriptor did not retain lease after other reader exited: %+v", result)
+	}
+	_ = stdin.Close()
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
 	}
 }
 
