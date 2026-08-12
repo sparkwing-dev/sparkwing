@@ -972,8 +972,8 @@ on its own after five idle minutes. See 'sparkwing runs consumer'.
 | `-C, --cd PATH` | Resolve the pipeline from this directory instead of the current one |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--home PATH` | Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing) |
-| `--consumer-idle DUR` | How long the resident consumer stays alive with no work (default 5m) |
-| `--consumer-claim-lease DUR` | Lease the consumer stamps on each claimed run, renewed while it executes (default 3m) |
+| `--consumer-idle DUR` | If this starts a consumer: how long it stays alive with no work (default 5m). A resident consumer keeps its own settings. |
+| `--consumer-claim-lease DUR` | If this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m) |
 
 ### Examples
 

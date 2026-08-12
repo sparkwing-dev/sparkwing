@@ -85,10 +85,13 @@ func runRunsSubmit(ctx context.Context, args []string) error {
 	home := fs.String("home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	changeDir := fs.StringP("cd", "C", "", "resolve the pipeline from this directory instead of the current one")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
+	// Both tune a consumer this submission starts. A consumer already
+	// resident keeps the settings it was started with, so these are
+	// described as applying to a new one rather than to "the consumer".
 	idle := fs.Duration("consumer-idle", 0,
-		"how long the resident consumer stays alive with no work (default 5m)")
+		"if this starts a consumer: how long it stays alive with no work (default 5m)")
 	claimLease := fs.Duration("consumer-claim-lease", 0,
-		"lease the consumer stamps on each claimed run, renewed while it executes (default 3m)")
+		"if this starts a consumer: the lease it stamps on each claimed run, renewed while the run executes (default 3m)")
 	// Everything after the pipeline name belongs to the pipeline, so the
 	// flag set stops at the first operand.
 	fs.SetInterspersed(false)
