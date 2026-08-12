@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -54,6 +55,14 @@ func TestEntryExecHelper(t *testing.T) {
 			time.Sleep(time.Hour)
 		}
 	}
+	if mode == "term-delay" {
+		terminated := make(chan os.Signal, 1)
+		signal.Notify(terminated, syscall.SIGTERM)
+		_, _ = fmt.Fprintln(os.Stdout, "ready")
+		<-terminated
+		time.Sleep(200 * time.Millisecond)
+		return
+	}
 	if mode == "spawn" {
 		child := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
 		child.Env = replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "child")
@@ -87,10 +96,59 @@ func TestEntryExecHelper(t *testing.T) {
 		nextMode = "spawn"
 	} else if mode == "acquire-and-init-spawn" {
 		nextMode = "spawn-during-init"
+	} else if mode == "acquire-and-term-delay" {
+		nextMode = "term-delay"
 	}
 	env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", nextMode)
 	if err := lease.ExecReplace([]string{"-test.run=^TestEntryExecHelper$"}, "", env); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
+	root := t.TempDir()
+	key := "11111111-11111111"
+	entry := copyTestBinaryIntoEntry(t, root, key)
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
+	cmd.Env = append(os.Environ(),
+		"SPARKWING_ENTRY_EXEC_HELPER=acquire-and-term-delay",
+		"SPARKWING_ENTRY_HELPER_ROOT="+root,
+		"SPARKWING_ENTRY_HELPER_KEY="+key,
+	)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || strings.TrimSpace(line) != "ready" {
+		t.Fatalf("child readiness = %q, %v", line, err)
+	}
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ActiveSkippedEntries != 1 || result.ReclaimedEntries != 0 {
+		t.Fatalf("wrapper released lease before child exit: %+v", result)
+	}
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	result, err = Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ReclaimedEntries != 1 {
+		t.Fatalf("wrapper retained lease after child exit: %+v", result)
+	}
+	if _, err := os.Stat(entry.binaryPath()); !os.IsNotExist(err) {
+		t.Fatalf("pruned entry still exists: %v", err)
 	}
 }
 
