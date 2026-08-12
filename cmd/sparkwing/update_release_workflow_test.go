@@ -19,10 +19,17 @@ func TestReleaseWorkflowPublishesImmutableSignedUpdaterAssets(t *testing.T) {
 		"sparkwing-*.sig",
 		"SPARKWING_RELEASE_SIGNING_KEY",
 		"verify-release",
+		"--draft",
+		"--verify-tag",
+		"--latest=false",
+		"gh release edit \"$tag\" --draft=false",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("release workflow missing %q", required)
 		}
+	}
+	if strings.Contains(workflow, "existing release $tag; updating assets + notes") {
+		t.Error("release workflow mutates an existing public release")
 	}
 	if strings.Contains(workflow, "gh release upload \"$tag\" --clobber") {
 		t.Error("release workflow permits signed assets to be overwritten")
