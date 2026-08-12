@@ -22,4 +22,11 @@ func TestDiscoverPackagePathsIncludesEveryPublicPackage(t *testing.T) {
 	if !slices.IsSorted(paths) {
 		t.Fatalf("package paths are not stable: %v", paths)
 	}
+	seen := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		if seen[path] {
+			t.Fatalf("public package %q appears more than once: %v", path, paths)
+		}
+		seen[path] = true
+	}
 }
