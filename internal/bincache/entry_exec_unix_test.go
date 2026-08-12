@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -54,6 +55,21 @@ func TestEntryExecHelper(t *testing.T) {
 			time.Sleep(time.Hour)
 		}
 	}
+	if mode == "term-delay" {
+		terminated := make(chan os.Signal, 1)
+		signal.Notify(terminated, syscall.SIGTERM)
+		_, _ = fmt.Fprintln(os.Stdout, os.Getpid())
+		<-terminated
+		time.Sleep(200 * time.Millisecond)
+		return
+	}
+	if mode == "start-race-wrapper" {
+		env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "term-delay")
+		_ = execChildWith(os.Args[0], []string{"-test.run=^TestEntryExecHelper$"}, env, func(*exec.Cmd) {
+			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		})
+		return
+	}
 	if mode == "spawn" {
 		child := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
 		child.Env = replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "child")
@@ -87,6 +103,8 @@ func TestEntryExecHelper(t *testing.T) {
 		nextMode = "spawn"
 	} else if mode == "acquire-and-init-spawn" {
 		nextMode = "spawn-during-init"
+	} else if mode == "acquire-and-term-delay" {
+		nextMode = "term-delay"
 	}
 	env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", nextMode)
 	if err := lease.ExecReplace([]string{"-test.run=^TestEntryExecHelper$"}, "", env); err != nil {
@@ -96,6 +114,102 @@ func TestEntryExecHelper(t *testing.T) {
 
 func TestExecLeaseDoesNotSurviveChildSpawnedDuringInit(t *testing.T) {
 	testExecLeaseDoesNotSurviveChild(t, "acquire-and-init-spawn")
+}
+
+func TestExecChildSupervisesSignalsBeforeStart(t *testing.T) {
+	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
+	cmd.Env = append(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER=start-race-wrapper")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
+		t.Fatalf("child readiness = %q, %v", line, err)
+	}
+	childPID, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil {
+		t.Fatalf("child pid = %q, %v", line, err)
+	}
+	cleanupProcess(t, childPID)
+	if err := waitCommand(t, cmd, childPID); err == nil {
+		t.Fatal("signal-terminated foreground exited successfully")
+	}
+	if err := syscall.Kill(childPID, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("foreground child survived supervised termination: %v", err)
+	}
+}
+
+func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
+	root := t.TempDir()
+	key := "11111111-11111111"
+	entry := copyTestBinaryIntoEntry(t, root, key)
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
+	cmd.Env = append(os.Environ(),
+		"SPARKWING_ENTRY_EXEC_HELPER=acquire-and-term-delay",
+		"SPARKWING_ENTRY_HELPER_ROOT="+root,
+		"SPARKWING_ENTRY_HELPER_KEY="+key,
+	)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd.Stderr = os.Stderr
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
+		t.Fatalf("child readiness = %q, %v", line, err)
+	}
+	childPID, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil {
+		t.Fatalf("child pid = %q, %v", line, err)
+	}
+	cleanupProcess(t, childPID)
+	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ActiveSkippedEntries != 1 || result.ReclaimedEntries != 0 {
+		t.Fatalf("wrapper released lease before child exit: %+v", result)
+	}
+	if err := waitCommand(t, cmd, childPID); err != nil {
+		t.Fatal(err)
+	}
+	result, err = Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ReclaimedEntries != 1 {
+		t.Fatalf("wrapper retained lease after child exit: %+v", result)
+	}
+	if _, err := os.Stat(entry.binaryPath()); !os.IsNotExist(err) {
+		t.Fatalf("pruned entry still exists: %v", err)
+	}
+}
+
+func waitCommand(t *testing.T, cmd *exec.Cmd, childPID int) error {
+	t.Helper()
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	select {
+	case err := <-waited:
+		return err
+	case <-time.After(2 * time.Second):
+		_ = syscall.Kill(childPID, syscall.SIGKILL)
+		<-waited
+		t.Fatal("foreground wrapper did not finish before the deadline")
+		return nil
+	}
 }
 
 func TestExecLeaseDoesNotSurviveInPersistentChild(t *testing.T) {
