@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -176,6 +177,11 @@ func TestAdoptExecLeaseFailsClosedOnMismatchedDescriptor(t *testing.T) {
 	t.Setenv("SPARKWING_INTERNAL_CACHE_LEASE", coordinate)
 	if err := AdoptExecLeaseFromEnv(); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("mismatched descriptor error = %v", err)
+	}
+	runtime.GC()
+	runtime.GC()
+	if _, err := wrong.WriteString("descriptor still owned by caller"); err != nil {
+		t.Fatalf("rejected coordinate retained descriptor ownership: %v", err)
 	}
 }
 
