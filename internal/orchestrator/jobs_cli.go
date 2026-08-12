@@ -193,6 +193,45 @@ type StatusOpts struct {
 type nodeWithSteps struct {
 	*store.Node
 	Steps []*store.NodeStep `json:"steps,omitempty"`
+
+	// LogExcerpt is the masked, bounded tail of the failing command's
+	// output for a node that failed with captured output -- the same
+	// excerpt the node's error text carries, minus the headline and
+	// marker, so a JSON consumer gets the output without parsing an
+	// error string. Both fields are absent together when the node did
+	// not fail or failed without any output to excerpt; absence is the
+	// honest report, and Error still describes the failure.
+	LogExcerpt          string `json:"log_excerpt,omitempty"`
+	LogExcerptTruncated *bool  `json:"log_excerpt_truncated,omitempty"`
+
+	// LogExcerptUnavailable marks the one case where absence is not a
+	// statement: the lookup could not read far enough (or at all) to
+	// know whether this node published an excerpt. Never set together
+	// with LogExcerpt.
+	LogExcerptUnavailable bool `json:"log_excerpt_unavailable,omitempty"`
+}
+
+// withFailureExcerpts stamps each node's published excerpt onto the
+// JSON node view. Nodes with no excerpt (succeeded, skipped, cancelled,
+// upstream-failed, or failed without captured output) are untouched --
+// except a failed node the index could not speak for, which is marked
+// unavailable rather than left looking like a node with no output.
+func withFailureExcerpts(nodes []nodeWithSteps, ix failureExcerptIndex) []nodeWithSteps {
+	for i := range nodes {
+		if nodes[i].Node == nil {
+			continue
+		}
+		if ex, ok := ix.Get(nodes[i].NodeID); ok {
+			truncated := ex.Truncated
+			nodes[i].LogExcerpt = ex.LogExcerpt
+			nodes[i].LogExcerptTruncated = &truncated
+			continue
+		}
+		if nodes[i].Outcome == string(sparkwing.Failed) && ix.Unavailable(nodes[i].NodeID) {
+			nodes[i].LogExcerptUnavailable = true
+		}
+	}
+	return nodes
 }
 
 // groupStepsByNode buckets a flat NodeStep list by node id.
@@ -243,7 +282,9 @@ func JobStatus(ctx context.Context, paths Paths, runID string, opts StatusOpts, 
 		if err != nil {
 			return err
 		}
-		payload := map[string]any{"run": run, "nodes": nodes}
+		wrapped := withFailureExcerpts(joinStepsByNode(nodes, nil),
+			failureExcerptsFor(ctx, b, runID, failedNodeIDs(nodes)))
+		payload := map[string]any{"run": run, "nodes": wrapped}
 		if p := runLogPath(run); p != "" {
 			payload["log_path"] = p
 		}
@@ -1389,17 +1430,16 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 		return err
 	}
 
-	type failedNode struct {
-		Node    string `json:"node"`
-		Outcome string `json:"outcome"`
-		Error   string `json:"error"`
+	// Only the JSON shape carries excerpts, and only a run with a
+	// failure has any to fetch: the human output prints Error alone, so
+	// scanning the event stream for it would be pure cost. The unscanned
+	// zero value claims nothing either way, which is what the human path
+	// wants -- it renders no excerpt and no unavailability.
+	var excerpts failureExcerptIndex
+	if asJSON {
+		excerpts = failureExcerptsFor(ctx, st, runID, failedNodeIDs(nodes))
 	}
-	var failed []failedNode
-	for _, n := range nodes {
-		if n.Outcome == string(sparkwingFailedStr) && n.Error != "" {
-			failed = append(failed, failedNode{Node: n.NodeID, Outcome: n.Outcome, Error: n.Error})
-		}
-	}
+	failed := failedNodeReports(nodes, excerpts)
 
 	if asJSON {
 		return writeJSON(out, failed)
@@ -1412,6 +1452,46 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 		fmt.Fprintf(out, "%s:\n  %s\n\n", f.Node, indent(f.Error, "  "))
 	}
 	return nil
+}
+
+// failedNodeReport is one row of `runs errors`. Error is the human-
+// readable failure text (which already embeds a bounded excerpt);
+// LogExcerpt is the same excerpt as structured data for consumers that
+// would otherwise have to parse the error string. Both excerpt fields
+// are absent together for a node that failed without captured output.
+type failedNodeReport struct {
+	Node                string `json:"node"`
+	Outcome             string `json:"outcome"`
+	Error               string `json:"error"`
+	LogExcerpt          string `json:"log_excerpt,omitempty"`
+	LogExcerptTruncated *bool  `json:"log_excerpt_truncated,omitempty"`
+
+	// LogExcerptUnavailable marks a failure whose excerpt could not be
+	// looked up, as opposed to one that never had an excerpt to look
+	// up. See nodeWithSteps.
+	LogExcerptUnavailable bool `json:"log_excerpt_unavailable,omitempty"`
+}
+
+// failedNodeReports selects the nodes that own a failure and attaches
+// each one's published excerpt. Cancelled and upstream-failed nodes are
+// not failures of their own and never appear.
+func failedNodeReports(nodes []*store.Node, ix failureExcerptIndex) []failedNodeReport {
+	var out []failedNodeReport
+	for _, n := range nodes {
+		if n.Outcome != string(sparkwingFailedStr) || n.Error == "" {
+			continue
+		}
+		row := failedNodeReport{Node: n.NodeID, Outcome: n.Outcome, Error: n.Error}
+		if ex, ok := ix.Get(n.NodeID); ok {
+			truncated := ex.Truncated
+			row.LogExcerpt = ex.LogExcerpt
+			row.LogExcerptTruncated = &truncated
+		} else if ix.Unavailable(n.NodeID) {
+			row.LogExcerptUnavailable = true
+		}
+		out = append(out, row)
+	}
+	return out
 }
 
 // filterNodesBySince drops never-started or too-old nodes.
@@ -1569,7 +1649,8 @@ func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out 
 		return err
 	}
 	steps, _ := st.ListNodeSteps(ctx, runID)
-	wrapped := joinStepsByNode(nodes, steps)
+	wrapped := withFailureExcerpts(joinStepsByNode(nodes, steps),
+		failureExcerptsFor(ctx, st, runID, failedNodeIDs(nodes)))
 	payload := map[string]any{"run": run, "nodes": wrapped}
 	if p := runLogPath(run); p != "" {
 		payload["log_path"] = p

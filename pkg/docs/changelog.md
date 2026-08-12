@@ -140,6 +140,61 @@ code change to unlock.
   is treated as gone rather than holding a daemon goroutine for as long
   as it lives.
 
+### Changed
+
+- **orchestrator:** A failed node's recorded error is now bounded and redacted.
+  Previously a failing `sparkwing.Bash`/`Exec` step stored the command's entire
+  stderr *and* the entire command in the node's error -- both unbounded and
+  unmasked, so a large compiler run, or a generated script, turned a state row
+  into hundreds of kilobytes that `runs status`, the dashboard, and every
+  notification had to carry. The whole error text now has a hard ceiling of
+  about 5 KiB: the last 20 lines (at most 4 KiB) of command output, led by a
+  headline trimmed to one short line, with secret values redacted throughout.
+  When output was dropped the text says so and names the command that prints
+  the rest:
+  `… earlier output omitted (see: sparkwing runs logs --run <id> --node <id>)`.
+  An error with no captured output keeps its *first* lines instead -- there the
+  message is the diagnostic and its opening names the problem -- and points at
+  no log, because the log does not contain it. The node log still holds the
+  full output; cancelled and upstream-failed nodes are untouched.
+- **cli:** `sparkwing runs errors -o json` and `sparkwing runs status -o json`
+  carry the excerpt as structured data per failed node: `log_excerpt` (the
+  masked bounded output, without the headline and marker that decorate the
+  error text) and `log_excerpt_truncated`. Both fields are absent together when
+  there is nothing to excerpt -- a failure with no captured output, or a node
+  that did not fail on its own -- so absence is reportable rather than
+  fabricated. Where absence itself cannot be established (an event stream too
+  large to scan, or a controller that will not serve it) the node carries
+  `log_excerpt_unavailable` instead of a silent gap. Excerpts ride a new
+  `node_failure_excerpt` run event, so local and controller-backed reads render
+  identically; runs mirrored to S3-backed state carry no events and so no
+  excerpts. See [observability](docs/observability.md#failure-excerpts).
+
+### Security
+
+- **orchestrator:** Redact secret values in persisted node and step annotations
+  and summaries. The node log's masking wrapper sat *inside* the wrappers that
+  write `sparkwing.Annotate` and `sparkwing.Summary` output to the state store,
+  so those wrappers persisted the record before it was redacted: the log file
+  showed `***` while the annotation and summary rows beside it -- read by
+  `runs status`, `runs summary`, and the dashboard -- held the plaintext value.
+  The masker is now outermost. Rotate any secret a job passed to `Annotate` or
+  `Summary`; existing rows are unchanged.
+- **orchestrator:** Redact secret values in the structured attributes of node log
+  records, not just their messages. A failed step reports the command's whole
+  error text in `attrs.error`, so a secret that reached a command line or its
+  output was persisted in the node log one line below the redacted message --
+  on every execution path, local included. String attributes are now masked,
+  including strings nested in lists and maps; anything nested deeper than the
+  redaction pass inspects is replaced wholesale rather than emitted.
+- **orchestrator:** Redact secret values in node logs written by cluster and pod
+  node execution. `run-node` built the per-run masker from the pipeline's secret
+  arguments and wired it into secret resolution, but never installed it on the
+  context the node log wrapper reads, so a node running on a runner or in a pod
+  persisted secret values in plaintext where the same node run locally redacted
+  them. Already-written logs are unchanged: rotate any secret a job logged from
+  a remote node.
+
 ## [v0.25.0] - 2026-08-11
 ### Added
 
