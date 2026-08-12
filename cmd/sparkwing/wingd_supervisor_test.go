@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -46,7 +47,7 @@ func TestWingdSupervisorHardStopsOnlyAfterBoundedTermAndStartsOneSuccessor(t *te
 	wedged := newSupervisorTestChild()
 	successor := newSupervisorTestChild()
 	children := []*supervisorTestChild{wedged, successor}
-	var starts int
+	var starts atomic.Int32
 	startedSuccessor := make(chan struct{})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -59,17 +60,22 @@ func TestWingdSupervisorHardStopsOnlyAfterBoundedTermAndStartsOneSuccessor(t *te
 			TermGrace:     time.Millisecond,
 		}, wingdSupervisorDeps{
 			Start: func() (wingdSupervisedChild, error) {
-				if starts >= len(children) {
+				index := int(starts.Add(1) - 1)
+				if index >= len(children) {
 					t.Fatalf("started more than one successor")
 				}
-				child := children[starts]
-				starts++
-				if starts == 2 {
+				child := children[index]
+				if index == 1 {
 					close(startedSuccessor)
 				}
 				return child, nil
 			},
-			Probe: func(context.Context) error { return errors.New("unresponsive") },
+			Probe: func(context.Context) error {
+				if starts.Load() == 1 {
+					return errors.New("unresponsive")
+				}
+				return nil
+			},
 		})
 	}()
 
@@ -85,8 +91,8 @@ func TestWingdSupervisorHardStopsOnlyAfterBoundedTermAndStartsOneSuccessor(t *te
 	if kills != 1 {
 		t.Fatalf("wedged child kills = %d, want one hard stop after grace", kills)
 	}
-	if starts != 2 {
-		t.Fatalf("starts = %d, want predecessor plus exactly one successor", starts)
+	if starts.Load() != 2 {
+		t.Fatalf("starts = %d, want predecessor plus exactly one successor", starts.Load())
 	}
 
 	cancel()
