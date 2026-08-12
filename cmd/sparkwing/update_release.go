@@ -3,21 +3,16 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/releaseauth"
 )
 
-const releasePublicKeyBase64 = "SCA8nBcnHkYcyP6g+Quuwy5UR4bKJLlwrf7FcWZsXOI="
-
-func releasePublicKey() (ed25519.PublicKey, error) {
-	decoded, err := base64.StdEncoding.DecodeString(releasePublicKeyBase64)
-	if err != nil || len(decoded) != ed25519.PublicKeySize {
-		return nil, errors.New("embedded release public key is invalid")
-	}
-	return ed25519.PublicKey(decoded), nil
+func releasePublicKeys() ([]ed25519.PublicKey, error) {
+	return releaseauth.PublicKeys()
 }
 
 // verifiedReleaseAsset is the byte boundary the installer consumes.
@@ -49,6 +44,16 @@ func verifyReleaseAsset(publicKey ed25519.PublicKey, manifest, manifestSig []byt
 		return verifiedReleaseAsset{}, fmt.Errorf("checksum mismatch for %s", assetName)
 	}
 	return verifiedReleaseAsset{name: assetName, bytes: asset, digest: digest}, nil
+}
+
+func verifyReleaseAssetWithTrustSet(publicKeys []ed25519.PublicKey, manifest, manifestSig []byte, assetName string, asset, assetSig []byte) (verifiedReleaseAsset, error) {
+	for _, publicKey := range publicKeys {
+		verified, err := verifyReleaseAsset(publicKey, manifest, manifestSig, assetName, asset, assetSig)
+		if err == nil {
+			return verified, nil
+		}
+	}
+	return verifiedReleaseAsset{}, errors.New("release signatures do not match the updater trust set")
 }
 
 func manifestDigest(manifest []byte, assetName string) (string, error) {

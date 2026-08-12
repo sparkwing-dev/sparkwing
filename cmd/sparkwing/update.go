@@ -308,11 +308,11 @@ func downloadAndInstall(version, currentBin string) error {
 	if err != nil {
 		return err
 	}
-	publicKey, err := releasePublicKey()
+	publicKeys, err := releasePublicKeys()
 	if err != nil {
 		return err
 	}
-	verified, err := verifyReleaseAsset(publicKey, manifest, manifestSig, asset, assetBody, assetSig)
+	verified, err := verifyReleaseAssetWithTrustSet(publicKeys, manifest, manifestSig, asset, assetBody, assetSig)
 	if err != nil {
 		return err
 	}

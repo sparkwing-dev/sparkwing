@@ -8,6 +8,33 @@ import (
 	"fmt"
 )
 
+// TrustedPublicKeys is the updater trust set. Rotation adds the replacement
+// key before the release signer changes and removes the retired key later.
+var TrustedPublicKeys = []string{
+	"SCA8nBcnHkYcyP6g+Quuwy5UR4bKJLlwrf7FcWZsXOI=",
+}
+
+func TrustedPublicKey(encoded string) bool {
+	for _, trusted := range TrustedPublicKeys {
+		if encoded == trusted {
+			return true
+		}
+	}
+	return false
+}
+
+func PublicKeys() ([]ed25519.PublicKey, error) {
+	keys := make([]ed25519.PublicKey, 0, len(TrustedPublicKeys))
+	for _, encoded := range TrustedPublicKeys {
+		key, err := PublicKey(encoded)
+		if err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, nil
+}
+
 func PrivateKey(encoded string) (ed25519.PrivateKey, error) {
 	seed, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
