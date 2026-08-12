@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"os"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
@@ -24,6 +26,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
@@ -290,9 +293,21 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		trigger.Source = "manual"
 	}
 
+	// The args the run will actually execute with, resolved once here
+	// and reused for the guard verdict, the masker seed, and reg.Invoke.
+	// See mergeInvokeArgs for the layering.
+	invokeArgs := mergeInvokeArgs(opts)
+
 	if opts.PipelineYAML != nil {
+		// Guards judge the args the run executes with, not the args the
+		// caller typed. An `arg:target=prod` guard has to fire whether
+		// "prod" arrived on the command line or out of the project's
+		// defaults.args / the pipeline entry's args: block -- the run is
+		// equally against prod either way, and a guard that only reads
+		// opts.Args waves through exactly the invocation an operator
+		// wrote the guard to stop.
 		guardCtx := pipelines.GuardContext{
-			Args: opts.Args,
+			Args: invokeArgs,
 		}
 		if opts.Profile != nil {
 			guardCtx.ProfileName = opts.Profile.Name
@@ -362,7 +377,6 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 	// annotations and summaries, the node failure excerpt, and the
 	// child-run event payloads all write in the clear. invokeArgs is
 	// exactly what reg.Invoke is handed below; the two must not diverge.
-	invokeArgs := mergeInvokeArgs(opts)
 	masker := maskerForInvokeArgs(reg, invokeArgs)
 
 	var profName string
@@ -997,21 +1011,6 @@ func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 	}
 }
 
-// emitRunStart sends a run_start record with follow-logs/status hints
-// plus enough invocation context (args, flags, trigger-env keys, cwd)
-// for an operator -- or an agent reading the JSONL stream -- to
-// reproduce the run. Values for trigger env are deliberately omitted;
-// only the names are surfaced so secret-bearing variables don't leak
-// into the log/receipt.
-// buildRunInvocation snapshots how this run was started: run-id,
-// pipeline, args, flags, binary_source, cwd, log_path, hashes, hints,
-// etc.
-// The same map flows into BOTH the store.Run.Invocation column (so
-// runs status / receipt / dashboards can answer "how was this
-// started") and run_start.attrs (so the live JSONL stream agents
-// read carries the same shape). Adding a new context field is a
-// one-line edit here -- no schema migration, no separate emit-vs-
-// store divergence.
 // parentTriggerRepoDir returns the running pipeline's own working
 // directory, whose .sparkwing/ tree lets a same-repo child trigger
 // dispatch from the parent's already-compiled binary without a repo
@@ -1056,13 +1055,37 @@ func maskerForInvokeArgs(reg *sparkwing.Registration, invokeArgs map[string]stri
 //
 // The run row and its invocation snapshot keep recording opts.Args
 // rather than this merge, on purpose: the reproducer is the command a
-// human typed, and the yaml layers are re-read from the checkout that
-// runs, so a retry picks up the project's current defaults instead of a
-// months-old copy of them.
+// human typed. The yaml layers are not stored with it because they are
+// re-read from the checkout the run executes out of, at that checkout's
+// revision -- which for a retry is the source run's recorded revision,
+// materialized by prepareTriggerRepo, so a retry reproduces the
+// original's arguments rather than picking up whatever the project
+// declares today.
 //
 // Every value-derived protection has to key off the merged set anyway.
 // What the pipeline receives is what can reach a log line, and where a
 // value came from is not something the redaction machinery can see.
+//
+// # Where the layers come from, per entry point
+//
+// There is one merge and one guard evaluation, both inside [Run]. What
+// differs is who fills opts.DefaultArgs / opts.PipelineYAML before
+// getting there, and every entry point has to fill them or it plans
+// with a different argument set than its siblings:
+//
+//	entry point                    layers resolved by
+//	-----------------------------  --------------------------------------
+//	`sparkwing run` (main.go)      the CLI, from cwd's project config
+//	queued trigger (local child)   applyCheckoutProjectConfig
+//	claimed trigger (worker)       applyCheckoutProjectConfig
+//	cluster node (RunNodeOnce)     checkoutInvokeArgs -- no Run(), no guards
+//	replay (RunReplayNode)         checkoutInvokeArgs -- no Run(), no guards
+//
+// The first three reach [Run], so filling Options is what makes both the
+// merge and the guards see the project's values. The last two plan a
+// single node directly and merge the args themselves; guards do not
+// apply there because the dispatch they would have gated already
+// happened, on a path that did evaluate them.
 func mergeInvokeArgs(opts Options) map[string]string {
 	var pipelineArgs map[string]string
 	if opts.PipelineYAML != nil {
@@ -1078,6 +1101,126 @@ func mergeInvokeArgs(opts Options) map[string]string {
 	return merged
 }
 
+// checkoutProjectConfig loads the project config of the checkout this
+// process is executing out of, or nil when there is none.
+//
+// The root is the one the SDK runtime already resolved by walking up
+// from cwd for a `.sparkwing/` directory, and the config is read from
+// exactly that directory rather than re-walking with
+// projectconfig.Discover. The re-walk is what makes this dangerous: a
+// fetched checkout that has a `.sparkwing/` but no sparkwing.yaml in it
+// would keep climbing into the ancestors of wherever it was unpacked,
+// and runNodeRemote unpacks under ~/.sparkwing/ -- so an operator's own
+// ~/.sparkwing/sparkwing.yaml could supply arguments to somebody else's
+// pipeline. The resolved root is the boundary; nothing above it is this
+// project.
+//
+// A malformed config is reported, never swallowed. Planning with a
+// different argument set than the dispatcher used is precisely the
+// divergence this whole path exists to close, so it must not happen
+// quietly; the run continues with the caller's arguments, which is the
+// pre-existing behavior, and the warning says why they are all it got.
+func checkoutProjectConfig(logger *slog.Logger) *projectconfig.Config {
+	root := sparkwing.CurrentRuntime().WorkDir
+	if root == "" {
+		return nil
+	}
+	path := filepath.Join(root, ".sparkwing", projectconfig.Filename)
+	cfg, err := projectconfig.Load(path)
+	if err != nil {
+		if logger == nil {
+			logger = slog.Default()
+		}
+		logger.Warn("project config unreadable; running with the caller's arguments only, "+
+			"which may differ from the arguments this run was dispatched with",
+			"path", path, "err", err)
+		return nil
+	}
+	return cfg
+}
+
+// checkoutInvokeArgs is [mergeInvokeArgs] for the two entry points that
+// plan a single node from a stored run row instead of going through
+// [Run]: the cluster node entrypoint (RunNodeOnce) and replay. Those
+// callers get store.Run.Args, which is the operator's explicit layer and
+// nothing else, because that is deliberately all the run row records --
+// the yaml layers are re-read from the checkout that executes, at that
+// checkout's revision.
+//
+// Re-reading them is therefore not optional here; it is the other half
+// of that decision. Skip it and the same commit plans one way on a
+// laptop and another way in a pod, with the pod quietly missing every
+// value the project declared -- an image tag, a region, a `secret:"true"`
+// input the masker then never sees. Both callers execute out of the
+// project checkout (the pod's remote-compile child runs with the fetched
+// repo as its working directory; replay execs the pipeline binary from
+// the local .sparkwing/), so the layers are right there on disk.
+//
+// Degrades to stored when there is no project config: a runner image
+// with the pipeline baked in has no sparkwing.yaml to read, and the
+// stored args remain the whole set, exactly as before.
+func checkoutInvokeArgs(pipeline string, stored map[string]string, logger *slog.Logger) map[string]string {
+	cfg := checkoutProjectConfig(logger)
+	if cfg == nil {
+		return stored
+	}
+	return mergeInvokeArgs(Options{
+		Args:         stored,
+		DefaultArgs:  cfg.Defaults.Args,
+		PipelineYAML: (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(pipeline),
+	})
+}
+
+// applyCheckoutProjectConfig fills the yaml-derived Options fields for
+// the entry points that reach [Run] without a CLI to resolve them: the
+// queued-trigger child (HandleClaimedTriggerLocal) and the worker
+// (ExecuteClaimedTrigger). Both execute out of a project checkout --
+// the local trigger loop execs the child with the repo (for a retry,
+// the recorded-revision snapshot) as its working directory -- but
+// neither used to read it, so a queued trigger, a dashboard retry, and
+// a spawned child all planned with unmerged arguments and skipped
+// guards entirely.
+//
+// Filling Options rather than pre-merging the args is what makes the
+// guards work: [Run] evaluates them against opts.PipelineYAML, so a
+// path that hands over only a merged map is a path where
+// `guards.reject` silently never fires.
+//
+// Mirrors the CLI's resolution in main.go, including the
+// defaults.guards fallback, so a trigger and a `sparkwing run` of the
+// same pipeline are gated identically. Fields the caller already set
+// are left alone.
+func applyCheckoutProjectConfig(opts *Options, logger *slog.Logger) {
+	if opts.DefaultArgs != nil && opts.PipelineYAML != nil {
+		return
+	}
+	cfg := checkoutProjectConfig(logger)
+	if cfg == nil {
+		return
+	}
+	if opts.DefaultArgs == nil {
+		opts.DefaultArgs = cfg.Defaults.Args
+	}
+	if opts.PipelineYAML == nil {
+		entry := (&pipelines.Config{Pipelines: cfg.Pipelines}).Find(opts.Pipeline)
+		if entry != nil && entry.Guards.IsEmpty() {
+			entry.Guards = cfg.Defaults.Guards
+		}
+		opts.PipelineYAML = entry
+	}
+}
+
+// buildRunInvocation snapshots how this run was started: run-id,
+// pipeline, args, flags, binary_source, cwd, log_path, hashes, hints,
+// etc.
+//
+// The same map flows into BOTH the store.Run.Invocation column (so
+// runs status / receipt / dashboards can answer "how was this
+// started") and run_start.attrs (so the live JSONL stream agents
+// read carries the same shape). Adding a new context field is a
+// one-line edit here -- no schema migration, no separate emit-vs-
+// store divergence.
+//
 // logDir is the run's log directory on the machine executing it, as
 // reported by the log backend that will write it (see
 // localRunLogDir). It is recorded as log_path so a caller holding only
@@ -1168,11 +1311,17 @@ func buildRunInvocation(opts Options, runID, logDir string, secretArgs []string)
 	return inv
 }
 
-// emitRunStart sends a run_start record carrying the precomputed
-// invocation snapshot. Caller passes the same map that was stored on
-// store.Run.Invocation, so the live stream and the persisted row agree
-// on every field except the secret-declared args and the reproducer's
-// copy of them, which are redacted here.
+// emitRunStart sends a run_start record with follow-logs/status hints
+// plus enough invocation context (args, flags, trigger-env keys, cwd)
+// for an operator -- or an agent reading the JSONL stream -- to
+// reproduce the run. Values for trigger env are deliberately omitted;
+// only the names are surfaced so secret-bearing variables don't leak
+// into the log/receipt.
+//
+// It carries the precomputed invocation snapshot: the caller passes the
+// same map that was stored on store.Run.Invocation, so the live stream
+// and the persisted row agree on every field except the secret-declared
+// args and the reproducer's copy of them, which are redacted here.
 //
 // The envelope is a render surface, not a re-execution input: nothing
 // reconstructs a run from run_start.attrs (retry reads store.Run.Args),

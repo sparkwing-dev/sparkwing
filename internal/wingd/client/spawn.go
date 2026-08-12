@@ -16,11 +16,6 @@ import (
 // folds into an error when a spawned daemon dies before serving.
 const daemonLogTailLines = 8
 
-// daemonLogCapBytes is the size past which the daemon log is rotated once
-// (to d.log.1) at spawn, so a long-lived home cannot grow it without
-// bound. One rotation keeps the previous run's tail for a post-mortem.
-const daemonLogCapBytes = 1 << 20
-
 // DaemonSpawnVerb is the `wingd` subcommand every spawn in this package
 // invokes on the binary it starts. It is exported so the binaries that
 // host the daemon can pin, in their own tests, that they serve it.
@@ -191,15 +186,21 @@ func daemonLogPath(home string) (string, error) {
 // openDaemonLog prepares the daemon's log file for a detached spawn: it
 // creates the daemon directory (which the spawned daemon has not yet made
 // when the client opens the file), rotates the log once if it has grown
-// past the cap, and opens it append-only. The spawned daemon's stdout and
-// stderr are pointed at the returned file, so its operational log and any
-// early crash both land at the documented path. Nil on failure leaves the
-// daemon's output discarded rather than blocking the spawn.
+// past the cap ([wingd.RotateLogOverCap], which the running daemon shares
+// so the two rotations keep one shape), and opens it append-only. The
+// spawned daemon's stdout and stderr are pointed at the returned file, so
+// its operational log and any early crash both land at the documented
+// path. Nil on failure leaves the daemon's output discarded rather than
+// blocking the spawn.
 //
 // The file has to exist before the process starts, because it is the
 // process's stdout. existed reports whether it was already there, so a
 // spawn that never runs can put the directory back the way it found it
-// rather than leave an empty log implying a daemon ran.
+// rather than leave an empty log implying a daemon ran. A rotation does
+// not change that answer: it empties the log in place, so the file the
+// caller found is still the file that is there, and a predecessor still
+// writing through its own descriptor must not have it unlinked out from
+// under it.
 func openDaemonLog(home string) (f *os.File, existed bool) {
 	path, err := wingd.LogPath(home)
 	if err != nil {
@@ -210,12 +211,9 @@ func openDaemonLog(home string) (f *os.File, existed bool) {
 	} else {
 		_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	}
-	fi, serr := os.Stat(path)
+	_, _ = wingd.RotateLogOverCap(home)
+	_, serr := os.Stat(path)
 	existed = serr == nil
-	if existed && fi.Size() > daemonLogCapBytes {
-		_ = os.Rename(path, path+".1")
-		existed = false
-	}
 	f, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, existed

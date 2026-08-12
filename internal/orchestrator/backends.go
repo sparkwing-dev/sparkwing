@@ -225,33 +225,55 @@ func canonicalLocalStore(b StateBackend) *store.Store {
 // empty string means there is nothing local to point at, and the field
 // is omitted rather than fabricated.
 //
-// KNOWN FALSE NEGATIVE: a profile whose logs backend is a filesystem
-// log store (`logs: {type: fs}`) writes to local disk through
-// HTTPLogs/storage.LogStore, which exposes no run-directory accessor,
-// so those runs report no log_path even though the files are local.
-// Fixing it means adding a run-dir accessor to storage.LogStore and
-// threading it through HTTPLogs.
+// A profile whose logs backend is a filesystem log store
+// (`logs: {type: filesystem}`) also writes to local disk, but it does
+// so through HTTPLogs wrapping a storage.LogStore rather than through
+// localLogs. That case is answered by [HTTPLogs.localRunDir], which
+// probes for the concrete fs store rather than widening the public
+// storage.LogStore interface with a run-directory accessor every
+// remote implementation would have to answer meaninglessly.
 func localRunLogDir(b LogBackend, runID string) string {
-	var p Paths
 	switch l := b.(type) {
 	case localLogs:
-		p = l.paths
+		return EnsureRunLogDir(l.paths, runID)
 	case *localLogs:
-		p = l.paths
-	default:
-		return ""
+		return EnsureRunLogDir(l.paths, runID)
+	case *HTTPLogs:
+		return absExistingDir(l.localRunDir(runID))
 	}
+	return ""
+}
+
+// EnsureRunLogDir creates and returns the absolute directory a locally
+// executed run writes its node logs into, or "" when it cannot be
+// created or is not a directory. It is [localRunLogDir]'s body, exported
+// so a caller that acknowledges a run before the run has started -- most
+// sharply `sparkwing runs submit`, which returns a log_path the moment
+// the trigger is persisted -- reports exactly the directory the executing
+// run will later record, under the same "the path exists or is omitted"
+// rule the run_start receipt follows.
+func EnsureRunLogDir(p Paths, runID string) string {
 	if err := p.EnsureRunDir(runID); err != nil {
 		return ""
 	}
-	dir, err := filepath.Abs(p.RunDir(runID))
+	return absExistingDir(p.RunDir(runID))
+}
+
+// absExistingDir resolves dir to an absolute path and returns it only
+// when it names an existing directory, keeping the "the path exists or
+// is omitted" rule in one place for every log_path producer.
+func absExistingDir(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return ""
 	}
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+	if info, err := os.Stat(abs); err != nil || !info.IsDir() {
 		return ""
 	}
-	return dir
+	return abs
 }
 
 type localState struct {
@@ -569,6 +591,12 @@ func sparkwingGithubSplit(slug string) (owner, repo string) {
 func localNewRunID() string {
 	return fmt.Sprintf("run-%s-%08x", time.Now().UTC().Format("20060102-150405"), time.Now().UnixNano()&0xFFFFFFFF)
 }
+
+// NewLocalRunID mints a run id for a caller that must know the id before
+// the run exists -- `sparkwing runs submit`, which returns the id as its
+// acknowledgment. It is the same generator every local trigger uses, so
+// a submitted run is indistinguishable from any other by its id.
+func NewLocalRunID() string { return localNewRunID() }
 
 func firstNonEmptyStr(a, b string) string {
 	if a != "" {

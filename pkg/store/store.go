@@ -350,7 +350,9 @@ CREATE TABLE IF NOT EXISTS triggers (
     github_repo           TEXT NOT NULL DEFAULT '',
     repo_inherited        INTEGER NOT NULL DEFAULT 0,
     retry_of              TEXT NOT NULL DEFAULT '',
-    parent_node_id        TEXT NOT NULL DEFAULT ''
+    parent_node_id        TEXT NOT NULL DEFAULT '',
+    idempotency_key       TEXT NOT NULL DEFAULT '',
+    claim_seq             INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_triggers_pending
@@ -359,6 +361,18 @@ CREATE INDEX IF NOT EXISTS idx_triggers_claimed_lease
     ON triggers(status, lease_expires_at) WHERE status = 'claimed';
 CREATE INDEX IF NOT EXISTS idx_triggers_source_status_created
     ON triggers(trigger_source, status, created_at);
+-- Dedup is enforced by the database, not by a read-then-write in the
+-- submitter: two concurrent submissions carrying one key must produce
+-- one run, and only a unique constraint decides that without a lock.
+-- The partial predicate keeps the empty default (every trigger that
+-- was never submitted with a key) out of the index entirely.
+--
+-- Scoped to the pipeline: a key names one caller's intent, and two
+-- pipelines naming their intents independently is ordinary. A global
+-- namespace would let a submission of one pipeline be answered with
+-- another pipeline's run.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_triggers_idempotency_key
+    ON triggers(pipeline, idempotency_key) WHERE idempotency_key != '';
 
 -- Unified concurrency primitive (.Cache DSL).
 -- Capacity per-key on entries; policy per-arrival on waiters.
@@ -582,7 +596,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 12
+const expectedSchemaVersion = 13
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -981,6 +995,12 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		return s.ensureColumns("pipeline_profiles", pipelineProfilesVersioningCols)
 	case 12:
 		return s.ensureColumns("triggers", triggerRepoInheritedCols)
+	case 13:
+		if err := s.ensureColumns("triggers", triggerSubmissionCols); err != nil {
+			return err
+		}
+		_, err := s.exec(ctx, triggerIdempotencyIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1023,6 +1043,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		return addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesVersioningCols)
 	case 12:
 		return addColumnsTx(ctx, tx, "triggers", triggerRepoInheritedCols)
+	case 13:
+		if err := addColumnsTx(ctx, tx, "triggers", triggerSubmissionCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, triggerIdempotencyIndex)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1098,16 +1124,18 @@ var columnMigrations = []columnSpec{
 		"last_heartbeat_at": "INTEGER",
 	}},
 	{"triggers", map[string]string{
-		"parent_run_id":  "TEXT",
-		"repo":           "TEXT NOT NULL DEFAULT ''",
-		"repo_url":       "TEXT NOT NULL DEFAULT ''",
-		"github_owner":   "TEXT NOT NULL DEFAULT ''",
-		"github_repo":    "TEXT NOT NULL DEFAULT ''",
-		"repo_inherited": "INTEGER NOT NULL DEFAULT 0",
-		"retry_of":       "TEXT NOT NULL DEFAULT ''",
-		"retry_source":   "TEXT NOT NULL DEFAULT ''",
-		"parent_node_id": "TEXT NOT NULL DEFAULT ''",
-		"full":           "INTEGER NOT NULL DEFAULT 0",
+		"parent_run_id":   "TEXT",
+		"repo":            "TEXT NOT NULL DEFAULT ''",
+		"repo_url":        "TEXT NOT NULL DEFAULT ''",
+		"github_owner":    "TEXT NOT NULL DEFAULT ''",
+		"github_repo":     "TEXT NOT NULL DEFAULT ''",
+		"repo_inherited":  "INTEGER NOT NULL DEFAULT 0",
+		"retry_of":        "TEXT NOT NULL DEFAULT ''",
+		"retry_source":    "TEXT NOT NULL DEFAULT ''",
+		"parent_node_id":  "TEXT NOT NULL DEFAULT ''",
+		"full":            "INTEGER NOT NULL DEFAULT 0",
+		"idempotency_key": "TEXT NOT NULL DEFAULT ''",
+		"claim_seq":       "INTEGER NOT NULL DEFAULT 0",
 	}},
 	{"concurrency_waiters", map[string]string{
 		"holder_id":         "TEXT NOT NULL DEFAULT ''",
@@ -1171,6 +1199,33 @@ var pipelineProfilesVersioningCols = map[string]string{
 var triggerRepoInheritedCols = map[string]string{
 	"repo_inherited": "INTEGER NOT NULL DEFAULT 0",
 }
+
+// triggerSubmissionCols are the additive columns v13 adds so a
+// submitted run can be deduplicated by a caller-supplied key and so
+// each claim on a trigger is distinguishable from the one before it.
+var triggerSubmissionCols = map[string]string{
+	"idempotency_key": "TEXT NOT NULL DEFAULT ''",
+	"claim_seq":       "INTEGER NOT NULL DEFAULT 0",
+}
+
+// TriggerIdempotencyIndexName is the unique index enforcing at most one
+// trigger per (pipeline, idempotency key). Exported so a schema test can
+// assert the constraint exists by name rather than inferring it from an
+// insert that happens to fail.
+const TriggerIdempotencyIndexName = "idx_triggers_idempotency_key"
+
+// triggerIdempotencyIndex is v13's other half. The columns alone would
+// let two concurrent submissions of one key both insert; the constraint
+// is what makes "at most one run per key" true rather than likely. It
+// is written once here and applied on both dialects because the partial
+// unique index is valid SQL in each.
+//
+// An upgrade over a database that somehow already holds duplicate keys
+// would fail here -- correctly. No binary before v13 could write the
+// column, so on a real upgrade every row carries the empty default and
+// the partial predicate excludes all of them.
+const triggerIdempotencyIndex = `CREATE UNIQUE INDEX IF NOT EXISTS ` + TriggerIdempotencyIndexName + `
+    ON triggers(pipeline, idempotency_key) WHERE idempotency_key != ''`
 
 func (s *Store) ensureColumnsAll() error {
 	for _, spec := range columnMigrations {
@@ -2917,6 +2972,36 @@ type Trigger struct {
 	// "Rerun all" choice flips this; "Rerun from failed" leaves
 	// it false (the default).
 	Full bool `json:"full,omitempty"`
+	// IdempotencyKey is a caller-supplied deduplication token, scoped to
+	// the pipeline. At most one trigger may carry any given (pipeline,
+	// non-empty key) pair -- a partial unique index enforces it -- so a
+	// submitter that retries after an ambiguous failure re-reaches the
+	// original run instead of starting a second one. Empty is the norm
+	// and is exempt from the index.
+	//
+	// The scope is the pipeline and not the whole store because a key is
+	// a caller's name for one intent, and two pipelines naming their
+	// intents independently is the normal case: a global namespace would
+	// let `submit beta --idempotency-key nightly` answer with alpha's run
+	// and never execute beta at all.
+	//
+	// It is deliberately not the trigger's tracing identity: a caller
+	// correlating log lines wants a fresh id per attempt, while dedup
+	// wants the same token across attempts of one intent. Tracing ids
+	// ride in TriggerEnv; only this field decides whether a submission
+	// is a duplicate.
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	// ClaimSeq counts how many times this trigger has been claimed. It
+	// is the fence that makes a re-claim invalidate the previous
+	// dispatch: a claim reads the value it was given, and a terminal
+	// write that presents a stale value is refused rather than applied.
+	//
+	// Without it, a dispatch whose claim lapsed and was taken by another
+	// consumer could still finish and stamp its own outcome over the run
+	// the new claim is producing -- two writers, one run row, and the
+	// last to finish wins regardless of which one the store considers
+	// current.
+	ClaimSeq int64 `json:"claim_seq,omitempty"`
 }
 
 // DefaultLeaseDuration is the claim lease TTL. Wide enough to survive
@@ -2947,13 +3032,277 @@ func (s *Store) CreateTrigger(ctx context.Context, t Trigger) error {
 		ctx, `
 INSERT INTO triggers (id, pipeline, args_json, trigger_source, trigger_user,
                       trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full")
-VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		              repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
+		              idempotency_key)
+VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		t.ID, t.Pipeline, argsJSON, t.TriggerSource, t.TriggerUser,
 		envJSON, t.GitBranch, t.GitSHA, status, t.CreatedAt.UnixNano(), parent,
 		t.Repo, t.RepoURL, t.GithubOwner, t.GithubRepo, repoInheritedInt, t.RetryOf, t.RetrySource, t.ParentNodeID, fullInt,
+		t.IdempotencyKey,
 	)
+	if err != nil && isUniqueViolation(err) {
+		return fmt.Errorf("%w: idempotency key %q", ErrDuplicateIdempotencyKey, t.IdempotencyKey)
+	}
 	return err
+}
+
+// ErrDuplicateIdempotencyKey reports that a trigger insert lost the race
+// to another submission carrying the same idempotency key. It is not a
+// failure for the caller to report: the winning trigger is the answer,
+// and the caller resolves it with [Store.FindTriggerByIdempotencyKey].
+var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
+
+// isUniqueViolation reports whether err is a unique-constraint failure.
+// Both drivers surface it as message text rather than a typed sentinel
+// -- modernc.org/sqlite says "UNIQUE constraint failed", lib/pq says
+// "duplicate key value violates unique constraint" -- so the match is on
+// the stable fragment each uses, the same approach isBusyErr takes.
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "unique constraint") ||
+		strings.Contains(msg, "duplicate key value")
+}
+
+// FindTriggerByIdempotencyKey returns the trigger that already claimed
+// key for pipeline, or ErrNotFound when the pair is unused. An empty key
+// is never stored as a claim, so it always reports ErrNotFound rather
+// than matching the many rows that carry the empty default.
+//
+// The pipeline is part of the lookup for the same reason it is part of
+// the index: a key names one caller's intent, and answering a
+// submission of one pipeline with another pipeline's run would mean the
+// requested pipeline never runs at all.
+func (s *Store) FindTriggerByIdempotencyKey(ctx context.Context, pipeline, key string) (*Trigger, error) {
+	if key == "" || pipeline == "" {
+		return nil, ErrNotFound
+	}
+	var id string
+	err := s.queryRow(ctx,
+		`SELECT id FROM triggers WHERE pipeline = ? AND idempotency_key = ?`,
+		pipeline, key).Scan(&id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return s.GetTrigger(ctx, id)
+}
+
+// FinishTriggerAtGeneration marks a trigger done only while seq is still
+// its current claim generation, reporting false when it is not.
+//
+// This is the fence a superseded dispatch meets. Once a lapsed claim has
+// been re-taken by another consumer the trigger's generation moves on,
+// and the old dispatch -- which may still be running, and may still be
+// about to finish -- must not close out a claim it no longer holds. A
+// caller that sees false knows its work was superseded and that the
+// current claim owns the outcome.
+func (s *Store) FinishTriggerAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
+	res, err := s.exec(ctx,
+		`UPDATE triggers SET status = ?, lease_expires_at = NULL
+		  WHERE id = ? AND claim_seq = ?`,
+		triggerStatusDone, id, seq)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// FinishRunAtGeneration writes a run's terminal status only while seq is
+// still its trigger's current claim generation.
+//
+// It pairs with FinishTriggerAtGeneration for the run row: a superseded
+// dispatch must not stamp its own outcome over the run the current claim
+// is producing. Reports false without writing when the generation has
+// moved on.
+func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int64, status, errMsg string) (bool, error) {
+	current, err := s.TriggerClaimGeneration(ctx, runID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			// No trigger row means nothing can supersede this write --
+			// the run was not produced by the trigger queue at all.
+			return true, s.FinishRun(ctx, runID, status, errMsg)
+		}
+		return false, err
+	}
+	if current != seq {
+		return false, nil
+	}
+	return true, s.FinishRun(ctx, runID, status, errMsg)
+}
+
+// ListExpiredClaims returns the ids of claimed triggers whose lease has
+// lapsed, without changing anything.
+//
+// It is deliberately a read. ReapExpiredTriggers flips every lapsed
+// claim straight back to pending, which is the right move for a cluster
+// worker but not for a local consumer: a lapsed lease there can mean a
+// dead dispatch or merely a suspended laptop, and the caller has to look
+// at the run row -- and at what it is executing itself -- before
+// deciding. Separating the observation from the action is what lets that
+// judgment happen.
+func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error) {
+	rows, err := s.query(ctx,
+		`SELECT id FROM triggers
+		  WHERE status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at < ?`,
+		triggerStatusClaimed, time.Now().UnixNano())
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// RequeueUnstartedClaim returns a lapsed claim to the pending queue only
+// while its run has not started -- no run row, or one still pending.
+//
+// The run-status guard is what keeps recovery from becoming duplication.
+// A run that reached `running` has a process behind it that the lease
+// alone cannot see, so requeueing it would put a second copy of live
+// work on the queue; that case belongs to the orphan reaper, which
+// judges by heartbeat. Both conditions are checked inside one
+// transaction so a run that starts concurrently cannot slip between the
+// check and the requeue.
+func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error) {
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var status string
+	err = tx.QueryRowContext(ctx, `SELECT status FROM runs WHERE id = ?`, id).Scan(&status)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		status = runStatusPending
+	case err != nil:
+		return false, err
+	}
+	if status != runStatusPending {
+		return false, nil
+	}
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE triggers
+		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL
+		  WHERE id = ? AND status = ?`,
+		triggerStatusPending, id, triggerStatusClaimed)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ReleaseClaimAtGeneration returns a claimed trigger to the pending
+// queue, but only while seq is still its current claim generation.
+//
+// A consumer shutting down mid-dispatch uses it so the interrupted work
+// is immediately claimable by the next consumer instead of waiting out
+// a lease. The generation guard keeps a shutting-down consumer from
+// yanking a claim another consumer has already taken.
+func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int64) (bool, error) {
+	res, err := s.exec(ctx,
+		`UPDATE triggers
+		    SET status = ?, claimed_at = NULL, lease_expires_at = NULL
+		  WHERE id = ? AND claim_seq = ? AND status = ?`,
+		triggerStatusPending, id, seq, triggerStatusClaimed)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
+// TriggerClaimGeneration returns a trigger's current claim generation,
+// so a dispatch can tell whether it still owns the claim it started
+// under before it writes anything terminal.
+func (s *Store) TriggerClaimGeneration(ctx context.Context, id string) (int64, error) {
+	var seq int64
+	if err := s.queryRow(ctx,
+		`SELECT claim_seq FROM triggers WHERE id = ?`, id).Scan(&seq); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, ErrNotFound
+		}
+		return 0, err
+	}
+	return seq, nil
+}
+
+// CancelPendingTrigger cancels a submitted run that no consumer has
+// claimed yet, in one transaction: the trigger leaves the pending queue
+// and its run row becomes terminal. It reports false without touching
+// anything when the trigger is not pending -- already claimed, already
+// done, or unknown -- which is what makes it safe to try first and fall
+// back to the running-run cancellation path.
+//
+// The status guard in the UPDATE is the whole race defense. A consumer
+// claiming the same trigger runs the mirror-image statement, so exactly
+// one of the two sees a row affected; a cancel that loses reports false
+// and the caller escalates to cancelling the now-running run.
+func (s *Store) CancelPendingTrigger(ctx context.Context, id string) (bool, error) {
+	now := time.Now()
+	tx, err := s.beginTx(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE triggers
+		    SET status = ?, cancel_requested_at = COALESCE(cancel_requested_at, ?)
+		  WHERE id = ? AND status = ?`,
+		triggerStatusDone, now.UnixNano(), id, triggerStatusPending)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if n == 0 {
+		return false, nil
+	}
+	if _, err := tx.ExecContext(ctx,
+		`UPDATE runs
+		    SET status = ?, finished_at = ?, error = ?
+		  WHERE id = ? AND status = ?`,
+		runStatusCancelled, now.UnixNano(),
+		"cancelled before dispatch", id, runStatusPending); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // SpawnedChild is one row of the cross-pipeline spawn relation. A
@@ -3048,7 +3397,8 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pi
 	sel := `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full"
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
+       idempotency_key, claim_seq
   FROM triggers
  WHERE status = ?`
 	args := []any{triggerStatusPending}
@@ -3081,6 +3431,7 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
 		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
+		&t.IdempotencyKey, &t.ClaimSeq,
 	)
 	if parent.Valid {
 		t.ParentRunID = parent.String
@@ -3098,9 +3449,14 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 	expires := now.Add(lease)
 	if _, err := tx.ExecContext(
 		ctx,
-		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ? WHERE id = ?`,
+		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1
+		  WHERE id = ?`,
 		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(), t.ID,
 	); err != nil {
+		return nil, err
+	}
+	if err := tx.QueryRowContext(ctx,
+		`SELECT claim_seq FROM triggers WHERE id = ?`, t.ID).Scan(&t.ClaimSeq); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -3563,6 +3919,18 @@ SELECT id FROM triggers
 	return ids, rows.Err()
 }
 
+// CountPendingTriggers returns how many triggers are waiting to be
+// claimed. A resident consumer reads it to decide whether an idle
+// window is really idle before it releases its lock and exits.
+func (s *Store) CountPendingTriggers(ctx context.Context) (int, error) {
+	var n int
+	if err := s.queryRow(ctx,
+		`SELECT COUNT(*) FROM triggers WHERE status = ?`, triggerStatusPending).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // ClaimSpecificTrigger flips a known pending trigger to 'claimed';
 // ErrNotFound when not pending.
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error) {
@@ -3578,7 +3946,7 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 	now := time.Now()
 	expires := now.Add(lease)
 	res, err := tx.ExecContext(ctx,
-		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?
+		`UPDATE triggers SET status = ?, claimed_at = ?, lease_expires_at = ?, claim_seq = claim_seq + 1
 		  WHERE id = ? AND status = ?`,
 		triggerStatusClaimed, now.UnixNano(), expires.UnixNano(), id, triggerStatusPending)
 	if err != nil {
@@ -3601,11 +3969,13 @@ func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full"
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
+       idempotency_key, claim_seq
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &parent,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt); err != nil {
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
+		&t.IdempotencyKey, &t.ClaimSeq); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -3640,11 +4010,13 @@ func (s *Store) GetTrigger(ctx context.Context, id string) (*Trigger, error) {
 		ctx, `
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at, claimed_at, lease_expires_at,
-       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full"
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, parent_run_id, "full",
+       idempotency_key, claim_seq
   FROM triggers WHERE id = ?`, id,
 	).Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 		&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS, &claimedNS, &leaseNS,
-		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt)
+		&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &parent, &fullInt,
+		&t.IdempotencyKey, &t.ClaimSeq)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -3738,7 +4110,8 @@ func (s *Store) ListTriggers(ctx context.Context, f TriggerFilter) ([]*Trigger, 
 SELECT id, pipeline, args_json, trigger_source, trigger_user,
        trigger_env, git_branch, git_sha, status, created_at,
        claimed_at, lease_expires_at, parent_run_id,
-       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full"
+       repo, repo_url, github_owner, github_repo, repo_inherited, retry_of, retry_source, parent_node_id, "full",
+       idempotency_key, claim_seq
   FROM triggers` + where + `
  ORDER BY created_at DESC
  LIMIT ?`
@@ -3759,7 +4132,8 @@ SELECT id, pipeline, args_json, trigger_source, trigger_user,
 		if err := rows.Scan(&t.ID, &t.Pipeline, &argsJSON, &t.TriggerSource, &t.TriggerUser,
 			&envJSON, &t.GitBranch, &t.GitSHA, &t.Status, &createdNS,
 			&claimedNS, &leaseNS, &parent,
-			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt); err != nil {
+			&t.Repo, &t.RepoURL, &t.GithubOwner, &t.GithubRepo, &repoInheritedInt, &t.RetryOf, &t.RetrySource, &t.ParentNodeID, &fullInt,
+			&t.IdempotencyKey, &t.ClaimSeq); err != nil {
 			return nil, err
 		}
 		t.Full = fullInt != 0

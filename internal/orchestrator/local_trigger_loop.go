@@ -95,86 +95,6 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileNam
 	}
 }
 
-// RunLocalTriggerConsumer polls for pending triggers (including ones
-// created by web/CLI retry against the same SQLite store) and
-// dispatches each via the compile+exec path. Use this in long-lived
-// laptop dev servers (localws) so retried/queued runs actually
-// execute instead of sitting in the trigger table.
-//
-// The compile cache is shared across the consumer's lifetime so
-// back-to-back triggers against the same .sparkwing/ skip the rebuild.
-// An unparseable [StoreWedgeBudgetEnvVar] is a startup error so the
-// misconfiguration fails the caller instead of silently leaving
-// queued triggers unconsumed; on success the consumer runs in its own
-// goroutine until ctx cancels, letting in-flight dispatches finish
-// first.
-func RunLocalTriggerConsumer(ctx context.Context, st *store.Store, logger *slog.Logger) error {
-	if logger == nil {
-		logger = slog.Default()
-	}
-	wedge, err := newStoreWedgeGuardFromEnv()
-	if err != nil {
-		return fmt.Errorf("local trigger consumer: %w", err)
-	}
-	go consumeLocalTriggers(ctx, st, logger, wedge)
-	return nil
-}
-
-// consumeLocalTriggers is RunLocalTriggerConsumer's claim/dispatch
-// loop, split out so validation happens synchronously at startup.
-func consumeLocalTriggers(ctx context.Context, st *store.Store, logger *slog.Logger, wedge *storeWedgeGuard) {
-	cache := &localCompileCache{}
-	defer cache.Close()
-	var wg sync.WaitGroup
-	defer wg.Wait()
-
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-
-		trig, err := st.ClaimNextTrigger(ctx, store.DefaultLeaseDuration)
-		if err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				wedge.success()
-				continue
-			}
-			if terminal := wedge.fail("local trigger consumer: claim trigger", err); terminal != nil {
-				logger.Error("local trigger consumer stopping; store wedged", "err", terminal)
-				return
-			}
-			logger.Warn("local trigger consumer: claim failed", "err", err)
-			continue
-		}
-		wedge.success()
-		if trig == nil {
-			continue
-		}
-
-		wg.Add(1)
-		go func(t *store.Trigger) {
-			defer wg.Done()
-			if err := dispatchLocalTrigger(ctx, st, t, "", "", cache, logger); err != nil {
-				logger.Error("local trigger dispatch failed",
-					"trigger_id", t.ID, "pipeline", t.Pipeline, "err", err)
-				_ = st.CreateRun(ctx, store.Run{
-					ID:        t.ID,
-					Pipeline:  t.Pipeline,
-					Status:    "failed",
-					StartedAt: time.Now(),
-				})
-				_ = st.FinishRun(ctx, t.ID, "failed", "local dispatch: "+err.Error())
-				_ = st.FinishTrigger(ctx, t.ID)
-			}
-		}(trig)
-	}
-}
-
 // claimChildTrigger claims the oldest pending trigger parented to
 // runID. Filtering keeps multi-run sessions from stealing each
 // other's children.
@@ -317,6 +237,9 @@ func locateTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir s
 	if trig.RetryOf != "" {
 		return locateRetryRepo(ctx, trig)
 	}
+	if dir, err := submittedTriggerRepoDir(trig); dir != "" || err != nil {
+		return dir, err
+	}
 	if parentRepoDir != "" && triggerUsesParentRepo(trig) && repoDeclaresPipeline(parentRepoDir, trig.Pipeline) {
 		return parentRepoDir, nil
 	}
@@ -337,6 +260,47 @@ func locateTriggerRepo(ctx context.Context, trig *store.Trigger, parentRepoDir s
 
 func triggerUsesParentRepo(trig *store.Trigger) bool {
 	return trig.Repo == "" || trig.RepoInherited
+}
+
+// SubmitRepoDirKey is the TriggerEnv entry `sparkwing runs submit`
+// writes to name the checkout whose .sparkwing/ defines the submitted
+// pipeline. It is private metadata in the same sense as the
+// retryprovenance keys: persisted on the trigger, never exported into a
+// pipeline process environment.
+//
+// Submission needs it because the submitter and the executor are
+// different processes. The registry resolves a pipeline name to
+// whichever registered repo declares it, which is the right answer for a
+// spawned child and the wrong one for a person standing in a checkout
+// that is not registered -- or, worse, is one of two checkouts of the
+// same project, where the registry would silently pick the other. The
+// submitter knows which tree it was standing in; recording it is how
+// that survives the handoff.
+const SubmitRepoDirKey = "_SPARKWING_SUBMIT_REPO_DIR"
+
+// submittedTriggerRepoDir resolves the checkout a submitted trigger
+// named, or ("", nil) when the trigger carries no submission repo (every
+// trigger from the webhook, spawn, and retry paths).
+//
+// A recorded directory that no longer holds a .sparkwing/ is an error,
+// not a reason to fall back: falling back to the registry would run a
+// different copy of the pipeline than the submitter chose, and doing
+// that silently is exactly the confusion recording the path prevents.
+func submittedTriggerRepoDir(trig *store.Trigger) (string, error) {
+	raw := strings.TrimSpace(trig.TriggerEnv[SubmitRepoDirKey])
+	if raw == "" {
+		return "", nil
+	}
+	dir := filepath.Clean(raw)
+	if !filepath.IsAbs(dir) {
+		return "", fmt.Errorf("submitted trigger %s: recorded repo dir %q is not absolute", trig.ID, raw)
+	}
+	if info, err := os.Stat(filepath.Join(dir, ".sparkwing")); err != nil || !info.IsDir() {
+		return "", fmt.Errorf(
+			"submitted trigger %s: the checkout it was submitted from no longer has a .sparkwing/ at %s; "+
+				"resubmit from the checkout that defines %q", trig.ID, dir, trig.Pipeline)
+	}
+	return dir, nil
 }
 
 // RetrySourceUnavailableError is returned when a local retry cannot prove that

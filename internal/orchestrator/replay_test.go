@@ -141,6 +141,10 @@ func TestMintReplayRun_NoSnapshot(t *testing.T) {
 // don't try to test the happy path here -- it would require a
 // registered pipeline, which test fixtures don't easily provide.
 func TestRunReplayNode_CodeDrift(t *testing.T) {
+	// Replay re-reads the executing checkout's argument layers, so the
+	// runtime must point somewhere this test owns; otherwise this repo's
+	// own sparkwing.yaml would be a live input to it.
+	pointRuntimeAt(t, t.TempDir())
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {
@@ -181,6 +185,7 @@ func TestRunReplayNode_CodeDrift(t *testing.T) {
 // a replay (replay_of_* unset). Guards against accidental misuse on
 // a regular run id.
 func TestRunReplayNode_NotAReplayRun(t *testing.T) {
+	pointRuntimeAt(t, t.TempDir())
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
 	if err != nil {

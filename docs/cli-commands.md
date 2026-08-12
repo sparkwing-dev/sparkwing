@@ -14,7 +14,12 @@ walking every -h page.
 
 Drill down two ways: '<any path> --help' for one verb's flags,
 arguments, and examples, or --path PREFIX to narrow this list
-to a subtree (e.g. --path "sparkwing pipeline").
+to a subtree. The prefix may leave off the leading 'sparkwing'
+(--path runs and --path "sparkwing runs" select the same
+subtree). It matches whole path components, so --path run
+selects 'run' and its subcommands and not the separate 'runs'
+group, and a prefix that matches nothing is an error rather
+than an empty listing.
 
 -o json emits the full record for every verb -- path, synopsis,
 description, positional args, flags, examples, subcommands --
@@ -31,7 +36,7 @@ per top-level command group plus a cli-reference.md index).
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty \| json \| markdown \| plain (default: pretty) |
 | `--split-dir DIR` | With -o markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages |
-| `--path PREFIX` | Only emit commands whose Path starts with PREFIX |
+| `--path PREFIX` | Only emit commands at or under PREFIX, matched by whole path components, with or without the leading 'sparkwing' (runs, sparkwing runs, runs list); a prefix matching nothing is an error |
 | `--include-hidden` | Also emit Hidden:true commands (default: skip) |
 
 ### Examples
@@ -41,6 +46,9 @@ per top-level command group plus a cli-reference.md index).
 sparkwing commands
 
 # Just the pipelines subtree
+sparkwing commands --path pipeline
+
+# The same subtree, fully qualified
 sparkwing commands --path "sparkwing pipeline"
 
 # All paths, one per line

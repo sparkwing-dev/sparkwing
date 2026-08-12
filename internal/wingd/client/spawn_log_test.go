@@ -42,7 +42,7 @@ func TestOpenDaemonLog_RotatesOncePastCap(t *testing.T) {
 	if f, _ := openDaemonLog(home); f != nil {
 		_ = f.Close()
 	}
-	if err := os.WriteFile(path, make([]byte, daemonLogCapBytes+1), 0o600); err != nil {
+	if err := os.WriteFile(path, make([]byte, wingd.LogCapBytes+1), 0o600); err != nil {
 		t.Fatalf("seed oversized log: %v", err)
 	}
 	if f, _ := openDaemonLog(home); f != nil {
