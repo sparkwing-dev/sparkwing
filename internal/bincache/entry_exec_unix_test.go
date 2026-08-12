@@ -179,6 +179,12 @@ func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() {
+		if cmd.ProcessState == nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	})
 	line, err := readLineBefore(stdout, 5*time.Second)
 	if err != nil {
 		t.Fatalf("child readiness = %q, %v", line, err)
