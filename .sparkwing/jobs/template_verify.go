@@ -50,7 +50,13 @@ type TemplateVerifySummary struct {
 // sparks-core the repo is co-releasing -- rather than whatever tags the
 // module proxy happens to serve.
 type verifyEnv struct {
-	CLI        string            `json:"cli"`
+	CLI string `json:"cli"`
+	// Root is the working-tree checkout the CLI was built from. Scaffolds
+	// pin their sparkwing SDK onto it (see pinLocalSparkwingSDK) so a
+	// template is verified against the SDK about to ship, not the last
+	// released tag -- which also keeps the scaffold's runs-store schema in
+	// step with the tree-built CLI that shares StateHome with it.
+	Root       string            `json:"root"`
 	StateHome  string            `json:"state_home"`
 	SparksCore map[string]string `json:"sparks_core"`
 	// GoEnv carries GOCACHE / GOMODCACHE / GOPATH so a job that runs the
@@ -79,7 +85,7 @@ func (TemplateVerify) ShortHelp() string {
 }
 
 func (TemplateVerify) Help() string {
-	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline explain`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with. Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with SPARKWING_DRY_RUN=1 exported so cloud mutations echo instead of executing. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. The pipeline is green only when every template passes, which is why the release pipeline gates on it."
+	return "Builds the sparkwing CLI from the working tree, then fans out one job per sparks-core registry template. Each job scaffolds the template into a throwaway repo using the manifest's verify_params, then runs `go build ./...`, `sparkwing pipeline lint`, and `sparkwing pipeline explain`. Templates that import sparks-core blocks are built against the local sparks-core checkout (discovered via SPARKWING_SPARKS_CORE_DIR, the repo go.work, or a sibling ../sparks-core) so a template can be verified against unreleased library APIs it co-develops with, and every scaffold's sparkwing SDK is replaced with the working tree so the release being cut is what gets verified (and so a runs-store schema bump cannot strand a released-SDK scaffold on the tree-migrated verify state home). Templates tagged verify: runnable also run end-to-end against a synthesized fixture (a go module, a Dockerfile, a Node package, a Python package, or an ephemeral Postgres whose DSN is injected as a masked secret for the run); verify: dry-runnable templates run the same way with SPARKWING_DRY_RUN=1 exported so cloud mutations echo instead of executing. When a fixture's toolchain or any command in the manifest's verify_tools is missing on the host (Docker daemon, node/npm, python3, migrate, pg_dump, ...) the run step is skipped, not failed, so the gate stays green. The pipeline is green only when every template passes, which is why the release pipeline gates on it."
 }
 
 func (TemplateVerify) Examples() []sparkwing.Example {
@@ -155,6 +161,7 @@ func (j *buildVerifyCLIJob) run(ctx context.Context) (verifyEnv, error) {
 	}
 	return verifyEnv{
 		CLI:        bin,
+		Root:       root,
 		StateHome:  filepath.Join(dir, "state"),
 		SparksCore: core,
 		GoEnv:      readGoEnv(ctx),
@@ -275,6 +282,9 @@ func verifyTemplateFn(m templates.Manifest, envRef sparkwing.Ref[verifyEnv]) fun
 		}
 		if err := pinLocalSparksCore(ctx, dotSparkwing, env.SparksCore); err != nil {
 			return fmt.Errorf("%s: pin sparks-core: %w", m.Name, err)
+		}
+		if err := pinLocalSparkwingSDK(ctx, dotSparkwing, env.Root); err != nil {
+			return fmt.Errorf("%s: pin sparkwing SDK: %w", m.Name, err)
 		}
 		if _, err := sparkwing.Exec(ctx, "go", "build", "./...").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
 			return fmt.Errorf("%s: go build: %w", m.Name, err)
@@ -406,6 +416,38 @@ func pinLocalSparksCore(ctx context.Context, dotSparkwing string, core map[strin
 	for _, mp := range sortedKeys(core) {
 		fmt.Fprintf(&b, "\nreplace %s => %s\n", mp, core[mp])
 	}
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		return err
+	}
+	if _, err := sparkwing.Exec(ctx, "go", "mod", "tidy").Dir(dotSparkwing).Env("GOWORK", "off").Run(); err != nil {
+		return fmt.Errorf("go mod tidy: %w", err)
+	}
+	return nil
+}
+
+// pinLocalSparkwingSDK rewrites the scratch .sparkwing/go.mod to resolve
+// the sparkwing SDK from the working tree the verify CLI was built from,
+// then re-tidies. Scaffolds pin the last released SDK by default, which
+// verifies nothing about the release being cut -- and across a runs-store
+// schema bump it is fatal: the tree-built CLI migrates the shared verify
+// state home to the new schema, and a scaffold binary on the released SDK
+// then refuses to open it. Verifying against the tree keeps the scaffold
+// and the CLI on one schema and one SDK.
+func pinLocalSparkwingSDK(ctx context.Context, dotSparkwing, root string) error {
+	if root == "" {
+		return nil
+	}
+	path := filepath.Join(dotSparkwing, "go.mod")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var b strings.Builder
+	b.Write(body)
+	if len(body) > 0 && body[len(body)-1] != '\n' {
+		b.WriteByte('\n')
+	}
+	fmt.Fprintf(&b, "\nreplace github.com/sparkwing-dev/sparkwing => %s\n", root)
 	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
 		return err
 	}
