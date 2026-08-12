@@ -144,10 +144,8 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 		return nil, false
 	})
 
-	masker := secrets.NewMasker()
-	for _, v := range reg.SecretValues(run.Args) {
-		masker.Register(v)
-	}
+	// Seeded from the same run.Args the reg.Invoke above planned with.
+	masker := maskerForInvokeArgs(reg, run.Args)
 	src := secrets.NewDotenvSource("")
 	ctx = sparkwing.WithSecretResolver(ctx, secrets.NewCached(src, masker).AsResolver())
 	ctx = secrets.WithMasker(ctx, masker)
