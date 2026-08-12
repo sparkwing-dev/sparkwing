@@ -75,6 +75,28 @@ func TestEntryExecHelper(t *testing.T) {
 		}
 		return
 	}
+	if mode == "reject-unlocked-lease" {
+		root := os.Getenv("SPARKWING_ENTRY_HELPER_ROOT")
+		key := os.Getenv("SPARKWING_ENTRY_HELPER_KEY")
+		entry, err := pipelineEntryAt(root, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		unlocked, err := os.Open(entry.lockPath("lease"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer unlocked.Close()
+		coordinate := strconv.FormatUint(uint64(unlocked.Fd()), 10) + ":" + entry.key + ":" +
+			base64.RawURLEncoding.EncodeToString([]byte(entry.root))
+		if err := os.Setenv(execLeaseEnv, coordinate); err != nil {
+			t.Fatal(err)
+		}
+		if err := AdoptExecLeaseFromEnv(); err == nil {
+			t.Fatal("unlocked lease descriptor was accepted")
+		}
+		return
+	}
 	root := os.Getenv("SPARKWING_ENTRY_HELPER_ROOT")
 	key := os.Getenv("SPARKWING_ENTRY_HELPER_KEY")
 	entry, err := pipelineEntryAt(root, key)
@@ -114,6 +136,23 @@ func TestAdoptExecLeaseTwiceDoesNotCloseRetainedLease(t *testing.T) {
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("duplicate adoption helper failed: %v\n%s", err, output)
+	}
+}
+
+func TestAdoptExecLeaseRejectsUnlockedLeaseDescriptor(t *testing.T) {
+	root := t.TempDir()
+	key := "11111111-11111111"
+	copyTestBinaryIntoEntry(t, root, key)
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
+	cmd.Env = append(os.Environ(),
+		"SPARKWING_ENTRY_EXEC_HELPER=reject-unlocked-lease",
+		"SPARKWING_ENTRY_HELPER_ROOT="+root,
+		"SPARKWING_ENTRY_HELPER_KEY="+key,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("unlocked lease helper failed: %v\n%s", err, output)
 	}
 }
 
