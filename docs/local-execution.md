@@ -495,8 +495,12 @@ connections, holders, waiters, leases, and guards, followed by a stack
 for every goroutine, to that same log. The daemon keeps running, so you
 can capture the state before deciding whether to stop it, and the dump is
 what a bug report about a stuck or spinning daemon should carry. Each
-dump adds up to 2MB to `d.log`, which is rotated only when a daemon
-starts, so ask for a few of them rather than a few hundred.
+dump adds up to 2MB to `d.log`. The log is rotated once to `d.log.1`
+when it passes 1MB -- both when a daemon starts and before a dump is
+written -- so a long-lived daemon you ask for many dumps keeps the pair
+bounded rather than growing one file forever. Only the previous stretch
+is kept, so copy a dump you care about out of `d.log` before asking for
+several more.
 
 ### Capping sparkwing's share of the machine
 

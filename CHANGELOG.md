@@ -50,6 +50,16 @@ code change to unlock.
 ## [Unreleased]
 ### Fixed
 
+- **wingd:** The daemon log stays bounded between daemon restarts. Rotation
+  happened only when a daemon started, while each `SIGUSR1` diagnostics dump
+  appends up to 2MB to a daemon that by definition keeps running -- so a
+  resident daemon asked for dumps over the weeks between restarts grew
+  `wingd/d.log` without limit. A dump now rotates the log to `d.log.1` first
+  when it is already past the 1MB cap, using the same once-rotated shape as
+  the rotation at spawn, and re-points the daemon's output at the fresh file
+  so the dump lands in `d.log` rather than following the renamed one. A daemon
+  running in a terminal is untouched.
+
 - **cli:** `sparkwing commands --path` accepts the unqualified prefix and
   refuses one that matches nothing. Every command path begins with
   `sparkwing`, so `--path runs` is the spelling a reader reaches for first --
