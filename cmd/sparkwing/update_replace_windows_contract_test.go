@@ -54,3 +54,29 @@ func TestWindowsReplacementRestoresPreservedImageWhenInstallFails(t *testing.T) 
 		t.Fatalf("move calls = %#v, want %#v", calls, want)
 	}
 }
+
+func TestWindowsRollbackRestoresRunningImageAfterInstalledVerificationFails(t *testing.T) {
+	t.Parallel()
+
+	var calls [][2]string
+	move := func(source, target string, _ uint32) error {
+		calls = append(calls, [2]string{source, target})
+		return nil
+	}
+	remove := func(path string) error {
+		if path == "sparkwing.exe.old" {
+			return errors.New("running image is still mapped")
+		}
+		return nil
+	}
+	if err := restoreWindowsRunningImageWith("rollback", "sparkwing.exe", move, remove); err != nil {
+		t.Fatal(err)
+	}
+	want := [][2]string{
+		{"sparkwing.exe", "sparkwing.exe.failed"},
+		{"sparkwing.exe.old", "sparkwing.exe"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("move calls = %#v, want %#v", calls, want)
+	}
+}
