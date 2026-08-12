@@ -904,23 +904,6 @@ func ExecReplace(bin string, args []string, dir string, env []string) error {
 	return execChild(bin, args, env)
 }
 
-func execChild(bin string, args, env []string) error {
-	cmd := exec.Command(bin, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Stdin = os.Stdin
-	cmd.Env = env
-	if err := cmd.Run(); err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) {
-			os.Exit(ee.ExitCode()) //nolint:forbidigo // foreground wrapper preserves the pipeline's exit status
-		}
-		return err
-	}
-	os.Exit(0) //nolint:forbidigo // foreground wrapper preserves the pipeline's exit status
-	return nil
-}
-
 type fileFilter func(name string) bool
 
 func allFiles(string) bool { return true }
