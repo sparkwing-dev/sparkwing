@@ -166,6 +166,64 @@ An operator who wants the old per-request behavior back can set
 `FETCH_FRESH_WINDOW` and/or `RECLONE_COOLDOWN` to a negative duration
 (e.g. `-1s`) to disable that guard.
 
+## Dependency proxy defaults & egress
+
+The cache pod also serves a pull-through package proxy at
+`/proxy/{npm,pypi,pythonhosted,rubygems,golang,alpine}/...`. Immutable
+artifacts (`.tgz`, `.whl`, `.gem`, `.zip`, `.apk`, ...) are cached for
+7 days; mutable metadata for 10 minutes, with an expired entry served
+stale if upstream is unreachable.
+
+**Wired by default.** With `cache.enabled` (the chart default), the
+runner container and every pod the runner spawns start with:
+
+| Variable | Value |
+|----------|-------|
+| `GOPROXY` | `http://<cache>/proxy/golang\|https://proxy.golang.org,direct` |
+| `npm_config_registry` | `http://<cache>/proxy/npm` |
+| `PIP_INDEX_URL` | `http://<cache>/proxy/pypi/simple/` |
+| `PIP_TRUSTED_HOST` | `<cache host>` |
+
+Without this, every run re-downloads its whole dependency set from the
+public internet -- on a managed cluster that is per-run NAT-gateway
+egress you pay for twice, in bytes and in wall time.
+
+Details worth knowing:
+
+- `GOPROXY` separates the proxy from upstream with `|`, not `,`: `|`
+  falls through on **any** proxy error, so a rolling cache pod slows
+  builds instead of failing them. `,` only falls through on 404 and
+  410.
+- `direct` stays last, so `GOPRIVATE` modules keep resolving straight
+  from your forge through the `~/.netrc` the runner entrypoint seeds
+  from `GITHUB_TOKEN`. Private modules never transit the proxy.
+- pip **ignores** a plain-HTTP index unless its host is also named in
+  `PIP_TRUSTED_HOST`, and then fails with "no matching distribution"
+  rather than falling back to PyPI -- so both variables ship together.
+  The proxy rewrites the file URLs inside `/proxy/pypi/simple/` onto
+  `/proxy/pythonhosted`, so downloads follow the index automatically.
+- npm and pip have no upstream fallback of their own. If the cache is
+  down their fetches fail until it is back -- the same exposure a run
+  already has on its gitcache clone.
+- `npm install` writes the proxy URL into `package-lock.json`'s
+  `resolved` fields. Don't commit a lockfile generated inside the
+  cluster, or a laptop `npm ci` will chase a host it cannot resolve.
+
+**Opting out.** Set `cache.dependencyProxy.enabled=false` in the chart:
+the env is not emitted and the runner is started with
+`--dependency-proxy=off` so the pods it spawns skip the wiring too. On
+the runner binary directly, `--dependency-proxy=off` (or
+`SPARKWING_DEPENDENCY_PROXY_URL=off`); pass a URL instead to point at
+some other pull-through mirror. Overriding a single ecosystem is a
+`runner.extraEnv` entry with the same name -- a name you set there
+suppresses the chart's default rather than colliding with it.
+
+**Image pulls.** Runner pods are created with
+`imagePullPolicy: IfNotPresent`; `--image-pull-policy` (or
+`SPARKWING_IMAGE_PULL_POLICY`) accepts `Always`, `IfNotPresent`, or
+`Never`. `Always` re-downloads the runner image on every node in the
+DAG, which is the other per-run egress bill worth reading twice.
+
 ## Code delivery on remote triggers
 
 `sparkwing pipeline trigger <pipeline> --profile prod` triggers by commit
@@ -267,6 +325,13 @@ the ingress sets.
 | GET | `/cache/<key>` | Download cached dependency archive (auth required) |
 | HEAD | `/cache/<key>` | Check if cache entry exists (auth required) |
 | PUT | `/cache/<key>` | Upload dependency archive to cache (auth required) |
+
+### Package Registry Proxy
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET, HEAD | `/proxy/<registry>/<path...>` | Pull-through fetch; `<registry>` is one of `npm`, `pypi`, `pythonhosted`, `rubygems`, `golang`, `alpine` |
+| GET | `/stats` | Per-registry cached file count + bytes |
 
 ### Status
 

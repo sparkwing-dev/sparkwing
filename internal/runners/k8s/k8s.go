@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strings"
 	"time"
 
@@ -70,6 +71,20 @@ type Config struct {
 	// publish node outputs and stage consumed inputs. Empty disables
 	// artifacts for the pod.
 	ArtifactStoreURL string
+
+	// DependencyProxyURL is the base URL of the cache pod's
+	// pull-through registry proxy (the service that serves
+	// /proxy/{golang,npm,pypi,...}). Set, it points every Job pod's
+	// package managers at it so a node's dependency fetch is served
+	// in-cluster instead of egressing once per run. Empty leaves the
+	// pod on upstream defaults.
+	DependencyProxyURL string
+
+	// ImagePullPolicy applied to every Job pod's container. Empty
+	// means IfNotPresent -- see pullPolicyOrDefault, which also
+	// explains why the field is never left for the API server to
+	// default.
+	ImagePullPolicy corev1.PullPolicy
 
 	// NodeSelector + Tolerations let the caller pin runner pods to a
 	// specific pool (GPU nodes, spot nodes, etc.). v1 copies the same
@@ -493,11 +508,12 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 	if r.cfg.AgentToken != "" {
 		env = append(env, corev1.EnvVar{Name: "SPARKWING_AGENT_TOKEN", Value: r.cfg.AgentToken})
 	}
+	env = append(env, dependencyProxyEnv(r.cfg.DependencyProxyURL)...)
 
 	container := corev1.Container{
 		Name:            "runner",
 		Image:           r.cfg.Image,
-		ImagePullPolicy: corev1.PullAlways,
+		ImagePullPolicy: pullPolicyOrDefault(r.cfg.ImagePullPolicy),
 		Command:         []string{"sparkwing"},
 		Args:            []string{"run-node", req.RunID, req.NodeID},
 		Env:             env,
@@ -557,6 +573,86 @@ func (r *Runner) buildJob(name string, req runner.Request, res capacity.Resoluti
 }
 
 func boolPtr(v bool) *bool { return &v }
+
+// ResolveDependencyProxy picks the pull-through package proxy a runner
+// pod should use: an explicit value wins, the literal "off" disables
+// the wiring, and an empty value falls back to the cache service the
+// caller already talks to, because the same pod serves both the
+// gitcache and /proxy/. A non-HTTP cache URL (fs:// or s3:// artifact
+// stores reach this too) is not a proxy and yields "".
+func ResolveDependencyProxy(explicit, cacheURL string) string {
+	explicit = strings.TrimSpace(explicit)
+	if strings.EqualFold(explicit, "off") {
+		return ""
+	}
+	if explicit != "" {
+		return explicit
+	}
+	if !strings.HasPrefix(cacheURL, "http://") && !strings.HasPrefix(cacheURL, "https://") {
+		return ""
+	}
+	return cacheURL
+}
+
+// ParsePullPolicy validates a configured image pull policy, mapping
+// the empty string onto the default. Case-insensitive so an operator
+// passing `--image-pull-policy=ifnotpresent` is not rejected on
+// capitalization the K8s API type is strict about.
+func ParsePullPolicy(s string) (corev1.PullPolicy, error) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "":
+		return corev1.PullIfNotPresent, nil
+	case "always":
+		return corev1.PullAlways, nil
+	case "ifnotpresent":
+		return corev1.PullIfNotPresent, nil
+	case "never":
+		return corev1.PullNever, nil
+	}
+	return "", fmt.Errorf("image pull policy %q: expected Always, IfNotPresent, or Never", s)
+}
+
+// pullPolicyOrDefault resolves an unset policy to IfNotPresent. The
+// field is always written explicitly: an empty ImagePullPolicy makes
+// the API server default to Always for a `:latest` tag, so leaving it
+// blank would silently re-download the runner image on every node.
+func pullPolicyOrDefault(p corev1.PullPolicy) corev1.PullPolicy {
+	if p == "" {
+		return corev1.PullIfNotPresent
+	}
+	return p
+}
+
+// dependencyProxyEnv points a pod's package managers at the cache's
+// pull-through proxy. The values encode four constraints:
+//
+//   - GOPROXY separates proxy from upstream with "|" so ANY proxy error
+//     falls through to proxy.golang.org; "," only falls through on 404
+//     and 410, which would fail every build while the cache pod rolls.
+//   - "direct" stays last so GOPRIVATE modules keep resolving against
+//     the ~/.netrc the runner entrypoint seeds.
+//   - pip ignores a plain-HTTP index unless its host is also named in
+//     PIP_TRUSTED_HOST, and then fails with "no matching distribution"
+//     rather than falling back to PyPI.
+//   - the pypi index is proxied at /proxy/pypi/simple/, and the proxy
+//     rewrites the file URLs in that index onto /proxy/pythonhosted, so
+//     the download half needs no separate env.
+//
+// A base URL without a scheme and host yields no env at all: upstream
+// defaults beat a pod that cannot resolve its own registry.
+func dependencyProxyEnv(base string) []corev1.EnvVar {
+	base = strings.TrimRight(strings.TrimSpace(base), "/")
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme == "" || u.Host == "" {
+		return nil
+	}
+	return []corev1.EnvVar{
+		{Name: "GOPROXY", Value: base + "/proxy/golang|https://proxy.golang.org,direct"},
+		{Name: "npm_config_registry", Value: base + "/proxy/npm"},
+		{Name: "PIP_INDEX_URL", Value: base + "/proxy/pypi/simple/"},
+		{Name: "PIP_TRUSTED_HOST", Value: u.Host},
+	}
+}
 
 // podResources maps a resolved admission cost onto a runner pod's
 // requests and limits, so one .Resources() declaration drives both the

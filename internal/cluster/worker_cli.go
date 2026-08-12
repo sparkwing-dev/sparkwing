@@ -13,6 +13,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
+	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
@@ -42,6 +43,11 @@ func runWorkerCLI(args []string) error {
 	k8sCtrlURL := fs.String("runner-controller-url", os.Getenv("SPARKWING_RUNNER_CONTROLLER_URL"), "controller URL the runner pod should talk to (defaults to --controller)")
 	k8sLogsURL := fs.String("runner-logs-url", os.Getenv("SPARKWING_RUNNER_LOGS_URL"), "logs-service URL the runner pod should talk to (defaults to --logs)")
 	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
+	dependencyProxy := fs.String("dependency-proxy", os.Getenv("SPARKWING_DEPENDENCY_PROXY_URL"),
+		"base URL of the in-cluster pull-through package proxy stamped on runner pods as GOPROXY / npm_config_registry / PIP_INDEX_URL; "+
+			"empty derives it from SPARKWING_GITCACHE_URL, \"off\" disables (env: SPARKWING_DEPENDENCY_PROXY_URL)")
+	imagePullPolicy := fs.String("image-pull-policy", os.Getenv("SPARKWING_IMAGE_PULL_POLICY"),
+		"imagePullPolicy for runner pods: Always | IfNotPresent | Never (default IfNotPresent; env: SPARKWING_IMAGE_PULL_POLICY)")
 	warmWait := fs.Duration("warm-claim-wait", 5*time.Second,
 		"how long the warm pool Runner waits for a pod to claim before falling back to K8sRunner")
 	warmPoll := fs.Duration("warm-poll", 500*time.Millisecond,
@@ -100,19 +106,25 @@ func runWorkerCLI(args []string) error {
 		logger.Info("artifact store", "url", *artifactStoreURL)
 	}
 
+	// The pull-through proxy lives on the cache pod, so the gitcache
+	// URL the runner pod already carries is the proxy base.
+	proxyURL := k8srunner.ResolveDependencyProxy(*dependencyProxy, os.Getenv("SPARKWING_GITCACHE_URL"))
+
 	switch *runnerKind {
 	case "", "inprocess":
 	case "k8s":
 		factory, err := orchestrator.BuildK8sRunnerFactory(orchestrator.K8sRunnerFactoryConfig{
-			Kubeconfig:       *kubeconfig,
-			Namespace:        *k8sNamespace,
-			Image:            *k8sImage,
-			ServiceAccount:   *k8sSA,
-			ImagePullSecret:  *k8sPullSecret,
-			ControllerURL:    firstNonEmpty(*k8sCtrlURL, *controllerURL),
-			LogsURL:          firstNonEmpty(*k8sLogsURL, *logsURL),
-			ArtifactStoreURL: *artifactStoreURL,
-			AgentToken:       *token,
+			Kubeconfig:         *kubeconfig,
+			Namespace:          *k8sNamespace,
+			Image:              *k8sImage,
+			ServiceAccount:     *k8sSA,
+			ImagePullSecret:    *k8sPullSecret,
+			ControllerURL:      firstNonEmpty(*k8sCtrlURL, *controllerURL),
+			LogsURL:            firstNonEmpty(*k8sLogsURL, *logsURL),
+			ArtifactStoreURL:   *artifactStoreURL,
+			AgentToken:         *token,
+			DependencyProxyURL: proxyURL,
+			ImagePullPolicy:    *imagePullPolicy,
 		})
 		if err != nil {
 			return fmt.Errorf("k8s runner: %w", err)
@@ -122,15 +134,17 @@ func runWorkerCLI(args []string) error {
 		var k8sFactory func(orchestrator.Backends, *store.Trigger) runner.Runner
 		if *k8sImage != "" {
 			f, err := orchestrator.BuildK8sRunnerFactory(orchestrator.K8sRunnerFactoryConfig{
-				Kubeconfig:       *kubeconfig,
-				Namespace:        *k8sNamespace,
-				Image:            *k8sImage,
-				ServiceAccount:   *k8sSA,
-				ImagePullSecret:  *k8sPullSecret,
-				ControllerURL:    firstNonEmpty(*k8sCtrlURL, *controllerURL),
-				LogsURL:          firstNonEmpty(*k8sLogsURL, *logsURL),
-				ArtifactStoreURL: *artifactStoreURL,
-				AgentToken:       *token,
+				Kubeconfig:         *kubeconfig,
+				Namespace:          *k8sNamespace,
+				Image:              *k8sImage,
+				ServiceAccount:     *k8sSA,
+				ImagePullSecret:    *k8sPullSecret,
+				ControllerURL:      firstNonEmpty(*k8sCtrlURL, *controllerURL),
+				LogsURL:            firstNonEmpty(*k8sLogsURL, *logsURL),
+				ArtifactStoreURL:   *artifactStoreURL,
+				AgentToken:         *token,
+				DependencyProxyURL: proxyURL,
+				ImagePullPolicy:    *imagePullPolicy,
 			})
 			if err != nil {
 				return fmt.Errorf("warm runner (fallback k8s): %w", err)

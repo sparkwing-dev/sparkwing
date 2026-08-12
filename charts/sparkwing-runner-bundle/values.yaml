@@ -99,7 +99,11 @@ runner:
   affinity: {}
 
   # Extra env passed to the runner container. Useful for forwarding
-  # AWS_REGION, GOPRIVATE, DOCKER_HOST, etc.
+  # AWS_REGION, GOPRIVATE, DOCKER_HOST, etc. An entry here also
+  # overrides a cache.dependencyProxy default of the same name, and
+  # SPARKWING_IMAGE_PULL_POLICY sets the imagePullPolicy of the pods
+  # the runner spawns (Always | IfNotPresent | Never; default
+  # IfNotPresent).
   extraEnv: []
   # - name: GOPRIVATE
   #   value: github.com/your-org
@@ -134,6 +138,27 @@ cache:
     type: ClusterIP
     port: 80
     targetPort: 8090
+
+  # Pull-through package proxy. The cache pod already serves
+  # /proxy/{npm,pypi,pythonhosted,rubygems,golang,alpine}; enabled
+  # here, the runner container is pointed at it (GOPROXY,
+  # npm_config_registry, PIP_INDEX_URL + PIP_TRUSTED_HOST) and passes
+  # the same wiring to the pods it spawns. A dependency fetch then
+  # stays inside the cluster instead of leaving through the NAT
+  # gateway once per run.
+  #
+  # Failure is graceful: GOPROXY keeps proxy.golang.org and `direct`
+  # as fallbacks, so private modules still resolve via ~/.netrc and a
+  # rolling cache pod does not fail builds. npm and pip have no such
+  # fallback -- if the cache is down, their fetches fail until it is
+  # back, which is the same exposure a build already has on the
+  # gitcache clone.
+  dependencyProxy:
+    # false leaves every package manager on its upstream default.
+    # Anything you set in runner.extraEnv with the same name wins
+    # over the defaults below, so you can point one ecosystem at your
+    # own mirror without turning the rest off.
+    enabled: true
 
   # Repos the cache should pre-warm / proxy. Format matches the
   # GITCACHE_REPOS env: comma-separated `<alias>=<git-url>` pairs.

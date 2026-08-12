@@ -29,6 +29,15 @@ type K8sRunnerFactoryConfig struct {
 	AgentToken       string
 	NodeSelector     map[string]string
 	Tolerations      []corev1.Toleration
+	// DependencyProxyURL points runner pods at the cache pod's
+	// pull-through package proxy. Already resolved by the caller
+	// (k8srunner.ResolveDependencyProxy); empty leaves pods on
+	// upstream registries.
+	DependencyProxyURL string
+	// ImagePullPolicy as an operator typed it. Validated here rather
+	// than at each flag site so every entry point rejects the same
+	// set of values.
+	ImagePullPolicy string
 }
 
 func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Trigger) runner.Runner, error) {
@@ -41,8 +50,11 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 	if cfg.ControllerURL == "" {
 		return nil, fmt.Errorf("runner must be given a controller URL")
 	}
+	pullPolicy, err := k8srunner.ParsePullPolicy(cfg.ImagePullPolicy)
+	if err != nil {
+		return nil, fmt.Errorf("--image-pull-policy: %w", err)
+	}
 	var rc *rest.Config
-	var err error
 	if cfg.Kubeconfig != "" {
 		rc, err = clientcmd.BuildConfigFromFlags("", cfg.Kubeconfig)
 	} else {
@@ -63,6 +75,8 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		ControllerURL:      cfg.ControllerURL,
 		LogsURL:            cfg.LogsURL,
 		ArtifactStoreURL:   cfg.ArtifactStoreURL,
+		DependencyProxyURL: cfg.DependencyProxyURL,
+		ImagePullPolicy:    pullPolicy,
 		AgentToken:         cfg.AgentToken,
 		NodeSelector:       cfg.NodeSelector,
 		Tolerations:        cfg.Tolerations,

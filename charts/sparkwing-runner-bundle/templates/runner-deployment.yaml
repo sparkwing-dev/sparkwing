@@ -65,6 +65,12 @@ spec:
             {{- end }}
             {{- if .Values.cache.enabled }}
             - {{ printf "--gitcache=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
+            {{- if not .Values.cache.dependencyProxy.enabled }}
+            # The runner otherwise derives the dependency proxy for the
+            # pods it spawns from --gitcache; the opt-out has to be
+            # explicit to reach them.
+            - --dependency-proxy=off
+            {{- end }}
             {{- end }}
             - {{ printf "--max-concurrent=%d" (int .Values.runner.maxConcurrent) | quote }}
             - {{ printf "--poll=%s" .Values.runner.pollInterval | quote }}
@@ -115,6 +121,9 @@ spec:
                   name: {{ .Values.controller.tokenSecret.name | quote }}
                   key: {{ .Values.controller.tokenSecret.key | quote }}
                   optional: true
+            {{- end }}
+            {{- with (include "sparkwing-runner-bundle.runnerDependencyProxyEnv" .) }}
+            {{- . | nindent 12 }}
             {{- end }}
             {{- with .Values.runner.extraEnv }}
             {{- toYaml . | nindent 12 }}

@@ -46,9 +46,18 @@ type TriggerLoopOptions struct {
 	ArtifactStore   string
 	K8sNodeSelector []string
 	K8sTolerations  []string
-	WorkRoot        string
-	Poll            time.Duration
-	Logger          *slog.Logger
+	// DependencyProxy is the pull-through package proxy base URL the
+	// child's runner pods should use, already resolved. Empty is
+	// forwarded as an explicit opt-out: the child inherits
+	// SPARKWING_GITCACHE_URL from this process and would otherwise
+	// re-derive a proxy the operator turned off.
+	DependencyProxy string
+	// K8sImagePullPolicy is passed through unvalidated; the child's
+	// factory rejects a bad value with the flag name in the error.
+	K8sImagePullPolicy string
+	WorkRoot           string
+	Poll               time.Duration
+	Logger             *slog.Logger
 	// MaxConcurrent bounds in-flight trigger handlers in one worker.
 	// Values below 1 use the default. A value above 1 lets a worker claim
 	// RunAndAwait child triggers while the parent handler waits.
@@ -297,6 +306,14 @@ func triggerRunnerArgs(opts TriggerLoopOptions) []string {
 	appendFlag("--runner-logs-url", opts.K8sLogsURL)
 	appendFlag("--kubeconfig", opts.Kubeconfig)
 	appendFlag("--artifact-store", opts.ArtifactStore)
+	appendFlag("--image-pull-policy", opts.K8sImagePullPolicy)
+	// Always explicit: "off" has to travel, or the child re-derives the
+	// proxy from the inherited SPARKWING_GITCACHE_URL.
+	if opts.DependencyProxy != "" {
+		args = append(args, "--dependency-proxy", opts.DependencyProxy)
+	} else {
+		args = append(args, "--dependency-proxy", "off")
+	}
 	for _, val := range opts.K8sNodeSelector {
 		appendFlag("--runner-node-selector", val)
 	}
