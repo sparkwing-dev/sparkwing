@@ -47,6 +47,23 @@ type Config struct {
 	// loop. Per-repo backoff doubles on failure (cap 10m).
 	FetchInterval time.Duration
 
+	// FetchFreshWindow is how long a successful mirror fetch keeps a
+	// repo fresh for request handlers. Inside the window /archive,
+	// /file, /tree-hash, /branch-contains, and /sync/negotiate serve
+	// from the mirror instead of fetching GitHub again -- the
+	// background loop already owns freshness. /git/refresh bypasses
+	// this on purpose. Zero takes the default; a negative value
+	// disables the throttle and restores per-request fetching.
+	FetchFreshWindow time.Duration
+
+	// RecloneCooldown bounds how often /archive may recover from a
+	// failed fetch by deleting the mirror and cloning it again. Inside
+	// the cooldown a failed fetch is reported to the client instead,
+	// because a fetch that keeps failing would otherwise re-download
+	// the whole repository once per request. Zero takes the default; a
+	// negative value disables the cooldown.
+	RecloneCooldown time.Duration
+
 	// ProxyCacheTTL bounds how long mutable proxy responses are
 	// served from cache before re-fetching upstream.
 	ProxyCacheTTL time.Duration
@@ -81,14 +98,16 @@ type Config struct {
 // before the refactor.
 func DefaultConfig() Config {
 	return Config{
-		Addr:          ":8090",
-		DataDir:       "/data",
-		ProxyDir:      "/data/proxy",
-		FetchInterval: 30 * time.Second,
-		ProxyCacheTTL: 10 * time.Minute,
-		ProxyMaxAge:   7 * 24 * time.Hour,
-		SSHKeyDir:     "/etc/ssh-key",
-		GitForkLimit:  4,
+		Addr:             ":8090",
+		DataDir:          "/data",
+		ProxyDir:         "/data/proxy",
+		FetchInterval:    30 * time.Second,
+		FetchFreshWindow: 15 * time.Second,
+		RecloneCooldown:  1 * time.Hour,
+		ProxyCacheTTL:    10 * time.Minute,
+		ProxyMaxAge:      7 * 24 * time.Hour,
+		SSHKeyDir:        "/etc/ssh-key",
+		GitForkLimit:     4,
 	}
 }
 
@@ -126,6 +145,14 @@ func New(cfg Config) (*Server, error) {
 	if cfg.FetchInterval <= 0 {
 		cfg.FetchInterval = 30 * time.Second
 	}
+	// Zero means "unset, take the default"; a negative value is an
+	// explicit operator opt-out and survives untouched.
+	if cfg.FetchFreshWindow == 0 {
+		cfg.FetchFreshWindow = 15 * time.Second
+	}
+	if cfg.RecloneCooldown == 0 {
+		cfg.RecloneCooldown = 1 * time.Hour
+	}
 	if cfg.ProxyCacheTTL <= 0 {
 		cfg.ProxyCacheTTL = 10 * time.Minute
 	}
@@ -153,6 +180,8 @@ func New(cfg Config) (*Server, error) {
 	apiToken = cfg.APIToken
 	sshKeyDir = cfg.SSHKeyDir
 	autoRegisterReposSpec = cfg.AutoRegisterRepos
+	fetchFreshWindow = cfg.FetchFreshWindow
+	recloneCooldown = cfg.RecloneCooldown
 	gitForkSem = make(chan struct{}, cfg.GitForkLimit)
 
 	for _, d := range []string{repoDir, archDir, artifactsDir, binsDir, cacheDir, uploadsDir, proxyDir} {
