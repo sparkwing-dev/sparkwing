@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"flag"
@@ -45,6 +46,9 @@ func run(args []string) error {
 }
 
 func process(dist string, privateKey ed25519.PrivateKey, publicKey ed25519.PublicKey, verify bool) error {
+	if err := validateReleaseAssets(dist); err != nil {
+		return err
+	}
 	manifestPath := filepath.Join(dist, "SHA256SUMS")
 	assets, err := filepath.Glob(filepath.Join(dist, "sparkwing-*"))
 	if err != nil {
@@ -79,6 +83,79 @@ func process(dist string, privateKey ed25519.PrivateKey, publicKey ed25519.Publi
 		if err := os.WriteFile(signaturePath, signature, 0o600); err != nil {
 			return err
 		}
+	}
+	if verify {
+		if err := verifyManifestDigests(manifestPath, assets); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifyManifestDigests(manifestPath string, assets []string) error {
+	body, err := os.ReadFile(manifestPath)
+	if err != nil {
+		return err
+	}
+	want := make(map[string]string, len(assets))
+	for _, line := range strings.Split(strings.TrimSpace(string(body)), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 || len(fields[0]) != 64 {
+			return fmt.Errorf("malformed SHA256SUMS line %q", line)
+		}
+		if _, exists := want[fields[1]]; exists {
+			return fmt.Errorf("duplicate SHA256SUMS entry %q", fields[1])
+		}
+		want[fields[1]] = strings.ToLower(fields[0])
+	}
+	for _, path := range assets {
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		digest := fmt.Sprintf("%x", sha256.Sum256(body))
+		name := filepath.Base(path)
+		if want[name] != digest {
+			return fmt.Errorf("SHA256SUMS mismatch for %s", name)
+		}
+		delete(want, name)
+	}
+	if len(want) != 0 {
+		return fmt.Errorf("SHA256SUMS contains unexpected entries: %v", want)
+	}
+	return nil
+}
+
+func expectedReleaseAssets() []string {
+	var names []string
+	for _, binary := range []string{"sparkwing", "sparkwing-cache", "sparkwing-controller", "sparkwing-logs", "sparkwing-runner", "sparkwing-web"} {
+		for _, goos := range []string{"darwin", "linux"} {
+			for _, arch := range []string{"amd64", "arm64"} {
+				names = append(names, binary+"-"+goos+"-"+arch)
+			}
+		}
+	}
+	for _, arch := range []string{"amd64", "arm64"} {
+		names = append(names, "sparkwing-windows-"+arch+".exe")
+	}
+	sort.Strings(names)
+	return names
+}
+
+func validateReleaseAssets(dist string) error {
+	paths, err := filepath.Glob(filepath.Join(dist, "sparkwing-*"))
+	if err != nil {
+		return err
+	}
+	paths = unsignedAssets(paths)
+	got := make([]string, len(paths))
+	for i, path := range paths {
+		got[i] = filepath.Base(path)
+	}
+	sort.Strings(got)
+	want := expectedReleaseAssets()
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		return fmt.Errorf("release asset set mismatch: got %v want %v", got, want)
 	}
 	return nil
 }

@@ -23,6 +23,9 @@ func TestReleaseWorkflowPublishesImmutableSignedUpdaterAssets(t *testing.T) {
 		"--verify-tag",
 		"--latest=false",
 		"gh release edit \"$tag\" --draft=false",
+		"--json isDraft",
+		"gh release delete \"$tag\" --yes",
+		"trap cleanup_draft EXIT",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("release workflow missing %q", required)

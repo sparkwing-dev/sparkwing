@@ -231,19 +231,31 @@ jobs:
           # A published tag and its signed assets are immutable. Build
           # the complete set privately, verify it, then publish once.
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "release $tag already exists; immutable publication refuses mutation" >&2
-            exit 1
+            if [ "$(gh release view "$tag" --json isDraft --jq '.isDraft')" != "true" ]; then
+              echo "release $tag is published; immutable publication refuses mutation" >&2
+              exit 1
+            fi
+            gh release delete "$tag" --yes
           fi
+          draft_created=false
+          cleanup_draft() {
+            if [ "$draft_created" = true ]; then
+              gh release delete "$tag" --yes || true
+            fi
+          }
+          trap cleanup_draft EXIT
           gh release create "$tag" \
             --draft \
             --verify-tag \
             --latest=false \
             --title "sparkwing CLI $tag" \
             --notes-file release-notes.md
+          draft_created=true
           gh release upload "$tag" dist/*
           asset_count="$(gh release view "$tag" --json assets --jq '.assets | length')"
           test "$asset_count" -eq "$(find dist -type f | wc -l | tr -d ' ')"
           gh release edit "$tag" --draft=false
+          draft_created=false
           gh release view "$tag"
 
   # publish multi-arch container images for the cluster-side
