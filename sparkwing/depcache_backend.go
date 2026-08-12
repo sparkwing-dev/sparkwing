@@ -40,10 +40,11 @@ type depCacheBackend interface {
 // the environment (SPARKWING_CACHE_URL as set for runner pods, or
 // SPARKWING_GITCACHE_URL as set for warm runners), local otherwise.
 func selectDepCacheBackend() depCacheBackend {
-	for _, env := range []string{"SPARKWING_CACHE_URL", "SPARKWING_GITCACHE_URL"} {
-		if url := strings.TrimRight(os.Getenv(env), "/"); url != "" {
-			return &remoteDepCache{baseURL: url, token: depCacheToken()}
-		}
+	if url := strings.TrimRight(os.Getenv("SPARKWING_CACHE_URL"), "/"); url != "" {
+		return &remoteDepCache{baseURL: url, token: depCacheToken()}
+	}
+	if url := strings.TrimRight(os.Getenv("SPARKWING_GITCACHE_URL"), "/"); url != "" {
+		return &remoteDepCache{baseURL: url, token: depCacheToken()}
 	}
 	return &localDepCache{}
 }

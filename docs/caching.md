@@ -6,20 +6,33 @@ Job-level caching is content-addressed result memoization via the
 reference and [pipelines.md](pipelines.md) for usage in the Plan/Work
 model.
 
-Sparkwing caches at three levels:
+Sparkwing caches at four levels:
 
 1. **Job-level content-addressed caching.** A node declares a content
    key; when a later node computes the same key, the orchestrator
    replays the first completion's output instead of re-running -- same
    code, same inputs, same output, zero re-execution.
-2. **Build-layer caching.** Docker layer cache, BuildKit cache mounts,
+2. **Dependency caches.** A node declares the dependency stores its
+   work needs (the Go module cache, npm's store); sparkwing restores
+   them before the node runs and saves them after success. The node
+   always runs -- restore just makes it fast. See
+   [the section below](#dependency-caches).
+3. **Build-layer caching.** Docker layer cache, BuildKit cache mounts,
    warm PVC pool, and the dependency proxy. See
    [build-caching.md](build-caching.md) for that layer.
-3. **Pipeline binary caching.** Your `.sparkwing/` module is a Go
+4. **Pipeline binary caching.** Your `.sparkwing/` module is a Go
    program; sparkwing compiles it and reuses the binary until the
    source changes. See [the section below](#pipeline-binary-cache).
 
-This doc is about (1) and (3).
+This doc is about (1), (2), and (4).
+
+**`.Cache()` and `.CacheDir()` answer different questions.** `.Cache()`
+is memoization: a hit means the node does **not** run, because the
+answer is already known. `.CacheDir()` is a cache volume: the node
+**always** runs, and a hit means its dependency downloads are already
+on disk. Porting a `actions/cache` or GitLab `cache:` block from
+another CI system? That's `.CacheDir()`. Skipping work whose inputs
+haven't changed? That's `.Cache()`.
 
 Caching is keyed on **content alone**. It carries no scope and no group:
 it answers "is this the *same work*, so reuse the answer?" Bounding how
@@ -155,11 +168,87 @@ otherwise non-reusable leader outcome, the follower runs the node itself.
   controller sweeps expired entries automatically on a schedule, and the
   cache is additionally capped at roughly ten thousand rows, evicting the
   least recently used entries past that cap.
-- **No dependency-cache helper.** There is no first-class save/restore
-  for gems / node_modules / pip tarballs. Use the dependency proxy
-  (gitcache `/proxy/...`) or a warm PVC.
 - **Build-layer caching is separate.** See
   [build-caching.md](build-caching.md).
+
+## Dependency caches
+
+A CI executor that starts cold -- a fresh Kubernetes pod, a rebooted
+runner -- re-downloads every dependency its checks need, every run.
+`.CacheDir()` is the first-class fix: declare the dependency stores a
+node's work reads, and sparkwing restores them before the node runs
+and saves them after the node's first successful run under that key.
+
+```go
+sparkwing.Job(plan, "test", runTests).
+    CacheDir(sparkwing.GoModules())
+
+sparkwing.Job(plan, "web-test", runWebTests).
+    CacheDir(sparkwing.NpmCache())
+
+sparkwing.Job(plan, "gems", runSpecs).
+    CacheDir(sparkwing.Dir("vendor/bundle", sparkwing.KeyFromFile("Gemfile.lock")))
+```
+
+Groups take the same declaration and apply it to every member:
+`group.CacheDir(sparkwing.GoModules())`.
+
+### Helpers cache the store, not the install
+
+`GoModules()` targets GOMODCACHE and `NpmCache()` targets npm's cache
+directory (`npm config get cache`) -- the package manager's
+content-addressed store -- rather than a materialized install tree
+like `node_modules`. Two reasons. A store restored under a stale key
+is safe by construction: the tool tops up what's missing and touches
+nothing else. And the common CI invocation `npm ci` deletes
+`node_modules` before installing, so restoring an install tree there
+is discarded bytes. `Dir()` points anywhere you like -- including
+`node_modules` for an `npm install` flow -- and you own the staleness
+semantics of whatever you point it at.
+
+### Keys
+
+The key is `dep-<name>-<GOOS>-<GOARCH>-<hash>`, where the hash is the
+content of the ecosystem's lockfile (`go.sum`, `package-lock.json`,
+or the `KeyFromFile` target). Editing the lockfile changes the key;
+restoring its previous bytes restores the previous key. Platform is
+part of the key because compiled dependency content is not portable
+across it.
+
+Matching is exact in this iteration. A restore-keys-style prefix
+fallback ("nearest older cache for this ecosystem") is a planned
+follow-up; it will be safe for the ecosystem helpers precisely
+because they cache stores, where a near-miss restore can only cost
+bytes, never correctness.
+
+### Storage
+
+- **Laptop:** archives under `$SPARKWING_HOME/depcache/`.
+- **Cluster:** the sparkwing-cache service's `/cache/<key>` blob
+  store, reached through `SPARKWING_CACHE_URL` (node pods) or
+  `SPARKWING_GITCACHE_URL` (warm runners), authenticated with the
+  runner's agent token. Every pod in the cluster shares one cache.
+
+The archive format (tar.gz, permissions and symlinks preserved) is
+identical in both, so the same pipeline behaves the same everywhere.
+The cache service bounds uploads at 500 MB; a larger archive logs a
+warning and is skipped.
+
+### Guarantees
+
+Dependency caching is best-effort, always. A missing lockfile, an
+unreachable cache service, an oversized archive, or a failed extract
+logs a warning and the node runs as if no cache were declared. No
+cache condition ever fails a node, and a failed node never saves.
+A restore is also skipped when the target directory already has
+content -- a warm runner's existing cache is left alone.
+
+For scoping a *tool's* cache directory (golangci-lint and friends) to
+the current worktree rather than persisting it across runs, see
+`sparkwing.ToolCacheDir` in [sdk.md](sdk.md); the two compose --
+`ToolCacheDir` names a directory, `Dir()` can persist one.
+
+See `examples/dep-cache/` for a runnable cold/warm demo.
 
 ## Pipeline binary cache
 
