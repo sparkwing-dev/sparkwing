@@ -58,27 +58,27 @@ func AdoptExecLeaseFromEnv() error {
 	if err != nil {
 		return fmt.Errorf("invalid inherited pipeline cache lease entry: %w", err)
 	}
-	file := os.NewFile(uintptr(fd), "pipeline-cache-lease")
-	if file == nil {
-		return errors.New("inherited pipeline cache lease descriptor is unavailable")
-	}
-	info, err := file.Stat()
-	if err != nil {
+	var descriptorStat unix.Stat_t
+	if err := unix.Fstat(int(fd), &descriptorStat); err != nil {
 		return fmt.Errorf("inspect inherited pipeline cache lease descriptor: %w", err)
 	}
-	lockInfo, err := os.Stat(entry.lockPath("lease"))
-	if err != nil {
+	var authorityStat unix.Stat_t
+	if err := unix.Stat(entry.lockPath("lease"), &authorityStat); err != nil {
 		return fmt.Errorf("inspect inherited pipeline cache lease authority: %w", err)
 	}
-	if !os.SameFile(info, lockInfo) {
+	if descriptorStat.Dev != authorityStat.Dev || descriptorStat.Ino != authorityStat.Ino {
 		return errors.New("inherited pipeline cache lease descriptor does not match its entry")
 	}
-	flags, err := unix.FcntlInt(file.Fd(), unix.F_GETFD, 0)
+	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
 	if err != nil {
 		return fmt.Errorf("read inherited pipeline cache lease flags: %w", err)
 	}
-	if _, err := unix.FcntlInt(file.Fd(), unix.F_SETFD, flags|unix.FD_CLOEXEC); err != nil {
+	if _, err := unix.FcntlInt(uintptr(fd), unix.F_SETFD, flags|unix.FD_CLOEXEC); err != nil {
 		return fmt.Errorf("contain inherited pipeline cache lease: %w", err)
+	}
+	file := os.NewFile(uintptr(fd), "pipeline-cache-lease")
+	if file == nil {
+		return errors.New("inherited pipeline cache lease descriptor is unavailable")
 	}
 	processExecLease.Lock()
 	defer processExecLease.Unlock()
