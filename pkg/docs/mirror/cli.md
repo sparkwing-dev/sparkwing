@@ -141,14 +141,14 @@ daemon; they never host, replace, or upgrade it.** A run's client spawns
 the binary named by `SPARKWING_WINGD_BIN` -- which `sparkwing run` sets
 to its own path -- else the `sparkwing` found on PATH.
 
-With neither present, a run that declared no resources and no concurrency
-groups says so once and proceeds without local coordination, which is
-fine for a host that runs one pipeline at a time. A run whose pipeline
-*did* declare them fails instead, naming the fix, because those
-declarations are correctness requirements rather than tuning
-(`SPARKWING_ALLOW_UNADMITTED=1` overrides that if you know the box runs
-one thing at a time). Put the CLI on the box when concurrent runs there
-should queue against each other -- see
+With neither present, a run says so once and proceeds without host
+arbitration -- fine for a host that runs one pipeline at a time.
+`.Concurrency()` groups still hold, through the shared store rather than
+the daemon. The exception is a pipeline that reserves host capacity with
+`.Resources()`: that run fails instead, naming the fix, because CPU and
+memory have no fallback arbiter (`SPARKWING_ALLOW_UNADMITTED=1` overrides
+it if you know what else runs on the box). Put the CLI on the box when
+concurrent runs there should queue against each other -- see
 [local-execution.md](local-execution.md#who-hosts-the-daemon).
 
 This is the operational face of *sparkwing does not require sparkwing*:

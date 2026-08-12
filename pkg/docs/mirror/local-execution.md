@@ -247,33 +247,56 @@ A newer *installed* sparkwing transparently replaces a running older
 daemon. Pipeline binaries never do, so one repo bumping its `.sparkwing/`
 SDK pin cannot churn the daemon every other repo on the box shares.
 
-### When there is no daemon and nothing to host one
+### Running with no daemon available
 
-On a box with no daemon running and no sparkwing installed, what happens
-depends on what the pipeline asked for.
+Two situations look similar and are not.
 
-A run whose pipeline **explicitly declares** what it needs from the
-daemon fails, naming the fix. "Explicitly declares" means a plan-level or
-node-level `.Resources()` pin, or a `.Concurrency()` group with box or
-run scope. Those are correctness requirements -- "no two of these at
-once", "this needs eight cores" -- and running the pipeline while
-silently dropping them is not the same pipeline. The same refusal covers
-a daemon too old to serve a capability the run requires: it names both
-versions and the minimum release that speaks to the run.
+**Nothing is arbitrating the box** -- no daemon running, no sparkwing
+installed to start one. Most runs proceed uncoordinated, saying so once
+on stderr. What they lose is host arbitration: CPU and memory charges are
+not held against anything, so concurrent runs on that box can
+oversubscribe it. What they keep is `.Concurrency()`: box- and run-scoped
+groups are enforced through the shared store instead of the daemon, so
+"one deploy at a time on this box" still holds. The difference is crash
+cleanup -- the daemon frees a killed run's slot the instant the kernel
+closes its socket, while a store slot survives until `sparkwing doctor`
+reclaims it.
 
-A run that declared none of that **proceeds uncoordinated**, saying so
-once on stderr. It still gets a host charge per node, but from
-measurement or a cold-start default rather than from anything the author
-wrote, so nothing the pipeline states is being ignored. This is what
-keeps a pipeline binary shipped alone to a deploy box a working product.
+The exception is a pipeline that **reserves host capacity** with a
+plan-level or node-level `.Resources()` pin. That run fails, naming the
+fix. CPU and memory have no fallback arbiter, so there is no weaker
+version of the reservation to fall back to -- there is only quietly not
+making it, while other work on the box does the same.
 
-To force the second behavior for a declaring run -- an operator who knows
-their box runs one thing at a time -- set
-`SPARKWING_ALLOW_UNADMITTED=1`. It is an environment variable rather than
-a flag because the runs that need it are the ones no CLI launched.
+**A daemon is running but this binary cannot speak to it** -- its
+protocol is older than the pipeline binary's SDK pin, and pipeline
+binaries never replace a daemon. Every run fails here, pinned or not.
+Something is actively holding capacity for other work, and joining it
+unadmitted oversubscribes the machine rather than merely going
+uncoordinated. The error names both versions and the release to install.
 
-The fix in both cases is the same: install or update the sparkwing CLI on
+`SPARKWING_ALLOW_UNADMITTED=1` forces the uncoordinated path in either
+case, for an operator who knows what else runs on the box. It is an
+environment variable rather than a flag because the runs that need it are
+the ones no CLI launched, and it is read strictly: only the exact value
+`1` turns the check off. Dry runs (`--sw-dry-run`) are exempt from both
+refusals -- they mutate nothing and finish in seconds.
+
+The fix in every case is the same: install or update the sparkwing CLI on
 the host, or point `SPARKWING_WINGD_BIN` at an installed one.
+
+One in-body feature does change shape without a daemon.
+`sparkwing.ToolSlot(ctx, group)` -- the budget a job body takes out
+around a tool that manages its own parallelism -- returns
+`granted=false`, its documented fallback, and the body uses whatever
+private serialization the tool ships with. Job bodies already have to
+handle that return.
+
+These rules are evaluated once, at run start. A daemon that dies
+*during* a run is a different path: the run's client reconnects and
+reattaches its lease, spawning a replacement through the resolved host
+binary if one exists, and if none does the next admission the run needs
+fails loudly rather than silently continuing unarbitrated.
 
 The process connects when it needs admission. Explicit run resources and
 plan-level `.Concurrency()` groups are admitted at run start and held by
