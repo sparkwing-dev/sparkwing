@@ -226,6 +226,15 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	remaining := ids
 	if *on == "" {
 		results, remaining = cancelLocalRunsViaDaemon(ctx, *home, ids)
+		// A submitted run that no consumer has claimed has no process for
+		// the daemon to hold, so the daemon reports nothing and the id
+		// falls through to here. Cancelling it is a store transaction, not
+		// a signal -- and it must work on a laptop with no dashboard and
+		// no profile, since that is exactly the machine `runs submit`
+		// serves.
+		var queued []runResult
+		queued, remaining = cancelQueuedLocalRuns(ctx, *home, remaining)
+		results = append(results, queued...)
 	}
 	if len(remaining) == 0 {
 		return reportResults(os.Stdout, "cancel", results)
@@ -233,7 +242,16 @@ func runRunsCancel(ctx context.Context, args []string) error {
 
 	c, _, err := resolveRunsClient(*on, cmdJobsCancel.Path)
 	if err != nil {
-		return err
+		// With no controller reachable, a run this CLI could not account
+		// for locally is genuinely unresolvable. Say so per id rather than
+		// discarding the cancellations that did succeed.
+		if len(results) == 0 {
+			return err
+		}
+		for _, id := range remaining {
+			results = append(results, runResult{RunID: id, Error: err.Error()})
+		}
+		return reportResults(os.Stdout, "cancel", results)
 	}
 	for _, id := range remaining {
 		results = append(results, cancelOne(ctx, c, id))
@@ -292,6 +310,50 @@ func cancelLocalRunsViaDaemon(ctx context.Context, home string, ids []string) (d
 			continue
 		}
 		remaining = append(remaining, id)
+	}
+	return done, remaining
+}
+
+// cancelQueuedLocalRuns cancels each id that is still waiting in this
+// home's trigger queue, and returns the ids it could not account for.
+//
+// It cancels exactly the run named and nothing else. A submitted run's
+// trigger and run row share one id, and the transaction is guarded on
+// that id and on the row still being pending, so a cancellation aimed at
+// a run that has since been replaced -- retried, resubmitted under a
+// fresh id -- cannot reach the replacement: the replacement has a
+// different id, and the original's row has already left pending.
+//
+// Store faults are reported as failures rather than swallowed into the
+// fallback: a caller told "not found" when the database was unreadable
+// would draw the wrong conclusion about its run.
+func cancelQueuedLocalRuns(ctx context.Context, home string, ids []string) (done []runResult, remaining []string) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	paths, err := submitPaths(home)
+	if err != nil {
+		return nil, ids
+	}
+	if _, serr := os.Stat(paths.StateDB()); serr != nil {
+		return nil, ids
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		return nil, ids
+	}
+	defer func() { _ = st.Close() }()
+
+	for _, id := range ids {
+		cancelled, cerr := st.CancelPendingTrigger(ctx, id)
+		switch {
+		case cerr != nil:
+			done = append(done, runResult{RunID: id, Error: "cancel queued run: " + cerr.Error()})
+		case cancelled:
+			done = append(done, runResult{RunID: id, OK: true, Note: "cancelled before dispatch"})
+		default:
+			remaining = append(remaining, id)
+		}
 	}
 	return done, remaining
 }

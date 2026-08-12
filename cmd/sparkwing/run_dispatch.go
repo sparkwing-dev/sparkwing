@@ -569,17 +569,34 @@ func isHTTPNotFound(err error) bool {
 
 // detectRemoteGit reads cwd's git state. Unresolved fields return empty.
 func detectRemoteGit() (branch, sha, repo, repoURL string) {
-	if out, err := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD").Output(); err == nil {
-		branch = strings.TrimSpace(string(out))
+	return gitContextIn("")
+}
+
+// gitContextIn reads dir's git state, or cwd's when dir is empty.
+// Unresolved fields return empty: a project with no remote, or no git at
+// all, still runs -- it just records less provenance.
+func gitContextIn(dir string) (branch, sha, repo, repoURL string) {
+	git := func(args ...string) (string, bool) {
+		if dir != "" {
+			args = append([]string{"-C", dir}, args...)
+		}
+		out, err := exec.Command("git", args...).Output()
+		if err != nil {
+			return "", false
+		}
+		return strings.TrimSpace(string(out)), true
+	}
+	if v, ok := git("rev-parse", "--abbrev-ref", "HEAD"); ok {
+		branch = v
 		if branch == "HEAD" {
 			branch = ""
 		}
 	}
-	if out, err := exec.Command("git", "rev-parse", "HEAD").Output(); err == nil {
-		sha = strings.TrimSpace(string(out))
+	if v, ok := git("rev-parse", "HEAD"); ok {
+		sha = v
 	}
-	if out, err := exec.Command("git", "remote", "get-url", "origin").Output(); err == nil {
-		repoURL = strings.TrimSpace(string(out))
+	if v, ok := git("remote", "get-url", "origin"); ok {
+		repoURL = v
 		repo = parseGithubOwnerRepo(repoURL)
 	}
 	return branch, sha, repo, repoURL
