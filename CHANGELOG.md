@@ -74,15 +74,20 @@ code change to unlock.
   still ridden through. This also bounds `sparkwing runs logs --follow`, which
   shares the loop: a controller outage lasting more than 60 seconds now ends
   the follow with a non-zero exit instead of tailing nothing indefinitely.
-- **orchestrator:** Make local and cluster argument semantics agree. A run row
-  records only the arguments the operator passed; the `defaults.args` and
-  pipeline `args:` layers are re-read from the checkout that executes, so a
-  retry picks up the project's current values. The cluster node entrypoint and
-  `debug replay` never performed that second read, so the same commit planned
-  with the project's arguments on a laptop and without them in a pod -- and a
-  `secret:"true"` input supplied by `sparkwing.yaml` was never registered with
-  the pod's log masker. Both paths now merge the checkout's layers under the
-  stored arguments, which still win per key.
+- **orchestrator:** Make argument and guard semantics agree across every entry
+  point. A run row records only the arguments the operator passed; the
+  `defaults.args` and pipeline `args:` layers are re-read from the checkout the
+  run executes out of, at that checkout's revision (for a retry, the source
+  run's recorded revision). Only `sparkwing run` performed that read. Queued
+  triggers -- which is every dashboard run and retry, the local trigger loop,
+  and every spawned child -- planned with unmerged arguments and skipped guard
+  evaluation entirely, and the cluster node entrypoint and `debug replay`
+  planned with unmerged arguments too, so a `secret:"true"` input supplied by
+  `sparkwing.yaml` was never registered with the executing side's log masker.
+  All four paths now resolve the same layers, with the operator's explicit
+  arguments still winning per key. Behavior change: a trigger whose arguments
+  come from `sparkwing.yaml` now runs with them and is subject to the
+  pipeline's guards.
 - **orchestrator:** Evaluate `arg:<flag>=<value>` guards against the arguments
   the run actually executes with. Guards were judged on the caller's arguments
   alone, so a value supplied by the project's `defaults.args` block or a

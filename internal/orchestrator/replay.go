@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"time"
 
@@ -99,7 +100,7 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 	// layers the original plan merged in are on disk here too. Planning
 	// from the bare run row instead would rebuild a different plan than
 	// the one whose dispatch snapshot is about to be replayed into it.
-	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args)
+	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args, slog.Default())
 	plan, err := reg.Invoke(ctx, invokeArgs, rc)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("build plan: %w", err)

@@ -118,7 +118,7 @@ func RunNodeOnce(
 	// masker is seeded from the merge for the same reason it is on the
 	// local path: a yaml-supplied `secret:"true"` value the masker never
 	// saw is a value the node log persists in the clear.
-	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args)
+	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args, logger)
 	masker := maskerForInvokeArgs(reg, invokeArgs)
 	plan, err := reg.Invoke(ctx, invokeArgs, rc)
 	if err != nil {

@@ -95,7 +95,7 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 		r = opts.RunnerFactory(backends, trigger)
 	}
 	args := resolveTriggerArgs(runCtx, backends.State, trigger, logger)
-	res, err := Run(runCtx, backends, Options{
+	runOpts := Options{
 		Pipeline:    trigger.Pipeline,
 		RunID:       trigger.ID,
 		Args:        args,
@@ -111,7 +111,15 @@ func ExecuteClaimedTrigger(ctx context.Context, opts WorkerOptions, backends Bac
 			trigger.GitSHA, trigger.GitBranch, "", trigger.Repo, trigger.RepoURL),
 		Delegate: opts.Delegate,
 		Runner:   r,
-	})
+	}
+	// Same reason as the local trigger child: a worker executes out of a
+	// project checkout, and a trigger that plans without the project's
+	// argument layers -- or without its guards -- is a trigger that
+	// dispatches something `sparkwing run` of the same pipeline would
+	// have merged differently, or refused outright. Degrades to a no-op
+	// in a runner image that carries no checkout.
+	applyCheckoutProjectConfig(&runOpts, logger)
+	res, err := Run(runCtx, backends, runOpts)
 	cancelRun()
 	if err != nil {
 		logger.Error(
