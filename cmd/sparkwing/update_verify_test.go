@@ -207,7 +207,7 @@ func TestDownloadAndInstall_DigestMismatch_NoReplacement(t *testing.T) {
 	if err == nil {
 		t.Fatal("digest mismatch was accepted")
 	}
-	if !strings.Contains(err.Error(), "checksum mismatch") {
+	if !strings.Contains(err.Error(), "signatures do not match") {
 		t.Errorf("error did not mention the checksum mismatch: %v", err)
 	}
 	assertBytes(t, currentBin, old)
@@ -223,17 +223,18 @@ func TestDownloadAndInstall_PostRenameMismatch_RestoresPrior(t *testing.T) {
 	old := []byte("KNOWN-GOOD-PRIOR-BINARY")
 	currentBin := writeCurrentBin(t, old)
 
+	previousHook := afterInstallHook
 	afterInstallHook = func(installed string) {
 		// Corrupt the just-installed file so the re-hash cannot match.
 		_ = os.WriteFile(installed, []byte("CORRUPTED-AFTER-RENAME"), 0o755)
 	}
-	t.Cleanup(func() { afterInstallHook = nil })
+	t.Cleanup(func() { afterInstallHook = previousHook })
 
 	_, err := downloadAndInstall("v9.9.9", currentBin)
 	if err == nil {
 		t.Fatal("post-rename corruption was not detected")
 	}
-	if !strings.Contains(err.Error(), "installed bytes do not match") {
+	if !strings.Contains(err.Error(), "installed binary digest mismatch") {
 		t.Errorf("error did not describe the post-install mismatch: %v", err)
 	}
 	// The prior binary is restored, not left corrupted.
