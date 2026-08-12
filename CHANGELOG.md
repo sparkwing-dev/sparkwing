@@ -135,15 +135,15 @@ code change to unlock.
 - **wingd:** The admission daemon is now supervised: it is started as a
   child of a watchdog process that replaces it if it stops answering
   health probes. A daemon that has stopped scheduling cannot run its own
-  recovery, so only another process can bound it. The supervisor itself
-  shipped in v0.26.0 but nothing reached it -- the spawn path still
-  started the daemon directly, because the binary being re-execed was
-  often a compiled pipeline, which serves no `wingd` verbs. Now that
-  spawning starts an installed binary, and both the CLI and
-  `sparkwing-runner` serve both verbs, the spawn goes through the
-  supervisor. A test in each hosting binary pins that it serves the verb
-  the spawn invokes, and the headless gate pins that a pipeline binary is
-  never asked to.
+  recovery, so only another process can bound it. Both the supervisor and
+  the spawn that reaches it were added after v0.26.0 was cut, so no
+  release has shipped an unsupervised-then-supervised daemon -- this is
+  the first release with one at all. It works because spawning now starts
+  an installed binary and both the CLI and `sparkwing-runner` serve both
+  `wingd` verbs; a compiled pipeline binary, which serves neither, is
+  never asked to. A test in each hosting binary pins that it serves the
+  verb the spawn invokes, and the headless gate pins that a pipeline
+  binary is never asked to.
 - **runner:** `sparkwing-runner --local-admission` can bring up the
   admission daemon it depends on. It served only `wingd run` while its own
   spawn path invoked the supervisor, so its spawn answered itself with a

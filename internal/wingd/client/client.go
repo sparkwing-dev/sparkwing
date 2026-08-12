@@ -405,9 +405,11 @@ func takeoverExhausted(selfVersion string, ack wingwire.HelloAck, attempts int) 
 		ErrTakeoverExhausted, attempts, daemon, ack.ProtocolMajor, self, wingd.ProtocolMajor)
 }
 
-// spawnFailed reports a spawn-syscall failure, folding in the daemon log
+// spawnFailed reports why bringing a daemon up did not work. Most callers
+// reach it with a spawn-syscall failure, and it folds in the daemon log
 // tail when a prior attempt left one so a bind-time death is visible even
-// when the final spawn is what erred.
+// when the final spawn is what erred. Some errors arrive already
+// explained, and those pass through untouched.
 //
 // A dial that failed for a reason no spawn can fix -- the socket path blocked,
 // a wedged listener -- outranks the spawn error, because that dial is the real
@@ -424,11 +426,12 @@ func spawnFailed(home, sock string, serr, dialErr error) error {
 		// process that is not the obstacle.
 		return serr
 	}
-	if errors.Is(serr, ErrDaemonHostUnusable) {
+	if errors.Is(serr, ErrDaemonHostUnusable) || errors.Is(serr, ErrDaemonHostFailed) {
 		// The obstacle is the named host binary, and the error already
-		// names it, why it was chosen, and whatever the host managed to
-		// write. Re-wrapping it as a generic spawn failure would bury the
-		// one fact the operator has to act on.
+		// names it, why it was chosen, and -- for a host that started and
+		// died -- the tail of what it wrote. Re-wrapping it as a generic
+		// spawn failure would bury the one fact the operator has to act
+		// on, and appending the tail again would print it twice.
 		return serr
 	}
 	if tail := daemonLogTail(home); tail != "" {
@@ -609,7 +612,9 @@ func (cl *Client) connect(ctx context.Context) error {
 					cl.Close()
 					return takeoverExhausted(opts.Version, ack, takeovers.total)
 				}
-				cl.takeover(ctx, opts)
+				if terr := cl.takeover(ctx, opts); terr != nil {
+					return terr
+				}
 				continue
 			}
 			cl.Close()
@@ -621,7 +626,9 @@ func (cl *Client) connect(ctx context.Context) error {
 				cl.Close()
 				return takeoverExhausted(opts.Version, ack, takeovers.total)
 			}
-			cl.takeover(ctx, opts)
+			if terr := cl.takeover(ctx, opts); terr != nil {
+				return terr
+			}
 			continue
 		}
 		if opts.NoTakeover && !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
@@ -681,7 +688,15 @@ func (cl *Client) recoverConn(ctx context.Context) error {
 
 // takeover drains the reachable older daemon and spawns this client's
 // binary as its successor, then returns so the caller re-dials.
-func (cl *Client) takeover(ctx context.Context, opts Options) {
+//
+// It returns the successor spawn's failure when that failure is the host
+// binary itself dying, so a takeover into a broken host fails in
+// milliseconds naming the binary rather than draining a working daemon
+// and then spending the full socket budget waiting for a replacement that
+// cannot come. Every other spawn error stays a logged best-effort: the
+// old daemon has already been drained, so re-dialing is still the right
+// next move and the connect loop's own budget covers it.
+func (cl *Client) takeover(ctx context.Context, opts Options) error {
 	opts.logf("taking over daemon %s with %s", cl.ack.BinaryVersion, opts.Version)
 	_ = cl.nc.SetWriteDeadline(time.Now().Add(opts.dialTimeout()))
 	_ = cl.write(&wingwire.DrainRequest{SuccessorVersion: opts.Version})
@@ -689,9 +704,13 @@ func (cl *Client) takeover(ctx context.Context, opts Options) {
 	_, _ = cl.dec.read()
 	cl.Close()
 	if err := opts.spawn(opts.Home, opts.Version); err != nil {
+		if errors.Is(err, ErrDaemonHostFailed) || errors.Is(err, ErrDaemonHostUnusable) {
+			return err
+		}
 		opts.logf("spawn successor: %v", err)
 	}
 	_ = sleep(ctx, opts.backoff())
+	return nil
 }
 
 func (cl *Client) handshake(version string) (wingwire.HelloAck, error) {

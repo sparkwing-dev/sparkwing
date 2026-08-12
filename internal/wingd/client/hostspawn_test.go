@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -132,6 +133,55 @@ func TestSpawn_HostThatExitsImmediatelyFailsFast(t *testing.T) {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("message %q omits %q -- it must name the binary and carry the host's reason", err.Error(), want)
 		}
+	}
+}
+
+// The same fast-fail has to hold on the takeover path, which is worse
+// than a cold start: the old daemon has already been drained, so a
+// successor that cannot start leaves the box with nothing while the
+// client spends its whole takeover budget re-draining and re-spawning.
+//
+// It is also where "the socket exists" stops meaning "the host is up":
+// the predecessor's socket is still in place when the successor starts.
+func TestTakeover_BrokenSuccessorFailsFastNamingTheBinary(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fixture below is a unix shell script")
+	}
+	home := shortHome(t)
+	oneShotDaemon(t, home, wingwire.HelloAck{
+		ProtocolMajor:       wingd.ProtocolMajor,
+		NativeProtocolMajor: wingd.ProtocolMajor,
+		BinaryVersion:       "v0.1.0",
+	})
+	bin := filepath.Join(t.TempDir(), "sparkwing")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\necho 'wingd: cannot serve' >&2\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("write fixture host: %v", err)
+	}
+	t.Setenv(HostBinEnv, bin)
+	spawn, ok := HostSpawn()
+	if !ok {
+		t.Fatal("HostSpawn() did not resolve the fixture")
+	}
+
+	start := time.Now()
+	_, err := EnsureDaemon(context.Background(), Options{
+		Home:        home,
+		Version:     "v9.9.9", // supersedes the fixture daemon, so this takes over
+		Spawn:       spawn,
+		DialTimeout: 200 * time.Millisecond,
+		Backoff:     5 * time.Millisecond,
+	})
+	if !errors.Is(err, ErrDaemonHostFailed) {
+		t.Fatalf("error %v does not match ErrDaemonHostFailed", err)
+	}
+	if errors.Is(err, ErrTakeoverExhausted) {
+		t.Fatal("a broken successor was reported as a version skew after burning the takeover budget")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("waited %s for a successor that died immediately", elapsed)
+	}
+	if !strings.Contains(err.Error(), bin) {
+		t.Errorf("message %q does not name the successor binary", err.Error())
 	}
 }
 
@@ -285,6 +335,54 @@ func TestMinHostingRelease_TakesTheHigherOfBothBars(t *testing.T) {
 	}
 	if !semver.IsValid(FirstHostingRelease) {
 		t.Errorf("FirstHostingRelease %q is not a valid semver; the advice would name a version that does not exist", FirstHostingRelease)
+	}
+}
+
+// TestFirstHostingRelease_IsStillUnreleased is the live half of keeping
+// that constant honest. It names the release this feature ships in, so
+// while the feature is unreleased the tag must not exist yet. The moment
+// it does -- a v0.27.0 cut without this work, or this work landing a
+// release later -- the constant is naming a build that cannot host, and
+// this fails.
+//
+// The release pipeline carries the same check at tag time. This one is
+// what catches it on a branch, before anyone runs a release.
+func TestFirstHostingRelease_IsStillUnreleased(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available; the release pipeline carries the same check")
+	}
+	cmd := exec.Command("git", "tag", "--list", FirstHostingRelease)
+	cmd.Dir = repoRootForTest(t)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Skipf("git tag --list: %v (not a checkout with tags; the release pipeline carries the same check)", err)
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return
+	}
+	t.Fatalf("FirstHostingRelease names %s, which is already a released tag. Either that release shipped without "+
+		"daemon hosting -- in which case the constant now tells operators to install a build that cannot host -- or "+
+		"this feature landed in it and the constant is right but this test is stale. Point it at the release this "+
+		"work actually ships in.", FirstHostingRelease)
+}
+
+// repoRootForTest walks up to the module root so `git` runs inside the
+// checkout regardless of where the test binary was invoked from.
+func repoRootForTest(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Skipf("getwd: %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Skip("no module root above the test directory")
+		}
+		dir = parent
 	}
 }
 

@@ -155,13 +155,17 @@ func collectDispatchEnv(node *sparkwing.JobNode, runID string, run *store.Run) m
 // envDenyExact names variables the prefixes would otherwise sweep in but
 // that must not be persisted into a dispatch snapshot.
 //
-// A snapshot is replayed later, and by `sparkwing debug rerun` on a
-// different machine than the one that captured it. That makes any value
-// naming a local filesystem path to an executable actively harmful:
+// The rule: host-local executable paths never travel in dispatch
+// snapshots. A snapshot is replayed later, and by `sparkwing debug rerun`
+// on a different machine than the one that captured it, so a value naming
+// a path that gets executed would send the replay to a path that is
+// absent there or -- worse -- present and something else. Anything added
+// here should be a variable whose value is such a path; a variable that
+// merely differs per machine is fine to capture, because reproducing what
+// the original dispatch observed is the point.
+//
 // SPARKWING_WINGD_BIN is the binary a run spawns to host the admission
-// daemon, so a snapshot carrying it would send a replay on another host
-// to exec a path that is absent there, or -- worse -- present and
-// something else. The replaying machine must resolve its own daemon host.
+// daemon. The replaying machine must resolve its own.
 var envDenyExact = map[string]bool{
 	wingdclient.HostBinEnv: true,
 }

@@ -7,9 +7,10 @@
 // version negotiation, and one repo bumping its SDK cannot churn the
 // daemon every other repo on the box shares.
 //
-// What a pipeline binary does when no daemon is reachable and none can be
-// hosted depends on what its pipeline asked for -- see
-// [planDeclaresLocalAdmission] and [LocalAdmission.unhostedOutcome].
+// What a pipeline binary does when it cannot use this box's daemon
+// depends on whether the pipeline reserved host capacity and on whether
+// anything is arbitrating the box -- see [planPinsHostResources] and
+// [LocalAdmission.unhostedOutcome].
 package orchestrator
 
 import (
@@ -25,9 +26,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// AllowUnadmittedEnv forces a run that explicitly declares resource
-// claims or concurrency groups to proceed uncoordinated when no daemon
-// is reachable and none can be hosted, instead of failing closed.
+// AllowUnadmittedEnv forces a run to proceed uncoordinated instead of
+// failing closed: a run that reserved host capacity on a box with no
+// daemon to hold it, or any run facing a live daemon it cannot speak to.
+// Only the exact value "1" counts (see [allowUnadmitted]).
 //
 // It is an environment variable rather than a `--sw-allow` category
 // because the runs that need it are exactly the ones no CLI launched: a

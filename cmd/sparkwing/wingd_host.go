@@ -14,11 +14,33 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
+
+// daemonLifecycleNotices are the client diagnostics worth printing from
+// the pre-exec readiness step: the ones describing something this step
+// did to the machine's daemon.
+//
+// The rest are filtered out because the pipeline binary is about to make
+// the same observations against the same daemon and report them itself.
+// A dev-build laptop, where every run notes that a dev client is sharing
+// a release daemon, would otherwise print that line twice per run from
+// two processes -- and the copy that matters is the run's, since that is
+// the client actually being served.
+var daemonLifecycleNotices = []string{"taking over daemon"}
+
+func announceDaemonLifecycle(format string, args ...any) {
+	for _, prefix := range daemonLifecycleNotices {
+		if strings.HasPrefix(format, prefix) {
+			fmt.Fprintf(os.Stderr, "sparkwing run: "+format+"\n", args...)
+			return
+		}
+	}
+}
 
 // ensureDaemonTimeout bounds the pre-exec readiness step. It is generous
 // enough to cover a cold daemon binding its socket, and short enough that
@@ -119,9 +141,7 @@ func ensureRunDaemon() {
 	// client's own takeover line names both versions.
 	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{
 		Version: installedVersion(),
-		Logf: func(format string, args ...any) {
-			fmt.Fprintf(os.Stderr, "sparkwing run: "+format+"\n", args...)
-		},
+		Logf:    announceDaemonLifecycle,
 	})
 	if err != nil {
 		return

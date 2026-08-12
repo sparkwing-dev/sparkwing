@@ -113,13 +113,22 @@ func spawnDetached(bin, home, version string) error {
 // watchHostStart waits for the spawned host to bind its socket or exit,
 // whichever comes first, and reports a non-zero exit as a host failure
 // naming the binary and the tail of the log it wrote. It returns nil once
-// the socket exists or the grace window ends, leaving the connect loop to
-// decide how long to keep waiting for a host that is merely slow.
+// the host looks healthy or the grace window ends, leaving the connect
+// loop to decide how long to keep waiting for a host that is merely slow.
+//
+// "Bound its socket" is judged against the socket that was there before
+// the spawn, not against mere existence. During a takeover the
+// predecessor's socket is still in place, and treating it as the
+// successor's readiness would stop the watch instantly and miss a
+// successor that could not start at all -- the exact case this exists to
+// catch. A daemon binds a fresh socket file, so a different one is proof;
+// the same one is not.
 func watchHostStart(cmd *exec.Cmd, bin, home string) error {
 	sock, serr := wingd.SocketPath(home)
 	if serr != nil {
 		return nil
 	}
+	before, _ := os.Stat(sock)
 	exited := make(chan error, 1)
 	go func() { exited <- cmd.Wait() }()
 	deadline := time.Now().Add(hostStartGrace)
@@ -135,7 +144,7 @@ func watchHostStart(cmd *exec.Cmd, bin, home string) error {
 			return hostExitedEarly(bin, home, exit)
 		default:
 		}
-		if _, err := os.Stat(sock); err == nil {
+		if now, err := os.Stat(sock); err == nil && (before == nil || !os.SameFile(before, now)) {
 			return nil
 		}
 		if !time.Now().Before(deadline) {
