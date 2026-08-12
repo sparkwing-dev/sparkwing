@@ -140,7 +140,11 @@ func spawnInProcess(t *testing.T, home string) func(string, string) error {
 		case <-d.Ready():
 			t.Cleanup(func() {
 				cancel()
-				<-exited
+				select {
+				case <-exited:
+				case <-time.After(5 * time.Second):
+					t.Error("spawned daemon did not stop after cancellation")
+				}
 			})
 			return nil
 		case err := <-exited:
