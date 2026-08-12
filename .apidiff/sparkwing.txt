@@ -56,15 +56,9 @@ func BindPipelinesFromYAML(cfg interface {
 )
 func BoxToolBudget(tool string, grantableCores float64, queueTimeout time.Duration) *ConcurrencyGroup
 type Cache = storage.ArtifactStore
-type CacheConfig struct {
-	Key CacheKeyFn
-
-	TTL time.Duration
-}
 type CacheKey string
 func (k CacheKey) IsNoCache() bool
 type CacheKeyFn func(ctx context.Context) CacheKey
-type CacheOption func(*CacheConfig)
 const Cached Outcome = "cached"
 const CancelOthers OnLimit = "cancel_others"
 const Cancelled Outcome = "cancelled"
@@ -151,6 +145,9 @@ type DescribeStepRisks struct {
 	NodeID string
 	StepID string
 	Labels []string
+}
+func Dir(path string, key KeySource) DirCache
+type DirCache struct {
 }
 const EnvGitHubEventName = "GITHUB_EVENT_NAME"
 const EnvPRAction = "GITHUB_PR_ACTION"
@@ -254,6 +251,7 @@ func (g *Git) TagsAtHead(ctx context.Context) ([]string, error)
 func (g *Git) WorkDir() string
 func GithubOwnerRepo(slug string) (owner, repo string)
 func Glob(pattern string) ([]string, error)
+func GoModules() DirCache
 type GroupBuilder struct {
 }
 func (g *GroupBuilder) AllOrNone() *GroupBuilder
@@ -296,7 +294,7 @@ type JobGroup struct {
 }
 func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup
 func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup
-func (g *JobGroup) Cache(key CacheKeyFn, opts ...CacheOption) *JobGroup
+func (g *JobGroup) CacheDir(caches ...DirCache) *JobGroup
 func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup
 func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup
 func (g *JobGroup) ContinueOnError() *JobGroup
@@ -305,6 +303,7 @@ func (g *JobGroup) Env(key, value string) *JobGroup
 func (g *JobGroup) Err() error
 func (g *JobGroup) Inline() *JobGroup
 func (g *JobGroup) Members() []*JobNode
+func (g *JobGroup) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobGroup
 func (g *JobGroup) Name() string
 func (g *JobGroup) Needs(deps ...Dep) *JobGroup
 func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup
@@ -326,8 +325,7 @@ func (n *JobNode) AfterRunHooks() []AfterRunFn
 func (n *JobNode) ApprovalConfig() *ApprovalConfig
 func (n *JobNode) BeforeRun(fn BeforeRunFn) *JobNode
 func (n *JobNode) BeforeRunHooks() []BeforeRunFn
-func (n *JobNode) Cache(key CacheKeyFn, opts ...CacheOption) *JobNode
-func (n *JobNode) CacheConfig() *CacheConfig
+func (n *JobNode) CacheDir(caches ...DirCache) *JobNode
 func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode
 func (n *JobNode) ConcurrencyCost() int
 func (n *JobNode) ConcurrencyGroupRef() *ConcurrencyGroup
@@ -335,6 +333,7 @@ func (n *JobNode) ConsumeEdges() []ConsumeEdge
 func (n *JobNode) Consumes(producer *JobNode, opts ...ConsumeOption) *JobNode
 func (n *JobNode) ContinueOnError() *JobNode
 func (n *JobNode) DepIDs() []string
+func (n *JobNode) DirCaches() []DirCache
 func (n *JobNode) Env(key, value string) *JobNode
 func (n *JobNode) EnvMap() map[string]string
 func (n *JobNode) ID() string
@@ -344,6 +343,8 @@ func (n *JobNode) IsContinueOnError() bool
 func (n *JobNode) IsInline() bool
 func (n *JobNode) IsOptional() bool
 func (n *JobNode) Job() Workable
+func (n *JobNode) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobNode
+func (n *JobNode) MemoizeConfig() *MemoizeConfig
 func (n *JobNode) Needs(deps ...Dep) *JobNode
 func (n *JobNode) NeedsGroups() []*JobGroup
 func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode
@@ -376,6 +377,9 @@ func (n *JobNode) Work() *Work
 func JobSpawn(w *Work, id string, x any) *SpawnSpec
 func JobSpawnEach(w *Work, items, fn any) *SpawnGenSpec
 func Key(parts ...any) CacheKey
+func KeyFromFile(path string) KeySource
+type KeySource struct {
+}
 func LintCacheBlobKey() string
 type LintSlot struct {
 	Path string
@@ -413,6 +417,12 @@ func Lookup(name string) (*Registration, bool)
 func Max(v any) Constraint
 func MaxAge(d time.Duration) RefOption
 const MaxCacheTTL = 35 * 24 * time.Hour
+type MemoizeConfig struct {
+	Key CacheKeyFn
+
+	TTL time.Duration
+}
+type MemoizeOption func(*MemoizeConfig)
 func MemoryGB(n float64) ResourceHint
 func Min(v any) Constraint
 func MustConfig(ctx context.Context, name string) string
@@ -430,6 +440,7 @@ const NoCache CacheKey = "ck:nocache"
 type NoInputs struct{}
 func NodeFromContext(ctx context.Context) string
 func Not(p Predicate) Predicate
+func NpmCache() DirCache
 type OnLimit string
 func OneOf(values ...any) Constraint
 func Or(preds ...Predicate) Predicate
@@ -765,7 +776,7 @@ func (g *StepGroup) SkipIf(fn SkipPredicate) *StepGroup
 const Success Outcome = "success"
 func Summary(ctx context.Context, markdown string)
 const Superseded Outcome = "superseded"
-func TTL(d time.Duration) CacheOption
+func TTL(d time.Duration) MemoizeOption
 func ToolCacheDir(tool string) string
 func ToolCostCenticores(cores float64) int
 func ToolSlot(ctx context.Context, g *ConcurrencyGroup, cost ...int) (release func(), granted bool)
@@ -867,6 +878,7 @@ func (p argSetPredicate) String() string
 func (p argUnsetPredicate) Eval(ctx PredicateContext) bool
 func (p argUnsetPredicate) String() string
 func (c *countReader) Read(p []byte) (int, error)
+func (c *countingReader) Read(p []byte) (int, error)
 func (e *envResolver) Resolve(_ context.Context, name string) (string, bool, error)
 func (f *fileResolver) Resolve(_ context.Context, name string) (string, bool, error)
 func (k groupKind) String() string

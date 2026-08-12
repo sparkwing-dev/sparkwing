@@ -42,7 +42,7 @@ type s3CachedPipe struct{ sparkwing.Base }
 
 func (s3CachedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	node := sparkwing.Job(plan, "build", &s3CachedJob{})
-	node.Cache(func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("s3-integ", "static-v1") })
+	node.Memoize(func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("s3-integ", "static-v1") })
 	return nil
 }
 

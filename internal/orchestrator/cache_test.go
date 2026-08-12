@@ -325,7 +325,7 @@ func (w *planWrapper) Plan(ctx context.Context, plan *sparkwing.Plan, in sparkwi
 		return err
 	}
 	if node := plan.Job("build"); node != nil {
-		node.Cache(w.keyFn)
+		node.Memoize(w.keyFn)
 	}
 	return nil
 }

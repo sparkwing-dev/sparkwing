@@ -422,7 +422,7 @@ panics at materialize time.
 
 Approval gates register through `sw.JobApproval` and return an
 `*ApprovalGate` -- a narrower modifier surface than `*JobNode` so the
-modifiers that don't apply to gates (`Retry`, `Timeout`, `Cache`,
+modifiers that don't apply to gates (`Retry`, `Timeout`, `Memoize`,
 `Requires`, `Inline`) are physically absent and a misuse is a compile
 error rather than a runtime surprise:
 
@@ -482,7 +482,7 @@ Common Plan-layer modifiers (chainable on `*JobNode`):
 .OnFailure(id, job)                // recovery node if this node fails; job may be func(ctx, sparkwing.Failure) error to branch on stage
 .SkipIf(pred, opts...)             // skip when pred(ctx) returns true; SkipBudget(d) overrides budget
 .Requires(labels...)               // require runner labels (comma = OR within a term, AND across terms)
-.Cache(key, TTL(d))                // content-addressed result memoization (+ in-flight dedupe)
+.Memoize(key, TTL(d))                // content-addressed result memoization (+ in-flight dedupe)
 .Concurrency(group, cost...)       // join a shared concurrency budget (count-limit, gate, throttle)
 .BeforeRun(fn) / .AfterRun(fn)     // hooks
 .Inline()                          // bypass the runner entirely
@@ -1004,7 +1004,7 @@ your DryRun bodies for free.
 
 ## Cache
 
-`.Cache(key, opts...)` is content-addressed result memoization: same
+`.Memoize(key, opts...)` is content-addressed result memoization: same
 content, compute once, reuse the result. It carries no scope and no
 group -- that is [Concurrency](#concurrency)'s job.
 
@@ -1012,7 +1012,7 @@ group -- that is [Concurrency](#concurrency)'s job.
 sw.Key("go-mod", "1.26", "abc123") // a CacheKey from any parts
 
 node := sw.Job(plan, "build", func(ctx context.Context) error { return nil })
-node.Cache(func(ctx context.Context) sw.CacheKey {
+node.Memoize(func(ctx context.Context) sw.CacheKey {
     return sw.Key("build", "linux", "amd64")
 }, sw.TTL(24*time.Hour))
 ```
@@ -1027,7 +1027,7 @@ node.Cache(func(ctx context.Context) sw.CacheKey {
   computes, the rest wait and replay. No policy needed.
 
 See [caching.md](caching.md) for the full model. The `JobGroup` mirror
-is `group.Cache(key, opts...)`.
+is `group.Memoize(key, opts...)`.
 
 ## Concurrency
 
