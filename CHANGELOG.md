@@ -48,6 +48,14 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **storage:** `fs.LogStore.RunDir(runID)` names the directory a filesystem
+  logs backend writes a run's node logs into. The orchestrator records it as
+  the run's `log_path`; it is a method on the concrete filesystem store, not on
+  the `storage.LogStore` interface, because the object-store, controller, and
+  stdout backends have no local directory to name.
+
 ### Fixed
 
 - **orchestrator:** Record `log_path` for runs whose profile uses a filesystem

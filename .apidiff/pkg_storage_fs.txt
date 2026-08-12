@@ -19,6 +19,7 @@ func (s *LogStore) Append(_ context.Context, runID, nodeID string, data []byte) 
 func (s *LogStore) DeleteRun(_ context.Context, runID string) error
 func (s *LogStore) Read(_ context.Context, runID, nodeID string, opts storage.ReadOpts) ([]byte, error)
 func (s *LogStore) ReadRun(_ context.Context, runID string) ([]byte, error)
+func (s *LogStore) RunDir(runID string) string
 func (s *LogStore) Stream(context.Context, string, string) (io.ReadCloser, error)
 func NewArtifactStore(root string) (*ArtifactStore, error)
 func NewLogStore(root string) (*LogStore, error)

@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -66,9 +65,9 @@ var _ LogBackend = (*HTTPLogs)(nil)
 // implementation that forgot. Here the absence of a case IS the "not
 // local" answer.
 //
-// The layout is fs.LogStore's own: Root/<runID>/<nodeID>.ndjson.
-// TestLogPath_FilesystemLogsStoreMatchesWhereItWrites pins the two
-// together so this cannot drift into pointing at an empty directory.
+// The directory itself comes from [fs.LogStore.RunDir], so the recorded
+// path is the store's own answer rather than a second copy of its
+// layout that could drift into naming a directory nothing writes to.
 func (h *HTTPLogs) localRunDir(runID string) string {
 	store, ok := h.client.(*fs.LogStore)
 	if !ok || store == nil || store.Root == "" {
@@ -80,7 +79,7 @@ func (h *HTTPLogs) localRunDir(runID string) string {
 	if err := storage.SafeSegment(runID); err != nil {
 		return ""
 	}
-	dir := filepath.Join(store.Root, runID)
+	dir := store.RunDir(runID)
 	// Ensured, not merely named, for the same reason localRunLogDir
 	// ensures the localLogs directory: a run that dies during planning
 	// must not advertise a directory that never existed. This is the

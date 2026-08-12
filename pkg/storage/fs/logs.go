@@ -62,7 +62,19 @@ func (s *LogStore) nodePath(runID, nodeID string) string {
 	return filepath.Join(s.Root, runID, nodeID+".ndjson")
 }
 
-func (s *LogStore) runDir(runID string) string {
+// RunDir is the directory this store writes runID's node logs into.
+// The directory is named, not created: Append creates it on its first
+// write, and a caller that wants it to exist before then says so with
+// its own MkdirAll.
+//
+// Exported because the orchestrator records it as a run's `log_path`,
+// so an operator holding a run id can read the logs straight off disk.
+// It is a method on the concrete filesystem store rather than on
+// storage.LogStore on purpose: "which local directory holds this run's
+// logs" has no answer for the object-store, controller, or stdout
+// implementations, and forcing them to return "" would make "no local
+// directory" indistinguishable from "not implemented".
+func (s *LogStore) RunDir(runID string) string {
 	return filepath.Join(s.Root, runID)
 }
 
@@ -112,7 +124,7 @@ func (s *LogStore) ReadRun(_ context.Context, runID string) ([]byte, error) {
 	if err := storage.SafeSegment(runID); err != nil {
 		return nil, fmt.Errorf("fs.LogStore.ReadRun: %w", err)
 	}
-	dir := s.runDir(runID)
+	dir := s.RunDir(runID)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -149,7 +161,7 @@ func (s *LogStore) DeleteRun(_ context.Context, runID string) error {
 	if err := storage.SafeSegment(runID); err != nil {
 		return fmt.Errorf("fs.LogStore.DeleteRun: %w", err)
 	}
-	err := os.RemoveAll(s.runDir(runID))
+	err := os.RemoveAll(s.RunDir(runID))
 	if err == nil || errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
