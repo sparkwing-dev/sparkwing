@@ -100,7 +100,7 @@ func (l *localDepCache) fetch(_ context.Context, key, dir string) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	if err := extractDepCacheArchive(f, dir); err != nil {
+	if err := extractDepCacheArchiveStaged(f, dir); err != nil {
 		return 0, err
 	}
 	return fi.Size(), nil
@@ -200,7 +200,7 @@ func (r *remoteDepCache) fetch(ctx context.Context, key, dir string) (int64, err
 		return 0, fmt.Errorf("GET /cache/%s: %s", key, resp.Status)
 	}
 	counted := &countingReader{r: resp.Body}
-	if err := extractDepCacheArchive(counted, dir); err != nil {
+	if err := extractDepCacheArchiveStaged(counted, dir); err != nil {
 		return 0, err
 	}
 	return counted.n, nil

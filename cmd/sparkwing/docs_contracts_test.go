@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -37,6 +38,16 @@ const envPrefix = "SPARKWING_"
 // check. These pages are published to sparkwing.dev, and fifty paragraphs of
 // configuration semantics written from call sites, reaching external readers
 // without a human having read them, is a bigger risk than the gap they close.
+// docsMentionEnvVar reports whether the docs name the variable as a
+// whole token. A plain substring match would count SPARKWING_GITCACHE
+// as documented because SPARKWING_GITCACHE_URL contains it, hiding an
+// undocumented variable behind a longer one; "_" is an identifier
+// character, so the surrounding bytes must not be identifier bytes.
+func docsMentionEnvVar(documented, name string) bool {
+	re := regexp.MustCompile(`(^|[^A-Za-z0-9_])` + regexp.QuoteMeta(name) + `([^A-Za-z0-9_]|$)`)
+	return re.MatchString(documented)
+}
+
 var undocumentedEnvVars = []string{
 	"SPARKWING_AUTO_REGISTER_WORKTREES",
 	"SPARKWING_BAKED_BINARY",
@@ -61,6 +72,7 @@ var undocumentedEnvVars = []string{
 	"SPARKWING_NO_CACHE",
 	"SPARKWING_NO_UPDATE",
 	"SPARKWING_ONLY",
+	"SPARKWING_PROFILE",
 	"SPARKWING_REF",
 	"SPARKWING_REMOTE_CHILD",
 	"SPARKWING_REPOS",
@@ -137,9 +149,9 @@ func TestDocsNameEveryEnvironmentVariableTheCodeReads(t *testing.T) {
 
 	for _, name := range names {
 		switch {
-		case strings.Contains(documented, name) && recorded[name]:
+		case docsMentionEnvVar(documented, name) && recorded[name]:
 			t.Errorf("%s is documented now; drop it from undocumentedEnvVars", name)
-		case !strings.Contains(documented, name) && !recorded[name]:
+		case !docsMentionEnvVar(documented, name) && !recorded[name]:
 			t.Errorf("no docs page names %s, which the code reads", name)
 		}
 	}

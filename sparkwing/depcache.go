@@ -12,6 +12,7 @@ import (
 	"regexp"
 	goruntime "runtime"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -39,6 +40,12 @@ type DirCache struct {
 	// path is the directory to cache. A relative path resolves
 	// against [WorkDir]. Empty when resolvePath is set.
 	path string
+	// keyScope disambiguates the key when name alone does not. A
+	// [Dir] cache sets it to the declared path so two directories
+	// with the same base name and identical lockfile do not collide;
+	// the ecosystem helpers leave it empty because their directory is
+	// resolved from the environment and singular per host.
+	keyScope string
 	// resolvePath, when non-nil, resolves the directory at run time
 	// (GOMODCACHE is an environment question, not a plan question).
 	resolvePath func() (string, error)
@@ -112,6 +119,7 @@ func Dir(path string, key KeySource) DirCache {
 	return DirCache{
 		name:     filepath.Base(filepath.Clean(path)),
 		path:     path,
+		keyScope: filepath.ToSlash(filepath.Clean(path)),
 		keyFiles: key.files,
 	}
 }
@@ -164,6 +172,20 @@ func (n *JobNode) DirCaches() []DirCache { return n.dirCaches }
 // run (defense in depth -- derivation below only emits safe runes).
 var depCacheKeyRE = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
 
+// depCacheDirLocks serializes restore and save for caches that resolve
+// to the same directory within one process (two GoModules() members
+// running in parallel share GOMODCACHE). Keyed by resolved absolute
+// path. It does not guard against a second process on the same host --
+// that is the backend's concern, not the extraction's.
+var depCacheDirLocks sync.Map
+
+func lockDepCacheDir(dir string) func() {
+	m, _ := depCacheDirLocks.LoadOrStore(filepath.Clean(dir), &sync.Mutex{})
+	mu := m.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
 // dirCacheRun carries one node's per-run cache state between the
 // BeforeRun restore and the AfterRun save. The plan (and therefore
 // this state) is rebuilt from code in every environment that executes
@@ -173,10 +195,11 @@ type dirCacheRun struct {
 	node string
 
 	// Set by restore, read by save.
-	disabled bool   // no lockfile / bad key: skip everything silently
-	key      string // derived cache key
-	dir      string // resolved absolute target directory
-	missed   bool   // backend had no entry for key: save after success
+	disabled   bool   // no lockfile / bad key: skip everything silently
+	key        string // derived cache key
+	dir        string // resolved absolute target directory
+	missed     bool   // backend had no entry for key: save after success
+	emptyStart bool   // dir was absent/empty at restore: this run populated it
 }
 
 // dirCacheSpecAlias keeps the struct field readable while DirCache
@@ -197,7 +220,7 @@ func (st *dirCacheRun) restore(ctx context.Context) error {
 		return nil
 	}
 
-	key, err := deriveDepCacheKey(st.spec.name, lockPath)
+	key, err := deriveDepCacheKey(st.spec.name, st.spec.keyScope, lockPath)
 	if err != nil {
 		slog.Warn("depcache: key derivation failed; dependency cache disabled for this run",
 			"node", st.node, "cache", st.spec.name, "err", err)
@@ -215,6 +238,19 @@ func (st *dirCacheRun) restore(ctx context.Context) error {
 	}
 	st.dir = dir
 
+	// A pre-existing populated directory (a warm laptop's shared
+	// GOMODCACHE) is not this run's to archive; only a directory this
+	// run fills gets saved. See save.
+	notEmpty, _ := dirHasEntries(dir)
+	st.emptyStart = !notEmpty
+
+	// One host can run two nodes that resolve the same directory (two
+	// GoModules() members in parallel). Serialize restore+save on the
+	// resolved path so their extractions do not interleave into the
+	// same files.
+	unlock := lockDepCacheDir(dir)
+	defer unlock()
+
 	backend := selectDepCacheBackend()
 	hit, err := backend.exists(ctx, key)
 	if err != nil {
@@ -230,7 +266,7 @@ func (st *dirCacheRun) restore(ctx context.Context) error {
 		return nil
 	}
 
-	if notEmpty, _ := dirHasEntries(dir); notEmpty {
+	if notEmpty {
 		slog.Info("depcache: directory already has content; skipping restore",
 			"node", st.node, "cache", st.spec.name, "dir", dir)
 		return nil
@@ -256,6 +292,19 @@ func (st *dirCacheRun) save(ctx context.Context, runErr error) {
 	if st.disabled || !st.missed || runErr != nil || st.key == "" {
 		return
 	}
+	// Save only a directory this run populated from empty. A cache
+	// that was already warm at restore (a laptop's shared GOMODCACHE)
+	// is multi-GB of content this node did not produce; archiving it
+	// every run burns minutes of CPU and, against the remote backend,
+	// is discarded as oversize -- and because the key is never stored,
+	// it repeats on the next run.
+	if !st.emptyStart {
+		return
+	}
+
+	unlock := lockDepCacheDir(st.dir)
+	defer unlock()
+
 	if hasEntries, _ := dirHasEntries(st.dir); !hasEntries {
 		slog.Warn("depcache: nothing to save (directory missing or empty)",
 			"node", st.node, "cache", st.spec.name, "dir", st.dir)
@@ -286,16 +335,23 @@ func (c DirCache) targetDir(workdir string) (string, error) {
 	return filepath.Join(workdir, c.path), nil
 }
 
-// deriveDepCacheKey hashes the lockfile's bytes into
-// dep-<name>-<goos>-<goarch>-<hash16>. Platform is part of the key
-// because compiled dependency content (cgo artifacts, platform
-// wheels, install scripts) is not portable across it.
-func deriveDepCacheKey(name, lockPath string) (string, error) {
+// deriveDepCacheKey hashes the lockfile's bytes (and the cache's key
+// scope, when set) into dep-<name>-<goos>-<goarch>-<hash16>. Platform
+// is part of the key because compiled dependency content (cgo
+// artifacts, platform wheels, install scripts) is not portable across
+// it. The scope keeps two [Dir] caches with the same base name and
+// identical lockfile from resolving to one key and restoring each
+// other's contents.
+func deriveDepCacheKey(name, scope, lockPath string) (string, error) {
 	data, err := os.ReadFile(lockPath)
 	if err != nil {
 		return "", fmt.Errorf("read key file %s: %w", lockPath, err)
 	}
-	sum := sha256.Sum256(data)
+	h := sha256.New()
+	h.Write([]byte(scope))
+	h.Write([]byte{0})
+	h.Write(data)
+	sum := h.Sum(nil)
 	key := fmt.Sprintf("dep-%s-%s-%s-%s",
 		cacheSegment(name, "dir"), goruntime.GOOS, goruntime.GOARCH, hex.EncodeToString(sum[:8]))
 	if !depCacheKeyRE.MatchString(key) {

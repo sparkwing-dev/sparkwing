@@ -1,6 +1,9 @@
 package sparkwing
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"net/http"
@@ -20,11 +23,11 @@ func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	k1, err := deriveDepCacheKey("go-modules", lock)
+	k1, err := deriveDepCacheKey("go-modules", "", lock)
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}
-	k2, err := deriveDepCacheKey("go-modules", lock)
+	k2, err := deriveDepCacheKey("go-modules", "", lock)
 	if err != nil {
 		t.Fatalf("derive again: %v", err)
 	}
@@ -42,7 +45,7 @@ func TestDeriveDepCacheKeyStableAndSafe(t *testing.T) {
 	if err := os.WriteFile(lock, []byte("example.com/mod v1.1.0 h1:def\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	k3, err := deriveDepCacheKey("go-modules", lock)
+	k3, err := deriveDepCacheKey("go-modules", "", lock)
 	if err != nil {
 		t.Fatalf("derive after edit: %v", err)
 	}
@@ -57,7 +60,7 @@ func TestDeriveDepCacheKeySanitizesName(t *testing.T) {
 	if err := os.WriteFile(lock, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	key, err := deriveDepCacheKey("weird/name with spaces", lock)
+	key, err := deriveDepCacheKey("weird/name with spaces", "", lock)
 	if err != nil {
 		t.Fatalf("derive: %v", err)
 	}
@@ -148,6 +151,130 @@ func TestExtractDepCacheArchiveRejectsEscape(t *testing.T) {
 	}
 	if _, err := securePathJoin("/safe/root", "ok/nested"); err != nil {
 		t.Fatalf("legitimate nested path rejected: %v", err)
+	}
+}
+
+// writeRawDepArchive builds a gzip tar from explicit headers so a test
+// can forge the archives a hostile cache service could return.
+func writeRawDepArchive(t *testing.T, path string, entries []*tar.Header, bodies map[string][]byte) {
+	t.Helper()
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gz := gzip.NewWriter(f)
+	tw := tar.NewWriter(gz)
+	for _, h := range entries {
+		if err := tw.WriteHeader(h); err != nil {
+			t.Fatal(err)
+		}
+		if b, ok := bodies[h.Name]; ok {
+			if _, err := tw.Write(b); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestExtractRejectsEscapingSymlink is the regression for the
+// plant-a-symlink-then-write-through-it escape: a symlink whose target
+// leaves the extraction root must be refused, so no later file can be
+// written through it to an out-of-tree path.
+func TestExtractRejectsEscapingSymlink(t *testing.T) {
+	outside := t.TempDir()
+	victim := filepath.Join(outside, "victim")
+	if err := os.WriteFile(victim, []byte("original"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	archive := filepath.Join(t.TempDir(), "evil.tar.gz")
+	writeRawDepArchive(t, archive, []*tar.Header{
+		{Name: "x", Typeflag: tar.TypeSymlink, Linkname: outside, Mode: 0o777},
+		{Name: "x/victim", Typeflag: tar.TypeReg, Mode: 0o644, Size: 5},
+	}, map[string][]byte{"x/victim": []byte("PWNED")})
+
+	rf, err := os.Open(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rf.Close()
+	if err := extractDepCacheArchive(rf, t.TempDir()); err == nil {
+		t.Fatal("escaping symlink was accepted")
+	}
+	data, err := os.ReadFile(victim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "original" {
+		t.Fatalf("file outside the target was overwritten: %q", data)
+	}
+}
+
+// TestExtractBoundsDecompression is the regression for the gzip-bomb
+// fetch: extraction must stop at the cap rather than write unbounded.
+func TestExtractBoundsDecompression(t *testing.T) {
+	orig := depCacheMaxExtractBytes
+	depCacheMaxExtractBytes = 1 << 10
+	defer func() { depCacheMaxExtractBytes = orig }()
+
+	archive := filepath.Join(t.TempDir(), "bomb.tar.gz")
+	big := make([]byte, 64<<10)
+	writeRawDepArchive(t, archive, []*tar.Header{
+		{Name: "big", Typeflag: tar.TypeReg, Mode: 0o644, Size: int64(len(big))},
+	}, map[string][]byte{"big": big})
+
+	rf, err := os.Open(archive)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rf.Close()
+	if err := extractDepCacheArchive(rf, t.TempDir()); err == nil {
+		t.Fatal("oversized archive extracted past the cap")
+	}
+}
+
+// TestDirKeyIncludesPath is the regression for same-basename Dir()
+// caches colliding: two directories with the same base name and
+// identical lockfile content must derive different keys.
+func TestDirKeyIncludesPath(t *testing.T) {
+	dir := t.TempDir()
+	lock := filepath.Join(dir, "go.sum")
+	if err := os.WriteFile(lock, []byte("same content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	a := Dir("service-a/vendor", KeyFromFile("go.sum"))
+	b := Dir("service-b/vendor", KeyFromFile("go.sum"))
+	ka, err := deriveDepCacheKey(a.name, a.keyScope, lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kb, err := deriveDepCacheKey(b.name, b.keyScope, lock)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ka == kb {
+		t.Fatalf("same-basename Dir caches collide on key %q", ka)
+	}
+}
+
+// TestStagedExtractLeavesDirCleanOnFailure is the regression for a
+// truncated restore: a mid-stream failure must leave the target
+// absent, not half-populated.
+func TestStagedExtractLeavesDirCleanOnFailure(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "target")
+	truncated := bytes.NewReader([]byte{0x1f, 0x8b, 0x08, 0x00, 0x00}) // gzip magic, then cut off
+	if err := extractDepCacheArchiveStaged(truncated, dir); err == nil {
+		t.Fatal("truncated archive extracted without error")
+	}
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("target directory exists after failed restore (err=%v)", err)
 	}
 }
 
@@ -352,12 +479,6 @@ func TestDirCacheRunNeverSavesOnFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	depDir := filepath.Join(work, "vendor", "bundle")
-	if err := os.MkdirAll(depDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(depDir, "gem.rb"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
 
 	st := &dirCacheRun{spec: Dir("vendor/bundle", KeyFromFile("Gemfile.lock")), node: "t"}
 	if err := st.restore(context.Background()); err != nil {
@@ -365,6 +486,14 @@ func TestDirCacheRunNeverSavesOnFailure(t *testing.T) {
 	}
 	if !st.missed {
 		t.Fatal("expected a miss on an empty store")
+	}
+
+	// The node's Run populates the directory between restore and save.
+	if err := os.MkdirAll(depDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(depDir, "gem.rb"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
 	st.save(context.Background(), fmt.Errorf("node exploded"))
@@ -403,9 +532,8 @@ func TestDirCacheRunNpmStoreMissSaveHitCycle(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store1 := t.TempDir()
+	store1 := filepath.Join(t.TempDir(), "npm-cache-1")
 	t.Setenv("npm_config_cache", store1)
-	populateDepCacheFixture(t, store1)
 
 	first := &dirCacheRun{spec: NpmCache(), node: "t"}
 	if err := first.restore(context.Background()); err != nil {
@@ -414,6 +542,8 @@ func TestDirCacheRunNpmStoreMissSaveHitCycle(t *testing.T) {
 	if !first.missed {
 		t.Fatal("expected first-run miss")
 	}
+	// The node's Run fills the npm store between restore and save.
+	populateDepCacheFixture(t, store1)
 	first.save(context.Background(), nil)
 
 	store2 := filepath.Join(t.TempDir(), "npm-cache")
