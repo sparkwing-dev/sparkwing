@@ -335,6 +335,32 @@ func TestAcquireOrMaterializeClosesPublicationToLeaseGap(t *testing.T) {
 	}
 }
 
+func TestAcquireOrMaterializeAutomaticallyPrunesAfterNonCLIWrite(t *testing.T) {
+	t.Setenv(MaxCacheBytesEnv, "0")
+	t.Setenv(MaxCacheEntriesEnv, "1")
+
+	root := filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema)
+	old := testEntry(t, root, "11111111-11111111")
+	seedEntry(t, old, "old", time.Unix(1, 0))
+	newer := testEntry(t, root, "22222222-22222222")
+	lease, published, err := newer.AcquireOrMaterialize(context.Background(), func(path string) error {
+		return os.WriteFile(path, []byte("new"), 0o755)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lease.Release() }()
+	if !published {
+		t.Fatal("non-CLI write did not publish")
+	}
+	if _, err := os.Stat(old.binaryPath()); !os.IsNotExist(err) {
+		t.Fatalf("inactive sibling survived automatic pruning: %v", err)
+	}
+	if _, err := os.Stat(newer.binaryPath()); err != nil {
+		t.Fatalf("newly published leased entry was removed: %v", err)
+	}
+}
+
 func TestConcurrentMaterializationQueuesOnlyThePublisher(t *testing.T) {
 	root := t.TempDir()
 	entry := testEntry(t, root, "11111111-11111111")
