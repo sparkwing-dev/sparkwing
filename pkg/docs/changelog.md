@@ -55,6 +55,24 @@ code change to unlock.
   result reports observed capacity separately from removed entries; admission
   callers remeasure the filesystem after every attempt.
 
+### Fixed
+
+- **wingd:** Supervised admission daemons idle out again. Since v0.28.0 the
+  external supervisor's health probe opened a working connection every two
+  seconds, and every connection counted as daemon activity -- so a daemon
+  whose only traffic was its own watchdog never reached its idle window, and
+  detached supervise+run pairs outlived the throwaway homes that spawned
+  them (release hosts, scaffold verifies), charging their CPU to measured
+  external load and starving admission for real work on the box. The probe
+  now declares itself in its handshake and the daemon answers without
+  counting it as activity: a daemon with only probe traffic idles out on
+  schedule and the supervisor treats that clean exit as the end of
+  supervision. Socket sweeps (daemon discovery) are idle-neutral the same
+  way. A probe-declared connection may only read queue state; the daemon
+  drops it for anything else, so the accounting exemption cannot be
+  claimed by working clients. Supervisors already running from v0.28.x
+  keep probing the old way until their pair is killed once.
+
 ### Security
 
 - **cli + release:** `sparkwing update` accepts only an Ed25519-authenticated

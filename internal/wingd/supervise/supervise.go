@@ -103,6 +103,17 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (bool, 
 	defer ticker.Stop()
 	failures := 0
 	for {
+		// A child that already exited settles the watch: its exit, not a
+		// probe against its absence, is the verdict. Without this
+		// priority, a probe that failed because the child exited during
+		// it leaves both channels ready, and the select below picks at
+		// random -- enough unlucky picks in a row condemn a child that
+		// ended cleanly and spawn a successor nothing asked for.
+		select {
+		case err := <-child.Wait():
+			return false, err
+		default:
+		}
 		select {
 		case <-ctx.Done():
 			return false, stopChild(child, cfg.TermGrace)
@@ -218,9 +229,12 @@ func Run(args []string) error {
 		Start: func() (Child, error) {
 			return startExecChild(self, childArgs)
 		},
+		// The probe must ride [wingdclient.HealthProbe], never a working
+		// client: a working connection counts as daemon activity, and a
+		// daemon its own watchdog keeps active can never idle out, so the
+		// supervise+run pair outlives every home that spawned it.
 		Probe: func(ctx context.Context) error {
-			_, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home, DialTimeout: defaultProbeTimeout})
-			return err
+			return wingdclient.HealthProbe(ctx, *home)
 		},
 		Logf: logger.Printf,
 	})
