@@ -31,6 +31,7 @@ var (
 	gitcacheFetchDur      metric.Float64Histogram
 	gitcacheCacheHits     metric.Int64Counter
 	gitcacheCacheMisses   metric.Int64Counter
+	gitcacheRecoveryRecl  metric.Int64Counter
 )
 
 func initGitcacheMetrics() {
@@ -56,6 +57,10 @@ func initGitcacheMetrics() {
 	gitcacheCacheMisses, _ = meter.Int64Counter("sparkwing.gitcache.cache_misses",
 		metric.WithDescription("Archive cache misses"),
 		metric.WithUnit("{miss}"))
+
+	gitcacheRecoveryRecl, _ = meter.Int64Counter("sparkwing.gitcache.recovery_reclones",
+		metric.WithDescription("Recovery reclones after a failed mirror fetch"),
+		metric.WithUnit("{reclone}"))
 }
 
 // Proxy metrics
@@ -110,6 +115,19 @@ var (
 	apiToken              string
 	sshKeyDir             = "/etc/ssh-key"
 	autoRegisterReposSpec string
+	// fetchFreshWindow is how long a successful mirror fetch keeps a
+	// repo "fresh". Request handlers skip their own synchronous fetch
+	// inside the window because backgroundFetchLoop (or another
+	// request) already pulled from the remote that recently. Every
+	// skipped fetch is one fewer NAT egress round trip to GitHub, and
+	// under a webhook burst that is the difference between one fetch
+	// and one fetch per request.
+	fetchFreshWindow = 15 * time.Second
+	// recloneCooldown bounds handleArchive's delete-and-reclone
+	// recovery. A fetch that fails persistently (a ref conflict after
+	// a branch rename, say) would otherwise re-download the whole
+	// repository on every archive request.
+	recloneCooldown = 1 * time.Hour
 	// Per-repo locks to allow concurrent fetches of different repos
 	repoLocks   = map[string]*sync.Mutex{}
 	repoLocksMu sync.Mutex
@@ -194,9 +212,146 @@ type repoFetchState struct {
 	lastErrorAt time.Time // when the last error occurred
 	nextRetry   time.Time // backoff: when to retry
 	backoff     time.Duration
+	lastOK      time.Time   // last successful fetch (freshness throttle)
+	lastReclone time.Time   // last recovery reclone (circuit breaker)
+	reclones    []time.Time // recovery reclones inside the last 24h
 }
 
 var bgFetch = &fetchState{repos: map[string]*repoFetchState{}}
+
+// stateKey maps a repo hash to the bgFetch key. The background loop
+// walks repoDir and keys by directory name, so request handlers -- which
+// only hold the hash -- have to agree on that spelling for the
+// freshness throttle to see the loop's fetches at all.
+func stateKey(hash string) string { return hash + ".git" }
+
+// entry returns the state for a repo, creating it if absent.
+// Caller holds fs.mu for writing.
+func (fs *fetchState) entry(name string) *repoFetchState {
+	rs := fs.repos[name]
+	if rs == nil {
+		rs = &repoFetchState{}
+		fs.repos[name] = rs
+	}
+	return rs
+}
+
+// markFetched records a successful fetch, which starts the freshness
+// window other callers throttle against.
+func (fs *fetchState) markFetched(name string) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	rs := fs.entry(name)
+	rs.lastOK = time.Now()
+	rs.lastError = ""
+	rs.backoff = 0
+	// A fetch just succeeded, so the loop's retry backoff is stale
+	// news; leaving nextRetry in the future would keep the background
+	// loop skipping a repo that demonstrably works.
+	rs.nextRetry = time.Time{}
+}
+
+// fresh reports whether the mirror was fetched successfully within
+// fetchFreshWindow. A non-positive window disables the throttle.
+func (fs *fetchState) fresh(name string) bool {
+	if fetchFreshWindow <= 0 {
+		return false
+	}
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	rs := fs.repos[name]
+	if rs == nil || rs.lastOK.IsZero() {
+		return false
+	}
+	return time.Since(rs.lastOK) < fetchFreshWindow
+}
+
+// allowReclone reports whether a recovery reclone may run now, and
+// records it when the answer is yes. Callers hold the per-repo lock, so
+// two archive requests for the same repo cannot both be granted. The
+// slot is consumed before the clone runs, on purpose: a reclone that
+// fails halfway still spent egress, and a doomed clone retried per
+// request is exactly what the breaker exists to stop.
+func (fs *fetchState) allowReclone(name string) bool {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	rs := fs.entry(name)
+	now := time.Now()
+	if !rs.lastReclone.IsZero() && now.Sub(rs.lastReclone) < recloneCooldown {
+		return false
+	}
+	rs.lastReclone = now
+	kept := rs.reclones[:0]
+	for _, t := range rs.reclones {
+		if now.Sub(t) < 24*time.Hour {
+			kept = append(kept, t)
+		}
+	}
+	rs.reclones = append(kept, now)
+	return true
+}
+
+// recloneCooldownRemaining is how much of the cooldown is left, for the
+// error the client gets instead of another full re-download.
+func (fs *fetchState) recloneCooldownRemaining(name string) time.Duration {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	rs := fs.repos[name]
+	if rs == nil || rs.lastReclone.IsZero() {
+		return 0
+	}
+	left := recloneCooldown - time.Since(rs.lastReclone)
+	if left < 0 {
+		return 0
+	}
+	return left.Truncate(time.Second)
+}
+
+// mirrorFetch pulls origin's heads into a bare mirror. It is a var so
+// tests can count fetches; production never reassigns it.
+var mirrorFetch = func(timeout time.Duration, bareRepo string) (string, error) {
+	return gitCmdTimeout(timeout, "-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+}
+
+// recloneMirror is handleArchive's recovery path: throw the mirror away
+// and clone it again. A var for the same reason as mirrorFetch -- the
+// circuit-breaker tests need to count reclones, and counting a
+// terabyte-scale operation is the whole point of the breaker.
+var recloneMirror = func(repoURL, bareRepo string) (string, error) {
+	_ = os.RemoveAll(bareRepo)
+	return gitCmd("clone", "--bare", repoURL, bareRepo)
+}
+
+// mirrorFetchTimeout matches the old gitCmd default the request
+// handlers used before the fetch was funneled through one helper.
+const mirrorFetchTimeout = 2 * time.Minute
+
+// fetchMirrorIfStale runs the mirror fetch unless the repo is still
+// inside its freshness window, in which case it reports skipped=true
+// and touches the network not at all.
+func fetchMirrorIfStale(hash, bareRepo string) (out string, skipped bool, err error) {
+	name := stateKey(hash)
+	if bgFetch.fresh(name) {
+		return "", true, nil
+	}
+	out, err = mirrorFetch(mirrorFetchTimeout, bareRepo)
+	if err == nil {
+		bgFetch.markFetched(name)
+	}
+	return out, false, err
+}
+
+// refreshMirrorBestEffort is the throttled fetch for read-only handlers
+// that can serve slightly stale refs: a failure is logged, never fatal.
+// Before the throttle these handlers dropped the fetch error on the
+// floor, so the log line is new information.
+func refreshMirrorBestEffort(hash, bareRepo string) {
+	if _, skipped, err := fetchMirrorIfStale(hash, bareRepo); err != nil {
+		log.Printf("warning: mirror fetch for %s failed, serving cached refs: %v", hash, err)
+	} else if skipped {
+		log.Printf("mirror fetch for %s skipped (fetched within %s)", hash, fetchFreshWindow)
+	}
+}
 
 func (fs *fetchState) problems() []string {
 	fs.mu.RLock()
@@ -207,16 +362,35 @@ func (fs *fetchState) problems() []string {
 		msgs = append(msgs, "All git fetches are failing -- SSH may be broken or the pod is resource-exhausted")
 	}
 	for name, rs := range fs.repos {
+		short := strings.TrimSuffix(name, ".git")
+		if recent := recentReclones(rs.reclones); recent > 1 {
+			msgs = append(msgs, fmt.Sprintf(
+				"repo %s: recovery reclone ran %d times in 24h -- persistent fetch failure; investigate the underlying git error; recloning on every archive request is expensive",
+				short, recent))
+		}
 		if rs.lastError == "" {
 			continue
 		}
 		if time.Since(rs.lastErrorAt) > 10*time.Minute {
 			continue
 		}
-		msg := fmt.Sprintf("repo %s: %s", strings.TrimSuffix(name, ".git"), friendlyFetchError(rs.lastError))
+		msg := fmt.Sprintf("repo %s: %s", short, friendlyFetchError(rs.lastError))
 		msgs = append(msgs, msg)
 	}
 	return msgs
+}
+
+// recentReclones counts reclones inside the last 24h. allowReclone
+// prunes the slice as it appends, but /health can be read long after
+// the last reclone, so the window is applied on read too.
+func recentReclones(at []time.Time) int {
+	n := 0
+	for _, t := range at {
+		if time.Since(t) < 24*time.Hour {
+			n++
+		}
+	}
+	return n
 }
 
 // friendlyFetchError translates raw git/SSH errors into actionable messages.
@@ -281,7 +455,7 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 			mu := repoLock(bare)
 			mu.Lock()
 			fetchStart := time.Now()
-			out, err := gitCmdTimeout(1*time.Minute, "-C", bare, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+			out, err := mirrorFetch(1*time.Minute, bare)
 			mu.Unlock()
 			if gitcacheFetchDur != nil {
 				gitcacheFetchDur.Record(context.Background(), time.Since(fetchStart).Seconds(),
@@ -306,10 +480,14 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 				bgFetch.mu.Unlock()
 				log.Printf("background fetch: %s failed (retry in %s): %s", e.Name(), rs.backoff, errMsg)
 			} else {
-				if rs != nil {
-					rs.lastError = ""
-					rs.backoff = 0
-				}
+				// Record success even for repos with no prior state:
+				// lastOK is what the request-side freshness throttle
+				// reads, so a repo that has never failed still needs
+				// an entry.
+				rs = bgFetch.entry(e.Name())
+				rs.lastError = ""
+				rs.backoff = 0
+				rs.lastOK = time.Now()
 				bgFetch.mu.Unlock()
 				log.Printf("background fetch: %s ok", e.Name())
 			}
@@ -391,18 +569,45 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		enableSHAFetch(bareRepo)
+		bgFetch.markFetched(stateKey(hash))
 	} else {
 		enableSHAFetch(bareRepo)
-		log.Printf("background fetch: fetching %s", hash)
-		if out, err := gitCmd("-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*"); err != nil {
-			log.Printf("warning: fetch failed for %s, attempting recovery reclone: %v", hash, err)
-			_ = os.RemoveAll(bareRepo)
-			if recloneOut, err2 := gitCmd("clone", "--bare", repoURL, bareRepo); err2 != nil {
+		out, skipped, err := fetchMirrorIfStale(hash, bareRepo)
+		switch {
+		case skipped:
+			log.Printf("archive: %s fetched within %s, serving mirror as-is", hash, fetchFreshWindow)
+		case err != nil:
+			// A persistently failing fetch used to re-download the
+			// entire repository once per archive request. The breaker
+			// hands the git error to the client instead; the error text
+			// names the actual problem (a conflicting ref, say) and no
+			// operator can fix what they never see.
+			if !bgFetch.allowReclone(stateKey(hash)) {
+				left := bgFetch.recloneCooldownRemaining(stateKey(hash))
+				log.Printf("archive: fetch failed for %s and recovery reclone is on cooldown (%s left): %v", hash, left, err)
+				http.Error(w, fmt.Sprintf(
+					"fetch failed: %s\n%s\nrecovery reclone is on cooldown for another %s -- a reclone already ran for this repo and the fetch is still failing.\n"+
+						"This needs an operator: fix the git error above (a conflicting local ref after a branch rename is the usual cause, cleared with `git remote prune origin` / removing the conflicting ref in the mirror), because recloning the repository on every archive request costs a full download each time.",
+					err, sshHint(out), left), http.StatusBadGateway)
+				return
+			}
+			log.Printf("recovery reclone: %s -- fetch failed, recloning from origin (this re-downloads the whole repository): %v %s",
+				hash, err, strings.TrimSpace(out))
+			if gitcacheRecoveryRecl != nil {
+				gitcacheRecoveryRecl.Add(r.Context(), 1, metric.WithAttributes(
+					attribute.String("repo", hash),
+				))
+			}
+			if recloneOut, err2 := recloneMirror(repoURL, bareRepo); err2 != nil {
+				log.Printf("recovery reclone: %s failed: %v %s", hash, err2, strings.TrimSpace(recloneOut))
 				http.Error(w, fmt.Sprintf("fetch failed: %s\n%s\nreclone also failed: %s %s", err, sshHint(out), err2, recloneOut), http.StatusInternalServerError)
 				return
 			}
 			enableSHAFetch(bareRepo)
-			log.Printf("recovery reclone succeeded for %s", hash)
+			bgFetch.markFetched(stateKey(hash))
+			log.Printf("recovery reclone: %s succeeded", hash)
+		default:
+			log.Printf("archive: fetched %s", hash)
 		}
 	}
 
@@ -598,7 +803,7 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, _ = gitCmd("-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+	refreshMirrorBestEffort(hash, bareRepo)
 
 	out, err := exec.Command("git", "-C", bareRepo, "show", branch+":"+filePath).Output()
 	if err != nil {
@@ -641,7 +846,7 @@ func handleTreeHash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, _ = gitCmd("-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+	refreshMirrorBestEffort(hash, bareRepo)
 
 	ref := branch
 	if path != "" {
@@ -688,7 +893,7 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, _ = gitCmd("-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+	refreshMirrorBestEffort(hash, bareRepo)
 
 	err := exec.Command("git", "-C", bareRepo, "merge-base", "--is-ancestor", commit, branch).Run()
 	if err != nil {
@@ -1165,7 +1370,7 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 
 	lock := repoLock(hash)
 	lock.Lock()
-	_, _ = gitCmd("-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+	refreshMirrorBestEffort(hash, bareRepo)
 	lock.Unlock()
 
 	for _, commit := range req.Commits {
@@ -1390,12 +1595,16 @@ func handleGitRefresh(w http.ResponseWriter, r *http.Request) {
 	defer lock.Unlock()
 
 	enableSHAFetch(bareRepo)
-	out, err := gitCmdTimeout(45*time.Second, "-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
+	// Deliberately NOT throttled by fetchFreshWindow: this endpoint
+	// exists to close the push-then-trigger race, so a caller who just
+	// pushed must get a real fetch even if one ran a second ago.
+	out, err := mirrorFetch(45*time.Second, bareRepo)
 	if err != nil {
 		log.Printf("eager refresh: %s failed: %v %s", hash, err, out)
 		http.Error(w, fmt.Sprintf("fetch failed: %s\n%s", err, sshHint(out)), http.StatusBadGateway)
 		return
 	}
+	bgFetch.markFetched(stateKey(hash))
 	log.Printf("eager refresh: %s ok", hash)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "hash": hash})
