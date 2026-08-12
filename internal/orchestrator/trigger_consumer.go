@@ -439,22 +439,6 @@ func (rt consumerRuntime) shouldExit(ctx context.Context, st *store.Store, logge
 	return true
 }
 
-// busyCounter tracks in-flight dispatches so an idle window is judged on
-// real quiet, not merely on an empty pending queue while a long run is
-// still executing.
-type busyCounter struct {
-	mu sync.Mutex
-	n  int
-}
-
-func (b *busyCounter) enter() { b.mu.Lock(); b.n++; b.mu.Unlock() }
-func (b *busyCounter) leave() { b.mu.Lock(); b.n--; b.mu.Unlock() }
-func (b *busyCounter) idle() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.n == 0
-}
-
 // runClaimedTrigger executes one claimed trigger to a terminal outcome,
 // holding its lease open for the duration.
 //
