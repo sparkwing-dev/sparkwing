@@ -1,7 +1,14 @@
-// `sparkwing wingd run` -- the resident local admission arbiter. This
-// verb is hidden: users never invoke it directly. The client library
-// spawns it on demand as a detached process, and because it is the same
-// binary as the CLI, the daemon and its clients can never skew versions.
+// `sparkwing wingd run` -- the resident local admission arbiter, and
+// `sparkwing wingd supervise` -- the watchdog that owns its recovery.
+// Both verbs are hidden: users never invoke them directly.
+//
+// The installed Sparkwing distribution owns daemon lifecycle. Pipeline
+// clients declare required capabilities and use the running daemon; they
+// never host, replace, or upgrade it. A run's client spawns the binary
+// named by $SPARKWING_WINGD_BIN -- which `sparkwing run` sets to this
+// CLI's own path -- else the `sparkwing` found on PATH, so the daemon is
+// always an installed sparkwing build rather than a per-repo pipeline
+// binary.
 package main
 
 import (
