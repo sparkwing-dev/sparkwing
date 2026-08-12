@@ -82,7 +82,8 @@ before and after it installs them. The release signs the `SHA256SUMS`
 manifest with an ed25519 private key; the updater carries the matching
 public key compiled into the binary and verifies the detached
 `SHA256SUMS.sig` with pure-Go `crypto/ed25519` -- no external tool and no
-network beyond fetching the asset, `SHA256SUMS`, and `SHA256SUMS.sig`. It
+network beyond fetching the asset, its detached signature, `SHA256SUMS`,
+and `SHA256SUMS.sig`. It
 then checks the download against the signed digest, installs atomically,
 and re-hashes the installed file, requiring it to equal the verified
 digest. macOS binaries are ad-hoc-codesigned by the release *before* the
