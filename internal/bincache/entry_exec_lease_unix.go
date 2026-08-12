@@ -161,6 +161,21 @@ func AdoptExecLeaseFromEnv() error {
 		}
 		return errors.New("inherited pipeline cache lease proof is not owned by its descriptor")
 	}
+	leaseProbe, err := os.Open(entry.lockPath("lease"))
+	if err != nil {
+		return fmt.Errorf("open inherited pipeline cache lease probe: %w", err)
+	}
+	leaseProbeAcquired, leaseProbeErr := cacheLock(leaseProbe, cacheLockExclusiveNonblock)
+	if leaseProbeAcquired {
+		_ = cacheUnlock(leaseProbe)
+	}
+	_ = leaseProbe.Close()
+	if leaseProbeErr != nil {
+		return fmt.Errorf("probe inherited pipeline cache lease authority: %w", leaseProbeErr)
+	}
+	if leaseProbeAcquired {
+		return errors.New("inherited pipeline cache lease was not retained across exec")
+	}
 	proofOwned = true
 	if err := errors.Join(cacheUnlock(proof), proof.Close(), os.Remove(proofPath)); err != nil {
 		return fmt.Errorf("retire inherited pipeline cache lease proof: %w", err)
