@@ -362,6 +362,13 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 | `DATA_DIR` | Override data root (default: `/data`) |
 | `PORT` | Listen port (default: `8090`) |
 
+The server variables above configure the cache pod. On the client side,
+`SPARKWING_GITCACHE` forces a specific gitcache base URL for git clones:
+set it to a reachable cache server and sparkwing routes clones through
+that server instead of probing for a local one. Empty (the default)
+leaves sparkwing to auto-detect, falling back to a direct clone when no
+gitcache answers.
+
 ### Data directories
 
 | Path | Contents |

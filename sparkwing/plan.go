@@ -450,6 +450,11 @@ type JobNode struct {
 	contentCache *CacheConfig
 	concurrency  *concurrencyMembership
 
+	// dirCaches are the dependency-directory caches declared via
+	// JobNode.CacheDir, in declaration order. Execution rides the
+	// beforeRun/afterRun hooks; this slice exists for introspection.
+	dirCaches []DirCache
+
 	// resources is the node's cold-start cost hint set declared via
 	// JobNode.Resources; nil when the node declared none.
 	resources *ResourceHints
