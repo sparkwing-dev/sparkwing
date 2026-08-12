@@ -85,7 +85,7 @@ Docker build, push, and ECR helpers.
 handling ECR login automatically (the target ECR repository must already
 exist; a push to a missing repo fails). Its `Tags`
 field takes a `docker.ImageTag` value from the **SDK** (`sparkwing/docker`,
-via `docker.ComputeTags`) -- see [sdk-reference.md](sdk-reference.md) for
+via `docker.ComputeTags`) -- see [sdk-docker.md](sdk-docker.md) for
 how content-addressed tags are derived. sparks-core itself does not
 compute tags; it consumes the SDK's.
 

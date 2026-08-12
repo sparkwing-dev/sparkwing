@@ -11,7 +11,14 @@
 // branch imports them. Documenting only the root package left them
 // reachable exclusively by reading the module cache.
 //
-// Usage: go run . <repo-root>   (writes markdown to stdout)
+// Usage: go run . <repo-root> <out-dir>
+//
+// The reference is written as sdk-reference.md (the root package plus a
+// linked subpackage index) and one sdk-<name>.md per subpackage. It was
+// one page until that page reached 103K characters, past the ~100K
+// truncation limit of most agent fetch tooling, which silently ate the
+// subpackages at the end -- exactly the material an author reaches for
+// when a pipeline builds an image or reads the branch.
 package main
 
 import (
@@ -30,12 +37,24 @@ import (
 
 const importPath = "github.com/sparkwing-dev/sparkwing/sparkwing"
 
+// generatedMarker opens every page this generator writes. Its first line
+// doubles as the machine-readable "generated, not hand-authored" signal:
+// doccheck skips prose-style gates on pages carrying it, and the split
+// writer only prunes stale sdk-*.md pages that carry it.
+const generatedMarker = "<!-- GENERATED from the `sparkwing` package via go/doc (internal/sdkref). Do not edit by hand; regenerate with `bash bin/gen-sdk-docs.sh`. -->\n" +
+	"<!-- markdownlint-disable MD004 MD007 MD030 MD032 -->\n"
+
+// markerPrefix is the pruning guard: enough of generatedMarker to
+// identify this generator's output and nothing else.
+const markerPrefix = "<!-- GENERATED from the `sparkwing` package via go/doc"
+
 func main() {
-	if len(os.Args) != 2 {
-		fmt.Fprintln(os.Stderr, "usage: sdkref <repo-root>")
+	if len(os.Args) != 3 {
+		fmt.Fprintln(os.Stderr, "usage: sdkref <repo-root> <out-dir>")
 		os.Exit(2)
 	}
 	root := filepath.Join(os.Args[1], "sparkwing")
+	outDir := os.Args[2]
 
 	fset := token.NewFileSet()
 	dpkg, err := loadPackage(fset, root, importPath)
@@ -49,27 +68,110 @@ func main() {
 		os.Exit(2)
 	}
 
-	var b strings.Builder
-	b.WriteString("<!-- GENERATED from the `sparkwing` package via go/doc (internal/sdkref). Do not edit by hand; regenerate with `bash bin/gen-sdk-docs.sh`. -->\n")
-	b.WriteString("<!-- markdownlint-disable MD004 MD007 MD030 MD032 -->\n")
-	b.WriteString("# SDK API reference\n\n")
-	b.WriteString("Every exported symbol in the `sparkwing` package (the SDK you import " +
+	if err := writeSplit(outDir, fset, dpkg, subs); err != nil {
+		fmt.Fprintln(os.Stderr, "sdkref:", err)
+		os.Exit(2)
+	}
+}
+
+// splitPages renders the reference as the sdk-reference.md index (root
+// package + a linked subpackage list) plus one sdk-<name>.md per
+// subpackage, keyed by filename.
+func splitPages(fset *token.FileSet, dpkg *doc.Package, subs []subpackage) map[string]string {
+	files := make(map[string]string, len(subs)+1)
+
+	var idx strings.Builder
+	idx.WriteString(generatedMarker)
+	idx.WriteString("# SDK API reference\n\n")
+	idx.WriteString("Every exported symbol in the `sparkwing` package (the SDK you import " +
 		"as `sw`), generated from source. Browse the same thing with cross-links " +
 		"on pkg.go.dev: <https://pkg.go.dev/" + importPath + ">. For concepts and " +
 		"usage examples, see [sdk.md](sdk.md).\n\n")
-
-	renderPackage(&b, fset, dpkg, "##")
+	if len(subs) > 0 {
+		idx.WriteString("## Subpackages\n\n")
+		idx.WriteString("Part of the authoring surface too -- a pipeline that builds an image " +
+			"or reads the branch imports these. Each has its own page:\n\n")
+		for _, sub := range subs {
+			line := "- [`" + sub.rel + "`](" + sub.pageName() + ")"
+			if s := flatten(sub.pkg.Synopsis(sub.pkg.Doc)); s != "" {
+				line += " -- " + s
+			}
+			idx.WriteString(line + "\n")
+		}
+		idx.WriteString("\n")
+	}
+	renderPackage(&idx, fset, dpkg, "##")
+	files["sdk-reference.md"] = strings.TrimRight(idx.String(), "\n") + "\n"
 
 	for _, sub := range subs {
-		b.WriteString("## Package `" + sub.rel + "`\n\n")
+		var b strings.Builder
+		b.WriteString(generatedMarker)
+		b.WriteString("# SDK API reference: `" + sub.rel + "`\n\n")
 		if s := sub.pkg.Synopsis(sub.pkg.Doc); s != "" {
 			b.WriteString(s + "\n\n")
 		}
-		b.WriteString("Import as `" + sub.importAlias() + " \"" + sub.importPath + "\"`.\n\n")
-		renderPackage(&b, fset, sub.pkg, "###")
+		b.WriteString("Import as `" + sub.importAlias() + " \"" + sub.importPath + "\"`. " +
+			"The root package and the other subpackages are indexed in " +
+			"[sdk-reference.md](sdk-reference.md).\n\n")
+		renderPackage(&b, fset, sub.pkg, "##")
+		files[sub.pageName()] = strings.TrimRight(b.String(), "\n") + "\n"
+	}
+	return files
+}
+
+// writeSplit writes the split reference into dir, skipping
+// byte-identical pages, and prunes sdk-*.md pages a previous run
+// generated for subpackages that no longer exist. Only pages opening
+// with this generator's marker are ever pruned, so a hand-authored page
+// whose name happens to match sdk-*.md survives -- docs/sdk.md does not
+// match the pattern at all.
+func writeSplit(dir string, fset *token.FileSet, dpkg *doc.Package, subs []subpackage) error {
+	files := splitPages(fset, dpkg, subs)
+
+	names := make([]string, 0, len(files))
+	for name := range files {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	var wrote, unchanged, removed int
+	for _, name := range names {
+		path := filepath.Join(dir, name)
+		if prev, err := os.ReadFile(path); err == nil && string(prev) == files[name] {
+			unchanged++
+			continue
+		}
+		if err := os.WriteFile(path, []byte(files[name]), 0o644); err != nil {
+			return err
+		}
+		wrote++
 	}
 
-	fmt.Print(b.String())
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasPrefix(name, "sdk-") || !strings.HasSuffix(name, ".md") {
+			continue
+		}
+		if _, ok := files[name]; ok {
+			continue
+		}
+		data, rerr := os.ReadFile(filepath.Join(dir, name))
+		if rerr != nil || !strings.HasPrefix(string(data), markerPrefix) {
+			continue
+		}
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			return err
+		}
+		fmt.Printf("removed stale generated page %s\n", filepath.Join(dir, name))
+		removed++
+	}
+
+	fmt.Printf("sdk reference: wrote %d, unchanged %d, removed %d page(s) in %s\n", wrote, unchanged, removed, dir)
+	return nil
 }
 
 // renderPackage writes one package's exported surface under heading
@@ -119,6 +221,16 @@ type subpackage struct {
 // pipelines alias these (swdocker, swgit) because the bare package name
 // collides with the upstream library it wraps.
 func (s subpackage) importAlias() string { return "sw" + s.pkg.Name }
+
+// pageName is the subpackage's own page in the split reference, e.g.
+// sparkwing/docker -> sdk-docker.md. The sdk- prefix keeps every
+// generated page adjacent to sdk-reference.md in a directory listing
+// and distinct from the hand-written sdk.md.
+// Derived from the directory rather than the package name, so two
+// packages that declare the same name can't collide on one page.
+func (s subpackage) pageName() string {
+	return "sdk-" + strings.TrimPrefix(s.rel, "sparkwing/") + ".md"
+}
 
 // loadPackage parses every non-test .go file in dir into a doc.Package.
 func loadPackage(fset *token.FileSet, dir, ipath string) (*doc.Package, error) {

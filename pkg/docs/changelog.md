@@ -48,6 +48,21 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Docs
+
+- **sdk-reference:** split the subpackages onto their own pages
+  (`sdk-docker.md`, `sdk-git.md`, `sdk-inputs.md`, `sdk-planguard.md`,
+  `sdk-services.md`), leaving `sdk-reference.md` as the root package
+  plus a linked subpackage index. The single page had reached 103K
+  characters, past the ~100K truncation limit of most agent fetch
+  tooling, so the subpackages at the end of the page were silently
+  invisible to an agent reading it -- exactly what an author needs when
+  a pipeline builds an image or reads the branch. The root page is now
+  92K. Offline: `sparkwing docs read --topic sdk-<name>`.
+- **sdkref:** the generator writes its pages to an output directory
+  (`sdkref <repo-root> <out-dir>`) instead of stdout, pruning generated
+  pages for subpackages that no longer exist. Only pages carrying the
+  generated marker are pruned, so a hand-authored `sdk-*.md` survives.
 
 ## [v0.31.0] - 2026-08-12
 ### Added

@@ -230,7 +230,21 @@ func (p *PrePush) run(ctx context.Context) error {
 	}
 
 	if _, err := sparkwing.Bash(ctx,
-		`cd "$ROOT" && go run ./internal/sdkref "$ROOT" | diff -u docs/sdk-reference.md -`,
+		`cd "$ROOT" &&
+		TMP="$(mktemp -d)" &&
+		trap 'rm -rf "$TMP"' EXIT &&
+		go run ./internal/sdkref "$ROOT" "$TMP" >/dev/null &&
+		fail=0 &&
+		for f in "$TMP"/*.md; do
+			diff -u "docs/$(basename "$f")" "$f" || fail=1
+		done;
+		for f in docs/sdk-*.md; do
+			if [ ! -e "$TMP/$(basename "$f")" ] && head -n1 "$f" | grep -q "GENERATED from the .sparkwing. package via go/doc"; then
+				echo "stale generated page: $f"
+				fail=1
+			fi
+		done;
+		exit "$fail"`,
 	).Env("ROOT", sparkwing.Path()).Run(); err != nil {
 		failures = append(failures, "sdk-reference: stale -- run `bash bin/gen-sdk-docs.sh`")
 	} else {

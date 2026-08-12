@@ -4,8 +4,9 @@ A curated tour of the `sparkwing` package helpers you call from
 `.sparkwing/jobs/*.go`, plus the SDK-authoring concepts worth loading
 at the start of a task. The **complete** API -- every exported symbol
 with its signature -- is generated from source in
-[sdk-reference.md](sdk-reference.md) (offline:
-`sparkwing docs read --topic sdk-reference`), and browsable with
+[sdk-reference.md](sdk-reference.md), with one `sdk-<name>.md` page per
+subpackage (offline: `sparkwing docs read --topic sdk-reference`, or
+`--topic sdk-<name>` for one subpackage), and browsable with
 cross-links on pkg.go.dev:
 <https://pkg.go.dev/github.com/sparkwing-dev/sparkwing/sparkwing>.
 
