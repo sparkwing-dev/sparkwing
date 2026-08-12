@@ -8,8 +8,6 @@ import (
 	"os"
 	"os/signal"
 	"time"
-
-	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 )
 
 // runHandleTriggerCLI handles `sparkwing handle-trigger <id> [flags]`.
@@ -89,20 +87,20 @@ func runHandleTriggerCLI(args []string) error {
 			return err
 		}
 		factory, err := BuildK8sRunnerFactory(K8sRunnerFactoryConfig{
-			Kubeconfig:       *kubeconfig,
-			Namespace:        *k8sNamespace,
-			Image:            *k8sImage,
-			ServiceAccount:   *k8sSA,
-			ImagePullSecret:  *k8sPullSecret,
-			ControllerURL:    firstNonEmpty(*k8sCtrlURL, *controllerURL),
-			LogsURL:          firstNonEmpty(*k8sLogsURL, *logsURL),
-			ArtifactStoreURL: *artifactStoreURL,
-			AgentToken:       *token,
-			NodeSelector:     nodeSelector,
-			Tolerations:      tolerations,
-			DependencyProxyURL: k8srunner.ResolveDependencyProxy(
-				*dependencyProxy, os.Getenv("SPARKWING_GITCACHE_URL")),
-			ImagePullPolicy: *imagePullPolicy,
+			Kubeconfig:                 *kubeconfig,
+			Namespace:                  *k8sNamespace,
+			Image:                      *k8sImage,
+			ServiceAccount:             *k8sSA,
+			ImagePullSecret:            *k8sPullSecret,
+			ControllerURL:              firstNonEmpty(*k8sCtrlURL, *controllerURL),
+			LogsURL:                    firstNonEmpty(*k8sLogsURL, *logsURL),
+			ArtifactStoreURL:           *artifactStoreURL,
+			AgentToken:                 *token,
+			NodeSelector:               nodeSelector,
+			Tolerations:                tolerations,
+			DependencyProxyURL:         *dependencyProxy,
+			DependencyProxyFallbackURL: os.Getenv("SPARKWING_GITCACHE_URL"),
+			ImagePullPolicy:            *imagePullPolicy,
 		})
 		if err != nil {
 			return fmt.Errorf("k8s runner: %w", err)

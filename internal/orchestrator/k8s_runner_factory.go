@@ -29,11 +29,15 @@ type K8sRunnerFactoryConfig struct {
 	AgentToken       string
 	NodeSelector     map[string]string
 	Tolerations      []corev1.Toleration
-	// DependencyProxyURL points runner pods at the cache pod's
-	// pull-through package proxy. Already resolved by the caller
-	// (k8srunner.ResolveDependencyProxy); empty leaves pods on
-	// upstream registries.
+	// DependencyProxyURL points runner pods at a pull-through package
+	// proxy, as the operator typed it: a URL, "off", or empty.
+	// Resolution happens here rather than at each flag site so a CLI
+	// entry point never needs the runner backend package for it.
 	DependencyProxyURL string
+	// DependencyProxyFallbackURL is the cache URL to fall back on when
+	// DependencyProxyURL is empty -- the same pod serves the gitcache
+	// and /proxy/, so a runner that knows one knows the other.
+	DependencyProxyFallbackURL string
 	// ImagePullPolicy as an operator typed it. Validated here rather
 	// than at each flag site so every entry point rejects the same
 	// set of values.
@@ -75,7 +79,7 @@ func BuildK8sRunnerFactory(cfg K8sRunnerFactoryConfig) (func(Backends, *store.Tr
 		ControllerURL:      cfg.ControllerURL,
 		LogsURL:            cfg.LogsURL,
 		ArtifactStoreURL:   cfg.ArtifactStoreURL,
-		DependencyProxyURL: cfg.DependencyProxyURL,
+		DependencyProxyURL: k8srunner.ResolveDependencyProxy(cfg.DependencyProxyURL, cfg.DependencyProxyFallbackURL),
 		ImagePullPolicy:    pullPolicy,
 		AgentToken:         cfg.AgentToken,
 		NodeSelector:       cfg.NodeSelector,

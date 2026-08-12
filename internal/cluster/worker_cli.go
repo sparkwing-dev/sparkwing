@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
-	k8srunner "github.com/sparkwing-dev/sparkwing/internal/runners/k8s"
 	"github.com/sparkwing-dev/sparkwing/internal/runners/warmpool"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
@@ -108,23 +107,24 @@ func runWorkerCLI(args []string) error {
 
 	// The pull-through proxy lives on the cache pod, so the gitcache
 	// URL the runner pod already carries is the proxy base.
-	proxyURL := k8srunner.ResolveDependencyProxy(*dependencyProxy, os.Getenv("SPARKWING_GITCACHE_URL"))
+	proxyFallback := os.Getenv("SPARKWING_GITCACHE_URL")
 
 	switch *runnerKind {
 	case "", "inprocess":
 	case "k8s":
 		factory, err := orchestrator.BuildK8sRunnerFactory(orchestrator.K8sRunnerFactoryConfig{
-			Kubeconfig:         *kubeconfig,
-			Namespace:          *k8sNamespace,
-			Image:              *k8sImage,
-			ServiceAccount:     *k8sSA,
-			ImagePullSecret:    *k8sPullSecret,
-			ControllerURL:      firstNonEmpty(*k8sCtrlURL, *controllerURL),
-			LogsURL:            firstNonEmpty(*k8sLogsURL, *logsURL),
-			ArtifactStoreURL:   *artifactStoreURL,
-			AgentToken:         *token,
-			DependencyProxyURL: proxyURL,
-			ImagePullPolicy:    *imagePullPolicy,
+			Kubeconfig:                 *kubeconfig,
+			Namespace:                  *k8sNamespace,
+			Image:                      *k8sImage,
+			ServiceAccount:             *k8sSA,
+			ImagePullSecret:            *k8sPullSecret,
+			ControllerURL:              firstNonEmpty(*k8sCtrlURL, *controllerURL),
+			LogsURL:                    firstNonEmpty(*k8sLogsURL, *logsURL),
+			ArtifactStoreURL:           *artifactStoreURL,
+			AgentToken:                 *token,
+			DependencyProxyURL:         *dependencyProxy,
+			DependencyProxyFallbackURL: proxyFallback,
+			ImagePullPolicy:            *imagePullPolicy,
 		})
 		if err != nil {
 			return fmt.Errorf("k8s runner: %w", err)
@@ -134,17 +134,18 @@ func runWorkerCLI(args []string) error {
 		var k8sFactory func(orchestrator.Backends, *store.Trigger) runner.Runner
 		if *k8sImage != "" {
 			f, err := orchestrator.BuildK8sRunnerFactory(orchestrator.K8sRunnerFactoryConfig{
-				Kubeconfig:         *kubeconfig,
-				Namespace:          *k8sNamespace,
-				Image:              *k8sImage,
-				ServiceAccount:     *k8sSA,
-				ImagePullSecret:    *k8sPullSecret,
-				ControllerURL:      firstNonEmpty(*k8sCtrlURL, *controllerURL),
-				LogsURL:            firstNonEmpty(*k8sLogsURL, *logsURL),
-				ArtifactStoreURL:   *artifactStoreURL,
-				AgentToken:         *token,
-				DependencyProxyURL: proxyURL,
-				ImagePullPolicy:    *imagePullPolicy,
+				Kubeconfig:                 *kubeconfig,
+				Namespace:                  *k8sNamespace,
+				Image:                      *k8sImage,
+				ServiceAccount:             *k8sSA,
+				ImagePullSecret:            *k8sPullSecret,
+				ControllerURL:              firstNonEmpty(*k8sCtrlURL, *controllerURL),
+				LogsURL:                    firstNonEmpty(*k8sLogsURL, *logsURL),
+				ArtifactStoreURL:           *artifactStoreURL,
+				AgentToken:                 *token,
+				DependencyProxyURL:         *dependencyProxy,
+				DependencyProxyFallbackURL: proxyFallback,
+				ImagePullPolicy:            *imagePullPolicy,
 			})
 			if err != nil {
 				return fmt.Errorf("warm runner (fallback k8s): %w", err)
