@@ -142,7 +142,14 @@ func TestAdoptExecLeaseTwiceDoesNotCloseRetainedLease(t *testing.T) {
 func TestAdoptExecLeaseRejectsUnlockedLeaseDescriptor(t *testing.T) {
 	root := t.TempDir()
 	key := "11111111-11111111"
-	copyTestBinaryIntoEntry(t, root, key)
+	entry := copyTestBinaryIntoEntry(t, root, key)
+	lease, err := entry.openLock("lease", cacheLockShared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := errors.Join(cacheUnlock(lease), lease.Close()); err != nil {
+		t.Fatal(err)
+	}
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
 	cmd.Env = append(os.Environ(),
