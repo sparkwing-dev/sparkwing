@@ -18,6 +18,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 func TestEntryExecHelper(t *testing.T) {
@@ -55,6 +57,24 @@ func TestEntryExecHelper(t *testing.T) {
 		_, _ = io.Copy(io.Discard, os.Stdin)
 		return
 	}
+	if mode == "adopt-twice" {
+		raw := os.Getenv(execLeaseEnv)
+		if err := AdoptExecLeaseFromEnv(); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Setenv(execLeaseEnv, raw); err != nil {
+			t.Fatal(err)
+		}
+		if err := AdoptExecLeaseFromEnv(); err == nil || !strings.Contains(err.Error(), "more than once") {
+			t.Fatalf("duplicate adoption error = %v", err)
+		}
+		runtime.GC()
+		runtime.GC()
+		if _, err := unix.FcntlInt(processExecLease.file.Fd(), unix.F_GETFD, 0); err != nil {
+			t.Fatalf("duplicate adoption closed the retained lease: %v", err)
+		}
+		return
+	}
 	root := os.Getenv("SPARKWING_ENTRY_HELPER_ROOT")
 	key := os.Getenv("SPARKWING_ENTRY_HELPER_KEY")
 	entry, err := pipelineEntryAt(root, key)
@@ -71,10 +91,29 @@ func TestEntryExecHelper(t *testing.T) {
 	nextMode := "hold"
 	if mode == "acquire-and-spawn" {
 		nextMode = "adopt-and-spawn"
+	} else if mode == "acquire-and-adopt-twice" {
+		nextMode = "adopt-twice"
 	}
 	env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", nextMode)
 	if err := lease.ExecReplace([]string{"-test.run=^TestEntryExecHelper$"}, "", env); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAdoptExecLeaseTwiceDoesNotCloseRetainedLease(t *testing.T) {
+	root := t.TempDir()
+	key := "11111111-11111111"
+	copyTestBinaryIntoEntry(t, root, key)
+
+	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
+	cmd.Env = append(os.Environ(),
+		"SPARKWING_ENTRY_EXEC_HELPER=acquire-and-adopt-twice",
+		"SPARKWING_ENTRY_HELPER_ROOT="+root,
+		"SPARKWING_ENTRY_HELPER_KEY="+key,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("duplicate adoption helper failed: %v\n%s", err, output)
 	}
 }
 
