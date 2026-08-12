@@ -13,6 +13,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -31,6 +32,10 @@ import (
 // admission client uses the running daemon and, when none is running,
 // spawns the installed sparkwing to host one (see pipelineAdmission).
 func Main() {
+	if err := bincache.AdoptExecLeaseFromEnv(); err != nil {
+		fmt.Fprintln(os.Stderr, "pipeline cache lease:", err)
+		os.Exit(1)
+	}
 	projectCfg := bindProjectPipelines()
 
 	if len(os.Args) > 1 && os.Args[1] == "--describe" {
