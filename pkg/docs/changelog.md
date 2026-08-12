@@ -108,7 +108,7 @@ code change to unlock.
   unadmitted oversubscribes the box. Both errors name the fix.
   `SPARKWING_ALLOW_UNADMITTED=1` (exactly `1`) forces the uncoordinated
   path in either case; `--sw-dry-run` is exempt from both. See [migration
-  guide](docs/migrations/_unreleased.md#daemon-hosting-moves-to-installed-binaries).
+  guide](docs/migrations/v0.27.0.md#daemon-hosting-moves-to-installed-binaries).
 
   `sparkwing.ToolSlot` changes shape on such a host: it returns its
   documented `granted=false` fallback, where a headless pipeline binary
