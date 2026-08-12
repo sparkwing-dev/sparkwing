@@ -28,9 +28,10 @@ const (
 // Run statuses the store itself transitions (callers stamp terminal
 // statuses through FinishRun with their own outcome strings).
 const (
-	runStatusPending = "pending"
-	runStatusRunning = "running"
-	runStatusFailed  = "failed"
+	runStatusPending   = "pending"
+	runStatusRunning   = "running"
+	runStatusFailed    = "failed"
+	runStatusCancelled = "cancelled"
 )
 
 // runTerminalIn is the canonical SQL filter for a run in a terminal

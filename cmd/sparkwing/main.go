@@ -312,6 +312,8 @@ func runSparkwing(args []string) error {
 		return runQueueExecGuard(args[1:])
 	case "__dashboard-supervise":
 		return runDashboardSupervise(args[1:])
+	case consumerSpawnVerb:
+		return runRunsConsumeDetached(args[1:])
 	case "_complete-profiles":
 		return runInternalCompleteProfiles(args[1:])
 	case "_complete-pipelines":
@@ -656,6 +658,10 @@ func runJobs(args []string) error {
 		emitJSON := resolvedFmt == "json"
 		return orchestrator.JobErrors(ctx, paths, *runID, emitJSON, os.Stdout)
 
+	case "submit":
+		return runRunsSubmit(ctx, args[1:])
+	case "consumer":
+		return runRunsConsumer(args[1:])
 	case "cancel":
 		return runRunsCancel(ctx, args[1:])
 	case "retry":

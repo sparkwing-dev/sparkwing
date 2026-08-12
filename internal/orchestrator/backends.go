@@ -233,21 +233,36 @@ func canonicalLocalStore(b StateBackend) *store.Store {
 // storage.LogStore interface with a run-directory accessor every
 // remote implementation would have to answer meaninglessly.
 func localRunLogDir(b LogBackend, runID string) string {
-	var dir string
 	switch l := b.(type) {
 	case localLogs:
-		if err := l.paths.EnsureRunDir(runID); err != nil {
-			return ""
-		}
-		dir = l.paths.RunDir(runID)
+		return EnsureRunLogDir(l.paths, runID)
 	case *localLogs:
-		if err := l.paths.EnsureRunDir(runID); err != nil {
-			return ""
-		}
-		dir = l.paths.RunDir(runID)
+		return EnsureRunLogDir(l.paths, runID)
 	case *HTTPLogs:
-		dir = l.localRunDir(runID)
+		return absExistingDir(l.localRunDir(runID))
 	}
+	return ""
+}
+
+// EnsureRunLogDir creates and returns the absolute directory a locally
+// executed run writes its node logs into, or "" when it cannot be
+// created or is not a directory. It is [localRunLogDir]'s body, exported
+// so a caller that acknowledges a run before the run has started -- most
+// sharply `sparkwing runs submit`, which returns a log_path the moment
+// the trigger is persisted -- reports exactly the directory the executing
+// run will later record, under the same "the path exists or is omitted"
+// rule the run_start receipt follows.
+func EnsureRunLogDir(p Paths, runID string) string {
+	if err := p.EnsureRunDir(runID); err != nil {
+		return ""
+	}
+	return absExistingDir(p.RunDir(runID))
+}
+
+// absExistingDir resolves dir to an absolute path and returns it only
+// when it names an existing directory, keeping the "the path exists or
+// is omitted" rule in one place for every log_path producer.
+func absExistingDir(dir string) string {
 	if dir == "" {
 		return ""
 	}
@@ -576,6 +591,12 @@ func sparkwingGithubSplit(slug string) (owner, repo string) {
 func localNewRunID() string {
 	return fmt.Sprintf("run-%s-%08x", time.Now().UTC().Format("20060102-150405"), time.Now().UnixNano()&0xFFFFFFFF)
 }
+
+// NewLocalRunID mints a run id for a caller that must know the id before
+// the run exists -- `sparkwing runs submit`, which returns the id as its
+// acknowledgment. It is the same generator every local trigger uses, so
+// a submitted run is indistinguishable from any other by its id.
+func NewLocalRunID() string { return localNewRunID() }
 
 func firstNonEmptyStr(a, b string) string {
 	if a != "" {

@@ -75,6 +75,204 @@ local copy for automated workers that fire off many runs.
 
 See [native-mode.md](native-mode.md) for the full local-mode design.
 
+### Submitting a run and walking away
+
+`sparkwing run` executes in your terminal: close it and the run dies
+with it. When the work outlasts the session you are willing to hold
+open -- a long deploy over ssh, a nightly job kicked off by hand, an
+agent that must not block -- submit it instead:
+
+```bash
+$ sparkwing runs submit nightly-report
+run run-20260811-140322-1f2e3d4a submitted (nightly-report)
+  logs:   ~/.sparkwing/runs/run-20260811-140322-1f2e3d4a
+  follow: sparkwing runs logs --run run-20260811-140322-1f2e3d4a --follow
+  cancel: sparkwing runs cancel --run run-20260811-140322-1f2e3d4a
+```
+
+The command returns immediately. By the time it prints, the run is
+persisted and a resident consumer process on this machine owns it. Close
+the terminal, drop the ssh connection, log out: the run keeps going, and
+`sparkwing runs status --run <id>` answers from any shell afterward.
+
+`log_path` is the directory the run's node logs land in. It follows the
+same rule as the `run_start` receipt: present only when the directory
+exists, never a plausible-looking path to nothing.
+
+For scripting, `-o json` gives `{run_id, log_path, ...}` and `-o plain`
+gives the bare id:
+
+```bash
+RUN=$(sparkwing runs submit -o plain build)
+sparkwing runs wait --run "$RUN"
+```
+
+Everything after the pipeline name is the pipeline's own argument list,
+so submit's flags go **before** it:
+
+```bash
+sparkwing runs submit --idempotency-key k deploy --env staging
+```
+
+A submit flag typed after the pipeline name is refused rather than
+quietly passed through as a pipeline argument -- silently accepting
+`--idempotency-key` there would leave a caller believing its retry was
+deduplicated when it was not. If a pipeline genuinely declares a flag by
+the same name, `--` ends submit's arguments:
+
+```bash
+sparkwing runs submit deploy -- --request-id its-own
+```
+
+#### Making a retry safe
+
+If a submission fails ambiguously -- the connection dropped, the process
+was killed after the command left your keyboard -- you cannot tell
+whether the run was created. Pass `--idempotency-key` and stop caring:
+
+```bash
+sparkwing runs submit deploy --idempotency-key deploy-2026-08-11-a
+```
+
+A second submission carrying a key an earlier one used returns the
+*original* run id, marked `already submitted`, and creates nothing. The
+constraint is enforced by the runs store, not by a check-then-write in
+the CLI, so two callers racing with one key still produce one run.
+
+`--request-id` is a separate field with a separate job: it is recorded on
+the run for tracing and **never** affects deduplication. Use a fresh
+request id per attempt and a stable idempotency key per intent.
+
+#### What submission cannot do
+
+Flags that change what a run *does* but cannot survive detachment are
+refused with the reason rather than silently ignored: `--sw-index`
+(the index binding is a live path the submitting process holds open),
+`--sw-ref` (nothing would clean up the worktree afterward),
+`--sw-dry-run`, `--sw-start-at`, `--sw-stop-at`, `--sw-only`,
+`--sw-no-cache`, `--sw-mode`, `--sw-workers`, `--sw-allow`,
+`--sw-local-only`, `--sw-secrets`, and `--profile`. Run those in the
+foreground with `sparkwing run`. Everything else after the pipeline name
+is passed to the pipeline as its own arguments.
+
+Submission is local-only. To hand a run to a cluster, use
+`sparkwing pipeline trigger --profile <p> --detach`.
+
+#### A submitted run uses the consumer's environment, not your shell's
+
+This is the sharpest difference between `sparkwing run` and
+`sparkwing runs submit`, and it will bite you if you skip it.
+
+A foreground `sparkwing run` inherits the environment of the shell you
+typed it in. A submitted run does not. It is executed by the resident
+consumer, and the consumer inherits the environment of whichever shell
+happened to start it -- possibly hours earlier, possibly in a different
+project, possibly with a different `AWS_PROFILE`, `KUBECONFIG`,
+`GITHUB_TOKEN`, or `PATH`. This is the same rule the admission daemon
+follows: a process started on demand keeps the environment of the run
+that needed it first.
+
+So this does **not** do what it looks like:
+
+```bash
+AWS_PROFILE=prod sparkwing runs submit deploy   # the run may NOT see AWS_PROFILE=prod
+```
+
+The acknowledgment names the process that will run it, so the
+divergence is at least visible:
+
+```
+  runner: consumer pid 4831 (started 2026-08-12T09:14:02Z); the run uses ITS environment, not this shell's
+```
+
+Until submitted runs carry their submitter's environment, the reliable
+options are:
+
+- Put the value in the pipeline's own configuration or a secret store,
+  where it does not depend on an ambient variable at all.
+- Pass it as a pipeline argument: `sparkwing runs submit deploy --env prod`.
+- Start the consumer deliberately from the environment you want, then
+  submit against it:
+
+  ```bash
+  AWS_PROFILE=prod sparkwing runs consumer start
+  sparkwing runs submit deploy
+  ```
+
+- Or run it in the foreground with `sparkwing run`, which always uses
+  your shell's environment.
+
+Carrying the submitter's environment on the trigger is deliberately not
+done: it would persist whatever happened to be exported -- tokens
+included -- into the runs store, which is a new place for secrets to
+live.
+
+#### Which checkout runs
+
+The checkout you are standing in wins, and `-C PATH` points at a
+different one. Only if neither declares the pipeline does the repo
+registry get consulted. The chosen directory is recorded on the run, so
+the consumer executes the tree you submitted from even when a second
+checkout of the same project declares the same pipeline name.
+
+#### Cancelling a submitted run
+
+`sparkwing runs cancel --run <id>` works at both stages. Before a
+consumer claims it, cancellation is a store transaction that marks the
+run cancelled and takes it off the queue -- no dashboard and no profile
+required. Once it is running, the admission daemon holding the run's
+process cancels it the same way it cancels any local run. Either way the
+cancellation names one run id and can only reach that run: a
+resubmission is a different run with a different id.
+
+#### The consumer process
+
+One consumer per sparkwing home claims queued runs and executes them.
+`sparkwing runs submit` starts one when none is resident and confirms it
+owns the queue *before* acknowledging your run, so the acknowledgment
+means the machine has taken ownership -- not merely that a child was
+forked. The consumer exits on its own after five idle minutes.
+
+Exactly one serves a home at a time, enforced by a file lock rather than
+a PID check: a consumer killed with `kill -9` releases the lock
+immediately and leaves nothing stale to clean up. A running dashboard
+consumes the same queue; whichever holds the lock does the work and the
+other stands down, so a run is never dispatched twice.
+
+```bash
+sparkwing runs consumer status   # exits 1 when none is resident
+sparkwing runs consumer start    # keep one up deliberately
+sparkwing runs consumer stop     # queued runs stay queued
+```
+
+Recovery is automatic in both directions. Work queued while no consumer
+is resident runs as soon as one comes back. A run whose consumer was
+killed mid-dispatch stops having its claim renewed, and the next
+consumer sweeps the lapsed claim back onto the queue -- unless the run
+already reached a terminal status, in which case the claim is closed out
+rather than re-executed. Every acknowledged run ends up recoverable or
+terminal; none is lost, and none runs twice. A re-executed run is the
+same run, not a new one: it keeps the run id you were given along with
+its arguments, trigger, and submission time, and only its start time
+reflects the attempt that actually ran.
+
+Stopping a consumer never cancels queued runs. Use `runs cancel` for
+that.
+
+A run that is *executing* when you stop the consumer is interrupted and
+returned to the queue, not failed: it never reached a verdict, so the
+next consumer re-executes it from the start. If you want it to stop for
+good, cancel it rather than stopping the consumer.
+
+The consumer is also replaced when it is out of date. It records the
+sparkwing version it was built from, and a submission from a different
+build stops the old consumer and starts one from the new binary --
+otherwise a home with a steady queue would keep serving every run from
+the build that happened to start first, and an upgrade would never take
+effect. Replacing a consumer interrupts whatever it was executing, on
+the same terms as stopping one: that run returns to the queue and the
+new consumer re-executes it from the start.
+
 ### Remote execution
 
 ```
@@ -145,6 +343,7 @@ sparkwing to block them.
 |------|--------------|-------|-------------|
 | `sparkwing run <pipeline>` | Your laptop | Fast (local caches) | Day-to-day development, fast iteration, local-only deploys |
 | `sparkwing run <pipeline> --profile prof` | Your laptop | Fast | Local execution that records state to a shared profile's backend |
+| `sparkwing runs submit <pipeline>` | Your laptop, detached | Fast | Work that must outlive the terminal: long deploys over ssh, hand-kicked jobs, agents that must not block |
 | `sparkwing pipeline trigger <pipeline> --profile prof` | Cluster | Medium (remote build) | Production deploys, deploys requiring cluster credentials, parity with webhook flow |
 | Git push -> webhook | Cluster | Medium | Automated CI/CD on every commit |
 

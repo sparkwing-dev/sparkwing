@@ -55,6 +55,79 @@ code change to unlock.
   the run's `log_path`; it is a method on the concrete filesystem store, not on
   the `storage.LogStore` interface, because the object-store, controller, and
   stdout backends have no local directory to name.
+- **cli:** `sparkwing runs submit <pipeline>` queues a local run and returns its
+  id and log directory immediately, with execution owned by the machine rather
+  than the calling terminal. Closing the terminal, dropping an ssh session, or
+  killing the submitting process no longer ends the run. The acknowledgment
+  comes after the trigger and its pending run row are durable and after a
+  resident consumer has taken ownership of the queue, so a printed run id always
+  names a run that is recoverable or terminal -- never one that quietly never
+  started. `log_path` follows the `run_start` rule: present only when the
+  directory exists. `-o json` emits `{run_id, log_path, ...}`; `-o plain` emits
+  the bare id.
+
+  Repeat submissions deduplicate through `--idempotency-key`, scoped to the
+  pipeline: a second submission of the same pipeline carrying a key an earlier
+  one used returns the original run id, its current status, and creates nothing.
+  The runs store enforces it with a unique constraint, so two callers racing with
+  one key still produce one run. Reusing a key with different arguments is
+  refused, because a key names one intent and different arguments are a different
+  request. `--request-id` is a separate tracing field recorded on the run that
+  never affects deduplication.
+
+  A submitted run executes with the resident consumer's environment, not the
+  submitting shell's -- the same rule the admission daemon follows. The
+  acknowledgment names the consumer's pid so the difference is visible; see
+  [local-execution](docs/local-execution.md) for the ways to supply values a run
+  needs.
+
+  Flags a detached run cannot honor -- `--sw-index`, `--sw-ref`, `--sw-dry-run`,
+  the other run-shaping `--sw-` flags, and `--profile` -- are refused with the
+  reason rather than silently ignored.
+- **cli:** `sparkwing runs consumer {start,status,stop}` inspects and controls
+  the resident process that executes submitted runs. One consumer serves a
+  sparkwing home at a time, elected by a file lock rather than a PID check, so a
+  consumer killed with `kill -9` leaves no stale state; it exits on its own after
+  five idle minutes. A running dashboard consumes the same queue and stands down
+  when a resident consumer holds the lock, so a run is never dispatched twice.
+  Work queued while nothing is resident runs when a consumer returns, and a claim
+  whose consumer died before its run started is swept back onto the queue once
+  its lease lapses. A run that already started is left to the orphan reaper and a
+  run that already ended has its claim closed out, so recovery never re-executes
+  live or finished work -- the lease is wall-clock while the heartbeat defending
+  it is monotonic, so a suspended laptop can lapse the lease of a dispatch that
+  is perfectly alive. Stopping a consumer mid-dispatch returns that run to the
+  queue rather than failing it.
+
+  A consumer records the sparkwing version it was built from, and a submission
+  from a different build replaces it, so an upgrade takes effect instead of the
+  first build serving a busy home indefinitely.
+- **cli:** `sparkwing runs cancel --run <id>` now cancels a submitted run that no
+  consumer has claimed, as a store transaction requiring neither a dashboard nor
+  a profile. Cancellation names one run id and cannot reach a resubmission, which
+  is a different run with a different id.
+
+### Changed
+
+- **store (Breaking):** The runs-store schema advances from version 12 to 13,
+  adding two columns to `triggers` and one index. `idempotency_key` carries a
+  caller's deduplication token, under a partial unique index on
+  `(pipeline, idempotency_key)` that skips the empty default -- so dedup is a
+  database guarantee rather than a race-prone check-then-write, and a key is
+  scoped to the pipeline that used it rather than to the whole store.
+  `claim_seq` counts how many times a trigger has been claimed, so a dispatch
+  whose lease lapsed and was re-taken cannot write an outcome over the run the
+  new claim is producing. The upgrade is additive and applies on open; every
+  existing trigger carries the empty key and generation zero. As with every
+  schema advance, a binary older than this release refuses to open a database
+  that has been migrated, so upgrade every sparkwing sharing a runs store
+  together.
+
+  Anyone who ran an interim build of this branch before the schema was
+  finalized has a version-13 database missing `claim_seq`, which fails
+  submission with `no such column: claim_seq`. That shape was never released;
+  delete the development `state.db` (`$SPARKWING_HOME/state.db`, default
+  `~/.sparkwing/state.db`) and let it be recreated.
 
 ### Fixed
 
