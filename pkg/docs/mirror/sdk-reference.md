@@ -442,6 +442,20 @@ type DescribeStepRisks struct {
 ```
 
 
+### type DirCache
+
+DirCache describes one directory a node restores before running and saves after succeeding: a dependency directory keyed by the content of the lockfile that produced it.
+
+```
+type DirCache struct {
+    // contains filtered or unexported fields
+}
+```
+
+- `func Dir(path string, key KeySource) DirCache` -- Dir declares a cache over an arbitrary directory, keyed by an explicit KeySource.
+- `func GoModules() DirCache` -- GoModules caches the Go module download cache, keyed on go.sum.
+- `func NpmCache() DirCache` -- NpmCache caches npm's content-addressed cache directory, keyed on package-lock.json.
+
 ### type EnvVarDoc
 
 EnvVarDoc is one declared env var read by a pipeline.
@@ -722,6 +736,7 @@ type JobGroup struct {
 - `func (g *JobGroup) AfterRun(fn AfterRunFn) *JobGroup` -- AfterRun registers a post-run hook on every member.
 - `func (g *JobGroup) BeforeRun(fn BeforeRunFn) *JobGroup` -- BeforeRun registers a pre-run hook on every member.
 - `func (g *JobGroup) Cache(key CacheKeyFn, opts ...CacheOption) *JobGroup` -- Cache memoizes every member of the group on content.
+- `func (g *JobGroup) CacheDir(caches ...DirCache) *JobGroup` -- CacheDir registers dependency-directory caches on every member.
 - `func (g *JobGroup) Concurrency(cg *ConcurrencyGroup, cost ...int) *JobGroup` -- Concurrency enrolls every member of the group in concurrency group g with the given admission cost.
 - `func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup` -- Consumes stages the given producer's artifacts into every member's workspace before it runs, and implies Needs(producer) on each.
 - `func (g *JobGroup) ContinueOnError() *JobGroup` -- ContinueOnError marks every member so downstream dependents proceed even on failure.
@@ -764,6 +779,7 @@ type JobNode struct {
 - `func (n *JobNode) BeforeRunHooks() []BeforeRunFn` -- BeforeRunHooks returns the node's registered pre-run hooks.
 - `func (n *JobNode) Cache(key CacheKeyFn, opts ...CacheOption) *JobNode` -- Cache memoizes the node's result on content.
 - `func (n *JobNode) CacheConfig() *CacheConfig` -- CacheConfig returns the node's resolved content-cache configuration, or nil when JobNode.Cache was not called.
+- `func (n *JobNode) CacheDir(caches ...DirCache) *JobNode` -- CacheDir registers dependency-directory caches on the node: each declared directory is restored from the cache before the node's Run (on an exact key hit) and saved back after a successful Run whose restore missed.
 - `func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode` -- Concurrency enrolls the node in concurrency group g with the given admission cost (default 1).
 - `func (n *JobNode) ConcurrencyCost() int` -- ConcurrencyCost returns the admission cost declared via JobNode.Concurrency, or 0 when the node has no membership.
 - `func (n *JobNode) ConcurrencyGroupRef() *ConcurrencyGroup` -- ConcurrencyGroupRef returns the group the node joined via JobNode.Concurrency, or nil when the node declared no membership.
@@ -771,6 +787,7 @@ type JobNode struct {
 - `func (n *JobNode) Consumes(producer *JobNode, opts ...ConsumeOption) *JobNode` -- Consumes declares that this node stages the artifacts produced by producer into its workspace before it runs, and implies Needs(producer).
 - `func (n *JobNode) ContinueOnError() *JobNode` -- ContinueOnError tells the orchestrator that downstream dependents should proceed even when this node fails.
 - `func (n *JobNode) DepIDs() []string` -- DepIDs returns the node IDs this node depends on.
+- `func (n *JobNode) DirCaches() []DirCache` -- DirCaches returns the node's declared dependency-directory caches, in declaration order.
 - `func (n *JobNode) Env(key, value string) *JobNode` -- Env sets a per-node environment variable.
 - `func (n *JobNode) EnvMap() map[string]string` -- EnvMap returns the node's declared environment.
 - `func (n *JobNode) ID() string` -- ID returns the node's identifier.
@@ -809,6 +826,18 @@ type JobNode struct {
 - `func (n *JobNode) WhenRunner(labels ...string) *JobNode` -- WhenRunner marks the job as conditional on the dispatching runner advertising the listed labels (same comma-OR / AND semantics as Requires).
 - `func (n *JobNode) WhenRunnerLabels() []string` -- WhenRunnerLabels returns the terms declared via WhenRunner.
 - `func (n *JobNode) Work() *Work` -- Work returns the materialized inner DAG for the node's job.
+
+### type KeySource
+
+KeySource names the file whose content keys a Dir cache.
+
+```
+type KeySource struct {
+    // contains filtered or unexported fields
+}
+```
+
+- `func KeyFromFile(path string) KeySource` -- KeyFromFile keys a Dir cache on the content of one file, typically a lockfile.
 
 ### type LintSlot
 
