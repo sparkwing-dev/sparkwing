@@ -223,12 +223,57 @@ Nothing here ever deletes or renames a binary.
 Two `sparkwing run` invocations on the same machine compete for the same
 CPU. Local runs are arbitrated by a per-host admission daemon
 (`wingd`) -- invisible infrastructure you never install, start, or
-tune. The first run that needs admission elects one: a lock file under
+tune. The first run that needs admission brings one up: a lock file under
 the sparkwing home makes the race safe, so one process wins and the rest
-connect to the winner. A newer sparkwing binary transparently takes over
-from a running older daemon, and the daemon exits on its own once the
-machine has been idle for a while, coming back the next time a run needs
-it.
+connect to the winner. The daemon exits on its own once the machine has
+been idle for a while, coming back the next time a run needs it.
+
+### Who hosts the daemon
+
+**The installed Sparkwing distribution owns daemon lifecycle. Pipeline
+clients declare required capabilities and use the running daemon; they
+never host, replace, or upgrade it.**
+
+The daemon is always an installed sparkwing build -- the CLI, or
+`sparkwing-runner` on a runner box -- and never a per-repo pipeline
+binary. `sparkwing run` hands each run the exact CLI that launched it as
+the daemon host, through `SPARKWING_WINGD_BIN`; a pipeline binary invoked
+directly falls back to the `sparkwing` on PATH. You can export
+`SPARKWING_WINGD_BIN` yourself to point a directly-invoked pipeline
+binary (a systemd unit, a deploy box) at a sparkwing that is not on PATH,
+and `sparkwing run` will not overwrite a value you set.
+
+A newer *installed* sparkwing transparently replaces a running older
+daemon. Pipeline binaries never do, so one repo bumping its `.sparkwing/`
+SDK pin cannot churn the daemon every other repo on the box shares.
+
+### When there is no daemon and nothing to host one
+
+On a box with no daemon running and no sparkwing installed, what happens
+depends on what the pipeline asked for.
+
+A run whose pipeline **explicitly declares** what it needs from the
+daemon fails, naming the fix. "Explicitly declares" means a plan-level or
+node-level `.Resources()` pin, or a `.Concurrency()` group with box or
+run scope. Those are correctness requirements -- "no two of these at
+once", "this needs eight cores" -- and running the pipeline while
+silently dropping them is not the same pipeline. The same refusal covers
+a daemon too old to serve a capability the run requires: it names both
+versions and the minimum release that speaks to the run.
+
+A run that declared none of that **proceeds uncoordinated**, saying so
+once on stderr. It still gets a host charge per node, but from
+measurement or a cold-start default rather than from anything the author
+wrote, so nothing the pipeline states is being ignored. This is what
+keeps a pipeline binary shipped alone to a deploy box a working product.
+
+To force the second behavior for a declaring run -- an operator who knows
+their box runs one thing at a time -- set
+`SPARKWING_ALLOW_UNADMITTED=1`. It is an environment variable rather than
+a flag because the runs that need it are the ones no CLI launched.
+
+The fix in both cases is the same: install or update the sparkwing CLI on
+the host, or point `SPARKWING_WINGD_BIN` at an installed one.
 
 The process connects when it needs admission. Explicit run resources and
 plan-level `.Concurrency()` groups are admitted at run start and held by

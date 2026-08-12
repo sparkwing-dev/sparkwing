@@ -9,11 +9,12 @@ or `--topic cli-<group>` for one group). Treat that generated
 reference as authoritative -- when this page and it disagree, it wins.
 
 **Sparkwing does not require sparkwing.** The CLI is a developer
-convenience, not a dependency: everything it does at runtime, a compiled
-pipeline binary can do for itself. The binary embeds the admission daemon
-and its client, so a host that only ships the pinned pipeline binary --
-no CLI installed -- still runs pipelines and stays operable. See
-[Headless hosts](#headless-hosts).
+convenience, not a dependency: a host that only ships the pinned pipeline
+binary -- no CLI installed -- still runs pipelines and stays operable.
+What the CLI adds at runtime is coordination: it hosts the per-machine
+admission daemon, so multiple runs on one box queue against each other
+instead of oversubscribing it. A pipeline binary alone runs
+uncoordinated. See [Headless hosts](#headless-hosts).
 
 The rule across the whole tree: **every input is a named flag**. The one
 intentional exception is the pipeline name on `sparkwing run <pipeline>`
@@ -33,6 +34,12 @@ the pipeline binary and parsed against the pipeline's typed Inputs. The
 `--sw-*` prefix keeps those control flags from colliding with
 pipeline-defined flags -- see the flag-namespace section of
 [sdk.md](sdk.md#typed-inputs) for the full list and the forwarding rules.
+
+`--sw-allow` is enforced by the CLI before it dispatches anything. The
+labels you authorize are forwarded to the run as `SPARKWING_ALLOW`
+(comma-separated) purely so the run's own record shows what was
+authorized -- setting that variable by hand authorizes nothing, because
+the gate has already run by then.
 
 `--profile NAME` selects the storage and dispatch addressing
 (state/cache/logs, and any controller auth). Execution still happens
@@ -108,11 +115,11 @@ The describe schema matches `sparkwing.DescribePipeline` plus
 
 A runner host does not need the `sparkwing` CLI. Ship it the compiled
 pipeline binary (a plain `go build` of your `.sparkwing/` module),
-invoke pipelines by name, and operate the local admission daemon through
-the binary's own `ops` verbs:
+invoke pipelines by name, and inspect local state through the binary's
+own `ops` verbs:
 
 ```bash
-./pipelines <name>                # run a pipeline (spawns/uses the local daemon)
+./pipelines <name>                # run a pipeline
 ./pipelines ops queue             # the admission queue: holders, waiters, capacity
 ./pipelines ops doctor            # find and repair provably-dead local state
 ./pipelines ops stats             # the rolling admission-outcome window
@@ -127,5 +134,23 @@ are the field-recovery surface for a host with no browser and no CLI:
 `ops queue` shows why work is stuck, `ops doctor` clears it, and both are
 non-destructive to live runs.
 
+One thing a bare pipeline binary does not do is host the admission
+daemon. **The installed Sparkwing distribution owns daemon lifecycle.
+Pipeline clients declare required capabilities and use the running
+daemon; they never host, replace, or upgrade it.** A run's client spawns
+the binary named by `SPARKWING_WINGD_BIN` -- which `sparkwing run` sets
+to its own path -- else the `sparkwing` found on PATH.
+
+With neither present, a run that declared no resources and no concurrency
+groups says so once and proceeds without local coordination, which is
+fine for a host that runs one pipeline at a time. A run whose pipeline
+*did* declare them fails instead, naming the fix, because those
+declarations are correctness requirements rather than tuning
+(`SPARKWING_ALLOW_UNADMITTED=1` overrides that if you know the box runs
+one thing at a time). Put the CLI on the box when concurrent runs there
+should queue against each other -- see
+[local-execution.md](local-execution.md#who-hosts-the-daemon).
+
 This is the operational face of *sparkwing does not require sparkwing*:
-the pipeline binary is the product, and it is self-sufficient.
+the pipeline binary is the product, and it stays functional alone -- the
+CLI adds the coordination.

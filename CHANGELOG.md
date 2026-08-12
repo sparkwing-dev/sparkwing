@@ -49,6 +49,66 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **cli + orchestrator (Breaking):** Daemon hosting moves from compiled
+  pipeline binaries to installed sparkwing binaries. The invariant: the
+  installed Sparkwing distribution owns daemon lifecycle; pipeline clients
+  declare required capabilities and use the running daemon, but never host,
+  replace, or upgrade it. A pipeline binary no longer serves the hidden
+  `wingd` verbs and no longer takes a running daemon over -- it shares
+  whatever daemon is serving. `sparkwing run` sets `SPARKWING_WINGD_BIN` to
+  its own path before exec'ing the pipeline binary (an exported value of
+  your own survives) and brings the daemon to its own version first, for
+  invocations that will actually admit work. A pipeline binary invoked
+  directly falls back to the `sparkwing` on PATH, and starts the daemon
+  through that installed binary rather than through itself.
+
+  The point is that a repo's `.sparkwing/go.mod` pin is no longer part of
+  the machine-wide daemon version negotiation: one repo bumping its SDK can
+  no longer churn the daemon every other repo on the box shares.
+
+  On a box with no daemon and no installed sparkwing, behavior now splits
+  on what the pipeline declared. A run declaring a plan- or node-level
+  `.Resources()` pin, or a box- or run-scoped `.Concurrency()` group, fails
+  with an error naming the fix -- those are correctness requirements, not
+  tuning. A run declaring none of that proceeds uncoordinated with one
+  stderr warning, which keeps a pipeline binary shipped alone to a deploy
+  box a working product. `SPARKWING_ALLOW_UNADMITTED=1` forces the second
+  behavior for a declaring run. The same split covers a daemon too old to
+  serve the run's protocol; that refusal names both versions and the
+  minimum release. See [migration
+  guide](docs/migrations/_unreleased.md#daemon-hosting-moves-to-installed-binaries).
+
+  **Migration.** Nothing changes for anyone with the sparkwing CLI
+  installed and on PATH, which is the normal laptop and CI setup. Hosts
+  that run a pipeline binary with no sparkwing installed keep working if
+  their pipelines declare no resources or local concurrency groups, and
+  otherwise need the CLI installed (or `SPARKWING_ALLOW_UNADMITTED=1`).
+  Pipeline binaries built against an older SDK are unaffected: they keep
+  their existing self-hosting behavior and talk to a newer CLI-hosted
+  daemon exactly as before, so a mixed box during a rollout is fine. One
+  edge is worth naming: a host whose installed sparkwing is v0.24.x or
+  v0.25.x speaks the current protocol but does not serve `wingd supervise`,
+  so a new pipeline binary asking it to host will fail with the daemon log
+  naming that verb -- update the CLI to v0.26.0 or newer.
+
+### Fixed
+
+- **wingd:** The daemon is supervised again. v0.26.0 pointed the spawn at
+  `wingd supervise` so an unresponsive daemon gets replaced by a process
+  outside it, but the spawn re-execs whichever binary the client lives in,
+  and compiled pipeline binaries did not serve that verb -- every local run
+  without a live daemon failed, so the verb was reverted to `run`.
+  Supervision returns here, safely: spawning now starts an installed
+  binary, both the CLI and `sparkwing-runner` serve both verbs, and a
+  pipeline binary never re-execs itself at all. A test in each hosting
+  binary pins that it serves the verb the spawn invokes, and the headless
+  gate pins that a pipeline binary is never asked to.
+- **runner:** `sparkwing-runner --local-admission` could not bring up the
+  admission daemon it depends on: its own spawn answered with a usage
+  error, because it served only `wingd run`.
+
 ## [v0.26.0] - 2026-08-12
 ### Added
 
