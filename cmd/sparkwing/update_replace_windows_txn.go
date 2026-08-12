@@ -8,10 +8,6 @@ const (
 )
 
 func replaceWindowsRunningImageWith(source, target string, move func(string, string, uint32) error, remove func(string) error) error {
-	replaceFlags := windowsMoveReplaceExisting | windowsMoveWriteThrough
-	if err := move(source, target, replaceFlags); err == nil {
-		return nil
-	}
 	old := target + ".old"
 	_ = remove(old)
 	if err := move(target, old, windowsMoveWriteThrough); err != nil {
