@@ -22,6 +22,24 @@ const InvocationSecretArgsKey = "secret_args"
 // consistent marker.
 const RedactedArgValue = "***"
 
+// IncludeSecretValues is the `?include=` token a caller passes to
+// GET /api/v1/runs/{id} to receive a run's real argument values rather
+// than the redacted view.
+//
+// It exists because the run API is not only a display surface: a
+// cluster executor fetches the args it is about to run with from the
+// same endpoint the dashboard reads. Redaction that cannot be opted
+// out of would make pods execute with a literal "***" and, worse,
+// would stop the node-log masker from recognizing the real secret --
+// turning a display leak into a log leak.
+//
+// The controller honors it only for principals that can execute work
+// (nodes.claim or admin); everyone else, the dashboard included, keeps
+// getting the redacted view. Lives here rather than in the controller
+// or its client so the server and the caller cannot drift on the
+// spelling.
+const IncludeSecretValues = "secret_values"
+
 // SecretArgNames returns the arg names this run declared secret, or
 // nil when the run carries no classification.
 //

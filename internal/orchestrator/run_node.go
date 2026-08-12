@@ -78,7 +78,9 @@ func RunNodeOnce(
 	}
 	backends := RemoteBackends(stateClient, logsBackend, art, httpClient, store.DefaultConcurrencyLease)
 
-	run, err := stateClient.GetRun(ctx, runID)
+	// Execution read: run.Args seeds the masker below and is handed to
+	// reg.Invoke and the runner.Request. The plain GetRun redacts.
+	run, err := stateClient.GetRunForExecution(ctx, runID)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("get run %s: %w", runID, err)
 	}

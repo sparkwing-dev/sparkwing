@@ -98,7 +98,7 @@ func TestSecretArgs_ControllerListRunsRedacts(t *testing.T) {
 	assertRedactedResponse(t, "GET /api/v1/runs", getBody(t, srv.URL+"/api/v1/runs"))
 }
 
-func TestSecretArgs_ControllerGetRunRedacts(t *testing.T) {
+func TestSecretArgs_ControllerGetRunRedactsByDefault(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRun(t, st, "run-1")
 	assertRedactedResponse(t, "GET /api/v1/runs/{id}", getBody(t, srv.URL+"/api/v1/runs/run-1"))
@@ -228,4 +228,98 @@ func TestSecretArgs_ControllerGrandfathersOldRuns(t *testing.T) {
 	if !strings.Contains(body, ctlSecretValue) {
 		t.Errorf("old run without classification changed shape; want unchanged rendering:\n%s", body)
 	}
+}
+
+// The run API is not only a display surface: a cluster executor
+// fetches the args it is about to run with from this same endpoint.
+// ?include=secret_values is how it asks, and nodes.claim -- the scope
+// every node-execution endpoint already requires -- is what entitles
+// it.
+func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	seedSecretArgRun(t, st, "run-1")
+
+	now := time.Now().UTC()
+	runnerTok, _, err := st.CreateToken("pod", store.TokenKindRunner,
+		[]string{"nodes.claim", "runs.read"}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken runner: %v", err)
+	}
+	readerTok, _, err := st.CreateToken("dashboard", store.TokenKindUser,
+		[]string{"runs.read"}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken reader: %v", err)
+	}
+	adminTok, _, err := st.CreateToken("ops", store.TokenKindUser,
+		[]string{"admin"}, 0, now)
+	if err != nil {
+		t.Fatalf("CreateToken admin: %v", err)
+	}
+
+	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	defer srv.Close()
+
+	get := func(t *testing.T, token, query string) string {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/runs/run-1"+query, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status=%d for %q", resp.StatusCode, query)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(body)
+	}
+
+	const secretValues = "?include=" + store.IncludeSecretValues
+
+	// An executor gets the real value, or its pod plans with "***".
+	if body := get(t, runnerTok, secretValues); !strings.Contains(body, ctlSecretValue) {
+		t.Errorf("nodes.claim token did not receive the execution view:\n%s", body)
+	}
+	if body := get(t, adminTok, secretValues); !strings.Contains(body, ctlSecretValue) {
+		t.Errorf("admin token did not receive the execution view:\n%s", body)
+	}
+
+	// A display-scope token asking for it anyway stays redacted.
+	assertRedactedResponse(t, "runs.read token asking for the execution view",
+		get(t, readerTok, secretValues))
+
+	// And the executor's own default read is still redacted, so the
+	// opt-in is what carries the secret, not the token.
+	assertRedactedResponse(t, "nodes.claim token without the include",
+		get(t, runnerTok, ""))
+}
+
+// The execution view must not widen any other run-serving endpoint:
+// list, attempts and pipeline-latest have no executor use, so they
+// stay redacted no matter what the caller asks for.
+func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
+	st, srv := secretArgController(t)
+	seedSecretArgRun(t, st, "run-1")
+	if err := st.FinishRun(context.Background(), "run-1", "success", ""); err != nil {
+		t.Fatal(err)
+	}
+	const q = "?include=" + store.IncludeSecretValues
+	assertRedactedResponse(t, "GET /api/v1/runs"+q, getBody(t, srv.URL+"/api/v1/runs"+q))
+	assertRedactedResponse(t, "GET /api/v1/runs/{id}/attempts"+q,
+		getBody(t, srv.URL+"/api/v1/runs/run-1/attempts"+q))
+	assertRedactedResponse(t, "GET /api/v1/pipelines/{name}/latest"+q,
+		getBody(t, srv.URL+"/api/v1/pipelines/deploy/latest"+q))
+	assertRedactedResponse(t, "GET /api/v1/runs/{id}/receipt"+q,
+		getBody(t, srv.URL+"/api/v1/runs/run-1/receipt"+q))
 }

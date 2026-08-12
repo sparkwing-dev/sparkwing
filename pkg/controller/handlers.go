@@ -181,9 +181,45 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
+// secretValuesAllowed reports whether this request may receive a run's
+// real argument values.
+//
+// The gate is "can this principal execute work", which is exactly
+// [ScopeNodesClaim] -- every node-execution endpoint is already behind
+// it, so a token that can run a node can already reach the secrets the
+// node resolves. Admin is the usual superset. A caller with only
+// runs.read, which is what the dashboard and a human's CLI token
+// carry, stays on the redacted view.
+//
+// Returns true when the Authenticator is disabled, matching
+// requireScope: with no principals there is no distinction to draw,
+// and refusing would break local cluster-mode development.
+func secretValuesAllowed(r *http.Request) bool {
+	p, ok := PrincipalFromContext(r.Context())
+	if !ok {
+		return true
+	}
+	return p.HasScope(ScopeAdmin) || p.HasScope(ScopeNodesClaim)
+}
+
+// runForResponse redacts run unless the caller both asked for the
+// execution view and is entitled to it. Unauthorized callers get the
+// redacted view rather than an error: asking for more detail than your
+// token allows is not itself a failure, and an executor always holds
+// nodes.claim, so it cannot silently land on the redacted view.
+func runForResponse(r *http.Request, run *store.Run) *store.Run {
+	if includeHas(r.URL.Query().Get("include"), store.IncludeSecretValues) &&
+		secretValuesAllowed(r) {
+		return run
+	}
+	return store.RedactedRun(run)
+}
+
 // handleGetRun serves a single run by id. Default response is the
 // store.Run JSON with secret-declared args redacted. With
-// ?include=nodes it returns {run, nodes}.
+// ?include=nodes it returns {run, nodes}; with
+// ?include=secret_values an executor-scoped caller gets the real
+// argument values (see [store.IncludeSecretValues]).
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	run, err := s.store.GetRun(r.Context(), runID)
@@ -213,10 +249,10 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 		approvals, _ := s.store.ListApprovalsForRun(r.Context(), runID)
 		spawned, _ := s.store.ListSpawnedChildrenByRun(r.Context(), runID)
 		decorated := api.DecorateNodes(nodes, run.PlanSnapshot, steps, approvals, spawned)
-		writeJSON(w, http.StatusOK, map[string]any{"run": store.RedactedRun(run), "nodes": decorated})
+		writeJSON(w, http.StatusOK, map[string]any{"run": runForResponse(r, run), "nodes": decorated})
 		return
 	}
-	writeJSON(w, http.StatusOK, store.RedactedRun(run))
+	writeJSON(w, http.StatusOK, runForResponse(r, run))
 }
 
 // includeHas reports whether the comma-separated `include` query
