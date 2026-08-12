@@ -26,6 +26,12 @@ const (
 type Hello struct {
 	ProtocolMajor int    `json:"protocol_major"`
 	BinaryVersion string `json:"binary_version"`
+	// HealthProbe marks a connection that only observes the daemon: a
+	// supervisor health check or a socket sweep. The daemon serves it like
+	// any other connection but keeps it out of idle accounting, so a
+	// daemon whose only traffic is probes still idles out. Daemons that
+	// predate the field ignore it.
+	HealthProbe bool `json:"health_probe,omitempty"`
 }
 
 // HelloAck is the daemon's reply to [Hello], carrying the majors in play

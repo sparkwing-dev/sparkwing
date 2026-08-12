@@ -248,6 +248,11 @@ type Client struct {
 	// closed marks an intentional Close so a frame-read failure that follows
 	// it is not mistaken for a daemon blink and does not trigger a reconnect.
 	closed atomic.Bool
+	// probe declares this client a health probe in its hello, which keeps
+	// the connection out of the daemon's idle accounting. Only [Probe] and
+	// [HealthProbe] set it; a working client must never, or the daemon
+	// could idle out under it.
+	probe bool
 }
 
 // AdmissionError reports a terminal negative admission outcome: a policy
@@ -714,7 +719,7 @@ func (cl *Client) takeover(ctx context.Context, opts Options) error {
 }
 
 func (cl *Client) handshake(version string) (wingwire.HelloAck, error) {
-	if err := cl.write(&wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: version}); err != nil {
+	if err := cl.write(&wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: version, HealthProbe: cl.probe}); err != nil {
 		return wingwire.HelloAck{}, err
 	}
 	msg, err := cl.dec.read()

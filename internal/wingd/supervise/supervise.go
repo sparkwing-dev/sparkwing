@@ -218,9 +218,12 @@ func Run(args []string) error {
 		Start: func() (Child, error) {
 			return startExecChild(self, childArgs)
 		},
+		// The probe must ride [wingdclient.HealthProbe], never a working
+		// client: a working connection counts as daemon activity, and a
+		// daemon its own watchdog keeps active can never idle out, so the
+		// supervise+run pair outlives every home that spawned it.
 		Probe: func(ctx context.Context) error {
-			_, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home, DialTimeout: defaultProbeTimeout})
-			return err
+			return wingdclient.HealthProbe(ctx, *home)
 		},
 		Logf: logger.Printf,
 	})

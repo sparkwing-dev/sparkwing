@@ -65,6 +65,24 @@ type conn struct {
 	// definition, so the handlers read the request in its terms.
 	protocolMajor int
 
+	// healthProbe marks a connection whose hello declared it a health
+	// probe. It is left out of idle accounting -- it never advances
+	// lastActivity and does not hold the daemon open -- so a daemon whose
+	// only traffic is probes idles out and its supervisor reaps it. A
+	// probe may only read queue state; dispatch drops it for anything
+	// else, so the accounting exemption can never extend to admission.
+	// Guarded by the owning Daemon's mutex.
+	healthProbe bool
+
+	// handshaked records that this connection's hello was read, which is
+	// when it stops being an anonymous socket and starts being a client.
+	// Idle accounting charges activity only to handshaked connections: a
+	// peer that dialed and vanished without a hello did no work, and its
+	// disconnect must not advance the idle clock -- a probe whose hello
+	// was cut off by a deadline would otherwise reset the clock it
+	// exists to leave alone. Guarded by the owning Daemon's mutex.
+	handshaked bool
+
 	runID        string
 	ownerRunID   string
 	displayRunID string

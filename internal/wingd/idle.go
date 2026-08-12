@@ -32,11 +32,19 @@ func (d *Daemon) idleLoop(ctx context.Context) {
 }
 
 // idleElapsed returns how long the daemon has been idle, or zero if it is
-// currently busy (any connection, lease, or waiter).
+// currently busy (any working connection, lease, or waiter). Health-probe
+// connections do not count as busy: they observe the daemon on behalf of
+// its supervisor, and a daemon held open by its own watchdog could never
+// idle out.
 func (d *Daemon) idleElapsed() time.Duration {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if len(d.conns) > 0 || len(d.reattachWait) > 0 || len(d.guards) > 0 {
+	for c := range d.conns {
+		if !c.healthProbe {
+			return 0
+		}
+	}
+	if len(d.reattachWait) > 0 || len(d.guards) > 0 {
 		return 0
 	}
 	snap := d.ledger.Snapshot()

@@ -251,7 +251,6 @@ func (d *Daemon) Run(ctx context.Context) error {
 		c := newConn(d, nc)
 		d.mu.Lock()
 		d.conns[c] = struct{}{}
-		d.touchLocked()
 		d.mu.Unlock()
 		go d.serveConn(c)
 	}
@@ -486,6 +485,17 @@ func (d *Daemon) now() time.Time { return d.cfg.now() }
 
 func (d *Daemon) touchLocked() { d.lastActivity = d.now() }
 
+// touchConnLocked records activity on behalf of a connection: only a
+// handshaked working client counts. A health probe must never advance the
+// idle clock it exists to leave alone, and a peer that dialed and vanished
+// without a hello did no work -- charging either would let observation
+// hold the daemon open, which is the failure idle-exit exists to end.
+func (d *Daemon) touchConnLocked(c *conn) {
+	if c.handshaked && !c.healthProbe {
+		d.touchLocked()
+	}
+}
+
 func (d *Daemon) isDrainingLocked() bool { return d.draining }
 
 // serveConn runs one connection: the version handshake, then the request
@@ -505,6 +515,15 @@ func (d *Daemon) serveConn(c *conn) {
 	draining := d.isDrainingLocked()
 	c.protocolMajor = wingwire.ServedMajor(hello.ProtocolMajor)
 	served := c.protocolMajor
+	c.healthProbe = hello.HealthProbe
+	c.handshaked = true
+	// Activity is recorded here rather than at accept, because only the
+	// hello says whether the peer is a health probe -- and a probe must
+	// not advance the idle clock, or probing keeps the daemon alive
+	// forever and its supervisor can never reap it.
+	if !c.healthProbe {
+		d.touchLocked()
+	}
 	d.mu.Unlock()
 	ack := &wingwire.HelloAck{
 		ProtocolMajor:       served,
@@ -530,6 +549,16 @@ func (d *Daemon) serveConn(c *conn) {
 // dispatch handles one post-handshake message and reports whether the
 // connection loop should stop.
 func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
+	// A health probe observes; it may not do work. Its idle-accounting
+	// exemption would otherwise be claimable by any client wanting
+	// admission without holding the daemon open.
+	if c.healthProbe {
+		if _, ok := msg.(*wingwire.QueueState); !ok {
+			return true
+		}
+		d.handleQueueState(c)
+		return false
+	}
 	switch m := msg.(type) {
 	case *wingwire.AdmissionRequest:
 		d.handleAdmission(c, m)
@@ -1546,7 +1575,7 @@ func (d *Daemon) handleDisconnect(c *conn) {
 				if guard.completion == c {
 					guard.completion = nil
 				}
-				d.touchLocked()
+				d.touchConnLocked(c)
 				d.mu.Unlock()
 				d.logDisconnect(c, role, runID)
 				return
@@ -1583,7 +1612,7 @@ func (d *Daemon) handleDisconnect(c *conn) {
 		}
 		deliveries := d.routeLocked(events)
 		snap := d.ledger.Snapshot()
-		d.touchLocked()
+		d.touchConnLocked(c)
 		d.mu.Unlock()
 		d.logDisconnect(c, role, runID)
 		for _, orphan := range orphaned {
