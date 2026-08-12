@@ -165,6 +165,8 @@ type GuardCompleteAck struct{}
 type Hello struct {
 	ProtocolMajor int
 	BinaryVersion string
+
+	HealthProbe bool
 }
 type HelloAck struct {
 	ProtocolMajor int
