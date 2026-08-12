@@ -59,13 +59,24 @@ func TestEntryExecHelper(t *testing.T) {
 		terminated := make(chan os.Signal, 1)
 		signal.Notify(terminated, syscall.SIGTERM)
 		_, _ = fmt.Fprintln(os.Stdout, os.Getpid())
+		if ready := os.Getenv("SPARKWING_ENTRY_SIGNAL_READY"); ready != "" {
+			if err := os.WriteFile(ready, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 		<-terminated
+		if received := os.Getenv("SPARKWING_ENTRY_SIGNAL_RECEIVED"); received != "" {
+			if err := os.WriteFile(received, []byte("received"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
 		time.Sleep(200 * time.Millisecond)
 		return
 	}
 	if mode == "start-race-wrapper" {
 		env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "term-delay")
 		_ = execChildWith(os.Args[0], []string{"-test.run=^TestEntryExecHelper$"}, env, func(*exec.Cmd) {
+			waitForFile(os.Getenv("SPARKWING_ENTRY_SIGNAL_READY"), time.Second)
 			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		})
 		return
@@ -117,31 +128,48 @@ func TestExecLeaseDoesNotSurviveChildSpawnedDuringInit(t *testing.T) {
 }
 
 func TestExecChildSupervisesSignalsBeforeStart(t *testing.T) {
+	ready := filepath.Join(t.TempDir(), "ready")
+	received := filepath.Join(t.TempDir(), "received")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
-	cmd.Env = append(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER=start-race-wrapper")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		t.Fatal(err)
-	}
+	cmd.Env = append(os.Environ(),
+		"SPARKWING_ENTRY_EXEC_HELPER=start-race-wrapper",
+		"SPARKWING_ENTRY_SIGNAL_READY="+ready,
+		"SPARKWING_ENTRY_SIGNAL_RECEIVED="+received,
+	)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	line, err := bufio.NewReader(stdout).ReadString('\n')
+	pidBytes, err := waitForFile(ready, time.Second)
 	if err != nil {
-		t.Fatalf("child readiness = %q, %v", line, err)
+		t.Fatal(err)
 	}
-	childPID, err := strconv.Atoi(strings.TrimSpace(line))
+	childPID, err := strconv.Atoi(string(pidBytes))
 	if err != nil {
-		t.Fatalf("child pid = %q, %v", line, err)
+		t.Fatalf("child pid = %q, %v", pidBytes, err)
 	}
 	cleanupProcess(t, childPID)
 	if err := waitCommand(t, cmd, childPID); err == nil {
 		t.Fatal("signal-terminated foreground exited successfully")
 	}
-	if err := syscall.Kill(childPID, 0); !errors.Is(err, syscall.ESRCH) {
-		t.Fatalf("foreground child survived supervised termination: %v", err)
+	if body, err := os.ReadFile(received); err != nil || string(body) != "received" {
+		t.Fatalf("foreground did not receive supervised termination: body=%q err=%v", body, err)
 	}
+}
+
+func waitForFile(path string, timeout time.Duration) ([]byte, error) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		body, err := os.ReadFile(path)
+		if err == nil {
+			return body, nil
+		}
+		if !os.IsNotExist(err) {
+			return nil, err
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return nil, fmt.Errorf("%s was not published before deadline", path)
 }
 
 func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
