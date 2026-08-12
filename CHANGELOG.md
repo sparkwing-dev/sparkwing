@@ -57,6 +57,22 @@ code change to unlock.
 
 ### Changed
 
+- **runner:** Dependency fetches now default to the in-cluster pull-through
+  proxy. Wherever a cache URL is known, the runner container and every pod it
+  spawns start with `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL`, and
+  `PIP_TRUSTED_HOST` pointed at the cache pod's `/proxy/...` routes, so a
+  build's dependency traffic stays inside the cluster instead of leaving
+  through the NAT gateway once per run. `GOPROXY` keeps `proxy.golang.org` and
+  `direct` behind a `|` separator, so any proxy error falls through to
+  upstream and private modules still resolve through `~/.netrc`. Opt out with
+  `cache.dependencyProxy.enabled=false`, `--dependency-proxy=off`, or override
+  a single ecosystem via `runner.extraEnv`. See
+  [gitcache](docs/gitcache.md#dependency-proxy-defaults--egress).
+- **runner:** Kubernetes node pods are created with
+  `imagePullPolicy: IfNotPresent` instead of `Always`, which re-checked (and
+  on cache eviction re-downloaded) the runner image once per node in the DAG.
+  Deployments that depend on a mutable tag being re-pulled per node need
+  `--image-pull-policy=Always` (or `SPARKWING_IMAGE_PULL_POLICY`).
 - **cache:** `/archive`, `/file`, `/tree-hash`, `/branch-contains`, and
   `/sync/negotiate` no longer run a synchronous `git fetch` on every request.
   A successful fetch keeps a repo fresh for 15s (`--fetch-fresh-window` /
