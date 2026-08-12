@@ -1,7 +1,7 @@
 # Caching
 
 Job-level caching is content-addressed result memoization via the
-`.Cache(key, opts...)` node modifier plus the top-level
+`.Memoize(key, opts...)` node modifier plus the top-level
 `sparkwing.Key(...)` builder. See [sdk.md](sdk.md) for the full modifier
 reference and [pipelines.md](pipelines.md) for usage in the Plan/Work
 model.
@@ -26,13 +26,13 @@ Sparkwing caches at four levels:
 
 This doc is about (1), (2), and (4).
 
-**`.Cache()` and `.CacheDir()` answer different questions.** `.Cache()`
+**`.Memoize()` and `.CacheDir()` answer different questions.** `.Memoize()`
 is memoization: a hit means the node does **not** run, because the
 answer is already known. `.CacheDir()` is a cache volume: the node
 **always** runs, and a hit means its dependency downloads are already
 on disk. Porting a `actions/cache` or GitLab `cache:` block from
 another CI system? That's `.CacheDir()`. Skipping work whose inputs
-haven't changed? That's `.Cache()`.
+haven't changed? That's `.Memoize()`.
 
 Caching is keyed on **content alone**. It carries no scope and no group:
 it answers "is this the *same work*, so reuse the answer?" Bounding how
@@ -46,7 +46,7 @@ independent; a node may declare either, both, or neither.
 shard := sparkwing.Job(plan, "coverage-shard-1", func(ctx context.Context) error {
     return nil
 })
-shard.Cache(func(ctx context.Context) sparkwing.CacheKey {
+shard.Memoize(func(ctx context.Context) sparkwing.CacheKey {
     return sparkwing.Key("coverage", "shard-1", "v1")
 }, sparkwing.TTL(7*24*time.Hour))
 ```
@@ -59,7 +59,7 @@ When the orchestrator evaluates `shard`, it:
    output and records a cache-hit event.
 4. Otherwise it runs the node and persists the output under the hash.
 
-`.Cache()` is a node modifier, not a step. You cannot conditionally save
+`.Memoize()` is a node modifier, not a step. You cannot conditionally save
 or restore inside a job body -- the decision is declarative and
 evaluated once per node.
 
@@ -75,7 +75,7 @@ sparkwing.Key("deploy", "prod", "v1.2.3")
 build := sparkwing.Job(plan, "build", func(ctx context.Context) error { return nil })
 buildOut := sparkwing.RefTo[string](build)
 deploy := sparkwing.Job(plan, "deploy", func(ctx context.Context) error { return nil }).Needs(build)
-deploy.Cache(func(ctx context.Context) sparkwing.CacheKey {
+deploy.Memoize(func(ctx context.Context) sparkwing.CacheKey {
     // resolve the Ref to put the upstream's OUTPUT in the key; passing
     // the Ref directly would hash to the node ID
     return sparkwing.Key("deploy", "prod", buildOut.Get(ctx))
@@ -107,11 +107,11 @@ artifacts and they travel with the cache: a node that lists
 run, and a cache hit carries the producer's artifact manifest forward
 unchanged, so a downstream [`Consumes`](artifacts.md) stages the same
 files whether the producer ran or hit. Caching a file-producing node is
-supported -- pair `.Cache()` with `Outputs` so the cached node's files
+supported -- pair `.Memoize()` with `Outputs` so the cached node's files
 follow its replayed output to the nodes that need them. See
 [artifacts.md](artifacts.md) for the model.
 
-The restore is cross-run, not just in-flight: a `.Cache()` hit from a
+The restore is cross-run, not just in-flight: a `.Memoize()` hit from a
 *previous* run writes the output onto the current run's node row, so a
 downstream `RefTo[T]` resolves it -- the same as an in-flight dedupe
 follower would.
@@ -123,7 +123,7 @@ places at once -- a burst of identical triggers, or two nodes with the
 same key in one plan. Cache collapses that to a single execution: the
 first arrival computes, the rest wait on the content hash and replay its
 result the moment it lands. It is the same rule as a hit, one tick
-earlier, so it needs no separate policy or flag -- declaring `.Cache()`
+earlier, so it needs no separate policy or flag -- declaring `.Memoize()`
 is enough.
 
 Because dedupe keys on content, it spans groups and runs: two nodes with
@@ -139,7 +139,7 @@ missing-key warning:
 ```go
 skipCache := false
 sparkwing.Job(plan, "maybe", func(ctx context.Context) error { return nil }).
-    Cache(func(ctx context.Context) sparkwing.CacheKey {
+    Memoize(func(ctx context.Context) sparkwing.CacheKey {
         if skipCache {
             return sparkwing.NoCache
         }
@@ -153,7 +153,7 @@ populated cache.
 
 ## Caching a node that is also in a Skip or Fail group
 
-When a node declares both `.Cache()` and `.Concurrency()` on a group
+When a node declares both `.Memoize()` and `.Concurrency()` on a group
 whose `OnLimit` is `Skip` or `Fail`, and the cached content is being
 computed in flight, the leader may resolve to the group's skip/fail
 outcome rather than a successful result. An in-flight-dedupe follower

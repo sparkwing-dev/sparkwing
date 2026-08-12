@@ -440,7 +440,7 @@ func (wingdCachedUnpinnedPipe) Plan(
 	runID := rc.RunID
 	sparkwing.Job(plan, "cached", func(ctx context.Context) error {
 		return wingdE2EGate.Load().run(ctx, runID)
-	}).Cache(func(context.Context) sparkwing.CacheKey {
+	}).Memoize(func(context.Context) sparkwing.CacheKey {
 		return sparkwing.Key("wingd-e2e-cached", "stable")
 	})
 	return nil

@@ -39,7 +39,7 @@ type pgCacheReplayPipe struct{ sparkwing.Base }
 
 func (pgCacheReplayPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	node := sparkwing.Job(plan, "build", &pgCacheReplayJob{})
-	node.Cache(func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("pg-integ", "replay-v1") })
+	node.Memoize(func(ctx context.Context) sparkwing.CacheKey { return sparkwing.Key("pg-integ", "replay-v1") })
 	return nil
 }
 
@@ -53,7 +53,7 @@ func registerPgIntegPipelines(t *testing.T) {
 
 // TestPgSharing_CoordinatedCacheReservation is the central Mode 3
 // claim: two runs against the same Postgres schema sharing the same
-// .Cache() key -- the second sees an AcquireCached outcome (not just
+// .Memoize() key -- the second sees an AcquireCached outcome (not just
 // a content-addressed blob HEAD). Verify via the concurrency_cache
 // row written by Run A and the cached outcome on Run B's node.
 func TestPgSharing_CoordinatedCacheReservation(t *testing.T) {
