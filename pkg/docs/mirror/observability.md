@@ -221,3 +221,4 @@ backend you run (e.g. Tempo for traces, Loki for logs).
 | `sparkwing.gitcache.fetch_duration` | Histogram | Background fetch time |
 | `sparkwing.gitcache.cache_hits` | Counter | Cache hits (git archive and binary/dependency, distinguished by `type` attribute) |
 | `sparkwing.gitcache.cache_misses` | Counter | Cache misses (git archive and binary/dependency, distinguished by `type` attribute) |
+| `sparkwing.gitcache.recovery_reclones` | Counter | Full mirror re-downloads after a failed fetch, by `repo` hash. Should be near zero -- a repo that keeps appearing here has a persistent fetch failure (see [Cache](gitcache.md#recovery-reclone-circuit-breaker)) |

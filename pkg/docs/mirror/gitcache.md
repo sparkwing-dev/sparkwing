@@ -117,6 +117,55 @@ This keeps repos fresh so that:
 - Runner clones see recent commits without cold-start fetches
 - Ancestor negotiation for incremental uploads succeeds more often
 
+## Egress Guards
+
+Both guards below exist to stop the cache re-downloading from GitHub
+more than it has to. In a cluster behind NAT, every avoided fetch is
+avoided egress cost.
+
+### Fetch freshness throttle
+
+`/archive`, `/file`, `/tree-hash`, `/branch-contains`, and
+`/sync/negotiate` used to run their own `git fetch` on **every** request.
+The background loop already fetches every repo every 30 seconds, so a
+webhook burst multiplied GitHub traffic without making anything fresher.
+
+Now a successful fetch (from the background loop, from a request, or from
+`/git/refresh`) marks the repo fresh for `FETCH_FRESH_WINDOW`
+(default 15s), and requests inside that window serve straight from the
+mirror. Worst-case staleness is unchanged in practice: it is still bounded
+by the background fetch interval.
+
+`POST /git/refresh` **is not throttled**. It exists to close the
+`git push && sparkwing pipeline trigger` race, so it always performs a
+real fetch. Use it (as the CLI does) whenever a caller needs a just-pushed
+SHA immediately. Cloning a repo that is not cached yet is also unaffected.
+
+### Recovery reclone circuit breaker
+
+When `/archive` cannot fetch a repo, it can recover by deleting the mirror
+and cloning it again. That is the right move for a corrupted mirror and
+the wrong move for a fetch that will keep failing -- a conflicting local
+ref after an upstream branch rename (local `foo` vs remote `foo/bar`), for
+example, made every archive request re-download the entire repository.
+
+A reclone is now allowed at most once per `RECLONE_COOLDOWN` (default
+1h) per repo. Inside the cooldown, a failed fetch returns `502` with the
+underlying git error, the remaining cooldown, and a pointer to the fix.
+Each reclone logs loudly with the `recovery reclone:` prefix and the repo
+hash, and increments the `sparkwing.gitcache.recovery_reclones` counter.
+
+Health problems to expect from `GET /health`:
+
+| Problem text | What it means |
+|--------------|---------------|
+| `repo <hash>: recovery reclone ran N times in 24h -- persistent fetch failure; ...` | The mirror keeps failing to fetch and reclones are papering over it. Read the `recovery reclone:` log line for the git error, fix the cause (often a conflicting ref -- `git remote prune origin`, or delete the conflicting ref inside `/data/repos/<hash>.git`), then let the background loop resume. |
+| `repo <hash>: <friendly fetch error>` | The most recent background fetch failed (SSH, DNS, timeout, fork exhaustion). Unchanged behavior. |
+
+An operator who wants the old per-request behavior back can set
+`FETCH_FRESH_WINDOW` and/or `RECLONE_COOLDOWN` to a negative duration
+(e.g. `-1s`) to disable that guard.
+
 ## Code delivery on remote triggers
 
 `sparkwing pipeline trigger <pipeline> --profile prod` triggers by commit
@@ -243,6 +292,8 @@ The cache runs as a Deployment in the `sparkwing` namespace:
 | `SPARKWING_API_TOKEN` | Bearer token for write endpoint auth |
 | `GITCACHE_REPOS` | Comma-separated `name=url` pairs for auto-registration |
 | `FETCH_INTERVAL` | Background fetch interval (default: `30s`) |
+| `FETCH_FRESH_WINDOW` | How long a successful fetch lets request handlers skip their own fetch (default: `15s`; negative disables) |
+| `RECLONE_COOLDOWN` | Minimum gap between `/archive` recovery reclones of one repo (default: `1h`; negative disables) |
 | `DATA_DIR` | Override data root (default: `/data`) |
 | `PORT` | Listen port (default: `8090`) |
 
