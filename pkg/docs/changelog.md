@@ -50,6 +50,14 @@ code change to unlock.
 ## [Unreleased]
 ### Fixed
 
+- **cli:** Stop `pipeline trigger` from hanging when the controller dies
+  mid-run. The log-follow loop discarded every failed status read and polled
+  again forever, so a controller that went away during a follow left the
+  command waiting indefinitely instead of reaching its existing
+  unknown-outcome exit (3). The follow now gives up after the run's status has
+  been unreadable for 60 seconds and reports the transport error; any
+  successful poll in between resets the clock, so a replica rolling out is
+  still ridden through.
 - **orchestrator:** Make local and cluster argument semantics agree. A run row
   records only the arguments the operator passed; the `defaults.args` and
   pipeline `args:` layers are re-read from the checkout that executes, so a

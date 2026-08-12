@@ -369,14 +369,33 @@ func writeLogsTextRemote(ctx context.Context, logc storage.LogStore, runID strin
 	return nil
 }
 
+// remoteFollowFailureBudget bounds how long the follow loop keeps
+// polling a controller that answers nothing but errors. A run's status
+// read failing once is a blip -- a proxy hiccup, a replica rolling out
+// -- and the loop is right to keep waiting through it, which is why a
+// single success resets the clock. A controller that has failed every
+// status read for this long is not a blip, and continuing to poll it
+// turns "the controller died" into a `pipeline trigger` that hangs
+// until someone notices, instead of the exit-3 unknown-outcome answer
+// the CLI already knows how to give.
+//
+// A variable, not a constant, only so the tests can shorten it.
+var remoteFollowFailureBudget = 60 * time.Second
+
 // followLogsRemote tails live logs by polling ListNodes and spawning
 // per-node SSE goroutines. Exits when run is terminal (with a short
-// drain) or ctx cancels.
+// drain), when ctx cancels, or when the run's status has been
+// unreadable for [remoteFollowFailureBudget].
 //
 // A nil return means "the stream ended", never "the run succeeded":
 // `jobs logs -f` is a viewer and does not carry the run's outcome.
 // Callers that must exit on the run's outcome (`pipeline trigger`)
 // read it afterwards with [RemoteRunOutcome].
+//
+// A non-nil return is the transport failure that ended the follow, and
+// is likewise not a verdict on the run: [remoteFollowExit] still reads
+// the outcome afterwards and only reports "unknown" (exit 3) when that
+// read fails too.
 func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.LogStore,
 	runID, nodeFilter string, out io.Writer,
 ) error {
@@ -398,10 +417,17 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 
 	terminal := make(chan struct{})
 
+	// Written by the poll goroutine before it closes terminal, read
+	// only after that close: the channel carries the happens-before.
+	var followErr error
+
 	go func() {
 		defer close(terminal)
 		ticker := time.NewTicker(300 * time.Millisecond)
 		defer ticker.Stop()
+		// failingSince is when the current unbroken run of failed status
+		// reads began; zero while the last read succeeded.
+		var failingSince time.Time
 		for {
 			select {
 			case <-runCtx.Done():
@@ -424,7 +450,26 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 					}
 				}
 				run, err := ctrl.GetRun(runCtx, runID)
-				if err == nil && isTerminalStatus(run.Status) {
+				if err == nil {
+					failingSince = time.Time{}
+					if isTerminalStatus(run.Status) {
+						return
+					}
+					continue
+				}
+				// A cancelled context fails the read too; that is the
+				// caller leaving, not the controller dying.
+				if runCtx.Err() != nil {
+					return
+				}
+				now := time.Now()
+				if failingSince.IsZero() {
+					failingSince = now
+					continue
+				}
+				if now.Sub(failingSince) >= remoteFollowFailureBudget {
+					followErr = fmt.Errorf("run %s: controller status unreadable for %s: %w",
+						runID, now.Sub(failingSince).Round(time.Second), err)
 					return
 				}
 			}
@@ -438,7 +483,7 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 	}
 	cancel()
 	wg.Wait()
-	return nil
+	return followErr
 }
 
 // streamNode reads one node's SSE stream, reconnecting on errors.
