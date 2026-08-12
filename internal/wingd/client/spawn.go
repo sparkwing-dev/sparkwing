@@ -19,16 +19,25 @@ const daemonLogTailLines = 8
 // bound. One rotation keeps the previous run's tail for a post-mortem.
 const daemonLogCapBytes = 1 << 20
 
-// defaultSpawn re-execs this binary as a detached `sparkwing wingd supervise`
-// for home. The daemon's stdout and stderr go to a log file beside its
-// socket. Racing spawns are safe: the daemon's flock election lets only
-// one win, and the losers exit cleanly.
+// defaultSpawn re-execs this binary as a detached `wingd run` for home.
+// The daemon's stdout and stderr go to a log file beside its socket.
+// Racing spawns are safe: the daemon's flock election lets only one win,
+// and the losers exit cleanly.
+//
+// The verb must stay `run`, not `supervise`, because this binary is
+// frequently a compiled pipeline, and pipeline binaries dispatch wingd
+// verbs through orchestrator.RunWingd, which serves only `run`. The
+// supervise verb exists only in the sparkwing CLI (cmd/sparkwing), so
+// spawning it from a pipeline binary fails the exec and every local run
+// without an already-live daemon reports admission unreachable. Routing
+// spawns through the supervisor belongs to the daemon-hosting work that
+// moves spawning into installed binaries.
 func defaultSpawn(home, version string) error {
 	self, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("locate own binary: %w", err)
 	}
-	args := []string{"wingd", "supervise"}
+	args := []string{"wingd", "run"}
 	if home != "" {
 		args = append(args, "--home", home)
 	}
