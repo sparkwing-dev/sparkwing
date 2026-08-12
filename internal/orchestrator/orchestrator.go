@@ -1047,6 +1047,16 @@ func buildRunInvocation(opts Options, runID string, secretArgs []string) map[str
 	// every read path uses to redact at render time. Written whenever
 	// the pipeline declares any secret input, even if this run supplied
 	// none of them, so a row's classification is unambiguous.
+	//
+	// CreateRun's pending upsert replaces invocation_json wholesale, so
+	// this is authoritative over any classification a retry or replay
+	// inherited onto the pre-allocated row. That cuts both ways: a
+	// worker whose registration of this pipeline has dropped the
+	// `secret:"true"` tag erases the inherited classification and the
+	// row starts rendering in the clear. Accepted rather than merged,
+	// because a merge would let a stale worker pin a classification the
+	// pipeline no longer declares; the registration that actually ran
+	// the pipeline is the one that knows what its inputs are.
 	if len(secretArgs) > 0 {
 		inv[store.InvocationSecretArgsKey] = secretArgs
 	}

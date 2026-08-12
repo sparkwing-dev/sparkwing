@@ -165,6 +165,7 @@ const FailureRunnerLeaseExpired = "runner_lease_expired"
 const FailureTimeout = "timeout"
 const FailureUnknown = ""
 const FailureVerify = "verify"
+const IncludeSecretValues = "secret_values"
 func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
 const InvocationSecretArgsKey = "secret_args"
 func IsProtocolErr(err error) bool

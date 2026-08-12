@@ -926,6 +926,25 @@ Limits worth knowing:
   not the value. Pass the same value to a non-secret argument as well
   and it is masked in logs -- where masking is value-anchored -- but
   shown under that other argument's name.
+- `inputs_hash` is computed over the plaintext arguments and is shown
+  unredacted. For a low-entropy secret it is a brute-force oracle to
+  anyone who can read the run, so a receipt for a run with secret
+  arguments is not safe to hand to a party you would not give the
+  secret to.
+- Audit events are masked when they are written, not when they are
+  read. Events recorded before this behavior existed, and any future
+  event type that carries arguments without going through the masker,
+  are served as-is by `GET /api/v1/runs/{id}/events` and the dashboard
+  SSE stream.
+- Dispatch envelopes are masked only when a masker is present on the
+  context. A dispatch written outside a run's execution context is
+  stored as-is.
+
+Cluster executors are the one caller that needs the real values: a pod
+fetches the arguments it runs with from `GET /api/v1/runs/{id}`. They
+pass `?include=secret_values`, which the controller honors only for
+tokens carrying `nodes.claim` or `admin`. A token with just `runs.read`
+gets the redacted view whether or not it asks.
 
 Supported field types: `string`, `bool`, `int`, `int64`, `float64`,
 `time.Duration`, `[]string` (comma-separated on the wire), and

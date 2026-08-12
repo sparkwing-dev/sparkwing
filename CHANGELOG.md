@@ -64,16 +64,25 @@ code change to unlock.
   Runs started before this release carry no such record and render unchanged.
   Redaction is applied on read: the run row, its backups, and `state.ndjson`
   dumps still hold the plaintext, so keep treating the state database as
-  secret-bearing.
-  Three surfaces are deliberately not covered. Trigger rows carry no
-  classification and the dispatch path serves them to runners verbatim, so
+  secret-bearing. In a mixed-version fleet an older CLI or controller reading
+  the same database still renders those arguments in full and still computes
+  the pre-change `receipt_sha`, so upgrade every reader before relying on this.
+  Deliberately not covered. Trigger rows carry no classification and the
+  dispatch path serves them to runners verbatim, so
   `sparkwing runs triggers get|list` and `GET /api/v1/triggers` still show
-  argument values. A run pre-allocated by a fresh trigger is listable in `pending` before
-  a worker starts it, and the controller holds no pipeline schema to classify it
-  from, so it is unredacted for that window; retries and replays do inherit
-  their source's classification and are covered throughout. And redaction of the
-  reproducer is anchored on the argument name, so a secret value also passed to
-  a non-secret argument is masked in logs but shown under that other name.
+  argument values. A run pre-allocated by a fresh trigger is listable in
+  `pending` before a worker starts it, and the controller holds no pipeline
+  schema to classify it from, so it is unredacted for that window -- which
+  includes a child retry spawned through a trigger's `retry_of`; only
+  `POST /api/v1/runs/{id}/retry` and replay inherit their source's
+  classification directly. And redaction of the reproducer is anchored on the
+  argument name, so a secret value also passed to a non-secret argument is
+  masked in logs but shown under that other name.
+- **controller:** `GET /api/v1/runs/{id}` accepts `?include=secret_values`,
+  which returns a run's real argument values instead of the redacted ones. It
+  is honored only for tokens carrying `nodes.claim` or `admin`, because cluster
+  executors fetch the arguments they run with from this endpoint; every other
+  caller, the dashboard included, keeps getting the redacted view.
 
 ## [v0.25.0] - 2026-08-11
 ### Added
