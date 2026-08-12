@@ -55,7 +55,25 @@ code change to unlock.
   result reports observed capacity separately from removed entries; admission
   callers remeasure the filesystem after every attempt.
 
+### Changed
+
+- **cache:** `/archive`, `/file`, `/tree-hash`, `/branch-contains`, and
+  `/sync/negotiate` no longer run a synchronous `git fetch` on every request.
+  A successful fetch keeps a repo fresh for 15s (`--fetch-fresh-window` /
+  `FETCH_FRESH_WINDOW`), which collapses a webhook burst from one upstream
+  fetch per request to one fetch; the background loop still bounds staleness.
+  `POST /git/refresh` is exempt and always fetches, so the push-then-trigger
+  path is unchanged.
+
 ### Fixed
+
+- **cache:** A persistently failing mirror fetch no longer re-downloads the
+  entire repository on every `/archive` request. Recovery reclones are limited
+  to one per hour per repo (`--reclone-cooldown` / `RECLONE_COOLDOWN`); inside
+  the cooldown the request fails with the underlying git error and the
+  operator fix. Reclones log under a `recovery reclone:` prefix, increment the
+  new `sparkwing.gitcache.recovery_reclones` metric, and more than one in 24h
+  is reported by `GET /health`.
 
 - **wingd:** Supervised admission daemons idle out again. Since v0.28.0 the
   external supervisor's health probe opened a working connection every two
