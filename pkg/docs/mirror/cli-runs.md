@@ -18,6 +18,8 @@ prune) require a profile; 'jobs logs' supports both.
 
 ### Subcommands
 
+- `submit` -- Queue a local run and return its id immediately; execution outlives your terminal
+- `consumer` -- Inspect or control the resident process that executes submitted runs
 - `list` -- List recent runs with filters (pipeline, status, branch, sha, search, etc.)
 - `status` -- Show a single run's status (with per-step + approval state)
 - `summary` -- Aggregated work view: groups, work items, modifiers, annotations
@@ -248,6 +250,102 @@ sparkwing runs cancel --run run-... --profile prod
 
 # Cancel every running prod run
 sparkwing runs list --status running --profile prod -q | sparkwing runs cancel --run - --profile prod
+```
+
+## `sparkwing runs consumer`
+
+Inspect or control the process that executes submitted runs
+
+One consumer process per sparkwing home claims queued triggers
+and executes them. 'sparkwing runs submit' starts one when none
+is running and the consumer exits after a quiet window, so these
+verbs are for inspection and deliberate control rather than
+routine use.
+
+Exactly one consumer serves a home at a time, enforced by a file
+lock rather than a PID check -- a consumer killed with SIGKILL
+releases it immediately, so there is no stale state to clear. A
+running dashboard consumes the same queue; whichever holds the
+lock does the work and the other stands down, so a run is never
+dispatched twice.
+
+Stopping a consumer does not cancel queued runs. They stay
+queued and execute when a consumer comes back.
+
+### Subcommands
+
+- `start` -- Start a consumer for this home if none is running
+- `status` -- Report whether a consumer is resident (exit 1 when not)
+- `stop` -- Stop the resident consumer; queued runs stay queued
+
+## `sparkwing runs consumer start`
+
+Start a consumer for this home if none is running
+
+Starts the resident trigger consumer and waits until it owns the
+home's queue. A no-op when one is already running.
+
+Rarely needed by hand: 'sparkwing runs submit' does this before
+it acknowledges a run.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--home PATH` | Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing) |
+| `--idle DUR` | Exit after this long with no work (default 5m) |
+
+### Examples
+
+```sh
+# Start one for the default home
+sparkwing runs consumer start
+
+# Keep one resident for an hour
+sparkwing runs consumer start --idle 1h
+```
+
+## `sparkwing runs consumer status`
+
+Report whether a consumer is resident
+
+Prints the resident consumer's pid, home, and log path. Exits 1
+when no consumer is running, so it composes in shell conditions.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--home PATH` | Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing) |
+
+### Examples
+
+```sh
+# Check for a resident consumer
+sparkwing runs consumer status
+```
+
+## `sparkwing runs consumer stop`
+
+Stop the resident consumer
+
+Signals the resident consumer to drain and exit. Queued runs are
+not cancelled -- they stay queued and execute when a consumer
+comes back, which the next 'sparkwing runs submit' arranges.
+
+To cancel a queued run instead, use 'sparkwing runs cancel'.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--home PATH` | Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing) |
+
+### Examples
+
+```sh
+# Stop the resident consumer
+sparkwing runs consumer stop
 ```
 
 ## `sparkwing runs errors`
@@ -785,6 +883,90 @@ sparkwing runs status --run run-... --steps
 
 # Check a prod run
 sparkwing runs status --run run-... --profile prod
+```
+
+## `sparkwing runs submit`
+
+Queue a local run and return its id immediately
+
+Submits PIPELINE for local execution and returns as soon as the
+run is durable. Unlike 'sparkwing run', which executes in your
+terminal and dies with it, a submitted run is owned by a resident
+consumer process: close the terminal, drop the ssh session, log
+out -- the run keeps going.
+
+The acknowledgment is a run id and the directory its logs land
+in. Address the run by that id afterwards:
+
+  sparkwing runs status --run RUN_ID
+  sparkwing runs logs   --run RUN_ID --follow
+  sparkwing runs cancel --run RUN_ID
+
+Everything after PIPELINE is passed to the pipeline as arguments, so
+this command's own flags go BEFORE the pipeline name:
+
+  sparkwing runs submit --idempotency-key k deploy --env staging
+
+A submit flag typed after the pipeline name is refused rather than
+quietly handed to the pipeline. If a pipeline declares a flag by the
+same name, separate the two with '--':
+
+  sparkwing runs submit deploy -- --request-id its-own
+
+Flags that a detached run cannot honor (--sw-index, --sw-ref,
+--sw-dry-run, --sw-only, --profile, and the other run-shaping
+--sw- flags) are refused with the reason rather than ignored;
+run those in the foreground with 'sparkwing run'.
+
+Resolution order for PIPELINE: the checkout you are standing in
+(or -C PATH) first, then the repo registry. The chosen checkout
+is recorded on the run, so the consumer executes the tree you
+submitted from even when another registered checkout declares the
+same pipeline name.
+
+Deduplication is opt-in via --idempotency-key. A second
+submission carrying a key an earlier one used returns the
+original run id, marked 'already submitted', and creates
+nothing -- which is what makes a retry after a dropped connection
+safe. --request-id is a separate, tracing-only field: it is
+recorded on the run and never affects deduplication.
+
+A consumer is started automatically if none is running, and exits
+on its own after five idle minutes. See 'sparkwing runs consumer'.
+
+### Arguments
+
+- `pipeline` (required) -- Pipeline to run (see `sparkwing pipeline list`)
+- `[args...]` (optional) -- Arguments passed through to the pipeline
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--idempotency-key KEY` | Deduplication token; a repeat submission with this key returns the original run |
+| `--request-id ID` | Tracing identifier recorded on the run; never affects deduplication |
+| `-C, --cd PATH` | Resolve the pipeline from this directory instead of the current one |
+| `-o, --output FORMAT` | Output format: pretty\|json\|plain |
+| `--home PATH` | Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing) |
+| `--consumer-idle DUR` | How long the resident consumer stays alive with no work (default 5m) |
+
+### Examples
+
+```sh
+# Submit a run and keep the id
+sparkwing runs submit nightly-report
+
+# Submit with pipeline arguments
+sparkwing runs submit deploy --env staging
+
+# Capture the id for scripting
+RUN=$(sparkwing runs submit -o plain build)
+
+# Make a retry safe to repeat
+sparkwing runs submit --idempotency-key deploy-2026-08-11-a deploy
+
+# Submit from another checkout
+sparkwing runs submit -C ~/code/other-project lint
 ```
 
 ## `sparkwing runs summary`

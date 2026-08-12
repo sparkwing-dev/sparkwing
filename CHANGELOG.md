@@ -48,6 +48,54 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **cli:** `sparkwing runs submit <pipeline>` queues a local run and returns its
+  id and log directory immediately, with execution owned by the machine rather
+  than the calling terminal. Closing the terminal, dropping an ssh session, or
+  killing the submitting process no longer ends the run. The acknowledgment
+  comes after the trigger and its pending run row are durable and after a
+  resident consumer has taken ownership of the queue, so a printed run id always
+  names a run that is recoverable or terminal -- never one that quietly never
+  started. `log_path` follows the `run_start` rule: present only when the
+  directory exists. `-o json` emits `{run_id, log_path, ...}`; `-o plain` emits
+  the bare id.
+
+  Repeat submissions deduplicate through `--idempotency-key`: a second
+  submission carrying a key an earlier one used returns the original run id,
+  marked `already submitted`, and creates nothing. The runs store enforces it
+  with a unique constraint, so two callers racing with one key still produce one
+  run. `--request-id` is a separate tracing field recorded on the run that never
+  affects deduplication.
+
+  Flags a detached run cannot honor -- `--sw-index`, `--sw-ref`, `--sw-dry-run`,
+  the other run-shaping `--sw-` flags, and `--profile` -- are refused with the
+  reason rather than silently ignored.
+- **cli:** `sparkwing runs consumer {start,status,stop}` inspects and controls
+  the resident process that executes submitted runs. One consumer serves a
+  sparkwing home at a time, elected by a file lock rather than a PID check, so a
+  consumer killed with `kill -9` leaves no stale state; it exits on its own after
+  five idle minutes. A running dashboard consumes the same queue and stands down
+  when a resident consumer holds the lock, so a run is never dispatched twice.
+  Work queued while nothing is resident runs when a consumer returns, and a claim
+  whose consumer died mid-dispatch is swept back onto the queue once its lease
+  lapses -- unless the run already ended, in which case the claim is closed out
+  instead of re-executed.
+- **cli:** `sparkwing runs cancel --run <id>` now cancels a submitted run that no
+  consumer has claimed, as a store transaction requiring neither a dashboard nor
+  a profile. Cancellation names one run id and cannot reach a resubmission, which
+  is a different run with a different id.
+
+### Changed
+
+- **store (Breaking):** The runs-store schema advances from version 12 to 13,
+  adding `triggers.idempotency_key` and the partial unique index that makes
+  submission deduplication a database guarantee rather than a race-prone
+  check-then-write. The upgrade is additive and applies on open; every existing
+  trigger carries the empty default, which the partial index excludes. As with
+  every schema advance, a binary older than this release refuses to open a
+  database that has been migrated, so upgrade every sparkwing sharing a runs
+  store together.
 
 ## [v0.27.0] - 2026-08-12
 ### Security
