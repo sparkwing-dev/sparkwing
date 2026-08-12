@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestWindowsReplacementPreservesRunningImageBeforeInstall(t *testing.T) {
+func TestWindowsReplacementUsesOneAtomicOperation(t *testing.T) {
 	t.Parallel()
 
 	type call struct {
@@ -22,40 +22,30 @@ func TestWindowsReplacementPreservesRunningImageBeforeInstall(t *testing.T) {
 	if err := replaceWindowsRunningImageWith("stage", "sparkwing.exe", move, func(string) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	want := []call{
-		{source: "sparkwing.exe", target: "sparkwing.exe.old", flags: windowsMoveWriteThrough},
-		{source: "stage", target: "sparkwing.exe", flags: windowsMoveWriteThrough},
-	}
+	want := []call{{source: "stage", target: "sparkwing.exe", flags: windowsMoveReplaceExisting | windowsMoveWriteThrough}}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("move calls = %#v, want %#v", calls, want)
 	}
 }
 
-func TestWindowsReplacementRestoresPreservedImageWhenInstallFails(t *testing.T) {
+func TestWindowsReplacementFailsWithoutRenameAsideFallback(t *testing.T) {
 	t.Parallel()
 
 	var calls [][2]string
 	move := func(source, target string, _ uint32) error {
 		calls = append(calls, [2]string{source, target})
-		if source == "stage" {
-			return errors.New("sharing violation")
-		}
-		return nil
+		return errors.New("sharing violation")
 	}
 	if err := replaceWindowsRunningImageWith("stage", "sparkwing.exe", move, func(string) error { return nil }); err == nil {
 		t.Fatal("replaceWindowsRunningImageWith() succeeded")
 	}
-	want := [][2]string{
-		{"sparkwing.exe", "sparkwing.exe.old"},
-		{"stage", "sparkwing.exe"},
-		{"sparkwing.exe.old", "sparkwing.exe"},
-	}
+	want := [][2]string{{"stage", "sparkwing.exe"}}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("move calls = %#v, want %#v", calls, want)
 	}
 }
 
-func TestWindowsRollbackRestoresRunningImageAfterInstalledVerificationFails(t *testing.T) {
+func TestWindowsRollbackUsesOneAtomicOperation(t *testing.T) {
 	t.Parallel()
 
 	var calls [][2]string
@@ -63,19 +53,11 @@ func TestWindowsRollbackRestoresRunningImageAfterInstalledVerificationFails(t *t
 		calls = append(calls, [2]string{source, target})
 		return nil
 	}
-	remove := func(path string) error {
-		if path == "sparkwing.exe.old" {
-			return errors.New("running image is still mapped")
-		}
-		return nil
-	}
+	remove := func(string) error { return nil }
 	if err := restoreWindowsRunningImageWith("rollback", "sparkwing.exe", move, remove); err != nil {
 		t.Fatal(err)
 	}
-	want := [][2]string{
-		{"sparkwing.exe", "sparkwing.exe.failed"},
-		{"sparkwing.exe.old", "sparkwing.exe"},
-	}
+	want := [][2]string{{"rollback", "sparkwing.exe"}}
 	if !reflect.DeepEqual(calls, want) {
 		t.Fatalf("move calls = %#v, want %#v", calls, want)
 	}

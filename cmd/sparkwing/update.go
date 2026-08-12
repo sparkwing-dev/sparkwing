@@ -325,26 +325,7 @@ func downloadAndInstall(version, currentBin string) (installedRelease, error) {
 	return installedRelease{path: currentBin, digest: verified.digest}, nil
 }
 
-// replaceRunningBinary atomically swaps in the new binary. Windows
-// uses a rename-aside dance: cleanupStaleUpdate deletes the .old at
-// next launch (the running .exe can't be deleted while executing).
-func replaceRunningBinary(stagedBin, currentBin string) error {
-	if runtime.GOOS != "windows" {
-		return os.Rename(stagedBin, currentBin)
-	}
-	oldBin := currentBin + ".old"
-	_ = os.Remove(oldBin)
-	if err := os.Rename(currentBin, oldBin); err != nil {
-		return fmt.Errorf("move running binary aside: %w", err)
-	}
-	if err := os.Rename(stagedBin, currentBin); err != nil {
-		_ = os.Rename(oldBin, currentBin)
-		return fmt.Errorf("install new binary: %w", err)
-	}
-	return nil
-}
-
-// cleanupStaleUpdate removes <self>.old left by a Windows self-update.
+// cleanupStaleUpdate removes residue left by pre-integrity Windows updaters.
 func cleanupStaleUpdate() {
 	if runtime.GOOS != "windows" {
 		return
