@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -50,7 +51,7 @@ func TestSchemaV13_UpgradeAddsIdempotencyKeyAndItsConstraint(t *testing.T) {
 	if !errors.Is(err, store.ErrDuplicateIdempotencyKey) {
 		t.Fatalf("second insert under one key: err=%v, want ErrDuplicateIdempotencyKey", err)
 	}
-	got, err := up.FindTriggerByIdempotencyKey(ctx, "k")
+	got, err := up.FindTriggerByIdempotencyKey(ctx, "deploy", "k")
 	if err != nil {
 		t.Fatalf("FindTriggerByIdempotencyKey: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestFindTriggerByIdempotencyKey_EmptyKeyIsNotAMatch(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.FindTriggerByIdempotencyKey(ctx, ""); !errors.Is(err, store.ErrNotFound) {
+	if _, err := s.FindTriggerByIdempotencyKey(ctx, "build", ""); !errors.Is(err, store.ErrNotFound) {
 		t.Fatalf("empty key lookup: err=%v, want ErrNotFound", err)
 	}
 }
@@ -136,7 +137,7 @@ func TestCreateTrigger_ConcurrentSubmissionsOfOneKeyProduceOneRun(t *testing.T) 
 	if duplicates != racers-1 {
 		t.Fatalf("losers reported %d duplicates, want %d", duplicates, racers-1)
 	}
-	resolved, err := s.FindTriggerByIdempotencyKey(ctx, "shared")
+	resolved, err := s.FindTriggerByIdempotencyKey(ctx, "deploy", "shared")
 	if err != nil {
 		t.Fatalf("FindTriggerByIdempotencyKey: %v", err)
 	}
@@ -289,5 +290,255 @@ func seedSubmittedRun(t *testing.T, s *store.Store, id, pipeline string) {
 		TriggerSource: "runs-submit", CreatedAt: now, StartedAt: now,
 	}); err != nil {
 		t.Fatalf("seed run %s: %v", id, err)
+	}
+}
+
+// TestSchemaV13_StampsVersionAndCreatesTheNamedIndex checks the schema
+// by name rather than by inference. A test that only observes "the
+// second insert failed" would still pass if the constraint were the
+// wrong shape -- scoped to the wrong columns, or created on a different
+// table -- so the version and the index are asserted directly.
+func TestSchemaV13_StampsVersionAndCreatesTheNamedIndex(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+
+	got, err := s.CurrentSchemaVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 13 || got != store.ExpectedSchemaVersion() {
+		t.Fatalf("schema version = %d, want 13 (= ExpectedSchemaVersion %d)",
+			got, store.ExpectedSchemaVersion())
+	}
+
+	var sqlText string
+	if err := s.DB().QueryRowContext(ctx,
+		`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`,
+		store.TriggerIdempotencyIndexName).Scan(&sqlText); err != nil {
+		t.Fatalf("index %s absent from sqlite_master: %v", store.TriggerIdempotencyIndexName, err)
+	}
+	for _, want := range []string{"UNIQUE", "triggers", "pipeline", "idempotency_key", "WHERE"} {
+		if !strings.Contains(sqlText, want) {
+			t.Errorf("index definition missing %q: %s", want, sqlText)
+		}
+	}
+}
+
+// TestSchemaV13_PostgresCarriesTheSameConstraint runs the same check on
+// Postgres, where the partial unique index is the identical DDL but the
+// catalog it lands in is not.
+func TestSchemaV13_PostgresCarriesTheSameConstraint(t *testing.T) {
+	s := openPGTestStore(t)
+	ctx := context.Background()
+
+	got, err := s.CurrentSchemaVersion(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != store.ExpectedSchemaVersion() {
+		t.Fatalf("postgres schema version = %d, want %d", got, store.ExpectedSchemaVersion())
+	}
+	var n int
+	if err := s.DB().QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM pg_indexes WHERE indexname = $1`,
+		store.TriggerIdempotencyIndexName).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("postgres index %s present %d times, want 1", store.TriggerIdempotencyIndexName, n)
+	}
+
+	now := time.Now()
+	if err := s.CreateTrigger(ctx, store.Trigger{
+		ID: "pg-first", Pipeline: "deploy", CreatedAt: now, IdempotencyKey: "k",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTrigger(ctx, store.Trigger{
+		ID: "pg-dup", Pipeline: "deploy", CreatedAt: now, IdempotencyKey: "k",
+	}); !errors.Is(err, store.ErrDuplicateIdempotencyKey) {
+		t.Fatalf("postgres duplicate insert: err=%v, want ErrDuplicateIdempotencyKey", err)
+	}
+	// The scope is the pipeline, on this dialect too.
+	if err := s.CreateTrigger(ctx, store.Trigger{
+		ID: "pg-other", Pipeline: "other", CreatedAt: now, IdempotencyKey: "k",
+	}); err != nil {
+		t.Fatalf("postgres rejected one key across two pipelines: %v", err)
+	}
+}
+
+// TestIdempotencyKeysAreScopedToTheirPipeline is the fix for a key
+// namespace that was global. Submitting `beta` with a key `alpha`
+// already used returned ALPHA's run with a success exit, so beta never
+// ran and the caller was told everything was fine.
+func TestIdempotencyKeysAreScopedToTheirPipeline(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	now := time.Now()
+
+	if err := s.CreateTrigger(ctx, store.Trigger{
+		ID: "run-alpha", Pipeline: "alpha", CreatedAt: now, IdempotencyKey: "nightly",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTrigger(ctx, store.Trigger{
+		ID: "run-beta", Pipeline: "beta", CreatedAt: now, IdempotencyKey: "nightly",
+	}); err != nil {
+		t.Fatalf("one key used by two pipelines was rejected: %v", err)
+	}
+
+	alpha, err := s.FindTriggerByIdempotencyKey(ctx, "alpha", "nightly")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alpha.ID != "run-alpha" {
+		t.Fatalf("alpha's key resolved to %q", alpha.ID)
+	}
+	beta, err := s.FindTriggerByIdempotencyKey(ctx, "beta", "nightly")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if beta.ID != "run-beta" {
+		t.Fatalf("beta's key resolved to %q, want its own run", beta.ID)
+	}
+	// Same pipeline, same key: still one run.
+	if err := s.CreateTrigger(ctx, store.Trigger{
+		ID: "run-alpha-2", Pipeline: "alpha", CreatedAt: now, IdempotencyKey: "nightly",
+	}); !errors.Is(err, store.ErrDuplicateIdempotencyKey) {
+		t.Fatalf("duplicate within one pipeline: err=%v, want ErrDuplicateIdempotencyKey", err)
+	}
+}
+
+// TestClaimGeneration_AdvancesOnEveryClaim underpins the fence that
+// stops a superseded dispatch from writing.
+func TestClaimGeneration_AdvancesOnEveryClaim(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	seedSubmittedRun(t, s, "run-gen", "deploy")
+
+	first, err := s.ClaimNextTrigger(ctx, time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.ClaimSeq != 1 {
+		t.Fatalf("first claim generation = %d, want 1", first.ClaimSeq)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if _, err := s.RequeueUnstartedClaim(ctx, "run-gen"); err != nil {
+		t.Fatal(err)
+	}
+	second, err := s.ClaimNextTrigger(ctx, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.ClaimSeq != 2 {
+		t.Fatalf("second claim generation = %d, want 2", second.ClaimSeq)
+	}
+}
+
+// TestFinishAtGeneration_RefusesASupersededDispatch is the fence itself.
+// Without it, a dispatch whose claim lapsed and was re-taken could still
+// finish and stamp its own outcome over the run the new claim is
+// producing -- two writers on one run row, last write wins.
+func TestFinishAtGeneration_RefusesASupersededDispatch(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	seedSubmittedRun(t, s, "run-fence", "deploy")
+
+	stale, err := s.ClaimNextTrigger(ctx, time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if _, err := s.RequeueUnstartedClaim(ctx, "run-fence"); err != nil {
+		t.Fatal(err)
+	}
+	fresh, err := s.ClaimNextTrigger(ctx, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ok, err := s.FinishRunAtGeneration(ctx, "run-fence", stale.ClaimSeq, "failed", "stale writer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("a superseded dispatch was allowed to write the run's outcome")
+	}
+	done, err := s.FinishTriggerAtGeneration(ctx, "run-fence", stale.ClaimSeq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if done {
+		t.Fatal("a superseded dispatch closed out a claim it no longer held")
+	}
+	run, err := s.GetRun(ctx, "run-fence")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "pending" {
+		t.Fatalf("run status = %q; the stale writer changed it", run.Status)
+	}
+
+	// The current claim still writes normally.
+	ok, err = s.FinishRunAtGeneration(ctx, "run-fence", fresh.ClaimSeq, "success", "")
+	if err != nil || !ok {
+		t.Fatalf("current claim could not write its outcome: ok=%v err=%v", ok, err)
+	}
+}
+
+// TestRequeueUnstartedClaim_LeavesARunningRunAlone is the blocker fix at
+// the store: a lapsed lease is not evidence that a started run is dead,
+// because the lease is wall-clock and the heartbeat defending it is
+// monotonic. Requeueing a `running` row puts a second copy of live work
+// on the queue.
+func TestRequeueUnstartedClaim_LeavesARunningRunAlone(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	seedSubmittedRun(t, s, "run-live", "deploy")
+	if _, err := s.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateRun(ctx, store.Run{
+		ID: "run-live", Pipeline: "deploy", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	requeued, err := s.RequeueUnstartedClaim(ctx, "run-live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requeued {
+		t.Fatal("a running run was swept back onto the queue; it would execute twice")
+	}
+	if _, err := s.ClaimNextTrigger(ctx, time.Minute); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the running run became claimable again (err=%v)", err)
+	}
+}
+
+// TestRequeueUnstartedClaim_RecoversARunThatNeverStarted is the other
+// half: work whose consumer died before the run began must come back.
+func TestRequeueUnstartedClaim_RecoversARunThatNeverStarted(t *testing.T) {
+	s := newStoreT(t)
+	ctx := context.Background()
+	seedSubmittedRun(t, s, "run-neverstarted", "deploy")
+	if _, err := s.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
+		t.Fatal(err)
+	}
+
+	requeued, err := s.RequeueUnstartedClaim(ctx, "run-neverstarted")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !requeued {
+		t.Fatal("a run that never started was not recovered")
+	}
+	got, err := s.ClaimNextTrigger(ctx, time.Minute)
+	if err != nil {
+		t.Fatalf("recovered run is not claimable: %v", err)
+	}
+	if got.ID != "run-neverstarted" {
+		t.Fatalf("claimed %q", got.ID)
 	}
 }
