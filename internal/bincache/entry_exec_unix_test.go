@@ -58,7 +58,7 @@ func TestEntryExecHelper(t *testing.T) {
 	if mode == "term-delay" {
 		terminated := make(chan os.Signal, 1)
 		signal.Notify(terminated, syscall.SIGTERM)
-		_, _ = fmt.Fprintln(os.Stdout, "ready")
+		_, _ = fmt.Fprintln(os.Stdout, os.Getpid())
 		<-terminated
 		time.Sleep(200 * time.Millisecond)
 		return
@@ -124,9 +124,15 @@ func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	if line, err := bufio.NewReader(stdout).ReadString('\n'); err != nil || strings.TrimSpace(line) != "ready" {
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	if err != nil {
 		t.Fatalf("child readiness = %q, %v", line, err)
 	}
+	childPID, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil {
+		t.Fatalf("child pid = %q, %v", line, err)
+	}
+	cleanupProcess(t, childPID)
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
