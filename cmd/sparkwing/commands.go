@@ -187,6 +187,9 @@ func runCommands(args []string) error {
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
 
 	prefix := strings.TrimSpace(*pathPrefix)
+	if blankPathFilter(*pathPrefix, prefix) {
+		return unmatchedPathError(*pathPrefix, 0)
+	}
 	picked := []CommandJSON{}
 	hiddenMatches := 0
 	for _, c := range sorted {
@@ -259,9 +262,31 @@ func matchesCommandPath(path, prefix string) bool {
 	if prefix == "" {
 		return true
 	}
-	return strings.HasPrefix(path, prefix) ||
-		strings.HasPrefix(path, cmdSparkwing.Path+" "+prefix)
+	return hasPathComponentPrefix(path, prefix) ||
+		hasPathComponentPrefix(path, cmdSparkwing.Path+" "+prefix)
 }
+
+// hasPathComponentPrefix reports whether prefix names path or an
+// ancestor of it, matching whole space-separated components rather than
+// characters.
+//
+// A plain string prefix reads "--path run" as also selecting the whole
+// `runs` group -- 31 paths for a filter that named two -- and the
+// surplus is not obviously surplus, since every line of it starts with
+// the word that was typed. A subtree filter that quietly returns a
+// different subtree is worse than one that returns nothing, because
+// nothing is visible.
+func hasPathComponentPrefix(path, prefix string) bool {
+	return path == prefix || strings.HasPrefix(path, prefix+" ")
+}
+
+// blankPathFilter reports whether --path was given but names nothing. A
+// prefix that is only whitespace was still typed, so it is a filter that
+// selected nothing rather than an absent one; letting it fall through to
+// the empty prefix would answer a mistyped `--path " "` with the entire
+// CLI, which is the same silent wrong answer an unmatched prefix used to
+// give.
+func blankPathFilter(raw, trimmed string) bool { return raw != "" && trimmed == "" }
 
 // unmatchedPathError reports a --path that selected nothing. Exiting 0
 // with an empty listing -- or with the literal `null` that -o json used

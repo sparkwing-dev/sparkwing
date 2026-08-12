@@ -29,10 +29,19 @@ var wholeTreeGates = []struct {
 }
 
 // wholeTreeGateBudget is what the whole table is allowed to cost. The
-// gates it holds are the parallel sweeps, measured in hundredths of a
-// second; anything approaching a second means something in the table
-// started doing real work and belongs in the pipeline instead.
-const wholeTreeGateBudget = time.Second
+// gates it holds are the parallel sweeps, a fifth of a second between
+// them on an idle box.
+//
+// The ceiling is far above that measurement on purpose. This suite runs
+// inside `sparkwing run pre-commit`, alongside golangci-lint on two
+// modules, and a contended box has taken seven seconds for the same
+// work; a budget set near the idle number measures the machine's load
+// rather than this table and goes red for reasons no author can act on.
+// What it is for is the change that puts real work in here -- a gate
+// that shells out to the network or compiles something -- which misses
+// by an order of magnitude and trips this no matter what else the box
+// is doing.
+const wholeTreeGateBudget = 30 * time.Second
 
 // TestThisRepoSatisfiesItsOwnWholeTreeGates runs the whole-tree gates
 // against the real repository.

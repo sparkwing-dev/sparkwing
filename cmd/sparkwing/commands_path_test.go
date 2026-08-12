@@ -5,6 +5,8 @@ import (
 	"testing"
 )
 
+// Whole components only, either spelling: `run` names the run verb and
+// its subtree, never the separate runs group.
 func TestMatchesCommandPathAcceptsBothSpellingsOfAPrefix(t *testing.T) {
 	cases := []struct {
 		path   string
@@ -21,6 +23,13 @@ func TestMatchesCommandPathAcceptsBothSpellingsOfAPrefix(t *testing.T) {
 		{"sparkwing run", "runs", false},
 		{"sparkwing pipeline", "runs", false},
 		{"sparkwing pipeline", "sparkwing runs", false},
+		{"sparkwing run", "run", true},
+		{"sparkwing run config", "run", true},
+		{"sparkwing runs", "run", false},
+		{"sparkwing runs list", "run", false},
+		{"sparkwing runs", "sparkwing run", false},
+		{"sparkwing runs list", "runs lis", false},
+		{"sparkwing pipeline", "pipe", false},
 	}
 	for _, tc := range cases {
 		if got := matchesCommandPath(tc.path, tc.prefix); got != tc.want {
@@ -55,6 +64,40 @@ func TestCommandsRefusesAPathThatMatchesNothing(t *testing.T) {
 		if !strings.Contains(err.Error(), "nosuchsubtree") {
 			t.Fatalf("-o %s: error %q does not name the path", output, err)
 		}
+	}
+}
+
+// TestCommandsPathMatchesWholeComponentsOnly pins the boundary against
+// the live registry. `--path run` selecting the runs group as well
+// returned 31 paths for a filter that named two, and every surplus line
+// began with the word that was typed, so the wrong answer did not look
+// wrong.
+func TestCommandsPathMatchesWholeComponentsOnly(t *testing.T) {
+	selected := strings.Split(strings.TrimSpace(commandsOutput(t, "--path", "run", "-o", "plain")), "\n")
+	if len(selected) == 0 || selected[0] == "" {
+		t.Fatal("--path run selected nothing")
+	}
+	for _, path := range selected {
+		if strings.HasPrefix(path, "sparkwing runs") {
+			t.Fatalf("--path run selected %q from the separate runs group", path)
+		}
+	}
+	runs := commandsOutput(t, "--path", "runs", "-o", "plain")
+	if !strings.Contains(runs, "sparkwing runs list") {
+		t.Fatalf("--path runs stopped selecting its own subtree:\n%s", runs)
+	}
+}
+
+// TestCommandsRefusesAWhitespacePath keeps a filter that was typed from
+// being read as one that was not: `--path "  "` used to trim to the
+// empty prefix and answer with the entire CLI at exit 0.
+func TestCommandsRefusesAWhitespacePath(t *testing.T) {
+	err := runCommandsQuiet(t, "--path", "   ", "-o", "plain")
+	if err == nil {
+		t.Fatal("a whitespace --path returned no error")
+	}
+	if !strings.Contains(err.Error(), "matched no command") {
+		t.Fatalf("error %q does not report an unmatched filter", err)
 	}
 }
 
