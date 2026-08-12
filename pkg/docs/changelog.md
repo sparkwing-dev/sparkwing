@@ -105,13 +105,24 @@ code change to unlock.
 ### Changed
 
 - **store (Breaking):** The runs-store schema advances from version 12 to 13,
-  adding `triggers.idempotency_key` and the partial unique index that makes
-  submission deduplication a database guarantee rather than a race-prone
-  check-then-write. The upgrade is additive and applies on open; every existing
-  trigger carries the empty default, which the partial index excludes. As with
-  every schema advance, a binary older than this release refuses to open a
-  database that has been migrated, so upgrade every sparkwing sharing a runs
-  store together.
+  adding two columns to `triggers` and one index. `idempotency_key` carries a
+  caller's deduplication token, under a partial unique index on
+  `(pipeline, idempotency_key)` that skips the empty default -- so dedup is a
+  database guarantee rather than a race-prone check-then-write, and a key is
+  scoped to the pipeline that used it rather than to the whole store.
+  `claim_seq` counts how many times a trigger has been claimed, so a dispatch
+  whose lease lapsed and was re-taken cannot write an outcome over the run the
+  new claim is producing. The upgrade is additive and applies on open; every
+  existing trigger carries the empty key and generation zero. As with every
+  schema advance, a binary older than this release refuses to open a database
+  that has been migrated, so upgrade every sparkwing sharing a runs store
+  together.
+
+  Anyone who ran an interim build of this branch before the schema was
+  finalized has a version-13 database missing `claim_seq`, which fails
+  submission with `no such column: claim_seq`. That shape was never released;
+  delete the development `state.db` (`$SPARKWING_HOME/state.db`, default
+  `~/.sparkwing/state.db`) and let it be recreated.
 
 ## [v0.27.0] - 2026-08-12
 ### Security

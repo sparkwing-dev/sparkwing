@@ -338,14 +338,27 @@ func TestSchemaV13_PostgresCarriesTheSameConstraint(t *testing.T) {
 	if got != store.ExpectedSchemaVersion() {
 		t.Fatalf("postgres schema version = %d, want %d", got, store.ExpectedSchemaVersion())
 	}
-	var n int
+	// Scoped to this test's schema. pg_indexes spans the whole database,
+	// and these tests isolate by creating a schema per test against a
+	// shared database -- so an unqualified lookup counts every sibling
+	// schema's copy of the index and fails on any database where more
+	// than one has been created, including the admin open this harness
+	// performs before the per-test schema exists.
+	var indexDef string
 	if err := s.DB().QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM pg_indexes WHERE indexname = $1`,
-		store.TriggerIdempotencyIndexName).Scan(&n); err != nil {
-		t.Fatal(err)
+		`SELECT indexdef FROM pg_indexes
+		  WHERE indexname = $1 AND schemaname = current_schema()`,
+		store.TriggerIdempotencyIndexName).Scan(&indexDef); err != nil {
+		t.Fatalf("index %s absent from this schema's pg_indexes: %v",
+			store.TriggerIdempotencyIndexName, err)
 	}
-	if n != 1 {
-		t.Fatalf("postgres index %s present %d times, want 1", store.TriggerIdempotencyIndexName, n)
+	// Pin the shape, not merely the name, the way the SQLite assertion
+	// does: an index on the wrong columns would still be present under
+	// the right name.
+	for _, want := range []string{"UNIQUE", "triggers", "pipeline, idempotency_key", "WHERE"} {
+		if !strings.Contains(indexDef, want) {
+			t.Errorf("postgres index definition missing %q: %s", want, indexDef)
+		}
 	}
 
 	now := time.Now()

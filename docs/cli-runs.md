@@ -277,7 +277,9 @@ consumer re-executes it. To stop a run for good, cancel it.
 
 A consumer records the sparkwing version it was built from. A
 submission from a different build replaces it, so an upgrade takes
-effect instead of the first build serving the home forever.
+effect instead of the first build serving the home forever;
+replacing one interrupts whatever it was executing, and that run
+returns to the queue for the new consumer to re-execute.
 
 ### Subcommands
 

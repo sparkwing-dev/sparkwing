@@ -251,7 +251,10 @@ killed mid-dispatch stops having its claim renewed, and the next
 consumer sweeps the lapsed claim back onto the queue -- unless the run
 already reached a terminal status, in which case the claim is closed out
 rather than re-executed. Every acknowledged run ends up recoverable or
-terminal; none is lost, and none runs twice.
+terminal; none is lost, and none runs twice. A re-executed run is the
+same run, not a new one: it keeps the run id you were given along with
+its arguments, trigger, and submission time, and only its start time
+reflects the attempt that actually ran.
 
 Stopping a consumer never cancels queued runs. Use `runs cancel` for
 that.
@@ -266,7 +269,9 @@ sparkwing version it was built from, and a submission from a different
 build stops the old consumer and starts one from the new binary --
 otherwise a home with a steady queue would keep serving every run from
 the build that happened to start first, and an upgrade would never take
-effect.
+effect. Replacing a consumer interrupts whatever it was executing, on
+the same terms as stopping one: that run returns to the queue and the
+new consumer re-executes it from the start.
 
 ### Remote execution
 
