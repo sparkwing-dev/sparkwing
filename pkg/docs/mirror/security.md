@@ -47,8 +47,8 @@ authenticated secrets API; pipelines read them with `sparkwing.Secret`
 ## Release integrity
 
 GitHub Actions stores `SPARKWING_UPDATE_SIGNING_KEY` as a base64-encoded
-32-byte Ed25519 seed. Release jobs sign the final checksum manifest and
-every platform asset; the updater embeds only public keys. Rotate the key
+32-byte Ed25519 seed or its canonical 64-byte private key. Release jobs sign
+the final checksum manifest and every platform asset; the updater embeds only public keys. Rotate the key
 through three releases: add the replacement key to the updater trust set and
 ship that bridge release with the old signer; change the workflow secret to the
 replacement signer; remove the old key from the trust set after supported

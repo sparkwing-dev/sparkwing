@@ -36,14 +36,24 @@ func PublicKeys() ([]ed25519.PublicKey, error) {
 }
 
 func PrivateKey(encoded string) (ed25519.PrivateKey, error) {
-	seed, err := base64.StdEncoding.DecodeString(encoded)
+	key, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("decode release signing seed: %w", err)
 	}
-	if len(seed) != ed25519.SeedSize {
-		return nil, fmt.Errorf("release signing seed is %d bytes, want %d", len(seed), ed25519.SeedSize)
+	switch len(key) {
+	case ed25519.SeedSize:
+		return ed25519.NewKeyFromSeed(key), nil
+	case ed25519.PrivateKeySize:
+		privateKey := ed25519.PrivateKey(key)
+		seed := privateKey.Seed()
+		canonical := ed25519.NewKeyFromSeed(seed)
+		if !privateKey.Equal(canonical) {
+			return nil, errors.New("release signing private key is inconsistent with its seed")
+		}
+		return privateKey, nil
+	default:
+		return nil, fmt.Errorf("release signing key is %d bytes, want %d-byte seed or %d-byte private key", len(key), ed25519.SeedSize, ed25519.PrivateKeySize)
 	}
-	return ed25519.NewKeyFromSeed(seed), nil
 }
 
 func PublicKey(encoded string) (ed25519.PublicKey, error) {
