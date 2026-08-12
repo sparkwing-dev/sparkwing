@@ -134,6 +134,7 @@ func TestExecChildSupervisesSignalsBeforeStart(t *testing.T) {
 		"SPARKWING_ENTRY_EXEC_HELPER=start-race-wrapper",
 		"SPARKWING_ENTRY_SIGNAL_RECEIVED="+contained,
 	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Stdin = strings.NewReader("")
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
@@ -181,7 +182,7 @@ func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
 	}
 	t.Cleanup(func() {
 		if cmd.ProcessState == nil {
-			_ = cmd.Process.Kill()
+			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 			_ = cmd.Wait()
 		}
 	})
