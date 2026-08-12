@@ -155,6 +155,7 @@ func JobErrorsRemote(ctx context.Context, controllerURL, token, runID string, as
 	if err != nil {
 		return err
 	}
+	// JSON only; the unscanned zero value makes no claim either way.
 	var excerpts failureExcerptIndex
 	if asJSON {
 		excerpts = failureExcerptsFor(ctx, c, runID, failedNodeIDs(nodes))

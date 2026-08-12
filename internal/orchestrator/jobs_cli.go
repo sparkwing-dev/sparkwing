@@ -1401,7 +1401,9 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 
 	// Only the JSON shape carries excerpts, and only a run with a
 	// failure has any to fetch: the human output prints Error alone, so
-	// scanning the event stream for it would be pure cost.
+	// scanning the event stream for it would be pure cost. The unscanned
+	// zero value claims nothing either way, which is what the human path
+	// wants -- it renders no excerpt and no unavailability.
 	var excerpts failureExcerptIndex
 	if asJSON {
 		excerpts = failureExcerptsFor(ctx, st, runID, failedNodeIDs(nodes))

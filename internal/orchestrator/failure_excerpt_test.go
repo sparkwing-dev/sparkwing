@@ -212,6 +212,42 @@ func TestBoundedFailureHead_BoundsAndPreserves(t *testing.T) {
 	}
 }
 
+// Node ids are built from data (JobSpawnEach), so a long one must not
+// eat the whole headline budget and leave the exit code and command --
+// the part that says what actually failed -- on the floor.
+func TestBoundedFailureHead_LongNodeIDKeepsTheIdentifyingTail(t *testing.T) {
+	nodeID := "deploy-" + strings.Repeat("region-eu-west-1-", 13)
+	if len(nodeID) < 224 {
+		t.Fatalf("fixture node id is %d bytes, want >= 224", len(nodeID))
+	}
+	err := fmt.Errorf("%s: step %q: %w", nodeID, "apply", &sparkwing.ExecError{
+		Command:  "kubectl apply -f manifests/ --context prod",
+		Stderr:   "error: unable to recognize manifests/svc.yaml",
+		ExitCode: 1,
+	})
+
+	got := boundedFailureText(context.Background(), "run-1", nodeID, err)
+	head, _, _ := strings.Cut(got, "\n")
+
+	exitCodeKept := strings.Contains(head, "command failed (exit 1)")
+	cmdKept := strings.Contains(head, "kubectl apply")
+	if !exitCodeKept || !cmdKept {
+		t.Fatalf("headline dropped the identifying tail (exit=%v cmd=%v):\n%s", exitCodeKept, cmdKept, head)
+	}
+	if strings.Contains(head, nodeID) {
+		t.Fatalf("the long node id should be elided, not kept whole:\n%s", head)
+	}
+	if !strings.HasPrefix(head, "…: ") {
+		t.Fatalf("an elided headline should say so:\n%s", head)
+	}
+	if len(head) > failureHeadMaxBytes+len("…: ")+len(" … (command truncated)") {
+		t.Fatalf("headline is %d bytes, want the budget to hold", len(head))
+	}
+	if !strings.Contains(got, "unable to recognize manifests/svc.yaml") {
+		t.Fatalf("bounding the headline must not cost the output:\n%s", got)
+	}
+}
+
 // A plain error has no conclusion at the end: the message leads with
 // what failed, so the front is what must survive -- and nothing points
 // at a log that does not contain the message.
@@ -235,6 +271,23 @@ func TestBoundedFailureText_PlainErrorKeepsHead(t *testing.T) {
 	}
 	if n := strings.Count(got, "\n") + 1; n > failureExcerptMaxLines+2 {
 		t.Fatalf("plain error text is %d lines", n)
+	}
+}
+
+// A message that opens with a newline must still be cut at a line
+// boundary, not mid-line.
+func TestFailureMessageHead_LeadingNewlineStillCutsAtALine(t *testing.T) {
+	msg := "\n" + lines(6, "line %d "+strings.Repeat("x", 60))
+	got, truncated := failureMessageHead(msg, 100, 200)
+	if !truncated {
+		t.Fatal("expected the byte bound to bite")
+	}
+	if strings.HasPrefix(got, "\n") {
+		t.Fatalf("leading newline survived: %q", got)
+	}
+	last := got[strings.LastIndexByte(got, '\n')+1:]
+	if !strings.HasSuffix(last, strings.Repeat("x", 60)) {
+		t.Fatalf("message was cut mid-line: %q", last)
 	}
 }
 
@@ -342,7 +395,7 @@ func TestFailureExcerptsFor_ScansOnlyWhenItMustAndStopsEarly(t *testing.T) {
 	if src.calls != 0 {
 		t.Fatalf("a run with no failed nodes made %d event calls, want 0", src.calls)
 	}
-	if !ix.Complete || ix.Unavailable("anything") {
+	if ix.Incomplete || ix.Unavailable("anything") {
 		t.Fatal("an empty lookup is vacuously complete")
 	}
 
@@ -355,7 +408,7 @@ func TestFailureExcerptsFor_ScansOnlyWhenItMustAndStopsEarly(t *testing.T) {
 	if ex, ok := ix.Get("build"); !ok || ex.LogExcerpt != "boom" {
 		t.Fatalf("excerpt not found: %+v", ix)
 	}
-	if !ix.Complete {
+	if ix.Incomplete {
 		t.Fatal("a scan that found everything is complete")
 	}
 }
@@ -368,7 +421,7 @@ func TestFailureExcerptsFor_IncompleteScanReportsUnavailable(t *testing.T) {
 
 	huge := &countingEvents{events: filler(1, excerptPageSize*excerptMaxPages+excerptPageSize)}
 	ix := failureExcerptsFor(context.Background(), huge, "run-1", want)
-	if ix.Complete {
+	if !ix.Incomplete {
 		t.Fatal("a scan that hit the page cap must not claim completeness")
 	}
 	if !ix.Unavailable("build") {
@@ -380,14 +433,14 @@ func TestFailureExcerptsFor_IncompleteScanReportsUnavailable(t *testing.T) {
 
 	broken := &countingEvents{err: errors.New("controller down")}
 	ix = failureExcerptsFor(context.Background(), broken, "run-1", want)
-	if ix.Complete || !ix.Unavailable("build") {
+	if !ix.Incomplete || !ix.Unavailable("build") {
 		t.Fatal("a backend that cannot serve events yields unavailable, not absent")
 	}
 
 	// A completed scan that simply found nothing is authoritative.
 	quiet := &countingEvents{events: filler(1, 10)}
 	ix = failureExcerptsFor(context.Background(), quiet, "run-1", want)
-	if !ix.Complete || ix.Unavailable("build") {
+	if ix.Incomplete || ix.Unavailable("build") {
 		t.Fatal("a completed scan reports authoritative absence")
 	}
 }
@@ -399,18 +452,30 @@ func TestFailedNodeReports_MarksUnavailableNotAbsent(t *testing.T) {
 		{NodeID: "deploy", Outcome: "cancelled", Error: "upstream-failed"},
 	}
 
-	rows := failedNodeReports(nodes, failureExcerptIndex{Complete: false})
+	rows := failedNodeReports(nodes, failureExcerptIndex{Incomplete: true})
 	if len(rows) != 1 || !rows[0].LogExcerptUnavailable || rows[0].LogExcerpt != "" {
 		t.Fatalf("incomplete index should mark the failure unavailable: %+v", rows)
 	}
-	rows = failedNodeReports(nodes, failureExcerptIndex{Complete: true})
+	rows = failedNodeReports(nodes, failureExcerptIndex{})
 	if len(rows) != 1 || rows[0].LogExcerptUnavailable {
 		t.Fatalf("complete index should report plain absence: %+v", rows)
 	}
 
+	// The zero value is what the human paths declare when they skip the
+	// lookup entirely: it must claim nothing, not flag every failure in
+	// the run as unavailable.
+	rows = failedNodeReports(nodes, failureExcerptIndex{})
+	if len(rows) != 1 || rows[0].LogExcerptUnavailable || rows[0].LogExcerpt != "" {
+		t.Fatalf("the zero index must make no claim either way: %+v", rows)
+	}
+	zeroWrapped := withFailureExcerpts([]nodeWithSteps{{Node: nodes[0]}}, failureExcerptIndex{})
+	if zeroWrapped[0].LogExcerptUnavailable {
+		t.Fatalf("the zero index must not mark nodes unavailable: %+v", zeroWrapped[0])
+	}
+
 	wrapped := withFailureExcerpts([]nodeWithSteps{
 		{Node: nodes[0]}, {Node: nodes[1]},
-	}, failureExcerptIndex{Complete: false})
+	}, failureExcerptIndex{Incomplete: true})
 	if !wrapped[0].LogExcerptUnavailable {
 		t.Fatalf("failed node should be marked unavailable: %+v", wrapped[0])
 	}

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -27,6 +28,10 @@ const (
 	failureExcerptMaxLines = 20
 	failureExcerptMaxBytes = 4096
 	failureHeadMaxBytes    = 200
+	// failureHeadCommandBytes is the share of the headline budget
+	// reserved for the command itself, so a long node id cannot crowd
+	// out the thing that says what was run.
+	failureHeadCommandBytes = 100
 )
 
 // boundedFailureText renders err as the text a failed node records in
@@ -99,35 +104,71 @@ func boundedFailureText(ctx context.Context, runID, nodeID string, err error) st
 }
 
 // boundedFailureHead trims the failure headline to one short line. The
-// headline is "<node>: <wrapping>: command failed (exit N): <command>",
-// and <command> is whatever was run -- for sparkwing.Bash, the entire
-// script. Keeping the first line up to failureHeadMaxBytes preserves
-// the part that identifies the failure (node, step, exit code, the
-// start of the command) and drops the part that has no business in a
-// state row.
+// headline reads "<node>: <wrapping>: command failed (exit N):
+// <command>", and <command> is whatever was run -- for sparkwing.Bash,
+// the entire script.
+//
+// The budget is spent from the *right*. The left of that string is the
+// node id, which JobSpawnEach builds out of input data and which can
+// therefore be long enough to swallow the budget on its own; the right
+// is the exit code and the start of the command, which is what
+// identifies the failure. So an over-long headline keeps as many
+// trailing ": "-separated segments as fit, elides the rest with "…: ",
+// and truncates the command itself to a reserved share.
 func boundedFailureHead(head string) string {
 	if head == "" {
 		return ""
 	}
 	head = normalizeNewlines(head)
 	first, rest, multiline := strings.Cut(head, "\n")
-	truncated := multiline && strings.TrimSpace(rest) != ""
-	if len(first) > failureHeadMaxBytes {
-		first = first[:failureHeadMaxBytes]
-		for len(first) > 0 && !utf8.RuneStart(first[len(first)-1]) {
-			first = first[:len(first)-1]
+	elided := multiline && strings.TrimSpace(rest) != ""
+
+	if len(first) <= failureHeadMaxBytes {
+		first = strings.TrimRight(first, " \t")
+		if elided {
+			return first + " … (command truncated)"
 		}
-		// The final rune may itself be incomplete; drop it.
-		if r, size := utf8.DecodeLastRuneInString(first); r == utf8.RuneError && size <= 1 {
-			first = first[:len(first)-size]
+		return first
+	}
+
+	segs := strings.Split(first, ": ")
+	if len(segs) == 1 {
+		return strings.TrimRight(truncateUTF8(first, failureHeadMaxBytes), " \t") + " … (command truncated)"
+	}
+
+	// The last segment is the command; give it a fixed share and let
+	// the identifying segments before it use the rest.
+	kept := []string{truncateUTF8(segs[len(segs)-1], failureHeadCommandBytes)}
+	used := len(kept[0])
+	for i := len(segs) - 2; i >= 0; i-- {
+		if used+len(segs[i])+len(": ") > failureHeadMaxBytes {
+			break
 		}
-		truncated = true
+		used += len(segs[i]) + len(": ")
+		kept = append(kept, segs[i])
 	}
-	first = strings.TrimRight(first, " \t")
-	if truncated {
-		return first + " … (command truncated)"
+	slices.Reverse(kept)
+
+	out := strings.TrimRight(strings.Join(kept, ": "), " \t")
+	if len(kept) < len(segs) {
+		out = "…: " + out
 	}
-	return first
+	return out + " … (command truncated)"
+}
+
+// truncateUTF8 cuts s to at most n bytes without splitting a rune.
+func truncateUTF8(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	s = s[:n]
+	for len(s) > 0 && !utf8.RuneStart(s[len(s)-1]) {
+		s = s[:len(s)-1]
+	}
+	if r, size := utf8.DecodeLastRuneInString(s); r == utf8.RuneError && size <= 1 {
+		s = s[:len(s)-size]
+	}
+	return s
 }
 
 // nodeFailureExcerptEvent is the event kind carrying the machine-
@@ -212,15 +253,22 @@ const (
 
 // failureExcerptIndex is the result of one excerpt lookup.
 //
-// Complete distinguishes the two ways a node can end up without an
-// excerpt. When the scan saw the whole event stream, a missing excerpt
-// means the node published none -- authoritative absence, which is the
-// documented contract. When the scan ran out of budget first, absence
-// is unknown, and saying nothing would be a claim the lookup cannot
-// support; callers report those nodes as excerpt-unavailable instead.
+// Incomplete distinguishes the two ways a node can end up without an
+// excerpt. By default the scan saw the whole event stream, so a
+// missing excerpt means the node published none -- authoritative
+// absence, which is the documented contract. Incomplete says the scan
+// ran out of budget (or never got an answer) first: absence is then
+// unknown, and saying nothing would be a claim the lookup cannot
+// support, so callers report those nodes as excerpt-unavailable.
+//
+// The field is negative so the zero value is the safe one. A caller
+// that renders without a lookup -- the human output paths, which never
+// scan -- declares failureExcerptIndex{} and gets "no excerpts, and no
+// unavailability claims either", rather than flagging every failure in
+// the run as unavailable.
 type failureExcerptIndex struct {
-	byNode   map[string]failureExcerpt
-	Complete bool
+	byNode     map[string]failureExcerpt
+	Incomplete bool
 }
 
 // Get returns a node's excerpt, and whether the index can speak to its
@@ -233,7 +281,7 @@ func (ix failureExcerptIndex) Get(nodeID string) (failureExcerpt, bool) {
 // Unavailable reports whether nodeID's excerpt is missing *and* the
 // lookup could not prove it was never published.
 func (ix failureExcerptIndex) Unavailable(nodeID string) bool {
-	if ix.Complete {
+	if !ix.Incomplete {
 		return false
 	}
 	_, ok := ix.byNode[nodeID]
@@ -257,9 +305,9 @@ func (ix failureExcerptIndex) Unavailable(nodeID string) bool {
 func failureExcerptsFor(ctx context.Context, src eventLister, runID string, want map[string]struct{}) failureExcerptIndex {
 	if src == nil || runID == "" || len(want) == 0 {
 		// Nothing to look up: vacuously complete.
-		return failureExcerptIndex{Complete: true}
+		return failureExcerptIndex{}
 	}
-	ix := failureExcerptIndex{byNode: map[string]failureExcerpt{}}
+	ix := failureExcerptIndex{byNode: map[string]failureExcerpt{}, Incomplete: true}
 	var after int64
 	for range excerptMaxPages {
 		events, err := src.ListEventsAfter(ctx, runID, after, excerptPageSize)
@@ -281,7 +329,7 @@ func failureExcerptsFor(ctx context.Context, src eventLister, runID string, want
 			ix.byNode[e.NodeID] = ex
 		}
 		if len(ix.byNode) == len(want) || len(events) < excerptPageSize {
-			ix.Complete = true
+			ix.Incomplete = false
 			return ix
 		}
 	}
@@ -403,7 +451,12 @@ func failureExcerptTail(s string, maxLines, maxBytes int) (string, bool) {
 // follows with detail, so the front is the payload and the tail is the
 // expendable part -- the reverse of command output.
 func failureMessageHead(s string, maxLines, maxBytes int) (string, bool) {
-	s = strings.TrimRight(normalizeNewlines(s), "\n")
+	// Leading newlines are trimmed as well as trailing ones: a message
+	// that opens with one would otherwise put the only line boundary at
+	// offset 0, and a cut there leaves nothing to keep -- so the byte
+	// bound would fall through to a mid-line cut instead of ending
+	// where a line does.
+	s = strings.Trim(normalizeNewlines(s), "\n")
 	if strings.TrimSpace(s) == "" {
 		return "", false
 	}
@@ -417,16 +470,11 @@ func failureMessageHead(s string, maxLines, maxBytes int) (string, bool) {
 	out := strings.Join(lines, "\n")
 
 	if len(out) > maxBytes {
-		out = out[:maxBytes]
+		out = truncateUTF8(out, maxBytes)
+		// Prefer ending where a line does; the rune-safe cut above
+		// stands when the first line is itself the long one.
 		if i := strings.LastIndexByte(out, '\n'); i > 0 {
 			out = out[:i]
-		} else {
-			for len(out) > 0 && !utf8.RuneStart(out[len(out)-1]) {
-				out = out[:len(out)-1]
-			}
-			if r, size := utf8.DecodeLastRuneInString(out); r == utf8.RuneError && size <= 1 {
-				out = out[:len(out)-size]
-			}
 		}
 		truncated = true
 	}
