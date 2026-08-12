@@ -361,6 +361,31 @@ func TestAcquireOrMaterializeAutomaticallyPrunesAfterNonCLIWrite(t *testing.T) {
 	}
 }
 
+func TestAcquireOrMaterializeReportsAutomaticPruneFailure(t *testing.T) {
+	oldStatus := statusForLimits
+	t.Cleanup(func() { statusForLimits = oldStatus })
+	statusForLimits = func(context.Context, string) (CacheStatus, error) {
+		return CacheStatus{}, errors.New("read cache inventory")
+	}
+
+	entry := testEntry(t, t.TempDir(), "11111111-11111111")
+	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(path string) error {
+		return os.WriteFile(path, []byte("complete"), 0o755)
+	})
+	if err == nil || !strings.Contains(err.Error(), "read cache inventory") {
+		t.Fatalf("automatic prune error = %v", err)
+	}
+	if lease != nil {
+		t.Fatal("failed publication returned a live lease")
+	}
+	if !published {
+		t.Fatal("the completed publication was not reported")
+	}
+	if _, statErr := os.Stat(entry.binaryPath()); statErr != nil {
+		t.Fatalf("completed publication disappeared: %v", statErr)
+	}
+}
+
 func TestConcurrentMaterializationQueuesOnlyThePublisher(t *testing.T) {
 	root := t.TempDir()
 	entry := testEntry(t, root, "11111111-11111111")

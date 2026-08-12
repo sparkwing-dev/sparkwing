@@ -2,9 +2,31 @@ package bincache
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestCacheQueueLockHasAnInternalWaitBound(t *testing.T) {
+	root := t.TempDir()
+	held, acquired, err := openCacheLock(root, "entry-queue", cacheLockExclusiveNonblock)
+	if err != nil || !acquired {
+		t.Fatalf("hold queue lock: acquired=%v err=%v", acquired, err)
+	}
+	defer func() {
+		_ = cacheUnlock(held)
+		_ = held.Close()
+	}()
+
+	oldTimeout := cacheQueueLockTimeout
+	cacheQueueLockTimeout = time.Millisecond
+	t.Cleanup(func() { cacheQueueLockTimeout = oldTimeout })
+	_, err = openCacheQueueLock(context.Background(), root)
+	if !errors.Is(err, ErrCacheQueueBusy) {
+		t.Fatalf("queue lock error = %v, want ErrCacheQueueBusy", err)
+	}
+}
 
 func TestQueueRecoversOneInterruptedEnqueue(t *testing.T) {
 	root := t.TempDir()
