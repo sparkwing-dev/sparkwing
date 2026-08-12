@@ -69,6 +69,11 @@ func AdoptExecLeaseFromEnv() error {
 	if descriptorStat.Dev != authorityStat.Dev || descriptorStat.Ino != authorityStat.Ino {
 		return errors.New("inherited pipeline cache lease descriptor does not match its entry")
 	}
+	processExecLease.Lock()
+	defer processExecLease.Unlock()
+	if processExecLease.file != nil {
+		return errors.New("pipeline cache lease was adopted more than once")
+	}
 	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
 	if err != nil {
 		return fmt.Errorf("read inherited pipeline cache lease flags: %w", err)
@@ -79,11 +84,6 @@ func AdoptExecLeaseFromEnv() error {
 	file := os.NewFile(uintptr(fd), "pipeline-cache-lease")
 	if file == nil {
 		return errors.New("inherited pipeline cache lease descriptor is unavailable")
-	}
-	processExecLease.Lock()
-	defer processExecLease.Unlock()
-	if processExecLease.file != nil {
-		return errors.New("pipeline cache lease was adopted more than once")
 	}
 	processExecLease.file = file
 	return nil
