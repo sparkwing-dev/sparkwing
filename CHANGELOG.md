@@ -48,7 +48,14 @@ code change to unlock.
 ---
 
 ## [Unreleased]
-<<<<<<< HEAD
+### Added
+
+- **storage:** `fs.LogStore.RunDir(runID)` names the directory a filesystem
+  logs backend writes a run's node logs into. The orchestrator records it as
+  the run's `log_path`; it is a method on the concrete filesystem store, not on
+  the `storage.LogStore` interface, because the object-store, controller, and
+  stdout backends have no local directory to name.
+
 ### Fixed
 
 - **wingd:** The daemon log stays bounded between daemon restarts. Rotation
@@ -75,17 +82,6 @@ code change to unlock.
   the prefix with a non-zero exit, instead of an empty listing (or the literal
   `null` under `-o json`) at exit 0; when the prefix matched only hidden
   verbs, the error says to pass `--include-hidden`.
-=======
-### Added
-
-- **storage:** `fs.LogStore.RunDir(runID)` names the directory a filesystem
-  logs backend writes a run's node logs into. The orchestrator records it as
-  the run's `log_path`; it is a method on the concrete filesystem store, not on
-  the `storage.LogStore` interface, because the object-store, controller, and
-  stdout backends have no local directory to name.
-
-### Fixed
-
 - **orchestrator:** Record `log_path` for runs whose profile uses a filesystem
   logs backend (`logs: {type: filesystem}`). Those node logs are written to the
   executing machine's disk, but the run reported no log path, so readers
@@ -125,7 +121,6 @@ code change to unlock.
   still winning per key. Behavior change: a guard that silently passed because
   its value came from `sparkwing.yaml` now fires; a guard on an argument no
   layer supplies is unaffected.
->>>>>>> fix/wave3-correctness
 
 ## [v0.27.0] - 2026-08-12
 ### Security
