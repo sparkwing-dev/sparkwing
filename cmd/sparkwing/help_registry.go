@@ -2746,12 +2746,28 @@ is recorded on the run, so the consumer executes the tree you
 submitted from even when another registered checkout declares the
 same pipeline name.
 
-Deduplication is opt-in via --idempotency-key. A second
-submission carrying a key an earlier one used returns the
-original run id, marked 'already submitted', and creates
-nothing -- which is what makes a retry after a dropped connection
-safe. --request-id is a separate, tracing-only field: it is
-recorded on the run and never affects deduplication.
+ENVIRONMENT: a submitted run does NOT inherit this shell's
+environment. It is executed by the resident consumer, which
+carries the environment of whichever shell started it -- possibly
+hours ago, in another project, with a different AWS_PROFILE or
+KUBECONFIG. So
+
+  AWS_PROFILE=prod sparkwing runs submit deploy
+
+may not do what it looks like. Pass values as pipeline arguments,
+put them in the pipeline's configuration, or start the consumer
+from the environment you want ('sparkwing runs consumer start')
+before submitting. The acknowledgment names the consumer pid so
+the difference is visible.
+
+Deduplication is opt-in via --idempotency-key, scoped to the
+pipeline. A second submission of the SAME pipeline carrying a key
+an earlier one used returns the original run id, its current
+status, and creates nothing -- which is what makes a retry after a
+dropped connection safe. Reusing a key with different arguments is
+refused, because a key names one intent and different arguments
+are a different request. --request-id is a separate, tracing-only
+field: it is recorded on the run and never affects deduplication.
 
 A consumer is started automatically if none is running, and exits
 on its own after five idle minutes. See 'sparkwing runs consumer'.`,
@@ -2767,6 +2783,7 @@ on its own after five idle minutes. See 'sparkwing runs consumer'.`,
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "consumer-idle", Argument: "DUR", Desc: "How long the resident consumer stays alive with no work (default 5m)", Group: "System"},
+		{Name: "consumer-claim-lease", Argument: "DUR", Desc: "Lease the consumer stamps on each claimed run, renewed while it executes (default 3m)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Target", "Output", "System", "Other"},
 	Examples: []Example{
@@ -2795,7 +2812,14 @@ lock does the work and the other stands down, so a run is never
 dispatched twice.
 
 Stopping a consumer does not cancel queued runs. They stay
-queued and execute when a consumer comes back.`,
+queued and execute when a consumer comes back. A run that is
+executing when you stop it is interrupted and returned to the
+queue, not failed -- it never reached a verdict, so the next
+consumer re-executes it. To stop a run for good, cancel it.
+
+A consumer records the sparkwing version it was built from. A
+submission from a different build replaces it, so an upgrade takes
+effect instead of the first build serving the home forever.`,
 	Subcommands: []SubcommandRef{
 		{"start", "Start a consumer for this home if none is running"},
 		{"status", "Report whether a consumer is resident (exit 1 when not)"},
@@ -2814,6 +2838,7 @@ it acknowledges a run.`,
 	Flags: []FlagSpec{
 		{Name: "home", Argument: "PATH", Desc: "Sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 		{Name: "idle", Argument: "DUR", Desc: "Exit after this long with no work (default 5m)", Group: "System"},
+		{Name: "claim-lease", Argument: "DUR", Desc: "Lease stamped on each claimed run, renewed while it executes (default 3m)", Group: "System"},
 	},
 	Examples: []Example{
 		{"Start one for the default home", "sparkwing runs consumer start"},

@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -59,9 +60,20 @@ type submitResult struct {
 	LogPath string `json:"log_path,omitempty"`
 	// AlreadySubmitted is true when an idempotency key matched an
 	// earlier submission and this call created nothing.
-	AlreadySubmitted bool   `json:"already_submitted,omitempty"`
-	IdempotencyKey   string `json:"idempotency_key,omitempty"`
-	RequestID        string `json:"request_id,omitempty"`
+	AlreadySubmitted bool `json:"already_submitted,omitempty"`
+	// Status is the matched run's current status on the duplicate path.
+	// A duplicate acknowledgment that said only "already submitted"
+	// would let a caller assume work is under way when the original may
+	// have failed hours ago.
+	Status         string `json:"status,omitempty"`
+	IdempotencyKey string `json:"idempotency_key,omitempty"`
+	RequestID      string `json:"request_id,omitempty"`
+	// ConsumerPID and ConsumerStarted identify the process that will
+	// execute the run. They are reported because that process supplies
+	// the run's environment, and it is not this shell's -- see the
+	// environment note in the command's help.
+	ConsumerPID     int    `json:"consumer_pid,omitempty"`
+	ConsumerStarted string `json:"consumer_started,omitempty"`
 }
 
 func runRunsSubmit(ctx context.Context, args []string) error {
@@ -75,6 +87,8 @@ func runRunsSubmit(ctx context.Context, args []string) error {
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 	idle := fs.Duration("consumer-idle", 0,
 		"how long the resident consumer stays alive with no work (default 5m)")
+	claimLease := fs.Duration("consumer-claim-lease", 0,
+		"lease the consumer stamps on each claimed run, renewed while it executes (default 3m)")
 	// Everything after the pipeline name belongs to the pipeline, so the
 	// flag set stops at the first operand.
 	fs.SetInterspersed(false)
@@ -141,10 +155,18 @@ func runRunsSubmit(ctx context.Context, args []string) error {
 	// running, so a failure here is reported with the run id rather than
 	// swallowed: the row is real either way, and the caller needs to know
 	// which half of the acknowledgment it got.
-	if cerr := ensureTriggerConsumer(paths.Root, *idle); cerr != nil {
+	if cerr := ensureTriggerConsumer(paths.Root, *idle, *claimLease); cerr != nil {
 		return fmt.Errorf("run %s is persisted but no consumer could be started to execute it: %w\n"+
 			"Start one with `sparkwing runs consumer start`; the run is queued and will execute when it comes up",
 			result.RunID, cerr)
+	}
+	// Named in the acknowledgment because this process, not this shell,
+	// supplies the run's environment.
+	if info, ok := orchestrator.ConsumerInfo(paths.Root); ok {
+		result.ConsumerPID = info.PID
+		if !info.Started.IsZero() {
+			result.ConsumerStarted = info.Started.Format(time.RFC3339)
+		}
 	}
 	return emitSubmitResult(result, format)
 }
@@ -168,10 +190,10 @@ type submission struct {
 // leave an acknowledged run id that looks unknown to every read path
 // until a consumer picked it up.
 func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.Paths, sub submission) (submitResult, error) {
-	if existing, err := findExistingSubmission(ctx, st, sub.IdempotencyKey); err != nil {
+	if existing, err := findExistingSubmission(ctx, st, sub.Pipeline, sub.IdempotencyKey); err != nil {
 		return submitResult{}, err
 	} else if existing != nil {
-		return existingSubmissionResult(paths, existing, sub), nil
+		return existingSubmissionResult(ctx, st, paths, existing, sub)
 	}
 
 	runID := orchestrator.NewLocalRunID()
@@ -209,9 +231,9 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 		// this key won. That is the idempotent outcome, not a failure:
 		// resolve to the winner and report it as already submitted.
 		if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
-			existing, ferr := st.FindTriggerByIdempotencyKey(ctx, sub.IdempotencyKey)
+			existing, ferr := st.FindTriggerByIdempotencyKey(ctx, sub.Pipeline, sub.IdempotencyKey)
 			if ferr == nil {
-				return existingSubmissionResult(paths, existing, sub), nil
+				return existingSubmissionResult(ctx, st, paths, existing, sub)
 			}
 			return submitResult{}, fmt.Errorf("persist trigger: %w", err)
 		}
@@ -246,12 +268,13 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 }
 
 // findExistingSubmission returns the trigger an earlier submission
-// created under this key, or nil when the key is unused or absent.
-func findExistingSubmission(ctx context.Context, st *store.Store, key string) (*store.Trigger, error) {
+// created under this pipeline and key, or nil when the pair is unused or
+// no key was supplied.
+func findExistingSubmission(ctx context.Context, st *store.Store, pipeline, key string) (*store.Trigger, error) {
 	if key == "" {
 		return nil, nil
 	}
-	existing, err := st.FindTriggerByIdempotencyKey(ctx, key)
+	existing, err := st.FindTriggerByIdempotencyKey(ctx, pipeline, key)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, nil
 	}
@@ -265,15 +288,101 @@ func findExistingSubmission(ctx context.Context, st *store.Store, key string) (*
 // The run id is the original one, which is the whole point: a caller
 // retrying after a dropped connection reaches the run it already has
 // rather than starting a second one.
-func existingSubmissionResult(paths orchestrator.Paths, existing *store.Trigger, sub submission) submitResult {
+//
+// Two things make that answer honest rather than merely convenient.
+//
+// A key stands for one intent, so a resubmission whose arguments differ
+// from the original's is not a retry of that intent -- it is a different
+// request wearing the same name, and answering it with the original run
+// would silently drop it. That is refused instead.
+//
+// And the original may have finished long ago, possibly badly. A bare
+// "already submitted" invites the caller to believe work is under way
+// when it may be holding a corpse, so the acknowledgment carries the
+// run's current status.
+func existingSubmissionResult(
+	ctx context.Context, st *store.Store, paths orchestrator.Paths,
+	existing *store.Trigger, sub submission,
+) (submitResult, error) {
+	if diff := describeArgsMismatch(existing.Args, sub.Args); diff != "" {
+		return submitResult{}, fmt.Errorf(
+			"runs submit: idempotency key %q was already used for pipeline %q with different arguments, "+
+				"so this is a different request rather than a retry of that one.\n"+
+				"  %s\n"+
+				"Original run: %s\n"+
+				"Use a new key for the new arguments, or resubmit with the original ones",
+			sub.IdempotencyKey, existing.Pipeline, diff, existing.ID)
+	}
+
+	status := ""
+	if run, err := st.GetRun(ctx, existing.ID); err == nil && run != nil {
+		status = run.Status
+	}
+	// The log directory is only ensured for a run this call created. On
+	// the duplicate path the run is somebody else's and may be long
+	// finished or already pruned, so the path is reported when it is
+	// really there and omitted otherwise -- never conjured by creating
+	// an empty directory for a run that has none.
+	logPath := existingRunLogDir(paths, existing.ID)
 	return submitResult{
 		RunID:            existing.ID,
 		Pipeline:         existing.Pipeline,
-		LogPath:          orchestrator.EnsureRunLogDir(paths, existing.ID),
+		LogPath:          logPath,
 		AlreadySubmitted: true,
+		Status:           status,
 		IdempotencyKey:   existing.IdempotencyKey,
 		RequestID:        sub.RequestID,
+	}, nil
+}
+
+// existingRunLogDir reports an already-existing run's log directory, or
+// "" when there is none. Unlike EnsureRunLogDir it never creates one.
+func existingRunLogDir(paths orchestrator.Paths, runID string) string {
+	dir, err := filepath.Abs(paths.RunDir(runID))
+	if err != nil {
+		return ""
 	}
+	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+		return ""
+	}
+	return dir
+}
+
+// describeArgsMismatch returns a one-line description of how two
+// argument sets differ, or "" when they match.
+func describeArgsMismatch(original, incoming map[string]string) string {
+	if len(original) == len(incoming) {
+		same := true
+		for k, v := range original {
+			if incoming[k] != v {
+				same = false
+				break
+			}
+		}
+		if same {
+			return ""
+		}
+	}
+	return fmt.Sprintf("original arguments %s, this submission %s",
+		renderArgs(original), renderArgs(incoming))
+}
+
+// renderArgs prints an argument map in a stable order so two renderings
+// of the same arguments read identically.
+func renderArgs(args map[string]string) string {
+	if len(args) == 0 {
+		return "(none)"
+	}
+	keys := make([]string, 0, len(args))
+	for k := range args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("--%s=%s", k, args[k]))
+	}
+	return strings.Join(parts, " ")
 }
 
 // submitPaths resolves the home this submission writes to.
@@ -348,19 +457,45 @@ func localRepoDeclaring(start, pipeline string) (string, bool) {
 	return "", false
 }
 
-// undetachableFlags are the `sparkwing run` flags a detached submission
-// cannot honor, each with the reason.
+// undetachableFlags are the `sparkwing run` flags a submission refuses,
+// each with the reason it gives.
 //
-// They are refused rather than ignored. Every one of them changes what
-// the run does, so accepting the flag and running something else would
-// be the worst outcome available: a caller that asked for a dry run and
+// They are refused rather than ignored because every one of them changes
+// what the run does, and accepting a flag while running something else
+// is the worst outcome available: a caller that asked for a dry run and
 // got a real one has no way to tell from the acknowledgment.
+//
+// Two different kinds live here, and the distinction matters for
+// anyone deciding what to do about them.
+//
+// CAN NEVER DETACH -- the flag's meaning is tied to the submitting
+// process, so no amount of plumbing makes it work: --sw-index (a live
+// path this process holds open), --sw-ref (a worktree created and
+// removed around a foreground run), --sw-dry-run (a seconds-long
+// inspection whose whole output is the terminal it reports to), and
+// --profile (see the note at the refusal site).
+//
+// NOT CARRIED YET -- the flag is perfectly meaningful for a detached
+// run, but the trigger does not carry it and TriggerEnv is not exported
+// into the dispatched child's environment, so accepting it today would
+// silently ignore it. These become supportable by threading them onto
+// the trigger, and are refused only until then.
 var undetachableFlags = map[string]string{
+	// Can never detach.
 	"--sw-index": "an index binding is a live path this process holds open for the run; " +
 		"a detached run outlives the submitting process. Run it in the foreground with `sparkwing run --sw-index`",
 	"--sw-ref": "a --sw-ref worktree is created and removed around a foreground run; " +
 		"nothing would clean it up after a detached one. Check the ref out and submit from that checkout",
-	"--sw-dry-run":    "a dry run finishes in seconds and reports to your terminal; submit it with `sparkwing run --sw-dry-run`",
+	"--sw-dry-run": "a dry run finishes in seconds and reports to your terminal; submit it with `sparkwing run --sw-dry-run`",
+	// A profile-backed run writes its state, logs, and cache to that
+	// profile's backends. The resident consumer opens this home's local
+	// store and nothing else, so accepting --profile would record the run
+	// in the wrong place -- and the log_path this command acknowledges,
+	// which names a directory under this home, would be a lie about where
+	// the run's logs went.
+	"--profile": "the resident consumer executes against this home's local store, " +
+		"so a profile's backends would not receive the run; run profile-backed runs in the foreground",
+	// Not carried yet.
 	"--sw-start-at":   "step-window selection is not carried on the trigger yet; run it in the foreground",
 	"--sw-stop-at":    "step-window selection is not carried on the trigger yet; run it in the foreground",
 	"--sw-only":       "job filtering is not carried on the trigger yet; run it in the foreground",
@@ -370,7 +505,6 @@ var undetachableFlags = map[string]string{
 	"--sw-allow":      "risk authorization is not carried on the trigger yet; run it in the foreground",
 	"--sw-local-only": "backend overrides are not carried on the trigger yet; run it in the foreground",
 	"--sw-secrets":    "secret-profile selection is not carried on the trigger yet; run it in the foreground",
-	"--profile":       "the resident consumer executes against this home's local store; run profile-backed runs in the foreground",
 }
 
 // submitOwnedFlags are the flags `runs submit` reads itself. They must
@@ -479,16 +613,32 @@ func emitSubmitResult(r submitResult, format string) error {
 		fmt.Fprintln(os.Stdout, r.RunID)
 		return nil
 	default:
-		verb := "submitted"
 		if r.AlreadySubmitted {
-			verb = "already submitted"
+			status := r.Status
+			if status == "" {
+				status = "unknown"
+			}
+			fmt.Fprintf(os.Stdout, "run %s already submitted (%s), status %s\n",
+				r.RunID, r.Pipeline, status)
+		} else {
+			fmt.Fprintf(os.Stdout, "run %s submitted (%s)\n", r.RunID, r.Pipeline)
 		}
-		fmt.Fprintf(os.Stdout, "run %s %s (%s)\n", r.RunID, verb, r.Pipeline)
 		if r.LogPath != "" {
 			fmt.Fprintf(os.Stdout, "  logs:   %s\n", r.LogPath)
 		}
+		if r.ConsumerPID != 0 {
+			// Named because it is load-bearing: this process supplies the
+			// run's environment, and it is not this shell.
+			fmt.Fprintf(os.Stdout, "  runner: consumer pid %d (started %s); the run uses ITS environment, not this shell's\n",
+				r.ConsumerPID, r.ConsumerStarted)
+		}
 		fmt.Fprintf(os.Stdout, "  follow: sparkwing runs logs --run %s --follow\n", r.RunID)
 		fmt.Fprintf(os.Stdout, "  cancel: sparkwing runs cancel --run %s\n", r.RunID)
+		if r.AlreadySubmitted && isTerminalRunStatus(r.Status) {
+			fmt.Fprintf(os.Stdout,
+				"  note:   this run already finished (%s); nothing new was queued. "+
+					"Use a different --idempotency-key to run it again.\n", r.Status)
+		}
 		return nil
 	}
 }

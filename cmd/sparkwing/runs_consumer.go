@@ -67,6 +67,8 @@ func runRunsConsumerStart(args []string) error {
 	fs := flag.NewFlagSet(cmdJobsConsumerStart.Path, flag.ContinueOnError)
 	home := fs.String("home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
 	idle := fs.Duration("idle", 0, "exit after this long with no work (default 5m; 0 means the default)")
+	claimLease := fs.Duration("claim-lease", 0,
+		"lease stamped on each claimed run, renewed while it executes (default 3m)")
 	if err := parseAndCheck(cmdJobsConsumerStart, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -77,7 +79,7 @@ func runRunsConsumerStart(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := ensureTriggerConsumer(layout.Home, *idle); err != nil {
+	if err := ensureTriggerConsumer(layout.Home, *idle, *claimLease); err != nil {
 		return err
 	}
 	pid, _ := orchestrator.ConsumerPID(layout.Home)
@@ -152,15 +154,17 @@ func runRunsConsumerStop(args []string) error {
 //
 // A consumer that is already resident satisfies this immediately; the
 // spawn is only for the cold case.
-func ensureTriggerConsumer(home string, idle time.Duration) error {
+func ensureTriggerConsumer(home string, idle, claimLease time.Duration) error {
 	running, err := orchestrator.ConsumerRunning(home)
 	if err != nil {
 		return err
 	}
 	if running {
-		return nil
+		if !rotateOutdatedConsumer(home) {
+			return nil
+		}
 	}
-	if err := spawnTriggerConsumer(home, idle); err != nil {
+	if err := spawnTriggerConsumer(home, idle, claimLease); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(consumerStartTimeout)
@@ -182,13 +186,61 @@ func ensureTriggerConsumer(home string, idle time.Duration) error {
 		consumerStartTimeout, layout.Log, tail)
 }
 
+// rotateOutdatedConsumer stops a resident consumer built from a
+// different sparkwing version than this CLI, and reports whether the
+// queue is now free for a fresh one.
+//
+// Without it an upgrade silently does not take. A consumer keeps its
+// queue for as long as work keeps arriving, and `runs submit` only ever
+// asked whether *a* consumer was running -- so on a busy home the newly
+// installed binary would hand every run to the old build indefinitely,
+// including runs submitted precisely to pick up a fix.
+//
+// A consumer that records no version predates the stamp; it is rotated
+// too, since an unknown build is exactly the stale case. Failing to stop
+// it is not fatal: the existing consumer still executes the run, which
+// is better than refusing to submit.
+func rotateOutdatedConsumer(home string) bool {
+	info, ok := orchestrator.ConsumerInfo(home)
+	if !ok {
+		return true
+	}
+	mine := installedVersion()
+	if info.Version == mine {
+		return false
+	}
+	fmt.Fprintf(os.Stderr,
+		"sparkwing runs submit: replacing the resident consumer (pid %d, %s) with this build (%s)\n",
+		info.PID, consumerVersionLabel(info.Version), mine)
+	if err := stopSupervisor(info.PID, ""); err != nil {
+		fmt.Fprintf(os.Stderr,
+			"sparkwing runs submit: could not stop the older consumer (%v); it keeps serving this home\n", err)
+		return false
+	}
+	deadline := time.Now().Add(consumerStartTimeout)
+	for time.Now().Before(deadline) {
+		if running, err := orchestrator.ConsumerRunning(home); err == nil && !running {
+			return true
+		}
+		time.Sleep(consumerStartPoll)
+	}
+	return false
+}
+
+func consumerVersionLabel(v string) string {
+	if v == "" {
+		return "version unrecorded"
+	}
+	return v
+}
+
 // spawnTriggerConsumer re-execs this binary as a detached consumer.
 //
 // Detaching from the terminal's process group is what makes a submitted
 // run survive the submitting shell: without Setsid, a Ctrl-C in that
 // shell reaches the consumer through the foreground process group and
 // kills the very thing that was supposed to outlive it.
-func spawnTriggerConsumer(home string, idle time.Duration) error {
+func spawnTriggerConsumer(home string, idle, claimLease time.Duration) error {
 	self, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("locate own binary: %w", err)
@@ -206,9 +258,13 @@ func spawnTriggerConsumer(home string, idle time.Duration) error {
 	}
 	defer func() { _ = logF.Close() }()
 
-	spawnArgs := []string{consumerSpawnVerb, "--home", layout.Home}
+	spawnArgs := []string{consumerSpawnVerb, "--home", layout.Home,
+		"--version", installedVersion()}
 	if idle > 0 {
 		spawnArgs = append(spawnArgs, "--idle", idle.String())
+	}
+	if claimLease > 0 {
+		spawnArgs = append(spawnArgs, "--claim-lease", claimLease.String())
 	}
 	cmd := exec.Command(self, spawnArgs...)
 	cmd.Stdin = nil
@@ -243,6 +299,7 @@ func runRunsConsumeDetached(args []string) error {
 	home := fs.String("home", "", "")
 	idle := fs.Duration("idle", 0, "")
 	lease := fs.Duration("claim-lease", 0, "")
+	version := fs.String("version", "", "")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -253,6 +310,7 @@ func runRunsConsumeDetached(args []string) error {
 		Home:        *home,
 		IdleTimeout: *idle,
 		ClaimLease:  *lease,
+		Version:     *version,
 	})
 	if errors.Is(err, orchestrator.ErrConsumerElectionLost) {
 		return nil

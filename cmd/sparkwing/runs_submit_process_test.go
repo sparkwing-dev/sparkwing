@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -85,11 +87,12 @@ func main() {
 // submitTestEnv is one isolated machine: a home, a fixture checkout, and
 // the marker file the fixture writes to.
 type submitTestEnv struct {
-	t       *testing.T
-	bin     string
-	home    string
-	repoDir string
-	marker  string
+	t        *testing.T
+	bin      string
+	home     string
+	repoDir  string
+	marker   string
+	extraEnv []string
 }
 
 func newSubmitTestEnv(t *testing.T) *submitTestEnv {
@@ -131,7 +134,7 @@ func newSubmitTestEnv(t *testing.T) *submitTestEnv {
 }
 
 func (e *submitTestEnv) env() []string {
-	return append(os.Environ(),
+	base := append(os.Environ(),
 		"SPARKWING_HOME="+e.home,
 		// The CLI runs as a real process, so paths.UnderTest() is false
 		// inside it and the repo registry would otherwise resolve to the
@@ -141,6 +144,7 @@ func (e *submitTestEnv) env() []string {
 		"SPARKWING_NO_UPDATE=1",
 		"SPARKWING_SUBMIT_TEST_MARKER="+e.marker,
 	)
+	return append(base, e.extraEnv...)
 }
 
 // run invokes the CLI and returns its combined output.
@@ -153,6 +157,20 @@ func (e *submitTestEnv) run(args ...string) (string, error) {
 	return string(out), err
 }
 
+// runStdout invokes the CLI and returns stdout only. Diagnostics --
+// the consumer-rotation notice, warnings -- go to stderr on purpose, so
+// a caller parsing a JSON acknowledgment must not be reading them.
+func (e *submitTestEnv) runStdout(args ...string) (string, string, error) {
+	e.t.Helper()
+	cmd := exec.Command(e.bin, args...)
+	cmd.Env = e.env()
+	cmd.Dir = e.repoDir
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
+
 func (e *submitTestEnv) mustRun(args ...string) string {
 	e.t.Helper()
 	out, err := e.run(args...)
@@ -163,14 +181,28 @@ func (e *submitTestEnv) mustRun(args ...string) string {
 }
 
 // submit runs `runs submit` against the fixture and decodes the ack.
+// extra are submit's own flags, which precede the pipeline name.
 func (e *submitTestEnv) submit(extra ...string) submitResult {
 	e.t.Helper()
-	args := append([]string{"runs", "submit", "-o", "json", "--home", e.home, "-C", e.repoDir}, extra...)
+	return e.submitWithArgs(extra, nil)
+}
+
+// submitWithArgs separates submit's own flags from the pipeline's,
+// which is the placement the command requires: everything after the
+// pipeline name belongs to the pipeline.
+func (e *submitTestEnv) submitWithArgs(own, pipelineArgs []string) submitResult {
+	e.t.Helper()
+	args := append([]string{"runs", "submit", "-o", "json", "--home", e.home, "-C", e.repoDir}, own...)
 	args = append(args, "fixture")
-	out := e.mustRun(args...)
+	args = append(args, pipelineArgs...)
+	out, errOut, err := e.runStdout(args...)
+	if err != nil {
+		e.t.Fatalf("sparkwing %s failed: %v\nstdout:\n%s\nstderr:\n%s",
+			strings.Join(args, " "), err, out, errOut)
+	}
 	var r submitResult
 	if err := json.Unmarshal([]byte(out), &r); err != nil {
-		e.t.Fatalf("decode submit ack: %v\n%s", err, out)
+		e.t.Fatalf("decode submit ack: %v\nstdout:\n%s\nstderr:\n%s", err, out, errOut)
 	}
 	return r
 }
@@ -536,5 +568,283 @@ func TestRunsSubmit_RefusesAPipelineNothingDeclares(t *testing.T) {
 	}
 	if len(triggers) != 0 {
 		t.Fatalf("a refused submission still queued %d triggers", len(triggers))
+	}
+}
+
+// --- Regression tests lifted from adversarial review ---------------
+
+// advSlowFixtureSource is a pipeline that records a START/END pair per
+// dispatch and can be told to take a long time, so "dispatched twice
+// concurrently" is directly observable rather than inferred.
+const advSlowFixtureSource = `package main
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+	"time"
+)
+
+func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--describe" {
+		fmt.Print("[{\"name\":\"fixture\"}]")
+		return
+	}
+	marker := os.Getenv("SPARKWING_SUBMIT_TEST_MARKER")
+	id := os.Args[len(os.Args)-1]
+	appendLine(marker, "START "+id+" pid="+strconv.Itoa(os.Getpid()))
+	if s := os.Getenv("ADV_SLEEP_SECONDS"); s != "" {
+		n, _ := strconv.Atoi(s)
+		time.Sleep(time.Duration(n) * time.Second)
+	}
+	appendLine(marker, "END "+id+" pid="+strconv.Itoa(os.Getpid()))
+}
+
+func appendLine(path, line string) {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		panic(err)
+	}
+	defer f.Close()
+	fmt.Fprintln(f, line)
+}
+`
+
+// useSlowFixture swaps the environment's checkout for one whose runs
+// take sleepSeconds, so a dispatch can be observed while it is alive.
+func (e *submitTestEnv) useSlowFixture(t *testing.T, sleepSeconds int) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(e.repoDir, ".sparkwing", "main.go"),
+		[]byte(advSlowFixtureSource), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.extraEnv = append(e.extraEnv, "ADV_SLEEP_SECONDS="+strconv.Itoa(sleepSeconds))
+}
+
+func (e *submitTestEnv) startsInMarker() int {
+	n := 0
+	for _, l := range e.markerLines() {
+		if strings.HasPrefix(l, "START ") {
+			n++
+		}
+	}
+	return n
+}
+
+// TestRunsSubmit_LiveDispatchSurvivesAWallClockJump is BLOCKER 1 end to
+// end, and is the review's own repro turned into an assertion.
+//
+// A suspended laptop resumes with wall time past the claim's lease while
+// the heartbeat's next monotonic tick is still far away; the sweep runs
+// four times more often than the heartbeat, so it wins. Pushing the
+// lease row into the past reproduces exactly the state a resume leaves
+// behind. The run must not be dispatched a second time.
+func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
+	e := newSubmitTestEnv(t)
+	e.useSlowFixture(t, 45)
+
+	ack := e.submit("--consumer-claim-lease", "300s")
+	waitUntil(t, "the dispatch to start executing", 120*time.Second, func() bool {
+		return e.startsInMarker() >= 1
+	})
+
+	// The laptop wakes.
+	st := e.store()
+	if _, err := st.DB().Exec(
+		`UPDATE triggers SET lease_expires_at = ? WHERE status = 'claimed'`,
+		time.Now().Add(-time.Hour).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+
+	// Two full sweep intervals plus dispatch headroom.
+	deadline := time.Now().Add(45 * time.Second)
+	for time.Now().Before(deadline) {
+		if e.startsInMarker() > 1 {
+			t.Fatalf("run %s was dispatched %d times concurrently after a wall-clock jump:\n  %s",
+				ack.RunID, e.startsInMarker(), strings.Join(e.markerLines(), "\n  "))
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if got := e.startsInMarker(); got != 1 {
+		t.Fatalf("expected exactly one dispatch, saw %d: %v", got, e.markerLines())
+	}
+}
+
+// TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines is S2. A key used
+// by one pipeline used to answer another pipeline's submission with the
+// first pipeline's run, at exit 0 -- so the requested pipeline never ran
+// and the caller was told everything was fine.
+func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
+	e := newSubmitTestEnv(t)
+	other := t.TempDir()
+	otherSparkwing := filepath.Join(other, ".sparkwing")
+	if err := os.MkdirAll(otherSparkwing, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherSparkwing, "go.mod"),
+		[]byte("module otherfixture\n\ngo 1.22\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherSparkwing, "main.go"),
+		[]byte(strings.Replace(submitFixtureSource, `\"name\":\"fixture\"`, `\"name\":\"beta\"`, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	first := e.submit("--idempotency-key", "shared-key")
+	if first.Pipeline != "fixture" {
+		t.Fatalf("first submission is pipeline %q", first.Pipeline)
+	}
+
+	out, errOut, rerr := e.runStdout("runs", "submit", "-o", "json", "--home", e.home,
+		"-C", other, "--idempotency-key", "shared-key", "beta")
+	if rerr != nil {
+		t.Fatalf("submitting beta failed: %v\nstdout:\n%s\nstderr:\n%s", rerr, out, errOut)
+	}
+	var second submitResult
+	if err := json.Unmarshal([]byte(out), &second); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if second.RunID == first.RunID {
+		t.Fatalf("submitting beta returned fixture's run %s; beta would never run", first.RunID)
+	}
+	if second.Pipeline != "beta" {
+		t.Fatalf("second submission reported pipeline %q, want beta", second.Pipeline)
+	}
+	if second.AlreadySubmitted {
+		t.Fatal("a key used by a different pipeline was treated as a duplicate")
+	}
+}
+
+// TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused is the other
+// half of S2: a key names one intent, so the same key with different
+// arguments is a different request, not a retry. Answering it with the
+// original run would silently drop it.
+func TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
+	e := newSubmitTestEnv(t)
+	e.submitWithArgs([]string{"--idempotency-key", "k"}, []string{"--env", "staging"})
+
+	out, err := e.run("runs", "submit", "--home", e.home, "-C", e.repoDir,
+		"--idempotency-key", "k", "fixture", "--env", "production")
+	if err == nil {
+		t.Fatalf("a key reused with different arguments was accepted:\n%s", out)
+	}
+	for _, want := range []string{"different arguments", "staging", "production", "new key"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("refusal missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus is S3. Exit 0 is
+// still correct -- the run exists -- but the caller must be able to see
+// that what it is holding already finished, and how.
+func TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
+	e := newSubmitTestEnv(t)
+	first := e.submit("--idempotency-key", "k")
+
+	st := e.store()
+	if err := st.FinishRun(context.Background(), first.RunID, "failed", "boom"); err != nil {
+		t.Fatal(err)
+	}
+
+	out, errOut, rerr := e.runStdout("runs", "submit", "-o", "json", "--home", e.home,
+		"-C", e.repoDir, "--idempotency-key", "k", "fixture")
+	if rerr != nil {
+		t.Fatalf("resubmit failed: %v\nstdout:\n%s\nstderr:\n%s", rerr, out, errOut)
+	}
+	var second submitResult
+	if err := json.Unmarshal([]byte(out), &second); err != nil {
+		t.Fatalf("decode: %v\n%s", err, out)
+	}
+	if second.Status != "failed" {
+		t.Fatalf("duplicate ack status = %q, want failed", second.Status)
+	}
+
+	pretty := e.mustRun("runs", "submit", "-o", "pretty", "--home", e.home, "-C", e.repoDir,
+		"--idempotency-key", "k", "fixture")
+	if !strings.Contains(pretty, "failed") {
+		t.Errorf("pretty duplicate ack hides the original's failure:\n%s", pretty)
+	}
+	if !strings.Contains(pretty, "already finished") {
+		t.Errorf("pretty duplicate ack does not say the run is over:\n%s", pretty)
+	}
+}
+
+// TestRunsSubmit_ReplacesAConsumerFromAnotherBuild is S7. A consumer
+// keeps its queue while work keeps arriving, so without a version check
+// a freshly installed binary would hand every run to the old build --
+// including runs submitted to pick up a fix.
+func TestRunsSubmit_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
+	e := newSubmitTestEnv(t)
+
+	// A resident consumer claiming to be some other build.
+	old := exec.Command(e.bin, "__runs-consume", "--home", e.home,
+		"--idle", "10m", "--version", "v0.0.1-old")
+	old.Env = e.env()
+	old.Dir = e.repoDir
+	logF, _ := os.Create(filepath.Join(e.home, "old-consumer.log"))
+	old.Stdout, old.Stderr = logF, logF
+	if err := old.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = old.Process.Kill(); _ = old.Wait() })
+	waitUntil(t, "the old consumer to take the queue", 20*time.Second, func() bool {
+		running, err := orchestrator.ConsumerRunning(e.home)
+		return err == nil && running
+	})
+	oldPID, _ := orchestrator.ConsumerPID(e.home)
+
+	e.submit()
+
+	info, ok := orchestrator.ConsumerInfo(e.home)
+	if !ok {
+		t.Fatal("no consumer after submitting against an outdated one")
+	}
+	if info.PID == oldPID {
+		t.Fatalf("the outdated consumer (pid %d, v0.0.1-old) still owns the queue; "+
+			"an upgrade would never take effect", oldPID)
+	}
+	if info.Version == "v0.0.1-old" {
+		t.Fatalf("replacement consumer still reports the old version %q", info.Version)
+	}
+	waitUntil(t, "the new consumer to execute the run", 90*time.Second, func() bool {
+		return len(e.markerLines()) >= 1
+	})
+}
+
+// TestRunsConsumerStop_RecordsTheInterruptedRun is S5. Terminal
+// bookkeeping used to be written through the very context `stop` had
+// just cancelled, so it never landed: the run stayed pending and its
+// trigger stayed claimed until a lease lapsed minutes later.
+func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
+	e := newSubmitTestEnv(t)
+	e.useSlowFixture(t, 60)
+
+	ack := e.submit()
+	waitUntil(t, "the dispatch to start", 120*time.Second, func() bool {
+		return e.startsInMarker() >= 1
+	})
+
+	e.mustRun("runs", "consumer", "stop", "--home", e.home)
+
+	st := e.store()
+	waitUntil(t, "the interrupted run's trigger to leave the claimed state", 30*time.Second, func() bool {
+		trig, err := st.GetTrigger(context.Background(), ack.RunID)
+		return err == nil && trig.Status != "claimed"
+	})
+	trig, err := st.GetTrigger(context.Background(), ack.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trig.Status == "claimed" {
+		t.Fatal("stopping the consumer left the run's trigger claimed with nothing executing it")
+	}
+	// Requeued rather than failed: the run never got a verdict, so the
+	// next consumer re-executes it.
+	if trig.Status == "pending" {
+		n, cerr := st.CountPendingTriggers(context.Background())
+		if cerr != nil || n == 0 {
+			t.Fatalf("trigger reads pending but the queue is empty (n=%d err=%v)", n, cerr)
+		}
 	}
 }
