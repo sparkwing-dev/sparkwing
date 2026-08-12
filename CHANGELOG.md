@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.27.0] - 2026-08-12
 ### Security
 
 - **orchestrator:** Redact secret values that a run's arguments inherit from
@@ -67,6 +69,96 @@ code change to unlock.
   declared input names rather than from the values, so `runs list`, `runs get`,
   `runs status`, the controller endpoints, and `run_start` redacted correctly
   throughout.
+
+### Changed
+
+- **cli + orchestrator (Breaking):** Daemon hosting moves from compiled
+  pipeline binaries to installed sparkwing binaries. The invariant: the
+  installed Sparkwing distribution owns daemon lifecycle; pipeline clients
+  declare required capabilities and use the running daemon, but never host,
+  replace, or upgrade it. A pipeline binary no longer serves the hidden
+  `wingd` verbs and no longer takes a running daemon over -- it shares
+  whatever daemon is serving. `sparkwing run` sets `SPARKWING_WINGD_BIN` to
+  its own path before exec'ing the pipeline binary (an exported value of
+  your own survives) and brings the daemon to its own version first, for
+  invocations that will actually admit work. A pipeline binary invoked
+  directly falls back to the `sparkwing` on PATH, and starts the daemon
+  through that installed binary rather than through itself.
+
+  The point is that a repo's `.sparkwing/go.mod` pin is no longer part of
+  the machine-wide daemon version negotiation: one repo bumping its SDK can
+  no longer churn the daemon every other repo on the box shares.
+
+  On a box where no daemon is available, a run now proceeds uncoordinated
+  with one stderr warning, which keeps a pipeline binary shipped alone to a
+  deploy box a working product. It loses host arbitration only: CPU and
+  memory charges are not held, so concurrent runs there can oversubscribe
+  the machine. `.Concurrency()` groups are unaffected -- box- and
+  run-scoped groups are enforced through the shared store instead of the
+  daemon, so "one deploy at a time on this box" still holds, with weaker
+  crash cleanup (a killed run's slot waits for `sparkwing doctor` rather
+  than being freed when its socket closes).
+
+  Two cases fail instead of degrading. A pipeline that reserves host
+  capacity with a plan- or node-level `.Resources()` pin fails, because CPU
+  and memory have no fallback arbiter and there is no weaker version of
+  that reservation to fall back to. And a daemon that *is* running but
+  speaks an older protocol than the pipeline binary fails every run, pinned
+  or not: it is actively holding capacity for other work, so joining it
+  unadmitted oversubscribes the box. Both errors name the fix.
+  `SPARKWING_ALLOW_UNADMITTED=1` (exactly `1`) forces the uncoordinated
+  path in either case; `--sw-dry-run` is exempt from both. See [migration
+  guide](docs/migrations/_unreleased.md#daemon-hosting-moves-to-installed-binaries).
+
+  `sparkwing.ToolSlot` changes shape on such a host: it returns its
+  documented `granted=false` fallback, where a headless pipeline binary
+  used to self-host a daemon and be granted the budget. Job bodies already
+  have to handle that return, and fall back to whatever serialization the
+  tool ships with.
+
+  **Migration.** Nothing changes for anyone with the sparkwing CLI
+  installed and on PATH, which is the normal laptop and CI setup. Hosts
+  running a pipeline binary with no sparkwing installed keep working unless
+  their pipelines pin `.Resources()`, which now needs the CLI installed (or
+  `SPARKWING_ALLOW_UNADMITTED=1`). Pipeline binaries built against an older
+  SDK are unaffected: they keep their existing self-hosting behavior and
+  talk to a newer CLI-hosted daemon exactly as before, so a mixed box
+  during a rollout is fine.
+
+  One edge is worth naming, and it covers every release so far: no
+  sparkwing through v0.26.0 can host a daemon for a pipeline binary built
+  against this SDK, because none of them serves `wingd supervise`. A host
+  whose installed CLI predates this release will refuse to host, and the
+  error names the release to install. Update the CLI to v0.27.0 or newer on
+  any host that runs pipeline binaries built against this SDK.
+
+### Fixed
+
+- **wingd:** The admission daemon is now supervised: it is started as a
+  child of a watchdog process that replaces it if it stops answering
+  health probes. A daemon that has stopped scheduling cannot run its own
+  recovery, so only another process can bound it. Both the supervisor and
+  the spawn that reaches it were added after v0.26.0 was cut, so no
+  release has shipped an unsupervised-then-supervised daemon -- this is
+  the first release with one at all. It works because spawning now starts
+  an installed binary and both the CLI and `sparkwing-runner` serve both
+  `wingd` verbs; a compiled pipeline binary, which serves neither, is
+  never asked to. A test in each hosting binary pins that it serves the
+  verb the spawn invokes, and the headless gate pins that a pipeline
+  binary is never asked to.
+- **runner:** `sparkwing-runner --local-admission` can bring up the
+  admission daemon it depends on. It served only `wingd run` while its own
+  spawn path invoked the supervisor, so its spawn answered itself with a
+  usage error and no daemon appeared. Unreleased regression: the spawn
+  verb it collided with was added after v0.26.0 was cut.
+- **wingd:** A daemon host that fails to start now fails the run promptly
+  instead of after the full thirty-second socket wait, with an error
+  naming the binary that was started and the tail of whatever it wrote. A
+  named-but-unstartable host -- a typo'd `SPARKWING_WINGD_BIN`, a stale
+  path -- reports the variable and its value rather than "could not reach
+  the admission daemon", which sent the reader to inspect a daemon when
+  the fault was a path they typed. A spawn that never starts a process no
+  longer leaves an empty `d.log` behind implying one ran.
 
 ## [v0.26.0] - 2026-08-12
 ### Added

@@ -26,6 +26,13 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 		return err
 	}
 
+	// The pipeline binary is a wingd client but never a wingd host: hand
+	// it this CLI as the binary to spawn for the daemon. Bringing the
+	// daemon to this CLI's version happens in dispatchRun, gated on the
+	// invocation actually admitting work -- not here, where debug replay
+	// also passes through.
+	env = withWingdHost(env)
+
 	if os.Getenv("SPARKWING_NO_BINCACHE") != "" {
 		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
 	}

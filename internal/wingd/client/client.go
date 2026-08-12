@@ -68,6 +68,73 @@ func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 		ErrProtocolTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, pinAdvice)
 }
 
+// ErrDaemonTooOld is returned when the running daemon's protocol major is
+// below what this client speaks and the client may not replace it
+// ([Options.NoTakeover]). The lever is the daemon's own binary -- the
+// installed sparkwing that hosts it -- not this client's build, which is
+// what separates it from [ErrProtocolTooOld].
+var ErrDaemonTooOld = errors.New("wingd/client: daemon protocol is older than this client")
+
+// FirstHostingRelease is the first sparkwing release whose installed
+// binary can host the daemon for a client that does not host its own:
+// the release that serves [DaemonSpawnVerb] and ships the host handoff.
+//
+// It is a hand-maintained fact, not something the build can derive, so
+// the release owner must keep it honest: this constant names the version
+// this work ships in, and a slipped release renames it here. Getting it
+// wrong sends an operator to install a version that will not fix their
+// problem, which is worse than saying nothing.
+//
+// It exists because the protocol floor is not the whole answer. A
+// v0.24.0 or v0.25.0 install speaks the current protocol and would clear
+// [wingwire.ProtocolFloors.MinVersionSpeaking], but serves no supervise
+// verb, so it cannot host. The advice has to name whichever bar is
+// higher.
+const FirstHostingRelease = "v0.27.0"
+
+// minHostingRelease is the release an operator must install for this
+// client to be able to use a daemon that binary hosts: the higher of the
+// protocol floor for this client's major and the first release that can
+// host at all.
+func minHostingRelease() string {
+	floor, known := wingwire.ReleasedProtocolFloors().MinVersionSpeaking(wingd.ProtocolMajor)
+	if !known {
+		return FirstHostingRelease
+	}
+	if semver.Compare(floor, FirstHostingRelease) > 0 {
+		return floor
+	}
+	return FirstHostingRelease
+}
+
+// daemonTooOld explains a daemon protocol major below what this client
+// speaks, for a client that may not take the daemon over. A pipeline
+// binary gets here when its SDK pin crossed a protocol boundary the
+// installed sparkwing hosting the daemon has not reached, so the advice
+// moves that installation, not the repo's go.mod pin.
+//
+// It names a release rather than a protocol number because "install
+// sparkwing X" is an instruction an operator can carry out, and it names
+// the hosting bar as well as the protocol one because clearing only the
+// protocol bar leaves them with a binary that still cannot host.
+//
+// It deliberately suggests no SPARKWING_HOME escape: a private home gets
+// its own daemon from the same unusable installation, so the suggestion
+// would send the reader in a circle.
+func daemonTooOld(selfVersion string, ack wingwire.HelloAck) error {
+	self := selfVersion
+	if self == "" {
+		self = "(unknown)"
+	}
+	daemon := ack.BinaryVersion
+	if daemon == "" {
+		daemon = "(unknown)"
+	}
+	return fmt.Errorf("%w: daemon speaks protocol %d (sparkwing %s), this pipeline binary speaks protocol %d (sparkwing %s). "+
+		"Install sparkwing %s or newer on this host, then run `sparkwing daemon restart`",
+		ErrDaemonTooOld, ack.ProtocolMajor, daemon, wingd.ProtocolMajor, self, minHostingRelease())
+}
+
 // servedDownLevel reports that the daemon answered on an older major than
 // it natively speaks, which happens only when this client is the older
 // side. Such a client must not take the daemon over: replacing a newer
@@ -94,8 +161,25 @@ type Options struct {
 	// never triggers takeover.
 	Version string
 	// Spawn starts a detached daemon for Home. Nil uses the default, which
-	// re-execs this binary as `sparkwing wingd run`.
+	// re-execs this binary as `sparkwing wingd supervise`; a binary that
+	// does not serve the `wingd` verbs itself passes [HostSpawn] (or
+	// [NoHostSpawn]) instead.
 	Spawn func(home, version string) error
+	// NoTakeover shares a running daemon this build supersedes instead of
+	// draining and replacing it, and forbids the self-exec default spawn.
+	// It is set by clients that cannot host the daemon themselves --
+	// compiled pipeline binaries -- for which "replace the daemon with my
+	// own build" is not an action they can take: their build is not
+	// installed anywhere the successor could come from, and routing the
+	// replacement through the host binary would either be a no-op or let
+	// two pins drain each other's daemon in a loop.
+	//
+	// Such a client never spends takeover budget, because it never takes
+	// anything over. When the daemon's protocol major is below what this
+	// client speaks, connect fails with [ErrDaemonTooOld] naming the
+	// installed sparkwing as the lever, rather than attempting a
+	// replacement it cannot perform.
+	NoTakeover bool
 	// DialTimeout bounds a single connect attempt. Zero uses a small
 	// default.
 	DialTimeout time.Duration
@@ -139,6 +223,13 @@ func (o Options) logf(format string, args ...any) {
 func (o Options) spawn(home, version string) error {
 	if o.Spawn != nil {
 		return o.Spawn(home, version)
+	}
+	// safety: the self-exec default is only correct for a binary that serves
+	// the `wingd` verbs. A NoTakeover client is by definition not one, so an
+	// unset Spawn there is a wiring mistake, and re-execing anyway would put
+	// the very binary this feature keeps out of the daemon role into it.
+	if o.NoTakeover {
+		return ErrNoDaemonHost
 	}
 	return defaultSpawn(home, version)
 }
@@ -314,9 +405,11 @@ func takeoverExhausted(selfVersion string, ack wingwire.HelloAck, attempts int) 
 		ErrTakeoverExhausted, attempts, daemon, ack.ProtocolMajor, self, wingd.ProtocolMajor)
 }
 
-// spawnFailed reports a spawn-syscall failure, folding in the daemon log
+// spawnFailed reports why bringing a daemon up did not work. Most callers
+// reach it with a spawn-syscall failure, and it folds in the daemon log
 // tail when a prior attempt left one so a bind-time death is visible even
-// when the final spawn is what erred.
+// when the final spawn is what erred. Some errors arrive already
+// explained, and those pass through untouched.
 //
 // A dial that failed for a reason no spawn can fix -- the socket path blocked,
 // a wedged listener -- outranks the spawn error, because that dial is the real
@@ -325,6 +418,21 @@ func takeoverExhausted(selfVersion string, ack wingwire.HelloAck, attempts int) 
 func spawnFailed(home, sock string, serr, dialErr error) error {
 	if u := unreachable(sock, dialErr); u != nil {
 		return u
+	}
+	if errors.Is(serr, ErrNoDaemon) || errors.Is(serr, ErrNoDaemonHost) {
+		// Not a spawn failure: the caller declared it cannot or will not
+		// start a daemon. The sentinel is the whole answer, and a leftover
+		// log from some earlier daemon would only send the reader after a
+		// process that is not the obstacle.
+		return serr
+	}
+	if errors.Is(serr, ErrDaemonHostUnusable) || errors.Is(serr, ErrDaemonHostFailed) {
+		// The obstacle is the named host binary, and the error already
+		// names it, why it was chosen, and -- for a host that started and
+		// died -- the tail of what it wrote. Re-wrapping it as a generic
+		// spawn failure would bury the one fact the operator has to act
+		// on, and appending the tail again would print it twice.
+		return serr
 	}
 	if tail := daemonLogTail(home); tail != "" {
 		path, _ := wingd.LogPath(home)
@@ -380,7 +488,10 @@ func daemonDeathCause(tail string) string {
 // daemon's -- a strictly newer release, an exact clean source build based on
 // the daemon's release or later, or an ordered newer source build -- it drains
 // the old daemon and brings up its own binary as the successor before returning
-// a connection to it.
+// a connection to it. [Options.NoTakeover] disables that replacement: the client
+// shares the running daemon whatever its version, and fails with
+// [ErrDaemonTooOld] only when the daemon's protocol major is below what this
+// client speaks.
 // The returned Client speaks the same protocol major and is ready for
 // [Client.Acquire], [Client.Reattach], or [Client.QueueState]. When a
 // spawned daemon dies at startup, the returned error carries the tail of
@@ -489,25 +600,39 @@ func (cl *Client) connect(ctx context.Context) error {
 
 		if ack.ProtocolMajor != wingd.ProtocolMajor {
 			if wingd.ProtocolMajor > ack.ProtocolMajor {
+				if opts.NoTakeover {
+					// safety: reported before any budget is spent, so a
+					// client that never takes over can never exhaust the
+					// takeover allowance and report the wrong fault.
+					cl.Close()
+					return daemonTooOld(opts.Version, ack)
+				}
 				cl.ack = ack
 				if !takeovers.spend(ack.BinaryVersion) {
 					cl.Close()
 					return takeoverExhausted(opts.Version, ack, takeovers.total)
 				}
-				cl.takeover(ctx, opts)
+				if terr := cl.takeover(ctx, opts); terr != nil {
+					return terr
+				}
 				continue
 			}
 			cl.Close()
 			return protocolTooOld(opts.Version, ack)
 		}
-		if !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
+		if !opts.NoTakeover && !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
 			cl.ack = ack
 			if !takeovers.spend(ack.BinaryVersion) {
 				cl.Close()
 				return takeoverExhausted(opts.Version, ack, takeovers.total)
 			}
-			cl.takeover(ctx, opts)
+			if terr := cl.takeover(ctx, opts); terr != nil {
+				return terr
+			}
 			continue
+		}
+		if opts.NoTakeover && !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
+			opts.logf("sharing running daemon %s (this build does not host the daemon and never replaces it)", ack.BinaryVersion)
 		}
 		if devBuild(opts.Version) != devBuild(ack.BinaryVersion) {
 			opts.logf("sharing running daemon %s (dev and release builds do not supersede each other)", ack.BinaryVersion)
@@ -563,7 +688,15 @@ func (cl *Client) recoverConn(ctx context.Context) error {
 
 // takeover drains the reachable older daemon and spawns this client's
 // binary as its successor, then returns so the caller re-dials.
-func (cl *Client) takeover(ctx context.Context, opts Options) {
+//
+// It returns the successor spawn's failure when that failure is the host
+// binary itself dying, so a takeover into a broken host fails in
+// milliseconds naming the binary rather than draining a working daemon
+// and then spending the full socket budget waiting for a replacement that
+// cannot come. Every other spawn error stays a logged best-effort: the
+// old daemon has already been drained, so re-dialing is still the right
+// next move and the connect loop's own budget covers it.
+func (cl *Client) takeover(ctx context.Context, opts Options) error {
 	opts.logf("taking over daemon %s with %s", cl.ack.BinaryVersion, opts.Version)
 	_ = cl.nc.SetWriteDeadline(time.Now().Add(opts.dialTimeout()))
 	_ = cl.write(&wingwire.DrainRequest{SuccessorVersion: opts.Version})
@@ -571,9 +704,13 @@ func (cl *Client) takeover(ctx context.Context, opts Options) {
 	_, _ = cl.dec.read()
 	cl.Close()
 	if err := opts.spawn(opts.Home, opts.Version); err != nil {
+		if errors.Is(err, ErrDaemonHostFailed) || errors.Is(err, ErrDaemonHostUnusable) {
+			return err
+		}
 		opts.logf("spawn successor: %v", err)
 	}
 	_ = sleep(ctx, opts.backoff())
+	return nil
 }
 
 func (cl *Client) handshake(version string) (wingwire.HelloAck, error) {

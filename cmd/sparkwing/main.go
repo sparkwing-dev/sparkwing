@@ -232,6 +232,11 @@ func dispatchRun(args []string) error {
 		}
 	}
 
+	// Bring the daemon to this CLI's version only when this invocation
+	// will actually admit work.
+	if runNeedsDaemon(wf, passthrough) {
+		ensureRunDaemon()
+	}
 	return compileAndExec(dir, append([]string{pipelineName}, passthrough...), env,
 		compileOptions{NoUpdate: wf.noUpdate})
 }

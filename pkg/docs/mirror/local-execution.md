@@ -223,12 +223,80 @@ Nothing here ever deletes or renames a binary.
 Two `sparkwing run` invocations on the same machine compete for the same
 CPU. Local runs are arbitrated by a per-host admission daemon
 (`wingd`) -- invisible infrastructure you never install, start, or
-tune. The first run that needs admission elects one: a lock file under
+tune. The first run that needs admission brings one up: a lock file under
 the sparkwing home makes the race safe, so one process wins and the rest
-connect to the winner. A newer sparkwing binary transparently takes over
-from a running older daemon, and the daemon exits on its own once the
-machine has been idle for a while, coming back the next time a run needs
-it.
+connect to the winner. The daemon exits on its own once the machine has
+been idle for a while, coming back the next time a run needs it.
+
+### Who hosts the daemon
+
+**The installed Sparkwing distribution owns daemon lifecycle. Pipeline
+clients declare required capabilities and use the running daemon; they
+never host, replace, or upgrade it.**
+
+The daemon is always an installed sparkwing build -- the CLI, or
+`sparkwing-runner` on a runner box -- and never a per-repo pipeline
+binary. `sparkwing run` hands each run the exact CLI that launched it as
+the daemon host, through `SPARKWING_WINGD_BIN`; a pipeline binary invoked
+directly falls back to the `sparkwing` on PATH. You can export
+`SPARKWING_WINGD_BIN` yourself to point a directly-invoked pipeline
+binary (a systemd unit, a deploy box) at a sparkwing that is not on PATH,
+and `sparkwing run` will not overwrite a value you set.
+
+A newer *installed* sparkwing transparently replaces a running older
+daemon. Pipeline binaries never do, so one repo bumping its `.sparkwing/`
+SDK pin cannot churn the daemon every other repo on the box shares.
+
+### Running with no daemon available
+
+Two situations look similar and are not.
+
+**Nothing is arbitrating the box** -- no daemon running, no sparkwing
+installed to start one. Most runs proceed uncoordinated, saying so once
+on stderr. What they lose is host arbitration: CPU and memory charges are
+not held against anything, so concurrent runs on that box can
+oversubscribe it. What they keep is `.Concurrency()`: box- and run-scoped
+groups are enforced through the shared store instead of the daemon, so
+"one deploy at a time on this box" still holds. The difference is crash
+cleanup -- the daemon frees a killed run's slot the instant the kernel
+closes its socket, while a store slot survives until `sparkwing doctor`
+reclaims it.
+
+The exception is a pipeline that **reserves host capacity** with a
+plan-level or node-level `.Resources()` pin. That run fails, naming the
+fix. CPU and memory have no fallback arbiter, so there is no weaker
+version of the reservation to fall back to -- there is only quietly not
+making it, while other work on the box does the same.
+
+**A daemon is running but this binary cannot speak to it** -- its
+protocol is older than the pipeline binary's SDK pin, and pipeline
+binaries never replace a daemon. Every run fails here, pinned or not.
+Something is actively holding capacity for other work, and joining it
+unadmitted oversubscribes the machine rather than merely going
+uncoordinated. The error names both versions and the release to install.
+
+`SPARKWING_ALLOW_UNADMITTED=1` forces the uncoordinated path in either
+case, for an operator who knows what else runs on the box. It is an
+environment variable rather than a flag because the runs that need it are
+the ones no CLI launched, and it is read strictly: only the exact value
+`1` turns the check off. Dry runs (`--sw-dry-run`) are exempt from both
+refusals -- they mutate nothing and finish in seconds.
+
+The fix in every case is the same: install or update the sparkwing CLI on
+the host, or point `SPARKWING_WINGD_BIN` at an installed one.
+
+One in-body feature does change shape without a daemon.
+`sparkwing.ToolSlot(ctx, group)` -- the budget a job body takes out
+around a tool that manages its own parallelism -- returns
+`granted=false`, its documented fallback, and the body uses whatever
+private serialization the tool ships with. Job bodies already have to
+handle that return.
+
+These rules are evaluated once, at run start. A daemon that dies
+*during* a run is a different path: the run's client reconnects and
+reattaches its lease, spawning a replacement through the resolved host
+binary if one exists, and if none does the next admission the run needs
+fails loudly rather than silently continuing unarbitrated.
 
 The process connects when it needs admission. Explicit run resources and
 plan-level `.Concurrency()` groups are admitted at run start and held by

@@ -52,8 +52,19 @@ type procHandle struct {
 
 func startProc(t *testing.T, args ...string) *procHandle {
 	t.Helper()
+	return startProcEnv(t, nil, args...)
+}
+
+// startProcEnv is [startProc] with extra environment entries appended to
+// the inherited environment, for the paths whose behavior is decided by
+// the environment the process is launched with.
+func startProcEnv(t *testing.T, extraEnv []string, args ...string) *procHandle {
+	t.Helper()
 	bin := buildFixture(t)
 	cmd := exec.Command(bin, args...)
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatalf("stdout pipe: %v", err)
@@ -265,6 +276,67 @@ func TestProcess_SelfSpawnedDaemonWritesLogFile(t *testing.T) {
 	}
 	if !strings.Contains(string(data), "wingd:") || !strings.Contains(string(data), "elected") {
 		t.Fatalf("daemon log lacks a meaningful history line:\n%s", data)
+	}
+}
+
+// TestProcess_PipelineClientStartsDaemonViaHostBinary exercises the one
+// spawn path a non-hosting client retains. A compiled pipeline binary
+// invoked directly -- a systemd unit, a deploy box, no CLI in the loop --
+// with $SPARKWING_WINGD_BIN naming an installed sparkwing must bring the
+// daemon up by starting *that* binary, never by re-execing itself.
+//
+// The daemon's advertised version is the proof: the host binary names its
+// own build, and the spawn deliberately drops the client's, so a daemon
+// reporting anything but the host's default would mean the client hosted
+// itself after all.
+func TestProcess_PipelineClientStartsDaemonViaHostBinary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("process test skipped in -short")
+	}
+	home := shortHome(t)
+	hostBin := buildFixture(t)
+	env := []string{
+		"SPARKWING_WINGD_BIN=" + hostBin,
+		// An empty PATH proves the env var is what resolved the host: with
+		// a sparkwing on the developer's PATH the fallback would pass this
+		// test for the wrong reason.
+		"PATH=" + t.TempDir(),
+	}
+	h := startProcEnv(t, env, "hold",
+		"--home", home,
+		"--run", "hosted",
+		"--cores", "0.1",
+		"--host-spawn",
+		// Newer than the daemon the host binary brings up (v1.0.0): a
+		// no-takeover client must share it rather than replace it.
+		"--version", "v9.9.9",
+	)
+	if got := h.waitLine("DAEMON ", 20*time.Second); got != "v1.0.0" {
+		t.Fatalf("daemon version = %q, want v1.0.0 -- the daemon is not the binary $SPARKWING_WINGD_BIN named", got)
+	}
+	if tok := h.waitOK(10 * time.Second); tok == "" {
+		t.Fatal("host-spawned daemon granted an empty lease token")
+	}
+}
+
+// TestProcess_PipelineClientWithoutAHostStartsNothing is the other half:
+// with no host binary resolvable, a non-hosting client must report the
+// absence with its sentinel rather than fall back to hosting itself. A
+// caller that can run uncoordinated keys off exactly that sentinel.
+func TestProcess_PipelineClientWithoutAHostStartsNothing(t *testing.T) {
+	if testing.Short() {
+		t.Skip("process test skipped in -short")
+	}
+	home := shortHome(t)
+	env := []string{"SPARKWING_WINGD_BIN=", "PATH=" + t.TempDir()}
+	h := startProcEnv(t, env, "hold",
+		"--home", home, "--run", "hostless", "--cores", "0.1", "--host-spawn")
+	got := h.waitLine("ENSURE-ERR ", 20*time.Second)
+	if !strings.Contains(got, "no sparkwing binary is available to host one") {
+		t.Fatalf("error = %q, want the no-host sentinel", got)
+	}
+	if _, err := os.Stat(filepath.Join(home, "wingd", "d.log")); err == nil {
+		t.Fatal("a client with no host binary started a daemon anyway")
 	}
 }
 
