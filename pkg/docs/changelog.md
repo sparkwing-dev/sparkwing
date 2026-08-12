@@ -48,6 +48,7 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+<<<<<<< HEAD
 ### Fixed
 
 - **wingd:** The daemon log stays bounded between daemon restarts. Rotation
@@ -74,6 +75,57 @@ code change to unlock.
   the prefix with a non-zero exit, instead of an empty listing (or the literal
   `null` under `-o json`) at exit 0; when the prefix matched only hidden
   verbs, the error says to pass `--include-hidden`.
+=======
+### Added
+
+- **storage:** `fs.LogStore.RunDir(runID)` names the directory a filesystem
+  logs backend writes a run's node logs into. The orchestrator records it as
+  the run's `log_path`; it is a method on the concrete filesystem store, not on
+  the `storage.LogStore` interface, because the object-store, controller, and
+  stdout backends have no local directory to name.
+
+### Fixed
+
+- **orchestrator:** Record `log_path` for runs whose profile uses a filesystem
+  logs backend (`logs: {type: filesystem}`). Those node logs are written to the
+  executing machine's disk, but the run reported no log path, so readers
+  scraped the stream for output that was already on their own disk. The
+  invariant is unchanged: a recorded path always names a directory that exists,
+  and backends whose logs live behind a URL still record nothing.
+- **cli:** Stop `pipeline trigger` from hanging when the controller dies
+  mid-run. The log-follow loop discarded every failed status read and polled
+  again forever, so a controller that went away during a follow left the
+  command waiting indefinitely instead of reaching its existing
+  unknown-outcome exit (3). The follow now gives up after the run's status has
+  been unreadable for 60 seconds and reports the transport error; any
+  successful poll in between resets the clock, so a replica rolling out is
+  still ridden through. This also bounds `sparkwing runs logs --follow`, which
+  shares the loop: a controller outage lasting more than 60 seconds now ends
+  the follow with a non-zero exit instead of tailing nothing indefinitely.
+- **orchestrator:** Make argument and guard semantics agree across every entry
+  point. A run row records only the arguments the operator passed; the
+  `defaults.args` and pipeline `args:` layers are re-read from the checkout the
+  run executes out of, at that checkout's revision (for a retry, the source
+  run's recorded revision). Only `sparkwing run` performed that read. Queued
+  triggers -- which is every dashboard run and retry, the local trigger loop,
+  and every spawned child -- planned with unmerged arguments and skipped guard
+  evaluation entirely, and the cluster node entrypoint and `debug replay`
+  planned with unmerged arguments too, so a `secret:"true"` input supplied by
+  `sparkwing.yaml` was never registered with the executing side's log masker.
+  All four paths now resolve the same layers, with the operator's explicit
+  arguments still winning per key. Behavior change: a trigger whose arguments
+  come from `sparkwing.yaml` now runs with them and is subject to the
+  pipeline's guards.
+- **orchestrator:** Evaluate `arg:<flag>=<value>` guards against the arguments
+  the run actually executes with. Guards were judged on the caller's arguments
+  alone, so a value supplied by the project's `defaults.args` block or a
+  pipeline entry's `args:` block was invisible to them and a guard written to
+  reject a protected target waved the dispatch through. Guards now read the
+  same merged set the pipeline is invoked with, with the command-line flag
+  still winning per key. Behavior change: a guard that silently passed because
+  its value came from `sparkwing.yaml` now fires; a guard on an argument no
+  layer supplies is unaffected.
+>>>>>>> fix/wave3-correctness
 
 ## [v0.27.0] - 2026-08-12
 ### Security

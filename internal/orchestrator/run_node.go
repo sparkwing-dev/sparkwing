@@ -111,10 +111,16 @@ func RunNodeOnce(
 		StartedAt: run.StartedAt,
 	}
 	sparkwing.SetGit(rc.Git)
-	// run.Args is both the seed and the Invoke input: a pod has no
-	// sparkwing.yaml to merge, so the stored row is the whole arg set.
-	masker := maskerForInvokeArgs(reg, run.Args)
-	plan, err := reg.Invoke(ctx, run.Args, rc)
+	// run.Args carries only the operator's explicit layer; the project's
+	// defaults.args and the pipeline entry's args: block are re-read from
+	// the checkout this node compiled out of, so the pod plans from the
+	// same merged set the local plan used. See checkoutInvokeArgs. The
+	// masker is seeded from the merge for the same reason it is on the
+	// local path: a yaml-supplied `secret:"true"` value the masker never
+	// saw is a value the node log persists in the clear.
+	invokeArgs := checkoutInvokeArgs(run.Pipeline, run.Args, logger)
+	masker := maskerForInvokeArgs(reg, invokeArgs)
+	plan, err := reg.Invoke(ctx, invokeArgs, rc)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("build plan: %w", err)
 	}
@@ -414,7 +420,7 @@ func RunNodeOnce(
 		RunID:    runID,
 		NodeID:   nodeID,
 		Pipeline: run.Pipeline,
-		Args:     run.Args,
+		Args:     invokeArgs,
 		Git: sparkwing.NewGit(sparkwing.CurrentRuntime().WorkDir,
 			run.GitSHA, run.GitBranch, "", run.Repo, run.RepoURL),
 		Trigger:  sparkwing.TriggerInfo{Source: run.TriggerSource},

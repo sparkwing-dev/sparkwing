@@ -225,33 +225,40 @@ func canonicalLocalStore(b StateBackend) *store.Store {
 // empty string means there is nothing local to point at, and the field
 // is omitted rather than fabricated.
 //
-// KNOWN FALSE NEGATIVE: a profile whose logs backend is a filesystem
-// log store (`logs: {type: fs}`) writes to local disk through
-// HTTPLogs/storage.LogStore, which exposes no run-directory accessor,
-// so those runs report no log_path even though the files are local.
-// Fixing it means adding a run-dir accessor to storage.LogStore and
-// threading it through HTTPLogs.
+// A profile whose logs backend is a filesystem log store
+// (`logs: {type: filesystem}`) also writes to local disk, but it does
+// so through HTTPLogs wrapping a storage.LogStore rather than through
+// localLogs. That case is answered by [HTTPLogs.localRunDir], which
+// probes for the concrete fs store rather than widening the public
+// storage.LogStore interface with a run-directory accessor every
+// remote implementation would have to answer meaninglessly.
 func localRunLogDir(b LogBackend, runID string) string {
-	var p Paths
+	var dir string
 	switch l := b.(type) {
 	case localLogs:
-		p = l.paths
+		if err := l.paths.EnsureRunDir(runID); err != nil {
+			return ""
+		}
+		dir = l.paths.RunDir(runID)
 	case *localLogs:
-		p = l.paths
-	default:
+		if err := l.paths.EnsureRunDir(runID); err != nil {
+			return ""
+		}
+		dir = l.paths.RunDir(runID)
+	case *HTTPLogs:
+		dir = l.localRunDir(runID)
+	}
+	if dir == "" {
 		return ""
 	}
-	if err := p.EnsureRunDir(runID); err != nil {
-		return ""
-	}
-	dir, err := filepath.Abs(p.RunDir(runID))
+	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return ""
 	}
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+	if info, err := os.Stat(abs); err != nil || !info.IsDir() {
 		return ""
 	}
-	return dir
+	return abs
 }
 
 type localState struct {

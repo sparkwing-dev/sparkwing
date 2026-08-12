@@ -21,6 +21,18 @@ const (
 	roleHolder
 )
 
+// String renders the role for the daemon log.
+func (r connRole) String() string {
+	switch r {
+	case roleWaiter:
+		return "queued"
+	case roleHolder:
+		return "holding admission"
+	default:
+		return "idle"
+	}
+}
+
 // maxFrame bounds a single wire frame so a runaway peer cannot exhaust
 // memory; the largest legitimate frame is a full queue-state dump.
 const maxFrame = 8 << 20
@@ -36,6 +48,12 @@ type conn struct {
 	d  *Daemon
 	nc net.Conn
 	sc *bufio.Scanner
+
+	// id numbers this connection within the daemon's lifetime, so the
+	// log lines a connection produces can be tied to each other and to
+	// nothing else. Assigned once at construction and never written
+	// again, which is why reading it needs no lock.
+	id uint64
 
 	writeMu        sync.Mutex
 	closeOnce      sync.Once
@@ -118,7 +136,11 @@ type conn struct {
 func newConn(d *Daemon, nc net.Conn) *conn {
 	sc := bufio.NewScanner(nc)
 	sc.Buffer(make([]byte, 0, 64<<10), maxFrame)
-	return &conn{d: d, nc: nc, sc: sc}
+	var id uint64
+	if d != nil {
+		id = d.connSeq.Add(1)
+	}
+	return &conn{d: d, nc: nc, sc: sc, id: id}
 }
 
 // readMessage blocks for the next framed message. It returns an error on
@@ -149,8 +171,8 @@ func (c *conn) send(msg wingwire.Message) error {
 	}
 	if _, err := c.nc.Write(line); err != nil {
 		if errors.Is(err, os.ErrDeadlineExceeded) {
-			// safety: a timed-out write may have left a partial frame on the wire, so the stream can no longer be framed; close the socket and let the read loop's disconnect path release the connection's admission. The message names the peer address rather than the run: runID is guarded by the daemon mutex, which this path does not hold.
-			c.logf("client at %s stopped reading; dropping connection after %s", c.nc.RemoteAddr(), connWriteTimeout)
+			// safety: a timed-out write may have left a partial frame on the wire, so the stream can no longer be framed; close the socket and let the read loop's disconnect path release the connection's admission. The message names the connection rather than the run: runID is guarded by the daemon mutex, which this path does not hold. The conn id is immutable, so it is readable here and pairs this line with the disconnect line that follows it.
+			c.logf("conn %d stopped reading; dropping connection after %s", c.id, connWriteTimeout)
 			c.close()
 		}
 		return err

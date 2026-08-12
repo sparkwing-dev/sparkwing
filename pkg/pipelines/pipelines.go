@@ -43,8 +43,10 @@ type Pipeline struct {
 	// matches; Require fires when not every token matches. Token
 	// vocabulary: `profile:local`, `profile:controller`,
 	// `profile:name=<name>`, `arg:<flag>=<value>`,
-	// `git:branch=<name>`, `git:branch=default`. See
-	// pkg/pipelines/guards.go.
+	// `git:branch=<name>`, `git:branch=default`. `arg:` tokens read the
+	// merged argument set the run executes with, so a value supplied by
+	// defaults.args or this entry's own args: block is guarded exactly
+	// like one typed on the command line. See pkg/pipelines/guards.go.
 	Guards Guards `yaml:"guards,omitempty"`
 
 	// Args supplies per-arg default values. Higher priority than

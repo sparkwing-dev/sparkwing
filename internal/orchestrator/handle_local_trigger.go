@@ -68,7 +68,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 
 	var r runner.Runner
 	args := resolveTriggerArgs(ctx, backends.State, trigger, logger)
-	res, err := Run(ctx, backends, Options{
+	opts := Options{
 		Pipeline:          trigger.Pipeline,
 		RunID:             trigger.ID,
 		Args:              args,
@@ -91,7 +91,15 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 			trigger.GitSHA, trigger.GitBranch, "", trigger.Repo, trigger.RepoURL,
 		),
 		Runner: r,
-	})
+	}
+	// The local trigger loop exec'd this child with the repo as its
+	// working directory -- for a retry, the recorded-revision snapshot --
+	// so the project's argument layers and guards are on disk right here.
+	// Without this a queued trigger, a dashboard retry, and a spawned
+	// child each planned with unmerged arguments and no guard evaluation
+	// at all, while `sparkwing run` of the same pipeline got both.
+	applyCheckoutProjectConfig(&opts, logger)
+	res, err := Run(ctx, backends, opts)
 	if err != nil {
 		logger.Error(
 			"run failed setup",
