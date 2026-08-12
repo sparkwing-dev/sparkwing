@@ -4,10 +4,12 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -79,6 +81,80 @@ func TestLocalRunLogDir_RelativeHomeRecordsAbsolutePath(t *testing.T) {
 	}
 	if _, err := os.Stat(got); err != nil {
 		t.Errorf("recorded log_path does not exist: %v", err)
+	}
+}
+
+// `logs: {type: filesystem}` writes node logs to local disk just as
+// surely as the default localLogs backend does; it simply arrives
+// through HTTPLogs wrapping a storage.LogStore. Reporting no log_path
+// for those runs sent every reader scraping the stream for output that
+// was sitting on their own disk the whole time.
+func TestLogPath_FilesystemLogsStoreIsRecorded(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "logroot")
+	store, err := fs.NewLogStore(root)
+	if err != nil {
+		t.Fatalf("NewLogStore: %v", err)
+	}
+	got := localRunLogDir(NewLogStoreBackend(store, nil), "run-1")
+	if got == "" {
+		t.Fatal("filesystem log store reported no log_path")
+	}
+	if !filepath.IsAbs(got) {
+		t.Errorf("log_path = %q, want an absolute path", got)
+	}
+	info, err := os.Stat(got)
+	if err != nil || !info.IsDir() {
+		t.Fatalf("recorded log_path %q is not an existing directory (err=%v)", got, err)
+	}
+}
+
+// The recorded directory has to be the one the store actually writes
+// into. The probe reproduces fs.LogStore's layout rather than asking
+// it, so this is the test that keeps the two from drifting apart into
+// a truthfully-existing but permanently empty directory.
+func TestLogPath_FilesystemLogsStoreMatchesWhereItWrites(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "logroot")
+	store, err := fs.NewLogStore(root)
+	if err != nil {
+		t.Fatalf("NewLogStore: %v", err)
+	}
+	const runID, nodeID = "run-1", "build"
+	if err := store.Append(context.Background(), runID, nodeID, []byte(`{"msg":"hello"}`+"\n")); err != nil {
+		t.Fatalf("Append: %v", err)
+	}
+
+	dir := localRunLogDir(NewLogStoreBackend(store, nil), runID)
+	if dir == "" {
+		t.Fatal("filesystem log store reported no log_path")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read recorded log_path: %v", err)
+	}
+	found := false
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), nodeID+".") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("node log is not under the recorded log_path %q; entries=%v", dir, entries)
+	}
+}
+
+// A run id that the store itself would refuse cannot be advertised as
+// a directory either -- the probe must not create a path outside the
+// store's root.
+func TestLogPath_FilesystemLogsStoreRejectsUnsafeRunID(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "logroot")
+	store, err := fs.NewLogStore(root)
+	if err != nil {
+		t.Fatalf("NewLogStore: %v", err)
+	}
+	for _, bad := range []string{"", "..", "../escape", "a/b"} {
+		if dir := localRunLogDir(NewLogStoreBackend(store, nil), bad); dir != "" {
+			t.Errorf("run id %q: localRunLogDir = %q, want empty", bad, dir)
+		}
 	}
 }
 

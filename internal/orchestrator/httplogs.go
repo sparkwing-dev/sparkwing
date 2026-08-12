@@ -6,11 +6,14 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/sparkwinglogs"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -48,6 +51,46 @@ func NewLogStoreBackend(s storage.LogStore, logger *slog.Logger) *HTTPLogs {
 }
 
 var _ LogBackend = (*HTTPLogs)(nil)
+
+// localRunDir reports the directory this backend writes runID's node
+// logs into when -- and only when -- that directory is on the executing
+// machine's disk. Empty for every remote store, which is the honest
+// answer: a run whose logs live behind a URL has no local path to
+// advertise.
+//
+// The probe is a type switch on the concrete filesystem store rather
+// than a method on storage.LogStore. Adding it to the interface would
+// oblige the S3, controller, and stdout implementations to answer a
+// question that has no answer for them, and the only correct answer
+// they could give -- "" -- would then be indistinguishable from an
+// implementation that forgot. Here the absence of a case IS the "not
+// local" answer.
+//
+// The layout is fs.LogStore's own: Root/<runID>/<nodeID>.ndjson.
+// TestLogPath_FilesystemLogsStoreMatchesWhereItWrites pins the two
+// together so this cannot drift into pointing at an empty directory.
+func (h *HTTPLogs) localRunDir(runID string) string {
+	store, ok := h.client.(*fs.LogStore)
+	if !ok || store == nil || store.Root == "" {
+		return ""
+	}
+	// The same boundary check the store applies before it joins runID
+	// onto Root, so this probe cannot name a directory the writer would
+	// have refused.
+	if err := storage.SafeSegment(runID); err != nil {
+		return ""
+	}
+	dir := filepath.Join(store.Root, runID)
+	// Ensured, not merely named, for the same reason localRunLogDir
+	// ensures the localLogs directory: a run that dies during planning
+	// must not advertise a directory that never existed. This is the
+	// same idempotent MkdirAll fs.LogStore.Append performs on its first
+	// write.
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return ""
+	}
+	return dir
+}
 
 // OpenNodeLog returns a NodeLog that POSTs every line; delegate
 // mirrors locally.

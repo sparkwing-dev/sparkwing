@@ -50,6 +50,12 @@ code change to unlock.
 ## [Unreleased]
 ### Fixed
 
+- **orchestrator:** Record `log_path` for runs whose profile uses a filesystem
+  logs backend (`logs: {type: filesystem}`). Those node logs are written to the
+  executing machine's disk, but the run reported no log path, so readers
+  scraped the stream for output that was already on their own disk. The
+  invariant is unchanged: a recorded path always names a directory that exists,
+  and backends whose logs live behind a URL still record nothing.
 - **cli:** Stop `pipeline trigger` from hanging when the controller dies
   mid-run. The log-follow loop discarded every failed status read and polled
   again forever, so a controller that went away during a follow left the
