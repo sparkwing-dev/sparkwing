@@ -69,15 +69,11 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	var r runner.Runner
 	args := resolveTriggerArgs(ctx, backends.State, trigger, logger)
 	res, err := Run(ctx, backends, Options{
-		Pipeline:    trigger.Pipeline,
-		RunID:       trigger.ID,
-		Args:        args,
-		ParentRunID: trigger.ParentRunID,
-		Admission: &LocalAdmission{
-			Version:          sparkwingModuleVersion(),
-			ParentLeaseToken: childAttachTokenFromEnv(trigger.TriggerEnv),
-			Origin:           wingwire.OriginLocal,
-		},
+		Pipeline:          trigger.Pipeline,
+		RunID:             trigger.ID,
+		Args:              args,
+		ParentRunID:       trigger.ParentRunID,
+		Admission:         pipelineAdmission(childAttachTokenFromEnv(trigger.TriggerEnv), wingwire.OriginLocal),
 		RetryOf:           trigger.RetryOf,
 		RetrySource:       trigger.RetrySource,
 		RetryRepoDir:      trigger.TriggerEnv[retryprovenance.RepoDirKey],

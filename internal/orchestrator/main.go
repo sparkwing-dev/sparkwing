@@ -25,6 +25,11 @@ import (
 // handle-trigger <id>, run-node <runID> <nodeID>, replay-node.
 // Cluster-mode subcommands live in cluster.Main to keep heavy deps
 // out of consumer pipeline binaries.
+//
+// The pipeline binary deliberately does not serve the `wingd` verbs. The
+// installed Sparkwing distribution owns daemon lifecycle; this binary's
+// admission client uses the running daemon and, when none is running,
+// spawns the installed sparkwing to host one (see pipelineAdmission).
 func Main() {
 	projectCfg := bindProjectPipelines()
 
@@ -60,13 +65,6 @@ func Main() {
 	if len(os.Args) > 1 && os.Args[1] == "replay-node" {
 		if err := runReplayNodeCLI(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "replay-node:", err)
-			os.Exit(1)
-		}
-		return
-	}
-	if len(os.Args) > 1 && os.Args[1] == "wingd" {
-		if err := runWingdCLI(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "wingd:", err)
 			os.Exit(1)
 		}
 		return
@@ -157,11 +155,7 @@ func Main() {
 		PipelineYAML:        pipelineYAML,
 		SparkwingDir:        sparkwingDir,
 	}
-	opts.Admission = &LocalAdmission{
-		Version:          sparkwingModuleVersion(),
-		ParentLeaseToken: childAttachTokenFromProcessEnv(),
-		Origin:           wingwire.OriginLocal,
-	}
+	opts.Admission = pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal)
 	if projectCfg != nil {
 		opts.DefaultArgs = projectCfg.Defaults.Args
 		if pipelineYAML != nil {
