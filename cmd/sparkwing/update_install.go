@@ -59,7 +59,11 @@ func installVerifiedAsset(asset verifiedReleaseAsset, currentBin string) error {
 	stageOwned = false
 	installedDigest, hashErr := sha256OfFile(currentBin)
 	if hashErr == nil && installedDigest == asset.digest {
-		return syncDir(dir)
+		if syncErr := updateSyncDir(dir); syncErr == nil {
+			return nil
+		} else {
+			hashErr = fmt.Errorf("sync installed binary directory: %w", syncErr)
+		}
 	}
 
 	primary := fmt.Errorf("installed binary digest mismatch: got %s want %s", installedDigest, asset.digest)
@@ -71,6 +75,9 @@ func installVerifiedAsset(asset verifiedReleaseAsset, currentBin string) error {
 		return errors.Join(primary, fmt.Errorf("restore rollback binary from %s: %w", backup, err))
 	}
 	backupOwned = false
+	if err := updateSyncDir(dir); err != nil {
+		return errors.Join(primary, fmt.Errorf("sync restored binary directory: %w", err))
+	}
 	restoredDigest, err := sha256OfFile(currentBin)
 	if err != nil {
 		return errors.Join(primary, fmt.Errorf("rehash restored binary: %w", err))
