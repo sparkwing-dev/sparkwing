@@ -198,9 +198,9 @@ Groups take the same declaration and apply it to every member:
 `GoModules()` targets GOMODCACHE and `NpmCache()` targets npm's cache
 directory (`npm config get cache`) -- the package manager's
 content-addressed store -- rather than a materialized install tree
-like `node_modules`. Two reasons. A store restored under a stale key
-is safe by construction: the tool tops up what's missing and touches
-nothing else. And the common CI invocation `npm ci` deletes
+like `node_modules`. A store restored under a stale key is safe by
+construction, because the tool tops up what's missing and touches
+nothing else. The common CI invocation `npm ci` also deletes
 `node_modules` before installing, so restoring an install tree there
 is discarded bytes. `Dir()` points anywhere you like -- including
 `node_modules` for an `npm install` flow -- and you own the staleness

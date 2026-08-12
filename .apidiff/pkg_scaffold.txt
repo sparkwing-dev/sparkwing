@@ -1,3 +1,3 @@
 # pkg/scaffold
 
-const FallbackSDKVersion = "v0.29.0"
+const FallbackSDKVersion = "v0.30.0"
