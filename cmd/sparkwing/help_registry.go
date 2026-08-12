@@ -40,6 +40,7 @@ for agent-facing discovery.`,
 		{"runs", "Inspect or manage runs"},
 		{"repos", "The machine's fleet of sparkwing repos + SDK pins"},
 		{"queue", "The truthful view of local admission: holders + connections + waiters"},
+		{"cache", "Measure and safely reclaim compiled pipeline entries"},
 		{"daemon", "Inspect or refresh the local admission daemon"},
 		{"profile", "Show which profile sparkwing would use right now, and why"},
 		{"version", "Show + update versions"},
@@ -326,19 +327,14 @@ being deferred.`,
 var cmdUpdate = Command{
 	Path:     "sparkwing update",
 	Synopsis: "Self-update the CLI binary",
-	Description: `Downloads, verifies (signature + digest), and atomically
-installs the latest (or a specific) sparkwing release from GitHub
-Releases.
+	Description: `Downloads, authenticates, and atomically installs the latest
+(or a specific) sparkwing release from GitHub Releases.
 
 By default the command fetches the latest version pointer, pulls
-the matching binary for the current OS/arch, verifies the ed25519
-signature over SHA256SUMS with the public key compiled into this
-binary, checks the download against the signed digest, replaces the
-running binary via an atomic rename, then re-hashes the installed
-file and requires it to equal the verified digest. macOS binaries
-are ad-hoc-codesigned by the release before hashing, so nothing is
-mutated after verification. A signature, digest, download, or install
-failure is terminal -- there is no 'go install' fallback.
+the matching binary for the current OS/arch, verifies Ed25519
+signatures over the manifest and asset plus the manifest digest,
+and replaces the running binary atomically. Verification failure
+is terminal; the updater never selects an unsigned fallback.
 
 --check is the read-only probe: it reports the installed version
 and the latest published release, exits 0 when already current,
@@ -902,10 +898,10 @@ fits both the byte ceiling and the entry ceiling. Defaults come
 from $SPARKWING_CACHE_MAX_BYTES and $SPARKWING_CACHE_MAX_ENTRIES;
 either accepts 0 to disable that dimension.
 
-Entries used in the last few minutes are never evicted, because a
-run stats its binary just before exec'ing it. Entries that cannot
-be removed -- a running executable on Windows -- are reported as
-skipped and left for a later prune.`,
+An execution lease protects each running binary. Prune skips active
+and busy entries, bounds the number examined, and reports observed
+capacity separately from removed entries. Callers making admission
+decisions remeasure filesystem capacity after pruning.`,
 	Flags: []FlagSpec{
 		{Name: "max-bytes", Argument: "SIZE", Desc: "Byte ceiling, e.g. 512MiB", Group: "Limits"},
 		{Name: "max-entries", Argument: "N", Desc: "Entry ceiling", Group: "Limits"},

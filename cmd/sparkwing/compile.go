@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -38,117 +37,73 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
 	}
 
-	key, err := bincache.PipelineCacheKey(sparkwingDir)
+	key, keyParts, err := bincache.ExplainCacheKey(sparkwingDir)
 	if err != nil {
 		return runGo(sparkwingDir, append([]string{"run", "."}, args...), env)
 	}
-
-	binPath := bincache.CachedBinaryPath(key)
-
-	if _, err := os.Stat(binPath); err == nil {
-		// Stamp the hit before exec'ing. The binary's mtime is the
-		// cache's only record of when an entry was last wanted, and
-		// pruning evicts by that stamp.
-		bincache.Touch(binPath)
-		bincache.RecordOwner(key, sparkwingDir)
-		ensureDescribeCache(sparkwingDir, binPath)
-		err := bincache.ExecReplace(binPath, args, sparkwingDir, append(env, "SPARKWING_BINARY_SOURCE=cached"))
-		if !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-		// A concurrent prune removed the binary between the stat and
-		// the exec. The rest of this function rebuilds it, so falling
-		// through costs one compile instead of failing the run.
-		slog.Default().Debug("cached binary vanished before exec; rebuilding", "hash", key)
+	entry, err := bincache.PipelineEntry(key)
+	if err != nil {
+		return err
 	}
-
-	if cache, lookup := resolveEffectiveCacheSpec(sparkwingDir); cache != nil {
-		if as, err := storeurl.OpenArtifactStoreFromSpec(context.Background(), *cache, lookup); err == nil {
-			if err := bincache.FetchFromArtifactStore(context.Background(), as, key, binPath); err == nil {
-				bincache.RecordOwner(key, sparkwingDir)
-				ensureDescribeCache(sparkwingDir, binPath)
-				env = append(env, "SPARKWING_BINARY_SOURCE=artifact-store")
-				return bincache.ExecReplace(binPath, args, sparkwingDir, env)
-			} else if !bincache.IsNotFound(err) {
-				slog.Default().Warn("artifact-store fetch failed", "err", err, "hash", key)
+	ctx := context.Background()
+	source := "cached"
+	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
+		if cache, lookup := resolveEffectiveCacheSpec(sparkwingDir); cache != nil {
+			if store, openErr := storeurl.OpenArtifactStoreFromSpec(ctx, *cache, lookup); openErr == nil {
+				if fetchErr := bincache.FetchFromArtifactStore(ctx, store, key, tempPath); fetchErr == nil {
+					source = "artifact-store"
+					return nil
+				} else if !bincache.IsNotFound(fetchErr) {
+					slog.Default().Warn("artifact-store fetch failed", "err", fetchErr, "hash", key)
+				}
+			} else {
+				slog.Default().Warn("artifact-store open failed", "err", openErr, "type", cache.Type)
 			}
-		} else {
-			slog.Default().Warn("artifact-store open failed", "err", err, "type", cache.Type)
 		}
-	}
-
-	if gcURL := bincache.CacheURL(); gcURL != "" {
-		if err := bincache.TryBinary(gcURL, key, binPath); err == nil {
-			bincache.RecordOwner(key, sparkwingDir)
-			ensureDescribeCache(sparkwingDir, binPath)
-			env = append(env, "SPARKWING_BINARY_SOURCE=gitcache")
-			return bincache.ExecReplace(binPath, args, sparkwingDir, env)
+		if gcURL := bincache.CacheURL(); gcURL != "" {
+			if fetchErr := bincache.TryBinary(gcURL, key, tempPath); fetchErr == nil {
+				source = "gitcache"
+				return nil
+			}
 		}
-	}
-
-	announceCompile(binPath)
-	if err := bincache.CompilePipeline(sparkwingDir, binPath); err != nil {
-		if errors.Is(err, bincache.ErrMissingGoSum) {
+		announceCompile()
+		if compileErr := bincache.CompilePipeline(sparkwingDir, tempPath); compileErr != nil {
+			if !errors.Is(compileErr, bincache.ErrMissingGoSum) {
+				return compileErr
+			}
 			fmt.Fprintln(os.Stderr, color.Dim("==> populating go.sum (`go mod download`) and retrying compile..."))
 			if dlErr := runGo(sparkwingDir, []string{"mod", "download"}, env); dlErr != nil {
 				return fmt.Errorf("recovery `go mod download` failed: %w", dlErr)
 			}
-			if err := bincache.CompilePipeline(sparkwingDir, binPath); err != nil {
-				return err
+			if compileErr := bincache.CompilePipeline(sparkwingDir, tempPath); compileErr != nil {
+				return compileErr
 			}
-		} else {
-			return err
 		}
-	}
-
-	if gcURL := bincache.CacheURL(); gcURL != "" {
-		if err := bincache.UploadBinary(gcURL, bincache.CacheToken(), key, binPath); err != nil {
-			slog.Default().Warn("bin cache upload failed", "err", err, "hash", key)
-		}
-	}
-
-	bincache.RecordOwner(key, sparkwingDir)
-	if _, parts, err := bincache.ExplainCacheKey(sparkwingDir); err == nil {
-		// Stored so a later miss can name the input that changed.
-		bincache.RecordKeyParts(key, parts)
-	}
-
-	// A compile is the only thing that grows the cache, so it is the
-	// only place that needs to bound it. Keeping this off the cache-hit
-	// path means the common invocation pays nothing for it.
-	pruneCache()
-
-	ensureDescribeCache(sparkwingDir, binPath)
-	env = append(env, "SPARKWING_BINARY_SOURCE=compiled")
-	return bincache.ExecReplace(binPath, args, sparkwingDir, env)
-}
-
-// pruneCache trims the compiled-binary cache to its configured
-// ceilings. Failures are logged and swallowed: the cache is a
-// performance aid, and a run that just compiled successfully should not
-// fail because housekeeping did.
-func pruneCache() {
-	result, err := bincache.PruneToConfiguredLimits()
+		source = "compiled"
+		return nil
+	})
 	if err != nil {
-		slog.Default().Debug("pipeline cache prune failed", "err", err)
-		return
+		return err
 	}
-	if result.Removed > 0 {
-		slog.Default().Debug("pruned pipeline cache",
-			"removed", result.Removed, "freed_bytes", result.Freed,
-			"kept", result.Kept, "kept_bytes", result.KeptBytes, "skipped", result.Skipped)
+	defer func() { _ = lease.Release() }()
+	if published && source == "compiled" {
+		if gcURL := bincache.CacheURL(); gcURL != "" {
+			if err := bincache.UploadBinary(gcURL, bincache.CacheToken(), key, lease.Path()); err != nil {
+				slog.Default().Warn("bin cache upload failed", "err", err, "hash", key)
+			}
+		}
 	}
+	lease.RecordUse(sparkwingDir, keyParts)
+	ensureDescribeCache(sparkwingDir, key, lease.Path())
+	env = append(env, "SPARKWING_BINARY_SOURCE="+source)
+	return lease.ExecReplace(args, sparkwingDir, env)
 }
 
 // ensureDescribeCache writes the describe-cache file if it's missing
 // for the current PipelineCacheKey. Failures are logged at debug-
 // level and swallowed -- the cache is a perf optimization, not a
 // correctness gate on the pipeline run.
-func ensureDescribeCache(sparkwingDir, binPath string) {
-	key, err := bincache.PipelineCacheKey(sparkwingDir)
-	if err != nil {
-		return
-	}
+func ensureDescribeCache(sparkwingDir, key, binPath string) {
 	if _, err := os.Stat(describeCachePath(key)); err == nil {
 		return
 	}
@@ -163,8 +118,8 @@ func ensureDescribeCache(sparkwingDir, binPath string) {
 // on this laptop) from "source changed since last run" (cache root
 // has entries, just not for this hash). Stays silent when stderr
 // isn't a TTY (agents and pipes get clean logs already).
-func announceCompile(binPath string) {
-	cacheRoot := filepath.Dir(filepath.Dir(binPath))
+func announceCompile() {
+	cacheRoot := filepath.Join(bincache.SparkwingHome(), "cache", "pipelines", "v1", "entries")
 	firstEver := true
 	if entries, err := os.ReadDir(cacheRoot); err == nil && len(entries) > 0 {
 		firstEver = false

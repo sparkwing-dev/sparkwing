@@ -1,11 +1,6 @@
 // CLI self-update verbs. Mirrors install.sh: fetch the bare per-platform
-// binary, verify a signed SHA256SUMS, then atomically install and re-hash
-// the installed bytes. The release ad-hoc-codesigns the macOS Mach-O
-// binaries BEFORE SHA256SUMS is computed, so the verified bytes are
-// already Gatekeeper-valid and the updater installs them UNCHANGED --
-// there is no post-verification mutation. Windows uses a rename-aside
-// dance. Every failure is terminal: the updater never falls back to an
-// unverified build.
+// binary, verify SHA256, atomic-rename onto the running binary. macOS
+// gets ad-hoc codesigning; Windows uses a rename-aside dance.
 package main
 
 import (
@@ -31,76 +26,18 @@ import (
 )
 
 const (
-	updateRepo      = "sparkwing-dev/sparkwing"
-	updateAssetBase = "https://github.com/" + updateRepo + "/releases/download"
+	updateRepo             = "sparkwing-dev/sparkwing"
+	defaultUpdateAssetBase = "https://github.com/" + updateRepo + "/releases/download"
+	maxAssetBytes          = 512 << 20
+	maxMetadataBytes       = 1 << 20
 )
 
-// updateBaseURL is the release-download base the updater fetches assets
-// from. It is a package var only so tests can point it at a local httptest
-// server; production always uses the GitHub releases base.
-var updateBaseURL = updateAssetBase
-
-// sparkwingUpdatePubKeyHex is the ed25519 public key (hex-encoded, 32
-// bytes = 64 hex chars) the updater uses to verify the detached signature
-// over a release's SHA256SUMS. Verification is pure-Go crypto/ed25519 --
-// no external binary, and no network beyond fetching the asset, its
-// SHA256SUMS, and SHA256SUMS.sig.
-//
-// PLACEHOLDER -- NOT A REAL KEY. The release owner MUST replace these
-// all-zero bytes with the public key printed by
-//
-//	go run ./cmd/sign-manifest -genkey
-//
-// and store the matching private key as the SPARKWING_UPDATE_SIGNING_KEY
-// GitHub Actions secret (see .github/workflows/release.yaml). Until then a
-// real release's signature CANNOT verify against these zero bytes, so
-// `sparkwing update` fails CLOSED -- it refuses to install rather than
-// installing bytes it cannot prove are the release's. A half-armed release
-// (signed manifest, but this key still the placeholder) therefore fails
-// safe, never open.
-const sparkwingUpdatePubKeyHex = "c2155bdf98c26e5b43179ea70e10b308938f47fe9e3dfac95169c46b03fd0ab2"
-
-// Compile-time proof the embedded key is exactly 32 bytes (64 hex chars).
-// Both are constant expressions that must stay non-negative; a wrong
-// length makes one negative and the conversion to uint fails to compile.
-const (
-	_ = uint(len(sparkwingUpdatePubKeyHex) - 64)
-	_ = uint(64 - len(sparkwingUpdatePubKeyHex))
+var (
+	updateFetchLatest     = fetchLatestRelease
+	updateDownloadInstall = downloadAndInstall
+	updateBaseURL         = defaultUpdateAssetBase
+	updateVerifyKey       ed25519.PublicKey
 )
-
-// updateVerifyKey is the decoded verification key. It is a package var so
-// tests can inject a known keypair via withTestUpdateKey; production code
-// never reassigns it, and there is no flag or env override -- the trusted
-// key is compiled in.
-var updateVerifyKey = mustDecodeUpdateKey(sparkwingUpdatePubKeyHex)
-
-// isPlaceholderUpdateKey reports whether k is the unarmed all-zero
-// placeholder. The updater refuses to verify against it (fail closed).
-func isPlaceholderUpdateKey(k ed25519.PublicKey) bool {
-	if len(k) != ed25519.PublicKeySize {
-		return true
-	}
-	for _, b := range k {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func mustDecodeUpdateKey(h string) ed25519.PublicKey {
-	b, err := hex.DecodeString(strings.TrimSpace(h))
-	if err != nil || len(b) != ed25519.PublicKeySize {
-		panic("sparkwing: embedded update public key is not 32 hex-encoded bytes")
-	}
-	return ed25519.PublicKey(b)
-}
-
-// afterInstallHook, when non-nil, runs immediately after the atomic swap
-// and BEFORE the installed-bytes re-hash. It exists only as a test seam to
-// corrupt the just-installed file and exercise the post-install
-// verification + restore path. It is nil in production.
-var afterInstallHook func(installedPath string)
 
 // runUpdate is the top-level binary self-update verb (CLI only; for
 // SDK pins, see `sparkwing version update --sdk`).
@@ -182,24 +119,16 @@ func classifyDowngrade(current, resolved string) downgradeKind {
 	return downgradeRebaseline
 }
 
-// runUpdateBinary downloads, verifies (signature + digest), and atomically
-// installs a release binary, then re-hashes the installed file and
-// requires it to equal the verified release digest.
-//
-// Every failure is TERMINAL. There is no `go install` fallback: an
-// unverifiable download must not be silently swapped for an unverified
-// build that `go install` may drop in a different directory than the
-// running binary. An operator version hold is enforced here (unless
-// overrideHold): the ceiling binds every self-upgrade path, `sparkwing
-// update` and `sparkwing version update --cli` alike.
+// runUpdateBinary downloads, authenticates, and installs a release. An operator
+// version hold is enforced here (unless overrideHold): the ceiling
+// binds every self-upgrade path, `sparkwing update` and
+// `sparkwing version update --cli` alike.
 func runUpdateBinary(version string, force, overrideHold bool) error {
 	resolved := strings.TrimSpace(version)
 	if resolved == "" {
-		v, err := fetchLatestRelease()
+		v, err := updateFetchLatest()
 		if err != nil {
-			return fmt.Errorf("update: could not determine the latest release: %w\n"+
-				"  self-update does not fall back to `go install`; retry, pass --version vX.Y.Z, "+
-				"or reinstall out-of-band via bin/install.sh", err)
+			return fmt.Errorf("update: fetch latest version: %w", err)
 		}
 		resolved = v
 	}
@@ -242,18 +171,12 @@ func runUpdateBinary(version string, force, overrideHold bool) error {
 
 	fmt.Fprintf(os.Stdout, "updating sparkwing: %s -> %s\n", current, resolved)
 
-	res, err := downloadAndInstall(resolved, currentBin)
+	result, err := updateDownloadInstall(resolved, currentBin)
 	if err != nil {
-		// Terminal. The running binary is untouched on every pre-install
-		// failure, and restored on a post-install mismatch (see
-		// downloadAndInstall); either way we do NOT reach `go install`.
-		return fmt.Errorf("update: verified install failed: %w", err)
+		return fmt.Errorf("update: verified release install failed: %w", err)
 	}
 
-	// Contract point 6: name the installed path, version, and digest.
-	fmt.Fprintf(os.Stdout, "sparkwing updated: %s -> %s\n", current, res.version)
-	fmt.Fprintf(os.Stdout, "  path:   %s\n", res.path)
-	fmt.Fprintf(os.Stdout, "  digest: %s (sha256, verified against the signed SHA256SUMS)\n", res.digest)
+	fmt.Fprintf(os.Stdout, "sparkwing updated: %s -> %s\ninstalled: %s\nsha256: %s\n", current, resolved, result.path, result.digest)
 	reportOtherInstalls(os.Stdout, currentBin)
 	fmt.Fprintf(os.Stdout, "what's new: https://github.com/sparkwing-dev/sparkwing/releases\n")
 	return nil
@@ -340,20 +263,14 @@ func installedVersion() string {
 // Version is injected via -ldflags="-X main.Version=vX.Y.Z" at release.
 var Version string
 
-// installResult reports what downloadAndInstall proved and installed.
-type installResult struct {
-	path    string // absolute path the verified bytes now occupy
-	version string // release tag installed
-	digest  string // sha256 hex, verified against the signed SHA256SUMS
+type installedRelease struct {
+	path    string
+	version string
+	digest  string
 }
 
-// downloadAndInstall fetches the asset + SHA256SUMS + SHA256SUMS.sig,
-// verifies the ed25519 signature over SHA256SUMS with the embedded key,
-// checks the downloaded file against the signed digest, stages the bytes
-// UNCHANGED (no codesign, no mutation), atomically installs, then
-// re-hashes the installed file and requires it to equal the verified
-// digest -- restoring the prior binary and failing loudly on mismatch.
-func downloadAndInstall(version, currentBin string) (installResult, error) {
+// downloadAndInstall authenticates the manifest and platform asset before installation.
+func downloadAndInstall(version, currentBin string) (installedRelease, error) {
 	suffix := runtime.GOOS + "-" + runtime.GOARCH
 	ext := ""
 	if runtime.GOOS == "windows" {
@@ -364,185 +281,57 @@ func downloadAndInstall(version, currentBin string) (installResult, error) {
 
 	tmpDir, err := os.MkdirTemp("", "sparkwing-update-")
 	if err != nil {
-		return installResult{}, fmt.Errorf("mkdir tmp: %w", err)
+		return installedRelease{}, fmt.Errorf("mkdir tmp: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	binPath := filepath.Join(tmpDir, asset)
 	if err := downloadFile(base+"/"+asset, binPath, maxAssetBytes); err != nil {
-		return installResult{}, fmt.Errorf("download %s: %w", asset, err)
+		return installedRelease{}, fmt.Errorf("download %s: %w", asset, err)
+	}
+	assetSigPath := binPath + ".sig"
+	if err := downloadFile(base+"/"+asset+".sig", assetSigPath, maxMetadataBytes); err != nil {
+		return installedRelease{}, fmt.Errorf("download %s.sig: %w", asset, err)
 	}
 	sumsPath := filepath.Join(tmpDir, "SHA256SUMS")
-	if err := downloadFile(base+"/SHA256SUMS", sumsPath, maxMetaBytes); err != nil {
-		return installResult{}, fmt.Errorf("download SHA256SUMS: %w", err)
+	if err := downloadFile(base+"/SHA256SUMS", sumsPath, maxMetadataBytes); err != nil {
+		return installedRelease{}, fmt.Errorf("download SHA256SUMS: %w", err)
 	}
-	sigPath := filepath.Join(tmpDir, "SHA256SUMS.sig")
-	if err := downloadFile(base+"/SHA256SUMS.sig", sigPath, maxMetaBytes); err != nil {
-		return installResult{}, fmt.Errorf("download SHA256SUMS.sig: %w\n"+
-			"  this release is not signed for verified self-update; install it out-of-band via bin/install.sh instead", err)
+	sumsSigPath := sumsPath + ".sig"
+	if err := downloadFile(base+"/SHA256SUMS.sig", sumsSigPath, maxMetadataBytes); err != nil {
+		return installedRelease{}, fmt.Errorf("download SHA256SUMS.sig: %w", err)
 	}
-
-	// Verify the ed25519 signature over the RAW SHA256SUMS bytes with the
-	// embedded key BEFORE trusting any digest the manifest lists. With the
-	// placeholder key this fails for every real release (fail closed).
-	sumsBytes, err := os.ReadFile(sumsPath)
+	assetBody, err := os.ReadFile(binPath)
 	if err != nil {
-		return installResult{}, err
+		return installedRelease{}, err
 	}
-	sigBytes, err := os.ReadFile(sigPath)
+	assetSig, err := os.ReadFile(assetSigPath)
 	if err != nil {
-		return installResult{}, err
+		return installedRelease{}, err
 	}
-	// Fail closed if this build was never armed. The placeholder key is
-	// all-zero -- a low-order ed25519 point some verifiers will accept a
-	// crafted signature against -- so we refuse outright rather than trust
-	// ed25519.Verify's behavior on it. A real armed build never trips this.
-	if isPlaceholderUpdateKey(updateVerifyKey) {
-		return installResult{}, errors.New(
-			"this sparkwing build has no update signing key compiled in (placeholder); " +
-				"verified self-update is not armed -- install releases via bin/install.sh")
-	}
-	if !ed25519.Verify(updateVerifyKey, sumsBytes, sigBytes) {
-		return installResult{}, errors.New(
-			"SHA256SUMS signature is not valid for the key compiled into this binary; " +
-				"refusing to install (the running binary was not touched)")
-	}
-
-	// One data path: the digest comes from the SAME in-memory bytes the
-	// signature was verified over -- never re-read from disk -- so nothing
-	// can swap the manifest between verification and lookup.
-	expected, err := lookupSHA256(sumsBytes, asset)
+	manifest, err := os.ReadFile(sumsPath)
 	if err != nil {
-		return installResult{}, err
+		return installedRelease{}, err
 	}
-	actual, err := sha256OfFile(binPath)
+	manifestSig, err := os.ReadFile(sumsSigPath)
 	if err != nil {
-		return installResult{}, err
+		return installedRelease{}, err
 	}
-	if !strings.EqualFold(expected, actual) {
-		return installResult{}, fmt.Errorf(
-			"checksum mismatch for %s (download corrupt or tampered); refusing to install\n  expected: %s\n  actual:   %s",
-			asset, expected, actual)
-	}
-
-	stagedBin := currentBin + ".update.tmp"
-	if err := copyFile(binPath, stagedBin); err != nil {
-		return installResult{}, fmt.Errorf("stage new binary: %w", err)
-	}
-	if err := os.Chmod(stagedBin, 0o755); err != nil {
-		_ = os.Remove(stagedBin)
-		return installResult{}, err
-	}
-	// NO post-verification byte mutation. The macOS ad-hoc codesign moved
-	// to the release (rcodesign on the Linux runner, before SHA256SUMS is
-	// computed), so the verified bytes are already Gatekeeper-valid and
-	// install exactly as hashed.
-
-	prev, err := installAtomic(stagedBin, currentBin)
+	publicKeys, err := releasePublicKeys()
 	if err != nil {
-		_ = os.Remove(stagedBin)
-		return installResult{}, fmt.Errorf("install: %w", err)
+		return installedRelease{}, err
 	}
-
-	// Test seam: corrupt the just-installed file to exercise the recheck.
-	if afterInstallHook != nil {
-		afterInstallHook(currentBin)
+	verified, err := verifyReleaseAssetWithTrustSet(publicKeys, manifest, manifestSig, asset, assetBody, assetSig)
+	if err != nil {
+		return installedRelease{}, err
 	}
-
-	// Contract point 4: hash the INSTALLED file and require equality with
-	// the verified release digest. A mismatch here means the bytes on disk
-	// are not the release's bytes -- restore the prior binary and fail.
-	installed, herr := sha256OfFile(currentBin)
-	if herr != nil || !strings.EqualFold(installed, expected) {
-		if rerr := restorePrev(prev, currentBin); rerr != nil {
-			return installResult{}, fmt.Errorf(
-				"SECURITY: installed bytes do not match the verified release digest AND restoring the prior binary FAILED\n"+
-					"  expected:  %s\n  installed: %s\n  prior binary preserved at: %s\n  restore error: %v\n"+
-					"  do NOT run sparkwing until you replace it with a known-good binary (bin/install.sh)",
-				expected, installedOr(installed, herr), prev, rerr)
-		}
-		return installResult{}, fmt.Errorf(
-			"SECURITY: installed bytes do not match the verified release digest; restored the prior binary, no change made\n"+
-				"  expected:  %s\n  installed: %s",
-			expected, installedOr(installed, herr))
+	if err := installVerifiedAsset(verified, currentBin); err != nil {
+		return installedRelease{}, err
 	}
-
-	// Success: drop the preserved prior binary. On Windows it is the still
-	// running .old image and cannot be deleted now; cleanupStaleUpdate
-	// removes it at next launch, so ignore the error there.
-	_ = os.Remove(prev)
-
-	return installResult{path: currentBin, version: version, digest: expected}, nil
+	return installedRelease{path: currentBin, version: version, digest: verified.digest}, nil
 }
 
-// installedOr renders the installed-file hash, or a reason it could not be
-// read, for a post-install mismatch message.
-func installedOr(hash string, err error) string {
-	if err != nil {
-		return "(could not read installed file: " + err.Error() + ")"
-	}
-	return hash
-}
-
-// installAtomic swaps stagedBin in for currentBin and preserves the prior
-// binary so a caller that detects a post-install problem can restore it.
-// It returns the path where the prior binary is preserved.
-//
-//   - non-Windows: the prior bytes are copied aside to <current>.prev, then
-//     the staged binary is renamed over the running one in a single atomic
-//     rename (the running process keeps its open inode).
-//   - Windows: the running .exe cannot be overwritten, so it is renamed
-//     aside to <current>.old (which becomes the preserved prior) and the
-//     staged binary is renamed into place. cleanupStaleUpdate deletes the
-//     .old at next launch.
-func installAtomic(stagedBin, currentBin string) (prev string, err error) {
-	if runtime.GOOS == "windows" {
-		// Windows cannot overwrite or delete a running .exe, so this is two
-		// renames rather than one. Between them there is a brief window
-		// where no binary sits at currentBin; a crash there leaves the new
-		// binary at currentBin (second rename) or the prior one recoverable
-		// at oldBin, and cleanupStaleUpdate reconciles .old at next launch.
-		// POSIX below is a single atomic rename with no such window.
-		oldBin := currentBin + ".old"
-		_ = os.Remove(oldBin)
-		if err := os.Rename(currentBin, oldBin); err != nil {
-			return "", fmt.Errorf("move running binary aside: %w", err)
-		}
-		if err := os.Rename(stagedBin, currentBin); err != nil {
-			_ = os.Rename(oldBin, currentBin) // roll back the aside move
-			return "", fmt.Errorf("install new binary: %w", err)
-		}
-		return oldBin, nil
-	}
-
-	prev = currentBin + ".prev"
-	_ = os.Remove(prev)
-	if err := copyFile(currentBin, prev); err != nil {
-		return "", fmt.Errorf("back up current binary: %w", err)
-	}
-	_ = os.Chmod(prev, 0o755)
-	if err := os.Rename(stagedBin, currentBin); err != nil {
-		_ = os.Remove(prev)
-		return "", fmt.Errorf("install new binary: %w", err)
-	}
-	return prev, nil
-}
-
-// restorePrev puts the preserved prior binary back at currentBin after a
-// failed post-install check. On Windows the freshly-installed (non-running)
-// binary is removed first so the preserved .old can be renamed back.
-func restorePrev(prev, currentBin string) error {
-	if prev == "" {
-		return errors.New("no preserved prior binary to restore")
-	}
-	if runtime.GOOS == "windows" {
-		_ = os.Remove(currentBin)
-		return os.Rename(prev, currentBin)
-	}
-	return os.Rename(prev, currentBin)
-}
-
-// cleanupStaleUpdate removes <self>.old left by a Windows self-update.
+// cleanupStaleUpdate removes residue left by pre-integrity Windows updaters.
 func cleanupStaleUpdate() {
 	if runtime.GOOS != "windows" {
 		return
@@ -553,14 +342,6 @@ func cleanupStaleUpdate() {
 	}
 	_ = os.Remove(self + ".old")
 }
-
-// Download size ceilings. Bodies are bounded BEFORE verification so a
-// hostile or broken endpoint cannot stream an unbounded response into
-// memory/disk; an over-limit body is a terminal download error.
-const (
-	maxAssetBytes = 512 << 20 // 512 MiB -- generous for the binary asset
-	maxMetaBytes  = 1 << 20   // 1 MiB -- tight for SHA256SUMS and .sig
-)
 
 func downloadFile(url, dst string, maxBytes int64) error {
 	client := &http.Client{Timeout: 60 * time.Second}
@@ -577,23 +358,22 @@ func downloadFile(url, dst string, maxBytes int64) error {
 		return err
 	}
 	defer f.Close()
-	// Read one byte past the ceiling so an exactly-at-limit body still
-	// succeeds while anything larger is caught and rejected.
-	n, err := io.Copy(f, io.LimitReader(resp.Body, maxBytes+1))
+	written, err := io.Copy(f, io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return err
 	}
-	if n > maxBytes {
-		return fmt.Errorf("response body exceeds %d bytes; refusing", maxBytes)
+	if written > maxBytes {
+		return fmt.Errorf("download exceeds %d-byte limit", maxBytes)
 	}
 	return nil
 }
 
-// lookupSHA256 extracts the digest for filename from already-verified
-// SHA256SUMS bytes. It deliberately takes bytes, not a path, so the digest
-// is read from the same content the signature covered (no disk re-read).
-func lookupSHA256(sums []byte, filename string) (string, error) {
-	for _, line := range strings.Split(string(sums), "\n") {
+func lookupSHA256(sumsPath, filename string) (string, error) {
+	body, err := os.ReadFile(sumsPath)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range strings.Split(string(body), "\n") {
 		fields := strings.Fields(line)
 		if len(fields) >= 2 && fields[1] == filename {
 			return fields[0], nil

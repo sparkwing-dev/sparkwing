@@ -1,0 +1,35 @@
+// Package cachecontrol exposes Sparkwing-owned pipeline-cache measurement and
+// reclamation without exposing cache paths or entry layout.
+package cachecontrol
+
+import (
+	"context"
+
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+)
+
+// PruneOptions bounds one reclamation attempt.
+type PruneOptions struct {
+	ReclaimBytes int64
+	MaxEntries   int
+}
+
+// PruneResult reports observed cache state and completed work.
+type PruneResult = bincache.PruneResult
+
+// Status reports managed and legacy pipeline-cache state.
+type Status = bincache.CacheStatus
+
+// Measure reports pipeline-cache state.
+func Measure(ctx context.Context) (Status, error) {
+	return bincache.Status(ctx, "")
+}
+
+// Prune reclaims inactive entries within opts. Callers must remeasure filesystem
+// capacity before admission; GoalSatisfied is reclamation evidence, not authority.
+func Prune(ctx context.Context, opts PruneOptions) (PruneResult, error) {
+	return bincache.Prune(ctx, bincache.PruneOptions{
+		ReclaimBytes: opts.ReclaimBytes,
+		MaxEntries:   opts.MaxEntries,
+	})
+}

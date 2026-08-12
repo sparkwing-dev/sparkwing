@@ -25,6 +25,9 @@
 #     + syscall.Kill so it won't compile there anyway.
 
 name: release
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
 on:
   push:
     tags: ["v*"]
@@ -59,7 +62,7 @@ jobs:
           - { binary: sparkwing-runner, goos: windows }
           - { binary: sparkwing-logs, goos: windows }
           - { binary: sparkwing-web, goos: windows }
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.goos == 'darwin' && 'macos-latest' || 'ubuntu-latest' }}
     steps:
       # Pin the checkout to the tag's exact commit. Every job in this
       # workflow checks out the same github.sha, so a version string
@@ -125,6 +128,9 @@ jobs:
             -trimpath \
             -ldflags="-s -w -X main.Version=${TAG}" \
             -o "$out" "./cmd/${BIN}"
+          if [ "$GOOS" = "darwin" ]; then
+            codesign --force --sign - "$out"
+          fi
           ls -la "$out"
 
       # Each cell uploads exactly one binary as a uniquely-named
@@ -211,72 +217,15 @@ jobs:
           sha256sum sparkwing-* > SHA256SUMS
           ls -la
 
-      # Sign SHA256SUMS with the ed25519 private key so `sparkwing
-      # update` can verify the manifest with the public key compiled
-      # into the CLI (cmd/sparkwing/update.go). cmd/sign-manifest is the
-      # auditable Go signer, using the same crypto/ed25519 as the client.
-      #
-      # ARMING (one time, by the release owner):
-      #   1. go run ./cmd/sign-manifest -genkey
-      #   2. paste the printed PUBLIC key into sparkwingUpdatePubKeyHex
-      #      in cmd/sparkwing/update.go and ship a release with it.
-      #   3. store the printed PRIVATE key (base64) as the repo secret
-      #      SPARKWING_UPDATE_SIGNING_KEY
-      #      (Settings -> Secrets and variables -> Actions).
-      #
-      # Until the secret is set this step skips with a warning and no
-      # SHA256SUMS.sig is uploaded, so a CLI carrying the real public key
-      # fails closed (it cannot verify an unsigned release) rather than
-      # installing unverified bytes.
-      - name: Sign SHA256SUMS (ed25519 detached signature)
+      - name: Sign and verify immutable release assets
         env:
-          SPARKWING_UPDATE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
+          SPARKWING_RELEASE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          if [ -z "${SPARKWING_UPDATE_SIGNING_KEY:-}" ]; then
-            echo "::warning::SPARKWING_UPDATE_SIGNING_KEY is not set; skipping SHA256SUMS.sig. \
-          sparkwing update will fail closed until the signing key is armed (see cmd/sparkwing/update.go)."
-            exit 0
-          fi
-          go run ./cmd/sign-manifest -in dist/SHA256SUMS -out dist/SHA256SUMS.sig
-          ls -la dist/SHA256SUMS.sig
-
-      # Cross-check that the private key that just signed is the mate of
-      # the public key compiled into the CLI. A keypair mismatch (a pubkey
-      # pasted from a different `-genkey` run than the stored secret) would
-      # sign cleanly here yet leave every client unable to verify -- a dead
-      # updater shipped to the fleet. Verifying the fresh signature against
-      # the embedded key catches that before publish. Skipped only when the
-      # key is unset (the sign step already warned and produced no .sig).
-      - name: Verify SHA256SUMS.sig matches the embedded updater key
-        env:
-          SPARKWING_UPDATE_SIGNING_KEY: ${{ secrets.SPARKWING_UPDATE_SIGNING_KEY }}
-        run: |
-          set -euo pipefail
-          if [ -z "${SPARKWING_UPDATE_SIGNING_KEY:-}" ]; then
-            echo "signing key unset; no .sig to verify"; exit 0
-          fi
-          pub=$(sed -nE 's/.*sparkwingUpdatePubKeyHex = "([0-9a-f]+)".*/\1/p' cmd/sparkwing/update.go)
-          if [ -z "$pub" ]; then echo "::error::could not read sparkwingUpdatePubKeyHex"; exit 1; fi
-          go run ./cmd/sign-manifest -verify -in dist/SHA256SUMS -sig dist/SHA256SUMS.sig -pub "$pub"
-
-      # Auditor convenience only: a cosign keyless signature over the
-      # manifest, committing the workflow+repo+tag identity via GitHub
-      # OIDC. The updater does NOT consume this -- its trust root is the
-      # embedded ed25519 key above -- so a cosign/Rekor hiccup must never
-      # fail the release; continue-on-error keeps it advisory.
-      - name: Sign SHA256SUMS for auditors (cosign keyless)
-        continue-on-error: true
-        uses: sigstore/cosign-installer@v3
-      - name: cosign sign-blob SHA256SUMS
-        continue-on-error: true
-        env:
-          COSIGN_EXPERIMENTAL: "1"
-        run: |
-          set -euo pipefail
-          cosign sign-blob --yes \
-            --bundle dist/SHA256SUMS.cosign.bundle \
-            dist/SHA256SUMS
+          go run ./cmd/verify-release --dist dist
+          go run ./cmd/verify-release --dist dist --verify
+          test -f dist/SHA256SUMS.sig
+          ls dist/sparkwing-*.sig >/dev/null
 
       - name: Verify release asset schema parity
         # Pre-publish gate: the uploaded linux/amd64 binary must embed
@@ -309,27 +258,43 @@ jobs:
           echo "==> release notes:"
           cat release-notes.md
 
-      - name: Create or update release + upload assets
+      - name: Publish complete immutable release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          # Idempotent: re-running this workflow against the same tag
-          # (after a fix) replaces existing assets via --clobber and
-          # rewrites the notes from the (possibly updated) CHANGELOG.
+          # A published tag and its signed assets are immutable. Build
+          # the complete set privately, verify it, then publish once.
           if gh release view "$tag" >/dev/null 2>&1; then
-            echo "==> existing release $tag; updating assets + notes"
-            gh release edit "$tag" --notes-file release-notes.md
-          else
-            echo "==> creating release $tag"
-            gh release create "$tag" \
-              --title "sparkwing CLI $tag" \
-              --notes-file release-notes.md
+            if [ "$(gh release view "$tag" --json isDraft --jq '.isDraft')" != "true" ]; then
+              echo "release $tag is published; immutable publication refuses mutation" >&2
+              exit 1
+            fi
+            gh release delete "$tag" --yes
           fi
-          # Glob expands to every binary + SHA256SUMS in one upload
-          # call; --clobber replaces existing assets on workflow re-run.
-          gh release upload "$tag" --clobber dist/*
+          draft_created=false
+          cleanup_draft() {
+            if [ "$draft_created" = true ]; then
+              state="$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null || true)"
+              if [ "$state" = true ]; then
+                gh release delete "$tag" --yes || true
+              fi
+            fi
+          }
+          trap cleanup_draft EXIT
+          gh release create "$tag" \
+            --draft \
+            --verify-tag \
+            --latest=false \
+            --title "sparkwing CLI $tag" \
+            --notes-file release-notes.md
+          draft_created=true
+          gh release upload "$tag" dist/*
+          asset_count="$(gh release view "$tag" --json assets --jq '.assets | length')"
+          test "$asset_count" -eq "$(find dist -type f | wc -l | tr -d ' ')"
+          gh release edit "$tag" --draft=false
+          draft_created=false
           gh release view "$tag"
 
   # publish multi-arch container images for the cluster-side

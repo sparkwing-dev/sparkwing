@@ -44,6 +44,18 @@ Encrypted or not, values leave the server only through the
 authenticated secrets API; pipelines read them with `sparkwing.Secret`
 (see [sdk.md](sdk.md)).
 
+## Release integrity
+
+GitHub Actions stores `SPARKWING_UPDATE_SIGNING_KEY` as a base64-encoded
+32-byte Ed25519 seed. Release jobs sign the final checksum manifest and
+every platform asset; the updater embeds only public keys. Rotate the key
+through three releases: add the replacement key to the updater trust set and
+ship that bridge release with the old signer; change the workflow secret to the
+replacement signer; remove the old key from the trust set after supported
+updaters trust the replacement. The release gate rejects a signer outside the
+embedded trust set. Updaters without the replacement key fail closed rather
+than accepting an unknown signer.
+
 ## Cache service
 
 `sparkwing-cache` requires a bearer token on its external **write**
@@ -70,7 +82,8 @@ before and after it installs them. The release signs the `SHA256SUMS`
 manifest with an ed25519 private key; the updater carries the matching
 public key compiled into the binary and verifies the detached
 `SHA256SUMS.sig` with pure-Go `crypto/ed25519` -- no external tool and no
-network beyond fetching the asset, `SHA256SUMS`, and `SHA256SUMS.sig`. It
+network beyond fetching the asset, its detached signature, `SHA256SUMS`,
+and `SHA256SUMS.sig`. It
 then checks the download against the signed digest, installs atomically,
 and re-hashes the installed file, requiring it to equal the verified
 digest. macOS binaries are ad-hoc-codesigned by the release *before* the
@@ -81,19 +94,15 @@ post-install mismatch restores the prior binary and fails loudly.
 
 The signing key is release machinery, not per-user configuration:
 
-- The maintainer generates the keypair once with `go run
-  ./cmd/sign-manifest -genkey`, pastes the printed public key into
-  `sparkwingUpdatePubKeyHex` in `cmd/sparkwing/update.go`, and stores the
-  private key as the `SPARKWING_UPDATE_SIGNING_KEY` GitHub Actions secret
-  the release workflow reads.
-- Until the key is armed the compiled-in public key is a placeholder, so
-  every real release signature fails to verify and `sparkwing update`
-  fails closed rather than installing unverified bytes.
-- Because the trusted key is pinned into the binary, the first release
-  that carries a new key must be installed out-of-band (via
-  `bin/install.sh` or a direct download-and-verify) -- a binary built
-  before the key existed cannot verify it. This is inherent to key
-  pinning.
+- Generate a base64-encoded 32-byte Ed25519 seed and store it as the
+  `SPARKWING_UPDATE_SIGNING_KEY` GitHub Actions secret.
+- Add its public key to `internal/releaseauth.TrustedPublicKeys`. The
+  release verifier refuses publication unless the secret-derived key is
+  in the updater trust set.
+- Rotate through the three-release overlap above.
+  `SPARKWING_RELEASE_SIGNING_KEY="$SPARKWING_UPDATE_SIGNING_KEY" go run
+  ./cmd/verify-release --public-key` prints the secret's public key and
+  enforces trust-set membership before release assets are signed.
 
 ## Operator checklist
 

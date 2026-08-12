@@ -8,6 +8,7 @@
 package repos
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -135,16 +136,18 @@ func PipelineNamesForRepo(absPath string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("hash %s: %w", sparkwingDir, err)
 	}
-	binPath := bincache.CachedBinaryPath(hash)
-	if _, err := os.Stat(binPath); err != nil {
-		if !os.IsNotExist(err) {
-			return nil, fmt.Errorf("stat binary cache: %w", err)
-		}
-		if err := bincache.CompilePipeline(sparkwingDir, binPath); err != nil {
-			return nil, fmt.Errorf("compile %s: %w", sparkwingDir, err)
-		}
+	entry, err := bincache.PipelineEntry(hash)
+	if err != nil {
+		return nil, fmt.Errorf("cache entry: %w", err)
 	}
-	return describePipelineNames(binPath, absPath)
+	lease, _, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
+		return bincache.CompilePipeline(sparkwingDir, tempPath)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("compile %s: %w", sparkwingDir, err)
+	}
+	defer func() { _ = lease.Release() }()
+	return describePipelineNames(lease.Path(), absPath)
 }
 
 // pipelineNamesIfBuilt returns a repo's declared pipeline names only when
@@ -162,11 +165,16 @@ func pipelineNamesIfBuilt(absPath string) (names []string, ok bool) {
 	if err != nil {
 		return nil, false
 	}
-	binPath := bincache.CachedBinaryPath(hash)
-	if _, err := os.Stat(binPath); err != nil {
+	entry, err := bincache.PipelineEntry(hash)
+	if err != nil {
 		return nil, false
 	}
-	got, err := describePipelineNames(binPath, absPath)
+	lease, found, err := entry.Acquire(context.Background())
+	if err != nil || !found {
+		return nil, false
+	}
+	defer func() { _ = lease.Release() }()
+	got, err := describePipelineNames(lease.Path(), absPath)
 	if err != nil {
 		return nil, false
 	}

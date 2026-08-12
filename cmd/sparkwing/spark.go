@@ -618,11 +618,12 @@ func runSparksWarmup(args []string) error {
 	}
 
 	if *clearCache {
-		cacheRoot := bincache.CacheRoot()
-		if err := os.RemoveAll(cacheRoot); err != nil && !os.IsNotExist(err) {
-			return fmt.Errorf("spark warmup: clear cache %s: %w", cacheRoot, err)
+		result, err := bincache.PruneToLimits(ctx, 0, 0, true)
+		if err != nil {
+			return fmt.Errorf("spark warmup: clear cache: %w", err)
 		}
-		fmt.Fprintf(os.Stdout, "cleared %s\n", cacheRoot)
+		fmt.Fprintf(os.Stdout, "cache pruning removed %d bytes across %d entries\n",
+			result.LogicalRemovedBytes, result.ReclaimedEntries)
 	}
 
 	_, cfg, err := projectconfig.DiscoverPipelines(sparkwingDir)
@@ -636,19 +637,24 @@ func runSparksWarmup(args []string) error {
 	if err != nil {
 		return fmt.Errorf("spark warmup: hash pipeline: %w", err)
 	}
-	binPath := bincache.CachedBinaryPath(key)
-
-	if _, err := os.Stat(binPath); err == nil {
-		fmt.Fprintf(os.Stdout, "binary already cached: %s\n", binPath)
-	} else {
-		fmt.Fprintf(os.Stdout, "compiling %s -> %s\n", sparkwingDir, binPath)
-		if err := bincache.CompilePipeline(sparkwingDir, binPath); err != nil {
-			return fmt.Errorf("spark warmup: %w", err)
-		}
+	entry, err := bincache.PipelineEntry(key)
+	if err != nil {
+		return fmt.Errorf("spark warmup: cache entry: %w", err)
+	}
+	lease, published, err := entry.AcquireOrMaterialize(ctx, func(tempPath string) error {
+		fmt.Fprintf(os.Stdout, "compiling %s\n", sparkwingDir)
+		return bincache.CompilePipeline(sparkwingDir, tempPath)
+	})
+	if err != nil {
+		return fmt.Errorf("spark warmup: %w", err)
+	}
+	defer func() { _ = lease.Release() }()
+	if !published {
+		fmt.Fprintf(os.Stdout, "binary already cached: %s\n", lease.Path())
 	}
 
 	if gcURL := bincache.CacheURL(); gcURL != "" {
-		if err := bincache.UploadBinary(gcURL, bincache.CacheToken(), key, binPath); err != nil {
+		if err := bincache.UploadBinary(gcURL, bincache.CacheToken(), key, lease.Path()); err != nil {
 			fmt.Fprintf(os.Stderr, "warn: gitcache upload failed: %v\n", err)
 		} else {
 			fmt.Fprintf(os.Stdout, "uploaded to %s/bin/%s\n", gcURL, key)

@@ -225,6 +225,16 @@ code change to unlock.
   its value came from `sparkwing.yaml` now fires; a guard on an argument no
   layer supplies is unaffected.
 
+### Security
+
+- **cli + release:** Authenticate `sparkwing update` with an embedded Ed25519
+  release key. Releases sign the checksum manifest and every final platform
+  asset after macOS codesigning; published asset names are immutable. The
+  updater verifies both signatures, the requested manifest entry, staged bytes,
+  and installed bytes, and restores the prior binary when the final check fails.
+  Lookup or verification failure is terminal instead of falling back to an
+  unsigned source build.
+
 ## [v0.27.0] - 2026-08-12
 ### Security
 
@@ -519,8 +529,8 @@ code change to unlock.
   unbounded: after each compile, least recently used binaries are evicted to fit
   `SPARKWING_CACHE_MAX_BYTES` (default `2GiB`) and `SPARKWING_CACHE_MAX_ENTRIES`
   (default `20`), either set to `0` to disable. Eviction ranks entries by last
-  use rather than build time, so a binary in daily use survives regardless of
-  age, and entries used in the last few minutes are never evicted.
+  use rather than build time. Kernel-backed execution and writer leases prevent
+  eviction of active entries.
 - **cache:** `sparkwing cache explain` prints a pipeline's cache key, whether it
   is cached, and every input behind it with its own digest and file counts --
   including how many files git ignored and excluded, which is the usual reason
@@ -551,6 +561,11 @@ code change to unlock.
 
   These two changes invalidate existing cached binaries once; the next
   invocation of each pipeline recompiles.
+
+- **cache:** `pkg/cachecontrol` measures the managed pipeline-binary cache and
+  reclaims inactive entries within caller-set byte and entry-work bounds. The
+  result reports observed capacity separately from removed entries; admission
+  callers remeasure the filesystem after every attempt.
 
 ## [v0.24.0] - 2026-08-10
 ### Added

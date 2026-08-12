@@ -266,6 +266,8 @@ func runSparkwing(args []string) error {
 		return runJobs(args[1:])
 	case "queue":
 		return runQueue(args[1:])
+	case "cache":
+		return runCache(args[1:])
 	case "daemon":
 		return runDaemon(args[1:])
 	case "profile":
@@ -292,8 +294,6 @@ func runSparkwing(args []string) error {
 		return runExamples(args[1:])
 	case "docs":
 		return runDocs(args[1:])
-	case "cache":
-		return runCache(args[1:])
 	case "commands":
 		return runCommands(args[1:])
 	case "update":

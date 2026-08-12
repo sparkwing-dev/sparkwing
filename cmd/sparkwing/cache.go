@@ -9,6 +9,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,6 +23,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
+
+var pruneCacheToLimits = bincache.PruneToLimits
 
 func runCache(args []string) error {
 	if len(args) == 0 {
@@ -46,14 +49,18 @@ func runCache(args []string) error {
 
 // cacheInfoReport is the -o json shape.
 type cacheInfoReport struct {
-	Dir        string           `json:"dir"`
-	Entries    int              `json:"entries"`
-	Shared     int              `json:"shared_entries"`
-	TotalBytes int64            `json:"total_bytes"`
-	MaxBytes   int64            `json:"max_bytes"`
-	MaxEntries int              `json:"max_entries"`
-	OverLimit  bool             `json:"over_limit"`
-	Items      []cacheInfoEntry `json:"items,omitempty"`
+	Dir           string           `json:"dir"`
+	Entries       int              `json:"entries"`
+	ActiveEntries int              `json:"active_entries"`
+	BusyEntries   int              `json:"busy_entries"`
+	LegacyEntries int              `json:"legacy_entries"`
+	LegacyBytes   int64            `json:"legacy_bytes"`
+	Shared        int              `json:"shared_entries"`
+	TotalBytes    int64            `json:"total_bytes"`
+	MaxBytes      int64            `json:"max_bytes"`
+	MaxEntries    int              `json:"max_entries"`
+	OverLimit     bool             `json:"over_limit"`
+	Items         []cacheInfoEntry `json:"items,omitempty"`
 }
 
 type cacheInfoEntry struct {
@@ -76,29 +83,41 @@ func runCacheInfo(args []string) error {
 	var all bool
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json")
 	fs.BoolVar(&all, "all", false, "List every entry rather than the ten most recent")
+	requestedOutput := cacheOutputFromArgs(args, output)
 	if err := parseAndCheck(cmdCacheInfo, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
+		return writeCacheError(requestedOutput, err)
+	}
+	if err := validateCacheOutput(output); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("cache info: unexpected positional %q", fs.Arg(0))
+		return writeCacheError(output, fmt.Errorf("cache info: unexpected positional %q", fs.Arg(0)))
 	}
 
 	entries, err := bincache.ScanCache()
 	if err != nil {
-		return fmt.Errorf("cache info: %w", err)
+		return writeCacheError(output, fmt.Errorf("cache info: %w", err))
+	}
+	status, err := bincache.Status(context.Background(), "")
+	if err != nil {
+		return writeCacheError(output, fmt.Errorf("cache info: %w", err))
 	}
 
 	report := cacheInfoReport{
-		Dir:        bincache.CacheRoot(),
-		Entries:    len(entries),
-		MaxBytes:   bincache.ConfiguredMaxBytes(),
-		MaxEntries: bincache.ConfiguredMaxEntries(),
+		Dir:           bincache.CacheRoot(),
+		Entries:       len(entries) + status.LegacyEntries,
+		ActiveEntries: status.ActiveEntries,
+		BusyEntries:   status.BusyEntries,
+		LegacyEntries: status.LegacyEntries,
+		LegacyBytes:   status.LegacyBytes,
+		TotalBytes:    status.ObservedBytes + status.LegacyBytes,
+		MaxBytes:      bincache.ConfiguredMaxBytes(),
+		MaxEntries:    bincache.ConfiguredMaxEntries(),
 	}
 	for _, e := range entries {
-		report.TotalBytes += e.Bytes
 		if len(e.Owners) > 1 {
 			report.Shared++
 		}
@@ -123,17 +142,12 @@ func runCacheInfo(args []string) error {
 		report.Items = append(report.Items, item)
 	}
 
-	switch output {
-	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(report)
-	case "pretty", "":
+	return writeCacheOutput(output, report, func() {
 		fmt.Println(color.Bold("PIPELINE BINARY CACHE"))
 		fmt.Printf("  dir:      %s\n", color.Cyan(report.Dir))
 		if report.Entries == 0 {
 			fmt.Printf("  status:   %s\n", color.Dim("(empty -- no pipeline has been compiled yet)"))
-			return nil
+			return
 		}
 		fmt.Printf("  entries:  %d\n", report.Entries)
 		if report.Shared > 0 {
@@ -141,14 +155,20 @@ func runCacheInfo(args []string) error {
 				color.Green(fmt.Sprintf("%d entries reused by more than one checkout", report.Shared)))
 		}
 		fmt.Printf("  total:    %s\n", humanBytes(report.TotalBytes))
+		if report.ActiveEntries > 0 || report.BusyEntries > 0 {
+			fmt.Printf("  in use:   %d active, %d busy\n", report.ActiveEntries, report.BusyEntries)
+		}
+		if report.LegacyEntries > 0 {
+			fmt.Printf("  legacy:   %s across %d entries\n", humanBytes(report.LegacyBytes), report.LegacyEntries)
+		}
 		fmt.Printf("  ceiling:  %s / %s\n", limitLabel(report.MaxBytes), entryLimitLabel(report.MaxEntries))
 		if report.OverLimit {
 			fmt.Printf("  %s\n", color.Yellow("over ceiling -- the next compile will prune, or run `sparkwing cache prune`"))
 		}
 		fmt.Println()
-		heading := fmt.Sprintf("MOST RECENTLY USED (%d of %d)", len(shown), report.Entries)
+		heading := fmt.Sprintf("MOST RECENTLY USED (%d managed of %d total)", len(shown), report.Entries)
 		if all {
-			heading = fmt.Sprintf("ALL ENTRIES (%d)", report.Entries)
+			heading = fmt.Sprintf("ALL MANAGED ENTRIES (%d)", len(entries))
 		}
 		fmt.Println(color.Bold(heading))
 		for _, e := range shown {
@@ -164,10 +184,7 @@ func runCacheInfo(args []string) error {
 		if !all && len(entries) > len(shown) {
 			fmt.Printf("  %s\n", color.Dim(fmt.Sprintf("... and %d more (--all to list)", len(entries)-len(shown))))
 		}
-		return nil
-	default:
-		return fmt.Errorf("cache info: unknown output %q (valid: pretty, json)", output)
-	}
+	})
 }
 
 func runCachePrune(args []string) error {
@@ -176,59 +193,111 @@ func runCachePrune(args []string) error {
 	var maxEntries int
 	var all bool
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json")
-	fs.StringVar(&maxBytesRaw, "max-bytes", "", "Byte ceiling, e.g. 512MiB (default: $SPARKWING_CACHE_MAX_BYTES)")
-	fs.IntVar(&maxEntries, "max-entries", -1, "Entry ceiling (default: $SPARKWING_CACHE_MAX_ENTRIES)")
-	fs.BoolVar(&all, "all", false, "Remove every entry, ignoring both ceilings")
+	fs.StringVar(&maxBytesRaw, "max-bytes", "", "byte ceiling, e.g. 512MiB")
+	fs.IntVar(&maxEntries, "max-entries", -1, "entry ceiling")
+	fs.BoolVar(&all, "all", false, "remove every inactive entry")
+	requestedOutput := cacheOutputFromArgs(args, output)
 	if err := parseAndCheck(cmdCachePrune, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
+		return writeCacheError(requestedOutput, err)
+	}
+	if err := validateCacheOutput(output); err != nil {
 		return err
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("cache prune: unexpected positional %q", fs.Arg(0))
+	if fs.NArg() != 0 {
+		return writeCacheError(output, fmt.Errorf("cache prune: unexpected positional %q", fs.Arg(0)))
 	}
-
 	maxBytes := bincache.ConfiguredMaxBytes()
 	if maxBytesRaw != "" {
-		n, err := bincache.ParseBytes(maxBytesRaw)
+		parsed, err := bincache.ParseBytes(maxBytesRaw)
 		if err != nil {
-			return fmt.Errorf("cache prune: --max-bytes: %w", err)
+			return writeCacheError(output, fmt.Errorf("cache prune: --max-bytes: %w", err))
 		}
-		maxBytes = n
+		maxBytes = parsed
 	}
-	limitEntries := bincache.ConfiguredMaxEntries()
+	entryLimit := bincache.ConfiguredMaxEntries()
 	if maxEntries >= 0 {
-		limitEntries = maxEntries
+		entryLimit = maxEntries
 	}
-	if all {
-		// A ceiling of one byte evicts everything the grace window
-		// allows, which is the honest meaning of --all: entries a run
-		// may be about to exec are still spared.
-		maxBytes, limitEntries = 1, 0
-	}
-
-	result, err := bincache.Prune(maxBytes, limitEntries)
+	result, err := pruneCacheToLimits(context.Background(), maxBytes, entryLimit, all)
 	if err != nil {
-		return fmt.Errorf("cache prune: %w", err)
+		return writeCacheError(output, fmt.Errorf("cache prune: %w", err))
 	}
+	return writeCacheOutput(output, result, func() {
+		if result.PruneBusy {
+			fmt.Println("prune already in progress")
+			return
+		}
+		fmt.Printf("removed: %s across %d entries\n", humanBytes(result.LogicalRemovedBytes), result.ReclaimedEntries)
+		fmt.Printf("observed capacity gained: %s\n", humanBytes(result.ObservedCapacityGainedBytes))
+		fmt.Printf("examined: %d, active skipped: %d, busy skipped: %d\n",
+			result.ExaminedEntries, result.ActiveSkippedEntries, result.BusySkippedEntries)
+		fmt.Printf("goal satisfied: %t\n", result.GoalSatisfied)
+	})
+}
 
+func writeCacheError(output string, err error) error {
+	if output != "json" {
+		return err
+	}
+	encoded := struct {
+		Payload any `json:"payload"`
+		Error   any `json:"error"`
+	}{Error: struct {
+		Message string `json:"message"`
+	}{Message: err.Error()}}
+	return errors.Join(err, json.NewEncoder(os.Stdout).Encode(encoded))
+}
+
+func writeCacheOutput(output string, payload any, pretty func()) error {
+	if err := validateCacheOutput(output); err != nil {
+		return err
+	}
 	switch output {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(result)
+		encoded := struct {
+			Payload any `json:"payload"`
+			Error   any `json:"error"`
+		}{Payload: payload}
+		return json.NewEncoder(os.Stdout).Encode(encoded)
 	case "pretty", "":
-		fmt.Printf("removed %d entries, freed %s\n", result.Removed, humanBytes(result.Freed))
-		fmt.Printf("kept    %d entries, %s\n", result.Kept, humanBytes(result.KeptBytes))
-		if result.Skipped > 0 {
-			fmt.Printf("%s\n", color.Dim(fmt.Sprintf(
-				"skipped %d entry(s) still in use; a later prune will take them", result.Skipped)))
-		}
+		pretty()
+		return nil
+	}
+	return nil
+}
+
+func validateCacheOutput(output string) error {
+	switch output {
+	case "json", "pretty", "":
 		return nil
 	default:
-		return fmt.Errorf("cache prune: unknown output %q (valid: pretty, json)", output)
+		return fmt.Errorf("unknown output format %q (valid: pretty, json)", output)
 	}
+}
+
+func cacheOutputFromArgs(args []string, fallback string) string {
+	output := fallback
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--":
+			return output
+		case args[i] == "-o" || args[i] == "--output":
+			if i+1 < len(args) {
+				output = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(args[i], "-o="):
+			output = strings.TrimPrefix(args[i], "-o=")
+		case strings.HasPrefix(args[i], "-o") && len(args[i]) > len("-o"):
+			output = strings.TrimPrefix(args[i], "-o")
+		case strings.HasPrefix(args[i], "--output="):
+			output = strings.TrimPrefix(args[i], "--output=")
+		}
+	}
+	return output
 }
 
 // ownerLabel names the checkouts an entry serves. A key is a content
@@ -317,14 +386,18 @@ func runCacheExplain(args []string) error {
 	var output, dir string
 	fs.StringVarP(&output, "output", "o", "pretty", "pretty | json")
 	fs.StringVar(&dir, "dir", "", "Pipeline module directory (default: ./.sparkwing)")
+	requestedOutput := cacheOutputFromArgs(args, output)
 	if err := parseAndCheck(cmdCacheExplain, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
+		return writeCacheError(requestedOutput, err)
+	}
+	if err := validateCacheOutput(output); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
-		return fmt.Errorf("cache explain: unexpected positional %q", fs.Arg(0))
+		return writeCacheError(output, fmt.Errorf("cache explain: unexpected positional %q", fs.Arg(0)))
 	}
 	if dir == "" {
 		dir = defaultSparkwingDir()
@@ -332,10 +405,20 @@ func runCacheExplain(args []string) error {
 
 	key, parts, err := bincache.ExplainCacheKey(dir)
 	if err != nil {
-		return fmt.Errorf("cache explain: %w", err)
+		return writeCacheError(output, fmt.Errorf("cache explain: %w", err))
 	}
-	_, statErr := os.Stat(bincache.CachedBinaryPath(key))
-	report := cacheExplainReport{Dir: dir, Key: key, Cached: statErr == nil}
+	entry, entryErr := bincache.PipelineEntry(key)
+	if entryErr != nil {
+		return writeCacheError(output, fmt.Errorf("cache explain: %w", entryErr))
+	}
+	lease, cached, acquireErr := entry.Acquire(context.Background())
+	if acquireErr != nil {
+		return writeCacheError(output, fmt.Errorf("cache explain: %w", acquireErr))
+	}
+	if lease != nil {
+		defer func() { _ = lease.Release() }()
+	}
+	report := cacheExplainReport{Dir: dir, Key: key, Cached: cached}
 	for _, p := range parts {
 		report.Parts = append(report.Parts, cacheExplainPart{Label: p.Label, Digest: p.Digest, Detail: p.Detail})
 	}
@@ -345,7 +428,7 @@ func runCacheExplain(args []string) error {
 	absDir, _ := filepath.Abs(dir)
 	entries, err := bincache.ScanCache()
 	if err != nil {
-		return fmt.Errorf("cache explain: %w", err)
+		return writeCacheError(output, fmt.Errorf("cache explain: %w", err))
 	}
 	for _, e := range entries {
 		if e.Key == key {
@@ -368,12 +451,7 @@ func runCacheExplain(args []string) error {
 		report.Related = append(report.Related, prev)
 	}
 
-	switch output {
-	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(report)
-	case "pretty", "":
+	return writeCacheOutput(output, report, func() {
 		fmt.Println(color.Bold("CACHE KEY"))
 		fmt.Printf("  pipeline: %s\n", color.Cyan(dir))
 		fmt.Printf("  key:      %s\n", color.Cyan(report.Key))
@@ -401,8 +479,5 @@ func runCacheExplain(args []string) error {
 				}
 			}
 		}
-		return nil
-	default:
-		return fmt.Errorf("cache explain: unknown output %q (valid: pretty, json)", output)
-	}
+	})
 }

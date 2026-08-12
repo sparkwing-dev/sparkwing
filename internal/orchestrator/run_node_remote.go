@@ -82,12 +82,13 @@ func runNodeRemote(
 		return runner.Result{}, fmt.Errorf("fetch source: %w", err)
 	}
 
-	binPath, err := resolveRemoteBinary(sparkwingDir, gcURL, bincache.CacheToken(), logger)
+	binary, err := resolveRemoteBinary(sparkwingDir, gcURL, bincache.CacheToken(), logger)
 	if err != nil {
 		return runner.Result{}, fmt.Errorf("resolve binary: %w", err)
 	}
+	defer binary.release()
 	logger.Info("runNodeRemote: binary ready",
-		"run_id", runID, "node_id", nodeID, "bin", binPath)
+		"run_id", runID, "node_id", nodeID, "bin", binary.path)
 
 	childEnv := append(
 		os.Environ(),
@@ -97,7 +98,7 @@ func runNodeRemote(
 		remoteChildMarker+"=1",
 	)
 
-	cmd := exec.CommandContext(ctx, binPath, "run-node", runID, nodeID)
+	cmd := exec.CommandContext(ctx, binary.path, "run-node", runID, nodeID)
 	cmd.Dir = filepath.Dir(sparkwingDir)
 	cmd.Env = childEnv
 	cmd.Stdout = os.Stdout
@@ -138,36 +139,49 @@ func remoteTriggerSourceURLRaw(trigger *store.Trigger) string {
 
 // resolveRemoteBinary tries local disk, then remote /bin/<hash>, then
 // compile+upload, mirroring the trigger loop's build/upload dance.
-func resolveRemoteBinary(sparkwingDir, gcURL, token string, logger *slog.Logger) (string, error) {
+type remoteBinary struct {
+	path  string
+	lease *bincache.Lease
+}
+
+func (b remoteBinary) release() {
+	if b.lease != nil {
+		_ = b.lease.Release()
+	}
+}
+
+func resolveRemoteBinary(sparkwingDir, gcURL, token string, logger *slog.Logger) (remoteBinary, error) {
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
 		tmp := filepath.Join(sparkwingDir, ".sparkwing-runner-bin")
 		if cerr := bincache.CompilePipeline(sparkwingDir, tmp); cerr != nil {
-			return "", cerr
+			return remoteBinary{}, cerr
 		}
-		return tmp, nil
+		return remoteBinary{path: tmp}, nil
 	}
-	binPath := bincache.CachedBinaryPath(key)
-
-	if _, err := os.Stat(binPath); err == nil {
-		return binPath, nil
+	entry, err := bincache.PipelineEntry(key)
+	if err != nil {
+		return remoteBinary{}, err
 	}
-
-	if gcURL != "" {
-		if err := bincache.TryBinary(gcURL, key, binPath); err == nil {
-			return binPath, nil
-		} else if !errors.Is(err, bincache.ErrMiss) {
-			logger.Warn("runNodeRemote: bin cache fetch failed; compiling", "err", err, "hash", key)
+	compiled := false
+	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
+		if gcURL != "" {
+			if fetchErr := bincache.TryBinary(gcURL, key, tempPath); fetchErr == nil {
+				return nil
+			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
+				logger.Warn("runNodeRemote: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)
+			}
 		}
+		compiled = true
+		return bincache.CompilePipeline(sparkwingDir, tempPath)
+	})
+	if err != nil {
+		return remoteBinary{}, err
 	}
-
-	if err := bincache.CompilePipeline(sparkwingDir, binPath); err != nil {
-		return "", err
-	}
-	if gcURL != "" {
-		if err := bincache.UploadBinary(gcURL, token, key, binPath); err != nil {
+	if published && compiled && gcURL != "" {
+		if err := bincache.UploadBinary(gcURL, token, key, lease.Path()); err != nil {
 			logger.Warn("runNodeRemote: bin cache upload failed", "err", err, "hash", key)
 		}
 	}
-	return binPath, nil
+	return remoteBinary{path: lease.Path(), lease: lease}, nil
 }

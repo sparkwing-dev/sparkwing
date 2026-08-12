@@ -1,6 +1,7 @@
 package bincache
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,7 +31,7 @@ func TestSparkwingHome_UnderTestNeverResolvesToTheRealHome(t *testing.T) {
 	}{
 		{"SparkwingHome", SparkwingHome()},
 		{"CacheRoot", CacheRoot()},
-		{"CachedBinaryPath", CachedBinaryPath("deadbeef")},
+		{"PipelineEntry", mustPipelineEntry(t, "deadbeef-cafebabe").binaryPath()},
 	} {
 		if tc.got == real || strings.HasPrefix(tc.got, real+string(filepath.Separator)) {
 			t.Errorf("%s = %q, which is inside the developer's own home %s", tc.name, tc.got, real)
@@ -51,12 +52,13 @@ func TestSparkwingHome_HonorsSparkwingHomeEnv(t *testing.T) {
 	if got := SparkwingHome(); got != want {
 		t.Errorf("SparkwingHome() = %q, want the SPARKWING_HOME value %q", got, want)
 	}
-	if got, wantRoot := CacheRoot(), filepath.Join(want, "cache", "pipelines"); got != wantRoot {
+	if got, wantRoot := CacheRoot(), filepath.Join(want, "cache", "pipelines", pipelineCacheSchema, "entries"); got != wantRoot {
 		t.Errorf("CacheRoot() = %q, want %q", got, wantRoot)
 	}
-	wantBin := filepath.Join(want, "cache", "pipelines", "deadbeef", binaryName())
-	if got := CachedBinaryPath("deadbeef"); got != wantBin {
-		t.Errorf("CachedBinaryPath() = %q, want %q", got, wantBin)
+	entry := mustPipelineEntry(t, "deadbeef-cafebabe")
+	wantBin := filepath.Join(want, "cache", "pipelines", pipelineCacheSchema, "entries", "deadbeef-cafebabe", filepath.Base(entry.binaryPath()))
+	if got := entry.binaryPath(); got != wantBin {
+		t.Errorf("PipelineEntry binary = %q, want %q", got, wantBin)
 	}
 }
 
@@ -84,33 +86,38 @@ func TestSparkwingHome_MatchesDefaultPaths(t *testing.T) {
 func TestPrune_UnisolatedRunsAgainstTheSandbox(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", "")
 
-	root := CacheRoot()
-	if !strings.HasPrefix(root, os.TempDir()) {
-		t.Fatalf("CacheRoot() = %q, want a path under the test sandbox", root)
+	defaultRoot := CacheRoot()
+	if !strings.HasPrefix(defaultRoot, os.TempDir()) {
+		t.Fatalf("CacheRoot() = %q, want a path under the test sandbox", defaultRoot)
 	}
+	// Isolate the destructive assertion from parallel package tests while keeping
+	// it beneath the same test-owned sandbox whose default was proved above.
+	t.Setenv("SPARKWING_HOME", filepath.Join(SparkwingHome(), t.Name()))
+	root := CacheRoot()
 	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
-	seedEntry(t, "sandbox-cold", 100, 72*time.Hour)
-	seedEntry(t, "sandbox-warm", 100, 48*time.Hour)
+	cold := mustPipelineEntry(t, "aaaaaaaa-00000001")
+	warm := mustPipelineEntry(t, "aaaaaaaa-00000002")
+	seedEntry(t, cold, strings.Repeat("c", 100), time.Now().Add(-72*time.Hour))
+	seedEntry(t, warm, strings.Repeat("w", 100), time.Now().Add(-48*time.Hour))
 
-	result, err := Prune(150, 0)
+	result, err := Prune(context.Background(), PruneOptions{ReclaimEntries: 1, MaxEntries: 2})
 	if err != nil {
 		t.Fatalf("Prune: %v", err)
 	}
-	if result.Removed != 1 {
-		t.Errorf("Prune removed %d entries, want 1 from the sandbox cache", result.Removed)
+	if result.ReclaimedEntries != 1 {
+		t.Errorf("Prune removed %d entries, want 1 from the sandbox cache", result.ReclaimedEntries)
 	}
-	if _, err := os.Stat(CachedBinaryPath("sandbox-cold")); !os.IsNotExist(err) {
+	if _, err := os.Stat(cold.binaryPath()); !os.IsNotExist(err) {
 		t.Errorf("coldest sandbox entry survived: %v", err)
 	}
 }
 
-// binaryName mirrors the platform-dependent filename CachedBinaryPath
-// builds, so the assertion above reads as a layout check rather than a
-// GOOS check.
-func binaryName() string {
-	if filepath.Ext(CachedBinaryPath("x")) == ".exe" {
-		return "pipelines.exe"
+func mustPipelineEntry(t *testing.T, key string) Entry {
+	t.Helper()
+	entry, err := PipelineEntry(key)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return "pipelines"
+	return entry
 }

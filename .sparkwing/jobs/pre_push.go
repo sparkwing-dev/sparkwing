@@ -392,4 +392,5 @@ func checkNoCommittedGoWorkFiles(ctx context.Context) error {
 
 func init() {
 	sparkwing.Register("pre-push", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PrePush{} })
+	sparkwing.Register("push-checks", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &PrePush{} })
 }

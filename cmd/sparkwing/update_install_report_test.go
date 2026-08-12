@@ -10,10 +10,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 )
 
-// TestWriteOtherInstallsNote gives every competing copy an exact,
-// reversible remedy and never claims failure: reporting is all update
-// is entitled to do about a binary somebody else installed.
 func TestWriteOtherInstallsNote(t *testing.T) {
+	t.Parallel()
 	var quiet bytes.Buffer
 	writeOtherInstallsNote(&quiet, "/dest/sparkwing", nil)
 	if quiet.Len() != 0 {
@@ -24,22 +22,15 @@ func TestWriteOtherInstallsNote(t *testing.T) {
 	var buf bytes.Buffer
 	writeOtherInstallsNote(&buf, "/dest/sparkwing", []installsite.Copy{other})
 	out := buf.String()
-	for _, want := range []string{
-		other.Path,
-		installsite.RetireRemedy(other.Path).Text(),
-		"/dest/sparkwing",
-		"sparkwing doctor",
-	} {
+	for _, want := range []string{other.Path, installsite.RetireRemedy(other.Path).Text(), "/dest/sparkwing", "sparkwing doctor"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("note missing %q:\n%s", want, out)
 		}
 	}
 }
 
-// TestWriteOtherInstallsNote_QuotesPathsWithSpaces holds update's note
-// to the same paste-safety as doctor's: a competing copy under a
-// directory with a space gets a quoted remedy.
-func TestWriteOtherInstallsNote_QuotesPathsWithSpaces(t *testing.T) {
+func TestWriteOtherInstallsNoteQuotesPathsWithSpaces(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("asserts the POSIX-quoted form")
 	}
