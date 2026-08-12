@@ -266,6 +266,32 @@ func TestRunUpdateBinary_Failure_SpawnsNoGo(t *testing.T) {
 	}
 }
 
+// The default (unarmed) build carries the all-zero placeholder key and
+// must fail closed -- never install -- regardless of what is served.
+func TestDownloadAndInstall_PlaceholderKey_FailsClosed(t *testing.T) {
+	// Do NOT install a test key: exercise the real placeholder.
+	if !isPlaceholderUpdateKey(updateVerifyKey) {
+		t.Fatal("expected the compiled-in key to be the placeholder")
+	}
+	_, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Serve a well-formed, signed release; the placeholder must still refuse.
+	newReleaseServer(t, "v9.9.9", []byte("whatever"), priv, releaseServerOpts{})
+	old := []byte("OLD-BINARY-BYTES")
+	currentBin := writeCurrentBin(t, old)
+
+	_, err = downloadAndInstall("v9.9.9", currentBin)
+	if err == nil {
+		t.Fatal("placeholder build installed a release")
+	}
+	if !strings.Contains(err.Error(), "not armed") {
+		t.Errorf("error did not explain the build is unarmed: %v", err)
+	}
+	assertBytes(t, currentBin, old)
+}
+
 // --- small assertion helpers ---
 
 func bytesEqual(a, b []byte) bool {

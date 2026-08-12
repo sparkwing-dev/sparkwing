@@ -74,6 +74,20 @@ const (
 // key is compiled in.
 var updateVerifyKey = mustDecodeUpdateKey(sparkwingUpdatePubKeyHex)
 
+// isPlaceholderUpdateKey reports whether k is the unarmed all-zero
+// placeholder. The updater refuses to verify against it (fail closed).
+func isPlaceholderUpdateKey(k ed25519.PublicKey) bool {
+	if len(k) != ed25519.PublicKeySize {
+		return true
+	}
+	for _, b := range k {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func mustDecodeUpdateKey(h string) ed25519.PublicKey {
 	b, err := hex.DecodeString(strings.TrimSpace(h))
 	if err != nil || len(b) != ed25519.PublicKeySize {
@@ -378,6 +392,15 @@ func downloadAndInstall(version, currentBin string) (installResult, error) {
 	sigBytes, err := os.ReadFile(sigPath)
 	if err != nil {
 		return installResult{}, err
+	}
+	// Fail closed if this build was never armed. The placeholder key is
+	// all-zero -- a low-order ed25519 point some verifiers will accept a
+	// crafted signature against -- so we refuse outright rather than trust
+	// ed25519.Verify's behavior on it. A real armed build never trips this.
+	if isPlaceholderUpdateKey(updateVerifyKey) {
+		return installResult{}, errors.New(
+			"this sparkwing build has no update signing key compiled in (placeholder); " +
+				"verified self-update is not armed -- install releases via bin/install.sh")
 	}
 	if !ed25519.Verify(updateVerifyKey, sumsBytes, sigBytes) {
 		return installResult{}, errors.New(
