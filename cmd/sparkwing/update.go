@@ -28,6 +28,8 @@ import (
 const (
 	updateRepo             = "sparkwing-dev/sparkwing"
 	defaultUpdateAssetBase = "https://github.com/" + updateRepo + "/releases/download"
+	maxAssetBytes          = 512 << 20
+	maxMetadataBytes       = 1 << 20
 )
 
 var (
@@ -284,19 +286,19 @@ func downloadAndInstall(version, currentBin string) (installedRelease, error) {
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	binPath := filepath.Join(tmpDir, asset)
-	if err := downloadFile(base+"/"+asset, binPath); err != nil {
+	if err := downloadFile(base+"/"+asset, binPath, maxAssetBytes); err != nil {
 		return installedRelease{}, fmt.Errorf("download %s: %w", asset, err)
 	}
 	assetSigPath := binPath + ".sig"
-	if err := downloadFile(base+"/"+asset+".sig", assetSigPath); err != nil {
+	if err := downloadFile(base+"/"+asset+".sig", assetSigPath, maxMetadataBytes); err != nil {
 		return installedRelease{}, fmt.Errorf("download %s.sig: %w", asset, err)
 	}
 	sumsPath := filepath.Join(tmpDir, "SHA256SUMS")
-	if err := downloadFile(base+"/SHA256SUMS", sumsPath); err != nil {
+	if err := downloadFile(base+"/SHA256SUMS", sumsPath, maxMetadataBytes); err != nil {
 		return installedRelease{}, fmt.Errorf("download SHA256SUMS: %w", err)
 	}
 	sumsSigPath := sumsPath + ".sig"
-	if err := downloadFile(base+"/SHA256SUMS.sig", sumsSigPath); err != nil {
+	if err := downloadFile(base+"/SHA256SUMS.sig", sumsSigPath, maxMetadataBytes); err != nil {
 		return installedRelease{}, fmt.Errorf("download SHA256SUMS.sig: %w", err)
 	}
 	assetBody, err := os.ReadFile(binPath)
