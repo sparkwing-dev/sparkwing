@@ -1,23 +1,56 @@
 package main
 
 import (
-	"os"
-	"strings"
+	"errors"
+	"reflect"
 	"testing"
 )
 
-func TestWindowsReplacementRetainsRecoverableRunningImage(t *testing.T) {
+func TestWindowsReplacementPreservesRunningImageBeforeInstall(t *testing.T) {
 	t.Parallel()
 
-	body, err := os.ReadFile("update_replace_windows.go")
-	if err != nil {
+	type call struct {
+		source string
+		target string
+		flags  uint32
+	}
+	var calls []call
+	move := func(source, target string, flags uint32) error {
+		calls = append(calls, call{source: source, target: target, flags: flags})
+		return nil
+	}
+	if err := replaceWindowsRunningImageWith("stage", "sparkwing.exe", move, func(string) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	source := string(body)
-	if !strings.Contains(source, "replaceWindowsRunningImage") {
-		t.Fatal("Windows replacement has no running-image transaction")
+	want := []call{
+		{source: "sparkwing.exe", target: "sparkwing.exe.old", flags: windowsMoveWriteThrough},
+		{source: "stage", target: "sparkwing.exe", flags: windowsMoveWriteThrough},
 	}
-	if strings.Contains(source, "MOVEFILE_REPLACE_EXISTING|windows.MOVEFILE_WRITE_THROUGH") {
-		t.Fatal("Windows replacement still targets the executing image directly")
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("move calls = %#v, want %#v", calls, want)
+	}
+}
+
+func TestWindowsReplacementRestoresPreservedImageWhenInstallFails(t *testing.T) {
+	t.Parallel()
+
+	var calls [][2]string
+	move := func(source, target string, _ uint32) error {
+		calls = append(calls, [2]string{source, target})
+		if source == "stage" {
+			return errors.New("sharing violation")
+		}
+		return nil
+	}
+	if err := replaceWindowsRunningImageWith("stage", "sparkwing.exe", move, func(string) error { return nil }); err == nil {
+		t.Fatal("replaceWindowsRunningImageWith() succeeded")
+	}
+	want := [][2]string{
+		{"sparkwing.exe", "sparkwing.exe.old"},
+		{"stage", "sparkwing.exe"},
+		{"sparkwing.exe.old", "sparkwing.exe"},
+	}
+	if !reflect.DeepEqual(calls, want) {
+		t.Fatalf("move calls = %#v, want %#v", calls, want)
 	}
 }
