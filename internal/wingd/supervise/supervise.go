@@ -103,6 +103,17 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (bool, 
 	defer ticker.Stop()
 	failures := 0
 	for {
+		// A child that already exited settles the watch: its exit, not a
+		// probe against its absence, is the verdict. Without this
+		// priority, a probe that failed because the child exited during
+		// it leaves both channels ready, and the select below picks at
+		// random -- enough unlucky picks in a row condemn a child that
+		// ended cleanly and spawn a successor nothing asked for.
+		select {
+		case err := <-child.Wait():
+			return false, err
+		default:
+		}
 		select {
 		case <-ctx.Done():
 			return false, stopChild(child, cfg.TermGrace)
