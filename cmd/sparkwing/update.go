@@ -58,7 +58,7 @@ var updateBaseURL = updateAssetBase
 // installing bytes it cannot prove are the release's. A half-armed release
 // (signed manifest, but this key still the placeholder) therefore fails
 // safe, never open.
-const sparkwingUpdatePubKeyHex = "0000000000000000000000000000000000000000000000000000000000000000"
+const sparkwingUpdatePubKeyHex = "c2155bdf98c26e5b43179ea70e10b308938f47fe9e3dfac95169c46b03fd0ab2"
 
 // Compile-time proof the embedded key is exactly 32 bytes (64 hex chars).
 // Both are constant expressions that must stay non-negative; a wrong

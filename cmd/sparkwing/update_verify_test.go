@@ -266,12 +266,16 @@ func TestRunUpdateBinary_Failure_SpawnsNoGo(t *testing.T) {
 	}
 }
 
-// The default (unarmed) build carries the all-zero placeholder key and
-// must fail closed -- never install -- regardless of what is served.
+// An unarmed build carries the all-zero placeholder key and must fail
+// closed -- never install -- regardless of what is served. The test
+// installs the placeholder through the same seam the real key uses, so
+// it holds whether or not the shipped binary is armed.
 func TestDownloadAndInstall_PlaceholderKey_FailsClosed(t *testing.T) {
-	// Do NOT install a test key: exercise the real placeholder.
+	prev := updateVerifyKey
+	updateVerifyKey = make(ed25519.PublicKey, ed25519.PublicKeySize) // all-zero placeholder
+	t.Cleanup(func() { updateVerifyKey = prev })
 	if !isPlaceholderUpdateKey(updateVerifyKey) {
-		t.Fatal("expected the compiled-in key to be the placeholder")
+		t.Fatal("test setup: injected key is not the placeholder")
 	}
 	_, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
