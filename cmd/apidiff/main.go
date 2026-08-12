@@ -27,37 +27,12 @@ import (
 	"go/format"
 	"go/parser"
 	"go/token"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 )
-
-// packagePaths is the covered surface from VERSIONING.md:
-// sparkwing (top-level SDK only) + every pkg/... and its public
-// subpackages.
-var packagePaths = []string{
-	"sparkwing",
-	"pkg/backends",
-	"pkg/color",
-	"pkg/controller",
-	"pkg/controller/client",
-	"pkg/controller/pool",
-	"pkg/docs",
-	"pkg/localws",
-	"pkg/logs",
-	"pkg/pipelines",
-	"pkg/runner",
-	"pkg/storage",
-	"pkg/storage/fs",
-	"pkg/storage/s3",
-	"pkg/storage/sparkwingcache",
-	"pkg/storage/sparkwinglogs",
-	"pkg/storage/stdoutlogs",
-	"pkg/storage/storeurl",
-	"pkg/store",
-	"pkg/wingwire",
-}
 
 func main() {
 	if len(os.Args) != 2 {
@@ -72,6 +47,10 @@ func main() {
 	if err != nil {
 		die("locate repo root: %v", err)
 	}
+	packagePaths, err := discoverPackagePaths(root)
+	if err != nil {
+		die("discover public packages: %v", err)
+	}
 	for _, p := range packagePaths {
 		snap, err := snapshotPackage(filepath.Join(root, p), p)
 		if err != nil {
@@ -82,6 +61,40 @@ func main() {
 			die("write %s: %v", outName, err)
 		}
 	}
+}
+
+// discoverPackagePaths derives the versioned API surface from repository
+// structure. A new package under pkg therefore enters the snapshot gate in the
+// same change that creates it; no second allowlist can silently omit it.
+func discoverPackagePaths(root string) ([]string, error) {
+	paths := []string{"sparkwing"}
+	pkgRoot := filepath.Join(root, "pkg")
+	err := filepath.WalkDir(pkgRoot, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			return nil
+		}
+		rel, err := filepath.Rel(root, filepath.Dir(path))
+		if err != nil {
+			return err
+		}
+		importPath := filepath.ToSlash(rel)
+		if len(paths) == 0 || paths[len(paths)-1] != importPath {
+			paths = append(paths, importPath)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	return paths, nil
 }
 
 func die(format string, args ...any) {

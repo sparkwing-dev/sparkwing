@@ -1,0 +1,10 @@
+# pkg/cachecontrol
+
+func Measure(ctx context.Context) (Status, error)
+func Prune(ctx context.Context, opts PruneOptions) (PruneResult, error)
+type PruneOptions struct {
+	ReclaimBytes int64
+	MaxEntries   int
+}
+type PruneResult = bincache.PruneResult
+type Status = bincache.CacheStatus
