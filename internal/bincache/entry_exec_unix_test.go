@@ -5,6 +5,7 @@ package bincache
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -141,6 +142,40 @@ func TestExecLeaseDoesNotSurviveInPersistentChild(t *testing.T) {
 	}
 	if _, err := os.Stat(entry.binaryPath()); !os.IsNotExist(err) {
 		t.Fatalf("pruned entry still exists: %v", err)
+	}
+}
+
+func TestAdoptExecLeaseFailsClosedOnInvalidCoordinate(t *testing.T) {
+	t.Setenv("SPARKWING_INTERNAL_CACHE_LEASE", "not-a-coordinate")
+	if err := AdoptExecLeaseFromEnv(); err == nil || !strings.Contains(err.Error(), "invalid inherited") {
+		t.Fatalf("invalid coordinate error = %v", err)
+	}
+	if _, exists := os.LookupEnv("SPARKWING_INTERNAL_CACHE_LEASE"); exists {
+		t.Fatal("invalid coordinate remained available to descendants")
+	}
+}
+
+func TestAdoptExecLeaseFailsClosedOnMismatchedDescriptor(t *testing.T) {
+	root := t.TempDir()
+	entry := testEntry(t, root, "11111111-11111111")
+	lease, err := entry.openLock("lease", cacheLockShared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = cacheUnlock(lease)
+		_ = lease.Close()
+	}()
+	wrong, err := os.CreateTemp(t.TempDir(), "not-a-lease-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrong.Close()
+	coordinate := strconv.FormatUint(uint64(wrong.Fd()), 10) + ":" + entry.key + ":" +
+		base64.RawURLEncoding.EncodeToString([]byte(entry.root))
+	t.Setenv("SPARKWING_INTERNAL_CACHE_LEASE", coordinate)
+	if err := AdoptExecLeaseFromEnv(); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("mismatched descriptor error = %v", err)
 	}
 }
 
