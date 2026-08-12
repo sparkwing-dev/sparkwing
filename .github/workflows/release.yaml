@@ -186,8 +186,10 @@ jobs:
           SPARKWING_RELEASE_SIGNING_KEY: ${{ secrets.SPARKWING_RELEASE_SIGNING_KEY }}
         run: |
           set -euo pipefail
-          go run ./cmd/verify-release --dist dist
-          go run ./cmd/verify-release --dist dist --verify
+          go run ./cmd/verify-release --dist dist \
+            --expected-public-key SCA8nBcnHkYcyP6g+Quuwy5UR4bKJLlwrf7FcWZsXOI=
+          go run ./cmd/verify-release --dist dist --verify \
+            --expected-public-key SCA8nBcnHkYcyP6g+Quuwy5UR4bKJLlwrf7FcWZsXOI=
           test -f dist/SHA256SUMS.sig
           ls dist/sparkwing-*.sig >/dev/null
 
