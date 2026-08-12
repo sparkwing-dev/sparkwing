@@ -14,13 +14,14 @@ import (
 const childTerminationGrace = 5 * time.Second
 
 func execChild(bin string, args []string, env []string) error {
+	signals := make(chan os.Signal, 2)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	cmd := exec.Command(bin, args...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr, cmd.Env = os.Stdin, os.Stdout, os.Stderr, env
 	if err := cmd.Start(); err != nil {
+		signal.Stop(signals)
 		return err
 	}
-	signals := make(chan os.Signal, 2)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
 	var deadline <-chan time.Time
