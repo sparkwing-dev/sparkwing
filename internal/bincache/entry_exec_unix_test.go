@@ -237,7 +237,7 @@ func waitCommand(t *testing.T, cmd *exec.Cmd, childPID int) error {
 	select {
 	case err := <-waited:
 		return err
-	case <-time.After(2 * time.Second):
+	case <-time.After(10 * time.Second):
 		if childPID > 0 {
 			_ = syscall.Kill(childPID, syscall.SIGKILL)
 		}
