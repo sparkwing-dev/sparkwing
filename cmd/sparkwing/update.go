@@ -1,9 +1,15 @@
 // CLI self-update verbs. Mirrors install.sh: fetch the bare per-platform
-// binary, verify SHA256, atomic-rename onto the running binary. macOS
-// gets ad-hoc codesigning; Windows uses a rename-aside dance.
+// binary, verify a signed SHA256SUMS, then atomically install and re-hash
+// the installed bytes. The release ad-hoc-codesigns the macOS Mach-O
+// binaries BEFORE SHA256SUMS is computed, so the verified bytes are
+// already Gatekeeper-valid and the updater installs them UNCHANGED --
+// there is no post-verification mutation. Windows uses a rename-aside
+// dance. Every failure is terminal: the updater never falls back to an
+// unverified build.
 package main
 
 import (
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -28,6 +34,59 @@ const (
 	updateRepo      = "sparkwing-dev/sparkwing"
 	updateAssetBase = "https://github.com/" + updateRepo + "/releases/download"
 )
+
+// updateBaseURL is the release-download base the updater fetches assets
+// from. It is a package var only so tests can point it at a local httptest
+// server; production always uses the GitHub releases base.
+var updateBaseURL = updateAssetBase
+
+// sparkwingUpdatePubKeyHex is the ed25519 public key (hex-encoded, 32
+// bytes = 64 hex chars) the updater uses to verify the detached signature
+// over a release's SHA256SUMS. Verification is pure-Go crypto/ed25519 --
+// no external binary, and no network beyond fetching the asset, its
+// SHA256SUMS, and SHA256SUMS.sig.
+//
+// PLACEHOLDER -- NOT A REAL KEY. The release owner MUST replace these
+// all-zero bytes with the public key printed by
+//
+//	go run ./cmd/sign-manifest -genkey
+//
+// and store the matching private key as the SPARKWING_UPDATE_SIGNING_KEY
+// GitHub Actions secret (see .github/workflows/release.yaml). Until then a
+// real release's signature CANNOT verify against these zero bytes, so
+// `sparkwing update` fails CLOSED -- it refuses to install rather than
+// installing bytes it cannot prove are the release's. A half-armed release
+// (signed manifest, but this key still the placeholder) therefore fails
+// safe, never open.
+const sparkwingUpdatePubKeyHex = "0000000000000000000000000000000000000000000000000000000000000000"
+
+// Compile-time proof the embedded key is exactly 32 bytes (64 hex chars).
+// Both are constant expressions that must stay non-negative; a wrong
+// length makes one negative and the conversion to uint fails to compile.
+const (
+	_ = uint(len(sparkwingUpdatePubKeyHex) - 64)
+	_ = uint(64 - len(sparkwingUpdatePubKeyHex))
+)
+
+// updateVerifyKey is the decoded verification key. It is a package var so
+// tests can inject a known keypair via withTestUpdateKey; production code
+// never reassigns it, and there is no flag or env override -- the trusted
+// key is compiled in.
+var updateVerifyKey = mustDecodeUpdateKey(sparkwingUpdatePubKeyHex)
+
+func mustDecodeUpdateKey(h string) ed25519.PublicKey {
+	b, err := hex.DecodeString(strings.TrimSpace(h))
+	if err != nil || len(b) != ed25519.PublicKeySize {
+		panic("sparkwing: embedded update public key is not 32 hex-encoded bytes")
+	}
+	return ed25519.PublicKey(b)
+}
+
+// afterInstallHook, when non-nil, runs immediately after the atomic swap
+// and BEFORE the installed-bytes re-hash. It exists only as a test seam to
+// corrupt the just-installed file and exercise the post-install
+// verification + restore path. It is nil in production.
+var afterInstallHook func(installedPath string)
 
 // runUpdate is the top-level binary self-update verb (CLI only; for
 // SDK pins, see `sparkwing version update --sdk`).
@@ -109,18 +168,24 @@ func classifyDowngrade(current, resolved string) downgradeKind {
 	return downgradeRebaseline
 }
 
-// runUpdateBinary downloads + verifies + atomically installs.
-// Falls back to `go install` when the download fails. An operator
-// version hold is enforced here (unless overrideHold): the ceiling
-// binds every self-upgrade path, `sparkwing update` and
-// `sparkwing version update --cli` alike.
+// runUpdateBinary downloads, verifies (signature + digest), and atomically
+// installs a release binary, then re-hashes the installed file and
+// requires it to equal the verified release digest.
+//
+// Every failure is TERMINAL. There is no `go install` fallback: an
+// unverifiable download must not be silently swapped for an unverified
+// build that `go install` may drop in a different directory than the
+// running binary. An operator version hold is enforced here (unless
+// overrideHold): the ceiling binds every self-upgrade path, `sparkwing
+// update` and `sparkwing version update --cli` alike.
 func runUpdateBinary(version string, force, overrideHold bool) error {
 	resolved := strings.TrimSpace(version)
 	if resolved == "" {
 		v, err := fetchLatestRelease()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "update: could not fetch latest version (%v); falling back to go install\n", err)
-			return updateCLIViaGoInstall("latest")
+			return fmt.Errorf("update: could not determine the latest release: %w\n"+
+				"  self-update does not fall back to `go install`; retry, pass --version vX.Y.Z, "+
+				"or reinstall out-of-band via bin/install.sh", err)
 		}
 		resolved = v
 	}
@@ -163,12 +228,18 @@ func runUpdateBinary(version string, force, overrideHold bool) error {
 
 	fmt.Fprintf(os.Stdout, "updating sparkwing: %s -> %s\n", current, resolved)
 
-	if err := downloadAndInstall(resolved, currentBin); err != nil {
-		fmt.Fprintf(os.Stderr, "update: download path failed (%v); falling back to go install\n", err)
-		return updateCLIViaGoInstall(resolved)
+	res, err := downloadAndInstall(resolved, currentBin)
+	if err != nil {
+		// Terminal. The running binary is untouched on every pre-install
+		// failure, and restored on a post-install mismatch (see
+		// downloadAndInstall); either way we do NOT reach `go install`.
+		return fmt.Errorf("update: verified install failed: %w", err)
 	}
 
-	fmt.Fprintf(os.Stdout, "sparkwing updated: %s -> %s\n", current, resolved)
+	// Contract point 6: name the installed path, version, and digest.
+	fmt.Fprintf(os.Stdout, "sparkwing updated: %s -> %s\n", current, res.version)
+	fmt.Fprintf(os.Stdout, "  path:   %s\n", res.path)
+	fmt.Fprintf(os.Stdout, "  digest: %s (sha256, verified against the signed SHA256SUMS)\n", res.digest)
 	reportOtherInstalls(os.Stdout, currentBin)
 	fmt.Fprintf(os.Stdout, "what's new: https://github.com/sparkwing-dev/sparkwing/releases\n")
 	return nil
@@ -255,81 +326,188 @@ func installedVersion() string {
 // Version is injected via -ldflags="-X main.Version=vX.Y.Z" at release.
 var Version string
 
-// downloadAndInstall fetches binary + SHA256SUMS, verifies, atomic-renames.
-// Ad-hoc codesigns on macOS to avoid arm64 SIGKILL on first run.
-func downloadAndInstall(version, currentBin string) error {
+// installResult reports what downloadAndInstall proved and installed.
+type installResult struct {
+	path    string // absolute path the verified bytes now occupy
+	version string // release tag installed
+	digest  string // sha256 hex, verified against the signed SHA256SUMS
+}
+
+// downloadAndInstall fetches the asset + SHA256SUMS + SHA256SUMS.sig,
+// verifies the ed25519 signature over SHA256SUMS with the embedded key,
+// checks the downloaded file against the signed digest, stages the bytes
+// UNCHANGED (no codesign, no mutation), atomically installs, then
+// re-hashes the installed file and requires it to equal the verified
+// digest -- restoring the prior binary and failing loudly on mismatch.
+func downloadAndInstall(version, currentBin string) (installResult, error) {
 	suffix := runtime.GOOS + "-" + runtime.GOARCH
 	ext := ""
 	if runtime.GOOS == "windows" {
 		ext = ".exe"
 	}
 	asset := "sparkwing-" + suffix + ext
-	base := updateAssetBase + "/" + version
+	base := updateBaseURL + "/" + version
 
 	tmpDir, err := os.MkdirTemp("", "sparkwing-update-")
 	if err != nil {
-		return fmt.Errorf("mkdir tmp: %w", err)
+		return installResult{}, fmt.Errorf("mkdir tmp: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	binPath := filepath.Join(tmpDir, asset)
 	if err := downloadFile(base+"/"+asset, binPath); err != nil {
-		return fmt.Errorf("download %s: %w", asset, err)
+		return installResult{}, fmt.Errorf("download %s: %w", asset, err)
 	}
 	sumsPath := filepath.Join(tmpDir, "SHA256SUMS")
 	if err := downloadFile(base+"/SHA256SUMS", sumsPath); err != nil {
-		return fmt.Errorf("download SHA256SUMS: %w", err)
+		return installResult{}, fmt.Errorf("download SHA256SUMS: %w", err)
+	}
+	sigPath := filepath.Join(tmpDir, "SHA256SUMS.sig")
+	if err := downloadFile(base+"/SHA256SUMS.sig", sigPath); err != nil {
+		return installResult{}, fmt.Errorf("download SHA256SUMS.sig: %w\n"+
+			"  this release is not signed for verified self-update; install it out-of-band via bin/install.sh instead", err)
+	}
+
+	// Verify the ed25519 signature over the RAW SHA256SUMS bytes with the
+	// embedded key BEFORE trusting any digest the manifest lists. With the
+	// placeholder key this fails for every real release (fail closed).
+	sumsBytes, err := os.ReadFile(sumsPath)
+	if err != nil {
+		return installResult{}, err
+	}
+	sigBytes, err := os.ReadFile(sigPath)
+	if err != nil {
+		return installResult{}, err
+	}
+	if !ed25519.Verify(updateVerifyKey, sumsBytes, sigBytes) {
+		return installResult{}, errors.New(
+			"SHA256SUMS signature is not valid for the key compiled into this binary; " +
+				"refusing to install (the running binary was not touched)")
 	}
 
 	expected, err := lookupSHA256(sumsPath, asset)
 	if err != nil {
-		return err
+		return installResult{}, err
 	}
 	actual, err := sha256OfFile(binPath)
 	if err != nil {
-		return err
+		return installResult{}, err
 	}
 	if !strings.EqualFold(expected, actual) {
-		return fmt.Errorf("checksum mismatch for %s\n  expected: %s\n  actual:   %s", asset, expected, actual)
+		return installResult{}, fmt.Errorf(
+			"checksum mismatch for %s (download corrupt or tampered); refusing to install\n  expected: %s\n  actual:   %s",
+			asset, expected, actual)
 	}
 
 	stagedBin := currentBin + ".update.tmp"
 	if err := copyFile(binPath, stagedBin); err != nil {
-		return fmt.Errorf("stage new binary: %w", err)
+		return installResult{}, fmt.Errorf("stage new binary: %w", err)
 	}
 	if err := os.Chmod(stagedBin, 0o755); err != nil {
 		_ = os.Remove(stagedBin)
-		return err
+		return installResult{}, err
 	}
+	// NO post-verification byte mutation. The macOS ad-hoc codesign moved
+	// to the release (rcodesign on the Linux runner, before SHA256SUMS is
+	// computed), so the verified bytes are already Gatekeeper-valid and
+	// install exactly as hashed.
 
-	if runtime.GOOS == "darwin" {
-		_ = exec.Command("codesign", "--force", "--sign", "-", stagedBin).Run()
-	}
-
-	if err := replaceRunningBinary(stagedBin, currentBin); err != nil {
+	prev, err := installAtomic(stagedBin, currentBin)
+	if err != nil {
 		_ = os.Remove(stagedBin)
-		return fmt.Errorf("replace binary: %w", err)
+		return installResult{}, fmt.Errorf("install: %w", err)
 	}
-	return nil
+
+	// Test seam: corrupt the just-installed file to exercise the recheck.
+	if afterInstallHook != nil {
+		afterInstallHook(currentBin)
+	}
+
+	// Contract point 4: hash the INSTALLED file and require equality with
+	// the verified release digest. A mismatch here means the bytes on disk
+	// are not the release's bytes -- restore the prior binary and fail.
+	installed, herr := sha256OfFile(currentBin)
+	if herr != nil || !strings.EqualFold(installed, expected) {
+		if rerr := restorePrev(prev, currentBin); rerr != nil {
+			return installResult{}, fmt.Errorf(
+				"SECURITY: installed bytes do not match the verified release digest AND restoring the prior binary FAILED\n"+
+					"  expected:  %s\n  installed: %s\n  prior binary preserved at: %s\n  restore error: %v\n"+
+					"  do NOT run sparkwing until you replace it with a known-good binary (bin/install.sh)",
+				expected, installedOr(installed, herr), prev, rerr)
+		}
+		return installResult{}, fmt.Errorf(
+			"SECURITY: installed bytes do not match the verified release digest; restored the prior binary, no change made\n"+
+				"  expected:  %s\n  installed: %s",
+			expected, installedOr(installed, herr))
+	}
+
+	// Success: drop the preserved prior binary. On Windows it is the still
+	// running .old image and cannot be deleted now; cleanupStaleUpdate
+	// removes it at next launch, so ignore the error there.
+	_ = os.Remove(prev)
+
+	return installResult{path: currentBin, version: version, digest: expected}, nil
 }
 
-// replaceRunningBinary atomically swaps in the new binary. Windows
-// uses a rename-aside dance: cleanupStaleUpdate deletes the .old at
-// next launch (the running .exe can't be deleted while executing).
-func replaceRunningBinary(stagedBin, currentBin string) error {
-	if runtime.GOOS != "windows" {
-		return os.Rename(stagedBin, currentBin)
+// installedOr renders the installed-file hash, or a reason it could not be
+// read, for a post-install mismatch message.
+func installedOr(hash string, err error) string {
+	if err != nil {
+		return "(could not read installed file: " + err.Error() + ")"
 	}
-	oldBin := currentBin + ".old"
-	_ = os.Remove(oldBin)
-	if err := os.Rename(currentBin, oldBin); err != nil {
-		return fmt.Errorf("move running binary aside: %w", err)
+	return hash
+}
+
+// installAtomic swaps stagedBin in for currentBin and preserves the prior
+// binary so a caller that detects a post-install problem can restore it.
+// It returns the path where the prior binary is preserved.
+//
+//   - non-Windows: the prior bytes are copied aside to <current>.prev, then
+//     the staged binary is renamed over the running one in a single atomic
+//     rename (the running process keeps its open inode).
+//   - Windows: the running .exe cannot be overwritten, so it is renamed
+//     aside to <current>.old (which becomes the preserved prior) and the
+//     staged binary is renamed into place. cleanupStaleUpdate deletes the
+//     .old at next launch.
+func installAtomic(stagedBin, currentBin string) (prev string, err error) {
+	if runtime.GOOS == "windows" {
+		oldBin := currentBin + ".old"
+		_ = os.Remove(oldBin)
+		if err := os.Rename(currentBin, oldBin); err != nil {
+			return "", fmt.Errorf("move running binary aside: %w", err)
+		}
+		if err := os.Rename(stagedBin, currentBin); err != nil {
+			_ = os.Rename(oldBin, currentBin) // roll back the aside move
+			return "", fmt.Errorf("install new binary: %w", err)
+		}
+		return oldBin, nil
 	}
+
+	prev = currentBin + ".prev"
+	_ = os.Remove(prev)
+	if err := copyFile(currentBin, prev); err != nil {
+		return "", fmt.Errorf("back up current binary: %w", err)
+	}
+	_ = os.Chmod(prev, 0o755)
 	if err := os.Rename(stagedBin, currentBin); err != nil {
-		_ = os.Rename(oldBin, currentBin)
-		return fmt.Errorf("install new binary: %w", err)
+		_ = os.Remove(prev)
+		return "", fmt.Errorf("install new binary: %w", err)
 	}
-	return nil
+	return prev, nil
+}
+
+// restorePrev puts the preserved prior binary back at currentBin after a
+// failed post-install check. On Windows the freshly-installed (non-running)
+// binary is removed first so the preserved .old can be renamed back.
+func restorePrev(prev, currentBin string) error {
+	if prev == "" {
+		return errors.New("no preserved prior binary to restore")
+	}
+	if runtime.GOOS == "windows" {
+		_ = os.Remove(currentBin)
+		return os.Rename(prev, currentBin)
+	}
+	return os.Rename(prev, currentBin)
 }
 
 // cleanupStaleUpdate removes <self>.old left by a Windows self-update.
@@ -403,99 +581,6 @@ func copyFile(src, dst string) error {
 	defer out.Close()
 	_, err = io.Copy(out, in)
 	return err
-}
-
-// updateCLIViaGoInstall is the go-toolchain fallback when download fails.
-//
-// Unlike the download path, `go install` does not replace the running
-// binary: it drops the new build in GOBIN (or GOPATH/bin), which may be
-// a different directory than the one that ran this command. The
-// fallback therefore names the exact file it installed, says when the
-// running binary was not the one replaced, and lists any other copies
-// -- silently leaving a second install behind is the split-PATH state
-// this reporting exists to surface.
-func updateCLIViaGoInstall(version string) error {
-	target := "github.com/" + updateRepo + "/cmd/sparkwing@"
-	if version == "" || version == "latest" {
-		target += "latest"
-	} else {
-		target += version
-	}
-	fmt.Fprintf(os.Stdout, "go install -ldflags=\"-s -w\" -trimpath %s\n", target)
-	cmd := exec.Command("go", "install", "-ldflags=-s -w", "-trimpath", target)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("go install: %w", err)
-	}
-	fmt.Fprintf(os.Stdout, "go install finished for %s\n", target)
-	self, err := installsite.Self()
-	if err != nil {
-		self = ""
-	}
-	reportGoInstallOutcome(os.Stdout, goInstallBinTarget(), self)
-	return nil
-}
-
-// goInstallBinTarget is the file `go install` just wrote: GOBIN when
-// set, else the first GOPATH element's bin. Asked of `go env` rather
-// than the process environment, because settings written with
-// `go env -w` never appear there. Empty when go env will not answer.
-func goInstallBinTarget() string {
-	out, err := exec.Command("go", "env", "GOBIN", "GOPATH").Output()
-	if err != nil {
-		return ""
-	}
-	return goInstallBinTargetFromEnv(string(out))
-}
-
-// goInstallBinTargetFromEnv parses `go env GOBIN GOPATH` output: one
-// value per line, in the order asked. The default machine -- GOBIN
-// unset -- answers with a LEADING EMPTY LINE, so the output is split
-// before any trimming; a whole-output TrimSpace would swallow that
-// line, leave GOPATH alone on line one, and read the answer as too
-// short. Each value is trimmed on its own, which also drops the \r
-// that go env emits on Windows.
-func goInstallBinTargetFromEnv(out string) string {
-	lines := strings.Split(out, "\n")
-	if len(lines) < 2 {
-		return ""
-	}
-	return goInstallBinPath(strings.TrimSpace(lines[0]), strings.TrimSpace(lines[1]))
-}
-
-// goInstallBinPath resolves go's documented install target from the
-// GOBIN and GOPATH values go env reports.
-func goInstallBinPath(gobin, gopath string) string {
-	dir := gobin
-	if dir == "" {
-		for _, e := range filepath.SplitList(gopath) {
-			if e != "" {
-				dir = filepath.Join(e, "bin")
-				break
-			}
-		}
-	}
-	if dir == "" {
-		return ""
-	}
-	return filepath.Join(dir, installsite.ExeName())
-}
-
-// reportGoInstallOutcome says where the go-install fallback put the
-// binary and what that means for the install the caller actually ran.
-func reportGoInstallOutcome(w io.Writer, installedTo, self string) {
-	if installedTo == "" {
-		fmt.Fprintf(w, "note: could not determine where `go install` placed the binary; `sparkwing doctor` reports every install on this machine\n")
-		return
-	}
-	fmt.Fprintf(w, "installed to %s\n", installedTo)
-	if self != "" && !installsite.SamePath(installedTo, self) {
-		fmt.Fprintf(w, "note: the binary you ran (%s) was not replaced and is now a second install\n", self)
-		fmt.Fprintf(w, "  keep one: %s, or make sure each caller's PATH resolves %s first\n",
-			installsite.RetireRemedy(self).Text(), installedTo)
-	}
-	reportOtherInstalls(w, installedTo)
 }
 
 func runUpdateSDK(version string) error {

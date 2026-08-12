@@ -63,6 +63,38 @@ it can run dockerd and pre-pull images into a warm PVC. It is
 short-lived, single-container, and the only privileged workload
 sparkwing creates. See [warm-pool.md](warm-pool.md).
 
+## Verified self-update
+
+`sparkwing update` proves the bytes it installs are the release's bytes
+before and after it installs them. The release signs the `SHA256SUMS`
+manifest with an ed25519 private key; the updater carries the matching
+public key compiled into the binary and verifies the detached
+`SHA256SUMS.sig` with pure-Go `crypto/ed25519` -- no external tool and no
+network beyond fetching the asset, `SHA256SUMS`, and `SHA256SUMS.sig`. It
+then checks the download against the signed digest, installs atomically,
+and re-hashes the installed file, requiring it to equal the verified
+digest. macOS binaries are ad-hoc-codesigned by the release *before* the
+manifest is hashed, so the verified bytes install unchanged -- nothing is
+mutated after verification. A signature, digest, download, or install
+failure is terminal: the updater never falls back to `go install`, and a
+post-install mismatch restores the prior binary and fails loudly.
+
+The signing key is release machinery, not per-user configuration:
+
+- The maintainer generates the keypair once with `go run
+  ./cmd/sign-manifest -genkey`, pastes the printed public key into
+  `sparkwingUpdatePubKeyHex` in `cmd/sparkwing/update.go`, and stores the
+  private key as the `SPARKWING_UPDATE_SIGNING_KEY` GitHub Actions secret
+  the release workflow reads.
+- Until the key is armed the compiled-in public key is a placeholder, so
+  every real release signature fails to verify and `sparkwing update`
+  fails closed rather than installing unverified bytes.
+- Because the trusted key is pinned into the binary, the first release
+  that carries a new key must be installed out-of-band (via
+  `bin/install.sh` or a direct download-and-verify) -- a binary built
+  before the key existed cannot verify it. This is inherent to key
+  pinning.
+
 ## Operator checklist
 
 - **Set the auth tokens.** With an empty tokens table the controller

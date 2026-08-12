@@ -114,9 +114,10 @@ Two targets, one verb:
 
   --cli   Replace the running sparkwing binary with the target
           release. Resolves the version pointer from GitHub Releases,
-          downloads + checksum-verifies the tarball, and atomically
-          installs it. macOS arm64 binaries are ad-hoc-codesigned
-          to avoid SIGKILL on first run.
+          downloads the binary, verifies the ed25519 signature over
+          SHA256SUMS and the signed digest, atomically installs, and
+          re-hashes the installed file against the verified digest.
+          A verification or install failure is terminal.
 
   --sdk   Bump the SDK pin in this project's .sparkwing/go.mod via
           'go get github.com/sparkwing-dev/sparkwing@<version>',

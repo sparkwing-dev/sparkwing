@@ -326,14 +326,19 @@ being deferred.`,
 var cmdUpdate = Command{
 	Path:     "sparkwing update",
 	Synopsis: "Self-update the CLI binary",
-	Description: `Downloads, checksum-verifies, and atomically installs the latest
-(or a specific) sparkwing release from GitHub Releases.
+	Description: `Downloads, verifies (signature + digest), and atomically
+installs the latest (or a specific) sparkwing release from GitHub
+Releases.
 
 By default the command fetches the latest version pointer, pulls
-the matching tarball for the current OS/arch, verifies its SHA256
-against the published SHA256SUMS, and replaces the running binary
-via an atomic rename. macOS arm64 binaries are ad-hoc-codesigned
-after installation to avoid SIGKILL on first run.
+the matching binary for the current OS/arch, verifies the ed25519
+signature over SHA256SUMS with the public key compiled into this
+binary, checks the download against the signed digest, replaces the
+running binary via an atomic rename, then re-hashes the installed
+file and requires it to equal the verified digest. macOS binaries
+are ad-hoc-codesigned by the release before hashing, so nothing is
+mutated after verification. A signature, digest, download, or install
+failure is terminal -- there is no 'go install' fallback.
 
 --check is the read-only probe: it reports the installed version
 and the latest published release, exits 0 when already current,
@@ -370,9 +375,10 @@ var cmdVersionUpdate = Command{
 
   --cli   Replace the running sparkwing binary with the target
           release. Resolves the version pointer from GitHub Releases,
-          downloads + checksum-verifies the tarball, and atomically
-          installs it. macOS arm64 binaries are ad-hoc-codesigned
-          to avoid SIGKILL on first run.
+          downloads the binary, verifies the ed25519 signature over
+          SHA256SUMS and the signed digest, atomically installs, and
+          re-hashes the installed file against the verified digest.
+          A verification or install failure is terminal.
 
   --sdk   Bump the SDK pin in this project's .sparkwing/go.mod via
           'go get github.com/sparkwing-dev/sparkwing@<version>',
