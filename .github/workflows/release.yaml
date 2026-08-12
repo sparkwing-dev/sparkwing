@@ -59,7 +59,7 @@ jobs:
           - { binary: sparkwing-runner, goos: windows }
           - { binary: sparkwing-logs, goos: windows }
           - { binary: sparkwing-web, goos: windows }
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.goos == 'darwin' && 'macos-latest' || 'ubuntu-latest' }}
     steps:
       # Pin the checkout to the tag's exact commit. Every job in this
       # workflow checks out the same github.sha, so a version string
@@ -125,6 +125,9 @@ jobs:
             -trimpath \
             -ldflags="-s -w -X main.Version=${TAG}" \
             -o "$out" "./cmd/${BIN}"
+          if [ "$GOOS" = "darwin" ]; then
+            codesign --force --sign - "$out"
+          fi
           ls -la "$out"
 
       # Each cell uploads exactly one binary as a uniquely-named
@@ -178,6 +181,16 @@ jobs:
           sha256sum sparkwing-* > SHA256SUMS
           ls -la
 
+      - name: Sign and verify immutable release assets
+        env:
+          SPARKWING_RELEASE_SIGNING_KEY: ${{ secrets.SPARKWING_RELEASE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          go run ./cmd/verify-release --dist dist
+          go run ./cmd/verify-release --dist dist --verify
+          test -f dist/SHA256SUMS.sig
+          ls dist/sparkwing-*.sig >/dev/null
+
       - name: Verify release asset schema parity
         # Pre-publish gate: the uploaded linux/amd64 binary must embed
         # the same runs-store schema that the tagged source compiles.
@@ -215,9 +228,8 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          # Idempotent: re-running this workflow against the same tag
-          # (after a fix) replaces existing assets via --clobber and
-          # rewrites the notes from the (possibly updated) CHANGELOG.
+          # A published tag and its signed assets are immutable. A
+          # rerun may refresh notes, but asset-name collisions fail.
           if gh release view "$tag" >/dev/null 2>&1; then
             echo "==> existing release $tag; updating assets + notes"
             gh release edit "$tag" --notes-file release-notes.md
@@ -227,9 +239,9 @@ jobs:
               --title "sparkwing CLI $tag" \
               --notes-file release-notes.md
           fi
-          # Glob expands to every binary + SHA256SUMS in one upload
-          # call; --clobber replaces existing assets on workflow re-run.
-          gh release upload "$tag" --clobber dist/*
+          # Glob expands to every binary, signature, and SHA256SUMS in
+          # one upload. Existing names fail rather than mutate trust.
+          gh release upload "$tag" dist/*
           gh release view "$tag"
 
   # publish multi-arch container images for the cluster-side

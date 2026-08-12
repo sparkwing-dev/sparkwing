@@ -3,11 +3,22 @@ package main
 import (
 	"crypto/ed25519"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
 )
+
+const releasePublicKeyBase64 = "SCA8nBcnHkYcyP6g+Quuwy5UR4bKJLlwrf7FcWZsXOI="
+
+func releasePublicKey() (ed25519.PublicKey, error) {
+	decoded, err := base64.StdEncoding.DecodeString(releasePublicKeyBase64)
+	if err != nil || len(decoded) != ed25519.PublicKeySize {
+		return nil, errors.New("embedded release public key is invalid")
+	}
+	return ed25519.PublicKey(decoded), nil
+}
 
 // verifiedReleaseAsset is the byte boundary the installer consumes.
 type verifiedReleaseAsset struct {
@@ -18,7 +29,16 @@ type verifiedReleaseAsset struct {
 
 // verifyReleaseAsset isolates the updater's existing checksum contract so the
 // release-authentication boundary can be specified without filesystem writes.
-func verifyReleaseAsset(_ ed25519.PublicKey, manifest, _ []byte, assetName string, asset, _ []byte) (verifiedReleaseAsset, error) {
+func verifyReleaseAsset(publicKey ed25519.PublicKey, manifest, manifestSig []byte, assetName string, asset, assetSig []byte) (verifiedReleaseAsset, error) {
+	if len(publicKey) != ed25519.PublicKeySize {
+		return verifiedReleaseAsset{}, errors.New("release public key is invalid")
+	}
+	if !ed25519.Verify(publicKey, manifest, manifestSig) {
+		return verifiedReleaseAsset{}, errors.New("SHA256SUMS signature is invalid")
+	}
+	if !ed25519.Verify(publicKey, asset, assetSig) {
+		return verifiedReleaseAsset{}, fmt.Errorf("signature is invalid for %s", assetName)
+	}
 	digest, err := manifestDigest(manifest, assetName)
 	if err != nil {
 		return verifiedReleaseAsset{}, err
