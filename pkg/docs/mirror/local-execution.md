@@ -498,8 +498,11 @@ what a bug report about a stuck or spinning daemon should carry. Each
 dump adds up to 2MB to `d.log`. The log is rotated once to `d.log.1`
 when it passes 1MB -- both when a daemon starts and before a dump is
 written -- so a long-lived daemon you ask for many dumps keeps the pair
-bounded rather than growing one file forever. Only the previous stretch
-is kept, so copy a dump you care about out of `d.log` before asking for
+bounded rather than growing one file forever. The rotation copies the
+log aside and empties it in place rather than renaming it, so the
+daemon, the supervisor watching it, and anything else already writing
+to `d.log` all keep writing to `d.log`. Only the previous stretch is
+kept, so copy a dump you care about out of `d.log` before asking for
 several more.
 
 ### Capping sparkwing's share of the machine

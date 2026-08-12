@@ -188,15 +188,19 @@ func daemonLogPath(home string) (string, error) {
 // when the client opens the file), rotates the log once if it has grown
 // past the cap ([wingd.RotateLogOverCap], which the running daemon shares
 // so the two rotations keep one shape), and opens it append-only. The
-// spawned daemon's stdout and
-// stderr are pointed at the returned file, so its operational log and any
-// early crash both land at the documented path. Nil on failure leaves the
-// daemon's output discarded rather than blocking the spawn.
+// spawned daemon's stdout and stderr are pointed at the returned file, so
+// its operational log and any early crash both land at the documented
+// path. Nil on failure leaves the daemon's output discarded rather than
+// blocking the spawn.
 //
 // The file has to exist before the process starts, because it is the
 // process's stdout. existed reports whether it was already there, so a
 // spawn that never runs can put the directory back the way it found it
-// rather than leave an empty log implying a daemon ran.
+// rather than leave an empty log implying a daemon ran. A rotation does
+// not change that answer: it empties the log in place, so the file the
+// caller found is still the file that is there, and a predecessor still
+// writing through its own descriptor must not have it unlinked out from
+// under it.
 func openDaemonLog(home string) (f *os.File, existed bool) {
 	path, err := wingd.LogPath(home)
 	if err != nil {
@@ -207,12 +211,9 @@ func openDaemonLog(home string) (f *os.File, existed bool) {
 	} else {
 		_ = os.MkdirAll(filepath.Dir(path), 0o700)
 	}
-	if rotated, _ := wingd.RotateLogOverCap(home); rotated {
-		existed = false
-	} else {
-		_, serr := os.Stat(path)
-		existed = serr == nil
-	}
+	_, _ = wingd.RotateLogOverCap(home)
+	_, serr := os.Stat(path)
+	existed = serr == nil
 	f, err = os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return nil, existed

@@ -2,7 +2,6 @@ package wingd
 
 import (
 	"fmt"
-	"os"
 	"runtime"
 )
 
@@ -43,88 +42,28 @@ func (d *Daemon) diagnosticSummary() string {
 		runtime.NumGoroutine(), conns, holders, waiters, leases, guards, reattach, d.cfg.Version)
 }
 
-// daemonLogSinks are the process handles whose writes reach the daemon
-// log. A spawned daemon has both its stdout and its stderr pointed at
-// d.log by the client that started it, and logs through stderr. Tests
-// replace this with a handle of their own.
-var daemonLogSinks = func() []*os.File { return []*os.File{os.Stdout, os.Stderr} }
-
 // writeDiagnosticDump writes the daemon's counters and every goroutine
 // stack to its log, rotating the log first when it is already over cap.
-func (d *Daemon) writeDiagnosticDump() {
-	d.rotateLogForDump()
-	d.cfg.logf("diagnostics: %s", d.diagnosticSummary())
-	d.cfg.logf("diagnostics: goroutine dump\n%s", dumpGoroutineStacks(diagnosticsStackBytes))
-}
-
-// rotateLogForDump rotates the daemon log once when it is over cap and
-// re-points the daemon's output at the fresh file.
 //
 // Rotating at spawn is not enough for this writer. One dump appends up
 // to 2MB, and the daemon it is asked of is by definition still running:
 // a resident daemon can be asked for dozens over the weeks between
-// restarts, and the spawn-time check never sees any of them. Rotating
-// here uses the same helper and the same once-rotated .1 shape, so the
-// two rotations cannot drift apart.
+// restarts, and the spawn-time check never sees any of them.
+// [RotateLogOverCap] is the same helper the spawning client uses, so the
+// two rotations keep one cap and one once-rotated .1 shape, and it
+// empties the log in place so the daemon, its supervisor, and anything
+// else holding that descriptor all keep writing to d.log.
 //
-// Re-pointing the output is what makes the rotation mean anything. The
-// daemon's log is a file descriptor it inherited, not a path it reopens,
-// so a bare rename leaves it writing into d.log.1 -- d.log would be
-// gone, the next rotation would find nothing to rename, and the file
-// that keeps growing would be the one meant to be the archive.
-//
-// It acts only when the daemon's output really is that log file. A
-// daemon started in a terminal writes to the terminal: renaming a log it
-// is not writing, and redirecting an operator's console into a file,
-// would both be wrong.
-func (d *Daemon) rotateLogForDump() {
-	path, err := LogPath(d.cfg.Home)
-	if err != nil {
-		return
+// A rotation that fails is reported into the dump rather than aborting
+// it. The dump is the thing the operator asked for and the reason the
+// daemon is still alive to be asked; an unbounded log is the smaller
+// problem of the two.
+func (d *Daemon) writeDiagnosticDump() {
+	if _, err := RotateLogOverCap(d.cfg.Home); err != nil {
+		d.cfg.logf("diagnostics: could not rotate the daemon log: %v", err)
 	}
-	var sinks []*os.File
-	for _, s := range daemonLogSinks() {
-		if s != nil && sameOpenFile(s, path) {
-			sinks = append(sinks, s)
-		}
-	}
-	if len(sinks) == 0 {
-		return
-	}
-	rotated, err := RotateLogOverCap(d.cfg.Home)
-	if err != nil || !rotated {
-		return
-	}
-	restore := func() { _ = os.Rename(path+".1", path) }
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
-	if err != nil {
-		restore()
-		return
-	}
-	defer func() { _ = f.Close() }()
-	for _, s := range sinks {
-		if rerr := redirectFD(int(f.Fd()), int(s.Fd())); rerr != nil {
-			// safety: a sink still on the renamed inode would write the
-			// dump into the archive; put the log back where it was.
-			restore()
-			return
-		}
-	}
-}
-
-// sameOpenFile reports whether an open handle and a path name the same
-// file, which is how the daemon tells "my log is d.log" from "my log is
-// whatever terminal started me".
-func sameOpenFile(f *os.File, path string) bool {
-	open, err := f.Stat()
-	if err != nil {
-		return false
-	}
-	named, err := os.Stat(path)
-	if err != nil {
-		return false
-	}
-	return os.SameFile(open, named)
+	d.cfg.logf("diagnostics: %s", d.diagnosticSummary())
+	d.cfg.logf("diagnostics: goroutine dump\n%s", dumpGoroutineStacks(diagnosticsStackBytes))
 }
 
 // dumpGoroutineStacks returns every live goroutine's stack, truncated to

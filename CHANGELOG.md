@@ -56,9 +56,12 @@ code change to unlock.
   resident daemon asked for dumps over the weeks between restarts grew
   `wingd/d.log` without limit. A dump now rotates the log to `d.log.1` first
   when it is already past the 1MB cap, using the same once-rotated shape as
-  the rotation at spawn, and re-points the daemon's output at the fresh file
-  so the dump lands in `d.log` rather than following the renamed one. A daemon
-  running in a terminal is untouched.
+  the rotation at spawn. The rotation copies the log aside and empties it in
+  place rather than renaming it: the log is a descriptor its writers
+  inherited, not a path they reopen, and three processes hold it -- the
+  supervisor, the daemon it starts, and the client that opened it -- so a
+  rename would strand the ones that did not rotate on the archive and let
+  that archive grow without bound instead.
 
 - **cli:** `sparkwing commands --path` accepts the unqualified prefix and
   refuses one that matches nothing. Every command path begins with
