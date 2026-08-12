@@ -87,8 +87,18 @@ func TestEntryExecHelper(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer unlocked.Close()
+		proof, err := os.CreateTemp(filepath.Join(entry.root, "locks"), ".exec-proof-")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() {
+			_ = proof.Close()
+			_ = os.Remove(proof.Name())
+		}()
 		coordinate := strconv.FormatUint(uint64(unlocked.Fd()), 10) + ":" + entry.key + ":" +
-			base64.RawURLEncoding.EncodeToString([]byte(entry.root))
+			base64.RawURLEncoding.EncodeToString([]byte(entry.root)) + ":" +
+			strconv.FormatUint(uint64(proof.Fd()), 10) + ":" +
+			base64.RawURLEncoding.EncodeToString([]byte(proof.Name()))
 		if err := os.Setenv(execLeaseEnv, coordinate); err != nil {
 			t.Fatal(err)
 		}
@@ -260,7 +270,7 @@ func TestAdoptExecLeaseFailsClosedOnMismatchedDescriptor(t *testing.T) {
 	coordinate := strconv.FormatUint(uint64(wrong.Fd()), 10) + ":" + entry.key + ":" +
 		base64.RawURLEncoding.EncodeToString([]byte(entry.root))
 	t.Setenv("SPARKWING_INTERNAL_CACHE_LEASE", coordinate)
-	if err := AdoptExecLeaseFromEnv(); err == nil || !strings.Contains(err.Error(), "does not match") {
+	if err := AdoptExecLeaseFromEnv(); err == nil || !strings.Contains(err.Error(), "invalid inherited") {
 		t.Fatalf("mismatched descriptor error = %v", err)
 	}
 	runtime.GC()

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,9 +27,41 @@ func prepareExecLease(file *os.File, entry Entry, env []string) ([]string, func(
 	if err != nil {
 		return nil, nil, err
 	}
+	proofDir := filepath.Join(entry.root, "locks")
+	if err := os.MkdirAll(proofDir, 0o700); err != nil {
+		_ = restore()
+		return nil, nil, err
+	}
+	proof, err := os.CreateTemp(proofDir, ".exec-proof-")
+	if err != nil {
+		_ = restore()
+		return nil, nil, err
+	}
+	proofPath := proof.Name()
+	cleanupProof := func() error {
+		return errors.Join(cacheUnlock(proof), proof.Close(), os.Remove(proofPath))
+	}
+	if acquired, lockErr := cacheLock(proof, cacheLockExclusiveNonblock); lockErr != nil || !acquired {
+		_ = cleanupProof()
+		_ = restore()
+		if lockErr != nil {
+			return nil, nil, lockErr
+		}
+		return nil, nil, errors.New("pipeline cache exec proof is busy")
+	}
+	restoreProof, err := cacheRetainAcrossExec(proof)
+	if err != nil {
+		_ = cleanupProof()
+		_ = restore()
+		return nil, nil, err
+	}
 	coordinate := strconv.FormatUint(uint64(file.Fd()), 10) + ":" + entry.key + ":" +
-		base64.RawURLEncoding.EncodeToString([]byte(entry.root))
-	return replaceExecLeaseEnv(env, coordinate), restore, nil
+		base64.RawURLEncoding.EncodeToString([]byte(entry.root)) + ":" +
+		strconv.FormatUint(uint64(proof.Fd()), 10) + ":" +
+		base64.RawURLEncoding.EncodeToString([]byte(proofPath))
+	return replaceExecLeaseEnv(env, coordinate), func() error {
+		return errors.Join(restore(), restoreProof(), cleanupProof())
+	}, nil
 }
 
 // AdoptExecLeaseFromEnv confines the lease inherited across the pipeline exec
@@ -43,7 +76,7 @@ func AdoptExecLeaseFromEnv() error {
 		return fmt.Errorf("clear inherited pipeline cache lease coordinate: %w", err)
 	}
 	parts := strings.Split(raw, ":")
-	if len(parts) != 3 {
+	if len(parts) != 5 {
 		return errors.New("invalid inherited pipeline cache lease coordinate")
 	}
 	fd, err := strconv.ParseUint(parts[0], 10, 31)
@@ -73,6 +106,64 @@ func AdoptExecLeaseFromEnv() error {
 	defer processExecLease.Unlock()
 	if processExecLease.file != nil {
 		return errors.New("pipeline cache lease was adopted more than once")
+	}
+	proofFD, err := strconv.ParseUint(parts[3], 10, 31)
+	if err != nil || proofFD < 3 || proofFD == fd {
+		return errors.New("invalid inherited pipeline cache lease proof descriptor")
+	}
+	proofPathBytes, err := base64.RawURLEncoding.DecodeString(parts[4])
+	if err != nil {
+		return errors.New("invalid inherited pipeline cache lease proof path")
+	}
+	proofPath := string(proofPathBytes)
+	if filepath.Dir(proofPath) != filepath.Join(entry.root, "locks") || !strings.HasPrefix(filepath.Base(proofPath), ".exec-proof-") {
+		return errors.New("invalid inherited pipeline cache lease proof path")
+	}
+	proof := os.NewFile(uintptr(proofFD), "pipeline-cache-lease-proof")
+	if proof == nil {
+		return errors.New("inherited pipeline cache lease proof descriptor is unavailable")
+	}
+	proofOwned := false
+	defer func() {
+		if !proofOwned {
+			_ = proof.Close()
+		}
+	}()
+	proofInfo, err := proof.Stat()
+	if err != nil {
+		return fmt.Errorf("inspect inherited pipeline cache lease proof descriptor: %w", err)
+	}
+	proofAuthority, err := os.Stat(proofPath)
+	if err != nil {
+		return fmt.Errorf("inspect inherited pipeline cache lease proof authority: %w", err)
+	}
+	if !os.SameFile(proofInfo, proofAuthority) {
+		return errors.New("inherited pipeline cache lease proof descriptor does not match its authority")
+	}
+	probe, err := os.Open(proofPath)
+	if err != nil {
+		return fmt.Errorf("open inherited pipeline cache lease proof probe: %w", err)
+	}
+	probeAcquired, probeErr := cacheLock(probe, cacheLockExclusiveNonblock)
+	if probeAcquired {
+		_ = cacheUnlock(probe)
+	}
+	_ = probe.Close()
+	if probeErr != nil {
+		return fmt.Errorf("probe inherited pipeline cache lease proof: %w", probeErr)
+	}
+	if probeAcquired {
+		return errors.New("inherited pipeline cache lease proof was not retained across exec")
+	}
+	if acquired, lockErr := cacheLock(proof, cacheLockExclusiveNonblock); lockErr != nil || !acquired {
+		if lockErr != nil {
+			return fmt.Errorf("verify inherited pipeline cache lease proof: %w", lockErr)
+		}
+		return errors.New("inherited pipeline cache lease proof is not owned by its descriptor")
+	}
+	proofOwned = true
+	if err := errors.Join(cacheUnlock(proof), proof.Close(), os.Remove(proofPath)); err != nil {
+		return fmt.Errorf("retire inherited pipeline cache lease proof: %w", err)
 	}
 	flags, err := unix.FcntlInt(uintptr(fd), unix.F_GETFD, 0)
 	if err != nil {
