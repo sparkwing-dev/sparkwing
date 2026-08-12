@@ -98,7 +98,8 @@ The signing key is release machinery, not per-user configuration:
 - Add its public key to `internal/releaseauth.TrustedPublicKeys`. The
   release verifier refuses publication unless the secret-derived key is
   in the updater trust set.
-- Rotate through the three-release overlap above. `go run
+- Rotate through the three-release overlap above.
+  `SPARKWING_RELEASE_SIGNING_KEY="$SPARKWING_UPDATE_SIGNING_KEY" go run
   ./cmd/verify-release --public-key` prints the secret's public key and
   enforces trust-set membership before release assets are signed.
 

@@ -343,7 +343,7 @@ func cleanupStaleUpdate() {
 	_ = os.Remove(self + ".old")
 }
 
-func downloadFile(url, dst string, limits ...int64) error {
+func downloadFile(url, dst string, maxBytes int64) error {
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -358,16 +358,12 @@ func downloadFile(url, dst string, limits ...int64) error {
 		return err
 	}
 	defer f.Close()
-	var reader io.Reader = resp.Body
-	if len(limits) > 0 {
-		reader = io.LimitReader(resp.Body, limits[0]+1)
-	}
-	written, err := io.Copy(f, reader)
+	written, err := io.Copy(f, io.LimitReader(resp.Body, maxBytes+1))
 	if err != nil {
 		return err
 	}
-	if len(limits) > 0 && written > limits[0] {
-		return fmt.Errorf("download exceeds %d-byte limit", limits[0])
+	if written > maxBytes {
+		return fmt.Errorf("download exceeds %d-byte limit", maxBytes)
 	}
 	return nil
 }
