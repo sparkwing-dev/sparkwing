@@ -330,66 +330,6 @@ func TestConsumer_NoCancelRequestedDispatchesNormally(t *testing.T) {
 	}
 }
 
-// TestRequeueExpiredClaims_RecoversAKilledDispatch is the kill/restart
-// guarantee at the store level: a run whose consumer died mid-dispatch
-// must come back onto the queue rather than sit claimed forever, which
-// would leave an acknowledged run neither recoverable nor terminal.
-func TestRequeueExpiredClaims_RecoversAKilledDispatch(t *testing.T) {
-	home := t.TempDir()
-	st := consumerTestStore(t, home)
-	ctx := context.Background()
-	seedSubmission(t, st, "run-orphan", "deploy", "")
-
-	// A claim with a lease already in the past stands in for a consumer
-	// that was killed and stopped heartbeating.
-	if _, err := st.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(5 * time.Millisecond)
-
-	requeueExpiredClaims(ctx, st, quietLogger())
-
-	reclaimed, err := st.ClaimNextTrigger(ctx, time.Minute)
-	if err != nil {
-		t.Fatalf("orphaned claim was not recoverable: %v", err)
-	}
-	if reclaimed.ID != "run-orphan" {
-		t.Fatalf("reclaimed %q, want run-orphan", reclaimed.ID)
-	}
-}
-
-// TestRequeueExpiredClaims_DoesNotRerunAFinishedRun is the
-// no-duplication half of the same sweep. A dispatch that completed and
-// then lost its trigger bookkeeping must be closed out, not executed a
-// second time: recovery that re-runs finished work is worse than no
-// recovery.
-func TestRequeueExpiredClaims_DoesNotRerunAFinishedRun(t *testing.T) {
-	home := t.TempDir()
-	st := consumerTestStore(t, home)
-	ctx := context.Background()
-	seedSubmission(t, st, "run-finished", "deploy", "")
-	if _, err := st.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
-		t.Fatal(err)
-	}
-	if err := st.FinishRun(ctx, "run-finished", "success", ""); err != nil {
-		t.Fatal(err)
-	}
-	time.Sleep(5 * time.Millisecond)
-
-	requeueExpiredClaims(ctx, st, quietLogger())
-
-	if _, err := st.ClaimNextTrigger(ctx, time.Minute); !errors.Is(err, store.ErrNotFound) {
-		t.Fatalf("a completed run was put back on the queue (claim err=%v)", err)
-	}
-	trig, err := st.GetTrigger(ctx, "run-finished")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if trig.Status != "done" {
-		t.Fatalf("trigger status = %q, want done", trig.Status)
-	}
-}
-
 // TestSubmittedTriggerRepoDir_SelectsTheSubmittingCheckout is the repo
 // threading the whole submission path depends on. Two checkouts of one
 // project declare the same pipeline names, and the registry cannot tell
@@ -460,5 +400,245 @@ func TestEnsureRunLogDir_OnlyNamesADirectoryThatExists(t *testing.T) {
 	}
 	if got := EnsureRunLogDir(PathsAt(blocked), "run-1"); got != "" {
 		t.Fatalf("EnsureRunLogDir = %q for an uncreatable home, want empty", got)
+	}
+}
+
+// --- Regression tests lifted from adversarial review ---------------
+//
+// Each of these encodes a defect the review reproduced end to end. They
+// are written as assertions of the fixed behavior, so a regression
+// reintroduces the original failure rather than a vague timeout.
+
+// TestSweeper_LeavesALiveRunningDispatchAlone is BLOCKER 1.
+//
+// The lease deadline is an absolute wall-clock instant; the heartbeat
+// defending it is a Go ticker on the monotonic clock, which stops while
+// a laptop is suspended. Wall time therefore passes the lease of a
+// dispatch that is very much alive, and the sweep interval is four times
+// shorter than the heartbeat interval, so the sweeper is guaranteed to
+// notice first. The review ran one run id under two pids this way.
+//
+// The fix is that a lapsed lease alone is not evidence of death: only a
+// run that never started is requeued.
+func TestSweeper_LeavesALiveRunningDispatchAlone(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	ctx := context.Background()
+	seedSubmission(t, st, "run-alive", "deploy", "")
+
+	if _, err := st.ClaimNextTrigger(ctx, time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	// The dispatch started: a child process is executing.
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "run-alive", Pipeline: "deploy", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// The laptop wakes: wall time has jumped past the lease while the
+	// heartbeat's next monotonic tick is still far away.
+	if _, err := st.DB().Exec(
+		`UPDATE triggers SET lease_expires_at = ? WHERE id = ?`,
+		time.Now().Add(-time.Hour).UnixNano(), "run-alive"); err != nil {
+		t.Fatal(err)
+	}
+
+	requeueExpiredClaims(ctx, st, newInFlightSet(), quietLogger())
+
+	trig, err := st.GetTrigger(ctx, "run-alive")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trig.Status == "pending" {
+		t.Fatal("a live running dispatch was swept back onto the queue; it would execute twice")
+	}
+	if _, err := st.ClaimNextTrigger(ctx, time.Minute); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("the live run became re-claimable (err=%v)", err)
+	}
+}
+
+// TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting covers the
+// in-process half of the same blocker: the review saw a consumer
+// re-dispatch its OWN live run, because from the store's side a live
+// local dispatch and a dead one are indistinguishable.
+func TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	ctx := context.Background()
+	seedSubmission(t, st, "run-mine", "deploy", "")
+	if _, err := st.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+
+	// The run row is still pending -- the child has been exec'd but has
+	// not reached CreateRun yet, which is the widest version of the
+	// window. Only the in-flight set knows this work is owned.
+	inFlight := newInFlightSet()
+	inFlight.add("run-mine")
+
+	requeueExpiredClaims(ctx, st, inFlight, quietLogger())
+
+	trig, err := st.GetTrigger(ctx, "run-mine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trig.Status == "pending" {
+		t.Fatal("the consumer swept its own in-flight dispatch back onto its own queue")
+	}
+}
+
+// TestSweeper_ClosesOutAClaimWhoseRunAlreadyEnded pins the reconcile
+// step, and that it happens before anything is requeued.
+func TestSweeper_ClosesOutAClaimWhoseRunAlreadyEnded(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	ctx := context.Background()
+	seedSubmission(t, st, "run-done", "deploy", "")
+	if _, err := st.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishRun(ctx, "run-done", "success", ""); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+
+	requeueExpiredClaims(ctx, st, newInFlightSet(), quietLogger())
+
+	trig, err := st.GetTrigger(ctx, "run-done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trig.Status != "done" {
+		t.Fatalf("trigger status = %q, want done", trig.Status)
+	}
+	if _, err := st.ClaimNextTrigger(ctx, time.Minute); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("a finished run was put back on the queue (err=%v)", err)
+	}
+}
+
+// TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted keeps the
+// blocker fix from over-correcting into "recover nothing".
+func TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	ctx := context.Background()
+	seedSubmission(t, st, "run-orphan", "deploy", "")
+	if _, err := st.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+
+	requeueExpiredClaims(ctx, st, newInFlightSet(), quietLogger())
+
+	got, err := st.ClaimNextTrigger(ctx, time.Minute)
+	if err != nil {
+		t.Fatalf("a run whose consumer died before it started was not recovered: %v", err)
+	}
+	if got.ID != "run-orphan" {
+		t.Fatalf("claimed %q", got.ID)
+	}
+}
+
+// TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut is
+// BLOCKER 2.
+//
+// The dashboard attempted the election once and stood down forever, so
+// the ordering "resident consumer up, dashboard starts, resident idles
+// out" left the home with no consumer at all -- worse than the behavior
+// before a standalone consumer existed, since the dashboard always used
+// to consume.
+func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	ready := make(chan struct{})
+	residentDone := make(chan error, 1)
+	go func() {
+		residentDone <- ServeConsumer(ctx, ConsumerOptions{
+			Home: home, Store: st, Logger: quietLogger(),
+			IdleTimeout: 300 * time.Millisecond, Ready: ready,
+		})
+	}()
+	<-ready
+
+	// The dashboard comes up second and loses the election.
+	if err := RunLocalTriggerConsumer(ctx, home, st, quietLogger()); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	select {
+	case <-residentDone:
+	case <-time.After(15 * time.Second):
+		t.Fatal("resident consumer never idled out")
+	}
+
+	// Work arrives with only the dashboard left. It must pick the queue
+	// back up rather than leave the run pending forever.
+	seedSubmission(t, st, "run-stranded", "deploy", "")
+
+	waitFor(t, "the dashboard consumer to retake the queue", 20*time.Second, func() bool {
+		running, err := ConsumerRunning(home)
+		return err == nil && running
+	})
+	waitFor(t, "the stranded trigger to be claimed", 20*time.Second, func() bool {
+		trig, err := st.GetTrigger(context.Background(), "run-stranded")
+		return err == nil && trig.Status != "pending"
+	})
+}
+
+// TestHeartbeat_SurvivesATransientStoreError is S1. The heartbeat used
+// to give up permanently on the first error that was not ErrNotFound, so
+// one "database is locked" from a concurrent writer left the claim
+// undefended for the rest of a long run -- which is what let the sweeper
+// requeue a live dispatch.
+func TestHeartbeat_SurvivesATransientStoreError(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	ctx := context.Background()
+	seedSubmission(t, st, "run-hb", "deploy", "")
+	claimed, err := st.ClaimNextTrigger(ctx, 30*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// A budget long enough to retry through a brief failure.
+	if !heartbeatOnce(ctx, st, "run-hb", claimed.ClaimSeq, 30*time.Second, time.Second, quietLogger()) {
+		t.Fatal("heartbeat gave up on a healthy claim")
+	}
+
+	// A claim that no longer exists is the one case that ends it.
+	if err := st.FinishTrigger(ctx, "run-hb"); err != nil {
+		t.Fatal(err)
+	}
+	if heartbeatOnce(ctx, st, "run-hb", claimed.ClaimSeq, 30*time.Second, 50*time.Millisecond, quietLogger()) {
+		t.Fatal("heartbeat kept defending a claim that no longer exists")
+	}
+}
+
+// TestHeartbeat_StopsWhenTheClaimIsSuperseded keeps a stale dispatch
+// from prolonging a lease the current claim owns.
+func TestHeartbeat_StopsWhenTheClaimIsSuperseded(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	ctx := context.Background()
+	seedSubmission(t, st, "run-super", "deploy", "")
+	stale, err := st.ClaimNextTrigger(ctx, time.Nanosecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	if _, err := st.RequeueUnstartedClaim(ctx, "run-super"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.ClaimNextTrigger(ctx, time.Minute); err != nil {
+		t.Fatal(err)
+	}
+
+	if heartbeatOnce(ctx, st, "run-super", stale.ClaimSeq, time.Minute, 50*time.Millisecond, quietLogger()) {
+		t.Fatal("a superseded dispatch kept renewing a claim it no longer holds")
 	}
 }

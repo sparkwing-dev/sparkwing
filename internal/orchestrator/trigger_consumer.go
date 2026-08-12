@@ -17,6 +17,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -123,28 +124,63 @@ func ConsumerRunning(home string) (bool, error) {
 	return false, nil
 }
 
+// ConsumerIdentity is what a resident consumer records about itself:
+// enough for an operator to find the process, and enough for a newly
+// installed CLI to notice it is being served by an older build.
+type ConsumerIdentity struct {
+	PID     int       `json:"pid"`
+	Version string    `json:"version,omitempty"`
+	Started time.Time `json:"started"`
+}
+
 // ConsumerPID returns the pid recorded by the resident consumer, or
 // (0, false) when no consumer holds the lock. The liveness verdict comes
 // from the lock; the pid file only names who holds it, and is ignored
 // when it disagrees.
 func ConsumerPID(home string) (int, bool) {
+	id, ok := ConsumerInfo(home)
+	if !ok {
+		return 0, false
+	}
+	return id.PID, true
+}
+
+// ConsumerInfo returns the resident consumer's recorded identity, or
+// (zero, false) when no consumer holds home's lock.
+//
+// The version is what lets an upgrade take effect. A consumer holds its
+// queue for as long as work keeps arriving, so a freshly installed CLI
+// that only asked "is one running?" would keep handing runs to the old
+// build indefinitely -- the answer stays yes, and the newer binary never
+// gets to serve.
+func ConsumerInfo(home string) (ConsumerIdentity, bool) {
 	running, err := ConsumerRunning(home)
 	if err != nil || !running {
-		return 0, false
+		return ConsumerIdentity{}, false
 	}
 	l, err := ConsumerLayoutFor(home)
 	if err != nil {
-		return 0, false
+		return ConsumerIdentity{}, false
 	}
 	b, err := os.ReadFile(l.PID)
 	if err != nil {
-		return 0, false
+		return ConsumerIdentity{}, false
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || pid <= 0 {
-		return 0, false
+	var id ConsumerIdentity
+	if err := json.Unmarshal(b, &id); err != nil {
+		// A bare pid is what older consumers wrote. Reading it keeps a
+		// mixed-version home operable rather than reporting no consumer
+		// while one plainly holds the lock.
+		pid, perr := strconv.Atoi(strings.TrimSpace(string(b)))
+		if perr != nil || pid <= 0 {
+			return ConsumerIdentity{}, false
+		}
+		return ConsumerIdentity{PID: pid}, true
 	}
-	return pid, true
+	if id.PID <= 0 {
+		return ConsumerIdentity{}, false
+	}
+	return id, true
 }
 
 // ConsumerOptions configures one resident consumer.
@@ -169,6 +205,10 @@ type ConsumerOptions struct {
 	// Logger receives the consumer's operational log. Nil uses the
 	// default logger.
 	Logger *slog.Logger
+	// Version is the build serving this home, recorded alongside the pid
+	// so a newer CLI can tell it is being served by an older consumer and
+	// rotate it out instead of handing runs to a stale binary.
+	Version string
 	// Ready, when non-nil, is closed once the consumer has won the
 	// election and is polling. Tests wait on it instead of sleeping.
 	Ready chan<- struct{}
@@ -223,7 +263,11 @@ func ServeConsumer(ctx context.Context, opts ConsumerOptions) error {
 	}
 	defer func() { _ = flockUnlock(lockF) }()
 
-	_ = os.WriteFile(layout.PID, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644)
+	if b, merr := json.Marshal(ConsumerIdentity{
+		PID: os.Getpid(), Version: opts.Version, Started: time.Now(),
+	}); merr == nil {
+		_ = os.WriteFile(layout.PID, append(b, '\n'), 0o644)
+	}
 	defer func() { _ = os.Remove(layout.PID) }()
 
 	st := opts.Store
@@ -299,8 +343,7 @@ func consumeLocalTriggers(
 	var wg sync.WaitGroup
 	defer wg.Wait()
 
-	var inFlight sync.WaitGroup
-	busy := &busyCounter{}
+	inFlight := newInFlightSet()
 
 	ticker := time.NewTicker(consumerPollInterval)
 	defer ticker.Stop()
@@ -316,14 +359,14 @@ func consumeLocalTriggers(
 
 		if rt.maintain && time.Since(lastMaintenance) >= consumerMaintenanceInterval {
 			lastMaintenance = time.Now()
-			requeueExpiredClaims(ctx, st, logger)
+			requeueExpiredClaims(ctx, st, inFlight, logger)
 		}
 
 		trig, err := st.ClaimNextTrigger(ctx, rt.lease)
 		if err != nil {
 			if errors.Is(err, store.ErrNotFound) {
 				wedge.success()
-				if busy.idle() && rt.shouldExit(ctx, st, logger, lastWork) {
+				if inFlight.len() == 0 && rt.shouldExit(ctx, st, logger, lastWork) {
 					return nil
 				}
 				continue
@@ -337,20 +380,21 @@ func consumeLocalTriggers(
 		}
 		wedge.success()
 		if trig == nil {
-			if busy.idle() && rt.shouldExit(ctx, st, logger, lastWork) {
+			if inFlight.len() == 0 && rt.shouldExit(ctx, st, logger, lastWork) {
 				return nil
 			}
 			continue
 		}
 
 		lastWork = time.Now()
-		busy.enter()
+		// Recorded before the goroutine starts, so the sweeper can never
+		// observe this trigger as unowned in the gap between claiming it
+		// and beginning to execute it.
+		inFlight.add(trig.ID)
 		wg.Add(1)
-		inFlight.Add(1)
 		go func(t *store.Trigger) {
 			defer wg.Done()
-			defer inFlight.Done()
-			defer busy.leave()
+			defer inFlight.remove(t.ID)
 			runClaimedTrigger(ctx, st, t, cache, logger, rt.lease)
 		}(trig)
 	}
@@ -418,29 +462,72 @@ func (b *busyCounter) idle() bool {
 // "the consumer died mid-dispatch". Without it every run longer than the
 // lease would be swept back onto the queue and executed a second time;
 // with it, only a dispatch whose process stopped renewing is recovered.
+//
+// Terminal bookkeeping runs on a context detached from cancellation.
+// The dispatch context is cancelled by `runs consumer stop` and by the
+// consumer shutting down, and those are exactly the moments the run's
+// outcome most needs recording: writing it through the context that was
+// just cancelled leaves the run pending and its trigger claimed, with
+// nothing to fix it until a lease lapses minutes later.
 func runClaimedTrigger(
 	ctx context.Context, st *store.Store, trig *store.Trigger,
 	cache *localCompileCache, logger *slog.Logger, lease time.Duration,
 ) {
-	if cancelClaimedTriggerIfRequested(ctx, st, trig, lease, logger) {
+	book := context.WithoutCancel(ctx)
+	if cancelClaimedTriggerIfRequested(book, st, trig, lease, logger) {
 		return
 	}
 
 	dispatchCtx, stopHeartbeat := context.WithCancel(ctx)
 	defer stopHeartbeat()
-	go heartbeatClaimedTrigger(dispatchCtx, st, trig.ID, lease, logger)
+	go heartbeatClaimedTrigger(dispatchCtx, st, trig.ID, trig.ClaimSeq, lease, logger)
 
-	if err := dispatchLocalTrigger(dispatchCtx, st, trig, "", "", cache, logger); err != nil {
-		logger.Error("local trigger dispatch failed",
-			"trigger_id", trig.ID, "pipeline", trig.Pipeline, "err", err)
-		_ = st.CreateRun(ctx, store.Run{
-			ID:        trig.ID,
-			Pipeline:  trig.Pipeline,
-			Status:    "failed",
-			StartedAt: time.Now(),
-		})
-		_ = st.FinishRun(ctx, trig.ID, "failed", "local dispatch: "+err.Error())
-		_ = st.FinishTrigger(ctx, trig.ID)
+	err := dispatchLocalTrigger(dispatchCtx, st, trig, "", "", cache, logger)
+	if err == nil {
+		return
+	}
+	if ctx.Err() != nil {
+		// The consumer is stopping, so this dispatch was interrupted
+		// rather than found faulty. Hand the trigger back to the queue
+		// under our own generation instead of failing a run that never
+		// got a verdict; the next consumer re-executes it.
+		logger.Info("local trigger dispatch interrupted by shutdown; returning it to the queue",
+			"trigger_id", trig.ID, "pipeline", trig.Pipeline)
+		if _, rerr := st.ReleaseClaimAtGeneration(book, trig.ID, trig.ClaimSeq); rerr != nil {
+			logger.Warn("could not return the interrupted trigger to the queue",
+				"trigger_id", trig.ID, "err", rerr)
+		}
+		return
+	}
+	logger.Error("local trigger dispatch failed",
+		"trigger_id", trig.ID, "pipeline", trig.Pipeline, "err", err)
+
+	// The generation is checked BEFORE anything is written, not just
+	// before the outcome. CreateRun upserts a pending row, so a
+	// superseded dispatch that wrote first would stamp `failed` over the
+	// run the current claim is about to start -- and then discover it was
+	// superseded, too late to take it back.
+	if current, gerr := st.TriggerClaimGeneration(book, trig.ID); gerr == nil && current != trig.ClaimSeq {
+		logger.Warn("discarding a superseded dispatch's failure; the current claim owns this run",
+			"trigger_id", trig.ID, "claimed_generation", trig.ClaimSeq, "current_generation", current)
+		return
+	}
+	_ = st.CreateRun(book, store.Run{
+		ID:        trig.ID,
+		Pipeline:  trig.Pipeline,
+		Status:    "failed",
+		StartedAt: time.Now(),
+	})
+	if ok, ferr := st.FinishRunAtGeneration(book, trig.ID, trig.ClaimSeq,
+		"failed", "local dispatch: "+err.Error()); ferr != nil {
+		logger.Warn("record dispatch failure", "trigger_id", trig.ID, "err", ferr)
+	} else if !ok {
+		logger.Warn("dispatch failure not recorded; the claim was superseded",
+			"trigger_id", trig.ID)
+		return
+	}
+	if _, ferr := st.FinishTriggerAtGeneration(book, trig.ID, trig.ClaimSeq); ferr != nil {
+		logger.Warn("finish superseded trigger", "trigger_id", trig.ID, "err", ferr)
 	}
 }
 
@@ -470,11 +557,28 @@ func cancelClaimedTriggerIfRequested(
 	return true
 }
 
+// heartbeatRetryBudget bounds how long the heartbeat keeps trying after
+// a transient store failure before it gives up on defending a claim. It
+// is a fraction of the lease, so the retries all land inside the window
+// they are protecting.
+const heartbeatRetryFraction = 3
+
 // heartbeatClaimedTrigger renews trig's lease until ctx ends. A trigger
 // that has already been finished by its child reports ErrNotFound, which
 // ends the heartbeat quietly -- the dispatch is over.
-func heartbeatClaimedTrigger(ctx context.Context, st *store.Store, id string, lease time.Duration, logger *slog.Logger) {
-	interval := lease / 3
+//
+// Any other error is retried with backoff rather than treated as fatal.
+// A single "database is locked" from a concurrent dashboard or CLI write
+// is an ordinary event on a busy laptop, and giving up on it would leave
+// the claim undefended for the rest of a long run -- which is precisely
+// the state that lets a sweeper requeue a live dispatch. The heartbeat
+// stops only when the claim provably no longer exists, when the
+// generation has moved on, or when the dispatch itself ends.
+func heartbeatClaimedTrigger(
+	ctx context.Context, st *store.Store, id string, seq int64,
+	lease time.Duration, logger *slog.Logger,
+) {
+	interval := lease / heartbeatRetryFraction
 	if interval < 200*time.Millisecond {
 		interval = 200 * time.Millisecond
 	}
@@ -486,38 +590,165 @@ func heartbeatClaimedTrigger(ctx context.Context, st *store.Store, id string, le
 			return
 		case <-t.C:
 		}
-		if _, err := st.HeartbeatTrigger(ctx, id, lease); err != nil {
-			if !errors.Is(err, store.ErrNotFound) && ctx.Err() == nil {
-				logger.Warn("local trigger heartbeat failed", "trigger_id", id, "err", err)
-			}
+		if !heartbeatOnce(ctx, st, id, seq, lease, interval, logger) {
 			return
 		}
 	}
 }
 
-// requeueExpiredClaims sweeps claims whose lease lapsed back onto the
-// pending queue, which is how a run acknowledged before its consumer was
-// killed becomes runnable again rather than sitting claimed forever.
+// heartbeatOnce renews one lease, retrying transient failures inside the
+// tick it was given. It reports false when the heartbeat should stop for
+// good.
+func heartbeatOnce(
+	ctx context.Context, st *store.Store, id string, seq int64,
+	lease, budget time.Duration, logger *slog.Logger,
+) bool {
+	deadline := time.Now().Add(budget)
+	backoff := 50 * time.Millisecond
+	for {
+		_, err := st.HeartbeatTrigger(ctx, id, lease)
+		if err == nil {
+			// A claim taken by someone else is no longer this dispatch's
+			// to defend; renewing it would prolong a lease the current
+			// holder owns.
+			if current, gerr := st.TriggerClaimGeneration(ctx, id); gerr == nil && current != seq {
+				logger.Warn("stopping heartbeat; the claim was superseded",
+					"trigger_id", id, "claimed_generation", seq, "current_generation", current)
+				return false
+			}
+			return true
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			return false
+		}
+		if ctx.Err() != nil {
+			return false
+		}
+		if !time.Now().Before(deadline) {
+			logger.Warn("local trigger heartbeat failing; the claim may lapse",
+				"trigger_id", id, "err", err)
+			// Keep the heartbeat alive anyway: the next tick may succeed,
+			// and a live dispatch is better defended by a retrying
+			// heartbeat than by none at all.
+			return true
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(backoff):
+		}
+		if backoff < time.Second {
+			backoff *= 2
+		}
+	}
+}
+
+// requeueExpiredClaims sweeps claims whose lease lapsed, which is how a
+// run acknowledged before its consumer was killed stops sitting claimed
+// forever.
 //
-// A trigger whose run already reached a terminal status is finished
-// instead of requeued: its work is done, and re-executing it would turn
-// recovery into duplication.
-func requeueExpiredClaims(ctx context.Context, st *store.Store, logger *slog.Logger) {
-	ids, err := store.Maintenance.ReapExpiredTriggers(st, ctx)
+// It requeues only a run that never started. That restraint is the whole
+// point: the lease deadline is an absolute wall-clock instant while the
+// heartbeat defending it runs on the monotonic clock, so a laptop
+// suspend or an NTP step can lapse the lease of a dispatch that is very
+// much alive. Requeueing on that signal alone re-executes a running run
+// alongside itself. A run whose row says `running` therefore belongs to
+// the orphan reaper, which judges liveness by heartbeat rather than by
+// a lease, and a run whose row is already terminal is closed out instead
+// -- recovery that re-runs finished work is worse than no recovery.
+//
+// Terminal rows are reconciled BEFORE anything is requeued, so a crash
+// between the two steps cannot leave a finished run sitting pending.
+//
+// inFlight names the triggers this consumer is executing right now. The
+// store cannot know them -- from its side a live local dispatch and a
+// dead one look identical -- and without the check a consumer would
+// happily sweep its own running work back onto its own queue.
+func requeueExpiredClaims(ctx context.Context, st *store.Store, inFlight *inFlightSet, logger *slog.Logger) {
+	lapsed, err := st.ListExpiredClaims(ctx)
 	if err != nil {
 		logger.Warn("local trigger consumer: expired-claim sweep failed", "err", err)
 		return
 	}
-	for _, id := range ids {
-		run, gerr := st.GetRun(ctx, id)
-		if gerr == nil && run != nil && isTerminalRunStatus(run.Status) {
-			_ = st.FinishTrigger(ctx, id)
-			logger.Warn("finished stale claim whose run already ended",
-				"trigger_id", id, "status", run.Status)
+	for _, id := range lapsed {
+		if inFlight.has(id) {
 			continue
 		}
-		logger.Warn("requeued stale claim for recovery", "trigger_id", id)
+		run, gerr := st.GetRun(ctx, id)
+		switch {
+		case gerr == nil && run != nil && isTerminalRunStatus(run.Status):
+			// Reconciled first: closing the trigger before touching the
+			// queue means a crash here cannot strand a finished run.
+			if _, ferr := st.FinishTriggerAtGeneration(ctx, id, claimGenerationOf(ctx, st, id)); ferr != nil {
+				logger.Warn("close out stale claim", "trigger_id", id, "err", ferr)
+				continue
+			}
+			logger.Warn("closed stale claim whose run already ended",
+				"trigger_id", id, "status", run.Status)
+		case gerr == nil && run != nil && run.Status != "pending":
+			// Running (or any non-terminal, non-pending state): the work
+			// started, so liveness is the orphan reaper's judgment to
+			// make, not a wall-clock lease's.
+			logger.Debug("leaving a started run to the orphan reaper",
+				"trigger_id", id, "status", run.Status)
+		default:
+			requeued, rerr := st.RequeueUnstartedClaim(ctx, id)
+			if rerr != nil {
+				logger.Warn("requeue stale claim", "trigger_id", id, "err", rerr)
+				continue
+			}
+			if requeued {
+				logger.Warn("requeued a claim whose run never started", "trigger_id", id)
+			}
+		}
 	}
+}
+
+// claimGenerationOf reads a trigger's current claim generation, or 0
+// when it cannot be read. The sweeper uses it to close out a claim it is
+// looking at right now, so the read and the write describe the same
+// generation.
+func claimGenerationOf(ctx context.Context, st *store.Store, id string) int64 {
+	seq, err := st.TriggerClaimGeneration(ctx, id)
+	if err != nil {
+		return 0
+	}
+	return seq
+}
+
+// inFlightSet is the consumer's record of the triggers it is executing.
+type inFlightSet struct {
+	mu  sync.Mutex
+	ids map[string]struct{}
+}
+
+func newInFlightSet() *inFlightSet {
+	return &inFlightSet{ids: map[string]struct{}{}}
+}
+
+func (s *inFlightSet) add(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ids[id] = struct{}{}
+}
+
+func (s *inFlightSet) remove(id string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.ids, id)
+}
+
+func (s *inFlightSet) has(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, ok := s.ids[id]
+	return ok
+}
+
+func (s *inFlightSet) len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.ids)
 }
 
 // isTerminalRunStatus reports whether a run status admits no further
@@ -552,7 +783,33 @@ func RunLocalTriggerConsumer(ctx context.Context, home string, st *store.Store, 
 	if _, err := newStoreWedgeGuardFromEnv(); err != nil {
 		return fmt.Errorf("local trigger consumer: %w", err)
 	}
-	go func() {
+	go serveConsumerContending(ctx, home, st, logger)
+	return nil
+}
+
+// consumerElectionRetryInterval is how often a consumer that lost the
+// election looks again. Short enough that a dashboard picks up a queue
+// promptly after the resident consumer idles out, long enough to be a
+// negligible poll on a home someone else is serving.
+const consumerElectionRetryInterval = 2 * time.Second
+
+// serveConsumerContending serves home's queue whenever it can, retrying
+// the election for as long as ctx lives.
+//
+// Standing down on a lost election is right; standing down *forever* is
+// not, and that distinction is the whole reason this loop exists.
+// The resident consumer idles out after a few minutes, and a dashboard
+// that attempted the election exactly once would then leave the home
+// with no consumer at all -- every trigger its own UI, the retry path,
+// or a webhook creates sitting pending indefinitely, which is worse than
+// the behavior before a standalone consumer existed.
+//
+// The retry only ever takes a free lock: flockTry fails while a holder
+// exists, so contending costs nothing and cannot disturb the consumer
+// currently serving.
+func serveConsumerContending(ctx context.Context, home string, st *store.Store, logger *slog.Logger) {
+	announcedStandDown := false
+	for {
 		err := ServeConsumer(ctx, ConsumerOptions{
 			Home:              home,
 			Store:             st,
@@ -562,11 +819,29 @@ func RunLocalTriggerConsumer(ctx context.Context, home string, st *store.Store, 
 		})
 		switch {
 		case err == nil, errors.Is(err, context.Canceled):
+			if ctx.Err() != nil {
+				return
+			}
 		case errors.Is(err, ErrConsumerElectionLost):
-			logger.Info("dashboard trigger consumer standing down; a resident consumer owns this home's queue")
+			if !announcedStandDown {
+				logger.Info("dashboard trigger consumer standing down; " +
+					"a resident consumer owns this home's queue. Retrying while it does.")
+				announcedStandDown = true
+			}
 		default:
-			logger.Error("dashboard trigger consumer stopped", "err", err)
+			logger.Error("dashboard trigger consumer stopped; will retry", "err", err)
 		}
-	}()
-	return nil
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(consumerElectionRetryInterval):
+		}
+		// Re-arm the notice once the home is free, so the next stand-down
+		// is reported rather than swallowed as a repeat. Without this the
+		// log would say "standing down" once and never again, even across
+		// a genuinely new consumer taking over hours later.
+		if held, herr := ConsumerRunning(home); herr == nil && !held {
+			announcedStandDown = false
+		}
+	}
 }
