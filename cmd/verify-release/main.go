@@ -26,6 +26,7 @@ func run(args []string) error {
 	dist := fs.String("dist", "dist", "release asset directory")
 	verify := fs.Bool("verify", false, "verify existing signatures")
 	public := fs.Bool("public-key", false, "print the public key derived from the signing seed")
+	expectedPublic := fs.String("expected-public-key", "", "required base64 public key trusted by shipped updaters")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -34,6 +35,9 @@ func run(args []string) error {
 		return err
 	}
 	publicKey := privateKey.Public().(ed25519.PublicKey)
+	if *expectedPublic != "" && base64.StdEncoding.EncodeToString(publicKey) != *expectedPublic {
+		return errors.New("release signing key is not trusted by shipped updaters")
+	}
 	if *public {
 		fmt.Println(base64.StdEncoding.EncodeToString(publicKey))
 		return nil

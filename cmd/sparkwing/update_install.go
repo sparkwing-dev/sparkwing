@@ -10,6 +10,7 @@ import (
 var (
 	updateReplace      = atomicReplace
 	updateMutateStaged = func(string) {}
+	updateSyncDir      = syncDir
 )
 
 func installVerifiedAsset(asset verifiedReleaseAsset, currentBin string) error {
