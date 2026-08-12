@@ -186,15 +186,21 @@ func runCommands(args []string) error {
 	copy(sorted, allCommands)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Path < sorted[j].Path })
 
-	var picked []CommandJSON
+	prefix := strings.TrimSpace(*pathPrefix)
+	picked := []CommandJSON{}
+	hiddenMatches := 0
 	for _, c := range sorted {
-		if c.Hidden && !*includeHidden {
+		if !matchesCommandPath(c.Path, prefix) {
 			continue
 		}
-		if *pathPrefix != "" && !strings.HasPrefix(c.Path, *pathPrefix) {
+		if c.Hidden && !*includeHidden {
+			hiddenMatches++
 			continue
 		}
 		picked = append(picked, toCommandJSON(c))
+	}
+	if len(picked) == 0 && prefix != "" {
+		return unmatchedPathError(prefix, hiddenMatches)
 	}
 
 	switch strings.ToLower(output) {
@@ -231,12 +237,42 @@ func runCommands(args []string) error {
 		fmt.Println()
 		printAlignedSteps([]InfoNextStep{
 			{Command: "<any path above> --help", Purpose: "flags, arguments, examples for one verb"},
-			{Command: `sparkwing commands --path "sparkwing pipeline" -o json`, Purpose: "full records for a subtree"},
+			{Command: "sparkwing commands --path pipeline -o json", Purpose: "full records for a subtree"},
 		})
 		return nil
 	default:
 		return fmt.Errorf("unknown output format %q (valid: pretty, json, markdown, plain)", output)
 	}
+}
+
+// matchesCommandPath reports whether a command's path is inside the
+// subtree --path named. Both the fully-qualified prefix ("sparkwing
+// runs") and the bare one ("runs") match.
+//
+// Accepting the bare form is not a convenience. Every path in the
+// registry begins with the same root word, so typing it carries no
+// information -- and `--path runs` matching nothing looks exactly like
+// "this CLI has no runs commands", which is what three separate agents
+// concluded before finding the quoted form. The unqualified spelling is
+// the one a reader reaches for first, so it has to be the one that works.
+func matchesCommandPath(path, prefix string) bool {
+	if prefix == "" {
+		return true
+	}
+	return strings.HasPrefix(path, prefix) ||
+		strings.HasPrefix(path, cmdSparkwing.Path+" "+prefix)
+}
+
+// unmatchedPathError reports a --path that selected nothing. Exiting 0
+// with an empty listing -- or with the literal `null` that -o json used
+// to print -- reads as an answer about the CLI rather than as a bad
+// filter, and an agent that believes it has enumerated a subtree it
+// misspelled does not go looking for the verb again.
+func unmatchedPathError(prefix string, hiddenMatches int) error {
+	if hiddenMatches > 0 {
+		return fmt.Errorf("commands: --path %q matched only hidden commands; pass --include-hidden to list them", prefix)
+	}
+	return fmt.Errorf("commands: --path %q matched no command; `sparkwing commands -o plain` lists every path", prefix)
 }
 
 // renderCommandsMarkdown renders the full CLI surface as a reference

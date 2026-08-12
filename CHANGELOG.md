@@ -48,6 +48,17 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **cli:** `sparkwing commands --path` accepts the unqualified prefix and
+  refuses one that matches nothing. Every command path begins with
+  `sparkwing`, so `--path runs` is the spelling a reader reaches for first --
+  and it used to match nothing, which is indistinguishable from "this CLI has
+  no runs commands"; only `--path "sparkwing runs"` worked. Both forms now
+  select the same subtree. A prefix that selects no command is an error naming
+  the prefix with a non-zero exit, instead of an empty listing (or the literal
+  `null` under `-o json`) at exit 0; when the prefix matched only hidden
+  verbs, the error says to pass `--include-hidden`.
 
 ## [v0.27.0] - 2026-08-12
 ### Security
