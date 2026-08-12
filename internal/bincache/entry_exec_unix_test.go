@@ -66,7 +66,11 @@ func TestEntryExecHelper(t *testing.T) {
 	if !found {
 		t.Fatal("helper entry is absent")
 	}
-	env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", "hold")
+	nextMode := "hold"
+	if mode == "acquire-and-spawn" {
+		nextMode = "adopt-and-spawn"
+	}
+	env := replaceEnv(os.Environ(), "SPARKWING_ENTRY_EXEC_HELPER", nextMode)
 	if err := lease.ExecReplace([]string{"-test.run=^TestEntryExecHelper$"}, "", env); err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +83,7 @@ func TestExecLeaseDoesNotSurviveInPersistentChild(t *testing.T) {
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
 	cmd.Env = append(os.Environ(),
-		"SPARKWING_ENTRY_EXEC_HELPER=acquire",
+		"SPARKWING_ENTRY_EXEC_HELPER=acquire-and-spawn",
 		"SPARKWING_ENTRY_HELPER_ROOT="+root,
 		"SPARKWING_ENTRY_HELPER_KEY="+key,
 	)
