@@ -41,7 +41,7 @@ func TestCommandsJSONIsNDJSON(t *testing.T) {
 		t.Fatalf("commands -o json emitted %d lines, want one per command", len(lines))
 	}
 	head := strings.Join(lines[:5], "\n") + "\n"
-	five := decodeNDJSON[CommandJSON](t, head)
+	five := decodeNDJSON[CommandIndexJSON](t, head)
 	if len(five) != 5 {
 		t.Fatalf("head -5 yielded %d records, want 5", len(five))
 	}
@@ -53,7 +53,7 @@ func TestCommandsJSONIsNDJSON(t *testing.T) {
 
 	// Every line stands alone, and the stream carries the whole
 	// registry rather than a truncated prefix of it.
-	all := decodeNDJSON[CommandJSON](t, out)
+	all := decodeNDJSON[CommandIndexJSON](t, out)
 	if len(all) != len(lines) {
 		t.Fatalf("decoded %d records from %d lines; a record spans more than its line", len(all), len(lines))
 	}
@@ -67,7 +67,7 @@ func TestCommandsJSONIsNDJSON(t *testing.T) {
 // hand back the whole 200KB surface to a caller that asked for a
 // subtree, which is the failure this ticket is about.
 func TestCommandsJSONHonorsPathFilter(t *testing.T) {
-	records := decodeNDJSON[CommandJSON](t, commandsOutput(t, "--path", "docs", "-o", "json"))
+	records := decodeNDJSON[CommandIndexJSON](t, commandsOutput(t, "--path", "docs", "-o", "json"))
 	if len(records) == 0 {
 		t.Fatal("--path docs -o json returned no records")
 	}

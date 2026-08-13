@@ -52,7 +52,7 @@ for agent-facing discovery.`,
 		{"configure", "Laptop-local config"},
 		{"debug", "Interactive run debugging"},
 		{"docs", "Embedded user docs (offline)"},
-		{"commands", "Full CLI surface as JSON (agent self-discovery)"},
+		{"commands", "Index of every command: one path and synopsis per line"},
 		{"completion", "Shell completion script"},
 	},
 	Examples: []Example{
@@ -417,16 +417,20 @@ selects 'run' and its subcommands and not the separate 'runs'
 group, and a prefix that matches nothing is an error rather
 than an empty listing.
 
--o json emits the full record for every verb -- path, synopsis,
-description, positional args, flags, examples, subcommands --
-from the same Command values that power --help, as NDJSON: one
+-o json is this same index for a program to parse: path,
+synopsis, and subcommand_count per verb, as NDJSON -- one
 complete JSON object per line, so 'head -5' returns five whole
-records instead of a truncated array. That is still 200KB for
-the unfiltered surface, so pair it with --path unless you
-genuinely want all of it. -o plain is one path per line for
-shell consumption; -o markdown renders a reference page, and
-with --split-dir writes the docs/cli-*.md reference (one page
-per top-level command group plus a cli-reference.md index).`,
+records instead of a truncated array. It carries no
+description, flags, or examples; that is what '<path> --help'
+prints, from the same Command values and always current.
+Hidden commands are dispatchable but stay out of every
+listing, because their help points at what to use instead;
+--include-hidden lists them, flagged.
+
+-o plain is one path per line for shell consumption; -o
+markdown renders the full reference page, and with --split-dir
+writes the docs/cli-*.md reference (one page per top-level
+command group plus a cli-reference.md index).`,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | markdown | plain", Default: "pretty", Group: "Output"},
 		{Name: "split-dir", Argument: "DIR", Desc: "With -o markdown: write one page per top-level command group into DIR (plus a cli-reference.md index), pruning stale generated pages", Group: "Output"},
