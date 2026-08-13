@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -144,9 +146,8 @@ func runReposList(args []string) error {
 
 	switch strings.ToLower(output) {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(fleetJSON(fleet, latest))
+		// NDJSON: one repo per line.
+		return ndjson.Write(os.Stdout, fleetJSON(fleet, latest))
 	case "plain":
 		for _, r := range fleet {
 			fmt.Printf("%s\t%s\t%s\n", r.Name, orDashStr(r.Pin), orDashStr(r.Primary))
@@ -289,9 +290,8 @@ func runReposUpdate(args []string) error {
 	verdicts := repos.UpdateFleet(&execOps{}, fleet, cfg)
 
 	if strings.ToLower(output) == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(verdicts)
+		// NDJSON: one verdict per line.
+		return ndjson.Write(os.Stdout, verdicts)
 	}
 	printVerdicts(verdicts, fleet, cfg)
 	if brokenCount(verdicts) > 0 {

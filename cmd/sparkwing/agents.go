@@ -17,6 +17,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+
 	flag "github.com/spf13/pflag"
 )
 
@@ -99,9 +101,8 @@ func runAgentsList(args []string) error {
 	}
 
 	if *outputFormat == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(agents)
+		// NDJSON: one agent per line, so `head` returns whole agents.
+		return ndjson.Write(os.Stdout, agents)
 	}
 
 	if len(agents) == 0 {

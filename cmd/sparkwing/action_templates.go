@@ -15,6 +15,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
@@ -98,9 +100,8 @@ func listTemplates(category, cloud, output string) error {
 		for _, t := range filtered {
 			manifests = append(manifests, t.Manifest)
 		}
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(manifests)
+		// NDJSON: one example manifest per line.
+		return ndjson.Write(os.Stdout, manifests)
 	case "pretty", "":
 		if len(filtered) == 0 {
 			fmt.Println("no templates match the given filters")

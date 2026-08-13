@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"bytes"
-	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -86,10 +85,7 @@ func TestEmitGrepMatches_JSONShape(t *testing.T) {
 	if err := emitGrepMatches(matches, GrepOpts{JSON: true}, &buf); err != nil {
 		t.Fatal(err)
 	}
-	var got []GrepMatch
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("decode: %v\n%s", err, buf.String())
-	}
+	got := decodeNDJSON[GrepMatch](t, buf.String())
 	if len(got) != 1 || got[0].RunID != "run-a" || got[0].LineNo != 7 {
 		t.Errorf("unexpected: %+v", got)
 	}
@@ -121,14 +117,15 @@ func TestEmitGrepMatches_NoMatchesPrintsHint(t *testing.T) {
 	}
 }
 
-func TestEmitGrepMatches_QuietJSONEmptyArray(t *testing.T) {
+// No matches is an empty stream: with one id per line, zero matches is
+// zero lines. The exit code, not the bytes, says whether the search ran.
+func TestEmitGrepMatches_QuietJSONEmptyStream(t *testing.T) {
 	var buf bytes.Buffer
 	if err := emitGrepMatches(nil, GrepOpts{Quiet: true, JSON: true}, &buf); err != nil {
 		t.Fatal(err)
 	}
-	out := strings.TrimSpace(buf.String())
-	if out != "[]" {
-		t.Errorf("expected []; got %q", out)
+	if out := buf.String(); out != "" {
+		t.Errorf("expected an empty stream; got %q", out)
 	}
 }
 

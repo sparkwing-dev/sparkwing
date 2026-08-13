@@ -26,14 +26,11 @@ func TestRunDocsMigrationsList_JSONIsParseable(t *testing.T) {
 			t.Fatalf("list -o json: %v", err)
 		}
 	})
-	var rows []struct {
+	rows := decodeNDJSON[struct {
 		Version string `json:"version"`
 		Slug    string `json:"slug"`
 		Bytes   int    `json:"bytes"`
-	}
-	if err := json.Unmarshal([]byte(out), &rows); err != nil {
-		t.Fatalf("json unmarshal: %v\n%s", err, out)
-	}
+	}](t, out)
 	if len(rows) == 0 {
 		t.Fatal("expected at least one row in json output")
 	}
@@ -58,10 +55,7 @@ func TestRunDocsMigrationsList_JSONSchemaMatchesWeb(t *testing.T) {
 			t.Fatalf("list -o json: %v", err)
 		}
 	})
-	var rows []map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(out), &rows); err != nil {
-		t.Fatalf("json unmarshal: %v", err)
-	}
+	rows := decodeNDJSON[map[string]json.RawMessage](t, out)
 	if len(rows) == 0 {
 		t.Fatal("expected at least one row")
 	}
@@ -96,10 +90,7 @@ func TestRunDocsList_JSONSchemaMatchesWeb(t *testing.T) {
 			t.Fatalf("list -o json: %v", err)
 		}
 	})
-	var rows []map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(out), &rows); err != nil {
-		t.Fatalf("json unmarshal: %v", err)
-	}
+	rows := decodeNDJSON[map[string]json.RawMessage](t, out)
 	if len(rows) == 0 {
 		t.Fatal("expected at least one row")
 	}
@@ -123,14 +114,11 @@ func keysOf(m map[string]json.RawMessage) []string {
 	return out
 }
 
-// keysInOrder returns the JSON object keys of the first element of a
-// top-level JSON array, in source order. Uses a streaming decoder so
-// map iteration randomness doesn't interfere.
-func keysInOrder(jsonArray string) []string {
-	dec := json.NewDecoder(strings.NewReader(jsonArray))
-	if _, err := dec.Token(); err != nil {
-		return nil
-	}
+// keysInOrder returns the JSON object keys of the first NDJSON record,
+// in source order. Uses a streaming decoder so map iteration
+// randomness doesn't interfere.
+func keysInOrder(ndjson string) []string {
+	dec := json.NewDecoder(strings.NewReader(ndjson))
 	if _, err := dec.Token(); err != nil {
 		return nil
 	}

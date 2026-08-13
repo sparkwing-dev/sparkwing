@@ -3,12 +3,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"text/tabwriter"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
 
@@ -136,7 +137,8 @@ func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []stri
 		return err
 	}
 	if emitJSON {
-		return json.NewEncoder(os.Stdout).Encode(rows)
+		// NDJSON: one approval per line, so `head` returns whole rows.
+		return ndjson.Write(os.Stdout, rows)
 	}
 	return renderApprovalsTable(os.Stdout, rows)
 }

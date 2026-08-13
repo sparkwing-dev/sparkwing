@@ -2,7 +2,6 @@ package orchestrator
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -68,10 +67,7 @@ func TestRenderPipelinePivot_JSONShape(t *testing.T) {
 		PivotOpts{SparklineLen: 5, Style: SparkASCII, JSON: true}, &buf); err != nil {
 		t.Fatal(err)
 	}
-	var rows []PipelinePivotRow
-	if err := json.Unmarshal(buf.Bytes(), &rows); err != nil {
-		t.Fatalf("decode: %v\n%s", err, buf.String())
-	}
+	rows := decodeNDJSON[PipelinePivotRow](t, buf.String())
 	if len(rows) != 1 || rows[0].Pipeline != "deploy" || rows[0].LastRunID != "a" {
 		t.Errorf("unexpected rows: %+v", rows)
 	}

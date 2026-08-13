@@ -12,6 +12,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -82,9 +84,8 @@ func runTriggersList(args []string) error {
 	}
 
 	if strings.EqualFold(*output, "json") {
-		buf, _ := json.MarshalIndent(trigs, "", "  ")
-		fmt.Fprintln(os.Stdout, string(buf))
-		return nil
+		// NDJSON: one trigger per line, so `head` returns whole triggers.
+		return ndjson.Write(os.Stdout, trigs)
 	}
 	if *quiet {
 		for _, t := range trigs {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -65,10 +64,7 @@ func TestRenderHooksSurvey_JSONRoundTripsEveryRow(t *testing.T) {
 	if err := renderHooksSurvey(&buf, surveyRows(), "json"); err != nil {
 		t.Fatalf("renderHooksSurvey: %v", err)
 	}
-	var got []githooks.RepoGates
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v\n%s", err, buf.String())
-	}
+	got := decodeNDJSON[githooks.RepoGates](t, buf.String())
 	if len(got) != 3 {
 		t.Fatalf("rows = %d, want 3", len(got))
 	}
@@ -77,15 +73,17 @@ func TestRenderHooksSurvey_JSONRoundTripsEveryRow(t *testing.T) {
 	}
 }
 
-// An empty fleet has to encode as [] rather than null so a consumer can
-// iterate the result without a nil check.
-func TestRenderHooksSurvey_EmptyFleetEncodesAsAnArray(t *testing.T) {
+// An empty fleet is an empty stream: with one record per line, zero
+// repos is zero lines, and a consumer loops over lines without a nil
+// check either way. Success is still carried by the exit code, so an
+// empty stream never has to be told apart from an error by its bytes.
+func TestRenderHooksSurvey_EmptyFleetEncodesAsAnEmptyStream(t *testing.T) {
 	var buf bytes.Buffer
 	if err := renderHooksSurvey(&buf, nil, "json"); err != nil {
 		t.Fatalf("renderHooksSurvey: %v", err)
 	}
-	if got := strings.TrimSpace(buf.String()); got != "[]" {
-		t.Errorf("output = %q, want []", got)
+	if got := buf.String(); got != "" {
+		t.Errorf("output = %q, want an empty stream", got)
 	}
 }
 

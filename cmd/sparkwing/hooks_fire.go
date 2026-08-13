@@ -5,7 +5,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
 
@@ -92,12 +93,8 @@ func unenforcedResults(results []githooks.FireResult) []githooks.FireResult {
 func renderHooksFire(w io.Writer, results []githooks.FireResult, format string) error {
 	switch format {
 	case "json":
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		if results == nil {
-			results = []githooks.FireResult{}
-		}
-		return enc.Encode(results)
+		// NDJSON: one fire result per line. No repos is an empty stream.
+		return ndjson.Write(w, results)
 	case "plain":
 		for _, r := range results {
 			fmt.Fprintf(w, "%s\t%s\t%s\n", r.Repo, r.Verdict, r.Hook)

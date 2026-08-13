@@ -5,7 +5,6 @@
 package orchestrator
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -148,12 +147,8 @@ func RenderPipelinePivot(runs []*store.Run, opts PivotOpts, out io.Writer) error
 		return nil
 	}
 	if opts.JSON {
-		if rows == nil {
-			rows = []PipelinePivotRow{}
-		}
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rows)
+		// NDJSON: one pivot row per line, so `head` returns whole rows.
+		return writeNDJSON(out, rows)
 	}
 	if len(rows) == 0 {
 		fmt.Fprintln(out, "no pipelines match the filter")

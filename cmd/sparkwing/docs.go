@@ -6,11 +6,12 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
 
@@ -94,9 +95,8 @@ func runDocsGuides(args []string) error {
 	list := docs.Guides()
 	switch strings.ToLower(output) {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(list)
+		// NDJSON: one guide per line.
+		return ndjson.Write(os.Stdout, list)
 	case "plain":
 		for _, g := range list {
 			fmt.Println(g.Name)
@@ -241,12 +241,10 @@ func runDocsSearch(args []string) error {
 func renderDocsSections(hits []docs.Section, query string, withBody bool, output string) error {
 	switch strings.ToLower(output) {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if hits == nil {
-			hits = []docs.Section{}
-		}
-		return enc.Encode(hits)
+		// NDJSON: one section per line, so `head` returns whole
+		// sections -- which matters most here, where --with-body makes
+		// a single record thousands of characters long.
+		return ndjson.Write(os.Stdout, hits)
 	case "plain":
 		for _, h := range hits {
 			fmt.Printf("%s:%d\t%s\n", h.Slug, h.StartLine, sectionLabel(h))
@@ -317,9 +315,8 @@ func truncateLine(s string) string {
 func renderDocsList(entries []docs.Entry, output string) error {
 	switch strings.ToLower(output) {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(entries)
+		// NDJSON: one doc entry per line.
+		return ndjson.Write(os.Stdout, entries)
 	case "plain":
 		for _, e := range entries {
 			fmt.Println(e.Slug)

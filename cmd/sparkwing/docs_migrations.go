@@ -7,11 +7,12 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
@@ -286,9 +287,8 @@ func renderBetweenMarkdown(from, to string, entries []docs.MigrationEntry, fetch
 func renderMigrationsList(entries []docs.MigrationEntry, output string) error {
 	switch strings.ToLower(output) {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(entries)
+		// NDJSON: one migration guide per line.
+		return ndjson.Write(os.Stdout, entries)
 	case "plain":
 		for _, e := range entries {
 			fmt.Println(e.Version)

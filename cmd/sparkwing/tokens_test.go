@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -127,10 +126,7 @@ func TestRenderTokensJSON_ExposesScopesArray(t *testing.T) {
 		t.Fatalf("renderTokensJSON: %v", err)
 	}
 
-	var got []map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v\n%s", err, buf.String())
-	}
+	got := decodeNDJSON[map[string]any](t, buf.String())
 	if len(got) != 4 {
 		t.Fatalf("got %d tokens, want 4", len(got))
 	}
@@ -157,13 +153,16 @@ func TestRenderTokensJSON_ExposesScopesArray(t *testing.T) {
 	}
 }
 
-func TestRenderTokensJSON_NilTokensEmitsEmptyArray(t *testing.T) {
+// No tokens is an empty stream, not `[]`: with records as lines, zero
+// records is zero lines. A consumer that read empty output as an error
+// has to read it as zero records.
+func TestRenderTokensJSON_NilTokensEmitsAnEmptyStream(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
 	if err := renderTokensJSON(&buf, nil); err != nil {
 		t.Fatalf("renderTokensJSON(nil): %v", err)
 	}
-	if got := strings.TrimSpace(buf.String()); got != "[]" {
-		t.Errorf("renderTokensJSON(nil) = %q, want \"[]\"", got)
+	if got := buf.String(); got != "" {
+		t.Errorf("renderTokensJSON(nil) = %q, want an empty stream", got)
 	}
 }

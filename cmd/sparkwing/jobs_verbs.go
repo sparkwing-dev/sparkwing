@@ -15,6 +15,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
@@ -183,10 +185,8 @@ func renderFailures(rows []failureRow, groupBy string, asJSON bool) error {
 		return renderFailureClusters(rows, groupBy, asJSON)
 	}
 	if asJSON {
-		if rows == nil {
-			rows = []failureRow{}
-		}
-		return jsonEncode(os.Stdout, rows)
+		// NDJSON: one failure per line, so `head` returns whole rows.
+		return ndjson.Write(os.Stdout, rows)
 	}
 	if len(rows) == 0 {
 		fmt.Println("no failures found")
@@ -240,7 +240,8 @@ func renderFailureClusters(rows []failureRow, groupBy string, asJSON bool) error
 		return clusters[i].Last.After(clusters[j].Last)
 	})
 	if asJSON {
-		return jsonEncode(os.Stdout, clusters)
+		// NDJSON: one cluster per line.
+		return ndjson.Write(os.Stdout, clusters)
 	}
 	if len(clusters) == 0 {
 		fmt.Println("no failures found")
@@ -348,7 +349,8 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 	sort.Slice(stats, func(i, j int) bool { return stats[i].Pipeline < stats[j].Pipeline })
 
 	if emitJSON {
-		return jsonEncode(os.Stdout, stats)
+		// NDJSON: one pipeline's stats per line.
+		return ndjson.Write(os.Stdout, stats)
 	}
 	if len(stats) == 0 {
 		fmt.Println("no runs match the filter")
@@ -916,10 +918,8 @@ func renderFindResults(runs []*store.Run, format string, quiet bool) error {
 			for _, r := range runs {
 				ids = append(ids, r.ID)
 			}
-			if ids == nil {
-				ids = []string{}
-			}
-			return jsonEncode(os.Stdout, ids)
+			// One quoted id per line, matching the plain form below.
+			return ndjson.Write(os.Stdout, ids)
 		}
 		for _, r := range runs {
 			fmt.Fprintln(os.Stdout, r.ID)
@@ -927,11 +927,8 @@ func renderFindResults(runs []*store.Run, format string, quiet bool) error {
 		return nil
 	}
 	if format == "json" {
-		runs = store.RedactedRuns(runs)
-		if runs == nil {
-			runs = []*store.Run{}
-		}
-		return jsonEncode(os.Stdout, runs)
+		// NDJSON: one run per line, so `head` returns whole runs.
+		return ndjson.Write(os.Stdout, store.RedactedRuns(runs))
 	}
 	if len(runs) == 0 {
 		fmt.Fprintln(os.Stdout, "no runs match the requested filter")

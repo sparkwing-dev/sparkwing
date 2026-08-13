@@ -15,6 +15,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
 	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -46,7 +47,7 @@ type ListOpts struct {
 	// cwd backends.yaml.
 	Profile *profile.Profile
 
-	// Quiet prints only ids (or a JSON id array with JSON).
+	// Quiet prints only ids, one per line (JSON-quoted with JSON).
 	Quiet bool
 
 	// Filter holds the cooked client-side filter set built from the
@@ -133,7 +134,10 @@ func renderRunList(
 			for _, r := range runs {
 				ids = append(ids, r.ID)
 			}
-			return writeJSON(out, ids)
+			// One quoted id per line, matching the plain form below:
+			// quiet output is a list too, and a single-line array of
+			// ids truncates to invalid JSON exactly like any other.
+			return writeNDJSON(out, ids)
 		}
 		for _, r := range runs {
 			fmt.Fprintln(out, r.ID)
@@ -145,11 +149,7 @@ func renderRunList(
 		// The table below prints no args, but -o json emits the whole
 		// row. Redact here rather than at the two call sites so the
 		// local and controller-backed list paths cannot drift.
-		runs = store.RedactedRuns(runs)
-		if runs == nil {
-			runs = []*store.Run{}
-		}
-		return writeJSON(out, runs)
+		return writeNDJSON(out, store.RedactedRuns(runs))
 	}
 
 	if len(runs) == 0 {
@@ -1446,7 +1446,8 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 	failed := failedNodeReports(nodes, excerpts)
 
 	if asJSON {
-		return writeJSON(out, failed)
+		// NDJSON: one failing node per line.
+		return writeNDJSON(out, failed)
 	}
 	if len(failed) == 0 {
 		fmt.Fprintln(out, "no failing nodes")
@@ -1636,11 +1637,19 @@ func prettyJSON(raw []byte) (string, bool) {
 	return string(b), true
 }
 
-// writeJSON encodes v to out with pretty indentation.
+// writeJSON encodes v to out with pretty indentation. It is for the
+// single-object shapes -- one run, one receipt -- where the whole
+// answer is one record and indentation costs a reader nothing.
 func writeJSON(out io.Writer, v any) error {
 	enc := json.NewEncoder(out)
 	enc.SetIndent("", "  ")
 	return enc.Encode(v)
+}
+
+// writeNDJSON streams a listing as newline-delimited JSON, one record
+// per line. See internal/ndjson for why list output is lines.
+func writeNDJSON[T any](out io.Writer, records []T) error {
+	return ndjson.Write(out, records)
 }
 
 func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out io.Writer) error {

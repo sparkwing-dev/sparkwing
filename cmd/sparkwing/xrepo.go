@@ -6,7 +6,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +14,8 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
 
@@ -104,9 +105,8 @@ func runXrepoList(args []string) error {
 	}
 
 	if *outputFormat == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rows)
+		// NDJSON: one repo per line.
+		return ndjson.Write(os.Stdout, rows)
 	}
 
 	if len(rows) == 0 {

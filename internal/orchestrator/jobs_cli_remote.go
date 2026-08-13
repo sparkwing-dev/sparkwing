@@ -238,7 +238,8 @@ func JobErrorsRemote(ctx context.Context, controllerURL, token, runID string, as
 	}
 	failed := failedNodeReports(nodes, excerpts)
 	if asJSON {
-		return writeJSON(out, failed)
+		// NDJSON: one failing node per line.
+		return writeNDJSON(out, failed)
 	}
 	if len(failed) == 0 {
 		fmt.Fprintln(out, "no failing nodes")

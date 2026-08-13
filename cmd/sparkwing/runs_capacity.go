@@ -8,6 +8,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -65,7 +67,8 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 	}
 
 	if emitJSON {
-		return jsonEncode(os.Stdout, stats)
+		// NDJSON: one capacity profile per line.
+		return ndjson.Write(os.Stdout, stats)
 	}
 	if len(stats) == 0 {
 		fmt.Println("no measured capacity profiles yet; run a pipeline a few times to build one")

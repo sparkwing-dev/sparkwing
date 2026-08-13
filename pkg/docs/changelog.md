@@ -48,6 +48,26 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **cli (Breaking):** list-shaped `-o json` output is NDJSON -- one
+  complete, independently parseable JSON object per line, with no
+  enclosing array and no pretty-printing. `sparkwing commands -o json`
+  was 258KB across 6,439 lines and `AGENTS.md` sends an arriving agent
+  straight to it, so the orientation path handed a fresh agent a
+  quarter-megabyte document whose first five lines parsed as nothing:
+  `head` is the only sizing tool a caller has, and it is line-oriented.
+  Now `sparkwing commands -o json | head -5` is five whole command
+  records, and `runs list -o json` is 20 lines instead of 633. Migration
+  is mechanical -- decode a line at a time, drop the `[0]` indexing --
+  and no field was renamed or dropped. An empty listing is an empty
+  stream rather than `[]`. Single-object verbs (`runs status`, `runs
+  get`, `runs receipt`, `pipeline describe`, `queue`, `doctor`,
+  `version`, `info`) are unchanged, as are `pretty`, `plain`, and
+  `markdown`. See
+  [migration guide](docs/migrations/_unreleased.md#list-output-is-ndjson)
+  for the full command list.
+
 ### Fixed
 
 - **wingd:** harden daemon lifecycle arbitration across stalled holders,

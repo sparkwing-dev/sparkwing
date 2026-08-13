@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,10 +18,7 @@ func TestRunDocsVersions_EmbeddedOnly(t *testing.T) {
 			t.Fatalf("docs versions: %v", err)
 		}
 	})
-	var rows []versionRow
-	if err := json.Unmarshal([]byte(out), &rows); err != nil {
-		t.Fatalf("json: %v\n%s", err, out)
-	}
+	rows := decodeNDJSON[versionRow](t, out)
 	if len(rows) == 0 {
 		t.Fatal("expected at least one embedded version")
 	}
@@ -50,10 +46,7 @@ func TestRunDocsVersions_WebMergesRemote(t *testing.T) {
 			t.Fatalf("docs versions --web: %v", err)
 		}
 	})
-	var rows []versionRow
-	if err := json.Unmarshal([]byte(out), &rows); err != nil {
-		t.Fatalf("json: %v\n%s", err, out)
-	}
+	rows := decodeNDJSON[versionRow](t, out)
 	gotLatest := false
 	gotRemote := false
 	for _, r := range rows {

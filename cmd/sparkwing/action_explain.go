@@ -15,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 )
 
 // planSnapshotDoc mirrors the shape pkg/orchestrator emits. Kept
@@ -301,9 +303,8 @@ func runPipelineExplainAll(format string) error {
 		results = append(results, row)
 	}
 	if format == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		if err := enc.Encode(results); err != nil {
+		// NDJSON: one pipeline's explanation per line.
+		if err := ndjson.Write(os.Stdout, results); err != nil {
 			return err
 		}
 	} else {

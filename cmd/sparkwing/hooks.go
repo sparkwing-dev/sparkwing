@@ -4,7 +4,6 @@ package main
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +15,8 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
 
@@ -1002,12 +1003,9 @@ func surveyFleet(git githooks.Git) ([]githooks.RepoGates, error) {
 func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) error {
 	switch format {
 	case "json":
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		if rows == nil {
-			rows = []githooks.RepoGates{}
-		}
-		return enc.Encode(rows)
+		// NDJSON: one repo per line, so `head` returns whole repos. An
+		// empty fleet is an empty stream.
+		return ndjson.Write(w, rows)
 	case "plain":
 		// One tab-separated row per repo, no summary and no alignment, so
 		// `cut` and `awk` get a stable shape whatever the fleet looks like.
