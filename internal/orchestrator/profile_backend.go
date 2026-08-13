@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
@@ -162,7 +163,15 @@ func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, c
 	if surf.State == nil && surf.Logs == nil && surf.Cache == nil {
 		if p != nil && p.ControllerURL() != "" {
 			ctrl := func() *backends.Spec { return &backends.Spec{Type: backends.TypeController, Controller: p.Name} }
-			return ctrl(), ctrl(), ctrl()
+			// State and cache do live on the controller; logs do not.
+			// sparkwing-logs is a separate service, so the logs spec
+			// carries the URL the controller announces for it. Empty
+			// when nothing is announced, which leaves the historical
+			// behavior of posting to the controller -- correct only
+			// when one process serves both.
+			logsSpec := ctrl()
+			logsSpec.URL = announcedLogsURL(p)
+			return ctrl(), logsSpec, ctrl()
 		}
 		return &backends.Spec{Type: backends.TypeSQLite, Path: stateDBPath}, nil, nil
 	}
@@ -177,6 +186,24 @@ func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, c
 		state = &filled
 	}
 	return state, surf.Logs, surf.Cache
+}
+
+// announcedLogsURL asks the profile's controller where its logs
+// service is, via the discovery endpoint the controller already serves
+// for the cache pod. Empty when there is no controller, nothing is
+// announced, or discovery fails -- every one of which means "keep the
+// old fallback" rather than "fail the run".
+func announcedLogsURL(p *profile.Profile) string {
+	if p == nil || p.ControllerURL() == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), logsDiscoveryTimeout)
+	defer cancel()
+	svc, err := discovery.ServicesFor(ctx, p.ControllerURL(), p.ControllerToken())
+	if err != nil {
+		return ""
+	}
+	return svc.Logs
 }
 
 // profileControllerLookup builds a storeurl.ProfileLookup that resolves
