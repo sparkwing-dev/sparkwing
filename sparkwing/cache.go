@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// DefaultCacheTTL is the TTL applied when a node declares [JobNode.Cache]
+// DefaultCacheTTL is the TTL applied when a node declares [JobNode.Memoize]
 // without an explicit [TTL] option.
 const DefaultCacheTTL = 7 * 24 * time.Hour
 
@@ -14,10 +14,10 @@ const DefaultCacheTTL = 7 * 24 * time.Hour
 // without enabling unbounded cache growth.
 const MaxCacheTTL = 35 * 24 * time.Hour
 
-// CacheConfig is a node's resolved content-cache configuration: the
+// MemoizeConfig is a node's resolved memoization configuration: the
 // key function that names the work plus the retention window for a
 // stored result.
-type CacheConfig struct {
+type MemoizeConfig struct {
 	// Key computes the content key after upstream dependencies
 	// complete. Return [NoCache] to opt this invocation out.
 	Key CacheKeyFn
@@ -25,35 +25,41 @@ type CacheConfig struct {
 	TTL time.Duration
 }
 
-// CacheOption tunes a [JobNode.Cache] declaration.
-type CacheOption func(*CacheConfig)
+// MemoizeOption tunes a [JobNode.Memoize] declaration.
+type MemoizeOption func(*MemoizeConfig)
 
 // TTL sets how long a node's memoized result remains reusable. Values
 // above [MaxCacheTTL] are clamped with a warning log; a non-positive
 // value falls back to [DefaultCacheTTL].
-func TTL(d time.Duration) CacheOption {
-	return func(c *CacheConfig) { c.TTL = d }
+func TTL(d time.Duration) MemoizeOption {
+	return func(c *MemoizeConfig) { c.TTL = d }
 }
 
-// Cache memoizes the node's result on content. key names the work;
-// when a later node computes the same key, the orchestrator replays
-// the stored result instead of re-running. Caching is keyed on content
-// alone -- no scope, no group -- so two nodes that happen to share a
-// group never collide on each other's results. For bounding how many
-// nodes run at once, use [JobNode.Concurrency]; the two are
-// independent.
+// Memoize skips re-running the node when its result is already known.
+// key names the work; when a later node computes the same key, the
+// orchestrator replays the stored result instead of running the node
+// at all. Memoization is keyed on content alone -- no scope, no group
+// -- so two nodes that happen to share a group never collide on each
+// other's results. For bounding how many nodes run at once, use
+// [JobNode.Concurrency]; the two are independent.
 //
-//	shard.Cache(func(ctx context.Context) sparkwing.CacheKey {
+//	shard.Memoize(func(ctx context.Context) sparkwing.CacheKey {
 //	    return sparkwing.Key("coverage", "shard-1")
 //	}, sparkwing.TTL(7*24*time.Hour))
 //
+// Memoize is not a dependency cache. A hit means the node does not run;
+// it does not restore a directory so the node can run faster. To keep a
+// dependency directory warm across runs while the node still runs, use
+// [JobNode.CacheDir]. Porting a GitHub Actions `actions/cache` step maps
+// to CacheDir, not Memoize.
+//
 // Repeated calls overwrite. A nil key clears any prior declaration.
-func (n *JobNode) Cache(key CacheKeyFn, opts ...CacheOption) *JobNode {
+func (n *JobNode) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobNode {
 	if key == nil {
 		n.contentCache = nil
 		return n
 	}
-	cfg := CacheConfig{Key: key}
+	cfg := MemoizeConfig{Key: key}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(&cfg)
@@ -63,7 +69,7 @@ func (n *JobNode) Cache(key CacheKeyFn, opts ...CacheOption) *JobNode {
 		cfg.TTL = DefaultCacheTTL
 	}
 	if cfg.TTL > MaxCacheTTL {
-		slog.Warn("sparkwing.Cache: TTL exceeds MaxCacheTTL; clamping",
+		slog.Warn("sparkwing.Memoize: TTL exceeds MaxCacheTTL; clamping",
 			"node", n.id, "requested", cfg.TTL, "max", MaxCacheTTL)
 		cfg.TTL = MaxCacheTTL
 	}
@@ -71,18 +77,22 @@ func (n *JobNode) Cache(key CacheKeyFn, opts ...CacheOption) *JobNode {
 	return n
 }
 
-// CacheConfig returns the node's resolved content-cache configuration,
-// or nil when [JobNode.Cache] was not called.
-func (n *JobNode) CacheConfig() *CacheConfig { return n.contentCache }
+// MemoizeConfig returns the node's resolved memoization configuration,
+// or nil when [JobNode.Memoize] was not called.
+func (n *JobNode) MemoizeConfig() *MemoizeConfig { return n.contentCache }
 
-// Cache memoizes every member of the group on content. See
-// [JobNode.Cache]. Members typically want distinct keys, so this is
-// most useful when the key function discriminates per node (e.g. via
+// Memoize memoizes every member of the group. See [JobNode.Memoize].
+//
+// It applies one key function to every member, so a matrix built with
+// [JobFanOut] needs a key that discriminates per member -- otherwise
+// every cell shares one entry and the first cell's result replays for
+// the rest (a Go 1.23 cell would serve a Go 1.24 cell's pass). Make the
+// key depend on the per-member value (the fanned-out input, or a
 // node-specific upstream output); a constant key makes every member
-// share one result.
-func (g *JobGroup) Cache(key CacheKeyFn, opts ...CacheOption) *JobGroup {
+// share one result on purpose.
+func (g *JobGroup) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobGroup {
 	for _, m := range g.Members() {
-		m.Cache(key, opts...)
+		m.Memoize(key, opts...)
 	}
 	return g
 }

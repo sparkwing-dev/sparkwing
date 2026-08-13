@@ -39,7 +39,7 @@ docs/
   hooks.md               triggers (webhooks + opt-in pipeline hooks)
   scheduling.md          runner labels, .Requires/.Prefers/.WhenRunner
   warm-pool.md           warm PVC pool
-  caching.md             node-level Cache modifier (.Cache / CacheOption)
+  caching.md             node-level Cache modifier (.Cache / MemoizeOption)
   backends.md            per-profile state / cache / logs destinations
   build-caching.md       Docker / BuildKit / proxy caching layers
   fast-builds.md         performance best practices

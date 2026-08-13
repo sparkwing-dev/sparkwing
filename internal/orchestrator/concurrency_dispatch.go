@@ -237,7 +237,7 @@ func (cp coordParams) acquireRequest(runID, nodeID string, bypassRead bool) stor
 func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Request) (runner.Result, bool) {
 	node := req.Node
 	group := node.ConcurrencyGroupRef()
-	cacheCfg := node.CacheConfig()
+	cacheCfg := node.MemoizeConfig()
 	if group == nil && cacheCfg == nil {
 		return runner.Result{}, false
 	}
@@ -271,7 +271,7 @@ func (r *InProcessRunner) runUnderGroup(ctx context.Context, req runner.Request,
 // resolveCacheHash evaluates the node's content key, returning the hash
 // (or "" when there is no Cache config, the key opted out via NoCache,
 // or the key was empty) and the configured TTL.
-func (r *InProcessRunner) resolveCacheHash(ctx context.Context, node *sparkwing.JobNode, cacheCfg *sparkwing.CacheConfig) (string, time.Duration) {
+func (r *InProcessRunner) resolveCacheHash(ctx context.Context, node *sparkwing.JobNode, cacheCfg *sparkwing.MemoizeConfig) (string, time.Duration) {
 	if cacheCfg == nil {
 		return "", 0
 	}

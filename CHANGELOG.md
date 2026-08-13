@@ -49,6 +49,18 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **sdk (Breaking):** The result-memoization modifier `.Cache()` is renamed to
+  `.Memoize()` on both `JobNode` and `JobGroup`, with `CacheConfig` →
+  `MemoizeConfig`, `CacheOption` → `MemoizeOption`, and `CacheConfig()` →
+  `MemoizeConfig()`. `CacheKey`, `CacheKeyFn`, `Key`, `NoCache`, and `TTL` keep
+  their names. The old name read like GitHub Actions `actions/cache` while doing
+  the opposite (skipping the node instead of restoring a directory); the
+  `actions/cache` equivalent is `.CacheDir()`. No alias: every call site is a
+  compile error until updated. See
+  [migration guide](docs/migrations/_unreleased.md#cache-becomes-memoize).
+
 ### Fixed
 
 - **cli:** `--help` lists the subcommands the CLI actually dispatches. A group's

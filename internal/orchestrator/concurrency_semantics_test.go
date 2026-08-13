@@ -146,9 +146,9 @@ func (memoDiffGroupsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 	gx := sparkwing.NewConcurrencyGroup("memo-gx", sparkwing.ConcurrencyLimit{Capacity: 1})
 	gy := sparkwing.NewConcurrencyGroup("memo-gy", sparkwing.ConcurrencyLimit{Capacity: 1})
 	a := sparkwing.Job(plan, "a", semStep(40*time.Millisecond)).
-		Concurrency(gx).Cache(contentKey("shared"))
+		Concurrency(gx).Memoize(contentKey("shared"))
 	sparkwing.Job(plan, "b", semStep(40*time.Millisecond)).
-		Concurrency(gy).Cache(contentKey("shared")).Needs(a)
+		Concurrency(gy).Memoize(contentKey("shared")).Needs(a)
 	return nil
 }
 
@@ -156,16 +156,16 @@ type memoSameGroupDiffContentPipe struct{ sparkwing.Base }
 
 func (memoSameGroupDiffContentPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := sparkwing.NewConcurrencyGroup("memo-same", sparkwing.ConcurrencyLimit{Capacity: 2})
-	sparkwing.Job(plan, "a", semStep(40*time.Millisecond)).Concurrency(g).Cache(contentKey("k-a"))
-	sparkwing.Job(plan, "b", semStep(40*time.Millisecond)).Concurrency(g).Cache(contentKey("k-b"))
+	sparkwing.Job(plan, "a", semStep(40*time.Millisecond)).Concurrency(g).Memoize(contentKey("k-a"))
+	sparkwing.Job(plan, "b", semStep(40*time.Millisecond)).Concurrency(g).Memoize(contentKey("k-b"))
 	return nil
 }
 
 type memoInFlightPipe struct{ sparkwing.Base }
 
 func (memoInFlightPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "a", semStep(300*time.Millisecond)).Cache(contentKey("dup"))
-	sparkwing.Job(plan, "b", semStep(300*time.Millisecond)).Cache(contentKey("dup"))
+	sparkwing.Job(plan, "a", semStep(300*time.Millisecond)).Memoize(contentKey("dup"))
+	sparkwing.Job(plan, "b", semStep(300*time.Millisecond)).Memoize(contentKey("dup"))
 	return nil
 }
 
@@ -460,7 +460,7 @@ func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
 type memoSkipLeaderPipe struct{ sparkwing.Base }
 
 func (memoSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "leader", semStep(0)).Cache(contentKey("skip-dup")).SkipIf(heldSkip)
+	sparkwing.Job(plan, "leader", semStep(0)).Memoize(contentKey("skip-dup")).SkipIf(heldSkip)
 	return nil
 }
 
@@ -468,7 +468,7 @@ type memoSkipFollowerPipe struct{ sparkwing.Base }
 
 func (memoSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "follower", semStep(0)).
-		Cache(contentKey("skip-dup")).
+		Memoize(contentKey("skip-dup")).
 		SkipIf(func(ctx context.Context) bool { return true })
 	return nil
 }

@@ -62,7 +62,7 @@ into every member's workspace. See the
 
 Publishing and staging are independent of memoization. A node that
 declares `Outputs` publishes its files every run, whether or not it also
-declares [`.Cache()`](caching.md). A consumer stages its declared
+declares [`.Memoize()`](caching.md). A consumer stages its declared
 artifacts every time it runs.
 
 A producer that promises outputs it cannot deliver fails: if a declared
@@ -90,7 +90,7 @@ This is what lets caching and artifacts compose. A
 re-running it, and carries the producer's artifact manifest forward
 unchanged --- so a downstream `Consumes` stages the same files whether
 the producer ran or hit. Caching a file-producing node is supported:
-pair `.Cache()` with `Outputs`.
+pair `.Memoize()` with `Outputs`.
 
 ## Both execution modes
 
