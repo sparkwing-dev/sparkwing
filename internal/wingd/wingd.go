@@ -415,8 +415,7 @@ func reapSocketDir(sock string) {
 	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
 		return
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !ok || int(stat.Uid) != os.Getuid() {
+	if !socketDirOwnedByCurrentUser(info) {
 		return
 	}
 	_ = os.Remove(sock)
