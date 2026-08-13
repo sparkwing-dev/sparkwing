@@ -65,6 +65,7 @@ type BudgetState struct {
 
 	Raw string
 }
+const BuildIdentity = "wingwire-v1-liveness"
 type Cancel struct {
 	RunID  string
 	Reason string
@@ -165,6 +166,7 @@ type GuardCompleteAck struct{}
 type Hello struct {
 	ProtocolMajor int
 	BinaryVersion string
+	BuildIdentity string
 
 	HealthProbe bool
 
@@ -175,6 +177,7 @@ type HelloAck struct {
 
 	NativeProtocolMajor int
 	BinaryVersion       string
+	BuildIdentity       string
 	Draining            bool
 }
 type Holder struct {

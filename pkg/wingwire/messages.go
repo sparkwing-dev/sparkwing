@@ -26,6 +26,7 @@ const (
 type Hello struct {
 	ProtocolMajor int    `json:"protocol_major"`
 	BinaryVersion string `json:"binary_version"`
+	BuildIdentity string `json:"build_identity,omitempty"`
 	// HealthProbe marks a connection that only observes the daemon: a
 	// supervisor health check or a socket sweep. The daemon serves it like
 	// any other connection but keeps it out of idle accounting, so a
@@ -54,6 +55,7 @@ type HelloAck struct {
 	// ProtocolMajor is the only major there is.
 	NativeProtocolMajor int    `json:"native_protocol_major,omitempty"`
 	BinaryVersion       string `json:"binary_version"`
+	BuildIdentity       string `json:"build_identity,omitempty"`
 	Draining            bool   `json:"draining,omitempty"`
 }
 

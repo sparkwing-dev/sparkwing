@@ -84,7 +84,7 @@ var ErrBuildMismatch = errors.New("wingd/client: daemon build differs from this 
 func buildMismatch(selfVersion string, ack wingwire.HelloAck) error {
 	self := strings.TrimSpace(selfVersion)
 	daemon := strings.TrimSpace(ack.BinaryVersion)
-	if self == daemon || supersedes(daemon, self) {
+	if self == daemon || (ack.BuildIdentity != "" && ack.BuildIdentity == wingwire.BuildIdentity) || supersedes(daemon, self) {
 		return nil
 	}
 	if self == "" {
@@ -741,7 +741,7 @@ func (cl *Client) takeover(ctx context.Context, opts Options) error {
 }
 
 func (cl *Client) handshake(version string) (wingwire.HelloAck, error) {
-	if err := cl.write(&wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: version, HealthProbe: cl.probe, HolderLiveness: !cl.probe}); err != nil {
+	if err := cl.write(&wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: version, BuildIdentity: wingwire.BuildIdentity, HealthProbe: cl.probe, HolderLiveness: !cl.probe}); err != nil {
 		return wingwire.HelloAck{}, err
 	}
 	msg, err := cl.dec.read()

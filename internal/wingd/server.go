@@ -531,6 +531,7 @@ func (d *Daemon) serveConn(c *conn) {
 		ProtocolMajor:       served,
 		NativeProtocolMajor: ProtocolMajor,
 		BinaryVersion:       d.cfg.Version,
+		BuildIdentity:       wingwire.BuildIdentity,
 		Draining:            draining,
 	}
 	if err := c.send(ack); err != nil {

@@ -90,6 +90,17 @@ func TestMatchingProtocolAcceptsTheExactSameBuild(t *testing.T) {
 	}
 }
 
+func TestMatchingProtocolAcceptsDifferentDisplayVersionsWithSameBuildIdentity(t *testing.T) {
+	ack := wingwire.HelloAck{
+		ProtocolMajor: wingd.ProtocolMajor,
+		BinaryVersion: "v0.31.0-dev+e91a2fe1",
+		BuildIdentity: wingwire.BuildIdentity,
+	}
+	if err := buildMismatch("(devel)", ack); err != nil {
+		t.Fatalf("same protocol build identity rejected: %v", err)
+	}
+}
+
 // A daemon prerelease build version is not a usable module pin, so the
 // refusal must ask for a release by protocol number rather than the dev stamp.
 func TestProtocolTooOldNamesBothMajorsAndNoPinTarget(t *testing.T) {
