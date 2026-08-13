@@ -96,6 +96,14 @@ code change to unlock.
 
 ### Added
 
+- **controller:** `sparkwing-controller --logs-url URL` (env
+  `SPARKWING_LOGS_URL`) announces the sparkwing-logs service on `GET
+  /api/v1/services`, and a runner with no `logs:` surface posts node log
+  lines there. The controller serves no `/api/v1/logs` route of its own,
+  so a two-process deployment was sending every append into a 404 --
+  silently before the `logs_dropped` change above, and as a failed run
+  after it. Without the announcement a runner still falls back to the
+  controller's URL, which is correct when one process serves both.
 - **cli:** `pipeline hooks install --profile NAME` pins the storage
   profile a git hook's runs use, and the generated hook no longer
   inherits `SPARKWING_PROFILE` from the shell that invoked git. Two

@@ -29,6 +29,11 @@ import (
 // server side).
 type Services struct {
 	CachePod string `json:"cache_pod,omitempty"`
+
+	// Logs is the sparkwing-logs URL. Empty means the controller
+	// announced none, which a co-located deployment does not need to:
+	// there the controller's own URL routes /api/v1/logs.
+	Logs string `json:"logs,omitempty"`
 }
 
 // ErrNoController is returned when ServicesFor is called with an
