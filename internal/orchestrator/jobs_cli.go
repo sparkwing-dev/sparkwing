@@ -1673,3 +1673,28 @@ func writeRunDetailJSON(ctx context.Context, st *store.Store, runID string, out 
 	}
 	return writeJSON(out, payload)
 }
+
+// RunStatus reads one run's terminal status through the same backend
+// `runs status` rendered it from.
+//
+// The scriptable exit contract used to be derived from local SQLite
+// no matter which store the status came from, so on any machine that
+// had not itself run the pipeline -- the normal case for a shared
+// bucket, and for every CI step that shells out to `runs status` --
+// the command printed a correct status read from the bucket and then
+// exited 1 because the run was absent locally.
+func RunStatus(ctx context.Context, paths Paths, p *profile.Profile, runID string) (string, error) {
+	if err := paths.EnsureRoot(); err != nil {
+		return "", err
+	}
+	b, closer, err := readBackendFor(ctx, paths, p)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = closer.Close() }()
+	run, err := b.GetRun(ctx, runID)
+	if err != nil {
+		return "", err
+	}
+	return run.Status, nil
+}

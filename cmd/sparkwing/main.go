@@ -533,13 +533,15 @@ func runJobs(args []string) error {
 				Style:        sparkStyle,
 			},
 		}
-		if *profileName != "" {
-			p, perr := resolveProfileFlag(*profileName)
-			if perr != nil {
-				return perr
-			}
-			listOpts.Profile = p
+		// Resolved unconditionally: with no flag this is the project's
+		// defaults.profile, which is where `sparkwing run` put the runs
+		// being listed. Reading the local store instead is how a machine
+		// that shares a bucket reports an empty list.
+		p, perr := resolveProfileFlag(*profileName)
+		if perr != nil {
+			return perr
 		}
+		listOpts.Profile = p
 		return orchestrator.ListJobs(ctx, paths, listOpts, os.Stdout)
 
 	case "status":
@@ -566,20 +568,25 @@ func runJobs(args []string) error {
 			return err
 		}
 		statusOpts := orchestrator.StatusOpts{JSON: resolvedFmt == "json", Follow: *follow, Steps: *steps}
-		if *profileName != "" {
-			p, perr := resolveProfileFlag(*profileName)
-			if perr != nil {
-				return perr
-			}
-			statusOpts.Profile = p
+		p, perr := resolveProfileFlag(*profileName)
+		if perr != nil {
+			return perr
 		}
+		statusOpts.Profile = p
 		if err := orchestrator.JobStatus(ctx, paths, *runID, statusOpts, os.Stdout); err != nil {
 			return err
 		}
 		if *exitZero {
 			return nil
 		}
-		return localStatusExitCheck(ctx, paths, *runID)
+		// The exit code comes from the store the status was just read
+		// from, not from local SQLite: they are the same store only on
+		// the machine that ran the pipeline.
+		status, serr := orchestrator.RunStatus(ctx, paths, p, *runID)
+		if serr != nil {
+			return serr
+		}
+		return statusExitCode(status)
 
 	case "logs":
 		fs := flag.NewFlagSet(cmdJobsLogs.Path, flag.ContinueOnError)
@@ -628,13 +635,11 @@ func runJobs(args []string) error {
 			EventsOnly: *eventsOnly,
 			NoEvents:   *noEvents,
 		}
-		if *profileName != "" {
-			p, perr := resolveProfileFlag(*profileName)
-			if perr != nil {
-				return perr
-			}
-			opts.Profile = p
+		p, perr := resolveProfileFlag(*profileName)
+		if perr != nil {
+			return perr
 		}
+		opts.Profile = p
 		return orchestrator.JobLogs(ctx, paths, *runID, opts, os.Stdout)
 
 	case "errors":
@@ -758,19 +763,6 @@ func statusExitCode(status string) error {
 		return nil
 	}
 	return exitErrorf(1, "run status: %s", status)
-}
-
-func localStatusExitCheck(ctx context.Context, paths orchestrator.Paths, runID string) error {
-	st, err := store.Open(paths.StateDB())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = st.Close() }()
-	run, err := st.GetRun(ctx, runID)
-	if err != nil {
-		return err
-	}
-	return statusExitCode(run.Status)
 }
 
 func multiFlagVar(fs *flag.FlagSet, name, usage string) *[]string {
