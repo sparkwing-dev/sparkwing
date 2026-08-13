@@ -9,7 +9,11 @@ type ChainSource string
 
 const (
 	ChainSourceFlag ChainSource = "flag" // --profile X
-	ChainSourceNone ChainSource = "none" // no --profile passed; project defaults apply
+	ChainSourceNone ChainSource = "none" // no --profile passed and the project names no default
+	// ChainSourceProjectDefault: no --profile passed, so the project's
+	// own defaults.profile applies -- the same selection `sparkwing
+	// run` makes, which is why the read commands report and use it too.
+	ChainSourceProjectDefault ChainSource = "project-default"
 )
 
 // ConsideredEntry is one resolution rule that did not produce the

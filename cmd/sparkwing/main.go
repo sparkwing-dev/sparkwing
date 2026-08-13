@@ -455,7 +455,7 @@ func runJobs(args []string) error {
 		byPipeline := fs.Bool("by-pipeline", false, "pivot into one row per pipeline with a status sparkline of the last N runs")
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
-		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}
@@ -533,13 +533,15 @@ func runJobs(args []string) error {
 				Style:        sparkStyle,
 			},
 		}
-		if *profileName != "" {
-			p, perr := resolveProfileFlag(*profileName)
-			if perr != nil {
-				return perr
-			}
-			listOpts.Profile = p
+		// Resolved unconditionally: with no flag this is the project's
+		// defaults.profile, which is where `sparkwing run` put the runs
+		// being listed. Reading the local store instead is how a machine
+		// that shares a bucket reports an empty list.
+		p, perr := resolveProfileFlag(*profileName)
+		if perr != nil {
+			return perr
 		}
+		listOpts.Profile = p
 		return orchestrator.ListJobs(ctx, paths, listOpts, os.Stdout)
 
 	case "status":
@@ -548,7 +550,7 @@ func runJobs(args []string) error {
 		outFmt := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
 		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
 		steps := fs.Bool("steps", false, "render every step on every node in plain output")
-		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
@@ -566,20 +568,25 @@ func runJobs(args []string) error {
 			return err
 		}
 		statusOpts := orchestrator.StatusOpts{JSON: resolvedFmt == "json", Follow: *follow, Steps: *steps}
-		if *profileName != "" {
-			p, perr := resolveProfileFlag(*profileName)
-			if perr != nil {
-				return perr
-			}
-			statusOpts.Profile = p
+		p, perr := resolveProfileFlag(*profileName)
+		if perr != nil {
+			return perr
 		}
+		statusOpts.Profile = p
 		if err := orchestrator.JobStatus(ctx, paths, *runID, statusOpts, os.Stdout); err != nil {
 			return err
 		}
 		if *exitZero {
 			return nil
 		}
-		return localStatusExitCheck(ctx, paths, *runID)
+		// The exit code comes from the store the status was just read
+		// from, not from local SQLite: they are the same store only on
+		// the machine that ran the pipeline.
+		status, serr := orchestrator.RunStatus(ctx, paths, p, *runID)
+		if serr != nil {
+			return serr
+		}
+		return statusExitCode(status)
 
 	case "logs":
 		fs := flag.NewFlagSet(cmdJobsLogs.Path, flag.ContinueOnError)
@@ -587,7 +594,7 @@ func runJobs(args []string) error {
 		node := fs.String("node", "", "limit output to one node id")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
-		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		tail := fs.Int("tail", 0, "print only the last N lines (server-side in cluster mode)")
 		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
 		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")
@@ -628,13 +635,11 @@ func runJobs(args []string) error {
 			EventsOnly: *eventsOnly,
 			NoEvents:   *noEvents,
 		}
-		if *profileName != "" {
-			p, perr := resolveProfileFlag(*profileName)
-			if perr != nil {
-				return perr
-			}
-			opts.Profile = p
+		p, perr := resolveProfileFlag(*profileName)
+		if perr != nil {
+			return perr
 		}
+		opts.Profile = p
 		return orchestrator.JobLogs(ctx, paths, *runID, opts, os.Stdout)
 
 	case "errors":
@@ -758,19 +763,6 @@ func statusExitCode(status string) error {
 		return nil
 	}
 	return exitErrorf(1, "run status: %s", status)
-}
-
-func localStatusExitCheck(ctx context.Context, paths orchestrator.Paths, runID string) error {
-	st, err := store.Open(paths.StateDB())
-	if err != nil {
-		return err
-	}
-	defer func() { _ = st.Close() }()
-	run, err := st.GetRun(ctx, runID)
-	if err != nil {
-		return err
-	}
-	return statusExitCode(run.Status)
 }
 
 func multiFlagVar(fs *flag.FlagSet, name, usage string) *[]string {

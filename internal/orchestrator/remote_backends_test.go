@@ -2,13 +2,11 @@ package orchestrator_test
 
 import (
 	"context"
-	"net/http/httptest"
 	"path/filepath"
 	"sync"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -47,7 +45,7 @@ func TestRunLocal_RemoteBackends_DispatchesAgainstController(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = ctrlStore.Close() })
 
-	srv := httptest.NewServer(controller.New(ctrlStore, nil).Handler())
+	srv := orchestrator.NewControllerServer(t, ctrlStore, nil)
 	t.Cleanup(srv.Close)
 
 	c := client.NewWithToken(srv.URL, nil, "")

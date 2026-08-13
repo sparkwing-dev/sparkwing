@@ -84,17 +84,69 @@ func (s Surfaces) Validate(name string) error {
 	if s.State.Type == TypeNone || s.State.Type == TypeEnv {
 		return fmt.Errorf("profile %q: state cannot be type=%s", name, s.State.Type)
 	}
+	if err := s.State.ValidateFields("state"); err != nil {
+		return fmt.Errorf("profile %q: %w", name, err)
+	}
 	if s.Cache == nil {
 		return fmt.Errorf("profile %q: cache surface is required", name)
 	}
 	if s.Cache.Type == TypeNone || s.Cache.Type == TypeEnv {
 		return fmt.Errorf("profile %q: cache cannot be type=%s", name, s.Cache.Type)
 	}
+	if err := s.Cache.ValidateFields("cache"); err != nil {
+		return fmt.Errorf("profile %q: %w", name, err)
+	}
+	if s.Cache.Binaries != nil {
+		if err := s.Cache.Binaries.ValidateFields("cache.binaries"); err != nil {
+			return fmt.Errorf("profile %q: %w", name, err)
+		}
+	}
 	if s.Logs == nil {
 		return fmt.Errorf("profile %q: logs surface is required", name)
 	}
 	if s.Logs.Type == TypeNone || s.Logs.Type == TypeEnv {
 		return fmt.Errorf("profile %q: logs cannot be type=%s", name, s.Logs.Type)
+	}
+	if err := s.Logs.ValidateFields("logs"); err != nil {
+		return fmt.Errorf("profile %q: %w", name, err)
+	}
+	return nil
+}
+
+// ValidateFields enforces the fields a backend type cannot work
+// without. The storeurl factories document this contract -- "the spec
+// must already have passed pkg/backends validation (required fields per
+// type)" -- and nothing enforced it, so `{type: s3}` with no bucket
+// validated clean, rendered as `s3://`, and failed only when a run
+// tried to write to a bucket named "".
+//
+// A type whose missing field has a real default is deliberately absent:
+// sqlite without a path is filled in with the host's own state database
+// by the profile resolver, so demanding one here would reject configs
+// that work.
+func (s *Spec) ValidateFields(surface string) error {
+	if s == nil {
+		return nil
+	}
+	switch s.Type {
+	case "":
+		return fmt.Errorf("%s backend: type is required", surface)
+	case TypeS3, TypeGCS, TypeAzureBlob:
+		if s.Bucket == "" {
+			return fmt.Errorf("%s backend type=%s requires bucket", surface, s.Type)
+		}
+	case TypeFilesystem:
+		if s.Path == "" {
+			return fmt.Errorf("%s backend type=filesystem requires path", surface)
+		}
+	case TypePostgres, TypeMySQL:
+		if s.URL == "" && s.URLSource == "" {
+			return fmt.Errorf("%s backend type=%s requires url or url_source", surface, s.Type)
+		}
+	case TypeController:
+		if s.Controller == "" && s.URL == "" {
+			return fmt.Errorf("%s backend type=controller requires controller: <profile-name>", surface)
+		}
 	}
 	return nil
 }

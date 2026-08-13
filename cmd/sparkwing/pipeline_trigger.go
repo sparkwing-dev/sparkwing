@@ -126,7 +126,7 @@ func runPipelineTrigger(args []string) error {
 	return remoteFollowExit(ctx, prof, resp.RunID, followErr)
 }
 
-// remoteFollowExit is the remote counterpart of localStatusExitCheck:
+// remoteFollowExit is the remote counterpart of the local exit check:
 // once the follow ends, read the triggered run's outcome and map it
 // onto the exit contract a local `sparkwing run` already follows --
 // success exits 0, failed and cancelled exit 1.
