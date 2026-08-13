@@ -25,14 +25,14 @@ returns the whole set in one call.
 
 ### Subcommands
 
-- `list` -- Enumerate every doc topic (slug, title, summary)
-- `read` -- Print one doc's markdown to stdout (--topic NAME, or --guide NAME)
-- `guides` -- List task-sized topic sets (read one with `docs read --guide`)
+- `list` -- Enumerate every doc topic
+- `read` -- Print one doc's raw markdown to stdout
+- `guides` -- List the task-sized doc sets (--guide on `docs read`)
 - `all` -- Concatenate every doc to stdout (full corpus dump)
-- `search` -- Find the section that answers a question (--query TEXT)
-- `migrations` -- Per-version migration guides (list / read / between)
+- `search` -- Find the section that answers a question
+- `migrations` -- Per-version migration guides (agent-friendly)
 - `versions` -- List doc versions known to this CLI (and sparkwing.dev with --web)
-- `cache` -- Inspect / clear the on-disk cache used by --web
+- `cache` -- Inspect or clear the on-disk cache used by --web
 
 ### Examples
 
@@ -93,7 +93,7 @@ Use `cache info` to see size / counts; use `cache clear` to wipe it.
 ### Subcommands
 
 - `info` -- Print cache dir, total size, per-resource breakdown
-- `clear` -- Remove every cached file (refuses to escape the cache dir)
+- `clear` -- Remove every cached file
 
 ### Examples
 
@@ -230,9 +230,9 @@ range output.
 
 ### Subcommands
 
-- `list` -- Table of every migration guide this CLI knows about
-- `read` -- Print one migration guide to stdout (--version vX.Y.Z)
-- `between` -- Concatenate every guide in (--from, --to] into one blob
+- `list` -- Table of every embedded migration guide
+- `read` -- Print one migration guide's markdown to stdout
+- `between` -- Concatenate every guide in a version range into one blob
 
 ### Examples
 

@@ -115,10 +115,10 @@ func runInternalCompleteFlags(args []string) error {
 	if len(args) == 0 {
 		return nil
 	}
-	leaves := leafCommands()
+	cmds := commandsByArgvPath()
 	for n := len(args); n >= 1; n-- {
 		key := strings.Join(args[:n], " ")
-		cmd, ok := leaves[key]
+		cmd, ok := cmds[key]
 		if !ok {
 			continue
 		}
@@ -214,10 +214,10 @@ func walkUpForSparkwing(start string) (string, bool) {
 // runInternalCompleteHint emits "placeholder\trequirement\tdescription"
 // for the next positional. Empty output = nothing to hint.
 func runInternalCompleteHint(args []string) error {
-	leaves := leafCommands()
+	cmds := commandsByArgvPath()
 	for n := len(args); n >= 1; n-- {
 		key := strings.Join(args[:n], " ")
-		cmd, ok := leaves[key]
+		cmd, ok := cmds[key]
 		if !ok {
 			continue
 		}
@@ -317,13 +317,18 @@ func summarizePipelineTriggers(t pipelines.Triggers) string {
 	return strings.Join(bits, " ")
 }
 
-// leafCommands keys leaf Commands by argv path (Path minus "sparkwing ").
-func leafCommands() map[string]Command {
+// commandsByArgvPath keys every Command by argv path (Path minus
+// "sparkwing "), root excluded since it has no argv path.
+//
+// It is deliberately not "leaves only". Being a group and taking
+// flags are independent: `sparkwing run` has a `config` child and
+// still owns `<pipeline>` plus every --sw- flag, so a map that
+// excluded groups had no entry to answer `sparkwing run --<TAB>`
+// from. Groups that take nothing but --help complete to just that,
+// which is what they accept.
+func commandsByArgvPath() map[string]Command {
 	out := make(map[string]Command, len(allCommands))
 	for _, c := range allCommands {
-		if len(c.Subcommands) > 0 {
-			continue
-		}
 		key := strings.TrimPrefix(c.Path, "sparkwing ")
 		if key == "sparkwing" {
 			continue
@@ -333,11 +338,12 @@ func leafCommands() map[string]Command {
 	return out
 }
 
-// parentCommands keys parent Commands by argv path; "" = top-level.
+// parentCommands keys every Command that has registered children by
+// argv path; "" = top-level.
 func parentCommands() map[string]Command {
 	out := make(map[string]Command, len(allCommands))
 	for _, c := range allCommands {
-		if len(c.Subcommands) == 0 {
+		if len(childCommands(c.Path)) == 0 {
 			continue
 		}
 		key := strings.TrimPrefix(c.Path, "sparkwing ")
@@ -819,17 +825,17 @@ end
 	b.WriteString("\n# Pipeline names for `sparkwing run`.\n")
 	b.WriteString(`complete -c sparkwing -f -n '__sparkwing_has_path run' -a '(__sparkwing_pipelines)'
 `)
-	b.WriteString("\n# Flags per leaf, pulled from the registry.\n")
+	b.WriteString("\n# Flags per command, pulled from the registry.\n")
 
-	leaves := leafCommands()
-	keys := make([]string, 0, len(leaves))
-	for k := range leaves {
+	cmds := commandsByArgvPath()
+	keys := make([]string, 0, len(cmds))
+	for k := range cmds {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
 
 	for _, k := range keys {
-		cmd := leaves[k]
+		cmd := cmds[k]
 		flags := append([]FlagSpec(nil), cmd.Flags...)
 		if !hasFlagNamed(flags, "help") {
 			flags = append(flags, helpFlag)

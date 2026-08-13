@@ -20,9 +20,9 @@ space on demand.
 
 ### Subcommands
 
-- `info` -- Print cache location, size, ceilings, and recent entries
-- `prune` -- Evict least recently used entries down to the ceilings
-- `explain` -- Show the key for a pipeline and what went into it
+- `info` -- Print cache dir, size, ceilings, and recent entries
+- `prune` -- Evict least recently used binaries down to the ceilings
+- `explain` -- Show a pipeline's cache key and the inputs behind it
 
 ### Examples
 

@@ -29,15 +29,15 @@ address; set them up with 'sparkwing configure profiles'.
 
 ### Subcommands
 
-- `status` -- Roll-up report: controller health + fleet + queue + recent runs
-- `agents` -- Fleet-view detail (GET /api/v1/agents)
-- `worker` -- Run a laptop-side worker against a remote cluster
+- `status` -- Connectivity + fleet + queue health check against a remote cluster
+- `agents` -- Inspect the controller's fleet view
+- `worker` -- Claim triggers from a profile's controller and run them in-process
 - `gc` -- Sweep stale warm-PVC state
-- `users` -- Create / list / delete dashboard login users
-- `tokens` -- Create / list / revoke / rotate controller API tokens
-- `image` -- Image rollout helpers for gitops-managed deployments
-- `webhooks` -- Inspect / replay GitHub webhooks (wraps gh api)
-- `concurrency` -- Inspect a concurrency namespace: holders + queue
+- `users` -- Manage dashboard login users
+- `tokens` -- Manage controller API tokens
+- `image` -- Rollout helpers for images referenced by a gitops repo
+- `webhooks` -- Inspect and replay GitHub webhooks
+- `concurrency` -- Inspect a single concurrency namespace: holders + queue
 
 ### Examples
 
@@ -60,7 +60,7 @@ is no explicit registration table yet).
 
 ### Subcommands
 
-- `list` -- Print agents (name, type, status, active jobs, last-seen, labels)
+- `list` -- Print the controller's known agents
 
 ### Examples
 
@@ -178,7 +178,7 @@ wait for rollout" path.
 
 ### Subcommands
 
-- `rollout` -- Bump a kustomization newTag, commit+push, sync ArgoCD, wait for rollout
+- `rollout` -- Bump a kustomization image tag, commit+push, sync ArgoCD, optionally wait
 
 ### Examples
 
@@ -294,10 +294,10 @@ stash it immediately.
 
 ### Subcommands
 
-- `create` -- Mint a new token (prints raw value once)
-- `list` -- List token prefixes + metadata (never prints raw)
-- `revoke` -- Mark a token revoked so further requests 401
-- `lookup` -- Print metadata for a single token by prefix
+- `create` -- Mint a new API token
+- `list` -- List token prefixes + metadata
+- `revoke` -- Mark a token revoked
+- `lookup` -- Print metadata for a single token
 - `rotate` -- Mint a replacement token with a grace window
 
 ## `sparkwing cluster tokens create`
@@ -441,9 +441,9 @@ selected profile; --profile overrides the default.
 
 ### Subcommands
 
-- `add` -- Create a user with a password (prompts hidden on stdin)
-- `list` -- Print every user + created_at + last_login_at
-- `delete` -- Remove a user (active sessions stay until expiry)
+- `add` -- Create a dashboard user
+- `list` -- Print every user
+- `delete` -- Remove a dashboard user
 
 ## `sparkwing cluster users add`
 
@@ -533,8 +533,8 @@ terminal status -- without two separate lookups.
 
 ### Subcommands
 
-- `list` -- List hooks on a repo + derived pipeline name
-- `deliveries` -- Recent deliveries for one hook, joined with trigger state
+- `list` -- List GitHub hooks configured on a repo
+- `deliveries` -- List recent deliveries for a hook, joined with trigger state
 - `replay` -- Queue a redelivery of a specific delivery UUID
 
 ### Examples

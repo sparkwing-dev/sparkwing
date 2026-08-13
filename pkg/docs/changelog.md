@@ -64,6 +64,15 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `--help` lists the subcommands the CLI actually dispatches. A group's
+  COMMANDS listing is now derived from the command registry rather than authored
+  beside it, so it can no longer name a command that does not exist or omit one
+  that does. `sparkwing --help` gains `examples`, `sparkwing run --help` gains
+  `config`, `sparkwing configure xrepo` is a registered command instead of a
+  mention in its parent's listing, and about seventy subcommand descriptions that
+  had been reworded on only one side now match the command's own synopsis. Hidden
+  commands stay out of every listing as before.
+
 - **release:** Windows CLI binaries build again. The stale socket cleanup now
   checks Unix directory ownership only on Unix, so cross-compilation no longer
   references `syscall.Stat_t` on Windows.

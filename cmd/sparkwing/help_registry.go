@@ -33,28 +33,7 @@ programs in a repo's .sparkwing/ directory, triggered by git hooks,
 webhooks, schedules, or manual invocation. Use 'sparkwing run
 <pipeline>' to invoke one; 'sparkwing pipeline list' / 'describe'
 for agent-facing discovery.`,
-	Subcommands: []SubcommandRef{
-		{"info", "What is sparkwing, what's in this repo, what to run next"},
-		{"pipeline", "This repo's pipelines"},
-		{"run", "Run a pipeline (shortcut for `pipeline run`)"},
-		{"runs", "Inspect or manage runs"},
-		{"repos", "The machine's fleet of sparkwing repos + SDK pins"},
-		{"queue", "The truthful view of local admission: holders + connections + waiters"},
-		{"cache", "Measure and safely reclaim compiled pipeline entries"},
-		{"daemon", "Inspect or refresh the local admission daemon"},
-		{"profile", "Show which profile sparkwing would use right now, and why"},
-		{"version", "Show + update versions"},
-		{"update", "Self-update the CLI binary"},
-		{"dashboard", "Local dashboard server"},
-		{"doctor", "Diagnose and repair provably-dead local state"},
-		{"cluster", "Cluster ops"},
-		{"secrets", "Manage secrets"},
-		{"configure", "Laptop-local config"},
-		{"debug", "Interactive run debugging"},
-		{"docs", "Embedded user docs (offline)"},
-		{"commands", "Index of every command: one path and synopsis per line"},
-		{"completion", "Shell completion script"},
-	},
+	SubcommandOrder: []string{"info", "pipeline", "run", "runs", "repos", "queue", "cache", "daemon", "profile", "version", "update", "dashboard", "doctor", "cluster", "secrets", "configure", "debug", "docs", "examples", "commands", "completion"},
 	Examples: []Example{
 		{"Run a pipeline (positional shortcut)", "sparkwing run build-test-deploy"},
 		{"First command an agent should run", "sparkwing info --for-agent"},
@@ -66,14 +45,10 @@ for agent-facing discovery.`,
 }
 
 var cmdDaemon = Command{
-	Path:        "sparkwing daemon",
-	Synopsis:    "Inspect or refresh the local admission daemon",
-	Description: `The admission daemon starts on demand when a pipeline needs it. Status never starts one. Restart replaces only an answering daemon with this installed build, using the same drain, durable lease, and reattachment path as automatic version takeover; a stopped daemon stays stopped.`,
-	Subcommands: []SubcommandRef{
-		{"status", "Report whether wingd is running and which build it serves"},
-		{"restart", "Refresh an answering wingd to this installed build"},
-		{"recover-state", "Preserve unreadable daemon state after guarded commands stop"},
-	},
+	Path:            "sparkwing daemon",
+	Synopsis:        "Inspect or refresh the local admission daemon",
+	Description:     `The admission daemon starts on demand when a pipeline needs it. Status never starts one. Restart replaces only an answering daemon with this installed build, using the same drain, durable lease, and reattachment path as automatic version takeover; a stopped daemon stays stopped.`,
+	SubcommandOrder: []string{"status", "restart", "recover-state"},
 	Examples: []Example{
 		{"Machine-readable status", "sparkwing daemon status -o json"},
 		{"Refresh only if already running", "sparkwing daemon restart"},
@@ -173,17 +148,7 @@ For the laptop-local dashboard server, see
 
 Profiles (via --profile) pick which cluster these commands
 address; set them up with 'sparkwing configure profiles'.`,
-	Subcommands: []SubcommandRef{
-		{"status", "Roll-up report: controller health + fleet + queue + recent runs"},
-		{"agents", "Fleet-view detail (GET /api/v1/agents)"},
-		{"worker", "Run a laptop-side worker against a remote cluster"},
-		{"gc", "Sweep stale warm-PVC state"},
-		{"users", "Create / list / delete dashboard login users"},
-		{"tokens", "Create / list / revoke / rotate controller API tokens"},
-		{"image", "Image rollout helpers for gitops-managed deployments"},
-		{"webhooks", "Inspect / replay GitHub webhooks (wraps gh api)"},
-		{"concurrency", "Inspect a concurrency namespace: holders + queue"},
-	},
+	SubcommandOrder: []string{"status", "agents", "worker", "gc", "users", "tokens", "image", "webhooks", "concurrency"},
 	Examples: []Example{
 		{"Cluster health summary", "sparkwing cluster status --profile prod"},
 		{"List fleet agents", "sparkwing cluster agents --profile prod"},
@@ -203,17 +168,40 @@ Controller-side state (users, tokens) lives under
 'sparkwing cluster ...' since it writes to the remote
 controller, not the local config. Secrets are top-level
 ('sparkwing secrets ...').`,
-	Subcommands: []SubcommandRef{
-		{"init", "Set up ~/.config/sparkwing/ and report laptop-level config status"},
-		{"profiles", "Manage connection profiles for remote controllers"},
-		{"xrepo", "Cross-repo registry: list / add / remove / prune local checkouts"},
-	},
+	SubcommandOrder: []string{"init", "profiles", "xrepo"},
 	Examples: []Example{
 		{"First-time laptop setup", "sparkwing configure init"},
 		{"Status of laptop config", "sparkwing configure init -o json"},
 		{"List profiles", "sparkwing configure profiles list"},
 		{"Add a new profile", "sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN"},
 		{"Register the current repo with the cross-repo registry", "sparkwing configure xrepo add"},
+	},
+}
+
+// cmdConfigureXrepo registers a verb the CLI has always dispatched
+// (main.go routes it to runXrepo) but that had no Command. Its parent
+// named it in the help listing, so nothing looked wrong -- until the
+// listing became derived, at which point an unregistered child is an
+// invisible one. Its own subverbs (list / add / remove / prune) are
+// still parsed and documented by runXrepo rather than by this
+// registry, so it declares no children here.
+var cmdConfigureXrepo = Command{
+	Path:     "sparkwing configure xrepo",
+	Synopsis: "Manage the laptop-local repo registry",
+	Description: `The registry maps pipeline names to local checkouts so
+cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
+annotations. Auto-populated when you run 'sparkwing run <pipeline>'
+in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
+disable).
+
+Subverbs: list (show every registered repo and the pipelines it
+provides), add (register a checkout explicitly), remove (drop one by
+path or basename), prune (drop repos whose .sparkwing/ is gone). Run
+'sparkwing configure xrepo --help' for their flags.`,
+	Examples: []Example{
+		{"Register the current checkout", "sparkwing configure xrepo add"},
+		{"Show the fleet the registry reaches", "sparkwing configure xrepo list"},
+		{"Drop entries whose checkout is gone", "sparkwing configure xrepo prune"},
 	},
 }
 
@@ -261,10 +249,7 @@ trigger an upgrade without parsing prose.
 --offline skips the network fetch entirely; -o json emits the
 structured report; -o plain prints semver lines (CLI then
 latest) for shell pipelines.`,
-	Subcommands: []SubcommandRef{
-		{"update", "Self-update CLI binary or bump SDK pin (requires --cli or --sdk)"},
-		{"hold", "Show, set, or clear the operator ceiling on CLI upgrades"},
-	},
+	SubcommandOrder: []string{"update", "hold"},
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 		{Name: "offline", Desc: "Skip the network fetch for latest release", Group: "Behavior"},
@@ -483,9 +468,7 @@ same renderer prints the controller's admission state -- every
 concurrency key, its holders and waiters, and each registered runner's
 free capacity -- so one vocabulary reads local and cluster admission
 alike.`,
-	Subcommands: []SubcommandRef{
-		{"exec", "Run a command under local machine admission"},
-	},
+	SubcommandOrder: []string{"exec"},
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
@@ -543,16 +526,7 @@ narrow question does not cost a whole page.
 When one page leaves you a lookup short, ` + "`sparkwing docs guides`" + `
 lists task-sized sets of topics; ` + "`sparkwing docs read --guide authoring`" + `
 returns the whole set in one call.`,
-	Subcommands: []SubcommandRef{
-		{"list", "Enumerate every doc topic (slug, title, summary)"},
-		{"read", "Print one doc's markdown to stdout (--topic NAME, or --guide NAME)"},
-		{"guides", "List task-sized topic sets (read one with `docs read --guide`)"},
-		{"all", "Concatenate every doc to stdout (full corpus dump)"},
-		{"search", "Find the section that answers a question (--query TEXT)"},
-		{"migrations", "Per-version migration guides (list / read / between)"},
-		{"versions", "List doc versions known to this CLI (and sparkwing.dev with --web)"},
-		{"cache", "Inspect / clear the on-disk cache used by --web"},
-	},
+	SubcommandOrder: []string{"list", "read", "guides", "all", "search", "migrations", "versions", "cache"},
 	Examples: []Example{
 		{"List all topics (table)", "sparkwing docs list"},
 		{"List all topics (agent-readable)", "sparkwing docs list -o json"},
@@ -691,11 +665,7 @@ The same files are also reachable as regular docs (e.g.
 ` + "`sparkwing docs read --topic migrations/v0.4.0`" + `); this
 subcommand is the ergonomics layer with semver-aware filtering and
 range output.`,
-	Subcommands: []SubcommandRef{
-		{"list", "Table of every migration guide this CLI knows about"},
-		{"read", "Print one migration guide to stdout (--version vX.Y.Z)"},
-		{"between", "Concatenate every guide in (--from, --to] into one blob"},
-	},
+	SubcommandOrder: []string{"list", "read", "between"},
 	Examples: []Example{
 		{"List embedded migration guides", "sparkwing docs migrations list"},
 		{"Read one guide", "sparkwing docs migrations read --version v0.4.0"},
@@ -814,10 +784,7 @@ var cmdDocsCache = Command{
 can ` + "`cat`" + ` the cached files directly when debugging.
 
 Use ` + "`cache info`" + ` to see size / counts; use ` + "`cache clear`" + ` to wipe it.`,
-	Subcommands: []SubcommandRef{
-		{"info", "Print cache dir, total size, per-resource breakdown"},
-		{"clear", "Remove every cached file (refuses to escape the cache dir)"},
-	},
+	SubcommandOrder: []string{"info", "clear"},
 	Examples: []Example{
 		{"How big is the cache?", "sparkwing docs cache info"},
 		{"Force-refresh on next --web call", "sparkwing docs cache clear"},
@@ -866,11 +833,7 @@ Pruning runs automatically after a compile, keeping the most
 recently used entries within a byte ceiling and an entry count.
 These verbs are for looking at what is cached and for reclaiming
 space on demand.`,
-	Subcommands: []SubcommandRef{
-		{"info", "Print cache location, size, ceilings, and recent entries"},
-		{"prune", "Evict least recently used entries down to the ceilings"},
-		{"explain", "Show the key for a pipeline and what went into it"},
-	},
+	SubcommandOrder: []string{"info", "prune", "explain"},
 	Examples: []Example{
 		{"See what is cached", "sparkwing cache info"},
 		{"Reclaim space now", "sparkwing cache prune"},
@@ -955,14 +918,7 @@ var cmdDebug = Command{
 drop into a shell, or release the node. Every debug verb is
 ephemeral -- pause directives live only on the run they launch,
 never in pipeline source. Pipelines stay production-clean.`,
-	Subcommands: []SubcommandRef{
-		{"run", "Run a pipeline with --pause-before / --pause-after / --pause-on-failure"},
-		{"release", "Resume a paused node"},
-		{"attach", "kubectl exec into a paused node's pod (cluster mode)"},
-		{"env", "Print a paused node's env + workdir + claim holder"},
-		{"rerun", "Reproduce a node's dispatch frame and drop into a shell"},
-		{"replay", "Headlessly re-execute a single node from a prior run"},
-	},
+	SubcommandOrder: []string{"run", "release", "attach", "env", "rerun", "replay"},
 	Examples: []Example{
 		{"Pause before the tests node", "sparkwing debug run build --pause-before tests"},
 		{"Resume a paused node", "sparkwing debug release --run run-X --node tests"},
@@ -1171,19 +1127,7 @@ than scraping tab-complete.
 To bump the pipeline SDK pin in .sparkwing/go.mod, use
 'sparkwing version update --sdk'. To see the current pin, run
 'sparkwing version' (composite card).`,
-	Subcommands: []SubcommandRef{
-		{"list", "Enumerate every pipeline with metadata"},
-		{"describe", "Print one pipeline's full metadata"},
-		{"discover", "Fuzzy search over names, descriptions, tags"},
-		{"new", "Scaffold a new pipeline (auto-bootstraps .sparkwing/ if missing)"},
-		{"explain", "Render the pipeline's Plan DAG without running"},
-		{"lint", "Check pipeline source for idiomatic anti-patterns (enforced gate)"},
-		{"plan", "Render the runtime-resolved DAG (would-run/would-skip) without running"},
-		{"run", "Invoke a pipeline (canonical form of `sparkwing run <name>`)"},
-		{"trigger", "Submit a pipeline to a profile's controller (remote execution)"},
-		{"hooks", "Git pre-commit / pre-push / post-commit hooks: install / uninstall / status"},
-		{"sparks", "Manage sparks libraries: list / add / remove / lint / resolve / update / warmup"},
-	},
+	SubcommandOrder: []string{"list", "describe", "discover", "new", "explain", "lint", "plan", "run", "trigger", "hooks", "sparks"},
 	Examples: []Example{
 		{"Machine-readable catalog", "sparkwing pipeline list -o json"},
 		{"One pipeline's details", "sparkwing pipeline describe --name release -o json"},
@@ -1690,9 +1634,10 @@ the default for managed git hooks.`,
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/sparkwing.yaml", Required: true},
 	},
-	Flags:       runFlagSpecs,
-	GroupOrder:  []string{"Source", "Range", "Safety", "System", "Other"},
-	UsageSuffix: "[-- pipeline-flags...]",
+	Flags:           runFlagSpecs,
+	GroupOrder:      []string{"Source", "Range", "Safety", "System", "Other"},
+	SubcommandOrder: []string{"config"},
+	UsageSuffix:     "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Run with no flags", "sparkwing run build-test-deploy"},
 		{"Pass a typed pipeline arg", "sparkwing run release --version v0.28.1"},
@@ -1741,11 +1686,7 @@ the JSON API, the log endpoints, and the SQLite store on the same
 port. There is no separate Node process. The dashboard is purely
 for visualization -- everything it shows is reachable from the
 CLI as well.`,
-	Subcommands: []SubcommandRef{
-		{"start", "Spawn the detached dashboard server (replaces any running one)"},
-		{"kill", "Stop a running dashboard server"},
-		{"status", "Report whether the dashboard is running"},
-	},
+	SubcommandOrder: []string{"start", "kill", "status"},
 	Examples: []Example{
 		{"Start the dashboard", "sparkwing dashboard start"},
 		{"Check liveness", "sparkwing dashboard status"},
@@ -1946,16 +1887,7 @@ Every human-driven client command (tokens, users, jobs
 retry/cancel/prune/logs, gc) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
 exist on other commands; profiles are the only config surface.`,
-	Subcommands: []SubcommandRef{
-		{"add", "Register a new profile"},
-		{"list", "Print every profile; * marks the default"},
-		{"show", "Print one profile's full config"},
-		{"use", "Set the default profile"},
-		{"remove", "Delete a profile"},
-		{"duplicate", "Copy one profile's config into another"},
-		{"set", "Update fields on an existing profile"},
-		{"test", "Probe controller/auth/logs/gitcache for one profile"},
-	},
+	SubcommandOrder: []string{"add", "list", "show", "use", "remove", "duplicate", "set", "test"},
 }
 
 var cmdProfilesAdd = Command{
@@ -2077,13 +2009,7 @@ var cmdTokens = Command{
 named profile (or the default profile when --profile is omitted).
 Token creation prints the raw value to stdout exactly ONCE --
 stash it immediately.`,
-	Subcommands: []SubcommandRef{
-		{"create", "Mint a new token (prints raw value once)"},
-		{"list", "List token prefixes + metadata (never prints raw)"},
-		{"revoke", "Mark a token revoked so further requests 401"},
-		{"lookup", "Print metadata for a single token by prefix"},
-		{"rotate", "Mint a replacement token with a grace window"},
-	},
+	SubcommandOrder: []string{"create", "list", "revoke", "lookup", "rotate"},
 }
 
 var cmdTokensCreate = Command{
@@ -2182,11 +2108,7 @@ var cmdUsers = Command{
 	Description: `Seeds admin credentials in the controller's users table, used
 by the web pod's login flow. Connection info comes from the
 selected profile; --profile overrides the default.`,
-	Subcommands: []SubcommandRef{
-		{"add", "Create a user with a password (prompts hidden on stdin)"},
-		{"list", "Print every user + created_at + last_login_at"},
-		{"delete", "Remove a user (active sessions stay until expiry)"},
-	},
+	SubcommandOrder: []string{"add", "list", "delete"},
 }
 
 var cmdUsersAdd = Command{
@@ -2247,31 +2169,7 @@ the same runs remotely via the controller.
 Local-mode subcommands (list, status, logs, errors) read from
 ~/.sparkwing/runs/. Controller-mode subcommands (cancel, retry,
 prune) require a profile; 'jobs logs' supports both.`,
-	Subcommands: []SubcommandRef{
-		{"submit", "Queue a local run and return its id immediately; execution outlives your terminal"},
-		{"consumer", "Inspect or control the resident process that executes submitted runs"},
-		{"list", "List recent runs with filters (pipeline, status, branch, sha, search, etc.)"},
-		{"status", "Show a single run's status (with per-step + approval state)"},
-		{"summary", "Aggregated work view: groups, work items, modifiers, annotations"},
-		{"timeline", "ASCII waterfall of a run's nodes (and steps)"},
-		{"wait", "Block until a run reaches a terminal status"},
-		{"find", "Find runs matching a git SHA / repo / pipeline filter"},
-		{"grep", "Search log bodies across recent runs for a substring"},
-		{"logs", "Print a run's logs (optionally --follow)"},
-		{"errors", "Surface the error trail for a failed run"},
-		{"failures", "List recent failed runs; optional clustering by step"},
-		{"stats", "Aggregate stats (pass/fail, success %, avg/p95 duration)"},
-		{"last", "Show the most recent run; --watch tails new runs"},
-		{"tree", "ASCII tree of a run and every descendant run"},
-		{"get", "Emit one run's raw JSON (run + nodes)"},
-		{"receipt", "Emit a run's audit + cost receipt as JSON"},
-		{"annotations", "Read or append persistent node + step annotations"},
-		{"approvals", "List, approve, or deny approval gates"},
-		{"triggers", "Inspect trigger envelopes that produced runs"},
-		{"retry", "Trigger fresh runs copying pipeline + args from old ones"},
-		{"cancel", "Request cancellation of in-flight runs"},
-		{"prune", "Delete finished runs older than a threshold, or by id"},
-	},
+	SubcommandOrder: []string{"submit", "consumer", "list", "status", "summary", "timeline", "wait", "find", "grep", "logs", "errors", "failures", "stats", "last", "tree", "get", "receipt", "annotations", "approvals", "triggers", "retry", "cancel", "prune"},
 }
 
 var cmdJobsList = Command{
@@ -2836,11 +2734,7 @@ submission from a different build replaces it, so an upgrade takes
 effect instead of the first build serving the home forever;
 replacing one interrupts whatever it was executing, and that run
 returns to the queue for the new consumer to re-execute.`,
-	Subcommands: []SubcommandRef{
-		{"start", "Start a consumer for this home if none is running"},
-		{"status", "Report whether a consumer is resident (exit 1 when not)"},
-		{"stop", "Stop the resident consumer; queued runs stay queued"},
-	},
+	SubcommandOrder: []string{"start", "status", "stop"},
 }
 
 var cmdJobsConsumerStart = Command{
@@ -2952,13 +2846,7 @@ Managed hooks carry a "Installed by sparkwing" marker so
 uninstall and status can tell them apart from hand-written
 hooks. Existing unmanaged hooks are left alone; install skips
 them with a warning.`,
-	Subcommands: []SubcommandRef{
-		{"install", "Write pre-commit / pre-push / post-commit hooks for the enclosing repo"},
-		{"uninstall", "Remove sparkwing-managed git hooks"},
-		{"status", "Report declared, installed, and missing sparkwing hooks"},
-		{"survey", "Report which registered repos git actually runs a gate for"},
-		{"fire", "Make the gate refuse a commit, to see that it can"},
-	},
+	SubcommandOrder: []string{"install", "uninstall", "status", "survey", "fire"},
 }
 
 var cmdHooksInstall = Command{
@@ -3100,12 +2988,7 @@ Used for prod / staging secrets that the cluster needs at run
 time. Pipelines pull a secret by listing it in the
 sparkwing.yaml 'secrets:' block. Raw values never transit the
 CLI except via 'secrets get'.`,
-	Subcommands: []SubcommandRef{
-		{"set", "Store (or replace) a secret value"},
-		{"get", "Print a secret's raw value to stdout"},
-		{"list", "List secret names + metadata (never prints values)"},
-		{"delete", "Remove a secret"},
-	},
+	SubcommandOrder: []string{"set", "get", "list", "delete"},
 }
 
 var cmdSecretSet = Command{
@@ -3189,10 +3072,7 @@ controller logs. 'get' inspects one trigger by id.
 
 Connection info comes from the selected profile (--profile NAME);
 there are no --controller / --token flags on this command.`,
-	Subcommands: []SubcommandRef{
-		{"list", "List pending / claimed / done triggers"},
-		{"get", "Inspect one trigger's full metadata by id"},
-	},
+	SubcommandOrder: []string{"list", "get"},
 	Examples: []Example{
 		{"List pending triggers on prod", "sparkwing runs triggers list --profile prod --status pending"},
 		{"Inspect one trigger", "sparkwing runs triggers get --id run-... --profile prod"},
@@ -3253,9 +3133,7 @@ kustomization.yaml plus the downstream ArgoCD / kubectl dance.
 Building and pushing images stays with the consumer pipeline --
 this subcommand only owns the "bump tag, commit, push, sync,
 wait for rollout" path.`,
-	Subcommands: []SubcommandRef{
-		{"rollout", "Bump a kustomization newTag, commit+push, sync ArgoCD, wait for rollout"},
-	},
+	SubcommandOrder: []string{"rollout"},
 	Examples: []Example{
 		{"Bump sparkwing-runner to a new commit tag", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --profile prod --wait"},
 	},
@@ -3375,11 +3253,7 @@ Value-add over 'gh api' alone: the deliveries view joins
 GitHub's delivery log with sparkwing's trigger/run rows so
 each delivery shows the run id it produced and the run's
 terminal status -- without two separate lookups.`,
-	Subcommands: []SubcommandRef{
-		{"list", "List hooks on a repo + derived pipeline name"},
-		{"deliveries", "Recent deliveries for one hook, joined with trigger state"},
-		{"replay", "Queue a redelivery of a specific delivery UUID"},
-	},
+	SubcommandOrder: []string{"list", "deliveries", "replay"},
 	Examples: []Example{
 		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app --profile prod"},
 		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 608819334 --since 1h --profile prod"},
@@ -3458,9 +3332,7 @@ var cmdAgents = Command{
 Prints one row per agent seen claiming work in the last hour
 (the controller infers agents from recent node claims; there
 is no explicit registration table yet).`,
-	Subcommands: []SubcommandRef{
-		{"list", "Print agents (name, type, status, active jobs, last-seen, labels)"},
-	},
+	SubcommandOrder: []string{"list"},
 	Examples: []Example{
 		{"List prod agents", "sparkwing cluster agents list --profile prod"},
 	},
@@ -3530,16 +3402,7 @@ never modified.
 
 See docs/sparks.md for the full spec (spark.json schema,
 sparks.yaml shape, resolution rules, warmup).`,
-	Subcommands: []SubcommandRef{
-		{"list", "Show declared libraries and resolved versions"},
-		{"lint", "Validate a spark.json library manifest"},
-		{"resolve", "Resolve versions and materialize the overlay modfile"},
-		{"update", "Re-resolve one or all libraries"},
-		{"add", "Add a library to sparks.yaml"},
-		{"remove", "Remove a library from sparks.yaml"},
-		{"warmup", "Pre-compile pipeline binaries and upload to gitcache"},
-		{"inflate", "Copy a spark library's source into this repo so you can edit it"},
-	},
+	SubcommandOrder: []string{"list", "lint", "resolve", "update", "add", "remove", "warmup", "inflate"},
 	Examples: []Example{
 		{"List declared sparks libraries", "sparkwing pipeline sparks list"},
 		{"Validate a library's spark.json", "sparkwing pipeline sparks lint ~/code/sparks-core"},
@@ -3771,11 +3634,7 @@ var cmdApprovals = Command{
 	Description: `Inspect approval gates. Without --run returns every pending
 gate across all runs; with --run returns one run's full history
 (pending + resolved).`,
-	Subcommands: []SubcommandRef{
-		{"list", "List pending approvals, or one run's history with --run (the default verb)"},
-		{"approve", "Approve a pending gate: --run <id> --node <id> [--comment ...]"},
-		{"deny", "Deny a pending gate: --run <id> --node <id> [--comment ...]"},
-	},
+	SubcommandOrder: []string{"list", "approve", "deny"},
 }
 
 var cmdApprovalsList = Command{
@@ -3806,10 +3665,7 @@ sparkwing.Annotate) and agents append to a node or step during a
 run. They show up on the dashboard alongside outcome. This verb
 lets an agent read every annotation on a run or contribute one
 without going through the SDK.`,
-	Subcommands: []SubcommandRef{
-		{"list", "List annotations on a run (optionally filtered to a node/step)"},
-		{"add", "Append one annotation to a node or step"},
-	},
+	SubcommandOrder: []string{"list", "add"},
 }
 
 var cmdAnnotationsList = Command{
@@ -3874,11 +3730,7 @@ Bare 'sparkwing repos' and 'sparkwing repos list' both print this
 fleet. Use 'sparkwing repos info' for a single-repo deep dive, and
 'sparkwing repos update' to bump the whole fleet in one sitting
 with a compiled per-repo verdict.`,
-	Subcommands: []SubcommandRef{
-		{"list", "List the fleet (the same as bare 'sparkwing repos')"},
-		{"info", "Deep dive on one repo: pin, guides, worktrees, schema, pipelines"},
-		{"update", "Bump every repo's SDK pin with a compiled per-repo verdict"},
-	},
+	SubcommandOrder: []string{"list", "info", "update"},
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 	},

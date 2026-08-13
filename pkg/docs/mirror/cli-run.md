@@ -30,6 +30,10 @@ run to a progress line plus a one-line pass/fail status with
 the run id, surfacing the failing step only on failure; it is
 the default for managed git hooks.
 
+### Subcommands
+
+- `config` -- Print a pipeline's declared Secrets with provenance
+
 ### Arguments
 
 - `<pipeline>` (required) -- Pipeline name registered in .sparkwing/sparkwing.yaml

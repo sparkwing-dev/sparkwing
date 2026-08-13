@@ -9,12 +9,8 @@ import (
 const fakeRegistry = `package main
 
 var cmdRoot = Command{
-	Path: "sparkwing",
-	Subcommands: []SubcommandRef{
-		{"pipeline", "This repo's pipelines"},
-		{"run", "Run a pipeline"},
-		{"configure", "Laptop-local config"},
-	},
+	Path:            "sparkwing",
+	SubcommandOrder: []string{"pipeline", "run", "configure"},
 }
 
 var cmdRun = Command{
@@ -22,16 +18,14 @@ var cmdRun = Command{
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name", Required: true},
 	},
+	SubcommandOrder: []string{"config"},
 }
 
 var cmdRunConfig = Command{Path: "sparkwing run config"}
 
 var cmdPipeline = Command{
-	Path: "sparkwing pipeline",
-	Subcommands: []SubcommandRef{
-		{"list", "List pipelines"},
-		{"hooks", "Git hooks"},
-	},
+	Path:            "sparkwing pipeline",
+	SubcommandOrder: []string{"list", "hooks"},
 }
 
 var cmdPipelineList = Command{Path: "sparkwing pipeline list"}
@@ -39,11 +33,11 @@ var cmdPipelineHooks = Command{Path: "sparkwing pipeline hooks"}
 var cmdPipelineHooksInstall = Command{Path: "sparkwing pipeline hooks install"}
 
 var cmdConfigure = Command{
-	Path: "sparkwing configure",
-	Subcommands: []SubcommandRef{
-		{"xrepo", "Cross-repo registry: list / add / remove"},
-	},
+	Path:            "sparkwing configure",
+	SubcommandOrder: []string{"xrepo"},
 }
+
+var cmdConfigureXrepo = Command{Path: "sparkwing configure xrepo"}
 `
 
 func writeFakeRepo(t *testing.T) string {
@@ -59,7 +53,7 @@ func writeFakeRepo(t *testing.T) string {
 	return root
 }
 
-func TestLoadRegistry_CollectsPathsSubcommandsAndHiddenVerbs(t *testing.T) {
+func TestLoadRegistry_CollectsPathsAndHiddenVerbs(t *testing.T) {
 	root := writeFakeRepo(t)
 	valid, posArgs, err := loadRegistry(root)
 	if err != nil {

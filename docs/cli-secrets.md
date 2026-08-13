@@ -23,7 +23,7 @@ CLI except via 'secrets get'.
 
 - `set` -- Store (or replace) a secret value
 - `get` -- Print a secret's raw value to stdout
-- `list` -- List secret names + metadata (never prints values)
+- `list` -- List secret names + metadata
 - `delete` -- Remove a secret
 
 ## `sparkwing secrets delete`

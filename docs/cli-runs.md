@@ -18,26 +18,26 @@ prune) require a profile; 'jobs logs' supports both.
 
 ### Subcommands
 
-- `submit` -- Queue a local run and return its id immediately; execution outlives your terminal
-- `consumer` -- Inspect or control the resident process that executes submitted runs
-- `list` -- List recent runs with filters (pipeline, status, branch, sha, search, etc.)
-- `status` -- Show a single run's status (with per-step + approval state)
+- `submit` -- Queue a local run and return its id immediately
+- `consumer` -- Inspect or control the process that executes submitted runs
+- `list` -- List recent pipeline runs
+- `status` -- Show one run's status (non-zero exit unless status=success)
 - `summary` -- Aggregated work view: groups, work items, modifiers, annotations
-- `timeline` -- ASCII waterfall of a run's nodes (and steps)
+- `timeline` -- ASCII waterfall of nodes (and optional steps) for a run
 - `wait` -- Block until a run reaches a terminal status
-- `find` -- Find runs matching a git SHA / repo / pipeline filter
+- `find` -- Find runs by git SHA / repo / pipeline filter
 - `grep` -- Search log bodies across recent runs for a substring
-- `logs` -- Print a run's logs (optionally --follow)
+- `logs` -- Print a run's logs
 - `errors` -- Surface the error trail for a failed run
-- `failures` -- List recent failed runs; optional clustering by step
-- `stats` -- Aggregate stats (pass/fail, success %, avg/p95 duration)
-- `last` -- Show the most recent run; --watch tails new runs
-- `tree` -- ASCII tree of a run and every descendant run
+- `failures` -- List recent failed runs, optionally clustered
+- `stats` -- Aggregate run counts, success %, avg + p95 duration
+- `last` -- Print the most recent run
+- `tree` -- Show a run and every descendant run as an ASCII tree
 - `get` -- Emit one run's raw JSON (run + nodes)
 - `receipt` -- Emit a run's audit + cost receipt as JSON
 - `annotations` -- Read or append persistent node + step annotations
-- `approvals` -- List, approve, or deny approval gates
-- `triggers` -- Inspect trigger envelopes that produced runs
+- `approvals` -- List approval gates (pending and history)
+- `triggers` -- Fire, list, or inspect controller triggers
 - `retry` -- Trigger fresh runs copying pipeline + args from old ones
 - `cancel` -- Request cancellation of in-flight runs
 - `prune` -- Delete finished runs older than a threshold, or by id
@@ -54,8 +54,8 @@ without going through the SDK.
 
 ### Subcommands
 
-- `list` -- List annotations on a run (optionally filtered to a node/step)
-- `add` -- Append one annotation to a node or step
+- `list` -- List annotations on a run
+- `add` -- Append an annotation to a node or step
 
 ## `sparkwing runs annotations add`
 
@@ -128,9 +128,9 @@ gate across all runs; with --run returns one run's full history
 
 ### Subcommands
 
-- `list` -- List pending approvals, or one run's history with --run (the default verb)
-- `approve` -- Approve a pending gate: --run <id> --node <id> [--comment ...]
-- `deny` -- Deny a pending gate: --run <id> --node <id> [--comment ...]
+- `list` -- List pending approvals (or one run's history)
+- `approve` -- Approve a pending approval-gate node
+- `deny` -- Deny a pending approval-gate node
 
 ## `sparkwing runs approvals approve`
 
@@ -284,8 +284,8 @@ returns to the queue for the new consumer to re-execute.
 ### Subcommands
 
 - `start` -- Start a consumer for this home if none is running
-- `status` -- Report whether a consumer is resident (exit 1 when not)
-- `stop` -- Stop the resident consumer; queued runs stay queued
+- `status` -- Report whether a consumer is resident
+- `stop` -- Stop the resident consumer
 
 ## `sparkwing runs consumer start`
 

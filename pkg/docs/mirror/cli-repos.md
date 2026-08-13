@@ -27,9 +27,9 @@ with a compiled per-repo verdict.
 
 ### Subcommands
 
-- `list` -- List the fleet (the same as bare 'sparkwing repos')
+- `list` -- List the machine's fleet of sparkwing repos
 - `info` -- Deep dive on one repo: pin, guides, worktrees, schema, pipelines
-- `update` -- Bump every repo's SDK pin with a compiled per-repo verdict
+- `update` -- Bump the fleet's SDK pins with a compiled per-repo verdict
 
 ### Flags
 
