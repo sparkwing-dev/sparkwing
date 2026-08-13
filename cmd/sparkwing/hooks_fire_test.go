@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"strings"
 	"testing"
 
@@ -84,22 +83,19 @@ func TestRenderHooksFire_JSONRoundTripsEveryResult(t *testing.T) {
 	if err := renderHooksFire(&buf, fireResults(), "json"); err != nil {
 		t.Fatalf("renderHooksFire: %v", err)
 	}
-	var got []githooks.FireResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("unmarshal: %v\n%s", err, buf.String())
-	}
+	got := decodeNDJSON[githooks.FireResult](t, buf.String())
 	if len(got) != 4 || got[2].Verdict != githooks.FireBorrowed {
 		t.Errorf("round-tripped = %+v, want the borrowed row preserved", got)
 	}
 }
 
-func TestRenderHooksFire_EmptyFleetEncodesAsAnArray(t *testing.T) {
+func TestRenderHooksFire_EmptyFleetEncodesAsAnEmptyStream(t *testing.T) {
 	var buf bytes.Buffer
 	if err := renderHooksFire(&buf, nil, "json"); err != nil {
 		t.Fatalf("renderHooksFire: %v", err)
 	}
-	if got := strings.TrimSpace(buf.String()); got != "[]" {
-		t.Errorf("output = %q, want []", got)
+	if got := buf.String(); got != "" {
+		t.Errorf("output = %q, want an empty stream", got)
 	}
 }
 

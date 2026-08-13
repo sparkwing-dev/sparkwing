@@ -1,12 +1,13 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	"github.com/sparkwing-dev/sparkwing/internal/pipelinelint"
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
@@ -182,9 +183,9 @@ func filterFindings(findings []pipelinelint.Finding, name, entrypoint string) []
 func renderLintFindings(findings []pipelinelint.Finding, format string) error {
 	switch format {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(findings)
+		// NDJSON: one finding per line. A clean lint is an empty
+		// stream, which is what zero findings looks like in lines.
+		return ndjson.Write(os.Stdout, findings)
 	case "plain":
 		for _, f := range findings {
 			if f.File != "" {
@@ -219,9 +220,8 @@ func printLintTable(findings []pipelinelint.Finding) {
 func printLintRules(format string) error {
 	rules := pipelinelint.Rules()
 	if format == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rules)
+		// NDJSON: one rule per line.
+		return ndjson.Write(os.Stdout, rules)
 	}
 	for i, r := range rules {
 		if i > 0 {

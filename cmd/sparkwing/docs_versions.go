@@ -5,12 +5,13 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
@@ -91,9 +92,8 @@ func runDocsVersions(args []string) error {
 
 	switch strings.ToLower(output) {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rows)
+		// NDJSON: one version per line.
+		return ndjson.Write(os.Stdout, rows)
 	case "plain":
 		for _, r := range rows {
 			fmt.Println(r.Version)

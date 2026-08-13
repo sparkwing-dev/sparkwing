@@ -15,6 +15,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+
 	flag "github.com/spf13/pflag"
 )
 
@@ -147,16 +149,11 @@ func runTokensList(args []string) error {
 	return renderTokensTable(os.Stdout, out.Tokens)
 }
 
-// renderTokensJSON emits the typed list as a top-level JSON array so
-// callers can `jq '.[].scopes'` directly without unwrapping a "tokens"
-// envelope. Always emits []; never null.
+// renderTokensJSON streams the typed list as NDJSON -- one token per
+// line, no "tokens" envelope -- so a caller reads `.scopes` off each
+// line and `head` returns whole tokens. No tokens is an empty stream.
 func renderTokensJSON(w io.Writer, tokens []tokenListItem) error {
-	if tokens == nil {
-		tokens = []tokenListItem{}
-	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(tokens)
+	return ndjson.Write(w, tokens)
 }
 
 func renderTokensTable(w io.Writer, tokens []tokenListItem) error {

@@ -72,9 +72,11 @@ func TestHooksSurvey_UnreadableRegistryReadsNothingLikeAGatedFleet(t *testing.T)
 	}
 }
 
-// -o json is the form a script reads, and `[]` there is the machine-readable
-// spelling of "every repo is fine". An unreadable registry must not print it.
-func TestHooksSurvey_UnreadableRegistryEmitsNoJSONArray(t *testing.T) {
+// -o json is the form a script reads, and a clean stream there is the
+// machine-readable spelling of "every repo is fine". An unreadable
+// registry must not print one -- it exits non-zero having written
+// nothing, so a caller never mistakes silence for an answer.
+func TestHooksSurvey_UnreadableRegistryEmitsNoJSONRecords(t *testing.T) {
 	f := newChainFixture(t)
 	f.asProcessEnv(t)
 	f.corruptRegistry(t)

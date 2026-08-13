@@ -13,6 +13,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
@@ -130,9 +132,8 @@ func runPipelineList(args []string) error {
 	}
 	switch format {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(pipelines)
+		// NDJSON: one pipeline per line, so `head` returns whole records.
+		return ndjson.Write(os.Stdout, pipelines)
 	case "plain":
 		for _, a := range pipelines {
 			fmt.Println(a.Name)
@@ -194,9 +195,8 @@ func runPipelineDiscover(args []string) error {
 	})
 	switch format {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(results)
+		// NDJSON: one scored pipeline per line.
+		return ndjson.Write(os.Stdout, results)
 	case "plain":
 		for _, r := range results {
 			fmt.Println(r.Name)

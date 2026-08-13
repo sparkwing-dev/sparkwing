@@ -16,6 +16,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
+
 	flag "github.com/spf13/pflag"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -174,9 +176,8 @@ func runWebhooksList(args []string) error {
 	}
 
 	if *outputFormat == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rows)
+		// NDJSON: one row per line, so `head` returns whole rows.
+		return ndjson.Write(os.Stdout, rows)
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
@@ -313,9 +314,8 @@ func runWebhooksDeliveries(args []string) error {
 	}
 
 	if *outputFormat == "json" {
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rows)
+		// NDJSON: one row per line, so `head` returns whole rows.
+		return ndjson.Write(os.Stdout, rows)
 	}
 
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)

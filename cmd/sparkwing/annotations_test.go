@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -60,10 +59,7 @@ func TestAnnotationsList_LocalDefaultIsNodeOnly(t *testing.T) {
 			t.Fatalf("runAnnotationsList: %v", err)
 		}
 	})
-	var got []annotationEntry
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("decode: %v\n%s", err, out)
-	}
+	got := decodeNDJSON[annotationEntry](t, out)
 	if len(got) != 2 {
 		t.Fatalf("got %d entries, want 2 node-level entries; out=%s", len(got), out)
 	}
@@ -88,10 +84,7 @@ func TestAnnotationsList_StepsFlagIncludesStepRows(t *testing.T) {
 			t.Fatalf("runAnnotationsList: %v", err)
 		}
 	})
-	var got []annotationEntry
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("decode: %v\n%s", err, out)
-	}
+	got := decodeNDJSON[annotationEntry](t, out)
 	var hasStep bool
 	for _, e := range got {
 		if e.StepID == "canary" && e.Message == "rolled to 5%" {
@@ -114,10 +107,7 @@ func TestAnnotationsList_NodeFilter(t *testing.T) {
 			t.Fatalf("runAnnotationsList: %v", err)
 		}
 	})
-	var got []annotationEntry
-	if err := json.Unmarshal([]byte(out), &got); err != nil {
-		t.Fatalf("decode: %v\n%s", err, out)
-	}
+	got := decodeNDJSON[annotationEntry](t, out)
 	if len(got) != 1 || got[0].NodeID != "deploy" || got[0].StepID != "canary" {
 		t.Errorf("node filter failed: %+v", got)
 	}

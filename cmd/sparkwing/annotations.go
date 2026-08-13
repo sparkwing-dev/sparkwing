@@ -8,12 +8,13 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"text/tabwriter"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
 
@@ -216,10 +217,10 @@ func renderAnnotationsTable(w io.Writer, entries []annotationEntry) error {
 	return tw.Flush()
 }
 
+// writeAnnotationsJSON streams the listing as NDJSON: one annotation
+// per line, so `head` returns whole annotations.
 func writeAnnotationsJSON(w io.Writer, entries []annotationEntry) error {
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	return enc.Encode(entries)
+	return ndjson.Write(w, entries)
 }
 
 // runAnnotationsAdd implements `sparkwing runs annotations add`.

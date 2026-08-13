@@ -8,7 +8,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +16,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	flag "github.com/spf13/pflag"
 
@@ -242,9 +243,8 @@ func resolveArtifactStoreURL(_, urlFlag string) (string, error) {
 func renderPublishResults(rows []publishedBinary, format string) error {
 	switch format {
 	case "json":
-		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(rows)
+		// NDJSON: one published binary per line.
+		return ndjson.Write(os.Stdout, rows)
 	case "plain":
 		for _, r := range rows {
 			fmt.Println(r.UploadedTo)
