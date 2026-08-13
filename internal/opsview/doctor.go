@@ -378,7 +378,7 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 	report := DoctorReport{DryRun: dryRun}
 
 	report.Daemon = probeDaemon(ctx, home)
-	daemonLive := liveDaemonRuns(ctx, home)
+	daemonLive := liveDaemonRuns(ctx, home, selfVersion)
 
 	boxHolders, err := boxslot.Holders(p.BoxSlotDir())
 	if err != nil {
@@ -409,7 +409,7 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 	if err := diagnoseDanglingRunDirs(ctx, st, p, dryRun, &report); err != nil {
 		return report, err
 	}
-	if err := diagnosePoisonedProfiles(ctx, st, home, &report); err != nil {
+	if err := diagnosePoisonedProfiles(ctx, st, home, selfVersion, &report); err != nil {
 		return report, err
 	}
 	diagnoseDaemonHealth(ctx, home, selfVersion, &report)
@@ -512,12 +512,12 @@ func scratchBuild(version string) bool {
 // the remedy discards learned measurements, so it is named, not applied. The
 // ceiling comes from the live daemon; with none running, the raw core count
 // stands in (a higher bar, so absence of the daemon never over-flags).
-func diagnosePoisonedProfiles(ctx context.Context, st *store.Store, home string, report *DoctorReport) error {
+func diagnosePoisonedProfiles(ctx context.Context, st *store.Store, home, selfVersion string, report *DoctorReport) error {
 	profiles, err := st.ListPipelineProfiles(ctx, "")
 	if err != nil {
 		return err
 	}
-	grantable := grantableCores(ctx, home)
+	grantable := grantableCores(ctx, home, selfVersion)
 	for _, prof := range profiles {
 		if prof.NodeID != "" || !capacity.FloorPoisoned(&prof, grantable) {
 			continue
@@ -535,8 +535,8 @@ func diagnosePoisonedProfiles(ctx context.Context, st *store.Store, home string,
 // grantableCores is the largest CPU charge the local daemon grants a single
 // run on an idle box (capacity minus its reserve), else the machine's core
 // count when no daemon answers.
-func grantableCores(ctx context.Context, home string) float64 {
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home})
+func grantableCores(ctx context.Context, home, selfVersion string) float64 {
+	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home, Version: selfVersion})
 	if err == nil {
 		for _, r := range qs.Resources {
 			if r.Key == "cores" && r.Capacity > r.Reserved {
@@ -628,7 +628,7 @@ func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report 
 	}
 	diagnoseLockedOutRepos(info.ProtocolMajor, info.BinaryVersion, wingwire.ReleasedProtocolFloors(), report)
 
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home})
+	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home, Version: selfVersion})
 	if err != nil {
 		return
 	}
@@ -773,9 +773,9 @@ func rejectionExplanation(cause string) string {
 // liveDaemonRuns returns the set of run ids the local admission daemon is
 // holding or queueing, so orphan detection never finalizes a run the daemon
 // still tracks. An absent daemon means no live leases, so the set is empty.
-func liveDaemonRuns(ctx context.Context, home string) map[string]struct{} {
+func liveDaemonRuns(ctx context.Context, home, selfVersion string) map[string]struct{} {
 	live := map[string]struct{}{}
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home})
+	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home, Version: selfVersion})
 	if err != nil {
 		return live
 	}

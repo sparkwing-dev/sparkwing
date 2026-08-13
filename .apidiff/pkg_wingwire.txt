@@ -167,6 +167,8 @@ type Hello struct {
 	BinaryVersion string
 
 	HealthProbe bool
+
+	HolderLiveness bool
 }
 type HelloAck struct {
 	ProtocolMajor int
@@ -227,6 +229,12 @@ type HostResources struct {
 	MemoryBytes int64
 }
 const LeaseTokenEnv = "SPARKWING_LEASE_TOKEN"
+type LivenessAck struct {
+	Nonce uint64
+}
+type LivenessProbe struct {
+	Nonce uint64
+}
 type Message interface {
 	wireType() MessageType
 }
@@ -344,6 +352,8 @@ const TypeGuardComplete MessageType = "guard_complete"
 const TypeGuardCompleteAck MessageType = "guard_complete_ack"
 const TypeHello MessageType = "hello"
 const TypeHelloAck MessageType = "hello_ack"
+const TypeLivenessAck MessageType = "liveness_ack"
+const TypeLivenessProbe MessageType = "liveness_probe"
 const TypeQueueState MessageType = "queue_state"
 const TypeQueued MessageType = "queued"
 const TypeReattach MessageType = "reattach"

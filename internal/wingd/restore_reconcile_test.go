@@ -51,11 +51,11 @@ func holderRunIDs(t *testing.T, home string) map[string]bool {
 	return ids
 }
 
-// TestStartup_ShedsRestoredLeaseExceedingBudget reproduces a field wedge:
-// a persisted lease outlived its run and exceeds the operator's budget,
-// and the daemon must shed it at restore and serve, not exit before
-// serving and wedge host-wide admission behind one leaked lease.
-func TestStartup_ShedsRestoredLeaseExceedingBudget(t *testing.T) {
+// TestStartup_PreservesRestoredLeasesAboveSmallerBudget pins restart safety:
+// the daemon cannot know whether a restored holder is leaked or still running,
+// so a smaller startup budget must tighten new admission without silently
+// dropping arbitration for any existing run.
+func TestStartup_PreservesRestoredLeasesAboveSmallerBudget(t *testing.T) {
 	home := shortHome(t)
 	writeLedgerState(t, home, marshalState(t, admission.Snapshot{
 		TotalMilliCores:     14000,
@@ -75,21 +75,26 @@ func TestStartup_ShedsRestoredLeaseExceedingBudget(t *testing.T) {
 	}
 	startDaemon(t, wingd.Config{
 		Home:        home,
+		Version:     "v1",
 		Sampler:     newFakeSampler(14, 24<<30),
 		Budget:      budget,
 		GraceWindow: time.Minute,
 		Logf:        log.logf,
 	})
 
-	if !log.contains("shed lease lease-2") {
-		t.Errorf("expected a shed log line for lease-2, got:\n%s", log.joined())
+	if log.contains("shed lease") {
+		t.Errorf("restored lease was shed under the smaller budget:\n%s", log.joined())
 	}
 	ids := holderRunIDs(t, home)
-	if !ids["run-keep"] {
-		t.Errorf("run-keep lost its restorable lease; holders: %v", ids)
+	if !ids["run-keep"] || !ids["run-leak"] {
+		t.Errorf("restored run lost arbitration under the smaller budget; holders: %v", ids)
 	}
-	if ids["run-leak"] {
-		t.Errorf("run-leak's over-budget lease survived restore; holders: %v", ids)
+	waiter := ensure(t, home, "v1")
+	positions, _ := acquireAsync(waiter, coreReq("run-new", 1))
+	waitForQueue(t, positions)
+	qs := waitForWaiter(t, home, "run-new")
+	if len(qs.Holders) != 2 {
+		t.Fatalf("new work displaced restored arbitration: holders=%+v", qs.Holders)
 	}
 }
 
@@ -113,6 +118,7 @@ func TestStartup_SoftOvercommittedStateRestoresAndServes(t *testing.T) {
 	log := &logCapture{}
 	startDaemon(t, wingd.Config{
 		Home:        home,
+		Version:     "v1",
 		Sampler:     newFakeSampler(14, 24<<30),
 		GraceWindow: time.Minute,
 		Logf:        log.logf,

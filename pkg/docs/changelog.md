@@ -48,6 +48,16 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **wingd:** harden daemon lifecycle arbitration across stalled holders,
+  restarts, build skew, and scratch homes. Contended holders now prove control
+  plane liveness before keeping capacity; restart preserves every durable lease
+  even when the current budget shrank and gives clients a wider reattach
+  window; same-major builds fail closed unless their identities establish a
+  safe ordering; and stale temporary socket directories are reclaimed without
+  leaving a dead discovery record under the Sparkwing home.
+
 ### Docs
 
 - **sdk-reference:** split the subpackages onto their own pages

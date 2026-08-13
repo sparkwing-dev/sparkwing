@@ -225,7 +225,7 @@ func runRunsCancel(ctx context.Context, args []string) error {
 	var results []runResult
 	remaining := ids
 	if *on == "" {
-		results, remaining = cancelLocalRunsViaDaemon(ctx, *home, ids)
+		results, remaining = cancelLocalRunsViaDaemon(ctx, *home, Version, ids)
 		// A submitted run that no consumer has claimed has no process for
 		// the daemon to hold, so the daemon reports nothing and the id
 		// falls through to here. Cancelling it is a store transaction, not
@@ -302,9 +302,9 @@ func terminalCancelNote(status string) string {
 // the dashboard-free recovery path: a laptop with no dashboard and no
 // profile still cancels a wedged local run cleanly. Cluster runs and
 // already-finished runs are not known to the daemon and fall through.
-func cancelLocalRunsViaDaemon(ctx context.Context, home string, ids []string) (done []runResult, remaining []string) {
+func cancelLocalRunsViaDaemon(ctx context.Context, home, version string, ids []string) (done []runResult, remaining []string) {
 	for _, id := range ids {
-		found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home}, id)
+		found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home, Version: version}, id)
 		if err == nil && found {
 			done = append(done, runResult{RunID: id, OK: true})
 			continue

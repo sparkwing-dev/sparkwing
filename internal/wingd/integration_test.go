@@ -1449,7 +1449,7 @@ func TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead(t *testing.T) {
 		}
 	}
 
-	qs, err := client.Query(context.Background(), client.Options{Home: home})
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1.0.0"})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -1765,7 +1765,7 @@ func TestRepeatedInvalidRequestsSurfaceInQueueStateWindow(t *testing.T) {
 		}
 	}
 
-	qs, err := client.Query(context.Background(), client.Options{Home: home})
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1.0.0"})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -2053,7 +2053,7 @@ func TestBackfillStream_ReconnectedOlderWaiterUsesOnlyReservedSpareCapacity(t *t
 	olderPositions, olderResult := acquireAsync(reconnectedClient, olderReq)
 	waitForQueue(t, olderPositions)
 
-	qs, err := client.Query(context.Background(), client.Options{Home: home})
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1.0.0"})
 	if err != nil {
 		t.Fatalf("query after reconnect: %v", err)
 	}
@@ -2081,7 +2081,7 @@ func TestBackfillStream_ReconnectedOlderWaiterUsesOnlyReservedSpareCapacity(t *t
 	if secondNewer.err != nil || secondNewer.lease == nil {
 		t.Fatalf("safe second backfill = lease=%v err=%v, want grant", secondNewer.lease, secondNewer.err)
 	}
-	qs, err = client.Query(context.Background(), client.Options{Home: home})
+	qs, err = client.Query(context.Background(), client.Options{Home: home, Version: "v1.0.0"})
 	if err != nil {
 		t.Fatalf("query protected stream: %v", err)
 	}
@@ -2111,7 +2111,7 @@ func TestBackfillStream_ReconnectedOlderWaiterUsesOnlyReservedSpareCapacity(t *t
 		t.Fatalf("release safe second backfill: %v", err)
 	}
 
-	qs, err = client.Query(context.Background(), client.Options{Home: home})
+	qs, err = client.Query(context.Background(), client.Options{Home: home, Version: "v1.0.0"})
 	if err != nil {
 		t.Fatalf("query after older departure: %v", err)
 	}

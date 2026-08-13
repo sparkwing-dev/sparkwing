@@ -17,6 +17,7 @@ func spawnClient(t *testing.T, home string, succ *successor) *client.Client {
 	t.Helper()
 	cl, err := client.EnsureDaemon(context.Background(), client.Options{
 		Home:        home,
+		Version:     "v1.0.0",
 		Spawn:       succ.spawn,
 		DialTimeout: time.Second,
 		Backoff:     20 * time.Millisecond,

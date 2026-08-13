@@ -29,7 +29,7 @@ func shortDaemonHome(t *testing.T) string {
 
 func startDaemonForQueue(t *testing.T, home string) {
 	t.Helper()
-	d, err := wingd.New(wingd.Config{Home: home, HeadroomFraction: -1})
+	d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0", HeadroomFraction: -1})
 	if err != nil {
 		t.Fatalf("new daemon: %v", err)
 	}
@@ -51,7 +51,7 @@ func startDaemonForQueue(t *testing.T, home string) {
 func TestQueueHandler_NoDaemonReturnsEmptyQueue(t *testing.T) {
 	home := shortDaemonHome(t)
 	rec := httptest.NewRecorder()
-	queueHandler(home).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/queue", nil))
+	queueHandler(home, "v1.0.0").ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/queue", nil))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 with no daemon running", rec.Code)
@@ -72,6 +72,7 @@ func TestQueueHandler_ProxiesDaemonQueueState(t *testing.T) {
 	ctx := context.Background()
 	cl, err := wingdclient.EnsureDaemon(ctx, wingdclient.Options{
 		Home:        home,
+		Version:     "v1.0.0",
 		Spawn:       func(string, string) error { return errors.New("daemon should already be running") },
 		DialTimeout: time.Second,
 		Backoff:     10 * time.Millisecond,
@@ -92,7 +93,7 @@ func TestQueueHandler_ProxiesDaemonQueueState(t *testing.T) {
 	t.Cleanup(func() { _ = lease.Release() })
 
 	rec := httptest.NewRecorder()
-	queueHandler(home).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/queue", nil))
+	queueHandler(home, "v1.0.0").ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/queue", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}

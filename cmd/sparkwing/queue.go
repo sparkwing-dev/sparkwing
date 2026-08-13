@@ -63,9 +63,7 @@ func runQueue(args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// safety: empty Version keeps this read-only view from ever draining
-	// or replacing a running daemon during the version handshake.
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home})
+	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home, Version: Version})
 	legacy, _ := liveLegacyBoxSlots(*home)
 
 	if err != nil {

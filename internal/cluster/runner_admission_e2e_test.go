@@ -116,7 +116,7 @@ func TestRunnerAdmissionE2E(t *testing.T) {
 	ctx := context.Background()
 
 	rv := reserve{cores: 1}
-	provider := newHeadroomProvider(home, rv)
+	provider := newHeadroomProvider(home, "v1", rv)
 
 	idle := provider(ctx)
 	if idle == nil {

@@ -101,8 +101,7 @@ func (cl *Client) readQueueState() (qs wingwire.QueueState, terminal, transient 
 // the caller must not render as an empty queue: that state is unknown, not
 // idle.
 func Query(ctx context.Context, opts Options) (wingwire.QueueState, error) {
-	noSpawn := opts
-	noSpawn.Spawn = func(string, string) error { return ErrNoDaemon }
+	noSpawn := queryOptions(opts)
 	cl, err := EnsureDaemon(ctx, noSpawn)
 	if err != nil {
 		if errors.Is(err, ErrDaemonUnreachable) {
@@ -115,4 +114,10 @@ func Query(ctx context.Context, opts Options) (wingwire.QueueState, error) {
 	}
 	defer cl.Close()
 	return cl.QueueState(ctx)
+}
+
+func queryOptions(opts Options) Options {
+	opts.Spawn = func(string, string) error { return ErrNoDaemon }
+	opts.NoTakeover = true
+	return opts
 }

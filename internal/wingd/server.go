@@ -209,7 +209,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return ErrNotElected
 	}
 	defer d.releaseLock()
-	defer func() { _ = os.Remove(d.layout.sock) }()
+	defer func() {
+		_ = os.Remove(d.layout.sock)
+		_ = os.Remove(filepath.Dir(d.layout.sock))
+	}()
 
 	d.startedAt = d.now()
 	if err := d.initLedger(); err != nil {
@@ -394,37 +397,35 @@ func (d *Daemon) initLedger() error {
 }
 
 // restoreLedger rebuilds the ledger from snap and fits it to the current
-// budget. When the budget cannot hold every restored grant, it sheds the
-// newest grants until the rest fit, so one oversized or leaked lease
-// costs at most itself, never host-wide admission. The returned leases
-// are the ones still in the ledger, eligible for reclaim. A snapshot
-// that cannot be restored at all returns an error; the caller
-// quarantines the state file and serves with a fresh ledger.
+// budget without revoking restored authority. The daemon cannot distinguish
+// a leaked grant from a still-running client during startup, so totals are
+// temporarily floored at existing grants and queued requests while headroom
+// tightens new admission to the current budget. Holders then drain or expire
+// through the normal reattach grace path.
 func (d *Daemon) restoreLedger(snap admission.Snapshot) (*admission.Ledger, []admission.LeaseState, error) {
 	lg, err := admission.Restore(snap, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("restore ledger: %w", err)
 	}
-	kept := snap.Leases
-	for {
-		err := lg.ResizeTotals(d.budgetCores, d.budgetMemory)
-		if err == nil {
-			return lg, kept, nil
-		}
-		if len(kept) == 0 {
-			return nil, nil, fmt.Errorf("resize restored ledger: %w", err)
-		}
-		shed := kept[len(kept)-1]
-		kept = kept[:len(kept)-1]
-		for _, m := range shed.Members {
-			if _, rerr := lg.Release(shed.ID, m); rerr != nil {
-				return nil, nil, fmt.Errorf("shed restored lease %s: %w", shed.ID, rerr)
-			}
-		}
-		d.cfg.logf("restore: shed lease %s (run %s, %.1f cores, %s) to fit budget %.1f cores, %s",
-			shed.ID, shed.RequestID, float64(shed.MilliCores)/1000.0, humanBytesLog(shed.MemoryBytes),
-			d.budgetCores, humanBytesLog(d.budgetMemory))
+	neededMilliCores := int64(0)
+	neededMemory := uint64(0)
+	for _, lease := range snap.Leases {
+		neededMilliCores += lease.MilliCores
+		neededMemory += lease.MemoryBytes
 	}
+	for _, waiter := range snap.Waiters {
+		neededMilliCores = max(neededMilliCores, waiter.MilliCores)
+		neededMemory = max(neededMemory, waiter.MemoryBytes)
+	}
+	applyCores := max(d.budgetCores, float64(neededMilliCores)/1000.0)
+	applyMemory := max(d.budgetMemory, neededMemory)
+	if err := lg.ResizeTotals(applyCores, applyMemory); err != nil {
+		return nil, nil, fmt.Errorf("resize restored ledger: %w", err)
+	}
+	if _, err := lg.SetHeadroom(d.budgetCores, d.budgetMemory); err != nil {
+		return nil, nil, fmt.Errorf("cap restored ledger headroom: %w", err)
+	}
+	return lg, snap.Leases, nil
 }
 
 // discardState quarantines an unusable state file and logs the reason,
@@ -516,6 +517,7 @@ func (d *Daemon) serveConn(c *conn) {
 	c.protocolMajor = wingwire.ServedMajor(hello.ProtocolMajor)
 	served := c.protocolMajor
 	c.healthProbe = hello.HealthProbe
+	c.holderLiveness = hello.HolderLiveness
 	c.handshaked = true
 	// Activity is recorded here rather than at accept, because only the
 	// hello says whether the peer is a health probe -- and a probe must
@@ -568,6 +570,8 @@ func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 		d.handleRelease(c, m)
 	case *wingwire.GuardComplete:
 		d.handleGuardComplete(c, m)
+	case *wingwire.LivenessAck:
+		d.handleLivenessAck(c, m)
 	case *wingwire.QueueState:
 		d.handleQueueState(c)
 	case *wingwire.CancelLease:
@@ -581,6 +585,16 @@ func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
 		return true
 	}
 	return false
+}
+
+func (d *Daemon) handleLivenessAck(c *conn, ack *wingwire.LivenessAck) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if c.role == roleHolder && c.livenessNonce == ack.Nonce {
+		c.livenessNonce = 0
+		c.stalled = false
+		c.lowSince = d.now()
+	}
 }
 
 func chargedResources(r wingwire.HostResources) wingwire.HostResources {

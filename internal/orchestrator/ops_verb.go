@@ -80,7 +80,7 @@ func runOpsQueue(args []string) error {
 	format := resolveOpsFormat(getOut())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home})
+	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home, Version: sparkwingModuleVersion()})
 	if err != nil {
 		if errors.Is(err, wingdclient.ErrDaemonUnreachable) {
 			if rerr := opsview.RenderUnreachableDaemon(os.Stdout, format, err); rerr != nil {
@@ -106,7 +106,7 @@ func runOpsStats(args []string) error {
 	format := resolveOpsFormat(getOut())
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home})
+	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: *home, Version: sparkwingModuleVersion()})
 	if err != nil {
 		if errors.Is(err, wingdclient.ErrNoDaemon) {
 			return opsview.RenderStats(os.Stdout, wingwire.QueueState{}, format)
@@ -124,7 +124,7 @@ func runOpsStatsReset(args []string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := wingdclient.ResetStats(ctx, wingdclient.Options{Home: *home}); err != nil {
+	if err := wingdclient.ResetStats(ctx, wingdclient.Options{Home: *home, Version: sparkwingModuleVersion()}); err != nil {
 		if errors.Is(err, wingdclient.ErrNoDaemon) {
 			fmt.Fprintln(os.Stdout, "no admission daemon running; nothing to reset")
 			return nil

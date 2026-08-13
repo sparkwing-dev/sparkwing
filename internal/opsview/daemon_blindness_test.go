@@ -26,6 +26,7 @@ func renderLocalQueueFor(t *testing.T, home, format string) string {
 	defer cancel()
 	qs, err := wingdclient.Query(ctx, wingdclient.Options{
 		Home:        home,
+		Version:     "v1.0.0",
 		DialTimeout: 500 * time.Millisecond,
 		Backoff:     20 * time.Millisecond,
 	})

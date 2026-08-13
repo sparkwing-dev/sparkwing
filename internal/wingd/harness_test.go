@@ -65,6 +65,9 @@ type testDaemon struct {
 // serving. It fails the test if the daemon exits before becoming ready.
 func startDaemon(t *testing.T, cfg wingd.Config) *testDaemon {
 	t.Helper()
+	if cfg.Version == "" {
+		cfg.Version = "v1.0.0"
+	}
 	if cfg.Sampler == nil {
 		cfg.Sampler = newFakeSampler(64, 64<<30)
 	}
@@ -107,6 +110,9 @@ func errSpawn(string, string) error {
 // fire because the daemon is up.
 func ensure(t *testing.T, home, version string) *client.Client {
 	t.Helper()
+	if version == "" {
+		version = "v1.0.0"
+	}
 	cl, err := client.EnsureDaemon(context.Background(), client.Options{
 		Home:        home,
 		Version:     version,

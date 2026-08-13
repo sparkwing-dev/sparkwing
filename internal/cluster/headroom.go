@@ -105,9 +105,9 @@ func grantable(r wingwire.ResourceState) float64 {
 // daemon at home and advertises its grantable capacity minus rv. It
 // returns nil (advertise nothing) when no daemon is reachable, so a runner
 // whose box has no local daemon simply claims without a headroom figure.
-func newHeadroomProvider(home string, rv reserve) headroomProvider {
+func newHeadroomProvider(home, version string, rv reserve) headroomProvider {
 	return func(ctx context.Context) *client.Headroom {
-		qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home})
+		qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home, Version: version})
 		if err != nil {
 			return nil
 		}

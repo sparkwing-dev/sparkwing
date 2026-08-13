@@ -120,6 +120,7 @@ func TestQueueStateDoesNotSpinAgainstAFailingDaemon(t *testing.T) {
 
 	cl, err := EnsureDaemon(context.Background(), Options{
 		Home:        home,
+		Version:     "v9.9.9",
 		Spawn:       func(string, string) error { return errors.New("no spawn in this test") },
 		DialTimeout: 200 * time.Millisecond,
 	})
@@ -148,6 +149,7 @@ func TestQueueStateGivesUpRatherThanRetryingForever(t *testing.T) {
 
 	cl, err := EnsureDaemon(context.Background(), Options{
 		Home:        home,
+		Version:     "v9.9.9",
 		Spawn:       func(string, string) error { return errors.New("no spawn in this test") },
 		DialTimeout: 200 * time.Millisecond,
 	})

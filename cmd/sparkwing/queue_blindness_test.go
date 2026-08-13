@@ -39,6 +39,9 @@ const queueBlindnessWait = 10 * time.Second
 // the OS length limit, which t.TempDir cannot promise on macOS.
 func queueHome(t *testing.T) string {
 	t.Helper()
+	previousVersion := Version
+	Version = "v1.0.0"
+	t.Cleanup(func() { Version = previousVersion })
 	dir, err := os.MkdirTemp("/tmp", "swq")
 	if err != nil {
 		t.Fatalf("temp home: %v", err)

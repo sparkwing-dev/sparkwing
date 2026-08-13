@@ -72,7 +72,8 @@ type conn struct {
 	// probe may only read queue state; dispatch drops it for anything
 	// else, so the accounting exemption can never extend to admission.
 	// Guarded by the owning Daemon's mutex.
-	healthProbe bool
+	healthProbe    bool
+	holderLiveness bool
 
 	// handshaked records that this connection's hello was read, which is
 	// when it stops being an anonymous socket and starts being a client.
@@ -125,6 +126,10 @@ type conn struct {
 	// that has held for the stall window.
 	stalled  bool
 	lowSince time.Time
+	// livenessNonce is non-zero while an idle holder owes an acknowledgement.
+	// It is guarded by the daemon mutex and incremented for each challenge.
+	livenessNonce uint64
+	livenessSeq   uint64
 
 	// expectedP99MS and sampleCount carry the run's measured duration p99
 	// and how many runs back it, from the admission request. The contention

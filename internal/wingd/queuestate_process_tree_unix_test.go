@@ -42,7 +42,7 @@ func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
-		qs, err := client.Query(context.Background(), client.Options{Home: home})
+		qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1.0.0"})
 		if err != nil {
 			t.Fatalf("queue state: %v", err)
 		}
