@@ -79,20 +79,20 @@ code change to unlock.
   subsequent line paying the full retry cost, which took one 84ms
   pipeline to 43.9s. Set `SPARKWING_LOGS_DROP_POLICY=warn` to keep the
   old lossy behavior. See
-  [migration](docs/migrations/v0.33.0.md#lost-log-lines-fail-the-run).
+  [migration](docs/migrations/v0.34.0.md#lost-log-lines-fail-the-run).
 - **cli (Breaking):** `runs list`, `runs status`, and `runs logs` read
   through the project's `defaults.profile` when no `--profile` is
   given, which is the store `sparkwing run` writes to. They used to
   read the local SQLite store regardless, so on a machine sharing a
   bucket `runs list` came back empty. See
-  [migration](docs/migrations/v0.33.0.md#read-commands-follow-the-projects-default-profile).
+  [migration](docs/migrations/v0.34.0.md#read-commands-follow-the-projects-default-profile).
 - **config (Breaking):** A backend spec must carry the fields its type
   needs: a `bucket` for `s3` / `gcs` / `azure-blob`, a `path` for
   `filesystem`, a `url` or `url_source` for `postgres` / `mysql`, a
   name for `controller`. `{type: s3}` with no bucket used to load
   clean and render as `s3://`. `sqlite` with no path is still valid --
   the resolver fills in the host's own state database. See
-  [migration](docs/migrations/v0.33.0.md#backend-specs-declare-their-required-fields).
+  [migration](docs/migrations/v0.34.0.md#backend-specs-declare-their-required-fields).
 
 ### Added
 
