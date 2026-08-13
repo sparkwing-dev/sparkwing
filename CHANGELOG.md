@@ -48,6 +48,26 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+- **cli (Breaking):** `pipeline list -o json` is an index. It carries
+  `name`, `short`, `entrypoint` and `triggers` -- what a caller picks a
+  pipeline by -- where it used to carry every pipeline's full help text,
+  args, examples, env vars and risk labels as well. `pipeline describe
+  --name <n>` was already the read verb for those and still answers with
+  all of them. A pipeline declaring no `short` now summarizes as the
+  first line of its help, so nothing loses its line. `pipeline discover`
+  streams the same index plus its score. See
+  [migration](docs/migrations/v0.33.0.md#pipeline-list-is-an-index).
+- **cli (Breaking):** `pipeline sparks list -o json` is a stream: a
+  `kind: summary` line carrying `sparkwing_dir` and the library count,
+  then one `kind: library` line per library. It was a pretty-printed
+  object wrapping a `libraries` array, so `head -1` returned `{` and a
+  truncating reader got nothing. Single-object verbs are unchanged, as
+  in v0.32.0. See
+  [migration](docs/migrations/v0.33.0.md#pipeline-sparks-list-is-a-stream).
+- **cli:** `configure profiles list` takes `-o pretty|json|plain`, which
+  it had no machine-readable mode at all before. JSON is one profile per
+  line; the token is redacted in every mode, because a machine-readable
+  listing is the shape most likely to be piped into a log.
 
 ## [v0.32.1] - 2026-08-13
 ### Changed

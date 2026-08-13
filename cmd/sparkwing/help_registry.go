@@ -1916,11 +1916,16 @@ profile registered, it's auto-set as the default.`,
 var cmdProfilesList = Command{
 	Path:     "sparkwing configure profiles list",
 	Synopsis: "Print every registered profile",
-	Description: `Prints a table of profile name, controller URL, logs URL, token
-(redacted), and gitcache URL. The default profile is marked with
-a leading '*'.`,
+	Description: `Prints a table of profile name, controller URL, logs URL, and
+token. JSON is one profile per line; the token is redacted in
+every mode.`,
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
 	Examples: []Example{
 		{"List profiles", "sparkwing configure profiles list"},
+		{"Agent-readable record", "sparkwing configure profiles list -o json"},
 	},
 }
 

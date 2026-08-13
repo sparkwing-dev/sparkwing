@@ -13,6 +13,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
 )
 
@@ -90,30 +91,66 @@ func runProfilesAdd(args []string) error {
 	return nil
 }
 
+// profileIndex is one line of `configure profiles list`. The token is redacted
+// here and not anywhere downstream: a machine-readable listing is the shape most
+// likely to be piped into a log, and a secret that leaves the process once has
+// left it.
+type profileIndex struct {
+	Name       string `json:"name"`
+	Controller string `json:"controller,omitempty"`
+	Logs       string `json:"logs,omitempty"`
+	Token      string `json:"token,omitempty"`
+}
+
 func runProfilesList(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesList.Path, flag.ContinueOnError)
+	var output string
+	fs.StringVarP(&output, "output", "o", "", "pretty | json | plain")
 	if err := parseAndCheck(cmdProfilesList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
+	format, err := resolveOutputFormat(output, cmdProfilesList.Path)
+	if err != nil {
+		return err
+	}
 	cfg, path, err := loadCfg()
 	if err != nil {
 		return err
 	}
+	// A machine reading the listing gets an empty stream and exit 0: no
+	// profiles is an answer, and the advice belongs on stderr where it cannot
+	// be mistaken for a record.
 	if len(cfg.Profiles) == 0 {
 		fmt.Fprintln(os.Stderr, "no profiles configured")
 		fmt.Fprintf(os.Stderr, "expected at %s -- register one with `sparkwing profiles add`\n", path)
 		return nil
 	}
-	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tCONTROLLER\tLOGS\tTOKEN")
+	index := make([]profileIndex, 0, len(cfg.Profiles))
 	for _, name := range cfg.Names() {
 		p := cfg.Profiles[name]
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n",
-			name, emptyDash(p.ControllerURL()), profile.SpecString(p.Logs),
-			redactToken(p.ControllerToken()))
+		index = append(index, profileIndex{
+			Name:       name,
+			Controller: p.ControllerURL(),
+			Logs:       profile.SpecString(p.Logs),
+			Token:      redactToken(p.ControllerToken()),
+		})
+	}
+	switch format {
+	case "json":
+		return ndjson.Write(os.Stdout, index)
+	case "plain":
+		for _, p := range index {
+			fmt.Println(p.Name)
+		}
+		return nil
+	}
+	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(tw, "NAME\tCONTROLLER\tLOGS\tTOKEN")
+	for _, p := range index {
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", p.Name, emptyDash(p.Controller), p.Logs, p.Token)
 	}
 	_ = tw.Flush()
 	return nil

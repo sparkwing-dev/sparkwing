@@ -50,6 +50,29 @@ type Pipeline struct {
 	RisksBySteps []sparkwing.DescribeStepRisks `json:"risks_by_step,omitempty"`
 }
 
+// PipelineIndex is one line of `sparkwing pipeline list`: what a caller needs
+// to pick a pipeline and nothing else. The detail — help, args, examples, env
+// vars, risks — is what `pipeline describe` carries (house rule 13). Shipping
+// it in the listing made a five-pipeline catalog 2.7KB, most of it help text
+// nobody had asked for yet.
+type PipelineIndex struct {
+	Name       string   `json:"name"`
+	Short      string   `json:"short,omitempty"`
+	Entrypoint string   `json:"entrypoint,omitempty"`
+	Triggers   []string `json:"triggers,omitempty"`
+}
+
+// index projects a pipeline down to what a chooser reads. A pipeline with no
+// short falls back to the first line of its help, so dropping the help text
+// from the listing never leaves a line with nothing on it.
+func (p Pipeline) index() PipelineIndex {
+	short := p.Short
+	if short == "" {
+		short, _, _ = strings.Cut(p.Help, "\n")
+	}
+	return PipelineIndex{Name: p.Name, Short: short, Entrypoint: p.Entrypoint, Triggers: p.Triggers}
+}
+
 // runPipeline dispatches `sparkwing pipeline <verb> [...]`.
 func runPipeline(args []string) error {
 	if handleParentHelp(cmdPipeline, args) {
@@ -132,8 +155,13 @@ func runPipelineList(args []string) error {
 	}
 	switch format {
 	case "json":
-		// NDJSON: one pipeline per line, so `head` returns whole records.
-		return ndjson.Write(os.Stdout, pipelines)
+		// NDJSON: one pipeline per line, so `head` returns whole records, and
+		// an index rather than the catalog, so each one is a line and not a page.
+		index := make([]PipelineIndex, 0, len(pipelines))
+		for _, a := range pipelines {
+			index = append(index, a.index())
+		}
+		return ndjson.Write(os.Stdout, index)
 	case "plain":
 		for _, a := range pipelines {
 			fmt.Println(a.Name)
@@ -178,13 +206,13 @@ func runPipelineDiscover(args []string) error {
 	}
 	tokens := strings.Fields(strings.ToLower(query))
 	type scored struct {
-		Pipeline
+		PipelineIndex
 		Score int `json:"score"`
 	}
 	var results []scored
 	for _, a := range pipelines {
 		if s := scorePipeline(a, tokens); s > 0 {
-			results = append(results, scored{Pipeline: a, Score: s})
+			results = append(results, scored{PipelineIndex: a.index(), Score: s})
 		}
 	}
 	sort.SliceStable(results, func(i, j int) bool {
@@ -217,11 +245,7 @@ func runPipelineDiscover(args []string) error {
 	nameWidth = min(nameWidth, widthCap)
 	fmt.Printf("query: %s (%d match%s)\n\n", query, len(results), plural(len(results)))
 	for _, r := range results {
-		short := r.Short
-		if short == "" {
-			short = r.Help
-		}
-		fmt.Printf("  %-*s  %s\n", nameWidth, r.Name, short)
+		fmt.Printf("  %-*s  %s\n", nameWidth, r.Name, r.Short)
 	}
 	return nil
 }

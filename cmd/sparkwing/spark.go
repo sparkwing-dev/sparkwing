@@ -75,6 +75,13 @@ type sparkListEntry struct {
 	Error    string `json:"error,omitempty"`
 }
 
+// sparkListLine is one library as a stream record, discriminated like every
+// other line so a consumer reads `kind` rather than counting positions.
+type sparkListLine struct {
+	Kind string `json:"kind"`
+	sparkListEntry
+}
+
 func runSparksList(args []string) error {
 	fs := flag.NewFlagSet(cmdSparksList.Path, flag.ContinueOnError)
 	dir := fs.String("sparkwing-dir", "", "path to .sparkwing/ (default: <cwd>/.sparkwing)")
@@ -116,12 +123,20 @@ func runSparksList(args []string) error {
 	}
 	switch format {
 	case "json":
+		// A summary line carrying the fact that is not a library's, then one
+		// library per line, so `head` returns whole records (house rule 12).
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(map[string]any{
-			"sparkwing_dir": sparkwingDir,
-			"libraries":     entries,
-		})
+		if err := enc.Encode(map[string]any{
+			"kind": "summary", "sparkwing_dir": sparkwingDir, "library_count": len(entries),
+		}); err != nil {
+			return err
+		}
+		for _, e := range entries {
+			if err := enc.Encode(sparkListLine{Kind: "library", sparkListEntry: e}); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "plain":
 		for _, e := range entries {
 			ver := e.Resolved
