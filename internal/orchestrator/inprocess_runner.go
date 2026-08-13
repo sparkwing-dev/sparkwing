@@ -401,7 +401,7 @@ done:
 		payload, _ := json.Marshal(map[string]any{"count": count, "reason": reason})
 		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "logs_drop", payload)
 		if logsDropIsFatal() {
-			dropped := fmt.Errorf("%d log line(s) lost: the log store stayed unreachable past the append retry budget: %s", count, reason)
+			dropped := droppedLogsError(count, reason)
 			text := boundedFailureText(ctx, runID, node.ID(), dropped)
 			emitNodeEnd(sparkwing.Failed, text)
 			fctx := failureWriteCtx(ctx, dropped)
@@ -509,6 +509,35 @@ func nodeLogFatal(nlog NodeLog) error {
 // behavior, where loss surfaces only as a WARN line and the
 // logs_drop event.
 const LogsDropPolicyEnvVar = "SPARKWING_LOGS_DROP_POLICY"
+
+// droppedLogsError renders the failure an operator reads when log
+// lines were lost.
+//
+// The store's own error goes last, under a label, because it is the
+// least actionable part: an unreachable bucket answers with an SDK
+// sentence about PutObject attempts and endpoint resolution, and
+// leading with that is the same failure this ticket's AWS-region gap
+// objects to. What the operator needs first is how many lines went
+// missing, then what to look at, then how to opt out.
+func droppedLogsError(count int, reason string) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d log line(s) lost: the log store stayed unreachable past the append retry budget", count)
+	b.WriteString("\n  check: the logs backend this run named in invocation.backends")
+	b.WriteString("\n         (for s3: the bucket, AWS_REGION, credentials, SPARKWING_S3_ENDPOINT)")
+	// A 404 is not an outage, so the generic advice sends the operator
+	// to check a store that is answering fine. It means nothing serves
+	// log appends at that URL -- the shape a controller-only deployment
+	// has, because sparkwing-logs is a separate service.
+	if strings.Contains(reason, "404") {
+		b.WriteString("\n  note:  the store answered 404, so nothing serves log appends at that URL.")
+		b.WriteString("\n         A controller does not; sparkwing-logs is a separate service.")
+	}
+	fmt.Fprintf(&b, "\n  keep such runs green with %s=warn", LogsDropPolicyEnvVar)
+	if reason != "" {
+		fmt.Fprintf(&b, "\n  cause: %s", reason)
+	}
+	return errors.New(b.String())
+}
 
 // logsDropIsFatal reports whether lost log lines should fail the node.
 // Any value other than "warn" -- including an unset or misspelled one
