@@ -18,6 +18,7 @@ type Spec struct {
 	Binaries *Spec
 }
 func (s *Spec) ResolvedToken() string
+func (s *Spec) ValidateFields(surface string) error
 func (s *Spec) ValidateSecrets() error
 type Surfaces struct {
 	Secrets *Spec

@@ -160,6 +160,7 @@ type Event struct {
 func ExpectedSchemaVersion() int
 const FailureAgentLost = "agent_lost"
 const FailureLogsAuth = "logs_auth"
+const FailureLogsDropped = "logs_dropped"
 const FailureOOMKilled = "oom_killed"
 const FailureQueueTimeout = "queue_timeout"
 const FailureRunnerLeaseExpired = "runner_lease_expired"

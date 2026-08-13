@@ -274,6 +274,7 @@ was never a gate to arm.
 | `--repo DIR` | Repo directory (default: discovered via nearest .sparkwing/) |
 | `--fleet` | Install into every registered repo instead of one |
 | `--no-prove` | Claim core.hooksPath without running the gate first |
+| `--profile NAME` | Pin the hook's runs to this storage profile (default: whatever the project's config selects) |
 
 ### Examples
 
@@ -286,6 +287,9 @@ sparkwing pipeline hooks install --repo /path/to/repo
 
 # Arm every registered repo
 sparkwing pipeline hooks install --fleet
+
+# Pin the gate's runs to one store
+sparkwing pipeline hooks install --profile bucket
 ```
 
 ## `sparkwing pipeline hooks status`

@@ -163,15 +163,24 @@ sparkwing configure profiles duplicate --src prod --dst staging-prod
 
 Print every registered profile
 
-Prints a table of profile name, controller URL, logs URL, token
-(redacted), and gitcache URL. The default profile is marked with
-a leading '*'.
+Prints a table of profile name, controller URL, logs URL, and
+token. JSON is one profile per line; the token is redacted in
+every mode.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
 
 ### Examples
 
 ```sh
 # List profiles
 sparkwing configure profiles list
+
+# Agent-readable record
+sparkwing configure profiles list -o json
 ```
 
 ## `sparkwing configure profiles remove`
