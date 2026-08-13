@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.33.0] - 2026-08-13
 - **controller (Breaking):** On Darwin, the first host CPU sample after start
   reports `CPUMeasured=false` instead of a process-lifetime average. Later
   samples derive utilization from the change in cumulative process CPU time,
