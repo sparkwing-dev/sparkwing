@@ -136,8 +136,21 @@ func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, float64, bool,
 	if !ok {
 		return stat, 0, false, nil
 	}
+	// WHY: cumulative CPU time is only a utilization once differenced against a
+	// prior reading, so the previous snapshot and the wall time since it are
+	// carried on the sampler. The first tick has nothing to difference and
+	// reports unmeasured; callers already handle that (CPUMeasured=false).
+	now := time.Now()
+	previous, previousAt := p.darwinPrev, p.darwinPrevAt
+	p.darwinPrev, p.darwinPrevAt = snapshot, now
+	elapsedSeconds := 0.0
+	if !previousAt.IsZero() {
+		elapsedSeconds = now.Sub(previousAt).Seconds()
+	}
 	host, hostMeasured, owned, ownedMeasured := darwinCPUFromSnapshot(
 		snapshot,
+		previous,
+		elapsedSeconds,
 		roots,
 		stat.TotalCores,
 	)
@@ -149,7 +162,7 @@ func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, float64, bool,
 func darwinProcessCPUSnapshot() (map[int]darwinCPUProcess, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	output, err := exec.CommandContext(ctx, "ps", "-Ao", "pid=,ppid=,pcpu=").Output()
+	output, err := exec.CommandContext(ctx, "ps", "-Ao", "pid=,ppid=,time=").Output()
 	if err != nil {
 		return nil, false
 	}

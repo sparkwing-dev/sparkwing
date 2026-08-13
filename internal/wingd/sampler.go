@@ -68,6 +68,11 @@ type hostSamplerOnly struct {
 // average rather than what it is doing now.
 type platformSampler struct {
 	cpu cpuTracker
+	// darwinPrev is the previous cumulative-CPU-time snapshot and darwinPrevAt
+	// when it was taken. darwin has no per-process rate counter, so utilization
+	// is the difference between two readings over the wall time between them.
+	darwinPrev   map[int]darwinCPUProcess
+	darwinPrevAt time.Time
 }
 
 // Sample returns a live [HostStat] for the host it runs on. The first call
@@ -199,7 +204,37 @@ func ownedCPUFromProcesses(
 
 type darwinCPUProcess struct {
 	parentPID int
-	fraction  float64
+	// cpuSeconds is CUMULATIVE CPU time since the process started, never a
+	// utilization. Two readings and the wall time between them give the
+	// utilization; one reading alone gives a lifetime average that can never
+	// fall when the machine goes idle.
+	cpuSeconds float64
+}
+
+// parseDarwinCPUTime reads the `[[dd-]hh:]mm:ss[.ff]` form `ps -o time=` prints
+// into seconds.
+func parseDarwinCPUTime(field string) (float64, bool) {
+	days := 0.0
+	if dash := strings.IndexByte(field, '-'); dash >= 0 {
+		parsed, err := strconv.ParseFloat(field[:dash], 64)
+		if err != nil {
+			return 0, false
+		}
+		days, field = parsed, field[dash+1:]
+	}
+	parts := strings.Split(field, ":")
+	if len(parts) < 2 || len(parts) > 3 {
+		return 0, false
+	}
+	total := 0.0
+	for _, part := range parts {
+		value, err := strconv.ParseFloat(part, 64)
+		if err != nil || value < 0 {
+			return 0, false
+		}
+		total = total*60 + value
+	}
+	return days*86400 + total, true
 }
 
 func parseDarwinCPUSnapshot(output string) (map[int]darwinCPUProcess, bool) {
@@ -211,28 +246,50 @@ func parseDarwinCPUSnapshot(output string) (map[int]darwinCPUProcess, bool) {
 		}
 		processID, pidErr := strconv.Atoi(fields[0])
 		parentPID, parentErr := strconv.Atoi(fields[1])
-		percent, cpuErr := strconv.ParseFloat(fields[2], 64)
-		if pidErr != nil || parentErr != nil || cpuErr != nil || processID <= 0 || parentPID < 0 || percent < 0 {
+		cpuSeconds, cpuOK := parseDarwinCPUTime(fields[2])
+		if pidErr != nil || parentErr != nil || !cpuOK || processID <= 0 || parentPID < 0 {
 			continue
 		}
-		processes[processID] = darwinCPUProcess{parentPID: parentPID, fraction: percent / 100}
+		processes[processID] = darwinCPUProcess{parentPID: parentPID, cpuSeconds: cpuSeconds}
 	}
 	return processes, len(processes) > 0
 }
 
+// darwinCPUFromSnapshot differences two cumulative-CPU-time snapshots over the
+// wall time between them, so the result is what the machine is doing NOW. With
+// no previous snapshot it reports unmeasured rather than guessing: the first
+// tick has nothing to difference against, and a lifetime average there would
+// book cores against work that finished long ago.
 func darwinCPUFromSnapshot(
 	processes map[int]darwinCPUProcess,
+	previous map[int]darwinCPUProcess,
+	elapsedSeconds float64,
 	roots []int,
 	totalCores float64,
 ) (float64, bool, float64, bool) {
-	if len(processes) == 0 {
+	if len(processes) == 0 || len(previous) == 0 || elapsedSeconds <= 0 {
 		return 0, false, 0, false
 	}
-	var host float64
+	fractions := make(map[int]float64, len(processes))
 	children := map[int][]int{}
+	var host float64
 	for processID, process := range processes {
-		host += process.fraction
 		children[process.parentPID] = append(children[process.parentPID], processID)
+		prior, seen := previous[processID]
+		if !seen {
+			// WHY: a process born since the last tick has no baseline, and
+			// crediting its whole lifetime would import CPU spent before this
+			// interval — the very error this function exists to remove.
+			continue
+		}
+		delta := process.cpuSeconds - prior.cpuSeconds
+		if delta <= 0 {
+			// A reused PID reads backwards; it carries no usable interval.
+			continue
+		}
+		fraction := delta / elapsedSeconds
+		fractions[processID] = fraction
+		host += fraction
 	}
 	host = clampCores(host, totalCores)
 	if len(roots) == 0 {
@@ -249,7 +306,7 @@ func darwinCPUFromSnapshot(
 	}
 	var owned float64
 	for processID := range ownedIDs {
-		owned += processes[processID].fraction
+		owned += fractions[processID]
 	}
 	return host, true, clampCores(owned, totalCores), true
 }
