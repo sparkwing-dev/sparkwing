@@ -23,7 +23,7 @@ controller, not the local config. Secrets are top-level
 
 - `init` -- Set up ~/.config/sparkwing/ and report laptop-level config status
 - `profiles` -- Manage connection profiles for remote controllers
-- `xrepo` -- Cross-repo registry: list / add / remove / prune local checkouts
+- `xrepo` -- Manage the laptop-local repo registry
 
 ### Examples
 
@@ -97,8 +97,8 @@ exist on other commands; profiles are the only config surface.
 
 ### Subcommands
 
-- `add` -- Register a new profile
-- `list` -- Print every profile; * marks the default
+- `add` -- Register a new connection profile
+- `list` -- Print every registered profile
 - `show` -- Print one profile's full config
 - `use` -- Set the default profile
 - `remove` -- Delete a profile
@@ -304,4 +304,32 @@ default status.
 ```sh
 # Switch the default to prod
 sparkwing configure profiles use --name prod
+```
+
+## `sparkwing configure xrepo`
+
+Manage the laptop-local repo registry
+
+The registry maps pipeline names to local checkouts so
+cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
+annotations. Auto-populated when you run 'sparkwing run <pipeline>'
+in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
+disable).
+
+Subverbs: list (show every registered repo and the pipelines it
+provides), add (register a checkout explicitly), remove (drop one by
+path or basename), prune (drop repos whose .sparkwing/ is gone). Run
+'sparkwing configure xrepo --help' for their flags.
+
+### Examples
+
+```sh
+# Register the current checkout
+sparkwing configure xrepo add
+
+# Show the fleet the registry reaches
+sparkwing configure xrepo list
+
+# Drop entries whose checkout is gone
+sparkwing configure xrepo prune
 ```

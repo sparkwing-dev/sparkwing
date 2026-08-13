@@ -31,15 +31,15 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 
 - `list` -- Enumerate every pipeline with metadata
 - `describe` -- Print one pipeline's full metadata
-- `discover` -- Fuzzy search over names, descriptions, tags
-- `new` -- Scaffold a new pipeline (auto-bootstraps .sparkwing/ if missing)
-- `explain` -- Render the pipeline's Plan DAG without running
+- `discover` -- Fuzzy search over pipeline names + descriptions + tags
+- `new` -- Scaffold a new Go pipeline
+- `explain` -- Render the pipeline's Plan DAG without dispatching any jobs
 - `lint` -- Check pipeline source for idiomatic anti-patterns (enforced gate)
-- `plan` -- Render the runtime-resolved DAG (would-run/would-skip) without running
+- `plan` -- Render the runtime-resolved DAG without dispatching any jobs
 - `run` -- Invoke a pipeline (canonical form of `sparkwing run <name>`)
 - `trigger` -- Submit a pipeline to a profile's controller (remote execution)
-- `hooks` -- Git pre-commit / pre-push / post-commit hooks: install / uninstall / status
-- `sparks` -- Manage sparks libraries: list / add / remove / lint / resolve / update / warmup
+- `hooks` -- Install / uninstall git pre-commit + pre-push + post-commit hooks
+- `sparks` -- Manage sparks libraries declared in .sparkwing/sparks.yaml
 
 ### Examples
 
@@ -189,7 +189,7 @@ them with a warning.
 
 ### Subcommands
 
-- `install` -- Write pre-commit / pre-push / post-commit hooks for the enclosing repo
+- `install` -- Install pre-commit / pre-push / post-commit git hooks from sparkwing.yaml triggers
 - `uninstall` -- Remove sparkwing-managed git hooks
 - `status` -- Report declared, installed, and missing sparkwing hooks
 - `survey` -- Report which registered repos git actually runs a gate for
@@ -699,13 +699,13 @@ sparks.yaml shape, resolution rules, warmup).
 
 ### Subcommands
 
-- `list` -- Show declared libraries and resolved versions
+- `list` -- Show declared sparks libraries and their resolved versions
 - `lint` -- Validate a spark.json library manifest
 - `resolve` -- Resolve versions and materialize the overlay modfile
 - `update` -- Re-resolve one or all libraries
 - `add` -- Add a library to sparks.yaml
 - `remove` -- Remove a library from sparks.yaml
-- `warmup` -- Pre-compile pipeline binaries and upload to gitcache
+- `warmup` -- Pre-compile pipeline binaries after a sparks release
 - `inflate` -- Copy a spark library's source into this repo so you can edit it
 
 ### Examples

@@ -15,12 +15,12 @@ never in pipeline source. Pipelines stay production-clean.
 
 ### Subcommands
 
-- `run` -- Run a pipeline with --pause-before / --pause-after / --pause-on-failure
+- `run` -- Run a pipeline with ephemeral pause directives
 - `release` -- Resume a paused node
 - `attach` -- kubectl exec into a paused node's pod (cluster mode)
 - `env` -- Print a paused node's env + workdir + claim holder
-- `rerun` -- Reproduce a node's dispatch frame and drop into a shell
-- `replay` -- Headlessly re-execute a single node from a prior run
+- `rerun` -- Reproduce a node's dispatch frame in an interactive shell
+- `replay` -- Re-execute a single node headlessly using its dispatch snapshot
 
 ### Examples
 

@@ -24,7 +24,7 @@ latest) for shell pipelines.
 
 ### Subcommands
 
-- `update` -- Self-update CLI binary or bump SDK pin (requires --cli or --sdk)
+- `update` -- Self-update the CLI binary (--cli) or bump this project's SDK pin (--sdk)
 - `hold` -- Show, set, or clear the operator ceiling on CLI upgrades
 
 ### Flags
