@@ -33,7 +33,7 @@ func (artifactAggregatePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spa
 			return os.WriteFile(p, []byte(content), 0o644)
 		}).
 			Outputs(rel).
-			Cache(func(_ context.Context) sparkwing.CacheKey { return sparkwing.Key(id, "v1") })
+			Memoize(func(_ context.Context) sparkwing.CacheKey { return sparkwing.Key(id, "v1") })
 	}
 	s1 := producer("shard-1", "shards/1.txt", "one")
 	s2 := producer("shard-2", "shards/2.txt", "two")
