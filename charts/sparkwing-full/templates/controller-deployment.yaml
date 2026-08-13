@@ -55,6 +55,18 @@ spec:
             - {{ printf "--pool-namespace=%s" .Values.controller.pool.namespace | quote }}
             {{- end }}
             {{- end }}
+            {{- /*
+              Announced so a client with no logs: surface of its own -- a
+              laptop running `sparkwing run --profile prod` -- posts node
+              log lines to the logs service. The controller serves no
+              /api/v1/logs route, and without this a client falls back to
+              the controller's URL and every append 404s. The in-cluster
+              runner is unaffected: its Deployment passes --logs directly.
+            */}}
+            {{- $logsURL := include "sparkwing-full.web.logsURL" . }}
+            {{- if $logsURL }}
+            - {{ printf "--logs-url=%s" $logsURL | quote }}
+            {{- end }}
           env:
             # SPARKWING_HOME on a writable mount: the orchestrator's
             # DefaultPaths() mkdir's this at startup, and runAsUser
