@@ -119,22 +119,30 @@ func effectiveSourceDetail(chain profile.Chain, cfgPath string) string {
 	switch chain.Source {
 	case profile.ChainSourceFlag:
 		return fmt.Sprintf("flag (--profile %s)", chain.Selected)
+	case profile.ChainSourceProjectDefault:
+		return fmt.Sprintf("no --profile; project defaults.profile: %s", chain.Selected)
 	case profile.ChainSourceNone:
-		return "no --profile (project defaults apply)"
+		return "no --profile, and the project names no default (built-in local defaults apply)"
 	default:
 		return fmt.Sprintf("%s (%s)", chain.Source, displayConfigPath(cfgPath))
 	}
 }
 
-// chainRows reports the resolution. With the flag-only model there's
-// at most one selected level and no alternatives considered.
+// chainRows reports the resolution: one selected level, and no
+// alternatives, because each level either selects a profile outright
+// or hands the question to the next one.
 func chainRows(chain profile.Chain) []profileConsideredJSON {
-	if chain.Source == profile.ChainSourceFlag {
+	switch chain.Source {
+	case profile.ChainSourceFlag:
 		return []profileConsideredJSON{
 			{Source: string(profile.ChainSourceFlag), Name: chain.Selected, Reason: "selected"},
 		}
+	case profile.ChainSourceProjectDefault:
+		return []profileConsideredJSON{
+			{Source: string(profile.ChainSourceProjectDefault), Name: chain.Selected, Reason: "selected"},
+		}
 	}
 	return []profileConsideredJSON{
-		{Source: string(profile.ChainSourceNone), Name: "", Reason: "no --profile passed; project defaults apply"},
+		{Source: string(profile.ChainSourceNone), Name: "", Reason: "no --profile passed and the project names no default"},
 	}
 }

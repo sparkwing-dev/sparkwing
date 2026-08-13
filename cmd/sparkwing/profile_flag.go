@@ -9,9 +9,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
+	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
 // resolveProfileChain loads profiles.yaml and resolves NAME. Returns
@@ -29,15 +31,95 @@ func resolveProfileChain(name string) (*profile.Profile, profile.Chain, string, 
 	if err != nil {
 		return nil, profile.Chain{}, path, err
 	}
+	if name == "" {
+		pp, defName, ok, perr := projectDefaultProfile()
+		if perr != nil {
+			return nil, profile.Chain{}, path, perr
+		}
+		if ok {
+			return pp, profile.Chain{Selected: defName, Source: profile.ChainSourceProjectDefault}, path, nil
+		}
+	}
 	p, chain, err := profile.Resolve(name, cfg)
 	if err != nil {
 		if errors.Is(err, profile.ErrProfileNotFound) {
-			return nil, profile.Chain{}, path, fmt.Errorf("profile %q not found in %s.\nAvailable profiles: %s",
+			pp, ok, perr := projectProfile(name)
+			if perr != nil {
+				return nil, profile.Chain{}, path, perr
+			}
+			if ok {
+				return pp, profile.Chain{Selected: name, Source: profile.ChainSourceFlag}, path, nil
+			}
+			return nil, profile.Chain{}, path, fmt.Errorf(
+				"profile %q not found in %s, nor in this project's sparkwing.yaml profiles.\nAvailable profiles: %s",
 				name, displayConfigPath(path), strings.Join(cfg.Names(), ", "))
 		}
 		return nil, profile.Chain{}, path, err
 	}
 	return p, chain, path, nil
+}
+
+// projectProfile looks NAME up in the project's own profiles: block,
+// which is the second namespace --profile addresses. Any failure to
+// find the project at all is reported as "no such project profile":
+// the caller is already on its not-found path, and a working directory
+// outside a project is one of the ordinary ways to reach it.
+func projectProfile(name string) (*profile.Profile, bool, error) {
+	cfg, ok, err := loadProjectConfig()
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok || cfg.Profiles == nil {
+		return nil, false, nil
+	}
+	p, ok := cfg.Profiles[name]
+	if !ok || p == nil {
+		return nil, false, nil
+	}
+	return p, true, nil
+}
+
+// projectDefaultProfile resolves the project's defaults.profile: the
+// selection `sparkwing run` makes when no --profile is passed.
+//
+// The read commands consult it for the same reason they honour
+// --profile: a run whose state went to the project's default store and
+// a `runs status` that reads the local one disagree about where the
+// run is, and the operator has no way to ask which is right.
+func projectDefaultProfile() (*profile.Profile, string, bool, error) {
+	cfg, ok, err := loadProjectConfig()
+	if err != nil {
+		return nil, "", false, err
+	}
+	if !ok || cfg.Defaults.Profile == "" || cfg.Profiles == nil {
+		return nil, "", false, nil
+	}
+	p, ok := cfg.Profiles[cfg.Defaults.Profile]
+	if !ok || p == nil {
+		return nil, "", false, nil
+	}
+	return p, cfg.Defaults.Profile, true, nil
+}
+
+// loadProjectConfig reads the project's sparkwing.yaml. A cwd outside
+// any project reports false with no error -- "the project selects
+// nothing" is the right answer there. A project whose config will not
+// load returns the error rather than the same false, because a profile
+// silently missing because of a typo three lines away is the failure
+// this whole resolution path keeps producing.
+func loadProjectConfig() (*projectconfig.Config, bool, error) {
+	dir, err := findSparkwingDir()
+	if err != nil {
+		return nil, false, nil
+	}
+	cfg, err := projectconfig.Load(filepath.Join(dir, projectconfig.Filename))
+	if err != nil {
+		return nil, false, err
+	}
+	if cfg == nil {
+		return nil, false, nil
+	}
+	return cfg, true, nil
 }
 
 // resolveProfileFlag is the connection-side use of resolveProfileChain:

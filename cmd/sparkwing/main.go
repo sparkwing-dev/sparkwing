@@ -455,7 +455,7 @@ func runJobs(args []string) error {
 		byPipeline := fs.Bool("by-pipeline", false, "pivot into one row per pipeline with a status sparkline of the last N runs")
 		sparkline := fs.Int("sparkline", 30, "length of the sparkline when --by-pipeline is set")
 		style := fs.String("style", "ascii", "sparkline glyph style: ascii|block|dot")
-		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
 			return err
 		}
@@ -548,7 +548,7 @@ func runJobs(args []string) error {
 		outFmt := fs.StringP("output", "o", "", "output format: json|table|plain (default: table)")
 		follow := fs.BoolP("follow", "f", false, "poll until the run reaches a terminal state")
 		steps := fs.Bool("steps", false, "render every step on every node in plain output")
-		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		exitZero := fs.Bool("exit-zero", false,
 			"return exit code 0 even when the run failed/cancelled (opt out of the scriptable exit contract)")
 		if err := checkRetiredWhereFlags(args[1:], nil); err != nil {
@@ -587,7 +587,7 @@ func runJobs(args []string) error {
 		node := fs.String("node", "", "limit output to one node id")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 		follow := fs.BoolP("follow", "f", false, "tail the log(s) until the run terminates")
-		profileName := fs.String("profile", "", "read against the named storage profile from ~/.config/sparkwing/profiles.yaml")
+		profileName := fs.String("profile", "", "read against the named storage profile (~/.config/sparkwing/profiles.yaml, then the project's profiles: block; default: the project's defaults.profile)")
 		tail := fs.Int("tail", 0, "print only the last N lines (server-side in cluster mode)")
 		head := fs.Int("head", 0, "print only the first N lines (server-side in cluster mode)")
 		lines := fs.String("lines", "", "1-indexed inclusive line range A:B (server-side in cluster mode)")
