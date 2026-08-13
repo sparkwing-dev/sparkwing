@@ -1424,7 +1424,7 @@ rendered with each parameter's default.
 	},
 	Examples: []Example{
 		{"Browse them", "sparkwing examples"},
-		{"Read one", "sparkwing examples --name canary-deploy-k8s --body"},
+		{"Read one", "sparkwing examples --name container-deploy-ecs-fargate --body"},
 		{"Usually you want this instead", "sparkwing docs search -q \"ecs fargate\""},
 	},
 }

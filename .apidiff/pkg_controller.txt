@@ -84,11 +84,14 @@ func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
+func (s *Server) WithLogsURL(url string) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server
 func (s *Server) WithReconcileHook(fn func(context.Context) error) *Server
 func (s *Server) WithSecretsCipher(c Cipher) *Server
 type ServicesResponse struct {
 	CachePod string
+
+	Logs string
 }
 type TrendPoint struct {
 	Bucket    string

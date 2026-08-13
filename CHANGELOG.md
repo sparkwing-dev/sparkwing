@@ -48,6 +48,18 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+- **templates:** the scaffolding registry drops `go-test-build-deploy-k8s`
+  and `canary-deploy-k8s`, leaving 37. Both branched on
+  `SPARKWING_KIND_CLUSTER` to load the image they had just built into a
+  local cluster, and sparks-core removed kind support from `docker`,
+  `kube`, `deploy` and `rollback`. The branch still compiled, so
+  `template-verify` kept passing them while a scaffolded pipeline built
+  an image, never got it to a cluster, and deployed something stale. On
+  AWS, `gke-deploy-gar-kubectl` is the kubectl-apply template to start
+  from; for a canary, write the steps into `docker-deploy-ecr-eks`'s
+  deploy node. `sparkwing examples --name` now points at
+  `container-deploy-ecs-fargate` in its own help, since the name it
+  showed no longer resolves.
 - **cli (Breaking):** `pipeline list -o json` is an index. It carries
   `name`, `short`, `entrypoint` and `triggers` -- what a caller picks a
   pipeline by -- where it used to carry every pipeline's full help text,
