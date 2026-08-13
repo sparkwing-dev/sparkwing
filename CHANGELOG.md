@@ -60,7 +60,7 @@ code change to unlock.
   the opposite (skipping the node instead of restoring a directory); the
   `actions/cache` equivalent is `.CacheDir()`. No alias: every call site is a
   compile error until updated. See
-  [migration guide](docs/migrations/_unreleased.md#cache-becomes-memoize).
+  [migration guide](docs/migrations/v0.32.1.md#cache-becomes-memoize).
 
 ### Fixed
 
@@ -95,7 +95,7 @@ code change to unlock.
   get`, `runs receipt`, `pipeline describe`, `queue`, `doctor`,
   `version`, `info`) are unchanged, as are `pretty`, `plain`, and
   `markdown`. See
-  [migration guide](docs/migrations/_unreleased.md#list-output-is-ndjson)
+  [migration guide](docs/migrations/v0.32.0.md#list-output-is-ndjson)
   for the full command list.
 - **cli (Breaking):** `sparkwing commands -o json` emits index fields
   only. Each record is now `path`, `synopsis`, and `subcommand_count`
@@ -113,7 +113,7 @@ code change to unlock.
   the listing, now as a documented decision rather than an accident of
   the filter; `--include-hidden` lists them marked `"hidden": true`.
   See
-  [migration guide](docs/migrations/_unreleased.md#commands--o-json-is-an-index)
+  [migration guide](docs/migrations/v0.32.0.md#commands--o-json-is-an-index)
   for before/after records.
 
 ### Fixed
