@@ -4,14 +4,12 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
-	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -213,8 +211,7 @@ func TestRunLocal_MirrorsStateToLocalShadow(t *testing.T) {
 		t.Fatalf("controller store: %v", err)
 	}
 	t.Cleanup(func() { _ = ctrlStore.Close() })
-	srv := httptest.NewServer(controller.New(ctrlStore, nil).Handler())
-	t.Cleanup(srv.Close)
+	srv := NewControllerServer(t, ctrlStore, nil)
 
 	paths := Paths{Root: t.TempDir()}
 	if err := paths.EnsureRoot(); err != nil {

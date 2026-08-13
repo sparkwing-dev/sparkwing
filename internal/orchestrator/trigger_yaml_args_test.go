@@ -7,7 +7,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +15,6 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -133,7 +131,7 @@ func newTriggerWorkerRig(t *testing.T) *triggerWorkerRig {
 	t.Cleanup(func() { _ = st.Close() })
 
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
-	srv := httptest.NewServer(controller.New(st, quiet).Handler())
+	srv := orchestrator.NewControllerServer(t, st, quiet)
 	t.Cleanup(srv.Close)
 
 	httpClient := &http.Client{Timeout: 30 * time.Second}

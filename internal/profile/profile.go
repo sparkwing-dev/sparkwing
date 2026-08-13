@@ -201,12 +201,40 @@ func Load(path string) (*Config, error) {
 	for name, p := range cfg.Profiles {
 		if p == nil {
 			cfg.Profiles[name] = &Profile{Name: name}
-		} else {
-			p.Name = name
-			p.InheritControllerDefaults()
+			continue
+		}
+		p.Name = name
+		p.InheritControllerDefaults()
+		if err := p.validateSurfaceFields(); err != nil {
+			return nil, fmt.Errorf("%s: profile %q: %w", path, name, err)
 		}
 	}
 	return &cfg, nil
+}
+
+// validateSurfaceFields checks the fields each declared surface's type
+// cannot work without.
+//
+// Only the declared surfaces are checked, never the bundle: unlike a
+// project profile, a user profile may legitimately declare none of them
+// and let its controller imply all three. What it may not do is declare
+// `{type: s3}` with no bucket, which used to load clean and render as
+// `s3://`.
+func (p *Profile) validateSurfaceFields() error {
+	for surface, spec := range map[string]*backends.Spec{
+		"secrets": p.Secrets,
+		"state":   p.State,
+		"cache":   p.Cache,
+		"logs":    p.Logs,
+	} {
+		if err := spec.ValidateFields(surface); err != nil {
+			return err
+		}
+	}
+	if p.Cache != nil && p.Cache.Binaries != nil {
+		return p.Cache.Binaries.ValidateFields("cache.binaries")
+	}
+	return nil
 }
 
 // Save writes cfg to path atomically (write tmp, rename). Mode 0600
