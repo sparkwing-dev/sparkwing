@@ -746,7 +746,7 @@ func missingHooksStep(info Info) (InfoNextStep, bool) {
 }
 
 var infoForAgents = []InfoNextStep{
-	{Command: "sparkwing commands", Purpose: "one-line index of every verb (-o json for full records)"},
+	{Command: "sparkwing commands", Purpose: "one-line index of every verb (-o json for the same index, parseable)"},
 	{Command: "sparkwing info --json", Purpose: "machine-readable copy of this card (alias: -o json)"},
 	{Command: "sparkwing info --for-agent", Purpose: "current discovery context for one agent wake"},
 	{Command: "sparkwing pipeline list --json", Purpose: "this repo's pipelines as JSON"},

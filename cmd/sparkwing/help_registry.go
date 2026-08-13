@@ -52,7 +52,7 @@ for agent-facing discovery.`,
 		{"configure", "Laptop-local config"},
 		{"debug", "Interactive run debugging"},
 		{"docs", "Embedded user docs (offline)"},
-		{"commands", "Full CLI surface as JSON (agent self-discovery)"},
+		{"commands", "Index of every command: one path and synopsis per line"},
 		{"completion", "Shell completion script"},
 	},
 	Examples: []Example{
