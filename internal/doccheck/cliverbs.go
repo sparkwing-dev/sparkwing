@@ -19,15 +19,6 @@ var registryPathRE = regexp.MustCompile(`Path:\s*"(sparkwing[^"]*)"`)
 // as a value, so a bare word there is data, not a typo'd verb.
 var posArgsFieldRE = regexp.MustCompile(`^\s*PosArgs:`)
 
-// subcommandRefRE captures a SubcommandRef's leaf name (`{"xrepo",
-// "..."}`). SubcommandRefs enumerate a group's children; some children
-// (xrepo, whose own subcommands are handled in their handler) have no
-// dedicated Path literal, so the ref is the only registry record that
-// the group exists. The leaf name is always a bare lowercase word, which
-// distinguishes these from Example entries (a capitalized description
-// string) and FlagSpec/PosArg entries (`{Name: ...}`).
-var subcommandRefRE = regexp.MustCompile(`^\s*\{"([a-z][a-z0-9-]*)",\s*"`)
-
 // hiddenTopLevel are verbs the CLI dispatches but deliberately keeps out
 // of the help surface: the per-node execution entrypoints that the
 // runner and worker spawn as child processes. Architecture/internals docs
@@ -120,9 +111,15 @@ func checkCLIVerbs(contentDir, repoRoot string) bool {
 }
 
 // loadRegistry reads the help registry and returns the set of valid
-// command paths (Path literals, SubcommandRef children, and the hidden
-// execution verbs) plus the subset of paths that accept a positional
-// argument.
+// command paths (Path literals plus the hidden execution verbs) and
+// the subset of paths that accept a positional argument.
+//
+// Path literals are the whole set. This used to also scrape the
+// help-display subcommand list, because `configure xrepo` was named
+// there and nowhere else -- a group the CLI dispatched but never
+// registered. That command has its own Path now, so a doc verb
+// resolves against the registry alone and a group cannot become
+// checkable by being mentioned.
 func loadRegistry(repoRoot string) (valid, posArgs map[string]bool, err error) {
 	data, err := os.ReadFile(filepath.Join(repoRoot, "cmd", "sparkwing", "help_registry.go"))
 	if err != nil {
@@ -143,9 +140,6 @@ func loadRegistry(repoRoot string) (valid, posArgs map[string]bool, err error) {
 		if posArgsFieldRE.MatchString(line) {
 			posArgs[lastPath] = true
 			continue
-		}
-		if m := subcommandRefRE.FindStringSubmatch(line); m != nil {
-			valid[lastPath+" "+m[1]] = true
 		}
 	}
 	if len(valid) == 0 {
