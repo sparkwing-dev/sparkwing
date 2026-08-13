@@ -93,10 +93,29 @@ func (q *QuietRenderer) writeStart(rec sparkwing.LogRecord) {
 	}
 	runID, _ := rec.Attrs["run_id"].(string)
 	line := q.color("▶", ansiBlue) + " " + q.color(pipeline, ansiBold) + q.color(" running…", ansiDim)
+	// The active profile is named because this renderer is what a git
+	// hook prints: two identical commits whose runs landed in different
+	// stores both printed the same green tick, and nothing on the line
+	// said which store either one used.
+	if name := profileName(rec.Attrs); name != "" {
+		line += q.color("  profile "+name, ansiDim)
+	}
 	if runID != "" {
 		line += q.color("  run "+runID, ansiDim)
 	}
 	fmt.Fprintln(q.w, line)
+}
+
+// profileName digs the active profile's name out of a run_start
+// record's nested profile attribute. Empty when no profile is active,
+// which is the honest answer for a run on the built-in local defaults.
+func profileName(attrs map[string]any) string {
+	p, ok := attrs["profile"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	name, _ := p["name"].(string)
+	return name
 }
 
 func (q *QuietRenderer) writeFinish(finish sparkwing.LogRecord) {

@@ -312,7 +312,7 @@ func TestHooksInstall_DoctorStopsReportingAShadowedGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	writeExec(t, filepath.Join(hooksDir, "pre-commit"), renderHookScript("pre-commit", []string{"gate"}, false))
+	writeExec(t, filepath.Join(hooksDir, "pre-commit"), renderHookScript("pre-commit", []string{"gate"}, false, ""))
 
 	shadow, err := githooks.Detect(f.tryGit, f.repo)
 	if err != nil {

@@ -2879,11 +2879,13 @@ was never a gate to arm.`,
 		{Name: "repo", Argument: "DIR", Desc: "Repo directory (default: discovered via nearest .sparkwing/)", Group: "Input"},
 		{Name: "fleet", Desc: "Install into every registered repo instead of one", Group: "Input"},
 		{Name: "no-prove", Desc: "Claim core.hooksPath without running the gate first", Group: "Behavior"},
+		{Name: "profile", Argument: "NAME", Desc: "Pin the hook's runs to this storage profile (default: whatever the project's config selects)", Group: "Storage"},
 	},
 	Examples: []Example{
 		{"Install in the current repo", "sparkwing pipeline hooks install"},
 		{"Install in a different repo", "sparkwing pipeline hooks install --repo /path/to/repo"},
 		{"Arm every registered repo", "sparkwing pipeline hooks install --fleet"},
+		{"Pin the gate's runs to one store", "sparkwing pipeline hooks install --profile bucket"},
 	},
 }
 

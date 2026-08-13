@@ -61,15 +61,21 @@ func runHooksInstall(args []string) error {
 	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
 	fleet := fs.Bool("fleet", false, "install into every registered repo")
 	noProve := fs.Bool("no-prove", false, "claim core.hooksPath without running the gate first")
+	profileName := fs.String("profile", "", "pin the hook's runs to this storage profile (default: whatever the project's config selects)")
 	if err := parseAndCheck(cmdHooksInstall, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
 		}
 		return err
 	}
-	opts := installOptions{prove: runPipelineForProof}
+	opts := installOptions{prove: runPipelineForProof, profile: *profileName}
 	if *noProve {
 		opts.prove = nil
+	}
+	if opts.profile != "" {
+		if _, err := resolveProfileFlag(opts.profile); err != nil {
+			return fmt.Errorf("hooks install: %w", err)
+		}
 	}
 	if *fleet {
 		if *repo != "" {
@@ -195,6 +201,12 @@ type installOptions struct {
 	// prove runs a blocking gate before core.hooksPath is claimed. Nil arms
 	// the repository without the proof.
 	prove Prover
+
+	// profile pins the generated hooks to one storage profile. Empty
+	// leaves the selection to the project's own config, which is still
+	// deterministic -- what the hook must never do is take it from the
+	// shell that happened to invoke git.
+	profile string
 }
 
 // declaredHooks maps every git hook name repoRoot's pipelines ask for to the
@@ -303,7 +315,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 	installed, skipped := 0, 0
 	for _, hookName := range slices.Sorted(maps.Keys(hooksToRun)) {
 		pipes := hooksToRun[hookName]
-		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, pipes, globalHooks[hookName]))
+		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, pipes, globalHooks[hookName], opts.profile))
 		if err != nil {
 			return false, errors.Join(err, snapshot.restore(git, repoRoot, hooksDir))
 		}
@@ -319,7 +331,7 @@ func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installO
 		if _, ours := hooksToRun[hookName]; ours {
 			continue
 		}
-		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, nil, true))
+		wrote, err := writeManagedHook(hooksDir, hookName, renderHookScript(hookName, nil, true, opts.profile))
 		if err != nil {
 			return false, errors.Join(err, snapshot.restore(git, repoRoot, hooksDir))
 		}
@@ -1130,7 +1142,7 @@ func resolveHooksRepo(repo string) (repoRoot, sparkwingDir string, err error) {
 // that wrote this file. The subshell is what keeps the scrub off the hand-off:
 // the global hook is git's to configure, and it gets the environment git meant
 // it to have.
-func renderHookScript(hookName string, pipes []string, chainGlobal bool) string {
+func renderHookScript(hookName string, pipes []string, chainGlobal bool, profileName string) string {
 	blocking := hookName != "post-commit"
 	var b strings.Builder
 	b.WriteString("#!/bin/sh\n")
@@ -1154,8 +1166,19 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool) string 
 	if len(pipes) > 0 {
 		b.WriteString("(\n")
 		b.WriteString(gitenv.ShellUnbind())
+		// SPARKWING_PROFILE is scrubbed for the same reason the GIT_*
+		// bindings are: a hook must run against the store its repository
+		// declares, not the store the invoking shell happened to name.
+		// Leaving it inherited put two identical commits seconds apart
+		// into different stores -- one local, one in a bucket -- and both
+		// printed a green tick.
+		b.WriteString("unset SPARKWING_PROFILE\n")
+		flag := ""
+		if profileName != "" {
+			flag = " --profile " + shellSingleQuote(profileName)
+		}
 		for _, p := range pipes {
-			fmt.Fprintf(&b, "sparkwing run %s%s%s\n", p, stdin, tolerate)
+			fmt.Fprintf(&b, "sparkwing run %s%s%s%s\n", p, flag, stdin, tolerate)
 		}
 		b.WriteString(")\n")
 	}
@@ -1178,4 +1201,11 @@ func renderGlobalChain(hookName string) string {
 		"hook=\"$global/" + hookName + "\"\n" +
 		"[ -x \"$hook\" ] || exit 0\n" +
 		"exec \"$hook\" \"$@\"\n"
+}
+
+// shellSingleQuote renders s as one POSIX sh single-quoted word, so a
+// profile name carrying a space or a metacharacter reaches sparkwing
+// as the name the operator typed rather than as shell syntax.
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
