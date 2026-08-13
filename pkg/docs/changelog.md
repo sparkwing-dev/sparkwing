@@ -67,6 +67,24 @@ code change to unlock.
   `markdown`. See
   [migration guide](docs/migrations/_unreleased.md#list-output-is-ndjson)
   for the full command list.
+- **cli (Breaking):** `sparkwing commands -o json` emits index fields
+  only. Each record is now `path`, `synopsis`, and `subcommand_count`
+  (0 means the verb is a leaf); `description`, `flags`, `examples`,
+  `positional_args`, and the `subcommands` array are gone from the
+  listing, which drops the full surface from 207KB to 17KB. Those
+  fields are exactly what `<path> --help` prints, from the same command
+  registry -- so the listing was spending a caller's context budget on
+  a second copy of the help system, one that could disagree with the
+  first. Read the index to choose a command, then `<path> --help` to
+  learn how to call it; `--help --json` is unchanged and still returns
+  the full record for one command. `-o pretty`, `-o plain`, and `-o
+  markdown` (including `--split-dir`, which generates the
+  `docs/cli-*.md` reference) are untouched. Hidden commands stay out of
+  the listing, now as a documented decision rather than an accident of
+  the filter; `--include-hidden` lists them marked `"hidden": true`.
+  See
+  [migration guide](docs/migrations/_unreleased.md#commands--o-json-is-an-index)
+  for before/after records.
 
 ### Fixed
 

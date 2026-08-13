@@ -5,6 +5,77 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## `commands -o json` is an index
+
+`sparkwing commands -o json` emits index fields only. Every record is
+now three fields:
+
+| Field | Meaning |
+|---|---|
+| `path` | the command, e.g. `sparkwing runs list` |
+| `synopsis` | its one-line summary |
+| `subcommand_count` | direct children in the listing; `0` means a leaf |
+
+Records for hidden commands additionally carry `"hidden": true`, and
+those only appear under `--include-hidden`.
+
+`description`, `flags`, `examples`, `positional_args`, and the
+`subcommands` array are gone from this listing. Nothing else about the
+output changed: it is still NDJSON, still one record per line, still
+sorted by path, and still filtered by `--path`.
+
+**Before:**
+
+```json
+{"path":"sparkwing cache prune","synopsis":"Evict least recently used binaries down to the ceilings","description":"Removes the least recently used cached binaries until the ca [...]","flags":[{"name":"max-bytes","argument":"SIZE","description":"Byte ceiling, e.g. 512MiB","group":"Limits"}, ...],"examples":[{"description":"Trim to the configured ceilings","command":"sparkwing cache prune"}, ...]}
+```
+
+**After:**
+
+```json
+{"path":"sparkwing cache prune","synopsis":"Evict least recently used binaries down to the ceilings","subcommand_count":0}
+```
+
+**Steps:**
+
+1. If you read `path` or `synopsis`, nothing changes.
+2. If you read `description`, `flags`, `examples`, or
+   `positional_args`, get them from the command's own help instead:
+   `sparkwing <path> --help --json` returns the full record for one
+   command, in the same field names, and is unchanged by this release.
+   Ask for the one command you are about to run rather than for all
+   150.
+3. If you walked the `subcommands` array to decide whether to descend,
+   read `subcommand_count` instead and descend with `--path <path>`,
+   which lists that subtree.
+4. If you counted subcommand *names* from the array, list them:
+   `sparkwing commands --path "<path>" -o plain` is one path per line.
+
+**Why:** the dropped fields are what `<command> --help` already prints,
+from the same command registry, so the listing carried a second copy of
+the help system that could disagree with the first. They were also 83%
+of it -- of 207KB across 150 records, `description` was 76KB, `flags`
+55KB, and `examples` 40KB, against 6.6KB of synopsis and 3.6KB of path.
+An index exists to help a reader choose which page to open; it does not
+have to be the page. The listing is now 17KB.
+
+**Gotchas:**
+
+- `subcommand_count` counts the children *this listing* shows, which is
+  what `--path` will return. It is not `Command.Subcommands` from the
+  help renderer, which is a hand-maintained display list and disagrees
+  with the registry in a few places.
+- Hidden commands are still excluded, and that is deliberate: a hidden
+  command is dispatchable but not offered -- its own help names the
+  supported verb to use instead -- so listing it would put a "use
+  something else" entry in the index a reader consults to decide what
+  to use. `--include-hidden` lists them, marked `"hidden": true`, and a
+  `--path` that matches only hidden commands still errors saying so
+  rather than reporting an empty subtree.
+- `-o pretty`, `-o plain`, and `-o markdown` (including `--split-dir`,
+  which generates `docs/cli-reference.md` and the `docs/cli-*.md`
+  pages) are unchanged, and so is `<command> --help --json`.
+
 ## List output is NDJSON
 
 Every list-shaped `-o json` output is now newline-delimited JSON: one
