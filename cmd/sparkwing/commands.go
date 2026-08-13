@@ -155,7 +155,9 @@ func toCommandJSON(c *Command) CommandJSON {
 // pretty is the same 139 verbs in 140 lines, one path and synopsis
 // each, which is what "what is this CLI" actually wants; --path narrows
 // to a subtree and -o json is one flag away for anything that needs the
-// full records.
+// full records. -o json is NDJSON for the same reason: `head` is the
+// only sizing tool a caller has, and it only works on output whose
+// records are lines.
 func runCommands(args []string) error {
 	fs := flag.NewFlagSet(cmdCommands.Path, flag.ContinueOnError)
 	var output string
@@ -209,9 +211,22 @@ func runCommands(args []string) error {
 
 	switch strings.ToLower(output) {
 	case "json":
+		// NDJSON: one complete record per line, no array and no
+		// pretty-printing. An agent's only defense against output too
+		// big for its context is `head`, and `head` is line-oriented --
+		// a pretty-printed array truncates in the middle of a record
+		// and parses as nothing. One record per line makes a truncated
+		// read lossy but still valid, so `-o json | head -5` is five
+		// commands rather than a syntax error. A listing has no facts
+		// that are not a record's, so there is no summary line to lead
+		// with.
 		enc := json.NewEncoder(os.Stdout)
-		enc.SetIndent("", "  ")
-		return enc.Encode(picked)
+		for _, c := range picked {
+			if err := enc.Encode(c); err != nil {
+				return err
+			}
+		}
+		return nil
 	case "markdown", "md":
 		if *splitDir != "" {
 			return writeSplitMarkdown(*splitDir, picked)

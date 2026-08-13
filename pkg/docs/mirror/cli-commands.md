@@ -23,8 +23,10 @@ than an empty listing.
 
 -o json emits the full record for every verb -- path, synopsis,
 description, positional args, flags, examples, subcommands --
-from the same Command values that power --help. That is 235KB
-for the unfiltered surface, so pair it with --path unless you
+from the same Command values that power --help, as NDJSON: one
+complete JSON object per line, so 'head -5' returns five whole
+records instead of a truncated array. That is still 200KB for
+the unfiltered surface, so pair it with --path unless you
 genuinely want all of it. -o plain is one path per line for
 shell consumption; -o markdown renders a reference page, and
 with --split-dir writes the docs/cli-*.md reference (one page

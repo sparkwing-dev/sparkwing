@@ -85,6 +85,13 @@ sparkwing is the Go-pipeline platform.
 - **Structured output.** List / describe / get verbs accept
   `-o pretty|json|plain` (default `pretty`). `-o` / `--output` is the one
   output-format selector across the CLI.
+- **List output is one record per line.** A listing's `-o json` is
+  NDJSON: one complete JSON object per line, no array and no
+  pretty-printing, so `head -5` returns five whole records instead of a
+  truncated document that parses as nothing. Read the stream a line at a
+  time (`json.Decoder` in a loop, `jq -c .` with no `-s`, `while read
+  line`). An empty listing is an empty stream, not `[]`. Describe / get
+  / status verbs answer with one object and stay pretty-printed.
 - **Profile addressing.** `--profile NAME` picks the storage/dispatch
   profile. Absent, commands read local state (SQLite under `~/.sparkwing/`).
   `sparkwing run` always executes locally; `sparkwing pipeline trigger` is
@@ -106,6 +113,12 @@ sparkwing pipeline discover --query TEXT -o json # ranked fuzzy search
 sparkwing pipeline explain --name X -o json     # Plan DAG before running
 sparkwing commands                              # one-line index of every verb
 ```
+
+The list verbs stream NDJSON, so an agent that cannot afford a whole
+catalog reads a prefix of it: `sparkwing commands --path runs -o json |
+head -20` is twenty complete command records. `sparkwing commands` with
+no flags is the cheapest orientation of all -- one line per verb for the
+whole surface.
 
 The describe schema matches `sparkwing.DescribePipeline` plus
 `group` / `tags` / `triggers` drawn from the `pipelines:` block in
