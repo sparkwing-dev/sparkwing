@@ -69,6 +69,13 @@ const (
 	// logs are unrecoverable; better to fail loud than report
 	// status=success with no observable output.
 	FailureLogsAuth = "logs_auth"
+	// FailureLogsDropped: log lines were lost because the log store
+	// stayed unreachable past the append retry budget. The node's own
+	// work may well have succeeded, but its record of that work is
+	// incomplete, so the same rule as FailureLogsAuth applies: a run
+	// nobody can read is not a run anybody should trust. Adopters who
+	// prefer the lossy behaviour set SPARKWING_LOGS_DROP_POLICY=warn.
+	FailureLogsDropped = "logs_dropped"
 )
 
 // RetrySource values for runs.retry_source.

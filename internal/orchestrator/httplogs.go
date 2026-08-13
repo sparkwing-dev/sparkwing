@@ -119,6 +119,11 @@ type httpNodeLog struct {
 	fatal      error
 	dropCount  int
 	dropReason string // first-seen reason; subsequent drops keep the original
+
+	// suppressUntil holds the near end of the breaker window opened by
+	// the last exhausted retry budget. Lines emitted before it drop
+	// without touching the network.
+	suppressUntil time.Time
 }
 
 // httpNodeLogRetryAttempts caps the per-line retry budget for
@@ -128,6 +133,22 @@ var (
 	httpNodeLogRetryAttempts = 3
 	httpNodeLogRetryBackoff  = 200 * time.Millisecond
 )
+
+// httpNodeLogDropCooldown is how long a node stops attempting appends
+// after one line has exhausted its retry budget.
+//
+// Without it a store that is down rather than flaky charges the full
+// retry budget to every single line: a pipeline that runs in 84ms took
+// 43s against an unreachable bucket, because each batch blocked inline
+// on three SDK retries. The adopter reads that as "sparkwing is slow"
+// rather than "sparkwing cannot reach the log store".
+//
+// The window is short enough that a store recovering mid-run resumes
+// on the next line past it, so this trades a bounded number of extra
+// dropped lines for a run that finishes at its real speed. The lines
+// dropped inside the window are still counted, and the count still
+// fails the node, so the cooldown never converts loss into silence.
+var httpNodeLogDropCooldown = 5 * time.Second
 
 // SetTestHTTPNodeLogRetry overrides the per-line retry budget +
 // backoff for the duration of a test, restoring the originals on
@@ -140,6 +161,15 @@ func SetTestHTTPNodeLogRetry(t interface{ Cleanup(func()) }, attempts, backoffMS
 		httpNodeLogRetryAttempts = oldA
 		httpNodeLogRetryBackoff = oldB
 	})
+}
+
+// SetTestHTTPNodeLogDropCooldown overrides the post-drop breaker
+// window for the duration of a test. Production callers should not
+// touch this knob.
+func SetTestHTTPNodeLogDropCooldown(t interface{ Cleanup(func()) }, cooldownMS int) {
+	old := httpNodeLogDropCooldown
+	httpNodeLogDropCooldown = time.Duration(cooldownMS) * time.Millisecond
+	t.Cleanup(func() { httpNodeLogDropCooldown = old })
 }
 
 func (l *httpNodeLog) Log(level, msg string) {
@@ -178,8 +208,13 @@ func (l *httpNodeLog) Emit(rec sparkwing.LogRecord) {
 // appendWithRetry POSTs payload to the logs service with bounded
 // retries on transient errors. Auth failures (401/403) latch a
 // fatal error and abort early; other errors past the retry budget
-// increment dropCount + record the first-seen reason.
+// increment dropCount + record the first-seen reason and open a
+// cooldown window during which further lines drop without being
+// attempted (see httpNodeLogDropCooldown).
 func (l *httpNodeLog) appendWithRetry(payload []byte) {
+	if l.dropSuppressed() {
+		return
+	}
 	var lastErr error
 	for attempt := 0; attempt < httpNodeLogRetryAttempts; attempt++ {
 		if attempt > 0 {
@@ -215,6 +250,7 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 		l.dropReason = lastErr.Error()
 	}
 	count := l.dropCount
+	l.suppressUntil = time.Now().Add(httpNodeLogDropCooldown)
 	l.mu.Unlock()
 	l.logger.Warn(
 		"logs append dropped after retries",
@@ -223,6 +259,20 @@ func (l *httpNodeLog) appendWithRetry(payload []byte) {
 		"err", lastErr,
 		"dropped_total", count,
 	)
+}
+
+// dropSuppressed counts a drop and reports true when the breaker
+// window opened by an earlier exhausted retry budget is still open.
+// The line is lost either way; skipping the attempt only decides
+// whether the run also pays the retry budget for it.
+func (l *httpNodeLog) dropSuppressed() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.suppressUntil.IsZero() || !time.Now().Before(l.suppressUntil) {
+		return false
+	}
+	l.dropCount++
+	return true
 }
 
 func (l *httpNodeLog) Close() error {

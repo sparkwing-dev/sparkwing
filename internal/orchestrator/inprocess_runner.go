@@ -400,6 +400,16 @@ done:
 	if count, reason := nodeLogDrops(nlog); count > 0 {
 		payload, _ := json.Marshal(map[string]any{"count": count, "reason": reason})
 		_ = r.backends.State.AppendEvent(ctx, runID, node.ID(), "logs_drop", payload)
+		if logsDropIsFatal() {
+			dropped := fmt.Errorf("%d log line(s) lost: the log store stayed unreachable past the append retry budget: %s", count, reason)
+			text := boundedFailureText(ctx, runID, node.ID(), dropped)
+			emitNodeEnd(sparkwing.Failed, text)
+			fctx := failureWriteCtx(ctx, dropped)
+			_ = r.backends.State.FinishNodeWithReason(fctx, runID, node.ID(), string(sparkwing.Failed), text, nil, store.FailureLogsDropped, nil)
+			_ = r.backends.State.AppendEvent(fctx, runID, node.ID(), "node_failed", []byte(text))
+			appendFailureExcerptEvent(fctx, r.backends.State, runID, node.ID(), dropped)
+			return nil, dropped
+		}
 	}
 
 	var outBytes []byte
@@ -489,6 +499,23 @@ func nodeLogFatal(nlog NodeLog) error {
 		return f.Fatal()
 	}
 	return nil
+}
+
+// LogsDropPolicyEnvVar opts a deployment out of failing a node whose
+// log lines were lost. The default -- fail -- exists because a run
+// that could not record what it did reporting success is the same
+// false all-clear as a run that could not authenticate to its log
+// store (store.FailureLogsAuth). Set it to "warn" to keep the older
+// behaviour, where loss surfaces only as a WARN line and the
+// logs_drop event.
+const LogsDropPolicyEnvVar = "SPARKWING_LOGS_DROP_POLICY"
+
+// logsDropIsFatal reports whether lost log lines should fail the node.
+// Any value other than "warn" -- including an unset or misspelled one
+// -- fails, so a typo in the opt-out cannot silently restore the
+// behaviour the variable exists to opt out of.
+func logsDropIsFatal() bool {
+	return os.Getenv(LogsDropPolicyEnvVar) != "warn"
 }
 
 // nodeLogDrops returns the (count, first-reason) tuple from a
