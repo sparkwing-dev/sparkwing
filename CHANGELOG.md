@@ -48,6 +48,13 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+- **controller (Breaking):** On Darwin, the first host CPU sample after start
+  reports `CPUMeasured=false` instead of a process-lifetime average. Later
+  samples derive utilization from the change in cumulative process CPU time,
+  so past CPU work no longer remains booked as current external load. Callers
+  that already defer admission decisions until CPU is measured need no change.
+  See
+  [migration](docs/migrations/v0.33.0.md#the-first-darwin-cpu-sample-is-unmeasured).
 - **cli (Breaking):** `pipeline list -o json` is an index. It carries
   `name`, `short`, `entrypoint` and `triggers` -- what a caller picks a
   pipeline by -- where it used to carry every pipeline's full help text,
