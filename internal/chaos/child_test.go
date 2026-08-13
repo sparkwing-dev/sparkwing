@@ -45,7 +45,7 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 		_, _ = parent.Process.Wait()
 	})
 
-	readOpts := client.Options{Home: home, DialTimeout: 500 * time.Millisecond, Backoff: 30 * time.Millisecond}
+	readOpts := client.Options{Home: home, Version: "v1.0.0", DialTimeout: 500 * time.Millisecond, Backoff: 30 * time.Millisecond}
 
 	deadline := time.Now().Add(6 * time.Second)
 	var sawHolder bool

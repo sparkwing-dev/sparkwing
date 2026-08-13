@@ -3,6 +3,7 @@ package wingd_test
 import (
 	"context"
 	"errors"
+	"os"
 	"sync"
 	"testing"
 	"time"
@@ -11,6 +12,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
+
+type lifecycleIdleProcSampler struct{}
+
+func (lifecycleIdleProcSampler) CPUUsage(int) (wingd.ProcUsage, bool) {
+	return wingd.ProcUsage{}, true
+}
 
 func semReqCancel(runID, key string, cancelTimeoutMS int64) wingwire.AdmissionRequest {
 	return wingwire.AdmissionRequest{
@@ -66,6 +73,73 @@ func holdsRun(qs wingwire.QueueState, runID string) bool {
 	return false
 }
 
+// TestDaemon_StalledHolderMustAnswerLivenessChallenge proves that stall
+// detection is an automatic backstop, not only a queue annotation. The
+// victim remains alive and keeps its socket open, but never runs Watch and
+// therefore cannot answer a daemon challenge. A healthy zero-CPU holder does
+// run Watch and must retain its lease for the same observation window.
+func TestDaemon_StalledHolderMustAnswerLivenessChallenge(t *testing.T) {
+	home := shortHome(t)
+	startDaemon(t, wingd.Config{
+		Home: home, Version: "v1", GraceWindow: -1, HeadroomFraction: -1,
+		ProcSampler: lifecycleIdleProcSampler{}, StallInterval: 5 * time.Millisecond,
+		StallWindow: 10 * time.Millisecond, StallProbeTimeout: 25 * time.Millisecond,
+	})
+
+	wedgedClient := ensure(t, home, "v1")
+	wedgedReq := wingwire.AdmissionRequest{RunID: "wedged", SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{{Name: "wedged-lock", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue}}}
+	wedgedReq.PID = os.Getpid()
+	if _, err := wedgedClient.Acquire(context.Background(), wedgedReq, nil); err != nil {
+		t.Fatalf("wedged acquire: %v", err)
+	}
+	healthyClient := ensure(t, home, "v1")
+	healthyReq := wingwire.AdmissionRequest{RunID: "healthy", SemaphoresOnly: true, Semaphores: []wingwire.SemaphoreClaim{{Name: "healthy-lock", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue}}}
+	healthyReq.PID = os.Getpid()
+	healthy := mustAcquire(t, healthyClient, healthyReq)
+	go healthy.Watch(nil)
+
+	waiterClient := ensure(t, home, "v1")
+	waiter := make(chan error, 1)
+	go func() {
+		lease, err := waiterClient.Acquire(context.Background(), wingwire.AdmissionRequest{
+			RunID: "waiter", SemaphoresOnly: true,
+			Semaphores: []wingwire.SemaphoreClaim{
+				{Name: "wedged-lock", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
+				{Name: "healthy-lock", Capacity: 1, Cost: 1, Policy: wingwire.PolicyQueue},
+			},
+		}, nil)
+		if err == nil {
+			err = lease.Release()
+		}
+		waiter <- err
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+		if err != nil {
+			t.Fatalf("query: %v", err)
+		}
+		if !holdsRun(qs, "wedged") {
+			if !holdsRun(qs, "healthy") {
+				t.Fatal("healthy zero-CPU holder was reclaimed")
+			}
+			_ = healthy.Release()
+			select {
+			case err := <-waiter:
+				if err != nil {
+					t.Fatalf("waiter acquire: %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("waiter was not promoted")
+			}
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("live but unresponsive holder was not reclaimed")
+}
+
 func TestReattach_ReclaimsLeaseAfterRestart(t *testing.T) {
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 2 * time.Second})
@@ -82,7 +156,7 @@ func TestReattach_ReclaimsLeaseAfterRestart(t *testing.T) {
 	startDaemon(t, wingd.Config{Home: home, GraceWindow: 2 * time.Second})
 
 	b, err := client.EnsureDaemon(context.Background(), client.Options{
-		Home: home, Spawn: errSpawn, DialTimeout: time.Second, Backoff: 10 * time.Millisecond,
+		Home: home, Version: "v1.0.0", Spawn: errSpawn, DialTimeout: time.Second, Backoff: 10 * time.Millisecond,
 	})
 	if err != nil {
 		t.Fatalf("reconnect: %v", err)
@@ -156,7 +230,7 @@ func TestVersionTakeover_DrainsOldAndReattaches(t *testing.T) {
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0"})
 
-	holder := ensure(t, home, "")
+	holder := ensure(t, home, "v1.0.0")
 	lease := mustAcquire(t, holder, coreReq("a", 1))
 	token := lease.Token
 
@@ -214,7 +288,8 @@ func TestVersionTakeover_ExactSourceBuildDrainsSameReleaseAndReattaches(t *testi
 	if err := old.waitExit(t, 3*time.Second); err != nil {
 		t.Fatalf("release daemon should have drained and exited: %v", err)
 	}
-	reclaimed, err := holder.Reattach(context.Background(), lease.Token)
+	reconnect := ensure(t, home, newVersion)
+	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token)
 	if err != nil {
 		t.Fatalf("holder reattach: %v", err)
 	}
@@ -229,7 +304,7 @@ func TestRefreshRunning_ReplacesSameReleaseSourceBuildAndReattachesHolder(t *tes
 	newVersion := "v0.22.2-dev+2222222"
 	old := startDaemon(t, wingd.Config{Home: home, Version: oldVersion})
 
-	holder := ensure(t, home, "")
+	holder := ensure(t, home, oldVersion)
 	lease := mustAcquire(t, holder, coreReq("active", 1))
 	successor := newSuccessor(t, home, newVersion)
 
@@ -246,7 +321,8 @@ func TestRefreshRunning_ReplacesSameReleaseSourceBuildAndReattachesHolder(t *tes
 	if err := old.waitExit(t, 3*time.Second); err != nil {
 		t.Fatalf("old daemon should exit: %v", err)
 	}
-	reclaimed, err := holder.Reattach(context.Background(), lease.Token)
+	reconnect := ensure(t, home, newVersion)
+	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token)
 	if err != nil {
 		t.Fatalf("holder reattach: %v", err)
 	}
@@ -269,18 +345,13 @@ func TestRefreshRunning_LeavesStoppedDaemonStopped(t *testing.T) {
 	}
 }
 
-// TestVersionTakeover_DevBuildJoinsReleaseDaemon verifies that a source-built
-// "(devel)" client joins a release daemon without draining it. A fleet of
-// identically-named dev binaries would otherwise each drain the shared release
-// daemon, race to win the flock, and all fail. The ensure helper's errSpawn
-// fires if any spawn occurs, pinning the no-takeover invariant.
-func TestVersionTakeover_DevBuildJoinsReleaseDaemon(t *testing.T) {
+func TestVersionTakeover_DevBuildAcceptsSameSourceReleaseDaemon(t *testing.T) {
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0"})
 
-	dev := ensure(t, home, "(devel)")
-	if dev.DaemonVersion() != "v1.0.0" {
-		t.Fatalf("connected daemon version %q, want v1.0.0 (dev build must not supersede)", dev.DaemonVersion())
+	_, err := client.EnsureDaemon(context.Background(), client.Options{Home: home, Version: "(devel)", Spawn: errSpawn})
+	if err != nil {
+		t.Fatalf("ensure error = %v, want success", err)
 	}
 
 	select {
@@ -290,20 +361,13 @@ func TestVersionTakeover_DevBuildJoinsReleaseDaemon(t *testing.T) {
 	}
 }
 
-// TestVersionTakeover_ReleaseLeavesDevDaemon is the other half of the
-// dev-build rule: a strictly newer release client connects to a daemon
-// built from source and leaves it running. If it drained one, the two
-// builds would supersede each other and each would respawn its own
-// daemon over the other's for as long as both were in use. The ensure
-// helper's spawn hook fails the test if it fires, so an attempted
-// takeover shows up as a spawn the client had no business making.
-func TestVersionTakeover_ReleaseLeavesDevDaemon(t *testing.T) {
+func TestVersionTakeover_ReleaseAcceptsSameSourceDirtyDevDaemon(t *testing.T) {
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0+dirty"})
 
-	rel := ensure(t, home, "v1.1.0")
-	if rel.DaemonVersion() != "v1.0.0+dirty" {
-		t.Fatalf("connected daemon version %q, want the source-built v1.0.0+dirty still resident", rel.DaemonVersion())
+	_, err := client.EnsureDaemon(context.Background(), client.Options{Home: home, Version: "v1.1.0", Spawn: errSpawn})
+	if err != nil {
+		t.Fatalf("ensure error = %v, want success", err)
 	}
 
 	select {
@@ -398,6 +462,9 @@ type successor struct {
 }
 
 func newSuccessor(t *testing.T, home, ver string) *successor {
+	if ver == "" {
+		ver = "v1.0.0"
+	}
 	return &successor{t: t, home: home, ver: ver, ready: make(chan struct{})}
 }
 

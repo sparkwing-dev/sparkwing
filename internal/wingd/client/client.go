@@ -75,6 +75,28 @@ func protocolTooOld(selfVersion string, ack wingwire.HelloAck) error {
 // what separates it from [ErrProtocolTooOld].
 var ErrDaemonTooOld = errors.New("wingd/client: daemon protocol is older than this client")
 
+// ErrBuildMismatch is returned when two different or unidentified builds
+// claim the same protocol major. Major equality alone cannot prove that one
+// side understands fields added by the other, because JSON ignores unknown
+// fields within a major.
+var ErrBuildMismatch = errors.New("wingd/client: daemon build differs from this client")
+
+func buildMismatch(selfVersion string, ack wingwire.HelloAck) error {
+	self := strings.TrimSpace(selfVersion)
+	daemon := strings.TrimSpace(ack.BinaryVersion)
+	if self == daemon || (ack.BuildIdentity != "" && ack.BuildIdentity == wingwire.BuildIdentity) || supersedes(daemon, self) {
+		return nil
+	}
+	if self == "" {
+		self = "(unknown)"
+	}
+	if daemon == "" {
+		daemon = "(unknown)"
+	}
+	return fmt.Errorf("%w: this build is %s and the daemon is %s; the same protocol major does not prove same-build compatibility. Restart the daemon with this build or use a separate SPARKWING_HOME",
+		ErrBuildMismatch, self, daemon)
+}
+
 // FirstHostingRelease is the first sparkwing release whose installed
 // binary can host the daemon for a client that does not host its own:
 // the release that serves [DaemonSpawnVerb] and ships the host handoff.
@@ -628,7 +650,7 @@ func (cl *Client) connect(ctx context.Context) error {
 		if !opts.NoTakeover && !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
 			cl.ack = ack
 			if !takeovers.spend(ack.BinaryVersion) {
-				cl.Close()
+				_ = cl.Close()
 				return takeoverExhausted(opts.Version, ack, takeovers.total)
 			}
 			if terr := cl.takeover(ctx, opts); terr != nil {
@@ -636,11 +658,11 @@ func (cl *Client) connect(ctx context.Context) error {
 			}
 			continue
 		}
-		if opts.NoTakeover && !servedDownLevel(ack) && supersedes(opts.Version, ack.BinaryVersion) {
-			opts.logf("sharing running daemon %s (this build does not host the daemon and never replaces it)", ack.BinaryVersion)
-		}
-		if devBuild(opts.Version) != devBuild(ack.BinaryVersion) {
-			opts.logf("sharing running daemon %s (dev and release builds do not supersede each other)", ack.BinaryVersion)
+		if !servedDownLevel(ack) {
+			if err := buildMismatch(opts.Version, ack); err != nil {
+				cl.Close()
+				return err
+			}
 		}
 		if ack.Draining {
 			cl.Close()
@@ -719,7 +741,7 @@ func (cl *Client) takeover(ctx context.Context, opts Options) error {
 }
 
 func (cl *Client) handshake(version string) (wingwire.HelloAck, error) {
-	if err := cl.write(&wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: version, HealthProbe: cl.probe}); err != nil {
+	if err := cl.write(&wingwire.Hello{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: version, BuildIdentity: wingwire.BuildIdentity, HealthProbe: cl.probe, HolderLiveness: !cl.probe}); err != nil {
 		return wingwire.HelloAck{}, err
 	}
 	msg, err := cl.dec.read()

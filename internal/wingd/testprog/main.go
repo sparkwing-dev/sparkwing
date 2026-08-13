@@ -164,7 +164,7 @@ func runHold(args []string) {
 	// installed binary named by $SPARKWING_WINGD_BIN (else a `sparkwing`
 	// on PATH).
 	hostSpawn := fs.Bool("host-spawn", false, "")
-	version := fs.String("version", "", "")
+	version := fs.String("version", "v1.0.0", "")
 	_ = fs.Parse(args)
 
 	opts := client.Options{

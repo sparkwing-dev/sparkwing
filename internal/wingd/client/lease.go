@@ -237,6 +237,10 @@ func (l *Lease) WatchGuard(onEvicted func(wingwire.Evicted), onCancel func(wingw
 				onComplete()
 			}
 			return
+		case *wingwire.LivenessProbe:
+			if err := l.cl.write(&wingwire.LivenessAck{Nonce: m.Nonce}); err != nil {
+				continue
+			}
 		}
 	}
 }

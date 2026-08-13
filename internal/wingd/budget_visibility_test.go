@@ -27,7 +27,7 @@ func TestQueueState_NamesBudgetSource(t *testing.T) {
 		BudgetOrigin: "/home/op/.config/sparkwing/budget",
 	})
 
-	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1.0.0"})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -57,7 +57,7 @@ func TestQueueState_UnsetBudgetIsReported(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home})
 
-	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1.0.0"})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -84,7 +84,7 @@ func TestQueueState_UnrecordedBudgetSourceIsNotGuessed(t *testing.T) {
 	}
 	startDaemon(t, wingd.Config{Home: home, Budget: budget})
 
-	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+	qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1.0.0"})
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}

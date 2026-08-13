@@ -26,12 +26,17 @@ const (
 type Hello struct {
 	ProtocolMajor int    `json:"protocol_major"`
 	BinaryVersion string `json:"binary_version"`
+	BuildIdentity string `json:"build_identity,omitempty"`
 	// HealthProbe marks a connection that only observes the daemon: a
 	// supervisor health check or a socket sweep. The daemon serves it like
 	// any other connection but keeps it out of idle accounting, so a
 	// daemon whose only traffic is probes still idles out. Daemons that
 	// predate the field ignore it.
 	HealthProbe bool `json:"health_probe,omitempty"`
+	// HolderLiveness advertises that a working client can answer
+	// [LivenessProbe] frames while it holds admission. Older clients omit it
+	// and retain diagnostic-only stall handling.
+	HolderLiveness bool `json:"holder_liveness,omitempty"`
 }
 
 // HelloAck is the daemon's reply to [Hello], carrying the majors in play
@@ -50,6 +55,7 @@ type HelloAck struct {
 	// ProtocolMajor is the only major there is.
 	NativeProtocolMajor int    `json:"native_protocol_major,omitempty"`
 	BinaryVersion       string `json:"binary_version"`
+	BuildIdentity       string `json:"build_identity,omitempty"`
 	Draining            bool   `json:"draining,omitempty"`
 }
 
@@ -273,6 +279,18 @@ type Release struct {
 	LeaseToken string `json:"lease_token"`
 }
 
+// LivenessProbe asks an idle-looking holder to prove its control loop is
+// still running. Nonce prevents a delayed acknowledgement from satisfying a
+// later challenge.
+type LivenessProbe struct {
+	Nonce uint64 `json:"nonce"`
+}
+
+// LivenessAck answers the corresponding [LivenessProbe].
+type LivenessAck struct {
+	Nonce uint64 `json:"nonce"`
+}
+
 // GuardComplete declares that a guarded holder has stopped its command and
 // will start no more descendants. The daemon acknowledges only after the
 // registered process session is empty and the released ledger state is
@@ -400,9 +418,10 @@ type Holder struct {
 	// DriftWarning, when set, notes that the holder's pin has drifted from
 	// its measured profile.
 	DriftWarning string `json:"drift_warning,omitempty"`
-	// Stalled marks a holder that is alive but has consumed near-zero
-	// CPU for a sustained window while runs wait behind it -- a likely
-	// wedge. It is a flag only; the daemon never kills a holder.
+	// Stalled marks a holder that is alive but has consumed near-zero CPU for
+	// a sustained window while runs wait behind it -- a likely wedge. Capable
+	// clients are challenged before the daemon reclaims their admission; the
+	// flag remains diagnostic-only for older clients and guarded sessions.
 	Stalled bool `json:"stalled,omitempty"`
 	// Recovery is the exact command an operator runs to clear a stalled
 	// holder. Set only when Stalled is true; it never names a
@@ -756,6 +775,8 @@ func (*Grant) wireType() MessageType            { return TypeGrant }
 func (*Queued) wireType() MessageType           { return TypeQueued }
 func (*Evicted) wireType() MessageType          { return TypeEvicted }
 func (*Release) wireType() MessageType          { return TypeRelease }
+func (*LivenessProbe) wireType() MessageType    { return TypeLivenessProbe }
+func (*LivenessAck) wireType() MessageType      { return TypeLivenessAck }
 func (*GuardComplete) wireType() MessageType    { return TypeGuardComplete }
 func (*GuardCompleteAck) wireType() MessageType { return TypeGuardCompleteAck }
 func (*Reattach) wireType() MessageType         { return TypeReattach }

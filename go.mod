@@ -12,11 +12,11 @@ go 1.26.0
 // pin to them.
 retract (
 	[v1.0.0, v1.6.1]
-	v0.0.1
 	// Never released. Tagged off a branch that never landed on main, the
 	// build failed at signing, no binaries shipped. The proxy cached the
 	// tag before it could be recalled; v0.31.0 supersedes it.
 	v0.30.0
+	v0.0.1
 )
 
 require (
@@ -28,7 +28,7 @@ require (
 	github.com/jackc/pgx/v5 v5.9.2
 	github.com/johannesboyne/gofakes3 v0.0.0-20260208201424-4c385a1f6a73
 	github.com/prometheus/client_golang v1.23.2
-	github.com/sparkwing-dev/sparks-core/templates v0.28.0
+	github.com/sparkwing-dev/sparks-core/templates v0.30.0
 	github.com/spf13/pflag v1.0.10
 	go.opentelemetry.io/contrib/bridges/otelslog v0.18.0
 	go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp v0.68.0

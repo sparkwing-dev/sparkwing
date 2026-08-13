@@ -307,9 +307,7 @@ func TestProcess_PipelineClientStartsDaemonViaHostBinary(t *testing.T) {
 		"--run", "hosted",
 		"--cores", "0.1",
 		"--host-spawn",
-		// Newer than the daemon the host binary brings up (v1.0.0): a
-		// no-takeover client must share it rather than replace it.
-		"--version", "v9.9.9",
+		"--version", "v1.0.0",
 	)
 	if got := h.waitLine("DAEMON ", 20*time.Second); got != "v1.0.0" {
 		t.Fatalf("daemon version = %q, want v1.0.0 -- the daemon is not the binary $SPARKWING_WINGD_BIN named", got)

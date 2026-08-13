@@ -5,6 +5,77 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
+## `commands -o json` is an index
+
+`sparkwing commands -o json` emits index fields only. Every record is
+now three fields:
+
+| Field | Meaning |
+|---|---|
+| `path` | the command, e.g. `sparkwing runs list` |
+| `synopsis` | its one-line summary |
+| `subcommand_count` | direct children in the listing; `0` means a leaf |
+
+Records for hidden commands additionally carry `"hidden": true`, and
+those only appear under `--include-hidden`.
+
+`description`, `flags`, `examples`, `positional_args`, and the
+`subcommands` array are gone from this listing. Nothing else about the
+output changed: it is still NDJSON, still one record per line, still
+sorted by path, and still filtered by `--path`.
+
+**Before:**
+
+```json
+{"path":"sparkwing cache prune","synopsis":"Evict least recently used binaries down to the ceilings","description":"Removes the least recently used cached binaries until the ca [...]","flags":[{"name":"max-bytes","argument":"SIZE","description":"Byte ceiling, e.g. 512MiB","group":"Limits"}, ...],"examples":[{"description":"Trim to the configured ceilings","command":"sparkwing cache prune"}, ...]}
+```
+
+**After:**
+
+```json
+{"path":"sparkwing cache prune","synopsis":"Evict least recently used binaries down to the ceilings","subcommand_count":0}
+```
+
+**Steps:**
+
+1. If you read `path` or `synopsis`, nothing changes.
+2. If you read `description`, `flags`, `examples`, or
+   `positional_args`, get them from the command's own help instead:
+   `sparkwing <path> --help --json` returns the full record for one
+   command, in the same field names, and is unchanged by this release.
+   Ask for the one command you are about to run rather than for all
+   150.
+3. If you walked the `subcommands` array to decide whether to descend,
+   read `subcommand_count` instead and descend with `--path <path>`,
+   which lists that subtree.
+4. If you counted subcommand *names* from the array, list them:
+   `sparkwing commands --path "<path>" -o plain` is one path per line.
+
+**Why:** the dropped fields are what `<command> --help` already prints,
+from the same command registry, so the listing carried a second copy of
+the help system that could disagree with the first. They were also 83%
+of it -- of 207KB across 150 records, `description` was 76KB, `flags`
+55KB, and `examples` 40KB, against 6.6KB of synopsis and 3.6KB of path.
+An index exists to help a reader choose which page to open; it does not
+have to be the page. The listing is now 17KB.
+
+**Gotchas:**
+
+- `subcommand_count` counts the children *this listing* shows, which is
+  what `--path` will return. It is not `Command.Subcommands` from the
+  help renderer, which is a hand-maintained display list and disagrees
+  with the registry in a few places.
+- Hidden commands are still excluded, and that is deliberate: a hidden
+  command is dispatchable but not offered -- its own help names the
+  supported verb to use instead -- so listing it would put a "use
+  something else" entry in the index a reader consults to decide what
+  to use. `--include-hidden` lists them, marked `"hidden": true`, and a
+  `--path` that matches only hidden commands still errors saying so
+  rather than reporting an empty subtree.
+- `-o pretty`, `-o plain`, and `-o markdown` (including `--split-dir`,
+  which generates `docs/cli-reference.md` and the `docs/cli-*.md`
+  pages) are unchanged, and so is `<command> --help --json`.
+
 ## List output is NDJSON
 
 Every list-shaped `-o json` output is now newline-delimited JSON: one
@@ -90,11 +161,10 @@ webhooks deliveries`, `configure xrepo list`, `examples`, `docs list`,
 
 ## Cache becomes Memoize
 
-The result-memoization modifier `.Cache()` is renamed to `.Memoize()` on
-both `JobNode` and `JobGroup`. The behavior is unchanged: a key names the
-work, and a later node computing the same key replays the stored result
-instead of running. Only the name changes, and the supporting types change
-with it.
+The result-memoization modifier `.Cache()` is renamed to `.Memoize()` on both
+`JobNode` and `JobGroup`. The behavior is unchanged: a key names the work, and a
+later node computing the same key replays the stored result instead of running.
+Only the name changes, and the supporting types change with it.
 
 | Before | After |
 |---|---|
@@ -104,37 +174,23 @@ with it.
 | `sparkwing.CacheConfig` | `sparkwing.MemoizeConfig` |
 | `sparkwing.CacheOption` | `sparkwing.MemoizeOption` |
 
-`CacheKey`, `CacheKeyFn`, `Key(...)`, `NoCache`, `TTL`, `DefaultCacheTTL`,
-and `MaxCacheTTL` keep their names, because a memoized result is still
-stored under a content-addressed cache key.
-
-There is no deprecation alias. The old names are gone, so every call site
-is a compile error until updated. The change is mechanical:
+`CacheKey`, `CacheKeyFn`, `Key(...)`, `NoCache`, `TTL`, `DefaultCacheTTL`, and
+`MaxCacheTTL` keep their names, because a memoized result is still stored under a
+content-addressed cache key. There is no deprecation alias; every call site is a
+compile error until updated:
 
 ```go
-// before
-shard.Cache(func(ctx context.Context) sparkwing.CacheKey {
+shard.Cache(func(ctx context.Context) sparkwing.CacheKey {  // before
     return sparkwing.Key("coverage", "shard-1")
-}, sparkwing.TTL(48*time.Hour))
-
-// after
-shard.Memoize(func(ctx context.Context) sparkwing.CacheKey {
+})
+shard.Memoize(func(ctx context.Context) sparkwing.CacheKey { // after
     return sparkwing.Key("coverage", "shard-1")
-}, sparkwing.TTL(48*time.Hour))
+})
 ```
 
-**Why:** `.Cache()` read like GitHub Actions `actions/cache`, and it is the
-opposite. `actions/cache` restores a directory so a step runs faster;
-`.Cache()` skipped the node entirely. A pipeline ported by reaching for the
-same-named modifier compiled, ran green, and stopped running the work, with
-nothing to flag it. The name now says what the modifier does: `.Memoize(key)`
-skips the node when its result is already known, while `.CacheDir(...)` keeps
-a dependency directory warm so the node runs faster while still running --
-that is the `actions/cache` equivalent.
-
-**Group members still need distinct keys.** `JobGroup.Memoize` applies one
-key function to every member, unchanged from `JobGroup.Cache`. A matrix built
-with `JobFanOut` still needs a key that depends on the per-member value, or
-every cell shares one entry and the first cell's result replays for the rest.
-The `group-cache-shared` lint rule catches a group-scope `.Memoize()` the same
-way it caught `.Cache()`.
+**Why:** `.Cache()` read like GitHub Actions `actions/cache` and did the
+opposite -- it skipped the node instead of restoring a directory. `.Memoize(key)`
+now names what it does, while `.CacheDir(...)` keeps a dependency directory warm
+(the `actions/cache` equivalent). `JobGroup.Memoize` still applies one key to
+every member, so a `JobFanOut` matrix needs a key that depends on the per-member
+value; the `group-cache-shared` lint catches a constant one.

@@ -485,7 +485,7 @@ func TestQueueState_CarriesDaemonVersionAndUptime(t *testing.T) {
 		},
 	})
 
-	q := ensure(t, home, "")
+	q := ensure(t, home, "v9.9.9")
 	qs, err := q.QueueState(context.Background())
 	if err != nil {
 		t.Fatalf("queue state: %v", err)

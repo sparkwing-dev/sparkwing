@@ -120,6 +120,19 @@ head -20` is twenty complete command records. `sparkwing commands` with
 no flags is the cheapest orientation of all -- one line per verb for the
 whole surface.
 
+`sparkwing commands -o json` is an index, not a help dump: each record
+carries `path`, `synopsis`, and `subcommand_count` (0 means the verb is
+a leaf), and nothing else. Description, flags, and examples belong to
+`<path> --help`, which renders them from the same command registry and
+cannot go stale against it; duplicating them into the listing cost 190KB
+to answer a question the caller had not asked yet. Hidden commands are
+dispatchable but omitted from every listing -- their own help names the
+supported verb to use instead, so surfacing them in the index would
+steer readers at the thing the index exists to steer them away from.
+`--include-hidden` lists them, marked `"hidden": true`, and a `--path`
+that matches only hidden commands says so rather than reporting an empty
+subtree.
+
 The describe schema matches `sparkwing.DescribePipeline` plus
 `group` / `tags` / `triggers` drawn from the `pipelines:` block in
 `.sparkwing/sparkwing.yaml`.

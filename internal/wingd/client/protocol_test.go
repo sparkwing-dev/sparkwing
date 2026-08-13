@@ -70,6 +70,37 @@ func TestMatchingProtocolLeavesTheTakeoverToTheVersionComparison(t *testing.T) {
 	}
 }
 
+func TestMatchingProtocolRejectsAnUnorderedCrossBuildHandshake(t *testing.T) {
+	ack := wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor, NativeProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "v1.0.0"}
+	err := buildMismatch("(devel)", ack)
+	if !errors.Is(err, ErrBuildMismatch) {
+		t.Fatalf("buildMismatch error = %v, want ErrBuildMismatch", err)
+	}
+	for _, want := range []string{"(devel)", "v1.0.0", "same protocol major"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("build mismatch error %q omits %q", err, want)
+		}
+	}
+}
+
+func TestMatchingProtocolAcceptsTheExactSameBuild(t *testing.T) {
+	ack := wingwire.HelloAck{ProtocolMajor: wingd.ProtocolMajor, BinaryVersion: "v1.0.0"}
+	if err := buildMismatch("v1.0.0", ack); err != nil {
+		t.Fatalf("exact build rejected: %v", err)
+	}
+}
+
+func TestMatchingProtocolAcceptsDifferentDisplayVersionsWithSameBuildIdentity(t *testing.T) {
+	ack := wingwire.HelloAck{
+		ProtocolMajor: wingd.ProtocolMajor,
+		BinaryVersion: "v0.31.0-dev+e91a2fe1",
+		BuildIdentity: wingwire.BuildIdentity,
+	}
+	if err := buildMismatch("(devel)", ack); err != nil {
+		t.Fatalf("same protocol build identity rejected: %v", err)
+	}
+}
+
 // A daemon prerelease build version is not a usable module pin, so the
 // refusal must ask for a release by protocol number rather than the dev stamp.
 func TestProtocolTooOldNamesBothMajorsAndNoPinTarget(t *testing.T) {

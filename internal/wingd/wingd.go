@@ -25,8 +25,9 @@
 // daemon, which snapshots and exits, and the successor restores the same
 // state and honors the same grace window.
 //
-// Restored grants the current budget cannot hold are shed newest-first until
-// the rest fit. A structurally invalid legacy snapshot is quarantined. An
+// Restored grants remain authoritative when the current budget is smaller;
+// new admission tightens while those holders reattach or drain. A structurally
+// invalid legacy snapshot is quarantined. An
 // unreadable state file or unknown schema prevents startup because it may
 // contain guarded process authority; serving from an empty ledger could admit
 // overlapping work.
@@ -43,9 +44,13 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"syscall"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
@@ -67,7 +72,7 @@ const (
 	// DefaultGraceWindow is how long a freshly started daemon holds
 	// restored leases open for re-attach before releasing the unclaimed
 	// ones.
-	DefaultGraceWindow = 10 * time.Second
+	DefaultGraceWindow = 30 * time.Second
 	// DefaultSampleInterval is the period between host-load samples.
 	DefaultSampleInterval = 5 * time.Second
 	// DefaultHeadroomMaxAge bounds how long hysteresis may hold an applied
@@ -90,6 +95,9 @@ const (
 	// DefaultStallCPUFraction is the per-core CPU fraction below which a
 	// holder counts as idle for stall detection.
 	DefaultStallCPUFraction = 0.02
+	// DefaultStallProbeTimeout bounds how long an idle-looking holder has to
+	// answer a control-plane liveness challenge before its lease is reclaimed.
+	DefaultStallProbeTimeout = 10 * time.Second
 )
 
 // Config parameterizes a [Daemon]. Only Home is required; every other
@@ -166,6 +174,8 @@ type Config struct {
 	// StallCPUFraction overrides [DefaultStallCPUFraction] when non-zero;
 	// a negative value disables stall flagging entirely.
 	StallCPUFraction float64
+	// StallProbeTimeout overrides [DefaultStallProbeTimeout] when non-zero.
+	StallProbeTimeout time.Duration
 	// FinalizeRun, when set, is called with a run ID whose client
 	// disconnected while still holding or awaiting admission -- the
 	// process died without releasing (SIGKILL, panic). The callee
@@ -243,6 +253,13 @@ func (c Config) stallWindow() time.Duration {
 	return DefaultStallWindow
 }
 
+func (c Config) stallProbeTimeout() time.Duration {
+	if c.StallProbeTimeout > 0 {
+		return c.StallProbeTimeout
+	}
+	return DefaultStallProbeTimeout
+}
+
 // stallCPUFraction is the idle threshold; a negative config value returns
 // zero, which disables flagging because no reading is ever below it.
 func (c Config) stallCPUFraction() float64 {
@@ -279,17 +296,16 @@ func (c Config) logf(format string, args ...any) {
 }
 
 // layout resolves the on-disk paths a daemon uses for a sparkwing home.
-// The lock, state, log, and socket-pointer record live under the home
-// directory, which has no length limit; only the socket itself is placed
+// The lock, state, and log live under the home directory, which has no
+// length limit; only the socket itself is placed
 // on a short hashed path so a deep home cannot push it past the OS
 // sun_path limit and break bind.
 type layout struct {
-	dir    string
-	lock   string
-	sock   string
-	state  string
-	log    string
-	record string
+	dir   string
+	lock  string
+	sock  string
+	state string
+	log   string
 }
 
 func resolveLayout(home string) (layout, error) {
@@ -302,12 +318,11 @@ func resolveLayout(home string) (layout, error) {
 	}
 	dir := filepath.Join(home, "wingd")
 	return layout{
-		dir:    dir,
-		lock:   filepath.Join(dir, "d.lock"),
-		sock:   socketPathForHome(home),
-		state:  filepath.Join(dir, "state.json"),
-		log:    filepath.Join(dir, "d.log"),
-		record: filepath.Join(dir, "socket"),
+		dir:   dir,
+		lock:  filepath.Join(dir, "d.lock"),
+		sock:  socketPathForHome(home),
+		state: filepath.Join(dir, "state.json"),
+		log:   filepath.Join(dir, "d.log"),
 	}, nil
 }
 
@@ -346,9 +361,8 @@ func socketDirPrefix() string {
 // only at that home's own socket, so a tool inspecting one home is blind
 // to a daemon serving another until it looks here.
 //
-// A returned path is where a daemon was last seen, not proof one is
-// listening: an exiting daemon leaves its directory behind, and a daemon
-// killed outright leaves the socket file too. Callers dial to find out.
+// Dead socket entries owned by this user are removed during the sweep, so
+// callers see only listeners that answered a connection attempt.
 func PeerSockets(home string) ([]string, error) {
 	own, err := SocketPath(home)
 	if err != nil {
@@ -360,11 +374,52 @@ func PeerSockets(home string) ([]string, error) {
 	}
 	peers := make([]string, 0, len(matches))
 	for _, sock := range matches {
-		if sock != own {
+		alive, dead := socketStatus(sock)
+		if dead {
+			reapSocketDir(sock)
+			continue
+		}
+		if alive && sock != own {
 			peers = append(peers, sock)
 		}
 	}
 	return peers, nil
+}
+
+func socketStatus(sock string) (alive, dead bool) {
+	info, err := os.Lstat(sock)
+	if err != nil {
+		return false, errors.Is(err, fs.ErrNotExist)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return false, true
+	}
+	c, err := net.DialTimeout("unix", sock, 100*time.Millisecond)
+	if err != nil {
+		return false, socketDialMeansDead(err)
+	}
+	_ = c.Close()
+	return true, false
+}
+
+func socketDialMeansDead(err error) bool {
+	return errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, fs.ErrNotExist)
+}
+
+func reapSocketDir(sock string) {
+	dir := filepath.Dir(sock)
+	if filepath.Base(sock) != "d.sock" || !strings.HasPrefix(filepath.Base(dir), socketDirPrefix()) {
+		return
+	}
+	info, err := os.Lstat(dir)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm()&0o077 != 0 {
+		return
+	}
+	if !socketDirOwnedByCurrentUser(info) {
+		return
+	}
+	_ = os.Remove(sock)
+	_ = os.Remove(dir)
 }
 
 // socketBaseDir is the short directory family unix sockets live under.
@@ -420,9 +475,8 @@ func LockPath(home string) (string, error) {
 	return l.lock, nil
 }
 
-// StateDir returns the per-home directory holding the daemon's lock,
-// state file, log, and socket-pointer record. It stays under the home and
-// is where discovery tools and tests look for the daemon's bookkeeping.
+// StateDir returns the per-home directory holding the daemon's lock, state
+// file, and log.
 func StateDir(home string) (string, error) {
 	l, err := resolveLayout(home)
 	if err != nil {

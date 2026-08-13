@@ -3,7 +3,6 @@ package client
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -58,6 +57,12 @@ func TestSupersedes(t *testing.T) {
 		if got := supersedes(tt.client, tt.daemon); got != tt.want {
 			t.Errorf("supersedes(%q,%q)=%v, want %v", tt.client, tt.daemon, got, tt.want)
 		}
+	}
+}
+
+func TestDefaultReattachTimeoutFitsInsideDaemonGrace(t *testing.T) {
+	if defaultReattachTimeout*3 > wingd.DefaultGraceWindow {
+		t.Fatalf("reattach timeout %s does not fit safely inside daemon grace %s", defaultReattachTimeout, wingd.DefaultGraceWindow)
 	}
 }
 
@@ -161,6 +166,7 @@ func TestEnsureDaemon_SpawnsWhenAbsent(t *testing.T) {
 	home := shortHome(t)
 	cl, err := EnsureDaemon(context.Background(), Options{
 		Home:        home,
+		Version:     "v1.0.0",
 		Spawn:       spawnInProcess(t, home),
 		DialTimeout: 500 * time.Millisecond,
 		Backoff:     20 * time.Millisecond,
@@ -237,6 +243,7 @@ func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
 	defer cancel()
 	cl, err := EnsureDaemon(ctx, Options{
 		Home:        home,
+		Version:     "v1.0.0",
 		Spawn:       spawn,
 		DialTimeout: 10 * time.Millisecond,
 		Backoff:     10 * time.Millisecond,
@@ -250,11 +257,9 @@ func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
 	}
 }
 
-// TestEnsureDaemon_DevClientJoinsReleaseDaemon verifies that dev builds
-// connect to a release daemon without triggering a takeover. Two concurrent
-// dev clients must both succeed and see the release daemon version, not a
-// spawned replacement.
-func TestEnsureDaemon_DevClientJoinsReleaseDaemon(t *testing.T) {
+// TestEnsureDaemon_DevClientRejectsReleaseDaemon verifies that unordered
+// same-major builds fail closed instead of silently sharing a daemon.
+func TestEnsureDaemon_DevClientAcceptsSameSourceReleaseDaemon(t *testing.T) {
 	home := shortHome(t)
 	spawn := spawnInProcess(t, home)
 
@@ -270,12 +275,7 @@ func TestEnsureDaemon_DevClientJoinsReleaseDaemon(t *testing.T) {
 			return "", err
 		}
 		defer cl.Close()
-		ver := cl.DaemonVersion()
-		_, err = cl.Acquire(context.Background(), wingwire.AdmissionRequest{
-			RunID:     id,
-			Resources: wingwire.HostResources{Cores: 0.5},
-		}, nil)
-		return ver, err
+		return cl.DaemonVersion(), nil
 	}
 
 	type result struct {
@@ -295,49 +295,8 @@ func TestEnsureDaemon_DevClientJoinsReleaseDaemon(t *testing.T) {
 	wg.Wait()
 	for i, r := range results {
 		if r.err != nil {
-			t.Errorf("client %d: %v", i, r.err)
+			t.Errorf("client %d: error = %v, want success", i, r.err)
 		}
-		if r.ver != "v1.0.0" {
-			t.Errorf("client %d: daemon version %q after dev connect, want v1.0.0 (takeover must not have fired)", i, r.ver)
-		}
-	}
-}
-
-func TestEnsureDaemon_DevClientLogsWhenJoiningReleaseDaemon(t *testing.T) {
-	home := shortHome(t)
-	spawn := func(string, string) error {
-		d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0"})
-		if err != nil {
-			return err
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		t.Cleanup(cancel)
-		go func() { _ = d.Run(ctx) }()
-		return nil
-	}
-
-	var logged []string
-	cl, err := EnsureDaemon(context.Background(), Options{
-		Home:        home,
-		Version:     "(devel)",
-		Spawn:       spawn,
-		DialTimeout: 500 * time.Millisecond,
-		Backoff:     20 * time.Millisecond,
-		Logf:        func(f string, a ...any) { logged = append(logged, fmt.Sprintf(f, a...)) },
-	})
-	if err != nil {
-		t.Fatalf("ensure daemon: %v", err)
-	}
-	cl.Close()
-	found := false
-	for _, msg := range logged {
-		if strings.Contains(msg, "v1.0.0") {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Errorf("expected a log message naming the release daemon version; got %v", logged)
 	}
 }
 
@@ -350,5 +309,15 @@ func TestQuery_NoDaemonReturnsSentinel(t *testing.T) {
 	})
 	if !errors.Is(err, ErrNoDaemon) {
 		t.Fatalf("Query with no daemon: got %v, want ErrNoDaemon", err)
+	}
+}
+
+func TestQueryOptionsNeverTakeOverOrSpawn(t *testing.T) {
+	opts := queryOptions(Options{Version: "v2.0.0"})
+	if !opts.NoTakeover {
+		t.Fatal("read-only query remained takeover-capable")
+	}
+	if err := opts.Spawn("ignored", "ignored"); !errors.Is(err, ErrNoDaemon) {
+		t.Fatalf("query spawn error = %v, want ErrNoDaemon", err)
 	}
 }

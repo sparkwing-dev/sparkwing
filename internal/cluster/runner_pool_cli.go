@@ -108,7 +108,7 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 			Version: cfg.Version,
 			Origin:  wingwire.OriginController,
 		}
-		provider = newHeadroomProvider(cfg.Home, rv)
+		provider = newHeadroomProvider(cfg.Home, cfg.Version, rv)
 		logger.Info("local admission engaged; controller work shares the local daemon",
 			"reserve", cfg.LocalReserve, "source", cfg.SourceName)
 	}

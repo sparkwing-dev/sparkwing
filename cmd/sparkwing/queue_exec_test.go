@@ -81,7 +81,7 @@ func TestQueueExecWaitsInDaemonBeforeStartingCommand(t *testing.T) {
 
 	deadline := time.Now().Add(queueExecWait)
 	for {
-		qs, queryErr := wingdclient.Query(context.Background(), wingdclient.Options{Home: home})
+		qs, queryErr := wingdclient.Query(context.Background(), wingdclient.Options{Home: home, Version: "v1.0.0"})
 		if queryErr != nil {
 			t.Fatalf("query queue: %v", queryErr)
 		}
@@ -309,7 +309,7 @@ func TestQueueExecRefusesUnsupportedProcessOwnershipBeforeAdmission(t *testing.T
 	if _, statErr := os.Stat(ready); !errors.Is(statErr, os.ErrNotExist) {
 		t.Fatalf("unsupported command published readiness: %v", statErr)
 	}
-	qs, queryErr := wingdclient.Query(context.Background(), wingdclient.Options{Home: home})
+	qs, queryErr := wingdclient.Query(context.Background(), wingdclient.Options{Home: home, Version: "v1.0.0"})
 	if queryErr != nil {
 		t.Fatalf("query queue: %v", queryErr)
 	}
@@ -390,7 +390,7 @@ func TestQueueExecSupervisorDeathRetainsAdmissionUntilCommandSessionEnds(t *test
 	started := filepath.Join(tmp, "started")
 	release := filepath.Join(tmp, "release")
 
-	supervisor := exec.Command(os.Args[0], "-test.run=^TestQueueExecSupervisorProcess$", "--", home, ready, started, release)
+	supervisor := exec.Command(os.Args[0], "-test.run=^TestQueueExecSupervisorProcess$", "--", home, ready, started, release, "v1.0.0")
 	if err := supervisor.Start(); err != nil {
 		t.Fatalf("start queue-exec supervisor: %v", err)
 	}
@@ -499,7 +499,7 @@ func TestQueueExecSurvivesAdmissionDaemonRestart(t *testing.T) {
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), queueExecWait)
 		defer cancel()
-		if err := wingdclient.Stop(ctx, wingdclient.Options{Home: home}); err != nil && !errors.Is(err, wingdclient.ErrNoDaemon) {
+		if err := wingdclient.Stop(ctx, wingdclient.Options{Home: home, Version: "v1.0.0"}); err != nil && !errors.Is(err, wingdclient.ErrNoDaemon) {
 			t.Errorf("stop restarted queue daemon: %v", err)
 		}
 	})
@@ -576,7 +576,7 @@ func waitForRestartedQueueExecState(t *testing.T, home string, result <-chan err
 			t.Fatalf("queue exec ended during daemon restart: %v", err)
 		default:
 		}
-		qs, err := wingdclient.Query(context.Background(), wingdclient.Options{Home: home})
+		qs, err := wingdclient.Query(context.Background(), wingdclient.Options{Home: home, Version: "v1.0.0"})
 		if err == nil && ready(qs) {
 			return qs
 		}
@@ -632,9 +632,10 @@ func TestQueueExecSupervisorProcess(t *testing.T) {
 			separator = i
 		}
 	}
-	if separator < 0 || len(os.Args) != separator+5 {
+	if separator < 0 || len(os.Args) != separator+6 {
 		return
 	}
+	Version = os.Args[separator+5]
 	err := runQueue([]string{
 		"exec", "--home", os.Args[separator+1], "--run-id", "guarded-command", "--cores", "0.1",
 		"--semaphore", "bootstrap", "--ready-file", os.Args[separator+2],
@@ -735,7 +736,7 @@ func waitForQueueExecState(t *testing.T, home string, ready func(wingwire.QueueS
 	t.Helper()
 	deadline := time.Now().Add(queueExecWait)
 	for {
-		qs, err := wingdclient.Query(context.Background(), wingdclient.Options{Home: home})
+		qs, err := wingdclient.Query(context.Background(), wingdclient.Options{Home: home, Version: "v1.0.0"})
 		if err != nil {
 			t.Fatalf("query queue: %v", err)
 		}

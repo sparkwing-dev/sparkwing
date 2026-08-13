@@ -3,14 +3,16 @@ package wingd
 import (
 	"context"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 const descendantStallWindowMultiplier = 4
 
-// stallLoop samples holder process CPU on a slow cadence and marks
-// holders that stay idle while runs queue behind them. It runs only for
-// its side effect on holder state; the flag is surfaced through
-// [wingwire.QueueState] and never acts on the process.
+// stallLoop samples holder process CPU on a slow cadence and marks holders
+// that stay idle while runs queue behind them. A capable ordinary holder must
+// then answer a control-plane challenge; an unanswered challenge closes its
+// socket and lets the normal disconnect path reclaim admission.
 func (d *Daemon) stallLoop(ctx context.Context) {
 	t := time.NewTicker(d.cfg.stallInterval())
 	defer t.Stop()
@@ -85,7 +87,10 @@ func (d *Daemon) stallTick() {
 	}
 
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	var challenges []struct {
+		c     *conn
+		nonce uint64
+	}
 	for _, c := range holders {
 		if c.role != roleHolder || !sampled[c] {
 			continue
@@ -106,11 +111,49 @@ func (d *Daemon) stallTick() {
 			}
 			if now.Sub(c.lowSince) >= stallWindow {
 				c.stalled = true
+				// Only clients that advertised the challenge/ack capability may
+				// receive one. Older pinned clients retain the historical
+				// diagnostic-only behavior.
+				if c.holderLiveness && c.guard == nil && c.livenessNonce == 0 {
+					c.livenessSeq++
+					c.livenessNonce = c.livenessSeq
+					challenges = append(challenges, struct {
+						c     *conn
+						nonce uint64
+					}{c: c, nonce: c.livenessNonce})
+				}
 			}
 		} else {
 			c.lowSince = time.Time{}
 			c.stalled = false
 		}
+	}
+	d.mu.Unlock()
+	for _, challenge := range challenges {
+		if err := challenge.c.send(&wingwire.LivenessProbe{Nonce: challenge.nonce}); err != nil {
+			d.mu.Lock()
+			if challenge.c.livenessNonce == challenge.nonce {
+				challenge.c.livenessNonce = 0
+			}
+			d.mu.Unlock()
+			continue
+		}
+		time.AfterFunc(d.cfg.stallProbeTimeout(), func() {
+			d.mu.Lock()
+			unanswered := challenge.c.role == roleHolder && challenge.c.livenessNonce == challenge.nonce
+			runID := challenge.c.runID
+			if unanswered {
+				// Claim expiration while holding the same mutex an ack needs. Once
+				// cleared here, a late ack cannot turn this expired challenge back
+				// into proof of health before close reclaims the lease.
+				challenge.c.livenessNonce = 0
+			}
+			d.mu.Unlock()
+			if unanswered {
+				d.cfg.logf("holder %s did not answer liveness challenge within %s; reclaiming lease", runID, d.cfg.stallProbeTimeout())
+				challenge.c.close()
+			}
+		})
 	}
 }
 

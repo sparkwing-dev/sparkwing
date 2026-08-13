@@ -79,8 +79,7 @@ func LockHeld(home string) (bool, error) {
 	return false, nil
 }
 
-// bindListener prepares the socket directory, records the resolved socket
-// path under the home for discovery, removes any stale socket left by a
+// bindListener prepares the socket directory, removes any stale socket left by a
 // dead predecessor (the election lock is held, so no live daemon owns it),
 // and binds a fresh unix listener. It validates the path length first so
 // an over-length socket fails with a named limit rather than a bare bind
@@ -92,7 +91,6 @@ func (d *Daemon) bindListener() (net.Listener, error) {
 	if err := os.MkdirAll(filepath.Dir(d.layout.sock), 0o700); err != nil {
 		return nil, fmt.Errorf("wingd: prepare socket dir: %w", err)
 	}
-	_ = os.WriteFile(d.layout.record, []byte(d.layout.sock), 0o600)
 	_ = os.Remove(d.layout.sock)
 	ln, err := net.Listen("unix", d.layout.sock)
 	if err != nil {

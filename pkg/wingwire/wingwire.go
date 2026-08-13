@@ -25,14 +25,19 @@
 // SDK versions and keep running long after the daemon upgrades past
 // them, so the daemon meets such a client on its own major rather than
 // refusing it. The binary version travels alongside for observability
-// and for the newer-client takeover decision, never for compatibility
-// gating.
+// and for the newer-client takeover decision. BuildIdentity distinguishes
+// same-major implementations that may otherwise ignore one another's fields.
 package wingwire
 
 import (
 	"encoding/json"
 	"fmt"
 )
+
+// BuildIdentity changes whenever same-major wire behavior changes. It lets
+// source and installed builds compiled from the same protocol implementation
+// recognize each other even when their display versions differ.
+const BuildIdentity = "wingwire-v1-liveness"
 
 // ProtocolMajor is the newest wire protocol major this build speaks.
 // Clients send it in [Hello]; a daemon answers on it whenever the client
@@ -165,6 +170,8 @@ const (
 	TypeCancel           MessageType = "cancel"
 	TypeStatsReset       MessageType = "stats_reset"
 	TypeStatsResetAck    MessageType = "stats_reset_ack"
+	TypeLivenessProbe    MessageType = "liveness_probe"
+	TypeLivenessAck      MessageType = "liveness_ack"
 )
 
 // Message is implemented by every concrete wire message. The
@@ -259,6 +266,10 @@ func emptyMessage(t MessageType) (Message, error) {
 		return &StatsReset{}, nil
 	case TypeStatsResetAck:
 		return &StatsResetAck{}, nil
+	case TypeLivenessProbe:
+		return &LivenessProbe{}, nil
+	case TypeLivenessAck:
+		return &LivenessAck{}, nil
 	default:
 		return nil, fmt.Errorf("wingwire: unknown message type %q (peer speaks a different protocol major than %d)", t, ProtocolMajor)
 	}

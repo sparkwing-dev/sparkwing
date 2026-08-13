@@ -48,6 +48,26 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+### Changed
+
+- **sdk (Breaking):** The result-memoization modifier `.Cache()` is renamed to
+  `.Memoize()` on both `JobNode` and `JobGroup`, with `CacheConfig` →
+  `MemoizeConfig`, `CacheOption` → `MemoizeOption`, and `CacheConfig()` →
+  `MemoizeConfig()`. `CacheKey`, `CacheKeyFn`, `Key`, `NoCache`, and `TTL` keep
+  their names. The old name read like GitHub Actions `actions/cache` while doing
+  the opposite (skipping the node instead of restoring a directory); the
+  `actions/cache` equivalent is `.CacheDir()`. No alias: every call site is a
+  compile error until updated. See
+  [migration guide](docs/migrations/_unreleased.md#cache-becomes-memoize).
+
+### Fixed
+
+- **release:** Windows CLI binaries build again. The stale socket cleanup now
+  checks Unix directory ownership only on Unix, so cross-compilation no longer
+  references `syscall.Stat_t` on Windows.
+
+## [v0.32.0] - 2026-08-13
 ### Changed
 
 - **cli (Breaking):** list-shaped `-o json` output is NDJSON -- one
@@ -67,15 +87,34 @@ code change to unlock.
   `markdown`. See
   [migration guide](docs/migrations/_unreleased.md#list-output-is-ndjson)
   for the full command list.
-- **sdk (Breaking):** The result-memoization modifier `.Cache()` is renamed to
-  `.Memoize()` on both `JobNode` and `JobGroup`, with `CacheConfig` →
-  `MemoizeConfig`, `CacheOption` → `MemoizeOption`, and `CacheConfig()` →
-  `MemoizeConfig()`. `CacheKey`, `CacheKeyFn`, `Key`, `NoCache`, and `TTL` keep
-  their names. The old name read like GitHub Actions `actions/cache` while doing
-  the opposite (skipping the node instead of restoring a directory); the
-  `actions/cache` equivalent is `.CacheDir()`. No alias: every call site is a
-  compile error until updated. See
-  [migration guide](docs/migrations/_unreleased.md#cache-becomes-memoize).
+- **cli (Breaking):** `sparkwing commands -o json` emits index fields
+  only. Each record is now `path`, `synopsis`, and `subcommand_count`
+  (0 means the verb is a leaf); `description`, `flags`, `examples`,
+  `positional_args`, and the `subcommands` array are gone from the
+  listing, which drops the full surface from 207KB to 17KB. Those
+  fields are exactly what `<path> --help` prints, from the same command
+  registry -- so the listing was spending a caller's context budget on
+  a second copy of the help system, one that could disagree with the
+  first. Read the index to choose a command, then `<path> --help` to
+  learn how to call it; `--help --json` is unchanged and still returns
+  the full record for one command. `-o pretty`, `-o plain`, and `-o
+  markdown` (including `--split-dir`, which generates the
+  `docs/cli-*.md` reference) are untouched. Hidden commands stay out of
+  the listing, now as a documented decision rather than an accident of
+  the filter; `--include-hidden` lists them marked `"hidden": true`.
+  See
+  [migration guide](docs/migrations/_unreleased.md#commands--o-json-is-an-index)
+  for before/after records.
+
+### Fixed
+
+- **wingd:** harden daemon lifecycle arbitration across stalled holders,
+  restarts, build skew, and scratch homes. Contended holders now prove control
+  plane liveness before keeping capacity; restart preserves every durable lease
+  even when the current budget shrank and gives clients a wider reattach
+  window; same-major builds fail closed unless their identities establish a
+  safe ordering; and stale temporary socket directories are reclaimed without
+  leaving a dead discovery record under the Sparkwing home.
 
 ### Docs
 
@@ -92,15 +131,6 @@ code change to unlock.
   (`sdkref <repo-root> <out-dir>`) instead of stdout, pruning generated
   pages for subpackages that no longer exist. Only pages carrying the
   generated marker are pruned, so a hand-authored `sdk-*.md` survives.
-- **sdk (Breaking):** The result-memoization modifier `.Cache()` is renamed to
-  `.Memoize()` on both `JobNode` and `JobGroup`, with `CacheConfig` →
-  `MemoizeConfig`, `CacheOption` → `MemoizeOption`, and `CacheConfig()` →
-  `MemoizeConfig()`. `CacheKey`, `CacheKeyFn`, `Key`, `NoCache`, and `TTL` keep
-  their names. The old name read like GitHub Actions `actions/cache` while doing
-  the opposite (skipping the node instead of restoring a directory); the
-  `actions/cache` equivalent is `.CacheDir()`. No alias: every call site is a
-  compile error until updated. See
-  [migration guide](docs/migrations/v0.32.0.md).
 
 ## [v0.31.0] - 2026-08-12
 ### Added
@@ -113,7 +143,7 @@ code change to unlock.
   store, so a build's dependency downloads stay inside the cluster instead of
   egressing every run. Caching is best-effort throughout: a missing lockfile,
   an unreachable backend, or an oversized archive logs a warning and never
-  fails the node. This is distinct from `.Memoize()`, which memoizes a node's
+  fails the node. This is distinct from `.Cache()`, which memoizes a node's
   result so the node does not run at all; `.CacheDir()` makes the work fast
   while the node still runs. Porting `actions/cache` maps to `.CacheDir()`. See
   [caching](docs/caching.md).
@@ -124,15 +154,6 @@ code change to unlock.
 
 ### Changed
 
-- **sdk (Breaking):** The result-memoization modifier `.Cache()` is renamed to
-  `.Memoize()` on both `JobNode` and `JobGroup`, with `CacheConfig` →
-  `MemoizeConfig`, `CacheOption` → `MemoizeOption`, and `CacheConfig()` →
-  `MemoizeConfig()`. `CacheKey`, `CacheKeyFn`, `Key`, `NoCache`, and `TTL` keep
-  their names. The old name read like GitHub Actions `actions/cache` while doing
-  the opposite (skipping the node instead of restoring a directory); the
-  `actions/cache` equivalent is the new `.CacheDir()`. No alias: every call site
-  is a compile error until updated. See
-  [migration guide](docs/migrations/v0.31.0.md).
 - **runner:** Dependency fetches now default to the in-cluster pull-through
   proxy. Wherever a cache URL is known, the runner container and every pod it
   spawns start with `GOPROXY`, `npm_config_registry`, `PIP_INDEX_URL`, and
