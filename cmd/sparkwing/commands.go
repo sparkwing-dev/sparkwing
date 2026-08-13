@@ -1,7 +1,10 @@
-// `sparkwing commands` exposes the entire CLI surface as structured
-// data so an agent learns every verb in one tool call. Each entry
-// is the same Command record the help renderer uses; we just emit
-// it as JSON instead of prose.
+// `sparkwing commands` exposes the entire CLI surface as an index so an
+// agent learns every verb in one tool call: one path and synopsis per
+// command, in prose or as JSON. Detail -- description, flags, examples
+// -- belongs to `<command> --help`, which renders the same Command
+// values; the index only has to be good enough to pick which one to
+// open. `-o markdown` is the exception: it is the generated reference
+// page, so it renders the full record.
 package main
 
 import (
@@ -61,11 +64,42 @@ var allCommands = []*Command{
 	&cmdRepos, &cmdReposList, &cmdReposInfo, &cmdReposUpdate,
 }
 
-// CommandJSON is the wire shape emitted by `sparkwing commands` and
-// `<any-verb> --help --json`. It mirrors the Command struct but
-// flattens the FlagSpec / SubcommandRef / Example / PosArg types to
-// public-friendly field names. Decoupled from internal Command so
-// renames don't silently break agents pinning to older fields.
+// CommandIndexJSON is the wire shape emitted by `sparkwing commands
+// -o json`: a machine-readable twin of the pretty index, not a second
+// copy of the help system.
+//
+// The listing used to carry the full record -- description, flags,
+// examples -- for all 150 commands: 206KB, of which those three fields
+// were 83%. Every byte of it duplicates what `<command> --help` prints,
+// authoritatively and from the same Command values, so the listing was
+// paying a context budget to answer a question nobody had asked yet. An
+// index exists to help a reader choose which page to open; path and
+// synopsis choose, and SubcommandCount says whether there is a page
+// below this one.
+//
+// Count rather than a leaf/group boolean: the count carries the boolean
+// (0 means leaf) for four more bytes on the records that have children,
+// and it lets a caller size the descent before spending a call on it --
+// "this group has 20 subcommands" and "this group has 2" are different
+// decisions. See commandIndex for where the number comes from.
+//
+// `<any-verb> --help --json` still emits the full CommandJSON below;
+// that surface is the detail page, and detail is the whole point of it.
+type CommandIndexJSON struct {
+	Path            string `json:"path"`
+	Synopsis        string `json:"synopsis"`
+	SubcommandCount int    `json:"subcommand_count"`
+	// Hidden only ever appears under --include-hidden; see the comment
+	// on the exclusion in runCommands.
+	Hidden bool `json:"hidden,omitempty"`
+}
+
+// CommandJSON is the wire shape emitted by `<any-verb> --help --json`
+// and the input to the markdown reference renderer. It mirrors the
+// Command struct but flattens the FlagSpec / SubcommandRef / Example /
+// PosArg types to public-friendly field names. Decoupled from internal
+// Command so renames don't silently break agents pinning to older
+// fields.
 type CommandJSON struct {
 	Path        string           `json:"path"`
 	Synopsis    string           `json:"synopsis"`
@@ -143,6 +177,41 @@ func toCommandJSON(c *Command) CommandJSON {
 	return out
 }
 
+// commandIndex renders the picked listing as index records.
+//
+// The subcommand count is derived from the listing itself, not from
+// Command.Subcommands. That field is a hand-maintained help-display
+// list: it carries cross-group pointers (`configure` names `profiles`,
+// which is registered at the top level) and has drifted from the
+// registry in both directions -- `run` declares no children though `run
+// config` is registered, and `examples` is registered though the root
+// does not name it. A descend signal has to describe the thing a caller
+// actually descends into, which is `--path`, and `--path` selects
+// registry paths. Counting inside the listing also makes the number
+// self-consistent under every filter: `--path` selects a whole subtree,
+// so a picked command's children are always picked too, and the count
+// can never promise records this caller cannot see -- including under
+// --include-hidden, where the hidden children are in the listing and so
+// are in the count.
+func commandIndex(picked []*Command) []CommandIndexJSON {
+	children := make(map[string]int, len(picked))
+	for _, c := range picked {
+		if i := strings.LastIndex(c.Path, " "); i >= 0 {
+			children[c.Path[:i]]++
+		}
+	}
+	out := make([]CommandIndexJSON, 0, len(picked))
+	for _, c := range picked {
+		out = append(out, CommandIndexJSON{
+			Path:            c.Path,
+			Synopsis:        c.Synopsis,
+			SubcommandCount: children[c.Path],
+			Hidden:          c.Hidden,
+		})
+	}
+	return out
+}
+
 // runCommands handles `sparkwing commands [--include-hidden]
 // [--path PREFIX] [-o pretty|json|markdown|plain]`.
 //
@@ -154,10 +223,9 @@ func toCommandJSON(c *Command) CommandJSON {
 // a narrow lookup, spent ~58,000 tokens, and got truncated anyway.
 // pretty is the same 139 verbs in 140 lines, one path and synopsis
 // each, which is what "what is this CLI" actually wants; --path narrows
-// to a subtree and -o json is one flag away for anything that needs the
-// full records. -o json is NDJSON for the same reason: `head` is the
-// only sizing tool a caller has, and it only works on output whose
-// records are lines.
+// to a subtree, and -o json is the same index for a program to parse.
+// -o json is NDJSON for the same reason: `head` is the only sizing tool
+// a caller has, and it only works on output whose records are lines.
 func runCommands(args []string) error {
 	fs := flag.NewFlagSet(cmdCommands.Path, flag.ContinueOnError)
 	var output string
@@ -193,17 +261,26 @@ func runCommands(args []string) error {
 	if blankPathFilter(*pathPrefix, prefix) {
 		return unmatchedPathError(*pathPrefix, 0)
 	}
-	picked := []CommandJSON{}
+	picked := []*Command{}
 	hiddenMatches := 0
 	for _, c := range sorted {
 		if !matchesCommandPath(c.Path, prefix) {
 			continue
 		}
+		// Hidden commands stay out of every listing, deliberately. A
+		// Hidden command is dispatchable but not part of the offered
+		// surface -- it exists for a pipeline or a verification path and
+		// its own help says what to use instead -- so listing it flagged
+		// would put a "do not use this" entry in the one place a reader
+		// goes to choose what to use. Excluding it is not a claim that
+		// it does not exist: --include-hidden lists them, and a --path
+		// that matches only hidden commands errors saying so rather than
+		// answering "no such command" with an empty listing.
 		if c.Hidden && !*includeHidden {
 			hiddenMatches++
 			continue
 		}
-		picked = append(picked, toCommandJSON(c))
+		picked = append(picked, c)
 	}
 	if len(picked) == 0 && prefix != "" {
 		return unmatchedPathError(prefix, hiddenMatches)
@@ -221,17 +298,21 @@ func runCommands(args []string) error {
 		// that are not a record's, so there is no summary line to lead
 		// with.
 		enc := json.NewEncoder(os.Stdout)
-		for _, c := range picked {
+		for _, c := range commandIndex(picked) {
 			if err := enc.Encode(c); err != nil {
 				return err
 			}
 		}
 		return nil
 	case "markdown", "md":
-		if *splitDir != "" {
-			return writeSplitMarkdown(*splitDir, picked)
+		full := make([]CommandJSON, 0, len(picked))
+		for _, c := range picked {
+			full = append(full, toCommandJSON(c))
 		}
-		fmt.Print(renderCommandsMarkdown(picked))
+		if *splitDir != "" {
+			return writeSplitMarkdown(*splitDir, full)
+		}
+		fmt.Print(renderCommandsMarkdown(full))
 		return nil
 	case "plain":
 		for _, c := range picked {
@@ -256,7 +337,7 @@ func runCommands(args []string) error {
 		fmt.Println()
 		printAlignedSteps([]InfoNextStep{
 			{Command: "<any path above> --help", Purpose: "flags, arguments, examples for one verb"},
-			{Command: "sparkwing commands --path pipeline -o json", Purpose: "full records for a subtree"},
+			{Command: "sparkwing commands --path pipeline -o json", Purpose: "this index as JSON, one record per line"},
 		})
 		return nil
 	default:
