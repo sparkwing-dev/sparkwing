@@ -100,6 +100,23 @@ profiles:
       prefix: logs
 ```
 
+### What each runner needs beyond the profile
+
+The profile carries two strings per surface -- `bucket` and `prefix`.
+Everything else is environment, and every runner needs it:
+
+| Variable | Required | What it does |
+|---|---|---|
+| `AWS_REGION` | Yes | The SDK resolves no endpoint without it. Unset is the default state of a runner that has static credentials and no `~/.aws/config`. |
+| `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, or any other link in the standard AWS credential chain | Yes | Authenticates every read and write. Profiles hold no credential fields. |
+| `SPARKWING_S3_ENDPOINT` | Only for non-AWS S3 | Points the SDK at MinIO, R2, or another S3-compatible endpoint. Setting it also forces path-style addressing, and it applies process-wide: every surface -- state, cache, logs, and the binaries cache -- goes to that endpoint, so one profile cannot mix a MinIO cache with a real-AWS state. |
+
+Secrets are the exception to "no controller": the secrets surface
+takes `controller`, `filesystem`, `env`, or `none`, and has no
+object-store option. A Mode 2 team whose pipelines call `Secret()`
+provisions those per host, or runs a controller for that surface
+alone.
+
 Run against it with `sparkwing run <pipeline> --profile shared`, then
 point `sparkwing-web` at the same bucket:
 
@@ -264,8 +281,10 @@ A practical decision order:
 
 1. **One person, one laptop?** Mode 1.
 2. **Multiple people on S3, fine with bucket-dependent
-   coordination?** Mode 2 -- a bucket and a shared profile is the
-   entire setup.
+   coordination?** Mode 2 -- a bucket, a shared profile, and the
+   per-runner environment that profile does not carry: `AWS_REGION`,
+   credentials, and `SPARKWING_S3_ENDPOINT` for a non-AWS store. See
+   [what each runner needs](#what-each-runner-needs-beyond-the-profile).
 3. **Expensive cacheable steps where you want reservation guaranteed
    regardless of bucket CAS support, or low tail latency under heavy
    contention?** Mode 3 -- add a Postgres on top of Mode 2.

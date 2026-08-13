@@ -118,7 +118,7 @@ func TestLogsDropped_FailsRunAndRecordsCount(t *testing.T) {
 	}
 }
 
-// The opt-out restores the older lossy behaviour for adopters who
+// The opt-out restores the older lossy behavior for adopters who
 // would rather keep a green run than learn its logs are incomplete.
 func TestLogsDropped_WarnPolicyKeepsRunGreen(t *testing.T) {
 	register("dropwarn-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return dropFailPipe{} })
@@ -138,7 +138,7 @@ func TestLogsDropped_WarnPolicyKeepsRunGreen(t *testing.T) {
 }
 
 // A misspelled opt-out must fail rather than silently restore the
-// behaviour it was trying to keep -- the whole value of the default is
+// behavior it was trying to keep -- the whole value of the default is
 // that it cannot be turned off by accident.
 func TestLogsDropped_MisspelledPolicyStillFails(t *testing.T) {
 	register("droptypo-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return dropFailPipe{} })

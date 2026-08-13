@@ -82,7 +82,7 @@ func projectProfile(name string) (*profile.Profile, bool, error) {
 // projectDefaultProfile resolves the project's defaults.profile: the
 // selection `sparkwing run` makes when no --profile is passed.
 //
-// The read commands consult it for the same reason they honour
+// The read commands consult it for the same reason they honor
 // --profile: a run whose state went to the project's default store and
 // a `runs status` that reads the local one disagree about where the
 // run is, and the operator has no way to ask which is right.

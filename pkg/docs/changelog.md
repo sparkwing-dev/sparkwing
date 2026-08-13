@@ -48,6 +48,93 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+- **cli (Breaking):** `pipeline list -o json` is an index. It carries
+  `name`, `short`, `entrypoint` and `triggers` -- what a caller picks a
+  pipeline by -- where it used to carry every pipeline's full help text,
+  args, examples, env vars and risk labels as well. `pipeline describe
+  --name <n>` was already the read verb for those and still answers with
+  all of them. A pipeline declaring no `short` now summarizes as the
+  first line of its help, so nothing loses its line. `pipeline discover`
+  streams the same index plus its score. See
+  [migration](docs/migrations/v0.33.0.md#pipeline-list-is-an-index).
+- **cli (Breaking):** `pipeline sparks list -o json` is a stream: a
+  `kind: summary` line carrying `sparkwing_dir` and the library count,
+  then one `kind: library` line per library. It was a pretty-printed
+  object wrapping a `libraries` array, so `head -1` returned `{` and a
+  truncating reader got nothing. Single-object verbs are unchanged, as
+  in v0.32.0. See
+  [migration](docs/migrations/v0.33.0.md#pipeline-sparks-list-is-a-stream).
+- **cli:** `configure profiles list` takes `-o pretty|json|plain`, which
+  it had no machine-readable mode at all before. JSON is one profile per
+  line; the token is redacted in every mode, because a machine-readable
+  listing is the shape most likely to be piped into a log.
+- **cli (Breaking):** A run that lost log lines fails instead of
+  reporting success. When the log store stays unreachable past the
+  append retry budget, the node fails with the new `logs_dropped`
+  failure reason and the lost-line count reaches the run record. It
+  used to print `status: success` with rc 0 while dropping every line,
+  which is the same false all-clear `logs_auth` already exists to
+  prevent. Such a run also finishes at its real speed now -- a short
+  breaker window after the first exhausted budget stops every
+  subsequent line paying the full retry cost, which took one 84ms
+  pipeline to 43.9s. Set `SPARKWING_LOGS_DROP_POLICY=warn` to keep the
+  old lossy behavior. See
+  [migration](docs/migrations/v0.33.0.md#lost-log-lines-fail-the-run).
+- **cli (Breaking):** `runs list`, `runs status`, and `runs logs` read
+  through the project's `defaults.profile` when no `--profile` is
+  given, which is the store `sparkwing run` writes to. They used to
+  read the local SQLite store regardless, so on a machine sharing a
+  bucket `runs list` came back empty. See
+  [migration](docs/migrations/v0.33.0.md#read-commands-follow-the-projects-default-profile).
+- **config (Breaking):** A backend spec must carry the fields its type
+  needs: a `bucket` for `s3` / `gcs` / `azure-blob`, a `path` for
+  `filesystem`, a `url` or `url_source` for `postgres` / `mysql`, a
+  name for `controller`. `{type: s3}` with no bucket used to load
+  clean and render as `s3://`. `sqlite` with no path is still valid --
+  the resolver fills in the host's own state database. See
+  [migration](docs/migrations/v0.33.0.md#backend-specs-declare-their-required-fields).
+
+### Added
+
+- **cli:** `pipeline hooks install --profile NAME` pins the storage
+  profile a git hook's runs use, and the generated hook no longer
+  inherits `SPARKWING_PROFILE` from the shell that invoked git. Two
+  identical commits seconds apart could otherwise land in different
+  stores, both printing a green tick. The quiet renderer a hook prints
+  through now names the active profile, so a tick says which store
+  produced it.
+- **cli:** `dashboard start --profile NAME` reads the dashboard's logs
+  and artifacts through a storage profile's surfaces. The flag was
+  advertised by help, completion, and the CLI reference, and was
+  registered nowhere.
+
+### Fixed
+
+- **cli:** `--profile NAME` resolves against the project's own
+  `profiles:` block as well as `~/.config/sparkwing/profiles.yaml`. A
+  profile declared in `sparkwing.yaml` was reachable by a bare
+  `sparkwing run` and rejected by the flag every doc example teaches.
+  A name in both files resolves to the user's.
+- **cli:** `sparkwing profile` with no flag names the store it would
+  use. It reported "project defaults apply" and then rendered every
+  surface as unset, so no command answered where a run's state went.
+- **cli:** `runs status` exits 0 for a successful run read through a
+  profile. The exit code came from local SQLite whichever store the
+  status was read from, so any machine that had not itself run the
+  pipeline printed the right status and exited 1.
+- **cli:** A missing AWS region names `AWS_REGION` and the backend that
+  wanted it, rather than the SDK's "resolve auth scheme: resolve
+  endpoint: endpoint rule error, Invalid region".
+
+### Docs
+
+- **docs:** `deployment-modes.md` states what a Mode 2 runner needs
+  beyond the bucket and the shared profile: `AWS_REGION`, the AWS
+  credential chain, and `SPARKWING_S3_ENDPOINT` for a non-AWS store --
+  including that the endpoint applies process-wide, so one profile
+  cannot mix a MinIO cache with a real-AWS state. It also records that
+  the secrets surface has no object-store option, so "no controller"
+  and "no per-host secret provisioning" cannot both hold.
 
 ## [v0.32.1] - 2026-08-13
 ### Changed

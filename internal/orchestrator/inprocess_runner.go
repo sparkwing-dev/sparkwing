@@ -506,14 +506,14 @@ func nodeLogFatal(nlog NodeLog) error {
 // that could not record what it did reporting success is the same
 // false all-clear as a run that could not authenticate to its log
 // store (store.FailureLogsAuth). Set it to "warn" to keep the older
-// behaviour, where loss surfaces only as a WARN line and the
+// behavior, where loss surfaces only as a WARN line and the
 // logs_drop event.
 const LogsDropPolicyEnvVar = "SPARKWING_LOGS_DROP_POLICY"
 
 // logsDropIsFatal reports whether lost log lines should fail the node.
 // Any value other than "warn" -- including an unset or misspelled one
 // -- fails, so a typo in the opt-out cannot silently restore the
-// behaviour the variable exists to opt out of.
+// behavior the variable exists to opt out of.
 func logsDropIsFatal() bool {
 	return os.Getenv(LogsDropPolicyEnvVar) != "warn"
 }

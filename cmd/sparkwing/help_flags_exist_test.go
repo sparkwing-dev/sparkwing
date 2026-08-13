@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -101,21 +102,24 @@ func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
 func flagsRegisteredPerCommand(t *testing.T, varPaths map[string]string) map[string][]string {
 	t.Helper()
 	fset := token.NewFileSet()
-	pkgs, err := parser.ParseDir(fset, ".", nil, 0)
+	entries, err := os.ReadDir(".")
 	if err != nil {
-		t.Fatalf("parse cmd/sparkwing: %v", err)
+		t.Fatalf("read cmd/sparkwing: %v", err)
 	}
 
 	var funcs []*ast.FuncDecl
-	for _, pkg := range pkgs {
-		for name, file := range pkg.Files {
-			if strings.HasSuffix(name, "_test.go") {
-				continue
-			}
-			for _, decl := range file.Decls {
-				if fn, ok := decl.(*ast.FuncDecl); ok && fn.Body != nil {
-					funcs = append(funcs, fn)
-				}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		for _, decl := range file.Decls {
+			if fn, ok := decl.(*ast.FuncDecl); ok && fn.Body != nil {
+				funcs = append(funcs, fn)
 			}
 		}
 	}
