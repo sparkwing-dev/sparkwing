@@ -90,6 +90,14 @@ func OpenLogStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Profil
 		if err != nil {
 			return nil, err
 		}
+		// A controller serves no /api/v1/logs route -- sparkwing-logs is
+		// a separate service -- so a caller that learned the real URL
+		// overrides the controller's. The token is still the
+		// controller's, which is what the logs service validates
+		// against.
+		if spec.URL != "" {
+			url = spec.URL
+		}
 		return sparkwinglogs.New(url, nil, token), nil
 	case backends.TypeGCS, backends.TypeAzureBlob:
 		return nil, unimplemented("logs", spec.Type)

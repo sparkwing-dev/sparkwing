@@ -286,3 +286,36 @@ func containsArg(args []string, want string) bool {
 	}
 	return false
 }
+
+// The controller must announce the logs service, because it serves no
+// /api/v1/logs route itself. A client with no logs: surface of its own
+// -- a laptop running `sparkwing run --profile prod` -- discovers the
+// URL from the controller and posts there; without the announcement it
+// falls back to the controller's own URL and every append 404s.
+//
+// The in-cluster runner does not depend on this: its Deployment passes
+// --logs directly. This flag is for everything reaching in from outside.
+func TestControllerAnnouncesTheBundledLogsService(t *testing.T) {
+	rendered := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing")
+	args := webArgs(t, rendered)
+	got, ok := hasFlag(args, "--logs-url=")
+	if !ok {
+		t.Fatalf("no --logs-url flag in %v; a client with no logs surface would post to the controller, which serves none", args)
+	}
+	const want = "--logs-url=http://sparkwing-sparkwing-runner-bundle-logs.default.svc.cluster.local"
+	if got != want {
+		t.Errorf("logs-url flag = %q, want the bundled logs Service", got)
+	}
+}
+
+// With no logs component deployed there is nothing to announce, and the
+// flag must be absent rather than empty -- an empty announcement would
+// advertise a URL that resolves nowhere.
+func TestControllerAnnouncesNoLogsServiceWhenNoneIsDeployed(t *testing.T) {
+	rendered := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing",
+		"sparkwing-runner-bundle.logs.enabled=false")
+	args := webArgs(t, rendered)
+	if got, ok := hasFlag(args, "--logs-url="); ok {
+		t.Errorf("got %q, want no flag when no logs service is deployed", got)
+	}
+}

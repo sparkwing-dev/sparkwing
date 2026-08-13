@@ -71,6 +71,7 @@ type Server struct {
 	// hardcoding it in profiles.yaml. Empty = endpoint returns 404,
 	// callers fall back to "no cache pod configured."
 	cachePodURL string
+	logsURL     string
 	// cacheURL is the controller-reachable sparkwing-cache URL. It can
 	// be an in-cluster service URL because only controller proxy routes
 	// use it.
@@ -140,6 +141,16 @@ func (s *Server) WithArtifactStore(a storage.ArtifactStore) *Server {
 // the announcement (clients fall back to "no cache pod").
 func (s *Server) WithCachePodURL(url string) *Server {
 	s.cachePodURL = url
+	return s
+}
+
+// WithLogsURL announces the externally-reachable sparkwing-logs URL
+// via GET /api/v1/services, so a runner posts node log lines to the
+// service that routes them instead of to the controller, which does
+// not. Empty disables the announcement, which is correct for a
+// co-located deployment where one mux serves both.
+func (s *Server) WithLogsURL(url string) *Server {
+	s.logsURL = url
 	return s
 }
 

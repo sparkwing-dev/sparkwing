@@ -86,6 +86,13 @@ services:
       - SPARKWING_GITCACHE=http://gitcache:8090
       - SPARKWING_LOGS=http://sparkwing-logs:8091
       - SPARKWING_LOGS_PUBLIC_URL=${LOGS_PUBLIC_URL:-https://logs.example.com}
+      # Announced on GET /api/v1/services so a client reaching in from
+      # outside -- a laptop running `sparkwing run --profile prod` --
+      # posts node log lines to sparkwing-logs. The controller serves no
+      # /api/v1/logs route of its own, so without this a client falls
+      # back to the controller's URL and every append 404s. Public,
+      # not the compose-internal name: the client is not on this network.
+      - SPARKWING_LOGS_URL=${LOGS_PUBLIC_URL:-https://logs.example.com}
       - SPARKWING_CONTROLLER_SELF_URL=http://controller:8080
       - SPARKWING_DB_PATH=/data/sparkwing.db
       - SPARKWING_DASHBOARD_URL=${DASHBOARD_URL:-https://sparkwing.example.com}

@@ -45,6 +45,11 @@ func run(args []string) error {
 		"externally-reachable URL of the sparkwing-cache pod (gitcache + artifact store). "+
 			"Announced via GET /api/v1/services so operator CLIs can discover it without "+
 			"hardcoding it in profiles.yaml. Empty disables the announcement.")
+	logsURL := fs.String("logs-url", os.Getenv("SPARKWING_LOGS_URL"),
+		"externally-reachable URL of the sparkwing-logs service. Announced via "+
+			"GET /api/v1/services so runners post node log lines to the service that "+
+			"routes them; the controller itself serves no /api/v1/logs. Empty disables "+
+			"the announcement, which is correct only when one process serves both.")
 	cacheURL := fs.String("cache-url", os.Getenv("SPARKWING_CACHE_URL"),
 		"controller-reachable sparkwing-cache URL for gitcache proxy routes")
 	requireAuth := fs.Bool("require-auth", envTruthy("SPARKWING_REQUIRE_AUTH"),
@@ -90,6 +95,7 @@ func run(args []string) error {
 		EnableAuthFromStore().
 		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
 		WithCachePodURL(*cachePodURL).
+		WithLogsURL(*logsURL).
 		WithCacheURL(*cacheURL)
 	// safety: a typed-nil *secrets.Cipher satisfies the interface and would register as non-nil at the handler's seam.
 	if cipher != nil {

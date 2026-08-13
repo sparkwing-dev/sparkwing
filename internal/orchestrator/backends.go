@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/discovery"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
@@ -168,7 +169,7 @@ var _ StateBackend = (*client.Client)(nil)
 // configured.
 func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore, httpClient *http.Client, lease time.Duration) Backends {
 	if logs == nil {
-		logs = NewHTTPLogsWithToken(c.BaseURL(), nil, c.Token(), nil)
+		logs = NewHTTPLogsWithToken(remoteLogsURL(c), nil, c.Token(), nil)
 	}
 	if httpClient == nil {
 		httpClient = defaultHTTPClient()
@@ -180,6 +181,36 @@ func RemoteBackends(c *client.Client, logs LogBackend, art storage.ArtifactStore
 		Artifact:    art,
 	}
 }
+
+// remoteLogsURL picks where a Mode 4 run posts its node log lines when
+// the caller named no logs surface.
+//
+// A cluster runs the controller and the logs service as two binaries on
+// two ports, and only sparkwing-logs routes /api/v1/logs, so assuming
+// the controller's own URL posted every line into a 404 -- silently
+// before v0.34.0, and as a failed run after it. The controller
+// announces the real URL through the discovery endpoint it already
+// serves for the cache pod.
+//
+// The controller's own URL stays the fallback rather than an error,
+// because it is the right answer for a co-located deployment: the
+// laptop dashboard mounts the controller and the logs service on one
+// mux. When it is the wrong answer, the append fails with a 404 whose
+// message names the missing service.
+func remoteLogsURL(c *client.Client) string {
+	ctx, cancel := context.WithTimeout(context.Background(), logsDiscoveryTimeout)
+	defer cancel()
+	if svc, err := discovery.ServicesFor(ctx, c.BaseURL(), c.Token()); err == nil && svc.Logs != "" {
+		return svc.Logs
+	}
+	return c.BaseURL()
+}
+
+// logsDiscoveryTimeout bounds the one discovery call a run makes while
+// assembling its backends. Short, because an unreachable controller
+// must not delay the fallback the co-located case depends on;
+// discovery.ServicesFor caches the result for the process either way.
+const logsDiscoveryTimeout = 3 * time.Second
 
 // defaultHTTPClient returns nil so NewHTTPConcurrency picks its own
 // default transport (mirrors how client.NewWithToken handles a nil

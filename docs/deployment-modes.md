@@ -249,10 +249,27 @@ profiles:
     # state/cache/logs are implied by controller; reads/writes go through it.
 ```
 
-A profile with a `controller:` block routes state, cache, and logs through
-that controller over HTTP; the nested `token:` authenticates. Register or
-edit profiles with `sparkwing configure profiles`. See
+A profile with a `controller:` block routes state and cache through that
+controller over HTTP; the nested `token:` authenticates. Register or edit
+profiles with `sparkwing configure profiles`. See
 [Self-hosting](self-hosting.md) for the controller deployment.
+
+Logs are the exception. `sparkwing-controller` serves no `/api/v1/logs`
+route -- `sparkwing-logs` is a separate binary on its own port -- so a
+deployment that runs them as two processes must tell the controller
+where the logs service is:
+
+```sh
+sparkwing-controller --logs-url https://sparkwing-logs.example.dev
+```
+
+The controller announces that URL on `GET /api/v1/services`, and a
+runner with no `logs:` surface of its own posts there. Without the
+announcement a runner falls back to the controller's own URL, which is
+correct only when one process serves both -- the local dashboard mounts
+the controller and the logs service on a single mux. When it is wrong,
+every append gets a 404 and the run fails naming the missing service,
+rather than losing the lines silently.
 
 ## Forcing local mode for a single run
 
