@@ -202,9 +202,9 @@ func TestSpawn_FailedStartLeavesNoEmptyDaemonLog(t *testing.T) {
 	}
 }
 
-// A no-takeover client cannot replace a cross-build daemon, but it must not
-// silently share one either.
-func TestEnsureDaemon_NoTakeoverRejectsSupersededDaemon(t *testing.T) {
+// A no-takeover client may share a same-source daemon even when their display
+// versions differ.
+func TestEnsureDaemon_NoTakeoverAcceptsSameSourceDaemon(t *testing.T) {
 	home := shortHome(t)
 	var spawns atomic.Int32
 	inProcess := spawnInProcess(t, home)
@@ -220,8 +220,8 @@ func TestEnsureDaemon_NoTakeoverRejectsSupersededDaemon(t *testing.T) {
 		DialTimeout: 500 * time.Millisecond,
 		Backoff:     20 * time.Millisecond,
 	})
-	if !errors.Is(err, ErrBuildMismatch) {
-		t.Fatalf("ensure daemon error = %v, want ErrBuildMismatch", err)
+	if err != nil {
+		t.Fatalf("ensure daemon error = %v, want success", err)
 	}
 	if n := spawns.Load(); n != 1 {
 		t.Fatalf("spawn fired %d times, want exactly the initial bring-up", n)

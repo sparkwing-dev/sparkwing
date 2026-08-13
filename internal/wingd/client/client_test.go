@@ -259,7 +259,7 @@ func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
 
 // TestEnsureDaemon_DevClientRejectsReleaseDaemon verifies that unordered
 // same-major builds fail closed instead of silently sharing a daemon.
-func TestEnsureDaemon_DevClientRejectsReleaseDaemon(t *testing.T) {
+func TestEnsureDaemon_DevClientAcceptsSameSourceReleaseDaemon(t *testing.T) {
 	home := shortHome(t)
 	spawn := spawnInProcess(t, home)
 
@@ -294,8 +294,8 @@ func TestEnsureDaemon_DevClientRejectsReleaseDaemon(t *testing.T) {
 	}
 	wg.Wait()
 	for i, r := range results {
-		if !errors.Is(r.err, ErrBuildMismatch) {
-			t.Errorf("client %d: error = %v, want ErrBuildMismatch", i, r.err)
+		if r.err != nil {
+			t.Errorf("client %d: error = %v, want success", i, r.err)
 		}
 	}
 }

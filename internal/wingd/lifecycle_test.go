@@ -345,13 +345,13 @@ func TestRefreshRunning_LeavesStoppedDaemonStopped(t *testing.T) {
 	}
 }
 
-func TestVersionTakeover_DevBuildRejectsReleaseDaemon(t *testing.T) {
+func TestVersionTakeover_DevBuildAcceptsSameSourceReleaseDaemon(t *testing.T) {
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0"})
 
 	_, err := client.EnsureDaemon(context.Background(), client.Options{Home: home, Version: "(devel)", Spawn: errSpawn})
-	if !errors.Is(err, client.ErrBuildMismatch) {
-		t.Fatalf("ensure error = %v, want ErrBuildMismatch", err)
+	if err != nil {
+		t.Fatalf("ensure error = %v, want success", err)
 	}
 
 	select {
@@ -361,13 +361,13 @@ func TestVersionTakeover_DevBuildRejectsReleaseDaemon(t *testing.T) {
 	}
 }
 
-func TestVersionTakeover_ReleaseRejectsDirtyDevDaemon(t *testing.T) {
+func TestVersionTakeover_ReleaseAcceptsSameSourceDirtyDevDaemon(t *testing.T) {
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, Version: "v1.0.0+dirty"})
 
 	_, err := client.EnsureDaemon(context.Background(), client.Options{Home: home, Version: "v1.1.0", Spawn: errSpawn})
-	if !errors.Is(err, client.ErrBuildMismatch) {
-		t.Fatalf("ensure error = %v, want ErrBuildMismatch", err)
+	if err != nil {
+		t.Fatalf("ensure error = %v, want success", err)
 	}
 
 	select {
