@@ -49,6 +49,12 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **release:** Windows CLI binaries build again. The stale socket cleanup now
+  checks Unix directory ownership only on Unix, so cross-compilation no longer
+  references `syscall.Stat_t` on Windows.
+
 ## [v0.32.0] - 2026-08-13
 ### Changed
 
