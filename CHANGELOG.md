@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.32.0] - 2026-08-13
 ### Changed
 
 - **cli (Breaking):** list-shaped `-o json` output is NDJSON -- one
