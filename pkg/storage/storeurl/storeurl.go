@@ -138,10 +138,22 @@ func s3BucketPrefix(rest string) (bucket, prefix string, err error) {
 
 // newS3Client loads AWS credentials from the default chain. Honors
 // $SPARKWING_S3_ENDPOINT for non-AWS providers (R2, MinIO, etc.).
+//
+// A missing region is caught here rather than left to the SDK. Unset
+// is the ordinary state of a runner holding static credentials and no
+// ~/.aws/config, and the SDK's own answer -- "resolve auth scheme:
+// resolve endpoint: endpoint rule error, Invalid region" -- names
+// neither the variable to set nor the tool that wanted it.
 func newS3Client(ctx context.Context) (*awss3.Client, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("aws config: %w", err)
+	}
+	if cfg.Region == "" {
+		return nil, errors.New(
+			"no AWS region configured, which an s3 backend needs: set AWS_REGION " +
+				"(or a region in ~/.aws/config). For a non-AWS S3-compatible store, " +
+				"set SPARKWING_S3_ENDPOINT as well and any region value will do")
 	}
 	opts := []func(*awss3.Options){}
 	if ep := os.Getenv("SPARKWING_S3_ENDPOINT"); ep != "" {
