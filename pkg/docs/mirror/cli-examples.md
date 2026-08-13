@@ -50,7 +50,7 @@ rendered with each parameter's default.
 sparkwing examples
 
 # Read one
-sparkwing examples --name canary-deploy-k8s --body
+sparkwing examples --name container-deploy-ecs-fargate --body
 
 # Usually you want this instead
 sparkwing docs search -q "ecs fargate"
