@@ -10,7 +10,6 @@ import (
 	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -19,6 +18,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -264,12 +265,8 @@ func emitGrepMatches(matches []GrepMatch, opts GrepOpts, out io.Writer) error {
 		}
 		sort.Strings(ids)
 		if opts.JSON {
-			if ids == nil {
-				ids = []string{}
-			}
-			enc := json.NewEncoder(out)
-			enc.SetIndent("", "  ")
-			return enc.Encode(ids)
+			// One quoted id per line, matching the plain form below.
+			return ndjson.Write(out, ids)
 		}
 		for _, id := range ids {
 			fmt.Fprintln(out, id)
@@ -277,12 +274,8 @@ func emitGrepMatches(matches []GrepMatch, opts GrepOpts, out io.Writer) error {
 		return nil
 	}
 	if opts.JSON {
-		if matches == nil {
-			matches = []GrepMatch{}
-		}
-		enc := json.NewEncoder(out)
-		enc.SetIndent("", "  ")
-		return enc.Encode(matches)
+		// NDJSON: one match per line, so `head` returns whole matches.
+		return ndjson.Write(out, matches)
 	}
 	if len(matches) == 0 {
 		fmt.Fprintln(out, "no matches")

@@ -119,10 +119,7 @@ func TestListJobs_JSONOutput(t *testing.T) {
 	if err := orchestrator.ListJobs(context.Background(), p, orchestrator.ListOpts{JSON: true, Limit: 10}, &buf); err != nil {
 		t.Fatalf("ListJobs: %v", err)
 	}
-	var runs []map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &runs); err != nil {
-		t.Fatalf("json parse: %v\n%s", err, buf.String())
-	}
+	runs := decodeNDJSON[map[string]any](t, buf.String())
 	if len(runs) != 1 || runs[0]["id"] != res.RunID {
 		t.Fatalf("unexpected json: %v", runs)
 	}
@@ -814,10 +811,7 @@ func TestJobErrors_JSON(t *testing.T) {
 	if err := orchestrator.JobErrors(context.Background(), p, res.RunID, true, &buf); err != nil {
 		t.Fatalf("JobErrors: %v", err)
 	}
-	var failed []map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &failed); err != nil {
-		t.Fatalf("json parse: %v\n%s", err, buf.String())
-	}
+	failed := decodeNDJSON[map[string]any](t, buf.String())
 	if len(failed) != 1 {
 		t.Fatalf("expected 1 failed node, got %d: %v", len(failed), failed)
 	}

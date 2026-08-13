@@ -70,11 +70,7 @@ func runsErrorsJSON(t *testing.T, p orchestrator.Paths, runID string) []map[stri
 	if err := orchestrator.JobErrors(context.Background(), p, runID, true, &buf); err != nil {
 		t.Fatalf("JobErrors: %v", err)
 	}
-	var rows []map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &rows); err != nil {
-		t.Fatalf("decode runs errors json: %v\n%s", err, buf.String())
-	}
-	return rows
+	return decodeNDJSON[map[string]any](t, buf.String())
 }
 
 // No output, no excerpt: the fields are absent rather than empty, so a
@@ -173,10 +169,7 @@ func TestJobsRemoteJSON_CarriesFailureExcerpt(t *testing.T) {
 	if err := orchestrator.JobErrorsRemote(ctx, srv.URL, "", runID, true, &errBuf); err != nil {
 		t.Fatalf("JobErrorsRemote: %v", err)
 	}
-	var rows []map[string]any
-	if err := json.Unmarshal(errBuf.Bytes(), &rows); err != nil {
-		t.Fatalf("decode remote runs errors: %v\n%s", err, errBuf.String())
-	}
+	rows := decodeNDJSON[map[string]any](t, errBuf.String())
 	if len(rows) != 1 || rows[0]["node"] != failedID {
 		t.Fatalf("remote runs errors: %s", errBuf.String())
 	}

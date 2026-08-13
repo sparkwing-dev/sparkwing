@@ -156,10 +156,7 @@ func TestRun_FailedNodeRecordsBoundedMaskedExcerpt(t *testing.T) {
 	if err := orchestrator.JobErrors(ctx, p, res.RunID, true, &errBuf); err != nil {
 		t.Fatalf("JobErrors: %v", err)
 	}
-	var rows []map[string]any
-	if err := json.Unmarshal(errBuf.Bytes(), &rows); err != nil {
-		t.Fatalf("decode runs errors json: %v\n%s", err, errBuf.String())
-	}
+	rows := decodeNDJSON[map[string]any](t, errBuf.String())
 	if len(rows) != 1 || rows[0]["node"] != "build" {
 		t.Fatalf("runs errors should list the one owning failure, got: %s", errBuf.String())
 	}
