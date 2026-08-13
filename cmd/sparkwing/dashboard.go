@@ -114,7 +114,7 @@ func readLivePID(pidPath string) (int, bool) {
 
 func runDashboardStart(args []string) error {
 	fs := flag.NewFlagSet(cmdDashboardStart.Path, flag.ContinueOnError)
-	var addr, home, logStore, artifactStore string
+	var addr, home, logStore, artifactStore, profileName string
 	var readOnly, noLocalStore bool
 	fs.StringVar(&addr, "addr", "127.0.0.1:4343", "bind address for the unified dashboard+api server")
 	fs.StringVar(&home, "home", "", "sparkwing state directory (default: $SPARKWING_HOME or ~/.sparkwing)")
@@ -125,7 +125,9 @@ func runDashboardStart(args []string) error {
 	fs.BoolVar(&readOnly, "read-only", false,
 		"reject writes on /api/v1/* (auth + webhooks remain open)")
 	fs.BoolVar(&noLocalStore, "no-local-store", false,
-		"skip the local SQLite store; list runs from --artifact-store instead. Requires --log-store + --artifact-store. Powers tailing CI runs from a fresh laptop without an ingest step.")
+		"skip the local SQLite store; list runs from --artifact-store instead. Requires --log-store + --artifact-store (or --profile). Powers tailing CI runs from a fresh laptop without an ingest step.")
+	fs.StringVar(&profileName, "profile", "",
+		"read the dashboard's logs + artifacts through this storage profile's surfaces")
 	if err := parseAndCheck(cmdDashboardStart, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -135,6 +137,18 @@ func runDashboardStart(args []string) error {
 
 	if err := web.VerifyBundleEmbedded(); err != nil {
 		return err
+	}
+
+	// Resolved here as well as in the child so a typo'd name fails the
+	// command the operator is watching, rather than the detached
+	// supervisor's log file.
+	profileSupplies := false
+	if profileName != "" {
+		p, perr := resolveProfileFlag(profileName)
+		if perr != nil {
+			return perr
+		}
+		profileSupplies = p.Logs != nil && p.Cache != nil
 	}
 
 	dp, err := resolveDashboardPaths(home)
@@ -187,12 +201,15 @@ func runDashboardStart(args []string) error {
 	if artifactStore != "" {
 		superviseArgs = append(superviseArgs, "--artifact-store", artifactStore)
 	}
+	if profileName != "" {
+		superviseArgs = append(superviseArgs, "--profile", profileName)
+	}
 	if readOnly {
 		superviseArgs = append(superviseArgs, "--read-only")
 	}
 	if noLocalStore {
-		if logStore == "" || artifactStore == "" {
-			return fmt.Errorf("--no-local-store requires --log-store and --artifact-store (or an --profile profile that supplies them)")
+		if (logStore == "" || artifactStore == "") && !profileSupplies {
+			return fmt.Errorf("--no-local-store requires --log-store and --artifact-store, or a --profile whose logs and cache surfaces supply them")
 		}
 		superviseArgs = append(superviseArgs, "--no-local-store")
 	}
@@ -329,6 +346,7 @@ func runDashboardSupervise(args []string) error {
 	artifactStoreURL := fs.String("artifact-store", "", "")
 	readOnly := fs.Bool("read-only", false, "")
 	noLocalStore := fs.Bool("no-local-store", false, "")
+	profileName := fs.String("profile", "", "")
 	version := fs.String("version", "", "")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -367,6 +385,9 @@ func runDashboardSupervise(args []string) error {
 		}
 		opts.ArtifactStore = as
 		opts.ArtifactStoreLabel = schemeOf(*artifactStoreURL)
+	}
+	if err := applyDashboardProfile(ctx, &opts, *profileName); err != nil {
+		return err
 	}
 
 	if err := localws.Run(ctx, opts); err != nil {
@@ -582,4 +603,41 @@ func bannerLine() string {
 		buf[i] = '-'
 	}
 	return string(buf)
+}
+
+// applyDashboardProfile fills the dashboard's log and artifact stores
+// from a storage profile's own surfaces, so `dashboard start --profile
+// bucket` reads what runs against that profile wrote.
+//
+// The surfaces are opened from their specs rather than from a rendered
+// store URL: the URL form covers fs and s3 only, while the specs are
+// the whole vocabulary, and round-tripping through a string would drop
+// every field the URL has no room for. An explicit --log-store /
+// --artifact-store still wins, because naming a store outright is a
+// more specific instruction than naming the profile that holds one.
+func applyDashboardProfile(ctx context.Context, opts *localws.Options, profileName string) error {
+	if profileName == "" {
+		return nil
+	}
+	p, err := resolveProfileFlag(profileName)
+	if err != nil {
+		return err
+	}
+	if opts.LogStore == nil && p.Logs != nil {
+		ls, err := storeurl.OpenLogStoreFromSpec(ctx, *p.Logs, nil)
+		if err != nil {
+			return fmt.Errorf("--profile %s logs surface: %w", profileName, err)
+		}
+		opts.LogStore = ls
+		opts.LogStoreLabel = p.Logs.Type
+	}
+	if opts.ArtifactStore == nil && p.Cache != nil {
+		as, err := storeurl.OpenArtifactStoreFromSpec(ctx, *p.Cache, nil)
+		if err != nil {
+			return fmt.Errorf("--profile %s cache surface: %w", profileName, err)
+		}
+		opts.ArtifactStore = as
+		opts.ArtifactStoreLabel = p.Cache.Type
+	}
+	return nil
 }
