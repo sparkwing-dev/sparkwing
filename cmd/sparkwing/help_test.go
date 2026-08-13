@@ -184,25 +184,99 @@ func containsFlagRow(out, flagName string) bool {
 }
 
 func TestVisibleSubcommandsHidesHiddenChild(t *testing.T) {
-	parents := parentCommands()
-	leaves := leafCommands()
-	for parentKey, parent := range parents {
-		visible := visibleSubcommands(parent)
-		visibleNames := map[string]bool{}
-		for _, s := range visible {
-			visibleNames[s.Name] = true
+	for _, parent := range parentCommands() {
+		visible := map[string]bool{}
+		for _, s := range visibleSubcommands(parent) {
+			visible[s.Name] = true
 		}
-		for _, s := range parent.Subcommands {
-			childKey := s.Name
-			if parentKey != "" {
-				childKey = parentKey + " " + s.Name
+		for _, child := range childCommands(parent.Path) {
+			name := commandLeafName(child.Path)
+			if child.Hidden && visible[name] {
+				t.Errorf("parent %q: child %q is Hidden but appears in visibleSubcommands", parent.Path, name)
 			}
-			child, isLeaf := leaves[childKey]
-			if !isLeaf {
-				child = parents[childKey]
+		}
+	}
+}
+
+// TestHelpListingMatchesRegistry is the acceptance criterion for this
+// surface, asserted against the rendered listing rather than against
+// the field it is derived from: every subcommand a group's help offers
+// resolves to a registered Command, every non-Hidden registered child
+// is offered, and each row carries that child's own synopsis.
+//
+// A group's help used to be a hand-written twin of the registry, and a
+// twin drifts silently: help named an `xrepo` with no Command, omitted
+// the registered `examples` and `run config`, and reworded seventy
+// synopses on one side only. A reader has no way to tell a stale
+// listing from a true one, which is what makes the defect expensive.
+func TestHelpListingMatchesRegistry(t *testing.T) {
+	byPath := map[string]*Command{}
+	for _, c := range allCommands {
+		byPath[c.Path] = c
+	}
+
+	for _, parent := range allCommands {
+		listed := map[string]string{}
+		for _, s := range visibleSubcommands(*parent) {
+			listed[s.Name] = s.Synopsis
+		}
+
+		for name, synopsis := range listed {
+			child, ok := byPath[parent.Path+" "+name]
+			if !ok {
+				t.Errorf("%s --help offers %q, which is not a registered command",
+					parent.Path, name)
+				continue
 			}
-			if child.Hidden && visibleNames[s.Name] {
-				t.Errorf("parent %q: child %q is Hidden but appears in visibleSubcommands", parent.Path, s.Name)
+			if child.Hidden {
+				t.Errorf("%s --help offers Hidden child %q", parent.Path, name)
+			}
+			if synopsis != child.Synopsis {
+				t.Errorf("%s --help describes %q as %q; the command's own synopsis is %q",
+					parent.Path, name, synopsis, child.Synopsis)
+			}
+		}
+
+		for _, child := range childCommands(parent.Path) {
+			name := commandLeafName(child.Path)
+			if _, ok := listed[name]; !ok && !child.Hidden {
+				t.Errorf("%s is registered but %s --help does not list it",
+					child.Path, parent.Path)
+			}
+		}
+	}
+}
+
+// TestSubcommandOrderMatchesRegistry keeps the ordering hint honest.
+// A stale name in it cannot corrupt the listing -- filterSubcommands
+// ignores what does not resolve and appends what the hint forgot -- so
+// nothing user-facing breaks when it rots, which is exactly why it
+// needs its own gate: silent rot is how the old hand-written listing
+// got as far out of date as it did.
+func TestSubcommandOrderMatchesRegistry(t *testing.T) {
+	for _, parent := range allCommands {
+		want := map[string]bool{}
+		for _, child := range childCommands(parent.Path) {
+			if !child.Hidden {
+				want[commandLeafName(child.Path)] = true
+			}
+		}
+
+		seen := map[string]bool{}
+		for _, name := range parent.SubcommandOrder {
+			switch {
+			case seen[name]:
+				t.Errorf("%s SubcommandOrder names %q twice", parent.Path, name)
+			case !want[name]:
+				t.Errorf("%s SubcommandOrder names %q, which is not a visible registered child of it",
+					parent.Path, name)
+			}
+			seen[name] = true
+		}
+		for name := range want {
+			if !seen[name] {
+				t.Errorf("%s SubcommandOrder omits its registered child %q, so the child's place in the listing is unowned",
+					parent.Path, name)
 			}
 		}
 	}

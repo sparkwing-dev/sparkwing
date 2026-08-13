@@ -70,6 +70,9 @@ type Example struct {
 	Command string
 }
 
+// SubcommandRef is one row of a group's COMMANDS listing. It is
+// always derived from the registry by filterSubcommands, never
+// authored: see Command.SubcommandOrder.
 type SubcommandRef struct {
 	Name     string
 	Synopsis string
@@ -80,7 +83,23 @@ type Command struct {
 	Synopsis    string
 	Description string
 
-	Subcommands []SubcommandRef
+	// SubcommandOrder is a display-order hint for this group's
+	// children, not the child list. The list itself is derived from
+	// the registry, so a group's help can neither name a command the
+	// CLI does not dispatch nor omit one it does -- the two used to be
+	// separate facts and had drifted in both directions.
+	//
+	// A name here that resolves to nothing is ignored, and a
+	// registered child missing from it is still listed (appended in
+	// registry order), so the hint can only ever reorder a correct
+	// listing. TestSubcommandOrderMatchesRegistry fails on either kind
+	// of staleness so it does not quietly accumulate.
+	//
+	// It exists because the order is editorial and the registry cannot
+	// express it: the root menu leads with `info` because that is the
+	// command an agent should run first, and `runs` leads with
+	// `submit` / `list` rather than alphabetically.
+	SubcommandOrder []string
 
 	PosArgs     []PosArg
 	Flags       []FlagSpec
@@ -219,6 +238,11 @@ func PrintHelp(cmd Command, w io.Writer) {
 }
 
 func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
+	// The listing drives USAGE too: a group whose only child is
+	// Hidden offers no subcommand to type, so it must not advertise
+	// one.
+	visible := visibleSubcommands(cmd)
+
 	if cmd.Synopsis != "" {
 		fmt.Fprintln(w, cmd.Synopsis)
 		fmt.Fprintln(w)
@@ -233,10 +257,10 @@ func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 			fmt.Fprint(w, " [", a.Name, "]")
 		}
 	}
-	if len(cmd.Subcommands) > 0 {
+	if len(visible) > 0 {
 		fmt.Fprint(w, " <subcommand>")
 	}
-	if len(cmd.Flags) > 0 || len(cmd.Subcommands) == 0 {
+	if len(cmd.Flags) > 0 || len(visible) == 0 {
 		fmt.Fprint(w, " [flags]")
 	}
 	if cmd.UsageSuffix != "" {
@@ -253,17 +277,14 @@ func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 		fmt.Fprintln(w)
 	}
 
-	if len(cmd.Subcommands) > 0 {
-		visible := visibleSubcommands(cmd)
-		if len(visible) > 0 {
-			fmt.Fprintln(w, "COMMANDS")
-			tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-			for _, s := range visible {
-				fmt.Fprint(tw, "  ", s.Name, "\t", s.Synopsis, "\n")
-			}
-			_ = tw.Flush()
-			fmt.Fprintln(w)
+	if len(visible) > 0 {
+		fmt.Fprintln(w, "COMMANDS")
+		tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+		for _, s := range visible {
+			fmt.Fprint(tw, "  ", s.Name, "\t", s.Synopsis, "\n")
 		}
+		_ = tw.Flush()
+		fmt.Fprintln(w)
 	}
 
 	if len(cmd.PosArgs) > 0 {
@@ -354,36 +375,80 @@ func completableSubcommands(parent Command) []SubcommandRef {
 	return filterSubcommands(parent, true)
 }
 
+// filterSubcommands derives a group's listing from the registry:
+// every Command registered directly under parent.Path, named and
+// described by that Command itself, ordered by parent.SubcommandOrder
+// with anything it omits appended in registry order.
+//
+// Deriving is the point. The listing used to be authored alongside
+// the registry as a second copy of the same facts, and a second copy
+// drifts: `configure` advertised an `xrepo` that had no Command,
+// `sparkwing --help` omitted the registered `examples` group, `run`
+// hid its `config` child, and seventy synopses had been reworded on
+// one side only. A reader cannot tell a stale listing from a true
+// one, so the listing has to be incapable of being stale.
 func filterSubcommands(parent Command, dropHideFromComplete bool) []SubcommandRef {
-	leaves := leafCommands()
-	parents := parentCommands()
-	pp := strings.TrimPrefix(parent.Path, "sparkwing")
-	pp = strings.TrimPrefix(pp, " ")
-	out := make([]SubcommandRef, 0, len(parent.Subcommands))
-	for _, s := range parent.Subcommands {
-		key := s.Name
-		if pp != "" {
-			key = pp + " " + s.Name
+	kids := childCommands(parent.Path)
+	byName := make(map[string]*Command, len(kids))
+	for _, c := range kids {
+		byName[commandLeafName(c.Path)] = c
+	}
+
+	out := make([]SubcommandRef, 0, len(kids))
+	emitted := make(map[string]bool, len(kids))
+	emit := func(c *Command) {
+		name := commandLeafName(c.Path)
+		if emitted[name] {
+			return
 		}
-		if c, ok := leaves[key]; ok {
-			if c.Hidden {
-				continue
-			}
-			if dropHideFromComplete && c.HideFromComplete {
-				continue
-			}
+		emitted[name] = true
+		// Hidden children are dispatchable but deliberately off the
+		// offered surface -- listing one would put a "do not use this"
+		// entry in the place a reader goes to choose what to use (the
+		// same call runCommands makes). Deriving must not undo that.
+		if c.Hidden {
+			return
 		}
-		if c, ok := parents[key]; ok {
-			if c.Hidden {
-				continue
-			}
-			if dropHideFromComplete && c.HideFromComplete {
-				continue
-			}
+		if dropHideFromComplete && c.HideFromComplete {
+			return
 		}
-		out = append(out, s)
+		out = append(out, SubcommandRef{Name: name, Synopsis: c.Synopsis})
+	}
+
+	for _, name := range parent.SubcommandOrder {
+		if c, ok := byName[name]; ok {
+			emit(c)
+		}
+	}
+	for _, c := range kids {
+		emit(c)
 	}
 	return out
+}
+
+// childCommands returns the Commands registered directly under path
+// -- one argv word deeper, not the whole subtree -- in allCommands
+// order.
+func childCommands(path string) []*Command {
+	prefix := path + " "
+	var out []*Command
+	for _, c := range allCommands {
+		rest, ok := strings.CutPrefix(c.Path, prefix)
+		if !ok || rest == "" || strings.Contains(rest, " ") {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// commandLeafName is a command's final path word: the token a user
+// types to reach it from its parent.
+func commandLeafName(path string) string {
+	if i := strings.LastIndex(path, " "); i >= 0 {
+		return path[i+1:]
+	}
+	return path
 }
 
 func hasFlagNamed(flags []FlagSpec, name string) bool {

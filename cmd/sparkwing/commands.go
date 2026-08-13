@@ -26,7 +26,7 @@ import (
 // TestAllCommandsAreRegistered guard test fails CI if anyone forgets.
 var allCommands = []*Command{
 	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueExec, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonRecoverState, &cmdUpdate, &cmdVersion, &cmdVersionUpdate, &cmdVersionHold, &cmdRun, &cmdRunConfig,
-	&cmdConfigure, &cmdConfigureInit,
+	&cmdConfigure, &cmdConfigureInit, &cmdConfigureXrepo,
 	&cmdDocs, &cmdDocsList, &cmdDocsRead, &cmdDocsGuides, &cmdDocsAll, &cmdDocsSearch,
 	&cmdDocsMigrations, &cmdDocsMigrationsList, &cmdDocsMigrationsRead, &cmdDocsMigrationsBetween,
 	&cmdDocsVersions, &cmdDocsCache, &cmdDocsCacheInfo, &cmdDocsCacheClear,
@@ -148,7 +148,11 @@ func toCommandJSON(c *Command) CommandJSON {
 		Description: c.Description,
 		Hidden:      c.Hidden,
 	}
-	for _, s := range c.Subcommands {
+	// Derived, like the prose listing -- `--help --json` and the
+	// generated reference are the same page in another format, so they
+	// cannot be allowed to name a different set of children than
+	// `--help` does.
+	for _, s := range visibleSubcommands(*c) {
 		out.Subcommands = append(out.Subcommands, SubcommandJSON(s))
 	}
 	for _, p := range c.PosArgs {
@@ -179,15 +183,11 @@ func toCommandJSON(c *Command) CommandJSON {
 
 // commandIndex renders the picked listing as index records.
 //
-// The subcommand count is derived from the listing itself, not from
-// Command.Subcommands. That field is a hand-maintained help-display
-// list: it carries cross-group pointers (`configure` names `profiles`,
-// which is registered at the top level) and has drifted from the
-// registry in both directions -- `run` declares no children though `run
-// config` is registered, and `examples` is registered though the root
-// does not name it. A descend signal has to describe the thing a caller
-// actually descends into, which is `--path`, and `--path` selects
-// registry paths. Counting inside the listing also makes the number
+// The subcommand count is taken from this listing rather than from
+// the help listing, even though both now read the same registry. A
+// descend signal has to describe the thing a caller actually descends
+// into, which is `--path`, and `--path` selects registry paths.
+// Counting inside the listing also makes the number
 // self-consistent under every filter: `--path` selects a whole subtree,
 // so a picked command's children are always picked too, and the count
 // can never promise records this caller cannot see -- including under
