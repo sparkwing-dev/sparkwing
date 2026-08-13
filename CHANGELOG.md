@@ -49,6 +49,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.32.1] - 2026-08-13
 ### Changed
 
 - **sdk (Breaking):** The result-memoization modifier `.Cache()` is renamed to
