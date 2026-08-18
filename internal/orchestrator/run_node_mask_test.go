@@ -2,6 +2,8 @@ package orchestrator_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http/httptest"
@@ -79,7 +81,8 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 	srv := httptest.NewServer(controller.New(st, quiet).Handler())
 	defer srv.Close()
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	const (
 		runID  = "run-pod-progress"
 		nodeID = "parent"
@@ -93,25 +96,34 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 		t.Fatalf("create node: %v", err)
 	}
 
-	childFinished := make(chan struct{})
+	childFinished := make(chan error, 1)
 	go func() {
-		defer close(childFinished)
 		var childID string
 		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-			childID, _ = st.FindSpawnedChildTriggerID(ctx, runID, nodeID, "pod-progress-child")
+			var findErr error
+			childID, findErr = st.FindSpawnedChildTriggerID(ctx, runID, nodeID, "pod-progress-child")
+			if findErr != nil {
+				childFinished <- fmt.Errorf("find spawned child: %w", findErr)
+				return
+			}
 			if childID != "" {
 				break
 			}
 			time.Sleep(10 * time.Millisecond)
 		}
 		if childID == "" {
+			childFinished <- errors.New("spawned child was not recorded")
 			return
 		}
 		time.Sleep(250 * time.Millisecond)
 		finished := time.Now()
-		_ = st.CreateRun(ctx, store.Run{
+		if err := st.CreateRun(ctx, store.Run{
 			ID: childID, Pipeline: "pod-progress-child", Status: "success", StartedAt: finished, FinishedAt: &finished,
-		})
+		}); err != nil {
+			childFinished <- fmt.Errorf("finish spawned child: %w", err)
+			return
+		}
+		childFinished <- nil
 	}()
 
 	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, "", runID, nodeID,
@@ -120,7 +132,10 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 		t.Fatalf("RunNodeOnce: %v", err)
 	}
 	select {
-	case <-childFinished:
+	case childErr := <-childFinished:
+		if childErr != nil {
+			t.Fatal(childErr)
+		}
 	default:
 		t.Fatal("parent timed out before the delegated child completed")
 	}
