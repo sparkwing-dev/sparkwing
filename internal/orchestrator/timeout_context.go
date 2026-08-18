@@ -23,6 +23,7 @@ type nodeTimeoutController struct {
 	remaining time.Duration
 	paused    bool
 	timerGen  uint64
+	expired   bool
 
 	deadlineInspector func() bool
 	inspectorGen      uint64
@@ -163,7 +164,7 @@ func (c *nodeTimeoutController) resumeAt(admittedAt time.Time) bool {
 		}
 	}
 	if remaining <= 0 {
-		c.finishLocked(context.DeadlineExceeded)
+		c.expireLocked()
 		return false
 	}
 	c.remaining = 0
@@ -185,7 +186,7 @@ func (c *nodeTimeoutController) accountCompletedAdmission(queuedAt, admittedAt t
 		remaining -= spentAfterAdmission
 	}
 	if remaining <= 0 {
-		c.finishLocked(context.DeadlineExceeded)
+		c.expireLocked()
 		return false
 	}
 	if c.timer != nil {
@@ -226,7 +227,7 @@ func (c *nodeTimeoutController) finishDeadline(generation uint64) {
 	if c.err != nil || c.paused || c.timerGen != generation {
 		return
 	}
-	c.finishLocked(context.DeadlineExceeded)
+	c.expireLocked()
 }
 
 func (c *nodeTimeoutController) finish(err error) {
@@ -245,4 +246,18 @@ func (c *nodeTimeoutController) finishLocked(err error) {
 	c.timerGen++
 	c.err = err
 	close(c.done)
+}
+
+func (c *nodeTimeoutController) expireLocked() {
+	if c.err != nil {
+		return
+	}
+	c.expired = true
+	c.finishLocked(context.DeadlineExceeded)
+}
+
+func (c *nodeTimeoutController) timedOut() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.expired
 }

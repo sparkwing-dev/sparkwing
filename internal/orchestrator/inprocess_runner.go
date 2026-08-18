@@ -358,7 +358,7 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 				}
 			}
 		}
-		absoluteTimedOut := absoluteTimeout != nil && errors.Is(absoluteTimeout.Err(), context.DeadlineExceeded)
+		absoluteTimedOut := absoluteTimeout != nil && absoluteTimeout.timedOut()
 		noProgressTimedOut := progressTimeout != nil && progressTimeout.timedOut()
 		for i := len(cancels) - 1; i >= 0; i-- {
 			cancels[i]()
