@@ -478,7 +478,8 @@ Common Plan-layer modifiers (chainable on `*JobNode`):
 
 ```
 .Retry(n, opts...)                 // retry n times on failure; RetryBackoff(d) and RetryAuto() compose
-.Timeout(d)                        // execution budget; child plan-admission queue wait is excluded
+.Timeout(d)                        // absolute per-attempt execution budget
+.NoProgressTimeout(d)              // per-attempt inactivity budget; node log records reset it
 .Verify(fn)                        // postcondition checked after the action succeeds; non-nil fails at StageVerify
 .OnFailure(id, job)                // recovery node if this node fails; job may be func(ctx, sparkwing.Failure) error to branch on stage
 .SkipIf(pred, opts...)             // skip when pred(ctx) returns true; SkipBudget(d) overrides budget
@@ -489,6 +490,28 @@ Common Plan-layer modifiers (chainable on `*JobNode`):
 .Inline()                          // bypass the runner entirely
 .ContinueOnError() / .Optional()   // failure-propagation knobs
 .NeedsOptional(deps...)            // soft upstream dep
+```
+
+Use `NoProgressTimeout` to stop attempts that cease producing observable
+progress. Each node log record resets the inactivity window, including step
+transitions, `Info` / `Warn` / `Error`, command starts, and complete output
+lines from `Exec(...).Run()`. The timer covers the action and its `Verify`
+postcondition. It starts fresh for each retry.
+
+Node admission, hooks, retry backoff, delegated child execution, and tool-slot
+admission do not consume the inactivity budget. Cached nodes do not start it.
+Captured commands are silent after their command-start record, so a long
+`Capture`, `String`, `Lines`, `JSON`, or `MustBeEmpty` call can exceed the
+budget even while its subprocess is healthy. Use streaming `Run`, report
+progress from the job, or omit `NoProgressTimeout` when silence is expected.
+
+Pair it with a longer `Timeout` when continuing progress must not make an
+attempt unbounded:
+
+```go
+sw.Job(plan, "index", &Index{}).
+    NoProgressTimeout(2 * time.Minute).
+    Timeout(30 * time.Minute)
 ```
 
 ## Workable - the Work-bearing interface

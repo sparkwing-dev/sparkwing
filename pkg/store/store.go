@@ -54,10 +54,11 @@ func busyTimeoutMS() (int, error) {
 
 // Failure reason codes; empty = no structured reason.
 const (
-	FailureUnknown   = ""
-	FailureOOMKilled = "oom_killed"
-	FailureAgentLost = "agent_lost"
-	FailureTimeout   = "timeout"
+	FailureUnknown           = ""
+	FailureOOMKilled         = "oom_killed"
+	FailureAgentLost         = "agent_lost"
+	FailureTimeout           = "timeout"
+	FailureNoProgressTimeout = "no_progress_timeout"
 	// FailureVerify: the node's action completed but its Verify
 	// postcondition returned an error. The failure is at the verify
 	// stage, not the action.

@@ -433,10 +433,11 @@ type JobNode struct {
 	// Resilience modifiers. retryAuto switches from in-runner step
 	// re-run to whole-node re-dispatch (right for infra flakes where
 	// a fresh runner boot is more likely to recover).
-	retryAttempts int
-	retryBackoff  time.Duration
-	retryAuto     bool
-	timeout       time.Duration // per-attempt; zero = unlimited
+	retryAttempts     int
+	retryBackoff      time.Duration
+	retryAuto         bool
+	timeout           time.Duration // per-attempt; zero = unlimited
+	noProgressTimeout time.Duration
 
 	onFailure *JobNode // dispatched when this node fails
 
@@ -884,6 +885,15 @@ func (n *JobNode) Timeout(d time.Duration) *JobNode {
 	return n
 }
 
+// NoProgressTimeout caps how long an attempt may run without emitting a
+// node log record. The timer resets on each record and is suspended while
+// the node waits for delegated child work or tool admission. Zero disables
+// the timeout.
+func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode {
+	n.noProgressTimeout = d
+	return n
+}
+
 // OnFailure registers a recovery node that runs only when this node
 // terminates with outcome=failed; otherwise it's marked Skipped. The
 // recovery inherits no dependencies from its parent. Useful for
@@ -921,6 +931,10 @@ func (n *JobNode) RetryConfig() RetryConfig {
 // TimeoutDuration returns the configured per-attempt timeout, or zero
 // if unlimited.
 func (n *JobNode) TimeoutDuration() time.Duration { return n.timeout }
+
+// NoProgressTimeoutDuration returns the configured per-attempt inactivity
+// timeout, or zero if disabled.
+func (n *JobNode) NoProgressTimeoutDuration() time.Duration { return n.noProgressTimeout }
 
 // OnFailureNode returns the recovery node registered via OnFailure, or
 // nil if none.

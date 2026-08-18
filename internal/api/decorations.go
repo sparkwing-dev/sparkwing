@@ -78,11 +78,12 @@ type SpawnedPipelineRef struct {
 // Kept lossless so the dashboard sees every label the explain CLI
 // shows.
 type NodeModifiers struct {
-	Retry          int      `json:"retry,omitempty"`
-	RetryBackoffMS int64    `json:"retry_backoff_ms,omitempty"`
-	RetryAuto      bool     `json:"retry_auto,omitempty"`
-	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
-	RunsOn         []string `json:"runs_on,omitempty"`
+	Retry               int      `json:"retry,omitempty"`
+	RetryBackoffMS      int64    `json:"retry_backoff_ms,omitempty"`
+	RetryAuto           bool     `json:"retry_auto,omitempty"`
+	TimeoutMS           int64    `json:"timeout_ms,omitempty"`
+	NoProgressTimeoutMS int64    `json:"no_progress_timeout_ms,omitempty"`
+	RunsOn              []string `json:"runs_on,omitempty"`
 	// Content cache (JobNode.Cache): content-keyed memoization,
 	// independent of any concurrency group.
 	Cache      bool  `json:"cache,omitempty"`

@@ -251,6 +251,8 @@ func RunNodeOnce(
 						"run_id", runID, "node", currentNode, "err", evErr)
 				}
 			}
+			resumeProgressTimeout := pauseProgressTimeout(innerCtx)
+			defer resumeProgressTimeout()
 			pollCtx := innerCtx
 			parentCtx := nodeParentContextFromContext(innerCtx)
 			if req.Timeout > 0 {

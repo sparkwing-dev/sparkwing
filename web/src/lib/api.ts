@@ -291,6 +291,7 @@ export interface NodeModifiers {
   retry_backoff_ms?: number;
   retry_auto?: boolean;
   timeout_ms?: number;
+  no_progress_timeout_ms?: number;
   runs_on?: string[];
   // Content cache (JobNode.Cache): content-keyed memoization,
   // independent of any concurrency group.

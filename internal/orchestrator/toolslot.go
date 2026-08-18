@@ -77,8 +77,10 @@ func (r *InProcessRunner) toolSlotProvider(runID, nodeID string, delegate sparkw
 			r.emitToolSlotLog(ctx, runID, nodeID, delegate, detail)
 		}
 
+		resumeProgressTimeout := pauseProgressTimeout(ctx)
 		lease, err := la.acquireNodeSlot(acquireCtx, runID, nodeID, claim,
 			localAdmissionPriorityFromContext(ctx), onQueued)
+		resumeProgressTimeout()
 		if err != nil {
 			if errors.Is(context.Cause(acquireCtx), errNodeQueueTimeout) && ctx.Err() == nil {
 				return nil, fmt.Errorf("queued %s for %q without a slot", limit.QueueTimeout, key)

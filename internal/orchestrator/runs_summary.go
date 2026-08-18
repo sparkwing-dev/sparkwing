@@ -201,6 +201,9 @@ func aggregateModifiers(nodes []*store.Node, dmap map[string]*api.Decorations) [
 		if m.TimeoutMS > 0 {
 			add("Timeout", n.NodeID)
 		}
+		if m.NoProgressTimeoutMS > 0 {
+			add("NoProgressTimeout", n.NodeID)
+		}
 		if len(m.RunsOn) > 0 {
 			add("Requires", n.NodeID)
 		}

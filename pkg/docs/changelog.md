@@ -48,6 +48,10 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+- **sdk:** Jobs can declare `NoProgressTimeout` alongside a longer absolute
+  `Timeout`. Observable node log records reset the per-attempt inactivity
+  window; delegated child work and admission waits do not consume it. A node
+  that remains silent past the window fails with `no_progress_timeout`.
 - **templates:** the scaffolding registry drops `go-test-build-deploy-k8s`
   and `canary-deploy-k8s`, leaving 37. Both branched on
   `SPARKWING_KIND_CLUSTER` to load the image they had just built into a

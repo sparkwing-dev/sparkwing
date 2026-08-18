@@ -223,6 +223,15 @@ func (g *JobGroup) Timeout(d time.Duration) *JobGroup {
 	return g
 }
 
+// NoProgressTimeout sets the per-attempt inactivity timeout on every member.
+// See Job.NoProgressTimeout.
+func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup {
+	for _, m := range g.Members() {
+		m.NoProgressTimeout(d)
+	}
+	return g
+}
+
 // Verify registers the same postcondition check on every member. Each
 // member runs the check after its action succeeds and fails at
 // StageVerify if the check returns an error. See Job.Verify.

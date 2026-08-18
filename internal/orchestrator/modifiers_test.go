@@ -105,6 +105,21 @@ func (absoluteTimeoutWithProgressPipe) Plan(ctx context.Context, plan *sparkwing
 	return nil
 }
 
+type noProgressRetryPipe struct{ sparkwing.Base }
+
+var noProgressRetryAttempts atomic.Int32
+
+func (noProgressRetryPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "recovering", func(ctx context.Context) error {
+		if noProgressRetryAttempts.Add(1) == 1 {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}).Retry(1).NoProgressTimeout(60 * time.Millisecond)
+	return nil
+}
+
 type onFailurePipe struct{ sparkwing.Base }
 
 var rollbackCalled atomic.Bool
@@ -170,6 +185,7 @@ func init() {
 	register("mod-no-progress-timeout", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &noProgressTimeoutPipe{} })
 	register("mod-progressing", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &progressingPipe{} })
 	register("mod-absolute-timeout-with-progress", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &absoluteTimeoutWithProgressPipe{} })
+	register("mod-no-progress-retry", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &noProgressRetryPipe{} })
 	register("mod-onfailure", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailurePipe{} })
 	register("mod-onfailure-skip", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailureSkipPipe{} })
 	register("mod-onfailure-detached", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailureDetachedPipe{} })
@@ -314,6 +330,21 @@ func TestTimeout_RemainsAbsoluteWhileProgressContinues(t *testing.T) {
 	}
 	if len(nodes) != 1 || nodes[0].FailureReason != store.FailureTimeout {
 		t.Fatalf("failure reason = %+v, want %q", nodes, store.FailureTimeout)
+	}
+}
+
+func TestNoProgressTimeout_RetryStartsWithAFreshWindow(t *testing.T) {
+	noProgressRetryAttempts.Store(0)
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-no-progress-retry"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "success" {
+		t.Fatalf("status = %q, want success", res.Status)
+	}
+	if got := noProgressRetryAttempts.Load(); got != 2 {
+		t.Fatalf("attempts = %d, want 2", got)
 	}
 }
 
