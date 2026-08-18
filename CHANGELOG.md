@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.34.0] - 2026-08-18
 - **sdk:** Jobs can declare `NoProgressTimeout` alongside a longer absolute
   `Timeout`. Observable node log records reset the per-attempt inactivity
   window; delegated child work and admission waits do not consume it. A node
