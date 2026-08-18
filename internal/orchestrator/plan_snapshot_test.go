@@ -94,6 +94,32 @@ func TestMarshalPlanSnapshot_SplitsCacheAndConcurrency(t *testing.T) {
 	}
 }
 
+func TestMarshalPlanSnapshot_IncludesBothExecutionTimeouts(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	sparkwing.Job(plan, "build", func(ctx context.Context) error { return nil }).
+		Timeout(30 * time.Minute).
+		NoProgressTimeout(2 * time.Minute)
+
+	raw, err := marshalPlanSnapshot(plan, sparkwing.RunContext{Pipeline: "demo", RunID: "explain"}, planSnapshotMeta{})
+	if err != nil {
+		t.Fatalf("marshalPlanSnapshot: %v", err)
+	}
+	var snap planSnapshot
+	if err := json.Unmarshal(raw, &snap); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(snap.Nodes) != 1 || snap.Nodes[0].Modifiers == nil {
+		t.Fatalf("expected one node with modifiers, got %+v", snap.Nodes)
+	}
+	m := snap.Nodes[0].Modifiers
+	if m.TimeoutMS != (30 * time.Minute).Milliseconds() {
+		t.Errorf("TimeoutMS = %d, want %d", m.TimeoutMS, (30 * time.Minute).Milliseconds())
+	}
+	if m.NoProgressTimeoutMS != (2 * time.Minute).Milliseconds() {
+		t.Errorf("NoProgressTimeoutMS = %d, want %d", m.NoProgressTimeoutMS, (2 * time.Minute).Milliseconds())
+	}
+}
+
 func TestMarshalPlanSnapshot_EmbedsWorkAndSpawnTargets(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "parent", snapshotParentJob{}).Retry(2)
