@@ -31,6 +31,19 @@ func (podMaskPipe) Plan(_ context.Context, plan *sparkwing.Plan, in podMaskInput
 	return nil
 }
 
+type podProgressPipe struct{ sparkwing.Base }
+
+func (podProgressPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "parent", func(ctx context.Context) error {
+		if _, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "pod-progress-child", ""); err != nil {
+			return err
+		}
+		time.Sleep(200 * time.Millisecond)
+		return nil
+	}).NoProgressTimeout(100 * time.Millisecond)
+	return nil
+}
+
 func registerPodMaskPipe(t *testing.T) {
 	t.Helper()
 	if _, ok := sparkwing.Lookup("pod-mask-pipe"); ok {
@@ -38,6 +51,89 @@ func registerPodMaskPipe(t *testing.T) {
 	}
 	sparkwing.Register[podMaskInputs]("pod-mask-pipe",
 		func() sparkwing.Pipeline[podMaskInputs] { return podMaskPipe{} })
+}
+
+func registerPodProgressPipe(t *testing.T) {
+	t.Helper()
+	if _, ok := sparkwing.Lookup("pod-progress-pipe"); ok {
+		return
+	}
+	sparkwing.Register[sparkwing.NoInputs]("pod-progress-pipe",
+		func() sparkwing.Pipeline[sparkwing.NoInputs] { return podProgressPipe{} })
+}
+
+func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testing.T) {
+	registerPodProgressPipe(t)
+	isolateProfiles(t)
+	isolateCheckout(t)
+
+	home := t.TempDir()
+	t.Setenv("SPARKWING_HOME", home)
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+
+	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := httptest.NewServer(controller.New(st, quiet).Handler())
+	defer srv.Close()
+
+	ctx := context.Background()
+	const (
+		runID  = "run-pod-progress"
+		nodeID = "parent"
+	)
+	if err := st.CreateRun(ctx, store.Run{
+		ID: runID, Pipeline: "pod-progress-pipe", Status: "running", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: runID, NodeID: nodeID, Status: "pending"}); err != nil {
+		t.Fatalf("create node: %v", err)
+	}
+
+	childFinished := make(chan struct{})
+	go func() {
+		defer close(childFinished)
+		var childID string
+		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+			childID, _ = st.FindSpawnedChildTriggerID(ctx, runID, nodeID, "pod-progress-child")
+			if childID != "" {
+				break
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		if childID == "" {
+			return
+		}
+		time.Sleep(250 * time.Millisecond)
+		finished := time.Now()
+		_ = st.CreateRun(ctx, store.Run{
+			ID: childID, Pipeline: "pod-progress-child", Status: "success", StartedAt: finished, FinishedAt: &finished,
+		})
+	}()
+
+	res, err := orchestrator.RunNodeOnce(ctx, srv.URL, "", runID, nodeID,
+		"pod:"+runID+":"+nodeID, "", &captureLogger{}, quiet, nil)
+	if err != nil {
+		t.Fatalf("RunNodeOnce: %v", err)
+	}
+	select {
+	case <-childFinished:
+	default:
+		t.Fatal("parent timed out before the delegated child completed")
+	}
+	if res.Outcome != sparkwing.Failed {
+		t.Fatalf("outcome = %q (err=%v), want no-progress failure after child completion", res.Outcome, res.Err)
+	}
+	nodes, err := st.ListNodes(ctx, runID)
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].FailureReason != store.FailureNoProgressTimeout {
+		t.Fatalf("nodes = %+v, want failure reason %q", nodes, store.FailureNoProgressTimeout)
+	}
 }
 
 // TestRunNodeOnce_MasksSecretsInNodeLog pins the cluster/pod execution
