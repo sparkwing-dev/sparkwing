@@ -333,11 +333,13 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 
 		attemptCtx := nodeCtx
 		var cancels []context.CancelFunc
+		var absoluteTimeout *nodeTimeoutController
 		if timeout > 0 {
 			timeoutCtx := withNodeTimeoutDuration(nodeCtx, timeout)
 			timeoutCtx = withNodeParentContext(timeoutCtx, nodeCtx)
 			var cancel context.CancelFunc
 			attemptCtx, cancel = newNodeTimeoutContext(timeoutCtx, timeout)
+			absoluteTimeout = nodeTimeoutControllerFromContext(attemptCtx)
 			cancels = append(cancels, cancel)
 		}
 		var progressTimeout *progressTimeoutController
@@ -356,8 +358,21 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 				}
 			}
 		}
+		absoluteTimedOut := absoluteTimeout != nil && errors.Is(absoluteTimeout.Err(), context.DeadlineExceeded)
+		noProgressTimedOut := progressTimeout != nil && progressTimeout.timedOut()
 		for i := len(cancels) - 1; i >= 0; i-- {
 			cancels[i]()
+		}
+		if noProgressTimedOut {
+			if aerr == nil {
+				aerr = context.DeadlineExceeded
+			}
+			aerr = fmt.Errorf("no progress for %s: %w", noProgressTimeout, aerr)
+		} else if absoluteTimedOut {
+			if aerr == nil {
+				aerr = context.DeadlineExceeded
+			}
+			aerr = fmt.Errorf("timeout exceeded (%s): %w", timeout, aerr)
 		}
 		if aerr == nil {
 			output = out
@@ -365,18 +380,7 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 			break
 		}
 		lastErr = aerr
-		timedOut := false
-		noProgressTimedOut := progressTimeout != nil && progressTimeout.timedOut()
-		if noProgressTimedOut && errors.Is(aerr, context.DeadlineExceeded) && nodeCtx.Err() == nil {
-			lastErr = fmt.Errorf("no progress for %s: %w", noProgressTimeout, aerr)
-		}
-		if timeout > 0 && errors.Is(aerr, context.DeadlineExceeded) && nodeCtx.Err() == nil {
-			if !noProgressTimedOut {
-				lastErr = fmt.Errorf("timeout exceeded (%s): %w", timeout, aerr)
-				timedOut = true
-			}
-		}
-		lastTimeout = timedOut
+		lastTimeout = absoluteTimedOut
 		lastNoProgressTimeout = noProgressTimedOut
 	}
 

@@ -1864,8 +1864,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		}
 		watchdogWaits := admissionWaitTrackerFromContext(ctx)
 		watchdogParticipant := admissionWaitParticipantFromContext(ctx)
-		_, contextBounded := ctx.Deadline()
-		awaitBounded := req.Timeout > 0 || nodeTimeoutDurationFromContext(ctx) > 0 || progressTimeoutControllerFromContext(ctx) != nil || contextBounded
+		awaitBounded := childAwaitBounded(ctx, req.Timeout)
 		if awaitBounded {
 			watchdogWaits.begin(watchdogParticipant)
 			defer watchdogWaits.end(watchdogParticipant)
@@ -2104,6 +2103,11 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			}
 		}
 	})
+}
+
+func childAwaitBounded(ctx context.Context, requestTimeout time.Duration) bool {
+	_, contextBounded := ctx.Deadline()
+	return requestTimeout > 0 || nodeTimeoutDurationFromContext(ctx) > 0 || contextBounded
 }
 
 // repoSuffix returns " repo=<slug>" or "".
