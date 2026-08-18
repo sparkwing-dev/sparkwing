@@ -677,6 +677,7 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 	e := newSubmitTestEnv(t)
 	other := t.TempDir()
+	t.Cleanup(e.stopConsumer)
 	otherSparkwing := filepath.Join(other, ".sparkwing")
 	if err := os.MkdirAll(otherSparkwing, 0o755); err != nil {
 		t.Fatal(err)
