@@ -77,3 +77,15 @@ func TestProgressTimeoutDoesNotBoundDelegatedChildWait(t *testing.T) {
 		t.Fatal("a suspended progress timeout must not disable the dispatch watchdog")
 	}
 }
+
+func TestNodeTimeoutDoesNotOwnParentDeadline(t *testing.T) {
+	parent, cancelParent := context.WithCancel(context.Background())
+	ctx, cancel := newNodeTimeoutContext(parent, time.Hour)
+	defer cancel()
+	cancelParent()
+	<-ctx.Done()
+	controller := nodeTimeoutControllerFromContext(ctx)
+	if controller.timedOut() {
+		t.Fatal("parent cancellation must not classify as node timeout expiry")
+	}
+}
