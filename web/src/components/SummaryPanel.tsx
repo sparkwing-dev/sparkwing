@@ -152,6 +152,18 @@ export function NodeAttrChips({ n }: { n: RunNode }) {
       label: "inline",
       cls: "bg-slate-500/15 text-slate-300",
     });
+  if (n.modifiers?.timeout_ms)
+    chips.push({
+      key: "timeout",
+      label: `timeout ${fmtDurMs(n.modifiers.timeout_ms)}`,
+      cls: "bg-orange-500/15 text-orange-300",
+    });
+  if (n.modifiers?.no_progress_timeout_ms)
+    chips.push({
+      key: "no-progress-timeout",
+      label: `no progress ${fmtDurMs(n.modifiers.no_progress_timeout_ms)}`,
+      cls: "bg-orange-500/15 text-orange-300",
+    });
   if (n.on_failure_of)
     chips.push({
       key: "onfail",

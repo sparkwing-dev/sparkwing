@@ -1864,8 +1864,7 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 		}
 		watchdogWaits := admissionWaitTrackerFromContext(ctx)
 		watchdogParticipant := admissionWaitParticipantFromContext(ctx)
-		_, contextBounded := ctx.Deadline()
-		awaitBounded := req.Timeout > 0 || nodeTimeoutDurationFromContext(ctx) > 0 || contextBounded
+		awaitBounded := childAwaitBounded(ctx, req.Timeout)
 		if awaitBounded {
 			watchdogWaits.begin(watchdogParticipant)
 			defer watchdogWaits.end(watchdogParticipant)
@@ -1909,6 +1908,8 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			}
 		}
 
+		resumeProgressTimeout := pauseProgressTimeout(ctx)
+		defer resumeProgressTimeout()
 		pollCtx := ctx
 		parentCtx := nodeParentContextFromContext(ctx)
 		if req.Timeout > 0 {
@@ -2102,6 +2103,11 @@ func (s *dispatchState) pipelineAwaiter() sparkwing.PipelineAwaiter {
 			}
 		}
 	})
+}
+
+func childAwaitBounded(ctx context.Context, requestTimeout time.Duration) bool {
+	_, contextBounded := ctx.Deadline()
+	return requestTimeout > 0 || nodeTimeoutDurationFromContext(ctx) > 0 || contextBounded
 }
 
 // repoSuffix returns " repo=<slug>" or "".
@@ -3227,13 +3233,14 @@ type snapshotApproval struct {
 
 // snapshotModifiers is the wire shape of a Node's Plan-layer modifiers.
 type snapshotModifiers struct {
-	Retry          int      `json:"retry,omitempty"`
-	RetryBackoffMS int64    `json:"retry_backoff_ms,omitempty"`
-	RetryAuto      bool     `json:"retry_auto,omitempty"`
-	TimeoutMS      int64    `json:"timeout_ms,omitempty"`
-	RunsOn         []string `json:"runs_on,omitempty"`
-	Prefers        []string `json:"prefers,omitempty"`
-	WhenRunner     []string `json:"when_runner,omitempty"`
+	Retry               int      `json:"retry,omitempty"`
+	RetryBackoffMS      int64    `json:"retry_backoff_ms,omitempty"`
+	RetryAuto           bool     `json:"retry_auto,omitempty"`
+	TimeoutMS           int64    `json:"timeout_ms,omitempty"`
+	NoProgressTimeoutMS int64    `json:"no_progress_timeout_ms,omitempty"`
+	RunsOn              []string `json:"runs_on,omitempty"`
+	Prefers             []string `json:"prefers,omitempty"`
+	WhenRunner          []string `json:"when_runner,omitempty"`
 	// Content cache (JobNode.Cache): independent of any concurrency
 	// group. Cache marks that the node memoizes on content; CacheTTLMS
 	// is the retention window.
@@ -3482,19 +3489,20 @@ func effectiveJobRequires(n *sparkwing.JobNode, pipelineRequires []string) []str
 func nodeModifiersSnapshot(n *sparkwing.JobNode) *snapshotModifiers {
 	rc := n.RetryConfig()
 	m := snapshotModifiers{
-		Retry:           rc.Attempts,
-		RetryBackoffMS:  rc.Backoff.Milliseconds(),
-		RetryAuto:       rc.Auto,
-		TimeoutMS:       n.TimeoutDuration().Milliseconds(),
-		RunsOn:          n.RequiresLabels(),
-		Prefers:         n.PrefersLabels(),
-		WhenRunner:      n.WhenRunnerLabels(),
-		Inline:          n.IsInline(),
-		Optional:        n.IsOptional(),
-		ContinueOnError: n.IsContinueOnError(),
-		HasBeforeRun:    len(n.BeforeRunHooks()) > 0,
-		HasAfterRun:     len(n.AfterRunHooks()) > 0,
-		HasSkipIf:       len(n.SkipPredicates()) > 0,
+		Retry:               rc.Attempts,
+		RetryBackoffMS:      rc.Backoff.Milliseconds(),
+		RetryAuto:           rc.Auto,
+		TimeoutMS:           n.TimeoutDuration().Milliseconds(),
+		NoProgressTimeoutMS: n.NoProgressTimeoutDuration().Milliseconds(),
+		RunsOn:              n.RequiresLabels(),
+		Prefers:             n.PrefersLabels(),
+		WhenRunner:          n.WhenRunnerLabels(),
+		Inline:              n.IsInline(),
+		Optional:            n.IsOptional(),
+		ContinueOnError:     n.IsContinueOnError(),
+		HasBeforeRun:        len(n.BeforeRunHooks()) > 0,
+		HasAfterRun:         len(n.AfterRunHooks()) > 0,
+		HasSkipIf:           len(n.SkipPredicates()) > 0,
 	}
 	if rec := n.OnFailureNode(); rec != nil {
 		m.OnFailure = rec.ID()
@@ -3529,6 +3537,7 @@ func isZeroModifiers(m snapshotModifiers) bool {
 		m.RetryBackoffMS == 0 &&
 		!m.RetryAuto &&
 		m.TimeoutMS == 0 &&
+		m.NoProgressTimeoutMS == 0 &&
 		len(m.RunsOn) == 0 &&
 		len(m.Prefers) == 0 &&
 		len(m.WhenRunner) == 0 &&

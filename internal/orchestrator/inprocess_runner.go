@@ -299,10 +299,12 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 		backoff = 0
 	}
 	timeout := node.TimeoutDuration()
+	noProgressTimeout := node.NoProgressTimeoutDuration()
 
 	var output any
 	var lastErr error
 	var lastTimeout bool
+	var lastNoProgressTimeout bool
 	total := attempts + 1
 	for attempt := range total {
 		if attempt > 0 {
@@ -330,11 +332,22 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 		}
 
 		attemptCtx := nodeCtx
-		var cancel context.CancelFunc
+		var cancels []context.CancelFunc
+		var absoluteTimeout *nodeTimeoutController
 		if timeout > 0 {
 			timeoutCtx := withNodeTimeoutDuration(nodeCtx, timeout)
 			timeoutCtx = withNodeParentContext(timeoutCtx, nodeCtx)
+			var cancel context.CancelFunc
 			attemptCtx, cancel = newNodeTimeoutContext(timeoutCtx, timeout)
+			absoluteTimeout = nodeTimeoutControllerFromContext(attemptCtx)
+			cancels = append(cancels, cancel)
+		}
+		var progressTimeout *progressTimeoutController
+		if noProgressTimeout > 0 {
+			var cancel context.CancelFunc
+			attemptCtx, progressTimeout, cancel = newProgressTimeoutContext(attemptCtx, noProgressTimeout)
+			attemptCtx = sparkwingruntime.WithLogger(attemptCtx, progressLogger{delegate: nlog, progress: progressTimeout})
+			cancels = append(cancels, cancel)
 		}
 		out, aerr := runJobBody(attemptCtx, node)
 		if aerr == nil {
@@ -345,8 +358,21 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 				}
 			}
 		}
-		if cancel != nil {
-			cancel()
+		absoluteTimedOut := absoluteTimeout != nil && absoluteTimeout.timedOut()
+		noProgressTimedOut := progressTimeout != nil && progressTimeout.timedOut()
+		for i := len(cancels) - 1; i >= 0; i-- {
+			cancels[i]()
+		}
+		if noProgressTimedOut {
+			if aerr == nil {
+				aerr = context.DeadlineExceeded
+			}
+			aerr = fmt.Errorf("no progress for %s: %w", noProgressTimeout, aerr)
+		} else if absoluteTimedOut {
+			if aerr == nil {
+				aerr = context.DeadlineExceeded
+			}
+			aerr = fmt.Errorf("timeout exceeded (%s): %w", timeout, aerr)
 		}
 		if aerr == nil {
 			output = out
@@ -354,12 +380,8 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 			break
 		}
 		lastErr = aerr
-		timedOut := false
-		if timeout > 0 && errors.Is(aerr, context.DeadlineExceeded) && nodeCtx.Err() == nil {
-			lastErr = fmt.Errorf("timeout exceeded (%s): %w", timeout, aerr)
-			timedOut = true
-		}
-		lastTimeout = timedOut
+		lastTimeout = absoluteTimedOut
+		lastNoProgressTimeout = noProgressTimedOut
 	}
 
 done:
@@ -383,10 +405,12 @@ done:
 		reason := store.FailureUnknown
 		var ve *sparkwing.VerifyError
 		switch {
-		case errors.As(lastErr, &ve):
-			reason = store.FailureVerify
+		case lastNoProgressTimeout:
+			reason = store.FailureNoProgressTimeout
 		case lastTimeout:
 			reason = store.FailureTimeout
+		case errors.As(lastErr, &ve):
+			reason = store.FailureVerify
 		}
 		text := boundedFailureText(ctx, runID, node.ID(), lastErr)
 		emitNodeEnd(sparkwing.Failed, text)

@@ -76,17 +76,20 @@ func TestGroup_NeedsAppliesToEveryMember(t *testing.T) {
 	}
 }
 
-func TestGroup_RetryAndTimeoutApplyToEveryMember(t *testing.T) {
+func TestGroup_ResilienceModifiersApplyToEveryMember(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	g := sparkwing.JobFanOut(plan, "builds", []string{"a", "b"}, func(s string) (string, any) {
 		return "build-" + s, func(ctx context.Context) error { return nil }
-	}).Retry(3).Timeout(10 * time.Second)
+	}).Retry(3).Timeout(10 * time.Second).NoProgressTimeout(2 * time.Second)
 	for _, m := range g.Members() {
 		if got := m.RetryConfig().Attempts; got != 3 {
 			t.Fatalf("member %q retry attempts = %d, want 3", m.ID(), got)
 		}
 		if got := m.TimeoutDuration(); got != 10*time.Second {
 			t.Fatalf("member %q timeout = %v, want 10s", m.ID(), got)
+		}
+		if got := m.NoProgressTimeoutDuration(); got != 2*time.Second {
+			t.Fatalf("member %q no-progress timeout = %v, want 2s", m.ID(), got)
 		}
 	}
 }

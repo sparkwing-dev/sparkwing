@@ -64,6 +64,94 @@ func (timeoutPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
+type noProgressTimeoutPipe struct{ sparkwing.Base }
+
+func (noProgressTimeoutPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "silent", func(ctx context.Context) error {
+		<-ctx.Done()
+		return ctx.Err()
+	}).NoProgressTimeout(80 * time.Millisecond)
+	return nil
+}
+
+type progressingPipe struct{ sparkwing.Base }
+
+func (progressingPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "moving", func(ctx context.Context) error {
+		for range 5 {
+			time.Sleep(30 * time.Millisecond)
+			sparkwing.Info(ctx, "processed batch")
+		}
+		return nil
+	}).NoProgressTimeout(80 * time.Millisecond).Timeout(time.Second)
+	return nil
+}
+
+type absoluteTimeoutWithProgressPipe struct{ sparkwing.Base }
+
+func (absoluteTimeoutWithProgressPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "chatty", func(ctx context.Context) error {
+		ticker := time.NewTicker(20 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				sparkwing.Info(ctx, "still working")
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}).NoProgressTimeout(60 * time.Millisecond).Timeout(180 * time.Millisecond)
+	return nil
+}
+
+type noProgressRetryPipe struct{ sparkwing.Base }
+
+var noProgressRetryAttempts atomic.Int32
+
+func (noProgressRetryPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "recovering", func(ctx context.Context) error {
+		if noProgressRetryAttempts.Add(1) == 1 {
+			<-ctx.Done()
+			return ctx.Err()
+		}
+		return nil
+	}).Retry(1).NoProgressTimeout(60 * time.Millisecond)
+	return nil
+}
+
+type noProgressLateActionPipe struct{ sparkwing.Base }
+
+func (noProgressLateActionPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "late-action", func(ctx context.Context) error {
+		time.Sleep(120 * time.Millisecond)
+		return nil
+	}).NoProgressTimeout(50 * time.Millisecond)
+	return nil
+}
+
+type noProgressLateVerifyPipe struct{ sparkwing.Base }
+
+func (noProgressLateVerifyPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "late-verify", func(ctx context.Context) error { return nil }).
+		Verify(func(ctx context.Context) error {
+			time.Sleep(120 * time.Millisecond)
+			return nil
+		}).
+		NoProgressTimeout(50 * time.Millisecond)
+	return nil
+}
+
+type absoluteLateActionPipe struct{ sparkwing.Base }
+
+func (absoluteLateActionPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "late-action", func(ctx context.Context) error {
+		time.Sleep(120 * time.Millisecond)
+		return nil
+	}).Timeout(50 * time.Millisecond)
+	return nil
+}
+
 type onFailurePipe struct{ sparkwing.Base }
 
 var rollbackCalled atomic.Bool
@@ -126,6 +214,13 @@ func init() {
 	register("mod-retry-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &retryOK{} })
 	register("mod-retry-exhausted", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &retryExhausted{} })
 	register("mod-timeout", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &timeoutPipe{} })
+	register("mod-no-progress-timeout", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &noProgressTimeoutPipe{} })
+	register("mod-progressing", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &progressingPipe{} })
+	register("mod-absolute-timeout-with-progress", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &absoluteTimeoutWithProgressPipe{} })
+	register("mod-no-progress-retry", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &noProgressRetryPipe{} })
+	register("mod-no-progress-late-action", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &noProgressLateActionPipe{} })
+	register("mod-no-progress-late-verify", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &noProgressLateVerifyPipe{} })
+	register("mod-absolute-late-action", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &absoluteLateActionPipe{} })
 	register("mod-onfailure", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailurePipe{} })
 	register("mod-onfailure-skip", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailureSkipPipe{} })
 	register("mod-onfailure-detached", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailureDetachedPipe{} })
@@ -208,6 +303,119 @@ func TestTimeout_CancelsSlowJob(t *testing.T) {
 	nodes, _ := st.ListNodes(context.Background(), res.RunID)
 	if len(nodes) != 1 || !strings.Contains(nodes[0].Error, "timeout exceeded") {
 		t.Fatalf("expected timeout error, got %+v", nodes)
+	}
+}
+
+func TestNoProgressTimeout_CancelsSilentJob(t *testing.T) {
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-no-progress-timeout"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("status = %q, want failed", res.Status)
+	}
+
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	nodes, err := st.ListNodes(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].FailureReason != store.FailureNoProgressTimeout {
+		t.Fatalf("failure reason = %+v, want %q", nodes, store.FailureNoProgressTimeout)
+	}
+	if !strings.Contains(nodes[0].Error, "no progress for 80ms") {
+		t.Fatalf("error = %q, want no-progress duration", nodes[0].Error)
+	}
+}
+
+func TestNoProgressTimeout_ResetsOnObservableProgress(t *testing.T) {
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-progressing"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "success" {
+		t.Fatalf("status = %q, want success", res.Status)
+	}
+}
+
+func TestTimeout_RemainsAbsoluteWhileProgressContinues(t *testing.T) {
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-absolute-timeout-with-progress"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("status = %q, want failed", res.Status)
+	}
+
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	nodes, err := st.ListNodes(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].FailureReason != store.FailureTimeout {
+		t.Fatalf("failure reason = %+v, want %q", nodes, store.FailureTimeout)
+	}
+}
+
+func TestNoProgressTimeout_RetryStartsWithAFreshWindow(t *testing.T) {
+	noProgressRetryAttempts.Store(0)
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-no-progress-retry"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "success" {
+		t.Fatalf("status = %q, want success", res.Status)
+	}
+	if got := noProgressRetryAttempts.Load(); got != 2 {
+		t.Fatalf("attempts = %d, want 2", got)
+	}
+}
+
+func TestNoProgressTimeout_RejectsLateActionSuccess(t *testing.T) {
+	assertTimeoutReason(t, "mod-no-progress-late-action", store.FailureNoProgressTimeout)
+}
+
+func TestNoProgressTimeout_RejectsLateVerifierSuccess(t *testing.T) {
+	assertTimeoutReason(t, "mod-no-progress-late-verify", store.FailureNoProgressTimeout)
+}
+
+func TestTimeout_RejectsLateActionSuccess(t *testing.T) {
+	assertTimeoutReason(t, "mod-absolute-late-action", store.FailureTimeout)
+}
+
+func assertTimeoutReason(t *testing.T, pipeline, wantReason string) {
+	t.Helper()
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: pipeline})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("status = %q, want failed", res.Status)
+	}
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	nodes, err := st.ListNodes(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].FailureReason != wantReason {
+		t.Fatalf("failure reason = %+v, want %q", nodes, wantReason)
 	}
 }
 

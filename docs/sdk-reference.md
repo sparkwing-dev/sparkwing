@@ -733,6 +733,7 @@ type JobGroup struct {
 - `func (g *JobGroup) Name() string` -- Name returns the group's declared name, or "" for an unnamed (structural-only) group.
 - `func (g *JobGroup) Needs(deps ...Dep) *JobGroup` -- Needs declares an upstream dependency on every member of the group.
 - `func (g *JobGroup) NeedsOptional(deps ...Dep) *JobGroup` -- NeedsOptional declares optional upstream dependencies on every member; unknown IDs are silently dropped at finalize.
+- `func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup` -- NoProgressTimeout sets the per-attempt inactivity timeout on every member.
 - `func (g *JobGroup) Optional() *JobGroup` -- Optional marks every member as non-essential.
 - `func (g *JobGroup) Outputs(globs ...string) *JobGroup` -- Outputs declares the same artifact output globs on every member.
 - `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers biases runner selection for every member.
@@ -785,6 +786,8 @@ type JobNode struct {
 - `func (n *JobNode) Needs(deps ...Dep) *JobNode` -- Needs declares hard upstream dependencies.
 - `func (n *JobNode) NeedsGroups() []*JobGroup` -- NeedsGroups returns any dynamic groups (from ExpandFrom) this node is waiting on.
 - `func (n *JobNode) NeedsOptional(deps ...Dep) *JobNode` -- NeedsOptional declares upstream dependencies that may or may not be present in the plan.
+- `func (n *JobNode) NoProgressTimeout(d time.Duration) *JobNode` -- NoProgressTimeout caps how long an attempt may run without emitting a node log record.
+- `func (n *JobNode) NoProgressTimeoutDuration() time.Duration` -- NoProgressTimeoutDuration returns the configured per-attempt inactivity timeout, or zero if disabled.
 - `func (n *JobNode) OnFailure(id string, x any) *JobNode` -- OnFailure registers a recovery node that runs only when this node terminates with outcome=failed; otherwise it's marked Skipped.
 - `func (n *JobNode) OnFailureNode() *JobNode` -- OnFailureNode returns the recovery node registered via OnFailure, or nil if none.
 - `func (n *JobNode) Optional() *JobNode` -- Optional marks the node as non-essential: a failure is logged as a warning and does not count toward the run's overall success/fail outcome.

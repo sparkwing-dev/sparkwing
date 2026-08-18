@@ -56,6 +56,8 @@ func (h *dispatchSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID 
 	doneCh := h.state.ensureDoneCh(child.ID())
 	h.state.scheduleNode(child)
 
+	resumeProgressTimeout := pauseProgressTimeout(ctx)
+	defer resumeProgressTimeout()
 	select {
 	case <-doneCh:
 	case <-ctx.Done():
