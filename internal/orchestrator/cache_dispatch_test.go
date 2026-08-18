@@ -206,7 +206,7 @@ func (planLevelQueuedAwaitParentPipe) Plan(
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-child", "work")
 		return err
-	}).Timeout(time.Second)
+	}).NoProgressTimeout(100 * time.Millisecond).Timeout(time.Second)
 	return nil
 }
 
@@ -262,12 +262,12 @@ func (planLevelQueuedAwaitThenContinueParentPipe) Plan(
 			return err
 		}
 		select {
-		case <-time.After(20 * time.Millisecond):
+		case <-time.After(200 * time.Millisecond):
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	}).Timeout(time.Second)
+	}).NoProgressTimeout(100 * time.Millisecond).Timeout(time.Second)
 	return nil
 }
 
@@ -1035,7 +1035,7 @@ func TestDispatchWatchdog_UnclaimedUnboundedChildStillTimesOutParent(t *testing.
 	}
 }
 
-func TestConcurrency_RunAndAwaitParentContextContinuesAfterAdmissionWait(t *testing.T) {
+func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
 	ctx := context.Background()
@@ -1110,11 +1110,18 @@ childQueued:
 
 	select {
 	case parent := <-parentDone:
-		if parent.Status != "success" {
-			t.Fatalf("parent status = %q, want success after continuing post-await work (err=%v)", parent.Status, parent.Error)
+		if parent.Status != "failed" {
+			t.Fatalf("parent status = %q, want no-progress failure after child wait (err=%v)", parent.Status, parent.Error)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for parent after releasing queued child")
+	}
+	parentNodes, err := st.ListNodes(ctx, "queued-await-continue-parent")
+	if err != nil {
+		t.Fatalf("list parent nodes: %v", err)
+	}
+	if len(parentNodes) != 1 || parentNodes[0].FailureReason != store.FailureNoProgressTimeout {
+		t.Fatalf("parent nodes = %+v, want failure reason %q", parentNodes, store.FailureNoProgressTimeout)
 	}
 	select {
 	case child := <-childDone:

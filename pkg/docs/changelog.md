@@ -64,26 +64,6 @@ code change to unlock.
   deploy node. `sparkwing examples --name` now points at
   `container-deploy-ecs-fargate` in its own help, since the name it
   showed no longer resolves.
-- **cli (Breaking):** `pipeline list -o json` is an index. It carries
-  `name`, `short`, `entrypoint` and `triggers` -- what a caller picks a
-  pipeline by -- where it used to carry every pipeline's full help text,
-  args, examples, env vars and risk labels as well. `pipeline describe
-  --name <n>` was already the read verb for those and still answers with
-  all of them. A pipeline declaring no `short` now summarizes as the
-  first line of its help, so nothing loses its line. `pipeline discover`
-  streams the same index plus its score. See
-  [migration](docs/migrations/v0.33.0.md#pipeline-list-is-an-index).
-- **cli (Breaking):** `pipeline sparks list -o json` is a stream: a
-  `kind: summary` line carrying `sparkwing_dir` and the library count,
-  then one `kind: library` line per library. It was a pretty-printed
-  object wrapping a `libraries` array, so `head -1` returned `{` and a
-  truncating reader got nothing. Single-object verbs are unchanged, as
-  in v0.32.0. See
-  [migration](docs/migrations/v0.33.0.md#pipeline-sparks-list-is-a-stream).
-- **cli:** `configure profiles list` takes `-o pretty|json|plain`, which
-  it had no machine-readable mode at all before. JSON is one profile per
-  line; the token is redacted in every mode, because a machine-readable
-  listing is the shape most likely to be piped into a log.
 - **cli (Breaking):** A run that lost log lines fails instead of
   reporting success. When the log store stays unreachable past the
   append retry budget, the node fails with the new `logs_dropped`
@@ -159,6 +139,37 @@ code change to unlock.
   cannot mix a MinIO cache with a real-AWS state. It also records that
   the secrets surface has no object-store option, so "no controller"
   and "no per-host secret provisioning" cannot both hold.
+
+## [v0.33.0] - 2026-08-13
+- **controller (Breaking):** On Darwin, the first host CPU sample after start
+  reports `CPUMeasured=false` instead of a process-lifetime average. Later
+  samples derive utilization from the change in cumulative process CPU time,
+  so past CPU work no longer remains booked as current external load. In the
+  measured queue, this defect caused roughly 18% of admission refusals; 82%
+  remained with external CPU forced to zero because reservation accounting is
+  a separate constraint. Callers that already defer admission decisions until
+  CPU is measured need no change. See
+  [migration](docs/migrations/v0.33.0.md#the-first-darwin-cpu-sample-is-unmeasured).
+- **cli (Breaking):** `pipeline list -o json` is an index. It carries
+  `name`, `short`, `entrypoint` and `triggers` -- what a caller picks a
+  pipeline by -- where it used to carry every pipeline's full help text,
+  args, examples, env vars and risk labels as well. `pipeline describe
+  --name <n>` was already the read verb for those and still answers with
+  all of them. A pipeline declaring no `short` now summarizes as the
+  first line of its help, so nothing loses its line. `pipeline discover`
+  streams the same index plus its score. See
+  [migration](docs/migrations/v0.33.0.md#pipeline-list-is-an-index).
+- **cli (Breaking):** `pipeline sparks list -o json` is a stream: a
+  `kind: summary` line carrying `sparkwing_dir` and the library count,
+  then one `kind: library` line per library. It was a pretty-printed
+  object wrapping a `libraries` array, so `head -1` returned `{` and a
+  truncating reader got nothing. Single-object verbs are unchanged, as
+  in v0.32.0. See
+  [migration](docs/migrations/v0.33.0.md#pipeline-sparks-list-is-a-stream).
+- **cli:** `configure profiles list` takes `-o pretty|json|plain`, which
+  it had no machine-readable mode at all before. JSON is one profile per
+  line; the token is redacted in every mode, because a machine-readable
+  listing is the shape most likely to be piped into a log.
 
 ## [v0.32.1] - 2026-08-13
 ### Changed

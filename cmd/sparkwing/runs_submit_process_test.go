@@ -233,7 +233,19 @@ func (e *submitTestEnv) markerLines() []string {
 
 func (e *submitTestEnv) stopConsumer() {
 	if pid, ok := orchestrator.ConsumerPID(e.home); ok {
-		_ = syscall.Kill(pid, syscall.SIGKILL)
+		if err := stopSupervisor(pid, ""); err != nil {
+			e.t.Errorf("stop consumer process %d: %v", pid, err)
+			return
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			err := syscall.Kill(pid, 0)
+			if errors.Is(err, syscall.ESRCH) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		e.t.Errorf("consumer process %d did not exit within cleanup bound", pid)
 	}
 }
 
@@ -677,6 +689,7 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 	e := newSubmitTestEnv(t)
 	other := t.TempDir()
+	t.Cleanup(e.stopConsumer)
 	otherSparkwing := filepath.Join(other, ".sparkwing")
 	if err := os.MkdirAll(otherSparkwing, 0o755); err != nil {
 		t.Fatal(err)

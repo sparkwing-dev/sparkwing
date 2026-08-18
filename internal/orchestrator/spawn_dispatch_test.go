@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -84,6 +85,34 @@ func (spawnFailPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
+type spawnProgressChild struct{ sparkwing.Base }
+
+func (spawnProgressChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "wait", func(context.Context) error {
+		time.Sleep(250 * time.Millisecond)
+		return nil
+	})
+	return nil, nil
+}
+
+type spawnProgressParent struct{ sparkwing.Base }
+
+func (spawnProgressParent) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	child := sparkwing.JobSpawn(w, "child", spawnProgressChild{})
+	sparkwing.Step(w, "after", func(context.Context) error {
+		time.Sleep(200 * time.Millisecond)
+		return nil
+	}).Needs(child)
+	return nil, nil
+}
+
+type spawnProgressPipe struct{ sparkwing.Base }
+
+func (spawnProgressPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	sparkwing.Job(plan, "parent", spawnProgressParent{}).NoProgressTimeout(100 * time.Millisecond)
+	return nil
+}
+
 // spawnEachParent uses SpawnNodeForEach to fan out N children. Each
 // child increments a shared counter; the test asserts the counter
 // equals the slice length and that each child got a unique
@@ -126,9 +155,38 @@ func init() {
 		return &spawnSinglePipe{childRan: &spawnSingleChildRan}
 	})
 	register("spawn-fail", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &spawnFailPipe{} })
+	register("spawn-progress-timeout", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &spawnProgressPipe{} })
 	register("spawn-each", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return &spawnEachPipe{count: &spawnEachCount}
 	})
+}
+
+func TestSpawnDispatch_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testing.T) {
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "spawn-progress-timeout"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("status = %q, want no-progress failure after child completed", res.Status)
+	}
+
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	nodes, err := st.ListNodes(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
+	parent, child := find(nodes, "parent"), find(nodes, "parent/child")
+	if parent == nil || parent.FailureReason != store.FailureNoProgressTimeout {
+		t.Fatalf("parent = %+v, want failure reason %q", parent, store.FailureNoProgressTimeout)
+	}
+	if child == nil || child.Outcome != string(sparkwing.Success) {
+		t.Fatalf("child = %+v, want success after outliving the parent's inactivity budget", child)
+	}
 }
 
 func TestSpawnDispatch_SingleSpawnRunsThroughHandler(t *testing.T) {
