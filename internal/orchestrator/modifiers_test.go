@@ -120,6 +120,38 @@ func (noProgressRetryPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spa
 	return nil
 }
 
+type noProgressLateActionPipe struct{ sparkwing.Base }
+
+func (noProgressLateActionPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "late-action", func(ctx context.Context) error {
+		time.Sleep(120 * time.Millisecond)
+		return nil
+	}).NoProgressTimeout(50 * time.Millisecond)
+	return nil
+}
+
+type noProgressLateVerifyPipe struct{ sparkwing.Base }
+
+func (noProgressLateVerifyPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "late-verify", func(ctx context.Context) error { return nil }).
+		Verify(func(ctx context.Context) error {
+			time.Sleep(120 * time.Millisecond)
+			return nil
+		}).
+		NoProgressTimeout(50 * time.Millisecond)
+	return nil
+}
+
+type absoluteLateActionPipe struct{ sparkwing.Base }
+
+func (absoluteLateActionPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	sparkwing.Job(plan, "late-action", func(ctx context.Context) error {
+		time.Sleep(120 * time.Millisecond)
+		return nil
+	}).Timeout(50 * time.Millisecond)
+	return nil
+}
+
 type onFailurePipe struct{ sparkwing.Base }
 
 var rollbackCalled atomic.Bool
@@ -186,6 +218,9 @@ func init() {
 	register("mod-progressing", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &progressingPipe{} })
 	register("mod-absolute-timeout-with-progress", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &absoluteTimeoutWithProgressPipe{} })
 	register("mod-no-progress-retry", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &noProgressRetryPipe{} })
+	register("mod-no-progress-late-action", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &noProgressLateActionPipe{} })
+	register("mod-no-progress-late-verify", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &noProgressLateVerifyPipe{} })
+	register("mod-absolute-late-action", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &absoluteLateActionPipe{} })
 	register("mod-onfailure", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailurePipe{} })
 	register("mod-onfailure-skip", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailureSkipPipe{} })
 	register("mod-onfailure-detached", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailureDetachedPipe{} })
@@ -345,6 +380,42 @@ func TestNoProgressTimeout_RetryStartsWithAFreshWindow(t *testing.T) {
 	}
 	if got := noProgressRetryAttempts.Load(); got != 2 {
 		t.Fatalf("attempts = %d, want 2", got)
+	}
+}
+
+func TestNoProgressTimeout_RejectsLateActionSuccess(t *testing.T) {
+	assertTimeoutReason(t, "mod-no-progress-late-action", store.FailureNoProgressTimeout)
+}
+
+func TestNoProgressTimeout_RejectsLateVerifierSuccess(t *testing.T) {
+	assertTimeoutReason(t, "mod-no-progress-late-verify", store.FailureNoProgressTimeout)
+}
+
+func TestTimeout_RejectsLateActionSuccess(t *testing.T) {
+	assertTimeoutReason(t, "mod-absolute-late-action", store.FailureTimeout)
+}
+
+func assertTimeoutReason(t *testing.T, pipeline, wantReason string) {
+	t.Helper()
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: pipeline})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("status = %q, want failed", res.Status)
+	}
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	nodes, err := st.ListNodes(context.Background(), res.RunID)
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].FailureReason != wantReason {
+		t.Fatalf("failure reason = %+v, want %q", nodes, wantReason)
 	}
 }
 

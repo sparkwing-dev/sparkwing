@@ -69,3 +69,11 @@ func TestProgressTimeoutPreservesParentDeadline(t *testing.T) {
 		t.Fatalf("Deadline() = (%v, %v), want (%v, true)", got, ok, want)
 	}
 }
+
+func TestProgressTimeoutDoesNotBoundDelegatedChildWait(t *testing.T) {
+	ctx, _, cancel := newProgressTimeoutContext(context.Background(), time.Hour)
+	defer cancel()
+	if childAwaitBounded(ctx, 0) {
+		t.Fatal("a suspended progress timeout must not disable the dispatch watchdog")
+	}
+}
