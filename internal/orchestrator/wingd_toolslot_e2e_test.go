@@ -134,9 +134,12 @@ type toolSlotPipe struct{ sparkwing.Base }
 func (toolSlotPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Resources(sparkwing.Cores(0.25))
 	runID := rc.RunID
-	sparkwing.Job(plan, toolSlotNodeID, func(ctx context.Context) error {
+	node := sparkwing.Job(plan, toolSlotNodeID, func(ctx context.Context) error {
 		return toolSlotE2EGate.Load().hold(ctx, runID)
 	})
+	if strings.HasPrefix(runID, "tool-progress-") {
+		node.NoProgressTimeout(100 * time.Millisecond)
+	}
 	return nil
 }
 
@@ -296,6 +299,53 @@ func TestWingd_ContendedToolSlotReportsItsQueuePositionBehindTheBoxBudget(t *tes
 	awaitToolSlotRunSuccess(t, "tool-slot-a", runA)
 	awaitToolSlotRunSuccess(t, "tool-slot-b", runB)
 	awaitToolSlotRunSuccess(t, "tool-slot-c", runC)
+}
+
+func TestWingd_NoProgressTimeoutPausesForToolSlotAndResumesAfterGrant(t *testing.T) {
+	registerToolSlotE2EPipeline()
+	home := wingdTestHome(t)
+	startWingd(t, home, 8)
+	backends, st, _ := openWingdBackends(t, home)
+
+	budget := sparkwing.BoxToolBudget("wingd-e2e-tool-progress", toolSlotLintCores, 0)
+	gate := newToolSlotGate(budget, sparkwing.ToolCostCenticores(toolSlotLintCores))
+	toolSlotE2EGate.Store(gate)
+
+	holder := startToolSlotRun(t, backends, home, "tool-holder")
+	if grant := gate.awaitGrant(t, "tool-holder"); !grant.granted {
+		t.Fatal("holder was not granted the tool slot")
+	}
+
+	waiter := startToolSlotRun(t, backends, home, "tool-progress-waiter")
+	awaitToolSlotQueued(t, st, "tool-progress-waiter", toolSlotNodeID)
+	time.Sleep(250 * time.Millisecond)
+	select {
+	case res := <-waiter:
+		t.Fatalf("waiter finished while its no-progress clock should be paused: %+v", res)
+	default:
+	}
+
+	gate.let("tool-holder")
+	if grant := gate.awaitGrant(t, "tool-progress-waiter"); !grant.granted {
+		t.Fatal("waiter was not granted after the holder released")
+	}
+
+	select {
+	case res := <-waiter:
+		if res == nil || res.Status != "failed" {
+			t.Fatalf("waiter result = %+v, want failure after its clock resumed", res)
+		}
+		nodes, err := st.ListNodes(context.Background(), "tool-progress-waiter")
+		if err != nil {
+			t.Fatalf("list waiter nodes: %v", err)
+		}
+		if len(nodes) != 1 || nodes[0].FailureReason != store.FailureNoProgressTimeout {
+			t.Fatalf("waiter nodes = %+v, want failure reason %q", nodes, store.FailureNoProgressTimeout)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiter did not time out after its tool slot was granted")
+	}
+	awaitToolSlotRunSuccess(t, "tool-holder", holder)
 }
 
 // TestWingd_ToolSlotQueueTimeoutFallsBackRatherThanBlockingForever fills

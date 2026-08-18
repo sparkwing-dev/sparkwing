@@ -206,7 +206,7 @@ func (planLevelQueuedAwaitParentPipe) Plan(
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-child", "work")
 		return err
-	}).Timeout(time.Second)
+	}).NoProgressTimeout(100 * time.Millisecond).Timeout(time.Second)
 	return nil
 }
 

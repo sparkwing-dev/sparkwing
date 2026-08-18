@@ -234,6 +234,15 @@ func (e *submitTestEnv) markerLines() []string {
 func (e *submitTestEnv) stopConsumer() {
 	if pid, ok := orchestrator.ConsumerPID(e.home); ok {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			err := syscall.Kill(pid, 0)
+			if errors.Is(err, syscall.ESRCH) {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		e.t.Errorf("consumer process %d did not exit within cleanup bound", pid)
 	}
 }
 
