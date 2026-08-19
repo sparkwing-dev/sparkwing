@@ -1,6 +1,6 @@
 // `sparkwing configure xrepo` -- laptop-local repo registry CLI. Persists at
 // ~/.config/sparkwing/repos.yaml; consumed by the local trigger
-// consumer (pkg/orchestrator/local_trigger_loop.go) to resolve
+// consumer (internal/orchestrator/local_trigger_loop.go) to resolve
 // "pipeline X" -> "checkout at ~/code/Y" without per-call
 // WithFreshRepo annotations.
 package main
