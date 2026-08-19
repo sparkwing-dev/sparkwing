@@ -134,7 +134,7 @@ func TestFailExpiredNodeClaims_TerminatesWithAgentLost(t *testing.T) {
 	if _, err := s.ClaimNextReadyNode(ctx, "pod-dead", 1*time.Millisecond, nil); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(5 * time.Millisecond)
+	expireNodeClaim(t, s, "run-1", "node-a")
 
 	pairs, err := store.Maintenance.FailExpiredNodeClaims(s, ctx)
 	if err != nil {
