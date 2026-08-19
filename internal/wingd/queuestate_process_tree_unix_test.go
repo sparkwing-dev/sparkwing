@@ -40,9 +40,14 @@ func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
 	positions, _ := acquireAsync(waiter, semHostReq("waiting", "builder", holderProcess.Process.Pid+1, "deploy"))
 	waitForQueue(t, positions)
 
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1.0.0"})
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	observation := time.NewTimer(500 * time.Millisecond)
+	defer observation.Stop()
+	for {
+		queryCtx, cancelQuery := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		qs, err := client.Query(queryCtx, client.Options{Home: home, Version: "v1.0.0"})
+		cancelQuery()
 		if err != nil {
 			t.Fatalf("queue state: %v", err)
 		}
@@ -52,6 +57,10 @@ func TestQueueState_ActiveChildProcessPreventsStalledHolder(t *testing.T) {
 		if qs.Holders[0].Stalled {
 			t.Fatalf("holder with active child process was flagged stalled: %+v", qs.Holders[0])
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-observation.C:
+			return
+		}
 	}
 }
