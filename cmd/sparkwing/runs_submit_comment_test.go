@@ -10,8 +10,8 @@ import (
 
 var runsSubmitReviewLabels = []*regexp.Regexp{
 	regexp.MustCompile(`\bBLOCKER\s+[0-9]+\b`),
-	regexp.MustCompile(`\bis\s+S[0-9]+(?:[.:]|\s)`),
-	regexp.MustCompile(`\bhalf\s+of\s+S[0-9]+(?:[.:]|\s)`),
+	regexp.MustCompile(`\bTest[A-Za-z0-9_]+\s+is\s+S[0-9]+\.`),
+	regexp.MustCompile(`\bTest[A-Za-z0-9_]+\s+is\s+the\s+other\s+half\s+of\s+S[0-9]+:`),
 	regexp.MustCompile(`(?i)\badversarial review\b`),
 }
 
@@ -34,6 +34,7 @@ func TestRunsSubmitReviewLabelPatternsAllowProductNames(t *testing.T) {
 	for _, text := range []string{
 		"The fixture uses an S3 backend.",
 		"The S2 protocol response is retained.",
+		"The storage target is S3 compatible.",
 	} {
 		for _, pattern := range runsSubmitReviewLabels {
 			if pattern.MatchString(text) {
@@ -46,8 +47,8 @@ func TestRunsSubmitReviewLabelPatternsAllowProductNames(t *testing.T) {
 func TestRunsSubmitReviewLabelPatternsRejectFindingNames(t *testing.T) {
 	for _, text := range []string{
 		"This is BLOCKER 1 end to end.",
-		"This test is S3. Exit zero is correct.",
-		"This is the other half of S2: the key names one intent.",
+		"TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus is S3. Exit zero is correct.",
+		"TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused is the other half of S2: the key names one intent.",
 		"Regression tests lifted from adversarial review.",
 	} {
 		matched := false
