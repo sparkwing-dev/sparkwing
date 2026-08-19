@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** Consumer stop and upgrade replacement recognize a completed Unix
+  process immediately instead of waiting through the forced-stop grace period.
 - **admission:** Capacity measurements remain attached to the run's repository
   when job code changes the process working directory.
 - **sdk:** `Requires` documentation distinguishes runner-claimed work from
