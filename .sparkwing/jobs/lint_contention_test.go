@@ -109,7 +109,7 @@ func TestLintBudgetIsBoxScoped(t *testing.T) {
 // wrong answer, because it is the mode most runs exhibit once a cache is
 // hot, and it would let the box admit four concurrent linters that each
 // want three to four cores the moment any of them runs cold. Caches here
-// are per-worktree (BW-1223) and worktrees are disposable, so cold is the
+// are per-worktree and worktrees are disposable, so cold is the
 // common case and the safe one to price.
 //
 // This does not forbid re-pricing. It forbids re-pricing to a number below

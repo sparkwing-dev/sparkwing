@@ -69,7 +69,7 @@ var tagRE = regexp.MustCompile(`(?i)^// ?(hack|safety|bug|perf):`)
 // the testing package: "// Output:" and "// Unordered output:".
 var outputRE = regexp.MustCompile(`(?i)^// (Unordered output|Output):`)
 
-var opaqueTicketRE = regexp.MustCompile(`\bBW-\d+\b`)
+var opaqueTicketRE = regexp.MustCompile(`(?i)\bBW-\d+\b`)
 
 var skipDirs = map[string]bool{
 	"vendor":          true,

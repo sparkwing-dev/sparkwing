@@ -131,7 +131,7 @@ func TestCheckFile_RejectsOpaqueTicketLabelsInDocumentation(t *testing.T) {
 	src := `// Package widget implements BW-123 behavior.
 package widget
 
-// Add preserves the BW-456 compatibility rule.
+// Add preserves the bw-456 compatibility rule without interpreting BWT-789.
 func Add() {}
 `
 	path := filepath.Join(t.TempDir(), "widget.go")
@@ -144,7 +144,7 @@ func Add() {}
 		t.Fatalf("checkFile: %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("violations = %+v, want both opaque ticket labels rejected", got)
+		t.Fatalf("violations = %+v, want uppercase and lowercase opaque ticket labels rejected", got)
 	}
 }
 

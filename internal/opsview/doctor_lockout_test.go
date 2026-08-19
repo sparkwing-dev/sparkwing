@@ -219,7 +219,7 @@ func TestDiagnoseLockedOutRepos_NamesNoTargetWhenANewerDaemonReportsNoRelease(t 
 func TestDiagnoseLockedOutRepos_GivesARegisteredWorktreeItsOwnRow(t *testing.T) {
 	base := t.TempDir()
 	primary := pinnedCheckout(t, base, "sparks-core", "v0.22.0", false)
-	worktree := pinnedCheckout(t, base, "bw-1200", "v0.17.25", true)
+	worktree := pinnedCheckout(t, base, "feature-worktree", "v0.17.25", true)
 	registerRepos(t, primary, worktree)
 
 	var report DoctorReport
@@ -235,8 +235,8 @@ func TestDiagnoseLockedOutRepos_GivesARegisteredWorktreeItsOwnRow(t *testing.T) 
 	if !got.Worktree {
 		t.Error("a row for a linked worktree must be marked as one, so its branch-shaped Name reads correctly")
 	}
-	if got.Name != "bw-1200" || got.Pin != "v0.17.25" {
-		t.Errorf("locked-out row = %+v, want bw-1200 pinned v0.17.25", got)
+	if got.Name != "feature-worktree" || got.Pin != "v0.17.25" {
+		t.Errorf("locked-out row = %+v, want feature-worktree pinned v0.17.25", got)
 	}
 }
 
@@ -307,12 +307,12 @@ func TestDiagnoseLockedOutRepos_SilentWithoutAReadableProtocolMajor(t *testing.T
 func TestRenderDoctorPretty_GivesEveryLockedOutRowItsOwnRaiseTarget(t *testing.T) {
 	out := renderPretty(t, DoctorReport{LockedOutRepos: []DoctorLockedOutRepo{
 		{Name: "workwing", Path: "/code/workwing", Pin: "v0.17.25", RaiseTo: "v0.22.0"},
-		{Name: "bw-1200", Path: "/code/bw-1200", Pin: "v0.15.4", RaiseTo: "v0.22.0", Worktree: true},
+		{Name: "feature-worktree", Path: "/code/feature-worktree", Pin: "v0.15.4", RaiseTo: "v0.22.0", Worktree: true},
 	}})
 
 	for _, want := range []string{
 		"workwing", "pinned v0.17.25", "/code/workwing",
-		"bw-1200 (worktree)", "pinned v0.15.4", "/code/bw-1200",
+		"feature-worktree (worktree)", "pinned v0.15.4", "/code/feature-worktree",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("pretty output does not mention %q:\n%s", want, out)
