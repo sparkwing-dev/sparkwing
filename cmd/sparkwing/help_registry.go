@@ -2196,7 +2196,6 @@ shell piping:
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Filter by pipeline name (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "status", Argument: "STATUS", Desc: "Filter by status: running|success|failed|cancelled (repeatable; prefix `!` to exclude)", Group: "Filter"},
-		{Name: "tag", Argument: "TAG", Desc: "Filter by sparkwing.yaml tag (repeatable)", Group: "Filter"},
 		{Name: "branch", Argument: "BRANCH", Desc: "Filter by git branch (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "sha", Argument: "PREFIX", Desc: "Filter by git sha prefix (repeatable; prefix `!` to exclude)", Group: "Filter"},
 		{Name: "error", Argument: "SUBSTR", Desc: "Substring match against the persisted failure reason", Group: "Filter"},

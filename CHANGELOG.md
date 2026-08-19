@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `runs list --help` no longer advertises the unsupported `--tag`
+  filter.
 - **cli:** Generated help no longer repeats `--output` for profile probes,
   webhook inspection, or agent listings.
 - **cli:** Help marks subcommands as optional when the parent command also

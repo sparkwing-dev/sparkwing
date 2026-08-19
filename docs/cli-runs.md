@@ -572,7 +572,6 @@ shell piping:
 |---|---|
 | `--pipeline NAME` | Filter by pipeline name (repeatable; prefix `!` to exclude) |
 | `--status STATUS` | Filter by status: running\|success\|failed\|cancelled (repeatable; prefix `!` to exclude) |
-| `--tag TAG` | Filter by sparkwing.yaml tag (repeatable) |
 | `--branch BRANCH` | Filter by git branch (repeatable; prefix `!` to exclude) |
 | `--sha PREFIX` | Filter by git sha prefix (repeatable; prefix `!` to exclude) |
 | `--error SUBSTR` | Substring match against the persisted failure reason |
