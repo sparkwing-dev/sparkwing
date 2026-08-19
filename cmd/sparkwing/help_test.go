@@ -165,6 +165,24 @@ func TestRequiredProfileFlagsDoNotAdvertiseDefault(t *testing.T) {
 	}
 }
 
+func TestRunsMutationHelpDescribesLocalAndRemoteModes(t *testing.T) {
+	for _, command := range []Command{cmdJobsRetry, cmdJobsCancel, cmdJobsPrune} {
+		foundProfile := false
+		for _, spec := range command.Flags {
+			if spec.Name != "profile" {
+				continue
+			}
+			foundProfile = true
+			if !strings.Contains(strings.ToLower(spec.Desc), "omit for local") {
+				t.Errorf("%s describes --profile as %q, want local-mode guidance", command.Path, spec.Desc)
+			}
+		}
+		if !foundProfile {
+			t.Errorf("%s does not declare --profile", command.Path)
+		}
+	}
+}
+
 func TestSecretCommandHelpDescribesLocalAndRemoteModes(t *testing.T) {
 	for _, command := range childCommands(cmdSecret.Path) {
 		if command.Hidden {

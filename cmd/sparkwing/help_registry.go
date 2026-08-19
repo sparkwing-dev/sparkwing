@@ -2590,7 +2590,7 @@ only when at least one id failed.`,
 		{Name: "run", Argument: "RUN_ID", Desc: "Source run id (repeatable; use --run - to read ids from stdin)", Group: "Input"},
 		{Name: "failed", Desc: "Rerun from failed: reuse passed nodes, re-execute only failed/unreached", ConflictsWith: []string{"all"}, Group: "Input"},
 		{Name: "all", Desc: "Rerun all: re-execute every node from scratch", ConflictsWith: []string{"failed"}, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
@@ -2777,7 +2777,7 @@ Pass --run once per id (repeatable). Use --run - to read ids
 from stdin, one per line.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id to cancel (repeatable; use --run - to read ids from stdin)", Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
@@ -2800,7 +2800,7 @@ Use --dry-run first to confirm the victim list.`,
 		{Name: "older-than", Argument: "DURATION", Desc: "Prune runs older than this", RequiredWhen: "when no --run ids are supplied", ConflictsWith: []string{"run"}, Group: "Input"},
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id to prune (repeatable; use --run - to read ids from stdin)", RequiredWhen: "when --older-than is not set", ConflictsWith: []string{"older-than"}, Group: "Input"},
 		{Name: "dry-run", Desc: "List matching runs without deleting", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},
 	},
 	Examples: []Example{
 		{"Preview what a 7-day prune would delete", "sparkwing runs prune --older-than 7d --dry-run --profile prod"},

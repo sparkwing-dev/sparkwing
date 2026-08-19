@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** Run retry, cancellation, and pruning help distinguishes local runs
+  from named remote profiles.
 - **cli:** `cluster worker --help` marks `--profile` required and no longer
   claims a global default profile.
 - **cli:** Secret command help distinguishes local files from named remote
