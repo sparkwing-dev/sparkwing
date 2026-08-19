@@ -136,6 +136,7 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
 
+	started := time.Now()
 	if err := RunPoolLoop(ctx, PoolLoopConfig{
 		ControllerURL: cfg.Controller,
 		Token:         cfg.Token,
@@ -161,6 +162,9 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 	}
 	if !strings.HasPrefix(got.holder, "agent:test:") {
 		t.Fatalf("holder prefix: %q", got.holder)
+	}
+	if elapsed := time.Since(started); elapsed >= 300*time.Millisecond {
+		t.Fatalf("claim observation took %s, want less than 300ms", elapsed)
 	}
 }
 
