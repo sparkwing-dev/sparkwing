@@ -40,7 +40,6 @@ var advertisedButUnregistered = map[string]string{
 	"sparkwing configure profiles set --logs":           "BW-1359: as add",
 	"sparkwing configure profiles set --gitcache":       "BW-1359: as add",
 	"sparkwing configure profiles set --default-runner": "BW-1359: as add",
-	"sparkwing runs list --tag":                         "BW-1359: runs carry no tag the filter could read",
 }
 
 func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
