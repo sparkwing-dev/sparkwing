@@ -131,8 +131,11 @@ func TestCheckFile_RejectsOpaqueTicketLabelsInDocumentation(t *testing.T) {
 	src := `// Package widget implements BW-123 behavior.
 package widget
 
-// Add preserves the BW-456 compatibility rule.
+// Add preserves the bw-456 compatibility rule.
 func Add() {}
+
+// Remove accepts BWT-789 because it is not a ticket label.
+func Remove() {}
 `
 	path := filepath.Join(t.TempDir(), "widget.go")
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
