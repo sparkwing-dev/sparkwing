@@ -506,7 +506,7 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 
 // logFilter collects the server-side filter knobs for handleRead.
 // The same semantics are available client-side (pkg/logs helpers)
-// and cluster-side (this handler), so `sparkwing jobs logs --tail N`
+// and cluster-side (this handler), so `sparkwing runs logs --tail N`
 // behaves identically against local files and remote log bytes.
 type logFilter struct {
 	tail  int
