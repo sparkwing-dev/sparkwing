@@ -39,7 +39,9 @@ func containerRunning(ctx context.Context, name string) (bool, error) {
 // in tests that might leave one behind if the assertion fires before
 // WithServices' own cleanup.
 func forceRemove(name string) {
-	_ = exec.Command("docker", "rm", "-f", name).Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
 }
 
 func waitForContainerStopped(t *testing.T, name, cause string) {
