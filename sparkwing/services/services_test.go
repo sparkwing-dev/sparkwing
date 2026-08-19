@@ -42,6 +42,25 @@ func forceRemove(name string) {
 	_ = exec.Command("docker", "rm", "-f", name).Run()
 }
 
+func waitForContainerStopped(t *testing.T, name, cause string) {
+	t.Helper()
+	poll := time.NewTicker(100 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
+		if !containerRunning(name) {
+			return
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			forceRemove(name)
+			t.Fatalf("container %s still running after %s", name, cause)
+		}
+	}
+}
+
 func TestDeriveName(t *testing.T) {
 	cases := []struct {
 		image string
@@ -221,14 +240,7 @@ func TestWithServices_PanicStillCleansUp(t *testing.T) {
 	if capturedName == "" {
 		t.Fatalf("fn never captured the container name")
 	}
-	for range 20 {
-		if !containerRunning(capturedName) {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	forceRemove(capturedName)
-	t.Fatalf("container %s still running after panic through WithServices", capturedName)
+	waitForContainerStopped(t, capturedName, "panic through WithServices")
 }
 
 func TestWithServices_CtxCancelCleansUp(t *testing.T) {
@@ -263,14 +275,7 @@ func TestWithServices_CtxCancelCleansUp(t *testing.T) {
 	if capturedName == "" {
 		t.Fatalf("fn never captured container")
 	}
-	for range 20 {
-		if !containerRunning(capturedName) {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	forceRemove(capturedName)
-	t.Fatalf("container %s still running after ctx cancel", capturedName)
+	waitForContainerStopped(t, capturedName, "context cancellation")
 }
 
 func TestWithServices_ConcurrentNoCollision(t *testing.T) {
