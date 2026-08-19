@@ -527,32 +527,76 @@ func TestStartQueueExecSuccessorWaitsForReadiness(t *testing.T) {
 	runStarted := make(chan struct{})
 	allowReady := make(chan struct{})
 	stopRun := make(chan struct{})
-	returned := make(chan error, 1)
-	var done <-chan error
+	var allowReadyOnce sync.Once
+	var stopRunOnce sync.Once
+	releaseReady := func() { allowReadyOnce.Do(func() { close(allowReady) }) }
+	releaseRun := func() { stopRunOnce.Do(func() { close(stopRun) }) }
+	runFinished := make(chan struct{})
+	type startResult struct {
+		done <-chan error
+		err  error
+	}
+	returned := make(chan startResult, 1)
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		releaseReady()
+		releaseRun()
+		select {
+		case <-runFinished:
+		case <-time.After(queueExecWait):
+			t.Error("successor run did not stop during cleanup")
+		}
+		select {
+		case <-finished:
+		case <-time.After(queueExecWait):
+			t.Error("successor helper did not stop during cleanup")
+		}
+	})
 	go func() {
-		var err error
-		done, err = startQueueExecSuccessor(func() error {
+		done, err := startQueueExecSuccessor(func() error {
+			defer close(runFinished)
 			close(runStarted)
 			<-allowReady
 			close(ready)
 			<-stopRun
 			return nil
 		}, ready, queueExecWait)
-		returned <- err
+		returned <- startResult{done: done, err: err}
+		close(finished)
 	}()
-	<-runStarted
 	select {
-	case err := <-returned:
-		t.Fatalf("successor start returned before readiness: %v", err)
-	default:
+	case <-runStarted:
+	case <-time.After(queueExecWait):
+		t.Fatal("successor run did not start")
 	}
-	close(allowReady)
-	if err := <-returned; err != nil {
-		t.Fatalf("successor start: %v", err)
+	select {
+	case result := <-returned:
+		t.Fatalf("successor start returned before readiness: %v", result.err)
+	case <-time.After(100 * time.Millisecond):
 	}
-	close(stopRun)
-	if err := <-done; err != nil {
-		t.Fatalf("successor run: %v", err)
+	releaseReady()
+	var result startResult
+	select {
+	case result = <-returned:
+		if result.err != nil {
+			t.Fatalf("successor start: %v", result.err)
+		}
+	case <-time.After(queueExecWait):
+		t.Fatal("successor start did not return after readiness")
+	}
+	releaseRun()
+	select {
+	case err := <-result.done:
+		if err != nil {
+			t.Fatalf("successor run: %v", err)
+		}
+	case <-time.After(queueExecWait):
+		t.Fatal("successor run did not stop")
+	}
+	select {
+	case <-finished:
+	case <-time.After(queueExecWait):
+		t.Fatal("successor helper did not finish")
 	}
 }
 
