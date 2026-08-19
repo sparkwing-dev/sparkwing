@@ -2,6 +2,8 @@ package orchestrator_test
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -39,52 +41,103 @@ func init() {
 	register("appr-timeout", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &approveTimeoutPipe{} })
 }
 
+func resolveNextApproval(ctx context.Context, dbPath, resolution, approver, note string) error {
+	ticker := time.NewTicker(25 * time.Millisecond)
+	defer ticker.Stop()
+
+	var st *store.Store
+	defer func() {
+		if st != nil {
+			_ = st.Close()
+		}
+	}()
+	var lastErr error
+	for {
+		if st == nil {
+			if _, err := os.Stat(dbPath); err == nil {
+				st, lastErr = store.Open(dbPath)
+			} else if !os.IsNotExist(err) {
+				return fmt.Errorf("stat store: %w", err)
+			}
+		}
+		if st != nil {
+			pending, err := st.ListPendingApprovals(ctx)
+			if err != nil {
+				lastErr = err
+			} else if len(pending) > 0 {
+				a := pending[0]
+				if _, err := st.ResolveApproval(ctx, a.RunID, a.NodeID, resolution, approver, note); err != nil {
+					return fmt.Errorf("resolve approval: %w", err)
+				}
+				return nil
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				return fmt.Errorf("wait for pending approval: %w (last store error: %v)", ctx.Err(), lastErr)
+			}
+			return fmt.Errorf("wait for pending approval: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
+}
+
+type approvalRunResult struct {
+	result *orchestrator.Result
+	err    error
+}
+
+func joinApprovalWorker(t *testing.T, name string, done <-chan struct{}) {
+	t.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		t.Errorf("%s did not stop within 2s", name)
+	}
+}
+
 func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 	p := newPaths(t)
 	dbPath := filepath.Join(p.Root, "state.db")
+	testCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
-	done := make(chan *orchestrator.Result, 1)
+	done := make(chan approvalRunResult, 1)
+	runFinished := make(chan struct{})
 	go func() {
-		res, err := orchestrator.RunLocal(context.Background(), p,
+		defer close(runFinished)
+		res, err := orchestrator.RunLocal(testCtx, p,
 			orchestrator.Options{Pipeline: "appr-basic"})
-		if err != nil {
-			t.Errorf("Run: %v", err)
-		}
-		done <- res
+		done <- approvalRunResult{result: res, err: err}
 	}()
+	t.Cleanup(func() {
+		cancel()
+		joinApprovalWorker(t, "approval run", runFinished)
+	})
 
-	resolverDone := make(chan struct{})
+	resolverDone := make(chan error, 1)
+	resolverFinished := make(chan struct{})
 	go func() {
-		defer close(resolverDone)
-		time.Sleep(200 * time.Millisecond)
-		st, err := store.Open(dbPath)
-		if err != nil {
-			t.Errorf("resolver: store.Open: %v", err)
-			return
-		}
-		defer func() { _ = st.Close() }()
-		deadline := time.Now().Add(10 * time.Second)
-		for time.Now().Before(deadline) {
-			pend, listErr := st.ListPendingApprovals(context.Background())
-			if listErr != nil {
-				t.Errorf("resolver: ListPendingApprovals: %v", listErr)
-				return
-			}
-			if len(pend) > 0 {
-				a := pend[0]
-				if _, err := st.ResolveApproval(context.Background(), a.RunID, a.NodeID,
-					store.ApprovalResolutionApproved, "alice", "ok"); err != nil {
-					t.Errorf("resolver: ResolveApproval: %v", err)
-				}
-				return
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		t.Errorf("resolver: no pending approval appeared within 10s")
+		defer close(resolverFinished)
+		ctx, stopResolver := context.WithTimeout(testCtx, 10*time.Second)
+		defer stopResolver()
+		resolverDone <- resolveNextApproval(ctx, dbPath, store.ApprovalResolutionApproved, "alice", "ok")
 	}()
+	t.Cleanup(func() {
+		cancel()
+		joinApprovalWorker(t, "approval resolver", resolverFinished)
+	})
 
 	select {
-	case res := <-done:
+	case outcome := <-done:
+		if outcome.err != nil {
+			t.Fatalf("Run: %v", outcome.err)
+		}
+		res := outcome.result
 		if res == nil {
 			t.Fatal("nil result")
 		}
@@ -94,7 +147,9 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 	case <-time.After(15 * time.Second):
 		t.Fatal("run did not complete within 15s")
 	}
-	<-resolverDone
+	if err := <-resolverDone; err != nil {
+		t.Fatalf("resolver: %v", err)
+	}
 
 	st, _ := store.Open(dbPath)
 	defer func() { _ = st.Close() }()
@@ -124,41 +179,52 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 func TestApproval_DeniedFlowsToFailed(t *testing.T) {
 	p := newPaths(t)
 	dbPath := filepath.Join(p.Root, "state.db")
+	testCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
-	done := make(chan *orchestrator.Result, 1)
+	done := make(chan approvalRunResult, 1)
+	runFinished := make(chan struct{})
 	go func() {
-		res, _ := orchestrator.RunLocal(context.Background(), p,
+		defer close(runFinished)
+		res, err := orchestrator.RunLocal(testCtx, p,
 			orchestrator.Options{Pipeline: "appr-basic"})
-		done <- res
+		done <- approvalRunResult{result: res, err: err}
 	}()
+	t.Cleanup(func() {
+		cancel()
+		joinApprovalWorker(t, "approval run", runFinished)
+	})
 
+	resolverDone := make(chan error, 1)
+	resolverFinished := make(chan struct{})
 	go func() {
-		time.Sleep(200 * time.Millisecond)
-		st, err := store.Open(dbPath)
-		if err != nil {
-			return
-		}
-		defer func() { _ = st.Close() }()
-		deadline := time.Now().Add(4 * time.Second)
-		for time.Now().Before(deadline) {
-			pend, _ := st.ListPendingApprovals(context.Background())
-			if len(pend) > 0 {
-				a := pend[0]
-				_, _ = st.ResolveApproval(context.Background(), a.RunID, a.NodeID,
-					store.ApprovalResolutionDenied, "bob", "no go")
-				return
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
+		defer close(resolverFinished)
+		ctx, stopResolver := context.WithTimeout(testCtx, 4*time.Second)
+		defer stopResolver()
+		resolverDone <- resolveNextApproval(ctx, dbPath, store.ApprovalResolutionDenied, "bob", "no go")
 	}()
+	t.Cleanup(func() {
+		cancel()
+		joinApprovalWorker(t, "approval resolver", resolverFinished)
+	})
 
 	select {
-	case res := <-done:
+	case outcome := <-done:
+		if outcome.err != nil {
+			t.Fatalf("Run: %v", outcome.err)
+		}
+		res := outcome.result
+		if res == nil {
+			t.Fatal("nil result")
+		}
 		if res.Status != "failed" {
 			t.Fatalf("status = %q, want failed", res.Status)
 		}
 	case <-time.After(6 * time.Second):
 		t.Fatal("run did not complete within 6s")
+	}
+	if err := <-resolverDone; err != nil {
+		t.Fatalf("resolver: %v", err)
 	}
 }
 
