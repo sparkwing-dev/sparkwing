@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **admission:** Capacity measurements remain attached to the run's repository
+  when job code changes the process working directory.
 - **sdk:** `Requires` documentation distinguishes runner-claimed work from
   direct and inline execution instead of claiming unmatched labels fail
   validation.

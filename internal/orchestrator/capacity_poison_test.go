@@ -11,6 +11,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 // contendedRun folds one contended run of pipeline "ci" (plan hash B) that
@@ -173,11 +174,9 @@ func TestRatchetedFloorRecoversAtGrantableMemoryCeiling(t *testing.T) {
 	}
 }
 
-// TestContentionInOneRepoLeavesAnothersPricingAlone reproduces the second
-// BW-849 drill against the profile identity production derives: one machine,
-// two checkouts, each with a pipeline called "ci". Contention that ratchets
-// the first repo's demand floor to the machine ceiling must not price the
-// second repo's runs, which have never been measured at all.
+// Two checkouts on one machine can each have a pipeline called "ci".
+// Contention that ratchets one pipeline's demand floor to the machine ceiling
+// must not price the other pipeline, which has never been measured.
 func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -201,7 +200,11 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 		return res
 	}
 
-	t.Chdir(gitRepoDir(t, "alpha"))
+	previousWorkDir := sparkwing.CurrentRuntime().WorkDir
+	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
+	alpha := gitRepoDir(t, "alpha")
+	sparkwing.SetWorkDir(alpha)
+	t.Chdir(alpha)
 	for i := range 4 {
 		c := resolve().Cores
 		contendedRun(t, st, ctx, currentProfileKey("ci"), fmt.Sprintf("alpha%d", i), c, runCharge{Cores: c})
@@ -211,7 +214,9 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 			res.Cores, res.Source, grantable)
 	}
 
-	t.Chdir(gitRepoDir(t, "beta"))
+	beta := gitRepoDir(t, "beta")
+	sparkwing.SetWorkDir(beta)
+	t.Chdir(beta)
 	res := resolve()
 	if res.Source != store.CostSourceDefault {
 		t.Errorf("beta priced %v cores from %q, want the cold-start default: alpha's contention poisoned an unmeasured pipeline in another repo",
