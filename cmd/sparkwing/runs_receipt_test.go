@@ -88,6 +88,16 @@ func TestRunJobsReceipt_RejectsBadOutput(t *testing.T) {
 	}
 }
 
+func TestReceiptHelpMatchesLocalCost(t *testing.T) {
+	description := strings.ToLower(cmdJobsReceipt.Description)
+	if strings.Contains(description, "cost_per_runner_hour") {
+		t.Fatalf("receipt help advertises removed profile rate: %q", cmdJobsReceipt.Description)
+	}
+	if !strings.Contains(description, "zero cost") {
+		t.Fatalf("receipt help does not describe the local cost result: %q", cmdJobsReceipt.Description)
+	}
+}
+
 // captureStdout swaps os.Stdout for a pipe so the verb's
 // json.Encoder writes can be inspected. Restores on cleanup.
 func captureStdout(t *testing.T, fn func()) string {
