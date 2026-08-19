@@ -244,6 +244,7 @@ func startLocalws(t *testing.T, opts Options) string {
 		t.Skip(reason)
 	}
 	ln := pickListener(t)
+	t.Cleanup(func() { _ = ln.Close() })
 	opts.Listener = ln
 	addr := ln.Addr().String()
 
@@ -257,6 +258,7 @@ func startLocalws(t *testing.T, opts Options) string {
 	var stopOnce sync.Once
 	var stopErr error
 	stopReported := false
+	runErrReported := false
 	stop := func() {
 		stopOnce.Do(func() {
 			cancel()
@@ -272,6 +274,10 @@ func startLocalws(t *testing.T, opts Options) string {
 			stopReported = true
 			t.Errorf("stop localws: %v", stopErr)
 		}
+		if stopErr == nil && runErr != nil && !runErrReported {
+			runErrReported = true
+			t.Errorf("localws exited: %v", runErr)
+		}
 	}
 	t.Cleanup(stop)
 
@@ -283,6 +289,7 @@ func startLocalws(t *testing.T, opts Options) string {
 	for {
 		select {
 		case <-done:
+			runErrReported = true
 			t.Fatalf("localws exited before readiness: %v", runErr)
 		default:
 		}
@@ -293,6 +300,7 @@ func startLocalws(t *testing.T, opts Options) string {
 		}
 		select {
 		case <-done:
+			runErrReported = true
 			t.Fatalf("localws exited before readiness: %v", runErr)
 		case <-retry.C:
 		case <-deadline.C:
