@@ -70,6 +70,7 @@ func TestLogs_FilterPreservesFinalNewline(t *testing.T) {
 		{name: "grep-prefix", data: "first\nsecond", filter: logs.ReadFilter{Grep: "first"}, want: "first\n"},
 		{name: "tail-final", data: "first\nsecond", filter: logs.ReadFilter{Tail: 1}, want: "second"},
 		{name: "empty-selection", data: "first\nsecond", filter: logs.ReadFilter{Grep: "absent"}, want: ""},
+		{name: "single-empty-line", data: "\n", filter: logs.ReadFilter{Head: 1}, want: "\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := c.Append(ctx, "run-filter", tc.name, []byte(tc.data)); err != nil {
