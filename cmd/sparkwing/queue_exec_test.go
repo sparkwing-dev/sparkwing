@@ -79,7 +79,10 @@ func TestQueueExecWaitsInDaemonBeforeStartingCommand(t *testing.T) {
 		})
 	}()
 
-	deadline := time.Now().Add(queueExecWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(queueExecWait)
+	defer deadline.Stop()
 	for {
 		qs, queryErr := wingdclient.Query(context.Background(), wingdclient.Options{Home: home, Version: "v1.0.0"})
 		if queryErr != nil {
@@ -104,12 +107,10 @@ func TestQueueExecWaitsInDaemonBeforeStartingCommand(t *testing.T) {
 		select {
 		case runErr := <-result:
 			t.Fatalf("queue exec returned before admission: %v", runErr)
-		default:
-		}
-		if time.Now().After(deadline) {
+		case <-deadline.C:
 			t.Fatalf("queue exec never became visible: %+v", qs)
+		case <-poll.C:
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("command started before admission: %v", err)
@@ -161,11 +162,17 @@ func TestQueueExecHelperProcess(t *testing.T) {
 		os.Exit(98)
 	}
 	if len(os.Args) == separator+4 {
+		poll := time.NewTicker(10 * time.Millisecond)
+		deadline := time.NewTimer(queueExecWait)
 		for {
 			if _, statErr := os.Stat(os.Args[separator+3]); statErr == nil {
 				break
 			}
-			time.Sleep(10 * time.Millisecond)
+			select {
+			case <-poll.C:
+			case <-deadline.C:
+				os.Exit(99)
+			}
 		}
 	}
 	os.Exit(code)
@@ -675,7 +682,10 @@ func startQueueExecSuccessor(run func() error, ready <-chan struct{}, timeout ti
 
 func waitForRestartedQueueExecState(t *testing.T, home string, result <-chan error, ready func(wingwire.QueueState) bool) wingwire.QueueState {
 	t.Helper()
-	deadline := time.Now().Add(queueExecWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(queueExecWait)
+	defer deadline.Stop()
 	for {
 		select {
 		case err := <-result:
@@ -689,10 +699,13 @@ func waitForRestartedQueueExecState(t *testing.T, home string, result <-chan err
 		if err != nil && !errors.Is(err, wingdclient.ErrNoDaemon) {
 			t.Fatalf("query restarted queue: %v", err)
 		}
-		if time.Now().After(deadline) {
+		select {
+		case err := <-result:
+			t.Fatalf("queue exec ended during daemon restart: %v", err)
+		case <-deadline.C:
 			t.Fatalf("restarted queue did not converge: %+v (last error %v)", qs, err)
+		case <-poll.C:
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -773,14 +786,21 @@ func waitForQueueExecProcessExit(t *testing.T, pidFile string) {
 		t.Errorf("parse queue-exec cleanup pid %q: %v", body, err)
 		return
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
 		if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Errorf("queue-exec test process %d survived cleanup", pid)
+			return
+		}
 	}
-	t.Errorf("queue-exec test process %d survived cleanup", pid)
 }
 
 func containsString(values []string, want string) bool {
@@ -852,7 +872,10 @@ func TestQueueExecCancellationBeforeGrantNeverStartsCommand(t *testing.T) {
 
 func waitForQueueExecState(t *testing.T, home string, ready func(wingwire.QueueState) bool) wingwire.QueueState {
 	t.Helper()
-	deadline := time.Now().Add(queueExecWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(queueExecWait)
+	defer deadline.Stop()
 	for {
 		qs, err := wingdclient.Query(context.Background(), wingdclient.Options{Home: home, Version: "v1.0.0"})
 		if err != nil {
@@ -861,38 +884,47 @@ func waitForQueueExecState(t *testing.T, home string, ready func(wingwire.QueueS
 		if ready(qs) {
 			return qs
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-deadline.C:
 			t.Fatalf("queue state did not converge: %+v", qs)
+		case <-poll.C:
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
 func waitForFile(t *testing.T, path string) {
 	t.Helper()
-	deadline := time.Now().Add(queueExecWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(queueExecWait)
+	defer deadline.Stop()
 	for {
 		if _, err := os.Stat(path); err == nil {
 			return
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-deadline.C:
 			t.Fatalf("file did not appear: %s", path)
+		case <-poll.C:
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
 func waitForFileContents(t *testing.T, path string) []byte {
 	t.Helper()
-	deadline := time.Now().Add(queueExecWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(queueExecWait)
+	defer deadline.Stop()
 	for {
 		body, err := os.ReadFile(path)
 		if err == nil && len(body) > 0 {
 			return body
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-deadline.C:
 			t.Fatalf("file contents did not appear: %s: %v", path, err)
+		case <-poll.C:
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
