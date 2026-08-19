@@ -77,10 +77,32 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	_ = ln.Close()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
+	done := make(chan struct{})
+	var serveErr error
 	go func() {
-		done <- web.Serve(ctx, paths, addr)
+		serveErr = web.Serve(ctx, paths, addr)
+		close(done)
 	}()
+	var stopOnce sync.Once
+	var stopErr error
+	stopReported := false
+	stop := func() {
+		stopOnce.Do(func() {
+			cancel()
+			timer := time.NewTimer(time.Second)
+			defer timer.Stop()
+			select {
+			case <-done:
+			case <-timer.C:
+				stopErr = fmt.Errorf("web server did not stop within 1s")
+			}
+		})
+		if stopErr != nil && !stopReported {
+			stopReported = true
+			t.Errorf("stop web server: %v", stopErr)
+		}
+	}
+	t.Cleanup(stop)
 
 	base := fmt.Sprintf("http://%s", addr)
 	client := &http.Client{Timeout: 250 * time.Millisecond}
@@ -90,26 +112,22 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	defer deadline.Stop()
 	for {
 		select {
-		case err := <-done:
-			t.Fatalf("web server exited before readiness: %v", err)
+		case <-done:
+			t.Fatalf("web server exited before readiness: %v", serveErr)
 		default:
 		}
 		if resp, err := client.Get(base + "/api/health"); err == nil {
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
-				return base, func() {
-					cancel()
-					<-done
-				}
+				return base, stop
 			}
 		}
 		select {
-		case err := <-done:
-			t.Fatalf("web server exited before readiness: %v", err)
+		case <-done:
+			t.Fatalf("web server exited before readiness: %v", serveErr)
 		case <-retry.C:
 		case <-deadline.C:
-			cancel()
-			<-done
+			stop()
 			t.Fatal("web server did not become ready")
 		}
 	}
