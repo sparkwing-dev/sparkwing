@@ -138,14 +138,21 @@ func gatherMetrics(t *testing.T) string {
 
 func waitForListener(t *testing.T, addr string, timeout time.Duration) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	dialer := net.Dialer{Timeout: 100 * time.Millisecond}
+	for {
+		conn, err := dialer.DialContext(ctx, "tcp", addr)
 		if err == nil {
 			conn.Close()
 			return
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatalf("listener did not come up at %s within %s", addr, timeout)
+		}
 	}
-	t.Fatalf("listener did not come up at %s within %s", addr, timeout)
 }
