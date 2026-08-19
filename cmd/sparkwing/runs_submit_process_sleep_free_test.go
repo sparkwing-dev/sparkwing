@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strings"
 	"testing"
 )
 
@@ -29,4 +30,10 @@ func TestRunsSubmitProcessCodeDoesNotUseTimeSleep(t *testing.T) {
 		}
 		return true
 	})
+}
+
+func TestRunsSubmitSlowFixtureDoesNotUseTimeSleep(t *testing.T) {
+	if strings.Contains(advSlowFixtureSource, "time.Sleep") {
+		t.Fatal("advSlowFixtureSource contains time.Sleep")
+	}
 }
