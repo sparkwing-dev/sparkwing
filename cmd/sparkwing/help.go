@@ -252,11 +252,11 @@ func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 	fmt.Fprintln(w, "USAGE")
 	fmt.Fprint(w, "  ", cmd.Path)
 	for _, a := range cmd.PosArgs {
-		if a.Required {
-			fmt.Fprint(w, " ", a.Name)
-		} else {
-			fmt.Fprint(w, " [", a.Name, "]")
+		name := a.Name
+		if !a.Required && !(strings.HasPrefix(name, "[") && strings.HasSuffix(name, "]")) {
+			name = "[" + name + "]"
 		}
+		fmt.Fprint(w, " ", name)
 	}
 	if len(visible) > 0 {
 		if cmd.SubcommandOptional {
