@@ -149,6 +149,16 @@ func testCommandFamilyRequiresProfile(t *testing.T, parent Command) {
 	}
 }
 
+func TestRequiredProfileFlagsDoNotAdvertiseDefault(t *testing.T) {
+	for _, command := range allCommands {
+		for _, spec := range command.Flags {
+			if spec.Name == "profile" && spec.Required && strings.Contains(strings.ToLower(spec.Desc), "default") {
+				t.Errorf("%s requires --profile but describes it as %q", command.Path, spec.Desc)
+			}
+		}
+	}
+}
+
 func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 	cases := []struct {
 		name string
