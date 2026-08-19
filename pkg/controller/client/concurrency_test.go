@@ -21,3 +21,15 @@ func TestObserveSlotMapsMissingHolder(t *testing.T) {
 		t.Fatalf("ObserveSlot error = %v, want %v", err, store.ErrNotFound)
 	}
 }
+
+func TestHeartbeatSlotMapsLostOwnership(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "held by another holder", http.StatusConflict)
+	}))
+	defer server.Close()
+
+	_, err := New(server.URL, server.Client()).HeartbeatSlot(context.Background(), "group", "holder", 0)
+	if !errors.Is(err, store.ErrLockHeld) {
+		t.Fatalf("HeartbeatSlot error = %v, want %v", err, store.ErrLockHeld)
+	}
+}

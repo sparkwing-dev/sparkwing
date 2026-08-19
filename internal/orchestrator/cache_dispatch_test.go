@@ -84,7 +84,10 @@ func (cacheFailFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ s
 type cacheCancelOthersLeaderPipe struct{ sparkwing.Base }
 
 func (cacheCancelOthersLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	g := sparkwing.NewConcurrencyGroup("cache-cancel-others-key", sparkwing.ConcurrencyLimit{Capacity: 1})
+	g := sparkwing.NewConcurrencyGroup("cache-cancel-others-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.CancelOthers,
+	})
 	sparkwing.Job(plan, "leader", func(ctx context.Context) error {
 		select {
 		case <-time.After(5 * time.Second):
@@ -100,8 +103,9 @@ type cacheCancelOthersFollowerPipe struct{ sparkwing.Base }
 
 func (cacheCancelOthersFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := sparkwing.NewConcurrencyGroup("cache-cancel-others-key", sparkwing.ConcurrencyLimit{
-		Capacity: 1,
-		OnLimit:  sparkwing.CancelOthers,
+		Capacity:      1,
+		OnLimit:       sparkwing.CancelOthers,
+		CancelTimeout: 100 * time.Millisecond,
 	})
 	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).Concurrency(g)
 	return nil
