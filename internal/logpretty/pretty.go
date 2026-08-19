@@ -83,15 +83,14 @@ func (p *PrettyRenderer) Log(level, msg string) {
 }
 
 const (
-	ansiReset   = "\x1b[0m"
-	ansiDim     = "\x1b[2m"
-	ansiBold    = "\x1b[1m"
-	ansiRed     = "\x1b[31m"
-	ansiGreen   = "\x1b[32m"
-	ansiYellow  = "\x1b[33m"
-	ansiBlue    = "\x1b[34m"
-	ansiMagenta = "\x1b[35m"
-	ansiCyan    = "\x1b[36m"
+	ansiReset  = "\x1b[0m"
+	ansiDim    = "\x1b[2m"
+	ansiBold   = "\x1b[1m"
+	ansiRed    = "\x1b[31m"
+	ansiGreen  = "\x1b[32m"
+	ansiYellow = "\x1b[33m"
+	ansiBlue   = "\x1b[34m"
+	ansiCyan   = "\x1b[36m"
 )
 
 var nodePalette = []string{
@@ -1397,8 +1396,3 @@ func renderInlineMarkdown(s string) string {
 	}
 	return buf.String()
 }
-
-// ansiMagenta is kept here even though no current call site uses it;
-// it sits with the other CSI constants so future renderer additions
-// don't have to relocate the palette.
-var _ = ansiMagenta
