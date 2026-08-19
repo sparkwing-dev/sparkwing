@@ -41,21 +41,32 @@ func newPauseHarness(t *testing.T) *pauseTestHarness {
 
 func (h *pauseTestHarness) waitForPause(nodeID string) *store.DebugPause {
 	h.t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
-		runs, _ := h.st.ListRuns(context.Background(), store.RunFilter{Limit: 10})
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	poll := time.NewTicker(25 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		runs, err := h.st.ListRuns(ctx, store.RunFilter{Limit: 10})
+		if err != nil {
+			h.t.Fatalf("list runs while waiting for pause on %q: %v", nodeID, err)
+		}
 		for _, r := range runs {
-			ps, _ := h.st.ListDebugPauses(context.Background(), r.ID)
+			ps, err := h.st.ListDebugPauses(ctx, r.ID)
+			if err != nil {
+				h.t.Fatalf("list pauses for run %q: %v", r.ID, err)
+			}
 			for _, pp := range ps {
 				if pp.NodeID == nodeID && pp.ReleasedAt == nil {
 					return pp
 				}
 			}
 		}
-		time.Sleep(25 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-ctx.Done():
+			h.t.Fatalf("no open pause for node %q within deadline", nodeID)
+		}
 	}
-	h.t.Fatalf("no open pause for node %q within deadline", nodeID)
-	return nil
 }
 
 func (h *pauseTestHarness) release(runID, nodeID string) {
