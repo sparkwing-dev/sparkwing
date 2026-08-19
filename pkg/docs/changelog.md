@@ -49,6 +49,12 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cli:** Run lookback flags accept `d` and `w` suffixes in addition to Go
+  duration syntax. Commands such as `runs list --since 7d`, `runs grep
+  --since 7d`, and `runs prune --older-than 2w` now use the same parser.
+
 ## [v0.34.0] - 2026-08-18
 - **sdk:** Jobs can declare `NoProgressTimeout` alongside a longer absolute
   `Timeout`. Observable node log records reset the per-attempt inactivity
