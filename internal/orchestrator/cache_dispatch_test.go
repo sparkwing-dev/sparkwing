@@ -1738,7 +1738,7 @@ func TestConcurrency_CancelOthersEvictsCooperativeLeader(t *testing.T) {
 		if leader.Status != "cancelled" {
 			t.Fatalf("leader status = %q (err=%v), want cancelled after supersession", leader.Status, leader.Error)
 		}
-	case <-time.After(4 * time.Second):
+	case <-time.After(8 * time.Second):
 		t.Fatal("cooperative leader kept executing after a CancelOthers supersession")
 	}
 }

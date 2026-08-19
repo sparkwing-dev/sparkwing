@@ -523,11 +523,20 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 	var once sync.Once
 
 	lease := store.DefaultConcurrencyLease
+	var supersessionTicker *time.Ticker
+	var supersessionC <-chan time.Time
+	if onLimit != store.OnLimitCancelOthers && onLimit != store.OnLimitCoalesce {
+		supersessionTicker = time.NewTicker(store.DefaultConcurrencyHeartbeatInterval)
+		supersessionC = supersessionTicker.C
+	}
 
 	go func() {
 		wedge := newStoreWedgeGuard(wedgeBudget)
 		t := time.NewTicker(store.ConcurrencyHeartbeatInterval(onLimit))
 		defer t.Stop()
+		if supersessionTicker != nil {
+			defer supersessionTicker.Stop()
+		}
 		lastOK := time.Now()
 		for {
 			select {
@@ -535,6 +544,16 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 				return
 			case <-ctx.Done():
 				return
+			case <-supersessionC:
+				pollCtx, cancel := context.WithTimeout(context.Background(), store.DefaultConcurrencyHeartbeatTimeout)
+				holder, err := r.backends.Concurrency.ObserveSlot(pollCtx, key, holderID)
+				cancel()
+				if err == nil && holder != nil && holder.Superseded {
+					superseded.Store(true)
+					cancelExec()
+					return
+				}
+				continue
 			case <-t.C:
 				hbCtx, cancel := context.WithTimeout(context.Background(), store.ConcurrencyHeartbeatTimeout(onLimit))
 				_, wasSuperseded, err := r.backends.Concurrency.HeartbeatSlot(hbCtx, key, holderID, lease)
