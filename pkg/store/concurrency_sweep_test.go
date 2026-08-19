@@ -178,12 +178,37 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("W: want Queued, got %s", r.Kind)
 	}
-	time.Sleep(80 * time.Millisecond)
+	started := time.Now()
+	updated, err := s.DB().Exec(
+		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`,
+		time.Now().Add(-time.Second).UnixNano(), "k", "rA/n",
+	)
+	if err != nil {
+		t.Fatalf("expire holder: %v", err)
+	}
+	if rows, err := updated.RowsAffected(); err != nil {
+		t.Fatalf("count expired holders: %v", err)
+	} else if rows != 1 {
+		t.Fatalf("expired holder rows = %d, want 1", rows)
+	}
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rX/n", RunID: "rX", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("X: want Queued (FIFO; must not barge W), got %s", r.Kind)
+	}
+	if got := activeHolders(t, s, "k"); got != 0 {
+		t.Fatalf("active holders after expiry = %d, want 0", got)
+	}
+	state, err := s.GetConcurrencyState(ctxT(t), "k")
+	if err != nil {
+		t.Fatalf("state after fresh arrival: %v", err)
+	}
+	if len(state.Waiters) != 2 || state.Waiters[0].RunID != "rW" || state.Waiters[1].RunID != "rX" {
+		t.Fatalf("waiter order = %+v, want rW then rX", state.Waiters)
+	}
+	if elapsed := time.Since(started); elapsed >= 60*time.Millisecond {
+		t.Fatalf("expired-holder FIFO check took %v, want less than 60ms", elapsed)
 	}
 }
 
