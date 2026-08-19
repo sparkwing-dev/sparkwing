@@ -63,6 +63,7 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	}
 
 	released := make(chan struct{})
+	started := time.Now()
 	go func() {
 		time.Sleep(150 * time.Millisecond)
 		_ = lockTx.Rollback()
@@ -76,6 +77,9 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	<-released
 	if !expires.After(time.Now()) {
 		t.Errorf("lease not extended into the future: %v", expires)
+	}
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		t.Fatalf("transient-busy heartbeat took %s, want under 100ms", elapsed)
 	}
 }
 
