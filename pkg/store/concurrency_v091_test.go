@@ -37,7 +37,8 @@ func TestConcurrency_HeartbeatOnExpiredLeaseDoesNotRevive(t *testing.T) {
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
 	})
-	time.Sleep(80 * time.Millisecond)
+	started := time.Now()
+	expireHolderLease(t, s, "k", "rA/n")
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
@@ -51,6 +52,9 @@ func TestConcurrency_HeartbeatOnExpiredLeaseDoesNotRevive(t *testing.T) {
 	}
 	if got := activeHolders(t, s, "k"); got != 1 {
 		t.Fatalf("active holders on capacity-1 key = %d, want 1 (no over-admission)", got)
+	}
+	if elapsed := time.Since(started); elapsed >= 60*time.Millisecond {
+		t.Fatalf("expired-lease heartbeat regression took %s, want under 60ms", elapsed)
 	}
 }
 
