@@ -54,7 +54,7 @@ func (f failureRow) clusterKey(groupBy string) string {
 
 func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsFailures.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	limit := fs.Int("limit", 20, "max failures to analyze")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	since := lookbackDuration(fs, "since", 0, "only failures newer than this (e.g. 24h, 7d)")
@@ -269,7 +269,7 @@ type pipelineStats struct {
 
 func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsStats.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	since := lookbackDuration(fs, "since", 0, "only runs newer than this (e.g. 7d)")
 	capacityView := fs.Bool("capacity", false, "show measured capacity profiles")
@@ -407,7 +407,7 @@ func aggregateRuns(name string, runs []*store.Run) pipelineStats {
 
 func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsLast.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	pipeline := fs.String("pipeline", "", "restrict to one pipeline")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	watch := fs.BoolP("watch", "w", false, "tail for new runs (reprints whenever a newer run appears)")
@@ -512,7 +512,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsTree.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "root run identifier")
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
 	if err := parseAndCheck(cmdJobsTree, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -629,7 +629,7 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 func runJobsGet(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsGet.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	if err := parseAndCheck(cmdJobsGet, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil

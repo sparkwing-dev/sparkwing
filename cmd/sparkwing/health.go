@@ -45,7 +45,7 @@ type healthReport struct {
 
 func runHealth(args []string) error {
 	fs := flag.NewFlagSet(cmdHealth.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name")
 	outputFormat := fs.StringP("output", "o", "", "output format: pretty | json")
 	if err := parseAndCheck(cmdHealth, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
