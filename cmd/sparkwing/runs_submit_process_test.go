@@ -860,7 +860,7 @@ func TestRunsSubmit_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
 }
 
 // TestRunsConsumerStop_RecordsTheInterruptedRun covers terminal bookkeeping
-// written through the same context that `stop` had
+// that used to be written through the same context that `stop` had
 // just cancelled, so it never landed: the run stayed pending and its
 // trigger stayed claimed until a lease lapsed minutes later.
 func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
