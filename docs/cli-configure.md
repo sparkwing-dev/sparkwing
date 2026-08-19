@@ -285,10 +285,12 @@ annotations. Auto-populated when you run 'sparkwing run <pipeline>'
 in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
 disable).
 
-Subverbs: list (show every registered repo and the pipelines it
-provides), add (register a checkout explicitly), remove (drop one by
-path or basename), prune (drop repos whose .sparkwing/ is gone). Run
-'sparkwing configure xrepo --help' for their flags.
+### Subcommands
+
+- `list` -- List registered checkouts and their pipelines
+- `add` -- Register a checkout
+- `remove` -- Remove a registered checkout
+- `prune` -- Remove checkouts whose pipeline directory is gone
 
 ### Examples
 
@@ -301,4 +303,80 @@ sparkwing configure xrepo list
 
 # Drop entries whose checkout is gone
 sparkwing configure xrepo prune
+```
+
+## `sparkwing configure xrepo add`
+
+Register a checkout
+
+Registers a checkout explicitly. The path defaults to the current directory.
+
+### Arguments
+
+- `[path]` (optional) -- Checkout path; defaults to the current directory
+
+### Examples
+
+```sh
+# Register the current checkout
+sparkwing configure xrepo add
+
+# Register another checkout
+sparkwing configure xrepo add ../service
+```
+
+## `sparkwing configure xrepo list`
+
+List registered checkouts and their pipelines
+
+Shows each registered checkout, its status, and the pipelines it provides.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `-o, --output FORMAT` | Output format: json \| table |
+| `--pipelines` | Include pipeline names (default: true) |
+
+### Examples
+
+```sh
+# List registered checkouts
+sparkwing configure xrepo list
+
+# Emit one JSON record per checkout
+sparkwing configure xrepo list -o json
+
+# Skip pipeline discovery
+sparkwing configure xrepo list --pipelines=false
+```
+
+## `sparkwing configure xrepo prune`
+
+Remove checkouts whose pipeline directory is gone
+
+Removes registered checkouts that no longer contain a .sparkwing directory.
+
+### Examples
+
+```sh
+# Remove stale registry entries
+sparkwing configure xrepo prune
+```
+
+## `sparkwing configure xrepo remove`
+
+Remove a registered checkout
+
+Removes every registry entry matching a path or basename.
+
+### Arguments
+
+- `<path-or-basename>` (required) -- Registered path or basename to remove
+
+### Examples
+
+```sh
+# Remove a checkout by basename
+sparkwing configure xrepo remove service
 ```
