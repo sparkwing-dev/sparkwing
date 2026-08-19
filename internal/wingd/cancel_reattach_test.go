@@ -17,7 +17,7 @@ func TestCancel_ReattachedHolderIsCancellable(t *testing.T) {
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})
 
-	succ := newSuccessor(t, home, "")
+	succ := newSuccessorWithGrace(t, home, "", reattachSurvivalGrace)
 	holderCl := spawnClient(t, home, succ)
 	lease, err := holderCl.Acquire(context.Background(), coreReq("reattach-cancel", 1), nil)
 	if err != nil {
@@ -41,7 +41,7 @@ func TestCancel_ReattachedHolderIsCancellable(t *testing.T) {
 		t.Fatal("successor daemon never came up")
 	}
 	survivalStarted := time.Now()
-	time.Sleep(successorGrace + 500*time.Millisecond)
+	time.Sleep(reattachSurvivalGrace + 500*time.Millisecond)
 	waitForHolder(t, home, "reattach-cancel")
 
 	ctrl := ensure(t, home, "")

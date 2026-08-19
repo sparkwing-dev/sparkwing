@@ -70,7 +70,7 @@ func TestChurn_HolderWatchReattachesAcrossKill(t *testing.T) {
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})
 
-	succ := newSuccessor(t, home, "")
+	succ := newSuccessorWithGrace(t, home, "", reattachSurvivalGrace)
 	holderCl := spawnClient(t, home, succ)
 	lease, err := holderCl.Acquire(context.Background(), coreReq("churn-watch", 1), nil)
 	if err != nil {
@@ -89,7 +89,7 @@ func TestChurn_HolderWatchReattachesAcrossKill(t *testing.T) {
 		t.Fatal("successor daemon never came up")
 	}
 	survivalStarted := time.Now()
-	time.Sleep(successorGrace + 500*time.Millisecond)
+	time.Sleep(reattachSurvivalGrace + 500*time.Millisecond)
 	waitForHolder(t, home, "churn-watch")
 
 	if err := lease.Release(); err != nil {
@@ -130,6 +130,8 @@ const wingdChurnWait = 10 * time.Second
 // successorGrace mirrors the reattach grace window the successor daemon in
 // newSuccessor is configured with, so a test can wait out an unclaimed orphan.
 const successorGrace = 2 * time.Second
+
+const reattachSurvivalGrace = 500 * time.Millisecond
 
 func waitForHolder(t *testing.T, home, runID string) {
 	t.Helper()

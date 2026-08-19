@@ -480,6 +480,7 @@ type successor struct {
 	t     *testing.T
 	home  string
 	ver   string
+	grace time.Duration
 	once  sync.Once
 	ready chan struct{}
 }
@@ -488,7 +489,13 @@ func newSuccessor(t *testing.T, home, ver string) *successor {
 	if ver == "" {
 		ver = "v1.0.0"
 	}
-	return &successor{t: t, home: home, ver: ver, ready: make(chan struct{})}
+	return &successor{t: t, home: home, ver: ver, grace: successorGrace, ready: make(chan struct{})}
+}
+
+func newSuccessorWithGrace(t *testing.T, home, ver string, grace time.Duration) *successor {
+	s := newSuccessor(t, home, ver)
+	s.grace = grace
+	return s
 }
 
 func (s *successor) spawn(home, version string) error {
@@ -502,7 +509,7 @@ func (s *successor) bringUp() {
 		d, err := wingd.New(wingd.Config{
 			Home:        s.home,
 			Version:     s.ver,
-			GraceWindow: 2 * time.Second,
+			GraceWindow: s.grace,
 			Sampler:     newFakeSampler(64, 64<<30),
 		})
 		if err != nil {
