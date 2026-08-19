@@ -84,29 +84,60 @@ func resolveNextApproval(ctx context.Context, dbPath, resolution, approver, note
 	}
 }
 
+type approvalRunResult struct {
+	result *orchestrator.Result
+	err    error
+}
+
+func joinApprovalWorker(t *testing.T, name string, done <-chan struct{}) {
+	t.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		t.Errorf("%s did not stop within 2s", name)
+	}
+}
+
 func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 	p := newPaths(t)
 	dbPath := filepath.Join(p.Root, "state.db")
+	testCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
-	done := make(chan *orchestrator.Result, 1)
+	done := make(chan approvalRunResult, 1)
+	runFinished := make(chan struct{})
 	go func() {
-		res, err := orchestrator.RunLocal(context.Background(), p,
+		defer close(runFinished)
+		res, err := orchestrator.RunLocal(testCtx, p,
 			orchestrator.Options{Pipeline: "appr-basic"})
-		if err != nil {
-			t.Errorf("Run: %v", err)
-		}
-		done <- res
+		done <- approvalRunResult{result: res, err: err}
 	}()
+	t.Cleanup(func() {
+		cancel()
+		joinApprovalWorker(t, "approval run", runFinished)
+	})
 
 	resolverDone := make(chan error, 1)
+	resolverFinished := make(chan struct{})
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		defer close(resolverFinished)
+		ctx, stopResolver := context.WithTimeout(testCtx, 10*time.Second)
+		defer stopResolver()
 		resolverDone <- resolveNextApproval(ctx, dbPath, store.ApprovalResolutionApproved, "alice", "ok")
 	}()
+	t.Cleanup(func() {
+		cancel()
+		joinApprovalWorker(t, "approval resolver", resolverFinished)
+	})
 
 	select {
-	case res := <-done:
+	case outcome := <-done:
+		if outcome.err != nil {
+			t.Fatalf("Run: %v", outcome.err)
+		}
+		res := outcome.result
 		if res == nil {
 			t.Fatal("nil result")
 		}
@@ -148,23 +179,44 @@ func TestApproval_ApprovedFlowsToSuccess(t *testing.T) {
 func TestApproval_DeniedFlowsToFailed(t *testing.T) {
 	p := newPaths(t)
 	dbPath := filepath.Join(p.Root, "state.db")
+	testCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
 
-	done := make(chan *orchestrator.Result, 1)
+	done := make(chan approvalRunResult, 1)
+	runFinished := make(chan struct{})
 	go func() {
-		res, _ := orchestrator.RunLocal(context.Background(), p,
+		defer close(runFinished)
+		res, err := orchestrator.RunLocal(testCtx, p,
 			orchestrator.Options{Pipeline: "appr-basic"})
-		done <- res
+		done <- approvalRunResult{result: res, err: err}
 	}()
+	t.Cleanup(func() {
+		cancel()
+		joinApprovalWorker(t, "approval run", runFinished)
+	})
 
 	resolverDone := make(chan error, 1)
+	resolverFinished := make(chan struct{})
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-		defer cancel()
+		defer close(resolverFinished)
+		ctx, stopResolver := context.WithTimeout(testCtx, 4*time.Second)
+		defer stopResolver()
 		resolverDone <- resolveNextApproval(ctx, dbPath, store.ApprovalResolutionDenied, "bob", "no go")
 	}()
+	t.Cleanup(func() {
+		cancel()
+		joinApprovalWorker(t, "approval resolver", resolverFinished)
+	})
 
 	select {
-	case res := <-done:
+	case outcome := <-done:
+		if outcome.err != nil {
+			t.Fatalf("Run: %v", outcome.err)
+		}
+		res := outcome.result
+		if res == nil {
+			t.Fatal("nil result")
+		}
 		if res.Status != "failed" {
 			t.Fatalf("status = %q, want failed", res.Status)
 		}
