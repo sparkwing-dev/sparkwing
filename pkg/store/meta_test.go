@@ -23,7 +23,20 @@ func TestSweepClaimClearKeepsNewerOwner(t *testing.T) {
 	if !claimed {
 		t.Fatalf("old claim did not run")
 	}
-	time.Sleep(time.Millisecond)
+	res, err := store.DB().ExecContext(ctx,
+		`UPDATE sparkwing_meta SET value = ? WHERE key = ? AND value = ?`,
+		"0", metaKeyConcurrencySweepClaim, oldToken,
+	)
+	if err != nil {
+		t.Fatalf("expire old claim: %v", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		t.Fatalf("count expired claims: %v", err)
+	}
+	if changed != 1 {
+		t.Fatalf("expired claims = %d, want 1", changed)
+	}
 	claimed, newToken, err := store.claimSweepWindow(
 		ctx, metaKeyConcurrencySwept, metaKeyConcurrencySweepClaim, time.Hour, time.Nanosecond,
 	)
