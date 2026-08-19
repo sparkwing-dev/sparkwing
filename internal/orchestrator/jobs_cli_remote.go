@@ -380,8 +380,11 @@ func writeLogsTextRemote(ctx context.Context, logc storage.LogStore, runID strin
 // until someone notices, instead of the exit-3 unknown-outcome answer
 // the CLI already knows how to give.
 //
-// A variable, not a constant, only so the tests can shorten it.
-var remoteFollowFailureBudget = 60 * time.Second
+// Variables, not constants, only so tests can shorten the retry cycle.
+var (
+	remoteFollowFailureBudget = 60 * time.Second
+	remoteFollowPollInterval  = 300 * time.Millisecond
+)
 
 // followLogsRemote tails live logs by polling ListNodes and spawning
 // per-node SSE goroutines. Exits when run is terminal (with a short
@@ -424,7 +427,7 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 
 	go func() {
 		defer close(terminal)
-		ticker := time.NewTicker(300 * time.Millisecond)
+		ticker := time.NewTicker(remoteFollowPollInterval)
 		defer ticker.Stop()
 		// failingSince is when the current unbroken run of failed status
 		// reads began; zero while the last read succeeded.

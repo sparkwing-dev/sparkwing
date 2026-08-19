@@ -16,11 +16,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-func shortFollowBudget(t *testing.T, d time.Duration) {
+func shortFollowTiming(t *testing.T, budget, interval time.Duration) {
 	t.Helper()
-	prev := remoteFollowFailureBudget
-	remoteFollowFailureBudget = d
-	t.Cleanup(func() { remoteFollowFailureBudget = prev })
+	prevBudget := remoteFollowFailureBudget
+	prevInterval := remoteFollowPollInterval
+	remoteFollowFailureBudget = budget
+	remoteFollowPollInterval = interval
+	t.Cleanup(func() {
+		remoteFollowFailureBudget = prevBudget
+		remoteFollowPollInterval = prevInterval
+	})
 }
 
 // followSpy answers the two reads the follow loop makes. getRun is
@@ -117,7 +122,7 @@ func TestFollowLogsRemote_NoStreamsReturnsWithoutDrainDelay(t *testing.T) {
 // this. The follow now gives up once the status has been unreadable
 // for the whole budget and hands the transport error back.
 func TestFollowLogsRemote_GivesUpOnADeadController(t *testing.T) {
-	shortFollowBudget(t, time.Second)
+	shortFollowTiming(t, 60*time.Millisecond, 10*time.Millisecond)
 	const runID = "run-dead-controller"
 	url := followSpy(t, runID, func(n int32) (store.Run, bool) {
 		// One healthy poll, then the controller is gone for good.
@@ -156,7 +161,7 @@ func TestFollowLogsRemote_GivesUpOnADeadController(t *testing.T) {
 // replica rolling out mid-run would abort a follow that is working
 // fine.
 func TestFollowLogsRemote_SuccessfulPollResetsTheBudget(t *testing.T) {
-	shortFollowBudget(t, time.Second)
+	shortFollowTiming(t, 60*time.Millisecond, 10*time.Millisecond)
 	const runID = "run-blippy-controller"
 	url := followSpy(t, runID, func(n int32) (store.Run, bool) {
 		switch {
@@ -198,7 +203,7 @@ func TestFollowLogsRemote_SuccessfulPollResetsTheBudget(t *testing.T) {
 // the operator leaving, and it must not be reported as a controller
 // failure.
 func TestFollowLogsRemote_CancelIsNotATransportFailure(t *testing.T) {
-	shortFollowBudget(t, time.Millisecond)
+	shortFollowTiming(t, time.Millisecond, 10*time.Millisecond)
 	const runID = "run-cancelled-follow"
 	url, statusRead := followSpyWithStatusRead(t, runID, func(int32) (store.Run, bool) { return runningRun(runID), true })
 
