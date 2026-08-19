@@ -12,4 +12,7 @@ func TestPRCheckScaffoldDoesNotAdvertiseDefaultRunner(t *testing.T) {
 			t.Fatalf("pull-request scaffold advertises removed %q selection", retired)
 		}
 	}
+	if !strings.Contains(template, "does not affect runner selection") {
+		t.Fatal("pull-request scaffold does not state Prefers' metadata-only behavior")
+	}
 }

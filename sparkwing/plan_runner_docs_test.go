@@ -27,6 +27,9 @@ func TestPrefersDocumentationDoesNotClaimProfileDefault(t *testing.T) {
 				t.Fatalf("Prefers documentation advertises removed %q selection", retired)
 			}
 		}
+		if !strings.Contains(doc, "do not affect runner selection") {
+			t.Fatal("Prefers documentation does not state its metadata-only behavior")
+		}
 		return
 	}
 	t.Fatal("Prefers method not found")
