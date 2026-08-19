@@ -16,7 +16,6 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
@@ -152,11 +151,7 @@ func dispatchRun(args []string) error {
 	_ = repos.AutoRegister(filepath.Dir(dir))
 
 	if findings := lookupCachedRisks(dir, pipelineName); len(findings) > 0 {
-		var prof *profile.Profile
-		if p, perr := resolveProfileFlag(wf.profile); perr == nil {
-			prof = p
-		}
-		if err := enforceRiskGate(pipelineName, findings, wf, prof); err != nil {
+		if err := enforceRiskGate(pipelineName, findings, wf); err != nil {
 			return err
 		}
 	}

@@ -29,7 +29,7 @@ func moneyFinding() []stepRiskFinding {
 }
 
 func TestEnforceRiskGate_DestructiveBlocks(t *testing.T) {
-	err := enforceRiskGate("cluster-down", destructiveFinding(), runFlags{}, nil)
+	err := enforceRiskGate("cluster-down", destructiveFinding(), runFlags{})
 	if err == nil {
 		t.Fatal("enforceRiskGate: want refusal, got nil")
 	}
@@ -47,7 +47,7 @@ func TestEnforceRiskGate_DestructiveBlocks(t *testing.T) {
 
 func TestEnforceRiskGate_AllowDestructivePasses(t *testing.T) {
 	wf := runFlags{allow: []string{"destructive"}}
-	if err := enforceRiskGate("cluster-down", destructiveFinding(), wf, nil); err != nil {
+	if err := enforceRiskGate("cluster-down", destructiveFinding(), wf); err != nil {
 		t.Fatalf("--sw-allow destructive should pass: %v", err)
 	}
 }
@@ -65,14 +65,14 @@ func TestEnforceRiskGate_DryRunBypassesEverything(t *testing.T) {
 	}
 	for i, findings := range cases {
 		wf := runFlags{dryRun: true}
-		if err := enforceRiskGate("any", findings, wf, nil); err != nil {
+		if err := enforceRiskGate("any", findings, wf); err != nil {
 			t.Errorf("case %d: --sw-dry-run should bypass gate: %v", i, err)
 		}
 	}
 }
 
 func TestEnforceRiskGate_ProductionBlocks(t *testing.T) {
-	err := enforceRiskGate("migrate", prodFinding(), runFlags{}, nil)
+	err := enforceRiskGate("migrate", prodFinding(), runFlags{})
 	if err == nil {
 		t.Fatal("enforceRiskGate: want refusal for prod label")
 	}
@@ -87,33 +87,33 @@ func TestEnforceRiskGate_ProductionBlocks(t *testing.T) {
 
 func TestEnforceRiskGate_AllowProdPasses(t *testing.T) {
 	wf := runFlags{allow: []string{"prod"}}
-	if err := enforceRiskGate("migrate", prodFinding(), wf, nil); err != nil {
+	if err := enforceRiskGate("migrate", prodFinding(), wf); err != nil {
 		t.Fatalf("--sw-allow prod should pass: %v", err)
 	}
 }
 
 func TestEnforceRiskGate_AllowProdDoesNotAuthorizeDestructive(t *testing.T) {
 	wf := runFlags{allow: []string{"prod"}}
-	if err := enforceRiskGate("cluster-down", destructiveFinding(), wf, nil); err == nil {
+	if err := enforceRiskGate("cluster-down", destructiveFinding(), wf); err == nil {
 		t.Fatal("--sw-allow prod should NOT authorize destructive")
 	}
 }
 
 func TestEnforceRiskGate_MoneyBlocks(t *testing.T) {
-	if err := enforceRiskGate("stress-test", moneyFinding(), runFlags{}, nil); err == nil {
+	if err := enforceRiskGate("stress-test", moneyFinding(), runFlags{}); err == nil {
 		t.Fatal("enforceRiskGate: want refusal for money label")
 	}
 }
 
 func TestEnforceRiskGate_AllowMoneyPasses(t *testing.T) {
 	wf := runFlags{allow: []string{"money"}}
-	if err := enforceRiskGate("stress-test", moneyFinding(), wf, nil); err != nil {
+	if err := enforceRiskGate("stress-test", moneyFinding(), wf); err != nil {
 		t.Fatalf("--sw-allow money should pass: %v", err)
 	}
 }
 
 func TestEnforceRiskGate_NoFindings(t *testing.T) {
-	if err := enforceRiskGate("plain", nil, runFlags{}, nil); err != nil {
+	if err := enforceRiskGate("plain", nil, runFlags{}); err != nil {
 		t.Fatalf("no findings should pass: %v", err)
 	}
 }
@@ -126,7 +126,7 @@ func TestEnforceRiskGate_NamesEveryMissingLabel(t *testing.T) {
 		{NodeID: "n1", StepID: "step-a", Labels: []string{"destructive"}},
 		{NodeID: "n2", StepID: "step-b", Labels: []string{"prod"}},
 	}
-	err := enforceRiskGate("multi", findings, runFlags{}, nil)
+	err := enforceRiskGate("multi", findings, runFlags{})
 	var rbe *sparkwing.RiskBlockedError
 	if !errors.As(err, &rbe) {
 		t.Fatalf("expected *RiskBlockedError, got %T (%v)", err, err)
@@ -144,7 +144,7 @@ func TestEnforceRiskGate_PartialAllow(t *testing.T) {
 		{NodeID: "n1", StepID: "step-a", Labels: []string{"destructive", "prod"}},
 	}
 	wf := runFlags{allow: []string{"destructive"}}
-	err := enforceRiskGate("partial", findings, wf, nil)
+	err := enforceRiskGate("partial", findings, wf)
 	var rbe *sparkwing.RiskBlockedError
 	if !errors.As(err, &rbe) {
 		t.Fatalf("expected *RiskBlockedError, got %T (%v)", err, err)
@@ -160,11 +160,11 @@ func TestEnforceRiskGate_AuthorDefinedLabel(t *testing.T) {
 	findings := []stepRiskFinding{
 		{StepID: "rotate", Labels: []string{"rotates-key"}},
 	}
-	if err := enforceRiskGate("rotation", findings, runFlags{}, nil); err == nil {
+	if err := enforceRiskGate("rotation", findings, runFlags{}); err == nil {
 		t.Fatal("expected refusal for author-defined label")
 	}
 	wf := runFlags{allow: []string{"rotates-key"}}
-	if err := enforceRiskGate("rotation", findings, wf, nil); err != nil {
+	if err := enforceRiskGate("rotation", findings, wf); err != nil {
 		t.Fatalf("--sw-allow rotates-key should pass: %v", err)
 	}
 }

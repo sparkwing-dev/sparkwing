@@ -9,7 +9,6 @@ package main
 import (
 	"sort"
 
-	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -59,9 +58,7 @@ func lookupCachedRisks(sparkwingDir, pipelineName string) []stepRiskFinding {
 // enforceRiskGate is the dispatcher's gate: refuse the run when any
 // reachable step declares a risk label the operator hasn't
 // authorized via --sw-allow. --sw-dry-run bypasses every gate (the
-// safe-mode contract), and a profile-level auto_allow can
-// pre-authorize specific labels so a known-safe environment doesn't
-// pester the user.
+// safe-mode contract).
 //
 // Returns nil when no findings or when every declared label is
 // authorized. Returns a *sparkwing.RiskBlockedError whose
@@ -70,13 +67,11 @@ func enforceRiskGate(
 	pipelineName string,
 	findings []stepRiskFinding,
 	wf runFlags,
-	prof *profile.Profile,
 ) error {
 	if wf.dryRun {
 		return nil
 	}
 
-	_ = prof
 	allowed := map[string]bool{}
 	for _, l := range wf.allow {
 		allowed[l] = true
