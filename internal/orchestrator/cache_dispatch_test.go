@@ -938,6 +938,8 @@ func TestConcurrency_RunAndAwaitUnboundedClaimedChildAdmissionProtectsParentDisp
 	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "unbounded-await-parent", 750*time.Millisecond)
 }
 
+const admissionPauseTestBound = 1100 * time.Millisecond
+
 func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeline string, dispatchTimeout time.Duration) {
 	t.Helper()
 	resetCacheCounter()
@@ -1012,6 +1014,7 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
 
 childQueued:
+	pauseStarted := time.Now()
 	time.Sleep(1200 * time.Millisecond)
 
 	select {
@@ -1040,6 +1043,9 @@ childQueued:
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for child after releasing queued child")
+	}
+	if elapsed := time.Since(pauseStarted); elapsed >= admissionPauseTestBound {
+		t.Fatalf("admission-pause regression took %s, want less than %s", elapsed, admissionPauseTestBound)
 	}
 }
 
@@ -1134,6 +1140,7 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
 
 childQueued:
+	pauseStarted := time.Now()
 	time.Sleep(1200 * time.Millisecond)
 	if _, _, _, err := st.ReleaseAndNotify(ctx,
 		"g:plan-level-queued-await-key", "external-continue-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
@@ -1162,6 +1169,9 @@ childQueued:
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for child after releasing queued child")
+	}
+	if elapsed := time.Since(pauseStarted); elapsed >= admissionPauseTestBound {
+		t.Fatalf("admission-pause regression took %s, want less than %s", elapsed, admissionPauseTestBound)
 	}
 }
 
