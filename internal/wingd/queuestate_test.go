@@ -325,6 +325,28 @@ func waitForStalledHolder(
 	}
 }
 
+func observeQueueStateFor(t *testing.T, q *client.Client, duration time.Duration, assert func(wingwire.QueueState)) {
+	t.Helper()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	observation := time.NewTimer(duration)
+	defer observation.Stop()
+	for {
+		queryCtx, cancelQuery := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		qs, err := q.QueueState(queryCtx)
+		cancelQuery()
+		if err != nil {
+			t.Fatalf("queue state: %v", err)
+		}
+		assert(qs)
+		select {
+		case <-poll.C:
+		case <-observation.C:
+			return
+		}
+	}
+}
+
 func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
 	home := shortHome(t)
 	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{9003: {}}}
@@ -743,39 +765,36 @@ func TestQueueState_AdmissionWaitingParentIsNotStalled(t *testing.T) {
 		SubLease:     true,
 	})
 	waitForQueue(t, positions)
-	time.Sleep(150 * time.Millisecond)
 
 	q := ensure(t, home, "")
-	qs, err := q.QueueState(context.Background())
-	if err != nil {
-		t.Fatalf("queue state: %v", err)
-	}
-	if len(qs.Holders) != 2 || len(qs.Waiters) != 1 {
-		t.Fatalf("queue rows = %d holders, %d waiters; want 2 and 1: %+v", len(qs.Holders), len(qs.Waiters), qs)
-	}
-	var parent *wingwire.Holder
-	for i := range qs.Holders {
-		if qs.Holders[i].RunID == "pipeline-run" {
-			parent = &qs.Holders[i]
+	observeQueueStateFor(t, q, 150*time.Millisecond, func(qs wingwire.QueueState) {
+		if len(qs.Holders) != 2 || len(qs.Waiters) != 1 {
+			t.Fatalf("queue rows = %d holders, %d waiters; want 2 and 1: %+v", len(qs.Holders), len(qs.Waiters), qs)
 		}
-	}
-	if parent == nil {
-		t.Fatal("orchestration parent missing")
-	}
-	if parent.Stalled || parent.Recovery != "" {
-		t.Fatalf("admission-waiting parent has stalled recovery: %+v", parent)
-	}
-	if !parent.AdmissionWaiting {
-		t.Fatalf("parent does not expose admission wait: %+v", parent)
-	}
-	wantParticipant := "pipeline-run/node-host/YnVpbGQ"
-	if len(parent.ActiveWaiterParticipantIDs) != 1 || parent.ActiveWaiterParticipantIDs[0] != wantParticipant {
-		t.Fatalf("active waiter participants = %v, want [%s]", parent.ActiveWaiterParticipantIDs, wantParticipant)
-	}
-	w := qs.Waiters[0]
-	if w.RunID != "pipeline-run" || w.ParticipantID != wantParticipant || w.DisplayRunID != "pipeline-run/build" {
-		t.Fatalf("waiter hierarchy = %+v", w)
-	}
+		var parent *wingwire.Holder
+		for i := range qs.Holders {
+			if qs.Holders[i].RunID == "pipeline-run" {
+				parent = &qs.Holders[i]
+			}
+		}
+		if parent == nil {
+			t.Fatal("orchestration parent missing")
+		}
+		if parent.Stalled || parent.Recovery != "" {
+			t.Fatalf("admission-waiting parent has stalled recovery: %+v", parent)
+		}
+		if !parent.AdmissionWaiting {
+			t.Fatalf("parent does not expose admission wait: %+v", parent)
+		}
+		wantParticipant := "pipeline-run/node-host/YnVpbGQ"
+		if len(parent.ActiveWaiterParticipantIDs) != 1 || parent.ActiveWaiterParticipantIDs[0] != wantParticipant {
+			t.Fatalf("active waiter participants = %v, want [%s]", parent.ActiveWaiterParticipantIDs, wantParticipant)
+		}
+		w := qs.Waiters[0]
+		if w.RunID != "pipeline-run" || w.ParticipantID != wantParticipant || w.DisplayRunID != "pipeline-run/build" {
+			t.Fatalf("waiter hierarchy = %+v", w)
+		}
+	})
 }
 
 func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
@@ -797,19 +816,15 @@ func TestQueueState_BusyHolderIsNotStalled(t *testing.T) {
 	positions, _ := acquireAsync(waiter, semHostReq("waiting", "builder", 7002, "deploy"))
 	waitForQueue(t, positions)
 
-	time.Sleep(150 * time.Millisecond)
-
 	q := ensure(t, home, "")
-	qs, err := q.QueueState(context.Background())
-	if err != nil {
-		t.Fatalf("queue state: %v", err)
-	}
-	if len(qs.Holders) != 1 {
-		t.Fatalf("holders = %+v, want one", qs.Holders)
-	}
-	if qs.Holders[0].Stalled {
-		t.Fatalf("a busy holder must never be flagged stalled")
-	}
+	observeQueueStateFor(t, q, 150*time.Millisecond, func(qs wingwire.QueueState) {
+		if len(qs.Holders) != 1 {
+			t.Fatalf("holders = %+v, want one", qs.Holders)
+		}
+		if qs.Holders[0].Stalled {
+			t.Fatalf("a busy holder must never be flagged stalled")
+		}
+	})
 }
 
 func TestQueueState_IdleDescendantTreeStillStalls(t *testing.T) {
