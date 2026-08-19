@@ -263,8 +263,8 @@ func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup 
 	return g
 }
 
-// Requires records label terms used to filter runner claims for every member
-// on dispatched runs. An unmatched non-inline member remains queued until the
+// Requires records label terms used to filter runner claims for every non-inline dispatched member.
+// An unmatched non-inline member remains queued until the
 // controller fails it with queue_timeout. Direct runs and inline jobs have no
 // runner claim step, so Requires does not select or reject their runner. See
 // Job.Requires.

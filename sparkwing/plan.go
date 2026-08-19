@@ -467,9 +467,9 @@ type JobNode struct {
 	// non-nil return fails the node at StageVerify. Nil = no check.
 	verify VerifyFn
 
-	// requires stores label terms serialized into runner claims for non-inline
-	// dispatched jobs. Direct and inline execution do not consult them for
-	// runner selection. Empty permits any runner to claim.
+	// requires holds label terms stored with non-inline dispatched jobs for
+	// runner-claim filtering. Direct and inline execution do not consult them
+	// for runner selection. Empty permits any runner to claim.
 	requires []string
 
 	// prefers records ordered runner-label preferences in plan-snapshot
@@ -1047,8 +1047,8 @@ func (n *JobNode) BeforeRunHooks() []BeforeRunFn { return n.beforeRun }
 // AfterRunHooks returns the node's registered post-run hooks.
 func (n *JobNode) AfterRunHooks() []AfterRunFn { return n.afterRun }
 
-// Requires records label terms used to filter runner claims on dispatched
-// runs. Each argument is one term; within a term,
+// Requires records label terms used to filter runner claims for non-inline dispatched jobs.
+// Each argument is one term; within a term,
 // comma-separated values are alternatives (OR). Across terms, terms
 // compose with AND. A runner advertising a superset of the matched
 // alternatives still matches.
