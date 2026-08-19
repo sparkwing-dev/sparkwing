@@ -32,11 +32,7 @@ import (
 //
 // Fixing one means deleting its line. Entries are "<command path>
 // --<flag>".
-var advertisedButUnregistered = map[string]string{
-	"sparkwing configure profiles set --logs":           "BW-1359: as add",
-	"sparkwing configure profiles set --gitcache":       "BW-1359: as add",
-	"sparkwing configure profiles set --default-runner": "BW-1359: as add",
-}
+var advertisedButUnregistered = map[string]string{}
 
 func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
 	varPaths := registryVarPaths(t)
