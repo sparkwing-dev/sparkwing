@@ -320,7 +320,7 @@ func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request,
 
 	switch resp.Kind {
 	case store.AcquireCached:
-		return r.applyCacheHit(ctx, req, cp, resp.OutputRef, resp.OriginRunID, resp.OriginNodeID)
+		return r.applyCacheHit(ctx, req, cp, resp.OriginRunID, resp.OriginNodeID)
 	case store.AcquireSkipped:
 		return r.applySkippedConcurrent(ctx, req)
 	case store.AcquireFailed:
@@ -361,7 +361,7 @@ func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req r
 
 	switch resp.Kind {
 	case store.AcquireCached:
-		return r.applyCacheHit(ctx, req, memoCP, resp.OutputRef, resp.OriginRunID, resp.OriginNodeID)
+		return r.applyCacheHit(ctx, req, memoCP, resp.OriginRunID, resp.OriginNodeID)
 	case store.AcquireCoalesced:
 		return r.waitThenRun(ctx, req, memoCP, resp, wedgeBudget)
 	case store.AcquireQueued:
@@ -407,8 +407,8 @@ func storeOutcome(res runner.Result) string {
 
 // applyCacheHit stamps a cache-hit outcome and replays the origin's
 // output, with node_start/node_end + cache_hit bookkeeping.
-func (r *InProcessRunner) applyCacheHit(ctx context.Context, req runner.Request, cp coordParams, outputRef, originRun, originNode string) runner.Result {
-	output, err := r.fetchCachedOutput(ctx, outputRef, originRun, originNode)
+func (r *InProcessRunner) applyCacheHit(ctx context.Context, req runner.Request, cp coordParams, originRun, originNode string) runner.Result {
+	output, err := r.fetchCachedOutput(ctx, originRun, originNode)
 	if err != nil {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("cache hit: fetch output: %w", err))
 		return runner.Result{Outcome: sparkwing.Failed, Err: err}
@@ -691,7 +691,7 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 			_ = r.backends.State.UpdateNodeActivity(ctx, req.RunID, req.Node.ID(), "")
 			return r.runHeldSlot(ctx, req, cp, res.HolderID, wedgeBudget)
 		case store.WaiterCached:
-			return r.applyCacheHit(ctx, req, cp, res.OutputRef, res.OriginRunID, res.OriginNodeID)
+			return r.applyCacheHit(ctx, req, cp, res.OriginRunID, res.OriginNodeID)
 		case store.WaiterLeaderFinished:
 			return r.inheritLeaderOutcome(ctx, req, cp, res.LeaderRunID, res.LeaderNodeID, res.LeaderOutcome, res.LeaderFailureReason)
 		case store.WaiterCancelled:
@@ -788,9 +788,7 @@ func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.R
 	return runner.Result{Outcome: outcome, Output: output}
 }
 
-// fetchCachedOutput resolves output_ref to the origin's stored bytes.
-func (r *InProcessRunner) fetchCachedOutput(ctx context.Context, outputRef, originRun, originNode string) ([]byte, error) {
-	_ = outputRef
+func (r *InProcessRunner) fetchCachedOutput(ctx context.Context, originRun, originNode string) ([]byte, error) {
 	return r.backends.State.GetNodeOutput(ctx, originRun, originNode)
 }
 
