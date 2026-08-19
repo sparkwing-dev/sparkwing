@@ -60,7 +60,6 @@ func TestLease_HeartbeatExtends(t *testing.T) {
 	}
 	before := *claimed.LeaseExpiresAt
 
-	time.Sleep(20 * time.Millisecond)
 	if _, err := s.HeartbeatTrigger(context.Background(), claimed.ID, 10*time.Second); err != nil {
 		t.Fatalf("HeartbeatTrigger: %v", err)
 	}
@@ -69,8 +68,8 @@ func TestLease_HeartbeatExtends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.LeaseExpiresAt == nil || !got.LeaseExpiresAt.After(before) {
-		t.Errorf("lease didn't advance: before=%v after=%v", before, got.LeaseExpiresAt)
+	if got.LeaseExpiresAt == nil || got.LeaseExpiresAt.Sub(before) < 9*time.Second {
+		t.Errorf("lease did not extend by at least 9s: before=%v after=%v", before, got.LeaseExpiresAt)
 	}
 }
 
