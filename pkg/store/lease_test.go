@@ -101,13 +101,20 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 		t.Errorf("premature reap: %v", ids)
 	}
 
-	time.Sleep(80 * time.Millisecond)
+	started := time.Now()
+	if _, err := s.DB().Exec(`UPDATE triggers SET lease_expires_at = ? WHERE id = ?`,
+		time.Now().Add(-time.Second).UnixNano(), "trig-c"); err != nil {
+		t.Fatalf("expire lease: %v", err)
+	}
 	ids, err = store.Maintenance.ReapExpiredTriggers(s, context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(ids) != 1 || ids[0] != "trig-c" {
 		t.Fatalf("reaped=%v want [trig-c]", ids)
+	}
+	if elapsed := time.Since(started); elapsed >= 60*time.Millisecond {
+		t.Fatalf("expired-lease reap took %v, want less than 60ms", elapsed)
 	}
 
 	got, err := s.GetTrigger(context.Background(), "trig-c")
