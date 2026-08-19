@@ -27,19 +27,45 @@ func requireDocker(t *testing.T) {
 
 // containerRunning reports whether a container with the given name
 // exists in the running state. Used by cleanup-verification tests.
-func containerRunning(name string) bool {
-	out, err := exec.Command("docker", "ps", "--filter", "name=^"+name+"$", "--format", "{{.Names}}").Output()
+func containerRunning(ctx context.Context, name string) (bool, error) {
+	out, err := exec.CommandContext(ctx, "docker", "ps", "--filter", "name=^"+name+"$", "--format", "{{.Names}}").Output()
 	if err != nil {
-		return false
+		return false, err
 	}
-	return strings.TrimSpace(string(out)) == name
+	return strings.TrimSpace(string(out)) == name, nil
 }
 
 // forceRemove best-effort removes a container; used as belt-and-suspenders
 // in tests that might leave one behind if the assertion fires before
 // WithServices' own cleanup.
 func forceRemove(name string) {
-	_ = exec.Command("docker", "rm", "-f", name).Run()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "docker", "rm", "-f", name).Run()
+}
+
+func waitForContainerStopped(t *testing.T, name, cause string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	poll := time.NewTicker(100 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		running, err := containerRunning(ctx, name)
+		if err != nil {
+			forceRemove(name)
+			t.Fatalf("inspect container %s after %s: %v", name, cause, err)
+		}
+		if !running {
+			return
+		}
+		select {
+		case <-poll.C:
+		case <-ctx.Done():
+			forceRemove(name)
+			t.Fatalf("container %s still running after %s", name, cause)
+		}
+	}
 }
 
 func TestDeriveName(t *testing.T) {
@@ -141,7 +167,14 @@ func TestWithServices_StartAndCleanup(t *testing.T) {
 	if capturedName == "" {
 		t.Fatalf("fn never saw the container")
 	}
-	if containerRunning(capturedName) {
+	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelProbe()
+	running, probeErr := containerRunning(probeCtx, capturedName)
+	if probeErr != nil {
+		forceRemove(capturedName)
+		t.Fatalf("inspect container %s after WithServices returned: %v", capturedName, probeErr)
+	}
+	if running {
 		forceRemove(capturedName)
 		t.Fatalf("container %s still running after WithServices returned", capturedName)
 	}
@@ -221,14 +254,7 @@ func TestWithServices_PanicStillCleansUp(t *testing.T) {
 	if capturedName == "" {
 		t.Fatalf("fn never captured the container name")
 	}
-	for range 20 {
-		if !containerRunning(capturedName) {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	forceRemove(capturedName)
-	t.Fatalf("container %s still running after panic through WithServices", capturedName)
+	waitForContainerStopped(t, capturedName, "panic through WithServices")
 }
 
 func TestWithServices_CtxCancelCleansUp(t *testing.T) {
@@ -263,14 +289,7 @@ func TestWithServices_CtxCancelCleansUp(t *testing.T) {
 	if capturedName == "" {
 		t.Fatalf("fn never captured container")
 	}
-	for range 20 {
-		if !containerRunning(capturedName) {
-			return
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	forceRemove(capturedName)
-	t.Fatalf("container %s still running after ctx cancel", capturedName)
+	waitForContainerStopped(t, capturedName, "context cancellation")
 }
 
 func TestWithServices_ConcurrentNoCollision(t *testing.T) {
