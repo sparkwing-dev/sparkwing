@@ -1077,14 +1077,10 @@ func (n *JobNode) RequiresLabels() []string {
 	return copyLabels(n.requires)
 }
 
-// Prefers biases runner selection when more than one runner satisfies
-// Requires. Each argument is one term with the same comma-OR / AND
-// semantics as Requires. The scheduler walks the terms in declaration
-// order and picks the first runner whose labels match any term. With
-// no preference, the dispatch venue uses its normal runner selection.
-//
-// Prefers never fails a run on its own: if no runner matches any
-// preference term, the dispatch venue uses its normal runner selection.
+// Prefers records ordered runner-label preferences in plan metadata.
+// Each argument is one term with the same comma-OR / AND semantics as
+// Requires. Preferences appear in dispatch snapshots, renderers, and
+// dashboards but do not affect runner selection.
 //
 //	sw.Job(plan, "integration", &Integration{}).
 //	    Requires("os=linux").
@@ -1092,12 +1088,6 @@ func (n *JobNode) RequiresLabels() []string {
 //
 // Calling Prefers with no arguments clears any previously-set
 // preferences.
-//
-// Preferences are persisted on the dispatch snapshot so plan
-// renderers and dashboards see them; the in-process orchestrator
-// dispatches through a single configured runner today, so Prefers
-// becomes meaningful when more than one runner can satisfy Requires
-// and claim the job.
 func (n *JobNode) Prefers(labels ...string) *JobNode {
 	n.prefers = normalizeLabels(labels)
 	return n

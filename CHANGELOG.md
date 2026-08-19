@@ -51,8 +51,8 @@ code change to unlock.
 
 ### Fixed
 
-- **sdk:** Runner-preference documentation and generated scaffolds describe
-  dispatch fallback without referencing the removed profile default runner.
+- **sdk:** Runner-preference documentation and generated scaffolds state that
+  preferences are metadata and do not affect runner selection.
 - **config:** Pipeline YAML parse errors name `sparkwing.yaml` instead of the
   retired `pipelines.yaml` file.
 - **sdk:** Secret inspection documentation describes the typed `Secrets()`
