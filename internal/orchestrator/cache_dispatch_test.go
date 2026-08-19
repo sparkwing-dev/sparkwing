@@ -107,6 +107,36 @@ func (cacheCancelOthersFollowerPipe) Plan(ctx context.Context, plan *sparkwing.P
 	return nil
 }
 
+type cacheForcedReleaseLeaderPipe struct{ sparkwing.Base }
+
+func (cacheForcedReleaseLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	g := sparkwing.NewConcurrencyGroup("cache-forced-release-key", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.CancelOthers,
+	})
+	sparkwing.Job(plan, "leader", func(ctx context.Context) error {
+		select {
+		case <-time.After(5 * time.Second):
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}).Concurrency(g)
+	return nil
+}
+
+type cacheForcedReleaseFollowerPipe struct{ sparkwing.Base }
+
+func (cacheForcedReleaseFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	g := sparkwing.NewConcurrencyGroup("cache-forced-release-key", sparkwing.ConcurrencyLimit{
+		Capacity:      1,
+		OnLimit:       sparkwing.CancelOthers,
+		CancelTimeout: 100 * time.Millisecond,
+	})
+	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).Concurrency(g)
+	return nil
+}
+
 // cacheKeyedPipe exercises Cache() memoization across two sequential
 // runs. First run misses and writes a cache entry; second run hits and
 // replays the output without invoking the job body. Caching is keyed on
@@ -464,6 +494,8 @@ func init() {
 	register("cache-fail-follower", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheFailFollowerPipe{} })
 	register("cache-cancel-others-leader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheCancelOthersLeaderPipe{} })
 	register("cache-cancel-others-follower", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheCancelOthersFollowerPipe{} })
+	register("cache-forced-release-leader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheForcedReleaseLeaderPipe{} })
+	register("cache-forced-release-follower", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheForcedReleaseFollowerPipe{} })
 	register("cache-memoize", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheKeyedPipe{} })
 	register("cache-drift-a", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheDriftPipeA{} })
 	register("cache-drift-b", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cacheDriftPipeB{} })
@@ -1708,13 +1740,22 @@ func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 }
 
 func TestConcurrency_CancelOthersEvictsCooperativeLeader(t *testing.T) {
+	testCancelOthersStopsLeader(t, "cache-cancel-others-leader", "cache-cancel-others-follower")
+}
+
+func TestConcurrency_ForcedReleaseStopsCancelOthersLeader(t *testing.T) {
+	testCancelOthersStopsLeader(t, "cache-forced-release-leader", "cache-forced-release-follower")
+}
+
+func testCancelOthersStopsLeader(t *testing.T, leaderPipeline, followerPipeline string) {
+	t.Helper()
 	resetCacheCounter()
 	p := newPaths(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-			Pipeline: "cache-cancel-others-leader",
+			Pipeline: leaderPipeline,
 		})
 		leaderDone <- res
 	}()
@@ -1722,7 +1763,7 @@ func TestConcurrency_CancelOthersEvictsCooperativeLeader(t *testing.T) {
 
 	followerStart := time.Now()
 	followerRes, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline: "cache-cancel-others-follower",
+		Pipeline: followerPipeline,
 	})
 	followerElapsed := time.Since(followerStart)
 
@@ -1733,5 +1774,12 @@ func TestConcurrency_CancelOthersEvictsCooperativeLeader(t *testing.T) {
 		t.Fatalf("follower took %s; expected eviction well under 5s", followerElapsed)
 	}
 
-	<-leaderDone
+	select {
+	case leader := <-leaderDone:
+		if leader.Status != "cancelled" {
+			t.Fatalf("leader status = %q (err=%v), want cancelled after supersession", leader.Status, leader.Error)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("cooperative leader kept executing after a CancelOthers supersession")
+	}
 }

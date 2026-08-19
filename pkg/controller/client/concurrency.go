@@ -134,6 +134,9 @@ func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*Waiter
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, store.ErrNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, readHTTPError(resp)
 	}
@@ -163,6 +166,9 @@ func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease 
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusConflict {
+		return nil, store.ErrLockHeld
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, readHTTPError(resp)
 	}
