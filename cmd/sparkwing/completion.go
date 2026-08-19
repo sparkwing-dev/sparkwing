@@ -528,20 +528,6 @@ _sparkwing() {
         return
     fi
 
-    # Value completion: --target <TAB> -> the pipeline's declared targets.
-    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--target" ]]; then
-        local pipe=""
-        if (( ${#swpath[@]} >= 2 )) && [[ "${swpath[1]}" == "run" ]]; then
-            pipe="${swpath[2]}"
-        fi
-        if [[ -n "$pipe" ]]; then
-            local -a tgts
-            tgts=( ${(f)"$(sparkwing _complete-targets "$pipe" 2>/dev/null)"} )
-            _describe -t targets 'target' tgts
-        fi
-        return
-    fi
-
     # Value completion: --default-runner <TAB> -> runner names.
     # Used by sparkwing configure profiles add/set --default-runner.
     if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--default-runner" ]]; then
