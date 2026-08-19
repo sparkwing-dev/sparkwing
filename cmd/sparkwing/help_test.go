@@ -92,6 +92,21 @@ func TestProfilesTestHelpRequiresProfile(t *testing.T) {
 	t.Fatal("profiles test help does not declare --profile")
 }
 
+func TestProfilesRuntimeGuidanceUsesRegisteredPaths(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "profiles.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ast.Inspect(file, func(node ast.Node) bool {
+		literal, ok := node.(*ast.BasicLit)
+		if ok && literal.Kind == token.STRING && strings.Contains(literal.Value, "sparkwing profiles ") {
+			t.Errorf("profiles.go contains obsolete command path at %s", fset.Position(literal.Pos()))
+		}
+		return true
+	})
+}
+
 func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 	cases := []struct {
 		name string
