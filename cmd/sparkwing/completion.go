@@ -824,6 +824,9 @@ end
 			if f.Argument != "" {
 				line += " -r"
 			}
+			if f.Name == "profile" {
+				line += " -a '(__sparkwing_profiles)'"
+			}
 			line += fmt.Sprintf(" -d %q", desc)
 			b.WriteString(line + "\n")
 		}

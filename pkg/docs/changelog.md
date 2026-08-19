@@ -51,8 +51,8 @@ code change to unlock.
 
 ### Fixed
 
-- **cli:** Bash and Zsh complete profile names for the live `--profile` flag
-  instead of the retired `--sw-profile` spelling.
+- **cli:** Bash, Fish, and Zsh complete profile names for the live `--profile`
+  flag instead of the retired `--sw-profile` spelling.
 - **cli:** Zsh completion no longer advertises removed profile runner
   selection.
 - **cli:** Zsh completion no longer queries removed pipeline target metadata
