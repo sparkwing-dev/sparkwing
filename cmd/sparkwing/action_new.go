@@ -699,7 +699,7 @@ func init() {
 // ciPRCheckTemplate: the canonical pull-request gate. lint and test
 // run in parallel and a final gate job depends on both, so the
 // pipeline is green only when every check passes. test declares a
-// runner-label preference (Prefers) to show placement metadata. Prefers
+// runner-label preference (Prefers) in plan-snapshot metadata. Prefers
 // does not affect runner selection. The gate is Inline (a cheap
 // in-process convergence node) so it declares no runner label.
 const ciPRCheckTemplate = `package jobs
@@ -734,7 +734,7 @@ func ({{STRUCT}}) Examples() []sw.Example {
 // state), run.Trigger (push/manual/schedule/webhook), run.Pipeline
 // (registered name).
 //
-// Prefers records placement metadata for renderers and dashboards; it
+// Prefers records plan-snapshot metadata; it
 // does not affect runner selection.
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	lint := sw.Job(plan, "lint", &{{STRUCT}}Lint{})

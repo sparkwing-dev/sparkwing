@@ -1077,10 +1077,9 @@ func (n *JobNode) RequiresLabels() []string {
 	return copyLabels(n.requires)
 }
 
-// Prefers records ordered runner-label preferences in plan metadata.
+// Prefers records ordered runner-label preferences in plan-snapshot metadata; preferences do not affect runner selection.
 // Each argument is one term with the same comma-OR / AND semantics as
-// Requires. Preferences appear in dispatch snapshots, renderers, and
-// dashboards but do not affect runner selection.
+// Requires.
 //
 //	sw.Job(plan, "integration", &Integration{}).
 //	    Requires("os=linux").
