@@ -93,10 +93,11 @@ func stuckNodeIDs(plan *sparkwing.Plan, state *dispatchState) []string {
 func unresolvedNodesBlockedByAdmission(ctx context.Context, stateBackend StateBackend, runID string, plan *sparkwing.Plan, state *dispatchState, since time.Time) bool {
 	unresolved := make(map[string]*sparkwing.JobNode)
 	progress := false
+	events := dispatchWatchdogEvents(ctx, stateBackend, runID)
 	for _, node := range plan.Nodes() {
 		if _, ok := state.getOutcome(node.ID()); !ok {
 			unresolved[node.ID()] = node
-			progress = progress || nodeProgressSince(ctx, stateBackend, runID, node.ID(), since)
+			progress = progress || nodeDispatchProgressSince(events, node.ID(), since)
 		}
 	}
 	if len(unresolved) == 0 {
@@ -108,14 +109,14 @@ func unresolvedNodesBlockedByAdmission(ctx context.Context, stateBackend StateBa
 	memo := make(map[string]bool, len(unresolved))
 	visiting := make(map[string]bool, len(unresolved))
 	for nodeID := range unresolved {
-		if !nodeBlockedByAdmission(ctx, stateBackend, runID, unresolved, memo, visiting, nodeID) {
+		if !nodeBlockedByAdmission(ctx, stateBackend, runID, events, unresolved, memo, visiting, nodeID) {
 			return false
 		}
 	}
 	return true
 }
 
-func nodeBlockedByAdmission(ctx context.Context, stateBackend StateBackend, runID string, unresolved map[string]*sparkwing.JobNode, memo, visiting map[string]bool, nodeID string) bool {
+func nodeBlockedByAdmission(ctx context.Context, stateBackend StateBackend, runID string, events []store.Event, unresolved map[string]*sparkwing.JobNode, memo, visiting map[string]bool, nodeID string) bool {
 	if blocked, ok := memo[nodeID]; ok {
 		return blocked
 	}
@@ -126,14 +127,14 @@ func nodeBlockedByAdmission(ctx context.Context, stateBackend StateBackend, runI
 	if node == nil {
 		return false
 	}
-	if nodeWaitingForAdmission(ctx, stateBackend, runID, nodeID) {
+	if nodeWaitingForAdmission(ctx, stateBackend, runID, events, nodeID) {
 		memo[nodeID] = true
 		return true
 	}
 	visiting[nodeID] = true
 	defer delete(visiting, nodeID)
 	for _, depID := range node.DepIDs() {
-		if _, unresolvedDep := unresolved[depID]; unresolvedDep && nodeBlockedByAdmission(ctx, stateBackend, runID, unresolved, memo, visiting, depID) {
+		if _, unresolvedDep := unresolved[depID]; unresolvedDep && nodeBlockedByAdmission(ctx, stateBackend, runID, events, unresolved, memo, visiting, depID) {
 			memo[nodeID] = true
 			return true
 		}
@@ -142,28 +143,10 @@ func nodeBlockedByAdmission(ctx context.Context, stateBackend StateBackend, runI
 	return false
 }
 
-func nodeProgressSince(ctx context.Context, stateBackend StateBackend, runID, nodeID string, since time.Time) bool {
-	node, err := stateBackend.GetNode(ctx, runID, nodeID)
-	if err != nil || node == nil || node.LastHeartbeat == nil {
-		return false
-	}
-	return node.LastHeartbeat.After(since)
-}
-
-func nodeWaitingForAdmission(ctx context.Context, stateBackend StateBackend, runID, nodeID string) bool {
+func nodeWaitingForAdmission(ctx context.Context, stateBackend StateBackend, runID string, events []store.Event, nodeID string) bool {
 	node, err := stateBackend.GetNode(ctx, runID, nodeID)
 	if err == nil && node != nil && isAdmissionWaitDetail(node.StatusDetail) {
 		return true
-	}
-	eventReader, ok := stateBackend.(interface {
-		ListEventsAfter(context.Context, string, int64, int) ([]store.Event, error)
-	})
-	if !ok {
-		return false
-	}
-	events, err := eventReader.ListEventsAfter(ctx, runID, 0, 500)
-	if err != nil {
-		return false
 	}
 	waiting := false
 	for _, event := range events {
@@ -178,6 +161,33 @@ func nodeWaitingForAdmission(ctx context.Context, stateBackend StateBackend, run
 		}
 	}
 	return waiting
+}
+
+func dispatchWatchdogEvents(ctx context.Context, stateBackend StateBackend, runID string) []store.Event {
+	eventReader, ok := stateBackend.(interface {
+		ListEventsAfter(context.Context, string, int64, int) ([]store.Event, error)
+	})
+	if !ok {
+		return nil
+	}
+	events, err := eventReader.ListEventsAfter(ctx, runID, 0, 500)
+	if err != nil {
+		return nil
+	}
+	return events
+}
+
+func nodeDispatchProgressSince(events []store.Event, nodeID string, since time.Time) bool {
+	for _, event := range events {
+		if event.NodeID != nodeID || !event.TS.After(since) {
+			continue
+		}
+		switch event.Kind {
+		case "concurrency_wait", "concurrency_promoted", "node_started":
+			return true
+		}
+	}
+	return false
 }
 
 func isAdmissionWaitDetail(detail string) bool {

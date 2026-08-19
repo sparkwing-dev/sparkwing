@@ -841,7 +841,18 @@ func dispatch(
 	}
 
 	if waitForDispatch(dispatchCtx, &state.wg, dispatchWaitTimeout, func(ctx context.Context, since time.Time) bool {
-		return unresolvedNodesBlockedByAdmission(ctx, backends.State, runID, plan, state, since)
+		if !unresolvedNodesBlockedByAdmission(ctx, backends.State, runID, plan, state, since) {
+			return false
+		}
+		_ = backends.State.AppendEvent(ctx, runID, "", "dispatch_watchdog_continued", nil)
+		if delegate != nil {
+			delegate.Emit(sparkwing.LogRecord{
+				TS:    time.Now(),
+				Level: "info",
+				Event: "dispatch_watchdog_continued",
+			})
+		}
+		return true
 	}) == dispatchWaitTimedOut {
 		stuck := stuckNodeIDs(plan, state)
 		stack := dumpAllGoroutineStacks(dispatchStackDumpBytes)

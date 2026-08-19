@@ -4,7 +4,6 @@ import (
 	"context"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -38,11 +37,18 @@ func init() {
 	})
 }
 
-var watchdogQueueCounter atomic.Int32
+var watchdogQueueRelease chan struct{}
 
 func watchdogQueueStep(hold time.Duration) func(context.Context) error {
 	return func(ctx context.Context) error {
-		watchdogQueueCounter.Add(1)
+		if hold < 0 {
+			select {
+			case <-watchdogQueueRelease:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
 		select {
 		case <-time.After(hold):
 			return nil
@@ -59,7 +65,7 @@ func (watchdogQueueHolderPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ s
 		Capacity: 1,
 		OnLimit:  sparkwing.Queue,
 	})
-	sparkwing.Job(plan, "hold", watchdogQueueStep(350*time.Millisecond)).Concurrency(group)
+	sparkwing.Job(plan, "hold", watchdogQueueStep(-1)).Concurrency(group)
 	return nil
 }
 
@@ -162,7 +168,14 @@ func TestDispatchWatchdog_NegativeDisables(t *testing.T) {
 }
 
 func TestDispatchWatchdog_DoesNotFireWhileNodeWaitsInConcurrencyQueue(t *testing.T) {
-	watchdogQueueCounter.Store(0)
+	watchdogQueueRelease = make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-watchdogQueueRelease:
+		default:
+			close(watchdogQueueRelease)
+		}
+	})
 	paths := newPaths(t)
 	state, err := store.Open(paths.StateDB())
 	if err != nil {
@@ -170,29 +183,45 @@ func TestDispatchWatchdog_DoesNotFireWhileNodeWaitsInConcurrencyQueue(t *testing
 	}
 	defer func() { _ = state.Close() }()
 
+	holderLog := newWatchdogEventLog()
 	holderDone := make(chan *orchestrator.Result, 1)
 	go func() {
 		res, _ := runWithSharedStore(t, paths, state, orchestrator.Options{
+			RunID:               "dispatch-watchdog-holder",
 			Pipeline:            "watchdog-queue-holder",
 			DispatchWaitTimeout: time.Second,
+			Delegate:            holderLog,
 		})
 		holderDone <- res
 	}()
 
-	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); {
-		if watchdogQueueCounter.Load() > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if watchdogQueueCounter.Load() == 0 {
-		t.Fatal("holder did not start before deadline")
-	}
+	holderLog.wait(t, "node_start")
 
-	waiter, err := runWithSharedStore(t, paths, state, orchestrator.Options{
-		Pipeline:            "watchdog-queue-waiter",
-		DispatchWaitTimeout: 100 * time.Millisecond,
-	})
+	const waiterRunID = "dispatch-watchdog-waiter"
+	waiterLog := newWatchdogEventLog()
+	waiterDone := make(chan watchdogRunResult, 1)
+	go func() {
+		res, runErr := runWithSharedStore(t, paths, state, orchestrator.Options{
+			RunID:               waiterRunID,
+			Pipeline:            "watchdog-queue-waiter",
+			DispatchWaitTimeout: 100 * time.Millisecond,
+			Delegate:            waiterLog,
+		})
+		waiterDone <- watchdogRunResult{res: res, err: runErr}
+	}()
+
+	waiterLog.wait(t, "concurrency_wait")
+	waitForContinuationBeforeResult(t, waiterLog, waiterDone)
+	close(watchdogQueueRelease)
+
+	var waiter *orchestrator.Result
+	select {
+	case got := <-waiterDone:
+		waiter = got.res
+		err = got.err
+	case <-time.After(time.Second):
+		t.Fatal("queued waiter did not finish after holder released")
+	}
 	if err != nil {
 		t.Fatalf("queued waiter run returned error: %v", err)
 	}
@@ -210,5 +239,65 @@ func TestDispatchWatchdog_DoesNotFireWhileNodeWaitsInConcurrencyQueue(t *testing
 		}
 	case <-time.After(time.Second):
 		t.Fatal("holder did not finish")
+	}
+}
+
+type watchdogRunResult struct {
+	res *orchestrator.Result
+	err error
+}
+
+func waitForContinuationBeforeResult(t *testing.T, log *watchdogEventLog, done <-chan watchdogRunResult) {
+	t.Helper()
+	for {
+		select {
+		case got := <-log.events:
+			if got == "dispatch_watchdog_continued" {
+				return
+			}
+		case result := <-done:
+			if result.res != nil && result.res.Error != nil && strings.Contains(result.res.Error.Error(), "dispatch_wait_timeout") {
+				t.Fatalf("queued admission wait was killed by dispatch watchdog before admission released: %v", result.res.Error)
+			}
+			t.Fatalf("queued waiter finished before dispatch watchdog continuation: res=%+v err=%v", result.res, result.err)
+		case <-time.After(time.Second):
+			t.Fatal("dispatch watchdog continuation did not appear before deadline")
+		}
+	}
+}
+
+type watchdogEventLog struct {
+	events chan string
+}
+
+func newWatchdogEventLog() *watchdogEventLog {
+	return &watchdogEventLog{events: make(chan string, 16)}
+}
+
+func (l *watchdogEventLog) Log(level, msg string) {
+	l.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
+}
+
+func (l *watchdogEventLog) Emit(rec sparkwing.LogRecord) {
+	if rec.Event == "" {
+		return
+	}
+	select {
+	case l.events <- rec.Event:
+	default:
+	}
+}
+
+func (l *watchdogEventLog) wait(t *testing.T, event string) {
+	t.Helper()
+	for {
+		select {
+		case got := <-l.events:
+			if got == event {
+				return
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("event %s did not appear before deadline", event)
+		}
 	}
 }
