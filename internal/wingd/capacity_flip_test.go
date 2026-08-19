@@ -55,14 +55,21 @@ func queueOnce(t *testing.T, home string) wingwire.QueueState {
 
 func waitForCapacity(t *testing.T, home string, want float64) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if coresCapacity(queueOnce(t, home)) == want {
+	ticker := time.NewTicker(15 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for {
+		got := coresCapacity(queueOnce(t, home))
+		if got == want {
 			return
 		}
-		time.Sleep(15 * time.Millisecond)
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			t.Fatalf("cores capacity never reached %v (last %v)", want, got)
+		}
 	}
-	t.Fatalf("cores capacity never reached %v (last %v)", want, coresCapacity(queueOnce(t, home)))
 }
 
 // TestCapacity_CgroupGrowFlipIsPickedUp proves capacity is a living value: a
