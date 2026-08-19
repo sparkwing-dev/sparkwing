@@ -3211,7 +3211,6 @@ services (logs, gitcache) count as warn, not fail, so a
 minimally-configured laptop profile can still exit 0.`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
@@ -3283,7 +3282,6 @@ so operators can spot them for cleanup. Non-sparkwing hooks
 render as "(non-sparkwing)".`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo (owner can be omitted if gh has a default)", Required: true, Group: "Input"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (reserved for symmetry; unused by list)", Group: "System"},
 	},
@@ -3307,7 +3305,6 @@ take a time filter). Default: 24h.`,
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
 		{Name: "hook", Argument: "N", Desc: "GitHub hook id from 'webhooks list'", Required: true, Group: "Input"},
 		{Name: "since", Argument: "DURATION", Desc: "Only deliveries newer than this", Default: "24h", Group: "Filter"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (used for trigger/run lookups)", Required: true, Group: "System"},
 	},
@@ -3360,7 +3357,6 @@ Use -q to print just names, one per line, for shell piping
 (e.g. looping over agents with xargs).`,
 	Flags: []FlagSpec{
 		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
-		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print just agent names, one per line", Group: "Output"},
 	},

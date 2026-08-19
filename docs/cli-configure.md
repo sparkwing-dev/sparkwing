@@ -278,7 +278,6 @@ minimally-configured laptop profile can still exit 0.
 | Flag | Description |
 |---|---|
 | `--profile NAME` | Profile name (default: current default) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
 | `-o, --output FMT` | Output format (json\|table) |
 
 ### Examples
