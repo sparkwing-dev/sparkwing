@@ -17,17 +17,15 @@ import (
 )
 
 // addProfileFlag registers a `--profile <name>` flag on fs. The
-// returned pointer is populated after fs.Parse. Empty = use the default
-// profile.
+// returned pointer is populated after fs.Parse.
 func addProfileFlag(fs *flag.FlagSet) *string {
 	return fs.String("profile", "",
-		"profile name from ~/.config/sparkwing/profiles.yaml (default: current default)")
+		"profile name from ~/.config/sparkwing/profiles.yaml")
 }
 
-// resolveProfile loads profiles.yaml, picks the profile per `--profile`
-// and the file's default, and returns it. On any failure it prints
-// a helpful hint to stderr and returns a non-nil error so callers
-// can exit 1 without extra formatting.
+// resolveProfile loads the profile selected by `--profile`. On failure it
+// prints a hint and returns an error so callers can exit without additional
+// formatting.
 func resolveProfile(name string) (*profile.Profile, error) {
 	path, err := profile.DefaultPath()
 	if err != nil {
@@ -38,6 +36,9 @@ func resolveProfile(name string) (*profile.Profile, error) {
 		return nil, err
 	}
 	p, _, err := profile.Resolve(name, cfg)
+	if err == nil && p == nil {
+		err = profile.ErrNoProfile
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, profile.HintMissing(err, cfg))
 		return nil, errors.New("no profile resolved")
