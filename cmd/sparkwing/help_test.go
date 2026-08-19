@@ -80,6 +80,18 @@ func TestProfilesShowHelpRequiresName(t *testing.T) {
 	t.Fatal("profiles show help does not declare --name")
 }
 
+func TestProfilesTestHelpRequiresProfile(t *testing.T) {
+	for _, spec := range cmdProfilesTest.Flags {
+		if spec.Name == "profile" {
+			if !spec.Required {
+				t.Fatal("profiles test --profile is optional in help but required by the handler")
+			}
+			return
+		}
+	}
+	t.Fatal("profiles test help does not declare --profile")
+}
+
 func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 	cases := []struct {
 		name string
