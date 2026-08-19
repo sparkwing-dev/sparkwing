@@ -32,12 +32,12 @@ func activeHolders(t *testing.T, s *store.Store, key string) int {
 // the holder -- admission may have already reassigned that budget, so
 // reviving would put two live holders on a capacity-1 key.
 func TestConcurrency_HeartbeatOnExpiredLeaseDoesNotRevive(t *testing.T) {
-	started := time.Now()
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
 	})
+	started := time.Now()
 	expireHolderLease(t, s, "k", "rA/n")
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",

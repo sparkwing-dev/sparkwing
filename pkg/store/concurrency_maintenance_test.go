@@ -33,11 +33,8 @@ func waiterCount(t *testing.T, s *store.Store, key string) int {
 	return n
 }
 
-// expireHolderLease drives a holder's lease into the past so the maintenance
-// sweep sees it as dead. Aging the row is what keeps these tests honest under
-// load: a short real lease plus a sleep also has to outlive the test's own
-// setup, and on a saturated box two SQLite writes can straddle a 40ms lease,
-// so the waiter gets granted a slot instead of queueing behind the holder.
+// expireHolderLease drives a persisted lease into the past without waiting for
+// wall-clock expiry. This keeps expiry tests deterministic under host load.
 func expireHolderLease(t *testing.T, s *store.Store, key, holderID string) {
 	t.Helper()
 	if _, err := s.DB().Exec(
