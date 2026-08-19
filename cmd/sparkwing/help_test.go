@@ -300,6 +300,16 @@ func TestCommandFlagsAreUnique(t *testing.T) {
 	}
 }
 
+func TestRunsLogsHelpIncludesEventFilters(t *testing.T) {
+	var buf bytes.Buffer
+	PrintHelp(cmdJobsLogs, &buf)
+	for _, name := range []string{"--events-only", "--no-events"} {
+		if !containsFlagRow(buf.String(), name) {
+			t.Errorf("runs logs help omits accepted flag %s:\n%s", name, buf.String())
+		}
+	}
+}
+
 func TestBindFlagsString(t *testing.T) {
 	cmd := Command{
 		Path: "sparkwing bind-test",
