@@ -120,6 +120,13 @@ func TestStream_ContextCancellationStops(t *testing.T) {
 // TestStream_EscapesEmbeddedNewlines prevents a malformed log line
 // from splitting one event into two on the wire.
 func TestStream_EscapesEmbeddedNewlines(t *testing.T) {
+	started := time.Now()
+	t.Cleanup(func() {
+		if elapsed := time.Since(started); elapsed >= 750*time.Millisecond {
+			t.Errorf("embedded-newline stream test took %v, want less than 750ms", elapsed)
+		}
+	})
+
 	dir := t.TempDir()
 	s, err := logs.New(dir, nil)
 	if err != nil {
