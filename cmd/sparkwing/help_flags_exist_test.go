@@ -22,22 +22,6 @@ import (
 // The truth here is the source: a flag exists if some FlagSet built for
 // that command registers it. Registry-side flags the source never
 // registers are the failure this catches.
-// advertisedButUnregistered records the claims that were already stale
-// when this check was written. Each is the same defect as `dashboard
-// start --profile`: help, completion, and the CLI reference all offer a
-// flag the command rejects. They are listed rather than fixed here
-// because deciding whether each should be implemented or withdrawn is a
-// separate call per command -- but a listed entry cannot grow, and a new
-// one cannot appear.
-//
-// Fixing one means deleting its line. Entries are "<command path>
-// --<flag>".
-var advertisedButUnregistered = map[string]string{
-	"sparkwing configure profiles set --logs":           "BW-1359: as add",
-	"sparkwing configure profiles set --gitcache":       "BW-1359: as add",
-	"sparkwing configure profiles set --default-runner": "BW-1359: as add",
-}
-
 func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
 	varPaths := registryVarPaths(t)
 	registered := flagsRegisteredPerCommand(t, varPaths)
@@ -46,7 +30,6 @@ func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
 	}
 
 	checked := 0
-	seen := map[string]bool{}
 	for _, cmd := range allCommands {
 		if len(cmd.Flags) == 0 {
 			continue
@@ -64,15 +47,7 @@ func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
 			if f.Type != "" {
 				continue // bindFlags registers these from the registry itself
 			}
-			key := cmd.Path + " --" + f.Name
 			if slices.Contains(have, f.Name) {
-				if _, recorded := advertisedButUnregistered[key]; recorded {
-					t.Errorf("%q is registered now; drop it from advertisedButUnregistered", key)
-				}
-				continue
-			}
-			if _, recorded := advertisedButUnregistered[key]; recorded {
-				seen[key] = true
 				continue
 			}
 			t.Errorf("%s: the registry advertises --%s, which no FlagSet for that command registers; "+
@@ -82,11 +57,6 @@ func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("matched no command to its FlagSet, so this check proves nothing")
-	}
-	for key := range advertisedButUnregistered {
-		if !seen[key] {
-			t.Errorf("advertisedButUnregistered lists %q, which the walk no longer reaches; drop it", key)
-		}
 	}
 }
 
