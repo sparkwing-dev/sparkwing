@@ -93,12 +93,28 @@ func TestListJobs_FilterByStatus(t *testing.T) {
 
 func TestListJobs_FilterBySinceHidesOldRuns(t *testing.T) {
 	p := newPaths(t)
-	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
+	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	started := time.Now()
-	time.Sleep(50 * time.Millisecond)
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	result, err := st.DB().ExecContext(context.Background(),
+		"UPDATE runs SET started_at = ? WHERE id = ?",
+		time.Now().Add(-time.Second).UnixNano(), res.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := result.RowsAffected(); err != nil || rows != 1 {
+		t.Fatalf("age run fixture: rows=%d err=%v", rows, err)
+	}
 
 	var buf bytes.Buffer
-	err := orchestrator.ListJobs(context.Background(), p, orchestrator.ListOpts{
+	err = orchestrator.ListJobs(context.Background(), p, orchestrator.ListOpts{
 		Limit: 10,
 		Since: 10 * time.Millisecond,
 	}, &buf)
