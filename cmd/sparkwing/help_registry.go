@@ -1931,15 +1931,14 @@ var cmdProfilesShow = Command{
 	Path:     "sparkwing configure profiles show",
 	Synopsis: "Print one profile's full config",
 	Description: `Prints all fields of the profile named by --name. Token is
-redacted unless --show-token is passed. Omitting --name prints
-the current default profile.`,
+redacted unless --show-token is passed.`,
 	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "Input"},
+		{Name: "name", Argument: "NAME", Desc: "Profile name", Required: true, Group: "Input"},
 		{Name: "show-token", Desc: "Print the raw token (redacted by default)", Group: "Output"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
 	Examples: []Example{
-		{"Show the default profile", "sparkwing configure profiles show"},
+		{"Show a named profile", "sparkwing configure profiles show --name prod"},
 		{"Show a named profile with the raw token", "sparkwing configure profiles show --name prod --show-token"},
 	},
 }
