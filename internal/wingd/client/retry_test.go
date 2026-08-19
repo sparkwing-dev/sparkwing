@@ -111,35 +111,6 @@ func failingDaemon(t *testing.T, home string) *atomic.Int64 {
 	return accepted
 }
 
-// TestQueueStateDoesNotSpinAgainstAFailingDaemon is the client half of the
-// reported spin: a daemon that drops every exchange must cost a handful of
-// attempts in a window, not as many as the socket will carry.
-func TestQueueStateDoesNotSpinAgainstAFailingDaemon(t *testing.T) {
-	home := shortHome(t)
-	accepted := failingDaemon(t, home)
-
-	cl, err := EnsureDaemon(context.Background(), Options{
-		Home:        home,
-		Version:     "v9.9.9",
-		Spawn:       func(string, string) error { return errors.New("no spawn in this test") },
-		DialTimeout: 200 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatalf("ensure daemon: %v", err)
-	}
-	defer cl.Close()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 400*time.Millisecond)
-	defer cancel()
-	if _, err := cl.QueueState(ctx); err == nil {
-		t.Fatal("queue state against a daemon that answers nothing returned success")
-	}
-
-	if got := accepted.Load(); got > 8 {
-		t.Fatalf("client made %d connections in 400ms; the retry loop is unpaced", got)
-	}
-}
-
 // TestQueueStateGivesUpRatherThanRetryingForever bounds the read-only
 // path. Nothing depends on a status read eventually succeeding, so a
 // daemon that keeps failing it must be reported, not asked forever.
@@ -158,6 +129,7 @@ func TestQueueStateGivesUpRatherThanRetryingForever(t *testing.T) {
 	}
 	defer cl.Close()
 
+	start := time.Now()
 	done := make(chan error, 1)
 	go func() {
 		_, qerr := cl.QueueState(context.Background())
@@ -170,6 +142,9 @@ func TestQueueStateGivesUpRatherThanRetryingForever(t *testing.T) {
 		}
 		if !strings.Contains(qerr.Error(), "attempts") {
 			t.Fatalf("queue state failure = %v, want it to report the exhausted attempts", qerr)
+		}
+		if elapsed := time.Since(start); elapsed < 2*time.Second {
+			t.Fatalf("queue state exhausted its attempts in %s; retries were not paced", elapsed)
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("queue state never gave up on a daemon that answers nothing")
