@@ -57,7 +57,7 @@ func (s3TriggerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing
 	sparkwing.Job(plan, "trigger", func(ctx context.Context) error {
 		_, err := sparkwing.RunAndAwait[s3CachedJobOut, sparkwing.NoInputs](
 			ctx, "s3-integ-cache", "build",
-			sparkwing.WithFreshTimeout(5*time.Second),
+			sparkwing.WithFreshTimeout(250*time.Millisecond),
 		)
 		return err
 	})
