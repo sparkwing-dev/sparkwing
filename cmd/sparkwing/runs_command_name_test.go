@@ -10,7 +10,7 @@ import (
 )
 
 func TestProductionSourceUsesRunsCommandNames(t *testing.T) {
-	retired := regexp.MustCompile(`\b(?:sparkwing\s+)?jobs\s+(?:list|status|logs|errors|failures|stats|last|tree|get|wait|find|retry|cancel|prune|receipt|grep|summary|timeline)\b`)
+	retired := regexp.MustCompile(`(?:sparkwing\s+jobs|["'\x60]jobs)\s+(?:list|status|logs|errors|failures|stats|last|tree|get|wait|find|retry|cancel|prune|receipt|grep|summary|timeline)\b`)
 	err := filepath.WalkDir("../..", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
