@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **sdk:** Secret inspection documentation describes the typed `Secrets()`
+  provider instead of removed YAML secret declarations.
 - **logs:** Server-side line filters preserve the selected lines' final newline
   instead of adding or removing one.
 - **cli:** `configure xrepo` help, command discovery, and shell completion
