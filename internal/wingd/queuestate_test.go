@@ -293,6 +293,38 @@ func TestQueueState_CarriesOwnerAndParticipantIdentity(t *testing.T) {
 	}
 }
 
+func waitForStalledHolder(
+	t *testing.T,
+	q *client.Client,
+	description string,
+	selectHolder func([]wingwire.Holder) (wingwire.Holder, bool),
+) wingwire.Holder {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	var last []wingwire.Holder
+	for {
+		qs, err := q.QueueState(ctx)
+		if err != nil {
+			if ctx.Err() != nil {
+				t.Fatalf("%s never flagged stalled: %+v", description, last)
+			}
+			t.Fatalf("queue state: %v", err)
+		}
+		last = qs.Holders
+		if holder, ok := selectHolder(qs.Holders); ok && holder.Stalled {
+			return holder
+		}
+		select {
+		case <-poll.C:
+		case <-ctx.Done():
+			t.Fatalf("%s never flagged stalled: %+v", description, last)
+		}
+	}
+}
+
 func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
 	home := shortHome(t)
 	proc := &fakeProcSampler{usage: map[int]wingd.ProcUsage{9003: {}}}
@@ -332,28 +364,16 @@ func TestQueueState_RecoveryCommandUsesOwnerRunID(t *testing.T) {
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "v1")
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		qs, err := q.QueueState(context.Background())
-		if err != nil {
-			t.Fatalf("queue state: %v", err)
-		}
-		var target wingwire.Holder
-		for _, holder := range qs.Holders {
+	target := waitForStalledHolder(t, q, "idle holder", func(holders []wingwire.Holder) (wingwire.Holder, bool) {
+		for _, holder := range holders {
 			if holder.ParticipantID == "internal-holder" {
-				target = holder
+				return holder, true
 			}
 		}
-		if target.Stalled {
-			if got, want := target.Recovery, "sparkwing runs cancel --run run-1"; got != want {
-				t.Fatalf("recovery = %q, want %q", got, want)
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("idle holder never flagged stalled: %+v", qs.Holders)
-		}
-		time.Sleep(10 * time.Millisecond)
+		return wingwire.Holder{}, false
+	})
+	if got, want := target.Recovery, "sparkwing runs cancel --run run-1"; got != want {
+		t.Fatalf("recovery = %q, want %q", got, want)
 	}
 }
 
@@ -670,22 +690,14 @@ func TestQueueState_FlagsStalledHolderWithRecoveryCommand(t *testing.T) {
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "")
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		qs, err := q.QueueState(context.Background())
-		if err != nil {
-			t.Fatalf("queue state: %v", err)
+	target := waitForStalledHolder(t, q, "idle holder", func(holders []wingwire.Holder) (wingwire.Holder, bool) {
+		if len(holders) != 1 {
+			return wingwire.Holder{}, false
 		}
-		if len(qs.Holders) == 1 && qs.Holders[0].Stalled {
-			if qs.Holders[0].Recovery != "sparkwing runs cancel --run wedged" {
-				t.Fatalf("recovery command = %q, want the non-destructive cancel", qs.Holders[0].Recovery)
-			}
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("idle holder never flagged stalled: %+v", qs.Holders)
-		}
-		time.Sleep(10 * time.Millisecond)
+		return holders[0], true
+	})
+	if target.Recovery != "sparkwing runs cancel --run wedged" {
+		t.Fatalf("recovery command = %q, want the non-destructive cancel", target.Recovery)
 	}
 }
 
@@ -820,18 +832,10 @@ func TestQueueState_IdleDescendantTreeStillStalls(t *testing.T) {
 	waitForQueue(t, positions)
 
 	q := ensure(t, home, "")
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		qs, err := q.QueueState(context.Background())
-		if err != nil {
-			t.Fatalf("queue state: %v", err)
+	waitForStalledHolder(t, q, "idle descendant tree", func(holders []wingwire.Holder) (wingwire.Holder, bool) {
+		if len(holders) != 1 {
+			return wingwire.Holder{}, false
 		}
-		if len(qs.Holders) == 1 && qs.Holders[0].Stalled {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("idle descendant tree never flagged stalled: %+v", qs.Holders)
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return holders[0], true
+	})
 }
