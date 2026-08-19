@@ -30,6 +30,24 @@ func seedRunNode(t *testing.T, st *store.Store, runID, nodeID string) {
 	}
 }
 
+func setNodeReadyAt(t *testing.T, st *store.Store, runID, nodeID string, at time.Time) {
+	t.Helper()
+	res, err := st.DB().Exec(
+		`UPDATE nodes SET ready_at = ? WHERE run_id = ? AND node_id = ?`,
+		at.UnixNano(), runID, nodeID,
+	)
+	if err != nil {
+		t.Fatalf("set ready_at: %v", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		t.Fatalf("count ready_at rows: %v", err)
+	}
+	if changed != 1 {
+		t.Fatalf("ready_at rows = %d, want 1", changed)
+	}
+}
+
 // TestNodeClaim_HTTPRoundTrip exercises the full mark-ready / claim /
 // heartbeat / revoke surface via the Go client against an httptest
 // server. Covers: empty queue returns (nil, nil); mark ready +
@@ -159,10 +177,11 @@ func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 	if err := c.MarkNodeReady(ctx, "run-1", "special"); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2 * time.Millisecond)
 	if err := c.MarkNodeReady(ctx, "run-1", "anyone"); err != nil {
 		t.Fatal(err)
 	}
+	setNodeReadyAt(t, st, "run-1", "special", time.Unix(100, 0))
+	setNodeReadyAt(t, st, "run-1", "anyone", time.Unix(200, 0))
 
 	n, err := c.ClaimNode(ctx, "plain-runner", nil, 30*time.Second, nil)
 	if err != nil {
