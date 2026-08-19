@@ -127,6 +127,27 @@ func notAnExample() {
 	}
 }
 
+func TestCheckFile_RejectsOpaqueTicketLabelsInDocumentation(t *testing.T) {
+	src := `// Package widget implements BW-123 behavior.
+package widget
+
+// Add preserves the BW-456 compatibility rule.
+func Add() {}
+`
+	path := filepath.Join(t.TempDir(), "widget.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatalf("checkFile: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("violations = %+v, want both opaque ticket labels rejected", got)
+	}
+}
+
 func TestIsDirective(t *testing.T) {
 	cases := map[string]bool{
 		"//go:build linux":   true,
