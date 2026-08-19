@@ -1791,8 +1791,9 @@ func TestExplicitRelease_Promotes(t *testing.T) {
 	holder := mustAcquire(t, a, semReq("a", "lock", 1, 1, wingwire.PolicyQueue))
 
 	b := ensure(t, home, "")
-	_, resultB := acquireAsync(b, semReq("b", "lock", 1, 1, wingwire.PolicyQueue))
-	time.Sleep(100 * time.Millisecond)
+	positions, resultB := acquireAsync(b, semReq("b", "lock", 1, 1, wingwire.PolicyQueue))
+	waitForQueue(t, positions)
+	started := time.Now()
 
 	if err := holder.Release(); err != nil {
 		t.Fatalf("release: %v", err)
@@ -1800,6 +1801,9 @@ func TestExplicitRelease_Promotes(t *testing.T) {
 	r := waitResult(t, resultB, 2*time.Second)
 	if r.err != nil {
 		t.Fatalf("b should have been promoted after release, got %v", r.err)
+	}
+	if elapsed := time.Since(started); elapsed >= 90*time.Millisecond {
+		t.Fatalf("release-to-promotion took %v, want less than 90ms", elapsed)
 	}
 }
 
