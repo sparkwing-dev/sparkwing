@@ -626,7 +626,7 @@ func sliceRange(lines []string, a, b int) []string {
 
 // handleDeleteRun removes every log file for the run (the whole
 // runs/<runID> directory). 204 whether or not the dir existed so
-// `sparkwing jobs prune` can run repeatedly without babysitting.
+// `sparkwing runs prune` can run repeatedly without babysitting.
 func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runID")
 	if err := validateID(runID); err != nil {

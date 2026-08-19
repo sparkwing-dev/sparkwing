@@ -66,7 +66,7 @@ func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []strin
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs failures")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "runs failures")
 	if rerr != nil {
 		return rerr
 	}
@@ -79,7 +79,7 @@ func runJobsFailures(ctx context.Context, paths orchestrator.Paths, args []strin
 		if perr != nil {
 			return perr
 		}
-		if err := requireController(prof, "jobs failures"); err != nil {
+		if err := requireController(prof, "runs failures"); err != nil {
 			return err
 		}
 		rows, err = collectRemoteFailures(ctx, prof.ControllerURL(), prof.ControllerToken(), *pipeline, *since, *limit)
@@ -283,7 +283,7 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs stats")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "runs stats")
 	if rerr != nil {
 		return rerr
 	}
@@ -301,7 +301,7 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 		if perr != nil {
 			return perr
 		}
-		if err := requireController(prof, "jobs stats"); err != nil {
+		if err := requireController(prof, "runs stats"); err != nil {
 			return err
 		}
 		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
@@ -417,7 +417,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs last")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "runs last")
 	if rerr != nil {
 		return rerr
 	}
@@ -433,7 +433,7 @@ func runJobsLast(ctx context.Context, paths orchestrator.Paths, args []string) e
 			if err != nil {
 				return nil, err
 			}
-			if err := requireController(prof, "jobs last"); err != nil {
+			if err := requireController(prof, "runs last"); err != nil {
 				return nil, err
 			}
 			c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
@@ -520,7 +520,7 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		return err
 	}
-	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "jobs tree")
+	resolvedFmt, rerr := resolveOutputFormat(*outFmt, "runs tree")
 	if rerr != nil {
 		return rerr
 	}
@@ -538,7 +538,7 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if err != nil {
 			return err
 		}
-		if err := requireController(prof, "jobs tree"); err != nil {
+		if err := requireController(prof, "runs tree"); err != nil {
 			return err
 		}
 		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
@@ -641,7 +641,7 @@ func runJobsGet(ctx context.Context, paths orchestrator.Paths, args []string) er
 		if err != nil {
 			return err
 		}
-		if err := requireController(prof, "jobs get"); err != nil {
+		if err := requireController(prof, "runs get"); err != nil {
 			return err
 		}
 		return orchestrator.GetRunJSONRemote(ctx, prof.ControllerURL(), prof.ControllerToken(), *runID, os.Stdout)
@@ -664,12 +664,12 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 		}
 		return err
 	}
-	resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs wait")
+	resolvedFmt, err := resolveOutputFormat(*outFmt, "runs wait")
 	if err != nil {
 		return err
 	}
 	if *poll <= 0 {
-		return fmt.Errorf("jobs wait: --poll must be > 0")
+		return fmt.Errorf("runs wait: --poll must be > 0")
 	}
 
 	var fetch func() (*store.Run, error)
@@ -678,7 +678,7 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if perr != nil {
 			return exitError(4, perr)
 		}
-		if err := requireController(prof, "jobs wait"); err != nil {
+		if err := requireController(prof, "runs wait"); err != nil {
 			return exitError(4, err)
 		}
 		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
@@ -712,7 +712,7 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 			return exitErrorf(1, "run %s: %s", run.ID, run.Status)
 		}
 		if time.Now().After(deadline) {
-			return exitErrorf(2, "jobs wait: timeout after %s waiting on %s", *timeout, *runID)
+			return exitErrorf(2, "runs wait: timeout after %s waiting on %s", *timeout, *runID)
 		}
 		select {
 		case <-ctx.Done():
@@ -724,7 +724,7 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 }
 
 // emitWaitResult prints a terse summary of the terminal run so
-// `jobs wait` leaves at least one line on stdout scripts can parse.
+// `runs wait` leaves at least one line on stdout scripts can parse.
 // JSON emits the full run; table/plain emits one line.
 func emitWaitResult(run *store.Run, format string) {
 	if run == nil {
@@ -764,9 +764,9 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		return err
 	}
 	if *gitSHA == "" && *pipeline == "" && *repo == "" {
-		return fmt.Errorf("jobs find: at least one of --git-sha, --pipeline, or --repo is required")
+		return fmt.Errorf("runs find: at least one of --git-sha, --pipeline, or --repo is required")
 	}
-	resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs find")
+	resolvedFmt, err := resolveOutputFormat(*outFmt, "runs find")
 	if err != nil {
 		return err
 	}
@@ -777,7 +777,7 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		if perr != nil {
 			return perr
 		}
-		if err := requireController(prof, "jobs find"); err != nil {
+		if err := requireController(prof, "runs find"); err != nil {
 			return err
 		}
 		c := client.NewWithToken(prof.ControllerURL(), nil, prof.ControllerToken())
@@ -808,7 +808,7 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 		defer ticker.Stop()
 		for len(runs) == 0 {
 			if time.Now().After(deadline) {
-				return exitErrorf(2, "jobs find: timeout after %s with no match", *findTimeout)
+				return exitErrorf(2, "runs find: timeout after %s with no match", *findTimeout)
 			}
 			select {
 			case <-ctx.Done():

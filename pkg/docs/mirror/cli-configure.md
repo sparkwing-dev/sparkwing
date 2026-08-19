@@ -90,7 +90,7 @@ Profile config lives at $SPARKWING_PROFILES (if set), else
 $XDG_CONFIG_HOME/sparkwing/profiles.yaml, else
 ~/.config/sparkwing/profiles.yaml. Permissions on save are 0600.
 
-Every human-driven client command (tokens, users, jobs
+Every human-driven client command (tokens, users, runs
 retry/cancel/prune/logs, gc) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
 exist on other commands; profiles are the only config surface.

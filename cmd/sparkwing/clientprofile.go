@@ -1,6 +1,6 @@
 // Client-command profile resolution. Shared by every human-driven
 // subcommand that talks to a remote controller or logs service
-// (tokens, users, jobs retry/cancel/prune/logs, gc, fleet-worker,
+// (tokens, users, runs retry/cancel/prune/logs, gc, fleet-worker,
 // cluster-mode web). Each subcommand registers `--profile <name>` via
 // addProfileFlag, then calls resolveProfile to fetch the connection
 // info.
