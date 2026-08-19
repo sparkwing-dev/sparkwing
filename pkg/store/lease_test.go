@@ -101,6 +101,7 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 		t.Errorf("premature reap: %v", ids)
 	}
 
+	started := time.Now()
 	time.Sleep(80 * time.Millisecond)
 	ids, err = store.Maintenance.ReapExpiredTriggers(s, context.Background())
 	if err != nil {
@@ -108,6 +109,9 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 	}
 	if len(ids) != 1 || ids[0] != "trig-c" {
 		t.Fatalf("reaped=%v want [trig-c]", ids)
+	}
+	if elapsed := time.Since(started); elapsed >= 60*time.Millisecond {
+		t.Fatalf("expired-lease reap took %v, want less than 60ms", elapsed)
 	}
 
 	got, err := s.GetTrigger(context.Background(), "trig-c")
