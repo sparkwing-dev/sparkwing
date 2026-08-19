@@ -9,7 +9,8 @@ import (
 
 func TestQueueStateStalledRegressionsDoNotUseTimeSleep(t *testing.T) {
 	targets := map[string]bool{
-		"TestQueueState_RecoveryCommandUsesOwnerRunID":        false,
+		"waitForStalledHolder":                                 false,
+		"TestQueueState_RecoveryCommandUsesOwnerRunID":         false,
 		"TestQueueState_FlagsStalledHolderWithRecoveryCommand": false,
 		"TestQueueState_IdleDescendantTreeStillStalls":         false,
 	}
