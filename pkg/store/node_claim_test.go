@@ -32,6 +32,42 @@ func seedRunAndNode(t *testing.T, s *store.Store, runID, nodeID string) {
 	}
 }
 
+func setNodeReadyAt(t *testing.T, s *store.Store, runID, nodeID string, at time.Time) {
+	t.Helper()
+	res, err := s.DB().Exec(
+		`UPDATE nodes SET ready_at = ? WHERE run_id = ? AND node_id = ?`,
+		at.UnixNano(), runID, nodeID,
+	)
+	if err != nil {
+		t.Fatalf("set ready_at: %v", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		t.Fatalf("count ready_at rows: %v", err)
+	}
+	if changed != 1 {
+		t.Fatalf("ready_at rows = %d, want 1", changed)
+	}
+}
+
+func expireNodeClaim(t *testing.T, s *store.Store, runID, nodeID string) {
+	t.Helper()
+	res, err := s.DB().Exec(
+		`UPDATE nodes SET lease_expires_at = ? WHERE run_id = ? AND node_id = ? AND claimed_by IS NOT NULL`,
+		time.Now().Add(-time.Second).UnixNano(), runID, nodeID,
+	)
+	if err != nil {
+		t.Fatalf("expire node claim: %v", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		t.Fatalf("count expired node claims: %v", err)
+	}
+	if changed != 1 {
+		t.Fatalf("expired node claims = %d, want 1", changed)
+	}
+}
+
 func TestNodeClaim_MarkReadyIsIdempotent(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -47,9 +83,9 @@ func TestNodeClaim_MarkReadyIsIdempotent(t *testing.T) {
 	if n1.ReadyAt == nil {
 		t.Fatal("ready_at not set after MarkNodeReady")
 	}
-	first := *n1.ReadyAt
+	first := time.Unix(123, 456)
+	setNodeReadyAt(t, s, "run-1", "node-a", first)
 
-	time.Sleep(2 * time.Millisecond)
 	if err := s.MarkNodeReady(ctx, "run-1", "node-a"); err != nil {
 		t.Fatalf("MarkNodeReady 2: %v", err)
 	}
@@ -104,10 +140,11 @@ func TestNodeClaim_FIFOOrdering(t *testing.T) {
 	if err := s.MarkNodeReady(ctx, "run-1", "older"); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2 * time.Millisecond)
 	if err := s.MarkNodeReady(ctx, "run-2", "newer"); err != nil {
 		t.Fatal(err)
 	}
+	setNodeReadyAt(t, s, "run-1", "older", time.Unix(100, 0))
+	setNodeReadyAt(t, s, "run-2", "newer", time.Unix(200, 0))
 
 	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, nil)
 	if err != nil {
@@ -130,14 +167,13 @@ func TestNodeClaim_HeartbeatExtendsLeaseForHolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	firstLease := *n.LeaseExpiresAt
-	time.Sleep(5 * time.Millisecond)
 
 	if err := s.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-1", 10*time.Second); err != nil {
 		t.Fatalf("heartbeat: %v", err)
 	}
 	n2, _ := s.GetNode(ctx, "run-1", "node-a")
-	if !n2.LeaseExpiresAt.After(firstLease) {
-		t.Fatalf("lease did not extend: %v -> %v", firstLease, *n2.LeaseExpiresAt)
+	if n2.LeaseExpiresAt == nil || n2.LeaseExpiresAt.Sub(firstLease) < 7*time.Second {
+		t.Fatalf("lease did not extend by at least 7s: %v -> %v", firstLease, n2.LeaseExpiresAt)
 	}
 
 	err = s.HeartbeatNodeClaim(ctx, "run-1", "node-a", "pod-2", 10*time.Second)
@@ -156,7 +192,7 @@ func TestNodeClaim_ReapReleasesExpiredClaim(t *testing.T) {
 	if _, err := s.ClaimNextReadyNode(ctx, "pod-dead", 1*time.Millisecond, nil); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(5 * time.Millisecond)
+	expireNodeClaim(t, s, "run-1", "node-a")
 
 	pairs, err := s.ReapExpiredNodeClaims(ctx)
 	if err != nil {
@@ -283,7 +319,6 @@ func TestNodeClaim_LabelsUnmatchedSkipped(t *testing.T) {
 	ctx := context.Background()
 
 	seedNodeWithLabels(t, s, "run-1", "gpu-only", []string{"gpu"})
-	time.Sleep(2 * time.Millisecond)
 	seedNodeWithLabels(t, s, "run-2", "build", []string{"arm64"})
 
 	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, []string{"arm64", "laptop"})
