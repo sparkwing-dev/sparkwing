@@ -277,9 +277,9 @@ func darwinCPUFromSnapshot(
 		children[process.parentPID] = append(children[process.parentPID], processID)
 		prior, seen := previous[processID]
 		if !seen {
-			// WHY: a process born since the last tick has no baseline, and
+			// A process born since the last tick has no baseline, and
 			// crediting its whole lifetime would import CPU spent before this
-			// interval — the very error this function exists to remove.
+			// interval.
 			continue
 		}
 		delta := process.cpuSeconds - prior.cpuSeconds
