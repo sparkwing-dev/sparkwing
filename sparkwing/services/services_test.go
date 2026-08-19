@@ -284,13 +284,14 @@ func TestWithServices_ConcurrentNoCollision(t *testing.T) {
 	var wg sync.WaitGroup
 	errs := make(chan error, 2)
 	entered := make(chan struct{}, 2)
+	release := make(chan struct{})
 	for range 2 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			errs <- WithServices(context.Background(), []Service{svc}, func(ctx context.Context) error {
 				entered <- struct{}{}
-				time.Sleep(500 * time.Millisecond)
+				<-release
 				return nil
 			})
 		}()
@@ -298,6 +299,7 @@ func TestWithServices_ConcurrentNoCollision(t *testing.T) {
 	<-entered
 	<-entered
 	started := time.Now()
+	close(release)
 	wg.Wait()
 	if elapsed := time.Since(started); elapsed >= 400*time.Millisecond {
 		t.Fatalf("callbacks completed in %s after both entered, want < 400ms", elapsed)
