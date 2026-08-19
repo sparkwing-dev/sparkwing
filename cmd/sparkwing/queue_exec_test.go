@@ -163,9 +163,7 @@ func TestQueueExecHelperProcess(t *testing.T) {
 	}
 	if len(os.Args) == separator+4 {
 		poll := time.NewTicker(10 * time.Millisecond)
-		defer poll.Stop()
 		deadline := time.NewTimer(queueExecWait)
-		defer deadline.Stop()
 		for {
 			if _, statErr := os.Stat(os.Args[separator+3]); statErr == nil {
 				break
