@@ -478,9 +478,11 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 	}()
 
 	<-terminal
-	select {
-	case <-time.After(600 * time.Millisecond):
-	case <-ctx.Done():
+	if len(seen) > 0 {
+		select {
+		case <-time.After(600 * time.Millisecond):
+		case <-ctx.Done():
+		}
 	}
 	cancel()
 	wg.Wait()
