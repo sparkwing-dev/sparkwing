@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync/atomic"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/profile"
@@ -62,9 +61,6 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 				"trigger_id", trigger.ID, "err", ferr)
 		}
 	}()
-
-	cancelled := &atomic.Bool{}
-	_ = cancelled
 
 	var r runner.Runner
 	args := resolveTriggerArgs(ctx, backends.State, trigger, logger)

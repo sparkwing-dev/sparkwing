@@ -200,7 +200,6 @@ func Main() {
 		fmt.Fprintln(os.Stderr, "run:", err)
 		os.Exit(1)
 	}
-	_ = delegate
 	if res != nil && res.Error != nil {
 		fmt.Fprintln(os.Stderr, "run:", res.Error)
 	}

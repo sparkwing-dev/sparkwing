@@ -16,12 +16,10 @@ import (
 // Errors when neither resolves to a directory containing .git -- fail-
 // fast at claim time instead of a silent compile-loop timeout later.
 func LocalRepoDir(slug string) (string, error) {
-	owner, name, ok := splitRepoSlug(slug)
+	_, name, ok := splitRepoSlug(slug)
 	if !ok {
 		return "", fmt.Errorf("local repo: malformed slug %q (want owner/name)", slug)
 	}
-	_ = owner
-
 	if env := os.Getenv("SPARKWING_REPO_" + envKeyForName(name)); env != "" {
 		if err := assertGitDir(env); err != nil {
 			return "", fmt.Errorf("local repo: SPARKWING_REPO_%s=%s: %w",
