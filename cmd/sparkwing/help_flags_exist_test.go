@@ -33,10 +33,6 @@ import (
 // Fixing one means deleting its line. Entries are "<command path>
 // --<flag>".
 var advertisedButUnregistered = map[string]string{
-	"sparkwing configure profiles add --logs":           "BW-1359: the surfaces are set by editing profiles.yaml",
-	"sparkwing configure profiles add --gitcache":       "BW-1359: as above",
-	"sparkwing configure profiles add --default-runner": "BW-1359: as above",
-	"sparkwing configure profiles add --default":        "BW-1359: `configure profiles use` sets the default instead",
 	"sparkwing configure profiles set --logs":           "BW-1359: as add",
 	"sparkwing configure profiles set --gitcache":       "BW-1359: as add",
 	"sparkwing configure profiles set --default-runner": "BW-1359: as add",

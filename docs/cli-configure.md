@@ -111,8 +111,8 @@ exist on other commands; profiles are the only config surface.
 Register a new connection profile
 
 Creates a new entry in profiles.yaml. --name and --controller
-are mandatory; the rest are optional. When this is the first
-profile registered, it's auto-set as the default.
+are required; --token is optional. Configure storage and service
+backends by editing profiles.yaml.
 
 ### Flags
 
@@ -120,11 +120,7 @@ profile registered, it's auto-set as the default.
 |---|---|
 | `--name NAME` | Profile name (unique per profiles.yaml) (required) |
 | `--controller URL` | Controller base URL (required) |
-| `--logs URL` | Logs-service base URL |
 | `--token TOKEN` | Bearer token (omit for local/unauthed stacks) |
-| `--gitcache URL` | gitcache URL (fleet-worker uses this) |
-| `--default-runner NAME` | Runner name to pick when a job's Prefers don't match and several runners satisfy Requires (omit for local) |
-| `--default` | Set this profile as the default |
 
 ### Examples
 
@@ -134,9 +130,6 @@ sparkwing configure profiles add --name prod --controller https://api.sparkwing.
 
 # Add a local profile without auth
 sparkwing configure profiles add --name local --controller http://127.0.0.1:4344
-
-# Add a profile that defaults to a cluster runner
-sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN --default-runner cloud-linux
 ```
 
 ## `sparkwing configure profiles duplicate`

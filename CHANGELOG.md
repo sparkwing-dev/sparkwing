@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `configure profiles add --help` now lists only the flags accepted
+  by the command.
 - **cli:** `runs list --help` no longer advertises the unsupported `--tag`
   filter.
 - **cli:** Generated help no longer repeats `--output` for profile probes,

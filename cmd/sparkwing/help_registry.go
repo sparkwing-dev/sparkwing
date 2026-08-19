@@ -1897,22 +1897,17 @@ var cmdProfilesAdd = Command{
 	Path:     "sparkwing configure profiles add",
 	Synopsis: "Register a new connection profile",
 	Description: `Creates a new entry in profiles.yaml. --name and --controller
-are mandatory; the rest are optional. When this is the first
-profile registered, it's auto-set as the default.`,
+are required; --token is optional. Configure storage and service
+backends by editing profiles.yaml.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Profile name (unique per profiles.yaml)", Required: true, Group: "Input"},
 		{Name: "controller", Argument: "URL", Desc: "Controller base URL", Required: true, Group: "Connection"},
-		{Name: "logs", Argument: "URL", Desc: "Logs-service base URL", Group: "Connection"},
 		{Name: "token", Argument: "TOKEN", Desc: "Bearer token (omit for local/unauthed stacks)", Group: "Connection"},
-		{Name: "gitcache", Argument: "URL", Desc: "gitcache URL (fleet-worker uses this)", Group: "Connection"},
-		{Name: "default-runner", Argument: "NAME", Desc: "Runner name to pick when a job's Prefers don't match and several runners satisfy Requires (omit for local)", Group: "Dispatch"},
-		{Name: "default", Desc: "Set this profile as the default", Group: "System"},
 	},
-	GroupOrder: []string{"Input", "Connection", "Dispatch", "System", "Other"},
+	GroupOrder: []string{"Input", "Connection", "Other"},
 	Examples: []Example{
 		{"Add a prod profile", "sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN"},
 		{"Add a local profile without auth", "sparkwing configure profiles add --name local --controller http://127.0.0.1:4344"},
-		{"Add a profile that defaults to a cluster runner", "sparkwing configure profiles add --name prod --controller https://api.sparkwing.example --token $TOKEN --default-runner cloud-linux"},
 	},
 }
 
