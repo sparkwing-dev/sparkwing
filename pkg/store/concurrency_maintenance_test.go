@@ -37,11 +37,19 @@ func waiterCount(t *testing.T, s *store.Store, key string) int {
 // wall-clock expiry. This keeps expiry tests deterministic under host load.
 func expireHolderLease(t *testing.T, s *store.Store, key, holderID string) {
 	t.Helper()
-	if _, err := s.DB().Exec(
+	result, err := s.DB().Exec(
 		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`,
 		time.Now().Add(-time.Minute).UnixNano(), key, holderID,
-	); err != nil {
+	)
+	if err != nil {
 		t.Fatalf("expire holder lease: %v", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		t.Fatalf("expire holder lease rows affected: %v", err)
+	}
+	if rows != 1 {
+		t.Fatalf("expire holder lease matched %d rows, want 1", rows)
 	}
 }
 
