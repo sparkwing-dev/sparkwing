@@ -210,6 +210,13 @@ func TestHandleProxy_ImmutableCaching(t *testing.T) {
 }
 
 func TestHandleProxy_TTLExpiry(t *testing.T) {
+	started := time.Now()
+	t.Cleanup(func() {
+		if elapsed := time.Since(started); elapsed >= 750*time.Millisecond {
+			t.Errorf("TTL expiry test took %v, want less than 750ms without waiting for wall-clock expiry", elapsed)
+		}
+	})
+
 	var hitCount atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hitCount.Add(1)
