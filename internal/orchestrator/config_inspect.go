@@ -49,9 +49,7 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 	if !ok {
 		return unknownPipelineErr(pipeline)
 	}
-	pipelineYAML := loadPipelineYAML(pipeline)
-
-	secFields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, pipelineYAML)
+	secFields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg)
 	if err != nil {
 		return err
 	}
@@ -82,9 +80,7 @@ func printConfigInspectPretty(w io.Writer, pipeline string, secFields []sparkwin
 			req = "required"
 		}
 		extra := ""
-		if s.GoField != "" && s.DeclaredIn == "pipelines.yaml secrets:" {
-			extra = "  (also in Secrets struct as " + s.GoField + ")"
-		} else if s.GoField != "" {
+		if s.GoField != "" {
 			extra = "  (Secrets struct: " + s.GoField + ")"
 		} else if s.DeclaredIn != "" {
 			extra = "  [" + s.DeclaredIn + "]"

@@ -31,7 +31,7 @@ func ensureInspectPipe(t *testing.T) *sparkwing.Registration {
 
 func TestInspectPipelineSecrets_StructProvider(t *testing.T) {
 	reg := ensureInspectPipe(t)
-	fields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, nil)
+	fields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg)
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestInspectPipelineSecrets_ResolverHits(t *testing.T) {
 		return "", false, sparkwing.ErrSecretMissing
 	})
 	ctx := sparkwing.WithSecretResolver(context.Background(), resolver)
-	fields, err := sparkwing.InspectPipelineSecrets(ctx, reg, nil)
+	fields, err := sparkwing.InspectPipelineSecrets(ctx, reg)
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
