@@ -137,24 +137,33 @@ func TestRunHeartbeat_OperatorCancel(t *testing.T) {
 
 	cancelled := &atomic.Bool{}
 	hbCtx, stopHB := context.WithCancel(context.Background())
-	defer stopHB()
 	done := make(chan struct{})
 	go func() {
 		runHeartbeat(hbCtx, cli, "trig-x",
 			5*time.Millisecond, cancelRun, cancelled, discardLogger())
 		close(done)
 	}()
-
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if cancelled.Load() {
-			break
+	t.Cleanup(func() {
+		stopHB()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("heartbeat loop did not stop during cleanup")
 		}
-		time.Sleep(2 * time.Millisecond)
+	})
+
+	select {
+	case <-runCtx.Done():
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("run context was not cancelled by the heartbeat response")
 	}
 
 	stopHB()
-	<-done
+	select {
+	case <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("heartbeat loop did not stop")
+	}
 
 	if runCtx.Err() == nil {
 		t.Error("run ctx was not cancelled on operator cancel")
