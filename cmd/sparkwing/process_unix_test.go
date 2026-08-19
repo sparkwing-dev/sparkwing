@@ -17,8 +17,11 @@ func TestProcessAliveRejectsZombie(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = cmd.Wait() })
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
+	for {
 		processes, err := procgroup.List()
 		if err != nil {
 			t.Fatal(err)
@@ -31,7 +34,10 @@ func TestProcessAliveRejectsZombie(t *testing.T) {
 				return
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			t.Fatalf("pid %d did not enter zombie state", cmd.Process.Pid)
+		}
 	}
-	t.Fatalf("pid %d did not enter zombie state", cmd.Process.Pid)
 }
