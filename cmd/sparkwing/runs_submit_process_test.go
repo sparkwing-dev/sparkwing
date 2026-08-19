@@ -5,11 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -593,9 +594,10 @@ const advSlowFixtureSource = `package main
 
 import (
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"strconv"
-	"time"
 )
 
 func main() {
@@ -606,10 +608,12 @@ func main() {
 	marker := os.Getenv("SPARKWING_SUBMIT_TEST_MARKER")
 	id := os.Args[len(os.Args)-1]
 	appendLine(marker, "START "+id+" pid="+strconv.Itoa(os.Getpid()))
-	if s := os.Getenv("ADV_SLEEP_SECONDS"); s != "" {
-		n, _ := strconv.Atoi(s)
-		time.Sleep(time.Duration(n) * time.Second)
+	resp, err := http.Get(os.Getenv("ADV_HOLD_URL"))
+	if err != nil {
+		panic(err)
 	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
 	appendLine(marker, "END "+id+" pid="+strconv.Itoa(os.Getpid()))
 }
 
@@ -623,15 +627,39 @@ func appendLine(path, line string) {
 }
 `
 
-// useSlowFixture swaps the environment's checkout for one whose runs
-// take sleepSeconds, so a dispatch can be observed while it is alive.
-func (e *submitTestEnv) useSlowFixture(t *testing.T, sleepSeconds int) {
+// useBlockingFixture swaps the environment's checkout for one whose runs
+// remain active until their HTTP connection is closed.
+func (e *submitTestEnv) useBlockingFixture(t *testing.T) <-chan struct{} {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(e.repoDir, ".sparkwing", "main.go"),
 		[]byte(advSlowFixtureSource), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e.extraEnv = append(e.extraEnv, "ADV_SLEEP_SECONDS="+strconv.Itoa(sleepSeconds))
+	started := make(chan struct{})
+	var startedOnce sync.Once
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		startedOnce.Do(func() { close(started) })
+		<-r.Context().Done()
+	}))
+	t.Cleanup(func() {
+		server.CloseClientConnections()
+		server.Close()
+	})
+	e.extraEnv = append(e.extraEnv, "ADV_HOLD_URL="+server.URL)
+	return started
+}
+
+func waitForFixtureHold(t *testing.T, started <-chan struct{}) {
+	t.Helper()
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-started:
+	case <-timer.C:
+		t.Fatal("fixture did not enter its blocking request within 10s")
+	}
 }
 
 func (e *submitTestEnv) startsInMarker() int {
@@ -652,12 +680,13 @@ func (e *submitTestEnv) startsInMarker() int {
 // behind. The run must not be dispatched a second time.
 func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	e := newSubmitTestEnv(t)
-	e.useSlowFixture(t, 25)
+	holdStarted := e.useBlockingFixture(t)
 
 	ack := e.submit("--consumer-claim-lease", "300s")
 	waitUntil(t, "the dispatch to start executing", 120*time.Second, func() bool {
 		return e.startsInMarker() >= 1
 	})
+	waitForFixtureHold(t, holdStarted)
 
 	// The laptop wakes.
 	st := e.store()
@@ -878,12 +907,13 @@ func TestRunsSubmit_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
 // trigger stayed claimed until a lease lapsed minutes later.
 func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
 	e := newSubmitTestEnv(t)
-	e.useSlowFixture(t, 60)
+	holdStarted := e.useBlockingFixture(t)
 
 	ack := e.submit()
 	waitUntil(t, "the dispatch to start", 120*time.Second, func() bool {
 		return e.startsInMarker() >= 1
 	})
+	waitForFixtureHold(t, holdStarted)
 
 	e.mustRun("runs", "consumer", "stop", "--home", e.home)
 
