@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -246,17 +247,42 @@ func startLocalws(t *testing.T, opts Options) string {
 	addr := ln.Addr().String()
 
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	done := make(chan error, 1)
-	go func() { done <- Run(ctx, opts) }()
+	done := make(chan struct{})
+	var runErr error
+	go func() {
+		runErr = Run(ctx, opts)
+		close(done)
+	}()
+	var stopOnce sync.Once
+	var stopErr error
+	stopReported := false
+	stop := func() {
+		stopOnce.Do(func() {
+			cancel()
+			timer := time.NewTimer(time.Second)
+			defer timer.Stop()
+			select {
+			case <-done:
+			case <-timer.C:
+				stopErr = fmt.Errorf("localws did not stop within 1s")
+			}
+		})
+		if stopErr != nil && !stopReported {
+			stopReported = true
+			t.Errorf("stop localws: %v", stopErr)
+		}
+	}
+	t.Cleanup(stop)
 
 	client := &http.Client{Timeout: 250 * time.Millisecond}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	retry := time.NewTicker(20 * time.Millisecond)
+	defer retry.Stop()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for {
 		select {
-		case err := <-done:
-			t.Fatalf("localws exited before readiness: %v", err)
+		case <-done:
+			t.Fatalf("localws exited before readiness: %v", runErr)
 		default:
 		}
 		resp, err := client.Get("http://" + addr + "/api/v1/health")
@@ -264,10 +290,15 @@ func startLocalws(t *testing.T, opts Options) string {
 			resp.Body.Close()
 			return addr
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-done:
+			t.Fatalf("localws exited before readiness: %v", runErr)
+		case <-retry.C:
+		case <-deadline.C:
+			stop()
+			t.Fatal("localws did not start in time")
+		}
 	}
-	t.Fatalf("localws did not start in time")
-	return addr
 }
 
 // pickListener reserves a 127.0.0.1 ephemeral port and returns the
