@@ -178,12 +178,16 @@ func TestConcurrency_FreshArrivalDoesNotBargeQueuedWaiter(t *testing.T) {
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("W: want Queued, got %s", r.Kind)
 	}
+	started := time.Now()
 	time.Sleep(80 * time.Millisecond)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rX/n", RunID: "rX", NodeID: "n",
 		Capacity: 1, Cost: 1, Policy: store.OnLimitQueue,
 	}); r.Kind != store.AcquireQueued {
 		t.Fatalf("X: want Queued (FIFO; must not barge W), got %s", r.Kind)
+	}
+	if elapsed := time.Since(started); elapsed >= 60*time.Millisecond {
+		t.Fatalf("expired-holder FIFO check took %v, want less than 60ms", elapsed)
 	}
 }
 
