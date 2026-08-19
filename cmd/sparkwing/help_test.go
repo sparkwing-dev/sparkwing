@@ -170,10 +170,18 @@ func TestSecretCommandHelpDescribesLocalAndRemoteModes(t *testing.T) {
 		if command.Hidden {
 			continue
 		}
+		foundProfile := false
 		for _, spec := range command.Flags {
-			if spec.Name == "profile" && !strings.Contains(strings.ToLower(spec.Desc), "omit for local") {
+			if spec.Name != "profile" {
+				continue
+			}
+			foundProfile = true
+			if !strings.Contains(strings.ToLower(spec.Desc), "omit for local") {
 				t.Errorf("%s describes --profile as %q, want local-mode guidance", command.Path, spec.Desc)
 			}
+		}
+		if !foundProfile {
+			t.Errorf("%s does not declare --profile", command.Path)
 		}
 		local, remote := false, false
 		for _, example := range command.Examples {
