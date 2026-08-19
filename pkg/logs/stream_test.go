@@ -3,6 +3,7 @@ package logs_test
 import (
 	"bufio"
 	"context"
+	"errors"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -45,7 +46,7 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 
 	var readErr error
 	var gotLines []string
-	var mu sync.Mutex
+	received := make(chan struct{}, 1)
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -53,13 +54,40 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 		for scan.Scan() {
 			line := scan.Text()
 			if strings.HasPrefix(line, "data: ") {
-				mu.Lock()
 				gotLines = append(gotLines, strings.TrimPrefix(line, "data: "))
-				mu.Unlock()
+				if len(gotLines) >= 3 {
+					select {
+					case received <- struct{}{}:
+					default:
+					}
+				}
 			}
 		}
 		readErr = scan.Err()
 	}()
+	var (
+		joinOnce     sync.Once
+		joinErr      error
+		joinReported bool
+	)
+	joinScanner := func() error {
+		joinOnce.Do(func() {
+			_ = stream.Close()
+			timer := time.NewTimer(time.Second)
+			defer timer.Stop()
+			select {
+			case <-done:
+			case <-timer.C:
+				joinErr = errors.New("stream scanner did not stop after the response body closed")
+			}
+		})
+		return joinErr
+	}
+	t.Cleanup(func() {
+		if err := joinScanner(); err != nil && !joinReported {
+			t.Error(err)
+		}
+	})
 
 	for _, line := range []string{"alpha", "beta", "gamma"} {
 		if err := c.Append(context.Background(), "run-a", "node-x", []byte(line+"\n")); err != nil {
@@ -67,22 +95,22 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 		}
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		mu.Lock()
-		n := len(gotLines)
-		mu.Unlock()
-		if n >= 3 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
+	var waitErr error
+	select {
+	case <-received:
+	case <-ctx.Done():
+		waitErr = errors.New("stream did not deliver all appended records")
 	}
 
-	_ = stream.Close()
-	<-done
+	joinErr = joinScanner()
+	joinReported = true
+	if joinErr != nil {
+		t.Fatal(joinErr)
+	}
+	if waitErr != nil {
+		t.Fatal(waitErr)
+	}
 
-	mu.Lock()
-	defer mu.Unlock()
 	if len(gotLines) < 3 {
 		t.Fatalf("got %d lines, want >= 3: %v (readErr=%v)", len(gotLines), gotLines, readErr)
 	}
