@@ -54,6 +54,9 @@ code change to unlock.
 - **cli:** Run lookback flags accept `d` and `w` suffixes in addition to Go
   duration syntax. Commands such as `runs list --since 7d`, `runs grep
   --since 7d`, and `runs prune --older-than 2w` now use the same parser.
+- **cli:** Read-only local queue queries no longer extend the admission
+  daemon's lifetime. Monitoring can continue while an idle daemon reaches its
+  configured shutdown window and its supervisor exits.
 
 ## [v0.34.0] - 2026-08-18
 - **sdk:** Jobs can declare `NoProgressTimeout` alongside a longer absolute
