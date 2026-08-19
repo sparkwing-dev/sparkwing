@@ -159,12 +159,6 @@ type Options struct {
 	// argument defaults, guards, and runner requirements apply to the run.
 	PipelineYAML *pipelines.Pipeline
 
-	// SparkwingDir, when non-empty, is the resolved .sparkwing/
-	// directory. Used today for working-directory context; secret
-	// source binding now reads the inline spec on
-	// PipelineYAML.Dispatch.Source rather than a registry file.
-	SparkwingDir string
-
 	// MaxParallel caps concurrent node execution. Zero = unbounded
 	// (cluster default); local mode sets NumCPU. The cap applies only
 	// to active execution; dep-wait goroutines are uncapped.
