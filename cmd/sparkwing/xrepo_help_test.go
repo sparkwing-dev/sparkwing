@@ -1,6 +1,10 @@
 package main
 
-import "testing"
+import (
+	"os/exec"
+	"strings"
+	"testing"
+)
 
 func TestXrepoSubcommandsAreRegistered(t *testing.T) {
 	want := map[string]bool{
@@ -17,6 +21,32 @@ func TestXrepoSubcommandsAreRegistered(t *testing.T) {
 	for path, found := range want {
 		if !found {
 			t.Errorf("xrepo runtime command %q is absent from the command registry", path)
+		}
+	}
+}
+
+func TestXrepoRuntimeHelpUsesCommandRegistry(t *testing.T) {
+	bin := buildSubmitCLI(t)
+
+	parent, err := exec.Command(bin, "configure", "xrepo", "--help").CombinedOutput()
+	if err != nil {
+		t.Fatalf("xrepo help: %v\n%s", err, parent)
+	}
+	if !strings.Contains(string(parent), "list    List registered checkouts and their pipelines") {
+		t.Fatalf("xrepo help does not use the registered child synopsis:\n%s", parent)
+	}
+
+	leaf, err := exec.Command(bin, "configure", "xrepo", "list", "--help").CombinedOutput()
+	if err != nil {
+		t.Fatalf("xrepo list help: %v\n%s", err, leaf)
+	}
+	for _, want := range []string{
+		"sparkwing configure xrepo list [flags]",
+		"--output FORMAT",
+		"[optional]",
+	} {
+		if !strings.Contains(string(leaf), want) {
+			t.Errorf("xrepo list help is missing %q:\n%s", want, leaf)
 		}
 	}
 }
