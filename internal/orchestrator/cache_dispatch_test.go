@@ -227,6 +227,8 @@ func (planLevelSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _
 
 type planLevelQueuedAwaitParentPipe struct{ sparkwing.Base }
 
+const admissionPauseFixtureTimeout = 750 * time.Millisecond
+
 func (planLevelQueuedAwaitParentPipe) Plan(
 	ctx context.Context,
 	plan *sparkwing.Plan,
@@ -236,7 +238,7 @@ func (planLevelQueuedAwaitParentPipe) Plan(
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-child", "work")
 		return err
-	}).NoProgressTimeout(100 * time.Millisecond).Timeout(time.Second)
+	}).NoProgressTimeout(100 * time.Millisecond).Timeout(admissionPauseFixtureTimeout)
 	return nil
 }
 
@@ -297,7 +299,7 @@ func (planLevelQueuedAwaitThenContinueParentPipe) Plan(
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-	}).NoProgressTimeout(100 * time.Millisecond).Timeout(time.Second)
+	}).NoProgressTimeout(100 * time.Millisecond).Timeout(admissionPauseFixtureTimeout)
 	return nil
 }
 
@@ -938,6 +940,11 @@ func TestConcurrency_RunAndAwaitUnboundedClaimedChildAdmissionProtectsParentDisp
 	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "unbounded-await-parent", 750*time.Millisecond)
 }
 
+const (
+	admissionPauseHold      = 850 * time.Millisecond
+	admissionPauseTestBound = 1100 * time.Millisecond
+)
+
 func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeline string, dispatchTimeout time.Duration) {
 	t.Helper()
 	resetCacheCounter()
@@ -1012,12 +1019,16 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
 
 childQueued:
-	time.Sleep(1200 * time.Millisecond)
+	pauseStarted := time.Now()
+	time.Sleep(admissionPauseHold)
 
 	select {
 	case parent := <-parentDone:
 		t.Fatalf("parent finished while child was queued for plan admission: status=%q err=%v", parent.Status, parent.Error)
 	default:
+	}
+	if elapsed := time.Since(pauseStarted); elapsed >= admissionPauseTestBound {
+		t.Fatalf("admission-pause hold took %s, want less than %s", elapsed, admissionPauseTestBound)
 	}
 
 	if _, _, _, err := st.ReleaseAndNotify(ctx,
@@ -1134,7 +1145,11 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
 
 childQueued:
-	time.Sleep(1200 * time.Millisecond)
+	pauseStarted := time.Now()
+	time.Sleep(admissionPauseHold)
+	if elapsed := time.Since(pauseStarted); elapsed >= admissionPauseTestBound {
+		t.Fatalf("admission-pause hold took %s, want less than %s", elapsed, admissionPauseTestBound)
+	}
 	if _, _, _, err := st.ReleaseAndNotify(ctx,
 		"g:plan-level-queued-await-key", "external-continue-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
 		t.Fatalf("release external holder: %v", err)
