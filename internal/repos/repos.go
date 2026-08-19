@@ -99,9 +99,8 @@ func Load(path string) (*Config, error) {
 // was silent. The regression test beside this file reproduces it against
 // the old code on every run.
 //
-// Whether the same collision is what corrupted the registry BW-1457 was
-// opened over is not settled. Two writers sharing a descriptor target
-// can strand the tail of a longer write past the end of a shorter one,
+// Two writers sharing a descriptor target can strand the tail of a longer
+// write past the end of a shorter one,
 // which is the shape of the damage found (a stray "e" after the
 // fallback_paths key, where the file's last entry is "- ~/code"), but a
 // direct reproduction of the byte interleaving did not fire on APFS,
@@ -155,11 +154,8 @@ func Save(path string, cfg *Config) error {
 // orchestrate from worktrees can opt in.
 //
 // It also skips checkouts under the system temp directory, because a
-// scaffolded repo there is deleted minutes later and the entry it leaves
-// can never resolve again. 307 of the 457 entries in the registry
-// BW-1457 was opened over were exactly that: scratch repos the
-// template-verify pipeline job creates with os.MkdirTemp, runs
-// `sparkwing run` inside, and removes.
+// scaffolded repository there is deleted minutes later and leaves an entry
+// that can never resolve again.
 func AutoRegister(absPath string) error {
 	if os.Getenv("SPARKWING_NO_AUTO_REGISTER") == "1" {
 		return nil

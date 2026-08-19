@@ -42,10 +42,7 @@ func TestSandbox() string {
 // A test binary that set neither gets a disposable sandbox rather than
 // the developer's real home. Forgetting to set SPARKWING_HOME is a
 // mistake every new fixture can make once, and the cost of making it is
-// a suite that writes to the machine it is validating: BW-1457 was
-// opened over a fleet registry that had been corrupted and had grown 426
-// dead entries, and the dispatch test was writing the version stamp
-// under the real ~/.sparkwing the whole time. Redirecting rather than
+// a suite that writes to the machine it is validating. Redirecting rather than
 // erroring keeps a read returning the empty config a fresh laptop
 // legitimately has, so no test has to care.
 func DefaultPaths() (Paths, error) {

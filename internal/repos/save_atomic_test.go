@@ -10,8 +10,8 @@ import (
 	"testing"
 )
 
-// TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile reproduces the
-// corruption BW-1457 was opened over. With the old fixed path+".tmp"
+// TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile reproduces registry
+// corruption caused by the old fixed path+".tmp"
 // staging name, concurrent writers shared one file descriptor target,
 // interleaved their bytes and renamed the mixture over the registry.
 // Every writer here saves a config of a different length on purpose: it

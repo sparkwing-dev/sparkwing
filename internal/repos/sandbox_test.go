@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// TestDefaultPath_NeverResolvesToTheRealRegistryUnderTest is the
-// always-on half of BW-1457's acceptance criterion. The full-suite audit
+// TestDefaultPath_NeverResolvesToTheRealRegistryUnderTest is the always-on
+// protection for the live registry. The full-suite audit
 // in internal/configguard proves the suite left the live registry alone
 // on one machine at one moment; this proves no fixture can reach it at
 // all, which is the property that has to survive the next fixture

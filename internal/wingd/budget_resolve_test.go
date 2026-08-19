@@ -144,7 +144,7 @@ func TestResolveBudget_UnsetSaysSo(t *testing.T) {
 func TestResolveBudget_ConfigCommentsAndBlanks(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	os.Unsetenv(BudgetEnv)
-	writeBudgetConfig(t, path, "\n# host sensor over-reads external load, see BW-1454\n\n  ignore-external  \n")
+	writeBudgetConfig(t, path, "\n# host sensor over-reads external load\n\n  ignore-external  \n")
 
 	got, err := ResolveBudget("")
 	if err != nil {

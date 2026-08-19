@@ -22,9 +22,8 @@ const auditEnabled = "SPARKWING_LIVE_CONFIG_AUDIT"
 // auditInner marks the child `go test ./...` so it does not recurse.
 const auditInner = "SPARKWING_LIVE_CONFIG_AUDIT_INNER"
 
-// TestSuiteLeavesTheLiveConfigAlone is BW-1457 stated as a check: run
-// the whole suite and prove it did not write the developer's sparkwing
-// configuration. repos.yaml is the file that was found corrupt.
+// TestSuiteLeavesTheLiveConfigAlone runs the whole suite and proves it did
+// not write the developer's Sparkwing configuration.
 //
 // It asserts two ways, because neither is sufficient alone. The
 // sandbox-home run is the sound one: HOME points at an empty directory,

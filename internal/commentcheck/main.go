@@ -69,6 +69,8 @@ var tagRE = regexp.MustCompile(`(?i)^// ?(hack|safety|bug|perf):`)
 // the testing package: "// Output:" and "// Unordered output:".
 var outputRE = regexp.MustCompile(`(?i)^// (Unordered output|Output):`)
 
+var opaqueTicketRE = regexp.MustCompile(`(?i)\bBW-\d+\b`)
+
 var skipDirs = map[string]bool{
 	"vendor":          true,
 	"testdata":        true,
@@ -174,6 +176,11 @@ func checkFile(path string) ([]violation, error) {
 
 	var out []violation
 	for _, cg := range f.Comments {
+		if opaqueTicketRE.MatchString(cg.Text()) {
+			pos := fset.Position(cg.Pos())
+			out = append(out, violation{pos.Filename, pos.Line, firstLine(cg.List[0].Text)})
+			continue
+		}
 		if allowed[cg] {
 			continue
 		}

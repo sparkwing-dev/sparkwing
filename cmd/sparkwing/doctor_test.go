@@ -203,9 +203,9 @@ func TestDiagnose_SecondRunIsClean(t *testing.T) {
 	}
 }
 
-// TestDiagnose_FlagsPoisonedProfileWithoutRepair seeds the BW-849 poisoned
-// state -- a still-measuring profile whose contended-run floor prices runs at
-// the whole machine -- and expects doctor to name it (and only report: the
+// TestDiagnose_FlagsPoisonedProfileWithoutRepair seeds a still-measuring
+// profile whose contended-run floor prices runs at the whole machine. Doctor
+// must name it without repairing it: the
 // learned row must survive, since discarding measurements is the operator's
 // reset to run).
 func TestDiagnose_FlagsPoisonedProfileWithoutRepair(t *testing.T) {
