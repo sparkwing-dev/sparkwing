@@ -320,6 +320,8 @@ func TestNodeClaim_LabelsUnmatchedSkipped(t *testing.T) {
 
 	seedNodeWithLabels(t, s, "run-1", "gpu-only", []string{"gpu"})
 	seedNodeWithLabels(t, s, "run-2", "build", []string{"arm64"})
+	setNodeReadyAt(t, s, "run-1", "gpu-only", time.Unix(100, 0))
+	setNodeReadyAt(t, s, "run-2", "build", time.Unix(200, 0))
 
 	n, err := s.ClaimNextReadyNode(ctx, "pod-1", 30*time.Second, []string{"arm64", "laptop"})
 	if err != nil {
