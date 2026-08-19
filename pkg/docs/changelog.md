@@ -51,8 +51,8 @@ code change to unlock.
 
 ### Fixed
 
-- **cli:** `queue --help` shows its `exec` subcommand as optional, matching
-  the supported bare `sparkwing queue` command.
+- **cli:** Help marks subcommands as optional when the parent command also
+  runs directly, including `queue`, `run`, and `version`.
 - **cli:** Run lookback flags accept `d` and `w` suffixes in addition to Go
   duration syntax. Commands such as `runs list --since 7d`, `runs grep
   --since 7d`, and `runs prune --older-than 2w` now use the same parser.
