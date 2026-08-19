@@ -165,4 +165,7 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 	if gap := claimTimes[1].Sub(claimTimes[0]); gap > 250*time.Millisecond {
 		t.Fatalf("second claim gap = %s, want concurrent claim while first handler is running", gap)
 	}
+	if elapsed := time.Since(claimTimes[1]); elapsed >= 300*time.Millisecond {
+		t.Fatalf("trigger loop returned %s after the second claim, want < 300ms", elapsed)
+	}
 }
