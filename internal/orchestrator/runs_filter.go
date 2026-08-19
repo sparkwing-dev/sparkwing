@@ -38,11 +38,11 @@ func ParseSearch(raw string) SearchTerms {
 	return out
 }
 
-// parseLooseDuration accepts time.ParseDuration plus the `d` and
+// ParseLooseDuration accepts time.ParseDuration plus the `d` and
 // `w` suffixes the dashboard filter bar uses ("7d", "2w"). A bare
 // number is rejected -- callers must supply a unit so "7" doesn't
 // silently mean "7 nanoseconds".
-func parseLooseDuration(v string) (time.Duration, error) {
+func ParseLooseDuration(v string) (time.Duration, error) {
 	if v == "" {
 		return 0, errors.New("empty duration")
 	}
@@ -53,16 +53,27 @@ func parseLooseDuration(v string) (time.Duration, error) {
 		if err != nil {
 			return 0, err
 		}
-		return days * 24, nil
+		return scaleDuration(days, 24, v)
 	case 'w':
 		weeks, err := time.ParseDuration(v[:len(v)-1] + "h")
 		if err != nil {
 			return 0, err
 		}
-		return weeks * 24 * 7, nil
+		return scaleDuration(weeks, 24*7, v)
 	default:
 		return time.ParseDuration(v)
 	}
+}
+
+func scaleDuration(value time.Duration, factor int64, raw string) (time.Duration, error) {
+	const (
+		maxDuration = time.Duration(1<<63 - 1)
+		minDuration = time.Duration(-1 << 63)
+	)
+	if value > maxDuration/time.Duration(factor) || value < minDuration/time.Duration(factor) {
+		return 0, fmt.Errorf("duration %q overflows", raw)
+	}
+	return value * time.Duration(factor), nil
 }
 
 // SplitExcludes splits a repeatable filter slice into the include
@@ -100,7 +111,7 @@ func ParseLooseDate(raw string) (time.Time, error) {
 		y := now.AddDate(0, 0, -1)
 		return time.Date(y.Year(), y.Month(), y.Day(), 0, 0, 0, 0, y.Location()), nil
 	}
-	if d, err := parseLooseDuration(v); err == nil {
+	if d, err := ParseLooseDuration(v); err == nil {
 		return now.Add(-d), nil
 	}
 	for _, layout := range []string{

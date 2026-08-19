@@ -21,7 +21,7 @@ func runJobsGrep(ctx context.Context, paths orchestrator.Paths, args []string) e
 	statuses := multiFlagVar(fs, "status", "filter by status (repeatable; prefix `!` to exclude)")
 	branches := multiFlagVar(fs, "branch", "filter by git branch (repeatable; prefix `!` to exclude)")
 	shas := multiFlagVar(fs, "sha", "filter by git sha prefix (repeatable; prefix `!` to exclude)")
-	since := fs.Duration("since", 0, "only runs newer than this (e.g. 1h, 24h, 7d)")
+	since := lookbackDuration(fs, "since", 0, "only runs newer than this (e.g. 1h, 24h, 7d)")
 	startedAfter := fs.String("started-after", "", "only runs whose StartedAt >= this")
 	startedBefore := fs.String("started-before", "", "only runs whose StartedAt <= this")
 	limit := fs.Int("limit", 50, "max candidate runs to scan")

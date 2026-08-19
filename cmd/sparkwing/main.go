@@ -441,7 +441,7 @@ func runJobs(args []string) error {
 		limit := fs.Int("limit", 20, "max runs to show")
 		outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: table)")
 		quiet := fs.BoolP("quiet", "q", false, "print only run ids, one per line")
-		since := fs.Duration("since", 0, "only runs newer than this (e.g. 1h, 24h, 7d)")
+		since := lookbackDuration(fs, "since", 0, "only runs newer than this (e.g. 1h, 24h, 7d)")
 		pipelines := multiFlagVar(fs, "pipeline", "filter by pipeline (repeatable; OR semantics; prefix `!` to exclude)")
 		statuses := multiFlagVar(fs, "status", "filter by status (repeatable; OR semantics; prefix `!` to exclude)")
 		branches := multiFlagVar(fs, "branch", "filter by git branch (repeatable; prefix `!` to exclude)")
