@@ -841,7 +841,7 @@ func findRunsLocal(ctx context.Context, st *store.Store, gitSHA, pipeline, repo 
 	if err != nil {
 		return nil, err
 	}
-	return narrowRunsByRepo(ctx, runs, gitSHA, repo, limit, func(id string) (map[string]string, error) {
+	return narrowRunsByRepo(runs, gitSHA, repo, limit, func(id string) (map[string]string, error) {
 		t, err := st.GetTrigger(ctx, id)
 		if err != nil || t == nil {
 			return nil, err
@@ -868,7 +868,7 @@ func findRunsRemote(ctx context.Context, c *client.Client, gitSHA, pipeline, rep
 	if err != nil {
 		return nil, err
 	}
-	return narrowRunsByRepo(ctx, runs, gitSHA, repo, limit, func(id string) (map[string]string, error) {
+	return narrowRunsByRepo(runs, gitSHA, repo, limit, func(id string) (map[string]string, error) {
 		t, err := c.GetTrigger(ctx, id)
 		if err != nil || t == nil {
 			return nil, err
@@ -882,10 +882,9 @@ func findRunsRemote(ctx context.Context, c *client.Client, gitSHA, pipeline, rep
 // GITHUB_REPOSITORY env pulled from the run's trigger row. triggerEnv
 // is only fetched when --repo is set, so the SHA-only happy path stays
 // one-query.
-func narrowRunsByRepo(ctx context.Context, runs []*store.Run, gitSHA, repo string,
+func narrowRunsByRepo(runs []*store.Run, gitSHA, repo string,
 	limit int, triggerEnv func(id string) (map[string]string, error),
 ) []*store.Run {
-	_ = ctx
 	var out []*store.Run
 	for _, r := range runs {
 		if gitSHA != "" && !strings.HasPrefix(r.GitSHA, gitSHA) {
