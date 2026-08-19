@@ -196,13 +196,13 @@ func (p *PrettyRenderer) Emit(rec sparkwing.LogRecord) {
 		tail := p.color(fmt.Sprintf("(%s)", fmtDuration(durMS)), code)
 		fmt.Fprintln(sink, head+" "+name+" "+tail)
 	case "step_start":
-		p.writeStepStart(sink, rec, nodeHue)
+		p.writeStepStart(sink, rec)
 	case "step_end":
 		recCopy := rec
 		p.pendingStepEnd = &recCopy
 		return
 	case "step_skipped":
-		p.writeStepSkipped(sink, rec, nodeHue)
+		p.writeStepSkipped(sink, rec)
 	case "retry":
 		fmt.Fprintln(sink, p.color(fmt.Sprintf("  ↻ %s", rec.Msg), ansiYellow))
 	case "approval_requested":
@@ -256,8 +256,7 @@ func (p *PrettyRenderer) flushPending(sink io.Writer) {
 		p.pendingNodeStart = nil
 	}
 	if p.pendingStepEnd != nil {
-		nh := p.hueFor(p.pendingStepEnd.JobID)
-		p.writeStepEnd(sink, *p.pendingStepEnd, nh)
+		p.writeStepEnd(sink, *p.pendingStepEnd)
 		p.pendingStepEnd = nil
 	}
 }
@@ -961,15 +960,13 @@ func splitStepErrorPrefix(s string) (stepID, body string) {
 	return rest[:end], rest[end+len(`": `):]
 }
 
-func (p *PrettyRenderer) writeStepStart(w io.Writer, rec sparkwing.LogRecord, nodeHue string) {
-	_ = nodeHue
+func (p *PrettyRenderer) writeStepStart(w io.Writer, rec sparkwing.LogRecord) {
 	glyph := "●"
 	code := ansiBlue
 	fmt.Fprintln(w, p.color(fmt.Sprintf("  %s %s", glyph, rec.Msg), code))
 }
 
-func (p *PrettyRenderer) writeStepEnd(w io.Writer, rec sparkwing.LogRecord, nodeHue string) {
-	_ = nodeHue
+func (p *PrettyRenderer) writeStepEnd(w io.Writer, rec sparkwing.LogRecord) {
 	outcome, _ := rec.Attrs["outcome"].(string)
 	glyph, code := outcomeIcon(outcome)
 	if outcome == "success" || outcome == "cached" {
@@ -988,8 +985,7 @@ func (p *PrettyRenderer) writeStepEnd(w io.Writer, rec sparkwing.LogRecord, node
 	}
 }
 
-func (p *PrettyRenderer) writeStepSkipped(w io.Writer, rec sparkwing.LogRecord, nodeHue string) {
-	_ = nodeHue
+func (p *PrettyRenderer) writeStepSkipped(w io.Writer, rec sparkwing.LogRecord) {
 	glyph, code := outcomeIcon("skipped")
 	reason, _ := rec.Attrs["reason"].(string)
 	tail := ""
