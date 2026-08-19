@@ -147,10 +147,14 @@ func TestIdleExit_WaitsForWorkingConnections(t *testing.T) {
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 250 * time.Millisecond})
 
 	cl := ensure(t, home, "")
+	started := time.Now()
 	select {
 	case err := <-td.done:
 		t.Fatalf("daemon exited while a working client was connected: %v", err)
 	case <-time.After(750 * time.Millisecond):
+	}
+	if elapsed := time.Since(started); elapsed >= 600*time.Millisecond {
+		t.Fatalf("working-connection observation took %s, want under 600ms", elapsed)
 	}
 
 	_ = cl.Close()
