@@ -1794,7 +1794,6 @@ func TestExplicitRelease_Promotes(t *testing.T) {
 	positions, resultB := acquireAsync(b, semReq("b", "lock", 1, 1, wingwire.PolicyQueue))
 	waitForQueue(t, positions)
 	started := time.Now()
-	time.Sleep(100 * time.Millisecond)
 
 	if err := holder.Release(); err != nil {
 		t.Fatalf("release: %v", err)
