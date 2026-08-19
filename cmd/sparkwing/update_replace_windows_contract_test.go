@@ -6,6 +6,11 @@ import (
 	"testing"
 )
 
+var (
+	_ func(string, string, func(string, string, uint32) error) error = replaceWindowsRunningImageWith
+	_ func(string, string, func(string, string, uint32) error) error = restoreWindowsRunningImageWith
+)
+
 func TestWindowsReplacementUsesOneAtomicOperation(t *testing.T) {
 	t.Parallel()
 
