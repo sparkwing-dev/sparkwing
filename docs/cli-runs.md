@@ -241,6 +241,7 @@ from stdin, one per line.
 |---|---|
 | `--run RUN_ID` | Run id to cancel (repeatable; use --run - to read ids from stdin) |
 | `--profile NAME` | Profile name for remote runs; omit for local runs |
+| `--home DIR` | Sparkwing home for local daemon and queued-run storage (default: $SPARKWING_HOME or ~/.sparkwing) |
 
 ### Examples
 
