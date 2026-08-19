@@ -440,9 +440,7 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 // bodies. Decoupled from the SDK's sparkwing.TriggerInfo: Env
 // carries operational metadata (GITHUB_DELIVERY, GITHUB_REPOSITORY,
 // range-resume markers, ...) onto the persisted store.Trigger row
-// but is not surfaced to step bodies. Step-body code reads
-// trigger-supplied values via the pipeline's typed Config struct
-// (declared under the trigger's values: block in pipelines.yaml).
+// but is not surfaced to step bodies.
 type triggerReqMeta struct {
 	Source string            `json:"source,omitempty"`
 	User   string            `json:"user,omitempty"`
