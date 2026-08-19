@@ -131,6 +131,7 @@ func TestFollowLogsRemote_GivesUpOnADeadController(t *testing.T) {
 	logc := sparkwinglogs.New(url, nil, "")
 
 	done := make(chan error, 1)
+	started := time.Now()
 	go func() { done <- followLogsRemote(context.Background(), ctrl, logc, runID, "", io.Discard) }()
 
 	select {
@@ -141,6 +142,9 @@ func TestFollowLogsRemote_GivesUpOnADeadController(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), runID) {
 			t.Errorf("error = %v, want the run named", err)
+		}
+		if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
+			t.Fatalf("dead-controller follow returned after %s, want under 500ms", elapsed)
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("follow never returned: the poll loop is still unbounded")
@@ -174,12 +178,16 @@ func TestFollowLogsRemote_SuccessfulPollResetsTheBudget(t *testing.T) {
 	logc := sparkwinglogs.New(url, nil, "")
 
 	done := make(chan error, 1)
+	started := time.Now()
 	go func() { done <- followLogsRemote(context.Background(), ctrl, logc, runID, "", io.Discard) }()
 
 	select {
 	case err := <-done:
 		if err != nil {
 			t.Fatalf("follow aborted on interrupted blips: %v", err)
+		}
+		if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
+			t.Fatalf("recovered follow returned after %s, want under 500ms", elapsed)
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("follow never returned")
