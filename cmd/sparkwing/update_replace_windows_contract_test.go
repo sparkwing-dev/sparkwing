@@ -6,6 +6,11 @@ import (
 	"testing"
 )
 
+var (
+	_ func(string, string, func(string, string, uint32) error) error = replaceWindowsRunningImageWith
+	_ func(string, string, func(string, string, uint32) error) error = restoreWindowsRunningImageWith
+)
+
 func TestWindowsReplacementUsesOneAtomicOperation(t *testing.T) {
 	t.Parallel()
 
@@ -19,7 +24,7 @@ func TestWindowsReplacementUsesOneAtomicOperation(t *testing.T) {
 		calls = append(calls, call{source: source, target: target, flags: flags})
 		return nil
 	}
-	if err := replaceWindowsRunningImageWith("stage", "sparkwing.exe", move, func(string) error { return nil }); err != nil {
+	if err := replaceWindowsRunningImageWith("stage", "sparkwing.exe", move); err != nil {
 		t.Fatal(err)
 	}
 	want := []call{{source: "stage", target: "sparkwing.exe", flags: windowsMoveReplaceExisting | windowsMoveWriteThrough}}
@@ -36,7 +41,7 @@ func TestWindowsReplacementFailsWithoutRenameAsideFallback(t *testing.T) {
 		calls = append(calls, [2]string{source, target})
 		return errors.New("sharing violation")
 	}
-	if err := replaceWindowsRunningImageWith("stage", "sparkwing.exe", move, func(string) error { return nil }); err == nil {
+	if err := replaceWindowsRunningImageWith("stage", "sparkwing.exe", move); err == nil {
 		t.Fatal("replaceWindowsRunningImageWith() succeeded")
 	}
 	want := [][2]string{{"stage", "sparkwing.exe"}}
@@ -53,8 +58,7 @@ func TestWindowsRollbackUsesOneAtomicOperation(t *testing.T) {
 		calls = append(calls, [2]string{source, target})
 		return nil
 	}
-	remove := func(string) error { return nil }
-	if err := restoreWindowsRunningImageWith("rollback", "sparkwing.exe", move, remove); err != nil {
+	if err := restoreWindowsRunningImageWith("rollback", "sparkwing.exe", move); err != nil {
 		t.Fatal(err)
 	}
 	want := [][2]string{{"rollback", "sparkwing.exe"}}

@@ -2,22 +2,18 @@
 
 package main
 
-import (
-	"os"
-
-	"golang.org/x/sys/windows"
-)
+import "golang.org/x/sys/windows"
 
 func atomicReplace(source, target string) error {
 	return replaceWindowsRunningImage(source, target)
 }
 
 func atomicRestore(source, target string) error {
-	return restoreWindowsRunningImageWith(source, target, windowsMoveFileEx, os.Remove)
+	return restoreWindowsRunningImageWith(source, target, windowsMoveFileEx)
 }
 
 func replaceWindowsRunningImage(source, target string) error {
-	return replaceWindowsRunningImageWith(source, target, windowsMoveFileEx, os.Remove)
+	return replaceWindowsRunningImageWith(source, target, windowsMoveFileEx)
 }
 
 func windowsMoveFileEx(source, target string, flags uint32) error {
