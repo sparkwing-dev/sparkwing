@@ -62,25 +62,23 @@ func linkedWorktree(t *testing.T, repoName, worktreeName string) (repo, worktree
 	return repo, worktree
 }
 
-// TestRepoShortName_LinkedWorktreeResolvesToItsRepo is the keying half of the
-// BW-1459 fix. Every ticket gets its own worktree, so keying a capacity
-// profile by the directory a run launched from gave every ticket a cold
-// start, and threw the learning away exactly as often as work began.
+// TestRepoShortName_LinkedWorktreeResolvesToItsRepo keeps capacity learning
+// shared by every worktree of one repository.
 func TestRepoShortName_LinkedWorktreeResolvesToItsRepo(t *testing.T) {
-	repo, worktree := linkedWorktree(t, "bitwing", "bw-1459")
+	repo, worktree := linkedWorktree(t, "sample-repo", "feature-branch")
 
-	if got := repoShortName(repo); got != "bitwing" {
-		t.Errorf("main checkout: got %q, want bitwing", got)
+	if got := repoShortName(repo); got != "sample-repo" {
+		t.Errorf("main checkout: got %q, want sample-repo", got)
 	}
-	if got := repoShortName(worktree); got != "bitwing" {
-		t.Errorf("linked worktree: got %q, want bitwing", got)
+	if got := repoShortName(worktree); got != "sample-repo" {
+		t.Errorf("linked worktree: got %q, want sample-repo", got)
 	}
 	nested := filepath.Join(worktree, "backend", "cmd")
 	if err := os.MkdirAll(nested, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if got := repoShortName(nested); got != "bitwing" {
-		t.Errorf("inside a linked worktree: got %q, want bitwing", got)
+	if got := repoShortName(nested); got != "sample-repo" {
+		t.Errorf("inside a linked worktree: got %q, want sample-repo", got)
 	}
 }
 
@@ -88,18 +86,23 @@ func TestRepoShortName_LinkedWorktreeResolvesToItsRepo(t *testing.T) {
 // directly: the same pipeline in two worktrees of one repo reads and writes
 // one profile row, so a gate arrives already knowing what it costs.
 func TestCurrentProfileKey_SurvivesABranchChange(t *testing.T) {
-	repo, first := linkedWorktree(t, "bitwing", "bw-1458")
-	_, second := linkedWorktree(t, "bitwing", "bw-1459")
+	repo, first := linkedWorktree(t, "sample-repo", "first-branch")
+	_, second := linkedWorktree(t, "sample-repo", "second-branch")
+	previousWorkDir := sparkwing.CurrentRuntime().WorkDir
+	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
 
+	sparkwing.SetWorkDir(repo)
 	t.Chdir(repo)
 	want := currentProfileKey("pre-commit")
-	if want != "bitwing/pre-commit" {
-		t.Fatalf("main checkout keyed %q, want bitwing/pre-commit", want)
+	if want != "sample-repo/pre-commit" {
+		t.Fatalf("main checkout keyed %q, want sample-repo/pre-commit", want)
 	}
+	sparkwing.SetWorkDir(first)
 	t.Chdir(first)
 	if got := currentProfileKey("pre-commit"); got != want {
 		t.Errorf("first worktree keyed %q, want %q", got, want)
 	}
+	sparkwing.SetWorkDir(second)
 	t.Chdir(second)
 	if got := currentProfileKey("pre-commit"); got != want {
 		t.Errorf("second worktree keyed %q, want %q", got, want)
@@ -128,7 +131,7 @@ func TestCurrentProfileKey_UsesRunWorkDirAfterCWDChanges(t *testing.T) {
 // no .git directory level to strip.
 func TestRepoShortName_BareRepoWorktreeResolvesToTheRepoName(t *testing.T) {
 	root := t.TempDir()
-	gitDir := filepath.Join(root, "bitwing.git", "worktrees", "bw-1459")
+	gitDir := filepath.Join(root, "sample-repo.git", "worktrees", "feature-branch")
 	if err := os.MkdirAll(gitDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -139,8 +142,8 @@ func TestRepoShortName_BareRepoWorktreeResolvesToTheRepoName(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte("gitdir: "+gitDir+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := repoShortName(wt); got != "bitwing" {
-		t.Errorf("bare-repo worktree: got %q, want bitwing", got)
+	if got := repoShortName(wt); got != "sample-repo" {
+		t.Errorf("bare-repo worktree: got %q, want sample-repo", got)
 	}
 }
 
@@ -172,10 +175,9 @@ func TestRepoShortName_EmptyOutsideAnyRepo(t *testing.T) {
 	}
 }
 
-// TestScopedProfileKey_SeparatesReposAndKeepsBareNameOutsideOne pins the
-// BW-849 keying fix: two repos' identically named pipelines get distinct
-// capacity-profile rows, so contention in one repo cannot poison the
-// other's pricing.
+// TestScopedProfileKey_SeparatesReposAndKeepsBareNameOutsideOne keeps
+// identically named pipelines in separate repositories from sharing
+// capacity-profile rows.
 func TestScopedProfileKey_SeparatesReposAndKeepsBareNameOutsideOne(t *testing.T) {
 	if a, b := scopedProfileKey("alpha", "ci"), scopedProfileKey("beta", "ci"); a == b {
 		t.Errorf("scopedProfileKey pooled %q and %q onto one key %q", "alpha/ci", "beta/ci", a)
