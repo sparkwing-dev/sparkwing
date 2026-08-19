@@ -219,18 +219,29 @@ func TestTrigger_InProcessDispatcher_FullLoop(t *testing.T) {
 		t.Fatal("empty run_id")
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
 	var finalRun *store.Run
-	for time.Now().Before(deadline) {
+	for finalRun == nil {
 		run, err := st.GetRun(context.Background(), body.RunID)
-		if err == nil && run.FinishedAt != nil {
+		switch {
+		case err == nil && run.FinishedAt != nil:
 			finalRun = run
-			break
+		case err == nil:
+		case errors.Is(err, store.ErrNotFound):
+		default:
+			t.Fatalf("GetRun: %v", err)
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if finalRun == nil {
-		t.Fatalf("run %s never finished within deadline", body.RunID)
+		if finalRun != nil {
+			continue
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("run %s never finished within deadline", body.RunID)
+		}
 	}
 	if finalRun.Status != "success" {
 		t.Errorf("run status=%q want success (err=%q)", finalRun.Status, finalRun.Error)
