@@ -69,10 +69,11 @@ func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
 	ctx, stopQueries := context.WithCancel(context.Background())
 	defer stopQueries()
 	var successfulQueries, firstSuccess, lastSuccess atomic.Int64
+	started := time.Now()
 	probeLoop(ctx, 50*time.Millisecond, func(ctx context.Context) error {
 		_, err := client.Query(ctx, client.Options{Home: home, Version: "test"})
 		if err == nil {
-			now := time.Now().UnixNano()
+			now := time.Since(started).Nanoseconds()
 			firstSuccess.CompareAndSwap(0, now)
 			lastSuccess.Store(now)
 			successfulQueries.Add(1)
