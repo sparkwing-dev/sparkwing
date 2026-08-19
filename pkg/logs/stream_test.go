@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -64,6 +65,29 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 		}
 		readErr = scan.Err()
 	}()
+	var (
+		joinOnce     sync.Once
+		joinErr      error
+		joinReported bool
+	)
+	joinScanner := func() error {
+		joinOnce.Do(func() {
+			_ = stream.Close()
+			timer := time.NewTimer(time.Second)
+			defer timer.Stop()
+			select {
+			case <-done:
+			case <-timer.C:
+				joinErr = errors.New("stream scanner did not stop after the response body closed")
+			}
+		})
+		return joinErr
+	}
+	t.Cleanup(func() {
+		if err := joinScanner(); err != nil && !joinReported {
+			t.Error(err)
+		}
+	})
 
 	for _, line := range []string{"alpha", "beta", "gamma"} {
 		if err := c.Append(context.Background(), "run-a", "node-x", []byte(line+"\n")); err != nil {
@@ -78,8 +102,11 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 		waitErr = errors.New("stream did not deliver all appended records")
 	}
 
-	_ = stream.Close()
-	<-done
+	joinErr = joinScanner()
+	joinReported = true
+	if joinErr != nil {
+		t.Fatal(joinErr)
+	}
 	if waitErr != nil {
 		t.Fatal(waitErr)
 	}
