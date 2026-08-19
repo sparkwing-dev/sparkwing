@@ -25,6 +25,19 @@ pipelines:
 	}
 }
 
+func TestParse_YAMLErrorNamesSparkwingConfig(t *testing.T) {
+	_, err := pipelines.Parse(strings.NewReader("pipelines: ["))
+	if err == nil {
+		t.Fatal("expected YAML error")
+	}
+	if !strings.Contains(err.Error(), "parse sparkwing.yaml:") {
+		t.Fatalf("error = %q, want sparkwing.yaml context", err)
+	}
+	if strings.Contains(err.Error(), "pipelines.yaml") {
+		t.Fatalf("error names retired pipelines.yaml: %v", err)
+	}
+}
+
 func TestParse_FullFeatures(t *testing.T) {
 	yaml := `
 pipelines:

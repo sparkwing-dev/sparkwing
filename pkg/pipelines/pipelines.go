@@ -257,7 +257,7 @@ func Parse(r io.Reader) (*Config, error) {
 		if errors.Is(err, io.EOF) {
 			return &cfg, nil
 		}
-		return nil, fmt.Errorf("parse pipelines.yaml: %w", err)
+		return nil, fmt.Errorf("parse sparkwing.yaml: %w", err)
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
