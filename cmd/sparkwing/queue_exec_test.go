@@ -190,15 +190,11 @@ func TestQueueExecSerializesFreshCommandsAndClearsAdmission(t *testing.T) {
 	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
 		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "bootstrap-first"
 	})
-	waitForFile(t, firstStarted)
+	firstStartedBody := waitForFileContents(t, firstStarted)
 	if runtime.GOOS != "windows" {
-		body, err := os.ReadFile(firstStarted)
+		pid, err := strconv.Atoi(string(firstStartedBody))
 		if err != nil {
-			t.Fatalf("read command pid: %v", err)
-		}
-		pid, err := strconv.Atoi(string(body))
-		if err != nil {
-			t.Fatalf("parse command pid %q: %v", body, err)
+			t.Fatalf("parse command pid %q: %v", firstStartedBody, err)
 		}
 		if _, err := procgroup.CaptureSession(pid); err == nil {
 			t.Fatal("command replaced the registered session leader instead of running beneath its stable anchor")
@@ -759,6 +755,21 @@ func waitForFile(t *testing.T, path string) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("file did not appear: %s", path)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+func waitForFileContents(t *testing.T, path string) []byte {
+	t.Helper()
+	deadline := time.Now().Add(queueExecWait)
+	for {
+		body, err := os.ReadFile(path)
+		if err == nil && len(body) > 0 {
+			return body
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("file contents did not appear: %s: %v", path, err)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
