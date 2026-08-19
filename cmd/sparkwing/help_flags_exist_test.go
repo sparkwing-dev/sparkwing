@@ -60,6 +60,52 @@ func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
 	}
 }
 
+func TestProfileFlagRegistrationsDoNotAdvertiseDefault(t *testing.T) {
+	fset := token.NewFileSet()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("read cmd/sparkwing: %v", err)
+	}
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", name, err)
+		}
+		ast.Inspect(file, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok || len(call.Args) < 3 {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || (sel.Sel.Name != "String" && sel.Sel.Name != "StringP") {
+				return true
+			}
+			flagName, ok := stringLiteral(call.Args[0])
+			if !ok || flagName != "profile" {
+				return true
+			}
+			description, ok := stringLiteral(call.Args[len(call.Args)-1])
+			if ok && strings.Contains(strings.ToLower(description), "default") {
+				t.Errorf("%s advertises a default profile in %q", fset.Position(call.Pos()), description)
+			}
+			return true
+		})
+	}
+}
+
+func stringLiteral(expr ast.Expr) (string, bool) {
+	lit, ok := expr.(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	value, err := strconv.Unquote(lit.Value)
+	return value, err == nil
+}
+
 // flagsRegisteredPerCommand walks cmd/sparkwing for
 // `flag.NewFlagSet(cmdX.Path, ...)` and collects every flag name
 // registered on the resulting variable, keyed by the command's
