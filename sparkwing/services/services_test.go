@@ -27,12 +27,12 @@ func requireDocker(t *testing.T) {
 
 // containerRunning reports whether a container with the given name
 // exists in the running state. Used by cleanup-verification tests.
-func containerRunning(name string) bool {
-	out, err := exec.Command("docker", "ps", "--filter", "name=^"+name+"$", "--format", "{{.Names}}").Output()
+func containerRunning(ctx context.Context, name string) (bool, error) {
+	out, err := exec.CommandContext(ctx, "docker", "ps", "--filter", "name=^"+name+"$", "--format", "{{.Names}}").Output()
 	if err != nil {
-		return false
+		return false, err
 	}
-	return strings.TrimSpace(string(out)) == name
+	return strings.TrimSpace(string(out)) == name, nil
 }
 
 // forceRemove best-effort removes a container; used as belt-and-suspenders
@@ -44,17 +44,22 @@ func forceRemove(name string) {
 
 func waitForContainerStopped(t *testing.T, name, cause string) {
 	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	poll := time.NewTicker(100 * time.Millisecond)
 	defer poll.Stop()
-	deadline := time.NewTimer(2 * time.Second)
-	defer deadline.Stop()
 	for {
-		if !containerRunning(name) {
+		running, err := containerRunning(ctx, name)
+		if err != nil {
+			forceRemove(name)
+			t.Fatalf("inspect container %s after %s: %v", name, cause, err)
+		}
+		if !running {
 			return
 		}
 		select {
 		case <-poll.C:
-		case <-deadline.C:
+		case <-ctx.Done():
 			forceRemove(name)
 			t.Fatalf("container %s still running after %s", name, cause)
 		}
@@ -160,7 +165,14 @@ func TestWithServices_StartAndCleanup(t *testing.T) {
 	if capturedName == "" {
 		t.Fatalf("fn never saw the container")
 	}
-	if containerRunning(capturedName) {
+	probeCtx, cancelProbe := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancelProbe()
+	running, probeErr := containerRunning(probeCtx, capturedName)
+	if probeErr != nil {
+		forceRemove(capturedName)
+		t.Fatalf("inspect container %s after WithServices returned: %v", capturedName, probeErr)
+	}
+	if running {
 		forceRemove(capturedName)
 		t.Fatalf("container %s still running after WithServices returned", capturedName)
 	}
