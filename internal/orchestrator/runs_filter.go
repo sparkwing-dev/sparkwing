@@ -53,16 +53,27 @@ func ParseLooseDuration(v string) (time.Duration, error) {
 		if err != nil {
 			return 0, err
 		}
-		return days * 24, nil
+		return scaleDuration(days, 24, v)
 	case 'w':
 		weeks, err := time.ParseDuration(v[:len(v)-1] + "h")
 		if err != nil {
 			return 0, err
 		}
-		return weeks * 24 * 7, nil
+		return scaleDuration(weeks, 24*7, v)
 	default:
 		return time.ParseDuration(v)
 	}
+}
+
+func scaleDuration(value time.Duration, factor int64, raw string) (time.Duration, error) {
+	const (
+		maxDuration = time.Duration(1<<63 - 1)
+		minDuration = time.Duration(-1 << 63)
+	)
+	if value > maxDuration/time.Duration(factor) || value < minDuration/time.Duration(factor) {
+		return 0, fmt.Errorf("duration %q overflows", raw)
+	}
+	return value * time.Duration(factor), nil
 }
 
 // SplitExcludes splits a repeatable filter slice into the include
