@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// TestEnsureDaemon_SurfacesDaemonBindFailure pins BW-650: when a spawned
-// daemon dies at startup because it cannot bind, the returned error carries
-// the daemon's own bind failure (via its log) instead of an unrelated
-// spawn-layer error.
 func TestEnsureDaemon_SurfacesDaemonBindFailure(t *testing.T) {
 	home := shortHome(t)
 	stateDir, err := wingd.StateDir(home)
@@ -49,8 +45,9 @@ func TestEnsureDaemon_SurfacesDaemonBindFailure(t *testing.T) {
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
+	started := time.Now()
 	_, err = EnsureDaemon(ctx, Options{
 		Home:        home,
 		Spawn:       spawn,
@@ -65,5 +62,8 @@ func TestEnsureDaemon_SurfacesDaemonBindFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), logPath) {
 		t.Fatalf("error should name the daemon log path %q, got: %v", logPath, err)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("bind diagnostic returned in %s, want < 1s", elapsed)
 	}
 }
