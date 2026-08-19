@@ -23,6 +23,11 @@ func TestMaxParallel_CapsConcurrentNodeExecution(t *testing.T) {
 
 	var active, peak atomic.Int32
 	var observedAtZero atomic.Bool
+	entered := make(chan struct{}, fanOut)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseJobs := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseJobs)
 
 	registerOnce.Range(func(k, _ any) bool {
 		if k.(string) == "orch-maxparallel" {
@@ -37,14 +42,52 @@ func TestMaxParallel_CapsConcurrentNodeExecution(t *testing.T) {
 			active:         &active,
 			peak:           &peak,
 			observedAtZero: &observedAtZero,
+			entered:        entered,
+			release:        release,
 		}
 	})
 
 	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline:    "orch-maxparallel",
-		MaxParallel: cap,
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var res *orchestrator.Result
+	var runErr error
+	done := make(chan struct{})
+	go func() {
+		res, runErr = orchestrator.RunLocal(ctx, p, orchestrator.Options{
+			Pipeline:    "orch-maxparallel",
+			MaxParallel: cap,
+		})
+		close(done)
+	}()
+	t.Cleanup(func() {
+		releaseJobs()
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("RunLocal did not stop during cleanup")
+		}
 	})
+	for range cap {
+		select {
+		case <-entered:
+		case <-ctx.Done():
+			t.Fatal("configured capacity was not admitted")
+		}
+	}
+	select {
+	case <-entered:
+		t.Fatal("a fifth job entered while four jobs held the configured capacity")
+	case <-time.After(200 * time.Millisecond):
+	}
+	releaseJobs()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("RunLocal did not finish after jobs were released")
+	}
+	err := runErr
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)
 	}
@@ -69,6 +112,8 @@ type maxParallelPipe struct {
 	active         *atomic.Int32
 	peak           *atomic.Int32
 	observedAtZero *atomic.Bool
+	entered        chan<- struct{}
+	release        chan struct{}
 }
 
 func (p *maxParallelPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -76,6 +121,7 @@ func (p *maxParallelPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkw
 		id := jobName(i)
 		sparkwing.Job(plan, id, func(ctx context.Context) error {
 			n := p.active.Add(1)
+			defer p.active.Add(-1)
 			if n == 1 {
 				p.observedAtZero.Store(true)
 			}
@@ -85,9 +131,13 @@ func (p *maxParallelPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkw
 					break
 				}
 			}
-			time.Sleep(50 * time.Millisecond)
-			p.active.Add(-1)
-			return nil
+			p.entered <- struct{}{}
+			select {
+			case <-p.release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		})
 	}
 	return nil
@@ -100,6 +150,3 @@ func jobName(i int) string {
 	}
 	return "job-" + string(letters[i/26-1]) + string(letters[i%26])
 }
-
-// silence unused import on go versions without strconv usage above
-var _ = sync.Mutex{}
