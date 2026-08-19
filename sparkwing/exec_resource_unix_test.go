@@ -108,6 +108,10 @@ func TestExec_CancelKillsProcessTree(t *testing.T) {
 		script := fmt.Sprintf(`sleep 120 & echo $! > %q; wait`, pidfile)
 		_, _ = sparkwing.Bash(ctx, script).Run()
 	}()
+	t.Cleanup(func() {
+		cancel()
+		waitForSignal(t, done, 2*time.Second, "cancelled process tree did not stop during cleanup")
+	})
 
 	childPID := waitForPID(t, pidfile)
 	if !pidAlive(childPID) {
@@ -115,21 +119,17 @@ func TestExec_CancelKillsProcessTree(t *testing.T) {
 	}
 
 	cancel()
-
-	deadline := time.Now().Add(5 * time.Second)
-	for pidAlive(childPID) {
-		if time.Now().After(deadline) {
-			t.Fatalf("grandchild %d still alive 5s after cancel; process tree was not killed", childPID)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	<-done
+	waitForProcessExit(t, childPID, 5*time.Second)
+	waitForSignal(t, done, 2*time.Second, "cancelled process tree did not stop")
 }
 
 func waitForPID(t *testing.T, pidfile string) int {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	timeout := time.NewTimer(5 * time.Second)
+	defer timeout.Stop()
+	for {
 		data, err := os.ReadFile(pidfile)
 		if err == nil {
 			if s := strings.TrimSpace(string(data)); s != "" {
@@ -138,11 +138,41 @@ func waitForPID(t *testing.T, pidfile string) int {
 					return pid
 				}
 			}
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("read child pidfile %s: %v", pidfile, err)
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-ticker.C:
+		case <-timeout.C:
+			t.Fatalf("child pidfile %s never populated", pidfile)
+		}
 	}
-	t.Fatalf("child pidfile %s never populated", pidfile)
-	return 0
+}
+
+func waitForProcessExit(t *testing.T, pid int, timeout time.Duration) {
+	t.Helper()
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	for pidAlive(pid) {
+		select {
+		case <-ticker.C:
+		case <-timer.C:
+			t.Fatalf("grandchild %d still alive after %s; process tree was not killed", pid, timeout)
+		}
+	}
+}
+
+func waitForSignal(t *testing.T, done <-chan struct{}, timeout time.Duration, failure string) {
+	t.Helper()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		t.Error(failure)
+	}
 }
 
 // pidAlive reports whether pid names a live process; signal 0 probes
