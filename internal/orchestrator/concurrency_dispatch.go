@@ -558,6 +558,11 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 				hbCtx, cancel := context.WithTimeout(context.Background(), store.ConcurrencyHeartbeatTimeout(onLimit))
 				_, wasSuperseded, err := r.backends.Concurrency.HeartbeatSlot(hbCtx, key, holderID, lease)
 				cancel()
+				if errors.Is(err, store.ErrLockHeld) {
+					superseded.Store(true)
+					cancelExec()
+					return
+				}
 				if err != nil {
 					sinceOK := time.Since(lastOK)
 					if terminal := wedge.fail(fmt.Sprintf("concurrency key %q: heartbeat", key), err); terminal != nil {

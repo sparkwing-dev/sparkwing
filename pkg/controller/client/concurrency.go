@@ -166,6 +166,9 @@ func (c *Client) HeartbeatSlot(ctx context.Context, key, holderID string, lease 
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusConflict {
+		return nil, store.ErrLockHeld
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, readHTTPError(resp)
 	}

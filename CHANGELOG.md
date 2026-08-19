@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **concurrency:** `CancelOthers` promptly stops superseded work after the
+  replacement takes ownership of its slot.
 - **cli:** Consumer stop and upgrade replacement recognize a completed Unix
   process immediately instead of waiting through the forced-stop grace period.
 - **admission:** Capacity measurements remain attached to the run's repository
