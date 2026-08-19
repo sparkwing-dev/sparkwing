@@ -2,13 +2,38 @@
 
 package main
 
-import "syscall"
+import (
+	"syscall"
 
-// processAlive reports whether pid refers to a running process. On POSIX,
-// kill(pid, 0) is the canonical liveness probe -- it sends no signal but
-// returns ESRCH for a dead pid.
+	"github.com/sparkwing-dev/sparkwing/internal/procgroup"
+)
+
+// processAlive reports whether pid refers to a running process. A zombie still
+// answers kill(pid, 0), but has already finished and must not hold shutdown or
+// replacement waits open.
 func processAlive(pid int) bool {
-	return syscall.Kill(pid, 0) == nil
+	if syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	processes, err := procgroup.List()
+	if err != nil {
+		return true
+	}
+	for _, process := range processes {
+		if process.PID != pid {
+			continue
+		}
+		if process.State == "" {
+			return true
+		}
+		switch process.State[0] {
+		case 'Z', 'X', 'x':
+			return false
+		default:
+			return true
+		}
+	}
+	return false
 }
 
 // signalTerminate asks pid to shut down gracefully (SIGTERM on POSIX).
