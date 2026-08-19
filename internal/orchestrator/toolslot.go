@@ -74,7 +74,7 @@ func (r *InProcessRunner) toolSlotProvider(runID, nodeID string, delegate sparkw
 			}
 			lastDetail = detail
 			_ = r.backends.State.UpdateNodeActivity(ctx, runID, nodeID, detail)
-			r.emitToolSlotLog(ctx, runID, nodeID, delegate, detail)
+			r.emitToolSlotLog(runID, nodeID, delegate, detail)
 		}
 
 		resumeProgressTimeout := pauseProgressTimeout(ctx)
@@ -90,7 +90,7 @@ func (r *InProcessRunner) toolSlotProvider(runID, nodeID string, delegate sparkw
 		if announced {
 			_ = r.backends.State.AppendEvent(ctx, runID, nodeID, "concurrency_promoted", nil)
 			_ = r.backends.State.UpdateNodeActivity(ctx, runID, nodeID, "")
-			r.emitToolSlotLog(ctx, runID, nodeID, delegate,
+			r.emitToolSlotLog(runID, nodeID, delegate,
 				fmt.Sprintf("admitted to %s after %s", key, time.Since(start).Round(time.Second)))
 		}
 
@@ -102,8 +102,7 @@ func (r *InProcessRunner) toolSlotProvider(runID, nodeID string, delegate sparkw
 // emitToolSlotLog mirrors a tool-slot wait line into the node log so the
 // position shows up where an operator is already looking, matching how a
 // queued node reports itself.
-func (r *InProcessRunner) emitToolSlotLog(ctx context.Context, runID, nodeID string, delegate sparkwing.Logger, detail string) {
-	_ = ctx
+func (r *InProcessRunner) emitToolSlotLog(runID, nodeID string, delegate sparkwing.Logger, detail string) {
 	nlog, err := r.backends.Logs.OpenNodeLog(runID, nodeID, delegate)
 	if err != nil {
 		return
