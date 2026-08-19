@@ -580,6 +580,23 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 // one "database is locked" from a concurrent writer left the claim
 // undefended for the rest of a long run -- which is what let the sweeper
 // requeue a live dispatch.
+type transientHeartbeatStore struct {
+	calls int
+	seq   int64
+}
+
+func (s *transientHeartbeatStore) HeartbeatTrigger(context.Context, string, time.Duration) (bool, error) {
+	s.calls++
+	if s.calls == 1 {
+		return false, errors.New("database is locked")
+	}
+	return false, nil
+}
+
+func (s *transientHeartbeatStore) TriggerClaimGeneration(context.Context, string) (int64, error) {
+	return s.seq, nil
+}
+
 func TestHeartbeat_SurvivesATransientStoreError(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -590,9 +607,12 @@ func TestHeartbeat_SurvivesATransientStoreError(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A budget long enough to retry through a brief failure.
-	if !heartbeatOnce(ctx, st, "run-hb", claimed.ClaimSeq, 30*time.Second, time.Second, quietLogger()) {
+	transient := &transientHeartbeatStore{seq: claimed.ClaimSeq}
+	if !heartbeatOnce(ctx, transient, "run-hb", claimed.ClaimSeq, 30*time.Second, time.Second, quietLogger()) {
 		t.Fatal("heartbeat gave up on a healthy claim")
+	}
+	if transient.calls != 2 {
+		t.Fatalf("heartbeat attempts = %d, want 2 after one transient failure", transient.calls)
 	}
 
 	// A claim that no longer exists is the one case that ends it.
