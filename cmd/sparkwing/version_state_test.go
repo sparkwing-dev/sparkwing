@@ -22,9 +22,8 @@ func otherInstall(t *testing.T) string {
 	return p
 }
 
-// TestVersionMemoryIsScopedToTheInstall is the BW-1675 regression. Two
-// installs on one machine used to take turns stamping one shared
-// last-version file with their own version, so the record read as an
+// TestVersionMemoryIsScopedToTheInstall covers two installs on one machine
+// that used to stamp one shared last-version file, so the record read as an
 // upgrade every time the other binary ran and the evidence described
 // whichever process looked at it last. Each install now keeps its own
 // stamp: seeding one install's history, announcing its transition, and

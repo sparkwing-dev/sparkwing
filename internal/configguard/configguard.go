@@ -24,8 +24,8 @@ import (
 // treats as configuration. A test binary has no business changing any of
 // them.
 //
-// repos.yaml leads the list because it is the file BW-1457 was opened
-// for: it is the laptop's fleet registry, and a single malformed line
+// repos.yaml leads the list because it is the laptop's repository registry,
+// and a single malformed line
 // makes every fleet-wide command see an empty fleet.
 //
 // The state files under ~/.sparkwing -- last-version.d, outbox.db, state.db

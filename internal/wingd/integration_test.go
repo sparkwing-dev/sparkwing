@@ -1376,8 +1376,8 @@ func TestLivenessFloor_AdmitsSoleRunUnderExternalLoad(t *testing.T) {
 	}
 }
 
-// TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead reproduces the
-// multi-run stall from BW-1557. Run registrations keep several live daemon
+// TestLivenessFloor_ZeroCostConnectionsDoNotSuppressFIFOHead reproduces a
+// multi-run stall. Run registrations keep several live daemon
 // connections and zero-cost leases while their node-level resource requests
 // wait behind one real grant. When that grant releases under total external
 // pressure, exactly the FIFO head must bootstrap; the remaining nodes stay

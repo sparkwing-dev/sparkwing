@@ -64,8 +64,8 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_ContendedCeilingHitEscalatesFloor pins the BW-693
-// escalation: a contended run that consumed essentially its whole charge
+// TestRecordRunProfile_ContendedCeilingHitEscalatesFloor verifies that a
+// contended run which consumed essentially its whole charge
 // proves it wanted at least that much, so the demand floor rises to the
 // charge (not merely the throttled measured peak), and the clean window is
 // left untouched so contention never graduates the version.
@@ -220,8 +220,8 @@ func TestRecordRunProfile_ClearsStoredPinWhenPlanDeclaresNone(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_DurationExcludesQueueWait pins BW-652: the rollup
-// duration measures grant-to-finish (execStart..execEnd), so a run that
+// TestRecordRunProfile_DurationExcludesQueueWait verifies that the rollup
+// measures grant-to-finish (execStart..execEnd), so a run that
 // waited in admission before executing records only its execution time.
 func TestRecordRunProfile_DurationExcludesQueueWait(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))

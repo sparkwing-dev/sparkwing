@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// TestDefaultPaths_NeverResolvesToTheRealHomeUnderTest is the standing
-// guarantee behind BW-1457: a fixture that forgets SPARKWING_HOME gets a
+// TestDefaultPaths_NeverResolvesToTheRealHomeUnderTest guarantees that a
+// fixture which forgets SPARKWING_HOME gets a
 // disposable sandbox, not the developer's ~/.sparkwing. The dispatch
 // test in cmd/sparkwing was rewriting the real version stamp on every
 // run before this landed.

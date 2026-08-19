@@ -102,8 +102,7 @@ func TestToolSlot_PassesTheDeclaredCostThrough(t *testing.T) {
 }
 
 // TestBoxToolBudget_CapacityIsCentiCores pins the unit. A budget counted
-// in slots cannot survive the tool getting more expensive, which is
-// exactly what BW-1455 will do to lint.
+// in slots cannot survive a tool getting more expensive.
 func TestBoxToolBudget_CapacityIsCentiCores(t *testing.T) {
 	g := sparkwing.BoxToolBudget("t", 8, time.Minute)
 	if got := g.Limit().Capacity; got != 800 {

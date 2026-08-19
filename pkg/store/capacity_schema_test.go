@@ -7,8 +7,8 @@ import (
 	"time"
 )
 
-// TestRecordProfileObservation_IgnoresLegacySamples pins BW-652's version
-// stamp: a profile row persisted in the pre-versioning bare-array format
+// TestRecordProfileObservation_IgnoresLegacySamples pins the version stamp:
+// a profile row persisted in the pre-versioning bare-array format
 // (whose durations folded in admission queue wait) is discarded on the
 // next observation rather than contaminating the recomputed percentiles.
 func TestRecordProfileObservation_IgnoresLegacySamples(t *testing.T) {

@@ -50,8 +50,8 @@ func TestInstallConflict_ReportsEveryOtherInstall(t *testing.T) {
 	}
 }
 
-// TestInstallConflict_SeesInstallsOffTheCallersPath is the launchd half
-// of BW-1675: the interactive shell that runs doctor and the background
+// TestInstallConflict_SeesInstallsOffTheCallersPath covers differing process
+// environments: the interactive shell that runs doctor and the background
 // job that resolves the rival do not share a PATH. A copy sitting only
 // in a well-known install directory -- reachable to a job whose PATH
 // lists it, invisible to the caller's -- must still be reported, or the

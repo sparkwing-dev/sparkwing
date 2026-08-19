@@ -54,8 +54,8 @@ func gitRepoDir(t *testing.T, name string) string {
 	return dir
 }
 
-// TestPoisonedFloorRecoversWithoutManualReset reproduces the BW-849 drill: a
-// pipeline re-measuring after a structural change ratchets its charge under
+// TestPoisonedFloorRecoversWithoutManualReset proves that a pipeline
+// re-measuring after a structural change ratchets its charge under
 // external load (ceiling hits double the demand floor until the grantable
 // ceiling caps it), and then keeps being flagged contended while the load
 // tails off. The runs' own measurements prove demand is ~1 core, so the
