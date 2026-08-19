@@ -84,8 +84,11 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 
 	base := fmt.Sprintf("http://%s", addr)
 	client := &http.Client{Timeout: 250 * time.Millisecond}
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
+	retry := time.NewTicker(25 * time.Millisecond)
+	defer retry.Stop()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for {
 		select {
 		case err := <-done:
 			t.Fatalf("web server exited before readiness: %v", err)
@@ -100,12 +103,16 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 				}
 			}
 		}
-		time.Sleep(25 * time.Millisecond)
+		select {
+		case err := <-done:
+			t.Fatalf("web server exited before readiness: %v", err)
+		case <-retry.C:
+		case <-deadline.C:
+			cancel()
+			<-done
+			t.Fatal("web server did not become ready")
+		}
 	}
-	cancel()
-	<-done
-	t.Fatal("web server did not become ready")
-	return "", func() {}
 }
 
 // TestAPI_Logs covers the dashboard-owned log endpoints under
