@@ -130,12 +130,16 @@ func waitForQueuedRun(t *testing.T, dbPath, key, runID string) {
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		state, err := st.GetConcurrencyState(context.Background(), key)
-		if err == nil {
+		switch {
+		case err == nil:
 			for _, waiter := range state.Waiters {
 				if waiter.RunID == runID {
 					return
 				}
 			}
+		case errors.Is(err, store.ErrNotFound):
+		default:
+			t.Fatalf("read concurrency state for %q: %v", key, err)
 		}
 		time.Sleep(2 * time.Millisecond)
 	}
@@ -596,7 +600,9 @@ func TestGroupedNode_CancelWhileQueued_LeaksWaiterIntoPhantomHolder(t *testing.T
 	}
 	defer func() { _ = st.Close() }()
 	state, err := st.GetConcurrencyState(context.Background(), "g:phantom")
-	if err != nil && !errors.Is(err, store.ErrNotFound) {
+	if errors.Is(err, store.ErrNotFound) {
+		state = &store.ConcurrencyState{}
+	} else if err != nil {
 		t.Fatalf("read final concurrency state: %v", err)
 	}
 	now := time.Now()
