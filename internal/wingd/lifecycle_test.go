@@ -73,6 +73,29 @@ func holdsRun(qs wingwire.QueueState, runID string) bool {
 	return false
 }
 
+func waitForRecoveredHolderRelease(t *testing.T, q *client.Client, runID string) {
+	t.Helper()
+	qs, err := q.QueueState(context.Background())
+	if err != nil {
+		t.Fatalf("queue state: %v", err)
+	}
+	if !holdsRun(qs, runID) {
+		t.Fatalf("recovered holder %q was not visible during its grace window", runID)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for holdsRun(qs, runID) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		qs, err = q.QueueState(context.Background())
+		if err != nil {
+			t.Fatalf("queue state: %v", err)
+		}
+	}
+	if holdsRun(qs, runID) {
+		t.Fatalf("recovered holder %q was not released after its grace window", runID)
+	}
+}
+
 // TestDaemon_StalledHolderMustAnswerLivenessChallenge proves that stall
 // detection is an automatic backstop, not only a queue annotation. The
 // victim remains alive and keeps its socket open, but never runs Watch and
@@ -190,25 +213,7 @@ func TestGraceExpiry_ReleasesUnclaimedLease(t *testing.T) {
 	startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})
 	started := time.Now()
 	q := ensure(t, home, "")
-	qs, err := q.QueueState(context.Background())
-	if err != nil {
-		t.Fatalf("queue state: %v", err)
-	}
-	if !holdsRun(qs, "a") {
-		t.Fatal("recovered holder was not visible during its grace window")
-	}
-
-	deadline := time.Now().Add(3 * time.Second)
-	for holdsRun(qs, "a") && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-		qs, err = q.QueueState(context.Background())
-		if err != nil {
-			t.Fatalf("queue state: %v", err)
-		}
-	}
-	if holdsRun(qs, "a") {
-		t.Fatal("recovered holder was not released after its grace window")
-	}
+	waitForRecoveredHolderRelease(t, q, "a")
 	if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
 		t.Errorf("grace expiry observation took %v, want less than 500ms", elapsed)
 	}
@@ -230,27 +235,9 @@ func TestReattach_RejectedAfterGrace(t *testing.T) {
 	startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})
 	started := time.Now()
 	b := ensure(t, home, "")
-	qs, err := b.QueueState(context.Background())
-	if err != nil {
-		t.Fatalf("queue state: %v", err)
-	}
-	if !holdsRun(qs, "a") {
-		t.Fatal("recovered holder was not visible during its grace window")
-	}
+	waitForRecoveredHolderRelease(t, b, "a")
 
-	deadline := time.Now().Add(3 * time.Second)
-	for holdsRun(qs, "a") && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
-		qs, err = b.QueueState(context.Background())
-		if err != nil {
-			t.Fatalf("queue state: %v", err)
-		}
-	}
-	if holdsRun(qs, "a") {
-		t.Fatal("recovered holder was not released after its grace window")
-	}
-
-	_, err = b.Reattach(context.Background(), token)
+	_, err := b.Reattach(context.Background(), token)
 	if !errors.Is(err, client.ErrReattachRejected) {
 		t.Fatalf("reattach after grace: got %v, want ErrReattachRejected", err)
 	}
