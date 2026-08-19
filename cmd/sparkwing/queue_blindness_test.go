@@ -78,7 +78,20 @@ func serveQueueDaemon(t *testing.T, home string) {
 }
 
 func queueDaemonConfig(home string) wingd.Config {
-	return wingd.Config{Home: home, Version: "v1.0.0"}
+	return wingd.Config{Home: home, Version: "v1.0.0", Sampler: queueTestHostSampler{}}
+}
+
+type queueTestHostSampler struct{}
+
+func (queueTestHostSampler) Sample() (wingd.HostStat, error) {
+	return wingd.HostStat{
+		TotalCores:      8,
+		TotalMemoryBytes: 8 << 30,
+		FreeMemoryBytes:  8 << 30,
+		LoadMeasured:     true,
+		CPUMeasured:      true,
+		MemoryMeasured:   true,
+	}, nil
 }
 
 func TestQueueDaemonConfigUsesDeterministicHostSample(t *testing.T) {
