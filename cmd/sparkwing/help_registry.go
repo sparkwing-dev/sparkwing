@@ -3121,7 +3121,7 @@ this subcommand only owns the "bump tag, commit, push, sync,
 wait for rollout" path.`,
 	SubcommandOrder: []string{"rollout"},
 	Examples: []Example{
-		{"Bump sparkwing-runner to a new commit tag", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --profile prod --wait"},
+		{"Bump sparkwing-runner to a new commit tag", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --wait"},
 	},
 }
 
@@ -3156,7 +3156,6 @@ image to the registry before calling rollout.`,
 	Flags: []FlagSpec{
 		{Name: "image", Argument: "NAME", Desc: "Short image name (matches the suffix of the ECR URL)", Required: true, Group: "Input"},
 		{Name: "tag", Argument: "TAG", Desc: "New tag to write in kustomization.yaml", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name. Reserved for future per-profile gitops repo + argocd context discovery.", Required: true, Group: "System"},
 		{Name: "gitops-repo", Argument: "PATH", Desc: "Gitops repo path (or SPARKWING_GITOPS_REPO)", Group: "Input"},
 		{Name: "namespace", Argument: "NS", Desc: "Kubernetes namespace for rollout status + logs", Default: "sparkwing", Group: "Input"},
 		{Name: "argocd-app", Argument: "NAME", Desc: "ArgoCD app name (default: derived from --image)", Group: "Input"},
@@ -3167,9 +3166,9 @@ image to the registry before calling rollout.`,
 	},
 	GroupOrder: []string{"Input", "Toggles", "System", "Other"},
 	Examples: []Example{
-		{"Dry-run against the sparkwing-runner image", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --profile prod --dry-run"},
-		{"Bump and wait for the rollout", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --profile prod --wait"},
-		{"Bump, sync, wait, then tail pod logs", "sparkwing cluster image rollout --image sparkwing --tag commit-abc123 --profile prod --wait --tail-logs"},
+		{"Dry-run against the sparkwing-runner image", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --dry-run"},
+		{"Bump and wait for the rollout", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --wait"},
+		{"Bump, sync, wait, then tail pod logs", "sparkwing cluster image rollout --image sparkwing --tag commit-abc123 --wait --tail-logs"},
 	},
 }
 

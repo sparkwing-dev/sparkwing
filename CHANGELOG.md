@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `cluster image rollout` no longer requires or advertises an unused
+  `--profile` value.
 - **cli:** Local receipt help no longer advertises the removed profile billing
   rate and states that local receipts report zero cost.
 - **cli:** Run retry, cancellation, and pruning help distinguishes local runs
