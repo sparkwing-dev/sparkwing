@@ -528,7 +528,7 @@ func installQueueExecInProcessSuccessor(t *testing.T, home string) {
 		return wingdclient.Options{
 			Home: gotHome, Version: Version, Logf: t.Logf,
 			Spawn: func(spawnHome, _ string) error {
-				d, err := wingd.New(wingd.Config{Home: spawnHome, Version: "v1.0.0", GuardInterval: 10 * time.Millisecond})
+				d, err := wingd.New(queueRestartDaemonConfig(spawnHome))
 				if err != nil {
 					return err
 				}
@@ -588,7 +588,7 @@ func waitForRestartedQueueExecState(t *testing.T, home string, result <-chan err
 
 func startRestartableQueueDaemon(t *testing.T, home string) func() {
 	t.Helper()
-	d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0", GuardInterval: 10 * time.Millisecond})
+	d, err := wingd.New(queueRestartDaemonConfig(home))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,6 +619,16 @@ func startRestartableQueueDaemon(t *testing.T, home string) func() {
 	}
 	t.Cleanup(stop)
 	return stop
+}
+
+func queueRestartDaemonConfig(home string) wingd.Config {
+	return wingd.Config{Home: home, Version: "v1.0.0", GuardInterval: 10 * time.Millisecond}
+}
+
+func TestQueueRestartDaemonConfigUsesDeterministicHostSample(t *testing.T) {
+	if queueRestartDaemonConfig(t.TempDir()).Sampler == nil {
+		t.Fatal("queue restart test daemon uses the live host sampler")
+	}
 }
 
 func TestQueueExecSupervisorProcess(t *testing.T) {
