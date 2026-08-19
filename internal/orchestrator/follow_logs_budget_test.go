@@ -52,6 +52,51 @@ func runningRun(runID string) store.Run {
 	return store.Run{ID: runID, Pipeline: "release", Status: "running", StartedAt: time.Now().Add(-time.Second)}
 }
 
+func TestFollowLogsRemote_NoStreamsReturnsWithoutDrainDelay(t *testing.T) {
+	const runID = "run-no-streams"
+	terminalRead := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/nodes"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"nodes": []any{}})
+		case r.URL.Path == "/api/v1/runs/"+runID:
+			now := time.Now()
+			_ = json.NewEncoder(w).Encode(store.Run{
+				ID: runID, Pipeline: "release", Status: "success",
+				StartedAt: now.Add(-time.Second), FinishedAt: &now,
+			})
+			close(terminalRead)
+		default:
+			_, _ = w.Write([]byte("{}"))
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	done := make(chan error, 1)
+	go func() {
+		done <- followLogsRemote(
+			context.Background(),
+			client.NewWithToken(srv.URL, nil, ""),
+			sparkwinglogs.New(srv.URL, nil, ""),
+			runID, "", io.Discard,
+		)
+	}()
+
+	select {
+	case <-terminalRead:
+	case <-time.After(2 * time.Second):
+		t.Fatal("terminal status was never read")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("follow terminal run: %v", err)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("follow delayed after finding no streams to drain")
+	}
+}
+
 // A controller that dies mid-follow used to leave the follow loop
 // polling for as long as the process lived, because every GetRun error
 // was discarded and re-polled. `pipeline trigger` then hung instead of
