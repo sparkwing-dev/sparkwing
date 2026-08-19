@@ -72,6 +72,26 @@ func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 	}
 }
 
+func TestCommandFlagsAreUnique(t *testing.T) {
+	for _, cmd := range allCommands {
+		names := make(map[string]struct{}, len(cmd.Flags))
+		shorts := make(map[string]struct{}, len(cmd.Flags))
+		for _, spec := range cmd.Flags {
+			if _, ok := names[spec.Name]; ok {
+				t.Errorf("%s declares --%s more than once", cmd.Path, spec.Name)
+			}
+			names[spec.Name] = struct{}{}
+			if spec.Short == "" {
+				continue
+			}
+			if _, ok := shorts[spec.Short]; ok {
+				t.Errorf("%s declares -%s more than once", cmd.Path, spec.Short)
+			}
+			shorts[spec.Short] = struct{}{}
+		}
+	}
+}
+
 func TestBindFlagsString(t *testing.T) {
 	cmd := Command{
 		Path: "sparkwing bind-test",
