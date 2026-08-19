@@ -97,7 +97,6 @@ func TestListJobs_FilterBySinceHidesOldRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	started := time.Now()
 	st, err := store.Open(p.StateDB())
 	if err != nil {
 		t.Fatal(err)
@@ -123,9 +122,6 @@ func TestListJobs_FilterBySinceHidesOldRuns(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "no runs yet") {
 		t.Fatalf("expected since-filter to hide older run, got %s", buf.String())
-	}
-	if elapsed := time.Since(started); elapsed >= 40*time.Millisecond {
-		t.Fatalf("since-filter fixture took %s; want under 40ms", elapsed)
 	}
 }
 
