@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `configure xrepo` help, command discovery, and shell completion
+  expose its `list`, `add`, `remove`, and `prune` subcommands and inputs.
 - **cli:** Run-command errors and help use the public `runs` namespace instead
   of the retired `jobs` spelling.
 - **cli:** `runs logs --help`, shell completion, and the CLI reference expose

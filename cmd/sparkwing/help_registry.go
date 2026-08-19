@@ -178,13 +178,6 @@ controller, not the local config. Secrets are top-level
 	},
 }
 
-// cmdConfigureXrepo registers a verb the CLI has always dispatched
-// (main.go routes it to runXrepo) but that had no Command. Its parent
-// named it in the help listing, so nothing looked wrong -- until the
-// listing became derived, at which point an unregistered child is an
-// invisible one. Its own subverbs (list / add / remove / prune) are
-// still parsed and documented by runXrepo rather than by this
-// registry, so it declares no children here.
 var cmdConfigureXrepo = Command{
 	Path:     "sparkwing configure xrepo",
 	Synopsis: "Manage the laptop-local repo registry",
@@ -192,16 +185,62 @@ var cmdConfigureXrepo = Command{
 cross-repo RunAndAwait calls resolve without hardcoded WithFreshRepo
 annotations. Auto-populated when you run 'sparkwing run <pipeline>'
 in a .sparkwing/-bearing repo (set SPARKWING_NO_AUTO_REGISTER=1 to
-disable).
-
-Subverbs: list (show every registered repo and the pipelines it
-provides), add (register a checkout explicitly), remove (drop one by
-path or basename), prune (drop repos whose .sparkwing/ is gone). Run
-'sparkwing configure xrepo --help' for their flags.`,
+disable).`,
+	SubcommandOrder: []string{"list", "add", "remove", "prune"},
 	Examples: []Example{
 		{"Register the current checkout", "sparkwing configure xrepo add"},
 		{"Show the fleet the registry reaches", "sparkwing configure xrepo list"},
 		{"Drop entries whose checkout is gone", "sparkwing configure xrepo prune"},
+	},
+}
+
+var cmdConfigureXrepoList = Command{
+	Path:        "sparkwing configure xrepo list",
+	Synopsis:    "List registered checkouts and their pipelines",
+	Description: "Shows each registered checkout, its status, and the pipelines it provides.",
+	Flags: []FlagSpec{
+		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json | table", Group: "Output"},
+		{Name: "pipelines", Desc: "Include pipeline names", Default: "true", Group: "Output"},
+	},
+	GroupOrder: []string{"Output", "Other"},
+	Examples: []Example{
+		{"List registered checkouts", "sparkwing configure xrepo list"},
+		{"Emit one JSON record per checkout", "sparkwing configure xrepo list -o json"},
+		{"Skip pipeline discovery", "sparkwing configure xrepo list --pipelines=false"},
+	},
+}
+
+var cmdConfigureXrepoAdd = Command{
+	Path:        "sparkwing configure xrepo add",
+	Synopsis:    "Register a checkout",
+	Description: "Registers a checkout explicitly. The path defaults to the current directory.",
+	PosArgs: []PosArg{
+		{Name: "[path]", Desc: "Checkout path; defaults to the current directory"},
+	},
+	Examples: []Example{
+		{"Register the current checkout", "sparkwing configure xrepo add"},
+		{"Register another checkout", "sparkwing configure xrepo add ../service"},
+	},
+}
+
+var cmdConfigureXrepoRemove = Command{
+	Path:        "sparkwing configure xrepo remove",
+	Synopsis:    "Remove a registered checkout",
+	Description: "Removes every registry entry matching a path or basename.",
+	PosArgs: []PosArg{
+		{Name: "<path-or-basename>", Desc: "Registered path or basename to remove", Required: true},
+	},
+	Examples: []Example{
+		{"Remove a checkout by basename", "sparkwing configure xrepo remove service"},
+	},
+}
+
+var cmdConfigureXrepoPrune = Command{
+	Path:        "sparkwing configure xrepo prune",
+	Synopsis:    "Remove checkouts whose pipeline directory is gone",
+	Description: "Removes registered checkouts that no longer contain a .sparkwing directory.",
+	Examples: []Example{
+		{"Remove stale registry entries", "sparkwing configure xrepo prune"},
 	},
 }
 

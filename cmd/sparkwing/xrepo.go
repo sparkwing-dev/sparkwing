@@ -1,6 +1,6 @@
 // `sparkwing configure xrepo` -- laptop-local repo registry CLI. Persists at
 // ~/.config/sparkwing/repos.yaml; consumed by the local trigger
-// consumer (pkg/orchestrator/local_trigger_loop.go) to resolve
+// consumer (internal/orchestrator/local_trigger_loop.go) to resolve
 // "pipeline X" -> "checkout at ~/code/Y" without per-call
 // WithFreshRepo annotations.
 package main
@@ -8,7 +8,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -23,8 +22,11 @@ import (
 )
 
 func runXrepo(args []string) error {
+	if handleParentHelp(cmdConfigureXrepo, args) {
+		return nil
+	}
 	if len(args) == 0 {
-		printXrepoUsage(os.Stderr)
+		PrintHelp(cmdConfigureXrepo, os.Stderr)
 		os.Exit(2)
 	}
 	switch args[0] {
@@ -36,38 +38,12 @@ func runXrepo(args []string) error {
 		return runXrepoRemove(args[1:])
 	case "prune":
 		return runXrepoPrune(args[1:])
-	case "-h", "--help":
-		printXrepoUsage(os.Stdout)
-		return nil
 	default:
 		fmt.Fprintf(os.Stderr, "sparkwing configure xrepo: unknown subcommand %q\n\n", args[0])
-		printXrepoUsage(os.Stderr)
+		PrintHelp(cmdConfigureXrepo, os.Stderr)
 		os.Exit(2)
 	}
 	return nil
-}
-
-func printXrepoUsage(w io.Writer) {
-	fmt.Fprintln(w, "Manage the laptop-local repo registry")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "USAGE")
-	fmt.Fprintln(w, "  sparkwing configure xrepo <subcommand>")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "DESCRIPTION")
-	fmt.Fprintln(w, "  The registry maps pipeline names to local checkouts so")
-	fmt.Fprintln(w, "  cross-repo RunAndAwait calls resolve without")
-	fmt.Fprintln(w, "  hardcoded WithFreshRepo annotations. Auto-populated when")
-	fmt.Fprintln(w, "  you run `sparkwing run <pipeline>` in a .sparkwing/-bearing repo")
-	fmt.Fprintln(w, "  (set SPARKWING_NO_AUTO_REGISTER=1 to disable).")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "COMMANDS")
-	fmt.Fprintln(w, "  list    Show every registered repo and the pipelines it provides")
-	fmt.Fprintln(w, "  add     Register a checkout explicitly (path or .)")
-	fmt.Fprintln(w, "  remove  Drop a registered repo by path or basename")
-	fmt.Fprintln(w, "  prune   Drop registered repos whose .sparkwing/ no longer exists")
-	fmt.Fprintln(w)
-	fmt.Fprintln(w, "OTHER")
-	fmt.Fprintln(w, "  -h, --help  Show this help and exit")
 }
 
 // runXrepoList prints every registered repo and the pipelines it
@@ -79,7 +55,12 @@ func runXrepoList(args []string) error {
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	pipelines := fs.Bool("pipelines", true,
 		"include pipeline names (set --pipelines=false to skip the per-repo describe call)")
-	_ = fs.Parse(args)
+	if err := parseAndCheck(cmdConfigureXrepoList, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
 
 	entries, err := repos.List()
 	if err != nil {
@@ -138,7 +119,12 @@ func runXrepoList(args []string) error {
 // the user asked for it.
 func runXrepoAdd(args []string) error {
 	fs := flag.NewFlagSet("repo add", flag.ExitOnError)
-	_ = fs.Parse(args)
+	if err := parseAndCheck(cmdConfigureXrepoAdd, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
 	target := "."
 	if fs.NArg() > 0 {
 		target = fs.Arg(0)
@@ -160,7 +146,12 @@ func runXrepoAdd(args []string) error {
 // user's intent is "I don't want this" and that's already true.
 func runXrepoRemove(args []string) error {
 	fs := flag.NewFlagSet("repo remove", flag.ExitOnError)
-	_ = fs.Parse(args)
+	if err := parseAndCheck(cmdConfigureXrepoRemove, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
 	if fs.NArg() == 0 {
 		return errors.New("usage: sparkwing configure xrepo remove <path-or-basename>")
 	}
@@ -177,7 +168,12 @@ func runXrepoRemove(args []string) error {
 // dir. Useful after moving / deleting a checkout.
 func runXrepoPrune(args []string) error {
 	fs := flag.NewFlagSet("repo prune", flag.ExitOnError)
-	_ = fs.Parse(args)
+	if err := parseAndCheck(cmdConfigureXrepoPrune, fs, args); err != nil {
+		if errors.Is(err, errHelpRequested) {
+			return nil
+		}
+		return err
+	}
 	dropped, err := repos.Prune()
 	if err != nil {
 		return err
