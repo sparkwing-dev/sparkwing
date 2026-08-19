@@ -287,7 +287,7 @@ sparkwing cluster status --profile prod -o json
 Manage controller API tokens
 
 All subcommands resolve controller URL + admin bearer from the
-named profile (or the default profile when --profile is omitted).
+profile named by --profile.
 Token creation prints the raw value to stdout exactly ONCE --
 stash it immediately.
 
@@ -316,16 +316,16 @@ this command exits it cannot be recovered.
 | `--principal NAME` | Free-form label identifying the token holder (required) |
 | `--scope CSV` | Comma-separated scopes (e.g. runs.read,runs.write); auth.md lists the full set |
 | `--ttl DURATION` | Token lifetime (e.g. 30d, 720h). 0 = never expires |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (required) |
 
 ### Examples
 
 ```sh
 # Mint a service token with write scopes
-sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write
+sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write --profile prod
 
 # Mint a user token that expires in 30 days
-sparkwing cluster tokens create --type user --principal alice --scope admin --ttl 720h
+sparkwing cluster tokens create --type user --principal alice --scope admin --ttl 720h --profile prod
 ```
 
 ## `sparkwing cluster tokens list`
@@ -351,16 +351,16 @@ scope arrays, suitable for piping into jq.
 | `--type KIND` | Filter by token type |
 | `--include-revoked` | Include revoked tokens in the output |
 | `-o, --output FORMAT` | Output format: pretty \| json (default: pretty) |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (required) |
 
 ### Examples
 
 ```sh
 # List all active tokens
-sparkwing cluster tokens list
+sparkwing cluster tokens list --profile prod
 
 # Audit every revoked service token
-sparkwing cluster tokens list --type service --include-revoked
+sparkwing cluster tokens list --type service --include-revoked --profile prod
 
 # Inspect the warm-runner pool token's scopes as JSON
 sparkwing cluster tokens list --profile prod -o json | jq '.[] | select(.principal=="agent:sparkwing-warm-runner") | .scopes'
@@ -377,13 +377,13 @@ Prints the JSON metadata for a token given its non-secret prefix. Useful for con
 | Flag | Description |
 |---|---|
 | `--prefix PREFIX` | Non-secret token prefix (required) |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (required) |
 
 ### Examples
 
 ```sh
 # Inspect a token before revoking
-sparkwing cluster tokens lookup --prefix a1b2c3d4
+sparkwing cluster tokens lookup --prefix a1b2c3d4 --profile prod
 ```
 
 ## `sparkwing cluster tokens revoke`
@@ -397,13 +397,13 @@ Subsequent requests using the token receive HTTP 401. Revocation is immediate an
 | Flag | Description |
 |---|---|
 | `--prefix PREFIX` | Non-secret token prefix (from 'tokens list') (required) |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (required) |
 
 ### Examples
 
 ```sh
 # Revoke a leaked token
-sparkwing cluster tokens revoke --prefix a1b2c3d4
+sparkwing cluster tokens revoke --prefix a1b2c3d4 --profile prod
 ```
 
 ## `sparkwing cluster tokens rotate`
@@ -421,13 +421,13 @@ lets callers cycle credentials without downtime.
 | `--prefix PREFIX` | Non-secret prefix of the token to rotate (required) |
 | `--grace DURATION` | Window during which the old token still authenticates (default: 24h) |
 | `--ttl DURATION` | TTL of the new token (0 = preserve the old token's remaining TTL) |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (required) |
 
 ### Examples
 
 ```sh
 # Rotate a token with a 48h grace window
-sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h
+sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h --profile prod
 ```
 
 ## `sparkwing cluster users`
