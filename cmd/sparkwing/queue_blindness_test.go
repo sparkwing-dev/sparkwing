@@ -53,7 +53,7 @@ func queueHome(t *testing.T) string {
 // serveQueueDaemon runs an idle daemon for home until the test ends.
 func serveQueueDaemon(t *testing.T, home string) {
 	t.Helper()
-	d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0"})
+	d, err := wingd.New(queueDaemonConfig(home))
 	if err != nil {
 		t.Fatalf("new daemon: %v", err)
 	}
@@ -74,6 +74,37 @@ func serveQueueDaemon(t *testing.T, home string) {
 		t.Fatalf("daemon exited before serving: %v", err)
 	case <-time.After(queueBlindnessWait):
 		t.Fatal("daemon never became ready")
+	}
+}
+
+func queueDaemonConfig(home string) wingd.Config {
+	return wingd.Config{Home: home, Version: "v1.0.0", Sampler: queueTestHostSampler{}}
+}
+
+type queueTestHostSampler struct{}
+
+func (queueTestHostSampler) Sample() (wingd.HostStat, error) {
+	return wingd.HostStat{
+		TotalCores:       8,
+		TotalMemoryBytes: 8 << 30,
+		FreeMemoryBytes:  8 << 30,
+		LoadMeasured:     true,
+		CPUMeasured:      true,
+		MemoryMeasured:   true,
+	}, nil
+}
+
+func TestQueueDaemonConfigUsesDeterministicHostSample(t *testing.T) {
+	sampler := queueDaemonConfig(t.TempDir()).Sampler
+	if sampler == nil {
+		t.Fatal("queue test daemon uses the live host sampler")
+	}
+	stat, err := sampler.Sample()
+	if err != nil {
+		t.Fatalf("sample test host: %v", err)
+	}
+	if stat.TotalCores != 8 || stat.TotalMemoryBytes != 8<<30 || stat.BusyCores != 0 {
+		t.Fatalf("test host sample = %+v, want idle 8-core, 8 GiB host", stat)
 	}
 }
 
