@@ -228,12 +228,16 @@ func TestReattach_RejectedAfterGrace(t *testing.T) {
 	}
 
 	startDaemon(t, wingd.Config{Home: home, GraceWindow: 150 * time.Millisecond})
+	started := time.Now()
 	time.Sleep(600 * time.Millisecond)
 
 	b := ensure(t, home, "")
 	_, err := b.Reattach(context.Background(), token)
 	if !errors.Is(err, client.ErrReattachRejected) {
 		t.Fatalf("reattach after grace: got %v, want ErrReattachRejected", err)
+	}
+	if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
+		t.Errorf("reattach rejection observation took %v, want less than 500ms", elapsed)
 	}
 }
 
