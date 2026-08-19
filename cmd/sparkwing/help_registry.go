@@ -249,7 +249,8 @@ trigger an upgrade without parsing prose.
 --offline skips the network fetch entirely; -o json emits the
 structured report; -o plain prints semver lines (CLI then
 latest) for shell pipelines.`,
-	SubcommandOrder: []string{"update", "hold"},
+	SubcommandOrder:    []string{"update", "hold"},
+	SubcommandOptional: true,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 		{Name: "offline", Desc: "Skip the network fetch for latest release", Group: "Behavior"},
@@ -1635,10 +1636,11 @@ the default for managed git hooks.`,
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/sparkwing.yaml", Required: true},
 	},
-	Flags:           runFlagSpecs,
-	GroupOrder:      []string{"Source", "Range", "Safety", "System", "Other"},
-	SubcommandOrder: []string{"config"},
-	UsageSuffix:     "[-- pipeline-flags...]",
+	Flags:              runFlagSpecs,
+	GroupOrder:         []string{"Source", "Range", "Safety", "System", "Other"},
+	SubcommandOrder:    []string{"config"},
+	SubcommandOptional: true,
+	UsageSuffix:        "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Run with no flags", "sparkwing run build-test-deploy"},
 		{"Pass a typed pipeline arg", "sparkwing run release --version v0.28.1"},
