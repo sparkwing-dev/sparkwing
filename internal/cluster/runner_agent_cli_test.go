@@ -102,6 +102,7 @@ func TestAgentConfig_DefaultsSpawnPolicy(t *testing.T) {
 // carried both the bearer token and the configured labels.
 func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 	var seen atomic.Value
+	claimSeen := make(chan struct{}, 1)
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /api/v1/nodes/claim", func(w http.ResponseWriter, r *http.Request) {
 		if h := r.Header.Get("Authorization"); !strings.HasPrefix(h, "Bearer ") {
@@ -118,6 +119,10 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 			holder: body.HolderID,
 		})
 		w.WriteHeader(http.StatusNoContent)
+		select {
+		case claimSeen <- struct{}{}:
+		default:
+		}
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -137,16 +142,32 @@ func TestAgent_ClaimPassesLabelsAndToken(t *testing.T) {
 	defer cancel()
 
 	started := time.Now()
-	if err := RunPoolLoop(ctx, PoolLoopConfig{
-		ControllerURL: cfg.Controller,
-		Token:         cfg.Token,
-		HolderPrefix:  "agent:test",
-		Labels:        cfg.Labels,
-		MaxConcurrent: cfg.MaxConcurrent,
-		PollInterval:  cfg.Poll,
-		Lease:         cfg.Lease,
-		SourceName:    "agent",
-	}, nil); err != nil && !errors.Is(err, context.DeadlineExceeded) {
+	done := make(chan error, 1)
+	go func() {
+		done <- RunPoolLoop(ctx, PoolLoopConfig{
+			ControllerURL: cfg.Controller,
+			Token:         cfg.Token,
+			HolderPrefix:  "agent:test",
+			Labels:        cfg.Labels,
+			MaxConcurrent: cfg.MaxConcurrent,
+			PollInterval:  cfg.Poll,
+			Lease:         cfg.Lease,
+			SourceName:    "agent",
+		}, nil)
+	}()
+	select {
+	case <-claimSeen:
+		cancel()
+	case <-ctx.Done():
+		t.Fatal("agent never made a claim call")
+	}
+	var runErr error
+	select {
+	case runErr = <-done:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("agent did not stop after claim observation")
+	}
+	if err := runErr; err != nil && !errors.Is(err, context.Canceled) {
 		t.Fatalf("RunPoolLoop: %v", err)
 	}
 
