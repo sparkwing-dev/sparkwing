@@ -14,36 +14,60 @@ func TestHolderKeepsMemoryBallastAliveThroughHoldLoop(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var holdLoopPos, keepAlivePos token.Pos
-	ast.Inspect(file, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
-		if !ok {
-			return true
+	body := holderRunBody(file)
+	if body == nil {
+		t.Fatal("holder run method not found")
+	}
+	for i := 0; i+1 < len(body.List); i++ {
+		if isSelectorCall(body.List[i], "h", "holdLoop", "") &&
+			isSelectorCall(body.List[i+1], "runtime", "KeepAlive", "ballast") {
+			return
 		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		receiver, ok := sel.X.(*ast.Ident)
-		if !ok {
-			return true
-		}
-		switch {
-		case receiver.Name == "h" && sel.Sel.Name == "holdLoop":
-			holdLoopPos = call.Pos()
-		case receiver.Name == "runtime" && sel.Sel.Name == "KeepAlive" && len(call.Args) == 1:
-			arg, ok := call.Args[0].(*ast.Ident)
-			if ok && arg.Name == "ballast" {
-				keepAlivePos = call.Pos()
-			}
-		}
-		return true
-	})
+	}
+	t.Fatal("holder run method does not keep memory ballast alive immediately after its hold loop")
+}
 
-	if holdLoopPos == token.NoPos {
-		t.Fatal("holder does not enter its hold loop")
+func holderRunBody(file *ast.File) *ast.BlockStmt {
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "run" || fn.Recv == nil || len(fn.Recv.List) != 1 {
+			continue
+		}
+		star, ok := fn.Recv.List[0].Type.(*ast.StarExpr)
+		if !ok {
+			continue
+		}
+		ident, ok := star.X.(*ast.Ident)
+		if ok && ident.Name == "holder" {
+			return fn.Body
+		}
 	}
-	if keepAlivePos == token.NoPos || keepAlivePos < holdLoopPos {
-		t.Fatal("memory ballast is not kept alive through the hold loop")
+	return nil
+}
+
+func isSelectorCall(stmt ast.Stmt, receiver, method, arg string) bool {
+	expr, ok := stmt.(*ast.ExprStmt)
+	if !ok {
+		return false
 	}
+	call, ok := expr.X.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	recv, ok := sel.X.(*ast.Ident)
+	if !ok || recv.Name != receiver || sel.Sel.Name != method {
+		return false
+	}
+	if arg == "" {
+		return len(call.Args) == 0
+	}
+	if len(call.Args) != 1 {
+		return false
+	}
+	ident, ok := call.Args[0].(*ast.Ident)
+	return ok && ident.Name == arg
 }
