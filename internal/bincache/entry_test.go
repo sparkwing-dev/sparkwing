@@ -336,6 +336,7 @@ func TestAcquireOrMaterializeClosesPublicationToLeaseGap(t *testing.T) {
 }
 
 func TestAcquireOrMaterializeAutomaticallyPrunesAfterNonCLIWrite(t *testing.T) {
+	t.Setenv("SPARKWING_HOME", t.TempDir())
 	t.Setenv(MaxCacheBytesEnv, "0")
 	t.Setenv(MaxCacheEntriesEnv, "1")
 
