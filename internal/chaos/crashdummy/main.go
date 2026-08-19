@@ -24,6 +24,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -214,8 +215,6 @@ func (h *holder) run() {
 	if h.hf.memMB > 0 {
 		ballast = holdMemory(h.hf.memMB)
 	}
-	_ = ballast
-
 	h.installSignals()
 	if h.hf.runMS > 0 {
 		go func() {
@@ -224,6 +223,7 @@ func (h *holder) run() {
 		}()
 	}
 	h.holdLoop()
+	runtime.KeepAlive(ballast)
 }
 
 func (h *holder) request() wingwire.AdmissionRequest {
