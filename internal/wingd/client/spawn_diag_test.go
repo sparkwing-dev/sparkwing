@@ -51,6 +51,7 @@ func TestEnsureDaemon_SurfacesDaemonBindFailure(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	started := time.Now()
 	_, err = EnsureDaemon(ctx, Options{
 		Home:        home,
 		Spawn:       spawn,
@@ -65,5 +66,8 @@ func TestEnsureDaemon_SurfacesDaemonBindFailure(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), logPath) {
 		t.Fatalf("error should name the daemon log path %q, got: %v", logPath, err)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("bind diagnostic returned in %s, want < 1s", elapsed)
 	}
 }
