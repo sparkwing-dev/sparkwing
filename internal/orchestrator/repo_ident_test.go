@@ -126,6 +126,23 @@ func TestCurrentProfileKey_UsesRunWorkDirAfterCWDChanges(t *testing.T) {
 	}
 }
 
+func TestCurrentProfileKey_FallsBackToCWDWithoutRunWorkDir(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "fallback-repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	previousWorkDir := sparkwing.CurrentRuntime().WorkDir
+	sparkwing.SetWorkDir("")
+	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
+	t.Chdir(repo)
+
+	if got := currentProfileKey("build"); got != "fallback-repo/build" {
+		t.Fatalf("profile key without run directory = %q, want fallback-repo/build", got)
+	}
+}
+
 // TestRepoShortName_BareRepoWorktreeResolvesToTheRepoName covers the pointer
 // shape a worktree of a bare repo carries: <repo>.git/worktrees/<name>, with
 // no .git directory level to strip.
@@ -135,7 +152,7 @@ func TestRepoShortName_BareRepoWorktreeResolvesToTheRepoName(t *testing.T) {
 	if err := os.MkdirAll(gitDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	wt := filepath.Join(root, "bw-1459")
+	wt := filepath.Join(root, "linked-worktree")
 	if err := os.MkdirAll(wt, 0o755); err != nil {
 		t.Fatal(err)
 	}
