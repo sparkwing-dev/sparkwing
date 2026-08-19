@@ -187,16 +187,30 @@ func TestGraceExpiry_ReleasesUnclaimedLease(t *testing.T) {
 		t.Fatalf("daemon1 exit: %v", err)
 	}
 
-	startDaemon(t, wingd.Config{Home: home, GraceWindow: 150 * time.Millisecond})
-	time.Sleep(600 * time.Millisecond)
-
+	startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})
+	started := time.Now()
 	q := ensure(t, home, "")
 	qs, err := q.QueueState(context.Background())
 	if err != nil {
 		t.Fatalf("queue state: %v", err)
 	}
-	if len(qs.Holders) != 0 {
-		t.Fatalf("expected 0 holders after grace window, got %d", len(qs.Holders))
+	if !holdsRun(qs, "a") {
+		t.Fatal("recovered holder was not visible during its grace window")
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for holdsRun(qs, "a") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		qs, err = q.QueueState(context.Background())
+		if err != nil {
+			t.Fatalf("queue state: %v", err)
+		}
+	}
+	if holdsRun(qs, "a") {
+		t.Fatal("recovered holder was not released after its grace window")
+	}
+	if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
+		t.Errorf("grace expiry observation took %v, want less than 500ms", elapsed)
 	}
 }
 
