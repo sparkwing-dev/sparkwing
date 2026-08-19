@@ -426,16 +426,21 @@ func TestIdleExit_NoWork(t *testing.T) {
 
 func TestIdleExit_WaitsForHolders(t *testing.T) {
 	home := shortHome(t)
-	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
+	const idleTimeout = 300 * time.Millisecond
+	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: idleTimeout})
 
 	a := ensure(t, home, "")
 	lease := mustAcquire(t, a, coreReq("a", 1))
 
-	time.Sleep(600 * time.Millisecond)
+	started := time.Now()
+	time.Sleep(idleTimeout + 100*time.Millisecond)
 	select {
 	case err := <-td.done:
 		t.Fatalf("daemon exited while a lease was held: %v", err)
 	default:
+	}
+	if elapsed := time.Since(started); elapsed >= 550*time.Millisecond {
+		t.Fatalf("held-lease observation took %s, want under 550ms", elapsed)
 	}
 
 	if err := lease.Release(); err != nil {
