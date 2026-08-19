@@ -102,7 +102,10 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 	}
 
 	started := time.Now()
-	time.Sleep(80 * time.Millisecond)
+	if _, err := s.DB().Exec(`UPDATE triggers SET lease_expires_at = ? WHERE id = ?`,
+		time.Now().Add(-time.Second).UnixNano(), "trig-c"); err != nil {
+		t.Fatalf("expire lease: %v", err)
+	}
 	ids, err = store.Maintenance.ReapExpiredTriggers(s, context.Background())
 	if err != nil {
 		t.Fatal(err)
