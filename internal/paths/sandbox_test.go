@@ -7,11 +7,9 @@ import (
 	"testing"
 )
 
-// TestDefaultPaths_NeverResolvesToTheRealHomeUnderTest is the standing
-// guarantee behind BW-1457: a fixture that forgets SPARKWING_HOME gets a
-// disposable sandbox, not the developer's ~/.sparkwing. The dispatch
-// test in cmd/sparkwing was rewriting the real version stamp on every
-// run before this landed.
+// TestDefaultPaths_NeverResolvesToTheRealHomeUnderTest guarantees that a
+// fixture which forgets SPARKWING_HOME gets a disposable sandbox rather than
+// the developer's ~/.sparkwing.
 func TestDefaultPaths_NeverResolvesToTheRealHomeUnderTest(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", "")
 

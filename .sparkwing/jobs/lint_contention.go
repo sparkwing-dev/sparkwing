@@ -55,8 +55,8 @@ const golangciContention = "parallel golangci-lint is running"
 // already been observed in swap.
 //
 // Cores set the budget rather than memory because wingd's external memory
-// reading is currently pinned at 80% of capacity and is not a real
-// measurement (BW-1454), while its core reading is.
+// reading is pinned at 80% of capacity rather than measured, while its core
+// reading reflects observed demand.
 //
 // Widening the scope did not move this number, which is worth stating
 // because it is the opposite of what it looks like. lintCoreCost prices
