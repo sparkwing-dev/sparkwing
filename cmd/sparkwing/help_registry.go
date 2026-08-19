@@ -1890,7 +1890,7 @@ Every human-driven client command (tokens, users, jobs
 retry/cancel/prune/logs, gc) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
 exist on other commands; profiles are the only config surface.`,
-	SubcommandOrder: []string{"add", "list", "show", "use", "remove", "duplicate", "set", "test"},
+	SubcommandOrder: []string{"add", "list", "show", "remove", "duplicate", "set", "test"},
 }
 
 var cmdProfilesAdd = Command{
@@ -1931,37 +1931,22 @@ var cmdProfilesShow = Command{
 	Path:     "sparkwing configure profiles show",
 	Synopsis: "Print one profile's full config",
 	Description: `Prints all fields of the profile named by --name. Token is
-redacted unless --show-token is passed. Omitting --name prints
-the current default profile.`,
+redacted unless --show-token is passed.`,
 	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "Input"},
+		{Name: "name", Argument: "NAME", Desc: "Profile name", Required: true, Group: "Input"},
 		{Name: "show-token", Desc: "Print the raw token (redacted by default)", Group: "Output"},
 	},
 	GroupOrder: []string{"Input", "Output", "Other"},
 	Examples: []Example{
-		{"Show the default profile", "sparkwing configure profiles show"},
+		{"Show a named profile", "sparkwing configure profiles show --name prod"},
 		{"Show a named profile with the raw token", "sparkwing configure profiles show --name prod --show-token"},
-	},
-}
-
-var cmdProfilesUse = Command{
-	Path:     "sparkwing configure profiles use",
-	Synopsis: "Set the default profile",
-	Description: `Updates profiles.yaml so commands run without --profile target this
-profile. The previous default is untouched beyond losing its
-default status.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Profile name to mark as default", Required: true, Group: "Input"},
-	},
-	Examples: []Example{
-		{"Switch the default to prod", "sparkwing configure profiles use --name prod"},
 	},
 }
 
 var cmdProfilesRemove = Command{
 	Path:        "sparkwing configure profiles remove",
 	Synopsis:    "Delete a profile",
-	Description: `Removes the entry from profiles.yaml. If the removed profile was the default, no new default is auto-picked -- operators must pass --profile on every call or set one via 'sparkwing configure profiles use --name <X>'.`,
+	Description: `Removes the named entry from profiles.yaml.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Profile name to remove", Required: true, Group: "Input"},
 	},
@@ -3200,12 +3185,11 @@ Exit code is non-zero when any probe fails. Missing optional
 services (logs, gitcache) count as warn, not fail, so a
 minimally-configured laptop profile can still exit 0.`,
 	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
 	Examples: []Example{
-		{"Probe the default profile", "sparkwing configure profiles test"},
 		{"Probe a named profile", "sparkwing configure profiles test --profile prod"},
 		{"JSON for scripting", "sparkwing configure profiles test --profile prod -o json"},
 	},

@@ -100,7 +100,6 @@ exist on other commands; profiles are the only config surface.
 - `add` -- Register a new connection profile
 - `list` -- Print every registered profile
 - `show` -- Print one profile's full config
-- `use` -- Set the default profile
 - `remove` -- Delete a profile
 - `duplicate` -- Copy one profile's config into another
 - `set` -- Update fields on an existing profile
@@ -180,7 +179,7 @@ sparkwing configure profiles list -o json
 
 Delete a profile
 
-Removes the entry from profiles.yaml. If the removed profile was the default, no new default is auto-picked -- operators must pass --profile on every call or set one via 'sparkwing configure profiles use --name <X>'.
+Removes the named entry from profiles.yaml.
 
 ### Flags
 
@@ -226,21 +225,20 @@ sparkwing configure profiles set --name prod --controller https://api.sparkwing.
 Print one profile's full config
 
 Prints all fields of the profile named by --name. Token is
-redacted unless --show-token is passed. Omitting --name prints
-the current default profile.
+redacted unless --show-token is passed.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
-| `--name NAME` | Profile name (default: current default) |
+| `--name NAME` | Profile name (required) |
 | `--show-token` | Print the raw token (redacted by default) |
 
 ### Examples
 
 ```sh
-# Show the default profile
-sparkwing configure profiles show
+# Show a named profile
+sparkwing configure profiles show --name prod
 
 # Show a named profile with the raw token
 sparkwing configure profiles show --name prod --show-token
@@ -264,41 +262,17 @@ minimally-configured laptop profile can still exit 0.
 
 | Flag | Description |
 |---|---|
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (required) |
 | `-o, --output FMT` | Output format (json\|table) |
 
 ### Examples
 
 ```sh
-# Probe the default profile
-sparkwing configure profiles test
-
 # Probe a named profile
 sparkwing configure profiles test --profile prod
 
 # JSON for scripting
 sparkwing configure profiles test --profile prod -o json
-```
-
-## `sparkwing configure profiles use`
-
-Set the default profile
-
-Updates profiles.yaml so commands run without --profile target this
-profile. The previous default is untouched beyond losing its
-default status.
-
-### Flags
-
-| Flag | Description |
-|---|---|
-| `--name NAME` | Profile name to mark as default (required) |
-
-### Examples
-
-```sh
-# Switch the default to prod
-sparkwing configure profiles use --name prod
 ```
 
 ## `sparkwing configure xrepo`

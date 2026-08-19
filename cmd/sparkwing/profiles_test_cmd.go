@@ -1,4 +1,4 @@
-// `sparkwing profiles test` -- one-shot health check for the selected
+// `sparkwing configure profiles test` -- one-shot health check for the selected
 // profile. Probes controller reachability, auth, logs, and gitcache
 // so operators can distinguish "my CLI is wrong" from "the controller
 // is down" without running four curl commands by hand.
@@ -43,7 +43,7 @@ type profileTestReport struct {
 
 func runProfilesTest(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesTest.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
 	if err := parseAndCheck(cmdProfilesTest, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {

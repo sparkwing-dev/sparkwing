@@ -1,4 +1,4 @@
-// `sparkwing profiles` subcommand. Manages ~/.config/sparkwing/profiles.yaml,
+// `sparkwing configure profiles` subcommand. Manages ~/.config/sparkwing/profiles.yaml,
 // which is the SOLE source of connection info for every human-driven
 // client command (tokens, users, jobs retry/cancel/prune/logs, gc,
 // fleet-worker, cluster-mode web).
@@ -125,7 +125,7 @@ func runProfilesList(args []string) error {
 	// be mistaken for a record.
 	if len(cfg.Profiles) == 0 {
 		fmt.Fprintln(os.Stderr, "no profiles configured")
-		fmt.Fprintf(os.Stderr, "expected at %s -- register one with `sparkwing profiles add`\n", path)
+		fmt.Fprintf(os.Stderr, "expected at %s -- register one with `sparkwing configure profiles add --name NAME --controller URL`\n", path)
 		return nil
 	}
 	index := make([]profileIndex, 0, len(cfg.Profiles))
@@ -288,7 +288,7 @@ func runProfilesDuplicate(args []string) error {
 	if err := profile.Save(path, cfg); err != nil {
 		return err
 	}
-	fmt.Fprintf(os.Stdout, "duplicated %q -> %q (now edit it with `sparkwing profiles show %s` + text editor, or remove+re-add)\n", src, dst, dst)
+	fmt.Fprintf(os.Stdout, "duplicated %q -> %q (inspect it with `sparkwing configure profiles show --name %s`, then edit profiles.yaml or remove and re-add it)\n", src, dst, dst)
 	return nil
 }
 

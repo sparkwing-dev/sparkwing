@@ -377,10 +377,9 @@ func shippedProse(md string) (string, error) {
 // fence is still read as commands, so the default stays strict and the
 // narrowing only ever drops a fence that declares itself something else.
 //
-// The second is that a quoted run inside a unit is itself a unit. The
-// generated CLI reference quotes commands mid-sentence -- "set one via
-// 'sparkwing configure profiles use'" -- and those are as much an instruction
-// as a line in a fence.
+// The second is that a quoted run inside a unit is itself a unit. Generated
+// references can quote commands mid-sentence, and those are as much an
+// instruction as a line in a fence.
 func codeUnits(md string) []string {
 	var out []string
 	add := func(s string) {
@@ -439,8 +438,8 @@ func shellFence(info string) bool {
 // dispatchedPaths returns every invocation the binary answers, from both of
 // the places that decide it.
 //
-// The registry carries the nested paths -- `sparkwing configure profiles use`
-// -- and is the binary's own account of its surface: `sparkwing commands`
+// The registry carries nested paths and is the binary's own account of its
+// surface: `sparkwing commands`
 // serves it, the help renderer reads it, and TestAllCommandsAreRegistered
 // holds it level with help_registry.go. It is not the whole answer, because
 // runSparkwing also branches on verbs the registry does not carry:
