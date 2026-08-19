@@ -515,6 +515,40 @@ func TestQueueExecSurvivesAdmissionDaemonRestart(t *testing.T) {
 	}
 }
 
+func TestStartQueueExecSuccessorWaitsForReadiness(t *testing.T) {
+	ready := make(chan struct{})
+	runStarted := make(chan struct{})
+	allowReady := make(chan struct{})
+	stopRun := make(chan struct{})
+	returned := make(chan error, 1)
+	var done <-chan error
+	go func() {
+		var err error
+		done, err = startQueueExecSuccessor(func() error {
+			close(runStarted)
+			<-allowReady
+			close(ready)
+			<-stopRun
+			return nil
+		}, ready)
+		returned <- err
+	}()
+	<-runStarted
+	select {
+	case err := <-returned:
+		t.Fatalf("successor start returned before readiness: %v", err)
+	default:
+	}
+	close(allowReady)
+	if err := <-returned; err != nil {
+		t.Fatalf("successor start: %v", err)
+	}
+	close(stopRun)
+	if err := <-done; err != nil {
+		t.Fatalf("successor run: %v", err)
+	}
+}
+
 func installQueueExecInProcessSuccessor(t *testing.T, home string) {
 	t.Helper()
 	original := queueExecClientOptions
