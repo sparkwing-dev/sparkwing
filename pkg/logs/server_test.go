@@ -68,7 +68,7 @@ func TestLogs_FilterPreservesFinalNewline(t *testing.T) {
 			if err := c.Append(ctx, "run-filter", tc.name, []byte(tc.data)); err != nil {
 				t.Fatal(err)
 			}
-			got, err := c.ReadFiltered(ctx, "run-filter", tc.name, logs.ReadFilter{Grep: "i"})
+			got, err := c.ReadFiltered(ctx, "run-filter", tc.name, logs.ReadFilter{Head: 2})
 			if err != nil {
 				t.Fatal(err)
 			}
