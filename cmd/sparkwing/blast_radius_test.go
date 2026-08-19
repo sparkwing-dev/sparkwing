@@ -8,6 +8,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+var _ func(string, []stepRiskFinding, runFlags) error = enforceRiskGate
+
 func destructiveFinding() []stepRiskFinding {
 	return []stepRiskFinding{
 		{NodeID: "deploy", StepID: "destroy-eks", Labels: []string{"destructive"}},
