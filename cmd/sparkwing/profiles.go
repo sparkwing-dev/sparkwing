@@ -1,4 +1,4 @@
-// `sparkwing profiles` subcommand. Manages ~/.config/sparkwing/profiles.yaml,
+// `sparkwing configure profiles` subcommand. Manages ~/.config/sparkwing/profiles.yaml,
 // which is the SOLE source of connection info for every human-driven
 // client command (tokens, users, jobs retry/cancel/prune/logs, gc,
 // fleet-worker, cluster-mode web).

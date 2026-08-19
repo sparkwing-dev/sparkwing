@@ -33,7 +33,7 @@ func TestPrintHelpHidesHiddenFlag(t *testing.T) {
 
 func TestProfilesRegistryMatchesDispatcher(t *testing.T) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "profiles.go", nil, parser.ParseComments)
+	file, err := parser.ParseFile(fset, "profiles.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

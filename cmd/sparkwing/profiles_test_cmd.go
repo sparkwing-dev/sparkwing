@@ -1,4 +1,4 @@
-// `sparkwing profiles test` -- one-shot health check for the selected
+// `sparkwing configure profiles test` -- one-shot health check for the selected
 // profile. Probes controller reachability, auth, logs, and gitcache
 // so operators can distinguish "my CLI is wrong" from "the controller
 // is down" without running four curl commands by hand.
