@@ -1766,16 +1766,14 @@ with --runner k8s|warm and image / service-account flags, use
 sparkwing-runner.
 
 Run against a remote controller via --profile prod (or whichever profile),
-or against a local 'sparkwing dashboard start' via --profile local. With
---profile omitted, uses the default profile from profiles.yaml.`,
+or against a local 'sparkwing dashboard start' via --profile local.`,
 	Flags: []FlagSpec{
-		{Name: "profile", Argument: "PROFILE", Desc: "Profile name from profiles.yaml (default: default profile)", Group: "Connection"},
+		{Name: "profile", Argument: "PROFILE", Desc: "Profile name from profiles.yaml", Required: true, Group: "Connection"},
 		{Name: "poll", Argument: "DUR", Desc: "Claim poll interval when the queue is empty", Default: "1s", Group: "Tuning"},
 		{Name: "heartbeat", Argument: "DUR", Desc: "Claim-lease heartbeat cadence", Default: "5s", Group: "Tuning"},
 	},
 	GroupOrder: []string{"Connection", "Tuning", "Other"},
 	Examples: []Example{
-		{"Run against the default profile", "sparkwing cluster worker"},
 		{"Run against a named profile", "sparkwing cluster worker --profile local"},
 		{"Faster polling for tight dev loops", "sparkwing cluster worker --profile local --poll 250ms"},
 	},

@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `cluster worker --help` marks `--profile` required and no longer
+  claims a global default profile.
 - **cli:** Secret command help distinguishes local files from named remote
   profiles and includes examples for both modes.
 - **cli:** Required `--profile` flags no longer claim a default value.
