@@ -536,7 +536,7 @@ terminal status -- without two separate lookups.
 
 ```sh
 # List hooks on a repo
-sparkwing cluster webhooks list --repo your-org/my-app --profile prod
+sparkwing cluster webhooks list --repo your-org/my-app
 
 # Recent deliveries for a hook
 sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 608819334 --since 1h --profile prod
@@ -590,13 +590,12 @@ render as "(non-sparkwing)".
 |---|---|
 | `--repo OWNER/NAME` | GitHub repo (owner can be omitted if gh has a default) (required) |
 | `-o, --output FMT` | Output format (json\|table) |
-| `--profile NAME` | Profile name (reserved for symmetry; unused by list) |
 
 ### Examples
 
 ```sh
 # List hooks on a repo
-sparkwing cluster webhooks list --repo your-org/my-app --profile prod
+sparkwing cluster webhooks list --repo your-org/my-app
 ```
 
 ## `sparkwing cluster webhooks replay`
@@ -614,13 +613,12 @@ appears in the hook's delivery log within seconds.
 | `--repo OWNER/NAME` | GitHub repo (required) |
 | `--hook N` | GitHub hook id (required) |
 | `--delivery UUID` | Delivery GUID to redeliver (required) |
-| `--profile NAME` | Profile name (reserved; unused by replay) |
 
 ### Examples
 
 ```sh
 # Redeliver a webhook attempt
-sparkwing cluster webhooks replay --repo your-org/my-app --hook 608819334 --delivery 0ac55946-3e96-11f1-9de8-f33e32f0060f --profile prod
+sparkwing cluster webhooks replay --repo your-org/my-app --hook 608819334 --delivery 0ac55946-3e96-11f1-9de8-f33e32f0060f
 ```
 
 ## `sparkwing cluster worker`
