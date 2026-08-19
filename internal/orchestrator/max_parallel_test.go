@@ -42,7 +42,6 @@ func TestMaxParallel_CapsConcurrentNodeExecution(t *testing.T) {
 			active:         &active,
 			peak:           &peak,
 			observedAtZero: &observedAtZero,
-			capacity:       cap,
 			entered:        entered,
 			release:        release,
 		}
@@ -113,9 +112,8 @@ type maxParallelPipe struct {
 	active         *atomic.Int32
 	peak           *atomic.Int32
 	observedAtZero *atomic.Bool
-	capacity       int32
+	entered        chan<- struct{}
 	release        chan struct{}
-	releaseOnce    sync.Once
 }
 
 func (p *maxParallelPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -133,9 +131,7 @@ func (p *maxParallelPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkw
 					break
 				}
 			}
-			if n == p.capacity {
-				p.releaseOnce.Do(func() { close(p.release) })
-			}
+			p.entered <- struct{}{}
 			select {
 			case <-p.release:
 				return nil
