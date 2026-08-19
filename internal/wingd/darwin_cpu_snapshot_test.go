@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// WHY: fixtures are the `pid ppid time` form `ps -Ao pid=,ppid=,time=` prints,
-// where the third column is CUMULATIVE CPU time. Utilization is the difference
+// Fixtures use the `pid ppid time` form printed by `ps -Ao pid=,ppid=,time=`.
+// The third column is cumulative CPU time. Utilization is the difference
 // between two of these over the wall time between them.
 
 func TestDarwinCPUSnapshotPairsHostAndOwnedUnion(t *testing.T) {
@@ -32,10 +32,10 @@ func TestDarwinCPUSnapshotPairsHostAndOwnedUnion(t *testing.T) {
 }
 
 func TestDarwinCPUSnapshotCreditsNoCPUToAnIdleLongLivedProcess(t *testing.T) {
-	// WHY: this is the defect that booked an idle laptop. A process that burned
-	// hours of CPU earlier and is now idle carries a huge CUMULATIVE total, and
-	// the lifetime average `ps -o pcpu=` reports stays high forever. Differencing
-	// two readings must credit it ZERO, because between them it did nothing.
+	// A process that burned hours of CPU earlier and is now idle carries a large
+	// cumulative total, so its lifetime average from `ps -o pcpu=` remains high.
+	// Differencing two readings must credit it zero because it did no work between
+	// them.
 	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n99 1 9:59:59.00\n")
 	if !ok {
 		t.Fatal("parse previous snapshot failed")
@@ -56,7 +56,7 @@ func TestDarwinCPUSnapshotCreditsNoCPUToAnIdleLongLivedProcess(t *testing.T) {
 }
 
 func TestDarwinCPUSnapshotFirstTickIsUnmeasured(t *testing.T) {
-	// WHY: with nothing to difference against, the honest answer is "no reading",
+	// With nothing to difference against, the result is "no reading",
 	// never a since-start average. Reporting one would book cores against work
 	// that finished before the daemon started.
 	current, ok := parseDarwinCPUSnapshot("1 0 5:00.00\n")
@@ -72,7 +72,7 @@ func TestDarwinCPUSnapshotFirstTickIsUnmeasured(t *testing.T) {
 }
 
 func TestDarwinCPUSnapshotIgnoresABackwardsOrNewPID(t *testing.T) {
-	// WHY: a PID reused by a shorter-lived process reads backwards, and a process
+	// A PID reused by a shorter-lived process reads backwards, and a process
 	// born since the last tick has no baseline. Crediting either imports CPU from
 	// outside the interval.
 	previous, ok := parseDarwinCPUSnapshot("1 0 1:00.00\n")

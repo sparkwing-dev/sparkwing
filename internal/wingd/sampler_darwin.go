@@ -136,7 +136,7 @@ func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, float64, bool,
 	if !ok {
 		return stat, 0, false, nil
 	}
-	// WHY: cumulative CPU time is only a utilization once differenced against a
+	// Cumulative CPU time is only a utilization once differenced against a
 	// prior reading, so the previous snapshot and the wall time since it are
 	// carried on the sampler. The first tick has nothing to difference and
 	// reports unmeasured; callers already handle that (CPUMeasured=false).
