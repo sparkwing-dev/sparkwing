@@ -609,12 +609,12 @@ func runJobs(args []string) error {
 			return err
 		}
 		*runID = normalizeRunID(*runID)
-		resolvedFmt, err := resolveTTYAwareOutput(*outFmt, "jobs logs")
+		resolvedFmt, err := resolveTTYAwareOutput(*outFmt, "runs logs")
 		if err != nil {
 			return err
 		}
 		if *tail > 0 && *head > 0 {
-			return errors.New("jobs logs: --tail and --head cannot be combined")
+			return errors.New("runs logs: --tail and --head cannot be combined")
 		}
 		opts := orchestrator.LogsOpts{
 			Node:       *node,

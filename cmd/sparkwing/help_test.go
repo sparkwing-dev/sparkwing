@@ -326,6 +326,14 @@ func TestRunsLogsHelpIncludesEventFilters(t *testing.T) {
 	}
 }
 
+func TestRunsHelpUsesPublicLogsCommandName(t *testing.T) {
+	var buf bytes.Buffer
+	PrintHelp(cmdJobs, &buf)
+	if strings.Contains(buf.String(), "jobs logs") {
+		t.Fatalf("runs help advertises retired command name:\n%s", buf.String())
+	}
+}
+
 func TestBindFlagsString(t *testing.T) {
 	cmd := Command{
 		Path: "sparkwing bind-test",

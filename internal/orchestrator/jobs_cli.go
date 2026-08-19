@@ -690,7 +690,7 @@ func renderApprovalsSection(out io.Writer, approvals []*store.Approval) {
 	}
 }
 
-// LogsOpts configures `sparkwing jobs logs`.
+// LogsOpts configures `sparkwing runs logs`.
 type LogsOpts struct {
 	Node   string
 	JSON   bool
@@ -828,7 +828,7 @@ func JobLogs(ctx context.Context, paths Paths, runID string, opts LogsOpts, out 
 		return err
 	}
 	if opts.EventsOnly && opts.NoEvents {
-		return fmt.Errorf("jobs logs: --events-only and --no-events are mutually exclusive")
+		return fmt.Errorf("runs logs: --events-only and --no-events are mutually exclusive")
 	}
 	b, closer, berr := readBackendFor(ctx, paths, opts.Profile)
 	if berr != nil {

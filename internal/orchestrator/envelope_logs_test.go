@@ -214,4 +214,7 @@ func TestJobLogs_EventsOnlyAndNoEventsConflict(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when both --events-only and --no-events are set")
 	}
+	if !strings.HasPrefix(err.Error(), "runs logs:") {
+		t.Fatalf("error = %q, want runs logs prefix", err)
+	}
 }

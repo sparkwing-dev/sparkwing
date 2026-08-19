@@ -183,7 +183,7 @@ type ReadFilter struct {
 }
 
 // ReadFiltered is Read with server-side line filters. Matches the
-// flag set exposed on `sparkwing jobs logs` so cluster-mode never
+// flag set exposed on `sparkwing runs logs` so cluster-mode never
 // tails a million lines over the wire.
 func (c *Client) ReadFiltered(ctx context.Context, runID, nodeID string, f ReadFilter) ([]byte, error) {
 	u := fmt.Sprintf("%s/api/v1/logs/%s/%s", c.baseURL,
