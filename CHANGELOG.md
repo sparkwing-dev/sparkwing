@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** Zsh completion no longer advertises removed profile runner
+  selection.
 - **cli:** Zsh completion no longer queries removed pipeline target metadata
   when completing `--target`.
 - **cli:** `runs cancel --help` documents the existing `--home` option for

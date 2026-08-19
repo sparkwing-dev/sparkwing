@@ -501,9 +501,7 @@ _sparkwing() {
         return
     fi
 
-    # Value completion: --sw-profile <TAB> -> profile names, optionally
-    # filtered to those whose default_runner sits in the pipeline's
-    # allowed runner set when the pipeline is known.
+    # Value completion: --sw-profile <TAB> -> profile names.
     if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--sw-profile" ]]; then
         local pipe=""
         if (( ${#swpath[@]} >= 2 )) && [[ "${swpath[1]}" == "run" ]]; then
@@ -525,15 +523,6 @@ _sparkwing() {
     # cursor, so describe/explain/new all share the same menu.
     if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--pipeline" ]]; then
         _sparkwing_complete_pipelines
-        return
-    fi
-
-    # Value completion: --default-runner <TAB> -> runner names.
-    # Used by sparkwing configure profiles add/set --default-runner.
-    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--default-runner" ]]; then
-        local -a runs
-        runs=( ${(f)"$(sparkwing _complete-runners 2>/dev/null)"} )
-        _describe -t runners 'runner' runs
         return
     fi
 
