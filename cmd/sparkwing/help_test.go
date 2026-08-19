@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"slices"
 	"strings"
 	"testing"
 
@@ -303,9 +304,24 @@ func TestCommandFlagsAreUnique(t *testing.T) {
 func TestRunsLogsHelpIncludesEventFilters(t *testing.T) {
 	var buf bytes.Buffer
 	PrintHelp(cmdJobsLogs, &buf)
-	for _, name := range []string{"--events-only", "--no-events"} {
+	for _, tc := range []struct {
+		name     string
+		conflict string
+	}{
+		{name: "events-only", conflict: "no-events"},
+		{name: "no-events", conflict: "events-only"},
+	} {
+		name := "--" + tc.name
 		if !containsFlagRow(buf.String(), name) {
 			t.Errorf("runs logs help omits accepted flag %s:\n%s", name, buf.String())
+		}
+		spec, ok := findFlagSpec(cmdJobsLogs.Flags, tc.name)
+		if !ok {
+			t.Errorf("runs logs registry omits accepted flag %s", name)
+			continue
+		}
+		if !slices.Contains(spec.ConflictsWith, tc.conflict) {
+			t.Errorf("%s does not declare its conflict with --%s", name, tc.conflict)
 		}
 	}
 }
@@ -447,6 +463,15 @@ func flagNames(fs []FlagSpec) []string {
 		out[i] = "--" + f.Name
 	}
 	return out
+}
+
+func findFlagSpec(flags []FlagSpec, name string) (FlagSpec, bool) {
+	for _, spec := range flags {
+		if spec.Name == name {
+			return spec, true
+		}
+	}
+	return FlagSpec{}, false
 }
 
 // containsFlagRow returns true when out contains a help-formatted
