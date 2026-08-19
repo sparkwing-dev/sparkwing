@@ -49,7 +49,7 @@ func runPipelineConfigInspect(pipeline string, extra []string) error {
 	if !ok {
 		return unknownPipelineErr(pipeline)
 	}
-	pipelineYAML, _ := loadPipelineYAML(pipeline)
+	pipelineYAML := loadPipelineYAML(pipeline)
 
 	secFields, err := sparkwing.InspectPipelineSecrets(context.Background(), reg, pipelineYAML)
 	if err != nil {

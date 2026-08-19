@@ -7,7 +7,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -135,7 +134,7 @@ func Main() {
 		os.Exit(1)
 	}
 
-	pipelineYAML, sparkwingDir := loadPipelineYAML(pipeline)
+	pipelineYAML := loadPipelineYAML(pipeline)
 
 	delegate := selectLocalRenderer()
 	opts := Options{
@@ -153,7 +152,6 @@ func Main() {
 		MaxParallel:         runtime.NumCPU(),
 		DispatchWaitTimeout: parseDispatchWaitTimeout(os.Getenv("SPARKWING_DISPATCH_WAIT_TIMEOUT")),
 		PipelineYAML:        pipelineYAML,
-		SparkwingDir:        sparkwingDir,
 	}
 	opts.Admission = pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal)
 	if projectCfg != nil {
@@ -590,19 +588,17 @@ func readDebugDirectivesFromEnv() DebugDirectives {
 // loadPipelineYAML walks up from cwd looking for
 // .sparkwing/sparkwing.yaml and returns the entry for the named
 // pipeline (nil when there's no sparkwing.yaml or the pipeline isn't
-// listed). Also returns the resolved .sparkwing/ directory so the
-// orchestrator can consult the same file's sources section from the
-// same root.
-func loadPipelineYAML(pipeline string) (*pipelines.Pipeline, string) {
+// listed).
+func loadPipelineYAML(pipeline string) *pipelines.Pipeline {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, ""
+		return nil
 	}
-	yamlPath, cfg, err := projectconfig.DiscoverPipelines(cwd)
+	_, cfg, err := projectconfig.DiscoverPipelines(cwd)
 	if err != nil || cfg == nil {
-		return nil, ""
+		return nil
 	}
-	return cfg.Find(pipeline), filepath.Dir(yamlPath)
+	return cfg.Find(pipeline)
 }
 
 func splitCommaClean(s string) []string {
