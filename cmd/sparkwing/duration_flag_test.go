@@ -18,4 +18,3 @@ func TestLookbackDurationFlagAcceptsDocumentedDaySuffix(t *testing.T) {
 		t.Fatalf("--since 7d = %s, want %s", *since, 7*24*time.Hour)
 	}
 }
-

@@ -361,7 +361,7 @@ func cancelQueuedLocalRuns(ctx context.Context, home string, ids []string) (done
 func runRunsPrune(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsPrune.Path, flag.ContinueOnError)
 	on := fs.String("profile", "", "profile name (default: current default)")
-	olderThan := fs.Duration("older-than", 0, "prune runs older than this (e.g. 7d, 48h)")
+	olderThan := lookbackDuration(fs, "older-than", 0, "prune runs older than this (e.g. 7d, 48h)")
 	dryRun := fs.Bool("dry-run", false, "list matching runs without deleting")
 	runIDs := multiFlagVar(fs, "run", "specific run id to prune (repeatable; use --run - to read ids from stdin)")
 	if err := parseAndCheck(cmdJobsPrune, fs, args); err != nil {

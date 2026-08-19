@@ -38,11 +38,11 @@ func ParseSearch(raw string) SearchTerms {
 	return out
 }
 
-// parseLooseDuration accepts time.ParseDuration plus the `d` and
+// ParseLooseDuration accepts time.ParseDuration plus the `d` and
 // `w` suffixes the dashboard filter bar uses ("7d", "2w"). A bare
 // number is rejected -- callers must supply a unit so "7" doesn't
 // silently mean "7 nanoseconds".
-func parseLooseDuration(v string) (time.Duration, error) {
+func ParseLooseDuration(v string) (time.Duration, error) {
 	if v == "" {
 		return 0, errors.New("empty duration")
 	}
@@ -100,7 +100,7 @@ func ParseLooseDate(raw string) (time.Time, error) {
 		y := now.AddDate(0, 0, -1)
 		return time.Date(y.Year(), y.Month(), y.Day(), 0, 0, 0, 0, y.Location()), nil
 	}
-	if d, err := parseLooseDuration(v); err == nil {
+	if d, err := ParseLooseDuration(v); err == nil {
 		return now.Add(-d), nil
 	}
 	for _, layout := range []string{
