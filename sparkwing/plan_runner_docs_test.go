@@ -154,6 +154,7 @@ func assertPreferenceContract(t *testing.T, doc string) {
 		"default runner",
 		"biases runner selection",
 		"dispatch snapshot",
+		"pipeline explain",
 		"renderer",
 		"dashboard",
 	} {
