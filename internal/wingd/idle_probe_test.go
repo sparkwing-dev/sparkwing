@@ -3,6 +3,7 @@ package wingd_test
 import (
 	"context"
 	"net"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -55,8 +56,9 @@ func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
 }
 
 func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
+	const idleTimeout = 300 * time.Millisecond
 	home := shortHome(t)
-	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
+	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: idleTimeout})
 
 	firstCtx, firstDone := context.WithTimeout(context.Background(), 2*time.Second)
 	defer firstDone()
@@ -66,13 +68,25 @@ func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
 
 	ctx, stopQueries := context.WithCancel(context.Background())
 	defer stopQueries()
+	var successfulQueries, firstSuccess, lastSuccess atomic.Int64
 	probeLoop(ctx, 50*time.Millisecond, func(ctx context.Context) error {
 		_, err := client.Query(ctx, client.Options{Home: home, Version: "test"})
+		if err == nil {
+			now := time.Now().UnixNano()
+			firstSuccess.CompareAndSwap(0, now)
+			lastSuccess.Store(now)
+			successfulQueries.Add(1)
+		}
 		return err
 	})
 
 	if err := td.waitExit(t, 3*time.Second); err != nil {
 		t.Fatalf("daemon with only queue-state query traffic should idle out cleanly, got %v", err)
+	}
+	count := successfulQueries.Load()
+	span := time.Duration(lastSuccess.Load() - firstSuccess.Load())
+	if count < 3 || span < idleTimeout/2 {
+		t.Fatalf("query loop completed %d successful observations over %s; want repeated traffic spanning the idle window", count, span)
 	}
 }
 
