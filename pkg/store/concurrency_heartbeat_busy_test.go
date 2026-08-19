@@ -20,7 +20,7 @@ func busyProneDSN(path string) string {
 
 // TestHeartbeatConcurrencySlot_RetriesTransientBusy holds the write lock
 // on a separate connection, fires a heartbeat against a busy_timeout(0)
-// store so the first attempts see an un-absorbed SQLITE_BUSY, then frees
+// store so the first attempt sees an un-absorbed SQLITE_BUSY, then frees
 // the lock mid-flight. Success can only come from the heartbeat's own
 // bounded retry; without it the heartbeat would lapse a live lease.
 func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
@@ -56,6 +56,7 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin lock tx: %v", err)
 	}
+	defer func() { _ = lockTx.Rollback() }()
 	if _, err := lockTx.ExecContext(ctx,
 		`UPDATE concurrency_holders SET lease_expires_at = lease_expires_at WHERE key = 'k'`,
 	); err != nil {
