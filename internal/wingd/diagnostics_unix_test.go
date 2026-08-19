@@ -38,17 +38,23 @@ func TestDiagnosticsDumpsOnSIGUSR1(t *testing.T) {
 		t.Fatalf("raise SIGUSR1: %v", err)
 	}
 
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(5 * time.Second)
+	defer deadline.Stop()
+	for {
 		mu.Lock()
 		got := strings.Join(lines, "\n")
 		mu.Unlock()
 		if strings.Contains(got, "goroutine dump") {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatal("SIGUSR1 produced no goroutine dump in the daemon log")
+		}
 	}
-	t.Fatal("SIGUSR1 produced no goroutine dump in the daemon log")
 }
 
 // seedOversizedLog gives home a daemon log one byte past the cap and
