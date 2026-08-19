@@ -1990,7 +1990,7 @@ var cmdTokens = Command{
 	Path:     "sparkwing cluster tokens",
 	Synopsis: "Manage controller API tokens",
 	Description: `All subcommands resolve controller URL + admin bearer from the
-named profile (or the default profile when --profile is omitted).
+profile named by --profile.
 Token creation prints the raw value to stdout exactly ONCE --
 stash it immediately.`,
 	SubcommandOrder: []string{"create", "list", "revoke", "lookup", "rotate"},
@@ -2008,11 +2008,11 @@ this command exits it cannot be recovered.`,
 		{Name: "principal", Argument: "NAME", Desc: "Free-form label identifying the token holder", Required: true, Group: "Input"},
 		{Name: "scope", Argument: "CSV", Desc: "Comma-separated scopes (e.g. runs.read,runs.write); auth.md lists the full set", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "Token lifetime (e.g. 30d, 720h). 0 = never expires", Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"Mint a service token with write scopes", "sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write"},
-		{"Mint a user token that expires in 30 days", "sparkwing cluster tokens create --type user --principal alice --scope admin --ttl 720h"},
+		{"Mint a service token with write scopes", "sparkwing cluster tokens create --type service --principal deploy-bot --scope runs.read,runs.write --profile prod"},
+		{"Mint a user token that expires in 30 days", "sparkwing cluster tokens create --type user --principal alice --scope admin --ttl 720h --profile prod"},
 	},
 }
 
@@ -2034,11 +2034,11 @@ scope arrays, suitable for piping into jq.`,
 		{Name: "type", Argument: "KIND", Desc: "Filter by token type", Group: "Filter"},
 		{Name: "include-revoked", Desc: "Include revoked tokens in the output", Group: "Filter"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json", Default: "pretty", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"List all active tokens", "sparkwing cluster tokens list"},
-		{"Audit every revoked service token", "sparkwing cluster tokens list --type service --include-revoked"},
+		{"List all active tokens", "sparkwing cluster tokens list --profile prod"},
+		{"Audit every revoked service token", "sparkwing cluster tokens list --type service --include-revoked --profile prod"},
 		{"Inspect the warm-runner pool token's scopes as JSON", "sparkwing cluster tokens list --profile prod -o json | jq '.[] | select(.principal==\"agent:sparkwing-warm-runner\") | .scopes'"},
 	},
 }
@@ -2049,10 +2049,10 @@ var cmdTokensRevoke = Command{
 	Description: `Subsequent requests using the token receive HTTP 401. Revocation is immediate and irreversible.`,
 	Flags: []FlagSpec{
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret token prefix (from 'tokens list')", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"Revoke a leaked token", "sparkwing cluster tokens revoke --prefix a1b2c3d4"},
+		{"Revoke a leaked token", "sparkwing cluster tokens revoke --prefix a1b2c3d4 --profile prod"},
 	},
 }
 
@@ -2062,10 +2062,10 @@ var cmdTokensLookup = Command{
 	Description: `Prints the JSON metadata for a token given its non-secret prefix. Useful for confirming principal + scopes before revoking or rotating.`,
 	Flags: []FlagSpec{
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret token prefix", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"Inspect a token before revoking", "sparkwing cluster tokens lookup --prefix a1b2c3d4"},
+		{"Inspect a token before revoking", "sparkwing cluster tokens lookup --prefix a1b2c3d4 --profile prod"},
 	},
 }
 
@@ -2079,10 +2079,10 @@ lets callers cycle credentials without downtime.`,
 		{Name: "prefix", Argument: "PREFIX", Desc: "Non-secret prefix of the token to rotate", Required: true, Group: "Input"},
 		{Name: "grace", Argument: "DURATION", Desc: "Window during which the old token still authenticates", Default: "24h", Group: "Input"},
 		{Name: "ttl", Argument: "DURATION", Desc: "TTL of the new token (0 = preserve the old token's remaining TTL)", Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"Rotate a token with a 48h grace window", "sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h"},
+		{"Rotate a token with a 48h grace window", "sparkwing cluster tokens rotate --prefix a1b2c3d4 --grace 48h --profile prod"},
 	},
 }
 

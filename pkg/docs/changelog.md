@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** Token command help marks `--profile` required and includes it in
+  every example.
 - **cli:** Remote client commands reject an omitted `--profile` before
   attempting the request.
 - **cli:** Help and authentication guidance no longer advertise the removed

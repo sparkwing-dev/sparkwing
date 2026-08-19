@@ -114,6 +114,32 @@ func TestProfilesRuntimeGuidanceUsesRegisteredPaths(t *testing.T) {
 	}
 }
 
+func TestTokenCommandHelpRequiresProfile(t *testing.T) {
+	for _, command := range childCommands(cmdTokens.Path) {
+		if command.Hidden {
+			continue
+		}
+		found := false
+		for _, spec := range command.Flags {
+			if spec.Name != "profile" {
+				continue
+			}
+			found = true
+			if !spec.Required {
+				t.Errorf("%s does not mark --profile required", command.Path)
+			}
+		}
+		if !found {
+			t.Errorf("%s does not declare --profile", command.Path)
+		}
+		for _, example := range command.Examples {
+			if !strings.Contains(example.Command, "--profile ") {
+				t.Errorf("%s example %q omits required --profile", command.Path, example.Command)
+			}
+		}
+	}
+}
+
 func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 	cases := []struct {
 		name string
