@@ -188,6 +188,7 @@ func TestGraceExpiry_ReleasesUnclaimedLease(t *testing.T) {
 	}
 
 	startDaemon(t, wingd.Config{Home: home, GraceWindow: 150 * time.Millisecond})
+	started := time.Now()
 	time.Sleep(600 * time.Millisecond)
 
 	q := ensure(t, home, "")
@@ -197,6 +198,9 @@ func TestGraceExpiry_ReleasesUnclaimedLease(t *testing.T) {
 	}
 	if len(qs.Holders) != 0 {
 		t.Fatalf("expected 0 holders after grace window, got %d", len(qs.Holders))
+	}
+	if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
+		t.Errorf("grace expiry observation took %v, want less than 500ms", elapsed)
 	}
 }
 
