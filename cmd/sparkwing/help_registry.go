@@ -3121,7 +3121,7 @@ this subcommand only owns the "bump tag, commit, push, sync,
 wait for rollout" path.`,
 	SubcommandOrder: []string{"rollout"},
 	Examples: []Example{
-		{"Bump sparkwing-runner to a new commit tag", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --profile prod --wait"},
+		{"Bump sparkwing-runner to a new commit tag", "sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --wait"},
 	},
 }
 

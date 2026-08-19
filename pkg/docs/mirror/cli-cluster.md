@@ -183,7 +183,7 @@ wait for rollout" path.
 
 ```sh
 # Bump sparkwing-runner to a new commit tag
-sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --profile prod --wait
+sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --wait
 ```
 
 ## `sparkwing cluster image rollout`
