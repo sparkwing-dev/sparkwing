@@ -85,7 +85,7 @@ type queueTestHostSampler struct{}
 
 func (queueTestHostSampler) Sample() (wingd.HostStat, error) {
 	return wingd.HostStat{
-		TotalCores:      8,
+		TotalCores:       8,
 		TotalMemoryBytes: 8 << 30,
 		FreeMemoryBytes:  8 << 30,
 		LoadMeasured:     true,
