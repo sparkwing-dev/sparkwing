@@ -6,6 +6,11 @@ import (
 	"testing"
 )
 
+var (
+	_ func() Info               = gatherInfo
+	_ func(Info) []InfoNextStep = nextStepsFor
+)
+
 func TestParseInfoVersion_Classification(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -68,7 +73,7 @@ func TestInfoLeadsWithMissingDeclaredHooks(t *testing.T) {
 		Found: true, SparkwingDir: filepath.Join(f.repo, ".sparkwing"),
 	}}
 
-	steps := nextStepsFor(info, false)
+	steps := nextStepsFor(info)
 	if len(steps) == 0 || !strings.Contains(steps[0].Command, "sparkwing pipeline hooks install") ||
 		!strings.Contains(steps[0].Purpose, "pre-commit") {
 		t.Fatalf("info next steps = %+v, want missing hook repair first", steps)

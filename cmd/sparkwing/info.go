@@ -229,7 +229,7 @@ func runInfo(args []string) error {
 		return err
 	}
 
-	info := gatherInfo(format == "json")
+	info := gatherInfo()
 
 	switch format {
 	case "json":
@@ -329,7 +329,7 @@ func printAgentBlock() {
 	fmt.Println()
 	fmt.Print(agentBlockBody)
 
-	info := gatherInfo(false)
+	info := gatherInfo()
 	fmt.Println()
 	fmt.Println("### This repo, right now")
 	fmt.Println()
@@ -463,8 +463,8 @@ func pathHintLines() []string {
 }
 
 // gatherInfo never errors: every field has a sensible "not found"
-// fallback. agentMode tilts NextSteps toward discovery surfaces.
-func gatherInfo(agentMode bool) Info {
+// fallback.
+func gatherInfo() Info {
 	binary, _ := os.Executable()
 	info := Info{
 		About:           infoAbout,
@@ -510,7 +510,7 @@ func gatherInfo(agentMode bool) Info {
 
 	info.UpgradeNotice = pendingUpgradeNotice
 	info.Executable = gatherExecutable()
-	info.NextSteps = nextStepsFor(info, agentMode)
+	info.NextSteps = nextStepsFor(info)
 	info.Tips = gatherTips(info)
 	return info
 }
@@ -703,7 +703,7 @@ func summarizePipelines(list []Pipeline) InfoPipelinesSum {
 	return out
 }
 
-func nextStepsFor(info Info, agentMode bool) []InfoNextStep {
+func nextStepsFor(info Info) []InfoNextStep {
 	if !info.Project.Found {
 		return []InfoNextStep{
 			{Command: "sparkwing info --first-time", Purpose: "post-install onboarding card: full numbered scaffold steps + tips"},
@@ -711,7 +711,6 @@ func nextStepsFor(info Info, agentMode bool) []InfoNextStep {
 			{Command: "sparkwing run release", Purpose: "run the scaffolded pipeline"},
 		}
 	}
-	_ = agentMode
 	steps := []InfoNextStep{
 		{Command: "sparkwing pipeline list", Purpose: "see every pipeline this repo defines"},
 		{Command: "sparkwing pipeline describe --name <name>", Purpose: "full metadata for one pipeline"},
