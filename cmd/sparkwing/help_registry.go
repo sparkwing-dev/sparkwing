@@ -3740,7 +3740,8 @@ Bare 'sparkwing repos' and 'sparkwing repos list' both print this
 fleet. Use 'sparkwing repos info' for a single-repo deep dive, and
 'sparkwing repos update' to bump the whole fleet in one sitting
 with a compiled per-repo verdict.`,
-	SubcommandOrder: []string{"list", "info", "update"},
+	SubcommandOrder:    []string{"list", "info", "update"},
+	SubcommandOptional: true,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 	},
