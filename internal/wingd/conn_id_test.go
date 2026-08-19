@@ -15,14 +15,19 @@ import (
 
 // logSink collects the daemon's log lines for assertions.
 type logSink struct {
-	mu    sync.Mutex
-	lines []string
+	mu      sync.Mutex
+	lines   []string
+	changed chan struct{}
 }
 
 func (s *logSink) logf(format string, args ...any) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.lines = append(s.lines, fmt.Sprintf(format, args...))
+	s.mu.Unlock()
+	select {
+	case s.changed <- struct{}{}:
+	default:
+	}
 }
 
 func (s *logSink) matching(re *regexp.Regexp) []string {
@@ -46,7 +51,7 @@ var disconnectLine = regexp.MustCompile(`^conn (\d+) disconnected while `)
 // disconnects two events.
 func TestDaemon_LogsDistinctConnIDsPerClient(t *testing.T) {
 	home := shortHome(t)
-	sink := &logSink{}
+	sink := &logSink{changed: make(chan struct{}, 1)}
 	startDaemon(t, wingd.Config{
 		Home: home, Version: "v1", GraceWindow: -1, HeadroomFraction: -1,
 		Logf: sink.logf,
@@ -64,17 +69,19 @@ func TestDaemon_LogsDistinctConnIDsPerClient(t *testing.T) {
 	_ = first.Close()
 	_ = second.Close()
 
-	deadline := time.Now().Add(3 * time.Second)
+	timeout := time.NewTimer(3 * time.Second)
+	defer timeout.Stop()
 	var lines []string
-	for time.Now().Before(deadline) {
+	for {
 		lines = sink.matching(disconnectLine)
 		if len(lines) >= 2 {
 			break
 		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if len(lines) < 2 {
-		t.Fatalf("want a disconnect line per client, got %d:\n%s", len(lines), strings.Join(lines, "\n"))
+		select {
+		case <-sink.changed:
+		case <-timeout.C:
+			t.Fatalf("want a disconnect line per client, got %d:\n%s", len(lines), strings.Join(lines, "\n"))
+		}
 	}
 
 	ids := map[string]string{}
