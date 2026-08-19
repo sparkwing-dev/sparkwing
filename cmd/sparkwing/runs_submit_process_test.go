@@ -573,8 +573,6 @@ func TestRunsSubmit_RefusesAPipelineNothingDeclares(t *testing.T) {
 	}
 }
 
-// --- Regression tests lifted from adversarial review ---------------
-
 // advSlowFixtureSource is a pipeline that records a START/END pair per
 // dispatch and can be told to take a long time, so "dispatched twice
 // concurrently" is directly observable rather than inferred.
@@ -633,10 +631,8 @@ func (e *submitTestEnv) startsInMarker() int {
 	return n
 }
 
-// TestRunsSubmit_LiveDispatchSurvivesAWallClockJump is BLOCKER 1 end to
-// end, and is the review's own repro turned into an assertion.
-//
-// A suspended laptop resumes with wall time past the claim's lease while
+// TestRunsSubmit_LiveDispatchSurvivesAWallClockJump reproduces a suspended
+// laptop resuming with wall time past the claim's lease while
 // the heartbeat's next monotonic tick is still far away; the sweep runs
 // four times more often than the heartbeat, so it wins. Pushing the
 // lease row into the past reproduces exactly the state a resume leaves
@@ -721,8 +717,8 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 	}
 }
 
-// TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines is S2. A key used
-// by one pipeline used to answer another pipeline's submission with the
+// TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines covers a key used by
+// one pipeline answering another pipeline's submission with the
 // first pipeline's run, at exit 0 -- so the requested pipeline never ran
 // and the caller was told everything was fine.
 func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
@@ -767,10 +763,9 @@ func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 	}
 }
 
-// TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused is the other
-// half of S2: a key names one intent, so the same key with different
-// arguments is a different request, not a retry. Answering it with the
-// original run would silently drop it.
+// TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused pins that a key names
+// one intent, so the same key with different arguments is a different request,
+// not a retry. Answering it with the original run would silently drop it.
 func TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
 	e := newSubmitTestEnv(t)
 	e.submitWithArgs([]string{"--idempotency-key", "k"}, []string{"--env", "staging"})
@@ -787,9 +782,9 @@ func TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
 	}
 }
 
-// TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus is S3. Exit 0 is
-// still correct -- the run exists -- but the caller must be able to see
-// that what it is holding already finished, and how.
+// TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus pins that exit 0 remains
+// correct because the run exists, while the caller can see that the run has
+// already finished and how.
 func TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
 	e := newSubmitTestEnv(t)
 	first := e.submit("--idempotency-key", "k")
@@ -822,8 +817,8 @@ func TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
 	}
 }
 
-// TestRunsSubmit_ReplacesAConsumerFromAnotherBuild is S7. A consumer
-// keeps its queue while work keeps arriving, so without a version check
+// TestRunsSubmit_ReplacesAConsumerFromAnotherBuild covers a consumer keeping
+// its queue while work keeps arriving. Without a version check,
 // a freshly installed binary would hand every run to the old build --
 // including runs submitted to pick up a fix.
 func TestRunsSubmit_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
@@ -864,8 +859,8 @@ func TestRunsSubmit_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
 	})
 }
 
-// TestRunsConsumerStop_RecordsTheInterruptedRun is S5. Terminal
-// bookkeeping used to be written through the very context `stop` had
+// TestRunsConsumerStop_RecordsTheInterruptedRun covers terminal bookkeeping
+// that used to be written through the same context that `stop` had
 // just cancelled, so it never landed: the run stayed pending and its
 // trigger stayed claimed until a lease lapsed minutes later.
 func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
