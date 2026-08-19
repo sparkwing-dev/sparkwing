@@ -14,7 +14,7 @@ the same runs remotely via the controller.
 
 Local-mode subcommands (list, status, logs, errors) read from
 ~/.sparkwing/runs/. Controller-mode subcommands (cancel, retry,
-prune) require a profile; 'jobs logs' supports both.
+prune) require a profile; 'runs logs' supports both.
 
 ### Subcommands
 

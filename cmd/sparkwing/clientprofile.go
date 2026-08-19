@@ -48,7 +48,7 @@ func resolveProfile(name string) (*profile.Profile, error) {
 
 // requireController fails fast when a command needs a controller URL
 // but the resolved profile lacks one. Not applicable to every
-// command -- some (jobs logs) have local-only paths when no profile
+// command -- some (runs logs) have local-only paths when no profile
 // is active -- but common enough to centralize.
 func requireController(p *profile.Profile, cmd string) error {
 	if p.ControllerURL() == "" {

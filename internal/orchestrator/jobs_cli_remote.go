@@ -389,7 +389,7 @@ var remoteFollowFailureBudget = 60 * time.Second
 // unreadable for [remoteFollowFailureBudget].
 //
 // A nil return means "the stream ended", never "the run succeeded":
-// `jobs logs -f` is a viewer and does not carry the run's outcome.
+// `runs logs -f` is a viewer and does not carry the run's outcome.
 // Callers that must exit on the run's outcome (`pipeline trigger`)
 // read it afterwards with [RemoteRunOutcome].
 //
