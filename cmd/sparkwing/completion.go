@@ -414,8 +414,8 @@ _sparkwing_complete() {
         return
     fi
 
-    # Value completion for --sw-profile profile names.
-    if [[ "$prev" == "--sw-profile" ]]; then
+    # Value completion for --profile names.
+    if [[ "$prev" == "--profile" ]]; then
         local names
         names=$(sparkwing _complete-profiles 2>/dev/null)
         COMPREPLY=( $(compgen -W "$names" -- "$cur") )
@@ -501,19 +501,10 @@ _sparkwing() {
         return
     fi
 
-    # Value completion: --sw-profile <TAB> -> profile names.
-    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--sw-profile" ]]; then
-        local pipe=""
-        if (( ${#swpath[@]} >= 2 )) && [[ "${swpath[1]}" == "run" ]]; then
-            pipe="${swpath[2]}"
-        fi
+    # Value completion: --profile <TAB> -> profile names.
+    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--profile" ]]; then
         local -a profs
-        if [[ -n "$pipe" ]]; then
-            profs=( ${(f)"$(sparkwing _complete-profiles-for-pipeline "$pipe" 2>/dev/null)"} )
-        fi
-        if (( ${#profs[@]} == 0 )); then
-            profs=( ${(f)"$(sparkwing _complete-profiles 2>/dev/null)"} )
-        fi
+        profs=( ${(f)"$(sparkwing _complete-profiles 2>/dev/null)"} )
         _describe -t profiles 'profile' profs
         return
     fi
