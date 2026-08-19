@@ -325,7 +325,8 @@ func TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 		t.Fatal("resubmission did not report already_submitted")
 	}
 
-	triggers, err := e.store().ListTriggers(context.Background(), store.TriggerFilter{Limit: 100})
+	st := e.store()
+	triggers, err := st.ListTriggers(context.Background(), store.TriggerFilter{Limit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,9 +337,13 @@ func TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 	waitUntil(t, "the submitted run to execute exactly once", 90*time.Second, func() bool {
 		return len(e.markerLines()) >= 1
 	})
-	// Give a second dispatch every chance to appear before declaring the
-	// count final.
-	time.Sleep(2 * time.Second)
+	trigger, err := st.GetTrigger(context.Background(), first.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trigger.ClaimSeq != 1 {
+		t.Fatalf("deduplicated submission was claimed %d times, want 1", trigger.ClaimSeq)
+	}
 	if lines := e.markerLines(); len(lines) != 1 {
 		t.Fatalf("deduplicated submission executed %d times: %v", len(lines), lines)
 	}
