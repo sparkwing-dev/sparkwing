@@ -590,7 +590,10 @@ func TestGroupedNode_CancelWhileQueued_LeaksWaiterIntoPhantomHolder(t *testing.T
 		t.Fatal("released holder did not finish")
 	}
 
-	st, _ := store.Open(p.StateDB())
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open final state: %v", err)
+	}
 	defer func() { _ = st.Close() }()
 	state, err := st.GetConcurrencyState(context.Background(), "g:phantom")
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
