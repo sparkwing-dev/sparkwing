@@ -52,6 +52,33 @@ func TestLogs_AppendReadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLogs_FilterPreservesFinalNewline(t *testing.T) {
+	c, _, stop := newLogsServer(t)
+	defer stop()
+
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name string
+		data string
+	}{
+		{name: "terminated", data: "first\nsecond\n"},
+		{name: "unterminated", data: "first\nsecond"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := c.Append(ctx, "run-filter", tc.name, []byte(tc.data)); err != nil {
+				t.Fatal(err)
+			}
+			got, err := c.ReadFiltered(ctx, "run-filter", tc.name, logs.ReadFilter{Grep: "i"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.data {
+				t.Errorf("filtered bytes = %q, want %q", got, tc.data)
+			}
+		})
+	}
+}
+
 func TestLogs_ReadRunConcatenates(t *testing.T) {
 	c, _, stop := newLogsServer(t)
 	defer stop()
