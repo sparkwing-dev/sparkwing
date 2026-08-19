@@ -147,7 +147,7 @@ func renderRemoteStatus(run *store.Run, nodes []*store.Node, stepsByNode map[str
 
 // RemoteRunOutcome reads a remote run's status after a follow has
 // ended and, for a run that did not succeed, renders the same status
-// block `sparkwing jobs status --run <id>` prints against a
+// block `sparkwing runs status --run <id>` prints against a
 // controller -- run error, node outcomes, per-node errors -- so the
 // reason lands in the operator's terminal before the caller maps the
 // status onto an exit code.
@@ -270,7 +270,7 @@ func GetRunJSONRemote(ctx context.Context, controllerURL, token, runID string, o
 
 // GetRunJSONLocal is the local counterpart of GetRunJSONRemote.
 // Factored here rather than in jobs_cli.go so the two live side-by-
-// side; they're the backing pair for `sparkwing jobs get`.
+// side; they're the backing pair for `sparkwing runs get`.
 func GetRunJSONLocal(ctx context.Context, paths Paths, runID string, out io.Writer) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err

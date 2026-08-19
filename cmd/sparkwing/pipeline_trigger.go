@@ -157,7 +157,7 @@ func remoteFollowExit(ctx context.Context, prof *profile.Profile, runID string, 
 // exit contract. A status that could not be read, or a follow that
 // ended with the run still non-terminal (a dropped connection, a
 // cancelled context), is reported as unknown and exits 3 -- the code
-// `jobs wait` uses for a failed fetch -- because guessing either way
+// `runs wait` uses for a failed fetch -- because guessing either way
 // would hand CI a verdict the CLI never observed.
 func followExitResult(profileName, runID, status string, fetchErr, followErr error) error {
 	if fetchErr != nil || !isTerminalRunStatus(status) {
@@ -165,7 +165,7 @@ func followExitResult(profileName, runID, status string, fetchErr, followErr err
 	}
 	// statusExitCode owns the shared success -> 0 / anything else -> 1
 	// mapping; the trigger only restates it with the run id, the way
-	// `jobs wait` names the run it gave up on.
+	// `runs wait` names the run it gave up on.
 	if err := statusExitCode(status); err != nil {
 		return exitError(exitCodeFor(err), fmt.Errorf("pipeline trigger: run %s: %s", runID, status))
 	}

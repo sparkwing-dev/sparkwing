@@ -420,7 +420,7 @@ matches the GITHUB_REPOSITORY env on the trigger (owner/name), useful
 when one controller handles webhooks from multiple repos.
 
 With --wait, blocks until at least one match appears, up to
---find-timeout. Pairs with 'jobs wait' for the push-and-follow loop:
+--find-timeout. Pairs with 'runs wait' for the push-and-follow loop:
 
   git push && \
   sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline X --wait --profile prod -q | \
@@ -453,7 +453,7 @@ sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline build-test-deploy
 # Block until the matching run appears
 sparkwing runs find --git-sha abc123 --pipeline X --wait --profile prod
 
-# Pipe matching ids into jobs wait
+# Pipe matching ids into runs wait
 sparkwing runs find --git-sha abc --wait -q --profile prod | xargs -n1 -I{} sparkwing runs wait --run {} --profile prod
 ```
 
@@ -531,7 +531,7 @@ sparkwing runs grep --pattern 'connection refused' --profile prod --since 24h -o
 
 Print the most recent run
 
-Shorthand for 'jobs list --limit 1' with a compact one-line output. --watch tails for new runs, reprinting whenever a newer run ID appears.
+Shorthand for 'runs list --limit 1' with a compact one-line output. --watch tails for new runs, reprinting whenever a newer run ID appears.
 
 ### Flags
 
@@ -864,11 +864,11 @@ records its own pod-local path -- so the text output marks a directory
 that is not present here; the JSON reports it as recorded. Runs whose
 logs live on a controller or in an object store omit it.
 
-Exit code contract: after rendering, 'jobs status' exits 0 only when
+Exit code contract: after rendering, 'runs status' exits 0 only when
 status == success. Any non-success terminal status (failed, cancelled)
 exits 1; a run that is still running when the (non-follow) read
 returns also exits 1. Pass --exit-zero to inspect a known-failed run
-without the shell redline. For a blocking wait, use 'jobs wait'.
+without the shell redline. For a blocking wait, use 'runs wait'.
 
 ### Flags
 
@@ -1196,7 +1196,7 @@ cancelled, then exits. Exit code contract:
   2   timed out before the run reached a terminal status
   3+  infrastructure error (controller unreachable, run not found, ...)
 
-Pair with 'jobs find --wait' for the "push then find then wait" loop
+Pair with 'runs find --wait' for the "push then find then wait" loop
 described in the CLI wishlist.
 
 ### Flags

@@ -22,7 +22,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// ListOpts configures `sparkwing jobs list`.
+// ListOpts configures `sparkwing runs list`.
 // readBackendFor opens the read backend a `runs` command should consult:
 // the profile-resolved backend when --profile was passed, otherwise the
 // legacy cwd-backends.yaml flow. Centralizes the branch so list/status/
@@ -175,7 +175,7 @@ func renderRunList(
 	return tw.Flush()
 }
 
-// StatusOpts configures `sparkwing jobs status`.
+// StatusOpts configures `sparkwing runs status`.
 type StatusOpts struct {
 	JSON   bool
 	Follow bool // poll until the run reaches a terminal state

@@ -1884,7 +1884,7 @@ var cmdProfiles = Command{
 $XDG_CONFIG_HOME/sparkwing/profiles.yaml, else
 ~/.config/sparkwing/profiles.yaml. Permissions on save are 0600.
 
-Every human-driven client command (tokens, users, jobs
+Every human-driven client command (tokens, users, runs
 retry/cancel/prune/logs, gc) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
 exist on other commands; profiles are the only config surface.`,
@@ -2217,11 +2217,11 @@ records its own pod-local path -- so the text output marks a directory
 that is not present here; the JSON reports it as recorded. Runs whose
 logs live on a controller or in an object store omit it.
 
-Exit code contract: after rendering, 'jobs status' exits 0 only when
+Exit code contract: after rendering, 'runs status' exits 0 only when
 status == success. Any non-success terminal status (failed, cancelled)
 exits 1; a run that is still running when the (non-follow) read
 returns also exits 1. Pass --exit-zero to inspect a known-failed run
-without the shell redline. For a blocking wait, use 'jobs wait'.`,
+without the shell redline. For a blocking wait, use 'runs wait'.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier (e.g. run-20260422-142501-abcd)", Required: true, Group: "Input"},
 		{Name: "follow", Short: "f", Desc: "Poll until the run reaches a terminal state", Group: "Output"},
@@ -2348,7 +2348,7 @@ var cmdJobsStats = Command{
 var cmdJobsLast = Command{
 	Path:        "sparkwing runs last",
 	Synopsis:    "Print the most recent run",
-	Description: `Shorthand for 'jobs list --limit 1' with a compact one-line output. --watch tails for new runs, reprinting whenever a newer run ID appears.`,
+	Description: `Shorthand for 'runs list --limit 1' with a compact one-line output. --watch tails for new runs, reprinting whenever a newer run ID appears.`,
 	Flags: []FlagSpec{
 		{Name: "pipeline", Argument: "NAME", Desc: "Restrict to one pipeline", Group: "Filter"},
 		{Name: "watch", Short: "w", Desc: "Tail for new runs", Group: "Output"},
@@ -2428,7 +2428,7 @@ cancelled, then exits. Exit code contract:
   2   timed out before the run reached a terminal status
   3+  infrastructure error (controller unreachable, run not found, ...)
 
-Pair with 'jobs find --wait' for the "push then find then wait" loop
+Pair with 'runs find --wait' for the "push then find then wait" loop
 described in the CLI wishlist.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier to wait on", Required: true, Group: "Input"},
@@ -2455,7 +2455,7 @@ matches the GITHUB_REPOSITORY env on the trigger (owner/name), useful
 when one controller handles webhooks from multiple repos.
 
 With --wait, blocks until at least one match appears, up to
---find-timeout. Pairs with 'jobs wait' for the push-and-follow loop:
+--find-timeout. Pairs with 'runs wait' for the push-and-follow loop:
 
   git push && \
   sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline X --wait --profile prod -q | \
@@ -2479,7 +2479,7 @@ infrastructure error.`,
 	Examples: []Example{
 		{"Find a run by SHA + pipeline on prod", "sparkwing runs find --git-sha $(git rev-parse HEAD) --pipeline build-test-deploy --profile prod"},
 		{"Block until the matching run appears", "sparkwing runs find --git-sha abc123 --pipeline X --wait --profile prod"},
-		{"Pipe matching ids into jobs wait", "sparkwing runs find --git-sha abc --wait -q --profile prod | xargs -n1 -I{} sparkwing runs wait --run {} --profile prod"},
+		{"Pipe matching ids into runs wait", "sparkwing runs find --git-sha abc --wait -q --profile prod | xargs -n1 -I{} sparkwing runs wait --run {} --profile prod"},
 	},
 }
 

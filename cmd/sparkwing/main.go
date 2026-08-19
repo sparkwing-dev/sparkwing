@@ -460,7 +460,7 @@ func runJobs(args []string) error {
 			}
 			return err
 		}
-		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs list")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, "runs list")
 		if err != nil {
 			return err
 		}
@@ -497,7 +497,7 @@ func runJobs(args []string) error {
 			}
 			t, err := orchestrator.ParseLooseDate(ts.raw)
 			if err != nil {
-				return fmt.Errorf("jobs list: --%s: %w", ts.name, err)
+				return fmt.Errorf("runs list: --%s: %w", ts.name, err)
 			}
 			*ts.into = t
 		}
@@ -511,7 +511,7 @@ func runJobs(args []string) error {
 		case "dot":
 			sparkStyle = orchestrator.SparkDot
 		default:
-			return fmt.Errorf("jobs list: --style must be ascii|block|dot, got %q", *style)
+			return fmt.Errorf("runs list: --style must be ascii|block|dot, got %q", *style)
 		}
 
 		listOpts := orchestrator.ListOpts{
@@ -558,7 +558,7 @@ func runJobs(args []string) error {
 			return err
 		}
 		*runID = normalizeRunID(*runID)
-		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs status")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, "runs status")
 		if err != nil {
 			return err
 		}
@@ -651,7 +651,7 @@ func runJobs(args []string) error {
 			return err
 		}
 		*runID = normalizeRunID(*runID)
-		resolvedFmt, err := resolveOutputFormat(*outFmt, "jobs errors")
+		resolvedFmt, err := resolveOutputFormat(*outFmt, "runs errors")
 		if err != nil {
 			return err
 		}

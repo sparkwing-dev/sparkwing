@@ -51,8 +51,8 @@ code change to unlock.
 
 ### Fixed
 
-- **cli:** `runs logs` errors and help use the public command name instead of
-  the retired `jobs logs` spelling.
+- **cli:** Run-command errors and help use the public `runs` namespace instead
+  of the retired `jobs` spelling.
 - **cli:** `runs logs --help`, shell completion, and the CLI reference expose
   the existing `--events-only` and `--no-events` stream filters.
 - **cli:** Bash, Fish, and Zsh complete profile names for the live `--profile`
