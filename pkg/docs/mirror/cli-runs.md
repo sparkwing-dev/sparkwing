@@ -637,7 +637,8 @@ the CLI never tails giant logs over the wire.
 --since D drops nodes whose StartedAt is older than now-D; useful for
 runs that have been retried several times where only the newest
 attempt matters. Filtering is node-level (log lines aren't
-timestamped on disk).
+timestamped on disk). --events-only and --no-events are mutually
+exclusive views of the unified stream.
 
 ### Flags
 
@@ -651,6 +652,8 @@ timestamped on disk).
 | `--grep PATTERN` | Substring match (case-sensitive) |
 | `--since DURATION` | Only include nodes that started within the last D (e.g. 5m, 1h) |
 | `--tree` | Merge root + descendant runs into one stream (local only) |
+| `--events-only` | Include event records and omit node body output |
+| `--no-events` | Include node body output and omit event records |
 | `-f, --follow` | Tail the log(s) until the run terminates |
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain |
 | `--profile NAME` | Profile name (omit for local-only reads) |
@@ -672,6 +675,9 @@ sparkwing runs logs --run run-... --grep 'permission denied'
 
 # Merge a parent run with every descendant
 sparkwing runs logs --run run-... --tree
+
+# Read only structured event records
+sparkwing runs logs --run run-... --events-only
 
 # JSON stream for an agent
 sparkwing runs logs --run run-... -o json

@@ -2252,7 +2252,8 @@ the CLI never tails giant logs over the wire.
 --since D drops nodes whose StartedAt is older than now-D; useful for
 runs that have been retried several times where only the newest
 attempt matters. Filtering is node-level (log lines aren't
-timestamped on disk).`,
+timestamped on disk). --events-only and --no-events are mutually
+exclusive views of the unified stream.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run identifier", Required: true, Group: "Input"},
 		{Name: "node", Argument: "NODE_ID", Desc: "Limit output to one node id", Group: "Filter"},
@@ -2262,6 +2263,8 @@ timestamped on disk).`,
 		{Name: "grep", Argument: "PATTERN", Desc: "Substring match (case-sensitive)", Group: "Filter"},
 		{Name: "since", Argument: "DURATION", Desc: "Only include nodes that started within the last D (e.g. 5m, 1h)", Group: "Filter"},
 		{Name: "tree", Desc: "Merge root + descendant runs into one stream (local only)", Group: "Filter"},
+		{Name: "events-only", Desc: "Include event records and omit node body output", ConflictsWith: []string{"no-events"}, Group: "Filter"},
+		{Name: "no-events", Desc: "Include node body output and omit event records", ConflictsWith: []string{"events-only"}, Group: "Filter"},
 		{Name: "follow", Short: "f", Desc: "Tail the log(s) until the run terminates", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain", Group: "Output"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name (omit for local-only reads)", Group: "System"},
@@ -2273,6 +2276,7 @@ timestamped on disk).`,
 		{"Only the most recent attempt's output", "sparkwing runs logs --run run-... --profile prod --since 5m"},
 		{"Search logs for an error substring", "sparkwing runs logs --run run-... --grep 'permission denied'"},
 		{"Merge a parent run with every descendant", "sparkwing runs logs --run run-... --tree"},
+		{"Read only structured event records", "sparkwing runs logs --run run-... --events-only"},
 		{"JSON stream for an agent", "sparkwing runs logs --run run-... -o json"},
 		{"Plain text with node/step prefix", "sparkwing runs logs --run run-... -o plain"},
 		{"Force the colored renderer when piping", "sparkwing runs logs --run run-... -o pretty | less -R"},
