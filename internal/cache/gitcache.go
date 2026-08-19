@@ -777,7 +777,7 @@ func archiveToFile(bareRepo, branch, outPath string) error {
 	return nil
 }
 
-// GET /file?repo=X&branch=Y&path=.sparkwing/pipelines.yaml
+// GET /file?repo=X&branch=Y&path=.sparkwing/sparkwing.yaml
 // Returns the raw content of a single file from the cached bare repo.
 func handleFile(w http.ResponseWriter, r *http.Request) {
 	repoURL := r.URL.Query().Get("repo")

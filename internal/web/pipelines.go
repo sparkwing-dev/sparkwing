@@ -25,7 +25,7 @@ type pipelineArg struct {
 }
 
 // pipelinesHandler serves pipelines discovered from the nearest
-// .sparkwing/pipelines.yaml. Args schemas are empty until argument
+// .sparkwing/sparkwing.yaml. Args schemas are empty until argument
 // introspection is plumbed in from the compiled pipeline binary.
 func pipelinesHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {

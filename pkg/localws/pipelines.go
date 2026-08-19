@@ -30,7 +30,7 @@ type pipelineArg struct {
 	Default  string `json:"default,omitempty"`
 }
 
-// aggregatedPipelinesHandler enumerates every `.sparkwing/pipelines.yaml`
+// aggregatedPipelinesHandler enumerates every `.sparkwing/sparkwing.yaml`
 // across the repos registered in `~/.config/sparkwing/repos.yaml` and
 // merges them into one map keyed by pipeline name. The dashboard's
 // TriggerForm uses the result to drive its pipeline picker.
@@ -39,7 +39,7 @@ type pipelineArg struct {
 // repos.yaml order is preserved so users can promote a primary
 // checkout above feature worktrees of the same project.
 //
-// A missing or malformed pipelines.yaml in one checkout is skipped so a
+// A missing or malformed sparkwing.yaml in one checkout is skipped so a
 // broken side checkout does not black-hole the picker. The registry itself
 // is authoritative: if it is unreadable, returning an empty fleet would hide
 // the failure and misrepresent every registered checkout as absent.

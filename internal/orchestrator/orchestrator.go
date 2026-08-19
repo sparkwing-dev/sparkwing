@@ -155,13 +155,8 @@ type Options struct {
 	// SecretResolver. Nil means Secret() errors.
 	SecretSource secrets.Source
 
-	// PipelineYAML is the on-disk pipelines.yaml entry for this run's
-	// pipeline. When non-nil, the orchestrator resolves Config and
-	// Secrets via the SDK helpers (sparkwing.ResolvePipelineConfig /
-	// ResolvePipelineSecrets) before invoking the registration, so
-	// step bodies can read the typed values through
-	// sparkwing.PipelineConfig[T](ctx) / PipelineSecrets[T](ctx).
-	// Nil leaves both surfaces empty (existing pipelines unaffected).
+	// PipelineYAML is this pipeline's entry from sparkwing.yaml. Its
+	// argument defaults, guards, and runner requirements apply to the run.
 	PipelineYAML *pipelines.Pipeline
 
 	// SparkwingDir, when non-empty, is the resolved .sparkwing/
@@ -3186,8 +3181,8 @@ type planSnapshot struct {
 	// Plan.Resources; nil when the pipeline declared none.
 	Resources *snapshotResources `json:"plan_resources,omitempty"`
 
-	// Secrets is the typed declaration the pipelines.yaml file
-	// shipped (name + required/optional). The cluster pod uses it
+	// Secrets is the typed declaration from the pipeline's Secrets()
+	// provider (name + required/optional). The cluster pod uses it
 	// to drive ResolvePipelineSecrets against the pod's existing
 	// SecretResolver. Values are never persisted -- secrets are
 	// re-resolved on the pod side, never shipped across the wire.
