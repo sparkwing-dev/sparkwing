@@ -65,7 +65,6 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 		if err := c.Append(context.Background(), "run-a", "node-x", []byte(line+"\n")); err != nil {
 			t.Fatalf("Append %s: %v", line, err)
 		}
-		time.Sleep(220 * time.Millisecond)
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
