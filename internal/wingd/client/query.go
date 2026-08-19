@@ -119,5 +119,6 @@ func Query(ctx context.Context, opts Options) (wingwire.QueueState, error) {
 func queryOptions(opts Options) Options {
 	opts.Spawn = func(string, string) error { return ErrNoDaemon }
 	opts.NoTakeover = true
+	opts.healthProbe = true
 	return opts
 }

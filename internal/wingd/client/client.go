@@ -212,7 +212,8 @@ type Options struct {
 	// daemon to release this home's election. Zero uses the daemon startup window.
 	PredecessorWaitTimeout time.Duration
 	// Logf receives one-line diagnostics. Nil discards them.
-	Logf func(format string, args ...any)
+	Logf        func(format string, args ...any)
+	healthProbe bool
 }
 
 func (o Options) dialTimeout() time.Duration {
@@ -271,9 +272,9 @@ type Client struct {
 	// it is not mistaken for a daemon blink and does not trigger a reconnect.
 	closed atomic.Bool
 	// probe declares this client a health probe in its hello, which keeps
-	// the connection out of the daemon's idle accounting. Only [Probe] and
-	// [HealthProbe] set it; a working client must never, or the daemon
-	// could idle out under it.
+	// the connection out of the daemon's idle accounting. Only [Probe],
+	// [HealthProbe], and read-only [Query] set it; a working client must never,
+	// or the daemon could idle out under it.
 	probe bool
 }
 
@@ -532,7 +533,7 @@ func EnsureDaemon(ctx context.Context, opts Options) (*Client, error) {
 	if err := wingd.ValidateSocketPath(sock); err != nil {
 		return nil, err
 	}
-	cl := &Client{opts: opts, sock: sock}
+	cl := &Client{opts: opts, sock: sock, probe: opts.healthProbe}
 	if err := cl.connect(ctx); err != nil {
 		return nil, err
 	}
