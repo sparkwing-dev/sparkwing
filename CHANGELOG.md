@@ -51,8 +51,8 @@ code change to unlock.
 
 ### Fixed
 
-- **concurrency:** Superseded work stops when holder observation or lease
-  renewal reports that its replacement owns the slot.
+- **concurrency:** Superseded work receives context cancellation when holder
+  observation or lease renewal reports that its replacement owns the slot.
 - **cli:** Consumer stop and upgrade replacement recognize a completed Unix
   process immediately instead of waiting through the forced-stop grace period.
 - **admission:** Capacity measurements remain attached to the run's repository
