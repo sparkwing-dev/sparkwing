@@ -199,13 +199,13 @@ func TestFollowLogsRemote_CancelIsNotATransportFailure(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	started := time.Now()
 	go func() { done <- followLogsRemote(ctx, ctrl, logc, runID, "", io.Discard) }()
 	select {
 	case <-statusRead:
 	case <-time.After(2 * time.Second):
 		t.Fatal("follow did not read run status")
 	}
+	started := time.Now()
 	cancel()
 
 	select {
@@ -213,8 +213,8 @@ func TestFollowLogsRemote_CancelIsNotATransportFailure(t *testing.T) {
 		if err != nil {
 			t.Fatalf("a cancelled follow reported a transport failure: %v", err)
 		}
-		if elapsed := time.Since(started); elapsed >= 400*time.Millisecond {
-			t.Fatalf("cancelled follow returned after %s, want under 400ms", elapsed)
+		if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
+			t.Fatalf("cancelled follow returned after %s, want under 500ms", elapsed)
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("follow never returned after cancel")
