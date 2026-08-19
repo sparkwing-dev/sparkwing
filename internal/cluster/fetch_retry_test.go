@@ -149,23 +149,35 @@ func TestFetchPipelineSourceWithRetry_HonorsContextCancel(t *testing.T) {
 	triggerFetchRetryDelay = 30 * time.Second
 	triggerFetchMaxAttempts = 3
 
+	attempted := make(chan struct{}, 1)
 	fetchSourceFn = func(gcURL, repoURL, branch, sha, parentDir string) (string, error) {
+		select {
+		case attempted <- struct{}{}:
+		default:
+		}
 		return "", errors.New("not our ref abc")
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cancelDone := make(chan struct{})
 	go func() {
-		time.Sleep(20 * time.Millisecond)
-		cancel()
+		defer close(cancelDone)
+		select {
+		case <-attempted:
+			cancel()
+		case <-ctx.Done():
+		}
 	}()
 
 	start := time.Now()
 	_, err := fetchPipelineSourceWithRetry(ctx,
 		"http://cache", "git@github.com:o/r.git", "main", "abc", "/tmp/work",
 		slog.Default(), "run-4")
+	<-cancelDone
 	elapsed := time.Since(start)
-	if err == nil {
-		t.Fatal("expected ctx.Err on cancellation")
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want context.Canceled", err)
 	}
 	if elapsed > 5*time.Second {
 		t.Errorf("retry didn't honor context: elapsed=%v", elapsed)
