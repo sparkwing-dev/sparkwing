@@ -559,7 +559,7 @@ func (f logFilter) apply(data []byte) []byte {
 		terminated bool
 	}
 	var lines []line
-	if text != "" {
+	if len(data) > 0 {
 		parts := strings.Split(text, "\n")
 		lines = make([]line, len(parts))
 		for i, part := range parts {
