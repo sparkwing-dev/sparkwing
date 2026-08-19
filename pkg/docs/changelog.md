@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** Remote client commands reject an omitted `--profile` before
+  attempting the request.
 - **cli:** Help and authentication guidance no longer advertise the removed
   `configure profiles use` command.
 - **cli:** `configure profiles set --help` now lists only the fields the
