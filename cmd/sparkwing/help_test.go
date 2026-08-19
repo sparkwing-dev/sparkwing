@@ -28,6 +28,35 @@ func TestPrintHelpHidesHiddenFlag(t *testing.T) {
 	}
 }
 
+func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
+	cases := []struct {
+		name string
+		cmd  Command
+		want string
+	}{
+		{
+			name: "runnable parent",
+			cmd:  cmdQueue,
+			want: "  sparkwing queue [<subcommand>] [flags]\n",
+		},
+		{
+			name: "command group",
+			cmd:  cmdJobs,
+			want: "  sparkwing runs <subcommand>\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			PrintHelp(tc.cmd, &buf)
+			if !strings.Contains(buf.String(), tc.want) {
+				t.Fatalf("help does not contain %q:\n%s", tc.want, buf.String())
+			}
+		})
+	}
+}
+
 func TestBindFlagsString(t *testing.T) {
 	cmd := Command{
 		Path: "sparkwing bind-test",
