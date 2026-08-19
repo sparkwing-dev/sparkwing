@@ -1,6 +1,7 @@
 # Execution Model
 
-> **Status:** design record. Project config now lives in a single
+> **Status:** historical design record, not a description of current behavior.
+> Project config now lives in a single
 > `.sparkwing/sparkwing.yaml`; the standalone `runners.yaml`,
 > `sources.yaml`, and `backends.yaml` files this document assumes are
 > rejected by the loader. See docs/config-reference.md and

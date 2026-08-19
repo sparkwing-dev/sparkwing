@@ -736,7 +736,7 @@ type JobGroup struct {
 - `func (g *JobGroup) NoProgressTimeout(d time.Duration) *JobGroup` -- NoProgressTimeout sets the per-attempt inactivity timeout on every member.
 - `func (g *JobGroup) Optional() *JobGroup` -- Optional marks every member as non-essential.
 - `func (g *JobGroup) Outputs(globs ...string) *JobGroup` -- Outputs declares the same artifact output globs on every member.
-- `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers biases runner selection for every member.
+- `func (g *JobGroup) Prefers(labels ...string) *JobGroup` -- Prefers records runner-label preferences for every member in plan-snapshot metadata; preferences do not affect runner selection.
 - `func (g *JobGroup) Ready() <-chan struct{}` -- Ready returns a channel that closes once a dynamic group's expansion completes (success or failure).
 - `func (g *JobGroup) Requires(labels ...string) *JobGroup` -- Requires restricts every member to runners advertising the given labels.
 - `func (g *JobGroup) Resources(hints ...ResourceHint) *JobGroup` -- Resources pins the same peak on every member of the group.
@@ -795,7 +795,7 @@ type JobNode struct {
 - `func (n *JobNode) OutputGlobs() []string` -- OutputGlobs returns the artifact output globs declared via Outputs (the union across calls), or nil if the node declared none.
 - `func (n *JobNode) OutputType() reflect.Type` -- OutputType returns the concrete Go type of the job's Run output, or nil if the job's Run returns no value beyond error.
 - `func (n *JobNode) Outputs(globs ...string) *JobNode` -- Outputs declares the files this node emits as artifacts, by glob, relative to its working directory.
-- `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers biases runner selection when more than one runner satisfies Requires.
+- `func (n *JobNode) Prefers(labels ...string) *JobNode` -- Prefers records ordered runner-label preferences in plan-snapshot metadata; preferences do not affect runner selection.
 - `func (n *JobNode) PrefersLabels() []string` -- PrefersLabels returns the terms declared via Prefers.
 - `func (n *JobNode) Requires(labels ...string) *JobNode` -- Requires restricts this job to runners advertising every term in the given set.
 - `func (n *JobNode) RequiresLabels() []string` -- RequiresLabels returns the terms declared via Requires.

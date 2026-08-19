@@ -272,7 +272,8 @@ func (g *JobGroup) Requires(labels ...string) *JobGroup {
 	return g
 }
 
-// Prefers biases runner selection for every member. See Job.Prefers.
+// Prefers records runner-label preferences for every member in plan-snapshot metadata; preferences do not affect runner selection.
+// See Job.Prefers.
 func (g *JobGroup) Prefers(labels ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.Prefers(labels...)

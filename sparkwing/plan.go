@@ -472,9 +472,8 @@ type JobNode struct {
 	// Empty = any runner may claim.
 	requires []string
 
-	// prefers biases runner selection when more than one runner
-	// satisfies requires. Walked in declaration order: the first term
-	// any candidate runner advertises wins. No effect on eligibility.
+	// prefers records ordered runner-label preferences in plan-snapshot
+	// metadata. Preferences do not affect runner selection.
 	prefers []string
 
 	// whenRunner marks the job as conditional on the dispatching
@@ -1077,15 +1076,9 @@ func (n *JobNode) RequiresLabels() []string {
 	return copyLabels(n.requires)
 }
 
-// Prefers biases runner selection when more than one runner satisfies
-// Requires. Each argument is one term with the same comma-OR / AND
-// semantics as Requires. The scheduler walks the terms in declaration
-// order and picks the first runner whose labels match any term. With
-// no preference, selection falls through to the profile default or
-// the first-available runner.
-//
-// Prefers never fails a run on its own: if no runner matches any
-// preference term the job still dispatches via the default selection.
+// Prefers records ordered runner-label preferences in plan-snapshot metadata; preferences do not affect runner selection.
+// Each argument is one term with the same comma-OR / AND semantics as
+// Requires.
 //
 //	sw.Job(plan, "integration", &Integration{}).
 //	    Requires("os=linux").
@@ -1093,12 +1086,6 @@ func (n *JobNode) RequiresLabels() []string {
 //
 // Calling Prefers with no arguments clears any previously-set
 // preferences.
-//
-// Preferences are persisted on the dispatch snapshot so plan
-// renderers and dashboards see them; the in-process orchestrator
-// dispatches through a single configured runner today, so Prefers
-// becomes meaningful when more than one runner can satisfy Requires
-// and claim the job.
 func (n *JobNode) Prefers(labels ...string) *JobNode {
 	n.prefers = normalizeLabels(labels)
 	return n
