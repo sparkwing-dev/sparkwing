@@ -159,7 +159,7 @@ func TestReaper_HeartbeatKeepsAlive(t *testing.T) {
 	}
 	minimumExpiry := initialExpiry.Add(store.DefaultLeaseDuration / 2)
 	if renewed.LeaseExpiresAt.Before(minimumExpiry) {
-		t.Fatalf("heartbeat expiry = %s, want after %s", renewed.LeaseExpiresAt, minimumExpiry)
+		t.Fatalf("heartbeat expiry = %s, want at or after %s", renewed.LeaseExpiresAt, minimumExpiry)
 	}
 	reaped, err := store.Maintenance.ReapExpiredTriggers(st, ctx)
 	if err != nil {
