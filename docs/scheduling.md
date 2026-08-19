@@ -63,11 +63,10 @@ sw.Job(plan, "deploy", &Deploy{}).Needs(preflight)
   labels can claim the job. While none does, the warm pool logs a hint
   naming the missing labels and the node waits; the controller's sweep
   fails it with `queue_timeout` at the queue deadline (default 15m).
-- **`Prefers`** -- a placement preference recorded on the plan and shown
-  by `sparkwing pipeline explain` and the dashboard. Runner selection
-  does not consult it: the claim queue is FIFO by readiness and filters
-  only on the labels a job requires, so the first eligible runner to
-  poll claims the job.
+- **`Prefers`** -- runner-label preferences recorded in plan-snapshot
+  metadata. Preferences do not affect runner selection: the claim queue
+  is FIFO by readiness and filters only on the labels a job requires, so
+  the first eligible runner to poll claims the job.
 - **`WhenRunner`** -- conditional execution. A runner that advertises
   labels evaluates the terms up front and skips the node when they are
   not satisfied (downstream `Needs` treats a skip as satisfied); a runner
