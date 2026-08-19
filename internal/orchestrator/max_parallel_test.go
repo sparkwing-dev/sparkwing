@@ -23,7 +23,11 @@ func TestMaxParallel_CapsConcurrentNodeExecution(t *testing.T) {
 
 	var active, peak atomic.Int32
 	var observedAtZero atomic.Bool
+	entered := make(chan struct{}, fanOut)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseJobs := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseJobs)
 
 	registerOnce.Range(func(k, _ any) bool {
 		if k.(string) == "orch-maxparallel" {
@@ -39,17 +43,52 @@ func TestMaxParallel_CapsConcurrentNodeExecution(t *testing.T) {
 			peak:           &peak,
 			observedAtZero: &observedAtZero,
 			capacity:       cap,
+			entered:        entered,
 			release:        release,
 		}
 	})
 
 	p := newPaths(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{
-		Pipeline:    "orch-maxparallel",
-		MaxParallel: cap,
+	var res *orchestrator.Result
+	var runErr error
+	done := make(chan struct{})
+	go func() {
+		res, runErr = orchestrator.RunLocal(ctx, p, orchestrator.Options{
+			Pipeline:    "orch-maxparallel",
+			MaxParallel: cap,
+		})
+		close(done)
+	}()
+	t.Cleanup(func() {
+		releaseJobs()
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("RunLocal did not stop during cleanup")
+		}
 	})
+	for range cap {
+		select {
+		case <-entered:
+		case <-ctx.Done():
+			t.Fatal("configured capacity was not admitted")
+		}
+	}
+	select {
+	case <-entered:
+		t.Fatal("a fifth job entered while four jobs held the configured capacity")
+	case <-time.After(200 * time.Millisecond):
+	}
+	releaseJobs()
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("RunLocal did not finish after jobs were released")
+	}
+	err := runErr
 	if err != nil {
 		t.Fatalf("RunLocal: %v", err)
 	}
