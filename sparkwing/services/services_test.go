@@ -285,6 +285,10 @@ func TestWithServices_ConcurrentNoCollision(t *testing.T) {
 	errs := make(chan error, 2)
 	entered := make(chan struct{}, 2)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseCallbacks := func() { releaseOnce.Do(func() { close(release) }) }
+	defer wg.Wait()
+	defer releaseCallbacks()
 	for range 2 {
 		wg.Add(1)
 		go func() {
@@ -296,10 +300,19 @@ func TestWithServices_ConcurrentNoCollision(t *testing.T) {
 			})
 		}()
 	}
-	<-entered
-	<-entered
+	deadline := time.NewTimer(10 * time.Second)
+	defer deadline.Stop()
+	for range 2 {
+		select {
+		case <-entered:
+		case err := <-errs:
+			t.Fatalf("service failed before its callback entered: %v", err)
+		case <-deadline.C:
+			t.Fatal("timed out waiting for both service callbacks")
+		}
+	}
 	started := time.Now()
-	close(release)
+	releaseCallbacks()
 	wg.Wait()
 	if elapsed := time.Since(started); elapsed >= 400*time.Millisecond {
 		t.Fatalf("callbacks completed in %s after both entered, want < 400ms", elapsed)
