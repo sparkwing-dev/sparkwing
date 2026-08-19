@@ -273,13 +273,43 @@ func TestExecError_TerminatedRendersSignalNotStartFailure(t *testing.T) {
 // A command SIGKILLed mid-run by run-context cancellation had started;
 // its error must read as a cancellation-kill, not "failed to start".
 func TestExec_CancellationKillReadsAsTerminatedNotFailedToStart(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "started")
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	var err error
+	done := make(chan struct{})
 	go func() {
-		time.Sleep(100 * time.Millisecond)
-		cancel()
+		_, err = sparkwing.Bash(ctx, fmt.Sprintf("printf ready > %q; sleep 30", marker)).Run()
+		close(done)
 	}()
-	_, err := sparkwing.Bash(ctx, "sleep 30").Run()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("cancelled command did not stop during cleanup")
+		}
+	})
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if _, statErr := os.Stat(marker); statErr == nil {
+			break
+		} else if !os.IsNotExist(statErr) {
+			t.Fatalf("readiness marker: %v", statErr)
+		}
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			t.Fatal("command did not publish its readiness marker")
+		}
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("cancelled command did not stop")
+	}
 	if err == nil {
 		t.Fatal("expected error for a cancelled command")
 	}
