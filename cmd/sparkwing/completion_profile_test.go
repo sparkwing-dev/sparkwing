@@ -27,3 +27,20 @@ func TestShellCompletionUsesLiveProfileFlag(t *testing.T) {
 		})
 	}
 }
+
+func TestFishProfileFlagsCompleteProfileNames(t *testing.T) {
+	const candidates = `-a '(__sparkwing_profiles)'`
+	found := 0
+	for _, line := range strings.Split(renderFish(), "\n") {
+		if !strings.HasPrefix(line, "complete -c sparkwing ") || !strings.Contains(line, " -l profile") {
+			continue
+		}
+		found++
+		if !strings.Contains(line, candidates) {
+			t.Errorf("profile completion has no candidates: %s", line)
+		}
+	}
+	if found == 0 {
+		t.Fatal("fish completion contains no profile flags")
+	}
+}
