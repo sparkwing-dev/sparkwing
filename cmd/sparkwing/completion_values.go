@@ -7,8 +7,6 @@
 // rather than spamming an error during completion.
 package main
 
-import "fmt"
-
 // runInternalCompleteTargets remains callable by completion scripts
 // generated before pipeline targets were removed.
 func runInternalCompleteTargets(_ []string) error {
@@ -18,7 +16,6 @@ func runInternalCompleteTargets(_ []string) error {
 // runInternalCompleteRunners remains callable by completion scripts
 // generated before profile runner selection was removed.
 func runInternalCompleteRunners(_ []string) error {
-	fmt.Println("local")
 	return nil
 }
 
