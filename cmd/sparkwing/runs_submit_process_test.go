@@ -237,28 +237,41 @@ func (e *submitTestEnv) stopConsumer() {
 			e.t.Errorf("stop consumer process %d: %v", pid, err)
 			return
 		}
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
+		poll := time.NewTicker(10 * time.Millisecond)
+		defer poll.Stop()
+		deadline := time.NewTimer(5 * time.Second)
+		defer deadline.Stop()
+		for {
 			err := syscall.Kill(pid, 0)
 			if errors.Is(err, syscall.ESRCH) {
 				return
 			}
-			time.Sleep(10 * time.Millisecond)
+			select {
+			case <-poll.C:
+			case <-deadline.C:
+				e.t.Errorf("consumer process %d did not exit within cleanup bound", pid)
+				return
+			}
 		}
-		e.t.Errorf("consumer process %d did not exit within cleanup bound", pid)
 	}
 }
 
 func waitUntil(t *testing.T, what string, timeout time.Duration, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	poll := time.NewTicker(25 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
 		if cond() {
 			return
 		}
-		time.Sleep(25 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("timed out after %s waiting for %s", timeout, what)
+		}
 	}
-	t.Fatalf("timed out after %s waiting for %s", timeout, what)
 }
 
 // TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess is the core
@@ -682,8 +695,11 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 	}
 
 	// One full 15-second maintenance interval plus scheduling headroom.
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
+	poll := time.NewTicker(500 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(20 * time.Second)
+	defer deadline.Stop()
+	for {
 		if e.startsInMarker() > 1 {
 			t.Fatalf("run %s was dispatched %d times concurrently after a wall-clock jump:\n  %s",
 				ack.RunID, e.startsInMarker(), strings.Join(e.markerLines(), "\n  "))
@@ -695,14 +711,18 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 		if probe.Status == "done" {
 			break
 		}
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("maintenance sweep did not reconcile the probe within 20s; status = %q", probe.Status)
+		}
 	}
 	probe, err := st.GetTrigger(context.Background(), probeID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if probe.Status != "done" {
-		t.Fatalf("maintenance sweep did not reconcile the probe within 20s; status = %q", probe.Status)
+		t.Fatalf("maintenance sweep left probe status %q, want done", probe.Status)
 	}
 	liveAfter, err := st.GetTrigger(context.Background(), ack.RunID)
 	if err != nil {
