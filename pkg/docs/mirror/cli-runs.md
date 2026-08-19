@@ -1127,7 +1127,7 @@ Fetches GET /api/v1/triggers/{id} and prints the full row (pipeline, args, git, 
 |---|---|
 | `--id TRIGGER_ID` | Trigger / run identifier (same value 'fire' prints) (required) |
 | `-o, --output FORMAT` | Output format: json emits the raw response |
-| `--profile NAME` | Profile name (default: current default) (required) |
+| `--profile NAME` | Profile name (required) |
 
 ### Examples
 
@@ -1163,7 +1163,7 @@ entries narrow cleanly.
 | `--limit N` | Max triggers to show (default: 20) |
 | `-q, --quiet` | Print only trigger ids, newline-separated |
 | `-o, --output FORMAT` | Output format: json emits the raw triggers array |
-| `--profile NAME` | Profile name (default: current default) (required) |
+| `--profile NAME` | Profile name (required) |
 
 ### Examples
 

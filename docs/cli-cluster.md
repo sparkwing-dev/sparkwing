@@ -269,7 +269,7 @@ on "is the cluster reachable at all?".
 
 | Flag | Description |
 |---|---|
-| `--profile NAME` | Profile name (default: current default) (required) |
+| `--profile NAME` | Profile name (required) |
 | `-o, --output FMT` | Output format: pretty\|json |
 
 ### Examples

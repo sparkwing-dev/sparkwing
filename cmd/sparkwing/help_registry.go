@@ -3083,7 +3083,7 @@ entries narrow cleanly.`,
 		{Name: "limit", Argument: "N", Desc: "Max triggers to show", Default: "20", Group: "Output"},
 		{Name: "quiet", Short: "q", Desc: "Print only trigger ids, newline-separated", Group: "Output"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json emits the raw triggers array", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "Output", "System", "Other"},
 	Examples: []Example{
@@ -3100,7 +3100,7 @@ var cmdTriggersGet = Command{
 	Flags: []FlagSpec{
 		{Name: "id", Argument: "TRIGGER_ID", Desc: "Trigger / run identifier (same value 'fire' prints)", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: json emits the raw response", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
@@ -3214,7 +3214,7 @@ informational -- low success rate, empty pool, stale agents --
 and don't change the exit code so scripts can still condition
 on "is the cluster reachable at all?".`,
 	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Required: true, Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format: pretty|json", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
