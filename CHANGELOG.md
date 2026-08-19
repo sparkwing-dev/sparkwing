@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `runs cancel --help` documents the existing `--home` option for
+  selecting local daemon and queued-run state.
 - **cli:** Webhook listing and replay no longer advertise an unused
   `--profile` value.
 - **cli:** `cluster image rollout` no longer requires or advertises an unused

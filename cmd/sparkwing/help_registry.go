@@ -2777,6 +2777,7 @@ from stdin, one per line.`,
 	Flags: []FlagSpec{
 		{Name: "run", Argument: "RUN_ID", Desc: "Run id to cancel (repeatable; use --run - to read ids from stdin)", Group: "Input"},
 		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},
+		{Name: "home", Argument: "DIR", Desc: "Sparkwing home for local daemon and queued-run storage (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
