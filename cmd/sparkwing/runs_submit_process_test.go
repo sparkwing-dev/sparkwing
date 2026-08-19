@@ -653,7 +653,7 @@ func (e *submitTestEnv) startsInMarker() int {
 // behind. The run must not be dispatched a second time.
 func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	e := newSubmitTestEnv(t)
-	e.useSlowFixture(t, 45)
+	e.useSlowFixture(t, 25)
 
 	ack := e.submit("--consumer-claim-lease", "300s")
 	waitUntil(t, "the dispatch to start executing", 120*time.Second, func() bool {
@@ -668,14 +668,48 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Two full sweep intervals plus dispatch headroom.
-	deadline := time.Now().Add(45 * time.Second)
+	// A terminal expired claim is stable evidence that the maintenance
+	// sweep ran; unlike elapsed time, it cannot pass while the sweep is
+	// wedged or disconnected from the consumer loop.
+	probeID := ack.RunID + "-sweep-probe"
+	now := time.Now()
+	if _, err := st.DB().Exec(`
+INSERT INTO triggers (id, pipeline, status, created_at, claimed_at, lease_expires_at, claim_seq)
+VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.UnixNano(),
+		now.Add(-time.Hour).UnixNano()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.CreateRun(context.Background(), store.Run{
+		ID: probeID, Pipeline: "fixture", Status: "pending", StartedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishRun(context.Background(), probeID, "success", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// One full 15-second maintenance interval plus scheduling headroom.
+	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		if e.startsInMarker() > 1 {
 			t.Fatalf("run %s was dispatched %d times concurrently after a wall-clock jump:\n  %s",
 				ack.RunID, e.startsInMarker(), strings.Join(e.markerLines(), "\n  "))
 		}
+		probe, err := st.GetTrigger(context.Background(), probeID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if probe.Status == "done" {
+			break
+		}
 		time.Sleep(500 * time.Millisecond)
+	}
+	probe, err := st.GetTrigger(context.Background(), probeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if probe.Status != "done" {
+		t.Fatalf("maintenance sweep did not reconcile the probe within 20s; status = %q", probe.Status)
 	}
 	if got := e.startsInMarker(); got != 1 {
 		t.Fatalf("expected exactly one dispatch, saw %d: %v", got, e.markerLines())
