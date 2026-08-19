@@ -94,6 +94,25 @@ func TestGeneratedPrefersDocumentationStatesStoredBehavior(t *testing.T) {
 	}
 }
 
+func TestSchedulingPrefersDocumentationStatesStoredBehavior(t *testing.T) {
+	for _, path := range []string{"../docs/scheduling.md", "../pkg/docs/mirror/scheduling.md"} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		text := string(data)
+		start := strings.Index(text, "- **`Prefers`**")
+		if start < 0 {
+			t.Fatalf("%s has no Prefers definition", path)
+		}
+		definition := text[start:]
+		if end := strings.Index(definition, "\n- **`"); end >= 0 {
+			definition = definition[:end]
+		}
+		assertPreferenceContract(t, strings.ToLower(definition))
+	}
+}
+
 func methodDoc(t *testing.T, path, receiver, method string) string {
 	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments)
