@@ -836,6 +836,10 @@ func (s *Store) migrate() error {
 // lock is held across separate statements. Returns the last error if
 // every attempt is busy, or fn's first non-busy result.
 func retryOnBusy(fn func() error) error {
+	return retryOnBusyWithSleep(fn, time.Sleep)
+}
+
+func retryOnBusyWithSleep(fn func() error, sleep func(time.Duration)) error {
 	const attempts = 10
 	var err error
 	for i := range attempts {
@@ -843,7 +847,7 @@ func retryOnBusy(fn func() error) error {
 		if err == nil || !isBusyErr(err) {
 			return err
 		}
-		time.Sleep(time.Duration(i+1) * 50 * time.Millisecond)
+		sleep(time.Duration(i+1) * 50 * time.Millisecond)
 	}
 	return err
 }

@@ -62,19 +62,21 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 		t.Fatalf("take write lock: %v", err)
 	}
 
-	released := make(chan struct{})
+	retries := 0
+	releaseOnRetry := func(time.Duration) {
+		retries++
+		if err := lockTx.Rollback(); err != nil {
+			t.Fatalf("release write lock: %v", err)
+		}
+	}
 	started := time.Now()
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		_ = lockTx.Rollback()
-		close(released)
-	}()
-
-	expires, _, err := hb.HeartbeatConcurrencySlot(ctx, "k", "r1/n1", 30*time.Second)
+	expires, _, err := hb.heartbeatConcurrencySlot(ctx, "k", "r1/n1", 30*time.Second, releaseOnRetry)
 	if err != nil {
 		t.Fatalf("heartbeat under transient busy: %v", err)
 	}
-	<-released
+	if retries != 1 {
+		t.Fatalf("busy retries = %d, want 1", retries)
+	}
 	if !expires.After(time.Now()) {
 		t.Errorf("lease not extended into the future: %v", expires)
 	}
