@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** Local receipt help no longer advertises the removed profile billing
+  rate and states that local receipts report zero cost.
 - **cli:** Run retry, cancellation, and pruning help distinguishes local runs
   from named remote profiles.
 - **cli:** `cluster worker --help` marks `--profile` required and no longer
