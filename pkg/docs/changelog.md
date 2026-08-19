@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** Webhook listing and replay no longer advertise an unused
+  `--profile` value.
 - **cli:** `cluster image rollout` no longer requires or advertises an unused
   `--profile` value.
 - **cli:** Local receipt help no longer advertises the removed profile billing

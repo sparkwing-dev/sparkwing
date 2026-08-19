@@ -141,8 +141,6 @@ func runWebhooksList(args []string) error {
 	fs := flag.NewFlagSet(cmdWebhooksList.Path, flag.ContinueOnError)
 	repoFlag := fs.String("repo", "", "GitHub repo (OWNER/NAME)")
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table). Matches kubectl/gh")
-	on := addProfileFlag(fs)
-	_ = on
 	if err := parseAndCheck(cmdWebhooksList, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -385,8 +383,6 @@ func runWebhooksReplay(args []string) error {
 	repoFlag := fs.String("repo", "", "GitHub repo (OWNER/NAME)")
 	hook := fs.Int64("hook", 0, "GitHub hook id")
 	delivery := fs.String("delivery", "", "delivery UUID to redeliver")
-	on := addProfileFlag(fs)
-	_ = on
 	if err := parseAndCheck(cmdWebhooksReplay, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil

@@ -3238,7 +3238,7 @@ each delivery shows the run id it produced and the run's
 terminal status -- without two separate lookups.`,
 	SubcommandOrder: []string{"list", "deliveries", "replay"},
 	Examples: []Example{
-		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app --profile prod"},
+		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app"},
 		{"Recent deliveries for a hook", "sparkwing cluster webhooks deliveries --repo your-org/my-app --hook 608819334 --since 1h --profile prod"},
 	},
 }
@@ -3257,11 +3257,10 @@ render as "(non-sparkwing)".`,
 	Flags: []FlagSpec{
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo (owner can be omitted if gh has a default)", Required: true, Group: "Input"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (reserved for symmetry; unused by list)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "Output", "System", "Other"},
 	Examples: []Example{
-		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app --profile prod"},
+		{"List hooks on a repo", "sparkwing cluster webhooks list --repo your-org/my-app"},
 	},
 }
 
@@ -3298,11 +3297,10 @@ appears in the hook's delivery log within seconds.`,
 		{Name: "repo", Argument: "OWNER/NAME", Desc: "GitHub repo", Required: true, Group: "Input"},
 		{Name: "hook", Argument: "N", Desc: "GitHub hook id", Required: true, Group: "Input"},
 		{Name: "delivery", Argument: "UUID", Desc: "Delivery GUID to redeliver", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (reserved; unused by replay)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Redeliver a webhook attempt", "sparkwing cluster webhooks replay --repo your-org/my-app --hook 608819334 --delivery 0ac55946-3e96-11f1-9de8-f33e32f0060f --profile prod"},
+		{"Redeliver a webhook attempt", "sparkwing cluster webhooks replay --repo your-org/my-app --hook 608819334 --delivery 0ac55946-3e96-11f1-9de8-f33e32f0060f"},
 	},
 }
 
