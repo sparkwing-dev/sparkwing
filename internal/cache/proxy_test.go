@@ -210,6 +210,13 @@ func TestHandleProxy_ImmutableCaching(t *testing.T) {
 }
 
 func TestHandleProxy_TTLExpiry(t *testing.T) {
+	started := time.Now()
+	t.Cleanup(func() {
+		if elapsed := time.Since(started); elapsed >= 750*time.Millisecond {
+			t.Errorf("TTL expiry test took %v, want less than 750ms without waiting for wall-clock expiry", elapsed)
+		}
+	})
+
 	var hitCount atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hitCount.Add(1)
@@ -240,7 +247,23 @@ func TestHandleProxy_TTLExpiry(t *testing.T) {
 			t.Errorf("expected cache hit, but got %d upstream hits", hitCount.Load())
 		}
 
-		time.Sleep(1100 * time.Millisecond)
+		metaPath := filepath.Join(proxyDir, "test", proxyCacheKey("test", "metadata")+".meta")
+		metaData, err := os.ReadFile(metaPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var meta proxyMeta
+		if err := json.Unmarshal(metaData, &meta); err != nil {
+			t.Fatal(err)
+		}
+		meta.CachedAt = time.Now().Add(-2 * proxyCacheTTL).Unix()
+		metaData, err = json.Marshal(meta)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(metaPath, metaData, 0o644); err != nil {
+			t.Fatal(err)
+		}
 
 		req3 := httptest.NewRequest(http.MethodGet, "/proxy/test/metadata", nil)
 		w3 := httptest.NewRecorder()
