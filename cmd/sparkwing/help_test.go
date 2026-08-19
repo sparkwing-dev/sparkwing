@@ -197,6 +197,27 @@ func TestSecretCommandHelpDescribesLocalAndRemoteModes(t *testing.T) {
 	}
 }
 
+func TestWorkerHelpRequiresProfile(t *testing.T) {
+	found := false
+	for _, spec := range cmdWorker.Flags {
+		if spec.Name != "profile" {
+			continue
+		}
+		found = true
+		if !spec.Required {
+			t.Error("cluster worker does not mark --profile required")
+		}
+	}
+	if !found {
+		t.Fatal("cluster worker does not declare --profile")
+	}
+	for _, example := range cmdWorker.Examples {
+		if !strings.Contains(example.Command, "--profile ") {
+			t.Errorf("cluster worker example %q omits required --profile", example.Command)
+		}
+	}
+}
+
 func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 	cases := []struct {
 		name string
