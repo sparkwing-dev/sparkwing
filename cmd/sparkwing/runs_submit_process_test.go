@@ -717,13 +717,6 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 			t.Fatalf("maintenance sweep did not reconcile the probe within 20s; status = %q", probe.Status)
 		}
 	}
-	probe, err := st.GetTrigger(context.Background(), probeID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if probe.Status != "done" {
-		t.Fatalf("maintenance sweep left probe status %q, want done", probe.Status)
-	}
 	liveAfter, err := st.GetTrigger(context.Background(), ack.RunID)
 	if err != nil {
 		t.Fatal(err)
