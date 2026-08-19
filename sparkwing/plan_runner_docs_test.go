@@ -124,6 +124,7 @@ func methodDoc(t *testing.T, path, receiver, method string) string {
 
 func assertPreferenceContract(t *testing.T, doc string) {
 	t.Helper()
+	doc = strings.Join(strings.Fields(doc), " ")
 	for _, want := range []string{"plan-snapshot metadata", "do not affect runner selection"} {
 		if !strings.Contains(doc, want) {
 			t.Errorf("preference documentation does not contain %q", want)

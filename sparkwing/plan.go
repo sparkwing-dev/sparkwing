@@ -472,9 +472,8 @@ type JobNode struct {
 	// Empty = any runner may claim.
 	requires []string
 
-	// prefers biases runner selection when more than one runner
-	// satisfies requires. Walked in declaration order: the first term
-	// any candidate runner advertises wins. No effect on eligibility.
+	// prefers records ordered runner-label preferences in plan-snapshot
+	// metadata. Preferences do not affect runner selection.
 	prefers []string
 
 	// whenRunner marks the job as conditional on the dispatching
