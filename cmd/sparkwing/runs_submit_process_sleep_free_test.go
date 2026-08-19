@@ -32,8 +32,8 @@ func TestRunsSubmitProcessCodeDoesNotUseTimeSleep(t *testing.T) {
 	})
 }
 
-func TestRunsSubmitSlowFixtureDoesNotUseTimeSleep(t *testing.T) {
-	if strings.Contains(advSlowFixtureSource, "time.Sleep") {
-		t.Fatal("advSlowFixtureSource contains time.Sleep")
+func TestRunsSubmitBlockingFixtureDoesNotUseTimeSleep(t *testing.T) {
+	if strings.Contains(blockingFixtureSource, "time.Sleep") {
+		t.Fatal("blockingFixtureSource contains time.Sleep")
 	}
 }

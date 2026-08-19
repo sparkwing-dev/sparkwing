@@ -587,10 +587,9 @@ func TestRunsSubmit_RefusesAPipelineNothingDeclares(t *testing.T) {
 	}
 }
 
-// advSlowFixtureSource is a pipeline that records a START/END pair per
-// dispatch and can be told to take a long time, so "dispatched twice
-// concurrently" is directly observable rather than inferred.
-const advSlowFixtureSource = `package main
+// blockingFixtureSource records a START/END pair around an externally
+// released hold, so concurrent duplicate dispatch is directly observable.
+const blockingFixtureSource = `package main
 
 import (
 	"fmt"
@@ -632,7 +631,7 @@ func appendLine(path, line string) {
 func (e *submitTestEnv) useBlockingFixture(t *testing.T) <-chan struct{} {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(e.repoDir, ".sparkwing", "main.go"),
-		[]byte(advSlowFixtureSource), 0o644); err != nil {
+		[]byte(blockingFixtureSource), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	started := make(chan struct{})
