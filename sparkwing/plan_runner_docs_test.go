@@ -26,6 +26,11 @@ func TestPrefersDocumentationStatesStoredBehavior(t *testing.T) {
 }
 
 func TestPrefersStorageDocumentationStatesStoredBehavior(t *testing.T) {
+	assertPreferenceContract(t, strings.ToLower(jobNodeFieldDoc(t, "prefers")))
+}
+
+func jobNodeFieldDoc(t *testing.T, fieldName string) string {
+	t.Helper()
 	file, err := parser.ParseFile(token.NewFileSet(), "plan.go", nil, parser.ParseComments)
 	if err != nil {
 		t.Fatal(err)
@@ -45,17 +50,17 @@ func TestPrefersStorageDocumentationStatesStoredBehavior(t *testing.T) {
 				t.Fatal("JobNode is not a struct")
 			}
 			for _, field := range structType.Fields.List {
-				if len(field.Names) == 1 && field.Names[0].Name == "prefers" {
+				if len(field.Names) == 1 && field.Names[0].Name == fieldName {
 					if field.Doc == nil {
-						t.Fatal("JobNode.prefers has no documentation")
+						t.Fatalf("JobNode.%s has no documentation", fieldName)
 					}
-					assertPreferenceContract(t, strings.ToLower(field.Doc.Text()))
-					return
+					return field.Doc.Text()
 				}
 			}
 		}
 	}
-	t.Fatal("JobNode.prefers not found")
+	t.Fatalf("JobNode.%s not found", fieldName)
+	return ""
 }
 
 func TestExecutionModelIsClearlyHistorical(t *testing.T) {

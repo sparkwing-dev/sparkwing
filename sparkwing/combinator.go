@@ -263,8 +263,11 @@ func (g *JobGroup) Consumes(producer *JobNode, opts ...ConsumeOption) *JobGroup 
 	return g
 }
 
-// Requires restricts every member to runners advertising the given labels.
-// See Job.Requires.
+// Requires records label terms used to filter runner claims for every non-inline dispatched member.
+// An unmatched non-inline member remains queued until the
+// controller fails it with queue_timeout. Direct runs and inline jobs have no
+// runner claim step, so Requires does not select or reject their runner. See
+// Job.Requires.
 func (g *JobGroup) Requires(labels ...string) *JobGroup {
 	for _, m := range g.Members() {
 		m.Requires(labels...)

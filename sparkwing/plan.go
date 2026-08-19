@@ -467,9 +467,9 @@ type JobNode struct {
 	// non-nil return fails the node at StageVerify. Nil = no check.
 	verify VerifyFn
 
-	// requires restricts the job to runners advertising every listed
-	// term (AND across terms, OR within a term -- see MatchLabels).
-	// Empty = any runner may claim.
+	// requires holds label terms stored with non-inline dispatched jobs for
+	// runner-claim filtering. Direct and inline execution do not consult them
+	// for runner selection. Empty permits any runner to claim.
 	requires []string
 
 	// prefers records ordered runner-label preferences in plan-snapshot
@@ -1047,8 +1047,8 @@ func (n *JobNode) BeforeRunHooks() []BeforeRunFn { return n.beforeRun }
 // AfterRunHooks returns the node's registered post-run hooks.
 func (n *JobNode) AfterRunHooks() []AfterRunFn { return n.afterRun }
 
-// Requires restricts this job to runners advertising every term in
-// the given set. Each argument is one term; within a term,
+// Requires records label terms used to filter runner claims for non-inline dispatched jobs.
+// Each argument is one term; within a term,
 // comma-separated values are alternatives (OR). Across terms, terms
 // compose with AND. A runner advertising a superset of the matched
 // alternatives still matches.
@@ -1062,10 +1062,11 @@ func (n *JobNode) AfterRunHooks() []AfterRunFn { return n.afterRun }
 //	sw.Job(plan, "build-x",    &Build{}).Requires("os=linux,macos")        // OR
 //	sw.Job(plan, "build-y",    &Build{}).Requires("os=linux,macos", "amd64") // (linux OR macos) AND amd64
 //
-// A job that no runner can satisfy fails the run at validation; this
-// is the hard rail. For soft eligibility ("only run if a matching
-// runner exists"), use WhenRunner. For preference without a hard
-// constraint, use Prefers.
+// An unmatched non-inline dispatched job remains queued until the controller
+// fails it with queue_timeout. Direct runs and inline jobs have no runner claim
+// step, so Requires does not select or reject their runner. For conditional
+// execution based on the active runner, use WhenRunner. For metadata-only
+// preference, use Prefers.
 func (n *JobNode) Requires(labels ...string) *JobNode {
 	n.requires = normalizeLabels(labels)
 	return n
