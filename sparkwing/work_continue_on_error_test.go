@@ -13,13 +13,22 @@ import (
 // in-flight siblings exit with ctx.Err. Default for steps with no
 // failure-handling flags.
 func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
+	runCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	siblingEntered := make(chan struct{})
+	boom := errors.New("boom")
 	w := NewWork()
 	var siblingCompleted atomic.Bool
 	Step(w, "fast-fail", func(ctx context.Context) error {
-		time.Sleep(20 * time.Millisecond)
-		return errors.New("boom")
+		select {
+		case <-siblingEntered:
+			return boom
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	})
 	Step(w, "slow", func(ctx context.Context) error {
+		close(siblingEntered)
 		select {
 		case <-time.After(500 * time.Millisecond):
 			siblingCompleted.Store(true)
@@ -28,9 +37,12 @@ func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
 			return ctx.Err()
 		}
 	})
-	_, err := RunWork(context.Background(), w)
+	_, err := RunWork(runCtx, w)
 	if err == nil {
 		t.Fatal("RunWork should have errored")
+	}
+	if !errors.Is(err, boom) {
+		t.Fatalf("RunWork error = %v, want fast-fail error", err)
 	}
 	if siblingCompleted.Load() {
 		t.Error("slow sibling should have been cancelled; default is fail-fast")
@@ -42,13 +54,21 @@ func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
 // Both errored and successful siblings get a chance to complete.
 // Run-level rollup still reports the failure.
 func TestRunWork_ContinueOnErrorKeepsSiblingsAlive(t *testing.T) {
+	runCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	siblingEntered := make(chan struct{})
 	w := NewWork()
 	var siblingCompleted atomic.Bool
 	Step(w, "fast-fail", func(ctx context.Context) error {
-		time.Sleep(20 * time.Millisecond)
-		return errors.New("boom")
+		select {
+		case <-siblingEntered:
+			return errors.New("boom")
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}).ContinueOnError()
 	Step(w, "slow", func(ctx context.Context) error {
+		close(siblingEntered)
 		select {
 		case <-time.After(150 * time.Millisecond):
 			siblingCompleted.Store(true)
@@ -57,7 +77,7 @@ func TestRunWork_ContinueOnErrorKeepsSiblingsAlive(t *testing.T) {
 			return ctx.Err()
 		}
 	}).ContinueOnError()
-	_, err := RunWork(context.Background(), w)
+	_, err := RunWork(runCtx, w)
 	if !siblingCompleted.Load() {
 		t.Error("slow sibling should have completed; ContinueOnError must not cancel siblings")
 	}
