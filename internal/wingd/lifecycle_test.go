@@ -227,12 +227,30 @@ func TestReattach_RejectedAfterGrace(t *testing.T) {
 		t.Fatalf("daemon1 exit: %v", err)
 	}
 
-	startDaemon(t, wingd.Config{Home: home, GraceWindow: 150 * time.Millisecond})
+	startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})
 	started := time.Now()
-	time.Sleep(600 * time.Millisecond)
-
 	b := ensure(t, home, "")
-	_, err := b.Reattach(context.Background(), token)
+	qs, err := b.QueueState(context.Background())
+	if err != nil {
+		t.Fatalf("queue state: %v", err)
+	}
+	if !holdsRun(qs, "a") {
+		t.Fatal("recovered holder was not visible during its grace window")
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for holdsRun(qs, "a") && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		qs, err = b.QueueState(context.Background())
+		if err != nil {
+			t.Fatalf("queue state: %v", err)
+		}
+	}
+	if holdsRun(qs, "a") {
+		t.Fatal("recovered holder was not released after its grace window")
+	}
+
+	_, err = b.Reattach(context.Background(), token)
 	if !errors.Is(err, client.ErrReattachRejected) {
 		t.Fatalf("reattach after grace: got %v, want ErrReattachRejected", err)
 	}
