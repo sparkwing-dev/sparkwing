@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
 func TestRepoShortName_FindsGitToplevelBasename(t *testing.T) {
@@ -101,6 +103,23 @@ func TestCurrentProfileKey_SurvivesABranchChange(t *testing.T) {
 	t.Chdir(second)
 	if got := currentProfileKey("pre-commit"); got != want {
 		t.Errorf("second worktree keyed %q, want %q", got, want)
+	}
+}
+
+func TestCurrentProfileKey_UsesRunWorkDirAfterCWDChanges(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "sample-repo")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	previousWorkDir := sparkwing.CurrentRuntime().WorkDir
+	sparkwing.SetWorkDir(repo)
+	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
+	t.Chdir(t.TempDir())
+
+	if got := currentProfileKey("build"); got != "sample-repo/build" {
+		t.Fatalf("profile key after cwd change = %q, want sample-repo/build", got)
 	}
 }
 
