@@ -467,9 +467,9 @@ type JobNode struct {
 	// non-nil return fails the node at StageVerify. Nil = no check.
 	verify VerifyFn
 
-	// requires restricts the job to runners advertising every listed
-	// term (AND across terms, OR within a term -- see MatchLabels).
-	// Empty = any runner may claim.
+	// requires stores label terms serialized into runner claims for non-inline
+	// dispatched jobs. Direct and inline execution do not consult them for
+	// runner selection. Empty permits any runner to claim.
 	requires []string
 
 	// prefers records ordered runner-label preferences in plan-snapshot
@@ -1062,10 +1062,11 @@ func (n *JobNode) AfterRunHooks() []AfterRunFn { return n.afterRun }
 //	sw.Job(plan, "build-x",    &Build{}).Requires("os=linux,macos")        // OR
 //	sw.Job(plan, "build-y",    &Build{}).Requires("os=linux,macos", "amd64") // (linux OR macos) AND amd64
 //
-// An unmatched dispatched job remains queued until the controller fails it
-// with queue_timeout. Direct runs have no claim step, so Requires does not
-// select or reject the local runner. For conditional execution based on the
-// active runner, use WhenRunner. For metadata-only preference, use Prefers.
+// An unmatched non-inline dispatched job remains queued until the controller
+// fails it with queue_timeout. Direct runs and inline jobs have no runner claim
+// step, so Requires does not select or reject their runner. For conditional
+// execution based on the active runner, use WhenRunner. For metadata-only
+// preference, use Prefers.
 func (n *JobNode) Requires(labels ...string) *JobNode {
 	n.requires = normalizeLabels(labels)
 	return n
