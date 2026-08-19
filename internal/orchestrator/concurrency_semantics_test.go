@@ -536,6 +536,7 @@ func TestMemo_LeaderSkippedWhileFollowerCoalesced(t *testing.T) {
 func TestGroupedNode_CancelWhileQueued_LeaksWaiterIntoPhantomHolder(t *testing.T) {
 	resetSem()
 	p := newPaths(t)
+	started := time.Now()
 
 	holderDone := make(chan struct{})
 	go func() {
@@ -570,5 +571,8 @@ func TestGroupedNode_CancelWhileQueued_LeaksWaiterIntoPhantomHolder(t *testing.T
 			t.Fatalf("cancelled queued waiter was promoted into a phantom holder: %+v", h)
 		}
 		t.Fatalf("unexpected live holder after holder release + waiter cancel: %+v", h)
+	}
+	if elapsed := time.Since(started); elapsed >= 800*time.Millisecond {
+		t.Fatalf("cancelled-waiter regression took %s, want less than 800ms", elapsed)
 	}
 }
