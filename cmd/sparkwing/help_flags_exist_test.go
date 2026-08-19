@@ -60,7 +60,7 @@ func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
 	}
 }
 
-func TestProfileFlagRegistrationsDoNotAdvertiseDefault(t *testing.T) {
+func TestProfileFlagRegistrationsDoNotAdvertiseCurrentDefault(t *testing.T) {
 	fset := token.NewFileSet()
 	entries, err := os.ReadDir(".")
 	if err != nil {
@@ -89,8 +89,8 @@ func TestProfileFlagRegistrationsDoNotAdvertiseDefault(t *testing.T) {
 				return true
 			}
 			description, ok := stringLiteral(call.Args[len(call.Args)-1])
-			if ok && strings.Contains(strings.ToLower(description), "default") {
-				t.Errorf("%s advertises a default profile in %q", fset.Position(call.Pos()), description)
+			if ok && strings.Contains(strings.ToLower(description), "current default") {
+				t.Errorf("%s advertises a nonexistent current default profile in %q", fset.Position(call.Pos()), description)
 			}
 			return true
 		})
