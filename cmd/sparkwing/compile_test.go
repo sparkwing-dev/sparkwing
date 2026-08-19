@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
@@ -68,7 +67,6 @@ func TestPipelineCacheKey_ChangesWhenPipelineSourceChanges(t *testing.T) {
 
 	writeFile(t, filepath.Join(pipDir, "main.go"),
 		"package main\n\nfunc main() { println(\"hi\") }\n")
-	time.Sleep(10 * time.Millisecond)
 
 	k2, _ := bincache.PipelineCacheKey(pipDir)
 	if k1 == k2 {
@@ -82,7 +80,6 @@ func TestPipelineCacheKey_ChangesWhenReplaceTargetChanges(t *testing.T) {
 
 	sdkFile := filepath.Join(filepath.Dir(pipDir), "sdk", "sdk.go")
 	writeFile(t, sdkFile, "package sdk\n\nconst Version = \"2\"\n// extra\n")
-	time.Sleep(10 * time.Millisecond)
 
 	k2, _ := bincache.PipelineCacheKey(pipDir)
 	if k1 == k2 {
