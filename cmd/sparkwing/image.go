@@ -38,7 +38,6 @@ func runImageRollout(args []string) error {
 	fs := flag.NewFlagSet(cmdImageRollout.Path, flag.ContinueOnError)
 	image := fs.String("image", "", "short image name (matches suffix of ECR URL)")
 	tag := fs.String("tag", "", "new tag to write")
-	fs.String("profile", "", "profile name")
 	gitopsRepo := fs.String("gitops-repo", "", "gitops repo path (or SPARKWING_GITOPS_REPO)")
 	namespace := fs.String("namespace", "sparkwing", "kubernetes namespace for rollout + logs")
 	argocdApp := fs.String("argocd-app", "", "argocd app name (default: derived from --image)")

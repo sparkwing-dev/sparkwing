@@ -222,7 +222,6 @@ image to the registry before calling rollout.
 |---|---|
 | `--image NAME` | Short image name (matches the suffix of the ECR URL) (required) |
 | `--tag TAG` | New tag to write in kustomization.yaml (required) |
-| `--profile NAME` | Profile name. Reserved for future per-profile gitops repo + argocd context discovery. (required) |
 | `--gitops-repo PATH` | Gitops repo path (or SPARKWING_GITOPS_REPO) |
 | `--namespace NS` | Kubernetes namespace for rollout status + logs (default: sparkwing) |
 | `--argocd-app NAME` | ArgoCD app name (default: derived from --image) |
@@ -235,13 +234,13 @@ image to the registry before calling rollout.
 
 ```sh
 # Dry-run against the sparkwing-runner image
-sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --profile prod --dry-run
+sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --dry-run
 
 # Bump and wait for the rollout
-sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --profile prod --wait
+sparkwing cluster image rollout --image sparkwing-runner --tag commit-abc123 --wait
 
 # Bump, sync, wait, then tail pod logs
-sparkwing cluster image rollout --image sparkwing --tag commit-abc123 --profile prod --wait --tail-logs
+sparkwing cluster image rollout --image sparkwing --tag commit-abc123 --wait --tail-logs
 ```
 
 ## `sparkwing cluster status`
