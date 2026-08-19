@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"strings"
 	"testing"
 
@@ -25,6 +28,43 @@ func TestPrintHelpHidesHiddenFlag(t *testing.T) {
 	}
 	if strings.Contains(out, "--ghost") {
 		t.Errorf("did not expect --ghost in help; got:\n%s", out)
+	}
+}
+
+func TestProfilesRegistryMatchesDispatcher(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "profiles.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dispatched := map[string]bool{}
+	ast.Inspect(file, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "runProfiles" {
+			return true
+		}
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			clause, ok := node.(*ast.CaseClause)
+			if !ok {
+				return true
+			}
+			for _, expr := range clause.List {
+				literal, ok := expr.(*ast.BasicLit)
+				if ok && literal.Kind == token.STRING {
+					dispatched[strings.Trim(literal.Value, `"`)] = true
+				}
+			}
+			return true
+		})
+		return false
+	})
+
+	for _, child := range childCommands(cmdProfiles.Path) {
+		name := commandLeafName(child.Path)
+		if !child.Hidden && !dispatched[name] {
+			t.Errorf("%s is registered but runProfiles does not dispatch %q", child.Path, name)
+		}
 	}
 }
 
