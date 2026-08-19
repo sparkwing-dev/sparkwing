@@ -13,6 +13,27 @@ import (
 	"time"
 )
 
+func expireProxyCacheEntry(t *testing.T, registry, path string, ttl time.Duration) {
+	t.Helper()
+	metaPath := filepath.Join(proxyDir, registry, proxyCacheKey(registry, path)+".meta")
+	metaData, err := os.ReadFile(metaPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var meta proxyMeta
+	if err := json.Unmarshal(metaData, &meta); err != nil {
+		t.Fatal(err)
+	}
+	meta.CachedAt = time.Now().Add(-ttl - time.Second).Unix()
+	metaData, err = json.Marshal(meta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(metaPath, metaData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestProxyCacheKey_Deterministic(t *testing.T) {
 	k1 := proxyCacheKey("npm", "lodash/-/lodash-4.17.21.tgz")
 	k2 := proxyCacheKey("npm", "lodash/-/lodash-4.17.21.tgz")
@@ -247,23 +268,7 @@ func TestHandleProxy_TTLExpiry(t *testing.T) {
 			t.Errorf("expected cache hit, but got %d upstream hits", hitCount.Load())
 		}
 
-		metaPath := filepath.Join(proxyDir, "test", proxyCacheKey("test", "metadata")+".meta")
-		metaData, err := os.ReadFile(metaPath)
-		if err != nil {
-			t.Fatal(err)
-		}
-		var meta proxyMeta
-		if err := json.Unmarshal(metaData, &meta); err != nil {
-			t.Fatal(err)
-		}
-		meta.CachedAt = time.Now().Add(-2 * proxyCacheTTL).Unix()
-		metaData, err = json.Marshal(meta)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(metaPath, metaData, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		expireProxyCacheEntry(t, "test", "metadata", proxyCacheTTL)
 
 		req3 := httptest.NewRequest(http.MethodGet, "/proxy/test/metadata", nil)
 		w3 := httptest.NewRecorder()
@@ -342,7 +347,7 @@ func TestHandleProxy_UpstreamError(t *testing.T) {
 			t.Fatalf("expected 200, got %d", w1.Code)
 		}
 
-		time.Sleep(10 * time.Millisecond)
+		expireProxyCacheEntry(t, "test", "data", proxyCacheTTL)
 
 		req2 := httptest.NewRequest(http.MethodGet, "/proxy/test/data", nil)
 		w2 := httptest.NewRecorder()
