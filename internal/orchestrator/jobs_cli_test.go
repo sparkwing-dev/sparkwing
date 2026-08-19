@@ -94,6 +94,7 @@ func TestListJobs_FilterByStatus(t *testing.T) {
 func TestListJobs_FilterBySinceHidesOldRuns(t *testing.T) {
 	p := newPaths(t)
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "orch-ok"})
+	started := time.Now()
 	time.Sleep(50 * time.Millisecond)
 
 	var buf bytes.Buffer
@@ -106,6 +107,9 @@ func TestListJobs_FilterBySinceHidesOldRuns(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "no runs yet") {
 		t.Fatalf("expected since-filter to hide older run, got %s", buf.String())
+	}
+	if elapsed := time.Since(started); elapsed >= 40*time.Millisecond {
+		t.Fatalf("since-filter fixture took %s; want under 40ms", elapsed)
 	}
 }
 
