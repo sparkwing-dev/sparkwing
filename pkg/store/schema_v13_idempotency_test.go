@@ -422,6 +422,24 @@ func TestIdempotencyKeysAreScopedToTheirPipeline(t *testing.T) {
 	}
 }
 
+func expireTriggerClaim(t *testing.T, s *store.Store, id string) {
+	t.Helper()
+	res, err := s.DB().Exec(
+		`UPDATE triggers SET lease_expires_at = ? WHERE id = ? AND status = 'claimed' AND lease_expires_at IS NOT NULL`,
+		time.Now().Add(-time.Second).UnixNano(), id,
+	)
+	if err != nil {
+		t.Fatalf("expire trigger claim: %v", err)
+	}
+	changed, err := res.RowsAffected()
+	if err != nil {
+		t.Fatalf("count expired trigger claims: %v", err)
+	}
+	if changed != 1 {
+		t.Fatalf("expired trigger claims = %d, want 1", changed)
+	}
+}
+
 // TestClaimGeneration_AdvancesOnEveryClaim underpins the fence that
 // stops a superseded dispatch from writing.
 func TestClaimGeneration_AdvancesOnEveryClaim(t *testing.T) {
@@ -436,7 +454,7 @@ func TestClaimGeneration_AdvancesOnEveryClaim(t *testing.T) {
 	if first.ClaimSeq != 1 {
 		t.Fatalf("first claim generation = %d, want 1", first.ClaimSeq)
 	}
-	time.Sleep(5 * time.Millisecond)
+	expireTriggerClaim(t, s, "run-gen")
 	if _, err := s.RequeueUnstartedClaim(ctx, "run-gen"); err != nil {
 		t.Fatal(err)
 	}
@@ -462,7 +480,7 @@ func TestFinishAtGeneration_RefusesASupersededDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(5 * time.Millisecond)
+	expireTriggerClaim(t, s, "run-fence")
 	if _, err := s.RequeueUnstartedClaim(ctx, "run-fence"); err != nil {
 		t.Fatal(err)
 	}
