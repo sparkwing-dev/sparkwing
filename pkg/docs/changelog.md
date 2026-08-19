@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** Generated help no longer repeats `--output` for profile probes,
+  webhook inspection, or agent listings.
 - **cli:** Help marks subcommands as optional when the parent command also
   runs directly, including `queue`, `repos`, `run`, and `version`.
 - **cli:** Run lookback flags accept `d` and `w` suffixes in addition to Go

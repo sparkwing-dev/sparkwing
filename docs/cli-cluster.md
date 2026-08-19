@@ -86,7 +86,6 @@ Use -q to print just names, one per line, for shell piping
 | Flag | Description |
 |---|---|
 | `--profile NAME` | Profile name (required) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
 | `-o, --output FMT` | Output format (json\|table) |
 | `-q, --quiet` | Print just agent names, one per line |
 
@@ -566,7 +565,6 @@ take a time filter). Default: 24h.
 | `--repo OWNER/NAME` | GitHub repo (required) |
 | `--hook N` | GitHub hook id from 'webhooks list' (required) |
 | `--since DURATION` | Only deliveries newer than this (default: 24h) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
 | `-o, --output FMT` | Output format (json\|table) |
 | `--profile NAME` | Profile name (used for trigger/run lookups) (required) |
 
@@ -595,7 +593,6 @@ render as "(non-sparkwing)".
 | Flag | Description |
 |---|---|
 | `--repo OWNER/NAME` | GitHub repo (owner can be omitted if gh has a default) (required) |
-| `-o, --output FORMAT` | Output format: pretty \| json \| plain (default: pretty) |
 | `-o, --output FMT` | Output format (json\|table) |
 | `--profile NAME` | Profile name (reserved for symmetry; unused by list) |
 
