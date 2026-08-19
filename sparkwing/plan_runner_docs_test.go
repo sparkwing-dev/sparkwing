@@ -21,8 +21,11 @@ func TestPrefersDocumentationDoesNotClaimProfileDefault(t *testing.T) {
 		if fn.Doc == nil {
 			t.Fatal("Prefers has no documentation")
 		}
-		if strings.Contains(strings.ToLower(fn.Doc.Text()), "profile default") {
-			t.Fatal("Prefers documentation advertises the removed profile default")
+		doc := strings.ToLower(fn.Doc.Text())
+		for _, retired := range []string{"profile default", "default runner"} {
+			if strings.Contains(doc, retired) {
+				t.Fatalf("Prefers documentation advertises removed %q selection", retired)
+			}
 		}
 		return
 	}

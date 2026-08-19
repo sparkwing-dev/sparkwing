@@ -6,7 +6,10 @@ import (
 )
 
 func TestPRCheckScaffoldDoesNotAdvertiseDefaultRunner(t *testing.T) {
-	if strings.Contains(strings.ToLower(ciPRCheckTemplate), "default runner") {
-		t.Fatal("pull-request scaffold advertises the removed default runner")
+	template := strings.ToLower(ciPRCheckTemplate)
+	for _, retired := range []string{"profile default", "default runner"} {
+		if strings.Contains(template, retired) {
+			t.Fatalf("pull-request scaffold advertises removed %q selection", retired)
+		}
 	}
 }
