@@ -662,6 +662,13 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 
 	// The laptop wakes.
 	st := e.store()
+	liveBefore, err := st.GetTrigger(context.Background(), ack.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if liveBefore.Status != "claimed" {
+		t.Fatalf("live trigger status before jump = %q, want claimed", liveBefore.Status)
+	}
 	if _, err := st.DB().Exec(
 		`UPDATE triggers SET lease_expires_at = ? WHERE status = 'claimed'`,
 		time.Now().Add(-time.Hour).UnixNano()); err != nil {
@@ -673,18 +680,18 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	// wedged or disconnected from the consumer loop.
 	probeID := ack.RunID + "-sweep-probe"
 	now := time.Now()
-	if _, err := st.DB().Exec(`
-INSERT INTO triggers (id, pipeline, status, created_at, claimed_at, lease_expires_at, claim_seq)
-VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.UnixNano(),
-		now.Add(-time.Hour).UnixNano()); err != nil {
-		t.Fatal(err)
-	}
 	if err := st.CreateRun(context.Background(), store.Run{
 		ID: probeID, Pipeline: "fixture", Status: "pending", StartedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.FinishRun(context.Background(), probeID, "success", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB().Exec(`
+INSERT INTO triggers (id, pipeline, status, created_at, claimed_at, lease_expires_at, claim_seq)
+VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.UnixNano(),
+		now.Add(-time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -710,6 +717,14 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 	}
 	if probe.Status != "done" {
 		t.Fatalf("maintenance sweep did not reconcile the probe within 20s; status = %q", probe.Status)
+	}
+	liveAfter, err := st.GetTrigger(context.Background(), ack.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if liveAfter.Status != liveBefore.Status || liveAfter.ClaimSeq != liveBefore.ClaimSeq {
+		t.Fatalf("live trigger changed during sweep: status/claim_seq = %s/%d, want %s/%d",
+			liveAfter.Status, liveAfter.ClaimSeq, liveBefore.Status, liveBefore.ClaimSeq)
 	}
 	if got := e.startsInMarker(); got != 1 {
 		t.Fatalf("expected exactly one dispatch, saw %d: %v", got, e.markerLines())
