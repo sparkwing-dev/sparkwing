@@ -6,6 +6,11 @@ import (
 	"testing"
 )
 
+var (
+	_ func() Info               = gatherInfo
+	_ func(Info) []InfoNextStep = nextStepsFor
+)
+
 func TestParseInfoVersion_Classification(t *testing.T) {
 	cases := []struct {
 		name      string
