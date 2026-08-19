@@ -111,6 +111,8 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 	BakedBinary = os.Args[0]
 	t.Cleanup(func() { BakedBinary = oldBaked })
 	t.Setenv("SPARKWING_TRIGGER_LOOP_HELPER", "1")
+	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
+	defer cancel()
 
 	var claims atomic.Int32
 	var mu sync.Mutex
@@ -133,6 +135,9 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 				TriggerSource: "test",
 				Status:        "claimed",
 			})
+			if n == 2 {
+				cancel()
+			}
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/trigger-1/heartbeat":
 			_ = json.NewEncoder(w).Encode(map[string]bool{"cancel_requested": false})
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers/trigger-2/heartbeat":
@@ -142,9 +147,6 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 		}
 	}))
 	t.Cleanup(srv.Close)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
-	defer cancel()
 
 	err := RunTriggerLoop(ctx, TriggerLoopOptions{
 		ControllerURL: srv.URL,
