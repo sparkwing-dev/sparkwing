@@ -30,19 +30,22 @@ CLI except via 'secrets get'.
 
 Remove a secret
 
-Deletes the secret row from the controller. Pipelines that reference the name will fail to resolve until the secret is re-added.
+Deletes the secret from local files when --profile is omitted, or from the named profile's controller. Pipelines that reference the name will fail to resolve until the secret is re-added.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--name NAME` | Secret name to remove (required) |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (omit for local files) |
 
 ### Examples
 
 ```sh
-# Delete a secret
+# Delete a local secret
+sparkwing secrets delete --name API_TOKEN
+
+# Delete a remote secret
 sparkwing secrets delete --name API_TOKEN --profile prod
 ```
 
@@ -50,20 +53,24 @@ sparkwing secrets delete --name API_TOKEN --profile prod
 
 Print a secret's raw value to stdout
 
-Prints only the raw value (no trailing newline) so it can be
-piped into another command. Use 'secrets list' for metadata.
+Reads local secret files when --profile is omitted, or the
+named profile's controller. Prints only the raw value (no trailing newline)
+so it can be piped into another command. Use 'secrets list' for metadata.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--name NAME` | Secret name (required) |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (omit for local files) |
 
 ### Examples
 
 ```sh
-# Fetch a secret
+# Fetch a local secret
+sparkwing secrets get --name API_TOKEN
+
+# Fetch a remote secret
 sparkwing secrets get --name API_TOKEN --profile prod
 ```
 
@@ -71,18 +78,21 @@ sparkwing secrets get --name API_TOKEN --profile prod
 
 List secret names + metadata
 
-Prints a table of name, created_at, and the principal that last updated each secret. Raw values are never printed by this command.
+Lists secret names and metadata from local files when --profile is omitted, or from the named profile's controller. Raw values are never printed by this command.
 
 ### Flags
 
 | Flag | Description |
 |---|---|
 | `--grep PATTERN` | Filter by name substring (case-sensitive) |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (omit for local files) |
 
 ### Examples
 
 ```sh
+# List local secrets
+sparkwing secrets list
+
 # List secrets on prod
 sparkwing secrets list --profile prod
 
@@ -94,8 +104,9 @@ sparkwing secrets list --profile prod --grep API
 
 Store (or replace) a secret value
 
-Uploads --value (or the contents of --file) to the controller
-under --name. Replaces any existing secret with that name.
+Stores --value (or the contents of --file) in the local secret
+files when --profile is omitted, or uploads it to the named profile's
+controller. Replaces any existing secret with that name.
 Prefer --file for long or multi-line values so the raw text
 does not land in shell history.
 
@@ -107,13 +118,13 @@ does not land in shell history.
 | `--value VALUE` | Secret value (prefer --file for long values) |
 | `--file PATH` | Read value from file (keeps value out of shell history) |
 | `--plain` | Store as non-masked config (e.g. REGION, LOG_LEVEL) -- value will NOT be redacted in run logs. Default is masked. |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (omit for local files) |
 
 ### Examples
 
 ```sh
-# Set a masked secret (default)
-sparkwing secrets set --name API_TOKEN --value abc123 --profile prod
+# Set a local masked secret
+sparkwing secrets set --name API_TOKEN --value abc123
 
 # Set from a file
 sparkwing secrets set --name TLS_CERT --file ./tls.crt --profile prod

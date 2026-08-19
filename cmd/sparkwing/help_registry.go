@@ -2978,8 +2978,9 @@ CLI except via 'secrets get'.`,
 var cmdSecretSet = Command{
 	Path:     "sparkwing secrets set",
 	Synopsis: "Store (or replace) a secret value",
-	Description: `Uploads --value (or the contents of --file) to the controller
-under --name. Replaces any existing secret with that name.
+	Description: `Stores --value (or the contents of --file) in the local secret
+files when --profile is omitted, or uploads it to the named profile's
+controller. Replaces any existing secret with that name.
 Prefer --file for long or multi-line values so the raw text
 does not land in shell history.`,
 	Flags: []FlagSpec{
@@ -2987,11 +2988,11 @@ does not land in shell history.`,
 		{Name: "value", Type: FlagString, Argument: "VALUE", Desc: "Secret value (prefer --file for long values)", RequiredWhen: "when --file is not set", ConflictsWith: []string{"file"}, Group: "Input"},
 		{Name: "file", Type: FlagString, Argument: "PATH", Desc: "Read value from file (keeps value out of shell history)", RequiredWhen: "when --value is not set", ConflictsWith: []string{"value"}, Group: "Input"},
 		{Name: "plain", Type: FlagBool, Desc: "Store as non-masked config (e.g. REGION, LOG_LEVEL) -- value will NOT be redacted in run logs. Default is masked.", Group: "Input"},
-		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Set a masked secret (default)", "sparkwing secrets set --name API_TOKEN --value abc123 --profile prod"},
+		{"Set a local masked secret", "sparkwing secrets set --name API_TOKEN --value abc123"},
 		{"Set from a file", "sparkwing secrets set --name TLS_CERT --file ./tls.crt --profile prod"},
 		{"Set non-masked config", "sparkwing secrets set --name REGION --value us-east-1 --plain --profile prod"},
 	},
@@ -3000,28 +3001,31 @@ does not land in shell history.`,
 var cmdSecretGet = Command{
 	Path:     "sparkwing secrets get",
 	Synopsis: "Print a secret's raw value to stdout",
-	Description: `Prints only the raw value (no trailing newline) so it can be
-piped into another command. Use 'secrets list' for metadata.`,
+	Description: `Reads local secret files when --profile is omitted, or the
+named profile's controller. Prints only the raw value (no trailing newline)
+so it can be piped into another command. Use 'secrets list' for metadata.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name", Required: true, Group: "Input"},
-		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Fetch a secret", "sparkwing secrets get --name API_TOKEN --profile prod"},
+		{"Fetch a local secret", "sparkwing secrets get --name API_TOKEN"},
+		{"Fetch a remote secret", "sparkwing secrets get --name API_TOKEN --profile prod"},
 	},
 }
 
 var cmdSecretList = Command{
 	Path:        "sparkwing secrets list",
 	Synopsis:    "List secret names + metadata",
-	Description: `Prints a table of name, created_at, and the principal that last updated each secret. Raw values are never printed by this command.`,
+	Description: `Lists secret names and metadata from local files when --profile is omitted, or from the named profile's controller. Raw values are never printed by this command.`,
 	Flags: []FlagSpec{
 		{Name: "grep", Type: FlagString, Argument: "PATTERN", Desc: "Filter by name substring (case-sensitive)", Group: "Filter"},
-		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Filter", "System", "Other"},
 	Examples: []Example{
+		{"List local secrets", "sparkwing secrets list"},
 		{"List secrets on prod", "sparkwing secrets list --profile prod"},
 		{"Filter to API-related names", "sparkwing secrets list --profile prod --grep API"},
 	},
@@ -3030,14 +3034,15 @@ var cmdSecretList = Command{
 var cmdSecretDelete = Command{
 	Path:        "sparkwing secrets delete",
 	Synopsis:    "Remove a secret",
-	Description: `Deletes the secret row from the controller. Pipelines that reference the name will fail to resolve until the secret is re-added.`,
+	Description: `Deletes the secret from local files when --profile is omitted, or from the named profile's controller. Pipelines that reference the name will fail to resolve until the secret is re-added.`,
 	Flags: []FlagSpec{
 		{Name: "name", Type: FlagString, Argument: "NAME", Desc: "Secret name to remove", Required: true, Group: "Input"},
-		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Type: FlagString, Argument: "NAME", Desc: "Profile name (omit for local files)", Group: "System"},
 	},
 	GroupOrder: []string{"Input", "System", "Other"},
 	Examples: []Example{
-		{"Delete a secret", "sparkwing secrets delete --name API_TOKEN --profile prod"},
+		{"Delete a local secret", "sparkwing secrets delete --name API_TOKEN"},
+		{"Delete a remote secret", "sparkwing secrets delete --name API_TOKEN --profile prod"},
 	},
 }
 
