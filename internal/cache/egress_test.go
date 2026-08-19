@@ -99,6 +99,17 @@ func setWindows(t *testing.T, fresh, cooldown time.Duration) {
 	t.Cleanup(func() { fetchFreshWindow, recloneCooldown = oldFresh, oldCooldown })
 }
 
+func backdateFetch(t *testing.T, hash string, d time.Duration) {
+	t.Helper()
+	bgFetch.mu.Lock()
+	defer bgFetch.mu.Unlock()
+	rs := bgFetch.repos[stateKey(hash)]
+	if rs == nil || rs.lastOK.IsZero() {
+		t.Fatalf("no successful fetch recorded for %s", hash)
+	}
+	rs.lastOK = rs.lastOK.Add(-d)
+}
+
 func fileRequest(t *testing.T, repoURL string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodGet,
@@ -145,7 +156,7 @@ func TestFetchThrottle_ExpiredWindowFetchesAgain(t *testing.T) {
 	fetches := countFetches(t, nil)
 
 	fileRequest(t, repoURL)
-	time.Sleep(20 * time.Millisecond)
+	backdateFetch(t, repoHash(repoURL), 20*time.Millisecond)
 	fileRequest(t, repoURL)
 
 	if got := fetches.Load(); got != 2 {
