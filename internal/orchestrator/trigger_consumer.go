@@ -580,11 +580,16 @@ func heartbeatClaimedTrigger(
 	}
 }
 
+type triggerHeartbeatStore interface {
+	HeartbeatTrigger(context.Context, string, time.Duration) (bool, error)
+	TriggerClaimGeneration(context.Context, string) (int64, error)
+}
+
 // heartbeatOnce renews one lease, retrying transient failures inside the
 // tick it was given. It reports false when the heartbeat should stop for
 // good.
 func heartbeatOnce(
-	ctx context.Context, st *store.Store, id string, seq int64,
+	ctx context.Context, st triggerHeartbeatStore, id string, seq int64,
 	lease, budget time.Duration, logger *slog.Logger,
 ) bool {
 	deadline := time.Now().Add(budget)

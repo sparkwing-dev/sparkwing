@@ -405,8 +405,7 @@ func TestEnsureRunLogDir_OnlyNamesADirectoryThatExists(t *testing.T) {
 
 // TestSweeper_LeavesALiveRunningDispatchAlone covers suspension advancing wall
 // time past a live dispatch's lease while its monotonic heartbeat ticker stops.
-// The sweep interval is four times shorter than the heartbeat interval, so the
-// sweeper is guaranteed to notice first.
+// The sweeper can therefore observe a lapsed lease before the next heartbeat.
 //
 // A lapsed lease alone is not evidence of death: only a run that never
 // started is requeued.
