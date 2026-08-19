@@ -51,6 +51,7 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** Required `--profile` flags no longer claim a default value.
 - **cli:** User-management help marks `--profile` required and includes it in
   every example.
 - **cli:** Token command help marks `--profile` required and includes it in
