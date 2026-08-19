@@ -2,7 +2,7 @@
 // implements the dispatcher (runPipeline) and the read verbs (list,
 // describe, discover, explain). The catalog merges
 // .sparkwing/sparkwing.yaml entries with the describe cache's
-// typed metadata (Args, Examples) into one record shape.
+// typed metadata into one record shape.
 package main
 
 import (
@@ -25,7 +25,7 @@ import (
 
 // Pipeline is the agent-facing record for one entry in this
 // repo's sparkwing.yaml. Pipelines with at least one trigger
-// (push / webhook / schedule / hook) auto-run when the trigger
+// (push / pull request / webhook / schedule / hook) auto-run when the trigger
 // fires; pipelines with an empty Triggers list are manual-only
 // (`sparkwing run <name>`).
 type Pipeline struct {
@@ -351,11 +351,9 @@ func runPipelineDescribe(args []string) error {
 	}
 }
 
-// gatherPipelinesCatalog merges the three registries (sparkwing.yaml, describe
-// cache, scripts frontmatter) into one sorted slice. Sort order is
-// alphabetical by name regardless of kind, matching the intent of
-// `sparkwing pipeline list` as a flat catalog; grouping/bucketing is
-// a rendering concern handled by printPipelineTable.
+// gatherPipelinesCatalog enriches the sparkwing.yaml registry with
+// typed metadata from the describe cache. It returns entries sorted by
+// pipeline name for the flat `sparkwing pipeline list` view.
 func gatherPipelinesCatalog(includeHidden bool) ([]Pipeline, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
