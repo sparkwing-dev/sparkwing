@@ -39,3 +39,25 @@ func TestWebhookHelpUsesProfilesOnlyForControllerLookups(t *testing.T) {
 		}
 	}
 }
+
+func TestWebhookListAndReplayRejectProfile(t *testing.T) {
+	commands := []struct {
+		name string
+		run  func([]string) error
+	}{
+		{name: "list", run: runWebhooksList},
+		{name: "replay", run: runWebhooksReplay},
+	}
+
+	for _, command := range commands {
+		t.Run(command.name, func(t *testing.T) {
+			var err error
+			captureStderr(t, func() {
+				err = command.run([]string{"--profile", "prod"})
+			})
+			if err == nil || !strings.Contains(err.Error(), "unknown flag: --profile") {
+				t.Fatalf("error = %v, want unknown --profile flag", err)
+			}
+		})
+	}
+}
