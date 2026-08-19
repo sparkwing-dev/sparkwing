@@ -3,7 +3,6 @@ package logs_test
 import (
 	"bufio"
 	"context"
-	"io"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -120,6 +119,13 @@ func TestStream_ContextCancellationStops(t *testing.T) {
 // TestStream_EscapesEmbeddedNewlines prevents a malformed log line
 // from splitting one event into two on the wire.
 func TestStream_EscapesEmbeddedNewlines(t *testing.T) {
+	started := time.Now()
+	t.Cleanup(func() {
+		if elapsed := time.Since(started); elapsed >= 750*time.Millisecond {
+			t.Errorf("embedded-newline stream test took %v, want less than 750ms", elapsed)
+		}
+	})
+
 	dir := t.TempDir()
 	s, err := logs.New(dir, nil)
 	if err != nil {
@@ -143,17 +149,24 @@ func TestStream_EscapesEmbeddedNewlines(t *testing.T) {
 	_ = c.Append(context.Background(), "run-esc", "node-x",
 		[]byte("second\n"))
 
-	time.Sleep(500 * time.Millisecond)
-
-	go func() { time.Sleep(500 * time.Millisecond); stream.Close() }()
-	body, _ := io.ReadAll(stream)
-	got := string(body)
-
-	for _, line := range strings.Split(got, "\n") {
+	var body strings.Builder
+	scan := bufio.NewScanner(stream)
+	for scan.Scan() {
+		line := scan.Text()
+		body.WriteString(line)
+		body.WriteByte('\n')
 		if strings.HasPrefix(line, "data: ") && strings.Contains(line, "\r") {
 			t.Errorf("SSE line contains raw CR: %q", line)
 		}
+		got := body.String()
+		if strings.Contains(got, "embedded") && strings.Contains(got, "second") {
+			break
+		}
 	}
+	if err := scan.Err(); err != nil {
+		t.Fatal(err)
+	}
+	got := body.String()
 	if !strings.Contains(got, "embedded") || !strings.Contains(got, "second") {
 		t.Errorf("missing expected content:\n%s", got)
 	}
