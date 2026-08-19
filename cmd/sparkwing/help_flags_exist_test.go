@@ -89,7 +89,11 @@ func TestProfileFlagRegistrationsDoNotAdvertiseCurrentDefault(t *testing.T) {
 				return true
 			}
 			description, ok := stringLiteral(call.Args[len(call.Args)-1])
-			if ok && strings.Contains(strings.ToLower(description), "current default") {
+			if !ok {
+				t.Errorf("%s registers --profile with a description this check cannot inspect", fset.Position(call.Pos()))
+				return true
+			}
+			if strings.Contains(strings.ToLower(description), "current default") {
 				t.Errorf("%s advertises a nonexistent current default profile in %q", fset.Position(call.Pos()), description)
 			}
 			return true
