@@ -3185,12 +3185,11 @@ Exit code is non-zero when any probe fails. Missing optional
 services (logs, gitcache) count as warn, not fail, so a
 minimally-configured laptop profile can still exit 0.`,
 	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 		{Name: "output", Short: "o", Argument: "FMT", Desc: "Output format (json|table)", Group: "Output"},
 	},
 	GroupOrder: []string{"Output", "System", "Other"},
 	Examples: []Example{
-		{"Probe the default profile", "sparkwing configure profiles test"},
 		{"Probe a named profile", "sparkwing configure profiles test --profile prod"},
 		{"JSON for scripting", "sparkwing configure profiles test --profile prod -o json"},
 	},

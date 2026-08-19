@@ -262,15 +262,12 @@ minimally-configured laptop profile can still exit 0.
 
 | Flag | Description |
 |---|---|
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (required) |
 | `-o, --output FMT` | Output format (json\|table) |
 
 ### Examples
 
 ```sh
-# Probe the default profile
-sparkwing configure profiles test
-
 # Probe a named profile
 sparkwing configure profiles test --profile prod
 
