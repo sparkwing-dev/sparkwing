@@ -510,7 +510,7 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 			fmt.Printf("    %s\n", color.Dim("not yet live: point the repo's GitHub webhook at this pipeline to deliver the event"))
 		}
 	}
-	tidy := tidySkeleton(sparkwingDir, true)
+	tidy := tidySkeleton(sparkwingDir)
 	switch {
 	case tidy.Skipped:
 	case tidy.OK:
