@@ -1,23 +1,20 @@
-// Package pipelines parses .sparkwing/pipelines.yaml, the registry
-// that maps each pipeline's invocation name to the Go type that
-// implements it plus its trigger rules, declared secrets, and tags.
+// Package pipelines parses the pipelines section of
+// .sparkwing/sparkwing.yaml. The registry maps each invocation name to
+// its Go entrypoint and dispatch metadata.
 //
 // The file is intentionally a thin registry. The Plan itself, jobs,
-// conditions, and per-step details all live in Go code; pipelines.yaml
-// only holds metadata the controller needs before loading Go.
+// conditions, and per-step details all live in Go code.
 //
 // # Loading
 //
-// Use [Load] to read from disk or [Parse] to read from any
-// io.Reader; both return a [*Config]. Call [Config.Validate] before
-// trusting the file's contents.
+// Use [Parse] to read a standalone registry document from an
+// io.Reader. It returns a validated [*Config].
 //
 // # Shape
 //
 // [Config] is the top-level document with one or more [Pipeline]
-// entries. Each Pipeline carries [Triggers], [SecretsField], optional
-// [Target]s, and [PipelineValues] (the layered config-value surface).
-// Triggers fan out by source: [ManualTrigger], [PushTrigger],
-// [WebhookTrigger], [DeployTrigger], [PreHookTrigger],
-// [PostHookTrigger], [PostCommitHookTrigger].
+// entries. Each Pipeline carries [Triggers], [Guards], argument
+// defaults, a profile selector, and runner requirements. Triggers fan
+// out by source: [PushTrigger], [PullRequestTrigger], [WebhookTrigger],
+// [PreHookTrigger], [PostHookTrigger], and [PostCommitHookTrigger].
 package pipelines

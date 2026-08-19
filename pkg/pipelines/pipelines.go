@@ -8,16 +8,15 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// Config is the whole pipelines.yaml contents.
+// Config is one pipeline registry document.
 type Config struct {
 	Pipelines []Pipeline `yaml:"pipelines"`
 }
 
 // Pipeline is one registry entry. A pipeline binds a Go entrypoint
 // (declared via [sparkwing.RegisterEntrypoint]) to one named
-// deployment shape: defaults, guards, dispatch metadata, triggers,
-// secrets surface. One Go entrypoint can back many pipelines, each
-// with its own policy.
+// deployment shape: defaults, guards, dispatch metadata, and triggers.
+// One Go entrypoint can back many pipelines, each with its own policy.
 type Pipeline struct {
 	// Name is the invocable name (`sparkwing run <name>`); must equal
 	// the string passed to the SDK's Register call.
