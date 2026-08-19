@@ -18,6 +18,13 @@ import (
 // and verify every line eventually arrives, in order, as "data:"
 // events.
 func TestStream_TailsAppendedContent(t *testing.T) {
+	started := time.Now()
+	t.Cleanup(func() {
+		if elapsed := time.Since(started); elapsed >= 550*time.Millisecond {
+			t.Errorf("append stream test took %v, want less than 550ms", elapsed)
+		}
+	})
+
 	dir := t.TempDir()
 	s, err := logs.New(dir, nil)
 	if err != nil {
