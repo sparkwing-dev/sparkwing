@@ -49,6 +49,14 @@ func TestXrepoRuntimeHelpUsesCommandRegistry(t *testing.T) {
 			t.Errorf("xrepo list help is missing %q:\n%s", want, leaf)
 		}
 	}
+
+	add, err := exec.Command(bin, "configure", "xrepo", "add", "--help").CombinedOutput()
+	if err != nil {
+		t.Fatalf("xrepo add help: %v\n%s", err, add)
+	}
+	if !strings.Contains(string(add), "sparkwing configure xrepo add [path] [flags]") {
+		t.Fatalf("xrepo add help does not render its optional path once:\n%s", add)
+	}
 }
 
 func TestXrepoRegistryDescribesRuntimeInputs(t *testing.T) {
