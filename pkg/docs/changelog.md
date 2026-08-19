@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **logs:** Server-side line filters preserve whether the source ended with a
+  newline instead of adding one to unterminated output.
 - **cli:** `configure xrepo` help, command discovery, and shell completion
   expose its `list`, `add`, `remove`, and `prune` subcommands and inputs.
 - **cli:** Run-command errors and help use the public `runs` namespace instead

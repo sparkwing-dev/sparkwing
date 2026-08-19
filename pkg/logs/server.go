@@ -583,8 +583,9 @@ func (f logFilter) apply(data []byte) []byte {
 		return nil
 	}
 	out := strings.Join(lines, "\n")
-	out += "\n"
-	_ = trailingNL
+	if trailingNL {
+		out += "\n"
+	}
 	return []byte(out)
 }
 
