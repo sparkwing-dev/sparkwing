@@ -143,32 +143,33 @@ func TestReaper_HeartbeatKeepsAlive(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	hbDone := make(chan struct{})
-	go func() {
-		defer close(hbDone)
-		for i := range 5 {
-			time.Sleep(50 * time.Millisecond)
-			if _, err := c.HeartbeatTrigger(ctx, claimed.ID); err != nil {
-				t.Errorf("heartbeat %d: %v", i, err)
-				return
-			}
+	if claimed.LeaseExpiresAt == nil {
+		t.Fatal("claimed trigger has no lease expiry")
+	}
+	initialExpiry := *claimed.LeaseExpiresAt
+	if _, err := c.HeartbeatTrigger(ctx, claimed.ID); err != nil {
+		t.Fatalf("heartbeat: %v", err)
+	}
+	renewed, err := st.GetTrigger(ctx, claimed.ID)
+	if err != nil {
+		t.Fatalf("read renewed trigger: %v", err)
+	}
+	if renewed.LeaseExpiresAt == nil {
+		t.Fatal("heartbeated trigger has no lease expiry")
+	}
+	minimumExpiry := initialExpiry.Add(store.DefaultLeaseDuration / 2)
+	if renewed.LeaseExpiresAt.Before(minimumExpiry) {
+		t.Fatalf("heartbeat expiry = %s, want at or after %s", renewed.LeaseExpiresAt, minimumExpiry)
+	}
+	reaped, err := store.Maintenance.ReapExpiredTriggers(st, ctx)
+	if err != nil {
+		t.Fatalf("reap: %v", err)
+	}
+	for _, id := range reaped {
+		if id == claimed.ID {
+			t.Fatalf("heartbeated trigger %q was reaped", id)
 		}
-	}()
-
-	// safety: this loop outlasts the heartbeats, so it too has to be waited
-	// on -- left running it reaps against a closed store and a deleted dir.
-	reapDone := make(chan struct{})
-	go func() {
-		defer close(reapDone)
-		for range 10 {
-			_, _ = store.Maintenance.ReapExpiredTriggers(st, ctx)
-			time.Sleep(30 * time.Millisecond)
-		}
-	}()
-
-	<-hbDone
-	<-reapDone
+	}
 
 	got, err := st.GetTrigger(ctx, claimed.ID)
 	if err != nil {
