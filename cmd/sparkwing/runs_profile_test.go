@@ -53,3 +53,13 @@ func TestRunsLogs_OnFlagRetired(t *testing.T) {
 		t.Fatalf("logs: want retired --on pointer, got %v", err)
 	}
 }
+
+func TestRunsLogs_ErrorUsesPublicCommandName(t *testing.T) {
+	err := runJobs([]string{"logs", "--run", "r1", "--tail", "1", "--head", "1"})
+	if err == nil {
+		t.Fatal("expected conflicting range error")
+	}
+	if !strings.HasPrefix(err.Error(), "runs logs:") {
+		t.Fatalf("error = %q, want runs logs prefix", err)
+	}
+}
