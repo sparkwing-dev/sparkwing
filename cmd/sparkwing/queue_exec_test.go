@@ -622,7 +622,9 @@ func startRestartableQueueDaemon(t *testing.T, home string) func() {
 }
 
 func queueRestartDaemonConfig(home string) wingd.Config {
-	return wingd.Config{Home: home, Version: "v1.0.0", GuardInterval: 10 * time.Millisecond}
+	config := queueDaemonConfig(home)
+	config.GuardInterval = 10 * time.Millisecond
+	return config
 }
 
 func TestQueueRestartDaemonConfigUsesDeterministicHostSample(t *testing.T) {
