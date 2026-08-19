@@ -90,9 +90,14 @@ func TestImageRolloutDoesNotAdvertiseUnusedProfile(t *testing.T) {
 			t.Fatal("image rollout advertises unused --profile")
 		}
 	}
-	for _, example := range cmdImageRollout.Examples {
-		if strings.Contains(example.Command, "--profile") {
-			t.Errorf("image rollout example advertises unused --profile: %q", example.Command)
+	for _, command := range allCommands {
+		for _, example := range command.Examples {
+			if !strings.Contains(example.Command, "sparkwing cluster image rollout") {
+				continue
+			}
+			if strings.Contains(example.Command, "--profile") {
+				t.Errorf("%s example advertises unused rollout --profile: %q", command.Path, example.Command)
+			}
 		}
 	}
 }
