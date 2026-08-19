@@ -23,6 +23,7 @@ func TestMaxParallel_CapsConcurrentNodeExecution(t *testing.T) {
 
 	var active, peak atomic.Int32
 	var observedAtZero atomic.Bool
+	release := make(chan struct{})
 
 	registerOnce.Range(func(k, _ any) bool {
 		if k.(string) == "orch-maxparallel" {
@@ -37,11 +38,15 @@ func TestMaxParallel_CapsConcurrentNodeExecution(t *testing.T) {
 			active:         &active,
 			peak:           &peak,
 			observedAtZero: &observedAtZero,
+			capacity:       cap,
+			release:        release,
 		}
 	})
 
 	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{
 		Pipeline:    "orch-maxparallel",
 		MaxParallel: cap,
 	})
@@ -69,6 +74,9 @@ type maxParallelPipe struct {
 	active         *atomic.Int32
 	peak           *atomic.Int32
 	observedAtZero *atomic.Bool
+	capacity       int32
+	release        chan struct{}
+	releaseOnce    sync.Once
 }
 
 func (p *maxParallelPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -76,6 +84,7 @@ func (p *maxParallelPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkw
 		id := jobName(i)
 		sparkwing.Job(plan, id, func(ctx context.Context) error {
 			n := p.active.Add(1)
+			defer p.active.Add(-1)
 			if n == 1 {
 				p.observedAtZero.Store(true)
 			}
@@ -85,9 +94,15 @@ func (p *maxParallelPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkw
 					break
 				}
 			}
-			time.Sleep(50 * time.Millisecond)
-			p.active.Add(-1)
-			return nil
+			if n == p.capacity {
+				p.releaseOnce.Do(func() { close(p.release) })
+			}
+			select {
+			case <-p.release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		})
 	}
 	return nil
@@ -100,6 +115,3 @@ func jobName(i int) string {
 	}
 	return "job-" + string(letters[i/26-1]) + string(letters[i%26])
 }
-
-// silence unused import on go versions without strconv usage above
-var _ = sync.Mutex{}
