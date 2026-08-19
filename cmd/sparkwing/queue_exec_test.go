@@ -476,7 +476,7 @@ func TestQueueExecSurvivesAdmissionDaemonRestart(t *testing.T) {
 	}
 	home := queueHome(t)
 	stopFirst := startRestartableQueueDaemon(t, home)
-	installQueueExecInProcessSuccessor(t, home)
+	successorReady := installQueueExecInProcessSuccessor(t, home)
 	tmp := t.TempDir()
 	started := filepath.Join(tmp, "started")
 	release := filepath.Join(tmp, "release")
@@ -492,6 +492,13 @@ func TestQueueExecSurvivesAdmissionDaemonRestart(t *testing.T) {
 		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "restart-command"
 	})
 	stopFirst()
+	select {
+	case <-successorReady:
+	case err := <-result:
+		t.Fatalf("queue exec ended before successor readiness: %v", err)
+	case <-time.After(2 * queueExecWait):
+		t.Fatal("successor daemon did not become ready")
+	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), queueExecWait)
 		defer cancel()
@@ -515,13 +522,93 @@ func TestQueueExecSurvivesAdmissionDaemonRestart(t *testing.T) {
 	}
 }
 
-func installQueueExecInProcessSuccessor(t *testing.T, home string) {
+func TestStartQueueExecSuccessorWaitsForReadiness(t *testing.T) {
+	ready := make(chan struct{})
+	runStarted := make(chan struct{})
+	allowReady := make(chan struct{})
+	stopRun := make(chan struct{})
+	var allowReadyOnce sync.Once
+	var stopRunOnce sync.Once
+	releaseReady := func() { allowReadyOnce.Do(func() { close(allowReady) }) }
+	releaseRun := func() { stopRunOnce.Do(func() { close(stopRun) }) }
+	runFinished := make(chan struct{})
+	type startResult struct {
+		done <-chan error
+		err  error
+	}
+	returned := make(chan startResult, 1)
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		releaseReady()
+		releaseRun()
+		select {
+		case <-runFinished:
+		case <-time.After(queueExecWait):
+			t.Error("successor run did not stop during cleanup")
+		}
+		select {
+		case <-finished:
+		case <-time.After(queueExecWait):
+			t.Error("successor helper did not stop during cleanup")
+		}
+	})
+	go func() {
+		done, err := startQueueExecSuccessor(func() error {
+			defer close(runFinished)
+			close(runStarted)
+			<-allowReady
+			close(ready)
+			<-stopRun
+			return nil
+		}, ready, queueExecWait)
+		returned <- startResult{done: done, err: err}
+		close(finished)
+	}()
+	select {
+	case <-runStarted:
+	case <-time.After(queueExecWait):
+		t.Fatal("successor run did not start")
+	}
+	select {
+	case result := <-returned:
+		t.Fatalf("successor start returned before readiness: %v", result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	releaseReady()
+	var result startResult
+	select {
+	case result = <-returned:
+		if result.err != nil {
+			t.Fatalf("successor start: %v", result.err)
+		}
+	case <-time.After(queueExecWait):
+		t.Fatal("successor start did not return after readiness")
+	}
+	releaseRun()
+	select {
+	case err := <-result.done:
+		if err != nil {
+			t.Fatalf("successor run: %v", err)
+		}
+	case <-time.After(queueExecWait):
+		t.Fatal("successor run did not stop")
+	}
+	select {
+	case <-finished:
+	case <-time.After(queueExecWait):
+		t.Fatal("successor helper did not finish")
+	}
+}
+
+func installQueueExecInProcessSuccessor(t *testing.T, home string) <-chan struct{} {
 	t.Helper()
 	original := queueExecClientOptions
 	var mu sync.Mutex
+	ready := make(chan struct{})
+	var readyOnce sync.Once
 	type daemonInstance struct {
 		cancel context.CancelFunc
-		done   chan error
+		done   <-chan error
 	}
 	var instances []daemonInstance
 	queueExecClientOptions = func(gotHome string) wingdclient.Options {
@@ -533,11 +620,15 @@ func installQueueExecInProcessSuccessor(t *testing.T, home string) {
 					return err
 				}
 				ctx, stop := context.WithCancel(context.Background())
-				done := make(chan error, 1)
+				done, err := startQueueExecSuccessor(func() error { return d.Run(ctx) }, d.Ready(), queueExecWait)
+				if err != nil {
+					stop()
+					return err
+				}
 				mu.Lock()
 				instances = append(instances, daemonInstance{cancel: stop, done: done})
 				mu.Unlock()
-				go func() { done <- d.Run(ctx) }()
+				readyOnce.Do(func() { close(ready) })
 				return nil
 			},
 		}
@@ -561,6 +652,25 @@ func installQueueExecInProcessSuccessor(t *testing.T, home string) {
 			}
 		}
 	})
+	return ready
+}
+
+func startQueueExecSuccessor(run func() error, ready <-chan struct{}, timeout time.Duration) (<-chan error, error) {
+	done := make(chan error, 1)
+	go func() { done <- run() }()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-ready:
+		return done, nil
+	case err := <-done:
+		if err == nil {
+			err = errors.New("successor exited before readiness")
+		}
+		return done, err
+	case <-timer.C:
+		return done, errors.New("successor readiness timed out")
+	}
 }
 
 func waitForRestartedQueueExecState(t *testing.T, home string, result <-chan error, ready func(wingwire.QueueState) bool) wingwire.QueueState {
