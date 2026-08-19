@@ -18,7 +18,12 @@ func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
 	})
 	started := time.Now()
-	time.Sleep(80 * time.Millisecond)
+	if _, err := s.DB().Exec(
+		`UPDATE concurrency_holders SET lease_expires_at = ? WHERE key = ? AND holder_id = ?`,
+		time.Now().Add(-time.Second).UnixNano(), "k", "rA/n",
+	); err != nil {
+		t.Fatalf("expire holder: %v", err)
+	}
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue,
