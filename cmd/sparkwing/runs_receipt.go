@@ -1,8 +1,7 @@
 // `sparkwing runs receipt --run X` -- recompute and emit the
 // per-run audit + cost receipt as JSON. Local mode reads the SQLite
-// store directly and uses the resolved profile's
-// cost_per_runner_hour; cluster mode (--profile NAME) defers cost to the
-// controller's configured rate.
+// store directly and reports no configured cost; cluster mode
+// (--profile NAME) defers cost to the controller's configured rate.
 package main
 
 import (
@@ -23,7 +22,7 @@ import (
 func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsReceipt.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier")
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name; omit for local-only")
 	outFmt := fs.StringP("output", "o", "", "output format: json (default)")
 	if err := parseAndCheck(cmdJobsReceipt, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {

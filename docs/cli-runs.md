@@ -724,12 +724,11 @@ Recomputes the per-run receipt from the run + nodes
 rows on demand and prints it as JSON. The receipt bundles identity
 hashes (pipeline_version_hash, inputs_hash, plan_hash, per-node
 outputs_hash), per-step observability (durations, outcomes), and
-runner-time × profile-rate compute cost.
+runner-time and compute-cost accounting.
 
-Local mode reads from the SQLite store and uses the local profile's
-cost_per_runner_hour for the cost calc. --profile NAME reads from the
-remote controller's receipt endpoint; in that case the controller's
-configured rate (not the local profile) supplies cost.
+Local mode reads from the SQLite store and reports zero cost because no
+local billing rate is configured. --profile NAME reads from the remote
+controller's receipt endpoint and uses the controller's configured rate.
 
 ### Flags
 
