@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **docs:** Scheduling guidance no longer claims runner preferences appear in
+  surfaces that do not consume them.
 - **sdk:** Runner-preference documentation and generated scaffolds state that
   preferences are recorded in plan snapshots and do not affect runner selection.
 - **config:** Pipeline YAML parse errors name `sparkwing.yaml` instead of the
