@@ -25,6 +25,53 @@ func TestPrefersDocumentationStatesStoredBehavior(t *testing.T) {
 	}
 }
 
+func TestPrefersStorageDocumentationStatesStoredBehavior(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "plan.go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decl := range file.Decls {
+		typeDecl, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range typeDecl.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok || typeSpec.Name.Name != "JobNode" {
+				continue
+			}
+			structType, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				t.Fatal("JobNode is not a struct")
+			}
+			for _, field := range structType.Fields.List {
+				if len(field.Names) == 1 && field.Names[0].Name == "prefers" {
+					if field.Doc == nil {
+						t.Fatal("JobNode.prefers has no documentation")
+					}
+					assertPreferenceContract(t, strings.ToLower(field.Doc.Text()))
+					return
+				}
+			}
+		}
+	}
+	t.Fatal("JobNode.prefers not found")
+}
+
+func TestExecutionModelIsClearlyHistorical(t *testing.T) {
+	data, err := os.ReadFile("../DESIGN-execution-model.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := strings.ToLower(string(data))
+	if !strings.Contains(status, "status:** historical design record") {
+		t.Fatal("execution model does not identify itself as a historical design record")
+	}
+	if !strings.Contains(status, "not a description of current behavior") {
+		t.Fatal("execution model does not disclaim current-behavior authority")
+	}
+}
+
 func TestGeneratedPrefersDocumentationStatesStoredBehavior(t *testing.T) {
 	for _, path := range []string{"../docs/sdk-reference.md", "../pkg/docs/mirror/sdk-reference.md"} {
 		data, err := os.ReadFile(path)
