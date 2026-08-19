@@ -343,7 +343,8 @@ func TestRunNode_MissingJobFinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 }
 
 func TestRunNode_MissingJobUsesTerminalNodeDuringGrace(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -358,8 +359,13 @@ func TestRunNode_MissingJobUsesTerminalNodeDuringGrace(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
+	jobMissing := make(chan struct{}, 1)
 	kcli := fake.NewSimpleClientset()
 	kcli.PrependReactor("get", "jobs", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		select {
+		case jobMissing <- struct{}{}:
+		default:
+		}
 		return true, nil, apierrors.NewNotFound(schema.GroupResource{Group: "batch", Resource: "jobs"}, action.(k8stesting.GetAction).GetName())
 	})
 	r := New(kcli, client.New(srv.URL, nil), Config{
@@ -369,12 +375,20 @@ func TestRunNode_MissingJobUsesTerminalNodeDuringGrace(t *testing.T) {
 		PollInterval:          time.Millisecond,
 		MissingJobGracePeriod: 100 * time.Millisecond,
 	}, nil)
+	finishErr := make(chan error, 1)
 	go func() {
-		time.Sleep(5 * time.Millisecond)
-		_ = st.FinishNode(ctx, "run-1", "build", string(sparkwing.Success), "", []byte(`{"ok":true}`))
+		select {
+		case <-jobMissing:
+			finishErr <- st.FinishNode(ctx, "run-1", "build", string(sparkwing.Success), "", []byte(`{"ok":true}`))
+		case <-ctx.Done():
+			finishErr <- ctx.Err()
+		}
 	}()
 
 	res := r.RunNode(ctx, runner.Request{RunID: "run-1", NodeID: "build"})
+	if err := <-finishErr; err != nil {
+		t.Fatalf("finish terminal node: %v", err)
+	}
 	if res.Outcome != sparkwing.Success {
 		t.Fatalf("outcome = %s, want success from terminal node row (err=%v)", res.Outcome, res.Err)
 	}
