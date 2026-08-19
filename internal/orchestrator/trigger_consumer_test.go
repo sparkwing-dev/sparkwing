@@ -403,23 +403,13 @@ func TestEnsureRunLogDir_OnlyNamesADirectoryThatExists(t *testing.T) {
 	}
 }
 
-// --- Regression tests lifted from adversarial review ---------------
+// TestSweeper_LeavesALiveRunningDispatchAlone covers suspension advancing wall
+// time past a live dispatch's lease while its monotonic heartbeat ticker stops.
+// The sweep interval is four times shorter than the heartbeat interval, so the
+// sweeper is guaranteed to notice first.
 //
-// Each of these encodes a defect the review reproduced end to end. They
-// are written as assertions of the fixed behavior, so a regression
-// reintroduces the original failure rather than a vague timeout.
-
-// TestSweeper_LeavesALiveRunningDispatchAlone is BLOCKER 1.
-//
-// The lease deadline is an absolute wall-clock instant; the heartbeat
-// defending it is a Go ticker on the monotonic clock, which stops while
-// a laptop is suspended. Wall time therefore passes the lease of a
-// dispatch that is very much alive, and the sweep interval is four times
-// shorter than the heartbeat interval, so the sweeper is guaranteed to
-// notice first. The review ran one run id under two pids this way.
-//
-// The fix is that a lapsed lease alone is not evidence of death: only a
-// run that never started is requeued.
+// A lapsed lease alone is not evidence of death: only a run that never
+// started is requeued.
 func TestSweeper_LeavesALiveRunningDispatchAlone(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -457,10 +447,9 @@ func TestSweeper_LeavesALiveRunningDispatchAlone(t *testing.T) {
 	}
 }
 
-// TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting covers the
-// in-process half of the same blocker: the review saw a consumer
-// re-dispatch its OWN live run, because from the store's side a live
-// local dispatch and a dead one are indistinguishable.
+// TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting covers the window where
+// a consumer owns a live local dispatch that the store cannot distinguish
+// from a dead one.
 func TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -517,8 +506,8 @@ func TestSweeper_ClosesOutAClaimWhoseRunAlreadyEnded(t *testing.T) {
 	}
 }
 
-// TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted keeps the
-// blocker fix from over-correcting into "recover nothing".
+// TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted ensures that
+// protecting live dispatches does not prevent recovery before a run starts.
 func TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -540,14 +529,10 @@ func TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted(t *testing.T) {
 	}
 }
 
-// TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut is
-// BLOCKER 2.
-//
-// The dashboard attempted the election once and stood down forever, so
-// the ordering "resident consumer up, dashboard starts, resident idles
-// out" left the home with no consumer at all -- worse than the behavior
-// before a standalone consumer existed, since the dashboard always used
-// to consume.
+// TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut covers the
+// ordering "resident consumer up, dashboard starts, resident idles out". The
+// dashboard used to attempt the election once and stand down forever, leaving
+// the home with no consumer.
 func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
@@ -590,8 +575,8 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 	})
 }
 
-// TestHeartbeat_SurvivesATransientStoreError is S1. The heartbeat used
-// to give up permanently on the first error that was not ErrNotFound, so
+// TestHeartbeat_SurvivesATransientStoreError covers a heartbeat that used to
+// give up permanently on the first error that was not ErrNotFound, so
 // one "database is locked" from a concurrent writer left the claim
 // undefended for the rest of a long run -- which is what let the sweeper
 // requeue a live dispatch.
