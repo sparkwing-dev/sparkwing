@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **sdk:** `Requires` documentation distinguishes dispatched claim filtering
+  from direct execution instead of claiming unmatched labels fail validation.
 - **docs:** Scheduling guidance no longer claims runner preferences appear in
   surfaces that do not consume them.
 - **sdk:** Runner-preference documentation and generated scaffolds state that
