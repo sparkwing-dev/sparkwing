@@ -553,18 +553,24 @@ func (f logFilter) passThrough() bool {
 func (f logFilter) apply(data []byte) []byte {
 	text := string(data)
 	trailingNL := strings.HasSuffix(text, "\n")
-	if trailingNL {
-		text = strings.TrimSuffix(text, "\n")
+	text = strings.TrimSuffix(text, "\n")
+	type line struct {
+		text       string
+		terminated bool
 	}
-	var lines []string
-	if text != "" {
-		lines = strings.Split(text, "\n")
+	var lines []line
+	if len(data) > 0 {
+		parts := strings.Split(text, "\n")
+		lines = make([]line, len(parts))
+		for i, part := range parts {
+			lines[i] = line{text: part, terminated: i < len(parts)-1 || trailingNL}
+		}
 	}
 
 	if f.grep != "" {
 		kept := lines[:0:0]
 		for _, l := range lines {
-			if strings.Contains(l, f.grep) {
+			if strings.Contains(l.text, f.grep) {
 				kept = append(kept, l)
 			}
 		}
@@ -582,10 +588,17 @@ func (f logFilter) apply(data []byte) []byte {
 	if len(lines) == 0 {
 		return nil
 	}
-	out := strings.Join(lines, "\n")
-	out += "\n"
-	_ = trailingNL
-	return []byte(out)
+	var out strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			out.WriteByte('\n')
+		}
+		out.WriteString(line.text)
+	}
+	if lines[len(lines)-1].terminated {
+		out.WriteByte('\n')
+	}
+	return []byte(out.String())
 }
 
 // parseLinesRange parses "A:B" into 1-indexed inclusive bounds.
@@ -611,7 +624,7 @@ func parseLinesRange(spec string) (int, int, error) {
 
 // sliceRange returns lines[a-1:b] with 1-indexed inclusive bounds,
 // clamped to the actual slice length. b==0 means "until end".
-func sliceRange(lines []string, a, b int) []string {
+func sliceRange[T any](lines []T, a, b int) []T {
 	if a < 1 {
 		a = 1
 	}

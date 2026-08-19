@@ -52,6 +52,41 @@ func TestLogs_AppendReadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestLogs_FilterPreservesFinalNewline(t *testing.T) {
+	c, _, stop := newLogsServer(t)
+	defer stop()
+
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name   string
+		data   string
+		filter logs.ReadFilter
+		want   string
+	}{
+		{name: "terminated", data: "first\nsecond\n", filter: logs.ReadFilter{Head: 2}, want: "first\nsecond\n"},
+		{name: "unterminated", data: "first\nsecond", filter: logs.ReadFilter{Head: 2}, want: "first\nsecond"},
+		{name: "head-prefix", data: "first\nsecond", filter: logs.ReadFilter{Head: 1}, want: "first\n"},
+		{name: "range-prefix", data: "first\nsecond", filter: logs.ReadFilter{Lines: "1:1"}, want: "first\n"},
+		{name: "grep-prefix", data: "first\nsecond", filter: logs.ReadFilter{Grep: "first"}, want: "first\n"},
+		{name: "tail-final", data: "first\nsecond", filter: logs.ReadFilter{Tail: 1}, want: "second"},
+		{name: "empty-selection", data: "first\nsecond", filter: logs.ReadFilter{Grep: "absent"}, want: ""},
+		{name: "single-empty-line", data: "\n", filter: logs.ReadFilter{Head: 1}, want: "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := c.Append(ctx, "run-filter", tc.name, []byte(tc.data)); err != nil {
+				t.Fatal(err)
+			}
+			got, err := c.ReadFiltered(ctx, "run-filter", tc.name, tc.filter)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(got) != tc.want {
+				t.Errorf("filtered bytes = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestLogs_ReadRunConcatenates(t *testing.T) {
 	c, _, stop := newLogsServer(t)
 	defer stop()
