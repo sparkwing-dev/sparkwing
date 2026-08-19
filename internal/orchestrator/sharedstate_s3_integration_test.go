@@ -183,12 +183,16 @@ func TestS3Sharing_TriggerEnqueuesChildRecord(t *testing.T) {
 	paths := newPaths(t)
 
 	state := s3state.New(art, s3state.WithFlushInterval(20*time.Millisecond))
+	started := time.Now()
 	res, err := orchestrator.RunLocal(context.Background(), paths, orchestrator.Options{
 		Pipeline:      "s3-integ-trigger",
 		State:         state,
 		LogStore:      logs,
 		ArtifactStore: art,
 	})
+	if elapsed := time.Since(started); elapsed >= 2*time.Second {
+		t.Fatalf("child-trigger handoff took %s, want less than 2s", elapsed)
+	}
 	if err == nil && res != nil && res.Status == "success" {
 		t.Fatalf("trigger pipeline succeeded; expected the await to time out with no runner to claim the child")
 	}
