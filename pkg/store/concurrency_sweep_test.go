@@ -17,6 +17,7 @@ func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
 		Key: "k", HolderID: "rA/n", RunID: "rA", NodeID: "n",
 		Capacity: 1, Policy: store.OnLimitQueue, Lease: 40 * time.Millisecond,
 	})
+	started := time.Now()
 	time.Sleep(80 * time.Millisecond)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
 		Key: "k", HolderID: "rB/n", RunID: "rB", NodeID: "n",
@@ -32,6 +33,9 @@ func TestConcurrency_ReacquireExpiredHolderDoesNotRevive(t *testing.T) {
 	}
 	if got := activeHolders(t, s, "k"); got != 1 {
 		t.Fatalf("active holders on cap-1 key = %d, want 1 (no revive)", got)
+	}
+	if elapsed := time.Since(started); elapsed >= 60*time.Millisecond {
+		t.Fatalf("expired-holder reassignment took %v, want less than 60ms", elapsed)
 	}
 }
 
