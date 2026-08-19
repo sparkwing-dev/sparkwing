@@ -23,9 +23,12 @@ type memArt struct {
 	data   map[string][]byte
 	putErr error
 	getErr error
+	puts   chan string
 }
 
-func newMemArt() *memArt { return &memArt{data: map[string][]byte{}} }
+func newMemArt() *memArt {
+	return &memArt{data: map[string][]byte{}, puts: make(chan string, 64)}
+}
 
 func (m *memArt) setPutErr(err error) {
 	m.mu.Lock()
@@ -57,6 +60,10 @@ func (m *memArt) Put(_ context.Context, key string, r io.Reader) error {
 		return err
 	}
 	m.data[key] = body
+	select {
+	case m.puts <- key:
+	default:
+	}
 	return nil
 }
 
@@ -289,14 +296,19 @@ func TestS3StateBackend_BufferThreshold_TriggersFlush(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if ok, _ := art.Has(ctx, "runs/r/state.ndjson"); ok {
+	deadline := time.NewTimer(500 * time.Millisecond)
+	defer deadline.Stop()
+	for {
+		select {
+		case key := <-art.puts:
+			if key == "runs/r/state.ndjson" {
+				return
+			}
+		case <-deadline.C:
+			t.Fatal("threshold did not trigger a flush within 500ms")
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
 	}
-	t.Fatal("threshold did not trigger a flush within 500ms")
 }
 
 func TestS3StateBackend_Close_FlushesPending(t *testing.T) {
