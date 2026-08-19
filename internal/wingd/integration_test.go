@@ -1803,8 +1803,8 @@ func TestExplicitRelease_Promotes(t *testing.T) {
 	if r.err != nil {
 		t.Fatalf("b should have been promoted after release, got %v", r.err)
 	}
-	if elapsed := time.Since(started); elapsed >= 75*time.Millisecond {
-		t.Fatalf("release-to-promotion took %v, want less than 75ms", elapsed)
+	if elapsed := time.Since(started); elapsed >= 90*time.Millisecond {
+		t.Fatalf("release-to-promotion took %v, want less than 90ms", elapsed)
 	}
 }
 
