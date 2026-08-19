@@ -11,6 +11,11 @@ import (
 
 func TestProductionSourceUsesRunsCommandNames(t *testing.T) {
 	retired := regexp.MustCompile(`(?:sparkwing\s+jobs|["'\x60]jobs)\s+(?:list|status|logs|errors|failures|stats|last|tree|get|wait|find|retry|cancel|prune|receipt|grep|summary|timeline)\b`)
+	for _, subcommand := range cmdJobs.SubcommandOrder {
+		if !retired.MatchString("`jobs " + subcommand + "`") {
+			t.Errorf("retired-command pattern omits registered runs subcommand %q", subcommand)
+		}
+	}
 	err := filepath.WalkDir("../..", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
