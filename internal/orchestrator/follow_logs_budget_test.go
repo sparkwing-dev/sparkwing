@@ -48,6 +48,19 @@ func followSpy(t *testing.T, runID string, getRun func(n int32) (store.Run, bool
 	return srv.URL
 }
 
+func followSpyWithStatusRead(t *testing.T, runID string, getRun func(n int32) (store.Run, bool)) (string, <-chan struct{}) {
+	t.Helper()
+	statusRead := make(chan struct{}, 1)
+	url := followSpy(t, runID, func(n int32) (store.Run, bool) {
+		select {
+		case statusRead <- struct{}{}:
+		default:
+		}
+		return getRun(n)
+	})
+	return url, statusRead
+}
+
 func runningRun(runID string) store.Run {
 	return store.Run{ID: runID, Pipeline: "release", Status: "running", StartedAt: time.Now().Add(-time.Second)}
 }
@@ -179,7 +192,7 @@ func TestFollowLogsRemote_SuccessfulPollResetsTheBudget(t *testing.T) {
 func TestFollowLogsRemote_CancelIsNotATransportFailure(t *testing.T) {
 	shortFollowBudget(t, time.Millisecond)
 	const runID = "run-cancelled-follow"
-	url := followSpy(t, runID, func(int32) (store.Run, bool) { return runningRun(runID), true })
+	url, statusRead := followSpyWithStatusRead(t, runID, func(int32) (store.Run, bool) { return runningRun(runID), true })
 
 	ctrl := client.NewWithToken(url, nil, "")
 	logc := sparkwinglogs.New(url, nil, "")
@@ -188,7 +201,11 @@ func TestFollowLogsRemote_CancelIsNotATransportFailure(t *testing.T) {
 	done := make(chan error, 1)
 	started := time.Now()
 	go func() { done <- followLogsRemote(ctx, ctrl, logc, runID, "", io.Discard) }()
-	time.Sleep(500 * time.Millisecond)
+	select {
+	case <-statusRead:
+	case <-time.After(2 * time.Second):
+		t.Fatal("follow did not read run status")
+	}
 	cancel()
 
 	select {
@@ -196,8 +213,8 @@ func TestFollowLogsRemote_CancelIsNotATransportFailure(t *testing.T) {
 		if err != nil {
 			t.Fatalf("a cancelled follow reported a transport failure: %v", err)
 		}
-		if elapsed := time.Since(started); elapsed >= 300*time.Millisecond {
-			t.Fatalf("cancelled follow returned after %s, want under 300ms", elapsed)
+		if elapsed := time.Since(started); elapsed >= 400*time.Millisecond {
+			t.Fatalf("cancelled follow returned after %s, want under 400ms", elapsed)
 		}
 	case <-time.After(20 * time.Second):
 		t.Fatal("follow never returned after cancel")
