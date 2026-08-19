@@ -94,20 +94,22 @@ func TestProfilesTestHelpRequiresProfile(t *testing.T) {
 
 func TestProfilesRuntimeGuidanceUsesRegisteredPaths(t *testing.T) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "profiles.go", nil, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ast.Inspect(file, func(node ast.Node) bool {
-		literal, ok := node.(*ast.BasicLit)
-		if ok && literal.Kind == token.STRING && strings.Contains(literal.Value, "sparkwing profiles ") {
-			t.Errorf("profiles.go contains obsolete command path at %s", fset.Position(literal.Pos()))
+	for _, filename := range []string{"profiles.go", "profiles_test_cmd.go"} {
+		file, err := parser.ParseFile(fset, filename, nil, parser.ParseComments)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return true
-	})
-	for _, group := range file.Comments {
-		if strings.Contains(group.Text(), "sparkwing profiles ") {
-			t.Errorf("profiles.go contains obsolete command path at %s", fset.Position(group.Pos()))
+		ast.Inspect(file, func(node ast.Node) bool {
+			literal, ok := node.(*ast.BasicLit)
+			if ok && literal.Kind == token.STRING && strings.Contains(literal.Value, "sparkwing profiles") {
+				t.Errorf("%s contains obsolete command path at %s", filename, fset.Position(literal.Pos()))
+			}
+			return true
+		})
+		for _, group := range file.Comments {
+			if strings.Contains(group.Text(), "sparkwing profiles") {
+				t.Errorf("%s contains obsolete command path at %s", filename, fset.Position(group.Pos()))
+			}
 		}
 	}
 }
