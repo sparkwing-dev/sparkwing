@@ -165,11 +165,11 @@ func TestFollowLogsRemote_SuccessfulPollResetsTheBudget(t *testing.T) {
 	const runID = "run-blippy-controller"
 	url := followSpy(t, runID, func(n int32) (store.Run, bool) {
 		switch {
-		case n <= 2: // first burst of failures
+		case n <= 4: // first burst stays within the budget
 			return store.Run{}, false
-		case n == 3: // the reset
+		case n == 5: // the reset
 			return runningRun(runID), true
-		case n <= 5: // second burst, would exceed the budget if they summed
+		case n <= 9: // combined bursts exceed the budget unless it reset
 			return store.Run{}, false
 		}
 		now := time.Now()
