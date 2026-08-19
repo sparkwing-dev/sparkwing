@@ -249,7 +249,8 @@ trigger an upgrade without parsing prose.
 --offline skips the network fetch entirely; -o json emits the
 structured report; -o plain prints semver lines (CLI then
 latest) for shell pipelines.`,
-	SubcommandOrder: []string{"update", "hold"},
+	SubcommandOrder:    []string{"update", "hold"},
+	SubcommandOptional: true,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 		{Name: "offline", Desc: "Skip the network fetch for latest release", Group: "Behavior"},
@@ -468,7 +469,8 @@ same renderer prints the controller's admission state -- every
 concurrency key, its holders and waiters, and each registered runner's
 free capacity -- so one vocabulary reads local and cluster admission
 alike.`,
-	SubcommandOrder: []string{"exec"},
+	SubcommandOrder:    []string{"exec"},
+	SubcommandOptional: true,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
@@ -1634,10 +1636,11 @@ the default for managed git hooks.`,
 	PosArgs: []PosArg{
 		{Name: "<pipeline>", Desc: "Pipeline name registered in .sparkwing/sparkwing.yaml", Required: true},
 	},
-	Flags:           runFlagSpecs,
-	GroupOrder:      []string{"Source", "Range", "Safety", "System", "Other"},
-	SubcommandOrder: []string{"config"},
-	UsageSuffix:     "[-- pipeline-flags...]",
+	Flags:              runFlagSpecs,
+	GroupOrder:         []string{"Source", "Range", "Safety", "System", "Other"},
+	SubcommandOrder:    []string{"config"},
+	SubcommandOptional: true,
+	UsageSuffix:        "[-- pipeline-flags...]",
 	Examples: []Example{
 		{"Run with no flags", "sparkwing run build-test-deploy"},
 		{"Pass a typed pipeline arg", "sparkwing run release --version v0.28.1"},
@@ -3737,7 +3740,8 @@ Bare 'sparkwing repos' and 'sparkwing repos list' both print this
 fleet. Use 'sparkwing repos info' for a single-repo deep dive, and
 'sparkwing repos update' to bump the whole fleet in one sitting
 with a compiled per-repo verdict.`,
-	SubcommandOrder: []string{"list", "info", "update"},
+	SubcommandOrder:    []string{"list", "info", "update"},
+	SubcommandOptional: true,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Default: "pretty", Group: "Output"},
 	},
