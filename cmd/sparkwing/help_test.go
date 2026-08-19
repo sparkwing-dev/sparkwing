@@ -33,7 +33,7 @@ func TestPrintHelpHidesHiddenFlag(t *testing.T) {
 
 func TestProfilesRegistryMatchesDispatcher(t *testing.T) {
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "profiles.go", nil, 0)
+	file, err := parser.ParseFile(fset, "profiles.go", nil, parser.ParseComments)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +105,11 @@ func TestProfilesRuntimeGuidanceUsesRegisteredPaths(t *testing.T) {
 		}
 		return true
 	})
+	for _, group := range file.Comments {
+		if strings.Contains(group.Text(), "sparkwing profiles ") {
+			t.Errorf("profiles.go contains obsolete command path at %s", fset.Position(group.Pos()))
+		}
+	}
 }
 
 func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
