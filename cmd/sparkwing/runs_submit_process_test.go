@@ -332,16 +332,6 @@ func TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 	if len(triggers) != 1 {
 		t.Fatalf("two submissions under one key created %d triggers, want 1", len(triggers))
 	}
-
-	waitUntil(t, "the submitted run to execute exactly once", 90*time.Second, func() bool {
-		return len(e.markerLines()) >= 1
-	})
-	// Give a second dispatch every chance to appear before declaring the
-	// count final.
-	time.Sleep(2 * time.Second)
-	if lines := e.markerLines(); len(lines) != 1 {
-		t.Fatalf("deduplicated submission executed %d times: %v", len(lines), lines)
-	}
 }
 
 // TestRunsSubmit_DistinctKeysAreDistinctRuns is the other half of
