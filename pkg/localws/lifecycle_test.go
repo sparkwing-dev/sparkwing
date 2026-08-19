@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -138,7 +137,6 @@ func TestSchemaGuard_MiddlewarePassesThroughOn2xx(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v1/runs", nil))
 
-	time.Sleep(10 * time.Millisecond)
 	select {
 	case <-ctx.Done():
 		t.Fatal("healthy request wrongly triggered shutdown")
