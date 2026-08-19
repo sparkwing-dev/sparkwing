@@ -54,6 +54,28 @@ func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
 	}
 }
 
+func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
+	home := shortHome(t)
+	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
+
+	firstCtx, firstDone := context.WithTimeout(context.Background(), 2*time.Second)
+	defer firstDone()
+	if _, err := client.Query(firstCtx, client.Options{Home: home, Version: "test"}); err != nil {
+		t.Fatalf("query against a serving daemon: %v", err)
+	}
+
+	ctx, stopQueries := context.WithCancel(context.Background())
+	defer stopQueries()
+	probeLoop(ctx, 50*time.Millisecond, func(ctx context.Context) error {
+		_, err := client.Query(ctx, client.Options{Home: home, Version: "test"})
+		return err
+	})
+
+	if err := td.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("daemon with only queue-state query traffic should idle out cleanly, got %v", err)
+	}
+}
+
 func TestIdleExit_SocketSweepProbeDoesNotResetIdleClock(t *testing.T) {
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
