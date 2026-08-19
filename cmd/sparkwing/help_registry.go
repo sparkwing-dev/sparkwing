@@ -2091,7 +2091,7 @@ var cmdUsers = Command{
 	Synopsis: "Manage dashboard login users",
 	Description: `Seeds admin credentials in the controller's users table, used
 by the web pod's login flow. Connection info comes from the
-selected profile; --profile overrides the default.`,
+profile named by --profile.`,
 	SubcommandOrder: []string{"add", "list", "delete"},
 }
 
@@ -2106,11 +2106,11 @@ interactively.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Dashboard username", Required: true, Group: "Input"},
 		{Name: "password", Argument: "PASSWORD", Desc: "Password (omit to prompt interactively)", Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"Interactive add", "sparkwing cluster users add --name alice"},
-		{"Non-interactive add for CI", `sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW"`},
+		{"Interactive add", "sparkwing cluster users add --name alice --profile prod"},
+		{"Non-interactive add for CI", `sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod`},
 	},
 }
 
@@ -2120,11 +2120,10 @@ var cmdUsersList = Command{
 	Description: `Prints name, created_at, and last_login_at for every user in
 the controller's users table.`,
 	Flags: []FlagSpec{
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"List users on the default profile", "sparkwing cluster users list"},
-		{"List users on prod", "sparkwing cluster users list --profile prod"},
+		{"List users", "sparkwing cluster users list --profile prod"},
 	},
 }
 
@@ -2136,10 +2135,10 @@ valid until their individual expiry -- sparkwing does not
 proactively invalidate active cookies on delete.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Dashboard username to remove", Required: true, Group: "Input"},
-		{Name: "profile", Argument: "NAME", Desc: "Profile name (default: current default)", Group: "System"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name", Required: true, Group: "System"},
 	},
 	Examples: []Example{
-		{"Delete a user", "sparkwing cluster users delete --name alice"},
+		{"Delete a user", "sparkwing cluster users delete --name alice --profile prod"},
 	},
 }
 
