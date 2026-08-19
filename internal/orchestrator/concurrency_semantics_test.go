@@ -120,6 +120,32 @@ func waitForCoalesceWaiter(t *testing.T, dbPath string) {
 	t.Fatal("timed out waiting for a follower to coalesce")
 }
 
+func waitForQueuedRun(t *testing.T, dbPath, key, runID string) {
+	t.Helper()
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		state, err := st.GetConcurrencyState(context.Background(), key)
+		switch {
+		case err == nil:
+			for _, waiter := range state.Waiters {
+				if waiter.RunID == runID {
+					return
+				}
+			}
+		case errors.Is(err, store.ErrNotFound):
+		default:
+			t.Fatalf("read concurrency state for %q: %v", key, err)
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for run %q on %q", runID, key)
+}
+
 func semStep(hold time.Duration) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		sem.runs.Add(1)
@@ -477,7 +503,7 @@ type phantomHolderPipe struct{ sparkwing.Base }
 
 func (phantomHolderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := sparkwing.NewConcurrencyGroup("phantom", sparkwing.ConcurrencyLimit{Capacity: 1, Scope: sparkwing.ScopeGlobal})
-	sparkwing.Job(plan, "hold", semStep(1200*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "hold", held(nil)).Concurrency(g)
 	return nil
 }
 
@@ -536,30 +562,48 @@ func TestMemo_LeaderSkippedWhileFollowerCoalesced(t *testing.T) {
 func TestGroupedNode_CancelWhileQueued_LeaksWaiterIntoPhantomHolder(t *testing.T) {
 	resetSem()
 	p := newPaths(t)
+	started := time.Now()
 
+	holderCtx, cancelHolder := context.WithCancel(context.Background())
+	t.Cleanup(cancelHolder)
 	holderDone := make(chan struct{})
 	go func() {
-		_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "phantom-holder", RunID: "phantom-holder"})
+		_, _ = orchestrator.RunLocal(holderCtx, p, orchestrator.Options{Pipeline: "phantom-holder", RunID: "phantom-holder"})
 		close(holderDone)
 	}()
-	time.Sleep(250 * time.Millisecond)
+	waitForLeaderHolding(t)
 
 	waiterCtx, cancelWaiter := context.WithCancel(context.Background())
+	defer cancelWaiter()
 	waiterDone := make(chan struct{})
 	go func() {
 		_, _ = orchestrator.RunLocal(waiterCtx, p, orchestrator.Options{Pipeline: "phantom-waiter", RunID: "phantom-waiter"})
 		close(waiterDone)
 	}()
-	time.Sleep(300 * time.Millisecond)
+	waitForQueuedRun(t, p.StateDB(), "g:phantom", "phantom-waiter")
 	cancelWaiter()
-	<-waiterDone
-	<-holderDone
+	select {
+	case <-waiterDone:
+	case <-time.After(15 * time.Second):
+		t.Fatal("cancelled waiter did not finish")
+	}
+	leaderRelease.Store(true)
+	select {
+	case <-holderDone:
+	case <-time.After(15 * time.Second):
+		t.Fatal("released holder did not finish")
+	}
 
-	st, _ := store.Open(p.StateDB())
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open final state: %v", err)
+	}
 	defer func() { _ = st.Close() }()
 	state, err := st.GetConcurrencyState(context.Background(), "g:phantom")
-	if err != nil {
-		return
+	if errors.Is(err, store.ErrNotFound) {
+		state = &store.ConcurrencyState{}
+	} else if err != nil {
+		t.Fatalf("read final concurrency state: %v", err)
 	}
 	now := time.Now()
 	for _, h := range state.Holders {
@@ -570,5 +614,8 @@ func TestGroupedNode_CancelWhileQueued_LeaksWaiterIntoPhantomHolder(t *testing.T
 			t.Fatalf("cancelled queued waiter was promoted into a phantom holder: %+v", h)
 		}
 		t.Fatalf("unexpected live holder after holder release + waiter cancel: %+v", h)
+	}
+	if elapsed := time.Since(started); elapsed >= 800*time.Millisecond {
+		t.Fatalf("cancelled-waiter regression took %s, want less than 800ms", elapsed)
 	}
 }
