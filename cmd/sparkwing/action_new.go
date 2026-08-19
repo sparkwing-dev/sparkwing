@@ -700,8 +700,8 @@ func init() {
 // run in parallel and a final gate job depends on both, so the
 // pipeline is green only when every check passes. test declares a
 // runner-label preference (Prefers) to show placement intent without
-// stranding a local run -- Prefers falls through to the default runner
-// when no labeled runner exists. The gate is Inline (a cheap
+// stranding a local run -- an unmatched preference leaves the dispatch
+// venue's normal runner selection in place. The gate is Inline (a cheap
 // in-process convergence node) so it declares no runner label.
 const ciPRCheckTemplate = `package jobs
 
@@ -736,8 +736,8 @@ func ({{STRUCT}}) Examples() []sw.Example {
 // (registered name).
 //
 // Prefers biases runner selection when more than one runner can take
-// the job; it never fails a run on its own, so the scaffold still runs
-// locally on the default runner.
+// the job; it never fails a run on its own, so an unmatched preference
+// does not prevent the scaffold from running.
 func ({{STRUCT}}) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	lint := sw.Job(plan, "lint", &{{STRUCT}}Lint{})
 	test := sw.Job(plan, "test", &{{STRUCT}}Test{}).Prefers("ci-linux")

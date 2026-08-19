@@ -1081,11 +1081,10 @@ func (n *JobNode) RequiresLabels() []string {
 // Requires. Each argument is one term with the same comma-OR / AND
 // semantics as Requires. The scheduler walks the terms in declaration
 // order and picks the first runner whose labels match any term. With
-// no preference, selection falls through to the profile default or
-// the first-available runner.
+// no preference, the dispatch venue uses its normal runner selection.
 //
 // Prefers never fails a run on its own: if no runner matches any
-// preference term the job still dispatches via the default selection.
+// preference term, the dispatch venue uses its normal runner selection.
 //
 //	sw.Job(plan, "integration", &Integration{}).
 //	    Requires("os=linux").
