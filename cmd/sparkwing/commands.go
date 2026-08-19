@@ -40,7 +40,7 @@ var allCommands = []*Command{
 	&cmdDashboard, &cmdDashboardStart, &cmdDashboardKill, &cmdDashboardStatus,
 	&cmdWorker, &cmdGC, &cmdCompletion, &cmdDoctor,
 	&cmdProfiles, &cmdProfilesAdd, &cmdProfilesList, &cmdProfilesShow,
-	&cmdProfilesUse, &cmdProfilesRemove, &cmdProfilesDuplicate,
+	&cmdProfilesRemove, &cmdProfilesDuplicate,
 	&cmdProfilesSet, &cmdProfilesTest,
 	&cmdTokens, &cmdTokensCreate, &cmdTokensList, &cmdTokensRevoke,
 	&cmdTokensLookup, &cmdTokensRotate,

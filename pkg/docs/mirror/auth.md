@@ -94,11 +94,7 @@ connection info from a profile. Register one first:
 # Register a prod profile (controller URL + admin bearer).
 sparkwing configure profiles add --name prod \
     --controller https://sparkwing.example.com \
-    --logs https://sparkwing-logs.example.com \
     --token "$ADMIN_TOKEN"
-
-# Optional: set it as the default so you don't need --profile on every call.
-sparkwing configure profiles use --name prod
 ```
 
 Then the tokens commands are terse:
@@ -107,20 +103,20 @@ Then the tokens commands are terse:
 # Mint a user admin token. Emits the raw token ONCE. Stash it.
 sparkwing cluster tokens create --type user --principal alice --scope admin --profile prod
 
-# List all active tokens (omits --profile because prod is the default).
-sparkwing cluster tokens list
+# List all active tokens.
+sparkwing cluster tokens list --profile prod
 
 # List including revoked, for audit.
-sparkwing cluster tokens list --include-revoked
+sparkwing cluster tokens list --include-revoked --profile prod
 
 # Revoke a token by its non-secret prefix.
-sparkwing cluster tokens revoke --prefix swu_6cF9r2Kp
+sparkwing cluster tokens revoke --prefix swu_6cF9r2Kp --profile prod
 
 # Look up metadata for a prefix.
-sparkwing cluster tokens lookup --prefix swu_6cF9r2Kp
+sparkwing cluster tokens lookup --prefix swu_6cF9r2Kp --profile prod
 
 # Rotate: mint a replacement, with a grace window before the old one 401s.
-sparkwing cluster tokens rotate --prefix swu_6cF9r2Kp --grace 48h
+sparkwing cluster tokens rotate --prefix swu_6cF9r2Kp --grace 48h --profile prod
 ```
 
 Profiles are the only path for targeting a remote cluster, which keeps

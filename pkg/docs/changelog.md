@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** Help and authentication guidance no longer advertise the removed
+  `configure profiles use` command.
 - **cli:** `configure profiles set --help` now lists only the fields the
   command can update.
 - **cli:** `configure profiles add --help` now lists only the flags accepted

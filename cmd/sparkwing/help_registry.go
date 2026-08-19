@@ -1890,7 +1890,7 @@ Every human-driven client command (tokens, users, jobs
 retry/cancel/prune/logs, gc) reads connection info from the
 selected profile via --profile NAME. No --controller/--token flags
 exist on other commands; profiles are the only config surface.`,
-	SubcommandOrder: []string{"add", "list", "show", "use", "remove", "duplicate", "set", "test"},
+	SubcommandOrder: []string{"add", "list", "show", "remove", "duplicate", "set", "test"},
 }
 
 var cmdProfilesAdd = Command{
@@ -1944,24 +1944,10 @@ the current default profile.`,
 	},
 }
 
-var cmdProfilesUse = Command{
-	Path:     "sparkwing configure profiles use",
-	Synopsis: "Set the default profile",
-	Description: `Updates profiles.yaml so commands run without --profile target this
-profile. The previous default is untouched beyond losing its
-default status.`,
-	Flags: []FlagSpec{
-		{Name: "name", Argument: "NAME", Desc: "Profile name to mark as default", Required: true, Group: "Input"},
-	},
-	Examples: []Example{
-		{"Switch the default to prod", "sparkwing configure profiles use --name prod"},
-	},
-}
-
 var cmdProfilesRemove = Command{
 	Path:        "sparkwing configure profiles remove",
 	Synopsis:    "Delete a profile",
-	Description: `Removes the entry from profiles.yaml. If the removed profile was the default, no new default is auto-picked -- operators must pass --profile on every call or set one via 'sparkwing configure profiles use --name <X>'.`,
+	Description: `Removes the named entry from profiles.yaml.`,
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Profile name to remove", Required: true, Group: "Input"},
 	},
