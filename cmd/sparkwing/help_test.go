@@ -115,7 +115,16 @@ func TestProfilesRuntimeGuidanceUsesRegisteredPaths(t *testing.T) {
 }
 
 func TestTokenCommandHelpRequiresProfile(t *testing.T) {
-	for _, command := range childCommands(cmdTokens.Path) {
+	testCommandFamilyRequiresProfile(t, cmdTokens)
+}
+
+func TestUserCommandHelpRequiresProfile(t *testing.T) {
+	testCommandFamilyRequiresProfile(t, cmdUsers)
+}
+
+func testCommandFamilyRequiresProfile(t *testing.T, parent Command) {
+	t.Helper()
+	for _, command := range childCommands(parent.Path) {
 		if command.Hidden {
 			continue
 		}

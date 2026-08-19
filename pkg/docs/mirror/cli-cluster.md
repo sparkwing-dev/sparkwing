@@ -436,7 +436,7 @@ Manage dashboard login users
 
 Seeds admin credentials in the controller's users table, used
 by the web pod's login flow. Connection info comes from the
-selected profile; --profile overrides the default.
+profile named by --profile.
 
 ### Subcommands
 
@@ -460,16 +460,16 @@ interactively.
 |---|---|
 | `--name NAME` | Dashboard username (required) |
 | `--password PASSWORD` | Password (omit to prompt interactively) |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (required) |
 
 ### Examples
 
 ```sh
 # Interactive add
-sparkwing cluster users add --name alice
+sparkwing cluster users add --name alice --profile prod
 
 # Non-interactive add for CI
-sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW"
+sparkwing cluster users add --name ci-bot --password "$CI_BOT_PW" --profile prod
 ```
 
 ## `sparkwing cluster users delete`
@@ -485,13 +485,13 @@ proactively invalidate active cookies on delete.
 | Flag | Description |
 |---|---|
 | `--name NAME` | Dashboard username to remove (required) |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (required) |
 
 ### Examples
 
 ```sh
 # Delete a user
-sparkwing cluster users delete --name alice
+sparkwing cluster users delete --name alice --profile prod
 ```
 
 ## `sparkwing cluster users list`
@@ -505,15 +505,12 @@ the controller's users table.
 
 | Flag | Description |
 |---|---|
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name (required) |
 
 ### Examples
 
 ```sh
-# List users on the default profile
-sparkwing cluster users list
-
-# List users on prod
+# List users
 sparkwing cluster users list --profile prod
 ```
 
