@@ -35,13 +35,18 @@ func (podMaskPipe) Plan(_ context.Context, plan *sparkwing.Plan, in podMaskInput
 
 type podProgressPipe struct{ sparkwing.Base }
 
+var podProgressContext chan context.Context
+
 func (podProgressPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
 	sparkwing.Job(plan, "parent", func(ctx context.Context) error {
+		podProgressContext <- ctx
 		if _, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "pod-progress-child", ""); err != nil {
 			return err
 		}
-		time.Sleep(200 * time.Millisecond)
-		return nil
+		if !orchestrator.ExpireProgressTimeoutForTest(ctx) {
+			return errors.New("progress timeout did not resume after the child completed")
+		}
+		return ctx.Err()
 	}).NoProgressTimeout(100 * time.Millisecond)
 	return nil
 }
@@ -68,6 +73,7 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 	registerPodProgressPipe(t)
 	isolateProfiles(t)
 	isolateCheckout(t)
+	podProgressContext = make(chan context.Context, 1)
 
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)
@@ -98,24 +104,37 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 
 	childFinished := make(chan error, 1)
 	go func() {
+		var progressCtx context.Context
+		select {
+		case progressCtx = <-podProgressContext:
+		case <-ctx.Done():
+			childFinished <- ctx.Err()
+			return
+		}
+		poll := time.NewTicker(time.Millisecond)
+		defer poll.Stop()
 		var childID string
-		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
+		for childID == "" || !orchestrator.ProgressTimeoutPausedForTest(progressCtx) {
 			var findErr error
 			childID, findErr = st.FindSpawnedChildTriggerID(ctx, runID, nodeID, "pod-progress-child")
 			if findErr != nil {
 				childFinished <- fmt.Errorf("find spawned child: %w", findErr)
 				return
 			}
-			if childID != "" {
+			if childID != "" && orchestrator.ProgressTimeoutPausedForTest(progressCtx) {
 				break
 			}
-			time.Sleep(10 * time.Millisecond)
+			select {
+			case <-poll.C:
+			case <-ctx.Done():
+				childFinished <- errors.New("spawned child was not recorded while progress timeout was paused")
+				return
+			}
 		}
-		if childID == "" {
-			childFinished <- errors.New("spawned child was not recorded")
+		if orchestrator.ExpireProgressTimeoutForTest(progressCtx) {
+			childFinished <- errors.New("progress timeout fired while the delegated child was pending")
 			return
 		}
-		time.Sleep(250 * time.Millisecond)
 		finished := time.Now()
 		if err := st.CreateRun(ctx, store.Run{
 			ID: childID, Pipeline: "pod-progress-child", Status: "success", StartedAt: finished, FinishedAt: &finished,
@@ -136,8 +155,8 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 		if childErr != nil {
 			t.Fatal(childErr)
 		}
-	default:
-		t.Fatal("parent timed out before the delegated child completed")
+	case <-ctx.Done():
+		t.Fatal("delegated child synchronization did not finish")
 	}
 	if res.Outcome != sparkwing.Failed {
 		t.Fatalf("outcome = %q (err=%v), want no-progress failure after child completion", res.Outcome, res.Err)
