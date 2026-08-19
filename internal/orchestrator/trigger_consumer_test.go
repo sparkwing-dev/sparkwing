@@ -574,11 +574,6 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 	})
 }
 
-// TestHeartbeat_SurvivesATransientStoreError covers a heartbeat that used to
-// give up permanently on the first error that was not ErrNotFound, so
-// one "database is locked" from a concurrent writer left the claim
-// undefended for the rest of a long run -- which is what let the sweeper
-// requeue a live dispatch.
 type transientHeartbeatStore struct {
 	calls int
 	seq   int64
@@ -596,6 +591,11 @@ func (s *transientHeartbeatStore) TriggerClaimGeneration(context.Context, string
 	return s.seq, nil
 }
 
+// TestHeartbeat_SurvivesATransientStoreError covers a heartbeat that used to
+// give up permanently on the first error that was not ErrNotFound, so
+// one "database is locked" from a concurrent writer left the claim
+// undefended for the rest of a long run -- which is what let the sweeper
+// requeue a live dispatch.
 func TestHeartbeat_SurvivesATransientStoreError(t *testing.T) {
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
