@@ -240,7 +240,7 @@ from stdin, one per line.
 | Flag | Description |
 |---|---|
 | `--run RUN_ID` | Run id to cancel (repeatable; use --run - to read ids from stdin) |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name for remote runs; omit for local runs |
 
 ### Examples
 
@@ -701,7 +701,7 @@ Use --dry-run first to confirm the victim list.
 | `--older-than DURATION` | Prune runs older than this |
 | `--run RUN_ID` | Run id to prune (repeatable; use --run - to read ids from stdin) |
 | `--dry-run` | List matching runs without deleting |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name for remote runs; omit for local runs |
 
 ### Examples
 
@@ -784,7 +784,7 @@ only when at least one id failed.
 | `--run RUN_ID` | Source run id (repeatable; use --run - to read ids from stdin) |
 | `--failed` | Rerun from failed: reuse passed nodes, re-execute only failed/unreached |
 | `--all` | Rerun all: re-execute every node from scratch |
-| `--profile NAME` | Profile name (default: current default) |
+| `--profile NAME` | Profile name for remote runs; omit for local runs |
 
 ### Examples
 

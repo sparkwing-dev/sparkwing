@@ -141,7 +141,7 @@ func reportResults(out io.Writer, action string, results []runResult) error {
 func runRunsRetry(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsRetry.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "source run id (repeatable; can also be a positional or `-` for stdin)")
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name for remote runs; omit for local runs")
 	fromFailed := fs.Bool("failed", false, "rerun from failed: reuse passed nodes, re-execute only failed or unreached")
 	all := fs.Bool("all", false, "rerun all: re-execute every node from scratch")
 	if err := parseAndCheck(cmdJobsRetry, fs, args); err != nil {
@@ -203,7 +203,7 @@ func profileSuffix(on string) string {
 func runRunsCancel(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsCancel.Path, flag.ContinueOnError)
 	runIDs := multiFlagVar(fs, "run", "run id to cancel (repeatable; use --run - to read ids from stdin)")
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name for remote runs; omit for local runs")
 	home := fs.String("home", "", "sparkwing home whose local daemon arbitrates (default: $SPARKWING_HOME or ~/.sparkwing)")
 	if err := parseAndCheck(cmdJobsCancel, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
@@ -360,7 +360,7 @@ func cancelQueuedLocalRuns(ctx context.Context, home string, ids []string) (done
 
 func runRunsPrune(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsPrune.Path, flag.ContinueOnError)
-	on := fs.String("profile", "", "profile name (default: current default)")
+	on := fs.String("profile", "", "profile name for remote runs; omit for local runs")
 	olderThan := lookbackDuration(fs, "older-than", 0, "prune runs older than this (e.g. 7d, 48h)")
 	dryRun := fs.Bool("dry-run", false, "list matching runs without deleting")
 	runIDs := multiFlagVar(fs, "run", "specific run id to prune (repeatable; use --run - to read ids from stdin)")
