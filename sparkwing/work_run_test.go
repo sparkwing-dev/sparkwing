@@ -299,30 +299,34 @@ func TestRunWork_DependencyOrder(t *testing.T) {
 // TestRunWork_ParallelStepsRunConcurrently verifies that two steps
 // without a dependency run at the same time.
 func TestRunWork_ParallelStepsRunConcurrently(t *testing.T) {
-	ctx, _ := newWorkCtx()
-	var inFlight, peak int32
-	enter := func() {
-		v := atomic.AddInt32(&inFlight, 1)
-		for {
-			cur := atomic.LoadInt32(&peak)
-			if v <= cur || atomic.CompareAndSwapInt32(&peak, cur, v) {
-				break
-			}
+	baseCtx, _ := newWorkCtx()
+	ctx, cancel := context.WithTimeout(baseCtx, time.Second)
+	defer cancel()
+	var entered atomic.Int32
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	enter := func(ctx context.Context) error {
+		if entered.Add(1) == 2 {
+			releaseOnce.Do(func() { close(release) })
 		}
-		time.Sleep(20 * time.Millisecond)
-		atomic.AddInt32(&inFlight, -1)
+		select {
+		case <-release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 
 	w := sparkwing.NewWork()
-	sparkwing.Step(w, "a", func(ctx context.Context) error { enter(); return nil })
-	sparkwing.Step(w, "b", func(ctx context.Context) error { enter(); return nil })
-	sparkwing.Step(w, "c", func(ctx context.Context) error { enter(); return nil })
+	sparkwing.Step(w, "a", enter)
+	sparkwing.Step(w, "b", enter)
+	sparkwing.Step(w, "c", enter)
 
 	if _, err := sparkwing.RunWork(ctx, w); err != nil {
 		t.Fatalf("RunWork: %v", err)
 	}
-	if atomic.LoadInt32(&peak) < 2 {
-		t.Fatalf("expected concurrency >= 2 across independent steps, peak=%d", peak)
+	if got := entered.Load(); got < 2 {
+		t.Fatalf("independent steps entered concurrently = %d, want at least 2", got)
 	}
 }
 
