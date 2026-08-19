@@ -45,6 +45,16 @@ func TestParseLooseDate_RejectsGarbage(t *testing.T) {
 	}
 }
 
+func TestParseLooseDurationRejectsScaledOverflow(t *testing.T) {
+	for _, raw := range []string{"106752d", "15251w"} {
+		t.Run(raw, func(t *testing.T) {
+			if got, err := ParseLooseDuration(raw); err == nil {
+				t.Fatalf("ParseLooseDuration(%q) = %s, want overflow error", raw, got)
+			}
+		})
+	}
+}
+
 func TestCompiledFilter_BranchAndExclude(t *testing.T) {
 	f := CompiledFilter{Branches: []string{"main"}, BranchExcludes: []string{"canary"}}
 	if !f.Matches(&store.Run{GitBranch: "main"}) {
