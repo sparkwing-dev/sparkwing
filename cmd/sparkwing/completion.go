@@ -414,8 +414,8 @@ _sparkwing_complete() {
         return
     fi
 
-    # Value completion for --sw-profile profile names.
-    if [[ "$prev" == "--sw-profile" ]]; then
+    # Value completion for --profile names.
+    if [[ "$prev" == "--profile" ]]; then
         local names
         names=$(sparkwing _complete-profiles 2>/dev/null)
         COMPREPLY=( $(compgen -W "$names" -- "$cur") )
@@ -501,21 +501,10 @@ _sparkwing() {
         return
     fi
 
-    # Value completion: --sw-profile <TAB> -> profile names, optionally
-    # filtered to those whose default_runner sits in the pipeline's
-    # allowed runner set when the pipeline is known.
-    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--sw-profile" ]]; then
-        local pipe=""
-        if (( ${#swpath[@]} >= 2 )) && [[ "${swpath[1]}" == "run" ]]; then
-            pipe="${swpath[2]}"
-        fi
+    # Value completion: --profile <TAB> -> profile names.
+    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--profile" ]]; then
         local -a profs
-        if [[ -n "$pipe" ]]; then
-            profs=( ${(f)"$(sparkwing _complete-profiles-for-pipeline "$pipe" 2>/dev/null)"} )
-        fi
-        if (( ${#profs[@]} == 0 )); then
-            profs=( ${(f)"$(sparkwing _complete-profiles 2>/dev/null)"} )
-        fi
+        profs=( ${(f)"$(sparkwing _complete-profiles 2>/dev/null)"} )
         _describe -t profiles 'profile' profs
         return
     fi
@@ -525,15 +514,6 @@ _sparkwing() {
     # cursor, so describe/explain/new all share the same menu.
     if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--pipeline" ]]; then
         _sparkwing_complete_pipelines
-        return
-    fi
-
-    # Value completion: --default-runner <TAB> -> runner names.
-    # Used by sparkwing configure profiles add/set --default-runner.
-    if [[ ${CURRENT} -ge 2 && "${words[CURRENT-1]}" == "--default-runner" ]]; then
-        local -a runs
-        runs=( ${(f)"$(sparkwing _complete-runners 2>/dev/null)"} )
-        _describe -t runners 'runner' runs
         return
     fi
 
