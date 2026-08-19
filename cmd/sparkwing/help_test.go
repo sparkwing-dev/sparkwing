@@ -165,6 +165,30 @@ func TestRequiredProfileFlagsDoNotAdvertiseDefault(t *testing.T) {
 	}
 }
 
+func TestSecretCommandHelpDescribesLocalAndRemoteModes(t *testing.T) {
+	for _, command := range childCommands(cmdSecret.Path) {
+		if command.Hidden {
+			continue
+		}
+		for _, spec := range command.Flags {
+			if spec.Name == "profile" && !strings.Contains(strings.ToLower(spec.Desc), "omit for local") {
+				t.Errorf("%s describes --profile as %q, want local-mode guidance", command.Path, spec.Desc)
+			}
+		}
+		local, remote := false, false
+		for _, example := range command.Examples {
+			if strings.Contains(example.Command, "--profile ") {
+				remote = true
+			} else {
+				local = true
+			}
+		}
+		if !local || !remote {
+			t.Errorf("%s examples do not cover both local and remote modes", command.Path)
+		}
+	}
+}
+
 func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 	cases := []struct {
 		name string
