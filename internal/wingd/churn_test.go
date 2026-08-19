@@ -88,11 +88,15 @@ func TestChurn_HolderWatchReattachesAcrossKill(t *testing.T) {
 	case <-time.After(wingdChurnWait):
 		t.Fatal("successor daemon never came up")
 	}
+	survivalStarted := time.Now()
 	time.Sleep(successorGrace + 500*time.Millisecond)
 	waitForHolder(t, home, "churn-watch")
 
 	if err := lease.Release(); err != nil {
 		t.Fatalf("release after reattach: %v", err)
+	}
+	if elapsed := time.Since(survivalStarted); elapsed >= 1500*time.Millisecond {
+		t.Errorf("reattach survival proof took %v, want less than 1.5s", elapsed)
 	}
 }
 

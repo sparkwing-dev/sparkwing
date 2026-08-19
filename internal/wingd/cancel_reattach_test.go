@@ -40,6 +40,7 @@ func TestCancel_ReattachedHolderIsCancellable(t *testing.T) {
 	case <-time.After(wingdChurnWait):
 		t.Fatal("successor daemon never came up")
 	}
+	survivalStarted := time.Now()
 	time.Sleep(successorGrace + 500*time.Millisecond)
 	waitForHolder(t, home, "reattach-cancel")
 
@@ -59,5 +60,8 @@ func TestCancel_ReattachedHolderIsCancellable(t *testing.T) {
 		}
 	case <-time.After(wingdChurnWait):
 		t.Fatal("reattached holder never observed the cancel signal")
+	}
+	if elapsed := time.Since(survivalStarted); elapsed >= 1500*time.Millisecond {
+		t.Errorf("reattach cancellation proof took %v, want less than 1.5s", elapsed)
 	}
 }
