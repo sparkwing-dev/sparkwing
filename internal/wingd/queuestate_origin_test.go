@@ -72,8 +72,12 @@ func TestQueueState_OriginTagsHoldersAndWaiters(t *testing.T) {
 // test does not race the queued admission's arrival.
 func waitForWaiter(t *testing.T, home, runID string) wingwire.QueueState {
 	t.Helper()
-	for range 200 {
-		qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		qs, err := client.Query(ctx, client.Options{Home: home, Version: "v1"})
 		if err != nil {
 			t.Fatalf("query: %v", err)
 		}
@@ -82,8 +86,10 @@ func waitForWaiter(t *testing.T, home, runID string) wingwire.QueueState {
 				return qs
 			}
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-ctx.Done():
+			t.Fatalf("waiter %q never appeared", runID)
+		}
 	}
-	t.Fatalf("waiter %q never appeared", runID)
-	return wingwire.QueueState{}
 }
