@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** Zsh completion no longer queries removed pipeline target metadata
+  when completing `--target`.
 - **cli:** `runs cancel --help` documents the existing `--home` option for
   selecting local daemon and queued-run state.
 - **cli:** Webhook listing and replay no longer advertise an unused

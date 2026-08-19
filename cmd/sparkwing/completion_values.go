@@ -9,31 +9,11 @@ package main
 
 import (
 	"fmt"
-	"os"
-
-	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-// runInternalCompleteTargets emits the pipeline's declared targets.
-// Silent when no pipelines.yaml is on the path or the pipeline isn't
-// listed; the completion menu falls back to nothing.
-func runInternalCompleteTargets(args []string) error {
-	if len(args) != 1 {
-		return nil
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return nil //nolint:nilerr // silent failure is correct for completion context
-	}
-	_, cfg, err := projectconfig.DiscoverPipelines(cwd)
-	if err != nil || cfg == nil {
-		return nil //nolint:nilerr // silent failure is correct for completion context
-	}
-	p := cfg.Find(args[0])
-	if p == nil {
-		return nil
-	}
-	_ = p
+// runInternalCompleteTargets remains callable by completion scripts
+// generated before pipeline targets were removed.
+func runInternalCompleteTargets(_ []string) error {
 	return nil
 }
 
