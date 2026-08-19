@@ -261,8 +261,7 @@ type tidyStatus struct {
 
 // tidySkeleton runs `go mod tidy` so go.sum is populated before the
 // first `sparkwing run <name>`. Captures Go's noisy stdout/stderr; dumps only on failure.
-func tidySkeleton(sparkwingDir string, createdAny bool) tidyStatus {
-	_ = createdAny
+func tidySkeleton(sparkwingDir string) tidyStatus {
 	if !goOnPath() {
 		return tidyStatus{Skipped: true}
 	}
