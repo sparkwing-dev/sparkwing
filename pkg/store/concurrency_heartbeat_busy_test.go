@@ -20,7 +20,7 @@ func busyProneDSN(path string) string {
 
 // TestHeartbeatConcurrencySlot_RetriesTransientBusy holds the write lock
 // on a separate connection, fires a heartbeat against a busy_timeout(0)
-// store so the first attempts see an un-absorbed SQLITE_BUSY, then frees
+// store so the first attempt sees an un-absorbed SQLITE_BUSY, then frees
 // the lock mid-flight. Success can only come from the heartbeat's own
 // bounded retry; without it the heartbeat would lapse a live lease.
 func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
@@ -56,26 +56,33 @@ func TestHeartbeatConcurrencySlot_RetriesTransientBusy(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin lock tx: %v", err)
 	}
+	defer func() { _ = lockTx.Rollback() }()
 	if _, err := lockTx.ExecContext(ctx,
 		`UPDATE concurrency_holders SET lease_expires_at = lease_expires_at WHERE key = 'k'`,
 	); err != nil {
 		t.Fatalf("take write lock: %v", err)
 	}
 
-	released := make(chan struct{})
-	go func() {
-		time.Sleep(150 * time.Millisecond)
-		_ = lockTx.Rollback()
-		close(released)
-	}()
-
-	expires, _, err := hb.HeartbeatConcurrencySlot(ctx, "k", "r1/n1", 30*time.Second)
+	retries := 0
+	releaseOnRetry := func(time.Duration) {
+		retries++
+		if err := lockTx.Rollback(); err != nil {
+			t.Fatalf("release write lock: %v", err)
+		}
+	}
+	started := time.Now()
+	expires, _, err := hb.heartbeatConcurrencySlot(ctx, "k", "r1/n1", 30*time.Second, releaseOnRetry)
 	if err != nil {
 		t.Fatalf("heartbeat under transient busy: %v", err)
 	}
-	<-released
+	if retries != 1 {
+		t.Fatalf("busy retries = %d, want 1", retries)
+	}
 	if !expires.After(time.Now()) {
 		t.Errorf("lease not extended into the future: %v", expires)
+	}
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		t.Fatalf("transient-busy heartbeat took %s, want under 100ms", elapsed)
 	}
 }
 

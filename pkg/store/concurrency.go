@@ -1412,14 +1412,18 @@ func txSupersedeHolderAndInherited(ctx context.Context, tx *storeTx, key, holder
 // never revive a lease that lapsed while waiting; the bounded retry
 // budget is a small fraction of the lease window.
 func (s *Store) HeartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration) (expires time.Time, superseded bool, err error) {
+	return s.heartbeatConcurrencySlot(ctx, key, holderID, lease, time.Sleep)
+}
+
+func (s *Store) heartbeatConcurrencySlot(ctx context.Context, key, holderID string, lease time.Duration, sleep func(time.Duration)) (expires time.Time, superseded bool, err error) {
 	if lease <= 0 {
 		lease = DefaultConcurrencyLease
 	}
-	err = retryOnBusy(func() error {
+	err = retryOnBusyWithSleep(func() error {
 		var once error
 		expires, superseded, once = s.heartbeatConcurrencySlotOnce(ctx, key, holderID, lease)
 		return once
-	})
+	}, sleep)
 	return expires, superseded, err
 }
 
