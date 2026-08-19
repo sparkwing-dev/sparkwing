@@ -78,12 +78,18 @@ func TestDaemonStartup_LogsIgnoreExternal(t *testing.T) {
 
 func waitForLog(t *testing.T, log *logCapture, sub string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	for {
 		if log.contains(sub) {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("expected a log line containing %q, got:\n%s", sub, log.joined())
+		}
 	}
-	t.Fatalf("expected a log line containing %q, got:\n%s", sub, log.joined())
 }
