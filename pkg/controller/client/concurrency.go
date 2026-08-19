@@ -134,6 +134,9 @@ func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*Waiter
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, store.ErrNotFound
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, readHTTPError(resp)
 	}

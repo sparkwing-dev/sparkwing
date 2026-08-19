@@ -525,7 +525,7 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 	lease := store.DefaultConcurrencyLease
 	var supersessionTicker *time.Ticker
 	var supersessionC <-chan time.Time
-	if onLimit != store.OnLimitCancelOthers && onLimit != store.OnLimitCoalesce {
+	if pollsForSupersession(onLimit) {
 		supersessionTicker = time.NewTicker(store.DefaultConcurrencyHeartbeatInterval)
 		supersessionC = supersessionTicker.C
 	}
@@ -548,7 +548,7 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 				pollCtx, cancel := context.WithTimeout(context.Background(), store.DefaultConcurrencyHeartbeatTimeout)
 				holder, err := r.backends.Concurrency.ObserveSlot(pollCtx, key, holderID)
 				cancel()
-				if err == nil && holder != nil && holder.Superseded {
+				if slotOwnershipLost(holder, err) {
 					superseded.Store(true)
 					cancelExec()
 					return
@@ -595,6 +595,20 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 	}()
 
 	return func() { once.Do(func() { close(done) }) }
+}
+
+func pollsForSupersession(onLimit string) bool {
+	return onLimit != store.OnLimitCancelOthers
+}
+
+func slotOwnershipLost(holder *store.ConcurrencyHolder, err error) bool {
+	if errors.Is(err, store.ErrNotFound) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+	return holder == nil || holder.Superseded
 }
 
 // waitThenRun polls ResolveWaiter and transitions on first resolution.
