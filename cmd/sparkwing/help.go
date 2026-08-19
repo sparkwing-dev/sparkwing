@@ -99,7 +99,8 @@ type Command struct {
 	// express it: the root menu leads with `info` because that is the
 	// command an agent should run first, and `runs` leads with
 	// `submit` / `list` rather than alphabetically.
-	SubcommandOrder []string
+	SubcommandOrder    []string
+	SubcommandOptional bool
 
 	PosArgs     []PosArg
 	Flags       []FlagSpec
@@ -258,7 +259,11 @@ func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
 		}
 	}
 	if len(visible) > 0 {
-		fmt.Fprint(w, " <subcommand>")
+		if cmd.SubcommandOptional {
+			fmt.Fprint(w, " [<subcommand>]")
+		} else {
+			fmt.Fprint(w, " <subcommand>")
+		}
 	}
 	if len(cmd.Flags) > 0 || len(visible) == 0 {
 		fmt.Fprint(w, " [flags]")

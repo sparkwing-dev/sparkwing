@@ -468,7 +468,8 @@ same renderer prints the controller's admission state -- every
 concurrency key, its holders and waiters, and each registered runner's
 free capacity -- so one vocabulary reads local and cluster admission
 alike.`,
-	SubcommandOrder: []string{"exec"},
+	SubcommandOrder:    []string{"exec"},
+	SubcommandOptional: true,
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty | json | plain", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing home to inspect (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
