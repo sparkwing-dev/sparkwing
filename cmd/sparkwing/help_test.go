@@ -50,6 +50,11 @@ func TestPrintHelpDistinguishesOptionalSubcommands(t *testing.T) {
 			want: "  sparkwing version [<subcommand>] [flags]\n",
 		},
 		{
+			name: "runnable parent with default action",
+			cmd:  cmdRepos,
+			want: "  sparkwing repos [<subcommand>] [flags]\n",
+		},
+		{
 			name: "command group",
 			cmd:  cmdJobs,
 			want: "  sparkwing runs <subcommand>\n",
