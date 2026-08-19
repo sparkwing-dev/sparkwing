@@ -2,9 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"runtime"
-	"strings"
+	"sort"
 	"sync"
 	"time"
 
@@ -90,7 +91,13 @@ func stuckNodeIDs(plan *sparkwing.Plan, state *dispatchState) []string {
 	return stuck
 }
 
-func unresolvedNodesBlockedByAdmission(ctx context.Context, stateBackend StateBackend, runID string, plan *sparkwing.Plan, state *dispatchState, since time.Time) bool {
+type dispatchContinuation struct {
+	Continue       bool
+	Reason         string
+	UnresolvedNode []string
+}
+
+func unresolvedNodesBlockedByAdmission(ctx context.Context, stateBackend StateBackend, runID string, plan *sparkwing.Plan, state *dispatchState, since time.Time) dispatchContinuation {
 	unresolved := make(map[string]*sparkwing.JobNode)
 	progress := false
 	events := dispatchWatchdogEvents(ctx, stateBackend, runID)
@@ -101,19 +108,29 @@ func unresolvedNodesBlockedByAdmission(ctx context.Context, stateBackend StateBa
 		}
 	}
 	if len(unresolved) == 0 {
-		return false
+		return dispatchContinuation{}
 	}
+	unresolvedIDs := sortedJobNodeIDs(unresolved)
 	if progress {
-		return true
+		return dispatchContinuation{Continue: true, Reason: "dispatch_progress", UnresolvedNode: unresolvedIDs}
 	}
 	memo := make(map[string]bool, len(unresolved))
 	visiting := make(map[string]bool, len(unresolved))
 	for nodeID := range unresolved {
 		if !nodeBlockedByAdmission(ctx, stateBackend, runID, events, unresolved, memo, visiting, nodeID) {
-			return false
+			return dispatchContinuation{}
 		}
 	}
-	return true
+	return dispatchContinuation{Continue: true, Reason: "admission_wait", UnresolvedNode: unresolvedIDs}
+}
+
+func sortedJobNodeIDs(nodes map[string]*sparkwing.JobNode) []string {
+	ids := make([]string, 0, len(nodes))
+	for id := range nodes {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	return ids
 }
 
 func nodeBlockedByAdmission(ctx context.Context, stateBackend StateBackend, runID string, events []store.Event, unresolved map[string]*sparkwing.JobNode, memo, visiting map[string]bool, nodeID string) bool {
@@ -144,10 +161,6 @@ func nodeBlockedByAdmission(ctx context.Context, stateBackend StateBackend, runI
 }
 
 func nodeWaitingForAdmission(ctx context.Context, stateBackend StateBackend, runID string, events []store.Event, nodeID string) bool {
-	node, err := stateBackend.GetNode(ctx, runID, nodeID)
-	if err == nil && node != nil && isAdmissionWaitDetail(node.StatusDetail) {
-		return true
-	}
 	waiting := false
 	for _, event := range events {
 		if event.NodeID != nodeID {
@@ -155,7 +168,7 @@ func nodeWaitingForAdmission(ctx context.Context, stateBackend StateBackend, run
 		}
 		switch event.Kind {
 		case "concurrency_wait":
-			waiting = true
+			waiting = boundedQueueWait(event)
 		case "concurrency_promoted", "node_succeeded", "node_failed", "node_cancelled", "node_skipped":
 			waiting = false
 		}
@@ -163,14 +176,19 @@ func nodeWaitingForAdmission(ctx context.Context, stateBackend StateBackend, run
 	return waiting
 }
 
-func dispatchWatchdogEvents(ctx context.Context, stateBackend StateBackend, runID string) []store.Event {
-	eventReader, ok := stateBackend.(interface {
-		ListEventsAfter(context.Context, string, int64, int) ([]store.Event, error)
-	})
-	if !ok {
-		return nil
+func boundedQueueWait(event store.Event) bool {
+	var payload struct {
+		Kind           string `json:"kind"`
+		QueueTimeoutMS int64  `json:"queue_timeout_ms"`
 	}
-	events, err := eventReader.ListEventsAfter(ctx, runID, 0, 500)
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		return false
+	}
+	return payload.Kind == string(store.AcquireQueued) && payload.QueueTimeoutMS > 0
+}
+
+func dispatchWatchdogEvents(ctx context.Context, stateBackend StateBackend, runID string) []store.Event {
+	events, err := stateBackend.ListEventsAfter(ctx, runID, 0, 500)
 	if err != nil {
 		return nil
 	}
@@ -188,10 +206,6 @@ func nodeDispatchProgressSince(events []store.Event, nodeID string, since time.T
 		}
 	}
 	return false
-}
-
-func isAdmissionWaitDetail(detail string) bool {
-	return strings.HasPrefix(detail, "queued in ")
 }
 
 // parseDispatchWaitTimeout reads SPARKWING_DISPATCH_WAIT_TIMEOUT into

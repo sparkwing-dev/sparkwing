@@ -592,10 +592,16 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 		holders = append(holders, map[string]string{"run_id": h.RunID, "node_id": h.NodeID})
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"key":            cp.key,
-		"kind":           string(initial.Kind),
-		"position":       initial.Position,
-		"queue_length":   initial.QueueLength,
+		"key":          cp.key,
+		"kind":         string(initial.Kind),
+		"position":     initial.Position,
+		"queue_length": initial.QueueLength,
+		"queue_timeout_ms": func() int64 {
+			if cp.queueTimeout <= 0 || initial.Kind != store.AcquireQueued {
+				return 0
+			}
+			return cp.queueTimeout.Milliseconds()
+		}(),
 		"holders":        holders,
 		"leader_run_id":  leaderRun,
 		"leader_node_id": leaderNode,

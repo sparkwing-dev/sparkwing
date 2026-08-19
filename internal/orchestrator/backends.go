@@ -60,6 +60,7 @@ type StateBackend interface {
 	// AppendEvent mirrors store.AppendEvent but discards the sequence
 	// number; orchestrator call sites never read it.
 	AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error
+	ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error)
 
 	// GetNodeOutput returns a finished node's raw JSON output.
 	GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error)

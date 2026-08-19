@@ -794,6 +794,29 @@ func (b *Backend) AppendEvent(ctx context.Context, runID, nodeID, kind string, p
 	return b.appendEnvelope(ctx, runID, env)
 }
 
+func (b *Backend) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
+	if limit <= 0 {
+		limit = 500
+	}
+	rs, err := b.getRunState(ctx, runID, true)
+	if err != nil {
+		return nil, err
+	}
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	out := make([]store.Event, 0, min(limit, len(rs.events)))
+	for _, event := range rs.events {
+		if event.Seq <= afterSeq {
+			continue
+		}
+		out = append(out, event)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+
 // GetNodeOutput returns the finished node's raw output bytes.
 func (b *Backend) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
 	n, err := b.GetNode(ctx, runID, nodeID)

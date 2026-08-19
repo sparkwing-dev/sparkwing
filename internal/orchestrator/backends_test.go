@@ -116,6 +116,7 @@ type fakeState struct {
 	startNodes   int
 	finishNodes  int
 	eventKinds   map[string]int
+	events       []store.Event
 	cache        map[string][]byte
 	runs         map[string]store.Run
 	createRunErr error
@@ -231,7 +232,33 @@ func (f *fakeState) AppendEvent(ctx context.Context, runID, nodeID, kind string,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.eventKinds[kind]++
+	f.events = append(f.events, store.Event{
+		RunID:   runID,
+		Seq:     int64(len(f.events) + 1),
+		NodeID:  nodeID,
+		Kind:    kind,
+		TS:      time.Now(),
+		Payload: payload,
+	})
 	return nil
+}
+
+func (f *fakeState) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]store.Event, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if limit <= 0 {
+		limit = 500
+	}
+	events := make([]store.Event, 0, limit)
+	for _, event := range f.events {
+		if event.RunID == runID && event.Seq > afterSeq {
+			events = append(events, event)
+			if len(events) == limit {
+				break
+			}
+		}
+	}
+	return events, nil
 }
 
 func (f *fakeState) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample store.MetricSample) error {

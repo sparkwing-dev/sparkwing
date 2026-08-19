@@ -841,15 +841,26 @@ func dispatch(
 	}
 
 	if waitForDispatch(dispatchCtx, &state.wg, dispatchWaitTimeout, func(ctx context.Context, since time.Time) bool {
-		if !unresolvedNodesBlockedByAdmission(ctx, backends.State, runID, plan, state, since) {
+		continuation := unresolvedNodesBlockedByAdmission(ctx, backends.State, runID, plan, state, since)
+		if !continuation.Continue {
 			return false
 		}
-		_ = backends.State.AppendEvent(ctx, runID, "", "dispatch_watchdog_continued", nil)
+		payload, _ := json.Marshal(map[string]any{
+			"reason":           continuation.Reason,
+			"timeout":          dispatchWaitTimeout.String(),
+			"unresolved_nodes": continuation.UnresolvedNode,
+		})
+		_ = backends.State.AppendEvent(ctx, runID, "", "dispatch_watchdog_continued", payload)
 		if delegate != nil {
 			delegate.Emit(sparkwing.LogRecord{
 				TS:    time.Now(),
 				Level: "info",
 				Event: "dispatch_watchdog_continued",
+				Attrs: map[string]any{
+					"reason":           continuation.Reason,
+					"timeout_ms":       dispatchWaitTimeout.Milliseconds(),
+					"unresolved_nodes": continuation.UnresolvedNode,
+				},
 			})
 		}
 		return true

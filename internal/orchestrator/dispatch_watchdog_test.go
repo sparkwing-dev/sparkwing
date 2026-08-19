@@ -14,7 +14,7 @@ import (
 
 // wedgeRelease lets the test unblock the deliberately-stuck node body
 // after the watchdog has fired, so the leaked goroutine drains during
-// teardown instead of haunting subsequent tests in the same process.
+// teardown instead of affecting later tests in the same process.
 var wedgeRelease = make(chan struct{})
 
 type wedgedNodePipe struct{ sparkwing.Base }
@@ -34,6 +34,9 @@ func init() {
 	})
 	register("watchdog-queue-waiter", func() sparkwing.Pipeline[sparkwing.NoInputs] {
 		return &watchdogQueueWaiterPipe{}
+	})
+	register("watchdog-unbounded-queue-waiter", func() sparkwing.Pipeline[sparkwing.NoInputs] {
+		return &watchdogUnboundedQueueWaiterPipe{}
 	})
 }
 
@@ -76,6 +79,18 @@ func (watchdogQueueWaiterPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ s
 		Capacity:     1,
 		OnLimit:      sparkwing.Queue,
 		QueueTimeout: 2 * time.Second,
+	})
+	queued := sparkwing.Job(plan, "queued", watchdogQueueStep(10*time.Millisecond)).Concurrency(group)
+	sparkwing.Job(plan, "after-queued", watchdogQueueStep(10*time.Millisecond)).Needs(queued)
+	return nil
+}
+
+type watchdogUnboundedQueueWaiterPipe struct{ sparkwing.Base }
+
+func (watchdogUnboundedQueueWaiterPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
+	group := sparkwing.NewConcurrencyGroup("dispatch-watchdog-queued-wait", sparkwing.ConcurrencyLimit{
+		Capacity: 1,
+		OnLimit:  sparkwing.Queue,
 	})
 	queued := sparkwing.Job(plan, "queued", watchdogQueueStep(10*time.Millisecond)).Concurrency(group)
 	sparkwing.Job(plan, "after-queued", watchdogQueueStep(10*time.Millisecond)).Needs(queued)
@@ -242,6 +257,64 @@ func TestDispatchWatchdog_DoesNotFireWhileNodeWaitsInConcurrencyQueue(t *testing
 	}
 }
 
+func TestDispatchWatchdog_FiresForUnboundedConcurrencyQueueWait(t *testing.T) {
+	watchdogQueueRelease = make(chan struct{})
+	t.Cleanup(func() {
+		select {
+		case <-watchdogQueueRelease:
+		default:
+			close(watchdogQueueRelease)
+		}
+	})
+	paths := newPaths(t)
+	state, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatalf("open state: %v", err)
+	}
+	defer func() { _ = state.Close() }()
+
+	holderLog := newWatchdogEventLog()
+	holderDone := make(chan *orchestrator.Result, 1)
+	go func() {
+		res, _ := runWithSharedStore(t, paths, state, orchestrator.Options{
+			RunID:               "dispatch-watchdog-unbounded-holder",
+			Pipeline:            "watchdog-queue-holder",
+			DispatchWaitTimeout: time.Second,
+			Delegate:            holderLog,
+		})
+		holderDone <- res
+	}()
+	holderLog.wait(t, "node_start")
+
+	waiterLog := newWatchdogEventLog()
+	waiterDone := make(chan watchdogRunResult, 1)
+	go func() {
+		res, runErr := runWithSharedStore(t, paths, state, orchestrator.Options{
+			RunID:               "dispatch-watchdog-unbounded-waiter",
+			Pipeline:            "watchdog-unbounded-queue-waiter",
+			DispatchWaitTimeout: 100 * time.Millisecond,
+			Delegate:            waiterLog,
+		})
+		waiterDone <- watchdogRunResult{res: res, err: runErr}
+	}()
+
+	waiterLog.wait(t, "concurrency_wait")
+	result := waitForRunResult(t, waiterDone)
+	if result.err != nil {
+		t.Fatalf("unbounded queued waiter returned error: %v", result.err)
+	}
+	if result.res == nil || result.res.Status != "failed" || result.res.Error == nil ||
+		!strings.Contains(result.res.Error.Error(), "dispatch_wait_timeout") {
+		t.Fatalf("unbounded queued waiter result = %+v, want dispatch_wait_timeout failure", result.res)
+	}
+
+	close(watchdogQueueRelease)
+	holder := waitForHolderResult(t, holderDone)
+	if holder == nil || holder.Status != "success" {
+		t.Fatalf("holder result = %+v, want success", holder)
+	}
+}
+
 type watchdogRunResult struct {
 	res *orchestrator.Result
 	err error
@@ -263,6 +336,28 @@ func waitForContinuationBeforeResult(t *testing.T, log *watchdogEventLog, done <
 		case <-time.After(time.Second):
 			t.Fatal("dispatch watchdog continuation did not appear before deadline")
 		}
+	}
+}
+
+func waitForRunResult(t *testing.T, done <-chan watchdogRunResult) watchdogRunResult {
+	t.Helper()
+	select {
+	case result := <-done:
+		return result
+	case <-time.After(time.Second):
+		t.Fatal("run did not finish before deadline")
+		return watchdogRunResult{}
+	}
+}
+
+func waitForHolderResult(t *testing.T, done <-chan *orchestrator.Result) *orchestrator.Result {
+	t.Helper()
+	select {
+	case result := <-done:
+		return result
+	case <-time.After(time.Second):
+		t.Fatal("holder did not finish")
+		return nil
 	}
 }
 
