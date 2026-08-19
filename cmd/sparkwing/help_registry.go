@@ -1992,16 +1992,12 @@ clears the token (empty value, not an omitted flag). Use
 	Flags: []FlagSpec{
 		{Name: "name", Argument: "NAME", Desc: "Profile name to mutate", Required: true, Group: "Input"},
 		{Name: "controller", Argument: "URL", Desc: "New controller URL", Group: "Connection"},
-		{Name: "logs", Argument: "URL", Desc: "New logs-service URL", Group: "Connection"},
 		{Name: "token", Argument: "TOKEN", Desc: "New bearer token (empty string clears)", Group: "Connection"},
-		{Name: "gitcache", Argument: "URL", Desc: "New gitcache URL", Group: "Connection"},
-		{Name: "default-runner", Argument: "NAME", Desc: "Runner name (empty clears, falls back to local)", Group: "Dispatch"},
 	},
-	GroupOrder: []string{"Input", "Connection", "Dispatch", "System", "Other"},
+	GroupOrder: []string{"Input", "Connection", "Other"},
 	Examples: []Example{
 		{"Rotate a profile's token", "sparkwing configure profiles set --name prod --token $NEW_TOKEN"},
-		{"Clear a stale logs URL", `sparkwing configure profiles set --name prod --logs=""`},
-		{"Point a profile at a different default runner", "sparkwing configure profiles set --name prod --default-runner cloud-gpu"},
+		{"Change a profile's controller", "sparkwing configure profiles set --name prod --controller https://api.sparkwing.example"},
 	},
 }
 

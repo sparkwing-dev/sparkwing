@@ -51,6 +51,8 @@ code change to unlock.
 
 ### Fixed
 
+- **cli:** `configure profiles set --help` now lists only the fields the
+  command can update.
 - **cli:** `configure profiles add --help` now lists only the flags accepted
   by the command.
 - **cli:** `runs list --help` no longer advertises the unsupported `--tag`

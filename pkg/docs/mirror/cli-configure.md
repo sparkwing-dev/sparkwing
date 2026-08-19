@@ -209,10 +209,7 @@ clears the token (empty value, not an omitted flag). Use
 |---|---|
 | `--name NAME` | Profile name to mutate (required) |
 | `--controller URL` | New controller URL |
-| `--logs URL` | New logs-service URL |
 | `--token TOKEN` | New bearer token (empty string clears) |
-| `--gitcache URL` | New gitcache URL |
-| `--default-runner NAME` | Runner name (empty clears, falls back to local) |
 
 ### Examples
 
@@ -220,11 +217,8 @@ clears the token (empty value, not an omitted flag). Use
 # Rotate a profile's token
 sparkwing configure profiles set --name prod --token $NEW_TOKEN
 
-# Clear a stale logs URL
-sparkwing configure profiles set --name prod --logs=""
-
-# Point a profile at a different default runner
-sparkwing configure profiles set --name prod --default-runner cloud-gpu
+# Change a profile's controller
+sparkwing configure profiles set --name prod --controller https://api.sparkwing.example
 ```
 
 ## `sparkwing configure profiles show`
