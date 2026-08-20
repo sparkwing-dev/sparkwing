@@ -228,14 +228,16 @@ func TestSkipIf_PanickyPredicateDefaultsToRun(t *testing.T) {
 type generousTimeout struct{ sparkwing.Base }
 
 var generousRan atomic.Bool
+var generousCanceled chan struct{}
 
 func (generousTimeout) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "gated", func(ctx context.Context) error {
 		generousRan.Store(true)
 		return nil
 	}).SkipIf(func(ctx context.Context) bool {
-		time.Sleep(500 * time.Millisecond)
-		return true
+		<-ctx.Done()
+		generousCanceled <- struct{}{}
+		return false
 	}, sparkwing.SkipBudget(50*time.Millisecond))
 	return nil
 }
@@ -246,6 +248,7 @@ func init() {
 
 func TestSkipIf_PerNodeTimeoutOverride(t *testing.T) {
 	generousRan.Store(false)
+	generousCanceled = make(chan struct{}, 1)
 	p := newPaths(t)
 	start := time.Now()
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-generous"})
@@ -256,6 +259,13 @@ func TestSkipIf_PerNodeTimeoutOverride(t *testing.T) {
 	}
 	if !generousRan.Load() {
 		t.Fatal("job should run after predicate times out under override budget")
+	}
+	cancelWait := time.NewTimer(200 * time.Millisecond)
+	defer cancelWait.Stop()
+	select {
+	case <-generousCanceled:
+	case <-cancelWait.C:
+		t.Fatal("predicate did not observe budget cancellation")
 	}
 }
 
