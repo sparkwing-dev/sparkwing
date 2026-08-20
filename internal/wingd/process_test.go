@@ -169,7 +169,7 @@ func waitForNonblankFile(t *testing.T, path string, timeout, interval time.Durat
 		select {
 		case <-poll.C:
 		case <-deadline.C:
-			t.Fatalf("%s remained empty for %s", path, timeout)
+			t.Fatalf("%s remained blank for %s", path, timeout)
 		}
 	}
 }
