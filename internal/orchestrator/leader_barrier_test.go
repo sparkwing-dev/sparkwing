@@ -64,7 +64,7 @@ func TestLeaderBarrierUsesSignalsInsteadOfPolling(t *testing.T) {
 			}
 			if sel, ok := call.Fun.(*ast.SelectorExpr); ok {
 				if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "time" &&
-					(sel.Sel.Name == "After" || sel.Sel.Name == "NewTicker" || sel.Sel.Name == "Now") {
+					(sel.Sel.Name == "Sleep" || sel.Sel.Name == "After" || sel.Sel.Name == "NewTicker" || sel.Sel.Name == "Now") {
 					t.Errorf("%s contains time.%s polling at %s", fn.Name.Name, sel.Sel.Name, fset.Position(call.Pos()))
 				}
 			}
