@@ -549,6 +549,11 @@ func queryWingd(t *testing.T, home string) wingwire.QueueState {
 	return qs
 }
 
+func waitForWingdPoll(poll *time.Ticker) {
+	poll.Reset(10 * time.Millisecond)
+	<-poll.C
+}
+
 func awaitWaiter(t *testing.T, home, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
@@ -560,7 +565,7 @@ func awaitWaiter(t *testing.T, home, runID string) {
 				return
 			}
 		}
-		<-poll.C
+		waitForWingdPoll(poll)
 	}
 	t.Fatalf("run %q never appeared in the daemon queue", runID)
 }
@@ -576,7 +581,7 @@ func awaitOutContains(t *testing.T, out *syncBuffer, sub string) {
 		if out.count(sub) > 0 {
 			return
 		}
-		<-poll.C
+		waitForWingdPoll(poll)
 	}
 	t.Fatalf("out never contained %q; out = %q", sub, out.String())
 }
@@ -599,7 +604,7 @@ func awaitWaiterOrHolder(t *testing.T, home, runID string) wingwire.QueueState {
 				t.Fatalf("run %q was admitted as holder; queue state: %+v", runID, last)
 			}
 		}
-		<-poll.C
+		waitForWingdPoll(poll)
 	}
 	t.Fatalf("run %q never appeared as waiter or holder; queue state: %+v", runID, last)
 	return wingwire.QueueState{}
@@ -631,7 +636,7 @@ func awaitNodeOutcome(t *testing.T, st *store.Store, runID, nodeID, outcome stri
 				return
 			}
 		}
-		<-poll.C
+		waitForWingdPoll(poll)
 	}
 	t.Fatalf("timed out waiting for %s/%s outcome %q; last outcome %q", runID, nodeID, outcome, last)
 }
@@ -647,7 +652,7 @@ func findWingdHolder(t *testing.T, home, runID string) wingwire.Holder {
 				return h
 			}
 		}
-		<-poll.C
+		waitForWingdPoll(poll)
 	}
 	t.Fatalf("run %q never appeared as a holder", runID)
 	return wingwire.Holder{}
@@ -1325,11 +1330,13 @@ func TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission(t *testing.T) {
 	awaitWaiter(t, home, "wingd-hb-b")
 
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for outB.count("still queued for local admission after") < 2 {
 		if time.Now().After(deadline) {
 			t.Fatalf("queued run never re-emitted its wait status; out = %q", outB.String())
 		}
-		time.Sleep(10 * time.Millisecond)
+		waitForWingdPoll(poll)
 	}
 
 	close(gate.release)
@@ -1441,6 +1448,8 @@ func (c *captureLogger) eventNames() []string {
 func (c *captureLogger) awaitEvent(t *testing.T, event string) {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		c.mu.Lock()
 		got := slices.ContainsFunc(c.events, func(ev sparkwing.LogRecord) bool {
@@ -1450,7 +1459,7 @@ func (c *captureLogger) awaitEvent(t *testing.T, event string) {
 		if got {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		waitForWingdPoll(poll)
 	}
 	t.Errorf("delegate never emitted %q; got %v", event, c.eventNames())
 }
@@ -1536,6 +1545,8 @@ func TestWingd_AbruptDeathReleasesLeaseFinalizesRunAndPromotesNext(t *testing.T)
 	}
 
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for {
 		run, err := st.GetRun(ctx, "wingd-dead")
 		if err != nil {
@@ -1550,7 +1561,7 @@ func TestWingd_AbruptDeathReleasesLeaseFinalizesRunAndPromotesNext(t *testing.T)
 		if time.Now().After(deadline) {
 			t.Fatalf("dead run status = %q, want cancelled via the daemon's orphan finalizer", run.Status)
 		}
-		time.Sleep(10 * time.Millisecond)
+		waitForWingdPoll(poll)
 	}
 }
 
@@ -1869,13 +1880,15 @@ func TestWingd_DaemonFirstCancelRecoversStalledHolderWithoutDashboard(t *testing
 
 	var recovery string
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		h := findWingdHolder(t, home, "stall-holder")
 		if h.Stalled && h.Recovery != "" {
 			recovery = h.Recovery
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+		waitForWingdPoll(poll)
 	}
 	if recovery == "" {
 		t.Fatal("stalled holder was never flagged with a recovery command")
@@ -1954,6 +1967,8 @@ func TestWingd_DaemonFirstCancelSurvivesImmediateClientExit(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		run, getErr := st.GetRun(ctx, runID)
 		if getErr != nil {
@@ -1965,7 +1980,7 @@ func TestWingd_DaemonFirstCancelSurvivesImmediateClientExit(t *testing.T) {
 			}
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		waitForWingdPoll(poll)
 	}
 	t.Fatal("cancelled holder never finalized")
 }
@@ -2022,6 +2037,8 @@ func TestWingd_DaemonFirstCancelFinalizesQueuedClient(t *testing.T) {
 	_ = waiter.Close()
 
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		run, getErr := st.GetRun(ctx, runID)
 		if getErr != nil {
@@ -2033,7 +2050,7 @@ func TestWingd_DaemonFirstCancelFinalizesQueuedClient(t *testing.T) {
 			}
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		waitForWingdPoll(poll)
 	}
 	t.Fatal("cancelled waiter never finalized")
 }
@@ -2102,17 +2119,19 @@ func TestWingd_DaemonFirstCancelRemovesQueuedWaiterWithoutDashboard(t *testing.T
 	}
 
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		qs := queryWingd(t, home)
 		if _, stillQueued := findQueuedWaiter(qs, "cancel-waiter-a"); stillQueued {
-			time.Sleep(10 * time.Millisecond)
+			waitForWingdPoll(poll)
 			continue
 		}
 		b, ok := findQueuedWaiter(qs, "cancel-waiter-b")
 		if ok && b.Position == 1 && len(qs.Holders) == 1 && qs.Holders[0].RunID == "cancel-holder" {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+		waitForWingdPoll(poll)
 	}
 	qs := queryWingd(t, home)
 	if _, stillQueued := findQueuedWaiter(qs, "cancel-waiter-a"); stillQueued {
@@ -2197,6 +2216,8 @@ func TestRunLocal_SIGINTFinalizesRunAsCancelledAndReleasesLease(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for {
 		if len(queryWingd(t, home).Holders) == 0 {
 			break
@@ -2204,6 +2225,6 @@ func TestRunLocal_SIGINTFinalizesRunAsCancelledAndReleasesLease(t *testing.T) {
 		if time.Now().After(deadline) {
 			t.Fatalf("daemon still reports holders after the run finished: %+v", queryWingd(t, home).Holders)
 		}
-		time.Sleep(10 * time.Millisecond)
+		waitForWingdPoll(poll)
 	}
 }
