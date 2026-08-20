@@ -15,6 +15,7 @@ func TestProcessSuccessorUsesOnlyTheLeaseObservationSleep(t *testing.T) {
 	}
 	var foundHelper bool
 	var observationSleeps int
+	var foundLeaseObservation bool
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok {
@@ -33,6 +34,10 @@ func TestProcessSuccessorUsesOnlyTheLeaseObservationSleep(t *testing.T) {
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
 				if isTimeSleep(node) {
 					observationSleeps++
+					call := node.(*ast.CallExpr)
+					if len(call.Args) == 1 && is750Milliseconds(call.Args[0]) {
+						foundLeaseObservation = true
+					}
 				}
 				return true
 			})
@@ -44,6 +49,9 @@ func TestProcessSuccessorUsesOnlyTheLeaseObservationSleep(t *testing.T) {
 	if observationSleeps != 1 {
 		t.Errorf("successor regression has %d time.Sleep calls, want the one lease-survival observation", observationSleeps)
 	}
+	if !foundLeaseObservation {
+		t.Error("750ms lease-survival observation not found")
+	}
 }
 
 func isTimeSleep(node ast.Node) bool {
@@ -53,6 +61,23 @@ func isTimeSleep(node ast.Node) bool {
 	}
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || sel.Sel.Name != "Sleep" {
+		return false
+	}
+	pkg, ok := sel.X.(*ast.Ident)
+	return ok && pkg.Name == "time"
+}
+
+func is750Milliseconds(expr ast.Expr) bool {
+	mul, ok := expr.(*ast.BinaryExpr)
+	if !ok || mul.Op != token.MUL {
+		return false
+	}
+	value, ok := mul.X.(*ast.BasicLit)
+	if !ok || value.Value != "750" {
+		return false
+	}
+	sel, ok := mul.Y.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != "Millisecond" {
 		return false
 	}
 	pkg, ok := sel.X.(*ast.Ident)
