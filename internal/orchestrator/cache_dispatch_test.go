@@ -378,9 +378,10 @@ func (planLevelQueuedAwaitEarlyResumeParentPipe) Plan(
 	rc sparkwing.RunContext,
 ) error {
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		publishQueuedAwaitParentAttempt(ctx)
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-early-resume-child", "work")
 		return err
-	}).Timeout(time.Second)
+	}).Timeout(time.Hour)
 	return nil
 }
 
@@ -1530,13 +1531,16 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 
 func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) {
 	resetCacheCounter()
+	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
+	queuedAwaitParentAttempt.Store(gate)
+	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
 	p := newPaths(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	t.Cleanup(func() { _ = st.Close() })
 
 	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key:      "g:plan-level-queued-await-early-resume-key",
@@ -1552,20 +1556,56 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 		t.Fatalf("external acquire = %s, want granted", resp.Kind)
 	}
 
-	startedAt := time.Now()
 	parentDone := make(chan *orchestrator.Result, 1)
+	parentFinished := make(chan struct{})
+	childDone := make(chan *orchestrator.Result, 1)
+	childFinished := make(chan struct{})
+	var childStarted atomic.Bool
+	var releaseOnce sync.Once
+	var releaseErr error
+	releaseHolder := func() error {
+		releaseOnce.Do(func() {
+			_, _, _, releaseErr = st.ReleaseAndNotify(context.Background(),
+				"g:plan-level-queued-await-early-resume-key", "external-early-resume-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease)
+		})
+		return releaseErr
+	}
+	t.Cleanup(func() {
+		gate.release()
+		cancel()
+		if err := releaseHolder(); err != nil {
+			t.Errorf("cleanup external holder: %v", err)
+		}
+		joinCacheDispatchWorker(t, "early-resume parent", parentFinished)
+		if childStarted.Load() {
+			joinCacheDispatchWorker(t, "early-resume child", childFinished)
+		}
+	})
 	go func() {
+		defer close(parentFinished)
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-early-resume-parent",
 			RunID:    "queued-await-early-resume-parent",
 		})
 		parentDone <- res
 	}()
+	var attemptCtx context.Context
+	select {
+	case attemptCtx = <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("parent action did not publish its timeout context")
+	}
+	const controlledRemainder = time.Second
+	if !orchestrator.SetNodeTimeoutRemainingForTest(attemptCtx, controlledRemainder) {
+		t.Fatal("could not establish the parent timeout remainder")
+	}
+	gate.release()
 
 	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-early-resume-parent", "spawn", "plan-level-queued-await-early-resume-child")
 	claimManualChildTrigger(t, ctx, st, childID)
-	childDone := make(chan *orchestrator.Result, 1)
+	childStarted.Store(true)
 	go func() {
+		defer close(childFinished)
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-early-resume-child",
 			RunID:       childID,
@@ -1574,19 +1614,29 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 		childDone <- res
 	}()
 	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-early-resume-key", childID, childDone)
-	time.Sleep(700 * time.Millisecond)
-	if _, _, _, err := st.ReleaseAndNotify(ctx,
-		"g:plan-level-queued-await-early-resume-key", "external-early-resume-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+	waitForNodeTimeoutPaused(t, attemptCtx)
+	if !orchestrator.NodeTimeoutPausedForTest(attemptCtx) {
+		t.Fatal("parent node timeout was not paused during child admission")
+	}
+	if orchestrator.ForceNodeTimeoutForTest(attemptCtx) {
+		t.Fatal("parent node timeout fired while child admission was pending")
+	}
+	pausedRemaining, paused, ok := orchestrator.NodeTimeoutStateForTest(attemptCtx)
+	if !ok || !paused || pausedRemaining <= 0 || pausedRemaining > controlledRemainder {
+		t.Fatalf("paused timeout state = remaining %s, paused=%t, ok=%t; want positive remainder no greater than %s", pausedRemaining, paused, ok, controlledRemainder)
+	}
+	if err := releaseHolder(); err != nil {
 		t.Fatalf("release external holder: %v", err)
+	}
+	resumedRemaining := waitForNodeTimeoutResumed(t, attemptCtx)
+	if resumedRemaining > pausedRemaining {
+		t.Fatalf("resumed timeout remainder = %s, want no more than paused remainder %s", resumedRemaining, pausedRemaining)
 	}
 
 	select {
 	case parent := <-parentDone:
 		if parent.Status != "success" {
 			t.Fatalf("parent status = %q, want success after pre-deadline admission wait (err=%v)", parent.Status, parent.Error)
-		}
-		if elapsed := time.Since(startedAt); elapsed < time.Second {
-			t.Fatalf("parent elapsed = %s, want completion after original wall-clock timeout", elapsed)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for parent after releasing queued child")

@@ -41,11 +41,15 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	earlyResumeChecksPausedController := false
 	earlyResumeRejectsPausedExpiry := false
 	earlyResumeControlsRemainder := false
+	earlyResumeGateGated := false
 	cancellationGateUngated := false
 	remainingBudgetGateGated := false
 	var remainingBudgetSetPos token.Pos
 	var remainingBudgetReleasePos token.Pos
 	var remainingBudgetSpawnWaitPos token.Pos
+	var earlyResumeSetPos token.Pos
+	var earlyResumeReleasePos token.Pos
+	var earlyResumeSpawnWaitPos token.Pos
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_dispatch_test.go", nil, 0)
 	if err != nil {
@@ -82,6 +86,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 						cancellationGateUngated = !hasProceed
 					case "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget":
 						remainingBudgetGateGated = hasProceed
+					case "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline":
+						earlyResumeGateGated = hasProceed
 					}
 				}
 			}
@@ -93,6 +99,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 				usesSpawnWait = true
 				if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget" {
 					remainingBudgetSpawnWaitPos = call.Pos()
+				} else if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline" {
+					earlyResumeSpawnWaitPos = call.Pos()
 				}
 			}
 			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "waitForPlanAdmissionWaiter" {
@@ -135,11 +143,17 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					earlyResumeRejectsPausedExpiry = true
 				case "SetNodeTimeoutRemainingForTest":
 					earlyResumeControlsRemainder = true
+					earlyResumeSetPos = call.Pos()
 				}
 			}
 			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget" && sel.Sel.Name == "release" {
-				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "gate" && remainingBudgetReleasePos == token.NoPos {
+				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "gate" {
 					remainingBudgetReleasePos = call.Pos()
+				}
+			}
+			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline" && sel.Sel.Name == "release" {
+				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "gate" {
+					earlyResumeReleasePos = call.Pos()
 				}
 			}
 			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForNodeTimeoutResumed" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
@@ -203,5 +217,12 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if !earlyResumeControlsRemainder {
 		t.Error("early-resume regression does not establish its pre-admission timeout remainder")
+	}
+	if !earlyResumeGateGated {
+		t.Error("early-resume regression does not gate action progress while setting the timeout remainder")
+	}
+	if earlyResumeSetPos == token.NoPos || earlyResumeReleasePos == token.NoPos || earlyResumeSpawnWaitPos == token.NoPos ||
+		!(earlyResumeSetPos < earlyResumeReleasePos && earlyResumeReleasePos < earlyResumeSpawnWaitPos) {
+		t.Error("early-resume regression must set the remainder, release the action, then wait for child admission")
 	}
 }
