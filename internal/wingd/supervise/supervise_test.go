@@ -173,3 +173,34 @@ func TestStopChildBoundsPostKillWait(t *testing.T) {
 		t.Fatal("stopChild returned without escalating to Kill")
 	}
 }
+
+func TestStopChildAcceptsExitDuringPostKillWait(t *testing.T) {
+	child := newNonExitingSupervisorChild()
+	t.Cleanup(func() {
+		select {
+		case child.done <- nil:
+		default:
+		}
+	})
+
+	result := make(chan error, 1)
+	go func() { result <- stopChild(child, 20*time.Millisecond) }()
+	escalationTimer := time.NewTimer(500 * time.Millisecond)
+	defer escalationTimer.Stop()
+	select {
+	case <-child.killed:
+	case <-escalationTimer.C:
+		t.Fatal("stopChild did not escalate to Kill")
+	}
+	child.done <- nil
+	completionTimer := time.NewTimer(500 * time.Millisecond)
+	defer completionTimer.Stop()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("post-kill child exit returned %v, want success", err)
+		}
+	case <-completionTimer.C:
+		t.Fatal("stopChild did not accept child exit during post-kill grace")
+	}
+}
