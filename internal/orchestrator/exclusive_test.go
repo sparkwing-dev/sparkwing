@@ -16,11 +16,26 @@ import (
 // exclusiveCounter tracks the number of in-flight nodes holding the
 // Exclusive lock; test code asserts it never exceeds 1.
 type exclusiveCounter struct {
-	inflight int32
-	maxSeen  int32
+	inflight    int32
+	maxSeen     int32
+	entered     chan struct{}
+	release     chan struct{}
+	releaseOnce sync.Once
 }
 
-func (e *exclusiveCounter) step(holdFor time.Duration) func(ctx context.Context) error {
+func (e *exclusiveCounter) reset(entryCapacity int) {
+	atomic.StoreInt32(&e.inflight, 0)
+	atomic.StoreInt32(&e.maxSeen, 0)
+	e.entered = make(chan struct{}, entryCapacity)
+	e.release = make(chan struct{})
+	e.releaseOnce = sync.Once{}
+}
+
+func (e *exclusiveCounter) releaseAll() {
+	e.releaseOnce.Do(func() { close(e.release) })
+}
+
+func (e *exclusiveCounter) step() func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		cur := atomic.AddInt32(&e.inflight, 1)
 		defer atomic.AddInt32(&e.inflight, -1)
@@ -30,8 +45,13 @@ func (e *exclusiveCounter) step(holdFor time.Duration) func(ctx context.Context)
 				break
 			}
 		}
-		time.Sleep(holdFor)
-		return nil
+		e.entered <- struct{}{}
+		select {
+		case <-e.release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
@@ -41,8 +61,8 @@ var exclusiveState = &exclusiveCounter{}
 
 func (exclusivePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := sparkwing.NewConcurrencyGroup("shared-resource", sparkwing.ConcurrencyLimit{Capacity: 1})
-	sparkwing.Job(plan, "a", exclusiveState.step(150*time.Millisecond)).Concurrency(g)
-	sparkwing.Job(plan, "b", exclusiveState.step(150*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "a", exclusiveState.step()).Concurrency(g)
+	sparkwing.Job(plan, "b", exclusiveState.step()).Concurrency(g)
 	return nil
 }
 
@@ -114,43 +134,106 @@ func init() {
 }
 
 func TestExclusive_SerializesConcurrentHolders(t *testing.T) {
-	atomic.StoreInt32(&exclusiveState.inflight, 0)
-	atomic.StoreInt32(&exclusiveState.maxSeen, 0)
-
 	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "exclusive-serialize"})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if res.Status != "success" {
-		t.Fatalf("status = %q", res.Status)
-	}
-
-	peak := atomic.LoadInt32(&exclusiveState.maxSeen)
-	if peak > 1 {
-		t.Fatalf("Exclusive peak concurrency = %d, want 1", peak)
-	}
+	assertExclusiveSerialization(t, p, 1)
 }
 
 func TestExclusive_AcrossRuns(t *testing.T) {
-	atomic.StoreInt32(&exclusiveState.inflight, 0)
-	atomic.StoreInt32(&exclusiveState.maxSeen, 0)
-
 	p := newPaths(t)
+	assertExclusiveSerialization(t, p, 2)
+}
 
+func assertExclusiveSerialization(t *testing.T, p orchestrator.Paths, runs int) {
+	t.Helper()
+	exclusiveState.reset(runs * 2)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	results := make(chan error, runs)
 	var wg sync.WaitGroup
-	for range 2 {
+	for range runs {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "exclusive-serialize"})
+			_, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "exclusive-serialize"})
+			results <- err
 		}()
 	}
-	wg.Wait()
+	finished := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+	t.Cleanup(func() {
+		exclusiveState.releaseAll()
+		cancel()
+		join := time.NewTimer(time.Second)
+		defer join.Stop()
+		select {
+		case <-finished:
+		case <-join.C:
+			t.Error("exclusive runs did not stop during cleanup")
+		}
+	})
+
+	first := time.NewTimer(3 * time.Second)
+	defer first.Stop()
+	select {
+	case <-exclusiveState.entered:
+	case <-first.C:
+		t.Fatal("no exclusive holder entered")
+	}
+
+	waitForExclusivePopulation(t, ctx, st, runs*2-1)
+	select {
+	case <-exclusiveState.entered:
+		t.Fatal("a second exclusive holder entered before release")
+	default:
+	}
+	exclusiveState.releaseAll()
+
+	join := time.NewTimer(5 * time.Second)
+	defer join.Stop()
+	select {
+	case <-finished:
+	case <-join.C:
+		t.Fatal("exclusive runs did not finish after release")
+	}
+	for range runs {
+		if err := <-results; err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+	}
 
 	peak := atomic.LoadInt32(&exclusiveState.maxSeen)
 	if peak > 1 {
 		t.Fatalf("Exclusive peak concurrency across runs = %d, want 1", peak)
+	}
+}
+
+func waitForExclusivePopulation(t *testing.T, ctx context.Context, st *store.Store, wantWaiters int) {
+	t.Helper()
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		state, err := st.GetConcurrencyState(ctx, "g:shared-resource")
+		switch {
+		case err == nil && len(state.Holders) == 1 && len(state.Waiters) == wantWaiters:
+			return
+		case err == nil:
+		case errors.Is(err, store.ErrNotFound):
+		default:
+			t.Fatalf("read exclusive concurrency state: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("exclusive concurrency population did not reach 1 holder and %d waiters", wantWaiters)
+		case <-poll.C:
+		}
 	}
 }
 
