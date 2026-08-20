@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"testing"
@@ -21,18 +23,7 @@ func TestSubmitCLIFixtureOwnsTemporaryDirectory(t *testing.T) {
 		}
 		switch fn.Name.Name {
 		case "buildSubmitCLI":
-			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				assign, ok := node.(*ast.AssignStmt)
-				if !ok || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
-					return true
-				}
-				lhs, lok := assign.Lhs[0].(*ast.Ident)
-				rhs, rok := assign.Rhs[0].(*ast.Ident)
-				if lok && rok && lhs.Name == "submitCLIDir" && rhs.Name == "dir" {
-					recordsDirectory = true
-				}
-				return true
-			})
+			recordsDirectory = submitCLIBuilderRecordsDirectory(fn)
 		case "TestMain":
 			cleansDirectory = submitCLITestMainOwnsCleanup(fn)
 		}
@@ -43,6 +34,59 @@ func TestSubmitCLIFixtureOwnsTemporaryDirectory(t *testing.T) {
 	if !cleansDirectory {
 		t.Fatal("TestMain must remove the shared CLI directory after the suite and preserve its exit code")
 	}
+}
+
+func submitCLIBuilderRecordsDirectory(fn *ast.FuncDecl) bool {
+	writes := 0
+	ordered := false
+	ast.Inspect(fn.Body, func(node ast.Node) bool {
+		if assign, ok := node.(*ast.AssignStmt); ok {
+			for _, expr := range assign.Lhs {
+				if ident, ok := expr.(*ast.Ident); ok && ident.Name == "submitCLIDir" {
+					writes++
+				}
+			}
+		}
+		call, ok := node.(*ast.CallExpr)
+		if !ok || len(call.Args) != 1 || !isSubmitCleanupSelector(call.Fun, "submitCLIOnce", "Do") {
+			return true
+		}
+		body, ok := call.Args[0].(*ast.FuncLit)
+		if !ok || len(body.Body.List) < 4 {
+			return true
+		}
+		want := []string{
+			`dir, err := os.MkdirTemp("", "sparkwing-submit-cli")`,
+			"if err != nil {\n\tsubmitCLIErr = err\n\treturn\n}",
+			"submitCLIDir = dir",
+			`bin := filepath.Join(dir, "sparkwing")`,
+		}
+		for i := range want {
+			if formatNode(body.Body.List[i]) != want[i] {
+				return true
+			}
+		}
+		ordered = true
+		return true
+	})
+	return writes == 1 && ordered
+}
+
+func isSubmitCleanupSelector(expr ast.Expr, receiver, method string) bool {
+	sel, ok := expr.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != method {
+		return false
+	}
+	recv, ok := sel.X.(*ast.Ident)
+	return ok && recv.Name == receiver
+}
+
+func formatNode(node ast.Node) string {
+	var buf bytes.Buffer
+	if err := format.Node(&buf, token.NewFileSet(), node); err != nil {
+		return ""
+	}
+	return buf.String()
 }
 
 func submitCLITestMainOwnsCleanup(fn *ast.FuncDecl) bool {
@@ -84,12 +128,7 @@ func isDirectCall(expr ast.Expr, receiver, method string, args []string) bool {
 	if !ok || len(call.Args) != len(args) {
 		return false
 	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok || sel.Sel.Name != method {
-		return false
-	}
-	recv, ok := sel.X.(*ast.Ident)
-	if !ok || recv.Name != receiver {
+	if !isSubmitCleanupSelector(call.Fun, receiver, method) {
 		return false
 	}
 	for i, name := range args {
