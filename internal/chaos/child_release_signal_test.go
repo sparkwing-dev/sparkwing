@@ -103,7 +103,7 @@ func TestCrashdummyHolderInstallsSignalsBeforeSpawningChildren(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var installAt, spawnAt token.Pos
+	var installAt, ensureAt, spawnAt token.Pos
 	ast.Inspect(file, func(node ast.Node) bool {
 		fn, ok := node.(*ast.FuncDecl)
 		if !ok || fn.Name.Name != "run" || fn.Recv == nil {
@@ -120,6 +120,9 @@ func TestCrashdummyHolderInstallsSignalsBeforeSpawningChildren(t *testing.T) {
 			}
 			receiver, receiverOK := sel.X.(*ast.Ident)
 			if !receiverOK || receiver.Name != "h" {
+				if receiverOK && receiver.Name == "client" && sel.Sel.Name == "EnsureDaemon" {
+					ensureAt = call.Pos()
+				}
 				return true
 			}
 			switch sel.Sel.Name {
@@ -132,7 +135,40 @@ func TestCrashdummyHolderInstallsSignalsBeforeSpawningChildren(t *testing.T) {
 		})
 		return false
 	})
-	if installAt == token.NoPos || spawnAt == token.NoPos || installAt >= spawnAt {
-		t.Fatal("holder must install signal handling before children can publish readiness")
+	if installAt == token.NoPos || ensureAt == token.NoPos || spawnAt == token.NoPos || installAt >= ensureAt || installAt >= spawnAt {
+		t.Fatal("holder must install signal handling before admission or child readiness can become visible")
+	}
+}
+
+func TestCrashdummyCleanExitReleasesSpawnedChildren(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "crashdummy/main.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releasesChildren := false
+	ast.Inspect(file, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "cleanExit" || fn.Recv == nil {
+			return true
+		}
+		ast.Inspect(fn.Body, func(child ast.Node) bool {
+			call, ok := child.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "terminateChildren" {
+				return true
+			}
+			receiver, ok := sel.X.(*ast.Ident)
+			if ok && receiver.Name == "h" {
+				releasesChildren = true
+			}
+			return true
+		})
+		return false
+	})
+	if !releasesChildren {
+		t.Fatal("holder clean exit must terminate its spawned children")
 	}
 }
