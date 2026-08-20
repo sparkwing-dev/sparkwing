@@ -15,9 +15,16 @@ import (
 
 var (
 	fixtureOnce sync.Once
+	fixtureDir  string
 	fixtureBin  string
 	fixtureErr  error
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	os.RemoveAll(fixtureDir)
+	os.Exit(code)
+}
 
 // buildFixture compiles the testprog helper once per test binary.
 func buildFixture(t *testing.T) string {
@@ -28,6 +35,7 @@ func buildFixture(t *testing.T) string {
 			fixtureErr = err
 			return
 		}
+		fixtureDir = dir
 		bin := filepath.Join(dir, "testprog")
 		cmd := exec.Command("go", "build", "-o", bin,
 			"github.com/sparkwing-dev/sparkwing/internal/wingd/testprog")
