@@ -21,6 +21,7 @@ const (
 	helperMode        = "SPARKWING_PROCGROUP_HELPER"
 	procgroupReadyEnv = "SPARKWING_PROCGROUP_READY"
 	procgroupReadyFD  = "SPARKWING_PROCGROUP_READY_FD"
+	procgroupTermSeen = "SPARKWING_PROCGROUP_TERM_SEEN"
 )
 
 func TestGroupHelperProcess(t *testing.T) {
@@ -61,12 +62,17 @@ func TestGroupHelperProcess(t *testing.T) {
 		holdHelperProcess("")
 	case "session-cooperative":
 		term := make(chan os.Signal, 1)
+		release := make(chan os.Signal, 1)
 		signal.Notify(term, syscall.SIGTERM)
+		signal.Notify(release, syscall.SIGUSR1)
 		if err := os.WriteFile(os.Getenv(procgroupReadyEnv), []byte("ready"), 0o600); err != nil {
 			os.Exit(2)
 		}
 		<-term
-		time.Sleep(500 * time.Millisecond)
+		if err := os.WriteFile(os.Getenv(procgroupTermSeen), []byte("term"), 0o600); err != nil {
+			os.Exit(2)
+		}
+		<-release
 		if err := os.WriteFile(os.Getenv("SPARKWING_PROCGROUP_MARKER"), []byte("clean"), 0o600); err != nil {
 			os.Exit(2)
 		}
@@ -246,8 +252,9 @@ func TestSessionEmptyRetainsAdmissionWhenReusedLeaderHasLiveSessionMembers(t *te
 func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "cleanup-complete")
 	ready := marker + ".ready"
+	termSeen := marker + ".term"
 	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-	cmd.Env = append(os.Environ(), helperMode+"=session-cooperative", "SPARKWING_PROCGROUP_MARKER="+marker, "SPARKWING_PROCGROUP_READY="+ready)
+	cmd.Env = append(os.Environ(), helperMode+"=session-cooperative", "SPARKWING_PROCGROUP_MARKER="+marker, procgroupReadyEnv+"="+ready, procgroupTermSeen+"="+termSeen)
 	group, err := StartSession(cmd)
 	if err != nil {
 		t.Fatal(err)
@@ -257,29 +264,52 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 	if err != nil {
 		t.Fatalf("capture cooperative session: %v", err)
 	}
-	deadlineAt := time.Now().Add(time.Second)
-	deadline := time.NewTimer(time.Until(deadlineAt))
-	defer deadline.Stop()
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	for {
-		if _, err := os.Stat(ready); err == nil {
-			break
-		} else if !os.IsNotExist(err) {
-			t.Fatalf("inspect cooperative readiness: %v", err)
+	waitForProcgroupReady(t, ready, time.Second)
+	terminated := make(chan error, 1)
+	terminateFinished := make(chan struct{})
+	released := false
+	go func() {
+		err := TerminateSession(identity)
+		close(terminateFinished)
+		terminated <- err
+	}()
+	t.Cleanup(func() {
+		if !released {
+			select {
+			case <-terminateFinished:
+				released = true
+			default:
+				if syscall.Kill(group.ID(), syscall.SIGUSR1) == nil {
+					released = true
+				}
+			}
 		}
-		if !time.Now().Before(deadlineAt) {
-			t.Fatal("cooperative session did not install its signal handler")
-		}
-		poll.Reset(10 * time.Millisecond)
 		select {
-		case <-poll.C:
-		case <-deadline.C:
-			t.Fatal("cooperative session did not install its signal handler")
+		case <-terminateFinished:
+		case <-time.After(2 * time.Second):
+			t.Error("timed out joining cooperative termination")
 		}
+	})
+	waitForProcgroupReady(t, termSeen, time.Second)
+	observation := time.NewTimer(100 * time.Millisecond)
+	defer observation.Stop()
+	select {
+	case err := <-terminated:
+		released = true
+		t.Fatalf("termination returned before cooperative cleanup was released: %v", err)
+	case <-observation.C:
 	}
-	if err := TerminateSession(identity); err != nil {
-		t.Fatalf("terminate cooperative session: %v", err)
+	if err := syscall.Kill(group.ID(), syscall.SIGUSR1); err != nil {
+		t.Fatalf("release cooperative cleanup: %v", err)
+	}
+	released = true
+	select {
+	case err := <-terminated:
+		if err != nil {
+			t.Fatalf("terminate cooperative session: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("cooperative termination did not finish after cleanup release")
 	}
 	if _, err := os.Stat(marker); err != nil {
 		t.Fatalf("cooperative cleanup did not finish before escalation: %v", err)
