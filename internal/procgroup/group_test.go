@@ -514,27 +514,30 @@ func TestGroupLifecycleStressLeavesEveryGroupReaped(t *testing.T) {
 
 func TestConcurrentFinishAndTerminateNeverLoseCompletedCleanup(t *testing.T) {
 	const count = 50
-	for range count {
-		g := startConcurrentCleanupHelper(t)
-		results := make(chan error, 2)
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			results <- g.Finish(ctx, 10*time.Millisecond)
-		}()
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-			defer cancel()
-			results <- g.Terminate(ctx, 10*time.Millisecond)
-		}()
-		for range 2 {
-			if err := <-results; errors.Is(err, ErrCleanup) {
-				t.Fatalf("completed concurrent cleanup reported failure: %v", err)
+	for iteration := range count {
+		t.Run(fmt.Sprintf("iteration-%d", iteration), func(t *testing.T) {
+			t.Parallel()
+			g := startConcurrentCleanupHelper(t)
+			results := make(chan error, 2)
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				results <- g.Finish(ctx, 10*time.Millisecond)
+			}()
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+				defer cancel()
+				results <- g.Terminate(ctx, 10*time.Millisecond)
+			}()
+			for range 2 {
+				if err := <-results; errors.Is(err, ErrCleanup) {
+					t.Fatalf("completed concurrent cleanup reported failure: %v", err)
+				}
 			}
-		}
-		if !g.Reaped() {
-			t.Fatalf("group %d was not reaped", g.ID())
-		}
+			if !g.Reaped() {
+				t.Fatalf("group %d was not reaped", g.ID())
+			}
+		})
 	}
 }
 

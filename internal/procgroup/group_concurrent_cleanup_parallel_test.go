@@ -75,7 +75,7 @@ func rangeRunsParallelSubtest(loop *ast.RangeStmt) bool {
 		return false
 	}
 	worker, ok := call.Args[1].(*ast.FuncLit)
-	if !ok || len(worker.Body.List) == 0 {
+	if !ok || len(worker.Body.List) < 2 {
 		return false
 	}
 	first, ok := worker.Body.List[0].(*ast.ExprStmt)
@@ -91,5 +91,19 @@ func rangeRunsParallelSubtest(loop *ast.RangeStmt) bool {
 		return false
 	}
 	parallelReceiver, receiverOK := parallelSel.X.(*ast.Ident)
-	return receiverOK && parallelReceiver.Name == "t" && parallelSel.Sel.Name == "Parallel"
+	if !receiverOK || parallelReceiver.Name != "t" || parallelSel.Sel.Name != "Parallel" {
+		return false
+	}
+	assign, ok := worker.Body.List[1].(*ast.AssignStmt)
+	if !ok || assign.Tok != token.DEFINE || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
+		return false
+	}
+	group, ok := assign.Lhs[0].(*ast.Ident)
+	starter, callOK := assign.Rhs[0].(*ast.CallExpr)
+	if !ok || !callOK || group.Name != "g" || len(starter.Args) != 1 {
+		return false
+	}
+	starterName, ok := starter.Fun.(*ast.Ident)
+	starterArg, argOK := starter.Args[0].(*ast.Ident)
+	return ok && argOK && starterName.Name == "startConcurrentCleanupHelper" && starterArg.Name == "t"
 }
