@@ -49,11 +49,21 @@ func runLocalTriggerLoop(ctx context.Context, st *store.Store, runID, profileNam
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
+	firstObservation := true
 	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
+		if firstObservation {
+			firstObservation = false
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
 		}
 
 		trig, err := claimChildTrigger(ctx, st, runID)

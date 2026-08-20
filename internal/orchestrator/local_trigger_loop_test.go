@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/retryprovenance"
@@ -76,6 +77,64 @@ func TestLocalImplicitAwaitRetainsParentProvenanceWithoutForcingRegistryLookup(t
 	}
 	if len(env) != 1 || env["CALLER_VALUE"] != "unchanged" {
 		t.Fatalf("caller trigger env mutated: %#v", env)
+	}
+}
+
+func TestRunLocalTriggerLoopClaimsPendingTriggerImmediately(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "parent", Pipeline: "parent", Status: "running",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	childID, err := (localState{st: st}).EnqueueTrigger(
+		ctx, "child", nil, "parent", "gate", "", "await-pipeline", "", "", "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		runLocalTriggerLoop(ctx, st, "parent", "", t.TempDir(), slog.New(slog.NewTextHandler(io.Discard, nil)), time.Second)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-finished:
+		case <-timer.C:
+			t.Error("local trigger loop did not stop")
+		}
+	})
+
+	deadline := time.NewTimer(400 * time.Millisecond)
+	defer deadline.Stop()
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		run, err := st.GetRun(ctx, childID)
+		if err == nil {
+			if run.Status != "failed" {
+				t.Fatalf("child status = %q, want failed dispatch", run.Status)
+			}
+			return
+		}
+		if !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("get child run: %v", err)
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatal("pending child was not claimed within 400ms")
+		}
 	}
 }
 
