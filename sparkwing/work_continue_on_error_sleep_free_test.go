@@ -65,8 +65,11 @@ func TestDefaultFailFastObservesSiblingCancellationDirectly(t *testing.T) {
 		if goStmt, ok := node.(*ast.GoStmt); ok {
 			ast.Inspect(goStmt.Call, func(child ast.Node) bool {
 				call, ok := child.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
 				fn, fnOK := call.Fun.(*ast.Ident)
-				if ok && fnOK && fn.Name == "RunWork" {
+				if fnOK && fn.Name == "RunWork" {
 					runWorkLaunched = true
 				}
 				return true

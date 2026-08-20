@@ -13,12 +13,22 @@ import (
 // in-flight siblings exit with ctx.Err. Default for steps with no
 // failure-handling flags.
 func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
-	runCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
+	runCtx, cancel := context.WithCancel(context.Background())
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		cancel()
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-finished:
+		case <-timer.C:
+			t.Error("RunWork did not stop after cancellation")
+		}
+	})
 	siblingEntered := make(chan struct{})
 	boom := errors.New("boom")
 	w := NewWork()
-	var siblingCompleted atomic.Bool
+	var siblingCancelled atomic.Bool
 	Step(w, "fast-fail", func(ctx context.Context) error {
 		select {
 		case <-siblingEntered:
@@ -29,23 +39,32 @@ func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
 	})
 	Step(w, "slow", func(ctx context.Context) error {
 		close(siblingEntered)
-		select {
-		case <-time.After(500 * time.Millisecond):
-			siblingCompleted.Store(true)
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		<-ctx.Done()
+		siblingCancelled.Store(true)
+		return ctx.Err()
 	})
-	_, err := RunWork(runCtx, w)
+	result := make(chan error, 1)
+	go func() {
+		_, err := RunWork(runCtx, w)
+		result <- err
+		close(finished)
+	}()
+	watchdog := time.NewTimer(time.Second)
+	defer watchdog.Stop()
+	var err error
+	select {
+	case err = <-result:
+	case <-watchdog.C:
+		t.Fatal("RunWork did not return after the fail-fast step failed")
+	}
 	if err == nil {
 		t.Fatal("RunWork should have errored")
 	}
 	if !errors.Is(err, boom) {
 		t.Fatalf("RunWork error = %v, want fast-fail error", err)
 	}
-	if siblingCompleted.Load() {
-		t.Error("slow sibling should have been cancelled; default is fail-fast")
+	if !siblingCancelled.Load() {
+		t.Error("slow sibling did not observe cancellation; default is fail-fast")
 	}
 }
 
