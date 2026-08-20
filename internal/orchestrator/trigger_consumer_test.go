@@ -206,6 +206,38 @@ func TestServeConsumer_OneConsumerPerHome(t *testing.T) {
 	})
 }
 
+func TestServeConsumerClaimsPendingWorkImmediately(t *testing.T) {
+	home := t.TempDir()
+	st := consumerTestStore(t, home)
+	seedSubmission(t, st, "run-ready", "missing-pipeline", "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	ready := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		_ = ServeConsumer(ctx, ConsumerOptions{
+			Home: home, Store: st, Logger: quietLogger(), IdleTimeout: -1, Ready: ready,
+		})
+	}()
+	t.Cleanup(func() {
+		cancel()
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-finished:
+		case <-timer.C:
+			t.Error("consumer did not stop")
+		}
+	})
+	<-ready
+
+	waitFor(t, "the startup consumer to claim pending work", 400*time.Millisecond, func() bool {
+		run, err := st.GetRun(context.Background(), "run-ready")
+		return err == nil && run.Status == "failed"
+	})
+}
+
 // TestConsumerRunning_FalseBeforeAnyConsumerHasRun pins that a home
 // nobody has ever consumed reads as idle rather than erroring, so
 // `runs submit` on a fresh machine spawns instead of failing.
