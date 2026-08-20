@@ -13,6 +13,7 @@ import (
 func TestGroupHelperIndefiniteHoldsDoNotUseTimeSleep(t *testing.T) {
 	modes := map[string]bool{
 		"descendant":       false,
+		"ignore-short":      false,
 		"session-stubborn": false,
 		"session-parked":   false,
 	}
