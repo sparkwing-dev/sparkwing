@@ -357,11 +357,21 @@ func consumeLocalTriggers(
 	lastMaintenance := time.Now()
 	maintenanceInterval := consumerMaintenanceIntervalForLease(rt.lease)
 
+	firstObservation := true
 	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
+		if firstObservation {
+			firstObservation = false
+			select {
+			case <-ctx.Done():
+				return nil
+			default:
+			}
+		} else {
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-ticker.C:
+			}
 		}
 
 		if rt.maintain && time.Since(lastMaintenance) >= maintenanceInterval {
