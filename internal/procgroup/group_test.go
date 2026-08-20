@@ -5,6 +5,7 @@ package procgroup
 import (
 	"context"
 	"errors"
+	"net"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -23,13 +24,7 @@ func TestGroupHelperProcess(t *testing.T) {
 	switch os.Getenv(helperMode) {
 	case "descendant":
 		IgnoreTermination()
-		if ready := os.Getenv(procgroupReadyEnv); ready != "" {
-			if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
-				os.Exit(2)
-			}
-		}
-		time.Sleep(30 * time.Second)
-		os.Exit(0)
+		holdHelperProcess(os.Getenv(procgroupReadyEnv))
 	case "leader":
 		child := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
 		child.Env = append(os.Environ(), helperMode+"=descendant")
@@ -62,12 +57,10 @@ func TestGroupHelperProcess(t *testing.T) {
 		if err := child.Start(); err != nil {
 			os.Exit(2)
 		}
-		time.Sleep(30 * time.Second)
-		os.Exit(0)
+		holdHelperProcess("")
 	case "session-parked":
 		IgnoreTermination()
-		time.Sleep(30 * time.Second)
-		os.Exit(0)
+		holdHelperProcess("")
 	case "session-cooperative":
 		term := make(chan os.Signal, 1)
 		signal.Notify(term, syscall.SIGTERM)
@@ -81,6 +74,23 @@ func TestGroupHelperProcess(t *testing.T) {
 		}
 		os.Exit(0)
 	}
+}
+
+func holdHelperProcess(ready string) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		os.Exit(2)
+	}
+	if ready != "" {
+		if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
+			_ = ln.Close()
+			os.Exit(2)
+		}
+	}
+	if _, err := ln.Accept(); err != nil {
+		os.Exit(2)
+	}
+	os.Exit(2)
 }
 
 func TestSessionIdentityBindsInspectionToLeaderBirth(t *testing.T) {
