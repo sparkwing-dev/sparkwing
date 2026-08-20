@@ -12,6 +12,7 @@ import (
 	"time"
 
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -492,32 +493,90 @@ func TestRun_DegradedRunScopeStillSerializes(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
 	registerHostTestPipelines()
 	home := wingdTestHome(t)
-	backends, _, _ := openWingdBackends(t, home)
+	backends, st, _ := openWingdBackends(t, home)
 
 	gate := newWingdGate()
 	hostTestGate.Store(gate)
 	t.Cleanup(func() { hostTestGate.Store(nil) })
-	// Hold each node briefly so an unserialized pair would overlap
-	// observably rather than racing past each other.
-	go func() {
-		time.Sleep(400 * time.Millisecond)
-		close(gate.release)
-	}()
 
-	var warnings strings.Builder
-	res, err := Run(context.Background(), backends, Options{
-		Pipeline:    "host-gated-run-nodes",
-		RunID:       "degraded-run-scope",
-		MaxParallel: 4,
-		Admission:   unhostedAdmission(home, &warnings),
-	})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(gate.release) }) }
+	type runResult struct {
+		result *Result
+		err    error
 	}
-	if res.Status != "success" {
-		t.Fatalf("degraded run-scope run = %q (%v), want success", res.Status, res.Error)
+	done := make(chan runResult, 1)
+	joined := false
+	var warnings strings.Builder
+	go func() {
+		res, err := Run(ctx, backends, Options{
+			Pipeline:    "host-gated-run-nodes",
+			RunID:       "degraded-run-scope",
+			MaxParallel: 4,
+			Admission:   unhostedAdmission(home, &warnings),
+		})
+		done <- runResult{result: res, err: err}
+	}()
+	t.Cleanup(func() {
+		release()
+		cancel()
+		if joined {
+			return
+		}
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("degraded run-scope run did not stop during cleanup")
+		}
+	})
+
+	gate.awaitStarted(t, "degraded-run-scope")
+	waitForRunScopePopulation(t, ctx, st, scopedGroupKey(runGroup, "degraded-run-scope"))
+	select {
+	case started := <-gate.started:
+		t.Fatalf("%q entered while the run-scoped holder was blocked", started)
+	default:
+	}
+	release()
+
+	var outcome runResult
+	select {
+	case outcome = <-done:
+		joined = true
+	case <-ctx.Done():
+		t.Fatal("degraded run-scope run did not finish after release")
+	}
+	cancel()
+	if outcome.err != nil {
+		t.Fatalf("Run: %v", outcome.err)
+	}
+	if outcome.result.Status != "success" {
+		t.Fatalf("degraded run-scope run = %q (%v), want success", outcome.result.Status, outcome.result.Error)
 	}
 	if peak := gate.peak.Load(); peak != 1 {
 		t.Fatalf("peak concurrency = %d, want 1 under a run-scoped capacity-1 group", peak)
+	}
+}
+
+func waitForRunScopePopulation(t *testing.T, ctx context.Context, st *store.Store, key string) {
+	t.Helper()
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		state, err := st.GetConcurrencyState(ctx, key)
+		switch {
+		case err == nil && len(state.Holders) == 1 && len(state.Waiters) == 1:
+			return
+		case err == nil:
+		case errors.Is(err, store.ErrNotFound):
+		default:
+			t.Fatalf("read degraded run-scope concurrency state: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatal("degraded run-scope population did not reach one holder and one waiter")
+		case <-poll.C:
+		}
 	}
 }
