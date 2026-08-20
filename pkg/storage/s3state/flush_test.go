@@ -23,6 +23,21 @@ type gatedArt struct {
 	releaseOnce sync.Once
 }
 
+type doneObservedContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func newDoneObservedContext(ctx context.Context) *doneObservedContext {
+	return &doneObservedContext{Context: ctx, observed: make(chan struct{})}
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
 func newGatedArt() *gatedArt {
 	return &gatedArt{
 		memArt:  newMemArt(),
@@ -119,9 +134,10 @@ func TestBackend_FinishRunPersistsAfterWaitingOutAnInFlightFlush(t *testing.T) {
 
 	var finishErr error
 	finishDone := make(chan struct{})
+	finishCtx := newDoneObservedContext(ctx)
 	go func() {
 		defer close(finishDone)
-		finishErr = b.FinishRun(ctx, "r", "succeeded", "")
+		finishErr = b.FinishRun(finishCtx, "r", "succeeded", "")
 	}()
 	t.Cleanup(func() {
 		art.releaseHeldPut()
@@ -134,12 +150,14 @@ func TestBackend_FinishRunPersistsAfterWaitingOutAnInFlightFlush(t *testing.T) {
 		}
 	})
 
-	blocked := time.NewTimer(50 * time.Millisecond)
-	defer blocked.Stop()
+	waiting := time.NewTimer(time.Second)
+	defer waiting.Stop()
 	select {
+	case <-finishCtx.observed:
 	case <-finishDone:
-		t.Fatalf("FinishRun returned while the earlier flush was held: %v", finishErr)
-	case <-blocked.C:
+		t.Fatalf("FinishRun returned before waiting for the earlier flush: %v", finishErr)
+	case <-waiting.C:
+		t.Fatal("FinishRun did not reach the in-flight flush wait")
 	}
 	art.releaseHeldPut()
 
