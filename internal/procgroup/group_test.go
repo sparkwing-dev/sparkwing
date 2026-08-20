@@ -475,15 +475,35 @@ func TestGroupLifecycleStressLeavesEveryGroupReaped(t *testing.T) {
 	const count = 50
 	groups := make([]*Group, 0, count)
 	for range count {
-		groups = append(groups, startHelper(t, "leader"))
+		group := startHelper(t, "leader")
+		groups = append(groups, group)
+		t.Cleanup(func() {
+			if !group.Reaped() {
+				terminateForTest(group)
+			}
+		})
 	}
+	type finishResult struct {
+		id  int
+		err error
+	}
+	results := make(chan finishResult, count)
 	for _, group := range groups {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		err := group.Finish(ctx, 50*time.Millisecond)
-		cancel()
-		if err != nil {
-			t.Fatalf("finish group %d: %v", group.ID(), err)
+		go func(group *Group) {
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			results <- finishResult{id: group.ID(), err: group.Finish(ctx, 50*time.Millisecond)}
+		}(group)
+	}
+	var firstFailure *finishResult
+	for range count {
+		result := <-results
+		if result.err != nil && firstFailure == nil {
+			firstFailure = &result
 		}
+	}
+	if firstFailure != nil {
+		t.Fatalf("finish group %d: %v", firstFailure.id, firstFailure.err)
 	}
 	for _, group := range groups {
 		if !group.Reaped() {
