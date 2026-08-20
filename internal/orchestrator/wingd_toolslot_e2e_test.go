@@ -166,20 +166,23 @@ type toolSlotQueuedEvent struct {
 func awaitToolSlotQueued(t *testing.T, st *store.Store, runID, nodeID string) toolSlotQueuedEvent {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		events, err := st.ListEventsAfter(context.Background(), runID, 0, 500)
-		if err == nil {
-			for _, ev := range events {
-				if ev.Kind != "concurrency_wait" || ev.NodeID != nodeID {
-					continue
-				}
-				var q toolSlotQueuedEvent
-				if json.Unmarshal(ev.Payload, &q) == nil && q.Scope == "tool" {
-					return q
-				}
+		if err != nil {
+			t.Fatalf("list events for run %q: %v", runID, err)
+		}
+		for _, ev := range events {
+			if ev.Kind != "concurrency_wait" || ev.NodeID != nodeID {
+				continue
+			}
+			var q toolSlotQueuedEvent
+			if json.Unmarshal(ev.Payload, &q) == nil && q.Scope == "tool" {
+				return q
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-poll.C
 	}
 	t.Fatalf("run %q node %q never recorded a tool-slot queue position", runID, nodeID)
 	return toolSlotQueuedEvent{}
@@ -192,11 +195,13 @@ func awaitQueuedToolSlotWaiter(t *testing.T, home, runID, nodeID string) wingwir
 	t.Helper()
 	participant := nodeSemaphoreRunID(runID, nodeID)
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		if w, ok := findQueuedWaiter(queryWingd(t, home), participant); ok {
 			return w
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-poll.C
 	}
 	t.Fatalf("tool slot for run %q never appeared as a queued waiter", runID)
 	return wingwire.Waiter{}
