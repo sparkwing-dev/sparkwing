@@ -11,10 +11,11 @@ import (
 )
 
 type supervisorTestChild struct {
-	mu    sync.Mutex
-	done  chan error
-	terms int
-	kills int
+	mu      sync.Mutex
+	done    chan error
+	terms   int
+	kills   int
+	termErr error
 }
 
 type nonExitingSupervisorChild struct {
@@ -43,7 +44,7 @@ func (c *supervisorTestChild) Terminate() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.terms++
-	return nil
+	return c.termErr
 }
 
 func (c *supervisorTestChild) Kill() error {
@@ -202,5 +203,18 @@ func TestStopChildAcceptsExitDuringPostKillWait(t *testing.T) {
 		}
 	case <-completionTimer.C:
 		t.Fatal("stopChild did not accept child exit during post-kill grace")
+	}
+}
+
+func TestStopChildEscalatesWhenTerminateReturnsError(t *testing.T) {
+	child := newSupervisorTestChild()
+	child.termErr = errors.New("signal refused")
+
+	if err := stopChild(child, 20*time.Millisecond); err != nil {
+		t.Fatalf("forced cleanup after terminate error: %v", err)
+	}
+	terms, kills := child.actions()
+	if terms != 1 || kills != 1 {
+		t.Fatalf("cleanup actions after terminate error = term:%d kill:%d, want one each", terms, kills)
 	}
 }
