@@ -122,9 +122,12 @@ func (noProgressRetryPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spa
 
 type noProgressLateActionPipe struct{ sparkwing.Base }
 
+var noProgressLateActionStarted = make(chan context.Context, 1)
+
 func (noProgressLateActionPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "late-action", func(ctx context.Context) error {
-		time.Sleep(120 * time.Millisecond)
+		noProgressLateActionStarted <- ctx
+		<-ctx.Done()
 		return nil
 	}).NoProgressTimeout(50 * time.Millisecond)
 	return nil
@@ -132,10 +135,13 @@ func (noProgressLateActionPipe) Plan(ctx context.Context, plan *sparkwing.Plan, 
 
 type noProgressLateVerifyPipe struct{ sparkwing.Base }
 
+var noProgressLateVerifyStarted = make(chan context.Context, 1)
+
 func (noProgressLateVerifyPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "late-verify", func(ctx context.Context) error { return nil }).
 		Verify(func(ctx context.Context) error {
-			time.Sleep(120 * time.Millisecond)
+			noProgressLateVerifyStarted <- ctx
+			<-ctx.Done()
 			return nil
 		}).
 		NoProgressTimeout(50 * time.Millisecond)
@@ -384,11 +390,11 @@ func TestNoProgressTimeout_RetryStartsWithAFreshWindow(t *testing.T) {
 }
 
 func TestNoProgressTimeout_RejectsLateActionSuccess(t *testing.T) {
-	assertTimeoutReason(t, "mod-no-progress-late-action", store.FailureNoProgressTimeout)
+	assertForcedNoProgressTimeout(t, "mod-no-progress-late-action", noProgressLateActionStarted)
 }
 
 func TestNoProgressTimeout_RejectsLateVerifierSuccess(t *testing.T) {
-	assertTimeoutReason(t, "mod-no-progress-late-verify", store.FailureNoProgressTimeout)
+	assertForcedNoProgressTimeout(t, "mod-no-progress-late-verify", noProgressLateVerifyStarted)
 }
 
 func TestTimeout_RejectsLateActionSuccess(t *testing.T) {
@@ -416,6 +422,69 @@ func assertTimeoutReason(t *testing.T, pipeline, wantReason string) {
 	}
 	if len(nodes) != 1 || nodes[0].FailureReason != wantReason {
 		t.Fatalf("failure reason = %+v, want %q", nodes, wantReason)
+	}
+}
+
+func assertForcedNoProgressTimeout(t *testing.T, pipeline string, started <-chan context.Context) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	t.Cleanup(cancel)
+	type runResult struct {
+		result *orchestrator.Result
+		err    error
+	}
+	resultCh := make(chan runResult, 1)
+	finished := make(chan struct{})
+	p := newPaths(t)
+	go func() {
+		defer close(finished)
+		result, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: pipeline})
+		resultCh <- runResult{result: result, err: err}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		joinTimer := time.NewTimer(time.Second)
+		defer joinTimer.Stop()
+		select {
+		case <-finished:
+		case <-joinTimer.C:
+			t.Errorf("%s did not stop after cancellation", pipeline)
+		}
+	})
+
+	var attemptCtx context.Context
+	select {
+	case attemptCtx = <-started:
+	case <-ctx.Done():
+		t.Fatalf("%s did not start its late-success callback: %v", pipeline, ctx.Err())
+	}
+	if !orchestrator.ExpireProgressTimeoutForTest(attemptCtx) {
+		t.Fatalf("%s callback has no active progress timeout", pipeline)
+	}
+
+	var run runResult
+	select {
+	case run = <-resultCh:
+	case <-ctx.Done():
+		t.Fatalf("%s did not finish after forced timeout: %v", pipeline, ctx.Err())
+	}
+	if run.err != nil {
+		t.Fatalf("Run: %v", run.err)
+	}
+	if run.result == nil || run.result.Status != "failed" {
+		t.Fatalf("result = %+v, want failed", run.result)
+	}
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	nodes, err := st.ListNodes(context.Background(), run.result.RunID)
+	if err != nil {
+		t.Fatalf("list nodes: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].FailureReason != store.FailureNoProgressTimeout {
+		t.Fatalf("failure reason = %+v, want %q", nodes, store.FailureNoProgressTimeout)
 	}
 }
 
