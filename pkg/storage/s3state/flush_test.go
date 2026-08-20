@@ -23,6 +23,21 @@ type gatedArt struct {
 	releaseOnce sync.Once
 }
 
+type doneObservedContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func newDoneObservedContext(ctx context.Context) *doneObservedContext {
+	return &doneObservedContext{Context: ctx, observed: make(chan struct{})}
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
 func newGatedArt() *gatedArt {
 	return &gatedArt{
 		memArt:  newMemArt(),
@@ -117,15 +132,44 @@ func TestBackend_FinishRunPersistsAfterWaitingOutAnInFlightFlush(t *testing.T) {
 	}
 	<-art.entered
 
-	// hack: a sleep stands in for object-store latency. FinishRun reaches its
-	// flush within microseconds of the append, so the claim is still held.
+	var finishErr error
+	finishDone := make(chan struct{})
+	finishCtx := newDoneObservedContext(ctx)
 	go func() {
-		time.Sleep(100 * time.Millisecond)
-		art.releaseHeldPut()
+		defer close(finishDone)
+		finishErr = b.FinishRun(finishCtx, "r", "succeeded", "")
 	}()
+	t.Cleanup(func() {
+		art.releaseHeldPut()
+		join := time.NewTimer(time.Second)
+		defer join.Stop()
+		select {
+		case <-finishDone:
+		case <-join.C:
+			t.Error("FinishRun did not stop during cleanup")
+		}
+	})
 
-	if err := b.FinishRun(ctx, "r", "succeeded", ""); err != nil {
-		t.Fatalf("FinishRun: %v", err)
+	waiting := time.NewTimer(time.Second)
+	defer waiting.Stop()
+	select {
+	case <-finishCtx.observed:
+	case <-finishDone:
+		t.Fatalf("FinishRun returned before waiting for the earlier flush: %v", finishErr)
+	case <-waiting.C:
+		t.Fatal("FinishRun did not reach the in-flight flush wait")
+	}
+	art.releaseHeldPut()
+
+	finished := time.NewTimer(time.Second)
+	defer finished.Stop()
+	select {
+	case <-finishDone:
+	case <-finished.C:
+		t.Fatal("FinishRun did not persist after the earlier flush landed")
+	}
+	if finishErr != nil {
+		t.Fatalf("FinishRun: %v", finishErr)
 	}
 
 	reader := s3state.New(art)
