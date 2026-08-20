@@ -215,6 +215,8 @@ func waitForDaemonLineCount(t *testing.T, home string, want int, timeout time.Du
 // once, each of which will spawn a daemon if none is running; the flock
 // election must leave exactly one daemon serving all of them.
 func TestProcess_ElectionRaceSingleDaemon(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("process test skipped in -short")
 	}
@@ -244,6 +246,8 @@ func TestProcess_ElectionRaceSingleDaemon(t *testing.T) {
 // asserts the queued waiter is promoted -- the kernel closing the socket
 // is the only liveness signal.
 func TestProcess_ClientKillReleasesAndPromotes(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("process test skipped in -short")
 	}
