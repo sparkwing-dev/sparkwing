@@ -90,8 +90,27 @@ func startReadyDescendant(inheritStdout bool) bool {
 		return false
 	}
 	_ = writer.Close()
-	line, err := bufio.NewReader(reader).ReadString('\n')
-	return err == nil && line == "ready\n"
+	type readyResult struct {
+		line string
+		err  error
+	}
+	ready := make(chan readyResult, 1)
+	go func() {
+		line, err := bufio.NewReader(reader).ReadString('\n')
+		ready <- readyResult{line: line, err: err}
+	}()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case result := <-ready:
+		if result.err == nil && result.line == "ready\n" {
+			return true
+		}
+	case <-timer.C:
+	}
+	_ = child.Process.Kill()
+	_ = child.Wait()
+	return false
 }
 
 func waitForZombie(pid int) bool {
