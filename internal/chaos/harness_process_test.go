@@ -21,12 +21,19 @@ import (
 )
 
 const actorHelperMode = "SPARKWING_CHAOS_ACTOR_HELPER"
+const actorHelperReadyFD = "SPARKWING_CHAOS_ACTOR_READY_FD"
 
 func TestWatchActorHelperProcess(t *testing.T) {
 	switch os.Getenv(actorHelperMode) {
 	case "descendant":
 		ignoreProcessGroupTermination()
-		_, _ = fmt.Fprintln(os.Stdout, "ready")
+		fd, err := strconv.Atoi(os.Getenv(actorHelperReadyFD))
+		if err != nil {
+			os.Exit(2)
+		}
+		ready := os.NewFile(uintptr(fd), "actor-helper-ready")
+		_, _ = fmt.Fprintln(ready, "ready")
+		_ = ready.Close()
 		blockActorHelper()
 		os.Exit(0)
 	case "actor":
@@ -35,14 +42,14 @@ func TestWatchActorHelperProcess(t *testing.T) {
 			children = 1
 		}
 		for range children {
-			if !startReadyDescendant() {
+			if !startReadyDescendant(true) {
 				os.Exit(2)
 			}
 		}
 		fmt.Println("OK sentinel-immediately-before-exit")
 		os.Exit(0)
 	case "daemon":
-		if !startReadyDescendant() {
+		if !startReadyDescendant(false) {
 			os.Exit(2)
 		}
 		os.Exit(0)
@@ -66,17 +73,24 @@ func TestWatchActorHelperProcess(t *testing.T) {
 	}
 }
 
-func startReadyDescendant() bool {
-	child := exec.Command(os.Args[0], "-test.run=^TestWatchActorHelperProcess$")
-	child.Env = append(os.Environ(), actorHelperMode+"=descendant")
-	stdout, err := child.StdoutPipe()
+func startReadyDescendant(inheritStdout bool) bool {
+	reader, writer, err := os.Pipe()
 	if err != nil {
 		return false
 	}
+	defer reader.Close()
+	child := exec.Command(os.Args[0], "-test.run=^TestWatchActorHelperProcess$")
+	child.Env = append(os.Environ(), actorHelperMode+"=descendant", actorHelperReadyFD+"=3")
+	child.ExtraFiles = []*os.File{writer}
+	if inheritStdout {
+		child.Stdout = os.Stdout
+	}
 	if err := child.Start(); err != nil {
+		_ = writer.Close()
 		return false
 	}
-	line, err := bufio.NewReader(stdout).ReadString('\n')
+	_ = writer.Close()
+	line, err := bufio.NewReader(reader).ReadString('\n')
 	return err == nil && line == "ready\n"
 }
 
