@@ -150,11 +150,14 @@ func (noProgressLateVerifyPipe) Plan(ctx context.Context, plan *sparkwing.Plan, 
 
 type absoluteLateActionPipe struct{ sparkwing.Base }
 
+var absoluteLateActionStarted = make(chan context.Context, 1)
+
 func (absoluteLateActionPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "late-action", func(ctx context.Context) error {
-		time.Sleep(120 * time.Millisecond)
+		absoluteLateActionStarted <- ctx
+		<-ctx.Done()
 		return nil
-	}).Timeout(50 * time.Millisecond)
+	}).Timeout(time.Hour)
 	return nil
 }
 
@@ -398,7 +401,7 @@ func TestNoProgressTimeout_RejectsLateVerifierSuccess(t *testing.T) {
 }
 
 func TestTimeout_RejectsLateActionSuccess(t *testing.T) {
-	assertTimeoutReason(t, "mod-absolute-late-action", store.FailureTimeout)
+	assertForcedAbsoluteTimeout(t, "mod-absolute-late-action", absoluteLateActionStarted)
 }
 
 func assertTimeoutReason(t *testing.T, pipeline, wantReason string) {
@@ -426,6 +429,16 @@ func assertTimeoutReason(t *testing.T, pipeline, wantReason string) {
 }
 
 func assertForcedNoProgressTimeout(t *testing.T, pipeline string, started <-chan context.Context) {
+	t.Helper()
+	assertForcedTimeout(t, pipeline, started, orchestrator.ForceProgressTimeoutForTest, store.FailureNoProgressTimeout)
+}
+
+func assertForcedAbsoluteTimeout(t *testing.T, pipeline string, started <-chan context.Context) {
+	t.Helper()
+	assertForcedTimeout(t, pipeline, started, orchestrator.ForceNodeTimeoutForTest, store.FailureTimeout)
+}
+
+func assertForcedTimeout(t *testing.T, pipeline string, started <-chan context.Context, force func(context.Context) bool, wantReason string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	t.Cleanup(cancel)
@@ -458,8 +471,8 @@ func assertForcedNoProgressTimeout(t *testing.T, pipeline string, started <-chan
 	case <-ctx.Done():
 		t.Fatalf("%s did not start its late-success callback: %v", pipeline, ctx.Err())
 	}
-	if !orchestrator.ForceProgressTimeoutForTest(attemptCtx) {
-		t.Fatalf("%s callback progress timeout was not active", pipeline)
+	if !force(attemptCtx) {
+		t.Fatalf("%s callback timeout was not active", pipeline)
 	}
 
 	var run runResult
@@ -483,8 +496,8 @@ func assertForcedNoProgressTimeout(t *testing.T, pipeline string, started <-chan
 	if err != nil {
 		t.Fatalf("list nodes: %v", err)
 	}
-	if len(nodes) != 1 || nodes[0].FailureReason != store.FailureNoProgressTimeout {
-		t.Fatalf("failure reason = %+v, want %q", nodes, store.FailureNoProgressTimeout)
+	if len(nodes) != 1 || nodes[0].FailureReason != wantReason {
+		t.Fatalf("failure reason = %+v, want %q", nodes, wantReason)
 	}
 }
 
