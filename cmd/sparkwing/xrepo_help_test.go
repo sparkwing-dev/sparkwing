@@ -26,6 +26,7 @@ func TestXrepoSubcommandsAreRegistered(t *testing.T) {
 }
 
 func TestXrepoRuntimeHelpUsesCommandRegistry(t *testing.T) {
+	t.Parallel()
 	bin := buildSubmitCLI(t)
 
 	parent, err := exec.Command(bin, "configure", "xrepo", "--help").CombinedOutput()
