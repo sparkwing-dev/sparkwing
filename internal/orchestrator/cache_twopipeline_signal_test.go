@@ -15,7 +15,7 @@ func TestSharedS3SerializationUsesStateSignalsInsteadOfDuration(t *testing.T) {
 		"TestCache_TwoPipelinesShareKey_AcrossMultipleBursts": false,
 	}
 	usesBurst := map[string]bool{}
-	usesPopulation := false
+	exactPopulationSequence := false
 	signals := map[string]map[string]bool{}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_twopipeline_test.go", nil, 0)
@@ -40,9 +40,6 @@ func TestSharedS3SerializationUsesStateSignalsInsteadOfDuration(t *testing.T) {
 			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "runSharedS3Burst" {
 				usesBurst[fn.Name.Name] = true
 			}
-			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "waitForCacheConcurrencyPopulation" && fn.Name.Name == "runSharedS3Burst" {
-				usesPopulation = true
-			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
 			if !ok {
 				return true
@@ -53,6 +50,19 @@ func TestSharedS3SerializationUsesStateSignalsInsteadOfDuration(t *testing.T) {
 			}
 			return true
 		})
+		if fn.Name.Name == "runSharedS3Burst" {
+			for _, stmt := range fn.Body.List {
+				loop, ok := stmt.(*ast.ForStmt)
+				if !ok || len(loop.Body.List) != 6 {
+					continue
+				}
+				exactPopulationSequence = selectReceives(loop.Body.List[0], "entered") &&
+					exactPopulationCall(loop.Body.List[1]) &&
+					selectReceives(loop.Body.List[2], "entered") &&
+					selectSends(loop.Body.List[4], "release") &&
+					selectReceives(loop.Body.List[5], "finished")
+			}
+		}
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
 			sel, ok := node.(*ast.SelectorExpr)
 			if ok && (sel.Sel.Name == "entered" || sel.Sel.Name == "release" || sel.Sel.Name == "finished") {
@@ -74,8 +84,8 @@ func TestSharedS3SerializationUsesStateSignalsInsteadOfDuration(t *testing.T) {
 			t.Errorf("%s does not delegate to runSharedS3Burst", name)
 		}
 	}
-	if !usesPopulation {
-		t.Error("runSharedS3Burst does not observe the authoritative concurrency population")
+	if !exactPopulationSequence {
+		t.Error("runSharedS3Burst must order entry, exact persisted population, false-start check, release, and finish directly in its admission loop")
 	}
 	for _, name := range []string{"s3Push", "runSharedS3Burst"} {
 		for _, signal := range []string{"entered", "release", "finished"} {
@@ -84,4 +94,92 @@ func TestSharedS3SerializationUsesStateSignalsInsteadOfDuration(t *testing.T) {
 			}
 		}
 	}
+}
+
+func selectReceives(stmt ast.Stmt, channel string) bool {
+	selectStmt, ok := stmt.(*ast.SelectStmt)
+	if !ok {
+		return false
+	}
+	found := false
+	ast.Inspect(selectStmt, func(node ast.Node) bool {
+		receive, ok := node.(*ast.UnaryExpr)
+		if !ok || receive.Op != token.ARROW {
+			return true
+		}
+		sel, ok := receive.X.(*ast.SelectorExpr)
+		found = found || ok && sel.Sel.Name == channel
+		return true
+	})
+	return found
+}
+
+func selectSends(stmt ast.Stmt, channel string) bool {
+	selectStmt, ok := stmt.(*ast.SelectStmt)
+	if !ok {
+		return false
+	}
+	found := false
+	ast.Inspect(selectStmt, func(node ast.Node) bool {
+		send, ok := node.(*ast.SendStmt)
+		if !ok {
+			return true
+		}
+		sel, ok := send.Chan.(*ast.SelectorExpr)
+		found = found || ok && sel.Sel.Name == channel
+		return true
+	})
+	return found
+}
+
+func exactPopulationCall(stmt ast.Stmt) bool {
+	expr, ok := stmt.(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	call, ok := expr.X.(*ast.CallExpr)
+	if !ok || len(call.Args) != 6 {
+		return false
+	}
+	fun, ok := call.Fun.(*ast.Ident)
+	if !ok || fun.Name != "waitForCacheConcurrencyPopulation" || !isIdent(call.Args[0], "t") || !isIdent(call.Args[1], "ctx") {
+		return false
+	}
+	stateDB, ok := call.Args[2].(*ast.CallExpr)
+	if !ok || len(stateDB.Args) != 0 {
+		return false
+	}
+	stateSel, ok := stateDB.Fun.(*ast.SelectorExpr)
+	if !ok || stateSel.Sel.Name != "StateDB" || !isIdent(stateSel.X, "p") {
+		return false
+	}
+	key, ok := call.Args[3].(*ast.BasicLit)
+	if !ok || key.Kind != token.STRING || key.Value != `"g:shared-s3-bucket"` {
+		return false
+	}
+	holders, ok := call.Args[4].(*ast.BasicLit)
+	return ok && holders.Kind == token.INT && holders.Value == "1" && isRemainingWaiters(call.Args[5])
+}
+
+func isRemainingWaiters(expr ast.Expr) bool {
+	outer, ok := expr.(*ast.BinaryExpr)
+	if !ok || outer.Op != token.SUB || !isIntLiteral(outer.Y, "1") {
+		return false
+	}
+	inner, ok := outer.X.(*ast.BinaryExpr)
+	if !ok || inner.Op != token.SUB || !isIdent(inner.Y, "admitted") {
+		return false
+	}
+	length, ok := inner.X.(*ast.CallExpr)
+	return ok && len(length.Args) == 1 && isIdent(length.Fun, "len") && isIdent(length.Args[0], "names")
+}
+
+func isIdent(expr ast.Expr, name string) bool {
+	ident, ok := expr.(*ast.Ident)
+	return ok && ident.Name == name
+}
+
+func isIntLiteral(expr ast.Expr, value string) bool {
+	lit, ok := expr.(*ast.BasicLit)
+	return ok && lit.Kind == token.INT && lit.Value == value
 }
