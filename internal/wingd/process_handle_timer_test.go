@@ -13,8 +13,11 @@ func TestProcessHandleWaitsOwnTimers(t *testing.T) {
 		"waitLine":       false,
 		"mustStayQueued": false,
 	}
-	constructs := map[string]bool{}
+	constructs := map[string]int{}
+	allTimers := map[string]int{}
 	stops := map[string]bool{}
+	receives := map[string]bool{}
+	mustStayQueuedLoops := false
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "process_test.go", nil, 0)
 	if err != nil {
@@ -30,6 +33,29 @@ func TestProcessHandleWaitsOwnTimers(t *testing.T) {
 		}
 		targets[fn.Name.Name] = true
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if fn.Name.Name == "mustStayQueued" {
+				if _, ok := node.(*ast.ForStmt); ok {
+					mustStayQueuedLoops = true
+				}
+			}
+			if receive, ok := node.(*ast.UnaryExpr); ok && receive.Op == token.ARROW {
+				if channel, ok := receive.X.(*ast.SelectorExpr); ok && channel.Sel.Name == "C" {
+					if timer, ok := channel.X.(*ast.Ident); ok && timer.Name == "timer" {
+						receives[fn.Name.Name] = true
+					}
+				}
+			}
+			if assign, ok := node.(*ast.AssignStmt); ok && len(assign.Lhs) == 1 && len(assign.Rhs) == 1 {
+				name, nameOK := assign.Lhs[0].(*ast.Ident)
+				call, callOK := assign.Rhs[0].(*ast.CallExpr)
+				if nameOK && name.Name == "timer" && callOK {
+					if sel, ok := call.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "NewTimer" {
+						if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "time" {
+							constructs[fn.Name.Name]++
+						}
+					}
+				}
+			}
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
@@ -40,7 +66,9 @@ func TestProcessHandleWaitsOwnTimers(t *testing.T) {
 					case "After":
 						t.Errorf("%s contains time.After at %s", fn.Name.Name, fset.Position(call.Pos()))
 					case "NewTimer":
-						constructs[fn.Name.Name] = true
+						allTimers[fn.Name.Name]++
+					case "NewTicker":
+						t.Errorf("%s contains unexpected time.NewTicker at %s", fn.Name.Name, fset.Position(call.Pos()))
 					}
 				}
 				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "timer" && sel.Sel.Name == "Stop" {
@@ -54,8 +82,11 @@ func TestProcessHandleWaitsOwnTimers(t *testing.T) {
 		if !found {
 			t.Errorf("process_test.go does not declare procHandle.%s", name)
 		}
-		if !constructs[name] || !stops[name] {
-			t.Errorf("procHandle.%s does not own and stop its timer", name)
+		if constructs[name] != 1 || allTimers[name] != 1 || !receives[name] || !stops[name] {
+			t.Errorf("procHandle.%s does not construct, receive, and stop one owned timer", name)
 		}
+	}
+	if !mustStayQueuedLoops {
+		t.Error("procHandle.mustStayQueued does not observe output until its timer expires")
 	}
 }
