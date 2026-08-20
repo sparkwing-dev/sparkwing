@@ -31,11 +31,7 @@ func TestNoProgressLateSuccessRegressionsDoNotUseTimeSleep(t *testing.T) {
 		if fn.Name.Name == "assertForcedNoProgressTimeout" {
 			foundAssertion = true
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				call, ok := node.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
+				sel, ok := node.(*ast.SelectorExpr)
 				if ok && sel.Sel.Name == "ForceProgressTimeoutForTest" {
 					usesAtomicForce = true
 				}
@@ -45,11 +41,7 @@ func TestNoProgressLateSuccessRegressionsDoNotUseTimeSleep(t *testing.T) {
 		if fn.Name.Name == "assertForcedAbsoluteTimeout" {
 			foundAbsoluteAssertion = true
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				call, ok := node.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
+				sel, ok := node.(*ast.SelectorExpr)
 				if ok && sel.Sel.Name == "ForceNodeTimeoutForTest" {
 					usesAtomicAbsoluteForce = true
 				}
