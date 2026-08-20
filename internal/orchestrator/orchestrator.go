@@ -2615,6 +2615,8 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	deadline := time.NewTimer(time.Until(pause.ExpiresAt))
+	defer deadline.Stop()
 	for {
 		p, err := s.backends.State.GetActiveDebugPause(s.ctx, s.runID, nodeID)
 		if err != nil {
@@ -2634,6 +2636,7 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 		case <-s.resolverCtx.Done():
 			return true
 		case <-ticker.C:
+		case <-deadline.C:
 		}
 	}
 	// safety: "pending" is safe here; StartNode promotes it and FinishNode overwrites it.
