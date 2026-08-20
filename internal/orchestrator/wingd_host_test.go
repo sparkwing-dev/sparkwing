@@ -430,48 +430,73 @@ func TestRun_DegradedConcurrencyGroupsStillSerialize(t *testing.T) {
 			t.Setenv(AllowUnadmittedEnv, "")
 			registerHostTestPipelines()
 			home := wingdTestHome(t)
-			backends, _, _ := openWingdBackends(t, home)
+			backends, st, _ := openWingdBackends(t, home)
 
 			gate := newWingdGate()
 			hostTestGate.Store(gate)
 			t.Cleanup(func() { hostTestGate.Store(nil) })
 
-			var warnings strings.Builder
-			results := make(chan *Result, 2)
-			for i, runID := range []string{"degraded-a", "degraded-b"} {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(gate.release) }) }
+			type runResult struct {
+				result *Result
+				err    error
+			}
+			results := make(chan runResult, 2)
+			launched, joined := 0, 0
+			t.Cleanup(func() {
+				release()
+				cancel()
+				timer := time.NewTimer(time.Second)
+				defer timer.Stop()
+				for joined < launched {
+					select {
+					case <-results:
+						joined++
+					case <-timer.C:
+						t.Error("degraded box-scope runs did not stop during cleanup")
+						return
+					}
+				}
+			})
+
+			var warnings syncBuffer
+			launch := func(runID string) {
+				launched++
 				go func(runID string) {
-					res, err := Run(context.Background(), backends, Options{
+					res, err := Run(ctx, backends, Options{
 						Pipeline:  tc.pipeline,
 						RunID:     runID,
 						Admission: unhostedAdmission(home, &warnings),
 					})
-					if err != nil {
-						t.Errorf("run %s: %v", runID, err)
-					}
-					results <- res
+					results <- runResult{result: res, err: err}
 				}(runID)
-				if i == 0 {
-					// safety: let the first run take the slot before the
-					// second asks, so a failure means the group did not hold
-					// rather than that the race went the other way.
-					gate.awaitStarted(t, "degraded-a")
-				}
 			}
+			launch("degraded-a")
+			gate.awaitStarted(t, "degraded-a")
+			launch("degraded-b")
+			waitForDegradedConcurrencyPopulation(t, ctx, st, scopedGroupKey(boxGroup, ""))
+
 			// The second must not start while the first holds the slot.
 			select {
 			case started := <-gate.started:
 				t.Fatalf("%q started while %q held a capacity-1 box group", started, "degraded-a")
-			case <-time.After(750 * time.Millisecond):
+			default:
 			}
-			close(gate.release)
+			release()
 
 			for range 2 {
 				select {
-				case res := <-results:
-					if res.Status != "success" {
-						t.Fatalf("degraded run %s = %q (%v)", res.RunID, res.Status, res.Error)
+				case outcome := <-results:
+					joined++
+					if outcome.err != nil {
+						t.Fatalf("degraded run failed: %v", outcome.err)
 					}
-				case <-time.After(wingdTestWait):
+					if outcome.result.Status != "success" {
+						t.Fatalf("degraded run %s = %q (%v)", outcome.result.RunID, outcome.result.Status, outcome.result.Error)
+					}
+				case <-ctx.Done():
 					t.Fatal("degraded runs did not finish")
 				}
 			}
@@ -532,7 +557,7 @@ func TestRun_DegradedRunScopeStillSerializes(t *testing.T) {
 	})
 
 	gate.awaitStarted(t, "degraded-run-scope")
-	waitForRunScopePopulation(t, ctx, st, scopedGroupKey(runGroup, "degraded-run-scope"))
+	waitForDegradedConcurrencyPopulation(t, ctx, st, scopedGroupKey(runGroup, "degraded-run-scope"))
 	select {
 	case started := <-gate.started:
 		t.Fatalf("%q entered while the run-scoped holder was blocked", started)
@@ -559,7 +584,7 @@ func TestRun_DegradedRunScopeStillSerializes(t *testing.T) {
 	}
 }
 
-func waitForRunScopePopulation(t *testing.T, ctx context.Context, st *store.Store, key string) {
+func waitForDegradedConcurrencyPopulation(t *testing.T, ctx context.Context, st *store.Store, key string) {
 	t.Helper()
 	poll := time.NewTicker(5 * time.Millisecond)
 	defer poll.Stop()
@@ -571,11 +596,11 @@ func waitForRunScopePopulation(t *testing.T, ctx context.Context, st *store.Stor
 		case err == nil:
 		case errors.Is(err, store.ErrNotFound):
 		default:
-			t.Fatalf("read degraded run-scope concurrency state: %v", err)
+			t.Fatalf("read degraded concurrency state: %v", err)
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatal("degraded run-scope population did not reach one holder and one waiter")
+			t.Fatal("degraded concurrency population did not reach one holder and one waiter")
 		case <-poll.C:
 		}
 	}
