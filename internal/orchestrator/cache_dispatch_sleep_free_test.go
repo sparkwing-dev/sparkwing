@@ -77,7 +77,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 		if planWaiterCallers[fn.Name.Name] && !usesPlanWait {
 			t.Errorf("%s does not use waitForPlanAdmissionWaiter", fn.Name.Name)
 		}
-		if fn.Name.Name != "waitForConcurrencyHolder" && fn.Name.Name != "waitForSpawnedChildTrigger" && !usesSpawnWait {
+		isHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
+		if !isHelper && !usesSpawnWait {
 			t.Errorf("%s does not use waitForSpawnedChildTrigger", fn.Name.Name)
 		}
 	}
