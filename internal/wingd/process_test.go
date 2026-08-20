@@ -130,12 +130,18 @@ func (ph *procHandle) mustStayQueued(within time.Duration) {
 	ph.t.Helper()
 	timer := time.NewTimer(within)
 	defer timer.Stop()
-	select {
-	case line, ok := <-ph.lines:
-		if ok && strings.HasPrefix(line, "OK ") {
-			ph.t.Fatalf("process was admitted early: %q", line)
+	for {
+		select {
+		case line, ok := <-ph.lines:
+			if !ok {
+				ph.t.Fatal("process exited while expected to remain queued")
+			}
+			if strings.HasPrefix(line, "OK ") {
+				ph.t.Fatalf("process was admitted early: %q", line)
+			}
+		case <-timer.C:
+			return
 		}
-	case <-timer.C:
 	}
 }
 
