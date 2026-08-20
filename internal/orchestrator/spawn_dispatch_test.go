@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -87,10 +88,26 @@ func (spawnFailPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 
 type spawnProgressChild struct{ sparkwing.Base }
 
+var (
+	spawnProgressParentContext = make(chan context.Context, 1)
+	spawnProgressChildContext  = make(chan context.Context, 1)
+	spawnProgressChildRelease  = make(chan struct{})
+	spawnProgressAfterContext  = make(chan context.Context, 1)
+)
+
 func (spawnProgressChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	sparkwing.Step(w, "wait", func(context.Context) error {
-		time.Sleep(250 * time.Millisecond)
-		return nil
+	sparkwing.Step(w, "wait", func(ctx context.Context) error {
+		select {
+		case spawnProgressChildContext <- ctx:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		select {
+		case <-spawnProgressChildRelease:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	})
 	return nil, nil
 }
@@ -98,10 +115,23 @@ func (spawnProgressChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 type spawnProgressParent struct{ sparkwing.Base }
 
 func (spawnProgressParent) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
-	child := sparkwing.JobSpawn(w, "child", spawnProgressChild{})
-	sparkwing.Step(w, "after", func(context.Context) error {
-		time.Sleep(200 * time.Millisecond)
-		return nil
+	before := sparkwing.Step(w, "before", func(ctx context.Context) error {
+		select {
+		case spawnProgressParentContext <- ctx:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	})
+	child := sparkwing.JobSpawn(w, "child", spawnProgressChild{}).Needs(before)
+	sparkwing.Step(w, "after", func(ctx context.Context) error {
+		select {
+		case spawnProgressAfterContext <- ctx:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		<-ctx.Done()
+		return ctx.Err()
 	}).Needs(child)
 	return nil, nil
 }
@@ -162,8 +192,71 @@ func init() {
 }
 
 func TestSpawnDispatch_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testing.T) {
+	spawnProgressParentContext = make(chan context.Context, 1)
+	spawnProgressChildContext = make(chan context.Context, 1)
+	spawnProgressChildRelease = make(chan struct{})
+	spawnProgressAfterContext = make(chan context.Context, 1)
+	var releaseChild sync.Once
+	release := func() { releaseChild.Do(func() { close(spawnProgressChildRelease) }) }
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	type runResult struct {
+		result *orchestrator.Result
+		err    error
+	}
+	runDone := make(chan runResult, 1)
+	runFinished := make(chan struct{})
 	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "spawn-progress-timeout"})
+	go func() {
+		defer close(runFinished)
+		res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "spawn-progress-timeout"})
+		runDone <- runResult{result: res, err: err}
+	}()
+	t.Cleanup(func() {
+		release()
+		cancel()
+		join := time.NewTimer(time.Second)
+		defer join.Stop()
+		select {
+		case <-runFinished:
+		case <-join.C:
+			t.Error("spawn progress run did not stop")
+		}
+	})
+	var parentCtx context.Context
+	select {
+	case parentCtx = <-spawnProgressParentContext:
+	case <-ctx.Done():
+		t.Fatal("parent did not start before spawning its child")
+	}
+	select {
+	case <-spawnProgressChildContext:
+	case <-ctx.Done():
+		t.Fatal("spawned child did not start")
+	}
+	if !orchestrator.ProgressTimeoutPausedForTest(parentCtx) {
+		t.Fatal("parent progress timeout was not paused for the spawned child")
+	}
+	if orchestrator.ExpireProgressTimeoutForTest(parentCtx) {
+		t.Fatal("parent progress timeout fired while the spawned child was pending")
+	}
+	release()
+	var afterCtx context.Context
+	select {
+	case afterCtx = <-spawnProgressAfterContext:
+	case <-ctx.Done():
+		t.Fatal("parent did not resume after the spawned child")
+	}
+	if !orchestrator.ExpireProgressTimeoutForTest(afterCtx) {
+		t.Fatal("parent progress timeout did not fire after the spawned child completed")
+	}
+	var completed runResult
+	select {
+	case completed = <-runDone:
+	case <-ctx.Done():
+		t.Fatal("spawn progress run did not finish after forced timeout")
+	}
+	cancel()
+	res, err := completed.result, completed.err
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
