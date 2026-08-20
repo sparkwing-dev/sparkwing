@@ -9,9 +9,10 @@ import (
 
 func TestConcurrencySemanticsStatePollingDoesNotSleep(t *testing.T) {
 	targets := map[string]bool{
-		"waitForLeaderHolding":  false,
-		"waitForCoalesceWaiter": false,
-		"waitForQueuedRun":      false,
+		"waitForConcurrencyPoll": false,
+		"waitForLeaderHolding":   false,
+		"waitForCoalesceWaiter":  false,
+		"waitForQueuedRun":       false,
 	}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "concurrency_semantics_test.go", nil, 0)
