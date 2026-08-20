@@ -51,11 +51,10 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 	defer cancelReady()
 	readyPoll := time.NewTicker(100 * time.Millisecond)
 	defer readyPoll.Stop()
-	var sawHolder bool
-	for !sawHolder {
+	var sawFamily bool
+	for !sawFamily {
 		qs, err := client.Query(readyCtx, readOpts)
 		if err == nil && len(qs.Holders) != 0 {
-			sawHolder = true
 			var parents, children int
 			for _, h := range qs.Holders {
 				if h.Parent == "" {
@@ -73,17 +72,26 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 					t.Fatalf("attached child %q charged %+v, want zero", h.RunID, h.Resources)
 				}
 			}
-			if parents != 1 {
-				t.Fatalf("want exactly 1 top-level holder (children share the lease), got %d: %+v", parents, qs.Holders)
+			if parents > 1 || children > 2 {
+				t.Fatalf("want 1 parent and 2 children, got %d parents and %d children: %+v", parents, children, qs.Holders)
+			}
+			if parents != 1 || children != 2 {
+				select {
+				case <-readyCtx.Done():
+					t.Fatalf("complete parent-child family never appeared; last state: %+v", qs.Holders)
+				case <-readyPoll.C:
+				}
+				continue
 			}
 			if held := resourceHeld(qs, "cores"); held != 1 {
 				t.Fatalf("cores held %g, want 1 (children must not double-charge)", held)
 			}
+			sawFamily = true
 			break
 		}
 		select {
 		case <-readyCtx.Done():
-			t.Fatal("parent never appeared as a holder")
+			t.Fatal("complete parent-child family never appeared")
 		case <-readyPoll.C:
 		}
 	}
