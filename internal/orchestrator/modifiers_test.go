@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -76,14 +77,52 @@ func (noProgressTimeoutPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ s
 
 type progressingPipe struct{ sparkwing.Base }
 
+type observableProgressGate struct {
+	started    chan context.Context
+	emit       chan struct{}
+	emitted    chan struct{}
+	finish     chan struct{}
+	emitOnce   sync.Once
+	finishOnce sync.Once
+}
+
+func newObservableProgressGate() *observableProgressGate {
+	return &observableProgressGate{
+		started: make(chan context.Context, 1),
+		emit:    make(chan struct{}),
+		emitted: make(chan struct{}),
+		finish:  make(chan struct{}),
+	}
+}
+
+func (g *observableProgressGate) emitProgress() {
+	g.emitOnce.Do(func() { close(g.emit) })
+}
+
+func (g *observableProgressGate) finishJob() {
+	g.finishOnce.Do(func() { close(g.finish) })
+}
+
+var progressingTestGate *observableProgressGate
+
 func (progressingPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "moving", func(ctx context.Context) error {
-		for range 5 {
-			time.Sleep(30 * time.Millisecond)
-			sparkwing.Info(ctx, "processed batch")
+		gate := progressingTestGate
+		gate.started <- ctx
+		select {
+		case <-gate.emit:
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		return nil
-	}).NoProgressTimeout(80 * time.Millisecond).Timeout(time.Second)
+		sparkwing.Info(ctx, "processed batch")
+		close(gate.emitted)
+		select {
+		case <-gate.finish:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}).NoProgressTimeout(time.Hour).Timeout(time.Hour)
 	return nil
 }
 
@@ -343,13 +382,71 @@ func TestNoProgressTimeout_CancelsSilentJob(t *testing.T) {
 }
 
 func TestNoProgressTimeout_ResetsOnObservableProgress(t *testing.T) {
-	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "mod-progressing"})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
+	gate := newObservableProgressGate()
+	progressingTestGate = gate
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	type runResult struct {
+		result *orchestrator.Result
+		err    error
 	}
-	if res.Status != "success" {
-		t.Fatalf("status = %q, want success", res.Status)
+	resultCh := make(chan runResult, 1)
+	finished := make(chan struct{})
+	p := newPaths(t)
+	go func() {
+		defer close(finished)
+		result, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "mod-progressing"})
+		resultCh <- runResult{result: result, err: err}
+	}()
+	t.Cleanup(func() {
+		gate.emitProgress()
+		gate.finishJob()
+		cancel()
+		joinTimer := time.NewTimer(time.Second)
+		defer joinTimer.Stop()
+		select {
+		case <-finished:
+		case <-joinTimer.C:
+			t.Error("progress-reset run did not stop after cancellation")
+		}
+	})
+
+	var attemptCtx context.Context
+	select {
+	case attemptCtx = <-gate.started:
+	case <-ctx.Done():
+		t.Fatalf("progressing job did not start: %v", ctx.Err())
+	}
+	generation, ok := orchestrator.ProgressTimeoutGenerationForTest(attemptCtx)
+	if !ok {
+		t.Fatal("progressing job has no active progress timeout")
+	}
+	gate.emitProgress()
+	select {
+	case <-gate.emitted:
+	case <-ctx.Done():
+		t.Fatalf("progressing job did not emit progress: %v", ctx.Err())
+	}
+	if orchestrator.ExpireProgressTimeoutGenerationForTest(attemptCtx, generation) {
+		t.Fatal("logged progress did not invalidate the prior timeout generation")
+	}
+	select {
+	case <-attemptCtx.Done():
+		t.Fatalf("progressing job context ended after stale timeout expiry: %v", attemptCtx.Err())
+	default:
+	}
+	gate.finishJob()
+
+	var run runResult
+	select {
+	case run = <-resultCh:
+	case <-ctx.Done():
+		t.Fatalf("progressing job did not finish: %v", ctx.Err())
+	}
+	if run.err != nil {
+		t.Fatalf("Run: %v", run.err)
+	}
+	if run.result == nil || run.result.Status != "success" {
+		t.Fatalf("result = %+v, want success", run.result)
 	}
 }
 
