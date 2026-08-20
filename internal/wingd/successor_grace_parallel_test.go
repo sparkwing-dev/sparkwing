@@ -12,8 +12,9 @@ func TestSuccessorGraceRegressionsRunInParallel(t *testing.T) {
 	t.Parallel()
 
 	targets := map[string]bool{
-		"TestChurn_HolderWatchReattachesAcrossKill": false,
-		"TestCancel_ReattachedHolderIsCancellable":  false,
+		"TestChurn_HolderWatchReattachesAcrossKill":   false,
+		"TestCancel_ReattachedHolderIsCancellable":    false,
+		"TestProcess_DaemonKillRestoresAndReattaches": false,
 	}
 	fset := token.NewFileSet()
 	paths, err := filepath.Glob("*_test.go")
