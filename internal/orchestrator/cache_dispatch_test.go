@@ -218,6 +218,15 @@ const admissionPauseFixtureTimeout = 750 * time.Millisecond
 
 type queuedAwaitParentGate struct {
 	started chan context.Context
+	proceed chan struct{}
+	once    sync.Once
+}
+
+func (g *queuedAwaitParentGate) release() {
+	if g == nil || g.proceed == nil {
+		return
+	}
+	g.once.Do(func() { close(g.proceed) })
 }
 
 var queuedAwaitParentAttempt atomic.Pointer[queuedAwaitParentGate]
@@ -227,6 +236,12 @@ func publishQueuedAwaitParentAttempt(ctx context.Context) {
 		select {
 		case gate.started <- ctx:
 		default:
+		}
+		if gate.proceed != nil {
+			select {
+			case <-gate.proceed:
+			case <-ctx.Done():
+			}
 		}
 	}
 }
@@ -297,7 +312,7 @@ func (planLevelQueuedAwaitThenContinueParentPipe) Plan(
 			return err
 		}
 		select {
-		case <-time.After(200 * time.Millisecond):
+		case <-time.After(120 * time.Millisecond):
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -332,14 +347,9 @@ func (planLevelQueuedAwaitRemainingBudgetParentPipe) Plan(
 ) error {
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
 		publishQueuedAwaitParentAttempt(ctx)
-		select {
-		case <-time.After(120 * time.Millisecond):
-		case <-ctx.Done():
-			return ctx.Err()
-		}
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-remaining-budget-child", "work")
 		return err
-	}).Timeout(200 * time.Millisecond)
+	}).Timeout(time.Hour)
 	return nil
 }
 
@@ -902,6 +912,28 @@ func waitForNodeTimeoutPaused(t *testing.T, attemptCtx context.Context) {
 	}
 }
 
+func waitForNodeTimeoutResumed(t *testing.T, attemptCtx context.Context) time.Duration {
+	t.Helper()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(2 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		remaining, paused, ok := orchestrator.NodeTimeoutStateForTest(attemptCtx)
+		if ok && !paused {
+			return remaining
+		}
+		if err := attemptCtx.Err(); err != nil {
+			t.Fatalf("parent action ended before its node timeout resumed: %v", err)
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatal("parent node timeout did not resume after child admission")
+		}
+	}
+}
+
 func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
@@ -1242,7 +1274,7 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 
 func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t *testing.T) {
 	resetCacheCounter()
-	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
+	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
 	p := newPaths(t)
@@ -1282,6 +1314,7 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 		return releaseErr
 	}
 	t.Cleanup(func() {
+		gate.release()
 		cancel()
 		if err := releaseHolder(); err != nil {
 			t.Errorf("cleanup external holder: %v", err)
@@ -1413,6 +1446,17 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 		})
 		parentDone <- res
 	}()
+	var attemptCtx context.Context
+	select {
+	case attemptCtx = <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("parent action did not publish its timeout context")
+	}
+	const controlledRemainder = 5 * time.Second
+	if !orchestrator.SetNodeTimeoutRemainingForTest(attemptCtx, controlledRemainder) {
+		t.Fatal("could not establish the parent timeout remainder")
+	}
+	gate.release()
 
 	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-remaining-budget-parent", "spawn", "plan-level-queued-await-remaining-budget-child")
 	claimManualChildTrigger(t, ctx, st, childID)
@@ -1427,18 +1471,16 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 		childDone <- res
 	}()
 	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-remaining-budget-key", childID, childDone)
-	var attemptCtx context.Context
-	select {
-	case attemptCtx = <-gate.started:
-	case <-time.After(time.Second):
-		t.Fatal("parent action did not publish its timeout context")
-	}
 	waitForNodeTimeoutPaused(t, attemptCtx)
 	if !orchestrator.NodeTimeoutPausedForTest(attemptCtx) {
 		t.Fatal("parent node timeout was not paused during child admission")
 	}
 	if orchestrator.ForceNodeTimeoutForTest(attemptCtx) {
 		t.Fatal("parent node timeout fired while child admission was pending")
+	}
+	pausedRemaining, paused, ok := orchestrator.NodeTimeoutStateForTest(attemptCtx)
+	if !ok || !paused || pausedRemaining <= 0 || pausedRemaining > controlledRemainder {
+		t.Fatalf("paused timeout state = remaining %s, paused=%t, ok=%t; want positive remainder no greater than %s", pausedRemaining, paused, ok, controlledRemainder)
 	}
 	if err := attemptCtx.Err(); err != nil {
 		t.Fatalf("parent action ended before child admission: %v", err)
@@ -1453,14 +1495,28 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	if err := releaseHolder(); err != nil {
 		t.Fatalf("release external holder: %v", err)
 	}
+	resumedRemaining := waitForNodeTimeoutResumed(t, attemptCtx)
+	if resumedRemaining > pausedRemaining {
+		t.Fatalf("resumed timeout remainder = %s, want no more than paused remainder %s", resumedRemaining, pausedRemaining)
+	}
+	if !orchestrator.ForceNodeTimeoutForTest(attemptCtx) {
+		t.Fatal("resumed parent node timeout could not be forced")
+	}
 
 	select {
 	case parent := <-parentDone:
 		if parent.Status != "failed" {
 			t.Fatalf("parent status = %q, want failed after remaining timeout budget is spent", parent.Status)
 		}
-	case <-time.After(250 * time.Millisecond):
+	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for parent after releasing queued child; parent timeout may still be suppressed")
+	}
+	parentNodes, err := st.ListNodes(ctx, "queued-await-remaining-budget-parent")
+	if err != nil {
+		t.Fatalf("list parent nodes: %v", err)
+	}
+	if len(parentNodes) != 1 || parentNodes[0].FailureReason != store.FailureTimeout {
+		t.Fatalf("parent nodes = %+v, want failure reason %q", parentNodes, store.FailureTimeout)
 	}
 	select {
 	case child := <-childDone:
