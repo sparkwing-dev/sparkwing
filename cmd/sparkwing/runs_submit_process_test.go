@@ -282,6 +282,7 @@ func waitUntil(t *testing.T, what string, timeout time.Duration, cond func() boo
 // with the terminal, which is the failure this whole feature exists to
 // remove.
 func TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 
 	ack := e.submit()
@@ -678,6 +679,7 @@ func (e *submitTestEnv) startsInMarker() int {
 // lease row into the past reproduces exactly the state a resume leaves
 // behind. The run must not be dispatched a second time.
 func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 	holdStarted := e.useBlockingFixture(t)
 
