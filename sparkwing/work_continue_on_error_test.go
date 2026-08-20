@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
-	"time"
+	"testing/synctest"
 )
 
 // TestRunWork_DefaultFailFastCancelsSiblings pins the prior
@@ -13,59 +13,33 @@ import (
 // in-flight siblings exit with ctx.Err. Default for steps with no
 // failure-handling flags.
 func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
-	runCtx, cancel := context.WithCancel(context.Background())
-	finished := make(chan struct{})
-	t.Cleanup(func() {
-		cancel()
-		timer := time.NewTimer(time.Second)
-		defer timer.Stop()
-		select {
-		case <-finished:
-		case <-timer.C:
-			t.Error("RunWork did not stop after cancellation")
-		}
-	})
-	siblingEntered := make(chan struct{})
-	boom := errors.New("boom")
-	w := NewWork()
-	var siblingCancelled atomic.Bool
-	Step(w, "fast-fail", func(ctx context.Context) error {
-		select {
-		case <-siblingEntered:
-			return boom
-		case <-ctx.Done():
+	synctest.Test(t, func(t *testing.T) {
+		siblingEntered := make(chan struct{})
+		boom := errors.New("boom")
+		w := NewWork()
+		var siblingCancelled atomic.Bool
+		Step(w, "fast-fail", func(ctx context.Context) error {
+			select {
+			case <-siblingEntered:
+				return boom
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		})
+		Step(w, "slow", func(ctx context.Context) error {
+			close(siblingEntered)
+			<-ctx.Done()
+			siblingCancelled.Store(true)
 			return ctx.Err()
+		})
+		_, err := RunWork(t.Context(), w)
+		if !errors.Is(err, boom) {
+			t.Fatalf("RunWork error = %v, want fast-fail error", err)
+		}
+		if !siblingCancelled.Load() {
+			t.Error("slow sibling did not observe cancellation; default is fail-fast")
 		}
 	})
-	Step(w, "slow", func(ctx context.Context) error {
-		close(siblingEntered)
-		<-ctx.Done()
-		siblingCancelled.Store(true)
-		return ctx.Err()
-	})
-	result := make(chan error, 1)
-	go func() {
-		_, err := RunWork(runCtx, w)
-		result <- err
-		close(finished)
-	}()
-	watchdog := time.NewTimer(time.Second)
-	defer watchdog.Stop()
-	var err error
-	select {
-	case err = <-result:
-	case <-watchdog.C:
-		t.Fatal("RunWork did not return after the fail-fast step failed")
-	}
-	if err == nil {
-		t.Fatal("RunWork should have errored")
-	}
-	if !errors.Is(err, boom) {
-		t.Fatalf("RunWork error = %v, want fast-fail error", err)
-	}
-	if !siblingCancelled.Load() {
-		t.Error("slow sibling did not observe cancellation; default is fail-fast")
-	}
 }
 
 // TestRunWork_ContinueOnErrorKeepsSiblingsAlive verifies that a
@@ -73,36 +47,33 @@ func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
 // Both errored and successful siblings get a chance to complete.
 // Run-level rollup still reports the failure.
 func TestRunWork_ContinueOnErrorKeepsSiblingsAlive(t *testing.T) {
-	runCtx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	siblingEntered := make(chan struct{})
-	w := NewWork()
-	var siblingCompleted atomic.Bool
-	Step(w, "fast-fail", func(ctx context.Context) error {
-		select {
-		case <-siblingEntered:
+	synctest.Test(t, func(t *testing.T) {
+		siblingEntered := make(chan struct{})
+		failureReturned := make(chan struct{})
+		w := NewWork()
+		var siblingCompleted atomic.Bool
+		Step(w, "fast-fail", func(ctx context.Context) error {
+			<-siblingEntered
+			close(failureReturned)
 			return errors.New("boom")
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}).ContinueOnError()
-	Step(w, "slow", func(ctx context.Context) error {
-		close(siblingEntered)
-		select {
-		case <-time.After(150 * time.Millisecond):
+		}).ContinueOnError()
+		Step(w, "slow", func(ctx context.Context) error {
+			close(siblingEntered)
+			<-failureReturned
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			siblingCompleted.Store(true)
 			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+		}).ContinueOnError()
+		_, err := RunWork(t.Context(), w)
+		if !siblingCompleted.Load() {
+			t.Error("slow sibling should have completed; ContinueOnError must not cancel siblings")
 		}
-	}).ContinueOnError()
-	_, err := RunWork(runCtx, w)
-	if !siblingCompleted.Load() {
-		t.Error("slow sibling should have completed; ContinueOnError must not cancel siblings")
-	}
-	if err == nil {
-		t.Fatal("RunWork should still surface the failure on the run rollup")
-	}
+		if err == nil {
+			t.Fatal("RunWork should still surface the failure on the run rollup")
+		}
+	})
 }
 
 // TestRunWork_OptionalMasksRollup pins the Optional contract: a

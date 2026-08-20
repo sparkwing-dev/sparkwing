@@ -7,7 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -47,136 +47,122 @@ func newWorkCtx() (context.Context, *recordingWorkLogger) {
 }
 
 func TestRunWork_ExplicitFailFastCancelsSiblingAndRunsFinally(t *testing.T) {
-	w := sparkwing.NewWork().ParallelFailures(sparkwing.FailFast)
-	started := make(chan struct{})
-	slow := sparkwing.Step(w, "slow", func(ctx context.Context) error {
-		close(started)
-		select {
-		case <-time.After(2 * time.Second):
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	})
-	failed := sparkwing.Step(w, "reject", func(context.Context) error {
-		<-started
-		return errors.New("rejected")
-	})
-	var pendingRan atomic.Bool
-	pending := sparkwing.Step(w, "pending", func(context.Context) error {
-		pendingRan.Store(true)
-		return nil
-	}).Needs(slow)
-	var cleaned atomic.Bool
-	sparkwing.Step(w, "cleanup", func(context.Context) error {
-		cleaned.Store(true)
-		return nil
-	}).Needs(slow, failed, pending).Finally()
-
-	ctx, logs := newWorkCtx()
-	start := time.Now()
-	_, err := sparkwing.RunWork(ctx, w)
-	if err == nil {
-		t.Fatal("RunWork should fail")
-	}
-	if time.Since(start) >= time.Second {
-		t.Fatal("fail-fast waited for the slow sibling")
-	}
-	if !cleaned.Load() {
-		t.Fatal("finally cleanup did not run")
-	}
-	if pendingRan.Load() {
-		t.Fatal("pending sibling ran after fail-fast")
-	}
-
-	cancelled := map[string]bool{}
-	var summary bool
-	failureIndex := -1
-	firstCancellationIndex := -1
-	for i, rec := range logs.snapshot() {
-		if rec.Event == "step_end" && rec.Msg == "reject" && rec.Attrs["outcome"] == "failed" {
-			failureIndex = i
-		}
-		if rec.Event == "step_end" && (rec.Msg == "slow" || rec.Msg == "pending") && rec.Attrs["outcome"] == "cancelled" {
-			cancelled[rec.Msg] = true
-			if firstCancellationIndex == -1 {
-				firstCancellationIndex = i
-			}
-		}
-		if rec.Event == "work_fail_fast" && rec.Attrs["trigger_step"] == "reject" {
-			summary = true
-			if got := fmt.Sprint(rec.Attrs["cancelled_steps"]); got != "[pending slow]" {
-				t.Fatalf("cancelled_steps = %s, want [pending slow]", got)
-			}
-		}
-	}
-	if !cancelled["slow"] || !cancelled["pending"] {
-		t.Fatalf("cancelled sibling telemetry = %v", cancelled)
-	}
-	if !summary {
-		t.Fatal("fail-fast telemetry did not name the triggering step")
-	}
-	if failureIndex == -1 || firstCancellationIndex == -1 || failureIndex > firstCancellationIndex {
-		t.Fatalf("terminal event order: failure=%d first cancellation=%d", failureIndex, firstCancellationIndex)
-	}
-}
-
-func TestRunWork_ParentCancellationDoesNotEmitFailFastTrigger(t *testing.T) {
-	w := sparkwing.NewWork().ParallelFailures(sparkwing.FailFast)
-	started := make(chan string, 2)
-	for _, id := range []string{"first", "second"} {
-		sparkwing.Step(w, id, func(ctx context.Context) error {
-			started <- id
+	synctest.Test(t, func(t *testing.T) {
+		w := sparkwing.NewWork().ParallelFailures(sparkwing.FailFast)
+		started := make(chan struct{})
+		slow := sparkwing.Step(w, "slow", func(ctx context.Context) error {
+			close(started)
 			<-ctx.Done()
 			return ctx.Err()
 		})
-	}
+		failed := sparkwing.Step(w, "reject", func(context.Context) error {
+			<-started
+			return errors.New("rejected")
+		})
+		var pendingRan atomic.Bool
+		pending := sparkwing.Step(w, "pending", func(context.Context) error {
+			pendingRan.Store(true)
+			return nil
+		}).Needs(slow)
+		var cleaned atomic.Bool
+		sparkwing.Step(w, "cleanup", func(context.Context) error {
+			cleaned.Store(true)
+			return nil
+		}).Needs(slow, failed, pending).Finally()
 
-	base, logs := newWorkCtx()
-	ctx, cancel := context.WithCancel(base)
-	done := make(chan error, 1)
-	go func() {
+		ctx, logs := newWorkCtx()
 		_, err := sparkwing.RunWork(ctx, w)
-		done <- err
-	}()
-
-	seen := map[string]bool{}
-	for len(seen) < 2 {
-		select {
-		case id := <-started:
-			seen[id] = true
-		case <-time.After(2 * time.Second):
-			t.Fatalf("parallel steps did not both start: %v", seen)
+		if err == nil {
+			t.Fatal("RunWork should fail")
 		}
-	}
-	cancel()
-
-	var err error
-	select {
-	case err = <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("RunWork did not return after parent cancellation")
-	}
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("RunWork error = %v, want context.Canceled", err)
-	}
-	var stepErr *sparkwing.StepError
-	if errors.As(err, &stepErr) {
-		t.Fatalf("parent cancellation attributed to step %q", stepErr.StepID)
-	}
-
-	cancelled := map[string]bool{}
-	for _, rec := range logs.snapshot() {
-		if rec.Event == "step_end" && rec.Attrs["outcome"] == "cancelled" {
-			cancelled[rec.Msg] = true
+		if !cleaned.Load() {
+			t.Fatal("finally cleanup did not run")
 		}
-		if rec.Event == sparkwing.EventWorkFailFast {
-			t.Fatalf("parent cancellation emitted fail-fast trigger: %+v", rec)
+		if pendingRan.Load() {
+			t.Fatal("pending sibling ran after fail-fast")
 		}
-	}
-	if !cancelled["first"] || !cancelled["second"] {
-		t.Fatalf("cancelled step telemetry = %v, want both parallel steps", cancelled)
-	}
+
+		cancelled := map[string]bool{}
+		var summary bool
+		failureIndex := -1
+		firstCancellationIndex := -1
+		for i, rec := range logs.snapshot() {
+			if rec.Event == "step_end" && rec.Msg == "reject" && rec.Attrs["outcome"] == "failed" {
+				failureIndex = i
+			}
+			if rec.Event == "step_end" && (rec.Msg == "slow" || rec.Msg == "pending") && rec.Attrs["outcome"] == "cancelled" {
+				cancelled[rec.Msg] = true
+				if firstCancellationIndex == -1 {
+					firstCancellationIndex = i
+				}
+			}
+			if rec.Event == "work_fail_fast" && rec.Attrs["trigger_step"] == "reject" {
+				summary = true
+				if got := fmt.Sprint(rec.Attrs["cancelled_steps"]); got != "[pending slow]" {
+					t.Fatalf("cancelled_steps = %s, want [pending slow]", got)
+				}
+			}
+		}
+		if !cancelled["slow"] || !cancelled["pending"] {
+			t.Fatalf("cancelled sibling telemetry = %v", cancelled)
+		}
+		if !summary {
+			t.Fatal("fail-fast telemetry did not name the triggering step")
+		}
+		if failureIndex == -1 || firstCancellationIndex == -1 || failureIndex > firstCancellationIndex {
+			t.Fatalf("terminal event order: failure=%d first cancellation=%d", failureIndex, firstCancellationIndex)
+		}
+	})
+}
+
+func TestRunWork_ParentCancellationDoesNotEmitFailFastTrigger(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		w := sparkwing.NewWork().ParallelFailures(sparkwing.FailFast)
+		started := make(chan string, 2)
+		for _, id := range []string{"first", "second"} {
+			sparkwing.Step(w, id, func(ctx context.Context) error {
+				started <- id
+				<-ctx.Done()
+				return ctx.Err()
+			})
+		}
+
+		base, logs := newWorkCtx()
+		ctx, cancel := context.WithCancel(base)
+		done := make(chan error, 1)
+		go func() {
+			_, err := sparkwing.RunWork(ctx, w)
+			done <- err
+		}()
+
+		seen := map[string]bool{}
+		for len(seen) < 2 {
+			seen[<-started] = true
+		}
+		cancel()
+
+		err := <-done
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("RunWork error = %v, want context.Canceled", err)
+		}
+		var stepErr *sparkwing.StepError
+		if errors.As(err, &stepErr) {
+			t.Fatalf("parent cancellation attributed to step %q", stepErr.StepID)
+		}
+
+		cancelled := map[string]bool{}
+		for _, rec := range logs.snapshot() {
+			if rec.Event == "step_end" && rec.Attrs["outcome"] == "cancelled" {
+				cancelled[rec.Msg] = true
+			}
+			if rec.Event == sparkwing.EventWorkFailFast {
+				t.Fatalf("parent cancellation emitted fail-fast trigger: %+v", rec)
+			}
+		}
+		if !cancelled["first"] || !cancelled["second"] {
+			t.Fatalf("cancelled step telemetry = %v, want both parallel steps", cancelled)
+		}
+	})
 }
 
 func TestRunWork_CollectAllFinishesParallelSiblings(t *testing.T) {
@@ -299,70 +285,68 @@ func TestRunWork_DependencyOrder(t *testing.T) {
 // TestRunWork_ParallelStepsRunConcurrently verifies that two steps
 // without a dependency run at the same time.
 func TestRunWork_ParallelStepsRunConcurrently(t *testing.T) {
-	baseCtx, _ := newWorkCtx()
-	ctx, cancel := context.WithTimeout(baseCtx, time.Second)
-	defer cancel()
-	var entered atomic.Int32
-	release := make(chan struct{})
-	var releaseOnce sync.Once
-	enter := func(ctx context.Context) error {
-		if entered.Add(1) == 2 {
-			releaseOnce.Do(func() { close(release) })
+	synctest.Test(t, func(t *testing.T) {
+		baseCtx, _ := newWorkCtx()
+		var entered atomic.Int32
+		release := make(chan struct{})
+		var releaseOnce sync.Once
+		enter := func(ctx context.Context) error {
+			if entered.Add(1) == 2 {
+				releaseOnce.Do(func() { close(release) })
+			}
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
-		select {
-		case <-release:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+
+		w := sparkwing.NewWork()
+		sparkwing.Step(w, "a", enter)
+		sparkwing.Step(w, "b", enter)
+		sparkwing.Step(w, "c", enter)
+
+		if _, err := sparkwing.RunWork(baseCtx, w); err != nil {
+			t.Fatalf("RunWork: %v", err)
 		}
-	}
-
-	w := sparkwing.NewWork()
-	sparkwing.Step(w, "a", enter)
-	sparkwing.Step(w, "b", enter)
-	sparkwing.Step(w, "c", enter)
-
-	if _, err := sparkwing.RunWork(ctx, w); err != nil {
-		t.Fatalf("RunWork: %v", err)
-	}
-	if got := entered.Load(); got < 2 {
-		t.Fatalf("independent steps entered concurrently = %d, want at least 2", got)
-	}
+		if got := entered.Load(); got < 2 {
+			t.Fatalf("independent steps entered concurrently = %d, want at least 2", got)
+		}
+	})
 }
 
 // TestRunWork_FailFastCancelsSiblings verifies that one step's
 // failure cancels in-flight parallel siblings via the shared ctx.
 func TestRunWork_FailFastCancelsSiblings(t *testing.T) {
-	ctx, _ := newWorkCtx()
-	var siblingObserved atomic.Bool
-	siblingStarted := make(chan struct{})
+	synctest.Test(t, func(t *testing.T) {
+		ctx, _ := newWorkCtx()
+		var siblingObserved atomic.Bool
+		siblingStarted := make(chan struct{})
 
-	w := sparkwing.NewWork()
-	sparkwing.Step(w, "sibling", func(ctx context.Context) error {
-		close(siblingStarted)
-		select {
-		case <-ctx.Done():
+		w := sparkwing.NewWork()
+		sparkwing.Step(w, "sibling", func(ctx context.Context) error {
+			close(siblingStarted)
+			<-ctx.Done()
 			siblingObserved.Store(true)
 			return ctx.Err()
-		case <-time.After(2 * time.Second):
-			return errors.New("sibling not cancelled")
+		})
+		sparkwing.Step(w, "fails", func(ctx context.Context) error {
+			<-siblingStarted
+			return errors.New("nope")
+		})
+
+		out, err := sparkwing.RunWork(ctx, w)
+		if err == nil {
+			t.Fatal("expected error from fails step")
+		}
+		if out != nil {
+			t.Fatalf("output should be nil on failure, got %v", out)
+		}
+		if !siblingObserved.Load() {
+			t.Fatal("sibling did not observe ctx cancellation")
 		}
 	})
-	sparkwing.Step(w, "fails", func(ctx context.Context) error {
-		<-siblingStarted
-		return errors.New("nope")
-	})
-
-	out, err := sparkwing.RunWork(ctx, w)
-	if err == nil {
-		t.Fatal("expected error from fails step")
-	}
-	if out != nil {
-		t.Fatalf("output should be nil on failure, got %v", out)
-	}
-	if !siblingObserved.Load() {
-		t.Fatal("sibling did not observe ctx cancellation")
-	}
 }
 
 // TestRunWork_TypedResultRecordsOnStep runs a multi-step Work whose
