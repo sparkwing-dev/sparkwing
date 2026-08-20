@@ -87,8 +87,15 @@ func TestWatchActorReapsExitedProcessAndRecordsFinalOutput(t *testing.T) {
 	t.Cleanup(func() { _ = h.finishActor(a, true) })
 	go h.watchActor(a, stdout)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	deadlineAt := time.Now().Add(2 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+	for {
+		if !time.Now().Before(deadlineAt) {
+			break
+		}
 		h.mu.Lock()
 		exited, granted := a.exited, a.granted
 		h.mu.Unlock()
@@ -104,7 +111,11 @@ func TestWatchActorReapsExitedProcessAndRecordsFinalOutput(t *testing.T) {
 			}
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			break
+		}
 	}
 	t.Fatal("exited actor was not reaped while its descendant held stdout open")
 }
@@ -172,15 +183,27 @@ func TestManagedDaemonBoundsRepeatedIgnoreTermDescendantChurn(t *testing.T) {
 		t.Cleanup(func() { _ = h.finishDaemon(daemon, true) })
 	}
 
-	deadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(deadline) {
+	deadlineAt := time.Now().Add(4 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+waitForDaemons:
+	for {
+		if !time.Now().Before(deadlineAt) {
+			break
+		}
 		h.mu.Lock()
 		remaining := len(h.daemons)
 		h.mu.Unlock()
 		if remaining == 0 {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			break waitForDaemons
+		}
 	}
 	h.mu.Lock()
 	remaining := len(h.daemons)
@@ -419,13 +442,25 @@ func TestProcessGuardAcceptsSoakScaleDescendantZombieBurst(t *testing.T) {
 		actors = append(actors, startGuardedActor(t, h, fmt.Sprintf("burst-%d", i), "zombie-parent", 0))
 	}
 	guard := newProcessGuard(h)
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
+	deadlineAt := time.Now().Add(30 * time.Second)
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+waitForBurst:
+	for {
+		if !time.Now().Before(deadlineAt) {
+			break
+		}
 		guard.check()
 		if len(guard.since) == len(actors) {
 			break
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			break waitForBurst
+		}
 	}
 	if len(guard.since) != len(actors) {
 		t.Fatalf("guard saw %d descendant zombies, want %d", len(guard.since), len(actors))
@@ -491,10 +526,22 @@ func TestProcessGuardExemptsZombiesRetainedByAReportedCleanupFailure(t *testing.
 	h.mu.Unlock()
 
 	guard := newProcessGuard(h)
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	deadlineAt := time.Now().Add(time.Second)
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+observeGuard:
+	for {
+		if !time.Now().Before(deadlineAt) {
+			break
+		}
 		guard.check()
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			break observeGuard
+		}
 	}
 	if len(reported) > 0 {
 		t.Fatalf("guard re-reported an already-reported cleanup failure: %s", strings.Join(reported, "; "))
@@ -504,15 +551,28 @@ func TestProcessGuardExemptsZombiesRetainedByAReportedCleanupFailure(t *testing.
 func awaitGuardViolation(t *testing.T, h *Harness, bound time.Duration, fired <-chan []string) string {
 	t.Helper()
 	guard := newProcessGuard(h)
-	deadline := time.Now().Add(bound)
-	for time.Now().Before(deadline) {
+	deadlineAt := time.Now().Add(bound)
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+	for {
+		if !time.Now().Before(deadlineAt) {
+			break
+		}
 		guard.check()
 		select {
 		case violations := <-fired:
 			return strings.Join(violations, "; ")
 		default:
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case violations := <-fired:
+			return strings.Join(violations, "; ")
+		case <-poll.C:
+		case <-deadline.C:
+			break
+		}
 	}
 	t.Fatal("process guard reported no violation within its bound")
 	return ""
