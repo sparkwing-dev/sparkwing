@@ -125,7 +125,7 @@ func TestPause_BeforeRun_HoldsUntilReleased(t *testing.T) {
 
 // TestPause_BeforeRun_Timeout verifies SPARKWING_PAUSE_TIMEOUT fires.
 func TestPause_BeforeRun_Timeout(t *testing.T) {
-	t.Setenv("SPARKWING_PAUSE_TIMEOUT", "500ms")
+	t.Setenv("SPARKWING_PAUSE_TIMEOUT", "200ms")
 	h := newPauseHarness(t)
 	opts := orchestrator.Options{
 		Pipeline: "orch-pause-ok",
@@ -133,9 +133,13 @@ func TestPause_BeforeRun_Timeout(t *testing.T) {
 			PauseBefore: []string{"orch-pause-ok"},
 		},
 	}
+	started := time.Now()
 	res, err := orchestrator.Run(context.Background(), h.backends, opts)
 	if err != nil {
 		t.Fatalf("run: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 400*time.Millisecond {
+		t.Fatalf("pause timeout took %v, want at most 400ms", elapsed)
 	}
 	if res.Status != "success" {
 		t.Fatalf("status = %q, want success (timeout releases and run continues)", res.Status)
