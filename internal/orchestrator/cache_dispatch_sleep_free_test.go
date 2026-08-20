@@ -9,16 +9,16 @@ import (
 
 func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	targets := map[string]bool{
-		"waitForConcurrencyHolder":   false,
-		"waitForSpawnedChildTrigger": false,
-		"TestConcurrency_RunAndAwaitUnboundedClaimedChildAdmissionProtectsParentDispatch": false,
-		"TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait":           false,
-		"TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused":        false,
-		"TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget":              false,
-		"TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline":                    false,
-		"TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWait":    false,
-		"TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait":         false,
-		"TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning":                 false,
+		"waitForConcurrencyHolder":                                                     false,
+		"waitForSpawnedChildTrigger":                                                   false,
+		"testRunAndAwaitAdmissionOutlivesDispatchWatchdog":                             false,
+		"TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait":        false,
+		"TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused":     false,
+		"TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget":           false,
+		"TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline":                 false,
+		"TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWait": false,
+		"TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait":      false,
+		"TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning":              false,
 	}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_dispatch_test.go", nil, 0)
