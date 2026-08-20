@@ -90,7 +90,8 @@ func startProcEnv(t *testing.T, extraEnv []string, args ...string) *procHandle {
 
 func (ph *procHandle) waitOK(timeout time.Duration) string {
 	ph.t.Helper()
-	deadline := time.After(timeout)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	for {
 		select {
 		case line, ok := <-ph.lines:
@@ -100,7 +101,7 @@ func (ph *procHandle) waitOK(timeout time.Duration) string {
 			if tok, found := strings.CutPrefix(line, "OK "); found {
 				return tok
 			}
-		case <-deadline:
+		case <-timer.C:
 			ph.t.Fatal("timed out waiting for OK")
 		}
 	}
@@ -108,7 +109,8 @@ func (ph *procHandle) waitOK(timeout time.Duration) string {
 
 func (ph *procHandle) waitLine(prefix string, timeout time.Duration) string {
 	ph.t.Helper()
-	deadline := time.After(timeout)
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
 	for {
 		select {
 		case line, ok := <-ph.lines:
@@ -118,7 +120,7 @@ func (ph *procHandle) waitLine(prefix string, timeout time.Duration) string {
 			if rest, found := strings.CutPrefix(line, prefix); found {
 				return strings.TrimSpace(rest)
 			}
-		case <-deadline:
+		case <-timer.C:
 			ph.t.Fatalf("timed out waiting for %q", prefix)
 		}
 	}
@@ -126,12 +128,20 @@ func (ph *procHandle) waitLine(prefix string, timeout time.Duration) string {
 
 func (ph *procHandle) mustStayQueued(within time.Duration) {
 	ph.t.Helper()
-	select {
-	case line, ok := <-ph.lines:
-		if ok && strings.HasPrefix(line, "OK ") {
-			ph.t.Fatalf("process was admitted early: %q", line)
+	timer := time.NewTimer(within)
+	defer timer.Stop()
+	for {
+		select {
+		case line, ok := <-ph.lines:
+			if !ok {
+				ph.t.Fatal("process exited while expected to remain queued")
+			}
+			if strings.HasPrefix(line, "OK ") {
+				ph.t.Fatalf("process was admitted early: %q", line)
+			}
+		case <-timer.C:
+			return
 		}
-	case <-time.After(within):
 	}
 }
 
