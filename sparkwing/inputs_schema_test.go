@@ -3,10 +3,18 @@ package sparkwing
 import (
 	"context"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
+
+var inputsSchemaTestSequence atomic.Uint64
+
+func inputsSchemaTestName(prefix string) string {
+	return prefix + strconv.FormatUint(inputsSchemaTestSequence.Add(1), 10)
+}
 
 type allTypesInputs struct {
 	S    string            `flag:"s"`
@@ -442,10 +450,11 @@ func (secretValuesPipe) Plan(_ context.Context, _ *Plan, _ secretValuesCreds, _ 
 // Verifies passed values, defaulted values, and that empty/non-secret
 // fields are excluded.
 func TestRegistration_SecretValues(t *testing.T) {
-	Register[secretValuesCreds]("secret-values-fixture", func() Pipeline[secretValuesCreds] {
+	name := inputsSchemaTestName("secret-values-fixture-")
+	Register[secretValuesCreds](name, func() Pipeline[secretValuesCreds] {
 		return secretValuesPipe{}
 	})
-	reg, _ := Lookup("secret-values-fixture")
+	reg, _ := Lookup(name)
 	got := reg.SecretValues(map[string]string{
 		"token":   "from-args",
 		"visible": "not-secret",
@@ -463,8 +472,9 @@ func TestRegistration_SecretValues(t *testing.T) {
 
 func TestRegister_SchemaCarriesSecretBit(t *testing.T) {
 	captured := &secretPipe{}
-	Register[secretInputs]("secret-bit-fixture", func() Pipeline[secretInputs] { return captured })
-	reg, ok := Lookup("secret-bit-fixture")
+	name := inputsSchemaTestName("secret-bit-fixture-")
+	Register[secretInputs](name, func() Pipeline[secretInputs] { return captured })
+	reg, ok := Lookup(name)
 	if !ok {
 		t.Fatal("not registered")
 	}
@@ -658,8 +668,9 @@ func (p *embeddedRegPipe) Plan(_ context.Context, plan *Plan, in embedOuter, rc 
 
 func TestRegister_EmbeddedArgsAppearInSchema(t *testing.T) {
 	captured := &embeddedRegPipe{}
-	Register[embedOuter]("embedded-args-fixture", func() Pipeline[embedOuter] { return captured })
-	reg, ok := Lookup("embedded-args-fixture")
+	name := inputsSchemaTestName("embedded-args-fixture-")
+	Register[embedOuter](name, func() Pipeline[embedOuter] { return captured })
+	reg, ok := Lookup(name)
 	if !ok {
 		t.Fatal("not registered")
 	}
