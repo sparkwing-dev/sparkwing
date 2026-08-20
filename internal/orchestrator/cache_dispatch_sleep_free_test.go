@@ -62,6 +62,9 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	var earlyResumeSetPos token.Pos
 	var earlyResumeReleasePos token.Pos
 	var earlyResumeSpawnWaitPos token.Pos
+	var multiKeySetPos token.Pos
+	var multiKeyReleasePos token.Pos
+	var multiKeySpawnWaitPos token.Pos
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_dispatch_test.go", nil, 0)
 	if err != nil {
@@ -115,6 +118,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					remainingBudgetSpawnWaitPos = call.Pos()
 				} else if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline" {
 					earlyResumeSpawnWaitPos = call.Pos()
+				} else if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait" {
+					multiKeySpawnWaitPos = call.Pos()
 				}
 			}
 			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "waitForPlanAdmissionWaiter" {
@@ -201,6 +206,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					multiKeyInspectsControllerState = true
 				case "SetNodeTimeoutRemainingForTest":
 					multiKeyControlsRemainder = true
+					multiKeySetPos = call.Pos()
 				}
 			}
 			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget" && sel.Sel.Name == "release" {
@@ -211,6 +217,11 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline" && sel.Sel.Name == "release" {
 				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "gate" {
 					earlyResumeReleasePos = call.Pos()
+				}
+			}
+			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait" && sel.Sel.Name == "release" {
+				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "gate" {
+					multiKeyReleasePos = call.Pos()
 				}
 			}
 			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForNodeTimeoutResumed" || fn.Name.Name == "waitForProgressTimeoutResumed" || fn.Name.Name == "observeAdmissionWaitBeyondDispatchTimeout" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
@@ -305,5 +316,9 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if !multiKeyGateGated {
 		t.Error("multi-key admission regression does not gate action progress while setting the timeout remainder")
+	}
+	if multiKeySetPos == token.NoPos || multiKeyReleasePos == token.NoPos || multiKeySpawnWaitPos == token.NoPos ||
+		!(multiKeySetPos < multiKeyReleasePos && multiKeyReleasePos < multiKeySpawnWaitPos) {
+		t.Error("multi-key admission regression must set the remainder, release the action, then wait for child admission")
 	}
 }
