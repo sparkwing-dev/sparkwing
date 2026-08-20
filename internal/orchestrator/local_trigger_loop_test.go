@@ -451,7 +451,13 @@ func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *
 	outputPath := filepath.Join(t.TempDir(), "executed-behavior")
 	t.Setenv("SPARKWING_RETRY_TEST_OUTPUT", outputPath)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := dispatchLocalTrigger(context.Background(), nil, trig, "", "", &localCompileCache{}, logger); err != nil {
+	cache := &localCompileCache{}
+	t.Cleanup(func() {
+		if err := cache.Close(); err != nil {
+			t.Errorf("close local compile cache: %v", err)
+		}
+	})
+	if err := dispatchLocalTrigger(context.Background(), nil, trig, "", "", cache, logger); err != nil {
 		t.Fatalf("dispatchLocalTrigger: %v", err)
 	}
 	raw, err = os.ReadFile(outputPath)
