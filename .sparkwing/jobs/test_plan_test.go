@@ -21,6 +21,13 @@ func TestTestPipelineMeasuresAndBoundsItsCPU(t *testing.T) {
 	if hints := plan.ResourceHints(); hints != nil {
 		t.Fatalf("resource pin = %#v, want measured admission", hints)
 	}
+	nodes := plan.Nodes()
+	if len(nodes) != 1 {
+		t.Fatalf("planned nodes = %d, want 1", len(nodes))
+	}
+	if hints := nodes[0].ResourceHints(); hints != nil {
+		t.Fatalf("node resource pin = %#v, want measured admission", hints)
+	}
 	if got := testGoCommand(14); got != "GOMAXPROCS=6 go test -p 6 ./..." {
 		t.Fatalf("bounded command = %q", got)
 	}
