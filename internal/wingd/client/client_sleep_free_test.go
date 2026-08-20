@@ -14,6 +14,10 @@ func TestSlowSpawnRegressionDoesNotUseTimeSleep(t *testing.T) {
 		t.Fatalf("parse client_test.go: %v", err)
 	}
 	found := false
+	closesSpawnRequested := false
+	spawnRequestedReceives := 0
+	startDaemonReceives := 0
+	releaseStartCalls := 0
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name.Name != "TestEnsureDaemon_WaitsForOneSlowHealthySpawn" {
@@ -21,9 +25,31 @@ func TestSlowSpawnRegressionDoesNotUseTimeSleep(t *testing.T) {
 		}
 		found = true
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if receive, ok := node.(*ast.UnaryExpr); ok && receive.Op == token.ARROW {
+				if channel, ok := receive.X.(*ast.Ident); ok {
+					switch channel.Name {
+					case "spawnRequested":
+						spawnRequestedReceives++
+					case "startDaemon":
+						startDaemonReceives++
+					}
+				}
+			}
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
+			}
+			if ident, ok := call.Fun.(*ast.Ident); ok {
+				switch ident.Name {
+				case "close":
+					if len(call.Args) == 1 {
+						if arg, ok := call.Args[0].(*ast.Ident); ok && arg.Name == "spawnRequested" {
+							closesSpawnRequested = true
+						}
+					}
+				case "releaseStart":
+					releaseStartCalls++
+				}
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
 			if !ok || sel.Sel.Name != "Sleep" {
@@ -38,5 +64,8 @@ func TestSlowSpawnRegressionDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("TestEnsureDaemon_WaitsForOneSlowHealthySpawn declaration not found")
+	}
+	if !closesSpawnRequested || spawnRequestedReceives < 2 || startDaemonReceives == 0 || releaseStartCalls < 2 {
+		t.Fatal("slow-spawn regression must gate daemon startup after the spawn request and release it on normal and cleanup paths")
 	}
 }

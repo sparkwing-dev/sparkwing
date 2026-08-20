@@ -224,34 +224,101 @@ func TestEnsureDaemon_BoundsAnUnreachablePredecessorElection(t *testing.T) {
 func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
 	home := shortHome(t)
 	var calls atomic.Int32
+	spawnRequested := make(chan struct{})
+	startDaemon := make(chan struct{})
+	var spawnOnce, startOnce sync.Once
+	releaseStart := func() { startOnce.Do(func() { close(startDaemon) }) }
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+
+	var daemonErr error
+	daemonFinished := make(chan struct{})
+	go func() {
+		defer close(daemonFinished)
+		select {
+		case <-spawnRequested:
+		case <-ctx.Done():
+			daemonErr = ctx.Err()
+			return
+		}
+		select {
+		case <-startDaemon:
+		case <-ctx.Done():
+			daemonErr = ctx.Err()
+			return
+		}
+		d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0"})
+		if err != nil {
+			daemonErr = err
+			return
+		}
+		daemonErr = d.Run(ctx)
+	}()
+
 	spawn := func(string, string) error {
 		calls.Add(1)
-		go func() {
-			time.Sleep(750 * time.Millisecond)
-			d, err := wingd.New(wingd.Config{Home: home, Version: "v1.0.0"})
-			if err != nil {
-				t.Errorf("spawn: new daemon: %v", err)
-				return
-			}
-			ctx, cancel := context.WithCancel(context.Background())
-			t.Cleanup(cancel)
-			_ = d.Run(ctx)
-		}()
+		spawnOnce.Do(func() { close(spawnRequested) })
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-	cl, err := EnsureDaemon(ctx, Options{
-		Home:        home,
-		Version:     "v1.0.0",
-		Spawn:       spawn,
-		DialTimeout: 10 * time.Millisecond,
-		Backoff:     10 * time.Millisecond,
-	})
-	if err != nil {
-		t.Fatalf("ensure slow-starting daemon: %v", err)
+	type ensureResult struct {
+		cl  *Client
+		err error
 	}
-	defer cl.Close()
+	var result ensureResult
+	ensureFinished := make(chan struct{})
+	go func() {
+		defer close(ensureFinished)
+		result.cl, result.err = EnsureDaemon(ctx, Options{
+			Home:        home,
+			Version:     "v1.0.0",
+			Spawn:       spawn,
+			DialTimeout: 10 * time.Millisecond,
+			Backoff:     10 * time.Millisecond,
+		})
+	}()
+	t.Cleanup(func() {
+		releaseStart()
+		cancel()
+		joinDeadline := time.NewTimer(time.Second)
+		ensureJoined := false
+		select {
+		case <-ensureFinished:
+			ensureJoined = true
+		case <-joinDeadline.C:
+			t.Error("EnsureDaemon did not stop after cancellation")
+		}
+		joinDeadline.Stop()
+		if ensureJoined && result.cl != nil {
+			_ = result.cl.Close()
+		}
+		joinDeadline = time.NewTimer(time.Second)
+		defer joinDeadline.Stop()
+		select {
+		case <-daemonFinished:
+			if daemonErr != nil && !errors.Is(daemonErr, context.Canceled) {
+				t.Errorf("spawned daemon: %v", daemonErr)
+			}
+		case <-joinDeadline.C:
+			t.Error("spawned daemon did not stop after cancellation")
+		}
+	})
+
+	select {
+	case <-spawnRequested:
+	case <-ctx.Done():
+		t.Fatalf("spawn was not requested: %v", ctx.Err())
+	}
+	releaseStart()
+	select {
+	case <-ensureFinished:
+	case <-ctx.Done():
+		t.Fatalf("ensure slow-starting daemon: %v", ctx.Err())
+	}
+	if result.err != nil {
+		t.Fatalf("ensure slow-starting daemon: %v", result.err)
+	}
+	if result.cl == nil {
+		t.Fatal("ensure slow-starting daemon returned no client")
+	}
 	if got := calls.Load(); got != 1 {
 		t.Fatalf("spawn calls = %d, want one startup attempt", got)
 	}
