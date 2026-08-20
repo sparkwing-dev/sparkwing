@@ -18,9 +18,28 @@ func TestNoProgressLateSuccessRegressionsDoNotUseTimeSleep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse modifiers_test.go: %v", err)
 	}
+	foundAssertion := false
+	usesAtomicForce := false
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv == nil || len(fn.Recv.List) != 1 {
+		if !ok {
+			continue
+		}
+		if fn.Name.Name == "assertForcedNoProgressTimeout" {
+			foundAssertion = true
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if ok && sel.Sel.Name == "ForceProgressTimeoutForTest" {
+					usesAtomicForce = true
+				}
+				return true
+			})
+		}
+		if fn.Recv == nil || len(fn.Recv.List) != 1 {
 			continue
 		}
 		receiver, ok := fn.Recv.List[0].Type.(*ast.Ident)
@@ -52,5 +71,10 @@ func TestNoProgressLateSuccessRegressionsDoNotUseTimeSleep(t *testing.T) {
 		if !found {
 			t.Errorf("required timeout regression owner %s not found", name)
 		}
+	}
+	if !foundAssertion {
+		t.Error("required timeout assertion helper assertForcedNoProgressTimeout not found")
+	} else if !usesAtomicForce {
+		t.Error("assertForcedNoProgressTimeout must require an atomic timeout transition")
 	}
 }
