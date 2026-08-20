@@ -57,25 +57,6 @@ func (d *Daemon) deriveCapacity(stat HostStat) capacityReading {
 	return r
 }
 
-// refreshCapacity re-derives machine capacity from a fresh host sample and
-// resizes the ledger when it has moved past the hysteresis band, so a hot VM
-// resize or a runtime cgroup-quota edit is picked up without a restart.
-//
-// A shrink never evicts a running holder: the applied total is floored at the
-// cores and memory already granted, so holders drain naturally while
-// admission tightens against the smaller machine; the true smaller total
-// takes effect on a later tick once enough has drained. A grow applies at
-// once, and the headroom refresh that follows in the sample loop promotes any
-// waiter the larger capacity now fits.
-func (d *Daemon) refreshCapacity() {
-	stat, err := d.sampler.Sample()
-	if err != nil {
-		d.cfg.logf("capacity sample: %v", err)
-		return
-	}
-	d.applyCapacity(stat)
-}
-
 func (d *Daemon) applyCapacity(stat HostStat) {
 	cap := d.deriveCapacity(stat)
 

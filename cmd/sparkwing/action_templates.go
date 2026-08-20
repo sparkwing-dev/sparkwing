@@ -171,21 +171,6 @@ func printTemplateLine(m templates.Manifest) {
 	fmt.Printf("  %s%s %s\n", color.Bold(name), pad, color.Dim(truncateLine(signal)))
 }
 
-func printBuiltinShapes() {
-	fmt.Println()
-	fmt.Println(color.Bold("SHAPES") + color.Dim("  (built into `pipeline new`; DAG skeletons with echo bodies --"))
-	fmt.Println(color.Dim("         start here only when no example above fits your task)"))
-	for _, s := range builtinShapes {
-		const width = 20
-		pad := ""
-		if len(s.Name) < width {
-			pad = strings.Repeat(" ", width-len(s.Name))
-		}
-		fmt.Printf("  %s%s %s\n", color.Bold(s.Name), pad, color.Dim(s.Summary()))
-	}
-	fmt.Printf("  %s\n", color.Cyan("sparkwing pipeline new --name <name> --template <shape> [--on <event>]"))
-}
-
 // templateCategoryGroup is one category header plus the templates filed
 // under it, as rendered by the pretty list.
 type templateCategoryGroup struct {

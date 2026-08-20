@@ -129,12 +129,6 @@ func (c *nodeTimeoutController) pauseAt(queuedAt time.Time) bool {
 	return true
 }
 
-func (c *nodeTimeoutController) isPaused() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.paused
-}
-
 func (c *nodeTimeoutController) setDeadlineInspector(inspector func() bool) func() {
 	c.mu.Lock()
 	c.inspectorGen++

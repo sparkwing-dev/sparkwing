@@ -51,6 +51,19 @@ code change to unlock.
 
 ### Fixed
 
+- **wingd:** Supervisor shutdown escalates to a bounded forced stop when graceful
+  termination fails or a killed child does not reap, preventing orphaned daemon
+  processes and unbounded replacement waits.
+- **orchestrator:** Approval and debug-pause expirations wake at their configured
+  deadlines instead of waiting for the next 500ms state-poll interval.
+- **orchestrator:** Trigger consumers inspect queued dispatches and child triggers
+  immediately after startup instead of delaying the first claim by one 500ms poll.
+- **orchestrator:** Maintenance cadence scales with configured dispatch leases, so
+  expired work using short leases is reconciled before its next heartbeat while
+  the default three-minute lease retains its existing cadence.
+- **controller:** Cancelling Kubernetes pool warming interrupts pod polling
+  immediately and still removes the temporary warmup pod under a bounded cleanup
+  context.
 - **concurrency:** Superseded work receives context cancellation when holder
   observation or lease renewal reports that its replacement owns the slot.
 - **cli:** Consumer stop and upgrade replacement recognize a completed Unix

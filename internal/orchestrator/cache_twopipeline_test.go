@@ -277,9 +277,7 @@ func TestCache_TwoPipelinesShareKey_AcrossMultipleBursts(t *testing.T) {
 	const iterations = 3
 	pipelines := make([]string, 0, 2*iterations)
 	for range iterations {
-		for _, name := range []string{"publish-release", "sync-backup"} {
-			pipelines = append(pipelines, name)
-		}
+		pipelines = append(pipelines, "publish-release", "sync-backup")
 	}
 	results := runSharedS3Burst(t, p, st, pipelines)
 	for i, result := range results {

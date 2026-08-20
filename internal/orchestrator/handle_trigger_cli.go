@@ -37,11 +37,9 @@ func runHandleTriggerCLI(args []string) error {
 	imagePullPolicy := fs.String("image-pull-policy", os.Getenv("SPARKWING_IMAGE_PULL_POLICY"),
 		"imagePullPolicy for runner pods: Always | IfNotPresent | Never (default IfNotPresent; env: SPARKWING_IMAGE_PULL_POLICY)")
 	kubeconfig := fs.String("kubeconfig", os.Getenv("KUBECONFIG"), "kubeconfig path (empty = in-cluster)")
-	var k8sNodeSelector stringSliceFlag
-	k8sNodeSelector = splitEnvList(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR"))
+	k8sNodeSelector := stringSliceFlag(splitEnvList(os.Getenv("SPARKWING_RUNNER_NODE_SELECTOR")))
 	fs.Var(&k8sNodeSelector, "runner-node-selector", "node selector for runner pods, key=value (repeatable; env: SPARKWING_RUNNER_NODE_SELECTOR)")
-	var k8sTolerations stringSliceFlag
-	k8sTolerations = splitEnvList(os.Getenv("SPARKWING_RUNNER_TOLERATION"))
+	k8sTolerations := stringSliceFlag(splitEnvList(os.Getenv("SPARKWING_RUNNER_TOLERATION")))
 	fs.Var(&k8sTolerations, "runner-toleration", "toleration for runner pods, key[=value]:Effect (repeatable; env: SPARKWING_RUNNER_TOLERATION)")
 	local := fs.Bool("local", false,
 		"run against the laptop SQLite store; no controller required")

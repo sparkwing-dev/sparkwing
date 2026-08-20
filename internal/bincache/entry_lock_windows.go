@@ -51,7 +51,3 @@ func cacheLeaseReady(file *os.File) error {
 	_, err := cacheLock(file, cacheLockShared)
 	return err
 }
-
-func cacheRetainAcrossExec(*os.File) (func() error, error) {
-	return func() error { return nil }, nil
-}

@@ -42,12 +42,6 @@ type stubSampler struct{ stat wingd.HostStat }
 
 func (s stubSampler) Sample() (wingd.HostStat, error) { return s.stat, nil }
 
-// idleProcSampler reports every holder process as consuming no CPU, so
-// stall flagging fires deterministically for a blocked holder.
-type idleProcSampler struct{}
-
-func (idleProcSampler) CPUUsage(int) (wingd.ProcUsage, bool) { return wingd.ProcUsage{}, true }
-
 // startWingd runs a real daemon in-process for home with a fixed host
 // capacity, wired to the same orphan-run finalizer production uses.
 func startWingd(t *testing.T, home string, cores float64) {

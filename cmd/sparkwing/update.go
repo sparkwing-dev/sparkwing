@@ -368,20 +368,6 @@ func downloadFile(url, dst string, maxBytes int64) error {
 	return nil
 }
 
-func lookupSHA256(sumsPath, filename string) (string, error) {
-	body, err := os.ReadFile(sumsPath)
-	if err != nil {
-		return "", err
-	}
-	for _, line := range strings.Split(string(body), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 2 && fields[1] == filename {
-			return fields[0], nil
-		}
-	}
-	return "", fmt.Errorf("%s not listed in SHA256SUMS", filename)
-}
-
 func sha256OfFile(path string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -393,21 +379,6 @@ func sha256OfFile(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	_, err = io.Copy(out, in)
-	return err
 }
 
 func runUpdateSDK(version string) error {

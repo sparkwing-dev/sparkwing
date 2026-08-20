@@ -393,7 +393,7 @@ func unlocatableChildError(pipeline string) error {
 	return fmt.Errorf("locate %q: not declared by the running project, absent from the repo "+
 		"registry, and this run has no git identity to resolve a sibling checkout from. Give the "+
 		"project a git remote, register the defining repo with `sparkwing configure xrepo add <path>`, "+
-		"or pass sparkwing.WithFreshRepo(\"owner/name\") for a cross-repo await.",
+		"or pass sparkwing.WithFreshRepo(\"owner/name\") for a cross-repo await",
 		pipeline)
 }
 
