@@ -115,7 +115,6 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 		t.Skipf("burner drew only %d millicores; host too loaded to measure", trueMillicores)
 	}
 
-	reportedAt := time.Now()
 	nodemetrics.AddReportedChildCPU(childCPU)
 	if err := st.AddNodeMetricSample(ctx, "r1", "step", store.MetricSample{
 		TS:            time.Now(),
@@ -124,6 +123,7 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	reportedAt := time.Now()
 	waitForReconcileSampleAfter(t, sampCtx, samples, reportedAt)
 	stopAndJoinSampler()
 

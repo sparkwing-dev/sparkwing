@@ -24,6 +24,8 @@ func TestCapacityReconciliationRegressionDoesNotUseTimeSleep(t *testing.T) {
 	zeroBoundaryWaits := 0
 	reportedBoundaryWaits := 0
 	var reportedChildCPUPos token.Pos
+	var manualSamplePos token.Pos
+	var reportedAtAssignmentPos token.Pos
 	var reportedBoundaryPos token.Pos
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -41,6 +43,13 @@ func TestCapacityReconciliationRegressionDoesNotUseTimeSleep(t *testing.T) {
 		}
 		targets[name] = true
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if assignment, ok := node.(*ast.AssignStmt); ok && name == "TestRecordRunProfile_SDKBurnerPeakNotDoubled" {
+				for _, lhs := range assignment.Lhs {
+					if ident, ok := lhs.(*ast.Ident); ok && ident.Name == "reportedAt" {
+						reportedAtAssignmentPos = assignment.Pos()
+					}
+				}
+			}
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
@@ -80,6 +89,9 @@ func TestCapacityReconciliationRegressionDoesNotUseTimeSleep(t *testing.T) {
 			if ok && name == "TestRecordRunProfile_SDKBurnerPeakNotDoubled" && pkg.Name == "nodemetrics" && sel.Sel.Name == "AddReportedChildCPU" {
 				reportedChildCPUPos = call.Pos()
 			}
+			if ok && name == "TestRecordRunProfile_SDKBurnerPeakNotDoubled" && pkg.Name == "st" && sel.Sel.Name == "AddNodeMetricSample" {
+				manualSamplePos = call.Pos()
+			}
 			return true
 		})
 	}
@@ -94,7 +106,7 @@ func TestCapacityReconciliationRegressionDoesNotUseTimeSleep(t *testing.T) {
 	if zeroBoundaryWaits != 1 || reportedBoundaryWaits != 1 {
 		t.Errorf("sample boundaries = zero:%d reported:%d, want one of each", zeroBoundaryWaits, reportedBoundaryWaits)
 	}
-	if reportedChildCPUPos == token.NoPos || reportedBoundaryPos <= reportedChildCPUPos {
-		t.Error("reportedAt sample boundary must follow AddReportedChildCPU")
+	if reportedChildCPUPos == token.NoPos || manualSamplePos <= reportedChildCPUPos || reportedAtAssignmentPos <= manualSamplePos || reportedBoundaryPos <= reportedAtAssignmentPos {
+		t.Error("reportedAt must be captured after child attribution and its manual sample, then used by the later sampler wait")
 	}
 }
