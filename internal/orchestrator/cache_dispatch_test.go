@@ -778,17 +778,29 @@ func waitForConcurrencyHolder(t *testing.T, dbPath, holderID string) {
 		t.Fatalf("open store: %v", err)
 	}
 	defer func() { _ = st.Close() }()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
+	deadlineAt := time.Now().Add(15 * time.Second)
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+	poll := time.NewTicker(2 * time.Millisecond)
+	defer poll.Stop()
+	for time.Now().Before(deadlineAt) {
 		var count int
 		err := st.DB().QueryRowContext(context.Background(),
 			`SELECT COUNT(*) FROM concurrency_holders WHERE holder_id = ?`,
 			holderID,
 		).Scan(&count)
-		if err == nil && count > 0 {
+		if err != nil {
+			t.Fatalf("query concurrency holder %q: %v", holderID, err)
+		}
+		if count > 0 {
 			return
 		}
-		time.Sleep(2 * time.Millisecond)
+		poll.Reset(2 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for concurrency holder %q", holderID)
+		}
 	}
 	t.Fatalf("timed out waiting for concurrency holder %q", holderID)
 }
