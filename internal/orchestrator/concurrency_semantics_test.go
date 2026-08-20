@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -18,6 +19,48 @@ var sem struct {
 	runs     atomic.Int32
 	inflight atomic.Int32
 	peak     atomic.Int32
+}
+
+type semStepGate struct {
+	started     chan struct{}
+	release     chan struct{}
+	startedOnce sync.Once
+	releaseOnce sync.Once
+}
+
+type semRunOutcome struct {
+	res *orchestrator.Result
+	err error
+}
+
+func requireSemRunSuccess(t *testing.T, name string, outcome semRunOutcome) {
+	t.Helper()
+	if outcome.err != nil || outcome.res == nil || outcome.res.Status != "success" {
+		status := ""
+		if outcome.res != nil {
+			status = outcome.res.Status
+		}
+		t.Fatalf("%s status=%q err=%v", name, status, outcome.err)
+	}
+}
+
+var activeSemStepGate atomic.Pointer[semStepGate]
+
+func (g *semStepGate) letRun() {
+	g.releaseOnce.Do(func() { close(g.release) })
+}
+
+func installSemStepGate(t *testing.T) *semStepGate {
+	t.Helper()
+	gate := &semStepGate{started: make(chan struct{}), release: make(chan struct{})}
+	if !activeSemStepGate.CompareAndSwap(nil, gate) {
+		t.Fatal("sem-step gate already installed")
+	}
+	t.Cleanup(func() {
+		gate.letRun()
+		activeSemStepGate.CompareAndSwap(gate, nil)
+	})
+	return gate
 }
 
 func resetSem() {
@@ -160,7 +203,7 @@ func waitForQueuedRun(t *testing.T, dbPath, key, runID string) {
 	t.Fatalf("timed out waiting for run %q on %q", runID, key)
 }
 
-func semStep(hold time.Duration) func(ctx context.Context) error {
+func semStep() func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		sem.runs.Add(1)
 		cur := sem.inflight.Add(1)
@@ -171,8 +214,54 @@ func semStep(hold time.Duration) func(ctx context.Context) error {
 				break
 			}
 		}
-		time.Sleep(hold)
-		return nil
+		gate := activeSemStepGate.Load()
+		if gate == nil {
+			return nil
+		}
+		gate.startedOnce.Do(func() { close(gate.started) })
+		select {
+		case <-gate.release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+func waitForSemConcurrencyPopulation(t *testing.T, ctx context.Context, dbPath, groupName string, holders, waiters int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store while waiting for %s: %v", groupName, err)
+	}
+	defer func() { _ = st.Close() }()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		states, err := st.ListConcurrencyStates(ctx)
+		if err != nil {
+			t.Fatalf("list concurrency states while waiting for %s: %v", groupName, err)
+		}
+		matches := 0
+		for _, state := range states {
+			if strings.HasSuffix(state.Key, groupName) {
+				matches++
+				if len(state.Holders) == holders && len(state.Waiters) == waiters {
+					return
+				}
+			}
+		}
+		if matches > 1 {
+			t.Fatalf("found %d concurrency states ending in %q", matches, groupName)
+		}
+		poll.Reset(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for %s population holders=%d waiters=%d", groupName, holders, waiters)
+		}
 	}
 }
 
@@ -185,9 +274,9 @@ type memoDiffGroupsPipe struct{ sparkwing.Base }
 func (memoDiffGroupsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	gx := sparkwing.NewConcurrencyGroup("memo-gx", sparkwing.ConcurrencyLimit{Capacity: 1})
 	gy := sparkwing.NewConcurrencyGroup("memo-gy", sparkwing.ConcurrencyLimit{Capacity: 1})
-	a := sparkwing.Job(plan, "a", semStep(40*time.Millisecond)).
+	a := sparkwing.Job(plan, "a", semStep()).
 		Concurrency(gx).Memoize(contentKey("shared"))
-	sparkwing.Job(plan, "b", semStep(40*time.Millisecond)).
+	sparkwing.Job(plan, "b", semStep()).
 		Concurrency(gy).Memoize(contentKey("shared")).Needs(a)
 	return nil
 }
@@ -196,16 +285,16 @@ type memoSameGroupDiffContentPipe struct{ sparkwing.Base }
 
 func (memoSameGroupDiffContentPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := sparkwing.NewConcurrencyGroup("memo-same", sparkwing.ConcurrencyLimit{Capacity: 2})
-	sparkwing.Job(plan, "a", semStep(40*time.Millisecond)).Concurrency(g).Memoize(contentKey("k-a"))
-	sparkwing.Job(plan, "b", semStep(40*time.Millisecond)).Concurrency(g).Memoize(contentKey("k-b"))
+	sparkwing.Job(plan, "a", semStep()).Concurrency(g).Memoize(contentKey("k-a"))
+	sparkwing.Job(plan, "b", semStep()).Concurrency(g).Memoize(contentKey("k-b"))
 	return nil
 }
 
 type memoInFlightPipe struct{ sparkwing.Base }
 
 func (memoInFlightPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "a", semStep(300*time.Millisecond)).Memoize(contentKey("dup"))
-	sparkwing.Job(plan, "b", semStep(300*time.Millisecond)).Memoize(contentKey("dup"))
+	sparkwing.Job(plan, "a", semStep()).Memoize(contentKey("dup"))
+	sparkwing.Job(plan, "b", semStep()).Memoize(contentKey("dup"))
 	return nil
 }
 
@@ -215,7 +304,7 @@ func (scopeBoxPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 	g := sparkwing.NewConcurrencyGroup("scope-box", sparkwing.ConcurrencyLimit{
 		Capacity: 1, Scope: sparkwing.ScopeBox,
 	})
-	sparkwing.Job(plan, "work", semStep(250*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "work", semStep()).Concurrency(g)
 	return nil
 }
 
@@ -272,8 +361,8 @@ func costBoxGroup() *sparkwing.ConcurrencyGroup {
 
 func (costBoxAPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := costBoxGroup()
-	sparkwing.Job(plan, "a", semStep(300*time.Millisecond)).Concurrency(g, 4)
-	sparkwing.Job(plan, "b", semStep(300*time.Millisecond)).Concurrency(g, 4)
+	sparkwing.Job(plan, "a", semStep()).Concurrency(g, 4)
+	sparkwing.Job(plan, "b", semStep()).Concurrency(g, 4)
 	return nil
 }
 
@@ -281,7 +370,7 @@ type costBoxBPipe struct{ sparkwing.Base }
 
 func (costBoxBPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := costBoxGroup()
-	sparkwing.Job(plan, "c", semStep(300*time.Millisecond)).Concurrency(g, 4)
+	sparkwing.Job(plan, "c", semStep()).Concurrency(g, 4)
 	return nil
 }
 
@@ -292,9 +381,9 @@ type workerSlotPipe struct{ sparkwing.Base }
 func (workerSlotPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	start := time.Now()
 	g := sparkwing.NewConcurrencyGroup("worker-block", sparkwing.ConcurrencyLimit{Capacity: 1})
-	sparkwing.Job(plan, "g1", semStep(500*time.Millisecond)).Concurrency(g)
-	sparkwing.Job(plan, "g2", semStep(500*time.Millisecond)).Concurrency(g)
-	sparkwing.Job(plan, "g3", semStep(500*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "g1", semStep()).Concurrency(g)
+	sparkwing.Job(plan, "g2", semStep()).Concurrency(g)
+	sparkwing.Job(plan, "g3", semStep()).Concurrency(g)
 	sparkwing.Job(plan, "free", func(ctx context.Context) error {
 		freeNodeLatency.Store(int64(time.Since(start)))
 		return nil
@@ -316,7 +405,7 @@ func (queueTimeoutFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, 
 	g := sparkwing.NewConcurrencyGroup("qt-key", sparkwing.ConcurrencyLimit{
 		Capacity: 1, OnLimit: sparkwing.Queue, QueueTimeout: 200 * time.Millisecond,
 	})
-	sparkwing.Job(plan, "follower", semStep(50*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "follower", semStep()).Concurrency(g)
 	return nil
 }
 
@@ -376,11 +465,35 @@ func TestMemo_SameGroupDifferentContentBothRun(t *testing.T) {
 
 func TestMemo_InFlightDedupeOnContent(t *testing.T) {
 	resetSem()
+	gate := installSemStepGate(t)
 	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "memo-inflight"})
-	if err != nil || res.Status != "success" {
-		t.Fatalf("run: status=%q err=%v", res.Status, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	done := make(chan semRunOutcome, 1)
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		gate.letRun()
+		cancel()
+		joinCacheDispatchWorker(t, "memo in-flight run", finished)
+	})
+	go func() {
+		defer close(finished)
+		res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "memo-inflight"})
+		done <- semRunOutcome{res: res, err: err}
+	}()
+	select {
+	case <-gate.started:
+	case <-ctx.Done():
+		t.Fatal("memo leader body did not start")
 	}
+	waitForCoalesceWaiter(t, p.StateDB())
+	gate.letRun()
+	var got semRunOutcome
+	select {
+	case got = <-done:
+	case <-ctx.Done():
+		t.Fatal("memo in-flight run did not finish")
+	}
+	requireSemRunSuccess(t, "memo in-flight run", got)
 	if got := sem.runs.Load(); got != 1 {
 		t.Fatalf("body ran %d times, want 1 (identical in-flight content must dedupe)", got)
 	}
@@ -391,18 +504,42 @@ func TestMemo_InFlightDedupeOnContent(t *testing.T) {
 
 func TestScope_BoxSerializesAcrossRunsOnSameHost(t *testing.T) {
 	resetSem()
+	gate := installSemStepGate(t)
 	p := newPaths(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	var wg sync.WaitGroup
+	results := make(chan semRunOutcome, 2)
+	finished := make(chan struct{})
 	for i := range 2 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+			res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{
 				Pipeline: "scope-box", RunID: fmt.Sprintf("box-%d", i),
 			})
+			results <- semRunOutcome{res: res, err: err}
 		}(i)
 	}
-	wg.Wait()
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+	t.Cleanup(func() {
+		gate.letRun()
+		cancel()
+		joinCacheDispatchWorker(t, "box-scope runs", finished)
+	})
+	select {
+	case <-gate.started:
+	case <-ctx.Done():
+		t.Fatal("box-scope holder body did not start")
+	}
+	waitForSemConcurrencyPopulation(t, ctx, p.StateDB(), "scope-box", 1, 1)
+	gate.letRun()
+	joinCacheDispatchWorker(t, "box-scope runs", finished)
+	for range 2 {
+		requireSemRunSuccess(t, "box-scope run", <-results)
+	}
 	if peak := sem.peak.Load(); peak > 1 {
 		t.Fatalf("Box-scoped peak across runs = %d, want 1 (shared budget on one host)", peak)
 	}
@@ -442,18 +579,43 @@ func TestScope_RunIsolatesPerRun(t *testing.T) {
 
 func TestConcurrency_CostSummedAcrossBoxScope(t *testing.T) {
 	resetSem()
+	gate := installSemStepGate(t)
 	p := newPaths(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	var wg sync.WaitGroup
+	results := make(chan semRunOutcome, 2)
+	finished := make(chan struct{})
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cost-box-a", RunID: "cb-a"})
+		res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "cost-box-a", RunID: "cb-a"})
+		results <- semRunOutcome{res: res, err: err}
 	}()
 	go func() {
 		defer wg.Done()
-		_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cost-box-b", RunID: "cb-b"})
+		res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "cost-box-b", RunID: "cb-b"})
+		results <- semRunOutcome{res: res, err: err}
 	}()
-	wg.Wait()
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+	t.Cleanup(func() {
+		gate.letRun()
+		cancel()
+		joinCacheDispatchWorker(t, "cost-box runs", finished)
+	})
+	select {
+	case <-gate.started:
+	case <-ctx.Done():
+		t.Fatal("cost-box holder body did not start")
+	}
+	waitForSemConcurrencyPopulation(t, ctx, p.StateDB(), "cost-box", 2, 1)
+	gate.letRun()
+	joinCacheDispatchWorker(t, "cost-box runs", finished)
+	for range 2 {
+		requireSemRunSuccess(t, "cost-box run", <-results)
+	}
 	if peak := sem.peak.Load(); peak > 2 {
 		t.Fatalf("cost-weighted Box peak = %d, want <= 2 (8/4)", peak)
 	}
@@ -461,18 +623,48 @@ func TestConcurrency_CostSummedAcrossBoxScope(t *testing.T) {
 
 func TestConcurrency_WaitDoesNotHoldWorkerSlot(t *testing.T) {
 	resetSem()
+	gate := installSemStepGate(t)
 	freeNodeLatency.Store(0)
 	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline: "worker-slot-yield", MaxParallel: 2,
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	done := make(chan semRunOutcome, 1)
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		gate.letRun()
+		cancel()
+		joinCacheDispatchWorker(t, "worker-slot run", finished)
 	})
-	if err != nil || res.Status != "success" {
-		t.Fatalf("run: status=%q err=%v", res.Status, err)
+	go func() {
+		defer close(finished)
+		res, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "worker-slot-yield", MaxParallel: 2})
+		done <- semRunOutcome{res: res, err: err}
+	}()
+	select {
+	case <-gate.started:
+	case <-ctx.Done():
+		t.Fatal("worker-slot holder body did not start")
+	}
+	waitForSemConcurrencyPopulation(t, ctx, p.StateDB(), "worker-block", 1, 2)
+	poll := time.NewTicker(2 * time.Millisecond)
+	defer poll.Stop()
+	for freeNodeLatency.Load() == 0 {
+		if err := ctx.Err(); err != nil {
+			t.Fatal("free node did not run while grouped nodes were queued")
+		}
+		waitForConcurrencyPoll(poll)
 	}
 	latency := time.Duration(freeNodeLatency.Load())
-	if latency == 0 || latency > 300*time.Millisecond {
+	if latency > 300*time.Millisecond {
 		t.Fatalf("free node latency = %s, want < 300ms (queued waiters must not pin worker slots)", latency)
 	}
+	gate.letRun()
+	var got semRunOutcome
+	select {
+	case got = <-done:
+	case <-ctx.Done():
+		t.Fatal("worker-slot run did not finish")
+	}
+	requireSemRunSuccess(t, "worker-slot run", got)
 }
 
 func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
@@ -500,14 +692,14 @@ func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
 type memoSkipLeaderPipe struct{ sparkwing.Base }
 
 func (memoSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "leader", semStep(0)).Memoize(contentKey("skip-dup")).SkipIf(heldSkip)
+	sparkwing.Job(plan, "leader", semStep()).Memoize(contentKey("skip-dup")).SkipIf(heldSkip)
 	return nil
 }
 
 type memoSkipFollowerPipe struct{ sparkwing.Base }
 
 func (memoSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	sparkwing.Job(plan, "follower", semStep(0)).
+	sparkwing.Job(plan, "follower", semStep()).
 		Memoize(contentKey("skip-dup")).
 		SkipIf(func(ctx context.Context) bool { return true })
 	return nil
@@ -525,7 +717,7 @@ type phantomWaiterPipe struct{ sparkwing.Base }
 
 func (phantomWaiterPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := sparkwing.NewConcurrencyGroup("phantom", sparkwing.ConcurrencyLimit{Capacity: 1, Scope: sparkwing.ScopeGlobal})
-	sparkwing.Job(plan, "wait", semStep(50*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "wait", semStep()).Concurrency(g)
 	return nil
 }
 
