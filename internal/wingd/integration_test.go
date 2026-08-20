@@ -51,7 +51,10 @@ func TestElection_ExactlyOneWinner(t *testing.T) {
 	}
 
 	var winners int
-	deadline := time.After(3 * time.Second)
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for winners == 0 {
 		for _, d := range daemons {
 			select {
@@ -62,15 +65,17 @@ func TestElection_ExactlyOneWinner(t *testing.T) {
 		}
 		if winners == 0 {
 			select {
-			case <-deadline:
+			case <-deadline.C:
 				t.Fatal("no daemon won the election")
-			case <-time.After(10 * time.Millisecond):
+			case <-poll.C:
 			}
 		}
 	}
+	poll.Stop()
 
 	lost := 0
-	loseDeadline := time.After(3 * time.Second)
+	loseDeadline := time.NewTimer(3 * time.Second)
+	defer loseDeadline.Stop()
 	for lost < n-1 {
 		select {
 		case err := <-errs:
@@ -78,7 +83,7 @@ func TestElection_ExactlyOneWinner(t *testing.T) {
 				t.Fatalf("loser returned %v, want ErrNotElected", err)
 			}
 			lost++
-		case <-loseDeadline:
+		case <-loseDeadline.C:
 			t.Fatalf("only %d of %d losers reported ErrNotElected", lost, n-1)
 		}
 	}
