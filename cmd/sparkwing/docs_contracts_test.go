@@ -48,6 +48,19 @@ func docsMentionEnvVar(documented, name string) bool {
 	return re.MatchString(documented)
 }
 
+func TestDocsMentionEnvVarDoesNotAllocatePerLookup(t *testing.T) {
+	mentioned := false
+	allocs := testing.AllocsPerRun(100, func() {
+		mentioned = docsMentionEnvVar("before SPARKWING_CACHE_TOKEN after", "SPARKWING_CACHE_TOKEN")
+	})
+	if !mentioned {
+		t.Fatal("environment variable token was not found")
+	}
+	if allocs != 0 {
+		t.Fatalf("docsMentionEnvVar allocated %.0f objects per lookup, want 0", allocs)
+	}
+}
+
 var undocumentedEnvVars = []string{
 	"SPARKWING_AUTO_REGISTER_WORKTREES",
 	"SPARKWING_BAKED_BINARY",
