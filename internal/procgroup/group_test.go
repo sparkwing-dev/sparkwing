@@ -5,11 +5,13 @@ package procgroup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 const (
 	helperMode        = "SPARKWING_PROCGROUP_HELPER"
 	procgroupReadyEnv = "SPARKWING_PROCGROUP_READY"
+	procgroupReadyFD  = "SPARKWING_PROCGROUP_READY_FD"
 )
 
 func TestGroupHelperProcess(t *testing.T) {
@@ -26,13 +29,11 @@ func TestGroupHelperProcess(t *testing.T) {
 		IgnoreTermination()
 		holdHelperProcess(os.Getenv(procgroupReadyEnv))
 	case "leader":
-		child := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-		child.Env = append(os.Environ(), helperMode+"=descendant")
-		if err := child.Start(); err != nil {
+		if err := startReadyGroupDescendant(false); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 		IgnoreTermination()
-		time.Sleep(100 * time.Millisecond)
 		os.Exit(0)
 	case "short":
 		os.Exit(0)
@@ -41,13 +42,10 @@ func TestGroupHelperProcess(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		os.Exit(0)
 	case "session-leader":
-		child := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-		child.Env = append(os.Environ(), helperMode+"=descendant")
-		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		if err := child.Start(); err != nil {
+		if err := startReadyGroupDescendant(true); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
-		time.Sleep(100 * time.Millisecond)
 		os.Exit(0)
 	case "session-stubborn":
 		IgnoreTermination()
@@ -81,6 +79,20 @@ func holdHelperProcess(ready string) {
 	if err != nil {
 		os.Exit(2)
 	}
+	if fdText := os.Getenv(procgroupReadyFD); fdText != "" {
+		fd, err := strconv.Atoi(fdText)
+		if err != nil {
+			_ = ln.Close()
+			os.Exit(2)
+		}
+		readyPipe := os.NewFile(uintptr(fd), "procgroup-helper-ready")
+		if _, err := readyPipe.Write([]byte{1}); err != nil {
+			_ = readyPipe.Close()
+			_ = ln.Close()
+			os.Exit(2)
+		}
+		_ = readyPipe.Close()
+	}
 	if ready != "" {
 		if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
 			_ = ln.Close()
@@ -91,6 +103,67 @@ func holdHelperProcess(ready string) {
 		os.Exit(2)
 	}
 	os.Exit(2)
+}
+
+func startReadyGroupDescendant(setpgid bool) error {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create descendant readiness pipe: %w", err)
+	}
+	defer reader.Close()
+	child := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	child.Env = append(os.Environ(), helperMode+"=descendant", procgroupReadyFD+"=3")
+	child.ExtraFiles = []*os.File{writer}
+	if setpgid {
+		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
+	if err := child.Start(); err != nil {
+		_ = writer.Close()
+		return fmt.Errorf("start descendant: %w", err)
+	}
+	_ = writer.Close()
+	type readyResult struct {
+		n     int
+		value byte
+		err   error
+	}
+	ready := make(chan readyResult, 1)
+	go func() {
+		buf := make([]byte, 1)
+		n, err := reader.Read(buf)
+		ready <- readyResult{n: n, value: buf[0], err: err}
+	}()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	var readyErr error
+	select {
+	case result := <-ready:
+		if result.err == nil && result.n == 1 && result.value == 1 {
+			return nil
+		}
+		readyErr = fmt.Errorf("invalid descendant readiness: n=%d value=%d err=%v", result.n, result.value, result.err)
+	case <-timer.C:
+		readyErr = errors.New("timed out waiting for descendant readiness")
+	}
+	killErr := child.Process.Kill()
+	waited := make(chan error, 1)
+	go func() {
+		waited <- child.Wait()
+	}()
+	join := time.NewTimer(time.Second)
+	defer join.Stop()
+	select {
+	case <-waited:
+		if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+			return fmt.Errorf("%w; kill descendant: %v", readyErr, killErr)
+		}
+		return readyErr
+	case <-join.C:
+		if killErr != nil {
+			return fmt.Errorf("%w; kill descendant: %v; wait did not return", readyErr, killErr)
+		}
+		return fmt.Errorf("%w; descendant did not stop after kill", readyErr)
+	}
 }
 
 func TestSessionIdentityBindsInspectionToLeaderBirth(t *testing.T) {
