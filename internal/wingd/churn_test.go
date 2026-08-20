@@ -162,7 +162,8 @@ func observeReattachedHolderFor(t *testing.T, home, runID string, duration time.
 	t.Helper()
 	q := ensure(t, home, "")
 	defer func() { _ = q.Close() }()
-	deadlineAt := time.Now().Add(duration)
+	started := time.Now()
+	deadlineAt := started.Add(duration)
 	poll := time.NewTicker(20 * time.Millisecond)
 	defer poll.Stop()
 	observation := time.NewTimer(duration)
@@ -178,6 +179,9 @@ func observeReattachedHolderFor(t *testing.T, home, runID string, duration time.
 			t.Fatalf("reattached holder %q disappeared during its successor grace observation", runID)
 		}
 		if !time.Now().Before(deadlineAt) {
+			if elapsed := time.Since(started); elapsed < duration {
+				t.Fatalf("reattached holder observation took %s, want at least %s", elapsed, duration)
+			}
 			return
 		}
 		select {
