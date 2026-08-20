@@ -9,6 +9,7 @@ import (
 
 func TestNoProgressLateSuccessRegressionsDoNotUseTimeSleep(t *testing.T) {
 	targets := map[string]bool{
+		"absoluteLateActionPipe.Plan":   false,
 		"noProgressLateActionPipe.Plan": false,
 		"noProgressLateVerifyPipe.Plan": false,
 	}
@@ -20,6 +21,8 @@ func TestNoProgressLateSuccessRegressionsDoNotUseTimeSleep(t *testing.T) {
 	}
 	foundAssertion := false
 	usesAtomicForce := false
+	foundAbsoluteAssertion := false
+	usesAtomicAbsoluteForce := false
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok {
@@ -35,6 +38,20 @@ func TestNoProgressLateSuccessRegressionsDoNotUseTimeSleep(t *testing.T) {
 				sel, ok := call.Fun.(*ast.SelectorExpr)
 				if ok && sel.Sel.Name == "ForceProgressTimeoutForTest" {
 					usesAtomicForce = true
+				}
+				return true
+			})
+		}
+		if fn.Name.Name == "assertForcedAbsoluteTimeout" {
+			foundAbsoluteAssertion = true
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				sel, ok := call.Fun.(*ast.SelectorExpr)
+				if ok && sel.Sel.Name == "ForceNodeTimeoutForTest" {
+					usesAtomicAbsoluteForce = true
 				}
 				return true
 			})
@@ -62,7 +79,7 @@ func TestNoProgressLateSuccessRegressionsDoNotUseTimeSleep(t *testing.T) {
 			}
 			pkg, ok := sel.X.(*ast.Ident)
 			if ok && pkg.Name == "time" {
-				t.Errorf("%s uses time.Sleep; synchronize timeout completion through the progress controller", name)
+				t.Errorf("%s uses time.Sleep; synchronize completion through its timeout controller", name)
 			}
 			return true
 		})
@@ -76,5 +93,10 @@ func TestNoProgressLateSuccessRegressionsDoNotUseTimeSleep(t *testing.T) {
 		t.Error("required timeout assertion helper assertForcedNoProgressTimeout not found")
 	} else if !usesAtomicForce {
 		t.Error("assertForcedNoProgressTimeout must require an atomic timeout transition")
+	}
+	if !foundAbsoluteAssertion {
+		t.Error("required timeout assertion helper assertForcedAbsoluteTimeout not found")
+	} else if !usesAtomicAbsoluteForce {
+		t.Error("assertForcedAbsoluteTimeout must require an atomic timeout transition")
 	}
 }
