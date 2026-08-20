@@ -27,7 +27,7 @@ func TestCancelOthersRegressionsControlSupersessionCadence(t *testing.T) {
 				return true
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "SetSupersessionPollIntervalForTest" {
+			if !ok || sel.Sel.Name != "SetSlotObservationIntervalForTest" {
 				return true
 			}
 			receiver, ok := sel.X.(*ast.Ident)
@@ -50,5 +50,5 @@ func TestCancelOthersRegressionsControlSupersessionCadence(t *testing.T) {
 		}
 		break
 	}
-	t.Fatal("testCancelOthersStopsLeader must set the supersession poll interval to 10ms")
+	t.Fatal("testCancelOthersStopsLeader must set the slot observation interval to 10ms")
 }
