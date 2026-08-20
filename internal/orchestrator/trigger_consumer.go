@@ -53,12 +53,18 @@ const DefaultConsumerIdleTimeout = 5 * time.Minute
 // consumerPollInterval matches the dashboard-hosted loop's cadence.
 const consumerPollInterval = 500 * time.Millisecond
 
-// consumerMaintenanceInterval is how often the consumer sweeps expired
-// trigger leases back onto the queue. It must be well under the claim
-// lease so a crashed dispatch is recovered promptly once its lease
-// lapses, and well over the poll interval so the sweep is not a hot
-// query on an idle home.
-const consumerMaintenanceInterval = 15 * time.Second
+// defaultConsumerMaintenanceInterval caps expired-lease sweeps for the
+// standard lease. Short configured leases scale below it; the consumer
+// poll cadence remains the lower bound on how often a sweep can run.
+const defaultConsumerMaintenanceInterval = 15 * time.Second
+
+func consumerMaintenanceIntervalForLease(lease time.Duration) time.Duration {
+	interval := lease / 12
+	if interval > defaultConsumerMaintenanceInterval {
+		return defaultConsumerMaintenanceInterval
+	}
+	return interval
+}
 
 // ConsumerLayout names the files one home's resident consumer owns.
 type ConsumerLayout struct {
@@ -349,6 +355,7 @@ func consumeLocalTriggers(
 	defer ticker.Stop()
 	lastWork := time.Now()
 	lastMaintenance := time.Now()
+	maintenanceInterval := consumerMaintenanceIntervalForLease(rt.lease)
 
 	for {
 		select {
@@ -357,7 +364,7 @@ func consumeLocalTriggers(
 		case <-ticker.C:
 		}
 
-		if rt.maintain && time.Since(lastMaintenance) >= consumerMaintenanceInterval {
+		if rt.maintain && time.Since(lastMaintenance) >= maintenanceInterval {
 			lastMaintenance = time.Now()
 			requeueExpiredClaims(ctx, st, inFlight, logger)
 		}
