@@ -35,6 +35,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	cancellationRejectsPausedExpiry := false
 	remainingBudgetChecksPausedController := false
 	remainingBudgetRejectsPausedExpiry := false
+	remainingBudgetInspectsControllerState := false
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_dispatch_test.go", nil, 0)
 	if err != nil {
@@ -84,6 +85,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					remainingBudgetChecksPausedController = true
 				case "ForceNodeTimeoutForTest":
 					remainingBudgetRejectsPausedExpiry = true
+				case "NodeTimeoutStateForTest":
+					remainingBudgetInspectsControllerState = true
 				}
 			}
 			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
@@ -121,5 +124,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if !remainingBudgetRejectsPausedExpiry {
 		t.Error("remaining-budget regression does not reject forced timeout while admission is paused")
+	}
+	if !remainingBudgetInspectsControllerState {
+		t.Error("remaining-budget regression does not compare paused and resumed timeout state")
 	}
 }
