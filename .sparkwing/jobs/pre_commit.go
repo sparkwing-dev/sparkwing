@@ -412,14 +412,20 @@ func runBuild(ctx context.Context) error {
 }
 
 func runTest(ctx context.Context) error {
+	return withGoTestScratch(func(testRoot string) error {
+		return forEachGoModuleEnv(
+			ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), productTestUnset,
+			map[string]string{"TMPDIR": testRoot},
+		)
+	})
+}
+
+func withGoTestScratch(run func(string) error) error {
 	testRoot, err := os.MkdirTemp("", "sparkwing-go-test-")
 	if err != nil {
 		return fmt.Errorf("create go test temporary root: %w", err)
 	}
-	testErr := forEachGoModuleEnv(
-		ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), productTestUnset,
-		map[string]string{"TMPDIR": testRoot},
-	)
+	testErr := run(testRoot)
 	cleanupErr := os.RemoveAll(testRoot)
 	if cleanupErr != nil {
 		cleanupErr = fmt.Errorf("remove go test temporary root: %w", cleanupErr)

@@ -47,7 +47,10 @@ func TestTestPipelineReservesAndBoundsItsCPU(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := `func (p *Test) run(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, testGoCommand(runtime.NumCPU())).Run(); err != nil {
+	if err := withGoTestScratch(func(testRoot string) error {
+		_, err := sparkwing.Bash(ctx, testGoCommand(runtime.NumCPU())).Env("TMPDIR", testRoot).Run()
+		return err
+	}); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "go test: all packages passed")
