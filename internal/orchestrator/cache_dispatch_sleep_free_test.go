@@ -41,6 +41,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	earlyResumeChecksPausedController := false
 	earlyResumeRejectsPausedExpiry := false
 	earlyResumeControlsRemainder := false
+	noProgressChecksPausedController := false
+	noProgressRejectsPausedExpiry := false
 	earlyResumeGateGated := false
 	cancellationGateUngated := false
 	remainingBudgetGateGated := false
@@ -122,6 +124,14 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					cancellationRejectsPausedExpiry = true
 				}
 			}
+			if fn.Name.Name == "TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait" && ok && pkg.Name == "orchestrator" {
+				switch sel.Sel.Name {
+				case "ProgressTimeoutPausedForTest":
+					noProgressChecksPausedController = true
+				case "ForceProgressTimeoutForTest":
+					noProgressRejectsPausedExpiry = true
+				}
+			}
 			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget" && ok && pkg.Name == "orchestrator" {
 				switch sel.Sel.Name {
 				case "NodeTimeoutPausedForTest":
@@ -160,7 +170,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 			isCancellationRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused"
 			isRemainingBudgetRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget"
 			isEarlyResumeRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline"
-			if (isPollingHelper || isCancellationRegression || isRemainingBudgetRegression || isEarlyResumeRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
+			isNoProgressRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait"
+			if (isPollingHelper || isCancellationRegression || isRemainingBudgetRegression || isEarlyResumeRegression || isNoProgressRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
 				t.Errorf("%s contains time.Sleep at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			if planWaiterCallers[fn.Name.Name] && sel.Sel.Name == "GetConcurrencyState" {
@@ -224,5 +235,11 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	if earlyResumeSetPos == token.NoPos || earlyResumeReleasePos == token.NoPos || earlyResumeSpawnWaitPos == token.NoPos ||
 		!(earlyResumeSetPos < earlyResumeReleasePos && earlyResumeReleasePos < earlyResumeSpawnWaitPos) {
 		t.Error("early-resume regression must set the remainder, release the action, then wait for child admission")
+	}
+	if !noProgressChecksPausedController {
+		t.Error("no-progress admission regression does not inspect the paused timeout controller")
+	}
+	if !noProgressRejectsPausedExpiry {
+		t.Error("no-progress admission regression does not reject forced timeout while admission is paused")
 	}
 }
