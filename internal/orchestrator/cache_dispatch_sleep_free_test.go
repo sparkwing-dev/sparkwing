@@ -32,6 +32,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	}
 	cancellationChecksPausedController := false
 	cancellationRejectsPausedExpiry := false
+	remainingBudgetChecksPausedController := false
+	remainingBudgetRejectsPausedExpiry := false
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_dispatch_test.go", nil, 0)
 	if err != nil {
@@ -75,9 +77,18 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					cancellationRejectsPausedExpiry = true
 				}
 			}
+			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget" && ok && pkg.Name == "orchestrator" {
+				switch sel.Sel.Name {
+				case "NodeTimeoutPausedForTest":
+					remainingBudgetChecksPausedController = true
+				case "ForceNodeTimeoutForTest":
+					remainingBudgetRejectsPausedExpiry = true
+				}
+			}
 			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
 			isCancellationRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused"
-			if (isPollingHelper || isCancellationRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
+			isRemainingBudgetRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget"
+			if (isPollingHelper || isCancellationRegression || isRemainingBudgetRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
 				t.Errorf("%s contains time.Sleep at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			if planWaiterCallers[fn.Name.Name] && sel.Sel.Name == "GetConcurrencyState" {
@@ -103,5 +114,11 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if !cancellationRejectsPausedExpiry {
 		t.Error("parent-cancellation regression does not reject timeout expiry while admission is paused")
+	}
+	if !remainingBudgetChecksPausedController {
+		t.Error("remaining-budget regression does not inspect the paused timeout controller")
+	}
+	if !remainingBudgetRejectsPausedExpiry {
+		t.Error("remaining-budget regression does not reject forced timeout while admission is paused")
 	}
 }
