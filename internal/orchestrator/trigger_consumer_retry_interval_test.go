@@ -13,6 +13,7 @@ func TestDashboardConsumerRetakeUsesControlledElectionRetryInterval(t *testing.T
 	targets := map[string]bool{
 		"RunLocalTriggerConsumer":                                       false,
 		"runLocalTriggerConsumerWithRetryInterval":                      false,
+		"serveConsumerContending":                                       false,
 		"TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut": false,
 	}
 	for _, path := range files {
@@ -29,17 +30,32 @@ func TestDashboardConsumerRetakeUsesControlledElectionRetryInterval(t *testing.T
 				continue
 			}
 			targets[fn.Name.Name] = true
-			var matchesArg func(ast.Expr) bool
+			var matchesCall func(*ast.CallExpr) bool
 			switch fn.Name.Name {
 			case "RunLocalTriggerConsumer":
-				matchesArg = func(expr ast.Expr) bool {
-					id, ok := expr.(*ast.Ident)
-					return ok && id.Name == "consumerElectionRetryInterval"
+				matchesCall = func(call *ast.CallExpr) bool {
+					return callsWithLastArg(call, "runLocalTriggerConsumerWithRetryInterval", "consumerElectionRetryInterval")
+				}
+			case "runLocalTriggerConsumerWithRetryInterval":
+				matchesCall = func(call *ast.CallExpr) bool {
+					return callsWithLastArg(call, "serveConsumerContending", "retryInterval")
+				}
+			case "serveConsumerContending":
+				matchesCall = func(call *ast.CallExpr) bool {
+					sel, ok := call.Fun.(*ast.SelectorExpr)
+					if !ok {
+						return false
+					}
+					pkg, pkgOK := sel.X.(*ast.Ident)
+					return pkgOK && pkg.Name == "time" && sel.Sel.Name == "After" &&
+						len(call.Args) == 1 && isIdent(call.Args[0], "retryInterval")
 				}
 			case "TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut":
-				matchesArg = isTenMilliseconds
-			default:
-				continue
+				matchesCall = func(call *ast.CallExpr) bool {
+					name, ok := call.Fun.(*ast.Ident)
+					return ok && name.Name == "runLocalTriggerConsumerWithRetryInterval" &&
+						len(call.Args) == 5 && isTenMilliseconds(call.Args[4])
+				}
 			}
 			found := false
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
@@ -47,11 +63,7 @@ func TestDashboardConsumerRetakeUsesControlledElectionRetryInterval(t *testing.T
 				if !ok {
 					return true
 				}
-				name, ok := call.Fun.(*ast.Ident)
-				if !ok || name.Name != "runLocalTriggerConsumerWithRetryInterval" || len(call.Args) != 5 {
-					return true
-				}
-				found = matchesArg(call.Args[4])
+				found = found || matchesCall(call)
 				return true
 			})
 			if !found {
@@ -64,6 +76,16 @@ func TestDashboardConsumerRetakeUsesControlledElectionRetryInterval(t *testing.T
 			t.Errorf("%s not found", name)
 		}
 	}
+}
+
+func callsWithLastArg(call *ast.CallExpr, name, arg string) bool {
+	callee, ok := call.Fun.(*ast.Ident)
+	return ok && callee.Name == name && len(call.Args) == 5 && isIdent(call.Args[4], arg)
+}
+
+func isIdent(expr ast.Expr, name string) bool {
+	id, ok := expr.(*ast.Ident)
+	return ok && id.Name == name
 }
 
 func isTenMilliseconds(expr ast.Expr) bool {
