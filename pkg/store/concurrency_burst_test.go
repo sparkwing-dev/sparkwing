@@ -3,6 +3,7 @@ package store_test
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -139,6 +140,8 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 
 	const N = 20
 	var wg sync.WaitGroup
+	var arrivals atomic.Int32
+	allArrived := make(chan struct{})
 	errs := make(chan error, N)
 	for i := range N {
 		createLiveRunT(t, s, fmt.Sprintf("r-%d", i))
@@ -155,12 +158,18 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 				Key: "k", HolderID: holder, RunID: runID, NodeID: "n",
 				Capacity: 1, Policy: store.OnLimitQueue,
 			})
+			if arrivals.Add(1) == N {
+				close(allArrived)
+			}
 			if err != nil {
 				errs <- fmt.Errorf("arrival %d acquire: %w", i, err)
 				return
 			}
+			<-allArrived
 			if resp.Kind != store.AcquireGranted {
 				deadline := time.Now().Add(10 * time.Second)
+				poll := time.NewTicker(25 * time.Millisecond)
+				defer poll.Stop()
 				for {
 					if time.Now().After(deadline) {
 						errs <- fmt.Errorf("arrival %d: stuck queued past deadline", i)
@@ -178,11 +187,11 @@ func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 						errs <- fmt.Errorf("arrival %d cancelled unexpectedly", i)
 						return
 					}
-					time.Sleep(25 * time.Millisecond)
+					poll.Reset(25 * time.Millisecond)
+					<-poll.C
 				}
 			}
 
-			time.Sleep(5 * time.Millisecond)
 			_, relErr := s.ReleaseConcurrencySlot(ctx, "k", holder, "success", "", "", 0)
 			if relErr != nil {
 				errs <- fmt.Errorf("arrival %d release: %w", i, relErr)
