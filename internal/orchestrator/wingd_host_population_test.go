@@ -66,27 +66,47 @@ func TestDegradedBoxScopeSerializationUsesPersistedPopulation(t *testing.T) {
 }
 
 func isExactPopulationReturnCase(clause *ast.CaseClause) bool {
-	if len(clause.List) != 1 {
+	if len(clause.List) != 1 || len(clause.Body) != 1 {
 		return false
 	}
-	returns := false
-	for _, stmt := range clause.Body {
-		if _, ok := stmt.(*ast.ReturnStmt); ok {
-			returns = true
+	if _, ok := clause.Body[0].(*ast.ReturnStmt); !ok {
+		return false
+	}
+	var leaves []ast.Expr
+	collectAndLeaves(clause.List[0], &leaves)
+	if len(leaves) != 3 {
+		return false
+	}
+	errNil, holdersOne, waitersOne := 0, 0, 0
+	for _, leaf := range leaves {
+		binary, ok := leaf.(*ast.BinaryExpr)
+		if !ok {
+			return false
+		}
+		if isIdentEqualNil(binary, "err") {
+			errNil++
+		} else if isStateCountOne(binary, "Holders") {
+			holdersOne++
+		} else if isStateCountOne(binary, "Waiters") {
+			waitersOne++
+		} else {
+			return false
 		}
 	}
-	errNil, holdersOne, waitersOne := false, false, false
-	ast.Inspect(clause.List[0], func(node ast.Node) bool {
-		binary, ok := node.(*ast.BinaryExpr)
-		if !ok {
-			return true
-		}
-		errNil = errNil || isIdentEqualNil(binary, "err")
-		holdersOne = holdersOne || isStateCountOne(binary, "Holders")
-		waitersOne = waitersOne || isStateCountOne(binary, "Waiters")
-		return true
-	})
-	return returns && errNil && holdersOne && waitersOne
+	return errNil == 1 && holdersOne == 1 && waitersOne == 1
+}
+
+func collectAndLeaves(expr ast.Expr, leaves *[]ast.Expr) {
+	if paren, ok := expr.(*ast.ParenExpr); ok {
+		collectAndLeaves(paren.X, leaves)
+		return
+	}
+	if binary, ok := expr.(*ast.BinaryExpr); ok && binary.Op == token.LAND {
+		collectAndLeaves(binary.X, leaves)
+		collectAndLeaves(binary.Y, leaves)
+		return
+	}
+	*leaves = append(*leaves, expr)
 }
 
 func isIdentEqualNil(binary *ast.BinaryExpr, name string) bool {
