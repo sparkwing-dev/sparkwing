@@ -269,8 +269,9 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 	terminateFinished := make(chan struct{})
 	released := false
 	go func() {
-		defer close(terminateFinished)
-		terminated <- TerminateSession(identity)
+		err := TerminateSession(identity)
+		close(terminateFinished)
+		terminated <- err
 	}()
 	t.Cleanup(func() {
 		if !released {
