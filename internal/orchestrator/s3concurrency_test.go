@@ -84,6 +84,202 @@ func release(t *testing.T, c orchestrator.ConcurrencyBackend, key, holderID, out
 	}
 }
 
+func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key string, capacity int, costs []int) (int, int64, int32) {
+	t.Helper()
+	type initialResult struct {
+		resp store.AcquireSlotResponse
+		cost int
+		err  error
+	}
+	type admission struct {
+		worker  int
+		cost    int
+		release chan struct{}
+	}
+	type waiterCheck struct {
+		worker int
+		resume chan struct{}
+	}
+	initial := make(chan initialResult, len(costs))
+	admitted := make(chan admission, len(costs))
+	checked := make(chan waiterCheck, len(costs)*2)
+	finished := make(chan int, len(costs))
+	workerErrors := make(chan error, len(costs))
+	start := make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	var ran atomic.Int32
+
+	var wg sync.WaitGroup
+	for w, cost := range costs {
+		wg.Add(1)
+		go func(w, cost int) {
+			defer wg.Done()
+			runID := fmt.Sprintf("run-%d", w)
+			<-start
+			resp, err := c.AcquireSlot(ctx, store.AcquireSlotRequest{
+				Key: key, RunID: runID, NodeID: "n",
+				Capacity: capacity, Cost: cost, Policy: store.OnLimitQueue,
+			})
+			initial <- initialResult{resp: resp, cost: cost, err: err}
+			if err != nil {
+				return
+			}
+			holderID := resp.HolderID
+			switch resp.Kind {
+			case store.AcquireGranted:
+			case store.AcquireQueued:
+				deadline := time.Now().Add(resolveTimeout)
+				poll := time.NewTicker(3 * time.Millisecond)
+				defer poll.Stop()
+				for time.Now().Before(deadline) {
+					resolved, err := c.ResolveWaiter(ctx, key, runID, "n", "", "", "", false)
+					if err != nil {
+						workerErrors <- fmt.Errorf("ResolveWaiter(%s/n): %w", runID, err)
+						return
+					}
+					if resolved.Status == store.WaiterPromoted {
+						holderID = resolved.HolderID
+						break
+					}
+					if resolved.Status != store.WaiterStillWaiting {
+						workerErrors <- fmt.Errorf("waiter %s/n resolved to %q, want promoted", runID, resolved.Status)
+						return
+					}
+					resume := make(chan struct{})
+					select {
+					case checked <- waiterCheck{worker: w, resume: resume}:
+					case <-ctx.Done():
+						return
+					}
+					select {
+					case <-resume:
+					case <-ctx.Done():
+						return
+					}
+					<-poll.C
+				}
+				if holderID == "" {
+					workerErrors <- fmt.Errorf("waiter %s/n never promoted within %s", runID, resolveTimeout)
+					return
+				}
+			default:
+				workerErrors <- fmt.Errorf("unexpected acquire kind %q for %s/n", resp.Kind, runID)
+				return
+			}
+
+			permit := make(chan struct{})
+			admitted <- admission{worker: w, cost: cost, release: permit}
+			select {
+			case <-permit:
+			case <-ctx.Done():
+				return
+			}
+			ran.Add(1)
+			if err := c.ReleaseSlot(ctx, key, holderID, "success", "", "", 0); err != nil {
+				workerErrors <- fmt.Errorf("ReleaseSlot(%s, %s): %w", key, holderID, err)
+				return
+			}
+			finished <- w
+		}(w, cost)
+	}
+	joined := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(joined)
+	}()
+	defer func() {
+		cancel()
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-joined:
+		case <-timer.C:
+			t.Errorf("S3 concurrency burst workers did not stop")
+		}
+	}()
+
+	close(start)
+	grantedCost := 0
+	var acquireErr error
+	for range costs {
+		result := <-initial
+		if result.err != nil && acquireErr == nil {
+			acquireErr = result.err
+		}
+		if result.resp.Kind == store.AcquireGranted {
+			grantedCost += result.cost
+		}
+	}
+	if acquireErr != nil {
+		t.Fatalf("initial acquisition: %v", acquireErr)
+	}
+
+	remaining := make(map[int]bool, len(costs))
+	for worker := range costs {
+		remaining[worker] = true
+	}
+	held := make(map[int]admission, capacity)
+	var heldCost int64
+	var maxHeldCost int64
+	for len(remaining) > 0 || len(held) > 0 {
+		stableWaiters := make(map[int]chan struct{}, len(remaining))
+		for len(stableWaiters) < len(remaining) {
+			select {
+			case err := <-workerErrors:
+				t.Fatalf("S3 concurrency burst worker: %v", err)
+			case entry := <-admitted:
+				if !remaining[entry.worker] {
+					t.Fatalf("worker %d admitted more than once", entry.worker)
+				}
+				delete(remaining, entry.worker)
+				held[entry.worker] = entry
+				heldCost += int64(entry.cost)
+			case check := <-checked:
+				if remaining[check.worker] {
+					if _, exists := stableWaiters[check.worker]; exists {
+						t.Fatalf("worker %d reported stable waiting more than once", check.worker)
+					}
+					stableWaiters[check.worker] = check.resume
+				} else {
+					close(check.resume)
+				}
+			}
+		}
+		if heldCost > int64(capacity) {
+			t.Fatalf("live holder cost = %d, exceeds capacity %d", heldCost, capacity)
+		}
+		if heldCost > maxHeldCost {
+			maxHeldCost = heldCost
+		}
+
+		var released admission
+		for worker, entry := range held {
+			released = entry
+			delete(held, worker)
+			break
+		}
+		if released.release != nil {
+			close(released.release)
+			select {
+			case <-finished:
+				heldCost -= int64(released.cost)
+			case err := <-workerErrors:
+				t.Fatalf("S3 concurrency burst worker: %v", err)
+			}
+		}
+		for _, resume := range stableWaiters {
+			close(resume)
+		}
+	}
+	<-joined
+	select {
+	case err := <-workerErrors:
+		t.Fatalf("S3 concurrency burst worker: %v", err)
+	default:
+	}
+	return grantedCost, maxHeldCost, ran.Load()
+}
+
 // TestS3Concurrency_NoOverAdmission is the central guarantee: under
 // sustained contention by N goroutines on one capacity-K key, the live
 // holder count never exceeds K. The CAS loop is the enforcement -- two
@@ -98,41 +294,19 @@ func TestS3Concurrency_NoOverAdmission(t *testing.T) {
 
 	for round := 0; round < 3; round++ {
 		key := fmt.Sprintf("g:over-admit-%d", round)
-		var live atomic.Int32
-		var maxLive atomic.Int32
-		var ran atomic.Int32
-
-		var wg sync.WaitGroup
-		for w := 0; w < workers; w++ {
-			wg.Add(1)
-			go func(w int) {
-				defer wg.Done()
-				runID := fmt.Sprintf("run-%d-%d", round, w)
-				holderID := holdSlot(t, c, key, runID, "n", capacity, 1)
-
-				cur := live.Add(1)
-				for {
-					m := maxLive.Load()
-					if cur <= m || maxLive.CompareAndSwap(m, cur) {
-						break
-					}
-				}
-				if cur > capacity {
-					t.Errorf("live holders = %d, exceeds capacity %d", cur, capacity)
-				}
-				time.Sleep(2 * time.Millisecond)
-				live.Add(-1)
-				ran.Add(1)
-				release(t, c, key, holderID, "success")
-			}(w)
+		costs := make([]int, workers)
+		for i := range costs {
+			costs[i] = 1
 		}
-		wg.Wait()
-
-		if got := maxLive.Load(); got > capacity {
-			t.Fatalf("round %d: peak concurrent holders = %d, want <= %d", round, got, capacity)
+		grantedCost, maxCost, ran := runS3ConcurrencyBurst(t, c, key, capacity, costs)
+		if grantedCost != capacity {
+			t.Fatalf("initial burst granted cost %d, want %d", grantedCost, capacity)
 		}
-		if got := ran.Load(); got != workers {
-			t.Fatalf("round %d: %d workers ran, want %d (some never got a slot)", round, got, workers)
+		if maxCost > capacity {
+			t.Fatalf("round %d: peak live cost = %d, want <= %d", round, maxCost, capacity)
+		}
+		if ran != workers {
+			t.Fatalf("round %d: %d workers ran, want %d (some never got a slot)", round, ran, workers)
 		}
 	}
 }
@@ -148,42 +322,19 @@ func TestS3Concurrency_NoOverBudgetWithCost(t *testing.T) {
 	const workers = 15
 	key := "g:over-budget"
 
-	var liveCost atomic.Int64
-	var maxCost atomic.Int64
-	var ran atomic.Int32
-
-	var wg sync.WaitGroup
-	for w := 0; w < workers; w++ {
-		wg.Add(1)
-		go func(w int) {
-			defer wg.Done()
-			cost := (w % 3) + 1
-			runID := fmt.Sprintf("run-%d", w)
-			holderID := holdSlot(t, c, key, runID, "n", capacity, cost)
-
-			cur := liveCost.Add(int64(cost))
-			for {
-				m := maxCost.Load()
-				if cur <= m || maxCost.CompareAndSwap(m, cur) {
-					break
-				}
-			}
-			if cur > capacity {
-				t.Errorf("live cost = %d, exceeds capacity %d", cur, capacity)
-			}
-			time.Sleep(2 * time.Millisecond)
-			liveCost.Add(-int64(cost))
-			ran.Add(1)
-			release(t, c, key, holderID, "success")
-		}(w)
+	costs := make([]int, workers)
+	for w := range costs {
+		costs[w] = (w % 3) + 1
 	}
-	wg.Wait()
-
-	if got := maxCost.Load(); got > capacity {
-		t.Fatalf("peak live cost = %d, want <= %d", got, capacity)
+	grantedCost, maxCost, ran := runS3ConcurrencyBurst(t, c, key, capacity, costs)
+	if grantedCost > capacity {
+		t.Fatalf("initial burst granted cost %d, exceeds capacity %d", grantedCost, capacity)
 	}
-	if got := ran.Load(); got != workers {
-		t.Fatalf("%d workers ran, want %d", got, workers)
+	if maxCost > capacity {
+		t.Fatalf("peak live cost = %d, want <= %d", maxCost, capacity)
+	}
+	if ran != workers {
+		t.Fatalf("%d workers ran, want %d", ran, workers)
 	}
 }
 
