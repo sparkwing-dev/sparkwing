@@ -1,10 +1,12 @@
 package chaos
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,7 +26,8 @@ func TestWatchActorHelperProcess(t *testing.T) {
 	switch os.Getenv(actorHelperMode) {
 	case "descendant":
 		ignoreProcessGroupTermination()
-		time.Sleep(30 * time.Second)
+		_, _ = fmt.Fprintln(os.Stdout, "ready")
+		blockActorHelper()
 		os.Exit(0)
 	case "actor":
 		children, err := strconv.Atoi(os.Getenv("SPARKWING_CHAOS_CHILDREN"))
@@ -32,27 +35,20 @@ func TestWatchActorHelperProcess(t *testing.T) {
 			children = 1
 		}
 		for range children {
-			child := exec.Command(os.Args[0], "-test.run=^TestWatchActorHelperProcess$")
-			child.Env = append(os.Environ(), actorHelperMode+"=descendant")
-			child.Stdout = os.Stdout
-			if err := child.Start(); err != nil {
+			if !startReadyDescendant() {
 				os.Exit(2)
 			}
 		}
-		time.Sleep(250 * time.Millisecond)
 		fmt.Println("OK sentinel-immediately-before-exit")
 		os.Exit(0)
 	case "daemon":
-		child := exec.Command(os.Args[0], "-test.run=^TestWatchActorHelperProcess$")
-		child.Env = append(os.Environ(), actorHelperMode+"=descendant")
-		if err := child.Start(); err != nil {
+		if !startReadyDescendant() {
 			os.Exit(2)
 		}
-		time.Sleep(250 * time.Millisecond)
 		os.Exit(0)
 	case "hang":
 		ignoreProcessGroupTermination()
-		time.Sleep(30 * time.Second)
+		blockActorHelper()
 		os.Exit(0)
 	case "zombie-parent":
 		child := exec.Command(os.Args[0], "-test.run=^TestWatchActorHelperProcess$")
@@ -60,11 +56,51 @@ func TestWatchActorHelperProcess(t *testing.T) {
 		if err := child.Start(); err != nil {
 			os.Exit(2)
 		}
-		time.Sleep(30 * time.Second)
+		if !waitForZombie(child.Process.Pid) {
+			os.Exit(2)
+		}
+		blockActorHelper()
 		os.Exit(0)
 	case "exit":
 		os.Exit(0)
 	}
+}
+
+func startReadyDescendant() bool {
+	child := exec.Command(os.Args[0], "-test.run=^TestWatchActorHelperProcess$")
+	child.Env = append(os.Environ(), actorHelperMode+"=descendant")
+	stdout, err := child.StdoutPipe()
+	if err != nil {
+		return false
+	}
+	if err := child.Start(); err != nil {
+		return false
+	}
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	return err == nil && line == "ready\n"
+}
+
+func waitForZombie(pid int) bool {
+	return pollProcessState(3*time.Second, 10*time.Millisecond, func() bool {
+		processes, err := procgroup.List()
+		if err != nil {
+			return false
+		}
+		for _, process := range processes {
+			if process.PID == pid {
+				return strings.HasPrefix(process.State, "Z")
+			}
+		}
+		return false
+	})
+}
+
+func blockActorHelper() {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		os.Exit(2)
+	}
+	_, _ = listener.Accept()
 }
 
 func TestWatchActorReapsExitedProcessAndRecordsFinalOutput(t *testing.T) {
