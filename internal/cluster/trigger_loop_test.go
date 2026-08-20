@@ -6,10 +6,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/signal"
 	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -103,7 +105,9 @@ func TestHandleTriggerArgsPutFlagsBeforeTriggerID(t *testing.T) {
 
 func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 	if os.Getenv("SPARKWING_TRIGGER_LOOP_HELPER") == "1" {
-		time.Sleep(500 * time.Millisecond)
+		release := make(chan os.Signal, 1)
+		signal.Notify(release, syscall.SIGUSR1)
+		<-release
 		os.Exit(0)
 	}
 
