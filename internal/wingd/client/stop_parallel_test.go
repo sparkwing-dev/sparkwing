@@ -137,33 +137,71 @@ func isStopReleaseRoundsLoop(loop *ast.RangeStmt) bool {
 }
 
 func cleanupCancelsAndJoins(body *ast.BlockStmt) bool {
-	cancels, createsTimer, stopsTimer := false, false, false
-	joinedFinished, joinedTimer := false, false
-	ast.Inspect(body, func(node ast.Node) bool {
-		switch n := node.(type) {
-		case *ast.CallExpr:
-			if ident, ok := n.Fun.(*ast.Ident); ok && ident.Name == "cancel" && len(n.Args) == 0 {
-				cancels = true
-			}
-			if sel, ok := n.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "NewTimer" {
-				pkg, ok := sel.X.(*ast.Ident)
-				createsTimer = createsTimer || ok && pkg.Name == "time"
-			}
-			if sel, ok := n.Fun.(*ast.SelectorExpr); ok && sel.Sel.Name == "Stop" {
-				stopsTimer = stopsTimer || isIdent(sel.X, "timer")
-			}
-		case *ast.UnaryExpr:
-			if n.Op != token.ARROW {
-				break
-			}
-			joinedFinished = joinedFinished || isIdent(n.X, "finished")
-			if sel, ok := n.X.(*ast.SelectorExpr); ok {
-				joinedTimer = joinedTimer || sel.Sel.Name == "C" && isIdent(sel.X, "timer")
-			}
+	return len(body.List) == 4 &&
+		isDirectCall(body.List[0], "cancel") &&
+		isCleanupTimer(body.List[1]) &&
+		isDeferStop(body.List[2], "timer") &&
+		selectWaitsForFinishedOrTimer(body.List[3])
+}
+
+func isDirectCall(stmt ast.Stmt, name string) bool {
+	expr, ok := stmt.(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	call, ok := expr.X.(*ast.CallExpr)
+	return ok && len(call.Args) == 0 && isIdent(call.Fun, name)
+}
+
+func isCleanupTimer(stmt ast.Stmt) bool {
+	assign, ok := stmt.(*ast.AssignStmt)
+	if !ok || assign.Tok != token.DEFINE || len(assign.Lhs) != 1 || !isIdent(assign.Lhs[0], "timer") || len(assign.Rhs) != 1 {
+		return false
+	}
+	call, ok := assign.Rhs[0].(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 {
+		return false
+	}
+	constructor, ok := call.Fun.(*ast.SelectorExpr)
+	duration, durationOK := call.Args[0].(*ast.SelectorExpr)
+	return ok && constructor.Sel.Name == "NewTimer" && isIdent(constructor.X, "time") &&
+		durationOK && duration.Sel.Name == "Second" && isIdent(duration.X, "time")
+}
+
+func isDeferStop(stmt ast.Stmt, receiver string) bool {
+	deferStmt, ok := stmt.(*ast.DeferStmt)
+	if !ok || len(deferStmt.Call.Args) != 0 {
+		return false
+	}
+	stop, ok := deferStmt.Call.Fun.(*ast.SelectorExpr)
+	return ok && stop.Sel.Name == "Stop" && isIdent(stop.X, receiver)
+}
+
+func selectWaitsForFinishedOrTimer(stmt ast.Stmt) bool {
+	selectStmt, ok := stmt.(*ast.SelectStmt)
+	if !ok || len(selectStmt.Body.List) != 2 {
+		return false
+	}
+	finished, timer := false, false
+	for _, rawClause := range selectStmt.Body.List {
+		clause, ok := rawClause.(*ast.CommClause)
+		if !ok || clause.Comm == nil {
+			return false
 		}
-		return true
-	})
-	return cancels && createsTimer && stopsTimer && joinedFinished && joinedTimer
+		expr, ok := clause.Comm.(*ast.ExprStmt)
+		if !ok {
+			return false
+		}
+		receive, ok := expr.X.(*ast.UnaryExpr)
+		if !ok || receive.Op != token.ARROW {
+			return false
+		}
+		finished = finished || isIdent(receive.X, "finished")
+		if channel, ok := receive.X.(*ast.SelectorExpr); ok {
+			timer = timer || channel.Sel.Name == "C" && isIdent(channel.X, "timer")
+		}
+	}
+	return finished && timer
 }
 
 func isDeferClose(stmt ast.Stmt, channel string) bool {
