@@ -19,6 +19,7 @@ const backgroundNice = 10
 // the machine budget on Linux. It is nil on other platforms and whenever
 // enforcement is off or the cgroup filesystem is unavailable.
 type cgroupLimiter struct {
+	//lint:ignore U1000 used by the Linux implementation
 	path string
 }
 

@@ -179,10 +179,6 @@ func discardUnusedDaemonLog(logF *os.File, home string, existed bool) {
 	}
 }
 
-func daemonLogPath(home string) (string, error) {
-	return wingd.LogPath(home)
-}
-
 // openDaemonLog prepares the daemon's log file for a detached spawn: it
 // creates the daemon directory (which the spawned daemon has not yet made
 // when the client opens the file), rotates the log once if it has grown

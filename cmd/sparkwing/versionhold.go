@@ -121,7 +121,7 @@ func holdRefusal(target string, hold versionHold) error {
 	return fmt.Errorf(
 		"update refused: an operator set a version hold at %s (%s), and %s is beyond it.\n"+
 			"  This ceiling is deliberate. Report the block to the operator who set the hold;\n"+
-			"  do not work around it.",
+			"  do not work around it",
 		hold.Value, hold.Source, target)
 }
 

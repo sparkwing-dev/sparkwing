@@ -110,6 +110,7 @@ type OwnedCPUSampler interface {
 }
 
 type ownedProcSampler struct {
+	//lint:ignore U1000 used by the Linux implementation
 	mu   sync.Mutex
 	last map[processIdentity]cpuSample
 }
@@ -132,6 +133,7 @@ type ProcUsage struct {
 // derive a rate from two samples (Linux); platforms that expose a live
 // percentage (macOS) ignore it.
 type procSampler struct {
+	//lint:ignore U1000 used by the Linux implementation
 	mu   sync.Mutex
 	last map[int]cpuSample
 	tree map[int]map[int]struct{}

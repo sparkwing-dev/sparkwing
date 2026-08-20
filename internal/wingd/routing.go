@@ -132,11 +132,6 @@ func (d *Daemon) waiterDeliveriesLocked() []delivery {
 	return out
 }
 
-func (d *Daemon) queuedDeliveryLocked(c *conn, runID string) *delivery {
-	snap := d.ledger.Snapshot()
-	return d.queuedDeliveryLockedFromSnapshot(c, snap, runID)
-}
-
 func (d *Daemon) queuedDeliveryLockedFromSnapshot(c *conn, snap admission.Snapshot, runID string) *delivery {
 	qlen := len(snap.Waiters)
 	for i, waiter := range snap.Waiters {
@@ -245,12 +240,7 @@ func requestFromWaiter(w admission.WaiterState) admission.Request {
 		MemoryBytes: w.MemoryBytes,
 	}
 	for _, c := range w.Claims {
-		req.Semaphores = append(req.Semaphores, admission.SemaphoreClaim{
-			Key:      c.Key,
-			Capacity: c.Capacity,
-			Cost:     c.Cost,
-			Policy:   c.Policy,
-		})
+		req.Semaphores = append(req.Semaphores, admission.SemaphoreClaim(c))
 	}
 	return req
 }

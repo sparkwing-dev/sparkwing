@@ -924,19 +924,6 @@ func goMajorMinor() string {
 	return v
 }
 
-// hashDirInto folds every build-relevant file under dir into h as
-// "<path relative to dir>\x00<sha256 of contents>". Paths are relative
-// and digests are content-only -- no mtime, size, or inode -- so two
-// checkouts holding identical files produce identical bytes here
-// regardless of where they sit on disk.
-//
-// Files git ignores are skipped; see [ignoredUnder] for why that is
-// what makes the result portable rather than merely cheaper.
-func hashDirInto(h io.Writer, dir string, keep fileFilter) error {
-	_, err := hashDirIntoCounted(h, dir, keep)
-	return err
-}
-
 // HashStats describes what a directory contributed to the key. It is
 // reported by `sparkwing cache explain` so the exclusion of gitignored
 // files is visible rather than a silent surprise when an edit fails to

@@ -501,30 +501,6 @@ func TestTimeout_RejectsLateActionSuccess(t *testing.T) {
 	assertForcedAbsoluteTimeout(t, "mod-absolute-late-action", absoluteLateActionStarted)
 }
 
-func assertTimeoutReason(t *testing.T, pipeline, wantReason string) {
-	t.Helper()
-	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: pipeline})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if res.Status != "failed" {
-		t.Fatalf("status = %q, want failed", res.Status)
-	}
-	st, err := store.Open(p.StateDB())
-	if err != nil {
-		t.Fatalf("open store: %v", err)
-	}
-	defer func() { _ = st.Close() }()
-	nodes, err := st.ListNodes(context.Background(), res.RunID)
-	if err != nil {
-		t.Fatalf("list nodes: %v", err)
-	}
-	if len(nodes) != 1 || nodes[0].FailureReason != wantReason {
-		t.Fatalf("failure reason = %+v, want %q", nodes, wantReason)
-	}
-}
-
 func assertForcedNoProgressTimeout(t *testing.T, pipeline string, started <-chan context.Context) {
 	t.Helper()
 	assertForcedTimeout(t, pipeline, started, orchestrator.ForceProgressTimeoutForTest, store.FailureNoProgressTimeout)

@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -497,40 +496,6 @@ func sanitizeTriggerEnv(env map[string]string) map[string]string {
 		return nil
 	}
 	return cleaned
-}
-
-func isTerminalStatus(status string) bool {
-	switch status {
-	case "success", "failed", "cancelled":
-		return true
-	default:
-		return false
-	}
-}
-
-func (s *Server) runIsSelfOrAncestor(ctx context.Context, runID, candidateAncestorRunID string) (bool, error) {
-	if candidateAncestorRunID == "" {
-		return false, nil
-	}
-	currentRunID := runID
-	const maxDepth = 64
-	for range maxDepth {
-		if currentRunID == "" {
-			return false, nil
-		}
-		if currentRunID == candidateAncestorRunID {
-			return true, nil
-		}
-		run, err := s.store.GetRun(ctx, currentRunID)
-		if err != nil {
-			if errors.Is(err, store.ErrNotFound) {
-				return false, fmt.Errorf("parent_run_id %s not found", currentRunID)
-			}
-			return false, fmt.Errorf("get parent run %s: %w", currentRunID, err)
-		}
-		currentRunID = run.ParentRunID
-	}
-	return false, fmt.Errorf("parent_run_id %s ancestor chain exceeds %d", runID, maxDepth)
 }
 
 // handleTrigger is the external intake for a new run. Persists the

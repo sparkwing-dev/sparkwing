@@ -672,10 +672,6 @@ func boundedCacheDiscoveryLimit(limit int) int {
 	return limit
 }
 
-func treeSize(root string) (int64, error) {
-	return treeSizeContext(context.Background(), root)
-}
-
 func treeSizeContext(ctx context.Context, root string) (int64, error) {
 	var size int64
 	err := filepath.WalkDir(root, func(_ string, dir fs.DirEntry, err error) error {

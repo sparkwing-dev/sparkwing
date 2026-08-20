@@ -276,7 +276,7 @@ func extractLintCacheArchive(r io.Reader, destDir, runningWorkdir string) error 
 			}
 			continue
 		}
-		if hdr.Typeflag != tar.TypeReg && hdr.Typeflag != tar.TypeRegA {
+		if hdr.Typeflag != tar.TypeReg {
 			continue
 		}
 

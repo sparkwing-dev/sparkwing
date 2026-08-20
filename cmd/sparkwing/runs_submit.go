@@ -553,7 +553,7 @@ func refuseMisplacedSubmitFlags(passthrough []string) error {
 				"Move it before the pipeline name:\n"+
 				"  sparkwing runs submit %s <pipeline> [pipeline-flags...]\n"+
 				"If the pipeline really declares its own %s, separate the two with `--`:\n"+
-				"  sparkwing runs submit <pipeline> -- %s ...",
+				"  sparkwing runs submit <pipeline> -- %s <pipeline-args>",
 			name, name, name, name)
 	}
 	return nil
