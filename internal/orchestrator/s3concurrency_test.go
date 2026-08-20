@@ -91,11 +91,23 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 		cost int
 		err  error
 	}
+	type admission struct {
+		worker  int
+		cost    int
+		release chan struct{}
+	}
+	type waiterCheck struct {
+		worker int
+		epoch  int64
+	}
 	initial := make(chan initialResult, len(costs))
+	admitted := make(chan admission, len(costs))
+	checked := make(chan waiterCheck, len(costs)*2)
+	finished := make(chan int, len(costs))
+	workerErrors := make(chan error, len(costs))
 	start := make(chan struct{})
-	releaseInitial := make(chan struct{})
-	var liveCost atomic.Int64
-	var maxCost atomic.Int64
+	ctx, cancel := context.WithCancel(context.Background())
+	var epoch atomic.Int64
 	var ran atomic.Int32
 
 	var wg sync.WaitGroup
@@ -105,7 +117,7 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 			defer wg.Done()
 			runID := fmt.Sprintf("run-%d", w)
 			<-start
-			resp, err := c.AcquireSlot(context.Background(), store.AcquireSlotRequest{
+			resp, err := c.AcquireSlot(ctx, store.AcquireSlotRequest{
 				Key: key, RunID: runID, NodeID: "n",
 				Capacity: capacity, Cost: cost, Policy: store.OnLimitQueue,
 			})
@@ -116,29 +128,67 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 			holderID := resp.HolderID
 			switch resp.Kind {
 			case store.AcquireGranted:
-				<-releaseInitial
 			case store.AcquireQueued:
-				holderID = waitPromoted(t, c, key, runID, "n")
+				deadline := time.Now().Add(resolveTimeout)
+				poll := time.NewTicker(3 * time.Millisecond)
+				defer poll.Stop()
+				for time.Now().Before(deadline) {
+					attemptEpoch := epoch.Load()
+					resolved, err := c.ResolveWaiter(ctx, key, runID, "n", "", "", "", false)
+					if err != nil {
+						workerErrors <- fmt.Errorf("ResolveWaiter(%s/n): %w", runID, err)
+						return
+					}
+					if resolved.Status == store.WaiterPromoted {
+						holderID = resolved.HolderID
+						break
+					}
+					if resolved.Status != store.WaiterStillWaiting {
+						workerErrors <- fmt.Errorf("waiter %s/n resolved to %q, want promoted", runID, resolved.Status)
+						return
+					}
+					checked <- waiterCheck{worker: w, epoch: attemptEpoch}
+					<-poll.C
+				}
+				if holderID == "" {
+					workerErrors <- fmt.Errorf("waiter %s/n never promoted within %s", runID, resolveTimeout)
+					return
+				}
 			default:
-				t.Errorf("unexpected acquire kind %q for %s/n", resp.Kind, runID)
+				workerErrors <- fmt.Errorf("unexpected acquire kind %q for %s/n", resp.Kind, runID)
 				return
 			}
 
-			cur := liveCost.Add(int64(cost))
-			for {
-				max := maxCost.Load()
-				if cur <= max || maxCost.CompareAndSwap(max, cur) {
-					break
-				}
+			permit := make(chan struct{})
+			admitted <- admission{worker: w, cost: cost, release: permit}
+			select {
+			case <-permit:
+			case <-ctx.Done():
+				return
 			}
-			if cur > int64(capacity) {
-				t.Errorf("live cost = %d, exceeds capacity %d", cur, capacity)
-			}
-			liveCost.Add(-int64(cost))
 			ran.Add(1)
-			release(t, c, key, holderID, "success")
+			if err := c.ReleaseSlot(ctx, key, holderID, "success", "", "", 0); err != nil {
+				workerErrors <- fmt.Errorf("ReleaseSlot(%s, %s): %w", key, holderID, err)
+				return
+			}
+			finished <- w
 		}(w, cost)
 	}
+	joined := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(joined)
+	}()
+	defer func() {
+		cancel()
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-joined:
+		case <-timer.C:
+			t.Errorf("S3 concurrency burst workers did not stop")
+		}
+	}()
 
 	close(start)
 	grantedCost := 0
@@ -152,12 +202,63 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 			grantedCost += result.cost
 		}
 	}
-	close(releaseInitial)
-	wg.Wait()
 	if acquireErr != nil {
 		t.Fatalf("initial acquisition: %v", acquireErr)
 	}
-	return grantedCost, maxCost.Load(), ran.Load()
+
+	remaining := make(map[int]bool, len(costs))
+	for worker := range costs {
+		remaining[worker] = true
+	}
+	var maxWaveCost int64
+	for len(remaining) > 0 {
+		currentEpoch := epoch.Add(1)
+		stableWaiters := make(map[int]bool, len(remaining))
+		var wave []admission
+		var waveCost int64
+		for len(stableWaiters) < len(remaining) {
+			select {
+			case err := <-workerErrors:
+				t.Fatalf("S3 concurrency burst worker: %v", err)
+			case entry := <-admitted:
+				if !remaining[entry.worker] {
+					t.Fatalf("worker %d admitted more than once", entry.worker)
+				}
+				delete(remaining, entry.worker)
+				wave = append(wave, entry)
+				waveCost += int64(entry.cost)
+				currentEpoch = epoch.Add(1)
+				clear(stableWaiters)
+			case check := <-checked:
+				if remaining[check.worker] && check.epoch >= currentEpoch {
+					stableWaiters[check.worker] = true
+				}
+			}
+		}
+		if waveCost > int64(capacity) {
+			t.Fatalf("admitted wave cost = %d, exceeds capacity %d", waveCost, capacity)
+		}
+		if waveCost > maxWaveCost {
+			maxWaveCost = waveCost
+		}
+		for _, entry := range wave {
+			close(entry.release)
+		}
+		for range wave {
+			select {
+			case <-finished:
+			case err := <-workerErrors:
+				t.Fatalf("S3 concurrency burst worker: %v", err)
+			}
+		}
+	}
+	<-joined
+	select {
+	case err := <-workerErrors:
+		t.Fatalf("S3 concurrency burst worker: %v", err)
+	default:
+	}
+	return grantedCost, maxWaveCost, ran.Load()
 }
 
 // TestS3Concurrency_NoOverAdmission is the central guarantee: under
