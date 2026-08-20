@@ -409,6 +409,7 @@ func (planLevelQueuedAwaitMissedPromotionParentPipe) Plan(
 	rc sparkwing.RunContext,
 ) error {
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		publishQueuedAwaitParentAttempt(ctx)
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-missed-promotion-child", "work")
 		return err
 	}).Timeout(700 * time.Millisecond)
@@ -1766,15 +1767,57 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 	}
 }
 
+type missedPromotionBackend struct {
+	orchestrator.ConcurrencyBackend
+	key   string
+	runID string
+	ready chan struct{}
+	once  sync.Once
+	count atomic.Int32
+}
+
+func (b *missedPromotionBackend) ResolveWaiter(
+	ctx context.Context,
+	key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string,
+	bypassRead bool,
+) (store.WaiterResolution, error) {
+	resolution, err := b.ConcurrencyBackend.ResolveWaiter(ctx, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID, bypassRead)
+	if err == nil && key == b.key && runID == b.runID && resolution.Status == store.WaiterStillWaiting && b.count.Add(1) == 3 {
+		b.once.Do(func() { close(b.ready) })
+	}
+	return resolution, err
+}
+
+func waitForMissedPromotionChecks(t *testing.T, backend *missedPromotionBackend) {
+	t.Helper()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	select {
+	case <-backend.ready:
+	case <-timer.C:
+		t.Fatalf("observed %d waiter resolutions, want at least 3", backend.count.Load())
+	}
+}
+
 func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWait(t *testing.T) {
 	resetCacheCounter()
+	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
+	queuedAwaitParentAttempt.Store(gate)
+	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
 	p := newPaths(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	t.Cleanup(func() { _ = st.Close() })
+	backends := orchestrator.LocalBackends(p, st, nil)
+	observed := &missedPromotionBackend{
+		ConcurrencyBackend: backends.Concurrency,
+		key:                "g:plan-level-queued-await-missed-promotion-key",
+		ready:              make(chan struct{}),
+	}
+	backends.Concurrency = observed
 
 	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key:      "g:plan-level-queued-await-missed-promotion-key",
@@ -1790,21 +1833,58 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 		t.Fatalf("external acquire = %s, want granted", resp.Kind)
 	}
 
-	startedAt := time.Now()
 	parentDone := make(chan *orchestrator.Result, 1)
+	parentFinished := make(chan struct{})
+	childDone := make(chan *orchestrator.Result, 1)
+	childFinished := make(chan struct{})
+	var childStarted atomic.Bool
+	var releaseOnce sync.Once
+	var releaseErr error
+	releaseHolder := func() error {
+		releaseOnce.Do(func() {
+			_, _, _, releaseErr = st.ReleaseAndNotify(context.Background(),
+				"g:plan-level-queued-await-missed-promotion-key", "external-missed-promotion-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease)
+		})
+		return releaseErr
+	}
+	t.Cleanup(func() {
+		gate.release()
+		cancel()
+		if err := releaseHolder(); err != nil {
+			t.Errorf("cleanup external holder: %v", err)
+		}
+		joinCacheDispatchWorker(t, "missed-promotion parent", parentFinished)
+		if childStarted.Load() {
+			joinCacheDispatchWorker(t, "missed-promotion child", childFinished)
+		}
+	})
 	go func() {
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		defer close(parentFinished)
+		res, _ := orchestrator.Run(ctx, backends, orchestrator.Options{
 			Pipeline: "plan-level-queued-await-missed-promotion-parent",
 			RunID:    "queued-await-missed-promotion-parent",
 		})
 		parentDone <- res
 	}()
+	var attemptCtx context.Context
+	select {
+	case attemptCtx = <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("parent action did not publish its timeout context")
+	}
+	const controlledRemainder = 600 * time.Millisecond
+	if !orchestrator.SetNodeTimeoutRemainingForTest(attemptCtx, controlledRemainder) {
+		t.Fatal("could not establish the parent timeout remainder")
+	}
+	gate.release()
 
 	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-missed-promotion-parent", "spawn", "plan-level-queued-await-missed-promotion-child")
+	observed.runID = childID
 	claimManualChildTrigger(t, ctx, st, childID)
-	childDone := make(chan *orchestrator.Result, 1)
+	childStarted.Store(true)
 	go func() {
-		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		defer close(childFinished)
+		res, _ := orchestrator.Run(ctx, backends, orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-missed-promotion-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-missed-promotion-parent",
@@ -1812,19 +1892,27 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 		childDone <- res
 	}()
 	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-missed-promotion-key", childID, childDone)
-	time.Sleep(350 * time.Millisecond)
-	if _, _, _, err := st.ReleaseAndNotify(ctx,
-		"g:plan-level-queued-await-missed-promotion-key", "external-missed-promotion-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+	waitForMissedPromotionChecks(t, observed)
+	waitForNodeTimeoutPaused(t, attemptCtx)
+	if !orchestrator.NodeTimeoutPausedForTest(attemptCtx) || orchestrator.ForceNodeTimeoutForTest(attemptCtx) {
+		t.Fatal("parent timeout was not safely paused across missed promotion checks")
+	}
+	pausedRemaining, paused, ok := orchestrator.NodeTimeoutStateForTest(attemptCtx)
+	if !ok || !paused || pausedRemaining <= 0 || pausedRemaining > controlledRemainder {
+		t.Fatalf("paused timeout state = remaining %s, paused=%t, ok=%t", pausedRemaining, paused, ok)
+	}
+	if err := releaseHolder(); err != nil {
 		t.Fatalf("release external holder: %v", err)
+	}
+	resumedRemaining := waitForNodeTimeoutResumed(t, attemptCtx)
+	if resumedRemaining > pausedRemaining {
+		t.Fatalf("resumed timeout remainder = %s, want no more than paused remainder %s", resumedRemaining, pausedRemaining)
 	}
 
 	select {
 	case parent := <-parentDone:
 		if parent.Status != "success" {
 			t.Fatalf("parent status = %q, want success after missed promotion accounting (err=%v)", parent.Status, parent.Error)
-		}
-		if elapsed := time.Since(startedAt); elapsed < 700*time.Millisecond {
-			t.Fatalf("parent elapsed = %s, want completion after original wall-clock timeout", elapsed)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for parent after releasing queued child")
