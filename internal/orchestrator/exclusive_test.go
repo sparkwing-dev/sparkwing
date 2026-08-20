@@ -148,6 +148,11 @@ func assertExclusiveSerialization(t *testing.T, p orchestrator.Paths, runs int) 
 	exclusiveState.reset(runs * 2)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	st, err := store.Open(p.StateDB())
+	if err != nil {
+		t.Fatalf("open store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
 	results := make(chan error, runs)
 	var wg sync.WaitGroup
 	for range runs {
@@ -183,12 +188,11 @@ func assertExclusiveSerialization(t *testing.T, p orchestrator.Paths, runs int) 
 		t.Fatal("no exclusive holder entered")
 	}
 
-	observation := time.NewTimer(100 * time.Millisecond)
-	defer observation.Stop()
+	waitForExclusivePopulation(t, ctx, st, runs*2-1)
 	select {
 	case <-exclusiveState.entered:
 		t.Fatal("a second exclusive holder entered before release")
-	case <-observation.C:
+	default:
 	}
 	exclusiveState.releaseAll()
 
@@ -208,6 +212,28 @@ func assertExclusiveSerialization(t *testing.T, p orchestrator.Paths, runs int) 
 	peak := atomic.LoadInt32(&exclusiveState.maxSeen)
 	if peak > 1 {
 		t.Fatalf("Exclusive peak concurrency across runs = %d, want 1", peak)
+	}
+}
+
+func waitForExclusivePopulation(t *testing.T, ctx context.Context, st *store.Store, wantWaiters int) {
+	t.Helper()
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		state, err := st.GetConcurrencyState(ctx, "g:shared-resource")
+		switch {
+		case err == nil && len(state.Holders) == 1 && len(state.Waiters) == wantWaiters:
+			return
+		case err == nil:
+		case errors.Is(err, store.ErrNotFound):
+		default:
+			t.Fatalf("read exclusive concurrency state: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("exclusive concurrency population did not reach 1 holder and %d waiters", wantWaiters)
+		case <-poll.C:
+		}
 	}
 }
 
