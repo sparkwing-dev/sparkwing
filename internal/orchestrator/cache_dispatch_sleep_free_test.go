@@ -46,6 +46,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	noProgressChecksPausedController := false
 	noProgressRejectsPausedExpiry := false
 	dispatchWatchdogObservesAdmissionWait := false
+	dispatchWatchdogUsesObservation := false
 	earlyResumeGateGated := false
 	cancellationGateUngated := false
 	remainingBudgetGateGated := false
@@ -110,6 +111,9 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 			}
 			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "waitForPlanAdmissionWaiter" {
 				usesPlanWait = true
+			}
+			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "observeAdmissionWaitBeyondDispatchTimeout" && fn.Name.Name == "testRunAndAwaitAdmissionOutlivesDispatchWatchdog" {
+				dispatchWatchdogUsesObservation = true
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
 			if !ok {
@@ -177,7 +181,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 			isRemainingBudgetRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget"
 			isEarlyResumeRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline"
 			isNoProgressRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait"
-			if (isPollingHelper || isCancellationRegression || isRemainingBudgetRegression || isEarlyResumeRegression || isNoProgressRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
+			isDispatchWatchdogRegression := fn.Name.Name == "testRunAndAwaitAdmissionOutlivesDispatchWatchdog"
+			if (isPollingHelper || isCancellationRegression || isRemainingBudgetRegression || isEarlyResumeRegression || isNoProgressRegression || isDispatchWatchdogRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
 				t.Errorf("%s contains time.Sleep at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			if planWaiterCallers[fn.Name.Name] && sel.Sel.Name == "GetConcurrencyState" {
@@ -250,5 +255,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if !dispatchWatchdogObservesAdmissionWait {
 		t.Error("dispatch-watchdog regression does not observe the real admission wait state")
+	}
+	if !dispatchWatchdogUsesObservation {
+		t.Error("dispatch-watchdog regression does not delegate its observation window")
 	}
 }
