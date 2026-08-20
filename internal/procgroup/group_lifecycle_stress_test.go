@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"strconv"
 	"testing"
 )
 
@@ -27,28 +28,29 @@ func TestGroupLifecycleStressFinishesGroupsConcurrently(t *testing.T) {
 	}
 	finishesInWorker := false
 	registersCleanup := false
+	keepsStressCardinality := false
 	ast.Inspect(target.Body, func(node ast.Node) bool {
 		switch node := node.(type) {
-		case *ast.GoStmt:
-			ast.Inspect(node.Call, func(child ast.Node) bool {
-				call, ok := child.(*ast.CallExpr)
-				if !ok {
-					return true
+		case *ast.ValueSpec:
+			if len(node.Names) == 1 && node.Names[0].Name == "count" && len(node.Values) == 1 {
+				if value, ok := node.Values[0].(*ast.BasicLit); ok && value.Kind == token.INT && value.Value == strconv.Itoa(50) {
+					keepsStressCardinality = true
 				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if ok && sel.Sel.Name == "Finish" {
-					finishesInWorker = true
-				}
-				return true
-			})
-		case *ast.CallExpr:
-			sel, ok := node.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "Cleanup" {
+			}
+		case *ast.RangeStmt:
+			over, ok := node.X.(*ast.Ident)
+			if !ok {
 				return true
 			}
-			receiver, ok := sel.X.(*ast.Ident)
-			if ok && receiver.Name == "t" {
-				registersCleanup = true
+			switch over.Name {
+			case "count":
+				if rangeCallsCleanup(node) {
+					registersCleanup = true
+				}
+			case "groups":
+				if rangeLaunchesFinish(node) {
+					finishesInWorker = true
+				}
 			}
 		}
 		return true
@@ -59,4 +61,52 @@ func TestGroupLifecycleStressFinishesGroupsConcurrently(t *testing.T) {
 	if !registersCleanup {
 		t.Error("lifecycle stress must register cleanup as each group starts")
 	}
+	if !keepsStressCardinality {
+		t.Error("lifecycle stress must retain 50 process groups")
+	}
+}
+
+func rangeCallsCleanup(loop *ast.RangeStmt) bool {
+	found := false
+	ast.Inspect(loop.Body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		receiver, receiverOK := sel.X.(*ast.Ident)
+		if receiverOK && receiver.Name == "t" && sel.Sel.Name == "Cleanup" {
+			found = true
+		}
+		return true
+	})
+	return found
+}
+
+func rangeLaunchesFinish(loop *ast.RangeStmt) bool {
+	for _, stmt := range loop.Body.List {
+		worker, ok := stmt.(*ast.GoStmt)
+		if !ok {
+			continue
+		}
+		found := false
+		ast.Inspect(worker.Call, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if ok && sel.Sel.Name == "Finish" {
+				found = true
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
 }
