@@ -2724,7 +2724,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 		deadline = appr.RequestedAt.Add(cfg.Timeout)
 	}
 
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(approvalPollInterval())
 	defer ticker.Stop()
 
 	res := s.pollApproval(node.ID(), deadline, onTimeout, ticker)
