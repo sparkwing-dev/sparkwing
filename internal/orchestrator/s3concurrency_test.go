@@ -57,6 +57,8 @@ func holdSlot(t *testing.T, c orchestrator.ConcurrencyBackend, key, runID, nodeI
 func waitPromoted(t *testing.T, c orchestrator.ConcurrencyBackend, key, runID, nodeID string) string {
 	t.Helper()
 	deadline := time.Now().Add(resolveTimeout)
+	poll := time.NewTicker(3 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		res, err := c.ResolveWaiter(context.Background(), key, runID, nodeID, "", "", "", false)
 		if err != nil {
@@ -64,7 +66,7 @@ func waitPromoted(t *testing.T, c orchestrator.ConcurrencyBackend, key, runID, n
 		}
 		switch res.Status {
 		case store.WaiterStillWaiting:
-			time.Sleep(3 * time.Millisecond)
+			<-poll.C
 		case store.WaiterPromoted:
 			return res.HolderID
 		default:
@@ -275,7 +277,6 @@ func TestS3Concurrency_CostBackfillStopsWhenYoungerHolderBlocksOldestWaiter(t *t
 func TestS3Concurrency_ResolveWaiterPromotesAfterHolderLeaseExpires(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
-	ctx := context.Background()
 	key := "g:resolve-expired-holder"
 
 	a := acquire(t, c, store.AcquireSlotRequest{
@@ -304,17 +305,8 @@ func TestS3Concurrency_ResolveWaiterPromotesAfterHolderLeaseExpires(t *testing.T
 	if b.Kind != store.AcquireQueued {
 		t.Fatalf("B kind = %q, want queued", b.Kind)
 	}
-	time.Sleep(50 * time.Millisecond)
-
-	res, err := c.ResolveWaiter(ctx, key, "B", "n", "", "", "", false)
-	if err != nil {
-		t.Fatalf("ResolveWaiter: %v", err)
-	}
-	if res.Status != store.WaiterPromoted {
-		t.Fatalf("status = %q, want promoted", res.Status)
-	}
-	if res.HolderID != "B/n" {
-		t.Fatalf("holder = %q, want B/n", res.HolderID)
+	if holderID := waitPromoted(t, c, key, "B", "n"); holderID != "B/n" {
+		t.Fatalf("holder = %q, want B/n", holderID)
 	}
 }
 
