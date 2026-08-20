@@ -14,12 +14,20 @@ import (
 	"time"
 )
 
-const helperMode = "SPARKWING_PROCGROUP_HELPER"
+const (
+	helperMode        = "SPARKWING_PROCGROUP_HELPER"
+	procgroupReadyEnv = "SPARKWING_PROCGROUP_READY"
+)
 
 func TestGroupHelperProcess(t *testing.T) {
 	switch os.Getenv(helperMode) {
 	case "descendant":
 		IgnoreTermination()
+		if ready := os.Getenv(procgroupReadyEnv); ready != "" {
+			if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
+				os.Exit(2)
+			}
+		}
 		time.Sleep(30 * time.Second)
 		os.Exit(0)
 	case "leader":
@@ -63,7 +71,7 @@ func TestGroupHelperProcess(t *testing.T) {
 	case "session-cooperative":
 		term := make(chan os.Signal, 1)
 		signal.Notify(term, syscall.SIGTERM)
-		if err := os.WriteFile(os.Getenv("SPARKWING_PROCGROUP_READY"), []byte("ready"), 0o600); err != nil {
+		if err := os.WriteFile(os.Getenv(procgroupReadyEnv), []byte("ready"), 0o600); err != nil {
 			os.Exit(2)
 		}
 		<-term
@@ -196,14 +204,15 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 }
 
 func TestSessionTerminateKillsStubbornLeaderAndNestedGroup(t *testing.T) {
+	ready := filepath.Join(t.TempDir(), "descendant-ready")
 	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-	cmd.Env = append(os.Environ(), helperMode+"=session-stubborn")
+	cmd.Env = append(os.Environ(), helperMode+"=session-stubborn", procgroupReadyEnv+"="+ready)
 	g, err := StartSession(cmd)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { terminateForTest(g) })
-	time.Sleep(150 * time.Millisecond)
+	waitForProcgroupReady(t, ready, 3*time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	if err := g.Terminate(ctx, 50*time.Millisecond); errors.Is(err, ErrCleanup) {
@@ -211,6 +220,31 @@ func TestSessionTerminateKillsStubbornLeaderAndNestedGroup(t *testing.T) {
 	}
 	if !g.Reaped() {
 		t.Fatal("stubborn session leader was not reaped")
+	}
+}
+
+func waitForProcgroupReady(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadlineAt := time.Now().Add(timeout)
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		if !time.Now().Before(deadlineAt) {
+			t.Fatalf("timed out waiting for process readiness at %s", path)
+		}
+		if _, err := os.Stat(path); err == nil {
+			return
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("inspect process readiness at %s: %v", path, err)
+		}
+		poll.Reset(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for process readiness at %s", path)
+		}
 	}
 }
 
