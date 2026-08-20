@@ -27,11 +27,10 @@ func TestDegradedBoxScopeSerializationUsesPersistedPopulation(t *testing.T) {
 		}
 		targets[fn.Name.Name] = true
 		waitsForPopulation := false
-		holdersOne, waitersOne := false, false
+		exactReturnPredicate := false
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
-			if binary, ok := node.(*ast.BinaryExpr); ok && fn.Name.Name == "waitForDegradedConcurrencyPopulation" {
-				holdersOne = holdersOne || isStateCountOne(binary, "Holders")
-				waitersOne = waitersOne || isStateCountOne(binary, "Waiters")
+			if clause, ok := node.(*ast.CaseClause); ok && fn.Name.Name == "waitForDegradedConcurrencyPopulation" {
+				exactReturnPredicate = exactReturnPredicate || isExactPopulationReturnCase(clause)
 			}
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
@@ -55,7 +54,7 @@ func TestDegradedBoxScopeSerializationUsesPersistedPopulation(t *testing.T) {
 		if fn.Name.Name == "TestRun_DegradedConcurrencyGroupsStillSerialize" && !waitsForPopulation {
 			t.Error("serialization regression does not wait for persisted holder/waiter population")
 		}
-		if fn.Name.Name == "waitForDegradedConcurrencyPopulation" && (!holdersOne || !waitersOne) {
+		if fn.Name.Name == "waitForDegradedConcurrencyPopulation" && !exactReturnPredicate {
 			t.Error("population helper must require exactly one holder and one waiter")
 		}
 	}
@@ -64,6 +63,39 @@ func TestDegradedBoxScopeSerializationUsesPersistedPopulation(t *testing.T) {
 			t.Errorf("%s not found", name)
 		}
 	}
+}
+
+func isExactPopulationReturnCase(clause *ast.CaseClause) bool {
+	if len(clause.List) != 1 {
+		return false
+	}
+	returns := false
+	for _, stmt := range clause.Body {
+		if _, ok := stmt.(*ast.ReturnStmt); ok {
+			returns = true
+		}
+	}
+	errNil, holdersOne, waitersOne := false, false, false
+	ast.Inspect(clause.List[0], func(node ast.Node) bool {
+		binary, ok := node.(*ast.BinaryExpr)
+		if !ok {
+			return true
+		}
+		errNil = errNil || isIdentEqualNil(binary, "err")
+		holdersOne = holdersOne || isStateCountOne(binary, "Holders")
+		waitersOne = waitersOne || isStateCountOne(binary, "Waiters")
+		return true
+	})
+	return returns && errNil && holdersOne && waitersOne
+}
+
+func isIdentEqualNil(binary *ast.BinaryExpr, name string) bool {
+	if binary.Op != token.EQL {
+		return false
+	}
+	left, leftOK := binary.X.(*ast.Ident)
+	right, rightOK := binary.Y.(*ast.Ident)
+	return leftOK && left.Name == name && rightOK && right.Name == "nil"
 }
 
 func isStateCountOne(binary *ast.BinaryExpr, field string) bool {
