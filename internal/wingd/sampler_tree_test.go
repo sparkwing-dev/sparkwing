@@ -53,17 +53,7 @@ func TestProcSampler_CountsChildSubtreeCPU(t *testing.T) {
 	p := newProcSampler()
 
 	p.CPUUsage(root)
-	time.Sleep(500 * time.Millisecond)
-	usage, ok := p.CPUUsage(root)
-	if !ok {
-		t.Fatalf("root pid %d not sampled", root)
-	}
-	if usage.Fraction <= 0.2 {
-		t.Fatalf("subtree CPU credited to root = %.3f, want > 0.2 (busy descendant not counted)", usage.Fraction)
-	}
-	if !usage.HasDescendant {
-		t.Fatalf("root pid %d has a forked child, want HasDescendant", root)
-	}
+	waitForBusySubtree(t, p, root)
 }
 
 // TestProcSampler_IdleTreeIsZero spawns a holder whose whole tree only
@@ -75,10 +65,39 @@ func TestProcSampler_IdleTreeIsZero(t *testing.T) {
 	p := newProcSampler()
 
 	p.CPUUsage(root)
-	time.Sleep(500 * time.Millisecond)
-	usage, ok := p.CPUUsage(root)
+	observeIdleSubtree(t, p, root)
+}
+
+func waitForBusySubtree(t *testing.T, sampler *procSampler, root int) {
+	t.Helper()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for {
+		usage, ok := sampler.CPUUsage(root)
+		if ok && usage.HasDescendant && usage.Fraction > 0.2 {
+			return
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("root pid %d did not report a busy descendant before the deadline", root)
+		}
+	}
+}
+
+func observeIdleSubtree(t *testing.T, sampler *procSampler, root int) {
+	t.Helper()
+	observation := time.NewTimer(500 * time.Millisecond)
+	defer observation.Stop()
+	<-observation.C
+	usage, ok := sampler.CPUUsage(root)
 	if !ok {
-		t.Fatalf("root pid %d not sampled", root)
+		t.Fatalf("root pid %d produced no CPU sample", root)
+	}
+	if !usage.HasDescendant {
+		t.Fatalf("root pid %d never exposed its idle child", root)
 	}
 	if usage.Fraction > 0.1 {
 		t.Fatalf("idle tree CPU = %.3f, want ~0", usage.Fraction)
@@ -100,7 +119,7 @@ func requireObservableProcCPU(t *testing.T) {
 // mirroring how sparkwing runs each command -- so the busy work lives in
 // a descendant the holder pid never touches, proving the sampler walks
 // the tree rather than grouping by pgid. It gives the backgrounded work a
-// moment to spin up and kills the whole group on cleanup.
+// child state is observed by the sampler, and cleanup kills the whole group.
 func startProcessTree(t *testing.T, script string) int {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", script)
@@ -113,6 +132,5 @@ func startProcessTree(t *testing.T, script string) int {
 		syscall.Kill(-pid, syscall.SIGKILL)
 		cmd.Wait()
 	})
-	time.Sleep(400 * time.Millisecond)
 	return pid
 }
