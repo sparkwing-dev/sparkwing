@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -778,17 +779,32 @@ func waitForConcurrencyHolder(t *testing.T, dbPath, holderID string) {
 		t.Fatalf("open store: %v", err)
 	}
 	defer func() { _ = st.Close() }()
-	deadline := time.Now().Add(15 * time.Second)
-	for time.Now().Before(deadline) {
+	deadlineAt := time.Now().Add(15 * time.Second)
+	pollCtx, cancel := context.WithDeadline(context.Background(), deadlineAt)
+	defer cancel()
+	poll := time.NewTicker(2 * time.Millisecond)
+	defer poll.Stop()
+	for time.Now().Before(deadlineAt) {
 		var count int
-		err := st.DB().QueryRowContext(context.Background(),
+		err := st.DB().QueryRowContext(pollCtx,
 			`SELECT COUNT(*) FROM concurrency_holders WHERE holder_id = ?`,
 			holderID,
 		).Scan(&count)
-		if err == nil && count > 0 {
+		if err != nil {
+			if errors.Is(err, context.DeadlineExceeded) || errors.Is(pollCtx.Err(), context.DeadlineExceeded) {
+				t.Fatalf("timed out waiting for concurrency holder %q", holderID)
+			}
+			t.Fatalf("query concurrency holder %q: %v", holderID, err)
+		}
+		if count > 0 {
 			return
 		}
-		time.Sleep(2 * time.Millisecond)
+		poll.Reset(2 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-pollCtx.Done():
+			t.Fatalf("timed out waiting for concurrency holder %q", holderID)
+		}
 	}
 	t.Fatalf("timed out waiting for concurrency holder %q", holderID)
 }
