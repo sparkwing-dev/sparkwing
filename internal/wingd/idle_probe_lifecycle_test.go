@@ -26,6 +26,7 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 		foundOldHelper    bool
 		helperWithCancel  bool
 		helperCleanup     bool
+		helperCancels     bool
 		helperClosesDone  bool
 		helperWaitsDone   bool
 		helperOwnsTimer   bool
@@ -49,11 +50,6 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 			continue
 		}
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
-			if unary, ok := node.(*ast.UnaryExpr); isHelper && ok && unary.Op == token.ARROW {
-				if ident, ok := unary.X.(*ast.Ident); ok && ident.Name == "done" {
-					helperWaitsDone = true
-				}
-			}
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
@@ -79,10 +75,38 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 					helperWithCancel = true
 				case receiver.Name == "t" && sel.Sel.Name == "Cleanup":
 					helperCleanup = true
-				case receiver.Name == "time" && sel.Sel.Name == "NewTimer":
-					helperOwnsTimer = true
-				case receiver.Name == "timer" && sel.Sel.Name == "Stop":
-					helperStopsTimer = true
+					if len(call.Args) == 1 {
+						cleanup, ok := call.Args[0].(*ast.FuncLit)
+						if ok {
+							ast.Inspect(cleanup.Body, func(node ast.Node) bool {
+								if unary, ok := node.(*ast.UnaryExpr); ok && unary.Op == token.ARROW {
+									if ident, ok := unary.X.(*ast.Ident); ok && ident.Name == "done" {
+										helperWaitsDone = true
+									}
+								}
+								innerCall, ok := node.(*ast.CallExpr)
+								if !ok {
+									return true
+								}
+								if ident, ok := innerCall.Fun.(*ast.Ident); ok && ident.Name == "cancel" && len(innerCall.Args) == 0 {
+									helperCancels = true
+									return true
+								}
+								innerSel, ok := innerCall.Fun.(*ast.SelectorExpr)
+								if !ok {
+									return true
+								}
+								innerReceiver, _ := innerSel.X.(*ast.Ident)
+								if innerReceiver != nil && innerReceiver.Name == "time" && innerSel.Sel.Name == "NewTimer" {
+									helperOwnsTimer = true
+								}
+								if innerReceiver != nil && innerReceiver.Name == "timer" && innerSel.Sel.Name == "Stop" {
+									helperStopsTimer = true
+								}
+								return true
+							})
+						}
+					}
 				}
 			}
 			if fn.Name.Name == "TestIdleExit_PreHelloConnectionsDoNotResetIdleClock" && sel.Sel.Name == "DialContext" {
@@ -94,7 +118,7 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 	if foundOldHelper {
 		t.Error("probeLoop leaves lifecycle ownership at callers; use startProbeLoop")
 	}
-	if !foundHelper || !helperWithCancel || !helperCleanup || !helperClosesDone || !helperWaitsDone || !helperOwnsTimer || !helperStopsTimer {
+	if !foundHelper || !helperWithCancel || !helperCleanup || !helperCancels || !helperClosesDone || !helperWaitsDone || !helperOwnsTimer || !helperStopsTimer {
 		t.Error("startProbeLoop must own cancellation, completion, cleanup, and a stopped bounded join timer")
 	}
 	for name, delegates := range callers {
