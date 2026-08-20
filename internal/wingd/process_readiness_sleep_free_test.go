@@ -10,7 +10,7 @@ import (
 func TestProcessFileReadinessDoesNotSleep(t *testing.T) {
 	targets := map[string]bool{
 		"readDaemonPid":                              false,
-		"waitForNonemptyFile":                        false,
+		"waitForNonblankFile":                        false,
 		"TestProcess_SelfSpawnedDaemonWritesLogFile": false,
 	}
 	fset := token.NewFileSet()

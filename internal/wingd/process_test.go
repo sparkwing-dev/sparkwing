@@ -142,7 +142,7 @@ func (ph *procHandle) kill(sig syscall.Signal) {
 func readDaemonPid(t *testing.T, home string) int {
 	t.Helper()
 	path := filepath.Join(home, "wingd", "daemons.log")
-	data := waitForNonemptyFile(t, path, 3*time.Second, 50*time.Millisecond)
+	data := waitForNonblankFile(t, path, 3*time.Second, 50*time.Millisecond)
 	lines := strings.Fields(strings.TrimSpace(string(data)))
 	last := lines[len(lines)-1]
 	pid, err := strconv.Atoi(last)
@@ -152,7 +152,7 @@ func readDaemonPid(t *testing.T, home string) int {
 	return pid
 }
 
-func waitForNonemptyFile(t *testing.T, path string, timeout, interval time.Duration) []byte {
+func waitForNonblankFile(t *testing.T, path string, timeout, interval time.Duration) []byte {
 	t.Helper()
 	poll := time.NewTicker(interval)
 	defer poll.Stop()
@@ -160,7 +160,7 @@ func waitForNonemptyFile(t *testing.T, path string, timeout, interval time.Durat
 	defer deadline.Stop()
 	for {
 		data, err := os.ReadFile(path)
-		if err == nil && len(data) > 0 {
+		if err == nil && len(strings.TrimSpace(string(data))) > 0 {
 			return data
 		}
 		if err != nil && !os.IsNotExist(err) {
@@ -270,7 +270,7 @@ func TestProcess_SelfSpawnedDaemonWritesLogFile(t *testing.T) {
 	h.waitOK(10 * time.Second)
 
 	logPath := filepath.Join(home, "wingd", "d.log")
-	data := waitForNonemptyFile(t, logPath, 5*time.Second, 20*time.Millisecond)
+	data := waitForNonblankFile(t, logPath, 5*time.Second, 20*time.Millisecond)
 	if !strings.Contains(string(data), "wingd:") || !strings.Contains(string(data), "elected") {
 		t.Fatalf("daemon log lacks a meaningful history line:\n%s", data)
 	}
