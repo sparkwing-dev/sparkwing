@@ -68,10 +68,20 @@ func TestElectionExactlyOneWinnerOwnsTimers(t *testing.T) {
 			t.Errorf("%s constructor = time.%s, want time.%s", name, constructors[name], constructor)
 		}
 	}
+	for name := range constructors {
+		if _, ok := wantConstructors[name]; !ok {
+			t.Errorf("unexpected election timing resource %s", name)
+		}
+	}
 	wantStops := map[string]int{"deadline": 1, "poll": 2, "loseDeadline": 1}
 	for name, count := range wantStops {
 		if stops[name] != count {
 			t.Errorf("%s Stop calls = %d, want %d", name, stops[name], count)
+		}
+	}
+	for name := range stops {
+		if _, ok := wantStops[name]; !ok {
+			t.Errorf("unexpected Stop receiver %s", name)
 		}
 	}
 }
