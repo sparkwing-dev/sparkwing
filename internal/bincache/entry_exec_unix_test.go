@@ -51,13 +51,16 @@ func TestEntryExecHelper(t *testing.T) {
 		return
 	}
 	if mode == "child" {
-		for {
-			time.Sleep(time.Hour)
-		}
+		terminated := make(chan os.Signal, 1)
+		signal.Notify(terminated, syscall.SIGTERM, syscall.SIGINT)
+		<-terminated
+		return
 	}
 	if mode == "term-delay" {
 		terminated := make(chan os.Signal, 1)
 		signal.Notify(terminated, syscall.SIGTERM)
+		released := make(chan os.Signal, 1)
+		signal.Notify(released, syscall.SIGUSR1)
 		_, _ = fmt.Fprintln(os.Stdout, os.Getpid())
 		if ready := os.Getenv("SPARKWING_ENTRY_SIGNAL_READY"); ready != "" {
 			if err := os.WriteFile(ready, []byte(strconv.Itoa(os.Getpid())), 0o600); err != nil {
@@ -70,7 +73,7 @@ func TestEntryExecHelper(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		time.Sleep(200 * time.Millisecond)
+		<-released
 		return
 	}
 	if mode == "start-race-wrapper" {
@@ -147,8 +150,15 @@ func TestExecChildSupervisesSignalsBeforeStart(t *testing.T) {
 }
 
 func waitForFile(path string, timeout time.Duration) ([]byte, error) {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	deadlineAt := time.Now().Add(timeout)
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+	for {
+		if !time.Now().Before(deadlineAt) {
+			return nil, fmt.Errorf("%s was not published before deadline", path)
+		}
 		body, err := os.ReadFile(path)
 		if err == nil {
 			return body, nil
@@ -156,21 +166,26 @@ func waitForFile(path string, timeout time.Duration) ([]byte, error) {
 		if !os.IsNotExist(err) {
 			return nil, err
 		}
-		time.Sleep(5 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			return nil, fmt.Errorf("%s was not published before deadline", path)
+		}
 	}
-	return nil, fmt.Errorf("%s was not published before deadline", path)
 }
 
 func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
 	root := t.TempDir()
 	key := "11111111-11111111"
 	entry := copyTestBinaryIntoEntry(t, root, key)
+	received := filepath.Join(t.TempDir(), "term-received")
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
 	cmd.Env = append(os.Environ(),
 		"SPARKWING_ENTRY_EXEC_HELPER=acquire-and-term-delay",
 		"SPARKWING_ENTRY_HELPER_ROOT="+root,
 		"SPARKWING_ENTRY_HELPER_KEY="+key,
+		"SPARKWING_ENTRY_SIGNAL_RECEIVED="+received,
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
@@ -208,12 +223,18 @@ func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := waitForFile(received, 5*time.Second); err != nil {
+		t.Fatal(err)
+	}
 	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.ActiveSkippedEntries != 1 || result.ReclaimedEntries != 0 {
 		t.Fatalf("wrapper released lease before child exit: %+v", result)
+	}
+	if err := syscall.Kill(childPID, syscall.SIGUSR1); err != nil {
+		t.Fatal(err)
 	}
 	if err := waitCommand(t, cmd, childPID); err != nil {
 		t.Fatal(err)
@@ -323,16 +344,24 @@ func testExecLeaseDoesNotSurviveChild(t *testing.T, mode string) {
 		t.Fatalf("persistent child died with foreground: %v", err)
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
+	deadlineAt := time.Now().Add(2 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
 	for {
+		if !time.Now().Before(deadlineAt) {
+			t.Fatalf("persistent child retained foreground lease: result=%+v err=%v", result, err)
+		}
 		result, err = Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
 		if err == nil && result.ActiveSkippedEntries == 0 && result.ReclaimedEntries == 1 {
 			break
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-poll.C:
+		case <-deadline.C:
 			t.Fatalf("persistent child retained foreground lease: result=%+v err=%v", result, err)
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	if _, err := os.Stat(entry.binaryPath()); !os.IsNotExist(err) {
 		t.Fatalf("pruned entry still exists: %v", err)
@@ -383,14 +412,26 @@ func cleanupProcess(t *testing.T, pid int) {
 	t.Helper()
 	t.Cleanup(func() {
 		_ = syscall.Kill(pid, syscall.SIGKILL)
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
+		deadlineAt := time.Now().Add(2 * time.Second)
+		poll := time.NewTicker(10 * time.Millisecond)
+		defer poll.Stop()
+		deadline := time.NewTimer(time.Until(deadlineAt))
+		defer deadline.Stop()
+		for {
+			if !time.Now().Before(deadlineAt) {
+				t.Errorf("persistent child %d was not reaped before the cleanup deadline", pid)
+				return
+			}
 			if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
 				return
 			}
-			time.Sleep(10 * time.Millisecond)
+			select {
+			case <-poll.C:
+			case <-deadline.C:
+				t.Errorf("persistent child %d was not reaped before the cleanup deadline", pid)
+				return
+			}
 		}
-		t.Errorf("persistent child %d was not reaped before the cleanup deadline", pid)
 	})
 }
 
