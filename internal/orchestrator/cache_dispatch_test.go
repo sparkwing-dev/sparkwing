@@ -440,6 +440,7 @@ func (planLevelQueuedAwaitMultiKeyParentPipe) Plan(
 	rc sparkwing.RunContext,
 ) error {
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		publishQueuedAwaitParentAttempt(ctx)
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-multi-key-child", "work")
 		return err
 	}).Timeout(500 * time.Millisecond)
@@ -1840,13 +1841,16 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 
 func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *testing.T) {
 	resetCacheCounter()
+	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
+	queuedAwaitParentAttempt.Store(gate)
+	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
 	p := newPaths(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	t.Cleanup(func() { _ = st.Close() })
 
 	for _, key := range []string{"g:plan-level-queued-await-multi-key-a", "g:plan-level-queued-await-multi-key-b"} {
 		resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
@@ -1864,20 +1868,60 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 		}
 	}
 
-	startedAt := time.Now()
 	parentDone := make(chan *orchestrator.Result, 1)
+	parentFinished := make(chan struct{})
+	childDone := make(chan *orchestrator.Result, 1)
+	childFinished := make(chan struct{})
+	var childStarted atomic.Bool
+	keys := []string{"g:plan-level-queued-await-multi-key-a", "g:plan-level-queued-await-multi-key-b"}
+	var releaseOnce [2]sync.Once
+	var releaseErr [2]error
+	releaseHolder := func(index int) error {
+		releaseOnce[index].Do(func() {
+			key := keys[index]
+			_, _, _, releaseErr[index] = st.ReleaseAndNotify(context.Background(),
+				key, "external-"+key+"/-", "success", "", "", 0, store.DefaultConcurrencyLease)
+		})
+		return releaseErr[index]
+	}
+	t.Cleanup(func() {
+		gate.release()
+		cancel()
+		for index, key := range keys {
+			if err := releaseHolder(index); err != nil {
+				t.Errorf("cleanup external holder %s: %v", key, err)
+			}
+		}
+		joinCacheDispatchWorker(t, "multi-key parent", parentFinished)
+		if childStarted.Load() {
+			joinCacheDispatchWorker(t, "multi-key child", childFinished)
+		}
+	})
 	go func() {
+		defer close(parentFinished)
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-multi-key-parent",
 			RunID:    "queued-await-multi-key-parent",
 		})
 		parentDone <- res
 	}()
+	var attemptCtx context.Context
+	select {
+	case attemptCtx = <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("parent action did not publish its timeout context")
+	}
+	const controlledRemainder = 480 * time.Millisecond
+	if !orchestrator.SetNodeTimeoutRemainingForTest(attemptCtx, controlledRemainder) {
+		t.Fatal("could not establish the parent timeout remainder")
+	}
+	gate.release()
 
 	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-multi-key-parent", "spawn", "plan-level-queued-await-multi-key-child")
 	claimManualChildTrigger(t, ctx, st, childID)
-	childDone := make(chan *orchestrator.Result, 1)
+	childStarted.Store(true)
 	go func() {
+		defer close(childFinished)
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-multi-key-child",
 			RunID:       childID,
@@ -1885,28 +1929,41 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 		})
 		childDone <- res
 	}()
-	keyA := "g:plan-level-queued-await-multi-key-a"
-	keyB := "g:plan-level-queued-await-multi-key-b"
+	keyA := keys[0]
+	keyB := keys[1]
 	waitForPlanAdmissionWaiter(t, ctx, st, keyA, childID, childDone)
-	time.Sleep(200 * time.Millisecond)
-	if _, _, _, err := st.ReleaseAndNotify(ctx,
-		keyA, "external-"+keyA+"/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+	waitForNodeTimeoutPaused(t, attemptCtx)
+	if !orchestrator.NodeTimeoutPausedForTest(attemptCtx) || orchestrator.ForceNodeTimeoutForTest(attemptCtx) {
+		t.Fatal("parent timeout was not safely paused for key A admission")
+	}
+	firstRemaining, firstPaused, firstOK := orchestrator.NodeTimeoutStateForTest(attemptCtx)
+	if !firstOK || !firstPaused || firstRemaining <= 0 || firstRemaining > controlledRemainder {
+		t.Fatalf("key A timeout state = remaining %s, paused=%t, ok=%t", firstRemaining, firstPaused, firstOK)
+	}
+	if err := releaseHolder(0); err != nil {
 		t.Fatalf("release key A holder: %v", err)
 	}
 	waitForPlanAdmissionWaiter(t, ctx, st, keyB, childID, childDone)
-	time.Sleep(200 * time.Millisecond)
-	if _, _, _, err := st.ReleaseAndNotify(ctx,
-		keyB, "external-"+keyB+"/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+	waitForNodeTimeoutPaused(t, attemptCtx)
+	if !orchestrator.NodeTimeoutPausedForTest(attemptCtx) || orchestrator.ForceNodeTimeoutForTest(attemptCtx) {
+		t.Fatal("parent timeout was not safely paused for key B admission")
+	}
+	secondRemaining, secondPaused, secondOK := orchestrator.NodeTimeoutStateForTest(attemptCtx)
+	if !secondOK || !secondPaused || secondRemaining <= 0 || secondRemaining > firstRemaining {
+		t.Fatalf("key B timeout state = remaining %s, paused=%t, ok=%t; want no more than key A remainder %s", secondRemaining, secondPaused, secondOK, firstRemaining)
+	}
+	if err := releaseHolder(1); err != nil {
 		t.Fatalf("release key B holder: %v", err)
+	}
+	resumedRemaining := waitForNodeTimeoutResumed(t, attemptCtx)
+	if resumedRemaining > secondRemaining {
+		t.Fatalf("resumed timeout remainder = %s, want no more than key B remainder %s", resumedRemaining, secondRemaining)
 	}
 
 	select {
 	case parent := <-parentDone:
 		if parent.Status != "success" {
 			t.Fatalf("parent status = %q, want success after multi-key admission accounting (err=%v)", parent.Status, parent.Error)
-		}
-		if elapsed := time.Since(startedAt); elapsed < 500*time.Millisecond {
-			t.Fatalf("parent elapsed = %s, want completion after original wall-clock timeout", elapsed)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for parent after releasing queued child")
