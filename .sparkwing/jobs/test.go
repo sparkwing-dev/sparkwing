@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"runtime"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -26,16 +27,21 @@ func (Test) Examples() []sparkwing.Example {
 }
 
 func (p *Test) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	plan.Resources(sparkwing.Cores(float64(preCommitCPUReservation(runtime.NumCPU()))))
 	sparkwing.Job(plan, rc.Pipeline, p.run)
 	return nil
 }
 
 func (p *Test) run(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "go test ./...").Run(); err != nil {
+	if _, err := sparkwing.Bash(ctx, testGoCommand(runtime.NumCPU())).Run(); err != nil {
 		return err
 	}
 	sparkwing.Info(ctx, "go test: all packages passed")
 	return nil
+}
+
+func testGoCommand(cpuCount int) string {
+	return boundedGoCommand(cpuCount, "test", "./...")
 }
 
 func init() {
