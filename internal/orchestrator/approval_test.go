@@ -229,8 +229,12 @@ func TestApproval_DeniedFlowsToFailed(t *testing.T) {
 }
 
 func TestApproval_TimeoutWithPolicyFail(t *testing.T) {
+	orchestrator.SetApprovalPollIntervalForTest(t, time.Hour)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
 	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p,
+	res, err := orchestrator.RunLocal(ctx, p,
 		orchestrator.Options{Pipeline: "appr-timeout"})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -247,5 +251,15 @@ func TestApproval_TimeoutWithPolicyFail(t *testing.T) {
 	}
 	if appr.Resolution != store.ApprovalResolutionTimedOut {
 		t.Fatalf("resolution: %q", appr.Resolution)
+	}
+	if appr.TimeoutMS != 200 {
+		t.Fatalf("timeout = %dms, want 200ms", appr.TimeoutMS)
+	}
+	if appr.ResolvedAt == nil {
+		t.Fatal("approval has no resolution timestamp")
+	}
+	deadline := appr.RequestedAt.Add(200 * time.Millisecond)
+	if appr.ResolvedAt.Before(deadline) {
+		t.Fatalf("resolved at %s before configured deadline %s", appr.ResolvedAt, deadline)
 	}
 }
