@@ -108,9 +108,22 @@ func WarmPVC(ctx context.Context, client kubernetes.Interface, namespace, pvcNam
 	log.Printf("warmer: warming %s via pod %s", pvcName, created.Name)
 
 	timeout := 30 * time.Minute
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		time.Sleep(5 * time.Second)
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	poll := time.NewTicker(5 * time.Second)
+	defer poll.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = client.CoreV1().Pods(namespace).Delete(cleanupCtx, podName, metav1.DeleteOptions{})
+			cancel()
+			return fmt.Errorf("waiting for warmer pod %s: %w", podName, ctx.Err())
+		case <-deadline.C:
+			_ = client.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
+			return fmt.Errorf("warmer pod %s timed out after %s", podName, timeout)
+		case <-poll.C:
+		}
 		p, err := client.CoreV1().Pods(namespace).Get(ctx, podName, metav1.GetOptions{})
 		if err != nil {
 			log.Printf("warmer: warning: polling warmer pod: %v", err)
@@ -127,9 +140,6 @@ func WarmPVC(ctx context.Context, client kubernetes.Interface, namespace, pvcNam
 			return fmt.Errorf("warmer pod failed:\n%s", logs)
 		}
 	}
-
-	_ = client.CoreV1().Pods(namespace).Delete(ctx, podName, metav1.DeleteOptions{})
-	return fmt.Errorf("warmer pod %s timed out after %s", podName, timeout)
 }
 
 // FetchPodLogs retrieves logs from a pod (used by warmer for error reporting).
