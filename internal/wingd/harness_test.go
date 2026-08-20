@@ -56,9 +56,10 @@ func shortHome(t *testing.T) string {
 }
 
 type testDaemon struct {
-	d    *wingd.Daemon
-	done chan error
-	stop context.CancelFunc
+	d        *wingd.Daemon
+	done     chan error
+	finished chan struct{}
+	stop     context.CancelFunc
 }
 
 // startDaemon runs a daemon in the background and waits until it is
@@ -76,19 +77,32 @@ func startDaemon(t *testing.T, cfg wingd.Config) *testDaemon {
 		t.Fatalf("new daemon: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	td := &testDaemon{d: d, done: make(chan error, 1), stop: cancel}
-	go func() { td.done <- d.Run(ctx) }()
+	td := &testDaemon{d: d, done: make(chan error, 1), finished: make(chan struct{}), stop: cancel}
+	go func() {
+		defer close(td.finished)
+		td.done <- d.Run(ctx)
+	}()
+	t.Cleanup(func() { td.stopAndWait(t) })
 	select {
 	case <-d.Ready():
 	case err := <-td.done:
-		cancel()
 		t.Fatalf("daemon exited before ready: %v", err)
 	case <-time.After(3 * time.Second):
-		cancel()
 		t.Fatal("daemon never became ready")
 	}
-	t.Cleanup(cancel)
 	return td
+}
+
+func (td *testDaemon) stopAndWait(t *testing.T) {
+	t.Helper()
+	td.stop()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-td.finished:
+	case <-timer.C:
+		t.Error("daemon did not stop during test cleanup")
+	}
 }
 
 func (td *testDaemon) waitExit(t *testing.T, within time.Duration) error {
