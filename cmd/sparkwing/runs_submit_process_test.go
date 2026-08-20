@@ -683,7 +683,7 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	e := newSubmitTestEnv(t)
 	holdStarted := e.useBlockingFixture(t)
 
-	ack := e.submit("--consumer-claim-lease", "60s")
+	ack := e.submit("--consumer-claim-lease", "24s")
 	waitUntil(t, "the dispatch to start executing", 120*time.Second, func() bool {
 		return e.startsInMarker() >= 1
 	})
@@ -698,11 +698,10 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	if liveBefore.Status != "claimed" {
 		t.Fatalf("live trigger status before jump = %q, want claimed", liveBefore.Status)
 	}
-	if _, err := st.DB().Exec(
-		`UPDATE triggers SET lease_expires_at = ? WHERE status = 'claimed'`,
-		time.Now().Add(-time.Hour).UnixNano()); err != nil {
-		t.Fatal(err)
+	if liveBefore.LeaseExpiresAt == nil {
+		t.Fatal("live trigger has no claim lease")
 	}
+	initialLease := *liveBefore.LeaseExpiresAt
 
 	// A terminal expired claim is stable evidence that the maintenance
 	// sweep ran; unlike elapsed time, it cannot pass while the sweep is
@@ -717,18 +716,48 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	if err := st.FinishRun(context.Background(), probeID, "success", ""); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := st.DB().Exec(`
+
+	// Observe one renewal first, then publish both expired rows in one
+	// transaction. The next heartbeat is now a full interval away.
+	waitUntil(t, "the live claim heartbeat", 10*time.Second, func() bool {
+		live, err := st.GetTrigger(context.Background(), ack.RunID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return live.LeaseExpiresAt != nil && live.LeaseExpiresAt.After(initialLease)
+	})
+	liveBefore, err = st.GetTrigger(context.Background(), ack.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := st.DB().BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.Exec(`UPDATE triggers SET lease_expires_at = ?
+WHERE id = ? AND status = 'claimed' AND claim_seq = ?`,
+		time.Now().Add(-time.Hour).UnixNano(), ack.RunID, liveBefore.ClaimSeq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		t.Fatalf("expire live claim rows=%d err=%v, want 1", changed, err)
+	}
+	if _, err := tx.Exec(`
 INSERT INTO triggers (id, pipeline, status, created_at, claimed_at, lease_expires_at, claim_seq)
 VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.UnixNano(),
 		now.Add(-time.Hour).UnixNano()); err != nil {
 		t.Fatal(err)
 	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 
-	// One lease-derived maintenance interval plus scheduling headroom,
-	// still well inside the live claim's first heartbeat.
+	// One lease-derived maintenance interval plus scheduling headroom.
 	poll := time.NewTicker(250 * time.Millisecond)
 	defer poll.Stop()
-	deadline := time.NewTimer(12 * time.Second)
+	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	for {
 		if e.startsInMarker() > 1 {
@@ -745,7 +774,7 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 		select {
 		case <-poll.C:
 		case <-deadline.C:
-			t.Fatalf("maintenance sweep did not reconcile the probe within 12s; status = %q", probe.Status)
+			t.Fatalf("maintenance sweep did not reconcile the probe within 5s; status = %q", probe.Status)
 		}
 	}
 	liveAfter, err := st.GetTrigger(context.Background(), ack.RunID)
