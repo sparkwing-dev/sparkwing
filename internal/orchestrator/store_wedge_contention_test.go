@@ -145,11 +145,16 @@ func TestStoreWedgeGuard_TerminalOnRealWALShmContention(t *testing.T) {
 
 	retry := time.NewTicker(100 * time.Millisecond)
 	defer retry.Stop()
-	deadline := time.NewTimer(60 * time.Second)
+	deadlineAt := time.Now().Add(60 * time.Second)
+	deadline := time.NewTimer(time.Until(deadlineAt))
 	defer deadline.Stop()
 	var terminal, lastStoreErr error
 	timedOut := false
 	for terminal == nil && !timedOut {
+		if !time.Now().Before(deadlineAt) {
+			timedOut = true
+			break
+		}
 		st, err := store.Open(dbPath)
 		if err == nil {
 			_ = st.Close()
