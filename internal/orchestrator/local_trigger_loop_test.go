@@ -374,6 +374,18 @@ func TestLocateTriggerRepo_RetryRejectsRevisionDriftBeforeCompilation(t *testing
 }
 
 func TestPrepareTriggerRepo_RetrySnapshotsRecordedRevisionDespiteDirtySource(t *testing.T) {
+	leaseRoot := t.TempDir()
+	t.Setenv("TMPDIR", leaseRoot)
+	t.Cleanup(func() {
+		matches, err := filepath.Glob(filepath.Join(leaseRoot, "sparkwing-child-executables-*"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(matches) != 0 {
+			t.Errorf("child executable leases survived test cleanup: %v", matches)
+		}
+	})
+
 	repoDir, sha := writeRetryTestRepo(t, filepath.Join(t.TempDir(), "repo-a"), "git@example.test:owner/repo-a.git", "recorded-behavior")
 	behaviorPath := filepath.Join(repoDir, ".sparkwing", "behavior.txt")
 	executablePath := filepath.Join(repoDir, ".sparkwing", "main.go")
