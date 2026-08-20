@@ -26,9 +26,6 @@ func TestDegradedBoxScopeSerializationUsesPersistedPopulation(t *testing.T) {
 			continue
 		}
 		targets[fn.Name.Name] = true
-		if fn.Name.Name != "TestRun_DegradedConcurrencyGroupsStillSerialize" {
-			continue
-		}
 		waitsForPopulation := false
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
@@ -37,18 +34,20 @@ func TestDegradedBoxScopeSerializationUsesPersistedPopulation(t *testing.T) {
 			}
 			switch fun := call.Fun.(type) {
 			case *ast.Ident:
-				if fun.Name == "waitForDegradedConcurrencyPopulation" {
-					waitsForPopulation = true
+				if fn.Name.Name == "TestRun_DegradedConcurrencyGroupsStillSerialize" &&
+					fun.Name == "waitForDegradedConcurrencyPopulation" && len(call.Args) == 4 {
+					waitsForPopulation = isBoxScopeKey(call.Args[3])
 				}
 			case *ast.SelectorExpr:
 				pkg, ok := fun.X.(*ast.Ident)
-				if ok && pkg.Name == "time" && fun.Sel.Name == "After" {
-					t.Errorf("serialization readiness uses time.After at %s", fset.Position(call.Pos()))
+				if ok && pkg.Name == "time" &&
+					(fun.Sel.Name == "After" || fun.Sel.Name == "Sleep") {
+					t.Errorf("%s uses time.%s at %s", fn.Name.Name, fun.Sel.Name, fset.Position(call.Pos()))
 				}
 			}
 			return true
 		})
-		if !waitsForPopulation {
+		if fn.Name.Name == "TestRun_DegradedConcurrencyGroupsStillSerialize" && !waitsForPopulation {
 			t.Error("serialization regression does not wait for persisted holder/waiter population")
 		}
 	}
@@ -57,4 +56,18 @@ func TestDegradedBoxScopeSerializationUsesPersistedPopulation(t *testing.T) {
 			t.Errorf("%s not found", name)
 		}
 	}
+}
+
+func isBoxScopeKey(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok || len(call.Args) != 2 {
+		return false
+	}
+	name, ok := call.Fun.(*ast.Ident)
+	if !ok || name.Name != "scopedGroupKey" {
+		return false
+	}
+	group, groupOK := call.Args[0].(*ast.Ident)
+	runID, runOK := call.Args[1].(*ast.BasicLit)
+	return groupOK && group.Name == "boxGroup" && runOK && runID.Value == `""`
 }
