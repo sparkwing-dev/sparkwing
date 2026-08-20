@@ -38,11 +38,18 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	remainingBudgetRejectsPausedExpiry := false
 	remainingBudgetInspectsControllerState := false
 	remainingBudgetControlsRemainder := false
+	earlyResumeChecksPausedController := false
+	earlyResumeRejectsPausedExpiry := false
+	earlyResumeControlsRemainder := false
+	earlyResumeGateGated := false
 	cancellationGateUngated := false
 	remainingBudgetGateGated := false
 	var remainingBudgetSetPos token.Pos
 	var remainingBudgetReleasePos token.Pos
 	var remainingBudgetSpawnWaitPos token.Pos
+	var earlyResumeSetPos token.Pos
+	var earlyResumeReleasePos token.Pos
+	var earlyResumeSpawnWaitPos token.Pos
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_dispatch_test.go", nil, 0)
 	if err != nil {
@@ -79,6 +86,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 						cancellationGateUngated = !hasProceed
 					case "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget":
 						remainingBudgetGateGated = hasProceed
+					case "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline":
+						earlyResumeGateGated = hasProceed
 					}
 				}
 			}
@@ -90,6 +99,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 				usesSpawnWait = true
 				if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget" {
 					remainingBudgetSpawnWaitPos = call.Pos()
+				} else if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline" {
+					earlyResumeSpawnWaitPos = call.Pos()
 				}
 			}
 			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "waitForPlanAdmissionWaiter" {
@@ -124,15 +135,32 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					remainingBudgetSetPos = call.Pos()
 				}
 			}
+			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline" && ok && pkg.Name == "orchestrator" {
+				switch sel.Sel.Name {
+				case "NodeTimeoutPausedForTest":
+					earlyResumeChecksPausedController = true
+				case "ForceNodeTimeoutForTest":
+					earlyResumeRejectsPausedExpiry = true
+				case "SetNodeTimeoutRemainingForTest":
+					earlyResumeControlsRemainder = true
+					earlyResumeSetPos = call.Pos()
+				}
+			}
 			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget" && sel.Sel.Name == "release" {
-				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "gate" && remainingBudgetReleasePos == token.NoPos {
+				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "gate" {
 					remainingBudgetReleasePos = call.Pos()
+				}
+			}
+			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline" && sel.Sel.Name == "release" {
+				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "gate" {
+					earlyResumeReleasePos = call.Pos()
 				}
 			}
 			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForNodeTimeoutResumed" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
 			isCancellationRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused"
 			isRemainingBudgetRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget"
-			if (isPollingHelper || isCancellationRegression || isRemainingBudgetRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
+			isEarlyResumeRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline"
+			if (isPollingHelper || isCancellationRegression || isRemainingBudgetRegression || isEarlyResumeRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
 				t.Errorf("%s contains time.Sleep at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			if planWaiterCallers[fn.Name.Name] && sel.Sel.Name == "GetConcurrencyState" {
@@ -180,5 +208,21 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	if remainingBudgetSetPos == token.NoPos || remainingBudgetReleasePos == token.NoPos || remainingBudgetSpawnWaitPos == token.NoPos ||
 		!(remainingBudgetSetPos < remainingBudgetReleasePos && remainingBudgetReleasePos < remainingBudgetSpawnWaitPos) {
 		t.Error("remaining-budget regression must set the remainder, release the action, then wait for child admission")
+	}
+	if !earlyResumeChecksPausedController {
+		t.Error("early-resume regression does not inspect the paused timeout controller")
+	}
+	if !earlyResumeRejectsPausedExpiry {
+		t.Error("early-resume regression does not reject forced timeout while admission is paused")
+	}
+	if !earlyResumeControlsRemainder {
+		t.Error("early-resume regression does not establish its pre-admission timeout remainder")
+	}
+	if !earlyResumeGateGated {
+		t.Error("early-resume regression does not gate action progress while setting the timeout remainder")
+	}
+	if earlyResumeSetPos == token.NoPos || earlyResumeReleasePos == token.NoPos || earlyResumeSpawnWaitPos == token.NoPos ||
+		!(earlyResumeSetPos < earlyResumeReleasePos && earlyResumeReleasePos < earlyResumeSpawnWaitPos) {
+		t.Error("early-resume regression must set the remainder, release the action, then wait for child admission")
 	}
 }
