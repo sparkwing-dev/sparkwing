@@ -18,7 +18,7 @@ func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
 	siblingEntered := make(chan struct{})
 	boom := errors.New("boom")
 	w := NewWork()
-	var siblingCompleted atomic.Bool
+	var siblingCancelled atomic.Bool
 	Step(w, "fast-fail", func(ctx context.Context) error {
 		select {
 		case <-siblingEntered:
@@ -29,13 +29,9 @@ func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
 	})
 	Step(w, "slow", func(ctx context.Context) error {
 		close(siblingEntered)
-		select {
-		case <-time.After(500 * time.Millisecond):
-			siblingCompleted.Store(true)
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		<-ctx.Done()
+		siblingCancelled.Store(true)
+		return ctx.Err()
 	})
 	_, err := RunWork(runCtx, w)
 	if err == nil {
@@ -44,8 +40,8 @@ func TestRunWork_DefaultFailFastCancelsSiblings(t *testing.T) {
 	if !errors.Is(err, boom) {
 		t.Fatalf("RunWork error = %v, want fast-fail error", err)
 	}
-	if siblingCompleted.Load() {
-		t.Error("slow sibling should have been cancelled; default is fail-fast")
+	if !siblingCancelled.Load() {
+		t.Error("slow sibling did not observe cancellation; default is fail-fast")
 	}
 }
 

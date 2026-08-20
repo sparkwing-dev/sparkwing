@@ -60,8 +60,12 @@ func TestDefaultFailFastObservesSiblingCancellationDirectly(t *testing.T) {
 				t.Errorf("%s: observe sibling cancellation directly", fset.Position(node.Pos()))
 			}
 		case *ast.UnaryExpr:
-			sel, ok := node.X.(*ast.SelectorExpr)
+			call, ok := node.X.(*ast.CallExpr)
 			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || len(call.Args) != 0 {
 				return true
 			}
 			receiver, receiverOK := sel.X.(*ast.Ident)
