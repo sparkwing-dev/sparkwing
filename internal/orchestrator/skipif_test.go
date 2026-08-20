@@ -236,6 +236,7 @@ func (generousTimeout) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwi
 		return nil
 	}).SkipIf(func(ctx context.Context) bool {
 		<-ctx.Done()
+		generousCanceled <- struct{}{}
 		return false
 	}, sparkwing.SkipBudget(50*time.Millisecond))
 	return nil
