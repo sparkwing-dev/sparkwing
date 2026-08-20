@@ -274,8 +274,14 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 	}()
 	t.Cleanup(func() {
 		if !released {
-			released = true
-			_ = syscall.Kill(group.ID(), syscall.SIGUSR1)
+			select {
+			case <-terminateFinished:
+				released = true
+			default:
+				if syscall.Kill(group.ID(), syscall.SIGUSR1) == nil {
+					released = true
+				}
+			}
 		}
 		select {
 		case <-terminateFinished:
@@ -288,13 +294,14 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 	defer observation.Stop()
 	select {
 	case err := <-terminated:
+		released = true
 		t.Fatalf("termination returned before cooperative cleanup was released: %v", err)
 	case <-observation.C:
 	}
-	released = true
 	if err := syscall.Kill(group.ID(), syscall.SIGUSR1); err != nil {
 		t.Fatalf("release cooperative cleanup: %v", err)
 	}
+	released = true
 	select {
 	case err := <-terminated:
 		if err != nil {
