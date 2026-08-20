@@ -40,8 +40,7 @@ func TestGroupHelperProcess(t *testing.T) {
 		os.Exit(0)
 	case "ignore-short":
 		IgnoreTermination()
-		time.Sleep(50 * time.Millisecond)
-		os.Exit(0)
+		holdHelperProcess("")
 	case "session-leader":
 		if err := startReadyGroupDescendant(true); err != nil {
 			_, _ = fmt.Fprintln(os.Stderr, err)
@@ -128,28 +127,9 @@ func startReadyGroupDescendant(setpgid bool) error {
 		return fmt.Errorf("start descendant: %w", err)
 	}
 	_ = writer.Close()
-	type readyResult struct {
-		n     int
-		value byte
-		err   error
-	}
-	ready := make(chan readyResult, 1)
-	go func() {
-		buf := make([]byte, 1)
-		n, err := reader.Read(buf)
-		ready <- readyResult{n: n, value: buf[0], err: err}
-	}()
-	timer := time.NewTimer(3 * time.Second)
-	defer timer.Stop()
-	var readyErr error
-	select {
-	case result := <-ready:
-		if result.err == nil && result.n == 1 && result.value == 1 {
-			return nil
-		}
-		readyErr = fmt.Errorf("invalid descendant readiness: n=%d value=%d err=%v", result.n, result.value, result.err)
-	case <-timer.C:
-		readyErr = errors.New("timed out waiting for descendant readiness")
+	readyErr := awaitProcgroupReadyByte(reader, 3*time.Second)
+	if readyErr == nil {
+		return nil
 	}
 	killErr := child.Process.Kill()
 	waited := make(chan error, 1)
@@ -169,6 +149,31 @@ func startReadyGroupDescendant(setpgid bool) error {
 			return fmt.Errorf("%w; kill descendant: %v; wait did not return", readyErr, killErr)
 		}
 		return fmt.Errorf("%w; descendant did not stop after kill", readyErr)
+	}
+}
+
+func awaitProcgroupReadyByte(reader *os.File, timeout time.Duration) error {
+	type readyResult struct {
+		n     int
+		value byte
+		err   error
+	}
+	ready := make(chan readyResult, 1)
+	go func() {
+		buf := make([]byte, 1)
+		n, err := reader.Read(buf)
+		ready <- readyResult{n: n, value: buf[0], err: err}
+	}()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	select {
+	case result := <-ready:
+		if result.err != nil || result.n != 1 || result.value != 1 {
+			return fmt.Errorf("invalid readiness signal: n=%d value=%d err=%v", result.n, result.value, result.err)
+		}
+		return nil
+	case <-deadline.C:
+		return errors.New("timed out waiting for readiness signal")
 	}
 }
 
@@ -490,7 +495,7 @@ func TestGroupLifecycleStressLeavesEveryGroupReaped(t *testing.T) {
 func TestConcurrentFinishAndTerminateNeverLoseCompletedCleanup(t *testing.T) {
 	const count = 50
 	for range count {
-		g := startHelper(t, "ignore-short")
+		g := startReadyHelper(t, "ignore-short")
 		results := make(chan error, 2)
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -520,6 +525,33 @@ func startHelper(t *testing.T, mode string) *Group {
 	g, err := Start(cmd)
 	if err != nil {
 		t.Fatal(err)
+	}
+	return g
+}
+
+func startReadyHelper(t *testing.T, mode string) *Group {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("create helper readiness pipe: %v", err)
+	}
+	defer reader.Close()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	cmd.Env = append(os.Environ(), helperMode+"="+mode, procgroupReadyFD+"=3")
+	cmd.ExtraFiles = []*os.File{writer}
+	g, err := Start(cmd)
+	_ = writer.Close()
+	if err != nil {
+		t.Fatalf("start ready helper: %v", err)
+	}
+	t.Cleanup(func() {
+		if !g.Reaped() {
+			terminateForTest(g)
+		}
+	})
+	if err := awaitProcgroupReadyByte(reader, 3*time.Second); err != nil {
+		terminateForTest(g)
+		t.Fatalf("wait for helper readiness: %v", err)
 	}
 	return g
 }
