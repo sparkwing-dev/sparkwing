@@ -12,6 +12,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 		"waitForConcurrencyHolder":                                                     false,
 		"waitForNodeTimeoutPaused":                                                     false,
 		"waitForNodeTimeoutResumed":                                                    false,
+		"waitForProgressTimeoutResumed":                                                false,
 		"waitForPlanAdmissionWaiter":                                                   false,
 		"waitForSpawnedChildTrigger":                                                   false,
 		"testRunAndAwaitAdmissionOutlivesDispatchWatchdog":                             false,
@@ -166,7 +167,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					earlyResumeReleasePos = call.Pos()
 				}
 			}
-			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForNodeTimeoutResumed" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
+			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForNodeTimeoutResumed" || fn.Name.Name == "waitForProgressTimeoutResumed" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
 			isCancellationRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused"
 			isRemainingBudgetRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget"
 			isEarlyResumeRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline"
@@ -182,7 +183,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 		if planWaiterCallers[fn.Name.Name] && !usesPlanWait {
 			t.Errorf("%s does not use waitForPlanAdmissionWaiter", fn.Name.Name)
 		}
-		isHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForNodeTimeoutResumed" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
+		isHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForNodeTimeoutResumed" || fn.Name.Name == "waitForProgressTimeoutResumed" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
 		if !isHelper && !usesSpawnWait {
 			t.Errorf("%s does not use waitForSpawnedChildTrigger", fn.Name.Name)
 		}
