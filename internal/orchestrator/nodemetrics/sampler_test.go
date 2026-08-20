@@ -9,14 +9,19 @@ import (
 )
 
 type captureSink struct {
-	mu      sync.Mutex
-	samples []Sample
+	mu          sync.Mutex
+	samples     []Sample
+	memoryReady chan struct{}
+	memoryOnce  sync.Once
 }
 
 func (s *captureSink) Push(_ context.Context, sample Sample) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.samples = append(s.samples, sample)
+	if sample.MemoryBytes > 0 && s.memoryReady != nil {
+		s.memoryOnce.Do(func() { close(s.memoryReady) })
+	}
 	return nil
 }
 
@@ -147,16 +152,37 @@ func TestReadCPUTime_SubtractsReportedChildCPU(t *testing.T) {
 // TestRun_ReportsMemory asserts the sampler reports a nonzero memory
 // reading from the platform RSS source or its runtime fallback.
 func TestRun_ReportsMemory(t *testing.T) {
-	sink := &captureSink{}
-	ctx, cancel := context.WithCancel(context.Background())
+	memoryReady := make(chan struct{})
+	sink := &captureSink{memoryReady: memoryReady}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	done := make(chan struct{})
 	go func() {
 		Run(ctx, 40*time.Millisecond, sink)
 		close(done)
 	}()
-	time.Sleep(200 * time.Millisecond)
+	t.Cleanup(func() {
+		cancel()
+		joinDeadline := time.NewTimer(time.Second)
+		defer joinDeadline.Stop()
+		select {
+		case <-done:
+		case <-joinDeadline.C:
+			t.Error("sampler did not stop after cancellation")
+		}
+	})
+	select {
+	case <-memoryReady:
+	case <-ctx.Done():
+		t.Fatalf("sampler did not report nonzero memory: %v", ctx.Err())
+	}
 	cancel()
-	<-done
+	joinDeadline := time.NewTimer(time.Second)
+	defer joinDeadline.Stop()
+	select {
+	case <-done:
+	case <-joinDeadline.C:
+		t.Fatal("sampler did not stop after cancellation")
+	}
 
 	sink.mu.Lock()
 	defer sink.mu.Unlock()
