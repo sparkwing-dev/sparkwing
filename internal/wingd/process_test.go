@@ -367,6 +367,8 @@ func TestProcess_PipelineClientWithoutAHostStartsNothing(t *testing.T) {
 // the surviving holder reclaims its lease from the successor. A second token
 // claimant would compete with the holder rather than exercise holder recovery.
 func TestProcess_DaemonKillRestoresAndReattaches(t *testing.T) {
+	t.Parallel()
+
 	if testing.Short() {
 		t.Skip("process test skipped in -short")
 	}
