@@ -19,6 +19,22 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+var slotObservationIntervalNanos atomic.Int64
+
+func supersessionPollInterval() time.Duration {
+	if interval := time.Duration(slotObservationIntervalNanos.Load()); interval > 0 {
+		return interval
+	}
+	return store.DefaultConcurrencyHeartbeatInterval
+}
+
+func slotHeartbeatInterval(onLimit string) time.Duration {
+	if interval := time.Duration(slotObservationIntervalNanos.Load()); interval > 0 {
+		return interval
+	}
+	return store.ConcurrencyHeartbeatInterval(onLimit)
+}
+
 // concWaitDetail renders a short status_detail string describing why a
 // node is waiting on a concurrency namespace, for the dashboard. Empty
 // for kinds that don't represent a wait.
@@ -526,13 +542,13 @@ func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID,
 	var supersessionTicker *time.Ticker
 	var supersessionC <-chan time.Time
 	if pollsForSupersession(onLimit) {
-		supersessionTicker = time.NewTicker(store.DefaultConcurrencyHeartbeatInterval)
+		supersessionTicker = time.NewTicker(supersessionPollInterval())
 		supersessionC = supersessionTicker.C
 	}
 
 	go func() {
 		wedge := newStoreWedgeGuard(wedgeBudget)
-		t := time.NewTicker(store.ConcurrencyHeartbeatInterval(onLimit))
+		t := time.NewTicker(slotHeartbeatInterval(onLimit))
 		defer t.Stop()
 		if supersessionTicker != nil {
 			defer supersessionTicker.Stop()

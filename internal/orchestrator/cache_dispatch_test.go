@@ -2413,6 +2413,7 @@ func TestConcurrency_ForcedReleaseStopsCancelOthersLeader(t *testing.T) {
 
 func testCancelOthersStopsLeader(t *testing.T, leaderPipeline, followerPipeline string) {
 	t.Helper()
+	orchestrator.SetSlotObservationIntervalForTest(t, 10*time.Millisecond)
 	resetCacheCounter()
 	p := newPaths(t)
 
