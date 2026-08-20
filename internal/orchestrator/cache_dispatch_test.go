@@ -216,6 +216,12 @@ type planLevelQueuedAwaitParentPipe struct{ sparkwing.Base }
 
 const admissionPauseFixtureTimeout = 750 * time.Millisecond
 
+type queuedAwaitParentGate struct {
+	started chan context.Context
+}
+
+var queuedAwaitParentAttempt atomic.Pointer[queuedAwaitParentGate]
+
 func (planLevelQueuedAwaitParentPipe) Plan(
 	ctx context.Context,
 	plan *sparkwing.Plan,
@@ -223,6 +229,12 @@ func (planLevelQueuedAwaitParentPipe) Plan(
 	rc sparkwing.RunContext,
 ) error {
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		if gate := queuedAwaitParentAttempt.Load(); gate != nil {
+			select {
+			case gate.started <- ctx:
+			default:
+			}
+		}
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-child", "work")
 		return err
 	}).NoProgressTimeout(100 * time.Millisecond).Timeout(admissionPauseFixtureTimeout)
@@ -853,6 +865,17 @@ func waitForPlanAdmissionWaiter(t *testing.T, ctx context.Context, st *store.Sto
 	}
 }
 
+func joinCacheDispatchWorker(t *testing.T, name string, done <-chan struct{}) {
+	t.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+	case <-timer.C:
+		t.Errorf("%s did not stop within 2s", name)
+	}
+}
+
 func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
@@ -1193,14 +1216,16 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 
 func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t *testing.T) {
 	resetCacheCounter()
+	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
+	queuedAwaitParentAttempt.Store(gate)
+	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
 	p := newPaths(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	t.Cleanup(func() { _ = st.Close() })
 
 	resp, err := st.AcquireConcurrencySlot(context.Background(), store.AcquireSlotRequest{
 		Key:      "g:plan-level-queued-await-key",
@@ -1217,7 +1242,31 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 	}
 
 	parentDone := make(chan *orchestrator.Result, 1)
+	parentFinished := make(chan struct{})
+	childDone := make(chan *orchestrator.Result, 1)
+	childFinished := make(chan struct{})
+	var childStarted atomic.Bool
+	var releaseOnce sync.Once
+	var releaseErr error
+	releaseHolder := func() error {
+		releaseOnce.Do(func() {
+			_, _, _, releaseErr = st.ReleaseAndNotify(context.Background(),
+				"g:plan-level-queued-await-key", "external-plan-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease)
+		})
+		return releaseErr
+	}
+	t.Cleanup(func() {
+		cancel()
+		if err := releaseHolder(); err != nil {
+			t.Errorf("cleanup external holder: %v", err)
+		}
+		joinCacheDispatchWorker(t, "admission-cancellation parent", parentFinished)
+		if childStarted.Load() {
+			joinCacheDispatchWorker(t, "admission-cancellation child", childFinished)
+		}
+	})
 	go func() {
+		defer close(parentFinished)
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-parent",
 			RunID:    "queued-await-cancel-parent",
@@ -1227,9 +1276,10 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 
 	childID := waitForSpawnedChildTrigger(t, context.Background(), st, "queued-await-cancel-parent", "spawn", "plan-level-queued-await-child")
 	claimManualChildTrigger(t, context.Background(), st, childID)
-	childDone := make(chan *orchestrator.Result, 1)
+	childStarted.Store(true)
 	go func() {
-		res, _ := orchestrator.Run(context.Background(), orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
+		defer close(childFinished)
+		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-child",
 			RunID:       childID,
 			ParentRunID: "queued-await-cancel-parent",
@@ -1237,7 +1287,26 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 		childDone <- res
 	}()
 	waitForPlanAdmissionWaiter(t, context.Background(), st, "g:plan-level-queued-await-key", childID, childDone)
-	time.Sleep(250 * time.Millisecond)
+	var attemptCtx context.Context
+	select {
+	case attemptCtx = <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("parent action did not publish its timeout context")
+	}
+	if !orchestrator.ProgressTimeoutPausedForTest(attemptCtx) {
+		t.Fatal("parent timeout controller was not paused during child admission")
+	}
+	if orchestrator.ExpireProgressTimeoutForTest(attemptCtx) {
+		t.Fatal("parent timeout expired while child admission was pending")
+	}
+	if err := attemptCtx.Err(); err != nil {
+		t.Fatalf("parent action ended before explicit cancellation: %v", err)
+	}
+	select {
+	case parent := <-parentDone:
+		t.Fatalf("parent finished before explicit cancellation: status=%q err=%v", parent.Status, parent.Error)
+	default:
+	}
 	cancel()
 
 	select {
@@ -1249,8 +1318,7 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 		t.Fatal("timed out waiting for parent cancellation")
 	}
 
-	if _, _, _, err := st.ReleaseAndNotify(context.Background(),
-		"g:plan-level-queued-await-key", "external-plan-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+	if err := releaseHolder(); err != nil {
 		t.Fatalf("release external holder: %v", err)
 	}
 	select {
