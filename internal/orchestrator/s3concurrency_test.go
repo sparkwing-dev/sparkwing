@@ -903,7 +903,9 @@ func TestS3Concurrency_LeaseExpiryReclaimed(t *testing.T) {
 		t.Fatalf("A kind = %q, want granted", a.Kind)
 	}
 
-	time.Sleep(150 * time.Millisecond)
+	if err := orchestrator.ExpireS3ConcurrencyHolderForTest(ctx, c, key, a.HolderID); err != nil {
+		t.Fatalf("expire holder A: %v", err)
+	}
 
 	if _, _, err := c.HeartbeatSlot(ctx, key, a.HolderID, 0); !errors.Is(err, store.ErrLockHeld) {
 		t.Errorf("heartbeat on lapsed lease err = %v, want ErrLockHeld", err)
