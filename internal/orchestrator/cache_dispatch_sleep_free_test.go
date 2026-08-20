@@ -48,6 +48,11 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	dispatchWatchdogObservesAdmissionWait := false
 	dispatchWatchdogUsesObservation := false
 	dispatchWatchdogSpansTimeout := false
+	multiKeyChecksPausedController := false
+	multiKeyRejectsPausedExpiry := false
+	multiKeyInspectsControllerState := false
+	multiKeyControlsRemainder := false
+	multiKeyGateGated := false
 	earlyResumeGateGated := false
 	cancellationGateUngated := false
 	remainingBudgetGateGated := false
@@ -57,6 +62,9 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	var earlyResumeSetPos token.Pos
 	var earlyResumeReleasePos token.Pos
 	var earlyResumeSpawnWaitPos token.Pos
+	var multiKeySetPos token.Pos
+	var multiKeyReleasePos token.Pos
+	var multiKeySpawnWaitPos token.Pos
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_dispatch_test.go", nil, 0)
 	if err != nil {
@@ -95,6 +103,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 						remainingBudgetGateGated = hasProceed
 					case "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline":
 						earlyResumeGateGated = hasProceed
+					case "TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait":
+						multiKeyGateGated = hasProceed
 					}
 				}
 			}
@@ -108,6 +118,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					remainingBudgetSpawnWaitPos = call.Pos()
 				} else if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline" {
 					earlyResumeSpawnWaitPos = call.Pos()
+				} else if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait" {
+					multiKeySpawnWaitPos = call.Pos()
 				}
 			}
 			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "waitForPlanAdmissionWaiter" {
@@ -184,6 +196,19 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					earlyResumeSetPos = call.Pos()
 				}
 			}
+			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait" && ok && pkg.Name == "orchestrator" {
+				switch sel.Sel.Name {
+				case "NodeTimeoutPausedForTest":
+					multiKeyChecksPausedController = true
+				case "ForceNodeTimeoutForTest":
+					multiKeyRejectsPausedExpiry = true
+				case "NodeTimeoutStateForTest":
+					multiKeyInspectsControllerState = true
+				case "SetNodeTimeoutRemainingForTest":
+					multiKeyControlsRemainder = true
+					multiKeySetPos = call.Pos()
+				}
+			}
 			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget" && sel.Sel.Name == "release" {
 				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "gate" {
 					remainingBudgetReleasePos = call.Pos()
@@ -194,13 +219,19 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					earlyResumeReleasePos = call.Pos()
 				}
 			}
+			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait" && sel.Sel.Name == "release" {
+				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "gate" {
+					multiKeyReleasePos = call.Pos()
+				}
+			}
 			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForNodeTimeoutResumed" || fn.Name.Name == "waitForProgressTimeoutResumed" || fn.Name.Name == "observeAdmissionWaitBeyondDispatchTimeout" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
 			isCancellationRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused"
 			isRemainingBudgetRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget"
 			isEarlyResumeRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline"
 			isNoProgressRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait"
 			isDispatchWatchdogRegression := fn.Name.Name == "testRunAndAwaitAdmissionOutlivesDispatchWatchdog"
-			if (isPollingHelper || isCancellationRegression || isRemainingBudgetRegression || isEarlyResumeRegression || isNoProgressRegression || isDispatchWatchdogRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
+			isMultiKeyRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait"
+			if (isPollingHelper || isCancellationRegression || isRemainingBudgetRegression || isEarlyResumeRegression || isNoProgressRegression || isDispatchWatchdogRegression || isMultiKeyRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
 				t.Errorf("%s contains time.Sleep at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			if planWaiterCallers[fn.Name.Name] && sel.Sel.Name == "GetConcurrencyState" {
@@ -279,5 +310,15 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if !dispatchWatchdogSpansTimeout {
 		t.Error("dispatch-watchdog observation does not span the configured timeout")
+	}
+	if !multiKeyChecksPausedController || !multiKeyRejectsPausedExpiry || !multiKeyInspectsControllerState || !multiKeyControlsRemainder {
+		t.Error("multi-key admission regression does not control and inspect its paused timeout state")
+	}
+	if !multiKeyGateGated {
+		t.Error("multi-key admission regression does not gate action progress while setting the timeout remainder")
+	}
+	if multiKeySetPos == token.NoPos || multiKeyReleasePos == token.NoPos || multiKeySpawnWaitPos == token.NoPos ||
+		!(multiKeySetPos < multiKeyReleasePos && multiKeyReleasePos < multiKeySpawnWaitPos) {
+		t.Error("multi-key admission regression must set the remainder, release the action, then wait for child admission")
 	}
 }
