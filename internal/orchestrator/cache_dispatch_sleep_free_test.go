@@ -30,6 +30,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 		"TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWait": true,
 		"TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait":      true,
 	}
+	cancellationChecksPausedController := false
+	cancellationRejectsPausedExpiry := false
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_dispatch_test.go", nil, 0)
 	if err != nil {
@@ -65,8 +67,17 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 				t.Errorf("%s polls FindSpawnedChildTriggerID directly at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			pkg, ok := sel.X.(*ast.Ident)
+			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused" && ok && pkg.Name == "orchestrator" {
+				switch sel.Sel.Name {
+				case "ProgressTimeoutPausedForTest":
+					cancellationChecksPausedController = true
+				case "ExpireProgressTimeoutForTest":
+					cancellationRejectsPausedExpiry = true
+				}
+			}
 			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
-			if isPollingHelper && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
+			isCancellationRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused"
+			if (isPollingHelper || isCancellationRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
 				t.Errorf("%s contains time.Sleep at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			if planWaiterCallers[fn.Name.Name] && sel.Sel.Name == "GetConcurrencyState" {
@@ -86,5 +97,11 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 		if !found {
 			t.Errorf("cache_dispatch_test.go does not declare %s", name)
 		}
+	}
+	if !cancellationChecksPausedController {
+		t.Error("parent-cancellation regression does not inspect the paused timeout controller")
+	}
+	if !cancellationRejectsPausedExpiry {
+		t.Error("parent-cancellation regression does not reject timeout expiry while admission is paused")
 	}
 }
