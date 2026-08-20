@@ -2795,6 +2795,12 @@ func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeou
 	if err != nil {
 		return approvalResult{outcome: sparkwing.Failed, errMsg: err.Error()}
 	}
+	var deadlineC <-chan time.Time
+	if !deadline.IsZero() {
+		deadlineTimer := time.NewTimer(time.Until(deadline))
+		defer deadlineTimer.Stop()
+		deadlineC = deadlineTimer.C
+	}
 	for {
 		got, err := s.backends.State.GetApproval(s.ctx, s.runID, nodeID)
 		if err != nil {
@@ -2820,6 +2826,7 @@ func (s *dispatchState) pollApproval(nodeID string, deadline time.Time, onTimeou
 		}
 		select {
 		case <-ticker.C:
+		case <-deadlineC:
 		case <-s.ctx.Done():
 			return approvalResult{outcome: sparkwing.Cancelled, errMsg: "ctx-cancelled"}
 		}
