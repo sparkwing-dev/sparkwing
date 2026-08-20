@@ -1,6 +1,7 @@
 package orchestrator
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +18,34 @@ import (
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+type consumerLogSignal struct {
+	needle []byte
+	seen   chan struct{}
+	once   sync.Once
+}
+
+func newConsumerLogSignal(needle string) *consumerLogSignal {
+	return &consumerLogSignal{needle: []byte(needle), seen: make(chan struct{})}
+}
+
+func (s *consumerLogSignal) Write(p []byte) (int, error) {
+	if bytes.Contains(p, s.needle) {
+		s.once.Do(func() { close(s.seen) })
+	}
+	return len(p), nil
+}
+
+func waitForConsumerLog(t *testing.T, signal *consumerLogSignal) {
+	t.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-signal.seen:
+	case <-timer.C:
+		t.Fatalf("consumer log did not contain %q", signal.needle)
+	}
 }
 
 func consumerTestStore(t *testing.T, home string) *store.Store {
@@ -167,13 +197,12 @@ func TestRunLocalTriggerConsumer_StandsDownWhenAResidentConsumerHoldsTheLock(t *
 	<-ready
 	residentPID, _ := ConsumerPID(home)
 
-	if err := RunLocalTriggerConsumer(ctx, home, st, quietLogger()); err != nil {
+	stoodDown := newConsumerLogSignal("dashboard trigger consumer standing down")
+	logger := slog.New(slog.NewTextHandler(stoodDown, nil))
+	if err := RunLocalTriggerConsumer(ctx, home, st, logger); err != nil {
 		t.Fatalf("dashboard consumer startup: %v", err)
 	}
-	// The dashboard's consumer loses the election in its own goroutine.
-	// The observable consequence is that the resident consumer still owns
-	// the lock and the pid file was never rewritten.
-	time.Sleep(200 * time.Millisecond)
+	waitForConsumerLog(t, stoodDown)
 	pid, ok := ConsumerPID(home)
 	if !ok || pid != residentPID {
 		t.Fatalf("consumer pid = %d (ok=%v), want the resident %d still owning the queue", pid, ok, residentPID)
@@ -568,10 +597,12 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 	<-ready
 
 	// The dashboard comes up second and loses the election.
-	if err := RunLocalTriggerConsumer(ctx, home, st, quietLogger()); err != nil {
+	stoodDown := newConsumerLogSignal("dashboard trigger consumer standing down")
+	logger := slog.New(slog.NewTextHandler(stoodDown, nil))
+	if err := RunLocalTriggerConsumer(ctx, home, st, logger); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	waitForConsumerLog(t, stoodDown)
 
 	select {
 	case <-residentDone:
