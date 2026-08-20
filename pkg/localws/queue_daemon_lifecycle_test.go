@@ -20,8 +20,10 @@ func TestQueueDaemonHarnessOwnsWorkerLifecycle(t *testing.T) {
 		cleanupPos      token.Pos
 		readySelectPos  token.Pos
 		cleanupCancels  bool
+		cleanupTimer    bool
 		cleanupStops    bool
 		boundedJoin     bool
+		timingResources int
 	)
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
@@ -64,6 +66,25 @@ func TestQueueDaemonHarnessOwnsWorkerLifecycle(t *testing.T) {
 			}
 			cleanupPos = call.Pos()
 			ast.Inspect(cleanup.Body, func(node ast.Node) bool {
+				if assignment, ok := node.(*ast.AssignStmt); ok && len(assignment.Lhs) == 1 && len(assignment.Rhs) == 1 {
+					lhs, lhsOK := assignment.Lhs[0].(*ast.Ident)
+					constructor, callOK := assignment.Rhs[0].(*ast.CallExpr)
+					if lhsOK && lhs.Name == "timer" && callOK && len(constructor.Args) == 1 {
+						constructorSel, selOK := constructor.Fun.(*ast.SelectorExpr)
+						duration, durationOK := constructor.Args[0].(*ast.BinaryExpr)
+						if selOK && durationOK {
+							constructorPkg, pkgOK := constructorSel.X.(*ast.Ident)
+							amount, amountOK := duration.X.(*ast.BasicLit)
+							unit, unitOK := duration.Y.(*ast.SelectorExpr)
+							if unitOK {
+								unitPkg, unitPkgOK := unit.X.(*ast.Ident)
+								cleanupTimer = pkgOK && constructorPkg.Name == "time" && constructorSel.Sel.Name == "NewTimer" &&
+									duration.Op == token.MUL && amountOK && amount.Value == "3" && unitPkgOK &&
+									unitPkg.Name == "time" && unit.Sel.Name == "Second"
+							}
+						}
+					}
+				}
 				if selection, ok := node.(*ast.SelectStmt); ok {
 					var waitsFinished, waitsTimer bool
 					for _, stmt := range selection.Body.List {
@@ -102,6 +123,12 @@ func TestQueueDaemonHarnessOwnsWorkerLifecycle(t *testing.T) {
 					return true
 				}
 				innerReceiver, _ := innerSel.X.(*ast.Ident)
+				if innerReceiver != nil && innerReceiver.Name == "time" {
+					switch innerSel.Sel.Name {
+					case "After", "NewTicker", "NewTimer":
+						timingResources++
+					}
+				}
 				cleanupStops = cleanupStops || (innerReceiver != nil && innerReceiver.Name == "timer" && innerSel.Sel.Name == "Stop")
 				return true
 			})
@@ -114,7 +141,7 @@ func TestQueueDaemonHarnessOwnsWorkerLifecycle(t *testing.T) {
 	if !cleanupPos.IsValid() || !readySelectPos.IsValid() || cleanupPos >= readySelectPos {
 		t.Error("queue daemon cleanup must be registered before readiness can fail")
 	}
-	if !cleanupCancels || !cleanupStops || !boundedJoin {
+	if !cleanupCancels || !cleanupTimer || !cleanupStops || !boundedJoin || timingResources != 1 {
 		t.Error("queue daemon cleanup must cancel and boundedly join its worker")
 	}
 }
