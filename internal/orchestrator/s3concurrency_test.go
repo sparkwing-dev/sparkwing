@@ -218,11 +218,11 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 	for worker := range costs {
 		remaining[worker] = true
 	}
-	var maxWaveCost int64
-	for len(remaining) > 0 {
+	held := make(map[int]admission, capacity)
+	var heldCost int64
+	var maxHeldCost int64
+	for len(remaining) > 0 || len(held) > 0 {
 		stableWaiters := make(map[int]chan struct{}, len(remaining))
-		var wave []admission
-		var waveCost int64
 		for len(stableWaiters) < len(remaining) {
 			select {
 			case err := <-workerErrors:
@@ -232,8 +232,8 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 					t.Fatalf("worker %d admitted more than once", entry.worker)
 				}
 				delete(remaining, entry.worker)
-				wave = append(wave, entry)
-				waveCost += int64(entry.cost)
+				held[entry.worker] = entry
+				heldCost += int64(entry.cost)
 			case check := <-checked:
 				if remaining[check.worker] {
 					if _, exists := stableWaiters[check.worker]; exists {
@@ -245,18 +245,24 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 				}
 			}
 		}
-		if waveCost > int64(capacity) {
-			t.Fatalf("admitted wave cost = %d, exceeds capacity %d", waveCost, capacity)
+		if heldCost > int64(capacity) {
+			t.Fatalf("live holder cost = %d, exceeds capacity %d", heldCost, capacity)
 		}
-		if waveCost > maxWaveCost {
-			maxWaveCost = waveCost
+		if heldCost > maxHeldCost {
+			maxHeldCost = heldCost
 		}
-		for _, entry := range wave {
-			close(entry.release)
+
+		var released admission
+		for worker, entry := range held {
+			released = entry
+			delete(held, worker)
+			break
 		}
-		for range wave {
+		if released.release != nil {
+			close(released.release)
 			select {
 			case <-finished:
+				heldCost -= int64(released.cost)
 			case err := <-workerErrors:
 				t.Fatalf("S3 concurrency burst worker: %v", err)
 			}
@@ -271,7 +277,7 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 		t.Fatalf("S3 concurrency burst worker: %v", err)
 	default:
 	}
-	return grantedCost, maxWaveCost, ran.Load()
+	return grantedCost, maxHeldCost, ran.Load()
 }
 
 // TestS3Concurrency_NoOverAdmission is the central guarantee: under
