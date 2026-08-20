@@ -1,0 +1,108 @@
+package wingd_test
+
+import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"testing"
+)
+
+func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
+	t.Parallel()
+
+	file, err := parser.ParseFile(token.NewFileSet(), "idle_probe_test.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse idle_probe_test.go: %v", err)
+	}
+	callers := map[string]bool{
+		"TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock": false,
+		"TestIdleExit_QueryTrafficDoesNotResetIdleClock":       false,
+		"TestIdleExit_SocketSweepProbeDoesNotResetIdleClock": false,
+		"TestIdleExit_PreHelloConnectionsDoNotResetIdleClock": false,
+		"TestIdleExit_GraceThenIdleUnderHealthProbes":         false,
+	}
+	var (
+		foundHelper       bool
+		foundOldHelper    bool
+		helperWithCancel  bool
+		helperCleanup     bool
+		helperClosesDone  bool
+		helperWaitsDone   bool
+		helperOwnsTimer   bool
+		helperStopsTimer  bool
+		preHelloDialBound bool
+	)
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Body == nil {
+			continue
+		}
+		if fn.Name.Name == "probeLoop" {
+			foundOldHelper = true
+		}
+		_, isCaller := callers[fn.Name.Name]
+		isHelper := fn.Name.Name == "startProbeLoop"
+		if isHelper {
+			foundHelper = true
+		}
+		if !isCaller && !isHelper {
+			continue
+		}
+		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if unary, ok := node.(*ast.UnaryExpr); isHelper && ok && unary.Op == token.ARROW {
+				if ident, ok := unary.X.(*ast.Ident); ok && ident.Name == "done" {
+					helperWaitsDone = true
+				}
+			}
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			if ident, ok := call.Fun.(*ast.Ident); ok {
+				if isCaller && ident.Name == "startProbeLoop" {
+					callers[fn.Name.Name] = true
+				}
+				if isHelper && ident.Name == "close" && len(call.Args) == 1 {
+					arg, ok := call.Args[0].(*ast.Ident)
+					helperClosesDone = ok && arg.Name == "done"
+				}
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			receiver, _ := sel.X.(*ast.Ident)
+			if isHelper && receiver != nil {
+				switch {
+				case receiver.Name == "context" && sel.Sel.Name == "WithCancel":
+					helperWithCancel = true
+				case receiver.Name == "t" && sel.Sel.Name == "Cleanup":
+					helperCleanup = true
+				case receiver.Name == "time" && sel.Sel.Name == "NewTimer":
+					helperOwnsTimer = true
+				case receiver.Name == "timer" && sel.Sel.Name == "Stop":
+					helperStopsTimer = true
+				}
+			}
+			if fn.Name.Name == "TestIdleExit_PreHelloConnectionsDoNotResetIdleClock" && sel.Sel.Name == "DialContext" {
+				preHelloDialBound = true
+			}
+			return true
+		})
+	}
+	if foundOldHelper {
+		t.Error("probeLoop leaves lifecycle ownership at callers; use startProbeLoop")
+	}
+	if !foundHelper || !helperWithCancel || !helperCleanup || !helperClosesDone || !helperWaitsDone || !helperOwnsTimer || !helperStopsTimer {
+		t.Error("startProbeLoop must own cancellation, completion, cleanup, and a stopped bounded join timer")
+	}
+	for name, delegates := range callers {
+		if !delegates {
+			t.Errorf("%s must delegate probe lifecycle to startProbeLoop", name)
+		}
+	}
+	if !preHelloDialBound {
+		t.Error("pre-hello probes must use context-bounded dialing")
+	}
+}
