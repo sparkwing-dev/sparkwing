@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -69,35 +70,39 @@ const stopReleaseRounds = 20
 // lock still held here means the home came back too early.
 func TestStop_ReturnsOnlyAfterTheDaemonReleasedTheHome(t *testing.T) {
 	for round := range stopReleaseRounds {
-		home := shortHome(t)
-		done := runDaemon(t, home, "v1.0.0")
+		t.Run(fmt.Sprintf("round-%d", round), func(t *testing.T) {
+			t.Parallel()
 
-		ctx, cancel := context.WithTimeout(context.Background(), stopTestWait)
-		if err := Stop(ctx, Options{Home: home}); err != nil {
-			cancel()
-			t.Fatalf("round %d: stop: %v", round, err)
-		}
-		cancel()
+			home := shortHome(t)
+			done := runDaemon(t, home, "v1.0.0")
 
-		held, err := wingd.LockHeld(home)
-		if err != nil {
-			t.Fatalf("round %d: read election lock: %v", round, err)
-		}
-		if held {
-			t.Fatalf("round %d: stop returned while the daemon still held the home; its final state write can still land under %s", round, home)
-		}
-		if err := os.RemoveAll(home); err != nil {
-			t.Fatalf("round %d: remove home after stop: %v", round, err)
-		}
-
-		select {
-		case err := <-done:
-			if err != nil {
-				t.Fatalf("round %d: daemon Run returned %v, want a clean stop", round, err)
+			ctx, cancel := context.WithTimeout(context.Background(), stopTestWait)
+			if err := Stop(ctx, Options{Home: home}); err != nil {
+				cancel()
+				t.Fatalf("stop: %v", err)
 			}
-		case <-time.After(stopTestWait):
-			t.Fatalf("round %d: daemon kept running after Stop returned", round)
-		}
+			cancel()
+
+			held, err := wingd.LockHeld(home)
+			if err != nil {
+				t.Fatalf("read election lock: %v", err)
+			}
+			if held {
+				t.Fatalf("stop returned while the daemon still held the home; its final state write can still land under %s", home)
+			}
+			if err := os.RemoveAll(home); err != nil {
+				t.Fatalf("remove home after stop: %v", err)
+			}
+
+			select {
+			case err := <-done:
+				if err != nil {
+					t.Fatalf("daemon Run returned %v, want a clean stop", err)
+				}
+			case <-time.After(stopTestWait):
+				t.Fatal("daemon kept running after Stop returned")
+			}
+		})
 	}
 }
 
