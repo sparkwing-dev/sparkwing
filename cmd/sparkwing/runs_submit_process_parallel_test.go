@@ -9,8 +9,22 @@ import (
 
 func TestLongSubmitProcessRegressionsRunInParallel(t *testing.T) {
 	targets := map[string]bool{
-		"TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess": false,
-		"TestRunsSubmit_LiveDispatchSurvivesAWallClockJump":    false,
+		"TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess":          false,
+		"TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun":              false,
+		"TestRunsSubmit_DistinctKeysAreDistinctRuns":                    false,
+		"TestRunsSubmit_RequestIDDoesNotDeduplicate":                    false,
+		"TestRunsSubmit_PendingWorkRecoversAfterConsumerRestart":        false,
+		"TestRunsConsumer_StatusAndStopReportTheResidentProcess":        false,
+		"TestRunsCancel_CancelsAQueuedRunWithoutTouchingItsReplacement": false,
+		"TestRunsSubmit_RefusesASubmitFlagPlacedAfterThePipelineName":   false,
+		"TestRunsSubmit_SeparatorHandsAConflictingFlagToThePipeline":    false,
+		"TestRunsSubmit_RefusesAPipelineNothingDeclares":                false,
+		"TestRunsSubmit_LiveDispatchSurvivesAWallClockJump":             false,
+		"TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines":            false,
+		"TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused":         false,
+		"TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus":           false,
+		"TestRunsSubmit_ReplacesAConsumerFromAnotherBuild":              false,
+		"TestRunsConsumerStop_RecordsTheInterruptedRun":                 false,
 	}
 	file, err := parser.ParseFile(token.NewFileSet(), "runs_submit_process_test.go", nil, 0)
 	if err != nil {
