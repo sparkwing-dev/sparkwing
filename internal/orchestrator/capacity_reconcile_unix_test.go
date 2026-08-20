@@ -6,6 +6,7 @@ import (
 	"context"
 	"os/exec"
 	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -17,14 +18,25 @@ import (
 type reconcileSink struct {
 	st            *store.Store
 	runID, nodeID string
+	samples       chan<- nodemetrics.Sample
 }
 
 func (s reconcileSink) Push(ctx context.Context, sm nodemetrics.Sample) error {
-	return s.st.AddNodeMetricSample(ctx, s.runID, s.nodeID, store.MetricSample{
+	if err := s.st.AddNodeMetricSample(ctx, s.runID, s.nodeID, store.MetricSample{
 		TS:            sm.TS,
 		CPUMillicores: sm.CPUMillicores,
 		MemoryBytes:   sm.MemoryBytes,
-	})
+	}); err != nil {
+		return err
+	}
+	if s.samples != nil {
+		select {
+		case s.samples <- sm:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
 }
 
 // TestRecordRunProfile_SDKBurnerPeakNotDoubled runs the sampler alongside a
@@ -40,7 +52,7 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = st.Close() }()
+	t.Cleanup(func() { _ = st.Close() })
 	ctx := context.Background()
 
 	start := time.Now()
@@ -53,19 +65,44 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 
 	sampCtx, stopSampler := context.WithCancel(ctx)
 	done := make(chan struct{})
+	samples := make(chan nodemetrics.Sample, 4)
 	go func() {
-		nodemetrics.Run(sampCtx, 200*time.Millisecond, reconcileSink{st: st, runID: "r1", nodeID: "step"})
+		nodemetrics.Run(sampCtx, 200*time.Millisecond, reconcileSink{st: st, runID: "r1", nodeID: "step", samples: samples})
 		close(done)
 	}()
+	var stopOnce sync.Once
+	stopAndJoinSampler := func() {
+		stopOnce.Do(func() {
+			stopSampler()
+			joinTimer := time.NewTimer(time.Second)
+			defer joinTimer.Stop()
+			select {
+			case <-done:
+			case <-joinTimer.C:
+				t.Error("node-metrics sampler did not stop after cancellation")
+			}
+		})
+	}
+	t.Cleanup(stopAndJoinSampler)
 
 	startedAt := time.Now()
 	cmd := exec.Command("sh", "-c", "while :; do :; done")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start burner: %v", err)
 	}
-	time.Sleep(300 * time.Millisecond)
-	_ = cmd.Process.Kill()
+	burnerWaited := false
+	t.Cleanup(func() {
+		if !burnerWaited {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+	})
+	waitForReconcileSampleAfter(t, sampCtx, samples, time.Time{})
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill burner: %v", err)
+	}
 	_ = cmd.Wait()
+	burnerWaited = true
 	wall := time.Since(startedAt)
 
 	ru, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage)
@@ -78,6 +115,7 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 		t.Skipf("burner drew only %d millicores; host too loaded to measure", trueMillicores)
 	}
 
+	reportedAt := time.Now()
 	nodemetrics.AddReportedChildCPU(childCPU)
 	if err := st.AddNodeMetricSample(ctx, "r1", "step", store.MetricSample{
 		TS:            time.Now(),
@@ -86,9 +124,8 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	time.Sleep(220 * time.Millisecond)
-	stopSampler()
-	<-done
+	waitForReconcileSampleAfter(t, sampCtx, samples, reportedAt)
+	stopAndJoinSampler()
 
 	recordRunProfile(ctx, st, "burn", "r1", nil, "", runCharge{}, false, start, time.Now())
 
@@ -104,5 +141,21 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 	if rollup.PeakCores < trueCores*0.7 {
 		t.Errorf("peak cores = %.3f, want >= %.3f -- per-command report lost, burn undercounted",
 			rollup.PeakCores, trueCores*0.7)
+	}
+}
+
+func waitForReconcileSampleAfter(t *testing.T, ctx context.Context, samples <-chan nodemetrics.Sample, after time.Time) {
+	t.Helper()
+	waitCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	for {
+		select {
+		case sample := <-samples:
+			if after.IsZero() || sample.TS.After(after) {
+				return
+			}
+		case <-waitCtx.Done():
+			t.Fatalf("node-metrics sampler did not persist a sample after %s: %v", after, waitCtx.Err())
+		}
 	}
 }
