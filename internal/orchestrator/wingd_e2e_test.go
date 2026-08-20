@@ -622,7 +622,10 @@ func awaitNodeOutcome(t *testing.T, st *store.Store, runID, nodeID, outcome stri
 	var last string
 	for time.Now().Before(deadline) {
 		node, err := st.GetNode(context.Background(), runID, nodeID)
-		if err == nil && node != nil {
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			t.Fatalf("get node %s/%s: %v", runID, nodeID, err)
+		}
+		if node != nil {
 			last = node.Outcome
 			if node.Outcome == outcome {
 				return
