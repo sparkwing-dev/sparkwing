@@ -9,7 +9,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -44,8 +43,25 @@ const envPrefix = "SPARKWING_"
 // undocumented variable behind a longer one; "_" is an identifier
 // character, so the surrounding bytes must not be identifier bytes.
 func docsMentionEnvVar(documented, name string) bool {
-	re := regexp.MustCompile(`(^|[^A-Za-z0-9_])` + regexp.QuoteMeta(name) + `([^A-Za-z0-9_]|$)`)
-	return re.MatchString(documented)
+	for from := 0; from <= len(documented)-len(name); {
+		rel := strings.Index(documented[from:], name)
+		if rel < 0 {
+			return false
+		}
+		start := from + rel
+		end := start + len(name)
+		leftBoundary := start == 0 || !isIdentifierByte(documented[start-1])
+		rightBoundary := end == len(documented) || !isIdentifierByte(documented[end])
+		if leftBoundary && rightBoundary {
+			return true
+		}
+		from = start + 1
+	}
+	return false
+}
+
+func isIdentifierByte(c byte) bool {
+	return c == '_' || c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9'
 }
 
 func TestDocsMentionEnvVarDoesNotAllocatePerLookup(t *testing.T) {
@@ -58,6 +74,26 @@ func TestDocsMentionEnvVarDoesNotAllocatePerLookup(t *testing.T) {
 	}
 	if allocs != 0 {
 		t.Fatalf("docsMentionEnvVar allocated %.0f objects per lookup, want 0", allocs)
+	}
+}
+
+func TestDocsMentionEnvVarRequiresWholeIdentifierToken(t *testing.T) {
+	const name = "SPARKWING_GITCACHE"
+	for _, tc := range []struct {
+		documented string
+		want       bool
+	}{
+		{name, true},
+		{"before " + name, true},
+		{name + " after", true},
+		{"`" + name + "`", true},
+		{name + "_URL", false},
+		{"MY_" + name, false},
+		{"before " + name + "_URL then " + name, true},
+	} {
+		if got := docsMentionEnvVar(tc.documented, name); got != tc.want {
+			t.Errorf("docsMentionEnvVar(%q, %q) = %t, want %t", tc.documented, name, got, tc.want)
+		}
 	}
 }
 
