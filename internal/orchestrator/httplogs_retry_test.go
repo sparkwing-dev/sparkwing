@@ -7,7 +7,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -187,7 +186,7 @@ func TestHTTPLogs_DropCooldownExpiryProbesAgain(t *testing.T) {
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "first"})
 	posts.Store(0)
 	healthy.Store(true)
-	time.Sleep(60 * time.Millisecond)
+	orchestrator.ExpireTestHTTPNodeLogDropCooldown(t, nlog)
 
 	nlog.Emit(sparkwing.LogRecord{Level: "info", Msg: "second"})
 	if got := posts.Load(); got != 1 {
