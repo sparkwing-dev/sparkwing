@@ -142,27 +142,36 @@ func (ph *procHandle) kill(sig syscall.Signal) {
 func readDaemonPid(t *testing.T, home string) int {
 	t.Helper()
 	path := filepath.Join(home, "wingd", "daemons.log")
-	var last string
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		data, err := os.ReadFile(path)
-		if err == nil {
-			lines := strings.Fields(strings.TrimSpace(string(data)))
-			if len(lines) > 0 {
-				last = lines[len(lines)-1]
-				break
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if last == "" {
-		t.Fatal("no daemon pid recorded")
-	}
+	data := waitForNonemptyFile(t, path, 3*time.Second, 50*time.Millisecond)
+	lines := strings.Fields(strings.TrimSpace(string(data)))
+	last := lines[len(lines)-1]
 	pid, err := strconv.Atoi(last)
 	if err != nil {
 		t.Fatalf("parse daemon pid %q: %v", last, err)
 	}
 	return pid
+}
+
+func waitForNonemptyFile(t *testing.T, path string, timeout, interval time.Duration) []byte {
+	t.Helper()
+	poll := time.NewTicker(interval)
+	defer poll.Stop()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		data, err := os.ReadFile(path)
+		if err == nil && len(data) > 0 {
+			return data
+		}
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("%s remained empty for %s", path, timeout)
+		}
+	}
 }
 
 func daemonLineCount(t *testing.T, home string) int {
@@ -261,19 +270,7 @@ func TestProcess_SelfSpawnedDaemonWritesLogFile(t *testing.T) {
 	h.waitOK(10 * time.Second)
 
 	logPath := filepath.Join(home, "wingd", "d.log")
-	var data []byte
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		b, err := os.ReadFile(logPath)
-		if err == nil && len(b) > 0 {
-			data = b
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if len(data) == 0 {
-		t.Fatalf("self-spawned daemon wrote no log file at %s", logPath)
-	}
+	data := waitForNonemptyFile(t, logPath, 5*time.Second, 20*time.Millisecond)
 	if !strings.Contains(string(data), "wingd:") || !strings.Contains(string(data), "elected") {
 		t.Fatalf("daemon log lacks a meaningful history line:\n%s", data)
 	}
