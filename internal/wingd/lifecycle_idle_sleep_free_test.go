@@ -17,6 +17,7 @@ func TestIdleHolderRegressionDoesNotUseTimeSleep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse lifecycle_test.go: %v", err)
 	}
+	usesObservation := false
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok {
@@ -30,6 +31,11 @@ func TestIdleHolderRegressionDoesNotUseTimeSleep(t *testing.T) {
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
+			}
+			if fn.Name.Name == "TestIdleExit_WaitsForHolders" {
+				if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "observeHolderFor" {
+					usesObservation = true
+				}
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
 			if !ok || sel.Sel.Name != "Sleep" {
@@ -46,5 +52,8 @@ func TestIdleHolderRegressionDoesNotUseTimeSleep(t *testing.T) {
 		if !found {
 			t.Errorf("%s declaration not found", name)
 		}
+	}
+	if !usesObservation {
+		t.Error("TestIdleExit_WaitsForHolders must observe the active holder")
 	}
 }
