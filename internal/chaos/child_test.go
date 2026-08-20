@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -36,16 +37,20 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 	}
 
 	parent := exec.Command(bin, "hold", "--home", home, "--run", "p",
-		"--cores", "1", "--children", "2", "--run-ms", "4000")
+		"--cores", "1", "--children", "2", "--run-ms", "0")
 	if err := parent.Start(); err != nil {
 		t.Fatalf("start parent: %v", err)
 	}
-	t.Cleanup(func() {
-		_ = parent.Process.Kill()
-		_, _ = parent.Process.Wait()
-	})
-
+	parentResult := make(chan error, 1)
+	parentFinished := make(chan struct{})
+	go func() {
+		parentResult <- parent.Wait()
+		close(parentFinished)
+	}()
 	readOpts := client.Options{Home: home, Version: "v1.0.0", DialTimeout: 500 * time.Millisecond, Backoff: 30 * time.Millisecond}
+	t.Cleanup(func() {
+		stopCrashdummyFamily(t, parent, parentFinished, readOpts)
+	})
 
 	readyCtx, cancelReady := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancelReady()
@@ -95,24 +100,53 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 		case <-readyPoll.C:
 		}
 	}
+	if !stopCrashdummyFamily(t, parent, parentFinished, readOpts) {
+		t.Fatal("crashdummy family did not stop after release")
+	}
+	if err := <-parentResult; err != nil {
+		t.Fatalf("parent exit: %v", err)
+	}
+}
 
-	convergeCtx, cancelConverge := context.WithTimeout(context.Background(), 12*time.Second)
-	defer cancelConverge()
-	convergePoll := time.NewTicker(150 * time.Millisecond)
-	defer convergePoll.Stop()
-	for {
-		qs, err := client.Query(convergeCtx, readOpts)
-		if errors.Is(err, client.ErrNoDaemon) {
-			return
+func stopCrashdummyFamily(t *testing.T, parent *exec.Cmd, parentFinished <-chan struct{}, opts client.Options) bool {
+	t.Helper()
+	if err := parent.Process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		t.Errorf("release crashdummy parent: %v", err)
+	}
+	if !waitForCrashdummyParent(parentFinished, 2*time.Second) {
+		_ = parent.Process.Kill()
+		if !waitForCrashdummyParent(parentFinished, 2*time.Second) {
+			t.Error("crashdummy parent did not exit after kill escalation")
+			return false
 		}
-		if err == nil && len(qs.Holders) == 0 && len(qs.Waiters) == 0 {
-			return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	poll := time.NewTicker(25 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		qs, err := client.Query(ctx, opts)
+		if errors.Is(err, client.ErrNoDaemon) || err == nil && len(qs.Holders) == 0 && len(qs.Waiters) == 0 {
+			return true
 		}
 		select {
-		case <-convergeCtx.Done():
-			t.Fatal("family did not converge after parent and children exited")
-		case <-convergePoll.C:
+		case <-poll.C:
+		case <-ctx.Done():
+			t.Error("crashdummy family did not converge within cleanup bound")
+			return false
 		}
+	}
+}
+
+func waitForCrashdummyParent(finished <-chan struct{}, bound time.Duration) bool {
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	select {
+	case <-finished:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 
