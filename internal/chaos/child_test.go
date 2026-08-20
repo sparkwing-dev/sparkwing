@@ -47,60 +47,73 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 
 	readOpts := client.Options{Home: home, Version: "v1.0.0", DialTimeout: 500 * time.Millisecond, Backoff: 30 * time.Millisecond}
 
-	deadline := time.Now().Add(6 * time.Second)
-	var sawHolder bool
-	for time.Now().Before(deadline) {
-		qs, err := client.Query(context.Background(), readOpts)
-		if err != nil {
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-		if len(qs.Holders) == 0 {
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-		sawHolder = true
-		var parents, children int
-		for _, h := range qs.Holders {
-			if h.Parent == "" {
-				parents++
-				if h.RunID != "p" {
-					t.Fatalf("top-level holder run id %q, want parent p", h.RunID)
+	readyCtx, cancelReady := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancelReady()
+	readyPoll := time.NewTicker(100 * time.Millisecond)
+	defer readyPoll.Stop()
+	var sawFamily bool
+	for !sawFamily {
+		qs, err := client.Query(readyCtx, readOpts)
+		if err == nil && len(qs.Holders) != 0 {
+			var parents, children int
+			for _, h := range qs.Holders {
+				if h.Parent == "" {
+					parents++
+					if h.RunID != "p" {
+						t.Fatalf("top-level holder run id %q, want parent p", h.RunID)
+					}
+					continue
+				}
+				children++
+				if h.Parent != "p" {
+					t.Fatalf("attached child %q names parent %q, want p", h.RunID, h.Parent)
+				}
+				if h.Resources.Cores != 0 || h.Resources.MemoryBytes != 0 {
+					t.Fatalf("attached child %q charged %+v, want zero", h.RunID, h.Resources)
+				}
+			}
+			if parents > 1 || children > 2 {
+				t.Fatalf("want 1 parent and 2 children, got %d parents and %d children: %+v", parents, children, qs.Holders)
+			}
+			if parents != 1 || children != 2 {
+				select {
+				case <-readyCtx.Done():
+					t.Fatalf("complete parent-child family never appeared; last state: %+v", qs.Holders)
+				case <-readyPoll.C:
 				}
 				continue
 			}
-			children++
-			if h.Parent != "p" {
-				t.Fatalf("attached child %q names parent %q, want p", h.RunID, h.Parent)
+			if held := resourceHeld(qs, "cores"); held != 1 {
+				t.Fatalf("cores held %g, want 1 (children must not double-charge)", held)
 			}
-			if h.Resources.Cores != 0 || h.Resources.MemoryBytes != 0 {
-				t.Fatalf("attached child %q charged %+v, want zero", h.RunID, h.Resources)
-			}
+			sawFamily = true
+			break
 		}
-		if parents != 1 {
-			t.Fatalf("want exactly 1 top-level holder (children share the lease), got %d: %+v", parents, qs.Holders)
+		select {
+		case <-readyCtx.Done():
+			t.Fatal("complete parent-child family never appeared")
+		case <-readyPoll.C:
 		}
-		if held := resourceHeld(qs, "cores"); held != 1 {
-			t.Fatalf("cores held %g, want 1 (children must not double-charge)", held)
-		}
-		break
-	}
-	if !sawHolder {
-		t.Fatal("parent never appeared as a holder")
 	}
 
-	convDeadline := time.Now().Add(12 * time.Second)
-	for time.Now().Before(convDeadline) {
-		qs, err := client.Query(context.Background(), readOpts)
+	convergeCtx, cancelConverge := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancelConverge()
+	convergePoll := time.NewTicker(150 * time.Millisecond)
+	defer convergePoll.Stop()
+	for {
+		qs, err := client.Query(convergeCtx, readOpts)
 		if errors.Is(err, client.ErrNoDaemon) {
 			return
 		}
 		if err == nil && len(qs.Holders) == 0 && len(qs.Waiters) == 0 {
 			return
 		}
-		time.Sleep(150 * time.Millisecond)
+		select {
+		case <-convergeCtx.Done():
+			t.Fatal("family did not converge after parent and children exited")
+		case <-convergePoll.C:
+		}
 	}
-	t.Fatal("family did not converge after parent and children exited")
 }
 
 func resourceHeld(qs wingwire.QueueState, key string) float64 {
