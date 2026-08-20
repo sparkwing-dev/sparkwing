@@ -21,9 +21,21 @@ func TestWarmPVCCancellationStopsAndDeletesTheWarmer(t *testing.T) {
 	})
 
 	result := make(chan error, 1)
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		result <- WarmPVC(ctx, client, "builds", "sparkwing-cache-pool-1", nil)
 	}()
+	t.Cleanup(func() {
+		cancel()
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-finished:
+		case <-timer.C:
+			t.Error("WarmPVC did not stop during cleanup")
+		}
+	})
 
 	timer := time.NewTimer(250 * time.Millisecond)
 	defer timer.Stop()
