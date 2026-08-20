@@ -4,6 +4,8 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync/atomic"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
@@ -15,6 +17,12 @@ type typedHelpArgs struct {
 }
 
 type typedHelpPipe struct{ sparkwing.Base }
+
+var typedHelpTestSequence atomic.Uint64
+
+func typedHelpTestName(prefix string) string {
+	return prefix + strconv.FormatUint(typedHelpTestSequence.Add(1), 10)
+}
 
 func (typedHelpPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ typedHelpArgs, _ sparkwing.RunContext) error {
 	sparkwing.Job(plan, "noop", func(_ context.Context) error { return nil })
@@ -52,8 +60,8 @@ func writeTypedHelpProject(t *testing.T, pipelineName, entrypoint string) {
 }
 
 func TestBindProjectPipelines_ResolvesTypedArgsPipelineForHelp(t *testing.T) {
-	const entrypoint = "TypedHelpEntry"
-	const pipelineName = "typed-help-fuzz"
+	entrypoint := typedHelpTestName("TypedHelpEntry")
+	pipelineName := typedHelpTestName("typed-help-fuzz-")
 	sparkwing.RegisterEntrypoint[typedHelpArgs](entrypoint, func() sparkwing.Pipeline[typedHelpArgs] {
 		return typedHelpPipe{}
 	})
@@ -100,8 +108,8 @@ func TestBindProjectPipelines_ResolvesTypedArgsPipelineForHelp(t *testing.T) {
 }
 
 func TestDescribeAll_IncludesTypedArgsPipelineAfterBind(t *testing.T) {
-	const entrypoint = "TypedHelpEntryDescribe"
-	const pipelineName = "typed-help-describe"
+	entrypoint := typedHelpTestName("TypedHelpEntryDescribe")
+	pipelineName := typedHelpTestName("typed-help-describe-")
 	sparkwing.RegisterEntrypoint[typedHelpArgs](entrypoint, func() sparkwing.Pipeline[typedHelpArgs] {
 		return typedHelpPipe{}
 	})

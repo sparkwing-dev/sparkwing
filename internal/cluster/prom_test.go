@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -33,13 +34,29 @@ func TestObserveClaimOutcome(t *testing.T) {
 // TestObserveNodeExecution verifies the histogram emits a count row
 // with the pipeline + outcome labels after a single observation.
 func TestObserveNodeExecution(t *testing.T) {
+	const prefix = `sparkwing_node_execution_seconds_count{outcome="Success",pipeline="prom-exec-pipeline"}`
+	before := metricSampleValue(t, gatherMetrics(t), prefix)
 	observeNodeExecution("prom-exec-pipeline", "Success", 2*time.Second)
 
-	body := gatherMetrics(t)
-	want := `sparkwing_node_execution_seconds_count{outcome="Success",pipeline="prom-exec-pipeline"} 1`
-	if !strings.Contains(body, want) {
-		t.Errorf("missing histogram count row %q in /metrics:\n%s", want, body)
+	if got := metricSampleValue(t, gatherMetrics(t), prefix); got != before+1 {
+		t.Errorf("node execution count=%v before=%v, want one observation", got, before)
 	}
+}
+
+func metricSampleValue(t *testing.T, body, prefix string) float64 {
+	t.Helper()
+	for line := range strings.SplitSeq(body, "\n") {
+		value, ok := strings.CutPrefix(line, prefix+" ")
+		if !ok {
+			continue
+		}
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			t.Fatalf("parse metric sample %q: %v", line, err)
+		}
+		return parsed
+	}
+	return 0
 }
 
 // TestObserveNodeExecution_SkipsEmpty guards against accidental

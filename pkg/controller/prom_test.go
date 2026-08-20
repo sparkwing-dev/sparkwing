@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -77,6 +78,12 @@ func TestMetrics_RunsCounterIncrements(t *testing.T) {
 	defer cleanup()
 
 	const pipeline = "prom-test-pipeline-runs"
+	counterPrefix := `sparkwing_runs_total{pipeline="` + pipeline + `",status="success"}`
+	histogramPrefix := `sparkwing_run_duration_seconds_count{outcome="success",pipeline="` + pipeline + `"}`
+	before := scrape(t, base)
+	beforeCounter := metricSampleValue(t, before, counterPrefix)
+	beforeHistogram := metricSampleValue(t, before, histogramPrefix)
+
 	run := store.Run{
 		ID:        "run-prom-runs-1",
 		Pipeline:  pipeline,
@@ -88,15 +95,29 @@ func TestMetrics_RunsCounterIncrements(t *testing.T) {
 		map[string]any{"status": "success"},
 		http.StatusNoContent)
 
-	body := scrape(t, base)
-	wantCounter := `sparkwing_runs_total{pipeline="` + pipeline + `",status="success"} 1`
-	if !strings.Contains(body, wantCounter) {
-		t.Errorf("/metrics missing or wrong counter row\nwant substring: %s\ngot:\n%s", wantCounter, body)
+	after := scrape(t, base)
+	if got := metricSampleValue(t, after, counterPrefix); got != beforeCounter+1 {
+		t.Errorf("runs counter=%v before=%v, want one increment", got, beforeCounter)
 	}
-	wantHist := `sparkwing_run_duration_seconds_count{outcome="success",pipeline="` + pipeline + `"}`
-	if !strings.Contains(body, wantHist) {
-		t.Errorf("/metrics missing histogram count row %q:\n%s", wantHist, body)
+	if got := metricSampleValue(t, after, histogramPrefix); got != beforeHistogram+1 {
+		t.Errorf("run duration count=%v before=%v, want one observation", got, beforeHistogram)
 	}
+}
+
+func metricSampleValue(t *testing.T, body, prefix string) float64 {
+	t.Helper()
+	for line := range strings.SplitSeq(body, "\n") {
+		value, ok := strings.CutPrefix(line, prefix+" ")
+		if !ok {
+			continue
+		}
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			t.Fatalf("parse metric sample %q: %v", line, err)
+		}
+		return parsed
+	}
+	return 0
 }
 
 // TestMetrics_CardinalityGuard verifies the scrape output never

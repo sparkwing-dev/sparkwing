@@ -2591,6 +2591,8 @@ func pauseTimeout() time.Duration {
 // the deadline fires. Returns true when the resolver ctx is cancelled
 // mid-pause so the caller can mark the node cancelled; false on
 // normal release (manual or timeout).
+const debugPausePollInterval = 500 * time.Millisecond
+
 func (s *dispatchState) doPause(nodeID, reason string) bool {
 	now := time.Now()
 	timeout := pauseTimeout()
@@ -2613,7 +2615,7 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 	})
 	_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_paused", payload)
 
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(debugPausePollInterval)
 	defer ticker.Stop()
 	deadline := time.NewTimer(time.Until(pause.ExpiresAt))
 	defer deadline.Stop()
@@ -2724,7 +2726,7 @@ func (s *dispatchState) runApprovalGate(node *sparkwing.JobNode) runner.Result {
 		deadline = appr.RequestedAt.Add(cfg.Timeout)
 	}
 
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(approvalPollInterval())
 	defer ticker.Stop()
 
 	res := s.pollApproval(node.ID(), deadline, onTimeout, ticker)

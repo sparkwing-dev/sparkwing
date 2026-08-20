@@ -351,7 +351,7 @@ func TestQueueExecLeaseLossTerminatesBeforePromotingNextCommand(t *testing.T) {
 		case <-time.After(queueExecWait):
 		}
 	})
-	waitForFile(t, started)
+	startedBody := waitForFileContents(t, started)
 	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
 		return len(qs.Holders) == 1 && qs.Holders[0].RunID == "lost-bootstrap"
 	})
@@ -366,13 +366,9 @@ func TestQueueExecLeaseLossTerminatesBeforePromotingNextCommand(t *testing.T) {
 	if runErr == nil || !strings.Contains(runErr.Error(), "admission lease") {
 		t.Fatalf("lease-loss result = %v, want admission lease failure", runErr)
 	}
-	body, err := os.ReadFile(started)
+	pid, err := strconv.Atoi(string(startedBody))
 	if err != nil {
-		t.Fatalf("read child pid: %v", err)
-	}
-	pid, err := strconv.Atoi(string(body))
-	if err != nil {
-		t.Fatalf("parse child pid %q: %v", body, err)
+		t.Fatalf("parse child pid %q: %v", startedBody, err)
 	}
 	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("child %d survived lease loss: %v", pid, err)
