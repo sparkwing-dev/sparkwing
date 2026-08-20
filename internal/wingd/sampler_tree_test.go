@@ -64,7 +64,7 @@ func TestProcSampler_CountsChildSubtreeCPU(t *testing.T) {
 // must not manufacture CPU where none is spent.
 func TestProcSampler_IdleTreeIsZero(t *testing.T) {
 	requireObservableProcCPU(t)
-	root := startProcessTree(t, `sleep 5`)
+	root := startProcessTree(t, `sleep 5 & wait`)
 	p := newProcSampler()
 	usage := sampleSubtreeCPU(t, p, root)
 	if usage.Fraction > 0.1 {
@@ -83,7 +83,7 @@ func sampleSubtreeCPU(t *testing.T, sampler *procSampler, root int) ProcUsage {
 		t.Fatalf("root pid %d produced no CPU sample", root)
 	}
 	if !usage.HasDescendant {
-		t.Fatalf("root pid %d never exposed its idle child", root)
+		t.Fatalf("root pid %d produced no descendant CPU sample", root)
 	}
 	return usage
 }
