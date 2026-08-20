@@ -77,9 +77,10 @@ func TestNormalizeVerifyModulePath_IsStableAcrossScratchDirectories(t *testing.T
 
 func TestCleanupTemplateScratch_RemovesOnlyVerifierDirectories(t *testing.T) {
 	root := t.TempDir()
-	stale := filepath.Join(root, "sparkwing-tv-example-123")
+	staleTemplate := filepath.Join(root, "sparkwing-tv-example-123")
+	staleCLI := filepath.Join(root, "sparkwing-template-verify-cli-123")
 	unrelated := filepath.Join(root, "other-tool-123")
-	for _, dir := range []string{stale, unrelated} {
+	for _, dir := range []string{staleTemplate, staleCLI, unrelated} {
 		if err := os.MkdirAll(dir, 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -87,8 +88,10 @@ func TestCleanupTemplateScratch_RemovesOnlyVerifierDirectories(t *testing.T) {
 	if err := cleanupTemplateScratch(root); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(stale); !os.IsNotExist(err) {
-		t.Fatalf("verifier scratch remains: %v", err)
+	for _, stale := range []string{staleTemplate, staleCLI} {
+		if _, err := os.Stat(stale); !os.IsNotExist(err) {
+			t.Errorf("verifier scratch %s remains: %v", filepath.Base(stale), err)
+		}
 	}
 	if _, err := os.Stat(unrelated); err != nil {
 		t.Fatalf("unrelated temp data was removed: %v", err)
