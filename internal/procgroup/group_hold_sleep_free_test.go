@@ -12,10 +12,10 @@ import (
 
 func TestGroupHelperIndefiniteHoldsDoNotUseTimeSleep(t *testing.T) {
 	modes := map[string]bool{
-		"descendant":       false,
-		"ignore-short":     false,
-		"session-stubborn": false,
-		"session-parked":   false,
+		"concurrent-cleanup": false,
+		"descendant":         false,
+		"session-stubborn":   false,
+		"session-parked":     false,
 	}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "group_test.go", nil, 0)
@@ -23,6 +23,10 @@ func TestGroupHelperIndefiniteHoldsDoNotUseTimeSleep(t *testing.T) {
 		t.Fatalf("parse group_test.go: %v", err)
 	}
 	foundHelper := false
+	foundReadyReader := false
+	foundConcurrentStarter := false
+	foundConcurrentTest := false
+	usesConcurrentStarter := false
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok {
@@ -32,6 +36,25 @@ func TestGroupHelperIndefiniteHoldsDoNotUseTimeSleep(t *testing.T) {
 		case "holdHelperProcess":
 			foundHelper = true
 			rejectTimeSleep(t, fset, fn.Name.Name, fn.Body)
+		case "awaitProcgroupReadyByte":
+			foundReadyReader = true
+			rejectTimeSleep(t, fset, fn.Name.Name, fn.Body)
+		case "startConcurrentCleanupHelper":
+			foundConcurrentStarter = true
+			rejectTimeSleep(t, fset, fn.Name.Name, fn.Body)
+		case "TestConcurrentFinishAndTerminateNeverLoseCompletedCleanup":
+			foundConcurrentTest = true
+			rejectTimeSleep(t, fset, fn.Name.Name, fn.Body)
+			ast.Inspect(fn.Body, func(node ast.Node) bool {
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "startConcurrentCleanupHelper" {
+					usesConcurrentStarter = true
+				}
+				return true
+			})
 		case "TestGroupHelperProcess":
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
 				clause, ok := node.(*ast.CaseClause)
@@ -73,6 +96,18 @@ func TestGroupHelperIndefiniteHoldsDoNotUseTimeSleep(t *testing.T) {
 	}
 	if !foundHelper {
 		t.Error("group_test.go does not declare holdHelperProcess")
+	}
+	if !foundReadyReader {
+		t.Error("group_test.go does not declare awaitProcgroupReadyByte")
+	}
+	if !foundConcurrentStarter {
+		t.Error("group_test.go does not declare startConcurrentCleanupHelper")
+	}
+	if !foundConcurrentTest {
+		t.Error("group_test.go does not declare TestConcurrentFinishAndTerminateNeverLoseCompletedCleanup")
+	}
+	if !usesConcurrentStarter {
+		t.Error("concurrent cleanup test does not use startConcurrentCleanupHelper")
 	}
 	for mode, found := range modes {
 		if !found {
