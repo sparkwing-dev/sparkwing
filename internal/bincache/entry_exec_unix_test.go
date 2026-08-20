@@ -178,12 +178,14 @@ func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
 	root := t.TempDir()
 	key := "11111111-11111111"
 	entry := copyTestBinaryIntoEntry(t, root, key)
+	received := filepath.Join(t.TempDir(), "term-received")
 
 	cmd := exec.Command(os.Args[0], "-test.run=^TestEntryExecHelper$")
 	cmd.Env = append(os.Environ(),
 		"SPARKWING_ENTRY_EXEC_HELPER=acquire-and-term-delay",
 		"SPARKWING_ENTRY_HELPER_ROOT="+root,
 		"SPARKWING_ENTRY_HELPER_KEY="+key,
+		"SPARKWING_ENTRY_SIGNAL_RECEIVED="+received,
 	)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	stdout, err := cmd.StdoutPipe()
@@ -219,6 +221,9 @@ func TestExecLeaseSurvivesWrapperTerminationUntilChildExit(t *testing.T) {
 	}
 	cleanupProcess(t, childPID)
 	if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := waitForFile(received, 5*time.Second); err != nil {
 		t.Fatal(err)
 	}
 	result, err := Prune(context.Background(), PruneOptions{Root: root, ReclaimBytes: 1, MaxEntries: 1})
