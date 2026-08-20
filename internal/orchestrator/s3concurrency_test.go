@@ -98,7 +98,7 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 	}
 	type waiterCheck struct {
 		worker int
-		epoch  int64
+		resume chan struct{}
 	}
 	initial := make(chan initialResult, len(costs))
 	admitted := make(chan admission, len(costs))
@@ -107,7 +107,6 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 	workerErrors := make(chan error, len(costs))
 	start := make(chan struct{})
 	ctx, cancel := context.WithCancel(context.Background())
-	var epoch atomic.Int64
 	var ran atomic.Int32
 
 	var wg sync.WaitGroup
@@ -133,7 +132,6 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 				poll := time.NewTicker(3 * time.Millisecond)
 				defer poll.Stop()
 				for time.Now().Before(deadline) {
-					attemptEpoch := epoch.Load()
 					resolved, err := c.ResolveWaiter(ctx, key, runID, "n", "", "", "", false)
 					if err != nil {
 						workerErrors <- fmt.Errorf("ResolveWaiter(%s/n): %w", runID, err)
@@ -147,7 +145,17 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 						workerErrors <- fmt.Errorf("waiter %s/n resolved to %q, want promoted", runID, resolved.Status)
 						return
 					}
-					checked <- waiterCheck{worker: w, epoch: attemptEpoch}
+					resume := make(chan struct{})
+					select {
+					case checked <- waiterCheck{worker: w, resume: resume}:
+					case <-ctx.Done():
+						return
+					}
+					select {
+					case <-resume:
+					case <-ctx.Done():
+						return
+					}
 					<-poll.C
 				}
 				if holderID == "" {
@@ -212,8 +220,7 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 	}
 	var maxWaveCost int64
 	for len(remaining) > 0 {
-		currentEpoch := epoch.Add(1)
-		stableWaiters := make(map[int]bool, len(remaining))
+		stableWaiters := make(map[int]chan struct{}, len(remaining))
 		var wave []admission
 		var waveCost int64
 		for len(stableWaiters) < len(remaining) {
@@ -227,11 +234,14 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 				delete(remaining, entry.worker)
 				wave = append(wave, entry)
 				waveCost += int64(entry.cost)
-				currentEpoch = epoch.Add(1)
-				clear(stableWaiters)
 			case check := <-checked:
-				if remaining[check.worker] && check.epoch >= currentEpoch {
-					stableWaiters[check.worker] = true
+				if remaining[check.worker] {
+					if _, exists := stableWaiters[check.worker]; exists {
+						t.Fatalf("worker %d reported stable waiting more than once", check.worker)
+					}
+					stableWaiters[check.worker] = check.resume
+				} else {
+					close(check.resume)
 				}
 			}
 		}
@@ -250,6 +260,9 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 			case err := <-workerErrors:
 				t.Fatalf("S3 concurrency burst worker: %v", err)
 			}
+		}
+		for _, resume := range stableWaiters {
+			close(resume)
 		}
 	}
 	<-joined
