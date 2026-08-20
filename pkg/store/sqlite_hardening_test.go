@@ -23,6 +23,7 @@ import (
 // ("slot full"), and no SQLITE_BUSY / SQLITE_BUSY_SNAPSHOT leaks
 // through as an error.
 func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "state.db")
 
 	seed, err := store.Open(dbPath)
@@ -95,6 +96,7 @@ func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 // but with OnLimit:Queue: one Granted, the rest Queued, across separate
 // connections. No lock-contention error should surface.
 func TestConcurrentWriters_QueuePolicyNoBusyError(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "state.db")
 	seed, err := store.Open(dbPath)
 	if err != nil {
