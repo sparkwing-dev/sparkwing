@@ -82,17 +82,24 @@ func heldSkip(ctx context.Context) bool {
 	return true
 }
 
+func waitForConcurrencyPoll(poll *time.Ticker) {
+	poll.Reset(2 * time.Millisecond)
+	<-poll.C
+}
+
 // waitForLeaderHolding blocks until a held leader signals it holds its
 // slot, with a generous ceiling so a hang fails loudly rather than
 // hanging the suite.
 func waitForLeaderHolding(t *testing.T) {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
+	poll := time.NewTicker(2 * time.Millisecond)
+	defer poll.Stop()
 	for !leaderHolding.Load() {
 		if time.Now().After(deadline) {
 			t.Fatal("timed out waiting for the leader to hold its slot")
 		}
-		time.Sleep(2 * time.Millisecond)
+		waitForConcurrencyPoll(poll)
 	}
 }
 
@@ -109,13 +116,18 @@ func waitForCoalesceWaiter(t *testing.T, dbPath string) {
 	}
 	defer func() { _ = st.Close() }()
 	deadline := time.Now().Add(15 * time.Second)
+	poll := time.NewTicker(2 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		var n int
 		if err := st.DB().QueryRowContext(context.Background(),
-			`SELECT COUNT(*) FROM concurrency_waiters WHERE policy = 'coalesce'`).Scan(&n); err == nil && n > 0 {
+			`SELECT COUNT(*) FROM concurrency_waiters WHERE policy = 'coalesce'`).Scan(&n); err != nil {
+			t.Fatalf("count coalesce waiters: %v", err)
+		}
+		if n > 0 {
 			return
 		}
-		time.Sleep(2 * time.Millisecond)
+		waitForConcurrencyPoll(poll)
 	}
 	t.Fatal("timed out waiting for a follower to coalesce")
 }
@@ -128,6 +140,8 @@ func waitForQueuedRun(t *testing.T, dbPath, key, runID string) {
 	}
 	defer func() { _ = st.Close() }()
 	deadline := time.Now().Add(15 * time.Second)
+	poll := time.NewTicker(2 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		state, err := st.GetConcurrencyState(context.Background(), key)
 		switch {
@@ -141,7 +155,7 @@ func waitForQueuedRun(t *testing.T, dbPath, key, runID string) {
 		default:
 			t.Fatalf("read concurrency state for %q: %v", key, err)
 		}
-		time.Sleep(2 * time.Millisecond)
+		waitForConcurrencyPoll(poll)
 	}
 	t.Fatalf("timed out waiting for run %q on %q", runID, key)
 }
