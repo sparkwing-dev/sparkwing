@@ -3,14 +3,17 @@
 package procgroup
 
 import (
+	"bytes"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"testing"
 )
 
 func TestConcurrentCleanupStressRunsIsolatedIterationsInParallel(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "group_test.go", nil, 0)
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "group_test.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,14 +50,14 @@ func TestConcurrentCleanupStressRunsIsolatedIterationsInParallel(t *testing.T) {
 		if !ok || over.Name != "count" {
 			continue
 		}
-		if rangeRunsParallelSubtest(loop) {
+		if rangeRunsParallelSubtest(fset, loop) {
 			return
 		}
 	}
 	t.Fatal("concurrent cleanup stress must run each isolated iteration as a parallel subtest")
 }
 
-func rangeRunsParallelSubtest(loop *ast.RangeStmt) bool {
+func rangeRunsParallelSubtest(fset *token.FileSet, loop *ast.RangeStmt) bool {
 	if len(loop.Body.List) != 1 {
 		return false
 	}
@@ -62,48 +65,29 @@ func rangeRunsParallelSubtest(loop *ast.RangeStmt) bool {
 	if !ok {
 		return false
 	}
-	call, ok := expr.X.(*ast.CallExpr)
-	if !ok || len(call.Args) != 2 {
-		return false
+	const expected = `t.Run(fmt.Sprintf("iteration-%d", iteration), func(t *testing.T) {
+	t.Parallel()
+	g := startConcurrentCleanupHelper(t)
+	results := make(chan error, 2)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		results <- g.Finish(ctx, 10*time.Millisecond)
+	}()
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		results <- g.Terminate(ctx, 10*time.Millisecond)
+	}()
+	for range 2 {
+		if err := <-results; errors.Is(err, ErrCleanup) {
+			t.Fatalf("completed concurrent cleanup reported failure: %v", err)
+		}
 	}
-	sel, ok := call.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return false
+	if !g.Reaped() {
+		t.Fatalf("group %d was not reaped", g.ID())
 	}
-	receiver, receiverOK := sel.X.(*ast.Ident)
-	if !receiverOK || receiver.Name != "t" || sel.Sel.Name != "Run" {
-		return false
-	}
-	worker, ok := call.Args[1].(*ast.FuncLit)
-	if !ok || len(worker.Body.List) < 2 {
-		return false
-	}
-	first, ok := worker.Body.List[0].(*ast.ExprStmt)
-	if !ok {
-		return false
-	}
-	parallel, ok := first.X.(*ast.CallExpr)
-	if !ok || len(parallel.Args) != 0 {
-		return false
-	}
-	parallelSel, ok := parallel.Fun.(*ast.SelectorExpr)
-	if !ok {
-		return false
-	}
-	parallelReceiver, receiverOK := parallelSel.X.(*ast.Ident)
-	if !receiverOK || parallelReceiver.Name != "t" || parallelSel.Sel.Name != "Parallel" {
-		return false
-	}
-	assign, ok := worker.Body.List[1].(*ast.AssignStmt)
-	if !ok || assign.Tok != token.DEFINE || len(assign.Lhs) != 1 || len(assign.Rhs) != 1 {
-		return false
-	}
-	group, ok := assign.Lhs[0].(*ast.Ident)
-	starter, callOK := assign.Rhs[0].(*ast.CallExpr)
-	if !ok || !callOK || group.Name != "g" || len(starter.Args) != 1 {
-		return false
-	}
-	starterName, ok := starter.Fun.(*ast.Ident)
-	starterArg, argOK := starter.Args[0].(*ast.Ident)
-	return ok && argOK && starterName.Name == "startConcurrentCleanupHelper" && starterArg.Name == "t"
+})`
+	var rendered bytes.Buffer
+	return format.Node(&rendered, fset, expr.X) == nil && rendered.String() == expected
 }
