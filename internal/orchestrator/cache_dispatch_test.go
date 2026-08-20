@@ -269,6 +269,7 @@ func (unboundedAwaitParentPipe) Plan(
 	_ sparkwing.RunContext,
 ) error {
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		publishQueuedAwaitParentAttempt(ctx)
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-child", "work")
 		return err
 	})
@@ -284,6 +285,7 @@ func (explicitTimeoutAwaitParentPipe) Plan(
 	_ sparkwing.RunContext,
 ) error {
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		publishQueuedAwaitParentAttempt(ctx)
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](
 			ctx,
 			"plan-level-queued-await-child",
@@ -1100,21 +1102,47 @@ func TestConcurrency_RunAndAwaitUnboundedClaimedChildAdmissionProtectsParentDisp
 	testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t, "unbounded-await-parent", 750*time.Millisecond)
 }
 
-const (
-	admissionPauseHold      = 850 * time.Millisecond
-	admissionPauseTestBound = 1100 * time.Millisecond
-)
+func observeAdmissionWaitBeyondDispatchTimeout(
+	t *testing.T,
+	attemptCtx context.Context,
+	parentDone <-chan *orchestrator.Result,
+	dispatchTimeout time.Duration,
+) {
+	t.Helper()
+	deadline := time.NewTimer(dispatchTimeout + 100*time.Millisecond)
+	defer deadline.Stop()
+	poll := time.NewTicker(2 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		if !orchestrator.AdmissionWaitActiveForTest(attemptCtx) {
+			t.Fatal("parent admission wait ended before the dispatch-watchdog observation completed")
+		}
+		select {
+		case parent := <-parentDone:
+			t.Fatalf("parent finished during its admission wait: status=%q err=%v", parent.Status, parent.Error)
+		case <-deadline.C:
+			if !orchestrator.AdmissionWaitActiveForTest(attemptCtx) {
+				t.Fatal("parent admission wait ended at the dispatch-watchdog boundary")
+			}
+			return
+		case <-poll.C:
+		}
+	}
+}
 
 func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeline string, dispatchTimeout time.Duration) {
 	t.Helper()
 	resetCacheCounter()
+	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
+	queuedAwaitParentAttempt.Store(gate)
+	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
 	p := newPaths(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	t.Cleanup(func() { _ = st.Close() })
 
 	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key:      "g:plan-level-queued-await-key",
@@ -1131,7 +1159,32 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 	}
 
 	parentDone := make(chan *orchestrator.Result, 1)
+	parentFinished := make(chan struct{})
+	childDone := make(chan *orchestrator.Result, 1)
+	childFinished := make(chan struct{})
+	var childStarted atomic.Bool
+	var releaseOnce sync.Once
+	var releaseErr error
+	releaseHolder := func() error {
+		releaseOnce.Do(func() {
+			_, _, _, releaseErr = st.ReleaseAndNotify(context.Background(),
+				"g:plan-level-queued-await-key", "external-plan-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease)
+		})
+		return releaseErr
+	}
+	t.Cleanup(func() {
+		gate.release()
+		cancel()
+		if err := releaseHolder(); err != nil {
+			t.Errorf("cleanup external holder: %v", err)
+		}
+		joinCacheDispatchWorker(t, "dispatch-watchdog parent", parentFinished)
+		if childStarted.Load() {
+			joinCacheDispatchWorker(t, "dispatch-watchdog child", childFinished)
+		}
+	})
 	go func() {
+		defer close(parentFinished)
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
 			Pipeline:            parentPipeline,
 			RunID:               "queued-await-parent",
@@ -1142,8 +1195,9 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 
 	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-parent", "spawn", "plan-level-queued-await-child")
 	claimManualChildTrigger(t, ctx, st, childID)
-	childDone := make(chan *orchestrator.Result, 1)
+	childStarted.Store(true)
 	go func() {
+		defer close(childFinished)
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-child",
 			RunID:       childID,
@@ -1152,20 +1206,15 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 		childDone <- res
 	}()
 	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-key", childID, childDone)
-	pauseStarted := time.Now()
-	time.Sleep(admissionPauseHold)
-
+	var attemptCtx context.Context
 	select {
-	case parent := <-parentDone:
-		t.Fatalf("parent finished while child was queued for plan admission: status=%q err=%v", parent.Status, parent.Error)
-	default:
+	case attemptCtx = <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("parent action did not publish its admission context")
 	}
-	if elapsed := time.Since(pauseStarted); elapsed >= admissionPauseTestBound {
-		t.Fatalf("admission-pause hold took %s, want less than %s", elapsed, admissionPauseTestBound)
-	}
+	observeAdmissionWaitBeyondDispatchTimeout(t, attemptCtx, parentDone, dispatchTimeout)
 
-	if _, _, _, err := st.ReleaseAndNotify(ctx,
-		"g:plan-level-queued-await-key", "external-plan-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+	if err := releaseHolder(); err != nil {
 		t.Fatalf("release external holder: %v", err)
 	}
 
