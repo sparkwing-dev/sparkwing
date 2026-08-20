@@ -239,7 +239,7 @@ func TestApproval_TimeoutWithPolicyFail(t *testing.T) {
 	if res.Status != "failed" {
 		t.Fatalf("status = %q, want failed", res.Status)
 	}
-	if time.Since(start) > 3*time.Second {
+	if time.Since(start) > 400*time.Millisecond {
 		t.Fatalf("run took too long: %v", time.Since(start))
 	}
 
