@@ -47,6 +47,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	noProgressRejectsPausedExpiry := false
 	dispatchWatchdogObservesAdmissionWait := false
 	dispatchWatchdogUsesObservation := false
+	dispatchWatchdogSpansTimeout := false
 	earlyResumeGateGated := false
 	cancellationGateUngated := false
 	remainingBudgetGateGated := false
@@ -123,6 +124,23 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 				t.Errorf("%s polls FindSpawnedChildTriggerID directly at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			pkg, ok := sel.X.(*ast.Ident)
+			if fn.Name.Name == "observeAdmissionWaitBeyondDispatchTimeout" && ok && pkg.Name == "time" && sel.Sel.Name == "NewTimer" && len(call.Args) == 1 {
+				add, added := call.Args[0].(*ast.BinaryExpr)
+				if added {
+					left, leftOK := add.X.(*ast.Ident)
+					margin, marginOK := add.Y.(*ast.BinaryExpr)
+					if marginOK {
+						amount, amountOK := margin.X.(*ast.BasicLit)
+						unit, unitOK := margin.Y.(*ast.SelectorExpr)
+						if unitOK {
+							unitPkg, unitPkgOK := unit.X.(*ast.Ident)
+							dispatchWatchdogSpansTimeout = add.Op == token.ADD && leftOK && left.Name == "dispatchTimeout" &&
+								margin.Op == token.MUL && amountOK && amount.Value == "100" && unitPkgOK &&
+								unitPkg.Name == "time" && unit.Sel.Name == "Millisecond"
+						}
+					}
+				}
+			}
 			if fn.Name.Name == "observeAdmissionWaitBeyondDispatchTimeout" && ok && pkg.Name == "orchestrator" && sel.Sel.Name == "AdmissionWaitActiveForTest" {
 				dispatchWatchdogObservesAdmissionWait = true
 			}
@@ -258,5 +276,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if !dispatchWatchdogUsesObservation {
 		t.Error("dispatch-watchdog regression does not delegate its observation window")
+	}
+	if !dispatchWatchdogSpansTimeout {
+		t.Error("dispatch-watchdog observation does not span the configured timeout")
 	}
 }
