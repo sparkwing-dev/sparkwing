@@ -87,24 +87,25 @@ func TestWatchActorReapsExitedProcessAndRecordsFinalOutput(t *testing.T) {
 	t.Cleanup(func() { _ = h.finishActor(a, true) })
 	go h.watchActor(a, stdout)
 
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
+	if pollProcessState(2*time.Second, 10*time.Millisecond, func() bool {
 		h.mu.Lock()
 		exited, granted := a.exited, a.granted
 		h.mu.Unlock()
-		if exited {
-			if !granted {
-				t.Fatal("final protocol output was lost before the actor was reaped")
-			}
-			if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
-				t.Fatal("actor was marked exited before its process was reaped")
-			}
-			if !group.Reaped() {
-				t.Fatal("actor ownership was released before group cleanup completed")
-			}
-			return
+		if !exited {
+			return false
 		}
-		time.Sleep(10 * time.Millisecond)
+		if !granted {
+			t.Fatal("final protocol output was lost before the actor was reaped")
+		}
+		if cmd.ProcessState == nil || !cmd.ProcessState.Exited() {
+			t.Fatal("actor was marked exited before its process was reaped")
+		}
+		if !group.Reaped() {
+			t.Fatal("actor ownership was released before group cleanup completed")
+		}
+		return true
+	}) {
+		return
 	}
 	t.Fatal("exited actor was not reaped while its descendant held stdout open")
 }
@@ -172,16 +173,12 @@ func TestManagedDaemonBoundsRepeatedIgnoreTermDescendantChurn(t *testing.T) {
 		t.Cleanup(func() { _ = h.finishDaemon(daemon, true) })
 	}
 
-	deadline := time.Now().Add(4 * time.Second)
-	for time.Now().Before(deadline) {
+	pollProcessState(4*time.Second, 10*time.Millisecond, func() bool {
 		h.mu.Lock()
 		remaining := len(h.daemons)
 		h.mu.Unlock()
-		if remaining == 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+		return remaining == 0
+	})
 	h.mu.Lock()
 	remaining := len(h.daemons)
 	h.mu.Unlock()
@@ -419,14 +416,10 @@ func TestProcessGuardAcceptsSoakScaleDescendantZombieBurst(t *testing.T) {
 		actors = append(actors, startGuardedActor(t, h, fmt.Sprintf("burst-%d", i), "zombie-parent", 0))
 	}
 	guard := newProcessGuard(h)
-	deadline := time.Now().Add(30 * time.Second)
-	for time.Now().Before(deadline) {
+	pollProcessState(30*time.Second, 20*time.Millisecond, func() bool {
 		guard.check()
-		if len(guard.since) == len(actors) {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+		return len(guard.since) == len(actors)
+	})
 	if len(guard.since) != len(actors) {
 		t.Fatalf("guard saw %d descendant zombies, want %d", len(guard.since), len(actors))
 	}
@@ -491,11 +484,10 @@ func TestProcessGuardExemptsZombiesRetainedByAReportedCleanupFailure(t *testing.
 	h.mu.Unlock()
 
 	guard := newProcessGuard(h)
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
+	pollProcessState(time.Second, 20*time.Millisecond, func() bool {
 		guard.check()
-		time.Sleep(20 * time.Millisecond)
-	}
+		return false
+	})
 	if len(reported) > 0 {
 		t.Fatalf("guard re-reported an already-reported cleanup failure: %s", strings.Join(reported, "; "))
 	}
@@ -504,18 +496,42 @@ func TestProcessGuardExemptsZombiesRetainedByAReportedCleanupFailure(t *testing.
 func awaitGuardViolation(t *testing.T, h *Harness, bound time.Duration, fired <-chan []string) string {
 	t.Helper()
 	guard := newProcessGuard(h)
-	deadline := time.Now().Add(bound)
-	for time.Now().Before(deadline) {
+	var got string
+	if pollProcessState(bound, 20*time.Millisecond, func() bool {
 		guard.check()
 		select {
 		case violations := <-fired:
-			return strings.Join(violations, "; ")
+			got = strings.Join(violations, "; ")
+			return true
 		default:
+			return false
 		}
-		time.Sleep(20 * time.Millisecond)
+	}) {
+		return got
 	}
 	t.Fatal("process guard reported no violation within its bound")
 	return ""
+}
+
+func pollProcessState(bound, interval time.Duration, predicate func() bool) bool {
+	deadlineAt := time.Now().Add(bound)
+	poll := time.NewTicker(interval)
+	defer poll.Stop()
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+	for {
+		if !time.Now().Before(deadlineAt) {
+			return false
+		}
+		if predicate() {
+			return true
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			return false
+		}
+	}
 }
 
 func helperCommand(mode string, children int) *exec.Cmd {
