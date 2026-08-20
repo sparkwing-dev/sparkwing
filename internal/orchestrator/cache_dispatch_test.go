@@ -809,6 +809,32 @@ func waitForConcurrencyHolder(t *testing.T, dbPath, holderID string) {
 	t.Fatalf("timed out waiting for concurrency holder %q", holderID)
 }
 
+func waitForSpawnedChildTrigger(t *testing.T, ctx context.Context, st *store.Store, parentRunID, parentNodeID, pipeline string) string {
+	t.Helper()
+	pollCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		childID, err := st.FindSpawnedChildTriggerID(pollCtx, parentRunID, parentNodeID, pipeline)
+		if err != nil {
+			if pollCtx.Err() != nil {
+				t.Fatalf("waiting for child trigger: %v", pollCtx.Err())
+			}
+			t.Fatalf("find spawned child trigger: %v", err)
+		}
+		if childID != "" {
+			return childID
+		}
+		poll.Reset(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-pollCtx.Done():
+			t.Fatalf("waiting for child trigger: %v", pollCtx.Err())
+		}
+	}
+}
+
 func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
@@ -996,17 +1022,7 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 		parentDone <- res
 	}()
 
-	var childID string
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-parent", "spawn", "plan-level-queued-await-child")
-		if err == nil && childID != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if childID == "" {
-		t.Fatal("timed out waiting for queued child trigger")
-	}
+	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-parent", "spawn", "plan-level-queued-await-child")
 	claimManualChildTrigger(t, ctx, st, childID)
 	childDone := make(chan *orchestrator.Result, 1)
 	go func() {
@@ -1127,17 +1143,7 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 		parentDone <- res
 	}()
 
-	var childID string
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-continue-parent", "spawn", "plan-level-queued-await-child")
-		if err == nil && childID != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if childID == "" {
-		t.Fatal("timed out waiting for queued child trigger")
-	}
+	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-continue-parent", "spawn", "plan-level-queued-await-child")
 	claimManualChildTrigger(t, ctx, st, childID)
 	childDone := make(chan *orchestrator.Result, 1)
 	go func() {
@@ -1230,17 +1236,7 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 		parentDone <- res
 	}()
 
-	var childID string
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		childID, err = st.FindSpawnedChildTriggerID(context.Background(), "queued-await-cancel-parent", "spawn", "plan-level-queued-await-child")
-		if err == nil && childID != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if childID == "" {
-		t.Fatal("timed out waiting for queued child trigger")
-	}
+	childID := waitForSpawnedChildTrigger(t, context.Background(), st, "queued-await-cancel-parent", "spawn", "plan-level-queued-await-child")
 	claimManualChildTrigger(t, context.Background(), st, childID)
 	childDone := make(chan *orchestrator.Result, 1)
 	go func() {
@@ -1320,17 +1316,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 		parentDone <- res
 	}()
 
-	var childID string
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-remaining-budget-parent", "spawn", "plan-level-queued-await-remaining-budget-child")
-		if err == nil && childID != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if childID == "" {
-		t.Fatal("timed out waiting for queued child trigger")
-	}
+	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-remaining-budget-parent", "spawn", "plan-level-queued-await-remaining-budget-child")
 	claimManualChildTrigger(t, ctx, st, childID)
 	childDone := make(chan *orchestrator.Result, 1)
 	go func() {
@@ -1419,17 +1405,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 		parentDone <- res
 	}()
 
-	var childID string
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-early-resume-parent", "spawn", "plan-level-queued-await-early-resume-child")
-		if err == nil && childID != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if childID == "" {
-		t.Fatal("timed out waiting for queued child trigger")
-	}
+	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-early-resume-parent", "spawn", "plan-level-queued-await-early-resume-child")
 	claimManualChildTrigger(t, ctx, st, childID)
 	childDone := make(chan *orchestrator.Result, 1)
 	go func() {
@@ -1514,17 +1490,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 		parentDone <- res
 	}()
 
-	var childID string
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-missed-promotion-parent", "spawn", "plan-level-queued-await-missed-promotion-child")
-		if err == nil && childID != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if childID == "" {
-		t.Fatal("timed out waiting for queued child trigger")
-	}
+	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-missed-promotion-parent", "spawn", "plan-level-queued-await-missed-promotion-child")
 	claimManualChildTrigger(t, ctx, st, childID)
 	childDone := make(chan *orchestrator.Result, 1)
 	go func() {
@@ -1611,17 +1577,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 		parentDone <- res
 	}()
 
-	var childID string
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		childID, err = st.FindSpawnedChildTriggerID(ctx, "queued-await-multi-key-parent", "spawn", "plan-level-queued-await-multi-key-child")
-		if err == nil && childID != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if childID == "" {
-		t.Fatal("timed out waiting for queued child trigger")
-	}
+	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-multi-key-parent", "spawn", "plan-level-queued-await-multi-key-child")
 	claimManualChildTrigger(t, ctx, st, childID)
 	childDone := make(chan *orchestrator.Result, 1)
 	go func() {
@@ -1702,17 +1658,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning(t *testing.
 		parentDone <- res
 	}()
 
-	var childID string
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		childID, err = st.FindSpawnedChildTriggerID(ctx, "slow-plan-await-parent", "spawn", "plan-level-slow-plan-await-child")
-		if err == nil && childID != "" {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if childID == "" {
-		t.Fatal("timed out waiting for slow-plan child trigger")
-	}
+	childID := waitForSpawnedChildTrigger(t, ctx, st, "slow-plan-await-parent", "spawn", "plan-level-slow-plan-await-child")
 	claimManualChildTrigger(t, ctx, st, childID)
 	childDone := make(chan *orchestrator.Result, 1)
 	go func() {
