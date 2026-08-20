@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,58 @@ import (
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
+
+type consumerLogSignal struct {
+	message string
+	seen    chan struct{}
+	once    sync.Once
+}
+
+type consumerLogSignalHandler struct {
+	base   slog.Handler
+	signal *consumerLogSignal
+}
+
+func newConsumerLogSignal(message string) (*slog.Logger, *consumerLogSignal) {
+	signal := &consumerLogSignal{message: message, seen: make(chan struct{})}
+	handler := &consumerLogSignalHandler{
+		base:   slog.NewTextHandler(io.Discard, nil),
+		signal: signal,
+	}
+	return slog.New(handler), signal
+}
+
+func (h *consumerLogSignalHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.base.Enabled(ctx, level)
+}
+
+func (h *consumerLogSignalHandler) Handle(ctx context.Context, record slog.Record) error {
+	if record.Message == h.signal.message {
+		h.signal.once.Do(func() { close(h.signal.seen) })
+	}
+	return h.base.Handle(ctx, record)
+}
+
+func (h *consumerLogSignalHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &consumerLogSignalHandler{base: h.base.WithAttrs(attrs), signal: h.signal}
+}
+
+func (h *consumerLogSignalHandler) WithGroup(name string) slog.Handler {
+	return &consumerLogSignalHandler{base: h.base.WithGroup(name), signal: h.signal}
+}
+
+func waitForConsumerLog(t *testing.T, signal *consumerLogSignal) {
+	t.Helper()
+	timer := time.NewTimer(2 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-signal.seen:
+	case <-timer.C:
+		t.Fatalf("consumer log did not report %q", signal.message)
+	}
+}
+
+const dashboardStandDownMessage = "dashboard trigger consumer standing down; a resident consumer owns this home's queue. Retrying while it does."
 
 func consumerTestStore(t *testing.T, home string) *store.Store {
 	t.Helper()
@@ -167,13 +220,11 @@ func TestRunLocalTriggerConsumer_StandsDownWhenAResidentConsumerHoldsTheLock(t *
 	<-ready
 	residentPID, _ := ConsumerPID(home)
 
-	if err := RunLocalTriggerConsumer(ctx, home, st, quietLogger()); err != nil {
+	logger, stoodDown := newConsumerLogSignal(dashboardStandDownMessage)
+	if err := RunLocalTriggerConsumer(ctx, home, st, logger); err != nil {
 		t.Fatalf("dashboard consumer startup: %v", err)
 	}
-	// The dashboard's consumer loses the election in its own goroutine.
-	// The observable consequence is that the resident consumer still owns
-	// the lock and the pid file was never rewritten.
-	time.Sleep(200 * time.Millisecond)
+	waitForConsumerLog(t, stoodDown)
 	pid, ok := ConsumerPID(home)
 	if !ok || pid != residentPID {
 		t.Fatalf("consumer pid = %d (ok=%v), want the resident %d still owning the queue", pid, ok, residentPID)
@@ -568,10 +619,11 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 	<-ready
 
 	// The dashboard comes up second and loses the election.
-	if err := RunLocalTriggerConsumer(ctx, home, st, quietLogger()); err != nil {
+	logger, stoodDown := newConsumerLogSignal(dashboardStandDownMessage)
+	if err := RunLocalTriggerConsumer(ctx, home, st, logger); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	waitForConsumerLog(t, stoodDown)
 
 	select {
 	case <-residentDone:

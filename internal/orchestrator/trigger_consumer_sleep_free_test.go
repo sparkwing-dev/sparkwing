@@ -11,16 +11,19 @@ func TestTriggerConsumerStatePollingDoesNotSleep(t *testing.T) {
 	targets := map[string]bool{
 		"waitFor":            false,
 		"expireTriggerLease": false,
-		"TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting":        false,
-		"TestSweeper_ClosesOutAClaimWhoseRunAlreadyEnded":             false,
-		"TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted": false,
-		"TestHeartbeat_StopsWhenTheClaimIsSuperseded":                 false,
+		"TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting":                    false,
+		"TestSweeper_ClosesOutAClaimWhoseRunAlreadyEnded":                         false,
+		"TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted":             false,
+		"TestHeartbeat_StopsWhenTheClaimIsSuperseded":                             false,
+		"TestRunLocalTriggerConsumer_StandsDownWhenAResidentConsumerHoldsTheLock": false,
+		"TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut":           false,
 	}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "trigger_consumer_test.go", nil, 0)
 	if err != nil {
 		t.Fatalf("parse trigger_consumer_test.go: %v", err)
 	}
+
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Body == nil {
