@@ -51,7 +51,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 				t.Errorf("%s polls FindSpawnedChildTriggerID directly at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			pkg, ok := sel.X.(*ast.Ident)
-			if fn.Name.Name == "waitForSpawnedChildTrigger" && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
+			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForSpawnedChildTrigger"
+			if isPollingHelper && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
 				t.Errorf("%s contains time.Sleep at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			return true
