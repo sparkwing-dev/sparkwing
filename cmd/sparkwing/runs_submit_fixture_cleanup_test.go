@@ -38,7 +38,7 @@ func TestSubmitCLIFixtureOwnsTemporaryDirectory(t *testing.T) {
 
 func submitCLIBuilderRecordsDirectory(fn *ast.FuncDecl) bool {
 	writes := 0
-	ordered := false
+	doCalls := 0
 	ast.Inspect(fn.Body, func(node ast.Node) bool {
 		if assign, ok := node.(*ast.AssignStmt); ok {
 			for _, expr := range assign.Lhs {
@@ -48,28 +48,38 @@ func submitCLIBuilderRecordsDirectory(fn *ast.FuncDecl) bool {
 			}
 		}
 		call, ok := node.(*ast.CallExpr)
-		if !ok || len(call.Args) != 1 || !isSubmitCleanupSelector(call.Fun, "submitCLIOnce", "Do") {
-			return true
+		if ok && isSubmitCleanupSelector(call.Fun, "submitCLIOnce", "Do") {
+			doCalls++
 		}
-		body, ok := call.Args[0].(*ast.FuncLit)
-		if !ok || len(body.Body.List) < 4 {
-			return true
-		}
-		want := []string{
-			`dir, err := os.MkdirTemp("", "sparkwing-submit-cli")`,
-			"if err != nil {\n\tsubmitCLIErr = err\n\treturn\n}",
-			"submitCLIDir = dir",
-			`bin := filepath.Join(dir, "sparkwing")`,
-		}
-		for i := range want {
-			if formatNode(body.Body.List[i]) != want[i] {
-				return true
-			}
-		}
-		ordered = true
 		return true
 	})
-	return writes == 1 && ordered
+	if writes != 1 || doCalls != 1 || len(fn.Body.List) < 2 {
+		return false
+	}
+	expr, ok := fn.Body.List[1].(*ast.ExprStmt)
+	if !ok {
+		return false
+	}
+	call, ok := expr.X.(*ast.CallExpr)
+	if !ok || len(call.Args) != 1 || !isSubmitCleanupSelector(call.Fun, "submitCLIOnce", "Do") {
+		return false
+	}
+	body, ok := call.Args[0].(*ast.FuncLit)
+	if !ok || len(body.Body.List) < 4 {
+		return false
+	}
+	want := []string{
+		`dir, err := os.MkdirTemp("", "sparkwing-submit-cli")`,
+		"if err != nil {\n\tsubmitCLIErr = err\n\treturn\n}",
+		"submitCLIDir = dir",
+		`bin := filepath.Join(dir, "sparkwing")`,
+	}
+	for i := range want {
+		if formatNode(body.Body.List[i]) != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func isSubmitCleanupSelector(expr ast.Expr, receiver, method string) bool {
