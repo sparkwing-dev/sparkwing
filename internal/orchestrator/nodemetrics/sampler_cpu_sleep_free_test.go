@@ -21,6 +21,9 @@ func TestCPUAccountingRegressionsDoNotUseTimeSleep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse sampler_test.go: %v", err)
 	}
+	rawExecSignalsSamples := false
+	rawExecWaitsForSample := false
+	rawExecBoundsSampler := false
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok {
@@ -31,12 +34,30 @@ func TestCPUAccountingRegressionsDoNotUseTimeSleep(t *testing.T) {
 		}
 		targets[fn.Name.Name] = true
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if fn.Name.Name == "TestRun_CountsRawExecChildrenCPU" {
+				if field, ok := node.(*ast.KeyValueExpr); ok {
+					if key, ok := field.Key.(*ast.Ident); ok && key.Name == "sampleReady" {
+						rawExecSignalsSamples = true
+					}
+				}
+			}
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "Sleep" {
+			if !ok {
+				return true
+			}
+			if fn.Name.Name == "TestRun_CountsRawExecChildrenCPU" && sel.Sel.Name == "waitForSampleAfter" {
+				rawExecWaitsForSample = true
+			}
+			if fn.Name.Name == "TestRun_CountsRawExecChildrenCPU" && sel.Sel.Name == "WithTimeout" {
+				if pkg, ok := sel.X.(*ast.Ident); ok && pkg.Name == "context" {
+					rawExecBoundsSampler = true
+				}
+			}
+			if sel.Sel.Name != "Sleep" {
 				return true
 			}
 			pkg, ok := sel.X.(*ast.Ident)
@@ -50,5 +71,8 @@ func TestCPUAccountingRegressionsDoNotUseTimeSleep(t *testing.T) {
 		if !found {
 			t.Errorf("%s declaration not found", name)
 		}
+	}
+	if !rawExecSignalsSamples || !rawExecWaitsForSample || !rawExecBoundsSampler {
+		t.Error("TestRun_CountsRawExecChildrenCPU must configure and boundedly wait for sample publication")
 	}
 }

@@ -85,8 +85,8 @@ func TestCPUAccountingBurnerProcess(t *testing.T) {
 // CPU-burning process must produce a nonzero sampled peak, so learned
 // capacity can activate rather than costing every run by the default.
 func TestRun_ReportsNonzeroCPUUnderLoad(t *testing.T) {
-	sink := &captureSink{sampleReady: make(chan struct{}, 1)}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	sink := &captureSink{}
+	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {
 		Run(ctx, 40*time.Millisecond, sink)
@@ -116,13 +116,23 @@ func TestRun_CountsRawExecChildrenCPU(t *testing.T) {
 	if _, ok := readCPUTime(); !ok {
 		t.Skip("no CPU accounting on this platform")
 	}
-	sink := &captureSink{}
-	ctx, cancel := context.WithCancel(context.Background())
+	sink := &captureSink{sampleReady: make(chan struct{}, 1)}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	done := make(chan struct{})
 	go func() {
 		Run(ctx, 40*time.Millisecond, sink)
 		close(done)
 	}()
+	t.Cleanup(func() {
+		cancel()
+		joinDeadline := time.NewTimer(time.Second)
+		defer joinDeadline.Stop()
+		select {
+		case <-done:
+		case <-joinDeadline.C:
+			t.Error("sampler did not stop after cancellation")
+		}
+	})
 
 	for sink.peakCPU() <= 300 {
 		burnAndReap(t)
