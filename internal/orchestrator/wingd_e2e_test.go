@@ -552,13 +552,15 @@ func queryWingd(t *testing.T, home string) wingwire.QueueState {
 func awaitWaiter(t *testing.T, home, runID string) {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		for _, w := range queryWingd(t, home).Waiters {
 			if queueRowMatchesRun(w.RunID, w.ParticipantID, runID) {
 				return
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-poll.C
 	}
 	t.Fatalf("run %q never appeared in the daemon queue", runID)
 }
@@ -568,11 +570,13 @@ func awaitWaiter(t *testing.T, home, runID string) {
 func awaitOutContains(t *testing.T, out *syncBuffer, sub string) {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		if out.count(sub) > 0 {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-poll.C
 	}
 	t.Fatalf("out never contained %q; out = %q", sub, out.String())
 }
@@ -580,6 +584,8 @@ func awaitOutContains(t *testing.T, out *syncBuffer, sub string) {
 func awaitWaiterOrHolder(t *testing.T, home, runID string) wingwire.QueueState {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	var last wingwire.QueueState
 	for time.Now().Before(deadline) {
 		last = queryWingd(t, home)
@@ -593,7 +599,7 @@ func awaitWaiterOrHolder(t *testing.T, home, runID string) wingwire.QueueState {
 				t.Fatalf("run %q was admitted as holder; queue state: %+v", runID, last)
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-poll.C
 	}
 	t.Fatalf("run %q never appeared as waiter or holder; queue state: %+v", runID, last)
 	return wingwire.QueueState{}
@@ -611,6 +617,8 @@ func acquireWingd(t *testing.T, cl *wingdclient.Client, req wingwire.AdmissionRe
 func awaitNodeOutcome(t *testing.T, st *store.Store, runID, nodeID, outcome string) {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	var last string
 	for time.Now().Before(deadline) {
 		node, err := st.GetNode(context.Background(), runID, nodeID)
@@ -620,7 +628,7 @@ func awaitNodeOutcome(t *testing.T, st *store.Store, runID, nodeID, outcome stri
 				return
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-poll.C
 	}
 	t.Fatalf("timed out waiting for %s/%s outcome %q; last outcome %q", runID, nodeID, outcome, last)
 }
@@ -628,13 +636,15 @@ func awaitNodeOutcome(t *testing.T, st *store.Store, runID, nodeID, outcome stri
 func findWingdHolder(t *testing.T, home, runID string) wingwire.Holder {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		for _, h := range queryWingd(t, home).Holders {
 			if queueRowMatchesRun(h.RunID, h.ParticipantID, runID) {
 				return h
 			}
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-poll.C
 	}
 	t.Fatalf("run %q never appeared as a holder", runID)
 	return wingwire.Holder{}
