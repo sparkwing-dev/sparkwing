@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
@@ -21,20 +20,42 @@ func quietLogger() *slog.Logger {
 }
 
 type consumerLogSignal struct {
-	needle []byte
-	seen   chan struct{}
-	once   sync.Once
+	message string
+	seen    chan struct{}
+	once    sync.Once
 }
 
-func newConsumerLogSignal(needle string) *consumerLogSignal {
-	return &consumerLogSignal{needle: []byte(needle), seen: make(chan struct{})}
+type consumerLogSignalHandler struct {
+	base   slog.Handler
+	signal *consumerLogSignal
 }
 
-func (s *consumerLogSignal) Write(p []byte) (int, error) {
-	if bytes.Contains(p, s.needle) {
-		s.once.Do(func() { close(s.seen) })
+func newConsumerLogSignal(message string) (*slog.Logger, *consumerLogSignal) {
+	signal := &consumerLogSignal{message: message, seen: make(chan struct{})}
+	handler := &consumerLogSignalHandler{
+		base:   slog.NewTextHandler(io.Discard, nil),
+		signal: signal,
 	}
-	return len(p), nil
+	return slog.New(handler), signal
+}
+
+func (h *consumerLogSignalHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	return h.base.Enabled(ctx, level)
+}
+
+func (h *consumerLogSignalHandler) Handle(ctx context.Context, record slog.Record) error {
+	if record.Message == h.signal.message {
+		h.signal.once.Do(func() { close(h.signal.seen) })
+	}
+	return h.base.Handle(ctx, record)
+}
+
+func (h *consumerLogSignalHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &consumerLogSignalHandler{base: h.base.WithAttrs(attrs), signal: h.signal}
+}
+
+func (h *consumerLogSignalHandler) WithGroup(name string) slog.Handler {
+	return &consumerLogSignalHandler{base: h.base.WithGroup(name), signal: h.signal}
 }
 
 func waitForConsumerLog(t *testing.T, signal *consumerLogSignal) {
@@ -44,9 +65,11 @@ func waitForConsumerLog(t *testing.T, signal *consumerLogSignal) {
 	select {
 	case <-signal.seen:
 	case <-timer.C:
-		t.Fatalf("consumer log did not contain %q", signal.needle)
+		t.Fatalf("consumer log did not report %q", signal.message)
 	}
 }
+
+const dashboardStandDownMessage = "dashboard trigger consumer standing down; a resident consumer owns this home's queue. Retrying while it does."
 
 func consumerTestStore(t *testing.T, home string) *store.Store {
 	t.Helper()
@@ -197,8 +220,7 @@ func TestRunLocalTriggerConsumer_StandsDownWhenAResidentConsumerHoldsTheLock(t *
 	<-ready
 	residentPID, _ := ConsumerPID(home)
 
-	stoodDown := newConsumerLogSignal("dashboard trigger consumer standing down")
-	logger := slog.New(slog.NewTextHandler(stoodDown, nil))
+	logger, stoodDown := newConsumerLogSignal(dashboardStandDownMessage)
 	if err := RunLocalTriggerConsumer(ctx, home, st, logger); err != nil {
 		t.Fatalf("dashboard consumer startup: %v", err)
 	}
@@ -597,8 +619,7 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 	<-ready
 
 	// The dashboard comes up second and loses the election.
-	stoodDown := newConsumerLogSignal("dashboard trigger consumer standing down")
-	logger := slog.New(slog.NewTextHandler(stoodDown, nil))
+	logger, stoodDown := newConsumerLogSignal(dashboardStandDownMessage)
 	if err := RunLocalTriggerConsumer(ctx, home, st, logger); err != nil {
 		t.Fatal(err)
 	}
