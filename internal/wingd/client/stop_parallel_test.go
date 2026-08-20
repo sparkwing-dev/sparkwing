@@ -23,8 +23,8 @@ func TestStopReleaseRoundsRunAsParallelSubtests(t *testing.T) {
 		if len(fn.Body.List) != 1 {
 			continue
 		}
-		loop, ok := fn.Body.List[0].(*ast.ForStmt)
-		if !ok || len(loop.Body.List) != 1 {
+		loop, ok := fn.Body.List[0].(*ast.RangeStmt)
+		if !ok || !isStopReleaseRoundsLoop(loop) || len(loop.Body.List) != 1 {
 			continue
 		}
 		expr, ok := loop.Body.List[0].(*ast.ExprStmt)
@@ -65,4 +65,13 @@ func TestStopReleaseRoundsRunAsParallelSubtests(t *testing.T) {
 	if !foundParallelRounds {
 		t.Fatal("stop release rounds must each run as a direct parallel subtest")
 	}
+}
+
+func isStopReleaseRoundsLoop(loop *ast.RangeStmt) bool {
+	round, ok := loop.Key.(*ast.Ident)
+	if !ok || round.Name != "round" || loop.Value != nil || loop.Tok != token.DEFINE {
+		return false
+	}
+	rounds, ok := loop.X.(*ast.Ident)
+	return ok && rounds.Name == "stopReleaseRounds"
 }
