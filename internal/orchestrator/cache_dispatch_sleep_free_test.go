@@ -11,6 +11,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	targets := map[string]bool{
 		"waitForConcurrencyHolder":                                                     false,
 		"waitForNodeTimeoutPaused":                                                     false,
+		"waitForNodeTimeoutResumed":                                                    false,
 		"waitForPlanAdmissionWaiter":                                                   false,
 		"waitForSpawnedChildTrigger":                                                   false,
 		"testRunAndAwaitAdmissionOutlivesDispatchWatchdog":                             false,
@@ -36,6 +37,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	remainingBudgetChecksPausedController := false
 	remainingBudgetRejectsPausedExpiry := false
 	remainingBudgetInspectsControllerState := false
+	remainingBudgetControlsRemainder := false
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_dispatch_test.go", nil, 0)
 	if err != nil {
@@ -87,9 +89,11 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					remainingBudgetRejectsPausedExpiry = true
 				case "NodeTimeoutStateForTest":
 					remainingBudgetInspectsControllerState = true
+				case "SetNodeTimeoutRemainingForTest":
+					remainingBudgetControlsRemainder = true
 				}
 			}
-			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
+			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForNodeTimeoutResumed" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
 			isCancellationRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused"
 			isRemainingBudgetRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget"
 			if (isPollingHelper || isCancellationRegression || isRemainingBudgetRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
@@ -103,7 +107,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 		if planWaiterCallers[fn.Name.Name] && !usesPlanWait {
 			t.Errorf("%s does not use waitForPlanAdmissionWaiter", fn.Name.Name)
 		}
-		isHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
+		isHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForNodeTimeoutResumed" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
 		if !isHelper && !usesSpawnWait {
 			t.Errorf("%s does not use waitForSpawnedChildTrigger", fn.Name.Name)
 		}
@@ -127,5 +131,8 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if !remainingBudgetInspectsControllerState {
 		t.Error("remaining-budget regression does not compare paused and resumed timeout state")
+	}
+	if !remainingBudgetControlsRemainder {
+		t.Error("remaining-budget regression does not establish its pre-admission timeout remainder")
 	}
 }
