@@ -234,8 +234,8 @@ func (generousTimeout) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwi
 		generousRan.Store(true)
 		return nil
 	}).SkipIf(func(ctx context.Context) bool {
-		time.Sleep(500 * time.Millisecond)
-		return true
+		<-ctx.Done()
+		return false
 	}, sparkwing.SkipBudget(50*time.Millisecond))
 	return nil
 }
