@@ -34,21 +34,31 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 			continue
 		}
 		targets[fn.Name.Name] = true
+		usesSpawnWait := false
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
 			}
+			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "waitForSpawnedChildTrigger" {
+				usesSpawnWait = true
+			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "Sleep" {
+			if !ok {
 				return true
 			}
+			if fn.Name.Name != "waitForSpawnedChildTrigger" && sel.Sel.Name == "FindSpawnedChildTriggerID" {
+				t.Errorf("%s polls FindSpawnedChildTriggerID directly at %s", fn.Name.Name, fset.Position(call.Pos()))
+			}
 			pkg, ok := sel.X.(*ast.Ident)
-			if ok && pkg.Name == "time" {
+			if fn.Name.Name == "waitForSpawnedChildTrigger" && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
 				t.Errorf("%s contains time.Sleep at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			return true
 		})
+		if fn.Name.Name != "waitForConcurrencyHolder" && fn.Name.Name != "waitForSpawnedChildTrigger" && !usesSpawnWait {
+			t.Errorf("%s does not use waitForSpawnedChildTrigger", fn.Name.Name)
+		}
 	}
 	for name, found := range targets {
 		if !found {
