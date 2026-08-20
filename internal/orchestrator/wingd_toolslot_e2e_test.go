@@ -40,15 +40,21 @@ type toolSlotGrant struct {
 	granted bool
 }
 
+type toolSlotContext struct {
+	runID string
+	ctx   context.Context
+}
+
 // toolSlotGate is the shared rendezvous the tool-slot pipeline's job body
 // runs against: it holds the budget under test, collects each acquirer's
 // grant, and holds every acquirer inside the slot until the test releases
 // it by name. Releasing by name is what makes the ordering assertion real,
 // because the third acquirer can only be admitted after a named release.
 type toolSlotGate struct {
-	budget *sparkwing.ConcurrencyGroup
-	cost   int
-	grants chan toolSlotGrant
+	budget   *sparkwing.ConcurrencyGroup
+	cost     int
+	grants   chan toolSlotGrant
+	contexts chan toolSlotContext
 
 	mu      sync.Mutex
 	release map[string]chan struct{}
@@ -56,10 +62,11 @@ type toolSlotGate struct {
 
 func newToolSlotGate(budget *sparkwing.ConcurrencyGroup, cost int) *toolSlotGate {
 	return &toolSlotGate{
-		budget:  budget,
-		cost:    cost,
-		grants:  make(chan toolSlotGrant, 8),
-		release: map[string]chan struct{}{},
+		budget:   budget,
+		cost:     cost,
+		grants:   make(chan toolSlotGrant, 8),
+		contexts: make(chan toolSlotContext, 8),
+		release:  map[string]chan struct{}{},
 	}
 }
 
@@ -80,6 +87,11 @@ func (g *toolSlotGate) releaseChan(runID string) chan struct{} {
 // pipeline author calls, reports what it got, and stays inside the slot
 // until the test lets it go.
 func (g *toolSlotGate) hold(ctx context.Context, runID string) error {
+	select {
+	case g.contexts <- toolSlotContext{runID: runID, ctx: ctx}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 	release, granted := sparkwing.ToolSlot(ctx, g.budget, g.cost)
 	defer release()
 	g.grants <- toolSlotGrant{runID: runID, granted: granted}
@@ -91,9 +103,34 @@ func (g *toolSlotGate) hold(ctx context.Context, runID string) error {
 	}
 }
 
+func (g *toolSlotGate) awaitContext(t *testing.T, want string) context.Context {
+	t.Helper()
+	select {
+	case got := <-g.contexts:
+		if got.runID != want {
+			t.Fatalf("tool slot context for %q arrived first, want %q", got.runID, want)
+		}
+		return got.ctx
+	case <-time.After(wingdTestWait):
+		t.Fatalf("run %q never entered its tool slot", want)
+		return nil
+	}
+}
+
 // let drops one acquirer out of the slot.
 func (g *toolSlotGate) let(runID string) {
-	close(g.releaseChan(runID))
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	ch, ok := g.release[runID]
+	if !ok {
+		ch = make(chan struct{})
+		g.release[runID] = ch
+	}
+	select {
+	case <-ch:
+	default:
+		close(ch)
+	}
 }
 
 // awaitGrant blocks until an acquirer reports, failing when the reporter
@@ -315,24 +352,33 @@ func TestWingd_NoProgressTimeoutPausesForToolSlotAndResumesAfterGrant(t *testing
 	budget := sparkwing.BoxToolBudget("wingd-e2e-tool-progress", toolSlotLintCores, 0)
 	gate := newToolSlotGate(budget, sparkwing.ToolCostCenticores(toolSlotLintCores))
 	toolSlotE2EGate.Store(gate)
+	t.Cleanup(func() {
+		gate.let("tool-holder")
+		gate.let("tool-progress-waiter")
+	})
 
 	holder := startToolSlotRun(t, backends, home, "tool-holder")
+	gate.awaitContext(t, "tool-holder")
 	if grant := gate.awaitGrant(t, "tool-holder"); !grant.granted {
 		t.Fatal("holder was not granted the tool slot")
 	}
 
 	waiter := startToolSlotRun(t, backends, home, "tool-progress-waiter")
+	waiterCtx := gate.awaitContext(t, "tool-progress-waiter")
 	awaitToolSlotQueued(t, st, "tool-progress-waiter", toolSlotNodeID)
-	time.Sleep(250 * time.Millisecond)
-	select {
-	case res := <-waiter:
-		t.Fatalf("waiter finished while its no-progress clock should be paused: %+v", res)
-	default:
+	if !ProgressTimeoutPausedForTest(waiterCtx) {
+		t.Fatal("waiter progress timeout was not paused for the tool slot")
+	}
+	if ExpireProgressTimeoutForTest(waiterCtx) {
+		t.Fatal("waiter progress timeout fired while the tool slot was queued")
 	}
 
 	gate.let("tool-holder")
 	if grant := gate.awaitGrant(t, "tool-progress-waiter"); !grant.granted {
 		t.Fatal("waiter was not granted after the holder released")
+	}
+	if !ExpireProgressTimeoutForTest(waiterCtx) {
+		t.Fatal("waiter progress timeout did not fire after the tool slot was granted")
 	}
 
 	select {
