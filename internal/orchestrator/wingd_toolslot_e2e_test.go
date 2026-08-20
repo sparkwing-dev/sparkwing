@@ -119,7 +119,18 @@ func (g *toolSlotGate) awaitContext(t *testing.T, want string) context.Context {
 
 // let drops one acquirer out of the slot.
 func (g *toolSlotGate) let(runID string) {
-	close(g.releaseChan(runID))
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	ch, ok := g.release[runID]
+	if !ok {
+		ch = make(chan struct{})
+		g.release[runID] = ch
+	}
+	select {
+	case <-ch:
+	default:
+		close(ch)
+	}
 }
 
 // awaitGrant blocks until an acquirer reports, failing when the reporter
@@ -341,6 +352,10 @@ func TestWingd_NoProgressTimeoutPausesForToolSlotAndResumesAfterGrant(t *testing
 	budget := sparkwing.BoxToolBudget("wingd-e2e-tool-progress", toolSlotLintCores, 0)
 	gate := newToolSlotGate(budget, sparkwing.ToolCostCenticores(toolSlotLintCores))
 	toolSlotE2EGate.Store(gate)
+	t.Cleanup(func() {
+		gate.let("tool-holder")
+		gate.let("tool-progress-waiter")
+	})
 
 	holder := startToolSlotRun(t, backends, home, "tool-holder")
 	gate.awaitContext(t, "tool-holder")
