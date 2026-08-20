@@ -21,6 +21,10 @@ func TestCapacityReconciliationRegressionDoesNotUseTimeSleep(t *testing.T) {
 		"waitForReconcileSampleAfter":                  false,
 	}
 	waitCalls := 0
+	zeroBoundaryWaits := 0
+	reportedBoundaryWaits := 0
+	var reportedChildCPUPos token.Pos
+	var reportedBoundaryPos token.Pos
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok {
@@ -41,16 +45,40 @@ func TestCapacityReconciliationRegressionDoesNotUseTimeSleep(t *testing.T) {
 			if !ok {
 				return true
 			}
-			if callee, ok := call.Fun.(*ast.Ident); ok && name == "TestRecordRunProfile_SDKBurnerPeakNotDoubled" && callee.Name == "waitForReconcileSampleAfter" {
-				waitCalls++
+			if callee, ok := call.Fun.(*ast.Ident); ok && name == "TestRecordRunProfile_SDKBurnerPeakNotDoubled" {
+				switch callee.Name {
+				case "waitForReconcileSampleAfter":
+					waitCalls++
+					if len(call.Args) == 4 {
+						switch boundary := call.Args[3].(type) {
+						case *ast.CompositeLit:
+							sel, ok := boundary.Type.(*ast.SelectorExpr)
+							if !ok {
+								break
+							}
+							pkg, pkgOK := sel.X.(*ast.Ident)
+							if pkgOK && pkg.Name == "time" && sel.Sel.Name == "Time" && len(boundary.Elts) == 0 {
+								zeroBoundaryWaits++
+							}
+						case *ast.Ident:
+							if boundary.Name == "reportedAt" {
+								reportedBoundaryWaits++
+								reportedBoundaryPos = call.Pos()
+							}
+						}
+					}
+				}
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
-			if !ok || sel.Sel.Name != "Sleep" {
+			if !ok {
 				return true
 			}
 			pkg, ok := sel.X.(*ast.Ident)
-			if ok && pkg.Name == "time" {
+			if ok && pkg.Name == "time" && sel.Sel.Name == "Sleep" {
 				t.Errorf("%s uses time.Sleep; synchronize on persisted samples", name)
+			}
+			if ok && name == "TestRecordRunProfile_SDKBurnerPeakNotDoubled" && pkg.Name == "nodemetrics" && sel.Sel.Name == "AddReportedChildCPU" {
+				reportedChildCPUPos = call.Pos()
 			}
 			return true
 		})
@@ -62,5 +90,11 @@ func TestCapacityReconciliationRegressionDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if waitCalls != 2 {
 		t.Errorf("capacity reconciliation regression waits for %d persisted sample boundaries, want 2", waitCalls)
+	}
+	if zeroBoundaryWaits != 1 || reportedBoundaryWaits != 1 {
+		t.Errorf("sample boundaries = zero:%d reported:%d, want one of each", zeroBoundaryWaits, reportedBoundaryWaits)
+	}
+	if reportedChildCPUPos == token.NoPos || reportedBoundaryPos <= reportedChildCPUPos {
+		t.Error("reportedAt sample boundary must follow AddReportedChildCPU")
 	}
 }
