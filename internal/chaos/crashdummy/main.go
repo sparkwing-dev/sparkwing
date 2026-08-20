@@ -170,15 +170,17 @@ func runHold(args []string) {
 }
 
 type holder struct {
-	hf    holdFlags
-	mu    sync.Mutex
-	lease *client.Lease
-	cl    *client.Client
-	done  chan struct{}
+	hf       holdFlags
+	mu       sync.Mutex
+	lease    *client.Lease
+	cl       *client.Client
+	children []*exec.Cmd
+	done     chan struct{}
 }
 
 func (h *holder) run() {
 	h.done = make(chan struct{})
+	h.installSignals()
 	opts := client.Options{
 		Home:    h.hf.home,
 		Version: h.hf.version,
@@ -215,7 +217,6 @@ func (h *holder) run() {
 	if h.hf.memMB > 0 {
 		ballast = holdMemory(h.hf.memMB)
 	}
-	h.installSignals()
 	if h.hf.runMS > 0 {
 		go func() {
 			time.Sleep(time.Duration(h.hf.runMS) * time.Millisecond)
@@ -307,6 +308,7 @@ func (h *holder) cleanExit() {
 	default:
 	}
 	close(h.done)
+	h.terminateChildren()
 	if h.hf.dirty {
 		os.Exit(1)
 	}
@@ -347,8 +349,20 @@ func (h *holder) spawnChildren(token string) {
 			"--run-ms", strconv.Itoa(childMS),
 		)
 		if err := cmd.Start(); err == nil {
+			h.mu.Lock()
+			h.children = append(h.children, cmd)
+			h.mu.Unlock()
 			go func() { _ = cmd.Wait() }()
 		}
+	}
+}
+
+func (h *holder) terminateChildren() {
+	h.mu.Lock()
+	children := append([]*exec.Cmd(nil), h.children...)
+	h.mu.Unlock()
+	for _, child := range children {
+		_ = child.Process.Signal(syscall.SIGTERM)
 	}
 }
 

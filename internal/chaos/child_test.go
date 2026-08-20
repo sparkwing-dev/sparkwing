@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 	"testing"
 	"time"
 
@@ -36,13 +37,25 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 	}
 
 	parent := exec.Command(bin, "hold", "--home", home, "--run", "p",
-		"--cores", "1", "--children", "2", "--run-ms", "4000")
+		"--cores", "1", "--children", "2", "--run-ms", "0")
 	if err := parent.Start(); err != nil {
 		t.Fatalf("start parent: %v", err)
 	}
+	parentResult := make(chan error, 1)
+	parentFinished := make(chan struct{})
+	go func() {
+		parentResult <- parent.Wait()
+		close(parentFinished)
+	}()
 	t.Cleanup(func() {
 		_ = parent.Process.Kill()
-		_, _ = parent.Process.Wait()
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-parentFinished:
+		case <-timer.C:
+			t.Error("crashdummy parent did not exit within cleanup bound")
+		}
 	})
 
 	readOpts := client.Options{Home: home, Version: "v1.0.0", DialTimeout: 500 * time.Millisecond, Backoff: 30 * time.Millisecond}
@@ -94,6 +107,19 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 			t.Fatal("complete parent-child family never appeared")
 		case <-readyPoll.C:
 		}
+	}
+	if err := parent.Process.Signal(syscall.SIGTERM); err != nil {
+		t.Fatalf("release parent: %v", err)
+	}
+	parentExit := time.NewTimer(2 * time.Second)
+	defer parentExit.Stop()
+	select {
+	case err := <-parentResult:
+		if err != nil {
+			t.Fatalf("parent exit: %v", err)
+		}
+	case <-parentExit.C:
+		t.Fatal("parent did not exit after release")
 	}
 
 	convergeCtx, cancelConverge := context.WithTimeout(context.Background(), 12*time.Second)
