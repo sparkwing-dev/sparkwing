@@ -43,11 +43,13 @@ func TestDispatchWatchdog_ArmsAfterAdmissionWaitEnds(t *testing.T) {
 	waits := newAdmissionWaitTracker()
 	waits.begin("queued")
 
+	observed := make(chan bool, 2)
 	result := make(chan dispatchWaitResult, 1)
 	go func() {
-		result <- waitForDispatch(&wg, 40*time.Millisecond, waits, func() []string { return []string{"queued"} })
+		result <- waitForDispatchObserved(&wg, 40*time.Millisecond, waits,
+			func() []string { return []string{"queued"} }, watchdogPauseObserver(observed))
 	}()
-	time.Sleep(80 * time.Millisecond)
+	waitForWatchdogObservation(t, observed, true)
 	waits.end("queued")
 
 	select {
@@ -106,11 +108,12 @@ func TestDispatchWatchdog_WakesWhenWedgedSiblingStarts(t *testing.T) {
 		wg.Done()
 	}()
 
+	observed := make(chan bool, 2)
 	result := make(chan dispatchWaitResult, 1)
 	go func() {
-		result <- waitForDispatch(&wg, 40*time.Millisecond, waits, state.watchdogActiveNodeIDs)
+		result <- waitForDispatchObserved(&wg, 40*time.Millisecond, waits, state.watchdogActiveNodeIDs, watchdogPauseObserver(observed))
 	}()
-	time.Sleep(80 * time.Millisecond)
+	waitForWatchdogObservation(t, observed, true)
 	state.markStarted("wedged")
 
 	select {
@@ -138,12 +141,14 @@ func TestDispatchWatchdog_PausesWhenRunningSiblingFinishes(t *testing.T) {
 	}
 	waits.begin("queued")
 
+	observed := make(chan bool, 2)
 	result := make(chan dispatchWaitResult, 1)
 	go func() {
-		result <- waitForDispatch(&wg, 80*time.Millisecond, waits, state.watchdogActiveNodeIDs)
+		result <- waitForDispatchObserved(&wg, 80*time.Millisecond, waits, state.watchdogActiveNodeIDs, watchdogPauseObserver(observed))
 	}()
-	time.Sleep(20 * time.Millisecond)
+	waitForWatchdogObservation(t, observed, false)
 	state.setOutcome("running", sparkwing.Success)
+	waitForWatchdogObservation(t, observed, true)
 
 	select {
 	case got := <-result:
@@ -161,5 +166,30 @@ func TestDispatchWatchdog_PausesWhenRunningSiblingFinishes(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("watchdog did not finish after queued work completed")
+	}
+}
+
+func watchdogPauseObserver(observed chan<- bool) func(bool) {
+	return func(paused bool) {
+		select {
+		case observed <- paused:
+		default:
+		}
+	}
+}
+
+func waitForWatchdogObservation(t *testing.T, observed <-chan bool, wantPaused bool) {
+	t.Helper()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for {
+		select {
+		case paused := <-observed:
+			if paused == wantPaused {
+				return
+			}
+		case <-deadline.C:
+			t.Fatalf("watchdog did not report paused=%t", wantPaused)
+		}
 	}
 }

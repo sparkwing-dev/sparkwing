@@ -129,6 +129,16 @@ func waitForDispatch(
 	waits *admissionWaitTracker,
 	activeParticipants func() []string,
 ) dispatchWaitResult {
+	return waitForDispatchObserved(wg, timeout, waits, activeParticipants, nil)
+}
+
+func waitForDispatchObserved(
+	wg *sync.WaitGroup,
+	timeout time.Duration,
+	waits *admissionWaitTracker,
+	activeParticipants func() []string,
+	observePause func(bool),
+) dispatchWaitResult {
 	if timeout <= 0 {
 		wg.Wait()
 		return dispatchWaitDone
@@ -141,7 +151,11 @@ func waitForDispatch(
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	for {
-		if waits != nil && waits.covers(activeParticipants()) {
+		paused := waits != nil && waits.covers(activeParticipants())
+		if observePause != nil {
+			observePause(paused)
+		}
+		if paused {
 			if !timer.Stop() {
 				select {
 				case <-timer.C:
