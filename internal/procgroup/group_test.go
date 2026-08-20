@@ -38,7 +38,7 @@ func TestGroupHelperProcess(t *testing.T) {
 		os.Exit(0)
 	case "short":
 		os.Exit(0)
-	case "ignore-short":
+	case "concurrent-cleanup":
 		IgnoreTermination()
 		holdHelperProcess("")
 	case "session-leader":
@@ -495,7 +495,7 @@ func TestGroupLifecycleStressLeavesEveryGroupReaped(t *testing.T) {
 func TestConcurrentFinishAndTerminateNeverLoseCompletedCleanup(t *testing.T) {
 	const count = 50
 	for range count {
-		g := startReadyHelper(t, "ignore-short")
+		g := startConcurrentCleanupHelper(t)
 		results := make(chan error, 2)
 		go func() {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -529,7 +529,7 @@ func startHelper(t *testing.T, mode string) *Group {
 	return g
 }
 
-func startReadyHelper(t *testing.T, mode string) *Group {
+func startConcurrentCleanupHelper(t *testing.T) *Group {
 	t.Helper()
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -537,7 +537,7 @@ func startReadyHelper(t *testing.T, mode string) *Group {
 	}
 	defer reader.Close()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-	cmd.Env = append(os.Environ(), helperMode+"="+mode, procgroupReadyFD+"=3")
+	cmd.Env = append(os.Environ(), helperMode+"=concurrent-cleanup", procgroupReadyFD+"=3")
 	cmd.ExtraFiles = []*os.File{writer}
 	g, err := Start(cmd)
 	_ = writer.Close()
