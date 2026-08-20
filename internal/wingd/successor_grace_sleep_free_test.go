@@ -14,6 +14,8 @@ func TestSuccessorGraceRegressionsDoNotUseTimeSleep(t *testing.T) {
 		"observeReattachedHolderFor":                "churn_test.go",
 	}
 	found := make(map[string]bool, len(targets))
+	waitPositions := make(map[string]token.Pos)
+	observePositions := make(map[string]token.Pos)
 	for name, filename := range targets {
 		fset := token.NewFileSet()
 		file, err := parser.ParseFile(fset, filename, nil, 0)
@@ -31,6 +33,29 @@ func TestSuccessorGraceRegressionsDoNotUseTimeSleep(t *testing.T) {
 				if !ok {
 					return true
 				}
+				if ident, ok := call.Fun.(*ast.Ident); ok {
+					switch ident.Name {
+					case "waitForHolder":
+						waitPositions[name] = call.Pos()
+					case "observeReattachedHolderFor":
+						if len(call.Args) == 4 {
+							duration, durationOK := call.Args[3].(*ast.BinaryExpr)
+							if durationOK && duration.Op == token.ADD {
+								grace, graceOK := duration.X.(*ast.Ident)
+								margin, marginOK := duration.Y.(*ast.BinaryExpr)
+								if graceOK && grace.Name == "successorGrace" && marginOK && margin.Op == token.MUL {
+									amount, amountOK := margin.X.(*ast.BasicLit)
+									unit, unitOK := margin.Y.(*ast.SelectorExpr)
+									if amountOK && amount.Value == "500" && unitOK && unit.Sel.Name == "Millisecond" {
+										if pkg, ok := unit.X.(*ast.Ident); ok && pkg.Name == "time" {
+											observePositions[name] = call.Pos()
+										}
+									}
+								}
+							}
+						}
+					}
+				}
 				sel, ok := call.Fun.(*ast.SelectorExpr)
 				if !ok || sel.Sel.Name != "Sleep" {
 					return true
@@ -46,6 +71,13 @@ func TestSuccessorGraceRegressionsDoNotUseTimeSleep(t *testing.T) {
 	for name := range targets {
 		if !found[name] {
 			t.Errorf("%s declaration not found", name)
+		}
+	}
+	for _, name := range []string{"TestChurn_HolderWatchReattachesAcrossKill", "TestCancel_ReattachedHolderIsCancellable"} {
+		waitPos := waitPositions[name]
+		observePos := observePositions[name]
+		if !waitPos.IsValid() || !observePos.IsValid() || waitPos >= observePos {
+			t.Errorf("%s must find then observe the reattached holder through successorGrace + 500*time.Millisecond", name)
 		}
 	}
 }

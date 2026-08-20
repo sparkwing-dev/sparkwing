@@ -88,8 +88,8 @@ func TestChurn_HolderWatchReattachesAcrossKill(t *testing.T) {
 	case <-time.After(wingdChurnWait):
 		t.Fatal("successor daemon never came up")
 	}
-	time.Sleep(successorGrace + 500*time.Millisecond)
 	waitForHolder(t, home, "churn-watch")
+	observeReattachedHolderFor(t, home, "churn-watch", successorGrace+500*time.Millisecond)
 
 	if err := lease.Release(); err != nil {
 		t.Fatalf("release after reattach: %v", err)
@@ -154,6 +154,35 @@ func waitForHolder(t *testing.T, home, runID string) {
 				t.Fatalf("run %q never reappeared as a holder after reattach; last queue error: %v", runID, lastErr)
 			}
 			t.Fatalf("run %q never reappeared as a holder after reattach", runID)
+		}
+	}
+}
+
+func observeReattachedHolderFor(t *testing.T, home, runID string, duration time.Duration) {
+	t.Helper()
+	q := ensure(t, home, "")
+	defer func() { _ = q.Close() }()
+	deadlineAt := time.Now().Add(duration)
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
+	observation := time.NewTimer(duration)
+	defer observation.Stop()
+	for {
+		queryCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+		qs, err := q.QueueState(queryCtx)
+		cancel()
+		if err != nil {
+			t.Fatalf("queue state while observing reattached holder %q: %v", runID, err)
+		}
+		if !holdsRun(qs, runID) {
+			t.Fatalf("reattached holder %q disappeared during its successor grace observation", runID)
+		}
+		if !time.Now().Before(deadlineAt) {
+			return
+		}
+		select {
+		case <-poll.C:
+		case <-observation.C:
 		}
 	}
 }

@@ -40,8 +40,8 @@ func TestCancel_ReattachedHolderIsCancellable(t *testing.T) {
 	case <-time.After(wingdChurnWait):
 		t.Fatal("successor daemon never came up")
 	}
-	time.Sleep(successorGrace + 500*time.Millisecond)
 	waitForHolder(t, home, "reattach-cancel")
+	observeReattachedHolderFor(t, home, "reattach-cancel", successorGrace+500*time.Millisecond)
 
 	ctrl := ensure(t, home, "")
 	found, err := ctrl.CancelLease(context.Background(), "reattach-cancel")
