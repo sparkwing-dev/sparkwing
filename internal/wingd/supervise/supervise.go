@@ -165,8 +165,14 @@ func stopChild(child Child, grace time.Duration) error {
 	if err := child.Kill(); err != nil {
 		return fmt.Errorf("wingd supervisor: kill child after %s: %w", grace, err)
 	}
-	<-done
-	return nil
+	killTimer := time.NewTimer(grace)
+	defer killTimer.Stop()
+	select {
+	case <-done:
+		return nil
+	case <-killTimer.C:
+		return fmt.Errorf("wingd supervisor: child did not exit after kill within %s", grace)
+	}
 }
 
 type execChild struct {
