@@ -19,6 +19,24 @@ func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+func TestConsumerMaintenanceIntervalTracksClaimLease(t *testing.T) {
+	tests := []struct {
+		name  string
+		lease time.Duration
+		want  time.Duration
+	}{
+		{name: "default lease", lease: store.DefaultLeaseDuration, want: 15 * time.Second},
+		{name: "short lease", lease: 12 * time.Second, want: time.Second},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := consumerMaintenanceIntervalForLease(test.lease); got != test.want {
+				t.Fatalf("maintenance interval for %s lease = %s, want %s", test.lease, got, test.want)
+			}
+		})
+	}
+}
+
 type consumerLogSignal struct {
 	message string
 	seen    chan struct{}

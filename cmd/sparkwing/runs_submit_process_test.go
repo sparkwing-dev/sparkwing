@@ -683,7 +683,7 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	e := newSubmitTestEnv(t)
 	holdStarted := e.useBlockingFixture(t)
 
-	ack := e.submit("--consumer-claim-lease", "300s")
+	ack := e.submit("--consumer-claim-lease", "12s")
 	waitUntil(t, "the dispatch to start executing", 120*time.Second, func() bool {
 		return e.startsInMarker() >= 1
 	})
@@ -724,10 +724,10 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 		t.Fatal(err)
 	}
 
-	// One full 15-second maintenance interval plus scheduling headroom.
-	poll := time.NewTicker(500 * time.Millisecond)
+	// One lease-derived maintenance interval plus scheduling headroom.
+	poll := time.NewTicker(100 * time.Millisecond)
 	defer poll.Stop()
-	deadline := time.NewTimer(20 * time.Second)
+	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
 	for {
 		if e.startsInMarker() > 1 {
@@ -744,7 +744,7 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 		select {
 		case <-poll.C:
 		case <-deadline.C:
-			t.Fatalf("maintenance sweep did not reconcile the probe within 20s; status = %q", probe.Status)
+			t.Fatalf("maintenance sweep did not reconcile the probe within 5s; status = %q", probe.Status)
 		}
 	}
 	liveAfter, err := st.GetTrigger(context.Background(), ack.RunID)
