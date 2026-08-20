@@ -55,13 +55,13 @@ func TestGroupHelperProcess(t *testing.T) {
 		time.Sleep(100 * time.Millisecond)
 		os.Exit(0)
 	case "session-stubborn":
+		IgnoreTermination()
 		child := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
 		child.Env = append(os.Environ(), helperMode+"=descendant")
 		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 		if err := child.Start(); err != nil {
 			os.Exit(2)
 		}
-		IgnoreTermination()
 		time.Sleep(30 * time.Second)
 		os.Exit(0)
 	case "session-parked":
