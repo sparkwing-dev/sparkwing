@@ -28,9 +28,16 @@ import (
 
 var (
 	submitCLIOnce sync.Once
+	submitCLIDir  string
 	submitCLIBin  string
 	submitCLIErr  error
 )
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	os.RemoveAll(submitCLIDir)
+	os.Exit(code)
+}
 
 // buildSubmitCLI compiles the sparkwing CLI once per test binary.
 func buildSubmitCLI(t *testing.T) string {
@@ -41,6 +48,7 @@ func buildSubmitCLI(t *testing.T) string {
 			submitCLIErr = err
 			return
 		}
+		submitCLIDir = dir
 		bin := filepath.Join(dir, "sparkwing")
 		cmd := exec.Command("go", "build", "-o", bin, "github.com/sparkwing-dev/sparkwing/cmd/sparkwing")
 		cmd.Stderr = os.Stderr
