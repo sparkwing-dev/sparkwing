@@ -3,8 +3,11 @@
 package main
 
 import (
+	"bufio"
+	"fmt"
 	"os"
 	"os/exec"
+	"os/signal"
 	"syscall"
 	"testing"
 	"time"
@@ -18,28 +21,41 @@ func TestSoakguardHelperProcess(t *testing.T) {
 	switch os.Getenv(soakguardHelper) {
 	case "nested":
 		procgroup.IgnoreTermination()
-		time.Sleep(30 * time.Second)
+		_, _ = fmt.Fprintln(os.Stdout, "ready")
+		release := make(chan os.Signal, 1)
+		signal.Notify(release, syscall.SIGUSR1)
+		<-release
 		os.Exit(0)
 	case "leader":
-		child := exec.Command(os.Args[0], "-test.run=^TestSoakguardHelperProcess$")
-		child.Env = append(os.Environ(), soakguardHelper+"=nested")
-		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		if err := child.Start(); err != nil {
+		if !startNestedHelper() {
 			os.Exit(2)
 		}
 		procgroup.IgnoreTermination()
-		time.Sleep(30 * time.Second)
+		release := make(chan os.Signal, 1)
+		signal.Notify(release, syscall.SIGUSR1)
+		<-release
 		os.Exit(0)
 	case "leader-fail":
-		child := exec.Command(os.Args[0], "-test.run=^TestSoakguardHelperProcess$")
-		child.Env = append(os.Environ(), soakguardHelper+"=nested")
-		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		if err := child.Start(); err != nil {
+		if !startNestedHelper() {
 			os.Exit(2)
 		}
-		time.Sleep(100 * time.Millisecond)
 		os.Exit(7)
 	}
+}
+
+func startNestedHelper() bool {
+	child := exec.Command(os.Args[0], "-test.run=^TestSoakguardHelperProcess$")
+	child.Env = append(os.Environ(), soakguardHelper+"=nested")
+	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdout, err := child.StdoutPipe()
+	if err != nil {
+		return false
+	}
+	if err := child.Start(); err != nil {
+		return false
+	}
+	line, err := bufio.NewReader(stdout).ReadString('\n')
+	return err == nil && line == "ready\n"
 }
 
 func TestFailedCommandCleansNestedGroupsBeforeReturningStatus(t *testing.T) {
