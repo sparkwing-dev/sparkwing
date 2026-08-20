@@ -606,11 +606,31 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 	home := t.TempDir()
 	st := consumerTestStore(t, home)
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	ready := make(chan struct{})
 	residentDone := make(chan error, 1)
+	residentFinished := make(chan struct{})
+	var dashboardFinished <-chan struct{}
+	t.Cleanup(func() {
+		cancel()
+		for name, finished := range map[string]<-chan struct{}{
+			"resident":  residentFinished,
+			"dashboard": dashboardFinished,
+		} {
+			if finished == nil {
+				continue
+			}
+			timer := time.NewTimer(time.Second)
+			select {
+			case <-finished:
+			case <-timer.C:
+				t.Errorf("%s consumer did not stop", name)
+			}
+			timer.Stop()
+		}
+	})
 	go func() {
+		defer close(residentFinished)
 		residentDone <- ServeConsumer(ctx, ConsumerOptions{
 			Home: home, Store: st, Logger: quietLogger(),
 			IdleTimeout: 300 * time.Millisecond, Ready: ready,
@@ -620,7 +640,9 @@ func TestDashboardConsumer_RetakesTheQueueAfterTheResidentIdlesOut(t *testing.T)
 
 	// The dashboard comes up second and loses the election.
 	logger, stoodDown := newConsumerLogSignal(dashboardStandDownMessage)
-	if err := RunLocalTriggerConsumer(ctx, home, st, logger); err != nil {
+	var err error
+	dashboardFinished, err = runLocalTriggerConsumerWithRetryInterval(ctx, home, st, logger, 10*time.Millisecond)
+	if err != nil {
 		t.Fatal(err)
 	}
 	waitForConsumerLog(t, stoodDown)
