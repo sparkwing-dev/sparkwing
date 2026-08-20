@@ -216,6 +216,12 @@ type planLevelQueuedAwaitParentPipe struct{ sparkwing.Base }
 
 const admissionPauseFixtureTimeout = 750 * time.Millisecond
 
+type queuedAwaitParentGate struct {
+	started chan context.Context
+}
+
+var queuedAwaitParentAttempt atomic.Pointer[queuedAwaitParentGate]
+
 func (planLevelQueuedAwaitParentPipe) Plan(
 	ctx context.Context,
 	plan *sparkwing.Plan,
@@ -223,6 +229,12 @@ func (planLevelQueuedAwaitParentPipe) Plan(
 	rc sparkwing.RunContext,
 ) error {
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		if gate := queuedAwaitParentAttempt.Load(); gate != nil {
+			select {
+			case gate.started <- ctx:
+			default:
+			}
+		}
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-child", "work")
 		return err
 	}).NoProgressTimeout(100 * time.Millisecond).Timeout(admissionPauseFixtureTimeout)
@@ -1193,6 +1205,9 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 
 func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t *testing.T) {
 	resetCacheCounter()
+	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
+	queuedAwaitParentAttempt.Store(gate)
+	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
 	p := newPaths(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1237,7 +1252,18 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 		childDone <- res
 	}()
 	waitForPlanAdmissionWaiter(t, context.Background(), st, "g:plan-level-queued-await-key", childID, childDone)
-	time.Sleep(250 * time.Millisecond)
+	var attemptCtx context.Context
+	select {
+	case attemptCtx = <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("parent action did not publish its timeout context")
+	}
+	if !orchestrator.ProgressTimeoutPausedForTest(attemptCtx) {
+		t.Fatal("parent timeout controller was not paused during child admission")
+	}
+	if orchestrator.ExpireProgressTimeoutForTest(attemptCtx) {
+		t.Fatal("parent timeout expired while child admission was pending")
+	}
 	cancel()
 
 	select {
