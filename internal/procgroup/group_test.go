@@ -267,12 +267,16 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 	waitForProcgroupReady(t, ready, time.Second)
 	terminated := make(chan error, 1)
 	terminateFinished := make(chan struct{})
+	released := false
 	go func() {
 		defer close(terminateFinished)
 		terminated <- TerminateSession(identity)
 	}()
 	t.Cleanup(func() {
-		_ = syscall.Kill(group.ID(), syscall.SIGUSR1)
+		if !released {
+			released = true
+			_ = syscall.Kill(group.ID(), syscall.SIGUSR1)
+		}
 		select {
 		case <-terminateFinished:
 		case <-time.After(2 * time.Second):
@@ -280,11 +284,14 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 		}
 	})
 	waitForProcgroupReady(t, termSeen, time.Second)
+	observation := time.NewTimer(100 * time.Millisecond)
+	defer observation.Stop()
 	select {
 	case err := <-terminated:
 		t.Fatalf("termination returned before cooperative cleanup was released: %v", err)
-	default:
+	case <-observation.C:
 	}
+	released = true
 	if err := syscall.Kill(group.ID(), syscall.SIGUSR1); err != nil {
 		t.Fatalf("release cooperative cleanup: %v", err)
 	}
