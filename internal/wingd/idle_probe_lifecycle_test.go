@@ -51,6 +51,20 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 			continue
 		}
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if worker, ok := node.(*ast.GoStmt); isHelper && ok {
+				body, ok := worker.Call.Fun.(*ast.FuncLit)
+				if ok && len(body.Body.List) > 0 {
+					deferred, ok := body.Body.List[0].(*ast.DeferStmt)
+					if ok {
+						closeCall := deferred.Call
+						closeIdent, ok := closeCall.Fun.(*ast.Ident)
+						if ok && closeIdent.Name == "close" && len(closeCall.Args) == 1 {
+							done, ok := closeCall.Args[0].(*ast.Ident)
+							helperClosesDone = ok && done.Name == "done"
+						}
+					}
+				}
+			}
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
@@ -58,10 +72,6 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 			if ident, ok := call.Fun.(*ast.Ident); ok {
 				if isCaller && ident.Name == "startProbeLoop" {
 					callers[fn.Name.Name] = true
-				}
-				if isHelper && ident.Name == "close" && len(call.Args) == 1 {
-					arg, ok := call.Args[0].(*ast.Ident)
-					helperClosesDone = ok && arg.Name == "done"
 				}
 				return true
 			}
