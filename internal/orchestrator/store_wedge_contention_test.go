@@ -46,16 +46,21 @@ func TestStoreWedgeContention_ChildProcessHarness(t *testing.T) {
 		Start:  walReadMarkOffset,
 		Len:    walReadMarkCount,
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	retry := time.NewTicker(10 * time.Millisecond)
+	timeout := time.NewTimer(2 * time.Second)
 	for {
 		err = syscall.FcntlFlock(f.Fd(), syscall.F_SETLK, &lock)
 		if err == nil {
+			retry.Stop()
+			timeout.Stop()
 			break
 		}
-		if time.Now().After(deadline) {
+		select {
+		case <-retry.C:
+		case <-timeout.C:
+			retry.Stop()
 			t.Fatalf("child: lock read marks: %v", err)
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 	_, _ = os.Stdout.WriteString("LOCKED\n")
 	select {}
@@ -138,21 +143,34 @@ func TestStoreWedgeGuard_TerminalOnRealWALShmContention(t *testing.T) {
 	}
 	guard.logger = slog.New(slog.NewTextHandler(&events, nil))
 
-	deadline := time.Now().Add(60 * time.Second)
+	retry := time.NewTicker(100 * time.Millisecond)
+	defer retry.Stop()
+	deadlineAt := time.Now().Add(60 * time.Second)
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
 	var terminal, lastStoreErr error
-	for time.Now().Before(deadline) {
+	timedOut := false
+	for terminal == nil && !timedOut {
+		if !time.Now().Before(deadlineAt) {
+			timedOut = true
+			break
+		}
 		st, err := store.Open(dbPath)
 		if err == nil {
 			_ = st.Close()
 			guard.success()
-			time.Sleep(100 * time.Millisecond)
+		} else {
+			lastStoreErr = err
+			terminal = guard.fail("contention repro open", err)
+		}
+		if terminal != nil {
 			continue
 		}
-		lastStoreErr = err
-		if terminal = guard.fail("contention repro open", err); terminal != nil {
-			break
+		select {
+		case <-retry.C:
+		case <-deadline.C:
+			timedOut = true
 		}
-		time.Sleep(100 * time.Millisecond)
 	}
 
 	if terminal == nil {
