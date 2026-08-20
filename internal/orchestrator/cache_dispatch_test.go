@@ -312,7 +312,7 @@ func (planLevelQueuedAwaitThenContinueParentPipe) Plan(
 			return err
 		}
 		select {
-		case <-time.After(120 * time.Millisecond):
+		case <-time.After(200 * time.Millisecond):
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -1274,7 +1274,7 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 
 func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t *testing.T) {
 	resetCacheCounter()
-	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
+	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
 	p := newPaths(t)
@@ -1389,7 +1389,7 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 
 func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testing.T) {
 	resetCacheCounter()
-	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
+	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
 	p := newPaths(t)

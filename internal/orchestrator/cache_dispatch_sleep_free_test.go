@@ -38,6 +38,11 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	remainingBudgetRejectsPausedExpiry := false
 	remainingBudgetInspectsControllerState := false
 	remainingBudgetControlsRemainder := false
+	cancellationGateUngated := false
+	remainingBudgetGateGated := false
+	var remainingBudgetSetPos token.Pos
+	var remainingBudgetReleasePos token.Pos
+	var remainingBudgetSpawnWaitPos token.Pos
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_dispatch_test.go", nil, 0)
 	if err != nil {
@@ -55,12 +60,37 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 		usesPlanWait := false
 		usesSpawnWait := false
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if lit, ok := node.(*ast.CompositeLit); ok {
+				gateType, isGate := lit.Type.(*ast.Ident)
+				if isGate && gateType.Name == "queuedAwaitParentGate" {
+					hasProceed := false
+					for _, elt := range lit.Elts {
+						field, keyed := elt.(*ast.KeyValueExpr)
+						if !keyed {
+							continue
+						}
+						name, named := field.Key.(*ast.Ident)
+						if named && name.Name == "proceed" {
+							hasProceed = true
+						}
+					}
+					switch fn.Name.Name {
+					case "TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused":
+						cancellationGateUngated = !hasProceed
+					case "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget":
+						remainingBudgetGateGated = hasProceed
+					}
+				}
+			}
 			call, ok := node.(*ast.CallExpr)
 			if !ok {
 				return true
 			}
 			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "waitForSpawnedChildTrigger" {
 				usesSpawnWait = true
+				if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget" {
+					remainingBudgetSpawnWaitPos = call.Pos()
+				}
 			}
 			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "waitForPlanAdmissionWaiter" {
 				usesPlanWait = true
@@ -91,6 +121,12 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					remainingBudgetInspectsControllerState = true
 				case "SetNodeTimeoutRemainingForTest":
 					remainingBudgetControlsRemainder = true
+					remainingBudgetSetPos = call.Pos()
+				}
+			}
+			if fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget" && sel.Sel.Name == "release" {
+				if receiver, ok := sel.X.(*ast.Ident); ok && receiver.Name == "gate" && remainingBudgetReleasePos == token.NoPos {
+					remainingBudgetReleasePos = call.Pos()
 				}
 			}
 			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForNodeTimeoutResumed" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
@@ -134,5 +170,15 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if !remainingBudgetControlsRemainder {
 		t.Error("remaining-budget regression does not establish its pre-admission timeout remainder")
+	}
+	if !cancellationGateUngated {
+		t.Error("parent-cancellation regression must not block its action-start signal")
+	}
+	if !remainingBudgetGateGated {
+		t.Error("remaining-budget regression does not gate action progress while setting the timeout remainder")
+	}
+	if remainingBudgetSetPos == token.NoPos || remainingBudgetReleasePos == token.NoPos || remainingBudgetSpawnWaitPos == token.NoPos ||
+		!(remainingBudgetSetPos < remainingBudgetReleasePos && remainingBudgetReleasePos < remainingBudgetSpawnWaitPos) {
+		t.Error("remaining-budget regression must set the remainder, release the action, then wait for child admission")
 	}
 }
