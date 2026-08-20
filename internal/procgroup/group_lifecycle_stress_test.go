@@ -3,7 +3,9 @@
 package procgroup
 
 import (
+	"bytes"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"strconv"
@@ -11,7 +13,8 @@ import (
 )
 
 func TestGroupLifecycleStressFinishesGroupsConcurrently(t *testing.T) {
-	file, err := parser.ParseFile(token.NewFileSet(), "group_test.go", nil, 0)
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "group_test.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -44,7 +47,7 @@ func TestGroupLifecycleStressFinishesGroupsConcurrently(t *testing.T) {
 			}
 			switch over.Name {
 			case "count":
-				if rangeCallsCleanup(node) {
+				if rangeOwnsGroupCleanup(fset, node) {
 					registersCleanup = true
 				}
 			case "groups":
@@ -66,24 +69,23 @@ func TestGroupLifecycleStressFinishesGroupsConcurrently(t *testing.T) {
 	}
 }
 
-func rangeCallsCleanup(loop *ast.RangeStmt) bool {
-	found := false
-	ast.Inspect(loop.Body, func(node ast.Node) bool {
-		call, ok := node.(*ast.CallExpr)
+func rangeOwnsGroupCleanup(fset *token.FileSet, loop *ast.RangeStmt) bool {
+	const expected = `t.Cleanup(func() {
+	if !group.Reaped() {
+		terminateForTest(group)
+	}
+})`
+	for _, stmt := range loop.Body.List {
+		expr, ok := stmt.(*ast.ExprStmt)
 		if !ok {
+			continue
+		}
+		var rendered bytes.Buffer
+		if err := format.Node(&rendered, fset, expr.X); err == nil && rendered.String() == expected {
 			return true
 		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok {
-			return true
-		}
-		receiver, receiverOK := sel.X.(*ast.Ident)
-		if receiverOK && receiver.Name == "t" && sel.Sel.Name == "Cleanup" {
-			found = true
-		}
-		return true
-	})
-	return found
+	}
+	return false
 }
 
 func rangeLaunchesFinish(loop *ast.RangeStmt) bool {
