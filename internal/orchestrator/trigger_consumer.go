@@ -766,14 +766,29 @@ func isTerminalRunStatus(status string) bool {
 // misconfiguration fails the caller instead of silently leaving queued
 // triggers unconsumed.
 func RunLocalTriggerConsumer(ctx context.Context, home string, st *store.Store, logger *slog.Logger) error {
+	_, err := runLocalTriggerConsumerWithRetryInterval(ctx, home, st, logger, consumerElectionRetryInterval)
+	return err
+}
+
+func runLocalTriggerConsumerWithRetryInterval(
+	ctx context.Context,
+	home string,
+	st *store.Store,
+	logger *slog.Logger,
+	retryInterval time.Duration,
+) (<-chan struct{}, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if _, err := newStoreWedgeGuardFromEnv(); err != nil {
-		return fmt.Errorf("local trigger consumer: %w", err)
+		return nil, fmt.Errorf("local trigger consumer: %w", err)
 	}
-	go serveConsumerContending(ctx, home, st, logger)
-	return nil
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		serveConsumerContending(ctx, home, st, logger, retryInterval)
+	}()
+	return done, nil
 }
 
 // consumerElectionRetryInterval is how often a consumer that lost the
@@ -796,7 +811,13 @@ const consumerElectionRetryInterval = 2 * time.Second
 // The retry only ever takes a free lock: flockTry fails while a holder
 // exists, so contending costs nothing and cannot disturb the consumer
 // currently serving.
-func serveConsumerContending(ctx context.Context, home string, st *store.Store, logger *slog.Logger) {
+func serveConsumerContending(
+	ctx context.Context,
+	home string,
+	st *store.Store,
+	logger *slog.Logger,
+	retryInterval time.Duration,
+) {
 	announcedStandDown := false
 	for {
 		err := ServeConsumer(ctx, ConsumerOptions{
@@ -823,7 +844,7 @@ func serveConsumerContending(ctx context.Context, home string, st *store.Store, 
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(consumerElectionRetryInterval):
+		case <-time.After(retryInterval):
 		}
 		// Re-arm the notice once the home is free, so the next stand-down
 		// is reported rather than swallowed as a repeat. Without this the
