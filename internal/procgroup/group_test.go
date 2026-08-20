@@ -166,15 +166,26 @@ func TestTerminateSessionAllowsCooperativeCleanupBeforeEscalation(t *testing.T) 
 	if err != nil {
 		t.Fatalf("capture cooperative session: %v", err)
 	}
-	deadline := time.Now().Add(time.Second)
+	deadlineAt := time.Now().Add(time.Second)
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for {
 		if _, err := os.Stat(ready); err == nil {
 			break
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("inspect cooperative readiness: %v", err)
 		}
-		if time.Now().After(deadline) {
+		if !time.Now().Before(deadlineAt) {
 			t.Fatal("cooperative session did not install its signal handler")
 		}
-		time.Sleep(10 * time.Millisecond)
+		poll.Reset(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatal("cooperative session did not install its signal handler")
+		}
 	}
 	if err := TerminateSession(identity); err != nil {
 		t.Fatalf("terminate cooperative session: %v", err)
