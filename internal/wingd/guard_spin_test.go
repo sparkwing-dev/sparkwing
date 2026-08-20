@@ -149,6 +149,29 @@ func (g *perSessionGuardInspector) calls() int {
 	return g.count
 }
 
+func runGuardLoopFor(t *testing.T, d *Daemon, window time.Duration) {
+	t.Helper()
+	stop := make(chan struct{})
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		d.guardLoop(stop)
+	}()
+
+	observation := time.NewTimer(window)
+	defer observation.Stop()
+	<-observation.C
+	close(stop)
+
+	join := time.NewTimer(time.Second)
+	defer join.Stop()
+	select {
+	case <-finished:
+	case <-join.C:
+		t.Fatal("guard loop did not stop within one second")
+	}
+}
+
 // TestGuardLoopBacksOffWhileInspectionFails is the regression the reported
 // spin asks for: a guard state the daemon cannot inspect -- a wedged or
 // unreadable process table -- must cost a probe every few seconds, not a
@@ -159,10 +182,7 @@ func TestGuardLoopBacksOffWhileInspectionFails(t *testing.T) {
 	inspector := &countingGuardInspector{err: errors.New("process table unavailable")}
 	d := guardSweepDaemon(inspector, 4, interval)
 
-	done := make(chan struct{})
-	go d.guardLoop(done)
-	time.Sleep(window)
-	close(done)
+	runGuardLoopFor(t, d, window)
 
 	snapshots, _ := inspector.counts()
 	unpaced := int(window / interval)
@@ -183,10 +203,7 @@ func TestGuardLoopKeepsFullCadenceWhileInspectionWorks(t *testing.T) {
 	inspector := &countingGuardInspector{}
 	d := guardSweepDaemon(inspector, 4, interval)
 
-	done := make(chan struct{})
-	go d.guardLoop(done)
-	time.Sleep(window)
-	close(done)
+	runGuardLoopFor(t, d, window)
 
 	snapshots, _ := inspector.counts()
 	if want := int(window/interval) / 3; snapshots < want {
@@ -263,10 +280,7 @@ func TestOneBrokenGuardDoesNotSlowTheSweep(t *testing.T) {
 		t.Fatalf("a sweep with one broken guard reported failure: %v", err)
 	}
 
-	done := make(chan struct{})
-	go d.guardLoop(done)
-	time.Sleep(window)
-	close(done)
+	runGuardLoopFor(t, d, window)
 
 	if want := int(window/interval) / 3; inspector.count() < want {
 		t.Fatalf("sweeps = %d in %s, want at least %d; one broken guard slowed the whole loop", inspector.count(), window, want)
@@ -286,10 +300,7 @@ func TestEveryGuardFailingStillBacksOff(t *testing.T) {
 		t.Fatal("a sweep whose only guard failed reported success")
 	}
 
-	done := make(chan struct{})
-	go d.guardLoop(done)
-	time.Sleep(window)
-	close(done)
+	runGuardLoopFor(t, d, window)
 
 	unpaced := int(window / interval)
 	if got := inspector.count(); got >= unpaced/2 {
