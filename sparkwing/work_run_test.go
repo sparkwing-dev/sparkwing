@@ -285,33 +285,35 @@ func TestRunWork_DependencyOrder(t *testing.T) {
 // TestRunWork_ParallelStepsRunConcurrently verifies that two steps
 // without a dependency run at the same time.
 func TestRunWork_ParallelStepsRunConcurrently(t *testing.T) {
-	baseCtx, _ := newWorkCtx()
-	var entered atomic.Int32
-	release := make(chan struct{})
-	var releaseOnce sync.Once
-	enter := func(ctx context.Context) error {
-		if entered.Add(1) == 2 {
-			releaseOnce.Do(func() { close(release) })
+	synctest.Test(t, func(t *testing.T) {
+		baseCtx, _ := newWorkCtx()
+		var entered atomic.Int32
+		release := make(chan struct{})
+		var releaseOnce sync.Once
+		enter := func(ctx context.Context) error {
+			if entered.Add(1) == 2 {
+				releaseOnce.Do(func() { close(release) })
+			}
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 		}
-		select {
-		case <-release:
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
+
+		w := sparkwing.NewWork()
+		sparkwing.Step(w, "a", enter)
+		sparkwing.Step(w, "b", enter)
+		sparkwing.Step(w, "c", enter)
+
+		if _, err := sparkwing.RunWork(baseCtx, w); err != nil {
+			t.Fatalf("RunWork: %v", err)
 		}
-	}
-
-	w := sparkwing.NewWork()
-	sparkwing.Step(w, "a", enter)
-	sparkwing.Step(w, "b", enter)
-	sparkwing.Step(w, "c", enter)
-
-	if _, err := sparkwing.RunWork(baseCtx, w); err != nil {
-		t.Fatalf("RunWork: %v", err)
-	}
-	if got := entered.Load(); got < 2 {
-		t.Fatalf("independent steps entered concurrently = %d, want at least 2", got)
-	}
+		if got := entered.Load(); got < 2 {
+			t.Fatalf("independent steps entered concurrently = %d, want at least 2", got)
+		}
+	})
 }
 
 // TestRunWork_FailFastCancelsSiblings verifies that one step's
