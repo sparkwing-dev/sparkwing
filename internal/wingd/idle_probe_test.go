@@ -43,6 +43,8 @@ func startProbeLoop(t *testing.T, interval time.Duration, probe func(context.Con
 }
 
 func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
+	t.Parallel()
+
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
 
@@ -65,6 +67,8 @@ func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
 }
 
 func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
+	t.Parallel()
+
 	const idleTimeout = 300 * time.Millisecond
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: idleTimeout})
@@ -99,6 +103,8 @@ func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
 }
 
 func TestIdleExit_SocketSweepProbeDoesNotResetIdleClock(t *testing.T) {
+	t.Parallel()
+
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
 	sock, err := wingd.SocketPath(home)
@@ -121,6 +127,8 @@ func TestIdleExit_SocketSweepProbeDoesNotResetIdleClock(t *testing.T) {
 }
 
 func TestIdleExit_PreHelloConnectionsDoNotResetIdleClock(t *testing.T) {
+	t.Parallel()
+
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
 	sock, err := wingd.SocketPath(home)
@@ -146,6 +154,8 @@ func TestIdleExit_PreHelloConnectionsDoNotResetIdleClock(t *testing.T) {
 }
 
 func TestIdleExit_WaitsForWorkingConnections(t *testing.T) {
+	t.Parallel()
+
 	home := shortHome(t)
 	const idleTimeout = 250 * time.Millisecond
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: idleTimeout})
@@ -173,6 +183,8 @@ func TestIdleExit_WaitsForWorkingConnections(t *testing.T) {
 // daemon open, and once grace releases the unreclaimed leases, the probes
 // must not keep it from idling out.
 func TestIdleExit_GraceThenIdleUnderHealthProbes(t *testing.T) {
+	t.Parallel()
+
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
 	cl := ensure(t, home, "")
