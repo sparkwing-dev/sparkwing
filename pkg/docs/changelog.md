@@ -49,6 +49,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.34.1] - 2026-08-20
 ### Fixed
 
 - **wingd:** Supervisor shutdown escalates to a bounded forced stop when graceful
