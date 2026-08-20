@@ -51,6 +51,8 @@ func TestDaemon_CancelTimeoutForceReleasesNonCooperatingHolder(t *testing.T) {
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
 		if err != nil {
@@ -59,7 +61,7 @@ func TestDaemon_CancelTimeoutForceReleasesNonCooperatingHolder(t *testing.T) {
 		if !holdsRun(qs, "victim") {
 			return
 		}
-		time.Sleep(20 * time.Millisecond)
+		<-poll.C
 	}
 	t.Fatal("victim was never force-released after its cancel timeout")
 }
@@ -84,8 +86,10 @@ func waitForRecoveredHolderRelease(t *testing.T, q *client.Client, runID string)
 	}
 
 	deadline := time.Now().Add(3 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for holdsRun(qs, runID) && time.Now().Before(deadline) {
-		time.Sleep(10 * time.Millisecond)
+		<-poll.C
 		qs, err = q.QueueState(context.Background())
 		if err != nil {
 			t.Fatalf("queue state: %v", err)
@@ -138,6 +142,8 @@ func TestDaemon_StalledHolderMustAnswerLivenessChallenge(t *testing.T) {
 	}()
 
 	deadline := time.Now().Add(time.Second)
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		qs, err := client.Query(context.Background(), client.Options{Home: home, Version: "v1"})
 		if err != nil {
@@ -158,7 +164,7 @@ func TestDaemon_StalledHolderMustAnswerLivenessChallenge(t *testing.T) {
 			}
 			return
 		}
-		time.Sleep(5 * time.Millisecond)
+		<-poll.C
 	}
 	t.Fatal("live but unresponsive holder was not reclaimed")
 }
@@ -503,6 +509,8 @@ func (s *successor) spawn(home, version string) error {
 
 func (s *successor) bringUp() {
 	deadline := time.Now().Add(5 * time.Second)
+	retry := time.NewTicker(20 * time.Millisecond)
+	defer retry.Stop()
 	for time.Now().Before(deadline) {
 		d, err := wingd.New(wingd.Config{
 			Home:        s.home,
@@ -523,7 +531,7 @@ func (s *successor) bringUp() {
 			return
 		case <-done:
 			cancel()
-			time.Sleep(20 * time.Millisecond)
+			<-retry.C
 		}
 	}
 }

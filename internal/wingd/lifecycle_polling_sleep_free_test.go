@@ -10,9 +10,9 @@ import (
 func TestLifecyclePollingDoesNotUseTimeSleep(t *testing.T) {
 	targets := map[string]bool{
 		"TestDaemon_CancelTimeoutForceReleasesNonCooperatingHolder": false,
-		"waitForRecoveredHolderRelease":                         false,
-		"TestDaemon_StalledHolderMustAnswerLivenessChallenge":   false,
-		"bringUp":                                                false,
+		"waitForRecoveredHolderRelease":                             false,
+		"TestDaemon_StalledHolderMustAnswerLivenessChallenge":       false,
+		"bringUp": false,
 	}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "lifecycle_test.go", nil, 0)
