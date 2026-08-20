@@ -835,6 +835,38 @@ func waitForSpawnedChildTrigger(t *testing.T, ctx context.Context, st *store.Sto
 	}
 }
 
+func waitForPlanAdmissionWaiter(t *testing.T, ctx context.Context, st *store.Store, key, runID string, childDone <-chan *orchestrator.Result) {
+	t.Helper()
+	pollCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		state, err := st.GetConcurrencyState(pollCtx, key)
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			if pollCtx.Err() != nil {
+				t.Fatalf("waiting for run %q to queue for %s: %v", runID, key, pollCtx.Err())
+			}
+			t.Fatalf("get concurrency state for %s: %v", key, err)
+		}
+		if err == nil {
+			for _, waiter := range state.Waiters {
+				if waiter.RunID == runID && waiter.NodeID == "" {
+					return
+				}
+			}
+		}
+		poll.Reset(10 * time.Millisecond)
+		select {
+		case child := <-childDone:
+			t.Fatalf("child finished before queuing for admission: status=%q err=%v", child.Status, child.Error)
+		case <-poll.C:
+		case <-pollCtx.Done():
+			t.Fatalf("waiting for run %q to queue for %s: %v", runID, key, pollCtx.Err())
+		}
+	}
+}
+
 func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
@@ -1033,24 +1065,7 @@ func testRunAndAwaitAdmissionOutlivesDispatchWatchdog(t *testing.T, parentPipeli
 		})
 		childDone <- res
 	}()
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		if state, err := st.GetConcurrencyState(ctx, "g:plan-level-queued-await-key"); err == nil {
-			for _, waiter := range state.Waiters {
-				if waiter.RunID == childID && waiter.NodeID == "" {
-					goto childQueued
-				}
-			}
-		}
-		select {
-		case child := <-childDone:
-			t.Fatalf("child finished before queuing for admission: status=%q err=%v", child.Status, child.Error)
-		default:
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
-
-childQueued:
+	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-key", childID, childDone)
 	pauseStarted := time.Now()
 	time.Sleep(admissionPauseHold)
 
@@ -1154,19 +1169,7 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 		})
 		childDone <- res
 	}()
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		if state, err := st.GetConcurrencyState(ctx, "g:plan-level-queued-await-key"); err == nil {
-			for _, waiter := range state.Waiters {
-				if waiter.RunID == childID && waiter.NodeID == "" {
-					goto childQueued
-				}
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
-
-childQueued:
+	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-key", childID, childDone)
 	pauseStarted := time.Now()
 	time.Sleep(admissionPauseHold)
 	if elapsed := time.Since(pauseStarted); elapsed >= admissionPauseTestBound {
@@ -1247,19 +1250,7 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 		})
 		childDone <- res
 	}()
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		if state, err := st.GetConcurrencyState(context.Background(), "g:plan-level-queued-await-key"); err == nil {
-			for _, waiter := range state.Waiters {
-				if waiter.RunID == childID && waiter.NodeID == "" {
-					goto childQueued
-				}
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
-
-childQueued:
+	waitForPlanAdmissionWaiter(t, context.Background(), st, "g:plan-level-queued-await-key", childID, childDone)
 	time.Sleep(250 * time.Millisecond)
 	cancel()
 
@@ -1327,19 +1318,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 		})
 		childDone <- res
 	}()
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		if state, err := st.GetConcurrencyState(ctx, "g:plan-level-queued-await-remaining-budget-key"); err == nil {
-			for _, waiter := range state.Waiters {
-				if waiter.RunID == childID && waiter.NodeID == "" {
-					goto childQueued
-				}
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
-
-childQueued:
+	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-remaining-budget-key", childID, childDone)
 	time.Sleep(250 * time.Millisecond)
 
 	select {
@@ -1416,19 +1395,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 		})
 		childDone <- res
 	}()
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		if state, err := st.GetConcurrencyState(ctx, "g:plan-level-queued-await-early-resume-key"); err == nil {
-			for _, waiter := range state.Waiters {
-				if waiter.RunID == childID && waiter.NodeID == "" {
-					goto childQueued
-				}
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
-
-childQueued:
+	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-early-resume-key", childID, childDone)
 	time.Sleep(700 * time.Millisecond)
 	if _, _, _, err := st.ReleaseAndNotify(ctx,
 		"g:plan-level-queued-await-early-resume-key", "external-early-resume-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
@@ -1501,19 +1468,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 		})
 		childDone <- res
 	}()
-	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-		if state, err := st.GetConcurrencyState(ctx, "g:plan-level-queued-await-missed-promotion-key"); err == nil {
-			for _, waiter := range state.Waiters {
-				if waiter.RunID == childID && waiter.NodeID == "" {
-					goto childQueued
-				}
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for child %q to queue for admission", childID)
-
-childQueued:
+	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-missed-promotion-key", childID, childDone)
 	time.Sleep(350 * time.Millisecond)
 	if _, _, _, err := st.ReleaseAndNotify(ctx,
 		"g:plan-level-queued-await-missed-promotion-key", "external-missed-promotion-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
@@ -1588,30 +1543,15 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 		})
 		childDone <- res
 	}()
-	waitForPlanWaiter := func(key string) {
-		t.Helper()
-		for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); {
-			if state, err := st.GetConcurrencyState(ctx, key); err == nil {
-				for _, waiter := range state.Waiters {
-					if waiter.RunID == childID && waiter.NodeID == "" {
-						return
-					}
-				}
-			}
-			time.Sleep(10 * time.Millisecond)
-		}
-		t.Fatalf("timed out waiting for child %q to queue for %s", childID, key)
-	}
-
 	keyA := "g:plan-level-queued-await-multi-key-a"
 	keyB := "g:plan-level-queued-await-multi-key-b"
-	waitForPlanWaiter(keyA)
+	waitForPlanAdmissionWaiter(t, ctx, st, keyA, childID, childDone)
 	time.Sleep(200 * time.Millisecond)
 	if _, _, _, err := st.ReleaseAndNotify(ctx,
 		keyA, "external-"+keyA+"/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
 		t.Fatalf("release key A holder: %v", err)
 	}
-	waitForPlanWaiter(keyB)
+	waitForPlanAdmissionWaiter(t, ctx, st, keyB, childID, childDone)
 	time.Sleep(200 * time.Millisecond)
 	if _, _, _, err := st.ReleaseAndNotify(ctx,
 		keyB, "external-"+keyB+"/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
