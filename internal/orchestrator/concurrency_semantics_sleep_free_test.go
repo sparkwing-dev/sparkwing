@@ -10,6 +10,7 @@ import (
 func TestConcurrencySemanticsDoNotUseTimeSleep(t *testing.T) {
 	targets := map[string]bool{
 		"semStep":                                     false,
+		"installSemStepGate":                          false,
 		"waitForSemConcurrencyPopulation":             false,
 		"TestMemo_InFlightDedupeOnContent":            false,
 		"TestScope_BoxSerializesAcrossRunsOnSameHost": false,
