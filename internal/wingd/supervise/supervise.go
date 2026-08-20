@@ -152,7 +152,10 @@ func stopChild(child Child, grace time.Duration) error {
 		case waitErr := <-done:
 			return waitErr
 		default:
-			return fmt.Errorf("wingd supervisor: terminate child: %w", err)
+			if forceErr := killAndWaitChild(child, done, grace); forceErr != nil {
+				return fmt.Errorf("wingd supervisor: terminate child: %v; forced stop: %w", err, forceErr)
+			}
+			return nil
 		}
 	}
 	timer := time.NewTimer(grace)
@@ -162,8 +165,15 @@ func stopChild(child Child, grace time.Duration) error {
 		return nil
 	case <-timer.C:
 	}
+	if err := killAndWaitChild(child, done, grace); err != nil {
+		return fmt.Errorf("wingd supervisor: %w", err)
+	}
+	return nil
+}
+
+func killAndWaitChild(child Child, done <-chan error, grace time.Duration) error {
 	if err := child.Kill(); err != nil {
-		return fmt.Errorf("wingd supervisor: kill child after %s: %w", grace, err)
+		return fmt.Errorf("kill child after %s: %w", grace, err)
 	}
 	killTimer := time.NewTimer(grace)
 	defer killTimer.Stop()
@@ -171,7 +181,7 @@ func stopChild(child Child, grace time.Duration) error {
 	case <-done:
 		return nil
 	case <-killTimer.C:
-		return fmt.Errorf("wingd supervisor: child did not exit after kill within %s", grace)
+		return fmt.Errorf("child did not exit after kill within %s", grace)
 	}
 }
 
