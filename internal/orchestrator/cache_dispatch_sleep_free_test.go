@@ -10,6 +10,7 @@ import (
 func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	targets := map[string]bool{
 		"waitForConcurrencyHolder":                                                     false,
+		"waitForNodeTimeoutPaused":                                                     false,
 		"waitForPlanAdmissionWaiter":                                                   false,
 		"waitForSpawnedChildTrigger":                                                   false,
 		"testRunAndAwaitAdmissionOutlivesDispatchWatchdog":                             false,
@@ -85,7 +86,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 					remainingBudgetRejectsPausedExpiry = true
 				}
 			}
-			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
+			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
 			isCancellationRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused"
 			isRemainingBudgetRegression := fn.Name.Name == "TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget"
 			if (isPollingHelper || isCancellationRegression || isRemainingBudgetRegression) && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
@@ -99,7 +100,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 		if planWaiterCallers[fn.Name.Name] && !usesPlanWait {
 			t.Errorf("%s does not use waitForPlanAdmissionWaiter", fn.Name.Name)
 		}
-		isHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
+		isHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForNodeTimeoutPaused" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
 		if !isHelper && !usesSpawnWait {
 			t.Errorf("%s does not use waitForSpawnedChildTrigger", fn.Name.Name)
 		}
