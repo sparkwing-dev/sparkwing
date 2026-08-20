@@ -14,6 +14,7 @@ func TestProcessPollingRegressionsDoNotSleep(t *testing.T) {
 		"TestProcessGuardAcceptsSoakScaleDescendantZombieBurst":           false,
 		"TestProcessGuardExemptsZombiesRetainedByAReportedCleanupFailure": false,
 		"awaitGuardViolation": false,
+		"pollProcessState":    false,
 	}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "harness_process_test.go", nil, 0)
