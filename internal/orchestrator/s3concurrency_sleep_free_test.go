@@ -9,6 +9,7 @@ import (
 
 func TestS3ConcurrencyBurstRegressionsDoNotUseTimeSleep(t *testing.T) {
 	targets := map[string]bool{
+		"runS3ConcurrencyBurst":                  false,
 		"TestS3Concurrency_NoOverAdmission":      false,
 		"TestS3Concurrency_NoOverBudgetWithCost": false,
 	}
