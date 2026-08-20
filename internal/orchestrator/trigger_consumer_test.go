@@ -27,6 +27,7 @@ func TestConsumerMaintenanceIntervalTracksClaimLease(t *testing.T) {
 	}{
 		{name: "default lease", lease: store.DefaultLeaseDuration, want: 15 * time.Second},
 		{name: "short lease", lease: 12 * time.Second, want: time.Second},
+		{name: "long lease", lease: 5 * time.Minute, want: 15 * time.Second},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
