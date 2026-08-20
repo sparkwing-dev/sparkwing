@@ -47,18 +47,10 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 		parentResult <- parent.Wait()
 		close(parentFinished)
 	}()
-	t.Cleanup(func() {
-		_ = parent.Process.Kill()
-		timer := time.NewTimer(2 * time.Second)
-		defer timer.Stop()
-		select {
-		case <-parentFinished:
-		case <-timer.C:
-			t.Error("crashdummy parent did not exit within cleanup bound")
-		}
-	})
-
 	readOpts := client.Options{Home: home, Version: "v1.0.0", DialTimeout: 500 * time.Millisecond, Backoff: 30 * time.Millisecond}
+	t.Cleanup(func() {
+		stopCrashdummyFamily(t, parent, parentFinished, readOpts)
+	})
 
 	readyCtx, cancelReady := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancelReady()
@@ -108,37 +100,53 @@ func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 		case <-readyPoll.C:
 		}
 	}
-	if err := parent.Process.Signal(syscall.SIGTERM); err != nil {
-		t.Fatalf("release parent: %v", err)
+	if !stopCrashdummyFamily(t, parent, parentFinished, readOpts) {
+		t.Fatal("crashdummy family did not stop after release")
 	}
-	parentExit := time.NewTimer(2 * time.Second)
-	defer parentExit.Stop()
-	select {
-	case err := <-parentResult:
-		if err != nil {
-			t.Fatalf("parent exit: %v", err)
+	if err := <-parentResult; err != nil {
+		t.Fatalf("parent exit: %v", err)
+	}
+}
+
+func stopCrashdummyFamily(t *testing.T, parent *exec.Cmd, parentFinished <-chan struct{}, opts client.Options) bool {
+	t.Helper()
+	if err := parent.Process.Signal(syscall.SIGTERM); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		t.Errorf("release crashdummy parent: %v", err)
+	}
+	if !waitForCrashdummyParent(parentFinished, 2*time.Second) {
+		_ = parent.Process.Kill()
+		if !waitForCrashdummyParent(parentFinished, 2*time.Second) {
+			t.Error("crashdummy parent did not exit after kill escalation")
+			return false
 		}
-	case <-parentExit.C:
-		t.Fatal("parent did not exit after release")
 	}
 
-	convergeCtx, cancelConverge := context.WithTimeout(context.Background(), 12*time.Second)
-	defer cancelConverge()
-	convergePoll := time.NewTicker(150 * time.Millisecond)
-	defer convergePoll.Stop()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	poll := time.NewTicker(25 * time.Millisecond)
+	defer poll.Stop()
 	for {
-		qs, err := client.Query(convergeCtx, readOpts)
-		if errors.Is(err, client.ErrNoDaemon) {
-			return
-		}
-		if err == nil && len(qs.Holders) == 0 && len(qs.Waiters) == 0 {
-			return
+		qs, err := client.Query(ctx, opts)
+		if errors.Is(err, client.ErrNoDaemon) || err == nil && len(qs.Holders) == 0 && len(qs.Waiters) == 0 {
+			return true
 		}
 		select {
-		case <-convergeCtx.Done():
-			t.Fatal("family did not converge after parent and children exited")
-		case <-convergePoll.C:
+		case <-poll.C:
+		case <-ctx.Done():
+			t.Error("crashdummy family did not converge within cleanup bound")
+			return false
 		}
+	}
+}
+
+func waitForCrashdummyParent(finished <-chan struct{}, bound time.Duration) bool {
+	timer := time.NewTimer(bound)
+	defer timer.Stop()
+	select {
+	case <-finished:
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 

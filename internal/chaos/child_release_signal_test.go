@@ -28,7 +28,7 @@ func TestCrashdummyChildFixtureUsesObservedReleaseSignal(t *testing.T) {
 		t.Fatal("TestCrashdummy_ChildrenAttachToParentLease declaration missing")
 	}
 
-	var familyObservedAt, releaseAt, convergeAt token.Pos
+	var familyObservedAt, releaseAt token.Pos
 	indefiniteHold := false
 	waitsInWorker := false
 	cleanupOwnsFamily := false
@@ -47,8 +47,6 @@ func TestCrashdummyChildFixtureUsesObservedReleaseSignal(t *testing.T) {
 							familyObservedAt = node.Pos()
 						}
 					}
-				case "convergeCtx":
-					convergeAt = node.Pos()
 				}
 			}
 		case *ast.GoStmt:
@@ -65,6 +63,9 @@ func TestCrashdummyChildFixtureUsesObservedReleaseSignal(t *testing.T) {
 				return true
 			})
 		case *ast.CallExpr:
+			if fn, ok := node.Fun.(*ast.Ident); ok && fn.Name == "stopCrashdummyFamily" && node.Pos() > releaseAt {
+				releaseAt = node.Pos()
+			}
 			if fn, ok := node.Fun.(*ast.SelectorExpr); ok && fn.Sel.Name == "Signal" {
 				if process, ok := fn.X.(*ast.SelectorExpr); ok && process.Sel.Name == "Process" {
 					if parent, ok := process.X.(*ast.Ident); ok && parent.Name == "parent" {
@@ -110,8 +111,8 @@ func TestCrashdummyChildFixtureUsesObservedReleaseSignal(t *testing.T) {
 	if !indefiniteHold {
 		t.Error("parent fixture must hold indefinitely until the test releases it")
 	}
-	if familyObservedAt == token.NoPos || releaseAt <= familyObservedAt || convergeAt <= releaseAt {
-		t.Error("parent release must follow complete-family observation and precede convergence")
+	if familyObservedAt == token.NoPos || releaseAt <= familyObservedAt {
+		t.Error("bounded family release must follow complete-family observation")
 	}
 	if !waitsInWorker {
 		t.Error("parent wait must run in its lifecycle worker")
