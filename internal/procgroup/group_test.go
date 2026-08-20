@@ -5,6 +5,7 @@ package procgroup
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"os/exec"
@@ -28,7 +29,8 @@ func TestGroupHelperProcess(t *testing.T) {
 		IgnoreTermination()
 		holdHelperProcess(os.Getenv(procgroupReadyEnv))
 	case "leader":
-		if !startReadyGroupDescendant(false) {
+		if err := startReadyGroupDescendant(false); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 		IgnoreTermination()
@@ -40,7 +42,8 @@ func TestGroupHelperProcess(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		os.Exit(0)
 	case "session-leader":
-		if !startReadyGroupDescendant(true) {
+		if err := startReadyGroupDescendant(true); err != nil {
+			_, _ = fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 		os.Exit(0)
@@ -102,10 +105,10 @@ func holdHelperProcess(ready string) {
 	os.Exit(2)
 }
 
-func startReadyGroupDescendant(setpgid bool) bool {
+func startReadyGroupDescendant(setpgid bool) error {
 	reader, writer, err := os.Pipe()
 	if err != nil {
-		return false
+		return fmt.Errorf("create descendant readiness pipe: %w", err)
 	}
 	defer reader.Close()
 	child := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
@@ -116,27 +119,51 @@ func startReadyGroupDescendant(setpgid bool) bool {
 	}
 	if err := child.Start(); err != nil {
 		_ = writer.Close()
-		return false
+		return fmt.Errorf("start descendant: %w", err)
 	}
 	_ = writer.Close()
-	ready := make(chan error, 1)
+	type readyResult struct {
+		n     int
+		value byte
+		err   error
+	}
+	ready := make(chan readyResult, 1)
 	go func() {
 		buf := make([]byte, 1)
-		_, err := reader.Read(buf)
-		ready <- err
+		n, err := reader.Read(buf)
+		ready <- readyResult{n: n, value: buf[0], err: err}
 	}()
 	timer := time.NewTimer(3 * time.Second)
 	defer timer.Stop()
+	var readyErr error
 	select {
-	case err := <-ready:
-		if err == nil {
-			return true
+	case result := <-ready:
+		if result.err == nil && result.n == 1 && result.value == 1 {
+			return nil
 		}
+		readyErr = fmt.Errorf("invalid descendant readiness: n=%d value=%d err=%v", result.n, result.value, result.err)
 	case <-timer.C:
+		readyErr = errors.New("timed out waiting for descendant readiness")
 	}
-	_ = child.Process.Kill()
-	_ = child.Wait()
-	return false
+	killErr := child.Process.Kill()
+	waited := make(chan error, 1)
+	go func() {
+		waited <- child.Wait()
+	}()
+	join := time.NewTimer(time.Second)
+	defer join.Stop()
+	select {
+	case <-waited:
+		if killErr != nil && !errors.Is(killErr, os.ErrProcessDone) {
+			return fmt.Errorf("%w; kill descendant: %v", readyErr, killErr)
+		}
+		return readyErr
+	case <-join.C:
+		if killErr != nil {
+			return fmt.Errorf("%w; kill descendant: %v; wait did not return", readyErr, killErr)
+		}
+		return fmt.Errorf("%w; descendant did not stop after kill", readyErr)
+	}
 }
 
 func TestSessionIdentityBindsInspectionToLeaderBirth(t *testing.T) {
