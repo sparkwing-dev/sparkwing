@@ -54,8 +54,8 @@ const DefaultConsumerIdleTimeout = 5 * time.Minute
 const consumerPollInterval = 500 * time.Millisecond
 
 // defaultConsumerMaintenanceInterval caps expired-lease sweeps for the
-// standard lease. Short configured leases scale below it so maintenance
-// remains four times more frequent than the lease heartbeat.
+// standard lease. Short configured leases scale below it; the consumer
+// poll cadence remains the lower bound on how often a sweep can run.
 const defaultConsumerMaintenanceInterval = 15 * time.Second
 
 func consumerMaintenanceIntervalForLease(lease time.Duration) time.Duration {
