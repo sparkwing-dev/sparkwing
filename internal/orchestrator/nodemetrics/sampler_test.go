@@ -2,7 +2,9 @@ package nodemetrics
 
 import (
 	"context"
+	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -13,14 +15,21 @@ type captureSink struct {
 	samples     []Sample
 	memoryReady chan struct{}
 	memoryOnce  sync.Once
+	sampleReady chan struct{}
 }
 
 func (s *captureSink) Push(_ context.Context, sample Sample) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.samples = append(s.samples, sample)
 	if sample.MemoryBytes > 0 && s.memoryReady != nil {
 		s.memoryOnce.Do(func() { close(s.memoryReady) })
+	}
+	s.mu.Unlock()
+	if s.sampleReady != nil {
+		select {
+		case s.sampleReady <- struct{}{}:
+		default:
+		}
 	}
 	return nil
 }
@@ -37,12 +46,47 @@ func (s *captureSink) peakCPU() int64 {
 	return peak
 }
 
+func (s *captureSink) hasSampleAfter(boundary time.Time) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, sample := range s.samples {
+		if sample.TS.After(boundary) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *captureSink) waitForSampleAfter(ctx context.Context, boundary time.Time) error {
+	for !s.hasSampleAfter(boundary) {
+		select {
+		case <-s.sampleReady:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+const cpuAccountingBurnerEnv = "SPARKWING_NODEMETRICS_CPU_BURNER"
+
+func TestCPUAccountingBurnerProcess(t *testing.T) {
+	if os.Getenv(cpuAccountingBurnerEnv) != "1" {
+		return
+	}
+	var value uint64 = 1
+	for i := 0; i < 25_000_000; i++ {
+		value = value*1664525 + 1013904223
+	}
+	runtime.KeepAlive(value)
+}
+
 // TestRun_ReportsNonzeroCPUUnderLoad verifies that on the host platform a
 // CPU-burning process must produce a nonzero sampled peak, so learned
 // capacity can activate rather than costing every run by the default.
 func TestRun_ReportsNonzeroCPUUnderLoad(t *testing.T) {
-	sink := &captureSink{}
-	ctx, cancel := context.WithCancel(context.Background())
+	sink := &captureSink{sampleReady: make(chan struct{}, 1)}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	done := make(chan struct{})
 	go func() {
 		Run(ctx, 40*time.Millisecond, sink)
@@ -80,15 +124,12 @@ func TestRun_CountsRawExecChildrenCPU(t *testing.T) {
 		close(done)
 	}()
 
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		cmd := exec.Command("sh", "-c", "while :; do :; done")
-		if err := cmd.Start(); err != nil {
-			t.Fatalf("start burner: %v", err)
+	for sink.peakCPU() <= 300 {
+		burnAndReap(t)
+		reapedAt := time.Now()
+		if err := sink.waitForSampleAfter(ctx, reapedAt); err != nil {
+			t.Fatalf("wait for CPU sample after reaping child: %v", err)
 		}
-		time.Sleep(100 * time.Millisecond)
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
 	}
 	cancel()
 	<-done
@@ -98,17 +139,17 @@ func TestRun_CountsRawExecChildrenCPU(t *testing.T) {
 	}
 }
 
-// burnAndReap runs a CPU-burning child for d, then kills and waits for it so
-// its usage lands in RUSAGE_CHILDREN.
-func burnAndReap(t *testing.T, d time.Duration) {
+// burnAndReap runs fixed CPU work in a child and waits for its usage to land
+// in RUSAGE_CHILDREN.
+func burnAndReap(t *testing.T) {
 	t.Helper()
-	cmd := exec.Command("sh", "-c", "while :; do :; done")
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("start burner: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestCPUAccountingBurnerProcess$")
+	cmd.Env = append(os.Environ(), cpuAccountingBurnerEnv+"=1")
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run CPU burner: %v", err)
 	}
-	time.Sleep(d)
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
 }
 
 // TestReadCPUTime_SubtractsReportedChildCPU pins the reconciliation: a reaped
@@ -128,13 +169,12 @@ func TestReadCPUTime_SubtractsReportedChildCPU(t *testing.T) {
 
 	const (
 		wantChildCPU = 100 * time.Millisecond
-		burnWindow   = 300 * time.Millisecond
 		burnDeadline = 5 * time.Second
 	)
 	var withChild, childCPU time.Duration
 	giveUp := time.Now().Add(burnDeadline)
 	for childCPU < wantChildCPU && time.Now().Before(giveUp) {
-		burnAndReap(t, burnWindow)
+		burnAndReap(t)
 		withChild, _ = readCPUTime()
 		childCPU = withChild - base
 	}

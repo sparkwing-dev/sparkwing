@@ -10,7 +10,10 @@ import (
 func TestCPUAccountingRegressionsDoNotUseTimeSleep(t *testing.T) {
 	targets := map[string]bool{
 		"TestRun_CountsRawExecChildrenCPU":          false,
-		"burnAndReap":                              false,
+		"hasSampleAfter":                            false,
+		"waitForSampleAfter":                        false,
+		"TestCPUAccountingBurnerProcess":            false,
+		"burnAndReap":                               false,
 		"TestReadCPUTime_SubtractsReportedChildCPU": false,
 	}
 	fset := token.NewFileSet()
