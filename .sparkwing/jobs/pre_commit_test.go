@@ -205,6 +205,72 @@ func TestTheTestStepDoesNotHandTheGateIndexToTheSuitesItRuns(t *testing.T) {
 	}
 }
 
+func TestTheTestStepRemovesItsSuitesTemporaryRoot(t *testing.T) {
+	root := gateFixtureRepo(t)
+	marker := filepath.Join(t.TempDir(), "tmpdir")
+	t.Setenv("SPARKWING_TEST_TMPDIR_MARKER", marker)
+	writeGoFile(t, filepath.Join(root, "internal", "tmpdir_probe_test.go"), `package internal
+
+import (
+	"os"
+	"testing"
+)
+
+func TestRecordTMPDIR(t *testing.T) {
+	if err := os.WriteFile(os.Getenv("SPARKWING_TEST_TMPDIR_MARKER"), []byte(os.Getenv("TMPDIR")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+`)
+	gitAddAll(t, root)
+
+	if err := runTest(context.Background()); err != nil {
+		t.Fatalf("test step: %v", err)
+	}
+	assertTestScratchRemoved(t, marker)
+}
+
+func TestTheTestStepRemovesItsSuitesTemporaryRootAfterFailure(t *testing.T) {
+	root := gateFixtureRepo(t)
+	marker := filepath.Join(t.TempDir(), "tmpdir")
+	t.Setenv("SPARKWING_TEST_TMPDIR_MARKER", marker)
+	writeGoFile(t, filepath.Join(root, "internal", "tmpdir_probe_test.go"), `package internal
+
+import (
+	"os"
+	"testing"
+)
+
+func TestRecordTMPDIRThenFail(t *testing.T) {
+	if err := os.WriteFile(os.Getenv("SPARKWING_TEST_TMPDIR_MARKER"), []byte(os.Getenv("TMPDIR")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Fatal("deliberate")
+}
+`)
+	gitAddAll(t, root)
+
+	if err := runTest(context.Background()); err == nil {
+		t.Fatal("test step accepted a failing suite")
+	}
+	assertTestScratchRemoved(t, marker)
+}
+
+func assertTestScratchRemoved(t *testing.T, marker string) {
+	t.Helper()
+	raw, err := os.ReadFile(marker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	testRoot := string(raw)
+	if !strings.HasPrefix(filepath.Base(testRoot), "sparkwing-go-test-") {
+		t.Fatalf("suite TMPDIR = %q, want gate-owned root", testRoot)
+	}
+	if _, err := os.Stat(testRoot); !os.IsNotExist(err) {
+		t.Fatalf("suite temporary root survived test step: %v", err)
+	}
+}
+
 // gitIndexProbe is a product test that stages a file in a repository of its
 // own. Its index holds that one file until something binds git elsewhere.
 const gitIndexProbe = `package internal

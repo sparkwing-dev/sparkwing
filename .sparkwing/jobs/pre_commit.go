@@ -412,13 +412,29 @@ func runBuild(ctx context.Context) error {
 }
 
 func runTest(ctx context.Context) error {
-	return forEachGoModule(ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), productTestUnset)
+	testRoot, err := os.MkdirTemp("", "sparkwing-go-test-")
+	if err != nil {
+		return fmt.Errorf("create go test temporary root: %w", err)
+	}
+	testErr := forEachGoModuleEnv(
+		ctx, "go test", boundedGoCommand(runtime.NumCPU(), "test", "./..."), productTestUnset,
+		map[string]string{"TMPDIR": testRoot},
+	)
+	cleanupErr := os.RemoveAll(testRoot)
+	if cleanupErr != nil {
+		cleanupErr = fmt.Errorf("remove go test temporary root: %w", cleanupErr)
+	}
+	return errors.Join(testErr, cleanupErr)
 }
 
 // forEachGoModule runs cmd in every committed module directory that holds
 // buildable packages, with the variables in unset dropped, and reports all
 // failures, so one broken module does not hide another's verdict.
 func forEachGoModule(ctx context.Context, label, cmd string, unset []string) error {
+	return forEachGoModuleEnv(ctx, label, cmd, unset, nil)
+}
+
+func forEachGoModuleEnv(ctx context.Context, label, cmd string, unset []string, env map[string]string) error {
 	dirs, err := committedModuleDirs(ctx)
 	if err != nil {
 		return err
@@ -429,7 +445,11 @@ func forEachGoModule(ctx context.Context, label, cmd string, unset []string) err
 			continue
 		}
 		script := withoutInherited(fmt.Sprintf("cd %q && %s", dir, cmd), unset)
-		if _, err := sparkwing.Bash(ctx, script).Run(); err != nil {
+		run := sparkwing.Bash(ctx, script)
+		for name, value := range env {
+			run.Env(name, value)
+		}
+		if _, err := run.Run(); err != nil {
 			failures = append(failures, fmt.Sprintf("%s: %v", dir, err))
 		}
 	}
