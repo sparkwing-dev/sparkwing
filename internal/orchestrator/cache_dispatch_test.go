@@ -304,6 +304,7 @@ func (planLevelQueuedAwaitThenContinueParentPipe) Plan(
 	rc sparkwing.RunContext,
 ) error {
 	sparkwing.Job(plan, "spawn", func(ctx context.Context) error {
+		publishQueuedAwaitParentAttempt(ctx)
 		_, err := sparkwing.RunAndAwait[struct{}, sparkwing.NoInputs](ctx, "plan-level-queued-await-child", "work")
 		if err != nil {
 			return err
@@ -311,13 +312,9 @@ func (planLevelQueuedAwaitThenContinueParentPipe) Plan(
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		select {
-		case <-time.After(200 * time.Millisecond):
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}).NoProgressTimeout(100 * time.Millisecond).Timeout(admissionPauseFixtureTimeout)
+		<-ctx.Done()
+		return ctx.Err()
+	}).NoProgressTimeout(time.Hour).Timeout(admissionPauseFixtureTimeout)
 	return nil
 }
 
@@ -935,6 +932,27 @@ func waitForNodeTimeoutResumed(t *testing.T, attemptCtx context.Context) time.Du
 	}
 }
 
+func waitForProgressTimeoutResumed(t *testing.T, attemptCtx context.Context) {
+	t.Helper()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(2 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		if !orchestrator.ProgressTimeoutPausedForTest(attemptCtx) {
+			if err := attemptCtx.Err(); err != nil {
+				t.Fatalf("parent action ended before its progress timeout resumed: %v", err)
+			}
+			return
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatal("parent progress timeout did not resume after child admission")
+		}
+	}
+}
+
 func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	resetCacheCounter()
 	p := newPaths(t)
@@ -1195,13 +1213,16 @@ func TestDispatchWatchdog_UnclaimedUnboundedChildStillTimesOutParent(t *testing.
 
 func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *testing.T) {
 	resetCacheCounter()
+	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1)}
+	queuedAwaitParentAttempt.Store(gate)
+	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
 	p := newPaths(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	st, err := store.Open(p.StateDB())
 	if err != nil {
 		t.Fatalf("open store: %v", err)
 	}
-	defer st.Close()
+	t.Cleanup(func() { _ = st.Close() })
 
 	resp, err := st.AcquireConcurrencySlot(ctx, store.AcquireSlotRequest{
 		Key:      "g:plan-level-queued-await-key",
@@ -1218,7 +1239,32 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 	}
 
 	parentDone := make(chan *orchestrator.Result, 1)
+	parentFinished := make(chan struct{})
+	childDone := make(chan *orchestrator.Result, 1)
+	childFinished := make(chan struct{})
+	var childStarted atomic.Bool
+	var releaseOnce sync.Once
+	var releaseErr error
+	releaseHolder := func() error {
+		releaseOnce.Do(func() {
+			_, _, _, releaseErr = st.ReleaseAndNotify(context.Background(),
+				"g:plan-level-queued-await-key", "external-continue-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease)
+		})
+		return releaseErr
+	}
+	t.Cleanup(func() {
+		gate.release()
+		cancel()
+		if err := releaseHolder(); err != nil {
+			t.Errorf("cleanup external holder: %v", err)
+		}
+		joinCacheDispatchWorker(t, "no-progress parent", parentFinished)
+		if childStarted.Load() {
+			joinCacheDispatchWorker(t, "no-progress child", childFinished)
+		}
+	})
 	go func() {
+		defer close(parentFinished)
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
 			Pipeline: "plan-level-queued-await-then-continue-parent",
 			RunID:    "queued-await-continue-parent",
@@ -1228,8 +1274,9 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 
 	childID := waitForSpawnedChildTrigger(t, ctx, st, "queued-await-continue-parent", "spawn", "plan-level-queued-await-child")
 	claimManualChildTrigger(t, ctx, st, childID)
-	childDone := make(chan *orchestrator.Result, 1)
+	childStarted.Store(true)
 	go func() {
+		defer close(childFinished)
 		res, _ := orchestrator.Run(ctx, orchestrator.LocalBackends(p, st, nil), orchestrator.Options{
 			Pipeline:    "plan-level-queued-await-child",
 			RunID:       childID,
@@ -1238,14 +1285,32 @@ func TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait(t *te
 		childDone <- res
 	}()
 	waitForPlanAdmissionWaiter(t, ctx, st, "g:plan-level-queued-await-key", childID, childDone)
-	pauseStarted := time.Now()
-	time.Sleep(admissionPauseHold)
-	if elapsed := time.Since(pauseStarted); elapsed >= admissionPauseTestBound {
-		t.Fatalf("admission-pause hold took %s, want less than %s", elapsed, admissionPauseTestBound)
+	var attemptCtx context.Context
+	select {
+	case attemptCtx = <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("parent action did not publish its progress timeout context")
 	}
-	if _, _, _, err := st.ReleaseAndNotify(ctx,
-		"g:plan-level-queued-await-key", "external-continue-holder/-", "success", "", "", 0, store.DefaultConcurrencyLease); err != nil {
+	if !orchestrator.ProgressTimeoutPausedForTest(attemptCtx) {
+		t.Fatal("parent progress timeout was not paused during child admission")
+	}
+	if orchestrator.ForceProgressTimeoutForTest(attemptCtx) {
+		t.Fatal("parent progress timeout fired while child admission was pending")
+	}
+	if err := attemptCtx.Err(); err != nil {
+		t.Fatalf("parent action ended before child admission: %v", err)
+	}
+	select {
+	case parent := <-parentDone:
+		t.Fatalf("parent finished while child was queued for plan admission: status=%q err=%v", parent.Status, parent.Error)
+	default:
+	}
+	if err := releaseHolder(); err != nil {
 		t.Fatalf("release external holder: %v", err)
+	}
+	waitForProgressTimeoutResumed(t, attemptCtx)
+	if !orchestrator.ForceProgressTimeoutForTest(attemptCtx) {
+		t.Fatal("resumed parent progress timeout could not be forced")
 	}
 
 	select {
