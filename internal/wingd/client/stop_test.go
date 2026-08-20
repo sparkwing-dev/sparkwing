@@ -23,9 +23,22 @@ func runDaemon(t *testing.T, home, version string) chan error {
 		t.Fatalf("new daemon: %v", err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
 	done := make(chan error, 1)
-	go func() { done <- d.Run(ctx) }()
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		done <- d.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-finished:
+		case <-timer.C:
+			t.Error("daemon did not stop within 1s of cleanup cancellation")
+		}
+	})
 	select {
 	case <-d.Ready():
 	case err := <-done:
