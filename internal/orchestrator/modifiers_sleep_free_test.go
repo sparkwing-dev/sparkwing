@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestNoProgressLateSuccessRegressionsDoNotUseTimeSleep(t *testing.T) {
+func TestLateSuccessTimeoutRegressionsDoNotUseTimeSleep(t *testing.T) {
 	targets := map[string]bool{
 		"absoluteLateActionPipe.Plan":   false,
 		"noProgressLateActionPipe.Plan": false,
