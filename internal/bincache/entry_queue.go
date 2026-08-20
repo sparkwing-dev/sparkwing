@@ -164,6 +164,8 @@ func consumeCacheQueueRecord(ctx context.Context, root string, sequence uint64) 
 func openCacheQueueLock(ctx context.Context, root string) (*os.File, error) {
 	waitCtx, cancel := context.WithTimeout(ctx, cacheQueueLockTimeout)
 	defer cancel()
+	retry := time.NewTimer(cacheQueueLockRetry)
+	defer retry.Stop()
 	for {
 		lock, acquired, err := openCacheLock(root, "entry-queue", cacheLockExclusiveNonblock)
 		if err != nil {
@@ -172,13 +174,14 @@ func openCacheQueueLock(ctx context.Context, root string) (*os.File, error) {
 		if acquired {
 			return lock, nil
 		}
+		retry.Reset(cacheQueueLockRetry)
 		select {
 		case <-waitCtx.Done():
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 			return nil, ErrCacheQueueBusy
-		case <-time.After(cacheQueueLockRetry):
+		case <-retry.C:
 		}
 	}
 }
