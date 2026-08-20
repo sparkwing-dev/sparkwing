@@ -187,13 +187,15 @@ func acquireTemplateVerifyLock(root string) error {
 }
 
 func cleanupTemplateScratch(root string) error {
-	matches, err := filepath.Glob(filepath.Join(root, "sparkwing-tv-*"))
-	if err != nil {
-		return err
-	}
-	for _, path := range matches {
-		if err := os.RemoveAll(path); err != nil {
-			return fmt.Errorf("remove %s: %w", filepath.Base(path), err)
+	for _, pattern := range []string{"sparkwing-tv-*", "sparkwing-template-verify-cli-*"} {
+		matches, err := filepath.Glob(filepath.Join(root, pattern))
+		if err != nil {
+			return err
+		}
+		for _, path := range matches {
+			if err := os.RemoveAll(path); err != nil {
+				return fmt.Errorf("remove %s: %w", filepath.Base(path), err)
+			}
 		}
 	}
 	return nil
