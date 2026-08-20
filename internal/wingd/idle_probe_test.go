@@ -12,13 +12,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// probeLoop fires probe on an interval until ctx is cancelled, keeping
-// continuous probe traffic flowing at a daemon whose idle-exit is under
-// test. Probe outcomes are deliberately ignored: once the daemon exits,
-// probes fail, and that is the loop's signal to just keep quietly trying
-// until the test stops it.
-func probeLoop(ctx context.Context, interval time.Duration, probe func(context.Context) error) {
+// startProbeLoop keeps probe traffic flowing until test cleanup. Outcomes are
+// ignored because failed probes are expected after the daemon exits.
+func startProbeLoop(t *testing.T, interval time.Duration, probe func(context.Context) error) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		for ctx.Err() == nil {
 			one, cancel := context.WithTimeout(ctx, interval)
 			_ = probe(one)
@@ -29,6 +30,16 @@ func probeLoop(ctx context.Context, interval time.Duration, probe func(context.C
 			}
 		}
 	}()
+	t.Cleanup(func() {
+		cancel()
+		timer := time.NewTimer(time.Second)
+		defer timer.Stop()
+		select {
+		case <-done:
+		case <-timer.C:
+			t.Error("idle probe loop did not stop after cancellation")
+		}
+	})
 }
 
 func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
@@ -44,9 +55,7 @@ func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
 		t.Fatalf("health probe against a serving daemon: %v", err)
 	}
 
-	ctx, stopProbes := context.WithCancel(context.Background())
-	defer stopProbes()
-	probeLoop(ctx, 50*time.Millisecond, func(ctx context.Context) error {
+	startProbeLoop(t, 50*time.Millisecond, func(ctx context.Context) error {
 		return client.HealthProbe(ctx, home)
 	})
 
@@ -66,11 +75,9 @@ func TestIdleExit_QueryTrafficDoesNotResetIdleClock(t *testing.T) {
 		t.Fatalf("query against a serving daemon: %v", err)
 	}
 
-	ctx, stopQueries := context.WithCancel(context.Background())
-	defer stopQueries()
 	var successfulQueries, firstSuccess, lastSuccess atomic.Int64
 	started := time.Now()
-	probeLoop(ctx, 50*time.Millisecond, func(ctx context.Context) error {
+	startProbeLoop(t, 50*time.Millisecond, func(ctx context.Context) error {
 		_, err := client.Query(ctx, client.Options{Home: home, Version: "test"})
 		if err == nil {
 			now := time.Since(started).Nanoseconds()
@@ -103,9 +110,7 @@ func TestIdleExit_SocketSweepProbeDoesNotResetIdleClock(t *testing.T) {
 		t.Fatalf("probe against a serving daemon: %v", err)
 	}
 
-	ctx, stopProbes := context.WithCancel(context.Background())
-	defer stopProbes()
-	probeLoop(ctx, 50*time.Millisecond, func(ctx context.Context) error {
+	startProbeLoop(t, 50*time.Millisecond, func(ctx context.Context) error {
 		_, err := client.Probe(ctx, sock)
 		return err
 	})
@@ -127,10 +132,8 @@ func TestIdleExit_PreHelloConnectionsDoNotResetIdleClock(t *testing.T) {
 	// shape of a probe whose hello was cut off by its deadline. A peer
 	// that never said hello did no work, so its disconnect must not
 	// advance the idle clock.
-	ctx, stopDialing := context.WithCancel(context.Background())
-	defer stopDialing()
-	probeLoop(ctx, 50*time.Millisecond, func(context.Context) error {
-		nc, err := net.Dial("unix", sock)
+	startProbeLoop(t, 50*time.Millisecond, func(ctx context.Context) error {
+		nc, err := (&net.Dialer{}).DialContext(ctx, "unix", sock)
 		if err == nil {
 			_ = nc.Close()
 		}
@@ -188,9 +191,7 @@ func TestIdleExit_GraceThenIdleUnderHealthProbes(t *testing.T) {
 		IdleTimeout: 300 * time.Millisecond,
 		GraceWindow: 500 * time.Millisecond,
 	})
-	ctx, stopProbes := context.WithCancel(context.Background())
-	defer stopProbes()
-	probeLoop(ctx, 50*time.Millisecond, func(ctx context.Context) error {
+	startProbeLoop(t, 50*time.Millisecond, func(ctx context.Context) error {
 		return client.HealthProbe(ctx, home)
 	})
 
