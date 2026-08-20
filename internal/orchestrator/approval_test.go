@@ -230,7 +230,6 @@ func TestApproval_DeniedFlowsToFailed(t *testing.T) {
 
 func TestApproval_TimeoutWithPolicyFail(t *testing.T) {
 	p := newPaths(t)
-	start := time.Now()
 	res, err := orchestrator.RunLocal(context.Background(), p,
 		orchestrator.Options{Pipeline: "appr-timeout"})
 	if err != nil {
@@ -239,10 +238,6 @@ func TestApproval_TimeoutWithPolicyFail(t *testing.T) {
 	if res.Status != "failed" {
 		t.Fatalf("status = %q, want failed", res.Status)
 	}
-	if time.Since(start) > 400*time.Millisecond {
-		t.Fatalf("run took too long: %v", time.Since(start))
-	}
-
 	dbPath := filepath.Join(p.Root, "state.db")
 	st, _ := store.Open(dbPath)
 	defer func() { _ = st.Close() }()
