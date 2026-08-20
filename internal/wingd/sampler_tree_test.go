@@ -12,6 +12,8 @@ import (
 	"time"
 )
 
+const subtreeSampleWindow = 500 * time.Millisecond
+
 // TestCollectSubtree_GathersEveryDescendant is the platform-independent
 // core of the fix: a holder's forked work must be reachable from its pid
 // through the parent->children map, several levels deep, while an
@@ -51,9 +53,10 @@ func TestProcSampler_CountsChildSubtreeCPU(t *testing.T) {
 	requireObservableProcCPU(t)
 	root := startProcessTree(t, `sh -c "while :; do :; done" & sleep 5`)
 	p := newProcSampler()
-
-	p.CPUUsage(root)
-	waitForBusySubtree(t, p, root)
+	usage := sampleSubtreeCPU(t, p, root)
+	if usage.Fraction <= 0.2 {
+		t.Fatalf("subtree CPU credited to root = %.3f, want > 0.2 (busy descendant not counted)", usage.Fraction)
+	}
 }
 
 // TestProcSampler_IdleTreeIsZero spawns a holder whose whole tree only
@@ -63,35 +66,18 @@ func TestProcSampler_IdleTreeIsZero(t *testing.T) {
 	requireObservableProcCPU(t)
 	root := startProcessTree(t, `sleep 5`)
 	p := newProcSampler()
-
-	p.CPUUsage(root)
-	observeIdleSubtree(t, p, root)
-}
-
-func waitForBusySubtree(t *testing.T, sampler *procSampler, root int) {
-	t.Helper()
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	deadline := time.NewTimer(3 * time.Second)
-	defer deadline.Stop()
-	for {
-		usage, ok := sampler.CPUUsage(root)
-		if ok && usage.HasDescendant && usage.Fraction > 0.2 {
-			return
-		}
-		select {
-		case <-poll.C:
-		case <-deadline.C:
-			t.Fatalf("root pid %d did not report a busy descendant before the deadline", root)
-		}
+	usage := sampleSubtreeCPU(t, p, root)
+	if usage.Fraction > 0.1 {
+		t.Fatalf("idle tree CPU = %.3f, want ~0", usage.Fraction)
 	}
 }
 
-func observeIdleSubtree(t *testing.T, sampler *procSampler, root int) {
+func sampleSubtreeCPU(t *testing.T, sampler *procSampler, root int) ProcUsage {
 	t.Helper()
-	observation := time.NewTimer(500 * time.Millisecond)
-	defer observation.Stop()
-	<-observation.C
+	sampler.CPUUsage(root)
+	window := time.NewTimer(subtreeSampleWindow)
+	defer window.Stop()
+	<-window.C
 	usage, ok := sampler.CPUUsage(root)
 	if !ok {
 		t.Fatalf("root pid %d produced no CPU sample", root)
@@ -99,9 +85,7 @@ func observeIdleSubtree(t *testing.T, sampler *procSampler, root int) {
 	if !usage.HasDescendant {
 		t.Fatalf("root pid %d never exposed its idle child", root)
 	}
-	if usage.Fraction > 0.1 {
-		t.Fatalf("idle tree CPU = %.3f, want ~0", usage.Fraction)
-	}
+	return usage
 }
 
 // requireObservableProcCPU skips where per-process CPU cannot be read
@@ -118,8 +102,7 @@ func requireObservableProcCPU(t *testing.T) {
 // startProcessTree launches "sh -c script" in its own process group --
 // mirroring how sparkwing runs each command -- so the busy work lives in
 // a descendant the holder pid never touches, proving the sampler walks
-// the tree rather than grouping by pgid. It gives the backgrounded work a
-// child state is observed by the sampler, and cleanup kills the whole group.
+// the tree rather than grouping by pgid. Cleanup kills the whole group.
 func startProcessTree(t *testing.T, script string) int {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", script)
@@ -132,5 +115,26 @@ func startProcessTree(t *testing.T, script string) int {
 		syscall.Kill(-pid, syscall.SIGKILL)
 		cmd.Wait()
 	})
+	waitForProcessDescendant(t, pid)
 	return pid
+}
+
+func waitForProcessDescendant(t *testing.T, root int) {
+	t.Helper()
+	sampler := newProcSampler()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	for {
+		usage, ok := sampler.CPUUsage(root)
+		if ok && usage.HasDescendant {
+			return
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("root pid %d did not expose a descendant before the deadline", root)
+		}
+	}
 }
