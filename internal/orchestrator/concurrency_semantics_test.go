@@ -70,20 +70,27 @@ func resetSem() {
 	resetLeaderBarrier()
 }
 
-// leaderHolding is set true by a held leader once it is executing -- so
-// it has acquired its slot -- and a test polls it to start the follower
-// deterministically instead of guessing with a sleep. leaderRelease
-// frees the held leader once the follower has resolved. Both are
-// in-process (the orchestrator runs in-process in these tests), so no
-// store handle or timing race is involved.
-var (
-	leaderHolding atomic.Bool
-	leaderRelease atomic.Bool
-)
+type leaderBarrier struct {
+	holding     chan struct{}
+	release     chan struct{}
+	holdingOnce sync.Once
+	releaseOnce sync.Once
+}
+
+var currentLeaderBarrier atomic.Pointer[leaderBarrier]
 
 func resetLeaderBarrier() {
-	leaderHolding.Store(false)
-	leaderRelease.Store(false)
+	currentLeaderBarrier.Store(&leaderBarrier{
+		holding: make(chan struct{}),
+		release: make(chan struct{}),
+	})
+}
+
+func releaseLeaderBarrier() {
+	barrier := currentLeaderBarrier.Load()
+	if barrier != nil {
+		barrier.releaseOnce.Do(func() { close(barrier.release) })
+	}
 }
 
 // held returns a job body that marks its slot held, then blocks until
@@ -98,15 +105,14 @@ func held(onStart func() func()) func(context.Context) error {
 				defer cleanup()
 			}
 		}
-		leaderHolding.Store(true)
-		for !leaderRelease.Load() {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(2 * time.Millisecond):
-			}
+		barrier := currentLeaderBarrier.Load()
+		barrier.holdingOnce.Do(func() { close(barrier.holding) })
+		select {
+		case <-barrier.release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		return nil
 	}
 }
 
@@ -114,15 +120,14 @@ func held(onStart func() func()) func(context.Context) error {
 // skip evaluation until released, then skips. Used to make a skipped
 // memo leader hold deterministically while a follower coalesces.
 func heldSkip(ctx context.Context) bool {
-	leaderHolding.Store(true)
-	for !leaderRelease.Load() {
-		select {
-		case <-ctx.Done():
-			return true
-		case <-time.After(2 * time.Millisecond):
-		}
+	barrier := currentLeaderBarrier.Load()
+	barrier.holdingOnce.Do(func() { close(barrier.holding) })
+	select {
+	case <-barrier.release:
+		return true
+	case <-ctx.Done():
+		return true
 	}
-	return true
 }
 
 func waitForConcurrencyPoll(poll *time.Ticker) {
@@ -135,14 +140,13 @@ func waitForConcurrencyPoll(poll *time.Ticker) {
 // hanging the suite.
 func waitForLeaderHolding(t *testing.T) {
 	t.Helper()
-	deadline := time.Now().Add(15 * time.Second)
-	poll := time.NewTicker(2 * time.Millisecond)
-	defer poll.Stop()
-	for !leaderHolding.Load() {
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for the leader to hold its slot")
-		}
-		waitForConcurrencyPoll(poll)
+	barrier := currentLeaderBarrier.Load()
+	timer := time.NewTimer(15 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-barrier.holding:
+	case <-timer.C:
+		t.Fatal("timed out waiting for the leader to hold its slot")
 	}
 }
 
@@ -685,7 +689,7 @@ func TestConcurrency_QueueTimeoutFailsWaiterCleanly(t *testing.T) {
 	if n.FailureReason != store.FailureQueueTimeout {
 		t.Fatalf("follower failure_reason = %q, want %q", n.FailureReason, store.FailureQueueTimeout)
 	}
-	leaderRelease.Store(true)
+	releaseLeaderBarrier()
 	<-leaderDone
 }
 
@@ -745,7 +749,7 @@ func TestMemo_LeaderSkippedWhileFollowerCoalesced(t *testing.T) {
 		followerDone <- res
 	}()
 	waitForCoalesceWaiter(t, p.StateDB())
-	leaderRelease.Store(true)
+	releaseLeaderBarrier()
 	leaderRes := <-leaderDone
 	followerRes := <-followerDone
 
@@ -793,7 +797,7 @@ func TestGroupedNode_CancelWhileQueued_LeaksWaiterIntoPhantomHolder(t *testing.T
 	case <-time.After(15 * time.Second):
 		t.Fatal("cancelled waiter did not finish")
 	}
-	leaderRelease.Store(true)
+	releaseLeaderBarrier()
 	select {
 	case <-holderDone:
 	case <-time.After(15 * time.Second):
