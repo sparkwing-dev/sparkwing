@@ -86,14 +86,7 @@ type cacheCancelOthersLeaderPipe struct{ sparkwing.Base }
 
 func (cacheCancelOthersLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := sparkwing.NewConcurrencyGroup("cache-cancel-others-key", sparkwing.ConcurrencyLimit{Capacity: 1})
-	sparkwing.Job(plan, "leader", func(ctx context.Context) error {
-		select {
-		case <-time.After(5 * time.Second):
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}).Concurrency(g)
+	sparkwing.Job(plan, "leader", held(nil)).Concurrency(g)
 	return nil
 }
 
@@ -115,14 +108,7 @@ func (cacheForcedReleaseLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Pl
 		Capacity: 1,
 		OnLimit:  sparkwing.CancelOthers,
 	})
-	sparkwing.Job(plan, "leader", func(ctx context.Context) error {
-		select {
-		case <-time.After(5 * time.Second):
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}).Concurrency(g)
+	sparkwing.Job(plan, "leader", held(nil)).Concurrency(g)
 	return nil
 }
 
@@ -222,7 +208,7 @@ type planLevelSkipLeaderPipe struct{ sparkwing.Base }
 
 func (planLevelSkipLeaderPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-skip-key", sparkwing.ConcurrencyLimit{Capacity: 1}))
-	sparkwing.Job(plan, "work", cacheStep(500*time.Millisecond))
+	sparkwing.Job(plan, "work", held(cacheCounterBump))
 	return nil
 }
 
@@ -1630,11 +1616,21 @@ func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 	p := newPaths(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
+	leaderFinished := make(chan struct{})
 	go func() {
+		defer close(leaderFinished)
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "plan-level-skip-leader"})
 		leaderDone <- res
 	}()
-	time.Sleep(100 * time.Millisecond)
+	t.Cleanup(func() {
+		leaderRelease.Store(true)
+		select {
+		case <-leaderFinished:
+		case <-time.After(2 * time.Second):
+			t.Error("timed out stopping plan-level skip leader")
+		}
+	})
+	waitForLeaderHolding(t)
 
 	snapshotBefore := cacheCounter.inflight.Load()
 
@@ -1648,11 +1644,20 @@ func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 		t.Fatalf("follower status = %q, want success (Skip treats plan-level full slot as OK)", followerRes.Status)
 	}
 
-	<-leaderDone
-	finalCount := cacheCounter.inflight.Load()
-	if finalCount-snapshotBefore > 1 {
-		t.Fatalf("too many step executions between snapshot and final (%d-%d), expected <= 1 (leader only)",
-			finalCount, snapshotBefore)
+	if current := cacheCounter.inflight.Load(); current != snapshotBefore {
+		t.Fatalf("in-flight steps = %d, want unchanged leader count %d", current, snapshotBefore)
+	}
+	leaderRelease.Store(true)
+	select {
+	case leader := <-leaderDone:
+		if leader.Status != "success" {
+			t.Fatalf("leader status = %q, want success (err=%v)", leader.Status, leader.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for plan-level skip leader")
+	}
+	if finalCount := cacheCounter.inflight.Load(); finalCount != 0 {
+		t.Fatalf("in-flight steps after leader completion = %d, want 0", finalCount)
 	}
 }
 
@@ -1670,13 +1675,23 @@ func testCancelOthersStopsLeader(t *testing.T, leaderPipeline, followerPipeline 
 	p := newPaths(t)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
+	leaderFinished := make(chan struct{})
 	go func() {
+		defer close(leaderFinished)
 		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
 			Pipeline: leaderPipeline,
 		})
 		leaderDone <- res
 	}()
-	time.Sleep(200 * time.Millisecond)
+	t.Cleanup(func() {
+		leaderRelease.Store(true)
+		select {
+		case <-leaderFinished:
+		case <-time.After(8 * time.Second):
+			t.Error("timed out stopping cache leader")
+		}
+	})
+	waitForLeaderHolding(t)
 
 	followerStart := time.Now()
 	followerRes, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
