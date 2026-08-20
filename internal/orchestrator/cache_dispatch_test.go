@@ -736,7 +736,7 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 	var waitLeaderOnce sync.Once
 	var leaderRes *orchestrator.Result
 	waitLeader := func() *orchestrator.Result {
-		leaderRelease.Store(true)
+		releaseLeaderBarrier()
 		waitLeaderOnce.Do(func() { leaderRes = <-leaderDone })
 		return leaderRes
 	}
@@ -760,7 +760,7 @@ func TestConcurrency_SkipResolvesAsSkippedConcurrent(t *testing.T) {
 		t.Fatalf("follower outcome = %q, want skipped-concurrent", fnodes[0].Outcome)
 	}
 
-	leaderRelease.Store(true)
+	releaseLeaderBarrier()
 	leaderRes = waitLeader()
 	if leaderRes.Status != "success" {
 		t.Fatalf("leader status = %q, want success", leaderRes.Status)
@@ -800,7 +800,7 @@ func TestConcurrency_FailResolvesFollowerAsFailed(t *testing.T) {
 		t.Fatalf("follower error = %q, want a message mentioning OnLimit:Fail", nodes[0].Error)
 	}
 
-	leaderRelease.Store(true)
+	releaseLeaderBarrier()
 	leaderRes := <-leaderDone
 	if leaderRes.Status != "success" {
 		t.Fatalf("leader status = %q, want success", leaderRes.Status)
@@ -2365,7 +2365,7 @@ func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 		leaderDone <- res
 	}()
 	t.Cleanup(func() {
-		leaderRelease.Store(true)
+		releaseLeaderBarrier()
 		select {
 		case <-leaderFinished:
 		case <-time.After(2 * time.Second):
@@ -2389,7 +2389,7 @@ func TestConcurrency_PlanLevelSkipShortCircuits(t *testing.T) {
 	if current := cacheCounter.inflight.Load(); current != snapshotBefore {
 		t.Fatalf("in-flight steps = %d, want unchanged leader count %d", current, snapshotBefore)
 	}
-	leaderRelease.Store(true)
+	releaseLeaderBarrier()
 	select {
 	case leader := <-leaderDone:
 		if leader.Status != "success" {
@@ -2426,7 +2426,7 @@ func testCancelOthersStopsLeader(t *testing.T, leaderPipeline, followerPipeline 
 		leaderDone <- res
 	}()
 	t.Cleanup(func() {
-		leaderRelease.Store(true)
+		releaseLeaderBarrier()
 		select {
 		case <-leaderFinished:
 		case <-time.After(8 * time.Second):
