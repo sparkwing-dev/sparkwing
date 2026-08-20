@@ -467,6 +467,8 @@ func TestVersionTakeover_ReleaseLeavesCleanSourceDaemon(t *testing.T) {
 }
 
 func TestIdleExit_NoWork(t *testing.T) {
+	t.Parallel()
+
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 250 * time.Millisecond})
 	if err := td.waitExit(t, 3*time.Second); err != nil {
@@ -475,6 +477,8 @@ func TestIdleExit_NoWork(t *testing.T) {
 }
 
 func TestIdleExit_WaitsForHolders(t *testing.T) {
+	t.Parallel()
+
 	home := shortHome(t)
 	const idleTimeout = 300 * time.Millisecond
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: idleTimeout})
