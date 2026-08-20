@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -16,6 +18,7 @@ import (
 )
 
 const soakguardHelper = "SPARKWING_SOAKGUARD_HELPER"
+const soakguardLeaderReady = "SPARKWING_SOAKGUARD_LEADER_READY"
 
 func TestSoakguardHelperProcess(t *testing.T) {
 	switch os.Getenv(soakguardHelper) {
@@ -31,6 +34,9 @@ func TestSoakguardHelperProcess(t *testing.T) {
 			os.Exit(2)
 		}
 		procgroup.IgnoreTermination()
+		if err := os.WriteFile(os.Getenv(soakguardLeaderReady), []byte("ready"), 0o600); err != nil {
+			os.Exit(2)
+		}
 		release := make(chan os.Signal, 1)
 		signal.Notify(release, syscall.SIGUSR1)
 		<-release
@@ -83,11 +89,29 @@ func TestSignalTerminatesEveryNestedProcessGroupBeforeExit(t *testing.T) {
 	done := make(chan int, 1)
 	cmd := []string{os.Args[0], "-test.run=^TestSoakguardHelperProcess$"}
 	t.Setenv(soakguardHelper, "leader")
+	ready := filepath.Join(t.TempDir(), "leader-ready")
+	t.Setenv(soakguardLeaderReady, ready)
 	go func() { done <- run(cmd, signals, started) }()
+	var stopOnce sync.Once
+	stop := func() { stopOnce.Do(func() { signals <- syscall.SIGTERM }) }
+	joined := false
+	t.Cleanup(func() {
+		stop()
+		if joined {
+			return
+		}
+		select {
+		case <-done:
+		case <-time.After(7 * time.Second):
+			t.Error("soakguard did not stop during cleanup")
+		}
+	})
 	session := <-started
-	signals <- syscall.SIGTERM
+	waitForSoakguardMarker(t, ready)
+	stop()
 	select {
 	case code := <-done:
+		joined = true
 		if code != 130 {
 			t.Fatalf("exit code = %d, want 130", code)
 		}
@@ -95,6 +119,30 @@ func TestSignalTerminatesEveryNestedProcessGroupBeforeExit(t *testing.T) {
 		t.Fatal("soakguard did not bound signal cleanup")
 	}
 	assertSessionEmpty(t, session)
+}
+
+func waitForSoakguardMarker(t *testing.T, path string) {
+	t.Helper()
+	deadlineAt := time.Now().Add(3 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+	for {
+		if !time.Now().Before(deadlineAt) {
+			t.Fatal("soakguard leader did not publish readiness")
+		}
+		if _, err := os.Stat(path); err == nil {
+			return
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("read soakguard leader readiness: %v", err)
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatal("soakguard leader did not publish readiness")
+		}
+	}
 }
 
 func assertSessionEmpty(t *testing.T, session int) {
