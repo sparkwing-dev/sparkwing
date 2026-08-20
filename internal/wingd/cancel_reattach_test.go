@@ -14,6 +14,8 @@ import (
 // the reattached connection finalizable, so a control client's CancelLease
 // finds the run and the holder's watch observes the terminal cancel.
 func TestCancel_ReattachedHolderIsCancellable(t *testing.T) {
+	t.Parallel()
+
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})
 

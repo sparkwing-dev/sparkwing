@@ -67,6 +67,8 @@ func TestChurn_QueuedWaiterRecoversAcrossDaemonKill(t *testing.T) {
 // window is the proof -- an unclaimed orphan would have been released -- and
 // the recovered connection can still cleanly release the lease afterward.
 func TestChurn_HolderWatchReattachesAcrossKill(t *testing.T) {
+	t.Parallel()
+
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})
 
