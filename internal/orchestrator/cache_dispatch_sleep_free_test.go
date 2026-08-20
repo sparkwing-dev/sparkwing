@@ -10,6 +10,7 @@ import (
 func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 	targets := map[string]bool{
 		"waitForConcurrencyHolder":                                                     false,
+		"waitForPlanAdmissionWaiter":                                                   false,
 		"waitForSpawnedChildTrigger":                                                   false,
 		"testRunAndAwaitAdmissionOutlivesDispatchWatchdog":                             false,
 		"TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait":        false,
@@ -19,6 +20,15 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 		"TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWait": false,
 		"TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait":      false,
 		"TestConcurrency_RunAndAwaitParentTimeoutCountsSlowChildPlanning":              false,
+	}
+	planWaiterCallers := map[string]bool{
+		"testRunAndAwaitAdmissionOutlivesDispatchWatchdog":                             true,
+		"TestConcurrency_RunAndAwaitNoProgressTimeoutResumesAfterAdmissionWait":        true,
+		"TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused":     true,
+		"TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget":           true,
+		"TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline":                 true,
+		"TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWait": true,
+		"TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait":      true,
 	}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "cache_dispatch_test.go", nil, 0)
@@ -34,6 +44,7 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 			continue
 		}
 		targets[fn.Name.Name] = true
+		usesPlanWait := false
 		usesSpawnWait := false
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
 			call, ok := node.(*ast.CallExpr)
@@ -43,6 +54,9 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "waitForSpawnedChildTrigger" {
 				usesSpawnWait = true
 			}
+			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "waitForPlanAdmissionWaiter" {
+				usesPlanWait = true
+			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
 			if !ok {
 				return true
@@ -51,12 +65,18 @@ func TestCacheDispatchStatePollingDoesNotUseTimeSleep(t *testing.T) {
 				t.Errorf("%s polls FindSpawnedChildTriggerID directly at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
 			pkg, ok := sel.X.(*ast.Ident)
-			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForSpawnedChildTrigger"
+			isPollingHelper := fn.Name.Name == "waitForConcurrencyHolder" || fn.Name.Name == "waitForPlanAdmissionWaiter" || fn.Name.Name == "waitForSpawnedChildTrigger"
 			if isPollingHelper && sel.Sel.Name == "Sleep" && ok && pkg.Name == "time" {
 				t.Errorf("%s contains time.Sleep at %s", fn.Name.Name, fset.Position(call.Pos()))
 			}
+			if planWaiterCallers[fn.Name.Name] && sel.Sel.Name == "GetConcurrencyState" {
+				t.Errorf("%s polls GetConcurrencyState directly at %s", fn.Name.Name, fset.Position(call.Pos()))
+			}
 			return true
 		})
+		if planWaiterCallers[fn.Name.Name] && !usesPlanWait {
+			t.Errorf("%s does not use waitForPlanAdmissionWaiter", fn.Name.Name)
+		}
 		if fn.Name.Name != "waitForConcurrencyHolder" && fn.Name.Name != "waitForSpawnedChildTrigger" && !usesSpawnWait {
 			t.Errorf("%s does not use waitForSpawnedChildTrigger", fn.Name.Name)
 		}
