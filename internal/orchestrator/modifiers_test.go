@@ -129,7 +129,7 @@ func (noProgressLateActionPipe) Plan(ctx context.Context, plan *sparkwing.Plan, 
 		noProgressLateActionStarted <- ctx
 		<-ctx.Done()
 		return nil
-	}).NoProgressTimeout(50 * time.Millisecond)
+	}).NoProgressTimeout(time.Hour)
 	return nil
 }
 
@@ -144,7 +144,7 @@ func (noProgressLateVerifyPipe) Plan(ctx context.Context, plan *sparkwing.Plan, 
 			<-ctx.Done()
 			return nil
 		}).
-		NoProgressTimeout(50 * time.Millisecond)
+		NoProgressTimeout(time.Hour)
 	return nil
 }
 
@@ -458,8 +458,8 @@ func assertForcedNoProgressTimeout(t *testing.T, pipeline string, started <-chan
 	case <-ctx.Done():
 		t.Fatalf("%s did not start its late-success callback: %v", pipeline, ctx.Err())
 	}
-	if !orchestrator.ExpireProgressTimeoutForTest(attemptCtx) {
-		t.Fatalf("%s callback has no active progress timeout", pipeline)
+	if !orchestrator.ForceProgressTimeoutForTest(attemptCtx) {
+		t.Fatalf("%s callback progress timeout was not active", pipeline)
 	}
 
 	var run runResult
