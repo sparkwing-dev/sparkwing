@@ -9,6 +9,7 @@ import (
 
 func TestWingdE2EStatePollingDoesNotSleep(t *testing.T) {
 	targets := map[string]bool{
+		"waitForWingdPoll": false,
 		"TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission": false,
 		"awaitEvent": false,
 		"TestWingd_AbruptDeathReleasesLeaseFinalizesRunAndPromotesNext":    false,
