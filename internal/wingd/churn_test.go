@@ -129,10 +129,14 @@ const successorGrace = 2 * time.Second
 
 func waitForHolder(t *testing.T, home, runID string) {
 	t.Helper()
-	deadline := time.Now().Add(wingdChurnWait)
-	for time.Now().Before(deadline) {
+	ctx, cancel := context.WithTimeout(context.Background(), wingdChurnWait)
+	defer cancel()
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
+	var lastErr error
+	for {
 		q := ensure(t, home, "")
-		qs, err := q.QueueState(context.Background())
+		qs, err := q.QueueState(ctx)
 		_ = q.Close()
 		if err == nil {
 			for _, h := range qs.Holders {
@@ -140,8 +144,16 @@ func waitForHolder(t *testing.T, home, runID string) {
 					return
 				}
 			}
+		} else {
+			lastErr = err
 		}
-		time.Sleep(20 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-ctx.Done():
+			if lastErr != nil {
+				t.Fatalf("run %q never reappeared as a holder after reattach; last queue error: %v", runID, lastErr)
+			}
+			t.Fatalf("run %q never reappeared as a holder after reattach", runID)
+		}
 	}
-	t.Fatalf("run %q never reappeared as a holder after reattach", runID)
 }
