@@ -22,6 +22,21 @@ var sharedS3 struct {
 	pushes      atomic.Int32
 }
 
+type sharedS3Gate struct {
+	entered     chan struct{}
+	release     chan struct{}
+	finished    chan struct{}
+	releaseOnce sync.Once
+}
+
+var activeSharedS3Gate atomic.Pointer[sharedS3Gate]
+
+type sharedS3Result struct {
+	name string
+	res  *orchestrator.Result
+	err  error
+}
+
 func resetSharedS3() {
 	sharedS3.inflight.Store(0)
 	sharedS3.maxInflight.Store(0)
@@ -39,8 +54,22 @@ func s3Push() func(ctx context.Context) error {
 			}
 		}
 		sharedS3.pushes.Add(1)
+		gate := activeSharedS3Gate.Load()
+		if gate == nil {
+			return nil
+		}
 		select {
-		case <-time.After(300 * time.Millisecond):
+		case gate.entered <- struct{}{}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		select {
+		case <-gate.release:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		select {
+		case gate.finished <- struct{}{}:
 			return nil
 		case <-ctx.Done():
 			return ctx.Err()
@@ -86,12 +115,97 @@ func init() {
 // schema migration when two callers fire concurrently against the
 // same paths. Sharing one store mirrors how sparkwing dev actually
 // works (one process, one store) and is the correct test topology.
-func runWithSharedStore(t *testing.T, paths orchestrator.Paths, st *store.Store, opts orchestrator.Options) (*orchestrator.Result, error) {
+func runWithSharedStore(ctx context.Context, t *testing.T, paths orchestrator.Paths, st *store.Store, opts orchestrator.Options) (*orchestrator.Result, error) {
 	t.Helper()
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, err
 	}
-	return orchestrator.Run(context.Background(), orchestrator.LocalBackends(paths, st, nil), opts)
+	return orchestrator.Run(ctx, orchestrator.LocalBackends(paths, st, nil), opts)
+}
+
+func runSharedS3Burst(t *testing.T, p orchestrator.Paths, st *store.Store, names []string) []sharedS3Result {
+	t.Helper()
+	gate := &sharedS3Gate{
+		entered:  make(chan struct{}, len(names)),
+		release:  make(chan struct{}),
+		finished: make(chan struct{}, len(names)),
+	}
+	if !activeSharedS3Gate.CompareAndSwap(nil, gate) {
+		t.Fatal("shared S3 gate already installed")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	results := make(chan sharedS3Result, len(names))
+	var wg sync.WaitGroup
+	for _, name := range names {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			res, err := runWithSharedStore(ctx, t, p, st, orchestrator.Options{Pipeline: name})
+			results <- sharedS3Result{name: name, res: res, err: err}
+		}()
+	}
+	workersDone := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(workersDone)
+	}()
+
+	var cleanupOnce sync.Once
+	cleanup := func() {
+		cleanupOnce.Do(func() {
+			cancel()
+			gate.releaseOnce.Do(func() { close(gate.release) })
+			timer := time.NewTimer(time.Second)
+			defer timer.Stop()
+			select {
+			case <-workersDone:
+			case <-timer.C:
+				t.Errorf("shared S3 workers did not stop within 1s")
+			}
+			activeSharedS3Gate.CompareAndSwap(gate, nil)
+		})
+	}
+	t.Cleanup(cleanup)
+
+	for admitted := 0; admitted < len(names); admitted++ {
+		select {
+		case <-gate.entered:
+		case <-ctx.Done():
+			t.Fatalf("shared S3 body %d of %d did not enter: %v", admitted+1, len(names), ctx.Err())
+		}
+		waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:shared-s3-bucket", 1, len(names)-admitted-1)
+		select {
+		case <-gate.entered:
+			t.Fatalf("multiple shared S3 bodies entered before release %d", admitted+1)
+		default:
+		}
+		if peak := sharedS3.maxInflight.Load(); peak > 1 {
+			t.Fatalf("push-s3 peak concurrency = %d before release %d, want 1", peak, admitted+1)
+		}
+		select {
+		case gate.release <- struct{}{}:
+		case <-ctx.Done():
+			t.Fatalf("release shared S3 body %d: %v", admitted+1, ctx.Err())
+		}
+		select {
+		case <-gate.finished:
+		case <-ctx.Done():
+			t.Fatalf("shared S3 body %d did not finish: %v", admitted+1, ctx.Err())
+		}
+	}
+	select {
+	case <-workersDone:
+	case <-ctx.Done():
+		t.Fatalf("shared S3 runs did not finish: %v", ctx.Err())
+	}
+
+	out := make([]sharedS3Result, 0, len(names))
+	for range names {
+		out = append(out, <-results)
+	}
+	cleanup()
+	return out
 }
 
 func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {
@@ -101,30 +215,12 @@ func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = st.Close() }()
+	t.Cleanup(func() { _ = st.Close() })
 
-	type result struct {
-		name string
-		res  *orchestrator.Result
-		err  error
-	}
-	results := make(chan result, 2)
-	var wg sync.WaitGroup
-	start := time.Now()
-	for _, name := range []string{"publish-release", "sync-backup"} {
-		wg.Add(1)
-		go func(n string) {
-			defer wg.Done()
-			res, rerr := runWithSharedStore(t, p, st, orchestrator.Options{Pipeline: n})
-			results <- result{name: n, res: res, err: rerr}
-		}(name)
-	}
-	wg.Wait()
-	close(results)
-	elapsed := time.Since(start)
+	results := runSharedS3Burst(t, p, st, []string{"publish-release", "sync-backup"})
 
 	var succeeded int
-	for r := range results {
+	for _, r := range results {
 		if r.err != nil {
 			t.Errorf("%s: %v", r.name, r.err)
 			continue
@@ -145,11 +241,6 @@ func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {
 
 	if pushes := sharedS3.pushes.Load(); pushes != 2 {
 		t.Fatalf("expected 2 pushes total, got %d", pushes)
-	}
-
-	maxParallel := 850 * time.Millisecond
-	if elapsed > maxParallel {
-		t.Logf("elapsed=%s (expected <%s for step-scoped coordination)", elapsed, maxParallel)
 	}
 
 	runs, _ := st.ListRuns(context.Background(), store.RunFilter{Limit: 5})
@@ -181,27 +272,25 @@ func TestCache_TwoPipelinesShareKey_AcrossMultipleBursts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = st.Close() }()
+	t.Cleanup(func() { _ = st.Close() })
 
 	const iterations = 3
-	var wg sync.WaitGroup
-	for i := range iterations {
+	pipelines := make([]string, 0, 2*iterations)
+	for range iterations {
 		for _, name := range []string{"publish-release", "sync-backup"} {
-			wg.Add(1)
-			go func(n string, i int) {
-				defer wg.Done()
-				res, rerr := runWithSharedStore(t, p, st, orchestrator.Options{Pipeline: n})
-				if rerr != nil {
-					t.Errorf("iter %d %s: %v", i, n, rerr)
-					return
-				}
-				if res.Status != "success" {
-					t.Errorf("iter %d %s: status=%q", i, n, res.Status)
-				}
-			}(name, i)
+			pipelines = append(pipelines, name)
 		}
 	}
-	wg.Wait()
+	results := runSharedS3Burst(t, p, st, pipelines)
+	for i, result := range results {
+		if result.err != nil {
+			t.Errorf("run %d %s: %v", i, result.name, result.err)
+			continue
+		}
+		if result.res.Status != "success" {
+			t.Errorf("run %d %s: status=%q", i, result.name, result.res.Status)
+		}
+	}
 
 	if peak := sharedS3.maxInflight.Load(); peak > 1 {
 		t.Fatalf("push-s3 peak concurrency across bursts = %d, want 1", peak)
