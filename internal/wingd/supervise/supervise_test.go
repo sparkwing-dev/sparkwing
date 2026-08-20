@@ -3,6 +3,7 @@ package supervise
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,6 +15,22 @@ type supervisorTestChild struct {
 	done  chan error
 	terms int
 	kills int
+}
+
+type nonExitingSupervisorChild struct {
+	done   chan error
+	killed chan struct{}
+}
+
+func newNonExitingSupervisorChild() *nonExitingSupervisorChild {
+	return &nonExitingSupervisorChild{done: make(chan error, 1), killed: make(chan struct{})}
+}
+
+func (c *nonExitingSupervisorChild) Wait() <-chan error { return c.done }
+func (c *nonExitingSupervisorChild) Terminate() error   { return nil }
+func (c *nonExitingSupervisorChild) Kill() error {
+	close(c.killed)
+	return nil
 }
 
 func newSupervisorTestChild() *supervisorTestChild {
@@ -126,5 +143,33 @@ func TestWingdSupervisorDoesNotRestartAChildThatExitsWithoutWatchdogRecovery(t *
 	}
 	if starts != 1 {
 		t.Fatalf("clean idle/drain exit started %d children, want one", starts)
+	}
+}
+
+func TestStopChildBoundsPostKillWait(t *testing.T) {
+	child := newNonExitingSupervisorChild()
+	t.Cleanup(func() {
+		select {
+		case child.done <- nil:
+		default:
+		}
+	})
+
+	result := make(chan error, 1)
+	go func() { result <- stopChild(child, 20*time.Millisecond) }()
+	timer := time.NewTimer(500 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "did not exit after kill") {
+			t.Fatalf("post-kill wait error = %v, want bounded exit failure", err)
+		}
+	case <-timer.C:
+		t.Fatal("stopChild blocked after Kill returned without child exit")
+	}
+	select {
+	case <-child.killed:
+	default:
+		t.Fatal("stopChild returned without escalating to Kill")
 	}
 }
