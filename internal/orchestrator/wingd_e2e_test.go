@@ -1842,10 +1842,35 @@ func TestWingd_DaemonFirstCancelReleasesHolderAndPromotesWaiter(t *testing.T) {
 	backends, st, _ := openWingdBackends(t, home)
 	gate := newWingdGate()
 	wingdE2EGate.Store(gate)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(gate.release) }) }
+	var holderFinished, waiterFinished chan struct{}
+	t.Cleanup(func() {
+		cancel()
+		release()
+		for name, finished := range map[string]<-chan struct{}{
+			"holder": holderFinished,
+			"waiter": waiterFinished,
+		} {
+			if finished == nil {
+				continue
+			}
+			timer := time.NewTimer(2 * time.Second)
+			select {
+			case <-finished:
+			case <-timer.C:
+				t.Errorf("%s run did not stop", name)
+			}
+			timer.Stop()
+		}
+		wingdE2EGate.CompareAndSwap(gate, nil)
+	})
 
 	holder := make(chan *Result, 1)
+	holderFinished = make(chan struct{})
 	go func() {
+		defer close(holderFinished)
 		res, _ := Run(ctx, backends, Options{
 			Pipeline:  "wingd-e2e-hold",
 			RunID:     "cancel-holder",
@@ -1856,7 +1881,9 @@ func TestWingd_DaemonFirstCancelReleasesHolderAndPromotesWaiter(t *testing.T) {
 	gate.awaitStarted(t, "cancel-holder")
 
 	waiter := make(chan *Result, 1)
+	waiterFinished = make(chan struct{})
 	go func() {
+		defer close(waiterFinished)
 		res, _ := Run(ctx, backends, Options{
 			Pipeline:  "wingd-e2e-hold",
 			RunID:     "cancel-waiter",
@@ -1884,7 +1911,7 @@ func TestWingd_DaemonFirstCancelReleasesHolderAndPromotesWaiter(t *testing.T) {
 	}
 
 	gate.awaitStarted(t, "cancel-waiter")
-	close(gate.release)
+	release()
 	select {
 	case res := <-waiter:
 		if res.Status != "success" {
