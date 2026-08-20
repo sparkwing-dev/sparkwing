@@ -3,20 +3,36 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/signal"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func init() {
+	if os.Getenv("SPARKWING_TRIGGER_LOOP_HELPER") != "1" {
+		return
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		os.Exit(2)
+	}
+	if err := os.WriteFile(os.Getenv("SPARKWING_TRIGGER_LOOP_READY"), []byte("ready"), 0o600); err != nil {
+		os.Exit(2)
+	}
+	_, _ = listener.Accept()
+	os.Exit(0)
+}
 
 func TestTriggerRunnerArgsK8s(t *testing.T) {
 	got := triggerRunnerArgs(TriggerLoopOptions{
@@ -104,17 +120,12 @@ func TestHandleTriggerArgsPutFlagsBeforeTriggerID(t *testing.T) {
 }
 
 func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
-	if os.Getenv("SPARKWING_TRIGGER_LOOP_HELPER") == "1" {
-		release := make(chan os.Signal, 1)
-		signal.Notify(release, syscall.SIGUSR1)
-		<-release
-		os.Exit(0)
-	}
-
 	oldBaked := BakedBinary
 	BakedBinary = os.Args[0]
 	t.Cleanup(func() { BakedBinary = oldBaked })
 	t.Setenv("SPARKWING_TRIGGER_LOOP_HELPER", "1")
+	ready := filepath.Join(t.TempDir(), "helper-ready")
+	t.Setenv("SPARKWING_TRIGGER_LOOP_READY", ready)
 	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
 	defer cancel()
 
@@ -128,6 +139,12 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 			if n > 2 {
 				w.WriteHeader(http.StatusNoContent)
 				return
+			}
+			if n == 2 {
+				if err := waitForTriggerHelper(ready, 500*time.Millisecond); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
+				}
 			}
 			mu.Lock()
 			claimTimes = append(claimTimes, time.Now())
@@ -168,10 +185,30 @@ func TestRunTriggerLoopClaimsWhileHandlerInFlight(t *testing.T) {
 	if len(claimTimes) < 2 {
 		t.Fatalf("claims = %d, want at least 2", len(claimTimes))
 	}
-	if gap := claimTimes[1].Sub(claimTimes[0]); gap > 250*time.Millisecond {
-		t.Fatalf("second claim gap = %s, want concurrent claim while first handler is running", gap)
-	}
 	if elapsed := time.Since(claimTimes[1]); elapsed >= 300*time.Millisecond {
 		t.Fatalf("trigger loop returned %s after the second claim, want < 300ms", elapsed)
+	}
+}
+
+func waitForTriggerHelper(path string, timeout time.Duration) error {
+	deadlineAt := time.Now().Add(timeout)
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(time.Until(deadlineAt))
+	defer deadline.Stop()
+	for {
+		if !time.Now().Before(deadlineAt) {
+			return fmt.Errorf("trigger helper did not publish readiness within %s", timeout)
+		}
+		if _, err := os.Stat(path); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return fmt.Errorf("read trigger helper readiness: %w", err)
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			return fmt.Errorf("trigger helper did not publish readiness within %s", timeout)
+		}
 	}
 }
