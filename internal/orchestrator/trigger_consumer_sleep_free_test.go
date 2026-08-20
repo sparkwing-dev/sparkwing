@@ -9,7 +9,8 @@ import (
 
 func TestTriggerConsumerStatePollingDoesNotSleep(t *testing.T) {
 	targets := map[string]bool{
-		"waitFor": false,
+		"waitFor":            false,
+		"expireTriggerLease": false,
 		"TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting":        false,
 		"TestSweeper_ClosesOutAClaimWhoseRunAlreadyEnded":             false,
 		"TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted": false,
