@@ -32,9 +32,22 @@ func TestIdleHolderRegressionDoesNotUseTimeSleep(t *testing.T) {
 			if !ok {
 				return true
 			}
-			if fn.Name.Name == "TestIdleExit_WaitsForHolders" {
+			if fn.Name.Name == "TestIdleExit_WaitsForHolders" && len(call.Args) == 5 {
 				if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "observeHolderFor" {
-					usesObservation = true
+					duration, durationOK := call.Args[4].(*ast.BinaryExpr)
+					if durationOK && duration.Op == token.ADD {
+						idleTimeout, idleOK := duration.X.(*ast.Ident)
+						margin, marginOK := duration.Y.(*ast.BinaryExpr)
+						if !idleOK || idleTimeout.Name != "idleTimeout" || !marginOK || margin.Op != token.MUL {
+							return true
+						}
+						amount, amountOK := margin.X.(*ast.BasicLit)
+						unit, unitOK := margin.Y.(*ast.SelectorExpr)
+						if unitOK {
+							pkg, pkgOK := unit.X.(*ast.Ident)
+							usesObservation = amountOK && amount.Value == "100" && unit.Sel.Name == "Millisecond" && pkgOK && pkg.Name == "time"
+						}
+					}
 				}
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)

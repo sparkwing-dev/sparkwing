@@ -77,6 +77,7 @@ func holdsRun(qs wingwire.QueueState, runID string) bool {
 
 func observeHolderFor(t *testing.T, q *client.Client, daemonDone <-chan error, runID string, duration time.Duration) {
 	t.Helper()
+	deadlineAt := time.Now().Add(duration)
 	observe := func() {
 		queryCtx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 		defer cancel()
@@ -88,18 +89,24 @@ func observeHolderFor(t *testing.T, q *client.Client, daemonDone <-chan error, r
 			t.Fatalf("holder %q disappeared during idle observation", runID)
 		}
 	}
-
-	observe()
 	poll := time.NewTicker(20 * time.Millisecond)
 	defer poll.Stop()
 	observation := time.NewTimer(duration)
 	defer observation.Stop()
 	for {
+		observe()
+		if !time.Now().Before(deadlineAt) {
+			select {
+			case err := <-daemonDone:
+				t.Fatalf("daemon exited while holder %q was active: %v", runID, err)
+			default:
+			}
+			return
+		}
 		select {
 		case err := <-daemonDone:
 			t.Fatalf("daemon exited while holder %q was active: %v", runID, err)
 		case <-poll.C:
-			observe()
 		case <-observation.C:
 			observe()
 			select {
@@ -477,7 +484,11 @@ func TestIdleExit_WaitsForHolders(t *testing.T) {
 
 	started := time.Now()
 	observeHolderFor(t, a, td.done, "a", idleTimeout+100*time.Millisecond)
-	if elapsed := time.Since(started); elapsed >= 550*time.Millisecond {
+	elapsed := time.Since(started)
+	if elapsed < idleTimeout {
+		t.Fatalf("held-lease observation took %s, want at least idle timeout %s", elapsed, idleTimeout)
+	}
+	if elapsed >= 550*time.Millisecond {
 		t.Fatalf("held-lease observation took %s, want under 550ms", elapsed)
 	}
 
