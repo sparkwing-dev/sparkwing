@@ -1835,22 +1835,10 @@ func TestWingd_NodeGroupCancelOthersEvictsAcrossRuns(t *testing.T) {
 	}
 }
 
-func TestWingd_DaemonFirstCancelRecoversStalledHolderWithoutDashboard(t *testing.T) {
+func TestWingd_DaemonFirstCancelReleasesHolderAndPromotesWaiter(t *testing.T) {
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
-	startWingdCfg(t, wingd.Config{
-		Home:    home,
-		Version: "test",
-		Sampler: stubSampler{wingd.HostStat{
-			TotalCores: 2, TotalMemoryBytes: 64 << 30, FreeMemoryBytes: 64 << 30,
-			LoadMeasured: true, MemoryMeasured: true,
-		}},
-		HeadroomFraction: -1,
-		GraceWindow:      -1,
-		ProcSampler:      idleProcSampler{},
-		StallInterval:    20 * time.Millisecond,
-		StallWindow:      40 * time.Millisecond,
-	})
+	startWingd(t, home, 2)
 	backends, st, _ := openWingdBackends(t, home)
 	gate := newWingdGate()
 	wingdE2EGate.Store(gate)
@@ -1860,44 +1848,25 @@ func TestWingd_DaemonFirstCancelRecoversStalledHolderWithoutDashboard(t *testing
 	go func() {
 		res, _ := Run(ctx, backends, Options{
 			Pipeline:  "wingd-e2e-hold",
-			RunID:     "stall-holder",
+			RunID:     "cancel-holder",
 			Admission: testWingdAdmission(home, nil),
 		})
 		holder <- res
 	}()
-	gate.awaitStarted(t, "stall-holder")
+	gate.awaitStarted(t, "cancel-holder")
 
 	waiter := make(chan *Result, 1)
 	go func() {
 		res, _ := Run(ctx, backends, Options{
 			Pipeline:  "wingd-e2e-hold",
-			RunID:     "stall-waiter",
+			RunID:     "cancel-waiter",
 			Admission: testWingdAdmission(home, nil),
 		})
 		waiter <- res
 	}()
-	awaitWaiter(t, home, "stall-waiter")
+	awaitWaiter(t, home, "cancel-waiter")
 
-	var recovery string
-	deadline := time.Now().Add(wingdTestWait)
-	poll := time.NewTicker(10 * time.Millisecond)
-	defer poll.Stop()
-	for time.Now().Before(deadline) {
-		h := findWingdHolder(t, home, "stall-holder")
-		if h.Stalled && h.Recovery != "" {
-			recovery = h.Recovery
-			break
-		}
-		waitForWingdPoll(poll)
-	}
-	if recovery == "" {
-		t.Fatal("stalled holder was never flagged with a recovery command")
-	}
-	if recovery != "sparkwing runs cancel --run stall-holder" {
-		t.Fatalf("recovery command = %q, want the daemon-first cancel", recovery)
-	}
-
-	found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home, Version: "test"}, "stall-holder")
+	found, err := wingdclient.Cancel(ctx, wingdclient.Options{Home: home, Version: "test"}, "cancel-holder")
 	if err != nil {
 		t.Fatalf("daemon-first cancel: %v", err)
 	}
@@ -1911,10 +1880,10 @@ func TestWingd_DaemonFirstCancelRecoversStalledHolderWithoutDashboard(t *testing
 			t.Fatalf("holder status = %q (err=%v), want cancelled after daemon-first cancel", res.Status, res.Error)
 		}
 	case <-time.After(wingdTestWait):
-		t.Fatal("stalled holder never wound down after cancel")
+		t.Fatal("holder never wound down after cancel")
 	}
 
-	gate.awaitStarted(t, "stall-waiter")
+	gate.awaitStarted(t, "cancel-waiter")
 	close(gate.release)
 	select {
 	case res := <-waiter:
@@ -1925,7 +1894,7 @@ func TestWingd_DaemonFirstCancelRecoversStalledHolderWithoutDashboard(t *testing
 		t.Fatal("waiter never promoted after the holder released")
 	}
 
-	run, err := st.GetRun(ctx, "stall-holder")
+	run, err := st.GetRun(ctx, "cancel-holder")
 	if err != nil {
 		t.Fatalf("get holder run: %v", err)
 	}

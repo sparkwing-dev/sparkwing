@@ -12,12 +12,12 @@ func TestWingdE2EStatePollingDoesNotSleep(t *testing.T) {
 		"waitForWingdPoll": false,
 		"TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission": false,
 		"awaitEvent": false,
-		"TestWingd_AbruptDeathReleasesLeaseFinalizesRunAndPromotesNext":    false,
-		"TestWingd_DaemonFirstCancelRecoversStalledHolderWithoutDashboard": false,
-		"TestWingd_DaemonFirstCancelSurvivesImmediateClientExit":           false,
-		"TestWingd_DaemonFirstCancelFinalizesQueuedClient":                 false,
-		"TestWingd_DaemonFirstCancelRemovesQueuedWaiterWithoutDashboard":   false,
-		"TestRunLocal_SIGINTFinalizesRunAsCancelledAndReleasesLease":       false,
+		"TestWingd_AbruptDeathReleasesLeaseFinalizesRunAndPromotesNext":  false,
+		"TestWingd_DaemonFirstCancelReleasesHolderAndPromotesWaiter":     false,
+		"TestWingd_DaemonFirstCancelSurvivesImmediateClientExit":         false,
+		"TestWingd_DaemonFirstCancelFinalizesQueuedClient":               false,
+		"TestWingd_DaemonFirstCancelRemovesQueuedWaiterWithoutDashboard": false,
+		"TestRunLocal_SIGINTFinalizesRunAsCancelledAndReleasesLease":     false,
 	}
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "wingd_e2e_test.go", nil, 0)
