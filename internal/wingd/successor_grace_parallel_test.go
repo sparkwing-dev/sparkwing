@@ -33,21 +33,23 @@ func TestSuccessorGraceRegressionsRunInParallel(t *testing.T) {
 			if _, ok := targets[fn.Name.Name]; !ok {
 				continue
 			}
-			ast.Inspect(fn.Body, func(node ast.Node) bool {
-				call, ok := node.(*ast.CallExpr)
-				if !ok {
-					return true
-				}
-				sel, ok := call.Fun.(*ast.SelectorExpr)
-				if !ok || sel.Sel.Name != "Parallel" {
-					return true
-				}
-				receiver, ok := sel.X.(*ast.Ident)
-				if ok && receiver.Name == "t" && len(call.Args) == 0 {
-					targets[fn.Name.Name] = true
-				}
-				return true
-			})
+			if len(fn.Body.List) == 0 {
+				continue
+			}
+			expr, ok := fn.Body.List[0].(*ast.ExprStmt)
+			if !ok {
+				continue
+			}
+			call, ok := expr.X.(*ast.CallExpr)
+			if !ok || len(call.Args) != 0 {
+				continue
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok || sel.Sel.Name != "Parallel" {
+				continue
+			}
+			receiver, ok := sel.X.(*ast.Ident)
+			targets[fn.Name.Name] = ok && receiver.Name == "t"
 		}
 	}
 	for name, parallel := range targets {
