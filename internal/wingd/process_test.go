@@ -183,6 +183,24 @@ func daemonLineCount(t *testing.T, home string) int {
 	return len(strings.Fields(strings.TrimSpace(string(data))))
 }
 
+func waitForDaemonLineCount(t *testing.T, home string, want int, timeout time.Duration) {
+	t.Helper()
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		if got := daemonLineCount(t, home); got >= want {
+			return
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("daemon history contains fewer than %d entries after %s", want, timeout)
+		}
+	}
+}
+
 // TestProcess_ElectionRaceSingleDaemon starts several client processes at
 // once, each of which will spawn a daemon if none is running; the flock
 // election must leave exactly one daemon serving all of them.
@@ -352,13 +370,7 @@ func TestProcess_DaemonKillRestoresAndReattaches(t *testing.T) {
 		t.Fatalf("kill daemon %d: %v", dpid, err)
 	}
 
-	deadline := time.Now().Add(10 * time.Second)
-	for daemonLineCount(t, home) < 2 && time.Now().Before(deadline) {
-		time.Sleep(20 * time.Millisecond)
-	}
-	if daemonLineCount(t, home) < 2 {
-		t.Fatal("successor daemon was not elected")
-	}
+	waitForDaemonLineCount(t, home, 2, 10*time.Second)
 
 	// A restored lease that was not reclaimed would expire after this window.
 	time.Sleep(750 * time.Millisecond)
