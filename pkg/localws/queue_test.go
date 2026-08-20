@@ -35,17 +35,28 @@ func startDaemonForQueue(t *testing.T, home string) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
-	go func() { done <- d.Run(ctx) }()
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		done <- d.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		timer := time.NewTimer(3 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-finished:
+		case <-timer.C:
+			t.Error("queue daemon did not stop during test cleanup")
+		}
+	})
 	select {
 	case <-d.Ready():
 	case err := <-done:
-		cancel()
 		t.Fatalf("daemon exited before ready: %v", err)
 	case <-time.After(3 * time.Second):
-		cancel()
 		t.Fatal("daemon never became ready")
 	}
-	t.Cleanup(cancel)
 }
 
 func TestQueueHandler_NoDaemonReturnsEmptyQueue(t *testing.T) {
