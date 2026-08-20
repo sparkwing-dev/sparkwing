@@ -225,8 +225,10 @@ func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
 	home := shortHome(t)
 	var calls atomic.Int32
 	spawnRequested := make(chan struct{})
+	postSpawnRetries := make(chan struct{})
 	startDaemon := make(chan struct{})
 	var spawnOnce, startOnce sync.Once
+	var retryCount atomic.Int32
 	releaseStart := func() { startOnce.Do(func() { close(startDaemon) }) }
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 
@@ -273,6 +275,11 @@ func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
 			Spawn:       spawn,
 			DialTimeout: 10 * time.Millisecond,
 			Backoff:     10 * time.Millisecond,
+			observeDialFailure: func() {
+				if calls.Load() > 0 && retryCount.Add(1) == 3 {
+					close(postSpawnRetries)
+				}
+			},
 		})
 	}()
 	t.Cleanup(func() {
@@ -306,6 +313,11 @@ func TestEnsureDaemon_WaitsForOneSlowHealthySpawn(t *testing.T) {
 	case <-spawnRequested:
 	case <-ctx.Done():
 		t.Fatalf("spawn was not requested: %v", ctx.Err())
+	}
+	select {
+	case <-postSpawnRetries:
+	case <-ctx.Done():
+		t.Fatalf("post-spawn retries were not observed: %v", ctx.Err())
 	}
 	releaseStart()
 	select {

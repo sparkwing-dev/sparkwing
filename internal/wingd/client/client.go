@@ -212,8 +212,9 @@ type Options struct {
 	// daemon to release this home's election. Zero uses the daemon startup window.
 	PredecessorWaitTimeout time.Duration
 	// Logf receives one-line diagnostics. Nil discards them.
-	Logf        func(format string, args ...any)
-	healthProbe bool
+	Logf               func(format string, args ...any)
+	healthProbe        bool
+	observeDialFailure func()
 }
 
 func (o Options) dialTimeout() time.Duration {
@@ -566,6 +567,9 @@ func (cl *Client) connect(ctx context.Context) error {
 		}
 		nc, derr := dial(ctx, cl.sock, opts.dialTimeout())
 		if derr != nil {
+			if opts.observeDialFailure != nil {
+				opts.observeDialFailure()
+			}
 			lastDial = derr
 			if socketDeadline.IsZero() || !time.Now().Before(socketDeadline) {
 				if spawns >= maxSpawnAttempts {
