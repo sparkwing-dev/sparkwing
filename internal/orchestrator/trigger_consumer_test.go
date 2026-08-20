@@ -62,13 +62,32 @@ func seedSubmission(t *testing.T, st *store.Store, id, pipeline, repoDir string)
 func waitFor(t *testing.T, what string, timeout time.Duration, cond func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
 	for time.Now().Before(deadline) {
 		if cond() {
 			return
 		}
-		time.Sleep(10 * time.Millisecond)
+		<-poll.C
 	}
 	t.Fatalf("timed out after %s waiting for %s", timeout, what)
+}
+
+func expireTriggerLease(t *testing.T, st *store.Store, id string) {
+	t.Helper()
+	result, err := st.DB().Exec(
+		`UPDATE triggers SET lease_expires_at = ? WHERE id = ? AND status = 'claimed' AND lease_expires_at IS NOT NULL`,
+		time.Now().Add(-time.Second).UnixNano(), id)
+	if err != nil {
+		t.Fatalf("expire trigger %q lease: %v", id, err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		t.Fatalf("count expired trigger %q leases: %v", id, err)
+	}
+	if rows != 1 {
+		t.Fatalf("expired trigger %q leases = %d, want 1", id, rows)
+	}
 }
 
 // TestServeConsumer_OneConsumerPerHome is the no-double-consume proof at
@@ -457,7 +476,7 @@ func TestSweeper_NeverRequeuesWhatThisConsumerIsExecuting(t *testing.T) {
 	if _, err := st.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(5 * time.Millisecond)
+	expireTriggerLease(t, st, "run-mine")
 
 	// The run row is still pending -- the child has been exec'd but has
 	// not reached CreateRun yet, which is the widest version of the
@@ -489,7 +508,7 @@ func TestSweeper_ClosesOutAClaimWhoseRunAlreadyEnded(t *testing.T) {
 	if err := st.FinishRun(ctx, "run-done", "success", ""); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(5 * time.Millisecond)
+	expireTriggerLease(t, st, "run-done")
 
 	requeueExpiredClaims(ctx, st, newInFlightSet(), quietLogger())
 
@@ -515,7 +534,7 @@ func TestSweeper_StillRecoversAConsumerKilledBeforeTheRunStarted(t *testing.T) {
 	if _, err := st.ClaimNextTrigger(ctx, time.Nanosecond); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(5 * time.Millisecond)
+	expireTriggerLease(t, st, "run-orphan")
 
 	requeueExpiredClaims(ctx, st, newInFlightSet(), quietLogger())
 
@@ -634,7 +653,7 @@ func TestHeartbeat_StopsWhenTheClaimIsSuperseded(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(5 * time.Millisecond)
+	expireTriggerLease(t, st, "run-super")
 	if _, err := st.RequeueUnstartedClaim(ctx, "run-super"); err != nil {
 		t.Fatal(err)
 	}
