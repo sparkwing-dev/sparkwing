@@ -17,19 +17,15 @@ import (
 // either pipeline's "push-s3" step fires, we observe the in-flight
 // count. Peak must stay at 1.
 var sharedS3 struct {
-	inflight        atomic.Int32
-	maxInflight     atomic.Int32
-	pushes          atomic.Int32
-	otherConcurrent atomic.Int32
-	otherMax        atomic.Int32
+	inflight    atomic.Int32
+	maxInflight atomic.Int32
+	pushes      atomic.Int32
 }
 
 func resetSharedS3() {
 	sharedS3.inflight.Store(0)
 	sharedS3.maxInflight.Store(0)
 	sharedS3.pushes.Store(0)
-	sharedS3.otherConcurrent.Store(0)
-	sharedS3.otherMax.Store(0)
 }
 
 func s3Push() func(ctx context.Context) error {
@@ -52,35 +48,19 @@ func s3Push() func(ctx context.Context) error {
 	}
 }
 
-func unsharedStep(label string) func(ctx context.Context) error {
-	_ = label
-	return func(ctx context.Context) error {
-		cur := sharedS3.otherConcurrent.Add(1)
-		defer sharedS3.otherConcurrent.Add(-1)
-		for {
-			peak := sharedS3.otherMax.Load()
-			if cur <= peak || sharedS3.otherMax.CompareAndSwap(peak, cur) {
-				break
-			}
-		}
-		select {
-		case <-time.After(80 * time.Millisecond):
-			return nil
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
+func unsharedStep() func(context.Context) error {
+	return func(context.Context) error { return nil }
 }
 
 // publishReleasePipe: build -> push-s3 -> notify
 type publishReleasePipe struct{ sparkwing.Base }
 
 func (publishReleasePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	build := sparkwing.Job(plan, "build-artifact", unsharedStep("release-build"))
+	build := sparkwing.Job(plan, "build-artifact", unsharedStep())
 	push := sparkwing.Job(plan, "push-s3", s3Push()).
 		Needs(build).
 		Concurrency(sparkwing.NewConcurrencyGroup("shared-s3-bucket", sparkwing.ConcurrencyLimit{Capacity: 1, OnLimit: sparkwing.Queue}))
-	sparkwing.Job(plan, "notify-slack", unsharedStep("release-notify")).Needs(push)
+	sparkwing.Job(plan, "notify-slack", unsharedStep()).Needs(push)
 	return nil
 }
 
@@ -88,11 +68,11 @@ func (publishReleasePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 type syncBackupPipe struct{ sparkwing.Base }
 
 func (syncBackupPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
-	snapshot := sparkwing.Job(plan, "snapshot-db", unsharedStep("backup-snapshot"))
+	snapshot := sparkwing.Job(plan, "snapshot-db", unsharedStep())
 	push := sparkwing.Job(plan, "push-s3", s3Push()).
 		Needs(snapshot).
 		Concurrency(sparkwing.NewConcurrencyGroup("shared-s3-bucket", sparkwing.ConcurrencyLimit{Capacity: 1, OnLimit: sparkwing.Queue}))
-	sparkwing.Job(plan, "update-inventory", unsharedStep("backup-inventory")).Needs(push)
+	sparkwing.Job(plan, "update-inventory", unsharedStep()).Needs(push)
 	return nil
 }
 
