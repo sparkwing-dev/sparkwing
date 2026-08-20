@@ -18,6 +18,8 @@ func TestSlowSpawnRegressionDoesNotUseTimeSleep(t *testing.T) {
 	spawnRequestedReceives := 0
 	startDaemonReceives := 0
 	releaseStartCalls := 0
+	configuresDialObserver := false
+	var postSpawnRetryPos, lastReleasePos token.Pos
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok || fn.Name.Name != "TestEnsureDaemon_WaitsForOneSlowHealthySpawn" {
@@ -25,6 +27,11 @@ func TestSlowSpawnRegressionDoesNotUseTimeSleep(t *testing.T) {
 		}
 		found = true
 		ast.Inspect(fn.Body, func(node ast.Node) bool {
+			if field, ok := node.(*ast.KeyValueExpr); ok {
+				if key, ok := field.Key.(*ast.Ident); ok && key.Name == "observeDialFailure" {
+					configuresDialObserver = true
+				}
+			}
 			if receive, ok := node.(*ast.UnaryExpr); ok && receive.Op == token.ARROW {
 				if channel, ok := receive.X.(*ast.Ident); ok {
 					switch channel.Name {
@@ -32,6 +39,8 @@ func TestSlowSpawnRegressionDoesNotUseTimeSleep(t *testing.T) {
 						spawnRequestedReceives++
 					case "startDaemon":
 						startDaemonReceives++
+					case "postSpawnRetries":
+						postSpawnRetryPos = receive.Pos()
 					}
 				}
 			}
@@ -49,6 +58,9 @@ func TestSlowSpawnRegressionDoesNotUseTimeSleep(t *testing.T) {
 					}
 				case "releaseStart":
 					releaseStartCalls++
+					if call.Pos() > lastReleasePos {
+						lastReleasePos = call.Pos()
+					}
 				}
 			}
 			sel, ok := call.Fun.(*ast.SelectorExpr)
@@ -67,5 +79,8 @@ func TestSlowSpawnRegressionDoesNotUseTimeSleep(t *testing.T) {
 	}
 	if !closesSpawnRequested || spawnRequestedReceives < 2 || startDaemonReceives == 0 || releaseStartCalls < 2 {
 		t.Fatal("slow-spawn regression must gate daemon startup after the spawn request and release it on normal and cleanup paths")
+	}
+	if !configuresDialObserver || !postSpawnRetryPos.IsValid() || postSpawnRetryPos >= lastReleasePos {
+		t.Fatal("slow-spawn regression must observe post-spawn dial retries before releasing daemon startup")
 	}
 }
