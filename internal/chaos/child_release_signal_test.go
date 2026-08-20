@@ -97,3 +97,42 @@ func TestCrashdummyChildFixtureUsesObservedReleaseSignal(t *testing.T) {
 		t.Error("parent wait must run in its lifecycle worker")
 	}
 }
+
+func TestCrashdummyHolderInstallsSignalsBeforeSpawningChildren(t *testing.T) {
+	file, err := parser.ParseFile(token.NewFileSet(), "crashdummy/main.go", nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var installAt, spawnAt token.Pos
+	ast.Inspect(file, func(node ast.Node) bool {
+		fn, ok := node.(*ast.FuncDecl)
+		if !ok || fn.Name.Name != "run" || fn.Recv == nil {
+			return true
+		}
+		ast.Inspect(fn.Body, func(child ast.Node) bool {
+			call, ok := child.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			sel, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			receiver, receiverOK := sel.X.(*ast.Ident)
+			if !receiverOK || receiver.Name != "h" {
+				return true
+			}
+			switch sel.Sel.Name {
+			case "installSignals":
+				installAt = call.Pos()
+			case "spawnChildren":
+				spawnAt = call.Pos()
+			}
+			return true
+		})
+		return false
+	})
+	if installAt == token.NoPos || spawnAt == token.NoPos || installAt >= spawnAt {
+		t.Fatal("holder must install signal handling before children can publish readiness")
+	}
+}
