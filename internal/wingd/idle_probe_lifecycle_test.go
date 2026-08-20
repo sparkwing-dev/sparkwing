@@ -29,6 +29,7 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 		helperCancels     bool
 		helperClosesDone  bool
 		helperWaitsDone   bool
+		helperBoundedJoin bool
 		helperOwnsTimer   bool
 		helperStopsTimer  bool
 		preHelloDialBound bool
@@ -79,6 +80,31 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 						cleanup, ok := call.Args[0].(*ast.FuncLit)
 						if ok {
 							ast.Inspect(cleanup.Body, func(node ast.Node) bool {
+								if selection, ok := node.(*ast.SelectStmt); ok {
+									var waitsDone, waitsTimer bool
+									for _, stmt := range selection.Body.List {
+										clause, ok := stmt.(*ast.CommClause)
+										if !ok {
+											continue
+										}
+										expr, ok := clause.Comm.(*ast.ExprStmt)
+										if !ok {
+											continue
+										}
+										recv, ok := expr.X.(*ast.UnaryExpr)
+										if !ok || recv.Op != token.ARROW {
+											continue
+										}
+										if ident, ok := recv.X.(*ast.Ident); ok && ident.Name == "done" {
+											waitsDone = true
+										}
+										if channel, ok := recv.X.(*ast.SelectorExpr); ok && channel.Sel.Name == "C" {
+											receiver, ok := channel.X.(*ast.Ident)
+											waitsTimer = ok && receiver.Name == "timer"
+										}
+									}
+									helperBoundedJoin = waitsDone && waitsTimer
+								}
 								if unary, ok := node.(*ast.UnaryExpr); ok && unary.Op == token.ARROW {
 									if ident, ok := unary.X.(*ast.Ident); ok && ident.Name == "done" {
 										helperWaitsDone = true
@@ -118,7 +144,7 @@ func TestIdleProbeLoopsOwnTheirLifecycle(t *testing.T) {
 	if foundOldHelper {
 		t.Error("probeLoop leaves lifecycle ownership at callers; use startProbeLoop")
 	}
-	if !foundHelper || !helperWithCancel || !helperCleanup || !helperCancels || !helperClosesDone || !helperWaitsDone || !helperOwnsTimer || !helperStopsTimer {
+	if !foundHelper || !helperWithCancel || !helperCleanup || !helperCancels || !helperClosesDone || !helperWaitsDone || !helperBoundedJoin || !helperOwnsTimer || !helperStopsTimer {
 		t.Error("startProbeLoop must own cancellation, completion, cleanup, and a stopped bounded join timer")
 	}
 	for name, delegates := range callers {
