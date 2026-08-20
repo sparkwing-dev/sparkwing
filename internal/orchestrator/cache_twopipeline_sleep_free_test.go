@@ -1,7 +1,9 @@
 package orchestrator_test
 
 import (
+	"bytes"
 	"go/ast"
+	"go/format"
 	"go/parser"
 	"go/token"
 	"testing"
@@ -21,16 +23,14 @@ func TestUnsharedCacheFixtureStepDoesNotWait(t *testing.T) {
 			continue
 		}
 		found = true
-		ast.Inspect(fn.Body, func(node ast.Node) bool {
-			sel, ok := node.(*ast.SelectorExpr)
-			if !ok {
-				return true
-			}
-			if ident, isIdent := sel.X.(*ast.Ident); ok && isIdent && ident.Name == "time" {
-				t.Errorf("unsharedStep contains time.%s at %s", sel.Sel.Name, fset.Position(sel.Pos()))
-			}
-			return true
-		})
+		var rendered bytes.Buffer
+		if err := format.Node(&rendered, fset, fn); err != nil {
+			t.Fatalf("format unsharedStep: %v", err)
+		}
+		const want = "func unsharedStep() func(context.Context) error {\n\treturn func(context.Context) error { return nil }\n}"
+		if rendered.String() != want {
+			t.Errorf("unsharedStep must remain an inert closure; got:\n%s", rendered.String())
+		}
 	}
 	if !found {
 		t.Fatal("unsharedStep declaration not found")
