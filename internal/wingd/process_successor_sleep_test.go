@@ -7,15 +7,15 @@ import (
 	"testing"
 )
 
-func TestProcessSuccessorUsesOnlyTheLeaseObservationSleep(t *testing.T) {
+func TestProcessSuccessorObservesLeaseWithoutTimeSleep(t *testing.T) {
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, "process_test.go", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	var foundHelper bool
-	var observationSleeps int
-	var foundLeaseObservation bool
+	var foundRegression bool
+	var holderReadyPos, observationPos token.Pos
 	for _, decl := range file.Decls {
 		fn, ok := decl.(*ast.FuncDecl)
 		if !ok {
@@ -31,12 +31,25 @@ func TestProcessSuccessorUsesOnlyTheLeaseObservationSleep(t *testing.T) {
 				return true
 			})
 		case "TestProcess_DaemonKillRestoresAndReattaches":
+			foundRegression = true
 			ast.Inspect(fn.Body, func(node ast.Node) bool {
 				if isTimeSleep(node) {
-					observationSleeps++
-					call := node.(*ast.CallExpr)
-					if len(call.Args) == 1 && is750Milliseconds(call.Args[0]) {
-						foundLeaseObservation = true
+					t.Errorf("%s: observe successor lease state directly", fset.Position(node.Pos()))
+				}
+				call, ok := node.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				ident, ok := call.Fun.(*ast.Ident)
+				if !ok {
+					return true
+				}
+				switch ident.Name {
+				case "waitForHolder":
+					holderReadyPos = call.Pos()
+				case "observeReattachedHolderFor":
+					if len(call.Args) == 4 && is750Milliseconds(call.Args[3]) {
+						observationPos = call.Pos()
 					}
 				}
 				return true
@@ -46,11 +59,11 @@ func TestProcessSuccessorUsesOnlyTheLeaseObservationSleep(t *testing.T) {
 	if !foundHelper {
 		t.Error("required declaration waitForDaemonLineCount not found")
 	}
-	if observationSleeps != 1 {
-		t.Errorf("successor regression has %d time.Sleep calls, want the one lease-survival observation", observationSleeps)
+	if !foundRegression {
+		t.Error("required declaration TestProcess_DaemonKillRestoresAndReattaches not found")
 	}
-	if !foundLeaseObservation {
-		t.Error("750ms lease-survival observation not found")
+	if !holderReadyPos.IsValid() || !observationPos.IsValid() || holderReadyPos >= observationPos {
+		t.Error("successor regression must find then observe holder a for 750*time.Millisecond")
 	}
 }
 

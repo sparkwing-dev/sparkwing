@@ -372,10 +372,9 @@ func TestProcess_DaemonKillRestoresAndReattaches(t *testing.T) {
 
 	waitForDaemonLineCount(t, home, 2, 10*time.Second)
 
-	// A restored lease that was not reclaimed would expire after this window.
-	time.Sleep(750 * time.Millisecond)
+	waitForHolder(t, home, "a")
+	observeReattachedHolderFor(t, home, "a", 750*time.Millisecond)
 	if err := a.cmd.Process.Signal(syscall.Signal(0)); err != nil {
 		t.Fatalf("original holder exited instead of reclaiming its lease: %v", err)
 	}
-	waitForHolder(t, home, "a")
 }
