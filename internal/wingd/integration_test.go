@@ -71,6 +71,7 @@ func TestElection_ExactlyOneWinner(t *testing.T) {
 			}
 		}
 	}
+	poll.Stop()
 
 	lost := 0
 	loseDeadline := time.NewTimer(3 * time.Second)
