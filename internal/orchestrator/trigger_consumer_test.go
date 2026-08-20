@@ -213,10 +213,11 @@ func TestServeConsumerClaimsPendingWorkImmediately(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	ready := make(chan struct{})
+	result := make(chan error, 1)
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)
-		_ = ServeConsumer(ctx, ConsumerOptions{
+		result <- ServeConsumer(ctx, ConsumerOptions{
 			Home: home, Store: st, Logger: quietLogger(), IdleTimeout: -1, Ready: ready,
 		})
 	}()
@@ -230,7 +231,15 @@ func TestServeConsumerClaimsPendingWorkImmediately(t *testing.T) {
 			t.Error("consumer did not stop")
 		}
 	})
-	<-ready
+	startupTimer := time.NewTimer(time.Second)
+	defer startupTimer.Stop()
+	select {
+	case <-ready:
+	case err := <-result:
+		t.Fatalf("consumer exited before readiness: %v", err)
+	case <-startupTimer.C:
+		t.Fatal("consumer did not become ready")
+	}
 
 	waitFor(t, "the startup consumer to claim pending work", 400*time.Millisecond, func() bool {
 		run, err := st.GetRun(context.Background(), "run-ready")
