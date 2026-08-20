@@ -58,7 +58,7 @@ func TestSharedS3SerializationUsesStateSignalsInsteadOfDuration(t *testing.T) {
 				}
 				exactPopulationSequence = selectReceives(loop.Body.List[0], "entered") &&
 					exactPopulationCall(loop.Body.List[1]) &&
-					selectReceives(loop.Body.List[2], "entered") &&
+					selectRejectsExtraEntry(loop.Body.List[2]) &&
 					selectSends(loop.Body.List[4], "release") &&
 					selectReceives(loop.Body.List[5], "finished")
 			}
@@ -108,10 +108,39 @@ func selectReceives(stmt ast.Stmt, channel string) bool {
 			return true
 		}
 		sel, ok := receive.X.(*ast.SelectorExpr)
-		found = found || ok && sel.Sel.Name == channel
+		found = found || ok && sel.Sel.Name == channel && isIdent(sel.X, "gate")
 		return true
 	})
 	return found
+}
+
+func selectRejectsExtraEntry(stmt ast.Stmt) bool {
+	selectStmt, ok := stmt.(*ast.SelectStmt)
+	if !ok || len(selectStmt.Body.List) != 2 {
+		return false
+	}
+	hasEntered, hasDefault := false, false
+	for _, rawClause := range selectStmt.Body.List {
+		clause, ok := rawClause.(*ast.CommClause)
+		if !ok {
+			return false
+		}
+		if clause.Comm == nil {
+			hasDefault = true
+			continue
+		}
+		expr, ok := clause.Comm.(*ast.ExprStmt)
+		if !ok {
+			continue
+		}
+		receive, ok := expr.X.(*ast.UnaryExpr)
+		if !ok || receive.Op != token.ARROW {
+			continue
+		}
+		sel, ok := receive.X.(*ast.SelectorExpr)
+		hasEntered = hasEntered || ok && sel.Sel.Name == "entered" && isIdent(sel.X, "gate")
+	}
+	return hasEntered && hasDefault
 }
 
 func selectSends(stmt ast.Stmt, channel string) bool {
@@ -126,7 +155,7 @@ func selectSends(stmt ast.Stmt, channel string) bool {
 			return true
 		}
 		sel, ok := send.Chan.(*ast.SelectorExpr)
-		found = found || ok && sel.Sel.Name == channel
+		found = found || ok && sel.Sel.Name == channel && isIdent(sel.X, "gate")
 		return true
 	})
 	return found
