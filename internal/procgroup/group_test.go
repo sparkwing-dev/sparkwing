@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 const (
 	helperMode        = "SPARKWING_PROCGROUP_HELPER"
 	procgroupReadyEnv = "SPARKWING_PROCGROUP_READY"
+	procgroupReadyFD  = "SPARKWING_PROCGROUP_READY_FD"
 )
 
 func TestGroupHelperProcess(t *testing.T) {
@@ -26,13 +28,10 @@ func TestGroupHelperProcess(t *testing.T) {
 		IgnoreTermination()
 		holdHelperProcess(os.Getenv(procgroupReadyEnv))
 	case "leader":
-		child := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-		child.Env = append(os.Environ(), helperMode+"=descendant")
-		if err := child.Start(); err != nil {
+		if !startReadyGroupDescendant(false) {
 			os.Exit(2)
 		}
 		IgnoreTermination()
-		time.Sleep(100 * time.Millisecond)
 		os.Exit(0)
 	case "short":
 		os.Exit(0)
@@ -41,13 +40,9 @@ func TestGroupHelperProcess(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		os.Exit(0)
 	case "session-leader":
-		child := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
-		child.Env = append(os.Environ(), helperMode+"=descendant")
-		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		if err := child.Start(); err != nil {
+		if !startReadyGroupDescendant(true) {
 			os.Exit(2)
 		}
-		time.Sleep(100 * time.Millisecond)
 		os.Exit(0)
 	case "session-stubborn":
 		IgnoreTermination()
@@ -81,6 +76,20 @@ func holdHelperProcess(ready string) {
 	if err != nil {
 		os.Exit(2)
 	}
+	if fdText := os.Getenv(procgroupReadyFD); fdText != "" {
+		fd, err := strconv.Atoi(fdText)
+		if err != nil {
+			_ = ln.Close()
+			os.Exit(2)
+		}
+		readyPipe := os.NewFile(uintptr(fd), "procgroup-helper-ready")
+		if _, err := readyPipe.Write([]byte{1}); err != nil {
+			_ = readyPipe.Close()
+			_ = ln.Close()
+			os.Exit(2)
+		}
+		_ = readyPipe.Close()
+	}
 	if ready != "" {
 		if err := os.WriteFile(ready, []byte("ready"), 0o600); err != nil {
 			_ = ln.Close()
@@ -91,6 +100,43 @@ func holdHelperProcess(ready string) {
 		os.Exit(2)
 	}
 	os.Exit(2)
+}
+
+func startReadyGroupDescendant(setpgid bool) bool {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		return false
+	}
+	defer reader.Close()
+	child := exec.Command(os.Args[0], "-test.run=^TestGroupHelperProcess$")
+	child.Env = append(os.Environ(), helperMode+"=descendant", procgroupReadyFD+"=3")
+	child.ExtraFiles = []*os.File{writer}
+	if setpgid {
+		child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	}
+	if err := child.Start(); err != nil {
+		_ = writer.Close()
+		return false
+	}
+	_ = writer.Close()
+	ready := make(chan error, 1)
+	go func() {
+		buf := make([]byte, 1)
+		_, err := reader.Read(buf)
+		ready <- err
+	}()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case err := <-ready:
+		if err == nil {
+			return true
+		}
+	case <-timer.C:
+	}
+	_ = child.Process.Kill()
+	_ = child.Wait()
+	return false
 }
 
 func TestSessionIdentityBindsInspectionToLeaderBirth(t *testing.T) {
