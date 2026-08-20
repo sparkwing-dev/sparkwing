@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,7 +21,33 @@ var cacheCounter struct {
 	max      atomic.Int32
 }
 
-func cacheStep(hold time.Duration) func(ctx context.Context) error {
+type cacheStepGate struct {
+	started     chan struct{}
+	release     chan struct{}
+	startedOnce sync.Once
+	releaseOnce sync.Once
+}
+
+var activeCacheStepGate atomic.Pointer[cacheStepGate]
+
+func (g *cacheStepGate) letRun() {
+	g.releaseOnce.Do(func() { close(g.release) })
+}
+
+func installCacheStepGate(t *testing.T) *cacheStepGate {
+	t.Helper()
+	gate := &cacheStepGate{started: make(chan struct{}), release: make(chan struct{})}
+	if !activeCacheStepGate.CompareAndSwap(nil, gate) {
+		t.Fatal("cache step gate already installed")
+	}
+	t.Cleanup(func() {
+		gate.letRun()
+		activeCacheStepGate.CompareAndSwap(gate, nil)
+	})
+	return gate
+}
+
+func cacheStep() func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		cur := cacheCounter.inflight.Add(1)
 		defer cacheCounter.inflight.Add(-1)
@@ -30,8 +57,17 @@ func cacheStep(hold time.Duration) func(ctx context.Context) error {
 				break
 			}
 		}
-		time.Sleep(hold)
-		return nil
+		gate := activeCacheStepGate.Load()
+		if gate == nil {
+			return nil
+		}
+		gate.startedOnce.Do(func() { close(gate.started) })
+		select {
+		case <-gate.release:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 
@@ -39,8 +75,8 @@ type cacheQueuePipe struct{ sparkwing.Base }
 
 func (cacheQueuePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := sparkwing.NewConcurrencyGroup("cache-queue-key", sparkwing.ConcurrencyLimit{Capacity: 1})
-	sparkwing.Job(plan, "a", cacheStep(120*time.Millisecond)).Concurrency(g)
-	sparkwing.Job(plan, "b", cacheStep(120*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "a", cacheStep()).Concurrency(g)
+	sparkwing.Job(plan, "b", cacheStep()).Concurrency(g)
 	return nil
 }
 
@@ -59,7 +95,7 @@ func (cacheSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ s
 		Capacity: 1,
 		OnLimit:  sparkwing.Skip,
 	})
-	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "follower", cacheStep()).Concurrency(g)
 	return nil
 }
 
@@ -78,7 +114,7 @@ func (cacheFailFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ s
 		Capacity: 1,
 		OnLimit:  sparkwing.Fail,
 	})
-	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "follower", cacheStep()).Concurrency(g)
 	return nil
 }
 
@@ -97,7 +133,7 @@ func (cacheCancelOthersFollowerPipe) Plan(ctx context.Context, plan *sparkwing.P
 		Capacity: 1,
 		OnLimit:  sparkwing.CancelOthers,
 	})
-	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "follower", cacheStep()).Concurrency(g)
 	return nil
 }
 
@@ -120,7 +156,7 @@ func (cacheForcedReleaseFollowerPipe) Plan(ctx context.Context, plan *sparkwing.
 		OnLimit:       sparkwing.CancelOthers,
 		CancelTimeout: 100 * time.Millisecond,
 	})
-	sparkwing.Job(plan, "follower", cacheStep(50*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "follower", cacheStep()).Concurrency(g)
 	return nil
 }
 
@@ -146,7 +182,7 @@ type cacheDriftPipeA struct{ sparkwing.Base }
 
 func (cacheDriftPipeA) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := sparkwing.NewConcurrencyGroup("cache-drift-key", sparkwing.ConcurrencyLimit{Capacity: 1})
-	sparkwing.Job(plan, "a", cacheStep(50*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "a", cacheStep()).Concurrency(g)
 	return nil
 }
 
@@ -154,7 +190,7 @@ type cacheDriftPipeB struct{ sparkwing.Base }
 
 func (cacheDriftPipeB) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	g := sparkwing.NewConcurrencyGroup("cache-drift-key", sparkwing.ConcurrencyLimit{Capacity: 3})
-	sparkwing.Job(plan, "a", cacheStep(50*time.Millisecond)).Concurrency(g)
+	sparkwing.Job(plan, "a", cacheStep()).Concurrency(g)
 	return nil
 }
 
@@ -165,7 +201,7 @@ type planLevelQueuePipe struct{ sparkwing.Base }
 
 func (planLevelQueuePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	plan.Concurrency(sparkwing.NewConcurrencyGroup("plan-level-key", sparkwing.ConcurrencyLimit{Capacity: 1}))
-	sparkwing.Job(plan, "work", cacheStep(200*time.Millisecond))
+	sparkwing.Job(plan, "work", cacheStep())
 	return nil
 }
 
@@ -200,7 +236,7 @@ func (planLevelSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan,
 		Capacity: 1,
 		OnLimit:  sparkwing.Skip,
 	}))
-	sparkwing.Job(plan, "work", cacheStep(100*time.Millisecond))
+	sparkwing.Job(plan, "work", cacheStep())
 	return nil
 }
 
@@ -332,7 +368,7 @@ func (planLevelQueuedAwaitChildPipe) Plan(
 		Capacity: 1,
 		OnLimit:  sparkwing.Queue,
 	}))
-	sparkwing.Job(plan, "work", cacheStep(10*time.Millisecond))
+	sparkwing.Job(plan, "work", cacheStep())
 	return nil
 }
 
@@ -364,7 +400,7 @@ func (planLevelQueuedAwaitRemainingBudgetChildPipe) Plan(
 		Capacity: 1,
 		OnLimit:  sparkwing.Queue,
 	}))
-	sparkwing.Job(plan, "work", cacheStep(300*time.Millisecond))
+	sparkwing.Job(plan, "work", cacheStep())
 	return nil
 }
 
@@ -396,7 +432,7 @@ func (planLevelQueuedAwaitEarlyResumeChildPipe) Plan(
 		Capacity: 1,
 		OnLimit:  sparkwing.Queue,
 	}))
-	sparkwing.Job(plan, "work", cacheStep(400*time.Millisecond))
+	sparkwing.Job(plan, "work", cacheStep())
 	return nil
 }
 
@@ -428,7 +464,7 @@ func (planLevelQueuedAwaitMissedPromotionChildPipe) Plan(
 		Capacity: 1,
 		OnLimit:  sparkwing.Queue,
 	}))
-	sparkwing.Job(plan, "work", cacheStep(250*time.Millisecond))
+	sparkwing.Job(plan, "work", cacheStep())
 	return nil
 }
 
@@ -464,7 +500,7 @@ func (planLevelQueuedAwaitMultiKeyChildPipe) Plan(
 		Capacity: 1,
 		OnLimit:  sparkwing.Queue,
 	}))
-	sparkwing.Job(plan, "work", cacheStep(300*time.Millisecond))
+	sparkwing.Job(plan, "work", cacheStep())
 	return nil
 }
 
@@ -500,7 +536,7 @@ func (planLevelSlowPlanAwaitChildPipe) Plan(
 		Capacity: 1,
 		OnLimit:  sparkwing.Queue,
 	}))
-	sparkwing.Job(plan, "work", cacheStep(10*time.Millisecond))
+	sparkwing.Job(plan, "work", cacheStep())
 	return nil
 }
 
@@ -603,10 +639,33 @@ func cacheCounterBump() func() {
 
 func TestConcurrency_QueueSerializesConcurrentHolders(t *testing.T) {
 	resetCacheCounter()
+	gate := installCacheStepGate(t)
 	p := newPaths(t)
-	res, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-queue-serialize"})
-	if err != nil {
-		t.Fatalf("Run: %v", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	done := make(chan *orchestrator.Result, 1)
+	finished := make(chan struct{})
+	t.Cleanup(func() {
+		gate.letRun()
+		cancel()
+		joinCacheDispatchWorker(t, "single-run cache serialization", finished)
+	})
+	go func() {
+		defer close(finished)
+		res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "cache-queue-serialize", RunID: "cache-queue-single"})
+		done <- res
+	}()
+	select {
+	case <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("first cache body did not start")
+	}
+	waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:cache-queue-key", 1, 1)
+	gate.letRun()
+	var res *orchestrator.Result
+	select {
+	case res = <-done:
+	case <-ctx.Done():
+		t.Fatal("cache serialization run did not finish")
 	}
 	if res.Status != "success" {
 		t.Fatalf("status = %q err=%v", res.Status, res.Error)
@@ -618,17 +677,46 @@ func TestConcurrency_QueueSerializesConcurrentHolders(t *testing.T) {
 
 func TestConcurrency_QueueSerializesAcrossRuns(t *testing.T) {
 	resetCacheCounter()
+	gate := installCacheStepGate(t)
 	p := newPaths(t)
-
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	done := make(chan *orchestrator.Result, 2)
+	finished := make(chan struct{})
 	var wg sync.WaitGroup
-	for range 2 {
+	for index := range 2 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "cache-queue-serialize"})
+			res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "cache-queue-serialize", RunID: fmt.Sprintf("cache-queue-run-%d", index)})
+			done <- res
 		}()
 	}
-	wg.Wait()
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+	t.Cleanup(func() {
+		gate.letRun()
+		cancel()
+		joinCacheDispatchWorker(t, "cross-run cache serialization", finished)
+	})
+	select {
+	case <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("first cross-run cache body did not start")
+	}
+	waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:cache-queue-key", 1, 3)
+	gate.letRun()
+	for range 2 {
+		select {
+		case res := <-done:
+			if res.Status != "success" {
+				t.Fatalf("cross-run status = %q, want success", res.Status)
+			}
+		case <-ctx.Done():
+			t.Fatal("cross-run cache serialization did not finish")
+		}
+	}
 
 	if peak := cacheCounter.max.Load(); peak > 1 {
 		t.Fatalf("Concurrency(Queue) cross-run peak concurrency = %d, want 1", peak)
@@ -882,6 +970,67 @@ func waitForPlanAdmissionWaiter(t *testing.T, ctx context.Context, st *store.Sto
 	}
 }
 
+func waitForCacheConcurrencyPopulation(t *testing.T, ctx context.Context, dbPath, key string, holders, waiters int) {
+	t.Helper()
+	pollCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open concurrency store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		state, err := st.GetConcurrencyState(pollCtx, key)
+		if err == nil && len(state.Holders) == holders && len(state.Waiters) == waiters {
+			return
+		}
+		if err != nil && !errors.Is(err, store.ErrNotFound) {
+			if pollCtx.Err() != nil {
+				t.Fatalf("waiting for concurrency population on %q: %v", key, pollCtx.Err())
+			}
+			t.Fatalf("read concurrency population on %q: %v", key, err)
+		}
+		poll.Reset(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-pollCtx.Done():
+			t.Fatalf("timed out waiting for %d holders and %d waiters on %q", holders, waiters, key)
+		}
+	}
+}
+
+func waitForCacheEvent(t *testing.T, ctx context.Context, dbPath, runID, kind string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	st, err := store.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open store while waiting for %s: %v", kind, err)
+	}
+	defer func() { _ = st.Close() }()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		events, err := st.ListEventsAfter(ctx, runID, 0, 500)
+		if err != nil {
+			t.Fatalf("list %s events while waiting for %s: %v", runID, kind, err)
+		}
+		for _, event := range events {
+			if event.Kind == kind {
+				return
+			}
+		}
+		poll.Reset(10 * time.Millisecond)
+		select {
+		case <-poll.C:
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for %s event for %s", kind, runID)
+		}
+	}
+}
+
 func joinCacheDispatchWorker(t *testing.T, name string, done <-chan struct{}) {
 	t.Helper()
 	timer := time.NewTimer(2 * time.Second)
@@ -959,17 +1108,46 @@ func waitForProgressTimeoutResumed(t *testing.T, attemptCtx context.Context) {
 
 func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 	resetCacheCounter()
+	gate := installCacheStepGate(t)
 	p := newPaths(t)
-
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	done := make(chan *orchestrator.Result, 2)
+	finished := make(chan struct{})
 	var wg sync.WaitGroup
-	for range 2 {
+	for index := range 2 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "plan-level-queue"})
+			res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "plan-level-queue", RunID: fmt.Sprintf("plan-queue-run-%d", index)})
+			done <- res
 		}()
 	}
-	wg.Wait()
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+	t.Cleanup(func() {
+		gate.letRun()
+		cancel()
+		joinCacheDispatchWorker(t, "plan-level cache serialization", finished)
+	})
+	select {
+	case <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("first plan-level cache body did not start")
+	}
+	waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:plan-level-key", 1, 1)
+	gate.letRun()
+	for range 2 {
+		select {
+		case res := <-done:
+			if res.Status != "success" {
+				t.Fatalf("plan-level status = %q, want success", res.Status)
+			}
+		case <-ctx.Done():
+			t.Fatal("plan-level cache serialization did not finish")
+		}
+	}
 
 	if peak := cacheCounter.max.Load(); peak > 1 {
 		t.Fatalf("plan-level Queue cross-run peak concurrency = %d, want <= 1", peak)
@@ -978,24 +1156,55 @@ func TestConcurrency_PlanLevelQueueSerializesConcurrentRuns(t *testing.T) {
 
 func TestConcurrency_PlanLevelQueueEmitsAdmissionEvents(t *testing.T) {
 	resetCacheCounter()
+	gate := installCacheStepGate(t)
 	p := newPaths(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 
 	leaderDone := make(chan *orchestrator.Result, 1)
+	leaderFinished := make(chan struct{})
+	followerDone := make(chan *orchestrator.Result, 1)
+	followerFinished := make(chan struct{})
+	var followerStarted atomic.Bool
+	t.Cleanup(func() {
+		gate.letRun()
+		cancel()
+		joinCacheDispatchWorker(t, "plan queue event leader", leaderFinished)
+		if followerStarted.Load() {
+			joinCacheDispatchWorker(t, "plan queue event follower", followerFinished)
+		}
+	})
 	go func() {
-		res, _ := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
+		defer close(leaderFinished)
+		res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{
 			Pipeline: "plan-level-queue",
 			RunID:    "plan-queue-leader",
 		})
 		leaderDone <- res
 	}()
+	select {
+	case <-gate.started:
+	case <-time.After(time.Second):
+		t.Fatal("plan queue event leader body did not start")
+	}
 	waitForConcurrencyHolder(t, p.StateDB(), "plan-queue-leader/-")
 
-	follower, err := orchestrator.RunLocal(context.Background(), p, orchestrator.Options{
-		Pipeline: "plan-level-queue",
-		RunID:    "plan-queue-follower",
-	})
-	if err != nil {
-		t.Fatalf("follower: %v", err)
+	followerStarted.Store(true)
+	go func() {
+		defer close(followerFinished)
+		res, _ := orchestrator.RunLocal(ctx, p, orchestrator.Options{
+			Pipeline: "plan-level-queue",
+			RunID:    "plan-queue-follower",
+		})
+		followerDone <- res
+	}()
+	waitForCacheConcurrencyPopulation(t, ctx, p.StateDB(), "g:plan-level-key", 1, 1)
+	waitForCacheEvent(t, ctx, p.StateDB(), "plan-queue-follower", "concurrency_wait_update")
+	gate.letRun()
+	var follower *orchestrator.Result
+	select {
+	case follower = <-followerDone:
+	case <-ctx.Done():
+		t.Fatal("plan queue event follower did not finish")
 	}
 	if follower.Status != "success" {
 		t.Fatalf("follower status = %q, want success", follower.Status)
@@ -1506,6 +1715,7 @@ func TestConcurrency_RunAndAwaitParentCancellationWhileAdmissionTimeoutPaused(t 
 
 func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testing.T) {
 	resetCacheCounter()
+	stepGate := installCacheStepGate(t)
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
@@ -1546,6 +1756,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 		return releaseErr
 	}
 	t.Cleanup(func() {
+		stepGate.letRun()
 		cancel()
 		if err := releaseHolder(); err != nil {
 			t.Errorf("cleanup external holder: %v", err)
@@ -1612,6 +1823,11 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	if err := releaseHolder(); err != nil {
 		t.Fatalf("release external holder: %v", err)
 	}
+	select {
+	case <-stepGate.started:
+	case <-ctx.Done():
+		t.Fatal("remaining-budget child body did not start")
+	}
 	resumedRemaining := waitForNodeTimeoutResumed(t, attemptCtx)
 	if resumedRemaining > pausedRemaining {
 		t.Fatalf("resumed timeout remainder = %s, want no more than paused remainder %s", resumedRemaining, pausedRemaining)
@@ -1619,6 +1835,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 	if !orchestrator.ForceNodeTimeoutForTest(attemptCtx) {
 		t.Fatal("resumed parent node timeout could not be forced")
 	}
+	stepGate.letRun()
 
 	select {
 	case parent := <-parentDone:
@@ -1647,6 +1864,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutResumesWithRemainingBudget(t *testi
 
 func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) {
 	resetCacheCounter()
+	stepGate := installCacheStepGate(t)
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
@@ -1687,6 +1905,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 		return releaseErr
 	}
 	t.Cleanup(func() {
+		stepGate.letRun()
 		gate.release()
 		cancel()
 		if err := releaseHolder(); err != nil {
@@ -1744,10 +1963,16 @@ func TestConcurrency_RunAndAwaitParentTimeoutPausesBeforeDeadline(t *testing.T) 
 	if err := releaseHolder(); err != nil {
 		t.Fatalf("release external holder: %v", err)
 	}
+	select {
+	case <-stepGate.started:
+	case <-ctx.Done():
+		t.Fatal("early-resume child body did not start")
+	}
 	resumedRemaining := waitForNodeTimeoutResumed(t, attemptCtx)
 	if resumedRemaining > pausedRemaining {
 		t.Fatalf("resumed timeout remainder = %s, want no more than paused remainder %s", resumedRemaining, pausedRemaining)
 	}
+	stepGate.letRun()
 
 	select {
 	case parent := <-parentDone:
@@ -1801,6 +2026,7 @@ func waitForMissedPromotionChecks(t *testing.T, backend *missedPromotionBackend)
 
 func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWait(t *testing.T) {
 	resetCacheCounter()
+	stepGate := installCacheStepGate(t)
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
@@ -1848,6 +2074,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 		return releaseErr
 	}
 	t.Cleanup(func() {
+		stepGate.letRun()
 		gate.release()
 		cancel()
 		if err := releaseHolder(); err != nil {
@@ -1904,10 +2131,16 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 	if err := releaseHolder(); err != nil {
 		t.Fatalf("release external holder: %v", err)
 	}
+	select {
+	case <-stepGate.started:
+	case <-ctx.Done():
+		t.Fatal("missed-promotion child body did not start")
+	}
 	resumedRemaining := waitForNodeTimeoutResumed(t, attemptCtx)
 	if resumedRemaining > pausedRemaining {
 		t.Fatalf("resumed timeout remainder = %s, want no more than paused remainder %s", resumedRemaining, pausedRemaining)
 	}
+	stepGate.letRun()
 
 	select {
 	case parent := <-parentDone:
@@ -1929,6 +2162,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutCountsMissedPromotionAsAdmissionWai
 
 func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *testing.T) {
 	resetCacheCounter()
+	stepGate := installCacheStepGate(t)
 	gate := &queuedAwaitParentGate{started: make(chan context.Context, 1), proceed: make(chan struct{})}
 	queuedAwaitParentAttempt.Store(gate)
 	t.Cleanup(func() { queuedAwaitParentAttempt.CompareAndSwap(gate, nil) })
@@ -1973,6 +2207,7 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 		return releaseErr[index]
 	}
 	t.Cleanup(func() {
+		stepGate.letRun()
 		gate.release()
 		cancel()
 		for index, key := range keys {
@@ -2043,10 +2278,16 @@ func TestConcurrency_RunAndAwaitParentTimeoutAggregatesMultiKeyAdmissionWait(t *
 	if err := releaseHolder(1); err != nil {
 		t.Fatalf("release key B holder: %v", err)
 	}
+	select {
+	case <-stepGate.started:
+	case <-ctx.Done():
+		t.Fatal("multi-key child body did not start")
+	}
 	resumedRemaining := waitForNodeTimeoutResumed(t, attemptCtx)
 	if resumedRemaining > secondRemaining {
 		t.Fatalf("resumed timeout remainder = %s, want no more than key B remainder %s", resumedRemaining, secondRemaining)
 	}
+	stepGate.letRun()
 
 	select {
 	case parent := <-parentDone:
