@@ -326,6 +326,7 @@ func TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 // duplicate-submission proof across processes: a caller that resubmits
 // after an ambiguous failure must reach the run it already has.
 func TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 
 	first := e.submit("--idempotency-key", "deploy-once")
@@ -352,6 +353,7 @@ func TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 // TestRunsSubmit_DistinctKeysAreDistinctRuns is the other half of
 // dedup. A key scopes one intent; two intents must not collapse.
 func TestRunsSubmit_DistinctKeysAreDistinctRuns(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 	a := e.submit("--idempotency-key", "a")
 	b := e.submit("--idempotency-key", "b")
@@ -368,6 +370,7 @@ func TestRunsSubmit_DistinctKeysAreDistinctRuns(t *testing.T) {
 // get separate runs; folding request_id into dedup would silently
 // swallow deliberate resubmissions.
 func TestRunsSubmit_RequestIDDoesNotDeduplicate(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 	a := e.submit("--request-id", "trace-1")
 	b := e.submit("--request-id", "trace-1")
@@ -393,6 +396,7 @@ func TestRunsSubmit_RequestIDDoesNotDeduplicate(t *testing.T) {
 // recovery contract. A consumer killed outright -- SIGKILL, no chance to
 // clean up -- must leave the queue takeable and the work runnable.
 func TestRunsSubmit_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 
 	// Prime the compile cache with one completed submission, so the
@@ -446,6 +450,7 @@ func TestRunsSubmit_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 // operator surface, including that a SIGKILLed consumer reads as gone
 // with no stale-state cleanup.
 func TestRunsConsumer_StatusAndStopReportTheResidentProcess(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 
 	if out, err := e.run("runs", "consumer", "status", "--home", e.home); err == nil {
@@ -472,6 +477,7 @@ func TestRunsConsumer_StatusAndStopReportTheResidentProcess(t *testing.T) {
 // cancellation contract on the path submission adds: a run that no
 // consumer has claimed, on a laptop with no dashboard and no profile.
 func TestRunsCancel_CancelsAQueuedRunWithoutTouchingItsReplacement(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 	ctx := context.Background()
 	st := e.store()
@@ -523,6 +529,7 @@ func TestRunsCancel_CancelsAQueuedRunWithoutTouchingItsReplacement(t *testing.T)
 // normal acknowledgment. A caller cannot detect that from the output,
 // which makes silence the worst possible response.
 func TestRunsSubmit_RefusesASubmitFlagPlacedAfterThePipelineName(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 	out, err := e.run("runs", "submit", "--home", e.home, "-C", e.repoDir,
 		"fixture", "--idempotency-key", "misplaced")
@@ -547,6 +554,7 @@ func TestRunsSubmit_RefusesASubmitFlagPlacedAfterThePipelineName(t *testing.T) {
 // escape hatch: a pipeline that declares its own --request-id must still
 // be submittable.
 func TestRunsSubmit_SeparatorHandsAConflictingFlagToThePipeline(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 	out := e.mustRun("runs", "submit", "-o", "json", "--home", e.home, "-C", e.repoDir,
 		"fixture", "--", "--request-id", "belongs-to-the-pipeline")
@@ -570,6 +578,7 @@ func TestRunsSubmit_SeparatorHandsAConflictingFlagToThePipeline(t *testing.T) {
 // fails in the caller's terminal rather than landing in the queue and
 // failing later where nobody is reading.
 func TestRunsSubmit_RefusesAPipelineNothingDeclares(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 	out, err := e.run("runs", "submit", "--home", e.home, "-C", e.repoDir, "no-such-pipeline")
 	if err == nil {
@@ -798,6 +807,7 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 // first pipeline's run, at exit 0 -- so the requested pipeline never ran
 // and the caller was told everything was fine.
 func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 	other := t.TempDir()
 	t.Cleanup(e.stopConsumer)
@@ -843,6 +853,7 @@ func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 // one intent, so the same key with different arguments is a different request,
 // not a retry. Answering it with the original run would silently drop it.
 func TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 	e.submitWithArgs([]string{"--idempotency-key", "k"}, []string{"--env", "staging"})
 
@@ -862,6 +873,7 @@ func TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
 // correct because the run exists, while the caller can see that the run has
 // already finished and how.
 func TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 	first := e.submit("--idempotency-key", "k")
 
@@ -898,6 +910,7 @@ func TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
 // a freshly installed binary would hand every run to the old build --
 // including runs submitted to pick up a fix.
 func TestRunsSubmit_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 
 	// A resident consumer claiming to be some other build.
@@ -940,6 +953,7 @@ func TestRunsSubmit_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
 // just cancelled, so it never landed: the run stayed pending and its
 // trigger stayed claimed until a lease lapsed minutes later.
 func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
+	t.Parallel()
 	e := newSubmitTestEnv(t)
 	holdStarted := e.useBlockingFixture(t)
 
