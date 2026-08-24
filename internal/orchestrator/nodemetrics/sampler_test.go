@@ -81,17 +81,15 @@ func TestCPUAccountingBurnerProcess(t *testing.T) {
 	runtime.KeepAlive(value)
 }
 
-// TestRun_ReportsNonzeroCPUUnderLoad verifies that on the host platform a
+// TestAttach_ReportsNonzeroCPUUnderLoad verifies that on the host platform a
 // CPU-burning process must produce a nonzero sampled peak, so learned
 // capacity can activate rather than costing every run by the default.
-func TestRun_ReportsNonzeroCPUUnderLoad(t *testing.T) {
+func TestAttach_ReportsNonzeroCPUUnderLoad(t *testing.T) {
+	t.Cleanup(SetIntervalForTest(40 * time.Millisecond))
 	sink := &captureSink{}
 	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		Run(ctx, 40*time.Millisecond, sink)
-		close(done)
-	}()
+	defer cancel()
+	detach := Attach(ctx, sink)
 
 	burnUntil := time.Now().Add(600 * time.Millisecond)
 	x := 0
@@ -99,39 +97,31 @@ func TestRun_ReportsNonzeroCPUUnderLoad(t *testing.T) {
 		x++
 		_ = x * x
 	}
-	cancel()
-	<-done
+	detach()
+	waitForSamplerStop(t)
 
 	if peak := sink.peakCPU(); peak <= 0 {
 		t.Fatalf("peak CPU millicores = %d, want > 0 after burning a core", peak)
 	}
 }
 
-// TestRun_CountsRawExecChildrenCPU verifies that CPU burned by a child
+// TestAttach_CountsRawExecChildrenCPU verifies that CPU burned by a child
 // spawned with os/exec outside the SDK command wrapper surfaces in the
 // sampled peak through RUSAGE_CHILDREN, so a raw-exec pipeline cannot measure
 // zero and be over-admitted at the floor. The parent stays near idle while
 // each child burns, so the peak reflects the children rather than self.
-func TestRun_CountsRawExecChildrenCPU(t *testing.T) {
+func TestAttach_CountsRawExecChildrenCPU(t *testing.T) {
 	if _, ok := readCPUTime(); !ok {
 		t.Skip("no CPU accounting on this platform")
 	}
+	t.Cleanup(SetIntervalForTest(40 * time.Millisecond))
 	sink := &captureSink{sampleReady: make(chan struct{}, 1)}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	done := make(chan struct{})
-	go func() {
-		Run(ctx, 40*time.Millisecond, sink)
-		close(done)
-	}()
+	detach := Attach(ctx, sink)
 	t.Cleanup(func() {
+		detach()
 		cancel()
-		joinDeadline := time.NewTimer(time.Second)
-		defer joinDeadline.Stop()
-		select {
-		case <-done:
-		case <-joinDeadline.C:
-			t.Error("sampler did not stop after cancellation")
-		}
+		waitForSamplerStop(t)
 	})
 
 	for sink.peakCPU() <= 300 {
@@ -141,8 +131,8 @@ func TestRun_CountsRawExecChildrenCPU(t *testing.T) {
 			t.Fatalf("wait for CPU sample after reaping child: %v", err)
 		}
 	}
-	cancel()
-	<-done
+	detach()
+	waitForSamplerStop(t)
 
 	if peak := sink.peakCPU(); peak <= 300 {
 		t.Fatalf("peak CPU millicores = %d, want > 300 from raw-exec child burn", peak)
@@ -199,40 +189,26 @@ func TestReadCPUTime_SubtractsReportedChildCPU(t *testing.T) {
 	}
 }
 
-// TestRun_ReportsMemory asserts the sampler reports a nonzero memory
+// TestAttach_ReportsMemory asserts the sampler reports a nonzero memory
 // reading from the platform RSS source or its runtime fallback.
-func TestRun_ReportsMemory(t *testing.T) {
+func TestAttach_ReportsMemory(t *testing.T) {
+	t.Cleanup(SetIntervalForTest(40 * time.Millisecond))
 	memoryReady := make(chan struct{})
 	sink := &captureSink{memoryReady: memoryReady}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	done := make(chan struct{})
-	go func() {
-		Run(ctx, 40*time.Millisecond, sink)
-		close(done)
-	}()
+	detach := Attach(ctx, sink)
 	t.Cleanup(func() {
+		detach()
 		cancel()
-		joinDeadline := time.NewTimer(time.Second)
-		defer joinDeadline.Stop()
-		select {
-		case <-done:
-		case <-joinDeadline.C:
-			t.Error("sampler did not stop after cancellation")
-		}
+		waitForSamplerStop(t)
 	})
 	select {
 	case <-memoryReady:
 	case <-ctx.Done():
 		t.Fatalf("sampler did not report nonzero memory: %v", ctx.Err())
 	}
-	cancel()
-	joinDeadline := time.NewTimer(time.Second)
-	defer joinDeadline.Stop()
-	select {
-	case <-done:
-	case <-joinDeadline.C:
-		t.Fatal("sampler did not stop after cancellation")
-	}
+	detach()
+	waitForSamplerStop(t)
 
 	sink.mu.Lock()
 	defer sink.mu.Unlock()

@@ -31,6 +31,11 @@ type runCharge struct {
 // busy box cannot inflate its own ETAs by folding past congestion into the
 // profile.
 //
+// A node's profile takes the peak of that node's own samples, while the
+// rollup takes the peak of the readings those samples were split from -- the
+// whole run is charged what the process drew, not what its widest node's
+// share was.
+//
 // planHash versions the rollup: a structural change re-measures the pipeline
 // rather than pricing it on the predecessor's samples. A contended run
 // measured its allocation, not its demand, so it never folds into the clean
@@ -50,8 +55,7 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 		return
 	}
 	cpuMeasured := nodemetrics.CPUAccountingAvailable()
-	var runPeakCores float64
-	var runPeakMem int64
+	intervals := map[int64]intervalTotal{}
 	measured := false
 	for _, n := range nodes {
 		samples, err := st.ListNodeMetrics(ctx, runID, n.NodeID)
@@ -66,12 +70,12 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 			if s.MemoryBytes > peakMem {
 				peakMem = s.MemoryBytes
 			}
+			total := intervals[s.TS.UnixNano()]
+			total.cpuMillicores += s.CPUMillicores
+			total.memoryBytes += s.MemoryBytes
+			intervals[s.TS.UnixNano()] = total
 		}
 		peakCores := capLocalPeakCores(ctx, pipeline, n.NodeID, observedCores)
-		runPeakCores = math.Max(runPeakCores, peakCores)
-		if peakMem > runPeakMem {
-			runPeakMem = peakMem
-		}
 		if contended {
 			continue
 		}
@@ -86,6 +90,7 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 	if !measured {
 		return
 	}
+	runPeakCores, runPeakMem := peakProcessReading(ctx, pipeline, intervals)
 	if contended {
 		floorCores := runPeakCores
 		if charge.Cores > 0 && runPeakCores >= capacity.CeilingHitFraction*charge.Cores {
@@ -120,6 +125,33 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 		return
 	}
 	_ = st.SetProfilePin(ctx, pipeline, "", pin.Cores, pin.MemoryBytes)
+}
+
+// intervalTotal is what one sampling interval read across every node that was
+// running in it.
+type intervalTotal struct {
+	cpuMillicores int64
+	memoryBytes   int64
+}
+
+// peakProcessReading returns the run's heaviest interval as cores and bytes.
+// The sampler divides each interval's process-wide reading among the nodes
+// running in it, so the whole process is the sum of one interval's shares and
+// the maximum of a single node's share would understate a parallel stage by
+// its width -- the direction that over-admits. Samples that carry their own
+// timestamp, as a per-command report does, group alone and so still contribute
+// exactly what they measured. The core figure clamps to host capacity for the
+// reason capLocalPeakCores clamps a node's.
+func peakProcessReading(ctx context.Context, pipeline string, intervals map[int64]intervalTotal) (float64, int64) {
+	var peakCores float64
+	var peakMem int64
+	for _, total := range intervals {
+		peakCores = math.Max(peakCores, float64(total.cpuMillicores)/1000.0)
+		if total.memoryBytes > peakMem {
+			peakMem = total.memoryBytes
+		}
+	}
+	return capLocalPeakCores(ctx, pipeline, "", peakCores), peakMem
 }
 
 // cacheDominant reports whether a finished run's completed nodes were

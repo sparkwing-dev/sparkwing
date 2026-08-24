@@ -127,13 +127,18 @@ cluster metrics-server is involved.
 - **CPU**: millicores from `getrusage`, covering the runner process and
   the commands it spawned, clamped to the host's core count so a large
   reaped subtree cannot register as an impossible rate.
-- **Memory**: resident bytes -- `/proc/self/statm` on Linux, the
-  `getrusage` high-water mark on macOS, and the Go runtime's system
-  reservation where neither is available.
+- **Memory**: resident bytes -- `/proc/self/statm` on Linux, `ps -o rss=`
+  on macOS, and the Go runtime's system reservation where neither is
+  available. Both platform sources report the footprint at the moment of
+  the sample, not a high-water mark.
 
-The signal is process-wide: nodes running in parallel share one series,
-so read a node's chart as the process's usage during that node rather
-than that node's alone.
+One sampler runs per process and splits each interval's reading evenly
+across the nodes running in it. A node's chart is therefore an estimate
+of that node's share rather than a measurement of it -- but the nodes of
+a parallel fan-out sum to what the process really used, which is what
+right-sizing and admission both need. A node joins and leaves on tick
+boundaries, so up to one interval of its cost can land on the nodes
+beside it.
 
 ### API
 

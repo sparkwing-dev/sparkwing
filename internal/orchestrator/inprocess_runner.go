@@ -229,12 +229,15 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 	}
 
 	samplerCtx, stopSampler := context.WithCancel(ctx)
-	go nodemetrics.Run(samplerCtx, 2*time.Second, stateMetricsSink{
+	detachSampler := nodemetrics.Attach(samplerCtx, stateMetricsSink{
 		backend: r.backends.State,
 		runID:   runID,
 		nodeID:  node.ID(),
 	})
-	defer stopSampler()
+	defer func() {
+		detachSampler()
+		stopSampler()
+	}()
 
 	wedgeBudget, err := storeWedgeBudget()
 	if err != nil {

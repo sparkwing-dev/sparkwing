@@ -180,6 +180,81 @@ func TestRecordRunProfile_CapsCPUProfileAtHostCapacity(t *testing.T) {
 	}
 }
 
+// TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto pins the
+// rollup a parallel stage folds to. The sampler halves each interval's
+// process-wide reading between the two nodes running in it, so the run drew
+// what the shares of one tick sum to; taking the widest node's share instead
+// would price the whole fan-out at half the machine it used and admit twice as
+// many of them. A sample carrying its own timestamp, as a per-command report
+// does, stands alone rather than joining a tick it did not belong to.
+func TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto(t *testing.T) {
+	if runtime.NumCPU() < 2 {
+		t.Skip("host cannot hold a two-core reading")
+	}
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+
+	start := time.Now()
+	if err := st.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "fan", Status: "running", StartedAt: start}); err != nil {
+		t.Fatal(err)
+	}
+	ticks := []struct {
+		ts    time.Time
+		share store.MetricSample
+	}{
+		{ts: start, share: store.MetricSample{CPUMillicores: 500, MemoryBytes: 1 << 30}},
+		{ts: start.Add(2 * time.Second), share: store.MetricSample{CPUMillicores: 1000, MemoryBytes: 2 << 30}},
+	}
+	for _, nodeID := range []string{"fan-a", "fan-b"} {
+		if err := st.CreateNode(ctx, store.Node{RunID: "r1", NodeID: nodeID, Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		for _, tick := range ticks {
+			sample := tick.share
+			sample.TS = tick.ts
+			if err := st.AddNodeMetricSample(ctx, "r1", nodeID, sample); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := st.AddNodeMetricSample(ctx, "r1", "fan-a", store.MetricSample{
+		TS:            start.Add(2*time.Second + time.Millisecond),
+		CPUMillicores: 300,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	recordRunProfile(ctx, st, "fan", "r1", nil, "", runCharge{}, false, start, start.Add(4*time.Second))
+
+	rollup, err := st.GetPipelineProfile(ctx, "fan", "")
+	if err != nil || rollup == nil {
+		t.Fatalf("rollup profile missing: %v", err)
+	}
+	if rollup.PeakCores != 2.0 {
+		t.Errorf("rollup PeakCores = %v, want 2.0 (both halves of the heaviest tick)", rollup.PeakCores)
+	}
+	if rollup.PeakMemoryBytes != 4<<30 {
+		t.Errorf("rollup PeakMemoryBytes = %d, want %d (both halves of the heaviest tick)", rollup.PeakMemoryBytes, int64(4)<<30)
+	}
+
+	for _, nodeID := range []string{"fan-a", "fan-b"} {
+		node, err := st.GetPipelineProfile(ctx, "fan", nodeID)
+		if err != nil || node == nil {
+			t.Fatalf("node %q profile missing: %v", nodeID, err)
+		}
+		if node.PeakCores != 1.0 {
+			t.Errorf("node %q PeakCores = %v, want its own 1.0 share", nodeID, node.PeakCores)
+		}
+		if node.PeakMemoryBytes != 2<<30 {
+			t.Errorf("node %q PeakMemoryBytes = %d, want its own %d share", nodeID, node.PeakMemoryBytes, int64(2)<<30)
+		}
+	}
+}
+
 func TestRecordRunProfile_ClearsStoredPinWhenPlanDeclaresNone(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {

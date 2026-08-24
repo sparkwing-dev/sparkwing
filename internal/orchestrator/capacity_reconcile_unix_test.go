@@ -63,27 +63,18 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	t.Cleanup(nodemetrics.SetIntervalForTest(200 * time.Millisecond))
 	sampCtx, stopSampler := context.WithCancel(ctx)
-	done := make(chan struct{})
 	samples := make(chan nodemetrics.Sample, 4)
-	go func() {
-		nodemetrics.Run(sampCtx, 200*time.Millisecond, reconcileSink{st: st, runID: "r1", nodeID: "step", samples: samples})
-		close(done)
-	}()
+	detachSampler := nodemetrics.Attach(sampCtx, reconcileSink{st: st, runID: "r1", nodeID: "step", samples: samples})
 	var stopOnce sync.Once
-	stopAndJoinSampler := func() {
+	stopSampling := func() {
 		stopOnce.Do(func() {
+			detachSampler()
 			stopSampler()
-			joinTimer := time.NewTimer(time.Second)
-			defer joinTimer.Stop()
-			select {
-			case <-done:
-			case <-joinTimer.C:
-				t.Error("node-metrics sampler did not stop after cancellation")
-			}
 		})
 	}
-	t.Cleanup(stopAndJoinSampler)
+	t.Cleanup(stopSampling)
 
 	startedAt := time.Now()
 	cmd := exec.Command("sh", "-c", "while :; do :; done")
@@ -125,7 +116,7 @@ func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 
 	reportedAt := time.Now()
 	waitForReconcileSampleAfter(t, sampCtx, samples, reportedAt)
-	stopAndJoinSampler()
+	stopSampling()
 
 	recordRunProfile(ctx, st, "burn", "r1", nil, "", runCharge{}, false, start, time.Now())
 

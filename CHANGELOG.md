@@ -48,6 +48,16 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **orchestrator:** Per-node resource metrics divide each interval's
+  process-wide reading across the nodes running in it, and a run's learned
+  profile is folded from the readings those shares reconstruct. Every node of
+  a parallel fan-out previously recorded the whole process's CPU and memory,
+  so learned capacity charged the fan-out several times over what it used.
+- **orchestrator:** macOS memory samples report the process's current
+  resident set instead of `getrusage`'s lifetime high-water mark, which made
+  every node that ran after a memory peak inherit that peak as its own.
 
 ## [v0.34.1] - 2026-08-20
 ### Fixed
