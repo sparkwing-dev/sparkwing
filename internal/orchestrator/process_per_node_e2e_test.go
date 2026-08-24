@@ -145,6 +145,7 @@ func TestProcessPerNode_SpawnNodeRunsInsideItsParentsProcess(t *testing.T) {
 	probe := t.TempDir()
 	runEnv := append(os.Environ(),
 		"SPARKWING_HOME="+home,
+		"SPARKWING_WINGD_BIN="+wingdHostBin(t),
 		"SPARKWING_LOG_FORMAT=json",
 		"PROC_PROBE_DIR="+probe,
 	)
