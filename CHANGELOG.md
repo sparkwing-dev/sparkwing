@@ -48,6 +48,19 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **local execution (Breaking):** Every job in a local run now executes as
+  its own OS process, spawned from the same `run-node` entrypoint Kubernetes
+  pods use. Jobs no longer share memory with each other or the orchestrator:
+  typed refs and artifacts are the only data paths between jobs, which is
+  what the cluster has always enforced, and a job's output must be
+  JSON-serializable -- rejected at plan time for shapes that can never
+  encode, failed at the node for values that will not marshal. Inside a job
+  nothing changes; steps still share their job's process, exactly like a
+  pod. See the [migration
+  guide](docs/migrations/v0.36.0.md#process-per-node).
+
 ### Added
 
 - **dashboard:** A Capacity page showing what admission is charging on this
