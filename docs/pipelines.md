@@ -389,6 +389,15 @@ func (j *ScanJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 The spawned Job id is namespaced as `parent/spawnID`
 (e.g. `scan/compliance`) so logs and the run history don't collide.
 
+A spawned Job runs inside its parent node's own process -- a local node
+process, or a pod. It runs under the admission lease its parent already
+holds, so it is not charged against host capacity a second time, and
+concurrent children are capped the way the dispatcher caps nodes. It
+still records its own node row under `parent/spawnID`, its own logs,
+metrics, and output, and a `spawn_dispatched` event on the parent. A
+child whose `WhenRunner` labels the executing runner does not advertise
+is skipped, exactly as a planned node would be.
+
 `sw.JobSpawnEach(w, items, fn)` is the cardinality-many variant. The
 generator runs once Needs are satisfied; each returned `(id, Job)`
 pair becomes a fresh Plan node. The spawning runner stays suspended

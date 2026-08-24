@@ -459,6 +459,13 @@ func RunNodeOnce(
 	}
 
 	r := NewInProcessRunner(backends)
+	// safety: this process is the only thing that can serve a SpawnNode
+	// call in the node it is about to run. The dispatcher's handler
+	// splices the child into a live plan object that exists only in the
+	// dispatcher's memory, and a pod has no dispatcher to ask at all.
+	ctx = sparkwingruntime.WithSpawnHandler(ctx, newNodeSpawnHandler(
+		r, backends, plan, runID, run.Pipeline, nodeID, delegate,
+		nodeProcessPipelineRequires(run.Pipeline, logger)))
 	req := runner.Request{
 		RunID:    runID,
 		NodeID:   nodeID,
