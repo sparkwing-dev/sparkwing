@@ -60,6 +60,39 @@ code change to unlock.
   nothing changes; steps still share their job's process, exactly like a
   pod. See the [migration
   guide](docs/migrations/v0.36.0.md#process-per-node).
+- **store (Breaking):** The runs-store schema advances from version 14 to 15,
+  adding `cpu_nanos`, `max_rss_bytes`, and `process_wall_nanos` to `nodes`,
+  and `cpu_time_nanos` to `node_metrics`. The node columns hold the kernel's
+  exit accounting for the process that ran the node, which local runs now
+  record, and the span that CPU was drawn over; the metric column marks a
+  sample as a per-command report and carries the CPU it measured. A node or
+  sample that carries none of it keeps the zero default, read everywhere as
+  absent rather than as a measurement of nothing. The upgrade is additive and
+  applies on open. As with every schema advance, a binary older than this
+  release refuses to open a database that has been migrated, so upgrade every
+  sparkwing sharing a runs store together -- the admission daemon included,
+  since it opens the same store. See the [migration
+  guide](docs/migrations/v0.36.0.md#runs-store-schema-advances-to-version-15).
+- **admission:** A local node is priced from what the kernel charged its
+  process, not only from what the two-second sampler happened to see. A node
+  shorter than one sampling interval used to be invisible to pricing -- a
+  pipeline of them learned nothing and kept paying a cold start no matter how
+  often it ran -- and now records its measured CPU and peak memory like any
+  other. Where both measurements exist the exact one is a floor under the
+  sampled figures, so charges can rise for pipelines whose work lives between
+  ticks. A node's recorded duration is now its process's whole life, spawn to
+  reap, rather than the shorter window the node stamps from inside itself, so
+  ETAs count the startup the box actually paid for. Cluster pricing is
+  untouched: a pod reports no exit accounting, and a controller-backed run is
+  folded by the controller, which prices from pod samples exactly as before.
+- **admission:** A local run's rollup adds up what every node was drawing at
+  the same moment, grouping readings into sampling windows instead of by
+  exact timestamp. With each node sampling itself in its own process, two
+  nodes never stamp the same nanosecond, and the previous grouping quietly
+  reduced a parallel stage to its widest single node -- half a machine for a
+  pair, a quarter for a fan-out of four, always in the direction that admits
+  too much. Expect rollup peaks for pipelines that fan out to rise to what
+  they always claimed to measure. Per-node figures are unchanged.
 
 ### Added
 
@@ -76,6 +109,14 @@ code change to unlock.
   running the page says so and still prices from the runs store. Two
   read-only dashboard endpoints back it, `GET /api/v1/capacity/profiles` and
   `GET /api/v1/capacity/profiles/explain?pipeline=NAME`.
+- **store:** `Store.AddNodeUsage` folds what the kernel charged one node
+  process into the node row -- CPU and occupancy accumulate across retried
+  attempts, peak memory keeps its high-water -- and `store.Node.CPUNanos`,
+  `store.Node.MaxRSSBytes`, and `store.Node.ProcessWallNanos` read it back.
+  `store.MetricSample.CPUTime` and `MetricSample.OneShot` distinguish a
+  per-command report from a sampler tick. Zero in any of these means nothing
+  measured it, so a reader must treat it as absent rather than as a node or
+  command that cost nothing.
 - **store:** `Store.ProfileSamples` and `store.NearestRankIndex` expose a
   pipeline profile's stored sample window and the position a percentile
   charge was taken from, so a reader can recompute an admission charge from

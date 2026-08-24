@@ -604,7 +604,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 14
+const expectedSchemaVersion = 15
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -1019,6 +1019,11 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		}
 		_, err := s.exec(ctx, pipelineProfilesSustainedBackfill)
 		return err
+	case 15:
+		if err := s.ensureColumns("nodes", nodesUsageCols); err != nil {
+			return err
+		}
+		return s.ensureColumns("node_metrics", nodeMetricsCPUTimeCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1073,6 +1078,11 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 		}
 		_, err := tx.ExecContext(ctx, pipelineProfilesSustainedBackfill)
 		return err
+	case 15:
+		if err := addColumnsTx(ctx, tx, "nodes", nodesUsageCols); err != nil {
+			return err
+		}
+		return addColumnsTx(ctx, tx, "node_metrics", nodeMetricsCPUTimeCols)
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1242,6 +1252,43 @@ var pipelineProfilesSustainedCols = map[string]string{
 const pipelineProfilesSustainedBackfill = `UPDATE pipeline_profiles
    SET sustained_cores = peak_cores, prev_sustained_cores = prev_peak_cores
  WHERE sustained_cores = 0`
+
+// nodesUsageCols is the additive column set v15 adds to nodes: the
+// kernel's exit accounting for the process that executed the node, which
+// is exact where the per-interval sampler is not -- a node shorter than one
+// sampling interval is invisible to sampling and still reports its true CPU
+// time and peak RSS here. All three default to zero, which every reader
+// treats as "no process was supervised" (a cluster pod, a node run inside
+// the dispatcher) rather than as a measurement of nothing.
+//
+// process_wall_nanos is the span the CPU was drawn over, spawn to reap, and
+// it is stored rather than derived because the node's own timestamps do not
+// describe the same span: started_at and finished_at are stamped inside the
+// process, after runtime and plan startup and before teardown. Pricing the
+// process's whole CPU against that shorter window reports a rate the machine
+// never gave.
+//
+// It is applied on its own rather than through columnMigrations because
+// that list runs at v1, which every store past v1 has already applied.
+var nodesUsageCols = map[string]string{
+	"cpu_nanos":          "INTEGER NOT NULL DEFAULT 0",
+	"max_rss_bytes":      "INTEGER NOT NULL DEFAULT 0",
+	"process_wall_nanos": "INTEGER NOT NULL DEFAULT 0",
+}
+
+// nodeMetricsCPUTimeCols is v15's addition to node_metrics: the CPU a
+// one-shot sample measured, as a duration rather than as the rate the
+// sample's cpu_millicores carries.
+//
+// A sampler tick is a rate over a known window and leaves this zero. A
+// per-command report is a rate over that command's own span, which may be a
+// fraction of the window it lands in, so summing several of them as rates
+// invents concurrency that never existed: four 400ms commands at two cores
+// each, run back to back inside one window, would read as eight cores. The
+// duration lets the fold integrate them instead.
+var nodeMetricsCPUTimeCols = map[string]string{
+	"cpu_time_nanos": "INTEGER NOT NULL DEFAULT 0",
+}
 
 var triggerRepoInheritedCols = map[string]string{
 	"repo_inherited": "INTEGER NOT NULL DEFAULT 0",
@@ -1955,6 +2002,28 @@ type Node struct {
 	// live on NodeStep.Summary instead.
 	Summary string `json:"summary,omitempty"`
 
+	// CPUNanos is the user plus system CPU time the kernel accounted to
+	// the process that executed this node, MaxRSSBytes the peak resident
+	// set size it reported for that process, and ProcessWallNanos the
+	// span that process existed for, spawn to reap. They are written by
+	// a runner that supervised a process of its own, and stay zero for a
+	// node executed anywhere else -- a Kubernetes pod, a node run inside
+	// the dispatcher; zero means absent, not measured-as-nothing. Exact
+	// where the per-interval sampler is not: a node shorter than one
+	// sampling interval has no metric samples at all and still reports
+	// what it cost here.
+	//
+	// ProcessWallNanos is the denominator CPUNanos belongs over. It is
+	// wider than FinishedAt.Sub(StartedAt), which the node stamps from
+	// inside itself once startup is done, and both figures are kept
+	// because they answer different questions: how long the box was
+	// occupied, and how long the node's own work took. A node retried in
+	// place accumulates every attempt here -- the machine paid for all of
+	// them -- while MaxRSSBytes keeps the high-water across attempts.
+	CPUNanos         int64 `json:"cpu_nanos,omitempty"`
+	MaxRSSBytes      int64 `json:"max_rss_bytes,omitempty"`
+	ProcessWallNanos int64 `json:"process_wall_nanos,omitempty"`
+
 	// ArtifactManifest is the content-addressed digest of the manifest
 	// describing the files this node published as artifacts (see
 	// JobNode.Outputs). Empty when the node declared no outputs or no
@@ -2035,12 +2104,51 @@ func (s *Store) SetNodeArtifactManifest(ctx context.Context, runID, nodeID, mani
 	return err
 }
 
+// NodeUsage is the kernel's exit accounting for one process that
+// executed a node: CPUTime is user plus system time across that process
+// tree, MaxRSSBytes its peak resident set size, and Wall the span it
+// existed for, spawn to reap.
+type NodeUsage struct {
+	CPUTime     time.Duration
+	MaxRSSBytes int64
+	Wall        time.Duration
+}
+
+// AddNodeUsage folds one finished process's accounting into a node's
+// row. Called by the runner that supervised the process, after the
+// process it describes has exited and therefore after the node's own
+// terminal row -- which is why it is a separate write rather than a
+// FinishNode argument: the figures do not exist until the process is
+// reaped, and the node that wrote its own outcome is not the process
+// that can read them.
+//
+// It adds rather than replaces because a node can be executed more than
+// once: an auto-retry runs a fresh process per attempt, and the machine
+// paid for every one of them, so CPU and wall accumulate. Peak RSS takes
+// the high-water instead, since the attempts did not hold their peaks at
+// the same time. A non-positive figure contributes nothing, and zero
+// stays the value every reader treats as absent.
+func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) error {
+	cpuNanos := max(int64(u.CPUTime), 0)
+	wallNanos := max(int64(u.Wall), 0)
+	maxRSSBytes := max(u.MaxRSSBytes, 0)
+	_, err := s.exec(ctx, `
+UPDATE nodes
+   SET cpu_nanos = cpu_nanos + ?,
+       process_wall_nanos = process_wall_nanos + ?,
+       max_rss_bytes = CASE WHEN ? > max_rss_bytes THEN ? ELSE max_rss_bytes END
+ WHERE run_id = ? AND node_id = ?`,
+		cpuNanos, wallNanos, maxRSSBytes, maxRSSBytes, runID, nodeID)
+	return err
+}
+
 // ListNodes returns the nodes for a run in insertion order.
 func (s *Store) ListNodes(ctx context.Context, runID string) ([]*Node, error) {
 	rows, err := s.query(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary, artifact_manifest
+       failure_reason, exit_code, annotations_json, summary, artifact_manifest,
+       cpu_nanos, max_rss_bytes, process_wall_nanos
   FROM nodes
  WHERE run_id = ?
  ORDER BY `+s.insertionOrderColumn(), runID)
@@ -2064,7 +2172,8 @@ func (s *Store) GetNode(ctx context.Context, runID, nodeID string) (*Node, error
 	row := s.queryRow(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary, artifact_manifest
+       failure_reason, exit_code, annotations_json, summary, artifact_manifest,
+       cpu_nanos, max_rss_bytes, process_wall_nanos
   FROM nodes
  WHERE run_id = ? AND node_id = ?`, runID, nodeID)
 	n := &Node{}
@@ -2084,7 +2193,8 @@ func scanNodeRow(rs rowScanner, n *Node) error {
 		&depsJSON, &n.Error, &outputJSON, &startedNS, &finishedNS,
 		&readyNS, &claimedBy, &leaseNS, &labelsJSON,
 		&n.StatusDetail, &heartbeatNS,
-		&n.FailureReason, &exitCode, &annotationsJSON, &n.Summary, &n.ArtifactManifest)
+		&n.FailureReason, &exitCode, &annotationsJSON, &n.Summary, &n.ArtifactManifest,
+		&n.CPUNanos, &n.MaxRSSBytes, &n.ProcessWallNanos)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -2457,7 +2567,8 @@ func (s *Store) ClaimNextReadyNode(ctx context.Context, holderID string, lease t
 		err = scanNodeRow(tx.QueryRowContext(ctx, `
 SELECT run_id, node_id, status, outcome, deps_json, error, output_json, started_at, finished_at,
        ready_at, claimed_by, lease_expires_at, needs_labels, status_detail, last_heartbeat,
-       failure_reason, exit_code, annotations_json, summary, artifact_manifest
+       failure_reason, exit_code, annotations_json, summary, artifact_manifest,
+       cpu_nanos, max_rss_bytes, process_wall_nanos
   FROM nodes
  WHERE ready_at IS NOT NULL AND claimed_by IS NULL AND `+nodeNotDone+`
  ORDER BY ready_at ASC

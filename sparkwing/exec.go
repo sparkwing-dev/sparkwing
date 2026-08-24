@@ -435,9 +435,15 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 
 	waitErr := cmd.Wait()
 	wall := time.Since(startedAt)
-	drainStreams(&wg, outR, errR)
-
+	// safety: the report is filed at the reap, ahead of the drain, because the
+	// node sampler is ticking the whole time. The report tells the sampler
+	// which reaped-child CPU it has already accounted for, and a tick landing
+	// inside the drain's grace window would otherwise charge that CPU a second
+	// time -- the same CPU, once as the command's report and once as the
+	// sampler's own RUSAGE_CHILDREN delta.
 	emitCommandResources(ctx, cmd, wall)
+
+	drainStreams(&wg, outR, errR)
 
 	res := ExecResult{
 		Command:  display,

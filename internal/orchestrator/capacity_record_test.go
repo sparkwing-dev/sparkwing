@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -181,15 +182,18 @@ func TestRecordRunProfile_CapsCPUProfileAtHostCapacity(t *testing.T) {
 }
 
 // TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto pins the
-// rollup a parallel stage folds to. The sampler halves each interval's
-// process-wide reading between the two nodes running in it, so the run drew
-// what the shares of one tick sum to; taking the widest node's share instead
-// would price the whole fan-out at half the machine it used and admit twice as
-// many of them. A sample carrying its own timestamp, as a per-command report
-// does, stands alone rather than joining a tick it did not belong to.
+// rollup a parallel stage folds to. Each node reads what it drew in an
+// interval, so the run drew what one interval's readings sum to; taking the
+// widest node's reading instead would price the whole fan-out at half the
+// machine it used and admit twice as many of them. A sample carrying its own
+// timestamp, as a per-command report does, joins the interval it happened in
+// and adds to it: that CPU really was drawn beside the nodes sampling around
+// it. The run start is aligned to the sampling cadence the fold groups on, so
+// the one-shot lands inside the tick it is offset from instead of straddling
+// a window boundary at random.
 func TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto(t *testing.T) {
-	if runtime.NumCPU() < 2 {
-		t.Skip("host cannot hold a two-core reading")
+	if runtime.NumCPU() < 3 {
+		t.Skip("host cannot hold a three-core reading")
 	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -198,7 +202,7 @@ func TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto(t *testing.
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
-	start := time.Now()
+	start := time.Now().Truncate(nodemetrics.Interval())
 	if err := st.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "fan", Status: "running", StartedAt: start}); err != nil {
 		t.Fatal(err)
 	}
@@ -234,8 +238,8 @@ func TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto(t *testing.
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
-	if rollup.PeakCores != 2.0 {
-		t.Errorf("rollup PeakCores = %v, want 2.0 (both halves of the heaviest tick)", rollup.PeakCores)
+	if rollup.PeakCores != 2.3 {
+		t.Errorf("rollup PeakCores = %v, want 2.3 (both nodes' readings plus the one-shot drawn beside them)", rollup.PeakCores)
 	}
 	if rollup.PeakMemoryBytes != 4<<30 {
 		t.Errorf("rollup PeakMemoryBytes = %d, want %d (both halves of the heaviest tick)", rollup.PeakMemoryBytes, int64(4)<<30)

@@ -15,6 +15,11 @@ type metricSample struct {
 	TS            string `json:"ts"` // RFC3339
 	CPUMillicores int64  `json:"cpu_millicores"`
 	MemoryBytes   int64  `json:"memory_bytes"`
+	// CPUTimeNanos marks a per-command one-shot and carries the CPU it
+	// measured. A node process reports its commands over this endpoint,
+	// so a field dropped here is dropped exactly for the runs the
+	// capacity fold needs it for. Absent (zero) means a sampler tick.
+	CPUTimeNanos int64 `json:"cpu_time_nanos,omitempty"`
 }
 
 // handleAddNodeMetric appends one resource sample for a node. Single
@@ -37,6 +42,7 @@ func (s *Server) handleAddNodeMetric(w http.ResponseWriter, r *http.Request) {
 		TS:            ts,
 		CPUMillicores: body.CPUMillicores,
 		MemoryBytes:   body.MemoryBytes,
+		CPUTime:       time.Duration(body.CPUTimeNanos),
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return

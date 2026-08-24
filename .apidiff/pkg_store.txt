@@ -192,7 +192,10 @@ type MetricSample struct {
 	TS            time.Time
 	CPUMillicores int64
 	MemoryBytes   int64
+
+	CPUTime time.Duration
 }
+func (m MetricSample) OneShot() bool
 func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
 type Node struct {
@@ -224,6 +227,10 @@ type Node struct {
 
 	Summary string
 
+	CPUNanos         int64
+	MaxRSSBytes      int64
+	ProcessWallNanos int64
+
 	ArtifactManifest string
 }
 type NodeDispatch struct {
@@ -251,6 +258,11 @@ type NodeStep struct {
 	Annotations []string
 
 	Summary string
+}
+type NodeUsage struct {
+	CPUTime     time.Duration
+	MaxRSSBytes int64
+	Wall        time.Duration
 }
 const OnLimitCancelOthers = "cancel_others"
 const OnLimitCoalesce = "coalesce"
@@ -432,6 +444,7 @@ type Store struct {
 func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotRequest) (AcquireSlotResponse, error)
 func (s *Store) ActiveConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
 func (s *Store) AddNodeMetricSample(ctx context.Context, runID, nodeID string, sample MetricSample) error
+func (s *Store) AddNodeUsage(ctx context.Context, runID, nodeID string, u NodeUsage) error
 func (s *Store) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) (int64, error)
 func (s *Store) AppendNodeAnnotation(ctx context.Context, runID, nodeID, msg string) error
 func (s *Store) AppendStepAnnotation(ctx context.Context, runID, nodeID, stepID, msg string) error

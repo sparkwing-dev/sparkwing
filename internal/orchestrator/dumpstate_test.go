@@ -101,7 +101,8 @@ UPDATE nodes SET
    claimed_by='runner-7', lease_expires_at=?,
    status_detail='compiling',
    last_heartbeat=?, failure_reason='exit_nonzero', exit_code=?,
-   annotations_json=?, summary=?, artifact_manifest='sha-cafef00d'
+   annotations_json=?, summary=?, artifact_manifest='sha-cafef00d',
+   cpu_nanos=?, max_rss_bytes=?, process_wall_nanos=?
  WHERE run_id=? AND node_id=?`,
 		[]byte(`{"out":"ok"}`),
 		time.Unix(1746335100, 0).UnixNano(),
@@ -112,6 +113,9 @@ UPDATE nodes SET
 		17,
 		[]byte(`["compiled 14 MiB","linked in 1.2s"]`),
 		"## compile\n- 14 MiB binary",
+		int64(4200*time.Millisecond),
+		int64(384<<20),
+		int64(5100*time.Millisecond),
 		runID, nodeID,
 	); err != nil {
 		t.Fatalf("populate node row: %v", err)

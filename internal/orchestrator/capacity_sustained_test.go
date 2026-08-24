@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/nodemetrics"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -110,14 +111,19 @@ func TestRecordRunProfile_ShortRunSustainedIsItsMaximum(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_OneShotSamplesRankAsSingleIntervals covers the
-// per-command report, which carries its own timestamp and so joins no tick.
-// It must count once, like any other interval: summed into a neighboring
-// tick it would invent process demand that never existed, and weighted as a
-// plateau it would price a whole run off one command's burst.
-func TestRecordRunProfile_OneShotSamplesRankAsSingleIntervals(t *testing.T) {
-	if runtime.NumCPU() < 4 {
-		t.Skip("host cannot hold a four-core reading")
+// TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn covers the
+// per-command report, which carries its own timestamp rather than a tick's.
+// It is grouped by when it happened, like every other reading: the command
+// drew its four cores while both nodes were drawing half a core each, so the
+// window it landed in reads five. Standing it alone would report a moment
+// the machine never had, and would hide the concurrency admission exists to
+// price. It still ranks as one window among five, so a single command's
+// burst cannot price the whole run. The run start is aligned to the cadence
+// the fold groups on, so the one-shot sits a millisecond inside a tick's
+// window rather than across its edge.
+func TestRecordRunProfile_OneShotSamplesJoinTheWindowTheyLandIn(t *testing.T) {
+	if runtime.NumCPU() < 5 {
+		t.Skip("host cannot hold a five-core reading")
 	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -126,7 +132,7 @@ func TestRecordRunProfile_OneShotSamplesRankAsSingleIntervals(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
-	start := time.Now()
+	start := time.Now().Truncate(nodemetrics.Interval())
 	if err := st.CreateRun(ctx, store.Run{ID: "r1", Pipeline: "fan", Status: "running", StartedAt: start}); err != nil {
 		t.Fatal(err)
 	}
@@ -157,11 +163,11 @@ func TestRecordRunProfile_OneShotSamplesRankAsSingleIntervals(t *testing.T) {
 	if err != nil || rollup == nil {
 		t.Fatalf("rollup profile missing: %v", err)
 	}
-	if rollup.PeakCores != 4.0 {
-		t.Errorf("rollup PeakCores = %v, want 4.0 (the one-shot stands alone, not summed into a tick)", rollup.PeakCores)
+	if rollup.PeakCores != 5.0 {
+		t.Errorf("rollup PeakCores = %v, want 5.0 (the one-shot's four cores plus the two halves beside it)", rollup.PeakCores)
 	}
-	if rollup.SustainedCores != 1.5 {
-		t.Errorf("rollup SustainedCores = %v, want 1.5 (the one-shot ranks as one interval among six and lifts the mean)", rollup.SustainedCores)
+	if rollup.SustainedCores != 1.8 {
+		t.Errorf("rollup SustainedCores = %v, want 1.8 (four windows at one core and one at five)", rollup.SustainedCores)
 	}
 }
 

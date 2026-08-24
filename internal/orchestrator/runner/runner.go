@@ -72,4 +72,13 @@ type ResourceUsage struct {
 	CPUTime time.Duration
 	// MaxRSSBytes is peak resident set size, normalized to bytes.
 	MaxRSSBytes int64
+
+	// Wall is how long that process existed, spawn to reap, measured by
+	// the runner that owns it. It is the span CPUTime was drawn over, and
+	// the only span that matches it: a node's own started_at/finished_at
+	// are stamped inside the process, after runtime and plan startup and
+	// before teardown, so dividing this CPU by that window reports cores
+	// the machine never gave -- a millisecond of work would price at host
+	// capacity. Zero when the runner did not time the process.
+	Wall time.Duration
 }

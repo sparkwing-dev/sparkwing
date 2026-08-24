@@ -207,8 +207,10 @@ func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *s
 
 // executeNodeElsewhere hands the node to the executor and flattens its
 // Result back into the (output, error) shape the coordination paths
-// expect. The executor's process wrote the node's terminal row, so
-// nothing is persisted here.
+// expect. The executor's process wrote the node's terminal row from
+// inside itself, so the only thing persisted here is what that process
+// cost: knowable solely out here, after the reap, and dropped with the
+// rest of the Result by the flattening if it were not written first.
 func (r *InProcessRunner) executeNodeElsewhere(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
 	res := r.spawn.RunNode(ctx, runner.Request{
 		RunID:    runID,
@@ -216,6 +218,7 @@ func (r *InProcessRunner) executeNodeElsewhere(ctx context.Context, runID string
 		Node:     node,
 		Delegate: delegate,
 	})
+	recordNodeUsage(ctx, r.backends.State, runID, node.ID(), res.Usage)
 	switch res.Outcome {
 	case sparkwing.Success, sparkwing.Cached:
 		return res.Output, nil
@@ -302,6 +305,7 @@ func (r *InProcessRunner) executeNodeInProcess(ctx context.Context, runID string
 			TS:            time.Now(),
 			CPUMillicores: s.CPUMillicores,
 			MemoryBytes:   s.MemoryBytes,
+			CPUTime:       s.CPUTime,
 		})
 	})
 

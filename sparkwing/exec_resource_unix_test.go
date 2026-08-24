@@ -85,6 +85,43 @@ func TestExec_SpawnedBinaryBurnerRecordsNonzeroCPU(t *testing.T) {
 	}
 }
 
+// TestExec_ResourceReportIsFiledAtTheReapNotAfterTheDrain pins the order of
+// two things that used to happen in the wrong sequence.
+//
+// A command's report tells the node sampler which reaped-child CPU has
+// already been accounted for. The sampler keeps ticking meanwhile, so any
+// delay between the reap and the report is a window in which a tick charges
+// that CPU a second time -- once as the sampler's own RUSAGE_CHILDREN delta
+// and once as the command's report. The delay was real: a surviving
+// grandchild holding the command's stdout open makes the drain wait out its
+// whole grace window, and the report used to be filed after that.
+//
+// The background process here holds the inherited pipe for far longer than
+// the grace, so a report that waits for the drain cannot arrive in time. The
+// 300ms budget is loose on purpose: what it pins is which side of the 500ms
+// grace the report falls on, not how fast the box is.
+func TestExec_ResourceReportIsFiledAtTheReapNotAfterTheDrain(t *testing.T) {
+	reported := make(chan time.Duration, 4)
+	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
+	started := time.Now()
+	ctx = sparkwing.WithResourceReporter(ctx, func(sparkwing.ResourceSample) {
+		reported <- time.Since(started)
+	})
+
+	if _, err := sparkwing.Bash(ctx, `sleep 5 & echo spawned`).Run(); err != nil {
+		t.Fatalf("Bash with a surviving grandchild: %v", err)
+	}
+
+	select {
+	case at := <-reported:
+		if at > 300*time.Millisecond {
+			t.Errorf("resource report arrived %s after the command started; it waited out the stream drain", at)
+		}
+	default:
+		t.Error("no resource report was filed for a command whose grandchild held its pipes open")
+	}
+}
+
 // A command with no resource reporter installed runs normally: reporting
 // is a no-op, never a failure.
 func TestExec_NoReporterIsHarmless(t *testing.T) {

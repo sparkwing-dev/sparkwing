@@ -2683,8 +2683,14 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 }
 
 // applyResult mirrors the runner's terminal outcome into in-memory
-// state for downstream coordination.
+// state for downstream coordination, and records what the node's
+// process cost when the runner reporting the outcome supervised one.
+// A runner reached through the node-executor seam has already recorded
+// that at the seam, where the Result is flattened and the figures would
+// otherwise be dropped; one configured as the dispatcher's own Runner
+// reports them here.
 func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
+	recordNodeUsage(s.ctx, s.backends.State, s.runID, nodeID, res.Usage)
 	if res.Output != nil {
 		s.setOutput(nodeID, res.Output)
 	}

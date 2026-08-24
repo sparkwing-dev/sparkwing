@@ -132,13 +132,44 @@ cluster metrics-server is involved.
   available. Both platform sources report the footprint at the moment of
   the sample, not a high-water mark.
 
-One sampler runs per process and splits each interval's reading evenly
-across the nodes running in it. A node's chart is therefore an estimate
-of that node's share rather than a measurement of it -- but the nodes of
-a parallel fan-out sum to what the process really used, which is what
-right-sizing and admission both need. A node joins and leaves on tick
-boundaries, so up to one interval of its cost can land on the nodes
-beside it.
+One sampler runs per process. A local node is its own process and a
+cluster node is its own pod, so each node's chart measures that node
+and nothing else; the nodes of a parallel fan-out still sum to what the
+machine used, which is what right-sizing and admission both need. Where
+several nodes do share one process -- a program that embeds the SDK and
+runs nodes inside itself -- the interval's reading is split evenly
+among them, so each node's chart is an estimate of its share, and a
+node joining or leaving between ticks can land up to one interval of
+its cost on the nodes beside it.
+
+Sampling every 2 seconds cannot see everything. A node shorter than one
+interval produces no samples at all, and CPU burned by a command that
+started and finished between two ticks may not appear in either. So a
+node's row also records what the kernel charged its process at exit --
+total CPU time, peak resident set, and the span the process existed for
+-- which the capacity fold reads as a floor under the sampled figures.
+Those exit figures exist only where sparkwing supervised a process,
+which today means local runs; a pod reports none and prices from its
+samples alone.
+
+The exit figures cover the whole process, including runtime startup,
+plan rebuild, and teardown, which is why the span is recorded with them
+rather than taken from the node's own start and finish timestamps: those
+are stamped from inside the process once startup is done, and dividing
+the process's whole CPU by that narrower window would report a draw the
+machine never gave. The node's recorded duration is the process's whole
+life for the same reason -- it is how long the box was occupied. A node
+retried in place accumulates every attempt's CPU and occupancy, since
+the machine ran them all, while the peak stays a high-water.
+
+Per-command reports and sampler ticks are folded differently when a run
+is priced. A tick is a rate that already covers its window, so
+concurrent nodes' ticks add up. A command report is a rate over the
+command's own span, so the fold integrates it instead: four 400ms
+commands at two cores each, run back to back inside one window, are 1.6
+cores of that window rather than the eight their rates would add to.
+Command memory is a lifetime high-water, so one node's several reports
+in a window contribute the largest, not the sum.
 
 ### API
 

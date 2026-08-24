@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +35,7 @@ func TestProcessPerNode_EveryNodeRunsInItsOwnProcess(t *testing.T) {
 	probe := t.TempDir()
 	runEnv := append(os.Environ(),
 		"SPARKWING_HOME="+home,
+		"SPARKWING_WINGD_BIN="+wingdHostBin(t),
 		"SPARKWING_LOG_FORMAT=json",
 		"PROC_PROBE_DIR="+probe,
 	)
@@ -59,6 +61,68 @@ func TestProcessPerNode_EveryNodeRunsInItsOwnProcess(t *testing.T) {
 	// the boundary.
 	if !strings.Contains(out, "consumed digest=sha-abc123") {
 		t.Errorf("consumer did not read the producer's typed output:\n%s", out)
+	}
+
+	assertNodesRecordedTheirUsage(t, home, "spawnproof", "produce", "consume")
+}
+
+// assertNodesRecordedTheirUsage checks that the dispatcher wrote what the
+// kernel charged each node's process onto the node row, and that the pipeline
+// profile prices the node at what those figures say.
+//
+// Only a supervised process has this accounting, so the first half is the
+// end-to-end proof that the reap reaches the store: a node that really ran
+// spent CPU, held memory, and existed for a span. The second half is why the
+// span is stored: the charge has to be the CPU over the process's own life.
+// Divided by the node's inner started_at..finished_at window instead -- which
+// excludes runtime startup, plan rebuild, and teardown, while the CPU those
+// phases burn is still in the total -- these same fixture nodes price several
+// times higher, and on a smaller box they clamp to host capacity. Every node
+// of every pipeline would then charge the whole machine after enough runs.
+//
+// The fixture nodes are all shorter than one sampling interval, so the exit
+// accounting is the only measurement they have and the stored charge has to
+// be exactly it.
+func assertNodesRecordedTheirUsage(t *testing.T, home, pipeline string, nodeIDs ...string) {
+	t.Helper()
+	st, err := store.Open(filepath.Join(home, "state.db"))
+	if err != nil {
+		t.Fatalf("open runs store: %v", err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	run, err := st.GetLatestRun(ctx, pipeline, nil, time.Hour)
+	if err != nil || run == nil {
+		t.Fatalf("latest %s run: %v", pipeline, err)
+	}
+	for _, id := range nodeIDs {
+		n, err := st.GetNode(ctx, run.ID, id)
+		if err != nil {
+			t.Fatalf("node %q: %v", id, err)
+		}
+		if n.CPUNanos <= 0 {
+			t.Errorf("node %q cpu_nanos = %d, want the CPU its process burned", id, n.CPUNanos)
+		}
+		if n.MaxRSSBytes <= 0 {
+			t.Errorf("node %q max_rss_bytes = %d, want the peak RSS its process held", id, n.MaxRSSBytes)
+		}
+		if n.ProcessWallNanos <= 0 {
+			t.Fatalf("node %q process_wall_nanos = %d, want the span the process existed for", id, n.ProcessWallNanos)
+		}
+		measured := float64(n.CPUNanos) / float64(n.ProcessWallNanos)
+		if measured > float64(runtime.NumCPU()) {
+			t.Errorf("node %q measured %.2f cores; a %d-core host cannot have given that, so the span is not the one the CPU was drawn over",
+				id, measured, runtime.NumCPU())
+		}
+		prof, err := st.GetPipelineProfile(ctx, pipeline, id)
+		if err != nil || prof == nil {
+			t.Fatalf("node %q profile missing: %v", id, err)
+		}
+		if diff := math.Abs(prof.SustainedCores - measured); diff > 0.05*measured {
+			t.Errorf("node %q charges %.3f sustained cores but its process measured %.3f (cpu %s over %s)",
+				id, prof.SustainedCores, measured,
+				time.Duration(n.CPUNanos), time.Duration(n.ProcessWallNanos))
+		}
 	}
 }
 
@@ -167,6 +231,7 @@ func TestProcessPerNode_NodeAbandonsARunWhoseDispatcherDied(t *testing.T) {
 	cmd.Dir = mod
 	cmd.Env = append(os.Environ(),
 		"SPARKWING_HOME="+home,
+		"SPARKWING_WINGD_BIN="+wingdHostBin(t),
 		"SPARKWING_LOG_FORMAT=json",
 		"PROC_PROBE_DIR="+probe,
 	)
@@ -254,6 +319,28 @@ func buildProcPerNodeBinary(t *testing.T) (mod, bin string) {
 	bin = filepath.Join(mod, "procpernode")
 	runGo(t, mod, buildEnv, "build", "-o", bin, ".")
 	return mod, bin
+}
+
+// wingdHostBin builds this working tree's own CLI and returns its path, for
+// pinning SPARKWING_WINGD_BIN on a spawned run.
+//
+// Without the pin, a run's admission daemon is hosted by whatever `sparkwing`
+// happens to be on PATH. That binary is usually older than the tree under
+// test, and the moment the tree's schema is newer it cannot open the store the
+// test just migrated: the daemon's terminal check fails, admission evicts the
+// run, and the test reports `plan concurrency group "terminal-check": slot
+// full under OnLimit:Fail` while the real reason sits in the daemon's log. The
+// test builds a pipeline binary already, so building the CLI beside it costs
+// one more link and makes the run depend on nothing installed.
+func wingdHostBin(t *testing.T) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "sparkwing")
+	root := repoRootDir(t)
+	// safety: GOWORK=off for the reason AGENTS.md gives -- inside a worktree
+	// the checked-in go.work resolves the main checkout and breaks the build.
+	env := append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local")
+	runGo(t, root, env, "build", "-o", bin, "./cmd/sparkwing")
+	return bin
 }
 
 func readPID(t *testing.T, dir, name string) int {

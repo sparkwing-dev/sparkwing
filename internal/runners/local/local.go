@@ -190,6 +190,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	// child watches for.
 	defer func() { _ = livenessW.Close() }()
 
+	spawnedAt := time.Now()
 	group, err := procgroup.Start(cmd)
 	// safety: the child owns its copies now; a parent that keeps the write ends
 	// open never sees EOF on its own readers.
@@ -211,11 +212,12 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 		fmt.Sprintf("running, pid %d", group.ID()))
 
 	waitErr, cancelled := r.await(ctx, group)
+	wall := time.Since(spawnedAt)
 	forwarders.Wait()
 	closeAll(stdout, stderr)
 	stopHB()
 
-	return r.resultFor(ctx, req, cmd, waitErr, cancelled)
+	return r.resultFor(ctx, req, cmd, waitErr, cancelled, wall)
 }
 
 // nodeArgv is the child's command line. Flags precede the positionals
@@ -266,9 +268,12 @@ func (r *Runner) await(ctx context.Context, group *procgroup.Group) (error, bool
 // says how the process ended. A synthesized outcome is what is left
 // when the process died without writing one, and it is written back so
 // the run does not carry a node stuck at "running".
-func (r *Runner) resultFor(ctx context.Context, req runner.Request, cmd *exec.Cmd, waitErr error, cancelled bool) runner.Result {
+func (r *Runner) resultFor(ctx context.Context, req runner.Request, cmd *exec.Cmd, waitErr error, cancelled bool, wall time.Duration) runner.Result {
 	readCtx := context.WithoutCancel(ctx)
 	usage := usageFrom(cmd.ProcessState)
+	if usage != nil {
+		usage.Wall = wall
+	}
 
 	n, err := r.ctrl.GetNode(readCtx, req.RunID, req.NodeID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {

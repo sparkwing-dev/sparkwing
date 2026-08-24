@@ -46,8 +46,16 @@ func SetIntervalForTest(d time.Duration) (restore func()) {
 	return func() { intervalNanos.Store(previous) }
 }
 
-// currentInterval is the cadence the next loop will start with.
-func currentInterval() time.Duration {
+// Interval is the cadence the next loop will start with, and the width
+// of the window a reader must group samples into to reconstruct what
+// the machine drew at one moment. Every node runs its own sampler in
+// its own process, so concurrent nodes stamp a tick with timestamps
+// that are close but never equal; a reader that grouped on the exact
+// timestamp would see one node per group and mistake a parallel stage's
+// widest share for the whole stage. Exported so the fold and the
+// sampler cannot drift: the cadence samples are produced at is the
+// cadence they are grouped at, test override included.
+func Interval() time.Duration {
 	if d := time.Duration(intervalNanos.Load()); d > 0 {
 		return d
 	}
@@ -138,7 +146,7 @@ func (s *sharedSampler) add(a *attachment) {
 		stop := make(chan struct{})
 		s.stop = stop
 		loopsRunning.Add(1)
-		go s.loop(stop, currentInterval())
+		go s.loop(stop, Interval())
 	}
 }
 
