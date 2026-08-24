@@ -18,6 +18,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
+	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -38,13 +39,23 @@ import (
 // local run, so controller work and local work share one arbiter. In a
 // Kubernetes pod the scheduler already admitted the work, so the pod's
 // run-node entrypoint passes nil and the daemon is never engaged.
+//
+// Options carry the execution mode. The default is the pod contract
+// above. [Coordinated] switches to the local contract, where the
+// dispatcher that spawned this process already resolved cache,
+// concurrency admission, and SkipIf before deciding to spawn at all.
 func RunNodeOnce(
 	ctx context.Context,
 	controllerURL, logsURL, runID, nodeID, holderID, token string,
 	delegate sparkwing.Logger,
 	logger *slog.Logger,
 	admission *LocalAdmission,
+	opts ...RunNodeOption,
 ) (runner.Result, error) {
+	var cfg runNodeConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -72,12 +83,6 @@ func RunNodeOnce(
 		logsBackend = localLogs{paths: paths}
 	}
 
-	art, err := resolveArtifactStoreFromEnv(ctx)
-	if err != nil {
-		return runner.Result{}, fmt.Errorf("artifact store: %w", err)
-	}
-	backends := RemoteBackends(stateClient, logsBackend, art, httpClient, store.DefaultConcurrencyLease)
-
 	// Execution read: run.Args seeds the masker below and is handed to
 	// reg.Invoke and the runner.Request. The plain GetRun redacts.
 	run, err := stateClient.GetRunForExecution(ctx, runID)
@@ -93,6 +98,24 @@ func RunNodeOnce(
 	if shouldRunRemote(trigger) {
 		return runNodeRemote(ctx, trigger, run, controllerURL, logsURL, runID, nodeID, token, logger)
 	}
+
+	var art storage.ArtifactStore
+	var localSecrets secrets.Source
+	if cfg.coordinated {
+		// safety: the dispatcher and this process are the same binary on the
+		// same machine reading the same project, so the child rebuilds
+		// the run's own surfaces rather than borrowing the pod's
+		// controller-backed ones: a laptop run's secrets live in a
+		// dotenv file the controller has never seen, and its artifact
+		// store is the one the dispatcher's profile named.
+		localSecrets, art, err = coordinatedChildSurfaces(ctx, run.Pipeline)
+	} else {
+		art, err = resolveArtifactStoreFromEnv(ctx)
+	}
+	if err != nil {
+		return runner.Result{}, fmt.Errorf("artifact store: %w", err)
+	}
+	backends := RemoteBackends(stateClient, logsBackend, art, httpClient, store.DefaultConcurrencyLease)
 
 	reg, ok := sparkwing.Lookup(run.Pipeline)
 	if !ok {
@@ -132,18 +155,21 @@ func RunNodeOnce(
 		return data, true
 	})
 
-	httpSource := secrets.SourceFunc(func(name string) (string, bool, error) {
-		sec, gerr := stateClient.GetSecret(ctx, name)
-		if gerr != nil {
-			if errors.Is(gerr, store.ErrNotFound) {
-				return "", false, secrets.ErrSecretMissing
+	source := localSecrets
+	if source == nil {
+		source = secrets.SourceFunc(func(name string) (string, bool, error) {
+			sec, gerr := stateClient.GetSecret(ctx, name)
+			if gerr != nil {
+				if errors.Is(gerr, store.ErrNotFound) {
+					return "", false, secrets.ErrSecretMissing
+				}
+				return "", false, gerr
 			}
-			return "", false, gerr
-		}
-		return sec.Value, sec.Masked, nil
-	})
+			return sec.Value, sec.Masked, nil
+		})
+	}
 	ctx = sparkwing.WithSecretResolver(ctx,
-		secrets.NewCached(httpSource, masker).AsResolver())
+		secrets.NewCached(source, masker).AsResolver())
 	// The masker has to reach the node log wrapper the same way it does
 	// on the local path (RunLocal, replay): through the context. Without
 	// this the cluster/pod path resolves secrets into a masker nothing
@@ -152,6 +178,15 @@ func RunNodeOnce(
 
 	if in := plan.Inputs(); in != nil {
 		ctx = sparkwingruntime.WithInputs(ctx, in)
+	}
+
+	// safety: the dispatcher installs this from the same plan (newDispatchState).
+	// Without it every sparkwing.ArgOrDefault call in a node running
+	// outside the dispatcher's process reads no resolved-args map and
+	// answers with the schema default, silently discarding the operator's
+	// value.
+	if ra := plan.ResolvedArgs(); ra != nil {
+		ctx = sparkwingruntime.WithResolvedArgs(ctx, ra)
 	}
 
 	if info := podRunnerInfo(); info != nil {
@@ -416,9 +451,15 @@ func RunNodeOnce(
 		defer lease.release()
 	}
 
+	if cfg.coordinated {
+		ctx, err = installStepControlsFromEnv(ctx, plan)
+		if err != nil {
+			return runner.Result{}, err
+		}
+	}
+
 	r := NewInProcessRunner(backends)
-	start := time.Now()
-	res := r.RunNode(ctx, runner.Request{
+	req := runner.Request{
 		RunID:    runID,
 		NodeID:   nodeID,
 		Pipeline: run.Pipeline,
@@ -428,7 +469,14 @@ func RunNodeOnce(
 		Trigger:  sparkwing.TriggerInfo{Source: run.TriggerSource},
 		Node:     node,
 		Delegate: delegate,
-	})
+	}
+	start := time.Now()
+	var res runner.Result
+	if cfg.coordinated {
+		res = r.executeCoordinated(ctx, req)
+	} else {
+		res = r.RunNode(ctx, req)
+	}
 	if MetricsHook != nil {
 		MetricsHook(run.Pipeline, string(res.Outcome), time.Since(start))
 	}
@@ -451,6 +499,8 @@ func runNodeCLI(args []string) error {
 		"logs-service URL (env: SPARKWING_LOGS_URL, falls back to $SPARKWING_HOME/dev.env)")
 	timeout := fs.Duration("timeout", 0,
 		"max wall-clock duration for the node (0 = none; job-level modifiers still apply)")
+	coordinated := fs.Bool("coordinated", false,
+		"a local dispatcher owns this node's cache, concurrency, and SkipIf decisions; execute the body only")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -478,10 +528,22 @@ func runNodeCLI(args []string) error {
 
 	holderID := fmt.Sprintf("pod:%s:%s", runID, nodeID)
 	token := os.Getenv("SPARKWING_AGENT_TOKEN")
+	var runOpts []RunNodeOption
+	if *coordinated {
+		holderID = fmt.Sprintf("node:%s:%s", runID, nodeID)
+		runOpts = append(runOpts, Coordinated())
+		var abandon context.CancelFunc
+		ctx, abandon = context.WithCancel(ctx)
+		defer abandon()
+		defer WatchParentLiveness(abandon)()
+	}
 	res, err := RunNodeOnce(ctx, *controllerURL, *logsURL, runID, nodeID, holderID, token,
-		selectLocalRenderer(), slog.Default(), nil)
+		selectLocalRenderer(), slog.Default(), nil, runOpts...)
 	if err != nil {
 		return err
+	}
+	if *coordinated {
+		return coordinatedExitStatus(runID, nodeID, res)
 	}
 	if res.Err != nil {
 		fmt.Fprintf(os.Stderr, "node %s/%s failed: %v\n", runID, nodeID, res.Err)
@@ -489,6 +551,25 @@ func runNodeCLI(args []string) error {
 	}
 	fmt.Fprintf(os.Stderr, "node %s/%s outcome=%s\n", runID, nodeID, res.Outcome)
 	return nil
+}
+
+// coordinatedExitStatus reports a spawned node's outcome to its
+// dispatcher without printing the node's own error text.
+//
+// The masker that redacts a node's logs is installed inside the node
+// log wrapper, so anything written straight to this process's stderr
+// goes out unredacted -- and the dispatcher relays stderr into the
+// run's delegate and its envelope file. A failure message carrying a
+// resolved secret would therefore be masked in the node log and naked
+// on the operator's terminal. The dispatcher does not need the text
+// anyway: it reads the node's terminal row, where the masked message
+// already is. Only the non-zero exit has to survive, for the case
+// where the row write itself failed.
+func coordinatedExitStatus(runID, nodeID string, res runner.Result) error {
+	if res.Err == nil {
+		return nil
+	}
+	return fmt.Errorf("node %s/%s failed; its terminal row carries the reason", runID, nodeID)
 }
 
 // invokeGeneratorForPod runs one ExpandFrom generator under panic

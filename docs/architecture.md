@@ -215,6 +215,26 @@ These are set on every runner pod:
 | `SPARKWING_HOME` | State / cache / logs root |
 | `SPARKWING_AGENT_TOKEN` | Bearer token for controller + logs calls |
 
+### Environment variables set on a local node process
+
+A local run executes each node as its own process, so the same
+variables above are set on it, with `SPARKWING_CONTROLLER_URL` pointing
+at a loopback controller the dispatcher mounts for the run. Three more
+describe the process boundary itself. Sparkwing sets all of them; they
+are not knobs.
+
+| Variable | Purpose |
+|----------|---------|
+| `SPARKWING_PARENT_LIVENESS_FD` | Descriptor the node reads to notice its dispatcher died, so an abandoned node stops rather than running on against a run nobody owns |
+| `SPARKWING_RUNNER_NAME` | `local` -- the runner name `Runtime().Runner` reports |
+| `SPARKWING_RUNNER_TYPE` | `local` -- the runner type `Runtime().Runner` reports |
+| `SPARKWING_RUNNER_LABELS` | The labels the local runner advertises, comma-separated; what `WhenRunner` matches against |
+
+`SPARKWING_PARENT_LIVENESS_FD` in particular should never be set by
+hand: it is the node's authority to read and close that descriptor, and
+naming one sparkwing did not open points the node at another
+subsystem's file.
+
 ### Controller API endpoints
 
 The controller's full route set, methods, and required scopes are in

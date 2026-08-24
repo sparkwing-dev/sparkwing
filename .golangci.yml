@@ -226,16 +226,23 @@ linters:
             - pkg: github.com/sparkwing-dev/sparkwing/internal/cache
               desc: "internal/cache is the sparkwing-cache HTTP server's implementation; only cmd/sparkwing-cache should import it."
 
-        runners-cluster-only:
+        # internal/runners/* are the per-runtime execution backends. Two
+        # places select one: internal/cluster (the warm-runner pool) and
+        # internal/orchestrator (the dispatcher, which wires the k8s
+        # backend through k8s_runner_factory.go and the local
+        # process-per-node backend through local_dispatch.go). Everything
+        # else goes through the runner.Runner interface instead.
+        runners-dispatcher-only:
           list-mode: lax
           files:
             - "**"
             - "!**/internal/cluster/**"
+            - "!**/internal/orchestrator/**"
             - "!**/internal/runners/**"
             - "!**/*_test.go"
           deny:
             - pkg: github.com/sparkwing-dev/sparkwing/internal/runners
-              desc: "internal/runners/* are the warm-runner pool's per-runtime backends (k8s, warmpool). Only internal/cluster (the pool itself) should import them."
+              desc: "internal/runners/* are the per-runtime execution backends. Only internal/cluster (the warm-runner pool) and internal/orchestrator (the dispatcher that selects one) should import them; everything else depends on the runner.Runner interface."
     forbidigo:
       # Each `forbid` pattern fires on call sites by default; analyze-types=false
       # keeps the rule focused on textual matches (no need to load full type info).

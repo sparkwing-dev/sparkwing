@@ -111,10 +111,25 @@ func (p *Plan) Nodes() []*JobNode {
 }
 
 // Job returns the node with the given ID, or nil if absent.
+//
+// A recovery node registered with [JobNode.OnFailure] is built
+// directly and never enters the id index, so a miss falls back to
+// scanning every node's recovery attachment. Any consumer that
+// resolves a node from its id alone -- a node executing in its own
+// process, replay, dependency inspection -- otherwise reports a
+// recovery node as absent from the plan that declares it.
 func (p *Plan) Job(id string) *JobNode {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.byID[id]
+	if n, ok := p.byID[id]; ok {
+		return n
+	}
+	for _, n := range p.nodes {
+		if rec := n.onFailure; rec != nil && rec.id == id {
+			return rec
+		}
+	}
+	return nil
 }
 
 // Expansions returns the registered ExpandFrom generators. Used by

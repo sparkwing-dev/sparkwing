@@ -23,6 +23,15 @@ import (
 type InProcessRunner struct {
 	backends Backends
 	labels   []string
+
+	// spawn, when set, executes the node body somewhere else once this
+	// runner has finished the coordination it owns -- the cache
+	// lookup, the concurrency slot, host admission, SkipIf. Local runs
+	// set it to the process-per-node runner; the coordination stays
+	// here because that is where the store handles and the slot
+	// bookkeeping live, and because a cache hit must resolve without
+	// starting anything at all.
+	spawn runner.Runner
 }
 
 // NewInProcessRunner builds a runner over Backends; lifecycle is
@@ -179,8 +188,45 @@ func (r *InProcessRunner) executeNodeWithAdmission(ctx context.Context, req runn
 	return r.executeNode(nodeCtx, req.RunID, req.Node, req.Delegate)
 }
 
-// executeNode runs the job with modifiers + hooks and persists state.
+// WithNodeExecutor routes node bodies through exec instead of this
+// process. Coordination is unaffected: everything a node needs
+// decided before it runs is still decided here.
+func (r *InProcessRunner) WithNodeExecutor(exec runner.Runner) *InProcessRunner {
+	r.spawn = exec
+	return r
+}
+
+// executeNode runs the job with modifiers + hooks and persists state,
+// or hands it to the configured executor.
 func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
+	if r.spawn != nil {
+		return r.executeNodeElsewhere(ctx, runID, node, delegate)
+	}
+	return r.executeNodeInProcess(ctx, runID, node, delegate)
+}
+
+// executeNodeElsewhere hands the node to the executor and flattens its
+// Result back into the (output, error) shape the coordination paths
+// expect. The executor's process wrote the node's terminal row, so
+// nothing is persisted here.
+func (r *InProcessRunner) executeNodeElsewhere(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
+	res := r.spawn.RunNode(ctx, runner.Request{
+		RunID:    runID,
+		NodeID:   node.ID(),
+		Node:     node,
+		Delegate: delegate,
+	})
+	switch res.Outcome {
+	case sparkwing.Success, sparkwing.Cached:
+		return res.Output, nil
+	}
+	if res.Err != nil {
+		return nil, res.Err
+	}
+	return nil, fmt.Errorf("%s: node executor returned outcome %q with no error", node.ID(), res.Outcome)
+}
+
+func (r *InProcessRunner) executeNodeInProcess(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
 	writeCtx := context.WithoutCancel(ctx)
 	nlog, err := r.backends.Logs.OpenNodeLog(runID, node.ID(), delegate)
 	if err != nil {
@@ -441,9 +487,19 @@ done:
 
 	var outBytes []byte
 	if output != nil {
-		if b, merr := json.Marshal(output); merr == nil {
-			outBytes = b
+		b, merr := json.Marshal(output)
+		if merr != nil {
+			wrapped := nodeOutputMarshalError(node.ID(), output, merr)
+			nlog.Log("error", wrapped.Error())
+			text := boundedFailureText(ctx, runID, node.ID(), wrapped)
+			emitNodeEnd(sparkwing.Failed, text)
+			fctx := failureWriteCtx(ctx, wrapped)
+			_ = r.backends.State.FinishNodeWithReason(fctx, runID, node.ID(), string(sparkwing.Failed), text, nil, store.FailureUnknown, nil)
+			_ = r.backends.State.AppendEvent(fctx, runID, node.ID(), "node_failed", []byte(text))
+			appendFailureExcerptEvent(fctx, r.backends.State, runID, node.ID(), wrapped)
+			return nil, wrapped
 		}
+		outBytes = b
 	}
 
 	if digest, perr := r.publishArtifacts(nodeCtx, node); perr != nil {

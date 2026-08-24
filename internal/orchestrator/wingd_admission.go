@@ -1002,6 +1002,17 @@ func localAdmissionFromContext(ctx context.Context) (*LocalAdmission, string, bo
 	return state.la, state.token, state.hostAdmitted
 }
 
+// leaseTokensFromContext reports the run's admission lease and its
+// child-attach token, for a runner that has to pass them to a process
+// it spawns. Both empty when no daemon admitted the run.
+func leaseTokensFromContext(ctx context.Context) (string, string) {
+	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
+	if !ok {
+		return "", ""
+	}
+	return state.token, state.childToken
+}
+
 func localAdmissionChildTokenFromContext(ctx context.Context) string {
 	state, ok := ctx.Value(localAdmissionCtxKey{}).(localAdmissionState)
 	if !ok {

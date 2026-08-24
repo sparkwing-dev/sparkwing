@@ -4,6 +4,7 @@ package runner
 
 import (
 	"context"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -55,4 +56,20 @@ type Result struct {
 	Outcome sparkwing.Outcome
 	Output  any
 	Err     error
+
+	// Usage is the kernel's exit-time accounting for the process that
+	// ran the node, when a runner supervised one. Nil for runners that
+	// do not own a process (in-process execution, a pod the
+	// orchestrator only polls). It is exact where per-second sampling
+	// is not, which is why it is carried separately from the sampled
+	// metrics; the capacity fold consumes it.
+	Usage *ResourceUsage
+}
+
+// ResourceUsage is what one node's process actually cost.
+type ResourceUsage struct {
+	// CPUTime is user plus system time across the process tree.
+	CPUTime time.Duration
+	// MaxRSSBytes is peak resident set size, normalized to bytes.
+	MaxRSSBytes int64
 }

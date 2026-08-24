@@ -63,6 +63,20 @@ type Options struct {
 	// Runner, when non-nil, replaces the default InProcessRunner.
 	Runner runner.Runner
 
+	// ProcessPerNode asks RunLocal to execute every node as its own
+	// process, re-entering this binary at `run-node --coordinated`.
+	//
+	// Only an entrypoint can assert this, which is why it is a flag
+	// rather than the default: it is true exactly when the running
+	// binary serves the `run-node` subcommand, and the entrypoint that
+	// installed that subcommand is the only code that knows. [Main]
+	// sets it. A library caller embedding the orchestrator in some
+	// other binary -- a test binary included -- leaves it false and
+	// keeps in-process execution.
+	//
+	// Ignored when Runner is set.
+	ProcessPerNode bool
+
 	// ParentRunID marks this run as spawned by another via
 	// RunAndAwait; the controller walks the ancestor chain for
 	// cross-pipeline cycle detection.
@@ -429,7 +443,10 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		}
 	}
 
-	validatePlanModifiers(opts.Delegate, plan)
+	if err := validatePlanModifiers(opts.Delegate, plan); err != nil {
+		_ = backends.State.FinishRun(ctx, runID, "failed", err.Error())
+		return &Result{RunID: runID, Status: "failed", Error: err}, nil
+	}
 
 	if opts.StartAt != "" || opts.StopAt != "" {
 		if opts.Only != "" {
@@ -795,6 +812,18 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	ctx, stopSignals := withInterruptCancel(ctx)
 	defer stopSignals()
 
+	if opts.Runner == nil && opts.ProcessPerNode {
+		exec, eerr := setupLocalExecution(paths, &opts, nodeWorkspace(), nil)
+		if eerr != nil {
+			return nil, eerr
+		}
+		if exec != nil {
+			defer exec.cleanup()
+			exec.runner.SetLeaseTokenSource(leaseTokensFromContext)
+			opts.Runner = NewInProcessRunner(backends).WithNodeExecutor(exec.runner)
+		}
+	}
+
 	res, runErr := Run(ctx, backends, opts)
 	if st != nil && opts.ArtifactStore != nil && res != nil && res.RunID != "" {
 		if err := DumpRunState(ctx, st, res.RunID, opts.ArtifactStore); err != nil {
@@ -977,10 +1006,15 @@ func dispatch(
 	return nil
 }
 
-// validatePlanModifiers warns on combinations that silently no-op.
-func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) {
+// validatePlanModifiers warns on combinations that silently no-op and
+// rejects the plan outright when a job declares an output type that
+// cannot survive the JSON round-trip every node output makes.
+func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) error {
+	if err := planOutputTypeErrors(plan); err != nil {
+		return err
+	}
 	if delegate == nil {
-		return
+		return nil
 	}
 	for _, n := range plan.Nodes() {
 		if n.IsInline() && len(n.RequiresLabels()) > 0 {
@@ -998,6 +1032,7 @@ func validatePlanModifiers(delegate sparkwing.Logger, plan *sparkwing.Plan) {
 			})
 		}
 	}
+	return nil
 }
 
 // parentTriggerRepoDir returns the running pipeline's own working

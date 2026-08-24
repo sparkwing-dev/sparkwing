@@ -291,8 +291,8 @@ func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, j
 	msg := fmt.Sprintf("K8sRunner: Job %s disappeared before reaching a terminal condition", jobName)
 	for {
 		n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID)
-		if err == nil && nodeTerminal(n) {
-			return mapNodeResult(n)
+		if err == nil && runner.NodeTerminal(n) {
+			return runner.ResultFromNode(n)
 		}
 		if err != nil && !errors.Is(err, store.ErrNotFound) {
 			r.logger.Warn("node poll after missing job failed",
@@ -303,8 +303,8 @@ func (r *Runner) readMissingJobResult(ctx context.Context, req runner.Request, j
 				string(sparkwing.Failed), msg, nil, store.FailureUnknown, nil); err != nil {
 				r.logger.Warn("finish node after missing job failed",
 					"job", jobName, "run_id", req.RunID, "node_id", req.NodeID, "err", err)
-			} else if n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID); err == nil && nodeTerminal(n) {
-				return mapNodeResult(n)
+			} else if n, err := r.ctrl.GetNode(ctx, req.RunID, req.NodeID); err == nil && runner.NodeTerminal(n) {
+				return runner.ResultFromNode(n)
 			} else if err != nil && !errors.Is(err, store.ErrNotFound) {
 				r.logger.Warn("node poll after missing job finish failed",
 					"job", jobName, "run_id", req.RunID, "node_id", req.NodeID, "err", err)
@@ -339,9 +339,9 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 		}
 	}
 
-	res := mapNodeResult(n)
+	res := runner.ResultFromNode(n)
 	// safety: pod crashed before writing terminal state; synthesize Failed so the orchestrator sees something deterministic
-	if !nodeTerminal(n) {
+	if !runner.NodeTerminal(n) {
 		res.Outcome = sparkwing.Failed
 		reason, exitCode := r.inspectTerminatedPod(ctx, j)
 		errMsg := fmt.Sprintf("pod %s exited without writing terminal state", j.Name)
@@ -353,22 +353,6 @@ func (r *Runner) readFinalResult(ctx context.Context, req runner.Request, j *bat
 		}
 		_ = r.ctrl.FinishNodeWithReason(ctx, req.RunID, req.NodeID,
 			string(sparkwing.Failed), errMsg, nil, reason, exitCode)
-	}
-	return res
-}
-
-func nodeTerminal(n *store.Node) bool {
-	return n != nil && n.Status == "done" && n.Outcome != ""
-}
-
-func mapNodeResult(n *store.Node) runner.Result {
-	res := runner.Result{Outcome: sparkwing.Outcome(n.Outcome)}
-	if n.Error != "" {
-		res.Err = errors.New(n.Error)
-	}
-	if len(n.Output) > 0 {
-		// safety: pass Output as raw []byte; unmarshaling here would erase the typed shape and break Ref[T].Get
-		res.Output = n.Output
 	}
 	return res
 }

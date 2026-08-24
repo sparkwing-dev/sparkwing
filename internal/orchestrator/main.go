@@ -152,6 +152,9 @@ func Main() {
 		MaxParallel:         runtime.NumCPU(),
 		DispatchWaitTimeout: parseDispatchWaitTimeout(os.Getenv("SPARKWING_DISPATCH_WAIT_TIMEOUT")),
 		PipelineYAML:        pipelineYAML,
+		// safety: this binary serves `run-node` a few lines above, so it can
+		// re-enter itself for each node.
+		ProcessPerNode: true,
 	}
 	opts.Admission = pipelineAdmission(childAttachTokenFromProcessEnv(), wingwire.OriginLocal)
 	if projectCfg != nil {
