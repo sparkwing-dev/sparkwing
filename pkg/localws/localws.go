@@ -175,6 +175,9 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	root.Handle("GET /api/v1/pipelines", aggregatedPipelinesHandler())
 	root.Handle("GET /api/v1/queue", queueHandler(paths.Root, opts.Version))
+	// safety: the controller handler below claims all of /api/v1/, so a dashboard-owned route reaches its handler only when it is named here.
+	root.Handle("GET /api/v1/capacity/profiles", webHandler)
+	root.Handle("GET /api/v1/capacity/profiles/explain", webHandler)
 	if ctrl != nil {
 		ctrlHandler := ctrl.Handler()
 		if opts.ReadOnly {

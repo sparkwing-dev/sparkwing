@@ -553,6 +553,14 @@ freak run cannot pin the price until it ages out of the window. The
 waiter names its provenance, as in `needs 5.0 cores (measured sustained
 p95 over 12 runs); 2.1 available`.
 
+The dashboard's **Capacity** page is the same accounting with its work
+shown: the live host ledger with the subtraction behind each available
+figure, the priced table above, and, per pipeline, the stored sample
+window with the run each percentile charge was ranked out of marked. It
+is where to look when a charge seems wrong, because it puts the price and
+the evidence for it on one screen -- see
+[observability.md](observability.md#dashboard).
+
 A pipeline may pass a cold-start hint with
 `.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n))`, and may pin an
 explicit cost when it must -- but a pin is policed, not trusted blindly:

@@ -905,6 +905,27 @@ func boolToInt(b bool) int {
 // one and price the same measurements differently.
 func NearestRankPercentile(xs []float64, q float64) float64 { return percentile(xs, q) }
 
+// NearestRankIndex returns the position in xs holding the value
+// [NearestRankPercentile] selects for q, or -1 for an empty slice. Ties
+// resolve to the earliest position of the tied value, so a window of equal
+// samples points at the oldest of them.
+//
+// It exists so a reader can be shown the run a charge came from rather than
+// a figure that merely equals it: with the sample window on screen and one
+// row marked, a human recomputes the price by eye and catches a charge that
+// no sample supports.
+func NearestRankIndex(xs []float64, q float64) int {
+	if len(xs) == 0 {
+		return -1
+	}
+	order := make([]int, len(xs))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return xs[order[a]] < xs[order[b]] })
+	return order[nearestRank(len(xs), q)]
+}
+
 // percentile returns the nearest-rank q-percentile (0..1) of xs. An empty
 // slice yields zero.
 func percentile(xs []float64, q float64) float64 {
@@ -913,12 +934,61 @@ func percentile(xs []float64, q float64) float64 {
 	}
 	sorted := append([]float64(nil), xs...)
 	sort.Float64s(sorted)
-	rank := int(math.Ceil(q*float64(len(sorted)))) - 1
+	return sorted[nearestRank(len(sorted), q)]
+}
+
+// nearestRank is the rank arithmetic behind every percentile a profile
+// stores, kept in one place so the value a charge takes and the sample
+// [NearestRankIndex] points at cannot disagree by one.
+func nearestRank(n int, q float64) int {
+	rank := int(math.Ceil(q*float64(n))) - 1
 	if rank < 0 {
-		rank = 0
+		return 0
 	}
-	if rank >= len(sorted) {
-		rank = len(sorted) - 1
+	if rank >= n {
+		return n - 1
 	}
-	return sorted[rank]
+	return rank
+}
+
+// ProfileSample is one run's persisted contribution to a profile window:
+// what that run took and drew, as folded by [Store.RecordProfileObservation].
+// It is the evidence behind a pipeline's price, exported read-only so a
+// reader can recompute the charge from the same rows admission charged from.
+type ProfileSample struct {
+	Duration        time.Duration `json:"duration_ns"`
+	PeakCores       float64       `json:"peak_cores"`
+	SustainedCores  float64       `json:"sustained_cores"`
+	PeakMemoryBytes int64         `json:"peak_memory_bytes"`
+}
+
+// ProfileSamples returns the (pipeline, node) profile's stored sample
+// window, oldest run first, or nil when nothing is stored for the key. A
+// window written under a sample schema too old to price from reads as empty,
+// the same way [Store.GetPipelineProfile] reports zeroes for such a row, so
+// the two never describe one profile differently.
+func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error) {
+	var raw []byte
+	if err := s.queryRow(ctx,
+		`SELECT samples_json FROM pipeline_profiles WHERE pipeline = ? AND node_id = ?`,
+		pipeline, nodeID).Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	window, ok := decodeProfileWindow(raw)
+	if !ok {
+		return nil, nil
+	}
+	out := make([]ProfileSample, 0, len(window))
+	for _, s := range window {
+		out = append(out, ProfileSample{
+			Duration:        time.Duration(s.D),
+			PeakCores:       s.C,
+			SustainedCores:  s.S,
+			PeakMemoryBytes: s.M,
+		})
+	}
+	return out, nil
 }

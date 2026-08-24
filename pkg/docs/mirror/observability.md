@@ -177,6 +177,22 @@ The dashboard shows failure information where a run's detail is:
   detail, with peak and average in the header; it refreshes while the
   node is running.
 
+It also shows what admission is doing with the machine:
+
+- **Queue page**: the live admission queue -- every resource with its
+  headroom, every holder, every waiter in order with its ETA. Mirrors
+  `sparkwing queue`.
+- **Capacity page**: the same host ledger with the subtraction behind
+  each Available cell written out, then every measured pipeline with the
+  charge it resolves to (the live form of `sparkwing runs stats
+  --capacity`), and, per pipeline, the stored sample window with the run
+  each percentile charge was ranked out of marked. Use it to check a
+  charge by hand: the p95 the panel marks and the price it shows come
+  from the rows on screen, so a charge no sample supports is visible
+  rather than inferred. Host figures refresh every 2 seconds; learned
+  pricing every 10. With no daemon running the host section reports that
+  and the pricing table still reads from the runs store.
+
 ## Data retention
 
 Finished runs (and their metrics) are kept until you prune them. There

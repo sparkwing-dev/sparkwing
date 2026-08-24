@@ -128,6 +128,59 @@ export function externalCell(
   return fmtAmount(r.key, r.external ?? 0);
 }
 
+// AvailabilityTerm is one operand of a host row's headroom arithmetic, in
+// the order admission applied it. sign is "-" for a subtraction and "" for
+// the capacity the subtractions run against.
+export interface AvailabilityTerm {
+  label: string;
+  value: string;
+  sign: "" | "-";
+}
+
+// availabilityTerms breaks a host resource row into the operands admission
+// subtracted, so a reader can add the row up rather than trust its
+// Available cell. Returns an empty list for a semaphore row, whose
+// availability is a plain count and not headroom arithmetic.
+export function availabilityTerms(r: QueueResource): AvailabilityTerm[] {
+  if (!isHostResource(r.key)) return [];
+  const terms: AvailabilityTerm[] = [
+    { label: "capacity", value: fmtAmount(r.key, r.capacity), sign: "" },
+    { label: "held", value: fmtAmount(r.key, r.held), sign: "-" },
+  ];
+  if ((r.reserved ?? 0) > 0) {
+    terms.push({
+      label: "reserved",
+      value: fmtAmount(r.key, r.reserved ?? 0),
+      sign: "-",
+    });
+  }
+  if (r.external_source === EXTERNAL_UNMEASURED) {
+    terms.push({ label: "external", value: "unmeasured", sign: "-" });
+  } else if ((r.external ?? 0) > 0) {
+    terms.push({
+      label: "external",
+      value: fmtAmount(r.key, r.external ?? 0),
+      sign: "-",
+    });
+  }
+  return terms;
+}
+
+// availabilityResidual is what the printed operands leave over, so a row
+// whose Available does not equal capacity minus its subtractions shows up as
+// the discrepancy it is. Null for a semaphore row, for a dimension whose
+// external load could not be read (nothing was subtracted, and no figure can
+// honestly be printed), and when the daemon is configured to ignore external
+// load, where the operands on screen are not the whole story.
+export function availabilityResidual(
+  r: QueueResource,
+  ignoreExternal: boolean,
+): number | null {
+  if (!isHostResource(r.key)) return null;
+  if (ignoreExternal || r.external_source === EXTERNAL_UNMEASURED) return null;
+  return r.capacity - r.held - (r.reserved ?? 0) - (r.external ?? 0);
+}
+
 // externalUnmeasuredNote names the host dimensions the sampler could not
 // read and states that nothing was subtracted for them. Empty when every
 // dimension was measured, and when the operator has already been told

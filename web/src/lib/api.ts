@@ -1163,7 +1163,14 @@ export interface QueueHolder {
   elapsed_ms: number;
   resources: HostResources;
   semaphores?: string[];
+  // connection_only marks a zero-cost orchestration lease: it keeps the run
+  // connected for lifecycle and finalization but holds no host resource.
+  connection_only?: boolean;
   cost_source?: string;
+  // cost_rationale is the daemon's own phrase for cost_source ("measured
+  // sustained p95 over 12 runs", "explicit pin"). Absent on daemons that
+  // predate the field and on leases whose source did not survive a restart.
+  cost_rationale?: string;
   expected_duration_ms?: number;
   drift_warning?: string;
   stalled?: boolean;
@@ -1189,6 +1196,9 @@ export interface QueueWaiter {
   blocking_reason?: string;
   waiting_ms?: number;
   cost_source?: string;
+  // cost_rationale is the daemon's own phrase for cost_source, also folded
+  // into blocking_reason.
+  cost_rationale?: string;
   expected_duration_ms?: number;
   drift_warning?: string;
   // Estimated wait until admission, in ms from now. Null when a run
@@ -1239,6 +1249,165 @@ export async function getQueue(): Promise<QueueState | null> {
   const res = await authFetch(`${API_URL}/api/v1/queue`, {
     cache: "no-store",
   }).catch(() => null);
+  if (!res || !res.ok) return null;
+  return res.json();
+}
+
+// --- Learned capacity pricing ---
+//
+// Mirrors the Go payloads in internal/web/capacity.go: the pipeline table
+// behind `sparkwing runs stats --capacity`, and per pipeline the stored
+// sample window with the rank each charge was taken at.
+
+// CapacityCharge is one resolved admission price with its provenance.
+export interface CapacityCharge {
+  cores: number;
+  memory_bytes: number;
+  source: string;
+  rationale?: string;
+  // cores_basis names the stored figure the core charge came from:
+  // "sustained_p95", "peak_p95", "pin", "floor", "prev_charge",
+  // "cold_start".
+  cores_basis: string;
+  // floor_applied marks a charge raised to the minimum a measured
+  // pipeline is accounted for at, rather than taken from its basis figure.
+  floor_applied?: boolean;
+}
+
+// CapacityProfile is one pipeline's row in the priced table.
+export interface CapacityProfile {
+  pipeline: string;
+  charge: CapacityCharge;
+  sample_count: number;
+  peak_cores: number;
+  sustained_cores: number;
+  peak_memory_bytes: number;
+  cpu_p50: number;
+  cpu_p95: number;
+  memory_p50_bytes: number;
+  memory_p95_bytes: number;
+  cpu_measured: boolean;
+  p50_duration_ms: number;
+  p99_duration_ms: number;
+  wait_p50_ms?: number;
+  wait_p99_ms?: number;
+  floor_cores?: number;
+  floor_memory_bytes?: number;
+  pinned_cores?: number;
+  pinned_memory_bytes?: number;
+  drift?: string;
+  drift_class?: string;
+  contended_count?: number;
+  plan_hash?: string;
+  updated_at_ms?: number;
+  node_count?: number;
+}
+
+// CapacityConstants are the resolution knobs the arithmetic on screen is
+// measured against, served rather than hardcoded so the page cannot quote
+// a threshold the resolver does not use.
+export interface CapacityConstants {
+  min_samples: number;
+  charge_percentile: number;
+  sustained_percentile: number;
+  warm_start_multiple: number;
+  safety_multiple: number;
+  drift_fraction: number;
+  cold_start_cores: number;
+}
+
+// CapacityChargeStep is one rung of the resolution order, present whether
+// or not it was taken; applied marks the one the resolver chose.
+export interface CapacityChargeStep {
+  step: string;
+  label: string;
+  cores?: number;
+  memory_bytes?: number;
+  eligible: boolean;
+  applied: boolean;
+  detail?: string;
+}
+
+// CapacityRankSelection points at the sample a percentile charge was taken
+// from. matches false means recomputing the window no longer reproduces the
+// stored figure -- the price and its evidence have parted company.
+export interface CapacityRankSelection {
+  field: string;
+  percentile: number;
+  rank: number;
+  count: number;
+  index: number;
+  value: number;
+  stored: number;
+  matches: boolean;
+  unmeasured?: boolean;
+}
+
+// CapacitySample is one run's persisted contribution to the window,
+// oldest first.
+export interface CapacitySample {
+  index: number;
+  duration_ms: number;
+  peak_cores: number;
+  sustained_cores: number;
+  peak_memory_bytes: number;
+}
+
+export interface CapacityNode {
+  node_id: string;
+  sample_count: number;
+  peak_cores: number;
+  sustained_cores: number;
+  peak_memory_bytes: number;
+  p50_duration_ms: number;
+  p99_duration_ms: number;
+}
+
+export interface CapacityProfiles {
+  machine_cores: number;
+  constants: CapacityConstants;
+  profiles: CapacityProfile[];
+  generated_at_ms: number;
+}
+
+export interface CapacityExplain {
+  machine_cores: number;
+  constants: CapacityConstants;
+  profile: CapacityProfile;
+  chain: CapacityChargeStep[];
+  samples: CapacitySample[];
+  selections: {
+    cores: CapacityRankSelection;
+    memory: CapacityRankSelection;
+    duration_p50: CapacityRankSelection;
+    duration_p99: CapacityRankSelection;
+  };
+  nodes: CapacityNode[];
+  ceiling_note: string;
+  generated_at_ms: number;
+}
+
+// getCapacityProfiles reads every measured pipeline with the charge it
+// resolves to. Returns null when this dashboard is not reading a local
+// runs store (the endpoint answers 501) or is unreachable, so the caller
+// can say which rather than render an empty table.
+export async function getCapacityProfiles(): Promise<CapacityProfiles | null> {
+  const res = await authFetch(`${API_URL}/api/v1/capacity/profiles`, {
+    cache: "no-store",
+  }).catch(() => null);
+  if (!res || !res.ok) return null;
+  return res.json();
+}
+
+// getCapacityExplain reads one pipeline's derivation: its sample window,
+// the selected ranks, and the resolution order behind its charge.
+export async function getCapacityExplain(
+  pipeline: string,
+): Promise<CapacityExplain | null> {
+  const res = await authFetch(
+    `${API_URL}/api/v1/capacity/profiles/explain?pipeline=${encodeURIComponent(pipeline)}`,
+    { cache: "no-store" },
+  ).catch(() => null);
   if (!res || !res.ok) return null;
   return res.json();
 }

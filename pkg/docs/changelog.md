@@ -48,6 +48,25 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **dashboard:** A Capacity page showing what admission is charging on this
+  machine and how it got there. The live host ledger prints the subtraction
+  behind each available figure (capacity, held, reserved, measured external
+  load) beside every holder's charge with the daemon's own rationale and
+  every waiter's blocking reason verbatim; a priced table lists each measured
+  pipeline's CPU and memory charge, sortable, with the resolution source, the
+  demand floor, and any pin drift; and picking a pipeline renders its stored
+  sample window with the run each percentile charge was ranked out of marked,
+  alongside the resolution order that produced the price. Host figures
+  refresh every 2 seconds and learned pricing every 10; with no daemon
+  running the page says so and still prices from the runs store. Two
+  read-only dashboard endpoints back it, `GET /api/v1/capacity/profiles` and
+  `GET /api/v1/capacity/profiles/explain?pipeline=NAME`.
+- **store:** `Store.ProfileSamples` and `store.NearestRankIndex` expose a
+  pipeline profile's stored sample window and the position a percentile
+  charge was taken from, so a reader can recompute an admission charge from
+  the same rows it was priced from.
 
 ## [v0.35.0] - 2026-08-24
 ### Changed

@@ -1,7 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { QueueHolder, QueueState } from "./api.ts";
+import type { QueueHolder, QueueResource, QueueState } from "./api.ts";
 import {
+  availabilityResidual,
+  availabilityTerms,
   daemonUptimeLabel,
   eventsLine,
   externalCell,
@@ -306,7 +308,10 @@ describe("queueLifecycleHolders", () => {
         waiting_ms: 30_000,
       },
     ]);
-    assert.deepEqual(visible.map((h) => h.run_id), ["other"]);
+    assert.deepEqual(
+      visible.map((h) => h.run_id),
+      ["other"],
+    );
   });
 
   it("keeps a genuinely idle holder visible", () => {
@@ -380,5 +385,54 @@ describe("hasDaemon", () => {
       hasDaemon({ resources: [{ key: "cores", capacity: 8, held: 0 }] }),
       true,
     );
+  });
+});
+
+describe("availabilityTerms", () => {
+  it("prints every operand admission subtracted", () => {
+    const r: QueueResource = {
+      key: "cores",
+      capacity: 10,
+      held: 2,
+      reserved: 1,
+      external: 3,
+      external_source: "measured",
+      available: 4,
+    };
+    assert.deepEqual(
+      availabilityTerms(r).map((t) => `${t.sign}${t.value} ${t.label}`),
+      ["10 capacity", "-2 held", "-1 reserved", "-3 external"],
+    );
+    assert.equal(availabilityResidual(r, false), 4);
+  });
+
+  it("names an unmeasured dimension rather than printing a figure", () => {
+    const r: QueueResource = {
+      key: "memory",
+      capacity: 1024,
+      held: 0,
+      external_source: "unmeasured",
+    };
+    const terms = availabilityTerms(r);
+    assert.equal(terms[terms.length - 1].value, "unmeasured");
+    assert.equal(availabilityResidual(r, false), null);
+  });
+
+  it("leaves semaphore rows out of the headroom arithmetic", () => {
+    const r: QueueResource = { key: "deploy-lock", capacity: 1, held: 1 };
+    assert.deepEqual(availabilityTerms(r), []);
+    assert.equal(availabilityResidual(r, false), null);
+  });
+
+  it("withholds the residual when the daemon ignores external load", () => {
+    const r: QueueResource = {
+      key: "cores",
+      capacity: 8,
+      held: 0,
+      external: 6,
+      external_source: "measured",
+      available: 8,
+    };
+    assert.equal(availabilityResidual(r, true), null);
   });
 });

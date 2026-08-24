@@ -182,6 +182,8 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 
 	authedMux.HandleFunc("GET /api/v1/capabilities", CapabilitiesHandler(opts.Backend))
 	authedMux.HandleFunc("/api/v1/pipelines", pipelinesHandler())
+	authedMux.HandleFunc("GET /api/v1/capacity/profiles", capacityProfilesHandler(opts.Backend))
+	authedMux.HandleFunc("GET /api/v1/capacity/profiles/explain", capacityExplainHandler(opts.Backend))
 
 	if opts.LogsURL != "" {
 		authedMux.Handle("/api/v1/logs/", controllerProxy(opts.LogsURL, opts.Token))
