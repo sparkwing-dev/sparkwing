@@ -193,6 +193,7 @@ type MetricSample struct {
 	CPUMillicores int64
 	MemoryBytes   int64
 }
+func NearestRankIndex(xs []float64, q float64) int
 func NearestRankPercentile(xs []float64, q float64) float64
 type Node struct {
 	RunID      string
@@ -328,6 +329,12 @@ type ProfileResetSummary struct {
 	RowsCleared    int
 	SamplesDropped int
 	FloorsDropped  int
+}
+type ProfileSample struct {
+	Duration        time.Duration
+	PeakCores       float64
+	SustainedCores  float64
+	PeakMemoryBytes int64
 }
 func RedactInvocation(inv map[string]any) map[string]any
 const RedactedArgValue = "***"
@@ -513,6 +520,7 @@ func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMainten
 func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts ConcurrencyMaintenanceOptions, minInterval time.Duration) (ConcurrencyMaintenanceResult, bool, error)
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) MinBinaryVersion(ctx context.Context) string
+func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
 func (s *Store) PurgeDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
