@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.35.0] - 2026-08-24
 ### Changed
 
 - **admission:** Learned CPU charges price a run's sustained demand instead
