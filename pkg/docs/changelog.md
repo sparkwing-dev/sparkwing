@@ -65,6 +65,14 @@ code change to unlock.
   on the new one within twenty runs. Cluster (Kubernetes) pod sizing is
   deliberately unchanged: a pod CPU limit is a hard quota, not compressible
   headroom, so it stays peak-derived.
+- **store (Breaking):** The runs-store schema advances from version 13 to 14,
+  adding `sustained_cores` and `prev_sustained_cores` to `pipeline_profiles`,
+  both backfilled from their peak counterparts so every stored profile keeps
+  its current price until fresh runs are measured. The upgrade is additive and
+  applies on open. As with every schema advance, a binary older than this
+  release refuses to open a database that has been migrated, so upgrade every
+  sparkwing sharing a runs store together. See the [migration
+  guide](docs/migrations/v0.35.0.md#runs-store-schema-advances-to-version-14).
 
 ### Fixed
 
