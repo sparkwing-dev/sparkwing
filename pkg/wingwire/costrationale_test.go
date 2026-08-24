@@ -14,8 +14,8 @@ func TestCostRationale_PhrasesEachSource(t *testing.T) {
 		want    string
 	}{
 		{"pin", wingwire.CostSourcePin, 0, "explicit pin"},
-		{"measured with samples", wingwire.CostSourceMeasured, 12, "measured p95 over 12 runs"},
-		{"measured without samples", wingwire.CostSourceMeasured, 0, "measured p95"},
+		{"measured with samples", wingwire.CostSourceMeasured, 12, "measured sustained p95 over 12 runs"},
+		{"measured without samples", wingwire.CostSourceMeasured, 0, "measured sustained p95"},
 		{"measuring", wingwire.CostSourceMeasuring, 0, "re-measuring at prior charge"},
 		{"floor", wingwire.CostSourceFloor, 0, "measuring up from the demand floor of contended runs"},
 		{"default", wingwire.CostSourceDefault, 0, "first run, conservative default until measured"},

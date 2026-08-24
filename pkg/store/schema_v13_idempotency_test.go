@@ -306,8 +306,8 @@ func TestSchemaV13_StampsVersionAndCreatesTheNamedIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got != 13 || got != store.ExpectedSchemaVersion() {
-		t.Fatalf("schema version = %d, want 13 (= ExpectedSchemaVersion %d)",
+	if got < 13 || got != store.ExpectedSchemaVersion() {
+		t.Fatalf("schema version = %d, want ExpectedSchemaVersion %d, at or past the v13 that added the index",
 			got, store.ExpectedSchemaVersion())
 	}
 

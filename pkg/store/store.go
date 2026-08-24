@@ -604,7 +604,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 13
+const expectedSchemaVersion = 14
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -1013,6 +1013,12 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 		}
 		_, err := s.exec(ctx, triggerIdempotencyIndex)
 		return err
+	case 14:
+		if err := s.ensureColumns("pipeline_profiles", pipelineProfilesSustainedCols); err != nil {
+			return err
+		}
+		_, err := s.exec(ctx, pipelineProfilesSustainedBackfill)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1060,6 +1066,12 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			return err
 		}
 		_, err := tx.ExecContext(ctx, triggerIdempotencyIndex)
+		return err
+	case 14:
+		if err := addColumnsTx(ctx, tx, "pipeline_profiles", pipelineProfilesSustainedCols); err != nil {
+			return err
+		}
+		_, err := tx.ExecContext(ctx, pipelineProfilesSustainedBackfill)
 		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
@@ -1207,6 +1219,29 @@ var pipelineProfilesVersioningCols = map[string]string{
 	"prev_peak_cores":        "REAL NOT NULL DEFAULT 0",
 	"prev_peak_memory_bytes": "INTEGER NOT NULL DEFAULT 0",
 }
+
+// pipelineProfilesSustainedCols is the additive column set v14 adds: the
+// core figure admission charges once it prices cores from sustained demand
+// rather than burst peaks, plus its counterpart carried across a plan-hash
+// change so a warm start prices at the predecessor's charge, not its bursts.
+var pipelineProfilesSustainedCols = map[string]string{
+	"sustained_cores":      "REAL NOT NULL DEFAULT 0",
+	"prev_sustained_cores": "REAL NOT NULL DEFAULT 0",
+}
+
+// pipelineProfilesSustainedBackfill prices rows carried across the v14
+// upgrade at their existing peaks, so a stored profile charges exactly what
+// it charged before the upgrade until fresh observations age sustained
+// figures into its window -- twenty runs at most, and no cold start in the
+// meantime.
+//
+// The predicate makes a re-run harmless rather than merely unlikely: the
+// SQLite path applies migration steps outside a transaction, so a crash
+// between this statement and the version stamp replays it, and a row already
+// carrying a measured sustained figure must not be overwritten by a peak.
+const pipelineProfilesSustainedBackfill = `UPDATE pipeline_profiles
+   SET sustained_cores = peak_cores, prev_sustained_cores = prev_peak_cores
+ WHERE sustained_cores = 0`
 
 var triggerRepoInheritedCols = map[string]string{
 	"repo_inherited": "INTEGER NOT NULL DEFAULT 0",

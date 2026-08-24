@@ -16,9 +16,9 @@ func CostRationale(source CostSource, sampleCount int) string {
 		return "explicit pin"
 	case CostSourceMeasured:
 		if sampleCount > 0 {
-			return fmt.Sprintf("measured p95 over %d runs", sampleCount)
+			return fmt.Sprintf("measured sustained p95 over %d runs", sampleCount)
 		}
-		return "measured p95"
+		return "measured sustained p95"
 	case CostSourceMeasuring:
 		return "re-measuring at prior charge"
 	case CostSourceFloor:

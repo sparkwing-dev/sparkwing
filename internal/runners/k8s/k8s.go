@@ -656,7 +656,18 @@ func dependencyProxyEnv(base string) []corev1.EnvVar {
 
 // podResources maps a resolved admission cost onto a runner pod's
 // requests and limits, so one .Resources() declaration drives both the
-// laptop daemon and the kube scheduler. Per dimension: an explicit pin or a
+// laptop daemon and the kube scheduler.
+//
+// safety: the resolved Cores figure becomes a CPU *limit* here, not only a
+// request, and a Kubernetes CPU limit is a hard CFS quota. The local daemon
+// charges cores from sustained demand precisely because a host holds no such
+// quota -- the kernel time-slices a transient collision instead of capping
+// it. Cluster profiles therefore carry no sustained figure and capacity.Resolve
+// falls back to their peaks; a spiky pod sized at its plateau would be
+// throttled to that plateau for its whole life. Do not add sustained figures
+// to the controller's fold without first splitting request from limit here.
+//
+// Per dimension: an explicit pin or a
 // measured peak becomes the request, with a limit set by the policy
 // (generous for compressible CPU, tight for memory that OOMs); the
 // cold-start default tier, and any dimension a pin or profile leaves

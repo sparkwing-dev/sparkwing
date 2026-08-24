@@ -75,16 +75,17 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 		return nil
 	}
 	tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PIPELINE\tSOURCE\tP50\tP99\tCPU P50/P95/PEAK\tMEM P50/P95/PEAK\tWAIT P50/P99\tSAMPLES\tCONTENDED\tCACHED\tFLOOR")
+	fmt.Fprintln(tw, "PIPELINE\tSOURCE\tP50\tP99\tCPU P50/P95/PEAK\tCPU CHARGE\tMEM P50/P95/PEAK\tWAIT P50/P99\tSAMPLES\tCONTENDED\tCACHED\tFLOOR")
 	for _, s := range stats {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
 			s.Pipeline, s.Source, fmtDur(s.Rollup.P50Duration), fmtDur(s.Rollup.P99Duration),
-			fmtCPUCells(s.Rollup), fmtMemCells(s.Rollup), fmtWaitCells(s.Rollup), s.Rollup.SampleCount,
+			fmtCPUCells(s.Rollup), fmtCPUChargeCell(s.Rollup), fmtMemCells(s.Rollup),
+			fmtWaitCells(s.Rollup), s.Rollup.SampleCount,
 			fmtContendedCell(s.Rollup), fmtCachedCell(s.CachedExcluded), fmtFloorCell(s.Rollup))
 		for _, n := range s.Nodes {
-			fmt.Fprintf(tw, "  %s\t\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
+			fmt.Fprintf(tw, "  %s\t\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
 				n.NodeID, fmtDur(n.P50Duration), fmtDur(n.P99Duration),
-				fmtCPUCells(n), fmtMemCells(n), "-", n.SampleCount, "-", "-", "-")
+				fmtCPUCells(n), fmtCPUChargeCell(n), fmtMemCells(n), "-", n.SampleCount, "-", "-", "-")
 		}
 	}
 	if err := tw.Flush(); err != nil {
@@ -225,9 +226,24 @@ func matchBarePipeline(profiles []store.PipelineProfile, name string) []store.Pi
 }
 
 // fmtCPUCells renders a profile's CPU distribution as p50/p95/peak. The
-// percentiles describe spikiness; PEAK is what admission charges.
+// three describe how spiky the pipeline is and none of them is the price;
+// fmtCPUChargeCell renders that.
 func fmtCPUCells(p store.PipelineProfile) string {
 	return fmt.Sprintf("%.1f/%.1f/%.1f", p.CPUP50, p.CPUP95, p.PeakCores)
+}
+
+// fmtCPUChargeCell renders the core figure admission actually charges: the
+// sustained level, falling back to the peak on a profile measured before
+// sustained figures were stored, which is the same fallback the charge
+// makes. Without this column the table showed three numbers and the price
+// was none of them, leaving an operator to reconcile a queue line against a
+// distribution that no longer explained it.
+func fmtCPUChargeCell(p store.PipelineProfile) string {
+	charge := p.SustainedCores
+	if charge == 0 {
+		charge = p.PeakCores
+	}
+	return fmt.Sprintf("%.1f", charge)
 }
 
 // fmtMemCells renders a profile's memory distribution as p50/p95/peak.

@@ -31,10 +31,12 @@ type runCharge struct {
 // busy box cannot inflate its own ETAs by folding past congestion into the
 // profile.
 //
-// A node's profile takes the peak of that node's own samples, while the
-// rollup takes the peak of the readings those samples were split from -- the
-// whole run is charged what the process drew, not what its widest node's
-// share was.
+// A node's profile summarizes that node's own samples, while the rollup
+// summarizes the readings those samples were split from -- the whole run is
+// charged what the process drew, not what its widest node's share was. Each
+// records two core figures: the sustained level, which cores are charged
+// from once the version graduates, and the peak, which stays on display and
+// is the statistic the contended-run demand floor is measured on.
 //
 // planHash versions the rollup: a structural change re-measures the pipeline
 // rather than pricing it on the predecessor's samples. A contended run
@@ -82,6 +84,7 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 		_ = st.RecordProfileObservation(ctx, pipeline, n.NodeID, store.ProfileObservation{
 			Duration:        nodeDuration(n, samples),
 			PeakCores:       peakCores,
+			SustainedCores:  math.Min(sustainedSampleCores(samples), peakCores),
 			PeakMemoryBytes: peakMem,
 			CPUMeasured:     cpuMeasured,
 			PlanHash:        planHash,
@@ -91,7 +94,18 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 		return
 	}
 	runPeakCores, runPeakMem := peakProcessReading(ctx, pipeline, intervals)
+	runSustainedCores := math.Min(sustainedProcessCores(intervals), runPeakCores)
 	if contended {
+		// safety: the floor is measured on peaks, not on the sustained level
+		// cores are priced from. A contended run's sustained reading is its
+		// contention-suppressed allocation, so a floor fed from it would
+		// decay toward that allocation and never clear the ceiling-hit
+		// fraction of its own SafetyMultiple charge -- a closed deflation
+		// loop on a saturated box. A burst still gets scheduled somewhere on
+		// a busy box, so the peak is the statistic contention cannot
+		// suppress. Nothing is lost by the conservatism: the floor prices
+		// only pre-graduation versions, where erring high is the point,
+		// while sustained pricing applies to graduated measured profiles.
 		floorCores := runPeakCores
 		if charge.Cores > 0 && runPeakCores >= capacity.CeilingHitFraction*charge.Cores {
 			floorCores = math.Max(floorCores, charge.Cores)
@@ -116,6 +130,7 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 	_ = st.RecordProfileObservation(ctx, pipeline, "", store.ProfileObservation{
 		Duration:        runDur,
 		PeakCores:       runPeakCores,
+		SustainedCores:  runSustainedCores,
 		PeakMemoryBytes: runPeakMem,
 		CPUMeasured:     cpuMeasured,
 		PlanHash:        planHash,
@@ -154,6 +169,57 @@ func peakProcessReading(ctx context.Context, pipeline string, intervals map[int6
 	return capLocalPeakCores(ctx, pipeline, "", peakCores), peakMem
 }
 
+// sustainedProcessCores returns the process-wide core level the run is
+// priced at: the sustainedLevel of the same per-interval totals
+// peakProcessReading takes its maximum from. A run of a few intervals
+// yields its own maximum, so short work prices exactly as it did. A
+// one-shot per-command report carries its own timestamp and groups alone,
+// contributing one interval like any tick.
+//
+// It applies no host clamp of its own. The result never exceeds the raw
+// peak, so taking the minimum against the already-clamped peak enforces the
+// same invariant and spares a second clamp log line for one overshoot.
+func sustainedProcessCores(intervals map[int64]intervalTotal) float64 {
+	cores := make([]float64, 0, len(intervals))
+	for _, total := range intervals {
+		cores = append(cores, float64(total.cpuMillicores)/1000.0)
+	}
+	return sustainedLevel(cores)
+}
+
+// sustainedSampleCores is the node-level counterpart: the sustainedLevel of
+// one node's own sample readings, clamped by its caller against that node's
+// peak for the reason sustainedProcessCores gives. The sampler's ticks are
+// equal-cadence and a per-command one-shot reports once, so treating the
+// readings unweighted approximates duration weighting closely enough to
+// price from and avoids carrying per-sample spans through the fold.
+func sustainedSampleCores(samples []store.MetricSample) float64 {
+	cores := make([]float64, len(samples))
+	for i, s := range samples {
+		cores[i] = float64(s.CPUMillicores) / 1000.0
+	}
+	return sustainedLevel(cores)
+}
+
+// sustainedLevel is the core figure a series of interval readings prices at:
+// the nearest-rank capacity.SustainedPercentile, guarded from below by the
+// series mean. The rank finds the plateau and keeps an idle tail from
+// diluting it, but in a tail-heavy run the few hot intervals carry most of
+// the CPU integral and the rank alone would price the run below its own
+// average draw -- and summed average draws are the load a box carries, so a
+// charge below the mean over-admits chronically, not just for a burst.
+func sustainedLevel(cores []float64) float64 {
+	if len(cores) == 0 {
+		return 0
+	}
+	var sum float64
+	for _, c := range cores {
+		sum += c
+	}
+	rank := store.NearestRankPercentile(cores, capacity.SustainedPercentile)
+	return math.Max(rank, sum/float64(len(cores)))
+}
+
 // cacheDominant reports whether a finished run's completed nodes were
 // predominantly cache hits -- at or above capacity.CacheDominantFraction of
 // them served from cache. Such a run measured the cache, not the work: its
@@ -176,11 +242,11 @@ func cacheDominant(nodes []*store.Node) bool {
 }
 
 // capLocalPeakCores enforces the stored-profile invariant that a local
-// profile's peak never exceeds host capacity: a measured peak above the host's
-// core count is a sampler artifact (a reaped subtree's CPU landing in one
-// interval), so the stored peak clamps to host cores while the raw observation
-// stays in the metric samples. It logs a one-line note when it clamps so an
-// overshoot is visible rather than silently swallowed.
+// profile's core figures never exceed host capacity: a reading above the
+// host's core count is a sampler artifact (a reaped subtree's CPU landing in
+// one interval), so what is stored clamps to host cores while the raw
+// observation stays in the metric samples. It logs a one-line note when it
+// clamps so an overshoot is visible rather than silently swallowed.
 func capLocalPeakCores(ctx context.Context, pipeline, node string, observedCores float64) float64 {
 	hostCores := float64(runtime.NumCPU())
 	if hostCores > 0 && observedCores > hostCores {

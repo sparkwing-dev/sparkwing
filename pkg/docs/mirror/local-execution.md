@@ -538,12 +538,20 @@ works.
 percentiles, CPU and memory distributions (p50/p95/peak across recent
 runs), and queue-wait p50/p99. The distributions tell you whether work
 is steady or spiky and whether the box is too small. Admission charges
-the p95 of the recent per-run peaks, not their maximum: dropping the
-single largest sample keeps one freak run from pinning the price until
-it ages out of the window, while a near-worst-case charge still avoids
-the oversubscription that under-reserving a spiky node would recreate.
-A blocked waiter names its charge's provenance, as in `needs 5.0 cores
-(measured p95 over 12 runs); 2.1 available`.
+cores from the p95 across recent runs of each run's *sustained* demand
+-- the level that covers four sampling ticks in five, never below its
+average draw, and not the peak it touched once -- while memory still
+charges the p95 of the per-run peaks. The dimensions differ because the
+resources do: cores are compressible, so the kernel time-slices two
+runs that collide for a tick and reserving a burst peak for a whole
+hold only refuses work the box could have run, while an oversubscribed
+box does not time-slice memory, it OOMs. It is the split admission
+already makes when it gates: CPU pressure is backpressure, memory is
+strict. Either way the charge takes p95 rather than the maximum, so one
+freak run cannot pin the price until it ages out of the window. The
+`CPU CHARGE` column reports the resulting core figure, and a blocked
+waiter names its provenance, as in `needs 5.0 cores (measured sustained
+p95 over 12 runs); 2.1 available`.
 
 A pipeline may pass a cold-start hint with
 `.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n))`, and may pin an

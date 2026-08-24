@@ -409,8 +409,9 @@ type Holder struct {
 	// restart.
 	CostSource string `json:"cost_source,omitempty"`
 	// CostRationale is the short human phrase explaining that CostSource
-	// ("measured p95 over 12 runs", "explicit pin"), for a dashboard to
-	// tooltip beside the charge. Empty when the source is unknown.
+	// ("measured sustained p95 over 12 runs", "explicit pin"), for a
+	// dashboard to tooltip beside the charge. Empty when the source is
+	// unknown.
 	CostRationale string `json:"cost_rationale,omitempty"`
 	// ExpectedDurationMS is the holder's measured p50 run duration; zero
 	// when unknown. ETA uses it to estimate when the holder frees capacity.
@@ -495,9 +496,9 @@ type Waiter struct {
 	// "default").
 	CostSource string `json:"cost_source,omitempty"`
 	// CostRationale is the short human phrase explaining that CostSource
-	// ("measured p95 over 12 runs", "first run, conservative default until
-	// measured"), also folded into BlockingReason. Empty when the source is
-	// unknown.
+	// ("measured sustained p95 over 12 runs", "first run, conservative
+	// default until measured"), also folded into BlockingReason. Empty when
+	// the source is unknown.
 	CostRationale string `json:"cost_rationale,omitempty"`
 	// ExpectedDurationMS is the waiter's measured p50 run duration; zero
 	// when unknown.

@@ -48,6 +48,24 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Changed
+
+- **admission:** Learned CPU charges price a run's sustained demand instead
+  of its burst peak. A run's cost is now the p95 across recent runs of the
+  core level that covers four sampling ticks in five of each run, never below
+  that run's average draw, so a node that touches 4.9 cores for one tick of a
+  three-minute run no longer reserves 4.9 cores for the whole run. Memory
+  still charges the p95 of the per-run peaks, because an oversubscribed box
+  does not time-slice memory the way the kernel time-slices contended CPU.
+  Expect a box to admit more concurrent work than it did. Queue lines and pin
+  drift warnings read `measured sustained p95 over N runs`, and
+  `sparkwing runs stats --capacity` gains a `CPU CHARGE` column naming the
+  figure admission reserves beside the unchanged p50/p95/peak distribution.
+  Existing profiles are carried forward at their current price and converge
+  on the new one within twenty runs. Cluster (Kubernetes) pod sizing is
+  deliberately unchanged: a pod CPU limit is a hard quota, not compressible
+  headroom, so it stays peak-derived.
+
 ### Fixed
 
 - **orchestrator:** Per-node resource metrics divide each interval's

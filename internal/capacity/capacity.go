@@ -26,9 +26,9 @@ const (
 	// judged against it. Small enough to learn fast, large enough that one
 	// odd run cannot flip a decision.
 	MinSamples = 3
-	// DriftFraction is the relative gap between a pin and the measured p95
-	// peak that trips a drift warning. Below it, the pin and reality agree
-	// closely enough to stay quiet.
+	// DriftFraction is the relative gap between a pin and what measurement
+	// would charge on that dimension that trips a drift warning. Below it,
+	// the pin and reality agree closely enough to stay quiet.
 	DriftFraction = 0.25
 	// coldStartFraction is the share of the machine an unknown pipeline's
 	// first run is charged. Half the machine means two unknown runs cannot
@@ -52,11 +52,30 @@ const (
 	// double the next, a log2 search that converges on true demand from
 	// below, the same doubling reasoning as TCP slow-start.
 	SafetyMultiple = 2.0
+	// SustainedPercentile is the rank a run's sustained core demand takes
+	// from its own per-interval readings: the level that covers four ticks in
+	// five. Cores are charged from it rather than from the burst peak because
+	// cores are compressible -- the kernel time-slices two runs that collide
+	// for a tick -- so reserving a one-tick peak for a whole hold refuses work
+	// the box could have run. Memory keeps charging the peak: an
+	// oversubscribed box does not time-slice, it OOMs. A run of a few
+	// intervals has no plateau to find and this rank degenerates to its
+	// maximum, so short runs price unchanged. The fold guards the rank from
+	// below with the run's mean draw: summed means are the load a box
+	// actually carries, and a tail-heavy run whose hot intervals hold most
+	// of its CPU integral would otherwise price below its own average.
+	SustainedPercentile = 0.80
 	// CeilingHitFraction is how much of its admitted charge a contended run
 	// must consume for the charge to count as a proven demand minimum: at or
 	// above this fraction the run wanted at least its whole charge, so the
 	// floor rises to the charge and the next run doubles. Below it, the run's
 	// measured peak alone raises the floor and the charge does not escalate.
+	// Consumption is judged on peaks on both dimensions, including cores,
+	// even though a graduated profile charges cores from sustained demand: a
+	// contended run's sustained reading is the allocation contention left it,
+	// so a floor fed from it would decay toward that allocation and never
+	// clear this fraction of its own SafetyMultiple charge, stalling the
+	// escalation search exactly when it is needed.
 	CeilingHitFraction = 0.9
 	// CacheDominantFraction is the share of a run's completed nodes that must
 	// be cache hits for the run to count as cache-dominant and be excluded from
@@ -91,13 +110,22 @@ type Resolution struct {
 
 // Resolve applies the resolution order. A non-empty pin wins verbatim; a
 // measured profile of the run's own version (matching plan hash) with at
-// least MinSamples clean samples supplies the measured peaks; a version that
-// changed structurally or has not yet graduated is priced by measurement --
-// a warm start at its predecessor peak or a safety multiple of its
-// contended-run demand floor, whichever is larger; otherwise the cold-start
-// default is charged.
+// least MinSamples clean samples supplies the measured charge, sustained
+// cores and peak memory (the split [store.PipelineProfile] explains); a
+// version that changed structurally or has not yet graduated is priced by
+// measurement -- a warm start at what its predecessor was charged or a
+// safety multiple of its contended-run demand floor, whichever is larger;
+// otherwise the cold-start default is charged.
 // ExpectedDuration is filled from the profile whenever one exists, even when
 // a pin sets the cost, so ETA still has a duration to simulate with.
+//
+// safety: the cluster runner resolves pod requests AND limits from this same
+// Cores figure (internal/runners/k8s.podResources), and a Kubernetes CPU
+// limit is a hard CFS quota rather than the compressible time-slicing that
+// justifies charging sustained demand locally. Cluster profiles therefore
+// leave [store.PipelineProfile.SustainedCores] zero and fall back to the
+// peak on purpose. Do not "fix" that asymmetry by mirroring sustained into
+// the controller's fold: it would throttle every spiky pod at its plateau.
 //
 // planHash is the DAG-topology fingerprint of the version being admitted.
 // When it differs from the stored profile's hash the pipeline changed
@@ -131,7 +159,7 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 	}
 	versionChanged := planHash != "" && profile.PlanHash != "" && profile.PlanHash != planHash
 	if !versionChanged && measurementQualifies(profile) {
-		res.Cores = math.Max(profile.PeakCores, measuredCoreFloor)
+		res.Cores = math.Max(chargedCores(profile), measuredCoreFloor)
 		res.MemoryBytes = profile.PeakMemoryBytes
 		res.Source = store.CostSourceMeasured
 		return res
@@ -139,11 +167,36 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 	return measuringResolution(res, profile, numCPU, versionChanged)
 }
 
+// chargedCores is the core figure a measured profile prices a run at: its
+// sustained demand, since a hold reserves cores for the run's whole life and
+// the kernel time-slices the transient collisions a burst peak would reserve
+// against. A profile measured before sustained figures were recorded carries
+// none; it keeps pricing off the peak, as it did, until its window refills.
+func chargedCores(profile *store.PipelineProfile) float64 {
+	if profile.SustainedCores > 0 {
+		return profile.SustainedCores
+	}
+	return profile.PeakCores
+}
+
+// carriedCores is chargedCores for the predecessor figures a plan-hash
+// change carried across: what the previous version was charged, not what it
+// peaked at. Charging the carried peak would spike a spiky pipeline's price
+// on every structural edit -- the opposite of the parity WarmStartMultiple
+// promises. Zero on profiles whose predecessor predates sustained figures,
+// which fall back to its peak.
+func carriedCores(profile *store.PipelineProfile) float64 {
+	if profile.PrevSustainedCores > 0 {
+		return profile.PrevSustainedCores
+	}
+	return profile.PrevPeakCores
+}
+
 // measuringResolution prices a version that has not finalized a measured
 // price for the run's structure: one that changed shape, or one still short
-// of MinSamples clean runs. The charge is the largest of a warm start (the
-// predecessor peak, else the half-machine default for a pipeline with no
-// prior measurement), the safety multiple of the demand floor its own
+// of MinSamples clean runs. The charge is the largest of a warm start (what
+// the predecessor was charged, else the half-machine default for a pipeline
+// with no prior measurement), the safety multiple of the demand floor its own
 // contended runs proved, and the small absolute core floor.
 // The floor's evidence belongs to the current version only, so a structural
 // change ignores it and re-measures from the predecessor.
@@ -153,12 +206,12 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 	var floorCores float64
 	var floorMem int64
 	if versionChanged {
-		prevCores, prevMem = profile.PeakCores, profile.PeakMemoryBytes
+		prevCores, prevMem = chargedCores(profile), profile.PeakMemoryBytes
 		if prevCores == 0 {
-			prevCores, prevMem = profile.PrevPeakCores, profile.PrevPeakMemoryBytes
+			prevCores, prevMem = carriedCores(profile), profile.PrevPeakMemoryBytes
 		}
 	} else {
-		prevCores, prevMem = profile.PrevPeakCores, profile.PrevPeakMemoryBytes
+		prevCores, prevMem = carriedCores(profile), profile.PrevPeakMemoryBytes
 		floorCores, floorMem = profile.FloorCores, profile.FloorMemoryBytes
 	}
 
@@ -296,12 +349,18 @@ type Drift struct {
 // -- never warns -- for an unpinned pipeline, a profile with fewer than
 // MinSamples, or a pin that agrees with measurement. Cores drive the
 // comparison; a memory-only pin falls back to the memory dimension.
+//
+// Each dimension is judged against the figure that dimension would be
+// charged, which for cores is sustained demand. Judging a core pin against
+// the peak would tell the author of a spiky pipeline to raise a pin that
+// already matches what the pipeline is charged, multiplying their cost to
+// silence a warning that was wrong.
 func CheckDrift(pin *Pin, profile *store.PipelineProfile) *Drift {
 	if pin.Empty() || profile == nil || profile.SampleCount < MinSamples {
 		return nil
 	}
-	if pin.Cores > 0 && profile.PeakCores > 0 {
-		return coreDrift(pin.Cores, profile.PeakCores, profile.SampleCount)
+	if charged := chargedCores(profile); pin.Cores > 0 && charged > 0 {
+		return coreDrift(pin.Cores, charged, profile.SampleCount)
 	}
 	if pin.MemoryBytes > 0 && profile.PeakMemoryBytes > 0 {
 		return memoryDrift(pin.MemoryBytes, profile.PeakMemoryBytes, profile.SampleCount)
@@ -321,7 +380,7 @@ func coreDrift(pinCores, measuredCores float64, samples int) *Drift {
 		MeasuredCores: measuredCores,
 		SampleCount:   samples,
 		Message: fmt.Sprintf(
-			"resource pin: %s cores; measured p95 %s cores over %d runs - update or remove the pin",
+			"resource pin: %s cores; measured sustained p95 %s cores over %d runs - update or remove the pin",
 			trimFloat(pinCores), trimFloat(measuredCores), samples),
 	}
 }

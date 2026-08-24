@@ -310,12 +310,129 @@ func TestCheckDrift_Gating(t *testing.T) {
 	}
 }
 
+// TestResolve_MeasuredChargesSustainedCores is the charge site of the whole
+// sustained-pricing change: a profile whose runs burst to six cores but hold
+// one and a half admits at one and a half. Memory is untouched by the split
+// and still charges the peak.
+func TestResolve_MeasuredChargesSustainedCores(t *testing.T) {
+	profile := &store.PipelineProfile{
+		PeakCores:       6,
+		SustainedCores:  1.5,
+		PeakMemoryBytes: 4 << 30,
+		SampleCount:     MinSamples,
+		CPUMeasured:     true,
+	}
+	got := Resolve(nil, profile, 8, "")
+	if got.Cores != 1.5 {
+		t.Errorf("Cores = %v, want the sustained 1.5, not the 6.0 peak", got.Cores)
+	}
+	if got.MemoryBytes != 4<<30 {
+		t.Errorf("MemoryBytes = %d, want the peak %d", got.MemoryBytes, int64(4)<<30)
+	}
+	if got.Source != store.CostSourceMeasured {
+		t.Errorf("Source = %q, want measured", got.Source)
+	}
+}
+
+// TestResolve_ProfileWithoutSustainedFallsBackToPeak covers a profile
+// measured before sustained figures were recorded: it carries none, and must
+// keep pricing at exactly what it priced at rather than dropping to the core
+// floor and over-admitting until its window refills.
+func TestResolve_ProfileWithoutSustainedFallsBackToPeak(t *testing.T) {
+	profile := &store.PipelineProfile{
+		PeakCores:       6,
+		PeakMemoryBytes: 4 << 30,
+		SampleCount:     MinSamples,
+		CPUMeasured:     true,
+	}
+	if got := Resolve(nil, profile, 8, ""); got.Cores != 6 {
+		t.Errorf("Cores = %v, want the 6.0 peak while no sustained figure exists", got.Cores)
+	}
+}
+
+// TestResolve_SustainedBelowFloorLiftsToFloor keeps a near-idle pipeline
+// accounted for rather than free once cores are priced from the quieter of
+// the two figures.
+func TestResolve_SustainedBelowFloorLiftsToFloor(t *testing.T) {
+	tiny := &store.PipelineProfile{
+		PeakCores:      6,
+		SustainedCores: 0.02,
+		SampleCount:    MinSamples,
+		CPUMeasured:    true,
+	}
+	if got := Resolve(nil, tiny, 8, ""); got.Cores != measuredCoreFloor {
+		t.Errorf("Cores = %v, want the %v floor", got.Cores, measuredCoreFloor)
+	}
+}
+
+// TestCheckDrift_JudgesCorePinsAgainstTheChargedFigure covers a spiky
+// pipeline whose pin already matches its price. Judged against the 8.0 peak,
+// a pin of 3 looks under-pinned and the warning tells the author to raise it
+// -- quadrupling what the pipeline reserves to silence advice that was
+// measured against a number nothing charges.
+func TestCheckDrift_JudgesCorePinsAgainstTheChargedFigure(t *testing.T) {
+	spiky := &store.PipelineProfile{
+		PeakCores:      8,
+		SustainedCores: 2.6,
+		SampleCount:    12,
+	}
+	if d := CheckDrift(&Pin{Cores: 3}, spiky); d != nil {
+		t.Errorf("drift = %+v, want none: a pin of 3 agrees with the 2.6 it is charged", d)
+	}
+	d := CheckDrift(&Pin{Cores: 8}, spiky)
+	if d == nil || d.Class != DriftOverPinned {
+		t.Fatalf("drift = %+v, want over-pinned: 8 reserves triple the 2.6 charge", d)
+	}
+	if d.MeasuredCores != 2.6 {
+		t.Errorf("MeasuredCores = %v, want the charged 2.6", d.MeasuredCores)
+	}
+}
+
+// TestCheckDrift_FallsBackToPeakBeforeSustainedExists keeps a pre-v14
+// profile's drift advice identical to what it was.
+func TestCheckDrift_FallsBackToPeakBeforeSustainedExists(t *testing.T) {
+	d := CheckDrift(&Pin{Cores: 2}, &store.PipelineProfile{PeakCores: 8, SampleCount: 12})
+	if d == nil || d.MeasuredCores != 8 {
+		t.Fatalf("drift = %+v, want under-pinned against the 8.0 peak", d)
+	}
+}
+
+// TestResolve_WarmStartAfterPlanHashChangePricesAtParity guards
+// WarmStartMultiple's promise. A structural edit to a spiky pipeline must
+// re-measure at what its predecessor was charged; pricing the carried peak
+// instead would spike the charge fourfold for the three runs it takes to
+// graduate, on a change that may not have altered cost at all.
+func TestResolve_WarmStartAfterPlanHashChangePricesAtParity(t *testing.T) {
+	changed := &store.PipelineProfile{
+		PlanHash:           "old",
+		PrevPeakCores:      8,
+		PrevSustainedCores: 2,
+		SampleCount:        1,
+	}
+	got := Resolve(nil, changed, 8, "new")
+	if got.Cores != 2 {
+		t.Errorf("Cores = %v, want the predecessor's 2.0 charge, not its 8.0 peak", got.Cores)
+	}
+	if got.Source != store.CostSourceMeasuring {
+		t.Errorf("Source = %q, want measuring", got.Source)
+	}
+}
+
+// TestResolve_WarmStartFallsBackToPrevPeak covers a predecessor measured
+// before sustained figures existed: its carried peak is all there is.
+func TestResolve_WarmStartFallsBackToPrevPeak(t *testing.T) {
+	changed := &store.PipelineProfile{PlanHash: "old", PrevPeakCores: 8, SampleCount: 1}
+	if got := Resolve(nil, changed, 8, "new"); got.Cores != 8 {
+		t.Errorf("Cores = %v, want the carried 8.0 peak", got.Cores)
+	}
+}
+
 func TestCheckDrift_MessageCarriesExactFix(t *testing.T) {
 	d := CheckDrift(&Pin{Cores: 2}, &store.PipelineProfile{PeakCores: 9.1, SampleCount: 12})
 	if d == nil {
 		t.Fatal("expected drift")
 	}
-	want := "resource pin: 2 cores; measured p95 9.1 cores over 12 runs - update or remove the pin"
+	want := "resource pin: 2 cores; measured sustained p95 9.1 cores over 12 runs - update or remove the pin"
 	if d.Message != want {
 		t.Errorf("Message = %q, want %q", d.Message, want)
 	}

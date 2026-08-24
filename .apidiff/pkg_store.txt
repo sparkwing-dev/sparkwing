@@ -193,6 +193,7 @@ type MetricSample struct {
 	CPUMillicores int64
 	MemoryBytes   int64
 }
+func NearestRankPercentile(xs []float64, q float64) float64
 type Node struct {
 	RunID      string
 	NodeID     string
@@ -271,7 +272,9 @@ type PipelineProfile struct {
 	P99Duration     time.Duration
 	PeakCores       float64
 	PeakMemoryBytes int64
-	SampleCount     int
+
+	SustainedCores float64
+	SampleCount    int
 
 	CPUP50 float64
 	CPUP95 float64
@@ -299,12 +302,16 @@ type PipelineProfile struct {
 
 	PrevPeakCores       float64
 	PrevPeakMemoryBytes int64
+
+	PrevSustainedCores float64
 }
 const PrefixLen = 12
 type ProfileObservation struct {
 	Duration        time.Duration
 	PeakCores       float64
 	PeakMemoryBytes int64
+
+	SustainedCores float64
 
 	CPUMeasured bool
 

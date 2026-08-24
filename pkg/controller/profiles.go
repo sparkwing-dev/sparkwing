@@ -68,6 +68,14 @@ func (s *Server) handleSetPipelinePin(w http.ResponseWriter, r *http.Request) {
 // event the run and dashboard views surface. It mirrors the local daemon's
 // end-of-run profiling so one .Resources() declaration is judged the same
 // in both modes. Best-effort: a profiling error never fails the run finish.
+//
+// safety: the mirroring stops short of the sustained core figure the local
+// fold records. These profiles size pod requests and limits, and a
+// Kubernetes CPU limit is a hard CFS quota rather than the compressible
+// time-slicing that justifies charging a plateau -- see
+// internal/runners/k8s.podResources. Leaving [store.ProfileObservation.SustainedCores]
+// unset makes the store persist the peak in its place, so cluster pricing
+// stays peak-based on purpose. Adding it here would throttle every spiky pod.
 func (s *Server) foldRunProfiles(ctx context.Context, run *store.Run) {
 	if run == nil || run.Pipeline == "" {
 		return
