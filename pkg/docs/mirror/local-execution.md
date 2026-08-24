@@ -537,10 +537,13 @@ works.
 `sparkwing runs stats --capacity` shows what was learned: duration
 percentiles, CPU and memory distributions (p50/p95/peak across recent
 runs), and queue-wait p50/p99. The distributions tell you whether work
-is steady or spiky and whether the box is too small; admission always
-charges the measured peak, never a percentile, because under-reserving a
-spiky node recreates exactly the oversubscription the daemon exists to
-prevent. Percentiles inform, peak admits.
+is steady or spiky and whether the box is too small. Admission charges
+the p95 of the recent per-run peaks, not their maximum: dropping the
+single largest sample keeps one freak run from pinning the price until
+it ages out of the window, while a near-worst-case charge still avoids
+the oversubscription that under-reserving a spiky node would recreate.
+A blocked waiter names its charge's provenance, as in `needs 5.0 cores
+(measured p95 over 12 runs); 2.1 available`.
 
 A pipeline may pass a cold-start hint with
 `.Resources(sparkwing.Cores(n), sparkwing.MemoryGB(n))`, and may pin an
