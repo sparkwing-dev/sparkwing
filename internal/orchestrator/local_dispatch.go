@@ -8,8 +8,6 @@ import (
 
 	localrunner "github.com/sparkwing-dev/sparkwing/internal/runners/local"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
-	"github.com/sparkwing-dev/sparkwing/pkg/storage/s3state"
-	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
 // selfExecutable is the binary a node process re-enters.
@@ -29,20 +27,28 @@ type localExecution struct {
 }
 
 // setupLocalExecution builds the process-per-node runner for a local
-// run, or reports (nil, nil) when this run's state backend cannot
-// serve node processes and execution stays in the dispatcher's own
-// process.
+// run.
 //
 // The state backend decides how a node process reaches run state:
 //
-//   - *store.Store: the dispatcher owns the only SQLite handle, so it
-//     mounts a loopback controller over it and hands children the URL.
 //   - *client.Client: a controller already exists; children are told
 //     the same URL and token the dispatcher uses.
-//   - anything else (S3-only state): there is no controller to point a
-//     child at, and RunNodeOnce is written against one. Such a run
-//     keeps executing in-process.
-func setupLocalExecution(paths Paths, opts *Options, workDir string, logger *slog.Logger) (*localExecution, error) {
+//   - a local SQLite store: the dispatcher owns the only handle, so it
+//     mounts the real controller over it and hands children the URL.
+//   - anything else: the dispatcher mounts the node-facing subset of
+//     that API over the assembled state backend. Object-store state
+//     ("state: {type: s3}") is what reaches this arm today.
+//
+// The last two are one loopback with two backings, not two execution
+// models; the child cannot tell them apart, and nothing local executes
+// in the dispatcher's own goroutines any more.
+//
+// It takes the assembled Backends rather than only opts.State because
+// the run's state surface is the one the dispatcher itself writes
+// through -- including the local mirror a remote-profile run tees to.
+// Pointing children at the raw handle underneath would silently drop
+// their writes out of the mirror.
+func setupLocalExecution(paths Paths, opts *Options, backends Backends, workDir string, logger *slog.Logger) (*localExecution, error) {
 	exe, err := selfExecutable()
 	if err != nil {
 		return nil, fmt.Errorf("resolve pipeline binary for node processes: %w", err)
@@ -70,9 +76,13 @@ func setupLocalExecution(paths Paths, opts *Options, workDir string, logger *slo
 	var ctrl *client.Client
 	var cleanup func()
 
-	switch s := opts.State.(type) {
-	case *store.Store:
-		loopback, lerr := startLoopbackController(s, opts.ArtifactStore, opts.RunID, logger)
+	if c, ok := backends.State.(*client.Client); ok {
+		cfg.ControllerURL = c.BaseURL()
+		cfg.AgentToken = c.Token()
+		ctrl = c
+		cleanup = func() {}
+	} else {
+		loopback, lerr := startRunLoopback(opts, backends, logger)
 		if lerr != nil {
 			return nil, lerr
 		}
@@ -80,16 +90,24 @@ func setupLocalExecution(paths Paths, opts *Options, workDir string, logger *slo
 		cfg.AgentToken = loopback.token
 		ctrl = client.NewWithToken(loopback.url, nil, loopback.token)
 		cleanup = loopback.Close
-	case *client.Client:
-		cfg.ControllerURL = s.BaseURL()
-		cfg.AgentToken = s.Token()
-		ctrl = s
-		cleanup = func() {}
-	case *s3state.Backend:
-		return nil, nil
-	default:
-		return nil, nil
 	}
 
 	return &localExecution{runner: localrunner.New(ctrl, cfg), cleanup: cleanup}, nil
+}
+
+// startRunLoopback mounts the controller this run's node processes talk
+// to. A run whose state IS a local SQLite store gets the real
+// controller over it, which is the richer surface and the one the
+// dashboard already shares; every other backing gets the node-facing
+// shim over the assembled state backend.
+//
+// The SQLite arm unwraps to the raw *store.Store because the real
+// controller is a database server and the store is what it needs. A
+// mirrored run never reaches that arm: its canonical state is remote,
+// so its children must write through the tee, not past it.
+func startRunLoopback(opts *Options, backends Backends, logger *slog.Logger) (*loopbackController, error) {
+	if local, ok := backends.State.(localState); ok {
+		return startLoopbackController(local.st, opts.ArtifactStore, opts.RunID, logger)
+	}
+	return startLoopbackShim(backends.State, backends.Concurrency, opts.ArtifactStore, opts.RunID, logger)
 }

@@ -60,7 +60,7 @@ func (b *Backend) WriteNodeDispatch(ctx context.Context, d store.NodeDispatch) e
 const DefaultBufferThreshold = 16 * 1024
 const DefaultFlushInterval = 500 * time.Millisecond
 const DefaultOutboxDrainInterval = 5 * time.Second
-var ErrNotSupported = errors.New("s3state: operation not supported in S3-only mode")
+var ErrNotSupported = fmt.Errorf("%w: s3state: operation not supported in S3-only mode", storage.ErrNotSupported)
 const KindEvent = "event"
 const KindMetricSample = "metric_sample"
 const KindNode = "node"

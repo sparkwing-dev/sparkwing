@@ -813,7 +813,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 	defer stopSignals()
 
 	if opts.Runner == nil && opts.ProcessPerNode {
-		exec, eerr := setupLocalExecution(paths, &opts, nodeWorkspace(), nil)
+		exec, eerr := setupLocalExecution(paths, &opts, backends, nodeWorkspace(), nil)
 		if eerr != nil {
 			return nil, eerr
 		}

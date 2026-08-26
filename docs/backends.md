@@ -65,6 +65,22 @@ State backends correspond to deployment modes. See
 `mysql` is reserved in the schema but not implemented; declaring it
 fails at run start with a clear error.
 
+Local execution is process-per-node under every state backend. A node
+body runs in its own process of the pipeline binary and reaches run
+state through a controller the dispatcher mounts on loopback for the
+run: the full controller when state is a local SQLite database, and the
+node-facing subset of the same API over whatever else the profile named
+-- object-store state included. Nothing local executes inside the
+dispatcher's own process, so a bucket-backed CI run and a laptop run
+behave the same way.
+
+One measurement does not follow. The measured pipeline profiles that
+size admission are folded from the local run store, so only `sqlite`
+state feeds them; a bucket-backed run records its per-node metric
+samples in the bucket but folds no profile and stores no exit
+accounting, exactly as it did before. Point `state` at `sqlite` (or a
+controller) on the machine whose capacity you want learned.
+
 Required fields per type:
 
 - `filesystem` -- `path`

@@ -60,6 +60,26 @@ code change to unlock.
   nothing changes; steps still share their job's process, exactly like a
   pod. See the [migration
   guide](docs/migrations/v0.36.0.md#process-per-node).
+- **local execution (Breaking):** That now includes runs whose state is
+  object-store NDJSON (`state: { type: s3 }`), the shared-bucket shape
+  documented for CI. Such a run kept executing every job inside the
+  orchestrator's process, because a job process reaches run state through a
+  controller and a bucket has none to point it at. The dispatcher now mounts
+  one on loopback for the run -- the same routes, request bodies, and status
+  codes a pod talks to, served over the run's own state -- so there is a
+  single local execution model rather than one per backend. What a
+  bucket-backed run does *not* gain is measured capacity profiles: those are
+  folded from the local runs store, and a run whose state lives on a bucket
+  still folds nothing, exactly as before.
+- **local execution (Breaking):** A locally spawned job process now writes its
+  log to the surface its profile declares, instead of always to the executing
+  machine's disk. Jobs of a run with `logs: { type: s3 }` post to the bucket,
+  and jobs of a run whose profile routes logs through a controller post to the
+  logs service -- in both cases what `sparkwing runs logs` reads. A profile
+  naming no logs surface is unchanged: those jobs still write the run's local
+  log files. A declared logs surface that will not open now **fails the job**,
+  naming the profile and the surface type, rather than silently degrading to
+  local files and splitting one run's logs across two places.
 - **store (Breaking):** The runs-store schema advances from version 14 to 15,
   adding `cpu_nanos`, `max_rss_bytes`, and `process_wall_nanos` to `nodes`,
   and `cpu_time_nanos` to `node_metrics`. The node columns hold the kernel's

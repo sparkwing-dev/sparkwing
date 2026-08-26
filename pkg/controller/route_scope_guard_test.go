@@ -56,6 +56,85 @@ func TestRouteGuard_EveryMuxRouteRequiresScope(t *testing.T) {
 	})
 }
 
+// The loopback controller claims a node process cannot tell it from
+// the real one. Prose cannot hold that: a route renamed or re-scoped in
+// server.go leaves the loopback answering a path nothing calls, or
+// answering a call at a scope the real controller refuses.
+//
+// Both route tables are read out of the source, so the assertion is on
+// what is registered rather than on what a comment says: every pattern
+// the loopback serves must be registered by server.go, at the same
+// scope. The reverse does not hold and must not -- the loopback serves
+// a subset, which is the whole point of it.
+func TestRouteGuard_LoopbackRoutesAreASubsetOfTheController(t *testing.T) {
+	server := muxRoutes(t, "server.go")
+	loopback := muxRoutes(t, "loopback.go")
+	if len(loopback) == 0 {
+		t.Fatal("no loopback routes parsed; the guard would pass vacuously")
+	}
+	for pattern, scope := range loopback {
+		want, ok := server[pattern]
+		if !ok {
+			t.Errorf("loopback serves %q, which server.go does not register", pattern)
+			continue
+		}
+		if want != scope {
+			t.Errorf("loopback serves %q at scope %s; server.go registers it at %s",
+				pattern, scope, want)
+		}
+	}
+}
+
+// muxRoutes reads the `mux.Handle("<pattern>", requireScope(Scope..., ...))`
+// registrations out of one file, as pattern -> scope constant name.
+// Routes on the outer public router are not mux routes and are skipped,
+// which is what the requireScope guard above already assumes.
+func muxRoutes(t *testing.T, file string) map[string]string {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, file, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]string{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) < 2 {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Handle" {
+			return true
+		}
+		if recv, ok := sel.X.(*ast.Ident); !ok || recv.Name != "mux" {
+			return true
+		}
+		lit, ok := call.Args[0].(*ast.BasicLit)
+		if !ok {
+			return true
+		}
+		pattern, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			return true
+		}
+		wrapped, ok := call.Args[1].(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		fn, ok := wrapped.Fun.(*ast.Ident)
+		if !ok || fn.Name != "requireScope" || len(wrapped.Args) == 0 {
+			return true
+		}
+		scope, ok := wrapped.Args[0].(*ast.Ident)
+		if !ok {
+			return true
+		}
+		out[pattern] = scope.Name
+		return true
+	})
+	return out
+}
+
 // The SDK's approval timeout policy strings and the store's resolution
 // constants are independent declarations of one wire vocabulary; the
 // orchestrator serializes the former and compares against the latter.

@@ -27,6 +27,13 @@ import (
 // wire call for a measurement that path cannot produce. It survives run
 // cancellation for the same reason the terminal row does -- the process
 // still cost what it cost.
+//
+// Object-store state now supervises node processes too, so this machine does
+// reap them and the figures do exist. They are still dropped, because
+// recordRunProfile -- the only reader -- reads the local store. Storing them
+// where nothing folds them would claim a capacity story Mode 2 does not have;
+// enabling that fold is its own decision, not a side effect of moving where
+// nodes execute.
 func recordNodeUsage(ctx context.Context, backend StateBackend, runID, nodeID string, usage *runner.ResourceUsage) {
 	if usage == nil || (usage.CPUTime <= 0 && usage.MaxRSSBytes <= 0) {
 		return

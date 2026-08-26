@@ -2,6 +2,8 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -103,24 +105,14 @@ func startLoopbackController(
 		WithAuthenticator(controller.NewAuthenticator(st, loopbackAuthCacheTTL)).
 		Handler()
 
-	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	url, srv, err := serveLoopback(srvHandler, runID, logger)
 	if err != nil {
 		_ = st.RevokeToken(tok.Prefix, time.Now().UTC())
-		return nil, fmt.Errorf("loopback controller: listen: %w", err)
+		return nil, err
 	}
-
-	srv := &http.Server{
-		Handler:           srvHandler,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-	go func() {
-		if serveErr := srv.Serve(lis); serveErr != nil && serveErr != http.ErrServerClosed {
-			logger.Warn("loopback controller stopped", "run_id", runID, "err", serveErr)
-		}
-	}()
 
 	return &loopbackController{
-		url:         "http://" + lis.Addr().String(),
+		url:         url,
 		token:       raw,
 		tokenPrefix: tok.Prefix,
 		srv:         srv,
@@ -129,9 +121,82 @@ func startLoopbackController(
 	}, nil
 }
 
+// startLoopbackShim mounts the same node-facing API over a state
+// backend that is not a SQLite database -- today the per-run NDJSON on
+// an object store, which a `state: {type: s3}` profile resolves to.
+//
+// Such a run used to be the one shape that still executed its nodes in
+// the dispatcher's own goroutines, because RunNodeOnce is written
+// against a controller and there was none to point a child at. There
+// is one now, so there is one execution model.
+//
+// The bearer lives in memory rather than in a tokens table. That is not
+// a compromise: the shim IS the run, so a credential scoped to the
+// shim's life is scoped to the run's, and a process that dies takes the
+// only thing that would honor the token with it.
+func startLoopbackShim(
+	state StateBackend,
+	concurrency ConcurrencyBackend,
+	art storage.ArtifactStore,
+	runID string,
+	logger *slog.Logger,
+) (*loopbackController, error) {
+	if logger == nil {
+		logger = loopbackLogger()
+	}
+	token, err := newLoopbackToken()
+	if err != nil {
+		return nil, fmt.Errorf("loopback shim: mint run token: %w", err)
+	}
+
+	shim := controller.NewLoopback(state, runID, token, logger).
+		WithConcurrency(concurrency).
+		WithArtifactStore(art)
+
+	url, srv, err := serveLoopback(shim.Handler(), runID, logger)
+	if err != nil {
+		return nil, err
+	}
+	return &loopbackController{url: url, token: token, srv: srv, logger: logger}, nil
+}
+
+// newLoopbackToken mints the run-scoped bearer for a shim. 256 bits
+// from the system source, hex-encoded: the token is compared verbatim
+// rather than looked up by prefix, so it carries no structure.
+func newLoopbackToken() (string, error) {
+	var raw [32]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return "swl_" + hex.EncodeToString(raw[:]), nil
+}
+
+// serveLoopback binds 127.0.0.1 on an ephemeral port and starts
+// serving. The address belongs to this run, not to the machine, so it
+// is never announced in dev.env.
+func serveLoopback(h http.Handler, runID string, logger *slog.Logger) (string, *http.Server, error) {
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, fmt.Errorf("loopback controller: listen: %w", err)
+	}
+	srv := &http.Server{
+		Handler:           h,
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go func() {
+		if serveErr := srv.Serve(lis); serveErr != nil && serveErr != http.ErrServerClosed {
+			logger.Warn("loopback controller stopped", "run_id", runID, "err", serveErr)
+		}
+	}()
+	return "http://" + lis.Addr().String(), srv, nil
+}
+
 // Close stops serving and revokes the run's bearer. Both halves run
 // even if the first fails: a token that outlives its run is the part
 // that matters.
+//
+// A shim has no token row to revoke -- its bearer was only ever held in
+// this process -- so shutting the listener is the whole of it.
 func (c *loopbackController) Close() {
 	if c == nil {
 		return
@@ -140,6 +205,9 @@ func (c *loopbackController) Close() {
 	defer cancel()
 	if err := c.srv.Shutdown(shutdownCtx); err != nil {
 		c.logger.Debug("loopback controller shutdown", "err", err)
+	}
+	if c.store == nil {
+		return
 	}
 	if err := c.store.RevokeToken(c.tokenPrefix, time.Now().UTC()); err != nil {
 		c.logger.Warn("loopback controller: revoke run token", "err", err)

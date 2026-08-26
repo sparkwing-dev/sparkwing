@@ -108,12 +108,20 @@ func RunNodeOnce(
 		// controller-backed ones: a laptop run's secrets live in a
 		// dotenv file the controller has never seen, and its artifact
 		// store is the one the dispatcher's profile named.
-		localSecrets, art, err = coordinatedChildSurfaces(ctx, run.Pipeline)
+		var profileLogs LogBackend
+		localSecrets, art, profileLogs, err = coordinatedChildSurfaces(ctx, run.Pipeline)
+		if err != nil {
+			// safety: the inner errors already name which surface failed.
+			return runner.Result{}, err
+		}
+		if profileLogs != nil {
+			logsBackend = profileLogs
+		}
 	} else {
 		art, err = resolveArtifactStoreFromEnv(ctx)
-	}
-	if err != nil {
-		return runner.Result{}, fmt.Errorf("artifact store: %w", err)
+		if err != nil {
+			return runner.Result{}, fmt.Errorf("artifact store: %w", err)
+		}
 	}
 	backends := RemoteBackends(stateClient, logsBackend, art, httpClient, store.DefaultConcurrencyLease)
 

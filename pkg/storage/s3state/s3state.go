@@ -48,9 +48,14 @@ const DefaultFlushInterval = 500 * time.Millisecond
 const DefaultBufferThreshold = 16 * 1024
 
 // ErrNotSupported is the sentinel returned by methods that require
-// cross-runner coordination Mode 2 deliberately omits. Callers check
-// with errors.Is.
-var ErrNotSupported = errors.New("s3state: operation not supported in S3-only mode")
+// cross-runner coordination Mode 2 omits. Callers check with errors.Is.
+//
+// It wraps [storage.ErrNotSupported] so a caller that only knows it
+// holds a state store -- the loopback controller a run mounts for its
+// node processes, which must answer "this backend cannot do that"
+// rather than "this failed" -- recognizes the refusal without
+// importing this package.
+var ErrNotSupported = fmt.Errorf("%w: s3state: operation not supported in S3-only mode", storage.ErrNotSupported)
 
 // Envelope kinds. Exported so the dashboard's S3Backend reader can
 // match against the same constants.

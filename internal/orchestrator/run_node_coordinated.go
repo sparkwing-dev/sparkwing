@@ -91,29 +91,38 @@ func installStepControlsFromEnv(ctx context.Context, plan *sparkwing.Plan) (cont
 	return ctx, nil
 }
 
-// coordinatedChildSurfaces rebuilds the secrets source and artifact
-// store a locally-dispatched node needs, from the same profile
+// coordinatedChildSurfaces rebuilds the secrets source, artifact store,
+// and log sink a locally-dispatched node needs, from the same profile
 // resolution the dispatcher ran.
 //
 // Every local secrets backend is bound to a file or the environment
 // rather than to the dispatcher's memory (dotenv, filesystem, env), so
 // re-resolving it here reaches the same values. A controller-backed
 // profile resolves the same way it does for the dispatcher.
-func coordinatedChildSurfaces(ctx context.Context, pipeline string) (secrets.Source, storage.ArtifactStore, error) {
+//
+// A nil log backend means the caller keeps its own default, which is
+// the run's local log files -- the right answer for a profile that
+// names no logs surface.
+func coordinatedChildSurfaces(ctx context.Context, pipeline string) (secrets.Source, storage.ArtifactStore, LogBackend, error) {
 	projectCfg := bindProjectPipelines()
 	prof, _, err := resolveActiveProfile(loadPipelineYAML(pipeline), projectCfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("run-node --coordinated: resolve profile: %w", err)
+		return nil, nil, nil, fmt.Errorf("run-node --coordinated: resolve profile: %w", err)
 	}
 
 	art, err := coordinatedArtifactStore(ctx, prof)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
+	}
+
+	logs, err := coordinatedLogBackend(ctx, prof)
+	if err != nil {
+		return nil, art, nil, err
 	}
 
 	source, err := selectSecretResolver(ctx, Options{Profile: prof})
 	if err != nil {
-		return nil, art, fmt.Errorf("run-node --coordinated: secrets backend: %w", err)
+		return nil, art, logs, fmt.Errorf("run-node --coordinated: secrets backend: %w", err)
 	}
 	if source == nil {
 		// safety: RunLocal's own default when the profile declares no secrets
@@ -122,7 +131,44 @@ func coordinatedChildSurfaces(ctx context.Context, pipeline string) (secrets.Sou
 		// move out of the dispatcher's process.
 		source = secrets.NewDotenvSource("")
 	}
-	return source, art, nil
+	return source, art, logs, nil
+}
+
+// coordinatedLogBackend opens the log sink the run's profile named, so
+// a node's log lands where the run says its logs live.
+//
+// The node process writes its own node log -- the dispatcher only
+// relays the child's stdout into the run's delegate -- so without this
+// a run whose profile puts logs on a bucket or a logs service would
+// have written them to the executing machine's disk instead, and
+// `sparkwing runs logs` would find nothing. It is the same rule the
+// secrets source and artifact store follow: the child rebuilds the
+// run's surfaces, it does not substitute the machine's.
+//
+// A surface that will not open fails the node. Falling back to local
+// files would put half a run's logs on a worker's disk and half on the
+// declared surface, with nothing saying which; a loud failure at node
+// startup is the same answer a Mode 2 run already gives when its state
+// surface will not open.
+//
+// A profile naming no logs surface returns (nil, nil), which leaves the
+// caller on the run's local log files -- byte-identical to what a
+// laptop SQLite run wrote before nodes moved into their own processes.
+func coordinatedLogBackend(ctx context.Context, prof *profile.Profile) (LogBackend, error) {
+	if prof == nil {
+		return nil, nil
+	}
+	_, logs, _ := profileSurfaceSpecs(prof, "")
+	if logs == nil {
+		return nil, nil
+	}
+	sink, err := storeurl.OpenLogStoreFromSpec(ctx, *logs, profileControllerLookup(prof))
+	if err != nil {
+		return nil, fmt.Errorf(
+			"run-node --coordinated: profile %q declares a %s logs surface this node cannot open: %w",
+			prof.Name, logs.Type, err)
+	}
+	return NewLogStoreBackend(sink, nil), nil
 }
 
 // coordinatedArtifactStore opens the store a locally dispatched node
