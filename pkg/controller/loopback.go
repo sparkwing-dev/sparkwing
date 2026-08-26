@@ -831,7 +831,7 @@ func (l *Loopback) handleReleaseDebugPause(w http.ResponseWriter, r *http.Reques
 		body.ReleaseKind = store.PauseReleaseManual
 	}
 	if err := l.state.ReleaseDebugPause(r.Context(), r.PathValue("id"), r.PathValue("nodeID"),
-		releasedByFromAuth(r), body.ReleaseKind); err != nil {
+		auditPrincipal(r), body.ReleaseKind); err != nil {
 		writeStateError(w, err)
 		return
 	}
