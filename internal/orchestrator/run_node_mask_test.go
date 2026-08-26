@@ -175,7 +175,7 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 // per-run masker built from the pipeline's secret args must reach the
 // node log wrapper, so a job that logs a secret value persists `***`
 // and never the plaintext. The masker is installed on the context, and
-// InProcessRunner reads it back from there; dropping that installation
+// NodeExecutor reads it back from there; dropping that installation
 // silently disables masking for every remote node.
 func TestRunNodeOnce_MasksSecretsInNodeLog(t *testing.T) {
 	registerPodMaskPipe(t)

@@ -1172,16 +1172,24 @@ func copyLabels(in []string) []string {
 	return out
 }
 
-// Inline marks the node for in-process execution on the dispatcher,
-// bypassing the configured Runner. Useful for lightweight glue work
-// (setup checks, result aggregation) that would otherwise force a
-// multi-second runner boot.
+// Inline marks the node to run on the dispatcher's own host rather
+// than being handed to the configured Runner. Useful for lightweight
+// glue work (setup checks, result aggregation) that would otherwise
+// force a multi-second runner boot.
+//
+// It says where the job runs, not what it shares. On the local model
+// an inline job is still its own process, with its own memory and its
+// own copy of every package variable, exactly like any other job; what
+// it skips is the cluster. Dispatched to a cluster runner, an inline
+// job runs inside the dispatcher itself.
 //
 // Constraints:
 //
-//   - The job runs on the dispatcher's goroutine pool; a long or
-//     CPU-heavy inline node delays other nodes. Keep inline jobs
-//     under a second or two.
+//   - Dispatched to a cluster runner, the job runs on the
+//     dispatcher's goroutine pool, where a long or CPU-heavy inline
+//     node delays other nodes: keep such jobs under a second or two.
+//     A local run spawns it like any other job, so its cost is only
+//     its own.
 //
 //   - Retry / Timeout / CacheKey still apply; only runner placement
 //     changes.
@@ -1199,9 +1207,9 @@ func (n *JobNode) Inline() *JobNode {
 	return n
 }
 
-// IsInline reports whether the node was marked for orchestrator-local
-// execution via Inline(). The dispatcher uses this to route the node
-// to the in-process runner regardless of the configured Runner.
+// IsInline reports whether the node was marked via Inline() to run on
+// the dispatcher's own host. The dispatcher uses this to route the
+// node past the configured Runner.
 func (n *JobNode) IsInline() bool { return n.inline }
 
 // JobGroupNames returns the names of every declared *JobGroup whose

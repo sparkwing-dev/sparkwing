@@ -1684,7 +1684,7 @@ func TestWingd_NodeGroupDoesNotHoldSemaphoreWhileWaitingForHostAdmission(t *test
 	node := sparkwing.Job(plan, "locked", func(context.Context) error { return nil }).
 		Resources(sparkwing.Cores(1)).
 		Concurrency(group)
-	r := NewInProcessRunner(backends)
+	r := NewNodeExecutor(backends)
 	ctx := withLocalAdmission(context.Background(), la, "", "", false, 0)
 
 	result := make(chan runner.Result, 1)

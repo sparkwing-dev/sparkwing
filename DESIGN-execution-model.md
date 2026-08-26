@@ -50,7 +50,7 @@ A target is a named logical environment a pipeline can act on. **The shipped sha
 
 What the two declaration sites do instead:
 
-- `requires: [...]` -- the pipeline's runner-label allowlist. Every job in the pipeline must satisfy it in addition to its own `Requires()`. The reserved label `local` pins execution to the in-process runner.
+- `requires: [...]` -- the pipeline's runner-label allowlist. Every job in the pipeline must satisfy it in addition to its own `Requires()`. The reserved label `local` pins execution to this machine.
 - `profile: <name>` -- binds the pipeline to a project profile, which carries its backend surfaces (`state:`, `cache:`, `logs:`) and its `secrets:` source. The profile applies wholesale; there is no per-surface layering.
 
 ```yaml
@@ -649,7 +649,7 @@ Each scenario is a concrete pipeline shape the design must support, with the con
 
 The parts of this design that are the current model:
 
-- **Label-matched runner selection.** A pipeline states its allowlist with `requires:` in `.sparkwing/sparkwing.yaml`; jobs narrow it with `Requires`, `Prefers`, and `WhenRunner` on `*JobNode` and `*JobGroup` (groups delegate to every member). The reserved label `local` pins a pipeline to the in-process runner.
+- **Label-matched runner selection.** A pipeline states its allowlist with `requires:` in `.sparkwing/sparkwing.yaml`; jobs narrow it with `Requires`, `Prefers`, and `WhenRunner` on `*JobNode` and `*JobGroup` (groups delegate to every member). The reserved label `local` pins a pipeline to this machine.
 - **Workable-declared constraints.** `Requires() []string` and `Prefers() []string` are optional interfaces (`sparkwing/workable_labels.go`); the orchestrator reads them when it wraps a Workable into a `*JobNode`, so a fan-out instance can carry its own contract.
 - **Typed runner inspection.** `sparkwing.Runner(ctx)` returns the `*RunnerInfo` the orchestrator installed at dispatch, with `HasLabel` for adapter branching. It is nil outside a dispatched job.
 - **A trimmed `RuntimeConfig`.** `WorkDir` and `Git` remain. `IsLocal`, `RunID`, `NodeID`, the `Debug` field, and every env-var venue detection are gone; `sparkwing.DebugEnabled()` reads the `SPARKWING_DEBUG` flag, and IDs live on `RunContext` and the per-job context. The `Venue` enum is deleted.

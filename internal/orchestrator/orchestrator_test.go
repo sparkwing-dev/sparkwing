@@ -124,12 +124,64 @@ func (refPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInp
 	return nil
 }
 
+// sharedMemoryOut is an output that only reaches a consumer intact when
+// producer and consumer are the same process: encoding/json drops
+// Handle, so anything downstream reads a nil pointer.
+type sharedMemoryOut struct {
+	Tag    string  `json:"tag"`
+	Handle *string `json:"-"`
+}
+
+type sharedMemoryBuild struct {
+	sparkwing.Base
+	sparkwing.Produces[sharedMemoryOut]
+}
+
+func (j *sharedMemoryBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "run", j.run), nil
+}
+
+func (sharedMemoryBuild) run(ctx context.Context) (sharedMemoryOut, error) {
+	live := "only-in-this-process"
+	return sharedMemoryOut{Tag: "v9", Handle: &live}, nil
+}
+
+type sharedMemoryDeploy struct {
+	sparkwing.Base
+	Build sparkwing.Ref[sharedMemoryOut]
+}
+
+func (d *sharedMemoryDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	sparkwing.Step(w, "run", d.run)
+	return nil, nil
+}
+
+func (d *sharedMemoryDeploy) run(ctx context.Context) error {
+	got := d.Build.Get(ctx)
+	if got.Tag != "v9" {
+		return fmt.Errorf("ref got tag %q, want v9", got.Tag)
+	}
+	if got.Handle == nil {
+		return fmt.Errorf("handle did not survive the ref")
+	}
+	return nil
+}
+
+type sharedMemoryPipe struct{ sparkwing.Base }
+
+func (sharedMemoryPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	build := sparkwing.Job(plan, "build", &sharedMemoryBuild{})
+	sparkwing.Job(plan, "deploy", &sharedMemoryDeploy{Build: sparkwing.RefTo[sharedMemoryOut](build)}).Needs(build)
+	return nil
+}
+
 func init() {
 	register("orch-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &okPipe{} })
 	register("orch-fail", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &failPipe{} })
 	register("orch-fanout-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &fanOutOK{} })
 	register("orch-middle-fails", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &middleFails{} })
 	register("orch-ref", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &refPipe{} })
+	register("orch-ref-shared-memory", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &sharedMemoryPipe{} })
 	register("orch-cancel-inflight", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &cancelInflight{} })
 }
 
@@ -335,6 +387,44 @@ func TestRun_TypedRefsThreadOutput(t *testing.T) {
 		if out.Tag != "v9" {
 			t.Fatalf("build output %q, want v9", out.Tag)
 		}
+	}
+}
+
+// A pipeline that only works because two nodes shared memory has to
+// break where its author runs it. This run executes nodes inside the
+// test binary -- the shape every `go test` of a pipeline has, and the
+// one a library embedder keeps -- and it still fails, because Ref.Get
+// resolves from the node's stored JSON on every execution model there
+// is. Passing here and failing in production is the whole class of bug
+// process-per-node exists to close.
+func TestRun_InProcessRefsStillCrossAJSONBoundary(t *testing.T) {
+	p := newPaths(t)
+	res, err := orchestrator.RunLocal(context.Background(), p,
+		orchestrator.Options{Pipeline: "orch-ref-shared-memory"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != "failed" {
+		t.Fatalf("status = %q, want failed: the producer's pointer cannot reach the consumer", res.Status)
+	}
+
+	st, _ := store.Open(p.StateDB())
+	defer func() { _ = st.Close() }()
+	deploy, err := st.GetNode(context.Background(), res.RunID, "deploy")
+	if err != nil || deploy == nil {
+		t.Fatalf("get deploy node: %v", err)
+	}
+	if !strings.Contains(deploy.Error, "handle did not survive the ref") {
+		t.Fatalf("deploy error = %q, want the consumer's own complaint about the dropped pointer", deploy.Error)
+	}
+	// safety: the rest of the output has to arrive, or this test would
+	// pass on a ref that resolved nothing at all.
+	build, err := st.GetNode(context.Background(), res.RunID, "build")
+	if err != nil || build == nil {
+		t.Fatalf("get build node: %v", err)
+	}
+	if string(build.Output) != `{"tag":"v9"}` {
+		t.Fatalf("build output = %s, want the marshaled output the ref resolves from", build.Output)
 	}
 }
 

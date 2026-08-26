@@ -88,8 +88,8 @@ pipelines:
 
 `requires` is a flat list of label terms. When set it wholesale replaces
 the project `defaults.requires`. The reserved label **`local`** pins
-execution to the in-process runner -- the same effect as the
-`--sw-local-only` flag:
+execution to this machine -- the same effect as the `--sw-local-only`
+flag:
 
 ```yaml
 pipelines:
@@ -124,14 +124,14 @@ which claims nodes.
 
 ## Direct (`sparkwing run`) vs dispatched (`trigger`)
 
-`sparkwing run <pipeline>` executes the pipeline **locally, in this
-process, on this machine** -- there is no controller and no claim step,
-so label matching against remote runners does not apply (`.Requires()`
-is not enforced here -- there is no claim step to filter on -- while
-`WhenRunner` evaluates against the in-process runner, which advertises
-`local` unless the caller overrides its label set). Use
-`requires: [local]` or `--sw-local-only` to force
-in-process execution explicitly.
+`sparkwing run <pipeline>` executes the pipeline **on this machine**,
+each job in a process this binary spawns -- there is no controller and
+no claim step, so label matching against remote runners does not apply
+(`.Requires()` is not enforced here -- there is no claim step to filter
+on -- while `WhenRunner` evaluates against the local runner, which
+advertises `local` unless the caller overrides its label set). Use
+`requires: [local]` or `--sw-local-only` to force local execution
+explicitly.
 
 `sparkwing pipeline trigger <pipeline> --profile prod` hands the run to a
 controller, which schedules each node onto a runner whose labels satisfy
@@ -185,8 +185,8 @@ preflight := sw.Job(plan, "check-sso", &CheckSSO{}).WhenRunner("local")
 sw.Job(plan, "build", &Build{}).Needs(preflight)
 ```
 
-The preflight runs when you `sparkwing run` locally, because the
-in-process runner advertises `local`. Dispatched to a controller, the
+The preflight runs when you `sparkwing run` locally, because the local
+runner advertises `local`. Dispatched to a controller, the
 term becomes a claim-queue label rather than an up-front skip: unless a
 connected runner advertises `local`, the node waits unclaimed and fails
 with `queue_timeout`. Keep environment-scoped preflights on

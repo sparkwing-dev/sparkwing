@@ -50,8 +50,8 @@ type runFlags struct {
 	// when running locally. Empty = laptop dotenv.
 	secrets   string
 	changeDir string
-	// mode: "" / "local" = in-process workers; "ci-embedded" = capped
-	// local procs + S3 storage.
+	// mode: "" / "local" = this machine's own dispatcher; "ci-embedded"
+	// = capped local procs + S3 storage.
 	mode string
 	// workers caps concurrent nodes in ci-embedded mode; 0 = NumCPU.
 	workers int

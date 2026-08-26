@@ -6,15 +6,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// WithResolver installs a reference resolver into ctx. Intended for
-// orchestrator implementations.
-func WithResolver(ctx context.Context, get func(nodeID string) (any, bool)) context.Context {
-	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.RefResolver, get)
-}
-
-// WithJSONResolver installs a JSON-returning resolver into ctx. Used
-// by cluster-mode pod runners whose only handle to upstream outputs
-// is the controller's raw JSON.
+// WithJSONResolver installs the in-run reference resolver into ctx. A
+// node's output reaches its consumer as JSON in the run store on every
+// execution model there is -- a pod, a spawned local process, a node
+// executed inside a test binary -- so this is the only resolver.
 func WithJSONResolver(ctx context.Context, get func(nodeID string) ([]byte, bool)) context.Context {
 	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.JSONRefResolver, get)
 }

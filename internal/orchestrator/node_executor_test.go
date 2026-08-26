@@ -12,7 +12,7 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestInProcessRunnerMarkFailedPersistsAfterContextCancel(t *testing.T) {
+func TestNodeExecutorMarkFailedPersistsAfterContextCancel(t *testing.T) {
 	home := t.TempDir()
 	paths := PathsAt(home)
 	if err := paths.EnsureRoot(); err != nil {
@@ -43,7 +43,7 @@ func TestInProcessRunnerMarkFailedPersistsAfterContextCancel(t *testing.T) {
 
 	cancelled, cancel := context.WithCancel(ctx)
 	cancel()
-	r := &InProcessRunner{backends: LocalBackends(paths, st, nil)}
+	r := &NodeExecutor{backends: LocalBackends(paths, st, nil)}
 	r.markFailed(cancelled, "run-cancelled-terminal-write", "node", errors.New("local admission failed"))
 
 	node, err := st.GetNode(ctx, "run-cancelled-terminal-write", "node")
@@ -58,7 +58,7 @@ func TestInProcessRunnerMarkFailedPersistsAfterContextCancel(t *testing.T) {
 	}
 }
 
-func TestInProcessRunnerRunNodeCancelledLeavesRowForTeardownClassifier(t *testing.T) {
+func TestNodeExecutorRunNodeCancelledLeavesRowForTeardownClassifier(t *testing.T) {
 	home := t.TempDir()
 	paths := PathsAt(home)
 	if err := paths.EnsureRoot(); err != nil {
@@ -97,7 +97,7 @@ func TestInProcessRunnerRunNodeCancelledLeavesRowForTeardownClassifier(t *testin
 		Spawn: func(string, string) error { return errors.New("daemon unavailable") },
 	}, "", "", false, 0)
 
-	r := &InProcessRunner{backends: LocalBackends(paths, st, nil)}
+	r := &NodeExecutor{backends: LocalBackends(paths, st, nil)}
 	res := r.RunNode(cancelled, runner.Request{
 		RunID:    "run-cancelled-no-terminal-write",
 		NodeID:   "node",
@@ -117,7 +117,7 @@ func TestInProcessRunnerRunNodeCancelledLeavesRowForTeardownClassifier(t *testin
 	}
 }
 
-func TestInProcessRunnerVerifyFailurePersistsReasonAfterContextCancel(t *testing.T) {
+func TestNodeExecutorVerifyFailurePersistsReasonAfterContextCancel(t *testing.T) {
 	home := t.TempDir()
 	paths := PathsAt(home)
 	if err := paths.EnsureRoot(); err != nil {
@@ -152,7 +152,7 @@ func TestInProcessRunnerVerifyFailurePersistsReasonAfterContextCancel(t *testing
 		t.Fatalf("create node: %v", err)
 	}
 
-	r := &InProcessRunner{backends: LocalBackends(paths, st, nil)}
+	r := &NodeExecutor{backends: LocalBackends(paths, st, nil)}
 	res := r.RunNode(ctx, runner.Request{
 		RunID:    "run-verify-terminal-write",
 		NodeID:   "node",
@@ -175,7 +175,7 @@ func TestInProcessRunnerVerifyFailurePersistsReasonAfterContextCancel(t *testing
 	}
 }
 
-func TestInProcessRunnerMarkFailedIfUnfinishedDoesNotOverwriteOnReadError(t *testing.T) {
+func TestNodeExecutorMarkFailedIfUnfinishedDoesNotOverwriteOnReadError(t *testing.T) {
 	home := t.TempDir()
 	paths := PathsAt(home)
 	if err := paths.EnsureRoot(); err != nil {
@@ -210,7 +210,7 @@ func TestInProcessRunnerMarkFailedIfUnfinishedDoesNotOverwriteOnReadError(t *tes
 
 	backends := LocalBackends(paths, st, nil)
 	backends.State = getNodeErrorState{StateBackend: backends.State}
-	r := &InProcessRunner{backends: backends}
+	r := &NodeExecutor{backends: backends}
 	r.markFailedIfUnfinished(ctx, "run-read-error-terminal-write", "node", errors.New("generic failure"))
 
 	stored, err := st.GetNode(ctx, "run-read-error-terminal-write", "node")

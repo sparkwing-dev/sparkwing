@@ -647,7 +647,6 @@ var RuntimePlumbing = struct {
 		Runner:            runnerCtxKey{},
 		SpawnHandler:      keySpawnHandler,
 		StepRange:         stepRangeKey{},
-		RefResolver:       keyRefResolver,
 		JSONRefResolver:   keyJSONRefResolver,
 		PipelineResolver:  keyPipelineResolver,
 		PipelineAwaiter:   keyPipelineAwaiter,

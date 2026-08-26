@@ -5,7 +5,7 @@ import "context"
 // runtimePlumbingKeys bundles the context keys that internal/sparkwingruntime
 // needs in order to install and read the orchestrator-facing values
 // (dry-run flag, runner info, step range, spawn handler, ref
-// resolvers). Holding the keys in one struct keeps the public surface
+// resolver). Holding the keys in one struct keeps the public surface
 // of this package small: a pipeline author sees a single
 // `RuntimePlumbing` entry in autocomplete rather than seven.
 type runtimePlumbingKeys struct {
@@ -13,7 +13,6 @@ type runtimePlumbingKeys struct {
 	Runner           any
 	SpawnHandler     any
 	StepRange        any
-	RefResolver      any
 	JSONRefResolver  any
 	PipelineResolver any
 	PipelineAwaiter  any
@@ -69,7 +68,6 @@ var RuntimePlumbing = struct {
 		Runner:            runnerCtxKey{},
 		SpawnHandler:      keySpawnHandler,
 		StepRange:         stepRangeKey{},
-		RefResolver:       keyRefResolver,
 		JSONRefResolver:   keyJSONRefResolver,
 		PipelineResolver:  keyPipelineResolver,
 		PipelineAwaiter:   keyPipelineAwaiter,

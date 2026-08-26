@@ -29,7 +29,7 @@ var errNodeQueueTimeout = errors.New("queue timeout")
 // the node runs (a cancel_others arrival) cancels execution and
 // finalizes the node as superseded, naming the key and the superseding
 // run.
-func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.Request, la *LocalAdmission, group *sparkwing.ConcurrencyGroup) runner.Result {
+func (r *NodeExecutor) runNodeUnderDaemonSem(ctx context.Context, req runner.Request, la *LocalAdmission, group *sparkwing.ConcurrencyGroup) runner.Result {
 	node := req.Node
 	_, _, hostAdmitted := localAdmissionFromContext(ctx)
 	limit := group.Limit()
@@ -166,7 +166,7 @@ func (r *InProcessRunner) runNodeUnderDaemonSem(ctx context.Context, req runner.
 // terminal outcome: skip and fail policies mirror the store path's
 // outcomes, a bounded queue wait that elapsed finalizes with the
 // queue_timeout failure reason, and a cancelled run stays a cancellation.
-func (r *InProcessRunner) failedDaemonAcquire(ctx, acquireCtx context.Context, req runner.Request, key string, queueTimeout time.Duration, err error) runner.Result {
+func (r *NodeExecutor) failedDaemonAcquire(ctx, acquireCtx context.Context, req runner.Request, key string, queueTimeout time.Duration, err error) runner.Result {
 	node := req.Node
 	if errors.Is(context.Cause(acquireCtx), errNodeQueueTimeout) && ctx.Err() == nil {
 		terr := fmt.Errorf("concurrency key %q: queued %s without a slot under OnLimit:Queue", key, queueTimeout)

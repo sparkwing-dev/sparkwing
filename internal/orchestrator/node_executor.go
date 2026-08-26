@@ -17,15 +17,21 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// InProcessRunner executes nodes in the orchestrator's own goroutine.
-// Owns per-node execution: cache, SkipIf, lock, run + hooks, terminal
-// state. Stateless beyond Backends.
-type InProcessRunner struct {
+// NodeExecutor owns everything that has to be decided about one node
+// before and after its body runs: the cache lookup, the concurrency
+// slot, host admission, SkipIf, the node's logs and metrics, and its
+// terminal row. Stateless beyond Backends.
+//
+// It is reached three ways: as the dispatcher's runner, where a local
+// run hands each body to a spawner and a library embedder's run keeps
+// the body here; as the `run-node` entrypoint a spawned process or a
+// pod re-enters; and from replay.
+type NodeExecutor struct {
 	backends Backends
 	labels   []string
 
 	// spawn, when set, executes the node body somewhere else once this
-	// runner has finished the coordination it owns -- the cache
+	// executor has finished the coordination it owns -- the cache
 	// lookup, the concurrency slot, host admission, SkipIf. Local runs
 	// set it to the process-per-node runner; the coordination stays
 	// here because that is where the store handles and the slot
@@ -34,29 +40,29 @@ type InProcessRunner struct {
 	spawn runner.Runner
 }
 
-// NewInProcessRunner builds a runner over Backends; lifecycle is
-// caller-owned. The runner advertises a "local" label by default so
-// jobs declaring WhenRunner("local") dispatch through it.
-func NewInProcessRunner(backends Backends) *InProcessRunner {
-	return &InProcessRunner{backends: backends, labels: []string{"local"}}
+// NewNodeExecutor builds an executor over Backends; lifecycle is
+// caller-owned. It advertises a "local" label by default so jobs
+// declaring WhenRunner("local") dispatch through it.
+func NewNodeExecutor(backends Backends) *NodeExecutor {
+	return &NodeExecutor{backends: backends, labels: []string{"local"}}
 }
 
 // AdvertisedLabels implements runner.LabelAdvertiser. The default set
-// is ["local"]; callers wiring an in-process runner with additional
+// is ["local"]; callers wiring a node executor with additional
 // capabilities (a USB-attached device, a specific OS) can override
 // via SetLabels before the orchestrator dispatch loop starts.
-func (r *InProcessRunner) AdvertisedLabels() []string {
+func (r *NodeExecutor) AdvertisedLabels() []string {
 	out := make([]string, len(r.labels))
 	copy(out, r.labels)
 	return out
 }
 
 // SetLabels replaces the advertised label set. Intended for callers
-// that wire an InProcessRunner outside NewInProcessRunner's defaults
+// that wire a NodeExecutor outside NewNodeExecutor's defaults
 // (host-side runners with hardware affinity, test fixtures pinning a
 // custom label set). The orchestrator's WhenRunner evaluation reads
 // the labels via AdvertisedLabels.
-func (r *InProcessRunner) SetLabels(labels []string) {
+func (r *NodeExecutor) SetLabels(labels []string) {
 	if len(labels) == 0 {
 		r.labels = nil
 		return
@@ -71,8 +77,8 @@ func (r *InProcessRunner) SetLabels(labels []string) {
 }
 
 var (
-	_ runner.Runner          = (*InProcessRunner)(nil)
-	_ runner.LabelAdvertiser = (*InProcessRunner)(nil)
+	_ runner.Runner          = (*NodeExecutor)(nil)
+	_ runner.LabelAdvertiser = (*NodeExecutor)(nil)
 )
 
 // runJobBody executes the node's materialized Work as a step DAG.
@@ -126,12 +132,12 @@ func (s stateMetricsSink) Push(ctx context.Context, sample nodemetrics.Sample) e
 
 // RunNode executes one node to a terminal outcome. ctx carries the
 // ref resolver and propagates cancellation to job + hooks + SkipIf.
-func (r *InProcessRunner) RunNode(ctx context.Context, req runner.Request) runner.Result {
+func (r *NodeExecutor) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	node := req.Node
 	if node == nil {
 		return runner.Result{
 			Outcome: sparkwing.Failed,
-			Err:     fmt.Errorf("InProcessRunner: Request.Node is nil for %s/%s", req.RunID, req.NodeID),
+			Err:     fmt.Errorf("NodeExecutor: Request.Node is nil for %s/%s", req.RunID, req.NodeID),
 		}
 	}
 
@@ -156,7 +162,7 @@ func (r *InProcessRunner) RunNode(ctx context.Context, req runner.Request) runne
 	return runner.Result{Outcome: sparkwing.Success, Output: output}
 }
 
-func (r *InProcessRunner) executeNodeWithAdmission(ctx context.Context, req runner.Request) (any, error) {
+func (r *NodeExecutor) executeNodeWithAdmission(ctx context.Context, req runner.Request) (any, error) {
 	la, _, hostAdmitted := localAdmissionFromContext(ctx)
 	if la == nil || hostAdmitted {
 		return r.executeNode(ctx, req.RunID, req.Node, req.Delegate)
@@ -188,30 +194,32 @@ func (r *InProcessRunner) executeNodeWithAdmission(ctx context.Context, req runn
 	return r.executeNode(nodeCtx, req.RunID, req.Node, req.Delegate)
 }
 
-// WithNodeExecutor routes node bodies through exec instead of this
-// process. Coordination is unaffected: everything a node needs
-// decided before it runs is still decided here.
-func (r *InProcessRunner) WithNodeExecutor(exec runner.Runner) *InProcessRunner {
-	r.spawn = exec
+// WithSpawner routes node bodies through spawner instead of running
+// them here. Coordination is unaffected: everything a node needs
+// decided before it runs is still decided by this executor.
+func (r *NodeExecutor) WithSpawner(spawner runner.Runner) *NodeExecutor {
+	r.spawn = spawner
 	return r
 }
 
 // executeNode runs the job with modifiers + hooks and persists state,
-// or hands it to the configured executor.
-func (r *InProcessRunner) executeNode(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
+// or hands it to the configured spawner. Either way the output comes
+// back as the node's marshaled JSON, which is the only form a
+// downstream node can read it in.
+func (r *NodeExecutor) executeNode(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
 	if r.spawn != nil {
 		return r.executeNodeElsewhere(ctx, runID, node, delegate)
 	}
 	return r.executeNodeInProcess(ctx, runID, node, delegate)
 }
 
-// executeNodeElsewhere hands the node to the executor and flattens its
+// executeNodeElsewhere hands the node to the spawner and flattens its
 // Result back into the (output, error) shape the coordination paths
-// expect. The executor's process wrote the node's terminal row from
+// expect. The spawned process wrote the node's terminal row from
 // inside itself, so the only thing persisted here is what that process
 // cost: knowable solely out here, after the reap, and dropped with the
 // rest of the Result by the flattening if it were not written first.
-func (r *InProcessRunner) executeNodeElsewhere(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
+func (r *NodeExecutor) executeNodeElsewhere(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
 	res := r.spawn.RunNode(ctx, runner.Request{
 		RunID:    runID,
 		NodeID:   node.ID(),
@@ -226,10 +234,19 @@ func (r *InProcessRunner) executeNodeElsewhere(ctx context.Context, runID string
 	if res.Err != nil {
 		return nil, res.Err
 	}
-	return nil, fmt.Errorf("%s: node executor returned outcome %q with no error", node.ID(), res.Outcome)
+	return nil, fmt.Errorf("%s: node spawner returned outcome %q with no error", node.ID(), res.Outcome)
 }
 
-func (r *InProcessRunner) executeNodeInProcess(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
+// executeNodeInProcess runs the node's body here, in this process,
+// and returns the output as the JSON it wrote to the node's terminal
+// row -- never the live Go value. A consumer reads an output through a
+// JSON round-trip whether the body ran here or in a process of its
+// own, so a pipeline that only works by pointer identity has to fail
+// in its author's test run exactly as it would in production. A node
+// that produced nothing returns an untyped nil, not a nil []byte in an
+// interface, so a caller's `output != nil` still means "there is an
+// output".
+func (r *NodeExecutor) executeNodeInProcess(ctx context.Context, runID string, node *sparkwing.JobNode, delegate sparkwing.Logger) (any, error) {
 	writeCtx := context.WithoutCancel(ctx)
 	nlog, err := r.backends.Logs.OpenNodeLog(runID, node.ID(), delegate)
 	if err != nil {
@@ -527,7 +544,10 @@ done:
 	_ = r.backends.State.FinishNode(writeCtx, runID, node.ID(), string(sparkwing.Success), "", outBytes)
 	_ = r.backends.State.AppendEvent(writeCtx, runID, node.ID(), "node_succeeded", nil)
 
-	return output, nil
+	if outBytes == nil {
+		return nil, nil
+	}
+	return outBytes, nil
 }
 
 // publishArtifacts captures the node's declared output globs from its
@@ -536,7 +556,7 @@ done:
 // no artifact store is configured. A capture failure (an unreadable or
 // unresolvable declared file) fails the node: a producer that promised
 // outputs it cannot deliver has not succeeded.
-func (r *InProcessRunner) publishArtifacts(ctx context.Context, node *sparkwing.JobNode) (string, error) {
+func (r *NodeExecutor) publishArtifacts(ctx context.Context, node *sparkwing.JobNode) (string, error) {
 	globs := node.OutputGlobs()
 	if len(globs) == 0 || r.backends.Artifact == nil {
 		return "", nil
@@ -552,7 +572,7 @@ func (r *InProcessRunner) publishArtifacts(ctx context.Context, node *sparkwing.
 // every producer the node consumes (see [sparkwing.JobNode.Consumes]).
 // Returns the number of files staged. A no-op when the node consumes
 // nothing or no artifact store is configured.
-func (r *InProcessRunner) stageArtifacts(ctx context.Context, runID string, node *sparkwing.JobNode) (int, error) {
+func (r *NodeExecutor) stageArtifacts(ctx context.Context, runID string, node *sparkwing.JobNode) (int, error) {
 	edges := node.ConsumeEdges()
 	if len(edges) == 0 || r.backends.Artifact == nil {
 		return 0, nil
@@ -654,13 +674,13 @@ func runVerify(ctx context.Context, fn sparkwing.VerifyFn) (err error) {
 	return fn(ctx)
 }
 
-func (r *InProcessRunner) markSkipped(ctx context.Context, runID, nodeID, reason string) {
+func (r *NodeExecutor) markSkipped(ctx context.Context, runID, nodeID, reason string) {
 	writeCtx := context.WithoutCancel(ctx)
 	_ = r.backends.State.FinishNode(writeCtx, runID, nodeID, string(sparkwing.Skipped), reason, nil)
 	_ = r.backends.State.AppendEvent(writeCtx, runID, nodeID, "node_skipped", []byte(reason))
 }
 
-func (r *InProcessRunner) markFailed(ctx context.Context, runID, nodeID string, reason error) {
+func (r *NodeExecutor) markFailed(ctx context.Context, runID, nodeID string, reason error) {
 	writeCtx := context.WithoutCancel(ctx)
 	text := boundedFailureText(ctx, runID, nodeID, reason)
 	_ = r.backends.State.FinishNode(writeCtx, runID, nodeID, string(sparkwing.Failed), text, nil)
@@ -679,7 +699,7 @@ func failureWriteCtx(ctx context.Context, err error) context.Context {
 	return context.WithoutCancel(ctx)
 }
 
-func (r *InProcessRunner) markFailedIfUnfinished(ctx context.Context, runID, nodeID string, reason error) {
+func (r *NodeExecutor) markFailedIfUnfinished(ctx context.Context, runID, nodeID string, reason error) {
 	if ctx.Err() != nil && errors.Is(reason, context.Canceled) {
 		return
 	}

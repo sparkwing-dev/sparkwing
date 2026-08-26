@@ -73,7 +73,7 @@ func heldByLabel(holders []store.ConcurrencyHolder) string {
 // emitConcWaitLog mirrors a concurrency-wait line into the node log and,
 // via the run delegate, the live stream. The node log is append-mode, so
 // executeNode's later open on promotion appends cleanly.
-func (r *InProcessRunner) emitConcWaitLog(ctx context.Context, req runner.Request, detail string) {
+func (r *NodeExecutor) emitConcWaitLog(ctx context.Context, req runner.Request, detail string) {
 	if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nlog.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Event: "concurrency_wait", Msg: detail})
 		_ = nlog.Close()
@@ -250,7 +250,7 @@ func (cp coordParams) acquireRequest(runID, nodeID string, bypassRead bool) stor
 // are independent: a node may have either, both, or neither. Returns
 // handled=false when the node needs no coordination so the caller runs
 // it on the normal path.
-func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Request) (runner.Result, bool) {
+func (r *NodeExecutor) runNodeWithCache(ctx context.Context, req runner.Request) (runner.Result, bool) {
 	node := req.Node
 	group := node.ConcurrencyGroupRef()
 	cacheCfg := node.MemoizeConfig()
@@ -277,7 +277,7 @@ func (r *InProcessRunner) runNodeWithCache(ctx context.Context, req runner.Reque
 // run-scoped groups on the local run path go through the admission
 // daemon, while global-scope groups (and every group on cluster paths,
 // which carry no local daemon) keep the shared-store acquire.
-func (r *InProcessRunner) runUnderGroup(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup) runner.Result {
+func (r *NodeExecutor) runUnderGroup(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup) runner.Result {
 	if la, _, _ := localAdmissionFromContext(ctx); la != nil && groupUsesLocalDaemon(group) {
 		return r.runNodeUnderDaemonSem(ctx, req, la, group)
 	}
@@ -287,7 +287,7 @@ func (r *InProcessRunner) runUnderGroup(ctx context.Context, req runner.Request,
 // resolveCacheHash evaluates the node's content key, returning the hash
 // (or "" when there is no Cache config, the key opted out via NoCache,
 // or the key was empty) and the configured TTL.
-func (r *InProcessRunner) resolveCacheHash(ctx context.Context, node *sparkwing.JobNode, cacheCfg *sparkwing.MemoizeConfig) (string, time.Duration) {
+func (r *NodeExecutor) resolveCacheHash(ctx context.Context, node *sparkwing.JobNode, cacheCfg *sparkwing.MemoizeConfig) (string, time.Duration) {
 	if cacheCfg == nil {
 		return "", 0
 	}
@@ -309,7 +309,7 @@ func (r *InProcessRunner) resolveCacheHash(ctx context.Context, node *sparkwing.
 // acquireAndRun performs one store acquire for cp and dispatches on the
 // outcome: replay a hit, skip/fail under a full group, run a granted
 // slot, or wait then run a queued/coalesced/evicting arrival.
-func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
+func (r *NodeExecutor) acquireAndRun(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
 	node := req.Node
 	holderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
 	wedgeBudget, err := storeWedgeBudget()
@@ -360,7 +360,7 @@ func (r *InProcessRunner) acquireAndRun(ctx context.Context, req runner.Request,
 // identical work draws one budget unit, not one per duplicate). The
 // memo leader then competes for the group budget, runs, and on release
 // writes the shared cache entry.
-func (r *InProcessRunner) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, cacheHash string, cacheTTL time.Duration) runner.Result {
+func (r *NodeExecutor) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, cacheHash string, cacheTTL time.Duration) runner.Result {
 	node := req.Node
 	memoCP := memoParamsFor(cacheHash, cacheTTL)
 	memoHolderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
@@ -423,7 +423,7 @@ func storeOutcome(res runner.Result) string {
 
 // applyCacheHit stamps a cache-hit outcome and replays the origin's
 // output, with node_start/node_end + cache_hit bookkeeping.
-func (r *InProcessRunner) applyCacheHit(ctx context.Context, req runner.Request, cp coordParams, originRun, originNode string) runner.Result {
+func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, cp coordParams, originRun, originNode string) runner.Result {
 	output, err := r.fetchCachedOutput(ctx, originRun, originNode)
 	if err != nil {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("cache hit: fetch output: %w", err))
@@ -456,7 +456,7 @@ func (r *InProcessRunner) applyCacheHit(ctx context.Context, req runner.Request,
 
 // applySkippedConcurrent resolves a node that arrived at a full slot
 // under OnLimit:Skip.
-func (r *InProcessRunner) applySkippedConcurrent(ctx context.Context, req runner.Request) runner.Result {
+func (r *NodeExecutor) applySkippedConcurrent(ctx context.Context, req runner.Request) runner.Result {
 	_ = r.backends.State.StartNode(ctx, req.RunID, req.Node.ID())
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_skipped_concurrent", nil)
 	_ = r.backends.State.FinishNode(ctx, req.RunID, req.Node.ID(), string(sparkwing.SkippedConcurrent), "", nil)
@@ -479,7 +479,7 @@ func (r *InProcessRunner) applySkippedConcurrent(ctx context.Context, req runner
 // way but finalizes as failed, carrying the wedge verdict so the run
 // record names the true cause instead of a supersede that never
 // happened.
-func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string, wedgeBudget time.Duration) runner.Result {
+func (r *NodeExecutor) runHeldSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string, wedgeBudget time.Duration) runner.Result {
 	execCtx, cancelExec := context.WithCancel(ctx)
 	var superseded atomic.Bool
 	var wedgeAbort atomic.Pointer[string]
@@ -534,7 +534,7 @@ func (r *InProcessRunner) runHeldSlot(ctx context.Context, req runner.Request, c
 // heartbeats forever, recording its verdict in wedgeAbort so the node
 // finalizes with the true cause rather than a supersede. The returned
 // stop is safe to call multiple times.
-func (r *InProcessRunner) startSlotHeartbeat(ctx context.Context, key, holderID, onLimit string, superseded *atomic.Bool, wedgeAbort *atomic.Pointer[string], cancelExec context.CancelFunc, wedgeBudget time.Duration) func() {
+func (r *NodeExecutor) startSlotHeartbeat(ctx context.Context, key, holderID, onLimit string, superseded *atomic.Bool, wedgeAbort *atomic.Pointer[string], cancelExec context.CancelFunc, wedgeBudget time.Duration) func() {
 	done := make(chan struct{})
 	var once sync.Once
 
@@ -637,7 +637,7 @@ func slotOwnershipLost(holder *store.ConcurrencyHolder, err error) bool {
 // a continuous failure streak past wedgeBudget (or one "locking
 // protocol" error) into a terminal node failure instead of a poll
 // loop spinning against a wedged store.
-func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, cp coordParams, initial store.AcquireSlotResponse, wedgeBudget time.Duration) runner.Result {
+func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp coordParams, initial store.AcquireSlotResponse, wedgeBudget time.Duration) runner.Result {
 	wedge := newStoreWedgeGuard(wedgeBudget)
 	leaderRun, leaderNode := initial.LeaderRunID, initial.LeaderNodeID
 
@@ -761,7 +761,7 @@ func (r *InProcessRunner) waitThenRun(ctx context.Context, req runner.Request, c
 // it drops the parked waiter row so a later release can't promote a
 // node that already gave up, then finalizes the node as failed with
 // failure_reason "queue_timeout".
-func (r *InProcessRunner) failQueueTimeout(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
+func (r *NodeExecutor) failQueueTimeout(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
 	if _, err := r.backends.Concurrency.CancelWaiter(ctx, cp.key, req.RunID, req.Node.ID()); err != nil {
 		slog.Warn("cancel waiter after queue timeout failed; reaper will sweep it",
 			"key", cp.key, "run", req.RunID, "node", req.Node.ID(), "err", err)
@@ -803,7 +803,7 @@ func followerOutcomeFromLeader(leaderOutcome string) sparkwing.Outcome {
 // caches), so the follower must inherit the leader's actual node
 // outcome -- a Skipped or Failed leader must not stamp the follower
 // Success with empty output.
-func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.Request, cp coordParams, leaderRunID, leaderNodeID, leaderOutcome, leaderFailureReason string) runner.Result {
+func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Request, cp coordParams, leaderRunID, leaderNodeID, leaderOutcome, leaderFailureReason string) runner.Result {
 	output, err := r.backends.State.GetNodeOutput(ctx, leaderRunID, leaderNodeID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
 		r.markFailed(ctx, req.RunID, req.Node.ID(), fmt.Errorf("fetch leader output: %w", err))
@@ -842,7 +842,7 @@ func (r *InProcessRunner) inheritLeaderOutcome(ctx context.Context, req runner.R
 	return runner.Result{Outcome: outcome, Output: output}
 }
 
-func (r *InProcessRunner) fetchCachedOutput(ctx context.Context, originRun, originNode string) ([]byte, error) {
+func (r *NodeExecutor) fetchCachedOutput(ctx context.Context, originRun, originNode string) ([]byte, error) {
 	return r.backends.State.GetNodeOutput(ctx, originRun, originNode)
 }
 
@@ -851,7 +851,7 @@ func (r *InProcessRunner) fetchCachedOutput(ctx context.Context, originRun, orig
 // producer's file set without re-running it. No-op when the source
 // recorded no manifest. Written before the terminal FinishNode flip so a
 // consumer dispatched on completion always sees the reference.
-func (r *InProcessRunner) copyArtifactManifest(ctx context.Context, dstRun, dstNode, srcRun, srcNode string) {
+func (r *NodeExecutor) copyArtifactManifest(ctx context.Context, dstRun, dstNode, srcRun, srcNode string) {
 	src, err := r.backends.State.GetNode(ctx, srcRun, srcNode)
 	if err != nil || src == nil || src.ArtifactManifest == "" {
 		return
@@ -885,10 +885,10 @@ func (i *inflightMap) get(runID, nodeID string) string {
 	return outcome
 }
 
-func (r *InProcessRunner) recordReleaseOutcome(runID, nodeID, outcome string) {
+func (r *NodeExecutor) recordReleaseOutcome(runID, nodeID, outcome string) {
 	inflightOutcomes.set(runID, nodeID, outcome)
 }
 
-func (r *InProcessRunner) lastReleaseOutcomeFor(runID, nodeID string) string {
+func (r *NodeExecutor) lastReleaseOutcomeFor(runID, nodeID string) string {
 	return inflightOutcomes.get(runID, nodeID)
 }

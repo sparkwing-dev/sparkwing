@@ -341,9 +341,9 @@ func TestJobFanOutDynamic_RegistersExpansion(t *testing.T) {
 	if calls != 0 {
 		t.Fatalf("fn should not run at registration; ran %d times", calls)
 	}
-	ctx := sparkwingruntime.WithResolver(context.Background(), func(id string) (any, bool) {
+	ctx := sparkwingruntime.WithJSONResolver(context.Background(), func(id string) ([]byte, bool) {
 		if id == "discover" {
-			return []string{"a", "b", "c"}, true
+			return []byte(`["a","b","c"]`), true
 		}
 		return nil, false
 	})

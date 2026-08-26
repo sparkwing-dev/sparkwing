@@ -49,7 +49,7 @@ var envAllowExact = map[string]bool{
 // writeDispatchSnapshot captures the dispatch frame for one
 // (run, node, attempt). Called before BeforeRun so replays re-run
 // hooks and pick up rotated secrets lazily.
-func (r *InProcessRunner) writeDispatchSnapshot(ctx context.Context, runID string, node *sparkwing.JobNode) error {
+func (r *NodeExecutor) writeDispatchSnapshot(ctx context.Context, runID string, node *sparkwing.JobNode) error {
 	scalar, err := json.Marshal(node.Job())
 	if err != nil {
 		return fmt.Errorf("marshal job: %w", err)

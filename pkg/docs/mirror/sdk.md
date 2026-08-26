@@ -124,9 +124,10 @@ func (b *Build) Plan(ctx context.Context, plan *sw.Plan, args BuildArgs, run sw.
 
 `.Inline()` keeps a tiny discover Job from paying dispatch overhead
 while still living in the DAG (so explain renders it, retry/cache
-apply, the dashboard shows it). Inline is the explicit "run in the
-orchestrator process" annotation -- it's not a way to opt back into
-Plan-time side effects.
+apply, the dashboard shows it). Inline is the explicit "run on the
+dispatcher's host rather than on a runner" annotation. It says where
+the job runs, not what it shares: locally it is still its own process,
+and it is not a way to opt back into Plan-time side effects.
 
 Consumer-side helper packages (sparks-core libraries, custom
 pipeline libs) can opt their own ctx-taking entry points into the
@@ -487,7 +488,7 @@ Common Plan-layer modifiers (chainable on `*JobNode`):
 .Memoize(key, TTL(d))                // content-addressed result memoization (+ in-flight dedupe)
 .Concurrency(group, cost...)       // join a shared concurrency budget (count-limit, gate, throttle)
 .BeforeRun(fn) / .AfterRun(fn)     // hooks
-.Inline()                          // bypass the runner entirely
+.Inline()                          // run on the dispatcher's host, not a runner
 .ContinueOnError() / .Optional()   // failure-propagation knobs
 .NeedsOptional(deps...)            // soft upstream dep
 ```

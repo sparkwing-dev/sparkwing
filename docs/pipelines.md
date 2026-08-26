@@ -47,7 +47,7 @@ hard parse error):
 - **guards** - gate dispatch on profile, args, and git branch (`reject` / `require` token lists)
 - **args** - per-arg default values, keyed by CLI flag name
 - **profile** - the project profile this pipeline uses (from the `profiles:` map)
-- **requires** - runner-label requirements for every job (e.g. `[local]` pins to the in-process runner)
+- **requires** - runner-label requirements for every job (e.g. `[local]` pins execution to this machine)
 - **hidden** - omit from `pipeline list` (still invocable by exact name)
 
 For the complete schema -- every top-level key, pipeline field, and
@@ -109,8 +109,9 @@ Sparkwing has two DAG layers, and almost every pipeline-authoring choice
 is a layer choice. Internalize this before reading the recipes below.
 
 - **Plan / Job** is the *outer* DAG - units of dispatch. Each Job runs
-  on its own runner: a separate pod in cluster mode, a separate
-  goroutine slot in local mode. Nodes carry the dispatch envelope -
+  in its own process: a separate pod in cluster mode, a separate
+  invocation of the pipeline binary in local mode. Nodes carry the
+  dispatch envelope -
   `Retry`, `Timeout`, `OnFailure`, `Memoize`, `Requires`, `BeforeRun` /
   `AfterRun`, `Approval` gating - because each Job *is* the unit the
   scheduler can retry, time out, or route to a labeled runner.
@@ -440,9 +441,9 @@ to promote it to a Job via `sw.JobSpawn`.
 
 ### `.Inline()`
 
-Marks a Job for in-process execution on the dispatcher (the
-controller in cluster mode, the laptop binary in local mode). Bypasses
-the configured Runner so no pod / warm-runner spin-up cost is paid.
+Marks a Job to run on the dispatcher's own host instead of being
+handed to the configured Runner, so no pod / warm-runner spin-up cost
+is paid.
 
 ```go
 sw.Job(plan, "setup", &Setup{}).Inline()
@@ -451,11 +452,18 @@ sw.Job(plan, "summarize", &Summarize{}).Needs(deploys).Inline()
 
 Reach for it on genuinely lightweight glue (setup checks, fan-in
 summaries) that would otherwise burn seconds of runner boot for a few
-hundred ms of work. It is **not** a general "faster" knob: inline
-nodes share the dispatcher's goroutine pool, so a long inline job
-delays every other node's scheduling. Keep inline work under a second
-or two. `.Inline()` on an approval gate panics. `.Requires` labels are
-ignored for inline nodes.
+hundred ms of work.
+
+`Inline()` says where the job runs, not what it shares. In a local run
+it is still its own process, like every other job -- what it skips is
+the cluster, not the process boundary. Dispatched to a cluster runner
+it runs inside the dispatcher itself, and there it is **not** a general
+"faster" knob: it shares the dispatcher's goroutine pool, so a long
+inline job delays every other node's scheduling. Keep such jobs under a
+second or two.
+
+`.Inline()` on an approval gate panics. `.Requires` labels are ignored
+for inline nodes.
 
 ### Dynamic nodes
 

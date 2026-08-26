@@ -775,10 +775,10 @@ type JobNode struct {
 - `func (n *JobNode) Env(key, value string) *JobNode` -- Env sets a per-node environment variable.
 - `func (n *JobNode) EnvMap() map[string]string` -- EnvMap returns the node's declared environment.
 - `func (n *JobNode) ID() string` -- ID returns the node's identifier.
-- `func (n *JobNode) Inline() *JobNode` -- Inline marks the node for in-process execution on the dispatcher, bypassing the configured Runner.
+- `func (n *JobNode) Inline() *JobNode` -- Inline marks the node to run on the dispatcher's own host rather than being handed to the configured Runner.
 - `func (n *JobNode) IsApproval() bool` -- IsApproval reports whether the node is an approval gate.
 - `func (n *JobNode) IsContinueOnError() bool` -- IsContinueOnError reports whether downstream should ignore this node's failure for dispatch purposes.
-- `func (n *JobNode) IsInline() bool` -- IsInline reports whether the node was marked for orchestrator-local execution via Inline().
+- `func (n *JobNode) IsInline() bool` -- IsInline reports whether the node was marked via Inline() to run on the dispatcher's own host.
 - `func (n *JobNode) IsOptional() bool` -- IsOptional reports whether the node is marked non-essential.
 - `func (n *JobNode) Job() Workable` -- Job returns the underlying user-authored job struct.
 - `func (n *JobNode) Memoize(key CacheKeyFn, opts ...MemoizeOption) *JobNode` -- Memoize skips re-running the node when its result is already known.
@@ -2062,7 +2062,6 @@ var RuntimePlumbing = struct {
         Runner:            runnerCtxKey{},
         SpawnHandler:      keySpawnHandler,
         StepRange:         stepRangeKey{},
-        RefResolver:       keyRefResolver,
         JSONRefResolver:   keyJSONRefResolver,
         PipelineResolver:  keyPipelineResolver,
         PipelineAwaiter:   keyPipelineAwaiter,

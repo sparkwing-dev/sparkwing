@@ -196,9 +196,9 @@ below).
 ## Runner labels (`runner-label`)
 
 A blank runner label matches no runner, so the job strands forever. An
-`Inline()` job runs in-process on the dispatcher, so a `Requires` or
-`Prefers` label on it can never be honored -- declaring both signals
-confused placement.
+`Inline()` job runs on the dispatcher's own host rather than on a
+runner, so a `Requires` or `Prefers` label on it can never be honored
+-- declaring both signals confused placement.
 
 Don't strand a job on a blank or unhonored label:
 
@@ -206,7 +206,7 @@ Don't strand a job on a blank or unhonored label:
 // blank label matches no runner
 sparkwing.Job(plan, "build", func(ctx context.Context) error { return nil }).Requires("")
 
-// inline runs in-process, so the label is never honored
+// inline never reaches a runner, so the label is never honored
 sparkwing.Job(plan, "setup", func(ctx context.Context) error { return nil }).Inline().Requires("linux")
 ```
 

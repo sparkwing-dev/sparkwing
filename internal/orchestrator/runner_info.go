@@ -15,9 +15,9 @@ import (
 // runner type (local vs kubernetes vs static) from the concrete
 // type and label hints.
 //
-// The pod path (RunNodeOnce) also dispatches through an
-// InProcessRunner -- "local in process" relative to the pod -- but
-// the operator-visible runner is kubernetes/static. podRunnerInfo
+// The pod path (RunNodeOnce) also runs through a NodeExecutor --
+// every execution model does, it is the thing that runs a node -- but
+// the operator-visible runner there is kubernetes/static. podRunnerInfo
 // overrides the type and name from env vars the trigger loop
 // stamps onto the pod.
 func runnerInfoFor(r runner.Runner) *sparkwing.RunnerInfo {
@@ -32,7 +32,7 @@ func runnerInfoFor(r runner.Runner) *sparkwing.RunnerInfo {
 	if adv, ok := r.(runner.LabelAdvertiser); ok {
 		info.Labels = adv.AdvertisedLabels()
 	}
-	if _, ok := r.(*InProcessRunner); ok {
+	if _, ok := r.(*NodeExecutor); ok {
 		info.Type = "local"
 		if info.Name == "" {
 			info.Name = "local"

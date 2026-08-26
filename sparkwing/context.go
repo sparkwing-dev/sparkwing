@@ -143,7 +143,6 @@ type ctxKey int
 const (
 	keyLogger ctxKey = iota
 	keyNode
-	keyRefResolver
 	keyJSONRefResolver
 	keyPipelineResolver
 	keyPipelineAwaiter

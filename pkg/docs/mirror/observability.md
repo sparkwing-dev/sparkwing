@@ -132,13 +132,18 @@ cluster metrics-server is involved.
   available. Both platform sources report the footprint at the moment of
   the sample, not a high-water mark.
 
-One sampler runs per process. A local node is its own process and a
-cluster node is its own pod, so each node's chart measures that node
-and nothing else; the nodes of a parallel fan-out still sum to what the
-machine used, which is what right-sizing and admission both need. Where
-several nodes do share one process -- a program that embeds the SDK and
-runs nodes inside itself -- the interval's reading is split evenly
-among them, so each node's chart is an estimate of its share, and a
+One sampler runs per process, and each interval's reading is split
+evenly among the nodes attached to it. A plan-level node of a local run
+is its own process and a cluster node is its own pod, so there is one
+attachment and the chart is that node's exact usage. Several nodes do
+share one process in three shapes: a `JobSpawn` child runs inside its
+parent's process while the parent is still attached; `sparkwing cluster
+worker --runner inprocess` and `sparkwing handle-trigger --runner
+inprocess` (the default runner kind for both) run every node of a
+claimed trigger in the one worker process; and a test binary or a
+program embedding the SDK runs nodes inside itself. There each node's
+chart is an estimate of its share -- the shares still sum to what the
+process drew, which is what right-sizing and admission need -- and a
 node joining or leaving between ticks can land up to one interval of
 its cost on the nodes beside it.
 

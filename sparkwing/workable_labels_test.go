@@ -141,13 +141,13 @@ func TestWorkableLabels_JobFanOutDynamicHeterogeneous(t *testing.T) {
 	if len(exps) != 1 {
 		t.Fatalf("expected one expansion, got %d", len(exps))
 	}
-	resolver := func(nodeID string) (any, bool) {
+	resolver := func(nodeID string) ([]byte, bool) {
 		if nodeID == "discover" {
-			return []int{0, 1, 2, 3}, true
+			return []byte(`[0,1,2,3]`), true
 		}
 		return nil, false
 	}
-	ctx := sparkwingruntime.WithResolver(context.Background(), resolver)
+	ctx := sparkwingruntime.WithJSONResolver(context.Background(), resolver)
 	children := exps[0].Gen(ctx)
 	if len(children) != 4 {
 		t.Fatalf("expected 4 children, got %d", len(children))

@@ -52,13 +52,26 @@ code change to unlock.
 
 - **local execution (Breaking):** Every job in a local run now executes as
   its own OS process, spawned from the same `run-node` entrypoint Kubernetes
-  pods use. Jobs no longer share memory with each other or the orchestrator:
-  typed refs and artifacts are the only data paths between jobs, which is
-  what the cluster has always enforced, and a job's output must be
-  JSON-serializable -- rejected at plan time for shapes that can never
-  encode, failed at the node for values that will not marshal. Inside a job
-  nothing changes; steps still share their job's process, exactly like a
-  pod. See the [migration
+  pods use, so one execution model serves the laptop and the cluster. Jobs no
+  longer share memory with each other or with the dispatcher: typed refs and
+  artifacts are the only data paths between them, which is what a pod has
+  always enforced. `Ref[T].Get` now resolves from the producer's stored JSON
+  on every model there is, a `go test` that runs the whole pipeline inside
+  one binary included, so a pipeline that only worked because two jobs shared
+  a package variable or a pointer fails where its author can see it rather
+  than on the first deploy. A job's output must therefore be
+  JSON-serializable: a declared output type that can never encode is rejected
+  at plan time, and a value that will not marshal fails its node instead of
+  reporting success and handing consumers nothing. A job process also gets no
+  terminal -- stdin is `/dev/null`, and stdout and stderr are pipes the
+  dispatcher forwards into the run log and onto your screen -- so a step that
+  prompted for input, or a tool that insists on a TTY, needs its
+  non-interactive flag. `Inline()` keeps its purpose and changes its meaning:
+  it says the job runs on the dispatcher's host instead of on a cluster
+  runner, not that it runs in the dispatcher's memory, and a local inline job
+  is its own process like any other. Inside a job nothing changes; steps
+  still share their job's process, exactly like a pod. What a job leaks,
+  corrupts, or crashes is now its own, which is the point. See the [migration
   guide](docs/migrations/v0.36.0.md#process-per-node).
 - **local execution (Breaking):** That now includes runs whose state is
   object-store NDJSON (`state: { type: s3 }`), the shared-bucket shape
@@ -80,6 +93,16 @@ code change to unlock.
   log files. A declared logs surface that will not open now **fails the job**,
   naming the profile and the surface type, rather than silently degrading to
   local files and splitting one run's logs across two places.
+- **orchestrator:** An `OnFailure` recovery node on the local path now gets
+  the same dispatch envelope as every other node -- the cache lookup, the
+  concurrency slot with its `OnLimit` policy, and `SkipIf` -- which is what a
+  Kubernetes pod has always given it. The local dispatcher used to run a
+  recovery body directly, ignoring all three, so a rollback declared
+  `Concurrency(g)` on a full group ran anyway instead of respecting the
+  budget, a `SkipIf` guard never fired, and a `Memoize` declaration was
+  silently dead. Expect a recovery node enrolled in a full group under
+  `OnLimit: Fail` to fail where it previously ran, and one carrying `Memoize`
+  to replay a cached result on a repeat failure.
 - **store (Breaking):** The runs-store schema advances from version 14 to 15,
   adding `cpu_nanos`, `max_rss_bytes`, and `process_wall_nanos` to `nodes`,
   and `cpu_time_nanos` to `node_metrics`. The node columns hold the kernel's
@@ -129,6 +152,19 @@ code change to unlock.
 
 ### Added
 
+- **sdk:** `sw.JobSpawn` and `sw.JobSpawnEach` now work from inside a job
+  wherever that job runs -- a Kubernetes pod, a local node process -- and not
+  only from a job the dispatcher happened to be running itself. Every spawn
+  outside the dispatcher used to hard-fail with "no SpawnHandler is installed
+  in ctx", so a pipeline that decides its work mid-job could not run on the
+  cluster at all. A spawned child gets the same run record it has always got
+  -- a `<parent>/<id>` row, its own logs, the parent's `spawn_dispatched`
+  event -- and its `WhenRunner` terms are checked against what the executing
+  process advertises, matching the gate the dispatcher has always applied on
+  its own path. A child is measured and priced as its own node: it gets its
+  own sampler share and its own learned profile under `<parent>/<id>`, and
+  because parent and child share one process the interval's reading is split
+  between them rather than counted twice.
 - **cli:** `sparkwing runs bounce --run RUN_ID --node NODE_ID` restarts one
   running job's process without failing the run it belongs to. The job's
   process is stopped -- SIGTERM, then SIGKILL after the grace period -- and
@@ -172,6 +208,17 @@ code change to unlock.
   pipeline profile's stored sample window and the position a percentile
   charge was taken from, so a reader can recompute an admission charge from
   the same rows it was priced from.
+
+### Removed
+
+- **sdk (Breaking):** `RuntimePlumbing.Keys.RefResolver` is gone, with the
+  live-Go-value reference resolver it keyed. A node's output reaches its
+  consumer as JSON in the run store on every execution model, so `Ref[T].Get`
+  has one path and the orchestrator installs one resolver instead of a typed
+  one that only a shared process could satisfy. The author-facing surface is
+  unchanged: `RuntimePlumbing` is orchestrator plumbing that pipeline code is
+  documented not to reach for, and `Ref[T].Get` reads exactly as before. See
+  the [migration guide](docs/migrations/v0.36.0.md#process-per-node).
 
 ## [v0.35.0] - 2026-08-24
 ### Changed

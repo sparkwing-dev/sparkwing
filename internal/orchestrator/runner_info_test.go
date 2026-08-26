@@ -24,7 +24,7 @@ func TestRunnerInfoFor_NilRunnerIsLocalDefault(t *testing.T) {
 }
 
 func TestRunnerInfoFor_InProcessAdvertisesLocal(t *testing.T) {
-	r := NewInProcessRunner(Backends{})
+	r := NewNodeExecutor(Backends{})
 	info := runnerInfoFor(r)
 	if info.Type != "local" || info.Name != "local" {
 		t.Errorf("got %+v, want type/name = local", info)

@@ -2,6 +2,7 @@ package sparkwing_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/internal/sparkwingruntime"
@@ -279,9 +280,13 @@ func TestRefPanicsWithoutResolver(t *testing.T) {
 
 func TestRefResolves(t *testing.T) {
 	expected := buildOut{Tag: "v2", Digest: "sha256:def"}
-	ctx := sparkwingruntime.WithResolver(context.Background(), func(id string) (any, bool) {
+	stored, err := json.Marshal(expected)
+	if err != nil {
+		t.Fatalf("marshal fixture output: %v", err)
+	}
+	ctx := sparkwingruntime.WithJSONResolver(context.Background(), func(id string) ([]byte, bool) {
 		if id == "build" {
-			return expected, true
+			return stored, true
 		}
 		return nil, false
 	})

@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	goruntime "runtime"
 	"strings"
@@ -108,7 +109,7 @@ func nodeSpawnFixture(t *testing.T, runID string, requires []string) (*store.Sto
 	}
 
 	backends := LocalBackends(paths, st, nil)
-	r := NewInProcessRunner(backends)
+	r := NewNodeExecutor(backends)
 	return st, newNodeSpawnHandler(r, backends, sparkwing.NewPlan(), runID, "spawn-unit", "parent", nil, requires)
 }
 
@@ -123,9 +124,18 @@ func TestNodeSpawnHandler_WritesTheChildRowAndReturnsItsOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	got, ok := out.(nodeSpawnOut)
-	if !ok || got.Findings != 3 {
-		t.Fatalf("Spawn returned %#v, want the child's typed output", out)
+	// safety: a child's output crosses to its caller as the JSON written
+	// to its row, the same bytes on every execution model.
+	raw, ok := out.([]byte)
+	if !ok {
+		t.Fatalf("Spawn returned %#v, want the child's output as JSON", out)
+	}
+	var got nodeSpawnOut
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal spawn output %s: %v", raw, err)
+	}
+	if got.Findings != 3 {
+		t.Fatalf("Spawn returned %s, want the child's output", raw)
 	}
 
 	child, err := st.GetNode(ctx, "spawn-unit-ok", "parent/scan")

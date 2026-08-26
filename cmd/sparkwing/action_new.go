@@ -701,7 +701,8 @@ func init() {
 // pipeline is green only when every check passes. test declares a
 // runner-label preference (Prefers) in plan-snapshot metadata. Prefers
 // does not affect runner selection. The gate is Inline (a cheap
-// in-process convergence node) so it declares no runner label.
+// convergence node that runs on the dispatcher's host) so it declares
+// no runner label.
 const ciPRCheckTemplate = `package jobs
 
 import (

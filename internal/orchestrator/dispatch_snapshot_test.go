@@ -174,7 +174,7 @@ func buildNode(t *testing.T, id string, job sparkwing.Workable) *sparkwing.JobNo
 // fields round-tripped via JSON.
 func TestDispatchSnapshot_CapturesEnvelope(t *testing.T) {
 	be := &captureBackend{gitSHA: "deadbeef"}
-	r := NewInProcessRunner(Backends{State: be})
+	r := NewNodeExecutor(Backends{State: be})
 	node := buildNode(t, "deploy", &stubJob{Region: "us-east-1"})
 
 	if err := r.writeDispatchSnapshot(context.Background(), "run-1", node); err != nil {
@@ -219,7 +219,7 @@ func TestDispatchSnapshot_CapturesEnvelope(t *testing.T) {
 // bypass sparkwing.Secret.
 func TestDispatchSnapshot_MaskerRedactsScalar(t *testing.T) {
 	be := &captureBackend{}
-	r := NewInProcessRunner(Backends{State: be})
+	r := NewNodeExecutor(Backends{State: be})
 	node := buildNode(t, "deploy", &stubJob{Region: "us-east-1", Token: "supersecret"})
 
 	m := secrets.NewMasker()
@@ -243,12 +243,12 @@ func TestDispatchSnapshot_MaskerRedactsScalar(t *testing.T) {
 
 // TestDispatchSnapshot_BestEffortFailureNonFatal -- a backend whose
 // WriteNodeDispatch errors must surface the error to the caller (so
-// the inprocess_runner caller can log it) but the caller decides
+// the node executor can log it) but the caller decides
 // whether to fail the node. This test asserts the error returns and
 // no row is captured.
 func TestDispatchSnapshot_BestEffortFailureNonFatal(t *testing.T) {
 	be := &captureBackend{writeErr: errors.New("backend kaput")}
-	r := NewInProcessRunner(Backends{State: be})
+	r := NewNodeExecutor(Backends{State: be})
 	node := buildNode(t, "deploy", &stubJob{})
 
 	err := r.writeDispatchSnapshot(context.Background(), "run-1", node)

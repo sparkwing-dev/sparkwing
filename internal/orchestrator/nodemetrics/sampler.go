@@ -1,11 +1,32 @@
-// Package nodemetrics runs one in-process resource sampler shared by every
-// running node. Each interval's process-wide reading is split evenly across
-// the nodes attached for that interval: a per-node value is an estimate, but
-// the values sum to the process's real usage, which is the property admission
-// needs -- charging every node of a parallel fan-out the whole process reads
-// as N times the cost the machine actually paid. A node joins and leaves on
-// tick boundaries, so up to one interval of its cost can smear onto the nodes
-// beside it.
+// Package nodemetrics samples the CPU and memory of the process it runs in
+// and divides each reading evenly among the nodes attached at the time. What
+// a reading means therefore depends on how many nodes that is.
+//
+// With one attachment the division is by one and the reading is that node's
+// exact usage. That is the common shape: a plan-level node of a local run or
+// of a Kubernetes pod has a process to itself.
+//
+// Several nodes share one sampler whenever several nodes share one process,
+// and that is not only a test-time shape:
+//
+//   - A JobSpawn child runs inside its parent's process while the parent is
+//     still attached, so a parent plus its children is up to NumCPU+1
+//     attachments in an ordinary production run.
+//   - `sparkwing cluster worker --runner inprocess` and
+//     `sparkwing handle-trigger --runner inprocess` -- the default runner
+//     kind for both -- execute every node of a claimed trigger in the one
+//     worker process.
+//   - A test binary or a library embedder running nodes with
+//     Options.ProcessPerNode false.
+//
+// A per-node value is an estimate in those cases, but the values sum to the
+// process's real usage, which is the property admission needs: charging every
+// node of a parallel fan-out the whole process reads as N times the cost the
+// machine actually paid. A node joins and leaves on tick boundaries, so up to
+// one interval of its cost can smear onto the nodes beside it.
+//
+// Nothing branches on which shape it is in; the arithmetic is the same and
+// the one-attachment case is its exact answer.
 package nodemetrics
 
 import (
@@ -48,11 +69,11 @@ func SetIntervalForTest(d time.Duration) (restore func()) {
 
 // Interval is the cadence the next loop will start with, and the width
 // of the window a reader must group samples into to reconstruct what
-// the machine drew at one moment. Every node runs its own sampler in
-// its own process, so concurrent nodes stamp a tick with timestamps
-// that are close but never equal; a reader that grouped on the exact
-// timestamp would see one node per group and mistake a parallel stage's
-// widest share for the whole stage. Exported so the fold and the
+// the machine drew at one moment. Nodes in separate processes each run
+// their own sampler, so they stamp a tick with timestamps that are
+// close but never equal; a reader that grouped on the exact timestamp
+// would see one node per group and mistake a parallel stage's widest
+// share for the whole stage. Exported so the fold and the
 // sampler cannot drift: the cadence samples are produced at is the
 // cadence they are grouped at, test override included.
 func Interval() time.Duration {

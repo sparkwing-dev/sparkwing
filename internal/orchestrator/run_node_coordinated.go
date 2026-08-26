@@ -41,7 +41,7 @@ func Coordinated() RunNodeOption {
 // coordination the dispatcher already did. Terminal state is written
 // by the execution path itself, exactly as on the in-process path;
 // the returned Result is what the parent reads if it can.
-func (r *InProcessRunner) executeCoordinated(ctx context.Context, req runner.Request) runner.Result {
+func (r *NodeExecutor) executeCoordinated(ctx context.Context, req runner.Request) runner.Result {
 	node := req.Node
 	if node == nil {
 		return runner.Result{

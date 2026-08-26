@@ -53,7 +53,10 @@ func (h *dispatchSpawnHandler) Spawn(ctx context.Context, parentNodeID, spawnID 
 		return nil, spawnFailedError(childID, oc, h.state.errorMessage(childID))
 	}
 
-	out, _ := h.state.resolve(childID)
+	out, ok := h.state.resolveJSON(childID)
+	if !ok {
+		return nil, nil
+	}
 	return out, nil
 }
 

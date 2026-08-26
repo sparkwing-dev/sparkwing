@@ -60,7 +60,7 @@ type Options struct {
 	// display.
 	Delegate sparkwing.Logger
 
-	// Runner, when non-nil, replaces the default InProcessRunner.
+	// Runner, when non-nil, replaces the default NodeExecutor.
 	Runner runner.Runner
 
 	// ProcessPerNode asks RunLocal to execute every node as its own
@@ -481,7 +481,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	r := opts.Runner
 	if r == nil {
-		r = NewInProcessRunner(backends)
+		r = NewNodeExecutor(backends)
 	}
 	ctx = secrets.WithMasker(ctx, masker)
 	if resolver, rerr := selectSecretResolver(ctx, opts); rerr != nil {
@@ -820,7 +820,7 @@ func RunLocal(ctx context.Context, paths Paths, opts Options) (*Result, error) {
 		if exec != nil {
 			defer exec.cleanup()
 			exec.runner.SetLeaseTokenSource(leaseTokensFromContext)
-			opts.Runner = NewInProcessRunner(backends).WithNodeExecutor(exec.runner)
+			opts.Runner = NewNodeExecutor(backends).WithSpawner(exec.runner)
 		}
 	}
 
@@ -1743,8 +1743,7 @@ type dispatchState struct {
 
 	mu        sync.Mutex
 	doneCh    map[string]chan struct{} // per-node completion signal
-	outputs   map[string]any           // per-node typed output (in-process runner)
-	outputsJS map[string][]byte        // per-node raw JSON output (cluster runner)
+	outputsJS map[string][]byte        // per-node output, always the JSON a consumer resolves it from
 	outcomes  map[string]sparkwing.Outcome
 	errors    map[string]string             // per-node error message, set when runner.Result.Err is non-nil
 	failures  map[string]sparkwing.Failure  // per-node failure (stage + err), set when a node fails
@@ -1820,7 +1819,6 @@ func newDispatchState(
 		retryOf:        retryOf,
 		masker:         masker,
 		doneCh:         map[string]chan struct{}{},
-		outputs:        map[string]any{},
 		outputsJS:      map[string][]byte{},
 		outcomes:       map[string]sparkwing.Outcome{},
 		errors:         map[string]string{},
@@ -1832,10 +1830,10 @@ func newDispatchState(
 		debug:          debug,
 		admissionWaits: newAdmissionWaitTracker(),
 	}
-	if ipr, ok := r.(*InProcessRunner); ok {
+	if ipr, ok := r.(*NodeExecutor); ok {
 		s.inlineRunner = ipr
 	} else {
-		s.inlineRunner = NewInProcessRunner(backends)
+		s.inlineRunner = NewNodeExecutor(backends)
 	}
 	for _, n := range plan.Nodes() {
 		if rec := n.OnFailureNode(); rec != nil {
@@ -1849,7 +1847,6 @@ func newDispatchState(
 	}
 	s.resolverCtx = withLocalAdmission(s.resolverCtx, admission, leaseToken, leaseChildToken, leaseHostAdmitted, s.plan.PriorityValue())
 	s.resolverCtx = withAdmissionWaitTracker(s.resolverCtx, s.admissionWaits)
-	s.resolverCtx = sparkwingruntime.WithResolver(s.resolverCtx, s.resolve)
 	s.resolverCtx = sparkwingruntime.WithJSONResolver(s.resolverCtx, s.resolveJSON)
 	s.resolverCtx = sparkwingruntime.WithPipelineResolver(s.resolverCtx, s.pipelineRef())
 	s.resolverCtx = sparkwingruntime.WithPipelineAwaiter(s.resolverCtx, s.pipelineAwaiter())
@@ -2197,13 +2194,6 @@ func (s *dispatchState) rehydrateFromRetry(ctx context.Context, priorRunID strin
 	}
 }
 
-func (s *dispatchState) resolve(id string) (any, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	v, ok := s.outputs[id]
-	return v, ok
-}
-
 func (s *dispatchState) resolveJSON(id string) ([]byte, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2211,14 +2201,30 @@ func (s *dispatchState) resolveJSON(id string) ([]byte, bool) {
 	return v, ok
 }
 
-func (s *dispatchState) setOutput(id string, v any) {
+// setOutput records what a finished node published, and reports an
+// output that cannot be published at all. Every runner in this
+// repository answers in the node's marshaled JSON -- the executor
+// marshals before it writes the terminal row, a spawned process's row
+// is read back raw -- so a live Go value here is a third-party
+// Options.Runner, and JSON is still the only form a consumer can read.
+//
+// An unmarshalable value is an error rather than a dropped output,
+// because the node's consumers would otherwise resolve nothing off a
+// node the runner called a success: the same verdict the executor
+// reaches on its own path, where the marshal failure fails the node.
+func (s *dispatchState) setOutput(id string, v any) error {
+	b, isBytes := v.([]byte)
+	if !isBytes {
+		m, err := json.Marshal(v)
+		if err != nil {
+			return nodeOutputMarshalError(id, v, err)
+		}
+		b = m
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if b, isBytes := v.([]byte); isBytes {
-		s.outputsJS[id] = b
-		return
-	}
-	s.outputs[id] = v
+	s.outputsJS[id] = b
+	return nil
 }
 
 func (s *dispatchState) setOutcome(id string, o sparkwing.Outcome) {
@@ -2685,14 +2691,23 @@ func (s *dispatchState) doPause(nodeID, reason string) bool {
 // applyResult mirrors the runner's terminal outcome into in-memory
 // state for downstream coordination, and records what the node's
 // process cost when the runner reporting the outcome supervised one.
-// A runner reached through the node-executor seam has already recorded
+// A runner reached through the executor's spawner seam has already recorded
 // that at the seam, where the Result is flattened and the figures would
 // otherwise be dropped; one configured as the dispatcher's own Runner
 // reports them here.
 func (s *dispatchState) applyResult(nodeID string, res runner.Result) {
 	recordNodeUsage(s.ctx, s.backends.State, s.runID, nodeID, res.Usage)
 	if res.Output != nil {
-		s.setOutput(nodeID, res.Output)
+		if err := s.setOutput(nodeID, res.Output); err != nil {
+			res.Outcome = sparkwing.Failed
+			res.Err = err
+			// safety: the runner already wrote this node's terminal row and
+			// the store refuses to reopen one, so the in-memory outcome is
+			// the correction that governs the rest of the run; the event is
+			// what tells an operator why a row reading success has
+			// dependents that never ran.
+			_ = s.backends.State.AppendEvent(s.ctx, s.runID, nodeID, "node_failed", []byte(err.Error()))
+		}
 	}
 	if res.Err != nil {
 		s.setError(nodeID, res.Err.Error())
@@ -2945,24 +2960,15 @@ func approvalTimeoutToOutcome(onTimeout string) approvalResult {
 	return r
 }
 
-// invokeRecoveryRunner runs a recovery node via the in-process
-// job-only path; cluster runners fall back to full RunNode.
+// invokeRecoveryRunner dispatches an OnFailure recovery node. It is
+// the same RunNode hand-off every other node gets, with the parent's
+// failure on ctx: a recovery node is a job, and one that skipped the
+// cache lookup, the concurrency slot, and SkipIf only where the
+// dispatcher happened to run bodies itself would behave differently on
+// a laptop than in a pod.
 func (s *dispatchState) invokeRecoveryRunner(node *sparkwing.JobNode, parentFailure sparkwing.Failure) runner.Result {
 	ctx := sparkwing.WithFailure(s.resolverCtx, parentFailure)
 	ctx = withAdmissionWaitParticipant(ctx, node.ID())
-	if ipr, ok := s.runner.(*InProcessRunner); ok {
-		out, err := ipr.executeNodeWithAdmission(ctx, runner.Request{
-			RunID:    s.runID,
-			NodeID:   node.ID(),
-			Pipeline: s.pipeline,
-			Node:     node,
-			Delegate: s.delegate,
-		})
-		if err != nil {
-			return runner.Result{Outcome: sparkwing.Failed, Err: err}
-		}
-		return runner.Result{Outcome: sparkwing.Success, Output: out}
-	}
 	return s.runWithCap(node, func(slot *workerSlot) runner.Result {
 		return s.runner.RunNode(ctx, runner.Request{
 			RunID:               s.runID,

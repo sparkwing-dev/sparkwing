@@ -6,6 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 )
 
-var _ func(*InProcessRunner, context.Context, runner.Request, coordParams, string, string) runner.Result = (*InProcessRunner).applyCacheHit
+var _ func(*NodeExecutor, context.Context, runner.Request, coordParams, string, string) runner.Result = (*NodeExecutor).applyCacheHit
 
-var _ func(*InProcessRunner, context.Context, string, string) ([]byte, error) = (*InProcessRunner).fetchCachedOutput
+var _ func(*NodeExecutor, context.Context, string, string) ([]byte, error) = (*NodeExecutor).fetchCachedOutput

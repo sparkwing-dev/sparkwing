@@ -30,7 +30,7 @@ import (
 // scheduled would need a plan the dispatcher never planned, and in a
 // pod there is nothing on the other end to send it to.
 type nodeSpawnHandler struct {
-	runner   *InProcessRunner
+	runner   *NodeExecutor
 	backends Backends
 	plan     *sparkwing.Plan
 	runID    string
@@ -57,7 +57,7 @@ type nodeSpawnHandler struct {
 
 // newNodeSpawnHandler binds a handler to the node this process runs.
 func newNodeSpawnHandler(
-	r *InProcessRunner,
+	r *NodeExecutor,
 	backends Backends,
 	plan *sparkwing.Plan,
 	runID, pipeline, parentNodeID string,

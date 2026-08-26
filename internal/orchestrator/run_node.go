@@ -25,7 +25,7 @@ import (
 
 // RunNodeOnce is the shared execution core for cluster-mode node
 // runs: fetches run + plan, installs HTTP resolvers, locates the node
-// (with ExpandFrom fallback), and invokes InProcessRunner against
+// (with ExpandFrom fallback), and invokes NodeExecutor against
 // HTTP backends. The runner writes terminal state through the
 // controller; the returned Result is for caller-side logging.
 //
@@ -466,7 +466,7 @@ func RunNodeOnce(
 		}
 	}
 
-	r := NewInProcessRunner(backends)
+	r := NewNodeExecutor(backends)
 	// safety: this process is the only thing that can serve a SpawnNode
 	// call in the node it is about to run. The dispatcher's handler
 	// splices the child into a live plan object that exists only in the

@@ -94,15 +94,24 @@ pair `.Memoize()` with `Outputs`.
 
 ## Both execution modes
 
-Artifacts flow the same way wherever a node runs. In local in-process
-execution the orchestrator captures and stages against the node's
-working directory directly. In distributed execution each node runs in
-its own worker pod with a fresh workspace; the worker resolves the
-shared artifact store and stages the producer's files into the pod
-before the body runs, then publishes the node's outputs back to the
-store on success. The producer and consumer never share a filesystem ---
-the store is the only channel --- which is why the edge has to be
-content-addressed rather than a path handoff.
+Artifacts flow the same way wherever a node runs. In a local run each
+node process captures and stages against its working directory, which
+is the machine's own filesystem, so a producer and a consumer on the
+same machine still exchange files through the store rather than by
+leaving them where the next node happens to look. In distributed
+execution each node runs in its own worker pod with a fresh workspace;
+the worker resolves the shared artifact store and stages the producer's
+files into the pod before the body runs, then publishes the node's
+outputs back to the store on success. The producer and consumer never
+share a filesystem --- the store is the only channel --- which is why
+the edge has to be content-addressed rather than a path handoff.
+
+One local asymmetry survives and is worth naming: a run's node
+processes do share a working directory, so a producer that writes a
+file and a consumer that reads it by path still work locally without
+declaring anything, and still break the first time that pipeline runs
+in a pod. Declare `Outputs` and `Consumes` for anything that has to
+travel between jobs.
 
 ## Non-goals
 

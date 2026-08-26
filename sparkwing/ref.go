@@ -60,9 +60,9 @@ func (r Ref[T]) Job() string { return r.NodeID }
 // Get resolves the reference to a typed T value. Behavior depends
 // on the routing:
 //
-//   - In-run (Pipeline==""): asks the in-run resolver installed via
-//     WithResolver / WithJSONResolver. Panics if no resolver, or if
-//     the upstream hasn't completed.
+//   - In-run (Pipeline==""): unmarshals the upstream node's stored
+//     output into T. Panics if no resolver is installed, or if the
+//     upstream hasn't completed.
 //
 //   - Cross-pipeline (Pipeline!=""): asks the pipeline resolver
 //     installed via WithPipelineResolver. Panics if no resolver, if
@@ -80,36 +80,25 @@ func (r Ref[T]) Get(ctx context.Context) T {
 	return r.getInRun(ctx)
 }
 
+// getInRun reads the upstream node's output from the run store and
+// unmarshals it into T. There is no live-value path: the upstream node
+// ran in a process of its own, so JSON is the only thing that crossed.
 func (r Ref[T]) getInRun(ctx context.Context) T {
-	resolve := resolverFromContext(ctx)
 	jsonResolve := jsonResolverFromContext(ctx)
-	if resolve != nil {
-		if raw, ok := resolve(r.NodeID); ok {
-			typed, ok := raw.(T)
-			if !ok {
-				var zero T
-				panic(fmt.Sprintf("sparkwing: Ref[%T].Get: node %q produced %T, not assignable", zero, r.NodeID, raw))
-			}
-			Debug(ctx, "Ref.Get(%s): in-process hit", r.NodeID)
-			return typed
-		}
-	}
-	if jsonResolve != nil {
-		if data, ok := jsonResolve(r.NodeID); ok {
-			var out T
-			if err := json.Unmarshal(data, &out); err != nil {
-				var zero T
-				panic(fmt.Sprintf("sparkwing: Ref[%T].Get: unmarshal node %q output: %v", zero, r.NodeID, err))
-			}
-			Debug(ctx, "Ref.Get(%s): JSON path, %d bytes", r.NodeID, len(data))
-			return out
-		}
-	}
 	var zero T
-	if resolve == nil && jsonResolve == nil {
+	if jsonResolve == nil {
 		panic(fmt.Sprintf("sparkwing: Ref[%T].Get called without a resolver in context", zero))
 	}
-	panic(fmt.Sprintf("sparkwing: Ref[%T].Get: node %q has not completed", zero, r.NodeID))
+	data, ok := jsonResolve(r.NodeID)
+	if !ok {
+		panic(fmt.Sprintf("sparkwing: Ref[%T].Get: node %q has not completed", zero, r.NodeID))
+	}
+	var out T
+	if err := json.Unmarshal(data, &out); err != nil {
+		panic(fmt.Sprintf("sparkwing: Ref[%T].Get: unmarshal node %q output: %v", zero, r.NodeID, err))
+	}
+	Debug(ctx, "Ref.Get(%s): %d bytes", r.NodeID, len(data))
+	return out
 }
 
 func (r Ref[T]) getCrossPipeline(ctx context.Context) T {
@@ -214,19 +203,10 @@ func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T] {
 	}
 }
 
-// resolverFromContext reads the in-run reference resolver that
-// internal/sparkwingruntime.WithResolver installed on ctx. Storing the
-// raw func (rather than a wrapper type) lets the runtime package
-// construct the value without naming an unexported sparkwing type.
-func resolverFromContext(ctx context.Context) func(nodeID string) (any, bool) {
-	f, _ := ctx.Value(keyRefResolver).(func(string) (any, bool))
-	return f
-}
-
-// jsonResolverFromContext reads the cluster-mode JSON resolver
-// installed by internal/sparkwingruntime.WithJSONResolver. Cluster
-// pod runners' only handle to upstream outputs is the controller's
-// raw JSON.
+// jsonResolverFromContext reads the in-run resolver installed by
+// internal/sparkwingruntime.WithJSONResolver. Storing the raw func
+// (rather than a wrapper type) lets the runtime package construct the
+// value without naming an unexported sparkwing type.
 func jsonResolverFromContext(ctx context.Context) func(nodeID string) ([]byte, bool) {
 	f, _ := ctx.Value(keyJSONRefResolver).(func(string) ([]byte, bool))
 	return f

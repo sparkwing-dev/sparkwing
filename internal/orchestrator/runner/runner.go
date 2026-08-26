@@ -34,10 +34,14 @@ type Request struct {
 	Git      *sparkwing.Git
 	Trigger  sparkwing.TriggerInfo
 
-	// Node is set for in-process runners; cluster runners leave nil.
+	// Node is set by whoever holds the built plan -- the dispatcher for
+	// every runner it hands a node to, a node process for a child it
+	// spawns. A cluster runner rebuilds the plan inside the pod, so it
+	// leaves this nil.
 	Node *sparkwing.JobNode
 
-	// Delegate mirrors log lines; in-process only.
+	// Delegate mirrors the node's log lines onto the dispatcher's own
+	// logger, so an operator watching a run sees them as they happen.
 	Delegate sparkwing.Logger
 
 	// ReleaseWorkerSlot and ReacquireWorkerSlot let a node that blocks

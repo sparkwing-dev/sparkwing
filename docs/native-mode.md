@@ -1,6 +1,6 @@
 # Local dashboard (native mode)
 
-Running `sparkwing` executes pipelines in-process on your laptop. Native mode adds one thing on top of that: a way to watch several runs side by side.
+Running `sparkwing` executes pipelines on your laptop, each job in its own process. Native mode adds one thing on top of that: a way to watch several runs side by side.
 
 The design is small:
 

@@ -64,8 +64,8 @@ type Pipeline struct {
 	// Requires are runner-label requirements all jobs in this
 	// pipeline must satisfy in addition to their own Job.Requires().
 	// Wholesale replaces defaults.requires when non-empty. The
-	// reserved label "local" pins execution to the in-process
-	// runner (same effect as --sw-local-only).
+	// reserved label "local" pins execution to this machine (same
+	// effect as --sw-local-only).
 	Requires []string `yaml:"requires,omitempty"`
 }
 

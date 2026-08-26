@@ -157,7 +157,7 @@ func RunReplayNode(ctx context.Context, paths Paths, st *store.Store, runID, nod
 	ctx = sparkwing.WithSecretResolver(ctx, secrets.NewCached(src, masker).AsResolver())
 	ctx = secrets.WithMasker(ctx, masker)
 
-	r := NewInProcessRunner(backends)
+	r := NewNodeExecutor(backends)
 	res := r.RunNode(ctx, runner.Request{
 		RunID:    runID,
 		NodeID:   nodeID,

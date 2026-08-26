@@ -57,7 +57,7 @@ type WorkerOptions struct {
 
 	// RunnerFactory returns the Runner each claimed trigger should
 	// use; called once per trigger so the factory can close over the
-	// claim. Nil means default InProcessRunner.
+	// claim. Nil means default NodeExecutor.
 	RunnerFactory func(backends Backends, trigger *store.Trigger) runner.Runner
 
 	// Token is the shared-secret bearer for controller + logs calls.
