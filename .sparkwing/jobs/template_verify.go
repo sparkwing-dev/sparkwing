@@ -99,7 +99,6 @@ func (TemplateVerify) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.
 	if verifyTemplatesErr != nil {
 		return fmt.Errorf("template-verify: load registry: %w", verifyTemplatesErr)
 	}
-	plan.Resources(sparkwing.Cores(8), sparkwing.MemoryGB(4))
 
 	build := sparkwing.Job(plan, "build-cli", &buildVerifyCLIJob{})
 	envRef := sparkwing.RefTo[verifyEnv](build)
