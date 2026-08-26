@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.36.0] - 2026-08-26
 ### Changed
 
 - **local execution (Breaking):** Every job in a local run now executes as
