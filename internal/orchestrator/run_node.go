@@ -533,6 +533,13 @@ func runNodeCLI(args []string) error {
 		return errors.New("--controller + <runID> + <nodeID> are required (or SPARKWING_CONTROLLER_URL + SPARKWING_RUN_ID + SPARKWING_NODE_ID env)")
 	}
 
+	// safety: SIGINT only, and SIGTERM must stay unhandled. SIGTERM is how a
+	// node process is stopped -- by `runs bounce`, by a cancelled run, by
+	// a pod's own termination -- and the guarantee those paths rest on is
+	// that the child dies without writing a terminal row: the supervisor
+	// decides what the kill meant. A handler here would let a bounced node
+	// record an outcome mid-bounce, which is the one thing a bounce must
+	// never produce. See TestNodeEntrypoints_DoNotHandleSIGTERM.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	if *timeout > 0 {

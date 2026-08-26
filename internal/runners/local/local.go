@@ -19,6 +19,12 @@
 // directly: N processes writing one SQLite file is the wedge this
 // repository already carries a guard subsystem for, and the
 // controller path is the one a pod uses too.
+//
+// One process per node is also what makes a node restartable on its
+// own. An operator can bounce a live node -- `sparkwing runs bounce`
+// -- and this runner kills that process and runs the node again
+// without the node ever reaching a terminal state, so the run it
+// belongs to carries on and nothing downstream sees a failure.
 package local
 
 import (
@@ -62,9 +68,43 @@ const ParentLivenessFD = 3
 // dispatcher that actually passed the pipe sets this.
 const ParentLivenessFDEnv = "SPARKWING_PARENT_LIVENESS_FD"
 
-// heartbeatInterval matches the cluster runner's: a missed heartbeat
-// is a dashboard annoyance, not a correctness problem.
-const heartbeatInterval = 5 * time.Second
+// superviseInterval is how often the loop that watches a live node
+// touches its heartbeat and asks whether an operator has requested a
+// bounce. It matches the cluster runner's heartbeat cadence: a missed
+// heartbeat is a dashboard annoyance, not a correctness problem, and a
+// bounce is an operator action whose worst case is waiting one tick
+// for the kill.
+const superviseInterval = 5 * time.Second
+
+// bouncePollTimeout bounds the bounce poll so a slow controller cannot
+// delay the heartbeat that shares its loop.
+//
+// The heartbeat is not cosmetic here: a node whose heartbeat goes
+// stale past the reconciler's threshold is reaped as abandoned, and
+// that fails the whole run. The poll runs on the same goroutine, so
+// without its own deadline it would inherit the client's 30-second
+// timeout and could push the gap between two heartbeats past that
+// threshold -- an operator convenience taking down the run it was
+// meant to save. Two seconds is generous for a loopback read and small
+// enough to be invisible against the interval.
+const bouncePollTimeout = 2 * time.Second
+
+// bounceRetryDelay spaces the retries of the two bounce writes that
+// must not be lost: the read that decides whether a killed node is
+// re-run, and the consume that closes the request.
+const bounceRetryDelay = 200 * time.Millisecond
+
+const (
+	// bounceReadAttempts is how many times the post-kill node read is
+	// tried before the runner refuses to guess.
+	bounceReadAttempts = 3
+	// bounceConsumeAttempts is how many times closing a request is tried.
+	bounceConsumeAttempts = 3
+	// bounceSweepLimit bounds the end-of-node sweep. Each pass closes one
+	// request, and a node with more open requests than this has an
+	// operator holding down a key, not a bug to spin on.
+	bounceSweepLimit = 8
+)
 
 // Config is what a dispatcher tells the runner about the run it is
 // spawning nodes for.
@@ -114,6 +154,12 @@ type Config struct {
 	// after SIGTERM before SIGKILL. Zero uses procgroup's default.
 	TerminationGrace time.Duration
 
+	// SuperviseInterval is the cadence of the loop that heartbeats a
+	// live node and polls for a bounce request. Zero uses
+	// superviseInterval; tests shorten it so a bounce lands in
+	// milliseconds rather than in the operator-facing five seconds.
+	SuperviseInterval time.Duration
+
 	// Labels are advertised for WhenRunner matching.
 	Labels []string
 
@@ -134,6 +180,9 @@ func New(ctrl *client.Client, cfg Config) *Runner {
 	}
 	if cfg.TerminationGrace <= 0 {
 		cfg.TerminationGrace = procgroup.DefaultTerminationGrace
+	}
+	if cfg.SuperviseInterval <= 0 {
+		cfg.SuperviseInterval = superviseInterval
 	}
 	if len(cfg.Labels) == 0 {
 		cfg.Labels = []string{"local"}
@@ -161,25 +210,102 @@ func (r *Runner) AdvertisedLabels() []string {
 }
 
 // RunNode spawns the node's process and supervises it to a terminal
-// outcome.
+// outcome, re-running it in place for each operator bounce that
+// arrives while it is live.
+//
+// A bounce is the one way a node process dies without the node dying
+// with it. Nothing terminal is written between the kill and the
+// respawn, so the dispatcher's waiters see no outcome and downstream
+// nodes cannot cascade-fail on a node that is, from their side, still
+// running. The heartbeat spans the gap for the same reason: a node
+// that stopped heartbeating mid-bounce would be reaped as abandoned.
+//
+// One request is one kill and one respawn. Nothing here loops on its
+// own -- an operator who bounces a wedged node repeatedly is the loop,
+// and their intent is a row each time.
+//
+// No request outlives the node it named. Whatever ends the node -- its
+// own exit, cancellation, a spawn that failed -- every request still
+// open for it is settled before this returns, because a request left
+// pending is not inert: the next dispatch of the same node id (an
+// auto-retry) would find it on its first poll and kill an attempt
+// nobody bounced.
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
+	bounces := make(chan *store.NodeBounce, 1)
+	superviseCtx, stopSupervise := context.WithCancel(ctx)
+	superviseDone := make(chan struct{})
+	go func() { defer close(superviseDone); r.supervise(superviseCtx, req, bounces) }()
+	ledger := bounceLedger{}
+	defer func() {
+		// safety: the order is load-bearing. Stopping the poll and waiting for
+		// it to exit is what makes the sweep final -- a poll still
+		// running could hand over a request after the sweep looked.
+		stopSupervise()
+		<-superviseDone
+		r.settleOpenBounces(context.WithoutCancel(ctx), req, ledger)
+	}()
+
+	// safety: the machine paid for every attempt, including the ones an
+	// operator killed, so what the node cost is their sum -- the same
+	// accumulation an auto-retry's attempts get.
+	var total *runner.ResourceUsage
+	for {
+		res, bounced := r.runAttempt(ctx, req, bounces, ledger)
+		total = addUsage(total, res.Usage)
+		if !bounced {
+			res.Usage = total
+			return res
+		}
+	}
+}
+
+// pollBounce asks for this node's oldest open request under its own
+// short deadline, so a controller that stops answering costs the
+// supervision loop one bouncePollTimeout rather than the client's full
+// timeout -- which the heartbeat sharing this loop would pay for.
+func (r *Runner) pollBounce(ctx context.Context, req runner.Request) (*store.NodeBounce, error) {
+	pollCtx, cancel := context.WithTimeout(ctx, bouncePollTimeout)
+	defer cancel()
+	return r.ctrl.PendingNodeBounce(pollCtx, req.RunID, req.NodeID)
+}
+
+// bounceLedger records what this RunNode decided about each request it
+// took, keyed by seq.
+//
+// It exists because deciding and recording are two steps with a
+// network between them: a consume that fails leaves a row still
+// pending while the runner has already acted on it. The sweep at the
+// end of RunNode consults this so a request that was honored is
+// finally recorded as honored, rather than being relabelled a miss by
+// the cleanup that had to finish the job.
+//
+// One RunNode owns one node, and every write happens on the goroutine
+// running the attempts, so it needs no lock.
+type bounceLedger map[int64]string
+
+// runAttempt runs the node's process once. It reports the attempt's
+// result and whether an operator bounce ended it, in which case the
+// result carries only what the killed process cost: no outcome was
+// written and the node is still running as far as everything outside
+// this runner is concerned.
+func (r *Runner) runAttempt(ctx context.Context, req runner.Request, bounces <-chan *store.NodeBounce, ledger bounceLedger) (runner.Result, bool) {
 	cmd := exec.Command(r.cfg.Executable, nodeArgv(r.cfg.ControllerURL, req.RunID, req.NodeID)...)
 	cmd.Dir = r.cfg.WorkDir
 	cmd.Env = childEnv(ctx, os.Environ(), r.cfg, req)
 
 	stdout, stdoutW, err := os.Pipe()
 	if err != nil {
-		return failedResult(fmt.Errorf("local runner: stdout pipe for %s: %w", req.NodeID, err))
+		return failedResult(fmt.Errorf("local runner: stdout pipe for %s: %w", req.NodeID, err)), false
 	}
 	stderr, stderrW, err := os.Pipe()
 	if err != nil {
 		closeAll(stdout, stdoutW)
-		return failedResult(fmt.Errorf("local runner: stderr pipe for %s: %w", req.NodeID, err))
+		return failedResult(fmt.Errorf("local runner: stderr pipe for %s: %w", req.NodeID, err)), false
 	}
 	livenessR, livenessW, err := os.Pipe()
 	if err != nil {
 		closeAll(stdout, stdoutW, stderr, stderrW)
-		return failedResult(fmt.Errorf("local runner: liveness pipe for %s: %w", req.NodeID, err))
+		return failedResult(fmt.Errorf("local runner: liveness pipe for %s: %w", req.NodeID, err)), false
 	}
 	cmd.Stdout = stdoutW
 	cmd.Stderr = stderrW
@@ -197,7 +323,7 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	closeAll(stdoutW, stderrW, livenessR)
 	if err != nil {
 		closeAll(stdout, stderr)
-		return failedResult(fmt.Errorf("local runner: spawn %s: %w", req.NodeID, err))
+		return failedResult(fmt.Errorf("local runner: spawn %s: %w", req.NodeID, err)), false
 	}
 
 	var forwarders sync.WaitGroup
@@ -205,19 +331,37 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	go func() { defer forwarders.Done(); forwardRecords(stdout, req, r.cfg.Logger) }()
 	go func() { defer forwarders.Done(); forwardStderr(stderr, req) }()
 
-	hbCtx, stopHB := context.WithCancel(ctx)
-	defer stopHB()
-	go r.heartbeat(hbCtx, req)
 	_ = r.ctrl.UpdateNodeActivity(ctx, req.RunID, req.NodeID,
 		fmt.Sprintf("running, pid %d", group.ID()))
 
-	waitErr, cancelled := r.await(ctx, group)
+	ending, bounce, waitErr := r.await(ctx, group, bounces)
 	wall := time.Since(spawnedAt)
 	forwarders.Wait()
 	closeAll(stdout, stderr)
-	stopHB()
 
-	return r.resultFor(ctx, req, cmd, waitErr, cancelled, wall)
+	usage := usageFrom(cmd.ProcessState)
+	if usage != nil {
+		usage.Wall = wall
+	}
+	cancelled := ending == endCancelled
+	if ending == endBounced {
+		switch r.settleBounce(context.WithoutCancel(ctx), req, bounce, ledger, ctx.Err() != nil) {
+		case bounceRespawn:
+			return runner.Result{Usage: usage}, true
+		case bounceTornDown:
+			// safety: the run is going away, so the kill this bounce asked for
+			// is indistinguishable from teardown's own. Classifying it as
+			// cancellation leaves the row to teardown, which is the only
+			// writer that knows whether the run was cancelled or superseded.
+			cancelled = true
+		case bounceMissed:
+			// safety: the node wrote its terminal row before the kill landed;
+			// resultFor reads that row and it wins, exactly as it would
+			// have without a bounce in flight.
+		}
+	}
+
+	return r.resultFor(ctx, req, cmd, waitErr, cancelled, usage), false
 }
 
 // nodeArgv is the child's command line. Flags precede the positionals
@@ -240,17 +384,42 @@ func nodeArgv(controllerURL, runID, nodeID string) []string {
 	}
 }
 
+// attemptEnding is what ended one attempt's process.
+type attemptEnding int
+
+const (
+	// endExited: the process ended on its own terms.
+	endExited attemptEnding = iota
+	// endCancelled: the run was cancelled and this runner terminated
+	// the process tree.
+	endCancelled
+	// endBounced: an operator asked for the node to be restarted and
+	// this runner terminated the process tree to do it.
+	endBounced
+)
+
 // await waits for the process tree, terminating it when the run is
-// cancelled. It reports the wait error and whether cancellation, not
-// the node itself, ended the process.
-func (r *Runner) await(ctx context.Context, group *procgroup.Group) (error, bool) {
+// cancelled or an operator bounces the node. It reports the wait
+// error, what ended the process, and -- for a bounce -- the request
+// that did.
+//
+// A bounce and a cancellation kill identically: SIGTERM to the group,
+// the configured grace, then SIGKILL, with the tree proven empty
+// before the attempt is over. They differ only in what is written
+// afterwards, which is the caller's decision.
+func (r *Runner) await(ctx context.Context, group *procgroup.Group, bounces <-chan *store.NodeBounce) (attemptEnding, *store.NodeBounce, error) {
 	done := make(chan error, 1)
 	go func() { done <- group.Finish(context.WithoutCancel(ctx), r.cfg.TerminationGrace) }()
 
+	var ending attemptEnding
+	var bounce *store.NodeBounce
 	select {
 	case err := <-done:
-		return err, false
+		return endExited, nil, err
 	case <-ctx.Done():
+		ending = endCancelled
+	case b := <-bounces:
+		ending, bounce = endBounced, b
 	}
 
 	termCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*r.cfg.TerminationGrace+30*time.Second)
@@ -258,7 +427,223 @@ func (r *Runner) await(ctx context.Context, group *procgroup.Group) (error, bool
 	if err := group.Terminate(termCtx, r.cfg.TerminationGrace); err != nil && !errors.Is(err, procgroup.ErrCleanup) {
 		r.cfg.Logger.Debug("local runner: terminate", "err", err)
 	}
-	return <-done, true
+	return ending, bounce, <-done
+}
+
+// bounceVerdict is what a bounced attempt does next.
+type bounceVerdict int
+
+const (
+	// bounceRespawn: the kill landed on live work; run the node again.
+	bounceRespawn bounceVerdict = iota
+	// bounceMissed: the node reached its terminal row before the kill
+	// landed. The row wins -- a finished node has nothing to restart --
+	// and the request is closed as missed.
+	bounceMissed
+	// bounceTornDown: the run itself is ending, so there is nothing to
+	// restart the node for.
+	bounceTornDown
+)
+
+// settleBounce records how one bounce request ended and reports what
+// the attempt should do next.
+//
+// The node row decides, which is the cluster runner's rule: the row
+// the executing process wrote is the truth, and a dead executor
+// without one is a failure unless something explicitly intended
+// otherwise. This request is that explicit intent, so it is consumed
+// either way -- a request must not outlive the kill it asked for, or
+// the next poll would act on it a second time.
+//
+// A read that will not answer is not a verdict. The node's state after
+// the kill decides whether the node is re-run at all, so the read is
+// retried, and if it still will not answer the node is NOT re-run:
+// respawning blind risks executing the node's steps a second time over
+// a node that had already finished, and the ordinary exit path below
+// resolves the attempt with whatever it can read instead.
+func (r *Runner) settleBounce(ctx context.Context, req runner.Request, b *store.NodeBounce, ledger bounceLedger, tearingDown bool) bounceVerdict {
+	if b == nil {
+		return bounceMissed
+	}
+	verdict, outcome, kind, reason := bounceRespawn, store.BounceBounced, "node_bounced", ""
+	switch {
+	case tearingDown:
+		verdict, outcome, kind = bounceTornDown, store.BounceMissed, "node_bounce_missed"
+		reason = "the run was ending"
+	default:
+		n, err := r.nodeAfterKill(ctx, req)
+		switch {
+		case err != nil:
+			verdict, outcome, kind = bounceMissed, store.BounceMissed, "node_bounce_missed"
+			reason = fmt.Sprintf("the node's state could not be read after the kill (%v), so it was not re-run", err)
+			r.cfg.Logger.Warn("local runner: read node after bounce kill",
+				"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+		case runner.NodeTerminal(n):
+			verdict, outcome, kind = bounceMissed, store.BounceMissed, "node_bounce_missed"
+			reason = fmt.Sprintf("the node finished (%s) before the kill landed", n.Outcome)
+		}
+	}
+
+	attrs := map[string]any{
+		"seq":          b.Seq,
+		"requested_by": b.RequestedBy,
+		"requested_at": b.RequestedAt,
+		// safety: the node keeps the admission lease its run already holds --
+		// the work was admitted once, and an operator restarting it is
+		// not a re-price. Recorded on the event so a capacity question
+		// asked later is answered by the run's own history.
+		"admission_lease_retained": true,
+	}
+	if reason != "" {
+		attrs["reason"] = reason
+	}
+	payload, _ := json.Marshal(attrs)
+	if err := r.ctrl.AppendEvent(ctx, req.RunID, req.NodeID, kind, payload); err != nil {
+		r.cfg.Logger.Warn("local runner: record bounce event",
+			"run_id", req.RunID, "node_id", req.NodeID, "kind", kind, "err", err)
+	}
+	// safety: recorded before the consume, not after. A consume that fails
+	// leaves the row pending while this runner has already acted on it,
+	// and the sweep at the end of RunNode has to close that row with the
+	// verdict actually reached rather than relabelling it a miss.
+	ledger[b.Seq] = outcome
+	// safety: a consume that fails after every retry is logged there and left
+	// to the sweep at the end of RunNode, which closes it with the
+	// verdict the ledger just recorded. The attempt does not stall on it:
+	// the node's own progress is not the request's bookkeeping.
+	_ = r.consumeBounce(ctx, req, b.Seq, outcome)
+	return verdict
+}
+
+// nodeAfterKill reads the node row a killed attempt left behind,
+// retrying a read that fails.
+//
+// The read is the only evidence distinguishing "the operator's kill
+// landed on live work" from "the node had already finished", and both
+// branches are consequential -- one re-runs the node's steps, the
+// other does not. One dropped loopback request is not a reason to
+// choose either blind.
+func (r *Runner) nodeAfterKill(ctx context.Context, req runner.Request) (*store.Node, error) {
+	var err error
+	for attempt := range bounceReadAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(bounceRetryDelay):
+			}
+		}
+		var n *store.Node
+		n, err = r.ctrl.GetNode(ctx, req.RunID, req.NodeID)
+		if err == nil {
+			return n, nil
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+	}
+	return nil, err
+}
+
+// consumeBounce closes one request, retrying briefly.
+//
+// "A request must not outlive the kill it asked for" is the invariant,
+// and a single dropped write would break it: the row would stay
+// pending, and the next dispatch of this node id would read it as a
+// fresh instruction to kill an attempt nobody bounced. Retrying is
+// what makes the sentence true rather than usual.
+func (r *Runner) consumeBounce(ctx context.Context, req runner.Request, seq int64, outcome string) error {
+	var err error
+	for attempt := range bounceConsumeAttempts {
+		if attempt > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(bounceRetryDelay):
+			}
+		}
+		if err = r.ctrl.ConsumeNodeBounce(ctx, req.RunID, req.NodeID, seq, outcome); err == nil {
+			return nil
+		}
+		if errors.Is(err, store.ErrNotFound) {
+			return nil
+		}
+	}
+	r.cfg.Logger.Warn("local runner: consume bounce request",
+		"run_id", req.RunID, "node_id", req.NodeID, "seq", seq, "err", err)
+	return err
+}
+
+// settleOpenBounces closes every request still open for this node once
+// the runner is done with it.
+//
+// A pending request is an instruction, not a note. The runner that
+// takes the node next -- an auto-retry is a fresh RunNode on the same
+// node id -- polls the same rows and would read a request meant for an
+// attempt that is already over as one meant for its own, killing a
+// process nobody asked it to kill. So a request this runner did not
+// honor is closed as missed: the node ended, and the kill was never
+// delivered. One this runner did honor but failed to record is closed
+// with the verdict it actually reached, which the ledger remembers.
+//
+// It runs after the poll has stopped, so nothing can open a request
+// behind it, and it is bounded so a store that refuses to accept the
+// close cannot spin here.
+func (r *Runner) settleOpenBounces(ctx context.Context, req runner.Request, ledger bounceLedger) {
+	for range bounceSweepLimit {
+		b, err := r.ctrl.PendingNodeBounce(ctx, req.RunID, req.NodeID)
+		if err != nil {
+			r.cfg.Logger.Warn("local runner: sweep bounce requests",
+				"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+			return
+		}
+		if b == nil {
+			return
+		}
+		outcome, honored := ledger[b.Seq]
+		if !honored {
+			outcome = store.BounceMissed
+			payload, _ := json.Marshal(map[string]any{
+				"seq":                      b.Seq,
+				"requested_by":             b.RequestedBy,
+				"requested_at":             b.RequestedAt,
+				"admission_lease_retained": true,
+				"reason":                   "the node ended before the kill was delivered",
+			})
+			if evErr := r.ctrl.AppendEvent(ctx, req.RunID, req.NodeID,
+				"node_bounce_missed", payload); evErr != nil {
+				r.cfg.Logger.Warn("local runner: record bounce event",
+					"run_id", req.RunID, "node_id", req.NodeID, "err", evErr)
+			}
+		}
+		if err := r.consumeBounce(ctx, req, b.Seq, outcome); err != nil {
+			return
+		}
+		ledger[b.Seq] = outcome
+	}
+}
+
+// addUsage folds one attempt's accounting into the node's running
+// total: CPU and occupancy add up because the machine paid for each
+// attempt, while peak RSS takes the high-water because the attempts
+// did not hold their peaks at the same time. It is the arithmetic the
+// store applies across separate writes, done here because a bounced
+// attempt's figures reach the store no other way -- the attempt writes
+// no row of its own.
+func addUsage(total, attempt *runner.ResourceUsage) *runner.ResourceUsage {
+	if attempt == nil {
+		return total
+	}
+	if total == nil {
+		copied := *attempt
+		return &copied
+	}
+	total.CPUTime += attempt.CPUTime
+	total.Wall += attempt.Wall
+	if attempt.MaxRSSBytes > total.MaxRSSBytes {
+		total.MaxRSSBytes = attempt.MaxRSSBytes
+	}
+	return total
 }
 
 // resultFor decides the node's outcome.
@@ -268,12 +653,8 @@ func (r *Runner) await(ctx context.Context, group *procgroup.Group) (error, bool
 // says how the process ended. A synthesized outcome is what is left
 // when the process died without writing one, and it is written back so
 // the run does not carry a node stuck at "running".
-func (r *Runner) resultFor(ctx context.Context, req runner.Request, cmd *exec.Cmd, waitErr error, cancelled bool, wall time.Duration) runner.Result {
+func (r *Runner) resultFor(ctx context.Context, req runner.Request, cmd *exec.Cmd, waitErr error, cancelled bool, usage *runner.ResourceUsage) runner.Result {
 	readCtx := context.WithoutCancel(ctx)
-	usage := usageFrom(cmd.ProcessState)
-	if usage != nil {
-		usage.Wall = wall
-	}
 
 	n, err := r.ctrl.GetNode(readCtx, req.RunID, req.NodeID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -302,19 +683,48 @@ func (r *Runner) resultFor(ctx context.Context, req runner.Request, cmd *exec.Cm
 	return verdict.result
 }
 
-func (r *Runner) heartbeat(ctx context.Context, req runner.Request) {
+// supervise watches a live node for as long as this runner owns it:
+// it keeps the node's heartbeat fresh and asks the controller whether
+// an operator has requested a bounce.
+//
+// It spans every attempt rather than one, because the node is what it
+// watches and the node survives a bounce. A heartbeat that stopped
+// while the process was being replaced would let the reaper conclude
+// the node had been abandoned.
+//
+// A request is handed over once. The channel is the handover and seq
+// is what keeps it to one: a request already passed to an attempt is
+// skipped on later ticks, so polling cannot turn one intent into two
+// kills. A send that would block is left for the next tick, which is
+// the window where an attempt is between spawns.
+func (r *Runner) supervise(ctx context.Context, req runner.Request, bounces chan<- *store.NodeBounce) {
 	_ = r.ctrl.TouchNodeHeartbeat(ctx, req.RunID, req.NodeID)
-	t := time.NewTicker(heartbeatInterval)
+	t := time.NewTicker(r.cfg.SuperviseInterval)
 	defer t.Stop()
+	var handed int64
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if err := r.ctrl.TouchNodeHeartbeat(ctx, req.RunID, req.NodeID); err != nil {
-				r.cfg.Logger.Debug("local runner: heartbeat failed",
-					"run_id", req.RunID, "node_id", req.NodeID, "err", err)
-			}
+		}
+		if err := r.ctrl.TouchNodeHeartbeat(ctx, req.RunID, req.NodeID); err != nil {
+			r.cfg.Logger.Debug("local runner: heartbeat failed",
+				"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+		}
+		b, err := r.pollBounce(ctx, req)
+		if err != nil {
+			r.cfg.Logger.Debug("local runner: poll for bounce request",
+				"run_id", req.RunID, "node_id", req.NodeID, "err", err)
+			continue
+		}
+		if b == nil || b.Seq <= handed {
+			continue
+		}
+		select {
+		case bounces <- b:
+			handed = b.Seq
+		default:
 		}
 	}
 }

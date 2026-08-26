@@ -664,6 +664,8 @@ func runJobs(args []string) error {
 		return runRunsConsumer(args[1:])
 	case "cancel":
 		return runRunsCancel(ctx, args[1:])
+	case "bounce":
+		return runRunsBounce(ctx, args[1:])
 	case "retry":
 		return runRunsRetry(ctx, args[1:])
 	case "prune":

@@ -398,6 +398,18 @@ func (r *Runner) inspectTerminatedPod(ctx context.Context, j *batchv1.Job) (stri
 // The attempt suffix is reserved for retry handling; today it's
 // always 0.
 //
+// It is also what a cluster-side `sparkwing runs bounce` would need.
+// The state half already exists and is dialect-agnostic: the intent
+// row (store.RequestNodeBounce / PendingNodeBounce /
+// ConsumeNodeBounce) and its three controller endpoints are the same
+// ones the local runner uses. What remains is this runner's own
+// supervision loop -- poll for a pending request beside the Job watch,
+// delete the Job with a foreground propagation policy, wait for the
+// pod to go, then submit the same node at attempt+1 and keep watching
+// the new name -- plus the rule the local path already follows: write
+// no terminal node row across the gap, and consume the request as
+// store.BounceMissed when the pod finished first.
+//
 // K8s names: lowercase alphanumerics + '-', ≤63 chars. We combine a
 // short sha256 prefix of (runID+nodeID+attempt) with a human-readable
 // suffix built from the truncated nodeID so operators can still

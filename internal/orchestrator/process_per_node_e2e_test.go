@@ -365,6 +365,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -377,6 +378,32 @@ func StampPID(name string) {
 		return
 	}
 	_ = os.WriteFile(filepath.Join(dir, name+".pid"), []byte(strconv.Itoa(os.Getpid())), 0o644)
+}
+
+// StampRunID records the run's id where a test can read it without
+// opening the run's store while the run still owns it.
+func StampRunID(id string) {
+	dir := os.Getenv("PROC_PROBE_DIR")
+	if dir == "" || id == "" {
+		return
+	}
+	_ = os.WriteFile(filepath.Join(dir, "run.id"), []byte(id), 0o644)
+}
+
+// RecordAttempt appends this process's pid to the shared attempts file
+// and reports how many attempts of the node have now started. The file
+// is the only state that survives a bounce, since each attempt is a
+// different process.
+func RecordAttempt() int {
+	path := filepath.Join(os.Getenv("PROC_PROBE_DIR"), "bounce-attempts")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return 0
+	}
+	fmt.Fprintf(f, "%d\n", os.Getpid())
+	_ = f.Close()
+	raw, _ := os.ReadFile(path)
+	return len(strings.Fields(string(raw)))
 }
 
 type BuildOut struct {
@@ -480,10 +507,65 @@ func (p *Spawnproof) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
+type BounceOut struct {
+	Attempt int ` + "`json:\"attempt\"`" + `
+	PID     int ` + "`json:\"pid\"`" + `
+}
+
+type Bouncer struct {
+	sparkwing.Base
+	sparkwing.Produces[BounceOut]
+}
+
+func (j *Bouncer) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "run", func(ctx context.Context) (BounceOut, error) {
+		attempt := RecordAttempt()
+		if attempt == 1 {
+			// Burn CPU the exit accounting can see, then wait to be
+			// killed. Deliberately ignores ctx: a bounce is a kill, not
+			// a cancellation the body can cooperate with.
+			deadline := time.Now().Add(1500 * time.Millisecond)
+			spin := 0
+			for time.Now().Before(deadline) {
+				spin++
+			}
+			_ = spin
+			time.Sleep(10 * time.Minute)
+		}
+		return BounceOut{Attempt: attempt, PID: os.Getpid()}, nil
+	}), nil
+}
+
+type BounceConsumer struct {
+	sparkwing.Base
+	From sparkwing.Ref[BounceOut]
+}
+
+func (j *BounceConsumer) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
+	return sparkwing.Step(w, "check", func(ctx context.Context) error {
+		got := j.From.Get(ctx)
+		if got.Attempt != 2 {
+			return fmt.Errorf("consumed attempt=%d, want the second (surviving) attempt", got.Attempt)
+		}
+		sparkwing.Info(ctx, "consumed attempt=%d pid=%d", got.Attempt, got.PID)
+		return nil
+	}), nil
+}
+
+type Bounceproof struct{ sparkwing.Base }
+
+func (p *Bounceproof) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
+	StampRunID(rc.RunID)
+	work := sparkwing.Job(plan, "work", &Bouncer{})
+	sparkwing.Job(plan, "after", &BounceConsumer{From: sparkwing.RefTo[BounceOut](work)}).Needs(work)
+	return nil
+}
+
 func init() {
 	sparkwing.Register("spawnproof", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Spawnproof{} })
 	sparkwing.Register("orphanproof", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Orphanproof{} })
 	sparkwing.Register("spawnnode", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Spawnnode{} })
+	sparkwing.Register("bounceproof", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &Bounceproof{} })
 }
 `
 

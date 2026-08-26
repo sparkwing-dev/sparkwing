@@ -48,7 +48,7 @@ var allCommands = []*Command{
 	&cmdJobs, &cmdJobsList, &cmdJobsStatus, &cmdJobsLogs, &cmdJobsErrors,
 	&cmdJobsFailures, &cmdJobsStats, &cmdJobsLast, &cmdJobsTree,
 	&cmdJobsGet, &cmdJobsReceipt, &cmdJobsWait, &cmdJobsFind, &cmdJobsRetry,
-	&cmdJobsCancel, &cmdJobsPrune, &cmdJobsTimeline, &cmdJobsSummary, &cmdJobsGrep,
+	&cmdJobsCancel, &cmdJobsBounce, &cmdJobsPrune, &cmdJobsTimeline, &cmdJobsSummary, &cmdJobsGrep,
 	&cmdJobsSubmit, &cmdJobsConsumer, &cmdJobsConsumerStart, &cmdJobsConsumerStatus, &cmdJobsConsumerStop,
 	&cmdHooks, &cmdHooksInstall, &cmdHooksUninstall, &cmdHooksStatus, &cmdHooksSurvey, &cmdHooksFire,
 	&cmdSecret, &cmdSecretSet, &cmdSecretGet, &cmdSecretList, &cmdSecretDelete,

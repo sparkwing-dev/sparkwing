@@ -1415,7 +1415,7 @@ func (s *Server) handleReleaseDebugPause(w http.ResponseWriter, r *http.Request)
 	if body.ReleaseKind == "" {
 		body.ReleaseKind = store.PauseReleaseManual
 	}
-	releasedBy := releasedByFromAuth(r)
+	releasedBy := auditPrincipal(r)
 	if err := s.store.ReleaseDebugPause(r.Context(), runID, nodeID, releasedBy, body.ReleaseKind); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
 			writeError(w, http.StatusNotFound, err)
@@ -1427,10 +1427,11 @@ func (s *Server) handleReleaseDebugPause(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// releasedByFromAuth derives the audit identity for a debug-pause
-// release from the authenticated principal. Returns "anonymous" when
-// auth is disabled so the audit row is still meaningful.
-func releasedByFromAuth(r *http.Request) string {
+// auditPrincipal derives the identity recorded on an operator action --
+// a debug-pause release, a node bounce -- from the authenticated
+// principal. Returns "anonymous" when auth is disabled so the audit row
+// is still meaningful.
+func auditPrincipal(r *http.Request) string {
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil && p.Name != "" {
 		return p.Name
 	}

@@ -93,6 +93,19 @@ code change to unlock.
   sparkwing sharing a runs store together -- the admission daemon included,
   since it opens the same store. See the [migration
   guide](docs/migrations/v0.36.0.md#runs-store-schema-advances-to-version-15).
+- **store (Breaking):** The runs-store schema advances again, from version 15
+  to 16, adding a `node_bounces` table that records each request to restart a
+  running job's process and what became of it. Nothing existing is touched,
+  the upgrade applies on open, and a store that never sees a bounce simply
+  keeps the table empty. The usual schema rule applies: a binary older than
+  this release refuses to open a migrated database. See the [migration
+  guide](docs/migrations/v0.36.0.md#runs-store-schema-advances-to-version-16).
+- **store:** `Store.StartNode` no longer reopens a job that already
+  recorded its outcome; a start arriving after a terminal row is a silent
+  no-op, matching the guard `FinishNode` has always had. A job's terminal row
+  is the executing process's own verdict, and now that a job can be re-run in
+  place, a re-execution racing that write can no longer flip the row back to
+  running or overwrite the verdict it carries.
 - **admission:** A local node is priced from what the kernel charged its
   process, not only from what the two-second sampler happened to see. A node
   shorter than one sampling interval used to be invisible to pricing -- a
@@ -116,6 +129,24 @@ code change to unlock.
 
 ### Added
 
+- **cli:** `sparkwing runs bounce --run RUN_ID --node NODE_ID` restarts one
+  running job's process without failing the run it belongs to. The job's
+  process is stopped -- SIGTERM, then SIGKILL after the grace period -- and
+  the job is re-run from its first step; it never reaches a terminal state,
+  so nothing downstream sees a failure and the rest of the run keeps going.
+  Reach for it when a job is wedged and cancelling the whole run would cost
+  more than it saves. The verb records the request and returns; the runner
+  supervising the job acts on it within a few seconds. Steps run again, so a
+  job with side effects needs the same idempotency a restarted pod already
+  demands. A job that finishes before the stop lands is left alone, and
+  bouncing again is allowed -- one request is one restart. Local runs today;
+  the request is recorded through the controller, so a hosted controller
+  serves it the same way.
+- **store:** `Store.RequestNodeBounce`, `Store.PendingNodeBounce`,
+  `Store.ConsumeNodeBounce`, and `Store.ListNodeBounces` read and write those
+  requests, and `client.Client` carries the same three calls over HTTP. A
+  request is refused for a run that has already finished or a job that is not
+  running, since neither has a process to stop.
 - **dashboard:** A Capacity page showing what admission is charging on this
   machine and how it got there. The live host ledger prints the subtraction
   behind each available figure (capacity, held, reserved, measured external

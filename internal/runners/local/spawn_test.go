@@ -39,9 +39,15 @@ type spawnFixture struct {
 	runner *Runner
 	store  *store.Store
 	ctrl   *client.Client
+	// url is the test controller's base URL, for tests that need to sit
+	// a proxy between the runner and it.
+	url string
 }
 
-func newSpawnFixture(t *testing.T, exe string) *spawnFixture {
+// newSpawnFixture builds a Runner over a real store and controller.
+// tune adjusts the Config before construction, which is how a test
+// picks a supervision cadence its scenario needs.
+func newSpawnFixture(t *testing.T, exe string, tune ...func(*Config)) *spawnFixture {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {
@@ -54,15 +60,21 @@ func newSpawnFixture(t *testing.T, exe string) *spawnFixture {
 	t.Cleanup(srv.Close)
 
 	ctrl := client.NewWithToken(srv.URL, nil, "")
-	r := New(ctrl, Config{
+	cfg := Config{
 		Executable:       exe,
 		ControllerURL:    srv.URL,
 		WorkDir:          t.TempDir(),
 		Home:             t.TempDir(),
 		TerminationGrace: time.Second,
-		Logger:           quiet,
-	})
-	return &spawnFixture{runner: r, store: st, ctrl: ctrl}
+		// safety: the operator-facing cadence is five seconds, which every
+		// bounce test would otherwise wait out twice over.
+		SuperviseInterval: 25 * time.Millisecond,
+		Logger:            quiet,
+	}
+	for _, fn := range tune {
+		fn(&cfg)
+	}
+	return &spawnFixture{runner: New(ctrl, cfg), store: st, ctrl: ctrl, url: srv.URL}
 }
 
 func (f *spawnFixture) seedNode(t *testing.T, runID, nodeID string) {

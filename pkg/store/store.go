@@ -604,7 +604,7 @@ var schemaPostgres = func() string {
 // a lower (or no) version is brought forward by running the missing
 // steps in order inside a single transaction (on Postgres, guarded by
 // pg_advisory_xact_lock so N runners coordinate cleanly).
-const expectedSchemaVersion = 15
+const expectedSchemaVersion = 16
 
 // ExpectedSchemaVersion returns the schema version this binary
 // understands. Useful for diagnostics, version-mismatch reporting,
@@ -756,6 +756,38 @@ var pipelineProfilesTablePostgres = strings.NewReplacer(
 	"INTEGER", "BIGINT",
 	"BLOB", "BYTEA",
 ).Replace(pipelineProfilesTableSQLite)
+
+// nodeBouncesTableSQLite records operator requests to restart a
+// running node's process in place, and what became of each. Created in
+// migration v16, as its own table rather than as columns on nodes: a
+// node can be bounced any number of times, and one row per request is
+// what makes "bounced three times" a history rather than a counter.
+//
+// The partial index is the one a runner hits: every supervision tick
+// of every running node asks whether this node has an unconsumed
+// request, and unconsumed rows are a vanishing fraction of the table.
+//
+// Both statements are IF NOT EXISTS, which is what makes the step safe
+// to replay -- the SQLite path applies migrations outside a
+// transaction, so a process killed between this step and its version
+// stamp re-runs it on the next open.
+const nodeBouncesTableSQLite = `CREATE TABLE IF NOT EXISTS node_bounces (
+    run_id       TEXT    NOT NULL,
+    node_id      TEXT    NOT NULL,
+    seq          INTEGER NOT NULL,
+    requested_at INTEGER NOT NULL,
+    requested_by TEXT    NOT NULL DEFAULT '',
+    consumed_at  INTEGER,
+    outcome      TEXT    NOT NULL DEFAULT '',
+    PRIMARY KEY (run_id, node_id, seq),
+    FOREIGN KEY (run_id) REFERENCES runs(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_node_bounces_pending
+    ON node_bounces(run_id, node_id) WHERE consumed_at IS NULL;`
+
+var nodeBouncesTablePostgres = strings.NewReplacer(
+	"INTEGER", "BIGINT",
+).Replace(nodeBouncesTableSQLite)
 
 // SkewError is returned by Open when the database is at a schema
 // version newer than the binary understands. Callers can use
@@ -1024,6 +1056,9 @@ func (s *Store) applyMigrationSQLite(ctx context.Context, version int) error {
 			return err
 		}
 		return s.ensureColumns("node_metrics", nodeMetricsCPUTimeCols)
+	case 16:
+		_, err := s.exec(ctx, nodeBouncesTableSQLite)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -1083,6 +1118,9 @@ func (s *Store) applyMigrationPostgresTx(ctx context.Context, tx *storeTx, versi
 			return err
 		}
 		return addColumnsTx(ctx, tx, "node_metrics", nodeMetricsCPUTimeCols)
+	case 16:
+		_, err := tx.ExecContext(ctx, nodeBouncesTablePostgres)
+		return err
 	default:
 		return fmt.Errorf("no migration registered for v%d", version)
 	}
@@ -2046,11 +2084,30 @@ VALUES (?,?,?,?,?)`, n.RunID, n.NodeID, n.Status, depsJSON, labelsJSON)
 	return err
 }
 
-// StartNode marks a node as running.
+// StartNode marks a node as running and stamps started_at.
+//
+// It is idempotent for a node that has not finished, which is what a
+// re-executed node needs: a bounced node's replacement process calls
+// it again, and the fresh stamp is what makes the node's recorded
+// duration measure the attempt that survived.
+//
+// It will not reopen a node that already recorded its outcome. A
+// terminal row is the executing process's own verdict and the last
+// word on the node -- FinishNodeWithReason refuses to overwrite one
+// for the same reason -- so a start arriving after it is a no-op
+// rather than a resurrection. Without that guard a re-execution racing
+// a terminal write would flip the row back to running with its outcome
+// still attached, and the second execution's finish, which the
+// terminal guard would otherwise have refused, would land on a node
+// that had already succeeded.
+//
+// A no-op is silent: every caller starts a node it is about to
+// execute and finish, and none reads the row count.
 func (s *Store) StartNode(ctx context.Context, runID, nodeID string) error {
 	_, err := s.exec(ctx, `
-UPDATE nodes SET status = ?, started_at = ? WHERE run_id = ? AND node_id = ?`,
-		nodeStatusRunning, time.Now().UnixNano(), runID, nodeID)
+UPDATE nodes SET status = ?, started_at = ?
+ WHERE run_id = ? AND node_id = ? AND status != ?`,
+		nodeStatusRunning, time.Now().UnixNano(), runID, nodeID, nodeStatusDone)
 	return err
 }
 

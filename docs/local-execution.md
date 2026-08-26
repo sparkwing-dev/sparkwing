@@ -273,6 +273,34 @@ effect. Replacing a consumer interrupts whatever it was executing, on
 the same terms as stopping one: that run returns to the queue and the
 new consumer re-executes it from the start.
 
+### Bouncing a wedged job
+
+Every job in a local run is its own process, which means one job can be
+restarted without touching the run around it. `sparkwing runs bounce
+--run <id> --node <job>` stops that job's process -- SIGTERM, then
+SIGKILL after the grace period -- and runs the job again in place. The
+job never reaches a terminal state, so nothing downstream sees a
+failure and no other job is disturbed; the run finishes normally on the
+attempt that survives.
+
+Reach for it when a job is wedged or misbehaving and cancelling the
+whole run would cost more than it saves -- a fifty-minute pipeline
+whose deploy step is stuck on a connection that will never answer.
+
+The verb records the request and returns. The runner supervising the
+job picks it up within a few seconds, so the stop is prompt rather than
+instant, and a job that finishes in the meantime is left alone.
+Bouncing again is allowed: one request is one restart, and a job that
+wedges repeatedly is bounced repeatedly.
+
+The job re-runs from its **first step**, not from where it stopped.
+Steps that already ran run again, so a job with side effects needs the
+same idempotency a restarted Kubernetes pod already demands. The node
+keeps the admission lease its run holds -- the work was priced once,
+and restarting it is not a new charge -- and what the killed attempt
+cost the machine is added to the job's recorded CPU and occupancy,
+because the box paid for it.
+
 ### Remote execution
 
 ```

@@ -399,6 +399,15 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/runs/{id}/events", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleListEvents)))
 	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/debug-pause", requireScope(ScopeRunsRead, http.HandlerFunc(s.handleGetActiveDebugPause)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/release", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleReleaseDebugPause)))
+	// safety: asking for a bounce is an operator action (runs.write), while
+	// reading and closing the request are the supervising runner's and
+	// sit with the scope it already holds. The consume is
+	// state-changing, which nodes.claim already is -- it starts,
+	// finishes, and heartbeats nodes -- so closing a request that
+	// runner was handed adds no power to the scope.
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleRequestNodeBounce)))
+	mux.Handle("GET /api/v1/runs/{id}/nodes/{nodeID}/bounce", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handlePendingNodeBounce)))
+	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/bounce/consume", requireScope(ScopeNodesClaim, http.HandlerFunc(s.handleConsumeNodeBounce)))
 	mux.Handle("POST /api/v1/runs/{id}/nodes/{nodeID}/status", requireScope(ScopeAdmin, http.HandlerFunc(s.handleSetNodeStatus)))
 
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}/request", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRequestApproval)))

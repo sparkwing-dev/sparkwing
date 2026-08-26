@@ -40,6 +40,7 @@ prune) require a profile; 'runs logs' supports both.
 - `triggers` -- Fire, list, or inspect controller triggers
 - `retry` -- Trigger fresh runs copying pipeline + args from old ones
 - `cancel` -- Request cancellation of in-flight runs
+- `bounce` -- Restart one running job's process without failing the run
 - `prune` -- Delete finished runs older than a threshold, or by id
 
 ## `sparkwing runs annotations`
@@ -221,6 +222,46 @@ sparkwing runs approvals list --run run-...
 
 # Emit JSON for an agent
 sparkwing runs approvals list -o json
+```
+
+## `sparkwing runs bounce`
+
+Restart one running job's process without failing the run
+
+Stops the process executing one running job and runs that
+job again, in place. The run keeps going: the job never reaches a
+terminal state, so nothing downstream sees a failure and no other
+job is disturbed.
+
+Use it for a job that is wedged or misbehaving when cancelling the
+whole run would cost more than it saves.
+
+The request is recorded and the verb returns; the runner supervising
+the job picks it up within a few seconds, stops the process (SIGTERM,
+then SIGKILL after the grace period), and re-runs the job from its
+first step. Steps therefore run again, so a job with side effects
+needs the same idempotency a restarted pod already demands.
+
+A job that finishes before the stop lands is left alone. Bouncing
+again is allowed -- one request is one restart.
+
+### Flags
+
+| Flag | Description |
+|---|---|
+| `--run RUN_ID` | Run id owning the job |
+| `--node NODE_ID` | Job id to bounce |
+| `--profile NAME` | Profile name for remote runs; omit for local runs |
+| `--home DIR` | Sparkwing home holding the run (default: $SPARKWING_HOME or ~/.sparkwing) |
+
+### Examples
+
+```sh
+# Bounce a wedged job in a local run
+sparkwing runs bounce --run run-... --node build
+
+# Bounce a job in a cluster run
+sparkwing runs bounce --run run-... --node build --profile prod
 ```
 
 ## `sparkwing runs cancel`

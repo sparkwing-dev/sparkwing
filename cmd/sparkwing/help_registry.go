@@ -2189,7 +2189,7 @@ the same runs remotely via the controller.
 Local-mode subcommands (list, status, logs, errors) read from
 ~/.sparkwing/runs/. Controller-mode subcommands (cancel, retry,
 prune) require a profile; 'runs logs' supports both.`,
-	SubcommandOrder: []string{"submit", "consumer", "list", "status", "summary", "timeline", "wait", "find", "grep", "logs", "errors", "failures", "stats", "last", "tree", "get", "receipt", "annotations", "approvals", "triggers", "retry", "cancel", "prune"},
+	SubcommandOrder: []string{"submit", "consumer", "list", "status", "summary", "timeline", "wait", "find", "grep", "logs", "errors", "failures", "stats", "last", "tree", "get", "receipt", "annotations", "approvals", "triggers", "retry", "cancel", "bounce", "prune"},
 }
 
 var cmdJobsList = Command{
@@ -2826,6 +2826,38 @@ from stdin, one per line.`,
 	Examples: []Example{
 		{"Cancel one run", "sparkwing runs cancel --run run-... --profile prod"},
 		{"Cancel every running prod run", "sparkwing runs list --status running --profile prod -q | sparkwing runs cancel --run - --profile prod"},
+	},
+}
+
+var cmdJobsBounce = Command{
+	Path:     "sparkwing runs bounce",
+	Synopsis: "Restart one running job's process without failing the run",
+	Description: `Stops the process executing one running job and runs that
+job again, in place. The run keeps going: the job never reaches a
+terminal state, so nothing downstream sees a failure and no other
+job is disturbed.
+
+Use it for a job that is wedged or misbehaving when cancelling the
+whole run would cost more than it saves.
+
+The request is recorded and the verb returns; the runner supervising
+the job picks it up within a few seconds, stops the process (SIGTERM,
+then SIGKILL after the grace period), and re-runs the job from its
+first step. Steps therefore run again, so a job with side effects
+needs the same idempotency a restarted pod already demands.
+
+A job that finishes before the stop lands is left alone. Bouncing
+again is allowed -- one request is one restart.`,
+	Flags: []FlagSpec{
+		{Name: "run", Argument: "RUN_ID", Desc: "Run id owning the job", Group: "Input"},
+		{Name: "node", Argument: "NODE_ID", Desc: "Job id to bounce", Group: "Input"},
+		{Name: "profile", Argument: "NAME", Desc: "Profile name for remote runs; omit for local runs", Group: "System"},
+		{Name: "home", Argument: "DIR", Desc: "Sparkwing home holding the run (default: $SPARKWING_HOME or ~/.sparkwing)", Group: "System"},
+	},
+	GroupOrder: []string{"Input", "System", "Other"},
+	Examples: []Example{
+		{"Bounce a wedged job in a local run", "sparkwing runs bounce --run run-... --node build"},
+		{"Bounce a job in a cluster run", "sparkwing runs bounce --run run-... --node build --profile prod"},
 	},
 }
 

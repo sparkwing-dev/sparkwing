@@ -60,6 +60,8 @@ const ApprovalOnTimeoutFail = "fail"
 const ApprovalResolutionApproved = "approved"
 const ApprovalResolutionDenied = "denied"
 const ApprovalResolutionTimedOut = "timed_out"
+const BounceBounced = "bounced"
+const BounceMissed = "missed"
 const BusyTimeoutEnvVar = "SPARKWING_SQLITE_BUSY_TIMEOUT_MS"
 func ConcurrencyHeartbeatInterval(onLimit string) time.Duration
 func ConcurrencyHeartbeatTimeout(onLimit string) time.Duration
@@ -148,7 +150,9 @@ var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
 var ErrLockHeld = errors.New("held by another holder")
+var ErrNodeNotRunning = errors.New("node is not running")
 var ErrNotFound = errors.New("not found")
+var ErrRunNotLive = errors.New("run is not live")
 type Event struct {
 	RunID   string
 	Seq     int64
@@ -232,6 +236,16 @@ type Node struct {
 	ProcessWallNanos int64
 
 	ArtifactManifest string
+}
+type NodeBounce struct {
+	RunID  string
+	NodeID string
+
+	Seq         int64
+	RequestedAt time.Time
+	RequestedBy string
+	ConsumedAt  *time.Time
+	Outcome     string
 }
 type NodeDispatch struct {
 	RunID            string
@@ -457,6 +471,7 @@ func (s *Store) ClaimNextTriggerFor(ctx context.Context, lease time.Duration, pi
 func (s *Store) ClaimSpecificTrigger(ctx context.Context, id string, lease time.Duration) (*Trigger, error)
 func (s *Store) Close() error
 func (s *Store) ConcurrencyHolder(ctx context.Context, key, holderID string, now time.Time) (*ConcurrencyHolder, error)
+func (s *Store) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
 func (s *Store) CountActiveRunners(ctx context.Context, window time.Duration) (int, error)
 func (s *Store) CountConcurrencyCache(ctx context.Context) (int, error)
 func (s *Store) CountDeadLocalConcurrency(ctx context.Context) (holders, waiters int, err error)
@@ -512,6 +527,7 @@ func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState,
 func (s *Store) ListDebugPauses(ctx context.Context, runID string) ([]*DebugPause, error)
 func (s *Store) ListEventsAfter(ctx context.Context, runID string, afterSeq int64, limit int) ([]Event, error)
 func (s *Store) ListExpiredClaims(ctx context.Context) ([]string, error)
+func (s *Store) ListNodeBounces(ctx context.Context, runID string) ([]*NodeBounce, error)
 func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([]*NodeDispatch, error)
 func (s *Store) ListNodeMetrics(ctx context.Context, runID, nodeID string) ([]MetricSample, error)
 func (s *Store) ListNodeSteps(ctx context.Context, runID string) ([]*NodeStep, error)
@@ -533,6 +549,7 @@ func (s *Store) MaintainConcurrency(ctx context.Context, opts ConcurrencyMainten
 func (s *Store) MaintainConcurrencyThrottled(ctx context.Context, opts ConcurrencyMaintenanceOptions, minInterval time.Duration) (ConcurrencyMaintenanceResult, bool, error)
 func (s *Store) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (s *Store) MinBinaryVersion(ctx context.Context) string
+func (s *Store) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*NodeBounce, error)
 func (s *Store) ProfileSamples(ctx context.Context, pipeline, nodeID string) ([]ProfileSample, error)
 func (s *Store) PromoteNextWaiters(ctx context.Context, key string, lease time.Duration) ([]ConcurrencyWaiter, error)
 func (s *Store) PruneRunsOlderThan(ctx context.Context, cutoff time.Time) ([]string, error)
@@ -546,6 +563,7 @@ func (s *Store) ReleaseClaimAtGeneration(ctx context.Context, id string, seq int
 func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (bool, error)
 func (s *Store) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (s *Store) RequestCancel(ctx context.Context, id string) error
+func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedBy string) (*NodeBounce, error)
 func (s *Store) RequeueUnstartedClaim(ctx context.Context, id string) (bool, error)
 func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, error)
 func (s *Store) ResetPipelineProfile(ctx context.Context, pipeline string) (ProfileResetSummary, error)

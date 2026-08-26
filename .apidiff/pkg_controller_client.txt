@@ -47,6 +47,7 @@ func (c *Client) ClaimTrigger(ctx context.Context) (*store.Trigger, error)
 func (c *Client) ClaimTriggerFor(ctx context.Context, pipelines, sources []string) (*store.Trigger, error)
 func (c *Client) Close() error
 func (c *Client) ConcurrencyState(ctx context.Context, key string) (*ConcurrencyState, error)
+func (c *Client) ConsumeNodeBounce(ctx context.Context, runID, nodeID string, seq int64, outcome string) error
 func (c *Client) CreateApproval(ctx context.Context, a store.Approval) error
 func (c *Client) CreateDebugPause(ctx context.Context, p store.DebugPause) error
 func (c *Client) CreateNode(ctx context.Context, n store.Node) error
@@ -114,8 +115,10 @@ func (c *Client) ListSecrets(ctx context.Context) ([]Secret, error)
 func (c *Client) ListTriggers(ctx context.Context, f store.TriggerFilter) ([]*store.Trigger, error)
 func (c *Client) MarkNodeReady(ctx context.Context, runID, nodeID string) error
 func (c *Client) ObserveSlot(ctx context.Context, key, holderID string) (*WaiterHolder, error)
+func (c *Client) PendingNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
 func (c *Client) ReleaseDebugPause(ctx context.Context, runID, nodeID, releasedBy, kind string) error
 func (c *Client) ReleaseSlot(ctx context.Context, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) error
+func (c *Client) RequestNodeBounce(ctx context.Context, runID, nodeID string) (*store.NodeBounce, error)
 func (c *Client) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error)
 func (c *Client) ResolveWaiter(ctx context.Context, key, runID, nodeID, cacheKeyHash, leaderRunID, leaderNodeID string, bypassRead bool) (*WaiterResolution, error)
 func (c *Client) RetryRun(ctx context.Context, srcRunID string, full bool) (string, error)
