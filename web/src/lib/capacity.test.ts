@@ -1,13 +1,13 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { CapacityProfile, CapacityRankSelection } from "./api.ts";
+import type { CapacityProfile, CapacityRankSelection } from "./api";
 import {
   chargeBasisLabel,
   mismatchNote,
   pinDriftFlag,
   rankLabel,
   sortProfiles,
-} from "./capacity.ts";
+} from "./capacity";
 
 function profile(over: Partial<CapacityProfile>): CapacityProfile {
   return {

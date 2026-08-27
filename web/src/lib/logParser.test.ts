@@ -7,7 +7,7 @@ import {
   hasStepBanners,
   type StepSection,
   type LogSection,
-} from "./logParser.ts";
+} from "./logParser";
 
 // Real ANSI output from the sparkwing CLI
 const cyan = "\x1b[36m";
@@ -209,8 +209,9 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
     ];
     const result = parseLogLines(lines);
     const skipped = result.sections.find(
-      (s) => s.type === "step" && s.name === "build · deploy",
-    ) as StepSection | undefined;
+      (s): s is StepSection =>
+        s.type === "step" && "name" in s && s.name === "build · deploy",
+    );
     assert.ok(skipped, "expected a skipped step bucket for deploy");
     assert.equal(skipped!.status, "passed");
     assert.ok(

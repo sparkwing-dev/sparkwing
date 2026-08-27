@@ -103,6 +103,10 @@ jobs:
           cache: "npm"
           cache-dependency-path: web/package-lock.json
 
+      - name: Audit production dashboard dependencies
+        if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
+        run: npm --prefix web audit --omit=dev --audit-level=high
+
       - name: Build dashboard + populate next-out
         if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
         run: bash bin/build-web.sh
@@ -133,6 +137,18 @@ jobs:
           fi
           ls -la "$out"
 
+      - name: Scan exact release binary
+        env:
+          TARGET_GOOS: ${{ matrix.goos }}
+          TARGET_GOARCH: ${{ matrix.goarch }}
+          BIN: ${{ matrix.binary }}
+        run: |
+          set -euo pipefail
+          ext=""
+          [ "$TARGET_GOOS" = "windows" ] && ext=".exe"
+          bash bin/check-release-binary-vulnerabilities.sh \
+            "dist/${BIN}-${TARGET_GOOS}-${TARGET_GOARCH}${ext}"
+
       # Each cell uploads exactly one binary as a uniquely-named
       # artifact. The release job re-downloads all of them with
       # merge-multiple so they land in a single dist/ for sha256sum +
@@ -146,17 +162,13 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
-  release:
+  prepare-binaries:
+    name: Assemble & scan release binaries
     needs: build
     runs-on: ubuntu-latest
     steps:
-      # Checkout is needed so the release body can be extracted from
-      # CHANGELOG.md at the tagged commit. The release pipeline (see
-      # .sparkwing/jobs/release.go) renames `## [Unreleased]` to
-      # `## [vX.Y.Z] - DATE` and commits before pushing the tag, so
-      # the tagged tree already has the section in place. Pinned to
-      # github.sha so the schema-parity reference below compiles the
-      # exact tagged commit, identical to the build job's tree.
+      # The scanner script and Go vulnerability tooling come from the exact
+      # tagged commit whose matrix artifacts are assembled below.
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
@@ -172,6 +184,7 @@ jobs:
       - name: Download all binaries
         uses: actions/download-artifact@v4
         with:
+          pattern: bin-*
           path: dist
           merge-multiple: true
 
@@ -206,6 +219,38 @@ jobs:
             "$rc" sign "$f"
           done
           rm -rf rcodesign.tar.gz apple-codesign-*
+
+      - name: Scan assembled release binaries
+        run: bash bin/check-release-binary-vulnerabilities.sh dist/sparkwing-*
+
+      - name: Upload scanned release binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanned-release-binaries
+          path: dist/sparkwing-*
+          retention-days: 1
+          if-no-files-found: error
+
+  release:
+    needs: [prepare-binaries, publish-images]
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout supplies the tagged changelog, verification code, and schema
+      # reference. The binaries themselves come only from prepare-binaries.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.sum
+
+      - name: Download scanned release binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: scanned-release-binaries
+          path: dist
 
       - name: Compute SHA256SUMS
         # Operators verifying via install.sh (or any third party) can
@@ -297,23 +342,23 @@ jobs:
           draft_created=false
           gh release view "$tag"
 
-  # publish multi-arch container images for the cluster-side
-  # binaries to GHCR on every v* tag push. Independent of the binary
-  # build matrix above -- they share the trigger but not artifacts;
-  # buildx compiles from source inside the Docker stage. Sibling job
-  # (not gated on `build`) so an image build failure never blocks
-  # the GitHub-Release upload, and vice versa.
+  # Build and scan multi-arch container images for the cluster-side
+  # binaries on every v* tag push. Each matrix cell stages one untagged
+  # digest in GHCR; no version or latest tag is published until every
+  # image and architecture is clean.
   #
-  # Five images, parameterized off a single Dockerfile (build/
-  # Dockerfile.binary) via --build-arg BINARY=. The matrix fans out
-  # one runner per binary; each does its own buildx + push + sign.
+  # Five images fan out one runner per binary. The runner uses
+  # Dockerfile.runner because its runtime needs the Go toolchain and
+  # netrc-seeding entrypoint; the other four share Dockerfile.binary.
+  # Each cell pushes an untagged digest and scans both architectures.
+  # publish-images waits for the complete matrix before signing or tagging.
   #
   # Cosign signs keylessly via GitHub OIDC (id-token: write at the
   # workflow level). No KMS key, no secret -- the signature commits
   # the workflow + repo + tag triple as the signing identity, which
   # `cosign verify --certificate-identity-regexp ...` can attest.
   build-images:
-    name: Build & publish container images
+    name: Build & scan container images
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -331,6 +376,27 @@ jobs:
         with:
           ref: ${{ github.sha }}
 
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.sum
+
+      - name: Setup Node (dashboard image)
+        if: matrix.binary == 'sparkwing-web'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Audit production dashboard dependencies for image
+        if: matrix.binary == 'sparkwing-web'
+        run: npm --prefix web audit --omit=dev --audit-level=high
+
+      - name: Build dashboard for image
+        if: matrix.binary == 'sparkwing-web'
+        run: bash bin/build-web.sh
+
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
@@ -340,6 +406,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate vulnerability waiver policy
+        run: GOWORK=off go run ./bin/check-vulnerability-waivers.go .trivyignore.yaml
 
       # metadata-action emits the full tag list:
       #   - type=ref,event=tag       -> ghcr.io/.../<bin>:v1.2.3
@@ -361,10 +430,9 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: build/Dockerfile.binary
+          file: ${{ matrix.binary == 'sparkwing-runner' && 'build/Dockerfile.runner' || 'build/Dockerfile.binary' }}
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
+          outputs: type=image,name=ghcr.io/sparkwing-dev/${{ matrix.binary }},push-by-digest=true,name-canonical=true,push=true
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BINARY=${{ matrix.binary }}
@@ -372,17 +440,114 @@ jobs:
           cache-from: type=gha,scope=${{ matrix.binary }}
           cache-to: type=gha,mode=max,scope=${{ matrix.binary }}
 
-      - uses: sigstore/cosign-installer@v3
-
-      # Keyless signing: cosign requests a short-lived cert from
-      # Fulcio, signed by the GitHub OIDC token, and uploads the
-      # signature to the same GHCR repository as `<digest>.sig`.
-      # `--yes` skips the interactive confirm prompt.
-      - name: Sign image (cosign keyless)
+      - name: Scan image digest (linux/amd64)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/sparkwing-dev/${{ matrix.binary }}@${{ steps.build.outputs.digest }}
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          trivyignores: .trivyignore.yaml
         env:
-          COSIGN_EXPERIMENTAL: "1"
+          TRIVY_PLATFORM: linux/amd64
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Scan image digest (linux/arm64)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ghcr.io/sparkwing-dev/${{ matrix.binary }}@${{ steps.build.outputs.digest }}
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          trivyignores: .trivyignore.yaml
+          skip-setup-trivy: true
+        env:
+          TRIVY_PLATFORM: linux/arm64
+          TRIVY_USERNAME: ${{ github.actor }}
+          TRIVY_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Export scanned image digest
+        env:
           DIGEST: ${{ steps.build.outputs.digest }}
+          BINARY: ${{ matrix.binary }}
         run: |
           set -euo pipefail
-          cosign sign --yes \
-            "ghcr.io/sparkwing-dev/${{ matrix.binary }}@${DIGEST}"
+          mkdir -p scanned-image-digests
+          printf '%s\n' "$DIGEST" >"scanned-image-digests/$BINARY"
+
+      - name: Upload scanned image digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanned-image-${{ matrix.binary }}
+          path: scanned-image-digests/${{ matrix.binary }}
+          retention-days: 1
+          if-no-files-found: error
+
+  publish-images:
+    name: Publish scanned container images
+    needs: [build-images, prepare-binaries]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: scanned-image-*
+          path: scanned-image-digests
+          merge-multiple: true
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: sigstore/cosign-installer@v3
+
+      # Sign every approved digest before exposing any version tag. A signing
+      # failure therefore leaves only the untagged staging digests behind.
+      - name: Sign scanned image digests
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          binaries=(
+            sparkwing-controller
+            sparkwing-runner
+            sparkwing-cache
+            sparkwing-logs
+            sparkwing-web
+          )
+          for binary in "${binaries[@]}"; do
+            digest="$(tr -d '\r\n' <"scanned-image-digests/$binary")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            cosign sign --yes "ghcr.io/sparkwing-dev/${binary}@${digest}"
+          done
+
+      - name: Publish scanned image tags
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          binaries=(
+            sparkwing-controller
+            sparkwing-runner
+            sparkwing-cache
+            sparkwing-logs
+            sparkwing-web
+          )
+          for binary in "${binaries[@]}"; do
+            digest="$(tr -d '\r\n' <"scanned-image-digests/$binary")"
+            image="ghcr.io/sparkwing-dev/${binary}"
+            tag_args=(--tag "${image}:${TAG}")
+            if [[ "$TAG" != *-* ]]; then
+              tag_args+=(--tag "${image}:latest")
+            fi
+            docker buildx imagetools create \
+              "${tag_args[@]}" \
+              "${image}@${digest}"
+          done

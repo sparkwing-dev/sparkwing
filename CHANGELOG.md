@@ -50,6 +50,12 @@ code change to unlock.
 ## [Unreleased]
 ### Fixed
 
+- **release:** Release builds now scan every exact Go binary, the production
+  dashboard dependency tree, and both architectures of every container image
+  before version or latest tag promotion. The shipped gRPC and OpenTelemetry
+  trees are upgraded past reachable vulnerability findings, and any temporary
+  image waiver must record an owner, reachability, mitigation, and a future
+  expiry.
 - **s3 state:** The local SQLite outbox now retains a queued state or artifact
   write when replay reaches a non-transient object-store error, and `Drain`
   returns that error. The row previously disappeared even though its staged

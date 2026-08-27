@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { QueueHolder, QueueResource, QueueState } from "./api.ts";
+import type { QueueHolder, QueueResource, QueueState } from "./api";
 import {
   availabilityResidual,
   availabilityTerms,
@@ -20,7 +20,7 @@ import {
   queueRowID,
   resourceAvailable,
   trimFloat,
-} from "./queue.ts";
+} from "./queue";
 
 describe("trimFloat", () => {
   it("renders whole numbers bare and fractions to two places", () => {

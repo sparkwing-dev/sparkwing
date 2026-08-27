@@ -10,7 +10,9 @@
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 cd "$HERE/web"
-npm ci
+# The static dashboard build does not require dependency lifecycle hooks. Keep
+# an install or release build from executing third-party package scripts.
+npm ci --ignore-scripts --no-audit
 npm run build
 rm -rf "$HERE/internal/web/next-out"
 mkdir -p "$HERE/internal/web/next-out"

@@ -12,10 +12,8 @@ go.work.sum
 # meaningful history.
 .git/
 
-# Frontend tooling. The SPA bundle is committed to
-# internal/web/next-out/ and that's what the binary embeds; the
-# rest of web/ (node_modules, build cache, src for the bundle) is
-# only needed when iterating on the dashboard via bin/build-web.sh.
+# Frontend tooling. bin/build-web.sh generates internal/web/next-out,
+# which the binary embeds before Docker receives the build context.
 web/node_modules/
 web/.next/
 web/out/

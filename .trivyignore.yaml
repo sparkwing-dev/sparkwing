@@ -1,0 +1,4 @@
+# Temporary image-vulnerability waivers belong here. Each entry must include
+# `expired_at` plus a statement with `Owner:`, `Reachability:`, and
+# `Mitigation:` lines. Expired entries stop suppressing findings automatically.
+vulnerabilities: []

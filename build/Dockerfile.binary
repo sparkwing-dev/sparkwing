@@ -19,9 +19,8 @@
 # alpine + ca-certificates -- negligible).
 #
 # Note: sparkwing-web embeds its Next.js bundle via //go:embed
-# all:next-out in internal/web/server.go. The bundle is committed at
-# pkg/orchestrator/web/next-out/ in this repo, so the embed resolves
-# at build time without needing a Node stage.
+# all:next-out in internal/web/server.go. The release workflow populates
+# internal/web/next-out before invoking this Dockerfile.
 
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 ARG TARGETOS TARGETARCH BINARY SPARKWING_VERSION

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import type { Run } from "./api.ts";
+import type { Run } from "./api";
 import {
   DAY_MS,
   WEEK_MS,
@@ -12,7 +12,7 @@ import {
   deltaAbs,
   deltaPct,
   summarize,
-} from "./overview.ts";
+} from "./overview";
 
 const NOW = new Date("2026-06-16T12:00:00Z").getTime();
 

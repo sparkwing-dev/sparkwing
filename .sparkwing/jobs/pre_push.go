@@ -19,6 +19,26 @@ func runMarkdownlint(ctx context.Context) error {
 	return err
 }
 
+func runReleaseBinaryVulnerabilityScan(ctx context.Context) error {
+	dir, err := os.MkdirTemp("", "sparkwing-release-vulnerability-*")
+	if err != nil {
+		return fmt.Errorf("create release vulnerability scan directory: %w", err)
+	}
+	defer os.RemoveAll(dir)
+
+	for _, binary := range publicBinaries {
+		artifact := filepath.Join(dir, binary)
+		if _, err := sparkwing.Exec(ctx, "go", "build", "-trimpath", "-o", artifact, "./cmd/"+binary).
+			Env("GOWORK", "off").Run(); err != nil {
+			return fmt.Errorf("build release vulnerability artifact %s: %w", binary, err)
+		}
+		if _, err := sparkwing.Exec(ctx, "bash", "bin/check-release-binary-vulnerabilities.sh", artifact).Run(); err != nil {
+			return fmt.Errorf("scan release vulnerability artifact %s: %w", binary, err)
+		}
+	}
+	return nil
+}
+
 // PrePush provides slower release-boundary checks: full golangci-lint,
 // `go test -race` in the .sparkwing pipeline module, the
 // version-freshness check against the sparkwing ecosystem, the
@@ -35,8 +55,9 @@ func runMarkdownlint(ctx context.Context) error {
 // dangerous change or release boundary. Tooling assumed on PATH:
 // golangci-lint, staticcheck (called by golangci-lint), shellcheck,
 // markdownlint-cli2, terraform (for the Mode 3 module gate;
-// .tool-versions pins it). govulncheck is fetched with `go run` and
-// needs no install.
+// .tool-versions pins it). The release artifact scanner uses an installed
+// govulncheck when present and otherwise fetches the pinned version with
+// `go run`.
 type PrePush struct {
 	sparkwing.Base
 	AllowReleaseLineSelfReplace bool
@@ -49,8 +70,7 @@ func (PrePush) ShortHelp() string {
 func (PrePush) Help() string {
 	return "Explicit release-boundary verification. Runs the full golangci-lint set, " +
 		"`go test -race ./...` in the .sparkwing pipeline module, " +
-		"govulncheck in package-scan mode from .sparkwing/ (symbol scan " +
-		"panics on go1.26 generics), the " +
+		"binary-mode govulncheck against every shipped Go executable, the " +
 		"sparkwing-ecosystem version-freshness check (deps must be at " +
 		"the latest released tag, or replaced with a not-behind local " +
 		"path), the chaos gate (the adversarial admission suite in " +
@@ -151,17 +171,21 @@ func (p *PrePush) run(ctx context.Context) error {
 		sparkwing.Info(ctx, "chaos gate: admission invariants held under fault injection")
 	}
 
-	// hack: package scan not symbol scan -- symbol scan panics on go1.26 generics (x/tools TypeParam)
-	if _, err := sparkwing.Bash(ctx, "cd .sparkwing && go run golang.org/x/vuln/cmd/govulncheck@v1.4.0 -scan package ./...").Run(); err != nil {
-		failures = append(failures, fmt.Sprintf("govulncheck: %v", err))
+	if err := runReleaseBinaryVulnerabilityScan(ctx); err != nil {
+		failures = append(failures, fmt.Sprintf("release binary vulnerability scan: %v", err))
 	} else {
-		sparkwing.Info(ctx, "govulncheck: clean")
+		sparkwing.Info(ctx, "release binary vulnerability scan: clean")
 	}
 
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-shell-test.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("shellcheck script portability: %v", err))
 	} else {
 		sparkwing.Info(ctx, "shellcheck script portability: clean")
+	}
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-release-binary-vulnerabilities-test.sh").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("release binary vulnerability scanner: %v", err))
+	} else {
+		sparkwing.Info(ctx, "release binary vulnerability scanner: clean")
 	}
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-changelog-test.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("changelog script portability: %v", err))

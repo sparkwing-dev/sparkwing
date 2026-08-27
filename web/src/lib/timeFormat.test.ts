@@ -5,7 +5,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { fmtDateTime } from "./timeFormat.ts";
+import { fmtDateTime } from "./timeFormat";
 
 // Build a local-time ISO string so the assertions don't depend on the
 // runner's timezone -- a UTC literal would shift the day across zones.
