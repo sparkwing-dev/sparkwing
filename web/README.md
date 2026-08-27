@@ -16,6 +16,9 @@ Pages live under `src/app/` -- the dashboard home is `src/app/page.tsx`,
 with sibling routes for runs, queue, cluster, analytics and the docs guide.
 Shared UI is in `src/components/`. Edits hot-reload.
 
+Run `npm test` for the dashboard's TypeScript unit suite, `npm run lint` for
+ESLint, and `npm run build` for the production static export.
+
 ## How this ships
 
 `next build` static-exports the dashboard to `web/out/`. `bash

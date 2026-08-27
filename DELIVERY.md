@@ -10,8 +10,8 @@ this file is a menu and checklist, not a command that every change must run.
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
 - **Normal broad check:** `sparkwing run pre-commit` covers every committed Go
-  module, formatting, vet, build, tests, lint, documentation mirrors, and source
-  policy.
+  module, the dashboard TypeScript unit suite, formatting, vet, build, tests,
+  lint, documentation mirrors, and source policy.
 - **Expensive or release-boundary:** `sparkwing run pre-push` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when

@@ -8,8 +8,9 @@
 pipelines:
   # pre-commit: explicitly selected broad local verification. gofmt, vet,
   # build, test and golangci-lint run in every committed Go module (the repo
-  # root and .sparkwing/); the formatters and regex sweeps read the staged
-  # change. It has no automatic Git trigger.
+  # root and .sparkwing/); frontend-unit runs the dashboard TypeScript suite;
+  # the formatters and regex sweeps read the staged change. It has no
+  # automatic Git trigger.
   - name: pre-commit
     entrypoint: PreCommit
 

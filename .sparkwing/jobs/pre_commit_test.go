@@ -354,6 +354,46 @@ func TestEachMandatoryStepWaitsOnTheOneBeforeIt(t *testing.T) {
 	}
 }
 
+func TestPreCommitRunsFrontendUnitSuiteAsAnIndependentStep(t *testing.T) {
+	w := sparkwing.NewWork()
+	if _, err := (&PreCommit{}).Work(w); err != nil {
+		t.Fatal(err)
+	}
+	step := w.StepByID("frontend-unit")
+	if step == nil {
+		t.Fatal("pre-commit does not run frontend-unit")
+	}
+	if deps := step.DepIDs(); len(deps) != 0 {
+		t.Fatalf("frontend-unit dependencies = %v, want an independent fast check", deps)
+	}
+}
+
+func TestFrontendUnitSuitePropagatesTheNPMVerdict(t *testing.T) {
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	if err := os.MkdirAll(web, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	packageJSON := filepath.Join(web, "package.json")
+	previous := sparkwing.WorkDir()
+	sparkwing.SetWorkDir(root)
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+
+	writeGoFile(t, packageJSON, `{"scripts":{"test":"node -e \"process.exit(1)\""}}`)
+	err := runFrontendUnit(context.Background())
+	if err == nil {
+		t.Fatal("frontend-unit accepted a failing npm test script")
+	}
+	if !strings.Contains(err.Error(), "frontend unit suite") {
+		t.Fatalf("frontend-unit failure = %q, want named suite", err)
+	}
+
+	writeGoFile(t, packageJSON, `{"scripts":{"test":"node -e \"process.exit(0)\""}}`)
+	if err := runFrontendUnit(context.Background()); err != nil {
+		t.Fatalf("frontend-unit rejected a passing npm test script: %v", err)
+	}
+}
+
 // The sweeps read this file too, so the fixtures spell their patterns with an
 // escape and a join rather than literally. Written out, they are the real
 // thing; read as source, neither trips the check under test.

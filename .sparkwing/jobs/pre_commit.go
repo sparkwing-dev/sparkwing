@@ -29,6 +29,7 @@ import (
 // embedded copies) have drifted, so an edit to either source can't be
 // committed without re-running bin/sync-docs.sh; the comment
 // check fails when the staged diff adds a comment the policy disallows;
+// the frontend-unit step runs the dashboard's TypeScript unit suite;
 // the home-resolution check fails when product code resolves the
 // sparkwing home itself -- reading SPARKWING_HOME, or building the path
 // from a home directory -- instead of through
@@ -39,11 +40,11 @@ import (
 type PreCommit struct{ sparkwing.Base }
 
 func (PreCommit) ShortHelp() string {
-	return "Broad local verification: format, vet, build, test, lint, em-dash + tracker-ID sweeps, docs-mirror sync, comment policy, home resolution"
+	return "Broad local verification: Go gates, frontend unit tests, source-policy sweeps, and docs sync"
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs the dashboard's TypeScript unit suite as `npm --prefix web test`, plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -89,10 +90,10 @@ func boundedGoCommand(cpuCount int, verb, args string) string {
 // same tier as test. It also needs a tree that compiles, which is what
 // build and test establish.
 //
-// The five sweeps stay parallel. Nothing downstream waits on them and
+// The six fast checks stay parallel. Nothing downstream waits on them and
 // each finishes in well under a second (docs-mirror 0.02s,
-// home-resolution 0.15s, comments 0.5s), so ordering them would only
-// delay their verdict without saving any work.
+// frontend-unit 0.2s, home-resolution 0.15s, comments 0.5s), so ordering
+// them would only delay their verdict without saving any work.
 func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.ParallelFailures(sparkwing.FailFast)
 	gofmtStep := sparkwing.Step(w, "gofmt", runGofmt)
@@ -106,7 +107,15 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
 	sparkwing.Step(w, "comments", checkComments)
 	sparkwing.Step(w, "home-resolution", checkHomeResolution)
+	sparkwing.Step(w, "frontend-unit", runFrontendUnit)
 	return nil, nil
+}
+
+func runFrontendUnit(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx, "npm --prefix web test").Run(); err != nil {
+		return fmt.Errorf("frontend unit suite: %w", err)
+	}
+	return nil
 }
 
 // checkComments fails when the staged diff introduces a comment the repo

@@ -79,8 +79,8 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
       msg: name,
       attrs: { outcome: "skipped", reason },
     });
-  const execLine = (node: string, msg: string, ts: string) =>
-    JSON.stringify({ ts, level: "info", node, event: "exec_line", msg });
+  const execLine = (node: string, msg: string, ts: string, step?: string) =>
+    JSON.stringify({ ts, level: "info", node, step, event: "exec_line", msg });
   const nodeEnd = (
     node: string,
     outcome: string,
@@ -99,10 +99,10 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
     const lines = [
       nodeStart("build", "2026-04-23T00:00:00Z"),
       stepStart("build", "compile", "2026-04-23T00:00:00.100Z"),
-      execLine("build", "ok 3 packages", "2026-04-23T00:00:00.200Z"),
+      execLine("build", "ok 3 packages", "2026-04-23T00:00:00.200Z", "compile"),
       stepEnd("build", "compile", "success", 900, "2026-04-23T00:00:01.000Z"),
       stepStart("build", "push", "2026-04-23T00:00:01.000Z"),
-      execLine("build", "pushing image", "2026-04-23T00:00:01.200Z"),
+      execLine("build", "pushing image", "2026-04-23T00:00:01.200Z", "push"),
       stepEnd("build", "push", "success", 1000, "2026-04-23T00:00:02.000Z"),
       nodeEnd("build", "success", 2000, "2026-04-23T00:00:02.000Z"),
     ];
@@ -126,7 +126,7 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
     const lines = [
       nodeStart("build", "2026-04-23T00:00:00Z"),
       stepStart("build", "compile", "2026-04-23T00:00:00.100Z"),
-      execLine("build", "compiling...", "2026-04-23T00:00:00.200Z"),
+      execLine("build", "compiling...", "2026-04-23T00:00:00.200Z", "compile"),
       // Stream cut here -- no step_end / node_end yet.
     ];
     const result = parseLogLines(lines);
@@ -139,10 +139,10 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
     const lines = [
       nodeStart("build", "2026-04-23T00:00:00Z"),
       stepStart("build", "compile", "2026-04-23T00:00:00.100Z"),
-      execLine("build", "ok", "2026-04-23T00:00:00.200Z"),
+      execLine("build", "ok", "2026-04-23T00:00:00.200Z", "compile"),
       stepEnd("build", "compile", "success", 900, "2026-04-23T00:00:01.000Z"),
       stepStart("build", "push", "2026-04-23T00:00:01.000Z"),
-      execLine("build", "push rejected", "2026-04-23T00:00:01.500Z"),
+      execLine("build", "push rejected", "2026-04-23T00:00:01.500Z", "push"),
       stepEnd("build", "push", "failed", 1000, "2026-04-23T00:00:02.000Z"),
       nodeEnd("build", "failed", 2000, "2026-04-23T00:00:02.000Z"),
     ];
@@ -165,6 +165,35 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
     const slow = result.sections[0] as StepSection;
     assert.equal(slow.status, "cancelled");
     assert.equal(slow.duration, "50ms");
+  });
+
+  it("routes interleaved parallel output to its owning step", () => {
+    const lines = [
+      nodeStart("build", "2026-04-23T00:00:00Z"),
+      stepStart("build", "linux", "2026-04-23T00:00:00.100Z"),
+      stepStart("build", "darwin", "2026-04-23T00:00:00.110Z"),
+      execLine("build", "linux one", "2026-04-23T00:00:00.200Z", "linux"),
+      execLine("build", "darwin one", "2026-04-23T00:00:00.210Z", "darwin"),
+      execLine("build", "linux two", "2026-04-23T00:00:00.220Z", "linux"),
+      stepEnd("build", "darwin", "success", 200, "2026-04-23T00:00:00.310Z"),
+      stepEnd("build", "linux", "success", 300, "2026-04-23T00:00:00.400Z"),
+      nodeEnd("build", "success", 400, "2026-04-23T00:00:00.400Z"),
+    ];
+
+    const result = parseLogLines(lines);
+    assert.equal(result.sections.length, 2);
+    const linux = result.sections[0] as StepSection;
+    const darwin = result.sections[1] as StepSection;
+    assert.equal(linux.name, "build · linux");
+    assert.deepEqual(
+      linux.lines.map((line) => line.replace(/^\[[^\]]+\] /, "")),
+      ["linux one", "linux two"],
+    );
+    assert.equal(darwin.name, "build · darwin");
+    assert.deepEqual(
+      darwin.lines.map((line) => line.replace(/^\[[^\]]+\] /, "")),
+      ["darwin one"],
+    );
   });
 
   it("renders step_skipped as a one-line skipped bucket with reason", () => {
