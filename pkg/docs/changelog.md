@@ -85,7 +85,8 @@ code change to unlock.
   single local execution model rather than one per backend. What a
   bucket-backed run does *not* gain is measured capacity profiles: those are
   folded from the local runs store, and a run whose state lives on a bucket
-  still folds nothing, exactly as before.
+  still folds nothing, exactly as before. See the [migration
+  guide](docs/migrations/v0.36.0.md#object-store-local-runs-execute-process-per-node).
 - **local execution (Breaking):** A locally spawned job process now writes its
   log to the surface its profile declares, instead of always to the executing
   machine's disk. Jobs of a run with `logs: { type: s3 }` post to the bucket,
@@ -94,7 +95,8 @@ code change to unlock.
   naming no logs surface is unchanged: those jobs still write the run's local
   log files. A declared logs surface that will not open now **fails the job**,
   naming the profile and the surface type, rather than silently degrading to
-  local files and splitting one run's logs across two places.
+  local files and splitting one run's logs across two places. See the
+  [migration guide](docs/migrations/v0.36.0.md#local-node-logs-use-the-declared-logs-surface).
 - **orchestrator:** An `OnFailure` recovery node on the local path now gets
   the same dispatch envelope as every other node -- the cache lookup, the
   concurrency slot with its `OnLimit` policy, and `SkipIf` -- which is what a
