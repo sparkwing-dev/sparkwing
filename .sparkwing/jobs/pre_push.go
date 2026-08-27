@@ -66,7 +66,8 @@ func (PrePush) Help() string {
 		"Terraform module for both engine knobs (bin/check-terraform.sh). " +
 		"Not read-only: when the .sparkwing sparkwing pin is behind the " +
 		"latest released tag, pre-push bumps the pin and pkg/scaffold's " +
-		"fallback version, tidies .sparkwing/go.mod, and commits the result " +
+		"fallback version, tidies .sparkwing/go.mod, regenerates the public " +
+		"API snapshots, and commits the result " +
 		"so the bump rides along with the push."
 }
 

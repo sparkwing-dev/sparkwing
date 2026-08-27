@@ -88,7 +88,7 @@ func (Release) ShortHelp() string {
 }
 
 func (Release) Help() string {
-	return "Runs the pre-commit, pre-push and template-verify gates, validates the release shape (clean tree, free tag, non-empty CHANGELOG.md [Unreleased] section), commits the CHANGELOG [Unreleased] rename, then pushes the branch and a vX.Y.Z tag to origin. Afterwards it pins .sparkwing/go.mod and pkg/scaffold to the released version and restores the dogfood self-replace, in two further commits, and pushes the branch again. The .github/workflows/release.yaml workflow takes over from the tag push to build cross-platform binaries (uploaded to GH Releases) and multi-arch container images (published to GHCR). This pipeline never builds or publishes artifacts itself."
+	return "Runs the pre-commit, pre-push and template-verify gates, validates the release shape (clean tree, free tag, non-empty CHANGELOG.md [Unreleased] section), commits the CHANGELOG [Unreleased] rename, then pushes the branch and a vX.Y.Z tag to origin. Afterwards it pins .sparkwing/go.mod and pkg/scaffold to the released version, regenerates the public API snapshots, and restores the dogfood self-replace, in two further commits, and pushes the branch again. The .github/workflows/release.yaml workflow takes over from the tag push to build cross-platform binaries (uploaded to GH Releases) and multi-arch container images (published to GHCR). This pipeline never builds or publishes artifacts itself."
 }
 
 func (Release) Examples() []sparkwing.Example {
@@ -510,7 +510,8 @@ func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
 }
 
 // bumpSelfReplace pins `.sparkwing/go.mod` and fresh scaffolds to version,
-// strips the local self-replace, and commits the release-version artifacts.
+// regenerates the public API snapshots, strips the local self-replace, and
+// commits the release-version artifacts.
 // Split from the job body so the half-applied failure state -- files rewritten,
 // commit refused -- is reachable in a test without a run-time Ref resolver.
 func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
@@ -545,7 +546,11 @@ func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 			return fmt.Errorf("release: bump scaffold fallback: %w", err)
 		}
 	}
-	if _, err := runGitIn(ctx, repoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum", scaffoldFallbackRel); err != nil {
+	if err := regenerateScaffoldAPISnapshot(ctx, repoDir); err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	addArgs := append([]string{"add", "--"}, sparkwingPinArtifacts...)
+	if _, err := runGitIn(ctx, repoDir, addArgs...); err != nil {
 		return fmt.Errorf("release: git add release-version artifacts: %w", err)
 	}
 	if _, err := runGitIn(ctx, repoDir, "commit", "-m",
@@ -786,7 +791,11 @@ func restoreSelfReplaceIn(ctx context.Context, repoDir string) error {
 		}
 		return fmt.Errorf("release: tidy restored .sparkwing module: %s", detail)
 	}
-	if _, err := runGitIn(ctx, repoDir, "add", ".sparkwing/go.mod", ".sparkwing/go.sum", scaffoldFallbackRel); err != nil {
+	if err := regenerateScaffoldAPISnapshot(ctx, repoDir); err != nil {
+		return fmt.Errorf("release: %w", err)
+	}
+	addArgs := append([]string{"add", "--"}, sparkwingPinArtifacts...)
+	if _, err := runGitIn(ctx, repoDir, addArgs...); err != nil {
 		return fmt.Errorf("release: git add release-version artifacts: %w", err)
 	}
 	if _, err := runGitIn(ctx, repoDir, "commit", "-m",

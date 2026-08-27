@@ -21,12 +21,15 @@ const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 
 const scaffoldFallbackRel = "pkg/scaffold/version.go"
 
+const scaffoldAPISnapshotRel = ".apidiff/pkg_scaffold.txt"
+
 var scaffoldFallbackVersionRe = regexp.MustCompile(`FallbackSDKVersion = "(v[^"]*)"`)
 
 var sparkwingPinArtifacts = []string{
 	scaffoldFallbackRel,
 	".sparkwing/go.mod",
 	".sparkwing/go.sum",
+	scaffoldAPISnapshotRel,
 }
 
 type VersionFreshnessOptions struct {
@@ -430,11 +433,11 @@ func captureCmd(ctx context.Context, dir, name string, args ...string) (string, 
 // autoBumpSparkwingPinIfStale detects whether the scaffold fallback pin
 // (pkg/scaffold/version.go:FallbackSDKVersion) is behind the latest
 // released sparkwing tag. When it is, it bumps FallbackSDKVersion, the
-// .sparkwing/go.mod require-version placeholder, and .sparkwing/go.sum
-// (via go mod tidy), then commits all three so the bump rides along with
-// the triggering push. Returns ("", nil) when already current, or
-// (bumpedVersion, nil) on a successful bump. Only the sparkwing self-pin
-// is touched; other watched modules are left for the freshness check.
+// .sparkwing/go.mod require-version placeholder, .sparkwing/go.sum
+// (via go mod tidy), and the public API snapshots, then commits them so the
+// bump rides along with the triggering push. Returns ("", nil) when already
+// current, or (bumpedVersion, nil) on a successful bump. Only the sparkwing
+// self-pin is touched; other watched modules are left for the freshness check.
 func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string, retErr error) {
 	latest, err := latestReleasedTag(ctx, repoRoot, majorCapFor(sdkModulePath))
 	if err != nil {
@@ -468,10 +471,36 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 	if _, err := captureCmd(ctx, repoRoot, "go", "-C", ".sparkwing", "mod", "tidy"); err != nil {
 		return "", fmt.Errorf("go mod tidy .sparkwing: %w", err)
 	}
+	if err := regenerateScaffoldAPISnapshot(ctx, repoRoot); err != nil {
+		return "", err
+	}
 	if err := commitSparkwingPinBump(ctx, repoRoot, latest); err != nil {
 		return "", fmt.Errorf("commit sparkwing pin bump: %w", err)
 	}
 	return latest, nil
+}
+
+func regenerateScaffoldAPISnapshot(ctx context.Context, repoRoot string) error {
+	tmp, err := os.MkdirTemp("", "sparkwing-apidiff-")
+	if err != nil {
+		return fmt.Errorf("create API snapshot temp directory: %w", err)
+	}
+	defer os.RemoveAll(tmp)
+
+	cmd := exec.CommandContext(ctx, "bash", "bin/regen-api-snapshot.sh", tmp)
+	cmd.Dir = repoRoot
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("regenerate API snapshots: %w\n%s", err, bytes.TrimSpace(out))
+	}
+	snapshot, err := os.ReadFile(filepath.Join(tmp, filepath.Base(scaffoldAPISnapshotRel)))
+	if err != nil {
+		return fmt.Errorf("read regenerated scaffold API snapshot: %w", err)
+	}
+	if err := os.WriteFile(filepath.Join(repoRoot, filepath.FromSlash(scaffoldAPISnapshotRel)), snapshot, 0o644); err != nil {
+		return fmt.Errorf("write scaffold API snapshot: %w", err)
+	}
+	return nil
 }
 
 func requireCleanSparkwingPinArtifacts(ctx context.Context, repoRoot string) error {

@@ -124,10 +124,14 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		if err := os.MkdirAll(filepath.Join(dir, ".sparkwing"), 0o755); err != nil {
 			t.Fatal(err)
 		}
+		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(scaffoldAPISnapshotRel)), 0o755); err != nil {
+			t.Fatal(err)
+		}
 		for path, content := range map[string]string{
 			filepath.Join("pkg", "scaffold", "version.go"): "v0.19.0",
 			filepath.Join(".sparkwing", "go.mod"):          "module test",
 			filepath.Join(".sparkwing", "go.sum"):          "",
+			filepath.FromSlash(scaffoldAPISnapshotRel):     "v0.19.0",
 		} {
 			if err := os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644); err != nil {
 				t.Fatal(err)
@@ -155,7 +159,7 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		if err != nil {
 			t.Fatalf("git show: %v", err)
 		}
-		for _, f := range []string{"pkg/scaffold/version.go", ".sparkwing/go.mod", ".sparkwing/go.sum"} {
+		for _, f := range []string{"pkg/scaffold/version.go", ".sparkwing/go.mod", ".sparkwing/go.sum", ".apidiff/pkg_scaffold.txt"} {
 			if !strings.Contains(filesOut, f) {
 				t.Errorf("committed files: %q not found in output %q", f, filesOut)
 			}
@@ -174,7 +178,7 @@ func TestCommitSparkwingPinBump(t *testing.T) {
 		dir := initRepo(t)
 		createBumpFiles(t, dir)
 
-		mustGit(t, dir, "add", "--", "pkg/scaffold/version.go", ".sparkwing/go.mod", ".sparkwing/go.sum")
+		mustGit(t, dir, "add", "--", "pkg/scaffold/version.go", ".sparkwing/go.mod", ".sparkwing/go.sum", scaffoldAPISnapshotRel)
 		mustGit(t, dir, "commit", "-m", "initial")
 
 		if err := commitSparkwingPinBump(context.Background(), dir, "v0.19.0"); err == nil {
@@ -255,6 +259,8 @@ func TestAutoBumpSparkwingPinIfStaleRestoresIndexAfterCommitFailure(t *testing.T
 		".sparkwing/go.sum":      "",
 		".sparkwing/pipeline.go": "package pipelines\n\nimport _ \"github.com/sparkwing-dev/sparkwing\"\n",
 		scaffoldFallbackRel:      "package scaffold\n\nconst FallbackSDKVersion = \"v0.18.0\"\n",
+		filepath.FromSlash(scaffoldAPISnapshotRel): "# pkg/scaffold\n\nconst FallbackSDKVersion = \"v0.18.0\"\n",
+		"bin/regen-api-snapshot.sh":                fakeRegenAPISnapshot,
 	} {
 		path = filepath.Join(dir, filepath.FromSlash(path))
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -296,6 +302,37 @@ func TestAutoBumpSparkwingPinIfStaleRestoresIndexAfterCommitFailure(t *testing.T
 	}
 	if status := strings.TrimSpace(captureGitOutput(t, dir, "status", "--porcelain")); status != "" {
 		t.Fatalf("failed auto bump left worktree or index dirty:\n%s", status)
+	}
+}
+
+func TestAutoBumpSparkwingPinIfStaleRegeneratesAPISnapshot(t *testing.T) {
+	repo := seedReleaseRepo(t)
+	hooks := filepath.Join(t.TempDir(), "hooks")
+	if err := os.MkdirAll(hooks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "config", "core.hooksPath", hooks)
+	gitRun(t, repo, "tag", "v0.99.0")
+
+	bumped, err := autoBumpSparkwingPinIfStale(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("autoBumpSparkwingPinIfStale: %v", err)
+	}
+	if bumped != "v0.99.0" {
+		t.Fatalf("autoBumpSparkwingPinIfStale = %q, want v0.99.0", bumped)
+	}
+
+	snapshotPath := scaffoldAPISnapshotRel
+	committed := gitRun(t, repo, "show", "--name-only", "--format=", "HEAD")
+	if !strings.Contains(committed, snapshotPath) {
+		t.Errorf("auto-bump commit omitted %s:\n%s", snapshotPath, committed)
+	}
+	snapshot := gitRun(t, repo, "show", "HEAD:"+snapshotPath)
+	if !strings.Contains(snapshot, `FallbackSDKVersion = "v0.99.0"`) {
+		t.Errorf("committed API snapshot does not contain v0.99.0:\n%s", snapshot)
+	}
+	if _, err := os.Stat(filepath.Join(repo, filepath.Dir(scaffoldAPISnapshotRel), "pkg_other.txt")); !os.IsNotExist(err) {
+		t.Errorf("auto-bump copied unrelated generated API snapshot: %v", err)
 	}
 }
 

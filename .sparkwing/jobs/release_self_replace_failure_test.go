@@ -35,6 +35,15 @@ echo "gate: .sparkwing module does not build without the local replace" >&2
 exit 1
 `
 
+const fakeRegenAPISnapshot = `#!/bin/sh
+set -eu
+version=$(sed -n 's/.*FallbackSDKVersion = "\(v[^"]*\)".*/\1/p' pkg/scaffold/version.go)
+out=${1:-.apidiff}
+mkdir -p "$out"
+printf '# pkg/scaffold\n\nconst FallbackSDKVersion = "%s"\n' "$version" > "$out/pkg_scaffold.txt"
+printf '# pkg/other\n' > "$out/pkg_other.txt"
+`
+
 func gitRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
@@ -67,7 +76,15 @@ func seedReleaseRepo(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Join(repo, "pkg", "scaffold"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.MkdirAll(filepath.Join(repo, filepath.Dir(scaffoldAPISnapshotRel)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "bin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldFallbackRel)), "package scaffold\n\nconst FallbackSDKVersion = \"v0.1.0\"\n")
+	writeFile(t, filepath.Join(repo, filepath.FromSlash(scaffoldAPISnapshotRel)), "# pkg/scaffold\n\nconst FallbackSDKVersion = \"v0.1.0\"\n")
+	writeFile(t, filepath.Join(repo, "bin", "regen-api-snapshot.sh"), fakeRegenAPISnapshot)
 
 	gitRun(t, repo, "init", "-b", "main")
 	gitRun(t, repo, "config", "user.email", "test@example.invalid")
@@ -172,9 +189,17 @@ func TestReleaseBumpLeavesVersionFreshnessGreen(t *testing.T) {
 	if !strings.Contains(committed, scaffoldFallbackRel) {
 		t.Errorf("release bump commit omitted %s:\n%s", scaffoldFallbackRel, committed)
 	}
+	snapshotPath := scaffoldAPISnapshotRel
+	if !strings.Contains(committed, snapshotPath) {
+		t.Errorf("release bump commit omitted %s:\n%s", snapshotPath, committed)
+	}
 	contents := gitRun(t, repo, "show", "HEAD:"+scaffoldFallbackRel)
 	if !strings.Contains(contents, `FallbackSDKVersion = "v0.99.0"`) {
 		t.Errorf("committed fallback does not contain v0.99.0:\n%s", contents)
+	}
+	snapshot := gitRun(t, repo, "show", "HEAD:"+snapshotPath)
+	if !strings.Contains(snapshot, `FallbackSDKVersion = "v0.99.0"`) {
+		t.Errorf("committed API snapshot does not contain v0.99.0:\n%s", snapshot)
 	}
 }
 
