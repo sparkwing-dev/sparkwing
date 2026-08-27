@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -24,6 +25,19 @@ type memArt struct {
 	putErr error
 	getErr error
 	puts   chan string
+}
+
+type cancelAfterPutArt struct {
+	*memArt
+	cancel context.CancelFunc
+}
+
+func (m *cancelAfterPutArt) Put(ctx context.Context, key string, r io.Reader) error {
+	if err := m.memArt.Put(ctx, key, r); err != nil {
+		return err
+	}
+	m.cancel()
+	return nil
 }
 
 func newMemArt() *memArt {
@@ -456,6 +470,71 @@ func TestOutbox_Drain_AppliesQueuedWritesInOrder(t *testing.T) {
 	_ = rc.Close()
 	if string(got) != string(newer) {
 		t.Errorf("store = %q, want the later superset %q (older overwrote newer)", got, newer)
+	}
+}
+
+func TestOutbox_Drain_RetainsWriteAfterNonTransientFailure(t *testing.T) {
+	art := newMemArt()
+	outbox, err := s3state.OpenOutbox(filepath.Join(t.TempDir(), "outbox.db"), art, time.Hour)
+	if err != nil {
+		t.Fatalf("OpenOutbox: %v", err)
+	}
+	t.Cleanup(func() { _ = outbox.Close() })
+
+	ctx := context.Background()
+	key := "runs/r/state.ndjson"
+	body := []byte(`{"kind":"run","data":{"id":"r","pipeline":"p"}}`)
+	if err := outbox.Stage(ctx, s3state.OutboxKindState, key, body); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+
+	putErr := errors.New("access denied")
+	art.setPutErr(putErr)
+	if err := outbox.Drain(ctx); !errors.Is(err, putErr) {
+		t.Fatalf("Drain error = %v, want %v", err, putErr)
+	}
+	if got, err := outbox.Pending(ctx); err != nil || got != 1 {
+		t.Fatalf("Pending after failed drain = %d, %v; want 1, nil", got, err)
+	}
+
+	art.setPutErr(nil)
+	if err := outbox.Drain(ctx); err != nil {
+		t.Fatalf("Drain after recovery: %v", err)
+	}
+	if got, err := outbox.Pending(ctx); err != nil || got != 0 {
+		t.Fatalf("Pending after recovery = %d, %v; want 0, nil", got, err)
+	}
+	rc, err := art.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("Get after recovery: %v", err)
+	}
+	got, err := io.ReadAll(rc)
+	_ = rc.Close()
+	if err != nil {
+		t.Fatalf("read recovered write: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("recovered body = %q, want %q", got, body)
+	}
+}
+
+func TestOutbox_Drain_ReturnsDeleteFailure(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	art := &cancelAfterPutArt{memArt: newMemArt(), cancel: cancel}
+	outbox, err := s3state.OpenOutbox(filepath.Join(t.TempDir(), "outbox.db"), art, time.Hour)
+	if err != nil {
+		t.Fatalf("OpenOutbox: %v", err)
+	}
+	t.Cleanup(func() { _ = outbox.Close() })
+
+	if err := outbox.Stage(ctx, s3state.OutboxKindState, "runs/r/state.ndjson", []byte("body")); err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if err := outbox.Drain(ctx); !errors.Is(err, context.Canceled) || !strings.Contains(err.Error(), "delete drained outbox write") {
+		t.Fatalf("Drain error = %v, want wrapped context cancellation from DELETE", err)
+	}
+	if got, err := outbox.Pending(context.Background()); err != nil || got != 1 {
+		t.Fatalf("Pending after failed DELETE = %d, %v; want 1, nil", got, err)
 	}
 }
 

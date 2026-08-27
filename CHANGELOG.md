@@ -48,6 +48,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **s3 state:** The local SQLite outbox now retains a queued state or artifact
+  write when replay reaches a non-transient object-store error, and `Drain`
+  returns that error. The row previously disappeared even though its staged
+  write had never reached the bucket.
 
 ## [v0.36.0] - 2026-08-26
 ### Changed

@@ -129,10 +129,9 @@ func (o *Outbox) Pending(ctx context.Context) (int, error) {
 	return n, nil
 }
 
-// Drain attempts to replay every queued write in id order. Stops on
-// the first PUT that fails with a transient error so the FIFO
-// invariant survives across retries. Non-transient errors delete the
-// offending row (the user already saw the original 4xx) and continue.
+// Drain attempts to replay every queued write in id order. It stops
+// on the first PUT failure and leaves that row queued so the FIFO
+// invariant survives across retries without losing the write.
 func (o *Outbox) Drain(ctx context.Context) error {
 	for {
 		o.mu.Lock()
@@ -153,16 +152,17 @@ SELECT id, kind, key, body FROM outbox_writes ORDER BY id ASC LIMIT 1`)
 		case OutboxKindState, OutboxKindArtifact:
 			perr := o.art.Put(ctx, key, byteReader(body))
 			if perr != nil {
-				if isTransient(perr) {
-					return perr
-				}
+				return fmt.Errorf("s3state: drain %s %q: %w", kind, key, perr)
 			}
 		case OutboxKindLog:
 		default:
 		}
 		o.mu.Lock()
-		_, _ = o.db.ExecContext(ctx, `DELETE FROM outbox_writes WHERE id = ?`, id)
+		_, err = o.db.ExecContext(ctx, `DELETE FROM outbox_writes WHERE id = ?`, id)
 		o.mu.Unlock()
+		if err != nil {
+			return fmt.Errorf("s3state: delete drained outbox write %d: %w", id, err)
+		}
 	}
 }
 
