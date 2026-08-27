@@ -8,17 +8,20 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-func TestTemplateVerifyPlanBoundsTemplateFanout(t *testing.T) {
+func TestTemplateVerifyPlanUsesMeasuredResourcesAndBoundsFanout(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	if err := (TemplateVerify{}).Plan(context.Background(), plan, sparkwing.NoInputs{}, sparkwing.RunContext{}); err != nil {
 		t.Fatal(err)
 	}
-	if hints := plan.ResourceHints(); hints == nil || hints.Cores < 8 {
-		t.Fatalf("template verifier cores = %+v, want at least measured p95 rounded up to 8", hints)
+	if hints := plan.ResourceHints(); hints != nil {
+		t.Fatalf("resource pin = %#v, want measured admission", hints)
 	}
 
 	count := 0
 	for _, node := range plan.Nodes() {
+		if hints := node.ResourceHints(); hints != nil {
+			t.Fatalf("%s resource pin = %#v, want measured admission", node.ID(), hints)
+		}
 		if !strings.HasPrefix(node.ID(), "verify-") {
 			continue
 		}
