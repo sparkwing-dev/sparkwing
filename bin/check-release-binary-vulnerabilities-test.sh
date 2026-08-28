@@ -11,6 +11,9 @@ touch "$CASE_ROOT/one" "$CASE_ROOT/two"
 cat >"$CASE_ROOT/tools/govulncheck" <<'EOF'
 #!/usr/bin/env bash
 printf '%s\0' "$@" >>"$SCAN_CAPTURE"
+if [[ "${SYMBOL_SCAN_STATUS:-0}" -ne 0 && "${2:-}" != "-scan=package" ]]; then
+  exit "$SYMBOL_SCAN_STATUS"
+fi
 if [[ "$2" == *two ]]; then
   exit "${SECOND_SCAN_STATUS:-0}"
 fi
@@ -26,6 +29,15 @@ printf '%s\0' \
   '-mode=binary' "$CASE_ROOT/one" \
   '-mode=binary' "$CASE_ROOT/two" >"$CASE_ROOT/expected"
 cmp "$CASE_ROOT/expected" "$CASE_ROOT/actual"
+
+: >"$SCAN_CAPTURE"
+export SYMBOL_SCAN_STATUS=3
+bash "$ROOT/bin/check-release-binary-vulnerabilities.sh" "$CASE_ROOT/one"
+printf '%s\0' \
+  '-mode=binary' "$CASE_ROOT/one" \
+  '-mode=binary' '-scan=package' "$CASE_ROOT/one" >"$CASE_ROOT/expected"
+cmp "$CASE_ROOT/expected" "$CASE_ROOT/actual"
+unset SYMBOL_SCAN_STATUS
 
 export SECOND_SCAN_STATUS=23
 set +e
