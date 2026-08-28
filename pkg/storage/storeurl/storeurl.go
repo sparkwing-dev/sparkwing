@@ -88,8 +88,6 @@ func OpenLogStore(ctx context.Context, raw string) (storage.LogStore, error) {
 	}
 }
 
-// splitScheme returns ("fs", "/abs/path", nil) for "fs:///abs/path"
-// and ("s3", "bucket/prefix", nil) for "s3://bucket/prefix".
 func splitScheme(raw string) (scheme, rest string, err error) {
 	if raw == "" {
 		return "", "", errors.New("storeurl: empty URL")
@@ -101,9 +99,6 @@ func splitScheme(raw string) (scheme, rest string, err error) {
 	return raw[:idx], raw[idx+3:], nil
 }
 
-// fsPath validates a filesystem URL's path component. The fs scheme
-// requires an absolute path so a typo'd "fs://my-bucket" doesn't
-// silently land in CWD.
 func fsPath(rest string) (string, error) {
 	if rest == "" {
 		return "", errors.New("storeurl: fs:// requires a path")
@@ -121,8 +116,6 @@ func fsPath(rest string) (string, error) {
 	return rest, nil
 }
 
-// s3BucketPrefix splits "bucket" or "bucket/prefix..." into its parts.
-// Bucket is required; prefix may be empty (root of bucket).
 func s3BucketPrefix(rest string) (bucket, prefix string, err error) {
 	u, err := url.Parse("s3://" + rest)
 	if err != nil {
@@ -136,14 +129,6 @@ func s3BucketPrefix(rest string) (bucket, prefix string, err error) {
 	return u.Host, prefix, nil
 }
 
-// newS3Client loads AWS credentials from the default chain. Honors
-// $SPARKWING_S3_ENDPOINT for non-AWS providers (R2, MinIO, etc.).
-//
-// A missing region is caught here rather than left to the SDK. Unset
-// is the ordinary state of a runner holding static credentials and no
-// ~/.aws/config, and the SDK's own answer -- "resolve auth scheme:
-// resolve endpoint: endpoint rule error, Invalid region" -- names
-// neither the variable to set nor the tool that wanted it.
 func newS3Client(ctx context.Context) (*awss3.Client, error) {
 	cfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {

@@ -17,10 +17,6 @@ func openTestStore(t *testing.T) (*Store, context.Context) {
 	return st, context.Background()
 }
 
-// TestRecordProfileObservation_ContendedRaisesFloorNotPeak verifies that a
-// contended observation feeds the demand floor only. It never enters the
-// clean window, so the measured peak, the duration percentiles, and the
-// sample count that graduates a version are all untouched.
 func TestRecordProfileObservation_ContendedRaisesFloorNotPeak(t *testing.T) {
 	st, ctx := openTestStore(t)
 
@@ -55,8 +51,6 @@ func TestRecordProfileObservation_ContendedRaisesFloorNotPeak(t *testing.T) {
 	}
 }
 
-// TestRecordProfileObservation_FloorRisesOnHigherEvidence confirms contended
-// evidence at or above the stored floor raises it outright.
 func TestRecordProfileObservation_FloorRisesOnHigherEvidence(t *testing.T) {
 	st, ctx := openTestStore(t)
 	for _, c := range []float64{5, 7} {
@@ -72,11 +66,6 @@ func TestRecordProfileObservation_FloorRisesOnHigherEvidence(t *testing.T) {
 	}
 }
 
-// TestRecordProfileObservation_FloorDecaysTowardLowerEvidence verifies that
-// lower evidence decays an inflated floor
-// by half per run -- never past the run's own evidence -- so a floor ratcheted
-// up by transient external load converges back to demand instead of pricing
-// the pipeline at the machine ceiling until a manual reset.
 func TestRecordProfileObservation_FloorDecaysTowardLowerEvidence(t *testing.T) {
 	st, ctx := openTestStore(t)
 	fold := func(cores float64, memBytes int64) {
@@ -109,9 +98,6 @@ func TestRecordProfileObservation_FloorDecaysTowardLowerEvidence(t *testing.T) {
 		t.Errorf("FloorMemoryBytes = %d, want %d (memory reaches its evidence alongside cores)", prof.FloorMemoryBytes, int64(1<<30))
 	}
 
-	// Evidence between half the floor and the floor stops the halving short:
-	// unclamped it would land on 4 and price the pipeline below the 5 cores
-	// this run proved it wanted.
 	fold(8, 8<<30)
 	fold(5, 5<<30)
 	prof, _ = st.GetPipelineProfile(ctx, "demo", "")
@@ -123,10 +109,6 @@ func TestRecordProfileObservation_FloorDecaysTowardLowerEvidence(t *testing.T) {
 	}
 }
 
-// TestRecordProfileObservation_PlanHashChangeResetsWindow verifies that a
-// structural change clears the version's learned window and floor and carries
-// the outgoing peak into PrevPeak, so the changed version re-measures from a
-// warm start rather than inheriting stale samples.
 func TestRecordProfileObservation_PlanHashChangeResetsWindow(t *testing.T) {
 	st, ctx := openTestStore(t)
 
@@ -166,9 +148,6 @@ func TestRecordProfileObservation_PlanHashChangeResetsWindow(t *testing.T) {
 	}
 }
 
-// TestRecordProfileObservation_PeakIgnoresSingleOutlier confirms the charged
-// peak is the window's p95, so one freak run cannot pin the price for the
-// whole window.
 func TestRecordProfileObservation_PeakIgnoresSingleOutlier(t *testing.T) {
 	st, ctx := openTestStore(t)
 	if err := st.RecordProfileObservation(ctx, "demo", "", ProfileObservation{
@@ -192,9 +171,6 @@ func TestRecordProfileObservation_PeakIgnoresSingleOutlier(t *testing.T) {
 	}
 }
 
-// TestRecordProfileObservation_WindowAgesOutOldCost confirms an old
-// expensive generation stops influencing the charge once profileWindow
-// cheaper runs have folded in.
 func TestRecordProfileObservation_WindowAgesOutOldCost(t *testing.T) {
 	st, ctx := openTestStore(t)
 	for range 5 {

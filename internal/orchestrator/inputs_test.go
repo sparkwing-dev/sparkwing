@@ -15,9 +15,6 @@ type inputsArgs struct {
 	Env     string `flag:"env" default:"staging"`
 }
 
-// inputsObservation captures what the step body saw, so the test can
-// assert against it after RunLocal returns. Package-level so the
-// pipeline factory closes over it.
 var (
 	inputsObservedMu sync.Mutex
 	inputsObserved   *inputsArgs

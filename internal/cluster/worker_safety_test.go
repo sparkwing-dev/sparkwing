@@ -10,11 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// buildRunWorkerBackends mirrors the Backends construction inside
-// internal/cluster/worker.go's RunWorker (current wiring). If
-// that block changes shape, update this fixture in lockstep -- the
-// assertions below pin the *types*, not the construction syntax, so
-// the static fixture is a faithful stand-in for the live constructor.
 func buildRunWorkerBackends() orchestrator.Backends {
 	const ctrlURL = "http://controller.sparkwing.svc.cluster.local"
 	stateClient := client.NewWithToken(ctrlURL, nil, "")
@@ -25,8 +20,6 @@ func buildRunWorkerBackends() orchestrator.Backends {
 	}
 }
 
-// TestRunWorkerBackends_StateMustBeHTTP rejects *store.Store on
-// Backends.State. See file header for rationale.
 func TestRunWorkerBackends_StateMustBeHTTP(t *testing.T) {
 	backends := buildRunWorkerBackends()
 
@@ -47,9 +40,6 @@ level write access to the state DB.`)
 	}
 }
 
-// TestRunWorkerBackends_ConcurrencyMustBeHTTP rejects the SQLite-
-// direct localConcurrency on Backends.Concurrency. This is the exact
-// privilege-escalation regression the HTTP-only invariant prevents.
 func TestRunWorkerBackends_ConcurrencyMustBeHTTP(t *testing.T) {
 	backends := buildRunWorkerBackends()
 
@@ -71,9 +61,6 @@ concurrency tables.`, concType)
 	}
 }
 
-// TestRunWorkerBackends_NoStoreReachable walks the Backends graph
-// looking for any reachable *store.Store. Belt-and-suspenders against
-// a future hybrid backend that lazily falls back to direct SQLite.
 func TestRunWorkerBackends_NoStoreReachable(t *testing.T) {
 	backends := buildRunWorkerBackends()
 
@@ -89,16 +76,6 @@ reach it via reflection or a hybrid backend's fallback path.`, found)
 	}
 }
 
-// findStoreType walks v looking for a *store.Store value. Returns
-// the field path where it found one, or "" if none. Bounded depth
-// keeps this from chasing into stdlib graph cycles.
-//
-// Duplicated rather than imported from the orchestrator-package test
-// because Go test helpers don't cross packages cleanly and this file
-// must live in internal/cluster to read the package-private wiring
-// (even though the current fixture happens to mirror only exported
-// types -- a future refactor that swaps in package-private helpers
-// shouldn't break the test).
 func findStoreType(v reflect.Value, depth int) string {
 	if depth > 6 {
 		return ""
@@ -131,8 +108,6 @@ func findStoreType(v reflect.Value, depth int) string {
 	return ""
 }
 
-// TestRunWorkerBackends_GuardCatchesViolation is the meta-test:
-// proves the assertions above actually fire on a *store.Store.
 func TestRunWorkerBackends_GuardCatchesViolation(t *testing.T) {
 	var bad *store.Store
 	stateType := reflect.TypeOf(bad).String()

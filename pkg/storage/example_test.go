@@ -12,11 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
-// ExampleOpenArtifactStore opens a filesystem-backed [storage.ArtifactStore]
-// from a backend URL, writes a blob, and reads it back through the
-// interface. Production code uses [storeurl.OpenArtifactStore] so the
-// same call works against fs, s3, and sparkwing-cache backends without
-// the caller knowing which is wired.
 func ExampleOpenArtifactStore() {
 	dir, err := os.MkdirTemp("", "sparkwing-example-")
 	if err != nil {
@@ -49,10 +44,6 @@ func ExampleOpenArtifactStore() {
 	// Output: {"image":"app:dev"}
 }
 
-// ExampleLogStore_Read shows reading a per-node log through a
-// [storage.LogStore] with a [storage.ReadOpts] filter. The Tail filter
-// narrows the read server-side; backends that lack a native tail
-// primitive emulate it. An empty ReadOpts returns the full log.
 func ExampleLogStore_Read() {
 	dir, _ := os.MkdirTemp("", "sparkwing-example-logs-")
 	defer os.RemoveAll(dir)

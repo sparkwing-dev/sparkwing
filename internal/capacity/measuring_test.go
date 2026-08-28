@@ -6,10 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestResolve_PlanHashChangeReMeasuresAtPriorPeak confirms a structural
-// change (a new plan hash) warm-starts the changed version at its
-// predecessor's measured peak, not on the stale measured price, and
-// labels the charge measuring.
 func TestResolve_PlanHashChangeReMeasuresAtPriorPeak(t *testing.T) {
 	prof := &store.PipelineProfile{
 		PlanHash:    "shapeA",
@@ -26,9 +22,6 @@ func TestResolve_PlanHashChangeReMeasuresAtPriorPeak(t *testing.T) {
 	}
 }
 
-// TestResolve_SameHashGraduatedUsesMeasuredPeak confirms a version whose
-// plan hash matches its graduated profile is priced on the measured peak,
-// not re-measured.
 func TestResolve_SameHashGraduatedUsesMeasuredPeak(t *testing.T) {
 	prof := &store.PipelineProfile{
 		PlanHash:    "shapeA",
@@ -45,9 +38,6 @@ func TestResolve_SameHashGraduatedUsesMeasuredPeak(t *testing.T) {
 	}
 }
 
-// TestResolve_ContendedFloorChargesTwiceFloor confirms a version still
-// short of clean samples but with a demand floor from its contended runs is
-// charged the safety multiple of that floor, sourced as floor.
 func TestResolve_ContendedFloorChargesTwiceFloor(t *testing.T) {
 	prof := &store.PipelineProfile{
 		PlanHash:    "shapeA",
@@ -64,9 +54,6 @@ func TestResolve_ContendedFloorChargesTwiceFloor(t *testing.T) {
 	}
 }
 
-// TestResolve_FloorOutranksPredecessorWarmStart confirms the larger of the
-// warm start (predecessor peak) and the floor (2x floor) wins, and the
-// source names whichever drove the charge.
 func TestResolve_FloorOutranksPredecessorWarmStart(t *testing.T) {
 	prof := &store.PipelineProfile{
 		PlanHash:      "shapeB",
@@ -84,9 +71,6 @@ func TestResolve_FloorOutranksPredecessorWarmStart(t *testing.T) {
 	}
 }
 
-// TestResolve_NoEvidenceKeepsColdStartDefault confirms a version still
-// gathering its first clean samples -- no floor, no predecessor -- stays on
-// the cold-start default rather than reading as measuring.
 func TestResolve_NoEvidenceKeepsColdStartDefault(t *testing.T) {
 	prof := &store.PipelineProfile{
 		PlanHash:    "shapeA",
@@ -102,10 +86,6 @@ func TestResolve_NoEvidenceKeepsColdStartDefault(t *testing.T) {
 	}
 }
 
-// TestResolve_EmptyPlanHashDisablesVersionTracking confirms a caller that
-// passes no plan hash (per-node and cluster paths) keeps the plain
-// pin-measured-default order: a graduated profile still resolves measured
-// even though its stored hash differs.
 func TestResolve_EmptyPlanHashDisablesVersionTracking(t *testing.T) {
 	prof := &store.PipelineProfile{
 		PlanHash:    "shapeA",

@@ -12,19 +12,12 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
-// OverlayModfileName is the generated overlay modfile. Gitignored.
 const OverlayModfileName = ".resolved.mod"
 
-// OverlaySumfileName is the sum file written by `go mod download` using
-// the overlay modfile. Gitignored.
 const OverlaySumfileName = ".resolved.sum"
 
-// goModFilename is the consumer's git-tracked modfile. NEVER modified by
-// this package.
 const goModFilename = "go.mod"
 
-// goBin returns the `go` binary to invoke; tests may override via
-// SPARKS_GO_BIN.
 func goBin() string {
 	if v := os.Getenv("SPARKS_GO_BIN"); v != "" {
 		return v
@@ -32,14 +25,6 @@ func goBin() string {
 	return "go"
 }
 
-// WriteOverlay generates .resolved.mod + .resolved.sum in sparkwingDir
-// from the consumer's go.mod plus the resolved-version map. If the
-// overlay already matches the desired output, returns (false, nil)
-// without writing.
-//
-// The consumer's go.mod and go.sum are never modified. `go mod download
-// -modfile=.resolved.mod` is invoked to materialize .resolved.sum unless
-// there are no require edits needed.
 func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]string) (bool, error) {
 	if sparkwingDir == "" {
 		return false, errors.New("sparks: sparkwingDir must not be empty")
@@ -95,10 +80,6 @@ func WriteOverlay(ctx context.Context, sparkwingDir string, resolved map[string]
 	return true, nil
 }
 
-// buildOverlay returns the contents for .resolved.mod given raw go.mod
-// bytes and a resolved-version map. The file is the user's go.mod with
-// matching `require` entries rewritten to the resolved versions. If a
-// resolved module is not in go.mod, a new require line is appended.
 func buildOverlay(rawGoMod []byte, goModPath string, resolved map[string]string) ([]byte, error) {
 	f, err := modfile.Parse(goModPath, rawGoMod, nil)
 	if err != nil {
@@ -153,11 +134,6 @@ func materializeSum(ctx context.Context, workDir, overlayPath string) error {
 	return nil
 }
 
-// goWorkInScope walks up from workDir looking for a `go.work` file,
-// the same way `go build` discovers workspace mode. Honors GOWORK:
-// "off" disables, an explicit path is used as-is when readable.
-// Mirrored in internal/bincache and cmd/sparkwing; pulled out once
-// these three callers grow a shared internal package.
 func goWorkInScope(workDir string) (string, bool) {
 	switch env := os.Getenv("GOWORK"); env {
 	case "off":
@@ -194,9 +170,6 @@ func assertGoModUntouched(path string, before []byte) error {
 	return nil
 }
 
-// ensureGitignore appends the overlay entries to .gitignore if missing.
-// Walks up from sparkwingDir looking for an existing .gitignore; if none
-// exists, writes one next to the sparkwing dir.
 func ensureGitignore(sparkwingDir string) error {
 	target := locateGitignore(sparkwingDir)
 	entry := filepath.Join(filepath.Base(sparkwingDir), OverlayModfileName)
@@ -240,9 +213,6 @@ func ensureGitignore(sparkwingDir string) error {
 	return nil
 }
 
-// locateGitignore finds the best .gitignore to update. Walks up from
-// sparkwingDir looking for a `.git` sibling; the .gitignore sits next to
-// it. Falls back to sparkwingDir/.gitignore.
 func locateGitignore(sparkwingDir string) string {
 	dir := sparkwingDir
 	for range 10 {

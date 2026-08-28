@@ -37,27 +37,10 @@ const (
 	CostSourceFloor CostSource = "floor"
 )
 
-// profileWindow bounds how many recent run observations back a profile's
-// percentiles. Old observations age out so the profile tracks the
-// pipeline as its cost drifts; the window is short enough that a real
-// cost change re-prices within a couple dozen runs instead of lingering
-// for fifty.
 const profileWindow = 20
 
-// peakPercentile is the rank the admission charge takes across the window
-// of runs, on both the per-run peaks and the per-run sustained figures.
-// Nearest-rank p99 of a window this small is the maximum, which lets one
-// freak run pin the price until it ages fully out; p95 drops the single
-// largest sample while still charging near-worst-case.
 const peakPercentile = 0.95
 
-// floorDecayFactor shrinks the demand floor when a contended run measures
-// below it: the run was given the whole floor-derived charge and used less,
-// so the floor overestimates demand. Halving mirrors the ceiling-hit
-// doubling on the admission side -- one under-floor run undoes one
-// escalation -- so a floor ratcheted up by transient external load decays
-// back toward measured demand instead of pricing the pipeline at the
-// machine ceiling until an operator resets the profile.
 const floorDecayFactor = 0.5
 
 // PipelineProfile is the measured resource fingerprint of a
@@ -193,8 +176,6 @@ type ProfileObservation struct {
 	FloorMemoryBytes int64
 }
 
-// profileSample is one windowed observation as persisted in samples_json.
-// S is the run's sustained core figure, absent before schema 4.
 type profileSample struct {
 	D int64   `json:"d"`
 	C float64 `json:"c"`
@@ -202,35 +183,15 @@ type profileSample struct {
 	S float64 `json:"s,omitempty"`
 }
 
-// profileSchemaCurrent stamps the meaning of a profile's stored samples.
-// Schema 4 records each run's sustained core demand beside its peak. Schema 3
-// uses CPU peaks from amortized child accounting. Schema 2 measured rollup
-// duration from admission grant to finish but still allowed reaped child CPU
-// to land in one sample window. Schema 1 and the older bare-array format
-// folded admission queue wait into duration.
 const profileSchemaCurrent = 4
 
-// profileSchemaOldest is the oldest sample schema still read. Schema 3 is
-// upgraded on load rather than dropped because schema 4 changed no field it
-// carries -- it only added one, and backfilling the sustained figure from
-// the peak reproduces exactly what such a window was charged before the
-// upgrade, so an existing profile converges to sustained pricing as fresh
-// runs age in instead of losing its price to a cold start. Schemas below it
-// folded queue wait or reaped child CPU into the numbers themselves and are
-// still dropped rather than contaminating admission until they age out.
 const profileSchemaOldest = 3
 
-// profileWindowDoc is the versioned envelope samples_json holds. The
-// bare-array format written before versioning fails to decode into it and
-// is treated as an empty, ignorable window.
 type profileWindowDoc struct {
 	Schema  int             `json:"schema"`
 	Samples []profileSample `json:"samples"`
 }
 
-// profileMutState is the subset of a stored profile row the fold reads to
-// decide a version transition and update floors: the clean-sample window,
-// the peaks and hash it was measured on, and the current contended floor.
 type profileMutState struct {
 	window              []profileSample
 	planHash            string
@@ -329,17 +290,8 @@ ON CONFLICT (pipeline, node_id) DO UPDATE SET
 	})
 }
 
-// sustainedOrPeak is the sustained figure a sample is persisted with. A
-// caller that measures no sustained level -- the cluster fold, which has no
-// per-interval series to rank -- stores the peak, so every sample in a
-// window is priced in the same era.
-//
-// safety: this must stay a write-time rule, not merely a read-time backfill
-// of pre-v14 documents. The window mixes a caller's samples with whatever
-// was already stored, and one fold re-serializes the whole window at the
-// current schema; a literal zero written beside carried peaks would sink the
-// across-window percentile onto a stale sample and hold it there until the
-// zero-writing samples aged out.
+// safety: resolve missing sustained cores before storing; a literal zero can
+// pin the mixed-window percentile to stale data until that sample ages out.
 func sustainedOrPeak(obs ProfileObservation) float64 {
 	if obs.SustainedCores == 0 && obs.PeakCores > 0 {
 		return obs.PeakCores
@@ -347,11 +299,6 @@ func sustainedOrPeak(obs ProfileObservation) float64 {
 	return obs.SustainedCores
 }
 
-// foldFloor folds one contended run's proven demand into the stored floor.
-// Evidence at or above the floor raises it outright (a ceiling hit arrives
-// here already escalated to the whole charge). Evidence below it decays the
-// floor by floorDecayFactor, but never past the evidence itself: the run
-// still proved it wanted at least that much.
 func foldFloor(stored, observed float64) float64 {
 	if observed >= stored {
 		return observed
@@ -384,14 +331,11 @@ func (s *Store) loadProfileMutState(ctx context.Context, pipeline, nodeID string
 	return st, nil
 }
 
-// waitWindowDoc is the versioned envelope wait_samples_json holds:
-// per-run admission waits in milliseconds, oldest first.
 type waitWindowDoc struct {
 	Schema  int     `json:"schema"`
 	Samples []int64 `json:"samples"`
 }
 
-// waitSchemaCurrent stamps the meaning of the stored wait samples.
 const waitSchemaCurrent = 1
 
 // RecordWaitObservation folds one run's admission wait (submit to grant)
@@ -550,8 +494,6 @@ func (s *Store) ResetAllProfiles(ctx context.Context) (ProfileResetSummary, erro
 	return s.resetProfiles(ctx, "")
 }
 
-// resetProfiles clears learned profile data. An empty pipeline resets
-// every pipeline; a non-empty one restricts the reset to that pipeline.
 func (s *Store) resetProfiles(ctx context.Context, pipeline string) (ProfileResetSummary, error) {
 	summary := ProfileResetSummary{Pipelines: []string{}}
 	andPipeline := ""
@@ -643,8 +585,6 @@ UPDATE pipeline_profiles SET
 	return summary, nil
 }
 
-// profileColumns is the shared SELECT column list every profile read
-// uses, kept in one place so scanProfile stays in lockstep with it.
 const profileColumns = `p50_duration_ms, p99_duration_ms, peak_cores, peak_memory_bytes, sample_count, cpu_measured, updated_at, pinned_cores, pinned_memory_bytes, samples_json, wait_p50_ms, wait_p99_ms, wait_sample_count, contended_count, plan_hash, floor_cores, floor_memory_bytes, prev_peak_cores, prev_peak_memory_bytes, sustained_cores, prev_sustained_cores`
 
 // GetPipelineProfile returns the (pipeline, node) profile, or nil when no
@@ -759,10 +699,6 @@ func scanProfile(row rowScanner, pipeline, nodeID string) (*PipelineProfile, err
 	return prof, nil
 }
 
-// scanProfileInto scans one profileColumns row, prepending any leading
-// destinations (the pipeline and node id columns when the query selects
-// them), and derives the display-only resource percentiles from the
-// stored samples.
 func scanProfileInto(scan func(...any) error, lead ...any) (*PipelineProfile, error) {
 	var (
 		p50, p99         int64
@@ -851,8 +787,6 @@ func decodeProfileWindow(raw []byte) ([]profileSample, bool) {
 	return doc.Samples, true
 }
 
-// annotateResourcePercentiles fills the display-only CPU and memory
-// distribution fields from the persisted sample window.
 func annotateResourcePercentiles(prof *PipelineProfile, samples []profileSample) {
 	if len(samples) == 0 {
 		return
@@ -926,8 +860,6 @@ func NearestRankIndex(xs []float64, q float64) int {
 	return order[nearestRank(len(xs), q)]
 }
 
-// percentile returns the nearest-rank q-percentile (0..1) of xs. An empty
-// slice yields zero.
 func percentile(xs []float64, q float64) float64 {
 	if len(xs) == 0 {
 		return 0
@@ -937,9 +869,6 @@ func percentile(xs []float64, q float64) float64 {
 	return sorted[nearestRank(len(sorted), q)]
 }
 
-// nearestRank is the rank arithmetic behind every percentile a profile
-// stores, kept in one place so the value a charge takes and the sample
-// [NearestRankIndex] points at cannot disagree by one.
 func nearestRank(n int, q float64) int {
 	rank := int(math.Ceil(q*float64(n))) - 1
 	if rank < 0 {

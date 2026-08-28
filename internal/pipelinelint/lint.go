@@ -1,18 +1,3 @@
-// Package pipelinelint statically checks a sparkwing pipeline's source
-// for the idiomatic anti-patterns that make a Plan() non-deterministic,
-// impure, or misconfigured. It is the machine-checkable definition of
-// "idiomatic": each rule cites exactly what it forbids and why, so the
-// linter can be wired as an enforced gate (non-zero exit on any
-// violation) rather than a style suggestion.
-//
-// Two surfaces are analyzed:
-//
-//   - Go source (AnalyzeSource): the body of every pipeline Plan method,
-//     using go/ast. Only statements that execute while the DAG is being
-//     built are inspected; bodies of nested function literals (job/step
-//     closures, SkipIf, BeforeRun, ...) run at dispatch and are skipped.
-//   - Pipeline config (AnalyzeGuards): the guards: block of each pipeline
-//     in sparkwing.yaml, for tokens that can never be satisfied together.
 package pipelinelint
 
 import (
@@ -21,8 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
-// Rule identifiers. Stable: messages and docs reference them, and an
-// operator may grep CI output by rule name.
 const (
 	RulePlanIO            = "plan-io"
 	RulePlanRuntimeBranch = "plan-runtime-branch"
@@ -32,8 +15,6 @@ const (
 	RuleGroupCacheShared  = "group-cache-shared"
 )
 
-// Finding is one rule violation. File/Line/Col are zero for findings
-// that come from config (guards) rather than source.
 type Finding struct {
 	Rule     string `json:"rule"`
 	Pipeline string `json:"pipeline,omitempty"`
@@ -43,16 +24,12 @@ type Finding struct {
 	Col      int    `json:"col,omitempty"`
 }
 
-// RuleDoc is the human-readable charter for one rule: what it forbids
-// and why. Surfaced by `sparkwing pipeline lint --rules` so the rule set
-// is self-documenting.
 type RuleDoc struct {
 	Name    string `json:"name"`
 	Forbids string `json:"forbids"`
 	Why     string `json:"why"`
 }
 
-// Rules returns every rule's charter in stable order.
 func Rules() []RuleDoc {
 	return []RuleDoc{
 		{
@@ -88,10 +65,6 @@ func Rules() []RuleDoc {
 	}
 }
 
-// Analyze runs every rule. sourceDir, when non-empty, is scanned for
-// pipeline Plan methods; cfg, when non-nil, supplies the guard tokens.
-// Findings are returned sorted by location then rule. An error is
-// returned only when the source directory cannot be parsed at all.
 func Analyze(sourceDir string, cfg *pipelines.Config) ([]Finding, error) {
 	var findings []Finding
 	if sourceDir != "" {
@@ -106,10 +79,6 @@ func Analyze(sourceDir string, cfg *pipelines.Config) ([]Finding, error) {
 	return findings, nil
 }
 
-// AnalyzeGuards checks every pipeline's guards: block for token
-// combinations that can never be satisfied. Syntax is already validated
-// at config load (pipelines.Guards.Validate); this layer catches
-// unsatisfiable pipelines that parse cleanly.
 func AnalyzeGuards(cfg *pipelines.Config) []Finding {
 	if cfg == nil {
 		return nil

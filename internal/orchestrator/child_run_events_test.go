@@ -9,13 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestChildRun_StartAndFinishEventsInParentStream: a node that spawns a
-// child via RunAndAwait must record structured child_run_start /
-// child_run_finish events in the PARENT's stream -- linking the child's
-// run_id and terminal status -- rather than inlining the child's
-// per-line output. Reuses spawn-retry-parent, whose spawner awaits with
-// a tight timeout so the child_run_finish lands as status=timeout
-// without needing a worker to process the trigger.
 func TestChildRun_StartAndFinishEventsInParentStream(t *testing.T) {
 	p := newPaths(t)
 	ctx := context.Background()

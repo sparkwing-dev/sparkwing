@@ -9,7 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// captureLogger records the last record it was handed.
 type captureLogger struct{ last sparkwing.LogRecord }
 
 func (c *captureLogger) Log(level, msg string) {
@@ -25,8 +24,6 @@ func newTestMasker(values ...string) *Masker {
 	return m
 }
 
-// The record that leaked: a failed step reports the command's whole
-// output in attrs["error"], which masking Msg alone never touched.
 func TestWrappedLogger_MasksStringAttrs(t *testing.T) {
 	inner := &captureLogger{}
 	log := MaskingLogger(inner, newTestMasker("s3cr3t"))
@@ -50,9 +47,6 @@ func TestWrappedLogger_MasksStringAttrs(t *testing.T) {
 	}
 }
 
-// Attribute maps are shared -- run_start hands the same invocation map
-// to the log record and to the persisted run row -- so masking must
-// copy rather than write through.
 func TestMaskAttrs_DoesNotMutateCallerMap(t *testing.T) {
 	m := newTestMasker("s3cr3t")
 	attrs := map[string]any{"cmd": "deploy --token s3cr3t"}
@@ -66,7 +60,6 @@ func TestMaskAttrs_DoesNotMutateCallerMap(t *testing.T) {
 	}
 }
 
-// Nothing to redact means nothing to copy: the same map comes back.
 func TestMaskAttrs_ReturnsInputWhenUnchanged(t *testing.T) {
 	attrs := map[string]any{"cmd": "deploy --dry-run", "n": 3}
 
@@ -87,8 +80,6 @@ func TestMaskAttrs_ReturnsInputWhenUnchanged(t *testing.T) {
 	}
 }
 
-// Attribute values are not always flat strings: slices and nested maps
-// carry command output too (argv lists, per-step rollups).
 func TestMaskAttrs_RecursesIntoContainers(t *testing.T) {
 	m := newTestMasker("s3cr3t")
 	nested := map[string]any{"headers": map[string]string{"auth": "Bearer s3cr3t"}}
@@ -122,13 +113,9 @@ func TestMaskAttrs_RecursesIntoContainers(t *testing.T) {
 	}
 }
 
-// The depth guard must fail closed. Anything the pass declines to
-// inspect is replaced wholesale rather than emitted, so nesting cannot
-// be used to carry a value past redaction.
 func TestMaskAttrs_FailsClosedPastDepthCap(t *testing.T) {
 	m := newTestMasker("s3cr3t")
 
-	// Level 1..8 are inspected; the value that sits at level 9 is not.
 	deep := map[string]any{"leaf": "token s3cr3t here"}
 	for range maskAttrsMaxDepth {
 		deep = map[string]any{"next": deep}
@@ -142,7 +129,7 @@ func TestMaskAttrs_FailsClosedPastDepthCap(t *testing.T) {
 			t.Fatalf("nesting lost after %d hops: %#v", hop, cur)
 		}
 		if s, isStr := next.(string); isStr {
-			// The whole sub-map was replaced.
+
 			if s != "***" {
 				t.Fatalf("uninspected level rendered as %q, want ***", s)
 			}
@@ -153,8 +140,7 @@ func TestMaskAttrs_FailsClosedPastDepthCap(t *testing.T) {
 			t.Fatalf("unexpected nested type %T", next)
 		}
 	}
-	// The leaf sits past the cap: it must be replaced wholesale, not
-	// merely have its secret substring rewritten.
+
 	leaf := cur["leaf"]
 	if leaf != "***" {
 		t.Fatalf("value past the depth cap = %#v, want the whole value replaced by ***", leaf)
@@ -164,8 +150,6 @@ func TestMaskAttrs_FailsClosedPastDepthCap(t *testing.T) {
 	}
 }
 
-// A shallow value with the same secret is still masked normally --
-// failing closed at depth must not change ordinary behavior.
 func TestMaskAttrs_ShallowValuesUnaffectedByDepthGuard(t *testing.T) {
 	m := newTestMasker("s3cr3t")
 	attrs := map[string]any{"a": map[string]any{"b": map[string]any{"c": "x s3cr3t"}}}
@@ -176,7 +160,6 @@ func TestMaskAttrs_ShallowValuesUnaffectedByDepthGuard(t *testing.T) {
 	}
 }
 
-// A self-referential map must not spin forever.
 func TestMaskAttrs_BoundedDepth(t *testing.T) {
 	m := newTestMasker("s3cr3t")
 	cycle := map[string]any{"cmd": "deploy s3cr3t"}

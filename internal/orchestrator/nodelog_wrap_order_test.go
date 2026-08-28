@@ -14,9 +14,6 @@ import (
 
 const wrapOrderSecret = "wrap-order-supersecret"
 
-// leakyAnnotateJob resolves a secret and then hands it to every
-// state-persisting surface a job can reach through the logger:
-// node-scoped Annotate/Summary and their step-scoped counterparts.
 type leakyAnnotateJob struct{ sparkwing.Base }
 
 func (j *leakyAnnotateJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -45,11 +42,6 @@ func init() {
 	register("wrap-order-leak", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &wrapOrderPipe{} })
 }
 
-// TestRun_AnnotationsAndSummariesPersistMasked pins the node log
-// wrapper order. The annotation and summary wrappers persist what they
-// see straight into the state store, so the masker has to sit outside
-// them; with the masker innermost the log file was redacted while the
-// annotation and summary rows next to it held the plaintext secret.
 func TestRun_AnnotationsAndSummariesPersistMasked(t *testing.T) {
 	p := newPaths(t)
 	dotenv := filepath.Join(t.TempDir(), "secrets.env")
@@ -75,9 +67,6 @@ func TestRun_AnnotationsAndSummariesPersistMasked(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	ctx := context.Background()
 
-	// Annotate / Summary called inside a step body persist onto the
-	// step row; the step-state wrapper writes that row from the same
-	// stream, so this also proves the reorder cost neither.
 	steps, err := st.ListNodeSteps(ctx, res.RunID)
 	if err != nil {
 		t.Fatalf("ListNodeSteps: %v", err)

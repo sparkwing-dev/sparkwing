@@ -1,14 +1,4 @@
 #!/usr/bin/env bash
-# sparkwing run: pre-release-test
-# desc: Full pre-release test suite (unit, security, build, config)
-# arg: quick (bool) Skip slow tests
-#
-# Pre-release test suite -- run before all major releases.
-# Covers: unit tests, security tests, build verification, config validation.
-#
-# Usage:
-#   ./bin/pre-release-test.sh           # full suite
-#   ./bin/pre-release-test.sh --quick   # skip slow tests
 set -uo pipefail
 
 CYAN="\033[36m"
@@ -51,12 +41,10 @@ run_check() {
 
 echo -e "${BOLD}Sparkwing Pre-Release Test Suite${RESET}\n"
 
-# --- 1. Compilation ---
 echo -e "${BOLD}1. Build Verification${RESET}"
 run_check "Go build (all packages)" go build ./...
 run_check "Go vet (all packages)" go vet ./...
 
-# --- 2. Unit Tests ---
 echo -e "\n${BOLD}2. Unit Tests${RESET}"
 run_check "Controller tests" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./internal/controller/ -count=1"
 run_check "CLI tests" go test ./internal/cli/ -count=1
@@ -65,7 +53,6 @@ run_check "Step library tests" go test ./pkg/step/ -count=1
 run_check "Artifact client tests" go test ./pkg/artifact/ -count=1
 run_check "Git cache tests" go test ./cmd/sparkwing-gitcache/ -count=1
 
-# --- 3. Security Tests ---
 echo -e "\n${BOLD}3. Security Tests${RESET}"
 run_check "Auth middleware" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./internal/controller/ -run TestAuthMiddleware -count=1"
 run_check "Webhook signature verification" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./internal/controller/ -run 'TestWebhook|TestVerifySignature' -count=1"
@@ -81,7 +68,6 @@ run_check "Rate limiter + XFF" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./inte
 run_check "Secrets encryption" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./internal/controller/ -run TestSecretStore -count=1"
 run_check "Log masking" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./internal/controller/ -run TestMaskSecrets -count=1"
 
-# --- 4. Trigger Matching ---
 echo -e "\n${BOLD}4. Trigger & Config Tests${RESET}"
 run_check "Push trigger matching" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./internal/controller/ -run TestMatchesPush -count=1"
 run_check "PR trigger matching" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./internal/controller/ -run TestMatchesPR -count=1"
@@ -91,13 +77,11 @@ run_check "Timeout enforcement" bash -c "SPARKWING_DISABLE_FLAKY=1 go test ./int
 run_check "Config matching (CLI)" go test ./internal/cli/ -run "TestMatches|TestEffective" -count=1
 run_check "Path change detection" go test ./pkg/step/ -run "TestPathsMatch|TestGlobStar|TestWhenPaths" -count=1
 
-# --- 5. Step Library ---
 echo -e "\n${BOLD}5. Step Library Tests${RESET}"
 run_check "Retry with backoff" go test ./pkg/step/ -run TestRetry -count=1
 run_check "JUnit XML parsing" go test ./pkg/step/ -run TestParseJUnit -count=1
 run_check "Spawn context cancellation" go test ./pkg/step/ -run TestSpawn -count=1
 
-# --- 6. Slow tests (skipped in --quick mode) ---
 if [[ "$QUICK" == false ]]; then
   echo -e "\n${BOLD}6. Integration Tests${RESET}"
   if [[ -x ./bin/security-test.sh ]]; then
@@ -114,7 +98,6 @@ else
   echo -e "\n${DIM}Skipping integration tests (--quick mode)${RESET}"
 fi
 
-# --- Summary ---
 TOTAL_DUR=$(( SECONDS - TOTAL_START ))
 TOTAL=$((PASS + FAIL))
 

@@ -10,11 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// memoryRows builds the same memory row twice: once as a measured reading of
-// an idle machine, once as a dimension the host sampler could not read. The
-// figures are identical, which is the whole problem -- an unread sensor and a
-// machine with no external load produce the same numbers, so only the label
-// can tell them apart.
 func memoryRows() (measured, unmeasured wingwire.QueueState) {
 	row := wingwire.ResourceState{
 		Key:       "memory",
@@ -31,14 +26,6 @@ func memoryRows() (measured, unmeasured wingwire.QueueState) {
 		wingwire.QueueState{Resources: []wingwire.ResourceState{unmeasuredRow}}
 }
 
-// TestRenderQueuePretty_UnmeasuredExternalPrintsTheWordNotAFigure is the
-// negative control for a blind sensor. The EXTERNAL cell for a dimension
-// nobody read must carry the word "unmeasured", never a byte count, and the
-// view must state that nothing was subtracted. Asserting only that the two
-// renderings differ would pass vacuously, so this pins the literal each one
-// prints, and it pins the row rather than the page: a note saying the sensor
-// is blind while the table still shows a figure leaves the figure there to be
-// read and believed.
 func TestRenderQueuePretty_UnmeasuredExternalPrintsTheWordNotAFigure(t *testing.T) {
 	measured, unmeasured := memoryRows()
 
@@ -71,9 +58,6 @@ func TestRenderQueuePretty_UnmeasuredExternalPrintsTheWordNotAFigure(t *testing.
 	}
 }
 
-// resourceRowLine pulls one resource table row out of a pretty rendering, so
-// an assertion lands on the cell a reader sees rather than anywhere in the
-// page.
 func resourceRowLine(t *testing.T, out, key string) string {
 	t.Helper()
 	for _, line := range strings.Split(out, "\n") {
@@ -85,9 +69,6 @@ func resourceRowLine(t *testing.T, out, key string) string {
 	return ""
 }
 
-// TestRenderQueuePlain_UnmeasuredExternalIsAddressable pins the machine-facing
-// rendering, so a script reading plain output can tell a blind sensor from a
-// quiet machine without parsing prose.
 func TestRenderQueuePlain_UnmeasuredExternalIsAddressable(t *testing.T) {
 	measured, unmeasured := memoryRows()
 
@@ -106,9 +87,6 @@ func TestRenderQueuePlain_UnmeasuredExternalIsAddressable(t *testing.T) {
 	}
 }
 
-// TestRenderQueueJSON_CarriesExternalSource keeps the label on the wire, so
-// the JSON consumers that drove a wrong capacity decision off this figure can
-// see which numbers are readings.
 func TestRenderQueueJSON_CarriesExternalSource(t *testing.T) {
 	_, unmeasured := memoryRows()
 	var buf bytes.Buffer
@@ -124,9 +102,6 @@ func TestRenderQueueJSON_CarriesExternalSource(t *testing.T) {
 	}
 }
 
-// TestExternalAgeNote_ShowsHowOldTheReadingIs covers the other half of "this
-// number is not what it appears": a reading held in force by the deadband is
-// indistinguishable from a live one until it says how old it is.
 func TestExternalAgeNote_ShowsHowOldTheReadingIs(t *testing.T) {
 	qs := wingwire.QueueState{
 		Resources:           []wingwire.ResourceState{{Key: "cores", Capacity: 8, Available: 6.4, ExternalSource: wingwire.ExternalMeasured}},

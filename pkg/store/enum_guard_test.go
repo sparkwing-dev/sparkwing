@@ -12,13 +12,6 @@ import (
 	"testing"
 )
 
-// enumGroups freezes the value sets of the enums that scattered switch
-// statements branch over. Adding a value to one of these enums fails
-// this test on purpose: the failure message inventories every switch in
-// the module that branches on the group, so the new value is carried
-// into each of them (or consciously left to a default arm) instead of
-// being silently absorbed. After reviewing the switches, add the new
-// value here.
 var enumGroups = map[string]struct {
 	file   string
 	values []string
@@ -72,10 +65,6 @@ func TestEnumGuard_SwitchedEnumSetsAreAcknowledged(t *testing.T) {
 	}
 }
 
-// declaredConstNames returns the names from file's top-level const
-// blocks that either carry one of the group's known names or share its
-// declared type with one that does, so a freshly added value in the
-// same block is picked up.
 func declaredConstNames(t *testing.T, file string, knownNames []string) []string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -136,9 +125,6 @@ func diffSets(want, got []string) (missing, extra []string) {
 	return missing, extra
 }
 
-// switchSites inventories every switch statement in the module whose
-// case clauses reference at least one of the group's constant names,
-// noting whether a default arm would silently absorb a new value.
 func switchSites(t *testing.T, root string, values []string) []string {
 	t.Helper()
 	known := map[string]bool{}

@@ -13,8 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// fakeBackend is a minimal Backend stub for handler-shape tests.
-// Untouched methods return ErrNotSupported so a misuse is loud.
 type fakeBackend struct {
 	caps        backend.Capabilities
 	listRuns    func(store.RunFilter) ([]*store.Run, error)
@@ -218,5 +216,4 @@ func TestGetRunHandler_NotFound(t *testing.T) {
 	}
 }
 
-// guard: ensure ErrNotSupported isn't accidentally swallowed by fakeBackend.
 var _ = errors.New

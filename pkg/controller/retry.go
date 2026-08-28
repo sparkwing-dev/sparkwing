@@ -15,15 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// handleListAttempts returns every run in the same retry tree as
-// the requested id, ordered oldest-first. The dashboard's Attempts
-// dropdown numbers them sequentially -- branches (e.g. attempt #2
-// retried twice) appear as siblings ordered by created_at, so
-// chronological numbering stays linear even when the underlying
-// retry_of graph has forks.
-//
-// Response shape mirrors GET /api/v1/runs: { "runs": [Run, ...] }
-// so the existing client decoder works unchanged.
 func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	runs, err := s.store.ListRunRetryTree(r.Context(), id)
@@ -38,16 +29,6 @@ func (s *Server) handleListAttempts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
-// handleRetry creates a new run with the same pipeline + args as an
-// existing run. The source run's status doesn't matter (retrying a
-// running run is allowed). Trigger source is "retry" so callers can
-// distinguish retries from originals.
-//
-// Query parameters:
-//   - full=1  re-execute every node, ignoring the skip-passed
-//     rehydration that retry_of would normally trigger. This is the
-//     "Rerun all" choice on the dashboard retry menu. Default "Rerun
-//     from failed" leaves full unset (skip-passed kicks in).
 func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 	srcID := r.PathValue("id")
 	src, err := s.store.GetRun(r.Context(), srcID)
@@ -102,12 +83,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		RetrySource:   store.RetrySourceManual,
 		CreatedAt:     now,
 		StartedAt:     now,
-		// This pending row carries src.Args in the clear and is
-		// listable before any worker picks it up -- permanently if
-		// none ever does. Inherit the source's secret-arg
-		// classification so it redacts for the whole of that window;
-		// the orchestrator replaces the invocation wholesale when the
-		// run starts.
+
 		Invocation: store.InheritSecretArgs(nil, src),
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, fmt.Errorf("persist run: %w", err))
@@ -146,10 +122,6 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// retryProvenance binds a local retry to the exact checkout and static plan
-// recorded by its source attempt. Cluster runs may not have a host-visible cwd;
-// leaving the keys absent preserves their remote dispatch path, while the local
-// consumer treats missing keys on a retry as an unavailable source worktree.
 func retryProvenance(src *store.Run) map[string]string {
 	if src == nil {
 		return nil
@@ -183,10 +155,6 @@ func retryProvenance(src *store.Run) map[string]string {
 	}
 }
 
-// inheritedRetryProvenance keeps a retry chain bound to its original durable
-// checkout. A retry run's cwd is an intentionally short-lived snapshot, so a
-// later retry must inherit the recorded source rather than capture that temp
-// directory. Invocation data may be freshly built or JSON-decoded from storage.
 func inheritedRetryProvenance(raw any) map[string]string {
 	var value func(string) string
 	switch provenance := raw.(type) {

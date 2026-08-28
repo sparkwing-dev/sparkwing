@@ -13,8 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// seedRunNode is a local helper so these tests don't depend on the
-// run/trigger path -- we only care about the node-claim endpoints.
 func seedRunNode(t *testing.T, st *store.Store, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -48,11 +46,6 @@ func setNodeReadyAt(t *testing.T, st *store.Store, runID, nodeID string, at time
 	}
 }
 
-// TestNodeClaim_HTTPRoundTrip exercises the full mark-ready / claim /
-// heartbeat / revoke surface via the Go client against an httptest
-// server. Covers: empty queue returns (nil, nil); mark ready +
-// claim returns the node; heartbeat with a different holder id
-// returns ErrLockHeld; revoke on a claimed node returns false.
 func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -105,10 +98,6 @@ func TestNodeClaim_HTTPRoundTrip(t *testing.T) {
 	}
 }
 
-// TestNodeClaim_RevokeAfterReadyNoPodClaimedYet covers the warm-pool
-// Runner's fallback path: if the orchestrator calls MarkNodeReady but
-// no pool pod has claimed yet, RevokeNodeReady returns true and the
-// node is no longer claimable until the next MarkNodeReady call.
 func TestNodeClaim_RevokeAfterReadyNoPodClaimedYet(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -142,10 +131,6 @@ func TestNodeClaim_RevokeAfterReadyNoPodClaimedYet(t *testing.T) {
 	}
 }
 
-// TestNodeClaim_HTTPLabelFiltering covers the runs_on wire path: a
-// runner posting labels only gets nodes whose needs_labels are a
-// subset of those labels; a labeled node skipped by one runner is
-// still claimable by a matching runner.
 func TestNodeClaim_HTTPLabelFiltering(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

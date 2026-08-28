@@ -12,9 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// blockSocket strips search permission from the directory holding home's
-// daemon socket, so a dial fails with EACCES the way a sandbox denial does
-// rather than with the ENOENT an idle machine produces.
 func blockSocket(t *testing.T, home string) {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)
@@ -34,10 +31,6 @@ func blockSocket(t *testing.T, home string) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 }
 
-// TestQuery_UnreachableSocketIsNotAnIdleMachine pins the distinction the two
-// sentinels exist to draw. A socket that cannot be reached says nothing about
-// what is queued behind it, so it must not come back as the sentinel a quiet
-// machine returns.
 func TestQuery_UnreachableSocketIsNotAnIdleMachine(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reaches a socket whatever its directory mode")
@@ -59,8 +52,6 @@ func TestQuery_UnreachableSocketIsNotAnIdleMachine(t *testing.T) {
 	}
 }
 
-// The negative control for the test above: nothing listening really is an idle
-// machine, and it must keep saying so.
 func TestQuery_AbsentSocketStaysNoDaemon(t *testing.T) {
 	home := shortHome(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -74,10 +65,6 @@ func TestQuery_AbsentSocketStaysNoDaemon(t *testing.T) {
 	}
 }
 
-// TestProbe_TellsAnUnreachableSocketFromAnAbsentOne keeps doctor's daemon
-// section honest: it reads its verdict from Probe, so a probe that collapses
-// both into ErrNoDaemon would report "no daemon" for a daemon it could not
-// look at.
 func TestProbe_TellsAnUnreachableSocketFromAnAbsentOne(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reaches a socket whatever its directory mode")
@@ -113,10 +100,6 @@ func TestDaemonDeathCause_LeadsWithTheLastLoggedReason(t *testing.T) {
 	}
 }
 
-// TestDaemonUnreachable_LeadsWithTheCauseNotTheSymptom pins the message order.
-// It used to open with "started but exited before serving", which reads as a
-// crash, and left the bind failure buried under eight lines of log tail where
-// the reader stopped before reaching it.
 func TestDaemonUnreachable_DoesNotClaimAnUnobservedExit(t *testing.T) {
 	home := shortHome(t)
 	logPath, err := wingd.LogPath(home)

@@ -16,19 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestProcessPerNode_BounceRestartsANodeWithoutFailingTheRun is the
-// operator story end to end: a job is wedged, someone bounces it, and
-// the run they did not want to lose finishes.
-//
-// The whole claim rests on what the node row does NOT do. Killing a
-// node process is otherwise indistinguishable from a crash, and a
-// crash without a terminal row is a failure -- which would wake the
-// dispatcher's waiters and cascade into everything downstream. So the
-// assertions here are: the node ran twice in two processes, no
-// terminal row appeared between them, the consumer got the second
-// attempt's output, and the run ended green. The accounting is the
-// other half: the machine paid for the killed attempt too, and the
-// node's charge has to say so.
 func TestProcessPerNode_BounceRestartsANodeWithoutFailingTheRun(t *testing.T) {
 	mod, bin := buildProcPerNodeBinary(t)
 	cli := wingdHostBin(t)
@@ -116,16 +103,11 @@ func TestProcessPerNode_BounceRestartsANodeWithoutFailingTheRun(t *testing.T) {
 		t.Fatalf("downstream node = %+v (%v), want success", after, err)
 	}
 
-	// The killed attempt burned 1.5s of CPU before it went to sleep; the
-	// attempt that replaced it burns a fraction of that. A charge that
-	// covered only the survivor could not reach this floor, so the node
-	// would be priced as though the machine never ran the first attempt.
 	if work.CPUNanos < int64(time.Second) {
 		t.Errorf("node cpu_nanos = %s, want the killed attempt's CPU included (it spun 1.5s)",
 			time.Duration(work.CPUNanos))
 	}
-	// started_at is re-stamped by the surviving attempt, so the node's own
-	// window measures that attempt alone while the accounting spans both.
+
 	if work.StartedAt == nil || work.FinishedAt == nil {
 		t.Fatalf("node timestamps = %v/%v, want both stamped", work.StartedAt, work.FinishedAt)
 	}
@@ -168,8 +150,6 @@ func TestProcessPerNode_BounceRestartsANodeWithoutFailingTheRun(t *testing.T) {
 	}
 }
 
-// waitForProbeFile blocks until the named probe file has content and
-// returns it trimmed.
 func waitForProbeFile(t *testing.T, dir, name string, timeout time.Duration) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -187,8 +167,6 @@ func waitForProbeFile(t *testing.T, dir, name string, timeout time.Duration) str
 	}
 }
 
-// attemptPIDs returns the pid of every attempt of the bounced node
-// recorded so far.
 func attemptPIDs(t *testing.T, probe string) []string {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(probe, "bounce-attempts"))
@@ -198,7 +176,6 @@ func attemptPIDs(t *testing.T, probe string) []string {
 	return strings.Fields(string(raw))
 }
 
-// waitForAttempts blocks until at least n attempts have started.
 func waitForAttempts(t *testing.T, probe string, n int, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)

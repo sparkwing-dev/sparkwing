@@ -35,9 +35,6 @@ func slotHeartbeatInterval(onLimit string) time.Duration {
 	return store.ConcurrencyHeartbeatInterval(onLimit)
 }
 
-// concWaitDetail renders a short status_detail string describing why a
-// node is waiting on a concurrency namespace, for the dashboard. Empty
-// for kinds that don't represent a wait.
 func concWaitDetail(namespace string, r store.AcquireSlotResponse, leaderRun, leaderNode string) string {
 	switch r.Kind {
 	case store.AcquireQueued:
@@ -51,14 +48,10 @@ func concWaitDetail(namespace string, r store.AcquireSlotResponse, leaderRun, le
 	}
 }
 
-// concQueuedDetail renders the "queued in <ns>: N ahead, held by X"
-// summary for a queue-policy waiter.
 func concQueuedDetail(namespace string, position int, holders []store.ConcurrencyHolder) string {
 	return fmt.Sprintf("queued in %s: %d ahead, held by %s", namespace, position, heldByLabel(holders))
 }
 
-// heldByLabel summarizes a holder list as its first holder's label
-// plus an overflow count; "unknown" when the list is empty.
 func heldByLabel(holders []store.ConcurrencyHolder) string {
 	if len(holders) == 0 {
 		return "unknown"
@@ -70,9 +63,6 @@ func heldByLabel(holders []store.ConcurrencyHolder) string {
 	return held
 }
 
-// emitConcWaitLog mirrors a concurrency-wait line into the node log and,
-// via the run delegate, the live stream. The node log is append-mode, so
-// executeNode's later open on promotion appends cleanly.
 func (r *NodeExecutor) emitConcWaitLog(ctx context.Context, req runner.Request, detail string) {
 	if nlog, err := r.backends.Logs.OpenNodeLog(req.RunID, req.Node.ID(), req.Delegate); err == nil {
 		nlog.Emit(sparkwing.LogRecord{TS: time.Now(), Level: "info", Event: "concurrency_wait", Msg: detail})
@@ -87,35 +77,17 @@ func holderLabel(runID, nodeID string) string {
 	return runID + "/" + nodeID
 }
 
-// memoKeyPrefix namespaces content-addressed memoization slots so they
-// can never collide with an author-named concurrency group. A cached
-// node coordinates on memoKeyPrefix+contentHash: identical content
-// shares one leader (in-flight dedupe) and one cache row regardless of
-// which concurrency group -- if any -- the node also belongs to. Memo
-// and concurrency are independent store interactions on a node that
-// declares both.
 const memoKeyPrefix = "memo:"
 
 func memoKeyFor(contentHash string) string { return memoKeyPrefix + contentHash }
 
-// Scope-qualified coordination-key scheme. Each scope gets a distinct
-// leading tag, and Run/Box keys length-prefix their qualifier (run id
-// or host) before the group name. Both pieces are author- or
-// operator-supplied and may contain any byte, including the separators,
-// so the encoding must stay injective in (scope, qualifier, name): the
-// length prefix makes the qualifier/name boundary unambiguous, and the
-// leading tag keeps scopes from colliding (a Global name can never fold
-// onto a Box or Run key). The tag also lets the CLI label a key's scope.
 const (
 	scopeKeyGlobalPrefix = "g:"
 	scopeKeyRunPrefix    = "r:"
 	scopeKeyBoxPrefix    = "b:"
-	scopeKeyLenSep       = ":" // separates the qualifier byte-length from the qualifier
+	scopeKeyLenSep       = ":"
 )
 
-// boxHostID is the stable host identity used to qualify ScopeBox keys.
-// It defaults to os.Hostname() and is overridable via SPARKWING_BOX_ID
-// for environments where the hostname is unstable or shared.
 func boxHostID() string {
 	if v := strings.TrimSpace(os.Getenv("SPARKWING_BOX_ID")); v != "" {
 		return v
@@ -126,9 +98,6 @@ func boxHostID() string {
 	return "localhost"
 }
 
-// scopedGroupKey folds a group's Scope into its coordination key:
-// ScopeRun isolates per run, ScopeBox pools per machine, ScopeGlobal
-// (the zero value) pools across the fleet by bare name.
 func scopedGroupKey(g *sparkwing.ConcurrencyGroup, runID string) string {
 	name := g.Name()
 	switch g.Limit().Scope {
@@ -141,17 +110,10 @@ func scopedGroupKey(g *sparkwing.ConcurrencyGroup, runID string) string {
 	}
 }
 
-// qualifiedKey builds a Run/Box coordination key as
-// <prefix><len><sep><qualifier><name>, length-prefixing the qualifier
-// so a qualifier or name containing the separator can't fold two
-// distinct identities onto the same key.
 func qualifiedKey(prefix, qualifier, name string) string {
 	return prefix + strconv.Itoa(len(qualifier)) + scopeKeyLenSep + qualifier + name
 }
 
-// qualifierFromKey recovers the length-prefixed qualifier from the
-// remainder of a Run/Box key (the bytes after its scheme tag), or ""
-// if the prefix is malformed.
 func qualifierFromKey(rest string) string {
 	sep := strings.IndexByte(rest, scopeKeyLenSep[0])
 	if sep < 0 {
@@ -164,11 +126,6 @@ func qualifierFromKey(rest string) string {
 	return rest[sep+1 : sep+1+n]
 }
 
-// ScopeLabelFromKey reports a human label for the scope a coordination
-// key encodes, for the CLI / dashboard. The leading scheme tag is
-// authoritative; the qualifier (run id or host) is surfaced when
-// present. A "memo:" key is the content-addressed memoization slot, not
-// a group.
 func ScopeLabelFromKey(key string) string {
 	switch {
 	case strings.HasPrefix(key, memoKeyPrefix):
@@ -184,8 +141,6 @@ func ScopeLabelFromKey(key string) string {
 	}
 }
 
-// coordParams is the resolved coordination input for one store acquire
-// (a concurrency group slot or a content-memo slot).
 type coordParams struct {
 	key           string
 	capacity      int
@@ -197,9 +152,6 @@ type coordParams struct {
 	queueTimeout  time.Duration
 }
 
-// concParamsFor builds the coordParams for a node's concurrency group:
-// scope-qualified key, capacity, policy, cost, and timeout knobs. No
-// cache hash -- memoization is a separate acquire.
 func concParamsFor(node *sparkwing.JobNode, g *sparkwing.ConcurrencyGroup, runID string) coordParams {
 	lim := g.Limit()
 	return coordParams{
@@ -212,9 +164,6 @@ func concParamsFor(node *sparkwing.JobNode, g *sparkwing.ConcurrencyGroup, runID
 	}
 }
 
-// memoParamsFor builds the coordParams for a node's content-memo slot:
-// a capacity-1 Coalesce acquire on the content hash, so identical work
-// dedupes in flight and shares one cache entry.
 func memoParamsFor(cacheHash string, cacheTTL time.Duration) coordParams {
 	return coordParams{
 		key:       memoKeyFor(cacheHash),
@@ -226,9 +175,6 @@ func memoParamsFor(cacheHash string, cacheTTL time.Duration) coordParams {
 	}
 }
 
-// acquireRequest is the single mapping from coordParams to the store's
-// acquire request for a node-level arrival, so the two acquire sites
-// (group slot and memo slot) cannot diverge on a field.
 func (cp coordParams) acquireRequest(runID, nodeID string, bypassRead bool) store.AcquireSlotRequest {
 	return store.AcquireSlotRequest{
 		Key:           cp.key,
@@ -245,11 +191,6 @@ func (cp coordParams) acquireRequest(runID, nodeID string, bypassRead bool) stor
 	}
 }
 
-// runNodeWithCache owns the full Cache()/Concurrency() lifecycle.
-// Memoization (content-keyed) and concurrency admission (group-keyed)
-// are independent: a node may have either, both, or neither. Returns
-// handled=false when the node needs no coordination so the caller runs
-// it on the normal path.
 func (r *NodeExecutor) runNodeWithCache(ctx context.Context, req runner.Request) (runner.Result, bool) {
 	node := req.Node
 	group := node.ConcurrencyGroupRef()
@@ -273,10 +214,6 @@ func (r *NodeExecutor) runNodeWithCache(ctx context.Context, req runner.Request)
 	}
 }
 
-// runUnderGroup routes a node's concurrency-group admission: box- and
-// run-scoped groups on the local run path go through the admission
-// daemon, while global-scope groups (and every group on cluster paths,
-// which carry no local daemon) keep the shared-store acquire.
 func (r *NodeExecutor) runUnderGroup(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup) runner.Result {
 	if la, _, _ := localAdmissionFromContext(ctx); la != nil && groupUsesLocalDaemon(group) {
 		return r.runNodeUnderDaemonSem(ctx, req, la, group)
@@ -284,9 +221,6 @@ func (r *NodeExecutor) runUnderGroup(ctx context.Context, req runner.Request, gr
 	return r.acquireAndRun(ctx, req, concParamsFor(req.Node, group, req.RunID))
 }
 
-// resolveCacheHash evaluates the node's content key, returning the hash
-// (or "" when there is no Cache config, the key opted out via NoCache,
-// or the key was empty) and the configured TTL.
 func (r *NodeExecutor) resolveCacheHash(ctx context.Context, node *sparkwing.JobNode, cacheCfg *sparkwing.MemoizeConfig) (string, time.Duration) {
 	if cacheCfg == nil {
 		return "", 0
@@ -306,9 +240,6 @@ func (r *NodeExecutor) resolveCacheHash(ctx context.Context, node *sparkwing.Job
 	}
 }
 
-// acquireAndRun performs one store acquire for cp and dispatches on the
-// outcome: replay a hit, skip/fail under a full group, run a granted
-// slot, or wait then run a queued/coalesced/evicting arrival.
 func (r *NodeExecutor) acquireAndRun(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
 	node := req.Node
 	holderID := fmt.Sprintf("%s/%s", req.RunID, node.ID())
@@ -354,12 +285,6 @@ func (r *NodeExecutor) acquireAndRun(ctx context.Context, req runner.Request, cp
 	return runner.Result{Outcome: sparkwing.Failed, Err: err}
 }
 
-// runMemoizedUnderConcurrency handles a node that declares both Cache
-// and Concurrency. It first acquires the content-memo slot; a hit or an
-// in-flight leader resolves without ever touching the group budget (so
-// identical work draws one budget unit, not one per duplicate). The
-// memo leader then competes for the group budget, runs, and on release
-// writes the shared cache entry.
 func (r *NodeExecutor) runMemoizedUnderConcurrency(ctx context.Context, req runner.Request, group *sparkwing.ConcurrencyGroup, cacheHash string, cacheTTL time.Duration) runner.Result {
 	node := req.Node
 	memoCP := memoParamsFor(cacheHash, cacheTTL)
@@ -406,8 +331,6 @@ func (r *NodeExecutor) runMemoizedUnderConcurrency(ctx context.Context, req runn
 	}
 }
 
-// storeOutcome maps a runner Result to the store's release-outcome
-// string. Only "success" writes a cache entry on release.
 func storeOutcome(res runner.Result) string {
 	switch res.Outcome {
 	case sparkwing.Success, sparkwing.Cached:
@@ -421,8 +344,6 @@ func storeOutcome(res runner.Result) string {
 	}
 }
 
-// applyCacheHit stamps a cache-hit outcome and replays the origin's
-// output, with node_start/node_end + cache_hit bookkeeping.
 func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, cp coordParams, originRun, originNode string) runner.Result {
 	output, err := r.fetchCachedOutput(ctx, originRun, originNode)
 	if err != nil {
@@ -454,8 +375,6 @@ func (r *NodeExecutor) applyCacheHit(ctx context.Context, req runner.Request, cp
 	return runner.Result{Outcome: sparkwing.Cached, Output: output}
 }
 
-// applySkippedConcurrent resolves a node that arrived at a full slot
-// under OnLimit:Skip.
 func (r *NodeExecutor) applySkippedConcurrent(ctx context.Context, req runner.Request) runner.Result {
 	_ = r.backends.State.StartNode(ctx, req.RunID, req.Node.ID())
 	_ = r.backends.State.AppendEvent(ctx, req.RunID, req.Node.ID(), "node_skipped_concurrent", nil)
@@ -473,12 +392,6 @@ func (r *NodeExecutor) applySkippedConcurrent(ctx context.Context, req runner.Re
 	return runner.Result{Outcome: sparkwing.SkippedConcurrent}
 }
 
-// runHeldSlot executes the node while a heartbeat extends the lease
-// and watches for supersede; on supersede execCtx cancels and the
-// node finalizes as superseded. A store-wedge abort cancels the same
-// way but finalizes as failed, carrying the wedge verdict so the run
-// record names the true cause instead of a supersede that never
-// happened.
 func (r *NodeExecutor) runHeldSlot(ctx context.Context, req runner.Request, cp coordParams, holderID string, wedgeBudget time.Duration) runner.Result {
 	execCtx, cancelExec := context.WithCancel(ctx)
 	var superseded atomic.Bool
@@ -526,14 +439,6 @@ func (r *NodeExecutor) runHeldSlot(ctx context.Context, req runner.Request, cp c
 	return runner.Result{Outcome: sparkwing.Success, Output: output}
 }
 
-// startSlotHeartbeat extends the slot lease and watches for supersede.
-// Fail-closed: if no successful heartbeat in `lease`, the controller
-// has reaped us; we abort so a newer holder isn't racing the same
-// work. A wedged store also aborts: a "locking protocol" error or a
-// failure streak past wedgeBudget stops the loop instead of re-issuing
-// heartbeats forever, recording its verdict in wedgeAbort so the node
-// finalizes with the true cause rather than a supersede. The returned
-// stop is safe to call multiple times.
 func (r *NodeExecutor) startSlotHeartbeat(ctx context.Context, key, holderID, onLimit string, superseded *atomic.Bool, wedgeAbort *atomic.Pointer[string], cancelExec context.CancelFunc, wedgeBudget time.Duration) func() {
 	done := make(chan struct{})
 	var once sync.Once
@@ -632,11 +537,6 @@ func slotOwnershipLost(holder *store.ConcurrencyHolder, err error) bool {
 	return holder == nil || holder.Superseded
 }
 
-// waitThenRun polls ResolveWaiter and transitions on first resolution.
-// A transient ResolveWaiter error keeps polling; the wedge guard turns
-// a continuous failure streak past wedgeBudget (or one "locking
-// protocol" error) into a terminal node failure instead of a poll
-// loop spinning against a wedged store.
 func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp coordParams, initial store.AcquireSlotResponse, wedgeBudget time.Duration) runner.Result {
 	wedge := newStoreWedgeGuard(wedgeBudget)
 	leaderRun, leaderNode := initial.LeaderRunID, initial.LeaderNodeID
@@ -757,10 +657,6 @@ func (r *NodeExecutor) waitThenRun(ctx context.Context, req runner.Request, cp c
 	}
 }
 
-// failQueueTimeout cleans up a waiter that exhausted its QueueTimeout:
-// it drops the parked waiter row so a later release can't promote a
-// node that already gave up, then finalizes the node as failed with
-// failure_reason "queue_timeout".
 func (r *NodeExecutor) failQueueTimeout(ctx context.Context, req runner.Request, cp coordParams) runner.Result {
 	if _, err := r.backends.Concurrency.CancelWaiter(ctx, cp.key, req.RunID, req.Node.ID()); err != nil {
 		slog.Warn("cancel waiter after queue timeout failed; reaper will sweep it",
@@ -777,11 +673,6 @@ func (r *NodeExecutor) failQueueTimeout(ctx context.Context, req runner.Request,
 	return runner.Result{Outcome: sparkwing.Failed, Err: err}
 }
 
-// followerOutcomeFromLeader maps a coalesce leader's terminal node
-// outcome to the outcome its dedupe followers inherit. A successful (or
-// cached) leader lets followers replay Success; any non-success leader
-// outcome is carried through so followers never go green for work that
-// did not actually succeed. Unknown / empty outcomes fail safe.
 func followerOutcomeFromLeader(leaderOutcome string) sparkwing.Outcome {
 	switch leaderOutcome {
 	case string(sparkwing.Success), string(sparkwing.Cached):
@@ -797,12 +688,6 @@ func followerOutcomeFromLeader(leaderOutcome string) sparkwing.Outcome {
 	}
 }
 
-// inheritLeaderOutcome adopts the leader's terminal node outcome +
-// output when it finished without writing a cache entry. A leader that
-// wrote no cache row did not succeed (only a successful release
-// caches), so the follower must inherit the leader's actual node
-// outcome -- a Skipped or Failed leader must not stamp the follower
-// Success with empty output.
 func (r *NodeExecutor) inheritLeaderOutcome(ctx context.Context, req runner.Request, cp coordParams, leaderRunID, leaderNodeID, leaderOutcome, leaderFailureReason string) runner.Result {
 	output, err := r.backends.State.GetNodeOutput(ctx, leaderRunID, leaderNodeID)
 	if err != nil && !errors.Is(err, store.ErrNotFound) {
@@ -846,11 +731,6 @@ func (r *NodeExecutor) fetchCachedOutput(ctx context.Context, originRun, originN
 	return r.backends.State.GetNodeOutput(ctx, originRun, originNode)
 }
 
-// copyArtifactManifest copies the origin/leader node's published-artifact
-// manifest reference onto the replayed node so a cache hit reproduces the
-// producer's file set without re-running it. No-op when the source
-// recorded no manifest. Written before the terminal FinishNode flip so a
-// consumer dispatched on completion always sees the reference.
 func (r *NodeExecutor) copyArtifactManifest(ctx context.Context, dstRun, dstNode, srcRun, srcNode string) {
 	src, err := r.backends.State.GetNode(ctx, srcRun, srcNode)
 	if err != nil || src == nil || src.ArtifactManifest == "" {
@@ -859,8 +739,6 @@ func (r *NodeExecutor) copyArtifactManifest(ctx context.Context, dstRun, dstNode
 	_ = r.backends.State.SetNodeArtifactManifest(ctx, dstRun, dstNode, src.ArtifactManifest)
 }
 
-// In-memory sidechannel so runHeldSlot's defer learns the outcome.
-// Lost on crash; reaper handles orphan holders.
 var inflightOutcomes = &inflightMap{m: map[string]string{}}
 
 type inflightMap struct {

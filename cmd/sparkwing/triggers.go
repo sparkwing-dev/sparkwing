@@ -1,5 +1,3 @@
-// `sparkwing triggers` subcommand. Thin operator surface over the
-// controller's /api/v1/triggers endpoints.
 package main
 
 import (
@@ -84,7 +82,7 @@ func runTriggersList(args []string) error {
 	}
 
 	if strings.EqualFold(*output, "json") {
-		// NDJSON: one trigger per line, so `head` returns whole triggers.
+
 		return ndjson.Write(os.Stdout, trigs)
 	}
 	if *quiet {

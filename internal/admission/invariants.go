@@ -5,24 +5,12 @@ import (
 	"sort"
 )
 
-// mustHoldInvariants re-asserts every ledger invariant and panics on the
-// first violation. Every mutating method calls it before returning, so a
-// transition that corrupts the ledger fails at its own boundary instead
-// of committing and surfacing later as an unrelated symptom.
 func (l *Ledger) mustHoldInvariants() {
 	if err := l.invariantViolation(); err != nil {
 		panic(fmt.Sprintf("admission: ledger invariant violated: %v", err))
 	}
 }
 
-// invariantViolation checks the full invariant set and returns the first
-// violation found, or nil. The checks: host accounting matches the lease
-// set, memory never exceeds the total, every lease has at least one member,
-// consistent membership indexing, and exactly one hold per claim; every
-// semaphore's live cost fits its effective capacity and every hold belongs
-// to a live lease; waiters are unique, strictly FIFO-ordered, and hold
-// nothing; no waiter is left behind free capacity that fits it; and no
-// sequence counter has fallen behind the state it numbers.
 func (l *Ledger) invariantViolation() error {
 	if err := l.hostInvariant(); err != nil {
 		return err

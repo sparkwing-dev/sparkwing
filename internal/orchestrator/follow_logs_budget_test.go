@@ -28,9 +28,6 @@ func shortFollowTiming(t *testing.T, budget, interval time.Duration) {
 	})
 }
 
-// followSpy answers the two reads the follow loop makes. getRun is
-// consulted per call so a test can flip the controller from healthy to
-// dead mid-follow.
 func followSpy(t *testing.T, runID string, getRun func(n int32) (store.Run, bool)) string {
 	t.Helper()
 	var calls atomic.Int32
@@ -115,17 +112,11 @@ func TestFollowLogsRemote_NoStreamsReturnsWithoutDrainDelay(t *testing.T) {
 	}
 }
 
-// A controller that dies mid-follow used to leave the follow loop
-// polling for as long as the process lived, because every GetRun error
-// was discarded and re-polled. `pipeline trigger` then hung instead of
-// reaching the exit-3 unknown-outcome path that exists for exactly
-// this. The follow now gives up once the status has been unreadable
-// for the whole budget and hands the transport error back.
 func TestFollowLogsRemote_GivesUpOnADeadController(t *testing.T) {
 	shortFollowTiming(t, 60*time.Millisecond, 10*time.Millisecond)
 	const runID = "run-dead-controller"
 	url := followSpy(t, runID, func(n int32) (store.Run, bool) {
-		// One healthy poll, then the controller is gone for good.
+
 		if n == 1 {
 			return runningRun(runID), true
 		}
@@ -156,10 +147,6 @@ func TestFollowLogsRemote_GivesUpOnADeadController(t *testing.T) {
 	}
 }
 
-// A blip is not a death. Errors that are interrupted by a successful
-// status read must not accumulate toward the budget, or a controller
-// replica rolling out mid-run would abort a follow that is working
-// fine.
 func TestFollowLogsRemote_SuccessfulPollResetsTheBudget(t *testing.T) {
 	start := time.Unix(100, 0)
 	var failures remoteFollowFailures
@@ -178,9 +165,6 @@ func TestFollowLogsRemote_SuccessfulPollResetsTheBudget(t *testing.T) {
 	}
 }
 
-// Cancelling the caller's context also fails the status read; that is
-// the operator leaving, and it must not be reported as a controller
-// failure.
 func TestFollowLogsRemote_CancelIsNotATransportFailure(t *testing.T) {
 	shortFollowTiming(t, time.Millisecond, 10*time.Millisecond)
 	const runID = "run-cancelled-follow"

@@ -28,9 +28,6 @@ func newStoreForAuth(t *testing.T) *store.Store {
 	return s
 }
 
-// TestAuthenticator_Disabled exercises the "auth off" path: nil store
-// means every request is let through. Preserves the laptop-local dev
-// invariant (empty tokens table = pass-through).
 func TestAuthenticator_Disabled(t *testing.T) {
 	a := NewAuthenticator(nil, 0)
 	if !a.AuthDisabled() {
@@ -43,8 +40,6 @@ func TestAuthenticator_Disabled(t *testing.T) {
 	}
 }
 
-// TestAuthenticator_MissingHeader returns 401 when auth is enabled
-// and no Authorization header is present.
 func TestAuthenticator_MissingHeader(t *testing.T) {
 	a := NewAuthenticator(newStoreForAuth(t), 0)
 	rec := httptest.NewRecorder()
@@ -54,8 +49,6 @@ func TestAuthenticator_MissingHeader(t *testing.T) {
 	}
 }
 
-// TestAuthenticator_WrongScheme rejects non-Bearer schemes. Basic
-// auth shouldn't accidentally unlock the controller.
 func TestAuthenticator_WrongScheme(t *testing.T) {
 	a := NewAuthenticator(newStoreForAuth(t), 0)
 	req := httptest.NewRequest(http.MethodPost, "/x", nil)
@@ -67,9 +60,6 @@ func TestAuthenticator_WrongScheme(t *testing.T) {
 	}
 }
 
-// TestAuthenticator_NonSwPrefixRejected ensures tokens without a
-// known sw*_ prefix fail authentication. Closes the v0 fallback
-// path that phase 4 of FOLLOWUPS #2 removed.
 func TestAuthenticator_NonSwPrefixRejected(t *testing.T) {
 	a := NewAuthenticator(newStoreForAuth(t), 0)
 	req := httptest.NewRequest(http.MethodPost, "/x", nil)
@@ -81,8 +71,6 @@ func TestAuthenticator_NonSwPrefixRejected(t *testing.T) {
 	}
 }
 
-// TestAuthenticator_StoreToken exercises the sw*_ prefix path: a real
-// token row authenticates; an unknown sw*_ token 401s.
 func TestAuthenticator_StoreToken(t *testing.T) {
 	st := newStoreForAuth(t)
 	now := time.Now().UTC()
@@ -109,7 +97,6 @@ func TestAuthenticator_StoreToken(t *testing.T) {
 	}
 }
 
-// TestRequireScope_Allowed: principal has scope -> handler runs.
 func TestRequireScope_Allowed(t *testing.T) {
 	inner := teapotHandler()
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -122,7 +109,6 @@ func TestRequireScope_Allowed(t *testing.T) {
 	}
 }
 
-// TestRequireScope_Forbidden: principal without scope -> 403.
 func TestRequireScope_Forbidden(t *testing.T) {
 	inner := teapotHandler()
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -135,7 +121,6 @@ func TestRequireScope_Forbidden(t *testing.T) {
 	}
 }
 
-// TestRequireScope_AdminIsSuperset: admin scope unlocks anything.
 func TestRequireScope_AdminIsSuperset(t *testing.T) {
 	inner := teapotHandler()
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -148,8 +133,6 @@ func TestRequireScope_AdminIsSuperset(t *testing.T) {
 	}
 }
 
-// TestRequireScope_NoPrincipalPassesThrough: when auth is disabled
-// the context has no principal; requireScope must not 401.
 func TestRequireScope_NoPrincipalPassesThrough(t *testing.T) {
 	inner := teapotHandler()
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
@@ -160,10 +143,6 @@ func TestRequireScope_NoPrincipalPassesThrough(t *testing.T) {
 	}
 }
 
-// 403 body for a missing-scope rejection is structured JSON
-// with code, missing_scope, principal, and a human message. Pinned
-// here so a future reword of the message can't silently break the
-// logs-client parser (or any third-party SDK consuming the shape).
 func TestRequireScope_ForbiddenBodyShape(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/x", nil)
 	p := &Principal{Name: "warm-runner-7", Kind: "runner", Scopes: []string{ScopeNodesClaim}}
@@ -194,9 +173,6 @@ func TestRequireScope_ForbiddenBodyShape(t *testing.T) {
 	}
 }
 
-// 401 body (no token / invalid token) carries the
-// "unauthenticated" code and a non-empty message but no scope or
-// principal -- auth never resolved.
 func TestMiddleware_UnauthenticatedBodyShape(t *testing.T) {
 	a := NewAuthenticator(newStoreForAuth(t), 0)
 	req := httptest.NewRequest(http.MethodPost, "/x", nil)

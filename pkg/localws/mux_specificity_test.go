@@ -6,11 +6,6 @@ import (
 	"testing"
 )
 
-// TestMuxSpecificity_ApiV1Routing pins the assumption that Go 1.22's
-// ServeMux picks the most specific pattern (not first-registered, not
-// longest-prefix). If this fails, dashboard /api/v1 routes silently
-// fall through to the controller's catch-all and the dashboard goes
-// dark.
 func TestMuxSpecificity_ApiV1Routing(t *testing.T) {
 	t.Parallel()
 
@@ -50,9 +45,6 @@ func TestMuxSpecificity_ApiV1Routing(t *testing.T) {
 	}
 }
 
-// TestMuxSpecificity_S3OnlyMode pins conditional routing in S3-only
-// mode: with no controller catch-all, /api/v1/runs and
-// /api/v1/runs/{id} must land on dashboard handlers.
 func TestMuxSpecificity_S3OnlyMode(t *testing.T) {
 	t.Parallel()
 

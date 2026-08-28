@@ -1,10 +1,5 @@
 "use client";
 
-// Cluster status: services health + fleet (per-runner detail).
-//
-// Data sources:
-//   /api/v1/health/services - controller + logs (+ ExtraServices)
-//   /api/v1/agents          - runners seen in the last hour
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -78,8 +73,6 @@ function typeBadge(kind: string): { label: string; cls: string } {
   }
 }
 
-// Sort rule: busy agents first, then by type (agent, pool, local,
-// other), then name.
 function sortAgents(a: Agent, b: Agent): number {
   if (a.status !== b.status) return a.status === "busy" ? -1 : 1;
   if (a.type !== b.type) {

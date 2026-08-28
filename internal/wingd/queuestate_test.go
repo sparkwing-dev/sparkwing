@@ -14,13 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// TestQueueState_HostPressureExplainsWait sets a host under heavy external
-// (non-sparkwing) load and, with a run already holding, admits a second run
-// that needs more than the remaining headroom. The queue view must carry the
-// headroom decomposition (reserve, external, available) and a per-waiter
-// blocking reason naming the external load -- the queue is not silent about a
-// host-pressure wait. A prior holder is present so the wait is real
-// backpressure and not the liveness floor, which would admit a sole run.
 func TestQueueState_HostPressureExplainsWait(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
@@ -140,10 +133,6 @@ func TestQueueState_PositiveGrantRestoresExternalPressureAccounting(t *testing.T
 	}
 }
 
-// TestQueueState_BlockingReasonExplainsChargeSource queues a run whose cost
-// was resolved from a measured profile and asserts the waiter's blocking
-// reason and its standalone CostRationale both explain where the charge came
-// from, not just its size.
 func TestQueueState_BlockingReasonExplainsChargeSource(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
@@ -442,11 +431,6 @@ func TestQueueState_DecodesNodeParticipantIdentity(t *testing.T) {
 	}
 }
 
-// TestQueueState_ResourceRowsReconcile puts a host under external load with a
-// run holding, then asserts the reported cores row balances exactly:
-// capacity - held - reserved - external = available. The external the queue
-// shows is the one the availability math used, so the arithmetic never looks
-// broken even though the raw load sample is deadbanded.
 func TestQueueState_ResourceRowsReconcile(t *testing.T) {
 	home := shortHome(t)
 	sampler := newFakeSampler(10, 64<<30)
@@ -475,8 +459,6 @@ func TestQueueState_ResourceRowsReconcile(t *testing.T) {
 	}
 }
 
-// fakeProcSampler feeds controllable per-pid CPU fractions so stall
-// flagging is exercised without a real busy or idle process.
 type fakeProcSampler struct {
 	mu    sync.Mutex
 	usage map[int]wingd.ProcUsage
@@ -540,8 +522,6 @@ func TestQueueState_CarriesDaemonVersionAndUptime(t *testing.T) {
 	}
 }
 
-// writeContainerFixture lays a minimal cgroup v2 tree under a fresh temp
-// root, so a daemon pointed at it clamps capacity to the container limit.
 func writeContainerFixture(t *testing.T, cpuMax, memMax string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -560,10 +540,6 @@ func writeContainerFixture(t *testing.T, cpuMax, memMax string) string {
 	return root
 }
 
-// TestQueueState_ClampsCapacityToContainerLimit points a daemon on a
-// 24-core, 24 GiB host at a 6-core, 6 GiB cgroup and asserts the ledger,
-// the container row, and an explicit budget compose: capacity is the
-// container's, and a budget below it caps further.
 func TestQueueState_ClampsCapacityToContainerLimit(t *testing.T) {
 	home := shortHome(t)
 	root := writeContainerFixture(t, "600000 100000", "6442450944")
@@ -608,8 +584,6 @@ func TestQueueState_ClampsCapacityToContainerLimit(t *testing.T) {
 	}
 }
 
-// TestQueueState_NoContainerWhenUnlimited confirms a daemon whose cgroup
-// imposes no limit reports the host totals and no container row.
 func TestQueueState_NoContainerWhenUnlimited(t *testing.T) {
 	home := shortHome(t)
 	root := writeContainerFixture(t, "max 100000", "max")

@@ -1,17 +1,8 @@
 #!/usr/bin/env bash
-# sparkwing run: flaky-detect
-# desc: Run Go tests N times and report flaky tests with failure rates
-# arg: runs (optional, default: 10) Number of test iterations
-# arg: package (optional, default: ./...) Go package pattern
-# arg: load (optional, default: 1) Concurrent copies per iteration
 set -euo pipefail
 
 RUNS="${1:-10}"
 PACKAGE="${2:-./...}"
-# Hunting a scheduling race means raising this past the CPU count, but it stays
-# opt-in: packages bound by a shared resource rather than by CPU, such as the
-# docker-backed service suites, fail under any concurrency, and a detector that
-# cries wolf on them is one nobody reads.
 LOAD="${3:-1}"
 
 if [[ ! "$LOAD" =~ ^[1-9][0-9]*$ ]]; then
@@ -19,8 +10,6 @@ if [[ ! "$LOAD" =~ ^[1-9][0-9]*$ ]]; then
   exit 2
 fi
 
-# Each iteration produces LOAD results per test, so every denominator below
-# counts observations rather than iterations; the two only coincide at load 1.
 OBSERVATIONS=$((RUNS * LOAD))
 
 CYAN="\033[36m"
@@ -46,10 +35,6 @@ declare -A FAIL_RUNS
 for i in $(seq 1 "$RUNS"); do
   printf "  run %2d/%d ... " "$i" "$RUNS"
 
-  # Run LOAD copies at once. The flakes worth catching are races, not
-  # repeats: a serial rerun of one package leaves the box idle, so reader
-  # goroutines never starve and short leases never straddle a slow write.
-  # Concurrent copies put the package under what `go test ./...` does to it.
   PIDS=()
   OUTPUTS=()
   for c in $(seq 1 "$LOAD"); do
@@ -69,9 +54,6 @@ for i in $(seq 1 "$RUNS"); do
     echo -e "${RED}fail${RESET}"
   fi
 
-  # Parse results. Counts are per observation, but the run list is per
-  # iteration: a test that fails in every concurrent copy still failed run $i
-  # once, so the copies are pooled here before the run number is recorded.
   declare -A ITER_FAILED=()
   for OUTPUT in "${OUTPUTS[@]}"; do
     while IFS= read -r line; do
@@ -94,16 +76,10 @@ done
 
 echo ""
 
-# Collect all test names
-# Initialised empty rather than merely declared: under `set -u` an associative
-# array with no elements is still unset, so ${#ALL_TESTS[@]} aborts the report
-# whenever a run produced no test lines at all -- a package with no tests, or
-# one that failed to compile.
 declare -A ALL_TESTS=()
 for t in "${!PASS_COUNT[@]}"; do ALL_TESTS[$t]=1; done
 for t in "${!FAIL_COUNT[@]}"; do ALL_TESTS[$t]=1; done
 
-# Categorize
 FLAKY=()
 ALWAYS_FAIL=()
 ALWAYS_PASS=()
@@ -122,7 +98,6 @@ for t in "${!ALL_TESTS[@]}"; do
   fi
 done
 
-# Report
 if [[ ${#FLAKY[@]} -gt 0 ]]; then
   echo -e "${YELLOW}${BOLD}Flaky tests (${#FLAKY[@]})${RESET}"
   for t in "${FLAKY[@]}"; do
@@ -147,7 +122,6 @@ fi
 echo -e "${GREEN}${BOLD}Stable tests: ${#ALWAYS_PASS[@]}${RESET}"
 echo -e "${DIM}Total unique tests seen: ${#ALL_TESTS[@]}${RESET}"
 
-# Write JSON report for dashboard
 JSON_OUT="${SPARKWING_FLAKY_REPORT:-flaky-report.json}"
 timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 {

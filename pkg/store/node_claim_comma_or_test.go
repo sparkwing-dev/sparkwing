@@ -9,10 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestNodeClaim_CommaORTermClaimableByEitherAlternative verifies the
-// comma-OR term semantics on the claim path: a node demanding
-// "os=linux,os=macos" is claimable by either a linux runner or a
-// macos runner.
 func TestNodeClaim_CommaORTermClaimableByEitherAlternative(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {
@@ -46,10 +42,6 @@ func TestNodeClaim_CommaORTermClaimableByEitherAlternative(t *testing.T) {
 	}
 }
 
-// TestNodeClaim_MixedAndOrTerms verifies AND-across-terms with OR
-// inside each term: needs ("os=linux,os=macos", "arch=amd64") means
-// (linux OR macos) AND amd64. A runner missing amd64 is rejected;
-// runners with either OS and amd64 are accepted.
 func TestNodeClaim_MixedAndOrTerms(t *testing.T) {
 	ctx := context.Background()
 	cases := []struct {
@@ -84,9 +76,6 @@ func TestNodeClaim_MixedAndOrTerms(t *testing.T) {
 	}
 }
 
-// TestNodeClaim_BareLabelCommaOR verifies the bare-label form
-// (gpu,fpga) -- runner having either claims; runner with neither is
-// rejected.
 func TestNodeClaim_BareLabelCommaOR(t *testing.T) {
 	ctx := context.Background()
 	s := newStoreT(t)

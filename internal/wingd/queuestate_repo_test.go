@@ -9,11 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// TestQueueState_RepoChildAttachmentAndEventsWindow drives a parent
-// admission carrying a repo identity, attaches a child to its lease, and
-// asserts the queue snapshot carries the repo on both rows, renders the
-// child as an attached holder under its parent, and summarizes the grant
-// in the events window.
 func TestQueueState_RepoChildAttachmentAndEventsWindow(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, Version: "v1", GraceWindow: -1})

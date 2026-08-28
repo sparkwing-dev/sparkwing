@@ -80,8 +80,6 @@ func TestPodRunnerInfo_EmptyEnvReturnsNil(t *testing.T) {
 	}
 }
 
-// fakeAdvRunner satisfies runner.Runner + runner.LabelAdvertiser
-// for the label-classification test.
 type fakeAdvRunner struct {
 	labels []string
 }

@@ -15,32 +15,18 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
-// VendoredDirName is the subdirectory of a consumer's .sparkwing/ where
-// vendored (ejected) spark module source is written.
 const VendoredDirName = "sparks"
 
-// VendorResult describes a completed vendor operation.
 type VendorResult struct {
-	// ModulePath is the full Go module path that was vendored.
 	ModulePath string
-	// Version is the concrete version the module was resolved to.
+
 	Version string
-	// Dest is the absolute path of the copied source tree.
+
 	Dest string
-	// RelReplace is the path used in the go.mod replace directive,
-	// relative to the modfile (e.g. "./sparks/templates").
+
 	RelReplace string
 }
 
-// Vendor ejects a spark module's source into
-// <sparkwingDir>/sparks/<base>/ and adds a `replace <module> =>
-// ./sparks/<base>` directive to <sparkwingDir>/go.mod, then runs
-// `go mod tidy`. The module version is read from the consumer's go.mod
-// require list, falling back to `latest`. Because the replace points at
-// the copied tree, the consumer's import paths are unchanged and
-// transitive dependencies keep resolving; the user now owns the code.
-//
-// Vendor refuses to overwrite an existing destination directory.
 func Vendor(ctx context.Context, sparkwingDir, modulePath string) (*VendorResult, error) {
 	if sparkwingDir == "" {
 		return nil, errors.New("sparks: sparkwingDir must not be empty")
@@ -99,8 +85,6 @@ func Vendor(ctx context.Context, sparkwingDir, modulePath string) (*VendorResult
 	}, nil
 }
 
-// requiredVersion returns the version pinned for modulePath in the
-// consumer's go.mod require list, or "" when the module is not required.
 func requiredVersion(rawGoMod []byte, goModPath, modulePath string) string {
 	f, err := modfile.Parse(goModPath, rawGoMod, nil)
 	if err != nil {
@@ -114,8 +98,6 @@ func requiredVersion(rawGoMod []byte, goModPath, modulePath string) string {
 	return ""
 }
 
-// modDownloadJSON is the subset of `go mod download -json` output we
-// consume.
 type modDownloadJSON struct {
 	Path    string
 	Version string
@@ -123,9 +105,6 @@ type modDownloadJSON struct {
 	Error   string
 }
 
-// downloadModule runs `go mod download -json <module>@<version>` from
-// sparkwingDir and returns the module-cache directory plus the concrete
-// resolved version.
 func downloadModule(ctx context.Context, sparkwingDir, modulePath, version string) (dir, resolved string, err error) {
 	cmd := exec.CommandContext(ctx, goBin(), "mod", "download", "-json", modulePath+"@"+version)
 	cmd.Dir = sparkwingDir
@@ -147,9 +126,6 @@ func downloadModule(ctx context.Context, sparkwingDir, modulePath, version strin
 	return info.Dir, info.Version, nil
 }
 
-// copyModuleTree recursively copies src to dst, skipping the top-level
-// vendor/ directory. Regular files are copied with 0644 permissions
-// regardless of the read-only source (module-cache files are 0444).
 func copyModuleTree(src, dst string) error {
 	return filepath.WalkDir(src, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -193,9 +169,6 @@ func copyFile(src, dst string) error {
 	return out.Close()
 }
 
-// makeTreeWritable adds the owner-write bit to every file and directory
-// under root. The module cache is read-only, so the copied tree would
-// otherwise be un-editable.
 func makeTreeWritable(root string) error {
 	return filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -209,9 +182,6 @@ func makeTreeWritable(root string) error {
 	})
 }
 
-// addReplaceDirective adds `replace modulePath => relReplace` to the
-// modfile at goModPath and writes it back. The rest of the file is
-// preserved by round-tripping through modfile.
 func addReplaceDirective(goModPath string, rawGoMod []byte, modulePath, relReplace string) error {
 	f, err := modfile.Parse(goModPath, rawGoMod, nil)
 	if err != nil {

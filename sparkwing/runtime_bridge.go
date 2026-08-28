@@ -2,44 +2,23 @@ package sparkwing
 
 import "context"
 
-// runtimePlumbingKeys bundles the context keys that internal/sparkwingruntime
-// needs in order to install and read the orchestrator-facing values
-// (dry-run flag, runner info, step range, spawn handler, ref
-// resolver). Holding the keys in one struct keeps the public surface
-// of this package small: a pipeline author sees a single
-// `RuntimePlumbing` entry in autocomplete rather than seven.
 type runtimePlumbingKeys struct {
-	DryRun           any
-	Runner           any
-	SpawnHandler     any
-	StepRange        any
-	JSONRefResolver  any
-	PipelineResolver any
-	PipelineAwaiter  any
-	Inputs           any
-	PipelineSecrets  any
-	SecretResolver   any
-	Logger           any
-	Node             any
-	// ResolvedArgs carries the v0.6 typed-args resolution result --
-	// a map keyed by flag name with each resolved Go value. Reads
-	// via sparkwing.Arg[T](ctx, name). The framework installs it on
-	// the run context after running Schema.Resolve.
-	ResolvedArgs any
-
-	// ProfileResolution carries the active profile's default-args,
-	// name, and local/remote flag for the v0.6 args resolver. The
-	// orchestrator installs it on the plan-time ctx so the
-	// registration's invoke() can feed it into ResolveInputs. Read
-	// path is internal to the sparkwing package.
+	DryRun            any
+	Runner            any
+	SpawnHandler      any
+	StepRange         any
+	JSONRefResolver   any
+	PipelineResolver  any
+	PipelineAwaiter   any
+	Inputs            any
+	PipelineSecrets   any
+	SecretResolver    any
+	Logger            any
+	Node              any
+	ResolvedArgs      any
 	ProfileResolution any
 }
 
-// runtimePlumbingFns bundles function pointers to unexported runtime-
-// mutator methods on author-facing types (Plan, JobGroup, WorkStep,
-// SpawnSpec). Holding them here lets internal/orchestrator drive plan
-// execution without those methods appearing in autocomplete or godoc
-// on the author surface.
 type runtimePlumbingFns struct {
 	PlanInsertChild        func(p *Plan, child *JobNode) error
 	PlanInsertExpanded     func(p *Plan, source *JobNode, children []*JobNode) error

@@ -14,10 +14,6 @@ func testBudget(t *testing.T) *sparkwing.ConcurrencyGroup {
 	return sparkwing.BoxToolBudget("golangci-lint", 8, time.Minute)
 }
 
-// TestToolSlot_NoProviderFallsBackRatherThanProceeding is the safety
-// case. A run with no admission daemon behind it must report that it
-// holds nothing, because the caller uses the answer to decide whether to
-// drop a tool's own lock.
 func TestToolSlot_NoProviderFallsBackRatherThanProceeding(t *testing.T) {
 	release, granted := sparkwing.ToolSlot(context.Background(), testBudget(t), 100)
 	if granted {
@@ -29,9 +25,6 @@ func TestToolSlot_NoProviderFallsBackRatherThanProceeding(t *testing.T) {
 	release()
 }
 
-// TestToolSlot_AcquireFailureFallsBack covers a daemon that was reachable
-// when the run started and is not reachable now. The step must fall back,
-// never proceed as if bounded.
 func TestToolSlot_AcquireFailureFallsBack(t *testing.T) {
 	ctx := sparkwing.WithToolSlotProvider(context.Background(),
 		func(context.Context, *sparkwing.ConcurrencyGroup, int) (func(), error) {
@@ -62,8 +55,6 @@ func TestToolSlot_GrantedReturnsProviderRelease(t *testing.T) {
 	}
 }
 
-// TestToolSlot_GrantedWithNilReleaseIsStillSafeToDefer guards the
-// `defer release()` shape the doc comment recommends.
 func TestToolSlot_GrantedWithNilReleaseIsStillSafeToDefer(t *testing.T) {
 	ctx := sparkwing.WithToolSlotProvider(context.Background(),
 		func(context.Context, *sparkwing.ConcurrencyGroup, int) (func(), error) {
@@ -101,8 +92,6 @@ func TestToolSlot_PassesTheDeclaredCostThrough(t *testing.T) {
 	}
 }
 
-// TestBoxToolBudget_CapacityIsCentiCores pins the unit. A budget counted
-// in slots cannot survive a tool getting more expensive.
 func TestBoxToolBudget_CapacityIsCentiCores(t *testing.T) {
 	g := sparkwing.BoxToolBudget("t", 8, time.Minute)
 	if got := g.Limit().Capacity; got != 800 {

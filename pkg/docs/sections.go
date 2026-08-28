@@ -85,8 +85,7 @@ func splitSections(slug, body string) []Section {
 	}
 
 	fence := ""
-	// stack[d] is the innermost heading seen at depth d, so a new
-	// heading's ancestors are everything shallower still standing.
+
 	var stack []string
 	for i, line := range lines {
 		if marker := fenceMarker(line); marker != "" {
@@ -106,9 +105,7 @@ func splitSections(slug, body string) []Section {
 				for len(stack) < level-1 {
 					stack = append(stack, "")
 				}
-				// Skip the H1: it is the doc title, which the slug
-				// already carries, so repeating it costs width in every
-				// result line and distinguishes nothing.
+
 				var crumbs []string
 				for d, a := range stack {
 					if d > 0 && a != "" {
@@ -128,12 +125,6 @@ func splitSections(slug, body string) []Section {
 	return out
 }
 
-// fenceMarker returns the run of backticks or tildes opening or closing
-// a fenced block, or "" for an ordinary line.
-//
-// The run is returned rather than a bool so a nested fence closes at
-// the right depth: a ``` inside a ````-fenced block is content, and a
-// closing fence must be at least as long as the one that opened it.
 func fenceMarker(line string) string {
 	t := strings.TrimLeft(line, " ")
 	for _, c := range []byte{'`', '~'} {
@@ -148,7 +139,6 @@ func fenceMarker(line string) string {
 	return ""
 }
 
-// parseHeading recognizes an ATX heading (#, ##, ...).
 func parseHeading(line string) (level int, text string, ok bool) {
 	if !strings.HasPrefix(line, "#") {
 		return 0, "", false
@@ -163,18 +153,6 @@ func parseHeading(line string) (level int, text string, ok bool) {
 	return i, strings.TrimSpace(line[i:]), true
 }
 
-// nonCurrentPenalty sinks documents that describe something other than
-// current behavior below every reference hit.
-//
-// A proposal records what someone wanted to build, tagged with a status
-// that is frequently "draft" or "not implemented"; a migration guide
-// records what changed between two versions. Ranked alongside reference
-// pages they are worse than noise, because both tend to be short and
-// the tie-break favors tight sections -- searching "trigger" returned a
-// redesign sketch above the schema that exists. Both stay searchable,
-// since "why is it like this" and "what changed in v0.16" are real
-// questions; they just never answer "how does this work" ahead of the
-// page that documents it.
 func nonCurrentPenalty(slug string) int {
 	if strings.HasPrefix(slug, "proposals/") || strings.HasPrefix(slug, "migrations/") {
 		return 1000
@@ -182,32 +160,14 @@ func nonCurrentPenalty(slug string) int {
 	return 0
 }
 
-// wholeWord reports whether tok appears in hay as a word rather than
-// buried inside a longer one.
-//
-// The distinction decides the ranking. "command" is a substring of
-// "Subcommands", so substring-matching a heading made the generated CLI
-// reference's subcommand tables the top hit for "run shell command" --
-// a list of verb names ranked above the page explaining how to run a
-// shell command, because it was shorter and the heading "matched".
 func wholeWord(hay, tok string) bool {
 	return matchAt(hay, tok, false)
 }
 
-// wordPrefix reports whether tok starts a word in hay: "shell" matches
-// "shelling", "command" does not match "subcommands".
-//
-// This is the cheapest stand-in for stemming, and it is what closes the
-// gap between how someone asks and how a doc is titled. "How do I run a
-// shell command" has to reach a section headed "Exec -- shelling out";
-// requiring an exact word never gets there, and allowing any substring
-// gets there via every compound noun in the corpus.
 func wordPrefix(hay, tok string) bool {
 	return matchAt(hay, tok, true)
 }
 
-// matchAt finds tok at a word boundary. prefixOK allows the match to end
-// mid-word ("shell" in "shelling"); it must always start one.
 func matchAt(hay, tok string, prefixOK bool) bool {
 	for i := 0; i <= len(hay)-len(tok); {
 		j := strings.Index(hay[i:], tok)
@@ -231,11 +191,6 @@ func isWordByte(s string, i int) bool {
 	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 
-// Match weights. A whole-word heading hit is the section that is *about*
-// the query; a substring heading hit is usually an accident of English
-// compounding, so it scores below a whole-word body hit -- the section
-// that at least discusses the thing beats the one whose title merely
-// contains its letters.
 const (
 	scoreHeadingWord   = 20
 	scoreHeadingPrefix = 12
@@ -247,9 +202,6 @@ const (
 	scoreBodySubstr    = 1
 )
 
-// minToken drops tokens too short to discriminate. "a" in "Exec run a
-// command" matches nearly every section in the corpus, so it
-// contributes only noise to the score while still narrowing nothing.
 const minToken = 2
 
 // SearchSections returns the sections matching every token in query,
@@ -286,11 +238,7 @@ func SearchSections(query string) []Section {
 		for _, s := range secs {
 			hay := strings.ToLower(s.Body)
 			head := strings.ToLower(s.Heading + " " + s.Slug)
-			// The breadcrumb scores below the heading. It says what a
-			// section is *under*, not what it is about: every
-			// "Subcommands" table nested beneath `sparkwing runs
-			// triggers` would otherwise answer "triggers" as strongly as
-			// the section that documents them.
+
 			crumb := strings.ToLower(s.Breadcrumb)
 			score, all := 0, true
 			for _, tok := range tokens {

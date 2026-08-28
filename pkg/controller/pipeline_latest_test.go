@@ -13,8 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// seedFinishedRun inserts a run in a terminal state with a specific
-// finished_at. Centralized so tests read as data, not setup.
 func seedFinishedRun(t *testing.T, st *store.Store, id, pipeline, status string, startedAgo, finishedAgo time.Duration) {
 	t.Helper()
 	ctx := context.Background()
@@ -32,8 +30,6 @@ func seedFinishedRun(t *testing.T, st *store.Store, id, pipeline, status string,
 	}
 }
 
-// TestPipelineLatest_HTTPRoundTrip exercises the full read path:
-// seed, query via Go client, decode.
 func TestPipelineLatest_HTTPRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -59,8 +55,6 @@ func TestPipelineLatest_HTTPRoundTrip(t *testing.T) {
 	}
 }
 
-// TestPipelineLatest_NotFound404 proves missing data surfaces as
-// ErrNotFound through the client so SDK callers can switch on it.
 func TestPipelineLatest_NotFound404(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -79,8 +73,6 @@ func TestPipelineLatest_NotFound404(t *testing.T) {
 	}
 }
 
-// TestPipelineLatest_MaxAgeFilter verifies the max_age query param
-// is plumbed through from client to store.
 func TestPipelineLatest_MaxAgeFilter(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

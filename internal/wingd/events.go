@@ -8,29 +8,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// eventWindowSpan is how far back the daemon's admission-outcome window
-// reaches; older entries are pruned on every append and summary.
 const eventWindowSpan = 24 * time.Hour
 
-// eventWindowCap bounds the window's entry count so a pathological burst
-// cannot grow the persisted state without limit; the oldest entries are
-// dropped first.
 const eventWindowCap = 4096
 
-// admissionEvent is one admission outcome in the daemon's rolling
-// window. Exactly one Kind per entry; WaitMS is meaningful for grants
-// and Key for evictions.
 type admissionEvent struct {
 	At     time.Time `json:"at"`
 	Kind   string    `json:"kind"`
 	WaitMS int64     `json:"wait_ms,omitempty"`
 	Key    string    `json:"key,omitempty"`
-	// BackfillCount is the older waiter's cumulative bypass count after a
-	// backfill event. A transition to one activates starvation protection.
+
 	BackfillCount uint64 `json:"backfill_count,omitempty"`
 }
 
-// Event kinds recorded in the window.
 const (
 	eventGrant        = "grant"
 	eventEviction     = "eviction"
@@ -41,9 +31,6 @@ const (
 	eventBackfill     = "backfill"
 )
 
-// eventWindow is the daemon's bounded rolling record of admission
-// outcomes. It has its own lock so the persistence path can snapshot it
-// without holding the daemon mutex.
 type eventWindow struct {
 	mu      sync.Mutex
 	entries []admissionEvent
@@ -57,8 +44,6 @@ func (w *eventWindow) record(now time.Time, ev admissionEvent) {
 	w.pruneLocked(now)
 }
 
-// restore seeds the window from persisted entries, dropping anything
-// already outside the span.
 func (w *eventWindow) restore(now time.Time, entries []admissionEvent) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -80,15 +65,12 @@ func (w *eventWindow) pruneLocked(now time.Time) {
 	}
 }
 
-// reset clears the window, so an operator can zero the recent-events summary
-// after resolving an incident.
 func (w *eventWindow) reset() {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.entries = nil
 }
 
-// snapshot returns a copy of the live entries for persistence.
 func (w *eventWindow) snapshot(now time.Time) []admissionEvent {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -96,9 +78,6 @@ func (w *eventWindow) snapshot(now time.Time) []admissionEvent {
 	return append([]admissionEvent(nil), w.entries...)
 }
 
-// summary folds the window into the wire form the queue view renders.
-// Nil when the window is empty, so older-daemon and nothing-happened
-// payloads look the same.
 func (w *eventWindow) summary(now time.Time) *wingwire.EventsWindow {
 	w.mu.Lock()
 	defer w.mu.Unlock()

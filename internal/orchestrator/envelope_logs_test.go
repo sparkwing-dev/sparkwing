@@ -12,9 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
-// TestEnvelopeLog_PersistsRunStartFinish verifies the envelope tee
-// writes run_start + run_finish records (and node_start/node_end) to
-// <runDir>/_envelope.ndjson during a local dispatch.
 func TestEnvelopeLog_PersistsRunStartFinish(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
@@ -39,10 +36,6 @@ func TestEnvelopeLog_PersistsRunStartFinish(t *testing.T) {
 	}
 }
 
-// TestEnvelopeLog_RunStartCarriesLogPath pins the agent-facing
-// contract: the run_start record names the directory it is itself
-// being written into, so a caller holding the stream (or just the run
-// id) can read the logs off disk without scraping them.
 func TestEnvelopeLog_RunStartCarriesLogPath(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
@@ -78,8 +71,6 @@ func TestEnvelopeLog_RunStartCarriesLogPath(t *testing.T) {
 	}
 }
 
-// TestJobLogs_EventsOnlyFiltersBodyLines confirms --events-only
-// drops exec_line records and keeps the bracket events.
 func TestJobLogs_EventsOnlyFiltersBodyLines(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
@@ -120,8 +111,6 @@ func TestJobLogs_EventsOnlyFiltersBodyLines(t *testing.T) {
 	}
 }
 
-// TestJobLogs_NoEventsMatchesLegacy verifies --no-events restores
-// today's body-only behavior so existing scripts keep working.
 func TestJobLogs_NoEventsMatchesLegacy(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
@@ -145,9 +134,6 @@ func TestJobLogs_NoEventsMatchesLegacy(t *testing.T) {
 	}
 }
 
-// TestJobLogs_DefaultIsMergedStream confirms the new default mode
-// includes both bracket events and body output -- the canonical
-// "watch this run" surface.
 func TestJobLogs_DefaultIsMergedStream(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
@@ -170,8 +156,6 @@ func TestJobLogs_DefaultIsMergedStream(t *testing.T) {
 	}
 }
 
-// TestJobLogs_GrepWorksWithEventsOnly confirms --grep composes with
-// --events-only, satisfying the ticket's filter-flags spec.
 func TestJobLogs_GrepWorksWithEventsOnly(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
@@ -200,7 +184,6 @@ func TestJobLogs_GrepWorksWithEventsOnly(t *testing.T) {
 	}
 }
 
-// TestJobLogs_EventsOnlyAndNoEventsConflict guards the API contract.
 func TestJobLogs_EventsOnlyAndNoEventsConflict(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,

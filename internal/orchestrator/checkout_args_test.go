@@ -11,10 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// pointRuntimeAt makes root the project root the SDK runtime reports,
-// the way a pipeline binary's own walk-up from its working directory
-// would. Restored after the test so the repo's own config cannot leak
-// into unrelated cases.
 func pointRuntimeAt(t *testing.T, root string) {
 	t.Helper()
 	prev := sparkwing.CurrentRuntime().WorkDir
@@ -22,8 +18,6 @@ func pointRuntimeAt(t *testing.T, root string) {
 	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
 }
 
-// checkoutAt writes a project checkout containing yaml and points the
-// runtime at it. Returns the checkout root.
 func checkoutAt(t *testing.T, yaml string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -42,15 +36,10 @@ func writeProjectConfig(t *testing.T, root, yaml string) {
 	}
 }
 
-// captureLog returns a logger writing into buf, for asserting on
-// warnings the caller must not miss.
 func captureLog(buf *bytes.Buffer) *slog.Logger {
 	return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelWarn}))
 }
 
-// checkoutInvokeArgs is the executing side's half of the decision that
-// keeps the yaml layers OUT of the run row: both must re-read them, in
-// the same order, or a stored run replans differently than it planned.
 func TestCheckoutInvokeArgs_LayersYAMLUnderStored(t *testing.T) {
 	checkoutAt(t, `defaults:
   args:
@@ -65,9 +54,9 @@ pipelines:
 `)
 	got := checkoutInvokeArgs("deploy", map[string]string{"region": "us-east"}, slog.Default())
 	want := map[string]string{
-		"region": "us-east",    // stored beats defaults.args
-		"tier":   "premium",    // entry args beat defaults.args
-		"token":  "from-entry", // supplied only by the entry
+		"region": "us-east",
+		"tier":   "premium",
+		"token":  "from-entry",
 	}
 	for k, v := range want {
 		if got[k] != v {
@@ -79,8 +68,6 @@ pipelines:
 	}
 }
 
-// A pipeline the project config does not mention still gets the
-// project-wide defaults, and nothing else.
 func TestCheckoutInvokeArgs_UnlistedPipelineGetsDefaultsOnly(t *testing.T) {
 	checkoutAt(t, `defaults:
   args:
@@ -100,9 +87,6 @@ pipelines:
 	}
 }
 
-// A runner image with the pipeline baked in has no project checkout to
-// read. The stored args are then the whole set, unchanged and
-// un-copied -- the pre-existing behavior for that shape.
 func TestCheckoutInvokeArgs_NoProjectReturnsStored(t *testing.T) {
 	pointRuntimeAt(t, t.TempDir())
 
@@ -113,11 +97,6 @@ func TestCheckoutInvokeArgs_NoProjectReturnsStored(t *testing.T) {
 	}
 }
 
-// The resolved project root is the boundary. A checkout with a
-// .sparkwing/ but no sparkwing.yaml must NOT keep climbing: the pod's
-// remote-compile path unpacks its checkout under ~/.sparkwing/, so a
-// walk-up would let an operator's personal ~/.sparkwing/sparkwing.yaml
-// hand arguments to somebody else's pipeline.
 func TestCheckoutInvokeArgs_AncestorConfigIsNotMerged(t *testing.T) {
 	ancestor := t.TempDir()
 	writeProjectConfig(t, ancestor, `defaults:
@@ -136,10 +115,6 @@ func TestCheckoutInvokeArgs_AncestorConfigIsNotMerged(t *testing.T) {
 	}
 }
 
-// An unparseable sparkwing.yaml means this side plans with a different
-// argument set than the dispatcher used -- exactly the divergence this
-// path exists to close. Continuing is right; continuing silently is
-// not.
 func TestCheckoutInvokeArgs_MalformedConfigWarnsAndFallsBack(t *testing.T) {
 	checkoutAt(t, "defaults:\n  args:\n   - this is not a map\n\tand this is a tab\n")
 
@@ -157,10 +132,6 @@ func TestCheckoutInvokeArgs_MalformedConfigWarnsAndFallsBack(t *testing.T) {
 	}
 }
 
-// applyCheckoutProjectConfig fills the fields Run() reads, not a
-// pre-merged map, because guards are evaluated from opts.PipelineYAML.
-// Handing over only merged args is how a path ends up silently
-// ungated.
 func TestApplyCheckoutProjectConfig_FillsArgsAndGuards(t *testing.T) {
 	checkoutAt(t, `defaults:
   args:
@@ -186,14 +157,12 @@ pipelines:
 	if opts.PipelineYAML.Args["tier"] != "premium" {
 		t.Errorf("PipelineYAML.Args = %v, want the entry's args block", opts.PipelineYAML.Args)
 	}
-	// defaults.guards has to fall through to an entry that declares
-	// none, or a trigger is gated differently than `sparkwing run`.
+
 	if len(opts.PipelineYAML.Guards.Reject) != 1 {
 		t.Errorf("Guards = %+v, want the defaults.guards fallback applied", opts.PipelineYAML.Guards)
 	}
 }
 
-// A caller that already resolved the layers (the CLI) keeps them.
 func TestApplyCheckoutProjectConfig_DoesNotOverrideCaller(t *testing.T) {
 	checkoutAt(t, `defaults:
   args:

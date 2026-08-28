@@ -8,16 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// buildOnlyPlan returns a plan with this DAG:
-//
-//	prep ──┬──> test-phase-a
-//	       ├──> test-phase-b-shard-1
-//	       └──> test-phase-b-shard-2
-//
-//	standalone (no deps)
-//
-// `prep` is the shared prerequisite; the test-phase-* nodes are
-// sibling leaves. `standalone` is unrelated.
 func buildOnlyPlan(t *testing.T) *sparkwing.Plan {
 	t.Helper()
 	plan := sparkwing.NewPlan()

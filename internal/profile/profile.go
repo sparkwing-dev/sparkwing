@@ -1,28 +1,3 @@
-// Package profile manages named storage/connection profiles selected by
-// `--profile <name>`. A profile describes where a run's state, cache, and
-// logs live (the backend triple) plus any controller URL / token needed
-// to reach a remote controller.
-//
-// Path resolution (first match wins):
-//
-//  1. $SPARKWING_PROFILES
-//  2. $XDG_CONFIG_HOME/sparkwing/profiles.yaml
-//  3. $HOME/.config/sparkwing/profiles.yaml
-//
-// On-disk shape:
-//
-//	profiles:
-//	  laptop:
-//	    state: { type: sqlite }
-//	    cache: { type: filesystem, path: ~/.cache/sparkwing }
-//	    logs:  { type: filesystem, path: ~/.cache/sparkwing/logs }
-//	  prod:
-//	    controller:
-//	      url: https://api.example.dev
-//	      token: swu_...
-//	    # state/cache/logs implied by the controller when omitted.
-//
-// Missing optional fields come back as nil specs / empty strings.
 package profile
 
 import (
@@ -37,44 +12,24 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 )
 
-// Profile is one named connection bundle.
 type Profile struct {
 	Name string `yaml:"-"`
 
-	// Controller bundles the remote controller's URL and bearer token.
-	// Nil = laptop-local profile (no remote dispatch). When set, the
-	// operator's CLI talks to this controller for triggers, run state,
-	// log streaming, and auxiliary-service discovery (the cache pod
-	// URL for `sparkwing push` etc.). The token authenticates every
-	// request; nil/empty token = no Authorization header sent.
 	Controller *ControllerSpec `yaml:"controller,omitempty"`
 
-	// Secrets, State, Cache, and Logs are the per-surface backends
-	// this profile uses. Consume as a unit via Surfaces. A nil pointer
-	// means "not declared at this layer." When --profile X is active,
-	// the orchestrator uses this Surfaces bundle wholesale, ignoring
-	// any project defaults or pipeline overrides.
 	Secrets *backends.Spec `yaml:"secrets,omitempty"`
 	State   *backends.Spec `yaml:"state,omitempty"`
 	Cache   *backends.Spec `yaml:"cache,omitempty"`
 	Logs    *backends.Spec `yaml:"logs,omitempty"`
 
-	// MirrorLocal toggles whether local execution against this profile
-	// also writes state to the local SQLite store. Nil means the
-	// default (true); set false for automated workers that fire and
-	// forget. Consume via EffectiveMirrorLocal.
 	MirrorLocal *bool `yaml:"mirror_local,omitempty"`
 }
 
-// ControllerSpec is the nested controller block on a Profile.
 type ControllerSpec struct {
 	URL   string `yaml:"url"`
 	Token string `yaml:"token,omitempty"`
 }
 
-// ControllerURL returns the profile's controller URL or "" when no
-// controller is configured. Nil-safe at every level so callers don't
-// need a Controller != nil check before reading.
 func (p *Profile) ControllerURL() string {
 	if p == nil || p.Controller == nil {
 		return ""
@@ -82,8 +37,6 @@ func (p *Profile) ControllerURL() string {
 	return p.Controller.URL
 }
 
-// ControllerToken returns the profile's controller bearer token or
-// "" when none is configured. Nil-safe like ControllerURL.
 func (p *Profile) ControllerToken() string {
 	if p == nil || p.Controller == nil {
 		return ""
@@ -91,22 +44,10 @@ func (p *Profile) ControllerToken() string {
 	return p.Controller.Token
 }
 
-// HasController reports whether this profile dispatches to a remote
-// controller. Equivalent to ControllerURL() != "" but reads more
-// naturally at call sites.
 func (p *Profile) HasController() bool {
 	return p.ControllerURL() != ""
 }
 
-// InheritControllerDefaults fills empty URL/Token/TokenEnv/Controller
-// fields on any controller-typed surface from the profile's top-level
-// Controller block. A surface that's explicitly set keeps its own
-// values; this only fills gaps. Cuts boilerplate for the common case
-// where every surface routes through the same controller as the CLI
-// client connection -- a profiles.yaml that just declares
-// `controller: { url, token }` plus `state/cache/logs/secrets:
-// { type: controller }` becomes the complete spec, and surface specs
-// don't have to repeat `controller: <this-profile-name>` themselves.
 func (p *Profile) InheritControllerDefaults() {
 	if p == nil || p.Controller == nil {
 		return
@@ -127,8 +68,6 @@ func (p *Profile) InheritControllerDefaults() {
 	}
 }
 
-// Surfaces returns the profile's per-surface backends as a
-// backends.Surfaces. A nil profile yields a zero-valued Surfaces.
 func (p *Profile) Surfaces() backends.Surfaces {
 	if p == nil {
 		return backends.Surfaces{}
@@ -141,10 +80,6 @@ func (p *Profile) Surfaces() backends.Surfaces {
 	}
 }
 
-// EffectiveMirrorLocal reports whether local execution against this
-// profile should mirror state to the local SQLite store. Defaults to
-// true when unset, because laptop execution mirrors by default.
-// Nil-safe: a nil profile reports true.
 func (p *Profile) EffectiveMirrorLocal() bool {
 	if p == nil || p.MirrorLocal == nil {
 		return true
@@ -152,21 +87,14 @@ func (p *Profile) EffectiveMirrorLocal() bool {
 	return *p.MirrorLocal
 }
 
-// Config is the on-disk profiles.yaml file.
 type Config struct {
 	Profiles map[string]*Profile `yaml:"profiles,omitempty"`
 }
 
-// ErrNoProfile is returned by Resolve when no profile can be
-// identified.
 var ErrNoProfile = errors.New("no profile configured")
 
-// ErrProfileNotFound is returned when --on names a profile that
-// doesn't exist in profiles.yaml.
 var ErrProfileNotFound = errors.New("profile not found")
 
-// DefaultPath returns the resolved profiles.yaml path, honoring
-// SPARKWING_PROFILES > XDG_CONFIG_HOME > $HOME.
 func DefaultPath() (string, error) {
 	if v := os.Getenv("SPARKWING_PROFILES"); v != "" {
 		return v, nil
@@ -181,8 +109,6 @@ func DefaultPath() (string, error) {
 	return filepath.Join(home, ".config", "sparkwing", "profiles.yaml"), nil
 }
 
-// Load reads and parses profiles.yaml at path. Missing file returns
-// an empty Config without error; parse errors are surfaced.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -212,14 +138,6 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// validateSurfaceFields checks the fields each declared surface's type
-// cannot work without.
-//
-// Only the declared surfaces are checked, never the bundle: unlike a
-// project profile, a user profile may legitimately declare none of them
-// and let its controller imply all three. What it may not do is declare
-// `{type: s3}` with no bucket, which used to load clean and render as
-// `s3://`.
 func (p *Profile) validateSurfaceFields() error {
 	for surface, spec := range map[string]*backends.Spec{
 		"secrets": p.Secrets,
@@ -237,8 +155,6 @@ func (p *Profile) validateSurfaceFields() error {
 	return nil
 }
 
-// Save writes cfg to path atomically (write tmp, rename). Mode 0600
-// because profiles.yaml carries bearer tokens in plaintext.
 func Save(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -267,11 +183,6 @@ func Save(path string, cfg *Config) error {
 	return nil
 }
 
-// LoadAndResolve does DefaultPath + Load + Resolve in one call,
-// resolving explicitName through the chain (flag level; no project
-// hint). A nil profile is never returned for an empty name: the chain
-// returns (nil, nil) when explicitName is empty (the no-profile
-// path; project defaults apply at the orchestrator layer).
 func LoadAndResolve(explicitName string) (*Profile, error) {
 	path, err := DefaultPath()
 	if err != nil {
@@ -285,7 +196,6 @@ func LoadAndResolve(explicitName string) (*Profile, error) {
 	return p, err
 }
 
-// Names returns the profile names sorted alphabetically.
 func (c *Config) Names() []string {
 	out := make([]string, 0, len(c.Profiles))
 	for name := range c.Profiles {
@@ -295,8 +205,6 @@ func (c *Config) Names() []string {
 	return out
 }
 
-// HintMissing formats a human-readable error body pointing the
-// operator at next steps.
 func HintMissing(err error, cfg *Config) string {
 	base := err.Error()
 	if cfg != nil && len(cfg.Profiles) > 0 {

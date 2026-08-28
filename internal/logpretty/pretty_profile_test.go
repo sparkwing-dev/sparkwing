@@ -9,8 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// renderRunStart emits a run_start record (with the given profile +
-// backends attrs) and flushes, returning the rendered setup block.
 func renderRunStart(t *testing.T, prof, backends map[string]any) string {
 	t.Helper()
 	var buf bytes.Buffer

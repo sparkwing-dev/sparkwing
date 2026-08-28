@@ -19,8 +19,6 @@ func livenessPipe(t *testing.T) (read *os.File, closeWrite func()) {
 	return r, func() { _ = w.Close() }
 }
 
-// EOF on the pipe is the dispatcher's death. The node has to hear it
-// even though no signal was sent.
 func TestWatchLiveness_EOFCancelsTheNode(t *testing.T) {
 	r, closeWrite := livenessPipe(t)
 	gone := make(chan struct{})
@@ -37,11 +35,6 @@ func TestWatchLiveness_EOFCancelsTheNode(t *testing.T) {
 	}
 }
 
-// A step body that ignores its context survives the cancel. The grace
-// exists so such a node still stops instead of holding the machine for
-// a run nobody owns. (In a real node a write to the dead dispatcher's
-// stdout usually raises SIGPIPE first, but a node that writes nothing
-// would never trip that, and this is the case it covers.)
 func TestWatchLiveness_ExitsWhenCancelIsIgnored(t *testing.T) {
 	r, closeWrite := livenessPipe(t)
 	var code atomic.Int64
@@ -63,8 +56,6 @@ func TestWatchLiveness_ExitsWhenCancelIsIgnored(t *testing.T) {
 	}
 }
 
-// A node that stops on its own during the grace exits through its own
-// path; the guard must not race it to a different status.
 func TestWatchLiveness_NodeThatStopsInTimeIsNotKilled(t *testing.T) {
 	r, closeWrite := livenessPipe(t)
 	var exits atomic.Int64
@@ -72,7 +63,7 @@ func TestWatchLiveness_NodeThatStopsInTimeIsNotKilled(t *testing.T) {
 
 	closeWrite()
 	time.Sleep(100 * time.Millisecond)
-	stop() // safety: the node finished and the CLI is unwinding
+	stop()
 	time.Sleep(300 * time.Millisecond)
 
 	if got := exits.Load(); got != 0 {
@@ -80,10 +71,6 @@ func TestWatchLiveness_NodeThatStopsInTimeIsNotKilled(t *testing.T) {
 	}
 }
 
-// Without the dispatcher's say-so the descriptor is not ours. This
-// very test binary proves why that matters: `go test` hands it a pipe
-// on fd 3, so a probe that accepted any pipe would claim the
-// harness's descriptor and then read and close it.
 func TestOpenParentLivenessPipe_RefusesADescriptorNoDispatcherNamed(t *testing.T) {
 	t.Setenv(local.ParentLivenessFDEnv, "")
 	if f := openParentLivenessPipe(); f != nil {

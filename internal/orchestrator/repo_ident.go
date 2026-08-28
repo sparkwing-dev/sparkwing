@@ -8,14 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// repoShortName derives the short repo identity of the directory a run
-// was launched from: the basename of the repository the enclosing git
-// toplevel belongs to, found by walking up to the first directory
-// containing a .git entry. A .git directory is a normal checkout, so the
-// toplevel's own basename is the repo. A .git file is a linked worktree
-// or a submodule; a worktree resolves to the repository it was branched
-// from, because a worktree is one branch of a repo and not a repo of its
-// own. Empty when dir is not inside a git repository.
 func repoShortName(dir string) string {
 	d := filepath.Clean(dir)
 	for {
@@ -37,13 +29,6 @@ func repoShortName(dir string) string {
 	}
 }
 
-// worktreeRepoDir resolves the working directory of the repository a
-// linked worktree belongs to, from the "gitdir:" pointer in the
-// worktree's .git file. Git writes that pointer as
-// <common>/worktrees/<name>, where common is the repo's .git directory
-// (or the bare repo itself), so the repo is one or two levels up. It
-// returns "" for any other .git file -- a submodule's pointer has no
-// worktrees segment, and a submodule is its own repo for pricing.
 func worktreeRepoDir(gitFile, worktreeDir string) string {
 	raw, err := os.ReadFile(gitFile)
 	if err != nil {
@@ -73,9 +58,6 @@ func worktreeRepoDir(gitFile, worktreeDir string) string {
 	return strings.TrimSuffix(common, ".git")
 }
 
-// currentRepoShortName keeps profile reads and writes bound to the
-// configured run directory even when node code changes the process cwd.
-// Callers outside a configured runtime fall back to the process cwd.
 func currentRepoShortName() string {
 	if workDir := sparkwing.CurrentRuntime().WorkDir; workDir != "" {
 		return repoShortName(workDir)
@@ -87,14 +69,6 @@ func currentRepoShortName() string {
 	return repoShortName(wd)
 }
 
-// scopedProfileKey is the identity a pipeline's capacity profile is stored
-// under in the machine-global state database: repo-scoped, because pipeline
-// names repeat across repos (every scaffolded repo ships a "ci") and pooling
-// their samples and contended floors lets contention in one repo poison
-// another's pricing. A run outside any git repo keeps the bare pipeline name.
-// Every linked worktree of a repo shares the repo's key, because a pipeline
-// costs what it costs whichever branch runs it; keying per worktree throws
-// that learning away whenever work moves to a fresh branch.
 func scopedProfileKey(repo, pipeline string) string {
 	if repo == "" || pipeline == "" {
 		return pipeline
@@ -102,9 +76,6 @@ func scopedProfileKey(repo, pipeline string) string {
 	return repo + "/" + pipeline
 }
 
-// currentProfileKey scopes a pipeline's profile identity to the repo the
-// process runs from. Every profile read and write in one run goes through
-// this, so pricing, folds, and contention tallies always land on one row.
 func currentProfileKey(pipeline string) string {
 	return scopedProfileKey(currentRepoShortName(), pipeline)
 }

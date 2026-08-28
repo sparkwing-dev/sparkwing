@@ -13,11 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-// newTriggerHeartbeatServer returns an httptest.Server wired to a
-// single handler for POST /api/v1/triggers/*/heartbeat. The handler
-// is swapped between tests via the returned atomic pointer so each
-// subtest can program its own sequence without restarting the
-// server. handlerCalls counts only heartbeat requests.
 func newTriggerHeartbeatServer(t *testing.T) (*httptest.Server, *atomic.Value, *atomic.Int64) {
 	t.Helper()
 	var handler atomic.Value
@@ -41,8 +36,6 @@ func newTriggerHeartbeatServer(t *testing.T) (*httptest.Server, *atomic.Value, *
 	return ts, &handler, &calls
 }
 
-// withFastTriggerHeartbeat shrinks the trigger heartbeat timing knobs
-// so silence / reaped paths fire in milliseconds. Restores on cleanup.
 func withFastTriggerHeartbeat(t *testing.T, interval, timeout, silence time.Duration) {
 	t.Helper()
 	oldInterval := triggerHeartbeatInterval
@@ -66,8 +59,6 @@ type noopWriter struct{}
 
 func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
 
-// TestTriggerClaimHeartbeat_Reaped: controller returns 404 on the
-// first heartbeat. Expect: killChild invoked, outcome=Reaped.
 func TestTriggerClaimHeartbeat_Reaped(t *testing.T) {
 	withFastTriggerHeartbeat(t, 5*time.Millisecond, 50*time.Millisecond, time.Second)
 
@@ -93,9 +84,6 @@ func TestTriggerClaimHeartbeat_Reaped(t *testing.T) {
 	}
 }
 
-// TestTriggerClaimHeartbeat_Silenced: controller returns 500 on
-// every heartbeat. After silence window elapses, killChild invoked
-// and outcome=Silenced.
 func TestTriggerClaimHeartbeat_Silenced(t *testing.T) {
 	withFastTriggerHeartbeat(t, 10*time.Millisecond, 20*time.Millisecond, 100*time.Millisecond)
 
@@ -121,9 +109,6 @@ func TestTriggerClaimHeartbeat_Silenced(t *testing.T) {
 	}
 }
 
-// TestTriggerClaimHeartbeat_TransientRecovery: controller fails a few
-// times inside the silence window, then recovers. Heartbeat must
-// stay alive and not invoke killChild.
 func TestTriggerClaimHeartbeat_TransientRecovery(t *testing.T) {
 	withFastTriggerHeartbeat(t, 5*time.Millisecond, 20*time.Millisecond, 500*time.Millisecond)
 
@@ -155,7 +140,6 @@ func TestTriggerClaimHeartbeat_TransientRecovery(t *testing.T) {
 	}
 }
 
-// withFastPoolHeartbeat shrinks the node heartbeat timing knobs.
 func withFastPoolHeartbeat(t *testing.T, timeout, silence time.Duration) {
 	t.Helper()
 	oldTimeout := poolHeartbeatTimeout
@@ -168,9 +152,6 @@ func withFastPoolHeartbeat(t *testing.T, timeout, silence time.Duration) {
 	})
 }
 
-// TestRunPoolHeartbeat_ReapedCancelsNode: controller returns 409 on
-// the first heartbeat (reaper flipped the claim). killNode must be
-// invoked so the in-flight node execution stops.
 func TestRunPoolHeartbeat_ReapedCancelsNode(t *testing.T) {
 	withFastPoolHeartbeat(t, 50*time.Millisecond, time.Second)
 
@@ -205,9 +186,6 @@ func TestRunPoolHeartbeat_ReapedCancelsNode(t *testing.T) {
 	}
 }
 
-// TestRunPoolHeartbeat_SilenceCancelsNode: controller returns 500
-// repeatedly. After silence window elapses, killNode invoked and
-// heartbeat returns.
 func TestRunPoolHeartbeat_SilenceCancelsNode(t *testing.T) {
 	withFastPoolHeartbeat(t, 20*time.Millisecond, 100*time.Millisecond)
 

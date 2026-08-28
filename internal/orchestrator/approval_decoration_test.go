@@ -9,11 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestApproval_DecorationCarriesResolution drives a tiny approval
-// pipeline (timeout=200ms, policy=fail by default) through the same
-// store -> ListApprovalsForRun -> DecorateNodes -> NodeApprovalState
-// path the dashboard reads from /api/v1/runs/{id}?include=nodes.
-// The decorated gate node should expose who resolved it and when.
 func TestApproval_DecorationCarriesResolution(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,

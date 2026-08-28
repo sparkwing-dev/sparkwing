@@ -11,13 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestSchemaV14_UpgradeBackfillsSustainedFromPeak reconstructs a schema-13
-// pipeline_profiles store without the sustained_cores column, opens it with
-// the current binary, and asserts the upgrade prices every carried row at
-// exactly what it was charged before: cores come from sustained demand now,
-// but a profile measured before sustained figures existed has none, so the
-// backfill hands it its own peak rather than a zero that would drop the
-// pipeline back to a cold start.
 func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schema13.db")
 
@@ -79,12 +72,6 @@ func TestSchemaV14_UpgradeBackfillsSustainedFromPeak(t *testing.T) {
 	}
 }
 
-// TestProfileWindow_SchemaThreeSamplesBackfillSustained pins the other half
-// of the upgrade. The stored sample window carries each run's sustained
-// figure from schema 4 on; a schema-3 window predates it, and is upgraded on
-// load rather than dropped so the surviving runs keep pricing at their peaks
-// as the window refills. A window read as zeroes instead would collapse the
-// charge the moment one fresh observation folded in.
 func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
 	if err != nil {
@@ -132,14 +119,6 @@ func TestProfileWindow_SchemaThreeSamplesBackfillSustained(t *testing.T) {
 	}
 }
 
-// TestProfileWindow_WriterWithoutSustainedStoresThePeak is the invariant
-// that keeps a window from mixing eras. The cluster fold records no sustained
-// figure -- deliberately, since its profiles size pod CPU limits -- and its
-// observations land in the same window as samples carried across the v14
-// upgrade. Persisting a literal zero for them would sink the across-window
-// percentile onto whichever carried sample survived, so a cluster pipeline
-// would be charged a stale figure for as long as it took the zeroes to age
-// out. Without the write-time rule this test reads 2 instead of 10.
 func TestProfileWindow_WriterWithoutSustainedStoresThePeak(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
 	if err != nil {
@@ -173,12 +152,6 @@ func TestProfileWindow_WriterWithoutSustainedStoresThePeak(t *testing.T) {
 	}
 }
 
-// TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn reconstructs
-// what a v13 database actually holds -- no sustained column AND a schema-3
-// sample window -- rather than a current-binary row with the column dropped.
-// The two halves of the backfill have to agree: the column keeps the stored
-// price, the window keeps the samples behind it, and the next fold must not
-// mix a fresh sample with zeroed carried ones.
 func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "real13.db")
 	st, err := store.Open(path)
@@ -249,10 +222,6 @@ func TestSchemaV14_UpgradeOfARealV13ShapeBackfillsWindowAndColumn(t *testing.T) 
 	}
 }
 
-// TestSchemaV14_BackfillIsSafeToReplay covers the SQLite path applying
-// migration steps outside a transaction: a crash between the backfill and the
-// version stamp replays the statement, which must not overwrite a measured
-// sustained figure with a peak.
 func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "replay.db")
 	st, err := store.Open(path)
@@ -285,9 +254,6 @@ func TestSchemaV14_BackfillIsSafeToReplay(t *testing.T) {
 	}
 }
 
-// TestRecordProfileObservation_PlanHashChangeCarriesSustained checks the
-// figure the warm start reads is carried at the transition, alongside the
-// peak it has always carried.
 func TestRecordProfileObservation_PlanHashChangeCarriesSustained(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
 	if err != nil {
@@ -323,9 +289,6 @@ func TestRecordProfileObservation_PlanHashChangeCarriesSustained(t *testing.T) {
 	}
 }
 
-// TestProfileFromWindow_SustainedTakesTheSameAcrossRunRankAsThePeak checks
-// the two core figures are ranked identically across the window and only
-// differ in what each run contributed: one freak run is dropped from both.
 func TestProfileFromWindow_SustainedTakesTheSameAcrossRunRankAsThePeak(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
 	if err != nil {
@@ -359,9 +322,6 @@ func TestProfileFromWindow_SustainedTakesTheSameAcrossRunRankAsThePeak(t *testin
 	}
 }
 
-// TestProfileObservation_SustainedRoundTripsPerRun confirms each run's own
-// sustained figure is what the window ranks, not a value re-derived from the
-// peak: a run whose two figures disagree must persist both.
 func TestProfileObservation_SustainedRoundTripsPerRun(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
 	if err != nil {
@@ -390,11 +350,6 @@ func TestProfileObservation_SustainedRoundTripsPerRun(t *testing.T) {
 	}
 }
 
-// TestNearestRankPercentile_MatchesTheRankProfilesAreBuiltOn guards the
-// arithmetic the orchestrator borrows to compute a run's sustained figure.
-// A helper that rounded ranks differently would price the same measurements
-// differently depending on which side of the store boundary they were
-// summarized on.
 func TestNearestRankPercentile_MatchesTheRankProfilesAreBuiltOn(t *testing.T) {
 	cases := []struct {
 		xs   []float64

@@ -14,10 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// TestCrashdummy_ChildrenAttachToParentLease drives a real crashdummy
-// parent that spawns children attaching to its lease, and asserts through
-// the daemon's queue view that the children share the one lease without
-// double-charging host cores, then that the whole family converges.
 func TestCrashdummy_ChildrenAttachToParentLease(t *testing.T) {
 	if testing.Short() {
 		t.Skip("crashdummy process test skipped in -short")

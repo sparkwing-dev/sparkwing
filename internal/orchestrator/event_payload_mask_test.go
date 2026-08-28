@@ -7,11 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/secrets"
 )
 
-// Audit-event payloads are served by GET /api/v1/runs/{id}/events and
-// streamed to the dashboard over SSE, but nothing routes them through
-// the log masker -- it only rewrites a record's Msg. child_run_start
-// carries the args a parent forwards to a child, so a parent secret
-// reaching a child's argument list would be published verbatim.
 func TestMaskEventPayload_RedactsForwardedSecrets(t *testing.T) {
 	m := secrets.NewMasker()
 	m.Register("s3cr3t-token-value")
@@ -30,8 +25,6 @@ func TestMaskEventPayload_RedactsForwardedSecrets(t *testing.T) {
 	}
 }
 
-// Value-anchored, so a secret embedded inside a larger argument is
-// covered too -- the case a name-anchored rewrite would miss.
 func TestMaskEventPayload_CoversEmbeddedSecrets(t *testing.T) {
 	m := secrets.NewMasker()
 	m.Register("s3cr3t")
@@ -41,8 +34,6 @@ func TestMaskEventPayload_CoversEmbeddedSecrets(t *testing.T) {
 	}
 }
 
-// A run with no secrets must not pay for the pass, and the payload
-// must come back byte-identical.
 func TestMaskEventPayload_NoOpWithoutSecrets(t *testing.T) {
 	payload := []byte(`{"child_run_id":"c1","args":{"env":"prod"}}`)
 	if got := maskEventPayload(secrets.NewMasker(), payload); string(got) != string(payload) {

@@ -44,8 +44,6 @@ func TestRenderJSONL_NonJSONLinesPassThrough(t *testing.T) {
 	}
 }
 
-// TestRenderJSONL_PlainStripsMsgANSI: a child-process color sequence
-// embedded in "Msg" must not survive the plain render path.
 func TestRenderJSONL_PlainStripsMsgANSI(t *testing.T) {
 	in := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"node\":\"n\",\"msg\":\"\x1b[31mred text\x1b[0m\"}\n")
 	var out bytes.Buffer
@@ -58,8 +56,6 @@ func TestRenderJSONL_PlainStripsMsgANSI(t *testing.T) {
 	}
 }
 
-// TestRenderJSONL_PlainStripsNonJSONANSI: unstructured ANSI in a
-// non-JSON passthrough line must also come out clean in plain mode.
 func TestRenderJSONL_PlainStripsNonJSONANSI(t *testing.T) {
 	in := []byte("\x1b[31mraw red\x1b[0m\n")
 	var out bytes.Buffer
@@ -69,8 +65,6 @@ func TestRenderJSONL_PlainStripsNonJSONANSI(t *testing.T) {
 	}
 }
 
-// TestRenderJSONL_ANSIKeepsRendererSGRAndMsg: renderer SGR is on AND
-// child-process ANSI in Msg survives.
 func TestRenderJSONL_ANSIKeepsRendererSGRAndMsg(t *testing.T) {
 	in := []byte("{\"ts\":\"2026-05-04T06:03:16Z\",\"level\":\"error\",\"node\":\"n\",\"msg\":\"\x1b[31mred\x1b[0m\"}\n")
 	var out bytes.Buffer

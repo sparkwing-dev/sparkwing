@@ -8,10 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// resolveTriggerArgs returns the args for Plan(). On retry, returns
-// the original run's args so re-derived values (e.g. "latest tag")
-// can't drift between attempts and silently mask divergence under
-// skip-passed rehydration. Falls back to trigger.Args on fetch error.
 func resolveTriggerArgs(ctx context.Context, state StateBackend, trigger *store.Trigger, logger *slog.Logger) map[string]string {
 	if trigger.RetryOf == "" {
 		return trigger.Args
@@ -19,8 +15,7 @@ func resolveTriggerArgs(ctx context.Context, state StateBackend, trigger *store.
 	if state == nil {
 		return trigger.Args
 	}
-	// Execution read: these args go straight into Plan(). A redacted
-	// fetch would re-run the retry with a literal "***".
+
 	orig, err := runForExecution(ctx, state, trigger.RetryOf)
 	if err != nil {
 		if logger == nil {

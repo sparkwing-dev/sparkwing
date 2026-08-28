@@ -11,18 +11,10 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// sdkModulePath is the SDK module every sparkwing pipeline pins.
 const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 
-// Git runs a git subcommand inside dir and returns stdout. The fleet
-// derivation takes it as a dependency so tests can canonicalize
-// worktrees against a fake instead of a real checkout.
 type Git func(dir string, args ...string) (string, error)
 
-// RunObservation is the repo identity carried on an observed run,
-// projected out of the runs store. It supplies "last run" enrichment
-// and surfaces repos that have executed pipelines but aren't in
-// repos.yaml.
 type RunObservation struct {
 	Repo     string
 	RepoURL  string
@@ -30,38 +22,26 @@ type RunObservation struct {
 	At       time.Time
 }
 
-// WorktreeRef is one linked worktree of a primary repo, kept only to
-// report a pin that diverges from the primary's -- a signal the
-// operator bumped a worktree in isolation.
 type WorktreeRef struct {
 	Path string
 	Pin  string
 }
 
-// Repo is one row of the fleet: a primary checkout (or a runs-only
-// observation) with its SDK pin, last run, and any divergent
-// worktrees. Update operates on Primary only.
 type Repo struct {
-	// Primary is the canonical primary checkout path. Empty for a
-	// runs-only row (observed in the store, no local checkout).
 	Primary string
 	Name    string
-	// Pin is the SDK version in Primary/.sparkwing/go.mod, or "" when
-	// unresolved (missing module, replace directive, runs-only).
+
 	Pin string
-	// Replace is the SDK replace target when the project replaces the
-	// SDK with a local path; such repos are not bumpable.
+
 	Replace      string
 	LastRun      time.Time
 	LastPipeline string
 	Worktrees    []WorktreeRef
-	Status       string // ok | worktree-only | runs-only
+	Status       string
 	GuidesBehind int
 	Latest       string
 }
 
-// DivergentWorktrees returns the worktrees whose pin differs from the
-// primary's, i.e. the ones worth a detail line in the report.
 func (r Repo) DivergentWorktrees() []WorktreeRef {
 	var out []WorktreeRef
 	for _, w := range r.Worktrees {
@@ -72,11 +52,6 @@ func (r Repo) DivergentWorktrees() []WorktreeRef {
 	return out
 }
 
-// PrimaryRoot canonicalizes any checkout path to its primary repo
-// root by resolving git's common dir: a linked worktree's common dir
-// points at the primary's .git, so the primary root is that dir's
-// parent. A regular checkout resolves to itself. The result is
-// symlink-resolved so two spellings of the same repo dedupe.
 func PrimaryRoot(git Git, path string) (string, error) {
 	out, err := git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
 	if err != nil {
@@ -97,8 +72,6 @@ func PrimaryRoot(git Git, path string) (string, error) {
 	return canonPath(root), nil
 }
 
-// canonPath cleans and symlink-resolves a path for stable dedup,
-// falling back to the cleaned path when the target can't be resolved.
 func canonPath(p string) string {
 	c := filepath.Clean(p)
 	if r, err := filepath.EvalSymlinks(c); err == nil {
@@ -107,10 +80,6 @@ func canonPath(p string) string {
 	return c
 }
 
-// SDKPin reads the SDK version pinned in sparkwingDir/go.mod. It
-// returns the require version, the replace target (when the SDK is
-// replaced with a local module), or empty strings when neither is
-// present or the file can't be parsed.
 func SDKPin(sparkwingDir string) (pin, replace string) {
 	body, err := os.ReadFile(filepath.Join(sparkwingDir, "go.mod"))
 	if err != nil {
@@ -136,14 +105,6 @@ func SDKPin(sparkwingDir string) (pin, replace string) {
 	return pin, replace
 }
 
-// SDKWorkspaceOverride returns the local directory a .sparkwing/go.work
-// substitutes for the SDK, or "" when there is no workspace or none of its
-// modules is the SDK.
-//
-// A workspace `use` directive outranks the go.mod require, so a repo with
-// one compiles its pipeline binary from that checkout and its declared pin
-// describes nothing that runs. Callers reasoning about what a repo will
-// actually execute must consult this before believing [SDKPin].
 func SDKWorkspaceOverride(sparkwingDir string) string {
 	body, err := os.ReadFile(filepath.Join(sparkwingDir, "go.work"))
 	if err != nil {
@@ -165,8 +126,6 @@ func SDKWorkspaceOverride(sparkwingDir string) string {
 	return ""
 }
 
-// modulePathOf returns the module path declared by dir/go.mod, or "" when
-// the file is absent or unparseable.
 func modulePathOf(dir string) string {
 	body, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil {
@@ -179,12 +138,6 @@ func modulePathOf(dir string) string {
 	return mf.Module.Mod.Path
 }
 
-// DeriveFleet builds the deduped fleet from registered candidates and
-// observed runs. Candidates are canonicalized to their primary repo
-// via git; a primary is tracked once, with any additional worktrees
-// recorded for divergent-pin reporting. Runs that match no candidate
-// become runs-only rows. latest, when a valid semver, drives the
-// "guides behind" count via guidesBehind.
 func DeriveFleet(cands []Candidate, runs []RunObservation, git Git, latest string, guidesBehind func(pin, latest string) int) []Repo {
 	byPrimary := map[string]*Repo{}
 	order := []string{}
@@ -241,9 +194,6 @@ func fleetStatusRank(s string) int {
 	}
 }
 
-// attachRuns stamps the most recent matching run onto each primary
-// repo. A run matches a repo when its short name equals the repo's
-// directory name or its remote basename.
 func attachRuns(byPrimary map[string]*Repo, order []string, runs []RunObservation) {
 	for _, p := range order {
 		r := byPrimary[p]
@@ -259,10 +209,6 @@ func attachRuns(byPrimary map[string]*Repo, order []string, runs []RunObservatio
 	}
 }
 
-// RunMatchesRepo reports whether an observed run belongs to a fleet repo,
-// matching the run's short name against the repo's directory name or the
-// basename of its remote URL. A deep-dive view reuses it to attach per-pipeline
-// run history to the same repo the fleet listing does.
 func RunMatchesRepo(obs RunObservation, r Repo) bool {
 	return runMatchesRepo(obs, r)
 }
@@ -283,9 +229,6 @@ func runMatchesRepo(obs RunObservation, r Repo) bool {
 	return false
 }
 
-// runsOnly returns rows for repos observed in the store but not backed
-// by any registered checkout, so the fleet still names them (they're
-// skipped by update since there's nothing to bump).
 func runsOnly(byPrimary map[string]*Repo, runs []RunObservation, latest string) []Repo {
 	haveName := map[string]bool{}
 	for _, r := range byPrimary {
@@ -316,10 +259,6 @@ func runsOnly(byPrimary map[string]*Repo, runs []RunObservation, latest string) 
 	return out
 }
 
-// GuidesBehind counts the embedded migration guides strictly newer
-// than pin and no newer than latest -- the "versions behind" measure
-// surfaced on the fleet list. Returns 0 when either bound isn't a
-// valid semver.
 func GuidesBehind(guideVersions []string, pin, latest string) int {
 	if !semver.IsValid(pin) || !semver.IsValid(latest) {
 		return 0

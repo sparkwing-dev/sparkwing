@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Regenerate API surface snapshots into a tempdir and diff against
-# the checked-in .apidiff/ tree. Fail loudly if drift exists, with
-# instructions on how to fix.
-#
-# Wired into `sparkwing run lint` so PRs that change the public
-# surface without updating the snapshot fail CI.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

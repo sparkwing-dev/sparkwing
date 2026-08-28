@@ -15,7 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// blobStore is a minimal in-memory /cache/<key> server for blob-store tests.
 type blobStore struct {
 	mu   sync.Mutex
 	data map[string][]byte
@@ -166,10 +165,6 @@ func TestSaveAndRestoreLintCache_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestRestoreLintCache_WorkdirMismatchIsRejected saves a cache at workdir A
-// then attempts to restore it at workdir B. The restore must return
-// ErrLintCacheWorkdirMismatch rather than silently expanding A's paths.
-// This is the negative control the ticket requires.
 func TestRestoreLintCache_WorkdirMismatchIsRejected(t *testing.T) {
 	srv, bs := newBlobServer(t)
 

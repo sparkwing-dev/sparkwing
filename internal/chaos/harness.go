@@ -25,57 +25,31 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// Config parameterizes a chaos run. The zero value is not useful; use
-// [CIConfig] or [SoakConfig].
 type Config struct {
-	// Seed governs the scenario schedule: which faults fire in which order
-	// with which parameters. OS timing (process start, SIGKILL delivery)
-	// is not seeded, so oracles use settle bounds rather than exact state.
 	Seed int64
-	// Duration is the active fault-injection window before the harness
-	// quiesces and checks convergence.
+
 	Duration time.Duration
-	// MaxActors caps concurrent crashdummy processes.
+
 	MaxActors int
-	// Settle is the window the OS and daemon are allowed to reach a
-	// consistent state after an event before an oracle treats a mismatch
-	// as a violation.
+
 	Settle time.Duration
-	// EnableCLI hammers the real sparkwing read verbs concurrently. It
-	// requires building cmd/sparkwing; when the build fails the harness
-	// logs and continues without it.
+
 	EnableCLI bool
-	// FaultBudget scales how aggressively faults fire relative to actor
-	// spawns; higher means more kills and takeovers per spawn.
+
 	FaultBudget float64
-	// DaemonIdleMS and DaemonGraceMS tune the daemon the harness and its
-	// actors spawn. Idle must outlast any lull during injection so the
-	// daemon does not idle-exit mid-run, yet be short enough that
-	// convergence to an idle exit is observable.
+
 	DaemonIdleMS  int
 	DaemonGraceMS int
-	// DaemonCores is the fixed host core capacity the daemon advertises.
+
 	DaemonCores float64
-	// MaxOwnedProcesses bounds the total number of processes in groups the
-	// harness owns. A non-positive value derives a limit from MaxActors.
+
 	MaxOwnedProcesses int
-	// MaxZombieDrain bounds how long any one process in an owned group may
-	// stay unreaped. Both kinds of owned zombie are transient by design: a
-	// group leader is deliberately held as the ownership anchor until its
-	// descendants are proven empty, and a descendant is a zombie between its
-	// own exit and its parent's wait. How many exist at any instant therefore
-	// scales with actor churn rather than with correctness, so what is checked
-	// is that each one drains. A non-positive value derives a bound from
-	// Settle.
+
 	MaxZombieDrain time.Duration
-	// OracleTimeout bounds each daemon query so a wedged server cannot stop
-	// the independent process-growth guard or teardown.
+
 	OracleTimeout time.Duration
 }
 
-// CIConfig returns a bounded configuration suitable for `go test`: a short
-// active window, modest actor counts, and settle bounds generous enough to
-// hold on a loaded machine.
 func CIConfig(seed int64) Config {
 	return Config{
 		Seed:              seed,
@@ -92,8 +66,6 @@ func CIConfig(seed int64) Config {
 	}
 }
 
-// SoakConfig returns a long-running configuration for nightly or manual
-// runs: the given duration, higher actor counts, and a heavier fault mix.
 func SoakConfig(seed int64, d time.Duration) Config {
 	return Config{
 		Seed:              seed,
@@ -110,10 +82,6 @@ func SoakConfig(seed int64, d time.Duration) Config {
 	}
 }
 
-// Harness drives one chaos run against a real daemon in an isolated
-// sparkwing home. It builds the crashdummy actor, spawns and kills real
-// processes and daemons, and cross-checks the admission invariants after
-// every event.
 type Harness struct {
 	cfg      Config
 	t        testing.TB
@@ -142,8 +110,7 @@ type daemonProcess struct {
 	done       chan struct{}
 	finalizeMu sync.Mutex
 	complete   bool
-	// cleanupFailed marks a daemon whose teardown already failed and was
-	// reported; its anchor is deliberately retained for a later retry.
+
 	cleanupFailed bool
 }
 
@@ -157,8 +124,7 @@ type actor struct {
 	rejected bool
 	killed   bool
 	exited   bool
-	// cleanupFailed marks an actor whose teardown already failed and was
-	// reported; its anchor is deliberately retained for a later retry.
+
 	cleanupFailed bool
 	group         *procgroup.Group
 	stdout        io.ReadCloser
@@ -168,9 +134,6 @@ type actor struct {
 	exitedAt      time.Time
 }
 
-// Run executes the chaos scenario and fails t on the first invariant
-// violation. On any failure it prints the seed and journal path so the run
-// is reproducible.
 func Run(t testing.TB, cfg Config) {
 	if err := procgroup.Supported(); err != nil {
 		t.Fatalf("chaos process ownership: %v", err)
@@ -247,8 +210,6 @@ func (h *Harness) build(pkg string, required bool) string {
 	return bin
 }
 
-// loop runs the fault-injection schedule until the active window elapses,
-// checking the ledger-truth oracle after every event.
 func (h *Harness) loop() {
 	deadline := time.Now().Add(h.cfg.Duration)
 	lastOS := time.Now()
@@ -273,7 +234,6 @@ func (h *Harness) loop() {
 	}
 }
 
-// step picks and performs one weighted action from the seeded RNG.
 func (h *Harness) step() {
 	fb := h.cfg.FaultBudget
 	choices := []struct {
@@ -308,9 +268,6 @@ func (h *Harness) spawnActor() { h.spawn(false) }
 
 func (h *Harness) spawnWedged() { h.spawn(true) }
 
-// spawn launches one crashdummy holder with seeded parameters. A wedged
-// actor sits idle, ignores SIGTERM, and never self-exits, standing in for
-// an alive-but-stuck holder with waiters behind it.
 func (h *Harness) spawn(wedged bool) {
 	h.mu.Lock()
 	if h.liveCountLocked() >= h.cfg.MaxActors {
@@ -375,7 +332,6 @@ func (h *Harness) spawn(wedged bool) {
 	go h.watchActor(a, stdout)
 }
 
-// startActorCommand launches an actor in an exact owned process group.
 func startActorCommand(cmd *exec.Cmd) (io.ReadCloser, *procgroup.Group, error) {
 	stdout, childStdout, err := os.Pipe()
 	if err != nil {
@@ -392,8 +348,6 @@ func startActorCommand(cmd *exec.Cmd) (io.ReadCloser, *procgroup.Group, error) {
 	return stdout, group, nil
 }
 
-// watchActor tracks an actor's stdout for its grant or rejection, then
-// waits for the process to exit and records the terminal state.
 func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
 	scanned := a.scanned
 	go func() {
@@ -421,10 +375,6 @@ func (h *Harness) watchActor(a *actor, stdout io.ReadCloser) {
 	}
 }
 
-// errActorDrain identifies an actor whose process group was already proven
-// empty and reaped while its stdout reader had not finished. It is a distinct
-// cleanup phase from the process group failing to exit, and conflating the two
-// sends the next soak investigation hunting a process leak that is not there.
 var errActorDrain = errors.New("output stream did not drain within the cleanup bound")
 
 func (h *Harness) finishActor(a *actor, force bool) error {
@@ -491,8 +441,6 @@ func (h *Harness) killActor(a *actor, kind string) {
 	h.jr.Append(Event{Kind: kind, Run: a.runID})
 }
 
-// killDaemon SIGKILLs the currently elected daemon; live clients must
-// re-elect a successor and reattach their surviving leases.
 func (h *Harness) killDaemon() {
 	pid := h.currentDaemonPid()
 	if pid <= 0 {
@@ -511,9 +459,6 @@ func (h *Harness) killDaemon() {
 	h.jr.Append(Event{Kind: "kill_daemon", Detail: strconv.Itoa(pid)})
 }
 
-// takeover spawns a newer-versioned actor whose client drains the running
-// daemon and brings up its own binary as the successor, exercising the
-// version-takeover path alongside live leases that must reattach.
 func (h *Harness) takeover() {
 	h.mu.Lock()
 	if h.liveCountLocked() >= h.cfg.MaxActors {
@@ -547,8 +492,6 @@ func (h *Harness) takeover() {
 	go h.watchActor(a, stdout)
 }
 
-// churn opens and immediately closes a burst of raw connections to the
-// socket, stressing the daemon's accept and disconnect paths.
 func (h *Harness) churn() {
 	sock := h.sockPath()
 	n := 3 + h.rng.Intn(6)
@@ -567,8 +510,6 @@ func (h *Harness) churn() {
 	h.jr.Append(Event{Kind: "churn", Detail: strconv.Itoa(n)})
 }
 
-// malformed writes a garbage frame to the socket and closes, asserting the
-// daemon rejects it without disturbing real leases.
 func (h *Harness) malformed() {
 	sock := h.sockPath()
 	c, err := dialUnix(sock, 200*time.Millisecond)
@@ -586,8 +527,6 @@ func (h *Harness) malformed() {
 	h.jr.Append(Event{Kind: "malformed"})
 }
 
-// hammerCLI invokes a real read-only sparkwing verb against the isolated
-// home, exercising the CLI concurrently with the daemon's admission churn.
 func (h *Harness) hammerCLI() {
 	if h.sparkBin == "" {
 		return
@@ -600,9 +539,6 @@ func (h *Harness) hammerCLI() {
 	h.jr.Append(Event{Kind: "cli", Detail: strings.Join(verb, " ")})
 }
 
-// checkLedger reads the daemon's queue state and fails on any ledger-truth
-// violation. Over-capacity is impossible in a correct daemon, so a
-// violation here is a real bug, reported with the seed and journal.
 func (h *Harness) checkLedger() {
 	qs, err := h.readState()
 	if err != nil {
@@ -622,8 +558,6 @@ func (h *Harness) checkLedger() {
 	}
 }
 
-// checkOS cross-checks live processes against granted leases once the
-// settle window has passed for recently killed actors.
 func (h *Harness) checkOS() {
 	qs, err := h.readState()
 	if err != nil {
@@ -670,20 +604,15 @@ func (h *Harness) startProcessGuard() func() {
 	}
 }
 
-// ownedGroup is one process group the harness still owns.
 type ownedGroup struct {
 	cleanupFailed bool
 }
 
-// zombie identifies one unreaped process in an owned group.
 type zombie struct {
 	pid   int
 	group int
 }
 
-// processGuard samples the owned process groups on its own cadence so a
-// wedged daemon cannot suppress leak detection. It is driven from a single
-// goroutine and keeps the first sighting of every owned zombie.
 type processGuard struct {
 	h     *Harness
 	since map[zombie]time.Time
@@ -693,20 +622,6 @@ func newProcessGuard(h *Harness) *processGuard {
 	return &processGuard{h: h, since: map[zombie]time.Time{}}
 }
 
-// check fails fast before leaked processes can exhaust the machine's process
-// table. Two bounds carry that, and neither is a ceiling on how many zombies
-// exist at once.
-//
-// Owned zombies are transient by design and their instantaneous count tracks
-// concurrency, not correctness. A group leader is deliberately left
-// exited-but-unreaped as the ownership anchor until its descendants are proven
-// empty, and each actor's own children are zombies between their exit and the
-// actor's wait -- a single daemon kill makes every live actor fork a
-// replacement at once, so a burst is expected. What must hold is that total
-// owned processes stay bounded and that every zombie drains.
-//
-// Ages come from the process table rather than from the harness's own
-// bookkeeping, so a leader whose exit the harness never observed is caught too.
 func (g *processGuard) check() {
 	h := g.h
 	groups := h.ownedProcessGroups()
@@ -757,9 +672,6 @@ func (g *processGuard) check() {
 	}
 }
 
-// stalledZombies names every owned zombie that outlived the drain bound. A
-// group whose teardown already failed is skipped: that failure was reported
-// through the reap path, which retains the anchor on purpose for a later retry.
 func (g *processGuard) stalledZombies(groups map[int]ownedGroup, now time.Time) []string {
 	bound := g.h.zombieDrain()
 	stalled := make([]zombie, 0, len(g.since))
@@ -778,8 +690,6 @@ func (g *processGuard) stalledZombies(groups map[int]ownedGroup, now time.Time) 
 	return violations
 }
 
-// String names a zombie the way an operator reading a soak failure needs it:
-// the exact pid, its group, and which of the two kinds it is.
 func (z zombie) String() string {
 	if z.pid == z.group {
 		return fmt.Sprintf("owned group %d leader anchor (pid %d)", z.group, z.pid)
@@ -804,9 +714,6 @@ func (h *Harness) processLimit() int {
 	return h.cfg.MaxActors*4 + 32
 }
 
-// zombieDrain bounds how long one owned process may stay unreaped. Teardown of
-// a single group is itself bounded by processWait, so twice that leaves room
-// for a loaded machine without letting a genuinely stuck process go unreported.
 func (h *Harness) zombieDrain() time.Duration {
 	if h.cfg.MaxZombieDrain > 0 {
 		return h.cfg.MaxZombieDrain
@@ -831,9 +738,6 @@ func (h *Harness) ownedProcessGroups() map[int]ownedGroup {
 	return groups
 }
 
-// leakStable reports whether enough time has passed since the last daemon
-// kill that no restored lease is still within its reattach grace window;
-// only then can a dead holder be judged a genuine leak.
 func (h *Harness) leakStable() bool {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -844,8 +748,6 @@ func (h *Harness) leakStable() bool {
 	return time.Since(h.daemonKilledAt) > grace+h.cfg.Settle
 }
 
-// processSets returns the run ids whose processes are live (or still
-// settling after a kill) and the set of run ids the harness ever spawned.
 func (h *Harness) processSets() (live, known map[string]bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -889,8 +791,6 @@ func (h *Harness) liveCountLocked() int {
 	return n
 }
 
-// quiesce stops injection, kills every remaining actor, and waits for the
-// processes to exit so no lease is held by the harness's own doing.
 func (h *Harness) quiesce() {
 	h.jr.Log("quiesce", "", "stopping injection")
 	h.mu.Lock()
@@ -985,9 +885,6 @@ func (h *Harness) allExited(as []*actor) bool {
 	return true
 }
 
-// converge asserts the system returns to rest with zero human
-// intervention: no holders, no waiters, no held capacity within the settle
-// window, and then the daemon idles out once the last connection closes.
 func (h *Harness) converge() {
 	deadline := time.Now().Add(h.cfg.Settle + 5*time.Second)
 	var last []string
@@ -1030,8 +927,6 @@ func (h *Harness) converge() {
 	h.t.Errorf("daemon did not idle-exit after convergence (seed=%d journal=%s)", h.cfg.Seed, h.jr.Path())
 }
 
-// readState returns the daemon's queue state over a reused read-only
-// control connection, re-establishing it after a daemon kill.
 func (h *Harness) readState() (wingwire.QueueState, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), h.oracleTimeout())
 	defer cancel()
@@ -1079,8 +974,6 @@ func (h *Harness) readOpts() client.Options {
 	}
 }
 
-// daemonSpawn brings up a crashdummy daemon with the harness's fixed
-// sampler and lifecycle windows, so every daemon in the run is identical.
 func (h *Harness) daemonSpawn() func(home, version string) error {
 	return func(home, version string) error {
 		v := version
@@ -1156,7 +1049,6 @@ func (h *Harness) sockPath() string {
 	return sock
 }
 
-// currentDaemonPid reads the newest pid the daemons recorded on election.
 func (h *Harness) currentDaemonPid() int {
 	data, err := os.ReadFile(filepath.Join(h.home, "wingd", "daemons.log"))
 	if err != nil {
@@ -1173,9 +1065,6 @@ func (h *Harness) currentDaemonPid() int {
 	return pid
 }
 
-// scanDaemonPanic fails the run if any daemon logged a panic or invariant
-// violation: the in-process ledger panics on over-admission, so a panic in
-// the daemon log is a caught correctness bug.
 func (h *Harness) scanDaemonPanic() {
 	data, err := os.ReadFile(filepath.Join(h.home, "wingd", "d.log"))
 	if err != nil {
@@ -1196,8 +1085,6 @@ func firstPanicLine(s string) string {
 	return "panic in daemon log"
 }
 
-// fail records the violation, prints the seed and journal path
-// prominently, and fails the test.
 func (h *Harness) fail(oracle string, violations []string, qs wingwire.QueueState) {
 	h.jr.Append(Event{Kind: "VIOLATION", Detail: oracle, Fields: map[string]any{
 		"violations": violations,

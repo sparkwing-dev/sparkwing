@@ -91,11 +91,8 @@ func (s *Store) RequestNodeBounce(ctx context.Context, runID, nodeID, requestedB
 			nodeID, runID, nodeStatus, ErrNodeNotRunning)
 	}
 
-	// safety: the number and the row are one transaction, exactly as
-	// AppendEvent allocates its seq. Read and insert as separate
-	// statements and two operators bouncing the same node at once both
-	// read the same maximum, and one of them is answered with a primary
-	// key violation instead of a bounce.
+	// safety: allocate the request number and insert in one transaction or
+	// concurrent bounces can choose the same primary key.
 	tx, err := s.beginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -224,8 +221,6 @@ func scanNodeBounce(rs rowScanner) (*NodeBounce, error) {
 	return &b, nil
 }
 
-// isTerminalRunStatus reports whether a run has already finished, in
-// the same vocabulary runTerminalIn filters on.
 func isTerminalRunStatus(status string) bool {
 	return status == "success" || status == runStatusFailed || status == runStatusCancelled
 }

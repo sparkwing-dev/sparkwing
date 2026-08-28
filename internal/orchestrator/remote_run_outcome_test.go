@@ -17,9 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// outcomeController stands up a real controller.Server over an
-// in-memory-ish SQLite store and seeds one terminal run so
-// RemoteRunOutcome reads a run the same way the CLI does.
 func outcomeController(t *testing.T, status, runErr string) string {
 	t.Helper()
 	ctx := context.Background()
@@ -56,11 +53,6 @@ func outcomeController(t *testing.T, status, runErr string) string {
 	return srv.URL
 }
 
-// TestRemoteRunOutcome_ReportsTerminalStatus is the contract the
-// `pipeline trigger` exit code rests on: the follow ends carrying no
-// outcome, so this read is what tells the CLI whether the remote run
-// succeeded, and a non-success run must leave its failure detail on
-// the operator's terminal.
 func TestRemoteRunOutcome_ReportsTerminalStatus(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -99,9 +91,6 @@ func TestRemoteRunOutcome_ReportsTerminalStatus(t *testing.T) {
 	}
 }
 
-// TestRemoteRunOutcome_UnreadableStatusIsAnError keeps a controller
-// that cannot answer from being reported as either outcome: the
-// caller has to be able to tell "unknown" apart from "failed".
 func TestRemoteRunOutcome_UnreadableStatusIsAnError(t *testing.T) {
 	url := outcomeController(t, "success", "")
 	var buf bytes.Buffer
@@ -114,11 +103,6 @@ func TestRemoteRunOutcome_UnreadableStatusIsAnError(t *testing.T) {
 	}
 }
 
-// TestRemoteRunOutcome_RetriesOneTransportBlip guards the difference
-// between "the controller hiccuped" and "the outcome is unknown". The
-// follow just watched this run go terminal, so a single 503 from a
-// controller replica rolling out must not be promoted into an
-// unknown-outcome verdict for the caller.
 func TestRemoteRunOutcome_RetriesOneTransportBlip(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,8 +141,6 @@ func TestRemoteRunOutcome_RetriesOneTransportBlip(t *testing.T) {
 	}
 }
 
-// TestRemoteRunOutcome_RequiresControllerURL matches the guard every
-// other *Remote entry point in this file carries.
 func TestRemoteRunOutcome_RequiresControllerURL(t *testing.T) {
 	if _, err := orchestrator.RemoteRunOutcome(context.Background(), "", "", "run-x", nil); err == nil {
 		t.Fatal("expected an error when no controller URL is configured")

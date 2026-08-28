@@ -13,9 +13,6 @@ import (
 // how large the cache may grow.
 const DefaultConcurrencyCacheCap = 10_000
 
-// metaKeyConcurrencySwept records the wall-clock of the last full
-// concurrency maintenance pass so the daemonless run path can throttle the
-// global sweep across separate processes.
 const (
 	metaKeyConcurrencySwept      = "concurrency_swept_at"
 	metaKeyConcurrencySweepClaim = "concurrency_sweep_claimed_at"

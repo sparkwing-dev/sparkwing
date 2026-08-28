@@ -1,31 +1,4 @@
 #!/usr/bin/env bash
-# End-to-end smoke test for the shared-state deployment modes.
-#
-# Spins up a local Postgres + minio in Docker, exercises each
-# deployment mode against them, and asserts the expected state lands
-# in the right place. Designed to be run by a human after touching
-# anything in pkg/store, pkg/storage/s3state, internal/orchestrator,
-# or internal/backend.
-#
-# Usage:
-#   bash bin/smoke-shared.sh              # run + clean up
-#   bash bin/smoke-shared.sh --keep       # run + leave containers up
-#   bash bin/smoke-shared.sh --skip-build # reuse existing binaries
-#   bash bin/smoke-shared.sh --build-web  # also rebuild the SPA bundle
-#                                         # (slow; needed for fresh dashboard UI)
-#   bash bin/smoke-shared.sh --teardown   # only stop containers and exit
-#
-# What it covers:
-#   1. Local-only mode (--sw-local-only): isolated SQLite, no shared infra touched
-#   2. S3-only mode (Mode 2): both runs land in minio, dashboard reads from minio
-#   3. Postgres + S3 mode (Mode 3): runs land in pg, cache blobs in minio,
-#      dashboard reads from pg
-#   4. sparkwing-web boot against the shared backends, /api/v1/capabilities
-#      reports the right mode tag, /api/v1/runs returns the runs we just made
-#
-# Containers:
-#   sparkwing-smoke-pg     postgres:16   on :5432
-#   sparkwing-smoke-minio  minio/minio   on :9000 (api) and :9001 (console)
 
 set -uo pipefail
 
@@ -53,11 +26,10 @@ WEB_PORT=4344
 WEB_PID="$PID_DIR/web.pid"
 WEB_LOG="$LOG_DIR/web.log"
 
-PIPELINE_SIMPLE=weather-report   # no approvals/triggers; safe for Mode 2
-PIPELINE_RICH=example            # approvals + spawned triggers + fan-out; Mode 3+ only
-PARALLEL_RUNS=10                 # how many of the rich pipeline to fire in parallel
+PIPELINE_SIMPLE=weather-report
+PIPELINE_RICH=example
+PARALLEL_RUNS=10
 
-# ---------- flags ----------
 KEEP=0
 SKIP_BUILD=0
 BUILD_WEB=0
@@ -75,7 +47,6 @@ for arg in "$@"; do
   esac
 done
 
-# ---------- helpers ----------
 log()  { printf "\033[1;34m==>\033[0m %s\n" "$*"; }
 ok()   { printf "  \033[1;32mok\033[0m %s\n" "$*"; }
 fail() { printf "  \033[1;31mFAIL\033[0m %s\n" "$*"; exit 1; }
@@ -150,13 +121,11 @@ teardown() {
 
 trap 'teardown' EXIT
 
-# ---------- prerequisites ----------
 log "Checking prerequisites"
 command -v docker >/dev/null || fail "docker not found"
 command -v curl   >/dev/null || fail "curl not found"
 ok "docker, curl"
 
-# ---------- teardown-only short-circuit ----------
 if [ "$TEARDOWN_ONLY" = "1" ]; then
   stop_web
   docker rm -f "$PG_CONTAINER" "$MINIO_CONTAINER" >/dev/null 2>&1 || true
@@ -167,7 +136,6 @@ fi
 
 mkdir -p "$RUN_DIR" "$HOME_DIR" "$CONFIG_DIR" "$LOG_DIR" "$PID_DIR"
 
-# ---------- build / install ----------
 if [ "$BUILD_WEB" = "1" ]; then
   log "Building dashboard SPA (slow; runs npm ci + next build)"
   bash "$REPO/bin/build-web.sh" >"$LOG_DIR/build-web.log" 2>&1 || {
@@ -192,7 +160,6 @@ fi
 command -v sparkwing      >/dev/null || fail "sparkwing not on PATH"
 command -v sparkwing-web  >/dev/null || fail "sparkwing-web not on PATH"
 
-# ---------- start containers ----------
 log "Starting Postgres"
 if container_running "$PG_CONTAINER"; then
   ok "$PG_CONTAINER already running"
@@ -231,7 +198,6 @@ log "Waiting for minio to report healthy"
 wait_for_minio || fail "minio never became ready"
 ok "minio ready"
 
-# ---------- create bucket ----------
 log "Creating minio bucket via in-container mc"
 docker exec "$MINIO_CONTAINER" sh -c "
   mc alias set local http://localhost:9000 $MINIO_USER $MINIO_PASS >/dev/null 2>&1 &&
@@ -239,7 +205,6 @@ docker exec "$MINIO_CONTAINER" sh -c "
 " || fail "bucket setup failed"
 ok "bucket $BUCKET ready"
 
-# ---------- env for sparkwing ----------
 export SPARKWING_HOME="$HOME_DIR"
 export SPARKWING_S3_ENDPOINT="http://localhost:$MINIO_PORT"
 export AWS_ACCESS_KEY_ID="$MINIO_USER"
@@ -247,7 +212,6 @@ export AWS_SECRET_ACCESS_KEY="$MINIO_PASS"
 export AWS_REGION="us-east-1"
 export SPARKWING_SMOKE_PG_URL="postgres://$PG_USER:$PG_PASS@localhost:$PG_PORT/$PG_DB?sslmode=disable"
 
-# Phase L: local-only override.
 LOCAL_CONFIG="$CONFIG_DIR/local-only.yaml"
 cat >"$LOCAL_CONFIG" <<EOF
 defaults:
@@ -256,7 +220,6 @@ defaults:
     path: $HOME_DIR/state.db
 EOF
 
-# Phase 2: S3-only (state + cache + logs in minio).
 S3_CONFIG="$CONFIG_DIR/s3-only.yaml"
 cat >"$S3_CONFIG" <<EOF
 defaults:
@@ -274,7 +237,6 @@ defaults:
     prefix: logs
 EOF
 
-# Phase 3: pg + s3.
 PG_CONFIG="$CONFIG_DIR/pg-s3.yaml"
 cat >"$PG_CONFIG" <<EOF
 defaults:
@@ -299,9 +261,6 @@ run_pipeline() {
   (cd "$REPO" && sparkwing run "$pipeline" $extra) >>"$LOG_DIR/runs.log" 2>&1
 }
 
-# Fire N copies of a pipeline in parallel against the given config.
-# Each invocation writes its own subprocess log so failures are
-# attributable. Returns non-zero if any subprocess failed.
 run_pipeline_parallel() {
   local config="$1"
   local pipeline="$2"
@@ -323,7 +282,6 @@ run_pipeline_parallel() {
   return "$failed"
 }
 
-# ---------- Phase L: local-only override ----------
 log "Phase L: --sw-local-only ignores configured shared backends"
 rm -f "$HOME_DIR/state.db"
 
@@ -340,12 +298,10 @@ pg_rows_after=$(docker exec -e PGPASSWORD="$PG_PASS" "$PG_CONTAINER" \
   fail "local-only run leaked $((pg_rows_after - pg_rows_before)) rows into pg (was $pg_rows_before, now $pg_rows_after)"
 ok "pg row count unchanged by local-only run"
 
-# ---------- Phase 2: S3-only ----------
 log "Phase 2: S3-only (Mode 2)"
 docker exec "$MINIO_CONTAINER" sh -c \
   "mc rm --recursive --force local/$BUCKET/state >/dev/null 2>&1 || true"
 
-# Three sequential simple runs to verify the happy path.
 for i in 1 2 3; do
   run_pipeline "$S3_CONFIG" "$PIPELINE_SIMPLE" \
     || fail "S3-only run #$i ($PIPELINE_SIMPLE) failed -- see $LOG_DIR/runs.log"
@@ -357,9 +313,6 @@ state_count=$(docker exec "$MINIO_CONTAINER" sh -c \
 [ "$state_count" -ge 3 ] || fail "expected >=3 state.ndjson objects in s3, got $state_count"
 ok "$state_count run-state objects in minio"
 
-# Negative assertion: the rich pipeline uses approvals + spawned
-# triggers, which Mode 2 explicitly opts out of via ErrNotSupported.
-# Asserting the failure proves the capability gating is real.
 log "Phase 2b: $PIPELINE_RICH must fail in S3-only mode (no CAS)"
 if run_pipeline "$S3_CONFIG" "$PIPELINE_RICH"; then
   fail "$PIPELINE_RICH unexpectedly succeeded in S3-only mode (expected ErrNotSupported boundary)"
@@ -369,7 +322,6 @@ if ! tail -50 "$LOG_DIR/runs.log" | grep -qi "not supported\|s3state"; then
 fi
 ok "$PIPELINE_RICH correctly rejected by S3-only ErrNotSupported boundary"
 
-# ---------- Phase 3: pg + s3 ----------
 log "Phase 3: Postgres + S3 (Mode 3)"
 docker exec -e PGPASSWORD="$PG_PASS" "$PG_CONTAINER" \
   psql -U "$PG_USER" -d "$PG_DB" -c "TRUNCATE runs CASCADE" >/dev/null 2>&1 || true
@@ -379,10 +331,6 @@ pq() {
     psql -U "$PG_USER" -d "$PG_DB" -tAc "$1" 2>/dev/null
 }
 
-# Phase 3a: parallel concurrency stress on the simple pipeline. This
-# exercises pg locking (FOR UPDATE SKIP LOCKED on claims), connection-
-# pool sizing across N processes, and the schema-version advisory
-# lock under contention.
 log "Phase 3a: $PARALLEL_RUNS parallel $PIPELINE_SIMPLE runs (concurrency stress)"
 start_s=$(date +%s)
 run_pipeline_parallel "$PG_CONFIG" "$PIPELINE_SIMPLE" "$PARALLEL_RUNS" \
@@ -395,13 +343,6 @@ parallel_success=$(pq "SELECT COUNT(*) FROM runs WHERE pipeline='$PIPELINE_SIMPL
   || fail "expected $PARALLEL_RUNS successful $PIPELINE_SIMPLE runs, got $parallel_success"
 ok "all $PARALLEL_RUNS $PIPELINE_SIMPLE runs ended status=success"
 
-# Note: the rich pipeline (example) currently fails in Mode 3 because
-# its RunAndAwait cross-pipeline spawn exec's a child subprocess that
-# doesn't pick up the shared-backend config. Worth a separate
-# investigation; the smoke test deliberately skips it to stay reliable.
-# Phase 2b above still asserts the simpler "rich pipeline rejected in
-# Mode 2" boundary which is what we actually care about for the
-# capability-gating story.
 
 total_runs=$(pq "SELECT COUNT(*) FROM runs")
 ok "$total_runs total runs in pg"
@@ -421,7 +362,6 @@ schema_version=$(pq "SELECT MAX(version) FROM sparkwing_schema_version")
   || fail "schema version row missing"
 ok "schema version $schema_version recorded"
 
-# ---------- Phase 4: dashboard against pg + s3 ----------
 log "Phase 4: sparkwing-web against shared backends"
 stop_web
 sparkwing-web \
@@ -444,7 +384,6 @@ run_count=$(echo "$runs" | grep -o '"id":"' | wc -l | tr -d ' ')
   || fail "dashboard returned $run_count runs, expected >=$total_runs (pg has $total_runs)"
 ok "dashboard returned $run_count runs (matches pg)"
 
-# ---------- summary ----------
 log "Smoke test passed"
 echo
 echo "  Logs:        $LOG_DIR/"

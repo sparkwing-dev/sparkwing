@@ -1,4 +1,3 @@
-// Package httpapi serves the billing endpoints.
 package httpapi
 
 import (
@@ -9,12 +8,10 @@ import (
 	"example.com/paygate/internal/store"
 )
 
-// Handler serves account and invoice routes against a Store.
 type Handler struct {
 	Store *store.Store
 }
 
-// Routes returns the mux with every endpoint registered.
 func (h *Handler) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", h.health)

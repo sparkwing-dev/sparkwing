@@ -9,25 +9,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// ClientBackend wraps a *client.Client (controller HTTP) for state
-// and an optional storage.LogStore for log reads. Log reads bypass the
-// controller and go straight to logStore.
 type ClientBackend struct {
 	c        *client.Client
-	logStore storage.LogStore // nil means log read/stream return empty
+	logStore storage.LogStore
 
 	caps Capabilities
 }
 
-// NewClientBackend constructs a ClientBackend. logStore may be nil,
-// in which case log endpoints return empty content.
 func NewClientBackend(c *client.Client, logStore storage.LogStore) *ClientBackend {
 	return &ClientBackend{c: c, logStore: logStore}
 }
 
 var _ Backend = (*ClientBackend)(nil)
 
-// SetCapabilities binds the static capabilities body.
 func (b *ClientBackend) SetCapabilities(c Capabilities) { b.caps = c }
 
 func (b *ClientBackend) Capabilities(context.Context) (Capabilities, error) {

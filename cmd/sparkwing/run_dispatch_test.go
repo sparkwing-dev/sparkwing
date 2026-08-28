@@ -90,9 +90,6 @@ func TestParseRunFlags_Profile(t *testing.T) {
 	}
 }
 
-// --profile picks the storage profile; --target falls through to the
-// pipeline binary as a regular pass-through arg in v0.6 (no longer
-// framework-special).
 func TestParseRunFlags_ProfileSetTargetFallsThrough(t *testing.T) {
 	wf, pass := parseRunFlags([]string{"--profile", "local", "--target", "prod"})
 	if wf.profile != "local" {
@@ -103,8 +100,6 @@ func TestParseRunFlags_ProfileSetTargetFallsThrough(t *testing.T) {
 	}
 }
 
-// The retired --sw-profile flag is no longer parsed; it falls through to
-// passthrough where checkRetiredWhereFlags catches it with a pointer.
 func TestParseRunFlags_RetiredSwProfileFallsThrough(t *testing.T) {
 	wf, pass := parseRunFlags([]string{"--sw-profile", "remote"})
 	if wf.profile != "" {
@@ -115,10 +110,6 @@ func TestParseRunFlags_RetiredSwProfileFallsThrough(t *testing.T) {
 	}
 }
 
-// A command that declares a flag owns that spelling, even one a past
-// release retired globally. `pipeline new --on` names the sparkwing.yaml
-// `on:` key it writes; the retired --on addressed a profile, so nothing
-// about the two overlaps except four characters.
 func TestRetiredFlagYieldsToTheCommandThatDeclaresIt(t *testing.T) {
 	args := []string{"--name", "x", "--on", "pull_request"}
 	if err := checkRetiredWhereFlags(args, map[string]bool{"on": true}); err != nil {

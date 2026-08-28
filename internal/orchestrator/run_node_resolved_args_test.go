@@ -61,11 +61,6 @@ func registerPodArgsPipe() {
 	})
 }
 
-// A node running outside the dispatcher's process rebuilds the plan
-// itself, and the plan's resolved job args have to come with it. Until
-// they did, every sparkwing.Arg / ArgOrDefault call in such a node
-// answered with the schema default: the same commit scaled to 5 on a
-// laptop and to 1 in a pod, with nothing in the logs to say so.
 func TestRunNodeOnce_InstallsResolvedArgs(t *testing.T) {
 	registerPodArgsPipe()
 	isolateCheckout(t)

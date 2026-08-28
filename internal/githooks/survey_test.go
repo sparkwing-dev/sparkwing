@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
-// checkout builds a repository whose hook directory holds the named managed
-// gates. A gate runs a pipeline; anything else sparkwing writes is a
-// forwarder and does not count as one.
 func checkout(t *testing.T, gates ...string) (repoRoot, hooksDir string) {
 	t.Helper()
 	repoRoot = t.TempDir()
@@ -91,8 +88,6 @@ func TestSurvey_UninstalledWhenAnUnwrittenHookIsDeclared(t *testing.T) {
 	}
 }
 
-// A repository can hold one gate and be missing another; the verdict follows
-// the hook that does not fire, not the one that does.
 func TestSurvey_UninstalledWhenOnlySomeDeclaredHooksWereWritten(t *testing.T) {
 	repo, _ := checkout(t, "pre-push")
 	got := githooks.Survey(stubGit("", ""), repo, []string{"pre-commit", "pre-push"})
@@ -104,8 +99,6 @@ func TestSurvey_UninstalledWhenOnlySomeDeclaredHooksWereWritten(t *testing.T) {
 	}
 }
 
-// A push gate that does not fire leaves the pushes unchecked, so the
-// repository is ungated however healthy its commit gate is.
 func TestSurvey_UngatedWhenOnlyTheDeclaredPushGateIsMissing(t *testing.T) {
 	repo, _ := checkout(t, "pre-commit")
 	got := githooks.Survey(stubGit("", ""), repo, []string{"pre-commit", "pre-push"})
@@ -114,9 +107,6 @@ func TestSurvey_UngatedWhenOnlyTheDeclaredPushGateIsMissing(t *testing.T) {
 	}
 }
 
-// A post-commit hook cannot refuse work, so a missing one costs a
-// notification rather than a gate -- reporting the repository as ungated over
-// it would bury the ones whose commits really do go unchecked.
 func TestSurvey_GatedWhenOnlyTheDeclaredPostCommitHookIsMissing(t *testing.T) {
 	repo, _ := checkout(t, "pre-commit")
 	got := githooks.Survey(stubGit("", ""), repo, []string{"post-commit", "pre-commit"})
@@ -139,8 +129,6 @@ func TestSurvey_UndeclaredWhenNoPipelineAsksForAHook(t *testing.T) {
 	}
 }
 
-// A hooks path pointing at a directory that does carry the gate is how the
-// install arms a repository, so it must read as armed rather than redirected.
 func TestSurvey_ArmedWhenTheOverridePointsAtTheGatesThemselves(t *testing.T) {
 	repo, hooks := checkout(t, "pre-commit")
 	got := githooks.Survey(stubGit(hooks, filepath.Join(t.TempDir(), "global")), repo, []string{"pre-commit"})
@@ -238,9 +226,6 @@ func TestUngated_DropsTheRowsNoGateIsMissingFrom(t *testing.T) {
 	}
 }
 
-// The report contradicted itself for every shadowed repo: the hook sat in both
-// installed and missing, and a reader who resolved that the wrong way saw a
-// repo with nothing to fix.
 func TestSurvey_NeverReportsOneHookAsBothInstalledAndMissing(t *testing.T) {
 	repo, _ := checkout(t, "pre-commit", "pre-push")
 	got := githooks.Survey(stubGit("", t.TempDir()), repo, []string{"pre-commit", "pre-push"})
@@ -261,8 +246,6 @@ func TestSurvey_NeverReportsOneHookAsBothInstalledAndMissing(t *testing.T) {
 	}
 }
 
-// A repo that declares two hooks, holds one and never wrote the other has one
-// of each, and the two reasons need separate lists to stay actionable.
 func TestSurvey_SeparatesAShadowedHookFromAnUnwrittenOne(t *testing.T) {
 	repo, _ := checkout(t, "pre-commit")
 	got := githooks.Survey(stubGit("", t.TempDir()), repo, []string{"pre-commit", "pre-push"})
@@ -277,8 +260,6 @@ func TestSurvey_SeparatesAShadowedHookFromAnUnwrittenOne(t *testing.T) {
 	}
 }
 
-// The state that read as "no gate" while the gate was armed and blocking: a
-// core.hooksPath pointing at a sibling repo's hooks.
 func TestSurvey_BorrowedWhenTheGateThatFiresLivesInAnotherRepo(t *testing.T) {
 	repo, _ := checkout(t)
 	sibling, siblingHooks := checkout(t, "pre-commit")
@@ -297,9 +278,6 @@ func TestSurvey_BorrowedWhenTheGateThatFiresLivesInAnotherRepo(t *testing.T) {
 	}
 }
 
-// A borrowed gate is only fixable once the repo's own override is cleared:
-// install treats a repo-scoped core.hooksPath as deliberate and leaves it be,
-// so the install on its own changes nothing.
 func TestRepoGatesRemedy_ClearsTheOverrideBeforeInstallingForABorrowedGate(t *testing.T) {
 	r := githooks.RepoGates{Repo: "/code/sparkwing-platform", Borrowed: []string{"pre-commit"}, State: githooks.GateBorrowed}
 	got := r.Remedy()
@@ -322,8 +300,6 @@ func TestRepoGatesRemedy_ClearsALocalOverrideBeforeInstallingAShadowedGate(t *te
 	}
 }
 
-// The one-word state cannot carry a repo with two different problems, so the
-// summary names every hook the repo does not run its own gate for.
 func TestRepoGatesSummary_NamesTheBorrowedGateAndTheMissingOneTogether(t *testing.T) {
 	r := githooks.RepoGates{
 		Repo:      "/code/sparkwing-platform",

@@ -8,9 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
-// handleArtifactGet streams the artifact at {key} to the response.
-// Registered only when WithArtifactStore was set; absent otherwise.
-// Returns 404 for unknown keys.
 func (s *Server) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	if s.artifactStore == nil {
 		// safety: handler registered only via route gate; direct calls mirror gated behavior

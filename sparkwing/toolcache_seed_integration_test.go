@@ -8,18 +8,6 @@ import (
 	"testing"
 )
 
-// Seeding a new worktree's cache from one an earlier worktree filled is the
-// obvious way to skip a cold start, and it is not sound. golangci-lint stores
-// an issue with the absolute path of the tree that produced it and keys it on
-// file content alone, so a copied cache replays the donor's paths into any
-// worktree it is restored into -- the failure a per-worktree
-// ToolCacheDir exists to prevent, reached by a different route.
-//
-// The obvious guard, seeding only from a run that reported nothing, does not
-// hold either: exclusion rules and diff baselines are applied when results are
-// REPORTED, while the cache stores what the analyzers RETURNED. A run can
-// print "0 issues" and still leave issues in its cache, each carrying the
-// donor's absolute path.
 func TestSeededToolCache_ReportsTheDonorsPathsWhenTheDonorRunHadFindings(t *testing.T) {
 	root := lintFixtureRoot(t)
 	donor := seedLintWorktree(t, filepath.Join(root, "donor"))
@@ -37,11 +25,6 @@ func TestSeededToolCache_ReportsTheDonorsPathsWhenTheDonorRunHadFindings(t *test
 	}
 }
 
-// The donor here reports nothing because its config excludes the only finding,
-// which is the shape every repo carrying exclusion rules or a merge-base
-// baseline is in. The donor tree is deleted before the seeded run, because a
-// per-ticket worktree is deleted when the ticket lands and a path into it stops
-// resolving; that is what turns a silently wrong path into a visible one.
 func TestSeededToolCache_NamesTheDonorEvenWhenTheDonorRunReportedNothing(t *testing.T) {
 	root := lintFixtureRoot(t)
 	donor := seedLintWorktree(t, filepath.Join(root, "donor"))
@@ -67,10 +50,6 @@ func TestSeededToolCache_NamesTheDonorEvenWhenTheDonorRunReportedNothing(t *test
 	}
 }
 
-// lintFixtureRoot returns a temp root for a seeding fixture. A missing
-// toolchain skips the test rather than passing it: these assertions are
-// about golangci-lint's own cache behavior, so without golangci-lint they
-// establish nothing.
 func lintFixtureRoot(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
@@ -84,9 +63,6 @@ func lintFixtureRoot(t *testing.T) string {
 	return t.TempDir()
 }
 
-// writeExcludeAllConfig writes a config that excludes the fixture's only
-// finding, so the analyzer still runs and its issue is still cached while the
-// report comes back empty. Returns the config path.
 func writeExcludeAllConfig(t *testing.T, dir string) string {
 	t.Helper()
 	path := filepath.Join(dir, "golangci.yml")
@@ -104,8 +80,6 @@ func writeExcludeAllConfig(t *testing.T, dir string) string {
 	return path
 }
 
-// copyOfCache duplicates a filled cache directory the way a restore from a
-// blob store would, and returns the copy.
 func copyOfCache(t *testing.T, src, dst string) string {
 	t.Helper()
 	if err := os.CopyFS(dst, os.DirFS(src)); err != nil {

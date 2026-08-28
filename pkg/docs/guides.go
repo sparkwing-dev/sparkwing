@@ -27,19 +27,6 @@ type Guide struct {
 	Topics []string
 }
 
-// guides is the registry.
-//
-// Membership is narrative topics only. The generated references
-// (sdk-reference, cli-reference) are lookup tables, tens of thousands
-// of tokens each, and agents already treat them as such -- the traces
-// show them piped through grep so only matching lines are ingested.
-// Bundling one into a guide would multiply the cost of every guide read
-// to deliver something nobody reads end to end; those are what
-// `docs search` is for.
-//
-// Guides are added on evidence, not on taxonomy. A set earns an entry
-// when trials show its topics being read together, which is why there
-// is one of them and not eight.
 var guides = []Guide{
 	{
 		Name:    "authoring",

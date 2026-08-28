@@ -171,9 +171,6 @@ func TestRetry_OfRetryInheritsOriginalCheckoutInsteadOfEphemeralSnapshot(t *test
 	}
 }
 
-// Retry pre-allocates a pending Run row at intake so the dashboard's
-// runs list surfaces the attempt instantly. Response body is the
-// canonical Run-shape (status=pending, trigger_source=retry).
 func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "s.db"))
@@ -237,8 +234,6 @@ func TestRetry_PreAllocatesPendingRunRow(t *testing.T) {
 	}
 }
 
-// ?full=1 sets the trigger's Full flag so the orchestrator skips
-// rehydration and re-runs every node.
 func TestRetry_FullQueryParam(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "s.db"))
@@ -281,8 +276,6 @@ func TestRetry_FullQueryParam(t *testing.T) {
 	}
 }
 
-// /api/v1/runs/{id}/attempts returns every run in the retry tree
-// rooted at the requested id, ordered by created_at.
 func TestRetry_ListAttempts(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "s.db"))

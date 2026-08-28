@@ -2,9 +2,6 @@ package nodemetrics
 
 import "testing"
 
-// TestParseProcessRSSKB pins the ps reading's unit conversion and its refusal
-// to read a failed or unparsable listing as a process holding no memory, which
-// would suppress the MemStats fallback and store a zero footprint.
 func TestParseProcessRSSKB(t *testing.T) {
 	cases := []struct {
 		name string

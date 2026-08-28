@@ -1,5 +1,3 @@
-// `sparkwing tokens` subcommand. Manages the controller's tokens
-// table over HTTP.
 package main
 
 import (
@@ -94,8 +92,6 @@ func runTokensCreate(args []string) error {
 	return nil
 }
 
-// tokenListItem is the typed projection used by `tokens list`. It
-// mirrors the controller's tokenRecordJSON for the fields we render.
 type tokenListItem struct {
 	Prefix     string   `json:"prefix"`
 	Kind       string   `json:"kind"`
@@ -149,9 +145,6 @@ func runTokensList(args []string) error {
 	return renderTokensTable(os.Stdout, out.Tokens)
 }
 
-// renderTokensJSON streams the typed list as NDJSON -- one token per
-// line, no "tokens" envelope -- so a caller reads `.scopes` off each
-// line and `head` returns whole tokens. No tokens is an empty stream.
 func renderTokensJSON(w io.Writer, tokens []tokenListItem) error {
 	return ndjson.Write(w, tokens)
 }
@@ -177,11 +170,6 @@ func renderTokensTable(w io.Writer, tokens []tokenListItem) error {
 	return tw.Flush()
 }
 
-// formatScopes renders a token's scope set for the table view.
-// `admin` is the controller's superset scope (see auth.requireScope:
-// `admin` short-circuits any other scope check), so admin tokens
-// collapse to "*" instead of the literal scope name. An empty scope
-// set renders as "-" so it's visually distinct from a missing column.
 func formatScopes(scopes []string) string {
 	if len(scopes) == 0 {
 		return "-"

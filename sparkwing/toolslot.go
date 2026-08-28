@@ -25,8 +25,6 @@ func WithToolSlotProvider(ctx context.Context, p ToolSlotProvider) context.Conte
 	return context.WithValue(ctx, toolSlotCtxKey{}, p)
 }
 
-// toolSlotProviderFrom returns the provider installed on ctx, or nil
-// when the run has no local admission daemon behind it.
 func toolSlotProviderFrom(ctx context.Context) ToolSlotProvider {
 	p, _ := ctx.Value(toolSlotCtxKey{}).(ToolSlotProvider)
 	return p

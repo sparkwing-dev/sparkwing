@@ -5,15 +5,6 @@ import (
 	"testing"
 )
 
-// `sparkwing pipeline explain --name X -- <flags>` must forward
-// <flags> to the inner pipeline binary so a sliced Plan (e.g.
-// --skip artifact, --only build) renders the same DAG as
-// `sparkwing run X --explain --skip artifact`.
-//
-// The literal "--" separator must be CONSUMED, not forwarded:
-// Go's flag package stops flag processing at "--", so passing it
-// through would cause every trailing token to be parsed as a
-// positional and the slicing flags would silently no-op.
 func TestParsePipelineExplainArgs_Passthrough(t *testing.T) {
 	cases := []struct {
 		name       string

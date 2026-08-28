@@ -84,7 +84,7 @@ export default function TrendCharts({
 
   return (
     <div className="space-y-4">
-      {/* Duration chart: avg + p95 */}
+      {                               }
       <div>
         <div className="text-xs font-medium text-[var(--muted)] mb-2">
           Duration
@@ -124,7 +124,7 @@ export default function TrendCharts({
         </ResponsiveContainer>
       </div>
 
-      {/* Queue wait chart */}
+      {                      }
       <div>
         <div className="text-xs font-medium text-[var(--muted)] mb-2">
           Queue Wait
@@ -155,7 +155,7 @@ export default function TrendCharts({
         </ResponsiveContainer>
       </div>
 
-      {/* Success rate stacked bar */}
+      {                              }
       <div>
         <div className="text-xs font-medium text-[var(--muted)] mb-2">
           Success Rate

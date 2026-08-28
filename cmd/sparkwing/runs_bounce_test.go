@@ -10,9 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// bounceHome seeds a sparkwing home holding one live run with a
-// running job and one that never started -- the shapes the verb has to
-// tell apart.
 func bounceHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
@@ -38,9 +35,6 @@ func bounceHome(t *testing.T) string {
 	return home
 }
 
-// The verb records the request against the home the run is using and
-// says so. It does not wait for the restart: what it writes is an
-// intent, and the runner holding the process is what acts on it.
 func TestRunsBounce_RecordsTheRequestAgainstTheHomesStore(t *testing.T) {
 	home := bounceHome(t)
 	if err := runRunsBounce(context.Background(),
@@ -62,10 +56,6 @@ func TestRunsBounce_RecordsTheRequestAgainstTheHomesStore(t *testing.T) {
 	}
 }
 
-// Every refusal names what is actually wrong. An operator reaching for
-// this verb is already dealing with a stuck run, and "not found" for a
-// job that simply has not started yet would send them hunting for a
-// typo they did not make.
 func TestRunsBounce_RefusalsSayWhichThingIsWrong(t *testing.T) {
 	home := bounceHome(t)
 	ctx := context.Background()
@@ -92,8 +82,6 @@ func TestRunsBounce_RefusalsSayWhichThingIsWrong(t *testing.T) {
 	}
 }
 
-// A finished run has nothing executing it, so the verb says that
-// rather than recording an intent nobody will ever consume.
 func TestRunsBounce_RefusesAFinishedRun(t *testing.T) {
 	home := bounceHome(t)
 	ctx := context.Background()

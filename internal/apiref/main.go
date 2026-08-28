@@ -1,12 +1,3 @@
-// apiref generates docs/api-reference.md from the controller and
-// logs-service route registrations (pkg/controller/server.go,
-// pkg/logs/server.go). Method, path, and required scope are read
-// straight from the `mux.Handle("METHOD /path", requireScope(Scope, ...))`
-// calls, so the HTTP surface reference is derived from the routing code
-// and cannot drift (the rot that left api.md documenting /jobs, /badge,
-// /authorize, and an unprefixed surface that never existed).
-//
-// Usage: go run . <repo-root>   (writes markdown to stdout)
 package main
 
 import (
@@ -19,12 +10,10 @@ import (
 )
 
 var (
-	// matches `<recv>.Handle("METHOD /path", <rest...>` and the
-	// HandleFunc variant; group1=method group2=path group3=rest-of-line.
 	handleRE = regexp.MustCompile(`\.Handle(?:Func)?\("([A-Z]+) (/[^"]+)",\s*(.*)$`)
-	// the scope identifier inside requireScope(...) / s.requireScope(...).
+
 	scopeRefRE = regexp.MustCompile(`requireScope\((\w+),`)
-	// scope constant declarations: `ScopeAdmin = "admin"` / `scopeLogsRead = "logs.read"`.
+
 	scopeConstRE = regexp.MustCompile(`\b([A-Za-z]\w*)\s*=\s*"([a-z][a-z.]*)"`)
 )
 

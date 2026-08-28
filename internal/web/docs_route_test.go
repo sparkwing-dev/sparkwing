@@ -10,8 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-// head trims a response body for a failure message: the wrong answer here is a
-// whole HTML document, and printing all of it buries the assertion that failed.
 func head(body string) string {
 	const limit = 240
 	if len(body) > limit {
@@ -27,11 +25,6 @@ func getPath(t *testing.T, opts HandlerOptions, target string) *httptest.Respons
 	return rec
 }
 
-// The dashboard's catch-all answers every path the mux does not otherwise
-// claim, so a status code proves nothing about /docs: the app shell would
-// return 200 for /docs, for /, and for a nonsense path alike. These assertions
-// are on the bytes -- the page's own heading, and two slugs disagreeing --
-// because those are what the shell cannot produce.
 func TestDocsRouteServesTheEmbeddedPagesNotTheAppShell(t *testing.T) {
 	var opts HandlerOptions
 	pages := docs.List()
@@ -75,14 +68,6 @@ func TestDocsRouteRejectsAnUnknownSlug(t *testing.T) {
 	}
 }
 
-// The docs route is mounted inside the authenticated mux, so a dashboard that
-// requires a login requires one for its docs too. Asserting it here makes that
-// a decision the suite holds rather than a consequence of which line the route
-// was written on: moving it to the outer router would publish the pages to
-// anyone who can reach the listener, which is a different posture than the
-// rest of the surface has. The second half asserts the route is served on a
-// dashboard that requires no login, so the first half is about auth rather
-// than about the route being unreachable.
 func TestDocsRouteInheritsTheDashboardsAuthPosture(t *testing.T) {
 	opts := HandlerOptions{RequireLogin: true, ControllerURL: "http://127.0.0.1:1"}
 

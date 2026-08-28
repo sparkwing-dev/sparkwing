@@ -1,6 +1,3 @@
-// `sparkwing cluster worker` -- laptop-local worker that claims
-// triggers from a profile's controller and dispatches each one to
-// the user's compiled `.sparkwing/` binary via `handle-trigger <id>`.
 package main
 
 import (
@@ -71,13 +68,6 @@ func runWorker(args []string) error {
 	}
 }
 
-// dispatchTrigger hands a claimed trigger to `sparkwing handle-trigger`
-// as a child process. That command routes through dispatchRun's
-// compile+exec, so the user's .sparkwing binary runs the pipeline
-// with its registry intact. The child's exit status is observed but
-// not propagated -- the trigger is already flipped to 'done' inside
-// the child's HandleClaimedTrigger (even on setup failure), so we
-// just log and go back to claiming.
 func dispatchTrigger(ctx context.Context, self, triggerID, controllerURL, logsURL, token string, heartbeat time.Duration) {
 	args := []string{
 		"handle-trigger",

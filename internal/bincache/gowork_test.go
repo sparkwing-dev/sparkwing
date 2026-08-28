@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// newWorkspaceAt builds a workspace whose go.work body the caller
-// supplies verbatim, so a test can vary one directive at a time.
 func newWorkspaceAt(t *testing.T, body string) (pipelineDir string) {
 	t.Helper()
 	root := t.TempDir()
@@ -23,10 +21,6 @@ func newWorkspaceAt(t *testing.T, body string) (pipelineDir string) {
 	return pipelineDir
 }
 
-// The workspace summary is normalized rather than a hash of the file's
-// bytes, which means every build-affecting directive has to be
-// enumerated by hand. modfile.WorkFile carries five; one omitted here
-// is one that silently stops invalidating the cache.
 func TestPipelineCacheKey_InvalidatesOnEachGoWorkDirective(t *testing.T) {
 	const base = "go 1.26\n\nuse ./svc\nuse ./tmpl\n"
 
@@ -50,9 +44,6 @@ func TestPipelineCacheKey_InvalidatesOnEachGoWorkDirective(t *testing.T) {
 	}
 }
 
-// Cosmetic differences are exactly what raw-byte hashing used to catch
-// and what normalization is meant to stop catching: comments, blank
-// lines, and directive order differ freely between checkouts.
 func TestPipelineCacheKey_IgnoresGoWorkCosmetics(t *testing.T) {
 	plain := "go 1.26\n\nuse ./svc\nuse ./tmpl\n"
 	dressed := "// local workspace\n\ngo 1.26\n\n\nuse ./tmpl\nuse ./svc // pipeline\n"

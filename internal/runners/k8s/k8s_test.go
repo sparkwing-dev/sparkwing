@@ -56,10 +56,6 @@ func TestBuildJob_OmitsArtifactStoreURLWhenEmpty(t *testing.T) {
 	}
 }
 
-// The four values are load-bearing, not decorative: the "|" makes any
-// proxy error fall through to upstream, `direct` last keeps private
-// modules resolvable through ~/.netrc, and pip ignores a plain-HTTP
-// index whose host is not also in PIP_TRUSTED_HOST.
 func TestBuildJob_PointsPackageManagersAtTheDependencyProxy(t *testing.T) {
 	env := jobEnv(t, Config{Image: "img", DependencyProxyURL: "http://cache.sparkwing.svc.cluster.local"})
 	for key, want := range map[string]string{
@@ -74,9 +70,6 @@ func TestBuildJob_PointsPackageManagersAtTheDependencyProxy(t *testing.T) {
 	}
 }
 
-// npm_config_registry is lowercase, which is legal for a K8s env name
-// and easy to assume otherwise; a rejected name would fail the Job at
-// admission, long after this code ran.
 func TestDependencyProxyEnv_NamesAreValidK8sEnvNames(t *testing.T) {
 	for _, e := range dependencyProxyEnv("http://cache") {
 		if errs := validation.IsEnvVarName(e.Name); len(errs) > 0 {
@@ -135,9 +128,6 @@ func TestDependencyProxyEnv_URLJoin(t *testing.T) {
 	}
 }
 
-// A pod that cannot resolve its own registry is worse than one on
-// upstream defaults, so a base URL missing a scheme or host wires
-// nothing at all.
 func TestDependencyProxyEnv_RejectsUnusableBase(t *testing.T) {
 	for _, base := range []string{"", "cache.sparkwing.svc", "http://", "://cache"} {
 		if got := dependencyProxyEnv(base); got != nil {
@@ -168,8 +158,6 @@ func TestResolveDependencyProxy(t *testing.T) {
 	}
 }
 
-// PullAlways on a Job-per-node pod re-downloads a digest the kubelet
-// already has, once per node.
 func TestBuildJob_DefaultsToIfNotPresentPullPolicy(t *testing.T) {
 	r := &Runner{cfg: Config{Image: "img"}}
 	job := r.buildJob("job-name", runner.Request{RunID: "run-1", NodeID: "node-1"}, capacity.Resolution{Source: store.CostSourceDefault})
@@ -444,8 +432,6 @@ func TestRunNode_MissingJobReturnsLateTerminalNodeAfterGrace(t *testing.T) {
 	}
 }
 
-// defaultsCfg is the conservative fallback the cold-start tier and any
-// unset dimension resolve to.
 var defaultsCfg = Config{
 	CPURequest: "100m", CPULimit: "2", MemoryRequest: "128Mi", MemoryLimit: "2Gi",
 }

@@ -1,35 +1,14 @@
 #!/usr/bin/env bash
-#
-# sparkwing-runner installer for macOS (launchd) and Linux (systemd user).
-#
-# Usage (interactive):
-#   bash install/install.sh
-#
-# Usage (non-interactive, e.g. for scripting or team onboarding docs):
-#   SPARKWING_CONTROLLER=https://controller.example.com \
-#   SPARKWING_LOGS=https://logs.example.com \
-#   SPARKWING_API_TOKEN=... \
-#   RUNNER_NAME=dev-laptop \
-#   MAX_CONCURRENT=2 \
-#   bash install/install.sh --yes
-#
-# What it does:
-#   1. Confirms sparkwing-runner is on your PATH (or tells you how to install it)
-#   2. Writes ~/.config/sparkwing/agent.yaml (controller URL, token, labels)
-#   3. Renders a launchd plist (macOS) or a systemd user unit (Linux) that
-#      runs `sparkwing-runner agent --config <that file>`
-#   4. Loads the service so the runner starts at login / boot
-#   5. Prints instructions for pause / stop / uninstall
-#
-# This script does NOT build sparkwing-runner itself. Install it first:
-#   go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing-runner@latest
-# or build from source and put the binary on your PATH.
+
+
+
+
+
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ---------- helpers ----------
 
 log()  { printf "\033[36m==>\033[0m %s\n" "$*"; }
 warn() { printf "\033[33m==>\033[0m %s\n" "$*" >&2; }
@@ -74,7 +53,6 @@ remote cluster -- there's no local runner Service to install." ;;
   esac
 }
 
-# ---------- pre-flight ----------
 
 NON_INTERACTIVE=false
 if [[ "${1:-}" == "--yes" || "${1:-}" == "-y" ]]; then
@@ -100,7 +78,6 @@ if ! command -v docker >/dev/null 2>&1; then
   warn "docker not found on PATH. Most sparkwing jobs need Docker -- install Docker Desktop / colima / rancher-desktop before running real work."
 fi
 
-# ---------- collect config ----------
 
 if [ "$NON_INTERACTIVE" = false ]; then
   log "configuring sparkwing-runner. Press enter to accept defaults."
@@ -149,15 +126,11 @@ if [ "$NON_INTERACTIVE" = false ]; then
   fi
 fi
 
-# ---------- render and install ----------
 
 SPARKWING_HOME="${HOME}/.sparkwing"
 LOG_PATH="${SPARKWING_HOME}/runner.log"
 mkdir -p "$SPARKWING_HOME"
 
-# The agent reads its connection config from agent.yaml -- the service
-# just points at this file. The token lives here (mode 600), not in the
-# launchd/systemd unit.
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/sparkwing"
 CONFIG_PATH="${CONFIG_DIR}/agent.yaml"
 mkdir -p "$CONFIG_DIR"
@@ -168,7 +141,7 @@ token: "${API_TOKEN}"
 max_concurrent: ${MAX_CONCURRENT}
 holder_prefix: "${RUNNER_NAME}"
 YAML
-chmod 600 "$CONFIG_PATH"  # contains the API token
+chmod 600 "$CONFIG_PATH"
 log "wrote $CONFIG_PATH (mode 600)"
 
 if [ "$PLATFORM" = "macos" ]; then
@@ -179,7 +152,6 @@ if [ "$PLATFORM" = "macos" ]; then
   PLIST_PATH="${PLIST_DIR}/com.sparkwing.runner.plist"
   mkdir -p "$PLIST_DIR"
 
-  # Unload if already installed so we can replace cleanly.
   if launchctl list com.sparkwing.runner >/dev/null 2>&1; then
     log "unloading existing LaunchAgent..."
     launchctl unload "$PLIST_PATH" 2>/dev/null || true

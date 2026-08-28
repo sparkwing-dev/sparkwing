@@ -1,11 +1,4 @@
 #!/usr/bin/env bash
-# sparkwing run: verify-replay
-# desc: Quick verification of the replay primitives. Runs the focused
-#       unit tests against the orchestrator + store packages so the
-#       dispatch substrate + lineage stamping are exercised against real
-#       SQLite. Use after touching pkg/orchestrator/replay.go or the
-#       runs schema.
-# arg:  none
 
 set -euo pipefail
 

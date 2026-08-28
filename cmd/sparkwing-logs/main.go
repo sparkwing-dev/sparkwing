@@ -1,6 +1,3 @@
-// Command sparkwing-logs is the logs-service pod's entry point:
-// an HTTP service fronting file-per-node log storage. Worker pods
-// POST log lines, the web pod GETs them back.
 package main
 
 import (

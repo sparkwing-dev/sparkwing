@@ -16,12 +16,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// resolveTimeout bounds how long a test waits for a queued/coalesced
-// waiter to resolve before failing.
 const resolveTimeout = 15 * time.Second
 
-// acquire is a thin helper that issues one AcquireSlot and fails the
-// test on transport error.
 func acquire(t *testing.T, c orchestrator.ConcurrencyBackend, req store.AcquireSlotRequest) store.AcquireSlotResponse {
 	t.Helper()
 	resp, err := c.AcquireSlot(context.Background(), req)
@@ -31,10 +27,6 @@ func acquire(t *testing.T, c orchestrator.ConcurrencyBackend, req store.AcquireS
 	return resp
 }
 
-// holdSlot acquires a queue-policy slot and blocks until it actually
-// holds it (granted outright or promoted from the queue), returning the
-// holder id. It models how the orchestrator turns a queued arrival into
-// a running node.
 func holdSlot(t *testing.T, c orchestrator.ConcurrencyBackend, key, runID, nodeID string, capacity, cost int) string {
 	t.Helper()
 	resp := acquire(t, c, store.AcquireSlotRequest{
@@ -52,8 +44,6 @@ func holdSlot(t *testing.T, c orchestrator.ConcurrencyBackend, key, runID, nodeI
 	}
 }
 
-// waitPromoted polls ResolveWaiter until the waiter is promoted to a
-// holder, returning the holder id.
 func waitPromoted(t *testing.T, c orchestrator.ConcurrencyBackend, key, runID, nodeID string) string {
 	t.Helper()
 	deadline := time.Now().Add(resolveTimeout)
@@ -280,11 +270,6 @@ func runS3ConcurrencyBurst(t *testing.T, c orchestrator.ConcurrencyBackend, key 
 	return grantedCost, maxHeldCost, ran.Load()
 }
 
-// TestS3Concurrency_NoOverAdmission is the central guarantee: under
-// sustained contention by N goroutines on one capacity-K key, the live
-// holder count never exceeds K. The CAS loop is the enforcement -- two
-// arrivals that both read room serialize on If-Match, and the loser
-// re-reads and queues. Run under -race to surface ordering bugs.
 func TestS3Concurrency_NoOverAdmission(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
@@ -311,9 +296,6 @@ func TestS3Concurrency_NoOverAdmission(t *testing.T) {
 	}
 }
 
-// TestS3Concurrency_NoOverBudgetWithCost asserts admission is by summed
-// cost, not slot count: the live holders' total cost never exceeds the
-// capacity budget even when arrivals carry mixed weights.
 func TestS3Concurrency_NoOverBudgetWithCost(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
@@ -594,10 +576,6 @@ func TestS3Concurrency_CancelOthersSupersedesInheritedHolder(t *testing.T) {
 	}
 }
 
-// TestS3Concurrency_QueueOrderingAndPromotion drives the queue policy
-// deterministically for equal-cost waiters: arrivals report positions,
-// ResolveWaiter reflects the live queue, and each release promotes the
-// oldest fitting waiter.
 func TestS3Concurrency_QueueOrderingAndPromotion(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
@@ -659,8 +637,6 @@ func assertStillWaiting(t *testing.T, c orchestrator.ConcurrencyBackend, key, ru
 	}
 }
 
-// TestS3Concurrency_SkipAndFail covers the non-queuing reject policies
-// at a full slot, plus the cost-exceeds-capacity short circuit.
 func TestS3Concurrency_SkipAndFail(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
@@ -732,9 +708,6 @@ func containsString(list []string, target string) bool {
 	return false
 }
 
-// TestS3Concurrency_CoalesceCacheHit asserts a coalesced follower
-// inherits the leader's memoized result once the leader releases with a
-// cache entry.
 func TestS3Concurrency_CoalesceCacheHit(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
@@ -846,10 +819,6 @@ func TestS3Concurrency_CoalesceFollowersReparentAfterFailedLeader(t *testing.T) 
 	}
 }
 
-// TestS3Concurrency_CancelOthersSupersedes asserts cancel_others evicts
-// the prior holder under fencing: the new arrival holds, the evicted
-// holder's heartbeat reports superseded, and ForceReleaseSuperseded
-// drops it.
 func TestS3Concurrency_CancelOthersSupersedes(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
@@ -888,10 +857,6 @@ func TestS3Concurrency_CancelOthersSupersedes(t *testing.T) {
 	}
 }
 
-// TestS3Concurrency_LeaseExpiryReclaimed asserts a holder whose lease
-// lapsed without a heartbeat frees its budget for the next acquirer,
-// and that the lapsed holder's heartbeat is refused so it cannot revive
-// a slot already handed on.
 func TestS3Concurrency_LeaseExpiryReclaimed(t *testing.T) {
 	art, _ := openIntegrationS3(t)
 	c := orchestrator.NewS3Concurrency(art)
@@ -917,10 +882,6 @@ func TestS3Concurrency_LeaseExpiryReclaimed(t *testing.T) {
 	}
 }
 
-// TestS3Concurrency_FallsBackWhenPreconditionsIgnored asserts that an
-// endpoint advertising the CAS interface but ignoring preconditions
-// degrades to no-op admission (every slot granted) instead of handing
-// out unsafe locks.
 func TestS3Concurrency_FallsBackWhenPreconditionsIgnored(t *testing.T) {
 	c := orchestrator.NewS3Concurrency(&ignorePreconditionsStore{})
 	key := "g:fallback"
@@ -935,8 +896,6 @@ func TestS3Concurrency_FallsBackWhenPreconditionsIgnored(t *testing.T) {
 	}
 }
 
-// TestS3Concurrency_NonConditionalStoreIsNoop asserts a store without
-// the ConditionalWriter capability yields the no-op backend directly.
 func TestS3Concurrency_NonConditionalStoreIsNoop(t *testing.T) {
 	c := orchestrator.NewS3Concurrency(&plainStore{})
 	key := "g:plain"
@@ -948,7 +907,6 @@ func TestS3Concurrency_NonConditionalStoreIsNoop(t *testing.T) {
 	}
 }
 
-// plainStore is an ArtifactStore with no conditional-write capability.
 type plainStore struct{}
 
 func (*plainStore) Get(context.Context, string) (io.ReadCloser, error) {
@@ -961,9 +919,6 @@ func (*plainStore) List(context.Context, string) ([]string, error) {
 	return nil, storage.ErrListNotSupported
 }
 
-// ignorePreconditionsStore implements ConditionalWriter but reports that
-// the endpoint does not enforce preconditions, so the concurrency
-// backend must fall back to no-op coordination.
 type ignorePreconditionsStore struct {
 	mu   sync.Mutex
 	data map[string][]byte

@@ -7,9 +7,6 @@ import (
 	"time"
 )
 
-// fakeGit maps a checkout path to the git-common-dir output that
-// canonicalizes it, so worktree folding can be tested without real
-// linked worktrees.
 func fakeGit(commonDirs map[string]string) Git {
 	return func(dir string, args ...string) (string, error) {
 		if cd, ok := commonDirs[dir]; ok {

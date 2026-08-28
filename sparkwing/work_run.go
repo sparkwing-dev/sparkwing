@@ -278,9 +278,6 @@ func RunWork(ctx context.Context, w *Work) (any, error) {
 	return nil, nil
 }
 
-// stepOf returns the WorkStep for a step-kind item, or nil for
-// spawn / spawnEach items (which don't carry Optional /
-// ContinueOnError flags today).
 func stepOf(it *workItem) *WorkStep {
 	if it == nil || it.kind != itemStep {
 		return nil
@@ -296,7 +293,6 @@ const (
 	itemSpawnEach
 )
 
-// workItem unifies steps and spawns under one scheduling entity.
 type workItem struct {
 	id       string
 	kind     itemKind
@@ -305,11 +301,8 @@ type workItem struct {
 	step     *WorkStep
 	spawn    *SpawnSpec
 	gen      *SpawnGenSpec
-	isHidden bool // true for synthetic SpawnNodeForEach items
-	// rangeSkipReason, when non-empty, short-circuits the item with a
-	// `step_skipped` event whose Attrs.reason carries this string.
-	// Populated by RunWork when --start-at / --stop-at puts the item
-	// outside the selected range.
+	isHidden bool
+
 	rangeSkipReason string
 }
 
@@ -317,10 +310,6 @@ func (it *workItem) isFinally() bool {
 	return it != nil && it.step != nil && it.step.IsFinally()
 }
 
-// runOneItem executes a single item to terminal: range skip, SkipIf
-// evaluation, then dispatch to the kind-specific executor. Panics
-// in user code are surfaced as item errors so the runner doesn't
-// crash.
 func runOneItem(ctx context.Context, it *workItem, parentNodeID string, handler SpawnHandler, done chan<- stepResult) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -411,8 +400,6 @@ func runOneSpawn(ctx context.Context, spec *SpawnSpec, parentNodeID string, hand
 	return out, err
 }
 
-// runSpawnEach iterates the generator's slice and dispatches every
-// (id, job) pair through the handler in parallel. Fail-fast.
 func runSpawnEach(ctx context.Context, spec *SpawnGenSpec, parentNodeID string, handler SpawnHandler) (any, error) {
 	rv := reflect.ValueOf(spec.items)
 	if rv.Kind() != reflect.Slice {

@@ -10,14 +10,6 @@ import (
 	"testing"
 )
 
-// TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile reproduces registry
-// corruption caused by the old fixed path+".tmp"
-// staging name, concurrent writers shared one file descriptor target,
-// interleaved their bytes and renamed the mixture over the registry.
-// Every writer here saves a config of a different length on purpose: it
-// is the length difference that strands a tail of the longer write past
-// the end of the shorter one, which is what a stray character after a
-// key actually is.
 func TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "repos.yaml")
 	const writers = 24
@@ -63,9 +55,6 @@ func TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile(t *testing.T) {
 	}
 }
 
-// TestSave_LeavesNoStagingFilesBehind guards the cleanup: a temp name
-// per writer is only an improvement if the losers are removed, or the
-// config directory fills with .repos-*.yaml debris.
 func TestSave_LeavesNoStagingFilesBehind(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "repos.yaml")
@@ -85,11 +74,6 @@ func TestSave_LeavesNoStagingFilesBehind(t *testing.T) {
 	}
 }
 
-// TestSave_AFailedWriteLeavesThePreviousRegistryIntact is the mutation
-// check for the atomic write: make the save fail and confirm the file it
-// was replacing is still there and still parses. A read-only config
-// directory is the cheapest way to fail a save after the caller already
-// has a good file on disk.
 func TestSave_AFailedWriteLeavesThePreviousRegistryIntact(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "repos.yaml")
@@ -127,15 +111,8 @@ func TestSave_AFailedWriteLeavesThePreviousRegistryIntact(t *testing.T) {
 	}
 }
 
-// killSentinel makes the test binary re-enter itself as the child of the
-// interrupt test below, saving to the registry named in the variable.
 const killSentinel = "SPARKWING_TEST_SAVE_UNTIL_KILLED"
 
-// TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact is the
-// harsher mutation check: a real process is SIGKILLed while it is
-// looping over Save, so it dies at an arbitrary point in the write
-// rather than at a seam the test chose. Whatever it was doing, the
-// registry has to be one of the two whole versions, never a blend.
 func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T) {
 	if os.Getenv(killSentinel) != "" {
 		saveUntilKilled(os.Getenv(killSentinel))
@@ -184,9 +161,6 @@ func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T
 	}
 }
 
-// saveUntilKilled writes an ever-growing registry to path until the
-// parent kills the process. The config grows so each write takes long
-// enough that the kill has a good chance of landing inside one.
 func saveUntilKilled(path string) {
 	cfg := &Config{FallbackPaths: []string{"~/code"}}
 	for i := 0; ; i++ {
@@ -197,9 +171,6 @@ func saveUntilKilled(path string) {
 	}
 }
 
-// waitForGrowth blocks until the child has landed at least one save of
-// its own, so the kill lands during real work rather than during the
-// child's startup.
 func waitForGrowth(t *testing.T, path string) {
 	t.Helper()
 	for range 20000 {

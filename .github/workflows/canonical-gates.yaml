@@ -67,9 +67,6 @@ jobs:
       - name: Build the checked-out Sparkwing CLI
         run: go build -trimpath -o "$RUNNER_TEMP/sparkwing" ./cmd/sparkwing
 
-      # Diff-scoped pre-commit checks need the event's change in the index.
-      # Moving HEAD while retaining the target tree recreates the state a
-      # local pre-commit hook sees without changing any checked-out bytes.
       - name: Stage the event change
         if: matrix.gate == 'pre-commit'
         env:
@@ -90,9 +87,6 @@ jobs:
           test "$(git write-tree)" = "$(git rev-parse "$TARGET_SHA^{tree}")"
           git diff --quiet
 
-      # The release gate normally runs before creating a tag. Hiding the
-      # triggering tag locally preserves that freshness boundary and keeps
-      # pre-push from generating a post-release pin commit.
       - name: Preserve the pre-tag release boundary
         if: matrix.gate == 'pre-push' && github.ref_type == 'tag'
         run: git tag --delete -- "$GITHUB_REF_NAME"

@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestBuildRerunEnv_OverlayWins asserts the snapshot env beats the
-// caller's base env on key collisions, while non-conflicting base
-// keys are preserved (so the shell still has PATH etc.).
 func TestBuildRerunEnv_OverlayWins(t *testing.T) {
 	envJSON, _ := json.Marshal(map[string]string{
 		"SPARKWING_RUN_ID": "run-abc",
@@ -48,8 +45,6 @@ func TestBuildRerunEnv_OverlayWins(t *testing.T) {
 	}
 }
 
-// TestBuildRerunEnv_OmitRefsDir keeps the env clean when no refs dir
-// is in play (cluster mode does not materialize refs).
 func TestBuildRerunEnv_OmitRefsDir(t *testing.T) {
 	snap := &store.NodeDispatch{EnvJSON: []byte(`{}`)}
 	got, err := BuildRerunEnv(snap, "", nil)
@@ -65,9 +60,6 @@ func TestBuildRerunEnv_OmitRefsDir(t *testing.T) {
 	}
 }
 
-// TestBuildRerunEnv_EmptyEnvJSON handles a snapshot whose env_json
-// blob is nil (older row, or a write that lost the env). The base
-// env still flows through; the rerun marker is still set.
 func TestBuildRerunEnv_EmptyEnvJSON(t *testing.T) {
 	got, err := BuildRerunEnv(&store.NodeDispatch{}, "", []string{"FOO=bar"})
 	if err != nil {
@@ -82,8 +74,6 @@ func TestBuildRerunEnv_EmptyEnvJSON(t *testing.T) {
 	}
 }
 
-// TestBuildRerunEnv_BadJSON surfaces a parse error rather than
-// silently returning an empty map.
 func TestBuildRerunEnv_BadJSON(t *testing.T) {
 	snap := &store.NodeDispatch{EnvJSON: []byte("not-json")}
 	if _, err := BuildRerunEnv(snap, "", nil); err == nil {
@@ -91,8 +81,6 @@ func TestBuildRerunEnv_BadJSON(t *testing.T) {
 	}
 }
 
-// TestMaterializeLocalRefs writes one file per dep with the upstream
-// node's output bytes. Missing deps are warned-about, not fatal.
 func TestMaterializeLocalRefs(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -141,9 +129,6 @@ func TestMaterializeLocalRefs(t *testing.T) {
 	}
 }
 
-// TestPrintRerunBanner sanity: the banner mentions the key context
-// (run, node, seq, workdir, error). Layout-only assertions; format
-// changes require updating this test.
 func TestPrintRerunBanner(t *testing.T) {
 	snap := &store.NodeDispatch{
 		RunID: "run-X", NodeID: "deploy", Seq: 2,
@@ -169,8 +154,6 @@ func TestPrintRerunBanner(t *testing.T) {
 	}
 }
 
-// TestPodName produces a DNS-label-safe pod name. Length, charset,
-// uniqueness across calls.
 func TestPodName(t *testing.T) {
 	a := podName("run-1", "build")
 	b := podName("run-1", "build")

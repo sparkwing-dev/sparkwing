@@ -16,21 +16,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// sample reads one holder's process-tree CPU usage. It reports
-// not-sampled when the process is gone or the process table cannot be
-// read.
 func (p *procSampler) sample(pid int) (ProcUsage, bool) {
 	usages := p.sampleMany([]int{pid})
 	usage, ok := usages[pid]
 	return usage, ok
 }
 
-// sampleMany finds each holder's descendants from kinfo_proc and sums the
-// process tree's CPU percentage through one shared ps invocation, matching
-// the operator view on macOS. Reading only a holder's own pid would miss
-// work that runs in forked children, so a busy holder driving child
-// processes would read idle.
-//
 // hack: kinfo_proc's own P_pctcpu field is unmaintained on current macOS
 // releases -- it reads zero even for a pegged process -- so the CPU
 // percentages come from ps while the sysctl supplies only the tree shape.
@@ -136,10 +127,7 @@ func (p *platformSampler) SampleWithOwned(roots []int) (HostStat, float64, bool,
 	if !ok {
 		return stat, 0, false, nil
 	}
-	// Cumulative CPU time is only a utilization once differenced against a
-	// prior reading, so the previous snapshot and the wall time since it are
-	// carried on the sampler. The first tick has nothing to difference and
-	// reports unmeasured; callers already handle that (CPUMeasured=false).
+
 	now := time.Now()
 	previous, previousAt := p.darwinPrev, p.darwinPrevAt
 	p.darwinPrev, p.darwinPrevAt = snapshot, now
@@ -250,23 +238,6 @@ func sampleHost() (HostStat, error) {
 	return stat, nil
 }
 
-// darwinFreeMemory turns kern.memorystatus_level, the kernel's own
-// percent-available figure, into an available-byte count. It is the darwin
-// analog of Linux MemAvailable and the only macOS reading that answers how
-// much memory new work can draw.
-//
-// There is deliberately no fallback under it. vm.page_free_count counts only
-// truly free pages, and macOS parks most of RAM in reclaimable cache and the
-// compressor, so on this repo's 16 GiB dev box it read 0.31 GiB free while
-// the machine sat idle (measured 2026-07-30). Standing that in reports 98% of
-// the box consumed, pins memory headroom at zero, and is indistinguishable
-// from a measurement of a full machine. A level outside 1..100 is treated the
-// same way, because a kernel figure of no memory at all on a box that is still
-// serving cannot be told apart from a sysctl nobody populated.
-//
-// An unreadable level reports (0, false): no bytes and no measurement, so
-// every caller has to decide what to do about the blindness rather than
-// inheriting a number.
 func darwinFreeMemory(total uint64, level uint32, read bool) (uint64, bool) {
 	if !read || level == 0 || level > 100 {
 		return 0, false

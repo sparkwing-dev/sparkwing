@@ -1,24 +1,8 @@
 #!/usr/bin/env bash
-# Demonstrates .CacheDir(sparkwing.GoModules()): the same pipeline run
-# twice, where the first run downloads the app's Go modules and saves
-# the module cache, and the second run starts from a wiped module
-# cache (a fresh runner pod, simulated) and restores it instead of
-# re-downloading. The second run executes with GOPROXY=off, so if the
-# restore did not work, the run fails -- the proof is structural, not
-# a log line.
-#
-# Run from anywhere inside a sparkwing checkout:
-#
-#   bash examples/dep-cache/demo.sh
-#
-# Everything lands in a throwaway temp dir (isolated SPARKWING_HOME,
-# isolated GOMODCACHE); your real caches are never touched.
 set -euo pipefail
 
 SPARKWING_REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DEMO="$(mktemp -d)"
-# Module caches are read-only on disk; make them writable before the
-# sweep or the trap spews permission errors.
 trap 'chmod -R u+w "$DEMO" 2>/dev/null || true; rm -rf "$DEMO"' EXIT
 
 APP="$DEMO/app"
@@ -140,9 +124,6 @@ EOF
 
 say "building the pipeline binary and a matching CLI (uses your normal Go caches)"
 (cd "$APP/.sparkwing" && GOWORK=off go mod tidy -e >/dev/null 2>&1 && GOWORK=off go build -o "$DEMO/pipeline" .)
-# The pipeline binary hands local admission to the `sparkwing` on
-# PATH; an older installed CLI cannot host this branch's daemon, so
-# the demo builds its own and puts it first.
 mkdir -p "$DEMO/bin"
 (cd "$SPARKWING_REPO" && GOWORK=off go build -o "$DEMO/bin/sparkwing" ./cmd/sparkwing)
 export PATH="$DEMO/bin:$PATH"

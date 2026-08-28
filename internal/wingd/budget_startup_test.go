@@ -10,8 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// logCapture is a thread-safe sink for the daemon's operational log lines,
-// which the sampler goroutine writes concurrently with startup.
 type logCapture struct {
 	mu    sync.Mutex
 	lines []string

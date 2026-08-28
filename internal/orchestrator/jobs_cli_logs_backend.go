@@ -15,12 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// writeLogsViaBackend renders per-node log output via a Backend. Used
-// for Mode 2 (S3 / object-store) and Mode 4 (controller) state, where
-// the local on-disk envelope + per-node files don't exist. The per-
-// node body is already NDJSON of [sparkwing.LogRecord], so this is
-// basically a per-node ReadNodeLog plus the same banner / format
-// rules as [writeLogsTextRemote].
 func writeLogsViaBackend(ctx context.Context, b backend.Backend, runID string, target []*store.Node, opts LogsOpts, out io.Writer) error {
 	filter := backend.ReadOpts{
 		Tail:  opts.Tail,
@@ -59,10 +53,6 @@ func writeLogsViaBackend(ctx context.Context, b backend.Backend, runID string, t
 	return nil
 }
 
-// writeEventsViaBackend renders the run's lifecycle event stream from
-// the state backend (s3state for Mode 2; controller HTTP for Mode 4).
-// One JSON-encoded [store.Event] per line. Used for --events-only;
-// per-node body bytes go through writeLogsViaBackend.
 func writeEventsViaBackend(ctx context.Context, b backend.Backend, runID string, opts LogsOpts, out io.Writer) error {
 	events, err := b.ListEventsAfter(ctx, runID, 0, 0)
 	if err != nil {
@@ -83,11 +73,6 @@ func writeEventsViaBackend(ctx context.Context, b backend.Backend, runID string,
 	return err
 }
 
-// followLogsViaBackend tails per-node body output by polling
-// Backend.ListNodes for new nodes and streaming each via
-// Backend.StreamNodeLog. Mirrors [followLogsRemote] for the
-// backend-abstracted code path. Exits on run-terminal status (with
-// a brief drain window) or ctx cancel.
 func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFilter string, out io.Writer) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -150,19 +135,6 @@ func followLogsViaBackend(ctx context.Context, b backend.Backend, runID, nodeFil
 	return nil
 }
 
-// streamNodeViaBackend reads one node's log stream from a Backend.
-// Two code paths:
-//
-//   - StreamNodeLog returns a non-nil ReadCloser: dispatch to the
-//     copy loop and reconnect on close. Used by backends with native
-//     streaming (controller SSE).
-//   - StreamNodeLog returns (nil, nil): poll ReadNodeLog with a
-//     growing offset, emit only the new bytes each cycle. Used by
-//     backends like S3 that have no real stream API but expose a
-//     read that returns the current full body.
-//
-// Exits cleanly on ctx done. Reconnect/poll spacing is 250-500ms so
-// a dead node doesn't tight-loop.
 func streamNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID string,
 	multi *atomic.Bool, mu *sync.Mutex, out io.Writer,
 ) {
@@ -196,14 +168,6 @@ func streamNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID 
 	}
 }
 
-// pollNodeViaBackend tails a node's log by re-reading the full body
-// each cycle and emitting only the new bytes since last read. Used
-// when the backend has no native stream API (S3). Exits on ctx done.
-//
-// Cost: each poll re-reads the full node body. For agent use against
-// short-to-medium runs this is fine; the alternative (listing new
-// log-shard objects since the last call) would require backend
-// surface we don't have today. Revisit if log volumes warrant it.
 func pollNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID string,
 	multi *atomic.Bool, mu *sync.Mutex, out io.Writer,
 ) {
@@ -237,10 +201,6 @@ func pollNodeViaBackend(ctx context.Context, b backend.Backend, runID, nodeID st
 	}
 }
 
-// copyNodeStream reads NDJSON lines from rc and writes them under mu
-// so concurrent nodes don't corrupt each other's output. When multi
-// flips true mid-stream, each subsequent line gets a "[nodeID] "
-// prefix so the operator can attribute interleaved output.
 func copyNodeStream(ctx context.Context, rc io.Reader, nodeID string, multi *atomic.Bool, mu *sync.Mutex, out io.Writer) {
 	const bufSize = 64 * 1024
 	buf := make([]byte, bufSize)

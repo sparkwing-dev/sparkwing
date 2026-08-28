@@ -15,13 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestCoordinatedLogBackend_NoLogsSurfaceKeepsTheRunsOwnFiles pins the
-// laptop case byte-for-byte.
-//
-// A profile that names no logs surface must leave the node process on
-// its caller's default, which is the run's local log files. Anything
-// else would move a laptop run's node logs the moment its nodes started
-// executing in their own processes.
 func TestCoordinatedLogBackend_NoLogsSurfaceKeepsTheRunsOwnFiles(t *testing.T) {
 	ctx := context.Background()
 
@@ -42,15 +35,6 @@ func TestCoordinatedLogBackend_NoLogsSurfaceKeepsTheRunsOwnFiles(t *testing.T) {
 	}
 }
 
-// TestCoordinatedLogBackend_UnopenableSurfaceFailsTheNode pins the
-// fail-fast.
-//
-// A node that cannot reach the run's declared logs surface must fail,
-// not quietly write to the worker's disk: half a run's logs in the
-// declared place and half somewhere nobody named is worse than a run
-// that stops and says so. The message has to name the profile and the
-// surface, because the operator reading it is looking at a node row,
-// not at this code.
 func TestCoordinatedLogBackend_UnopenableSurfaceFailsTheNode(t *testing.T) {
 	_, err := coordinatedLogBackend(context.Background(), &profile.Profile{
 		Name:  "shared-team",
@@ -67,16 +51,6 @@ func TestCoordinatedLogBackend_UnopenableSurfaceFailsTheNode(t *testing.T) {
 	}
 }
 
-// TestStartRunLoopback_MirroredRunTeesChildWritesToBothStores is the
-// mirror case: `sparkwing run --profile <remote>` from a laptop, whose
-// state is the remote backend with a local SQLite shadow.
-//
-// Before node bodies moved into their own processes the tee saw every
-// write, because the dispatcher made them. A child pointed at the
-// canonical handle underneath the tee would have written past the
-// mirror, and the laptop's shadow of the run would have carried the
-// run row and nothing else. This asserts the child's writes land in
-// both stores.
 func TestStartRunLoopback_MirroredRunTeesChildWritesToBothStores(t *testing.T) {
 	paths := newInternalPaths(t)
 

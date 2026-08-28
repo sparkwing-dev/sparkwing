@@ -22,15 +22,6 @@ func TestLintCommandWaitsForTheBoxWideLockInsteadOfFailingOnIt(t *testing.T) {
 	}
 }
 
-// TestLintCommandNeverDropsTheToolLockWithoutABudget pins the invariant
-// the whole box budget rests on. golangci-lint's private lock is the only
-// thing serializing lint when no wingd slot is held, so dropping it
-// without the slot would leave concurrent linters with nothing bounding
-// them at all. This is the corruption case, not a performance case.
-//
-// It matters more now than when it was written. The step runs one command
-// per committed module, so a regression here drops the lock once per
-// module rather than once per gate.
 func TestLintCommandNeverDropsTheToolLockWithoutABudget(t *testing.T) {
 	withoutBudget := lintCommandFor(false)
 	if strings.Contains(withoutBudget, "--allow-parallel-runners") {
@@ -77,10 +68,6 @@ func TestFixedCheckoutDoesNotNeedLintAlias(t *testing.T) {
 	}
 }
 
-// TestLintSlotCostIsAdmissibleOnThisBox guards the plan-time panic path:
-// a cost larger than the budget could never be admitted, so a machine
-// smaller than one measured lint must clamp to exclusive rather than
-// crash the gate.
 func TestLintSlotCostIsAdmissibleOnThisBox(t *testing.T) {
 	cost, capacity := lintSlotCost(), lintBudget.Limit().Capacity
 	if cost < 1 {
@@ -91,10 +78,6 @@ func TestLintSlotCostIsAdmissibleOnThisBox(t *testing.T) {
 	}
 }
 
-// TestLintBudgetIsBoxScoped pins the scope. golangci-lint's own lock is
-// box-wide, so a budget replacing it has to reach exactly as far; a
-// run-scoped budget would let every concurrent gate hold its own slot and
-// serialize nothing.
 func TestLintBudgetIsBoxScoped(t *testing.T) {
 	if got := lintBudget.Limit().Scope; got != sparkwing.ScopeBox {
 		t.Fatalf("lint budget scope is %q, so it does not bound the machine the tool lock bounded", got)
@@ -104,17 +87,6 @@ func TestLintBudgetIsBoxScoped(t *testing.T) {
 	}
 }
 
-// Lint cost is bimodal: a cold run draws 2.67-4.84 average cores and a
-// warm one 1.04-2.60. Pricing the budget at the warm mode is the tempting
-// wrong answer, because it is the mode most runs exhibit once a cache is
-// hot, and it would let the box admit four concurrent linters that each
-// want three to four cores the moment any of them runs cold. Caches here
-// are per-worktree and worktrees are disposable, so cold is the
-// common case and the safe one to price.
-//
-// This does not forbid re-pricing. It forbids re-pricing to a number below
-// what a cold lint was measured to draw without also changing what makes
-// cold rare, which is a cache that survives a worktree.
 func TestLintCostIsPricedForTheColdRunNotTheWarmOne(t *testing.T) {
 	if lintCoreCost < measuredColdCoreDemand {
 		t.Fatalf("lint is priced at %.2f cores against a cold run measured at %.2f, so a full "+
@@ -177,10 +149,6 @@ func TestDescribeLintFailureReportsRealFindingsUnchanged(t *testing.T) {
 	}
 }
 
-// TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint verifies that
-// runGolangciLint sends a GET to the cache endpoint before golangci-lint runs.
-// The server returns 404 (no cached blob), then a stub linter keeps this cache
-// ordering test from paying for a full repository analysis.
 func TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint(t *testing.T) {
 	var gets atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -205,8 +173,6 @@ func TestRunGolangciLint_AttemptsRestoreFromBlobStoreBeforeLint(t *testing.T) {
 	}
 }
 
-// expiredContext returns a context whose deadline has already passed,
-// which is the state the lint step is in when its bounded wait runs out.
 func expiredContext(t *testing.T) context.Context {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)

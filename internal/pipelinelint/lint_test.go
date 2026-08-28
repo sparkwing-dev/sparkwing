@@ -9,8 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
-// lintSource writes src as a single .go file in a temp dir and returns
-// the findings AnalyzeSource produces over it.
 func lintSource(t *testing.T, src string) []Finding {
 	t.Helper()
 	dir := t.TempDir()
@@ -283,9 +281,6 @@ func TestAnalyze_SortsFindingsByLocation(t *testing.T) {
 	}
 }
 
-// A group's Cache applies one key to every member, so a matrix stores
-// one result and replays it for every cell. It presents as a fast green
-// run, which is why nothing downstream catches it.
 func TestGroupCacheShared(t *testing.T) {
 	const src = `package jobs
 
@@ -319,8 +314,6 @@ func (P) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunConte
 	}
 }
 
-// Cache on a single job is the supported thing and must stay silent, or
-// the rule taxes the correct usage.
 func TestSingleJobCacheIsClean(t *testing.T) {
 	const src = `package jobs
 

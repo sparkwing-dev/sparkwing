@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestListJobs_ReadsFromProfileBackend confirms ListOpts.Profile routes
-// the read through OpenReadBackendForProfile (the profile's resolved
-// backend) rather than the legacy cwd backends.yaml flow.
 func TestListJobs_ReadsFromProfileBackend(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "profile-state.db")

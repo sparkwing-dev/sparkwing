@@ -1,15 +1,3 @@
-// ansi.ts -- minimal SGR (colors / bold / dim / underline) to HTML.
-//
-// Sparkwing stores log records with `msg` allowed to contain raw
-// ANSI bytes from child processes (buildx, `go test -v`, etc.). The
-// terminal renderer passes them through; in the browser we translate
-// the SGR subset into Tailwind-style class spans so the same colors
-// survive without pulling in a runtime dep.
-//
-// Not a full ANSI implementation: handles SGR (`\x1b[...m`) only and
-// ignores cursor-movement / screen-clear sequences. Output is safe to
-// feed to `dangerouslySetInnerHTML` -- every non-span character is
-// HTML-escaped.
 
 const SGR_RE = /\x1b\[([0-9;]*)m/g;
 

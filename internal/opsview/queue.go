@@ -1,10 +1,3 @@
-// Package opsview renders the local admission daemon's operational surfaces
-// -- the queue view, the doctor repair report, and the stats window -- from
-// the wire types the daemon serves. It is the single source of these
-// renderings so the sparkwing CLI and a headless pipeline binary (which
-// embeds the same daemon and admission client) present operators an identical
-// picture: "sparkwing does not require sparkwing" -- everything the CLI shows
-// at runtime, the pipeline binary can show for itself.
 package opsview
 
 import (
@@ -18,8 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// RenderQueue writes qs in the requested format: "json", "plain" (one
-// tab-separated record per line), or pretty (the default).
 func RenderQueue(w io.Writer, qs wingwire.QueueState, format string) error {
 	switch format {
 	case "json":
@@ -33,48 +24,29 @@ func RenderQueue(w io.Writer, qs wingwire.QueueState, format string) error {
 	}
 }
 
-// Daemon reach states. They are the answer to "did this view come from the
-// daemon?", which every local queue rendering states outright.
 const (
-	// ReachServing means the daemon answered and the queue below it is its
-	// own report.
 	ReachServing = "serving"
-	// ReachAbsent means nothing is listening, so no admission is being
-	// arbitrated and the empty queue is the truth.
+
 	ReachAbsent = "absent"
-	// ReachUnreachable means the socket could not be reached, so what is
-	// queued is unknown. It is never an empty queue.
+
 	ReachUnreachable = "unreachable"
 )
 
-// DaemonReach says whether a local queue view was read from the admission
-// daemon at all. Reachable and State carry no omitempty because an absent
-// field is exactly what let `sparkwing queue -o json` print `{}` for both an
-// idle machine and a command that never reached the daemon -- the reader
-// cannot tell those apart, and reads the second as the first.
 type DaemonReach struct {
 	Reachable bool   `json:"reachable"`
 	State     string `json:"state"`
-	// Detail explains a state the reader has to act on: why the socket could
-	// not be reached, or that an absent daemon means nothing is queued.
+
 	Detail string `json:"detail,omitempty"`
 }
 
-// Serving reports a daemon that answered.
 func Serving() DaemonReach {
 	return DaemonReach{Reachable: true, State: ReachServing}
 }
 
-// Absent reports that nothing is listening on the daemon's socket, which is
-// what an idle machine looks like: no daemon means no admission to arbitrate.
 func Absent() DaemonReach {
 	return DaemonReach{State: ReachAbsent, Detail: "no admission daemon is running for this home, so nothing is queued"}
 }
 
-// Unreachable reports that the daemon's socket could not be reached, so the
-// queue behind it is unknown. cause is the dial failure, which leads every
-// rendering of this state because it is the only thing that tells the reader
-// what to fix.
 func Unreachable(cause error) DaemonReach {
 	detail := "the admission daemon socket could not be reached"
 	if cause != nil {
@@ -83,19 +55,11 @@ func Unreachable(cause error) DaemonReach {
 	return DaemonReach{State: ReachUnreachable, Detail: detail}
 }
 
-// queueView is the JSON shape of a local queue rendering: the daemon's queue
-// state with the reachability that produced it. The embedded state keeps every
-// field where callers already read it, so the block is purely additive.
 type queueView struct {
 	wingwire.QueueState
 	Daemon DaemonReach `json:"daemon"`
 }
 
-// RenderLocalQueue writes the local admission view together with an explicit
-// statement of whether the daemon was reached. Every format states it, because
-// silence about reachability is what makes a blind command look like an idle
-// machine -- in JSON as `{}`, in plain as no rows at all, and in pretty as a
-// table of zeros.
 func RenderLocalQueue(w io.Writer, qs wingwire.QueueState, reach DaemonReach, format string) error {
 	switch format {
 	case "json":
@@ -123,14 +87,10 @@ func RenderLocalQueue(w io.Writer, qs wingwire.QueueState, reach DaemonReach, fo
 	}
 }
 
-// RenderNoDaemon reports the calm truth that nothing is queued: no daemon
-// means no admission is being arbitrated.
 func RenderNoDaemon(w io.Writer, format string) error {
 	return RenderLocalQueue(w, wingwire.QueueState{}, Absent(), format)
 }
 
-// RenderUnreachableDaemon reports that the daemon could not be reached, so the
-// queue is unknown. It never renders as an empty queue.
 func RenderUnreachableDaemon(w io.Writer, format string, cause error) error {
 	return RenderLocalQueue(w, wingwire.QueueState{}, Unreachable(cause), format)
 }
@@ -191,9 +151,6 @@ func renderQueuePlain(w io.Writer, qs wingwire.QueueState) error {
 	return nil
 }
 
-// RenderQueuePretty writes the human-readable queue view: a daemon header, a
-// resource table with headroom decomposition, holders, and waiters, plus
-// bottom-of-view callouts for stalled or contended holders and pin drift.
 func RenderQueuePretty(out io.Writer, qs wingwire.QueueState) error {
 	holders := queueLifecycleHolders(qs)
 	connections := queueLifecycleConnections(qs)
@@ -370,10 +327,6 @@ func queueLifecycleRows(qs wingwire.QueueState, connectionOnly bool) []wingwire.
 	return holders
 }
 
-// resourceAvailable is the grantable amount to show for a resource row: the
-// daemon's headroom-aware Available for the host dimensions, or plain
-// capacity-minus-held for a semaphore row (and for older daemons that sent no
-// Available).
 func resourceAvailable(r wingwire.ResourceState) float64 {
 	if isHostResource(r.Key) && (r.Available > 0 || r.Reserved > 0 || r.External > 0 || r.ExternalSource != "") {
 		return r.Available
@@ -385,9 +338,6 @@ func resourceAvailable(r wingwire.ResourceState) float64 {
 	return free
 }
 
-// resourceLegend explains the resource table's headroom arithmetic in one
-// line. Shown only when a host dimension (cores or memory) is present, since
-// the reserved and external columns are blank for a semaphore-only view.
 func resourceLegend(qs wingwire.QueueState) string {
 	for _, r := range qs.Resources {
 		if isHostResource(r.Key) {
@@ -404,10 +354,6 @@ func fmtHeadroomCell(key string, v float64) string {
 	return fmtAmount(key, v)
 }
 
-// externalCell renders the EXTERNAL column. A dimension the host sampler
-// could not read prints the word rather than a figure, because a
-// substituted number in the same format as a measurement is what made a
-// healthy machine read as fully consumed.
 func externalCell(r wingwire.ResourceState) string {
 	if !isHostResource(r.Key) {
 		return "-"
@@ -418,10 +364,6 @@ func externalCell(r wingwire.ResourceState) string {
 	return fmtAmount(r.Key, r.External)
 }
 
-// ExternalUnmeasuredNote names the host dimensions the sampler could not
-// read, and states that nothing was subtracted for them. Empty when every
-// dimension was measured, and when the operator has already been told
-// external load is ignored outright.
 func ExternalUnmeasuredNote(qs wingwire.QueueState) string {
 	if qs.IgnoreExternal {
 		return ""
@@ -439,9 +381,6 @@ func ExternalUnmeasuredNote(qs wingwire.QueueState) string {
 		" (host sensor unavailable); no external load subtracted from available"
 }
 
-// ExternalAgeNote states how old the reading behind the external and
-// available columns is. Empty when the daemon reports no age, which is
-// every daemon that predates the field.
 func ExternalAgeNote(qs wingwire.QueueState) string {
 	if qs.ExternalSampleAgeMS <= 0 {
 		return ""
@@ -455,8 +394,6 @@ func ExternalAgeNote(qs wingwire.QueueState) string {
 
 func isHostResource(key string) bool { return key == "cores" || key == "memory" }
 
-// ContainerNote renders the container-limit row for the queue's headroom
-// arithmetic. Empty when no container limit binds.
 func ContainerNote(c *wingwire.ContainerLimit) string {
 	if c == nil {
 		return ""
@@ -475,19 +412,6 @@ func ContainerNote(c *wingwire.ContainerLimit) string {
 	return "container limit: " + strings.Join(parts, ", ")
 }
 
-// BudgetNote renders the machine-budget row for the queue's headroom
-// arithmetic, naming the setting the active budget came from so an
-// operator can revoke a budget they did not set themselves.
-//
-// With no budget set anywhere the note says exactly that. Admission
-// against the whole machine looks identical to a deliberate
-// whole-machine budget from the outside, and a view that stays silent
-// leaves the reader to guess which one they are looking at.
-//
-// A nil state, or one from a daemon too old to name a source, is not an
-// answer: nothing is claimed about a budget the reporting daemon never
-// described. An old daemon still reports its caps, so those are rendered
-// without a source.
 func BudgetNote(b *wingwire.BudgetState) string {
 	if b == nil {
 		return ""
@@ -521,9 +445,6 @@ func BudgetNote(b *wingwire.BudgetState) string {
 	return note
 }
 
-// budgetOrigin is the exact setting behind a budget -- a file path, a
-// variable name, a flag -- for the machine-readable views, which want the
-// setting itself rather than a sentence about it.
 func budgetOrigin(b *wingwire.BudgetState) string {
 	if b == nil {
 		return ""
@@ -531,9 +452,6 @@ func budgetOrigin(b *wingwire.BudgetState) string {
 	return b.Origin
 }
 
-// BudgetSourceLabel names where a budget came from, in the words an
-// operator needs to change it: the file to edit, the variable to unset,
-// the flag that was passed. Empty when the daemon did not say.
 func BudgetSourceLabel(b *wingwire.BudgetState) string {
 	if b == nil {
 		return ""
@@ -552,11 +470,6 @@ func BudgetSourceLabel(b *wingwire.BudgetState) string {
 	}
 }
 
-// ExternalIgnoredNote states that admission is ignoring measured external
-// load, and which setting told it to. This is the escape hatch for a
-// misreading host sensor, and the one most worth naming a source for: it
-// makes the machine admit against total capacity, and an operator who
-// finds it on has no other way to learn who turned it on.
 func ExternalIgnoredNote(qs wingwire.QueueState) string {
 	if !qs.IgnoreExternal {
 		return ""
@@ -568,9 +481,6 @@ func ExternalIgnoredNote(qs wingwire.QueueState) string {
 	return note + ")"
 }
 
-// ExternalPressureNote returns a one-line callout when non-sparkwing load is
-// what is holding runs back. Empty when external load is not the binding
-// constraint.
 func ExternalPressureNote(qs wingwire.QueueState) string {
 	if qs.IgnoreExternal || len(qs.Waiters) == 0 {
 		return ""
@@ -607,8 +517,6 @@ func queueDriftNotes(qs wingwire.QueueState) []queueDriftNote {
 	return notes
 }
 
-// FmtDaemonHeader renders the daemon identity line above the queue: its binary
-// version and how long it has been up. Empty when the daemon reported neither.
 func FmtDaemonHeader(qs wingwire.QueueState) string {
 	if qs.DaemonVersion == "" && qs.DaemonUptimeMS <= 0 {
 		return ""
@@ -624,9 +532,6 @@ func FmtDaemonHeader(qs wingwire.QueueState) string {
 	return fmt.Sprintf("daemon %s, %s", version, up)
 }
 
-// FmtCapacityChange renders the queue header's note that the daemon re-derived
-// a different machine capacity while running -- a hot resize or a cgroup-quota
-// edit picked up without a restart. Empty when capacity has held steady.
 func FmtCapacityChange(cc *wingwire.CapacityChange) string {
 	if cc == nil || cc.FromCores == cc.ToCores {
 		return ""
@@ -634,8 +539,6 @@ func FmtCapacityChange(cc *wingwire.CapacityChange) string {
 	return fmt.Sprintf("capacity changed: %s -> %s cores", trimFloat(cc.FromCores), trimFloat(cc.ToCores))
 }
 
-// FmtEventsLine renders the one-line recent-events health summary from the
-// daemon's rolling window. Empty when the daemon sent no window.
 func FmtEventsLine(ev *wingwire.EventsWindow) string {
 	if ev == nil || (ev.Runs == 0 && len(ev.Evictions) == 0 && ev.QueueTimeouts == 0 &&
 		ev.Cancellations == 0 && ev.Contended == 0 && ev.Backfills == 0 && ev.BackfillProtections == 0) {

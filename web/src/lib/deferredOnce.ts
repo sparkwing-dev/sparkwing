@@ -1,9 +1,6 @@
 export type DeferredMarker<T> = { current: T | null };
 export type DeferredScheduler = (callback: () => void) => () => void;
 
-// deferOnce consumes a key only after its deferred work succeeds. React
-// StrictMode can therefore clean up the first setup without preventing the
-// replacement setup from doing the work.
 export function deferOnce<T>(
   marker: DeferredMarker<T>,
   key: T,

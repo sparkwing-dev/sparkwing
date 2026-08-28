@@ -1,28 +1,3 @@
-# Cross-compile + upload sparkwing binaries to GH Releases on every
-# tag push.
-#
-# Trigger: any tag matching v*. Release notes are auto-generated from
-# PR titles since the previous tag.
-#
-# To cut a release: push a v*-prefixed tag (e.g. via `sparkwing run
-# release --version vX.Y.Z`). This workflow takes it from there.
-#
-# Shape: matrix-parallel build (one runner per binary × platform),
-# followed by a single release job that downloads every artifact and
-# pushes the bundle to GH Releases. Cuts wall-clock from ~8 min
-# sequential to ~1-2 min parallel; trades runner-minutes for latency.
-#
-# Per-binary platform constraints:
-#   - sparkwing -- the user-facing CLI; 6 platforms (linux/darwin/
-#     windows × amd64/arm64). It also bundles the local dashboard
-#     server, so `sparkwing dashboard start` is the supported way to
-#     run a long-lived local UI -- there is no separately-released
-#     daemon binary anymore.
-#   - sparkwing-cache, controller, runner, logs, web -- server-side
-#     components meant for Linux containers. linux + darwin (for local
-#     dev) only; windows is excluded because (a) nobody runs these on
-#     a Windows host, and (b) sparkwing-cache uses POSIX-only Setpgid
-#     + syscall.Kill so it won't compile there anyway.
 
 name: release
 concurrency:
@@ -86,11 +61,6 @@ jobs:
       contents: read
 
   build:
-    # fail-fast: false so a cell failure doesn't cancel siblings and
-    # leave the release half-built. The release job's `needs: build`
-    # gate then refuses to run on partial results, so the user sees a
-    # clean "build failed; release not created" outcome rather than a
-    # release with missing assets.
     needs: [validate-tag, canonical]
     if: ${{ always() && needs.validate-tag.result == 'success' && (needs.canonical.result == 'success' || github.event_name == 'workflow_dispatch') }}
     strategy:
@@ -113,10 +83,6 @@ jobs:
           - { binary: sparkwing-web, goos: windows }
     runs-on: ${{ matrix.goos == 'darwin' && 'macos-latest' || 'ubuntu-latest' }}
     steps:
-      # Pin the checkout to the tag's exact commit. Every job in this
-      # workflow checks out the same resolved tag, so a version string
-      # implies one identical tree across all assets and matches what
-      # `go install ...@tag` compiles -- no provenance drift.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -135,13 +101,6 @@ jobs:
           go-version: "1.26.6"
           cache-dependency-path: go.sum
 
-      # actions/setup-go@v5 caches ~/go/pkg/mod (module deps); this
-      # cache covers ~/.cache/go-build (compiled object files for
-      # stdlib + dep packages, target-specific). Key includes goos +
-      # goarch since cross-compiled object files don't share, and
-      # all .go files so any source change invalidates fully. Cells
-      # with the same (goos, goarch) but different binary share the
-      # cache because the cached entries are binary-agnostic.
       - name: Cache Go build cache
         uses: actions/cache@v4
         with:
@@ -150,9 +109,6 @@ jobs:
           restore-keys: |
             gobuild-${{ matrix.goos }}-${{ matrix.goarch }}-
 
-      # The dashboard SPA is embedded via //go:embed all:next-out by
-      # both sparkwing (for `sparkwing dashboard start`) and
-      # sparkwing-web (the cluster pod). Other binaries skip this.
       - name: Setup Node (binaries that embed the dashboard)
         if: matrix.binary == 'sparkwing' || matrix.binary == 'sparkwing-web'
         uses: actions/setup-node@v4
@@ -175,8 +131,6 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
           BIN: ${{ matrix.binary }}
-          # Keep the resolved tag in an env var so the run script reads it as
-          # a normal bash value rather than YAML interpolation in a heredoc.
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
@@ -206,11 +160,6 @@ jobs:
           bash "${{ github.event_name == 'workflow_dispatch' && '.release-tools/bin/check-release-binary-vulnerabilities.sh' || 'bin/check-release-binary-vulnerabilities.sh' }}" \
             "dist/${BIN}-${TARGET_GOOS}-${TARGET_GOARCH}${ext}"
 
-      # Each cell uploads exactly one binary as a uniquely-named
-      # artifact. The release job re-downloads all of them with
-      # merge-multiple so they land in a single dist/ for sha256sum +
-      # upload. retention-days: 1 because these are immediately
-      # consumed by the release job; no value in keeping them after.
       - name: Upload binary artifact
         uses: actions/upload-artifact@v4
         with:
@@ -225,8 +174,6 @@ jobs:
     if: ${{ always() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      # The scanner script and Go vulnerability tooling come from the exact
-      # tagged commit whose matrix artifacts are assembled below.
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.sha }}
@@ -244,9 +191,6 @@ jobs:
           go-version: "1.26.6"
           cache-dependency-path: go.sum
 
-      # merge-multiple: true flattens every artifact into one dist/
-      # without per-artifact subdirectories, so sha256sum + the upload
-      # glob below pick up all files in one shot.
       - name: Download all binaries
         uses: actions/download-artifact@v4
         with:
@@ -254,14 +198,6 @@ jobs:
           path: dist
           merge-multiple: true
 
-      # Ad-hoc-sign the macOS Mach-O assets BEFORE SHA256SUMS is
-      # computed, so the published+hashed bytes are already
-      # Gatekeeper-valid and `sparkwing update` installs them UNCHANGED
-      # (the client no longer codesigns after verification -- doing so
-      # would mutate the verified bytes). rcodesign is a pure-Rust,
-      # cross-platform Apple code-signer, so this runs on the Linux
-      # runner with no macOS host. Version pinned; the released binary is
-      # fetched rather than built to keep the step fast.
       - name: Ad-hoc-sign macOS binaries (rcodesign)
         working-directory: dist
         run: |
@@ -304,8 +240,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      # Checkout supplies the tagged changelog, verification code, and schema
-      # reference. The binaries themselves come only from prepare-binaries.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -323,10 +257,6 @@ jobs:
           path: dist
 
       - name: Compute SHA256SUMS
-        # Operators verifying via install.sh (or any third party) can
-        # diff against this; the contents are fully reproducible from
-        # the GitHub-Actions-built binaries. Computed AFTER the macOS
-        # ad-hoc signing above so the digests match the shipped bytes.
         working-directory: dist
         run: |
           sha256sum sparkwing-* > SHA256SUMS
@@ -343,15 +273,6 @@ jobs:
           ls dist/sparkwing-*.sig >/dev/null
 
       - name: Verify release asset schema parity
-        # Pre-publish gate: the uploaded linux/amd64 binary must embed
-        # the same runs-store schema that the tagged source compiles.
-        # The reference is built fresh from the checked-out tag tree, so
-        # a mismatch means an asset was built from a different commit
-        # than the tag -- exactly the schema-skew failure mode. Fails
-        # the release before any asset reaches the public page.
-        # linux/amd64 is the one asset the runner can execute; every
-        # asset builds from the same pinned tag, and the schema
-        # constant is platform-independent, so this one is representative.
         run: |
           set -euo pipefail
           chmod +x dist/sparkwing-linux-amd64
@@ -360,13 +281,6 @@ jobs:
             --repo .
 
       - name: Extract CHANGELOG section for this tag
-        # The CHANGELOG entry for [vX.Y.Z] is the curated migration
-        # narrative. Use it verbatim as the release body so adopters
-        # see the migration tables, not the dev-facing commit log
-        # (which includes things like "regen apidiff" / "lint sweep"
-        # that aren't user-visible). Fails the workflow if the
-        # section is missing -- catches a missed [Unreleased] -> [v*]
-        # rename before adopters ever see an empty release page.
         env:
           TAG: ${{ inputs.tag || github.ref_name }}
         run: |
@@ -415,21 +329,6 @@ jobs:
           draft_created=false
           gh release view "$tag"
 
-  # Build and scan multi-arch container images for the cluster-side
-  # binaries for each release. Each matrix cell stages one untagged
-  # digest in GHCR; no version or latest tag is published until every
-  # image and architecture is clean.
-  #
-  # Five images fan out one runner per binary. The runner uses
-  # Dockerfile.runner because its runtime needs the Go toolchain and
-  # netrc-seeding entrypoint; the other four share Dockerfile.binary.
-  # Each cell pushes an untagged digest and scans both architectures.
-  # publish-images waits for the complete matrix before signing or tagging.
-  #
-  # Cosign signs keylessly via GitHub OIDC. The publish-images job alone
-  # can mint an identity token. No KMS key, no secret -- the signature commits
-  # the workflow + repo + tag triple as the signing identity, which
-  # `cosign verify --certificate-identity-regexp ...` can attest.
   build-images:
     name: Build & scan container images
     needs: [validate-tag, canonical]
@@ -448,16 +347,11 @@ jobs:
           - sparkwing-logs
           - sparkwing-web
     steps:
-      # Pinned to the tag's exact commit, matching the binary build
-      # job so images and binaries ship from one identical tree.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
           ref: ${{ inputs.tag || github.sha }}
 
-      # Recovery keeps application source pinned to the immutable tag while
-      # allowing the current release branch to repair the image recipe after
-      # a base-package vulnerability blocks publication.
       - name: Checkout current image recipe
         if: github.event_name == 'workflow_dispatch'
         uses: actions/checkout@v4
@@ -504,12 +398,6 @@ jobs:
       - name: Validate vulnerability waiver policy
         run: GOWORK=off go run ./bin/check-vulnerability-waivers.go .trivyignore.yaml
 
-      # metadata-action emits the full tag list:
-      #   - type=raw,value=<tag>     -> ghcr.io/.../<bin>:v1.2.3
-      #   - type=raw,value=latest    -> ghcr.io/.../<bin>:latest
-      # `:latest` is gated on the tag NOT containing a hyphen so
-      # pre-release tags (v1.2.3-rc.1) don't clobber the stable
-      # rolling pointer.
       - name: Compute image metadata
         id: meta
         uses: docker/metadata-action@v5
@@ -606,8 +494,6 @@ jobs:
 
       - uses: sigstore/cosign-installer@v3
 
-      # Sign every approved digest before exposing any version tag. A signing
-      # failure therefore leaves only the untagged staging digests behind.
       - name: Sign scanned image digests
         env:
           COSIGN_EXPERIMENTAL: "1"

@@ -91,11 +91,7 @@ func OpenLogStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Profil
 		if err != nil {
 			return nil, err
 		}
-		// A controller serves no /api/v1/logs route -- sparkwing-logs is
-		// a separate service -- so a caller that learned the real URL
-		// overrides the controller's. The token is still the
-		// controller's, which is what the logs service validates
-		// against.
+
 		if spec.URL != "" {
 			url = spec.URL
 		}
@@ -107,10 +103,6 @@ func OpenLogStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Profil
 	}
 }
 
-// resolveControllerProfile validates the controller field and asks the
-// lookup callback for the profile's URL and bearer token. Centralizes
-// the "factory was handed a controller-typed spec but no lookup
-// callback" guard so cache and logs surfaces give identical errors.
 func resolveControllerProfile(surface, controller string, lookup ProfileLookup) (string, string, error) {
 	if controller == "" {
 		return "", "", fmt.Errorf("%s backend type=controller requires controller: <profile-name>", surface)
@@ -173,24 +165,8 @@ func OpenStateStoreFromSpec(ctx context.Context, spec backends.Spec, lookup Prof
 	}
 }
 
-// outboxWarnOnce keeps the "outbox unavailable" warning to one line per
-// process even if several S3 state stores are opened.
 var outboxWarnOnce sync.Once
 
-// s3StateOutboxOptions opens the local durability outbox that lets an
-// S3 state store absorb writes while the object store is briefly
-// unreachable and replay them when it returns. The outbox and the
-// state store share the same artifact store, so drained writes land on
-// the same bucket and prefix.
-//
-// A single per-host database (SPARKWING_HOME, else ~/.sparkwing) backs
-// every runner on the machine; SQLite's file locking serializes them.
-// If the database cannot be opened -- home unresolved, disk unwritable
-// -- state writes still work, degraded to surfacing transient
-// object-store errors rather than buffering them, so a non-openable
-// outbox never fails a run. That degradation is loud, not silent: it
-// logs one warning naming the underlying cause and stating that the
-// documented outage resilience is not in effect.
 func s3StateOutboxOptions(art storage.ArtifactStore) []s3state.Option {
 	opts, err := openStateOutbox(art)
 	if err != nil {
@@ -200,9 +176,6 @@ func s3StateOutboxOptions(art storage.ArtifactStore) []s3state.Option {
 	return opts
 }
 
-// openStateOutbox resolves the shared outbox path and opens it. On
-// success it returns the WithOutbox option; on failure it returns a
-// non-nil error explaining why the outbox is unavailable.
 func openStateOutbox(art storage.ArtifactStore) ([]s3state.Option, error) {
 	path, err := outboxDBPath()
 	if err != nil {
@@ -218,22 +191,10 @@ func openStateOutbox(art storage.ArtifactStore) ([]s3state.Option, error) {
 	return []s3state.Option{s3state.WithOutbox(ob)}, nil
 }
 
-// logOutboxUnavailable warns that the S3 state store's durability
-// outbox could not be opened, so the object-store outage resilience
-// documented for shared-object-storage mode is not in effect. State
-// writes still work; a transient object-store error surfaces to the
-// caller instead of buffering.
 func logOutboxUnavailable(log *slog.Logger, err error) {
 	log.Warn("s3 state durability outbox unavailable; object-store outage resilience is not in effect", "error", err)
 }
 
-// outboxDBPath resolves the shared local outbox database, honoring
-// SPARKWING_HOME and otherwise rooting at ~/.sparkwing.
-//
-// A test binary that set no SPARKWING_HOME gets a disposable sandbox
-// instead of the developer's real outbox. Before this, opening a state
-// store from a test created and wrote ~/.sparkwing/outbox.db on the
-// machine running the suite.
 func outboxDBPath() (string, error) {
 	if root := os.Getenv("SPARKWING_HOME"); root != "" {
 		return filepath.Join(root, "outbox.db"), nil
@@ -248,15 +209,6 @@ func outboxDBPath() (string, error) {
 	return filepath.Join(home, ".sparkwing", "outbox.db"), nil
 }
 
-// underTest reports whether the running binary is a Go test binary, and
-// testSandbox is the throwaway home one is given.
-//
-// Both duplicate internal/paths on purpose. This package is part of the
-// public SDK surface and the pkg/ tree imports nothing from internal/;
-// four lines of duplication is a smaller price than routing an SDK
-// package through an internal one to reach them. Keep the sandbox naming
-// identical to internal/paths.TestSandbox so a test that inspects one
-// home finds the other.
 func underTest() bool {
 	base := filepath.Base(os.Args[0])
 	return strings.HasSuffix(base, ".test") || strings.HasSuffix(base, ".test.exe")
@@ -270,11 +222,6 @@ func unimplemented(surface, t string) error {
 	return fmt.Errorf("%s backend type %q is recognized but not implemented in this build", surface, t)
 }
 
-// resolveStateDSN reads either an inline url or an env-var indirection
-// (`env:VAR_NAME`) and returns the resolved DSN. Mirrors the
-// convention used elsewhere in the backends config: keep the literal
-// connection string out of YAML by pointing at an environment variable
-// the runner provides.
 func resolveStateDSN(surface, url, urlSource string) (string, error) {
 	if url != "" {
 		return url, nil

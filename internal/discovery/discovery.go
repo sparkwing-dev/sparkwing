@@ -1,16 +1,3 @@
-// Package discovery queries the controller's GET /api/v1/services
-// endpoint to discover auxiliary-service URLs (sparkwing-cache pod
-// etc.) without requiring the operator to configure them per-profile.
-//
-// Results are cached per-process keyed by controller URL + token so a
-// single CLI invocation that calls discovery from multiple paths
-// (e.g. `sparkwing push` followed by an eager-refresh on dispatch)
-// only pays one HTTP roundtrip.
-//
-// Callers that have no controller (no controller URL set on the
-// active profile) skip discovery entirely -- the relevant operations
-// (`sparkwing push`, eager-refresh) fail loudly with a clear message
-// pointing the operator at adding a controller binding.
 package discovery
 
 import (
@@ -23,23 +10,12 @@ import (
 	"time"
 )
 
-// Services mirrors the controller's pkg/controller.ServicesResponse
-// (re-declared here to avoid a cycle: cmd/sparkwing imports both
-// internal/profile and internal/discovery; pkg/controller is the
-// server side).
 type Services struct {
 	CachePod string `json:"cache_pod,omitempty"`
 
-	// Logs is the sparkwing-logs URL. Empty means the controller
-	// announced none, which a co-located deployment does not need to:
-	// there the controller's own URL routes /api/v1/logs.
 	Logs string `json:"logs,omitempty"`
 }
 
-// ErrNoController is returned when ServicesFor is called with an
-// empty controllerURL. Callers handle this with a clear message
-// ("this command needs a controller-bound profile") rather than
-// hiding the failure.
 var ErrNoController = errors.New("discovery: no controller URL configured")
 
 type cacheKey struct {
@@ -55,31 +31,14 @@ type cacheEntry struct {
 
 var (
 	cacheMu sync.Mutex
-	// servicesCache holds at most one entry per (URL, Token) pair for
-	// the lifetime of the process. Discovery failures cache too (with
-	// a shorter TTL) so a transient outage doesn't hammer the
-	// controller from a chatty CLI session.
+
 	servicesCache = map[cacheKey]cacheEntry{}
 )
 
-// successTTL is how long a successful discovery result stays cached
-// in-process. Set generously: cache pod URL changes are infrastructure
-// events, not per-run events.
 const successTTL = 10 * time.Minute
 
-// failureTTL is how long a discovery failure stays cached so the CLI
-// doesn't retry on every operation in a session when the controller
-// is down or doesn't implement /services yet.
 const failureTTL = 30 * time.Second
 
-// ServicesFor returns the controller's announced services for the
-// given controller URL + token. Returns ErrNoController when
-// controllerURL is empty; returns the cached result (success or
-// failure) when the per-process cache holds a fresh entry.
-//
-// Network errors are returned wrapped; an HTTP 404 from /api/v1/services
-// is reported as a zero-value Services + nil error so callers can
-// branch on "no cache pod announced" without an error path.
 func ServicesFor(ctx context.Context, controllerURL, token string) (Services, error) {
 	if controllerURL == "" {
 		return Services{}, ErrNoController
@@ -107,8 +66,6 @@ func ServicesFor(ctx context.Context, controllerURL, token string) (Services, er
 	return svc, err
 }
 
-// ResetCache clears the per-process services cache. Tests use this
-// between cases that point at different fake controllers.
 func ResetCache() {
 	cacheMu.Lock()
 	defer cacheMu.Unlock()

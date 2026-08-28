@@ -18,9 +18,6 @@ func (s stubNodeReader) GetNode(_ context.Context, _, nodeID string) (*store.Nod
 	return s.nodes[nodeID], nil
 }
 
-// publishProducer captures globs from a fresh producer workspace into
-// art and returns a node reader that maps producerID to the recorded
-// manifest digest, mirroring what executeNode persists on a producer.
 func publishProducer(t *testing.T, art storage.ArtifactStore, producerID string, files map[string][]byte) stubNodeReader {
 	t.Helper()
 	ws := t.TempDir()
@@ -156,10 +153,6 @@ func TestStageConsumedArtifacts_RejectsEscapingPath(t *testing.T) {
 	}
 }
 
-// publishMaliciousManifest stores a hand-crafted manifest whose single
-// entry carries badPath, bypassing the capture glob walk that can only
-// produce in-workspace relative paths. It models a producer manifest with
-// an untrusted, traversing or absolute Path.
 func publishMaliciousManifest(t *testing.T, art storage.ArtifactStore, producerID, badPath string) stubNodeReader {
 	t.Helper()
 	ctx := context.Background()

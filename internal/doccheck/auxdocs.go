@@ -10,13 +10,6 @@ import (
 	"strings"
 )
 
-// auxDocGlobs name the maintained markdown files outside docs/: the
-// repo's root-level markdown and the satellite READMEs (charts/,
-// install/, web/). These surfaces are read by the same users and agents
-// as docs/ but have no other coupling to the code, so a rename the
-// docs/ gates would catch could still rot them silently. Deliberately a
-// glob list, not a walk: internal/ testdata contains fixture READMEs
-// that are test inputs, not documentation.
 var auxDocGlobs = []string{
 	"*.md",
 	"charts/*/README.md",
@@ -24,10 +17,6 @@ var auxDocGlobs = []string{
 	"web/*.md",
 }
 
-// auxDocFiles resolves auxDocGlobs under repoRoot, sorted and deduped.
-// CHANGELOG.md is dropped: the changelog is a historical record that
-// names removed flags and files because recording them is its job, the
-// same reason migrations/ is excluded from the docs/ gates.
 func auxDocFiles(repoRoot string) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -47,25 +36,6 @@ func auxDocFiles(repoRoot string) []string {
 	return out
 }
 
-// checkAuxDocs runs the drift subset of the doc gates over the aux
-// docs: dead tokens and CLI-verb resolution over every file, plus
-// relative .md-link resolution. The pipeline registrations under
-// .sparkwing/ and examples/*.yaml are scanned for dead tokens and
-// resolvable `sparkwing` invocations too -- pipeline help strings and
-// example workflows are documentation with no other gate. Only the
-// editorial checks (history narrative, frozen counts) stay docs/-only:
-// VERSIONING.md documents the deprecation procedure and DESIGN-* docs
-// record how the design evolved, so change vocabulary is their subject
-// matter, not rot.
-//
-// A `sparkwing ...` command shown in a pipeline Example string, a help
-// snippet, or a workflow step is documentation the reader will paste,
-// so its verbs resolve like doc prose. Extraction is bounded to keep
-// prose that merely mentions the word from being parsed as a command:
-// backtick spans anywhere, YAML `run:` steps, and double-quoted
-// literals only on Example `Command:` lines -- a quoted string that
-// merely starts with "sparkwing" elsewhere is usually an error message
-// about the product, not a command.
 func checkAuxDocs(repoRoot string) bool {
 	valid, posArgs, err := loadRegistry(repoRoot)
 	if err != nil {
@@ -181,15 +151,11 @@ func checkAuxDocs(repoRoot string) bool {
 }
 
 var (
-	// quotedCmdRE lifts a double-quoted `sparkwing ...` literal out of a
-	// Go or YAML source line.
 	quotedCmdRE = regexp.MustCompile(`"(sparkwing [^"]*)"`)
-	// yamlRunCmdRE lifts the command from a YAML `run:` step.
+
 	yamlRunCmdRE = regexp.MustCompile(`run:\s*(sparkwing\s.*)$`)
 )
 
-// sidebar mirrors docs/_sidebar.json: the categories the site renders
-// and the entries deliberately kept out of navigation.
 type sidebar struct {
 	Categories []struct {
 		Label string   `json:"label"`
@@ -198,14 +164,6 @@ type sidebar struct {
 	Excluded []string `json:"excluded"`
 }
 
-// checkSidebar verifies docs/_sidebar.json against the docs tree in both
-// directions: every listed slug must exist as a page, and every page
-// must be either listed or explicitly excluded. The links gate catches a
-// renamed page's dangling references, but nothing else notices a new
-// page that never gets wired into navigation -- it would be published
-// yet unreachable. A stale exclusion is drift too: an entry naming a
-// directory or page that no longer exists reads as deliberate curation
-// but guards nothing.
 func checkSidebar(contentDir string) bool {
 	data, err := os.ReadFile(filepath.Join(contentDir, "_sidebar.json"))
 	if err != nil {

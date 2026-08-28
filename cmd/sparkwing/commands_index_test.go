@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// indexKeys is the entire key set a `commands -o json` record may carry.
-// Anything else means help text leaked back into the index.
 var indexKeys = map[string]bool{
 	"path":             true,
 	"synopsis":         true,
@@ -16,12 +14,6 @@ var indexKeys = map[string]bool{
 	"hidden":           true,
 }
 
-// TestCommandsJSONCarriesIndexFieldsOnly is the acceptance criterion:
-// the listing answers "which command", and every record carries the
-// three fields that answer it. Description, flags, and examples answer
-// "how do I call it", which `<path> --help` already answers from the
-// same registry -- carrying them here was 83% of a 206KB payload and a
-// second copy of the help system that could disagree with the first.
 func TestCommandsJSONCarriesIndexFieldsOnly(t *testing.T) {
 	out := commandsOutput(t, "-o", "json")
 	records := decodeNDJSON[map[string]any](t, out)
@@ -42,10 +34,6 @@ func TestCommandsJSONCarriesIndexFieldsOnly(t *testing.T) {
 	}
 }
 
-// TestCommandsJSONSubcommandCountMatchesTheListing keeps the descend
-// signal honest against the thing it is a signal about: the number has
-// to equal the direct children the same listing emits, or a consumer
-// that trusts it walks into an empty subtree (or misses a populated one).
 func TestCommandsJSONSubcommandCountMatchesTheListing(t *testing.T) {
 	records := decodeNDJSON[CommandIndexJSON](t, commandsOutput(t, "-o", "json"))
 	children := map[string]int{}
@@ -70,21 +58,12 @@ func TestCommandsJSONSubcommandCountMatchesTheListing(t *testing.T) {
 	}
 }
 
-// TestCommandsJSONStaysAnIndex is a size regression guard. The bound is
-// generous -- the listing is ~17KB today -- because it is not policing
-// growth in the registry, only the return of a full-help field: the
-// three that were dropped were 40KB, 55KB, and 76KB on their own.
 func TestCommandsJSONStaysAnIndex(t *testing.T) {
 	if n := len(commandsOutput(t, "-o", "json")); n > 40_000 {
 		t.Errorf("commands -o json is %d bytes; an index that large is a help dump again", n)
 	}
 }
 
-// TestCommandsJSONOmitsHiddenUnlessAsked pins the deliberate Hidden
-// decision from both sides: hidden commands stay out of the listing
-// (their help names the supported verb instead, so the index must not
-// steer a reader at them), and --include-hidden both lists them and
-// marks them, so a caller that opted in can tell which is which.
 func TestCommandsJSONOmitsHiddenUnlessAsked(t *testing.T) {
 	hidden := ""
 	for _, c := range allCommands {
@@ -121,9 +100,6 @@ func TestCommandsJSONOmitsHiddenUnlessAsked(t *testing.T) {
 	}
 }
 
-// TestHelpJSONStillCarriesFullDetail is the other half of the split:
-// dropping help text from the index is only sound because the detail
-// page still has it. `<path> --help --json` is that page.
 func TestHelpJSONStillCarriesFullDetail(t *testing.T) {
 	var buf bytes.Buffer
 	renderHelp(cmdCommands, []string{"--json"}, &buf)

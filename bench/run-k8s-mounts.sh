@@ -1,24 +1,10 @@
 #!/usr/bin/env bash
-#
-# Sparkwing Cache Mount Benchmark -- In-Cluster
-#
-# Tests BuildKit cache mounts persisting across builds on the same
-# DinD volume (simulating the warm PVC pool).
-#
-# Scenarios:
-#   A. Cold build (first ever -- populates cache mounts)
-#   B. Layer cache (unchanged rebuild)
-#   C. --no-cache, mounts warm (layers busted, deps cached)
-#   D. Dep change, mounts warm (add dayjs + httparty)
-#   E. Cold comparison (prune everything, rebuild with new deps)
-#
 set -e
 cd "$(dirname "$0")"
 
 NAMESPACE="sparkwing"
 JOB_NAME="bench-mounts-$(date +%s)"
 
-# Pre-generate modified files for the dep change scenario
 MODDIR=$(mktemp -d)
 SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 echo "==> Generating modified bench files..."

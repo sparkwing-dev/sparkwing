@@ -19,11 +19,10 @@ import (
 	"go.opentelemetry.io/otel/metric"
 )
 
-// Registry defines an upstream package registry that the proxy can cache.
 type Registry struct {
 	Name        string
-	Upstream    string // base URL (no trailing slash)
-	RewriteBody bool   // whether response bodies need URL rewriting
+	Upstream    string
+	RewriteBody bool
 }
 
 var defaultRegistries = map[string]Registry{
@@ -35,7 +34,6 @@ var defaultRegistries = map[string]Registry{
 	"alpine":       {Name: "alpine", Upstream: "https://dl-cdn.alpinelinux.org", RewriteBody: false},
 }
 
-// proxyMeta is stored alongside the cached body on disk.
 type proxyMeta struct {
 	Path        string `json:"path"`
 	ContentType string `json:"content_type"`
@@ -48,10 +46,9 @@ type proxyMeta struct {
 var (
 	proxyDir      = "/data/proxy"
 	proxyCacheTTL = 10 * time.Minute
-	proxyMaxAge   = 7 * 24 * time.Hour // cleanup threshold for immutable entries
+	proxyMaxAge   = 7 * 24 * time.Hour
 	proxyClient   = &http.Client{Timeout: 60 * time.Second}
 
-	// Per-key RWMutex: concurrent reads for cache hits, exclusive write for fetches
 	proxyKeyLocks   = map[string]*sync.RWMutex{}
 	proxyKeyLocksMu sync.Mutex
 )
@@ -65,10 +62,6 @@ func proxyKeyLock(key string) *sync.RWMutex {
 	return proxyKeyLocks[key]
 }
 
-// initProxy materializes the per-registry subdirectories under
-// proxyDir. New() calls this after Config has seeded proxyDir /
-// proxyCacheTTL / proxyMaxAge so all directory creation is
-// deterministically post-config.
 func initProxy() {
 	for name := range defaultRegistries {
 		if err := os.MkdirAll(filepath.Join(proxyDir, name), 0o755); err != nil {
@@ -77,7 +70,6 @@ func initProxy() {
 	}
 }
 
-// handleProxy routes /proxy/{registry}/{path...} requests.
 func handleProxy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "GET or HEAD only", http.StatusMethodNotAllowed)
@@ -141,7 +133,6 @@ func handleProxy(w http.ResponseWriter, r *http.Request) {
 	proxyFetchAndCache(w, r, reg, remotePath, key)
 }
 
-// handleProxyStats returns cache statistics.
 func handleProxyStats(w http.ResponseWriter, _ *http.Request) {
 	stats := map[string]any{}
 	var totalSize int64
@@ -175,18 +166,11 @@ func handleProxyStats(w http.ResponseWriter, _ *http.Request) {
 	}
 }
 
-// proxyCacheKey hashes a length-prefixed (registry, path) pair so the
-// encoding stays injective: without the prefix, ("npm/scoped",
-// "pkg") and ("npm", "scoped/pkg") hash the same bytes and could
-// serve each other's cached responses. Existing entries keyed by the
-// older unprefixed form simply miss and re-fetch once.
 func proxyCacheKey(registry, path string) string {
 	h := sha256.Sum256([]byte(strconv.Itoa(len(registry)) + ":" + registry + "/" + path))
 	return fmt.Sprintf("%x", h)[:16]
 }
 
-// proxyServeFromCache attempts to serve a cached response. Returns true if served.
-// Caller must hold at least a read lock on the key.
 func proxyServeFromCache(w http.ResponseWriter, r *http.Request, registry, key string) bool {
 	metaPath := filepath.Join(proxyDir, registry, key+".meta")
 	bodyPath := filepath.Join(proxyDir, registry, key+".body")
@@ -223,8 +207,6 @@ func proxyServeFromCache(w http.ResponseWriter, r *http.Request, registry, key s
 	return true
 }
 
-// proxyFetchAndCache fetches from upstream, caches the response, and writes it to the client.
-// Caller must hold the write lock on the key.
 func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, remotePath, key string) {
 	upstreamURL := reg.Upstream + "/" + remotePath
 
@@ -309,7 +291,6 @@ func proxyFetchAndCache(w http.ResponseWriter, r *http.Request, reg Registry, re
 	w.Write(body)
 }
 
-// proxyServeStale serves an expired cache entry as a fallback when upstream is down.
 func proxyServeStale(w http.ResponseWriter, r *http.Request, registry, key string) bool {
 	metaPath := filepath.Join(proxyDir, registry, key+".meta")
 	bodyPath := filepath.Join(proxyDir, registry, key+".body")
@@ -337,9 +318,6 @@ func proxyServeStale(w http.ResponseWriter, r *http.Request, registry, key strin
 	return true
 }
 
-// proxyRewriteBody replaces upstream URLs with proxy URLs in response bodies.
-// For npm: rewrites tarball URLs in metadata JSON.
-// For pypi: rewrites file download URLs in simple index HTML.
 func proxyRewriteBody(body []byte, reg Registry, r *http.Request) []byte {
 	scheme := "http"
 	if r.TLS != nil {
@@ -364,7 +342,6 @@ func proxyRewriteBody(body []byte, reg Registry, r *http.Request) []byte {
 	return []byte(s)
 }
 
-// isImmutable returns true for file extensions that represent versioned, immutable artifacts.
 func isImmutable(path string) bool {
 	immutableExts := []string{
 		".tgz", ".tar.gz", ".whl", ".gem", ".zip", ".jar",
@@ -379,7 +356,6 @@ func isImmutable(path string) bool {
 	return false
 }
 
-// proxyCleanupLoop runs periodically and removes expired cache entries.
 func proxyCleanupLoop(ctx context.Context) {
 	interval := 1 * time.Hour
 	log.Printf("proxy cleanup: every %s, max age %s", interval, proxyMaxAge)

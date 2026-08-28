@@ -95,9 +95,6 @@ func TestVendor_RefusesExistingDest(t *testing.T) {
 	}
 }
 
-// TestVendor_EndToEnd exercises the full flow against a hermetic
-// file-based module proxy: download from the cache, copy the tree, add
-// the replace directive, and run go mod tidy. No network access.
 func TestVendor_EndToEnd(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go toolchain not available")
@@ -147,8 +144,6 @@ func TestVendor_EndToEnd(t *testing.T) {
 	}
 }
 
-// buildFileProxy writes a minimal GOPROXY file tree serving one module
-// version and returns the proxy root directory.
 func buildFileProxy(t *testing.T, modPath, version string) string {
 	t.Helper()
 	proxyRoot := t.TempDir()
@@ -184,9 +179,6 @@ func buildFileProxy(t *testing.T, modPath, version string) string {
 	return proxyRoot
 }
 
-// writableTempDir returns a temp dir whose cleanup restores write
-// permissions first. The Go module cache extracts files read-only, so a
-// plain t.TempDir cleanup fails to remove a cache rooted under it.
 func writableTempDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "sparks-modcache")

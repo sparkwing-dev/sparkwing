@@ -10,28 +10,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-// exampleHit is a registry pipeline that matched a search.
-//
-// The registry doubles as the worked-example corpus: every entry is a
-// real pipeline that compiles, lints, and explains (runnable-tier
-// entries also execute), verified by the template-verify pipeline.
-// That makes it the best answer to "how does
-// someone actually do ECS Fargate" -- better than prose, because prose
-// is not executed.
-//
-// They surface through search rather than a listing on purpose.
-// Choosing from a catalog is what cost agent trials a quarter of their
-// turns; consulting one that search handed you costs nothing, because
-// no triage happened.
 type exampleHit struct {
 	Name    string `json:"name"`
 	Summary string `json:"summary"`
 	score   int
 }
 
-// searchExamples ranks registry pipelines against query. A name hit
-// outranks a summary hit: someone searching "canary" wants the canary
-// example, not the six that mention the word.
 func searchExamples(query string) []exampleHit {
 	tokens := strings.Fields(strings.ToLower(strings.TrimSpace(query)))
 	if len(tokens) == 0 {
@@ -76,8 +60,6 @@ func searchExamples(query string) []exampleHit {
 	return hits
 }
 
-// firstSentence returns the first sentence of the first non-empty
-// candidate, flattened to one line.
 func firstSentence(candidates ...string) string {
 	for _, c := range candidates {
 		c = strings.TrimSpace(c)
@@ -93,7 +75,6 @@ func firstSentence(candidates ...string) string {
 	return ""
 }
 
-// printExampleHits renders the examples half of a search result.
 func printExampleHits(hits []exampleHit, limit int) {
 	if len(hits) == 0 {
 		return

@@ -7,24 +7,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// stepStateNodeLog observes step_start / step_end / step_skipped
-// records as they fan out and writes a corresponding node_steps row
-// via the State backend. The bracketing log records still flow
-// through to the JSONL file and pretty renderer; the wrapper only
-// adds a side-channel write so the dashboard can read structured
-// step state instead of re-parsing the log stream.
-//
-// Persist errors are intentionally swallowed: per-step state is
-// dashboard ergonomics, never load-bearing for run correctness, and
-// the canonical fact (the log record itself) still lands.
 type stepStateNodeLog struct {
 	inner   NodeLog
 	persist func(event, stepID, outcome string)
 }
 
-// wrapNodeLogWithStepState returns inner unchanged when state is
-// nil. The returned wrapper persists each step-lifecycle record to
-// the State backend before delegating to inner.
 func wrapNodeLogWithStepState(inner NodeLog, state StateBackend, runID, nodeID string) NodeLog {
 	if inner == nil || state == nil {
 		return inner

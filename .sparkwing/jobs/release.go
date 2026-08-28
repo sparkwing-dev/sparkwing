@@ -25,61 +25,11 @@ import (
 
 const templateVerifyReleaseTimeout = time.Hour
 
-// ReleaseArgs is the typed CLI surface for the public-sparkwing
-// release pipeline. --version is optional: when omitted the
-// pipeline bumps --bump (default minor) off the latest origin tag.
-//
-// Preview / no-mutation mode is delivered through sparkwing's reserved
-// `--sw-dry-run` flag; each step below either marks itself
-// SafeWithoutDryRun (read-only checks) or provides a .DryRun(...)
-// body (the tag push), so the pipeline doesn't carry its own flag.
 type ReleaseArgs struct {
 	Version string `flag:"version" desc:"Explicit release version (e.g. v0.24.0); sparkwing is locked to v0.x, so v1.0.0+ is refused. When empty, derived from latest origin tag + --bump."`
 	Bump    string `flag:"bump" desc:"Auto-bump kind when --version is empty: patch|minor|major. Default: minor"`
 }
 
-// Release tags and pushes a new public-sparkwing version. The tag
-// push triggers `.github/workflows/release.yaml`, which builds
-// cross-platform binaries (for GitHub Releases) and multi-arch
-// container images (for GHCR). This pipeline does NOT duplicate
-// that work -- its job is to run the pre-commit, pre-push and
-// template-verify gates, validate the release shape (clean tree,
-// free tag, non-empty CHANGELOG [Unreleased] section), commit the
-// CHANGELOG rename, push the branch and the tag, then pin and
-// restore `.sparkwing/` in two further commits and push the branch
-// again before stepping out of the way.
-//
-// The "never force-push a Go module tag" invariant from the
-// platform-repo release pipeline applies here too: validate-version
-// hard-refuses a tag that already exists on origin.
-//
-// # Node ordering: tag first, then pin
-//
-// push-tag runs BEFORE bump-self-replace pins `.sparkwing/go.mod` to
-// the released version. The pin names a version that exists only once
-// the tag does, and the pin commit fires this repo's pre-commit gate,
-// which rebuilds the pipeline module against that pin -- so pinning
-// first asks a gate to resolve a tag the pipeline has not created yet,
-// and the step is unsatisfiable by construction. Tag-then-pin is the
-// only order in which the gate can approve that commit honestly.
-//
-// The tradeoff: the tag no longer points at a tree carrying the
-// released pin, so reproducing this repo's own gate at a tag uses the
-// local replace instead of the published module. That is acceptable
-// because `.sparkwing/` is sparkwing's own pipeline configuration and
-// not something adopters consume; the published module and the
-// container images are unaffected. The rejected alternative was
-// exempting the pin commit from the gate, which buys a tree-accurate
-// tag with a bypass in the one place that is supposed to prove the
-// release is sound.
-//
-// bump-self-replace is ContinueOnError so restore-self-replace runs
-// even when the pin commit fails. The bump strips the local replace
-// before it commits, and a repo left in that state does not build at
-// all, which fails every later gate run in it until a human restores
-// the replace by hand. Cleanup is the other half of a mutation and
-// belongs on the failure path. ContinueOnError only unblocks that
-// cleanup: a failed bump still fails the run.
 type Release struct {
 	sparkwing.Base
 	args ReleaseArgs
@@ -179,9 +129,6 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	return nil
 }
 
-// repoRoot returns the working directory of the sparkwing run. In the
-// public sparkwing repo `.sparkwing/` lives at the module root, so
-// the SDK's WorkDir() is the right answer.
 func repoRoot() (string, error) {
 	d := sparkwing.WorkDir()
 	if d == "" {
@@ -193,16 +140,6 @@ func repoRoot() (string, error) {
 	return d, nil
 }
 
-// resolveVersionJob picks the version to release, in order:
-//  1. explicit --version  -> use it.
-//  2. tag + bump          -> bump kind off the highest origin tag.
-//
-// First-ever release (no tags) yields v0.1.0 from the bump fallback.
-// CHANGELOG.md is maintained separately (see VERSIONING.md); the
-// check-changelog node verifies the [Unreleased] section has at
-// least one entry before push-tag runs. The GH-Actions release
-// workflow additionally emits commit-walk release notes via
-// `gh release create --generate-notes` for the GitHub Release page.
 type resolveVersionJob struct {
 	sparkwing.Base
 	sparkwing.Produces[string]
@@ -252,10 +189,6 @@ func (j *resolveVersionJob) run(ctx context.Context) (string, error) {
 	return next, nil
 }
 
-// validateVersionJob parses the resolved version string as semver
-// and fails loudly if the tag already exists on origin. Hard refusal
-// gate for "never force-push a module tag" -- the GH-Actions release
-// workflow assumes the tag push is the source of truth.
 type validateVersionJob struct {
 	sparkwing.Base
 	Version sparkwing.Ref[string]
@@ -286,28 +219,10 @@ func (j *validateVersionJob) run(ctx context.Context) error {
 	return nil
 }
 
-// firstHostingReleaseSource is where the constant lives, and the pattern
-// that reads it. The pipeline module cannot import it -- internal/ is
-// closed to this module -- so the gate reads the declaration out of the
-// source it is about to tag, which is the text being shipped anyway.
 const firstHostingReleaseSource = "internal/wingd/client/client.go"
 
 var firstHostingReleasePattern = regexp.MustCompile(`(?m)^const FirstHostingRelease = "([^"]+)"`)
 
-// checkHostingReleaseConstant keeps wingdclient.FirstHostingRelease
-// honest across a slipped release.
-//
-// That constant names the first release whose installed binary can host
-// the admission daemon, and a pipeline binary that meets an older host
-// prints it as the version to install. Nothing in the build can derive
-// it, so if the feature slips -- v0.27.0 ships without it, or this work
-// lands in v0.28.0 instead -- the constant silently starts naming a
-// release that never carried the feature, which is worse advice than
-// none.
-//
-// The gate fires only while the constant still points at an unreleased
-// version. Once that tag exists the promise has been kept, and every
-// later release cuts without touching it.
 func (j *validateVersionJob) checkHostingReleaseConstant(ctx context.Context, version string) error {
 	path := filepath.Join(j.RepoDir, firstHostingReleaseSource)
 	src, err := os.ReadFile(path)
@@ -338,9 +253,6 @@ func (j *validateVersionJob) checkHostingReleaseConstant(ctx context.Context, ve
 		version, declared, version, firstHostingReleaseSource, declared)
 }
 
-// checkCleanTreeJob refuses to proceed if the working tree has
-// uncommitted changes. Tag pushes always come from a clean HEAD; a
-// dirty tree usually means the operator forgot to commit.
 type checkCleanTreeJob struct {
 	sparkwing.Base
 	RepoDir string
@@ -363,52 +275,18 @@ func (j *checkCleanTreeJob) run(ctx context.Context) error {
 	return nil
 }
 
-// prepareChangelogJob validates CHANGELOG.md has shippable content
-// for this release and renames the `## [Unreleased]` section to
-// `## [vX.Y.Z] - YYYY-MM-DD`, leaving a fresh empty `## [Unreleased]`
-// heading above. Commits the rewrite so the tag points at a commit
-// with the [vX.Y.Z] section in place -- the GH-Actions release
-// workflow extracts that section verbatim as the GitHub Release body
-// (see .github/workflows/release.yaml + bin/extract-changelog-section.sh).
-//
-// Idempotent: if `[vX.Y.Z]` already exists in the file, the rewrite
-// is a no-op (an operator who re-runs after a tag-push failure
-// shouldn't get a duplicate commit). Validation still runs in that
-// case to confirm the existing section has content.
-//
-// Refuses to run when:
-//   - [Unreleased] has no bullet entries AND [vX.Y.Z] doesn't exist
-//     (nothing to ship)
-//   - BOTH [Unreleased] and [vX.Y.Z] have content (ambiguous: the
-//     operator probably split the entries by hand and needs to
-//     consolidate before re-running)
-//
-// The PR-time CI gate (bin/check-changelog.sh in `sparkwing run
-// lint`) already enforces non-empty [Unreleased] on covered-surface
-// changes; this is the defense-in-depth fence at release time.
 type prepareChangelogJob struct {
 	sparkwing.Base
 	RepoDir string
 	Version sparkwing.Ref[string]
 }
 
-// embeddedChangelogRel is where the CLI embeds the changelog so `docs read
-// --topic changelog` can serve it. bin/sync-docs.sh copies CHANGELOG.md here,
-// and a guard test byte-compares the two.
 const embeddedChangelogRel = "pkg/docs/changelog.md"
 
 func embeddedChangelogPath(repoDir string) string {
 	return filepath.Join(repoDir, filepath.FromSlash(embeddedChangelogRel))
 }
 
-// writeChangelogPair writes the rolled changelog to the root file and to the
-// embedded copy together.
-//
-// safety: a guard test byte-compares the two, and it runs inside the pre-commit
-// gate that the rewrite's own commit triggers. Writing one without the other
-// makes this step refuse the rewrite it just produced, leaving the roll on disk
-// with no commit -- which then fails every later attempt for a reason that names
-// neither the release nor the earlier failure.
 func writeChangelogPair(repoDir, body string) error {
 	if err := os.WriteFile(filepath.Join(repoDir, "CHANGELOG.md"), []byte(body), 0o644); err != nil {
 		return fmt.Errorf("write CHANGELOG.md: %w", err)
@@ -475,9 +353,6 @@ func (j *prepareChangelogJob) dryRun(ctx context.Context) error {
 	return nil
 }
 
-// selfReplaceComment is the comment block that precedes the dogfood
-// self-replace in `.sparkwing/go.mod`. Kept verbatim so restore-side
-// rewrites round-trip cleanly.
 const selfReplaceComment = `// The pipelines tree is consumed as the same module path the SDK
 // itself ships, so the require above is a placeholder; this replace
 // pins it to the parent checkout (the sparkwing repo root). The
@@ -490,12 +365,6 @@ const selfReplaceLine = "replace github.com/sparkwing-dev/sparkwing => .."
 
 const sparkwingModulePath = "github.com/sparkwing-dev/sparkwing"
 
-// prepareSelfReplaceJob bumps the sparkwing pins in `.sparkwing/go.mod`
-// and the scaffold fallback to the release version, then strips the local
-// self-replace. Runs after push-tag because the module pin it writes cannot
-// resolve until the tag it names exists (see [Release] for the ordering and
-// its tradeoff). Pairs with restoreSelfReplaceJob, which puts the replace
-// back whether or not this step succeeded.
 type prepareSelfReplaceJob struct {
 	sparkwing.Base
 	RepoDir string
@@ -511,11 +380,6 @@ func (j *prepareSelfReplaceJob) run(ctx context.Context) error {
 	return bumpSelfReplace(ctx, j.RepoDir, j.Version.Get(ctx))
 }
 
-// bumpSelfReplace pins `.sparkwing/go.mod` and fresh scaffolds to version,
-// regenerates the public API snapshots, strips the local self-replace, and
-// commits the release-version artifacts.
-// Split from the job body so the half-applied failure state -- files rewritten,
-// commit refused -- is reachable in a test without a run-time Ref resolver.
 func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 	path := filepath.Join(repoDir, ".sparkwing", "go.mod")
 	body, err := os.ReadFile(path)
@@ -746,14 +610,6 @@ func (f trackedModuleFile) Open() (io.ReadCloser, error) {
 	return os.Open(filepath.Join(f.repoDir, filepath.FromSlash(f.path)))
 }
 
-// restoreSelfReplaceJob undoes prepareSelfReplaceJob's mutation. Adds
-// the self-replace block back and pushes the restore commit so
-// subsequent local development picks up SDK edits via the parent
-// checkout instead of the freshly-tagged module proxy version. Runs on
-// the failure path too, because a half-applied bump leaves a repo that
-// does not build. Idempotent: noop when the replace is already
-// present, which is the state a run that never reached the bump leaves
-// behind.
 type restoreSelfReplaceJob struct {
 	sparkwing.Base
 	RepoDir string
@@ -768,10 +624,6 @@ func (j *restoreSelfReplaceJob) run(ctx context.Context) error {
 	return restoreSelfReplaceIn(ctx, j.RepoDir)
 }
 
-// restoreSelfReplaceIn puts the local self-replace back in
-// `.sparkwing/go.mod`, commits it, and pushes the branch. Split from
-// the job body so the failure path -- the bump left the replace
-// stripped and this has to undo it -- is testable against a real repo.
 func restoreSelfReplaceIn(ctx context.Context, repoDir string) error {
 	path := filepath.Join(repoDir, ".sparkwing", "go.mod")
 	body, err := os.ReadFile(path)
@@ -830,17 +682,6 @@ func (j *restoreSelfReplaceJob) dryRun(ctx context.Context) error {
 	return nil
 }
 
-// stripSelfReplace rewrites .sparkwing/go.mod for release: bumps the
-// `require github.com/sparkwing-dev/sparkwing vX.Y.Z` line to version
-// and removes the comment-block-plus-replace-line trailer. Pure
-// function so the rewrite is unit-testable without git or the file
-// system. Returns (newBody, changed, err).
-//
-//   - If neither the require nor the replace is present: error
-//     (unexpected go.mod shape; refuse to guess).
-//   - If the replace is absent but the require is on `version` already:
-//     (body, false, nil) -- already in shipped shape.
-//   - Otherwise: bump require, strip the comment + replace trailer.
 func stripSelfReplace(body, version string) (string, bool, error) {
 	requireRe := regexp.MustCompile(`(?m)^([\t ]*(?:require[\t ]+)?)` + regexp.QuoteMeta(sparkwingModulePath) + `[\t ]+v[0-9][0-9A-Za-z.+-]*[\t ]*$`)
 	if !requireRe.MatchString(body) {
@@ -880,9 +721,6 @@ func stripSelfReplace(body, version string) (string, bool, error) {
 	return newBody, true, nil
 }
 
-// restoreSelfReplace puts the dogfood self-replace block back after a
-// release cut. Idempotent: returns (body, false) if the replace is
-// already present.
 func restoreSelfReplace(body string) (string, bool) {
 	replaceRe := regexp.MustCompile(`(?m)^replace\s+` + regexp.QuoteMeta(sparkwingModulePath) + `\s*=>\s*\.\.\s*$`)
 	if replaceRe.MatchString(body) {
@@ -892,8 +730,6 @@ func restoreSelfReplace(body string) (string, bool) {
 	return trimmed + "\n\n" + selfReplaceComment + selfReplaceLine + "\n", true
 }
 
-// changelogRewriteKind distinguishes "operator already prepared the
-// CHANGELOG" from "we need to apply the rewrite ourselves".
 type changelogRewriteKind int
 
 const (
@@ -908,10 +744,6 @@ type changelogRewrite struct {
 	versionEntries    int
 }
 
-// planChangelogRewrite decides what (if anything) prepareChangelogJob
-// should do to body for the given version. Pure function so the test
-// suite can exercise every branch without touching git or the
-// filesystem.
 func planChangelogRewrite(body, version string) (changelogRewrite, error) {
 	unreleased, err := unreleasedEntries(body)
 	if err != nil {
@@ -948,10 +780,6 @@ func planChangelogRewrite(body, version string) (changelogRewrite, error) {
 	}, nil
 }
 
-// rewriteUnreleasedToVersion replaces the first `## [Unreleased]` /
-// `## Unreleased` heading with a pair of headings: a fresh empty
-// `## [Unreleased]` followed by `## [vX.Y.Z] - YYYY-MM-DD`. Returns
-// an error if no [Unreleased] heading is found.
 func rewriteUnreleasedToVersion(body, version, date string) (string, error) {
 	re := regexp.MustCompile(`(?m)^## \[?Unreleased\]?\s*$`)
 	loc := re.FindStringIndex(body)
@@ -962,8 +790,6 @@ func rewriteUnreleasedToVersion(body, version, date string) (string, error) {
 	return body[:loc[0]] + newHeader + body[loc[1]:], nil
 }
 
-// versionEntries counts the bullets under `## [vX.Y.Z]` (with or
-// without a date suffix). Mirrors unreleasedEntries' parsing.
 func versionEntries(body, version string) (int, error) {
 	target := strings.TrimSpace(version)
 	if target == "" {
@@ -1004,12 +830,6 @@ func versionEntries(body, version string) (int, error) {
 	return count, nil
 }
 
-// unreleasedEntries counts the bullet lines (lines starting with
-// `- `) inside the `## [Unreleased]` (or `## Unreleased`) section of
-// a Keep-a-Changelog-formatted body. Stops at the next top-level
-// `## ` heading or EOF. Returns 0 if the section is missing or
-// contains only sub-headings / blank lines; returns an error only
-// when the body is unreadable.
 func unreleasedEntries(body string) (int, error) {
 	lines := strings.Split(body, "\n")
 	in := false
@@ -1039,10 +859,6 @@ func unreleasedEntries(body string) (int, error) {
 	return count, nil
 }
 
-// pushTagJob creates the annotated tag and pushes it to origin. The
-// GH-Actions release workflow takes over from this push. Under
-// `--dry-run`, the dryRun body runs in place of run -- it logs the
-// planned tag without mutating local refs or origin.
 type pushTagJob struct {
 	sparkwing.Base
 	Version sparkwing.Ref[string]
@@ -1099,9 +915,6 @@ func (j *pushTagJob) dryRun(ctx context.Context) error {
 	return nil
 }
 
-// currentBranch returns the abbreviated ref name (e.g. "main") of
-// HEAD. Detached HEAD returns "HEAD"; the release branch fence refuses
-// that before pushing a branch or tag.
 func currentBranch(ctx context.Context, repoDir string) (string, error) {
 	out, err := runGitIn(ctx, repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
@@ -1127,10 +940,6 @@ func ensureBranchContainsRemote(ctx context.Context, repoDir, branch string) err
 	return nil
 }
 
-// checkReleaseLineageJob refuses to cut a release from a line whose
-// history does not contain the latest published release. That state
-// means an earlier release was cut from a branch that never landed
-// here; shipping over it would silently drop that release's work.
 type checkReleaseLineageJob struct {
 	sparkwing.Base
 	RepoDir string
@@ -1145,11 +954,6 @@ func (j *checkReleaseLineageJob) run(ctx context.Context) error {
 	return ensureLineageContainsLatestRelease(ctx, j.RepoDir)
 }
 
-// ensureLineageContainsLatestRelease verifies the latest release tag on
-// origin is an ancestor of HEAD. Tags are read from origin (never the
-// local tag list) so a stale checkout cannot pass; the retracted v1.x
-// tombstone line is excluded by the same rule the bump resolver uses. A
-// repo with no release tags passes: there is no lineage to contain yet.
 func ensureLineageContainsLatestRelease(ctx context.Context, repoDir string) error {
 	latest, err := latestSemverTagIn(ctx, repoDir)
 	if err != nil {
@@ -1245,20 +1049,8 @@ func runGitRawIn(ctx context.Context, dir string, args ...string) ([]byte, error
 	return out, nil
 }
 
-// releaseTagCeiling is the exclusive upper bound on tags the release
-// resolver treats as real releases. sparkwing is locked to the v0.x line
-// (validateReleaseVersion refuses v1.0.0+), so any v1.0.0+ tag is a
-// retracted tombstone -- notably v1.6.1, kept only to hold the Go module
-// @latest pointer on the v0.x line -- never a real release. Picking one as
-// the prev/latest release gives the schema gate a phantom prevSchema and
-// the --bump baseline a wrong floor, so they are skipped here.
 const releaseTagCeiling = "v1.0.0"
 
-// highestReleaseTag returns the highest stable-semver release tag in tags,
-// skipping pre-release/build tags and any tag at or above releaseTagCeiling
-// (the retracted v1.x line). tags are bare tag names (e.g. "v0.11.0").
-// Returns "" when no eligible tag exists. Pure so the resolver can be tested
-// without git or a remote.
 func highestReleaseTag(tags []string) string {
 	var best string
 	for _, t := range tags {
@@ -1278,13 +1070,6 @@ func highestReleaseTag(tags []string) string {
 	return best
 }
 
-// latestSemverTagIn returns the highest stable-semver release tag visible on
-// origin, excluding the retracted v1.x line (see highestReleaseTag). Reads
-// via `ls-remote --tags` rather than `git tag --list` so stale local tags
-// (orphans from before an OSS scrub, force-deleted upstream refs, etc.)
-// can't bias the bump fallback. The release pipeline's "what's the next
-// version" decision is fundamentally a statement about what the world has
-// seen -- not what this checkout happens to remember.
 func latestSemverTagIn(ctx context.Context, repoDir string) (string, error) {
 	out, err := runGitIn(ctx, repoDir, "ls-remote", "--tags", "origin")
 	if err != nil {
@@ -1340,18 +1125,10 @@ func bumpVersion(v, kind string) (string, error) {
 	return fmt.Sprintf("v%d.%d.%d", major, minor, patch), nil
 }
 
-// storeSchemaSourcePath is the source file holding the embedded
-// runs-store schema constant, read at HEAD and at the previous release
-// tag to detect a schema bump. Mirrors what bin/check-release-schema-
-// parity.sh compiles; reading the constant straight from source avoids
-// building a binary per release tag.
 const storeSchemaSourcePath = "pkg/store/store.go"
 
 var storeSchemaConstRe = regexp.MustCompile(`(?m)^const\s+expectedSchemaVersion\s*=\s*(\d+)\b`)
 
-// parseStoreSchemaVersion extracts the `expectedSchemaVersion` constant
-// from pkg/store/store.go source. Pure so the release gate can be tested
-// without git or a build.
 func parseStoreSchemaVersion(goSource string) (int, error) {
 	m := storeSchemaConstRe.FindStringSubmatch(goSource)
 	if m == nil {
@@ -1364,12 +1141,6 @@ func parseStoreSchemaVersion(goSource string) (int, error) {
 	return n, nil
 }
 
-// checkSchemaBreakJob refuses a release whose runs-store schema changed
-// since the previous tag without a matching `(Breaking)` changelog entry.
-// It reads the schema constant at HEAD (working tree) and at the latest
-// origin tag, and when they differ requires LintSchemaBreak to find a
-// marked schema entry in the section being cut. The first release (no
-// prior tag) has nothing to compare and passes.
 type checkSchemaBreakJob struct {
 	sparkwing.Base
 	RepoDir string

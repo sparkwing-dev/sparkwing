@@ -2,8 +2,6 @@ package web
 
 import "testing"
 
-// TestSafeNext rejects open-redirect vectors that a naive
-// HasPrefix(next, "/") check would let through.
 func TestSafeNext(t *testing.T) {
 	cases := []struct {
 		in   string

@@ -8,9 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// ResetStats asks the daemon to clear its rolling admission-outcome window
-// over this client's connection. It is a control operation and creates no
-// lease; use it on a dedicated connection, not one holding a lease.
 func (cl *Client) ResetStats(ctx context.Context) error {
 	stop := cl.cancelOnDone(ctx)
 	defer stop()
@@ -43,9 +40,6 @@ func (cl *Client) readResetStats() (terminal, transient error) {
 	return nil, nil
 }
 
-// ResetStats connects to a running daemon and clears its admission-outcome
-// window without spawning one. When no daemon is running it returns
-// [ErrNoDaemon]: there is no window to clear.
 func ResetStats(ctx context.Context, opts Options) error {
 	noSpawn := opts
 	noSpawn.Spawn = func(string, string) error { return ErrNoDaemon }

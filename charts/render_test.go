@@ -1,7 +1,3 @@
-// Package charts holds the deployment charts. Its only Go code is this
-// rendering test: the chart is a supported surface, and the arguments
-// it hands the web pod are the difference between a dashboard that can
-// see the cluster's cache and one that cannot.
 package charts
 
 import (
@@ -12,9 +8,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// helmRender renders one template out of one chart with the given
-// --set overrides. Rendering needs the helm binary, so these tests
-// only run where it is installed and skip everywhere else.
 func helmRender(t *testing.T, chart, showOnly, release string, sets ...string) string {
 	t.Helper()
 	helm, err := exec.LookPath("helm")
@@ -32,14 +25,11 @@ func helmRender(t *testing.T, chart, showOnly, release string, sets ...string) s
 	return string(out)
 }
 
-// helmTemplate renders sparkwing-full's web Deployment.
 func helmTemplate(t *testing.T, release string, sets ...string) string {
 	t.Helper()
 	return helmRender(t, "./sparkwing-full", "templates/web-deployment.yaml", release, sets...)
 }
 
-// webArgs pulls the container's args list out of the rendered
-// Deployment, so an assertion reads flags rather than YAML.
 func webArgs(t *testing.T, rendered string) []string {
 	t.Helper()
 	var args []string
@@ -70,11 +60,6 @@ func hasFlag(args []string, prefix string) (string, bool) {
 	return "", false
 }
 
-// A default install bundles the runner, so the dashboard is pointed at
-// the cache that install created. Nothing else in the chart reads the
-// cache; without this the services panel omits the one component that
-// reports a stalled fetch loop, and runner builds degrade to cold
-// clones with no lamp anywhere.
 func TestWebIsPointedAtTheBundledCache(t *testing.T) {
 	args := webArgs(t, helmTemplate(t, "sparkwing"))
 	got, ok := hasFlag(args, "--cache=")
@@ -85,8 +70,7 @@ func TestWebIsPointedAtTheBundledCache(t *testing.T) {
 	if got != want {
 		t.Errorf("cache flag = %q, want %q", got, want)
 	}
-	// The logs URL is computed by the same sub-chart-name helper; pin
-	// it so a change there cannot quietly move the logs backend.
+
 	if got, _ := hasFlag(args, "--logs="); got !=
 		"--logs=http://sparkwing-sparkwing-runner-bundle-logs.default.svc.cluster.local" {
 		t.Errorf("logs flag = %q, want the bundled logs Service", got)
@@ -100,10 +84,6 @@ func TestWebCacheURLOverrideWins(t *testing.T) {
 	}
 }
 
-// An operator who runs their own git mirror disables the bundled cache.
-// The web pod must then start with no --cache at all rather than a URL
-// pointing at a Service the chart did not create: an absent cache is
-// absent from the panel, not a red lamp for something nobody deployed.
 func TestWebHasNoCacheFlagWhenNoCacheIsDeployed(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -121,9 +101,6 @@ func TestWebHasNoCacheFlagWhenNoCacheIsDeployed(t *testing.T) {
 	}
 }
 
-// A release named after the sub-chart collapses the doubled name, and
-// the cache Service name has to follow it or the dashboard probes a
-// host that does not resolve.
 func TestWebCacheURLFollowsTheSubChartNaming(t *testing.T) {
 	args := webArgs(t, helmTemplate(t, "sparkwing-runner-bundle"))
 	if got, _ := hasFlag(args, "--cache="); got !=
@@ -132,8 +109,6 @@ func TestWebCacheURLFollowsTheSubChartNaming(t *testing.T) {
 	}
 }
 
-// renderedEnvVar / renderedContainer / renderedDeployment are the
-// slice of a Deployment these tests read.
 type renderedEnvVar struct {
 	Name  string `yaml:"name"`
 	Value string `yaml:"value"`
@@ -155,11 +130,6 @@ type renderedDeployment struct {
 	} `yaml:"spec"`
 }
 
-// runnerContainer decodes the rendered runner Deployment down to the
-// one container. Decoding the YAML (rather than grepping it) is what
-// lets a test assert that an env name appears exactly once: duplicate
-// names are a K8s validation error, so "the user's value wins" has to
-// mean "the default was never emitted".
 func runnerContainer(t *testing.T, rendered string) renderedContainer {
 	t.Helper()
 	var doc renderedDeployment
@@ -196,11 +166,6 @@ func renderRunner(t *testing.T, sets ...string) string {
 	return helmRender(t, "./sparkwing-runner-bundle", "templates/runner-deployment.yaml", "sparkwing", sets...)
 }
 
-// A default install pays for every dependency fetch twice: once in
-// egress, once in wall time. With the cache deployed, the runner's
-// package managers point at its pull-through proxy, and the values
-// carry the fallbacks that keep a rolling cache pod from failing
-// builds.
 func TestRunnerPackageManagersUseTheBundledDependencyProxy(t *testing.T) {
 	env := runnerEnv(t, renderRunner(t))
 	const host = "sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
@@ -216,9 +181,6 @@ func TestRunnerPackageManagersUseTheBundledDependencyProxy(t *testing.T) {
 	}
 }
 
-// An operator with their own mirror overrides one ecosystem without
-// giving up the others. The default must not be emitted alongside the
-// override, or the Deployment is rejected outright.
 func TestRunnerExtraEnvOverridesADependencyProxyDefault(t *testing.T) {
 	env := runnerEnv(t, renderRunner(t,
 		"runner.extraEnv[0].name=GOPROXY",
@@ -231,8 +193,6 @@ func TestRunnerExtraEnvOverridesADependencyProxyDefault(t *testing.T) {
 	}
 }
 
-// Opting out has to reach the pods the runner spawns too: those derive
-// the proxy from --gitcache, so the flag carries the decision.
 func TestRunnerDependencyProxyOptOut(t *testing.T) {
 	rendered := renderRunner(t, "cache.dependencyProxy.enabled=false")
 	env := runnerEnv(t, rendered)
@@ -246,9 +206,6 @@ func TestRunnerDependencyProxyOptOut(t *testing.T) {
 	}
 }
 
-// No cache deployed, no proxy to point at: the runner keeps its
-// upstream defaults rather than a URL for a Service the chart did not
-// create.
 func TestRunnerHasNoDependencyProxyWhenNoCacheIsDeployed(t *testing.T) {
 	rendered := renderRunner(t, "cache.enabled=false")
 	env := runnerEnv(t, rendered)
@@ -264,10 +221,6 @@ func TestRunnerHasNoDependencyProxyWhenNoCacheIsDeployed(t *testing.T) {
 	}
 }
 
-// sparkwing-full vendors the runner bundle as a packaged .tgz under
-// charts/, so a sub-chart edit reaches full-self-host installs only
-// after the dependency is re-packaged. Assert the wiring through the
-// parent chart as well: a pass means the vendored copy is current.
 func TestFullChartCarriesTheDependencyProxyWiring(t *testing.T) {
 	env := runnerEnv(t, helmRender(t, "./sparkwing-full",
 		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing"))
@@ -287,14 +240,6 @@ func containsArg(args []string, want string) bool {
 	return false
 }
 
-// The controller must announce the logs service, because it serves no
-// /api/v1/logs route itself. A client with no logs: surface of its own
-// -- a laptop running `sparkwing run --profile prod` -- discovers the
-// URL from the controller and posts there; without the announcement it
-// falls back to the controller's own URL and every append 404s.
-//
-// The in-cluster runner does not depend on this: its Deployment passes
-// --logs directly. This flag is for everything reaching in from outside.
 func TestControllerAnnouncesTheBundledLogsService(t *testing.T) {
 	rendered := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing")
 	args := webArgs(t, rendered)
@@ -308,9 +253,6 @@ func TestControllerAnnouncesTheBundledLogsService(t *testing.T) {
 	}
 }
 
-// With no logs component deployed there is nothing to announce, and the
-// flag must be absent rather than empty -- an empty announcement would
-// advertise a URL that resolves nowhere.
 func TestControllerAnnouncesNoLogsServiceWhenNoneIsDeployed(t *testing.T) {
 	rendered := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing",
 		"sparkwing-runner-bundle.logs.enabled=false")

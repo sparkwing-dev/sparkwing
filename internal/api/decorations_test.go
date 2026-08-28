@@ -8,11 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// fixtureSnapshot exercises every decoration lists as an
-// acceptance criterion: a node with modifiers, an approval gate, a
-// group membership, an OnFailure relationship, and an inner-Work
-// DAG (steps + spawn). Plus a bare node with no decorations to
-// confirm we don't synthesize an empty entry for it.
 const fixtureSnapshot = `{
   "nodes": [
     {
@@ -97,10 +92,6 @@ func TestDecorationsFromSnapshot(t *testing.T) {
 	}
 }
 
-// TestDecorationsFromSnapshot_EmptyOrUnparseable pins the
-// graceful-degradation contract: empty input -> nil; malformed JSON
-// -> nil. Callers treat both as "no decorations" and the dashboard
-// falls back to rendering nodes without adornments.
 func TestDecorationsFromSnapshot_EmptyOrUnparseable(t *testing.T) {
 	if got := api.DecorationsFromSnapshot(nil); got != nil {
 		t.Errorf("nil snapshot: got %v want nil", got)
@@ -113,10 +104,6 @@ func TestDecorationsFromSnapshot_EmptyOrUnparseable(t *testing.T) {
 	}
 }
 
-// TestDecorateNodes_WireShape pins the on-the-wire JSON shape: each
-// node marshals as the flat store.Node fields plus an optional
-// `decorations` object. Nodes without snapshot-derived adornments
-// emit no decorations key (omitempty).
 func TestDecorateNodes_WireShape(t *testing.T) {
 	nodes := []*store.Node{
 		{NodeID: "build", Status: "running", Deps: []string{}},
@@ -155,11 +142,6 @@ func TestDecorateNodes_WireShape(t *testing.T) {
 	}
 }
 
-// TestDecorateNodes_NoSnapshot pins the additive-shape contract:
-// when the run has no PlanSnapshot, every wrapped node still
-// marshals as bare store.Node fields with no `decorations` key.
-// Existing CLI consumers that read the canonical store fields are
-// unaffected.
 func TestDecorateNodes_NoSnapshot(t *testing.T) {
 	nodes := []*store.Node{{NodeID: "a", Status: "pending", Deps: []string{}}}
 	wrapped := api.DecorateNodes(nodes, nil, nil, nil, nil)

@@ -8,10 +8,6 @@ import (
 	"time"
 )
 
-// claimSweepWindow atomically claims a short in-progress lease when at least
-// minInterval has elapsed since the last successful stamp. The lease collapses
-// concurrent starters to one sweep without letting a timed-out sweep suppress
-// retries for the full interval.
 func (s *Store) claimSweepWindow(ctx context.Context, key, claimKey string, minInterval, claimTTL time.Duration) (bool, string, error) {
 	now := time.Now()
 	tx, err := s.beginTx(ctx)

@@ -14,18 +14,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// contendedRun folds one contended run of pipeline "ci" (plan hash B) that
-// measured peakCores while admitted at charge, mirroring the end-of-run fold
-// recordRunProfile performs for a daemon-flagged run. key is the profile
-// identity the fold lands on; the run row keeps the bare pipeline name, as
-// it does in production.
 func contendedRun(t *testing.T, st *store.Store, ctx context.Context, key, runID string, peakCores float64, charge runCharge) {
 	t.Helper()
 	contendedRunPeaking(t, st, ctx, key, runID, peakCores, 1<<30, charge)
 }
 
-// contendedRunPeaking is contendedRun with the run's memory peak spelled out,
-// for the cases where memory is the dimension under test.
 func contendedRunPeaking(t *testing.T, st *store.Store, ctx context.Context, key, runID string, peakCores float64, peakMemory int64, charge runCharge) {
 	t.Helper()
 	start := time.Now()
@@ -43,8 +36,6 @@ func contendedRunPeaking(t *testing.T, st *store.Store, ctx context.Context, key
 	recordRunProfile(ctx, st, key, runID, nil, "B", charge, true, start, start.Add(time.Second))
 }
 
-// gitRepoDir makes an empty checkout-shaped directory named name, so a
-// process running inside it keys its profiles under that repo.
 func gitRepoDir(t *testing.T, name string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), name)
@@ -54,13 +45,6 @@ func gitRepoDir(t *testing.T, name string) string {
 	return dir
 }
 
-// TestPoisonedFloorRecoversWithoutManualReset proves that a pipeline
-// re-measuring after a structural change ratchets its charge under
-// external load (ceiling hits double the demand floor until the grantable
-// ceiling caps it), and then keeps being flagged contended while the load
-// tails off. The runs' own measurements prove demand is ~1 core, so the
-// charge must converge back near it instead of pricing the pipeline at the
-// whole machine until an operator finds `runs stats --reset`.
 func TestPoisonedFloorRecoversWithoutManualReset(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -80,8 +64,6 @@ func TestPoisonedFloorRecoversWithoutManualReset(t *testing.T) {
 		return res.Cores
 	}
 
-	// External load: each contended run consumes its whole charge (the load,
-	// not the pipeline), so ceiling hits escalate the floor run over run.
 	for i := range 4 {
 		c := charge()
 		contendedRun(t, st, ctx, "ci", fmt.Sprintf("hot%d", i), c, runCharge{Cores: c})
@@ -90,8 +72,6 @@ func TestPoisonedFloorRecoversWithoutManualReset(t *testing.T) {
 		t.Fatalf("charge = %v cores, want the ratchet to reach the grantable ceiling %v first", c, grantable)
 	}
 
-	// Load gone, runs still flagged contended: every measurement now says the
-	// pipeline wants ~1 core and never hits its admitted ceiling.
 	for i := range 6 {
 		contendedRun(t, st, ctx, "ci", fmt.Sprintf("calm%d", i), 1.0, runCharge{Cores: charge()})
 	}
@@ -174,9 +154,6 @@ func TestRatchetedFloorRecoversAtGrantableMemoryCeiling(t *testing.T) {
 	}
 }
 
-// Two checkouts on one machine can each have a pipeline called "ci".
-// Contention that ratchets one pipeline's demand floor to the machine ceiling
-// must not price the other pipeline, which has never been measured.
 func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -186,8 +163,7 @@ func TestContentionInOneRepoLeavesAnothersPricingAlone(t *testing.T) {
 	ctx := context.Background()
 
 	const grantable = 7.5
-	// resolve prices "ci" exactly as admission does from the current
-	// directory: the stored profile read under the key this process derives.
+
 	resolve := func() capacity.Resolution {
 		t.Helper()
 		key := currentProfileKey("ci")

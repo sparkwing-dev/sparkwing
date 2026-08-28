@@ -160,10 +160,6 @@ func (cacheForcedReleaseFollowerPipe) Plan(ctx context.Context, plan *sparkwing.
 	return nil
 }
 
-// cacheKeyedPipe exercises Cache() memoization across two sequential
-// runs. First run misses and writes a cache entry; second run hits and
-// replays the output without invoking the job body. Caching is keyed on
-// content alone -- no concurrency group involved.
 type cacheKeyedPipe struct{ sparkwing.Base }
 
 func (cacheKeyedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -176,8 +172,6 @@ func (cacheKeyedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwin
 	return nil
 }
 
-// cacheDriftPipe declares the same group name with different capacities
-// across two runs so the second run's acquire records a capacity drift.
 type cacheDriftPipeA struct{ sparkwing.Base }
 
 func (cacheDriftPipeA) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -194,9 +188,6 @@ func (cacheDriftPipeB) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwi
 	return nil
 }
 
-// planLevelQueuePipe: single-node plan gated by Plan.Concurrency at
-// capacity 1. Running two concurrently MUST serialize -- peak
-// concurrency across both runs' nodes should stay at 1.
 type planLevelQueuePipe struct{ sparkwing.Base }
 
 func (planLevelQueuePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -227,8 +218,6 @@ func (planLevelCancelOthersQuickPipe) Plan(ctx context.Context, plan *sparkwing.
 	return nil
 }
 
-// planLevelSkipFollowerPipe: Skip-policy plan-level arrival that should
-// no-op when a plan-level leader is already holding the key.
 type planLevelSkipFollowerPipe struct{ sparkwing.Base }
 
 func (planLevelSkipFollowerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -624,8 +613,6 @@ func claimManualChildTrigger(t *testing.T, ctx context.Context, st *store.Store,
 	}
 }
 
-// cacheCounterBump records one in-flight body against the peak gauge and
-// returns the matching decrement, for use as held()'s onStart.
 func cacheCounterBump() func() {
 	cur := cacheCounter.inflight.Add(1)
 	for {

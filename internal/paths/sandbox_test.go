@@ -7,9 +7,6 @@ import (
 	"testing"
 )
 
-// TestDefaultPaths_NeverResolvesToTheRealHomeUnderTest guarantees that a
-// fixture which forgets SPARKWING_HOME gets a disposable sandbox rather than
-// the developer's ~/.sparkwing.
 func TestDefaultPaths_NeverResolvesToTheRealHomeUnderTest(t *testing.T) {
 	t.Setenv("SPARKWING_HOME", "")
 
@@ -29,8 +26,6 @@ func TestDefaultPaths_NeverResolvesToTheRealHomeUnderTest(t *testing.T) {
 	}
 }
 
-// TestDefaultPaths_StillHonorsSparkwingHome keeps the sandbox from
-// overriding the isolation tests already do for themselves.
 func TestDefaultPaths_StillHonorsSparkwingHome(t *testing.T) {
 	want := t.TempDir()
 	t.Setenv("SPARKWING_HOME", want)
@@ -43,9 +38,6 @@ func TestDefaultPaths_StillHonorsSparkwingHome(t *testing.T) {
 	}
 }
 
-// TestUnderTest holds the detection honest: this assertion runs inside a
-// test binary, so it has to be true here, and the suffix it keys on is
-// the one `go test` gives the binaries it builds.
 func TestUnderTest(t *testing.T) {
 	if !UnderTest() {
 		t.Fatalf("UnderTest() is false inside a test binary; os.Args[0] = %q", os.Args[0])

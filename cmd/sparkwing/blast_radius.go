@@ -1,9 +1,3 @@
-// Risk-label dispatch gate. Reads the author-declared per-step
-// labels from the per-repo describe cache and refuses dispatch when
-// any reachable step declares a label the operator hasn't authorized
-// via --sw-allow (or --sw-dry-run). Stale or missing cache silently
-// degrades to "no labels detected, no gate fires" so the gate is
-// purely additive and never blocks a dispatch the cache hasn't seen.
 package main
 
 import (
@@ -12,21 +6,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// stepRiskFinding is one risk-label group the gate detected on a
-// specific step. The validator unions every finding's labels and
-// reports the full missing set in one error so the operator can
-// authorize them all in a single retry.
 type stepRiskFinding struct {
 	NodeID string
 	StepID string
 	Labels []string
 }
 
-// lookupCachedRisks returns the per-step risk-label list for the
-// named pipeline as stored in the describe cache. Returns nil when
-// the pipeline isn't in the cache or when reading fails -- callers
-// treat empty as "no constraint declared" and proceed without
-// gating, matching the venue gate's degrade-gracefully shape.
 func lookupCachedRisks(sparkwingDir, pipelineName string) []stepRiskFinding {
 	schemas, err := readDescribeCache(sparkwingDir)
 	if err != nil || schemas == nil {
@@ -55,14 +40,6 @@ func lookupCachedRisks(sparkwingDir, pipelineName string) []stepRiskFinding {
 	return nil
 }
 
-// enforceRiskGate is the dispatcher's gate: refuse the run when any
-// reachable step declares a risk label the operator hasn't
-// authorized via --sw-allow. --sw-dry-run bypasses every gate (the
-// safe-mode contract).
-//
-// Returns nil when no findings or when every declared label is
-// authorized. Returns a *sparkwing.RiskBlockedError whose
-// MissingLabels names every unauthorized label in one shot.
 func enforceRiskGate(
 	pipelineName string,
 	findings []stepRiskFinding,

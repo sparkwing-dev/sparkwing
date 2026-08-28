@@ -10,14 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// printPipelineRuntimePlan implements `--plan` for the pipeline
-// binary. Builds the Plan via Registration.Invoke (so Plan-time
-// validation runs) then walks it via PreviewPlan to resolve per-step
-// would-run / would-skip decisions against the supplied args +
-// SPARKWING_START_AT / SPARKWING_STOP_AT env. No step bodies
-// execute. The JSON shape emitted here is consumed by
-// `cmd/sparkwing pipeline plan`'s wrapper (mirroring the --explain
-// / pipeline_explain.go contract).
 func printPipelineRuntimePlan(pipeline string, rest []string) error {
 	reg, ok := sparkwing.Lookup(pipeline)
 	if !ok {

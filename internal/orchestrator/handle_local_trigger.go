@@ -1,6 +1,3 @@
-// Local-mode child entry point for laptop cross-repo dispatch.
-// LocalBackends against the parent's SQLite (or the resolved profile's
-// state backend, when --profile is passed); no HTTP, no heartbeat.
 package orchestrator
 
 import (
@@ -16,15 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// HandleClaimedTriggerLocal runs an already-claimed trigger to
-// terminal against LocalBackends. Trigger MUST already be 'claimed';
-// re-claiming would race the parent's lease bookkeeping.
-//
-// profileName, when non-empty, opens the named profile's state backend
-// instead of the default local sqlite. The parent's local trigger
-// dispatcher forwards its own active profile so the child sees the
-// same triggers table (matters whenever state is non-sqlite, chiefly
-// the postgres-local path).
 func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName string) error {
 	logger := slog.Default()
 
@@ -88,12 +76,7 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 		),
 		Runner: r,
 	}
-	// The local trigger loop exec'd this child with the repo as its
-	// working directory -- for a retry, the recorded-revision snapshot --
-	// so the project's argument layers and guards are on disk right here.
-	// Without this a queued trigger, a dashboard retry, and a spawned
-	// child each planned with unmerged arguments and no guard evaluation
-	// at all, while `sparkwing run` of the same pipeline got both.
+
 	applyCheckoutProjectConfig(&opts, logger)
 	res, err := Run(ctx, backends, opts)
 	if err != nil {
@@ -113,11 +96,6 @@ func HandleClaimedTriggerLocal(ctx context.Context, triggerID, profileName strin
 	return nil
 }
 
-// openLocalTriggerStore returns a *store.Store for handle-trigger to
-// poll. With profileName empty it opens the default local sqlite at
-// paths.StateDB() (the historical behavior). With a profileName it
-// resolves that profile and opens its declared state surface, so the
-// child sees the same triggers row the parent enqueued.
 func openLocalTriggerStore(ctx context.Context, paths Paths, profileName string) (*store.Store, error) {
 	if profileName == "" {
 		st, err := store.Open(paths.StateDB())
@@ -133,11 +111,6 @@ func openLocalTriggerStore(ctx context.Context, paths Paths, profileName string)
 	return store, nil
 }
 
-// openProfileTriggerStore loads profiles.yaml, resolves profileName,
-// applies the profile's surfaces to a transient Options, and returns
-// the resulting state backend. Errors clearly when the profile's state
-// isn't a *store.Store (e.g. controller-backed) -- handle-trigger
-// --local can only adopt triggers from a local-store-backed profile.
 func openProfileTriggerStore(ctx context.Context, paths Paths, profileName string) (*store.Store, error) {
 	store, err := loadProfileStateBackend(ctx, paths, profileName)
 	if err != nil {
@@ -146,10 +119,6 @@ func openProfileTriggerStore(ctx context.Context, paths Paths, profileName strin
 	return store, nil
 }
 
-// loadProfileStateBackend resolves a profile name to a *store.Store via
-// the same plumbing the parent uses (ApplyProfileBackends). Returns a
-// clear error when the profile resolves to a non-local state backend
-// (controller, S3) since handle-trigger --local cannot adopt those.
 func loadProfileStateBackend(ctx context.Context, paths Paths, profileName string) (*store.Store, error) {
 	p, err := profile.LoadAndResolve(profileName)
 	if err != nil {

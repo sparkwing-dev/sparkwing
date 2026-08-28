@@ -30,9 +30,6 @@ func TestWithWingdHost_NamesThisCLIAsTheDaemonHost(t *testing.T) {
 	}
 }
 
-// An operator's own exported value must survive `sparkwing run`: the
-// variable is the documented way to point a run at a sparkwing that is
-// not this one, so overwriting it would silently ignore the instruction.
 func TestWithWingdHost_OperatorExportSurvives(t *testing.T) {
 	const operator = "/opt/custom/sparkwing"
 	t.Setenv(wingdclient.HostBinEnv, operator)
@@ -41,16 +38,12 @@ func TestWithWingdHost_OperatorExportSurvives(t *testing.T) {
 	if len(got) == 0 {
 		t.Fatalf("%s was dropped from the child env", wingdclient.HostBinEnv)
 	}
-	// The child reads the last assignment, so that is the one that must be
-	// the operator's -- a prepended override would still lose.
+
 	if last := got[len(got)-1]; last != operator {
 		t.Fatalf("child would see %s=%s, want the operator's %s", wingdclient.HostBinEnv, last, operator)
 	}
 }
 
-// The pre-exec readiness step costs a process to start a daemon and drains
-// a live one to replace it. Neither is a price an inspection command or a
-// dry run may charge.
 func TestRunNeedsDaemon(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -77,8 +70,6 @@ func TestRunNeedsDaemon(t *testing.T) {
 	}
 }
 
-// `--sw-dry-run` is parsed off the line before the gate sees it, so the
-// gate must be fed the parsed flags rather than the raw passthrough.
 func TestRunNeedsDaemon_ReadsTheParsedDryRunFlag(t *testing.T) {
 	wf, passthrough := parseRunFlags([]string{"--sw-dry-run", "--target", "prod"})
 	if !wf.dryRun {

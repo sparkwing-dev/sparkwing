@@ -7,9 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Cost-weighted admission: capacity is a budget summed over live
-// holders' costs, not a slot count. Capacity 8 with cost-4 members
-// admits two; the third waits until one drains.
 func TestConcurrency_CostWeightedAdmission(t *testing.T) {
 	s := newStoreT(t)
 	mk := func(run string) store.AcquireSlotRequest {
@@ -368,8 +365,6 @@ func TestConcurrency_CancelOthersSupersedesInheritedHolder(t *testing.T) {
 	}
 }
 
-// releaseAndPromoteT releases a holder and returns the waiters promoted
-// in the same transaction.
 func releaseAndPromoteT(t *testing.T, s *store.Store, key, holderID string) []store.ConcurrencyWaiter {
 	t.Helper()
 	_, _, promoted, err := s.ReleaseAndNotify(ctxT(t), key, holderID, "success", "", "", 0, 0)
@@ -379,8 +374,6 @@ func releaseAndPromoteT(t *testing.T, s *store.Store, key, holderID string) []st
 	return promoted
 }
 
-// With a capacity-1 budget, a full release lets the oldest waiter run and
-// leaves later waiters queued behind it.
 func TestConcurrency_CostHeavyWaiterHoldsFIFO(t *testing.T) {
 	s := newStoreT(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
@@ -404,9 +397,6 @@ func TestConcurrency_CostHeavyWaiterHoldsFIFO(t *testing.T) {
 	}
 }
 
-// A heavy head waiter that cannot fit in the currently available budget must
-// not idle that budget when later smaller waiters can run. The heavy waiter
-// stays queued and is promoted once enough budget frees.
 func TestConcurrency_CostBackfillsBehindNonFittingHeavyWaiter(t *testing.T) {
 	s := newStoreT(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{
@@ -545,10 +535,6 @@ func TestConcurrency_CostBackfillDeletesDeadEarlierWaiter(t *testing.T) {
 	}
 }
 
-// Most-restrictive-wins: when live participants declare different
-// capacities, the effective capacity is the minimum. A higher
-// declaration cannot overcommit while a lower one is live; it takes
-// effect only after the lower drains.
 func TestConcurrency_MostRestrictiveCapacityWins(t *testing.T) {
 	s := newStoreT(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{

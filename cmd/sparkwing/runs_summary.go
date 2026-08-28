@@ -1,5 +1,3 @@
-// Handler for `sparkwing runs summary`. Rendering lives in
-// orchestrator/runs_summary.go; this file is flag plumbing only.
 package main
 
 import (

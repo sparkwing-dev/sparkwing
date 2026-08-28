@@ -9,11 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// A node's error text can carry a value the run resolved as a secret.
-// The node log masks it; this process's stderr does not, and the
-// dispatcher relays stderr into the live delegate and the run's
-// envelope file. So the spawned node reports its failure by exit
-// status alone.
 func TestCoordinatedExitStatus_DoesNotRepeatTheNodesError(t *testing.T) {
 	const secret = "deploy-token-abc123"
 	err := coordinatedExitStatus("run-1", "deploy", runner.Result{

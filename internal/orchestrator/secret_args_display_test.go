@@ -47,8 +47,6 @@ func registerSecretArgsPipeline() {
 	})
 }
 
-// runWithSecretArg executes the fixture pipeline with one secret and
-// one ordinary arg, returning the paths and the run id.
 func runWithSecretArg(t *testing.T) (orchestrator.Paths, string) {
 	t.Helper()
 	registerSecretArgsPipeline()
@@ -63,8 +61,6 @@ func runWithSecretArg(t *testing.T) (orchestrator.Paths, string) {
 	return p, res.RunID
 }
 
-// assertRedacted fails when the plaintext secret appears anywhere in
-// out, and when the redaction marker is missing.
 func assertRedacted(t *testing.T, surface, out string) {
 	t.Helper()
 	if strings.Contains(out, secretArgValue) {
@@ -78,7 +74,6 @@ func assertRedacted(t *testing.T, surface, out string) {
 	}
 }
 
-// The three JSON read surfaces an operator or agent reaches for.
 func TestSecretArgs_RedactedInRunsListJSON(t *testing.T) {
 	p, runID := runWithSecretArg(t)
 	var buf bytes.Buffer
@@ -111,8 +106,6 @@ func TestSecretArgs_RedactedInRunsGetJSON(t *testing.T) {
 	assertRedacted(t, "runs get", buf.String())
 }
 
-// The plain-text status view never printed args, but it must not start
-// now, and it must not print the reproducer either.
 func TestSecretArgs_AbsentFromRunsStatusText(t *testing.T) {
 	p, runID := runWithSecretArg(t)
 	var buf bytes.Buffer
@@ -125,10 +118,6 @@ func TestSecretArgs_AbsentFromRunsStatusText(t *testing.T) {
 	}
 }
 
-// run_start.attrs is a second copy of the invocation that lands in the
-// on-disk envelope, streams live to the console, and is replayed by
-// `runs logs`. The masker cannot reach it (it rewrites rec.Msg only),
-// so the emit path redacts.
 func TestSecretArgs_RedactedInRunStartEnvelope(t *testing.T) {
 	p, runID := runWithSecretArg(t)
 	raw, err := os.ReadFile(p.EnvelopeLog(runID))
@@ -150,10 +139,6 @@ func TestSecretArgs_RedactedInRunStartEnvelope(t *testing.T) {
 	}
 }
 
-// The stored row must keep plaintext: the log masker seeds itself from
-// store.Run.Args, and retry / replay re-execute with them. Redacting at
-// rest here would silently disable masking inside node logs -- strictly
-// worse than the display leak this branch fixes.
 func TestSecretArgs_StoredRowKeepsPlaintextForReExecution(t *testing.T) {
 	p, runID := runWithSecretArg(t)
 	st, err := store.Open(p.StateDB())
@@ -177,18 +162,12 @@ func TestSecretArgs_StoredRowKeepsPlaintextForReExecution(t *testing.T) {
 	if got := run.SecretArgNames(); len(got) != 1 || got[0] != "token" {
 		t.Errorf("stored classification = %v, want [token]", got)
 	}
-	// And the classification actually drives redaction of that row.
+
 	if run.RedactedForDisplay().Args["token"] != store.RedactedArgValue {
 		t.Error("stored row does not redact through RedactedForDisplay")
 	}
 }
 
-// The decisive reason the fix is render-time and not storage-time:
-// `sparkwing run-node` and replay rebuild the run's log masker with
-// reg.SecretValues(run.Args) read straight off the stored row. Mask
-// that row at rest and the masker registers "***", matches nothing,
-// and the secret starts appearing in node log bodies -- strictly worse
-// than the display leak this branch closes.
 func TestSecretArgs_StoredRowStillSeedsTheLogMasker(t *testing.T) {
 	p, runID := runWithSecretArg(t)
 	st, err := store.Open(p.StateDB())
@@ -211,8 +190,6 @@ func TestSecretArgs_StoredRowStillSeedsTheLogMasker(t *testing.T) {
 	}
 }
 
-// A pipeline that declares no secret inputs writes no classification
-// key, so its runs render exactly as they did before this change.
 func TestSecretArgs_PipelineWithoutSecretsIsUnchanged(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,

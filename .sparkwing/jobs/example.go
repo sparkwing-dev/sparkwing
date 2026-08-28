@@ -10,40 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Example is the reference pipeline for this repo: a runnable tour
-// of every major SDK feature in one cohesive shape.
-//
-//	Plan layer
-//	  Job (single closure)               .................. configure, notify
-//	  Job (multi-step, typed output)     .................. build (Produces[BuildOut])
-//	  JobFanOut -> NodeGroup             .................. checks, publish-images
-//	  GroupJobs -> NodeGroup             .................. post-deploy-verify
-//	  JobApproval (auto-approve after 20s) ................ approve-deploy
-//	  modifiers: Retry · Timeout         .................. build, deploy
-//	  modifiers: Inline                  .................. configure, notify, audit-*, docs-snapshot, *-publish, *-report
-//	  modifiers: BeforeRun · AfterRun    .................. configure, notify
-//	  modifiers: OnFailure               .................. deploy -> deploy-rollback
-//	  Ref[T] / RefTo[T] typed values     .................. build -> publish, deploy
-//	  RunAndAwait (cross-pipeline)       .................. weather-check
-//	  Optional + ParallelFailures(CollectAll) ............. error-canary
-//
-//	Work layer (inside build)
-//	  Step (untyped + typed)             .................. fetch-*, compile, package
-//	  GroupSteps -> StepGroup            .................. ci (lint | vet | test)
-//	  Needs (sequential + parallel)      .................. throughout
-//	  StepGet[T] mid-Work read           .................. strip, package read compile
-//
-//	Work layer (inside deploy)
-//	  WorkStep.SkipIf                    .................. rollout (DRY_RUN=1)
-//	  Ref[T].Get(ctx) from a step        .................. render reads buildRef
-//
-//	Cross-cutting
-//	  Annotate (node-level summaries)    .................. every step
-//	  Summary (markdown step summary)    .................. build/package, deploy/rollout, smoke-test, metrics-check
-//
-// Each step sleeps briefly so every node and step renders as its own
-// bar in the dashboard waterfall. The 20s approval gate dominates the
-// wall clock, so a full tour runs for about a minute.
 type Example struct{ sparkwing.Base }
 
 func (Example) ShortHelp() string {
@@ -62,8 +28,6 @@ func (Example) Examples() []sparkwing.Example {
 	}
 }
 
-// BuildOut is the typed value the build node produces. publish and
-// deploy read it via sparkwing.Ref[BuildOut].
 type BuildOut struct {
 	Tag    string `json:"tag"`
 	Digest string `json:"digest"`
@@ -207,12 +171,6 @@ func rollbackFn(ctx context.Context) error {
 	return nap(ctx, 200)
 }
 
-// ExampleErrorCanary is the multi-step error fixture. Four parallel
-// shard steps each emit ~60 chatty progress lines (with graduated
-// WARN / ERROR-level entries near the end) and then return a
-// distinct failure mode. The Work collects every sibling failure, and
-// the surrounding Plan-layer Node is .Optional() so the run still
-// reports success while every per-step failure stays visible.
 type ExampleErrorCanary struct{ sparkwing.Base }
 
 func (j *ExampleErrorCanary) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -228,12 +186,6 @@ func (j *ExampleErrorCanary) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 	return nil, nil
 }
 
-// canaryShard returns a single-closure Job body that emits `items`
-// chatty progress lines -- the last ~15 of which are graduated
-// warnings + errors via sparkwing.Warn/Error so the log stream has
-// real warn/error-level entries to scroll back through, not just a
-// silent return at the end. Then annotates and returns the supplied
-// failure so the run records the structured outcome too.
 func canaryShard(label string, items, durMS int, fail string) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		tick := time.Duration(durMS) * time.Millisecond / time.Duration(items)
@@ -266,12 +218,6 @@ func canaryShard(label string, items, durMS int, fail string) func(ctx context.C
 	}
 }
 
-// weatherCheckFn triggers the `weather-report` pipeline via
-// sparkwing.RunAndAwait, decodes its typed WeatherOut, and annotates
-// the node with the result. Exercises the cross-pipeline dependency
-// surface end-to-end -- the awaiter enqueues a child trigger, the
-// orchestrator dispatches it on the same dispatcher, and the typed
-// output is JSON-decoded into the caller's frame.
 func weatherCheckFn(ctx context.Context) error {
 	sparkwing.Info(ctx, "calling weather-report pipeline via RunAndAwait")
 	out, err := sparkwing.RunAndAwait[WeatherOut, sparkwing.NoInputs](
@@ -286,9 +232,6 @@ func weatherCheckFn(ctx context.Context) error {
 	return nil
 }
 
-// offshootFn returns a closure that emits `lines` log lines spread
-// over 600ms, then annotates the node with a one-line summary.
-// Used for the taller-DAG off-shoot branches hanging off configure.
 func offshootFn(id string, lines int) func(ctx context.Context) error {
 	return func(ctx context.Context) error {
 		msgs := make([]string, lines)
@@ -544,10 +487,6 @@ func (j *ExampleDeploy) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}), nil
 }
 
-// chattyStep is the boilerplate for a sleep+log step that emits a
-// list of progress lines over its total duration and annotates the
-// node with a one-line summary. Used for leaf steps that don't need
-// typed output or StepGet plumbing.
 func chattyStep(w *sparkwing.Work, id string, totalMs int, summary string, lines []string) *sparkwing.WorkStep {
 	return sparkwing.Step(w, id, func(ctx context.Context) error {
 		if err := chatter(ctx, totalMs, lines); err != nil {
@@ -558,9 +497,6 @@ func chattyStep(w *sparkwing.Work, id string, totalMs int, summary string, lines
 	})
 }
 
-// chatter emits one log line per "tick" with ticks evenly spread
-// across totalMs. Empty lines list collapses to a single sleep.
-// Cancels cleanly via ctx.
 func chatter(ctx context.Context, totalMs int, lines []string) error {
 	if len(lines) == 0 {
 		return nap(ctx, totalMs)

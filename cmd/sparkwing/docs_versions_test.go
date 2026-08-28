@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-// TestRunDocsVersions_EmbeddedOnly verifies the no-flag path is
-// hermetic: it never touches the network, and the table includes the
-// embedded migration versions.
 func TestRunDocsVersions_EmbeddedOnly(t *testing.T) {
 	out := captureStdout(t, func() {
 		if err := runDocsVersions([]string{"-o", "json"}); err != nil {

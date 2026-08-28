@@ -47,11 +47,9 @@ func (n *JobNode) OutputGlobs() []string {
 // ConsumeOption tunes a [JobNode.Consumes] declaration.
 type ConsumeOption func(*consumeEdge)
 
-// consumeEdge records one consumer->producer artifact edge plus its
-// staging options. Stored in declaration order on the consumer node.
 type consumeEdge struct {
-	producer string // producer node id whose artifacts are staged
-	into     string // staging prefix; empty stages at the producer's declared paths
+	producer string
+	into     string
 }
 
 // Into stages the consumed producer's artifacts under prefix, with the
@@ -121,11 +119,6 @@ func (n *JobNode) ConsumeEdges() []ConsumeEdge {
 	return out
 }
 
-// validateArtifactEdges checks the plan's declared artifact edges after
-// Plan() has fully built it. It returns an error when a node consumes a
-// producer that declared no Outputs, and accumulates a [LintWarning]
-// for each pair of consumed producers whose staged paths overlap in one
-// consumer's workspace (last stage would win at run time).
 func (p *Plan) validateArtifactEdges() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -151,13 +144,6 @@ func (p *Plan) validateArtifactEdges() error {
 	return nil
 }
 
-// artifactOverlapWarnings reports, for one consumer node, each pair of
-// consumed producers whose staged paths overlap. Two producers overlap
-// when a staging root of one equals or contains a staging root of the
-// other, after applying any Into prefix. Globs are compared by their
-// literal directory prefix (the segments before the first wildcard),
-// which is conservative: sharded outputs under distinct names do not
-// collide, while a shared destination directory does.
 func artifactOverlapWarnings(n *JobNode, byID map[string]*JobNode) []LintWarning {
 	var out []LintWarning
 	for i := 0; i < len(n.consumes); i++ {
@@ -182,10 +168,6 @@ func artifactOverlapWarnings(n *JobNode, byID map[string]*JobNode) []LintWarning
 	return out
 }
 
-// stagingRoots returns the literal destination directories a producer's
-// output globs stage to under the given Into prefix. Each glob
-// contributes its literal leading path (segments before the first
-// wildcard) joined with the prefix.
 func stagingRoots(globs []string, into string) []string {
 	out := make([]string, 0, len(globs))
 	for _, g := range globs {
@@ -200,10 +182,6 @@ func stagingRoots(globs []string, into string) []string {
 	return out
 }
 
-// globLiteralPrefix returns the leading path segments of a glob up to
-// the first segment containing a wildcard metacharacter. "dist/**" ->
-// "dist"; "coverage/shard-1.json" -> "coverage/shard-1.json"; "*.json"
-// -> "".
 func globLiteralPrefix(glob string) string {
 	var lit []string
 	for _, seg := range strings.Split(glob, "/") {
@@ -215,8 +193,6 @@ func globLiteralPrefix(glob string) string {
 	return strings.Join(lit, "/")
 }
 
-// firstOverlap returns the first staging root shared (by equality or
-// containment) between two producers' root sets.
 func firstOverlap(a, b []string) (string, bool) {
 	for _, ra := range a {
 		for _, rb := range b {
@@ -231,9 +207,6 @@ func firstOverlap(a, b []string) (string, bool) {
 	return "", false
 }
 
-// pathContains reports whether two staging roots collide: equal, or one
-// is an ancestor directory of the other. The empty root is the
-// workspace root and contains everything.
 func pathContains(a, b string) bool {
 	a, b = path.Clean("/"+a), path.Clean("/"+b)
 	if a == b || a == "/" || b == "/" {

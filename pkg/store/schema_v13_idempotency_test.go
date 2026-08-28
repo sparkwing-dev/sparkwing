@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestSchemaV13_UpgradeAddsIdempotencyKeyAndItsConstraint proves the
-// migration gives an existing database both halves of dedup. The column
-// alone would let two submissions of one key both insert, so the
-// constraint is checked here rather than assumed from the fresh schema.
 func TestSchemaV13_UpgradeAddsIdempotencyKeyAndItsConstraint(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schema12.db")
 	st, err := store.Open(path)
@@ -60,10 +56,6 @@ func TestSchemaV13_UpgradeAddsIdempotencyKeyAndItsConstraint(t *testing.T) {
 	}
 }
 
-// TestCreateTrigger_EmptyIdempotencyKeyNeverCollides pins that the
-// partial index exempts the default. Every trigger the webhook, spawn,
-// and retry paths create carries the empty key; if those collided the
-// whole product would stop after one trigger.
 func TestCreateTrigger_EmptyIdempotencyKeyNeverCollides(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -76,9 +68,6 @@ func TestCreateTrigger_EmptyIdempotencyKeyNeverCollides(t *testing.T) {
 	}
 }
 
-// TestFindTriggerByIdempotencyKey_EmptyKeyIsNotAMatch guards the same
-// exemption on the read side: an empty key must never resolve to some
-// arbitrary keyless trigger.
 func TestFindTriggerByIdempotencyKey_EmptyKeyIsNotAMatch(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -92,10 +81,6 @@ func TestFindTriggerByIdempotencyKey_EmptyKeyIsNotAMatch(t *testing.T) {
 	}
 }
 
-// TestCreateTrigger_ConcurrentSubmissionsOfOneKeyProduceOneRun is the
-// duplicate-submission proof at the level that decides it. A
-// read-then-write submitter would let two racing callers both see "no
-// such key" and both insert; only the constraint makes exactly one win.
 func TestCreateTrigger_ConcurrentSubmissionsOfOneKeyProduceOneRun(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -146,9 +131,6 @@ func TestCreateTrigger_ConcurrentSubmissionsOfOneKeyProduceOneRun(t *testing.T) 
 	}
 }
 
-// TestCancelPendingTrigger_TerminatesTheQueuedRun covers cancelling a
-// submitted run that no consumer has picked up: both rows must move, or
-// the run reads as cancelled in one view and queued in another.
 func TestCancelPendingTrigger_TerminatesTheQueuedRun(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -181,10 +163,6 @@ func TestCancelPendingTrigger_TerminatesTheQueuedRun(t *testing.T) {
 	}
 }
 
-// TestCancelPendingTrigger_DoesNotStealAClaimedTrigger pins the guard
-// that keeps cancellation from racing a consumer. Once a claim lands the
-// pending path must decline, so the caller escalates to cancelling the
-// running run instead of silently doing nothing.
 func TestCancelPendingTrigger_DoesNotStealAClaimedTrigger(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -209,10 +187,6 @@ func TestCancelPendingTrigger_DoesNotStealAClaimedTrigger(t *testing.T) {
 	}
 }
 
-// TestCancelPendingTrigger_CannotReachAReplacementRun is the
-// exact-target requirement. Cancelling a run must never touch the run
-// that replaced it, which is the failure mode an id-reusing design would
-// have: here the replacement carries a distinct id and survives intact.
 func TestCancelPendingTrigger_CannotReachAReplacementRun(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -239,9 +213,6 @@ func TestCancelPendingTrigger_CannotReachAReplacementRun(t *testing.T) {
 	}
 }
 
-// TestCancelPendingTrigger_UnknownRunIsANoOpNotAnError lets the CLI try
-// the queued path first for every id without turning cluster runs and
-// finished runs into errors.
 func TestCancelPendingTrigger_UnknownRunIsANoOpNotAnError(t *testing.T) {
 	s := newStoreT(t)
 	cancelled, err := s.CancelPendingTrigger(context.Background(), "run-never-existed")
@@ -253,8 +224,6 @@ func TestCancelPendingTrigger_UnknownRunIsANoOpNotAnError(t *testing.T) {
 	}
 }
 
-// TestCountPendingTriggers_TracksTheClaimableQueue backs the consumer's
-// idle-exit decision; a wrong count there strands acknowledged work.
 func TestCountPendingTriggers_TracksTheClaimableQueue(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -274,8 +243,6 @@ func TestCountPendingTriggers_TracksTheClaimableQueue(t *testing.T) {
 	}
 }
 
-// seedSubmittedRun writes the trigger + pending run pair `runs submit`
-// creates, so the store tests exercise the same row shape.
 func seedSubmittedRun(t *testing.T, s *store.Store, id, pipeline string) {
 	t.Helper()
 	ctx := context.Background()
@@ -293,11 +260,6 @@ func seedSubmittedRun(t *testing.T, s *store.Store, id, pipeline string) {
 	}
 }
 
-// TestSchemaV13_StampsVersionAndCreatesTheNamedIndex checks the schema
-// by name rather than by inference. A test that only observes "the
-// second insert failed" would still pass if the constraint were the
-// wrong shape -- scoped to the wrong columns, or created on a different
-// table -- so the version and the index are asserted directly.
 func TestSchemaV13_StampsVersionAndCreatesTheNamedIndex(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -324,9 +286,6 @@ func TestSchemaV13_StampsVersionAndCreatesTheNamedIndex(t *testing.T) {
 	}
 }
 
-// TestSchemaV13_PostgresCarriesTheSameConstraint runs the same check on
-// Postgres, where the partial unique index is the identical DDL but the
-// catalog it lands in is not.
 func TestSchemaV13_PostgresCarriesTheSameConstraint(t *testing.T) {
 	s := openPGTestStore(t)
 	ctx := context.Background()
@@ -338,12 +297,7 @@ func TestSchemaV13_PostgresCarriesTheSameConstraint(t *testing.T) {
 	if got != store.ExpectedSchemaVersion() {
 		t.Fatalf("postgres schema version = %d, want %d", got, store.ExpectedSchemaVersion())
 	}
-	// Scoped to this test's schema. pg_indexes spans the whole database,
-	// and these tests isolate by creating a schema per test against a
-	// shared database -- so an unqualified lookup counts every sibling
-	// schema's copy of the index and fails on any database where more
-	// than one has been created, including the admin open this harness
-	// performs before the per-test schema exists.
+
 	var indexDef string
 	if err := s.DB().QueryRowContext(ctx,
 		`SELECT indexdef FROM pg_indexes
@@ -352,9 +306,7 @@ func TestSchemaV13_PostgresCarriesTheSameConstraint(t *testing.T) {
 		t.Fatalf("index %s absent from this schema's pg_indexes: %v",
 			store.TriggerIdempotencyIndexName, err)
 	}
-	// Pin the shape, not merely the name, the way the SQLite assertion
-	// does: an index on the wrong columns would still be present under
-	// the right name.
+
 	for _, want := range []string{"UNIQUE", "triggers", "pipeline, idempotency_key", "WHERE"} {
 		if !strings.Contains(indexDef, want) {
 			t.Errorf("postgres index definition missing %q: %s", want, indexDef)
@@ -372,7 +324,7 @@ func TestSchemaV13_PostgresCarriesTheSameConstraint(t *testing.T) {
 	}); !errors.Is(err, store.ErrDuplicateIdempotencyKey) {
 		t.Fatalf("postgres duplicate insert: err=%v, want ErrDuplicateIdempotencyKey", err)
 	}
-	// The scope is the pipeline, on this dialect too.
+
 	if err := s.CreateTrigger(ctx, store.Trigger{
 		ID: "pg-other", Pipeline: "other", CreatedAt: now, IdempotencyKey: "k",
 	}); err != nil {
@@ -380,10 +332,6 @@ func TestSchemaV13_PostgresCarriesTheSameConstraint(t *testing.T) {
 	}
 }
 
-// TestIdempotencyKeysAreScopedToTheirPipeline is the fix for a key
-// namespace that was global. Submitting `beta` with a key `alpha`
-// already used returned ALPHA's run with a success exit, so beta never
-// ran and the caller was told everything was fine.
 func TestIdempotencyKeysAreScopedToTheirPipeline(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -414,7 +362,7 @@ func TestIdempotencyKeysAreScopedToTheirPipeline(t *testing.T) {
 	if beta.ID != "run-beta" {
 		t.Fatalf("beta's key resolved to %q, want its own run", beta.ID)
 	}
-	// Same pipeline, same key: still one run.
+
 	if err := s.CreateTrigger(ctx, store.Trigger{
 		ID: "run-alpha-2", Pipeline: "alpha", CreatedAt: now, IdempotencyKey: "nightly",
 	}); !errors.Is(err, store.ErrDuplicateIdempotencyKey) {
@@ -440,8 +388,6 @@ func expireTriggerClaim(t *testing.T, s *store.Store, id string) {
 	}
 }
 
-// TestClaimGeneration_AdvancesOnEveryClaim underpins the fence that
-// stops a superseded dispatch from writing.
 func TestClaimGeneration_AdvancesOnEveryClaim(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -467,10 +413,6 @@ func TestClaimGeneration_AdvancesOnEveryClaim(t *testing.T) {
 	}
 }
 
-// TestFinishAtGeneration_RefusesASupersededDispatch is the fence itself.
-// Without it, a dispatch whose claim lapsed and was re-taken could still
-// finish and stamp its own outcome over the run the new claim is
-// producing -- two writers on one run row, last write wins.
 func TestFinishAtGeneration_RefusesASupersededDispatch(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -511,18 +453,12 @@ func TestFinishAtGeneration_RefusesASupersededDispatch(t *testing.T) {
 		t.Fatalf("run status = %q; the stale writer changed it", run.Status)
 	}
 
-	// The current claim still writes normally.
 	ok, err = s.FinishRunAtGeneration(ctx, "run-fence", fresh.ClaimSeq, "success", "")
 	if err != nil || !ok {
 		t.Fatalf("current claim could not write its outcome: ok=%v err=%v", ok, err)
 	}
 }
 
-// TestRequeueUnstartedClaim_LeavesARunningRunAlone is the blocker fix at
-// the store: a lapsed lease is not evidence that a started run is dead,
-// because the lease is wall-clock and the heartbeat defending it is
-// monotonic. Requeueing a `running` row puts a second copy of live work
-// on the queue.
 func TestRequeueUnstartedClaim_LeavesARunningRunAlone(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -548,8 +484,6 @@ func TestRequeueUnstartedClaim_LeavesARunningRunAlone(t *testing.T) {
 	}
 }
 
-// TestRequeueUnstartedClaim_RecoversARunThatNeverStarted is the other
-// half: work whose consumer died before the run began must come back.
 func TestRequeueUnstartedClaim_RecoversARunThatNeverStarted(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()

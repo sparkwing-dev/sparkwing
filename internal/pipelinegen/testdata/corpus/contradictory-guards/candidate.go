@@ -20,8 +20,6 @@ func (GenContradictoryGuards) Examples() []sw.Example {
 	}
 }
 
-// Plan is deliberately idiomatic: the anti-pattern under test is in the
-// guards: block this spec writes into sparkwing.yaml, not in the source.
 func (GenContradictoryGuards) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	build := sw.Job(plan, "build", genGuardStep)
 	sw.Job(plan, "deploy", genGuardStep).Needs(build)

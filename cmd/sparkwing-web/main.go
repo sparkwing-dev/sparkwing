@@ -1,6 +1,3 @@
-// Command sparkwing-web is the dashboard pod's entry point: an HTTP
-// server that serves the embedded Next.js bundle and proxies /api/*
-// to the controller and logs-service.
 package main
 
 import (
@@ -145,9 +142,6 @@ func resolveAuthControllerURL(explicit, profileURL string) string {
 	return profileURL
 }
 
-// openFromConfig resolves the profile + inline-spec precedence and opens
-// the Backend the dashboard should serve from. Inline specs win over the
-// profile's surfaces.
 func openFromConfig(
 	ctx context.Context,
 	paths swpaths.Paths,
@@ -207,11 +201,6 @@ func openFromConfig(
 	return b, closer, profileControllerURL, err
 }
 
-// profileWebSpecs derives the dashboard's state/logs/cache specs from a
-// resolved profile: explicit surfaces as declared, or -- for a
-// controller-only profile -- every surface routed through the
-// controller. A bare/laptop profile yields nil specs (the caller then
-// requires an inline --state-spec).
 func profileWebSpecs(p *profile.Profile) (state, logs, cache *backends.Spec) {
 	surf := p.Surfaces()
 	if surf.State == nil && surf.Logs == nil && surf.Cache == nil && p.ControllerURL() != "" {

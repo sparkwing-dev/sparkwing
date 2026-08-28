@@ -14,8 +14,6 @@ type deployArgs struct {
 	Env     string
 }
 
-// sw.Inputs[T](ctx) round-trips the typed value the orchestrator
-// (or a test) installs via sw.WithInputs.
 func TestInputs_RoundTrip(t *testing.T) {
 	want := deployArgs{Service: "api", Env: "prod"}
 	ctx := sparkwingruntime.WithInputs(context.Background(), want)
@@ -25,10 +23,6 @@ func TestInputs_RoundTrip(t *testing.T) {
 	}
 }
 
-// Calling Inputs[T] without an installer panics with a message
-// naming the expected type and pointing at the orchestrator
-// boundary -- matches how Secret / Config behave when called outside
-// a dispatch ctx.
 func TestInputs_PanicsWithoutInstaller(t *testing.T) {
 	defer func() {
 		r := recover()
@@ -43,8 +37,6 @@ func TestInputs_PanicsWithoutInstaller(t *testing.T) {
 	_ = sparkwing.Inputs[deployArgs](context.Background())
 }
 
-// Asking for the wrong concrete type is a programmer mistake;
-// panic loud rather than zero-value silently.
 func TestInputs_PanicsOnTypeMismatch(t *testing.T) {
 	type otherArgs struct {
 		Region string
@@ -63,9 +55,6 @@ func TestInputs_PanicsOnTypeMismatch(t *testing.T) {
 	_ = sparkwing.Inputs[otherArgs](ctx)
 }
 
-// Plan.Inputs returns the value the registration parsed; same value
-// the orchestrator hands to WithInputs at dispatch time. This pins
-// the wiring contract without spinning up an orchestrator run.
 func TestPlanInputs_RoundTrip(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	if got := plan.Inputs(); got != nil {

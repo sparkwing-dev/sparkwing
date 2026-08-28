@@ -10,10 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestJob_ClosureFormSingleStepWork verifies that sparkwing.Job
-// accepts a func(ctx) error closure directly and wraps it as a Job
-// whose Work has exactly one Step (id "run") and no typed result.
-// This replaces the older sparkwing.JobFn explicit-wrapper path.
 func TestJob_ClosureFormSingleStepWork(t *testing.T) {
 	called := false
 	plan := sparkwing.NewPlan()
@@ -43,8 +39,6 @@ type fooOut struct {
 	Tag string
 }
 
-// TestPlanJob_MaterializesWork verifies that sw.Job calls Work()
-// at registration time so the inner DAG is reachable before dispatch.
 type countingJob struct {
 	calls int
 }
@@ -67,7 +61,6 @@ func TestPlanJob_MaterializesWorkAtRegistration(t *testing.T) {
 	}
 }
 
-// TestPlanJob_PanicsOnNilJobAndDuplicate locks down the input contract.
 func TestPlanJob_PanicsOnNilJob(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	defer func() {
@@ -89,7 +82,6 @@ func TestPlanJob_PanicsOnDuplicateID(t *testing.T) {
 	sparkwing.Job(plan, "a", func(ctx context.Context) error { return nil })
 }
 
-// TestWork_StepDuplicateIDPanics locks down the inner contract.
 func TestWork_StepDuplicateIDPanics(t *testing.T) {
 	w := sparkwing.NewWork()
 	sparkwing.Step(w, "only", func(ctx context.Context) error { return nil })
@@ -101,7 +93,6 @@ func TestWork_StepDuplicateIDPanics(t *testing.T) {
 	sparkwing.Step(w, "only", func(ctx context.Context) error { return nil })
 }
 
-// TestWork_StepNeeds wires step deps and reads them back.
 func TestWork_StepNeeds(t *testing.T) {
 	w := sparkwing.NewWork()
 	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
@@ -116,10 +107,6 @@ func TestWork_StepNeeds(t *testing.T) {
 	}
 }
 
-// TestWork_NeedsChainAndGroupSteps verifies the DAG shape:
-// sequential deps via direct .Needs chains and fan-in via
-// sparkwing.GroupSteps. Sequence/Parallel sugar verbs were dropped;
-// this exercises the canonical primitive.
 func TestWork_NeedsChainAndGroupSteps(t *testing.T) {
 	w := sparkwing.NewWork()
 	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
@@ -144,9 +131,6 @@ func TestWork_NeedsChainAndGroupSteps(t *testing.T) {
 	}
 }
 
-// TestGroupSteps_NeedsAndSkipIfDelegate verifies the *StepGroup
-// modifier surface mirrors *WorkStep -- Needs and SkipIf delegate to
-// every member.
 func TestGroupSteps_NeedsAndSkipIfDelegate(t *testing.T) {
 	w := sparkwing.NewWork()
 	setup := sparkwing.Step(w, "setup", func(ctx context.Context) error { return nil })
@@ -167,8 +151,6 @@ func TestGroupSteps_NeedsAndSkipIfDelegate(t *testing.T) {
 	}
 }
 
-// TestStep_TypedStep_ResolveAfterMarkDone verifies the typed Step /
-// StepGet roundtrip blocks until the producing step posts its output.
 func TestStep_TypedStep_ResolveAfterMarkDone(t *testing.T) {
 	w := sparkwing.NewWork()
 	want := fooOut{Tag: "shipped"}
@@ -190,8 +172,6 @@ func TestStep_TypedStep_ResolveAfterMarkDone(t *testing.T) {
 	}
 }
 
-// TestStepGet_PanicsOnUntypedStep ensures StepGet enforces the
-// step's typed-output contract at call time.
 func TestStepGet_PanicsOnUntypedStep(t *testing.T) {
 	w := sparkwing.NewWork()
 	s := sparkwing.Step(w, "plain", func(ctx context.Context) error { return nil })
@@ -209,8 +189,6 @@ func TestStepGet_PanicsOnUntypedStep(t *testing.T) {
 	_ = sparkwing.StepGet[fooOut](context.Background(), s)
 }
 
-// TestStepGet_PanicsOnTypeMismatch ensures StepGet rejects a T that
-// doesn't match the producing step's outType.
 func TestStepGet_PanicsOnTypeMismatch(t *testing.T) {
 	w := sparkwing.NewWork()
 	s := sparkwing.Step(w, "produce", func(ctx context.Context) (fooOut, error) {
@@ -231,8 +209,6 @@ func TestStepGet_PanicsOnTypeMismatch(t *testing.T) {
 	_ = sparkwing.StepGet[string](context.Background(), s)
 }
 
-// TestStep_RejectsBadFnSignatures locks down the reflection contract:
-// fn must be func(ctx) error or func(ctx) (T, error).
 func TestStep_RejectsBadFnSignatures(t *testing.T) {
 	cases := []struct {
 		name string
@@ -267,10 +243,6 @@ func TestStep_RejectsBadFnSignatures(t *testing.T) {
 	}
 }
 
-// TestSpawnNode_DeclaredAtPlanTime verifies that a SpawnNode shows up
-// in the Work's Spawns() list so the Plan-time materializer has the
-// full reachable graph before dispatch (orchestrator wiring lands in
-// PR2).
 func TestSpawnNode_DeclaredAtPlanTime(t *testing.T) {
 	w := sparkwing.NewWork()
 	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })
@@ -288,7 +260,6 @@ func TestSpawnNode_DeclaredAtPlanTime(t *testing.T) {
 	}
 }
 
-// TestSpawnNode_PanicsOnEmptyOrNil is a contract guard.
 func TestSpawnNode_PanicsOnEmptyID(t *testing.T) {
 	w := sparkwing.NewWork()
 	defer func() {
@@ -299,10 +270,6 @@ func TestSpawnNode_PanicsOnEmptyID(t *testing.T) {
 	sparkwing.JobSpawn(w, "", func(ctx context.Context) error { return nil })
 }
 
-// TestNodeForEach_RegistersExpansion verifies the new generator wires
-// into the Plan's Expansion list and reads the source's typed output
-// at dispatch time. This test does not run the orchestrator; it only
-// exercises the Plan-time wiring.
 type discoverJob struct {
 	sparkwing.Produces[[]string]
 	items []string
@@ -362,8 +329,6 @@ func TestJobFanOutDynamic_RegistersExpansion(t *testing.T) {
 	}
 }
 
-// TestStepSkipIf_AccumulatesPredicates exercises the inner SkipIf
-// surface and OR semantics expectation.
 func TestStepSkipIf_AccumulatesPredicates(t *testing.T) {
 	w := sparkwing.NewWork()
 	s := sparkwing.Step(w, "x", func(ctx context.Context) error { return nil }).
@@ -378,8 +343,6 @@ func TestStepSkipIf_AccumulatesPredicates(t *testing.T) {
 	}
 }
 
-// Smoke: an error-returning step propagates the error through the
-// step's underlying fn shape.
 func TestWork_StepFnReturnsError(t *testing.T) {
 	myErr := errors.New("boom")
 	w := sparkwing.NewWork()
@@ -458,8 +421,6 @@ func TestSpawnNodeForEach_AcceptsCorrectShape(t *testing.T) {
 	}
 }
 
-// expectSpawnEachPanic runs body and asserts the panic value
-// stringifies to something containing want.
 func expectSpawnEachPanic(t *testing.T, want string, body func()) {
 	t.Helper()
 	defer func() {

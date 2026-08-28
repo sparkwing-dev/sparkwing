@@ -21,10 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// repoInfo is the read-only deep dive of a single fleet member: its SDK pin
-// and how far behind it is, its worktrees, working-tree state, whether its pin
-// can open the machine's state database, and its pipelines with last-run
-// status. It is the JSON shape and the source for the pretty view.
 type repoInfo struct {
 	Name         string         `json:"name"`
 	Primary      string         `json:"primary,omitempty"`
@@ -105,9 +101,6 @@ func runReposInfo(args []string) error {
 	return nil
 }
 
-// selectRepo resolves which fleet member to describe: the one named by --repo,
-// or -- when no selector is given -- the repo whose primary checkout contains
-// the current directory.
 func selectRepo(fleet []repos.Repo, sel string) (repos.Repo, error) {
 	if sel != "" {
 		scoped := scopeFleet(fleet, sel)
@@ -175,11 +168,6 @@ func buildRepoInfo(ctx context.Context, repo repos.Repo, latest string) repoInfo
 	return info
 }
 
-// schemaCompat reports whether this repo's pin can open the machine's state
-// database. The database records the minimum binary version it will admit; a
-// repo pinned below that has pipelines that would be refused before a run
-// starts. A replaced SDK or a database with no stamp cannot be judged and is
-// reported as such rather than guessed.
 func schemaCompat(ctx context.Context, repo repos.Repo) repoSchema {
 	sc := repoSchema{PinOpensDB: true}
 	paths, err := orchestrator.DefaultPaths()
@@ -201,10 +189,6 @@ func schemaCompat(ctx context.Context, repo repos.Repo) repoSchema {
 	return sc
 }
 
-// schemaVerdict decides whether a repo's SDK pin can open a state database that
-// requires minVersion, and explains the call. A replaced SDK, an unresolved
-// pin, an unstamped database, or an uncomparable version cannot be judged
-// against, so they default to "opens it" with a note rather than a false alarm.
 func schemaVerdict(pin, replace, minVersion string) (opensDB bool, note string) {
 	switch {
 	case replace != "":
@@ -222,10 +206,6 @@ func schemaVerdict(pin, replace, minVersion string) (opensDB bool, note string) 
 	}
 }
 
-// pipelineStates lists the repo's pipelines with their most recent run time
-// and status. Declared names come from the already-built pipeline binary when
-// one is cached (never triggering a build); run history fills in last-run and
-// surfaces any pipeline that ran but is no longer declared.
 func pipelineStates(ctx context.Context, repo repos.Repo) []repoPipeline {
 	byName := map[string]*repoPipeline{}
 	var order []string
@@ -271,10 +251,6 @@ func pipelineStates(ctx context.Context, repo repos.Repo) []repoPipeline {
 	return out
 }
 
-// repoSuggestion surfaces the single most pressing next step when the repo is
-// off, or "" when nothing needs doing. A pin that cannot open the shared
-// database is the most urgent because a run fails outright; a stale pin and an
-// uncommitted tree follow.
 func repoSuggestion(info repoInfo) string {
 	if !info.Schema.PinOpensDB && info.Schema.MinVersion != "" && info.Replace == "" {
 		return fmt.Sprintf("pin cannot open the machine state DB (needs >= %s): sparkwing repos update --version %s --apply",

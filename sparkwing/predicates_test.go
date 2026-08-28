@@ -4,8 +4,6 @@ import (
 	"testing"
 )
 
-// fakePredCtx is a minimal in-memory PredicateContext for the tests
-// in this file. Production resolution uses the real chain's context.
 type fakePredCtx struct {
 	args    map[string]any
 	profile string

@@ -1,9 +1,3 @@
-// Handlers for the `sparkwing runs annotations` verbs: list + add.
-//
-// Annotations are persistent summary strings the SDK (sparkwing.Annotate)
-// or external agents append to a node (or step) during a run. They show
-// up on the dashboard alongside outcome and are surfaced here so agents
-// can read or write them via the CLI without poking at the store.
 package main
 
 import (
@@ -23,9 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// annotationEntry is the wire shape emitted by `runs annotations list`.
-// One entry per appended string; step is empty when the annotation
-// lives on the node itself rather than an inner step.
 type annotationEntry struct {
 	RunID   string `json:"run_id"`
 	NodeID  string `json:"node_id"`
@@ -33,7 +24,6 @@ type annotationEntry struct {
 	Message string `json:"message"`
 }
 
-// runRunsAnnotations routes the `sparkwing runs annotations` subverb.
 func runRunsAnnotations(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	if handleParentHelp(cmdAnnotations, args) {
 		return nil
@@ -53,7 +43,6 @@ func runRunsAnnotations(ctx context.Context, paths orchestrator.Paths, args []st
 	}
 }
 
-// runAnnotationsList implements `sparkwing runs annotations list`.
 func runAnnotationsList(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdAnnotationsList.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier (required)")
@@ -217,13 +206,10 @@ func renderAnnotationsTable(w io.Writer, entries []annotationEntry) error {
 	return tw.Flush()
 }
 
-// writeAnnotationsJSON streams the listing as NDJSON: one annotation
-// per line, so `head` returns whole annotations.
 func writeAnnotationsJSON(w io.Writer, entries []annotationEntry) error {
 	return ndjson.Write(w, entries)
 }
 
-// runAnnotationsAdd implements `sparkwing runs annotations add`.
 func runAnnotationsAdd(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdAnnotationsAdd.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier (required)")

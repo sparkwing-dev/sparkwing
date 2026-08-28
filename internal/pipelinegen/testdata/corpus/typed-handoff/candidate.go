@@ -18,8 +18,6 @@ func (GenTypedHandoff) Examples() []sw.Example {
 	}
 }
 
-// handoffImage is the typed value the build job publishes and the
-// deploy job consumes.
 type handoffImage struct {
 	Tag    string
 	Digest string

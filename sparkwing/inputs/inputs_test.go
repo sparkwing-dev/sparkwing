@@ -143,7 +143,6 @@ func TestIncludeMatcherKeepsMatched(t *testing.T) {
 	}
 }
 
-// Sanity that globToRegex anchors fully (rejects substring matches).
 func TestGlobToRegexAnchored(t *testing.T) {
 	re := globToRegex("docs/api.md")
 	if re.MatchString("a-docs/api.md-suffix") {
@@ -154,8 +153,6 @@ func TestGlobToRegexAnchored(t *testing.T) {
 	}
 }
 
-// Ensure ignore patterns ending in `/` only match the prefix, not a
-// shorter prefix that happens to share characters. Regression guard.
 func TestDirPrefixIsBoundaryAware(t *testing.T) {
 	m := compilePattern("doc/")
 	if m("docs/x") {
@@ -163,8 +160,6 @@ func TestDirPrefixIsBoundaryAware(t *testing.T) {
 	}
 }
 
-// Composability: helpers should be assignable directly to a
-// CacheKeyFn-typed slot without ceremony.
 func TestSignatureIsCacheKeyFn(t *testing.T) {
 	_ = RepoFiles()
 	_ = RepoFiles(Ignore("*.md"))
@@ -174,7 +169,6 @@ func TestSignatureIsCacheKeyFn(t *testing.T) {
 	_ = Compose(Const("a"), Const("b"))
 }
 
-// Smoke: composed key respects all parts.
 func TestComposeIncorporatesAllParts(t *testing.T) {
 	a := Compose(Const("x"), Const("y"))(context.Background())
 	b := Compose(Const("x"), Const("z"))(context.Background())

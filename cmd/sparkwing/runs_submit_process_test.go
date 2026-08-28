@@ -21,11 +21,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// These tests run the real CLI as a separate process against an
-// isolated home. Nothing smaller can prove the submission contract: the
-// whole claim is that execution outlives the submitting process, and a
-// claim about processes has to be checked with processes.
-
 var (
 	submitCLIOnce sync.Once
 	submitCLIDir  string
@@ -39,7 +34,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// buildSubmitCLI compiles the sparkwing CLI once per test binary.
 func buildSubmitCLI(t *testing.T) string {
 	t.Helper()
 	submitCLIOnce.Do(func() {
@@ -64,14 +58,6 @@ func buildSubmitCLI(t *testing.T) string {
 	return submitCLIBin
 }
 
-// submitFixtureSource is a stand-in pipeline binary. It answers
-// --describe like a real compiled .sparkwing tree and, when dispatched,
-// appends the trigger id to a marker file and finishes.
-//
-// It deliberately has no dependencies. A real .sparkwing module pulls in
-// the SDK and takes tens of seconds to build; these tests are about
-// process ownership and recovery, and every one of those questions is
-// answered by "did the marker line appear, and how many times".
 const submitFixtureSource = `package main
 
 import (
@@ -93,8 +79,6 @@ func main() {
 }
 `
 
-// submitTestEnv is one isolated machine: a home, a fixture checkout, and
-// the marker file the fixture writes to.
 type submitTestEnv struct {
 	t        *testing.T
 	bin      string
@@ -109,8 +93,7 @@ func newSubmitTestEnv(t *testing.T) *submitTestEnv {
 	if runtime.GOOS == "windows" {
 		t.Skip("the detached-consumer contract is exercised on POSIX process semantics")
 	}
-	// A short home keeps every path this test creates well inside the
-	// unix-socket length limit that a long macOS TMPDIR would blow.
+
 	home, err := os.MkdirTemp("", "swh")
 	if err != nil {
 		t.Fatal(err)
@@ -145,10 +128,7 @@ func newSubmitTestEnv(t *testing.T) *submitTestEnv {
 func (e *submitTestEnv) env() []string {
 	base := append(os.Environ(),
 		"SPARKWING_HOME="+e.home,
-		// The CLI runs as a real process, so paths.UnderTest() is false
-		// inside it and the repo registry would otherwise resolve to the
-		// developer's own ~/.config/sparkwing/repos.yaml -- letting a test
-		// read, and compile, every checkout registered on the machine.
+
 		"SPARKWING_REPOS="+filepath.Join(e.home, "repos.yaml"),
 		"SPARKWING_NO_UPDATE=1",
 		"SPARKWING_SUBMIT_TEST_MARKER="+e.marker,
@@ -156,7 +136,6 @@ func (e *submitTestEnv) env() []string {
 	return append(base, e.extraEnv...)
 }
 
-// run invokes the CLI and returns its combined output.
 func (e *submitTestEnv) run(args ...string) (string, error) {
 	e.t.Helper()
 	cmd := exec.Command(e.bin, args...)
@@ -166,9 +145,6 @@ func (e *submitTestEnv) run(args ...string) (string, error) {
 	return string(out), err
 }
 
-// runStdout invokes the CLI and returns stdout only. Diagnostics --
-// the consumer-rotation notice, warnings -- go to stderr on purpose, so
-// a caller parsing a JSON acknowledgment must not be reading them.
 func (e *submitTestEnv) runStdout(args ...string) (string, string, error) {
 	e.t.Helper()
 	cmd := exec.Command(e.bin, args...)
@@ -189,16 +165,11 @@ func (e *submitTestEnv) mustRun(args ...string) string {
 	return out
 }
 
-// submit runs `runs submit` against the fixture and decodes the ack.
-// extra are submit's own flags, which precede the pipeline name.
 func (e *submitTestEnv) submit(extra ...string) submitResult {
 	e.t.Helper()
 	return e.submitWithArgs(extra, nil)
 }
 
-// submitWithArgs separates submit's own flags from the pipeline's,
-// which is the placement the command requires: everything after the
-// pipeline name belongs to the pipeline.
 func (e *submitTestEnv) submitWithArgs(own, pipelineArgs []string) submitResult {
 	e.t.Helper()
 	args := append([]string{"runs", "submit", "-o", "json", "--home", e.home, "-C", e.repoDir}, own...)
@@ -283,12 +254,6 @@ func waitUntil(t *testing.T, what string, timeout time.Duration, cond func() boo
 	}
 }
 
-// TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess is the core
-// contract: submit returns, the submitting process is gone, and the run
-// still executes. It also pins that the acknowledgment is backed by a
-// different process -- an ack from a fork of the submitter would die
-// with the terminal, which is the failure this whole feature exists to
-// remove.
 func TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -304,8 +269,6 @@ func TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 		t.Fatalf("acknowledged log_path %q is not a directory: %v", ack.LogPath, err)
 	}
 
-	// The submitting process has exited by now -- CombinedOutput waited
-	// for it. Whatever owns the run is something else.
 	var pid int
 	waitUntil(t, "a detached consumer to hold the queue", 10*time.Second, func() bool {
 		var ok bool
@@ -316,8 +279,6 @@ func TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 		t.Fatal("the test process is hosting the consumer; the run is not detached")
 	}
 
-	// The run was durable before the ack, so it is visible now regardless
-	// of how far execution has got.
 	st := e.store()
 	if _, err := st.GetTrigger(context.Background(), ack.RunID); err != nil {
 		t.Fatalf("acknowledged run has no trigger row: %v", err)
@@ -332,9 +293,6 @@ func TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 	})
 }
 
-// TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun is the
-// duplicate-submission proof across processes: a caller that resubmits
-// after an ambiguous failure must reach the run it already has.
 func TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -360,8 +318,6 @@ func TestRunsSubmit_DuplicateKeyReturnsTheOriginalRun(t *testing.T) {
 	}
 }
 
-// TestRunsSubmit_DistinctKeysAreDistinctRuns is the other half of
-// dedup. A key scopes one intent; two intents must not collapse.
 func TestRunsSubmit_DistinctKeysAreDistinctRuns(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -375,10 +331,6 @@ func TestRunsSubmit_DistinctKeysAreDistinctRuns(t *testing.T) {
 	}
 }
 
-// TestRunsSubmit_RequestIDDoesNotDeduplicate keeps the two identifiers
-// apart. A caller that reuses a tracing id across attempts must still
-// get separate runs; folding request_id into dedup would silently
-// swallow deliberate resubmissions.
 func TestRunsSubmit_RequestIDDoesNotDeduplicate(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -402,15 +354,10 @@ func TestRunsSubmit_RequestIDDoesNotDeduplicate(t *testing.T) {
 	}
 }
 
-// TestRunsSubmit_PendingWorkRecoversAfterConsumerRestart is the
-// recovery contract. A consumer killed outright -- SIGKILL, no chance to
-// clean up -- must leave the queue takeable and the work runnable.
 func TestRunsSubmit_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
 
-	// Prime the compile cache with one completed submission, so the
-	// recovery half is not also measuring a cold Go build.
 	first := e.submit()
 	waitUntil(t, "the first submitted run to execute", 90*time.Second, func() bool {
 		return len(e.markerLines()) == 1
@@ -429,8 +376,6 @@ func TestRunsSubmit_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 		return err == nil && !running
 	})
 
-	// Queue work while nothing is resident, the way a submission racing a
-	// consumer's exit would.
 	st := e.store()
 	ctx := context.Background()
 	now := time.Now()
@@ -456,9 +401,6 @@ func TestRunsSubmit_PendingWorkRecoversAfterConsumerRestart(t *testing.T) {
 	})
 }
 
-// TestRunsConsumer_StatusAndStopReportTheResidentProcess covers the
-// operator surface, including that a SIGKILLed consumer reads as gone
-// with no stale-state cleanup.
 func TestRunsConsumer_StatusAndStopReportTheResidentProcess(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -483,17 +425,12 @@ func TestRunsConsumer_StatusAndStopReportTheResidentProcess(t *testing.T) {
 	})
 }
 
-// TestRunsCancel_CancelsAQueuedRunWithoutTouchingItsReplacement is the
-// cancellation contract on the path submission adds: a run that no
-// consumer has claimed, on a laptop with no dashboard and no profile.
 func TestRunsCancel_CancelsAQueuedRunWithoutTouchingItsReplacement(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
 	ctx := context.Background()
 	st := e.store()
 
-	// Queue two runs with no consumer resident, so neither can be claimed
-	// out from under the cancellation mid-test.
 	for _, id := range []string{"run-target", "run-replacement"} {
 		now := time.Now()
 		if err := st.CreateTrigger(ctx, store.Trigger{
@@ -530,14 +467,6 @@ func TestRunsCancel_CancelsAQueuedRunWithoutTouchingItsReplacement(t *testing.T)
 	}
 }
 
-// TestRunsSubmit_RefusesASubmitFlagPlacedAfterThePipelineName is a
-// regression guard on a trap this command had during development.
-//
-// Parsing stops at the pipeline name, so `runs submit deploy
-// --idempotency-key k` handed the key to the pipeline as an argument and
-// ran with no deduplication whatsoever -- while printing a perfectly
-// normal acknowledgment. A caller cannot detect that from the output,
-// which makes silence the worst possible response.
 func TestRunsSubmit_RefusesASubmitFlagPlacedAfterThePipelineName(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -560,9 +489,6 @@ func TestRunsSubmit_RefusesASubmitFlagPlacedAfterThePipelineName(t *testing.T) {
 	}
 }
 
-// TestRunsSubmit_SeparatorHandsAConflictingFlagToThePipeline is the
-// escape hatch: a pipeline that declares its own --request-id must still
-// be submittable.
 func TestRunsSubmit_SeparatorHandsAConflictingFlagToThePipeline(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -584,9 +510,6 @@ func TestRunsSubmit_SeparatorHandsAConflictingFlagToThePipeline(t *testing.T) {
 	}
 }
 
-// TestRunsSubmit_RefusesAPipelineNothingDeclares proves the submission
-// fails in the caller's terminal rather than landing in the queue and
-// failing later where nobody is reading.
 func TestRunsSubmit_RefusesAPipelineNothingDeclares(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -607,8 +530,6 @@ func TestRunsSubmit_RefusesAPipelineNothingDeclares(t *testing.T) {
 	}
 }
 
-// blockingFixtureSource records a START/END pair around an externally
-// released hold, so concurrent duplicate dispatch is directly observable.
 const blockingFixtureSource = `package main
 
 import (
@@ -646,8 +567,6 @@ func appendLine(path, line string) {
 }
 `
 
-// useBlockingFixture swaps the environment's checkout for one whose runs
-// remain active until their HTTP connection is closed.
 func (e *submitTestEnv) useBlockingFixture(t *testing.T) <-chan struct{} {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(e.repoDir, ".sparkwing", "main.go"),
@@ -691,12 +610,6 @@ func (e *submitTestEnv) startsInMarker() int {
 	return n
 }
 
-// TestRunsSubmit_LiveDispatchSurvivesAWallClockJump reproduces a suspended
-// laptop resuming with wall time past the claim's lease while
-// the heartbeat's next monotonic tick is still far away; the sweep runs
-// four times more often than the heartbeat, so it wins. Pushing the
-// lease row into the past reproduces exactly the state a resume leaves
-// behind. The run must not be dispatched a second time.
 func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -708,7 +621,6 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	})
 	waitForFixtureHold(t, holdStarted)
 
-	// The laptop wakes.
 	st := e.store()
 	liveBefore, err := st.GetTrigger(context.Background(), ack.RunID)
 	if err != nil {
@@ -722,9 +634,6 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 	}
 	initialLease := *liveBefore.LeaseExpiresAt
 
-	// A terminal expired claim is stable evidence that the maintenance
-	// sweep ran; unlike elapsed time, it cannot pass while the sweep is
-	// wedged or disconnected from the consumer loop.
 	probeID := ack.RunID + "-sweep-probe"
 	now := time.Now()
 	if err := st.CreateRun(context.Background(), store.Run{
@@ -736,8 +645,6 @@ func TestRunsSubmit_LiveDispatchSurvivesAWallClockJump(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Observe one renewal first, then publish both expired rows in one
-	// transaction. The next heartbeat is now a full interval away.
 	waitUntil(t, "the live claim heartbeat", 10*time.Second, func() bool {
 		live, err := st.GetTrigger(context.Background(), ack.RunID)
 		if err != nil {
@@ -773,7 +680,6 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 		t.Fatal(err)
 	}
 
-	// One lease-derived maintenance interval plus scheduling headroom.
 	poll := time.NewTicker(250 * time.Millisecond)
 	defer poll.Stop()
 	deadline := time.NewTimer(5 * time.Second)
@@ -812,10 +718,6 @@ VALUES (?, ?, 'claimed', ?, ?, ?, 1)`, probeID, "fixture", now.UnixNano(), now.U
 	}
 }
 
-// TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines covers a key used by
-// one pipeline answering another pipeline's submission with the
-// first pipeline's run, at exit 0 -- so the requested pipeline never ran
-// and the caller was told everything was fine.
 func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -859,9 +761,6 @@ func TestRunsSubmit_IdempotencyKeyDoesNotCrossPipelines(t *testing.T) {
 	}
 }
 
-// TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused pins that a key names
-// one intent, so the same key with different arguments is a different request,
-// not a retry. Answering it with the original run would silently drop it.
 func TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -879,9 +778,6 @@ func TestRunsSubmit_DuplicateKeyWithDifferentArgsIsRefused(t *testing.T) {
 	}
 }
 
-// TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus pins that exit 0 remains
-// correct because the run exists, while the caller can see that the run has
-// already finished and how.
 func TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -915,15 +811,10 @@ func TestRunsSubmit_DuplicateAckCarriesTheOriginalStatus(t *testing.T) {
 	}
 }
 
-// TestRunsSubmit_ReplacesAConsumerFromAnotherBuild covers a consumer keeping
-// its queue while work keeps arriving. Without a version check,
-// a freshly installed binary would hand every run to the old build --
-// including runs submitted to pick up a fix.
 func TestRunsSubmit_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
 
-	// A resident consumer claiming to be some other build.
 	old := exec.Command(e.bin, "__runs-consume", "--home", e.home,
 		"--idle", "10m", "--version", "v0.0.1-old")
 	old.Env = e.env()
@@ -958,10 +849,6 @@ func TestRunsSubmit_ReplacesAConsumerFromAnotherBuild(t *testing.T) {
 	})
 }
 
-// TestRunsConsumerStop_RecordsTheInterruptedRun covers terminal bookkeeping
-// that used to be written through the same context that `stop` had
-// just cancelled, so it never landed: the run stayed pending and its
-// trigger stayed claimed until a lease lapsed minutes later.
 func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
 	t.Parallel()
 	e := newSubmitTestEnv(t)
@@ -987,8 +874,7 @@ func TestRunsConsumerStop_RecordsTheInterruptedRun(t *testing.T) {
 	if trig.Status == "claimed" {
 		t.Fatal("stopping the consumer left the run's trigger claimed with nothing executing it")
 	}
-	// Requeued rather than failed: the run never got a verdict, so the
-	// next consumer re-executes it.
+
 	if trig.Status == "pending" {
 		n, cerr := st.CountPendingTriggers(context.Background())
 		if cerr != nil || n == 0 {

@@ -32,7 +32,6 @@ function p95(values: number[]): number {
   return sorted[Math.floor(sorted.length * 0.95)];
 }
 
-// Activity sparkline -- shows job volume over recent time buckets
 function Sparkline({
   jobs,
   buckets = 12,
@@ -180,7 +179,7 @@ export default function MetricsPanel({
 
   return (
     <div className="space-y-4">
-      {/* Row 1: Key rates */}
+      {                      }
       <div className="grid grid-cols-4 gap-3">
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
           <div className="text-xl font-bold text-green-400">
@@ -210,7 +209,7 @@ export default function MetricsPanel({
         </div>
       </div>
 
-      {/* Row 2: Activity sparkline + p95 */}
+      {                                     }
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
           <div className="text-[10px] text-[var(--muted)] mb-2">
@@ -231,7 +230,7 @@ export default function MetricsPanel({
         </div>
       </div>
 
-      {/* Row 3: Per-pipeline breakdown */}
+      {                                   }
       {pipelineStats.length > 0 && (
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
           <div className="text-[10px] text-[var(--muted)] mb-2">Pipelines</div>
@@ -289,7 +288,7 @@ export default function MetricsPanel({
         </div>
       )}
 
-      {/* Row 4: Agent utilization timeline */}
+      {                                       }
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
         <AgentUtilization jobs={jobs} agents={agents} />
       </div>

@@ -13,11 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/conformance"
 )
 
-// TestConformance_LogStore wires the shared conformance suite
-// against an in-process stub of the sparkwing-logs HTTP service.
-// The stub honors tail/head/grep query params so the suite's
-// filter subtests exercise the real client query encoding without
-// reaching the production service.
 func TestConformance_LogStore(t *testing.T) {
 	conformance.TestLogStore(t, func() storage.LogStore {
 		var mu sync.Mutex
@@ -73,9 +68,6 @@ func TestConformance_LogStore(t *testing.T) {
 	})
 }
 
-// applyServerSideFilters mimics the sparkwing-logs server's
-// tail/head/grep handling so the stub round-trips the same filter
-// semantics the production server does.
 func applyServerSideFilters(body []byte, q map[string][]string) []byte {
 	text := string(body)
 	if g := first(q["grep"]); g != "" {

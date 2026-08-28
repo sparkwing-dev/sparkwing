@@ -10,10 +10,6 @@ import (
 	"testing"
 )
 
-// The concurrency subsystem keeps each invariant at one definition;
-// these guards make a bypassing site fail the suite instead of
-// compiling quietly. When one trips, route the new code through the
-// named helper rather than relaxing the count.
 func TestConcurrencyGuard_CanonicalSQLSitesOnly(t *testing.T) {
 	src := storePackageSource(t)
 	for needle, helper := range map[string]string{
@@ -72,9 +68,6 @@ func TestConcurrencyGuard_TablesTouchedOnlyByStore(t *testing.T) {
 	}
 }
 
-// Every mutating concurrency transaction must commit through
-// txCommitChecked so the invariant checks cannot be skipped. Read-only
-// paths are allowlisted; extending the list is a conscious act.
 func TestConcurrencyGuard_MutatingCommitsAreChecked(t *testing.T) {
 	allowed := map[string]bool{
 		"txCommitChecked":     true,

@@ -11,57 +11,36 @@ import (
 	"golang.org/x/mod/modfile"
 )
 
-// CheckName identifies one bar a generated pipeline must clear.
 type CheckName string
 
 const (
-	// CheckFormat is `gofmt -l` of the generated source: it reports no
-	// files, i.e. the source is already canonically formatted.
 	CheckFormat CheckName = "format"
-	// CheckCompile is `go build` of the generated source in a project.
+
 	CheckCompile CheckName = "compile"
-	// CheckVet is `go vet` of the generated project: the source is free of
-	// the suspicious constructs vet reports.
+
 	CheckVet CheckName = "vet"
-	// CheckExplain is `sparkwing pipeline explain --all`: Plan() builds a
-	// valid DAG without dispatching any job.
+
 	CheckExplain CheckName = "explain"
-	// CheckLint is `sparkwing pipeline lint --all`: the source is free of
-	// idiomatic anti-patterns.
+
 	CheckLint CheckName = "lint"
 )
 
-// CheckResult is the outcome of one check. Detail carries the truncated
-// tool output when OK is false, so a reviewer can reproduce the failure.
 type CheckResult struct {
 	Name   CheckName `json:"name"`
 	OK     bool      `json:"ok"`
 	Detail string    `json:"detail,omitempty"`
 }
 
-// Scorer runs a generated pipeline through the
-// gofmt+compile+vet+explain+lint bar.
 type Scorer interface {
 	Score(ctx context.Context, spec Spec, source string) ([]CheckResult, error)
 }
 
-// ProjectScorer scores a generation by materializing a single-pipeline
-// .sparkwing project in a temp dir -- copying go.mod/go.sum/main.go from
-// a discovered base project so the build resolves against the same
-// pinned SDK -- then running the oracle bar against it. Each spec gets
-// its own project so a generation that does not compile cannot poison
-// the others.
 type ProjectScorer struct {
-	// Sparkwing is the path to the sparkwing binary used for the explain
-	// and lint checks.
 	Sparkwing string
-	// BaseDir is a .sparkwing directory whose go.mod/go.sum/main.go are
-	// copied to build the temp project.
+
 	BaseDir string
 }
 
-// NewProjectScorer locates a base .sparkwing project by copying the
-// build files from baseDir and using sparkwingBin for the CLI checks.
 func NewProjectScorer(sparkwingBin, baseDir string) *ProjectScorer {
 	return &ProjectScorer{Sparkwing: sparkwingBin, BaseDir: baseDir}
 }
@@ -103,10 +82,6 @@ func (s *ProjectScorer) Score(ctx context.Context, spec Spec, source string) ([]
 	return checks, nil
 }
 
-// pipelineYAML renders the scored project's sparkwing.yaml: the single
-// pipeline entry, plus a guards: block when the spec declares one. The
-// guard-misuse lint rule reads this file rather than the Plan body, so a
-// spec that targets it can only express itself here.
 func pipelineYAML(spec Spec) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "pipelines:\n  - name: %s\n    entrypoint: %s\n", spec.Name, spec.Entrypoint)
@@ -123,10 +98,6 @@ func pipelineYAML(spec Spec) string {
 	return b.String()
 }
 
-// runFormatCheck runs `gofmt -l` over dir. gofmt exits 0 even when files
-// need formatting -- it lists them on stdout -- so the check is OK only
-// when that list is empty, so a pipeline that is not gofmt-clean fails
-// acceptance.
 func runFormatCheck(ctx context.Context, dir string) CheckResult {
 	out, err := exec.CommandContext(ctx, "gofmt", "-l", dir).CombinedOutput()
 	if err != nil {
@@ -138,9 +109,6 @@ func runFormatCheck(ctx context.Context, dir string) CheckResult {
 	return CheckResult{Name: CheckFormat, OK: true}
 }
 
-// runCheck runs name's command in dir, mapping a zero exit to OK and a
-// non-zero exit (or spawn failure) to a failed check with truncated
-// combined output as the detail.
 func runCheck(ctx context.Context, name CheckName, dir, bin string, args ...string) CheckResult {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
@@ -151,13 +119,6 @@ func runCheck(ctx context.Context, name CheckName, dir, bin string, args ...stri
 	return CheckResult{Name: name, OK: false, Detail: truncate(strings.TrimSpace(string(out)), 600)}
 }
 
-// writeRebasedGoMod copies baseGoMod to dst, rewriting every local
-// filesystem replace (a replace whose target has no version, e.g.
-// `replace x => ..`) from a path relative to baseDir into an absolute
-// path. The base .sparkwing project resolves the SDK with a relative
-// replace anchored at its own directory; a verbatim copy into a temp
-// project would resolve that path against the temp dir, where the SDK
-// is absent, so the rebase is what lets the generated pipeline compile.
 func writeRebasedGoMod(baseGoMod, dst, baseDir string) error {
 	raw, err := os.ReadFile(baseGoMod)
 	if err != nil {

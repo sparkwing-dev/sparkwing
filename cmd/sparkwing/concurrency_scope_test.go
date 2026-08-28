@@ -2,9 +2,6 @@ package main
 
 import "testing"
 
-// Defect 10: a global group whose name contains the qualifier separator
-// must still be labeled "global" -- the label reads the scheme tag, not
-// the mere presence of an "@".
 func TestScopeFromKey_GlobalNameWithAtNotMislabeled(t *testing.T) {
 	if got := scopeFromKey("g:payments@db"); got != "global" {
 		t.Fatalf("scopeFromKey(global key with @ in name) = %q, want global", got)

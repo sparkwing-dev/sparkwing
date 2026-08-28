@@ -3,11 +3,6 @@
 import { useEffect, useState } from "react";
 import { type Node, type NodeWorkStep, type Run } from "@/lib/api";
 
-// Gantt-ish execution timeline. Each row is a node; bar position +
-// width come from the node's started_at / finished_at. Running
-// nodes get an open-ended bar up to now. Skipped/pending nodes are
-// omitted (no timeline presence). Step bars are read from the
-// structured NodeWorkStep records on each node (no log parsing).
 
 function fmtMs(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -41,12 +36,8 @@ function outcomeColor(outcome: string, running: boolean): string {
     case "skipped":
       return "bg-slate-400/40";
     case "skipped-concurrent":
-      // OnLimit:Skip. Distinct from skipped so operators can
-      // see the slot was full, not a SkipIf predicate.
       return "bg-slate-500/40";
     case "superseded":
-      // OnLimit:CancelOthers. Distinct from cancelled so
-      // operators can see "evicted by newer run" vs operator cancel.
       return "bg-amber-500/60";
     default:
       return "bg-slate-400/60";
@@ -88,9 +79,6 @@ interface StepRow {
   status: "passed" | "failed" | "cancelled" | "running" | "skipped";
 }
 
-// stepsForNode pulls every NodeWorkStep with timing data and projects
-// it onto the run-wide timeline (offsets relative to `zero`). Steps
-// without started_at are excluded -- they never ran or haven't run yet.
 function stepsForNode(node: Node, zero: number): StepRow[] {
   const work = node.work;
   if (!work || !work.steps) return [];
@@ -148,14 +136,11 @@ export default function ExecutionWaterfall({
   onSelectNode?: (id: string | null) => void;
   onSelectStep?: (nodeId: string, stepId: string | null) => void;
   findMatched?: Set<string>;
-  // Keys: "<nodeID>::<stepID>" -- disambiguates step names reused across nodes.
   findMatchedSteps?: Set<string>;
 }) {
   const { rows, totalMs, zero } = extractRows(nodes);
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  // Auto-expand the focused node when a step in it is selected so
-  // the step bars reveal without manual toggle.
   useEffect(() => {
     if (!focusStep || !focusNode) return;
     let cancelled = false;

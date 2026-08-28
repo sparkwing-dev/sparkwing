@@ -10,11 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// The local Pipeline struct used as the wire shape for `pipeline
-// list -o json` and `pipeline describe -o json` must surface risks
-// (union) and risks_by_step (per-step breakdown) when the underlying
-// DescribePipeline declares them. JSON consumers rely on these
-// fields to know which --sw-allow labels a pipeline needs.
 func TestPipelineJSON_SurfacesRisks(t *testing.T) {
 	p := Pipeline{
 		Name:  "cluster-down",
@@ -42,9 +37,6 @@ func TestPipelineJSON_SurfacesRisks(t *testing.T) {
 	}
 }
 
-// Pipelines without risk labels must omit both fields entirely
-// (omitempty contract). Catalog readers depend on the absent-field
-// signal to mean "no labels declared".
 func TestPipelineJSON_OmitsEmptyRisks(t *testing.T) {
 	p := Pipeline{Name: "hello"}
 	raw, err := json.Marshal(p)
@@ -57,11 +49,6 @@ func TestPipelineJSON_OmitsEmptyRisks(t *testing.T) {
 	}
 }
 
-// The catalog copy in gatherPipelinesCatalog is the load-bearing
-// site -- it copies Short / Help / Args / Examples from the cached
-// DescribePipeline schema along with the two risk fields. This test
-// fakes the inner copy to assert the union + per-step both
-// round-trip.
 func TestCatalogCopy_PreservesRisks(t *testing.T) {
 	dp := sparkwing.DescribePipeline{
 		Name:  "cluster-down",
@@ -108,12 +95,6 @@ func TestCatalogCopy_PreservesRisks(t *testing.T) {
 	}
 }
 
-// `sparkwing pipeline describe --name X` returns a "no pipeline
-// named X" error when X isn't in the catalog, appended with a "did
-// you mean Y?" suggestion when the typo is close enough, matching
-// the orchestrator-side "unknown pipeline" surface. This test pins
-// the suggestion-composition logic from action.go's
-// runPipelineDescribe.
 func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 	catalog := []Pipeline{
 		{Name: "cluster-up"},
@@ -143,9 +124,6 @@ func TestPipelineDescribe_NoPipelineNamed_SuggestsClosest(t *testing.T) {
 	}
 }
 
-// Far typos must NOT produce a misleading suggestion. The describe
-// verb falls through to the original message body when no candidate
-// is close enough.
 func TestPipelineDescribe_FarTypoNoSuggestion(t *testing.T) {
 	catalog := []Pipeline{
 		{Name: "cluster-up"},

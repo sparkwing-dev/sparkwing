@@ -4,13 +4,6 @@ package wingd
 
 import "testing"
 
-// TestDarwinFreeMemory_UnreadableLevelReportsNoMeasurement pins that the macOS
-// available-memory reading has no substitute under it. The old sampler seeded
-// FreeMemoryBytes from vm.page_free_count and only overwrote it when
-// kern.memorystatus_level came back sane, so an unreadable level left the
-// near-zero free-page count standing: 0.31 GiB of 16 on an idle box, which
-// reports 98% of the machine consumed in the same format as a real reading.
-// The total below is 16 GiB.
 func TestDarwinFreeMemory_UnreadableLevelReportsNoMeasurement(t *testing.T) {
 	const total = 17179869184
 
@@ -42,10 +35,6 @@ func TestDarwinFreeMemory_UnreadableLevelReportsNoMeasurement(t *testing.T) {
 	}
 }
 
-// TestSampleHost_NeverClaimsAMeasurementItDoesNotHave runs the real macOS
-// sampler against this machine. Whatever the box is doing, a reading labeled
-// measured must carry bytes, because a measured zero is exactly the shape that
-// pinned admission at no memory headroom at all.
 func TestSampleHost_NeverClaimsAMeasurementItDoesNotHave(t *testing.T) {
 	stat, err := sampleHost()
 	if err != nil {

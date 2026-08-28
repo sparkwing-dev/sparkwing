@@ -10,19 +10,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// secretSetReq is the wire body for POST /api/v1/secrets.
 type secretSetReq struct {
 	Name  string `json:"name"`
 	Value string `json:"value"`
-	// Masked: nil pointer means the client didn't supply the field;
-	// the server defaults to true. Explicit false writes the entry as
-	// non-masked config.
+	// safety: nil defaults to masked; only an explicit false stores plain config.
 	Masked *bool `json:"masked,omitempty"`
 }
 
-// secretJSON is the non-value metadata the list endpoint emits. The
-// get endpoint reuses the same struct with Value populated so the
-// client sees one stable shape.
 type secretJSON struct {
 	Name      string `json:"name"`
 	Value     string `json:"value,omitempty"`

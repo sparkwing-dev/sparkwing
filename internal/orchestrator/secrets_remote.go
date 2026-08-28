@@ -11,8 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// remoteSecretSource builds a secrets.Source backed by the named
-// profile's controller (`sparkwing run <pipeline> --secrets PROF`).
 func remoteSecretSource(profName string) (secrets.Source, error) {
 	if profName == "" {
 		return nil, errors.New("profile name is required")

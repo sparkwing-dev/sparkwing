@@ -2,9 +2,6 @@
 
 import { useEffect } from "react";
 
-// Localhost loopbacks (laptop `sparkwing dev` + port-forward) keep the
-// default blue favicon; anything else is treated as a deployed cluster
-// and swapped to orange so it's visually distinct from a local tab.
 const LOCAL_HOSTNAMES = new Set([
   "localhost",
   "127.0.0.1",

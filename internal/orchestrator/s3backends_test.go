@@ -31,11 +31,6 @@ func registerS3Pipelines(t *testing.T) {
 	})
 }
 
-// TestRunLocal_S3State_DispatchesToS3Backends verifies that RunLocal
-// recognizes a *s3state.Backend on opts.State and wires the S3Backends
-// bundle (NDJSON state + log store + noop concurrency) instead of
-// LocalBackends. The pipeline runs to terminal state and its run
-// record is readable back from the underlying artifact store.
 func TestRunLocal_S3State_DispatchesToS3Backends(t *testing.T) {
 	registerS3Pipelines(t)
 	paths := newPaths(t)
@@ -83,10 +78,6 @@ func TestRunLocal_S3State_DispatchesToS3Backends(t *testing.T) {
 	}
 }
 
-// TestRunLocal_S3State_NoLogStore_Fails locks in the contract that
-// Mode 2 requires a LogStore (the orchestrator can't dispatch without
-// a log sink, and the SQLite-fallback path is not available in this
-// dispatch arm).
 func TestRunLocal_S3State_NoLogStore_Fails(t *testing.T) {
 	registerS3Pipelines(t)
 	paths := newPaths(t)
@@ -107,9 +98,6 @@ func TestRunLocal_S3State_NoLogStore_Fails(t *testing.T) {
 	}
 }
 
-// TestS3StateBackend_ListNotSupported_BubbleAsErrNotSupported makes
-// sure GetLatestRun degrades cleanly when the artifact store cannot
-// enumerate keys (some HTTP-only object stores).
 func TestS3StateBackend_ListNotSupported_BubbleAsErrNotSupported(t *testing.T) {
 	art := &noListArtifact{ArtifactStore: stubArtifact{}}
 	state := s3state.New(art)

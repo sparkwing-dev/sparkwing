@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// stubResolver is a test double for PipelineResolver. Lets the test
-// control the (runID, data, err) triple the Get path observes.
 type stubResolver struct {
 	lastPipeline string
 	lastNodeID   string
@@ -36,8 +34,6 @@ type buildOut struct {
 	Tag    string `json:"tag"`
 }
 
-// TestRefToLastRun_Get_UnmarshalsData exercises the happy path: the
-// resolver returns JSON, Get unmarshals into the typed parameter.
 func TestRefToLastRun_Get_UnmarshalsData(t *testing.T) {
 	payload, _ := json.Marshal(buildOut{Digest: "sha256:abc", Tag: "v1.2.3"})
 	r := &stubResolver{runID: "run-xyz", data: payload}
@@ -54,8 +50,6 @@ func TestRefToLastRun_Get_UnmarshalsData(t *testing.T) {
 	}
 }
 
-// TestRefToLastRun_Get_PanicsWithoutResolver makes the "called outside
-// the orchestrator" footgun loud.
 func TestRefToLastRun_Get_PanicsWithoutResolver(t *testing.T) {
 	defer func() {
 		r := recover()
@@ -71,9 +65,6 @@ func TestRefToLastRun_Get_PanicsWithoutResolver(t *testing.T) {
 	ref.Get(context.Background())
 }
 
-// TestRefToLastRun_Get_PanicsOnResolverError surfaces the resolver's
-// error via a helpful panic. Authors see "no run within X" rather
-// than a vague nil deref.
 func TestRefToLastRun_Get_PanicsOnResolverError(t *testing.T) {
 	defer func() {
 		r := recover()
@@ -91,10 +82,6 @@ func TestRefToLastRun_Get_PanicsOnResolverError(t *testing.T) {
 	ref.Get(ctx)
 }
 
-// TestRefToLastRun_Get_EmptyDataProducesZeroValue: a resolver that
-// returns nil/empty bytes gives the caller the zero value rather
-// than panicking in json.Unmarshal. Matches how the in-run path
-// treats "no upstream output yet" elsewhere.
 func TestRefToLastRun_Get_EmptyDataProducesZeroValue(t *testing.T) {
 	r := &stubResolver{runID: "run-empty", data: nil}
 	ctx := context.WithValue(context.Background(), keyPipelineResolver, r)
@@ -105,8 +92,6 @@ func TestRefToLastRun_Get_EmptyDataProducesZeroValue(t *testing.T) {
 	}
 }
 
-// TestRefToLastRun_NoOptions: MaxAge defaults to 0 when the caller
-// skips the option, and Pipeline / NodeID round-trip onto the Ref.
 func TestRefToLastRun_NoOptions(t *testing.T) {
 	ref := RefToLastRun[buildOut]("build", "artifact")
 	if ref.MaxAge != 0 {
@@ -117,9 +102,6 @@ func TestRefToLastRun_NoOptions(t *testing.T) {
 	}
 }
 
-// TestCollectCrossPipelineRefs_DiscoversFieldByShape: the audit
-// helper should find Ref[T] fields whose Pipeline is non-empty
-// (cross-pipeline routing) and skip in-run refs (Pipeline empty).
 func TestCollectCrossPipelineRefs_DiscoversFieldByShape(t *testing.T) {
 	type JobNode struct {
 		Build    Ref[buildOut]
@@ -140,8 +122,6 @@ func TestCollectCrossPipelineRefs_DiscoversFieldByShape(t *testing.T) {
 	}
 }
 
-// TestPipelineResolverFunc_AdaptsPlainFunction gives orchestrator
-// wiring a one-liner way to pass a closure as a PipelineResolver.
 func TestPipelineResolverFunc_AdaptsPlainFunction(t *testing.T) {
 	called := false
 	fn := PipelineResolverFunc(func(_ context.Context, pipeline, nodeID string, maxAge time.Duration) (*ResolvedPipelineRef, error) {

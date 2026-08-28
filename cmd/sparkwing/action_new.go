@@ -1,6 +1,3 @@
-// `sparkwing pipeline new` scaffolder. Five shapes, structural only:
-// minimal (default), build-test-deploy, ci-pr-check, release,
-// scheduled-report. Goal: get to a compiling, runnable stub fast.
 package main
 
 import (
@@ -101,14 +98,6 @@ func runPipelineNew(args []string) error {
 	return nil
 }
 
-// printExamplesHint tells an author who just scaffolded a bare shape
-// that worked pipelines exist to read.
-//
-// It prints here because this is the only moment it is certainly
-// relevant: whoever just ran `pipeline new` is writing a pipeline right
-// now, and everyone else pays nothing. It points at search rather than
-// a listing -- browsing forty examples to pick one is the cost this
-// reorganization removed.
 func printExamplesHint() {
 	list, err := templates.List()
 	if err != nil || len(list) == 0 {
@@ -124,11 +113,6 @@ func printExamplesHint() {
 	})
 }
 
-// scaffoldFromRegistry renders a sparks-core registry template (anything
-// `sparkwing examples` lists) into jobs/<name>.go and wires the
-// sparkwing.yaml entry. The pipeline's registered name is the --name
-// flag: when the template declares a `pipeline-name` param it's set from
-// --name, so the rendered Register() call and the yaml entry agree.
 func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []string, hidden, bootstrapped bool) error {
 	tmpl, err := templates.Get(templateName)
 	if err != nil {
@@ -165,10 +149,6 @@ func scaffoldFromRegistry(sparkwingDir, name, templateName string, params []stri
 	return nil
 }
 
-// parseTemplateParams turns repeated --param k=v flags into a map.
-//
-// Only `examples scaffold` reaches this now -- `pipeline new` takes a
-// shape and renders no parameters -- so the error names that verb.
 func parseTemplateParams(params []string) (map[string]string, error) {
 	out := make(map[string]string, len(params))
 	for _, p := range params {
@@ -190,8 +170,6 @@ func manifestDeclaresParam(m templates.Manifest, name string) bool {
 	return false
 }
 
-// validatePipelineName enforces kebab-case so the name round-trips
-// through yaml + shell + Go-identifier conversion.
 func validatePipelineName(name string) error {
 	if name == "" {
 		return errors.New("name: must not be empty")
@@ -239,9 +217,6 @@ func kebabToSnake(name string) string {
 	return strings.ReplaceAll(name, "-", "_")
 }
 
-// goReservedTrailingTokens are tokens (GOOS / GOARCH / "test") Go
-// treats specially as the trailing _-segment of a .go filename. A
-// scaffold landing on these silently gets build-tagged out.
 var goReservedTrailingTokens = map[string]bool{
 	"test": true,
 	"aix":  true, "android": true, "darwin": true, "dragonfly": true,
@@ -257,10 +232,6 @@ var goReservedTrailingTokens = map[string]bool{
 	"s390x": true, "sparc": true, "sparc64": true, "wasm": true,
 }
 
-// goJobFilename produces a .go filename that Go won't silently exclude
-// (leading _/., trailing _test/_<goos>/_<goarch>).
-// All transforms preserve the user-chosen pipeline name in
-// sparkwing.yaml; only the on-disk filename is adjusted.
 func goJobFilename(name string) string {
 	snake := kebabToSnake(name)
 	if strings.HasPrefix(snake, "_") || strings.HasPrefix(snake, ".") {
@@ -275,24 +246,13 @@ func goJobFilename(name string) string {
 	return snake + ".go"
 }
 
-// builtinShape is one structural starting point: a DAG and the trigger
-// it declares when the author does not say otherwise.
-//
-// Shape and trigger are separate fields because they are separate
-// decisions. Welding them together is what three agent trials in a row
-// complained about: `ci-pr-check` was the only shape declaring
-// `on: pull_request`, so wanting a PR-triggered single check meant
-// scaffolding three nodes and deleting two. `--on` unwelds them.
 type builtinShape struct {
 	Name string
-	// Nodes is how many jobs the shape's Plan builds, surfaced
-	// wherever the shape is offered. Trials picked `ci-pr-check` on
-	// its name and discovered its three nodes after scaffolding.
+
 	Nodes int
-	// Structure is the one-phrase DAG summary shown beside Nodes.
+
 	Structure string
-	// DefaultOn is the trigger event the shape declares when --on is
-	// absent. Empty means the pipeline runs only when invoked.
+
 	DefaultOn string
 	src       string
 }
@@ -306,8 +266,6 @@ func builtinShapeByName(name string) (builtinShape, bool) {
 	return builtinShape{}, false
 }
 
-// Summary is the one-line form used everywhere a shape is offered:
-// what it builds, and what fires it.
 func (s builtinShape) Summary() string {
 	unit := "nodes"
 	if s.Nodes == 1 {
@@ -328,16 +286,6 @@ var builtinShapes = []builtinShape{
 	{"scheduled-report", 5, "one collector fanning out to gatherers", "schedule", scheduledReportTemplate},
 }
 
-// triggerBlocks are the per-event entries that go under `on:`, indented
-// for a sparkwing.yaml pipeline entry.
-//
-// Every value carries a comment naming the one thing its reader most
-// likely wants next: the filter it does not have, or the fact that a
-// webhook still has to point here. A scaffolded trigger that silently
-// matches everything is the same trap as no trigger at all.
-//
-// Filters stay empty. `branches: [main]` would bake in a branch name
-// the repo may not use, and shapes have to be correct anywhere.
 var triggerBlocks = map[string]string{
 	"pull_request": `      # Fires on opened / synchronize / reopened. Add
       # ` + "`branches: [main]`" + ` to record which base branches this is
@@ -356,22 +304,10 @@ var triggerBlocks = map[string]string{
 	"manual": "",
 }
 
-// triggerEventNames is the --on vocabulary, in the order it is offered.
-// "manual" is last because it is the opt-out, and it is spelled rather
-// than left as an empty string so declining a trigger is something an
-// author can say out loud.
 var triggerEventNames = []string{"pull_request", "push", "schedule", "manual"}
 
-// manualTrigger is the spelling that means "no trigger". It is the only
-// value that cannot be combined, because it contradicts every other one.
 const manualTrigger = "manual"
 
-// parseOnFlag flattens repeated and comma-separated --on values.
-//
-// Both forms are accepted because both are things people type: GitHub
-// spells this `on: [push, pull_request]`, so a comma reads naturally,
-// while a repeatable flag is what shells and generated commands prefer.
-// Rejecting either would be a round-trip over punctuation.
 func parseOnFlag(values []string) []string {
 	var out []string
 	seen := map[string]bool{}
@@ -388,14 +324,6 @@ func parseOnFlag(values []string) []string {
 	return out
 }
 
-// resolveTrigger builds the `on:` block. An explicit --on wins;
-// otherwise the shape's own default applies, so `--template ci-pr-check`
-// keeps declaring pull_request without anyone repeating themselves.
-//
-// One pipeline can declare several events -- `on:` is a map, and the
-// workflow that prompted this declares both push and pull_request. When
-// --on took a single value, reproducing that meant hand-editing the
-// yaml the scaffolder had just written.
 func resolveTrigger(shape builtinShape, on []string, explicit bool) (string, error) {
 	events := []string{shape.DefaultOn}
 	if explicit {
@@ -440,10 +368,6 @@ func without(list []string, drop string) []string {
 	return out
 }
 
-// renderBuiltinTemplate expands the {{STRUCT}} / {{NAME}} / {{SHORTLIT}}
-// placeholders in a built-in template into compilable jobs-package
-// source for the given pipeline name. SHORTLIT is the strconv.Quote'd
-// literal so quoted user input survives codegen.
 func renderBuiltinTemplate(name, short, tmpl string) string {
 	if short == "" {
 		short = "one-line description of " + name
@@ -455,7 +379,6 @@ func renderBuiltinTemplate(name, short, tmpl string) string {
 	).Replace(tmpl)
 }
 
-// scaffoldGoFromTemplate is the shared write path.
 func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl string, bootstrapped bool, trigger string) error {
 	struct_ := kebabToPascal(name)
 	file := filepath.Join(sparkwingDir, "jobs", goJobFilename(name))
@@ -472,14 +395,6 @@ func scaffoldGoFromTemplate(sparkwingDir, name string, hidden bool, short, tmpl 
 	return finishScaffold(sparkwingDir, file, name, bootstrapped, trigger)
 }
 
-// finishScaffold is the shared post-write reporting + tidy step for both
-// the built-in string templates and the rendered registry templates.
-//
-// A written trigger is reported in the created-files list rather than
-// left for the author to notice. `pipeline new` wiring a repo into a
-// GitHub event is exactly the kind of thing that should not happen
-// silently, and the line doubles as the answer to "how do I declare
-// this" for anyone who wants a different one.
 func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger string) error {
 	rel, err := filepath.Rel(filepath.Dir(sparkwingDir), file)
 	if err != nil {
@@ -491,18 +406,11 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 	fmt.Printf("%s Creating new pipeline\n", color.Cyan("==>"))
 	fmt.Printf("  %s %s\n", color.Green("+"), rel)
 	fmt.Printf("  %s added %q entry to .sparkwing/sparkwing.yaml\n", color.Green("+"), name)
-	// "declared", not "enabled". The yaml records intent; the
-	// controller still has to receive the event, which means pointing a
-	// webhook at this pipeline by hand. An agent trial read the success
-	// output, did not open the yaml, and noted it would reasonably have
-	// reported the trigger as live -- so the output has to say which
-	// half it did.
+
 	if events := triggerEvents(trigger); len(events) > 0 {
 		fmt.Printf("  %s declared %s in sparkwing.yaml\n",
 			color.Green("+"), color.Bold(strings.Join(events, " + ")+" trigger"))
-		// Each says what it still needs, because they need different
-		// things: a webhook has to be pointed here, a schedule needs a
-		// timer to fire the cadence it records.
+
 		if slices.Contains(events, "schedule") {
 			fmt.Printf("    %s\n", color.Dim("schedule: declarative cadence; drive it with an external timer"))
 		}
@@ -529,13 +437,7 @@ func finishScaffold(sparkwingDir, file, name string, bootstrapped bool, trigger 
 		{Command: "sparkwing run " + name, Purpose: "run it"},
 		{Command: "sparkwing docs read --topic sdk", Purpose: "SDK reference for editing the stub"},
 	}
-	// A shape that declared no trigger runs only when someone types its
-	// name, and nothing on this screen would say so. That is the gap
-	// worth one line: an agent trial that scaffolded `minimal` and
-	// wanted a pull-request gate spent twice the median number of calls
-	// reading two full reference topics to find the `on:` schema, while
-	// the search that answers it in one hop went unused. Name the query,
-	// not the topic -- a search hit is a section, a topic is a page.
+
 	if len(triggerEvents(trigger)) == 0 {
 		tips = append(tips, InfoNextStep{
 			Command: `sparkwing docs search -q "on: trigger"`,
@@ -609,13 +511,6 @@ func init() {
 }
 `
 
-// buildTestDeployTemplate: the canonical CI shape. Three nodes with
-// classic build->test->deploy ordering. Each Run shells `echo` so
-// `sparkwing run <name>` succeeds end-to-end on first invocation; the user
-// fills in real commands once they see the structure pass. The
-// inline DAG comment is intentional (pipeline-specific structure,
-// not SDK reference) -- the SDK cookbook lives in `docs read
-// --topic sdk` and the stub points there rather than copying it.
 const buildTestDeployTemplate = `package jobs
 
 import (
@@ -696,13 +591,6 @@ func init() {
 }
 `
 
-// ciPRCheckTemplate: the canonical pull-request gate. lint and test
-// run in parallel and a final gate job depends on both, so the
-// pipeline is green only when every check passes. test declares a
-// runner-label preference (Prefers) in plan-snapshot metadata. Prefers
-// does not affect runner selection. The gate is Inline (a cheap
-// convergence node that runs on the dispatcher's host) so it declares
-// no runner label.
 const ciPRCheckTemplate = `package jobs
 
 import (
@@ -787,11 +675,6 @@ func init() {
 }
 `
 
-// releaseTemplate: the canonical release shape. A linear
-// version-bump -> changelog -> publish flow with echo Run bodies so
-// the first ` + "`sparkwing run <name>`" + ` succeeds end-to-end. publish
-// Prefers a release runner label to show placement intent without
-// stranding a local run.
 const releaseTemplate = `package jobs
 
 import (
@@ -874,12 +757,6 @@ func init() {
 }
 `
 
-// scheduledReportTemplate: the canonical scheduled-report shape. One
-// collect job seeds three parallel gatherers that fan out, and
-// publish-report converges them into a single summary. Designed to run
-// on a schedule -- the scaffold prints the exact sparkwing.yaml `+"`on:`"+`
-// trigger to add. gather-metrics Prefers a report runner label to show
-// placement intent; publish-report is Inline so it declares no label.
 const scheduledReportTemplate = `package jobs
 
 import (
@@ -995,15 +872,6 @@ func init() {
 }
 `
 
-// appendPipelinesYAML tacks a new entry onto .sparkwing/sparkwing.yaml
-// in the same shape the existing entries use. Plain text append keeps
-// the author's formatting (leading comments, spacing) intact -- a yaml
-// round-trip would reflow everything. Risk: the user's file could have
-// exotic yaml that we don't preserve; mitigated by the simplicity of
-// the append (we only add, never modify).
-//
-// trigger, when non-empty, is an already-indented `on:` block appended
-// under the entry.
 func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool, trigger string) error {
 	path := filepath.Join(sparkwingDir, projectconfig.Filename)
 	existing, err := os.ReadFile(path)
@@ -1023,9 +891,6 @@ func appendPipelinesYAML(sparkwingDir, name, entrypoint string, hidden bool, tri
 	return os.WriteFile(path, b.Bytes(), 0o644)
 }
 
-// triggerEvent names the event a scaffolded `on:` block declares, for
-// the created-files line. It reads the block's own text so the two
-// cannot drift: a trigger nobody names here is a trigger nobody reports.
 func triggerEvents(trigger string) []string {
 	var out []string
 	for _, event := range triggerEventNames {

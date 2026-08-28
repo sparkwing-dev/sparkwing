@@ -1,23 +1,3 @@
-// apidiff emits a deterministic text snapshot of the exported API
-// surface for every covered package (per VERSIONING.md), one file
-// per package under the output directory.
-//
-// Usage:
-//
-//	go run ./cmd/apidiff <out-dir>
-//
-// The lint pipeline regenerates snapshots into a tempdir and diffs
-// them against the checked-in .apidiff/ tree. Drift fails CI; the
-// developer fixes it by running bash bin/regen-api-snapshot.sh and
-// committing the updated snapshots in the same PR as the API change.
-//
-// Format notes:
-//   - One file per package, named with slashes replaced by underscores
-//     (`pkg/storage/fs.txt` -> `pkg_storage_fs.txt`).
-//   - Godoc is intentionally NOT included -- comments rot faster than
-//     APIs and Layer 4 already covers their accuracy.
-//   - Output is stable: declarations sorted by name, methods grouped
-//     under their receiver type, no iteration-order surprises.
 package main
 
 import (
@@ -63,9 +43,6 @@ func main() {
 	}
 }
 
-// discoverPackagePaths derives the versioned API surface from repository
-// structure. A new package under pkg therefore enters the snapshot gate in the
-// same change that creates it; no second allowlist can silently omit it.
 func discoverPackagePaths(root string) ([]string, error) {
 	packages := map[string]struct{}{"sparkwing": {}}
 	pkgRoot := filepath.Join(root, "pkg")
@@ -104,9 +81,6 @@ func die(format string, args ...any) {
 	os.Exit(1)
 }
 
-// repoRoot walks up from cwd until it finds a go.mod whose module
-// line names the sparkwing repo. Keeps the tool insensitive to where
-// `go run` is invoked from.
 func repoRoot() (string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -130,9 +104,9 @@ func repoRoot() (string, error) {
 
 type member struct {
 	name string
-	kind string // "const", "var", "type", "func", "method"
+	kind string
 	text string
-	recv string // for methods: bare receiver type name (no leading "*")
+	recv string
 }
 
 func snapshotPackage(dir, importPath string) (string, error) {
@@ -308,11 +282,6 @@ func renderType(fset *token.FileSet, ts *ast.TypeSpec) string {
 	return b.String()
 }
 
-// filterUnexportedFields strips unexported fields from struct types
-// so the snapshot reflects only the public contract. Interface,
-// function, and other type expressions pass through unchanged
-// (interface methods are by definition all callable when the
-// interface is exported).
 func filterUnexportedFields(expr ast.Expr) ast.Expr {
 	st, ok := expr.(*ast.StructType)
 	if !ok || st.Fields == nil {

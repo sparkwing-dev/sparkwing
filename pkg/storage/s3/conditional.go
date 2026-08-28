@@ -17,8 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
-// casProbe memoizes the result of ConditionalWritesSupported so the
-// live-endpoint probe runs at most once per store.
 type casProbe struct {
 	mu       sync.Mutex
 	resolved bool
@@ -98,11 +96,6 @@ func (s *ArtifactStore) ConditionalWritesSupported(ctx context.Context) (bool, e
 	return ok, err
 }
 
-// probeConditionalWrites reports whether the backing endpoint honors
-// create-if-absent preconditions. It writes a unique probe key twice: an
-// endpoint that fails the second write with ErrPreconditionFailed enforces
-// conditional writes; one that accepts the overwrite ignores preconditions,
-// so the caller falls back to last-write-wins.
 func (s *ArtifactStore) probeConditionalWrites(ctx context.Context) (bool, error) {
 	nonce := make([]byte, 16)
 	if _, err := rand.Read(nonce); err != nil {
@@ -124,7 +117,6 @@ func (s *ArtifactStore) probeConditionalWrites(ctx context.Context) (bool, error
 	return false, nil
 }
 
-// etagOf normalizes a possibly-nil SDK ETag pointer.
 func etagOf(p *string) storage.ETag {
 	if p == nil {
 		return ""
@@ -132,9 +124,6 @@ func etagOf(p *string) storage.ETag {
 	return storage.ETag(*p)
 }
 
-// isPreconditionFailed matches S3's 412 PreconditionFailed and the 409
-// ConditionalRequestConflict that a concurrent conditional write can
-// raise; both mean "re-read and retry the CAS."
 func isPreconditionFailed(err error) bool {
 	var apiErr smithy.APIError
 	if errors.As(err, &apiErr) {

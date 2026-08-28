@@ -15,10 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-// TestBuiltinTemplatesRenderLintClean renders every built-in scaffold
-// template and asserts it is valid Go and passes the pipeline linter
-// with zero findings -- the machine-checkable half of "idiomatic by
-// construction" promised by `sparkwing pipeline new`.
 func TestBuiltinTemplatesRenderLintClean(t *testing.T) {
 	cases := []struct {
 		template string
@@ -53,15 +49,6 @@ func TestBuiltinTemplatesRenderLintClean(t *testing.T) {
 	}
 }
 
-// TestShapesNamedForAnEventCarryItsTrigger asserts the two shapes named
-// for an event write that event's `on:` block, and that the block
-// survives the strict config parser.
-//
-// A hand-written yaml fragment is the kind of thing that decodes as
-// nothing and reports nothing: `pull_request:` with no value is legal
-// yaml, so a typo here would produce a pipeline that lints, explains,
-// and never fires. Six agent trials each hit the gap this closes; an
-// unparsed trigger would leave the gap while looking closed.
 func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 	cases := []struct {
 		shape   string
@@ -107,9 +94,6 @@ func TestShapesNamedForAnEventCarryItsTrigger(t *testing.T) {
 	}
 }
 
-// TestShapesWithoutAnEventStayManual guards the other direction: a shape
-// that is purely structural must not invent a trigger, or `pipeline new`
-// starts wiring repos into events nobody asked for.
 func TestShapesWithoutAnEventStayManual(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, projectconfig.Filename)
@@ -162,10 +146,6 @@ func TestGoJobFilename(t *testing.T) {
 	}
 }
 
-// TestEveryTriggerBlockParses holds the --on vocabulary to what the
-// strict config parser accepts. Hand-written yaml fails silently here:
-// `push:` with no value is legal and decodes to nothing, so a typo
-// produces a pipeline that lints, explains, and never fires.
 func TestEveryTriggerBlockParses(t *testing.T) {
 	for _, event := range triggerEventNames {
 		t.Run(event, func(t *testing.T) {
@@ -203,9 +183,6 @@ func TestEveryTriggerBlockParses(t *testing.T) {
 	}
 }
 
-// Shape and trigger are independent choices. The combination three
-// agent trials asked for -- one node, fired by pull requests -- has to
-// be one command, not a three-node gate with two nodes deleted.
 func TestOnOverridesTheShapeDefault(t *testing.T) {
 	cases := []struct {
 		shape    string
@@ -240,8 +217,6 @@ func TestOnOverridesTheShapeDefault(t *testing.T) {
 	}
 }
 
-// An unknown --on must name the whole vocabulary. A rejection that does
-// not is a round-trip: the author still has to go find the list.
 func TestUnknownTriggerNamesEveryChoice(t *testing.T) {
 	shape, _ := builtinShapeByName("minimal")
 	_, err := resolveTrigger(shape, []string{"on_merge"}, true)
@@ -255,12 +230,6 @@ func TestUnknownTriggerNamesEveryChoice(t *testing.T) {
 	}
 }
 
-// Generated code must not name SDK functions that do not exist. The
-// minimal stub pointed at `ExecIn` / `BashIn`, which the SDK has never
-// had -- it exports Exec and Bash -- and that comment is the first
-// thing an editor reads. Every agent in a six-config sweep searched the
-// docs for those spellings, found nothing, and fell back to reading the
-// whole SDK reference.
 func TestScaffoldsNameOnlyRealSDKSymbols(t *testing.T) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
@@ -284,15 +253,8 @@ func TestScaffoldsNameOnlyRealSDKSymbols(t *testing.T) {
 	}
 	sdkSrc := src.String()
 
-	// Comments count. The bug this guards was in prose -- "Paths in
-	// ExecIn / BashIn / ReadFile" -- not in a call, so checking only
-	// sw.-qualified calls would have passed while the defect shipped.
-	// Multi-segment CamelCase is the shape of an SDK symbol and not of
-	// English, so every such token in the rendered template has to
-	// resolve, whether it is called or merely mentioned.
 	ref := regexp.MustCompile(`\b(?:sw\.)?([A-Z][a-z0-9]+(?:[A-Z][a-z0-9]*)+)\b`)
-	// The scaffolder's own generated identifiers, and the one stdlib
-	// name the templates use.
+
 	generated := map[string]bool{"Sample": true, "SampleJob": true, "Context": true}
 	for _, shape := range builtinShapes {
 		rendered := renderBuiltinTemplate("sample", "", shape.src)
@@ -308,9 +270,6 @@ func TestScaffoldsNameOnlyRealSDKSymbols(t *testing.T) {
 	}
 }
 
-// One pipeline, several events. The workflow that prompted this
-// declares both push and pull_request, and reproducing it used to mean
-// hand-editing the yaml the scaffolder had just written.
 func TestOnAcceptsSeveralTriggers(t *testing.T) {
 	shape, _ := builtinShapeByName("minimal")
 	for _, form := range [][]string{
@@ -337,9 +296,6 @@ func TestOnAcceptsSeveralTriggers(t *testing.T) {
 	}
 }
 
-// manual means "no trigger", so combining it with a real one is a
-// contradiction rather than a merge. Silently honoring one half would
-// produce a pipeline that fires when the author said it should not.
 func TestManualCannotBeCombined(t *testing.T) {
 	shape, _ := builtinShapeByName("minimal")
 	_, err := resolveTrigger(shape, parseOnFlag([]string{"push,manual"}), true)
@@ -351,14 +307,13 @@ func TestManualCannotBeCombined(t *testing.T) {
 			t.Errorf("rejection does not name %q: %v", want, err)
 		}
 	}
-	// Alone it is still the opt-out.
+
 	got, err := resolveTrigger(shape, parseOnFlag([]string{"manual"}), true)
 	if err != nil || got != "" {
 		t.Errorf("--on manual alone = (%q, %v); want no trigger", got, err)
 	}
 }
 
-// Several events must still parse as one entry through the strict loader.
 func TestMultiTriggerYAMLParses(t *testing.T) {
 	shape, _ := builtinShapeByName("minimal")
 	block, err := resolveTrigger(shape, parseOnFlag([]string{"push,pull_request,schedule"}), true)

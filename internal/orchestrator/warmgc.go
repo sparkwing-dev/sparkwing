@@ -12,18 +12,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// gcTimeout caps the whole warm-PVC sweep so a stuck RemoveAll can't
-// stall claim-loop startup.
 const gcTimeout = 5 * time.Second
 
 const gcGitDirAge = 7 * 24 * time.Hour
 
 const gcTmpFileAge = 24 * time.Hour
 
-// gcRunDirGrace leaves room for dashboard log follow-ups without 404s.
 const gcRunDirGrace = 1 * time.Hour
 
-// GCStats summarizes what GCWarmRoot removed.
 type GCStats struct {
 	GitDirsRemoved    int
 	TmpEntriesRemoved int
@@ -31,14 +27,10 @@ type GCStats struct {
 	BytesFreed        int64
 }
 
-// TerminalRunLister is the narrow ListRuns contract GCWarmRoot needs.
 type TerminalRunLister interface {
 	ListRuns(ctx context.Context, f store.RunFilter) ([]*store.Run, error)
 }
 
-// GCWarmRoot prunes stale state from a warm-runner's SPARKWING_HOME.
-// Sweeps <root>/git/*, <root>/tmp/*, and terminal <root>/runs/<id>/
-// (skipped when ctrl is nil). Bounded by gcTimeout.
 func GCWarmRoot(ctx context.Context, root string, ctrl TerminalRunLister, logger *slog.Logger) (GCStats, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -80,9 +72,6 @@ func GCWarmRoot(ctx context.Context, root string, ctrl TerminalRunLister, logger
 	return stats, nil
 }
 
-// sweepAgeOldest removes mtime-before-cutoff entries; dirsOnly limits
-// to directories (the git/ sweep). Per-entry errors are logged and
-// skipped.
 func sweepAgeOldest(ctx context.Context, dir string, cutoff time.Time, dirsOnly bool, logger *slog.Logger) (int, int64) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -120,8 +109,6 @@ func sweepAgeOldest(ctx context.Context, dir string, cutoff time.Time, dirsOnly 
 	return removed, bytes
 }
 
-// sweepTerminalRuns removes run dirs the controller reports terminal
-// + finished before cutoff. Dirs not in the response are left alone.
 func sweepTerminalRuns(ctx context.Context, runsDir string, ctrl TerminalRunLister, cutoff time.Time, logger *slog.Logger) (int, int64) {
 	if _, err := os.Stat(runsDir); err != nil {
 		if os.IsNotExist(err) {
@@ -162,7 +149,6 @@ func sweepTerminalRuns(ctx context.Context, runsDir string, ctrl TerminalRunList
 	return removed, bytes
 }
 
-// entrySize walks path summing file sizes; unreadable paths count 0.
 func entrySize(path string) int64 {
 	var total int64
 	_ = filepath.WalkDir(path, func(p string, d fs.DirEntry, err error) error {

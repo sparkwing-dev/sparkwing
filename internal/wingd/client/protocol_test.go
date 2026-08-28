@@ -45,8 +45,6 @@ func TestServedDownLevelDetectsBeingTheOlderSide(t *testing.T) {
 	}
 }
 
-// A newer daemon that serves this client down-level is the side that must
-// survive, however the two binary versions happen to order.
 func TestDownLevelServiceOutranksASupersedingVersion(t *testing.T) {
 	ack := wingwire.HelloAck{ProtocolMajor: 1, NativeProtocolMajor: 2, BinaryVersion: "v1.0.0"}
 	if !supersedes("v2.0.0", ack.BinaryVersion) {
@@ -57,9 +55,6 @@ func TestDownLevelServiceOutranksASupersedingVersion(t *testing.T) {
 	}
 }
 
-// At a matching protocol major nothing outranks the version comparison, so
-// a dev build's refusal to supersede a release is the only thing keeping it
-// from taking the daemon over.
 func TestMatchingProtocolLeavesTheTakeoverToTheVersionComparison(t *testing.T) {
 	ack := wingwire.HelloAck{ProtocolMajor: 2, NativeProtocolMajor: 2, BinaryVersion: "v1.0.0"}
 	if servedDownLevel(ack) {
@@ -101,8 +96,6 @@ func TestMatchingProtocolAcceptsDifferentDisplayVersionsWithSameBuildIdentity(t 
 	}
 }
 
-// A daemon prerelease build version is not a usable module pin, so the
-// refusal must ask for a release by protocol number rather than the dev stamp.
 func TestProtocolTooOldNamesBothMajorsAndNoPinTarget(t *testing.T) {
 	ack := wingwire.HelloAck{
 		ProtocolMajor:       wingd.ProtocolMajor + 1,
@@ -124,10 +117,6 @@ func TestProtocolTooOldNamesBothMajorsAndNoPinTarget(t *testing.T) {
 	}
 }
 
-// A client whose binary supersedes the daemon's version must not take the
-// daemon over when the daemon is already on a newer protocol and is serving
-// this client down-level. Without the servedDownLevel guard the two processes
-// would drain and respawn each other's daemon without bound.
 func TestDownLevelServicePreventsLivelock(t *testing.T) {
 	home := shortHome(t)
 	sock, err := wingd.SocketPath(home)

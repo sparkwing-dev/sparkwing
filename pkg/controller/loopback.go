@@ -52,29 +52,18 @@ type LoopbackConcurrency interface {
 	State(ctx context.Context, key string) (*store.ConcurrencyState, error)
 }
 
-// loopbackTriggerReader is served by state backends that can read back
-// a trigger row. A run started without one (any `sparkwing run`) has no
-// trigger to read, so its absence is answered as not-found, which is
-// what the node path already handles.
 type loopbackTriggerReader interface {
 	GetTrigger(ctx context.Context, triggerID string) (*store.Trigger, error)
 }
 
-// loopbackChildTriggerFinder resolves a prior spawned child so a retry
-// of the parent chains onto it.
 type loopbackChildTriggerFinder interface {
 	FindSpawnedChildTriggerID(ctx context.Context, parentRunID, parentNodeID, pipeline string) (string, error)
 }
 
-// loopbackTriggerEnqueuerWithEnv carries trigger env through the spawn.
 type loopbackTriggerEnqueuerWithEnv interface {
 	EnqueueTriggerWithEnv(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string, triggerEnv map[string]string) (string, error)
 }
 
-// loopbackExecutionRunGetter distinguishes the execution read of a run
-// from the display read. Only the HTTP client implements it; a backend
-// that reads its own storage directly is never redacted, so GetRun is
-// already the execution view.
 type loopbackExecutionRunGetter interface {
 	GetRunForExecution(ctx context.Context, runID string) (*store.Run, error)
 }
@@ -198,10 +187,7 @@ func (l *Loopback) Handler() http.Handler {
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}/request", requireScope(ScopeAdmin, l.ownRun(l.handleRequestApproval)))
 	mux.Handle("POST /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeApprovalsWrite, l.ownRun(l.handleResolveApproval)))
 	mux.Handle("GET /api/v1/runs/{id}/approvals/{nodeID}", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleGetApproval)))
-	// The pending list is cross-run by construction -- the store method
-	// takes no run id -- and stays that way: it is a read, and narrowing
-	// it to this run would answer a different question than the route
-	// name promises on the controller a node's client also talks to.
+
 	mux.Handle("GET /api/v1/approvals/pending", requireScope(ScopeRunsRead, http.HandlerFunc(l.handleListPendingApprovals)))
 
 	mux.Handle("POST /api/v1/triggers", requireScope(ScopeRunsWrite, http.HandlerFunc(l.handleTrigger)))
@@ -220,23 +206,11 @@ func (l *Loopback) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
 	router.Handle("/", l.authenticate(mux))
-	// safety: the same wrappers [Server.Handler] ends with, so a node's
-	// requests are traced and logged identically whichever controller
-	// answered them. The per-request line is Info, which the loopback's
-	// Warn-level logger drops -- a request per state write of every node,
-	// printed over the run output the operator did ask for.
+	// safety: preserve the server wrapper order while the Warn-level loopback
+	// logger suppresses per-request Info lines from node state writes.
 	return otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, l.logger))
 }
 
-// authenticate admits the run's own bearer and nothing else, stamping
-// the admin principal the scope gates and the execution-read check
-// then read.
-//
-// The comparison is constant-time for the same reason the real
-// authenticator's is, even though the listener is bound to loopback:
-// the token is in the environment of every node process, and a
-// timing-distinguishable compare is a defect whether or not this
-// deployment can be reached to exploit it.
 func (l *Loopback) authenticate(next http.Handler) http.Handler {
 	if l.token == "" {
 		return next
@@ -264,19 +238,6 @@ func (l *Loopback) authenticate(next http.Handler) http.Handler {
 	})
 }
 
-// ownRun refuses a mutation aimed at any run but this loopback's.
-//
-// The bearer sits in the environment of every node process the run
-// spawned, and a node body is arbitrary user code. Without this gate,
-// that code could finish, cancel, or rewrite the rows of any other run
-// sharing the backing store -- which on a shared CI bucket is every
-// other run in the organization. The path's run id is the only thing
-// naming the target, so it is the thing to check.
-//
-// The refusal is a 404 rather than a 403 because that is what the
-// controller says about a run the caller cannot see, and the client
-// maps it onto store.ErrNotFound. The message names the mismatch, for
-// the operator reading a failed node's row.
 func (l *Loopback) ownRun(h http.HandlerFunc) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if id := r.PathValue("id"); id != l.runID {
@@ -287,8 +248,6 @@ func (l *Loopback) ownRun(h http.HandlerFunc) http.Handler {
 		h(w, r)
 	})
 }
-
-// --- runs ---
 
 func (l *Loopback) handleCreateRun(w http.ResponseWriter, r *http.Request) {
 	var body store.Run
@@ -320,10 +279,6 @@ func (l *Loopback) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, runForResponse(r, run))
 }
 
-// getRun picks the execution read when the caller asked for it and the
-// backend distinguishes the two. runForResponse still redacts what the
-// caller may not see, so the choice here only decides whether the
-// unredacted values were ever fetched.
 func (l *Loopback) getRun(r *http.Request, runID string) (*store.Run, error) {
 	if includeHas(r.URL.Query().Get("include"), store.IncludeSecretValues) {
 		if ex, ok := l.state.(loopbackExecutionRunGetter); ok {
@@ -418,8 +373,6 @@ func (l *Loopback) handlePipelineLatest(w http.ResponseWriter, r *http.Request) 
 	}
 	writeJSON(w, http.StatusOK, store.RedactedRun(run))
 }
-
-// --- nodes ---
 
 func (l *Loopback) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 	var body store.Node
@@ -665,8 +618,6 @@ func (l *Loopback) handleListNodeDispatches(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, out)
 }
 
-// --- steps ---
-
 func (l *Loopback) handleStartNodeStep(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		StepID string `json:"step_id"`
@@ -781,8 +732,6 @@ func (l *Loopback) handleListNodeSteps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})
 }
 
-// --- debug pauses ---
-
 func (l *Loopback) handleCreateDebugPause(w http.ResponseWriter, r *http.Request) {
 	var body store.DebugPause
 	if err := decodeJSON(r, &body); err != nil {
@@ -837,8 +786,6 @@ func (l *Loopback) handleReleaseDebugPause(w http.ResponseWriter, r *http.Reques
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-
-// --- approvals ---
 
 func (l *Loopback) handleRequestApproval(w http.ResponseWriter, r *http.Request) {
 	runID, nodeID := r.PathValue("id"), r.PathValue("nodeID")
@@ -942,21 +889,6 @@ func (l *Loopback) handleListPendingApprovals(w http.ResponseWriter, r *http.Req
 	writeJSON(w, http.StatusOK, map[string]any{"approvals": rows})
 }
 
-// --- triggers ---
-
-// handleTrigger spawns a child run through the state backend's own
-// enqueue, which owns cycle detection and child-trigger idempotence for
-// the storage it writes to.
-//
-// What lands depends on the backing, and the difference is visible to
-// an operator. Over object-store state, only a trigger record is
-// written: there is no dispatcher behind this listener to pick it up,
-// and a pending run row for work nothing will execute is a lie the
-// dashboard would show as pending forever. Over a mirror or a
-// controller client, the enqueue delegates to the canonical backend's
-// own EnqueueTrigger, which does create the run row the controller
-// creates -- the mirror's canonical side is a real controller, and this
-// route does not get to override what it records.
 func (l *Loopback) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	var body triggerReq
 	if err := decodeJSON(r, &body); err != nil {
@@ -1002,9 +934,6 @@ func (l *Loopback) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, triggerResp{RunID: runID, Status: "dispatched"})
 }
 
-// triggerErrorStatus maps a rejected enqueue onto the status the real
-// controller answers with, so the client's error text and the caller's
-// branch on it are the same either way.
 func triggerErrorStatus(err error) int {
 	switch {
 	case errors.Is(err, storage.ErrNotSupported):
@@ -1018,21 +947,9 @@ func triggerErrorStatus(err error) int {
 	}
 }
 
-// handleGetTrigger answers a backend that cannot read triggers at all
-// the same way it answers one that has no such trigger: not-found.
-//
-// This is the first call a node process makes, and it treats anything
-// other than not-found as fatal. A bucket without conditional writes
-// keeps no trigger records, so "unsupported" and "absent" are the same
-// fact there -- reporting the first would fail every node of a run
-// whose only sin is a store that cannot compare-and-swap.
 func (l *Loopback) handleGetTrigger(w http.ResponseWriter, r *http.Request) {
-	// safety: a mirrored state backend implements no GetTrigger, so a
-	// mirrored run answers not-found here unconditionally. Benign today:
-	// `sparkwing run` creates no trigger row, so there is nothing to read,
-	// and the node path treats not-found as "no trigger" already. A
-	// mirror that later forwards the read makes this arm dead rather than
-	// wrong.
+	// safety: mirrored state has no trigger row, and the node path already
+	// treats not-found as no trigger.
 	reader, ok := l.state.(loopbackTriggerReader)
 	if !ok {
 		writeError(w, http.StatusNotFound, store.ErrNotFound)
@@ -1066,8 +983,6 @@ func (l *Loopback) handleFindSpawnedChildTrigger(w http.ResponseWriter, r *http.
 	writeJSON(w, http.StatusOK, map[string]string{"run_id": id})
 }
 
-// --- concurrency ---
-
 func (l *Loopback) handleConcurrencyState(w http.ResponseWriter, r *http.Request) {
 	if l.concurrency == nil {
 		writeError(w, http.StatusNotFound, store.ErrNotFound)
@@ -1100,8 +1015,6 @@ func (l *Loopback) handleConcurrencyState(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// --- artifacts ---
-
 func (l *Loopback) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	if key == "" {
@@ -1122,10 +1035,6 @@ func (l *Loopback) handleArtifactGet(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.Copy(w, rc)
 }
 
-// writeStateError maps a state-backend error onto the status the
-// client turns back into the same error: not-found into
-// store.ErrNotFound, an operation the backend does not implement into
-// 501, anything else into a 500 carrying the message.
 func writeStateError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, store.ErrNotFound), errors.Is(err, storage.ErrNotFound):

@@ -136,29 +136,23 @@ func New(art storage.ArtifactStore, opts ...Option) *Backend {
 
 var _ storage.StateStore = (*Backend)(nil)
 
-// runState holds the in-memory log and derived snapshot for one run.
 type runState struct {
 	mu        sync.Mutex
 	envelopes []envelope
 	bufSize   int
 	dirty     bool
 
-	// flushing is non-nil while a flush holds this run and closes when
-	// that flush releases it, so a caller that needs durability can wait
-	// the flush out instead of dropping its own write. flushedLen and
-	// flushedSize are how much of the log that flush is carrying.
 	flushing    chan struct{}
 	flushedLen  int
 	flushedSize int
 
-	// Derived snapshot, kept up to date as envelopes are appended.
 	run       *store.Run
 	nodes     map[string]*store.Node
-	steps     map[string]map[string]*store.NodeStep // nodeID -> stepID
-	stepOrder []stepKey                             // insertion order for ListNodeSteps
+	steps     map[string]map[string]*store.NodeStep
+	stepOrder []stepKey
 	events    []store.Event
 	metrics   map[string][]store.MetricSample
-	loaded    bool // true once we've attempted a load-from-disk
+	loaded    bool
 }
 
 type stepKey struct {
@@ -179,10 +173,6 @@ func newRunState() *runState {
 	}
 }
 
-// getRunState returns the entry for runID, lazily loading from disk
-// on first access. If load=true and the run isn't already in memory,
-// a Get + parse is attempted; storage.ErrNotFound is treated as a
-// fresh run with an empty log.
 func (b *Backend) getRunState(ctx context.Context, runID string, load bool) (*runState, error) {
 	b.mu.Lock()
 	rs, ok := b.runs[runID]
@@ -203,8 +193,6 @@ func (b *Backend) getRunState(ctx context.Context, runID string, load bool) (*ru
 	return rs, nil
 }
 
-// loadLocked pulls the on-disk NDJSON for runID and replays it into
-// rs. Called with rs.mu held.
 func (b *Backend) loadLocked(ctx context.Context, runID string, rs *runState) error {
 	rc, err := b.art.Get(ctx, stateKey(runID))
 	if err != nil {
@@ -225,11 +213,6 @@ func (b *Backend) loadLocked(ctx context.Context, runID string, rs *runState) er
 	return nil
 }
 
-// appendEnvelope appends an envelope to the run's log, updates the
-// derived snapshot, and marks the run dirty. If the pending buffer
-// exceeds bufferLimit, an opportunistic flush is triggered
-// synchronously (callers tolerate the latency in exchange for bounded
-// memory).
 func (b *Backend) appendEnvelope(ctx context.Context, runID string, env envelope) error {
 	rs, err := b.getRunState(ctx, runID, true)
 	if err != nil {
@@ -248,18 +231,12 @@ func (b *Backend) appendEnvelope(ctx context.Context, runID string, env envelope
 	return nil
 }
 
-// lookupRun returns the in-memory state for runID, or nil when the
-// run has never been touched in this process.
 func (b *Backend) lookupRun(runID string) *runState {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.runs[runID]
 }
 
-// claimFlush reserves the run for one flush. The caller that wins the
-// claim gets the envelopes to write. A caller that loses gets the
-// channel the current holder closes on release. A clean run yields
-// neither.
 func (rs *runState) claimFlush() ([]envelope, <-chan struct{}) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
@@ -277,12 +254,6 @@ func (rs *runState) claimFlush() ([]envelope, <-chan struct{}) {
 	return envs, nil
 }
 
-// flushRun makes every envelope appended before the call durable, and
-// only returns nil once that is true. When another flush holds the run
-// it waits for that flush to land and then re-claims, because the
-// holder snapshotted the log before this caller's envelopes existed
-// and cannot be trusted to carry them. Cancelling ctx while waiting
-// returns ctx.Err() rather than a false success.
 func (b *Backend) flushRun(ctx context.Context, runID string) error {
 	for {
 		rs := b.lookupRun(runID)
@@ -305,11 +276,6 @@ func (b *Backend) flushRun(ctx context.Context, runID string) error {
 	}
 }
 
-// tryFlushRun flushes the run unless another flush already holds it.
-// It is for callers that want the batching but promise nobody
-// durability: the ticker and the buffer-threshold path. Skipping is
-// safe for them because a run with envelopes past the in-flight
-// snapshot stays dirty, so the next flush picks them up.
 func (b *Backend) tryFlushRun(ctx context.Context, runID string) error {
 	rs := b.lookupRun(runID)
 	if rs == nil {
@@ -322,8 +288,6 @@ func (b *Backend) tryFlushRun(ctx context.Context, runID string) error {
 	return b.putEnvelopes(ctx, runID, rs, envs)
 }
 
-// putEnvelopes serializes envs and PUTs them as the run's whole blob.
-// Callers must hold the run's flush claim; this releases it.
 func (b *Backend) putEnvelopes(ctx context.Context, runID string, rs *runState, envs []envelope) error {
 	body, err := encodeEnvelopes(envs)
 	if err != nil {
@@ -332,7 +296,8 @@ func (b *Backend) putEnvelopes(ctx context.Context, runID string, rs *runState, 
 	}
 	key := stateKey(runID)
 
-	// safety: while the outbox holds writes for this key, keep flushing through it so the FIFO drain isn't overtaken by a direct PUT.
+	// safety: while this key has queued writes, keep using the outbox so a direct
+	// PUT cannot overtake FIFO drain.
 	if b.outbox != nil {
 		if pending, perr := b.outbox.HasPending(ctx, key); perr == nil && pending {
 			serr := b.outbox.Stage(ctx, OutboxKindState, key, body)
@@ -359,12 +324,6 @@ func (b *Backend) putEnvelopes(ctx context.Context, runID string, rs *runState, 
 	return putErr
 }
 
-// markFlushed releases the run's flush claim and, when delivered is
-// true, marks clean only the part of the log that was actually written.
-// Envelopes appended while the PUT was in flight keep the run dirty,
-// otherwise the last append before a terminal state could be marked
-// durable by a write that never contained it. A run handed off to the
-// outbox counts as delivered: the outbox owns replay from there.
 func (b *Backend) markFlushed(rs *runState, delivered bool) {
 	rs.mu.Lock()
 	if delivered {
@@ -395,9 +354,6 @@ func (b *Backend) flushLoop() {
 	}
 }
 
-// dirtyRunIDs lists the runs with unwritten envelopes, including runs
-// a flush currently holds: a holder's snapshot may predate the newest
-// appends, so a durable caller still has work to do on them.
 func (b *Backend) dirtyRunIDs() []string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -433,12 +389,8 @@ func (b *Backend) Close() error {
 	return nil
 }
 
-// stateKey is the object-store key for one run's state log. Matches
-// the path orchestrator.DumpRunState writes today so a Mode 2 reader
-// can also pick up legacy completed-run dumps.
 func stateKey(runID string) string { return "runs/" + runID + "/state.ndjson" }
 
-// encodeEnvelopes serializes envs as NDJSON. One line per envelope.
 func encodeEnvelopes(envs []envelope) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
@@ -450,9 +402,6 @@ func encodeEnvelopes(envs []envelope) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// parseEnvelopes scans NDJSON from r and returns the envelope log.
-// Blank lines are tolerated. Buffer size is sized to accommodate
-// planSnapshot blobs inlined into the run record.
 func parseEnvelopes(r io.Reader) ([]envelope, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 1<<20), 16<<20)
@@ -471,9 +420,6 @@ func parseEnvelopes(r io.Reader) ([]envelope, error) {
 	return out, scanner.Err()
 }
 
-// applyEnvelope replays one envelope into the derived snapshot. Last
-// write wins for status/summary fields; annotations and metrics
-// accumulate. Called with rs.mu held.
 func applyEnvelope(rs *runState, env envelope) {
 	switch env.Kind {
 	case KindRun:
@@ -766,10 +712,6 @@ func (b *Backend) SetNodeSummary(ctx context.Context, runID, nodeID, md string) 
 	return b.mutateNode(ctx, runID, nodeID, func(n *store.Node) { n.Summary = md })
 }
 
-// mutateNode reads the current node snapshot, applies f, and appends
-// a new KindNode envelope reflecting the mutation. Creates a stub
-// row if the node doesn't exist yet (mirrors *store.Store's UPDATE-
-// without-error behavior on missing rows during reorders).
 func (b *Backend) mutateNode(ctx context.Context, runID, nodeID string, f func(*store.Node)) error {
 	rs, err := b.getRunState(ctx, runID, true)
 	if err != nil {
@@ -939,10 +881,6 @@ func RunIDFromStateKey(key string) (string, bool) {
 	return mid, true
 }
 
-// isTransient classifies an error as worth retrying via the outbox.
-// Context deadlines, network timeouts, and connection-refused are
-// transient; HTTP 4xx (auth, policy) bubble up unchanged so the user
-// sees the configuration problem.
 func isTransient(err error) bool {
 	if err == nil {
 		return false

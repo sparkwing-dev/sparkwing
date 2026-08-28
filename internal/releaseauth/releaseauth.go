@@ -1,4 +1,3 @@
-// Package releaseauth signs and verifies immutable Sparkwing release assets.
 package releaseauth
 
 import (
@@ -8,8 +7,6 @@ import (
 	"fmt"
 )
 
-// TrustedPublicKeys is the updater trust set. Rotation adds the replacement
-// key before the release signer changes and removes the retired key later.
 var TrustedPublicKeys = []string{
 	"whVb35jCbltDF56nDhCzCJOPR/6ePfrJUWnEawP9CrI=",
 }

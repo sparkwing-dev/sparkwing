@@ -74,18 +74,9 @@ const statusIcon: Record<string, { icon: string; color: string }> = {
   running: { icon: "●", color: "text-indigo-400 animate-pulse" },
 };
 
-// TS_PREFIX_RE matches the [YYYY-MM-DD HH:MM:SS.mmm] prefix baked
-// into JSON-derived log lines by recordToLine. The renderer splits
-// this off so it can be styled and toggled independently of the line
-// body. The date group is optional so lines produced before it was
-// added (a cached bundle, a pasted log) still render their clock.
 const TS_PREFIX_RE =
   /^\[(?:(\d{4}-\d{2}-\d{2}) )?(\d{2}:\d{2}:\d{2}\.\d{3})\]\s/;
 
-// tsStamp turns a TS_PREFIX_RE match into what the line should show:
-// the clock alone, or the date in front of it. Lines that predate the
-// date in the prefix have nothing to add, so they stay clock-only
-// whatever the toggle says.
 function tsStamp(m: RegExpMatchArray, showDate: boolean): string {
   return showDate && m[1] ? `${m[1]} ${m[2]}` : m[2];
 }
@@ -105,15 +96,9 @@ function LogLines({
   startLine: number;
   showTimestamps?: boolean;
   showDate?: boolean;
-  // When set, lines whose absolute number is in the set are painted
-  // with a yellow wash; the currentMatchLine gets a brighter band.
   matchLineSet?: Set<number>;
   currentMatchLine?: number;
-  // When set (filter mode), lines NOT in the set are hidden; gaps
-  // between visible lines collapse into a "…" separator row.
   visibleLineSet?: Set<number> | null;
-  // Top-level find hits -- painted fuchsia so they're visually
-  // distinct from the per-bucket yellow search.
   findLineSet?: Set<number>;
   findCurrentLine?: number | null;
 }) {
@@ -247,16 +232,12 @@ function StepBucket({
   section: StepSection;
   lineOffset: number;
   maxDurationMs: number;
-  // When set, the bar renders as a positioned waterfall segment
-  // relative to the chart's overall timeline. When zero/null we fall
-  // back to a left-aligned, length-only bar.
   waterfallStartMs?: number | null;
   waterfallTotalMs?: number | null;
   expanded?: boolean;
   onToggle?: () => void;
   showTimestamps?: boolean;
   showDate?: boolean;
-  // Step-level attributes that mirror the StepDag pill set.
   isResult?: boolean;
   hasSkipIf?: boolean;
   matchLineSet?: Set<number>;
@@ -269,9 +250,6 @@ function StepBucket({
     section.status === "failed" || section.status === "running";
   const [localExpanded, setLocalExpanded] = useState(defaultExpanded);
   const expanded = expandedProp ?? localExpanded;
-  // Wrapper ref so collapsing-from-stuck can scroll the header back
-  // to its sticky resting position. Otherwise the section's height
-  // shrinks under the user's cursor and they lose their place.
   const wrapperRef = useRef<HTMLDivElement>(null);
   const [flashing, setFlashing] = useState(false);
   const setExpanded = (next: boolean) => {
@@ -279,8 +257,6 @@ function StepBucket({
     const header = wrapper?.firstElementChild as HTMLElement | null;
     let wasStuck = false;
     if (expanded && wrapper && header) {
-      // Stuck when the header's viewport top has drifted above its
-      // wrapper's natural top (sticky positioning kicked in).
       wasStuck =
         header.getBoundingClientRect().top >
         wrapper.getBoundingClientRect().top + 1;
@@ -329,10 +305,6 @@ function StepBucket({
         ? "bg-indigo-400/60"
         : "bg-cyan-400/50";
 
-  // stepNameFromSection strips the "<nodeId> · " prefix when present;
-  // leaves the bare node-scope sections (the setup bucket) returning
-  // the full section.name. The data attribute below matches what
-  // external panes use to drive focus-step scrolling.
   const dataStep = section.name.includes(" · ")
     ? section.name.split(" · ").slice(-1)[0]
     : null;
@@ -340,14 +312,11 @@ function StepBucket({
     <div
       ref={wrapperRef}
       data-step-id={dataStep ?? undefined}
-      // scroll-mt-14 matches the step header's sticky top (3.5rem) so
-      // scrollIntoView leaves room for the AllNodesLogs node header
-      // and LogBucketView toolbar that sit above it.
       className={`border-b border-[var(--border)] last:border-b-0 scroll-mt-14 ${section.status === "failed" ? "bg-red-500/5" : ""}`}
     >
-      {/* Header is a div, not a button, so the inline CopyButton can
-        sit inside it without nesting button elements (invalid HTML).
-        Keyboard activation is wired via role + Enter/Space handler. */}
+      {
+
+                                                                       }
       <div
         role="button"
         tabIndex={0}
@@ -585,11 +554,6 @@ function InlineLogView({
   findLineSet?: Set<number>;
   findCurrentLine?: number | null;
 }) {
-  // Each line in the inline view is prefixed with the step it
-  // belongs to: `<step> | <line>`. That keeps a flat top-to-bottom
-  // scroll attributable without the banner separators the legacy
-  // STEP-banner format used. Preamble / summary / between sections
-  // get no prefix because they don't belong to any step.
   const renderLine = (
     line: string,
     key: number,
@@ -685,8 +649,6 @@ function InlineLogView({
           );
         }
 
-        // preamble / between -- no step prefix; these lines aren't
-        // owned by any single step.
         return (
           <div key={i}>
             {section.lines.map((line, j) =>
@@ -702,22 +664,9 @@ function InlineLogView({
 interface LogBucketViewProps {
   parsed: ParsedLog;
   jobId?: string;
-  // When set, the matching step bucket auto-expands and scrolls into
-  // view. Match is on the stepName suffix of section.name (which is
-  // formatted as "<nodeId> · <stepName>"). External selection driver
-  // for cross-pane navigation (left nodes panel / StepDag → logs).
   focusStep?: string | null;
-  // When set, locates the section containing the absolute line
-  // number, expands its step bucket, and scrolls the line into
-  // view. Driven by the cross-node global log search.
   focusLine?: number | null;
-  // Structured-state lookup for each parsed step bucket. The header
-  // renders the step's is_result / has_skip_if / annotation flags as
-  // chips alongside the step name, matching the StepDag pill set.
   nodeSteps?: { id: string; is_result?: boolean; has_skip_if?: boolean }[];
-  // Top-level find hits for this node (absolute log-line numbers).
-  // Each line gets a fuchsia wash; findCurrentLine is the brighter
-  // "current" band. Distinct from the per-bucket yellow search.
   findLineSet?: Set<number>;
   findCurrentLine?: number | null;
 }
@@ -732,22 +681,12 @@ export default function LogBucketView({
   findCurrentLine,
 }: LogBucketViewProps) {
   const [viewMode, setViewMode] = useState<"steps" | "inline">("steps");
-  // Timestamps default on -- they're the cheapest way to correlate
-  // log lines with the timeline view, and operators reach for them
-  // first when debugging. The toggle parks them when prose-y log
-  // bodies dominate a view.
   const [showTimestamps, setShowTimestamps] = useState(true);
-  // The date is off by default: within one run nearly every line
-  // shares a date, so it's a wide column that repeats itself. It
-  // earns its space when reading an old run, a run that crossed
-  // midnight, or logs pasted next to another day's.
   const [showDate, setShowDate] = useState(false);
   const steps = parsed.sections.filter(
     (s) => s.type === "step",
   ) as StepSection[];
 
-  // Lifted per-step expand state so the header can offer expand/
-  // collapse-all. Map key = step index in parsed.sections.
   const [stepOverrides, setStepOverrides] = useState<Record<number, boolean>>(
     {},
   );
@@ -774,9 +713,6 @@ export default function LogBucketView({
       });
     });
   };
-  // Map each find-hit line to the step section it sits in and force
-  // that bucket open. Otherwise the fuchsia wash hides behind a
-  // collapsed header.
   const findHitSections = useMemo(() => {
     if (!findLineSet || findLineSet.size === 0) return null;
     const out = new Set<number>();
@@ -809,17 +745,6 @@ export default function LogBucketView({
       cancelled = true;
     };
   }, [findHitSections]);
-  // Build the error-block list: every log line in any section whose
-  // body contains an ERROR / error: / FAIL marker. Each block carries
-  // its section index (so the walker can auto-expand the containing
-  // step bucket) plus the absolute line number (rendered as
-  // data-line on the line `<div>`) so scrollIntoView lands on the
-  // actual message instead of the section header.
-  // Consecutive error lines collapse into one block: a run of 50
-  // "ERROR shard-bravo: item N/55 FAILED" lines is one navigation
-  // target, not 50. The block's anchor is its first line so scroll
-  // lands at the top of the error burst. A non-matching line breaks
-  // the run, and the next matching line starts a new block.
   const errorBlocks = useMemo(() => {
     const out: { sectionIdx: number; line: number }[] = [];
     const reError = /\berror\b|\bfail\b|\bpanic\b/i;
@@ -843,8 +768,6 @@ export default function LogBucketView({
     if (errorBlocks.length === 0) return;
     errorCursor.current = (errorCursor.current + 1) % errorBlocks.length;
     const target = errorBlocks[errorCursor.current];
-    // Auto-expand the containing step bucket (no-op for between /
-    // summary sections, which render their lines inline already).
     setStepOverrides((prev) => ({ ...prev, [target.sectionIdx]: true }));
     requestAnimationFrame(() => {
       const el = containerRef.current?.querySelector(
@@ -853,16 +776,6 @@ export default function LogBucketView({
       el?.scrollIntoView({ block: "center", behavior: "smooth" });
     });
   };
-  // Search: free-text matching across every log line. Lines that
-  // contain the query (case-insensitive) get a yellow wash; the
-  // active match gets a brighter highlight. Walker mirrors
-  // nextError -- expands the containing step bucket and scrolls the
-  // line into view. Empty query disables the highlight + walker.
-  //
-  // Filter mode layers on top: when on, only matching lines (plus
-  // `searchContext` neighbors on each side) render; gaps collapse
-  // into a "…" separator. Toggling filter off snaps the scroll
-  // back to the active match so position survives the mode swap.
   const [searchQuery, setSearchQuery] = useState("");
   const [matchCursor, setMatchCursor] = useState(0);
   const [filterMode, setFilterMode] = useState(false);
@@ -886,10 +799,6 @@ export default function LogBucketView({
     () => new Set(searchMatches.map((m) => m.line)),
     [searchMatches],
   );
-  // visibleLineSet: when filter mode is on, the union of match lines
-  // and their `searchContext` neighbors. null = show everything.
-  // LogLines uses this to skip non-matching rows and collapse gaps
-  // into a "…" separator.
   const visibleLineSet = useMemo(() => {
     if (!filterMode || searchMatches.length === 0) return null;
     const set = new Set<number>();
@@ -900,8 +809,6 @@ export default function LogBucketView({
     }
     return set;
   }, [filterMode, searchMatches, searchContext]);
-  // Reset cursor when the query / match list changes so the next
-  // arrow lands on the first hit instead of an index past the end.
   useEffect(() => {
     let cancelled = false;
     queueMicrotask(() => {
@@ -911,11 +818,6 @@ export default function LogBucketView({
       cancelled = true;
     };
   }, [searchQuery]);
-  // Filter + highlight update live as the user types (the render
-  // already re-flows from searchMatches), but the view itself only
-  // jumps on explicit nav: Enter, Shift+Enter, or the ↑/↓ buttons.
-  // Auto-jumping while typing was grabbing the viewport during
-  // browsing, which felt wrong.
   const jumpToMatch = (idx: number) => {
     if (searchMatches.length === 0) return;
     const wrapped =
@@ -935,13 +837,6 @@ export default function LogBucketView({
   const prevMatch = () => jumpToMatch(matchCursor - 1);
   const currentMatchLine =
     searchMatches.length > 0 ? (searchMatches[matchCursor]?.line ?? -1) : -1;
-  // External focus-step: when a step is selected elsewhere (left
-  // panel row, StepDag click), expand that step's bucket and scroll
-  // it into view. Match against the section's parsed step name so
-  // the lookup stays in step-id terms.
-  // Fire only when focusStep actually changes. The last-focused guard
-  // prevents streaming-log renders from snapping the view back after
-  // the user moves it.
   const lastFocusedStep = useRef<string | null>(null);
   useEffect(() => {
     const incoming = focusStep ?? null;
@@ -958,9 +853,6 @@ export default function LogBucketView({
       return stepName === incoming;
     });
     if (matchIdx < 0) return;
-    // Single-step-open behavior: collapse every other step bucket
-    // so the selected one sits in isolation, mirroring how the
-    // outer AllNodesLogs collapses sibling nodes on selection.
     const next: Record<number, boolean> = {};
     for (const i of stepIndices) next[i] = i === matchIdx;
     return deferOnce(
@@ -978,11 +870,6 @@ export default function LogBucketView({
       },
     );
   }, [focusStep, parsed, stepIndices]);
-  // Same change-detection trick as focusStep: only act when the
-  // incoming focusLine actually changes value (not on every parsed
-  // re-render). The walker finds which section contains the line,
-  // force-expands it, and scrolls the matching data-line element
-  // into view.
   const lastFocusedLine = useRef<number | null>(null);
   const [pendingLineFocus, setPendingLineFocus] = useState<{
     line: number;
@@ -1004,9 +891,6 @@ export default function LogBucketView({
       }
       lineCursor += sec.lines.length;
     }
-    // Logs from a deep-link may arrive before the log fetch resolves;
-    // wait until parsed has the target section. Expansion is phase one:
-    // the line DOM does not exist inside a collapsed completed bucket.
     if (sectionIdx < 0) return;
     if (lastFocusedLine.current === incoming) return;
     return scheduleMicrotask(() => {
@@ -1014,8 +898,6 @@ export default function LogBucketView({
       setPendingLineFocus({ line: incoming, sectionIdx });
     });
   }, [focusLine, parsed]);
-  // Phase two runs after the expansion commit. The extra cancellable frame
-  // keeps a superseded target from scrolling after a transition or unmount.
   useEffect(() => {
     if (!pendingLineFocus || pendingLineFocus.line !== focusLine) return;
     return deferOnce(
@@ -1055,9 +937,6 @@ export default function LogBucketView({
     return max;
   }, [parsed]);
 
-  // Waterfall extent: earliest step_start to latest step_end across
-  // all steps with timestamp data. When we have it, each bar renders
-  // positioned along this shared timeline.
   const { waterfallStartMs, waterfallTotalMs } = useMemo(() => {
     let start = Infinity;
     let end = -Infinity;
@@ -1082,8 +961,8 @@ export default function LogBucketView({
       ref={containerRef}
       className="bg-[#0d1117] border border-[var(--border)] rounded-lg"
     >
-      {/* Header. Sits under the AllNodesLogs node header (which sticks
-          at top-0), so we offset down to avoid overlap. */}
+      {
+                                                           }
       <div className="sticky top-7 z-20 flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[#161b22] rounded-t-lg">
         <span className="text-[10px] text-[var(--muted)] uppercase tracking-wider">
           {steps.length} step{steps.length !== 1 ? "s" : ""}
@@ -1131,9 +1010,6 @@ export default function LogBucketView({
               onClick={() => {
                 const wasOn = filterMode;
                 setFilterMode(!wasOn);
-                // Toggling filter off keeps position: scroll back to
-                // the current match after the render that re-reveals
-                // surrounding lines.
                 if (wasOn && currentMatchLine > 0) {
                   requestAnimationFrame(() => {
                     const el = containerRef.current?.querySelector(
@@ -1235,9 +1111,9 @@ export default function LogBucketView({
         >
           ts
         </button>
-        {/* Turning the date on turns timestamps on with it -- asking
-          for the date while the whole stamp is hidden can only mean
-          you want to see it. */}
+        {
+
+                                }
         <button
           onClick={() => {
             const next = !showDate;
@@ -1349,7 +1225,6 @@ export default function LogBucketView({
   );
 }
 
-// Convenience wrapper for raw log string
 export function LogBucketViewFromRaw({
   rawLog,
   jobId,
@@ -1361,7 +1236,6 @@ export function LogBucketViewFromRaw({
   return <LogBucketView parsed={parsed} jobId={jobId} />;
 }
 
-// Convenience wrapper for streaming lines
 export function LogBucketViewFromLines({
   lines,
   jobId,

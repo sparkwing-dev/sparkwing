@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// fakeOps is a scripted Ops for exercising the verdict ladder without a
-// real checkout or toolchain.
 type fakeOps struct {
 	dirty      bool
 	pin        string

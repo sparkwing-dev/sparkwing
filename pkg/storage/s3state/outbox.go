@@ -295,8 +295,6 @@ func (o *Outbox) Close() error {
 	return o.db.Close()
 }
 
-// byteReader wraps body in a fresh reader on every call (Put may be
-// retried under the hood by the AWS SDK).
 type byteReaderImpl struct{ b []byte }
 
 func (r *byteReaderImpl) Read(p []byte) (int, error) {

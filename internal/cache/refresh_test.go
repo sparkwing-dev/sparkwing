@@ -10,13 +10,6 @@ import (
 	"testing"
 )
 
-// TestHandleGitRefresh_RunsFetchOnCachedRepo simulates dispatch-time
-// eager refresh: a registered repo with a local bare mirror exists,
-// the operator just pushed a new commit, and the dispatcher POSTs
-// /git/refresh?repo=... before creating a trigger. We verify the
-// handler runs git fetch (by pointing origin at a throwaway upstream
-// and confirming refs propagate), returns 200, and writes a JSON
-// ack.
 func TestHandleGitRefresh_RunsFetchOnCachedRepo(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH")
@@ -77,8 +70,6 @@ func TestHandleGitRefresh_RunsFetchOnCachedRepo(t *testing.T) {
 	}
 }
 
-// TestHandleGitRefresh_MissingArgs guards the input contract: at least
-// one of name/repo must be set.
 func TestHandleGitRefresh_MissingArgs(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/git/refresh", nil)
 	w := httptest.NewRecorder()
@@ -88,9 +79,6 @@ func TestHandleGitRefresh_MissingArgs(t *testing.T) {
 	}
 }
 
-// TestHandleGitRefresh_UncachedRepo: 404 when the repo URL isn't
-// already mirrored. The dispatcher tolerates this -- first-time repos
-// will be cloned on the regular /git/<name> path on first runner pull.
 func TestHandleGitRefresh_UncachedRepo(t *testing.T) {
 	oldRoot, oldRepoDir := dataRoot, repoDir
 	tmp := t.TempDir()
@@ -111,7 +99,6 @@ func TestHandleGitRefresh_UncachedRepo(t *testing.T) {
 	}
 }
 
-// TestHandleGitRefresh_GETRejected pins the POST-only contract.
 func TestHandleGitRefresh_GETRejected(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/git/refresh?repo=foo", nil)
 	w := httptest.NewRecorder()

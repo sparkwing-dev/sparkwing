@@ -14,11 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// RunOps serves the `ops` subcommand for any compiled pipeline binary. A host
-// running only a pinned pipeline binary -- no sparkwing CLI installed -- still
-// reaches the local admission daemon's operational surfaces through it:
-// everything the CLI shows and repairs at runtime, the pipeline binary can do
-// for itself. Rendering is shared with the CLI through internal/opsview.
 func RunOps(args []string) error { return runOpsCLI(args) }
 
 func runOpsCLI(args []string) error {
@@ -42,8 +37,6 @@ func runOpsCLI(args []string) error {
 	}
 }
 
-// opsOutputFlags registers -o and --output on fs and returns an accessor that
-// prefers the short form, so operators can use either spelling.
 func opsOutputFlags(fs *flag.FlagSet) func() string {
 	o := fs.String("o", "", "output format: pretty|json|plain")
 	output := fs.String("output", "", "output format: pretty|json|plain")
@@ -55,8 +48,6 @@ func opsOutputFlags(fs *flag.FlagSet) func() string {
 	}
 }
 
-// resolveOpsFormat picks the output format: an explicit choice wins; otherwise
-// pretty on a terminal and json when piped, matching the CLI's convention.
 func resolveOpsFormat(explicit string) string {
 	if explicit != "" {
 		return explicit
@@ -67,9 +58,6 @@ func resolveOpsFormat(explicit string) string {
 	return "json"
 }
 
-// runOpsQueue prints the headless binary's view of local admission. A daemon
-// it could not reach renders as unreachable and fails, because an empty queue
-// is a claim this process is in no position to make.
 func runOpsQueue(args []string) error {
 	fs := flag.NewFlagSet("ops queue", flag.ContinueOnError)
 	getOut := opsOutputFlags(fs)
@@ -184,9 +172,6 @@ func runOpsVersion(args []string) error {
 	return nil
 }
 
-// opsLegacyWarningLine renders the coexistence warning shown by ops doctor
-// when older-pinned binaries admit outside the daemon. Empty when none are
-// live.
 func opsLegacyWarningLine(n int) string {
 	if n <= 0 {
 		return ""

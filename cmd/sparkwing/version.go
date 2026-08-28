@@ -1,8 +1,3 @@
-// `sparkwing version` is the kubectl-style version surface: one
-// command shows the CLI version, the latest published release
-// (network-checked, ~3s timeout), the SDK pin in the current
-// repo's .sparkwing/go.mod, and any sparks libraries declared
-// alongside it.
 package main
 
 import (
@@ -27,7 +22,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// VersionReport is the JSON shape of `sparkwing version --json`.
 type VersionReport struct {
 	CLI            InfoVersion     `json:"cli"`
 	SchemaVersion  int             `json:"schema_version"`
@@ -38,9 +32,6 @@ type VersionReport struct {
 	Project        *VersionProject `json:"project,omitempty"`
 }
 
-// VersionProject collects per-repo version info: the SDK pin in
-// .sparkwing/go.mod and any sparks library pins. Nil when the
-// command is run outside a sparkwing project.
 type VersionProject struct {
 	SparkwingDir string     `json:"sparkwing_dir"`
 	SDKPin       string     `json:"sdk_pin,omitempty"`
@@ -49,27 +40,15 @@ type VersionProject struct {
 	Sparks       []SparkPin `json:"sparks,omitempty"`
 }
 
-// SparkPin is one sparkwing-dev/sparks-* module declared in the
-// project's go.mod (and presumably its sparks.yaml).
 type SparkPin struct {
 	Module  string `json:"module"`
 	Version string `json:"version"`
 }
 
-// versionLatestURL is the canonical "what's the newest tag"
-// pointer. github.com/.../releases/latest 302-redirects to
-// /releases/tag/<latest-tag>; we HEAD it and parse the tag from
-// the Location header. No GitHub API token, no rate-limited JSON.
 const versionLatestURL = "https://github.com/sparkwing-dev/sparkwing/releases/latest"
 
-// versionFetchTimeout caps the latest-release lookup. Short enough
-// that an offline laptop still gets a useful command in seconds,
-// long enough that a slow link succeeds.
 const versionFetchTimeout = 3 * time.Second
 
-// sdkModulePath is the canonical Go module path for the sparkwing
-// SDK. Used both for the SDK-pin lookup and for distinguishing the
-// SDK from sparks-* sibling modules.
 const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 
 func runVersion(args []string) error {
@@ -150,10 +129,6 @@ func gatherVersionReport(offline bool) VersionReport {
 	return r
 }
 
-// gatherVersionProject walks up from cwd to find .sparkwing/, then
-// parses .sparkwing/go.mod for the SDK pin and any sparks-* pins.
-// Returns nil when no .sparkwing/ is found so the report's Project
-// field stays absent in JSON.
 func gatherVersionProject(latest string) *VersionProject {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -202,10 +177,6 @@ func gatherVersionProject(latest string) *VersionProject {
 	return proj
 }
 
-// fetchLatestRelease HEADs github.com/.../releases/latest -- which
-// 302-redirects to /releases/tag/<latest-tag> -- and parses the tag
-// out of the Location header. Bounded by versionFetchTimeout so an
-// offline laptop falls back to "(unknown)" quickly.
 func fetchLatestRelease() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), versionFetchTimeout)
 	defer cancel()
@@ -239,19 +210,10 @@ func fetchLatestRelease() (string, error) {
 	return v, nil
 }
 
-// isSemver returns true for vX.Y.Z (allowing pre-release/build
-// suffixes per golang.org/x/mod/semver). Used to gate compare
-// calls so a malformed string doesn't poison the "behind" boolean.
 func isSemver(v string) bool {
 	return semver.IsValid(v)
 }
 
-// printVersionChangelog renders the embedded changelog for the
-// installed release. The embedded corpus only covers up to the running
-// binary's own version, so this is best-effort offline: it prints the
-// installed version's section (or [Unreleased] for a dev build), and
-// when the network check knows a newer release exists it points at the
-// release page rather than pretending to have notes it cannot embed.
 func printVersionChangelog(w io.Writer, r VersionReport) {
 	const releasesURL = "https://github.com/sparkwing-dev/sparkwing/releases"
 	printed := false

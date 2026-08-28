@@ -27,7 +27,6 @@ func TestLayerSurfaces_OverWinsPerSurface(t *testing.T) {
 	}
 }
 
-// layerSpec keeps base fields when over omits them but shares the type.
 func TestLayerSurfaces_SameTypeFillsBlanks(t *testing.T) {
 	base := backends.Surfaces{State: &backends.Spec{Type: backends.TypeS3, Bucket: "team", Prefix: "state"}}
 	over := backends.Surfaces{State: &backends.Spec{Type: backends.TypeS3, Prefix: "override"}}
@@ -37,10 +36,6 @@ func TestLayerSurfaces_SameTypeFillsBlanks(t *testing.T) {
 	}
 }
 
-// A backend type's required fields are enforced at validation, not at
-// first write. `{type: s3}` with no bucket used to validate clean and
-// render as `s3://`; the storeurl factories document this contract
-// ("required fields per type") and nothing enforced it.
 func TestValidateFields_RequiresWhatEachTypeCannotWorkWithout(t *testing.T) {
 	cases := []struct {
 		name string
@@ -73,9 +68,6 @@ func TestValidateFields_RequiresWhatEachTypeCannotWorkWithout(t *testing.T) {
 	}
 }
 
-// sqlite without a path is deliberately allowed: the profile resolver
-// fills in the host's own state database, so demanding one here would
-// reject configurations that work.
 func TestValidateFields_AllowsWhatHasARealDefault(t *testing.T) {
 	ok := []backends.Spec{
 		{Type: backends.TypeSQLite},
@@ -91,8 +83,6 @@ func TestValidateFields_AllowsWhatHasARealDefault(t *testing.T) {
 	}
 }
 
-// The bundle check runs the per-type check on every surface, so a
-// bucketless s3 is rejected wherever it appears.
 func TestSurfacesValidate_RejectsBucketlessS3(t *testing.T) {
 	surf := backends.Surfaces{
 		Secrets: &backends.Spec{Type: backends.TypeNone},

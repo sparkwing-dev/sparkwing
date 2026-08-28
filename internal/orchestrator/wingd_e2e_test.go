@@ -25,8 +25,6 @@ import (
 
 const wingdTestWait = 30 * time.Second
 
-// wingdTestHome returns a scratch sparkwing home under /tmp so the
-// daemon's unix socket path stays within the OS length limit.
 func wingdTestHome(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "swe2e")
@@ -42,8 +40,6 @@ type stubSampler struct{ stat wingd.HostStat }
 
 func (s stubSampler) Sample() (wingd.HostStat, error) { return s.stat, nil }
 
-// startWingd runs a real daemon in-process for home with a fixed host
-// capacity, wired to the same orphan-run finalizer production uses.
 func startWingd(t *testing.T, home string, cores float64) {
 	t.Helper()
 	startWingdCfg(t, wingd.Config{
@@ -62,8 +58,6 @@ func startWingd(t *testing.T, home string, cores float64) {
 	})
 }
 
-// startWingdCfg runs a daemon in-process for the given config, ensuring
-// the orphan finalizer is wired and cleaning it up at test end.
 func startWingdCfg(t *testing.T, cfg wingd.Config) {
 	t.Helper()
 	if cfg.FinalizeRun == nil {
@@ -122,8 +116,6 @@ func openWingdBackends(t *testing.T, home string) (Backends, *store.Store, Paths
 	return LocalBackends(p, st, nil), st, p
 }
 
-// wingdGate coordinates test pipelines: nodes report they started and
-// block until released (or their context ends).
 type wingdGate struct {
 	started chan string
 	release chan struct{}
@@ -191,8 +183,6 @@ func (p wingdHoldPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing
 	return nil
 }
 
-// wingdUnpinnedHoldPipe declares no .Resources() pin, so admission
-// resolves its cost from measurement (or the cold-start default).
 type wingdUnpinnedHoldPipe struct{ sparkwing.Base }
 
 func (wingdUnpinnedHoldPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -564,8 +554,6 @@ func awaitWaiter(t *testing.T, home, runID string) {
 	t.Fatalf("run %q never appeared in the daemon queue", runID)
 }
 
-// awaitOutContains blocks until sub has been written to out, failing the
-// test when it never is.
 func awaitOutContains(t *testing.T, out *syncBuffer, sub string) {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
@@ -665,8 +653,6 @@ func queueRowMatchesRun(runID, participantID, want string) bool {
 	return runID == want || participantID == want
 }
 
-// findQueuedWaiter returns the queued waiter with runID and whether it is
-// present, without blocking.
 func findQueuedWaiter(qs wingwire.QueueState, runID string) (wingwire.Waiter, bool) {
 	for _, w := range qs.Waiters {
 		if queueRowMatchesRun(w.RunID, w.ParticipantID, runID) {
@@ -681,10 +667,6 @@ func seedProfile(t *testing.T, st *store.Store, pipeline string, obs store.Profi
 	seedNodeProfile(t, st, pipeline, "", obs, runs)
 }
 
-// seedNodeProfile writes a learned profile under the same repo-scoped key
-// admission resolves from, so a seeded measurement is one the run under test
-// can actually find; seeding the bare pipeline name would store a row no
-// in-repo run ever reads.
 func seedNodeProfile(t *testing.T, st *store.Store, pipeline, nodeID string, obs store.ProfileObservation, runs int) {
 	t.Helper()
 	for range runs {
@@ -741,11 +723,6 @@ func TestWingd_SecondRunAdmittedWithMeasuredCost(t *testing.T) {
 	}
 }
 
-// TestWingd_ZeroCPUPipelineAdmitsAtTinyMeasuredCostAlongsideHeavyWork
-// seeds a sleep-heavy pipeline with three healthy-sampler observations at
-// a zero CPU peak. On the 2-core box its cold-start default (1 core) would
-// not fit behind the 1.5-core holder, so admitting it concurrently proves
-// the zero-CPU profile is trusted at its tiny measured cost.
 func TestWingd_ZeroCPUPipelineAdmitsAtTinyMeasuredCostAlongsideHeavyWork(t *testing.T) {
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
@@ -1265,8 +1242,6 @@ func TestWingd_CachedNodeMissAdmitsHostCost(t *testing.T) {
 	}
 }
 
-// syncBuffer is a concurrency-safe writer so a test can poll the
-// admission output a run goroutine writes while the run is still blocked.
 type syncBuffer struct {
 	mu  sync.Mutex
 	buf strings.Builder
@@ -1354,10 +1329,6 @@ func TestWingd_QueuedRunReemitsWaitStatusAndAnnouncesAdmission(t *testing.T) {
 	}
 }
 
-// TestWingd_QueuedRunEmitsAdmissionWaitToDelegate verifies that when a run
-// waits for admission, the position update reaches both the Out writer
-// (for operator / agent visibility on stdout) and the Delegate logger
-// (so it appears in the envelope log via the Run-wired delegate).
 func TestWingd_QueuedRunEmitsAdmissionWaitToDelegate(t *testing.T) {
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)
@@ -1392,9 +1363,6 @@ func TestWingd_QueuedRunEmitsAdmissionWaitToDelegate(t *testing.T) {
 	}()
 	awaitWaiter(t, home, "wingd-delegate-b")
 
-	// safety: the position update reaches Out and the delegate independently,
-	// with a run-row write between them, so seeing it on Out says nothing yet
-	// about the delegate. Wait on each sink on its own.
 	awaitOutContains(t, outB, "queued for local admission")
 	del.awaitEvent(t, "admission_wait")
 
@@ -1426,7 +1394,6 @@ func (c *captureLogger) Emit(rec sparkwing.LogRecord) {
 	c.mu.Unlock()
 }
 
-// eventNames lists the events emitted so far, for failure messages.
 func (c *captureLogger) eventNames() []string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1437,8 +1404,6 @@ func (c *captureLogger) eventNames() []string {
 	return names
 }
 
-// awaitEvent blocks until the delegate has received event, failing the test
-// when it never arrives.
 func (c *captureLogger) awaitEvent(t *testing.T, event string) {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
@@ -1523,8 +1488,6 @@ func TestWingd_AbruptDeathReleasesLeaseFinalizesRunAndPromotesNext(t *testing.T)
 	}()
 	awaitWaiter(t, home, "wingd-survivor")
 
-	// safety: closing the socket without Release is exactly what the
-	// kernel reports when the holder is SIGKILLed.
 	_ = cl.Close()
 
 	gate.awaitStarted(t, "wingd-survivor")

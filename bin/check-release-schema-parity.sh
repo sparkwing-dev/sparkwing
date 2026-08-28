@@ -1,24 +1,4 @@
 #!/usr/bin/env bash
-# Pre-publish gate: assert a built release asset embeds the same
-# runs-store schema version as the tagged source compiles.
-#
-# A version string must imply identical code across both install
-# paths: the GitHub-Release binary and `go install ...@tag`. If the
-# asset was built from a different commit than the tag, its embedded
-# schema can drift from what the tag compiles -- the failure mode
-# behind the v0.9.0 schema-skew incident. This check rebuilds the
-# schema reference straight from the tagged tree and refuses the
-# release when the asset disagrees.
-#
-# Usage:
-#   bin/check-release-schema-parity.sh --asset dist/sparkwing-linux-amd64
-#   bin/check-release-schema-parity.sh --asset <bin> --reference <bin>
-#   bin/check-release-schema-parity.sh --asset <bin> --repo /path/to/checkout
-#
-# --asset      the release binary whose embedded schema is verified.
-# --reference  a binary independently compiled from the tagged tree;
-#              when omitted, one is built from --repo (default: the
-#              repo this script lives in) via `go build ./cmd/sparkwing`.
 set -euo pipefail
 
 die() {
@@ -44,8 +24,6 @@ command -v jq >/dev/null 2>&1 || die "jq is required"
 [[ -n "$ASSET" ]] || die "--asset is required"
 [[ -x "$ASSET" ]] || die "asset is not an executable file: $ASSET"
 
-# Pull the embedded schema version out of a built binary. --offline
-# skips the latest-release network probe; the schema field is local.
 embedded_schema() {
   local bin="$1"
   local out

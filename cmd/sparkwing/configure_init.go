@@ -1,9 +1,3 @@
-// `sparkwing configure init` is the laptop-level setup + status
-// command. Pairs with the per-project flow: `sparkwing pipeline new`
-// scaffolds .sparkwing/ in your repo, configure init prepares
-// ~/.config/sparkwing/ + reports what's already there. Idempotent --
-// running it on a fresh laptop creates the dir; running again is a
-// status report.
 package main
 
 import (
@@ -20,9 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/repos"
 )
 
-// ConfigureInit is the JSON shape of `sparkwing configure init -o
-// json`. Stable contract: agents parse this directly. Field renames
-// are breaking changes.
 type ConfigureInit struct {
 	ConfigDir   string                 `json:"config_dir"`
 	Created     bool                   `json:"created"`
@@ -35,9 +26,7 @@ type ConfigureInitFile struct {
 	Name    string `json:"name"`
 	Path    string `json:"path"`
 	Present bool   `json:"present"`
-	// Summary is a one-line human description: "0 profiles", "3
-	// repos", etc. Empty when the file is absent or the package
-	// doesn't expose a count.
+
 	Summary string `json:"summary,omitempty"`
 }
 
@@ -88,11 +77,6 @@ func runConfigureInit(args []string) error {
 	}
 }
 
-// gatherConfigureInit performs the side effect (mkdir on the config
-// dir) when not in dry-run, then probes everything. Errors from any
-// best-effort probe (file existence, version lookups) are absorbed
-// into "not present" / empty fields so the command always returns a
-// useful report.
 func gatherConfigureInit(dryRun bool) (ConfigureInit, error) {
 	out := ConfigureInit{}
 
@@ -118,11 +102,6 @@ func gatherConfigureInit(dryRun bool) (ConfigureInit, error) {
 	return out, nil
 }
 
-// surveyConfigFiles walks the four files we know about today and
-// reports presence + a one-line summary. Adding a new ~/.config/
-// sparkwing/<file> requires an entry here -- intentional, so the
-// status report stays curated rather than auto-listing every dotfile
-// the user may have stashed there.
 func surveyConfigFiles(configDir, profilesPath string) []ConfigureInitFile {
 	reposPath, _ := repos.DefaultPath()
 	secretsEnvPath := filepath.Join(configDir, "secrets.env")
@@ -139,9 +118,6 @@ func surveyConfigFiles(configDir, profilesPath string) []ConfigureInitFile {
 	return files
 }
 
-// profileSummary returns a one-line count of configured profiles, or
-// a generic placeholder when the file's missing/unreadable. Failures
-// fall through silently -- this is a status command, not a parser.
 func profileSummary(path string) string {
 	cfg, err := profile.Load(path)
 	if err != nil || cfg == nil {

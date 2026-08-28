@@ -1,12 +1,5 @@
 "use client";
 
-// Queue: the one truthful view of local admission, mirroring
-// `sparkwing queue`. Every resource with its headroom arithmetic, every
-// holder with elapsed time and cost, every waiter in arrival order with
-// what it is waiting on and its ETA. The queue is the primary answer to
-// "why isn't my run starting," so this is where a human looks first when
-// the box feels busy. With no daemon running there is nothing to
-// arbitrate, so the panel reports a calm empty state.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";

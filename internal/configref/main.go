@@ -70,10 +70,6 @@ type fieldDoc struct {
 	required bool
 }
 
-// structFields returns the yaml-tagged fields of the named struct in
-// declaration order, with their type and godoc. A field is "required"
-// when its yaml tag lacks omitempty (matching the schema: name and
-// entrypoint carry no omitempty, everything else does).
 func structFields(f *ast.File, name string) []fieldDoc {
 	var out []fieldDoc
 	ast.Inspect(f, func(n ast.Node) bool {
@@ -111,8 +107,6 @@ func structFields(f *ast.File, name string) []fieldDoc {
 	return out
 }
 
-// typeString renders a field's AST type as Go source, dropping a
-// leading pointer star (the yaml shape doesn't care).
 func typeString(e ast.Expr) string {
 	var b bytes.Buffer
 	_ = printer.Fprint(&b, fset, e)
@@ -135,8 +129,6 @@ func section(b *strings.Builder, title string, fields []fieldDoc) {
 	b.WriteString("\n")
 }
 
-// cell flattens prose for a markdown table cell: collapse whitespace
-// and escape pipes.
 func cell(s string) string {
 	s = strings.ReplaceAll(s, "|", "\\|")
 	return strings.Join(strings.Fields(s), " ")

@@ -11,7 +11,6 @@ import (
 
 const maxFrame = 8 << 20
 
-// frameReader decodes newline-delimited wingwire frames off a connection.
 type frameReader struct {
 	sc *bufio.Scanner
 }
@@ -37,7 +36,6 @@ func dial(ctx context.Context, sock string, timeout time.Duration) (net.Conn, er
 	return d.DialContext(ctx, "unix", sock)
 }
 
-// sleep waits d or returns early if ctx is cancelled.
 func sleep(ctx context.Context, d time.Duration) error {
 	if d <= 0 {
 		return ctx.Err()

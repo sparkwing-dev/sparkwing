@@ -1,4 +1,3 @@
-// Command api serves the paygate billing endpoints.
 package main
 
 import (

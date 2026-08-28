@@ -1,9 +1,3 @@
-// Formatting + shaping helpers for the local admission queue panel.
-// These mirror the CLI's `sparkwing queue` renderer (cmd/sparkwing/
-// queue.go) so the dashboard and the terminal report one identical
-// view: the same headroom arithmetic, the same external-pressure note,
-// the same recent-events summary. Every helper tolerates absent or
-// unknown fields so an older daemon that predates a field still renders.
 
 import type {
   HostResources,
@@ -18,8 +12,6 @@ export function isHostResource(key: string): boolean {
   return key === "cores" || key === "memory";
 }
 
-// trimFloat prints a number without trailing-zero noise: whole numbers
-// bare, fractions to two places.
 export function trimFloat(v: number): string {
   if (Number.isInteger(v)) return String(v);
   return v.toFixed(2);
@@ -35,16 +27,11 @@ export function humanBytes(n: number): string {
   return `${Math.round(n)} B`;
 }
 
-// fmtAmount renders a resource amount: the memory dimension as human
-// bytes, every other dimension (cores, semaphore costs) as a plain
-// number.
 export function fmtAmount(key: string, v: number): string {
   if (key === "memory") return humanBytes(v);
   return trimFloat(v);
 }
 
-// fmtCost renders a run's host charge as "<cores> cores" plus memory
-// when it is charged.
 export function fmtCost(r: HostResources | undefined): string {
   const cores = r?.cores ?? 0;
   let out = `${trimFloat(cores)} cores`;
@@ -54,8 +41,6 @@ export function fmtCost(r: HostResources | undefined): string {
   return out;
 }
 
-// fmtHolderCost renders a holder's charge, or a dash for an attached
-// child, which rides its parent's lease and is charged nothing.
 export function fmtHolderCost(h: QueueHolder): string {
   if (h.parent) return "-";
   return fmtCost(h.resources);
@@ -68,8 +53,6 @@ export function queueRowID(row: {
   return row.participant_id || row.run_id;
 }
 
-// fmtDuration renders a millisecond span rounded to whole seconds:
-// "3s", "1m 30s", "2h 5m". Returns "-" for a non-positive span.
 export function fmtDuration(ms: number): string {
   if (!ms || ms <= 0) return "-";
   const totalSec = Math.round(ms / 1000);
@@ -84,19 +67,12 @@ export function fmtDuration(ms: number): string {
   return m ? `${h}h ${m}m` : `${h}h`;
 }
 
-// fmtETA renders a waiter's estimated start offset: "now" when it is
-// admitted immediately, a rounded span when it must wait, or "-" when no
-// estimate is available (a run ahead lacks a measured duration).
 export function fmtETA(ms: number | null | undefined): string {
   if (ms == null) return "-";
   if (ms <= 0) return "now";
   return fmtDuration(ms);
 }
 
-// resourceAvailable is the grantable amount to show for a resource row:
-// the daemon's headroom-aware Available for the host dimensions, or plain
-// capacity-minus-held for a semaphore row (and for older daemons that
-// sent no Available).
 export function resourceAvailable(r: QueueResource): number {
   const reserved = r.reserved ?? 0;
   const external = r.external ?? 0;
@@ -111,14 +87,8 @@ export function resourceAvailable(r: QueueResource): number {
   return free < 0 ? 0 : free;
 }
 
-// EXTERNAL_UNMEASURED is the external_source a daemon sends for a host
-// dimension its sampler could not read.
 export const EXTERNAL_UNMEASURED = "unmeasured";
 
-// externalCell renders the EXTERNAL column. A dimension nobody read prints
-// the word rather than a figure, because a substituted number in the same
-// format as a measurement is what made a healthy machine read as fully
-// consumed.
 export function externalCell(
   r: QueueResource,
   fmtAmount: (key: string, v: number) => string,
@@ -128,19 +98,12 @@ export function externalCell(
   return fmtAmount(r.key, r.external ?? 0);
 }
 
-// AvailabilityTerm is one operand of a host row's headroom arithmetic, in
-// the order admission applied it. sign is "-" for a subtraction and "" for
-// the capacity the subtractions run against.
 export interface AvailabilityTerm {
   label: string;
   value: string;
   sign: "" | "-";
 }
 
-// availabilityTerms breaks a host resource row into the operands admission
-// subtracted, so a reader can add the row up rather than trust its
-// Available cell. Returns an empty list for a semaphore row, whose
-// availability is a plain count and not headroom arithmetic.
 export function availabilityTerms(r: QueueResource): AvailabilityTerm[] {
   if (!isHostResource(r.key)) return [];
   const terms: AvailabilityTerm[] = [
@@ -166,12 +129,6 @@ export function availabilityTerms(r: QueueResource): AvailabilityTerm[] {
   return terms;
 }
 
-// availabilityResidual is what the printed operands leave over, so a row
-// whose Available does not equal capacity minus its subtractions shows up as
-// the discrepancy it is. Null for a semaphore row, for a dimension whose
-// external load could not be read (nothing was subtracted, and no figure can
-// honestly be printed), and when the daemon is configured to ignore external
-// load, where the operands on screen are not the whole story.
 export function availabilityResidual(
   r: QueueResource,
   ignoreExternal: boolean,
@@ -181,10 +138,6 @@ export function availabilityResidual(
   return r.capacity - r.held - (r.reserved ?? 0) - (r.external ?? 0);
 }
 
-// externalUnmeasuredNote names the host dimensions the sampler could not
-// read and states that nothing was subtracted for them. Empty when every
-// dimension was measured, and when the operator has already been told
-// external load is ignored outright.
 export function externalUnmeasuredNote(qs: QueueState): string {
   if (qs.ignore_external) return "";
   const keys = (qs.resources ?? [])
@@ -196,11 +149,6 @@ export function externalUnmeasuredNote(qs: QueueState): string {
   return `External load is unmeasured on ${keys.join(", ")} (host sensor unavailable); none was subtracted from available.`;
 }
 
-// externalPressureNote returns the callout to show when non-sparkwing
-// load is the binding constraint -- a queue that looks idle (free
-// capacity, waiters present) but refuses work because the machine is
-// busy with other processes. Empty when external load is not the binding
-// constraint.
 export function externalPressureNote(qs: QueueState): string {
   if (qs.ignore_external) return "";
   const waiters = qs.waiters ?? [];
@@ -215,18 +163,11 @@ export function externalPressureNote(qs: QueueState): string {
   return "";
 }
 
-// HolderGroup is a top-level holder with the attached children that ride
-// its lease, for indented rendering.
 export interface HolderGroup {
   holder: QueueHolder;
   children: QueueHolder[];
 }
 
-// groupHolders arranges holders into parent/child groups: each holder
-// that draws its own budget, followed by the attached children pinned to
-// its lease. A child whose named parent is absent (a lease that outlived
-// its parent record) is promoted to its own top-level group so it is
-// never dropped.
 export function groupHolders(holders: QueueHolder[]): HolderGroup[] {
   const byRun = new Map<string, QueueHolder>();
   for (const h of holders) byRun.set(queueRowID(h), h);
@@ -267,9 +208,6 @@ export function queueLifecycleHolders(
   });
 }
 
-// daemonUptimeLabel renders how long the serving daemon has been up:
-// "just started" under a second, else a rounded span. Empty when the
-// daemon reported no uptime (an older daemon, or none running).
 export function daemonUptimeLabel(qs: QueueState): string {
   const up = qs.daemon_uptime_ms ?? 0;
   if (up <= 0) return "";
@@ -277,10 +215,6 @@ export function daemonUptimeLabel(qs: QueueState): string {
   return `up ${fmtDuration(up)}`;
 }
 
-// hasDaemon reports whether a daemon is actually serving the queue.
-// The endpoint returns a well-formed empty QueueState with 200 when no
-// daemon is running, so an empty payload with no version and no rows is
-// the "no daemon" signal, not an error.
 export function hasDaemon(qs: QueueState): boolean {
   if (qs.daemon_version) return true;
   if ((qs.daemon_uptime_ms ?? 0) > 0) return true;
@@ -300,10 +234,6 @@ function plural(n: number, one: string, many: string): string {
   return n === 1 ? one : many;
 }
 
-// eventsLine renders the one-line recent-outcomes summary from the
-// daemon's rolling window: the grant count with median wait, then only
-// the trouble categories that actually occurred. Empty when the daemon
-// sent no window or nothing happened in it.
 export function eventsLine(events: QueueEvents | null | undefined): string {
   if (!events) return "";
   const evictions = totalEvictions(events);
@@ -348,8 +278,6 @@ export function eventsLine(events: QueueEvents | null | undefined): string {
   return `last ${hours}h: ${parts.join(", ")}`;
 }
 
-// driftNotes collects the pin-drift warnings across holders and waiters
-// so the panel surfaces each run's exact fix once.
 export function driftNotes(
   qs: QueueState,
 ): { runID: string; warning: string }[] {

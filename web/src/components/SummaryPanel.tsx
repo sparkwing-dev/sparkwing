@@ -1,12 +1,5 @@
 "use client";
 
-// SummaryPanel renders the run's terminal-state rollup -- mirrors the
-// CLI's `--- Summary ---` block. Visible whenever the run has
-// finished (success / failed / cancelled). Shows: status pill +
-// duration, per-outcome tally, jobs table (one row per node), errors
-// block formatted with the same `<node> > <step> |` breadcrumb the
-// CLI uses, and tip commands an operator/agent can copy back into a
-// terminal.
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
@@ -39,8 +32,6 @@ function durationMs(run: Run): number {
   );
 }
 
-// outcomeGlyph mirrors the CLI's outcomeIcon -- glyph + color class
-// for each outcome the orchestrator can produce.
 function outcomeGlyph(outcome: string): { glyph: string; cls: string } {
   switch (outcome) {
     case "success":
@@ -61,7 +52,6 @@ function outcomeGlyph(outcome: string): { glyph: string; cls: string } {
   }
 }
 
-// summaryStatusGlyph: top-of-block run-status indicator.
 function summaryStatusGlyph(status: string): { glyph: string; cls: string } {
   if (status === "success") return { glyph: "✓", cls: "text-green-400" };
   if (status === "failed") return { glyph: "✗", cls: "text-red-400" };
@@ -69,9 +59,6 @@ function summaryStatusGlyph(status: string): { glyph: string; cls: string } {
   return { glyph: "·", cls: "text-[var(--muted)]" };
 }
 
-// splitStepErrorPrefix matches the CLI's helper: lifts a `step "X": `
-// prefix off an error string so the breadcrumb can render the step
-// in its own column instead of repeating it inside the body.
 function splitStepErrorPrefix(s: string): { step: string; body: string } {
   const prefix = 'step "';
   if (!s.startsWith(prefix)) return { step: "", body: s };
@@ -81,8 +68,6 @@ function splitStepErrorPrefix(s: string): { step: string; body: string } {
   return { step: rest.slice(0, end), body: rest.slice(end + 3) };
 }
 
-// CopyButton: shared with SetupPanel in spirit; redefined locally so
-// each panel stays standalone-importable for Storybook.
 function CopyButton({ value }: { value: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -112,12 +97,6 @@ interface Tally {
   other: number;
 }
 
-// NodeAttrChips surfaces the DAG-pill attributes inline in the Jobs
-// list so the summary view tells the same story as the DAG: dynamic
-// shape, approval gates, cached runs, inline jobs, group membership,
-// and cross-pipeline spawns. Each spawn entry is a deep link to the
-// child run; everything else is informational.
-// fmtDurMs renders a coarse human duration for the cache-TTL chip.
 function fmtDurMs(ms: number): string {
   const s = Math.round(ms / 1000);
   if (s >= 86400) return `${Math.round(s / 86400)}d`;
@@ -263,9 +242,7 @@ export default function SummaryPanel({
   collapsed: boolean;
   onToggle: () => void;
   inline?: boolean;
-  // Node-id matches → highlight Jobs row.
   findMatched?: Set<string>;
-  // Error-text matches → highlight Errors row instead.
   findMatchedErrors?: Set<string>;
   findActiveKey?: string | null;
 }) {
@@ -276,10 +253,6 @@ export default function SummaryPanel({
   );
   const inv: RunInvocation = run.invocation ?? {};
   const hints = inv.hints ?? {};
-  // Synthesize the standard three commands the CLI prints in its
-  // Tips section so the panel works even on runs that predate the
-  // hints-on-invocation column. Falls back to invocation-supplied
-  // values when present so stale shapes don't drift.
   const tipCommands = [
     {
       label: "status",
@@ -325,9 +298,9 @@ export default function SummaryPanel({
       )}
       {(inline || !collapsed) && (
         <div className="px-4 pb-3 space-y-3">
-          {/* Dated window for the run. The summary is often read long
-            after the fact (a linked failure, a rerun comparison), so
-            the day matters as much as the duration. */}
+          {
+
+                                                       }
           <div
             className="text-xs font-mono text-[var(--muted)]"
             title={`Started ${fmtFullDate(run.started_at)}${
@@ -400,9 +373,9 @@ export default function SummaryPanel({
                   <span className="truncate">{n.id}</span>
                   <NodeAttrChips n={n} />
                   <span className="flex-1" />
-                  {/* Outcome word for non-success cases (mirrors the
-                      CLI: success is unambiguous from the glyph;
-                      anything else benefits from the label). */}
+                  {
+
+                                                                }
                   {n.outcome && n.outcome !== "success" && (
                     <span className={`${g.cls} text-[11px]`}>{n.outcome}</span>
                   )}

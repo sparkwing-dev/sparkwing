@@ -8,11 +8,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// TestProcessRSS_ReadsPlausibleCurrentFootprint covers what the parser cannot:
-// that the ps invocation still names the field and the process it means to,
-// and that the reading is scaled into bytes. getrusage's lifetime peak is the
-// available yardstick -- a current footprint sits under it, and a reading
-// still in kilobytes would sit orders of magnitude under it.
 func TestProcessRSS_ReadsPlausibleCurrentFootprint(t *testing.T) {
 	rss, ok := processRSS()
 	if !ok || rss <= 0 {

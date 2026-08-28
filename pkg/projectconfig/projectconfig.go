@@ -30,11 +30,8 @@ import (
 // Filename is the combined project-config file name inside .sparkwing/.
 const Filename = "sparkwing.yaml"
 
-// migrationGuideURL points adopters at the v0.5.0 config-flatten guide.
 const migrationGuideURL = "https://sparkwing.dev/docs/migration-guide/v0.5.0"
 
-// legacyFiles are the pre-v0.5.0 standalone config files that
-// sparkwing.yaml absorbed; their presence is now a hard error.
 var legacyFiles = []string{
 	"pipelines.yaml",
 	"backends.yaml",
@@ -275,7 +272,6 @@ func WriteSparksSection(path string, libs []sparks.Library) error {
 	return os.WriteFile(path, buf.Bytes(), 0o644)
 }
 
-// normalize validates each section after decode.
 func (c *Config) normalize() error {
 	pcfg := pipelines.Config{Pipelines: c.Pipelines}
 	if err := pcfg.Validate(); err != nil {

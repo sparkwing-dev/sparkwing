@@ -10,10 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/fs"
 )
 
-// `dashboard start --profile` was advertised in help and in
-// cli-reference.md, and dashboard.go registered no such flag -- the
-// error string at the --no-local-store guard even referenced it. The
-// surfaces now come from the profile's own specs.
 func TestApplyDashboardProfile_FillsStoresFromSurfaces(t *testing.T) {
 	dir := t.TempDir()
 	writeProfilesFixture(t, "profiles:\n  bucket:\n    logs: { type: filesystem, path: "+filepath.Join(dir, "logs")+" }\n    cache: { type: filesystem, path: "+filepath.Join(dir, "cache")+" }\n")
@@ -33,8 +29,6 @@ func TestApplyDashboardProfile_FillsStoresFromSurfaces(t *testing.T) {
 	}
 }
 
-// Naming a store outright is more specific than naming the profile
-// that holds one, so an explicit flag is not overwritten.
 func TestApplyDashboardProfile_ExplicitStoreWins(t *testing.T) {
 	dir := t.TempDir()
 	writeProfilesFixture(t, "profiles:\n  bucket:\n    logs: { type: filesystem, path: "+filepath.Join(dir, "logs")+" }\n")
@@ -55,7 +49,6 @@ func TestApplyDashboardProfile_ExplicitStoreWins(t *testing.T) {
 	}
 }
 
-// An empty name leaves every surface alone.
 func TestApplyDashboardProfile_NoProfileIsANoOp(t *testing.T) {
 	var opts localws.Options
 	if err := applyDashboardProfile(context.Background(), &opts, ""); err != nil {

@@ -23,10 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// schemaPollInterval bounds how long a resident dashboard keeps
-// serving a database another binary has migrated past it before the
-// schema guard notices on its own. The 5xx-triggered middleware check
-// usually fires first; this poll is the no-traffic safety net.
 const schemaPollInterval = 5 * time.Second
 
 // Options configures the local dev server. Addr defaults to
@@ -176,7 +172,8 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	root.Handle("GET /api/v1/pipelines", aggregatedPipelinesHandler())
 	root.Handle("GET /api/v1/queue", queueHandler(paths.Root, opts.Version))
-	// safety: the controller handler below claims all of /api/v1/, so a dashboard-owned route reaches its handler only when it is named here.
+	// safety: the controller claims all of /api/v1/, so dashboard-owned routes
+	// must be named here to remain reachable.
 	root.Handle("GET /api/v1/capacity/profiles", webHandler)
 	root.Handle("GET /api/v1/capacity/profiles/explain", webHandler)
 	if ctrl != nil {
@@ -253,9 +250,6 @@ func localPaths(home string) (orchestrator.Paths, error) {
 	return paths, nil
 }
 
-// backendCapabilitiesStorage builds the storage portion of the
-// /api/v1/capabilities response. Defaults to "fs" for logs+artifacts
-// when no override store is wired.
 func backendCapabilitiesStorage(opts Options, runs string) backend.CapabilitiesStorage {
 	out := backend.CapabilitiesStorage{Artifacts: "fs", Logs: "fs", Runs: runs}
 	if opts.LogStore != nil {
@@ -267,8 +261,6 @@ func backendCapabilitiesStorage(opts Options, runs string) backend.CapabilitiesS
 	return out
 }
 
-// localFeatures is the local-mode feature flag list surfaced on
-// /api/v1/capabilities.
 func localFeatures() []string {
 	return []string{
 		"pipelines", "runs", "logs",
@@ -283,9 +275,6 @@ func nonEmpty(s, fallback string) string {
 	return s
 }
 
-// readOnlyMiddleware rejects state-mutating methods on /api/v1/*
-// except /api/v1/auth/* and /webhooks/* (webhook senders can't honor
-// a 405).
 func readOnlyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -303,8 +292,6 @@ func readOnlyMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// writeDevEnv records the base URL at $SPARKWING_HOME/dev.env so
-// cooperating processes can reach us. Overwritten each startup.
 func writeDevEnv(root, baseURL string) error {
 	body := fmt.Sprintf("SPARKWING_CONTROLLER_URL=%s\nSPARKWING_LOGS_URL=%s\n", baseURL, baseURL)
 	return fssecure.WriteFile(filepath.Join(root, "dev.env"), []byte(body))

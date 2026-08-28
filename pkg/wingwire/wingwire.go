@@ -92,10 +92,6 @@ type ProtocolFloor struct {
 // release a known major starts at, and compare versions against that.
 type ProtocolFloors []ProtocolFloor
 
-// releasedProtocolFloors is the table this build shipped with. A bump of
-// [ProtocolMajor] appends a row naming the release that carries the bump,
-// and every past row stays: explaining a refusal between two older builds
-// needs the cliff between them long after both are behind.
 var releasedProtocolFloors = ProtocolFloors{
 	{Major: 1, MinVersion: "v0.0.0"},
 	{Major: 2, MinVersion: "v0.22.0"},

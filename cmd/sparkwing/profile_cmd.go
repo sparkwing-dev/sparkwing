@@ -1,9 +1,3 @@
-// `sparkwing profile` is read-side introspection: it reports which
-// profile a sparkwing command would pick right now, and why, using the
-// same profile.Resolve machinery `sparkwing run` / `pipeline trigger`
-// use -- including the project hint (.sparkwing/sparkwing.yaml profile:),
-// so it never reports a level the real commands don't honor. No
-// execution side-effects.
 package main
 
 import (
@@ -113,8 +107,6 @@ func renderProfilePretty(p *profile.Profile, chain profile.Chain, cfgPath string
 	return nil
 }
 
-// effectiveSourceDetail renders the parenthetical on the `source:` line:
-// where the winning selection came from.
 func effectiveSourceDetail(chain profile.Chain, cfgPath string) string {
 	switch chain.Source {
 	case profile.ChainSourceFlag:
@@ -128,9 +120,6 @@ func effectiveSourceDetail(chain profile.Chain, cfgPath string) string {
 	}
 }
 
-// chainRows reports the resolution: one selected level, and no
-// alternatives, because each level either selects a profile outright
-// or hands the question to the next one.
 func chainRows(chain profile.Chain) []profileConsideredJSON {
 	switch chain.Source {
 	case profile.ChainSourceFlag:

@@ -11,7 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// secretsReader reads PipelineSecrets[T] from a step body.
 type secretsReaderSec struct {
 	Token string `sw:"DEPLOY_TOKEN,required"`
 	Flag  string `sw:"NICE_TO_HAVE,optional"`
@@ -35,8 +34,6 @@ func init() {
 	register("orch-sec-reader", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &secretsReaderPipe{} })
 }
 
-// staticSource serves a small fixed map; missing names return
-// ErrSecretMissing so optional fields stay empty without failing.
 type staticSource map[string]string
 
 func (s staticSource) Read(name string) (string, bool, error) {

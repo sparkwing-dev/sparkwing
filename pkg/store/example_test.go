@@ -10,9 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// ExampleOpen opens a sqlite-backed store in a tempdir, writes a Run,
-// reads it back, and finishes it. Production callers keep one
-// [*store.Store] per process and share it across goroutines.
 func ExampleOpen() {
 	dir, _ := os.MkdirTemp("", "sparkwing-store-")
 	defer os.RemoveAll(dir)

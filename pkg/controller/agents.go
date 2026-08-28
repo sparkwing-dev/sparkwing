@@ -7,11 +7,6 @@ import (
 	"time"
 )
 
-// runnerHeadroomStale bounds how old an advertised-headroom report may be
-// before the agents view drops it: a runner that stopped heartbeating is
-// no longer a trustworthy source of free-capacity figures. It matches the
-// 1h agents window so a runner that still shows active claims but stopped
-// advertising simply loses its headroom line.
 const runnerHeadroomStale = time.Hour
 
 // Agent matches web/src/lib/api.ts:Agent. There's no explicit agent
@@ -39,9 +34,6 @@ type AgentHeadroom struct {
 	QueueDepth  int     `json:"queue_depth"`
 }
 
-// handleAgents returns agents inferred from the nodes table's
-// claimed_by values over a 1h window. Idle agents without any recent
-// claim activity don't appear.
 func (s *Server) handleAgents(w http.ResponseWriter, r *http.Request) {
 	windowStart := time.Now().Add(-1 * time.Hour)
 

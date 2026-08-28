@@ -79,7 +79,4 @@ type StateStore interface {
 	ListPendingApprovals(ctx context.Context) ([]*store.Approval, error)
 }
 
-// Compile-time check: the SQLite-backed *store.Store satisfies
-// StateStore. Future backends (Postgres, controller HTTP, object-store
-// NDJSON) wire similar assertions next to their own constructors.
 var _ StateStore = (*store.Store)(nil)

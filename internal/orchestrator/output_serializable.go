@@ -10,17 +10,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// processBoundaryGuide is where an author reads why a node output has
-// to survive a JSON round-trip. Both the plan-time rejection and the
-// execution-time marshal failure cite it, so the two messages lead to
-// one explanation.
 const processBoundaryGuide = "docs/migrations/v0.36.0.md#process-per-node"
 
-// nodeOutputMarshalError is the failure a node gets when its output
-// cannot be encoded. A node runs in its own process, so its output
-// reaches a downstream node only as JSON in the run store: an output
-// that will not marshal has not been produced, and reporting success
-// would hand every consumer an empty value instead.
 func nodeOutputMarshalError(nodeID string, output any, err error) error {
 	return fmt.Errorf(
 		"%s: output of type %T could not be encoded as JSON: %w\n"+
@@ -29,22 +20,6 @@ func nodeOutputMarshalError(nodeID string, output any, err error) error {
 		nodeID, output, err, processBoundaryGuide)
 }
 
-// validateOutputSerializable reports why a job's declared output type
-// can never round-trip through JSON, or nil when it can. It runs at
-// plan time so an unencodable output is a rejected plan rather than a
-// node that runs its whole body and then fails on the way out.
-//
-// It rejects only the four kinds encoding/json refuses for every
-// value: chan, func, complex, and unsafe.Pointer. Everything else is
-// left to the execution-time check on the actual value.
-//
-// The narrowness is the point. This check runs on the cluster path
-// too, where a wrong verdict turns a pipeline that has been shipping
-// for months red on upgrade with no way to override it. In
-// particular a struct with no exported fields is NOT rejected:
-// json.Marshal encodes it as {}, which is a real answer, and
-// rejecting it would fail every job whose output embeds a sync.Mutex,
-// an *os.File, or any third-party type that keeps its state private.
 func validateOutputSerializable(t reflect.Type) error {
 	return serializable(t, map[reflect.Type]bool{})
 }
@@ -84,10 +59,6 @@ func serializable(t reflect.Type, seen map[reflect.Type]bool) error {
 	return nil
 }
 
-// serializableStruct walks only the fields encoding/json will look
-// at. An unexported field is skipped rather than inspected, which is
-// also what keeps the walk out of the private innards of types this
-// repository does not own.
 func serializableStruct(t reflect.Type, seen map[reflect.Type]bool) error {
 	for i := range t.NumField() {
 		f := t.Field(i)
@@ -115,9 +86,6 @@ func hasCustomJSONEncoding(t reflect.Type) bool {
 		t.Implements(textMarshaler) || ptr.Implements(textMarshaler)
 }
 
-// planOutputTypeErrors collects the plan-time output-type rejections
-// for every node that declares one, as a single error naming each
-// offending job. Returns nil when the plan is clean.
 func planOutputTypeErrors(plan *sparkwing.Plan) error {
 	var problems []string
 	for _, n := range plan.Nodes() {

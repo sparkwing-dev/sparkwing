@@ -4,45 +4,21 @@ import { useEffect, useRef, useState } from "react";
 import { type Run, getRunAttempts } from "@/lib/api";
 import { fmtDateTime } from "@/lib/timeFormat";
 
-// Fires the page-level select-run event so the runs list page swaps
-// to a different attempt. Keep this string in sync with
-// SELECT_RUN_EVENT defined in app/runs/page.tsx.
 const SELECT_RUN_EVENT = "sparkwing:select-run";
 
-// AttemptsDropdown lists every run sharing the same retry-tree root
-// as `currentRunID`, numbered "Attempt N" by chronological order
-// (oldest = #1). Branches (one source rerun multiple times) appear as
-// siblings ordered by created_at, so the linear numbering stays
-// monotonic even when the underlying retry_of graph forks.
-//
-// Behavior:
-//   - Hidden entirely when there's no retry history (just one
-//     attempt). The trigger button only paints once a 2nd run lands.
-//   - Compact variant (`dense`) for inline row use; the default
-//     variant pairs with action buttons in the detail header.
-//
-// The dropdown navigates by dispatching SELECT_RUN_EVENT so the URL,
-// scroll, and checkbox highlight all stay in sync with manual row
-// clicks.
 export default function AttemptsDropdown({
   currentRunID,
   dense = false,
   refreshKey,
 }: {
   currentRunID: string;
-  // dense: smaller chip suitable for inline list rows.
   dense?: boolean;
-  // refreshKey is bumped by the caller to force a refetch (e.g. after
-  // a rerun is queued). Any change re-runs the fetch effect.
   refreshKey?: number;
 }) {
   const [attempts, setAttempts] = useState<Run[]>([]);
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLSpanElement | null>(null);
 
-  // Bumped whenever a "sparkwing:runs-changed" event fires so a
-  // rerun queued from elsewhere on the page refreshes this dropdown
-  // without the user having to navigate away and back.
   const [bus, setBus] = useState(0);
   useEffect(() => {
     const handler = () => setBus((v) => v + 1);
@@ -78,8 +54,6 @@ export default function AttemptsDropdown({
     };
   }, [open]);
 
-  // Single-attempt runs (no rerun in either direction): hide the
-  // dropdown. A standalone "Attempt 1 of 1" pill is noise.
   if (attempts.length <= 1) return null;
 
   const currentIdx = attempts.findIndex((a) => a.id === currentRunID);
@@ -195,15 +169,6 @@ function statusDot(status: string): string {
   }
 }
 
-// attemptMode classifies a single run row by how it was started:
-//   - "original"  the root attempt (no retry_of pointer)
-//   - "full"      a retry that ran in Options.Full mode
-//   - "failed"    a retry with skip-passed rehydration ("from failed")
-//   - null        retry_of is set but invocation hasn't been stamped
-//                 yet (the orchestrator writes flags only after the
-//                 subprocess starts), so the mode is genuinely unknown
-//                 for a brief window -- render nothing rather than
-//                 mislead.
 type AttemptMode = "original" | "full" | "failed";
 
 function attemptMode(r: Run): AttemptMode | null {
@@ -235,9 +200,6 @@ function modeTooltip(m: AttemptMode): string {
   }
 }
 
-// Attempts are labelled by when they started. fmtDateTime carries the
-// year when the attempt isn't from this one -- a retry chain can span
-// a year boundary and "Dec 31" alone would be ambiguous.
 function fmtAttemptTime(r: Run): string {
   if (!r.started_at) return r.id;
   return fmtDateTime(r.started_at);

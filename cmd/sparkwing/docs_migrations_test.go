@@ -44,11 +44,6 @@ func TestRunDocsMigrationsList_JSONIsParseable(t *testing.T) {
 	}
 }
 
-// TestRunDocsMigrationsList_JSONSchemaMatchesWeb asserts the CLI's
-// list -o json output uses the same field names (and order) as the
-// web's /migrations/index.json schema. The web is authoritative; the
-// CLI conforms to a subset (minus url / raw_url, which are
-// web-deployment artifacts).
 func TestRunDocsMigrationsList_JSONSchemaMatchesWeb(t *testing.T) {
 	out := captureStdout(t, func() {
 		if err := runDocsMigrationsList([]string{"-o", "json"}); err != nil {
@@ -81,9 +76,6 @@ func TestRunDocsMigrationsList_JSONSchemaMatchesWeb(t *testing.T) {
 	}
 }
 
-// TestRunDocsList_JSONSchemaMatchesWeb verifies the existing
-// `sparkwing docs list -o json` output mirrors the web's
-// /docs/index.json shape (minus url / raw_url).
 func TestRunDocsList_JSONSchemaMatchesWeb(t *testing.T) {
 	out := captureStdout(t, func() {
 		if err := runDocsList([]string{"-o", "json"}); err != nil {
@@ -114,9 +106,6 @@ func keysOf(m map[string]json.RawMessage) []string {
 	return out
 }
 
-// keysInOrder returns the JSON object keys of the first NDJSON record,
-// in source order. Uses a streaming decoder so map iteration
-// randomness doesn't interfere.
 func keysInOrder(ndjson string) []string {
 	dec := json.NewDecoder(strings.NewReader(ndjson))
 	if _, err := dec.Token(); err != nil {

@@ -1,15 +1,5 @@
 "use client";
 
-// Shared run-filter machinery used by /runs (Activity view) and the
-// PipelineOverview component (By pipeline view). Filter state lives
-// in URL params so it persists across the pivot toggle, survives
-// reloads, and can be shared as a link.
-//
-// Encoded URL params:
-//   status, repo, pipeline, branch, commit, tag        → comma-joined includes
-//   nstatus, nrepo, npipeline, nbranch, ncommit, ntag  → comma-joined excludes
-//   startedAfter, startedBefore, finishedAfter, finishedBefore → loose date strings
-//   q → free-text search (space = AND, "-" prefix = exclude)
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -17,7 +7,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Run, PipelineMeta } from "@/lib/api";
 import Tooltip from "@/components/Tooltip";
 
-// ─── URL state hook ────────────────────────────────────────────────────────
 
 const FILTER_URL_KEYS = [
   "status",
@@ -45,10 +34,6 @@ export function useUrlFilterState() {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Batch sync setParams calls in a microtask so multi-key updates
-  // (date-preset writing 4 keys, etc.) merge into one router.replace.
-  // Next 16's router.replace doesn't synchronously update
-  // window.location, so reading it back between rapid calls is stale.
   const pendingRef = useRef<Record<string, string | string[]> | null>(null);
   const setParams = useCallback(
     (updates: Record<string, string | string[]>) => {
@@ -170,7 +155,6 @@ export function useUrlFilterState() {
 
 export type RunFilterState = ReturnType<typeof useUrlFilterState>;
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
 
 export function repoLabel(r: Run): string {
   const raw = r.repo || r.github_repo || "unknown";
@@ -196,10 +180,6 @@ export function parseLooseDate(s: string): number | null {
     const d = new Date(t.replace(" ", "T"));
     return isNaN(d.getTime()) ? null : d.getTime();
   }
-  // Slash form: M/D, M/D/YYYY, M/D HH:MM, M/D/YYYY HH:MM. Year-less
-  // forms default to current year (local). 2-digit years map into
-  // 2000-2099 since older years aren't a useful date filter target
-  // for a CI dashboard.
   const slash = t.match(
     /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/,
   );
@@ -218,10 +198,6 @@ export function parseLooseDate(s: string): number | null {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
-// msToUrlString encodes an absolute timestamp as an ISO-8601 string
-// with explicit local offset, e.g. 2026-05-07T00:00-07:00. Stored in
-// URL so shared links round-trip to the same absolute instant
-// regardless of recipient's timezone.
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
@@ -237,10 +213,6 @@ function msToUrlString(ms: number): string {
   );
 }
 
-// urlToInputString turns a stored URL value back into a tidy local
-// form suitable for displaying in the input field. The offset, if
-// any, is stripped from the display since the user shouldn't have to
-// reason about it.
 export function urlToInputString(s: string): string {
   if (!s) return "";
   const ms = parseLooseDate(s);
@@ -252,10 +224,6 @@ export function urlToInputString(s: string): string {
   );
 }
 
-// onDateInputChange parses a user-typed value, converts it to the
-// canonical URL form when parseable, and passes that to `setter`.
-// Unparseable strings are passed through verbatim so the filter
-// no-ops while the user is still typing.
 export function commitDateInput(value: string, setter: (v: string) => void) {
   if (!value.trim()) {
     setter("");
@@ -268,9 +236,6 @@ export function commitDateInput(value: string, setter: (v: string) => void) {
 
 export function fmtDateChip(local: string): string {
   if (!local) return "";
-  // Parse via parseLooseDate so the chip matches what the filter
-  // actually uses -- otherwise "5/11" displays a misleading year-2001
-  // date here but the filter sees a different (also wrong) year.
   const ms = parseLooseDate(local);
   if (ms === null) return local;
   const d = new Date(ms);
@@ -315,8 +280,6 @@ export function serializeSearch(terms: SearchTerm[]): string {
     .join(" ");
 }
 
-// runMatchesFilter returns true if a run passes every active filter
-// in `s`. Used by both views to filter their data identically.
 export function runMatchesFilter(
   r: Run,
   s: RunFilterState,
@@ -394,8 +357,6 @@ export function runMatchesFilter(
   return true;
 }
 
-// activeFilterCount returns how many filter slots are currently set.
-// Used to show the "clear all" button and gate the chip strip.
 export function activeFilterCount(s: RunFilterState): number {
   return (
     s.filterStatus.length +
@@ -416,7 +377,6 @@ export function activeFilterCount(s: RunFilterState): number {
   );
 }
 
-// clearAllFilters wipes every facet at once.
 export function clearAllFilters(s: RunFilterState) {
   s.setFilterRepo([]);
   s.setFilterPipeline([]);
@@ -437,7 +397,6 @@ export function clearAllFilters(s: RunFilterState) {
   s.setExcludeTag([]);
 }
 
-// ─── Filter bar ────────────────────────────────────────────────────────────
 
 export interface FilterGroup {
   key: string;
@@ -463,9 +422,6 @@ export interface DateGroup {
   setFinishedBefore: (v: string) => void;
 }
 
-// buildGroupsFromState constructs the standard 6-facet group config
-// from a RunFilterState plus the option lists derived from the
-// caller's runs data.
 export function buildGroupsFromState(
   s: RunFilterState,
   options: {
@@ -553,8 +509,6 @@ export function buildGroupsFromState(
   ];
 }
 
-// computeOptions derives the available filter options from a runs
-// list and pipeline metadata.
 export function computeOptions(
   runs: Run[],
   pipelineMeta: Record<string, PipelineMeta>,
@@ -930,9 +884,6 @@ export function FullFilterBar({
   );
 }
 
-// DebouncedSearchInput keeps the visible value in local state for
-// snappy typing, then commits upstream (URL/router) after a brief
-// idle so each keystroke doesn't trigger a full filter rerun.
 function DebouncedSearchInput({
   value,
   onCommit,
@@ -1019,11 +970,6 @@ function DateInput({
   );
 }
 
-// Common time-range shortcuts. Each preset writes started-axis
-// boundaries and clears the finished-axis so the result is unambiguous.
-// "Today" sets startedAfter to local midnight today, leaves before
-// open; "Yesterday" pins to the full local day; "Last N" presets are
-// rolling windows ending now.
 const DATE_PRESETS: { label: string; apply: (g: DateGroup) => void }[] = [
   {
     label: "Today",
@@ -1172,10 +1118,6 @@ function DateFilterButton({
   );
 }
 
-// useFilterDropdownState provides the openDropdown state + outside-
-// click + Escape handler shared by FullFilterBar consumers. The
-// wrapping ref is returned so callers can attach it to their filter
-// container element.
 export function useFilterDropdownState() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -1184,17 +1126,11 @@ export function useFilterDropdownState() {
     const handler = (e: MouseEvent) => {
       if (!filterRef.current) return;
       const target = e.target as Element;
-      // Click landed inside a dropdown trigger or panel -- let it
-      // handle itself (toggle, switch to another dropdown, etc.).
       if (target.closest("[data-dropdown-region]")) return;
-      // Click outside the filter bar entirely -- swallow so the
-      // hidden detail row underneath doesn't also get hit.
       if (!filterRef.current.contains(target)) {
         e.stopPropagation();
         e.preventDefault();
       }
-      // Empty space inside the filter bar -- close without swallowing
-      // so other inline controls (chips, search input) still react.
       setOpenDropdown(null);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -1210,7 +1146,6 @@ export function useFilterDropdownState() {
   return { openDropdown, setOpenDropdown, filterRef };
 }
 
-// ─── Filterable value (click-to-filter pill) ──────────────────────────────
 
 export type FilterFacet =
   | "status"
@@ -1322,8 +1257,6 @@ export function createFilterCtx(filterState: RunFilterState): FilterCtx {
   };
 }
 
-// Filter context identity follows the URL-derived state so memoized rows
-// repaint their pills and event handlers together after navigation.
 export function useFilterCtx(filterState: RunFilterState): FilterCtx {
   return useMemo(() => createFilterCtx(filterState), [filterState]);
 }
@@ -1331,9 +1264,6 @@ export function useFilterCtx(filterState: RunFilterState): FilterCtx {
 function useClickPopup<T extends HTMLElement>() {
   const [open, setOpen] = useState(false);
   const ref = useRef<T>(null);
-  // Popup body is rendered via portal at document.body so overflow
-  // ancestors don't clip it; we still need outside-click detection,
-  // so the consumer wires `popupRef` to the portal's root node.
   const popupRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (!open) return;

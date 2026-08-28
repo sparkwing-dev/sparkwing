@@ -3,14 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getPaused, releaseNode, type PauseState } from "@/lib/api";
 
-// DebugPausePanel lists the open pauses for a run and exposes a
-// Release button per row. Copy-paste `sparkwing debug attach` snippet
-// sits under each row so an operator can drop into the paused pod
-// without leaving the dashboard.
-//
-// The panel polls every 2s while the run is active; hidden entirely
-// when there are no open pauses so it doesn't steal layout space on
-// normal runs.
 export default function DebugPausePanel({
   runID,
   runStatus,
@@ -27,7 +19,6 @@ export default function DebugPausePanel({
       const ps = await getPaused(runID);
       setPauses(ps.filter((p) => !p.released_at));
     } catch {
-      // Silent: the panel is supplementary to the main view.
     }
   }, [runID]);
 

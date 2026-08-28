@@ -7,12 +7,6 @@ import (
 	"testing"
 )
 
-// TestDefaultPath_NeverResolvesToTheRealRegistryUnderTest is the always-on
-// protection for the live registry. The full-suite audit
-// in internal/configguard proves the suite left the live registry alone
-// on one machine at one moment; this proves no fixture can reach it at
-// all, which is the property that has to survive the next fixture
-// someone writes.
 func TestDefaultPath_NeverResolvesToTheRealRegistryUnderTest(t *testing.T) {
 	t.Setenv("SPARKWING_REPOS", "")
 	t.Setenv("XDG_CONFIG_HOME", "")
@@ -34,8 +28,6 @@ func TestDefaultPath_NeverResolvesToTheRealRegistryUnderTest(t *testing.T) {
 	}
 }
 
-// TestDefaultPath_StillHonorsAnExplicitOverride keeps the sandbox from
-// swallowing the redirection tests already rely on.
 func TestDefaultPath_StillHonorsAnExplicitOverride(t *testing.T) {
 	want := filepath.Join(t.TempDir(), "explicit.yaml")
 	t.Setenv("SPARKWING_REPOS", want)
@@ -59,9 +51,6 @@ func TestDefaultPath_StillHonorsAnExplicitOverride(t *testing.T) {
 	}
 }
 
-// TestAutoRegister_SkipsAScratchCheckoutUnderTempDir covers the entry
-// class that grew the registry to 457: a repo scaffolded under
-// os.TempDir(), run once, and deleted.
 func TestAutoRegister_SkipsAScratchCheckoutUnderTempDir(t *testing.T) {
 	registry := filepath.Join(t.TempDir(), "repos.yaml")
 	t.Setenv("SPARKWING_REPOS", registry)
@@ -90,11 +79,6 @@ func TestAutoRegister_SkipsAScratchCheckoutUnderTempDir(t *testing.T) {
 	}
 }
 
-// TestUnderTempDir is the control for the temp skip: the class it
-// filters is throwaway directories, not every checkout. It asserts on
-// underTempDir rather than on AutoRegister because t.TempDir() is itself
-// inside os.TempDir() on macOS and Linux, which leaves a test no way to
-// build a "real" checkout on disk to register.
 func TestUnderTempDir(t *testing.T) {
 	scratch, err := os.MkdirTemp("", "sparkwing-tv-fake-*")
 	if err != nil {
@@ -119,10 +103,6 @@ func TestUnderTempDir(t *testing.T) {
 	}
 }
 
-// TestAutoRegister_StillRecordsACheckoutOutsideTempDir keeps the skip
-// from swallowing ordinary registration. The checkout does not exist on
-// disk, so this drives Add's shared validation only as far as the temp
-// filter, which is the branch under test.
 func TestAutoRegister_StillRecordsACheckoutOutsideTempDir(t *testing.T) {
 	registry := filepath.Join(t.TempDir(), "repos.yaml")
 	t.Setenv("SPARKWING_REPOS", registry)

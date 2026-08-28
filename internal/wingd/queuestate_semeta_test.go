@@ -338,8 +338,6 @@ func TestSemaphoreETACapacity_TakesTheSmallestDeclaration(t *testing.T) {
 	}
 }
 
-// semaNone marks a want entry whose ExpectedStartMS must stay nil, since a
-// nil estimate cannot be spelled in a slice of milliseconds.
 const semaNone = int64(-1)
 
 func semLease(id admission.LeaseID, runID, key string, capacity, cost int) admission.LeaseState {

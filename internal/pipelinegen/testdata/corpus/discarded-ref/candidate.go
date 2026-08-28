@@ -24,8 +24,7 @@ type discardedRefOut struct {
 
 func (GenDiscardedRef) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
 	build := sw.Job(plan, "build", &genDiscardedRefBuild{})
-	// Anti-pattern: the Ref is created and thrown away, so nothing
-	// downstream can read build's typed output.
+
 	_ = sw.RefTo[discardedRefOut](build)
 	sw.Job(plan, "deploy", genDiscardedRefDeploy).Needs(build)
 	return nil

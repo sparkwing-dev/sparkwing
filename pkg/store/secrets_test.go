@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// secretStore opens a fresh store for secret tests. Kept separate from
-// newStoreT (lease_test.go) so tests run independently even if the
-// lease helpers evolve.
 func secretStore(t *testing.T) *store.Store {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "secrets.db"))

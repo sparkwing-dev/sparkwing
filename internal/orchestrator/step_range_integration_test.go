@@ -10,9 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// stepRangeRanFlags is the canary set every stepRangePipe test
-// uses: a/b/c steps that each tick a counter so tests can assert
-// which actually executed.
 type stepRangeRanFlags struct {
 	a, b, c atomic.Bool
 }
@@ -35,9 +32,6 @@ func (stepRangeIntegPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 	return nil
 }
 
-// Full slice through Options.StartAt -> validation -> ctx install ->
-// RunWork skip. If any seam is wrong the run still reports success
-// but the wrong steps execute.
 func TestRunLocal_StartAtSkipsUpstreamSteps(t *testing.T) {
 	register("orch-step-range-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangeIntegPipe{} })
 	stepRangeFlags = stepRangeRanFlags{}
@@ -62,8 +56,6 @@ func TestRunLocal_StartAtSkipsUpstreamSteps(t *testing.T) {
 	}
 }
 
-// Unknown --start-at fails the run BEFORE any node dispatches; the
-// run-level Error carries the Levenshtein-suggesting message.
 func TestRunLocal_StartAtUnknownFailsRunBeforeDispatch(t *testing.T) {
 	register("orch-step-range-typo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangeIntegPipe{} })
 	stepRangeFlags = stepRangeRanFlags{}

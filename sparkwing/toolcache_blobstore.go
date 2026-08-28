@@ -17,9 +17,6 @@ import (
 	"time"
 )
 
-// lintCacheManifestName is the first entry in the lint-cache archive.
-// It holds the absolute workdir path so RestoreLintCache can verify the
-// cache was produced at the same path before writing any files.
 const lintCacheManifestName = "workdir"
 
 // ErrLintCacheWorkdirMismatch is returned when the archive's recorded
@@ -149,8 +146,6 @@ func RestoreLintCache(ctx context.Context, gcURL string) (bool, int64, error) {
 	return true, counted.n, nil
 }
 
-// writeLintCacheArchive streams a gzipped tar to w. The first entry is a
-// workdir manifest; remaining entries hold the cache tree under "cache/".
 func writeLintCacheArchive(w io.Writer, cacheDir, workdir string) error {
 	gz := gzip.NewWriter(w)
 	tw := tar.NewWriter(gz)
@@ -212,10 +207,6 @@ func writeLintCacheArchive(w io.Writer, cacheDir, workdir string) error {
 	return gz.Close()
 }
 
-// extractLintCacheArchive reads a lint-cache archive from r, verifies
-// the embedded workdir matches runningWorkdir, then expands the cache
-// files into destDir. Each regular file is written to a temp path and
-// renamed into place so a partial restore does not leave half-written files.
 func extractLintCacheArchive(r io.Reader, destDir, runningWorkdir string) error {
 	gz, err := gzip.NewReader(r)
 	if err != nil {

@@ -10,8 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// newStoreT opens a fresh store in t.TempDir. Used by every lease
-// test so they run in isolation.
 func newStoreT(t *testing.T) *store.Store {
 	t.Helper()
 	s, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -81,9 +79,6 @@ func TestLease_HeartbeatMissingReturnsNotFound(t *testing.T) {
 	}
 }
 
-// TestLease_ReaperRequeuesExpired is the headline crash-recovery
-// case: a worker claims, dies silently, and a second worker picks
-// up the work.
 func TestLease_ReaperRequeuesExpired(t *testing.T) {
 	s := newStoreT(t)
 	seedPending(t, s, "trig-c")
@@ -136,8 +131,6 @@ func TestLease_ReaperRequeuesExpired(t *testing.T) {
 	}
 }
 
-// TestLease_ReaperSkipsNonExpired guards against the sweep being
-// too aggressive and kicking out still-healthy workers.
 func TestLease_ReaperSkipsNonExpired(t *testing.T) {
 	s := newStoreT(t)
 	seedPending(t, s, "trig-healthy")

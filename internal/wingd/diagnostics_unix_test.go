@@ -16,9 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/admission"
 )
 
-// TestDiagnosticsDumpsOnSIGUSR1 pins the field-triage hook. A daemon
-// burning CPU can only be explained while it is still running, and the
-// operator's other option -- killing it -- is what destroys the evidence.
 func TestDiagnosticsDumpsOnSIGUSR1(t *testing.T) {
 	var mu sync.Mutex
 	var lines []string
@@ -57,8 +54,6 @@ func TestDiagnosticsDumpsOnSIGUSR1(t *testing.T) {
 	}
 }
 
-// seedOversizedLog gives home a daemon log one byte past the cap and
-// returns its path.
 func seedOversizedLog(t *testing.T, home string) string {
 	t.Helper()
 	path, err := LogPath(home)
@@ -78,13 +73,6 @@ func seedOversizedLog(t *testing.T, home string) string {
 	return path
 }
 
-// TestDiagnosticsRotatesAnOversizedLogBeforeDumping pins the bound on a
-// daemon that never restarts. Each dump appends up to 2MB and rotation
-// used to happen only at spawn, so a resident daemon asked for a handful
-// of dumps grew d.log without limit.
-//
-// The sink stands in for a spawned daemon's output, which the client
-// points at d.log before the process starts.
 func TestDiagnosticsRotatesAnOversizedLogBeforeDumping(t *testing.T) {
 	home := t.TempDir()
 	path := seedOversizedLog(t, home)
@@ -130,29 +118,10 @@ func TestDiagnosticsRotatesAnOversizedLogBeforeDumping(t *testing.T) {
 	}
 }
 
-// parentMarker is what the holding process writes after the rotation has
-// happened in another process.
 const parentMarker = "holder-wrote-this-after-the-rotation"
 
-// rotationChildEnv carries the home the child arm rotates.
 const rotationChildEnv = "SPARKWING_TEST_ROTATION_HOME"
 
-// TestDiagnosticsRotationFollowsAProcessHoldingAnInheritedLog is the
-// shape production actually has, which a single-process test cannot see.
-// The client points the supervisor's stdout and stderr at d.log, the
-// supervisor hands those same descriptors to every daemon it starts, and
-// it logs through them itself -- three processes writing one inherited
-// descriptor, only one of which performs the rotation.
-//
-// Renaming the log strands the other two on the archive: d.log never
-// grows again so it never rotates again, d.log.1 grows without bound,
-// and the next rotation unlinks the inode they are still writing to.
-// Copying the contents aside and truncating in place keeps one inode, so
-// a holder that never hears about the rotation follows it anyway. This
-// test proves that across a real process boundary: the parent opens the
-// log, a child process rotates and dumps through the descriptor it
-// inherited, and the parent's later writes have to land in the emptied
-// d.log rather than in the archive.
 func TestDiagnosticsRotationFollowsAProcessHoldingAnInheritedLog(t *testing.T) {
 	home := t.TempDir()
 	path := seedOversizedLog(t, home)
@@ -201,10 +170,6 @@ func TestDiagnosticsRotationFollowsAProcessHoldingAnInheritedLog(t *testing.T) {
 	}
 }
 
-// TestDiagnosticsRotationChildArm is the second process of
-// TestDiagnosticsRotationFollowsAProcessHoldingAnInheritedLog. It runs
-// only when that test re-execs this binary; a normal run returns without
-// doing anything.
 func TestDiagnosticsRotationChildArm(t *testing.T) {
 	home := os.Getenv(rotationChildEnv)
 	if home == "" {
@@ -239,9 +204,6 @@ func TestDiagnosticSummaryReportsWhatTheDaemonHolds(t *testing.T) {
 	}
 }
 
-// TestDiagnosticSummaryDoesNotWaitOnTheDaemonMutex keeps the dump usable
-// for the case it exists for: a daemon wedged holding its own lock must
-// still answer, and say so.
 func TestDiagnosticSummaryDoesNotWaitOnTheDaemonMutex(t *testing.T) {
 	d := &Daemon{cfg: Config{Version: "v1.2.3"}}
 	d.mu.Lock()

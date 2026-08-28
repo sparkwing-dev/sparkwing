@@ -28,9 +28,6 @@ var (
 	hostTestGate          atomic.Pointer[wingdGate]
 )
 
-// registerHostTestPipelines registers one pipeline per shape the split
-// semantics turn on, plus gated variants the concurrency regressions use
-// to observe how many run at once.
 func registerHostTestPipelines() {
 	hostTestPipelinesOnce.Do(func() {
 		register := func(name string, build func(*sparkwing.Plan, sparkwing.RunContext)) {
@@ -54,8 +51,6 @@ func registerHostTestPipelines() {
 			plan.Concurrency(globalGroup)
 		})
 
-		// Gated: the body reports and blocks, so overlapping work is
-		// observable as a peak above one.
 		gated := func(plan *sparkwing.Plan, id, runID string) *sparkwing.JobNode {
 			return sparkwing.Job(plan, id, func(ctx context.Context) error {
 				if g := hostTestGate.Load(); g != nil {
@@ -71,8 +66,7 @@ func registerHostTestPipelines() {
 		register("host-gated-node-box", func(plan *sparkwing.Plan, rc sparkwing.RunContext) {
 			gated(plan, "work", rc.RunID).Concurrency(boxGroup)
 		})
-		// Two independent nodes in one run, both in a run-scoped
-		// capacity-1 group: they would run in parallel if nothing held it.
+
 		register("host-gated-run-nodes", func(plan *sparkwing.Plan, rc sparkwing.RunContext) {
 			gated(plan, "work-a", rc.RunID).Concurrency(runGroup)
 			gated(plan, "work-b", rc.RunID).Concurrency(runGroup)
@@ -105,11 +99,6 @@ func buildHostTestPlan(t *testing.T, name string) *sparkwing.Plan {
 	return plan
 }
 
-// TestPlanPinsHostResources pins the line between a reservation only the
-// daemon can hold and everything else. Concurrency groups are on the
-// "everything else" side deliberately: without an admission they are
-// honored by the shared store, which
-// TestRun_DegradedConcurrencyGroupsStillSerialize proves empirically.
 func TestPlanPinsHostResources(t *testing.T) {
 	cases := []struct {
 		pipeline  string
@@ -138,10 +127,6 @@ func TestPlanPinsHostResources(t *testing.T) {
 	}
 }
 
-// TestUnhostedOutcome_OnlyTheTwoUnusableBoxSentinels keeps the split
-// pointed at the two conditions it exists for. An unreachable daemon, an
-// unusable host binary, a policy rejection, or an exhausted takeover must
-// keep failing loudly for everyone.
 func TestUnhostedOutcome_OnlyTheTwoUnusableBoxSentinels(t *testing.T) {
 	implicit := buildHostTestPlan(t, "host-implicit")
 	other := []error{
@@ -170,8 +155,6 @@ func TestUnhostedOutcome_OnlyTheTwoUnusableBoxSentinels(t *testing.T) {
 	}
 }
 
-// Only a host-resource pin fails closed on an empty box. A concurrency
-// group does not, because it keeps working without the daemon.
 func TestUnhostedOutcome_OnlyAHostPinFailsClosedOnAnEmptyBox(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
 	noHost := fmt.Errorf("local admission: %w", wingdclient.ErrNoDaemonHost)
@@ -199,9 +182,6 @@ func TestUnhostedOutcome_OnlyAHostPinFailsClosedOnAnEmptyBox(t *testing.T) {
 	}
 }
 
-// A live daemon this client cannot speak to refuses every run, pinned or
-// not: it is arbitrating the box, and joining it uncoordinated
-// oversubscribes the machine rather than merely losing coordination.
 func TestUnhostedOutcome_ALiveTooOldDaemonRefusesEveryRun(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
 	tooOld := fmt.Errorf("local admission: %w: daemon speaks protocol 2 (sparkwing v0.23.0), "+
@@ -226,9 +206,6 @@ func TestUnhostedOutcome_ALiveTooOldDaemonRefusesEveryRun(t *testing.T) {
 	}
 }
 
-// A run with nothing pinned degrades, and says so exactly once however
-// many admission calls meet the same box. The warning has to be honest
-// about what is and is not still enforced.
 func TestUnhostedOutcome_DegradeWarnsOnceAndNamesWhatIsLost(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
 	plan := buildHostTestPlan(t, "host-implicit")
@@ -253,9 +230,6 @@ func TestUnhostedOutcome_DegradeWarnsOnceAndNamesWhatIsLost(t *testing.T) {
 	}
 }
 
-// The escape hatch is strict: only "1". A value like "off" or "false"
-// reads as an attempt to keep the gate on, and a lenient parser that
-// treated any non-empty value as authorization would disable it.
 func TestAllowUnadmitted_OnlyExactlyOne(t *testing.T) {
 	plan := buildHostTestPlan(t, "host-plan-resources")
 	noHost := fmt.Errorf("x: %w", wingdclient.ErrNoDaemonHost)
@@ -275,9 +249,6 @@ func TestAllowUnadmitted_OnlyExactlyOne(t *testing.T) {
 	}
 }
 
-// A dry run mutates nothing and finishes in seconds, so it is exempt from
-// both refusals -- and it is the command an operator uses to find out
-// what a box would do, which refusing would defeat.
 func TestUnhostedOutcome_DryRunIsExempt(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
 	pinned := buildHostTestPlan(t, "host-plan-resources")
@@ -293,10 +264,6 @@ func TestUnhostedOutcome_DryRunIsExempt(t *testing.T) {
 	}
 }
 
-// TestPipelineAdmission_NeverHosts pins the wiring: a pipeline binary's
-// admission shares the daemon rather than replacing it, spawns something
-// other than itself when one is needed, and threads the parent lease and
-// origin through unchanged.
 func TestPipelineAdmission_NeverHosts(t *testing.T) {
 	t.Setenv(wingdclient.HostBinEnv, "/opt/sparkwing/bin/sparkwing")
 	la := pipelineAdmission("parent-token", wingwire.OriginLocal)
@@ -332,9 +299,6 @@ func TestPipelineAdmission_NoHostResolvableSpawnsNothing(t *testing.T) {
 	}
 }
 
-// PipelineClient and a non-self-exec Spawn are one stance. Setting the
-// first without the second must not fall through to the default that
-// re-execs this binary as the daemon.
 func TestClientOptions_PipelineClientNeverGetsTheSelfExecDefault(t *testing.T) {
 	t.Setenv(wingdclient.HostBinEnv, "")
 	t.Setenv("PATH", t.TempDir())
@@ -348,8 +312,6 @@ func TestClientOptions_PipelineClientNeverGetsTheSelfExecDefault(t *testing.T) {
 	}
 }
 
-// runHostTest drives a real Run through a pipeline-binary admission
-// pointed at a home no daemon serves, with nothing available to host one.
 func runHostTest(t *testing.T, pipeline string) (*Result, string) {
 	t.Helper()
 	registerHostTestPipelines()
@@ -381,8 +343,6 @@ func unhostedAdmission(home string, warnings io.Writer) *LocalAdmission {
 	}
 }
 
-// End to end: a pinned run on an empty box fails, an unpinned one
-// succeeds uncoordinated.
 func TestRun_EmptyBoxSplitsOnTheHostPin(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
 
@@ -414,12 +374,6 @@ func TestRun_EscapeHatchLetsAPinnedRunProceedUnadmitted(t *testing.T) {
 	}
 }
 
-// TestRun_DegradedConcurrencyGroupsStillSerialize is the evidence behind
-// narrowing the refusal to host pins. Two degraded runs of a capacity-1
-// box-scoped group must not overlap: with no admission the whole run
-// takes the no-daemon path, where the shared store enforces the group.
-// If that ever stops being true, refusing these runs becomes the right
-// answer again -- and this is the test that would say so.
 func TestRun_DegradedConcurrencyGroupsStillSerialize(t *testing.T) {
 	cases := []struct{ name, pipeline string }{
 		{"plan-level box scope", "host-gated-plan-box"},
@@ -478,7 +432,6 @@ func TestRun_DegradedConcurrencyGroupsStillSerialize(t *testing.T) {
 			launch("degraded-b")
 			waitForDegradedConcurrencyPopulation(t, ctx, st, scopedGroupKey(boxGroup, ""))
 
-			// The second must not start while the first holds the slot.
 			select {
 			case started := <-gate.started:
 				t.Fatalf("%q started while %q held a capacity-1 box group", started, "degraded-a")
@@ -510,10 +463,6 @@ func TestRun_DegradedConcurrencyGroupsStillSerialize(t *testing.T) {
 	}
 }
 
-// Run scope is keyed by run id, so the store enforces it completely: two
-// independent nodes of one degraded run sharing a run-scoped capacity-1
-// group must still serialize, even though nothing stops them being
-// dispatched at the same time.
 func TestRun_DegradedRunScopeStillSerializes(t *testing.T) {
 	t.Setenv(AllowUnadmittedEnv, "")
 	registerHostTestPipelines()

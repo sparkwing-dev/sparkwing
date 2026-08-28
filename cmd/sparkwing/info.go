@@ -19,8 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-// Info is the JSON shape of `sparkwing info`. Stable contract: agents
-// parse this directly. Field renames here are breaking changes.
 type Info struct {
 	About           string         `json:"about"`
 	CapabilityEpoch int            `json:"capability_epoch"`
@@ -34,22 +32,13 @@ type Info struct {
 	Docs            InfoDocs       `json:"docs"`
 	FirstRunNote    string         `json:"first_run_note"`
 	UpgradeNotice   string         `json:"upgrade_notice,omitempty"`
-	// Executable identifies the binary that produced this output, so a
-	// reader knows exactly which install the version above describes
-	// and whether some other invocation could resolve a different one.
+
 	Executable InfoExecutable `json:"executable"`
 }
 
-// InfoExecutable is the running binary's identity: its resolved path,
-// and any other sparkwing installs reachable on this machine. Plain
-// paths, no policy -- which copy a given process runs is decided by
-// that process's own PATH, which this binary cannot see.
 type InfoExecutable struct {
-	// Path is the running binary's path with symlinks resolved.
 	Path string `json:"path"`
-	// OtherInstalls are other sparkwing binaries reachable via PATH or
-	// the well-known install directories, if any. A process whose PATH
-	// orders one of these first runs it instead of Path.
+
 	OtherInstalls []string `json:"other_installs,omitempty"`
 }
 
@@ -60,9 +49,6 @@ type InfoTip struct {
 	Note    string `json:"note,omitempty"`
 }
 
-// InfoVersion separates the raw version string from parsed semver and
-// build provenance. Agents should branch on BuildType / IsRelease
-// rather than string-matching Installed.
 type InfoVersion struct {
 	Installed   string `json:"installed"`
 	Semver      string `json:"semver,omitempty"`
@@ -190,8 +176,6 @@ const (
 	infoGoRequirement = "Go-pipeline path requires the Go toolchain on PATH."
 )
 
-// infoBat indentation is load-bearing: the top-left "\" tail hangs off
-// the speech bubble drawn above it.
 const infoBat = `      /\                        /\
      / \'.__     /\_/\     __.'/ \
     (    '-.___( o   o )___.-'    )
@@ -249,31 +233,15 @@ func runInfo(args []string) error {
 
 const agentBlockHeader = "<!-- Sparkwing discovery context (capability epoch 1). Only the block between the 8< markers is durable; everything after it describes this wake and must not be persisted. -->"
 
-// durableMarkerOpen and durableMarkerClose delimit the one part of this
-// output that is safe to keep in an instruction file.
-//
-// Everything else here names a version, a path, or a command set, and a
-// copy of that in someone's CLAUDE.md is a fossil the day the CLI moves
-// -- which is why this output used to forbid persisting any of it. But
-// a reader who is told only "don't keep this" still needs some durable
-// way back in, and without one the answer becomes scraping the repo.
-// The durable block is therefore exactly one thing: what this repo uses
-// and the single command that reports everything current.
 const (
 	durableMarkerOpen  = "--- 8< --- durable: copy into AGENTS.md or CLAUDE.md --- 8< ---"
 	durableMarkerClose = "--- 8< --- end durable --- 8< ---"
 )
 
-// agentBlockDurable is the persistable half: no versions, no paths, no
-// counts, and one command. Anything added here has to survive being
-// read a year from now.
 const agentBlockDurable = "This repo uses **sparkwing** for CI/CD (https://sparkwing.dev). Pipelines are\n" +
 	"Go programs in `.sparkwing/`. Run `sparkwing info --for-agent` for the current\n" +
 	"commands and this repo's state -- ask the binary rather than scraping the repo.\n"
 
-// agentBlockAuthoring is the quickstart for the task agents most often
-// arrive with. It sits outside the durable block because every command
-// in it is a command, and commands move.
 const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"\n" +
 	"- `sparkwing pipeline new --name <n> --template <shape> [--on <event>]` --\n" +
@@ -293,16 +261,6 @@ const agentBlockAuthoring = "### Writing a pipeline\n" +
 	"  enforces, how a pipeline fires, and the config schema, in one call\n" +
 	"- `sparkwing pipeline lint` then `sparkwing run <n>` -- check it without guessing\n"
 
-// agentBlockBody is the current agent discovery context.
-//
-// Every agent wake pays for this block, and most agents are not
-// authoring a pipeline, so it routes rather than teaches: one line per
-// task, naming the trigger and the next command, nothing about what
-// that command will say. The authoring line earns its place because
-// without it trials went straight to the docs and hand-wrote every
-// pipeline, never learning the template catalog existed -- but
-// `pipeline new --help` already opens with the catalog, so repeating
-// it here would charge every agent for something one in ten needs.
 const agentBlockBody = "- `sparkwing commands` -- one-line index of every verb; `--path <prefix>` to\n" +
 	"  narrow, `<path> --help` for one verb, `-o json` for the full records\n" +
 	"- `sparkwing pipeline list -o json` -- this repo's pipelines\n" +
@@ -311,13 +269,6 @@ const agentBlockBody = "- `sparkwing commands` -- one-line index of every verb; 
 	"- `sparkwing docs read --topic <slug>` -- offline docs; full corpus: https://sparkwing.dev/llms-full.txt\n" +
 	"- `sparkwing info -o json` -- this same context as JSON, when you want to parse it\n"
 
-// printAgentBlock writes the agent discovery context.
-//
-// It ends with this repo's state because the block used to send the
-// reader to `info -o json` for it, and every recorded trial obediently
-// made that second call before doing anything else -- a whole model
-// round to learn one line. Answering it here costs four lines and
-// removes a turn from every agent's first minute.
 func printAgentBlock() {
 	fmt.Println(agentBlockHeader)
 	fmt.Println()
@@ -462,8 +413,6 @@ func pathHintLines() []string {
 	}
 }
 
-// gatherInfo never errors: every field has a sensible "not found"
-// fallback.
 func gatherInfo() Info {
 	binary, _ := os.Executable()
 	info := Info{
@@ -515,10 +464,6 @@ func gatherInfo() Info {
 	return info
 }
 
-// gatherExecutable resolves the running binary and scans for other
-// sparkwing installs. The scan is skipped under a test binary for the
-// same reason doctor's is: `go test` is not an installed sparkwing, so
-// every copy on the developer's real PATH would read as a rival to it.
 func gatherExecutable() InfoExecutable {
 	self, err := installsite.Self()
 	if err != nil {
@@ -538,8 +483,6 @@ func gatherExecutable() InfoExecutable {
 	return out
 }
 
-// gatherTips runs each tip gate. Each gate must be cheap and fail-soft;
-// network probes use a short timeout and silently skip on failure.
 func gatherTips(info Info) []InfoTip {
 	var tips []InfoTip
 
@@ -672,9 +615,6 @@ func semverBehind(current, latest string) bool {
 	return semver.Compare(current, latest) < 0
 }
 
-// goToolchainVersion shells out to `go version`. The user-facing answer
-// is "what compiler runs when sparkwing compiles .sparkwing/?" -- that's
-// the version on PATH, not the one that built the CLI.
 func goToolchainVersion() string {
 	bin, err := exec.LookPath("go")
 	if err != nil {

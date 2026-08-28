@@ -16,9 +16,6 @@ func TestReleaseTemplateVerificationAllowsSerializedAdmission(t *testing.T) {
 	}
 }
 
-// releaseGateNodes are the nodes whose failure must stop a release. A
-// release that reaches push-tag without all of them green has traded an
-// unsatisfiable pipeline for an unsafe one.
 var releaseGateNodes = []string{
 	"validate-version",
 	"check-clean-tree",
@@ -62,8 +59,6 @@ func TestReleasePreviewExampleUsesTheReservedRunFlag(t *testing.T) {
 	}
 }
 
-// ancestors returns every node id that id depends on, directly or
-// transitively.
 func ancestors(t *testing.T, plan *sparkwing.Plan, id string) map[string]bool {
 	t.Helper()
 	seen := map[string]bool{}

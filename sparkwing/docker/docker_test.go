@@ -15,7 +15,6 @@ import (
 	"testing"
 )
 
-// requireDocker skips the test when `docker` is not on PATH.
 func requireDocker(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("docker"); err != nil {
@@ -23,9 +22,6 @@ func requireDocker(t *testing.T) {
 	}
 }
 
-// dockerDaemonUp performs a cheap `docker version` to verify the
-// daemon is reachable. docker may be installed without a running
-// daemon (CI sandbox case); those tests skip.
 func dockerDaemonUp(t *testing.T) bool {
 	t.Helper()
 	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
@@ -35,8 +31,6 @@ func dockerDaemonUp(t *testing.T) bool {
 	return true
 }
 
-// withRepo creates a fresh git repo in a temp dir and chdirs into it
-// for the duration of the test. Mirrors pkg/sparkwing/git's helper.
 func withRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -100,13 +94,6 @@ func TestErrDockerUnavailable(t *testing.T) {
 	}
 }
 
-// fakeBuildxInspectDocker installs a `docker` shim on PATH that:
-//   - exits 0 for `docker buildx version`
-//   - prints the supplied buildx-inspect text on `docker buildx inspect`
-//   - exits 0 for any other invocation (so a downstream `docker build`
-//     in the same test sees a no-op success)
-//
-// Returns the bin dir for the caller to inspect call logs if needed.
 func fakeBuildxInspectDocker(t *testing.T, inspectOutput string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -464,8 +451,6 @@ func TestBuildRejectsMissingTags(t *testing.T) {
 	}
 }
 
-// TestBuildDefaults exercises the real docker daemon. Skips if docker
-// is not available or not running.
 func TestBuildDefaults(t *testing.T) {
 	requireDocker(t)
 	if !dockerDaemonUp(t) {
@@ -495,9 +480,6 @@ func TestBuildDefaults(t *testing.T) {
 	_ = exec.Command("docker", "rmi", "-f", fmt.Sprintf("%s:%s", image, tag)).Run()
 }
 
-// TestBuildAndPushLocalRegistry exercises BuildAndPush against a local
-// registry:2 container on a known port (default 5000). Skipped unless
-// a registry is reachable at $SPARKWING_TEST_REGISTRY (e.g. "localhost:5000").
 func TestBuildAndPushLocalRegistry(t *testing.T) {
 	requireDocker(t)
 	if !dockerDaemonUp(t) {
@@ -541,7 +523,6 @@ func TestBuildAndPushLocalRegistry(t *testing.T) {
 	).Run()
 }
 
-// registryReachable does a GET /v2/ against the registry.
 func registryReachable(registry string) bool {
 	u := &url.URL{Scheme: "http", Host: registry, Path: "/v2/"}
 	req, _ := http.NewRequest(http.MethodGet, u.String(), nil)
@@ -553,13 +534,8 @@ func registryReachable(registry string) bool {
 	return resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusUnauthorized
 }
 
-// httpDefaultClient is split out so tests can swap it under
-// httptest when needed.
 func httpDefaultClient() *http.Client {
 	return &http.Client{}
 }
 
-// Ensure httptest is referenced to satisfy the import on platforms
-// where the end-to-end path is skipped; tests that reach the registry
-// would otherwise leave httptest unused.
 var _ = httptest.NewServer

@@ -10,7 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// ensureRegistered registers `name` with `factory` if absent.
 func ensureRegistered(t *testing.T, name string, factory func() sparkwing.Pipeline[sparkwing.NoInputs]) *sparkwing.Registration {
 	t.Helper()
 	if reg, ok := sparkwing.Lookup(name); ok {
@@ -54,8 +53,6 @@ func registerPlainPipe(t *testing.T) *sparkwing.Registration {
 	})
 }
 
-// fakeResolver returns the values configured in its map; absent names
-// resolve to sparkwing.ErrSecretMissing.
 type fakeResolver struct {
 	values map[string]string
 	calls  []string

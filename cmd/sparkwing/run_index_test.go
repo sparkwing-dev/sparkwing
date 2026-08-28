@@ -46,8 +46,6 @@ func TestBindRunIndex_SetsGitIndexFileToAnAbsolutePath(t *testing.T) {
 	}
 }
 
-// A relative path is resolved before it is handed on: the pipeline
-// binary is exec'd from .sparkwing/, not from the caller's directory.
 func TestBindRunIndex_ResolvesARelativePath(t *testing.T) {
 	index := writeIndexFile(t)
 	t.Chdir(filepath.Dir(index))
@@ -104,8 +102,6 @@ func TestBindRunIndex_AnnouncesTheBoundIndex(t *testing.T) {
 	}
 }
 
-// A person watching a run in a terminal gets the receipt as prose; the
-// JSON record is for the caller parsing the stream.
 func TestBindRunIndex_AnnouncesInProseWhenTheRunIsNotJSON(t *testing.T) {
 	index := writeIndexFile(t)
 	var out bytes.Buffer
@@ -122,8 +118,6 @@ func TestBindRunIndex_AnnouncesInProseWhenTheRunIsNotJSON(t *testing.T) {
 	}
 }
 
-// git reads a missing index as an empty one, so a typo would otherwise
-// look like a tree with nothing in it.
 func TestBindRunIndex_RejectsAnIndexThatDoesNotExist(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "absent.index")
 	var out bytes.Buffer

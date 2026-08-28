@@ -15,28 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// FromSpecs picks the right dashboard Backend implementation for the
-// resolved state, logs, and (optionally) artifact specs, populates the
-// Capabilities tags from the spec types, and returns a Closer that
-// owns the underlying state-store / log-store connections. Callers
-// MUST defer the returned Closer; long-running web servers should
-// open backends once at startup and reuse them across requests.
-//
-// Dispatch rule:
-//
-//	state.type ∈ {sqlite, postgres, mysql} -> StoreBackend over *store.Store
-//	state.type ∈ {s3, gcs, azure-blob}      -> S3Backend over the ArtifactStore
-//	state.type == controller                -> ClientBackend over *client.Client
-//
-// Each branch resolves its own log store on the side via OpenLogStoreFromSpec
-// when logsSpec is non-nil; otherwise log reads fall back to the impl's
-// default (disk reads under paths.RunDir for StoreBackend, empty for the
-// HTTP impls).
-//
-// artifactsSpec is only consulted on the object-store state branch; it
-// is the artifact store the S3Backend reads NDJSON dumps from. For
-// most deployments artifactsSpec mirrors stateSpec -- the same bucket
-// hosts state, logs, and cache -- but they can diverge.
 func FromSpecs(
 	ctx context.Context,
 	stateSpec, logsSpec, artifactsSpec *backends.Spec,
@@ -97,11 +75,6 @@ func FromSpecs(
 	}
 }
 
-// capabilitiesFor builds the Capabilities body the dashboard advertises
-// at /api/v1/capabilities. The Storage tags are drawn from the resolved
-// spec types so the SPA can adapt UI hints; the feature set is held
-// constant per backend family because the dashboard's read API is
-// uniform.
 func capabilitiesFor(state, logs, artifacts *backends.Spec, readOnly bool) Capabilities {
 	mode := "local"
 	switch state.Type {
@@ -135,23 +108,6 @@ func capabilitiesFor(state, logs, artifacts *backends.Spec, readOnly bool) Capab
 	return c
 }
 
-// ParseInlineSpec turns a compact URL-style backend reference into a
-// backends.Spec. Accepts:
-//
-//	sqlite:///abs/path/state.db
-//	postgres://user:pass@host:5432/db?sslmode=disable
-//	postgresql://...                              (alias for postgres)
-//	s3://bucket-name/optional/prefix
-//	gcs://bucket-name/optional/prefix
-//	azure-blob://bucket-name/optional/prefix
-//	controller://profile-name
-//	fs:///path/to/dir
-//	stdout:                                       (logs only)
-//
-// Empty input returns (nil, nil) so callers can distinguish "no
-// override" from "parse error". The returned Spec is fed straight into
-// the storeurl factories; validation rules from pkg/backends apply at
-// open time.
 func ParseInlineSpec(s string) (*backends.Spec, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {

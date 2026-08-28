@@ -85,8 +85,6 @@ type podSpawnChildError struct{}
 
 func (*podSpawnChildError) Error() string { return "child scan exploded" }
 
-// podSpawnGatedChild declares a runner label no ordinary box carries,
-// so both dispatch paths have to refuse it.
 type podSpawnGatedChild struct{ sparkwing.Base }
 
 func (podSpawnGatedChild) WhenRunner() []string { return []string{"gpu"} }
@@ -139,9 +137,6 @@ func (podSpawnEachPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwin
 
 var podSpawnEachRan = &podSpawnRecorder{m: map[string]string{}}
 
-// podSpawnProgress* mirror spawn_dispatch_test.go's no-progress
-// fixture on the node path: the parent hands out its own context and
-// its child's, and the child blocks until released.
 var (
 	podSpawnProgressParentCtx = make(chan context.Context, 1)
 	podSpawnProgressChildCtx  = make(chan context.Context, 1)
@@ -189,9 +184,6 @@ func (podSpawnProgressPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spar
 	return nil
 }
 
-// podSpawnRecorder records which node id each body observed, so the
-// tests can assert the child ran under its own namespaced identity
-// rather than borrowing its parent's.
 type podSpawnRecorder struct {
 	mu sync.Mutex
 	m  map[string]string
@@ -225,8 +217,6 @@ func registerPodSpawnPipes() {
 	register("pod-spawn-progress", func() sparkwing.Pipeline[sparkwing.NoInputs] { return podSpawnProgressPipe{} })
 }
 
-// podSpawnFixture stands a controller up over a fresh store and seeds
-// a running one-node run, the shape a pod picks up.
 func podSpawnFixture(t *testing.T, pipeline, runID, nodeID string) (*store.Store, string) {
 	t.Helper()
 	registerPodSpawnPipes()
@@ -266,15 +256,6 @@ func podSpawnFixture(t *testing.T, pipeline, runID, nodeID string) (*store.Store
 	return st, srv.URL
 }
 
-// A node executing outside the dispatcher's process -- a pod, or since
-// process-per-node any local node -- has no dispatcher to route
-// SpawnNode through. Until RunNodeOnce installed a handler of its own,
-// every such node whose Work declared a spawn failed at the first
-// spawn with "no SpawnHandler is installed in ctx": the feature worked
-// only where the parent happened to share the dispatcher's memory.
-//
-// The spawn_dispatched payload is asserted quoted because the store
-// renders a non-JSON event payload as a JSON string on read.
 func TestRunNodeOnce_SpawnRunsInsideTheNodeProcess(t *testing.T) {
 	st, controllerURL := podSpawnFixture(t, "pod-spawn", "run-pod-spawn", "parent")
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -327,9 +308,6 @@ func TestRunNodeOnce_SpawnRunsInsideTheNodeProcess(t *testing.T) {
 	}
 }
 
-// A spawned child that fails has to fail its parent with the child's
-// own message, the same as on the dispatcher's path -- otherwise a pod
-// reports a green parent over failed sub-work.
 func TestRunNodeOnce_SpawnChildFailureFailsTheParent(t *testing.T) {
 	st, controllerURL := podSpawnFixture(t, "pod-spawn-fail", "run-pod-spawn-fail", "parent")
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -364,14 +342,6 @@ func TestRunNodeOnce_SpawnChildFailureFailsTheParent(t *testing.T) {
 	}
 }
 
-// WhenRunner is enforced in the dispatch loop, above the runner, so a
-// child spawned inside a node process reached no gate: it ran on
-// whatever box its parent landed on and recorded success. Since
-// process-per-node the dispatcher no longer executes node bodies at
-// all, which makes this path the only one a `sparkwing run` uses.
-//
-// The skip is asserted against the dispatcher's own row for the same
-// pipeline, so the two paths cannot drift in outcome or wording.
 func TestRunNodeOnce_SpawnHonorsWhenRunnerLikeTheDispatcher(t *testing.T) {
 	st, controllerURL := podSpawnFixture(t, "pod-spawn-gated", "run-pod-spawn-gated", "parent")
 	quiet := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -414,9 +384,6 @@ func TestRunNodeOnce_SpawnHonorsWhenRunnerLikeTheDispatcher(t *testing.T) {
 		t.Error("no node_skipped event for the gated child")
 	}
 
-	// safety: the dispatcher path still executes node bodies in a test
-	// binary, so its row for the same pipeline is the reference the node
-	// path has to match.
 	p := newPaths(t)
 	ref, err := orchestrator.RunLocal(ctx, p, orchestrator.Options{Pipeline: "pod-spawn-gated"})
 	if err != nil {
@@ -437,9 +404,6 @@ func TestRunNodeOnce_SpawnHonorsWhenRunnerLikeTheDispatcher(t *testing.T) {
 	}
 }
 
-// The other direction: on a runner that does advertise the label, the
-// same child runs. The labels come from the RunnerInfo the run stamps
-// on the process, which is what a spawned node and a pod each carry.
 func TestRunNodeOnce_SpawnRunsWhenTheRunnerAdvertisesTheLabel(t *testing.T) {
 	st, controllerURL := podSpawnFixture(t, "pod-spawn-gated", "run-pod-spawn-gpu", "parent")
 	t.Setenv("SPARKWING_RUNNER_TYPE", "local")
@@ -467,8 +431,6 @@ func TestRunNodeOnce_SpawnRunsWhenTheRunnerAdvertisesTheLabel(t *testing.T) {
 	}
 }
 
-// The fan-out guarantee spawn_dispatch_test.go proves on the
-// dispatcher path, ported to the path a `sparkwing run` now takes.
 func TestRunNodeOnce_SpawnEachFansOut(t *testing.T) {
 	st, controllerURL := podSpawnFixture(t, "pod-spawn-each", "run-pod-spawn-each", "parent")
 	podSpawnEachRan.reset()
@@ -497,10 +459,6 @@ func TestRunNodeOnce_SpawnEachFansOut(t *testing.T) {
 	}
 }
 
-// A parent blocked on its child is not a parent making no progress.
-// The dispatcher's handler pauses the no-progress budget across the
-// spawn; this asserts the node path does too, which is where the
-// guarantee now has to hold.
 func TestRunNodeOnce_SpawnPausesTheParentsNoProgressBudget(t *testing.T) {
 	_, controllerURL := podSpawnFixture(t, "pod-spawn-progress", "run-pod-spawn-progress", "parent")
 	podSpawnProgressParentCtx = make(chan context.Context, 1)

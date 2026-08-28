@@ -18,7 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// ListJobsRemote is the cluster-mode counterpart to ListJobs.
 func ListJobsRemote(ctx context.Context, controllerURL, token string, opts ListOpts, out io.Writer) error {
 	if controllerURL == "" {
 		return errors.New("ListJobsRemote: controller URL required")
@@ -48,7 +47,6 @@ func ListJobsRemote(ctx context.Context, controllerURL, token string, opts ListO
 	return renderRunList(runs, opts, out, nil)
 }
 
-// JobStatusRemote is the cluster-mode counterpart to JobStatus.
 func JobStatusRemote(ctx context.Context, controllerURL, token, runID string, opts StatusOpts, out io.Writer) error {
 	if controllerURL == "" {
 		return errors.New("JobStatusRemote: controller URL required")
@@ -145,26 +143,6 @@ func renderRemoteStatus(run *store.Run, nodes []*store.Node, stepsByNode map[str
 	return nil
 }
 
-// RemoteRunOutcome reads a remote run's status after a follow has
-// ended and, for a run that did not succeed, renders the same status
-// block `sparkwing runs status --run <id>` prints against a
-// controller -- run error, node outcomes, per-node errors -- so the
-// reason lands in the operator's terminal before the caller maps the
-// status onto an exit code.
-//
-// It exists because neither follow loop reports an outcome:
-// [followLogsRemote] ends when the run goes terminal and
-// [JobStatusRemote] paints the last frame it saw -- which can predate
-// the terminal transition -- so the caller needs one authoritative
-// read to decide the process exit status.
-//
-// The returned status is the run's status verbatim (possibly
-// non-terminal, if the follow ended for another reason); an error
-// means the status could not be read at all, which callers must not
-// treat as either success or failure. The status read gets one retry
-// (see [getRunRetrying]) so a transport blip does not masquerade as an
-// unknown outcome. Node/step/approval reads are best-effort: their
-// failure degrades the summary but still reports the status.
 func RemoteRunOutcome(ctx context.Context, controllerURL, token, runID string, out io.Writer) (string, error) {
 	if controllerURL == "" {
 		return "", errors.New("RemoteRunOutcome: controller URL required")
@@ -195,19 +173,8 @@ func RemoteRunOutcome(ctx context.Context, controllerURL, token, runID string, o
 	return run.Status, nil
 }
 
-// remoteOutcomeRetryDelay spaces RemoteRunOutcome's two status reads.
-// Long enough to outlast a proxy hiccup or a controller replica
-// rolling out, short enough that nobody notices it on the happy path
-// (where it never runs at all).
 const remoteOutcomeRetryDelay = 250 * time.Millisecond
 
-// getRunRetrying absorbs a single transport blip on the outcome read.
-// The follow that just returned watched this run reach a terminal
-// state, so one failed read here is far likelier to be a momentary
-// 5xx than a real answer, and reporting "outcome unknown" on that blip
-// would send a caller chasing a run that is sitting there, finished.
-// Two attempts, then the error stands: the point is to not guess, not
-// to retry until the controller comes back.
 func getRunRetrying(ctx context.Context, c *client.Client, runID string) (*store.Run, error) {
 	run, err := c.GetRun(ctx, runID)
 	if err == nil {
@@ -221,7 +188,6 @@ func getRunRetrying(ctx context.Context, c *client.Client, runID string) (*store
 	return c.GetRun(ctx, runID)
 }
 
-// JobErrorsRemote is the cluster-mode counterpart to JobErrors.
 func JobErrorsRemote(ctx context.Context, controllerURL, token, runID string, asJSON bool, out io.Writer) error {
 	if controllerURL == "" {
 		return errors.New("JobErrorsRemote: controller URL required")
@@ -231,14 +197,14 @@ func JobErrorsRemote(ctx context.Context, controllerURL, token, runID string, as
 	if err != nil {
 		return err
 	}
-	// JSON only; the unscanned zero value makes no claim either way.
+
 	var excerpts failureExcerptIndex
 	if asJSON {
 		excerpts = failureExcerptsFor(ctx, c, runID, failedNodeIDs(nodes))
 	}
 	failed := failedNodeReports(nodes, excerpts)
 	if asJSON {
-		// NDJSON: one failing node per line.
+
 		return writeNDJSON(out, failed)
 	}
 	if len(failed) == 0 {
@@ -251,7 +217,6 @@ func JobErrorsRemote(ctx context.Context, controllerURL, token, runID string, as
 	return nil
 }
 
-// GetRunJSONRemote fetches a run + nodes and writes pretty JSON.
 func GetRunJSONRemote(ctx context.Context, controllerURL, token, runID string, out io.Writer) error {
 	if controllerURL == "" {
 		return errors.New("GetRunJSONRemote: controller URL required")
@@ -268,9 +233,6 @@ func GetRunJSONRemote(ctx context.Context, controllerURL, token, runID string, o
 	return writeJSON(out, map[string]any{"run": store.RedactedRun(run), "nodes": nodes})
 }
 
-// GetRunJSONLocal is the local counterpart of GetRunJSONRemote.
-// Factored here rather than in jobs_cli.go so the two live side-by-
-// side; they're the backing pair for `sparkwing runs get`.
 func GetRunJSONLocal(ctx context.Context, paths Paths, runID string, out io.Writer) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -283,7 +245,6 @@ func GetRunJSONLocal(ctx context.Context, paths Paths, runID string, out io.Writ
 	return writeRunDetailJSON(ctx, st, runID, out)
 }
 
-// JobLogsRemote is the cluster-mode counterpart to JobLogs.
 func JobLogsRemote(ctx context.Context, controllerURL, logsURL, runID string, opts LogsOpts, out io.Writer) error {
 	if controllerURL == "" {
 		return errors.New("JobLogsRemote: controller URL required")
@@ -297,7 +258,6 @@ func JobLogsRemote(ctx context.Context, controllerURL, logsURL, runID string, op
 	return JobLogsRemoteWithTokens(ctx, controllerURL, logsURL, "", runID, opts, out)
 }
 
-// JobLogsRemoteWithTokens adds a bearer token to JobLogsRemote.
 func JobLogsRemoteWithTokens(ctx context.Context, controllerURL, logsURL, token, runID string, opts LogsOpts, out io.Writer) error {
 	if opts.EventsOnly {
 		return errors.New("--events-only is local-mode only today (remote envelope ingestion is a follow-up)")
@@ -370,17 +330,6 @@ func writeLogsTextRemote(ctx context.Context, logc storage.LogStore, runID strin
 	return nil
 }
 
-// remoteFollowFailureBudget bounds how long the follow loop keeps
-// polling a controller that answers nothing but errors. A run's status
-// read failing once is a blip -- a proxy hiccup, a replica rolling out
-// -- and the loop is right to keep waiting through it, which is why a
-// single success resets the clock. A controller that has failed every
-// status read for this long is not a blip, and continuing to poll it
-// turns "the controller died" into a `pipeline trigger` that hangs
-// until someone notices, instead of the exit-3 unknown-outcome answer
-// the CLI already knows how to give.
-//
-// Variables, not constants, only so tests can shorten the retry cycle.
 var (
 	remoteFollowFailureBudget = 60 * time.Second
 	remoteFollowPollInterval  = 300 * time.Millisecond
@@ -403,20 +352,6 @@ func (f *remoteFollowFailures) failed(now time.Time, budget time.Duration) (time
 	return elapsed, elapsed >= budget
 }
 
-// followLogsRemote tails live logs by polling ListNodes and spawning
-// per-node SSE goroutines. Exits when run is terminal (with a short
-// drain), when ctx cancels, or when the run's status has been
-// unreadable for [remoteFollowFailureBudget].
-//
-// A nil return means "the stream ended", never "the run succeeded":
-// `runs logs -f` is a viewer and does not carry the run's outcome.
-// Callers that must exit on the run's outcome (`pipeline trigger`)
-// read it afterwards with [RemoteRunOutcome].
-//
-// A non-nil return is the transport failure that ended the follow, and
-// is likewise not a verdict on the run: [remoteFollowExit] still reads
-// the outcome afterwards and only reports "unknown" (exit 3) when that
-// read fails too.
 func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.LogStore,
 	runID, nodeFilter string, out io.Writer,
 ) error {
@@ -438,16 +373,13 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 
 	terminal := make(chan struct{})
 
-	// Written by the poll goroutine before it closes terminal, read
-	// only after that close: the channel carries the happens-before.
 	var followErr error
 
 	go func() {
 		defer close(terminal)
 		ticker := time.NewTicker(remoteFollowPollInterval)
 		defer ticker.Stop()
-		// failingSince is when the current unbroken run of failed status
-		// reads began; zero while the last read succeeded.
+
 		var failures remoteFollowFailures
 		for {
 			select {
@@ -478,8 +410,7 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 					}
 					continue
 				}
-				// A cancelled context fails the read too; that is the
-				// caller leaving, not the controller dying.
+
 				if runCtx.Err() != nil {
 					return
 				}
@@ -505,7 +436,6 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 	return followErr
 }
 
-// streamNode reads one node's SSE stream, reconnecting on errors.
 func streamNode(ctx context.Context, logc storage.LogStore, runID, nodeID string,
 	multi *atomic.Bool, mu *sync.Mutex, out io.Writer,
 ) {
@@ -535,7 +465,6 @@ func streamNode(ctx context.Context, logc storage.LogStore, runID, nodeID string
 	}
 }
 
-// readSSE invokes onLine for each "data: ..." payload until EOF/ctx.
 func readSSE(ctx context.Context, body io.Reader, onLine func(string)) {
 	sc := bufio.NewScanner(body)
 	sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)

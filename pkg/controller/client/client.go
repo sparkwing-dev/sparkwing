@@ -71,8 +71,6 @@ func (c *Client) BaseURL() string { return c.baseURL }
 // the same auth to sibling HTTP backends.
 func (c *Client) Token() string { return c.token }
 
-// bearerTransport decorates outgoing requests with a fixed bearer
-// token.
 type bearerTransport struct {
 	base  http.RoundTripper
 	token string
@@ -868,7 +866,8 @@ func (c *Client) EnqueueTriggerWithEnv(
 			Env:    triggerEnv,
 		},
 	}
-	// hack: without explicit repo, the controller inherits the parent's repo+SHA and builds the wrong code for cross-repo awaits.
+	// hack: pass the repo explicitly so a cross-repo await cannot inherit the
+	// parent's repository and SHA.
 	if repo != "" {
 		req.Git.Repo = repo
 		req.Git.Branch = branch
@@ -1344,9 +1343,6 @@ func (c *Client) ListPendingApprovals(ctx context.Context) ([]*store.Approval, e
 	return body.Approvals, nil
 }
 
-// post marshals body as JSON, POSTs to path, and checks the status.
-// If out is non-nil, the response is JSON-decoded into it. body may
-// be nil.
 func (c *Client) post(ctx context.Context, path string, body any, wantStatus int, out any) error {
 	var reader io.Reader
 	if body != nil {
@@ -1378,7 +1374,6 @@ func (c *Client) post(ctx context.Context, path string, body any, wantStatus int
 	return nil
 }
 
-// postRaw sends an octet-stream POST.
 func (c *Client) postRaw(ctx context.Context, path string, body []byte, wantStatus int) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		c.baseURL+path, bytes.NewReader(body))
@@ -1397,9 +1392,6 @@ func (c *Client) postRaw(ctx context.Context, path string, body []byte, wantStat
 	return nil
 }
 
-// readHTTPError unpacks a non-2xx response into a typed error.
-// Controller returns `{"error": "msg"}` on failures; extract that
-// so callers see the server's reason.
 func readHTTPError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
 	var payload struct {

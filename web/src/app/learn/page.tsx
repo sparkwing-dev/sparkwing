@@ -558,7 +558,7 @@ export default function LearnPage() {
 
   return (
     <div className="flex-1 flex overflow-hidden">
-      {/* Sidebar */}
+      {             }
       <div className="w-56 border-r border-[var(--border)] bg-[var(--surface)] overflow-y-auto p-3">
         <div className="text-xs text-[var(--muted)] uppercase tracking-wider mb-3 px-2">
           Learn Sparkwing
@@ -578,7 +578,7 @@ export default function LearnPage() {
         ))}
       </div>
 
-      {/* Content */}
+      {             }
       <div className="flex-1 overflow-y-auto p-8 max-w-3xl">
         {section && <MarkdownContent content={section.content} />}
       </div>
@@ -586,7 +586,6 @@ export default function LearnPage() {
   );
 }
 
-// Simple markdown renderer for code blocks, headers, tables, and inline code
 function MarkdownContent({ content }: { content: string }) {
   const lines = content.trim().split("\n");
   const elements: React.ReactNode[] = [];
@@ -595,7 +594,6 @@ function MarkdownContent({ content }: { content: string }) {
   while (i < lines.length) {
     const line = lines[i];
 
-    // Code blocks
     if (line.startsWith("```")) {
       const codeLines: string[] = [];
       i++;
@@ -603,7 +601,7 @@ function MarkdownContent({ content }: { content: string }) {
         codeLines.push(lines[i]);
         i++;
       }
-      i++; // skip closing ```
+      i++;
       elements.push(
         <pre
           key={elements.length}
@@ -617,7 +615,6 @@ function MarkdownContent({ content }: { content: string }) {
       continue;
     }
 
-    // Headers
     if (line.startsWith("## ")) {
       elements.push(
         <h2 key={elements.length} className="text-lg font-bold mt-6 mb-3">
@@ -628,7 +625,6 @@ function MarkdownContent({ content }: { content: string }) {
       continue;
     }
 
-    // Tables
     if (line.startsWith("|")) {
       const tableLines: string[] = [];
       while (i < lines.length && lines[i].startsWith("|")) {
@@ -639,13 +635,11 @@ function MarkdownContent({ content }: { content: string }) {
       continue;
     }
 
-    // Empty lines
     if (line.trim() === "") {
       i++;
       continue;
     }
 
-    // Regular paragraph
     elements.push(
       <p
         key={elements.length}

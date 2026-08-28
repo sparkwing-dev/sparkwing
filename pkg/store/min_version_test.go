@@ -10,9 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestMinVersion_FreshOpenStampsBinaryVersion checks that a first open
-// records the running binary's version in the sparkwing_meta row the
-// skew path later reads.
 func TestMinVersion_FreshOpenStampsBinaryVersion(t *testing.T) {
 	store.SetBinaryVersion("v0.16.0")
 	t.Cleanup(func() { store.SetBinaryVersion("") })
@@ -34,11 +31,6 @@ func TestMinVersion_FreshOpenStampsBinaryVersion(t *testing.T) {
 	}
 }
 
-// TestMinVersion_SkewMessageNamesVersionAndCommand is the fixture test
-// the ticket calls for: a database stamped at a newer schema with a
-// recorded minimum version, opened by an older binary, must refuse
-// with a message naming the required version and the upgrade command
-// rather than a bare schema number.
 func TestMinVersion_SkewMessageNamesVersionAndCommand(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "skew_stamped.db")
 
@@ -84,10 +76,6 @@ func TestMinVersion_SkewMessageNamesVersionAndCommand(t *testing.T) {
 	}
 }
 
-// TestMinVersion_SkewFallsBackToSchemaNumbers confirms the graceful
-// degradation: a database migrated before version stamping shipped
-// has no min_binary_version row, so the skew message falls back to the
-// schema-number wording.
 func TestMinVersion_SkewFallsBackToSchemaNumbers(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "skew_unstamped.db")
 
@@ -120,8 +108,6 @@ func TestMinVersion_SkewFallsBackToSchemaNumbers(t *testing.T) {
 	}
 }
 
-// TestCurrentSchemaVersion_ReportsRecorded verifies the resident-reader
-// helper the dashboard polls returns the recorded schema version.
 func TestCurrentSchemaVersion_ReportsRecorded(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "current.db"))
 	if err != nil {

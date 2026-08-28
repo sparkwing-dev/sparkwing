@@ -16,10 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// newAuthedTestServer spins up a Server with EnableAuthFromStore
-// wired against a tokens table seeded with one admin row. Used by
-// tests that pin the "/metrics stays unauthenticated even when auth
-// is enabled" guarantee.
 func newAuthedTestServer(t *testing.T) (baseURL string, st *store.Store, cleanup func()) {
 	t.Helper()
 	dir := t.TempDir()
@@ -39,9 +35,6 @@ func newAuthedTestServer(t *testing.T) (baseURL string, st *store.Store, cleanup
 	}
 }
 
-// TestMetrics_EndpointReachable checks that /metrics returns 200, is
-// the sparkwing custom registry (not just the default), and exposes
-// all six session-1 collectors plus the Go runtime metrics.
 func TestMetrics_EndpointReachable(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
@@ -70,9 +63,6 @@ func TestMetrics_EndpointReachable(t *testing.T) {
 	}
 }
 
-// TestMetrics_RunsCounterIncrements drives a CreateRun + FinishRun
-// cycle and asserts the counter row appears on the next scrape. Uses
-// a unique pipeline label so parallel test runs don't interfere.
 func TestMetrics_RunsCounterIncrements(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
@@ -120,10 +110,6 @@ func metricSampleValue(t *testing.T, body, prefix string) float64 {
 	return 0
 }
 
-// TestMetrics_CardinalityGuard verifies the scrape output never
-// includes values that would blow up per-node or per-principal
-// cardinality. Guard regexes reject a `node_id=` label, a raw token
-// prefix (`sw?_`), or a run-id-looking label value.
 func TestMetrics_CardinalityGuard(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
@@ -171,11 +157,6 @@ func scrape(t *testing.T, base string) string {
 	return string(body)
 }
 
-// TestMetrics_HTTPRequestInstrumentation verifies every served
-// request flows into sparkwing_http_requests_total +
-// sparkwing_http_request_duration_seconds under a normalized route
-// pattern (never the raw URL path). Guards against both "no data"
-// regressions and cardinality blowups from ids in labels.
 func TestMetrics_HTTPRequestInstrumentation(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
@@ -195,9 +176,6 @@ func TestMetrics_HTTPRequestInstrumentation(t *testing.T) {
 	}
 }
 
-// TestMetrics_HTTPRouteNormalization confirms variable URL segments
-// (run ids, node ids) collapse into the registered route pattern so
-// per-id cardinality can't leak into label values.
 func TestMetrics_HTTPRouteNormalization(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
@@ -220,10 +198,6 @@ func TestMetrics_HTTPRouteNormalization(t *testing.T) {
 	}
 }
 
-// TestMetrics_EndpointUnauthWithAuthEnabled pins down the
-// FOLLOWUPS #2 + #5 guarantee: even when the authenticator is on,
-// Prometheus can still scrape /metrics without an Authorization
-// header. Regression guard for routing order in Server.Handler().
 func TestMetrics_EndpointUnauthWithAuthEnabled(t *testing.T) {
 	base, st, cleanup := newAuthedTestServer(t)
 	defer cleanup()

@@ -6,10 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// The qualifier (run id or host) is length-prefixed, so a qualifier or
-// name containing a separator can't fold two distinct identities onto
-// one key. Under a bare separator, (qualifier="a", name="@b") and
-// (qualifier="a@", name="b") collided.
 func TestScopeKey_QualifierWithSeparatorDoesNotCollide(t *testing.T) {
 	run := func(name string) *sparkwing.ConcurrencyGroup {
 		return sparkwing.NewConcurrencyGroup(name, sparkwing.ConcurrencyLimit{Scope: sparkwing.ScopeRun})
@@ -28,8 +24,6 @@ func TestScopeKey_QualifierWithSeparatorDoesNotCollide(t *testing.T) {
 	}
 }
 
-// ScopeLabelFromKey must recover the full qualifier even when it
-// contains the scheme's separators.
 func TestScopeKey_LabelRecoversQualifierWithSeparators(t *testing.T) {
 	t.Setenv("SPARKWING_BOX_ID", "host:with@seps")
 	box := sparkwing.NewConcurrencyGroup("db", sparkwing.ConcurrencyLimit{Scope: sparkwing.ScopeBox})

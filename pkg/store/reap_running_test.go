@@ -8,12 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestReapStaleRunningRuns_FlipsOrphanedRunsToFailed covers the
-// Mode 4 orphan case: a dispatching orchestrator stops pinging
-// last_heartbeat_at (laptop closed, network gone, process killed)
-// while a run sits at status='running' without any active node
-// claim. After the grace window, the controller-side reaper should
-// flip the run to 'failed' and cascade non-done nodes.
 func TestReapStaleRunningRuns_FlipsOrphanedRunsToFailed(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -88,9 +82,6 @@ func TestReapStaleRunningRuns_FlipsOrphanedRunsToFailed(t *testing.T) {
 	}
 }
 
-// TestReapStaleRunningRuns_IgnoresFreshHeartbeat verifies that a run
-// whose orchestrator is still pinging within the grace window is left
-// alone.
 func TestReapStaleRunningRuns_IgnoresFreshHeartbeat(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -118,10 +109,6 @@ func TestReapStaleRunningRuns_IgnoresFreshHeartbeat(t *testing.T) {
 	}
 }
 
-// TestReapStaleRunningRuns_IgnoresNullHeartbeat verifies that rows
-// with last_heartbeat_at IS NULL are skipped. Those predate the
-// feature or come from local/S3 modes which have their own orphan
-// reconciliation path, and shouldn't get reaped by this sweep.
 func TestReapStaleRunningRuns_IgnoresNullHeartbeat(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -149,9 +136,6 @@ func TestReapStaleRunningRuns_IgnoresNullHeartbeat(t *testing.T) {
 	}
 }
 
-// TestReapStaleRunningRuns_IgnoresTerminalRuns verifies that runs
-// already in a terminal status aren't re-touched by the sweep, even
-// if their last_heartbeat_at predates the grace window.
 func TestReapStaleRunningRuns_IgnoresTerminalRuns(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()

@@ -7,13 +7,6 @@ import (
 	"testing"
 )
 
-// The node/trigger/run lifecycle vocabulary lives in lifecycle.go;
-// Go-side queries reference statuses through those constants or the
-// canonical fragments, never as fresh inline literals. The schema DDL
-// keeps a fixed number of literal copies (column defaults and partial
-// indexes can't reference Go constants); these counts pin them so a
-// new inline literal -- the seed of the next untwinned guard -- fails
-// the suite instead of merging quietly.
 func TestLifecycleGuard_StatusLiteralsStayCanonical(t *testing.T) {
 	root := moduleRoot(t)
 	storeSrc := storePackageSource(t)

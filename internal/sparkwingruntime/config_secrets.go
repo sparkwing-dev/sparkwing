@@ -11,26 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// WithPipelineSecrets installs the resolved Secrets struct on ctx.
 func WithPipelineSecrets(ctx context.Context, v any) context.Context {
 	return context.WithValue(ctx, sparkwing.RuntimePlumbing.Keys.PipelineSecrets, v)
 }
 
-// ResolvePipelineSecrets resolves every required secret declared by
-// the pipeline's SecretsProvider against the SecretResolver
-// installed on ctx, before the pipeline's Plan runs.
-//
-// Required fail-fast: a missing required secret produces a clear
-// error naming the pipeline and the secret. Optional entries whose
-// resolver error matches ErrSecretMissing leave the struct field
-// empty without failing the run; other errors propagate.
-//
-// Resolved values populate the Secrets struct fields by sw-tag name,
-// so step bodies can read sec.DeployToken directly via
-// PipelineSecrets[T](ctx) without re-fetching.
-//
-// Returns (nil, nil) when the pipeline value does not implement
-// SecretsProvider -- nothing to install.
 func ResolvePipelineSecrets(ctx context.Context, reg *sparkwing.Registration, _ *pipelines.Pipeline) (any, error) {
 	if reg == nil {
 		return nil, nil
