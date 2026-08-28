@@ -378,6 +378,64 @@ func TestQueueExecLeaseLossTerminatesBeforePromotingNextCommand(t *testing.T) {
 	})
 }
 
+func TestQueueExecLeaderExitDeclaresCompletionBeforeRejectedReattach(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exact process-session ownership is unavailable on Windows")
+	}
+	home := queueHome(t)
+	serveQueueDaemon(t, home)
+	completionDeclared := make(chan struct{})
+	originalDeclaration := queueExecDeclareGuardComplete
+	queueExecDeclareGuardComplete = func(lease *wingdclient.Lease) error {
+		err := lease.CompleteGuard()
+		close(completionDeclared)
+		return err
+	}
+	t.Cleanup(func() { queueExecDeclareGuardComplete = originalDeclaration })
+	originalWatcher := queueExecWatchGuard
+	queueExecWatchGuard = func(_ *wingdclient.Lease, _ func(wingwire.Cancel), onComplete func()) {
+		// A rejected reattach is completion only after the client has declared
+		// that its direct session leader exited; the watcher then ends.
+		<-completionDeclared
+		onComplete()
+	}
+	t.Cleanup(func() { queueExecWatchGuard = originalWatcher })
+
+	tmp := t.TempDir()
+	started := filepath.Join(tmp, "started")
+	release := filepath.Join(tmp, "release")
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
+	result := make(chan error, 1)
+	go func() {
+		result <- runQueue([]string{
+			"exec", "--home", home, "--run-id", "completed-bootstrap", "--cores", "0.1",
+			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", started, "0", release,
+		})
+	}()
+	waitForFile(t, started)
+	select {
+	case <-completionDeclared:
+		t.Fatal("guard completion was declared before the direct leader exited")
+	default:
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-completionDeclared:
+	case <-time.After(queueExecWait):
+		t.Fatal("direct leader exit did not declare guard completion")
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("queue exec after rejected reattach completion: %v", err)
+		}
+	case <-time.After(queueExecWait):
+		t.Fatal("queue exec did not finish after rejected reattach completion")
+	}
+}
+
 func TestQueueExecSupervisorDeathRetainsAdmissionUntilCommandSessionEnds(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("exact process-session ownership is unavailable on Windows")

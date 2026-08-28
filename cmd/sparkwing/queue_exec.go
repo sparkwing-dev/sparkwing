@@ -171,6 +171,13 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 	}()
 	finished := make(chan error, 1)
 	go func() { finished <- group.Finish(context.Background(), queueExecCleanupTimeout) }()
+	go func() {
+		<-group.LeaderExited()
+		// Declare at exit observation, before a successor can reconcile the
+		// same empty session and reject reattachment. The main path retries
+		// any write failure below; CompleteGuard is idempotent.
+		_ = queueExecDeclareGuardComplete(lease)
+	}()
 
 	var commandErr error
 	select {
@@ -178,7 +185,16 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 	case <-cancelled:
 		commandErr = terminateQueueExec(group)
 	case <-leaseEnded:
-		commandErr = errors.Join(errQueueExecLeaseLost, terminateQueueExec(group))
+		select {
+		case <-completionAck:
+			commandErr = <-finished
+		default:
+			commandErr = errors.Join(errQueueExecLeaseLost, terminateQueueExec(group))
+		}
+	case <-completionAck:
+		// The successor can durably observe the exited process session before
+		// the local group waiter finishes reaping its leader.
+		commandErr = <-finished
 	case <-ctx.Done():
 		commandErr = errors.Join(ctx.Err(), terminateQueueExec(group))
 	}
@@ -223,6 +239,10 @@ var queueExecWatchGuard = func(lease *wingdclient.Lease, onCancel func(wingwire.
 	lease.WatchGuard(func(eviction wingwire.Evicted) {
 		onCancel(wingwire.Cancel{RunID: eviction.RunID, Reason: "admission superseded"})
 	}, onCancel, onComplete)
+}
+
+var queueExecDeclareGuardComplete = func(lease *wingdclient.Lease) error {
+	return lease.CompleteGuard()
 }
 
 func startQueueExecGuard(command []string) (*procgroup.Group, *os.File, procgroup.SessionIdentity, error) {
