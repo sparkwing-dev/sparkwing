@@ -8,7 +8,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: {{ include "sparkwing-runner-bundle.fullname" . }}-runner
+  name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "sparkwing-runner-bundle.labels" . | nindent 4 }}
@@ -31,7 +31,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: {{ include "sparkwing-runner-bundle.fullname" . }}-runner
+  name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "sparkwing-runner-bundle.labels" . | nindent 4 }}
@@ -42,5 +42,5 @@ subjects:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
-  name: {{ include "sparkwing-runner-bundle.fullname" . }}-runner
+  name: {{ include "sparkwing-runner-bundle.runner.fullname" . }}
 {{- end }}

@@ -91,6 +91,19 @@ code change to unlock.
   homes without following symlinks or removing cached binaries' execute bit.
   Windows continues to use inherited DACLs; doctor reports that ACL privacy as
   unverified instead of presenting a false clean bill.
+- **Helm:** The full self-host chart now sends its runner to the bundled
+  controller without an extra values override. The logs service enables
+  controller-backed auth only when a token Secret is configured, and the
+  runner no longer points no-repository triggers at a binary absent from its
+  image. Helm rejects trigger pools with no gitcache and incomplete Secret
+  references, treats configured runner and cache Secrets as required, and
+  keeps long component names unique while parent service URLs remain aligned
+  with runner-bundle names. The current chart defaults still do not identify a
+  compatible public image set; operators must pin repositories and tags for
+  every enabled image until that release blocker is cleared.
+- **release:** Container publication now builds `sparkwing-runner` from its
+  dedicated image contract, preserving the entrypoint, Go toolchain, and SSH
+  client the Helm workload requires.
 - **s3 state:** The local SQLite outbox now retains a queued state or artifact
   write when replay reaches a non-transient object-store error, and `Drain`
   returns that error. The background drainer emits one structured warning for

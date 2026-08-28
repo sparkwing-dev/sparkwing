@@ -127,4 +127,18 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 	if !strings.Contains(string(body), dockerfileSelection) {
 		t.Fatalf("release workflow does not select the dedicated runner Dockerfile:\nwant %s", dockerfileSelection)
 	}
+	runnerDockerfile, err := os.ReadFile("../../build/Dockerfile.runner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"RUN apk add --no-cache ca-certificates git openssh-client",
+		"COPY --from=golang:1.26-alpine /usr/local/go /usr/local/go",
+		"COPY build/runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh",
+		"COPY --from=build /out/sparkwing-runner /usr/local/bin/sparkwing-runner",
+	} {
+		if !strings.Contains(string(runnerDockerfile), required) {
+			t.Errorf("runner image contract missing %q", required)
+		}
+	}
 }

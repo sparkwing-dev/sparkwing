@@ -4,10 +4,29 @@ Sparkwing full self-host installed.
   Namespace: {{ .Release.Namespace }}
   Chart:     {{ .Chart.Name }}-{{ .Chart.Version }} (appVersion {{ .Chart.AppVersion }})
 
+{{- $bundle := index .Values "sparkwing-runner-bundle" -}}
+{{- $unpinnedImages := or (empty .Values.controller.image.tag) (empty .Values.web.image.tag) -}}
+{{- if index $bundle "enabled" -}}
+{{- $unpinnedImages = or $unpinnedImages (empty (index $bundle "runner" "image" "tag")) -}}
+{{- if index $bundle "cache" "enabled" -}}
+{{- $unpinnedImages = or $unpinnedImages (empty (index $bundle "cache" "image" "tag")) -}}
+{{- end -}}
+{{- if index $bundle "logs" "enabled" -}}
+{{- $unpinnedImages = or $unpinnedImages (empty (index $bundle "logs" "image" "tag")) -}}
+{{- end -}}
+{{- end -}}
+{{- if $unpinnedImages }}
+
+WARNING: This chart version has no compatible public default image set.
+At least one enabled component still uses the appVersion fallback. Pin both
+image.repository and image.tag for every enabled component to images built
+from one compatible Sparkwing revision before treating this as runnable.
+{{- end }}
+
 Components:
   Controller (1 replica)  -> {{ include "sparkwing-full.controller.fullname" . }}
   Web        ({{ .Values.web.replicas }} replica(s)) -> {{ include "sparkwing-full.web.fullname" . }}
-{{- if index .Values "sparkwing-runner-bundle" "enabled" }}
+{{- if index $bundle "enabled" }}
   Runner-bundle sub-chart -> see `helm get manifest {{ .Release.Name }}` for runner / cache / logs.
 {{- else }}
   Runner-bundle: DISABLED -- runners must be deployed separately.

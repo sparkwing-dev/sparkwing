@@ -20,11 +20,11 @@ type: application
 # Chart version: SemVer for this chart's *templates / values surface*.
 # Independent of the appVersion below. Bump on any user-facing
 # values.yaml change or template structural change.
-version: 0.1.0
+version: 0.1.1
 
-# appVersion: the sparkwing release this chart is *known to be tested
-# against*. Per-component image.tag in values.yaml overrides it.
-# Keep in sync with the latest sparkwing release as the chart evolves.
+# appVersion is retained as Helm metadata and the empty-tag fallback. The
+# current value is not a compatible public image-set guarantee; operators
+# must pin per-component repositories and tags until a corrected release.
 appVersion: "0.1.0"
 
 keywords:

@@ -9,10 +9,17 @@ single Kubernetes cluster:
 - `sparkwing-runner-bundle` (sub-chart) -- runner + cache + logs
 
 This is the chart referenced in architectural decision 0001 for the
-**Enterprise self-host** topology -- one `helm install` and you have
-a working Sparkwing instance. Single-tenant, single-instance: HA
-features (multi-replica controller, leader election, replication,
-zero-downtime upgrades) are paid tier and live in separate charts.
+**Enterprise self-host** topology. It models the complete stack as one
+Helm release. Single-tenant, single-instance: HA features (multi-replica
+controller, leader election, replication, zero-downtime upgrades) are
+paid tier and live in separate charts.
+
+> **Release blocker:** The checked-in default repositories and
+> `appVersion` do not currently identify a compatible public image set. A bare
+> install renders the intended topology, but it is not a supported runnable
+> release. Until a corrected release is published, build or mirror one
+> mutually compatible controller, web, runner, cache, and logs image set and
+> explicitly set every enabled component's `image.repository` and `image.tag`.
 
 If you only need a runner pool against a remote controller (Cloud or
 external self-host), use the standalone
@@ -48,6 +55,8 @@ instead -- this chart pulls it in as a dependency.
 ## Requirements
 
 - Kubernetes 1.27+
+- Explicit repositories and tags for a mutually compatible image set. The
+  current default GHCR/appVersion combination is not a runnable release.
 - A default `StorageClass` (or set `controller.storage.pvc.storageClassName`
   / equivalents on the sub-chart). The controller, cache, and logs
   PVCs are all RWO.
@@ -81,17 +90,34 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 # `admin` token covers both.
 ```
 
-## Quick install
+## Install from source
+
+Create `compatible-images.yaml` with images built from the same Sparkwing
+revision or copied together into your registry:
+
+```yaml
+controller:
+  image: {repository: registry.example/sparkwing-controller, tag: <compatible-tag>}
+web:
+  image: {repository: registry.example/sparkwing-web, tag: <compatible-tag>}
+sparkwing-runner-bundle:
+  runner:
+    image: {repository: registry.example/sparkwing-runner, tag: <compatible-tag>}
+  cache:
+    image: {repository: registry.example/sparkwing-cache, tag: <compatible-tag>}
+  logs:
+    image: {repository: registry.example/sparkwing-logs, tag: <compatible-tag>}
+```
 
 ```bash
 # Vendor the sub-chart into ./charts/ (one-time per chart change).
 helm dep up ./charts/sparkwing-full
 
-# Install. With nothing pre-created, this gives you a working
-# stack on a kind cluster -- no auth, no webhook verification,
-# no encryption-at-rest.
+# Install the complete stack with an explicitly compatible image set. This
+# source-test configuration has no auth, webhook verification, or encryption-at-rest.
 helm install sparkwing ./charts/sparkwing-full \
-    --namespace sparkwing --create-namespace
+    --namespace sparkwing --create-namespace \
+    -f compatible-images.yaml
 ```
 
 For a production install, attach the Secrets you created above:
@@ -99,6 +125,7 @@ For a production install, attach the Secrets you created above:
 ```bash
 helm install sparkwing ./charts/sparkwing-full \
     --namespace sparkwing --create-namespace \
+    -f compatible-images.yaml \
     --set controller.githubWebhookSecret.name=sparkwing-webhook \
     --set controller.secretsKey.name=sparkwing-secrets-key \
     --set web.tokenSecret.name=sparkwing-token \
@@ -163,6 +190,14 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
 | `sparkwing-runner-bundle.cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 
+The automatic controller URL follows the chart's default resource names. If
+you set top-level `nameOverride` or `fullnameOverride`, also set
+`sparkwing-runner-bundle.controller.url` to the resulting controller Service;
+the chart stops at render time with this instruction when the URL is missing.
+Nested `sparkwing-runner-bundle.nameOverride` and `fullnameOverride` values are
+included in the web and controller URLs for the bundled logs and cache
+Services.
+
 ## Auth
 
 API clients authenticate with **bearer tokens the controller mints**;
@@ -186,6 +221,10 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
 2. Stash the token in the `sparkwing-token` Secret (see Pre-install
    above) and reference it from `web.tokenSecret.name` /
    `sparkwing-runner-bundle.controller.tokenSecret.name`.
+
+   A configured Secret name requires a non-empty key; the chart rejects
+   incomplete pairs. Runner and cache Secret references are required, so
+   Kubernetes holds those pods until the configured Secret is present.
 
 3. Set `web.requireLogin=true` to gate the dashboard behind `/login`.
    On a fresh cluster `/login` renders a "create first admin" form and
@@ -237,7 +276,7 @@ create one.
 ```yaml
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://../sparkwing-runner-bundle"
     condition: sparkwing-runner-bundle.enabled
 ```
@@ -258,27 +297,18 @@ This refreshes `Chart.lock` and re-vendors the sub-chart under
 
 ## Image registry
 
-Default images:
+Fallback image references rendered when a component tag is empty:
 
 - `ghcr.io/sparkwing-dev/sparkwing-controller:<chart appVersion>`
 - `ghcr.io/sparkwing-dev/sparkwing-web:<chart appVersion>`
 - (sub-chart) `ghcr.io/sparkwing-dev/sparkwing-runner:<...>`,
   `sparkwing-cache`, `sparkwing-logs`
 
-> **NOTE:** Multi-arch (linux/amd64 + linux/arm64) images are
-> published to GHCR on every `v*` tag push by
-> `.github/workflows/release.yaml`. Each release pushes
-> `:vX.Y.Z`; stable (non-pre-release) tags also update `:latest`.
-> All images are cosign-keyless-signed via GitHub OIDC -- verify
-> with:
->
-> ```bash
-> cosign verify ghcr.io/sparkwing-dev/sparkwing-controller:vX.Y.Z \
->     --certificate-identity-regexp "https://github.com/sparkwing-dev/sparkwing/" \
->     --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
-> ```
->
-> Override `*.image.repository` if you mirror images internally.
+These fallbacks describe the chart's intended registry layout; they are not a
+compatible public release contract for the current chart version. Pin both
+repository and tag for every enabled image. Keep all five images on the same
+compatible Sparkwing revision until a corrected chart release publishes and
+verifies a public default set.
 
 ## Upgrade
 
