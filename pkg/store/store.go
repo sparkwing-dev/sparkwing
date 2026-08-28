@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
 	"runtime/debug"
 	"sort"
 	"strconv"
@@ -92,6 +94,7 @@ const (
 type Store struct {
 	db      *sql.DB
 	dialect Dialect
+	cleanup func() error
 }
 
 // Dialect reports the SQL dialect this Store was opened against.
@@ -136,11 +139,40 @@ func (s *Store) Dialect() Dialect { return s.dialect }
 // state (leases, runs, cache) is self-healing: a lost lease is reaped, a
 // lost run row reconciled.
 func Open(path string) (*Store, error) {
+	_, statErr := os.Lstat(path)
+	newDatabase := errors.Is(statErr, os.ErrNotExist)
+	if statErr != nil && !newDatabase {
+		return nil, fmt.Errorf("inspect sqlite database %s: %w", path, statErr)
+	}
+	if newDatabase {
+		if err := preparePrivateSQLite(path); err != nil {
+			return nil, err
+		}
+	}
 	dsn, err := sqliteDSN(path)
 	if err != nil {
 		return nil, err
 	}
-	return openSQL("sqlite", dsn, DialectSQLite)
+	st, err := openSQL("sqlite", dsn, DialectSQLite)
+	if err != nil {
+		return nil, err
+	}
+	return st, nil
+}
+
+func preparePrivateSQLite(path string) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return fmt.Errorf("secure sqlite database %s: %w", path, err)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("secure sqlite database %s: %w", path, err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("secure sqlite database %s: %w", path, err)
+	}
+	return nil
 }
 
 // sqliteDSN builds Open's read-write DSN, resolving the busy_timeout
@@ -156,11 +188,23 @@ func sqliteDSN(path string) (string, error) {
 // sqliteReadOnlyDSN builds OpenReadOnly's DSN; the busy_timeout
 // resolves the same way as [sqliteDSN].
 func sqliteReadOnlyDSN(path string) (string, error) {
+	return sqliteReadOnlyDSNWithMode(path, false)
+}
+
+func sqliteReadOnlySnapshotDSN(path string) (string, error) {
+	return sqliteReadOnlyDSNWithMode(path, true)
+}
+
+func sqliteReadOnlyDSNWithMode(path string, immutable bool) (string, error) {
 	ms, err := busyTimeoutMS()
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("file:%s?_pragma=busy_timeout(%d)&_pragma=query_only(true)", path, ms), nil
+	mode := "mode=ro"
+	if immutable {
+		mode += "&immutable=1"
+	}
+	return fmt.Sprintf("file:%s?%s&_pragma=busy_timeout(%d)&_pragma=query_only(true)", path, mode, ms), nil
 }
 
 // OpenReadOnly opens an existing SQLite state database for reads only.
@@ -176,6 +220,185 @@ func sqliteReadOnlyDSN(path string) (string, error) {
 // understand surfaces as query errors at read time, not here.
 func OpenReadOnly(path string) (*Store, error) {
 	dsn, err := sqliteReadOnlyDSN(path)
+	return openReadOnlyDSN(dsn, err)
+}
+
+// OpenReadOnlySnapshot copies a stable database-and-WAL pair from an existing
+// SQLite state database and opens the copy read-only. SQLite only opens the
+// private copy, so the source directory is never changed. Closing the Store
+// removes the temporary copy.
+func OpenReadOnlySnapshot(path string) (*Store, error) {
+	tempDir, err := os.MkdirTemp("", "sparkwing-store-snapshot-")
+	if err != nil {
+		return nil, fmt.Errorf("create sqlite snapshot directory: %w", err)
+	}
+	cleanup := func() error { return os.RemoveAll(tempDir) }
+	snapshotPath := filepath.Join(tempDir, "state.db")
+	if err := preparePrivateSQLite(snapshotPath); err != nil {
+		_ = cleanup()
+		return nil, err
+	}
+	if err := copySQLiteSnapshot(path, snapshotPath); err != nil {
+		_ = cleanup()
+		return nil, err
+	}
+	dsn, err := sqliteReadOnlySnapshotDSN(snapshotPath)
+	st, err := openReadOnlyDSN(dsn, err)
+	if err != nil {
+		_ = cleanup()
+		return nil, err
+	}
+	st.cleanup = cleanup
+	return st, nil
+}
+
+func copySQLiteSnapshot(sourcePath, destinationPath string) error {
+	return copySQLiteSnapshotWithInspect(sourcePath, destinationPath, inspectSnapshotSource)
+}
+
+type inspectSnapshotSourceFunc func(string, bool) (snapshotSource, error)
+
+func copySQLiteSnapshotWithInspect(sourcePath, destinationPath string, inspect inspectSnapshotSourceFunc) error {
+	var lastChange error
+	for range 5 {
+		beforeMain, err := inspect(sourcePath, false)
+		if err != nil {
+			return fmt.Errorf("inspect sqlite snapshot source %s: %w", sourcePath, err)
+		}
+		beforeWAL, err := inspect(sourcePath+"-wal", true)
+		if err != nil {
+			return fmt.Errorf("inspect sqlite snapshot source %s: %w", sourcePath+"-wal", err)
+		}
+		for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+			if err := os.Remove(destinationPath + suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+		}
+		if err := copySnapshotFile(sourcePath, destinationPath, beforeMain.info); err != nil {
+			if errors.Is(err, errSQLiteSnapshotSourceChanged) {
+				lastChange = err
+				continue
+			}
+			return err
+		}
+		if beforeWAL.exists {
+			if err := copySnapshotFile(sourcePath+"-wal", destinationPath+"-wal", beforeWAL.info); err != nil {
+				if errors.Is(err, errSQLiteSnapshotSourceChanged) {
+					lastChange = err
+					continue
+				}
+				return err
+			}
+		}
+		afterMain, err := inspect(sourcePath, false)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				lastChange = fmt.Errorf("%w: %s disappeared during copy", errSQLiteSnapshotSourceChanged, sourcePath)
+				continue
+			}
+			return fmt.Errorf("reinspect sqlite snapshot source %s: %w", sourcePath, err)
+		}
+		afterWAL, err := inspect(sourcePath+"-wal", true)
+		if err != nil {
+			return fmt.Errorf("reinspect sqlite snapshot source %s: %w", sourcePath+"-wal", err)
+		}
+		if !sameSnapshotSource(beforeMain, afterMain) || !sameSnapshotSource(beforeWAL, afterWAL) {
+			lastChange = fmt.Errorf("%w: %s database or WAL metadata changed during copy", errSQLiteSnapshotSourceChanged, sourcePath)
+			continue
+		}
+		if err := checkpointSQLiteCopy(destinationPath); err != nil {
+			return fmt.Errorf("validate sqlite snapshot copied from %s: %w", sourcePath, err)
+		}
+		return nil
+	}
+	return fmt.Errorf("copy sqlite snapshot: source %s kept changing after 5 attempts: %w", sourcePath, lastChange)
+}
+
+var errSQLiteSnapshotSourceChanged = errors.New("sqlite snapshot source changed")
+
+type snapshotSource struct {
+	exists bool
+	info   os.FileInfo
+}
+
+func inspectSnapshotSource(path string, optional bool) (snapshotSource, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if optional && errors.Is(err, os.ErrNotExist) {
+			return snapshotSource{}, nil
+		}
+		return snapshotSource{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return snapshotSource{}, fmt.Errorf("sqlite snapshot source %s is not a regular file", path)
+	}
+	return snapshotSource{exists: true, info: info}, nil
+}
+
+func copySnapshotFile(sourcePath, destinationPath string, expected os.FileInfo) error {
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w while opening %s", errSQLiteSnapshotSourceChanged, sourcePath)
+		}
+		return fmt.Errorf("open sqlite snapshot source %s: %w", sourcePath, err)
+	}
+	opened, err := source.Stat()
+	if err != nil || !os.SameFile(expected, opened) {
+		_ = source.Close()
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("%w while opening %s", errSQLiteSnapshotSourceChanged, sourcePath)
+	}
+	destination, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		_ = source.Close()
+		return fmt.Errorf("open sqlite snapshot destination %s: %w", destinationPath, err)
+	}
+	if err := destination.Chmod(0o600); err != nil {
+		_ = destination.Close()
+		_ = source.Close()
+		return fmt.Errorf("secure sqlite snapshot destination %s: %w", destinationPath, err)
+	}
+	_, copyErr := io.Copy(destination, source)
+	if err := errors.Join(copyErr, destination.Close(), source.Close()); err != nil {
+		return fmt.Errorf("copy sqlite snapshot source %s: %w", sourcePath, err)
+	}
+	return nil
+}
+
+func sameSnapshotSource(a, b snapshotSource) bool {
+	if a.exists != b.exists {
+		return false
+	}
+	if !a.exists {
+		return true
+	}
+	return os.SameFile(a.info, b.info) &&
+		a.info.Size() == b.info.Size() &&
+		a.info.ModTime().Equal(b.info.ModTime())
+}
+
+func checkpointSQLiteCopy(path string) error {
+	db, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(30000)")
+	if err != nil {
+		return err
+	}
+	db.SetMaxOpenConns(1)
+	var integrity string
+	checkErr := db.QueryRow(`PRAGMA quick_check`).Scan(&integrity)
+	if checkErr == nil && integrity != "ok" {
+		checkErr = fmt.Errorf("sqlite snapshot quick_check: %s", integrity)
+	}
+	var checkpointErr error
+	if checkErr == nil {
+		_, checkpointErr = db.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`)
+	}
+	return errors.Join(checkErr, checkpointErr, db.Close())
+}
+
+func openReadOnlyDSN(dsn string, err error) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
@@ -227,8 +450,16 @@ func openSQL(driver, dsn string, dialect Dialect) (*Store, error) {
 	return s, nil
 }
 
-// Close releases the underlying database handle.
-func (s *Store) Close() error { return s.db.Close() }
+// Close releases the underlying database handle and any private snapshot.
+func (s *Store) Close() error {
+	dbErr := s.db.Close()
+	if s.cleanup == nil {
+		return dbErr
+	}
+	cleanup := s.cleanup
+	s.cleanup = nil
+	return errors.Join(dbErr, cleanup())
+}
 
 // DB returns the underlying handle for read-side aggregations only.
 func (s *Store) DB() *sql.DB { return s.db }

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/logpretty"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
@@ -23,7 +24,7 @@ type nodeLogger struct {
 
 // newNodeLogger opens path for append. Caller must Close.
 func newNodeLogger(path, nodeID string, delegate sparkwing.Logger) (*nodeLogger, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := fssecure.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +129,7 @@ type envelopeLogger struct {
 
 // newEnvelopeLogger opens path for append. Caller must Close.
 func newEnvelopeLogger(path string, delegate sparkwing.Logger) (*envelopeLogger, error) {
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := fssecure.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 	if err != nil {
 		return nil, err
 	}

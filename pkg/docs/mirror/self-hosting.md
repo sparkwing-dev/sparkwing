@@ -45,6 +45,13 @@ What runs:
 All state persists in docker volumes. Backup `controller-data`,
 `gitcache-data`, and `logs-data` to protect history.
 
+The `sparkwing-logs` storage policy is explicit: omitting `--root` uses
+`$SPARKWING_HOME/logs-service` with owner-only directories and files. Supplying
+`--root` selects the operator-managed shared/PVC contract (creation modes 0755
+for directories and 0644 for files, reduced by the process umask); use the
+volume's ACL, ownership, umask, or Kubernetes security context to limit which
+service accounts can read it.
+
 ### Where to host
 
 Works anywhere docker-compose runs:

@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
@@ -251,7 +252,7 @@ func ServeConsumer(ctx context.Context, opts ConsumerOptions) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(layout.Home, 0o755); err != nil {
+	if err := fssecure.EnsureDir(layout.Home); err != nil {
 		return fmt.Errorf("mkdir %s: %w", layout.Home, err)
 	}
 
@@ -272,7 +273,7 @@ func ServeConsumer(ctx context.Context, opts ConsumerOptions) error {
 	if b, merr := json.Marshal(ConsumerIdentity{
 		PID: os.Getpid(), Version: opts.Version, Started: time.Now(),
 	}); merr == nil {
-		_ = os.WriteFile(layout.PID, append(b, '\n'), 0o644)
+		_ = fssecure.WriteFile(layout.PID, append(b, '\n'))
 	}
 	defer func() { _ = os.Remove(layout.PID) }()
 

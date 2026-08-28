@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator/runner"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -76,6 +77,9 @@ func runNodeRemote(
 
 	workDir := filepath.Join(bincache.SparkwingHome(), "node-runner", runID+"-"+nodeID)
 	defer func() { _ = os.RemoveAll(workDir) }()
+	if err := fssecure.EnsureDir(workDir); err != nil {
+		return runner.Result{}, fmt.Errorf("create private work directory: %w", err)
+	}
 
 	sparkwingDir, err := bincache.FetchPipelineSource(gcURL, repoURL, branch, trigger.GitSHA, workDir)
 	if err != nil {

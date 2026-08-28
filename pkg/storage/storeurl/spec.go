@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/backends"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
@@ -207,7 +208,7 @@ func openStateOutbox(art storage.ArtifactStore) ([]s3state.Option, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve outbox path: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := fssecure.EnsureDir(filepath.Dir(path)); err != nil {
 		return nil, fmt.Errorf("create outbox dir %s: %w", filepath.Dir(path), err)
 	}
 	ob, err := s3state.OpenOutbox(path, art, 0)

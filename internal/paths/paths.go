@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 )
 
 // Paths resolves on-disk locations under the sparkwing home root.
@@ -129,10 +131,16 @@ func sanitizeNodeFile(nodeID string) string {
 
 // EnsureRunDir creates the on-disk layout for a run. Idempotent.
 func (p Paths) EnsureRunDir(runID string) error {
-	return os.MkdirAll(p.RunDir(runID), 0o755)
+	if err := p.EnsureRoot(); err != nil {
+		return err
+	}
+	if err := fssecure.EnsureDir(p.RunsDir()); err != nil {
+		return err
+	}
+	return fssecure.EnsureDir(p.RunDir(runID))
 }
 
 // EnsureRoot creates the sparkwing home directory if absent.
 func (p Paths) EnsureRoot() error {
-	return os.MkdirAll(p.Root, 0o755)
+	return fssecure.EnsureDir(p.Root)
 }

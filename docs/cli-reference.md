@@ -15,7 +15,7 @@ Every `sparkwing` command, flag, and argument, generated from the CLI's own comm
 - [`sparkwing dashboard`](cli-dashboard.md) -- Manage the local dashboard + API server
 - [`sparkwing debug`](cli-debug.md) -- Interactive debugging for pipeline runs
 - [`sparkwing docs`](cli-docs.md) -- Embedded user docs (offline)
-- [`sparkwing doctor`](cli-doctor.md) -- Diagnose and repair provably-dead local state
+- [`sparkwing doctor`](cli-doctor.md) -- Diagnose and safely repair local state
 - [`sparkwing examples`](cli-examples.md) -- Worked pipelines to read, not starting points to scaffold
 - [`sparkwing info`](cli-info.md) -- Self-describe sparkwing + the current project (agent entrypoint)
 - [`sparkwing pipeline`](cli-pipeline.md) -- This repo's pipelines

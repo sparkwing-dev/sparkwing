@@ -60,6 +60,13 @@ code change to unlock.
   trees are upgraded past reachable vulnerability findings, and any temporary
   image waiver must record an owner, reachability, mitigation, and a future
   expiry.
+- **local security:** Sparkwing now creates its POSIX home, run, cache, and
+  local-work directories as owner-only (`0700`), and creates SQLite state,
+  outbox sidecars, logs, PIDs, rerun values, and local environment files as
+  owner-only (`0600`). `sparkwing doctor` reports and repairs permissive legacy
+  homes without following symlinks or removing cached binaries' execute bit.
+  Windows continues to use inherited DACLs; doctor reports that ACL privacy as
+  unverified instead of presenting a false clean bill.
 - **s3 state:** The local SQLite outbox now retains a queued state or artifact
   write when replay reaches a non-transient object-store error, and `Drain`
   returns that error. The row previously disappeared even though its staged

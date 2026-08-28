@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
 // probeTimeout bounds a single probe end to end, so one wedged daemon
@@ -64,6 +65,41 @@ func Probe(ctx context.Context, sock string) (DaemonInfo, error) {
 		BinaryVersion: ack.BinaryVersion,
 		Draining:      ack.Draining,
 	}, nil
+}
+
+// ProbeQueue reads one queue snapshot from an already-running daemon without
+// entering the spawn/election path. Status and dry-run callers use it when
+// even creating the daemon's lock directory would violate their contract.
+func ProbeQueue(ctx context.Context, sock string) (wingwire.QueueState, error) {
+	nc, err := dial(ctx, sock, probeTimeout)
+	if err != nil {
+		if u := unreachable(sock, err); u != nil {
+			return wingwire.QueueState{}, u
+		}
+		return wingwire.QueueState{}, ErrNoDaemon
+	}
+	defer func() { _ = nc.Close() }()
+	deadline := time.Now().Add(probeTimeout)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	_ = nc.SetDeadline(deadline)
+	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true}
+	ack, err := cl.handshake("")
+	if err != nil {
+		return wingwire.QueueState{}, fmt.Errorf("wingd/client: queue probe %s: %w", sock, err)
+	}
+	if ack.ProtocolMajor != wingd.ProtocolMajor {
+		return wingwire.QueueState{}, fmt.Errorf("wingd/client: queue probe %s: protocol %d is incompatible with %d", sock, ack.ProtocolMajor, wingd.ProtocolMajor)
+	}
+	qs, terminal, transient := cl.readQueueState()
+	if terminal != nil {
+		return wingwire.QueueState{}, terminal
+	}
+	if transient != nil {
+		return wingwire.QueueState{}, fmt.Errorf("wingd/client: queue probe %s: %w", sock, transient)
+	}
+	return qs, nil
 }
 
 // healthProbeRetryPace spaces re-dials of one health probe inside its

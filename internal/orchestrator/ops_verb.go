@@ -156,7 +156,14 @@ func runOpsDoctor(args []string) error {
 	defer cancel()
 	report, err := opsview.Diagnose(ctx, p, *home, sparkwingModuleVersion(), *dryRun)
 	if err != nil {
-		return fmt.Errorf("ops doctor: %w", err)
+		diagnoseErr := fmt.Errorf("ops doctor: %w", err)
+		if len(report.PermissionRepairs) == 0 && !report.PermissionAuditUnverified {
+			return diagnoseErr
+		}
+		return errors.Join(
+			opsview.RenderDoctor(os.Stdout, report, format, opsLegacyWarningLine(len(report.LiveLegacyHolders))),
+			diagnoseErr,
+		)
 	}
 	return opsview.RenderDoctor(os.Stdout, report, format, opsLegacyWarningLine(len(report.LiveLegacyHolders)))
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
@@ -111,7 +112,7 @@ func (l *localDepCache) store(_ context.Context, key, dir string) (int64, error)
 	if err != nil {
 		return 0, err
 	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+	if err := fssecure.EnsureDir(filepath.Dir(p)); err != nil {
 		return 0, err
 	}
 	// safety: temp-then-rename keeps a concurrent reader off a

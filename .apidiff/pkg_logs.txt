@@ -26,6 +26,7 @@ func (c *Client) Stream(ctx context.Context, runID, nodeID string) (io.ReadClose
 func New(root string, logger *slog.Logger) (*Server, error)
 func NewClient(baseURL string, httpClient *http.Client) *Client
 func NewClientWithToken(baseURL string, httpClient *http.Client, token string) *Client
+func NewPrivate(root string, logger *slog.Logger) (*Server, error)
 type ReadFilter struct {
 	Tail  int
 	Head  int
@@ -44,6 +45,7 @@ type SearchResult struct {
 	Content string
 }
 func Serve(ctx context.Context, root, addr string, logger *slog.Logger) error
+func ServePrivateWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error
 func ServeWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error
 type Server struct {
 }

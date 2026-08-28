@@ -24,6 +24,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
@@ -249,10 +250,10 @@ func spawnTriggerConsumer(home string, idle, claimLease time.Duration) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(layout.Home, 0o755); err != nil {
+	if err := fssecure.EnsureDir(layout.Home); err != nil {
 		return fmt.Errorf("mkdir %s: %w", layout.Home, err)
 	}
-	logF, err := os.OpenFile(layout.Log, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logF, err := fssecure.OpenFile(layout.Log, os.O_CREATE|os.O_APPEND|os.O_WRONLY)
 	if err != nil {
 		return fmt.Errorf("open %s: %w", layout.Log, err)
 	}

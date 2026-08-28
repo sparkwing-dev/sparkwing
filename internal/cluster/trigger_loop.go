@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
@@ -85,14 +86,15 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 	if opts.MaxConcurrent < 1 {
 		opts.MaxConcurrent = 4
 	}
-	if opts.WorkRoot == "" {
+	privateWorkRoot := opts.WorkRoot == ""
+	if privateWorkRoot {
 		opts.WorkRoot = filepath.Join(bincache.SparkwingHome(), "trigger-loop")
 	}
 	logger := opts.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
-	if err := os.MkdirAll(opts.WorkRoot, 0o755); err != nil {
+	if err := ensureTriggerWorkRoot(opts.WorkRoot, privateWorkRoot); err != nil {
 		return fmt.Errorf("mkdir work-root: %w", err)
 	}
 
@@ -168,6 +170,13 @@ func RunTriggerLoop(ctx context.Context, opts TriggerLoopOptions) error {
 			}
 		}(trigger)
 	}
+}
+
+func ensureTriggerWorkRoot(path string, private bool) error {
+	if private {
+		return fssecure.EnsureDir(path)
+	}
+	return os.MkdirAll(path, 0o755)
 }
 
 // BakedBinary is the path to a baked-in pipeline binary used for

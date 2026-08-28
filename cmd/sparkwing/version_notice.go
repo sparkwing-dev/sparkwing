@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
@@ -114,10 +115,10 @@ func writeVersionStamp(file, exe, version string) {
 	if version == "" {
 		return
 	}
-	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+	if err := fssecure.EnsureDir(filepath.Dir(file)); err != nil {
 		return
 	}
-	_ = os.WriteFile(file, []byte("# "+exe+"\n"+version+"\n"), 0o644)
+	_ = fssecure.WriteFile(file, []byte("# "+exe+"\n"+version+"\n"))
 }
 
 // quietNoticeVerb suppresses the transition line for machine-facing
@@ -128,7 +129,7 @@ func quietNoticeVerb(verb string) bool {
 		return true
 	}
 	switch verb {
-	case "completion", "handle-trigger", "wingd":
+	case "completion", "doctor", "handle-trigger", "wingd":
 		return true
 	}
 	return false

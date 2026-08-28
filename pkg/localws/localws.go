@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/backend"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
@@ -111,7 +112,7 @@ func Run(ctx context.Context, opts Options) error {
 	var logsSrv *logs.Server
 	if opts.LogStore == nil {
 		var err error
-		logsSrv, err = logs.New(paths.Root, nil)
+		logsSrv, err = logs.NewPrivate(paths.Root, nil)
 		if err != nil {
 			return fmt.Errorf("logs server: %w", err)
 		}
@@ -306,5 +307,5 @@ func readOnlyMiddleware(next http.Handler) http.Handler {
 // cooperating processes can reach us. Overwritten each startup.
 func writeDevEnv(root, baseURL string) error {
 	body := fmt.Sprintf("SPARKWING_CONTROLLER_URL=%s\nSPARKWING_LOGS_URL=%s\n", baseURL, baseURL)
-	return os.WriteFile(filepath.Join(root, "dev.env"), []byte(body), 0o644)
+	return fssecure.WriteFile(filepath.Join(root, "dev.env"), []byte(body))
 }

@@ -1,16 +1,33 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
+
+func TestRenderPartialDoctorWritesRepairsBeforeError(t *testing.T) {
+	report := doctorReport{PermissionRepairs: []fssecure.Change{{Path: "/private/home/state.db"}}}
+	diagnoseErr := errors.New("later repair failed")
+	var out bytes.Buffer
+	err := renderPartialDoctor(&out, report, "plain", diagnoseErr)
+	if !errors.Is(err, diagnoseErr) {
+		t.Fatalf("render error = %v, want diagnose error", err)
+	}
+	if got := out.String(); !strings.Contains(got, "permission_repairs\t1") {
+		t.Fatalf("partial report was not rendered before error:\n%s", got)
+	}
+}
 
 // doctorHome prepares an isolated sparkwing home with an initialized
 // state database and returns its paths. home doubles as the daemon home;

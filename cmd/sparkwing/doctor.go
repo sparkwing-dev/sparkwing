@@ -54,9 +54,16 @@ func runDoctor(args []string) error {
 
 	report, err := diagnose(ctx, p, *home, *dryRun)
 	if err != nil {
-		return fmt.Errorf("doctor: %w", err)
+		return renderPartialDoctor(os.Stdout, report, format, fmt.Errorf("doctor: %w", err))
 	}
 	return renderDoctor(os.Stdout, report, format)
+}
+
+func renderPartialDoctor(w io.Writer, report doctorReport, format string, diagnoseErr error) error {
+	if len(report.PermissionRepairs) == 0 && !report.PermissionAuditUnverified {
+		return diagnoseErr
+	}
+	return errors.Join(renderDoctor(w, report, format), diagnoseErr)
 }
 
 // diagnose runs the sweep and hangs the machine-wide gate findings off it.

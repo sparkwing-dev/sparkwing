@@ -345,6 +345,16 @@ it actually lives: the registry, the gitops repo, kubectl. A
 developer with ECR push and gitops write access can deploy with or
 without sparkwing.
 
+Sparkwing does protect its laptop-local persistence from other OS users. On
+POSIX systems it creates `$SPARKWING_HOME`, run directories, and private cache
+directories as `0700`, and local state databases, SQLite sidecars, logs, PID
+files, and materialized run values as `0600`. `sparkwing doctor --dry-run`
+lists permissive legacy paths; `sparkwing doctor` tightens them without
+following symlinks or removing the owner execute bit from cached pipeline
+binaries. Portable Go file modes do not describe Windows DACLs, so doctor
+reports that audit as unverified on Windows rather than claiming the ACL is
+private.
+
 **What sparkwing controls:**
 
 - Which clusters a pipeline can dispatch to (via the `--profile` target's
@@ -707,9 +717,10 @@ machine:
   socket that would not answer are different answers, and the second
   exits 4 with the dial failure named rather than printing an empty
   queue it never looked at.
-- `sparkwing doctor` -- the one repair verb. It removes only provably-
-  dead state (an interrupted run's leftover row, an orphaned lock file
-  whose owner is gone) and reports what it found and did. Every report
+- `sparkwing doctor` -- the one repair verb. It tightens permissive local-home
+  paths and removes only provably-dead state (an interrupted run's leftover
+  row, an orphaned lock file whose owner is gone), then reports what it found
+  and did. Every report
   opens with the daemon's state -- serving with its version and protocol,
   none running, or unreachable -- because the checks below it only run
   when the daemon answered, so their emptiness means nothing on its own.

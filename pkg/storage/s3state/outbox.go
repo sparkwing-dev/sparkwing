@@ -11,6 +11,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
@@ -49,6 +50,9 @@ type Outbox struct {
 func OpenOutbox(path string, art storage.ArtifactStore, interval time.Duration) (*Outbox, error) {
 	if art == nil {
 		return nil, errors.New("s3state: OpenOutbox requires an artifact store")
+	}
+	if err := fssecure.PrepareSQLite(path); err != nil {
+		return nil, fmt.Errorf("s3state: open outbox: %w", err)
 	}
 	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(on)&_pragma=busy_timeout(5000)", path)
 	db, err := sql.Open("sqlite", dsn)

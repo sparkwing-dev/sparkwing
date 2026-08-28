@@ -646,7 +646,7 @@ type localLogs struct {
 }
 
 func (l localLogs) OpenNodeLog(runID, nodeID string, delegate sparkwing.Logger) (NodeLog, error) {
-	if err := os.MkdirAll(l.paths.RunDir(runID), 0o755); err != nil {
+	if err := l.paths.EnsureRunDir(runID); err != nil {
 		return nil, err
 	}
 	return newNodeLogger(l.paths.NodeLog(runID, nodeID), nodeID, delegate)

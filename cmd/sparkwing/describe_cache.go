@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -89,10 +90,10 @@ func refreshDescribeFromBinary(sparkwingDir, binPath, key string) ([]sparkwing.D
 
 // writeDescribeFile is silent on failure; completion mustn't crash mid-tab.
 func writeDescribeFile(path string, raw []byte) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := fssecure.EnsureDir(filepath.Dir(path)); err != nil {
 		return
 	}
-	_ = os.WriteFile(path, raw, 0o644)
+	_ = fssecure.WriteFile(path, raw)
 }
 
 // writeDescribeCache persists the schema after a successful build.
@@ -115,10 +116,10 @@ func writeDescribeCache(sparkwingDir, binPath string) error {
 	}
 
 	path := describeCachePath(key)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := fssecure.EnsureDir(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
 	}
-	if err := os.WriteFile(path, out, 0o644); err != nil {
+	if err := fssecure.WriteFile(path, out); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	writeDescribeFile(byRepoDescribePath(sparkwingDir), out)

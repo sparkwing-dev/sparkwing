@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/opsview"
 )
@@ -16,6 +17,64 @@ func TestDoctorReport_RepeatRejectionsAreNotClean(t *testing.T) {
 	}
 	if r.Clean() {
 		t.Fatal("report with repeat admission rejections reported clean")
+	}
+}
+
+func TestRenderDoctorCarriesPermissionRepairs(t *testing.T) {
+	r := opsview.DoctorReport{
+		DryRun: true,
+		PermissionRepairs: []fssecure.Change{
+			{Path: "runs/demo/node.log", Before: "0644", After: "0600"},
+		},
+	}
+	if r.Clean() {
+		t.Fatal("report with permission repairs reported clean")
+	}
+	var pretty bytes.Buffer
+	if err := opsview.RenderDoctor(&pretty, r, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"private paths found", `"runs/demo/node.log" 0644 -> 0600`} {
+		if !strings.Contains(pretty.String(), want) {
+			t.Errorf("pretty output missing %q:\n%s", want, pretty.String())
+		}
+	}
+	var plain bytes.Buffer
+	if err := opsview.RenderDoctor(&plain, r, "plain", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plain.String(), "permission_repairs\t1") {
+		t.Errorf("plain output missing permission count:\n%s", plain.String())
+	}
+}
+
+func TestRenderDoctorQuotesPermissionPaths(t *testing.T) {
+	r := opsview.DoctorReport{PermissionRepairs: []fssecure.Change{{
+		Path: "runs/demo\nhealthy: nothing to repair", Before: "0644", After: "0600",
+	}}}
+	var pretty bytes.Buffer
+	if err := opsview.RenderDoctor(&pretty, r, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(pretty.String(), "runs/demo\nhealthy") {
+		t.Fatalf("permission path injected a line into output:\n%s", pretty.String())
+	}
+	if !strings.Contains(pretty.String(), `"runs/demo\nhealthy: nothing to repair"`) {
+		t.Fatalf("permission path was not safely quoted:\n%s", pretty.String())
+	}
+}
+
+func TestRenderDoctorRefusesFalsePermissionAllClear(t *testing.T) {
+	r := opsview.DoctorReport{PermissionAuditUnverified: true}
+	if r.Clean() {
+		t.Fatal("unverified permission audit reported clean")
+	}
+	var buf bytes.Buffer
+	if err := opsview.RenderDoctor(&buf, r, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(buf.String(), "Windows access is governed by DACLs") {
+		t.Errorf("pretty output missing Windows limitation:\n%s", buf.String())
 	}
 }
 

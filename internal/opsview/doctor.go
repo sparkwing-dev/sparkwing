@@ -1,7 +1,9 @@
 package opsview
 
 import (
+	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,6 +20,7 @@ import (
 
 	"github.com/sparkwing-dev/sparkwing/internal/boxslot"
 	"github.com/sparkwing-dev/sparkwing/internal/capacity"
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
@@ -46,6 +49,13 @@ type DoctorReport struct {
 	// DryRun reports that nothing was changed; the counts are what would have
 	// been repaired.
 	DryRun bool `json:"dry_run"`
+	// PermissionRepairs names private-home paths whose POSIX permissions were
+	// tightened, or would be tightened during a dry run.
+	PermissionRepairs []fssecure.Change `json:"permission_repairs,omitempty"`
+	// PermissionAuditUnverified reports that this platform's access control
+	// cannot be verified through portable POSIX mode bits. Windows uses DACLs,
+	// so doctor refuses to present a false all-clear for local file access.
+	PermissionAuditUnverified bool `json:"permission_audit_unverified,omitempty"`
 	// OrphanedRuns are run ids that were marked running with no live process
 	// and no daemon lease, finalized as interrupted.
 	OrphanedRuns []string `json:"orphaned_runs,omitempty"`
@@ -349,6 +359,8 @@ type DoctorLegacyHolder struct {
 // this run did not earn. A green that means nothing is worse than a red.
 func (r DoctorReport) Clean() bool {
 	return !r.Daemon.Blind() &&
+		len(r.PermissionRepairs) == 0 &&
+		!r.PermissionAuditUnverified &&
 		len(r.OrphanedRuns) == 0 &&
 		r.LegacyBoxSlotFilesRemoved == 0 &&
 		len(r.LiveLegacyHolders) == 0 &&
@@ -371,18 +383,87 @@ func (r DoctorReport) Clean() bool {
 // is the running binary's own version, compared against the live daemon's to
 // flag a version skew; pass "" to skip that check.
 //
-// The daemon is probed before anything else, because whether it answered
-// decides what the rest of the sweep is entitled to conclude: four checks can
-// only run against a live daemon, and one of those repairs.
+// The permission audit runs before state is opened, so it can report legacy
+// database modes. The daemon probe follows before any daemon-dependent check;
+// whether it answered decides what those checks may conclude.
 func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryRun bool) (DoctorReport, error) {
 	report := DoctorReport{DryRun: dryRun}
-
-	report.Daemon = probeDaemon(ctx, home)
-	daemonLive := liveDaemonRuns(ctx, home, selfVersion)
-
-	boxHolders, err := boxslot.Holders(p.BoxSlotDir())
+	if err := validateDoctorRoot(p, home); err != nil {
+		return report, err
+	}
+	home = p.Root
+	if err := validateDoctorMutationPaths(p, nil, false); err != nil {
+		return report, err
+	}
+	rootIdentity, repairable, err := recognizedSparkwingHome(p)
 	if err != nil {
 		return report, err
+	}
+	if !repairable {
+		return report, fmt.Errorf("refuse doctor mutation for unrecognized sparkwing home %q", p.Root)
+	}
+	if fssecure.AuditSupported() {
+		var repairs []fssecure.Change
+		if rootIdentity != nil {
+			repairs, err = fssecure.RepairTree(p.Root, rootIdentity, dryRun)
+		}
+		report.PermissionRepairs = repairs
+		if err != nil {
+			return report, fmt.Errorf("repair private-home permissions after reporting %d changed path(s): %w", len(repairs), err)
+		}
+	} else {
+		report.PermissionAuditUnverified = true
+	}
+	if !dryRun {
+		if err := validateDoctorMutationPaths(p, rootIdentity, rootIdentity == nil); err != nil {
+			return report, err
+		}
+	}
+	homeRoot, err := openDoctorHomeRoot(p.Root, rootIdentity)
+	if err != nil {
+		return report, err
+	}
+	if homeRoot == nil {
+		report.Daemon = probeDaemon(ctx, home)
+		diagnoseInstallConflict(&report)
+		return report, nil
+	}
+	defer func() { _ = homeRoot.Close() }()
+	boxRoot, _, err := openDoctorChildRoot(homeRoot, "box-slots")
+	if err != nil {
+		return report, err
+	}
+	if boxRoot != nil {
+		defer func() { _ = boxRoot.Close() }()
+	}
+	runsRoot, _, err := openDoctorChildRoot(homeRoot, "runs")
+	if err != nil {
+		return report, err
+	}
+	if runsRoot != nil {
+		defer func() { _ = runsRoot.Close() }()
+	}
+	st, stateFile, err := openDoctorState(p, homeRoot, rootIdentity, dryRun)
+	if err != nil {
+		return report, err
+	}
+	if stateFile != nil {
+		defer stateFile.Close()
+	}
+	if st != nil {
+		defer func() { _ = st.Close() }()
+	}
+
+	report.Daemon = probeDaemon(ctx, home)
+	queueState, queueRead := probeDaemonQueue(ctx, &report)
+	daemonLive := liveDaemonRuns(queueState, queueRead)
+
+	var boxHolders []boxslot.Holder
+	if boxRoot != nil {
+		boxHolders, err = boxslot.HoldersInRoot(boxRoot, p.BoxSlotDir())
+		if err != nil {
+			return report, err
+		}
 	}
 	legacyRuns := map[string]struct{}{}
 	for _, h := range boxHolders {
@@ -391,32 +472,319 @@ func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryR
 		}
 	}
 
-	st, err := store.Open(p.StateDB())
-	if err != nil {
+	if err := diagnoseLegacyBoxSlots(boxRoot, p.BoxSlotDir(), boxHolders, dryRun, &report); err != nil {
 		return report, err
 	}
-	defer func() { _ = st.Close() }()
-
-	if err := diagnoseOrphanRuns(ctx, st, daemonLive, legacyRuns, report.Daemon.Blind(), dryRun, &report); err != nil {
-		return report, err
+	if st != nil {
+		if err := diagnoseOrphanRuns(ctx, st, daemonLive, legacyRuns, report.Daemon.Blind(), dryRun, &report); err != nil {
+			return report, err
+		}
+		if err := diagnoseDeadConcurrency(ctx, st, dryRun, &report); err != nil {
+			return report, err
+		}
+		if err := diagnoseDanglingRunDirs(ctx, st, runsRoot, dryRun, &report); err != nil {
+			return report, err
+		}
+		if err := diagnosePoisonedProfiles(ctx, st, queueState, queueRead, &report); err != nil {
+			return report, err
+		}
 	}
-	if err := diagnoseLegacyBoxSlots(p, boxHolders, dryRun, &report); err != nil {
-		return report, err
-	}
-	if err := diagnoseDeadConcurrency(ctx, st, dryRun, &report); err != nil {
-		return report, err
-	}
-	if err := diagnoseDanglingRunDirs(ctx, st, p, dryRun, &report); err != nil {
-		return report, err
-	}
-	if err := diagnosePoisonedProfiles(ctx, st, home, selfVersion, &report); err != nil {
-		return report, err
-	}
-	diagnoseDaemonHealth(ctx, home, selfVersion, &report)
+	diagnoseDaemonHealth(selfVersion, queueState, queueRead, &report)
 	diagnoseQuarantinedLedgers(home, &report)
 	diagnoseStrayDaemons(ctx, home, &report)
 	diagnoseInstallConflict(&report)
 	return report, nil
+}
+
+func openDoctorHomeRoot(path string, expected os.FileInfo) (*os.Root, error) {
+	if expected == nil {
+		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+			if err != nil {
+				return nil, err
+			}
+			return nil, fmt.Errorf("refuse doctor mutation because missing home root %q appeared after recognition", path)
+		}
+		return nil, nil
+	}
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return nil, err
+	}
+	opened, err := root.Stat(".")
+	if err != nil || !os.SameFile(expected, opened) {
+		_ = root.Close()
+		if err != nil {
+			return nil, err
+		}
+		return nil, fmt.Errorf("refuse doctor mutation because home root %q changed after recognition", path)
+	}
+	return root, nil
+}
+
+func openDoctorChildRoot(root *os.Root, name string) (*os.Root, os.FileInfo, error) {
+	info, err := root.Lstat(name)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return nil, nil, fmt.Errorf("refuse doctor mutation through symlink %q", name)
+	}
+	if !info.IsDir() {
+		return nil, nil, fmt.Errorf("doctor path %q is not a directory", name)
+	}
+	child, err := root.OpenRoot(name)
+	if err != nil {
+		return nil, nil, err
+	}
+	opened, err := child.Stat(".")
+	if err != nil || !os.SameFile(info, opened) {
+		_ = child.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, fmt.Errorf("refuse doctor mutation because %q changed while opening", name)
+	}
+	return child, info, nil
+}
+
+func openDoctorState(p paths.Paths, homeRoot *os.Root, rootIdentity os.FileInfo, dryRun bool) (*store.Store, *os.File, error) {
+	info, err := homeRoot.Lstat("state.db")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, nil, nil
+		}
+		return nil, nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("refuse doctor mutation because state.db is not a regular file")
+	}
+	stateFile, err := homeRoot.OpenFile("state.db", os.O_RDONLY, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	opened, err := stateFile.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		_ = stateFile.Close()
+		if err != nil {
+			return nil, nil, err
+		}
+		return nil, nil, fmt.Errorf("refuse doctor mutation because state.db changed while opening")
+	}
+	if err := validatePinnedDoctorRootPath(p.Root, rootIdentity); err != nil {
+		_ = stateFile.Close()
+		return nil, nil, err
+	}
+	var st *store.Store
+	if dryRun {
+		st, err = store.OpenReadOnlySnapshot(p.StateDB())
+	} else {
+		st, err = store.Open(p.StateDB())
+	}
+	if err != nil {
+		_ = stateFile.Close()
+		return nil, nil, err
+	}
+	after, afterErr := homeRoot.Lstat("state.db")
+	rootErr := validatePinnedDoctorRootPath(p.Root, rootIdentity)
+	if afterErr != nil || !os.SameFile(info, after) || rootErr != nil {
+		_ = st.Close()
+		_ = stateFile.Close()
+		if afterErr != nil {
+			return nil, nil, afterErr
+		}
+		if rootErr != nil {
+			return nil, nil, rootErr
+		}
+		return nil, nil, fmt.Errorf("refuse doctor mutation because state.db changed while opening store")
+	}
+	return st, stateFile, nil
+}
+
+func validatePinnedDoctorRootPath(path string, expected os.FileInfo) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !os.SameFile(expected, info) {
+		return fmt.Errorf("refuse doctor mutation because home root %q changed after recognition", path)
+	}
+	return nil
+}
+
+func validateDoctorRoot(p paths.Paths, home string) error {
+	if p.Root == "" {
+		return errors.New("doctor: Sparkwing home root is empty")
+	}
+	if home == "" {
+		return nil
+	}
+	pathsRoot, err := filepath.Abs(p.Root)
+	if err != nil {
+		return err
+	}
+	homeRoot, err := filepath.Abs(home)
+	if err != nil {
+		return err
+	}
+	if filepath.Clean(pathsRoot) == filepath.Clean(homeRoot) {
+		return nil
+	}
+	pathsInfo, pathsErr := os.Stat(pathsRoot)
+	homeInfo, homeErr := os.Stat(homeRoot)
+	if pathsErr == nil && homeErr == nil && os.SameFile(pathsInfo, homeInfo) {
+		return nil
+	}
+	return fmt.Errorf("doctor paths root %q does not identify requested home %q", p.Root, home)
+}
+
+func validateDoctorMutationPaths(p paths.Paths, expectedRoot os.FileInfo, expectMissing bool) error {
+	rootInfo, err := os.Lstat(p.Root)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	} else {
+		if expectMissing {
+			return fmt.Errorf("refuse doctor mutation because missing home root %q appeared after recognition", p.Root)
+		}
+		if rootInfo.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refuse doctor mutation through symlink root %q", p.Root)
+		}
+		if expectedRoot != nil && !os.SameFile(expectedRoot, rootInfo) {
+			return fmt.Errorf("refuse doctor mutation because home root %q changed after recognition", p.Root)
+		}
+	}
+	paths := []string{
+		p.RunsDir(),
+		p.BoxSlotDir(),
+		p.StateDB(),
+		p.StateDB() + "-wal",
+		p.StateDB() + "-shm",
+		p.StateDB() + "-journal",
+	}
+	for _, path := range paths {
+		info, err := os.Lstat(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("refuse doctor mutation through symlink %q", path)
+		}
+	}
+	return nil
+}
+
+// recognizedSparkwingHome keeps doctor's recursive chmod away from arbitrary
+// directories. It returns the root identity that permission repair must still
+// observe after recognition.
+func recognizedSparkwingHome(p paths.Paths) (os.FileInfo, bool, error) {
+	rootInfo, err := os.Lstat(p.Root)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, true, nil
+		}
+		return nil, false, err
+	}
+	if rootInfo.Mode()&os.ModeSymlink != 0 {
+		return nil, false, fmt.Errorf("refuse permission repair through symlink root %q", p.Root)
+	}
+	if !rootInfo.IsDir() {
+		return nil, false, fmt.Errorf("sparkwing home %q is not a directory", p.Root)
+	}
+	entries, err := os.ReadDir(p.Root)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(entries) == 0 {
+		return rootInfo, true, nil
+	}
+	if sqliteHasTables(p.StateDB(), "runs", "nodes", "events", "triggers") ||
+		sqliteHasTables(filepath.Join(p.Root, "outbox.db"), "outbox_writes") ||
+		validWingdState(filepath.Join(p.Root, "wingd", "state.json")) ||
+		hasValidVersionStamp(p.VersionStampDir()) {
+		return rootInfo, true, nil
+	}
+	return rootInfo, false, nil
+}
+
+func hasValidVersionStamp(root string) bool {
+	info, err := os.Lstat(root)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() || len(entry.Name()) != 16 {
+			continue
+		}
+		if _, err := hex.DecodeString(entry.Name()); err != nil {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(root, entry.Name()))
+		if err != nil || len(body) > 64*1024 {
+			continue
+		}
+		lines := strings.Split(string(body), "\n")
+		if len(lines) >= 2 && strings.HasPrefix(lines[0], "# ") && filepath.IsAbs(strings.TrimSpace(strings.TrimPrefix(lines[0], "# "))) && strings.TrimSpace(lines[1]) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func validWingdState(path string) bool {
+	dirInfo, err := os.Lstat(filepath.Dir(path))
+	if err != nil || !dirInfo.IsDir() || dirInfo.Mode()&os.ModeSymlink != 0 {
+		return false
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() > 16<<20 {
+		return false
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	var state struct {
+		Schema   int             `json:"schema"`
+		Snapshot json.RawMessage `json:"snapshot"`
+	}
+	if err := json.Unmarshal(body, &state); err != nil {
+		return false
+	}
+	snapshot := bytes.TrimSpace(state.Snapshot)
+	return state.Schema > 0 &&
+		len(snapshot) >= 2 && snapshot[0] == '{' && snapshot[len(snapshot)-1] == '}'
+}
+
+func sqliteHasTables(path string, names ...string) bool {
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	st, err := store.OpenReadOnlySnapshot(path)
+	if err != nil {
+		return false
+	}
+	defer func() { _ = st.Close() }()
+	for _, name := range names {
+		var count int
+		if err := st.DB().QueryRow(
+			`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, name,
+		).Scan(&count); err != nil || count != 1 {
+			return false
+		}
+	}
+	return true
 }
 
 // diagnoseInstallConflict scans the machine for sparkwing binaries
@@ -512,12 +880,12 @@ func scratchBuild(version string) bool {
 // the remedy discards learned measurements, so it is named, not applied. The
 // ceiling comes from the live daemon; with none running, the raw core count
 // stands in (a higher bar, so absence of the daemon never over-flags).
-func diagnosePoisonedProfiles(ctx context.Context, st *store.Store, home, selfVersion string, report *DoctorReport) error {
+func diagnosePoisonedProfiles(ctx context.Context, st *store.Store, queueState wingwire.QueueState, queueRead bool, report *DoctorReport) error {
 	profiles, err := st.ListPipelineProfiles(ctx, "")
 	if err != nil {
 		return err
 	}
-	grantable := grantableCores(ctx, home, selfVersion)
+	grantable := grantableCores(queueState, queueRead)
 	for _, prof := range profiles {
 		if prof.NodeID != "" || !capacity.FloorPoisoned(&prof, grantable) {
 			continue
@@ -535,10 +903,9 @@ func diagnosePoisonedProfiles(ctx context.Context, st *store.Store, home, selfVe
 // grantableCores is the largest CPU charge the local daemon grants a single
 // run on an idle box (capacity minus its reserve), else the machine's core
 // count when no daemon answers.
-func grantableCores(ctx context.Context, home, selfVersion string) float64 {
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home, Version: selfVersion})
-	if err == nil {
-		for _, r := range qs.Resources {
+func grantableCores(queueState wingwire.QueueState, queueRead bool) float64 {
+	if queueRead {
+		for _, r := range queueState.Resources {
 			if r.Key == "cores" && r.Capacity > r.Reserved {
 				return r.Capacity - r.Reserved
 			}
@@ -615,12 +982,12 @@ func probeDaemon(ctx context.Context, home string) DoctorDaemon {
 	}
 }
 
-func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report *DoctorReport) {
+func diagnoseDaemonHealth(selfVersion string, queueState wingwire.QueueState, queueRead bool, report *DoctorReport) {
 	info := wingdclient.DaemonInfo{
 		BinaryVersion: report.Daemon.Version,
 		ProtocolMajor: report.Daemon.ProtocolMajor,
 	}
-	if !report.Daemon.Reachable {
+	if report.Daemon.Version == "" && report.Daemon.ProtocolMajor == 0 {
 		return
 	}
 	if versionSkewed(selfVersion, info.BinaryVersion) {
@@ -628,15 +995,14 @@ func diagnoseDaemonHealth(ctx context.Context, home, selfVersion string, report 
 	}
 	diagnoseLockedOutRepos(info.ProtocolMajor, info.BinaryVersion, wingwire.ReleasedProtocolFloors(), report)
 
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home, Version: selfVersion})
-	if err != nil {
+	if !queueRead {
 		return
 	}
-	report.MachineBudget = machineBudget(qs)
-	if qs.Events == nil {
+	report.MachineBudget = machineBudget(queueState)
+	if queueState.Events == nil {
 		return
 	}
-	for _, r := range qs.Events.Rejections {
+	for _, r := range queueState.Events.Rejections {
 		if r.Count >= doctorRejectionPatternThreshold {
 			report.AdmissionRejections = append(report.AdmissionRejections,
 				DoctorRejection{Cause: r.Cause, Count: r.Count})
@@ -773,19 +1139,32 @@ func rejectionExplanation(cause string) string {
 // liveDaemonRuns returns the set of run ids the local admission daemon is
 // holding or queueing, so orphan detection never finalizes a run the daemon
 // still tracks. An absent daemon means no live leases, so the set is empty.
-func liveDaemonRuns(ctx context.Context, home, selfVersion string) map[string]struct{} {
+func liveDaemonRuns(queueState wingwire.QueueState, queueRead bool) map[string]struct{} {
 	live := map[string]struct{}{}
-	qs, err := wingdclient.Query(ctx, wingdclient.Options{Home: home, Version: selfVersion})
-	if err != nil {
+	if !queueRead {
 		return live
 	}
-	for _, h := range qs.Holders {
+	for _, h := range queueState.Holders {
 		live[h.RunID] = struct{}{}
 	}
-	for _, w := range qs.Waiters {
+	for _, w := range queueState.Waiters {
 		live[w.RunID] = struct{}{}
 	}
 	return live
+}
+
+func probeDaemonQueue(ctx context.Context, report *DoctorReport) (wingwire.QueueState, bool) {
+	if !report.Daemon.Reachable {
+		return wingwire.QueueState{}, false
+	}
+	queueState, err := wingdclient.ProbeQueue(ctx, report.Daemon.Socket)
+	if err == nil {
+		return queueState, true
+	}
+	report.Daemon.Reachable = false
+	report.Daemon.State = ReachUnreachable
+	report.Daemon.Detail = "daemon handshake succeeded but its queue state could not be read: " + err.Error()
+	return wingwire.QueueState{}, false
 }
 
 // diagnoseOrphanRuns finalizes run rows still marked running whose process is
@@ -831,8 +1210,7 @@ func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive, legacy
 	return nil
 }
 
-func diagnoseLegacyBoxSlots(p paths.Paths, holders []boxslot.Holder, dryRun bool, report *DoctorReport) error {
-	dir := p.BoxSlotDir()
+func diagnoseLegacyBoxSlots(boxRoot *os.Root, displayPath string, holders []boxslot.Holder, dryRun bool, report *DoctorReport) error {
 	for _, h := range holders {
 		if h.Live {
 			report.LiveLegacyHolders = append(report.LiveLegacyHolders, DoctorLegacyHolder{
@@ -843,36 +1221,48 @@ func diagnoseLegacyBoxSlots(p paths.Paths, holders []boxslot.Holder, dryRun bool
 	if len(report.LiveLegacyHolders) > 0 {
 		return nil
 	}
+	if boxRoot == nil {
+		return nil
+	}
 	if dryRun {
-		n, err := countDirFiles(dir)
+		n, err := countRootFiles(boxRoot)
 		if err != nil {
 			return err
 		}
 		report.LegacyBoxSlotFilesRemoved = n
 		return nil
 	}
-	removed, live, err := boxslot.PurgeIfIdle(dir)
+	removed, live, err := boxslot.PurgeIfIdleInRoot(boxRoot, displayPath)
 	if err != nil {
 		return err
 	}
 	if len(live) > 0 {
+		for _, h := range live {
+			report.LiveLegacyHolders = append(report.LiveLegacyHolders, DoctorLegacyHolder{
+				PID: h.PID, RunID: h.RunID, Lock: h.Path,
+			})
+		}
 		return nil
 	}
 	report.LegacyBoxSlotFilesRemoved = removed
 	return nil
 }
 
-func countDirFiles(dir string) (int, error) {
-	entries, err := os.ReadDir(dir)
+func countRootFiles(root *os.Root) (int, error) {
+	dir, err := root.Open(".")
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return 0, nil
-		}
 		return 0, err
+	}
+	entries, readErr := dir.ReadDir(-1)
+	if err := dir.Close(); err != nil && readErr == nil {
+		readErr = err
+	}
+	if readErr != nil {
+		return 0, readErr
 	}
 	n := 0
 	for _, e := range entries {
-		if !e.IsDir() {
+		if !e.IsDir() && e.Name() != "coord.lock" {
 			n++
 		}
 	}
@@ -896,13 +1286,20 @@ func diagnoseDeadConcurrency(ctx context.Context, st *store.Store, dryRun bool, 
 	return nil
 }
 
-func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, p paths.Paths, dryRun bool, report *DoctorReport) error {
-	entries, err := os.ReadDir(p.RunsDir())
+func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, runsRoot *os.Root, dryRun bool, report *DoctorReport) error {
+	if runsRoot == nil {
+		return nil
+	}
+	dir, err := runsRoot.Open(".")
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
 		return err
+	}
+	entries, readErr := dir.ReadDir(-1)
+	if err := dir.Close(); err != nil && readErr == nil {
+		readErr = err
+	}
+	if readErr != nil {
+		return readErr
 	}
 	for _, e := range entries {
 		if !e.IsDir() {
@@ -919,7 +1316,7 @@ func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, p paths.Paths
 		if dryRun {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(p.RunsDir(), e.Name())); err != nil {
+		if err := runsRoot.RemoveAll(e.Name()); err != nil {
 			return err
 		}
 	}
@@ -944,6 +1341,12 @@ func RenderDoctor(w io.Writer, r DoctorReport, format, legacyLine string) error 
 
 func renderDoctorPlain(w io.Writer, r DoctorReport) error {
 	fmt.Fprintf(w, "daemon\t%s\n", r.Daemon.State)
+	fmt.Fprintf(w, "permission_repairs\t%d\n", len(r.PermissionRepairs))
+	permissionUnverified := 0
+	if r.PermissionAuditUnverified {
+		permissionUnverified = 1
+	}
+	fmt.Fprintf(w, "permission_audit_unverified\t%d\n", permissionUnverified)
 	fmt.Fprintf(w, "orphaned_runs\t%d\n", len(r.OrphanedRuns))
 	fmt.Fprintf(w, "legacy_box_slot_files_removed\t%d\n", r.LegacyBoxSlotFilesRemoved)
 	fmt.Fprintf(w, "live_legacy_holders\t%d\n", len(r.LiveLegacyHolders))
@@ -1016,6 +1419,13 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	renderInstallConflict(w, r)
 	renderDaemonSection(w, r)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
+	if n := len(r.PermissionRepairs); n > 0 {
+		permissionVerb := "tightened"
+		if r.DryRun {
+			permissionVerb = "found"
+		}
+		fmt.Fprintf(tw, "private paths %s\t%d\n", permissionVerb, n)
+	}
 	if n := len(r.OrphanedRuns); n > 0 {
 		fmt.Fprintf(tw, "orphaned runs finalized\t%d\n", n)
 	}
@@ -1030,6 +1440,15 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 		fmt.Fprintf(tw, "dangling run directories %s\t%d\n", verb, n)
 	}
 	_ = tw.Flush()
+	if len(r.PermissionRepairs) > 0 {
+		fmt.Fprintln(w, "\npermissions:")
+		for _, change := range r.PermissionRepairs {
+			fmt.Fprintf(w, "  %q %s -> %s\n", change.Path, change.Before, change.After)
+		}
+	}
+	if r.PermissionAuditUnverified {
+		fmt.Fprintln(w, "\nwarning: local file permissions were not verified -- Windows access is governed by DACLs, which this doctor check cannot inspect or repair")
+	}
 
 	for _, rej := range r.AdmissionRejections {
 		fmt.Fprintf(w, "\nwarning: %d admission request(s) rejected as invalid (%s)\n  %s\n",

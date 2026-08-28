@@ -17,6 +17,7 @@ import (
 
 	flag "github.com/spf13/pflag"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
@@ -235,7 +236,7 @@ func materializeLocalRefs(ctx context.Context, st *store.Store, refsDir, runID s
 	if len(deps) == 0 {
 		return nil
 	}
-	if err := os.MkdirAll(refsDir, 0o755); err != nil {
+	if err := fssecure.EnsureDir(refsDir); err != nil {
 		return err
 	}
 	for _, dep := range deps {
@@ -251,7 +252,7 @@ func materializeLocalRefs(ctx context.Context, st *store.Store, refsDir, runID s
 		if len(body) == 0 {
 			body = []byte("null")
 		}
-		if err := os.WriteFile(filepath.Join(refsDir, dep+".json"), body, 0o644); err != nil {
+		if err := fssecure.WriteFile(filepath.Join(refsDir, dep+".json"), body); err != nil {
 			return err
 		}
 	}

@@ -21,6 +21,7 @@ import (
 	flag "github.com/spf13/pflag"
 	"golang.org/x/mod/semver"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 	"github.com/sparkwing-dev/sparkwing/internal/web"
 	"github.com/sparkwing-dev/sparkwing/pkg/localws"
@@ -84,7 +85,7 @@ func resolveDashboardPaths(homeOverride string) (dashboardPaths, error) {
 		}
 		home = paths.Root
 	}
-	if err := os.MkdirAll(home, 0o755); err != nil {
+	if err := fssecure.EnsureDir(home); err != nil {
 		return dashboardPaths{}, fmt.Errorf("mkdir %s: %w", home, err)
 	}
 	return dashboardPaths{
@@ -177,7 +178,7 @@ func runDashboardStart(args []string) error {
 		return fmt.Errorf("address %s already in use by %s; free it or pass --addr to bind elsewhere", addr, holder)
 	}
 
-	logF, err := os.OpenFile(dp.log, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
+	logF, err := fssecure.OpenFile(dp.log, os.O_CREATE|os.O_APPEND|os.O_WRONLY)
 	if err != nil {
 		return fmt.Errorf("open log %s: %w", dp.log, err)
 	}
@@ -355,7 +356,7 @@ func runDashboardSupervise(args []string) error {
 		return errors.New("__dashboard-supervise: --home and --pid required")
 	}
 
-	if err := os.WriteFile(*pidPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+	if err := fssecure.WriteFile(*pidPath, []byte(strconv.Itoa(os.Getpid())+"\n")); err != nil {
 		return fmt.Errorf("write pid: %w", err)
 	}
 	defer func() { _ = os.Remove(*pidPath) }()

@@ -17,14 +17,17 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 )
 
 // Server handles HTTP requests against a filesystem-backed log store.
 type Server struct {
-	root   string
-	logger *slog.Logger
-	mu     sync.Mutex // guards concurrent opens of the same file
+	root     string
+	logger   *slog.Logger
+	dirMode  os.FileMode
+	fileMode os.FileMode
+	mu       sync.Mutex // guards concurrent opens of the same file
 	// Auth is whoami-based: forward the incoming Authorization header
 	// to the controller's /api/v1/auth/whoami endpoint, cache the
 	// resolved principal, enforce per-route scope checks. Empty
@@ -38,16 +41,56 @@ type Server struct {
 // New constructs a Server rooted at dir (created if absent). A nil
 // logger uses slog.Default.
 func New(root string, logger *slog.Logger) (*Server, error) {
+	return newServer(root, logger, false)
+}
+
+// NewPrivate constructs a Server whose directories and log files are
+// owner-only. It is for Sparkwing's default local home; operator-selected
+// shared and PVC roots should use [New].
+func NewPrivate(root string, logger *slog.Logger) (*Server, error) {
+	return newServer(root, logger, true)
+}
+
+func newServer(root string, logger *slog.Logger, private bool) (*Server, error) {
 	if root == "" {
 		return nil, errors.New("logs: root is required")
 	}
-	if err := os.MkdirAll(root, 0o755); err != nil {
+	dirMode, fileMode := os.FileMode(0o755), os.FileMode(0o644)
+	if private {
+		dirMode, fileMode = fssecure.DirMode, fssecure.FileMode
+	}
+	if err := ensureServerDir(root, dirMode); err != nil {
 		return nil, fmt.Errorf("logs: mkdir %s: %w", root, err)
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Server{root: root, logger: logger}, nil
+	return &Server{root: root, logger: logger, dirMode: dirMode, fileMode: fileMode}, nil
+}
+
+func ensureServerDir(path string, mode os.FileMode) error {
+	if mode == fssecure.DirMode {
+		return fssecure.EnsureDir(path)
+	}
+	return os.MkdirAll(path, mode)
+}
+
+func (s *Server) ensureDir(path string) error {
+	return ensureServerDir(path, s.dirMode)
+}
+
+func (s *Server) writeFile(path string, body []byte) error {
+	if s.fileMode == fssecure.FileMode {
+		return fssecure.WriteFile(path, body)
+	}
+	return os.WriteFile(path, body, s.fileMode)
+}
+
+func (s *Server) openAppend(path string) (*os.File, error) {
+	if s.fileMode == fssecure.FileMode {
+		return fssecure.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, s.fileMode)
 }
 
 // WithControllerAuth wires the controller's /api/v1/auth/whoami
@@ -315,7 +358,23 @@ func Serve(ctx context.Context, root, addr string, logger *slog.Logger) error {
 // wired against the given controller URL. Empty controllerURL = auth
 // fully disabled (laptop-local).
 func ServeWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error {
-	s, err := New(root, logger)
+	return serveWithTokens(ctx, root, addr, controllerURL, logger, false)
+}
+
+// ServePrivateWithTokens serves an owner-only local log root. Operator-chosen
+// shared and PVC roots should use [ServeWithTokens].
+func ServePrivateWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger) error {
+	return serveWithTokens(ctx, root, addr, controllerURL, logger, true)
+}
+
+func serveWithTokens(ctx context.Context, root, addr, controllerURL string, logger *slog.Logger, private bool) error {
+	var s *Server
+	var err error
+	if private {
+		s, err = NewPrivate(root, logger)
+	} else {
+		s, err = New(root, logger)
+	}
 	if err != nil {
 		return err
 	}
@@ -366,7 +425,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	var problems []string
 
 	canary := filepath.Join(s.root, ".health-check")
-	if err := os.WriteFile(canary, []byte("ok"), 0o644); err != nil {
+	if err := s.writeFile(canary, []byte("ok")); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		fmt.Fprintf(w, `{"status":"degraded","problems":["root: %s"]}`,
@@ -453,7 +512,7 @@ func (s *Server) handleAppend(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := s.openAppend(path)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -818,7 +877,7 @@ func (s *Server) pathFor(runID, nodeID string) (string, error) {
 		return "", fmt.Errorf("nodeID: %w", err)
 	}
 	dir := filepath.Join(s.root, "runs", runID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := s.ensureDir(dir); err != nil {
 		return "", err
 	}
 	return filepath.Join(dir, nodeID+".log"), nil

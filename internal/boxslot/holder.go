@@ -77,6 +77,58 @@ func Holders(lockDir string) ([]Holder, error) {
 	return holders, nil
 }
 
+// HoldersInRoot reports holder markers through an already-open directory.
+// The root keeps every read and flock probe attached to the directory the
+// caller validated even if its pathname is renamed or replaced concurrently.
+func HoldersInRoot(root *os.Root, displayPath string) ([]Holder, error) {
+	dir, err := root.Open(".")
+	if err != nil {
+		return nil, err
+	}
+	entries, readErr := dir.ReadDir(-1)
+	if err := dir.Close(); err != nil && readErr == nil {
+		readErr = err
+	}
+	if readErr != nil {
+		return nil, readErr
+	}
+	var holders []Holder
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), holderPrefix) {
+			continue
+		}
+		h := Holder{Path: filepath.Join(displayPath, e.Name())}
+		h.PID, h.ClaimedAt, _ = parseHolderName(e.Name())
+		if b, err := root.ReadFile(e.Name()); err == nil {
+			h.RunID = lastRunLine(b)
+		}
+		f, err := root.OpenFile(e.Name(), os.O_RDWR, 0)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, err
+		}
+		live, probeErr := probeHolderLiveFile(f)
+		closeErr := f.Close()
+		if probeErr != nil {
+			return nil, probeErr
+		}
+		if closeErr != nil {
+			return nil, closeErr
+		}
+		h.Live = live
+		holders = append(holders, h)
+	}
+	sort.Slice(holders, func(i, j int) bool {
+		if !holders[i].ClaimedAt.Equal(holders[j].ClaimedAt) {
+			return holders[i].ClaimedAt.Before(holders[j].ClaimedAt)
+		}
+		return holders[i].Path < holders[j].Path
+	})
+	return holders, nil
+}
+
 // lastRunLine extracts the run id from the last run= line of a holder
 // marker's contents; empty when the marker was never annotated.
 func lastRunLine(b []byte) string {
