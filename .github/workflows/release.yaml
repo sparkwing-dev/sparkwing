@@ -26,17 +26,55 @@
 
 name: release
 concurrency:
-  group: release-${{ github.ref_name }}
+  group: release-${{ inputs.tag || github.ref_name }}
   cancel-in-progress: false
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to rebuild after a publication-only failure
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
+  validate-tag:
+    name: Validate immutable release tag
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          tag_line="$(git ls-remote --exit-code --tags \
+            https://github.com/${{ github.repository }}.git "refs/tags/$TAG^{}")"
+          test -n "$tag_line"
+          if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+            exit 0
+          fi
+          tag_sha="${tag_line%%$'\t'*}"
+          verified=false
+          while read -r run_id; do
+            if gh api "repos/${{ github.repository }}/actions/runs/$run_id/jobs?per_page=100" \
+              --jq '[.jobs[] | select(.name | startswith("Verify tagged source / Canonical /")) | select(.conclusion == "success")] | length == 2' \
+              | grep -qx true; then
+              verified=true
+              break
+            fi
+          done < <(gh api --method GET "repos/${{ github.repository }}/actions/runs?head_sha=$tag_sha&event=push&per_page=20" \
+            --jq '.workflow_runs[] | select(.path == ".github/workflows/release.yaml") | .id')
+          test "$verified" = true
+
   canonical:
+    if: github.event_name == 'push'
     name: Verify tagged source
     uses: ./.github/workflows/canonical-gates.yaml
     permissions:
@@ -48,7 +86,8 @@ jobs:
     # gate then refuses to run on partial results, so the user sees a
     # clean "build failed; release not created" outcome rather than a
     # release with missing assets.
-    needs: canonical
+    needs: [validate-tag, canonical]
+    if: ${{ always() && needs.validate-tag.result == 'success' && (needs.canonical.result == 'success' || github.event_name == 'workflow_dispatch') }}
     strategy:
       fail-fast: false
       matrix:
@@ -70,17 +109,17 @@ jobs:
     runs-on: ${{ matrix.goos == 'darwin' && 'macos-latest' || 'ubuntu-latest' }}
     steps:
       # Pin the checkout to the tag's exact commit. Every job in this
-      # workflow checks out the same github.sha, so a version string
+      # workflow checks out the same resolved tag, so a version string
       # implies one identical tree across all assets and matches what
       # `go install ...@tag` compiles -- no provenance drift.
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.tag || github.sha }}
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.6"
           cache-dependency-path: go.sum
 
       # actions/setup-go@v5 caches ~/go/pkg/mod (module deps); this
@@ -123,10 +162,9 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
           BIN: ${{ matrix.binary }}
-          # GitHub injects ${{ github.ref_name }} as the tag name;
-          # keep it in an env so the run script reads it as a normal
-          # bash var rather than YAML interpolation in a heredoc.
-          TAG: ${{ github.ref_name }}
+          # Keep the resolved tag in an env var so the run script reads it as
+          # a normal bash value rather than YAML interpolation in a heredoc.
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           mkdir -p dist
@@ -177,11 +215,11 @@ jobs:
       # tagged commit whose matrix artifacts are assembled below.
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.tag || github.sha }}
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.6"
           cache-dependency-path: go.sum
 
       # merge-multiple: true flattens every artifact into one dist/
@@ -248,11 +286,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.tag || github.sha }}
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.6"
           cache-dependency-path: go.sum
 
       - name: Download scanned release binaries
@@ -289,7 +327,7 @@ jobs:
         # than the tag -- exactly the schema-skew failure mode. Fails
         # the release before any asset reaches the public page.
         # linux/amd64 is the one asset the runner can execute; every
-        # asset builds from the same pinned github.sha, and the schema
+        # asset builds from the same pinned tag, and the schema
         # constant is platform-independent, so this one is representative.
         run: |
           set -euo pipefail
@@ -306,18 +344,21 @@ jobs:
         # that aren't user-visible). Fails the workflow if the
         # section is missing -- catches a missed [Unreleased] -> [v*]
         # rename before adopters ever see an empty release page.
+        env:
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          bash bin/extract-changelog-section.sh "${GITHUB_REF_NAME}" CHANGELOG.md > release-notes.md
+          bash bin/extract-changelog-section.sh "$TAG" CHANGELOG.md > release-notes.md
           echo "==> release notes:"
           cat release-notes.md
 
       - name: Publish complete immutable release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${GITHUB_REF_NAME}"
+          tag="$TAG"
           # A published tag and its signed assets are immutable. Build
           # the complete set privately, verify it, then publish once.
           if gh release view "$tag" >/dev/null 2>&1; then
@@ -352,7 +393,7 @@ jobs:
           gh release view "$tag"
 
   # Build and scan multi-arch container images for the cluster-side
-  # binaries on every v* tag push. Each matrix cell stages one untagged
+  # binaries for each release. Each matrix cell stages one untagged
   # digest in GHCR; no version or latest tag is published until every
   # image and architecture is clean.
   #
@@ -368,7 +409,8 @@ jobs:
   # `cosign verify --certificate-identity-regexp ...` can attest.
   build-images:
     name: Build & scan container images
-    needs: canonical
+    needs: [validate-tag, canonical]
+    if: ${{ always() && needs.validate-tag.result == 'success' && (needs.canonical.result == 'success' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -388,11 +430,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.tag || github.sha }}
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.26"
+          go-version: "1.26.6"
           cache-dependency-path: go.sum
 
       - name: Setup Node (dashboard image)
@@ -425,7 +467,7 @@ jobs:
         run: GOWORK=off go run ./bin/check-vulnerability-waivers.go .trivyignore.yaml
 
       # metadata-action emits the full tag list:
-      #   - type=ref,event=tag       -> ghcr.io/.../<bin>:v1.2.3
+      #   - type=raw,value=<tag>     -> ghcr.io/.../<bin>:v1.2.3
       #   - type=raw,value=latest    -> ghcr.io/.../<bin>:latest
       # `:latest` is gated on the tag NOT containing a hyphen so
       # pre-release tags (v1.2.3-rc.1) don't clobber the stable
@@ -436,8 +478,8 @@ jobs:
         with:
           images: ghcr.io/sparkwing-dev/${{ matrix.binary }}
           tags: |
-            type=ref,event=tag
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+            type=raw,value=${{ inputs.tag || github.ref_name }}
+            type=raw,value=latest,enable=${{ !contains(inputs.tag || github.ref_name, '-') }}
 
       - name: Build and push image
         id: build
@@ -450,7 +492,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             BINARY=${{ matrix.binary }}
-            SPARKWING_VERSION=${{ github.ref_name }}
+            SPARKWING_VERSION=${{ inputs.tag || github.ref_name }}
           cache-from: type=gha,scope=${{ matrix.binary }}
           cache-to: type=gha,mode=max,scope=${{ matrix.binary }}
 
@@ -548,7 +590,7 @@ jobs:
 
       - name: Publish scanned image tags
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           binaries=(

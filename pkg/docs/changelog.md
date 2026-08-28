@@ -51,6 +51,10 @@ code change to unlock.
 
 ### Fixed
 
+- **release:** Release builds now pin Go 1.26.6 across every binary and image
+  runner. Maintainers can rebuild an existing immutable tag after a
+  publication-only failure; the recovery path validates and checks out that
+  exact tag while preserving the original canonical-gate result.
 - **orchestrator:** The default dispatch watchdog now accounts for declared
   node timeouts, retry attempts, retry backoff, dependency paths, and failure
   recovery before classifying a run as wedged. Explicit
