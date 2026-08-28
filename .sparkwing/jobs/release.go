@@ -132,7 +132,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	gatePrePush := sparkwing.Job(plan, "gate-pre-push", func(ctx context.Context) error {
 		return (&PrePush{AllowReleaseLineSelfReplace: true}).run(ctx)
 	})
-	gatePrePush.Needs(clean)
+	gatePrePush.Needs(clean, gatePreCommit)
 
 	gateTemplates := sparkwing.Job(plan, "gate-template-verify", func(ctx context.Context) error {
 		_, err := sparkwing.RunAndAwait[TemplateVerifySummary, sparkwing.NoInputs](
