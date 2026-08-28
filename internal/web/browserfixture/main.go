@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -21,6 +22,53 @@ import (
 )
 
 const serviceToken = "browser-fixture-service-token"
+
+type fixtureConfig struct {
+	home   string
+	webOut string
+}
+
+type singleValue struct {
+	name  string
+	value string
+	set   bool
+}
+
+func (v *singleValue) String() string { return v.value }
+
+func (v *singleValue) Set(value string) error {
+	if v.set {
+		return fmt.Errorf("%s may only be set once", v.name)
+	}
+	if value == "" {
+		return fmt.Errorf("%s requires a non-empty value", v.name)
+	}
+	v.value = value
+	v.set = true
+	return nil
+}
+
+func parseFixtureConfig(args []string) (fixtureConfig, error) {
+	flags := flag.NewFlagSet("browserfixture", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	home := singleValue{name: "--fixture-home"}
+	webOut := singleValue{name: "--web-out"}
+	flags.Var(&home, "fixture-home", "temporary fixture state directory")
+	flags.Var(&webOut, "web-out", "dashboard static export directory")
+	if err := flags.Parse(args); err != nil {
+		return fixtureConfig{}, fmt.Errorf("parse browser fixture flags: %w", err)
+	}
+	if flags.NArg() != 0 {
+		return fixtureConfig{}, fmt.Errorf("unexpected browser fixture argument %q", flags.Arg(0))
+	}
+	if !home.set {
+		return fixtureConfig{}, fmt.Errorf("--fixture-home is required")
+	}
+	if !webOut.set {
+		return fixtureConfig{}, fmt.Errorf("--web-out is required")
+	}
+	return fixtureConfig{home: home.value, webOut: webOut.value}, nil
+}
 
 type controllerState struct {
 	sync.Mutex
@@ -139,19 +187,14 @@ func listen(handler http.Handler) (net.Listener, *http.Server, error) {
 }
 
 func main() {
-	root := flag.String("fixture-home", "", "temporary fixture state directory")
-	webOutput := flag.String("web-out", "", "dashboard static export directory")
-	flag.Parse()
-	if *root == "" {
-		log.Fatal("--fixture-home is required")
-	}
-	if *webOutput == "" {
-		log.Fatal("--web-out is required")
-	}
-	if err := os.MkdirAll(*root, 0o700); err != nil {
+	config, err := parseFixtureConfig(os.Args[1:])
+	if err != nil {
 		log.Fatal(err)
 	}
-	dashboardPaths := paths.PathsAt(filepath.Join(*root, "home"))
+	if err := os.MkdirAll(config.home, 0o700); err != nil {
+		log.Fatal(err)
+	}
+	dashboardPaths := paths.PathsAt(filepath.Join(config.home, "home"))
 	if err := dashboardPaths.EnsureRoot(); err != nil {
 		log.Fatal(err)
 	}
@@ -175,7 +218,7 @@ func main() {
 		Token:         serviceToken,
 		Version:       "auth-browser-fixture",
 		RequireLogin:  true,
-	}, os.DirFS(*webOutput))
+	}, os.DirFS(config.webOut))
 	dashboardListener, dashboardServer, err := listen(dashboardHandler)
 	if err != nil {
 		_ = controllerServer.Close()
