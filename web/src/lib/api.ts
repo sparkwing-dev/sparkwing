@@ -1004,6 +1004,7 @@ export async function getJob(): Promise<Job | null> {
 }
 
 export async function getJobMetrics(_jobId?: string): Promise<NodeMetrics> {
+  void _jobId;
   return { points: [] };
 }
 

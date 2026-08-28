@@ -55,11 +55,15 @@ export default function QueuePage() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refresh();
+    });
     const i = window.setInterval(() => {
       if (!document.hidden) refresh();
     }, POLL_MS);
     return () => {
+      cancelled = true;
       window.clearInterval(i);
       if (pulseTimer.current) clearTimeout(pulseTimer.current);
     };

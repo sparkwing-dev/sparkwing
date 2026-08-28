@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { type Job, type Agent } from "@/lib/api";
 import AgentUtilization from "@/components/AgentUtilization";
 import { ResponsiveContainer, BarChart, Bar, Tooltip } from "recharts";
@@ -41,7 +42,11 @@ function Sparkline({
   buckets?: number;
   windowHours?: number;
 }) {
-  const now = Date.now();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
   const windowMs = windowHours * 3600 * 1000;
   const bucketMs = windowMs / buckets;
 
@@ -172,7 +177,6 @@ export default function MetricsPanel({
   const utilized = agents.reduce((s, a) => s + (a.active_jobs?.length || 0), 0);
 
   const pipelineStats = computePipelineStats(topLevel);
-  const maxPipelineTotal = Math.max(1, ...pipelineStats.map((p) => p.total));
 
   return (
     <div className="space-y-4">

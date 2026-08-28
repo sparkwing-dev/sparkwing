@@ -26,6 +26,10 @@ those directories for 14 days when the browser suite fails. The suite runs
 deterministic API fixtures against OS-assigned loopback ports; it needs no
 controller, hosted secret, or Kubernetes cluster.
 
+`sparkwing run pre-commit` runs the unit and full ESLint suites in parallel,
+then the production build and browser smoke suite. Install the locked dashboard
+dependencies before running the local gate; hosted CI runs `npm ci` itself.
+
 ## How this ships
 
 `next build` static-exports the dashboard to `web/out/`. `bash

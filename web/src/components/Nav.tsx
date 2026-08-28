@@ -157,11 +157,17 @@ function emptyLogoutCSRFToken() {
 function VersionPill() {
   const [version, setVersion] = useState<string>("");
   useEffect(() => {
-    const v = (window as unknown as { __SPARKWING_VERSION__?: string })
-      .__SPARKWING_VERSION__;
-    if (v && v !== "__SPARKWING_VERSION_MARKER__") {
-      setVersion(v);
-    }
+    let cancelled = false;
+    queueMicrotask(() => {
+      const v = (window as unknown as { __SPARKWING_VERSION__?: string })
+        .__SPARKWING_VERSION__;
+      if (!cancelled && v && v !== "__SPARKWING_VERSION_MARKER__") {
+        setVersion(v);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
   if (!version) return null;
   return (

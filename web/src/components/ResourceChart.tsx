@@ -59,11 +59,20 @@ export default function ResourceChart({
   }, [runID, nodeID]);
 
   useEffect(() => {
-    refresh();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refresh();
+    });
     if (isRunning) {
       const i = setInterval(refresh, 5_000);
-      return () => clearInterval(i);
+      return () => {
+        cancelled = true;
+        clearInterval(i);
+      };
     }
+    return () => {
+      cancelled = true;
+    };
   }, [refresh, isRunning]);
 
   if (!metrics || metrics.points.length < 2) return null;

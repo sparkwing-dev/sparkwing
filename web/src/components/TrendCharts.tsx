@@ -58,9 +58,15 @@ export default function TrendCharts({
   }, [pipeline, hours]);
 
   useEffect(() => {
-    refresh();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refresh();
+    });
     const i = setInterval(refresh, 30_000);
-    return () => clearInterval(i);
+    return () => {
+      cancelled = true;
+      clearInterval(i);
+    };
   }, [refresh]);
 
   if (points.length < 2) {

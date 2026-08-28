@@ -29,8 +29,8 @@ import (
 // embedded copies) have drifted, so an edit to either source can't be
 // committed without re-running bin/sync-docs.sh; the comment
 // check fails when the staged diff adds a comment the policy disallows;
-// the frontend chain runs the dashboard's TypeScript unit, production build,
-// browser-test lint, and browser smoke suites;
+// the frontend chain runs the dashboard's TypeScript unit, full ESLint,
+// production build, and browser smoke suites;
 // the home-resolution check fails when product code resolves the
 // sparkwing home itself -- reading SPARKWING_HOME, or building the path
 // from a home directory -- instead of through
@@ -45,7 +45,7 @@ func (PreCommit) ShortHelp() string {
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs the dashboard's TypeScript unit, production-build, browser-test lint, and Playwright browser-smoke suites, plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs the dashboard's TypeScript unit, full ESLint, production-build, and Playwright browser-smoke suites, plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -92,11 +92,10 @@ func boundedGoCommand(cpuCount int, verb, args string) string {
 // build and test establish.
 //
 // The seven policy and frontend roots stay parallel with the Go chain. In a
-// measured warm run, frontend-unit took 0.7s and frontend-browser-lint 2.2s;
-// their shared frontend-build successor took 4.5s, then frontend-browser took
-// 11.0s including the cached browser install and authenticated Go fixture.
-// That dependency chain avoids
-// testing a stale static export.
+// measured warm run, frontend-unit took 0.7s and frontend-lint 4.5s; their
+// shared frontend-build successor took 4.5s, then frontend-browser took 11.0s
+// including the cached browser install and authenticated Go fixture. That
+// dependency chain avoids testing a stale static export.
 func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.ParallelFailures(sparkwing.FailFast)
 	gofmtStep := sparkwing.Step(w, "gofmt", runGofmt)
@@ -111,8 +110,8 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "comments", checkComments)
 	sparkwing.Step(w, "home-resolution", checkHomeResolution)
 	frontendUnit := sparkwing.Step(w, "frontend-unit", runFrontendUnit)
-	frontendBrowserLint := sparkwing.Step(w, "frontend-browser-lint", runFrontendBrowserLint)
-	frontendBuild := sparkwing.Step(w, "frontend-build", runFrontendBuild).Needs(frontendUnit, frontendBrowserLint)
+	frontendLint := sparkwing.Step(w, "frontend-lint", runFrontendLint)
+	frontendBuild := sparkwing.Step(w, "frontend-build", runFrontendBuild).Needs(frontendUnit, frontendLint)
 	sparkwing.Step(w, "frontend-browser", runFrontendBrowser).Needs(frontendBuild)
 	return nil, nil
 }
@@ -124,9 +123,9 @@ func runFrontendUnit(ctx context.Context) error {
 	return nil
 }
 
-func runFrontendBrowserLint(ctx context.Context) error {
-	if _, err := sparkwing.Bash(ctx, "npm --prefix web run lint:browser").Run(); err != nil {
-		return fmt.Errorf("frontend browser-test lint: %w", err)
+func runFrontendLint(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx, "npm --prefix web run lint").Run(); err != nil {
+		return fmt.Errorf("frontend ESLint suite: %w", err)
 	}
 	return nil
 }

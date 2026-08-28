@@ -49,9 +49,15 @@ export default function ServiceHealth() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refresh();
+    });
     const i = setInterval(refresh, 15_000);
-    return () => clearInterval(i);
+    return () => {
+      cancelled = true;
+      clearInterval(i);
+    };
   }, [refresh]);
 
   if (services.length === 0) {

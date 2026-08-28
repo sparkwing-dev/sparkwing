@@ -158,12 +158,19 @@ export default function ExecutionWaterfall({
   // the step bars reveal without manual toggle.
   useEffect(() => {
     if (!focusStep || !focusNode) return;
-    setExpanded((prev) => {
-      if (prev.has(focusNode)) return prev;
-      const next = new Set(prev);
-      next.add(focusNode);
-      return next;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setExpanded((prev) => {
+        if (prev.has(focusNode)) return prev;
+        const next = new Set(prev);
+        next.add(focusNode);
+        return next;
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [focusStep, focusNode]);
 
   const toggle = (id: string) =>

@@ -60,11 +60,11 @@ import {
   getRuns,
   parseHolder,
   retryRun,
-  runDurationMs,
   searchRunLogs,
   searchRunsGrep,
 } from "@/lib/api";
 import { useRunEvents } from "@/lib/useRunEvents";
+import { useCurrentTime } from "@/lib/useCurrentTime";
 import {
   fmtAgo,
   fmtAgoShort,
@@ -101,6 +101,7 @@ const POLL_MS = 2000;
 // it's belt-and-suspenders, not the primary signal.
 const DETAIL_FALLBACK_POLL_MS = 8000;
 const RUNS_WINDOW = 200;
+const EMPTY_NODES: RunNode[] = [];
 
 function statusDot(status: string): string {
   switch (status) {
@@ -154,19 +155,6 @@ function collectNodeAnnotations(
     out.push({ stepID: null, text: a });
   }
   return out;
-}
-
-function TimeAgo({ ts }: { ts: string }) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const i = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(i);
-  }, []);
-  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (sec < 60) return <span>-{sec}s</span>;
-  if (sec < 3600) return <span>-{Math.floor(sec / 60)}m</span>;
-  if (sec < 86_400) return <span>-{Math.floor(sec / 3600)}h</span>;
-  return <span>-{Math.floor(sec / 86_400)}d</span>;
 }
 
 function nodeDuration(n: RunNode): number {
@@ -389,6 +377,17 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     stepID: string | null;
     line: number;
   } | null>(null);
+  const consumePendingLogFocus = useCallback(
+    () => setPendingLogFocus(null),
+    [],
+  );
+  const adoptPendingLogFocus = useCallback(
+    (focus: { nodeID: string; stepID: string | null }) => {
+      setSelectedNode(focus.nodeID);
+      setSelectedStep(focus.stepID);
+    },
+    [],
+  );
   useEffect(() => {
     if (typeof window === "undefined") return;
     const raw = sessionStorage.getItem("sparkwing.searchResultFocus");
@@ -591,7 +590,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }, [selectedRun, topLevel, runs.length]);
 
   const run = detail?.run || null;
-  const nodes = detail?.nodes || [];
+  const nodes = detail?.nodes ?? EMPTY_NODES;
   const node = nodes.find((n) => n.id === selectedNode) || null;
   // Single source of truth for "which nodes did the orchestrator
   // rehydrate from a prior attempt." Computed once at the page
@@ -746,7 +745,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [selectNode]);
 
   // Scroll focused row into view when it changes via keyboard.
   useEffect(() => {
@@ -1164,7 +1163,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                   ? pendingLogFocus
                   : null
               }
-              onConsumePendingLogFocus={() => setPendingLogFocus(null)}
+              onAdoptPendingLogFocus={adoptPendingLogFocus}
+              onConsumePendingLogFocus={consumePendingLogFocus}
               reusedNodeIDs={reusedNodeIDs ?? undefined}
               reusedPriorRunID={reusedPriorRunID}
             />
@@ -1457,6 +1457,7 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     const params = new URLSearchParams(searchParams.toString());
     params.delete("view");
     params.set("run", m.run_id);
+    params.set("node", m.node_id);
     router.push(`/runs?${params.toString()}`);
   };
   const byRun = new Map<string, RunsGrepMatch[]>();
@@ -1682,12 +1683,19 @@ function NodesList({
     });
   useEffect(() => {
     if (!selectedStep || !selectedNode) return;
-    setExpandedNodes((prev) => {
-      if (prev.has(selectedNode)) return prev;
-      const next = new Set(prev);
-      next.add(selectedNode);
-      return next;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setExpandedNodes((prev) => {
+        if (prev.has(selectedNode)) return prev;
+        const next = new Set(prev);
+        next.add(selectedNode);
+        return next;
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedStep, selectedNode]);
 
   return (
@@ -1933,6 +1941,8 @@ function StepRow({
   selected?: boolean;
   onClick: () => void;
 }) {
+  const status = s.status;
+  const now = useCurrentTime(status === "running");
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (selected) {
@@ -1940,7 +1950,6 @@ function StepRow({
     }
   }, [selected]);
   const label = s.id.length > 22 ? s.id.slice(0, 21) + "…" : s.id;
-  const status = s.status;
   const dot =
     status === "passed"
       ? "bg-green-400"
@@ -1955,7 +1964,7 @@ function StepRow({
               : "bg-slate-600";
   let durMs = s.duration_ms ?? 0;
   if (!durMs && status === "running" && s.started_at) {
-    durMs = Math.max(0, Date.now() - new Date(s.started_at).getTime());
+    durMs = Math.max(0, now - new Date(s.started_at).getTime());
   }
   return (
     <div
@@ -2007,10 +2016,13 @@ const FullRunRow = memo(function FullRunRow({
   compact?: boolean;
   progress?: { done: number; total: number };
 }) {
-  if (compact) return <CompactFullRunRow r={r} ctx={ctx} progress={progress} />;
+  const now = useCurrentTime(!r.finished_at);
+  if (compact) {
+    return <CompactFullRunRow r={r} ctx={ctx} progress={progress} now={now} />;
+  }
   const startedMs = new Date(r.started_at).getTime();
   const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
-  const elapsedMs = (finishedMs || Date.now()) - startedMs;
+  const elapsedMs = (finishedMs || now) - startedMs;
   const sinceTs = r.finished_at || r.started_at;
   const repo = repoLabel(r);
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
@@ -2184,14 +2196,16 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
   r,
   ctx,
   progress,
+  now,
 }: {
   r: Run;
   ctx: FilterCtx;
   progress?: { done: number; total: number };
+  now: number;
 }) {
   const startedMs = new Date(r.started_at).getTime();
   const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
-  const elapsedMs = (finishedMs || Date.now()) - startedMs;
+  const elapsedMs = (finishedMs || now) - startedMs;
   const sinceTs = r.finished_at || r.started_at;
   const repo = repoLabel(r);
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
@@ -2277,48 +2291,6 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
   );
 });
 
-function CompactRunRow({ r }: { r: Run }) {
-  return (
-    <div className="flex items-center gap-2">
-      <Tooltip
-        content={
-          <>
-            {r.status}
-            {(() => {
-              const ms = runDurationMs(r);
-              return ms ? ` in ${fmtMs(ms)}` : "";
-            })()}
-          </>
-        }
-      >
-        <span
-          className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)}`}
-        />
-      </Tooltip>
-      <Tooltip
-        content={
-          <>
-            <span className="text-[var(--muted)]">Pipeline:</span> {r.pipeline}
-            <br />
-            <span className="text-[var(--muted)]">Repo:</span> {repoLabel(r)}
-            <br />
-            <span className="text-[var(--muted)]">Branch:</span>{" "}
-            {r.git_branch || "-"}
-            <br />
-            <span className="text-[var(--muted)]">ID:</span>{" "}
-            <span className="font-mono">{r.id}</span>
-          </>
-        }
-      >
-        <span className="text-xs text-violet-300 truncate">{r.pipeline}</span>
-      </Tooltip>
-      <span className="ml-auto shrink-0 text-[10px] font-mono text-[var(--muted)]">
-        <TimeAgo ts={r.started_at} />
-      </span>
-    </div>
-  );
-}
-
 // --- detail pane ---
 
 type TabKey = "logs" | "resources" | "dag" | "timeline" | "summary" | "setup";
@@ -2399,6 +2371,7 @@ function RunDetailPane({
   tab,
   setTab,
   pendingLogFocus,
+  onAdoptPendingLogFocus,
   onConsumePendingLogFocus,
   reusedNodeIDs,
   reusedPriorRunID,
@@ -2421,6 +2394,10 @@ function RunDetailPane({
     stepID: string | null;
     line: number;
   } | null;
+  onAdoptPendingLogFocus?: (focus: {
+    nodeID: string;
+    stepID: string | null;
+  }) => void;
   onConsumePendingLogFocus?: () => void;
   // Set of node ids the orchestrator rehydrated from a prior attempt
   // (drives the DAG REUSED pill + teal status dot). Computed at the
@@ -2429,13 +2406,7 @@ function RunDetailPane({
   reusedPriorRunID?: string | null;
 }) {
   const selected = node;
-  const selectedIsRunning =
-    !!selected && !selected.finished_at && selected.status !== "pending";
   const runIsActive = run.status === "running";
-  const isTerminal =
-    run.status === "success" ||
-    run.status === "failed" ||
-    run.status === "cancelled";
   // --- Top-level find (cross-pane) ---
   // Structured matches (nodes/steps/annotations) are computed
   // synchronously from data we already have in memory. Log matches
@@ -2450,20 +2421,32 @@ function RunDetailPane({
   const [findLogSearching, setFindLogSearching] = useState(false);
   useEffect(() => {
     const q = findQuery.trim();
+    let cancelled = false;
     if (q === "") {
-      setFindLogResults([]);
-      setFindLogTotal(0);
-      setFindLogSearching(false);
-      return;
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setFindLogResults([]);
+        setFindLogTotal(0);
+        setFindLogSearching(false);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
-    setFindLogSearching(true);
+    queueMicrotask(() => {
+      if (!cancelled) setFindLogSearching(true);
+    });
     const t = setTimeout(async () => {
       const resp = await searchRunLogs(run.id, q, 500);
+      if (cancelled) return;
       setFindLogResults(resp.results || []);
       setFindLogTotal(resp.total || 0);
       setFindLogSearching(false);
     }, 250);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [findQuery, run.id]);
   // Each find target is its own hit so the walker behaves like Ctrl-F
   // on the Summary view: cycle through every matching item, scrolling
@@ -2553,16 +2536,6 @@ function RunDetailPane({
     const set = new Set<string>();
     for (const h of findStructuredHits) {
       if (h.kind === "node-err") set.add(h.nodeID);
-    }
-    return set;
-  }, [findStructuredHits]);
-  // Keys: "<nodeID>::<stepID>" -- disambiguates step names reused across nodes.
-  const findMatchedSteps = useMemo(() => {
-    const set = new Set<string>();
-    for (const h of findStructuredHits) {
-      if (h.kind === "step" || h.kind === "step-anno") {
-        set.add(`${h.nodeID}::${h.stepID}`);
-      }
     }
     return set;
   }, [findStructuredHits]);
@@ -2717,7 +2690,13 @@ function RunDetailPane({
     logs: findLogTotal,
   };
   useEffect(() => {
-    setFindCursor(0);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setFindCursor(0);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [findQuery, tab]);
   // findActiveKey is the data-find-key of the current hit; Summary
   // items watch it to mark themselves "current" (brighter fuchsia).
@@ -2811,35 +2790,48 @@ function RunDetailPane({
   } | null>(null);
   // Cross-run grep deep link: arriving with a pendingLogFocus means
   // the user clicked a result row in the Search view. Land on the
-  // Logs tab AND drive the same selection callbacks a regular row
-  // click fires so the sidebar Nodes column highlights the match
-  // and the LogBucketView opens the right step automatically.
-  // Without firing onSelectNode/onSelectStep here, the Logs section
-  // expanded but neither the sidebar nor the step bucket reflected
-  // which result the user clicked.
+  // Logs tab and adopt its node/step locally; the destination URL
+  // already carries the node, so writing it again can force a full
+  // document load from a static dashboard and erase the line focus.
   useEffect(() => {
     if (!pendingLogFocus) return;
-    setTab("logs");
-    setFindLogFocus(pendingLogFocus);
-    onSelectNode(pendingLogFocus.nodeID);
-    if (pendingLogFocus.stepID) {
-      onSelectStep(pendingLogFocus.nodeID, pendingLogFocus.stepID);
-    }
-    onConsumePendingLogFocus?.();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setTab("logs");
+      setFindLogFocus(pendingLogFocus);
+      onAdoptPendingLogFocus?.(pendingLogFocus);
+      onConsumePendingLogFocus?.();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [
     pendingLogFocus,
     setTab,
+    onAdoptPendingLogFocus,
     onConsumePendingLogFocus,
-    onSelectNode,
-    onSelectStep,
   ]);
   // Clear the focus when the query clears so a stale jump doesn't
-  // ride into the next session.
+  // ride into the next session. Initial empty state is not a clear:
+  // cross-run search hands off a line before this pane mounts.
+  const hadFindQueryRef = useRef(false);
   useEffect(() => {
-    if (findQuery.trim() === "") {
+    if (findQuery.trim() !== "") {
+      hadFindQueryRef.current = true;
+      return;
+    }
+    if (!hadFindQueryRef.current) return;
+    hadFindQueryRef.current = false;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
       setFindLogFocus(null);
       setFindActiveKey(null);
-    }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [findQuery]);
   const visibleTabs = buildVisibleTabs(
     nodes,
@@ -3079,7 +3071,6 @@ function RunDetailPane({
               selectedStep={selectedStep}
               onSelect={onSelectNode}
               onSelectStep={onSelectStep}
-              runId={run.id}
               findMatched={findMatchedNodesByName}
               findMatchedSteps={findMatchedStepsByName}
               reusedNodeIDs={reusedNodeIDs ?? undefined}
@@ -3137,7 +3128,7 @@ function RunDetailPane({
               onOpenRun={(id) => {
                 const el = document.querySelector(`[data-run-id="${id}"]`);
                 if (el) (el as HTMLElement).click();
-                else window.location.assign(`?run=${id}`);
+                else window.location.assign(new URL(`?run=${id}`, window.location.href));
               }}
               findMatchedFields={findMatchedSetupFields}
               findActiveKey={findActiveKey}
@@ -3244,6 +3235,7 @@ function SingleNodeLogs({
   const body =
     node.status === "approval_pending" || !node.finished_at ? (
       <StreamingLogs
+        key={`stream:${run.id}:${node.id}`}
         runID={run.id}
         nodeID={node.id}
         focusStep={focusStep}
@@ -3254,6 +3246,7 @@ function SingleNodeLogs({
       />
     ) : (
       <StoredLogs
+        key={`stored:${run.id}:${node.id}`}
         runID={run.id}
         nodeID={node.id}
         focusStep={focusStep}
@@ -3730,13 +3723,20 @@ function AllNodesLogs({
   // sections so only the selected node is open, then scroll it in.
   useEffect(() => {
     if (!focusNode) return;
-    setExpanded(new Set([focusNode]));
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setExpanded(new Set([focusNode]));
+    });
     requestAnimationFrame(() => {
+      if (cancelled) return;
       const el = document.querySelector(
         `[data-log-node-id="${focusNode}"]`,
       ) as HTMLElement | null;
       el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [focusNode]);
   // Open the owning section so LogBucketView mounts and its
   // focusLine effect can scroll the exact line into view. Don't
@@ -3744,21 +3744,35 @@ function AllNodesLogs({
   // positioning, and scrolling both races and ends at the node top.
   useEffect(() => {
     if (!externalFindFocus) return;
-    setExpanded((prev) => {
-      if (prev.has(externalFindFocus.nodeID) && prev.size === 1) return prev;
-      return new Set([externalFindFocus.nodeID]);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setExpanded((prev) => {
+        if (prev.has(externalFindFocus.nodeID) && prev.size === 1) return prev;
+        return new Set([externalFindFocus.nodeID]);
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [externalFindFocus]);
   // Auto-expand every node section whose logs contain a find match.
   // Users typing a query expect to see fuchsia highlights without
   // hunting through collapsed nodes.
   useEffect(() => {
     if (!findMatchedLogsByNode || findMatchedLogsByNode.size === 0) return;
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      for (const id of findMatchedLogsByNode.keys()) next.add(id);
-      return next;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const id of findMatchedLogsByNode.keys()) next.add(id);
+        return next;
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [findMatchedLogsByNode]);
   if (nodes.length === 0) {
     return (
@@ -3912,25 +3926,39 @@ function AllNodesResources({
     });
   useEffect(() => {
     if (!focusNode) return;
-    setExpanded(new Set([focusNode]));
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setExpanded(new Set([focusNode]));
+    });
     requestAnimationFrame(() => {
+      if (cancelled) return;
       const el = document.querySelector(
         `[data-resource-node-id="${focusNode}"]`,
       ) as HTMLElement | null;
       el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [focusNode]);
   // Auto-expand the section the find walker just landed on so the
   // chart loads instead of just scrolling the collapsed header.
   useEffect(() => {
     if (!findActiveKey?.startsWith("resource-node::")) return;
     const id = findActiveKey.slice("resource-node::".length);
-    setExpanded((prev) => {
-      if (prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.add(id);
-      return next;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setExpanded((prev) => {
+        if (prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [findActiveKey]);
   if (nodes.length === 0) {
     return (
@@ -4064,9 +4092,9 @@ function StreamingLogs({
 }) {
   const [lines, setLines] = useState<string[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
+  const parsed = useMemo(() => parseLogLines(lines), [lines]);
 
   useEffect(() => {
-    setLines([]);
     const url = getNodeStreamUrl(runID, nodeID);
     const es = new EventSource(url, { withCredentials: true });
     es.onmessage = (e) => {
@@ -4090,7 +4118,6 @@ function StreamingLogs({
   if (lines.length === 0) {
     return <div className="text-sm text-[var(--muted)] p-4">streaming...</div>;
   }
-  const parsed = parseLogLines(lines);
   return (
     <>
       <LogBucketView
@@ -4125,10 +4152,13 @@ function StoredLogs({
   findCurrentLine?: number | null;
 }) {
   const [text, setText] = useState<string | null>(null);
+  const parsed = useMemo(
+    () => (text === null ? null : parseLogLines(text.split("\n"))),
+    [text],
+  );
 
   useEffect(() => {
     let cancelled = false;
-    setText(null);
     (async () => {
       const t = await getNodeLogs(runID, nodeID);
       if (!cancelled) setText(t);
@@ -4138,7 +4168,7 @@ function StoredLogs({
     };
   }, [runID, nodeID]);
 
-  if (text === null) {
+  if (text === null || parsed === null) {
     return <div className="text-sm text-[var(--muted)]">loading...</div>;
   }
   if (text.trim() === "") {
@@ -4148,7 +4178,6 @@ function StoredLogs({
       </div>
     );
   }
-  const parsed = parseLogLines(text.split("\n"));
   return (
     <LogBucketView
       parsed={parsed}
@@ -4177,7 +4206,6 @@ function DAG({
   selectedStep,
   onSelect,
   onSelectStep,
-  runId,
   findMatched,
   findMatchedSteps,
   reusedNodeIDs,
@@ -4187,7 +4215,6 @@ function DAG({
   selectedStep: string | null;
   onSelect: (id: string | null) => void;
   onSelectStep: (nodeId: string, stepId: string | null) => void;
-  runId?: string;
   findMatched?: Set<string>;
   findMatchedSteps?: Set<string>;
   // Node ids the orchestrator rehydrated from the source attempt
@@ -4271,7 +4298,6 @@ function DAG({
   const rowGap = 26;
   const padX = 12;
   const padY = 32;
-  const nodeHeight = () => nodeH;
 
   const byID = new Map(nodes.map((n) => [n.id, n]));
   // Treat `on_failure_of` as a virtual dep for column placement: a
@@ -5719,6 +5745,7 @@ function StepTooltip({
   y: number;
 }) {
   const status = step.status || "pending";
+  const now = useCurrentTime(status === "running");
   const dot =
     status === "passed"
       ? "bg-green-400"
@@ -5733,7 +5760,7 @@ function StepTooltip({
               : "bg-slate-600";
   let dur = step.duration_ms ?? 0;
   if (!dur && status === "running" && step.started_at) {
-    dur = Math.max(0, Date.now() - new Date(step.started_at).getTime());
+    dur = Math.max(0, now - new Date(step.started_at).getTime());
   }
   const alignRight = x > window.innerWidth - 280;
   const style: React.CSSProperties = {
@@ -6478,14 +6505,17 @@ function useReusedNodeIDs(run: Run | null): {
   const runID = run?.id ?? null;
   const retryOf = run?.retry_of ?? null;
   useEffect(() => {
-    setIds(null);
-    setPriorRunID(null);
-    if (!runID) return;
-    if (!retryOf) {
-      setIds(new Set());
-      return;
-    }
     let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setIds(runID && !retryOf ? new Set() : null);
+      setPriorRunID(null);
+    });
+    if (!runID || !retryOf) {
+      return () => {
+        cancelled = true;
+      };
+    }
     listRunEvents(runID, { limit: 1000 }).then((events) => {
       if (cancelled) return;
       const next = new Set<string>();

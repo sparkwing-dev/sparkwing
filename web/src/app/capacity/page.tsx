@@ -86,28 +86,43 @@ export default function CapacityPage() {
   }, []);
 
   useEffect(() => {
-    refreshHost();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refreshHost();
+    });
     const i = window.setInterval(() => {
       if (!document.hidden) refreshHost();
     }, HOST_POLL_MS);
     return () => {
+      cancelled = true;
       window.clearInterval(i);
       if (pulseTimer.current) clearTimeout(pulseTimer.current);
     };
   }, [refreshHost]);
 
   useEffect(() => {
-    refreshPricing();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refreshPricing();
+    });
     const i = window.setInterval(() => {
       if (!document.hidden) refreshPricing();
     }, PRICING_POLL_MS);
-    return () => window.clearInterval(i);
+    return () => {
+      cancelled = true;
+      window.clearInterval(i);
+    };
   }, [refreshPricing]);
 
   useEffect(() => {
     if (!selected) {
-      setExplain(null);
-      return;
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) setExplain(null);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
     let cancelled = false;
     async function load() {

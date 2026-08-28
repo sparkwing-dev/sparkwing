@@ -107,11 +107,17 @@ export default function ClusterPage() {
   }, []);
 
   useEffect(() => {
-    refresh();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refresh();
+    });
     const i = window.setInterval(() => {
       if (!document.hidden) refresh();
     }, POLL_MS);
-    return () => window.clearInterval(i);
+    return () => {
+      cancelled = true;
+      window.clearInterval(i);
+    };
   }, [refresh]);
 
   const sortedAgents = useMemo(() => [...agents].sort(sortAgents), [agents]);

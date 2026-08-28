@@ -11,6 +11,11 @@ import {
   stepNameFromSection,
 } from "@/lib/logParser";
 import { ansiToHtml, stripAnsi } from "@/lib/ansi";
+import {
+  deferOnce,
+  scheduleAnimationFrame,
+  scheduleMicrotask,
+} from "@/lib/deferredOnce";
 
 function DownloadButton({
   text,
@@ -637,12 +642,17 @@ function InlineLogView({
     );
   };
 
-  let lineNum = 1;
+  const lineOffsets = sections.map(
+    (_, sectionIndex) =>
+      1 +
+      sections
+        .slice(0, sectionIndex)
+        .reduce((lineCount, section) => lineCount + section.lines.length, 0),
+  );
   return (
     <pre className="text-xs font-mono leading-5 whitespace-pre-wrap text-[#c9d1d9]">
       {sections.map((section, i) => {
-        const startLine = lineNum;
-        lineNum += section.lines.length;
+        const startLine = lineOffsets[i];
 
         if (section.type === "step") {
           const step = section as StepSection;
@@ -786,11 +796,18 @@ export default function LogBucketView({
   }, [parsed, findLineSet]);
   useEffect(() => {
     if (!findHitSections || findHitSections.size === 0) return;
-    setStepOverrides((prev) => {
-      const next = { ...prev };
-      for (const i of findHitSections) next[i] = true;
-      return next;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setStepOverrides((prev) => {
+        const next = { ...prev };
+        for (const i of findHitSections) next[i] = true;
+        return next;
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [findHitSections]);
   // Build the error-block list: every log line in any section whose
   // body contains an ERROR / error: / FAIL marker. Each block carries
@@ -886,7 +903,13 @@ export default function LogBucketView({
   // Reset cursor when the query / match list changes so the next
   // arrow lands on the first hit instead of an index past the end.
   useEffect(() => {
-    setMatchCursor(0);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setMatchCursor(0);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [searchQuery]);
   // Filter + highlight update live as the user types (the render
   // already re-flows from searchMatches), but the view itself only
@@ -916,22 +939,17 @@ export default function LogBucketView({
   // panel row, StepDag click), expand that step's bucket and scroll
   // it into view. Match against the section's parsed step name so
   // the lookup stays in step-id terms.
-  // Fire only when focusStep actually changes. The parsed/stepIndices
-  // deps would have re-fired this on every streaming-log render,
-  // re-snapping the scroll back to the focused step every time the
-  // user tried to move. Refs let us read the latest parsed without
-  // listing it in the dep array.
-  const parsedRef = useRef(parsed);
-  parsedRef.current = parsed;
-  const stepIndicesRef = useRef(stepIndices);
-  stepIndicesRef.current = stepIndices;
+  // Fire only when focusStep actually changes. The last-focused guard
+  // prevents streaming-log renders from snapping the view back after
+  // the user moves it.
   const lastFocusedStep = useRef<string | null>(null);
   useEffect(() => {
     const incoming = focusStep ?? null;
-    if (incoming === lastFocusedStep.current) return;
-    lastFocusedStep.current = incoming;
-    if (!incoming) return;
-    const matchIdx = parsedRef.current.sections.findIndex((s) => {
+    if (!incoming) {
+      lastFocusedStep.current = null;
+      return;
+    }
+    const matchIdx = parsed.sections.findIndex((s) => {
       if (s.type !== "step") return false;
       const name = (s as StepSection).name;
       const stepName = name.includes(" · ")
@@ -944,28 +962,38 @@ export default function LogBucketView({
     // so the selected one sits in isolation, mirroring how the
     // outer AllNodesLogs collapses sibling nodes on selection.
     const next: Record<number, boolean> = {};
-    for (const i of stepIndicesRef.current) next[i] = i === matchIdx;
-    setStepOverrides(next);
-    requestAnimationFrame(() => {
-      const el = containerRef.current?.querySelector(
-        `[data-step-id="${incoming}"]`,
-      ) as HTMLElement | null;
-      el?.scrollIntoView({ block: "start", behavior: "smooth" });
-    });
-  }, [focusStep]);
+    for (const i of stepIndices) next[i] = i === matchIdx;
+    return deferOnce(
+      lastFocusedStep,
+      incoming,
+      scheduleAnimationFrame,
+      () => {
+        const el = containerRef.current?.querySelector(
+          `[data-step-id="${incoming}"]`,
+        ) as HTMLElement | null;
+        if (!el) return false;
+        setStepOverrides(next);
+        el.scrollIntoView({ block: "start", behavior: "smooth" });
+        return true;
+      },
+    );
+  }, [focusStep, parsed, stepIndices]);
   // Same change-detection trick as focusStep: only act when the
   // incoming focusLine actually changes value (not on every parsed
   // re-render). The walker finds which section contains the line,
   // force-expands it, and scrolls the matching data-line element
   // into view.
   const lastFocusedLine = useRef<number | null>(null);
+  const [pendingLineFocus, setPendingLineFocus] = useState<{
+    line: number;
+    sectionIdx: number;
+  } | null>(null);
   useEffect(() => {
     const incoming = focusLine ?? null;
     if (incoming == null) {
       lastFocusedLine.current = null;
       return;
     }
-    if (incoming === lastFocusedLine.current) return;
     let lineCursor = 1;
     let sectionIdx = -1;
     for (let i = 0; i < parsed.sections.length; i++) {
@@ -977,17 +1005,33 @@ export default function LogBucketView({
       lineCursor += sec.lines.length;
     }
     // Logs from a deep-link may arrive before the log fetch resolves;
-    // wait until parsed has the target section, then mark it consumed.
+    // wait until parsed has the target section. Expansion is phase one:
+    // the line DOM does not exist inside a collapsed completed bucket.
     if (sectionIdx < 0) return;
-    lastFocusedLine.current = incoming;
-    setStepOverrides((prev) => ({ ...prev, [sectionIdx]: true }));
-    requestAnimationFrame(() => {
-      const el = containerRef.current?.querySelector(
-        `[data-line="${incoming}"]`,
-      ) as HTMLElement | null;
-      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (lastFocusedLine.current === incoming) return;
+    return scheduleMicrotask(() => {
+      setStepOverrides((prev) => ({ ...prev, [sectionIdx]: true }));
+      setPendingLineFocus({ line: incoming, sectionIdx });
     });
   }, [focusLine, parsed]);
+  // Phase two runs after the expansion commit. The extra cancellable frame
+  // keeps a superseded target from scrolling after a transition or unmount.
+  useEffect(() => {
+    if (!pendingLineFocus || pendingLineFocus.line !== focusLine) return;
+    return deferOnce(
+      lastFocusedLine,
+      pendingLineFocus.line,
+      scheduleAnimationFrame,
+      () => {
+        const el = containerRef.current?.querySelector(
+          `[data-line="${pendingLineFocus.line}"]`,
+        ) as HTMLElement | null;
+        if (!el) return false;
+        el.scrollIntoView({ block: "center", behavior: "smooth" });
+        return true;
+      },
+    );
+  }, [focusLine, pendingLineFocus]);
   const scrollToTop = () => {
     containerRef.current?.scrollIntoView({
       block: "start",
@@ -1325,7 +1369,7 @@ export function LogBucketViewFromLines({
   lines: string[];
   jobId?: string;
 }) {
-  const parsed = useMemo(() => parseLogLines(lines), [lines.length]);
+  const parsed = useMemo(() => parseLogLines(lines), [lines]);
   return <LogBucketView parsed={parsed} jobId={jobId} />;
 }
 

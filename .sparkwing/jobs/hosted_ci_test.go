@@ -82,6 +82,23 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 	}
 }
 
+func TestCanonicalPreCommitOwnsDashboardDependencyInstallation(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
+	install := "- name: Install dashboard dependencies\n        if: matrix.gate == 'pre-commit'\n        run: npm ci --prefix web"
+	requireWorkflowText(t, body, install)
+	if got := strings.Count(body, "npm ci --prefix web"); got != 1 {
+		t.Fatalf("dashboard dependency install count = %d, want 1", got)
+	}
+	installAt := strings.Index(body, install)
+	gateAt := strings.Index(body, "- name: Run canonical pre-commit")
+	if gateAt < 0 || installAt > gateAt {
+		t.Fatal("dashboard dependencies are not installed before canonical pre-commit")
+	}
+	if strings.Contains(body, "npm --prefix web run lint") {
+		t.Fatal("hosted workflow bypasses the canonical frontend-lint step")
+	}
+}
+
 func TestCanonicalWorkflowPinsEveryExternalAction(t *testing.T) {
 	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
 	requireWorkflowText(t, body,

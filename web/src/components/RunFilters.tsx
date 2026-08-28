@@ -115,55 +115,57 @@ export function useUrlFilterState() {
     else sessionStorage.removeItem(FILTER_STORAGE_KEY);
   }, [searchParams]);
 
-  const getList = (key: string): string[] => {
-    const v = searchParams.get(key);
-    return v ? v.split(",").filter(Boolean) : [];
-  };
-  const getStr = (key: string): string => searchParams.get(key) || "";
+  return useMemo(() => {
+    const getList = (key: string): string[] => {
+      const value = searchParams.get(key);
+      return value ? value.split(",").filter(Boolean) : [];
+    };
+    const getString = (key: string): string => searchParams.get(key) || "";
 
-  return {
-    filterStatus: getList("status"),
-    setFilterStatus: (v: string[]) => setParams({ status: v }),
-    excludeStatus: getList("nstatus"),
-    setExcludeStatus: (v: string[]) => setParams({ nstatus: v }),
+    return {
+      filterStatus: getList("status"),
+      setFilterStatus: (value: string[]) => setParams({ status: value }),
+      excludeStatus: getList("nstatus"),
+      setExcludeStatus: (value: string[]) => setParams({ nstatus: value }),
 
-    filterRepo: getList("repo"),
-    setFilterRepo: (v: string[]) => setParams({ repo: v }),
-    excludeRepo: getList("nrepo"),
-    setExcludeRepo: (v: string[]) => setParams({ nrepo: v }),
+      filterRepo: getList("repo"),
+      setFilterRepo: (value: string[]) => setParams({ repo: value }),
+      excludeRepo: getList("nrepo"),
+      setExcludeRepo: (value: string[]) => setParams({ nrepo: value }),
 
-    filterPipeline: getList("pipeline"),
-    setFilterPipeline: (v: string[]) => setParams({ pipeline: v }),
-    excludePipeline: getList("npipeline"),
-    setExcludePipeline: (v: string[]) => setParams({ npipeline: v }),
+      filterPipeline: getList("pipeline"),
+      setFilterPipeline: (value: string[]) => setParams({ pipeline: value }),
+      excludePipeline: getList("npipeline"),
+      setExcludePipeline: (value: string[]) => setParams({ npipeline: value }),
 
-    filterBranch: getList("branch"),
-    setFilterBranch: (v: string[]) => setParams({ branch: v }),
-    excludeBranch: getList("nbranch"),
-    setExcludeBranch: (v: string[]) => setParams({ nbranch: v }),
+      filterBranch: getList("branch"),
+      setFilterBranch: (value: string[]) => setParams({ branch: value }),
+      excludeBranch: getList("nbranch"),
+      setExcludeBranch: (value: string[]) => setParams({ nbranch: value }),
 
-    filterCommit: getList("commit"),
-    setFilterCommit: (v: string[]) => setParams({ commit: v }),
-    excludeCommit: getList("ncommit"),
-    setExcludeCommit: (v: string[]) => setParams({ ncommit: v }),
+      filterCommit: getList("commit"),
+      setFilterCommit: (value: string[]) => setParams({ commit: value }),
+      excludeCommit: getList("ncommit"),
+      setExcludeCommit: (value: string[]) => setParams({ ncommit: value }),
 
-    filterTag: getList("tag"),
-    setFilterTag: (v: string[]) => setParams({ tag: v }),
-    excludeTag: getList("ntag"),
-    setExcludeTag: (v: string[]) => setParams({ ntag: v }),
+      filterTag: getList("tag"),
+      setFilterTag: (value: string[]) => setParams({ tag: value }),
+      excludeTag: getList("ntag"),
+      setExcludeTag: (value: string[]) => setParams({ ntag: value }),
 
-    startedAfter: getStr("startedAfter"),
-    setStartedAfter: (v: string) => setParams({ startedAfter: v }),
-    startedBefore: getStr("startedBefore"),
-    setStartedBefore: (v: string) => setParams({ startedBefore: v }),
-    finishedAfter: getStr("finishedAfter"),
-    setFinishedAfter: (v: string) => setParams({ finishedAfter: v }),
-    finishedBefore: getStr("finishedBefore"),
-    setFinishedBefore: (v: string) => setParams({ finishedBefore: v }),
+      startedAfter: getString("startedAfter"),
+      setStartedAfter: (value: string) => setParams({ startedAfter: value }),
+      startedBefore: getString("startedBefore"),
+      setStartedBefore: (value: string) => setParams({ startedBefore: value }),
+      finishedAfter: getString("finishedAfter"),
+      setFinishedAfter: (value: string) => setParams({ finishedAfter: value }),
+      finishedBefore: getString("finishedBefore"),
+      setFinishedBefore: (value: string) => setParams({ finishedBefore: value }),
 
-    filterText: getStr("q"),
-    setFilterText: (v: string) => setParams({ q: v }),
-  };
+      filterText: getString("q"),
+      setFilterText: (value: string) => setParams({ q: value }),
+    };
+  }, [searchParams, setParams]);
 }
 
 export type RunFilterState = ReturnType<typeof useUrlFilterState>;
@@ -991,26 +993,21 @@ function DateInput({
   setUrl: (v: string) => void;
 }) {
   const [local, setLocal] = useState(() => urlToInputString(urlValue));
-  const focusedRef = useRef(false);
-  // Sync local from URL when it changes externally and the field
-  // isn't being typed in. Keeps round-trips from share-links clean.
-  useEffect(() => {
-    if (focusedRef.current) return;
-    setLocal(urlToInputString(urlValue));
-  }, [urlValue]);
+  const [focused, setFocused] = useState(false);
+  const value = focused ? local : urlToInputString(urlValue);
   return (
     <label className="block text-[10px] text-[var(--muted)]">
       {label}
       <input
         type="text"
         placeholder="YYYY-MM-DD [HH:MM]"
-        value={local}
-        onFocus={() => {
-          focusedRef.current = true;
+        value={value}
+        onFocus={(event) => {
+          setLocal(event.currentTarget.value);
+          setFocused(true);
         }}
         onBlur={() => {
-          focusedRef.current = false;
-          setLocal(urlToInputString(urlValue));
+          setFocused(false);
         }}
         onChange={(e) => {
           setLocal(e.target.value);
@@ -1238,99 +1235,97 @@ export interface FilterCtx {
   ) => void;
 }
 
-// useFilterCtx returns a stable FilterCtx bound to the given filter
-// state. Reads/writes pass through to the URL via a ref so the ctx
-// identity stays constant -- consumers can pass it through memoized
-// components without busting them.
-export function useFilterCtx(filterState: RunFilterState): FilterCtx {
-  const ref = useRef(filterState);
-  ref.current = filterState;
-  return useMemo<FilterCtx>(() => {
-    const facet = (f: FilterFacet) => {
-      const s = ref.current;
-      switch (f) {
-        case "status":
-          return [
-            s.filterStatus,
-            s.setFilterStatus,
-            s.excludeStatus,
-            s.setExcludeStatus,
-          ] as const;
-        case "repo":
-          return [
-            s.filterRepo,
-            s.setFilterRepo,
-            s.excludeRepo,
-            s.setExcludeRepo,
-          ] as const;
-        case "pipeline":
-          return [
-            s.filterPipeline,
-            s.setFilterPipeline,
-            s.excludePipeline,
-            s.setExcludePipeline,
-          ] as const;
-        case "branch":
-          return [
-            s.filterBranch,
-            s.setFilterBranch,
-            s.excludeBranch,
-            s.setExcludeBranch,
-          ] as const;
-        case "commit":
-          return [
-            s.filterCommit,
-            s.setFilterCommit,
-            s.excludeCommit,
-            s.setExcludeCommit,
-          ] as const;
-        case "tag":
-          return [
-            s.filterTag,
-            s.setFilterTag,
-            s.excludeTag,
-            s.setExcludeTag,
-          ] as const;
-      }
-    };
-    return {
-      isIncluded: (f, v) => facet(f)[0].includes(v),
-      isExcluded: (f, v) => facet(f)[2].includes(v),
-      toggle: (f, v, mode) => {
-        const [inc, setInc, exc, setExc] = facet(f);
-        if (mode === "include") {
-          if (inc.includes(v)) setInc(inc.filter((x) => x !== v));
-          else {
-            setInc([...inc, v]);
-            if (exc.includes(v)) setExc(exc.filter((x) => x !== v));
-          }
-        } else {
+export function createFilterCtx(filterState: RunFilterState): FilterCtx {
+  const facet = (f: FilterFacet) => {
+    const s = filterState;
+    switch (f) {
+      case "status":
+        return [
+          s.filterStatus,
+          s.setFilterStatus,
+          s.excludeStatus,
+          s.setExcludeStatus,
+        ] as const;
+      case "repo":
+        return [
+          s.filterRepo,
+          s.setFilterRepo,
+          s.excludeRepo,
+          s.setExcludeRepo,
+        ] as const;
+      case "pipeline":
+        return [
+          s.filterPipeline,
+          s.setFilterPipeline,
+          s.excludePipeline,
+          s.setExcludePipeline,
+        ] as const;
+      case "branch":
+        return [
+          s.filterBranch,
+          s.setFilterBranch,
+          s.excludeBranch,
+          s.setExcludeBranch,
+        ] as const;
+      case "commit":
+        return [
+          s.filterCommit,
+          s.setFilterCommit,
+          s.excludeCommit,
+          s.setExcludeCommit,
+        ] as const;
+      case "tag":
+        return [
+          s.filterTag,
+          s.setFilterTag,
+          s.excludeTag,
+          s.setExcludeTag,
+        ] as const;
+    }
+  };
+  return {
+    isIncluded: (f, v) => facet(f)[0].includes(v),
+    isExcluded: (f, v) => facet(f)[2].includes(v),
+    toggle: (f, v, mode) => {
+      const [inc, setInc, exc, setExc] = facet(f);
+      if (mode === "include") {
+        if (inc.includes(v)) setInc(inc.filter((x) => x !== v));
+        else {
+          setInc([...inc, v]);
           if (exc.includes(v)) setExc(exc.filter((x) => x !== v));
-          else {
-            setExc([...exc, v]);
-            if (inc.includes(v)) setInc(inc.filter((x) => x !== v));
-          }
         }
-      },
-      setDateBound: (field, bound, iso) => {
-        const d = new Date(iso);
-        const local = isNaN(d.getTime())
-          ? ""
-          : new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-              .toISOString()
-              .slice(0, 16);
-        const s = ref.current;
-        if (field === "started" && bound === "before")
-          s.setStartedBefore(local);
-        else if (field === "started" && bound === "after")
-          s.setStartedAfter(local);
-        else if (field === "finished" && bound === "before")
-          s.setFinishedBefore(local);
-        else if (field === "finished" && bound === "after")
-          s.setFinishedAfter(local);
-      },
-    };
-  }, []);
+      } else {
+        if (exc.includes(v)) setExc(exc.filter((x) => x !== v));
+        else {
+          setExc([...exc, v]);
+          if (inc.includes(v)) setInc(inc.filter((x) => x !== v));
+        }
+      }
+    },
+    setDateBound: (field, bound, iso) => {
+      const d = new Date(iso);
+      const local = isNaN(d.getTime())
+        ? ""
+        : new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+            .toISOString()
+            .slice(0, 16);
+      const s = filterState;
+      if (field === "started" && bound === "before")
+        s.setStartedBefore(local);
+      else if (field === "started" && bound === "after")
+        s.setStartedAfter(local);
+      else if (field === "finished" && bound === "before")
+        s.setFinishedBefore(local);
+      else if (field === "finished" && bound === "after")
+        s.setFinishedAfter(local);
+    },
+  };
+}
+
+// Filter context identity follows the URL-derived state so memoized rows
+// repaint their pills and event handlers together after navigation.
+export function useFilterCtx(filterState: RunFilterState): FilterCtx {
+  return useMemo(() => createFilterCtx(filterState), [filterState]);
 }
 
 function useClickPopup<T extends HTMLElement>() {

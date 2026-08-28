@@ -103,7 +103,7 @@ export default function LiveLogs({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [lines]);
 
-  const parsed = useMemo(() => parseLogLines(lines), [lines.length]);
+  const parsed = useMemo(() => parseLogLines(lines), [lines]);
   const hasSteps = parsed.sections.some((s) => s.type === "step");
 
   // If SSE has no data yet, show fallback logs or a waiting indicator

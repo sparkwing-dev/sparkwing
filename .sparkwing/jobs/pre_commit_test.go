@@ -374,16 +374,19 @@ func TestPreCommitRunsFrontendChecksBeforeBrowserSmoke(t *testing.T) {
 	if _, err := (&PreCommit{}).Work(w); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"frontend-browser-lint", "frontend-build", "frontend-browser"} {
+	for _, id := range []string{"frontend-lint", "frontend-build", "frontend-browser"} {
 		if w.StepByID(id) == nil {
 			t.Fatalf("pre-commit does not run %s", id)
 		}
 	}
+	if deps := w.StepByID("frontend-lint").DepIDs(); len(deps) != 0 {
+		t.Fatalf("frontend-lint dependencies = %v, want an independent fast check", deps)
+	}
 	if !stepWaitsOn(w, "frontend-build", "frontend-unit") {
 		t.Fatal("frontend-build does not wait on frontend-unit")
 	}
-	if !stepWaitsOn(w, "frontend-build", "frontend-browser-lint") {
-		t.Fatal("frontend-build does not wait on frontend-browser-lint")
+	if !stepWaitsOn(w, "frontend-build", "frontend-lint") {
+		t.Fatal("frontend-build does not wait on frontend-lint")
 	}
 	if !stepWaitsOn(w, "frontend-browser", "frontend-build") {
 		t.Fatal("frontend-browser does not wait on frontend-build")
@@ -456,7 +459,6 @@ func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
 		run     func(context.Context) error
 		failure string
 	}{
-		{name: "browser lint", script: "lint:browser", run: runFrontendBrowserLint, failure: "frontend browser-test lint"},
 		{name: "build", script: "build", run: runFrontendBuild, failure: "frontend production build"},
 		{name: "browser", script: "test:browser:gate", run: runFrontendBrowser, failure: "frontend browser smoke suite"},
 	}
@@ -477,6 +479,37 @@ func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
 				t.Fatalf("%s failure = %v, want named verdict", tc.name, err)
 			}
 		})
+	}
+}
+
+func TestFrontendLintPropagatesVerdictWithoutInstallingDependencies(t *testing.T) {
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	if err := os.MkdirAll(web, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	packageJSON := filepath.Join(web, "package.json")
+	previous := sparkwing.WorkDir()
+	sparkwing.SetWorkDir(root)
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+
+	writeGoFile(t, packageJSON, `{"scripts":{"lint":"node -e \"process.exit(1)\""}}`)
+	err := runFrontendLint(context.Background())
+	if err == nil {
+		t.Fatal("frontend-lint accepted a failing npm lint script")
+	}
+	if !strings.Contains(err.Error(), "frontend ESLint suite") {
+		t.Fatalf("frontend-lint failure = %q, want named suite", err)
+	}
+
+	writeGoFile(t, packageJSON, `{"scripts":{"lint":"node -e \"process.exit(0)\""}}`)
+	if err := runFrontendLint(context.Background()); err != nil {
+		t.Fatalf("frontend-lint rejected a passing npm lint script: %v", err)
+	}
+	for _, path := range []string{filepath.Join(web, "package-lock.json"), filepath.Join(web, "node_modules")} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("frontend-lint created dependency state at %s: %v", path, err)
+		}
 	}
 }
 

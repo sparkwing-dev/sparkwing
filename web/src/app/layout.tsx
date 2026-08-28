@@ -45,7 +45,6 @@ export default function RootLayout({
     >
       <head>
         <script
-          // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{
             __html:
               'window.__SPARKWING_TOKEN__="__SPARKWING_TOKEN_MARKER__";' +
