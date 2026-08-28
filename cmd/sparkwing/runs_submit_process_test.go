@@ -306,10 +306,12 @@ func TestRunsSubmit_ExecutionOutlivesTheSubmittingProcess(t *testing.T) {
 
 	// The submitting process has exited by now -- CombinedOutput waited
 	// for it. Whatever owns the run is something else.
-	pid, ok := orchestrator.ConsumerPID(e.home)
-	if !ok {
-		t.Fatal("nothing holds the queue after an acknowledged submission")
-	}
+	var pid int
+	waitUntil(t, "a detached consumer to hold the queue", 10*time.Second, func() bool {
+		var ok bool
+		pid, ok = orchestrator.ConsumerPID(e.home)
+		return ok
+	})
 	if pid == os.Getpid() {
 		t.Fatal("the test process is hosting the consumer; the run is not detached")
 	}

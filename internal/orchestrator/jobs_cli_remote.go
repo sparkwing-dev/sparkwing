@@ -386,6 +386,23 @@ var (
 	remoteFollowPollInterval  = 300 * time.Millisecond
 )
 
+type remoteFollowFailures struct {
+	since time.Time
+}
+
+func (f *remoteFollowFailures) succeeded() {
+	f.since = time.Time{}
+}
+
+func (f *remoteFollowFailures) failed(now time.Time, budget time.Duration) (time.Duration, bool) {
+	if f.since.IsZero() {
+		f.since = now
+		return 0, false
+	}
+	elapsed := now.Sub(f.since)
+	return elapsed, elapsed >= budget
+}
+
 // followLogsRemote tails live logs by polling ListNodes and spawning
 // per-node SSE goroutines. Exits when run is terminal (with a short
 // drain), when ctx cancels, or when the run's status has been
@@ -431,7 +448,7 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 		defer ticker.Stop()
 		// failingSince is when the current unbroken run of failed status
 		// reads began; zero while the last read succeeded.
-		var failingSince time.Time
+		var failures remoteFollowFailures
 		for {
 			select {
 			case <-runCtx.Done():
@@ -455,7 +472,7 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 				}
 				run, err := ctrl.GetRun(runCtx, runID)
 				if err == nil {
-					failingSince = time.Time{}
+					failures.succeeded()
 					if isTerminalStatus(run.Status) {
 						return
 					}
@@ -466,14 +483,10 @@ func followLogsRemote(ctx context.Context, ctrl *client.Client, logc storage.Log
 				if runCtx.Err() != nil {
 					return
 				}
-				now := time.Now()
-				if failingSince.IsZero() {
-					failingSince = now
-					continue
-				}
-				if now.Sub(failingSince) >= remoteFollowFailureBudget {
+				elapsed, exhausted := failures.failed(time.Now(), remoteFollowFailureBudget)
+				if exhausted {
 					followErr = fmt.Errorf("run %s: controller status unreadable for %s: %w",
-						runID, now.Sub(failingSince).Round(time.Second), err)
+						runID, elapsed.Round(time.Second), err)
 					return
 				}
 			}

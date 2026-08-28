@@ -132,18 +132,40 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 	if jobsAt < 0 {
 		t.Fatal("release workflow has no jobs section")
 	}
-	requireWorkflowText(t, body[:jobsAt], "permissions:\n  contents: read\n")
+	requireWorkflowText(t, body[:jobsAt],
+		"workflow_dispatch:",
+		"permissions:\n  actions: read\n  contents: read\n",
+	)
+	requireWorkflowText(t, workflowJob(t, body, "validate-tag"),
+		"git ls-remote --exit-code --tags",
+		`"refs/tags/$TAG^{}"`,
+		`startswith("Verify tagged source / Canonical /")`,
+		`select(.conclusion == "success")`,
+		`test "$verified" = true`,
+	)
 	requireWorkflowText(t, workflowJob(t, body, "canonical"),
+		"if: github.event_name == 'push'",
 		"uses: ./.github/workflows/canonical-gates.yaml",
 		"contents: read",
 	)
-	requireWorkflowText(t, workflowJob(t, body, "build"), "needs: canonical")
+	requireWorkflowText(t, workflowJob(t, body, "build"),
+		"needs: [validate-tag, canonical]",
+		"github.event_name == 'workflow_dispatch'",
+		"ref: ${{ inputs.tag || github.sha }}",
+		"path: .release-tools",
+		".release-tools/bin/check-release-binary-vulnerabilities.sh",
+		`go-version: "1.26.6"`,
+	)
 	requireWorkflowText(t, workflowJob(t, body, "build-images"),
-		"needs: canonical",
+		"needs: [validate-tag, canonical]",
+		"github.event_name == 'workflow_dispatch'",
 		"contents: read",
 		"packages: write",
 		"persist-credentials: false",
-		"ref: ${{ github.sha }}",
+		"ref: ${{ inputs.tag || github.sha }}",
+		"Checkout current image recipe",
+		"cp .release-tools/.dockerignore .dockerignore",
+		`go-version: "1.26.6"`,
 	)
 	requireWorkflowText(t, workflowJob(t, body, "publish-images"),
 		"contents: read",
@@ -151,9 +173,15 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 		"packages: write",
 	)
 	requireWorkflowText(t, workflowJob(t, body, "release"),
+		"inputs.publish_images == false",
 		"contents: write",
 		"persist-credentials: false",
-		"ref: ${{ github.sha }}",
+		"ref: ${{ inputs.tag || github.sha }}",
+		`go-version: "1.26.6"`,
+		"TAG: ${{ inputs.tag || github.ref_name }}",
+	)
+	requireWorkflowText(t, workflowJob(t, body, "prepare-binaries"),
+		"always() && needs.build.result == 'success'",
 	)
 
 	for permission, want := range map[string]int{

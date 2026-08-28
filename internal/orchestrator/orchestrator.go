@@ -516,7 +516,7 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 
 	dispatchWaitTimeout := opts.DispatchWaitTimeout
 	if dispatchWaitTimeout == 0 {
-		dispatchWaitTimeout = DefaultDispatchWaitTimeout
+		dispatchWaitTimeout = defaultDispatchWaitTimeoutForPlan(plan)
 	}
 
 	runCtx, cancelRun := context.WithCancelCause(ctx)

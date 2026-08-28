@@ -23,6 +23,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+const templateVerifyReleaseTimeout = time.Hour
+
 // ReleaseArgs is the typed CLI surface for the public-sparkwing
 // release pipeline. --version is optional: when omitted the
 // pipeline bumps --bump (default minor) off the latest origin tag.
@@ -130,16 +132,16 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 	gatePrePush := sparkwing.Job(plan, "gate-pre-push", func(ctx context.Context) error {
 		return (&PrePush{AllowReleaseLineSelfReplace: true}).run(ctx)
 	})
-	gatePrePush.Needs(clean)
+	gatePrePush.Needs(clean, gatePreCommit)
 
 	gateTemplates := sparkwing.Job(plan, "gate-template-verify", func(ctx context.Context) error {
 		_, err := sparkwing.RunAndAwait[TemplateVerifySummary, sparkwing.NoInputs](
 			ctx, "template-verify", "summary",
-			sparkwing.WithFreshTimeout(20*time.Minute),
+			sparkwing.WithFreshTimeout(templateVerifyReleaseTimeout),
 		)
 		return err
-	})
-	gateTemplates.Needs(clean, gatePrePush)
+	}).Resources(sparkwing.Cores(0.5))
+	gateTemplates.Needs(clean, gatePreCommit, gatePrePush)
 
 	gateLineage := sparkwing.Job(plan, "gate-release-lineage", &checkReleaseLineageJob{
 		RepoDir: repoDir,

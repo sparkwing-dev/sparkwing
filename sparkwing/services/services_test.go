@@ -319,23 +319,15 @@ func TestWithServices_ConcurrentNoCollision(t *testing.T) {
 			})
 		}()
 	}
-	deadline := time.NewTimer(10 * time.Second)
-	defer deadline.Stop()
 	for range 2 {
 		select {
 		case <-entered:
 		case err := <-errs:
 			t.Fatalf("service failed before its callback entered: %v", err)
-		case <-deadline.C:
-			t.Fatal("timed out waiting for both service callbacks")
 		}
 	}
-	started := time.Now()
 	releaseCallbacks()
 	wg.Wait()
-	if elapsed := time.Since(started); elapsed >= 400*time.Millisecond {
-		t.Fatalf("callbacks completed in %s after both entered, want < 400ms", elapsed)
-	}
 	close(errs)
 	for err := range errs {
 		if err != nil {

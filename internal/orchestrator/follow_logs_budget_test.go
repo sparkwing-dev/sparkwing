@@ -161,41 +161,20 @@ func TestFollowLogsRemote_GivesUpOnADeadController(t *testing.T) {
 // replica rolling out mid-run would abort a follow that is working
 // fine.
 func TestFollowLogsRemote_SuccessfulPollResetsTheBudget(t *testing.T) {
-	shortFollowTiming(t, 60*time.Millisecond, 10*time.Millisecond)
-	const runID = "run-blippy-controller"
-	url := followSpy(t, runID, func(n int32) (store.Run, bool) {
-		switch {
-		case n <= 4: // first burst stays within the budget
-			return store.Run{}, false
-		case n == 5: // the reset
-			return runningRun(runID), true
-		case n <= 9: // combined bursts exceed the budget unless it reset
-			return store.Run{}, false
-		}
-		now := time.Now()
-		return store.Run{
-			ID: runID, Pipeline: "release", Status: "success",
-			StartedAt: now.Add(-time.Second), FinishedAt: &now,
-		}, true
-	})
-
-	ctrl := client.NewWithToken(url, nil, "")
-	logc := sparkwinglogs.New(url, nil, "")
-
-	done := make(chan error, 1)
-	started := time.Now()
-	go func() { done <- followLogsRemote(context.Background(), ctrl, logc, runID, "", io.Discard) }()
-
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("follow aborted on interrupted blips: %v", err)
-		}
-		if elapsed := time.Since(started); elapsed >= 500*time.Millisecond {
-			t.Fatalf("recovered follow returned after %s, want under 500ms", elapsed)
-		}
-	case <-time.After(20 * time.Second):
-		t.Fatal("follow never returned")
+	start := time.Unix(100, 0)
+	var failures remoteFollowFailures
+	if _, exhausted := failures.failed(start, time.Minute); exhausted {
+		t.Fatal("first failure exhausted the budget")
+	}
+	if _, exhausted := failures.failed(start.Add(50*time.Second), time.Minute); exhausted {
+		t.Fatal("first failure burst exhausted the budget")
+	}
+	failures.succeeded()
+	if _, exhausted := failures.failed(start.Add(55*time.Second), time.Minute); exhausted {
+		t.Fatal("first failure after recovery exhausted the reset budget")
+	}
+	if _, exhausted := failures.failed(start.Add(65*time.Second), time.Minute); exhausted {
+		t.Fatal("interrupted failure bursts accumulated across a success")
 	}
 }
 

@@ -48,11 +48,7 @@ code change to unlock.
 ---
 
 ## [Unreleased]
-### Security
 
-- **controller:** First-admin creation now requires an admin bearer token when
-  controller authentication is enabled. The unauthenticated first-visit signup
-  remains available only while controller authentication is disabled.
 - **web (Breaking):** Login-required dashboards now refuse to start without a
   controller session backend. Login, first-admin, and logout forms enforce
   same-origin CSRF tokens; post-login redirects accept encoded same-origin
@@ -63,6 +59,20 @@ code change to unlock.
   failures return `502` without deleting browser cookies. See the
   [migration guide](docs/migrations/_unreleased.md#dashboard-browser-session-hardening).
 
+## [v0.37.1] - 2026-08-28
+### Fixed
+
+- **release:** Release builds now pin Go 1.26.6 across every binary and image
+  runner, and container runtimes use the patched Alpine 3.24 base. Maintainers
+  can rebuild an existing immutable tag after a
+  publication-only failure; the recovery path validates and checks out that
+  exact tag while preserving the original canonical-gate result.
+- **orchestrator:** The default dispatch watchdog now accounts for declared
+  node timeouts, retry attempts, retry backoff, dependency paths, and failure
+  recovery before classifying a run as wedged. Explicit
+  `SPARKWING_DISPATCH_WAIT_TIMEOUT` values remain exact operator overrides.
+
+## [v0.37.0] - 2026-08-28
 ### Fixed
 
 - **web (Breaking):** Live dashboard node logs now retain structured step buckets instead
@@ -72,7 +82,7 @@ code change to unlock.
   server-side proxy adds that credential only after validating the user's
   session cookie. Clients that sent a bearer token directly to a login-gated
   dashboard proxy must use a browser session or call the controller API
-  directly. See the [migration guide](docs/migrations/_unreleased.md#authenticated-dashboard-proxy-sessions).
+  directly. See the [migration guide](docs/migrations/v0.37.0.md#authenticated-dashboard-proxy-sessions).
 - **release:** Pull requests, main, and release tags now run the canonical
   pre-commit and release-boundary gates in hosted CI. Artifact builds and
   publication wait for the tagged commit to pass, and verification jobs hold
@@ -97,6 +107,12 @@ code change to unlock.
   a stalled FIFO head, another only when the head or error changes, and one
   recovery notice when replay resumes. The row previously disappeared even
   though its staged write had never reached the bucket.
+
+### Security
+
+- **controller:** First-admin creation now requires an admin bearer token when
+  controller authentication is enabled. The unauthenticated first-visit signup
+  remains available only while controller authentication is disabled.
 
 ## [v0.36.0] - 2026-08-26
 ### Changed
