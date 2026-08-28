@@ -63,6 +63,7 @@ func TestReleaseWorkflowScansArtifactsBeforePublication(t *testing.T) {
 		"aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0",
 		"needs: [prepare-binaries, publish-images]",
 		"needs: [build-images, prepare-binaries]",
+		"if: ${{ always() && needs.build-images.result == 'success' && needs.prepare-binaries.result == 'success' }}",
 		"name: scanned-release-binaries",
 		"pattern: scanned-image-*",
 		"Publish scanned image tags",
