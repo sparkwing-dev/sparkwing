@@ -48,6 +48,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **controller:** First-admin creation now requires an admin bearer token when
+  controller authentication is enabled. The unauthenticated first-visit signup
+  remains available only while controller authentication is disabled.
+
 ### Fixed
 
 - **web (Breaking):** Live dashboard node logs now retain structured step buckets instead

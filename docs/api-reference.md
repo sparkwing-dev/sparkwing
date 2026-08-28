@@ -1,7 +1,7 @@
 <!-- GENERATED from the route registrations in pkg/controller/server.go and pkg/logs/server.go by internal/apiref. Do not edit by hand; regenerate with `bash bin/gen-api-docs.sh`. -->
 # HTTP API reference
 
-Every route the controller and logs service register, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` is the superset that satisfies any scope check. `public` routes run with no bearer check (the GitHub webhook is HMAC-verified instead; `POST /api/v1/users` self-selects unauthenticated bootstrap vs admin-scoped create).
+Every route the controller and logs service register, with the scope each requires, generated from the routing code. All paths are under the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and the token model are in [auth.md](auth.md); `admin` is the superset that satisfies any scope check. `public` routes run with no bearer check (the GitHub webhook is HMAC-verified instead).
 
 ## Controller
 
@@ -107,7 +107,7 @@ Every route the controller and logs service register, with the scope each requir
 | `POST` | `/api/v1/triggers/{id}/done` | `admin` |
 | `POST` | `/api/v1/triggers/{id}/heartbeat` | `admin` |
 | `GET` | `/api/v1/users` | `admin` |
-| `POST` | `/api/v1/users` | `public` |
+| `POST` | `/api/v1/users` | `admin` |
 | `DELETE` | `/api/v1/users/{name}` | `admin` |
 | `GET` | `/metrics` | `public` |
 | `POST` | `/webhooks/github/{pipeline}` | `public` |
