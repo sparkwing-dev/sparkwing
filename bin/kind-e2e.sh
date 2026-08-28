@@ -89,9 +89,14 @@ create_owned_configmap() {
 }
 
 label_owned_release_pvcs() {
+  local label_status=0
   kube --namespace "$namespace" label persistentvolumeclaim \
     -l "app.kubernetes.io/instance=$release_name" \
-    "$ownership_label" "$owner_token_label" --overwrite
+    "$ownership_label" "$owner_token_label" --overwrite || label_status=1
+  kube --namespace "$namespace" label persistentvolumeclaim \
+    -l "app=sparkwing-cache-pool,sparkwing.dev/managed=pool-manager,sparkwing.dev/pool=cache" \
+    "$ownership_label" "$owner_token_label" --overwrite || label_status=1
+  return "$label_status"
 }
 
 preflight() {
@@ -212,6 +217,14 @@ api_get() {
     "http://127.0.0.1:${controller_port}${path}"
 }
 
+api_get_with_status() {
+  local path=$1
+  curl --silent --show-error --max-time 10 \
+    -H "Authorization: Bearer $admin_token" \
+    --write-out $'\n%{http_code}' \
+    "http://127.0.0.1:${controller_port}${path}"
+}
+
 collect_diagnostics() {
   local pod
   echo "kind-e2e: collecting failure diagnostics in $artifact_dir" >&2
@@ -254,22 +267,31 @@ cleanup_existing_resources() {
     return 1
   }
 
-  if ((release_owned == 0 && release_install_attempted == 1)); then
+  if ((release_install_attempted == 1)); then
+    release_owned=0
     if ! release_list="$(helm_e2e list --all --namespace "$namespace" \
       --selector "$owner_token_label" -o json)"; then
-      cleanup_status=1
+      echo "kind-e2e: refusing cleanup: cannot verify Helm release ownership" >&2
+      return 1
     elif ! release_present="$(jq -r --arg name "$release_name" \
       'if type == "array" then any(.[]; .name == $name) else error("Helm list was not an array") end' \
       <<<"$release_list")"; then
-      cleanup_status=1
-    elif [[ "$release_present" == "true" ]]; then
-      # safety: Helm overwrites failed release descriptions, but owner labels remain queryable.
-      release_owned=1
+      echo "kind-e2e: refusing cleanup: Helm release ownership response was invalid" >&2
+      return 1
     fi
+    [[ "$release_present" == "true" ]] || {
+      echo "kind-e2e: refusing cleanup: release $release_name is not owned by this run" >&2
+      return 1
+    }
+    # safety: Helm overwrites failed release descriptions, but owner labels remain queryable.
+    release_owned=1
   fi
   if ((release_owned == 1)); then
     # safety: Prove Helm ownership before labeling retained PVCs or uninstalling.
-    label_owned_release_pvcs || cleanup_status=1
+    if ! label_owned_release_pvcs; then
+      echo "kind-e2e: refusing cleanup: could not label all owned PVCs" >&2
+      return 1
+    fi
     if helm_e2e uninstall "$release_name" --namespace "$namespace" --timeout 5m; then
       release_owned=0
       release_installed=0
@@ -345,7 +367,6 @@ if [[ "$provision_mode" == "kind" ]]; then
   done
   docker run --rm --entrypoint /bin/sh "$(image_ref sparkwing-runner)" \
     -ec '
-      command -v git-daemon >/dev/null
       git init --bare /tmp/smoke.git >/dev/null
       touch /tmp/smoke.git/git-daemon-export-ok
       git daemon --reuseaddr --base-path=/tmp --export-all --listen=127.0.0.1 --port=9418 /tmp &
@@ -670,9 +691,13 @@ unauthenticated_status="$(curl --silent --show-error --max-time 5 \
 [[ "$unauthenticated_status" == "401" ]] || die "protected controller read returned $unauthenticated_status without a token"
 api_get "/api/v1/runs?limit=1" >/dev/null
 
-kube --namespace "$namespace" exec "deployment/$cache_deployment" -- \
-  git config --global url."git://kind-repo.${namespace}.svc.cluster.local/".insteadOf \
-  "https://github.com/sparkwing-kind/"
+for repository_source in \
+  "https://github.com/sparkwing-kind/" \
+  "git@github.com:sparkwing-kind/"; do
+  kube --namespace "$namespace" exec "deployment/$cache_deployment" -- \
+    git config --global --add url."git://kind-repo.${namespace}.svc.cluster.local/".insteadOf \
+    "$repository_source"
+done
 fixture_sha="$(kube --namespace "$namespace" exec "deployment/$cache_deployment" -- \
   git ls-remote "https://github.com/sparkwing-kind/e2e.git" refs/heads/main | awk '{print $1}')"
 [[ "$fixture_sha" =~ ^[0-9a-f]{40}$ ]] || die "in-cluster Git returned invalid fixture commit $fixture_sha"
@@ -711,9 +736,21 @@ wait_run_status() {
   local wanted=$2
   local timeout_seconds=$3
   local deadline=$((SECONDS + timeout_seconds))
-  local body status
+  local body http_status response status
   while ((SECONDS < deadline)); do
-    body="$(api_get "/api/v1/runs/$run_id")"
+    if ! response="$(api_get_with_status "/api/v1/runs/$run_id")"; then
+      die "run $run_id lookup failed while waiting for $wanted"
+    fi
+    http_status="${response##*$'\n'}"
+    body="${response%$'\n'*}"
+    case "$http_status" in
+      200) ;;
+      404)
+        sleep 1
+        continue
+        ;;
+      *) die "run $run_id returned HTTP $http_status while waiting for $wanted" ;;
+    esac
     status="$(jq -er '.status' <<<"$body")"
     if [[ "$status" == "$wanted" ]]; then
       return 0
