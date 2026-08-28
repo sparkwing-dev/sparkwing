@@ -143,7 +143,7 @@ export async function startAuthenticatedDashboard(
       ],
       options.buildTimeoutMs ?? 60_000,
     );
-    child = spawn(binary, [], {
+    const fixture = spawn(binary, [], {
       cwd: repositoryRoot,
       env: {
         ...process.env,
@@ -152,11 +152,12 @@ export async function startAuthenticatedDashboard(
         SPARKWING_WEB_INSECURE_COOKIES: "1",
       },
     });
-    const started = await waitForStart(child);
+    child = fixture;
+    const started = await waitForStart(fixture);
     return {
       ...started,
       close: async () => {
-        await stop(child);
+        await stop(fixture);
         await rm(temporary, { recursive: true, force: true });
       },
     };
