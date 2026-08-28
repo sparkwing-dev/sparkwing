@@ -54,8 +54,7 @@ func main() {
 		"the `/api/v1` base (webhook and `/metrics` excepted). Scope enforcement and " +
 		"the token model are in [auth.md](auth.md); `admin` is the superset that " +
 		"satisfies any scope check. `public` routes run with no bearer check (the " +
-		"GitHub webhook is HMAC-verified instead; `POST /api/v1/users` self-selects " +
-		"unauthenticated bootstrap vs admin-scoped create).\n\n")
+		"GitHub webhook is HMAC-verified instead).\n\n")
 
 	writeRoutes(&b, "Controller", scopes, controller)
 	writeRoutes(&b, "Logs service", scopes, logs)

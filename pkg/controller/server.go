@@ -437,6 +437,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("POST /api/v1/tokens/{prefix}/rotate", requireScope(ScopeAdmin, http.HandlerFunc(s.handleRotateToken)))
 
 	mux.Handle("GET /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleListUsers)))
+	mux.Handle("POST /api/v1/users", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateUserOrBootstrap)))
 	mux.Handle("DELETE /api/v1/users/{name}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleDeleteUser)))
 
 	mux.Handle("POST /api/v1/secrets", requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateSecret)))
@@ -453,7 +454,6 @@ func (s *Server) Handler() http.Handler {
 	router.Handle("POST /api/v1/auth/logout", http.HandlerFunc(s.handleLogout))
 	router.Handle("GET /api/v1/auth/session", http.HandlerFunc(s.handleSession))
 	router.Handle("GET /api/v1/auth/bootstrap-needed", http.HandlerFunc(s.handleBootstrapNeeded))
-	router.Handle("POST /api/v1/users", http.HandlerFunc(s.handleCreateUserOrBootstrap))
 	router.Handle("GET /metrics", metricsHandler())
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
 	router.Handle("/", authed)

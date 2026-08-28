@@ -59,20 +59,22 @@ the health and metrics probes (k8s httpGet probes and Prometheus
 scrapes can't carry `Authorization`), the service-discovery endpoint
 the runner uses to find the cache pod, the browser session endpoints
 the dashboard needs before it holds a token (login, logout, session),
-the bootstrap probe and the bootstrap-or-admin `POST /api/v1/users`
-(see below), and the GitHub webhook, which is HMAC-verified instead of
-bearer-authenticated. The logs service opens its health and metrics
-probes the same way. Every registered route is listed in
+the bootstrap probe, and the GitHub webhook, which is HMAC-verified
+instead of bearer-authenticated. The logs service opens its health and
+metrics probes the same way. Every registered route is listed in
 [api-reference.md](api-reference.md).
 
 ## First-visit signup
 
+Controller authentication is enabled at startup when the tokens table contains
+an active token. `--require-auth` makes startup fail when it does not; see the
+[security operator checklist](security.md#operator-checklist).
+
 A freshly-installed sparkwing cluster has no users, so there is
-nothing to log in *as*. Browsing to `/login` on an empty cluster
-renders a "Create first admin" form (matching the Grafana / ArgoCD /
-Prometheus first-visit pattern). Submitting it creates the first
-admin user via an unauthenticated `POST /api/v1/users`, then signs
-the new admin in automatically.
+nothing to log in *as*. While controller authentication is disabled,
+browsing to `/login` on an empty cluster renders a "Create first admin"
+form. Submitting it creates the first admin user via `POST
+/api/v1/users`, then signs the new admin in automatically.
 
 The bootstrap path is one-shot and latched: once any user exists,
 the controller serves `{"needed": false}` to the probe, the login
@@ -80,6 +82,11 @@ page reverts to the standard sign-in form, and `POST /api/v1/users`
 goes back to requiring an admin token. There is no way to reopen
 the bootstrap path short of restarting the controller against a
 freshly emptied database.
+
+When controller authentication is enabled, the bootstrap probe reports
+`{"needed": false}` and `POST /api/v1/users` requires an admin token even
+if the users table is empty. An operator can use that token with
+`sparkwing cluster users add` to create the first dashboard user.
 
 After the first admin is created, additional users are added via
 `sparkwing cluster users add` (admin-scoped) like any other operator

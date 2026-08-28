@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"maps"
 	"strconv"
 	"testing"
 
@@ -11,10 +12,28 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
+func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
+	want := map[string]bool{
+		"GET /api/v1/health":                true,
+		"GET /api/v1/services":              true,
+		"POST /api/v1/auth/login":           true,
+		"POST /api/v1/auth/logout":          true,
+		"GET /api/v1/auth/session":          true,
+		"GET /api/v1/auth/bootstrap-needed": true,
+		"GET /metrics":                      true,
+		"POST /webhooks/github/{pipeline}":  true,
+		"/":                                 true,
+	}
+	got := routesRegisteredOn(t, "server.go", "router")
+	if !maps.Equal(got, want) {
+		t.Errorf("outer router routes = %v; want reviewed set %v", got, want)
+	}
+}
+
 // Every route registered on the authenticated mux must pass through
 // requireScope; an endpoint registered bare would be reachable by any
 // authenticated principal regardless of token scope. Routes that are
-// deliberately public (login, bootstrap, health, metrics) live on the
+// deliberately public (login, bootstrap probe, health, metrics) live on the
 // outer router, which this guard does not constrain. Mux routes that
 // deliberately accept any authenticated principal must be listed here
 // so the exception is a conscious, reviewed act.
@@ -130,6 +149,47 @@ func muxRoutes(t *testing.T, file string) map[string]string {
 			return true
 		}
 		out[pattern] = scope.Name
+		return true
+	})
+	return out
+}
+
+func routesRegisteredOn(t *testing.T, file, receiver string) map[string]bool {
+	t.Helper()
+	fset := token.NewFileSet()
+	f, err := parser.ParseFile(fset, file, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := map[string]bool{}
+	ast.Inspect(f, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok || len(call.Args) == 0 {
+			return true
+		}
+		sel, ok := call.Fun.(*ast.SelectorExpr)
+		if !ok || sel.Sel.Name != "Handle" && sel.Sel.Name != "HandleFunc" {
+			return true
+		}
+		recv, ok := sel.X.(*ast.Ident)
+		if !ok || recv.Name != receiver {
+			return true
+		}
+		lit, ok := call.Args[0].(*ast.BasicLit)
+		if !ok {
+			t.Errorf("%s:%d: %s route pattern is not a string literal; the guard cannot verify it",
+				file, fset.Position(call.Pos()).Line, receiver)
+			return true
+		}
+		pattern, err := strconv.Unquote(lit.Value)
+		if err != nil {
+			t.Errorf("%s:%d: invalid route pattern: %v", file, fset.Position(lit.Pos()).Line, err)
+			return true
+		}
+		if out[pattern] {
+			t.Errorf("%s:%d: duplicate %s route %q", file, fset.Position(call.Pos()).Line, receiver, pattern)
+		}
+		out[pattern] = true
 		return true
 	})
 	return out
