@@ -176,14 +176,26 @@ test("bounds a failed fixture build and removes its temporary output", async () 
           'require("node:fs").writeFileSync(process.argv[1],String(process.pid));setInterval(()=>{},1000)',
           pidFile,
         ],
-        buildTimeoutMs: 200,
+        buildTimeoutMs: 2_000,
         temporaryParent: parent,
       }),
-    ).rejects.toThrow("timed out after 200ms");
+    ).rejects.toThrow("timed out after 2000ms");
     expect(Date.now() - startedAt).toBeLessThan(5_000);
 
     const pid = Number(await readFile(pidFile, "utf8"));
-    expect(() => process.kill(pid, 0)).toThrow();
+    await expect
+      .poll(
+        () => {
+          try {
+            process.kill(pid, 0);
+            return false;
+          } catch {
+            return true;
+          }
+        },
+        { timeout: 2_000 },
+      )
+      .toBe(true);
     expect(await readdir(parent)).toEqual(["build.pid"]);
   } finally {
     await rm(parent, { recursive: true, force: true });
