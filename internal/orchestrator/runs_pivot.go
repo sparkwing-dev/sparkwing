@@ -128,7 +128,6 @@ func RenderPipelinePivot(runs []*store.Run, opts PivotOpts, out io.Writer) error
 		return nil
 	}
 	if opts.JSON {
-
 		return writeNDJSON(out, rows)
 	}
 	if len(rows) == 0 {

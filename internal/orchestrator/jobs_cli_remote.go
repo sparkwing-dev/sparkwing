@@ -204,7 +204,6 @@ func JobErrorsRemote(ctx context.Context, controllerURL, token, runID string, as
 	}
 	failed := failedNodeReports(nodes, excerpts)
 	if asJSON {
-
 		return writeNDJSON(out, failed)
 	}
 	if len(failed) == 0 {

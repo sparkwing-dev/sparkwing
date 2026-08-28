@@ -202,7 +202,6 @@ func TestDownloadAndInstall_PostRenameMismatch_RestoresPrior(t *testing.T) {
 
 	previousHook := afterInstallHook
 	afterInstallHook = func(installed string) {
-
 		_ = os.WriteFile(installed, []byte("CORRUPTED-AFTER-RENAME"), 0o755)
 	}
 	t.Cleanup(func() { afterInstallHook = previousHook })

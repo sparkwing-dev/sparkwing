@@ -77,7 +77,6 @@ func watchHostStart(cmd *exec.Cmd, bin, home string) error {
 		case werr := <-exited:
 			var exit *exec.ExitError
 			if werr == nil || !errors.As(werr, &exit) {
-
 				return nil
 			}
 			return hostExitedEarly(bin, home, exit)

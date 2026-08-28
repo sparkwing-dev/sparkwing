@@ -20,8 +20,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-const actorHelperMode = "SPARKWING_CHAOS_ACTOR_HELPER"
-const actorHelperReadyFD = "SPARKWING_CHAOS_ACTOR_READY_FD"
+const (
+	actorHelperMode    = "SPARKWING_CHAOS_ACTOR_HELPER"
+	actorHelperReadyFD = "SPARKWING_CHAOS_ACTOR_READY_FD"
+)
 
 func TestWatchActorHelperProcess(t *testing.T) {
 	switch os.Getenv(actorHelperMode) {

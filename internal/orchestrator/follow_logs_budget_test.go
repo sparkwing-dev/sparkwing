@@ -116,7 +116,6 @@ func TestFollowLogsRemote_GivesUpOnADeadController(t *testing.T) {
 	shortFollowTiming(t, 60*time.Millisecond, 10*time.Millisecond)
 	const runID = "run-dead-controller"
 	url := followSpy(t, runID, func(n int32) (store.Run, bool) {
-
 		if n == 1 {
 			return runningRun(runID), true
 		}

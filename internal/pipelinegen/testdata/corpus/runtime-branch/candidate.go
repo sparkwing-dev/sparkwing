@@ -22,7 +22,6 @@ func (GenRuntimeBranch) Examples() []sw.Example {
 }
 
 func (GenRuntimeBranch) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-
 	if os.Getenv("DEPLOY_ENV") == "prod" {
 		sw.Job(plan, "deploy-prod", &genRBJob{})
 	} else {

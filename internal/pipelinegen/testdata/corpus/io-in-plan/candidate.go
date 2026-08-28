@@ -20,7 +20,6 @@ func (GenIOInPlan) Examples() []sw.Example {
 }
 
 func (GenIOInPlan) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-
 	data, _ := os.ReadFile("VERSION")
 	_ = data
 	sw.Job(plan, run.Pipeline, &genIOJob{})

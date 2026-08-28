@@ -77,7 +77,6 @@ func runXrepoList(args []string) error {
 	}
 
 	if *outputFormat == "json" {
-
 		return ndjson.Write(os.Stdout, rows)
 	}
 

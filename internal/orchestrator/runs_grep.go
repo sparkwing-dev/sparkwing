@@ -237,7 +237,6 @@ func emitGrepMatches(matches []GrepMatch, opts GrepOpts, out io.Writer) error {
 		}
 		sort.Strings(ids)
 		if opts.JSON {
-
 			return ndjson.Write(out, ids)
 		}
 		for _, id := range ids {
@@ -246,7 +245,6 @@ func emitGrepMatches(matches []GrepMatch, opts GrepOpts, out io.Writer) error {
 		return nil
 	}
 	if opts.JSON {
-
 		return ndjson.Write(out, matches)
 	}
 	if len(matches) == 0 {

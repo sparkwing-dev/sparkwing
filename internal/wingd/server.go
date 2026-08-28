@@ -479,7 +479,6 @@ func (d *Daemon) serveConn(c *conn) {
 }
 
 func (d *Daemon) dispatch(c *conn, msg wingwire.Message) bool {
-
 	if c.healthProbe {
 		if _, ok := msg.(*wingwire.QueueState); !ok {
 			return true

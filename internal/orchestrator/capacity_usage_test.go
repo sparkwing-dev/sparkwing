@@ -51,7 +51,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 		wantNoRollup bool
 	}{
 		{
-
 			name:      "sub-tick node is priced from its exit accounting alone",
 			hostCores: 1,
 			runWall:   time.Second,
@@ -65,7 +64,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 256 << 20,
 		},
 		{
-
 			name:      "process startup does not price a trivial node at host capacity",
 			hostCores: 1,
 			runWall:   200 * time.Millisecond,
@@ -82,7 +80,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 32 << 20,
 		},
 		{
-
 			name:      "measured mean outranks the sampled plateau",
 			hostCores: 1,
 			runWall:   10 * time.Second,
@@ -97,7 +94,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 1 << 30,
 		},
 		{
-
 			name:      "fan-out of four rolls up to the sum of its interleaved samples",
 			hostCores: 4,
 			runWall:   6 * time.Second,
@@ -116,7 +112,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 2 << 30,
 		},
 		{
-
 			name:      "sequential commands in one window integrate rather than sum",
 			hostCores: 2,
 			runWall:   2 * time.Second,
@@ -136,7 +131,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 512 << 20,
 		},
 		{
-
 			name:      "concurrent commands in one window still sum",
 			hostCores: 2,
 			runWall:   2 * time.Second,
@@ -159,7 +153,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 512 << 20,
 		},
 		{
-
 			name:      "a window adds its tick to one command mark, not to every one",
 			hostCores: 1,
 			runWall:   2 * time.Second,
@@ -177,7 +170,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 640 << 20,
 		},
 		{
-
 			name:      "peak memory comes from the kernel high-water mark",
 			hostCores: 1,
 			runWall:   4 * time.Second,
@@ -192,7 +184,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 3 << 30,
 		},
 		{
-
 			name:      "a node without exit accounting prices from samples alone",
 			hostCores: 2,
 			runWall:   10 * time.Second,
@@ -212,7 +203,6 @@ func TestRecordRunProfile_PricesMeasuredShapes(t *testing.T) {
 			wantPeakMem: 2 << 30,
 		},
 		{
-
 			name:         "an unmeasured node records nothing",
 			hostCores:    1,
 			runWall:      time.Second,

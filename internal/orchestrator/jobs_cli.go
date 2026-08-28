@@ -120,7 +120,6 @@ func renderRunList(
 	}
 
 	if opts.JSON {
-
 		return writeNDJSON(out, store.RedactedRuns(runs))
 	}
 
@@ -312,7 +311,6 @@ func renderStatus(ctx context.Context, b backend.Backend, runID string, out io.W
 	if p := runLogPath(run); p != "" {
 		line := p
 		if _, err := os.Stat(p); err != nil {
-
 			line += color.Dim(" (not present on this machine)")
 		}
 		fmt.Fprintf(out, "%s %s\n", label("log_path: "), line)
@@ -1293,7 +1291,6 @@ func JobErrors(ctx context.Context, paths Paths, runID string, asJSON bool, out 
 	failed := failedNodeReports(nodes, excerpts)
 
 	if asJSON {
-
 		return writeNDJSON(out, failed)
 	}
 	if len(failed) == 0 {

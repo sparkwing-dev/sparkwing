@@ -155,7 +155,6 @@ func runWebhooksList(args []string) error {
 	}
 
 	if *outputFormat == "json" {
-
 		return ndjson.Write(os.Stdout, rows)
 	}
 
@@ -288,7 +287,6 @@ func runWebhooksDeliveries(args []string) error {
 	}
 
 	if *outputFormat == "json" {
-
 		return ndjson.Write(os.Stdout, rows)
 	}
 

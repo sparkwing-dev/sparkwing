@@ -190,7 +190,6 @@ func TestProcessPerNode_NodeAbandonsARunWhoseDispatcherDied(t *testing.T) {
 
 	nodePID := waitForPID(t, probe, "orphan", 90*time.Second)
 	t.Cleanup(func() {
-
 		if processAlive(nodePID) {
 			_ = syscall.Kill(nodePID, syscall.SIGKILL)
 		}

@@ -60,7 +60,6 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 	}
 
 	if emitJSON {
-
 		return ndjson.Write(os.Stdout, stats)
 	}
 	if len(stats) == 0 {

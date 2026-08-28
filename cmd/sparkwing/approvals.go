@@ -127,7 +127,6 @@ func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []stri
 		return err
 	}
 	if emitJSON {
-
 		return ndjson.Write(os.Stdout, rows)
 	}
 	return renderApprovalsTable(os.Stdout, rows)
