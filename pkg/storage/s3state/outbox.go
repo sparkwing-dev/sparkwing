@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"sync"
 	"time"
 
+	"github.com/aws/smithy-go"
 	_ "modernc.org/sqlite"
 
 	"github.com/sparkwing-dev/sparkwing/internal/fssecure"
@@ -37,19 +39,48 @@ type Outbox struct {
 	db       *sql.DB
 	art      storage.ArtifactStore
 	interval time.Duration
+	logger   *slog.Logger
 
 	mu       sync.Mutex
 	stopCh   chan struct{}
 	stopOnce sync.Once
 	wg       sync.WaitGroup
+
+	stallMu sync.Mutex
+	stalled *outboxStall
+}
+
+type outboxHead struct {
+	id   int64
+	kind string
+	key  string
+}
+
+type outboxStall struct {
+	head        outboxHead
+	fingerprint outboxErrorFingerprint
+}
+
+type outboxErrorFingerprint struct {
+	status   int
+	code     string
+	message  string
+	fallback string
 }
 
 // OpenOutbox initializes the outbox at path. The artifact store
 // receives drained writes once they're re-runnable. Pass interval=0
 // for the default poll cadence.
 func OpenOutbox(path string, art storage.ArtifactStore, interval time.Duration) (*Outbox, error) {
+	return openOutbox(path, art, interval, slog.Default())
+}
+
+func openOutbox(path string, art storage.ArtifactStore, interval time.Duration, logger *slog.Logger) (*Outbox, error) {
 	if art == nil {
 		return nil, errors.New("s3state: OpenOutbox requires an artifact store")
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	if err := fssecure.PrepareSQLite(path); err != nil {
 		return nil, fmt.Errorf("s3state: open outbox: %w", err)
@@ -79,6 +110,7 @@ CREATE TABLE IF NOT EXISTS outbox_writes (
 		db:       db,
 		art:      art,
 		interval: interval,
+		logger:   logger,
 		stopCh:   make(chan struct{}),
 	}
 	if o.interval <= 0 {
@@ -137,6 +169,11 @@ func (o *Outbox) Pending(ctx context.Context) (int, error) {
 // on the first PUT failure and leaves that row queued so the FIFO
 // invariant survives across retries without losing the write.
 func (o *Outbox) Drain(ctx context.Context) error {
+	_, err := o.drain(ctx)
+	return err
+}
+
+func (o *Outbox) drain(ctx context.Context) (outboxHead, error) {
 	for {
 		o.mu.Lock()
 		row := o.db.QueryRowContext(ctx, `
@@ -147,16 +184,17 @@ SELECT id, kind, key, body FROM outbox_writes ORDER BY id ASC LIMIT 1`)
 		err := row.Scan(&id, &kind, &key, &body)
 		o.mu.Unlock()
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil
+			return outboxHead{}, nil
 		}
 		if err != nil {
-			return err
+			return outboxHead{}, err
 		}
+		head := outboxHead{id: id, kind: kind, key: key}
 		switch OutboxKind(kind) {
 		case OutboxKindState, OutboxKindArtifact:
 			perr := o.art.Put(ctx, key, byteReader(body))
 			if perr != nil {
-				return fmt.Errorf("s3state: drain %s %q: %w", kind, key, perr)
+				return head, fmt.Errorf("s3state: drain %s %q: %w", kind, key, perr)
 			}
 		case OutboxKindLog:
 		default:
@@ -165,9 +203,73 @@ SELECT id, kind, key, body FROM outbox_writes ORDER BY id ASC LIMIT 1`)
 		_, err = o.db.ExecContext(ctx, `DELETE FROM outbox_writes WHERE id = ?`, id)
 		o.mu.Unlock()
 		if err != nil {
-			return fmt.Errorf("s3state: delete drained outbox write %d: %w", id, err)
+			return head, fmt.Errorf("s3state: delete drained outbox write %d: %w", id, err)
 		}
 	}
+}
+
+func (o *Outbox) reportDrainResult(head outboxHead, err error) {
+	o.stallMu.Lock()
+	if err == nil {
+		stalled := o.stalled
+		o.stalled = nil
+		o.stallMu.Unlock()
+		if stalled != nil {
+			o.logger.Info("s3 state outbox replay recovered",
+				"kind", stalled.head.kind,
+				"key", stalled.head.key,
+			)
+		}
+		return
+	}
+
+	next := outboxStall{head: head, fingerprint: fingerprintOutboxError(err)}
+	if o.stalled != nil && *o.stalled == next {
+		o.stallMu.Unlock()
+		return
+	}
+	o.stalled = &next
+	o.stallMu.Unlock()
+
+	o.logger.Warn("s3 state outbox replay stalled",
+		"kind", head.kind,
+		"key", head.key,
+		"error", err,
+	)
+}
+
+func fingerprintOutboxError(err error) outboxErrorFingerprint {
+	var apiErr smithy.APIError
+	hasAPIError := errors.As(err, &apiErr)
+	var responseErr interface{ HTTPStatusCode() int }
+	hasHTTPStatus := errors.As(err, &responseErr)
+	if hasAPIError || hasHTTPStatus {
+		fingerprint := outboxErrorFingerprint{}
+		if hasAPIError {
+			fingerprint.code = apiErr.ErrorCode()
+			fingerprint.message = apiErr.ErrorMessage()
+		}
+		if hasHTTPStatus {
+			fingerprint.status = responseErr.HTTPStatusCode()
+			if !hasAPIError {
+				fingerprint.fallback = deepestOutboxErrorFingerprint(err)
+			}
+		}
+		return fingerprint
+	}
+	return outboxErrorFingerprint{fallback: fmt.Sprintf("%T:%s", err, err)}
+}
+
+func deepestOutboxErrorFingerprint(err error) string {
+	deepest := err
+	for {
+		unwrapped := errors.Unwrap(deepest)
+		if unwrapped == nil {
+			break
+		}
+		deepest = unwrapped
+	}
+	return fmt.Sprintf("%T:%s", deepest, deepest)
 }
 
 func (o *Outbox) drainLoop() {
@@ -179,7 +281,8 @@ func (o *Outbox) drainLoop() {
 		case <-o.stopCh:
 			return
 		case <-t.C:
-			_ = o.Drain(context.Background())
+			head, err := o.drain(context.Background())
+			o.reportDrainResult(head, err)
 		}
 	}
 }
