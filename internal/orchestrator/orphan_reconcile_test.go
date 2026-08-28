@@ -27,12 +27,6 @@ func clearRunHeartbeat(t *testing.T, st *store.Store, runID string) {
 	}
 }
 
-// TestReconcileOrphanedLocalRuns_StaleRunFlipsToFailed verifies the
-// core promise: a "running" run whose orchestrator process is dead
-// (no heartbeat past the threshold, started long ago) gets
-// transitioned to "failed" with an "orphaned" reason. This is what
-// closes the "dashboard says still running but it isn't" gap that
-// motivated the helper.
 func TestReconcileOrphanedLocalRuns_StaleRunFlipsToFailed(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
@@ -80,9 +74,6 @@ func TestReconcileOrphanedLocalRuns_StaleRunFlipsToFailed(t *testing.T) {
 	}
 }
 
-// TestReconcileOrphanedLocalRuns_FreshRunUntouched guards against the
-// false-positive case: a "running" run that started a moment ago
-// should not get marked failed.
 func TestReconcileOrphanedLocalRuns_FreshRunUntouched(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
@@ -110,12 +101,6 @@ func TestReconcileOrphanedLocalRuns_FreshRunUntouched(t *testing.T) {
 	}
 }
 
-// TestReconcileOrphanedLocalRuns_CascadesToPendingNodes confirms that
-// when an orphaned run is reconciled, downstream nodes that never had
-// a chance to run (status='pending', waiting on the dead upstream)
-// are marked cancelled rather than left dangling as pending. Matches
-// the in-process dispatcher's "upstream-failed" cascade so readers
-// see consistent shape regardless of how the failure happened.
 func TestReconcileOrphanedLocalRuns_CascadesToPendingNodes(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
@@ -170,9 +155,6 @@ func TestReconcileOrphanedLocalRuns_CascadesToPendingNodes(t *testing.T) {
 	}
 }
 
-// TestReconcileOrphanedLocalRuns_RecentHeartbeatUntouched: a run
-// started long ago whose nodes are still heartbeating should NOT be
-// reconciled. The MAX(last_heartbeat) clause covers this case.
 func TestReconcileOrphanedLocalRuns_RecentHeartbeatUntouched(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
@@ -203,12 +185,6 @@ func TestReconcileOrphanedLocalRuns_RecentHeartbeatUntouched(t *testing.T) {
 	}
 }
 
-// TestReconcileOrphanedLocalRuns_RunHeartbeatKeepsNodelessRunAlive: a
-// run started long ago that has dispatched no nodes yet -- it is parked
-// waiting on a plan-level concurrency slot -- but whose orchestrator is
-// still stamping the run-level heartbeat must NOT be reaped. Without
-// folding last_heartbeat_at into the liveness check this run falls back
-// to started_at and is killed at the threshold despite being alive.
 func TestReconcileOrphanedLocalRuns_RunHeartbeatKeepsNodelessRunAlive(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
@@ -239,11 +215,6 @@ func TestReconcileOrphanedLocalRuns_RunHeartbeatKeepsNodelessRunAlive(t *testing
 	}
 }
 
-// TestReconcileOrphanedLocalRuns_StaleRunHeartbeatReaped guards that
-// the run heartbeat is compared against the cutoff, not merely checked
-// for presence: a nodeless run whose last_heartbeat_at is set but older
-// than the threshold (the orchestrator died after its last ping) must
-// still be reaped.
 func TestReconcileOrphanedLocalRuns_StaleRunHeartbeatReaped(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
@@ -269,10 +240,6 @@ func TestReconcileOrphanedLocalRuns_StaleRunHeartbeatReaped(t *testing.T) {
 	}
 }
 
-// TestReconcileOrphanedLocalRuns_FreshRunHeartbeatBeatsStaleNode pins
-// the three-way max(): a run with a stale node heartbeat but a fresh
-// run-level heartbeat survives. A regression collapsing the liveness
-// check to the node signal alone would reap it.
 func TestReconcileOrphanedLocalRuns_FreshRunHeartbeatBeatsStaleNode(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
@@ -306,10 +273,6 @@ func TestReconcileOrphanedLocalRuns_FreshRunHeartbeatBeatsStaleNode(t *testing.T
 	}
 }
 
-// TestReconcileOrphanedLocalRuns_NodelessRunWithoutHeartbeatReaped is
-// the backstop guard for the case above: the same nodeless, long-ago
-// run with NO run-level heartbeat (a crashed orchestrator that never
-// pinged) must still be reaped via the started_at fallback.
 func TestReconcileOrphanedLocalRuns_NodelessRunWithoutHeartbeatReaped(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()

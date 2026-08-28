@@ -82,9 +82,6 @@ func TestChangelogHeadingMatches(t *testing.T) {
 	}
 }
 
-// firstReleasedVersion returns the newest `## [vX.Y.Z]` label in the
-// embedded changelog so version-specific assertions don't hard-code a
-// release that later rolls off.
 func firstReleasedVersion(t *testing.T) string {
 	t.Helper()
 	for _, line := range strings.Split(Changelog(), "\n") {

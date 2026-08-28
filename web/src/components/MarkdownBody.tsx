@@ -1,9 +1,5 @@
 "use client";
 
-// MarkdownBody renders user-emitted markdown (sparkwing.Summary)
-// inside a tight container -- no page-level padding or oversized
-// headings. Use this for embedded summary cards; the full-bleed
-// Markdown component is for standalone docs.
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";

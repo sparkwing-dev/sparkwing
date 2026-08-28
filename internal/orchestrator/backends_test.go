@@ -13,12 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestBackendsSeam_DrivesAllInterfaces runs a tiny pipeline through
-// fake backends and asserts that the orchestrator writes run/node
-// state, appends events, requests log sinks, and acquires exclusive
-// locks via the Backends interface (never reaches for the local
-// store directly). If a future refactor accidentally hardwires to
-// *store.Store again, this test fails.
 func TestBackendsSeam_DrivesAllInterfaces(t *testing.T) {
 	register("seam-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return seamOK{} })
 
@@ -69,8 +63,6 @@ func TestBackendsSeam_DrivesAllInterfaces(t *testing.T) {
 	}
 }
 
-// TestBackendsSeam_StateErrorPropagates ensures a failing
-// CreateRun surfaces to the caller without silent success.
 func TestBackendsSeam_StateErrorPropagates(t *testing.T) {
 	register("seam-ok", func() sparkwing.Pipeline[sparkwing.NoInputs] { return seamOK{} })
 

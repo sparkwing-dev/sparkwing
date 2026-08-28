@@ -11,17 +11,10 @@ import (
 	"strconv"
 )
 
-// cgroupRoot is the cgroup v2 unified hierarchy mount point.
 const cgroupRoot = "/sys/fs/cgroup"
 
-// cgroupSupported reports that this platform can wall runs with a cgroup.
 const cgroupSupported = true
 
-// newCgroupLimiter creates a cgroup v2 group whose cpu.max and memory.max
-// match the budget, named uniquely for this sparkwing home. It fails when
-// the machine is not on cgroup v2 or the daemon cannot write the group --
-// the common unprivileged-laptop case -- so the caller can degrade to an
-// admission-only cap with a logged note.
 func newCgroupLimiter(homeDir string, cores float64, mem uint64) (*cgroupLimiter, error) {
 	if _, err := os.Stat(filepath.Join(cgroupRoot, "cgroup.controllers")); err != nil {
 		return nil, fmt.Errorf("cgroup v2 not available at %s: %w", cgroupRoot, err)
@@ -42,8 +35,6 @@ func newCgroupLimiter(homeDir string, cores float64, mem uint64) (*cgroupLimiter
 	return &cgroupLimiter{path: path}, nil
 }
 
-// join moves a process into the budget cgroup so the kernel enforces the
-// cpu.max/memory.max wall on it.
 func (c *cgroupLimiter) join(pid int) error {
 	return os.WriteFile(filepath.Join(c.path, "cgroup.procs"), []byte(strconv.Itoa(pid)), 0)
 }

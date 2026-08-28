@@ -158,10 +158,11 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 
 	cancelled := make(chan struct{}, 1)
 	leaseEnded := make(chan struct{})
+	var leaseEndErr error
 	completionAck := make(chan struct{})
 	var completionOnce sync.Once
 	go func() {
-		queueExecWatchGuard(lease, func(wingwire.Cancel) {
+		leaseEndErr = queueExecWatchGuard(lease, func(wingwire.Cancel) {
 			select {
 			case cancelled <- struct{}{}:
 			default:
@@ -171,32 +172,65 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 	}()
 	finished := make(chan error, 1)
 	go func() { finished <- group.Finish(context.Background(), queueExecCleanupTimeout) }()
+	go func() {
+		<-group.LeaderExited()
+		// safety: Declare at exit observation, before a successor can reconcile the
+		// same empty session and reject reattachment. The main path retries
+		// any write failure below; CompleteGuard is idempotent.
+		_ = queueExecDeclareGuardComplete(lease)
+	}()
 
 	var commandErr error
+	completionAlreadyDurable := false
 	select {
 	case commandErr = <-finished:
 	case <-cancelled:
 		commandErr = terminateQueueExec(group)
 	case <-leaseEnded:
-		commandErr = errors.Join(errQueueExecLeaseLost, terminateQueueExec(group))
+		select {
+		case <-completionAck:
+			completionAlreadyDurable = true
+			commandErr = <-finished
+		default:
+			guardGone, inspectErr := queueExecGuardAlreadyGone(leaseEndErr, session)
+			if guardGone {
+				completionAlreadyDurable = true
+				commandErr = <-finished
+			} else {
+				commandErr = errors.Join(errQueueExecLeaseLost, leaseEndErr, inspectErr, terminateQueueExec(group))
+			}
+		}
+	case <-completionAck:
+		// safety: The successor can durably observe the exited process session before
+		// the local group waiter finishes reaping its leader.
+		commandErr = <-finished
 	case <-ctx.Done():
 		commandErr = errors.Join(ctx.Err(), terminateQueueExec(group))
 	}
-	releaseErr := lease.CompleteGuard()
-	select {
-	case <-completionAck:
-		releaseErr = nil
-	case <-leaseEnded:
+	var releaseErr error
+	if !completionAlreadyDurable {
+		releaseErr = queueExecReleaseGuard(lease)
 		select {
 		case <-completionAck:
 			releaseErr = nil
-		default:
-			if releaseErr == nil {
-				releaseErr = errors.New("guard completion ended without acknowledgement")
+		case <-leaseEnded:
+			select {
+			case <-completionAck:
+				releaseErr = nil
+			default:
+				guardGone, inspectErr := queueExecGuardAlreadyGone(leaseEndErr, session)
+				if guardGone {
+					releaseErr = nil
+				} else {
+					releaseErr = errors.Join(releaseErr, leaseEndErr, inspectErr)
+					if releaseErr == nil {
+						releaseErr = errors.New("guard completion ended without acknowledgement")
+					}
+				}
 			}
+		case <-time.After(queueExecCleanupTimeout):
+			releaseErr = errors.Join(releaseErr, errors.New("guard completion acknowledgement timed out"))
 		}
-	case <-time.After(queueExecCleanupTimeout):
-		releaseErr = errors.Join(releaseErr, errors.New("guard completion acknowledgement timed out"))
 	}
 	_ = cl.Close()
 	if commandErr == nil && releaseErr != nil {
@@ -219,10 +253,29 @@ func abortQueueExecGuard(group *procgroup.Group, gate *os.File, lease *wingdclie
 	_ = cl.Close()
 }
 
-var queueExecWatchGuard = func(lease *wingdclient.Lease, onCancel func(wingwire.Cancel), onComplete func()) {
-	lease.WatchGuard(func(eviction wingwire.Evicted) {
+var queueExecWatchGuard = func(lease *wingdclient.Lease, onCancel func(wingwire.Cancel), onComplete func()) error {
+	return lease.WatchGuard(func(eviction wingwire.Evicted) {
 		onCancel(wingwire.Cancel{RunID: eviction.RunID, Reason: "admission superseded"})
 	}, onCancel, onComplete)
+}
+
+func queueExecGuardAlreadyGone(watchErr error, session procgroup.SessionIdentity) (bool, error) {
+	if !errors.Is(watchErr, wingdclient.ErrReattachRejected) {
+		return false, nil
+	}
+	empty, err := procgroup.SessionEmpty(session)
+	if err != nil {
+		return false, fmt.Errorf("inspect guarded session after rejected reattach: %w", err)
+	}
+	return empty, nil
+}
+
+var queueExecDeclareGuardComplete = func(lease *wingdclient.Lease) error {
+	return lease.CompleteGuard()
+}
+
+var queueExecReleaseGuard = func(lease *wingdclient.Lease) error {
+	return lease.CompleteGuard()
 }
 
 func startQueueExecGuard(command []string) (*procgroup.Group, *os.File, procgroup.SessionIdentity, error) {

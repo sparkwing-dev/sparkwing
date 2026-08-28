@@ -40,15 +40,6 @@ type WhenRunnerProvider interface {
 	WhenRunner() []string
 }
 
-// applyWorkableLabels reads any provider interface a Workable
-// implements and seeds the corresponding *JobNode label set. Empty
-// slices from a provider clear the field (consistent with the
-// chainable verb's no-arg behavior); a Workable that does not
-// implement a given interface leaves the field untouched.
-//
-// Called from newNode so every construction path (the Job verb, the
-// fan-out generators, OnFailure recovery nodes, and spawn-handler
-// detached nodes) picks up Workable-declared labels uniformly.
 func applyWorkableLabels(n *JobNode, w Workable) {
 	if n == nil || w == nil {
 		return

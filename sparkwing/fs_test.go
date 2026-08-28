@@ -142,10 +142,6 @@ func TestCapture_DoesNotStreamButFails(t *testing.T) {
 	}
 }
 
-// When walk-up found no `.sparkwing/`, WorkDir is empty and the
-// helpers must refuse to run rather than silently use cwd. Each
-// path-aware helper is exercised here so a future regression in
-// any one of them is caught.
 func TestHelpers_FailLoudlyWhenNoProject(t *testing.T) {
 	prev := sparkwing.WorkDir()
 	sparkwing.SetWorkDir("")
@@ -207,8 +203,6 @@ func TestHelpers_FailLoudlyWhenNoProject(t *testing.T) {
 	})
 }
 
-// Absolute paths must work even when WorkDir is empty -- they don't
-// need a project root to resolve.
 func TestHelpers_AbsolutePathsWorkWithoutProject(t *testing.T) {
 	prev := sparkwing.WorkDir()
 	sparkwing.SetWorkDir("")

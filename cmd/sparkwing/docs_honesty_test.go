@@ -15,47 +15,17 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-// A repo doc outside the embedded set gets the same treatment through these
-// markers: text between them describes intent, text outside it describes
-// shipped behavior. The exclusion is written down and checked rather than
-// implied by nothing looking at the file, which is how a README comes to
-// document verbs the binary answers with `unknown subcommand`.
 const (
 	designRegionOpen  = "<!-- design:begin -->"
 	designRegionClose = "<!-- design:end -->"
 )
 
-// repoDocs are the markdown files outside the embedded set that the honesty
-// check still reads. README.md is the doc a stranger reads first, so a command
-// name in it is as much a promise as one on a page.
 var repoDocs = []string{"../../README.md"}
 
-// docCommand matches a `sparkwing <verb> [<verb>...]` invocation and captures
-// the run of lowercase words after the binary name. It is anchored, and is
-// applied only to the runnable units codeUnits produces, because a command
-// line is something a doc puts at the front of one -- "helm install sparkwing
-// charts/sparkwing-full" names a helm release, and "1. sparkwing resolves the
-// profile" is a sentence in a flow diagram.
-//
-// The trailing \b on each word is what keeps `sparkwing v0.16.0` -- a release
-// name, which the pages use constantly -- from reading as a call to a verb `v`.
 var docCommand = regexp.MustCompile(`^sparkwing((?: [a-z][a-z-]*\b)+)`)
 
-// intentPages carry verbs the binary does not have. Rule 3 of the
-// docs-publishing card puts declared-but-unbuilt surface on a page named as
-// intent and nowhere else in the set, and these are those pages: everything
-// under proposals/ is a proposal, and mcp.md opens by saying the server is not
-// implemented. TestIntentPagesDeclareThatTheyAreNotShipped holds them to
-// saying so, so this exemption cannot spread to a page that reads as
-// reference.
 var intentPages = []string{"mcp", "proposals/"}
 
-// versionedPages describe binaries other than the one they ship in. The
-// changelog records what each release did and the migration notes tell a
-// reader what the version they are leaving accepted, so a verb that was
-// renamed three releases ago belongs in them exactly as it was spelled then.
-// Checking these against today's dispatch would demand that history be
-// rewritten to match the present, which is the opposite of their purpose.
 var versionedPages = []string{"changelog", "migrations/"}
 
 func TestEmbeddedReferencePagesNameOnlyDispatchedCommands(t *testing.T) {
@@ -84,9 +54,6 @@ func TestEmbeddedReferencePagesNameOnlyDispatchedCommands(t *testing.T) {
 	}
 }
 
-// An exemption for a page that no longer exists is an exemption nobody is
-// reading, and the next page whose slug happens to match it inherits a pass
-// nobody granted.
 func TestEveryPageExemptionMatchesAPageThatExists(t *testing.T) {
 	for _, prefix := range append(append([]string{}, intentPages...), versionedPages...) {
 		matched := false
@@ -102,9 +69,6 @@ func TestEveryPageExemptionMatchesAPageThatExists(t *testing.T) {
 	}
 }
 
-// An intent page is exempt from the dispatch check because it says it is
-// describing something unbuilt. A page that stopped saying so is a reference
-// page again, and this is what notices.
 func TestIntentPagesDeclareThatTheyAreNotShipped(t *testing.T) {
 	for _, e := range docs.List() {
 		if !matchesAny(e.Slug, intentPages) {
@@ -121,8 +85,6 @@ func TestIntentPagesDeclareThatTheyAreNotShipped(t *testing.T) {
 	}
 }
 
-// matchesAny reports whether slug is one of these entries or sits under one of
-// them, so an entry ending in / names a directory of pages.
 func matchesAny(slug string, entries []string) bool {
 	for _, e := range entries {
 		if slug == e || (strings.HasSuffix(e, "/") && strings.HasPrefix(slug, e)) {
@@ -132,9 +94,6 @@ func matchesAny(slug string, entries []string) bool {
 	return false
 }
 
-// declaresStatus reports whether one of a page's opening lines is a status
-// declaration, in any of the spellings the set uses: a "Status:" paragraph, a
-// bolded or blockquoted one, or a "## Status" heading.
 func declaresStatus(body string) bool {
 	lines := strings.Split(body, "\n")
 	if len(lines) > 14 {
@@ -171,8 +130,6 @@ func TestRepoDocsNameOnlyDispatchedCommandsOutsideTheirDesignRegions(t *testing.
 	}
 }
 
-// An unbalanced marker would silently widen the exclusion until the check reads
-// nothing, so shippedProse refuses the file rather than passing it.
 func TestShippedProseDropsDesignRegionsAndRefusesUnbalancedMarkers(t *testing.T) {
 	const begin, end = designRegionOpen, designRegionClose
 	cases := []struct {
@@ -207,9 +164,6 @@ func TestShippedProseDropsDesignRegionsAndRefusesUnbalancedMarkers(t *testing.T)
 	}
 }
 
-// The pages that ship are honest, so the checks above cannot fail today. These
-// cases pin the detection itself: a gate that has never been shown to bite is
-// a gate nobody should trust.
 func TestHonestyCheckReadsInvocationsAndIgnoresProse(t *testing.T) {
 	dispatch := map[string]bool{
 		"sparkwing run":       true,
@@ -271,8 +225,6 @@ func TestHonestyCheckReadsInvocationsAndIgnoresProse(t *testing.T) {
 	}
 }
 
-// invocationCount reports how many units read as a call to this CLI. It backs
-// the guard that a doc the check reads has something in it to read.
 func invocationCount(units []string) int {
 	n := 0
 	for _, unit := range units {
@@ -283,9 +235,6 @@ func invocationCount(units []string) int {
 	return n
 }
 
-// The command registry is what the checks above read, so a path sitting in it
-// that no top-level case dispatches would let a doc name a verb the binary
-// refuses and still pass. This is the join between the two.
 func TestEveryRegistryTopLevelVerbIsDispatched(t *testing.T) {
 	switchCases := topLevelSwitchCases(t)
 	for _, c := range allCommands {
@@ -300,11 +249,6 @@ func TestEveryRegistryTopLevelVerbIsDispatched(t *testing.T) {
 	}
 }
 
-// undispatched returns the invocations among these units that resolve to no
-// registered command, deduplicated and sorted. An invocation resolves against
-// the longest registered path that prefixes it, so `sparkwing run my-pipeline`
-// is a call to `sparkwing run` carrying an argument rather than a call to a
-// verb `my-pipeline`.
 func undispatched(units []string, dispatch map[string]bool) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -331,9 +275,6 @@ func undispatched(units []string, dispatch map[string]bool) []string {
 	return out
 }
 
-// shippedProse returns md with its design regions removed, leaving the part of
-// the doc that presents itself as describing the binary as it ships. An
-// unbalanced marker is an error rather than a silently wider exclusion.
 func shippedProse(md string) (string, error) {
 	var kept []string
 	inDesign := false
@@ -362,24 +303,6 @@ func shippedProse(md string) (string, error) {
 	return strings.Join(kept, "\n"), nil
 }
 
-// codeUnits returns the places in a markdown doc where something is presented
-// as runnable: each line of a shell fence, and the body of each inline code
-// span. Each returned unit is a place a command line can begin, so an anchored
-// pattern over them reads instructions and ignores prose.
-//
-// Two narrowings make that true, and both are sparkwing's, not the copy
-// source's.
-//
-// The first is on fences. The upstream copy reads every fence whatever its
-// language; a Go string literal is not an imperative, and the embedded set
-// carries 139 Go fences and 60 YAML ones, so reading source fences would make
-// the check demand a dispatch for a word inside a struct tag. An unlabelled
-// fence is still read as commands, so the default stays strict and the
-// narrowing only ever drops a fence that declares itself something else.
-//
-// The second is that a quoted run inside a unit is itself a unit. Generated
-// references can quote commands mid-sentence, and those are as much an
-// instruction as a line in a fence.
 func codeUnits(md string) []string {
 	var out []string
 	add := func(s string) {
@@ -425,8 +348,6 @@ func codeUnits(md string) []string {
 	return out
 }
 
-// shellFence reports whether a fence's info string means "these are command
-// lines". An unlabelled fence counts, so the default stays strict.
 func shellFence(info string) bool {
 	switch strings.ToLower(strings.TrimSpace(info)) {
 	case "", "sh", "bash", "zsh", "shell", "console", "terminal":
@@ -435,16 +356,6 @@ func shellFence(info string) bool {
 	return false
 }
 
-// dispatchedPaths returns every invocation the binary answers, from both of
-// the places that decide it.
-//
-// The registry carries nested paths and is the binary's own account of its
-// surface: `sparkwing commands`
-// serves it, the help renderer reads it, and TestAllCommandsAreRegistered
-// holds it level with help_registry.go. It is not the whole answer, because
-// runSparkwing also branches on verbs the registry does not carry:
-// `run-node` and `handle-trigger` are dispatched for other processes to call,
-// and a doc that names one is describing something real.
 func dispatchedPaths(t *testing.T) map[string]bool {
 	t.Helper()
 	out := map[string]bool{}
@@ -460,8 +371,6 @@ func dispatchedPaths(t *testing.T) map[string]bool {
 	return out
 }
 
-// topLevelSwitchCases reads the case values of runSparkwing's `switch args[0]`,
-// which is what the process actually branches on.
 func topLevelSwitchCases(t *testing.T) map[string]bool {
 	t.Helper()
 	fset := token.NewFileSet()

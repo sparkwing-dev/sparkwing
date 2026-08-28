@@ -10,11 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestConcurrency_BurstResolvesAllArrivals: fire N concurrent
-// Queue-policy acquires against a Max=1 key. Each waiter should
-// eventually be promoted and released, and no waiter should be
-// permanently stuck. This mirrors the live HTTP burst script but
-// runs in-process so failures surface clearer diagnostics.
 func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
@@ -93,9 +88,6 @@ func TestConcurrency_BurstResolvesAllArrivals(t *testing.T) {
 	}
 }
 
-// TestConcurrency_HolderIDPreservedThroughPromotion: verifies the
-// caller's custom holder_id survives queueing + promotion so a later
-// heartbeat/release call using the same holder_id works.
 func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
@@ -130,10 +122,6 @@ func TestConcurrency_HolderIDPreservedThroughPromotion(t *testing.T) {
 	}
 }
 
-// TestConcurrency_BurstConcurrentAcquireAndRelease hammers the
-// primitive with N goroutines that each acquire, hold briefly, and
-// release. All must complete; the store's SQLite-serialized writes
-// handle the concurrency without deadlocks or stuck waiters.
 func TestConcurrency_BurstConcurrentAcquireAndRelease(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)

@@ -9,11 +9,6 @@ import (
 	"strings"
 )
 
-// AnalyzeSource parses every non-test .go file directly under dir,
-// finds each pipeline Plan method, and runs the source rules over its
-// body. Findings are tagged with the Plan's receiver type name (the
-// entrypoint). Parsing is AST-only: it never type-checks or builds, so
-// it works against a pinned-SDK source tree without resolving imports.
 func AnalyzeSource(dir string) ([]Finding, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -44,12 +39,11 @@ func AnalyzeSource(dir string) ([]Finding, error) {
 	return findings, nil
 }
 
-// analysis carries the per-Plan-method context every rule needs.
 type analysis struct {
 	fset     *token.FileSet
 	file     string
 	typeName string
-	imports  map[string]string // local package identifier -> import path
+	imports  map[string]string
 	findings []Finding
 }
 
@@ -65,9 +59,6 @@ func (a *analysis) add(rule string, pos token.Pos, msg string) {
 	})
 }
 
-// run walks the Plan body once, dispatching each node to the rules.
-// Function-literal bodies are pruned: their code runs at dispatch, not
-// while the plan is built, so I/O and env reads there are idiomatic.
 func (a *analysis) run(body *ast.BlockStmt) {
 	if body == nil {
 		return
@@ -195,8 +186,6 @@ func (a *analysis) checkExprStmt(es *ast.ExprStmt) {
 	}
 }
 
-// checkChain inspects a job-builder method chain (sparkwing.Job(...)
-// .Needs(...).Inline().Requires(...)) rooted at a job constructor.
 func (a *analysis) checkChain(expr ast.Expr) {
 	root, methods := unwindChain(expr)
 	if root == nil || !a.isJobConstructor(root) {
@@ -227,19 +216,6 @@ func (a *analysis) checkChain(expr ast.Expr) {
 	a.checkGroupCache(root, methods)
 }
 
-// checkGroupCache flags a content cache declared on a set of jobs rather
-// than on one job.
-//
-// JobGroup.Memoize takes a single key function and applies it to every
-// member, so the members share one cache entry: the first to finish
-// stores a result the rest replay. On the shape this is most often
-// reached for -- a build matrix from JobFanOut -- that means one cell's
-// pass is served for all of them. It presents as a fast green run, which
-// is why nothing downstream catches it.
-//
-// No intent needs inferring here, which is what makes it a lint rule
-// rather than an advisory: one key across N members is wrong under every
-// reading of it.
 func (a *analysis) checkGroupCache(root *ast.CallExpr, methods []*ast.CallExpr) {
 	sel := selectorOf(root.Fun)
 	if sel == nil {
@@ -337,8 +313,6 @@ func receiverTypeName(fn *ast.FuncDecl) string {
 	return baseTypeName(fn.Recv.List[0].Type)
 }
 
-// baseTypeName strips a leading pointer and package qualifier, returning
-// the bare type identifier (e.g. *sparkwing.Plan -> "Plan").
 func baseTypeName(expr ast.Expr) string {
 	switch t := expr.(type) {
 	case *ast.StarExpr:
@@ -351,9 +325,6 @@ func baseTypeName(expr ast.Expr) string {
 	return ""
 }
 
-// selectorOf returns the SelectorExpr a call's Fun resolves to,
-// unwrapping generic instantiation (RefTo[T] -> IndexExpr). Returns nil
-// when the call target is not pkg.Fn shaped.
 func selectorOf(fun ast.Expr) *ast.SelectorExpr {
 	switch f := fun.(type) {
 	case *ast.SelectorExpr:
@@ -366,9 +337,6 @@ func selectorOf(fun ast.Expr) *ast.SelectorExpr {
 	return nil
 }
 
-// unwindChain decomposes a method chain into its root call (the
-// left-most call, e.g. the job constructor) and the method calls applied
-// to it, in source order.
 func unwindChain(expr ast.Expr) (root *ast.CallExpr, methods []*ast.CallExpr) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
@@ -416,9 +384,6 @@ func allBlank(exprs []ast.Expr) bool {
 	return true
 }
 
-// findRefCall returns the first RefTo / RefToLastRun call inside expr,
-// matched structurally by name, without descending into function
-// literals. Used to spot a Ref produced into a blank assignment.
 func findRefCall(expr ast.Expr) *ast.CallExpr {
 	var found *ast.CallExpr
 	ast.Inspect(expr, func(n ast.Node) bool {

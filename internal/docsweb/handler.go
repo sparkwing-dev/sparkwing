@@ -1,14 +1,3 @@
-// Package docsweb renders sparkwing's embedded documentation for a browser.
-//
-// The pages come from pkg/docs, the one embedded set the CLI already reads, so
-// the dashboard and `sparkwing docs` describe the same build from the same
-// markdown. The two renderings differ: `sparkwing docs read` prints the body
-// with cross-page links rewritten into CLI commands, and this one turns those
-// links into anchors.
-//
-// This package only renders; it embeds nothing of its own. It is internal
-// rather than part of pkg/ because HTML is a rendering choice, and a renderer
-// on the public API is a shape adopters would pin.
 package docsweb
 
 import (
@@ -19,16 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-// Handler serves the embedded set: the index on whatever path it is mounted
-// at, and one page at `?p=<slug>`. Addressing pages by query string rather
-// than by path keeps the handler indifferent to its mount point, so the
-// dashboard can hang it on /docs without every cross-page link having to know
-// that path -- and it keeps the whole surface a single route, which is what
-// lets it be registered ahead of the dashboard's catch-all.
-//
-// An unknown slug is a 404. The catch-all this sits in front of answers every
-// path with the dashboard shell, so a docs route that returned 200 for a
-// nonsense slug would be indistinguishable from not being registered at all.
 func Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -50,8 +29,6 @@ func Handler() http.Handler {
 	})
 }
 
-// titleOf returns the index title for a slug, falling back to the slug so a
-// page whose markdown carries no heading still names itself.
 func titleOf(slug string) string {
 	for _, e := range docs.List() {
 		if e.Slug == slug {
@@ -64,9 +41,6 @@ func titleOf(slug string) string {
 	return slug
 }
 
-// pageHref resolves a cross-page markdown link to a query into this handler.
-// A link to a slug the set does not carry is reported unknown so the renderer
-// leaves the text unlinked rather than publishing a dead link.
 func pageHref(slug string) (string, bool) {
 	for _, e := range docs.List() {
 		if e.Slug == slug {
@@ -78,9 +52,6 @@ func pageHref(slug string) (string, bool) {
 
 var tmpl = template.Must(template.New("docs").Parse(pageHTML))
 
-// The page carries its palette inline. A docs view that fetched a stylesheet
-// would stop working the moment it is read from a dashboard on a machine with
-// no route to the internet, which is the case the embedded set exists for.
 const pageHTML = `
 {{define "head"}}<!doctype html>
 <html lang="en"><head>

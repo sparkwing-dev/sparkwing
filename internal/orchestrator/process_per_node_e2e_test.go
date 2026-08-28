@@ -18,15 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestProcessPerNode_EveryNodeRunsInItsOwnProcess is the parity gate
-// for local execution moving out of the dispatcher's goroutines.
-//
-// It has to build a real pipeline binary, because "can this binary
-// re-enter itself at run-node" is the whole property under test and a
-// test binary cannot. What it then asserts is the shape of the model:
-// each node body runs in a process of its own, a typed output still
-// reaches its consumer across that boundary, and a recovery node --
-// which the plan never registered by id -- is reachable and runs too.
 func TestProcessPerNode_EveryNodeRunsInItsOwnProcess(t *testing.T) {
 	mod, bin := buildProcPerNodeBinary(t)
 
@@ -50,15 +41,11 @@ func TestProcessPerNode_EveryNodeRunsInItsOwnProcess(t *testing.T) {
 				node, pid)
 		}
 	}
-	// safety: two nodes sharing a process would mean one process served both,
-	// which is the model this replaces.
+
 	if readPID(t, probe, "produce") == readPID(t, probe, "consume") {
 		t.Error("produce and consume shared a process")
 	}
 
-	// safety: the consumer asserts the value itself and fails the node when it
-	// is wrong, so a green run is the proof the typed output crossed
-	// the boundary.
 	if !strings.Contains(out, "consumed digest=sha-abc123") {
 		t.Errorf("consumer did not read the producer's typed output:\n%s", out)
 	}
@@ -66,23 +53,6 @@ func TestProcessPerNode_EveryNodeRunsInItsOwnProcess(t *testing.T) {
 	assertNodesRecordedTheirUsage(t, home, "spawnproof", "produce", "consume")
 }
 
-// assertNodesRecordedTheirUsage checks that the dispatcher wrote what the
-// kernel charged each node's process onto the node row, and that the pipeline
-// profile prices the node at what those figures say.
-//
-// Only a supervised process has this accounting, so the first half is the
-// end-to-end proof that the reap reaches the store: a node that really ran
-// spent CPU, held memory, and existed for a span. The second half is why the
-// span is stored: the charge has to be the CPU over the process's own life.
-// Divided by the node's inner started_at..finished_at window instead -- which
-// excludes runtime startup, plan rebuild, and teardown, while the CPU those
-// phases burn is still in the total -- these same fixture nodes price several
-// times higher, and on a smaller box they clamp to host capacity. Every node
-// of every pipeline would then charge the whole machine after enough runs.
-//
-// The fixture nodes are all shorter than one sampling interval, so the exit
-// accounting is the only measurement they have and the stored charge has to
-// be exactly it.
 func assertNodesRecordedTheirUsage(t *testing.T, home, pipeline string, nodeIDs ...string) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(home, "state.db"))
@@ -126,17 +96,6 @@ func assertNodesRecordedTheirUsage(t *testing.T, home, pipeline string, nodeIDs 
 	}
 }
 
-// TestProcessPerNode_SpawnNodeRunsInsideItsParentsProcess is the
-// spawn half of the same parity gate.
-//
-// SpawnNode used to be served only by the dispatcher, which splices
-// the child into its live plan -- so once a node's body moved into its
-// own process, the first spawn in a local run failed the way it had
-// always failed in a pod: no handler in ctx. This asserts the child
-// runs, in its parent's process (it is that node's sub-work, and its
-// CPU is charged there), and that the run record carries it as a real
-// node: a namespaced row, its typed output, and the parent's
-// spawn_dispatched event naming it.
 func TestProcessPerNode_SpawnNodeRunsInsideItsParentsProcess(t *testing.T) {
 	mod, bin := buildProcPerNodeBinary(t)
 
@@ -208,19 +167,6 @@ func TestProcessPerNode_SpawnNodeRunsInsideItsParentsProcess(t *testing.T) {
 	}
 }
 
-// TestProcessPerNode_NodeAbandonsARunWhoseDispatcherDied is the
-// orphan guarantee.
-//
-// A dispatcher killed with SIGKILL sends nothing and runs no
-// deferred cleanup, and its node processes live in their own process
-// groups precisely so a cancelled node's tree can be signaled
-// independently -- which also means they are not swept up when the
-// dispatcher dies. Without the liveness pipe they would keep running,
-// reparented to init, holding CPU and locks for a run nobody is
-// coordinating.
-//
-// The node here sleeps ten minutes and ignores its context, so
-// passing requires the hard exit, not just the cancel.
 func TestProcessPerNode_NodeAbandonsARunWhoseDispatcherDied(t *testing.T) {
 	mod, bin := buildProcPerNodeBinary(t)
 
@@ -244,8 +190,7 @@ func TestProcessPerNode_NodeAbandonsARunWhoseDispatcherDied(t *testing.T) {
 
 	nodePID := waitForPID(t, probe, "orphan", 90*time.Second)
 	t.Cleanup(func() {
-		// safety: a failing run must not leave the sleeper behind for whoever
-		// debugs this next.
+
 		if processAlive(nodePID) {
 			_ = syscall.Kill(nodePID, syscall.SIGKILL)
 		}
@@ -265,8 +210,6 @@ func TestProcessPerNode_NodeAbandonsARunWhoseDispatcherDied(t *testing.T) {
 	}
 }
 
-// waitForPID blocks until the named probe file appears and returns the
-// pid it holds.
 func waitForPID(t *testing.T, dir, name string, timeout time.Duration) int {
 	t.Helper()
 	path := filepath.Join(dir, name+".pid")
@@ -284,16 +227,10 @@ func waitForPID(t *testing.T, dir, name string, timeout time.Duration) int {
 	}
 }
 
-// processAlive reports whether pid still names a live process. Signal
-// 0 performs the permission and existence checks without delivering
-// anything.
 func processAlive(pid int) bool {
 	return syscall.Kill(pid, 0) == nil
 }
 
-// buildProcPerNodeBinary compiles a real pipeline binary against the
-// working tree. Only a real binary can re-enter itself at `run-node`,
-// which is the property both tests here are about.
 func buildProcPerNodeBinary(t *testing.T) (mod, bin string) {
 	t.Helper()
 	if testing.Short() {
@@ -322,23 +259,11 @@ func buildProcPerNodeBinary(t *testing.T) (mod, bin string) {
 	return mod, bin
 }
 
-// wingdHostBin builds this working tree's own CLI and returns its path, for
-// pinning SPARKWING_WINGD_BIN on a spawned run.
-//
-// Without the pin, a run's admission daemon is hosted by whatever `sparkwing`
-// happens to be on PATH. That binary is usually older than the tree under
-// test, and the moment the tree's schema is newer it cannot open the store the
-// test just migrated: the daemon's terminal check fails, admission evicts the
-// run, and the test reports `plan concurrency group "terminal-check": slot
-// full under OnLimit:Fail` while the real reason sits in the daemon's log. The
-// test builds a pipeline binary already, so building the CLI beside it costs
-// one more link and makes the run depend on nothing installed.
 func wingdHostBin(t *testing.T) string {
 	t.Helper()
 	bin := filepath.Join(t.TempDir(), "sparkwing")
 	root := repoRootDir(t)
-	// safety: GOWORK=off for the reason AGENTS.md gives -- inside a worktree
-	// the checked-in go.work resolves the main checkout and breaks the build.
+
 	env := append(os.Environ(), "GOWORK=off", "GOTOOLCHAIN=local")
 	runGo(t, root, env, "build", "-o", bin, "./cmd/sparkwing")
 	return bin

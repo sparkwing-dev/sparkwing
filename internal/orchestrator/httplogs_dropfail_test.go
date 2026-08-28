@@ -23,9 +23,6 @@ func (dropFailPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 	return nil
 }
 
-// dropFailBackends wires a run against a log store that answers every
-// append with 500, which is what an unreachable bucket looks like from
-// the orchestrator's side.
 func dropFailBackends(t *testing.T, logsURL string) (orchestrator.Backends, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
@@ -59,10 +56,6 @@ func alwaysFailingLogsServer(t *testing.T) string {
 	return srv.URL
 }
 
-// A run whose log lines were lost must not report success. The node's
-// own work succeeded here -- that is the point: the record of the work
-// is what is missing, and a green run nobody can read is the false
-// all-clear this failure reason exists to prevent.
 func TestLogsDropped_FailsRunAndRecordsCount(t *testing.T) {
 	register("dropfail-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return dropFailPipe{} })
 	orchestrator.SetTestHTTPNodeLogRetry(t, 2, 1)
@@ -97,8 +90,7 @@ func TestLogsDropped_FailsRunAndRecordsCount(t *testing.T) {
 				t.Errorf("Node.Error should contain %q, got: %q", want, n.Error)
 			}
 		}
-		// The store's own sentence is the least actionable part, so it
-		// must not be what the operator reads first.
+
 		if strings.Index(n.Error, "cause:") < strings.Index(n.Error, "check:") {
 			t.Errorf("the remedy should precede the store's error, got: %q", n.Error)
 		}
@@ -125,8 +117,6 @@ func TestLogsDropped_FailsRunAndRecordsCount(t *testing.T) {
 	}
 }
 
-// The opt-out restores the older lossy behavior for adopters who
-// would rather keep a green run than learn its logs are incomplete.
 func TestLogsDropped_WarnPolicyKeepsRunGreen(t *testing.T) {
 	register("dropwarn-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return dropFailPipe{} })
 	orchestrator.SetTestHTTPNodeLogRetry(t, 2, 1)
@@ -144,9 +134,6 @@ func TestLogsDropped_WarnPolicyKeepsRunGreen(t *testing.T) {
 	}
 }
 
-// A misspelled opt-out must fail rather than silently restore the
-// behavior it was trying to keep -- the whole value of the default is
-// that it cannot be turned off by accident.
 func TestLogsDropped_MisspelledPolicyStillFails(t *testing.T) {
 	register("droptypo-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return dropFailPipe{} })
 	orchestrator.SetTestHTTPNodeLogRetry(t, 2, 1)
@@ -161,9 +148,6 @@ func TestLogsDropped_MisspelledPolicyStillFails(t *testing.T) {
 	}
 }
 
-// A 404 is not an outage: it means nothing serves log appends at that
-// URL, which is the shape a controller-only deployment has. Sending
-// the operator to check bucket credentials would waste the trip.
 func TestLogsDropped_404NamesTheMissingService(t *testing.T) {
 	register("drop404-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return dropFailPipe{} })
 	orchestrator.SetTestHTTPNodeLogRetry(t, 2, 1)

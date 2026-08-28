@@ -13,19 +13,6 @@ import (
 	"strings"
 )
 
-// CheckPreV1Policy enforces the README's "this module stays below
-// v1.0.0" policy across every place a stray v1+ marker could leak
-// in. The companion check on the wire side is the version-gate in
-// release.go which refuses to cut a v1.0.0+ tag locally; this check
-// catches the indirect signals (CHANGELOG headers, VERSIONING.md
-// statements, local git tags) so the policy can't drift via a doc
-// edit or a misplaced manual tag.
-//
-// Returns nil when every signal is consistent with pre-v1, otherwise
-// an aggregated error. Pre-existing v1.0.0+ tags from the proxy-cache
-// poisoning incident are reported but do not fail the check (the
-// cache cannot be undone; what we can do is keep ourselves honest
-// about the policy going forward).
 func CheckPreV1Policy(ctx context.Context, repoRoot string) error {
 	var problems []string
 
@@ -45,13 +32,6 @@ func CheckPreV1Policy(ctx context.Context, repoRoot string) error {
 	return nil
 }
 
-// changelogV1HeadingPattern matches Keep-a-Changelog version headers
-// at major v1+ in either bracketed or bare form:
-//
-//	## [v1.0.0]
-//	## [v1.0.0] - 2026-05-20
-//	## v1.5.4
-//	## [1.0.0]      (no v prefix, used by some Keep-a-Changelog setups)
 var changelogV1HeadingPattern = regexp.MustCompile(`^##\s+\[?v?([1-9][0-9]*)\.\d+\.\d+`)
 
 func checkChangelogPreV1(path string) string {
@@ -85,10 +65,6 @@ func checkChangelogPreV1(path string) string {
 	)
 }
 
-// versioningDocV1Pattern catches explicit "v1.0.0 (released ...)"
-// style assertions in VERSIONING.md. Discussion of the v1.0.0 cutover
-// is allowed -- the doc absolutely should describe the policy -- but
-// claiming a v1 release has already happened is the failure mode.
 var versioningDocV1Pattern = regexp.MustCompile(`(?i)v1\.0\.0\s+(released|shipped|is the current|tagged)`)
 
 func checkVersioningDocPreV1(path string) string {
@@ -116,10 +92,6 @@ func checkVersioningDocPreV1(path string) string {
 	return "VERSIONING.md asserts v1.0.0 has shipped; sparkwing is still pre-v1"
 }
 
-// checkLocalGitTagsPreV1 returns a non-empty string listing any local
-// v1+ tags. Surfaced as a warning by the caller (not a failure);
-// existing tags from the proxy-cache poisoning incident can't be
-// undone.
 func checkLocalGitTagsPreV1(ctx context.Context, repoRoot string) string {
 	cmd := exec.CommandContext(ctx, "git", "-C", repoRoot, "tag", "-l")
 	out, err := cmd.Output()

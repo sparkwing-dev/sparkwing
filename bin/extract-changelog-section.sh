@@ -1,18 +1,4 @@
 #!/usr/bin/env bash
-# Extract a versioned section from CHANGELOG.md so the release
-# workflow can feed it to `gh release create --notes-file -`.
-#
-# Usage:
-#   bash bin/extract-changelog-section.sh <version> [changelog-path]
-#
-# Matches `## [<version>]` headings (with or without a ` - YYYY-MM-DD`
-# suffix) and prints everything between that heading and the next
-# top-level `## ` heading. The heading line itself is NOT printed --
-# the GitHub Release title already names the version.
-#
-# Trims leading + trailing blank lines so the body starts/ends at
-# the first/last content line. Exits non-zero with a clear message
-# when the section can't be found.
 
 set -euo pipefail
 
@@ -47,8 +33,6 @@ if [ -z "${body//[[:space:]]/}" ]; then
   exit 1
 fi
 
-# Trim leading + trailing blank lines so the printed body starts at
-# the first content line. Internal blank lines are preserved.
 printf '%s\n' "$body" | awk '
   /^$/ { if (!started) next; blank++; next }
   {

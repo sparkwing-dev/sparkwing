@@ -73,6 +73,42 @@ browser HTML or JavaScript. CLI and automation clients should authenticate
 directly to the controller through a profile rather than send a bearer to the
 browser-facing dashboard proxy.
 
+`sparkwing-web --require-login` needs a controller session backend. Pass
+`--controller URL`, or select a `--profile` whose `controller.url` is set. A
+state-only configuration such as `--state-spec=postgres://... --require-login`
+now fails at startup instead of silently serving an unauthenticated dashboard.
+The controller URL must be an absolute `http` or `https` URL without embedded
+credentials, a query, or a fragment.
+
+The login, first-admin, and logout forms carry a CSRF token in both a
+`SameSite=Strict` cookie and a hidden field. Sparkwing rejects a missing,
+cross-origin, or mismatched token with `403` before it calls the controller.
+Unsafe browser API requests (`POST`, `PUT`, `PATCH`, and `DELETE` under
+`/api/v1/`) also require a same-origin request whose `X-CSRF-Token` header
+matches both the browser's `sw_csrf` cookie and the live controller session.
+The dashboard proxy removes browser cookies and the CSRF header before adding
+its server-side bearer to controller or logs-service requests.
+Logout also verifies the token against the live controller session. It clears
+the browser session only after the controller confirms revocation; a controller
+failure returns `502` and leaves the cookies in place so the browser does not
+claim a session was revoked when it was not.
+
+The dashboard resolves the controller session on every HTML, data, and API
+request. Hashed files under `/_next/static/` contain no tenant data and do not
+touch the session backend. Deleting a session on another web replica or at the
+controller therefore takes effect on the next protected data request rather
+than after a local cache expires. A controller `401` authoritatively clears the
+browser session; a controller outage, `5xx`, or malformed response returns
+`502` and preserves the cookies so a transient failure cannot log out every
+user. Browser redirects preserve the original path and query as one encoded
+`next` value and accept only same-origin absolute paths.
+
+Login cookies are `Secure` by default, so a login-required dashboard must be
+served over HTTPS. A plain `http://localhost` port-forward can reach health
+endpoints but cannot retain those cookies. For a loopback-only development
+process, `SPARKWING_WEB_INSECURE_COOKIES=1` permits HTTP cookies; never set that
+override on a shared pod, ingress, or non-loopback listener.
+
 ## First-visit signup
 
 Controller authentication is enabled at startup when the tokens table contains

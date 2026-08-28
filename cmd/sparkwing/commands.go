@@ -1,10 +1,3 @@
-// `sparkwing commands` exposes the entire CLI surface as an index so an
-// agent learns every verb in one tool call: one path and synopsis per
-// command, in prose or as JSON. Detail -- description, flags, examples
-// -- belongs to `<command> --help`, which renders the same Command
-// values; the index only has to be good enough to pick which one to
-// open. `-o markdown` is the exception: it is the generated reference
-// page, so it renders the full record.
 package main
 
 import (
@@ -21,9 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-// allCommands lists every Command registered in help_registry.go.
-// Adding a new Command means adding it here too -- the
-// TestAllCommandsAreRegistered guard test fails CI if anyone forgets.
 var allCommands = []*Command{
 	&cmdSparkwing, &cmdInfo, &cmdCluster, &cmdCommands, &cmdQueue, &cmdQueueExec, &cmdDaemon, &cmdDaemonStatus, &cmdDaemonRestart, &cmdDaemonRecoverState, &cmdUpdate, &cmdVersion, &cmdVersionUpdate, &cmdVersionHold, &cmdRun, &cmdRunConfig,
 	&cmdConfigure, &cmdConfigureInit, &cmdConfigureXrepo, &cmdConfigureXrepoList, &cmdConfigureXrepoAdd, &cmdConfigureXrepoRemove, &cmdConfigureXrepoPrune,
@@ -64,42 +54,14 @@ var allCommands = []*Command{
 	&cmdRepos, &cmdReposList, &cmdReposInfo, &cmdReposUpdate,
 }
 
-// CommandIndexJSON is the wire shape emitted by `sparkwing commands
-// -o json`: a machine-readable twin of the pretty index, not a second
-// copy of the help system.
-//
-// The listing used to carry the full record -- description, flags,
-// examples -- for all 150 commands: 206KB, of which those three fields
-// were 83%. Every byte of it duplicates what `<command> --help` prints,
-// authoritatively and from the same Command values, so the listing was
-// paying a context budget to answer a question nobody had asked yet. An
-// index exists to help a reader choose which page to open; path and
-// synopsis choose, and SubcommandCount says whether there is a page
-// below this one.
-//
-// Count rather than a leaf/group boolean: the count carries the boolean
-// (0 means leaf) for four more bytes on the records that have children,
-// and it lets a caller size the descent before spending a call on it --
-// "this group has 20 subcommands" and "this group has 2" are different
-// decisions. See commandIndex for where the number comes from.
-//
-// `<any-verb> --help --json` still emits the full CommandJSON below;
-// that surface is the detail page, and detail is the whole point of it.
 type CommandIndexJSON struct {
 	Path            string `json:"path"`
 	Synopsis        string `json:"synopsis"`
 	SubcommandCount int    `json:"subcommand_count"`
-	// Hidden only ever appears under --include-hidden; see the comment
-	// on the exclusion in runCommands.
+
 	Hidden bool `json:"hidden,omitempty"`
 }
 
-// CommandJSON is the wire shape emitted by `<any-verb> --help --json`
-// and the input to the markdown reference renderer. It mirrors the
-// Command struct but flattens the FlagSpec / SubcommandRef / Example /
-// PosArg types to public-friendly field names. Decoupled from internal
-// Command so renames don't silently break agents pinning to older
-// fields.
 type CommandJSON struct {
 	Path        string           `json:"path"`
 	Synopsis    string           `json:"synopsis"`
@@ -148,10 +110,7 @@ func toCommandJSON(c *Command) CommandJSON {
 		Description: c.Description,
 		Hidden:      c.Hidden,
 	}
-	// Derived, like the prose listing -- `--help --json` and the
-	// generated reference are the same page in another format, so they
-	// cannot be allowed to name a different set of children than
-	// `--help` does.
+
 	for _, s := range visibleSubcommands(*c) {
 		out.Subcommands = append(out.Subcommands, SubcommandJSON(s))
 	}
@@ -181,18 +140,6 @@ func toCommandJSON(c *Command) CommandJSON {
 	return out
 }
 
-// commandIndex renders the picked listing as index records.
-//
-// The subcommand count is taken from this listing rather than from
-// the help listing, even though both now read the same registry. A
-// descend signal has to describe the thing a caller actually descends
-// into, which is `--path`, and `--path` selects registry paths.
-// Counting inside the listing also makes the number
-// self-consistent under every filter: `--path` selects a whole subtree,
-// so a picked command's children are always picked too, and the count
-// can never promise records this caller cannot see -- including under
-// --include-hidden, where the hidden children are in the listing and so
-// are in the count.
 func commandIndex(picked []*Command) []CommandIndexJSON {
 	children := make(map[string]int, len(picked))
 	for _, c := range picked {
@@ -212,20 +159,6 @@ func commandIndex(picked []*Command) []CommandIndexJSON {
 	return out
 }
 
-// runCommands handles `sparkwing commands [--include-hidden]
-// [--path PREFIX] [-o pretty|json|markdown|plain]`.
-//
-// Default --output pretty, because the bare command has to be an index.
-// It defaulted to json on the theory that agents are the primary
-// audience -- which is true, and is exactly why json was the wrong
-// default: the full surface is 139 verbs and 235KB of JSON, and agents
-// do not size output before reading it. An agent trial piped this into
-// a narrow lookup, spent ~58,000 tokens, and got truncated anyway.
-// pretty is the same 139 verbs in 140 lines, one path and synopsis
-// each, which is what "what is this CLI" actually wants; --path narrows
-// to a subtree, and -o json is the same index for a program to parse.
-// -o json is NDJSON for the same reason: `head` is the only sizing tool
-// a caller has, and it only works on output whose records are lines.
 func runCommands(args []string) error {
 	fs := flag.NewFlagSet(cmdCommands.Path, flag.ContinueOnError)
 	var output string
@@ -246,8 +179,7 @@ func runCommands(args []string) error {
 		if o := strings.ToLower(output); o != "markdown" && o != "md" {
 			return fmt.Errorf("commands: --split-dir requires -o markdown")
 		}
-		// The split writer prunes generated pages for groups it did not
-		// render, so a filtered surface would delete real pages.
+
 		if *pathPrefix != "" {
 			return fmt.Errorf("commands: --split-dir writes the full reference and conflicts with --path")
 		}
@@ -267,15 +199,7 @@ func runCommands(args []string) error {
 		if !matchesCommandPath(c.Path, prefix) {
 			continue
 		}
-		// Hidden commands stay out of every listing, deliberately. A
-		// Hidden command is dispatchable but not part of the offered
-		// surface -- it exists for a pipeline or a verification path and
-		// its own help says what to use instead -- so listing it flagged
-		// would put a "do not use this" entry in the one place a reader
-		// goes to choose what to use. Excluding it is not a claim that
-		// it does not exist: --include-hidden lists them, and a --path
-		// that matches only hidden commands errors saying so rather than
-		// answering "no such command" with an empty listing.
+
 		if c.Hidden && !*includeHidden {
 			hiddenMatches++
 			continue
@@ -288,15 +212,7 @@ func runCommands(args []string) error {
 
 	switch strings.ToLower(output) {
 	case "json":
-		// NDJSON: one complete record per line, no array and no
-		// pretty-printing. An agent's only defense against output too
-		// big for its context is `head`, and `head` is line-oriented --
-		// a pretty-printed array truncates in the middle of a record
-		// and parses as nothing. One record per line makes a truncated
-		// read lossy but still valid, so `-o json | head -5` is five
-		// commands rather than a syntax error. A listing has no facts
-		// that are not a record's, so there is no summary line to lead
-		// with.
+
 		enc := json.NewEncoder(os.Stdout)
 		for _, c := range commandIndex(picked) {
 			if err := enc.Encode(c); err != nil {
@@ -332,8 +248,7 @@ func runCommands(args []string) error {
 		for _, c := range picked {
 			fmt.Printf("%-*s  %s\n", w, c.Path, color.Dim(c.Synopsis))
 		}
-		// An index that does not say how to drill is a dead end, and
-		// the two ways down are not guessable from a table of paths.
+
 		fmt.Println()
 		printAlignedSteps([]InfoNextStep{
 			{Command: "<any path above> --help", Purpose: "flags, arguments, examples for one verb"},
@@ -345,16 +260,6 @@ func runCommands(args []string) error {
 	}
 }
 
-// matchesCommandPath reports whether a command's path is inside the
-// subtree --path named. Both the fully-qualified prefix ("sparkwing
-// runs") and the bare one ("runs") match.
-//
-// Accepting the bare form is not a convenience. Every path in the
-// registry begins with the same root word, so typing it carries no
-// information -- and `--path runs` matching nothing looks exactly like
-// "this CLI has no runs commands", which is what three separate agents
-// concluded before finding the quoted form. The unqualified spelling is
-// the one a reader reaches for first, so it has to be the one that works.
 func matchesCommandPath(path, prefix string) bool {
 	if prefix == "" {
 		return true
@@ -363,33 +268,12 @@ func matchesCommandPath(path, prefix string) bool {
 		hasPathComponentPrefix(path, cmdSparkwing.Path+" "+prefix)
 }
 
-// hasPathComponentPrefix reports whether prefix names path or an
-// ancestor of it, matching whole space-separated components rather than
-// characters.
-//
-// A plain string prefix reads "--path run" as also selecting the whole
-// `runs` group -- 31 paths for a filter that named two -- and the
-// surplus is not obviously surplus, since every line of it starts with
-// the word that was typed. A subtree filter that quietly returns a
-// different subtree is worse than one that returns nothing, because
-// nothing is visible.
 func hasPathComponentPrefix(path, prefix string) bool {
 	return path == prefix || strings.HasPrefix(path, prefix+" ")
 }
 
-// blankPathFilter reports whether --path was given but names nothing. A
-// prefix that is only whitespace was still typed, so it is a filter that
-// selected nothing rather than an absent one; letting it fall through to
-// the empty prefix would answer a mistyped `--path " "` with the entire
-// CLI, which is the same silent wrong answer an unmatched prefix used to
-// give.
 func blankPathFilter(raw, trimmed string) bool { return raw != "" && trimmed == "" }
 
-// unmatchedPathError reports a --path that selected nothing. Exiting 0
-// with an empty listing -- or with the literal `null` that -o json used
-// to print -- reads as an answer about the CLI rather than as a bad
-// filter, and an agent that believes it has enumerated a subtree it
-// misspelled does not go looking for the verb again.
 func unmatchedPathError(prefix string, hiddenMatches int) error {
 	if hiddenMatches > 0 {
 		return fmt.Errorf("commands: --path %q matched only hidden commands; pass --include-hidden to list them", prefix)
@@ -397,11 +281,6 @@ func unmatchedPathError(prefix string, hiddenMatches int) error {
 	return fmt.Errorf("commands: --path %q matched no command; `sparkwing commands -o plain` lists every path", prefix)
 }
 
-// renderCommandsMarkdown renders the full CLI surface as a reference
-// page. It is the source for docs/cli-reference.md (regenerated via
-// bin/gen-cli-docs.sh), so the per-command/flag/arg reference is
-// derived from the same registry the --help renderer uses and cannot
-// drift from the binary.
 func renderCommandsMarkdown(cmds []CommandJSON) string {
 	var b strings.Builder
 	b.WriteString(generatedPageMarker)
@@ -416,17 +295,9 @@ func renderCommandsMarkdown(cmds []CommandJSON) string {
 	return strings.TrimRight(b.String(), "\n") + "\n"
 }
 
-// generatedPageMarker opens every generated reference page. Its first
-// line doubles as the machine-readable "generated, not hand-authored"
-// signal: doccheck skips prose-style gates on pages that start with it,
-// and the split writer only prunes stale cli-*.md pages that carry it.
 const generatedPageMarker = "<!-- GENERATED from the CLI command registry by `sparkwing commands -o markdown`. Do not edit by hand; regenerate with `bash bin/gen-cli-docs.sh`. -->\n" +
 	"<!-- markdownlint-disable MD004 MD007 MD030 MD032 -->\n"
 
-// writeCommandSection renders one command's reference section (## Path
-// through Examples). withSubcommands is false on the split index page,
-// where the linked "Command groups" list replaces the root command's
-// subcommand listing.
 func writeCommandSection(b *strings.Builder, c CommandJSON, withSubcommands bool) {
 	{
 		b.WriteString("## `" + c.Path + "`\n\n")
@@ -496,12 +367,6 @@ func writeCommandSection(b *strings.Builder, c CommandJSON, withSubcommands bool
 	}
 }
 
-// splitCommandsMarkdown renders the reference as one page per top-level
-// command group plus a cli-reference.md index. The single-page render
-// hit 155K characters, past the ~100K truncation limit of most agent
-// fetch tooling -- everything alphabetically late was silently invisible.
-// Per-group pages keep the largest group around 35K and let an agent
-// fetch only the group it cares about.
 func splitCommandsMarkdown(cmds []CommandJSON) (map[string]string, error) {
 	var root *CommandJSON
 	var groupOrder []string
@@ -524,8 +389,6 @@ func splitCommandsMarkdown(cmds []CommandJSON) (map[string]string, error) {
 	}
 	sort.Strings(groupOrder)
 
-	// A group's one-line summary is the synopsis of its root command
-	// (path "sparkwing <group>"), which every group has.
 	synopsis := func(g string) string {
 		for _, c := range groups[g] {
 			if c.Path == "sparkwing "+g {
@@ -574,11 +437,6 @@ func splitCommandsMarkdown(cmds []CommandJSON) (map[string]string, error) {
 	return files, nil
 }
 
-// writeSplitMarkdown writes the split reference into dir, skipping
-// byte-identical pages, and prunes cli-*.md pages a previous run
-// generated for groups that no longer exist. Only pages opening with
-// the generated marker are ever pruned, so a hand-authored page whose
-// name happens to match cli-*.md survives.
 func writeSplitMarkdown(dir string, cmds []CommandJSON) error {
 	files, err := splitCommandsMarkdown(cmds)
 	if err != nil {
@@ -627,13 +485,6 @@ func writeSplitMarkdown(dir string, cmds []CommandJSON) error {
 	return nil
 }
 
-// descBlock makes a multi-line command description safe to emit as a
-// markdown block. Descriptions are authored for terminal help, so a
-// line may start with `#` (a shell-comment in an indented snippet) or
-// `>`; markdown would turn those into headings / blockquotes, breaking
-// the page structure and rendering huge on the docs site. Escaping the
-// leading marker renders the line as the literal text the terminal
-// shows. List markers are left alone (the file disables those rules).
 func descBlock(s string) string {
 	lines := strings.Split(s, "\n")
 	for i, ln := range lines {
@@ -646,9 +497,6 @@ func descBlock(s string) string {
 	return strings.Join(lines, "\n")
 }
 
-// cell flattens a string for use inside a markdown table cell or list
-// item: newlines collapse to spaces and pipes are escaped so they
-// don't break table parsing.
 func cell(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "|", "\\|")

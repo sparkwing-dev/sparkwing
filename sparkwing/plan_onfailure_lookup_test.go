@@ -5,12 +5,6 @@ import (
 	"testing"
 )
 
-// A recovery node is part of the plan that declares it, so resolving
-// it by id has to work. It never enters the plan's id index -- OnFailure
-// builds it directly -- and while the only consumer was the dispatcher,
-// which held the node pointer, nothing noticed. Anything that starts
-// from an id alone (a node executing in its own process, replay) reads
-// the miss as "not in this plan" and refuses to run the recovery.
 func TestPlanJob_FindsOnFailureRecoveryNode(t *testing.T) {
 	p := NewPlan()
 	deploy := Job(p, "deploy", func(context.Context) error { return nil })

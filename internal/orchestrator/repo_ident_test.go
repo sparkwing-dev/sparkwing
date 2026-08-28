@@ -41,9 +41,6 @@ func TestRepoShortName_GitFileMarksLinkedWorktree(t *testing.T) {
 	}
 }
 
-// linkedWorktree builds a repo checkout and a linked worktree of it laid out
-// the way git does: the worktree is a plain directory whose .git is a file
-// pointing at <repo>/.git/worktrees/<name>. It returns both directories.
 func linkedWorktree(t *testing.T, repoName, worktreeName string) (repo, worktree string) {
 	t.Helper()
 	root := t.TempDir()
@@ -62,8 +59,6 @@ func linkedWorktree(t *testing.T, repoName, worktreeName string) (repo, worktree
 	return repo, worktree
 }
 
-// TestRepoShortName_LinkedWorktreeResolvesToItsRepo keeps capacity learning
-// shared by every worktree of one repository.
 func TestRepoShortName_LinkedWorktreeResolvesToItsRepo(t *testing.T) {
 	repo, worktree := linkedWorktree(t, "sample-repo", "feature-branch")
 
@@ -82,9 +77,6 @@ func TestRepoShortName_LinkedWorktreeResolvesToItsRepo(t *testing.T) {
 	}
 }
 
-// TestCurrentProfileKey_SurvivesABranchChange states the acceptance criterion
-// directly: the same pipeline in two worktrees of one repo reads and writes
-// one profile row, so a gate arrives already knowing what it costs.
 func TestCurrentProfileKey_SurvivesABranchChange(t *testing.T) {
 	repo, first := linkedWorktree(t, "sample-repo", "first-branch")
 	_, second := linkedWorktree(t, "sample-repo", "second-branch")
@@ -143,9 +135,6 @@ func TestCurrentProfileKey_FallsBackToCWDWithoutRunWorkDir(t *testing.T) {
 	}
 }
 
-// TestRepoShortName_BareRepoWorktreeResolvesToTheRepoName covers the pointer
-// shape a worktree of a bare repo carries: <repo>.git/worktrees/<name>, with
-// no .git directory level to strip.
 func TestRepoShortName_BareRepoWorktreeResolvesToTheRepoName(t *testing.T) {
 	root := t.TempDir()
 	gitDir := filepath.Join(root, "sample-repo.git", "worktrees", "feature-branch")
@@ -164,10 +153,6 @@ func TestRepoShortName_BareRepoWorktreeResolvesToTheRepoName(t *testing.T) {
 	}
 }
 
-// TestRepoShortName_SubmoduleKeepsItsOwnIdentity guards the other .git file
-// shape. A submodule's pointer names <super>/.git/modules/<name> and has no
-// worktrees segment, so the submodule stays its own repo for pricing rather
-// than pooling its costs into its superproject.
 func TestRepoShortName_SubmoduleKeepsItsOwnIdentity(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "super", "vendor", "lib")
@@ -192,9 +177,6 @@ func TestRepoShortName_EmptyOutsideAnyRepo(t *testing.T) {
 	}
 }
 
-// TestScopedProfileKey_SeparatesReposAndKeepsBareNameOutsideOne keeps
-// identically named pipelines in separate repositories from sharing
-// capacity-profile rows.
 func TestScopedProfileKey_SeparatesReposAndKeepsBareNameOutsideOne(t *testing.T) {
 	if a, b := scopedProfileKey("alpha", "ci"), scopedProfileKey("beta", "ci"); a == b {
 		t.Errorf("scopedProfileKey pooled %q and %q onto one key %q", "alpha/ci", "beta/ci", a)

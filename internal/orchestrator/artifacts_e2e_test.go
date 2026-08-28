@@ -49,11 +49,6 @@ func findNode(t *testing.T, st *store.Store, runID, nodeID string) *store.Node {
 	return nil
 }
 
-// TestArtifacts_CapturedThenReplayedOnCacheHit runs a producer that
-// declares Outputs, asserts its files are captured into a manifest on
-// the node, then re-runs so the producer cache-hits and asserts the
-// manifest reference is copied onto the replayed node without
-// re-executing it.
 func TestArtifacts_CapturedThenReplayedOnCacheHit(t *testing.T) {
 	ws := t.TempDir()
 	orig := sparkwing.CurrentRuntime().WorkDir
@@ -105,9 +100,6 @@ func TestArtifacts_CapturedThenReplayedOnCacheHit(t *testing.T) {
 	}
 }
 
-// readManifestFromStore + readBlob mirror the in-package helpers but
-// operate on the exported manifest JSON shape so the external test can
-// read what the orchestrator wrote.
 type e2eManifest struct {
 	Entries []struct {
 		Path   string `json:"path"`

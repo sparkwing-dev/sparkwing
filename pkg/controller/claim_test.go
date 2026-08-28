@@ -16,10 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestClaim_TriggerPersistsThenClaims is the full trigger-queue
-// contract: POST /triggers persists a pending row; POST
-// /triggers/claim atomically flips it to 'claimed' and returns the
-// full record; second claim finds nothing.
 func TestClaim_TriggerPersistsThenClaims(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -94,8 +90,6 @@ func TestClaim_TriggerPersistsThenClaims(t *testing.T) {
 	}
 }
 
-// TestClaim_FIFOOrdering verifies the oldest pending trigger is
-// always claimed first. Workers depend on this for fairness.
 func TestClaim_FIFOOrdering(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

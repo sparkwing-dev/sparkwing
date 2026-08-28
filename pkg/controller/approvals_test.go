@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// seedRunWithNode is a small helper for the approval endpoint tests.
-// Creates a run + a single pending node so CreateApproval has a row to
-// flip.
 func seedRunWithNode(t *testing.T, st *store.Store, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()

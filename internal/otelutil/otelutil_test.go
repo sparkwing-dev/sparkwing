@@ -11,8 +11,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// TestResolveSampler_Default returns parent-based always-sample when
-// OTEL_TRACES_SAMPLER_ARG is unset.
 func TestResolveSampler_Default(t *testing.T) {
 	t.Setenv("OTEL_TRACES_SAMPLER_ARG", "")
 	s := resolveSampler()
@@ -24,8 +22,6 @@ func TestResolveSampler_Default(t *testing.T) {
 	}
 }
 
-// TestResolveSampler_HonorsEnv reads a valid ratio out of the env
-// var and builds a sampler with that ratio.
 func TestResolveSampler_HonorsEnv(t *testing.T) {
 	t.Setenv("OTEL_TRACES_SAMPLER_ARG", "0.1")
 	s := resolveSampler()
@@ -37,8 +33,6 @@ func TestResolveSampler_HonorsEnv(t *testing.T) {
 	}
 }
 
-// TestResolveSampler_InvalidEnvFallsBackToOne asserts we don't crash
-// on a garbage env value and fall back to the default ratio.
 func TestResolveSampler_InvalidEnvFallsBackToOne(t *testing.T) {
 	t.Setenv("OTEL_TRACES_SAMPLER_ARG", "not-a-number")
 	s := resolveSampler()
@@ -50,10 +44,6 @@ func TestResolveSampler_InvalidEnvFallsBackToOne(t *testing.T) {
 	}
 }
 
-// TestWrapTransport_Roundtrips verifies the wrapped transport still
-// delivers requests to the target. otelhttp's span creation requires
-// an active TracerProvider to do meaningful work, but the transport
-// itself must always pass the request through.
 func TestWrapTransport_Roundtrips(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
@@ -75,9 +65,6 @@ func TestWrapTransport_Roundtrips(t *testing.T) {
 	}
 }
 
-// TestStampSpan_NoopWithoutTracer exercises the handler path when no
-// TracerProvider has been installed (global provider returns a noop
-// tracer). StampSpan must not panic.
 func TestStampSpan_NoopWithoutTracer(t *testing.T) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -89,9 +76,6 @@ func TestStampSpan_NoopWithoutTracer(t *testing.T) {
 	})
 }
 
-// TestStampSpan_SkipsEmptyAttrs guards against cardinality leaks via
-// accidental empty attribute values. When only a subset of fields is
-// set, span.SetAttributes is called per non-empty field.
 func TestStampSpan_SkipsEmptyAttrs(t *testing.T) {
 	tp := sdktrace.NewTracerProvider()
 	defer tp.Shutdown(context.Background())
@@ -100,19 +84,12 @@ func TestStampSpan_SkipsEmptyAttrs(t *testing.T) {
 	StampSpan(ctx, SpanAttrs{RunID: "only-this"})
 }
 
-// TestTraceParentEnv_EmptyWithoutSpan: no active span -> empty string.
-// Caller can unconditionally append; empty strings are skipped on the
-// child-process env append path.
 func TestTraceParentEnv_EmptyWithoutSpan(t *testing.T) {
 	if got := TraceParentEnv(context.Background()); got != "" {
 		t.Errorf("expected empty with no span, got %q", got)
 	}
 }
 
-// TestTraceParentEnv_WithSpan produces a W3C traceparent env value
-// that a child can feed back through ContextFromEnv to continue the
-// trace. Asserts round-trip: the extracted SpanContext matches the
-// original trace id.
 func TestTraceParentEnv_WithSpan(t *testing.T) {
 	tp := sdktrace.NewTracerProvider()
 	defer tp.Shutdown(context.Background())
@@ -164,7 +141,6 @@ func indexOf(haystack, needle string) int {
 	return -1
 }
 
-// Ensure OTEL_TRACES_SAMPLER_ARG doesn't leak into sibling tests.
 func TestMain(m *testing.M) {
 	os.Unsetenv("OTEL_TRACES_SAMPLER_ARG")
 	os.Exit(m.Run())

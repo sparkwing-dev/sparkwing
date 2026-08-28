@@ -15,9 +15,6 @@ import (
 	"time"
 )
 
-// newTestClient returns a WebClient pointed at a httptest server with
-// a fresh per-test cache dir. The handler observes every request via
-// hits so tests can assert retry / cache-hit behavior.
 func newTestClient(t *testing.T, handler http.Handler) (*WebClient, *httptest.Server) {
 	t.Helper()
 	srv := httptest.NewServer(handler)

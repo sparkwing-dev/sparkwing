@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// budgetEnvSandbox points the budget config file at a temp directory and
-// clears the environment override, so a test starts from a machine with
-// no budget set anywhere. It returns the config file path.
 func budgetEnvSandbox(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -17,8 +14,6 @@ func budgetEnvSandbox(t *testing.T) string {
 	return filepath.Join(dir, "sparkwing", "budget")
 }
 
-// writeBudgetConfig writes the machine-budget config file with the given
-// contents.
 func writeBudgetConfig(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -29,10 +24,6 @@ func writeBudgetConfig(t *testing.T, path, body string) {
 	}
 }
 
-// TestResolveBudget_Precedence pins the documented resolution order:
-// flag beats env, env beats config file. Every layer is populated with a
-// distinguishable value so a win is proved by which one came back, not by
-// the absence of the others.
 func TestResolveBudget_Precedence(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	writeBudgetConfig(t, path, "2\n")
@@ -82,12 +73,6 @@ func TestResolveBudget_Precedence(t *testing.T) {
 	}
 }
 
-// TestResolveBudget_ConfigNeedsNoEnvironment is the point of the whole
-// setting: a budget in the config file resolves in a process whose
-// environment never carried SPARKWING_BUDGET. The daemon is spawned by
-// whichever gate runs first and inherits that process's environment, so a
-// setting that needs the variable belongs to whoever happened to trigger
-// the spawn rather than to the operator.
 func TestResolveBudget_ConfigNeedsNoEnvironment(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	os.Unsetenv(BudgetEnv)
@@ -111,11 +96,6 @@ func TestResolveBudget_ConfigNeedsNoEnvironment(t *testing.T) {
 	}
 }
 
-// TestResolveBudget_UnsetSaysSo is the negative control. With nothing set
-// anywhere, the resolver must report the budget as unset rather than
-// handing back a zero Budget that reads like a deliberate whole-machine
-// choice. Every surface that names the budget keys off this, so a default
-// that impersonates a setting would be invisible everywhere at once.
 func TestResolveBudget_UnsetSaysSo(t *testing.T) {
 	budgetEnvSandbox(t)
 	os.Unsetenv(BudgetEnv)
@@ -138,9 +118,6 @@ func TestResolveBudget_UnsetSaysSo(t *testing.T) {
 	}
 }
 
-// TestResolveBudget_ConfigCommentsAndBlanks checks the config file can
-// carry the note explaining why a budget is in force, which is what the
-// next person needs when they find admission capped.
 func TestResolveBudget_ConfigCommentsAndBlanks(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	os.Unsetenv(BudgetEnv)
@@ -158,9 +135,6 @@ func TestResolveBudget_ConfigCommentsAndBlanks(t *testing.T) {
 	}
 }
 
-// TestResolveBudget_CommentOnlyConfigIsUnset checks a file with nothing
-// but a note resolves as unset rather than as a config source with no
-// budget behind it.
 func TestResolveBudget_CommentOnlyConfigIsUnset(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	os.Unsetenv(BudgetEnv)
@@ -175,10 +149,6 @@ func TestResolveBudget_CommentOnlyConfigIsUnset(t *testing.T) {
 	}
 }
 
-// TestResolveBudget_MalformedConfigFails checks an unparseable config
-// value stops the daemon rather than being silently dropped. A setting
-// that quietly does nothing is the failure this resolver exists to end,
-// and a malformed SPARKWING_BUDGET has always failed the same way.
 func TestResolveBudget_MalformedConfigFails(t *testing.T) {
 	path := budgetEnvSandbox(t)
 	os.Unsetenv(BudgetEnv)
@@ -189,11 +159,6 @@ func TestResolveBudget_MalformedConfigFails(t *testing.T) {
 	}
 }
 
-// TestConfigResolvedBudget_UnrecordedSourceIsUnknown checks a daemon
-// config assembled without the resolver reports its budget source as
-// unknown. Naming a source that would not change the budget sends an
-// operator to edit the wrong setting, which is worse than admitting the
-// source was not recorded.
 func TestConfigResolvedBudget_UnrecordedSourceIsUnknown(t *testing.T) {
 	b, err := ParseBudget("4")
 	if err != nil {

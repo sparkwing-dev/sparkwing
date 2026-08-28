@@ -5,16 +5,6 @@ import (
 	"time"
 )
 
-// storeMaintenanceFns bundles the orchestrator-internal maintenance
-// operations on Store. The methods are unexported on *Store so they
-// don't appear in the public API surface adopters see in godoc /
-// IDE autocomplete; they're surfaced here as function pointers for
-// in-module callers (specifically pkg/controller's reaper goroutine).
-//
-// External adopters never need to call these -- they're crash-recovery
-// and TTL-eviction sweeps the controller runs on a schedule. If you're
-// reaching for one of these from outside this module, you almost
-// certainly want a different API.
 type storeMaintenanceFns struct {
 	ReapExpiredTriggers          func(s *Store, ctx context.Context) ([]string, error)
 	ReapStalePendingRuns         func(s *Store, ctx context.Context, grace time.Duration, reason string) ([]string, error)

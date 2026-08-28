@@ -59,10 +59,6 @@ func TestCommandsMarkdownEndsWithOneNewline(t *testing.T) {
 	}
 }
 
-// commandVarsInSource parses path and returns every top-level
-// identifier matching `cmd[A-Z]...` whose declaration is `=
-// Command{...}`. Robust to formatter/comment changes since we walk
-// the AST instead of regex-matching the file body.
 func commandVarsInSource(t *testing.T, path string) []string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -106,13 +102,6 @@ func commandVarsInSource(t *testing.T, path string) []string {
 	return names
 }
 
-// registeredCommandPaths returns the set of var-name -> Path
-// mappings derived from allCommands. Var names aren't directly
-// available at runtime, so we round-trip through Path: declared in
-// source as `var cmdFoo = Command{Path: "sparkwing foo"}`, and
-// matched by walking the source AST. Both sides eventually compare
-// var-names; the registered set returns var names by deriving them
-// from the Path field via the same helper used at parse time.
 func registeredCommandPaths() map[string]bool {
 	fset := token.NewFileSet()
 	f, _ := parser.ParseFile(fset, "help_registry.go", nil, parser.SkipObjectResolution)

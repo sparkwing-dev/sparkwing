@@ -23,10 +23,6 @@ import (
 
 var triggerTestGitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
-// triggerSpy is a minimal controller stand-in. It records request lines
-// and captures trigger POST bodies, and serves just enough of the
-// status-follow surface (GetRun returns a terminal run, ListNodes
-// returns empty) for a non-detach follow to render once and exit.
 type triggerSpy struct {
 	mu             sync.Mutex
 	reqs           []string
@@ -35,21 +31,16 @@ type triggerSpy struct {
 	seedBodyBytes  int
 	seedRepoValues []string
 	seedSHAValues  []string
-	// runStatus is the terminal status GetRun reports (default
-	// "success"); runError is the run-level error that goes with it.
+
 	runStatus string
 	runError  string
-	// runStatuses, when set, is consumed one entry per GetRun with the
-	// last entry repeating -- enough to stage a run that flips terminal
-	// between the status follow's render and its terminality check.
+
 	runStatuses []string
 	getRunCalls int
-	// runHTTPStatus, when non-zero, is the HTTP error GetRun returns
-	// instead of a run (a controller mid-rolling-restart).
+
 	runHTTPStatus int
 }
 
-// nextRunStatus returns the status this GetRun call should report.
 func (s *triggerSpy) nextRunStatus() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -144,8 +135,6 @@ func writeTriggerProfiles(t *testing.T, controllerURL string) {
 	t.Setenv("SPARKWING_PROFILES", path)
 }
 
-// writeTriggerProfilesWithLogs adds a logs: surface so the follow takes
-// the log-streaming arm (followLogsRemote) instead of the status arm.
 func writeTriggerProfilesWithLogs(t *testing.T, controllerURL string) {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "profiles.yaml")
@@ -382,11 +371,6 @@ func TestPipelineTrigger_DefaultFollows(t *testing.T) {
 	}
 }
 
-// TestPipelineTrigger_FollowExitsOnRunOutcome is the scripted contract
-// CI wraps: a non-detach trigger must exit like the local run it
-// stands in for -- 0 only when the remote run succeeded, 1 when it
-// failed or was cancelled. Before this, the follow returned nil no
-// matter how the run ended and wrappers read a failed run as success.
 func TestPipelineTrigger_FollowExitsOnRunOutcome(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -423,9 +407,7 @@ func TestPipelineTrigger_FollowExitsOnRunOutcome(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.status) || !strings.Contains(err.Error(), "run-test") {
 				t.Errorf("error should name the run and its status; got %q", err.Error())
 			}
-			// The status arm renders to stdout as it polls, so the
-			// summary has to reach stderr too or `> run.log` swallows
-			// every trace of the failure.
+
 			for _, want := range []string{"run-test", "status:    " + tc.status, "node build failed"} {
 				if !strings.Contains(stderr, want) {
 					t.Errorf("stderr summary missing %q; got:\n%s", want, stderr)
@@ -435,10 +417,6 @@ func TestPipelineTrigger_FollowExitsOnRunOutcome(t *testing.T) {
 	}
 }
 
-// TestPipelineTrigger_LogFollowReportsFailure covers the log-streaming
-// arm of the follow, where the SSE stream simply ends when the run
-// goes terminal: the summary has to come from a status read, printed
-// to stderr so stdout stays a pure log stream.
 func TestPipelineTrigger_LogFollowReportsFailure(t *testing.T) {
 	spy := &triggerSpy{runStatus: "failed", runError: "node build failed"}
 	srv := httptest.NewServer(spy.handler())
@@ -462,11 +440,6 @@ func TestPipelineTrigger_LogFollowReportsFailure(t *testing.T) {
 	}
 }
 
-// TestPipelineTrigger_StatusFollowRepaintsTerminalFrame covers the
-// window where the run flips terminal between the status follow's
-// render and its terminality check: the last frame on stdout still
-// says "running", so the authoritative summary must be reprinted or
-// the operator is left reading a stale frame next to exit 1.
 func TestPipelineTrigger_StatusFollowRepaintsTerminalFrame(t *testing.T) {
 	spy := &triggerSpy{runStatuses: []string{"running", "failed"}, runError: "node build failed"}
 	srv := httptest.NewServer(spy.handler())
@@ -492,11 +465,6 @@ func TestPipelineTrigger_StatusFollowRepaintsTerminalFrame(t *testing.T) {
 	}
 }
 
-// TestPipelineTrigger_UnreachableControllerIsUnknownNotFailed pins the
-// distinction a rolling controller restart depends on: losing the
-// follow says nothing about the run, so it exits 3 with a pointer at
-// the command that answers later -- never 1, which would report a
-// possibly-succeeding run as failed.
 func TestPipelineTrigger_UnreachableControllerIsUnknownNotFailed(t *testing.T) {
 	spy := &triggerSpy{runHTTPStatus: http.StatusServiceUnavailable}
 	srv := httptest.NewServer(spy.handler())
@@ -521,12 +489,6 @@ func TestPipelineTrigger_UnreachableControllerIsUnknownNotFailed(t *testing.T) {
 	}
 }
 
-// TestFollowExitResult_UnknownTerminalState pins the third arm: when
-// the follow ends without a readable terminal status (dropped
-// connection, cancelled context), the CLI reports what it knows and
-// exits 3 rather than inventing success or failure. A follow that
-// broke on a run that still reads terminal is not that case -- the
-// outcome wins.
 func TestFollowExitResult_UnknownTerminalState(t *testing.T) {
 	fetchErr := followExitResult("prod", "run-test", "", errors.New("dial tcp: connection refused"), nil)
 	if code := exitCodeFor(fetchErr); code != 3 {
@@ -546,8 +508,6 @@ func TestFollowExitResult_UnknownTerminalState(t *testing.T) {
 		t.Errorf("error should name the last status and why the follow ended; got %q", stillRunning.Error())
 	}
 
-	// A broken stream over a run that did reach a verdict reports the
-	// verdict: the stream is how output arrived, not what happened.
 	brokenButFailed := followExitResult("prod", "run-test", "failed", nil, errors.New("unexpected EOF"))
 	if code := exitCodeFor(brokenButFailed); code != 1 {
 		t.Errorf("terminal-despite-broken-follow exit code = %d (err=%v), want 1", code, brokenButFailed)
@@ -557,8 +517,6 @@ func TestFollowExitResult_UnknownTerminalState(t *testing.T) {
 	}
 }
 
-// captureStderr mirrors captureStdout for the failure summary, which
-// deliberately avoids stdout so piped log output stays clean.
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	r, w, err := os.Pipe()

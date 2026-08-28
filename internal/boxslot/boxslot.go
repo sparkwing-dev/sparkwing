@@ -1,18 +1,3 @@
-// Package boxslot inspects the host-local box-slot lock directory left
-// on disk by older sparkwing binaries. Host admission is owned by the
-// local admission daemon; nothing in the current run path acquires a box
-// slot. What remains is a read-only view of any lock files an
-// older-pinned pipeline binary is still holding, plus [PurgeIfIdle] to
-// clear the directory once no owner is live.
-//
-// A holder owns a lock file named holder-<nonce>.lock under
-// [Paths.BoxSlotDir] and keeps an exclusive flock on it for its
-// lifetime. The OS releases the flock when the process exits, even on
-// crash or SIGKILL, so a free flock proves the original owner is gone.
-// [Holders] reports every marker with that liveness verdict without
-// mutating the directory; [PurgeIfIdle] clears stale files only when no
-// marker's flock is still held and retains the coordination lock for
-// concurrent legacy acquirers.
 package boxslot
 
 import (
@@ -23,14 +8,6 @@ import (
 	"strings"
 )
 
-// PurgeIfIdle clears stale box-slot files when no holder is live, and
-// returns the live holders instead when any remain. A held
-// flock means an older-pinned pipeline binary is still admitting outside
-// the daemon, so its marker -- and the directory -- are left untouched
-// and reported. With no live holder every file is provably dead: the
-// stale markers and control files are removed. coord.lock remains so a
-// legacy acquirer can never create a holder behind cleanup's scan. An absent
-// directory is a no-op. removed counts the files deleted.
 func PurgeIfIdle(lockDir string) (removed int, live []Holder, err error) {
 	root, err := os.OpenRoot(lockDir)
 	if err != nil {
@@ -43,9 +20,6 @@ func PurgeIfIdle(lockDir string) (removed int, live []Holder, err error) {
 	return PurgeIfIdleInRoot(root, lockDir)
 }
 
-// PurgeIfIdleInRoot removes stale files through an already-open lock
-// directory. It retains coord.lock and the directory so legacy acquirers
-// continue to serialize against the same inode.
 func PurgeIfIdleInRoot(root *os.Root, displayPath string) (removed int, live []Holder, err error) {
 	return purgeIfIdleInRoot(root, displayPath, nil)
 }
@@ -212,11 +186,6 @@ func openPurgeCoord(root *os.Root, displayPath string) (*os.File, os.FileInfo, e
 	return nil, nil, fmt.Errorf("boxslot: %s kept changing while opening", filepath.Join(displayPath, "coord.lock"))
 }
 
-// probeHolderLive opens path and takes a non-blocking flock probe:
-// failure to lock means the owner still holds the file (live), success
-// means the kernel released it on owner death (stale). The probe lock
-// is dropped immediately. Errors (including a missing file) propagate so
-// the caller can refuse to act on a marker it can no longer see.
 func probeHolderLive(path string) (bool, error) {
 	f, err := os.OpenFile(path, os.O_RDWR, 0o600)
 	if err != nil {

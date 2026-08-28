@@ -29,18 +29,11 @@ type K8sRunnerFactoryConfig struct {
 	AgentToken       string
 	NodeSelector     map[string]string
 	Tolerations      []corev1.Toleration
-	// DependencyProxyURL points runner pods at a pull-through package
-	// proxy, as the operator typed it: a URL, "off", or empty.
-	// Resolution happens here rather than at each flag site so a CLI
-	// entry point never needs the runner backend package for it.
+
 	DependencyProxyURL string
-	// DependencyProxyFallbackURL is the cache URL to fall back on when
-	// DependencyProxyURL is empty -- the same pod serves the gitcache
-	// and /proxy/, so a runner that knows one knows the other.
+
 	DependencyProxyFallbackURL string
-	// ImagePullPolicy as an operator typed it. Validated here rather
-	// than at each flag site so every entry point rejects the same
-	// set of values.
+
 	ImagePullPolicy string
 }
 

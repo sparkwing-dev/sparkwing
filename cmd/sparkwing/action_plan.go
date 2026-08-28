@@ -1,8 +1,3 @@
-// `sparkwing pipeline plan <name>` forwards to the pipeline binary
-// with --plan, which builds the Plan and emits a runtime-resolved
-// preview JSON without dispatching any step body. Mirrors action_
-// explain.go's wrapper shape: pipeline binary owns the JSON
-// production, this wrapper owns flag parsing + pretty-printing.
 package main
 
 import (
@@ -15,9 +10,6 @@ import (
 	"strings"
 )
 
-// planPreviewDoc mirrors sparkwing.PlanPreview's wire shape. Kept
-// separate to avoid pulling the SDK package into the wrapper just
-// for the schema.
 type planPreviewDoc struct {
 	Pipeline     string               `json:"pipeline"`
 	ResolvedArgs map[string]string    `json:"resolved_args,omitempty"`
@@ -56,12 +48,10 @@ type planPreviewItemDoc struct {
 	SkipDetail        string   `json:"skip_detail,omitempty"`
 	Cardinality       string   `json:"cardinality,omitempty"`
 	CardinalitySource string   `json:"cardinality_source,omitempty"`
-	// Risks mirrors sparkwing.PreviewItem.Risks: the author-declared
-	// risk-label set on this step.
+
 	Risks []string `json:"risks,omitempty"`
 }
 
-// pipelinePlanArgs holds wrapper-owned flags + passthrough.
 type pipelinePlanArgs struct {
 	output      string
 	pipeline    string
@@ -70,10 +60,6 @@ type pipelinePlanArgs struct {
 	passthrough []string
 }
 
-// parsePipelinePlanArgs is parsePipelineExplainArgs's twin: the
-// same hand-parsed wrapper flags plus --start-at / --stop-at since
-// those are part of the runtime-resolved view this verb surfaces.
-// Mirrors the explain parser's `--` separator handling exactly.
 func parsePipelinePlanArgs(args []string) (pipelinePlanArgs, bool, error) {
 	var parsed pipelinePlanArgs
 	for i := 0; i < len(args); i++ {
@@ -178,9 +164,6 @@ func runPipelinePlan(args []string) error {
 	return nil
 }
 
-// printPlanPreview renders a PlanPreview as a human-readable tree.
-// Each node + work item is annotated with its would_run /
-// would_skip decision and (for skips) the reason.
 func printPlanPreview(doc *planPreviewDoc) {
 	if doc.Pipeline != "" {
 		fmt.Printf("Plan: %s\n", doc.Pipeline)

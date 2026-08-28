@@ -8,26 +8,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// unknownPipelineErr formats the canonical "unknown pipeline X"
-// error with a "did you mean Y?" Levenshtein suggestion sourced from
-// the live registration set. Reuses sparkwingruntime.SuggestClosest so the
-// typo threshold matches the rest of the SDK's string-id surfaces.
-//
-// Previously every "unknown pipeline" site returned a flat error and
-// forced the operator to re-read `sparkwing pipeline list` for the
-// right spelling. Now `sparkwing run claster-up` suggests "cluster-up"
-// inline, mirroring the `Needs("X")` typo suggestion. Far typos
-// ("totallyunrelated") fall through to the existing message without
-// a misleading suggestion.
 func unknownPipelineErr(pipeline string) error {
 	return fmt.Errorf("%s", unknownPipelineMessage(pipeline))
 }
 
-// unknownPipelineMessage is the string body of unknownPipelineErr,
-// exposed separately so cmd/sparkwing's `pipeline describe` (whose
-// error string is shaped slightly differently -- "no pipeline named
-// X" rather than "unknown pipeline X") can reuse the suggestion
-// logic without inheriting our message prefix.
 func unknownPipelineMessage(pipeline string) string {
 	registered := sparkwing.Registered()
 	suggestion := sparkwingruntime.SuggestClosest(pipeline, registered)

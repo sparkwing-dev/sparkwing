@@ -5,12 +5,6 @@ import (
 	"testing"
 )
 
-// TestSparkwingFlagDocs_OrderAndUniqueness pins the documented
-// sparkwing-owned flag set so a regression (typo, accidental dedupe,
-// missing entry) shows up as a test failure. Order is also pinned
-// because the per-pipeline help footer renders in walk order;
-// arbitrary reordering would silently re-shape every pipeline's
-// --help.
 func TestSparkwingFlagDocs_OrderAndUniqueness(t *testing.T) {
 	docs := SparkwingFlagDocs()
 	if len(docs) == 0 {
@@ -34,8 +28,6 @@ func TestSparkwingFlagDocs_OrderAndUniqueness(t *testing.T) {
 	}
 }
 
-// TestSparkwingFlagDocs_CoversSafetyFlags pins the range-resume,
-// dry-run, and risk-label flag set the doc list MUST include.
 func TestSparkwingFlagDocs_CoversSafetyFlags(t *testing.T) {
 	docs := SparkwingFlagDocs()
 	have := map[string]bool{}
@@ -54,10 +46,6 @@ func TestSparkwingFlagDocs_CoversSafetyFlags(t *testing.T) {
 	}
 }
 
-// TestSparkwingFlagDocs_AllSwPrefixed pins that every documented
-// sparkwing-owned flag carries the sw- prefix. The prefix is the
-// entire reservation mechanism -- it lets pipeline-author Inputs
-// flags occupy the unprefixed namespace without collision.
 func TestSparkwingFlagDocs_AllSwPrefixed(t *testing.T) {
 	flatTopLevel := map[string]bool{"profile": true, "target": true}
 	for _, d := range SparkwingFlagDocs() {
@@ -70,8 +58,6 @@ func TestSparkwingFlagDocs_AllSwPrefixed(t *testing.T) {
 	}
 }
 
-// TestSparkwingFlagDocs_ReturnsCopy ensures callers may mutate the
-// returned slice freely without affecting subsequent calls.
 func TestSparkwingFlagDocs_ReturnsCopy(t *testing.T) {
 	a := SparkwingFlagDocs()
 	if len(a) == 0 {
@@ -84,12 +70,6 @@ func TestSparkwingFlagDocs_ReturnsCopy(t *testing.T) {
 	}
 }
 
-// TestSparkwingFlagDocs_GroupsAreKnown pins the rendering buckets so
-// a rogue Group string ("system " with trailing space, "System "
-// with capitalization drift) doesn't silently fall into a default
-// bucket. Every sparkwing-owned flag belongs to the single "System"
-// bucket; pipeline-author flags get their own "Pipeline Args" bucket
-// in the render layer.
 func TestSparkwingFlagDocs_GroupsAreKnown(t *testing.T) {
 	known := map[string]bool{
 		"System": true,

@@ -29,8 +29,8 @@ type verifyFailsPipe struct{ sparkwing.Base }
 var (
 	vfActionRuns    atomic.Int32
 	vfVerifyRuns    atomic.Int32
-	vfRecoveryStage atomic.Int32 // int(stage)+1; 0 = recovery never ran
-	vfRecoveryErr   atomic.Value // string
+	vfRecoveryStage atomic.Int32
+	vfRecoveryErr   atomic.Value
 )
 
 func (verifyFailsPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {

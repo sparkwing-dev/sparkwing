@@ -1,9 +1,3 @@
-// `sparkwing pipeline publish` -- compile the .sparkwing/ pipeline
-// binary and upload it to the configured ArtifactStore at bin/<hash>.
-// . Pairs with the storage backends + the
-// existing PipelineCacheKey so a single S3 bucket hosts both
-// pipeline binaries (via this command) and per-run logs / state
-// (via ci-embedded mode).
 package main
 
 import (
@@ -26,8 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
-// publishedBinary is one row of the publish output -- one entry per
-// (GOOS, GOARCH) combination requested by --platform.
 type publishedBinary struct {
 	Key        string `json:"key"`
 	Platform   string `json:"platform"`
@@ -93,15 +85,12 @@ func runPipelinePublish(args []string) error {
 	return renderPublishResults(results, format)
 }
 
-// platform is a parsed GOOS/GOARCH target.
 type platform struct {
 	OS, Arch string
 }
 
 func (p platform) label() string { return p.OS + "/" + p.Arch }
 
-// parsePlatforms splits comma-separated "os/arch" entries; empty
-// returns a single-element slice for the current runtime.
 func parsePlatforms(s string) ([]platform, error) {
 	if s == "" {
 		return []platform{{OS: runtime.GOOS, Arch: runtime.GOARCH}}, nil
@@ -124,9 +113,6 @@ func parsePlatforms(s string) ([]platform, error) {
 	return out, nil
 }
 
-// compileAndPublishOne builds the pipeline binary for one target
-// platform and uploads it to the artifact-store under bin/<hash>.
-// Returns the metadata row for the publish output.
 func compileAndPublishOne(ctx context.Context, sparkwingDir string, p platform, store storage.ArtifactStore, storeURL string) (publishedBinary, error) {
 	key, err := bincache.PipelineCacheKeyForPlatform(sparkwingDir, p.OS, p.Arch)
 	if err != nil {
@@ -161,11 +147,6 @@ func compileAndPublishOne(ctx context.Context, sparkwingDir string, p platform, 
 	}, nil
 }
 
-// compileForPlatform shells out to `go build` with GOOS+GOARCH set.
-// bincache.CompilePipeline reads from os.Environ at exec time, so a
-// pair of os.Setenv calls before invoking it is enough -- but we
-// inline a thin go build invocation here for clarity since publish
-// is the only caller that cross-compiles.
 func compileForPlatform(sparkwingDir, dest string, p platform) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
@@ -193,9 +174,6 @@ func compileForPlatform(sparkwingDir, dest string, p platform) error {
 	return nil
 }
 
-// overlayModfilePath mirrors the helper in bincache (kept private
-// there). Duplicated here so this package doesn't have to widen
-// its public surface for one caller.
 func overlayModfilePath(sparkwingDir string) string {
 	p := filepath.Join(sparkwingDir, ".resolved.mod")
 	if fi, err := os.Stat(p); err == nil && fi.Mode().IsRegular() {
@@ -204,10 +182,6 @@ func overlayModfilePath(sparkwingDir string) string {
 	return ""
 }
 
-// goWorkInScope mirrors the bincache helper. Returns the path to a
-// go.work in sparkwingDir or an ancestor + true on hit, "" + false
-// otherwise. Honors GOWORK ("off" disables; an explicit path wins
-// when readable).
 func goWorkInScope(sparkwingDir string) (string, bool) {
 	switch env := os.Getenv("GOWORK"); env {
 	case "off":
@@ -233,9 +207,6 @@ func goWorkInScope(sparkwingDir string) (string, bool) {
 	}
 }
 
-// resolveArtifactStoreURL picks the storage URL to publish to.
-// Operators pass --artifact-store URL explicitly; returning "" means
-// the flag was not provided.
 func resolveArtifactStoreURL(_, urlFlag string) (string, error) {
 	return urlFlag, nil
 }
@@ -243,7 +214,7 @@ func resolveArtifactStoreURL(_, urlFlag string) (string, error) {
 func renderPublishResults(rows []publishedBinary, format string) error {
 	switch format {
 	case "json":
-		// NDJSON: one published binary per line.
+
 		return ndjson.Write(os.Stdout, rows)
 	case "plain":
 		for _, r := range rows {
@@ -261,8 +232,6 @@ func renderPublishResults(rows []publishedBinary, format string) error {
 	}
 }
 
-// humanSize is a small bytes->KiB/MiB formatter so the table output
-// shows useful magnitudes without a third-party dep.
 func humanSize(b int64) string {
 	const (
 		kib = 1024

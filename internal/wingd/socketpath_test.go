@@ -18,9 +18,6 @@ func deepHome(t *testing.T) string {
 	return home
 }
 
-// TestSocketPath_StaysShortForDeepHome verifies that a home deep enough to make
-// the old under-home socket exceed sun_path still resolves to a
-// short socket path, while the lock and state stay under the home.
 func TestSocketPath_StaysShortForDeepHome(t *testing.T) {
 	home := deepHome(t)
 
@@ -46,8 +43,6 @@ func TestSocketPath_StaysShortForDeepHome(t *testing.T) {
 	}
 }
 
-// TestSocketPath_DistinctPerHome ensures two homes get distinct sockets so
-// each keeps its own daemon.
 func TestSocketPath_DistinctPerHome(t *testing.T) {
 	a, _ := SocketPath(t.TempDir())
 	b, _ := SocketPath(t.TempDir())
@@ -56,9 +51,6 @@ func TestSocketPath_DistinctPerHome(t *testing.T) {
 	}
 }
 
-// bindPlaceholderSocket creates the socket file a daemon serving home
-// would have bound, so socket discovery has something to find without a
-// daemon process.
 func bindPlaceholderSocket(t *testing.T, home string) string {
 	t.Helper()
 	sock, err := SocketPath(home)
@@ -95,9 +87,6 @@ func bindLiveSocket(t *testing.T, home string) string {
 	return sock
 }
 
-// TestPeerSockets_FindsOtherHomesAndOmitsOwn covers the discovery a tool
-// needs to see a daemon serving a home that is not its own, which that
-// home's socket alone never reveals.
 func TestPeerSockets_FindsOtherHomesAndOmitsOwn(t *testing.T) {
 	own := t.TempDir()
 	other := t.TempDir()
@@ -116,8 +105,6 @@ func TestPeerSockets_FindsOtherHomesAndOmitsOwn(t *testing.T) {
 	}
 }
 
-// TestValidateSocketPath_RejectsOverLength asserts the length guard names
-// the limit and the path rather than letting bind fail with a bare EINVAL.
 func TestValidateSocketPath_RejectsOverLength(t *testing.T) {
 	long := "/tmp/" + strings.Repeat("x", maxSunPath())
 	err := ValidateSocketPath(long)
@@ -132,9 +119,6 @@ func TestValidateSocketPath_RejectsOverLength(t *testing.T) {
 	}
 }
 
-// TestDaemon_BindsUnderDeepHome drives a real daemon whose home is deep
-// enough to have broken the old under-home socket, and asserts it reaches
-// the serving state.
 func TestDaemon_BindsUnderDeepHome(t *testing.T) {
 	home := deepHome(t)
 	d, err := New(Config{Home: home, Version: "v1.0.0"})

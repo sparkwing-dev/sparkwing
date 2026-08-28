@@ -217,6 +217,4 @@ func mustAppend(t *testing.T, s storage.LogStore, ctx context.Context, runID, no
 	}
 }
 
-// silence unused-import warnings on builds that strip unreachable
-// branches when errors helpers aren't referenced.
 var _ = errors.Is

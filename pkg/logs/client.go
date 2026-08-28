@@ -136,12 +136,6 @@ func (c *Client) Append(ctx context.Context, runID, nodeID string, data []byte) 
 	return fmt.Errorf("logs append %d: %s", resp.StatusCode, trimmed)
 }
 
-// parseMissingScope extracts the scope name from a 401/403 response
-// body. Tries the JSON shape first (`missing_scope` field); falls
-// back to the older plain-text phrasing
-// "token lacks required scope: <name>" so mid-rollout we don't
-// degrade against an older logs service / non-controller proxy.
-// Returns "" when neither shape matches.
 func parseMissingScope(body string) string {
 	if body == "" {
 		return ""

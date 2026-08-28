@@ -16,8 +16,6 @@ import (
 
 const strayTestWait = 10 * time.Second
 
-// shortHome returns a scratch sparkwing home whose daemon socket stays
-// inside the OS length limit.
 func shortHome(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "opsview")
@@ -28,8 +26,6 @@ func shortHome(t *testing.T) string {
 	return dir
 }
 
-// serveDaemon runs a daemon for home at the given reported version until
-// the test ends.
 func serveDaemon(t *testing.T, home, version string) {
 	t.Helper()
 	d, err := wingd.New(wingd.Config{Home: home, Version: version})
@@ -79,10 +75,6 @@ func straySockets(r opsview.DoctorReport) []string {
 	return socks
 }
 
-// TestDiagnose_NamesADaemonBuiltFromAScratchModule covers the daemon a
-// scaffolded build leaves running: it serves a home of its own, so this
-// home's own socket never reveals it, and it stands beside the resident
-// daemon in a process listing looking like production.
 func TestDiagnose_NamesADaemonBuiltFromAScratchModule(t *testing.T) {
 	home := shortHome(t)
 	stray := shortHome(t)
@@ -101,10 +93,6 @@ func TestDiagnose_NamesADaemonBuiltFromAScratchModule(t *testing.T) {
 	}
 }
 
-// TestRenderDoctorPretty_ShowsAStrayDaemonOnAnOtherwiseHealthyHome covers
-// the case a stray is most likely to be missed in: the home itself has
-// nothing wrong, which is where the report would otherwise stop at one
-// line.
 func TestRenderDoctorPretty_ShowsAStrayDaemonOnAnOtherwiseHealthyHome(t *testing.T) {
 	r := opsview.DoctorReport{
 		StrayDaemons: []opsview.DoctorStrayDaemon{
@@ -127,9 +115,6 @@ func TestRenderDoctorPretty_ShowsAStrayDaemonOnAnOtherwiseHealthyHome(t *testing
 	}
 }
 
-// TestDiagnose_LeavesAnotherHomesReleaseDaemonAlone keeps the check off an
-// operator's deliberate second home, which is a remedy doctor itself
-// recommends.
 func TestDiagnose_LeavesAnotherHomesReleaseDaemonAlone(t *testing.T) {
 	home := shortHome(t)
 	other := shortHome(t)
@@ -145,9 +130,6 @@ func TestDiagnose_LeavesAnotherHomesReleaseDaemonAlone(t *testing.T) {
 	}
 }
 
-// TestDiagnose_LeavesThisHomesOwnDaemonAlone keeps the resident daemon out
-// of the finding: a daemon serving the home under inspection is what the
-// version-skew check is for.
 func TestDiagnose_LeavesThisHomesOwnDaemonAlone(t *testing.T) {
 	home := shortHome(t)
 	serveDaemon(t, home, "v0.0.0")

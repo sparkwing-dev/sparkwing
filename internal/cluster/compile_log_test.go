@@ -14,10 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
 
-// TestShipCompileOutput_PostsToLogsServer verifies that when the
-// warm-runner's .sparkwing/ compile fails, the captured `go build`
-// stdout + stderr are POSTed to the synthetic CompileLogNode log on
-// the configured logs service.
 func TestShipCompileOutput_PostsToLogsServer(t *testing.T) {
 	const runID = "run-test-imp-001"
 	const want = "go: go.mod requires go >= 9.99.0\n./pipeline.go:7:2: undefined: Foo"
@@ -52,17 +48,11 @@ func TestShipCompileOutput_PostsToLogsServer(t *testing.T) {
 	}
 }
 
-// TestShipCompileOutput_NoLogsURLNoOp guards the laptop-local path
-// where opts.LogsURL is empty: shipping must be a silent no-op
-// rather than panicking on a nil client.
 func TestShipCompileOutput_NoLogsURLNoOp(t *testing.T) {
 	buildErr := &bincache.CompileError{Output: []byte("oops"), Err: errors.New("x")}
 	shipCompileOutput(context.Background(), TriggerLoopOptions{}, "run-x", buildErr, slog.Default())
 }
 
-// TestShipCompileOutput_NonCompileErrorIgnored ensures we don't post
-// anything when the build error isn't a *CompileError (e.g. a fetch
-// or hash failure earlier in triggerBuildOrFetchBinary).
 func TestShipCompileOutput_NonCompileErrorIgnored(t *testing.T) {
 	posted := false
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -78,10 +68,6 @@ func TestShipCompileOutput_NonCompileErrorIgnored(t *testing.T) {
 	}
 }
 
-// TestShipCompileOutput_PostsEvenWhenCtxCancelled exercises the
-// context.WithoutCancel guard: the heartbeat goroutine often
-// cancels the parent ctx by the time we ship, but we still want
-// the operator-facing diagnostic to land.
 func TestShipCompileOutput_PostsEvenWhenCtxCancelled(t *testing.T) {
 	var posted sync.WaitGroup
 	posted.Add(1)

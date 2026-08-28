@@ -1,11 +1,3 @@
-// `sparkwing cache` inspects and trims the compiled-pipeline binary
-// cache at $SPARKWING_HOME/cache/pipelines. Every invocation of a
-// pipeline compiles its .sparkwing/ module to a binary keyed on a
-// fingerprint of the source; this is where those binaries accumulate.
-//
-// Pruning also happens automatically after a compile, so these verbs
-// are for inspecting the cache and for reclaiming space on demand
-// rather than a step anyone has to remember.
 package main
 
 import (
@@ -47,7 +39,6 @@ func runCache(args []string) error {
 	}
 }
 
-// cacheInfoReport is the -o json shape.
 type cacheInfoReport struct {
 	Dir           string           `json:"dir"`
 	Entries       int              `json:"entries"`
@@ -300,11 +291,6 @@ func cacheOutputFromArgs(args []string, fallback string) string {
 	return output
 }
 
-// ownerLabel names the checkouts an entry serves. A key is a content
-// fingerprint and -trimpath keeps build paths out of the binary, so
-// without this an entry is an unidentifiable 90 MB blob. One entry can
-// legitimately serve several checkouts, which is the point of a
-// path-independent key, so the extras are counted rather than hidden.
 func ownerLabel(owners []bincache.Owner, all bool) string {
 	if len(owners) == 0 {
 		return color.Dim("(unknown -- cached before owners were recorded)")
@@ -323,7 +309,6 @@ func ownerLabel(owners []bincache.Owner, all bool) string {
 	return label
 }
 
-// abbreviateHome shortens $HOME to ~ so a listing stays readable.
 func abbreviateHome(p string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" || !strings.HasPrefix(p, home) {
@@ -346,8 +331,6 @@ func entryLimitLabel(n int) string {
 	return fmt.Sprintf("%d entries", n)
 }
 
-// humanAge renders a duration the way a cache listing wants it: coarse,
-// and never more precise than the reader can use.
 func humanAge(d time.Duration) string {
 	switch {
 	case d < time.Minute:
@@ -361,7 +344,6 @@ func humanAge(d time.Duration) string {
 	}
 }
 
-// cacheExplainReport is the -o json shape for `cache explain`.
 type cacheExplainReport struct {
 	Dir     string             `json:"dir"`
 	Key     string             `json:"key"`
@@ -423,8 +405,6 @@ func runCacheExplain(args []string) error {
 		report.Parts = append(report.Parts, cacheExplainPart{Label: p.Label, Digest: p.Digest, Detail: p.Detail})
 	}
 
-	// Other entries this same checkout has produced. When the current
-	// key is a miss, the inputs that differ from those are the reason.
 	absDir, _ := filepath.Abs(dir)
 	entries, err := bincache.ScanCache()
 	if err != nil {

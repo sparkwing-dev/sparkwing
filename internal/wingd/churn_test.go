@@ -9,10 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
-// spawnClient opens a client whose spawn hook brings up a successor daemon
-// (restoring durable state) the first time a reconnect finds none running, so
-// a mid-operation daemon kill is recovered exactly as production recovers an
-// idle-exited or crashed daemon.
 func spawnClient(t *testing.T, home string, succ *successor) *client.Client {
 	t.Helper()
 	cl, err := client.EnsureDaemon(context.Background(), client.Options{
@@ -29,10 +25,6 @@ func spawnClient(t *testing.T, home string, succ *successor) *client.Client {
 	return cl
 }
 
-// TestChurn_QueuedWaiterRecoversAcrossDaemonKill is the field-down repro: a run
-// queued for admission must not surface "use of closed network connection" when
-// the daemon blinks. The waiter's Acquire transparently reconnects to the
-// respawned daemon, re-submits, and is granted -- no error reaches the run.
 func TestChurn_QueuedWaiterRecoversAcrossDaemonKill(t *testing.T) {
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{
@@ -61,11 +53,6 @@ func TestChurn_QueuedWaiterRecoversAcrossDaemonKill(t *testing.T) {
 	}
 }
 
-// TestChurn_HolderWatchReattachesAcrossKill proves a holder's lease survives a
-// daemon blink: after the daemon is killed and respawned, the holder's watcher
-// reconnects and reattaches within the grace window. Survival past the grace
-// window is the proof -- an unclaimed orphan would have been released -- and
-// the recovered connection can still cleanly release the lease afterward.
 func TestChurn_HolderWatchReattachesAcrossKill(t *testing.T) {
 	t.Parallel()
 
@@ -98,9 +85,6 @@ func TestChurn_HolderWatchReattachesAcrossKill(t *testing.T) {
 	}
 }
 
-// TestChurn_QueueStateRecoversAcrossKill checks the read-only status path: a
-// persistent client's QueueState survives a daemon kill by reconnecting to the
-// respawned daemon rather than failing the read.
 func TestChurn_QueueStateRecoversAcrossKill(t *testing.T) {
 	home := shortHome(t)
 	td1 := startDaemon(t, wingd.Config{Home: home, GraceWindow: 300 * time.Millisecond})
@@ -125,8 +109,6 @@ func TestChurn_QueueStateRecoversAcrossKill(t *testing.T) {
 
 const wingdChurnWait = 10 * time.Second
 
-// successorGrace mirrors the reattach grace window the successor daemon in
-// newSuccessor is configured with, so a test can wait out an unclaimed orphan.
 const successorGrace = 2 * time.Second
 
 func waitForHolder(t *testing.T, home, runID string) {

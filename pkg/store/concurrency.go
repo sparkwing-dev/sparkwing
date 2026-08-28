@@ -11,22 +11,10 @@ import (
 	"time"
 )
 
-// fitsBudget reports whether an arrival of the given cost fits a key's
-// effective capacity on top of the already-used cost. It compares by
-// subtraction (cost <= capacity-used) rather than summing used+cost, so
-// a very large declared cost can't overflow the sum into a false "fits"
-// and over-admit.
 func fitsBudget(used, cost, capacity int) bool {
 	return used <= capacity && cost <= capacity-used
 }
 
-// holderLiveSQL is the canonical SQL predicate for a holder row that
-// still counts toward its key's budget: not superseded and lease
-// unexpired. It consumes exactly one bind parameter, the current time
-// in nanoseconds. alias prefixes the column names (pass "h." for an
-// aliased join, "" otherwise). Every query that filters holders by
-// liveness must use this fragment; holderCountsForBudget is its Go-side
-// twin for rows already scanned.
 func holderLiveSQL(alias string) string {
 	return alias + "superseded = 0 AND " + alias + "lease_expires_at > ?"
 }
@@ -35,21 +23,10 @@ func holderLeaseLiveSQL(alias string) string {
 	return alias + "lease_expires_at > ?"
 }
 
-// holderCountsForBudget reports whether an already-scanned holder row
-// still counts toward its key's budget. It is the Go-side twin of
-// holderLiveSQL; the two must answer identically. The heartbeat path
-// deliberately does NOT use it: a superseded holder with a live lease
-// still heartbeats successfully (that is how it learns it was
-// superseded), so heartbeat checks the lease alone.
 func holderCountsForBudget(superseded bool, leaseExpiresNS, nowNS int64) bool {
 	return !superseded && leaseExpiresNS > nowNS
 }
 
-// declaredCapacityFloorTerm is one live holder's contribution to the
-// capacity floor: its own declaration, or the most-restrictive capacity
-// (1) when the row has no declared capacity (zero or negative), so the
-// holder constrains admission instead of
-// vanishing from the floor and inflating it into over-admission.
 func declaredCapacityFloorTerm(declared int) int {
 	if declared > 0 {
 		return declared
@@ -680,8 +657,6 @@ func (s *Store) AcquireConcurrencySlot(ctx context.Context, req AcquireSlotReque
 	}
 }
 
-// txActiveHolders reads the current live (per holderLiveSQL) holders
-// for a key within an open transaction, oldest claim first.
 func txActiveHolders(ctx context.Context, tx *storeTx, key string, nowNS int64) ([]ConcurrencyHolder, error) {
 	rows, err := tx.QueryContext(
 		ctx,
@@ -706,34 +681,16 @@ func txActiveHolders(ctx context.Context, tx *storeTx, key string, nowNS int64) 
 	return out, rows.Err()
 }
 
-// concurrencyAccounting is one consistent view of a key's admission
-// state: the used cost, the capacity floor, and the live holder set are
-// all derived from a single scan inside one transaction, so they cannot
-// disagree with each other by construction. Every admission, promotion,
-// and eviction decision routes through it.
 type concurrencyAccounting struct {
-	// used is the summed admission cost of the live holders.
 	used int
-	// floor is the most-restrictive declared capacity over the live
-	// holders (via declaredCapacityFloorTerm); 0 means no live holder
-	// constrains the budget. Parked waiters are NOT folded in -- a
-	// non-admitted waiter holds no budget, so letting its declaration
-	// drag the effective capacity below the already-admitted holders
-	// would invert priority and starve a FIFO head that fits under its
-	// own capacity.
+
 	floor int
-	// entryCap is the registered capacity from the entries row,
-	// defaulted to 1 when missing or non-positive.
+
 	entryCap int
-	// holders are the live holders, oldest claim first.
+
 	holders []ConcurrencyHolder
 }
 
-// effectiveCapacity resolves the most-restrictive-wins capacity for an
-// arrival declaring the given capacity. A non-positive incoming is
-// ignored (the release path has no arrival; the promote path folds each
-// candidate's own capacity itself). When neither the live holders nor
-// the arrival constrain the budget, the entries row is the fallback.
 func (a concurrencyAccounting) effectiveCapacity(incoming int) int {
 	eff := a.floor
 	if incoming > 0 && (eff == 0 || incoming < eff) {
@@ -745,8 +702,6 @@ func (a concurrencyAccounting) effectiveCapacity(incoming int) int {
 	return a.entryCap
 }
 
-// txConcurrencyAccounting computes the key's admission state from one
-// scan of the live holders plus the entries row.
 func txConcurrencyAccounting(ctx context.Context, tx *storeTx, key string, nowNS int64) (concurrencyAccounting, error) {
 	entryCap, err := txEntryCapacity(ctx, tx, key)
 	if err != nil {
@@ -879,13 +834,6 @@ func holderAdmissionOrderNS(h ConcurrencyHolder) int64 {
 	return h.ClaimedAt.UnixNano()
 }
 
-// txLockEntry serializes the transaction on the key's entries row --
-// the same lock the acquire path takes -- so every budget-mutating
-// path (admission, promotion, lease extension) runs under per-key
-// mutual exclusion on Postgres. Callers pass Store.forUpdate(); SQLite
-// passes an empty suffix because its writers serialize at the database
-// level. A key with no entries row has no holders or waiters to race
-// over, so a missing row is not an error.
 func txLockEntry(ctx context.Context, tx *storeTx, forUpdate, key string) error {
 	var one int
 	err := tx.QueryRowContext(
@@ -898,8 +846,6 @@ func txLockEntry(ctx context.Context, tx *storeTx, forUpdate, key string) error 
 	return err
 }
 
-// txEntryCapacity returns the registered capacity for a key, defaulting
-// to 1 when the entry row is missing or non-positive.
 func txEntryCapacity(ctx context.Context, tx *storeTx, key string) (int, error) {
 	var entryCap int
 	err := tx.QueryRowContext(
@@ -917,13 +863,6 @@ func txEntryCapacity(ctx context.Context, tx *storeTx, key string) (int, error) 
 	return entryCap, nil
 }
 
-// txPromoteWaiters grants holder rows to queue / cancel_others waiters,
-// scanning oldest-first and summing each promoted waiter's declared cost
-// against the open budget. A waiter that does not fit may be bypassed only
-// while older holders are what block it; once younger backfilled holders are
-// the blocker, promotion stops behind that waiter. Coalesce waiters resolve
-// via the leader path, not here. Returns the promoted waiters with their
-// assigned HolderID set.
 func txPromoteWaiters(ctx context.Context, tx *storeTx, key string, nowNS, expiresNS int64) ([]ConcurrencyWaiter, error) {
 	if _, err := txReapTerminalConcurrencyHolders(ctx, tx, key); err != nil {
 		return nil, err
@@ -1155,21 +1094,8 @@ func txLiveRunningRunIDs(ctx context.Context, tx *storeTx, ids []string, heartbe
 	return live, rows.Err()
 }
 
-// concurrencyInvariantFailFast selects how a violated concurrency
-// invariant reports. Under `go test` (testing.Testing()) a violation
-// fails the transaction, so every suite in the repo doubles as an
-// invariant monitor. In production it logs loudly and commits anyway:
-// a violation can also be produced by rows written by older binaries
-// (holders that predate declared-capacity tracking), and refusing to
-// commit would wedge release and promote paths on data this code
-// didn't write.
 var concurrencyInvariantFailFast = testing.Testing()
 
-// txCommitChecked verifies the concurrency invariants for every key a
-// mutating transaction touched, then commits. Every mutating
-// concurrency transaction must commit through it, so a path that
-// violates an invariant is caught at its own boundary no matter which
-// site drifted.
 func txCommitChecked(ctx context.Context, tx *storeTx, nowNS int64, keys ...string) error {
 	seen := make(map[string]bool, len(keys))
 	for _, k := range keys {
@@ -1184,11 +1110,6 @@ func txCommitChecked(ctx context.Context, tx *storeTx, nowNS int64, keys ...stri
 	return tx.Commit()
 }
 
-// txCheckConcurrencyInvariants asserts the cross-site invariants for
-// one key: live cost never exceeds the effective capacity, no live
-// holder outweighs its own declaration, every waiter carries a known
-// policy with the leader shape that policy requires, and no
-// participant both holds and waits on the same key.
 func txCheckConcurrencyInvariants(ctx context.Context, tx *storeTx, key string, nowNS int64) error {
 	acct, err := txConcurrencyAccounting(ctx, tx, key, nowNS)
 	if err != nil {
@@ -1250,8 +1171,6 @@ func txCheckConcurrencyInvariants(ctx context.Context, tx *storeTx, key string, 
 	return nil
 }
 
-// holderRow is the input to txInsertHolder: the identity, weight, and
-// declaration a new admission stamps onto its holder row.
 type holderRow struct {
 	key              string
 	holderID         string
@@ -1262,20 +1181,6 @@ type holderRow struct {
 	queueArrivedNS   int64
 }
 
-// txInsertHolder mints the live holder row for an admission -- the
-// single site that writes into concurrency_holders. A conflicting row
-// is reclaimed in place only when it no longer counts toward the budget
-// (superseded by a CancelOthers eviction, or lease-expired); both arise
-// from a same-holder_id re-acquire or promotion after a crash,
-// redelivery, or an eviction the reaper hasn't swept. A conflicting
-// LIVE row is never clobbered: the insert fails loudly instead, so a
-// path that forgot to check liveness before admitting surfaces as an
-// error rather than as a silently stolen slot.
-//
-// Minting also deletes any waiter row this participant left parked: an
-// admitted arrival is by definition no longer waiting, and a stale row
-// would later be promoted on top of its own live holder, aborting an
-// unrelated release.
 func txInsertHolder(ctx context.Context, tx *storeTx, h holderRow, nowNS, expiresNS int64) error {
 	if _, err := txDeleteWaiter(ctx, tx, h.key, h.runID, h.nodeID); err != nil {
 		return err
@@ -1500,11 +1405,6 @@ func (s *Store) ReleaseConcurrencySlot(ctx context.Context, key, holderID, outco
 	return released, nil
 }
 
-// txReleaseHolder is the single definition of "release this holder": it
-// deletes the holder row and, when the release is a successful run of
-// memoized content (outcome "success", a content hash, and a positive
-// TTL), writes the shared cache entry. Reports whether a holder row
-// matched, plus the released holder's (runID, nodeID).
 func txReleaseHolder(ctx context.Context, tx *storeTx, key, holderID, outcome, outputRef, cacheKeyHash string, ttl time.Duration) (released bool, runID, nodeID string, err error) {
 	var supersededInt int
 	var leaseNS, queueArrivedNS int64
@@ -1614,20 +1514,12 @@ func txTransferInheritedHolderCost(
 	return err
 }
 
-// concurrencyCacheHit is a served memo entry.
 type concurrencyCacheHit struct {
 	OutputRef    string
 	OriginRunID  string
 	OriginNodeID string
 }
 
-// txCacheLookup is the single "serve this arrival from the memo
-// cache?" decision, shared by the acquire path and the waiter-resolve
-// path. A request with no content hash, or one that asked to bypass
-// the read (--no-cache), never hits; an unexpired entry hits and
-// touches last_hit_at. deleteExpired additionally drops an expired
-// entry so the acquire path stops re-reading it; the polling resolve
-// path leaves expiry to the sweeper.
 func txCacheLookup(ctx context.Context, tx *storeTx, key, cacheKeyHash string, nowNS int64, bypassRead, deleteExpired bool) (*concurrencyCacheHit, error) {
 	if cacheKeyHash == "" || bypassRead {
 		return nil, nil
@@ -1741,10 +1633,6 @@ func (s *Store) ResolveCoalesceFollowers(ctx context.Context, key, leaderRunID, 
 	return out, nil
 }
 
-// txDrainCoalesceFollowers returns and deletes the coalesce waiters
-// parked behind the given leader -- the single definition of "resolve
-// this leader's followers", shared by ReleaseAndNotify and
-// ResolveCoalesceFollowers.
 func txDrainCoalesceFollowers(ctx context.Context, tx *storeTx, key, leaderRunID, leaderNodeID string) ([]ConcurrencyWaiter, error) {
 	rows, err := tx.QueryContext(
 		ctx,
@@ -1797,11 +1685,6 @@ func txNodeOutcome(ctx context.Context, tx *storeTx, runID, nodeID string) (outc
 	return outcome, failureReason, true, nil
 }
 
-// txPark parks an arrival as a waiter -- the single site that writes
-// into concurrency_waiters. Re-parking the same (key, run, node) is an
-// upsert, so a re-arrival after crash or redelivery refreshes its row
-// instead of erroring; its arrival order deliberately resets (the
-// re-arrival is a new wait).
 func txPark(ctx context.Context, tx *storeTx, w ConcurrencyWaiter, arrivedNS int64) error {
 	_, err := tx.ExecContext(
 		ctx,
@@ -1824,10 +1707,6 @@ func txPark(ctx context.Context, tx *storeTx, w ConcurrencyWaiter, arrivedNS int
 	return err
 }
 
-// txSupersede marks a holder evicted by a CancelOthers arrival -- the
-// single site that flips superseded. The row keeps its budget weight
-// out of the accounting from this point; the victim drains
-// cooperatively and the row is reclaimed or reaped later.
 func txSupersede(ctx context.Context, tx *storeTx, key, holderID string) error {
 	_, err := tx.ExecContext(
 		ctx,
@@ -1837,10 +1716,6 @@ func txSupersede(ctx context.Context, tx *storeTx, key, holderID string) error {
 	return err
 }
 
-// txDeleteHolder removes one holder row by its primary key -- the
-// single by-id DELETE site for concurrency_holders (release and the
-// reap sweeps). CancelWaiter reclaims by participant instead, the one
-// other holder-delete site.
 func txDeleteHolder(ctx context.Context, tx *storeTx, key, holderID string) error {
 	_, err := tx.ExecContext(
 		ctx,
@@ -1850,9 +1725,6 @@ func txDeleteHolder(ctx context.Context, tx *storeTx, key, holderID string) erro
 	return err
 }
 
-// txDeleteWaiter removes one waiter row by its primary key -- the
-// single DELETE site for concurrency_waiters. Reports whether a row
-// matched.
 func txDeleteWaiter(ctx context.Context, tx *storeTx, key, runID, nodeID string) (bool, error) {
 	res, err := tx.ExecContext(
 		ctx,
@@ -2296,9 +2168,6 @@ func (s *Store) GetConcurrencyState(ctx context.Context, key string) (*Concurren
 	return state, nil
 }
 
-// txReapTerminalConcurrencyHolders removes holders whose run already has a
-// terminal row. A missing run row is not proof of death; absence falls back
-// to the lease-expiry reaper.
 func txReapTerminalConcurrencyHolders(ctx context.Context, tx *storeTx, key string) ([]ConcurrencyHolder, error) {
 	rows, err := tx.QueryContext(
 		ctx,
@@ -2333,10 +2202,6 @@ func txReapTerminalConcurrencyHolders(ctx context.Context, tx *storeTx, key stri
 	return stale, nil
 }
 
-// reapStaleConcurrencyHolders deletes lease-expired holders; caller
-// runs PromoteNextWaiters and emits audit events. The transaction
-// holds the read locks (FOR UPDATE SKIP LOCKED on Postgres) for the
-// duration so concurrent reapers pick disjoint rows.
 func (s *Store) reapStaleConcurrencyHolders(ctx context.Context) ([]ConcurrencyHolder, error) {
 	tx, err := s.beginTx(ctx)
 	if err != nil {
@@ -2430,9 +2295,6 @@ func (s *Store) ForceReleaseSupersededHolders(ctx context.Context, key string) (
 	return out, nil
 }
 
-// reapStaleConcurrencyWaiters drops coalesce followers only after both
-// their leader and owning run are gone, and drops old waiters whose
-// owning run is not live.
 func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Duration) ([]ConcurrencyWaiter, error) {
 	if maxAge <= 0 {
 		return nil, nil
@@ -2542,9 +2404,6 @@ func (s *Store) reapStaleConcurrencyWaiters(ctx context.Context, maxAge time.Dur
 	return dropped, nil
 }
 
-// prefixColumns prefixes each column in a comma-separated canonical
-// column list with a table alias so the list stays usable in aliased
-// joins without re-spelling it.
 func prefixColumns(cols, alias string) string {
 	parts := strings.Split(cols, ",")
 	for i, p := range parts {
@@ -2595,8 +2454,6 @@ func (s *Store) ListConcurrencyStates(ctx context.Context) ([]*ConcurrencyState,
 	return states, nil
 }
 
-// reconcileConcurrencyKeys is the startup recovery sweep; PromoteNext
-// for every key with queued waiters and room.
 func (s *Store) reconcileConcurrencyKeys(ctx context.Context, lease time.Duration) (int, error) {
 	if lease <= 0 {
 		lease = DefaultConcurrencyLease
@@ -2635,7 +2492,6 @@ func (s *Store) reconcileConcurrencyKeys(ctx context.Context, lease time.Duratio
 	return total, nil
 }
 
-// sweepExpiredConcurrencyCache removes cache entries past their TTL.
 func (s *Store) sweepExpiredConcurrencyCache(ctx context.Context) (int64, error) {
 	res, err := s.exec(ctx,
 		`DELETE FROM concurrency_cache WHERE expires_at <= ?`, time.Now().UnixNano())
@@ -2645,7 +2501,6 @@ func (s *Store) sweepExpiredConcurrencyCache(ctx context.Context) (int64, error)
 	return res.RowsAffected()
 }
 
-// sweepLRUConcurrencyCache evicts oldest until row count == keepCount.
 func (s *Store) sweepLRUConcurrencyCache(ctx context.Context, keepCount int) (int64, error) {
 	if keepCount <= 0 {
 		return 0, nil
@@ -2683,9 +2538,6 @@ func (s *Store) CountConcurrencyCache(ctx context.Context) (int, error) {
 	return n, err
 }
 
-// holderColumns is the canonical SELECT column list for scanHolder, in
-// the exact order it scans. Centralized so the cost /
-// declared_capacity tail can't drift between call sites.
 const holderColumns = `key, holder_id, run_id, node_id, claimed_at, queue_arrived_at, lease_expires_at, superseded, cost, declared_capacity`
 
 func scanHolder(rs rowScanner) (ConcurrencyHolder, error) {
@@ -2716,9 +2568,6 @@ func scanWaiter(rs rowScanner) (ConcurrencyWaiter, error) {
 	return w, nil
 }
 
-// waiterColumns is the canonical SELECT column list for scanWaiter, in
-// the exact order it scans. Centralized so the cost / declared_capacity
-// tail can't drift between call sites.
 const waiterColumns = `key, run_id, node_id, holder_id, arrived_at, policy, cache_key_hash, leader_run_id, leader_node_id, cancel_timeout_ns, cost, declared_capacity`
 
 func nodeIDOrDash(nodeID string) string {

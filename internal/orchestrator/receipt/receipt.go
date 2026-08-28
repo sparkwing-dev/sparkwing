@@ -1,10 +1,3 @@
-// Package receipt computes the per-run audit + cost summary
-// surfaced by `sparkwing runs receipt` and GET /api/v1/runs/{id}/receipt.
-//
-// The receipt is recomputed from runs+nodes on demand. Only the
-// small queryable fields (receipt_sha, cost_*) live on the runs row;
-// the full JSON is regenerated each read so the receipt always
-// reflects the current store contents.
 package receipt
 
 import (
@@ -17,8 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Receipt is the per-run audit + cost artifact. JSON shape is the
-// public contract documented in the docs.
 type Receipt struct {
 	RunID      string     `json:"run_id"`
 	Pipeline   string     `json:"pipeline"`
@@ -28,18 +19,13 @@ type Receipt struct {
 	FinishedAt *time.Time `json:"finished_at,omitempty"`
 	DurationMS int64      `json:"duration_ms"`
 	Identity   Identity   `json:"identity"`
-	// Invocation: how the run was started (flags, args, binary_source,
-	// cwd, reproducer, hints). Sourced from store.Run.Invocation, which
-	// is itself a snapshot of the run_start envelope record's attrs.
-	// Empty for runs that predate the column landing.
+
 	Invocation map[string]any `json:"invocation,omitempty"`
 	Steps      []Step         `json:"steps"`
 	Cost       Cost           `json:"cost"`
 	ReceiptSHA string         `json:"receipt_sha"`
 }
 
-// Identity carries the four hashes that make two runs comparable
-// without rerunning either.
 type Identity struct {
 	PipelineVersionHash string            `json:"pipeline_version_hash"`
 	InputsHash          string            `json:"inputs_hash"`
@@ -47,8 +33,6 @@ type Identity struct {
 	OutputsHash         map[string]string `json:"outputs_hash"`
 }
 
-// Step is one row in the per-step observability section. Skipped
-// nodes appear with outcome=skipped and an optional skip_reason.
 type Step struct {
 	ID         string `json:"id"`
 	NodeID     string `json:"node_id"`
@@ -57,8 +41,6 @@ type Step struct {
 	SkipReason string `json:"skip_reason,omitempty"`
 }
 
-// Cost is the runner-time × profile-rate compute cost. Cloud-billing
-// reconciliation flips Settled to true.
 type Cost struct {
 	Currency     string `json:"currency"`
 	ComputeCents int64  `json:"compute_cents"`
@@ -66,11 +48,6 @@ type Cost struct {
 	Settled      bool   `json:"settled"`
 }
 
-// BuildReceipt assembles a Receipt from store rows. Pure: no I/O,
-// deterministic, safe to call repeatedly. rate is USD per runner
-// hour (0 = unconfigured -> compute_cents:0). rateSource is a
-// human-readable provenance string (e.g. "profile:prod
-// (cost_per_runner_hour=$0.05)") shown in the receipt.
 func BuildReceipt(run *store.Run, nodes []*store.Node, rate float64, rateSource string) Receipt {
 	if run == nil {
 		return Receipt{}
@@ -82,12 +59,7 @@ func BuildReceipt(run *store.Run, nodes []*store.Node, rate float64, rateSource 
 		Status:     run.Status,
 		StartedAt:  run.StartedAt,
 		FinishedAt: run.FinishedAt,
-		// Secret-declared args are redacted before the SHA is
-		// computed, not after, so receipt_sha certifies the document
-		// the caller actually receives -- a hash over bytes nobody is
-		// allowed to see would make verification impossible. Runs
-		// predating the invocation's secret-arg list carry no
-		// classification and hash exactly as they did before.
+
 		Invocation: store.RedactInvocation(run.Invocation),
 	}
 	if run.FinishedAt != nil {
@@ -110,10 +82,6 @@ func buildIdentity(run *store.Run, nodes []*store.Node) Identity {
 	return id
 }
 
-// planTopologyHash hashes node IDs + their dep edges. The node body
-// (Status / Outcome / timing / output) is excluded so two runs with
-// identical DAG shape produce the same plan_hash regardless of how
-// they ran.
 func planTopologyHash(nodes []*store.Node) string {
 	type edge struct {
 		ID   string   `json:"id"`
@@ -129,9 +97,6 @@ func planTopologyHash(nodes []*store.Node) string {
 	return hashCanonical(edges)
 }
 
-// outputsHashes returns a per-node sha of the typed Output JSON.
-// Skipped / never-ran nodes contribute the empty hash, kept out of
-// the map so the receipt isn't padded with nulls.
 func outputsHashes(nodes []*store.Node) map[string]string {
 	out := make(map[string]string, len(nodes))
 	for _, n := range nodes {
@@ -158,9 +123,6 @@ func buildSteps(nodes []*store.Node) []Step {
 	return steps
 }
 
-// stepOutcome normalizes the node's recorded outcome so the receipt
-// always uses one of {success,failed,skipped,cancelled}. An empty
-// outcome on a non-terminal node is reported as "running".
 func stepOutcome(n *store.Node) string {
 	if n.Outcome != "" {
 		return n.Outcome
@@ -171,10 +133,6 @@ func stepOutcome(n *store.Node) string {
 	return n.Status
 }
 
-// buildCost sums runner-time across nodes that actually ran (have
-// both started_at and finished_at, regardless of outcome) and
-// multiplies by the profile rate. Skipped/cancelled nodes do not
-// have a started_at and therefore contribute zero.
 func buildCost(nodes []*store.Node, rate float64, rateSource string) Cost {
 	c := Cost{Currency: "USD", RateSource: rateSource, Settled: false}
 	if rate <= 0 {
@@ -203,17 +161,11 @@ func buildCost(nodes []*store.Node, rate float64, rateSource string) Cost {
 	return c
 }
 
-// computeReceiptSHA hashes the canonical encoding of r with
-// ReceiptSHA blanked, so the field can certify "this is the receipt
-// I computed for this run state."
 func computeReceiptSHA(r Receipt) string {
 	r.ReceiptSHA = ""
 	return hashCanonical(r)
 }
 
-// hashCanonical marshals v with sorted map keys (the encoding/json
-// default for map[string]X) and returns sha256:<hex>. Slices retain
-// caller order; callers that need set-style stability sort first.
 func hashCanonical(v any) string {
 	buf, err := json.Marshal(v)
 	if err != nil {

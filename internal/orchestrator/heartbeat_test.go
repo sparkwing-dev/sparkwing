@@ -36,8 +36,6 @@ func newHeartbeatServer(t *testing.T, handler http.HandlerFunc) *httptest.Server
 	return ts
 }
 
-// withFastSilence shrinks the silence/timeout knobs. Interval is
-// passed directly into runHeartbeat so no override needed.
 func withFastSilence(t *testing.T, timeout, silence time.Duration) {
 	t.Helper()
 	oldTimeout := runHeartbeatTimeout
@@ -50,11 +48,6 @@ func withFastSilence(t *testing.T, timeout, silence time.Duration) {
 	})
 }
 
-// TestRunHeartbeat_ReapedCancelsRun: controller returns 404 on the
-// first heartbeat (trigger was reaped / no longer claimed). The
-// heartbeat must cancel the run ctx and NOT set the cancelled flag
-// (reaped != operator-cancel; the controller's reaper will mark
-// the run 'failed' with runner-lease-expired reason).
 func TestRunHeartbeat_ReapedCancelsRun(t *testing.T) {
 	withFastSilence(t, 50*time.Millisecond, time.Second)
 
@@ -87,9 +80,6 @@ func TestRunHeartbeat_ReapedCancelsRun(t *testing.T) {
 	}
 }
 
-// TestRunHeartbeat_SilenceCancelsRun: controller returns 500
-// repeatedly. After silence window elapses, run ctx must be
-// cancelled and cancelled flag stays false.
 func TestRunHeartbeat_SilenceCancelsRun(t *testing.T) {
 	withFastSilence(t, 20*time.Millisecond, 100*time.Millisecond)
 
@@ -122,9 +112,6 @@ func TestRunHeartbeat_SilenceCancelsRun(t *testing.T) {
 	}
 }
 
-// TestRunHeartbeat_OperatorCancel: controller returns 200 with
-// cancel_requested=true. Run ctx must be cancelled AND cancelled
-// flag must be set so the caller marks the run as 'cancelled'.
 func TestRunHeartbeat_OperatorCancel(t *testing.T) {
 	ts := newHeartbeatServer(t, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

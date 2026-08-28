@@ -84,11 +84,6 @@ func TestRun_ExplicitArgBeatsPipelineDefault(t *testing.T) {
 	}
 }
 
-// A guard's whole job is to describe an invocation nobody may
-// dispatch. Where the offending value came from is not part of that
-// description: `arg:protected=prod` must fire on the pipeline entry's
-// own args: block exactly as it fires on `--protected prod`, because
-// the run reaches prod either way.
 func TestRun_ArgGuardSeesPipelineYAMLDefault(t *testing.T) {
 	registerLockDefaultsPipe(t)
 	p := newPaths(t)
@@ -111,8 +106,6 @@ func TestRun_ArgGuardSeesPipelineYAMLDefault(t *testing.T) {
 	}
 }
 
-// The project's defaults.args block is the lowest layer, and a guard
-// has to see through to it for the same reason.
 func TestRun_ArgGuardSeesProjectDefaultArgs(t *testing.T) {
 	registerLockDefaultsPipe(t)
 	p := newPaths(t)
@@ -132,9 +125,6 @@ func TestRun_ArgGuardSeesProjectDefaultArgs(t *testing.T) {
 	}
 }
 
-// Guards read the merged set, which means they read the CLI override
-// too: a flag that steers the run away from prod must not be judged
-// against the yaml value it replaced.
 func TestRun_ArgGuardHonoursCLIOverrideOfYAMLDefault(t *testing.T) {
 	registerLockDefaultsPipe(t)
 	p := newPaths(t)
@@ -159,8 +149,6 @@ func TestRun_ArgGuardHonoursCLIOverrideOfYAMLDefault(t *testing.T) {
 	}
 }
 
-// An arg no layer supplies stays unset, and an arg guard never
-// matches an unset arg. Unchanged by the merge.
 func TestRun_ArgGuardOnUnsetArgDoesNotFire(t *testing.T) {
 	registerLockDefaultsPipe(t)
 	p := newPaths(t)

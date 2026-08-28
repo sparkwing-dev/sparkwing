@@ -12,14 +12,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// seedTrigger is a thin helper for these tests; avoids re-typing the
-// store.Trigger literal with only Pipeline varying.
 func seedTrigger(t *testing.T, st *store.Store, id, pipeline string, at time.Time) {
 	t.Helper()
 	seedTriggerWithSource(t, st, id, pipeline, "", at)
 }
 
-// seedTriggerWithSource seeds a trigger with the given trigger_source.
 func seedTriggerWithSource(t *testing.T, st *store.Store, id, pipeline, source string, at time.Time) {
 	t.Helper()
 	if err := st.CreateTrigger(context.Background(), store.Trigger{
@@ -32,9 +29,6 @@ func seedTriggerWithSource(t *testing.T, st *store.Store, id, pipeline, source s
 	}
 }
 
-// TestClaim_PipelineFilter_BasicInclude proves the advertised subset
-// filter returns only matching pipelines. Older pending trigger for an
-// unadvertised pipeline is skipped in favor of a newer matching one.
 func TestClaim_PipelineFilter_BasicInclude(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -68,9 +62,6 @@ func TestClaim_PipelineFilter_BasicInclude(t *testing.T) {
 	}
 }
 
-// TestClaim_PipelineFilter_Empty204 proves a worker whose subset
-// matches nothing in the queue sees 204 without claiming the
-// unrelated pending rows.
 func TestClaim_PipelineFilter_Empty204(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -101,9 +92,6 @@ func TestClaim_PipelineFilter_Empty204(t *testing.T) {
 	}
 }
 
-// TestClaim_PipelineFilter_NilMeansAll proves omitting the filter (or
-// passing nil) claims any pending trigger -- the documented contract
-// for "no pipeline filter".
 func TestClaim_PipelineFilter_NilMeansAll(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -127,11 +115,6 @@ func TestClaim_PipelineFilter_NilMeansAll(t *testing.T) {
 	}
 }
 
-// TestClaim_SourceFilter_GithubWorkerSkipsManual proves that a worker
-// advertising trigger_sources=["github"] does not claim a pending
-// trigger with source="manual". The warm-runner trigger loop claims
-// only github-stamped triggers; in-cluster workers claim only
-// dev-driven ones.
 func TestClaim_SourceFilter_GithubWorkerSkipsManual(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -164,9 +147,6 @@ func TestClaim_SourceFilter_GithubWorkerSkipsManual(t *testing.T) {
 	}
 }
 
-// TestClaim_SourceFilter_WorkerClaimsMatchingSource proves a worker
-// advertising trigger_sources=["manual","schedule"] claims a manual
-// trigger and leaves a github trigger unclaimed.
 func TestClaim_SourceFilter_WorkerClaimsMatchingSource(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -200,9 +180,6 @@ func TestClaim_SourceFilter_WorkerClaimsMatchingSource(t *testing.T) {
 	}
 }
 
-// TestClaim_SourceFilter_AndWithPipeline proves that both pipeline and
-// source filters apply simultaneously (AND semantics). A trigger matching
-// only one filter is not claimed.
 func TestClaim_SourceFilter_AndWithPipeline(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

@@ -1,5 +1,3 @@
-// Command sparkwing-controller is the controller pod's entry point:
-// an HTTP service fronting the run/node/event/cache state store.
 package main
 
 import (
@@ -124,11 +122,6 @@ func run(args []string) error {
 	return controller.ServeWith(ctx, srv, *addr)
 }
 
-// checkStorageClasses warns at startup when none of the controller's
-// PVCs reference a StorageClass and the cluster has no default class.
-// On such clusters PVCs sit Pending forever with no clear error
-// . Best-effort: a missing RBAC bit downgrades to debug since
-// the warning is informational, not load-bearing.
 func checkStorageClasses(ctx context.Context, kcli kubernetes.Interface, namespace string) {
 	pvcs, err := kcli.CoreV1().PersistentVolumeClaims(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -161,9 +154,6 @@ func checkStorageClasses(ctx context.Context, kcli kubernetes.Interface, namespa
 			"default with storageclass.kubernetes.io/is-default-class=true.")
 }
 
-// envTruthy reports whether an environment variable is set to a
-// recognized affirmative value. Unset, empty, and negative spellings
-// (0, false, no, off) all read as false.
 func envTruthy(name string) bool {
 	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
 	case "1", "true", "yes", "on":
@@ -173,10 +163,6 @@ func envTruthy(name string) bool {
 	}
 }
 
-// loadSecretsCipher resolves the controller's secret-encryption key
-// from (in order) SPARKWING_SECRETS_KEY env var, then --secrets-key-
-// file. Returns nil cipher + nil error when neither is set so the
-// caller can log a warning and run unencrypted.
 func loadSecretsCipher(filePath string) (*secrets.Cipher, error) {
 	if v := os.Getenv("SPARKWING_SECRETS_KEY"); v != "" {
 		key, err := secrets.DecodeKey(v)
@@ -202,10 +188,6 @@ func loadSecretsCipher(filePath string) (*secrets.Cipher, error) {
 	return nil, nil
 }
 
-// kubeClient builds a kubernetes.Interface for --pool. In-cluster
-// config is used when kubeconfig is empty, matching the typical pod
-// shape. Duplicated from the pre-split sparkwing binary; can move to
-// pkg/kubeutil if another binary needs it.
 func kubeClient(kubeconfig string) (kubernetes.Interface, error) {
 	var rc *rest.Config
 	var err error

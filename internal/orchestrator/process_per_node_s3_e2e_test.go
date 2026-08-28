@@ -23,16 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess is the Mode 2
-// half of the process-per-node parity gate.
-//
-// A run whose state is per-run NDJSON on a bucket -- the documented CI
-// story, with no daemon and no database -- used to be the one local
-// shape that still executed its nodes inside the dispatcher. This
-// drives a real pipeline binary against a faked bucket and asserts the
-// same three things the SQLite gate asserts: each node body in a
-// process of its own, a typed output crossing that boundary, and the
-// run's record landing where the profile said it would.
 func TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess(t *testing.T) {
 	mod, bin := buildProcPerNodeBinary(t)
 	endpoint, s3client, bucket := fakeBucket(t)
@@ -60,8 +50,7 @@ func TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess(t *testing.T) {
 		"AWS_REGION=us-east-1",
 		"AWS_ACCESS_KEY_ID=test",
 		"AWS_SECRET_ACCESS_KEY=test",
-		// safety: a developer's real ~/.aws must not decide where this run's
-		// state goes, and an assumed-role profile would fail the run.
+
 		"AWS_PROFILE=",
 		"AWS_SHARED_CREDENTIALS_FILE="+filepath.Join(t.TempDir(), "credentials"),
 		"AWS_CONFIG_FILE="+filepath.Join(t.TempDir(), "config"),
@@ -84,9 +73,6 @@ func TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess(t *testing.T) {
 		t.Errorf("consumer did not read the producer's typed output across the process boundary:\n%s", out)
 	}
 
-	// safety: the local database must stay empty. A run that quietly wrote
-	// its state to SQLite would pass every assertion above while proving
-	// nothing about Mode 2.
 	if _, err := os.Stat(filepath.Join(home, "state.db")); err == nil {
 		t.Error("a mirror_local:false object-store run wrote a local state database")
 	}
@@ -109,15 +95,9 @@ func TestProcessPerNode_S3StateRunsEveryNodeInItsOwnProcess(t *testing.T) {
 		t.Errorf("produce output in the bucket = %s", produce.Output)
 	}
 
-	// safety: a node writes its own log from its own process, so the profile's
-	// logs surface has to reach it. Left to the machine's default the lines
-	// would land on the runner's disk and `sparkwing runs logs` against the
-	// bucket would show an empty run.
 	assertNodeLogInBucket(t, s3client, bucket, run.ID, "consume", "consumed digest=sha-abc123")
 }
 
-// assertNodeLogInBucket checks one node's log reached the profile's
-// logs surface carrying want.
 func assertNodeLogInBucket(t *testing.T, client *awss3.Client, bucket, runID, nodeID, want string) {
 	t.Helper()
 	logs := s3store.NewLogStore(bucket, "logs", client)
@@ -130,9 +110,6 @@ func assertNodeLogInBucket(t *testing.T, client *awss3.Client, bucket, runID, no
 	}
 }
 
-// fakeBucket starts an in-process S3 server and returns its endpoint, a
-// client for reading it back, and a bucket name. Same gofakes3 the
-// storage tests use: real protocol, no Docker, no AWS account.
 func fakeBucket(t *testing.T) (endpoint string, client *awss3.Client, bucket string) {
 	t.Helper()
 	srv := httptest.NewServer(gofakes3.New(s3mem.New()).Server())
@@ -154,10 +131,6 @@ func fakeBucket(t *testing.T) (endpoint string, client *awss3.Client, bucket str
 	return srv.URL, client, bucket
 }
 
-// readRunFromBucket replays the one run's NDJSON state object out of
-// the bucket. It reads the raw object rather than opening a second
-// s3state backend so the assertion is about what was durably written,
-// not about what a reader reconstructs in memory.
 func readRunFromBucket(t *testing.T, client *awss3.Client, bucket, pipeline string) (*store.Run, map[string]*store.Node) {
 	t.Helper()
 	ctx := context.Background()

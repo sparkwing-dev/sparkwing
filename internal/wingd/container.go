@@ -9,12 +9,6 @@ import (
 	"time"
 )
 
-// containerSensor reads the daemon process's own cgroup limits and live
-// usage, so admission plans against the container it runs in rather than
-// the host it sits on. All reads are rooted at root, "/" in production and
-// a fixture tree in tests; a platform with no cgroup filesystem (macOS)
-// finds nothing and leaves the host reading untouched. A nil sensor
-// reports no limits, which is the behavior when detection is disabled.
 type containerSensor struct {
 	root string
 	now  func() time.Time
@@ -25,8 +19,6 @@ type containerSensor struct {
 	lastAt    time.Time
 }
 
-// newContainerSensor builds a sensor rooted at root; an empty root reads
-// the real filesystem at "/".
 func newContainerSensor(root string) *containerSensor {
 	if root == "" {
 		root = "/"
@@ -34,11 +26,6 @@ func newContainerSensor(root string) *containerSensor {
 	return &containerSensor{root: root, now: time.Now}
 }
 
-// containerSensorFor selects the sensor a daemon runs with. An explicit
-// ContainerRoot always wins, so a test can point detection at a fixture
-// tree. Otherwise detection is enabled only for the real platform sampler
-// (Sampler nil): a test that injects a fake host reading gets no cgroup
-// clamp on top of it unless it asks for one.
 func containerSensorFor(cfg Config) *containerSensor {
 	switch {
 	case cfg.ContainerRoot != "":
@@ -50,11 +37,6 @@ func containerSensorFor(cfg Config) *containerSensor {
 	}
 }
 
-// capacityLimits reports the cgroup's fixed capacity ceiling as a core
-// count and a memory byte count. A zero for either dimension means the
-// cgroup does not constrain it (unlimited, or no cgroup at all). It reads
-// only the static limit files, never the usage baseline, so the daemon can
-// size its ledger at startup without disturbing external-load sensing.
 func (s *containerSensor) capacityLimits() (cores float64, memBytes uint64) {
 	if s == nil {
 		return 0, 0
@@ -78,13 +60,6 @@ func (s *containerSensor) capacityLimits() (cores float64, memBytes uint64) {
 	return cores, memBytes
 }
 
-// apply clamps a host reading to the cgroup this process runs in. Capacity
-// is lowered to the cgroup ceiling on each dimension the cgroup actually
-// constrains below the host; on those same dimensions the live pressure is
-// re-read from the cgroup (cpu.stat, memory.current) so external-load
-// sensing measures the container rather than the machine. Dimensions the
-// cgroup leaves unbounded pass through untouched, so a systemd host slice
-// with no limits reads exactly as the host does.
 func (s *containerSensor) apply(stat HostStat) HostStat {
 	if s == nil {
 		return stat
@@ -120,11 +95,6 @@ func (s *containerSensor) apply(stat HostStat) HostStat {
 	return stat
 }
 
-// v2Dir resolves the cgroup v2 directory for this process: the unified
-// hierarchy mount joined with the path from /proc/self/cgroup, falling
-// back to the mount root when the joined path is not the directory holding
-// the control files (the common case under a cgroup namespace). It reports
-// false when no v2 control files are present.
 func (s *containerSensor) v2Dir() (string, bool) {
 	rel, ok := cgroupV2Path(s.readFile(filepath.Join("proc", "self", "cgroup")))
 	if !ok {
@@ -139,10 +109,6 @@ func (s *containerSensor) v2Dir() (string, bool) {
 	return "", false
 }
 
-// capacityV1 is the cgroup v1 capacity fallback for kernels without the
-// unified hierarchy: the CPU quota over its period and the memory limit,
-// read from the conventional controller mounts. Pressure sensing has no v1
-// path -- an unmeasured dimension falls back to the host reading.
 func (s *containerSensor) capacityV1() (cores float64, memBytes uint64) {
 	content := s.readFile(filepath.Join("proc", "self", "cgroup"))
 	base := filepath.Join(s.root, "sys", "fs", "cgroup")
@@ -166,10 +132,6 @@ func (s *containerSensor) capacityV1() (cores float64, memBytes uint64) {
 	return cores, memBytes
 }
 
-// cpuUsageCores derives the cgroup's recent CPU usage as a fraction of one
-// core from the change in cpu.stat's cumulative usage_usec between two
-// reads. The first read has no baseline and reports not-measured, so the
-// caller keeps the host load for that cycle.
 func (s *containerSensor) cpuUsageCores() (float64, bool) {
 	dir, ok := s.v2Dir()
 	if !ok {
@@ -194,8 +156,6 @@ func (s *containerSensor) cpuUsageCores() (float64, bool) {
 	return float64(usage-prev) / 1e6 / dt, true
 }
 
-// usedMemory reports the cgroup's current memory charge from
-// memory.current, and false when it cannot be read.
 func (s *containerSensor) usedMemory() (uint64, bool) {
 	dir, ok := s.v2Dir()
 	if !ok {
@@ -211,14 +171,10 @@ func (s *containerSensor) clock() time.Time {
 	return time.Now()
 }
 
-// readFile reads a root-relative path (joined onto the sensor root),
-// returning the whole body; missing files read as the empty string.
 func (s *containerSensor) readFile(rel string) string {
 	return readWholeFile(filepath.Join(s.root, rel))
 }
 
-// readWhole reads an already-rooted absolute path, returning the whole
-// body; missing files read as the empty string.
 func (s *containerSensor) readWhole(path string) string {
 	return readWholeFile(path)
 }
@@ -231,8 +187,6 @@ func readWholeFile(path string) string {
 	return string(data)
 }
 
-// readTrim reads an absolute control-file path (already rooted) and trims
-// trailing whitespace; missing files read as the empty string.
 func (s *containerSensor) readTrim(path string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -246,9 +200,6 @@ func (s *containerSensor) hasFile(path string) bool {
 	return err == nil
 }
 
-// cgroupV2Path extracts the unified-hierarchy path from /proc/self/cgroup:
-// the record whose hierarchy id is 0 and whose controller list is empty
-// (the "0::<path>" line). It reports false when no v2 record is present.
 func cgroupV2Path(content string) (string, bool) {
 	for _, line := range strings.Split(content, "\n") {
 		parts := strings.SplitN(line, ":", 3)
@@ -259,9 +210,6 @@ func cgroupV2Path(content string) (string, bool) {
 	return "", false
 }
 
-// cgroupV1Path extracts the path for a v1 controller from
-// /proc/self/cgroup: the record whose comma-separated controller list
-// contains controller. It reports false when the controller is absent.
 func cgroupV1Path(content, controller string) (string, bool) {
 	for _, line := range strings.Split(content, "\n") {
 		parts := strings.SplitN(line, ":", 3)
@@ -277,9 +225,6 @@ func cgroupV1Path(content, controller string) (string, bool) {
 	return "", false
 }
 
-// parseCPUMax reads a cgroup v2 cpu.max value ("quota period", or "max
-// period" for unbounded) into a core count. It is the inverse of
-// [cpuMaxLine]. An unbounded or malformed value reports not-limited.
 func parseCPUMax(content string) (float64, bool) {
 	fields := strings.Fields(content)
 	if len(fields) == 0 || fields[0] == "max" {
@@ -300,14 +245,8 @@ func parseCPUMax(content string) (float64, bool) {
 	return quota / period, true
 }
 
-// cgroupUnlimitedMem is the floor at or above which a numeric cgroup memory
-// limit is treated as unbounded: cgroup v1 writes a near-max sentinel
-// rather than a word, and no real container is limited to exabytes.
 const cgroupUnlimitedMem = uint64(1) << 62
 
-// parseMemMax reads a cgroup memory limit ("max", the v1 near-max
-// sentinel, or a byte count) into a byte count. An unbounded or malformed
-// value reports not-limited.
 func parseMemMax(content string) (uint64, bool) {
 	content = strings.TrimSpace(content)
 	if content == "" || content == "max" {
@@ -320,10 +259,6 @@ func parseMemMax(content string) (uint64, bool) {
 	return v, true
 }
 
-// parseCpuset counts the CPUs a cgroup v2 cpuset list pins the process to
-// ("0-3,6" -> 5), so a container narrowed by cpu affinity caps capacity even
-// when cpu.max leaves the quota unbounded. An empty or malformed list reports
-// not-limited.
 func parseCpuset(content string) (int, bool) {
 	content = strings.TrimSpace(content)
 	if content == "" {
@@ -356,8 +291,6 @@ func parseCpuset(content string) (int, bool) {
 	return total, true
 }
 
-// parseUsageUsec reads the cumulative usage_usec field from a cgroup v2
-// cpu.stat body.
 func parseUsageUsec(content string) (uint64, bool) {
 	for _, line := range strings.Split(content, "\n") {
 		fields := strings.Fields(line)

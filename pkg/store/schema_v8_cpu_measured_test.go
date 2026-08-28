@@ -9,12 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestSchemaV8_UpgradePreservesRowsAndQualifiesLegacyPeaks reconstructs
-// a schema-7 pipeline_profiles store without the cpu_measured column,
-// then opens it with the current binary and asserts the migration keeps
-// every seeded row, adds the column, and qualifies carried rows the way
-// admission does: a legacy positive peak implies a sampler that measured
-// CPU, while a zero-peak row stays conservatively unmeasured.
 func TestSchemaV8_UpgradePreservesRowsAndQualifiesLegacyPeaks(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schema7.db")
 
@@ -90,9 +84,6 @@ func TestSchemaV8_UpgradePreservesRowsAndQualifiesLegacyPeaks(t *testing.T) {
 	}
 }
 
-// TestPipelineProfile_CPUMeasuredRoundTrips records observations with the
-// cpu_measured bit set and clear and confirms the stored profile reflects
-// the latest observation's value.
 func TestPipelineProfile_CPUMeasuredRoundTrips(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "profiles.db"))
 	if err != nil {

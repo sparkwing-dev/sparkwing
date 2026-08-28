@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// recordingWorkLogger captures step events emitted by RunWork so
-// tests can assert on the structured envelope (event, step, outcome,
-// duration_ms).
 type recordingWorkLogger struct {
 	mu      sync.Mutex
 	records []sparkwing.LogRecord
@@ -253,8 +250,6 @@ func TestRunWork_SingleStepEmitsStartAndEnd(t *testing.T) {
 	}
 }
 
-// TestRunWork_DependencyOrder verifies that a step with deps runs
-// strictly after its upstream completes.
 func TestRunWork_DependencyOrder(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	var (
@@ -282,8 +277,6 @@ func TestRunWork_DependencyOrder(t *testing.T) {
 	}
 }
 
-// TestRunWork_ParallelStepsRunConcurrently verifies that two steps
-// without a dependency run at the same time.
 func TestRunWork_ParallelStepsRunConcurrently(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		baseCtx, _ := newWorkCtx()
@@ -316,8 +309,6 @@ func TestRunWork_ParallelStepsRunConcurrently(t *testing.T) {
 	})
 }
 
-// TestRunWork_FailFastCancelsSiblings verifies that one step's
-// failure cancels in-flight parallel siblings via the shared ctx.
 func TestRunWork_FailFastCancelsSiblings(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, _ := newWorkCtx()
@@ -349,11 +340,6 @@ func TestRunWork_FailFastCancelsSiblings(t *testing.T) {
 	})
 }
 
-// TestRunWork_TypedResultRecordsOnStep runs a multi-step Work whose
-// terminal step is typed; RunWork itself returns nil for the value
-// (the orchestrator reads typed output via node.ResultStep().Output()),
-// but completing the typed step must persist the typed value so
-// readers see it.
 func TestRunWork_TypedResultRecordsOnStep(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
@@ -375,12 +361,6 @@ func TestRunWork_TypedResultRecordsOnStep(t *testing.T) {
 	}
 }
 
-// TestRunWork_StepGetResolvesInDownstream confirms the in-process
-// resolution path: a downstream step calling sw.StepGet[T](ctx, step)
-// on its upstream gets the typed value back once the upstream step
-// completes.
-// This is the canonical fixture for typed inter-step composition under
-// the single-Step grammar.
 func TestRunWork_StepGetResolvesInDownstream(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
@@ -401,8 +381,6 @@ func TestRunWork_StepGetResolvesInDownstream(t *testing.T) {
 	}
 }
 
-// TestRunWork_SkipIfShortCircuits verifies a true SkipIf prevents
-// the step's fn from running while still propagating to downstream.
 func TestRunWork_SkipIfShortCircuits(t *testing.T) {
 	ctx, log := newWorkCtx()
 	var ran atomic.Bool
@@ -434,8 +412,6 @@ func TestRunWork_SkipIfShortCircuits(t *testing.T) {
 	}
 }
 
-// TestRunWork_CycleProducesError ensures that a cyclic dep graph is
-// detected (no zero-in-degree step exists).
 func TestRunWork_CycleProducesError(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
@@ -450,8 +426,6 @@ func TestRunWork_CycleProducesError(t *testing.T) {
 	}
 }
 
-// TestRunWork_PanicInStepBecomesError makes sure a panicking step
-// fails the run cleanly instead of taking down the runner.
 func TestRunWork_PanicInStepBecomesError(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
@@ -464,9 +438,6 @@ func TestRunWork_PanicInStepBecomesError(t *testing.T) {
 	}
 }
 
-// TestRunWork_SpawnRejectedWithoutHandler verifies the loud-failure
-// guard: Work that declares spawns errors out when no SpawnHandler
-// is installed in ctx (rather than silently dropping the spawn).
 func TestRunWork_SpawnRejectedWithoutHandler(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
@@ -479,10 +450,6 @@ func TestRunWork_SpawnRejectedWithoutHandler(t *testing.T) {
 	}
 }
 
-// TestRunWork_SpawnDispatchedThroughHandler installs a stub handler
-// and verifies that runtime fan-out flows: SpawnNode triggers the
-// handler with the right (parent, id, job) arguments, and the
-// returned output is observable via the SpawnSpec.
 func TestRunWork_SpawnDispatchedThroughHandler(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()
@@ -521,9 +488,6 @@ func TestRunWork_SpawnDispatchedThroughHandler(t *testing.T) {
 	}
 }
 
-// TestRunWork_SpawnForEachDispatchesEachItem verifies that
-// SpawnNodeForEach calls the handler once per slice element with the
-// per-item id + job the closure produces.
 func TestRunWork_SpawnForEachDispatchesEachItem(t *testing.T) {
 	ctx, _ := newWorkCtx()
 	w := sparkwing.NewWork()

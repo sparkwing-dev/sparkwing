@@ -14,7 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 )
 
-// scaffoldPipelineRepo lays out a minimal two-module tree under root:
 func scaffoldPipelineRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -100,8 +99,6 @@ func TestPipelineCacheKey_ReplaceTargetNonGoFilesBustCache(t *testing.T) {
 	}
 }
 
-// newSparksFixture lays out a consumer sparkwing dir with a go.mod and
-// an optional sparks.yaml at the given manifest path. Returns the dir.
 func newSparksFixture(t *testing.T, manifest string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -114,8 +111,6 @@ func newSparksFixture(t *testing.T, manifest string) string {
 	return dir
 }
 
-// newProxy spins a mock go module proxy that serves @latest -> `version`
-// for any requested module.
 func newProxy(t *testing.T, version string) *httptest.Server {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -129,9 +124,6 @@ func newProxy(t *testing.T, version string) *httptest.Server {
 	return srv
 }
 
-// pointResolverAt sets GOPROXY to the mock server so the resolver's
-// default client reaches it. GOPRIVATE cleared so every module goes
-// through the proxy path.
 func pointResolverAt(t *testing.T, srv *httptest.Server) {
 	t.Helper()
 	t.Setenv("GOPROXY", srv.URL)
@@ -139,9 +131,6 @@ func pointResolverAt(t *testing.T, srv *httptest.Server) {
 	fakeGo(t)
 }
 
-// fakeGo installs a shell script that acts as `go` and touches the
-// .sum file when `-modfile=...` is passed. Matches the script used in
-// internal/sparks/overlay_test.go.
 func fakeGo(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()

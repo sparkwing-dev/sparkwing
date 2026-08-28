@@ -1,24 +1,4 @@
 #!/usr/bin/env bash
-# Run one agent trial per configuration and print a comparison table.
-#
-# A conclusion drawn from one agent is worth one agent. This sweeps the
-# harnesses and models available locally so a change can be judged
-# against more than one set of habits -- they differ in ways that matter
-# to CLI design. Claude reads output in 30-60 line windows and issues
-# roughly one command per turn; Codex reads 160-240 lines, chains two to
-# four commands per turn with `&&`, and filters big output through `rg`
-# rather than truncating it. Output that fits the smaller window serves
-# both.
-#
-# Codex authenticated with a ChatGPT account rejects every --model but
-# its default, so it varies by reasoning effort instead. That is a
-# weaker axis than Claude's and the table labels it as such.
-#
-# Trials are serialized on purpose: they compete for CPU with anything
-# else running, and a contended run has been observed at six times the
-# agent's own reported duration.
-#
-# Usage: agent-trial-matrix.sh [--prompt-file <path>] [--fixture small|migrate|miniflux]
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -52,8 +32,6 @@ run_one() {
   local calls distinct secs wall lint expl
   calls=$(wc -l < "$log" 2>/dev/null | tr -d ' ')
   distinct=$(cut -f2- "$log" 2>/dev/null | sort -u | wc -l | tr -d ' ')
-  # time-to-green is the headline: total wall-clock includes the agent
-  # writing this harness's FRICTION report, which no user waits for.
   secs=$(printf '%s\n' "$out" | grep -oE 'time-to-green: [0-9]+s' | grep -oE '[0-9]+' | head -1)
   wall=$(printf '%s\n' "$out" | grep -oE 'wall-clock: +[0-9]+s' | grep -oE '[0-9]+' | head -1)
   lint=$(printf '%s\n' "$out" | grep -oE 'lint: +[A-Z]+' | awk '{print $2}')

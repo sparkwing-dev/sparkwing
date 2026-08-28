@@ -136,5 +136,4 @@ func TestFormatStepDuration_TerminalShowsDuration(t *testing.T) {
 	}
 }
 
-// keep import alive for future test plumbing
 var _ = ptrTime

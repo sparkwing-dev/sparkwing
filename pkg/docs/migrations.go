@@ -165,19 +165,13 @@ func MigrationsBetweenMarkdown(from, to string, entries []MigrationEntry) (strin
 	return b.String(), nil
 }
 
-// migrationIndexRow is one parsed line from docs/migrations/README.md.
 type migrationIndexRow struct {
 	date    string
 	summary string
 }
 
-// migrationsIndexRowPattern matches a markdown table row of the form
-// `| [vX.Y.Z](anything) | YYYY-MM-DD | summary text |`.
 var migrationsIndexRowPattern = regexp.MustCompile(`^\|\s*\[(v[^\]]+)\]\([^)]*\)\s*\|\s*([^|]*?)\s*\|\s*(.*?)\s*\|\s*$`)
 
-// parseMigrationsIndex returns the parsed rows of
-// mirror/migrations/README.md keyed by version. Missing or malformed
-// index is non-fatal: callers fall back to the file glob.
 func parseMigrationsIndex() map[string]migrationIndexRow {
 	out := map[string]migrationIndexRow{}
 	body, err := fs.ReadFile(allDocs, "mirror/migrations/README.md")

@@ -12,8 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// stateSchema versions the on-disk state file so a future format change
-// can be detected rather than misparsed.
 const stateSchema = 2
 
 type persistedGuard struct {
@@ -22,12 +20,6 @@ type persistedGuard struct {
 	Session wingwire.ProcessSession `json:"session"`
 }
 
-// persistedState is the durable form of the ledger. Only granted leases
-// survive a restart: waiters hold nothing and no re-attach token, so a
-// queued run simply re-submits on reconnect instead of being restored
-// into a lease nobody can claim. Events is the rolling admission-outcome
-// window behind the queue view's health line; state files written before
-// the window existed simply restore it empty.
 type persistedState struct {
 	Schema        int                `json:"schema"`
 	Snapshot      admission.Snapshot `json:"snapshot"`
@@ -36,9 +28,6 @@ type persistedState struct {
 	Guards        []persistedGuard   `json:"guards,omitempty"`
 }
 
-// writeState writes snap and the event window to path by atomic rename,
-// stripping waiters so a restored ledger contains only reclaimable
-// leases.
 func writeState(path string, snap admission.Snapshot, events []admissionEvent) error {
 	return writeStateWithCancellations(path, snap, events, nil)
 }
@@ -87,10 +76,6 @@ func writeStateWithGuards(path string, snap admission.Snapshot, events []admissi
 	return nil
 }
 
-// quarantineState moves an unusable state file aside under a
-// .corrupt-<unixtime> suffix so the next start does not reread it, and
-// returns the quarantine path. The original bytes are preserved for
-// forensics; sparkwing doctor reports quarantined files.
 func quarantineState(path string, now time.Time) (string, error) {
 	dst := fmt.Sprintf("%s.corrupt-%d", path, now.Unix())
 	if err := os.Rename(path, dst); err != nil {
@@ -99,9 +84,6 @@ func quarantineState(path string, now time.Time) (string, error) {
 	return dst, nil
 }
 
-// readState loads a persisted snapshot and event window. It returns
-// (nil, nil, nil) when no state file exists, so a fresh daemon starts
-// empty.
 func readState(path string) (*admission.Snapshot, []admissionEvent, error) {
 	snap, events, _, err := readStateWithCancellations(path)
 	return snap, events, err

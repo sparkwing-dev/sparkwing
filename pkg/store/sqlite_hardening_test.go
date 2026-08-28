@@ -11,17 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestConcurrentWriters_FailPolicyNoBusyError reproduces the failure
-// mode that aborted runs under load: N separate connections (standing
-// in for N `sparkwing run` processes on one host) racing to acquire the
-// same capacity-1 namespace with OnLimit:Fail. Each connection opens
-// its own *Store -- the SQLite-level contention only exists across
-// connections, since one Store serializes through a single conn.
-//
-// With busy_timeout + txlock=immediate the lock contention is absorbed:
-// exactly one arrival is Granted, the rest see a clean AcquireFailed
-// ("slot full"), and no SQLITE_BUSY / SQLITE_BUSY_SNAPSHOT leaks
-// through as an error.
 func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "state.db")
@@ -92,9 +81,6 @@ func TestConcurrentWriters_FailPolicyNoBusyError(t *testing.T) {
 	}
 }
 
-// TestConcurrentWriters_QueuePolicyNoBusyError mirrors the Fail test
-// but with OnLimit:Queue: one Granted, the rest Queued, across separate
-// connections. No lock-contention error should surface.
 func TestConcurrentWriters_QueuePolicyNoBusyError(t *testing.T) {
 	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "state.db")
@@ -164,8 +150,6 @@ func TestConcurrentWriters_QueuePolicyNoBusyError(t *testing.T) {
 	}
 }
 
-// TestOpenReadOnly_RejectsWrites: a store opened read-only must refuse
-// to mutate state so the dashboard daemon can't take a write lock.
 func TestOpenReadOnly_RejectsWrites(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "state.db")
 	rw, err := store.Open(dbPath)
@@ -188,10 +172,6 @@ func TestOpenReadOnly_RejectsWrites(t *testing.T) {
 	}
 }
 
-// TestOpenReadOnly_DoesNotBlockWriter: a read-only consumer holding an
-// open read transaction must not stop a separate writer from
-// committing. WAL + query_only guarantees this; the assertion is that
-// the write lands well inside busy_timeout.
 func TestOpenReadOnly_DoesNotBlockWriter(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "state.db")
 	rw, err := store.Open(dbPath)

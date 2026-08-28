@@ -1,10 +1,4 @@
 {{- if .Values.rbac.create -}}
-# Namespace-scoped Role: the controller's warm-PVC pool feature
-# (folded in from sparkwing-pool) creates + patches PVCs and
-# spawns ephemeral warmer pods in its own namespace. Also reads
-# namespaces (for identity lookups) and configmaps/events (for
-# state surfacing). Keeping this scoped to the install namespace
-# is the OSS posture; multi-namespace pools are a future feature.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -46,11 +40,6 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 {{- if .Values.rbac.clusterStorageClasses }}
 ---
-# Cluster-scoped read on StorageClasses for the controller's
-# startup default-class probe. Without this the controller logs
-# "skipped: list StorageClasses: forbidden" at boot but otherwise
-# functions. Disable via rbac.clusterStorageClasses=false in
-# clusters where you cannot grant cluster-wide reads.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

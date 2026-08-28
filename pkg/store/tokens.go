@@ -29,7 +29,6 @@ const (
 	TokenPrefixService = "sws"
 )
 
-// Argon2id params: ~8-15ms on arm64; 64MiB memory.
 const (
 	argonTime    = uint32(1)
 	argonMemory  = uint32(64 * 1024)
@@ -179,10 +178,6 @@ func (s *Store) LookupToken(raw string, now time.Time) (*Token, error) {
 	return nil, errors.New("unknown token")
 }
 
-// selectTokensByPrefix materializes all rows matching the prefix into
-// memory, closing the cursor before returning. Used by LookupToken
-// and LookupTokenByPrefix; centralizes the row-scan code + the
-// MaxOpenConns=1 cursor-lifetime discipline.
 func (s *Store) selectTokensByPrefix(prefix string) ([]Token, error) {
 	rows, err := s.queryNoCtx(`
         SELECT hash, prefix, principal, kind, scopes,
@@ -368,7 +363,6 @@ func mintRaw(prefix string) (string, error) {
 	return prefix + "_" + base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
-// hashToken returns "argon2id$<saltHex>$<keyHex>" with a fresh salt.
 func hashToken(raw string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
@@ -378,7 +372,6 @@ func hashToken(raw string) (string, error) {
 	return fmt.Sprintf("argon2id$%s$%s", hex.EncodeToString(salt), hex.EncodeToString(key)), nil
 }
 
-// verifyToken returns true iff raw hashes to stored.
 func verifyToken(raw, stored string) (bool, error) {
 	parts := strings.Split(stored, "$")
 	if len(parts) != 3 || parts[0] != "argon2id" {

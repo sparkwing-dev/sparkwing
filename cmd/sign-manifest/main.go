@@ -1,25 +1,3 @@
-// Command sign-manifest signs a release's SHA256SUMS with an ed25519
-// private key, producing a detached signature the sparkwing self-updater
-// verifies with the ed25519 public key compiled into its binary
-// (cmd/sparkwing/update.go). It uses the same pure-Go crypto/ed25519 as
-// the updater, so the signing side stays auditable Go rather than an
-// opaque external tool.
-//
-// Two modes:
-//
-//	# 1. Generate a keypair (one time, by the release owner):
-//	go run ./cmd/sign-manifest -genkey
-//	  -> prints the PUBLIC key  (hex)    -> paste into cmd/sparkwing/update.go
-//	  -> prints the PRIVATE key (base64) -> store as the GitHub Actions
-//	     secret SPARKWING_UPDATE_SIGNING_KEY
-//
-//	# 2. Sign a manifest (in CI, from the private key in the environment):
-//	SPARKWING_UPDATE_SIGNING_KEY=<base64> \
-//	  go run ./cmd/sign-manifest -in dist/SHA256SUMS -out dist/SHA256SUMS.sig
-//
-// The signature file holds the raw 64-byte ed25519 signature over the raw
-// bytes of the input file -- exactly what ed25519.Verify(pub, sums, sig)
-// consumes on the client.
 package main
 
 import (
@@ -33,8 +11,6 @@ import (
 	"os"
 )
 
-// signingKeyEnv names the environment variable that carries the base64
-// ed25519 private key (64 bytes: seed||public) in CI.
 const signingKeyEnv = "SPARKWING_UPDATE_SIGNING_KEY"
 
 func main() {
@@ -85,8 +61,6 @@ func main() {
 	fmt.Fprintf(os.Stdout, "wrote detached signature: %s\n", *out)
 }
 
-// runGenKey prints a fresh keypair: the public key as hex (to paste into
-// the updater) and the private key as base64 (to store as the CI secret).
 func runGenKey(w *os.File) error {
 	pub, priv, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
@@ -104,9 +78,6 @@ func runGenKey(w *os.File) error {
 	return nil
 }
 
-// loadSigningKey decodes the base64 ed25519 private key from the CI
-// environment value. It accepts a full 64-byte private key (seed||public)
-// or a bare 32-byte seed.
 func loadSigningKey(b64 string) (ed25519.PrivateKey, error) {
 	if b64 == "" {
 		return nil, fmt.Errorf("%s is empty; set it to the base64 ed25519 private key from `sign-manifest -genkey`", signingKeyEnv)
@@ -116,9 +87,9 @@ func loadSigningKey(b64 string) (ed25519.PrivateKey, error) {
 		return nil, fmt.Errorf("decode %s: %w", signingKeyEnv, err)
 	}
 	switch len(raw) {
-	case ed25519.PrivateKeySize: // 64 bytes: seed || public
+	case ed25519.PrivateKeySize:
 		return ed25519.PrivateKey(raw), nil
-	case ed25519.SeedSize: // 32 bytes: seed only
+	case ed25519.SeedSize:
 		return ed25519.NewKeyFromSeed(raw), nil
 	default:
 		return nil, fmt.Errorf("%s decodes to %d bytes; want %d (private key) or %d (seed)",
@@ -126,12 +97,6 @@ func loadSigningKey(b64 string) (ed25519.PrivateKey, error) {
 	}
 }
 
-// verifyFile checks that the detached signature at sigPath is a valid
-// ed25519 signature over inPath's bytes under the hex public key pubHex.
-// It needs no private key, so CI runs it after signing to prove the
-// embedded updater key (pubHex, read from cmd/sparkwing/update.go) matches
-// the key that just signed -- catching a keypair mismatch before a
-// release ships an updater that can never verify it.
 func verifyFile(pubHex, inPath, sigPath string) error {
 	pub, err := hex.DecodeString(pubHex)
 	if err != nil {
@@ -165,8 +130,6 @@ func verifyFile(pubHex, inPath, sigPath string) error {
 	return nil
 }
 
-// signFile reads inPath and writes the raw detached ed25519 signature over
-// its bytes to outPath.
 func signFile(priv ed25519.PrivateKey, inPath, outPath string) error {
 	if len(priv) != ed25519.PrivateKeySize {
 		return errors.New("private key is not a valid ed25519 private key")

@@ -7,11 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Test runs `go test ./...` across the public sparkwing module.
-// -race is omitted intentionally: this OSS lane runs the plain
-// suite so it stays fast as a cross-repo gate; a heavier matrix
-// (race + fuzz + integration) belongs in a downstream release-all
-// pipeline.
 type Test struct{ sparkwing.Base }
 
 func (Test) ShortHelp() string { return "Run the Go test suite (go test ./...)" }

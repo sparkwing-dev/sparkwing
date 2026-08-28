@@ -10,9 +10,6 @@ import (
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
-// daemonChild hosts a real in-process daemon behind the supervisor's Child
-// interface, so the loop is exercised against actual idle-exit behavior
-// rather than a scripted exit.
 type daemonChild struct {
 	done chan error
 	stop context.CancelFunc
@@ -22,13 +19,6 @@ func (c *daemonChild) Wait() <-chan error { return c.done }
 func (c *daemonChild) Terminate() error   { c.stop(); return nil }
 func (c *daemonChild) Kill() error        { c.stop(); return nil }
 
-// TestLoopReapsDaemonThatIdlesOutUnderHealthProbes is the regression pin
-// for supervised daemons that could never idle out: the loop's own health
-// probes counted as daemon activity, so the supervise+run pair survived
-// forever in homes nothing would ever use again. With the probe riding
-// the health-probe path, a daemon whose only traffic is its supervisor
-// idles out within its window, and the loop treats that clean exit as
-// the end of supervision instead of restarting the child.
 func TestLoopReapsDaemonThatIdlesOutUnderHealthProbes(t *testing.T) {
 	home, err := os.MkdirTemp("/tmp", "wsup")
 	if err != nil {

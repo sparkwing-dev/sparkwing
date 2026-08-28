@@ -12,8 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// planScopePipe declares a whole-plan concurrency group built by its
-// factory, so one pipeline shape exercises any scope/limit combination.
 type planScopePipe struct {
 	sparkwing.Base
 	group *sparkwing.ConcurrencyGroup
@@ -25,9 +23,6 @@ func (p *planScopePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwin
 	return nil
 }
 
-// planAcquireCapture records every AcquireSlot key and answers with a
-// fixed kind; ResolveWaiter parks queue-kind waiters forever, naming a
-// fixed holder.
 type planAcquireCapture struct {
 	fakeConcurrency
 	mu   sync.Mutex

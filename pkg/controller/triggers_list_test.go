@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestListTriggers_RoundTrip verifies that a trigger posted via
-// POST /api/v1/triggers is surfaced by the new GET /api/v1/triggers
-// list endpoint, and that status + pipeline filters narrow results
-// correctly.
 func TestListTriggers_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -88,9 +84,6 @@ func TestListTriggers_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestListTriggers_RepoFilter verifies the GITHUB_REPOSITORY env
-// filter matches triggers whose trigger_env carries the requested
-// repo.
 func TestListTriggers_RepoFilter(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

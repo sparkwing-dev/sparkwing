@@ -5,44 +5,33 @@ import (
 	"strings"
 )
 
-// VerdictKind is the per-repo outcome of an update attempt.
 type VerdictKind string
 
 const (
-	// VerdictClean: the bump compiled and every pipeline's plan is
-	// byte-identical before and after -- a guaranteed no-behavior-change
-	// upgrade.
 	VerdictClean VerdictKind = "clean"
-	// VerdictPlanDiffers: the bump compiled but at least one pipeline's
-	// plan changed shape; the structured diff is attached.
+
 	VerdictPlanDiffers VerdictKind = "plan-differs"
-	// VerdictBroken: the bump failed to apply, compile, or verify; the
-	// error and the crossed migration guides are attached.
+
 	VerdictBroken VerdictKind = "broken"
-	// VerdictSkippedDirty: the working tree had uncommitted changes.
+
 	VerdictSkippedDirty VerdictKind = "skipped-dirty"
-	// VerdictSkippedMissing: no bumpable .sparkwing pin (missing checkout,
-	// replace directive, or runs-only observation).
+
 	VerdictSkippedMissing VerdictKind = "skipped-missing"
-	// VerdictUpToDate: the pin already matches the target.
+
 	VerdictUpToDate VerdictKind = "up-to-date"
 )
 
-// PipelineDiff pairs a pipeline name with its before/after plan diff.
 type PipelineDiff struct {
 	Pipeline string
 	Diff     PlanDiff
 }
 
-// Guide is a crossed migration guide surfaced with a verdict: its
-// version, title, and one-line summary.
 type Guide struct {
 	Version string
 	Title   string
 	Summary string
 }
 
-// Verdict is the full result for one repo.
 type Verdict struct {
 	Repo      string
 	Primary   string
@@ -56,9 +45,6 @@ type Verdict struct {
 	Detail    string
 }
 
-// Ops are the side-effecting operations the updater performs against a
-// repo, injected so the orchestration is unit-testable without a real
-// checkout or toolchain.
 type Ops interface {
 	Dirty(dir string) (bool, error)
 	Pin(dir string) (pin, replace string)
@@ -71,23 +57,16 @@ type Ops interface {
 	Commit(dir, message string) error
 }
 
-// UpdateConfig parameterizes a fleet update.
 type UpdateConfig struct {
-	// Target is the SDK version to bump to (e.g. v0.15.8).
 	Target string
-	// Apply commits the bump per repo; false is a dry run that restores
-	// every repo to its pre-run state.
+
 	Apply bool
-	// Verify runs each repo's cheap gate after the bump.
+
 	Verify bool
-	// GuidesFor returns the crossed migration guides for a from->to
-	// range, used to enrich broken (and green) verdicts.
+
 	GuidesFor func(from, to string) []Guide
 }
 
-// UpdateRepo runs the verdict ladder for a single repo directory. The
-// sparkwingDir is dir/.sparkwing. It never leaves a dry run's tree
-// dirty and never commits a broken bump.
 func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 	v := Verdict{Repo: name, Primary: dir, ToPin: cfg.Target}
 	sparkwingDir := dir + "/.sparkwing"
@@ -197,8 +176,6 @@ func UpdateRepo(ops Ops, dir, name string, cfg UpdateConfig) Verdict {
 	return v
 }
 
-// UpdateFleet runs UpdateRepo across a set of repos and returns the
-// verdicts in input order.
 func UpdateFleet(ops Ops, repos []Repo, cfg UpdateConfig) []Verdict {
 	out := make([]Verdict, 0, len(repos))
 	for _, r := range repos {
@@ -223,15 +200,10 @@ func broken(v Verdict, msg string, cfg UpdateConfig) Verdict {
 	return v
 }
 
-// commitMessage is the conventional-commit subject written per repo
-// under --apply.
 func commitMessage(target string) string {
 	return "chore: bump sparkwing SDK to " + target
 }
 
-// PinsDiverge reports whether the fleet's repos don't all share the
-// same current pin -- the condition the report leads with, since the
-// shared state schema wants every pin bumped in one sitting.
 func PinsDiverge(repos []Repo) bool {
 	seen := map[string]bool{}
 	for _, r := range repos {
@@ -243,7 +215,6 @@ func PinsDiverge(repos []Repo) bool {
 	return len(seen) > 1
 }
 
-// RenderDiff formats a plan diff as indented detail lines.
 func RenderDiff(pd PipelineDiff) []string {
 	var out []string
 	d := pd.Diff
@@ -259,8 +230,6 @@ func RenderDiff(pd PipelineDiff) []string {
 	return out
 }
 
-// SummarizeVerdicts returns a one-line tally per kind for the report
-// footer, in a stable order.
 func SummarizeVerdicts(vs []Verdict) string {
 	counts := map[VerdictKind]int{}
 	for _, v := range vs {

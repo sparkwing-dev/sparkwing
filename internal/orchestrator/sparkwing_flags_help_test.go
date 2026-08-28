@@ -6,10 +6,6 @@ import (
 	"testing"
 )
 
-// TestPrintSparkwingFlagsSection_ContainsArcFlags pins per-pipeline
-// help (`sparkwing run <pipeline> --help`) so it enumerates the
-// sparkwing-owned flags. A future regression that drops one of
-// these from sparkwing.SparkwingFlagDocs() fails this test loud.
 func TestPrintSparkwingFlagsSection_ContainsArcFlags(t *testing.T) {
 	var buf bytes.Buffer
 	printSparkwingFlagsSection(&buf)
@@ -27,11 +23,6 @@ func TestPrintSparkwingFlagsSection_ContainsArcFlags(t *testing.T) {
 	mustContain(t, out, "SPARKWING FLAGS")
 }
 
-// TestPrintSparkwingFlagsSection_NoGroupHeaders pins that the
-// pipeline-binary help renders flags as one flat list -- no group
-// labels. Pipeline-author args (unprefixed) and sparkwing args
-// (--sw-*) are visually separated by the SPARKWING FLAGS section
-// header alone; further sub-grouping is noise.
 func TestPrintSparkwingFlagsSection_NoGroupHeaders(t *testing.T) {
 	var buf bytes.Buffer
 	printSparkwingFlagsSection(&buf)

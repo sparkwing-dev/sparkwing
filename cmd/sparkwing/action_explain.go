@@ -1,8 +1,3 @@
-// `sparkwing pipeline explain <name>` forwards to the pipeline binary
-// with --explain, which builds the Plan and emits its JSON snapshot
-// without dispatching any jobs. The wrapper pretty-prints the plan
-// (Plan -> Node -> Work -> Step) for humans by default; --json passes
-// the binary's output through unchanged for agent consumption.
 package main
 
 import (
@@ -19,12 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/ndjson"
 )
 
-// planSnapshotDoc mirrors the shape pkg/orchestrator emits. Kept
-// separate to avoid importing the orchestrator for just the schema.
-// PR5 expanded the wire shape: each node now carries its
-// inner Work (Steps + JobSpawn + JobSpawnEach), and Plan-layer
-// modifiers move into a dedicated `modifiers` block so renderers can
-// label each node with its dispatch envelope.
 type planSnapshotDoc struct {
 	Pipeline string             `json:"pipeline"`
 	RunID    string             `json:"run_id"`
@@ -91,8 +80,7 @@ type planSnapshotStep struct {
 	Needs     []string `json:"needs,omitempty"`
 	IsResult  bool     `json:"is_result,omitempty"`
 	HasSkipIf bool     `json:"has_skip_if,omitempty"`
-	// Risks mirrors orchestrator.snapshotStep.Risks: the
-	// author-declared risk-label set.
+
 	Risks []string `json:"risks,omitempty"`
 }
 
@@ -112,9 +100,6 @@ type planSnapshotSpawnEach struct {
 	Note             string            `json:"note,omitempty"`
 }
 
-// pipelineExplainArgs holds the parsed wrapper-owned flags plus the
-// trailing tokens that should be forwarded to the inner pipeline
-// binary.
 type pipelineExplainArgs struct {
 	output      string
 	pipeline    string
@@ -122,17 +107,6 @@ type pipelineExplainArgs struct {
 	passthrough []string
 }
 
-// parsePipelineExplainArgs hand-parses the wrapper's own flags
-// (--output / --name / --all / --help) and treats every other token
-// -- including everything after a literal "--" separator -- as
-// passthrough for the inner pipeline binary.
-//
-// The "--" separator is consumed (not forwarded). Forwarding it to
-// the pipeline binary would cause Go's flag package to stop flag
-// parsing at that point, which is exactly what we need to
-// avoid: `pipeline explain --name X -- --skip artifact` must reach
-// the inner binary as `--explain --skip artifact`, not
-// `--explain -- --skip artifact`.
 func parsePipelineExplainArgs(args []string) (pipelineExplainArgs, bool, error) {
 	var parsed pipelineExplainArgs
 	for i := 0; i < len(args); i++ {
@@ -230,31 +204,19 @@ func runPipelineExplain(args []string) error {
 		return nil
 	}
 	printPlanSnapshot(&snap)
-	// After the DAG, because the DAG is what was asked for; before the
-	// prompt returns, because "when does this run" is the question the
-	// tree cannot answer.
+
 	fmt.Println()
 	printTriggers(pipeline)
 	return nil
 }
 
-// allExplainResult is one row of the --all sweep. Status is one of
-// "ok", "fail" (Plan-construction error -- gates the exit code), or
-// "skipped" (pipeline requires Inputs that have no default; reported
-// for visibility but does not fail the sweep -- Inputs validation is
-// a separate concern)..
 type allExplainResult struct {
 	Pipeline string `json:"pipeline"`
-	Status   string `json:"status"` // ok | fail | skipped
+	Status   string `json:"status"`
 	Nodes    int    `json:"nodes,omitempty"`
 	Error    string `json:"error,omitempty"`
 }
 
-// runPipelineExplainAll iterates every pipeline in the local
-// .sparkwing/sparkwing.yaml catalog, runs `pipeline explain` against
-// each with zero arguments, and aggregates pass/fail. Non-zero exit on
-// any failure makes this a CI gate: a Plan-time mismatch (e.g. a stale
-// sparkwing.RefTo[T] call against a renamed output type) blocks merges.
 func runPipelineExplainAll(format string) error {
 	catalog, err := gatherPipelinesCatalog(true)
 	if err != nil {
@@ -303,7 +265,7 @@ func runPipelineExplainAll(format string) error {
 		results = append(results, row)
 	}
 	if format == "json" {
-		// NDJSON: one pipeline's explanation per line.
+
 		if err := ndjson.Write(os.Stdout, results); err != nil {
 			return err
 		}
@@ -316,10 +278,6 @@ func runPipelineExplainAll(format string) error {
 	return nil
 }
 
-// isMissingInputsError detects the "pipeline cannot construct a Plan
-// without explicit args" failure mode so --all can report it without
-// failing the gate. Inputs validation is a separate concern from
-// Plan-construction validity.
 func isMissingInputsError(msg string) bool {
 	if strings.Contains(msg, "panic:") ||
 		strings.Contains(msg, "runtime error") ||
@@ -364,7 +322,6 @@ func printAllExplainTable(results []allExplainResult, failed int) {
 	}
 }
 
-// printPlanSnapshot renders the snapshot as a tree:
 func printPlanSnapshot(snap *planSnapshotDoc) {
 	if snap.Pipeline != "" {
 		fmt.Printf("Plan: %s\n", snap.Pipeline)
@@ -560,9 +517,6 @@ func printWork(w *planSnapshotWork, indent string) {
 	}
 }
 
-// printPlanEdges renders the Plan-level edges as a flat dependency
-// list so a reader can quickly map the dispatch graph after seeing
-// the per-node work breakdown.
 func printPlanEdges(nodes []planSnapshotNode) {
 	type edge struct{ From, To string }
 	var edges []edge

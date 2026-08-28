@@ -31,8 +31,6 @@ func (nodeSpawnOKChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	}), nil
 }
 
-// nodeSpawnBlockingChild reports when it started and then runs until
-// its context ends, so a test can cancel a parent mid-child.
 type nodeSpawnBlockingChild struct {
 	sparkwing.Base
 	started chan struct{}
@@ -47,8 +45,6 @@ func (j *nodeSpawnBlockingChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, e
 	return nil, nil
 }
 
-// nodeSpawnNestingChild spawns a child of its own, so a test can
-// check that a grandchild is named under the node that spawned it.
 type nodeSpawnNestingChild struct{ sparkwing.Base }
 
 func (nodeSpawnNestingChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -56,8 +52,6 @@ func (nodeSpawnNestingChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error
 	return nil, nil
 }
 
-// nodeSpawnConcurrencyChild reports the peak number of children the
-// handler let run at once.
 type nodeSpawnConcurrencyChild struct {
 	sparkwing.Base
 	live *atomic.Int32
@@ -82,8 +76,6 @@ func (j *nodeSpawnConcurrencyChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep
 	return nil, nil
 }
 
-// nodeSpawnFixture seeds a run with one started parent node and
-// returns a handler bound to it, as RunNodeOnce builds one.
 func nodeSpawnFixture(t *testing.T, runID string, requires []string) (*store.Store, *nodeSpawnHandler) {
 	t.Helper()
 	home := t.TempDir()
@@ -113,9 +105,6 @@ func nodeSpawnFixture(t *testing.T, runID string, requires []string) (*store.Sto
 	return st, newNodeSpawnHandler(r, backends, sparkwing.NewPlan(), runID, "spawn-unit", "parent", nil, requires)
 }
 
-// The child's row is the only place a Ref reader, the dashboard, or
-// the run summary can see spawned work, so the handler has to write
-// one under the parent-namespaced id with the child's output on it.
 func TestNodeSpawnHandler_WritesTheChildRowAndReturnsItsOutput(t *testing.T) {
 	st, h := nodeSpawnFixture(t, "spawn-unit-ok", nil)
 	ctx := context.Background()
@@ -124,8 +113,7 @@ func TestNodeSpawnHandler_WritesTheChildRowAndReturnsItsOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
 	}
-	// safety: a child's output crosses to its caller as the JSON written
-	// to its row, the same bytes on every execution model.
+
 	raw, ok := out.([]byte)
 	if !ok {
 		t.Fatalf("Spawn returned %#v, want the child's output as JSON", out)
@@ -150,8 +138,6 @@ func TestNodeSpawnHandler_WritesTheChildRowAndReturnsItsOutput(t *testing.T) {
 	}
 }
 
-// Pipeline-level runner labels belong on every node row the run
-// creates, spawned or planned; the claim path filters on them.
 func TestNodeSpawnHandler_StampsPipelineRequiresOnTheChildRow(t *testing.T) {
 	st, h := nodeSpawnFixture(t, "spawn-unit-labels", []string{"gpu"})
 	ctx := context.Background()
@@ -168,9 +154,6 @@ func TestNodeSpawnHandler_StampsPipelineRequiresOnTheChildRow(t *testing.T) {
 	}
 }
 
-// A spawned child is itself a node, so its own spawns namespace under
-// it. One handler serves the whole chain: each call site names the
-// node it is running in, and the handler nests from there.
 func TestNodeSpawnHandler_NestsGrandchildrenUnderTheirSpawner(t *testing.T) {
 	st, h := nodeSpawnFixture(t, "spawn-unit-nested", nil)
 	ctx := sparkwingruntime.WithSpawnHandler(context.Background(), h)
@@ -187,10 +170,6 @@ func TestNodeSpawnHandler_NestsGrandchildrenUnderTheirSpawner(t *testing.T) {
 	}
 }
 
-// A JobSpawnEach fan-out dispatches every child at once, so without a
-// bound of its own the node path ran the whole slice concurrently --
-// twenty node bodies inside one admission lease, where the dispatcher
-// would have held them to MaxParallel.
 func TestNodeSpawnHandler_BoundsFanOutConcurrency(t *testing.T) {
 	_, h := nodeSpawnFixture(t, "spawn-unit-fanout", nil)
 	ctx := context.Background()
@@ -245,11 +224,6 @@ func TestNodeSpawnHandler_RejectsBadSpawnIDs(t *testing.T) {
 	}
 }
 
-// A parent torn down mid-spawn must leave the child recorded as
-// cancelled. The execution path deliberately writes no terminal state
-// when the failure is the cancellation itself -- on the dispatcher's
-// path the dispatch loop closes that row, and in a node process only
-// this handler can.
 func TestNodeSpawnHandler_CancelledParentClosesTheChildRow(t *testing.T) {
 	st, h := nodeSpawnFixture(t, "spawn-unit-cancel", nil)
 	ctx, cancel := context.WithCancel(context.Background())

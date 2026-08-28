@@ -17,8 +17,6 @@ import (
 
 const lockoutDaemonWait = 30 * time.Second
 
-// lockoutHome returns a scratch sparkwing home short enough for a unix socket
-// path.
 func lockoutHome(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "opsview-lockout")
@@ -29,11 +27,6 @@ func lockoutHome(t *testing.T) string {
 	return dir
 }
 
-// serveProtocolAck answers every connection on home's daemon socket with a
-// hello_ack naming major and version, and serves nothing else. A real daemon
-// cannot be stood up at a protocol major this build does not carry, and the
-// ack is the whole of what a lockout diagnosis can read from a daemon it
-// cannot otherwise talk to.
 func serveProtocolAck(t *testing.T, home string, major int, version string) {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)
@@ -88,10 +81,6 @@ func diagnoseAgainstAck(t *testing.T, home, selfVersion string) DoctorReport {
 	return report
 }
 
-// A daemon speaking a protocol major above this build's refuses every query
-// this build makes, so the lockout scan has to read the handshake ack rather
-// than the queue state -- otherwise the one incident the scan exists for is
-// the one that silences it.
 func TestDiagnose_NamesLockedOutReposAgainstADaemonThisBuildCannotQuery(t *testing.T) {
 	home := lockoutHome(t)
 	serveProtocolAck(t, home, wingwire.ProtocolMajor+1, "v0.30.0")
@@ -117,10 +106,6 @@ func TestDiagnose_NamesLockedOutReposAgainstADaemonThisBuildCannotQuery(t *testi
 	}
 }
 
-// The operator's cure in this state is the sparkwing CLI: it carries the
-// release table the diagnosis reads, and it cannot query the daemon at all
-// until it is updated. Telling them otherwise sends them away from the one
-// lever that moves.
 func TestDiagnose_PointsAtTheCLIWhenItSpeaksAnOlderProtocolThanTheDaemon(t *testing.T) {
 	home := lockoutHome(t)
 	serveProtocolAck(t, home, wingwire.ProtocolMajor+1, "v0.30.0")

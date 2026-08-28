@@ -1,12 +1,3 @@
-// Package supervise runs the external watchdog for the local admission
-// daemon: `<binary> wingd supervise` starts `<binary> wingd run` as a
-// child, probes it, and replaces it when it stops answering.
-//
-// It lives outside cmd/sparkwing because the spawn path re-execs whichever
-// binary hosts the daemon, and more than one installed binary does: the
-// sparkwing CLI and sparkwing-runner both serve `wingd supervise` from
-// here, so a daemon spawned by either gets the same recovery behavior
-// rather than one of them answering "usage: wingd run".
 package supervise
 
 import (
@@ -32,16 +23,12 @@ const (
 	defaultTermGrace     = 3 * time.Second
 )
 
-// Child is the supervised daemon process, as the loop needs to see it.
 type Child interface {
 	Wait() <-chan error
 	Terminate() error
 	Kill() error
 }
 
-// Config tunes the watchdog: how often to probe, how long a probe may
-// take, how many consecutive failures condemn the child, and how long a
-// condemned child has to exit on its own before it is killed.
 type Config struct {
 	ProbeInterval time.Duration
 	ProbeTimeout  time.Duration
@@ -49,8 +36,6 @@ type Config struct {
 	TermGrace     time.Duration
 }
 
-// Deps are the injectable edges of the loop, so tests drive it without
-// starting processes or dialing sockets.
 type Deps struct {
 	Start func() (Child, error)
 	Probe func(context.Context) error
@@ -73,9 +58,6 @@ func (c Config) validate() error {
 	return nil
 }
 
-// Loop keeps recovery authority outside the serving runtime. A daemon that
-// stops scheduling cannot run its own signal handler or watchdog, so only
-// another process can bound recovery from that failure.
 func Loop(ctx context.Context, cfg Config, deps Deps) error {
 	if err := cfg.validate(); err != nil {
 		return err
@@ -103,12 +85,7 @@ func watchChild(ctx context.Context, child Child, cfg Config, deps Deps) (bool, 
 	defer ticker.Stop()
 	failures := 0
 	for {
-		// A child that already exited settles the watch: its exit, not a
-		// probe against its absence, is the verdict. Without this
-		// priority, a probe that failed because the child exited during
-		// it leaves both channels ready, and the select below picks at
-		// random -- enough unlucky picks in a row condemn a child that
-		// ended cleanly and spawn a successor nothing asked for.
+
 		select {
 		case err := <-child.Wait():
 			return false, err
@@ -208,10 +185,6 @@ func (c *execChild) Wait() <-chan error { return c.done }
 func (c *execChild) Terminate() error   { return signalTerminate(c.cmd.Process.Pid) }
 func (c *execChild) Kill() error        { return signalKill(c.cmd.Process.Pid) }
 
-// Run serves `<binary> wingd supervise [--home DIR] [--version V]` for
-// any binary that hosts the daemon. It re-execs itself as `wingd run`
-// with the same flags, so the serving daemon is always the same build as
-// the supervisor that owns its recovery.
 func Run(args []string) error {
 	fs := flag.NewFlagSet("wingd supervise", flag.ContinueOnError)
 	home := fs.String("home", "", "")
@@ -245,10 +218,7 @@ func Run(args []string) error {
 		Start: func() (Child, error) {
 			return startExecChild(self, childArgs)
 		},
-		// The probe must ride [wingdclient.HealthProbe], never a working
-		// client: a working connection counts as daemon activity, and a
-		// daemon its own watchdog keeps active can never idle out, so the
-		// supervise+run pair outlives every home that spawned it.
+
 		Probe: func(ctx context.Context) error {
 			return wingdclient.HealthProbe(ctx, *home)
 		},

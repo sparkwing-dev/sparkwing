@@ -99,10 +99,6 @@ func TestRenderQueue_IgnoreExternalLabeledInAllModes(t *testing.T) {
 	}
 }
 
-// TestRenderQueue_IgnoreExternalSuppressesPressureNote pins that the
-// "external is the binding constraint" callout never fires when the
-// operator has told admission to ignore external load -- it would blame a
-// constraint the daemon is no longer enforcing.
 func TestRenderQueue_IgnoreExternalSuppressesPressureNote(t *testing.T) {
 	qs := wingwire.QueueState{
 		IgnoreExternal: true,
@@ -206,9 +202,6 @@ func TestRenderQueue_PrettyExplainsHostPressureWait(t *testing.T) {
 	}
 }
 
-// TestRenderQueue_PrettyToleratesOlderDaemonWithoutHeadroom pins that a
-// queue payload with no headroom fields (an older daemon) still renders a
-// sane AVAILABLE column from capacity minus held.
 func TestRenderQueue_PrettyToleratesOlderDaemonWithoutHeadroom(t *testing.T) {
 	var buf bytes.Buffer
 	if err := renderQueue(&buf, sampleQueueState(), "pretty"); err != nil {

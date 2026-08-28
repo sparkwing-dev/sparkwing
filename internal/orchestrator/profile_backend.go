@@ -13,24 +13,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// OpenReadBackendForProfile opens the dashboard-shaped read backend from
-// a resolved profile's surfaces. It is the profile-driven sibling of
-// OpenReadBackend: callers that resolve a profile first (via
-// internal/profile.ResolveChain) ask for the read surface here instead
-// of walking cwd for a backends.yaml. The state surface defaults to
-// SQLite at paths.StateDB() when the profile declares none; a profile
-// carrying only controller: routes every surface through that
-// controller. Callers MUST defer the returned Closer.
 func OpenReadBackendForProfile(ctx context.Context, paths Paths, p *profile.Profile) (backend.Backend, io.Closer, error) {
 	state, logs, cache := profileSurfaceSpecs(p, paths.StateDB())
 	return backend.FromSpecs(ctx, state, logs, cache, paths, profileControllerLookup(p))
 }
 
-// ApplyProfileBackends populates opts.State / opts.LogStore /
-// opts.ArtifactStore from a resolved profile's surfaces. It mirrors
-// ApplyBackendsConfig's effect but sources surfaces from the profile
-// resolver instead of backends.yaml. opts.LocalOnly still short-circuits
-// to the SQLite-only path, and values the caller pre-set are preserved.
 func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile) error {
 	if opts.LocalOnly {
 		opts.LogStore = nil
@@ -79,30 +66,6 @@ func ApplyProfileBackends(ctx context.Context, opts *Options, p *profile.Profile
 	return nil
 }
 
-// ApplyProfileBackendsWithMirror is the dual-write variant of
-// ApplyProfileBackends. When p resolves to a non-local state backend AND
-// p.EffectiveMirrorLocal() is true AND opts is not LocalOnly, it opens a
-// local SQLite store at paths.StateDB() and hands it to RunLocal via
-// opts.MirrorLocal, which tees every state write to it alongside the
-// canonical backend (see mirrorStateBackend). The laptop thus keeps a
-// browsable shadow of runs it executed against a remote profile.
-// Otherwise it behaves identically to ApplyProfileBackends (single-write
-// to whatever p resolves to) and leaves opts.MirrorLocal nil.
-//
-// It deliberately does NOT wrap opts.State itself: the run path consumes
-// state at the richer StateBackend layer (with AppendEvent / GetNodeOutput
-// / EnqueueTrigger), so the tee is applied by RunLocal once the canonical
-// Backends bundle is built. opts.State stays the canonical handle.
-//
-// "Non-local" is judged by the RESOLVED state spec, not p.State alone: a
-// controller-only profile (p.State == nil but controller: set) resolves
-// to a controller state surface and IS mirrored. A profile resolving to
-// SQLite (the laptop fallback, or an explicit sqlite state) is already
-// local and is a no-op.
-//
-// Used by `sparkwing run --profile X` from a laptop (step 5). Cluster-side
-// callers (handle-trigger, run-node) MUST use ApplyProfileBackends
-// instead -- pods have no use for a local shadow and limited disk.
 func ApplyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profile.Profile, paths Paths) error {
 	hadState := opts.State != nil
 	if err := ApplyProfileBackends(ctx, opts, p); err != nil {
@@ -126,19 +89,10 @@ func ApplyProfileBackendsWithMirror(ctx context.Context, opts *Options, p *profi
 	return nil
 }
 
-// isLocalState reports whether a resolved state spec already lives on the
-// local machine, in which case there is nothing to mirror to. SQLite is
-// the only local state type today.
 func isLocalState(spec *backends.Spec) bool {
 	return spec == nil || spec.Type == backends.TypeSQLite
 }
 
-// effectiveSurfaceSpecs picks the state/logs/cache specs for this
-// run. With an active profile (--profile X), the profile's Surfaces
-// wins wholesale -- project defaults are ignored, the coherence of
-// the bundle is preserved. Without one, the project's declared
-// backends apply (or the historical local sqlite fallback when the
-// project declares nothing).
 func effectiveSurfaceSpecs(p *profile.Profile, _ *Options, stateDBPath string) (state, logs, cache *backends.Spec) {
 	if p != nil {
 		return profileSurfaceSpecs(p, stateDBPath)
@@ -146,29 +100,12 @@ func effectiveSurfaceSpecs(p *profile.Profile, _ *Options, stateDBPath string) (
 	return &backends.Spec{Type: backends.TypeSQLite, Path: stateDBPath}, nil, nil
 }
 
-// profileSurfaceSpecs derives the state/logs/cache specs for opening
-// backends from a resolved profile. Three shapes:
-//
-//   - explicit surfaces (any of state/cache/logs set) → use them as-is;
-//     a sqlite state surface without a path is filled with stateDBPath.
-//   - controller-only (no surfaces but controller: set) → every surface
-//     resolves through the controller named by the profile.
-//   - bare (neither) → sqlite state at stateDBPath, no shared logs or
-//     cache (the historical local default).
-//
-// The profile's own spec pointers are never mutated; the sqlite path
-// default is applied to a clone.
 func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, cache *backends.Spec) {
 	surf := p.Surfaces()
 	if surf.State == nil && surf.Logs == nil && surf.Cache == nil {
 		if p != nil && p.ControllerURL() != "" {
 			ctrl := func() *backends.Spec { return &backends.Spec{Type: backends.TypeController, Controller: p.Name} }
-			// State and cache do live on the controller; logs do not.
-			// sparkwing-logs is a separate service, so the logs spec
-			// carries the URL the controller announces for it. Empty
-			// when nothing is announced, which leaves the historical
-			// behavior of posting to the controller -- correct only
-			// when one process serves both.
+
 			logsSpec := ctrl()
 			logsSpec.URL = announcedLogsURL(p)
 			return ctrl(), logsSpec, ctrl()
@@ -188,11 +125,6 @@ func profileSurfaceSpecs(p *profile.Profile, stateDBPath string) (state, logs, c
 	return state, surf.Logs, surf.Cache
 }
 
-// announcedLogsURL asks the profile's controller where its logs
-// service is, via the discovery endpoint the controller already serves
-// for the cache pod. Empty when there is no controller, nothing is
-// announced, or discovery fails -- every one of which means "keep the
-// old fallback" rather than "fail the run".
 func announcedLogsURL(p *profile.Profile) string {
 	if p == nil || p.ControllerURL() == "" {
 		return ""
@@ -206,11 +138,6 @@ func announcedLogsURL(p *profile.Profile) string {
 	return svc.Logs
 }
 
-// profileControllerLookup builds a storeurl.ProfileLookup that resolves
-// any controller-typed spec to this profile's controller URL and token.
-// Returns nil when the profile declares no controller, so the factories
-// give their usual "no lookup provided" error if a controller spec
-// nonetheless appears.
 func profileControllerLookup(p *profile.Profile) storeurl.ProfileLookup {
 	if p == nil || p.ControllerURL() == "" {
 		return nil

@@ -16,9 +16,6 @@ func useWorkDir(t *testing.T, dir string) {
 	t.Cleanup(func() { sparkwing.SetWorkDir(prev) })
 }
 
-// toolCacheDir calls the helper under test and removes what it
-// created. The cache lives under the OS temp dir rather than a
-// t.TempDir, so nothing else reclaims it.
 func toolCacheDir(t *testing.T, tool string) string {
 	t.Helper()
 	dir := sparkwing.ToolCacheDir(tool)
@@ -40,8 +37,6 @@ func TestToolCacheDir_DiffersBetweenWorktrees(t *testing.T) {
 	}
 }
 
-// Two checkouts of different repos land on the same branch name often
-// enough that the leaf directory name alone cannot separate them.
 func TestToolCacheDir_DiffersWhenWorktreeNamesMatch(t *testing.T) {
 	root := t.TempDir()
 	first := filepath.Join(root, "sparkwing", "release-prep")
@@ -107,8 +102,6 @@ func TestToolCacheDir_ToolNameStaysInsideCacheRoot(t *testing.T) {
 	}
 }
 
-// Outside a pipeline run there is no WorkDir; the helper still has to
-// return a usable directory rather than one rooted at "".
 func TestToolCacheDir_WithoutWorkDirFallsBackToCwd(t *testing.T) {
 	useWorkDir(t, "")
 

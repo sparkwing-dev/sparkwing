@@ -7,10 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// publicBinaries is the canonical list of binaries the public
-// sparkwing repo ships under cmd/. Mirrors the GH-Actions
-// release matrix in .github/workflows/release.yaml; keep in sync
-// when adding/removing a cmd entry.
 var publicBinaries = []string{
 	"sparkwing",
 	"sparkwing-cache",
@@ -20,18 +16,6 @@ var publicBinaries = []string{
 	"sparkwing-web",
 }
 
-// Build verifies every binary the public sparkwing repo ships from
-// cmd/ (publicBinaries above -- internal tools such as cmd/apidiff
-// are not covered) compiles cleanly for the host platform. Sanity
-// build only --
-// production multi-arch + container builds are owned by the GH-
-// Actions workflow at `.github/workflows/release.yaml`, which fires
-// on tag push (the tag the `release` pipeline below pushes).
-//
-// This pipeline exists primarily as a cross-ref target for an
-// upstream release-all orchestration pipeline that wants to gate
-// a release on a known-good public build before tagging. It does
-// NOT publish artifacts.
 type Build struct{ sparkwing.Base }
 
 func (Build) ShortHelp() string {

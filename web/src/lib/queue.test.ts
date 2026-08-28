@@ -114,9 +114,6 @@ describe("resourceAvailable", () => {
 });
 
 describe("externalCell", () => {
-  // The measured and the unmeasured row carry identical figures, which is the
-  // whole problem: a sensor nobody could read and a machine with no external
-  // load produce the same numbers, so only the label separates them.
   const row = { key: "memory", capacity: 17179869184, held: 0, external: 0 };
   const fmt = (_key: string, v: number) => `${v} B`;
 

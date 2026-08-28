@@ -22,9 +22,6 @@ import (
 type LogStore struct {
 	Root string
 
-	// One mutex per (runID, nodeID) so same-process appends serialize
-	// without blocking unrelated nodes. O_APPEND alone doesn't protect
-	// against torn writes from Go's opaque write buffer.
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 }
@@ -168,8 +165,6 @@ func (s *LogStore) DeleteRun(_ context.Context, runID string) error {
 	return err
 }
 
-// applyReadOpts mirrors the sparkwing-logs HTTP server filter
-// semantics: lines (range) -> grep -> head/tail.
 func applyReadOpts(data []byte, opts storage.ReadOpts) ([]byte, error) {
 	if (opts == storage.ReadOpts{}) {
 		return data, nil

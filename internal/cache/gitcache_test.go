@@ -173,15 +173,6 @@ func TestArtifactUpload_AbsolutePath(t *testing.T) {
 	}
 }
 
-// TestResolveGitRepo_AutoClonesWhenMissing covers the split-brain
-// recovery path: a name is in repoNames (config persisted) but the
-// bare-repo dir is missing (disk was wiped or never cloned at
-// registration time). resolveGitRepo should clone on demand from a
-// reachable URL rather than returning "registered but not cloned"
-// forever.
-//
-// The test uses a local upstream bare repo as the registered URL so
-// no SSH / network is required.
 func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 	root := t.TempDir()
 
@@ -226,10 +217,6 @@ func TestResolveGitRepo_AutoClonesWhenMissing(t *testing.T) {
 	}
 }
 
-// TestResolveGitRepo_AutoCloneFailureKeepsSeedHint verifies that a
-// failed auto-clone (bad URL / no network) still returns an error
-// pointing at the /sync/seed recovery path, so the operator's
-// playbook stays valid.
 func TestResolveGitRepo_AutoCloneFailureKeepsSeedHint(t *testing.T) {
 	root := t.TempDir()
 	oldRepoDir := repoDir

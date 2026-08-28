@@ -13,8 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// bounceFixture is a run with one running node and one node that never
-// started -- the two states every guard here is about.
 func bounceFixture(t *testing.T) (*store.Store, context.Context) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
@@ -40,10 +38,6 @@ func bounceFixture(t *testing.T) (*store.Store, context.Context) {
 	return st, ctx
 }
 
-// The whole lifecycle in one pass: a request becomes the node's pending
-// intent, the runner consumes it with the outcome it produced, and the node
-// is left with nothing pending. Nothing else may see it -- a bounce aimed at
-// one node must not stop another node's process.
 func TestNodeBounce_RequestBecomesPendingThenConsumed(t *testing.T) {
 	st, ctx := bounceFixture(t)
 
@@ -84,10 +78,6 @@ func TestNodeBounce_RequestBecomesPendingThenConsumed(t *testing.T) {
 	}
 }
 
-// Consuming twice is not a caller bug: the runner records the outcome and can
-// be asked to record it again by a retried write. The first verdict stands --
-// re-consuming must not rewrite a "bounced" row into a "missed" one -- while a
-// seq that names no row at all is the genuine mistake and says so.
 func TestNodeBounce_ConsumeIsIdempotent(t *testing.T) {
 	st, ctx := bounceFixture(t)
 	b, err := st.RequestNodeBounce(ctx, "run-1", "build", "korey")
@@ -115,9 +105,6 @@ func TestNodeBounce_ConsumeIsIdempotent(t *testing.T) {
 	}
 }
 
-// Repeated bounces are allowed and are separate rows: an operator bouncing a
-// wedged node twice asked twice, and the runner takes them one at a time in
-// the order they were asked.
 func TestNodeBounce_RepeatedRequestsQueueInOrder(t *testing.T) {
 	st, ctx := bounceFixture(t)
 	first, err := st.RequestNodeBounce(ctx, "run-1", "build", "korey")
@@ -144,18 +131,6 @@ func TestNodeBounce_RepeatedRequestsQueueInOrder(t *testing.T) {
 	}
 }
 
-// The row is what the guard reads, not a live process -- pinning
-// current behavior.
-//
-// A node is "running" from the moment its process stamps the row until
-// that process writes an outcome, and between a bounce's kill and its
-// replacement there is a real window where the row says running and no
-// process exists. A request made in that window is accepted, and that
-// is right: the supervising runner is still on the node and will
-// deliver the kill to whatever is running by then, or close the
-// request as missed if the node ends first. The alternative -- asking
-// for proof of a live process -- is a question the store cannot answer
-// and would refuse an operator whose job is genuinely still going.
 func TestNodeBounce_AcceptedWhileTheRowSaysRunningWithNoProcess(t *testing.T) {
 	st, ctx := bounceFixture(t)
 	b, err := st.RequestNodeBounce(ctx, "run-1", "build", "korey")
@@ -167,13 +142,6 @@ func TestNodeBounce_AcceptedWhileTheRowSaysRunningWithNoProcess(t *testing.T) {
 	}
 }
 
-// Concurrent requests each get their own row.
-//
-// Two people watching the same stuck job both reach for the verb, and
-// a dashboard button makes that ordinary rather than rare. Allocating
-// the sequence outside a transaction would answer some of them with a
-// primary key violation -- a database error shown to an operator who
-// did nothing wrong.
 func TestNodeBounce_ConcurrentRequestsDoNotCollide(t *testing.T) {
 	st, ctx := bounceFixture(t)
 
@@ -221,16 +189,6 @@ func TestNodeBounce_ConcurrentRequestsDoNotCollide(t *testing.T) {
 	}
 }
 
-// A node that recorded its outcome cannot be reopened by a start
-// arriving afterwards.
-//
-// This is the second half of the bounce race. The runner decides
-// whether to re-run a killed node by reading its row; if that read
-// loses to a terminal write, the replacement process would call
-// StartNode on a node that had already succeeded. An unguarded start
-// would flip it back to running with its success still attached --
-// which also defeats the terminal guard on the finish path, letting
-// the second execution overwrite the first's verdict.
 func TestStartNode_CannotReopenANodeThatAlreadyFinished(t *testing.T) {
 	st, ctx := bounceFixture(t)
 	if err := st.FinishNode(ctx, "run-1", "build", "success", "", []byte(`{"ok":true}`)); err != nil {
@@ -248,8 +206,6 @@ func TestStartNode_CannotReopenANodeThatAlreadyFinished(t *testing.T) {
 		t.Fatalf("node = %+v, want its terminal row untouched", n)
 	}
 
-	// The finish the re-execution would attempt must still be refused, which
-	// it only is while the row stayed terminal.
 	if err := st.FinishNode(ctx, "run-1", "build", "failed", "second execution", nil); err != nil {
 		t.Fatalf("FinishNode: %v", err)
 	}
@@ -261,8 +217,6 @@ func TestStartNode_CannotReopenANodeThatAlreadyFinished(t *testing.T) {
 		t.Errorf("node = %+v, want the first verdict kept", n)
 	}
 
-	// A node still running is unaffected: re-stamping is what a bounced
-	// node's replacement relies on.
 	before, err := st.GetNode(ctx, "run-1", "later")
 	if err != nil {
 		t.Fatal(err)
@@ -282,9 +236,6 @@ func TestStartNode_CannotReopenANodeThatAlreadyFinished(t *testing.T) {
 	}
 }
 
-// The guards are what make the verb honest about what it can do. Each of
-// these has no process to kill, so recording an intent nobody will ever
-// consume would leave the operator waiting on a restart that cannot happen.
 func TestNodeBounce_RefusesWhatHasNoProcessToKill(t *testing.T) {
 	st, ctx := bounceFixture(t)
 

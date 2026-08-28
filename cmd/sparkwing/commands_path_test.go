@@ -5,8 +5,6 @@ import (
 	"testing"
 )
 
-// Whole components only, either spelling: `run` names the run verb and
-// its subtree, never the separate runs group.
 func TestMatchesCommandPathAcceptsBothSpellingsOfAPrefix(t *testing.T) {
 	cases := []struct {
 		path   string
@@ -38,9 +36,6 @@ func TestMatchesCommandPathAcceptsBothSpellingsOfAPrefix(t *testing.T) {
 	}
 }
 
-// TestCommandsPathSelectsTheSameSubtreeEitherWay pins the fix against the
-// live registry rather than a fixture: the bare prefix has to reach the
-// real commands, not just satisfy a string helper.
 func TestCommandsPathSelectsTheSameSubtreeEitherWay(t *testing.T) {
 	bare := commandsOutput(t, "--path", "runs", "-o", "plain")
 	qualified := commandsOutput(t, "--path", "sparkwing runs", "-o", "plain")
@@ -52,9 +47,6 @@ func TestCommandsPathSelectsTheSameSubtreeEitherWay(t *testing.T) {
 	}
 }
 
-// TestCommandsRefusesAPathThatMatchesNothing keeps a mistyped filter from
-// reading as an answer about the CLI. It used to exit 0 printing nothing,
-// or the literal `null` under -o json.
 func TestCommandsRefusesAPathThatMatchesNothing(t *testing.T) {
 	for _, output := range []string{"pretty", "json", "plain", "markdown"} {
 		err := runCommandsQuiet(t, "--path", "nosuchsubtree", "-o", output)
@@ -67,11 +59,6 @@ func TestCommandsRefusesAPathThatMatchesNothing(t *testing.T) {
 	}
 }
 
-// TestCommandsPathMatchesWholeComponentsOnly pins the boundary against
-// the live registry. `--path run` selecting the runs group as well
-// returned 31 paths for a filter that named two, and every surplus line
-// began with the word that was typed, so the wrong answer did not look
-// wrong.
 func TestCommandsPathMatchesWholeComponentsOnly(t *testing.T) {
 	selected := strings.Split(strings.TrimSpace(commandsOutput(t, "--path", "run", "-o", "plain")), "\n")
 	if len(selected) == 0 || selected[0] == "" {
@@ -88,9 +75,6 @@ func TestCommandsPathMatchesWholeComponentsOnly(t *testing.T) {
 	}
 }
 
-// TestCommandsRefusesAWhitespacePath keeps a filter that was typed from
-// being read as one that was not: `--path "  "` used to trim to the
-// empty prefix and answer with the entire CLI at exit 0.
 func TestCommandsRefusesAWhitespacePath(t *testing.T) {
 	err := runCommandsQuiet(t, "--path", "   ", "-o", "plain")
 	if err == nil {
@@ -101,9 +85,6 @@ func TestCommandsRefusesAWhitespacePath(t *testing.T) {
 	}
 }
 
-// TestCommandsPointsAtIncludeHiddenWhenOnlyHiddenMatched separates "you
-// misspelled it" from "it exists but is hidden", which are different
-// mistakes with different fixes.
 func TestCommandsPointsAtIncludeHiddenWhenOnlyHiddenMatched(t *testing.T) {
 	hidden := ""
 	for _, c := range allCommands {
@@ -124,7 +105,6 @@ func TestCommandsPointsAtIncludeHiddenWhenOnlyHiddenMatched(t *testing.T) {
 	}
 }
 
-// commandsOutput runs the verb and returns what it printed.
 func commandsOutput(t *testing.T, args ...string) string {
 	t.Helper()
 	var err error
@@ -135,7 +115,6 @@ func commandsOutput(t *testing.T, args ...string) string {
 	return out
 }
 
-// runCommandsQuiet runs the verb for its error, discarding its output.
 func runCommandsQuiet(t *testing.T, args ...string) error {
 	t.Helper()
 	var err error

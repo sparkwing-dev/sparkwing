@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 )
 
-// A 403 from the logs service must come back as a typed
-// *AuthError with the missing scope parsed out, so the runner can
-// distinguish auth misconfig (fatal) from transient transport
-// errors (retryable).
 func TestAppend_403ReturnsAuthErrorWithScope(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "token lacks required scope: logs.write", http.StatusForbidden)
@@ -42,8 +38,6 @@ func TestAppend_403ReturnsAuthErrorWithScope(t *testing.T) {
 	}
 }
 
-// 401 maps to the same typed error so middleware-level rejections
-// (expired token, bad signature) hard-fail just like a missing scope.
 func TestAppend_401ReturnsAuthError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "invalid token", http.StatusUnauthorized)
@@ -64,10 +58,6 @@ func TestAppend_401ReturnsAuthError(t *testing.T) {
 	}
 }
 
-// When the server emits the structured JSON body, the
-// client extracts missing_scope from the JSON without depending on
-// the human-readable phrasing. Pinning this so a future reword of
-// the message field can't silently degrade AuthError.Scope.
 func TestAppend_403JSONBodyExtractsScope(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -92,8 +82,6 @@ func TestAppend_403JSONBodyExtractsScope(t *testing.T) {
 	}
 }
 
-// A JSON body without missing_scope must not crash the parser;
-// Scope stays empty.
 func TestAppend_403JSONBodyNoScope(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -119,9 +107,6 @@ func TestAppend_403JSONBodyNoScope(t *testing.T) {
 	}
 }
 
-// Non-auth failure responses (e.g. 500) are NOT *AuthError -- they
-// represent transient transport problems and must be retryable by
-// the runner's per-line retry budget.
 func TestAppend_5xxNotAuthError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "boom", http.StatusInternalServerError)

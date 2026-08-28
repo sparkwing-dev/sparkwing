@@ -34,8 +34,6 @@ func TestRepoNameFromURL(t *testing.T) {
 	}
 }
 
-// gitExecPath returns the directory containing git-http-backend, or
-// "" if unavailable. Tests skip when empty.
 func gitExecPath(t *testing.T) string {
 	t.Helper()
 	out, err := exec.Command("git", "--exec-path").Output()
@@ -49,8 +47,6 @@ func gitExecPath(t *testing.T) string {
 	return dir
 }
 
-// startGitcacheTestServer mounts git-http-backend CGI at /git/<name>/...
-// against repoParent and stubs /git/register to 200 OK.
 func startGitcacheTestServer(t *testing.T, repoParent string) *httptest.Server {
 	t.Helper()
 	execPath := gitExecPath(t)
@@ -74,9 +70,6 @@ func startGitcacheTestServer(t *testing.T, repoParent string) *httptest.Server {
 	return httptest.NewServer(mux)
 }
 
-// makeBareRepoWithSparkwing builds a bare repo with two commits on
-// the named branch, both with a `.sparkwing/` subdir. Returns the
-// older SHA and the branch-tip SHA.
 func makeBareRepoWithSparkwing(t *testing.T, repoParent, name, branch string) (oldSHA, tipSHA string) {
 	t.Helper()
 	if err := os.MkdirAll(repoParent, 0o755); err != nil {

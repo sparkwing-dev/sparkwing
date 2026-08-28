@@ -11,8 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
-// FetchFromArtifactStore reads bin/<key> from store and atomic-renames
-// into dest with mode 0o755. Returns storage.ErrNotFound on miss.
 func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, key, dest string) error {
 	rc, err := store.Get(ctx, "bin/"+key)
 	if err != nil {
@@ -40,7 +38,6 @@ func FetchFromArtifactStore(ctx context.Context, store storage.ArtifactStore, ke
 	return os.Rename(tmp, dest)
 }
 
-// UploadToArtifactStore reads src and PUTs it at bin/<key>.
 func UploadToArtifactStore(ctx context.Context, store storage.ArtifactStore, key, src string) error {
 	f, err := os.Open(src)
 	if err != nil {
@@ -53,11 +50,8 @@ func UploadToArtifactStore(ctx context.Context, store storage.ArtifactStore, key
 	return nil
 }
 
-// HasInArtifactStore wraps store.Has for the bin/ keyspace.
 func HasInArtifactStore(ctx context.Context, store storage.ArtifactStore, key string) (bool, error) {
 	return store.Has(ctx, "bin/"+key)
 }
 
-// IsNotFound reports whether err is a storage.ErrNotFound, including
-// wrapped forms.
 func IsNotFound(err error) bool { return errors.Is(err, storage.ErrNotFound) }

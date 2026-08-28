@@ -1,7 +1,3 @@
-// `sparkwing runs receipt --run X` -- recompute and emit the
-// per-run audit + cost receipt as JSON. Local mode reads the SQLite
-// store directly and reports no configured cost; cluster mode
-// (--profile NAME) defers cost to the controller's configured rate.
 package main
 
 import (
@@ -86,9 +82,6 @@ func runJobsReceipt(ctx context.Context, paths orchestrator.Paths, args []string
 	return enc.Encode(rec)
 }
 
-// localCostRate is the always-zero local-mode cost rate.
-// cost_per_runner_hour was dropped from profile config in v0.6;
-// receipts now show compute_seconds without a derived dollar figure.
 func localCostRate() (float64, string) {
 	return 0, "local (rate not configured)"
 }

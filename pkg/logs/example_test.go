@@ -10,10 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 )
 
-// ExampleClient spins up a sparkwing-logs [logs.Server] in-process
-// (auth off), appends two lines via [logs.Client], and reads them
-// back. In production the server runs as `sparkwing-logs` and the
-// client points at its URL.
 func ExampleClient() {
 	dir, _ := os.MkdirTemp("", "sparkwing-logs-")
 	defer os.RemoveAll(dir)

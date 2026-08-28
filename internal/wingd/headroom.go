@@ -8,16 +8,8 @@ import (
 	"time"
 )
 
-// loadEMAAlpha weights the newest load sample when smoothing. A modest
-// weight damps momentary spikes so admission headroom does not flap.
 const loadEMAAlpha = 0.4
 
-// sampleLoop periodically re-reads host pressure and feeds it into the
-// ledger's headroom until the context is cancelled or the daemon stops. On a
-// slower cadence it also re-derives machine capacity, so an instance resize
-// or a cgroup-quota edit is picked up without a restart. Capacity is refreshed
-// before headroom in the same tick, so a grow's promotion runs against the new
-// total.
 func (d *Daemon) sampleLoop(ctx context.Context) {
 	t := time.NewTicker(d.cfg.sampleInterval())
 	defer t.Stop()
@@ -40,15 +32,10 @@ func (d *Daemon) sampleLoop(ctx context.Context) {
 	}
 }
 
-// refreshHeadroom samples the host and applies the result. Sampler errors
-// are logged and leave the last headroom in force.
 func (d *Daemon) refreshHeadroom() {
 	d.refreshHostSample(false)
 }
 
-// refreshHostSample uses one host reading for every calculation on a sample
-// tick. Stateful CPU counters advance when sampled, so separate capacity and
-// headroom reads would measure utilization over the few moments between them.
 func (d *Daemon) refreshHostSample(refreshCapacity bool) {
 	roots, cohort := d.holderSample()
 	stat, ownedBusy, ownedMeasured, err := d.sampleHostAndOwned(roots)
@@ -78,11 +65,6 @@ func (d *Daemon) sampleHostAndOwned(roots []int) (HostStat, float64, bool, error
 	return stat, owned, measured, nil
 }
 
-// applyHeadroom converts a host reading into a ledger headroom ceiling:
-// total capacity minus the reserved margin minus whatever load and memory
-// the machine is under from work the daemon did not admit. It only pushes
-// a change past a deadband. Small wiggles are absorbed until a bounded
-// refresh applies the newest effective value.
 func (d *Daemon) applyHeadroom(stat HostStat) {
 	d.applyHeadroomSample(stat, nil, 0, false)
 }
@@ -133,12 +115,7 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, sampled holderCohort, ownedB
 	targetMem := headroomFromReserveExternal(stat.TotalMemoryBytes, reservedMem, admitExternalMem)
 
 	grantable := stat.TotalCores - reservedCores
-	// Saturation reads the load average, not the utilization the
-	// subtraction above uses. Threads blocked on I/O are exactly what
-	// "work is queueing for this machine" should count, and they consume
-	// no cores -- keeping the two terms separate is what leaves
-	// saturation flagging unchanged while the arithmetic that sizes the
-	// machine moves to cores actually in use.
+
 	saturated := grantable > 0 && coresContention(stat, load, usedCores) >= contentionSaturationFraction*grantable
 	d.updateContentionLocked(saturated, d.cfg.sampleInterval().Milliseconds(), now)
 
@@ -189,9 +166,6 @@ func (d *Daemon) applyHeadroomSample(stat HostStat, sampled holderCohort, ownedB
 	d.flush(deliveries, snap)
 }
 
-// headroomFromReserveExternal is the memory ceiling: total minus the
-// reserve minus the external memory admission subtracts. The external term
-// is zero when the operator has set ignore-external.
 func headroomFromReserveExternal(total, reserved, external uint64) uint64 {
 	avail := int64(total) - int64(reserved) - int64(external)
 	if avail < 0 {
@@ -200,12 +174,6 @@ func headroomFromReserveExternal(total, reserved, external uint64) uint64 {
 	return uint64(avail)
 }
 
-// memReserveAndExternal decomposes the memory headroom into its reserve
-// margin and the memory consumed by processes the daemon did not admit,
-// for the queue view. An unmeasured reading yields no external term at
-// all: subtracting a number the sampler never read is what pinned memory
-// headroom at zero on every box, and admission may not charge a run
-// against pressure nobody looked at.
 func memReserveAndExternal(stat HostStat, usedMem uint64, frac float64) (reserved, external uint64) {
 	reserved = uint64(frac * float64(stat.TotalMemoryBytes))
 	if !stat.MemoryMeasured {
@@ -220,15 +188,6 @@ func memReserveAndExternal(stat HostStat, usedMem uint64, frac float64) (reserve
 	return reserved, external
 }
 
-// coresExternal is host CPU consumed outside measured live holder process
-// trees. A blind holder reading credits no owned work, so transient sensor
-// loss may reduce admission but cannot erase external pressure. A blind host
-// reading subtracts nothing because no pressure was measured.
-//
-// It reads utilization rather than the run queue because this figure is
-// subtracted from a core count. The run queue counts threads waiting,
-// including on uninterruptible I/O, so on an I/O-bound box it runs far
-// above the cores in use and erases a machine that is mostly idle.
 func coresExternal(stat HostStat, busy, ownedBusy float64, ownedMeasured bool) float64 {
 	if !stat.CPUMeasured {
 		return 0
@@ -283,11 +242,6 @@ func sameHolderCohort(a, b holderCohort) bool {
 	return true
 }
 
-// coresContention is the run-queue pressure the daemon did not admit. It
-// answers a different question from [coresExternal]: not how much of the
-// machine is consumed, but how hard work is queueing for it. Threads
-// waiting on I/O belong in that answer, which is why this one reads the
-// load average and the capacity subtraction does not.
 func coresContention(stat HostStat, load, usedCores float64) float64 {
 	if !stat.LoadMeasured {
 		return 0
@@ -299,9 +253,6 @@ func coresContention(stat HostStat, load, usedCores float64) float64 {
 	return contention
 }
 
-// externalWord renders an external-load figure for a log line, or the
-// word "unmeasured" when the sensor could not read the dimension, so a
-// blind reading never reads as a number in the log either.
 func externalWord(measured bool, value string) string {
 	if !measured {
 		return "unmeasured"
@@ -309,7 +260,6 @@ func externalWord(measured bool, value string) string {
 	return value
 }
 
-// usedLocked sums the host resources currently held across all leases.
 func (d *Daemon) usedLocked() (cores float64, mem uint64) {
 	snap := d.ledger.Snapshot()
 	var milli int64

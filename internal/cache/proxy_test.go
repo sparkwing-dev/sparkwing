@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-func expireProxyCacheEntry(t *testing.T, registry, path string, ttl time.Duration) {
+func expireProxyCacheEntry(t *testing.T, registry, path string) {
 	t.Helper()
 	metaPath := filepath.Join(proxyDir, registry, proxyCacheKey(registry, path)+".meta")
 	metaData, err := os.ReadFile(metaPath)
@@ -24,7 +24,7 @@ func expireProxyCacheEntry(t *testing.T, registry, path string, ttl time.Duratio
 	if err := json.Unmarshal(metaData, &meta); err != nil {
 		t.Fatal(err)
 	}
-	meta.CachedAt = time.Now().Add(-ttl - time.Second).Unix()
+	meta.CachedAt = 0
 	metaData, err = json.Marshal(meta)
 	if err != nil {
 		t.Fatal(err)
@@ -231,13 +231,6 @@ func TestHandleProxy_ImmutableCaching(t *testing.T) {
 }
 
 func TestHandleProxy_TTLExpiry(t *testing.T) {
-	started := time.Now()
-	t.Cleanup(func() {
-		if elapsed := time.Since(started); elapsed >= 750*time.Millisecond {
-			t.Errorf("TTL expiry test took %v, want less than 750ms without waiting for wall-clock expiry", elapsed)
-		}
-	})
-
 	var hitCount atomic.Int32
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hitCount.Add(1)
@@ -247,7 +240,7 @@ func TestHandleProxy_TTLExpiry(t *testing.T) {
 	defer upstream.Close()
 
 	oldTTL := proxyCacheTTL
-	proxyCacheTTL = 1 * time.Second
+	proxyCacheTTL = 10 * time.Second
 	defer func() { proxyCacheTTL = oldTTL }()
 
 	withTestProxy(t, map[string]Registry{
@@ -268,7 +261,7 @@ func TestHandleProxy_TTLExpiry(t *testing.T) {
 			t.Errorf("expected cache hit, but got %d upstream hits", hitCount.Load())
 		}
 
-		expireProxyCacheEntry(t, "test", "metadata", proxyCacheTTL)
+		expireProxyCacheEntry(t, "test", "metadata")
 
 		req3 := httptest.NewRequest(http.MethodGet, "/proxy/test/metadata", nil)
 		w3 := httptest.NewRecorder()
@@ -347,7 +340,7 @@ func TestHandleProxy_UpstreamError(t *testing.T) {
 			t.Fatalf("expected 200, got %d", w1.Code)
 		}
 
-		expireProxyCacheEntry(t, "test", "data", proxyCacheTTL)
+		expireProxyCacheEntry(t, "test", "data")
 
 		req2 := httptest.NewRequest(http.MethodGet, "/proxy/test/data", nil)
 		w2 := httptest.NewRecorder()

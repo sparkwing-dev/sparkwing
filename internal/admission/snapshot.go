@@ -5,12 +5,6 @@ import (
 	"sort"
 )
 
-// Snapshot is the full JSON-serializable ledger state. A snapshot fed to
-// [Restore] reproduces the pre-snapshot ledger exactly: the same grants,
-// queue order, superseded holders, re-attach tokens, and sequence
-// counters, so event sequences and lease IDs continue where they left
-// off. Derived quantities (used host budget, queue positions) are not
-// stored; Restore recomputes them.
 type Snapshot struct {
 	TotalMilliCores     int64            `json:"total_milli_cores"`
 	TotalMemoryBytes    uint64           `json:"total_memory_bytes"`
@@ -25,7 +19,6 @@ type Snapshot struct {
 	Waiters             []WaiterState    `json:"waiters,omitempty"`
 }
 
-// LeaseState is one live lease in a [Snapshot], in grant order.
 type LeaseState struct {
 	Seq         uint64       `json:"seq"`
 	Admit       uint64       `json:"admit,omitempty"`
@@ -42,7 +35,6 @@ type LeaseState struct {
 	Members     []string     `json:"members"`
 }
 
-// ClaimState is one semaphore claim in a [Snapshot].
 type ClaimState struct {
 	Key      string `json:"key"`
 	Capacity int    `json:"capacity"`
@@ -50,17 +42,12 @@ type ClaimState struct {
 	Policy   Policy `json:"policy"`
 }
 
-// SemaphoreState is one named semaphore in a [Snapshot], holds in grant
-// order.
 type SemaphoreState struct {
 	Key          string      `json:"key"`
 	LastCapacity int         `json:"last_capacity"`
 	Holds        []HoldState `json:"holds"`
 }
 
-// HoldState is one semaphore hold in a [Snapshot]. SupersededBy may name
-// a lease that has since been released; it is historical attribution,
-// not a live reference.
 type HoldState struct {
 	Lease        LeaseID `json:"lease"`
 	Cost         int     `json:"cost"`
@@ -69,7 +56,6 @@ type HoldState struct {
 	SupersededBy LeaseID `json:"superseded_by,omitempty"`
 }
 
-// WaiterState is one queued request in a [Snapshot], in admission order.
 type WaiterState struct {
 	Arrival       uint64       `json:"arrival"`
 	Admit         uint64       `json:"admit,omitempty"`
@@ -85,9 +71,6 @@ type WaiterState struct {
 	Claims        []ClaimState `json:"claims,omitempty"`
 }
 
-// Snapshot captures the full ledger state deterministically: leases in
-// grant order, semaphores sorted by key, waiters in admission order,
-// members sorted.
 func (l *Ledger) Snapshot() Snapshot {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -171,10 +154,6 @@ func claimStates(claims []claim) []ClaimState {
 	return out
 }
 
-// Restore rebuilds a ledger from a snapshot, validating every field and
-// the full invariant set; a snapshot that fails either returns
-// [ErrInvalidSnapshot]. tokenGen mints tokens for grants made after the
-// restore; nil uses the default random generator.
 func Restore(snap Snapshot, tokenGen func() string) (*Ledger, error) {
 	if tokenGen == nil {
 		tokenGen = randomToken

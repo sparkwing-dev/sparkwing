@@ -8,15 +8,12 @@ import (
 	"strings"
 )
 
-// PlanStep is one work item (step / job spawn) inside a plan node,
-// reduced to the fields whose change alters pipeline behavior.
 type PlanStep struct {
 	ID       string   `json:"id"`
 	Needs    []string `json:"needs,omitempty"`
 	Decision string   `json:"decision,omitempty"`
 }
 
-// PlanNode is one node in a plan, reduced to structural fields.
 type PlanNode struct {
 	ID          string     `json:"id"`
 	Deps        []string   `json:"deps,omitempty"`
@@ -26,16 +23,11 @@ type PlanNode struct {
 	Steps       []PlanStep `json:"steps,omitempty"`
 }
 
-// Plan is the structural projection of a pipeline's plan preview used
-// for before/after comparison: the parts that describe the DAG's shape
-// and each node's run decision, with runtime-volatile detail dropped.
 type Plan struct {
 	Pipeline string     `json:"pipeline"`
 	Nodes    []PlanNode `json:"nodes"`
 }
 
-// canonical returns the plan with node and dependency ordering
-// normalized so hashing and comparison ignore incidental ordering.
 func (p Plan) canonical() Plan {
 	nodes := make([]PlanNode, len(p.Nodes))
 	copy(nodes, p.Nodes)
@@ -63,9 +55,6 @@ func sortedCopy(in []string) []string {
 	return out
 }
 
-// Hash is a fast-path fingerprint of the plan's canonical structure.
-// Equal hashes mean an identical plan; the structural diff is only
-// computed when hashes differ.
 func (p Plan) Hash() string {
 	c := p.canonical()
 	var b strings.Builder
@@ -80,15 +69,11 @@ func (p Plan) Hash() string {
 	return hex.EncodeToString(sum[:])
 }
 
-// NodeChange records how one node differs between two plans.
 type NodeChange struct {
 	ID      string
 	Details []string
 }
 
-// PlanDiff is the structured comparison of two plans: which nodes were
-// added, removed, or changed (deps, decision, approval/recovery role,
-// or steps). Identical is true when nothing changed.
 type PlanDiff struct {
 	Identical    bool
 	AddedNodes   []string
@@ -96,9 +81,6 @@ type PlanDiff struct {
 	ChangedNodes []NodeChange
 }
 
-// DiffPlans compares before and after structurally. It short-circuits
-// to Identical when the canonical hashes match, otherwise reports the
-// node-level changes.
 func DiffPlans(before, after Plan) PlanDiff {
 	if before.Hash() == after.Hash() {
 		return PlanDiff{Identical: true}
@@ -141,7 +123,6 @@ func indexNodes(p Plan) map[string]PlanNode {
 	return m
 }
 
-// nodeDelta lists the human-readable ways two same-id nodes differ.
 func nodeDelta(before, after PlanNode) []string {
 	var out []string
 	if strings.Join(before.Deps, ",") != strings.Join(after.Deps, ",") {

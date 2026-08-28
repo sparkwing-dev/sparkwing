@@ -60,8 +60,6 @@ func (s *countingHostSampler) Sample() (HostStat, error) {
 	return s.stat, nil
 }
 
-// coresEpsilon absorbs the float error in a reserve computed as a fraction
-// of the core count and carried through the ledger's milli-core integers.
 const coresEpsilon = 0.01
 
 func TestCapacityRefreshReusesTheHeadroomSample(t *testing.T) {
@@ -83,13 +81,6 @@ func TestCapacityRefreshReusesTheHeadroomSample(t *testing.T) {
 	}
 }
 
-// TestApplyHeadroom_ExternalCoresAreCoresNotQueuedThreads pins the defect
-// this sensor was added for. Admission subtracted the run-queue load
-// average from the machine's core count, but load average counts threads
-// runnable or parked on uninterruptible I/O and only some of those hold a
-// core. Eight threads queued on an eight-core box while two cores' worth of
-// instructions execute is the ordinary shape of an I/O-bound build;
-// charging the queue length erases the machine and admits nothing.
 func TestApplyHeadroom_ExternalCoresAreCoresNotQueuedThreads(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	d.applyHeadroom(HostStat{
@@ -113,10 +104,6 @@ func TestApplyHeadroom_ExternalCoresAreCoresNotQueuedThreads(t *testing.T) {
 	}
 }
 
-// TestApplyHeadroom_ExternalCoresStillChargeABusyMachine is the other half
-// of the same contract: a box whose cores are genuinely consumed must lose
-// that headroom. Here the load average is the same 8 as above and the CPUs
-// are actually saturated, so admission subtracts nearly the whole machine.
 func TestApplyHeadroom_ExternalCoresStillChargeABusyMachine(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	d.applyHeadroom(HostStat{
@@ -139,10 +126,6 @@ func TestApplyHeadroom_ExternalCoresStillChargeABusyMachine(t *testing.T) {
 	}
 }
 
-// TestApplyHeadroom_UnreadCPUSubtractsNothing holds the blind-sensor rule
-// the memory dimension already follows. A sampler that could not read
-// utilization reports no measurement, and a machine reported full by a
-// sensor that never looked is one no run could ever enter.
 func TestApplyHeadroom_UnreadCPUSubtractsNothing(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	d.applyHeadroom(HostStat{
@@ -192,9 +175,6 @@ func TestApplyHeadroom_MeasuredThenBlindCPUResetsEffectiveExternal(t *testing.T)
 	}
 }
 
-// TestApplyHeadroom_LeaseCapacityIsNotExecution proves a reservation cannot
-// stand in for measured process usage. Without an owned-process reading the
-// host's measured busy cores remain external for this sample.
 func TestApplyHeadroom_LeaseCapacityIsNotExecution(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	dec, _, err := d.ledger.Submit(admission.Request{ID: "holder", Cores: 3})

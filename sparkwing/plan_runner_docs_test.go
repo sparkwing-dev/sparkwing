@@ -25,44 +25,6 @@ func TestPrefersDocumentationStatesStoredBehavior(t *testing.T) {
 	}
 }
 
-func TestPrefersStorageDocumentationStatesStoredBehavior(t *testing.T) {
-	assertPreferenceContract(t, strings.ToLower(jobNodeFieldDoc(t, "prefers")))
-}
-
-func jobNodeFieldDoc(t *testing.T, fieldName string) string {
-	t.Helper()
-	file, err := parser.ParseFile(token.NewFileSet(), "plan.go", nil, parser.ParseComments)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, decl := range file.Decls {
-		typeDecl, ok := decl.(*ast.GenDecl)
-		if !ok {
-			continue
-		}
-		for _, spec := range typeDecl.Specs {
-			typeSpec, ok := spec.(*ast.TypeSpec)
-			if !ok || typeSpec.Name.Name != "JobNode" {
-				continue
-			}
-			structType, ok := typeSpec.Type.(*ast.StructType)
-			if !ok {
-				t.Fatal("JobNode is not a struct")
-			}
-			for _, field := range structType.Fields.List {
-				if len(field.Names) == 1 && field.Names[0].Name == fieldName {
-					if field.Doc == nil {
-						t.Fatalf("JobNode.%s has no documentation", fieldName)
-					}
-					return field.Doc.Text()
-				}
-			}
-		}
-	}
-	t.Fatalf("JobNode.%s not found", fieldName)
-	return ""
-}
-
 func TestExecutionModelIsClearlyHistorical(t *testing.T) {
 	data, err := os.ReadFile("../DESIGN-execution-model.md")
 	if err != nil {

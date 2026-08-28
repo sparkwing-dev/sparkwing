@@ -21,9 +21,6 @@ func (j *producedJob) run(ctx context.Context) (buildOut, error) {
 	return buildOut{Tag: "v9", Digest: "sha256:zzz"}, nil
 }
 
-// markerOnlyJob declares Produces[T] but never returns a typed step
-// from Work. The strict contract panics at Plan time when the marker
-// is present without a matching Work return value.
 type markerOnlyJob struct {
 	sparkwing.Base
 	sparkwing.Produces[buildOut]
@@ -34,7 +31,6 @@ func (j *markerOnlyJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-// otherOut is a distinct type used to provoke marker/Work mismatches.
 type otherOut struct {
 	Value string
 }
@@ -52,9 +48,6 @@ func (j *mismatchJob) run(ctx context.Context) (buildOut, error) {
 	return buildOut{}, nil
 }
 
-// unmarkedTypedJob returns a typed *WorkStep from Work but
-// deliberately omits the Produces[T] marker. This is a Plan-time
-// panic.
 type unmarkedTypedJob struct {
 	sparkwing.Base
 }
@@ -123,9 +116,6 @@ func TestProduces_MismatchPanics(t *testing.T) {
 	sparkwing.Job(plan, "mismatch", &mismatchJob{})
 }
 
-// The same Produces/SetResult contract that Job enforces must also
-// fire on the detached-node paths -- OnFailure recovery nodes,
-// JobFanOutDynamic children, orchestrator SpawnNode dispatch.
 func TestProduces_OnFailureRecoveryAppliesContract(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	parent := sparkwing.Job(plan, "parent", jobFnNoop())
@@ -197,9 +187,6 @@ func TestOutput_PanicsOnTypeMismatch(t *testing.T) {
 	_ = sparkwing.RefTo[otherOut](n)
 }
 
-// LintWarnings used to flag missing Produces / missing SetResult;
-// these are now hard panics, so an aligned plan should produce no
-// warnings.
 func TestLintWarning_NoneWhenAligned(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "build", &producedJob{})

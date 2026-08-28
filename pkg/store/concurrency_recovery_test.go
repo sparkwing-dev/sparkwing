@@ -8,11 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// Release+promote is atomic -- covers the "controller crashed between
-// release tx and promote tx" window. Even if the test stops the run
-// between store calls,
-// the DB state is consistent: either the release is committed and
-// the next waiter is already promoted, or nothing happened.
 func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
@@ -53,9 +48,6 @@ func TestConcurrency_ReleaseAndNotifyIsAtomic(t *testing.T) {
 	}
 }
 
-// ReconcileConcurrencyKeys finds keys with queued waiters but no
-// live holders and promotes. This is the recovery path for the
-// "released then crashed before promote" window.
 func TestConcurrency_ReconcileRecoversOrphanedQueue(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
@@ -717,7 +709,6 @@ func TestConcurrency_CoalesceFollowerRejectsNonReusableCompletedOutcomes(t *test
 	}
 }
 
-// Orphan coalesce followers get reaped when their leader is gone.
 func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
@@ -753,7 +744,6 @@ func TestConcurrency_WaiterReaperDropsOrphanFollowers(t *testing.T) {
 	}
 }
 
-// Waiters past maxAge get reaped regardless of leader state.
 func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
@@ -792,9 +782,6 @@ func TestConcurrency_WaiterReaperDropsOldWaiters(t *testing.T) {
 	}
 }
 
-// Regression: when maxAge is 0 the reaper is a no-op (disables the
-// age-based pass). Protects against accidental "reap everything"
-// calls if the config passes a zero.
 func TestConcurrency_WaiterReaperZeroAgeIsNoop(t *testing.T) {
 	s := newStoreT(t)
 	ctx := ctxT(t)
@@ -815,4 +802,4 @@ func TestConcurrency_WaiterReaperZeroAgeIsNoop(t *testing.T) {
 	}
 }
 
-var _ = context.Background // silence unused-import check when no direct use
+var _ = context.Background

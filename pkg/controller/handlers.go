@@ -19,14 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// handleHealth is the liveness probe. Returns 200 when the process is
-// up; component failures land in problems[] so callers can surface them
-// without a blanket outage banner. Only DB-unreachable flips to 503.
-// The auth field reports "enabled" or "disabled" so an operator can see
-// at a glance whether the controller is serving open.
-//
-// Response: {"status": "ok" | "degraded", "auth": "enabled" |
-// "disabled", "problems": ["comp: detail"]}.
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	var problems []string
 
@@ -148,8 +140,6 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleUpdatePlanSnapshot accepts raw JSON bytes as the snapshot
-// payload. Content-Type is ignored; the store treats it as opaque.
 func (s *Server) handleUpdatePlanSnapshot(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	defer r.Body.Close()
@@ -165,8 +155,6 @@ func (s *Server) handleUpdatePlanSnapshot(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleListRuns serves the dashboard/CLI read path. Filter parsing
-// shared with the laptop controller via store.ParseRunFilter.
 func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	filter := store.ParseRunFilter(r.URL.Query())
 	runs, err := s.store.ListRuns(r.Context(), filter)
@@ -181,19 +169,6 @@ func (s *Server) handleListRuns(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"runs": runs})
 }
 
-// secretValuesAllowed reports whether this request may receive a run's
-// real argument values.
-//
-// The gate is "can this principal execute work", which is exactly
-// [ScopeNodesClaim] -- every node-execution endpoint is already behind
-// it, so a token that can run a node can already reach the secrets the
-// node resolves. Admin is the usual superset. A caller with only
-// runs.read, which is what the dashboard and a human's CLI token
-// carry, stays on the redacted view.
-//
-// Returns true when the Authenticator is disabled, matching
-// requireScope: with no principals there is no distinction to draw,
-// and refusing would break local cluster-mode development.
 func secretValuesAllowed(r *http.Request) bool {
 	p, ok := PrincipalFromContext(r.Context())
 	if !ok {
@@ -202,11 +177,6 @@ func secretValuesAllowed(r *http.Request) bool {
 	return p.HasScope(ScopeAdmin) || p.HasScope(ScopeNodesClaim)
 }
 
-// runForResponse redacts run unless the caller both asked for the
-// execution view and is entitled to it. Unauthorized callers get the
-// redacted view rather than an error: asking for more detail than your
-// token allows is not itself a failure, and an executor always holds
-// nodes.claim, so it cannot silently land on the redacted view.
 func runForResponse(r *http.Request, run *store.Run) *store.Run {
 	if includeHas(r.URL.Query().Get("include"), store.IncludeSecretValues) &&
 		secretValuesAllowed(r) {
@@ -215,11 +185,6 @@ func runForResponse(r *http.Request, run *store.Run) *store.Run {
 	return store.RedactedRun(run)
 }
 
-// handleGetRun serves a single run by id. Default response is the
-// store.Run JSON with secret-declared args redacted. With
-// ?include=nodes it returns {run, nodes}; with
-// ?include=secret_values an executor-scoped caller gets the real
-// argument values (see [store.IncludeSecretValues]).
 func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	run, err := s.store.GetRun(r.Context(), runID)
@@ -255,8 +220,6 @@ func (s *Server) handleGetRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, runForResponse(r, run))
 }
 
-// includeHas reports whether the comma-separated `include` query
-// parameter contains target. Whitespace is trimmed; case-sensitive.
 func includeHas(csv, target string) bool {
 	for _, p := range strings.Split(csv, ",") {
 		if strings.TrimSpace(p) == target {
@@ -266,9 +229,6 @@ func includeHas(csv, target string) bool {
 	return false
 }
 
-// handlePipelineLatest serves the cross-pipeline-ref read endpoint.
-// Accepts ?status=success,failed (csv, default success), ?max_age=1h.
-// Returns the matching Run JSON or 404 when nothing matches.
 func (s *Server) handlePipelineLatest(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
 	if name == "" {
@@ -318,8 +278,6 @@ func (s *Server) handleListNodes(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"nodes": nodes})
 }
 
-// splitCSV is a tolerant comma-separated parser for query params.
-// Empty segments are dropped; whitespace is trimmed.
 func splitCSV(s string) []string {
 	raw := strings.Split(s, ",")
 	out := make([]string, 0, len(raw))
@@ -364,7 +322,7 @@ func (s *Server) handleStartNode(w http.ResponseWriter, r *http.Request) {
 type finishNodeReq struct {
 	Outcome       string `json:"outcome"`
 	Error         string `json:"error,omitempty"`
-	Output        []byte `json:"output,omitempty"` // JSON-encoded
+	Output        []byte `json:"output,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
 	ExitCode      *int   `json:"exit_code,omitempty"`
 }
@@ -436,19 +394,12 @@ func (s *Server) handleAppendEvent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, appendEventResp{Seq: seq})
 }
 
-// triggerReqMeta is the trigger block on POST /api/v1/triggers
-// bodies. Decoupled from the SDK's sparkwing.TriggerInfo: Env
-// carries operational metadata (GITHUB_DELIVERY, GITHUB_REPOSITORY,
-// range-resume markers, ...) onto the persisted store.Trigger row
-// but is not surfaced to step bodies.
 type triggerReqMeta struct {
 	Source string            `json:"source,omitempty"`
 	User   string            `json:"user,omitempty"`
 	Env    map[string]string `json:"env,omitempty"`
 }
 
-// triggerReqGit mirrors client.GitMeta on the wire. Field names MUST
-// match client.GitMeta JSON tags exactly.
 type triggerReqGit struct {
 	Branch      string `json:"branch,omitempty"`
 	SHA         string `json:"sha,omitempty"`
@@ -459,22 +410,13 @@ type triggerReqGit struct {
 }
 
 type triggerReq struct {
-	Pipeline string            `json:"pipeline"`
-	Args     map[string]string `json:"args,omitempty"`
-	Trigger  triggerReqMeta    `json:"trigger,omitempty"` // see triggerReqMeta below
-	Git      triggerReqGit     `json:"git,omitempty"`
-	// ParentRunID identifies the run that spawned this trigger via
-	// sparkwing.RunAndAwait; the controller walks the parent
-	// chain to reject cycles before persisting.
-	ParentRunID string `json:"parent_run_id,omitempty"`
-	// ParentNodeID identifies which node of the parent run did the
-	// spawning, so a retry of the parent can locate the prior child
-	// by (parent_run_id, parent_node_id, pipeline) and chain retry_of.
-	ParentNodeID string `json:"parent_node_id,omitempty"`
-	// RetryOf, when non-empty, marks this trigger as a retry of the
-	// named run; skip-passed rehydration uses it to seed outputs from
-	// the prior run's node rows.
-	RetryOf string `json:"retry_of,omitempty"`
+	Pipeline     string            `json:"pipeline"`
+	Args         map[string]string `json:"args,omitempty"`
+	Trigger      triggerReqMeta    `json:"trigger,omitempty"`
+	Git          triggerReqGit     `json:"git,omitempty"`
+	ParentRunID  string            `json:"parent_run_id,omitempty"`
+	ParentNodeID string            `json:"parent_node_id,omitempty"`
+	RetryOf      string            `json:"retry_of,omitempty"`
 }
 
 type triggerResp struct {
@@ -499,9 +441,6 @@ func sanitizeTriggerEnv(env map[string]string) map[string]string {
 	return cleaned
 }
 
-// handleTrigger is the external intake for a new run. Persists the
-// trigger to the queue then notifies the Dispatcher. Returns 202 with
-// the run ID immediately so webhooks can respond within seconds.
 func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 	var body triggerReq
 	if err := decodeJSON(r, &body); err != nil {
@@ -641,9 +580,6 @@ type heartbeatResp struct {
 	CancelRequested bool `json:"cancel_requested"`
 }
 
-// handleHeartbeat extends the lease on a claimed trigger and reports
-// whether the operator has requested cancellation. 404 when the
-// trigger is already gone -- the worker should stop.
 func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	cancelled, err := s.store.HeartbeatTrigger(r.Context(), id, 0)
@@ -658,7 +594,6 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, heartbeatResp{CancelRequested: cancelled})
 }
 
-// handleFinishTrigger flips a trigger to 'done'. Idempotent.
 func (s *Server) handleFinishTrigger(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.store.FinishTrigger(r.Context(), id); err != nil {
@@ -668,14 +603,6 @@ func (s *Server) handleFinishTrigger(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleListTriggers serves the operator read path for queued,
-// in-flight, and done triggers.
-//
-// Query params:
-//   - status: csv of pending|claimed|done
-//   - pipeline: csv of pipeline names
-//   - repo: match GITHUB_REPOSITORY on trigger_env
-//   - limit: int (default 20)
 func (s *Server) handleListTriggers(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	filter := store.TriggerFilter{}
@@ -705,10 +632,6 @@ func (s *Server) handleListTriggers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"triggers": trigs})
 }
 
-// handleFindSpawnedChildTrigger returns the most-recent child trigger
-// id created at (parent_run_id, parent_node_id) targeting `pipeline`.
-// Required query params: parent_run_id, parent_node_id, pipeline.
-// Returns 200 + {"run_id": ""} when no match.
 func (s *Server) handleFindSpawnedChildTrigger(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	parentRunID := q.Get("parent_run_id")
@@ -726,7 +649,6 @@ func (s *Server) handleFindSpawnedChildTrigger(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, map[string]string{"run_id": id})
 }
 
-// handleGetTrigger returns one trigger row by id.
 func (s *Server) handleGetTrigger(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	tr, err := s.store.GetTrigger(r.Context(), id)
@@ -741,8 +663,6 @@ func (s *Server) handleGetTrigger(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tr)
 }
 
-// handleCancelRun records an operator cancellation request for the
-// run. Idempotent: subsequent calls for the same run are no-ops.
 func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.store.RequestCancel(r.Context(), id); err != nil {
@@ -756,8 +676,6 @@ func (s *Server) handleCancelRun(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleDeleteRun removes one run (with nodes/events via FK cascade)
-// and its trigger. Idempotent: a missing run returns 204.
 func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	if err := s.store.DeleteRun(r.Context(), id); err != nil {
@@ -767,20 +685,11 @@ func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// claimTriggerReq is the optional body for POST /triggers/claim.
-// Empty body claims any pending trigger.
 type claimTriggerReq struct {
-	// Pipelines restricts candidates to the named pipelines. Empty =
-	// no restriction.
-	Pipelines []string `json:"pipelines,omitempty"`
-	// TriggerSources restricts candidates by trigger_source value.
-	// AND-semantics with Pipelines. Empty = no restriction.
+	Pipelines      []string `json:"pipelines,omitempty"`
 	TriggerSources []string `json:"trigger_sources,omitempty"`
 }
 
-// handleClaimTrigger atomically claims the oldest pending trigger and
-// returns the full record. 204 when the queue is empty. 400 on
-// malformed body.
 func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 	var body claimTriggerReq
 	if r.ContentLength > 0 {
@@ -801,9 +710,6 @@ func (s *Server) handleClaimTrigger(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, t)
 }
 
-// newRunID produces a sortable, human-readable identifier matching
-// the shape the orchestrator uses, so the trigger handler can return
-// a run ID before the orchestrator starts.
 func newRunID() string {
 	ts := time.Now().UTC().Format("20060102-150405")
 	var suffix [2]byte
@@ -811,8 +717,6 @@ func newRunID() string {
 	return fmt.Sprintf("run-%s-%s", ts, hex.EncodeToString(suffix[:]))
 }
 
-// decodeJSON reads the request body as JSON into v. Enforces a 1 MiB
-// ceiling to avoid unbounded memory on malformed clients.
 func decodeJSON(r *http.Request, v any) error {
 	defer r.Body.Close()
 	body := http.MaxBytesReader(nil, r.Body, 1<<20)
@@ -834,7 +738,6 @@ func writeError(w http.ResponseWriter, status int, err error) {
 	writeJSON(w, status, map[string]string{"error": err.Error()})
 }
 
-// handleGetNode returns a single node row.
 func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -850,8 +753,6 @@ func (s *Server) handleGetNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, n)
 }
 
-// handleGetNodeOutput returns just the raw output JSON for one node,
-// avoiding the wrapper overhead on a hot path (every Ref[T].Get).
 func (s *Server) handleGetNodeOutput(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -877,9 +778,6 @@ func (s *Server) handleGetNodeOutput(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleWriteNodeDispatch persists a dispatch snapshot. The path's
-// runID/nodeID override the body's so a caller can't write snapshots
-// for a different node.
 func (s *Server) handleWriteNodeDispatch(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -897,8 +795,6 @@ func (s *Server) handleWriteNodeDispatch(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusCreated)
 }
 
-// handleGetNodeDispatch returns a single dispatch snapshot. Optional
-// ?seq=N selects a specific attempt; omitted means most-recent.
 func (s *Server) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -923,8 +819,6 @@ func (s *Server) handleGetNodeDispatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, d)
 }
 
-// handleListNodeDispatches returns every dispatch snapshot for the
-// node, ordered oldest-first.
 func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -940,30 +834,18 @@ func (s *Server) handleListNodeDispatches(w http.ResponseWriter, r *http.Request
 }
 
 type claimNodeReq struct {
-	HolderID  string `json:"holder_id"`
-	LeaseSecs int    `json:"lease_secs,omitempty"`
-	// Labels advertised by the claiming runner. The store filters
-	// candidate nodes whose needs_labels is a subset of this set
-	// (AND). Empty/absent => only unlabeled nodes are claimable.
-	Labels []string `json:"labels,omitempty"`
-	// Headroom, when present, is the runner's live free capacity as its
-	// local admission daemon reports it (after the operator's reserve).
-	// The controller records it for the agents view; it never gates the
-	// claim, so an older runner that omits it claims exactly as before.
-	Headroom *claimHeadroom `json:"headroom,omitempty"`
+	HolderID  string         `json:"holder_id"`
+	LeaseSecs int            `json:"lease_secs,omitempty"`
+	Labels    []string       `json:"labels,omitempty"`
+	Headroom  *claimHeadroom `json:"headroom,omitempty"`
 }
 
-// claimHeadroom is a runner's advertised free capacity carried on a node
-// claim or heartbeat: grantable cores and memory plus the daemon's queue
-// depth.
 type claimHeadroom struct {
 	Cores       float64 `json:"cores"`
 	MemoryBytes int64   `json:"memory_bytes"`
 	QueueDepth  int     `json:"queue_depth"`
 }
 
-// recordAdvertisedHeadroom folds a claim/heartbeat body's headroom, when
-// present, into the runner headroom registry keyed by the holder's name.
 func (s *Server) recordAdvertisedHeadroom(holderID string, h *claimHeadroom) {
 	if h == nil {
 		return
@@ -977,9 +859,6 @@ func (s *Server) recordAdvertisedHeadroom(holderID string, h *claimHeadroom) {
 	})
 }
 
-// handleClaimNode atomically hands the oldest ready, unclaimed node
-// to the caller. 204 on empty queue so pool runners can back off
-// without treating it as an error.
 func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	var body claimNodeReq
 	if err := decodeJSON(r, &body); err != nil {
@@ -1012,9 +891,6 @@ func (s *Server) handleClaimNode(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, n)
 }
 
-// handleMarkNodeReady sets ready_at on a node. Idempotent; multiple
-// calls keep the original ready_at so FIFO ordering is stable across
-// revoke/retry cycles.
 func (s *Server) handleMarkNodeReady(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1033,8 +909,6 @@ type revokeResp struct {
 	Revoked bool `json:"revoked"`
 }
 
-// handleRevokeNodeReady atomically nulls ready_at iff the node is not
-// currently claimed. False means a pod beat us to it.
 func (s *Server) handleRevokeNodeReady(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1046,8 +920,6 @@ func (s *Server) handleRevokeNodeReady(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, revokeResp{Revoked: ok})
 }
 
-// handleHeartbeatNodeClaim extends a node claim's lease. 409 when
-// the caller isn't the current claim holder.
 func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1073,8 +945,6 @@ func (s *Server) handleHeartbeatNodeClaim(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleUpdateNodeActivity writes the runner-reported status_detail
-// and bumps last_heartbeat. Body is {"detail":"<string>"}.
 func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1089,9 +959,6 @@ func (s *Server) handleUpdateNodeActivity(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleAppendNodeAnnotation appends one persistent summary string
-// to the node's annotations list. Body is {"message":"<string>"}.
-// Driven by sparkwing.Annotate() inside step bodies.
 func (s *Server) handleAppendNodeAnnotation(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1109,9 +976,6 @@ func (s *Server) handleAppendNodeAnnotation(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleSetNodeSummary overwrites the node's markdown run summary.
-// Body is {"markdown":"<string>"}. Driven by sparkwing.Summary()
-// emitted outside any step body. Last write wins.
 func (s *Server) handleSetNodeSummary(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1129,9 +993,6 @@ func (s *Server) handleSetNodeSummary(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleSetNodeArtifactManifest records the content-addressed digest of
-// the node's published-artifact manifest. Body is
-// {"manifest_digest":"<string>"}. Last write wins.
 func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1149,9 +1010,6 @@ func (s *Server) handleSetNodeArtifactManifest(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleStartNodeStep records the running transition for one inner
-// Work step. Server stamps started_at; idempotent so retried POSTs
-// don't reset the clock.
 func (s *Server) handleStartNodeStep(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1173,8 +1031,6 @@ func (s *Server) handleStartNodeStep(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleFinishNodeStep records the terminal status of a step.
-// Accepts "passed" or "failed".
 func (s *Server) handleFinishNodeStep(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1201,8 +1057,6 @@ func (s *Server) handleFinishNodeStep(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleSkipNodeStep records a step that never ran (skipIf guard,
-// dry-run gap, etc.).
 func (s *Server) handleSkipNodeStep(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1224,10 +1078,6 @@ func (s *Server) handleSkipNodeStep(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleAppendStepAnnotation appends one persistent summary string
-// to a step's annotations list. Body is {"step_id":"...","message":"..."}.
-// Driven by sparkwing.Annotate() called from inside a step body
-// (the active step is captured via the rec.Step envelope field).
 func (s *Server) handleAppendStepAnnotation(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1250,9 +1100,6 @@ func (s *Server) handleAppendStepAnnotation(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleSetStepSummary overwrites a step's markdown run summary.
-// Body is {"step_id":"...","markdown":"..."}. Driven by
-// sparkwing.Summary() emitted inside a step body. Last write wins.
 func (s *Server) handleSetStepSummary(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1275,9 +1122,6 @@ func (s *Server) handleSetStepSummary(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleListNodeSteps returns every step row for one run as one
-// flat slice. Callers bucket by node_id client-side; the rows ship
-// in (node_id, started_at) order so that's cheap.
 func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	steps, err := s.store.ListNodeSteps(r.Context(), runID)
@@ -1291,8 +1135,6 @@ func (s *Server) handleListNodeSteps(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"steps": steps})
 }
 
-// handleTouchNodeHeartbeat bumps last_heartbeat without touching
-// status_detail. Runners call this on a ticker while executing.
 func (s *Server) handleTouchNodeHeartbeat(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -1303,10 +1145,6 @@ func (s *Server) handleTouchNodeHeartbeat(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// handleTouchRunHeartbeat bumps last_heartbeat_at on the run row.
-// Orchestrators call this on a ticker while the run is active so the
-// controller's reaper can detect a fully-orphaned dispatcher and
-// flip the run to failed instead of leaving it pinned at 'running'.
 func (s *Server) handleTouchRunHeartbeat(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	if _, err := s.store.GetRun(r.Context(), runID); err != nil {
@@ -1343,10 +1181,6 @@ func (s *Server) handleCreateDebugPause(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusCreated)
 }
 
-// handleListEvents returns events for a run with seq > ?after=N
-// (default 0), capped by ?limit=N (default 500). Always returns a
-// JSON array (never null) so the client can treat an empty tail as
-// "nothing new yet".
 func (s *Server) handleListEvents(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	var afterSeq int64
@@ -1428,10 +1262,6 @@ func (s *Server) handleReleaseDebugPause(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// auditPrincipal derives the identity recorded on an operator action --
-// a debug-pause release, a node bounce -- from the authenticated
-// principal. Returns "anonymous" when auth is disabled so the audit row
-// is still meaningful.
 func auditPrincipal(r *http.Request) string {
 	if p, ok := PrincipalFromContext(r.Context()); ok && p != nil && p.Name != "" {
 		return p.Name

@@ -7,9 +7,6 @@ import (
 	"strings"
 )
 
-// runGit executes a git subcommand inside dir (or cwd when empty)
-// and returns stdout. stderr is surfaced into the returned error so
-// callers get the actual git message, not a bare exit code.
 func runGit(dir string, gitArgs ...string) (string, error) {
 	cmd := exec.Command("git", gitArgs...)
 	if dir != "" {

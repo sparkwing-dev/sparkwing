@@ -42,12 +42,6 @@ func registerStepControlsPipe() {
 	})
 }
 
-// A pod, and a warm-pool worker especially, runs in an environment
-// nobody set for this run: the pool worker inherits the admission
-// daemon's shell. An operator who once exported SPARKWING_DRY_RUN
-// would otherwise have every pool node silently echo instead of act,
-// and a stale SPARKWING_START_AT would hard-fail every node against a
-// step id from some other pipeline.
 func TestRunNodeOnce_IgnoresAmbientStepControlsOffTheCoordinatedPath(t *testing.T) {
 	registerStepControlsPipe()
 	isolateCheckout(t)

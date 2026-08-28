@@ -2,17 +2,12 @@
 
 import { useEffect, useState } from "react";
 
-// Toast is the public payload callers push via the `toast()` helper.
-// `kind` only affects the accent color so success / info / error
-// notifications are visually distinct without callers having to wire
-// styling.
 export type ToastKind = "info" | "success" | "error";
 
 export interface Toast {
   id: number;
   kind: ToastKind;
   text: string;
-  // Auto-dismiss delay in ms. Defaults to 3500. Pass 0 to disable.
   ttl?: number;
 }
 
@@ -26,8 +21,6 @@ function notify() {
   for (const fn of listeners) fn(toasts);
 }
 
-// toast pushes a notification onto the global queue. Safe to call from
-// any module without React context plumbing.
 export function toast(text: string, kind: ToastKind = "info", ttl = 3500) {
   const id = counter++;
   toasts = [...toasts, { id, text, kind, ttl }];
@@ -43,8 +36,6 @@ export function dismiss(id: number) {
   notify();
 }
 
-// Toaster mounts the floating toast stack. Render once near the app
-// root; further calls to `toast()` propagate in via subscription.
 export default function Toaster() {
   const [list, setList] = useState<Toast[]>(toasts);
   useEffect(() => {

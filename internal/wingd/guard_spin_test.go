@@ -11,10 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// countingGuardInspector records how much kernel work a guard sweep asks
-// for: how many process-table snapshots, and how many session answers off
-// them. Every session it is asked about is reported live, so a sweep never
-// completes a guard and the loop keeps sweeping.
 type countingGuardInspector struct {
 	mu        sync.Mutex
 	snapshots int
@@ -83,10 +79,6 @@ func guardSweepDaemon(inspector SessionGuardInspector, guards int, interval time
 	return d
 }
 
-// TestReconcileGuardsTakesOneProcessSnapshotPerSweep pins the cost of
-// watching guarded sessions. Asking the kernel per guard makes the sweep
-// cost N process-table listings -- a `ps` fork plus a syscall per live
-// process, ten times a second -- which is the daemon spin this bounds.
 func TestReconcileGuardsTakesOneProcessSnapshotPerSweep(t *testing.T) {
 	const guards, sweeps = 8, 5
 	inspector := &countingGuardInspector{}
@@ -107,9 +99,6 @@ func TestReconcileGuardsTakesOneProcessSnapshotPerSweep(t *testing.T) {
 	}
 }
 
-// TestReconcileGuardsWithoutSnapshotSupportStillJudgesEveryGuard keeps the
-// batch seam optional: an inspector that only answers per session is asked
-// per session.
 func TestReconcileGuardsWithoutSnapshotSupportStillJudgesEveryGuard(t *testing.T) {
 	inspector := &perSessionGuardInspector{}
 	d := guardSweepDaemon(inspector, 3, 10*time.Millisecond)
@@ -172,10 +161,6 @@ func runGuardLoopFor(t *testing.T, d *Daemon, window time.Duration) {
 	}
 }
 
-// TestGuardLoopBacksOffWhileInspectionFails is the regression the reported
-// spin asks for: a guard state the daemon cannot inspect -- a wedged or
-// unreadable process table -- must cost a probe every few seconds, not a
-// probe every interval for as long as the daemon lives.
 func TestGuardLoopBacksOffWhileInspectionFails(t *testing.T) {
 	const window = 500 * time.Millisecond
 	const interval = 10 * time.Millisecond
@@ -194,9 +179,6 @@ func TestGuardLoopBacksOffWhileInspectionFails(t *testing.T) {
 	}
 }
 
-// TestGuardLoopKeepsFullCadenceWhileInspectionWorks is the other half: the
-// backoff must not slow a healthy daemon, which detects an orphaned
-// session within one interval.
 func TestGuardLoopKeepsFullCadenceWhileInspectionWorks(t *testing.T) {
 	const window = 300 * time.Millisecond
 	const interval = 10 * time.Millisecond
@@ -228,10 +210,6 @@ func TestNextGuardDelayDoublesUpToTheCap(t *testing.T) {
 	}
 }
 
-// partiallyFailingInspector answers one guarded session and fails the
-// other, which is what a single malformed guard among healthy ones looks
-// like -- and what a guarded leader exiting between two observations used
-// to look like before procgroup began reporting that as an answer.
 type partiallyFailingInspector struct {
 	mu        sync.Mutex
 	snapshots int
@@ -266,10 +244,6 @@ func (g *partiallyFailingInspector) count() int {
 	return g.snapshots
 }
 
-// TestOneBrokenGuardDoesNotSlowTheSweep keeps the backoff pointed at the
-// condition it exists for. A daemon that can still read the machine owes
-// its other guarded runs a prompt release, so one session it cannot judge
-// is logged and left to the next sweep at full cadence.
 func TestOneBrokenGuardDoesNotSlowTheSweep(t *testing.T) {
 	const window = 300 * time.Millisecond
 	const interval = 10 * time.Millisecond
@@ -287,9 +261,6 @@ func TestOneBrokenGuardDoesNotSlowTheSweep(t *testing.T) {
 	}
 }
 
-// TestEveryGuardFailingStillBacksOff is the other side: when no session
-// can be judged, the kernel view itself is unusable and retrying it at
-// full cadence is the spin this bounds.
 func TestEveryGuardFailingStillBacksOff(t *testing.T) {
 	const window = 500 * time.Millisecond
 	const interval = 10 * time.Millisecond

@@ -1,7 +1,3 @@
-// `sparkwing docs versions` enumerates what doc versions this CLI
-// (embedded) and sparkwing.dev (with --web) know about. Default
-// output is hermetic: only the embedded version shows up. --web
-// merges in the remote /versions.json contents.
 package main
 
 import (
@@ -20,13 +16,9 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/docs"
 )
 
-// versionRow is the JSON shape of `sparkwing docs versions -o json`.
-// IsLatest is local to the CLI surface (the server's versions.json
-// flags the latest via a top-level "latest" key; this layer translates
-// that into a per-row boolean for agent ergonomics).
 type versionRow struct {
 	Version  string `json:"version"`
-	Source   string `json:"source"` // "embedded" | "remote"
+	Source   string `json:"source"`
 	IsLatest bool   `json:"is_latest"`
 	Notes    string `json:"notes,omitempty"`
 }
@@ -92,7 +84,7 @@ func runDocsVersions(args []string) error {
 
 	switch strings.ToLower(output) {
 	case "json":
-		// NDJSON: one version per line.
+
 		return ndjson.Write(os.Stdout, rows)
 	case "plain":
 		for _, r := range rows {
@@ -142,11 +134,6 @@ func renderVersionsTable(rows []versionRow) error {
 	return nil
 }
 
-// embeddedDocVersions returns the set of versions this binary has
-// content for. Today the embed is single-version (the CLI's own
-// version), but the embed also includes one row per migration guide
-// shipped under content/migrations/, which counts as "this CLI knows
-// the markdown for that release."
 func embeddedDocVersions() []string {
 	set := map[string]struct{}{}
 	if v := embeddedVersion(); v != "" {

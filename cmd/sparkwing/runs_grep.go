@@ -1,5 +1,3 @@
-// Handler for `sparkwing runs grep PATTERN`. Search engine lives in
-// orchestrator/runs_grep.go; this file is just flag plumbing.
 package main
 
 import (

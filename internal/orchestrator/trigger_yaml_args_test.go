@@ -24,9 +24,6 @@ type triggerYAMLInputs struct {
 	Region string `flag:"region" desc:"target region"`
 }
 
-// capturedTriggerRegion records what the plan was actually built with,
-// which is the thing a divergence between dispatcher and executor would
-// silently change.
 var capturedTriggerRegion struct {
 	mu sync.Mutex
 	v  string
@@ -63,9 +60,6 @@ func registerTriggerYAMLPipe(t *testing.T) {
 		func() sparkwing.Pipeline[triggerYAMLInputs] { return triggerYAMLPipe{} })
 }
 
-// triggerRetryPipe records the region and then fails, so the retry has
-// a failed node to re-execute. A retry of an all-green run skips every
-// node, which would make the retry assertion vacuous.
 type triggerRetryPipe struct{ sparkwing.Base }
 
 func (triggerRetryPipe) Plan(_ context.Context, plan *sparkwing.Plan, in triggerYAMLInputs, _ sparkwing.RunContext) error {
@@ -85,9 +79,6 @@ func registerTriggerRetryPipe(t *testing.T) {
 		func() sparkwing.Pipeline[triggerYAMLInputs] { return triggerRetryPipe{} })
 }
 
-// triggerCheckout writes a project checkout and points the SDK runtime
-// at it, standing in for the working directory the trigger loop execs
-// its child with (for a retry, the recorded-revision snapshot).
 func triggerCheckout(t *testing.T, yaml string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -103,9 +94,6 @@ func triggerCheckout(t *testing.T, yaml string) string {
 	return root
 }
 
-// triggerWorkerRig stands up the controller-backed pair a worker holds:
-// the state client it writes through and the Backends the run executes
-// against.
 type triggerWorkerRig struct {
 	st      *store.Store
 	client  *client.Client
@@ -162,11 +150,6 @@ func (r *triggerWorkerRig) claim(t *testing.T, trig store.Trigger) *store.Trigge
 	return claimed
 }
 
-// A queued trigger -- what the dashboard's "run" and "retry" buttons,
-// the local trigger loop, and every spawned child go through -- used to
-// reach Run() with no project config at all: unmerged arguments AND no
-// guard evaluation. `sparkwing run` of the same pipeline on the same
-// commit got both. That is two dispatch shapes for one pipeline.
 func TestExecuteClaimedTrigger_MergesCheckoutYAMLArgs(t *testing.T) {
 	registerTriggerYAMLPipe(t)
 	setCapturedRegion("")
@@ -196,16 +179,12 @@ pipelines:
 	if run.Status != "success" {
 		t.Fatalf("run status = %q, want success", run.Status)
 	}
-	// The row still records only the explicit layer, which is what makes
-	// re-reading the checkout mandatory on every executing path.
+
 	if _, stored := run.Args["region"]; stored {
 		t.Errorf("run row recorded a yaml-supplied arg: %v", run.Args)
 	}
 }
 
-// The guards half. A guard is the operator's veto on a dispatch; a
-// trigger that never evaluates it is a hole straight through the veto,
-// and the dashboard is exactly where an unattended retry gets fired.
 func TestExecuteClaimedTrigger_EvaluatesGuardsOnCheckoutValues(t *testing.T) {
 	registerTriggerYAMLPipe(t)
 	setCapturedRegion("")
@@ -238,13 +217,6 @@ pipelines:
 	}
 }
 
-// A retry re-reads the layers from the checkout it executes out of, and
-// for a retry that checkout is the source run's recorded revision (the
-// detached worktree prepareTriggerRepo materializes). So a retry
-// reproduces the original's arguments -- it does not pick up whatever
-// the project declares today, which for a region or a cluster name is
-// the difference between re-running a deploy and deploying somewhere
-// new.
 func TestExecuteClaimedTrigger_RetryReproducesRecordedRevisionArgs(t *testing.T) {
 	registerTriggerRetryPipe(t)
 	rig := newTriggerWorkerRig(t)
@@ -258,7 +230,6 @@ pipelines:
     entrypoint: TriggerRetryPipe
 `
 
-	// The original run, on the revision where the project said eu-west.
 	setCapturedRegion("")
 	triggerCheckout(t, recordedRevisionConfig)
 	original := rig.claim(t, store.Trigger{
@@ -273,13 +244,6 @@ pipelines:
 		t.Fatalf("fixture is not exercising the case: the region must come from yaml, not the run row")
 	}
 
-	// The retry executes against a fresh checkout of the SOURCE run's
-	// recorded revision -- prepareTriggerRepo materializes exactly that
-	// as a detached worktree and execs there -- so it re-reads eu-west
-	// even if the project's tip has since moved on. Pointing the runtime
-	// at a second checkout of that same content is what this stands in
-	// for; the region is nowhere in the run row, so the only way it can
-	// come back is from the checkout.
 	setCapturedRegion("")
 	triggerCheckout(t, recordedRevisionConfig)
 	retry := rig.claim(t, store.Trigger{

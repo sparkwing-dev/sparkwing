@@ -20,9 +20,6 @@ const (
 	ctlVisibleValue = "prod"
 )
 
-// seedSecretArgRun writes a run shaped exactly as the orchestrator
-// writes one for a pipeline with a `secret:"true"` input: plaintext in
-// the row and the invocation, with the classification alongside.
 func seedSecretArgRun(t *testing.T, st *store.Store, id string) {
 	t.Helper()
 	err := st.CreateRun(context.Background(), store.Run{
@@ -75,10 +72,6 @@ func getBody(t *testing.T, url string) string {
 	return string(body)
 }
 
-// assertRedactedResponse fails when the raw secret reaches the wire.
-// The dashboard renders args and the reproducer out of these exact
-// responses, so redacting here is what keeps the value out of the
-// browser rather than merely out of the rendered DOM.
 func assertRedactedResponse(t *testing.T, surface, body string) {
 	t.Helper()
 	if strings.Contains(body, ctlSecretValue) {
@@ -135,9 +128,6 @@ func TestSecretArgs_ControllerAttemptsRedacts(t *testing.T) {
 		getBody(t, srv.URL+"/api/v1/runs/run-1/attempts"))
 }
 
-// Retry must still re-execute with the real value. It reads the stored
-// row in process, so response-boundary redaction cannot reach it --
-// this test is the guard that keeps it that way.
 func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRun(t, st, "run-1")
@@ -178,10 +168,6 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 		t.Errorf("retry trigger args[token] = %q, want plaintext", trig.Args["token"])
 	}
 
-	// The retry's own pending row is listable before any worker picks
-	// it up -- and forever if none does. It must redact for that whole
-	// window, which it can only do by inheriting the source's
-	// classification.
 	if got := retried.SecretArgNames(); len(got) != 1 || got[0] != "token" {
 		t.Fatalf("retry run classification = %v, want [token]", got)
 	}
@@ -189,12 +175,6 @@ func TestSecretArgs_RetryStillReceivesPlaintext(t *testing.T) {
 		getBody(t, srv.URL+"/api/v1/runs/"+src.RetriedAs))
 }
 
-// The same window exists for a fresh trigger's pre-allocated pending
-// row, but the controller holds no pipeline schema to classify from,
-// so it stays plaintext until the orchestrator upgrades the row at run
-// start. Pinned so the gap is a recorded decision rather than a
-// surprise; closing it needs the classification to reach the
-// controller, which is a wire-protocol change.
 func TestSecretArgs_ControllerPendingTriggerRowIsNotYetClassified(t *testing.T) {
 	st, srv := secretArgController(t)
 	err := st.CreateRun(context.Background(), store.Run{
@@ -212,8 +192,6 @@ func TestSecretArgs_ControllerPendingTriggerRowIsNotYetClassified(t *testing.T) 
 	}
 }
 
-// Runs written before the classification existed have no secret_args
-// entry, so the controller serves them exactly as it did before.
 func TestSecretArgs_ControllerGrandfathersOldRuns(t *testing.T) {
 	st, srv := secretArgController(t)
 	err := st.CreateRun(context.Background(), store.Run{
@@ -230,11 +208,6 @@ func TestSecretArgs_ControllerGrandfathersOldRuns(t *testing.T) {
 	}
 }
 
-// The run API is not only a display surface: a cluster executor
-// fetches the args it is about to run with from this same endpoint.
-// ?include=secret_values is how it asks, and nodes.claim -- the scope
-// every node-execution endpoint already requires -- is what entitles
-// it.
 func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -287,7 +260,6 @@ func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 
 	const secretValues = "?include=" + store.IncludeSecretValues
 
-	// An executor gets the real value, or its pod plans with "***".
 	if body := get(t, runnerTok, secretValues); !strings.Contains(body, ctlSecretValue) {
 		t.Errorf("nodes.claim token did not receive the execution view:\n%s", body)
 	}
@@ -295,19 +267,13 @@ func TestSecretArgs_ExecutionViewIsScopeGated(t *testing.T) {
 		t.Errorf("admin token did not receive the execution view:\n%s", body)
 	}
 
-	// A display-scope token asking for it anyway stays redacted.
 	assertRedactedResponse(t, "runs.read token asking for the execution view",
 		get(t, readerTok, secretValues))
 
-	// And the executor's own default read is still redacted, so the
-	// opt-in is what carries the secret, not the token.
 	assertRedactedResponse(t, "nodes.claim token without the include",
 		get(t, runnerTok, ""))
 }
 
-// The execution view must not widen any other run-serving endpoint:
-// list, attempts and pipeline-latest have no executor use, so they
-// stay redacted no matter what the caller asks for.
 func TestSecretArgs_ExecutionViewDoesNotWidenOtherEndpoints(t *testing.T) {
 	st, srv := secretArgController(t)
 	seedSecretArgRun(t, st, "run-1")

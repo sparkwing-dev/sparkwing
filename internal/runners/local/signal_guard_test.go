@@ -10,29 +10,11 @@ import (
 	"testing"
 )
 
-// nodeEntrypoints are the two files where a node process installs its
-// signal handling: the pipeline binary's `run-node` and the CLI's.
 var nodeEntrypoints = []string{
 	filepath.Join("internal", "orchestrator", "run_node.go"),
 	filepath.Join("cmd", "sparkwing", "run_node.go"),
 }
 
-// TestNodeEntrypoints_DoNotHandleSIGTERM pins the invariant every kill
-// path in this package rests on.
-//
-// Stopping a node's process means SIGTERM to its group: a bounce, a
-// cancelled run, and a pod's own termination all do it. What makes
-// those three distinguishable afterwards is that the child writes
-// nothing on its way out -- the supervisor reads the node row, sees no
-// terminal outcome, and applies the meaning it alone knows. Install a
-// SIGTERM handler in either entrypoint and a bounced node can record
-// an outcome mid-bounce, which is exactly the cascade a bounce exists
-// to avoid.
-//
-// The check is on the source rather than on a running process because
-// the regression is someone adding syscall.SIGTERM to a
-// signal.Notify* call, and that is visible here before it can ever be
-// executed.
 func TestNodeEntrypoints_DoNotHandleSIGTERM(t *testing.T) {
 	root := repoRoot(t)
 	for _, rel := range nodeEntrypoints {
@@ -74,8 +56,6 @@ func TestNodeEntrypoints_DoNotHandleSIGTERM(t *testing.T) {
 	}
 }
 
-// signalName renders an argument's source form well enough to spot a
-// SIGTERM registered under any of its spellings.
 func signalName(arg ast.Expr) string {
 	switch v := arg.(type) {
 	case *ast.Ident:
@@ -89,7 +69,6 @@ func signalName(arg ast.Expr) string {
 	return ""
 }
 
-// repoRoot resolves the repository root from this file's own path.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	_, file, _, ok := runtime.Caller(0)

@@ -21,7 +21,6 @@ func openDispatchStore(t *testing.T) *store.Store {
 	return s
 }
 
-// seedDispatchRun is the minimal CreateRun a dispatch row's foreign key needs.
 func seedDispatchRun(t *testing.T, s *store.Store, id string) {
 	t.Helper()
 	if err := s.CreateRun(context.Background(), store.Run{
@@ -34,9 +33,6 @@ func seedDispatchRun(t *testing.T, s *store.Store, id string) {
 	}
 }
 
-// TestDispatch_RoundTrip covers the basic write+read path: a snapshot
-// goes in, the same shape comes back out (modulo SQLite's nanosecond
-// timestamp coercion).
 func TestDispatch_RoundTrip(t *testing.T) {
 	s := openDispatchStore(t)
 	ctx := context.Background()
@@ -82,9 +78,6 @@ func TestDispatch_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestDispatch_AutoSeq lets the store assign the seq when the caller
-// passes Seq < 0 -- the warm-pool / re-claim path that doesn't know the
-// current attempt index.
 func TestDispatch_AutoSeq(t *testing.T) {
 	s := openDispatchStore(t)
 	ctx := context.Background()
@@ -113,7 +106,6 @@ func TestDispatch_AutoSeq(t *testing.T) {
 	}
 }
 
-// TestDispatch_GetLatest returns the highest seq when seq < 0.
 func TestDispatch_GetLatest(t *testing.T) {
 	s := openDispatchStore(t)
 	ctx := context.Background()
@@ -137,7 +129,6 @@ func TestDispatch_GetLatest(t *testing.T) {
 	}
 }
 
-// TestDispatch_NotFound surfaces ErrNotFound when no row matches.
 func TestDispatch_NotFound(t *testing.T) {
 	s := openDispatchStore(t)
 	_, err := s.GetNodeDispatch(context.Background(), "run-x", "node-x", 0)
@@ -146,9 +137,6 @@ func TestDispatch_NotFound(t *testing.T) {
 	}
 }
 
-// TestDispatch_Cascade verifies the FK cascade -- when a run is deleted
-// (via DELETE FROM runs WHERE id=...), its dispatch rows go too. This
-// is the GC story; aligns with how output_json + events behave.
 func TestDispatch_Cascade(t *testing.T) {
 	s := openDispatchStore(t)
 	ctx := context.Background()
@@ -170,9 +158,6 @@ func TestDispatch_Cascade(t *testing.T) {
 	}
 }
 
-// TestDispatch_TruncationCap checks that an oversized envelope is
-// replaced with the {"truncated":true} stub and input_size_bytes
-// records the original size.
 func TestDispatch_TruncationCap(t *testing.T) {
 	s := openDispatchStore(t)
 	ctx := context.Background()
@@ -200,8 +185,6 @@ func TestDispatch_TruncationCap(t *testing.T) {
 	}
 }
 
-// TestDispatch_RequiresIDs rejects writes missing the identifying
-// keys; the store can't auto-assign seq without (run_id, node_id).
 func TestDispatch_RequiresIDs(t *testing.T) {
 	s := openDispatchStore(t)
 	ctx := context.Background()
@@ -213,9 +196,6 @@ func TestDispatch_RequiresIDs(t *testing.T) {
 	}
 }
 
-// TestDispatch_ReplayOfColumns exercises the runs.replay_of_* ALTER
-// path: a fresh store opens with the columns present and CreateRun
-// accepts them.
 func TestDispatch_ReplayOfColumns(t *testing.T) {
 	s := openDispatchStore(t)
 	ctx := context.Background()

@@ -1,5 +1,3 @@
-// `sparkwing dashboard {start,kill,status}` -- background lifecycle
-// for the in-process dashboard + API + logs server (pkg/localws).
 package main
 
 import (
@@ -34,13 +32,8 @@ const (
 	dashboardEnvFile = "dev.env"
 )
 
-// dashboardStartTimeout is the accept deadline for a freshly spawned
-// supervisor. Generous so a loaded machine (a full pipeline fleet
-// compiling, the store under write contention) still comes up rather
-// than tripping a tight bound; the start wait retries within it.
 const dashboardStartTimeout = 30 * time.Second
 
-// runDashboard dispatches `sparkwing dashboard <verb>`.
 func runDashboard(args []string) error {
 	if handleParentHelp(cmdDashboard, args) {
 		return nil
@@ -68,14 +61,6 @@ type dashboardPaths struct {
 	log  string
 }
 
-// resolveDashboardPaths roots the dashboard's pid and log files at the
-// --home flag when given, and otherwise at the canonical resolution.
-//
-// It does not read SPARKWING_HOME itself. DefaultPaths already gives
-// that variable first refusal and returns its value verbatim, so the
-// direct read this replaces changed nothing for a real run -- but it
-// did skip the test-sandbox redirect underneath, which is the whole
-// reason the resolution is centralized.
 func resolveDashboardPaths(homeOverride string) (dashboardPaths, error) {
 	home := homeOverride
 	if home == "" {
@@ -95,9 +80,6 @@ func resolveDashboardPaths(homeOverride string) (dashboardPaths, error) {
 	}, nil
 }
 
-// readLivePID returns (pid, true) if dashboard.pid points at a running
-// process, (0, false) otherwise. A missing or stale PID file is not
-// an error -- both mean "not running."
 func readLivePID(pidPath string) (int, bool) {
 	b, err := os.ReadFile(pidPath)
 	if err != nil {
@@ -140,9 +122,6 @@ func runDashboardStart(args []string) error {
 		return err
 	}
 
-	// Resolved here as well as in the child so a typo'd name fails the
-	// command the operator is watching, rather than the detached
-	// supervisor's log file.
 	profileSupplies := false
 	if profileName != "" {
 		p, perr := resolveProfileFlag(profileName)
@@ -286,9 +265,6 @@ func runDashboardKill(args []string) error {
 	return nil
 }
 
-// stopSupervisor sends SIGTERM to pid, waits up to 5s for exit, then
-// escalates to SIGKILL. Removes the PID file regardless of outcome so
-// subsequent `start` invocations don't see stale state.
 func stopSupervisor(pid int, pidPath string) error {
 	if err := signalTerminate(pid); err != nil {
 		return fmt.Errorf("terminate pid %d: %w", pid, err)
@@ -335,9 +311,6 @@ func runDashboardStatus(args []string) error {
 	return nil
 }
 
-// runDashboardSupervise is the body of the detached child. It writes
-// its own PID, runs localws.Run in foreground, and removes the PID
-// file on clean exit.
 func runDashboardSupervise(args []string) error {
 	fs := flag.NewFlagSet("__dashboard-supervise", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:4343", "")
@@ -397,7 +370,6 @@ func runDashboardSupervise(args []string) error {
 	return nil
 }
 
-// schemeOf extracts the scheme prefix from a store URL ("fs", "s3").
 func schemeOf(raw string) string {
 	if i := strings.Index(raw, "://"); i > 0 {
 		return raw[:i]
@@ -405,8 +377,6 @@ func schemeOf(raw string) string {
 	return "custom"
 }
 
-// readBaseURL pulls the base URL localws wrote into dev.env. Returns
-// empty string when the file is missing or malformed.
 func readBaseURL(home string) string {
 	b, err := os.ReadFile(filepath.Join(home, dashboardEnvFile))
 	if err != nil {
@@ -421,10 +391,6 @@ func readBaseURL(home string) string {
 	return ""
 }
 
-// portHolder returns a human-readable description of the process bound
-// to addr ("<command> pid <pid>"), or empty string if the port is free.
-// Returns a non-nil error only on unexpected listener-creation failures
-// -- "address in use" is conveyed via the holder string, not an error.
 func portHolder(addr string) (string, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err == nil {
@@ -464,8 +430,6 @@ func portHolder(addr string) (string, error) {
 	}
 }
 
-// tailFile returns the last n lines of path, or empty string on any
-// error. Used to surface supervisor crash output to the foreground.
 func tailFile(path string, n int) string {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -478,10 +442,6 @@ func tailFile(path string, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-// fileSize returns the byte length of path, or 0 when it can't be
-// stat'd. Used to mark where a freshly spawned supervisor's log output
-// begins so a startup failure tails only the new instance's lines, not
-// the previous instance's request log.
 func fileSize(path string) int64 {
 	fi, err := os.Stat(path)
 	if err != nil {
@@ -490,10 +450,6 @@ func fileSize(path string) int64 {
 	return fi.Size()
 }
 
-// tailFileFrom returns up to the last n lines written to path at or
-// after byteOffset -- the output of the instance that started once the
-// caller recorded the offset. Empty string when nothing was written
-// there or the file can't be read.
 func tailFileFrom(path string, byteOffset int64, n int) string {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -513,12 +469,6 @@ func tailFileFrom(path string, byteOffset int64, n int) string {
 	return strings.Join(lines, "\n")
 }
 
-// probeDashboardVersion asks a resident dashboard for its version via
-// the unauthenticated GET /api/v1/version handshake. It tries the base
-// URL recorded in dev.env first, then falls back to the address this
-// start would bind. ok is false when no dashboard answers the endpoint
-// -- an older dashboard predating the endpoint, or one that isn't
-// reachable -- in which case the caller treats it as replaceable.
 func probeDashboardVersion(home, addr string) (localws.VersionInfo, bool) {
 	candidates := []string{}
 	if base := readBaseURL(home); base != "" {
@@ -541,8 +491,6 @@ func probeDashboardVersion(home, addr string) (localws.VersionInfo, bool) {
 	return localws.VersionInfo{}, false
 }
 
-// getDashboardVersion performs one GET base/api/v1/version and decodes
-// a non-empty version from a 200 response.
 func getDashboardVersion(client *http.Client, base string) (localws.VersionInfo, bool) {
 	resp, err := client.Get(base + "/api/v1/version")
 	if err != nil {
@@ -559,12 +507,6 @@ func getDashboardVersion(client *http.Client, base string) (localws.VersionInfo,
 	return info, true
 }
 
-// dashboardIsNewer reports whether the running dashboard's version is
-// strictly newer than this CLI's, so `start` should refuse to replace
-// it rather than downgrade a live upgrade. Only a confident semver
-// comparison refuses: when either side isn't valid semver (a dev
-// pseudo-build, an "(unknown)" version), it returns false so start
-// falls back to the drain-and-replace path.
 func dashboardIsNewer(running, mine string) bool {
 	if !semver.IsValid(running) || !semver.IsValid(mine) {
 		return false
@@ -572,13 +514,6 @@ func dashboardIsNewer(running, mine string) bool {
 	return semver.Compare(running, mine) > 0
 }
 
-// waitForListenerOrExit polls the bind address until a TCP connect
-// succeeds, the supervisor process exits (signaled on exited), or the
-// deadline expires. Keeping the deadline generous tolerates a loaded
-// machine, while the exit signal fails fast when the supervisor dies
-// early (e.g. a schema-skew refusal at store-open) instead of waiting
-// out the full deadline. The returned error names which of the two
-// ended the wait so the caller can frame the log tail correctly.
 func waitForListenerOrExit(addr string, exited <-chan struct{}, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
@@ -606,16 +541,6 @@ func bannerLine() string {
 	return string(buf)
 }
 
-// applyDashboardProfile fills the dashboard's log and artifact stores
-// from a storage profile's own surfaces, so `dashboard start --profile
-// bucket` reads what runs against that profile wrote.
-//
-// The surfaces are opened from their specs rather than from a rendered
-// store URL: the URL form covers fs and s3 only, while the specs are
-// the whole vocabulary, and round-tripping through a string would drop
-// every field the URL has no room for. An explicit --log-store /
-// --artifact-store still wins, because naming a store outright is a
-// more specific instruction than naming the profile that holds one.
 func applyDashboardProfile(ctx context.Context, opts *localws.Options, profileName string) error {
 	if profileName == "" {
 		return nil

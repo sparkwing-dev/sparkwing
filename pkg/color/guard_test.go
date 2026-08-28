@@ -8,18 +8,6 @@ import (
 	"testing"
 )
 
-// allowed is the set of files permitted to contain raw ANSI escape
-// sequences. Each entry is a path relative to the module root.
-//
-//   - pkg/color/color.go: the sanctioned helper itself.
-//   - internal/logpretty/pretty.go: PrettyRenderer's internal palette
-//     (extracted from internal/orchestrator/logger.go). The renderer
-//     is only selected when stdout is a TTY (see orchestrator's
-//     selectLocalRenderer), so its raw codes never reach an agent.
-//   - orchestrator/jobs_cli.go,
-//     orchestrator/jobs_cli_remote.go: cursor-control escapes
-//     (\x1b[H, \x1b[J) for live-status redraws; only run in
-//     interactive mode.
 var allowed = map[string]bool{
 	"pkg/color/color.go":                       true,
 	"pkg/color/guard_test.go":                  true,
@@ -28,17 +16,8 @@ var allowed = map[string]bool{
 	"internal/orchestrator/jobs_cli_remote.go": true,
 }
 
-// ansiPattern matches both common Go-source representations of an
-// ANSI CSI introducer: `\033[` (octal escape) and `\x1b[` (hex
-// escape). Doesn't match unicode escape `[` because no
-// existing source uses that form; if a future caller does, add it.
 var ansiPattern = regexp.MustCompile(`\\033\[|\\x1b\[`)
 
-// TestNoRawANSIOutsideAllowed walks the module tree and fails on any
-// non-test, non-vendored Go source that contains a raw ANSI escape
-// outside the allowed list. Agents see stdout as a pipe, so raw
-// ANSI bypasses pkg/color's TTY auto-disable and ends up as literal
-// noise in their logs.
 func TestNoRawANSIOutsideAllowed(t *testing.T) {
 	root := moduleRoot(t)
 	var offenders []string
@@ -91,10 +70,6 @@ func TestNoRawANSIOutsideAllowed(t *testing.T) {
 	}
 }
 
-// moduleRoot walks up from the test's CWD until it finds go.mod,
-// returning that directory. The test's working dir is the package's
-// own directory at run time, so we step up once or twice to land on
-// the module root.
 func moduleRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()

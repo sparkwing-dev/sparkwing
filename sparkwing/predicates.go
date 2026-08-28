@@ -279,11 +279,6 @@ func (alwaysPredicate) isPredicate()               {}
 // in some fallback profile" patterns.
 func Always() Predicate { return alwaysPredicate{} }
 
-// predicateValueEqual compares two values for predicate purposes.
-// Uses reflect.DeepEqual but normalizes numeric types so user-typed
-// int literals (3) match args declared as int32/int64/uint, and float
-// literals match across float32/float64. Strings, bools, and arbitrary
-// structs fall through to DeepEqual.
 func predicateValueEqual(a, b any) bool {
 	if a == nil || b == nil {
 		return a == b

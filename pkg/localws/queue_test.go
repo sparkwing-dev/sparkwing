@@ -15,8 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// shortDaemonHome returns a scratch home under /tmp so the daemon's unix
-// socket path stays within the OS length limit.
 func shortDaemonHome(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "lwq")

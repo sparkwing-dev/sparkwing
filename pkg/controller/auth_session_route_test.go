@@ -16,16 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestServerHandler_NoDuplicateRouteRegistrations guards against
-// silent route-shadowing. The previous incident: `GET
-// /api/v1/auth/session` was registered twice in server.go -- once
-// inside the bearer-auth-wrapped mux and once on the outer router.
-// Go's ServeMux specificity rules made the outer (exact-method-path)
-// registration always win, so the inner copy was dead code -- but
-// it also wasn't observable through behavior. The cleanest guard is
-// a static scan that counts route literals; if anyone re-introduces
-// a dup, this test fails loudly with a pointer to the offending
-// line.
 func TestServerHandler_NoDuplicateRouteRegistrations(t *testing.T) {
 	path := serverGoPath(t)
 	body, err := os.ReadFile(path)
@@ -51,15 +41,6 @@ func TestServerHandler_NoDuplicateRouteRegistrations(t *testing.T) {
 	}
 }
 
-// TestController_SessionRoute_OutsideBearerAuth guards the other
-// failure mode for the same endpoint: someone deletes the outer
-// registration and leaves only the inner one (now reachable, but
-// behind bearer auth). The session endpoint intentionally resolves
-// `Authorization: Session <id>` -- the bearer middleware would
-// reject the request before the handler ran, breaking the dashboard
-// login flow. We wire an actual Authenticator so the middleware is
-// live, and assert the handler's own error body shape comes back
-// (not the middleware's authErrorBody).
 func TestController_SessionRoute_OutsideBearerAuth(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -98,9 +79,6 @@ func TestController_SessionRoute_OutsideBearerAuth(t *testing.T) {
 	}
 }
 
-// serverGoPath returns the absolute path to server.go relative to
-// this test file. Works regardless of where `go test` is invoked
-// from.
 func serverGoPath(t *testing.T) string {
 	t.Helper()
 	_, here, _, ok := runtime.Caller(0)

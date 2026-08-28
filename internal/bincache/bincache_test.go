@@ -8,9 +8,6 @@ import (
 	"testing"
 )
 
-// newPipelineDir creates a minimal .sparkwing-style pipeline module
-// with no local replaces, so PipelineCacheKey is driven entirely by
-// files added on top.
 func newPipelineDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -82,8 +79,6 @@ func TestPipelineCacheKey_IncludesOverlaySum(t *testing.T) {
 	}
 }
 
-// installFakeGo drops a shell script named `go` on PATH that records
-// its argv into the file at log. Returns the log path.
 func installFakeGo(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
@@ -200,9 +195,6 @@ func TestCompilePipeline_WithGoWorkAndGoworkOff_UsesModfile(t *testing.T) {
 	}
 }
 
-// installFakeGoLoggingEnv drops a fake `go` on PATH that records its argv
-// and the GOWORK it ran under, so a test can assert both the build flags
-// and whether the enclosing workspace was disabled. Returns the log path.
 func installFakeGoLoggingEnv(t *testing.T) string {
 	t.Helper()
 	binDir := t.TempDir()
@@ -305,10 +297,6 @@ func mustReadFile(t *testing.T, path string) []byte {
 	return raw
 }
 
-// installFailingGo drops a fake `go` on PATH that prints `stderrLine`
-// to stderr, `stdoutLine` to stdout, and exits with status 1. Lets
-// us exercise the failure path of CompilePipeline without depending
-// on a real toolchain.
 func installFailingGo(t *testing.T, stderrLine, stdoutLine string) {
 	t.Helper()
 	binDir := t.TempDir()
@@ -325,10 +313,6 @@ func installFailingGo(t *testing.T, stderrLine, stdoutLine string) {
 
 func shQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
-// A failed compile must surface the toolchain's stdout + stderr via
-// *CompileError so the trigger loop can ship them into the run's
-// structured logs (instead of operators having to `kubectl logs` the
-// warm-runner pod).
 func TestCompilePipeline_FailureCapturesStdoutAndStderr(t *testing.T) {
 	const wantStderr = "go: go.mod requires go >= 9.99.0"
 	const wantStdout = "./pipeline.go:7:2: undefined: Foo"
@@ -356,7 +340,6 @@ func TestCompilePipeline_FailureCapturesStdoutAndStderr(t *testing.T) {
 	}
 }
 
-// writeFile is a fatal-on-error os.WriteFile for test fixtures.
 func writeFile(t *testing.T, path, body string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -367,10 +350,6 @@ func writeFile(t *testing.T, path, body string) {
 	}
 }
 
-// newWorkspaceScenario lays out a pipeline module plus a sibling local
-// module linked through a covering go.work, and points GOWORK at that
-// workspace. link is a go.work directive line ("replace ..." or
-// "use ..."). Returns the pipeline dir and the local module dir.
 func newWorkspaceScenario(t *testing.T, link string) (pipelineDir, moduleDir string) {
 	t.Helper()
 	root := t.TempDir()
@@ -411,8 +390,6 @@ func TestPipelineCacheKey_InvalidatesOnGoWorkUseTargetEdit(t *testing.T) {
 	}
 }
 
-// Adding a template to a replaced registry lands as an embedded,
-// non-Go asset; the key must still turn over.
 func TestPipelineCacheKey_InvalidatesOnGoWorkTargetEmbeddedAssetEdit(t *testing.T) {
 	pipelineDir, moduleDir := newWorkspaceScenario(t, "replace example.com/tmpl => ./tmpl")
 	keyA := mustKey(t, pipelineDir)
@@ -431,8 +408,6 @@ func TestPipelineCacheKey_StableWhenGoWorkTargetUnchanged(t *testing.T) {
 	}
 }
 
-// A workspace that does not cover the pipeline module is disabled at
-// build time (GOWORK=off), so its targets must not feed the key.
 func TestPipelineCacheKey_IgnoresNonCoveringGoWorkTargets(t *testing.T) {
 	root := t.TempDir()
 	pipelineDir := filepath.Join(root, "svc")
@@ -453,8 +428,6 @@ func TestPipelineCacheKey_IgnoresNonCoveringGoWorkTargets(t *testing.T) {
 	}
 }
 
-// The go.mod-local replace path must also cover embedded, non-Go
-// assets in the replaced module.
 func TestPipelineCacheKey_InvalidatesOnGoModReplaceTargetEmbeddedAssetEdit(t *testing.T) {
 	t.Setenv("GOWORK", "off")
 	root := t.TempDir()

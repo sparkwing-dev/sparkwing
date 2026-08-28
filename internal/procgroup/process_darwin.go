@@ -12,9 +12,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// darwinProcessListing reads the raw kernel process table. It is a
-// variable so a test can prove the `ps` fallback still answers when the
-// kernel listing does not.
 var darwinProcessListing = func() ([]byte, error) {
 	return unix.SysctlRaw("kern.proc.all")
 }
@@ -26,21 +23,10 @@ var (
 	}
 )
 
-// reportNativeFallback says once that this process has dropped to the
-// portable reader. The fallback is roughly fifty times more expensive per
-// listing and, once it starts, it usually never stops, so a silent one
-// looks exactly like the cost this package went to some trouble to
-// remove.
 func reportNativeFallback(err error) {
 	nativeFallbackOnce.Do(func() { nativeFallbackLog(err) })
 }
 
-// nativeProcessTable reads the process table straight from the kernel.
-// The `ps` fork it replaces costs about twenty milliseconds of wall time
-// per listing; this sysctl costs a few hundred microseconds and carries
-// the leader birth times too, so a guard sweep can answer identity from
-// the same snapshot it counts members in -- one kernel view per sweep,
-// consistent with itself, instead of one per session plus a fork.
 func nativeProcessTable(withSessions bool) ([]Info, bool) {
 	raw, err := darwinProcessListing()
 	if err != nil {
@@ -61,7 +47,8 @@ func nativeProcessTable(withSessions bool) ([]Info, bool) {
 		}
 		sid := 0
 		if withSessions {
-			// safety: a process that exits between the sysctl and this call reports no session, exactly as the `ps` path's ignored error did; the caller treats session zero as "not in the guarded session".
+			// safety: exit between sysctl and this call yields session zero, which
+			// callers treat as outside the guarded session.
 			sid, _ = unix.Getsid(pid)
 		}
 		processes = append(processes, Info{
@@ -75,8 +62,6 @@ func nativeProcessTable(withSessions bool) ([]Info, bool) {
 	return processes, true
 }
 
-// darwinProcessState maps a kernel process state onto the single-letter
-// codes `ps` prints, which is what [processTerminated] reads.
 func darwinProcessState(stat int8) string {
 	switch stat {
 	case 1:

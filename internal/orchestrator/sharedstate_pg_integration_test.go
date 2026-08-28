@@ -51,11 +51,6 @@ func registerPgIntegPipelines(t *testing.T) {
 	})
 }
 
-// TestPgSharing_CoordinatedCacheReservation is the central Mode 3
-// claim: two runs against the same Postgres schema sharing the same
-// .Memoize() key -- the second sees an AcquireCached outcome (not just
-// a content-addressed blob HEAD). Verify via the concurrency_cache
-// row written by Run A and the cached outcome on Run B's node.
 func TestPgSharing_CoordinatedCacheReservation(t *testing.T) {
 	registerPgIntegPipelines(t)
 	stA := openIntegrationPostgres(t)
@@ -124,10 +119,6 @@ func TestPgSharing_CoordinatedCacheReservation(t *testing.T) {
 	}
 }
 
-// TestPgSharing_StateVisibleToStoreBackend verifies the dashboard
-// path: after Run A completes, a fresh StoreBackend over the same
-// *store.Store handle reflects Run A's writes. This is the assertion
-// that backs the cmd/sparkwing-web --state-spec=postgres://... flow.
 func TestPgSharing_StateVisibleToStoreBackend(t *testing.T) {
 	registerPgIntegPipelines(t)
 	st := openIntegrationPostgres(t)

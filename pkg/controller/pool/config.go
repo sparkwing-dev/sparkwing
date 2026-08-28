@@ -27,7 +27,6 @@ type Config struct {
 	Namespace        string
 }
 
-// rawConfig is the wire format from the ConfigMap - durations as strings.
 type rawConfig struct {
 	WarmImages       []string `json:"warm_images"`
 	RefreshInterval  string   `json:"refresh_interval"`

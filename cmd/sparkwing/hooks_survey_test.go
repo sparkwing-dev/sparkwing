@@ -73,10 +73,6 @@ func TestRenderHooksSurvey_JSONRoundTripsEveryRow(t *testing.T) {
 	}
 }
 
-// An empty fleet is an empty stream: with one record per line, zero
-// repos is zero lines, and a consumer loops over lines without a nil
-// check either way. Success is still carried by the exit code, so an
-// empty stream never has to be told apart from an error by its bytes.
 func TestRenderHooksSurvey_EmptyFleetEncodesAsAnEmptyStream(t *testing.T) {
 	var buf bytes.Buffer
 	if err := renderHooksSurvey(&buf, nil, "json"); err != nil {

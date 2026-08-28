@@ -170,13 +170,6 @@ func TestRunNodeOnce_NoProgressTimeoutPausesForChildAndResumesAfterward(t *testi
 	}
 }
 
-// TestRunNodeOnce_MasksSecretsInNodeLog pins the cluster/pod execution
-// path to the same redaction guarantee the local path already has: the
-// per-run masker built from the pipeline's secret args must reach the
-// node log wrapper, so a job that logs a secret value persists `***`
-// and never the plaintext. The masker is installed on the context, and
-// NodeExecutor reads it back from there; dropping that installation
-// silently disables masking for every remote node.
 func TestRunNodeOnce_MasksSecretsInNodeLog(t *testing.T) {
 	registerPodMaskPipe(t)
 	isolateProfiles(t)

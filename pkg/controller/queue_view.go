@@ -7,11 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// handleQueueStateView serves the controller's admission state in the same
-// [wingwire.QueueState] shape the local daemon serves, so `sparkwing queue
-// --profile` renders controller-arbitrated work with the one queue renderer:
-// every concurrency key as a capacity row, its active holders and queued
-// waiters, and each registered runner's advertised headroom.
 func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request) {
 	states, err := s.store.ListConcurrencyStates(r.Context())
 	if err != nil {
@@ -62,8 +57,6 @@ func (s *Server) handleQueueStateView(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, qs)
 }
 
-// runNode joins a run id with its node id for display, or returns the run id
-// alone when the work is not a per-node claim.
 func runNode(runID, nodeID string) string {
 	if nodeID == "" {
 		return runID
@@ -71,8 +64,6 @@ func runNode(runID, nodeID string) string {
 	return runID + "/" + nodeID
 }
 
-// sinceMS is the elapsed milliseconds from t to now, clamped at zero for a
-// zero or future timestamp.
 func sinceMS(t, now time.Time) int64 {
 	if t.IsZero() || !t.Before(now) {
 		return 0

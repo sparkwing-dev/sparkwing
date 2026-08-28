@@ -17,7 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// fetchAgents reads GET /api/v1/agents and keys the result by agent name.
 func fetchAgents(t *testing.T, baseURL string) map[string]controller.Agent {
 	t.Helper()
 	resp, err := http.Get(baseURL + "/api/v1/agents")
@@ -38,8 +37,6 @@ func fetchAgents(t *testing.T, baseURL string) map[string]controller.Agent {
 	return out
 }
 
-// e2eSampler feeds the daemon a fixed machine size so capacity is
-// deterministic across platforms.
 type e2eSampler struct{ cores float64 }
 
 func (s e2eSampler) Sample() (wingd.HostStat, error) {
@@ -68,10 +65,6 @@ func startE2EDaemon(t *testing.T, home string, cores float64) {
 
 func e2eNoSpawn(string, string) error { return wingdclient.ErrNoDaemon }
 
-// holdLease acquires and holds a host-cores lease for the run's lifetime,
-// standing in for a run of that origin holding capacity on the box. The
-// returned client must stay open to hold the lease; it is closed on
-// cleanup.
 func holdLease(t *testing.T, home, runID string, cores float64, origin wingwire.Origin) {
 	t.Helper()
 	cl, err := wingdclient.EnsureDaemon(context.Background(), wingdclient.Options{
@@ -89,12 +82,6 @@ func holdLease(t *testing.T, home, runID string, cores float64, origin wingwire.
 	}
 }
 
-// TestRunnerAdmissionE2E stands up a real local admission daemon and a real
-// controller, holds local and controller-origin work on the box, and
-// asserts two observable behaviors:
-// controller-dispatched work appears in the queue with a controller origin
-// beside a local run, and the headroom the runner advertises to the
-// controller shrinks as local work holds capacity.
 func TestRunnerAdmissionE2E(t *testing.T) {
 	home, err := os.MkdirTemp("/tmp", "sw-e2e")
 	if err != nil {

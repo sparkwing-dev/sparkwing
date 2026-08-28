@@ -30,13 +30,6 @@ func TestRouteGuard_OuterRouterContainsOnlyReviewedRoutes(t *testing.T) {
 	}
 }
 
-// Every route registered on the authenticated mux must pass through
-// requireScope; an endpoint registered bare would be reachable by any
-// authenticated principal regardless of token scope. Routes that are
-// deliberately public (login, bootstrap probe, health, metrics) live on the
-// outer router, which this guard does not constrain. Mux routes that
-// deliberately accept any authenticated principal must be listed here
-// so the exception is a conscious, reviewed act.
 func TestRouteGuard_EveryMuxRouteRequiresScope(t *testing.T) {
 	anyAuthenticated := map[string]bool{
 		"GET /api/v1/auth/whoami": true,
@@ -75,16 +68,6 @@ func TestRouteGuard_EveryMuxRouteRequiresScope(t *testing.T) {
 	})
 }
 
-// The loopback controller claims a node process cannot tell it from
-// the real one. Prose cannot hold that: a route renamed or re-scoped in
-// server.go leaves the loopback answering a path nothing calls, or
-// answering a call at a scope the real controller refuses.
-//
-// Both route tables are read out of the source, so the assertion is on
-// what is registered rather than on what a comment says: every pattern
-// the loopback serves must be registered by server.go, at the same
-// scope. The reverse does not hold and must not -- the loopback serves
-// a subset, which is the whole point of it.
 func TestRouteGuard_LoopbackRoutesAreASubsetOfTheController(t *testing.T) {
 	server := muxRoutes(t, "server.go")
 	loopback := muxRoutes(t, "loopback.go")
@@ -104,10 +87,6 @@ func TestRouteGuard_LoopbackRoutesAreASubsetOfTheController(t *testing.T) {
 	}
 }
 
-// muxRoutes reads the `mux.Handle("<pattern>", requireScope(Scope..., ...))`
-// registrations out of one file, as pattern -> scope constant name.
-// Routes on the outer public router are not mux routes and are skipped,
-// which is what the requireScope guard above already assumes.
 func muxRoutes(t *testing.T, file string) map[string]string {
 	t.Helper()
 	fset := token.NewFileSet()
@@ -195,9 +174,6 @@ func routesRegisteredOn(t *testing.T, file, receiver string) map[string]bool {
 	return out
 }
 
-// The SDK's approval timeout policy strings and the store's resolution
-// constants are independent declarations of one wire vocabulary; the
-// orchestrator serializes the former and compares against the latter.
 func TestApprovalTimeoutPolicy_SDKMatchesStoreVocabulary(t *testing.T) {
 	pairs := map[string]string{
 		string(sparkwing.ApprovalFail):    store.ApprovalOnTimeoutFail,

@@ -347,6 +347,4 @@ func TestOpenFromSpec_ControllerLookupError(t *testing.T) {
 	}
 }
 
-// sanity: errors.New baseline so import is non-trivial in case the
-// test file is trimmed in the future.
 var _ = errors.New

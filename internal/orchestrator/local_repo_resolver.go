@@ -1,6 +1,3 @@
-// Local-mode cross-repo path resolution: maps "owner/repo" slugs to
-// the operator's sibling checkouts so the local trigger consumer can
-// compile + exec the right .sparkwing/.
 package orchestrator
 
 import (
@@ -11,10 +8,6 @@ import (
 	"strings"
 )
 
-// LocalRepoDir resolves an "owner/name" repo slug to a local checkout.
-// Tries SPARKWING_REPO_<UPPER_SNAKE_NAME> first, then $HOME/code/<name>.
-// Errors when neither resolves to a directory containing .git -- fail-
-// fast at claim time instead of a silent compile-loop timeout later.
 func LocalRepoDir(slug string) (string, error) {
 	_, name, ok := splitRepoSlug(slug)
 	if !ok {
@@ -40,7 +33,6 @@ func LocalRepoDir(slug string) (string, error) {
 	return dir, nil
 }
 
-// splitRepoSlug parses "owner/name"; ok=false on empty halves.
 func splitRepoSlug(slug string) (owner, name string, ok bool) {
 	slug = strings.TrimSpace(slug)
 	if slug == "" {
@@ -53,8 +45,6 @@ func splitRepoSlug(slug string) (owner, name string, ok bool) {
 	return slug[:i], slug[i+1:], true
 }
 
-// envKeyForName converts "sparks-core" to "SPARKS_CORE": hyphens to
-// underscores, dots dropped, rest upper-cased.
 func envKeyForName(name string) string {
 	var b strings.Builder
 	b.Grow(len(name))
@@ -73,7 +63,6 @@ func envKeyForName(name string) string {
 	return b.String()
 }
 
-// assertGitDir errors when path lacks a .git entry.
 func assertGitDir(path string) error {
 	if path == "" {
 		return errors.New("empty path")

@@ -62,8 +62,6 @@ func TestRead_RewritesCrossDocLinks(t *testing.T) {
 	}
 }
 
-// TestRead_ActuallyAppliesTransform asserts the transform fires on
-// the public Read() entrypoint (not just the internal helper).
 func TestRead_ActuallyAppliesTransform(t *testing.T) {
 	body, err := Read("pipelines")
 	if err != nil {

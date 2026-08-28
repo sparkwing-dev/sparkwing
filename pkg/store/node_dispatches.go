@@ -125,7 +125,6 @@ func (s *Store) ListNodeDispatches(ctx context.Context, runID, nodeID string) ([
 	return out, rows.Err()
 }
 
-// scanNodeDispatch accepts row.Scan or rows.Scan.
 func scanNodeDispatch(scan func(...any) error) (*NodeDispatch, error) {
 	d := &NodeDispatch{}
 	var dispatchedNS int64

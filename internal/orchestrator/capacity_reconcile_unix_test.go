@@ -39,11 +39,6 @@ func (s reconcileSink) Push(ctx context.Context, sm nodemetrics.Sample) error {
 	return nil
 }
 
-// TestRecordRunProfile_SDKBurnerPeakNotDoubled runs the sampler alongside a
-// reaped burner whose CPU is reported through the per-command path, as a real
-// node does. Without reconciliation the child's usage would land in both the
-// sampler's RUSAGE_CHILDREN spike and the per-command report, inflating the
-// folded peak past its true burn; the subtraction keeps the peak near truth.
 func TestRecordRunProfile_SDKBurnerPeakNotDoubled(t *testing.T) {
 	if !nodemetrics.CPUAccountingAvailable() {
 		t.Skip("no CPU accounting on this platform")

@@ -13,22 +13,10 @@ import (
 	"time"
 )
 
-// Cache sizing. A compiled pipeline binary routinely exceeds 90 MB, and
-// nothing evicted them before this, so an unattended cache grew without
-// bound -- tens of gigabytes for binaries whose source tree had since
-// been deleted.
-//
-// The byte ceiling is the real guard and the entry count is a secondary
-// backstop. A count alone would mean wildly different disk footprints
-// between a large project and a small one, since only the former's
-// binaries are enormous.
 const (
-	DefaultMaxCacheBytes   int64 = 2 << 30 // 2 GiB
+	DefaultMaxCacheBytes   int64 = 2 << 30
 	DefaultMaxCacheEntries       = 20
 
-	// MaxCacheBytesEnv and MaxCacheEntriesEnv override the defaults.
-	// Both accept 0 for "no limit"; the byte form also accepts a size
-	// suffix, as in 512MB or 4GiB.
 	MaxCacheBytesEnv   = "SPARKWING_CACHE_MAX_BYTES"
 	MaxCacheEntriesEnv = "SPARKWING_CACHE_MAX_ENTRIES"
 )
@@ -38,23 +26,18 @@ var (
 	pruneForLimits  = Prune
 )
 
-// CacheRoot is the directory holding compiled pipeline binaries, one
-// subdirectory per cache key.
 func CacheRoot() string {
 	return filepath.Join(SparkwingHome(), "cache", "pipelines", pipelineCacheSchema, "entries")
 }
 
-// CacheEntry is one cached pipeline binary.
 type CacheEntry struct {
-	Key      string    // cache key, the subdirectory name
-	Dir      string    // absolute path of the entry directory
-	Bytes    int64     // size of the binary, 0 for an orphaned directory
-	LastUsed time.Time // refreshed on every cache hit; zero when orphaned
-	Owners   []Owner   // checkouts known to have used it, most recent first
+	Key      string
+	Dir      string
+	Bytes    int64
+	LastUsed time.Time
+	Owners   []Owner
 }
 
-// ScanCache lists the cache entries, newest use first. A missing cache
-// root is not an error; it scans as empty.
 func ScanCache() ([]CacheEntry, error) {
 	root := CacheRoot()
 	dirents, err := os.ReadDir(root)
@@ -94,14 +77,10 @@ func sortCacheEntries(entries []CacheEntry) {
 	})
 }
 
-// PruneToConfiguredLimits translates configured ceilings into a bounded
-// request handled by the cache's sole deletion authority.
 func PruneToConfiguredLimits(ctx context.Context) (PruneResult, error) {
 	return PruneToLimits(ctx, ConfiguredMaxBytes(), ConfiguredMaxEntries(), false)
 }
 
-// PruneToLimits converts cache ceilings into a bounded request for the
-// lease-aware deletion authority. removeAll ignores both ceilings.
 func PruneToLimits(ctx context.Context, maxBytes int64, maxEntries int, removeAll bool) (PruneResult, error) {
 	return pruneToLimitsAtRoot(ctx, "", maxBytes, maxEntries, removeAll)
 }
@@ -141,8 +120,6 @@ func pruneToLimitsAtRoot(ctx context.Context, root string, maxBytes int64, maxEn
 	return result, err
 }
 
-// ConfiguredMaxBytes resolves the byte ceiling, falling back to the
-// default when unset or unparseable.
 func ConfiguredMaxBytes() int64 {
 	raw := os.Getenv(MaxCacheBytesEnv)
 	if raw == "" {
@@ -155,8 +132,6 @@ func ConfiguredMaxBytes() int64 {
 	return n
 }
 
-// ConfiguredMaxEntries resolves the entry ceiling, falling back to the
-// default when unset or unparseable.
 func ConfiguredMaxEntries() int {
 	raw := os.Getenv(MaxCacheEntriesEnv)
 	if raw == "" {
@@ -169,9 +144,6 @@ func ConfiguredMaxEntries() int {
 	return n
 }
 
-// ParseBytes reads a byte count, with or without a size suffix:
-// "2147483648", "2GiB", "512MB". Decimal suffixes are powers of 1000
-// and binary suffixes powers of 1024, matching the units they name.
 func ParseBytes(raw string) (int64, error) {
 	s := strings.TrimSpace(raw)
 	if s == "" {

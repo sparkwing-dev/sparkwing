@@ -11,9 +11,6 @@ import (
 	"testing"
 )
 
-// newCheckout lays out a pipeline module that replaces a sibling local
-// module, the shape a developer gets from a repository checkout. root
-// stands in for wherever that checkout happens to live.
 func newCheckout(t *testing.T, root string) (pipelineDir string) {
 	t.Helper()
 	writeFile(t, filepath.Join(root, "lib", "go.mod"), "module example.com/lib\n\ngo 1.22\n")
@@ -27,10 +24,6 @@ func newCheckout(t *testing.T, root string) (pipelineDir string) {
 	return pipelineDir
 }
 
-// This is the property the cache key exists to provide: two checkouts
-// of one commit, sitting at different paths, must agree. Before the
-// key recorded replace targets by module path, the absolute location of
-// ../lib entered the digest and every worktree compiled its own copy.
 func TestPipelineCacheKey_PortableAcrossCheckoutPaths(t *testing.T) {
 	a := newCheckout(t, t.TempDir())
 	b := newCheckout(t, t.TempDir())
@@ -41,8 +34,6 @@ func TestPipelineCacheKey_PortableAcrossCheckoutPaths(t *testing.T) {
 	}
 }
 
-// Portability must not become blindness: a real edit inside the replace
-// target still has to invalidate, wherever the checkout lives.
 func TestPipelineCacheKey_PortableButStillContentSensitive(t *testing.T) {
 	rootA, rootB := t.TempDir(), t.TempDir()
 	a, b := newCheckout(t, rootA), newCheckout(t, rootB)
@@ -54,8 +45,6 @@ func TestPipelineCacheKey_PortableButStillContentSensitive(t *testing.T) {
 	}
 }
 
-// A version-qualified replace is a different directive from a blanket
-// one, so the two must not collide on a single label.
 func TestPipelineCacheKey_ReplaceVersionIsPartOfIdentity(t *testing.T) {
 	rootA, rootB := t.TempDir(), t.TempDir()
 	a, b := newCheckout(t, rootA), newCheckout(t, rootB)
@@ -83,11 +72,6 @@ func TestCompilePipeline_PassesTrimpath(t *testing.T) {
 	}
 }
 
-// The end of the same story, through a real toolchain: with -trimpath
-// the build directory stays out of the output, so two checkouts do not
-// merely agree on a key, they produce the same bytes. Without it a
-// shared key would hand one checkout a binary carrying the other's
-// paths.
 func TestCompilePipeline_IdenticalBinariesAcrossCheckoutPaths(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiles with the real toolchain")
@@ -114,7 +98,6 @@ func TestCompilePipeline_IdenticalBinariesAcrossCheckoutPaths(t *testing.T) {
 		return hex.EncodeToString(h.Sum(nil))
 	}
 
-	// GOFLAGS/GOWORK from the developer's shell would otherwise leak in.
 	t.Setenv("GOWORK", "off")
 	t.Setenv("GOFLAGS", "")
 
@@ -124,9 +107,6 @@ func TestCompilePipeline_IdenticalBinariesAcrossCheckoutPaths(t *testing.T) {
 	}
 }
 
-// The walk must not follow symlinks out of the tree it was asked
-// about: a link pointing somewhere machine-specific would put foreign
-// content into the key and break portability again.
 func TestWalkHashable_DoesNotFollowSymlinks(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()

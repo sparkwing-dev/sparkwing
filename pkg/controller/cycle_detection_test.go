@@ -16,8 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestCycleDetect_RejectsSelfCycle: pipeline A's run spawns a trigger
-// for A again. Controller detects the immediate self-cycle and 409s.
 func TestCycleDetect_RejectsSelfCycle(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -52,8 +50,6 @@ func TestCycleDetect_RejectsSelfCycle(t *testing.T) {
 	}
 }
 
-// TestCycleDetect_AllowsIndirectNonCycle: a parent's ancestry of
-// different pipeline names lets a fresh pipeline through.
 func TestCycleDetect_AllowsIndirectNonCycle(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -89,8 +85,6 @@ func TestCycleDetect_AllowsIndirectNonCycle(t *testing.T) {
 	}
 }
 
-// TestCycleDetect_RejectsDeepCycle: A -> B -> C spawning A again
-// re-enters. Reject even though the cycle is two hops away.
 func TestCycleDetect_RejectsDeepCycle(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -129,11 +123,6 @@ func TestCycleDetect_RejectsDeepCycle(t *testing.T) {
 	}
 }
 
-// TestTrigger_ParentRepoInheritance: when a spawned trigger carries
-// parent_run_id but no git fields, the controller copies the parent
-// run's git context onto the persisted trigger. Without this,
-// runners claiming the spawned trigger have no .git context and
-// fall through to the BakedBinary path.
 func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -200,9 +189,6 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	}
 }
 
-// TestTrigger_ParentRepoInheritance_RespectsExplicit: when the body
-// already carries git fields (e.g. webhook intake forwards them on
-// behalf of the user), the inheritance pass must NOT overwrite them.
 func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -260,11 +246,6 @@ func TestTrigger_ParentRepoInheritance_RespectsExplicit(t *testing.T) {
 	}
 }
 
-// TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA: when the caller
-// declares a different repo via body.Git.Repo, the parent's SHA must
-// NOT be copied -- it belongs to a different repo and the runner
-// would fail with "fatal: not our ref" on fetch. SHA stays empty so
-// the runner clones the branch tip.
 func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -325,9 +306,6 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	}
 }
 
-// TestCycleDetect_ParentNotFound400: bogus parent_run_id gets a 400
-// so the caller knows their trigger request is malformed rather than
-// silently proceeding without the cycle check.
 func TestCycleDetect_ParentNotFound400(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

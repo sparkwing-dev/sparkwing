@@ -11,11 +11,6 @@ import (
 	"testing"
 )
 
-// TestNativeProcessTableMatchesTheIdentityLookup keeps the kernel listing
-// and the per-process identity lookup answering the same question. The
-// guarded sweep compares a birth token recorded by one against tokens
-// carried by the other, so a formatting difference between them would
-// read as a reused leader and silently drop a live run's admission.
 func TestNativeProcessTableMatchesTheIdentityLookup(t *testing.T) {
 	processes, ok := nativeProcessTable(true)
 	if !ok {
@@ -51,9 +46,6 @@ func TestNativeProcessTableMatchesTheIdentityLookup(t *testing.T) {
 	}
 }
 
-// TestNativeProcessTableReportsTerminatedChildren keeps the state letters
-// compatible with the `ps` reader they replace: a zombie holds no
-// admission, and misreading one as live would strand a guarded lease.
 func TestNativeProcessTableReportsTerminatedChildren(t *testing.T) {
 	if got := darwinProcessState(5); !processTerminated(got) {
 		t.Fatalf("zombie state = %q, want a state the terminated check accepts", got)
@@ -65,11 +57,6 @@ func TestNativeProcessTableReportsTerminatedChildren(t *testing.T) {
 	}
 }
 
-// TestProcessTableFallsBackAudiblyWhenTheKernelListingFails pins both
-// halves of the fallback: the portable reader still answers, and the
-// process says once that it has started paying fifty times more per
-// listing. A silent fallback is indistinguishable from the cost this
-// package removed.
 func TestProcessTableFallsBackAudiblyWhenTheKernelListingFails(t *testing.T) {
 	originalListing := darwinProcessListing
 	originalLog := nativeFallbackLog
@@ -107,9 +94,6 @@ func TestProcessTableFallsBackAudiblyWhenTheKernelListingFails(t *testing.T) {
 	}
 }
 
-// TestShortKernelListingFallsBack keeps a truncated read on the fallback
-// path rather than letting it be parsed as an empty machine, which would
-// read as "every guarded session is gone".
 func TestShortKernelListingFallsBack(t *testing.T) {
 	originalListing := darwinProcessListing
 	originalLog := nativeFallbackLog

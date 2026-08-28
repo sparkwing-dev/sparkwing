@@ -1,6 +1,3 @@
-// Describe cache: per-repo typed-flag schemas for completion.
-// Two layers: content-keyed (exact, fragile under edits) and per-repo
-// "last known" (stale-but-present) so tab never blocks on a recompile.
 package main
 
 import (
@@ -23,8 +20,6 @@ func describeCachePath(key string) string {
 		"cache", "describe", key+".json")
 }
 
-// byRepoDescribePath returns the "last known schema for this repo"
-// fallback path, keyed by sha256 of the absolute sparkwing-dir.
 func byRepoDescribePath(sparkwingDir string) string {
 	abs, err := filepath.Abs(sparkwingDir)
 	if err != nil {
@@ -35,8 +30,6 @@ func byRepoDescribePath(sparkwingDir string) string {
 		"cache", "describe", "by-repo", hex.EncodeToString(sum[:16])+".json")
 }
 
-// readDescribeCache: content-key hit -> binary --describe refresh ->
-// per-repo fallback. (nil, nil) on miss; never blocks on compile.
 func readDescribeCache(sparkwingDir string) ([]sparkwing.DescribePipeline, error) {
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {
@@ -58,7 +51,6 @@ func readDescribeCache(sparkwingDir string) ([]sparkwing.DescribePipeline, error
 	return readDescribeFile(byRepoDescribePath(sparkwingDir)), nil
 }
 
-// readDescribeFile: nil on miss/corruption (completion wants silent fallthrough).
 func readDescribeFile(path string) []sparkwing.DescribePipeline {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -71,7 +63,6 @@ func readDescribeFile(path string) []sparkwing.DescribePipeline {
 	return out
 }
 
-// refreshDescribeFromBinary execs --describe and persists both cache files.
 func refreshDescribeFromBinary(sparkwingDir, binPath, key string) ([]sparkwing.DescribePipeline, error) {
 	cmd := exec.Command(binPath, "--describe")
 	cmd.Dir = filepath.Dir(sparkwingDir)
@@ -88,7 +79,6 @@ func refreshDescribeFromBinary(sparkwingDir, binPath, key string) ([]sparkwing.D
 	return schemas, nil
 }
 
-// writeDescribeFile is silent on failure; completion mustn't crash mid-tab.
 func writeDescribeFile(path string, raw []byte) {
 	if err := fssecure.EnsureDir(filepath.Dir(path)); err != nil {
 		return
@@ -96,8 +86,6 @@ func writeDescribeFile(path string, raw []byte) {
 	_ = fssecure.WriteFile(path, raw)
 }
 
-// writeDescribeCache persists the schema after a successful build.
-// Cache is perf, not correctness: caller treats failures as non-fatal.
 func writeDescribeCache(sparkwingDir, binPath string) error {
 	key, err := bincache.PipelineCacheKey(sparkwingDir)
 	if err != nil {

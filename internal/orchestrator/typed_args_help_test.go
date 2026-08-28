@@ -35,9 +35,6 @@ func (typedHelpPipe) Examples() []sparkwing.Example {
 	return []sparkwing.Example{{Comment: "run 5000 seeds", Command: "sparkwing run typed-help-fuzz --seeds 5000"}}
 }
 
-// writeTypedHelpProject stages a .sparkwing/sparkwing.yaml under a temp
-// dir binding pipeline name -> entrypoint, chdirs into it, and restores
-// the cwd on cleanup.
 func writeTypedHelpProject(t *testing.T, pipelineName, entrypoint string) {
 	t.Helper()
 	dir := t.TempDir()

@@ -10,23 +10,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-// topLevelPipelinesRE matches a ```yaml block that is a sparkwing.yaml
-// config document -- i.e. one with a top-level `pipelines:` key. Other
-// yaml blocks in the docs (profiles.yaml, GitHub Actions, Helm values,
-// backend specs) don't have this key and are left alone.
 var topLevelPipelinesRE = regexp.MustCompile(`(?m)^pipelines:\s*$`)
 
-// checkYAMLConfigs decodes every sparkwing.yaml-shaped ```yaml block
-// under contentDir with the same strict field rules the CLI's
-// projectconfig.Load uses (KnownFields on the full project Config + the
-// per-pipeline UnmarshalYAML unknown-field rejection). A doc that shows
-// an unknown/renamed config key or a removed trigger fails here instead
-// of hard-erroring in a reader's repo.
-//
-// Unlike projectconfig.Load it deliberately skips normalize/validate:
-// doc examples legitimately abbreviate (a triggers-only fragment with no
-// entrypoint), and the value here is catching key drift, not enforcing
-// completeness. Returns false on any decode failure.
 func checkYAMLConfigs(contentDir string) bool {
 	blocks, err := extract(contentDir, "yaml")
 	if err != nil {

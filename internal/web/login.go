@@ -1,18 +1,18 @@
-// Login / logout handlers + session cookie helpers. Browsers POST a
-// username+password form; the cookie carries a session id resolved by
-// the controller's /api/v1/auth/session endpoint. Upstream proxy calls
-// continue to use opts.Token (the web pod's own service token).
 package web
 
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -21,10 +21,11 @@ import (
 const (
 	sessionCookieName = "sw_session"
 	csrfCookieName    = "sw_csrf"
+	csrfHeaderName    = "X-CSRF-Token"
 )
 
-// Pure HTML + CSS (no JavaScript) so the session id never touches the
-// JS runtime.
+var errInvalidControllerSession = errors.New("invalid controller session")
+
 const loginHTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -56,6 +57,7 @@ const loginHTML = `<!doctype html>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="new-password" minlength="8" required>
     <input type="hidden" name="next" value="{{.Next}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <button type="submit">Create admin and sign in</button>
     <div class="footer">First-visit signup</div>
   </form>
@@ -68,6 +70,7 @@ const loginHTML = `<!doctype html>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
     <input type="hidden" name="next" value="{{.Next}}">
+    <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
     <button type="submit">Sign in</button>
   </form>
   {{end}}
@@ -80,56 +83,50 @@ var loginTmpl = template.Must(template.New("login").Parse(loginHTML))
 type loginPageData struct {
 	Error     string
 	Next      string
-	Bootstrap bool // render the "create first admin" form
+	CSRFToken string
+	Bootstrap bool
 }
 
-// loginPageHandler renders the login form, or a "Create first admin"
-// form on a fresh cluster (users table empty per the controller).
 func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if opts.ControllerURL == "" {
-			http.Error(w, "login only available in cluster mode", http.StatusNotFound)
+		w.Header().Set("Cache-Control", "no-store")
+		controllerURL := authControllerURL(opts)
+		if controllerURL == "" {
+			http.Error(w, "login only available with a controller session backend", http.StatusNotFound)
 			return
 		}
-		data := loginPageData{Next: r.URL.Query().Get("next")}
-		if data.Next == "" {
-			data.Next = "/"
-		}
+		data := loginPageData{Next: safeNext(r.URL.Query().Get("next"))}
 		if c, err := r.Cookie(sessionCookieName); err == nil && c.Value != "" {
-			if _, err := controllerResolveSession(r.Context(), opts.ControllerURL, c.Value); err == nil {
+			if _, err := controllerResolveSession(r.Context(), controllerURL, c.Value); err == nil {
 				http.Redirect(w, r, data.Next, http.StatusSeeOther)
 				return
+			} else if !errors.Is(err, errInvalidControllerSession) {
+				sessionBackendError(w)
+				return
 			}
+			clearSessionCookies(w)
 		}
-		data.Bootstrap = controllerBootstrapNeeded(r.Context(), opts.ControllerURL)
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_ = loginTmpl.Execute(w, data)
+		data.Bootstrap = controllerBootstrapNeeded(r.Context(), controllerURL)
+		renderLoginPage(w, data, http.StatusOK)
 	}
 }
 
-// loginSubmitHandler validates creds via the controller, sets the
-// session cookies, and redirects to ?next=. On failure, re-renders the
-// login page with the error.
 func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if opts.ControllerURL == "" {
-			http.Error(w, "login only available in cluster mode", http.StatusNotFound)
-			return
-		}
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		w.Header().Set("Cache-Control", "no-store")
+		controllerURL := authControllerURL(opts)
+		if controllerURL == "" {
+			http.Error(w, "login only available with a controller session backend", http.StatusNotFound)
 			return
 		}
 		user := r.PostForm.Get("username")
 		pass := r.PostForm.Get("password")
 		next := safeNext(r.PostForm.Get("next"))
 
-		sess, err := controllerLogin(r.Context(), opts.ControllerURL, user, pass)
+		sess, err := controllerLogin(r.Context(), controllerURL, user, pass)
 		if err != nil {
 			data := loginPageData{Error: "Invalid username or password.", Next: next}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = loginTmpl.Execute(w, data)
+			renderLoginPage(w, data, http.StatusUnauthorized)
 			return
 		}
 
@@ -138,44 +135,35 @@ func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 	}
 }
 
-// bootstrapSubmitHandler creates the first admin while controller authentication
-// is disabled, then auto-logs-in so the user lands on the dashboard rather than
-// a re-rendered login page.
 func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if opts.ControllerURL == "" {
-			http.Error(w, "login only available in cluster mode", http.StatusNotFound)
-			return
-		}
-		if err := r.ParseForm(); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		w.Header().Set("Cache-Control", "no-store")
+		controllerURL := authControllerURL(opts)
+		if controllerURL == "" {
+			http.Error(w, "login only available with a controller session backend", http.StatusNotFound)
 			return
 		}
 		user := strings.TrimSpace(r.PostForm.Get("username"))
 		pass := r.PostForm.Get("password")
 		next := safeNext(r.PostForm.Get("next"))
 
-		if err := controllerCreateFirstUser(r.Context(), opts.ControllerURL, user, pass); err != nil {
+		if err := controllerCreateFirstUser(r.Context(), controllerURL, user, pass); err != nil {
 			data := loginPageData{Next: next, Bootstrap: true, Error: err.Error()}
 			if strings.Contains(err.Error(), "bootstrap closed") {
 				data.Bootstrap = false
 				data.Error = "Bootstrap closed -- sign in with the existing admin credentials."
 			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusBadRequest)
-			_ = loginTmpl.Execute(w, data)
+			renderLoginPage(w, data, http.StatusBadRequest)
 			return
 		}
 
-		sess, err := controllerLogin(r.Context(), opts.ControllerURL, user, pass)
+		sess, err := controllerLogin(r.Context(), controllerURL, user, pass)
 		if err != nil {
 			data := loginPageData{
 				Next:  next,
 				Error: "Admin created, but auto-login failed. Sign in with the credentials you just set.",
 			}
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			_ = loginTmpl.Execute(w, data)
+			renderLoginPage(w, data, http.StatusOK)
 			return
 		}
 		setSessionCookies(w, sess)
@@ -183,15 +171,55 @@ func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 	}
 }
 
-// logoutHandler clears cookies and asks the controller to drop the row.
 func logoutHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if c, err := r.Cookie(sessionCookieName); err == nil && opts.ControllerURL != "" {
-			_ = controllerLogout(r.Context(), opts.ControllerURL, c.Value)
+		w.Header().Set("Cache-Control", "no-store")
+		sessionCookie, err := r.Cookie(sessionCookieName)
+		if err != nil || sessionCookie.Value == "" {
+			clearSessionCookies(w)
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		controllerURL := authControllerURL(opts)
+		sess, err := controllerResolveSession(r.Context(), controllerURL, sessionCookie.Value)
+		if err != nil {
+			if errors.Is(err, errInvalidControllerSession) {
+				clearSessionCookies(w)
+				http.Redirect(w, r, "/login", http.StatusSeeOther)
+			} else {
+				sessionBackendError(w)
+			}
+			return
+		}
+		if !constantTimeEqual(r.PostForm.Get("csrf_token"), sess.CSRFToken) {
+			csrfError(w)
+			return
+		}
+		if err := controllerLogout(r.Context(), controllerURL, sessionCookie.Value); err != nil {
+			http.Error(w, "controller logout failed", http.StatusBadGateway)
+			return
 		}
 		clearSessionCookies(w)
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	}
+}
+
+func csrfFormMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !sameOriginRequest(r) {
+			csrfError(w)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if !validFormCSRF(r) {
+			csrfError(w)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type loginResp struct {
@@ -243,27 +271,96 @@ func controllerLogout(ctx context.Context, controllerURL, sessionID string) erro
 	if err != nil {
 		return err
 	}
-	resp.Body.Close()
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("controller logout: %d", resp.StatusCode)
+	}
 	return nil
 }
 
-// safeNext sanitizes the post-login redirect to a same-origin path.
-// Rejects protocol-relative URLs (//evil.com/...) that a naive
-// HasPrefix(next, "/") check would let through, plus back-slash
-// variants browsers occasionally normalize.
 func safeNext(next string) string {
-	if len(next) < 1 || next[0] != '/' {
+	u, err := url.ParseRequestURI(next)
+	if err != nil || strings.Contains(next, "#") || u.IsAbs() || u.Host != "" || u.Fragment != "" || u.Opaque != "" {
 		return "/"
 	}
-	if len(next) >= 2 && (next[1] == '/' || next[1] == '\\') {
+	if !strings.HasPrefix(u.Path, "/") || strings.HasPrefix(u.Path, "//") || strings.Contains(u.Path, `\`) {
 		return "/"
 	}
 	return next
 }
 
-// controllerBootstrapNeeded returns true only on a positive "needed"
-// answer; errors and non-2xx are treated as not-needed so a network
-// hiccup keeps users on the familiar login form.
+func renderLoginPage(w http.ResponseWriter, data loginPageData, status int) {
+	token, err := newCSRFToken()
+	if err != nil {
+		http.Error(w, "could not create login form", http.StatusInternalServerError)
+		return
+	}
+	data.CSRFToken = token
+	setCSRFCookie(w, token)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(status)
+	_ = loginTmpl.Execute(w, data)
+}
+
+func newCSRFToken() (string, error) {
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(raw), nil
+}
+
+func validFormCSRF(r *http.Request) bool {
+	if !sameOriginRequest(r) {
+		return false
+	}
+	cookie, err := r.Cookie(csrfCookieName)
+	if err != nil || cookie.Value == "" {
+		return false
+	}
+	formToken := r.PostForm.Get("csrf_token")
+	if !constantTimeEqual(formToken, cookie.Value) {
+		return false
+	}
+	return true
+}
+
+func sameOriginRequest(r *http.Request) bool {
+	return sameOriginRequestForCookiePolicy(r, cookieSecure)
+}
+
+func sameOriginRequestForCookiePolicy(r *http.Request, secureCookies bool) bool {
+	raw := r.Header.Get("Origin")
+	if raw == "" {
+		raw = r.Referer()
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") ||
+		u.Host == "" || u.User != nil || !strings.EqualFold(u.Host, r.Host) {
+		return false
+	}
+	expectedScheme := "https"
+	if !secureCookies {
+		expectedScheme = "http"
+	}
+	return strings.EqualFold(u.Scheme, expectedScheme)
+}
+
+func constantTimeEqual(a, b string) bool {
+	return a != "" && b != "" && subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
+}
+
+func csrfError(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	http.Error(w, "invalid CSRF token", http.StatusForbidden)
+}
+
+func sessionBackendError(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	http.Error(w, "controller session validation unavailable", http.StatusBadGateway)
+}
+
 func controllerBootstrapNeeded(ctx context.Context, controllerURL string) bool {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		strings.TrimRight(controllerURL, "/")+"/api/v1/auth/bootstrap-needed", nil)
@@ -285,9 +382,6 @@ func controllerBootstrapNeeded(ctx context.Context, controllerURL string) bool {
 	return body.Needed
 }
 
-// controllerCreateFirstUser posts without a bearer because bootstrap is only
-// available while controller authentication is disabled and the users table is
-// empty. A closed bootstrap returns an error to the login page.
 func controllerCreateFirstUser(ctx context.Context, controllerURL, user, pass string) error {
 	body, _ := json.Marshal(map[string]string{"name": user, "password": pass})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -328,12 +422,18 @@ func controllerResolveSession(ctx context.Context, controllerURL, sessionID stri
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return nil, fmt.Errorf("%w: controller returned 401", errInvalidControllerSession)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("controller session: %d", resp.StatusCode)
+		return nil, fmt.Errorf("controller session unavailable: status %d", resp.StatusCode)
 	}
 	var out sessionResp
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("decode controller session: %w", err)
+	}
+	if out.Principal == "" || out.CSRFToken == "" || out.ExpiresAt <= 0 {
+		return nil, errors.New("controller session response is missing required fields")
 	}
 	return &out, nil
 }
@@ -348,11 +448,15 @@ func setSessionCookies(w http.ResponseWriter, sess *loginResp) {
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(12 * time.Hour / time.Second),
 	})
+	setCSRFCookie(w, sess.CSRFToken)
+}
+
+func setCSRFCookie(w http.ResponseWriter, token string) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     csrfCookieName,
-		Value:    sess.CSRFToken,
+		Value:    token,
 		Path:     "/",
-		HttpOnly: false, // safety: SPA reads this cookie and echoes it in X-Sparkwing-Csrf; must not be HttpOnly
+		HttpOnly: false, // safety: the native logout form reads the session-bound token without exposing the HttpOnly session id
 		Secure:   cookieSecure,
 		SameSite: http.SameSiteStrictMode,
 		MaxAge:   int(12 * time.Hour / time.Second),
@@ -368,12 +472,11 @@ func clearSessionCookies(w http.ResponseWriter) {
 			MaxAge:   -1,
 			Secure:   cookieSecure,
 			HttpOnly: name == sessionCookieName,
+			SameSite: http.SameSiteStrictMode,
 		})
 	}
 }
 
-// cookieSecure defaults to true; flipped to false in laptop-local dev
-// (plain http on 127.0.0.1) via SPARKWING_WEB_INSECURE_COOKIES.
 var cookieSecure = func() bool {
 	v := os.Getenv("SPARKWING_WEB_INSECURE_COOKIES")
 	return !(v == "1" || strings.EqualFold(v, "true"))

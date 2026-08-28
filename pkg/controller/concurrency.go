@@ -26,30 +26,23 @@ type acquireSlotReq struct {
 }
 
 type acquireSlotResp struct {
-	Granted          bool      `json:"granted"`
-	Kind             string    `json:"kind"`
-	HolderID         string    `json:"holder_id,omitempty"`
-	LeaseExpiresAt   time.Time `json:"lease_expires_at,omitempty"`
-	LeaderRunID      string    `json:"leader_run_id,omitempty"`
-	LeaderNodeID     string    `json:"leader_node_id,omitempty"`
-	OutputRef        string    `json:"output_ref,omitempty"`
-	OriginRunID      string    `json:"origin_run_id,omitempty"`
-	OriginNodeID     string    `json:"origin_node_id,omitempty"`
-	SupersededIDs    []string  `json:"superseded_ids,omitempty"`
-	PreviousCapacity int       `json:"previous_capacity,omitempty"`
-	DriftNote        string    `json:"drift_note,omitempty"`
-	// Queue observability for AcquireQueued, mirroring the store.
-	Position    int               `json:"position,omitempty"`
-	QueueLength int               `json:"queue_length,omitempty"`
-	Holders     []stateHolderResp `json:"holders,omitempty"`
+	Granted          bool              `json:"granted"`
+	Kind             string            `json:"kind"`
+	HolderID         string            `json:"holder_id,omitempty"`
+	LeaseExpiresAt   time.Time         `json:"lease_expires_at,omitempty"`
+	LeaderRunID      string            `json:"leader_run_id,omitempty"`
+	LeaderNodeID     string            `json:"leader_node_id,omitempty"`
+	OutputRef        string            `json:"output_ref,omitempty"`
+	OriginRunID      string            `json:"origin_run_id,omitempty"`
+	OriginNodeID     string            `json:"origin_node_id,omitempty"`
+	SupersededIDs    []string          `json:"superseded_ids,omitempty"`
+	PreviousCapacity int               `json:"previous_capacity,omitempty"`
+	DriftNote        string            `json:"drift_note,omitempty"`
+	Position         int               `json:"position,omitempty"`
+	QueueLength      int               `json:"queue_length,omitempty"`
+	Holders          []stateHolderResp `json:"holders,omitempty"`
 }
 
-// handleAcquireSlot resolves a single arrival. Status codes
-// distinguish outcomes so clients branch without parsing body text:
-//
-//	200 -> AcquireGranted / AcquireCached
-//	202 -> AcquireQueued / AcquireCoalesced / AcquireCancellingOthers
-//	429 -> AcquireSkipped / AcquireFailed (terminal)
 func (s *Server) handleAcquireSlot(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	var body acquireSlotReq
@@ -126,9 +119,6 @@ type heartbeatSlotResp struct {
 	CancelledByNewer bool      `json:"cancelled_by_newer"`
 }
 
-// handleHeartbeatSlot extends the holder's lease and reports whether
-// the slot has been marked superseded since the last heartbeat (a
-// CancelOthers arrival tripped it).
 func (s *Server) handleHeartbeatSlot(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	var body heartbeatSlotReq
@@ -183,11 +173,6 @@ type releaseSlotReq struct {
 	CacheTTLNS   int64  `json:"cache_ttl_ns,omitempty"`
 }
 
-// handleReleaseSlot drops the holder row, optionally writes a cache
-// entry on success, and resolves any coalesce followers + promotes
-// eligible queued waiters within the available budget. Returns 204
-// whether or not a row was removed so idempotent release paths don't
-// have to handle 404.
 func (s *Server) handleReleaseSlot(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	var body releaseSlotReq
@@ -212,11 +197,8 @@ func (s *Server) handleReleaseSlot(w http.ResponseWriter, r *http.Request) {
 }
 
 type stateResp struct {
-	Key      string `json:"key"`
-	Capacity int    `json:"capacity"`
-	// EffectiveCapacity is the most-restrictive minimum actually
-	// enforced; UsedCost is the summed cost of active holders. Available
-	// budget is EffectiveCapacity - UsedCost.
+	Key               string            `json:"key"`
+	Capacity          int               `json:"capacity"`
 	EffectiveCapacity int               `json:"effective_capacity"`
 	UsedCost          int               `json:"used_cost"`
 	Holders           []stateHolderResp `json:"holders"`
@@ -234,9 +216,6 @@ type stateHolderResp struct {
 	Cost           int        `json:"cost,omitempty"`
 }
 
-// holderResp is the single mapping from a store holder to its wire
-// shape; every endpoint that returns holders goes through it so a new
-// field can't silently go missing from one response.
 func holderResp(h store.ConcurrencyHolder) stateHolderResp {
 	resp := stateHolderResp{
 		HolderID: h.HolderID, RunID: h.RunID, NodeID: h.NodeID,
@@ -259,13 +238,9 @@ type stateWaiterResp struct {
 	LeaderNodeID  string    `json:"leader_node_id,omitempty"`
 	CancelTimeout string    `json:"cancel_timeout,omitempty"`
 	Cost          int       `json:"cost,omitempty"`
-	// Position is the queue-policy waiter's 0-based arrival rank. Weighted
-	// admission may backfill later waiters that fit.
-	Position int `json:"position"`
+	Position      int       `json:"position"`
 }
 
-// handleConcurrencyState returns the current capacity + holders +
-// waiters for a key. 404 when the key has never been declared.
 func (s *Server) handleConcurrencyState(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	st, err := s.store.GetConcurrencyState(r.Context(), key)
@@ -315,11 +290,6 @@ type resolveWaiterResp struct {
 	Holders             []stateHolderResp `json:"holders,omitempty"`
 }
 
-// handleResolveWaiter is the polling read a waiting in-pod orchestrator
-// uses to learn whether it was promoted, cached, coalesced behind a
-// finished leader, or cancelled. Mirrors store.ResolveWaiter; the
-// orchestrator's waitThenRun loop drives it once the controller backend
-// returns a queued/coalesced/cancelling acquire.
 func (s *Server) handleResolveWaiter(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	q := r.URL.Query()
@@ -366,8 +336,6 @@ type cancelWaiterResp struct {
 	Cancelled bool `json:"cancelled"`
 }
 
-// handleCancelWaiter drops a parked waiter row so a waiter that gave up
-// (QueueTimeout) can't later be promoted to a holder.
 func (s *Server) handleCancelWaiter(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	var body cancelWaiterReq
@@ -391,9 +359,6 @@ type forceReleaseResp struct {
 	Dropped []stateHolderResp `json:"dropped,omitempty"`
 }
 
-// handleForceRelease drops superseded holders (a CancelOthers eviction
-// whose evicted holders won't terminate) and promotes the next
-// waiters, bounding forward progress.
 func (s *Server) handleForceRelease(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	dropped, err := s.store.ForceReleaseSupersededHolders(r.Context(), key)
@@ -414,18 +379,6 @@ func (s *Server) handleForceRelease(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleWaiterNotify is an SSE stream that surfaces resolution events
-// for a given (run_id, node_id) waiter. Polls the concurrency state at
-// 250ms cadence and emits exactly one terminal event per stream, then
-// closes. Every event payload carries key + run_id, plus node_id when
-// one was supplied on the query string.
-//
-//	event: ready         data: {"key":"...","run_id":"...","node_id":"..."}
-//	event: superseded    data: {"key":"...","run_id":"...","node_id":"..."}
-//	event: stream_end    data: {"reason":"max_wait"|"key_not_found", ...}
-//
-// 30 minutes is the fail-safe per-stream cap; the stream also closes
-// when the client disconnects.
 func (s *Server) handleWaiterNotify(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	runID := r.URL.Query().Get("run_id")

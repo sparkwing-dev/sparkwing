@@ -34,24 +34,14 @@ import (
 // the node runs as if no cache were declared; no cache condition ever
 // fails a node.
 type DirCache struct {
-	// name labels the cache in keys and logs ("go-modules",
-	// "node-modules"). Reduced to a key-safe segment at use.
 	name string
-	// path is the directory to cache. A relative path resolves
-	// against [WorkDir]. Empty when resolvePath is set.
+
 	path string
-	// keyScope disambiguates the key when name alone does not. A
-	// [Dir] cache sets it to the declared path so two directories
-	// with the same base name and identical lockfile do not collide;
-	// the ecosystem helpers leave it empty because their directory is
-	// resolved from the environment and singular per host.
+
 	keyScope string
-	// resolvePath, when non-nil, resolves the directory at run time
-	// (GOMODCACHE is an environment question, not a plan question).
+
 	resolvePath func() (string, error)
-	// keyFiles are candidate lockfiles; the first one that exists
-	// under WorkDir keys the cache. None existing disables the cache
-	// for the run with a warning.
+
 	keyFiles []string
 }
 
@@ -167,16 +157,8 @@ func (n *JobNode) CacheDir(caches ...DirCache) *JobNode {
 // in declaration order. Empty when [JobNode.CacheDir] was not called.
 func (n *JobNode) DirCaches() []DirCache { return n.dirCaches }
 
-// depCacheKeyRE mirrors the cache service's validCacheKey pattern; a
-// derived key must satisfy it or the declaration is disabled for the
-// run (defense in depth -- derivation below only emits safe runes).
 var depCacheKeyRE = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
 
-// depCacheDirLocks serializes restore and save for caches that resolve
-// to the same directory within one process (two GoModules() members
-// running in parallel share GOMODCACHE). Keyed by resolved absolute
-// path. It does not guard against a second process on the same host --
-// that is the backend's concern, not the extraction's.
 var depCacheDirLocks sync.Map
 
 func lockDepCacheDir(dir string) func() {
@@ -186,29 +168,19 @@ func lockDepCacheDir(dir string) func() {
 	return mu.Unlock
 }
 
-// dirCacheRun carries one node's per-run cache state between the
-// BeforeRun restore and the AfterRun save. The plan (and therefore
-// this state) is rebuilt from code in every environment that executes
-// the node, so nothing here needs to serialize.
 type dirCacheRun struct {
 	spec dirCacheSpecAlias
 	node string
 
-	// Set by restore, read by save.
-	disabled   bool   // no lockfile / bad key: skip everything silently
-	key        string // derived cache key
-	dir        string // resolved absolute target directory
-	missed     bool   // backend had no entry for key: save after success
-	emptyStart bool   // dir was absent/empty at restore: this run populated it
+	disabled   bool
+	key        string
+	dir        string
+	missed     bool
+	emptyStart bool
 }
 
-// dirCacheSpecAlias keeps the struct field readable while DirCache
-// stays the public name.
 type dirCacheSpecAlias = DirCache
 
-// restore is the BeforeRun hook: derive the key, and on a backend hit
-// extract into the target directory. Always returns nil -- a BeforeRun
-// error fails the node, and cache trouble must not.
 func (st *dirCacheRun) restore(ctx context.Context) error {
 	workdir := depCacheWorkdir()
 
@@ -238,16 +210,9 @@ func (st *dirCacheRun) restore(ctx context.Context) error {
 	}
 	st.dir = dir
 
-	// A pre-existing populated directory (a warm laptop's shared
-	// GOMODCACHE) is not this run's to archive; only a directory this
-	// run fills gets saved. See save.
 	notEmpty, _ := dirHasEntries(dir)
 	st.emptyStart = !notEmpty
 
-	// One host can run two nodes that resolve the same directory (two
-	// GoModules() members in parallel). Serialize restore+save on the
-	// resolved path so their extractions do not interleave into the
-	// same files.
 	unlock := lockDepCacheDir(dir)
 	defer unlock()
 
@@ -285,19 +250,11 @@ func (st *dirCacheRun) restore(ctx context.Context) error {
 	return nil
 }
 
-// save is the AfterRun hook: on node success after a restore miss,
-// archive the directory and store it under the derived key. Failures
-// log and return; AfterRun outcomes never change the node's.
 func (st *dirCacheRun) save(ctx context.Context, runErr error) {
 	if st.disabled || !st.missed || runErr != nil || st.key == "" {
 		return
 	}
-	// Save only a directory this run populated from empty. A cache
-	// that was already warm at restore (a laptop's shared GOMODCACHE)
-	// is multi-GB of content this node did not produce; archiving it
-	// every run burns minutes of CPU and, against the remote backend,
-	// is discarded as oversize -- and because the key is never stored,
-	// it repeats on the next run.
+
 	if !st.emptyStart {
 		return
 	}
@@ -324,7 +281,6 @@ func (st *dirCacheRun) save(ctx context.Context, runErr error) {
 		"node", st.node, "key", st.key, "backend", backend.label())
 }
 
-// targetDir resolves the cache's directory to an absolute path.
 func (c DirCache) targetDir(workdir string) (string, error) {
 	if c.resolvePath != nil {
 		return c.resolvePath()
@@ -335,13 +291,6 @@ func (c DirCache) targetDir(workdir string) (string, error) {
 	return filepath.Join(workdir, c.path), nil
 }
 
-// deriveDepCacheKey hashes the lockfile's bytes (and the cache's key
-// scope, when set) into dep-<name>-<goos>-<goarch>-<hash16>. Platform
-// is part of the key because compiled dependency content (cgo
-// artifacts, platform wheels, install scripts) is not portable across
-// it. The scope keeps two [Dir] caches with the same base name and
-// identical lockfile from resolving to one key and restoring each
-// other's contents.
 func deriveDepCacheKey(name, scope, lockPath string) (string, error) {
 	data, err := os.ReadFile(lockPath)
 	if err != nil {
@@ -360,9 +309,6 @@ func deriveDepCacheKey(name, scope, lockPath string) (string, error) {
 	return key, nil
 }
 
-// depCacheWorkdir resolves the directory lockfiles and relative cache
-// paths are read against: the pipeline's WorkDir, falling back to the
-// process working directory.
 func depCacheWorkdir() string {
 	if wd := WorkDir(); wd != "" {
 		return wd
@@ -373,8 +319,6 @@ func depCacheWorkdir() string {
 	return "."
 }
 
-// resolveNpmCacheDir resolves npm's cache directory, cheapest probe
-// first.
 func resolveNpmCacheDir() (string, error) {
 	if v := os.Getenv("npm_config_cache"); v != "" {
 		return v, nil
@@ -391,8 +335,6 @@ func resolveNpmCacheDir() (string, error) {
 	return filepath.Join(home, ".npm"), nil
 }
 
-// resolveGoModCache resolves the module cache the way the go tool
-// does, cheapest probe first.
 func resolveGoModCache() (string, error) {
 	if v := os.Getenv("GOMODCACHE"); v != "" {
 		return v, nil
@@ -409,8 +351,6 @@ func resolveGoModCache() (string, error) {
 	return filepath.Join(home, "go", "pkg", "mod"), nil
 }
 
-// firstExisting returns the first candidate (resolved against
-// workdir when relative) that exists as a regular file.
 func firstExisting(workdir string, candidates []string) (string, bool) {
 	for _, c := range candidates {
 		p := c
@@ -424,8 +364,6 @@ func firstExisting(workdir string, candidates []string) (string, bool) {
 	return "", false
 }
 
-// dirHasEntries reports whether dir exists and contains at least one
-// entry.
 func dirHasEntries(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -437,7 +375,6 @@ func dirHasEntries(dir string) (bool, error) {
 	return len(entries) > 0, nil
 }
 
-// humanBytes renders a byte count for log lines: "312 MB", "4.2 GB".
 func humanBytes(n int64) string {
 	const unit = 1000
 	if n < unit {

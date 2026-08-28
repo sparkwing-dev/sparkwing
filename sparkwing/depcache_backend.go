@@ -14,32 +14,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
-// remoteDepCacheMaxBytes matches the cache service's PUT /cache/<key>
-// MaxBytesReader; a larger archive is skipped client-side with a
-// warning instead of failing mid-upload. A var so tests can shrink it.
 var remoteDepCacheMaxBytes = int64(500 << 20)
 
-// depCacheHTTPTimeout bounds one remote cache operation. Module
-// caches run to hundreds of MB; a laptop-grade link needs minutes,
-// not seconds.
 const depCacheHTTPTimeout = 10 * time.Minute
 
-// depCacheBackend stores and retrieves dependency-cache archives.
-// Implementations share the tar.gz format, which is what keeps a
-// laptop run and a cluster run interchangeable.
 type depCacheBackend interface {
 	label() string
 	exists(ctx context.Context, key string) (bool, error)
-	// fetch extracts the archive stored under key into dir,
-	// returning the archive's size in bytes.
+
 	fetch(ctx context.Context, key, dir string) (int64, error)
-	// store archives dir under key, returning the archive's size.
+
 	store(ctx context.Context, key, dir string) (int64, error)
 }
 
-// selectDepCacheBackend picks remote when a cache service URL is in
-// the environment (SPARKWING_CACHE_URL as set for runner pods, or
-// SPARKWING_GITCACHE_URL as set for warm runners), local otherwise.
 func selectDepCacheBackend() depCacheBackend {
 	if url := strings.TrimRight(os.Getenv("SPARKWING_CACHE_URL"), "/"); url != "" {
 		return &remoteDepCache{baseURL: url, token: depCacheToken()}
@@ -50,9 +37,6 @@ func selectDepCacheBackend() depCacheBackend {
 	return &localDepCache{}
 }
 
-// depCacheToken resolves the bearer for the cache service:
-// SPARKWING_CACHE_TOKEN (the bincache convention), then
-// SPARKWING_AGENT_TOKEN (what runner pods carry).
 func depCacheToken() string {
 	if t := os.Getenv("SPARKWING_CACHE_TOKEN"); t != "" {
 		return t
@@ -60,7 +44,6 @@ func depCacheToken() string {
 	return os.Getenv("SPARKWING_AGENT_TOKEN")
 }
 
-// localDepCache stores archives under $SPARKWING_HOME/depcache.
 type localDepCache struct{}
 
 func (l *localDepCache) label() string { return "local" }
@@ -141,8 +124,6 @@ func (l *localDepCache) store(_ context.Context, key, dir string) (int64, error)
 	return size, nil
 }
 
-// remoteDepCache speaks the cache service's /cache/<key> blob
-// protocol: HEAD probes, GET fetches, PUT stores.
 type remoteDepCache struct {
 	baseURL string
 	token   string
@@ -259,7 +240,6 @@ func (r *remoteDepCache) store(ctx context.Context, key, dir string) (int64, err
 	return size, nil
 }
 
-// countingReader counts bytes read through it.
 type countingReader struct {
 	r io.Reader
 	n int64

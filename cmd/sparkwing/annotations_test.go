@@ -10,10 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// seedAnnotationsRun creates a finished run with two nodes; one has
-// node-level annotations, the other has a step with a step-level
-// annotation. Returns the resolved paths so tests can re-open the
-// store.
 func seedAnnotationsRun(t *testing.T) orchestrator.Paths {
 	t.Helper()
 	dir := t.TempDir()

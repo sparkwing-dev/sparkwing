@@ -20,8 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// holdFlock creates a marker file and holds an exclusive flock on it for
-// the rest of the test, so a probe reads its owner as live.
 func holdFlock(t *testing.T, path, body string) {
 	t.Helper()
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)

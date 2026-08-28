@@ -210,8 +210,6 @@ func (c *WebClient) MigrationIndex(ctx context.Context) ([]MigrationEntry, error
 	return entries, nil
 }
 
-// webDocPath returns the URL path for a doc. version=="latest" or ""
-// means the unversioned alias.
 func webDocPath(version, slug string) string {
 	if version == "" || version == LatestAlias {
 		return "/docs/" + slug + ".md"
@@ -226,9 +224,6 @@ func webDocIndexPath(version string) string {
 	return "/docs/" + version + "/index.json"
 }
 
-// normalizeSlug rejects slugs that would escape the /docs/ prefix
-// (absolute paths, traversal segments, trailing .md). Returns the
-// canonical slug (no leading slash, no .md suffix).
 func normalizeSlug(slug string) (string, error) {
 	if slug == "" {
 		return "", errors.New("docs: empty slug")
@@ -245,17 +240,10 @@ func normalizeSlug(slug string) (string, error) {
 	return slug, nil
 }
 
-// fetchOpts tunes the cache+fetch behavior for one call. ttl==0 means
-// "indefinite" (per-version content); positive ttl means "refetch
-// after this long" (index files).
 type fetchOpts struct {
 	ttl time.Duration
 }
 
-// cacheMeta is the JSON sidecar written alongside each cached body.
-// fetched_at lets TTL checks survive across filesystems that
-// round-trip mtime poorly; content_type / etag / status are
-// informational and surface from `sparkwing docs cache info`.
 type cacheMeta struct {
 	FetchedAt   time.Time `json:"fetched_at"`
 	ContentType string    `json:"content_type,omitempty"`
@@ -264,8 +252,6 @@ type cacheMeta struct {
 	URL         string    `json:"url"`
 }
 
-// fetch is the shared cache-aware HTTP helper. Path is a server-rooted
-// path like "/versions.json" or "/docs/v0.3.0/pipelines.md".
 func (c *WebClient) fetch(ctx context.Context, urlPath string, opts fetchOpts) ([]byte, error) {
 	base := c.BaseURL
 	if base == "" {
@@ -287,9 +273,6 @@ func (c *WebClient) fetch(ctx context.Context, urlPath string, opts fetchOpts) (
 	return body, nil
 }
 
-// httpGetWithRetry does one retry on 5xx / connection errors. 4xx is
-// returned immediately as ErrNotFound (404) or wrapped in
-// ErrUnavailable (other 4xx).
 func (c *WebClient) httpGetWithRetry(ctx context.Context, fullURL string) ([]byte, cacheMeta, error) {
 	var lastErr error
 	for attempt := 0; attempt < 2; attempt++ {
@@ -309,9 +292,6 @@ func (c *WebClient) httpGetWithRetry(ctx context.Context, fullURL string) ([]byt
 	return nil, cacheMeta{}, fmt.Errorf("%w: %w", ErrUnavailable, lastErr)
 }
 
-// statusErr lets callers branch on HTTP status without parsing the
-// error string. Wrapped in ErrUnavailable by httpGetWithRetry for
-// non-404 failures.
 type statusErr struct {
 	code int
 	url  string
@@ -358,9 +338,6 @@ func (c *WebClient) httpGet(ctx context.Context, fullURL string) ([]byte, cacheM
 	}, nil
 }
 
-// cachePath maps a URL path into an on-disk file path under CacheDir.
-// Returns "" if the result would escape CacheDir. The body file lives
-// at <CacheDir>/<urlPath>; the sidecar at <body>.meta.
 func (c *WebClient) cachePath(urlPath string) string {
 	if c.CacheDir == "" {
 		return ""
@@ -421,9 +398,6 @@ func (c *WebClient) writeCache(urlPath string, body []byte, meta cacheMeta) erro
 	return writeAtomic(bodyPath+".meta", metaBytes, 0o644)
 }
 
-// writeAtomic writes data to a temp file in the same directory then
-// renames into place. Survives concurrent invocations by giving each
-// writer a distinct temp file (os.CreateTemp uses random suffixes).
 func writeAtomic(path string, data []byte, mode os.FileMode) error {
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")

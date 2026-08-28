@@ -47,7 +47,7 @@ type ArtifactStore struct {
 	Prefix string // optional namespace within bucket; "" means bucket root
 	Client API
 
-	casOnce casProbe // memoizes ConditionalWritesSupported
+	casOnce casProbe
 }
 
 // NewArtifactStore wires an ArtifactStore around the provided client.
@@ -156,9 +156,6 @@ func (s *ArtifactStore) List(ctx context.Context, prefix string) ([]string, erro
 	return out, nil
 }
 
-// isNotFound matches both the typed NoSuchKey/NotFound shapes and the
-// HTTP-404 form some S3-compatible providers emit. HeadObject returns
-// smithy "NotFound" rather than s3.NoSuchKey, so we unwrap generically.
 func isNotFound(err error) bool {
 	if err == nil {
 		return false

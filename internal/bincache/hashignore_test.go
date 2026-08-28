@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// newGitPipelineDir is newPipelineDir inside an initialized repository,
-// so .gitignore is live for the key computation.
 func newGitPipelineDir(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -22,10 +20,6 @@ func newGitPipelineDir(t *testing.T) string {
 	return dir
 }
 
-// A gitignored file is local debris -- a provider plugin, a release
-// output -- that no build reads and that differs per machine. Hashing
-// it would make the key machine-specific and defeat sharing a compiled
-// binary between two checkouts of the same commit.
 func TestPipelineCacheKey_SkipsGitignoredFiles(t *testing.T) {
 	dir := newGitPipelineDir(t)
 	writeFile(t, filepath.Join(dir, ".gitignore"), "dist/\n*.tfplan\n")
@@ -51,8 +45,6 @@ func TestPipelineCacheKey_InvalidatesOnTrackedFileEdit(t *testing.T) {
 	}
 }
 
-// Editing .gitignore itself changes which files are build-relevant, so
-// it has to move the key like any other tracked file.
 func TestPipelineCacheKey_InvalidatesOnGitignoreEdit(t *testing.T) {
 	dir := newGitPipelineDir(t)
 	writeFile(t, filepath.Join(dir, ".gitignore"), "dist/\n")
@@ -79,11 +71,8 @@ func TestPipelineCacheKey_HashAllFilesEnvRestoresFullHashing(t *testing.T) {
 	}
 }
 
-// Outside a repository there is no .gitignore to consult, so every file
-// counts. A spurious miss costs one recompile; a spurious hit would
-// serve a stale binary, so this is the safe direction to fail in.
 func TestPipelineCacheKey_NonRepoDirHashesEverything(t *testing.T) {
-	dir := newPipelineDir(t) // deliberately not a git repo
+	dir := newPipelineDir(t)
 	writeFile(t, filepath.Join(dir, ".gitignore"), "dist/\n")
 	before := mustKey(t, dir)
 

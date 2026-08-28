@@ -14,14 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// A controller and a logs service are two binaries on two ports
-// (sparkwing-controller :4344, sparkwing-logs :4345), and only the
-// second routes /api/v1/logs. RemoteBackends defaulted log appends to
-// the controller's own base URL, so a profile that named a controller
-// and no logs surface posted every line into a 404.
-//
-// This pins the discriminator the fix relies on: a bare controller
-// handler does not accept a log append.
 func TestControllerHandlerServesNoLogAppends(t *testing.T) {
 	st, err := store.Open(t.TempDir() + "/controller.db")
 	if err != nil {
@@ -43,10 +35,6 @@ func TestControllerHandlerServesNoLogAppends(t *testing.T) {
 	}
 }
 
-// The laptop dashboard mounts the controller and the logs service on
-// one mux, so there the controller's base URL is the right place to
-// send appends. The fix must not break that case, which is why the
-// base URL stays the last resort rather than being removed.
 func TestColocatedControllerAcceptsLogAppends(t *testing.T) {
 	st, err := store.Open(t.TempDir() + "/controller.db")
 	if err != nil {
@@ -74,8 +62,6 @@ func TestColocatedControllerAcceptsLogAppends(t *testing.T) {
 	}
 }
 
-// When the controller announces a logs URL, appends go there rather
-// than to the controller.
 func TestRemoteBackends_PrefersAnnouncedLogsURL(t *testing.T) {
 	var logsHits, ctrlLogHits atomic.Int64
 

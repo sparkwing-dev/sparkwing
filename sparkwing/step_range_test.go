@@ -9,8 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// --start-at on a linear DAG runs the named step + every downstream
-// step; everything upstream is skipped.
 func TestStepRange_LinearDAG_StartAt(t *testing.T) {
 	var ranA, ranB, ranC atomic.Bool
 	w := sparkwing.NewWork()
@@ -33,8 +31,6 @@ func TestStepRange_LinearDAG_StartAt(t *testing.T) {
 	}
 }
 
-// --stop-at: the named step + every upstream step run; everything
-// downstream is skipped.
 func TestStepRange_LinearDAG_StopAt(t *testing.T) {
 	var ranA, ranB, ranC atomic.Bool
 	w := sparkwing.NewWork()
@@ -54,8 +50,6 @@ func TestStepRange_LinearDAG_StopAt(t *testing.T) {
 	}
 }
 
-// Pin the inclusive single-step window: --start-at X --stop-at X
-// runs exactly X.
 func TestStepRange_LinearDAG_StartEqualsStop(t *testing.T) {
 	var ranA, ranB, ranC atomic.Bool
 	w := sparkwing.NewWork()
@@ -75,19 +69,6 @@ func TestStepRange_LinearDAG_StartEqualsStop(t *testing.T) {
 	}
 }
 
-// Branching DAG: --start-at on a deep step skips all upstream
-// including the parallel-branch sibling. Documents the
-// reachability semantics from the ticket.
-//
-//	  root
-//	 /    \
-//	L      R
-//	 \    /
-//	 merge
-//	   |
-//	   end
-//
-// --start-at end skips root, L, R, merge -- only end runs.
 func TestStepRange_BranchingDAG_StartAtSkipsAllUpstream(t *testing.T) {
 	var ranRoot, ranL, ranR, ranMerge, ranEnd atomic.Bool
 	w := sparkwing.NewWork()
@@ -111,10 +92,6 @@ func TestStepRange_BranchingDAG_StartAtSkipsAllUpstream(t *testing.T) {
 	}
 }
 
-// User SkipIf still applies: range-skip OR'd with predicate. If the
-// range says "run X" but the user's predicate returns true, X is
-// still skipped (predicate wins for run vs skip; range-skip wins
-// only over not-yet-evaluated predicates).
 func TestStepRange_UserSkipIfStillApplies(t *testing.T) {
 	var ranA, ranB atomic.Bool
 	w := sparkwing.NewWork()
@@ -135,7 +112,6 @@ func TestStepRange_UserSkipIfStillApplies(t *testing.T) {
 	}
 }
 
-// Empty range: every step runs. Pin the no-op contract.
 func TestStepRange_NoBoundsRunsEverything(t *testing.T) {
 	var ranA, ranB atomic.Bool
 	w := sparkwing.NewWork()
@@ -150,11 +126,6 @@ func TestStepRange_NoBoundsRunsEverything(t *testing.T) {
 	}
 }
 
-// Range bounds naming a step in another Work degrade gracefully:
-// the local Work runs everything (no items match the bound, so the
-// filter doesn't apply). Lets a multi-Job pipeline carry one global
-// (start, stop) on ctx without forcing every Work to know about
-// every other Work's step ids.
 func TestStepRange_BoundInUnrelatedWorkIsNoOp(t *testing.T) {
 	var ran atomic.Bool
 	w := sparkwing.NewWork()
@@ -169,7 +140,6 @@ func TestStepRange_BoundInUnrelatedWorkIsNoOp(t *testing.T) {
 	}
 }
 
-// TopologicalStepOrder returns a stable order consistent with Needs.
 func TestTopologicalStepOrder_Stable(t *testing.T) {
 	w := sparkwing.NewWork()
 	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })

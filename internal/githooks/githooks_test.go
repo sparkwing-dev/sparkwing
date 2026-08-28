@@ -10,9 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
-// stubGit answers core.hooksPath lookups from fixed local and global values.
-// An empty value stands for "not configured", which real git reports by
-// exiting non-zero.
 func stubGit(local, global string) githooks.Git {
 	return func(_ string, args ...string) (string, error) {
 		scope := ""
@@ -35,7 +32,6 @@ func stubGit(local, global string) githooks.Git {
 	}
 }
 
-// repoWithGate builds a checkout whose hook directory holds one managed gate.
 func repoWithGate(t *testing.T, hookName string) (repoRoot, hooksDir string) {
 	t.Helper()
 	repoRoot = t.TempDir()

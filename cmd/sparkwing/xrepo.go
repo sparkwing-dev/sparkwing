@@ -1,8 +1,3 @@
-// `sparkwing configure xrepo` -- laptop-local repo registry CLI. Persists at
-// ~/.config/sparkwing/repos.yaml; consumed by the local trigger
-// consumer (internal/orchestrator/local_trigger_loop.go) to resolve
-// "pipeline X" -> "checkout at ~/code/Y" without per-call
-// WithFreshRepo annotations.
 package main
 
 import (
@@ -46,10 +41,6 @@ func runXrepo(args []string) error {
 	return nil
 }
 
-// runXrepoList prints every registered repo and the pipelines it
-// declares. Adds a stale/worktree marker so the operator can spot
-// drift without reading the YAML by hand. `-o json` emits a stable
-// shape for agents.
 func runXrepoList(args []string) error {
 	fs := flag.NewFlagSet("repo list", flag.ExitOnError)
 	outputFormat := fs.StringP("output", "o", "", "output format (json|table)")
@@ -86,7 +77,7 @@ func runXrepoList(args []string) error {
 	}
 
 	if *outputFormat == "json" {
-		// NDJSON: one repo per line.
+
 		return ndjson.Write(os.Stdout, rows)
 	}
 
@@ -114,9 +105,6 @@ func runXrepoList(args []string) error {
 	return tw.Flush()
 }
 
-// runXrepoAdd registers an explicit path (default: cwd) in the
-// registry. Unlike auto-register this does NOT skip worktrees --
-// the user asked for it.
 func runXrepoAdd(args []string) error {
 	fs := flag.NewFlagSet("repo add", flag.ExitOnError)
 	if err := parseAndCheck(cmdConfigureXrepoAdd, fs, args); err != nil {
@@ -140,10 +128,6 @@ func runXrepoAdd(args []string) error {
 	return nil
 }
 
-// runXrepoRemove drops every entry matching the argument: full
-// path, abbreviated path, or basename ("sparkwing" matches a
-// registered ~/code/sparkwing). Zero matches isn't an error -- the
-// user's intent is "I don't want this" and that's already true.
 func runXrepoRemove(args []string) error {
 	fs := flag.NewFlagSet("repo remove", flag.ExitOnError)
 	if err := parseAndCheck(cmdConfigureXrepoRemove, fs, args); err != nil {
@@ -164,8 +148,6 @@ func runXrepoRemove(args []string) error {
 	return nil
 }
 
-// runXrepoPrune drops entries whose path no longer has a .sparkwing/
-// dir. Useful after moving / deleting a checkout.
 func runXrepoPrune(args []string) error {
 	fs := flag.NewFlagSet("repo prune", flag.ExitOnError)
 	if err := parseAndCheck(cmdConfigureXrepoPrune, fs, args); err != nil {
@@ -189,9 +171,6 @@ func runXrepoPrune(args []string) error {
 	return nil
 }
 
-// entryWord pluralizes "entry"/"entries" for repo CLI messages.
-// Tiny helper kept local because cmd/sparkwing's existing plural()
-// only handles -es words.
 func entryWord(n int) string {
 	if n == 1 {
 		return "entry"
@@ -199,11 +178,6 @@ func entryWord(n int) string {
 	return "entries"
 }
 
-// repoListPipelines mirrors pkg/repos.pipelineNamesForRepo. We
-// re-do the work here (rather than exporting the helper) because
-// the CLI is the only consumer that wants pipeline names alongside
-// a list -- the orchestrator's resolver uses an in-memory map. If
-// a third caller materializes, hoist this into pkg/repos.
 func repoListPipelines(absPath string) ([]string, error) {
 	_, _ = repos.ResolveRepoForPipeline("__sparkwing_repo_list_probe__")
 	return repos.PipelineNamesForRepo(absPath)

@@ -8,15 +8,8 @@ import (
 	"strings"
 )
 
-// mdLinkRE matches a markdown link's target: [text](target).
 var mdLinkRE = regexp.MustCompile(`\[[^\]]*\]\(([^)\s]+)\)`)
 
-// checkLinks verifies that every intra-doc markdown link to a `.md`
-// page resolves to a file that exists (relative to the linking file).
-// This catches the rot where a page links to a renamed or deleted
-// doc -- increasingly likely as concept pages link to the generated
-// references. External (http/mailto) links and in-page anchors are
-// left alone; only the file part of a `.md` target is checked.
 func checkLinks(contentDir string) bool {
 	var broken []string
 	var checked int

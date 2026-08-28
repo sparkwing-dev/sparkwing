@@ -20,10 +20,6 @@ import (
 
 func timeNowUTC() time.Time { return time.Now().UTC() }
 
-// TestBootstrap_NeededOnEmpty asserts the unauthenticated probe
-// returns true on a fresh store and false once a user exists, so the
-// web pod's /login render flips from the signup form to the normal
-// login form without a controller restart.
 func TestBootstrap_NeededOnEmpty(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
@@ -45,10 +41,6 @@ func TestBootstrap_NeededOnEmpty(t *testing.T) {
 	}
 }
 
-// TestBootstrap_PostBootstrapRequiresAuth covers the post-bootstrap
-// safety requirement: once a user exists AND auth is on, POST
-// /api/v1/users reverts to admin-scoped and an unauthenticated call
-// is rejected. No reopening of the bootstrap path.
 func TestBootstrap_PostBootstrapRequiresAuth(t *testing.T) {
 	base, st, cleanup := newAuthedTestServer(t)
 	defer cleanup()
@@ -130,10 +122,6 @@ func TestBootstrap_AuthEnabledRequiresAdminForFirstUser(t *testing.T) {
 	}
 }
 
-// TestBootstrap_ConcurrentSignupRace fires many parallel unauthed
-// POSTs against a fresh controller and asserts exactly one wins. The
-// emptiness check happens inside the insert tx (store.CreateFirstUser)
-// so the race is resolved deterministically.
 func TestBootstrap_ConcurrentSignupRace(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()

@@ -41,9 +41,6 @@ func genFixtureStart(ctx context.Context) error {
 	return nil
 }
 
-// genFixtureReady is the postcondition: the job's action succeeding is
-// not the same as the database accepting connections, so readiness is
-// gated here rather than slept for in the test job.
 func genFixtureReady(ctx context.Context) error {
 	sw.Annotate(ctx, "database accepting connections")
 	return nil

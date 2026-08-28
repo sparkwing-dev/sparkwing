@@ -24,10 +24,6 @@ func (authFailPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 	return nil
 }
 
-// When logs.append returns 403 to the runner, the run must hard-fail
-// with a structured error rather than report status=success with
-// empty logs. This is the single most important behavioral
-// guarantee.
 func TestHTTPLogs_403HardFailsRun(t *testing.T) {
 	register("authfail-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return authFailPipe{} })
 

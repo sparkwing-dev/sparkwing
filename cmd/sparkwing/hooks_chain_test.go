@@ -10,10 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
-// chainFixture is a throwaway machine for the hooks install: a real git
-// checkout, a global git config that sets core.hooksPath, the hook directory
-// it points at, and a sparkwing shim on PATH that records the pipelines a
-// hook asks for.
 type chainFixture struct {
 	root       string
 	repo       string
@@ -62,11 +58,6 @@ func newChainFixture(t *testing.T) *chainFixture {
 	return f
 }
 
-// env is the environment every git and hook invocation runs under. It is
-// built from scratch rather than inherited: a test suite started by a git
-// hook carries GIT_DIR and GIT_INDEX_FILE pointing at the outer repository,
-// and a child git that inherits them commits into that repository instead of
-// this fixture's.
 func (f *chainFixture) env() []string {
 	return []string{
 		"PATH=" + f.binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
@@ -80,12 +71,6 @@ func (f *chainFixture) env() []string {
 	}
 }
 
-// asProcessEnv points this process's own environment at the fixture, so code
-// that shells git itself -- the command entry points, which reach for the
-// package-level runGit -- runs against the fixture's machine rather than the
-// developer's. The repository-binding GIT_* variables are cleared with it: a
-// suite started from a git hook inherits them and a child git would otherwise
-// operate on the outer repository.
 func (f *chainFixture) asProcessEnv(t *testing.T) {
 	t.Helper()
 	for _, kv := range f.env() {

@@ -22,9 +22,6 @@ func fireResults() []githooks.FireResult {
 	}
 }
 
-// A repo with no gate to fire is not a failure; every other verdict short of a
-// refusal by the repo's own gate is, including the ones that mean the question
-// went unanswered.
 func TestUnenforcedResults_CountsEverythingButARefusalAndNothingToFire(t *testing.T) {
 	got := unenforcedResults(fireResults())
 	if len(got) != 2 {
@@ -35,8 +32,6 @@ func TestUnenforcedResults_CountsEverythingButARefusalAndNothingToFire(t *testin
 	}
 }
 
-// A refusal by a gate that also moved HEAD is not a pass. HEAD must not move
-// during the attempt, and a report that shrugs at it is worthless.
 func TestUnenforcedResults_CountsARefusalThatMovedHead(t *testing.T) {
 	results := []githooks.FireResult{
 		{Repo: "/code/xwing", Verdict: githooks.FireRefused, Hook: "/h/pre-commit", HeadMoved: true},

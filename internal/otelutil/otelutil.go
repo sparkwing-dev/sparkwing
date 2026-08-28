@@ -1,4 +1,3 @@
-// Package otelutil provides shared OpenTelemetry initialization for all sparkwing services.
 package otelutil
 
 import (
@@ -29,28 +28,20 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// Config configures a service's telemetry setup.
 type Config struct {
-	// ServiceName is the OTEL service.name attribute (e.g. "sparkwing-controller").
 	ServiceName string
 
-	// Version is the service version, used in resource attributes.
 	Version string
 
-	// RegisterMetrics is an optional callback invoked after the MeterProvider
-	// is set up, allowing the caller to register service-specific instruments.
 	RegisterMetrics func(metric.Meter)
 }
 
-// Telemetry holds the initialized telemetry state.
 type Telemetry struct {
-	// PromHandler serves Prometheus metrics on /metrics.
 	PromHandler http.Handler
 
 	shutdowns []func(context.Context) error
 }
 
-// Shutdown flushes and shuts down all telemetry providers.
 func (t *Telemetry) Shutdown(ctx context.Context) error {
 	for _, fn := range t.shutdowns {
 		if err := fn(ctx); err != nil {
@@ -60,9 +51,6 @@ func (t *Telemetry) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// ContextFromEnv extracts a trace context from the TRACEPARENT environment
-// variable. If TRACEPARENT is not set, returns the input context unchanged.
-// This is used by runners to join the controller's trace.
 func ContextFromEnv(ctx context.Context) context.Context {
 	tp := os.Getenv("TRACEPARENT")
 	if tp == "" {
@@ -72,11 +60,6 @@ func ContextFromEnv(ctx context.Context) context.Context {
 	return propagation.TraceContext{}.Extract(ctx, carrier)
 }
 
-// TraceParentEnv returns a "TRACEPARENT=<w3c>" env-var string derived
-// from the active span in ctx, or "" when no span is active. Callers
-// append the result to a child process's env so the child's
-// ContextFromEnv can rejoin the parent trace. Keeps the propagation
-// detail inside otelutil so callers don't reach into go.opentelemetry.io.
 func TraceParentEnv(ctx context.Context) string {
 	sc := trace.SpanContextFromContext(ctx)
 	if !sc.IsValid() {
@@ -91,21 +74,14 @@ func TraceParentEnv(ctx context.Context) string {
 	return "TRACEPARENT=" + tp
 }
 
-// Tracer returns a named tracer for the given service.
 func Tracer(name string) trace.Tracer {
 	return otel.Tracer(name)
 }
 
-// Meter returns a named meter for the given service.
 func Meter(name string) metric.Meter {
 	return otel.Meter(name)
 }
 
-// Init sets up OpenTelemetry for a sparkwing service:
-//   - TracerProvider with OTLP export (if OTEL_EXPORTER_OTLP_ENDPOINT is set)
-//   - MeterProvider with Prometheus exporter (always) + OTLP (if endpoint set)
-//   - LoggerProvider with slog bridge for trace/span ID correlation (if endpoint set)
-//   - W3C TraceContext + Baggage propagators
 func Init(ctx context.Context, cfg Config) *Telemetry {
 	t := &Telemetry{}
 
@@ -203,10 +179,6 @@ func Init(ctx context.Context, cfg Config) *Telemetry {
 	return t
 }
 
-// resolveSampler returns the parent-based sampler for this process.
-// OTEL_TRACES_SAMPLER_ARG is read as a float in [0,1]; the default is
-// 1.0 (sample everything), which matches laptop-dev expectations.
-// Prod manifests set it to 0.1 for 10% head sampling.
 func resolveSampler() sdktrace.Sampler {
 	ratio := 1.0
 	if raw := os.Getenv("OTEL_TRACES_SAMPLER_ARG"); raw != "" {
@@ -219,16 +191,10 @@ func resolveSampler() sdktrace.Sampler {
 	return sdktrace.ParentBased(sdktrace.TraceIDRatioBased(ratio))
 }
 
-// WrapHandler wraps h with otelhttp middleware so every HTTP request
-// becomes a span rooted at the given service name. Pass the result as
-// the process's HTTP handler.
 func WrapHandler(serviceName string, h http.Handler) http.Handler {
 	return otelhttp.NewHandler(h, serviceName)
 }
 
-// WrapTransport returns an http.RoundTripper that stamps outgoing
-// requests with the W3C trace-context header derived from the
-// request's context. Accepts nil to mean http.DefaultTransport.
 func WrapTransport(base http.RoundTripper) http.RoundTripper {
 	if base == nil {
 		base = http.DefaultTransport
@@ -236,9 +202,6 @@ func WrapTransport(base http.RoundTripper) http.RoundTripper {
 	return otelhttp.NewTransport(base)
 }
 
-// SpanAttrs is the bundle of sparkwing-scoped attributes handlers
-// stamp on the active span. All fields are optional; empty values are
-// skipped so the scrape never carries an empty-string attribute.
 type SpanAttrs struct {
 	RunID     string
 	NodeID    string
@@ -247,9 +210,6 @@ type SpanAttrs struct {
 	Principal string
 }
 
-// StampSpan writes the non-empty fields on a to the active span
-// carried in ctx. No-op when the context carries no span (e.g. a code
-// path that's not yet wrapped by otelhttp).
 func StampSpan(ctx context.Context, a SpanAttrs) {
 	span := trace.SpanFromContext(ctx)
 	if !span.IsRecording() {
@@ -272,8 +232,6 @@ func StampSpan(ctx context.Context, a SpanAttrs) {
 	}
 }
 
-// traceContextHandler wraps an slog.Handler to inject trace_id and span_id
-// from the context into every log record. This enables log-to-trace correlation.
 type traceContextHandler struct {
 	inner slog.Handler
 }
@@ -301,7 +259,6 @@ func (h *traceContextHandler) WithGroup(name string) slog.Handler {
 	return &traceContextHandler{inner: h.inner.WithGroup(name)}
 }
 
-// multiSlogHandler fans out log records to multiple slog handlers.
 type multiSlogHandler struct {
 	handlers []slog.Handler
 }

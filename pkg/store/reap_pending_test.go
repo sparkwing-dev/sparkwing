@@ -8,12 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestReapStalePendingRuns_FlipsDoneTriggerPendingRunsToFailed covers
-// the bug the reaper was added for: a runner FinishTriggers a claim
-// (the trigger flips to 'done') but the associated run row stays at
-// 'pending' because the runner's failure path didn't propagate to
-// FinishRun. The reaper should detect the mismatch after the grace
-// window and mark the run failed.
 func TestReapStalePendingRuns_FlipsDoneTriggerPendingRunsToFailed(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -62,11 +56,6 @@ func TestReapStalePendingRuns_FlipsDoneTriggerPendingRunsToFailed(t *testing.T) 
 	}
 }
 
-// TestReapStalePendingRuns_LeavesRunsWithLiveTriggerAlone verifies
-// the reaper doesn't trip pending runs whose trigger is still in
-// 'pending' or 'claimed' state. Those are legitimately in flight
-// (queued for a runner or actively being processed) and shouldn't
-// flip to failed.
 func TestReapStalePendingRuns_LeavesRunsWithLiveTriggerAlone(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -104,10 +93,6 @@ func TestReapStalePendingRuns_LeavesRunsWithLiveTriggerAlone(t *testing.T) {
 	}
 }
 
-// TestReapStalePendingRuns_RespectsGracePeriod verifies that
-// recently-finished triggers don't get reaped immediately -- the
-// grace window has to elapse first to avoid racing against a healthy
-// FinishRun call still in flight.
 func TestReapStalePendingRuns_RespectsGracePeriod(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()

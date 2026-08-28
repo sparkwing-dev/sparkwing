@@ -1,4 +1,3 @@
-// Handlers for the approvals CLI verbs:
 package main
 
 import (
@@ -18,21 +17,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// runApprove handles `sparkwing runs approvals approve --run <id> --node <id>`.
 func runApprove(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	return resolveApprovalVerb(ctx, paths, args, cmdApprove,
 		store.ApprovalResolutionApproved, "approved")
 }
 
-// runDeny handles `sparkwing runs approvals deny --run <id> --node <id>`.
 func runDeny(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	return resolveApprovalVerb(ctx, paths, args, cmdDeny,
 		store.ApprovalResolutionDenied, "denied")
 }
 
-// resolveApprovalVerb is the shared body of approve/deny. Prints a
-// one-line confirmation on success and exits non-zero on failure.
-// Exit codes:
 func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []string, cmd Command, resolution, pastTense string) error {
 	fs := flag.NewFlagSet(cmd.Path, flag.ContinueOnError)
 	on := fs.String("profile", "", "profile name (default: local)")
@@ -81,9 +75,6 @@ func resolveApprovalVerb(ctx context.Context, paths orchestrator.Paths, args []s
 	return nil
 }
 
-// resolveLocalApproval opens the local SQLite store, writes the
-// resolution, and returns the updated row. Keeps the store-close
-// inside the function so callers don't need to manage a handle.
 func resolveLocalApproval(ctx context.Context, paths orchestrator.Paths, runID, nodeID, resolution, approver, comment string) (*store.Approval, error) {
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, err
@@ -96,7 +87,6 @@ func resolveLocalApproval(ctx context.Context, paths orchestrator.Paths, runID, 
 	return st.ResolveApproval(ctx, runID, nodeID, resolution, approver, comment)
 }
 
-// runApprovalsList handles `sparkwing approvals list`.
 func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdApprovalsList.Path, flag.ContinueOnError)
 	on := fs.String("profile", "", "profile name (default: local)")
@@ -137,16 +127,12 @@ func runApprovalsList(ctx context.Context, paths orchestrator.Paths, args []stri
 		return err
 	}
 	if emitJSON {
-		// NDJSON: one approval per line, so `head` returns whole rows.
+
 		return ndjson.Write(os.Stdout, rows)
 	}
 	return renderApprovalsTable(os.Stdout, rows)
 }
 
-// listLocalApprovals is the local-mode read for runApprovalsList.
-// When runID is empty it returns unresolved approvals across every
-// run; when set it returns the full history (pending + resolved) for
-// that run.
 func listLocalApprovals(ctx context.Context, paths orchestrator.Paths, runID string) ([]*store.Approval, error) {
 	if err := paths.EnsureRoot(); err != nil {
 		return nil, err
@@ -181,7 +167,6 @@ func renderApprovalsTable(w *os.File, rows []*store.Approval) error {
 	return tw.Flush()
 }
 
-// orDashApproval renders empty strings as "-" so columns line up.
 func orDashApproval(s string) string {
 	if s == "" {
 		return "-"

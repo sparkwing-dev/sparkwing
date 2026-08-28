@@ -10,7 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// requiresJob declares only Requires.
 type requiresJob struct{ sparkwing.Base }
 
 func (requiresJob) Requires() []string { return []string{"cloud-windows"} }
@@ -18,7 +17,6 @@ func (requiresJob) Work(_ *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-// allThreeJob declares all three provider interfaces.
 type allThreeJob struct{ sparkwing.Base }
 
 func (allThreeJob) Requires() []string   { return []string{"os=linux"} }
@@ -28,8 +26,6 @@ func (allThreeJob) Work(_ *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-// shardJob picks Requires per its data -- the canonical heterogeneous
-// fan-out use case.
 type shardJob struct {
 	sparkwing.Base
 	NeedsUSB bool
@@ -118,8 +114,6 @@ func TestWorkableLabels_JobFanOutHeterogeneous(t *testing.T) {
 	}
 }
 
-// dynShardSource produces []int the JobFanOutDynamic gen reads. The
-// per-item Workable's Requires() then depends on whether i is odd.
 type dynShardSource struct {
 	sparkwing.Base
 	sparkwing.Produces[[]int]

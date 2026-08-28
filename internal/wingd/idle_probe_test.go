@@ -12,8 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// startProbeLoop keeps probe traffic flowing until test cleanup. Outcomes are
-// ignored because failed probes are expected after the daemon exits.
 func startProbeLoop(t *testing.T, interval time.Duration, probe func(context.Context) error) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -48,9 +46,6 @@ func TestIdleExit_HealthProbeTrafficDoesNotResetIdleClock(t *testing.T) {
 	home := shortHome(t)
 	td := startDaemon(t, wingd.Config{Home: home, IdleTimeout: 300 * time.Millisecond})
 
-	// One synchronous probe first: the daemon is ready, so this must
-	// succeed, proving probes are being served before asserting what
-	// they do not do.
 	firstCtx, firstDone := context.WithTimeout(context.Background(), 2*time.Second)
 	defer firstDone()
 	if err := client.HealthProbe(firstCtx, home); err != nil {
@@ -136,10 +131,6 @@ func TestIdleExit_PreHelloConnectionsDoNotResetIdleClock(t *testing.T) {
 		t.Fatalf("socket path: %v", err)
 	}
 
-	// Dial and hang up without ever sending a hello, over and over: the
-	// shape of a probe whose hello was cut off by its deadline. A peer
-	// that never said hello did no work, so its disconnect must not
-	// advance the idle clock.
 	startProbeLoop(t, 50*time.Millisecond, func(ctx context.Context) error {
 		nc, err := (&net.Dialer{}).DialContext(ctx, "unix", sock)
 		if err == nil {
@@ -177,11 +168,6 @@ func TestIdleExit_WaitsForWorkingConnections(t *testing.T) {
 	}
 }
 
-// TestIdleExit_GraceThenIdleUnderHealthProbes is the release-host shape: a
-// daemon restarted over persisted leases whose owners are gone, with a
-// supervisor probing it throughout. The reattach grace must still hold the
-// daemon open, and once grace releases the unreclaimed leases, the probes
-// must not keep it from idling out.
 func TestIdleExit_GraceThenIdleUnderHealthProbes(t *testing.T) {
 	t.Parallel()
 
@@ -190,8 +176,6 @@ func TestIdleExit_GraceThenIdleUnderHealthProbes(t *testing.T) {
 	cl := ensure(t, home, "")
 	mustAcquire(t, cl, coreReq("gone-owner", 1))
 
-	// Stop the daemon out from under the holder; the lease persists for
-	// a successor, and its owner never comes back.
 	td.stop()
 	if err := td.waitExit(t, 3*time.Second); err != nil {
 		t.Fatalf("first daemon stop: %v", err)

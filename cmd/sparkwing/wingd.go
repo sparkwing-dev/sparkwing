@@ -1,14 +1,3 @@
-// `sparkwing wingd run` -- the resident local admission arbiter, and
-// `sparkwing wingd supervise` -- the watchdog that owns its recovery.
-// Both verbs are hidden: users never invoke them directly.
-//
-// The installed Sparkwing distribution owns daemon lifecycle. Pipeline
-// clients declare required capabilities and use the running daemon; they
-// never host, replace, or upgrade it. A run's client spawns the binary
-// named by $SPARKWING_WINGD_BIN -- which `sparkwing run` sets to this
-// CLI's own path -- else the `sparkwing` found on PATH, so the daemon is
-// always an installed sparkwing build rather than a per-repo pipeline
-// binary.
 package main
 
 import (
@@ -27,7 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd/supervise"
 )
 
-// runWingd dispatches the hidden `sparkwing wingd <verb>` surface.
 func runWingd(args []string) error {
 	if len(args) == 0 {
 		return errors.New("wingd: subcommand required (run, supervise)")
@@ -42,9 +30,6 @@ func runWingd(args []string) error {
 	}
 }
 
-// runWingdRun elects and serves one daemon for a sparkwing home, blocking
-// until it drains, idles out, or is signalled. Losing the election is a
-// success: another daemon already serves the home.
 func runWingdRun(args []string) error {
 	fs := flag.NewFlagSet("wingd run", flag.ContinueOnError)
 	home := fs.String("home", "", "sparkwing home (default: $SPARKWING_HOME or ~/.sparkwing)")

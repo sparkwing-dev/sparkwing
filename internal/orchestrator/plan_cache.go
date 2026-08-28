@@ -16,21 +16,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// planCacheOutcome is the short-circuit state of a plan-level Concurrency
-// acquire. Non-zero means dispatch returns without scheduling.
 type planCacheOutcome string
 
 const (
-	planCacheProceed planCacheOutcome = ""        // slot acquired; proceed as normal
-	planCacheSkipped planCacheOutcome = "skip"    // OnLimit:Skip, key was full
-	planCacheFailed  planCacheOutcome = "fail"    // OnLimit:Fail, key was full
-	planCacheEvicted planCacheOutcome = "evicted" // superseded mid-run
+	planCacheProceed planCacheOutcome = ""
+	planCacheSkipped planCacheOutcome = "skip"
+	planCacheFailed  planCacheOutcome = "fail"
+	planCacheEvicted planCacheOutcome = "evicted"
 )
 
-// planAdmissionEvictedError reports a run losing its admission to a
-// cancel_others requester, naming the contested key, the policy, and
-// the run that superseded it. The run finalizes as cancelled, never as
-// a generic execution failure.
 type planAdmissionEvictedError struct {
 	groupName    string
 	policy       string
@@ -77,15 +71,6 @@ func planConcurrencyAcquireOrder(plan *sparkwing.Plan, runID string) []sparkwing
 	return memberships
 }
 
-// acquirePlanSlot handles plan-level Concurrency() coordination through
-// the shared store. Caller invokes release() at plan terminal. release
-// uses a fresh context so it survives a cancelled run. The coordination
-// key is scope-qualified through the same scopedGroupKey the node-level
-// path uses, so groups with the same name and different scopes never
-// alias, and a plan group and a node group with the same name and scope
-// share one budget. With daemonHandlesLocalScopes set (the local run
-// path), box- and run-scoped groups are excluded here -- they ride the
-// run's daemon lease -- and only global-scope groups touch the store.
 func acquirePlanSlot(
 	ctx context.Context,
 	backends Backends,
@@ -241,15 +226,6 @@ type planConcurrencyHolderPayload struct {
 	LeaseExpiresAt time.Time `json:"lease_expires_at"`
 }
 
-// waitForPlanSlot polls until promoted or cancelled. Plans never
-// inherit output, so only those two outcomes are meaningful. A
-// non-zero queueTimeout bounds the wait: once it elapses the parked
-// waiter is cancelled and the run fails with a queue_timeout error
-// naming the group, the configured timeout, and the current holder;
-// zero waits indefinitely. A transient ResolveWaiter error keeps
-// polling; the wedge guard turns a continuous failure streak past
-// wedgeBudget (or one "locking protocol" error) into a terminal error
-// instead of a poll loop spinning against a wedged store.
 func waitForPlanSlot(ctx context.Context, backends Backends, key, groupName, resource, runID, holderID string, queueTimeout, wedgeBudget time.Duration) (bool, error) {
 	wedge := newStoreWedgeGuard(wedgeBudget)
 	var deadline time.Time
@@ -338,13 +314,6 @@ func cappedPlanEventHolders(holders []store.ConcurrencyHolder) []planConcurrency
 	return payload
 }
 
-// makePlanSlotRelease builds an idempotent release closure backed by
-// a lease-refreshing heartbeat. On contact loss beyond the lease, we
-// log loudly but do NOT preempt running nodes (operator chose plan-
-// scope coordination, not best-effort). A wedged store stops the
-// heartbeat loop -- a "locking protocol" error or a failure streak
-// past wedgeBudget -- instead of re-issuing statements forever; the
-// lease then lapses and the controller reaps the slot.
 func makePlanSlotRelease(backends Backends, key, holderID, onLimit string, wedgeBudget time.Duration) func(outcome string) {
 	hbCtx, hbCancel := context.WithCancel(context.Background())
 	var superseded atomic.Bool

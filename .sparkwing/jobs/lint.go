@@ -6,18 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Lint runs fast, repo-wide checks: gofmt compliance, go vet across
-// every package in the sparkwing module, the CHANGELOG-required gate
-// (any change to a covered surface needs an [Unreleased] entry), the
-// CHANGELOG-style gate (dedupe sub-headings + breaking-entry migration
-// guides, per docs/changelog-style.md), and the API surface gate that
-// diffs HEAD's public API against the checked-in snapshots under
-// .apidiff/. It also runs the shell gates (bin/check-shell.sh via
-// shellcheck, bin/check-shell-test.sh, bin/check-changelog-test.sh),
-// the installer report (bin/install-test.sh) and markdownlint-cli2, so
-// shellcheck and markdownlint-cli2 must be on PATH. Cross-repo callers
-// (a downstream release-all orchestration pipeline) can invoke
-// `sparkwing run lint` here as a gate.
 type Lint struct{ sparkwing.Base }
 
 func (Lint) ShortHelp() string {

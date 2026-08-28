@@ -29,7 +29,6 @@ export default function TriggerForm({
     getPipelines().then(setPipelines);
   }, []);
 
-  // Reset arg values when pipeline changes
   useEffect(() => {
     const meta = pipelines[selectedPipeline];
     if (!meta?.args) {
@@ -52,7 +51,6 @@ export default function TriggerForm({
     setTriggering(true);
     setError(null);
 
-    // Collect non-empty args
     const argsToSend: Record<string, string> = {};
     for (const arg of args) {
       const val = argValues[arg.name] || "";
@@ -90,9 +88,9 @@ export default function TriggerForm({
         )}
       </div>
 
-      {/* Pipeline selector (only if not pre-selected). Falls back to
-          a free-text input until Session C lights up /api/v1/pipelines
-          and pipelineNames gets populated. */}
+      {
+
+                                              }
       {!pipeline && (
         <div>
           <label className="text-xs text-[var(--muted)] block mb-1">
@@ -123,7 +121,7 @@ export default function TriggerForm({
         </div>
       )}
 
-      {/* Args form */}
+      {               }
       {args.length > 0 && (
         <div className="space-y-2">
           {args.map((arg) => (
@@ -139,7 +137,7 @@ export default function TriggerForm({
         </div>
       )}
 
-      {/* No args message */}
+      {                     }
       {selectedPipeline && args.length === 0 && (
         <p className="text-xs text-[var(--muted)]">
           {Object.keys(pipelines).length === 0
@@ -148,10 +146,10 @@ export default function TriggerForm({
         </p>
       )}
 
-      {/* Error */}
+      {           }
       {error && <p className="text-xs text-red-400">{error}</p>}
 
-      {/* Submit */}
+      {            }
       <div className="flex items-center gap-2">
         <button
           onClick={handleSubmit}

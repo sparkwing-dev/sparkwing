@@ -80,9 +80,6 @@ func (r Ref[T]) Get(ctx context.Context) T {
 	return r.getInRun(ctx)
 }
 
-// getInRun reads the upstream node's output from the run store and
-// unmarshals it into T. There is no live-value path: the upstream node
-// ran in a process of its own, so JSON is the only thing that crossed.
 func (r Ref[T]) getInRun(ctx context.Context) T {
 	jsonResolve := jsonResolverFromContext(ctx)
 	var zero T
@@ -203,22 +200,11 @@ func RefToLastRun[T any](pipeline, nodeID string, opts ...RefOption) Ref[T] {
 	}
 }
 
-// jsonResolverFromContext reads the in-run resolver installed by
-// internal/sparkwingruntime.WithJSONResolver. Storing the raw func
-// (rather than a wrapper type) lets the runtime package construct the
-// value without naming an unexported sparkwing type.
 func jsonResolverFromContext(ctx context.Context) func(nodeID string) ([]byte, bool) {
 	f, _ := ctx.Value(keyJSONRefResolver).(func(string) ([]byte, bool))
 	return f
 }
 
-// collectCrossPipelineRefs inspects a job struct for Ref[T] fields
-// whose Pipeline is non-empty (i.e. cross-pipeline refs). Used by
-// the dashboard / audit code to annotate cross-pipeline dependencies
-// without traversing the orchestrator's run graph.
-//
-// Unlike in-run refs, cross-pipeline refs do NOT imply a Needs()
-// edge in the current Plan -- they read another pipeline's history.
 func collectCrossPipelineRefs(job any) []RefTarget {
 	t := reflect.TypeOf(job)
 	v := reflect.ValueOf(job)

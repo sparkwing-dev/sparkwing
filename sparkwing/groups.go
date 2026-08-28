@@ -6,9 +6,6 @@ import (
 	"strings"
 )
 
-// groupKind enumerates the cross-field cardinality rules a GroupBuilder
-// can declare. Internal -- callers reach it via the GroupBuilder
-// methods (ExactlyOne, AtLeastOne, AtMostOne, AllOrNone).
 type groupKind int
 
 const (
@@ -34,14 +31,11 @@ func (k groupKind) String() string {
 	}
 }
 
-// groupMeta is the resolved per-group metadata produced by a chain
-// of GroupBuilder method calls. The resolution chain calls evalGroup
-// against it at validation time after all args have resolved.
 type groupMeta struct {
 	kind   groupKind
-	fields []string  // Go struct field names participating in the group
-	when   Predicate // nil = always active
-	desc   string    // optional override for the violation error message
+	fields []string
+	when   Predicate
+	desc   string
 }
 
 // GroupBuilder is the chainable handle returned by SchemaBuilder.Group.
@@ -58,11 +52,6 @@ type GroupBuilder struct {
 	meta *groupMeta
 }
 
-// newGroupBuilder constructs a GroupBuilder over the supplied field
-// names. Called from SchemaBuilder.Group. Exported via the
-// SchemaBuilder rather than directly so the field-name validation
-// (every name refers to a real struct field) happens at the same
-// point the rest of the schema gets vet-checked.
 func newGroupBuilder(fields []string) *GroupBuilder {
 	cp := make([]string, len(fields))
 	copy(cp, fields)
@@ -116,12 +105,6 @@ func (g *GroupBuilder) Desc(msg string) *GroupBuilder {
 	return g
 }
 
-// evalGroup checks a group constraint against a resolved PredicateContext.
-// Returns nil when the constraint holds (or is dormant via When);
-// returns an error naming the offending fields and expected cardinality
-// when violated. The caller is the resolution chain after all args
-// have resolved -- predicate evaluation here can rely on every field's
-// final value.
 func evalGroup(g *groupMeta, ctx PredicateContext) error {
 	if g.kind == groupKindUnset {
 		return fmt.Errorf("sparkwing: group has no cardinality set (call ExactlyOne / AtLeastOne / AtMostOne / AllOrNone before SchemaBuilder.Build)")
@@ -156,8 +139,6 @@ func evalGroup(g *groupMeta, ctx PredicateContext) error {
 	return nil
 }
 
-// groupViolation formats the standard error message for a failed
-// group constraint. Honors the optional desc override.
 func groupViolation(g *groupMeta, setFields []string) error {
 	if g.desc != "" {
 		return errors.New(g.desc)

@@ -1,6 +1,3 @@
-// Command sparkwing-web is the dashboard pod's entry point: an HTTP
-// server that serves the embedded Next.js bundle and proxies /api/*
-// to the controller and logs-service.
 package main
 
 import (
@@ -44,7 +41,7 @@ func run(args []string) error {
 	token := fs.String("token", "", "controller bearer token (also SPARKWING_AGENT_TOKEN)")
 	apiURL := fs.String("api-url", "", "public API URL injected into the dashboard (default: same origin)")
 	requireLogin := fs.Bool("require-login", false,
-		"redirect unauthed browsers to /login (prod). Leave off for laptop-local dev where the tokens table is empty and login would loop.")
+		"require controller-backed browser sessions; needs --controller or a profile with controller.url. Leave off for laptop-local dev.")
 
 	profileName := fs.String("profile", "", "storage profile name from ~/.config/sparkwing/profiles.yaml whose surfaces the dashboard reads")
 	stateSpec := fs.String("state-spec", "", "inline state backend spec, e.g. postgres://user:pw@host/db or s3://bucket/prefix")
@@ -74,18 +71,23 @@ func run(args []string) error {
 	usingNewConfig := *profileName != "" || *stateSpec != "" || *logsSpecFlag != "" || *artifactsSpec != ""
 
 	if usingNewConfig {
-		b, closer, err := openFromConfig(ctx, paths, *profileName, *stateSpec, *logsSpecFlag, *artifactsSpec)
+		b, closer, profileControllerURL, err := openFromConfig(ctx, paths, *profileName, *stateSpec, *logsSpecFlag, *artifactsSpec)
 		if err != nil {
 			return err
 		}
 		defer func() { _ = closer.Close() }()
+		authControllerURL := resolveAuthControllerURL(*controllerURL, profileControllerURL)
+		if err := validateLoginBackend(*requireLogin, authControllerURL); err != nil {
+			return err
+		}
 		opts := web.HandlerOptions{
-			Backend:      b,
-			Paths:        paths,
-			CacheURL:     *cacheURL,
-			Token:        *token,
-			APIURL:       *apiURL,
-			RequireLogin: *requireLogin,
+			Backend:           b,
+			Paths:             paths,
+			AuthControllerURL: authControllerURL,
+			CacheURL:          *cacheURL,
+			Token:             *token,
+			APIURL:            *apiURL,
+			RequireLogin:      *requireLogin,
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
@@ -93,6 +95,9 @@ func run(args []string) error {
 	if *controllerURL != "" || *logsURL != "" {
 		if *controllerURL == "" {
 			return fmt.Errorf("--logs requires --controller (dashboard needs node list from controller)")
+		}
+		if err := validateLoginBackend(*requireLogin, *controllerURL); err != nil {
+			return err
 		}
 		var logStore storage.LogStore
 		if *logsURL != "" {
@@ -116,34 +121,50 @@ func run(args []string) error {
 		}
 		return web.ServeWithOptions(ctx, opts, *addr)
 	}
+	if err := validateLoginBackend(*requireLogin, ""); err != nil {
+		return err
+	}
 
 	return web.Serve(ctx, paths, *addr)
 }
 
-// openFromConfig resolves the profile + inline-spec precedence and opens
-// the Backend the dashboard should serve from. Inline specs win over the
-// profile's surfaces.
+func validateLoginBackend(requireLogin bool, controllerURL string) error {
+	if requireLogin && controllerURL == "" {
+		return fmt.Errorf("--require-login requires a controller session backend; pass --controller URL or select --profile NAME with controller.url")
+	}
+	return nil
+}
+
+func resolveAuthControllerURL(explicit, profileURL string) string {
+	if explicit != "" {
+		return explicit
+	}
+	return profileURL
+}
+
 func openFromConfig(
 	ctx context.Context,
 	paths swpaths.Paths,
 	profileName, stateInline, logsInline, artifactsInline string,
-) (backend.Backend, io.Closer, error) {
+) (backend.Backend, io.Closer, string, error) {
 	var stateSpec, logsSpec, artifactsSpec *backends.Spec
 	var lookup storeurl.ProfileLookup
+	var profileControllerURL string
 
 	if profileName != "" {
 		path, err := profile.DefaultPath()
 		if err != nil {
-			return nil, nopCloser{}, err
+			return nil, nopCloser{}, "", err
 		}
 		cfg, err := profile.Load(path)
 		if err != nil {
-			return nil, nopCloser{}, err
+			return nil, nopCloser{}, "", err
 		}
 		p, _, err := profile.Resolve(profileName, cfg)
 		if err != nil {
-			return nil, nopCloser{}, fmt.Errorf("--profile %s: %w", profileName, err)
+			return nil, nopCloser{}, "", fmt.Errorf("--profile %s: %w", profileName, err)
 		}
+		profileControllerURL = p.ControllerURL()
 		stateSpec, logsSpec, artifactsSpec = profileWebSpecs(p)
 		if p.ControllerURL() != "" {
 			lookup = func(string) (string, string, error) { return p.ControllerURL(), p.ControllerToken(), nil }
@@ -153,37 +174,33 @@ func openFromConfig(
 	if stateInline != "" {
 		spec, err := backend.ParseInlineSpec(stateInline)
 		if err != nil {
-			return nil, nopCloser{}, fmt.Errorf("--state-spec: %w", err)
+			return nil, nopCloser{}, "", fmt.Errorf("--state-spec: %w", err)
 		}
 		stateSpec = spec
 	}
 	if logsInline != "" {
 		spec, err := backend.ParseInlineSpec(logsInline)
 		if err != nil {
-			return nil, nopCloser{}, fmt.Errorf("--logs-spec: %w", err)
+			return nil, nopCloser{}, "", fmt.Errorf("--logs-spec: %w", err)
 		}
 		logsSpec = spec
 	}
 	if artifactsInline != "" {
 		spec, err := backend.ParseInlineSpec(artifactsInline)
 		if err != nil {
-			return nil, nopCloser{}, fmt.Errorf("--artifacts-spec: %w", err)
+			return nil, nopCloser{}, "", fmt.Errorf("--artifacts-spec: %w", err)
 		}
 		artifactsSpec = spec
 	}
 
 	if stateSpec == nil {
-		return nil, nopCloser{}, fmt.Errorf("no state backend configured; pass --state-spec or --profile <name> with a profile that declares a state surface (or a controller)")
+		return nil, nopCloser{}, "", fmt.Errorf("no state backend configured; pass --state-spec or --profile <name> with a profile that declares a state surface (or a controller)")
 	}
 
-	return backend.FromSpecs(ctx, stateSpec, logsSpec, artifactsSpec, paths, lookup)
+	b, closer, err := backend.FromSpecs(ctx, stateSpec, logsSpec, artifactsSpec, paths, lookup)
+	return b, closer, profileControllerURL, err
 }
 
-// profileWebSpecs derives the dashboard's state/logs/cache specs from a
-// resolved profile: explicit surfaces as declared, or -- for a
-// controller-only profile -- every surface routed through the
-// controller. A bare/laptop profile yields nil specs (the caller then
-// requires an inline --state-spec).
 func profileWebSpecs(p *profile.Profile) (state, logs, cache *backends.Spec) {
 	surf := p.Surfaces()
 	if surf.State == nil && surf.Logs == nil && surf.Cache == nil && p.ControllerURL() != "" {

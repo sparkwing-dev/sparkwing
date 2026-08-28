@@ -8,10 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestStuckNodeIDsIncludesScheduledNodes pins that the watchdog names
-// runtime-scheduled nodes (dynamic fan-out members, recovery runners)
-// that never appear in Plan.Nodes(), while excluding nodes that have
-// already recorded an outcome.
 func TestStuckNodeIDsIncludesScheduledNodes(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	sparkwing.Job(plan, "static", func(ctx context.Context) error { return nil })

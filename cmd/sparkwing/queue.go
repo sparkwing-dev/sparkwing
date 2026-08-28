@@ -1,12 +1,3 @@
-// `sparkwing queue` -- the one truthful view of local admission. It
-// reads the local daemon's queue state and renders every resource with
-// its capacity and in-use amount, every holder with elapsed time and
-// cost, and every waiter in admission order with what it is waiting on. A
-// holder that is alive but idle while runs queue behind it is flagged
-// with the exact non-destructive recovery command. With no daemon
-// running there is nothing to arbitrate, so the command reports an empty
-// queue and exits 0. Rendering is shared with the headless pipeline
-// binary through internal/opsview so both present an identical view.
 package main
 
 import (
@@ -27,13 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// runQueue prints the local admission view, or the controller's with
-// --profile. It has three outcomes, and they are deliberately not two: a
-// daemon that answered, an absent daemon (nothing to arbitrate, exit 0), and a
-// socket that could not be reached, which is not an idle queue and never
-// renders as one. The last exits 4, the infrastructure code, because nothing
-// about the queue was answered -- a script reading exit 0 as "the queue is
-// empty" was wrong before and is right now.
 func runQueue(args []string) error {
 	if len(args) > 0 && args[0] == "exec" {
 		return runQueueExec(args[1:])
@@ -90,10 +74,6 @@ func runQueue(args []string) error {
 	return nil
 }
 
-// runQueueProfile inspects a controller's admission state through the same
-// renderer as the local view: it fetches the controller's QueueState-shaped
-// endpoint and hands it to the one queue renderer, so an operator reads one
-// vocabulary regardless of where admission lives.
 func runQueueProfile(profileName, format string) error {
 	prof, err := resolveProfile(profileName)
 	if err != nil {
@@ -111,8 +91,6 @@ func runQueueProfile(profileName, format string) error {
 	return renderQueue(os.Stdout, qs, format)
 }
 
-// fetchControllerQueueState calls GET /api/v1/queue/state with bearer auth and
-// decodes the controller's unified admission view.
 func fetchControllerQueueState(ctx context.Context, baseURL, token string) (wingwire.QueueState, error) {
 	u := strings.TrimRight(baseURL, "/") + "/api/v1/queue/state"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
@@ -138,9 +116,6 @@ func fetchControllerQueueState(ctx context.Context, baseURL, token string) (wing
 	return qs, nil
 }
 
-// warnLegacy prints the legacy-coexistence warning to stderr when
-// older-pinned pipeline binaries are still admitting outside the daemon.
-// It goes to stderr so JSON and plain stdout stay machine-clean.
 func warnLegacy(w io.Writer, n int) {
 	if line := legacyWarningLine(n); line != "" {
 		fmt.Fprintf(w, "warning: %s\n", line)
@@ -155,9 +130,6 @@ func renderUnreachableDaemon(w io.Writer, format string, cause error) error {
 	return opsview.RenderUnreachableDaemon(w, format, cause)
 }
 
-// renderLocalQueue writes a queue the local daemon answered for. It is
-// separate from renderQueue, which serves --profile: a controller's view comes
-// from a different source and carries no local-daemon reachability.
 func renderLocalQueue(w io.Writer, qs wingwire.QueueState, format string) error {
 	return opsview.RenderLocalQueue(w, qs, opsview.Serving(), format)
 }

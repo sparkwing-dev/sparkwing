@@ -1,5 +1,3 @@
-// Command soakguard runs a chaos test inside an isolated process session and
-// refuses to exit until every nested process group has been terminated.
 package main
 
 import (

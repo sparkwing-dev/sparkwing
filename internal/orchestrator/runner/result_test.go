@@ -42,8 +42,7 @@ func TestResultFromNode_CarriesOutcomeErrorAndRawOutput(t *testing.T) {
 	if res.Err == nil || res.Err.Error() != "boom" {
 		t.Errorf("Err = %v, want boom", res.Err)
 	}
-	// safety: raw bytes, not a decoded value -- unmarshaling here would erase the
-	// typed shape the downstream Ref[T].Get reconstructs.
+
 	got, ok := res.Output.([]byte)
 	if !ok {
 		t.Fatalf("Output is %T, want []byte", res.Output)

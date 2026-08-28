@@ -1,8 +1,3 @@
-// `sparkwing repos {list,info,update}` -- the machine's fleet of
-// sparkwing-bearing checkouts, a single-repo deep dive, and a one-command
-// SDK-pin bump with a compiled per-repo verdict. See internal/repos for the
-// derivation, plan-diff, and verdict-ladder logic; this file owns flag
-// parsing, the side-effecting Ops implementation, and rendering.
 package main
 
 import (
@@ -28,8 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// runRepos dispatches `sparkwing repos <verb>`. Bare `repos` lists, the same
-// as the explicit `list` verb.
 func runRepos(args []string) error {
 	if handleParentHelp(cmdRepos, args) {
 		return nil
@@ -47,13 +40,10 @@ func runRepos(args []string) error {
 	return runReposList(args)
 }
 
-// fleetGit adapts runGit to the repos.Git dependency.
 func fleetGit(dir string, args ...string) (string, error) {
 	return runGit(dir, args...)
 }
 
-// guideVersions returns the versions of every embedded migration guide,
-// used to count how many a repo is behind.
 func guideVersions() []string {
 	entries := docs.MigrationsList()
 	out := make([]string, 0, len(entries))
@@ -63,7 +53,6 @@ func guideVersions() []string {
 	return out
 }
 
-// guidesFor maps the crossed migration-guide range into verdict guides.
 func guidesFor(from, to string) []repos.Guide {
 	entries, err := docs.MigrationsBetween(from, to)
 	if err != nil {
@@ -76,8 +65,6 @@ func guidesFor(from, to string) []repos.Guide {
 	return out
 }
 
-// buildFleet derives the fleet from repos.yaml candidates and observed
-// runs in the local store. latest drives the guides-behind count.
 func buildFleet(latest string) ([]repos.Repo, error) {
 	cands, err := repos.CandidatePaths()
 	if err != nil {
@@ -91,10 +78,6 @@ func buildFleet(latest string) ([]repos.Repo, error) {
 	return fleet, nil
 }
 
-// observeRuns projects recent runs into repo observations. A store
-// that can't be opened (fresh laptop, schema skew) yields no
-// observations rather than failing the fleet listing -- repos.yaml
-// alone still produces a useful fleet.
 func observeRuns() []repos.RunObservation {
 	paths, err := orchestrator.DefaultPaths()
 	if err != nil {
@@ -146,7 +129,7 @@ func runReposList(args []string) error {
 
 	switch strings.ToLower(output) {
 	case "json":
-		// NDJSON: one repo per line.
+
 		return ndjson.Write(os.Stdout, fleetJSON(fleet, latest))
 	case "plain":
 		for _, r := range fleet {
@@ -158,7 +141,6 @@ func runReposList(args []string) error {
 	return nil
 }
 
-// fleetRepoJSON is the wire shape of one fleet row.
 type fleetRepoJSON struct {
 	Name         string              `json:"name"`
 	Primary      string              `json:"primary,omitempty"`
@@ -290,7 +272,7 @@ func runReposUpdate(args []string) error {
 	verdicts := repos.UpdateFleet(&execOps{}, fleet, cfg)
 
 	if strings.ToLower(output) == "json" {
-		// NDJSON: one verdict per line.
+
 		return ndjson.Write(os.Stdout, verdicts)
 	}
 	printVerdicts(verdicts, fleet, cfg)
@@ -395,9 +377,6 @@ func printOneVerdict(v repos.Verdict) {
 	}
 }
 
-// execOps is the production Ops implementation: git for tree state and
-// commits, the go toolchain for the pin bump, and the sparkwing CLI's
-// own plan verb for before/after plan construction.
 type execOps struct{}
 
 func (execOps) Dirty(dir string) (bool, error) {
@@ -504,15 +483,12 @@ func (execOps) Commit(dir, message string) error {
 	return nil
 }
 
-// modSnapshot is the dry-run restore payload: the .sparkwing go.mod and
-// go.sum bytes captured before a bump.
 type modSnapshot struct {
 	GoMod  []byte `json:"go_mod"`
 	GoSum  []byte `json:"go_sum"`
 	HadSum bool   `json:"had_sum"`
 }
 
-// runGoModCmd runs a go subcommand in dir and returns combined output.
 func runGoModCmd(dir string, args ...string) (string, error) {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
@@ -524,8 +500,6 @@ func runGoModCmd(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(out.String()), err
 }
 
-// parsePlanDoc converts the pipeline binary's plan-preview JSON into
-// the structural Plan the diff operates on.
 func parsePlanDoc(pipeline string, raw []byte) (repos.Plan, error) {
 	var doc planPreviewDoc
 	if err := json.Unmarshal(bytes.TrimSpace(raw), &doc); err != nil {

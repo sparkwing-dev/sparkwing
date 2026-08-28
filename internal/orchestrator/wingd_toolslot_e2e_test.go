@@ -15,26 +15,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// toolSlotPipelineName is the pipeline both tool-slot tests run. One
-// pipeline serves both because the gate carries the budget, so a test
-// picks the contention shape without needing its own registration.
 const toolSlotPipelineName = "wingd-e2e-tool-slot"
 
-// toolSlotNodeID is the single node in that pipeline, and therefore the
-// node whose sub-lease and events carry the tool slot.
 const toolSlotNodeID = "hold-tool"
 
-// toolSlotLintCores is the measured per-lint core cost the shipped
-// golangci-lint budget uses, kept here so these tests contend at the
-// real shape (4.0 cores against 8 grantable) rather than a toy one.
 const toolSlotLintCores = 4.0
 
-// toolSlotGrantableCores is what the box lends the tool in these tests,
-// giving a capacity of two concurrent acquirers at the lint cost.
 const toolSlotGrantableCores = 8.0
 
-// toolSlotGrant is one acquirer reporting what [sparkwing.ToolSlot]
-// answered it, so a test gates on the answer rather than on elapsed time.
 type toolSlotGrant struct {
 	runID   string
 	granted bool
@@ -45,11 +33,6 @@ type toolSlotContext struct {
 	ctx   context.Context
 }
 
-// toolSlotGate is the shared rendezvous the tool-slot pipeline's job body
-// runs against: it holds the budget under test, collects each acquirer's
-// grant, and holds every acquirer inside the slot until the test releases
-// it by name. Releasing by name is what makes the ordering assertion real,
-// because the third acquirer can only be admitted after a named release.
 type toolSlotGate struct {
 	budget   *sparkwing.ConcurrencyGroup
 	cost     int
@@ -70,8 +53,6 @@ func newToolSlotGate(budget *sparkwing.ConcurrencyGroup, cost int) *toolSlotGate
 	}
 }
 
-// releaseChan returns the run's release channel, creating it on first
-// use so the test and the job body can reach it in either order.
 func (g *toolSlotGate) releaseChan(runID string) chan struct{} {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -83,9 +64,6 @@ func (g *toolSlotGate) releaseChan(runID string) chan struct{} {
 	return ch
 }
 
-// hold is the job body: it takes the box budget through the SDK surface a
-// pipeline author calls, reports what it got, and stays inside the slot
-// until the test lets it go.
 func (g *toolSlotGate) hold(ctx context.Context, runID string) error {
 	select {
 	case g.contexts <- toolSlotContext{runID: runID, ctx: ctx}:
@@ -117,7 +95,6 @@ func (g *toolSlotGate) awaitContext(t *testing.T, want string) context.Context {
 	}
 }
 
-// let drops one acquirer out of the slot.
 func (g *toolSlotGate) let(runID string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -133,9 +110,6 @@ func (g *toolSlotGate) let(runID string) {
 	}
 }
 
-// awaitGrant blocks until an acquirer reports, failing when the reporter
-// is not the expected run so an out-of-order grant is a failure rather
-// than a silently accepted one.
 func (g *toolSlotGate) awaitGrant(t *testing.T, want string) toolSlotGrant {
 	t.Helper()
 	select {
@@ -150,8 +124,6 @@ func (g *toolSlotGate) awaitGrant(t *testing.T, want string) toolSlotGrant {
 	}
 }
 
-// expectNoGrantYet fails when any acquirer has already been answered,
-// which is how a queued third acquirer is shown to still be queued.
 func (g *toolSlotGate) expectNoGrantYet(t *testing.T) {
 	t.Helper()
 	select {
@@ -187,9 +159,6 @@ func registerToolSlotE2EPipeline() {
 	})
 }
 
-// toolSlotQueuedEvent is the concurrency_wait payload the tool-slot
-// acquire writes when the daemon reports a [wingwire.Queued] position, so
-// a test reads the position off the same record an operator would.
 type toolSlotQueuedEvent struct {
 	Key         string `json:"key"`
 	Kind        string `json:"kind"`
@@ -198,8 +167,6 @@ type toolSlotQueuedEvent struct {
 	QueueLength int    `json:"queue_length"`
 }
 
-// awaitToolSlotQueued blocks until the run's node has recorded a tool-slot
-// queue position, failing when it never does.
 func awaitToolSlotQueued(t *testing.T, st *store.Store, runID, nodeID string) toolSlotQueuedEvent {
 	t.Helper()
 	deadline := time.Now().Add(wingdTestWait)
@@ -225,9 +192,6 @@ func awaitToolSlotQueued(t *testing.T, st *store.Store, runID, nodeID string) to
 	return toolSlotQueuedEvent{}
 }
 
-// awaitQueuedToolSlotWaiter blocks until the daemon itself reports the
-// run's tool-slot sub-lease as a queued waiter, so the key the run
-// narrated can be checked against the key the daemon is holding it on.
 func awaitQueuedToolSlotWaiter(t *testing.T, home, runID, nodeID string) wingwire.Waiter {
 	t.Helper()
 	participant := nodeSemaphoreRunID(runID, nodeID)
@@ -244,8 +208,6 @@ func awaitQueuedToolSlotWaiter(t *testing.T, home, runID, nodeID string) wingwir
 	return wingwire.Waiter{}
 }
 
-// startToolSlotRun launches one run of the tool-slot pipeline against the
-// real daemon at home and returns its result channel.
 func startToolSlotRun(t *testing.T, backends Backends, home, runID string) chan *Result {
 	t.Helper()
 	done := make(chan *Result, 1)
@@ -272,17 +234,6 @@ func awaitToolSlotRunSuccess(t *testing.T, runID string, ch chan *Result) {
 	}
 }
 
-// TestWingd_ContendedToolSlotReportsItsQueuePositionBehindTheBoxBudget
-// drives the shipped call path end to end: three real runs against one
-// real daemon, each job body calling [sparkwing.ToolSlot] on a box budget
-// of 800 centicores at 400 apiece, which is the shape
-// .sparkwing/jobs/lint_contention.go ships (8 grantable cores, 4.0 cores
-// per lint). Two fit, the third must queue, must narrate a position under
-// the box-scoped key, and must stay queued until a holder releases.
-//
-// The ordering is gated on channels rather than on sleeping, because a
-// sleep would let a test pass on a daemon that admitted the third
-// acquirer early and only looked serialized.
 func TestWingd_ContendedToolSlotReportsItsQueuePositionBehindTheBoxBudget(t *testing.T) {
 	registerToolSlotE2EPipeline()
 	home := wingdTestHome(t)
@@ -399,11 +350,6 @@ func TestWingd_NoProgressTimeoutPausesForToolSlotAndResumesAfterGrant(t *testing
 	awaitToolSlotRunSuccess(t, "tool-holder", holder)
 }
 
-// TestWingd_ToolSlotQueueTimeoutFallsBackRatherThanBlockingForever fills
-// the same budget and lets a third acquirer's QueueTimeout elapse. The
-// contract is that it comes back not granted so the caller falls back to
-// the tool's own serialization, rather than pinning the step behind a
-// budget nobody is going to free.
 func TestWingd_ToolSlotQueueTimeoutFallsBackRatherThanBlockingForever(t *testing.T) {
 	registerToolSlotE2EPipeline()
 	home := wingdTestHome(t)

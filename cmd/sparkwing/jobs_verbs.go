@@ -1,7 +1,3 @@
-// Handlers for the restored jobs verbs: failures, stats, last, tree,
-// get. Each one follows the handler skeleton spelled out in
-// help_registry.go: parseAndCheck, resolve --profile (optional,
-// defaults to local), dispatch.
 package main
 
 import (
@@ -24,10 +20,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// failureRow is the normalized view a failure-clustering pass works
-// on. Controller-side failure_reason is empty for local runs (that's
-// a classification the controller performs), so default clustering
-// falls through to step-based grouping.
 type failureRow struct {
 	ID        string    `json:"id"`
 	Pipeline  string    `json:"pipeline"`
@@ -185,7 +177,7 @@ func renderFailures(rows []failureRow, groupBy string, asJSON bool) error {
 		return renderFailureClusters(rows, groupBy, asJSON)
 	}
 	if asJSON {
-		// NDJSON: one failure per line, so `head` returns whole rows.
+
 		return ndjson.Write(os.Stdout, rows)
 	}
 	if len(rows) == 0 {
@@ -240,7 +232,7 @@ func renderFailureClusters(rows []failureRow, groupBy string, asJSON bool) error
 		return clusters[i].Last.After(clusters[j].Last)
 	})
 	if asJSON {
-		// NDJSON: one cluster per line.
+
 		return ndjson.Write(os.Stdout, clusters)
 	}
 	if len(clusters) == 0 {
@@ -349,7 +341,7 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 	sort.Slice(stats, func(i, j int) bool { return stats[i].Pipeline < stats[j].Pipeline })
 
 	if emitJSON {
-		// NDJSON: one pipeline's stats per line.
+
 		return ndjson.Write(os.Stdout, stats)
 	}
 	if len(stats) == 0 {
@@ -571,9 +563,7 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 
 	var build func(r *store.Run) (*runNode, error)
 	build = func(r *store.Run) (*runNode, error) {
-		// -o json emits the whole row per node; the text render below
-		// reads only id/pipeline/status. Redact once here so both
-		// shapes come off the same tree.
+
 		node := &runNode{Run: store.RedactedRun(r)}
 		kids, err := fetchChildren(r.ID)
 		if err != nil {
@@ -649,8 +639,6 @@ func runJobsGet(ctx context.Context, paths orchestrator.Paths, args []string) er
 	return orchestrator.GetRunJSONLocal(ctx, paths, *runID, os.Stdout)
 }
 
-// runJobsWait blocks until the named run reaches a terminal state.
-// Exit codes (propagated via cliError):
 func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsWait.Path, flag.ContinueOnError)
 	runID := fs.String("run", "", "run identifier to wait on")
@@ -723,9 +711,6 @@ func runJobsWait(ctx context.Context, paths orchestrator.Paths, args []string) e
 	}
 }
 
-// emitWaitResult prints a terse summary of the terminal run so
-// `runs wait` leaves at least one line on stdout scripts can parse.
-// JSON emits the full run; table/plain emits one line.
 func emitWaitResult(run *store.Run, format string) {
 	if run == nil {
 		return
@@ -743,8 +728,6 @@ func emitWaitResult(run *store.Run, format string) {
 	}
 }
 
-// runJobsFind searches recent runs for a match against git SHA / repo
-// / pipeline / since filters. --wait polls until one appears.
 func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) error {
 	fs := flag.NewFlagSet(cmdJobsFind.Path, flag.ContinueOnError)
 	gitSHA := fs.String("git-sha", "", "match runs whose git SHA starts with this (prefix match)")
@@ -824,9 +807,6 @@ func runJobsFind(ctx context.Context, paths orchestrator.Paths, args []string) e
 	return renderFindResults(runs, resolvedFmt, *quiet)
 }
 
-// findRunsLocal narrows local runs by the requested filters. Since
-// matching on git SHA across the run table is fast (indexed id-order
-// scan under a limit), we over-fetch and then filter client-side.
 func findRunsLocal(ctx context.Context, st *store.Store, gitSHA, pipeline, repo string,
 	since time.Duration, limit int,
 ) ([]*store.Run, error) {
@@ -850,10 +830,6 @@ func findRunsLocal(ctx context.Context, st *store.Store, gitSHA, pipeline, repo 
 	}), nil
 }
 
-// findRunsRemote is the controller-side counterpart. Same pattern:
-// over-fetch, then filter by SHA/repo client-side. --repo requires a
-// per-run trigger lookup, so it's O(N) controller round-trips -- fine
-// for the typical N<50 lookback window.
 func findRunsRemote(ctx context.Context, c *client.Client, gitSHA, pipeline, repo string,
 	since time.Duration, limit int,
 ) ([]*store.Run, error) {
@@ -877,11 +853,6 @@ func findRunsRemote(ctx context.Context, c *client.Client, gitSHA, pipeline, rep
 	}), nil
 }
 
-// narrowRunsByRepo is the shared SHA+repo filter. SHA is a prefix
-// match (short-SHA-friendly); repo is an exact match against the
-// GITHUB_REPOSITORY env pulled from the run's trigger row. triggerEnv
-// is only fetched when --repo is set, so the SHA-only happy path stays
-// one-query.
 func narrowRunsByRepo(runs []*store.Run, gitSHA, repo string,
 	limit int, triggerEnv func(id string) (map[string]string, error),
 ) []*store.Run {
@@ -907,9 +878,6 @@ func narrowRunsByRepo(runs []*store.Run, gitSHA, repo string,
 	return out
 }
 
-// renderFindResults emits the search result set in one of three
-// shapes: quiet (ids newline-separated, or a JSON array with -o json),
-// JSON table (runs array), or a human table.
 func renderFindResults(runs []*store.Run, format string, quiet bool) error {
 	if quiet {
 		if format == "json" {
@@ -917,7 +885,7 @@ func renderFindResults(runs []*store.Run, format string, quiet bool) error {
 			for _, r := range runs {
 				ids = append(ids, r.ID)
 			}
-			// One quoted id per line, matching the plain form below.
+
 			return ndjson.Write(os.Stdout, ids)
 		}
 		for _, r := range runs {
@@ -926,7 +894,7 @@ func renderFindResults(runs []*store.Run, format string, quiet bool) error {
 		return nil
 	}
 	if format == "json" {
-		// NDJSON: one run per line, so `head` returns whole runs.
+
 		return ndjson.Write(os.Stdout, store.RedactedRuns(runs))
 	}
 	if len(runs) == 0 {

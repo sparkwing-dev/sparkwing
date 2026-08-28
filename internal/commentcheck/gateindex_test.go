@@ -58,9 +58,6 @@ func TestScopedAdds_StagedReadsTheIndexTheCommitIsBeingBuiltIn(t *testing.T) {
 	})
 }
 
-// newGatedRepo is a repository whose own index holds nothing but the last
-// commit, which is the state a hook finds it in under `git commit -a` and
-// under a partial commit.
 func newGatedRepo(t *testing.T) string {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -77,9 +74,6 @@ func newGatedRepo(t *testing.T) string {
 	return dir
 }
 
-// gateIndexOf copies the repository's index the way git copies it into the
-// lock file it composes a commit in, so staging against the copy leaves the
-// repository's own index where the commit found it.
 func gateIndexOf(t *testing.T, repo string) string {
 	t.Helper()
 	data, err := os.ReadFile(filepath.Join(repo, ".git", "index"))

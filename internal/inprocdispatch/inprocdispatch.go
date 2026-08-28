@@ -1,14 +1,3 @@
-// Package inprocdispatch carries the in-process implementation of
-// pkg/controller.Dispatcher. It lives outside pkg/controller so the
-// controller package's public API stays free of orchestrator-defined
-// types -- only tests, demos, and inside-module consumers (which can
-// import internal/) reach for the in-process dispatcher.
-//
-// Production wiring (the controller pod and pkg/localws) does not use
-// this dispatcher; the controller pod defaults to NoopDispatcher and
-// pkg/localws drives runs through orchestrator.RunLocalTriggerConsumer.
-// In-process dispatch exists primarily for full-loop tests that want
-// to exercise the trigger path without a separate runner process.
 package inprocdispatch
 
 import (
@@ -19,22 +8,13 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller"
 )
 
-// InProcessDispatcher runs the pipeline in a goroutine within the
-// controller process. State writes go back to the same controller via
-// the supplied Backends. Not intended for prod cluster-mode: it
-// couples pipeline execution to the controller's process lifetime
-// and offers no isolation.
 type InProcessDispatcher struct {
 	Backends orchestrator.Backends
 	Logger   *slog.Logger
-	// MaxParallel caps concurrent node execution per dispatched run.
-	// Zero = unbounded.
+
 	MaxParallel int
 }
 
-// Dispatch satisfies controller.Dispatcher. Returns once the run has
-// been scheduled; the run itself executes on a detached goroutine
-// that outlives the calling HTTP request.
 func (d InProcessDispatcher) Dispatch(ctx context.Context, req controller.RunRequest) error {
 	lg := d.Logger
 	if lg == nil {

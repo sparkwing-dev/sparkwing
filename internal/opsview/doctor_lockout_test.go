@@ -10,8 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// registerRepos writes a repos.yaml listing each path and points the loader
-// at it, so the lockout scan reads a fixture instead of the real machine.
 func registerRepos(t *testing.T, paths ...string) {
 	t.Helper()
 	cfg := "repos:\n"
@@ -25,9 +23,6 @@ func registerRepos(t *testing.T, paths ...string) {
 	t.Setenv("SPARKWING_REPOS", f)
 }
 
-// pinnedCheckout lays down a checkout with an SDK pin. A regular checkout
-// carries a .git directory and a linked worktree a .git file, which is what
-// the candidate scan reads to tag one.
 func pinnedCheckout(t *testing.T, base, name, pin string, worktree bool) string {
 	t.Helper()
 	root := filepath.Join(base, name)
@@ -56,8 +51,6 @@ func repoPinned(t *testing.T, base, name, pin string) string {
 	return pinnedCheckout(t, base, name, pin, false)
 }
 
-// shippedFloors is the table the binary carries; tests that need a cliff
-// this build has not reached yet declare their own.
 func shippedFloors() wingwire.ProtocolFloors { return wingwire.ReleasedProtocolFloors() }
 
 func floorsBeforeProtocol3() wingwire.ProtocolFloors {
@@ -100,10 +93,6 @@ func TestDiagnoseLockedOutRepos_NamesReposPinnedBelowTheDaemonsProtocol(t *testi
 	}
 }
 
-// The daemon's major is compared against each pin's, not against the major
-// the scanning binary was built at, so a cliff older than the newest one is
-// still diagnosed: after a bump, a daemon left resident at the previous major
-// keeps locking out every pin below it.
 func TestDiagnoseLockedOutRepos_ReportsACliffOlderThanTheNewestOne(t *testing.T) {
 	afterNextBump := wingwire.ProtocolFloors{
 		{Major: 1, MinVersion: "v0.0.0"},
@@ -127,10 +116,6 @@ func TestDiagnoseLockedOutRepos_ReportsACliffOlderThanTheNewestOne(t *testing.T)
 	}
 }
 
-// A daemon whose major the table does not carry cannot be answered with a
-// release from that table: the one release known to speak its major is the one
-// it is running. Raising to the floor of the newest major the table does carry
-// would leave every named checkout refused.
 func TestDiagnoseLockedOutRepos_RaisesToTheDaemonsOwnReleaseWhenTheTableEndsBelowItsProtocol(t *testing.T) {
 	base := t.TempDir()
 	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
@@ -146,10 +131,6 @@ func TestDiagnoseLockedOutRepos_RaisesToTheDaemonsOwnReleaseWhenTheTableEndsBelo
 	}
 }
 
-// Reading the daemon's major off its version places every pin at the newest
-// major the table carries and clears it, so the checkouts a newer daemon
-// refuses go unreported. The major comes from the handshake instead, and the
-// pins are placed against the release that answers it.
 func TestDiagnoseLockedOutRepos_NamesPinsAtTheNewestKnownMajorWhenTheDaemonIsPastIt(t *testing.T) {
 	base := t.TempDir()
 	registerRepos(t,
@@ -176,8 +157,6 @@ func TestDiagnoseLockedOutRepos_NamesPinsAtTheNewestKnownMajorWhenTheDaemonIsPas
 	}
 }
 
-// The gap is a finding in its own right: this build cannot query that daemon
-// either, and the release table it reads is the one that has to be refreshed.
 func TestDiagnoseLockedOutRepos_ReportsADaemonSpeakingAMajorTheTableDoesNotCarry(t *testing.T) {
 	base := t.TempDir()
 	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
@@ -197,8 +176,6 @@ func TestDiagnoseLockedOutRepos_ReportsADaemonSpeakingAMajorTheTableDoesNotCarry
 	}
 }
 
-// With no release name to raise to, naming checkouts would hand the operator a
-// target that does not exist; the gap still reports, so the run is not silent.
 func TestDiagnoseLockedOutRepos_NamesNoTargetWhenANewerDaemonReportsNoRelease(t *testing.T) {
 	base := t.TempDir()
 	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
@@ -277,9 +254,6 @@ func TestDiagnoseLockedOutRepos_SilentWhenTheDaemonSpeaksTheOlderProtocol(t *tes
 	}
 }
 
-// The daemon's version answers "which release do I raise to" and nothing else;
-// the major it speaks came from the handshake, so a daemon too old to report a
-// version is still diagnosed.
 func TestDiagnoseLockedOutRepos_NamesReposAgainstADaemonThatReportsNoVersion(t *testing.T) {
 	base := t.TempDir()
 	registerRepos(t, repoPinned(t, base, "workwing", "v0.17.25"))
@@ -323,8 +297,6 @@ func TestRenderDoctorPretty_GivesEveryLockedOutRowItsOwnRaiseTarget(t *testing.T
 	}
 }
 
-// With the daemon's protocol known, the CLI really is a bystander: it is not
-// the client in that handshake and no CLI upgrade moves the pins.
 func TestRenderDoctorPretty_SaysUpgradingTheCLIDoesNotHelpWhenItKnowsTheDaemonsProtocol(t *testing.T) {
 	out := renderPretty(t, DoctorReport{LockedOutRepos: []DoctorLockedOutRepo{
 		{Name: "workwing", Path: "/code/workwing", Pin: "v0.17.25", RaiseTo: "v0.22.0"},
@@ -338,9 +310,6 @@ func TestRenderDoctorPretty_SaysUpgradingTheCLIDoesNotHelpWhenItKnowsTheDaemonsP
 	}
 }
 
-// With the daemon past this build's table, updating the CLI is the action that
-// sharpens the diagnosis, so the bystander sentence would argue against the
-// one lever that moves.
 func TestRenderDoctorPretty_PointsAtUpdatingTheCLIWhenTheDaemonSpeaksPastItsTable(t *testing.T) {
 	out := renderPretty(t, DoctorReport{
 		LockedOutRepos: []DoctorLockedOutRepo{
@@ -364,8 +333,6 @@ func TestRenderDoctorPretty_PointsAtUpdatingTheCLIWhenTheDaemonSpeaksPastItsTabl
 	}
 }
 
-// The gap stands alone when no checkout is behind: this build still cannot
-// talk to the resident daemon, and saying nothing is how the incident starts.
 func TestRenderDoctorPretty_ReportsTheProtocolGapWithNoLockedOutCheckouts(t *testing.T) {
 	out := renderPretty(t, DoctorReport{
 		DaemonProtocolGap: &DoctorProtocolGap{Self: 2, Daemon: 3, DaemonVersion: "v0.30.0"},

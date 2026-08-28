@@ -41,12 +41,6 @@ func ensurePodRTPipe(t *testing.T) *sparkwing.Registration {
 	return reg
 }
 
-// TestClusterPodRoundTrip stitches the orchestrator-side snapshot
-// emission with the pod-side rehydrate path through a fake
-// controller-backed source. Mirrors what happens when a cluster
-// worker claims a remote-controller-bound run: the snapshot ships
-// declarations only, never values, and the pod re-resolves secrets
-// against the controller it talks to in its own boot.
 func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	reg := ensurePodRTPipe(t)
 
@@ -98,11 +92,6 @@ func TestClusterPodRoundTrip_RemoteControllerSource(t *testing.T) {
 	}
 }
 
-// TestClusterPodRoundTrip_RunnerInfoVisibleOnPod asserts that the
-// pod-side install picks up the runner identity the cluster trigger
-// loop stamps via SPARKWING_RUNNER_* env vars, so adapters branching
-// on sparkwing.Runner(ctx).HasLabel(...) take the non-local path on
-// the pod.
 func TestClusterPodRoundTrip_RunnerInfoVisibleOnPod(t *testing.T) {
 	t.Setenv("SPARKWING_RUNNER_NAME", "warm-pool-a")
 	t.Setenv("SPARKWING_RUNNER_TYPE", "kubernetes")
@@ -129,10 +118,6 @@ func TestClusterPodRoundTrip_RunnerInfoVisibleOnPod(t *testing.T) {
 	}
 }
 
-// TestClusterPodRoundTrip_AuthFailureSurfacesAsError pins the
-// controller's 401 contract end-to-end: the pod-side rehydrate
-// surfaces the auth failure rather than silently substituting an
-// empty value into the required field.
 func TestClusterPodRoundTrip_AuthFailureSurfacesAsError(t *testing.T) {
 	reg := ensurePodRTPipe(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

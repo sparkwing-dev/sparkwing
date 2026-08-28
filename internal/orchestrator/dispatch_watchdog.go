@@ -90,39 +90,92 @@ func admissionWaitParticipantFromContext(ctx context.Context) string {
 	return participant
 }
 
-// DefaultDispatchWaitTimeout bounds how long the dispatcher's
-// post-DAG drain (state.wg.Wait) may block before the run is declared
-// wedged. Picked to be generous enough that long-tail nodes don't hit
-// it during normal operation -- node-level timeouts, controller
-// reapers, and OS-level backpressure all act first -- while still
-// turning an unbounded hang into a fail-fast within the same shift.
 const DefaultDispatchWaitTimeout = 30 * time.Minute
 
-// dispatchStackDumpBytes caps the captured goroutine dump so a
-// pathological hang in a process with thousands of goroutines can't
-// produce a multi-gigabyte envelope file.
-const dispatchStackDumpBytes = 1 << 20 // 1 MiB
+const dispatchTimeoutDrainMargin = time.Minute
 
-// dispatchWaitResult reports how waitForDispatch returned.
+const dispatchStackDumpBytes = 1 << 20
+
+const maxDuration = time.Duration(1<<63 - 1)
+
+func defaultDispatchWaitTimeoutForPlan(plan *sparkwing.Plan) time.Duration {
+	if plan == nil {
+		return DefaultDispatchWaitTimeout
+	}
+
+	nodes := plan.Nodes()
+	byID := make(map[string]*sparkwing.JobNode, len(nodes))
+	for _, node := range nodes {
+		byID[node.ID()] = node
+	}
+	memo := make(map[string]time.Duration, len(nodes))
+	visiting := make(map[string]bool, len(nodes))
+	var pathBudget func(*sparkwing.JobNode) time.Duration
+	pathBudget = func(node *sparkwing.JobNode) time.Duration {
+		if budget, ok := memo[node.ID()]; ok {
+			return budget
+		}
+		if visiting[node.ID()] {
+			return 0
+		}
+		visiting[node.ID()] = true
+		var dependencyBudget time.Duration
+		for _, dependencyID := range node.DepIDs() {
+			if dependency := byID[dependencyID]; dependency != nil {
+				dependencyBudget = max(dependencyBudget, pathBudget(dependency))
+			}
+		}
+		delete(visiting, node.ID())
+		budget := saturatingDurationAdd(dependencyBudget, nodeExecutionBudget(node))
+		memo[node.ID()] = budget
+		return budget
+	}
+
+	longest := DefaultDispatchWaitTimeout
+	for _, node := range nodes {
+		budget := pathBudget(node)
+		if recovery := node.OnFailureNode(); recovery != nil {
+			budget = saturatingDurationAdd(budget, nodeExecutionBudget(recovery))
+		}
+		longest = max(longest, saturatingDurationAdd(budget, dispatchTimeoutDrainMargin))
+	}
+	return longest
+}
+
+func nodeExecutionBudget(node *sparkwing.JobNode) time.Duration {
+	timeout := node.TimeoutDuration()
+	if timeout <= 0 {
+		return 0
+	}
+	retry := node.RetryConfig()
+	attempts := retry.Attempts + 1
+	if attempts <= 0 || int64(attempts) > int64(maxDuration/timeout) {
+		return maxDuration
+	}
+	budget := timeout * time.Duration(attempts)
+	for attempt := 1; attempt <= retry.Attempts; attempt++ {
+		budget = saturatingDurationAdd(budget, scaledBackoff(retry.Backoff, attempt))
+		if budget == maxDuration {
+			break
+		}
+	}
+	return budget
+}
+
+func saturatingDurationAdd(a, b time.Duration) time.Duration {
+	if b > 0 && a > maxDuration-b {
+		return maxDuration
+	}
+	return a + b
+}
+
 type dispatchWaitResult int
 
 const (
-	dispatchWaitDone     dispatchWaitResult = iota // all per-node goroutines finished
-	dispatchWaitTimedOut                           // timeout elapsed first
+	dispatchWaitDone dispatchWaitResult = iota
+	dispatchWaitTimedOut
 )
 
-// waitForDispatch blocks until wg drains or timeout elapses. A
-// non-positive timeout means wait indefinitely -- the historical
-// behavior, preserved as an explicit opt-out for operators who'd
-// rather hang than fail-fast.
-//
-// On timeout the caller owns the fail-fast bookkeeping (event
-// emission, slot release via deferred unwind). The leaked goroutines
-// themselves are NOT killed; Go has no safe primitive for that, so
-// they outlive the returning dispatcher and die with the process.
-// Returning early is the entire point: a hung Wait holds the run's
-// concurrency-namespace slot indefinitely and locks the rest of the
-// fleet behind a process that will never make progress.
 func waitForDispatch(
 	wg *sync.WaitGroup,
 	timeout time.Duration,
@@ -191,15 +244,6 @@ func waitForDispatchObserved(
 	}
 }
 
-// stuckNodeIDs lists known nodes with no recorded outcome at the
-// moment the watchdog fired -- the dispatcher's view of "which
-// goroutines never reported back." The known set is the static plan
-// plus runtime-scheduled dynamic and recovery nodes, so a wedged
-// fan-out member is named too. A node that emitted node_end in the
-// envelope but whose state-store write didn't commit (the SQLite
-// snapshot-conflict failure mode) shows up here as well, which is
-// exactly the signal an on-call wants: log says done, dispatcher
-// disagrees, here are the candidates.
 func stuckNodeIDs(plan *sparkwing.Plan, state *dispatchState) []string {
 	var stuck []string
 	for _, n := range watchdogKnownNodes(plan, state) {
@@ -210,9 +254,6 @@ func stuckNodeIDs(plan *sparkwing.Plan, state *dispatchState) []string {
 	return stuck
 }
 
-// watchdogActiveNodeIDs excludes nodes that have not started because they are
-// waiting on dependencies. Admission can pause the watchdog only when every
-// started, unfinished node is itself in the admission queue.
 func (s *dispatchState) watchdogActiveNodeIDs() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -225,9 +266,6 @@ func (s *dispatchState) watchdogActiveNodeIDs() []string {
 	return active
 }
 
-// watchdogKnownNodes unions the static plan with the nodes the
-// dispatcher scheduled at runtime (dynamic fan-out members, recovery
-// runners) that never appear in Plan.Nodes(), deduped by ID.
 func watchdogKnownNodes(plan *sparkwing.Plan, state *dispatchState) []*sparkwing.JobNode {
 	known := plan.Nodes()
 	seen := make(map[string]struct{}, len(known))
@@ -246,16 +284,6 @@ func watchdogKnownNodes(plan *sparkwing.Plan, state *dispatchState) []*sparkwing
 	return known
 }
 
-// parseDispatchWaitTimeout reads SPARKWING_DISPATCH_WAIT_TIMEOUT into
-// a time.Duration with sensible fallbacks:
-//
-//   - empty / unparseable: zero (caller substitutes the default).
-//   - "0" or "off" or "disable": negative sentinel, which
-//     waitForDispatch treats as "wait indefinitely."
-//   - otherwise: time.ParseDuration shape (e.g. "30m", "45s", "2h").
-//
-// Unparseable values log a warning and fall through to the default so
-// a typo doesn't silently disable the watchdog.
 func parseDispatchWaitTimeout(raw string) time.Duration {
 	switch raw {
 	case "":
@@ -272,9 +300,6 @@ func parseDispatchWaitTimeout(raw string) time.Duration {
 	return d
 }
 
-// dumpAllGoroutineStacks returns every live goroutine's stack as a
-// single string, capped at maxBytes. The cap keeps the watchdog's
-// envelope payload bounded regardless of process state.
 func dumpAllGoroutineStacks(maxBytes int) string {
 	if maxBytes <= 0 {
 		maxBytes = dispatchStackDumpBytes

@@ -29,7 +29,7 @@ import (
 type ArtifactStore struct {
 	Root string
 
-	casLocks sync.Map // map[string]*sync.Mutex, guards conditional writes per key
+	casLocks sync.Map
 }
 
 // NewArtifactStore returns an ArtifactStore rooted at root, creating
@@ -142,8 +142,6 @@ func (s *ArtifactStore) List(_ context.Context, prefix string) ([]string, error)
 	return out, nil
 }
 
-// keyFromRelPath inverts ArtifactStore.path by stripping the shard
-// segment.
 func keyFromRelPath(rel string) string {
 	rel = filepath.ToSlash(rel)
 	_, after, ok := strings.Cut(rel, "/")

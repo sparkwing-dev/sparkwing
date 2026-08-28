@@ -105,18 +105,8 @@ func ReadRaw(slug string) (string, error) {
 	return string(body), nil
 }
 
-// crossDocLinkPattern matches markdown links to a *.md file with an
-// optional fragment.
 var crossDocLinkPattern = regexp.MustCompile(`\[([^\]]+)\]\(([^)#]+)\.md(?:#[^)]*)?\)`)
 
-// rewriteCLILinks transforms `[text](slug.md)` markdown links into
-// `sparkwing docs read --topic <slug>` when slug is a known topic.
-// Unknown slugs are left unchanged. Anchors are dropped (the CLI
-// verb has no fragment support).
-//
-// Output shapes:
-//   - Link text equals the filename -> bare command.
-//   - Link text differs -> original text + command in parens.
 func rewriteCLILinks(body string) string {
 	knownSlugs := make(map[string]struct{})
 	for _, e := range List() {
@@ -250,8 +240,6 @@ func ChangelogSection(version string) (body string, ok bool) {
 	return strings.TrimSpace(strings.Join(collected, "\n")), true
 }
 
-// changelogHeadingMatches reports whether a `## [X] - date` heading
-// names the wanted version label (already lowercased, v-stripped).
 func changelogHeadingMatches(heading, want string) bool {
 	rest := strings.TrimSpace(strings.TrimPrefix(heading, "## "))
 	rest = strings.TrimPrefix(rest, "[")
@@ -263,16 +251,12 @@ func changelogHeadingMatches(heading, want string) bool {
 	return rest == want
 }
 
-// ErrNotFound signals an unknown slug.
 type docsError string
 
 func (e docsError) Error() string { return string(e) }
 
 const ErrNotFound = docsError("doc not found")
 
-// extractTitleSummary pulls the first H1 as Title and the first
-// non-empty paragraph after it as Summary. Skips blockquote status
-// banners. Falls back to the first non-empty line when there's no H1.
 func extractTitleSummary(body []byte) (title, summary string) {
 	scanner := bufio.NewScanner(strings.NewReader(string(body)))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)

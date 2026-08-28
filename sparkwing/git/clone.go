@@ -10,20 +10,15 @@ import (
 	"time"
 )
 
-// gitcacheProbeURL is the address the package probes for a local
-// gitcache HTTP server. Overridden in tests.
 var gitcacheProbeURL = "http://localhost:18090"
 
-// gitcacheProbeTimeout caps how long detection blocks. Tight by
-// design since detection runs on every Clone / Fetch and missing-
-// cache is the common case outside cluster mode.
 var gitcacheProbeTimeout = 200 * time.Millisecond
 
 // CloneOption configures optional git-clone behavior.
 type CloneOption func(*cloneConfig)
 
 type cloneConfig struct {
-	depth int // 0 = full clone
+	depth int
 }
 
 // WithDepth limits the clone to the most recent n commits (--depth n).
@@ -55,9 +50,6 @@ func Fetch(ctx context.Context, repoDir string) error {
 	return err
 }
 
-// resolveCloneURL returns the URL `git clone` should target. When a
-// local gitcache is reachable, returns the cache's URL; otherwise
-// returns upstream unchanged.
 func resolveCloneURL(ctx context.Context, upstream string) string {
 	cache := detectGitcache(ctx)
 	if cache == "" {
@@ -66,9 +58,6 @@ func resolveCloneURL(ctx context.Context, upstream string) string {
 	return cacheCloneURL(cache, upstream)
 }
 
-// detectGitcache returns the base URL of a reachable gitcache HTTP
-// server, or "" when none is available. Honors SPARKWING_GITCACHE
-// as an explicit override (skipping the probe).
 func detectGitcache(ctx context.Context) string {
 	if v := strings.TrimRight(os.Getenv("SPARKWING_GITCACHE"), "/"); v != "" {
 		return v
@@ -93,9 +82,6 @@ func detectGitcache(ctx context.Context) string {
 	return strings.TrimRight(gitcacheProbeURL, "/")
 }
 
-// cacheCloneURL builds the gitcache-served URL. The cache serves
-// repos by bare name under /git/<repo>; the repo name is extracted
-// from either an SSH-style or HTTPS URL.
 func cacheCloneURL(cacheBase, upstream string) string {
 	repoName := upstream
 	if i := strings.LastIndex(repoName, "/"); i >= 0 {

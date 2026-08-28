@@ -1,7 +1,3 @@
-// Command registry -- the source of truth for help output, flag
-// validation, and shell completion. Every leaf handler pulls its
-// Command from here so the help page, the error messages, and the
-// tab-completion menu all describe the same thing.
 package main
 
 import (
@@ -10,14 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// helpExampleScratchDir returns a per-OS scratch directory string
-// suitable for inlining into help text. Linux gets "/tmp/<name>",
-// macOS the same (since /tmp is a symlink to /private/tmp and works
-// fine), and Windows gets "%TEMP%\<name>" -- using the env-var form
-// rather than a hardcoded C:\Temp so the example is portable across
-// users and matches what they'd type at a cmd.exe prompt. Avoids
-// os.TempDir() because that resolves to ugly per-process paths on
-// macOS (/var/folders/...) that aren't useful to copy-paste.
 func helpExampleScratchDir(name string) string {
 	if runtime.GOOS == "windows" {
 		return `%TEMP%\` + name
@@ -307,10 +295,6 @@ latest) for shell pipelines.`,
 	},
 }
 
-// cmdVersionHold is the operator-set ceiling on CLI self-upgrades.
-// The tool enforces the hold so an agent cannot cross it against
-// operator instruction; the override flag exists but is intentionally
-// left out of the refusal message an agent sees.
 var cmdVersionHold = Command{
 	Path:     "sparkwing version hold",
 	Synopsis: "Show, set, or clear the operator ceiling on CLI upgrades",
@@ -345,10 +329,6 @@ being deferred.`,
 	},
 }
 
-// cmdUpdate is the top-level binary self-update verb. Binary-only
-// (no --cli/--sdk split); for SDK updates use `version update --sdk`.
-// --check reports installed vs latest without modifying anything;
-// --force overrides the downgrade safety guard.
 var cmdUpdate = Command{
 	Path:     "sparkwing update",
 	Synopsis: "Self-update the CLI binary",
@@ -384,11 +364,6 @@ For SDK (go.mod) bumps, use 'sparkwing version update --sdk'.`,
 	},
 }
 
-// cmdVersionUpdate is the unified update verb. Picks one of two
-// targets explicitly via --cli (binary self-update) or --sdk
-// (per-project go.mod bump). Neither flag is the default --
-// the operator must state intent so a stray `version update`
-// can't quietly do the wrong half.
 var cmdVersionUpdate = Command{
 	Path:     "sparkwing version update",
 	Synopsis: "Self-update the CLI binary (--cli) or bump this project's SDK pin (--sdk)",
@@ -1120,15 +1095,6 @@ continuously.`,
 	},
 }
 
-// runFlagSpecs is shared between cmdRun (the `sparkwing run` help
-// page) and cmdPipelineRun (the `sparkwing pipeline run` help page),
-// since the two invocation surfaces are the same execution path
-// under different names. Derived from sparkwing.SparkwingFlagDocs()
-// so the per-pipeline footer (orchestrator/main.go's
-// printPipelineHelp) and the top-level `sparkwing run --help`
-// enumerate from the same source. Adding a flag in
-// sparkwing/sparkwing_flag_docs.go surfaces it in every help page
-// simultaneously.
 var runFlagSpecs = runFlagSpecsFromDocs()
 
 func runFlagSpecsFromDocs() []FlagSpec {
@@ -1179,11 +1145,6 @@ To bump the pipeline SDK pin in .sparkwing/go.mod, use
 	},
 }
 
-// cmdPipelineRun is the canonical run verb under the pipeline
-// namespace. `sparkwing run <name>` aliases to this. Positional
-// pipeline name (the deliberate exception in an otherwise
-// flag-only sparkwing surface) -- run is the hot path, typed
-// many times a day.
 var cmdPipelineRun = Command{
 	Path:     "sparkwing pipeline run",
 	Synopsis: "Invoke a pipeline (canonical form of `sparkwing run <name>`)",
@@ -1213,11 +1174,6 @@ Args.`,
 	},
 }
 
-// cmdPipelineTrigger submits a trigger to a profile's controller for
-// remote execution -- the v0.5.0 successor to `sparkwing run
-// --sw-profile`. Positional pipeline name (mirrors `pipeline run`), a
-// required --profile naming the controller, and pass-through pipeline
-// args.
 var cmdPipelineTrigger = Command{
 	Path:     "sparkwing pipeline trigger",
 	Synopsis: "Submit a pipeline to a profile's controller (remote execution)",
@@ -1470,11 +1426,6 @@ rendered with each parameter's default.
 	},
 }
 
-// cmdExampleScaffold materializes an example into a repo. It exists for
-// the template-verify pipeline, which proves every example still
-// compiles and runs by building one; it is hidden because scaffolding
-// from an example is not the path anyone should take to start a
-// pipeline.
 var cmdPipelineExplain = Command{
 	Path:     "sparkwing pipeline explain",
 	Synopsis: "Render the pipeline's Plan DAG without dispatching any jobs",
@@ -1570,12 +1521,6 @@ override with --dir.`,
 	},
 }
 
-// cmdPipelinePlan: same DAG as `explain` plus per-step would-run /
-// would-skip decisions evaluated against the supplied args +
-// --start-at / --stop-at bounds. NO step bodies execute. Designed
-// as the canonical pre-flight verb -- agents and humans inspect the
-// runtime-resolved plan before destructive operations,
-// terraform-style.
 var cmdPipelinePlan = Command{
 	Path:     "sparkwing pipeline plan",
 	Synopsis: "Render the runtime-resolved DAG without dispatching any jobs",
@@ -1617,10 +1562,6 @@ with 'sparkwing run <name>' to actually dispatch.`,
 	},
 }
 
-// cmdRunConfig documents the `<pipeline> config` inspection subverb.
-// Implemented by the inner pipeline binary (orchestrator/main.go's
-// dispatch), so this entry exists primarily for --help discoverability
-// and shell completion.
 var cmdRunConfig = Command{
 	Path:     "sparkwing run config",
 	Synopsis: "Print a pipeline's declared Secrets with provenance",
@@ -1643,11 +1584,6 @@ pipeline binary handles the subverb directly.`,
 	HideFromComplete: true,
 }
 
-// cmdRun is the top-level invoke verb: `sparkwing run <pipeline>`.
-// Takes the pipeline name as a positional (the deliberate exception
-// to the otherwise-flag-only sparkwing surface) because typing the
-// pipeline name many times a day is the hot path; the symmetry cost
-// is worth the ergonomic win.
 var cmdRun = Command{
 	Path:     "sparkwing run",
 	Synopsis: "Invoke a pipeline",
@@ -1689,9 +1625,6 @@ the default for managed git hooks.`,
 	},
 }
 
-// cmdProfile is read-side introspection: which profile would sparkwing
-// pick right now, and why. No positional args; --profile NAME drives the
-// hypothetical "what if I passed --profile NAME" case.
 var cmdProfile = Command{
 	Path:     "sparkwing profile",
 	Synopsis: "Show which profile sparkwing would use right now, and why",

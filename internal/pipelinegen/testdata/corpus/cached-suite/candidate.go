@@ -25,9 +25,6 @@ func (GenCachedSuite) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, ru
 	return nil
 }
 
-// genCachedKey computes the content key after upstream dependencies
-// complete. It runs on the runner, not while the DAG is built, so
-// hashing the tree here is fine.
 func genCachedKey(ctx context.Context) sw.CacheKey {
 	sources, err := sw.Glob("**/*.go")
 	if err != nil {

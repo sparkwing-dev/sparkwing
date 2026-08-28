@@ -19,8 +19,6 @@ const (
 	execVisibleValue = "prod"
 )
 
-// execControllerWithSecretRun stands up a controller holding one run
-// whose pipeline declared `token` secret, and returns a client for it.
 func execControllerWithSecretRun(t *testing.T, runID string) (*store.Store, *client.Client) {
 	t.Helper()
 	st, err := store.Open(filepath.Join(t.TempDir(), "controller.db"))
@@ -48,10 +46,6 @@ func execControllerWithSecretRun(t *testing.T, runID string) (*store.Store, *cli
 	return st, client.New(srv.URL, nil)
 }
 
-// The cluster executor path: `sparkwing run-node` in a pod fetches the
-// run over HTTP and plans from run.Args. Redacting that fetch makes the
-// pod execute with a literal "***", and -- worse -- seeds the per-run
-// masker with "***" so the real secret stops being masked in node logs.
 func TestSecretArgs_ExecutionFetchCarriesPlaintextAndSeedsTheMasker(t *testing.T) {
 	_, c := execControllerWithSecretRun(t, "run-1")
 	ctx := context.Background()
@@ -65,8 +59,6 @@ func TestSecretArgs_ExecutionFetchCarriesPlaintextAndSeedsTheMasker(t *testing.T
 			run.Args["token"])
 	}
 
-	// run_node.go seeds the masker from exactly these args. Prove the
-	// masker built this way redacts the REAL secret in node output.
 	masker := secrets.NewMasker()
 	for _, v := range run.Args {
 		masker.Register(v)
@@ -76,17 +68,12 @@ func TestSecretArgs_ExecutionFetchCarriesPlaintextAndSeedsTheMasker(t *testing.T
 		t.Errorf("masker seeded from the execution fetch does not mask the real secret: %q", got)
 	}
 
-	// The same payload is what maskEventPayload protects; it must see
-	// the real value to have anything to match.
 	payload := []byte(`{"args":{"token":"` + execSecretValue + `"}}`)
 	if got := string(maskEventPayload(masker, payload)); strings.Contains(got, execSecretValue) {
 		t.Errorf("child_run_start payload not masked: %s", got)
 	}
 }
 
-// The negative control: the display fetch is what the dashboard uses,
-// and using it for execution is the regression this guards. A masker
-// seeded from it registers "***" and masks nothing.
 func TestSecretArgs_DisplayFetchWouldBreakExecutionAndMasking(t *testing.T) {
 	_, c := execControllerWithSecretRun(t, "run-1")
 
@@ -108,9 +95,6 @@ func TestSecretArgs_DisplayFetchWouldBreakExecutionAndMasking(t *testing.T) {
 	}
 }
 
-// resolveTriggerArgs rehydrates a retry's args from the original run
-// and hands them to Plan(). Over a controller-backed StateBackend that
-// read must use the execution view, or the retry re-runs with "***".
 func TestSecretArgs_RetryArgRehydrationUsesTheExecutionView(t *testing.T) {
 	_, c := execControllerWithSecretRun(t, "orig-1")
 
@@ -126,8 +110,6 @@ func TestSecretArgs_RetryArgRehydrationUsesTheExecutionView(t *testing.T) {
 	}
 }
 
-// runForExecution falls back to a plain GetRun for local backends,
-// whose reads come off the database unredacted.
 func TestRunForExecution_FallsBackForLocalBackends(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "local.db"))
 	if err != nil {
@@ -151,10 +133,6 @@ func TestRunForExecution_FallsBackForLocalBackends(t *testing.T) {
 	}
 }
 
-// The replay sideload copies a remote run into the local store and
-// replays from that copy. A redacted fetch would persist "***"
-// permanently: sideloadRun returns early when the row already exists,
-// so the poisoned copy never self-heals.
 func TestSecretArgs_RemoteReplaySideloadRoundTripsPlaintext(t *testing.T) {
 	remote, c := execControllerWithSecretRun(t, "run-1")
 	ctx := context.Background()
@@ -189,8 +167,7 @@ func TestSecretArgs_RemoteReplaySideloadRoundTripsPlaintext(t *testing.T) {
 		t.Fatalf("sideloaded args[token] = %q, want plaintext -- replay would execute with that literal",
 			got.Args["token"])
 	}
-	// The classification must survive too, or the sideloaded row and
-	// every replay minted from it render the secret in the clear.
+
 	if names := got.SecretArgNames(); len(names) != 1 || names[0] != "token" {
 		t.Fatalf("sideloaded classification = %v, want [token]", names)
 	}
@@ -198,7 +175,6 @@ func TestSecretArgs_RemoteReplaySideloadRoundTripsPlaintext(t *testing.T) {
 		t.Error("sideloaded run does not redact for display")
 	}
 
-	// And the replay minted from it inherits both properties.
 	replayID, err := MintReplayRun(ctx, local, "run-1", "ship")
 	if err != nil {
 		t.Fatalf("MintReplayRun: %v", err)

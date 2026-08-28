@@ -114,11 +114,6 @@ func TestBash_RunsBashOnlyFeatures(t *testing.T) {
 	}
 }
 
-// Enough commands in flight at once to starve the reader goroutines, which is
-// what it takes to see output loss: a cmd.StdoutPipe is closed by Wait the
-// instant the child is reaped, so a reader that has not been scheduled yet
-// finds a dead pipe and reports empty stdout for a command that exited 0.
-// Sequential runs never reproduce it.
 func TestExec_ConcurrentCommandsKeepTheirOwnStdout(t *testing.T) {
 	const (
 		workers  = 16
@@ -131,7 +126,7 @@ func TestExec_ConcurrentCommandsKeepTheirOwnStdout(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			// safety: each goroutine needs its own logger; the recorders append unguarded.
+
 			ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
 			for i := range perGroup {
 				want := fmt.Sprintf("marker-%d-%d", w, i)
@@ -198,8 +193,6 @@ func TestBash_EnvInjects(t *testing.T) {
 	}
 }
 
-// When the dir does not exist, the renderer must NOT claim
-// "exit 0". The cause must be visible in the human string.
 func TestCmd_DirMissingRendersStartFailure(t *testing.T) {
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
 	bogus := filepath.Join(t.TempDir(), "does-not-exist")
@@ -226,8 +219,6 @@ func TestCmd_DirMissingRendersStartFailure(t *testing.T) {
 	}
 }
 
-// Missing-binary path (Exec with a name that's not on PATH)
-// must surface the ENOENT cause, not "exit 0".
 func TestExec_MissingBinaryRendersStartFailure(t *testing.T) {
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
 	_, err := sparkwing.Exec(ctx, "sparkwing-bogus-binary-xyz").Run()
@@ -250,9 +241,6 @@ func TestExec_MissingBinaryRendersStartFailure(t *testing.T) {
 	}
 }
 
-// A process killed after it started (exit code -1, colliding with the
-// ExitNotStarted sentinel) must render as terminated, not as a launch
-// failure -- the Terminated field, not ExitCode, decides.
 func TestExecError_TerminatedRendersSignalNotStartFailure(t *testing.T) {
 	e := &sparkwing.ExecError{
 		Command:    "go test ./...",
@@ -270,8 +258,6 @@ func TestExecError_TerminatedRendersSignalNotStartFailure(t *testing.T) {
 	}
 }
 
-// A command SIGKILLed mid-run by run-context cancellation had started;
-// its error must read as a cancellation-kill, not "failed to start".
 func TestExec_CancellationKillReadsAsTerminatedNotFailedToStart(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "started")
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
@@ -332,9 +318,6 @@ func TestExec_CancellationKillReadsAsTerminatedNotFailedToStart(t *testing.T) {
 	}
 }
 
-// A relative dir is resolved against WorkDir(), not the
-// runner-process cwd. .Dir("sub") from a pipeline rooted at /tmp/foo
-// must run in /tmp/foo/sub.
 func TestCmd_RelativeDirResolvesAgainstWorkDir(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "sub")
@@ -356,7 +339,6 @@ func TestCmd_RelativeDirResolvesAgainstWorkDir(t *testing.T) {
 	}
 }
 
-// An absolute dir is used as-is (not joined onto WorkDir()).
 func TestCmd_AbsoluteDirPassesThrough(t *testing.T) {
 	root := t.TempDir()
 	other := t.TempDir()

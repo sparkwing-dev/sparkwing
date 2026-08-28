@@ -1,10 +1,3 @@
-// Package logpretty renders sparkwing.LogRecord streams as
-// TTY-friendly output and provides a small set of helpers
-// (StripANSI, markdown summary rendering) the dashboard pulls in.
-//
-// Extracted from internal/orchestrator so thin binaries (sparkwing-web
-// in particular) can render logs without dragging in the dispatch
-// engine.
 package logpretty
 
 import (
@@ -25,9 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// PrettyRenderer is the TTY-facing Logger. Child-process ANSI in Msg
-// passes through verbatim. Each node gets a palette slot on first
-// appearance.
 type PrettyRenderer struct {
 	mu        sync.Mutex
 	w         io.Writer
@@ -43,7 +33,6 @@ type PrettyRenderer struct {
 	pendingRunStart   *sparkwing.LogRecord
 }
 
-// NewPrettyRenderer writes to stdout/stderr with color unless NO_COLOR is set.
 func NewPrettyRenderer() *PrettyRenderer {
 	return &PrettyRenderer{
 		w:         os.Stdout,
@@ -54,7 +43,6 @@ func NewPrettyRenderer() *PrettyRenderer {
 	}
 }
 
-// NewPrettyRendererTo writes all output to w with color forced via useColor.
 func NewPrettyRendererTo(w io.Writer, useColor bool) *PrettyRenderer {
 	return &PrettyRenderer{
 		w:         w,
@@ -260,10 +248,6 @@ func (p *PrettyRenderer) flushPending(sink io.Writer) {
 	}
 }
 
-// Flush drains any buffered events. Callers rendering one record at a
-// time (HTTP pretty-printers, batched log rendering) must invoke this
-// at end-of-stream so a buffered node_start or step_end is not dropped
-// when no follow-up event arrives.
 func (p *PrettyRenderer) Flush() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -729,12 +713,6 @@ func (p *PrettyRenderer) writeRunBlockSummaries(w io.Writer, nodes []any) {
 	}
 }
 
-// writeFailureHeadline names the root-cause node(s) -- those whose
-// outcome is "failed", i.e. they ran and errored -- with a one-line
-// error tail, then summarizes how many downstream nodes were cancelled
-// by that failure. The cancelled count is a cascade, not a set of
-// independent failures, so it's reported separately rather than mixed
-// into the failure list.
 func (p *PrettyRenderer) writeFailureHeadline(w io.Writer, nodes []any) {
 	cancelled := 0
 	var failed []map[string]any
@@ -767,10 +745,6 @@ func (p *PrettyRenderer) writeFailureHeadline(w io.Writer, nodes []any) {
 	}
 }
 
-// errorTail collapses a (possibly multi-line) error to its last
-// non-empty line, truncated for the one-line headline. The last line
-// is usually the proximate cause; the full text stays in the Errors
-// block below.
 func errorTail(body string) string {
 	const max = 120
 	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
@@ -1090,11 +1064,6 @@ func (p *PrettyRenderer) writeSetupBlock(w io.Writer, runStart, plan *sparkwing.
 	fmt.Fprintln(w, p.sectionRule("Logs"))
 }
 
-// writeProfileBlock renders the resolved-profile banner before the plan
-// when run_start carries a profile/backends object (i.e. the run was
-// driven by --profile). Omitted entirely otherwise, so legacy runs and
-// historical envelopes without these keys render unchanged. Never prints
-// the token or controller URL.
 func (p *PrettyRenderer) writeProfileBlock(w io.Writer, runStart *sparkwing.LogRecord) {
 	prof := anyMap(runStart.Attrs["profile"])
 	if len(prof) == 0 {
@@ -1124,9 +1093,6 @@ func (p *PrettyRenderer) writeProfileBlock(w io.Writer, runStart *sparkwing.LogR
 	}
 }
 
-// profileViaPhrase maps a ChainSource to the human phrase shown on
-// the banner's `via:` line. detectVia is retained as a no-op
-// parameter for caller-call-site compatibility.
 func profileViaPhrase(source, _ string) string {
 	switch source {
 	case string(profile.ChainSourceFlag):
@@ -1196,7 +1162,6 @@ func asMillis(v any) (int64, bool) {
 	return 0, false
 }
 
-// StripANSI removes ANSI CSI/SGR escape sequences from s.
 func StripANSI(s string) string {
 	if !strings.ContainsRune(s, 0x1b) {
 		return s
@@ -1223,15 +1188,6 @@ func StripANSI(s string) string {
 	return b.String()
 }
 
-// RenderMarkdownSummary pretty-prints a markdown blob for terminal
-// readers. Headings, emphasis, checklists, and tables get light
-// styling; everything else passes through as-is. Each output line is
-// indented by prefix so the block visually nests under its node/step
-// header.
-//
-// Color emission auto-disables when stdout isn't a TTY (pkg/color),
-// so agents and pipes get plain text -- the styling never bleeds
-// into logs.
 func RenderMarkdownSummary(out io.Writer, prefix, md string) {
 	body := strings.TrimRight(md, "\n")
 	lines := strings.Split(body, "\n")

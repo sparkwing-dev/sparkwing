@@ -7,13 +7,6 @@ import (
 	"testing"
 )
 
-// The degraded bodies below are the ones the services actually emit:
-// stuck triggers and a low run success rate from
-// pkg/controller/handlers.go, the disk-low degradation from
-// pkg/logs/server.go, and a stalled fetch loop plus an unwritable proxy
-// directory from internal/cache/gitcache.go. Problems without the
-// status word still read as degraded -- a service that names a fault
-// has not claimed health.
 func TestDecodeReadsTheContractEveryServicePublishes(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -109,10 +102,6 @@ func TestDecodeReadsTheContractEveryServicePublishes(t *testing.T) {
 	}
 }
 
-// The two failures mean opposite things and callers act on the
-// difference: a service answering outside the contract has said it is
-// up, while a body that could not be read said nothing at all. Only the
-// first is ErrNotContract.
 func TestDecodeSeparatesAnUnreadableBodyFromOneOutsideTheContract(t *testing.T) {
 	_, err := Decode(strings.NewReader("OK\n"))
 	if !errors.Is(err, ErrNotContract) {
@@ -131,8 +120,6 @@ func TestDecodeSeparatesAnUnreadableBodyFromOneOutsideTheContract(t *testing.T) 
 	}
 }
 
-// errReader stops partway through, the shape a truncated response
-// takes: the headers arrived, the body did not.
 type errReader struct{ prefix string }
 
 func (r *errReader) Read(p []byte) (int, error) {
@@ -144,8 +131,6 @@ func (r *errReader) Read(p []byte) (int, error) {
 	return 0, io.ErrUnexpectedEOF
 }
 
-// A body past the limit is truncated mid-JSON, so it fails to parse
-// rather than being read without end.
 func TestDecodeBoundsTheBody(t *testing.T) {
 	oversized := `{"status":"ok","problems":["` + strings.Repeat("x", MaxBodyBytes) + `"]}`
 	if _, err := Decode(strings.NewReader(oversized)); err == nil {

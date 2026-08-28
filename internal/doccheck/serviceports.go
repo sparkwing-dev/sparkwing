@@ -8,10 +8,6 @@ import (
 	"strings"
 )
 
-// service pairs a cluster DNS label with the binary whose default
-// `--addr` flag is the single source of truth for the port that label's
-// Service targets. The docs' internal-address table cites these; when a
-// service's bind port changes in the binary, the table rots silently.
 type service struct {
 	dnsLabel string
 	mainFile string
@@ -23,21 +19,10 @@ var services = []service{
 	{"sparkwing-logs", filepath.Join("cmd", "sparkwing-logs", "main.go")},
 }
 
-// addrDefaultRE captures the port from a service binary's default
-// `--addr` value, e.g. `fs.String("addr", "127.0.0.1:4344", ...)`.
 var addrDefaultRE = regexp.MustCompile(`"addr",\s*"[^"]*:(\d+)"`)
 
-// targetPortRE captures the port a doc line says a Service maps to: the
-// arrow form `80 -> 4344` used in the internal-address table.
 var targetPortRE = regexp.MustCompile(`->\s*(\d+)`)
 
-// checkServicePorts verifies that wherever a doc line names a cluster
-// service by its DNS label and states the port that Service targets
-// (`... -> <port>`), the port matches the service binary's default
-// `--addr` bind port. This anchors the internal-address documentation to
-// a single source of truth in code and catches the class of drift where
-// a service's port changed but the address table still shows the old
-// number. Returns false on any mismatch.
 func checkServicePorts(contentDir, repoRoot string) bool {
 	canonical := map[string]string{}
 	for _, s := range services {

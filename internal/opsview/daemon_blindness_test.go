@@ -18,8 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// renderLocalQueueFor runs the same query-and-render the queue verb runs, and
-// returns what an operator would see for home in the given format.
 func renderLocalQueueFor(t *testing.T, home, format string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), strayTestWait)
@@ -50,14 +48,6 @@ func renderLocalQueueFor(t *testing.T, home, format string) string {
 	return buf.String()
 }
 
-// TestLocalQueue_NoDaemonDoesNotReadLikeAnIdleDaemon is the negative control
-// for the reachability block. `sparkwing queue -o json` printed `{}` when it
-// could not reach the daemon, which is exactly what a quiet machine prints, so
-// the one command promising "the truthful view of local admission" reported an
-// idle queue while it was in fact blind.
-//
-// The two homes here differ only in whether a daemon is listening, and the
-// test fails if their output stops differing.
 func TestLocalQueue_NoDaemonDoesNotReadLikeAnIdleDaemon(t *testing.T) {
 	quiet := shortHome(t)
 	idle := shortHome(t)
@@ -83,9 +73,6 @@ func TestLocalQueue_NoDaemonDoesNotReadLikeAnIdleDaemon(t *testing.T) {
 	}
 }
 
-// TestLocalQueue_UnreachableIsNeitherIdleNorAbsent pins the third state. A
-// socket that would not answer is not an empty queue and not an absent daemon:
-// runs may be holding right now and this process cannot see them.
 func TestLocalQueue_UnreachableIsNeitherIdleNorAbsent(t *testing.T) {
 	blocked := errors.New("dial unix /tmp/sparkwing-502-abc/d.sock: connect: operation not permitted")
 	for _, format := range []string{"json", "plain", "pretty"} {
@@ -116,10 +103,6 @@ func TestLocalQueue_UnreachableIsNeitherIdleNorAbsent(t *testing.T) {
 	}
 }
 
-// TestDoctor_UnreachedDaemonDoesNotReadLikeAHealthyOne is the second negative
-// control. Doctor run against a daemon it never reached reported the same
-// counts a healthy machine reports, with no daemon field at all, so an
-// operator read four zeros as a clean bill while nothing could commit.
 func TestDoctor_UnreachedDaemonDoesNotReadLikeAHealthyOne(t *testing.T) {
 	quiet := shortHome(t)
 	healthy := shortHome(t)
@@ -152,11 +135,6 @@ func TestDoctor_UnreachedDaemonDoesNotReadLikeAHealthyOne(t *testing.T) {
 	}
 }
 
-// TestDiagnose_NamesAVersionSkewAgainstALiveDaemon covers one of the standing
-// conditions the local-execution doc promises doctor reports. The skew finding
-// had render-layer tests only, so nothing pinned that a sweep against a live
-// daemon actually populates it -- a wiring break would have looked exactly like
-// a machine with no skew.
 func TestDiagnose_NamesAVersionSkewAgainstALiveDaemon(t *testing.T) {
 	home := shortHome(t)
 	serveDaemon(t, home, "v9.9.9")
@@ -174,10 +152,6 @@ func TestDiagnose_NamesAVersionSkewAgainstALiveDaemon(t *testing.T) {
 	}
 }
 
-// TestDoctor_BlindSweepIsNotClean pins the rule the whole ticket rests on: a
-// check that cannot look must not report what it reports when everything is
-// fine. Four of doctor's checks need the daemon, so a sweep that never reached
-// one has not earned "healthy: nothing to repair".
 func TestDoctor_BlindSweepIsNotClean(t *testing.T) {
 	blind := opsview.DoctorReport{Daemon: opsview.DoctorDaemon{
 		State:  opsview.ReachUnreachable,
@@ -203,8 +177,6 @@ func TestDoctor_BlindSweepIsNotClean(t *testing.T) {
 	}
 }
 
-// A daemon nobody started is an ordinary state, so it stays clean -- but it
-// still has to say so out loud rather than by omission.
 func TestDoctor_AbsentDaemonIsCleanAndStated(t *testing.T) {
 	absent := opsview.DoctorReport{Daemon: opsview.DoctorDaemon{
 		State:  opsview.ReachAbsent,
@@ -223,9 +195,6 @@ func TestDoctor_AbsentDaemonIsCleanAndStated(t *testing.T) {
 	}
 }
 
-// The daemon block is the field that says the question was asked, so it has to
-// be in the JSON whatever its value. An omitted block reads as a build that
-// never looked, which is the distinction it exists to draw.
 func TestRenderDoctorJSON_AlwaysCarriesTheDaemonSection(t *testing.T) {
 	var buf bytes.Buffer
 	if err := opsview.RenderDoctor(&buf, opsview.DoctorReport{}, "json", ""); err != nil {
@@ -236,9 +205,6 @@ func TestRenderDoctorJSON_AlwaysCarriesTheDaemonSection(t *testing.T) {
 	}
 }
 
-// blockSocket strips search permission from the directory holding home's
-// daemon socket, so a dial fails the way a sandbox denial does (EACCES) rather
-// than with the ENOENT an idle machine produces.
 func blockSocket(t *testing.T, home string) {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)
@@ -258,11 +224,6 @@ func blockSocket(t *testing.T, home string) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
 }
 
-// TestDiagnose_LeavesRunRowsAloneWhenBlind covers the destructive edge the
-// blindness opened, which the ticket did not anticipate: an unreachable daemon
-// yields an empty live-run set, which reads exactly like a daemon holding no
-// leases, so a repairing sweep would finalize the runs that daemon is holding
-// right now.
 func TestDiagnose_LeavesRunRowsAloneWhenBlind(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reaches a socket whatever its directory mode")

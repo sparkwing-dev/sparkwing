@@ -8,8 +8,6 @@ import (
 	"strings"
 )
 
-// toolCacheRoot is the directory under the OS temp dir that parents
-// every cache ToolCacheDir hands out.
 const toolCacheRoot = "sparkwing-toolcache"
 
 // ToolCacheDir returns a cache directory for an external tool, scoped
@@ -98,9 +96,6 @@ func ToolCacheDir(tool string) string {
 	return dir
 }
 
-// cacheSegment reduces s to a single filesystem-safe path segment, so
-// a tool name or worktree name carrying separators or dots cannot
-// place the cache outside the toolCacheRoot tree.
 func cacheSegment(s, fallback string) string {
 	safe := strings.Map(func(r rune) rune {
 		switch {

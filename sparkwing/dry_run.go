@@ -2,8 +2,6 @@ package sparkwing
 
 import "context"
 
-// dryRunKey scopes the dry-run context value installed by
-// internal/sparkwingruntime.WithDryRun.
 type dryRunKey struct{}
 
 // IsDryRun reports whether ctx is in dry-run mode. Exported so

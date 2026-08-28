@@ -1,6 +1,3 @@
-// `sparkwing pipeline sparks` subcommand. Manages the sparks: section
-// of .sparkwing/sparkwing.yaml and drives the resolver in
-// internal/sparks.
 package main
 
 import (
@@ -21,9 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-// defaultSparkwingDir resolves the --sparkwing-dir flag's default:
-// the `.sparkwing/` child of the current working directory. We keep
-// the resolution lazy so tests can chdir first.
 func defaultSparkwingDir() string {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -63,10 +57,6 @@ func runSparks(args []string) error {
 	}
 }
 
-// sparkListEntry is the per-library shape we render for `spark list`.
-// Kept separate from sparks.Library so we can add the resolved
-// version and keep JSON output stable even if the manifest shape
-// changes.
 type sparkListEntry struct {
 	Name     string `json:"name"`
 	Source   string `json:"source"`
@@ -75,8 +65,6 @@ type sparkListEntry struct {
 	Error    string `json:"error,omitempty"`
 }
 
-// sparkListLine is one library as a stream record, discriminated like every
-// other line so a consumer reads `kind` rather than counting positions.
 type sparkListLine struct {
 	Kind string `json:"kind"`
 	sparkListEntry
@@ -123,8 +111,7 @@ func runSparksList(args []string) error {
 	}
 	switch format {
 	case "json":
-		// A summary line carrying the fact that is not a library's, then one
-		// library per line, so `head` returns whole records (house rule 12).
+
 		enc := json.NewEncoder(os.Stdout)
 		if err := enc.Encode(map[string]any{
 			"kind": "summary", "sparkwing_dir": sparkwingDir, "library_count": len(entries),
@@ -176,8 +163,6 @@ func runSparksList(args []string) error {
 	}
 }
 
-// shortErr trims a long resolver error message to one line suitable
-// for the RESOLVED column. Full error is still in JSON output.
 func shortErr(s string) string {
 	s = strings.TrimSpace(s)
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
@@ -189,12 +174,6 @@ func shortErr(s string) string {
 	return s
 }
 
-// sparkManifest is the shape of spark.json. Kept inline rather than
-// imported from internal/sparks because that package is concerned
-// with the consumer-side sparks.yaml, not the library-side
-// spark.json. Fields follow docs/sparks.md. A manifest carries
-// exactly one of Packages (one Go module, many importable packages)
-// or Modules (a monorepo of independently tagged Go modules).
 type sparkManifest struct {
 	Name          string                `json:"name"`
 	Description   string                `json:"description"`
@@ -207,10 +186,6 @@ type sparkManifest struct {
 	Dependencies  []sparkManifestDepRaw `json:"dependencies"`
 }
 
-// sparkManifestEntry is one `packages[]` or `modules[]` element.
-// Module names the Go module the subdirectory declares; it belongs to
-// a `modules[]` entry only, since every package of a single-module
-// library shares the manifest's own module path.
 type sparkManifestEntry struct {
 	Path        string `json:"path"`
 	Module      string `json:"module"`
@@ -307,10 +282,6 @@ func runSparksLint(args []string) error {
 	return nil
 }
 
-// sparkManifestShape picks the entry array the manifest declares. A
-// manifest carries exactly one of `packages` or `modules`; anything
-// else is the returned problem, and the entries are then not worth
-// checking one by one.
 func sparkManifestShape(m sparkManifest) (field string, entries []sparkManifestEntry, problem string) {
 	switch {
 	case len(m.Packages) > 0 && len(m.Modules) > 0:
@@ -326,10 +297,6 @@ func sparkManifestShape(m sparkManifest) (field string, entries []sparkManifestE
 	}
 }
 
-// lintSparkEntries validates the `packages[]` or `modules[]` array
-// named by field: every entry points at a real directory under libDir
-// and describes itself, paths are unique, and a `modules[]` entry
-// names the Go module its directory declares.
 func lintSparkEntries(libDir, field string, entries []sparkManifestEntry) []string {
 	wantModule := field == "modules"
 	var problems []string
@@ -379,9 +346,6 @@ func lintSparkEntries(libDir, field string, entries []sparkManifestEntry) []stri
 	return problems
 }
 
-// lintEntryGoMod cross-checks a modules[] entry against the go.mod in
-// its directory. A directory without a go.mod is left alone: the
-// module may be tagged from a parent, or not yet initialized.
 func lintEntryGoMod(dir, field string, i int, e sparkManifestEntry) []string {
 	declared := strings.TrimSpace(e.Module)
 	if declared == "" {
@@ -422,9 +386,6 @@ func pluralS(n int) string {
 	return "s"
 }
 
-// resolveSparkJSONPath handles the ergonomics of `spark lint PATH`:
-// PATH can be a library directory (we append spark.json) or a direct
-// path to a spark.json file.
 func resolveSparkJSONPath(target string) (libDir, manifestPath string, err error) {
 	info, err := os.Stat(target)
 	if err != nil {
@@ -680,13 +641,8 @@ func runSparksWarmup(args []string) error {
 	return nil
 }
 
-// sparksCoreModulePrefix is prepended to a bare --module name to form
-// the full module path of a sparks-core block module.
 const sparksCoreModulePrefix = "github.com/sparkwing-dev/sparks-core/"
 
-// resolveVendorModulePath turns a --module value into a full Go module
-// path. A value that already contains a slash is treated as a complete
-// module path; a bare name resolves to a sparks-core block module.
 func resolveVendorModulePath(module string) string {
 	module = strings.TrimSpace(module)
 	if strings.Contains(module, "/") {
@@ -750,10 +706,6 @@ func runSparksInflate(args []string) error {
 	return nil
 }
 
-// loadManifestForWrite reads sparks.yaml for a mutation subcommand.
-// Absent file -> an empty Manifest (so `spark add` on a fresh repo
-// creates the file). Returns the resolved path so callers write back
-// to the same location.
 func loadManifestForWrite(sparkwingDir string) (*sparks.Manifest, string, error) {
 	if sparkwingDir == "" {
 		return nil, "", errors.New("sparkwing-dir must not be empty")
@@ -774,8 +726,6 @@ func loadManifestForWrite(sparkwingDir string) (*sparks.Manifest, string, error)
 	return m, path, nil
 }
 
-// sparksResolveAndWrite loads the sparks manifest from the project's
-// sparkwing.yaml and resolves + writes the overlay modfile.
 func sparksResolveAndWrite(ctx context.Context, sparkwingDir string) (bool, error) {
 	m, err := projectconfig.LoadSparksManifest(sparkwingDir)
 	if err != nil {
@@ -784,10 +734,6 @@ func sparksResolveAndWrite(ctx context.Context, sparkwingDir string) (bool, erro
 	return sparks.ResolveAndWrite(ctx, sparkwingDir, m)
 }
 
-// writeSparksYAML writes m's libraries into the sparks: section of the
-// project's sparkwing.yaml (path), preserving every other section. A
-// surgical yaml edit -- the unrelated pipeline/runner/source config is
-// never re-marshaled.
 func writeSparksYAML(path string, m *sparks.Manifest) error {
 	return projectconfig.WriteSparksSection(path, m.Libraries)
 }

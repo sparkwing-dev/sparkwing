@@ -83,11 +83,6 @@ export default function SelectedNodePanel({ node }: { node: RunNode }) {
         </div>
       )}
       {(() => {
-        // Flatten node-scope + per-step annotations. After dropping
-        // the dual-persist write, step annotations live on
-        // step.annotations only -- reading node.annotations misses
-        // them. Dual-persisted older runs may carry the same string
-        // on both, so dedup by text.
         const rows: { stepID: string | null; text: string }[] = [];
         const stepTexts = new Set<string>();
         for (const s of node.work?.steps ?? []) {

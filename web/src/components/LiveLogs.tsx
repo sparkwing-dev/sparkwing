@@ -5,10 +5,6 @@ import { parseLogLines } from "@/lib/logParser";
 import LogBucketView from "@/components/LogBucketView";
 import { getControllerUrl } from "@/lib/api";
 
-// Token used to authenticate SSE subscribes against the logs service.
-// EventSource can't set headers, so both sparkwing-logs and the
-// controller's legacy /logs/ handler accept `?token=<token>` as a
-// fallback.
 function getToken(): string {
   if (typeof window === "undefined") return "";
   const win = window as unknown as Record<string, unknown>;
@@ -17,9 +13,6 @@ function getToken(): string {
   return process.env.NEXT_PUBLIC_API_TOKEN || "";
 }
 
-// buildLogSSEUrl picks the right endpoint + appends the token query
-// param. Prefers the server-provided logs_url (sparkwing-logs public
-// endpoint), falls back to the controller's legacy /logs/ path.
 function buildLogSSEUrl(jobId: string, logsUrl?: string): string {
   const base = logsUrl || `${getControllerUrl()}/logs/${jobId}`;
   const token = getToken();
@@ -62,7 +55,7 @@ export default function LiveLogs({
       es.onopen = () => {
         setConnected(true);
         setLogStatus("connected");
-        retryCount = 0; // reset backoff on successful connection
+        retryCount = 0;
       };
 
       es.onmessage = (event) => {
@@ -78,7 +71,6 @@ export default function LiveLogs({
       es.onerror = () => {
         setConnected(false);
         es?.close();
-        // Auto-reconnect with exponential backoff (1s, 2s, 4s, 8s, max 30s)
         if (!cancelled && retryCount < 10) {
           const delay = Math.min(1000 * Math.pow(2, retryCount), 30_000);
           retryCount++;
@@ -98,17 +90,14 @@ export default function LiveLogs({
     };
   }, [jobId, logsUrl]);
 
-  // Auto-scroll to bottom on new lines
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [lines]);
 
-  const parsed = useMemo(() => parseLogLines(lines), [lines.length]);
+  const parsed = useMemo(() => parseLogLines(lines), [lines]);
   const hasSteps = parsed.sections.some((s) => s.type === "step");
 
-  // If SSE has no data yet, show fallback logs or a waiting indicator
   if (lines.length === 0 && !connected) {
-    // If we have stored logs from the job result, show them
     if (fallbackLogs && fallbackLogs.trim().length > 0) {
       const fallbackParsed = parseLogLines(fallbackLogs.split("\n"));
       return <LogBucketView parsed={fallbackParsed} jobId={jobId} />;

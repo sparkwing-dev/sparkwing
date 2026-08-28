@@ -14,8 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
-// Same cardinality rule as pkg/controller/prom.go: pipeline + outcome
-// are bounded, node_id and principal are not.
 var (
 	metricsRegistry = prometheus.NewRegistry()
 
@@ -47,10 +45,6 @@ func init() {
 	orchestrator.MetricsHook = observeNodeExecution
 }
 
-// observeNodeExecution records a terminal node execution from any
-// caller of RunNodeOnce. Skipped when pipeline is empty (caller
-// couldn't resolve it) so the scrape never shows an empty-string
-// label value.
 func observeNodeExecution(pipeline, outcome string, d time.Duration) {
 	if pipeline == "" || outcome == "" {
 		return
@@ -61,20 +55,10 @@ func observeNodeExecution(pipeline, outcome string, d time.Duration) {
 	nodeExecutionSeconds.WithLabelValues(pipeline, outcome).Observe(d.Seconds())
 }
 
-// observeClaimOutcome records the result of one claim attempt in the
-// pool loop. Outcomes: "claimed" (got a node), "empty" (queue empty),
-// "error" (HTTP / controller failure). Pipeline is omitted because
-// empty / error outcomes don't have one; pipeline lives on the
-// execution metric instead.
 func observeClaimOutcome(outcome string) {
 	runnerClaimsTotal.WithLabelValues(outcome).Inc()
 }
 
-// StartMetricsListener serves /metrics on addr from this process's
-// custom registry (plus Go runtime + process collectors). Blocks
-// until ctx cancels or the listener fails; returns nil on ctx
-// cancellation so callers can start it in a goroutine and rely on
-// errgroup semantics.
 func StartMetricsListener(ctx context.Context, addr string, logger *slog.Logger) error {
 	if addr == "" {
 		return nil

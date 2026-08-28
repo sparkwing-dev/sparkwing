@@ -9,24 +9,8 @@ import (
 	"strings"
 )
 
-// frozenCountRE catches a number word glued to an enumeration noun for
-// an *open, code-defined set* -- "three places", "four checks". Those
-// are open/closed violations in prose: the count is wrong the moment
-// the code grows the set, and nobody rereads the sentence. The fix is
-// to describe the mechanism (or point at a generated list), not tally.
-//
-// The noun list is deliberately narrow: only sets the code can extend.
-// Invariant counts ("two-layer DAG", "two modes of X") use nouns kept
-// off this list (layer, mode, ...) because stating them is fine.
 var frozenCountRE = regexp.MustCompile(`(?i)\b(?:one|two|three|four|five|six|seven|eight|nine|ten|[0-9]+)[ -](places|ways|kinds|sources|triggers|checks|reasons|steps|stages|backends)\b`)
 
-// isGeneratedDoc reports whether the doc at path is produced by a
-// generator rather than hand-authored: generated docs (cli-reference
-// and its per-group pages, config-reference) open with an HTML comment
-// whose first line starts "<!-- GENERATED". Prose-style gates don't
-// apply to them -- their wording comes from code (command descriptions,
-// struct godoc). Detecting the marker instead of hardcoding names keeps
-// the exemption correct as generators add or remove pages.
 func isGeneratedDoc(path string) bool {
 	f, err := os.Open(path)
 	if err != nil {
@@ -40,8 +24,6 @@ func isGeneratedDoc(path string) bool {
 
 const generatedMarkerPrefix = "<!-- GENERATED"
 
-// checkFrozenCounts flags hand-written docs that snapshot the size of an
-// open set. Returns false on any hit.
 func checkFrozenCounts(contentDir string) bool {
 	var hits []string
 	_ = filepath.Walk(contentDir, func(path string, info os.FileInfo, err error) error {

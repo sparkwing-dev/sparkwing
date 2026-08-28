@@ -1,6 +1,3 @@
-// Time formatting helpers shared by the runs page and the
-// by-pipeline overview. Keep all date/clock rendering consistent
-// across surfaces.
 
 export function fmtMs(ms: number): string {
   if (!ms) return "-";
@@ -11,9 +8,6 @@ export function fmtMs(ms: number): string {
   return `${m}m ${s}s`;
 }
 
-// fmtMsCompact collapses to the largest unit only -- "12m" instead of
-// "12m 32s", "1h" instead of "1h 37m". Used in narrow contexts where
-// space is at a premium.
 export function fmtMsCompact(ms: number): string {
   if (!ms) return "-";
   if (ms < 1000) return `${Math.round(ms)}ms`;
@@ -35,11 +29,6 @@ export function fmtFullDate(ts: string): string {
   });
 }
 
-// fmtDateTime is the default for any absolute timestamp that isn't in
-// a column narrow enough to need fmtClock. It always names the day --
-// "Aug 5, 3:46 PM" this year, "May 31, 2025, 11:53 PM" otherwise --
-// because a bare clock leaves the reader guessing which day a run
-// belongs to. Pass seconds when the exact second matters (run start).
 export function fmtDateTime(ts: string, opts?: { seconds?: boolean }): string {
   if (!ts) return "--";
   const d = new Date(ts);
@@ -64,8 +53,6 @@ export function fmtClock(ts: string): string {
   });
 }
 
-// fmtDatePrefix returns "M/D" when ts isn't today, "M/D/YY" when it's
-// in a different year, and "" when it's today (clock alone suffices).
 export function fmtDatePrefix(ts: string): string {
   if (!ts) return "";
   const d = new Date(ts);
@@ -82,9 +69,6 @@ export function fmtDatePrefix(ts: string): string {
   return md;
 }
 
-// fmtAgoShort returns the same magnitude as fmtAgo but as a signed
-// offset string ("-2d", "-5m") without the trailing "ago". Useful in
-// narrow columns where every character counts.
 export function fmtAgoShort(ts: string): string {
   if (!ts) return "--";
   const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);

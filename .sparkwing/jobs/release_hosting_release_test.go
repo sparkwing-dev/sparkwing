@@ -6,12 +6,6 @@ import (
 	"testing"
 )
 
-// TestFirstHostingReleaseIsReadable pins the fragile half of the
-// daemon-hosting release gate: it reads a constant out of Go source by
-// regexp, because the pipeline module cannot import internal/. If the
-// constant is renamed, reformatted, or moved, the gate would quietly stop
-// checking anything -- so the parse is asserted here rather than
-// discovered at tag time.
 func TestFirstHostingReleaseIsReadable(t *testing.T) {
 	root, err := repoRoot()
 	if err != nil {

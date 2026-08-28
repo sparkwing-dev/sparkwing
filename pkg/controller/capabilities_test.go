@@ -15,9 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// fakeArtifactStore is a tiny in-memory ArtifactStore for tests.
-// Avoids spinning up the fs/s3 backends here -- this file's job is
-// to verify the handler + route-gating wiring, not the storage impl.
 type fakeArtifactStore struct {
 	objects map[string][]byte
 }
@@ -36,9 +33,6 @@ func (f *fakeArtifactStore) List(context.Context, string) ([]string, error) {
 	return nil, nil
 }
 
-// newServerWithArtifacts wires WithArtifactStore (or doesn't) before
-// binding the handler, mirroring how pkg/localws calls New(...).
-// WithArtifactStore(...) at startup.
 func newServerWithArtifacts(t *testing.T, art storage.ArtifactStore) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -53,10 +47,6 @@ func newServerWithArtifacts(t *testing.T, art storage.ArtifactStore) string {
 	return srv.URL
 }
 
-// Without WithArtifactStore the route is unregistered entirely, so the
-// request 404s through the outer mux. This is the laptop-vs-cluster
-// hinge: cluster mode never carries an ArtifactStore so cluster
-// callers must not see this endpoint at all.
 func TestArtifactsEndpoint_RouteAbsentWhenUnconfigured(t *testing.T) {
 	t.Parallel()
 	base := newServerWithArtifacts(t, nil)
@@ -71,8 +61,6 @@ func TestArtifactsEndpoint_RouteAbsentWhenUnconfigured(t *testing.T) {
 	}
 }
 
-// With WithArtifactStore the route serves bytes for known keys and
-// 404s for missing keys.
 func TestArtifactsEndpoint_RoundTrip(t *testing.T) {
 	t.Parallel()
 	art := &fakeArtifactStore{
@@ -103,8 +91,6 @@ func TestArtifactsEndpoint_RoundTrip(t *testing.T) {
 	}
 }
 
-// Pool routes are off when AttachPool is not called (laptop mode).
-// Cluster-mode tests for the configured pool live alongside pool.go.
 func TestPoolRoutes_AbsentWhenUnattached(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -126,8 +112,6 @@ func TestPoolRoutes_AbsentWhenUnattached(t *testing.T) {
 	}
 }
 
-// WithReconcileHook installs a closure that fires on every list-runs
-// and get-run. A nil hook leaves reads completely untouched.
 func TestReconcileHook_RunsBeforeReads(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -165,9 +149,6 @@ func TestReconcileHook_RunsBeforeReads(t *testing.T) {
 	}
 }
 
-// A nil reconcile hook is the default and must not introduce any
-// wrapper -- write-side handlers should be untouched and reads must
-// still work.
 func TestReconcileHook_NoHookIsPassThrough(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

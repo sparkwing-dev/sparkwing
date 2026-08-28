@@ -24,8 +24,6 @@ func (stepRangePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing
 	return nil
 }
 
-// Unknown --start-at is rejected with a Levenshtein suggestion,
-// reusing the typo-detector phrasing.
 func TestValidateStepRange_UnknownIDSuggests(t *testing.T) {
 	sparkwing.Register[sparkwing.NoInputs]("step-range-validate",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangePipe{} })
@@ -45,7 +43,6 @@ func TestValidateStepRange_UnknownIDSuggests(t *testing.T) {
 	}
 }
 
-// Known ids on both bounds → nil.
 func TestValidateStepRange_KnownIDsOK(t *testing.T) {
 	sparkwing.Register[sparkwing.NoInputs]("step-range-validate-ok",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangePipe{} })
@@ -59,8 +56,6 @@ func TestValidateStepRange_KnownIDsOK(t *testing.T) {
 	}
 }
 
-// Empty bounds = no-op. Pin the contract so we don't accidentally
-// require both bounds in the future.
 func TestValidateStepRange_EmptyBoundsNoOp(t *testing.T) {
 	sparkwing.Register[sparkwing.NoInputs]("step-range-validate-empty",
 		func() sparkwing.Pipeline[sparkwing.NoInputs] { return stepRangePipe{} })

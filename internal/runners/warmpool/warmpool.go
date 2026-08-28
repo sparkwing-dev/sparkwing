@@ -1,26 +1,3 @@
-// Package warmpool is the Runner that hands node work to a pool of
-// long-lived runner pods instead of spawning one K8s Job per node.
-//
-// Flow per node:
-//
-//  1. Orchestrator decides the node is ready (deps complete) and
-//     calls RunNode on this Runner.
-//  2. Runner calls MarkNodeReady on the controller; a warm runner
-//     pod's claim loop will atomically flip claimed_by on the next
-//     poll.
-//  3. Runner polls GetNode until status='done' (pod finished writing
-//     terminal state), or until a fallback deadline fires while the
-//     node is still unclaimed, in which case the runner revokes
-//     ready_at atomically and delegates to Fallback (typically a
-//     K8sRunner creating a one-off Job). The revoke guarantees the
-//     pod and Fallback never race -- whichever takes it first owns
-//     the execution.
-//
-// Latency win: a claim-plus-exec cycle on a warm pod is ~100ms once
-// the image is pulled, versus 5-15s for a fresh Job (pod schedule +
-// image pull + binary start). For short pipelines with many small
-// nodes, that's the difference between noticeable and imperceptible
-// iteration.
 package warmpool
 
 import (
@@ -36,23 +13,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Config tunes the Runner's claim-wait + poll behavior.
 type Config struct {
-	// PollInterval is how often GetNode is called while waiting on
-	// the pod to finish. 500ms feels instant to a human without
-	// hammering the controller.
 	PollInterval time.Duration
 
-	// ClaimWaitTimeout is how long to wait for SOME pod to claim the
-	// node before falling back to the K8sRunner path. A node that
-	// sits unclaimed past this threshold indicates an empty or
-	// unreachable pool. 5s is a comfortable default in a cluster with
-	// 3 warm replicas and sub-second claim polls; tune up for deeper
-	// queues.
 	ClaimWaitTimeout time.Duration
 }
 
-// Runner is a runner.Runner that dispatches through the warm pool.
 type Runner struct {
 	ctrl     *client.Client
 	fallback runner.Runner
@@ -60,11 +26,6 @@ type Runner struct {
 	logger   *slog.Logger
 }
 
-// New builds a Runner that marks nodes ready on ctrl and falls back
-// to `fallback` (typically a K8sRunner) when no pod claims within
-// cfg.ClaimWaitTimeout. Passing a nil fallback disables the fallback;
-// RunNode will block until a pod eventually claims the node or ctx
-// cancels.
 func New(ctrl *client.Client, fallback runner.Runner, cfg Config, logger *slog.Logger) *Runner {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 500 * time.Millisecond
@@ -80,9 +41,6 @@ func New(ctrl *client.Client, fallback runner.Runner, cfg Config, logger *slog.L
 
 var _ runner.Runner = (*Runner)(nil)
 
-// RunNode releases the node to the pool and waits for its terminal
-// state. Session 3's scope: the orchestrator remains the authority
-// for "when is a node ready"; the pool is the execution layer.
 func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result {
 	if err := r.ctrl.MarkNodeReady(ctx, req.RunID, req.NodeID); err != nil {
 		return runner.Result{Outcome: sparkwing.Failed, Err: fmt.Errorf("mark ready: %w", err)}
@@ -161,9 +119,6 @@ func (r *Runner) RunNode(ctx context.Context, req runner.Request) runner.Result 
 	}
 }
 
-// heartbeatLoop stamps last_heartbeat on (runID, nodeID) every 5s
-// until ctx cancels. Errors are logged but not surfaced: a missed
-// heartbeat is a UI annoyance, not a correctness issue.
 func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID string, logger *slog.Logger) {
 	_ = ctrl.TouchNodeHeartbeat(ctx, runID, nodeID)
 	t := time.NewTicker(5 * time.Second)
@@ -181,10 +136,6 @@ func heartbeatLoop(ctx context.Context, ctrl *client.Client, runID, nodeID strin
 	}
 }
 
-// resultFromNode maps a terminal node row to a runner.Result. Same
-// shape as K8sRunner.readFinalResult; kept local rather than
-// exported because both callers want slightly different defensive
-// checks.
 func resultFromNode(n *store.Node) runner.Result {
 	oc := sparkwing.Outcome(n.Outcome)
 	res := runner.Result{Outcome: oc}

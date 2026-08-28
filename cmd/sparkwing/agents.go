@@ -1,7 +1,3 @@
-// `sparkwing agents` -- terminal view of the fleet. The dashboard at
-// /agents pulls the same data via /api/v1/agents; this subcommand
-// reuses that endpoint so operators can script fleet checks or debug
-// the dashboard without a browser.
 package main
 
 import (
@@ -39,10 +35,6 @@ func runAgents(args []string) error {
 	}
 }
 
-// agentView is the JSON shape the controller returns from
-// /api/v1/agents. Kept local rather than importing pkg/controller so
-// we don't drag the controller's storage deps into the CLI binary.
-// The shape is already stable across the dashboard + this command.
 type agentView struct {
 	Name          string            `json:"name"`
 	Type          string            `json:"type"`
@@ -101,7 +93,7 @@ func runAgentsList(args []string) error {
 	}
 
 	if *outputFormat == "json" {
-		// NDJSON: one agent per line, so `head` returns whole agents.
+
 		return ndjson.Write(os.Stdout, agents)
 	}
 
@@ -120,10 +112,6 @@ func runAgentsList(args []string) error {
 	return tw.Flush()
 }
 
-// fetchAgents calls GET /api/v1/agents on the given controller with
-// bearer auth. The controller's client pkg doesn't have a typed
-// wrapper for this endpoint yet; we go direct to avoid widening the
-// public client surface for one dashboard-facing GET.
 func fetchAgents(ctx context.Context, baseURL, token string) ([]agentView, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(baseURL, "/")+"/api/v1/agents", nil)
 	if err != nil {

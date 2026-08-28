@@ -16,10 +16,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// processTableTimeout bounds one process-table listing. A wedged `ps` --
-// an unresponsive filesystem behind it, a stopped process table reader --
-// would otherwise block its caller forever, and every caller of this
-// package holds ownership of a process tree while it waits.
 const processTableTimeout = 2 * time.Second
 
 func platformSupport() error { return nil }
@@ -38,9 +34,6 @@ func processTable(withSessions bool) ([]Info, error) {
 	return psProcessTable(withSessions)
 }
 
-// psProcessTable is the portable listing: one `ps` fork plus a session
-// lookup per process. It is the fallback for platforms with no kernel
-// listing of their own, and for a kernel listing that failed.
 func psProcessTable(withSessions bool) ([]Info, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), processTableTimeout)
 	defer cancel()

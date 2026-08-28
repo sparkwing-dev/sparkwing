@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestLocalBackends_ThreadsArtifact confirms LocalBackends carries the
-// supplied artifact store onto Backends.Artifact and leaves it nil when
-// none is supplied.
 func TestLocalBackends_ThreadsArtifact(t *testing.T) {
 	p := newPaths(t)
 	if err := p.EnsureRoot(); err != nil {
@@ -32,8 +29,6 @@ func TestLocalBackends_ThreadsArtifact(t *testing.T) {
 	}
 }
 
-// TestS3Backends_ThreadsArtifact confirms S3Backends carries the
-// supplied artifact store onto Backends.Artifact.
 func TestS3Backends_ThreadsArtifact(t *testing.T) {
 	logs, err := fs.NewLogStore(t.TempDir())
 	if err != nil {

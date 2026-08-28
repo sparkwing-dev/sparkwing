@@ -13,8 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// approvePipe is a pipeline whose only node is an approval gate. The
-// tests drive the gate to resolution out-of-band by poking the store.
 type approvePipe struct{ sparkwing.Base }
 
 func (approvePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -25,7 +23,6 @@ func (approvePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
-// approveTimeoutPipe uses a tiny timeout so the waiter fires itself.
 type approveTimeoutPipe struct{ sparkwing.Base }
 
 func (approveTimeoutPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {

@@ -10,8 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/installsite"
 )
 
-// fakeInstall writes an executable stand-in for a sparkwing binary in
-// dir and returns its path.
 func fakeInstall(t *testing.T, dir string) string {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -24,10 +22,6 @@ func fakeInstall(t *testing.T, dir string) string {
 	return p
 }
 
-// TestScanCollapsesSymlinksToOneInstall guards the false positive that
-// would make this feature unusable: /usr/local/bin/sparkwing linked at
-// ~/.local/bin/sparkwing is one install with two names, and reporting it
-// as a conflict would train operators to ignore the warning.
 func TestScanCollapsesSymlinksToOneInstall(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation on windows needs privileges this test will not assume")
@@ -83,12 +77,6 @@ func TestCompetingExcludesOnlySelf(t *testing.T) {
 	}
 }
 
-// TestSearchDirsLooksBeyondTheCallersPath is the launchd half of the
-// bug: the shell that runs the scan and the job that resolves the rival
-// do not share a PATH, so a scan restricted to the caller's own PATH
-// would report the conflicting machine as clean. The result must still
-// be deduplicated -- GOPATH/bin and $HOME/go/bin are probed separately
-// and are often the same directory.
 func TestSearchDirsLooksBeyondTheCallersPath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the well-known POSIX install dirs do not apply")
@@ -119,9 +107,6 @@ func TestSearchDirsLooksBeyondTheCallersPath(t *testing.T) {
 	}
 }
 
-// TestPathKeyIsStablePerInstall pins the property the per-path version
-// stamps depend on: two names for one binary -- the scan resolves both
-// to one path -- share a key, and two distinct installs never do.
 func TestPathKeyIsStablePerInstall(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation on windows needs privileges this test will not assume")

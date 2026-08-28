@@ -11,11 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// ExampleNew shows the laptop-mode wiring: a sqlite-backed [store.Store]
-// fronted by a [controller.Server] with no dispatcher, no auth, and no
-// secrets cipher. This is the minimum viable controller; pkg/localws
-// builds on top by adding the dashboard handler and a log store on the
-// same mux.
 func ExampleNew() {
 	dir, _ := os.MkdirTemp("", "sparkwing-controller-")
 	defer os.RemoveAll(dir)
@@ -33,9 +28,6 @@ func ExampleNew() {
 	// Output: controller routes mounted
 }
 
-// passthroughCipher is the no-op shape a custom cipher takes when an
-// external consumer wants encryption-at-rest off but the route wired.
-// Real implementations (AES-GCM, KMS, etc.) follow the same shape.
 type passthroughCipher struct{}
 
 func (passthroughCipher) Seal(plain string) (string, error) {
@@ -54,11 +46,6 @@ func (passthroughCipher) Open(envelope string) (string, error) {
 	return string(b), nil
 }
 
-// ExampleServer_WithSecretsCipher shows wiring a custom [controller.Cipher]
-// implementation. The controller calls Seal before writing each secret
-// to the store and Open when serving it back; the interface lets you
-// plug in KMS, an HSM, or any other key-management approach without
-// patching the controller.
 func ExampleServer_WithSecretsCipher() {
 	dir, _ := os.MkdirTemp("", "sparkwing-cipher-")
 	defer os.RemoveAll(dir)

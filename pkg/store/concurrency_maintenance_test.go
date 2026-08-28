@@ -8,8 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// holderExists reports whether a holder row is present for (key, holderID),
-// regardless of lease state. Used to confirm a reaped holder's row is gone.
 func holderExists(t *testing.T, s *store.Store, key, holderID string) bool {
 	t.Helper()
 	var n int
@@ -33,8 +31,6 @@ func waiterCount(t *testing.T, s *store.Store, key string) int {
 	return n
 }
 
-// expireHolderLease drives a persisted lease into the past without waiting for
-// wall-clock expiry. This keeps expiry tests deterministic under host load.
 func expireHolderLease(t *testing.T, s *store.Store, key, holderID string) {
 	t.Helper()
 	result, err := s.DB().Exec(
@@ -66,9 +62,6 @@ func seedCacheRow(t *testing.T, s *store.Store, key, hash string, expiresAt, las
 	}
 }
 
-// A controllerless box never runs the reaper, so the maintenance pass is
-// the only thing that reclaims an expired holder's budget. It must delete
-// the dead holder and promote the waiter parked behind it.
 func TestMaintainConcurrency_ReapsExpiredHolderAndPromotesWaiter(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -102,8 +95,6 @@ func TestMaintainConcurrency_ReapsExpiredHolderAndPromotesWaiter(t *testing.T) {
 	}
 }
 
-// Expired cache rows accumulate forever on a daemonless box; the TTL sweep
-// must clear them.
 func TestMaintainConcurrency_SweepsExpiredCacheRows(t *testing.T) {
 	s := newStoreT(t)
 	past := time.Now().Add(-time.Hour)
@@ -123,8 +114,6 @@ func TestMaintainConcurrency_SweepsExpiredCacheRows(t *testing.T) {
 	}
 }
 
-// Unbounded cache growth is the core symptom; the LRU sweep must bound the
-// table to the configured cap, evicting the least-recently-hit rows.
 func TestMaintainConcurrency_EvictsOverCapCacheRows(t *testing.T) {
 	s := newStoreT(t)
 	future := time.Now().Add(time.Hour)
@@ -147,8 +136,6 @@ func TestMaintainConcurrency_EvictsOverCapCacheRows(t *testing.T) {
 	}
 }
 
-// A waiter without an owning run row is abandoned; once it is old enough,
-// the maintenance pass can remove it.
 func TestMaintainConcurrency_DropsAgedWaiter(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -409,8 +396,6 @@ func TestMaintainConcurrency_DropsAgedWaiterWhenHeartbeatGraceExpiresBeforeWaite
 	}
 }
 
-// The inline run-path pass must fire at most once per interval across
-// separate processes; the throttle claims the window atomically.
 func TestMaintainConcurrencyThrottled_RespectsInterval(t *testing.T) {
 	s := newStoreT(t)
 
@@ -495,8 +480,6 @@ func TestMaintainConcurrencyThrottled_ConcurrentCallersShareOneClaim(t *testing.
 	}
 }
 
-// Migration v4 adds the meta table the throttle stamp lives in; a fresh
-// open must create it.
 func TestMigration_V4CreatesMetaTable(t *testing.T) {
 	s := newStoreT(t)
 	if store.ExpectedSchemaVersion() < 4 {

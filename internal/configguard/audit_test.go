@@ -10,32 +10,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/configguard"
 )
 
-// auditEnabled opts a run into the full-suite audit. It is off by
-// default because the audit runs `go test ./...` inside a test, which
-// doubles the wall time of the pre-commit gate. The invariant it checks
-// is enforced structurally by paths.UnderTest and repos.DefaultPath (see
-// the sandbox tests beside internal/paths and internal/repos); the audit
-// is the end-to-end proof you reach for when you change how a home
-// directory is resolved.
 const auditEnabled = "SPARKWING_LIVE_CONFIG_AUDIT"
 
-// auditInner marks the child `go test ./...` so it does not recurse.
 const auditInner = "SPARKWING_LIVE_CONFIG_AUDIT_INNER"
 
-// TestSuiteLeavesTheLiveConfigAlone runs the whole suite and proves it did
-// not write the developer's Sparkwing configuration.
-//
-// It asserts two ways, because neither is sufficient alone. The
-// sandbox-home run is the sound one: HOME points at an empty directory,
-// so anything sparkwing writes there is a write that would have landed
-// in the real home, and no daemon or parallel commit on the machine can
-// forge it. The byte comparison of the real repos.yaml is the criterion
-// as written, and it is kept because the sandbox run cannot see a writer
-// that resolves the registry from something other than HOME.
-//
-// Run it with:
-//
-//	SPARKWING_LIVE_CONFIG_AUDIT=1 go test -timeout 30m ./internal/configguard/
 func TestSuiteLeavesTheLiveConfigAlone(t *testing.T) {
 	if os.Getenv(auditInner) == "1" {
 		t.Skip("inner run of the audit; the outer process does the comparing")
@@ -83,12 +61,6 @@ func TestSuiteLeavesTheLiveConfigAlone(t *testing.T) {
 	}
 }
 
-// runSuite runs the module's tests with HOME redirected at sandbox.
-//
-// The Go toolchain is invoked by absolute path and handed its caches
-// explicitly because a version manager puts `go` behind a shim in the
-// real home, and moving HOME out from under that shim makes it
-// unrunnable.
 func runSuite(t *testing.T, root, sandbox string) ([]byte, error) {
 	t.Helper()
 	goBin := filepath.Join(goEnv(t, root, "GOROOT"), "bin", "go")
@@ -108,8 +80,6 @@ func runSuite(t *testing.T, root, sandbox string) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
-// goEnv reads one `go env` value using the ambient environment, before
-// HOME is redirected.
 func goEnv(t *testing.T, root, name string) string {
 	t.Helper()
 	cmd := exec.Command("go", "env", name)
@@ -121,9 +91,6 @@ func goEnv(t *testing.T, root, name string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// repoRoot walks up from the working directory to the directory holding
-// go.mod, which is where `go test ./...` has to run from to cover the
-// whole module.
 func repoRoot(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -142,7 +109,6 @@ func repoRoot(t *testing.T) string {
 	}
 }
 
-// tail keeps a failure log readable by returning only its last lines.
 func tail(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	if len(lines) > 40 {

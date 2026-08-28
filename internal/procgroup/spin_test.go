@@ -26,10 +26,6 @@ func TestBackoffPollDoublesUpToItsCap(t *testing.T) {
 	}
 }
 
-// TestCaptureSessionTableCostsOneListingForManySessions pins the batch
-// seam: judging several guarded sessions must read the process table
-// once, because reading it forks `ps` and asks the kernel about every
-// process on the host.
 func TestCaptureSessionTableCostsOneListingForManySessions(t *testing.T) {
 	originalTable := sessionProcessTable
 	originalIdentity := sessionIdentityLookup
@@ -61,11 +57,6 @@ func TestCaptureSessionTableCostsOneListingForManySessions(t *testing.T) {
 	}
 }
 
-// TestWaitDescendantsEmptyBacksOffWhileTheTreeRefusesToDie is the
-// procgroup half of the reported spin. The wait after SIGKILL runs on the
-// caller's context, so a descendant that cannot be killed -- stuck in
-// uninterruptible I/O -- kept it polling the process table a hundred
-// times a second for as long as the caller lived.
 func TestWaitDescendantsEmptyBacksOffWhileTheTreeRefusesToDie(t *testing.T) {
 	const window = 500 * time.Millisecond
 	probes := &atomic.Int64{}
@@ -90,9 +81,6 @@ func TestWaitDescendantsEmptyBacksOffWhileTheTreeRefusesToDie(t *testing.T) {
 	}
 }
 
-// TestWaitDescendantsEmptyStillAnswersQuickly keeps the common case fast:
-// a tree that dies promptly must be observed gone at the base interval,
-// not after the backoff has widened.
 func TestWaitDescendantsEmptyStillAnswersQuickly(t *testing.T) {
 	probes := &atomic.Int64{}
 	g := &Group{id: 4243}
@@ -109,10 +97,6 @@ func TestWaitDescendantsEmptyStillAnswersQuickly(t *testing.T) {
 	}
 }
 
-// TestSessionTableAnswersLeaderIdentityFromItsOwnSnapshot pins the
-// atomicity the batch seam exists for: when the listing carries birth
-// tokens, the sweep must judge identity from the same kernel view it
-// counted members in rather than taking a second look later.
 func TestSessionTableAnswersLeaderIdentityFromItsOwnSnapshot(t *testing.T) {
 	originalTable := sessionProcessTable
 	originalIdentity := sessionIdentityLookup
@@ -142,11 +126,6 @@ func TestSessionTableAnswersLeaderIdentityFromItsOwnSnapshot(t *testing.T) {
 	}
 }
 
-// TestLeaderExitDuringInspectionIsAnAnswerNotAFailure keeps a normal
-// exit off the failure path. A leader that goes away between the snapshot
-// and its identity lookup has exited -- which is what the sweep is
-// waiting for -- so reporting it as a failed observation would make the
-// daemon slow down at exactly the moment it should act.
 func TestLeaderExitDuringInspectionIsAnAnswerNotAFailure(t *testing.T) {
 	originalTable := sessionProcessTable
 	originalIdentity := sessionIdentityLookup

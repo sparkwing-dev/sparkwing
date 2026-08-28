@@ -5,8 +5,6 @@ import (
 	"time"
 )
 
-// idleLoop stops the daemon once it has had no leases, no waiters, and no
-// connections for a full idle window.
 func (d *Daemon) idleLoop(ctx context.Context) {
 	idle := d.cfg.idleTimeout()
 	tick := idle / 4
@@ -31,11 +29,6 @@ func (d *Daemon) idleLoop(ctx context.Context) {
 	}
 }
 
-// idleElapsed returns how long the daemon has been idle, or zero if it is
-// currently busy (any working connection, lease, or waiter). Health-probe
-// connections do not count as busy: they observe the daemon on behalf of
-// its supervisor, and a daemon held open by its own watchdog could never
-// idle out.
 func (d *Daemon) idleElapsed() time.Duration {
 	d.mu.Lock()
 	defer d.mu.Unlock()

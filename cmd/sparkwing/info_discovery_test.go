@@ -22,12 +22,6 @@ func TestInfoDiscoveryIsEphemeralAndVersioned(t *testing.T) {
 	}
 }
 
-// The durable block is the only part of this output invited into an
-// instruction file, so it is the only part that can rot there. The old
-// guard refused durable-copy guidance outright, which kept the hazard
-// away but left a reader with no sanctioned way back in. Name the
-// hazard instead: anything version-, path-, or catalog-shaped is barred
-// from the durable block and belongs in the wake-scoped remainder.
 func TestDurableAgentBlockCarriesNothingThatRots(t *testing.T) {
 	if !strings.Contains(agentBlockDurable, "sparkwing info --for-agent") {
 		t.Error("durable block must name the command that reports everything current")
@@ -51,8 +45,6 @@ func TestDurableAgentBlockCarriesNothingThatRots(t *testing.T) {
 	}
 }
 
-// The authoring quickstart names commands, which move, so it must stay
-// on the wake-scoped side of the markers.
 func TestAuthoringQuickstartIsNotDurable(t *testing.T) {
 	if strings.Contains(agentBlockDurable, "pipeline new") ||
 		strings.Contains(agentBlockDurable, "--guide") {

@@ -1,5 +1,3 @@
-// Handler for `sparkwing runs timeline`. The rendering lives in
-// orchestrator/runs_timeline.go; this file is just flag plumbing.
 package main
 
 import (

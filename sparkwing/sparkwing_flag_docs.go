@@ -39,16 +39,6 @@ type SparkwingFlagDoc struct {
 	Hot bool
 }
 
-// sparkwingFlagDocs is the canonical documentation source for
-// sparkwing-owned flags. The order here is the order help renderers
-// walk; group boundaries determine section breaks. Adding a flag
-// here surfaces it in `sparkwing run --help` AND every per-pipeline
-// footer simultaneously.
-//
-// Subsumes `cmd/sparkwing/help_registry.go`'s runFlagSpecs (which
-// derives from this list). All sparkwing-owned flags are prefixed
-// `sw-` so pipeline authors have the full unprefixed namespace for
-// their typed Inputs flags.
 var sparkwingFlagDocs = []SparkwingFlagDoc{
 	{Name: "sw-cd", Short: "C", Argument: "PATH", Desc: "Run as if started in PATH", Group: "System"},
 	{Name: "sw-ref", Argument: "REF", Desc: "Run the pipeline at REF (branch/tag/SHA) instead of the working tree", Group: "System", Hot: true},

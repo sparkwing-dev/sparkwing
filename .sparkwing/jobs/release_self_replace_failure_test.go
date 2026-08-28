@@ -23,10 +23,6 @@ require github.com/sparkwing-dev/sparkwing v0.1.0
 ` + selfReplaceComment + selfReplaceLine + `
 `
 
-// refuseUnpinnedGate stands in for this repo's pre-commit gate: it
-// refuses a `.sparkwing/go.mod` with no local replace, which is what
-// the real gate does by failing to build the pipeline module against a
-// pin whose tag does not exist yet.
 const refuseUnpinnedGate = `#!/bin/sh
 if git show ":.sparkwing/go.mod" | grep -q 'replace github.com/sparkwing-dev/sparkwing => \.\.'; then
 	exit 0
@@ -55,9 +51,6 @@ func gitRun(t *testing.T, dir string, args ...string) string {
 	return string(out)
 }
 
-// seedReleaseRepo builds a throwaway repo shaped like sparkwing (root
-// module plus a nested `.sparkwing` pipelines module on a local
-// replace) with a bare origin to push to, and returns its path.
 func seedReleaseRepo(t *testing.T) string {
 	t.Helper()
 	base := t.TempDir()

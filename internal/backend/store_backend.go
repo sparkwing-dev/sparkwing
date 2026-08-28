@@ -10,33 +10,22 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// StoreBackend wraps a *store.Store for state, with either a
-// storage.LogStore or the on-disk laptop layout for log reads.
 type StoreBackend struct {
 	st       *store.Store
 	paths    paths.Paths
-	logStore storage.LogStore // when nil, fall back to disk reads under paths
+	logStore storage.LogStore
 
 	caps Capabilities
 }
 
-// NewStoreBackend constructs a StoreBackend bound to st. paths is used
-// for the disk log fallback when logStore is nil. Pass a non-nil
-// logStore to route log reads through that backend instead.
 func NewStoreBackend(st *store.Store, paths paths.Paths, logStore storage.LogStore) *StoreBackend {
 	return &StoreBackend{st: st, paths: paths, logStore: logStore}
 }
 
 var _ Backend = (*StoreBackend)(nil)
 
-// SetCapabilities binds the static capabilities body.
 func (b *StoreBackend) SetCapabilities(c Capabilities) { b.caps = c }
 
-// Store returns the underlying *store.Store. Exposed so the local
-// CLI's read commands can call sqlite-specific helpers (orphan
-// reconcile, step lookup) when this backend is in use, without
-// committing those helpers to the Backend interface for impls that
-// don't have an equivalent.
 func (b *StoreBackend) Store() *store.Store { return b.st }
 
 func (b *StoreBackend) Capabilities(context.Context) (Capabilities, error) {

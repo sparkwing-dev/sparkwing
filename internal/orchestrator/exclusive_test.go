@@ -13,8 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// exclusiveCounter tracks the number of in-flight nodes holding the
-// Exclusive lock; test code asserts it never exceeds 1.
 type exclusiveCounter struct {
 	inflight    int32
 	maxSeen     int32

@@ -28,9 +28,6 @@ type awaitOut struct {
 	Image string `json:"image"`
 }
 
-// TestRunAndAwait_HappyPath: the installed awaiter returns JSON,
-// typed unmarshal produces the expected value, the request carries
-// the pipeline / node / args / timeout passed via options.
 func TestRunAndAwait_HappyPath(t *testing.T) {
 	payload, _ := json.Marshal(awaitOut{Image: "registry/app:v1"})
 	aw := &stubAwaiter{runID: "child", data: payload}
@@ -58,9 +55,6 @@ func TestRunAndAwait_HappyPath(t *testing.T) {
 	}
 }
 
-// TestRunAndAwait_NoAwaiterInstalled fails with a clear error
-// rather than panicking when the caller uses RunAndAwait outside
-// of an orchestrator-dispatched ctx.
 func TestRunAndAwait_NoAwaiterInstalled(t *testing.T) {
 	_, err := RunAndAwait[awaitOut, NoInputs](context.Background(), "x", "y")
 	if err == nil || !strings.Contains(err.Error(), "no awaiter installed") {
@@ -68,9 +62,6 @@ func TestRunAndAwait_NoAwaiterInstalled(t *testing.T) {
 	}
 }
 
-// TestRunAndAwait_AwaiterError wraps awaiter errors with the
-// pipeline/node names so callers see enough context in the returned
-// error to triage without logs.
 func TestRunAndAwait_AwaiterError(t *testing.T) {
 	aw := &stubAwaiter{err: errors.New("boom")}
 	ctx := context.WithValue(context.Background(), keyPipelineAwaiter, aw)
@@ -87,9 +78,6 @@ func TestRunAndAwait_AwaiterError(t *testing.T) {
 	}
 }
 
-// TestRunAndAwait_EmptyDataZeroValue: the awaiter returned
-// success but the target node had no output. Give the caller the
-// zero value rather than surfacing a JSON-unmarshal panic.
 func TestRunAndAwait_EmptyDataZeroValue(t *testing.T) {
 	aw := &stubAwaiter{runID: "child", data: nil}
 	ctx := context.WithValue(context.Background(), keyPipelineAwaiter, aw)
@@ -103,8 +91,6 @@ func TestRunAndAwait_EmptyDataZeroValue(t *testing.T) {
 	}
 }
 
-// TestAwaitOption_Defaults: omitting options yields zero timeout +
-// nil args.
 func TestAwaitOption_Defaults(t *testing.T) {
 	aw := &stubAwaiter{runID: "x", data: []byte(`{}`)}
 	ctx := context.WithValue(context.Background(), keyPipelineAwaiter, aw)

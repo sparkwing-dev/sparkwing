@@ -25,8 +25,6 @@ func capacityBackend(t *testing.T) (*store.Store, backend.Backend) {
 	return st, backend.NewStoreBackend(st, paths.Paths{Root: dir}, nil)
 }
 
-// measure folds n runs whose sustained draw climbs by a core each time, so
-// the p95 rank lands on a sample the assertions can name.
 func measure(t *testing.T, st *store.Store, pipeline string, n int) {
 	t.Helper()
 	for i := 1; i <= n; i++ {
@@ -128,9 +126,6 @@ func TestCapacityProfiles_PinWinsAndDriftIsReported(t *testing.T) {
 	}
 }
 
-// A dashboard that is not reading a local runs store has no learned pricing
-// to show, and must say so rather than serve an empty table that reads as
-// "nothing has been measured".
 func TestCapacityProfiles_UnsupportedBackend(t *testing.T) {
 	rec := httptest.NewRecorder()
 	capacityProfilesHandler(&fakeBackend{})(rec, httptest.NewRequest(http.MethodGet, "/api/v1/capacity/profiles", nil))
@@ -247,8 +242,6 @@ func TestCapacityExplain_RejectsMissingAndUnknownPipelines(t *testing.T) {
 	}
 }
 
-// Profile keys are "repo/pipeline", which is why the key travels as a query
-// parameter; a path segment would split it.
 func TestCapacityExplain_AcceptsRepoScopedKeys(t *testing.T) {
 	st, b := capacityBackend(t)
 	measure(t, st, "myrepo/ci", 4)

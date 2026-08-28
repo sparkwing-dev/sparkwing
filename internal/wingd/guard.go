@@ -13,15 +13,8 @@ import (
 
 const defaultGuardInterval = 100 * time.Millisecond
 
-// maxGuardInterval caps how far the guard sweep backs off while
-// inspection keeps failing. A failing kernel probe is retried, not
-// abandoned, but retrying it at full cadence turns one broken process
-// table into a daemon that burns a core doing nothing.
 const maxGuardInterval = 5 * time.Second
 
-// SessionGuardInspector is the kernel boundary behind durable guarded
-// admission. Every uncertain inspection returns an error so the daemon keeps
-// the claim rather than promoting overlapping work.
 type SessionGuardInspector interface {
 	Validate(wingwire.ProcessSession) error
 	Quiescent(wingwire.ProcessSession) (bool, error)
@@ -29,11 +22,6 @@ type SessionGuardInspector interface {
 	Terminate(wingwire.ProcessSession) error
 }
 
-// SessionGuardSnapshotInspector is the optional batch extension to
-// [SessionGuardInspector]. The daemon reconciles every guarded session
-// against one snapshot when its inspector offers one, so watching N
-// sessions costs one process-table listing per sweep instead of N. An
-// inspector that does not implement it is asked session by session.
 type SessionGuardSnapshotInspector interface {
 	EmptySnapshot() (func(wingwire.ProcessSession) (bool, error), error)
 }
@@ -250,11 +238,6 @@ func (d *Daemon) reconcilableGuardsLocked() []guardReconcileState {
 	return guards
 }
 
-// guardLoop sweeps guarded sessions at the configured interval and backs
-// the sweep off exponentially while inspection fails, so a process table
-// the daemon cannot read costs it a probe every few seconds rather than
-// ten a second. A successful sweep restores the full cadence, which is
-// what bounds how quickly an orphaned session is observed empty.
 func (d *Daemon) guardLoop(ctxDone <-chan struct{}) {
 	base := d.cfg.guardInterval()
 	delay := base
@@ -293,13 +276,6 @@ func nextGuardDelay(current, base time.Duration) time.Duration {
 	return next
 }
 
-// reconcileGuards releases every guarded lease whose process session has
-// gone empty. The error it returns is the caller's signal to slow down,
-// so it reports only the failures that mean the kernel view itself is
-// unusable: a snapshot that could not be taken, or every guard in the
-// sweep failing. One broken guard among working ones is logged and left
-// to the next sweep at full cadence, because the daemon can still see the
-// machine and the other guarded runs are entitled to prompt release.
 func (d *Daemon) reconcileGuards() error {
 	d.mu.Lock()
 	guards := d.reconcilableGuardsLocked()
@@ -336,9 +312,6 @@ func (d *Daemon) reconcileGuards() error {
 	return nil
 }
 
-// guardEmptyProbe returns the emptiness probe for one sweep: a snapshot
-// shared by every guarded session when the inspector supports one, else
-// the per-session inspection.
 func (d *Daemon) guardEmptyProbe() (func(wingwire.ProcessSession) (bool, error), error) {
 	if snapshotter, ok := d.guardInspector.(SessionGuardSnapshotInspector); ok {
 		return snapshotter.EmptySnapshot()
@@ -346,10 +319,6 @@ func (d *Daemon) guardEmptyProbe() (func(wingwire.ProcessSession) (bool, error),
 	return d.guardInspector.Empty, nil
 }
 
-// releaseGuardDurably removes one guarded lease from durable state before
-// exposing the resulting promotions in memory. The persistence mutex orders
-// this transition with every other snapshot writer; the daemon mutex keeps
-// admission from observing the preview until the write succeeds.
 func (d *Daemon) releaseGuardDurably(leaseID admission.LeaseID, session wingwire.ProcessSession) ([]delivery, bool, error) {
 	d.persistMu.Lock()
 	defer d.persistMu.Unlock()

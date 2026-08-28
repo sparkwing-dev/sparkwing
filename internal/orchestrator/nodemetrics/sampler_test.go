@@ -81,9 +81,6 @@ func TestCPUAccountingBurnerProcess(t *testing.T) {
 	runtime.KeepAlive(value)
 }
 
-// TestAttach_ReportsNonzeroCPUUnderLoad verifies that on the host platform a
-// CPU-burning process must produce a nonzero sampled peak, so learned
-// capacity can activate rather than costing every run by the default.
 func TestAttach_ReportsNonzeroCPUUnderLoad(t *testing.T) {
 	t.Cleanup(SetIntervalForTest(40 * time.Millisecond))
 	sink := &captureSink{}
@@ -105,11 +102,6 @@ func TestAttach_ReportsNonzeroCPUUnderLoad(t *testing.T) {
 	}
 }
 
-// TestAttach_CountsRawExecChildrenCPU verifies that CPU burned by a child
-// spawned with os/exec outside the SDK command wrapper surfaces in the
-// sampled peak through RUSAGE_CHILDREN, so a raw-exec pipeline cannot measure
-// zero and be over-admitted at the floor. The parent stays near idle while
-// each child burns, so the peak reflects the children rather than self.
 func TestAttach_CountsRawExecChildrenCPU(t *testing.T) {
 	if _, ok := readCPUTime(); !ok {
 		t.Skip("no CPU accounting on this platform")
@@ -139,8 +131,6 @@ func TestAttach_CountsRawExecChildrenCPU(t *testing.T) {
 	}
 }
 
-// burnAndReap runs fixed CPU work in a child and waits for its usage to land
-// in RUSAGE_CHILDREN.
 func burnAndReap(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -152,15 +142,6 @@ func burnAndReap(t *testing.T) {
 	}
 }
 
-// TestReadCPUTime_SubtractsReportedChildCPU pins the reconciliation: a reaped
-// child raises the cumulative reading through RUSAGE_CHILDREN, and reporting
-// its CPU (as the SDK per-command path does) brings the reading back down, so
-// the same usage is not counted twice.
-//
-// How much CPU a child wins inside one wall-clock window is the scheduler's to
-// decide, so the burn repeats until the reading has risen far enough to be
-// unambiguous instead of assuming one window earned it. A busy box needs more
-// windows, not a looser floor.
 func TestReadCPUTime_SubtractsReportedChildCPU(t *testing.T) {
 	base, ok := readCPUTime()
 	if !ok {
@@ -189,8 +170,6 @@ func TestReadCPUTime_SubtractsReportedChildCPU(t *testing.T) {
 	}
 }
 
-// TestAttach_ReportsMemory asserts the sampler reports a nonzero memory
-// reading from the platform RSS source or its runtime fallback.
 func TestAttach_ReportsMemory(t *testing.T) {
 	t.Cleanup(SetIntervalForTest(40 * time.Millisecond))
 	memoryReady := make(chan struct{})

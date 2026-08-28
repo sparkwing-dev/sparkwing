@@ -363,9 +363,6 @@ func FilterBuildxPlatforms(ctx context.Context, wish []string) ([]string, error)
 	return out, nil
 }
 
-// parseBuildxPlatforms extracts every `Platforms:` line from a
-// `docker buildx inspect` text dump. Strips the native-marker `*`
-// and dedupes.
 func parseBuildxPlatforms(raw string) []string {
 	seen := map[string]struct{}{}
 	var out []string
@@ -391,9 +388,6 @@ func parseBuildxPlatforms(raw string) []string {
 	return out
 }
 
-// platformAdvertised reports whether `wish` is covered by any entry
-// in `advertised`. Variant suffixes ("linux/amd64/v2") satisfy the
-// base wish ("linux/amd64").
 func platformAdvertised(wish string, advertised []string) bool {
 	for _, a := range advertised {
 		if a == wish || strings.HasPrefix(a, wish+"/") {

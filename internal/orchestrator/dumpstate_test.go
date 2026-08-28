@@ -13,19 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestDumpRunState_RoundTrip pins the bijection between SQLite
-// run/node rows (orchestrator write surface) and the
-// runs/<id>/state.ndjson dump that S3-only dashboards read back. A
-// new exported store.Run / store.Node field added without a JSON tag
-// would silently disappear from the dashboard's S3
-// view -- no compile error, no integration failure. This test makes
-// that drift loud.
-//
-// PlanSnapshot is the one intentional omission: it carries `json:"-"`
-// because the snapshot blob is large and the dashboard doesn't render
-// it. The fixture populates PlanSnapshot to keep the
-// "every-field-set" assertion honest, then clears it on `want` before
-// the round-trip diff.
 func TestDumpRunState_RoundTrip(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

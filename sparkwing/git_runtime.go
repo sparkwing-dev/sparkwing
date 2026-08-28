@@ -23,9 +23,6 @@ type Git struct {
 	Repo          string `json:"repo,omitempty"`           // "owner/name"
 	RepoURL       string `json:"repo_url,omitempty"`       // "git@github.com:owner/name.git"
 
-	// workDir is the absolute path to the working tree. Unexported so
-	// the only legitimate constructors are NewGit / NewGitFromTree;
-	// cross-repo ops go through sparkwing/git directly.
 	workDir string `json:"-"`
 }
 
@@ -141,8 +138,6 @@ func (g *Git) PushTag(ctx context.Context, tag, message string) error {
 	return git.PushTag(ctx, g.dir(), tag, message)
 }
 
-// dir returns the working dir to shell into; empty falls back to
-// process CWD via the underlying git package.
 func (g *Git) dir() string {
 	if g == nil {
 		return ""
@@ -164,8 +159,6 @@ func GithubOwnerRepo(slug string) (owner, repo string) {
 	return parts[0], parts[1]
 }
 
-// repoSlugFromURL parses "owner/name" from a github SSH or HTTPS URL.
-// Returns "" for non-github URLs.
 func repoSlugFromURL(repoURL string) string {
 	repoURL = strings.TrimSpace(repoURL)
 	if repoURL == "" {

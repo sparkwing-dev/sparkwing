@@ -1,7 +1,3 @@
-// `sparkwing pipeline hooks fire` -- the behavioral half of the gate report.
-// It makes a repository's commit path refuse a commit and names the hook file
-// that did, which is the only way to tell a gate that is armed from one that
-// merely looks it.
 package main
 
 import (
@@ -20,12 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
-// runHooksFire makes a gate refuse a commit, here or across the fleet.
-//
-// The registry decides which repositories --fleet fires in, so a registry it
-// could not read leaves the fleet unfired rather than proven, and the sweep
-// refuses instead of enumerating nothing. Reporting zero results would say
-// every gate refused a commit having asked none of them.
 func runHooksFire(args []string) error {
 	fs := flag.NewFlagSet(cmdHooksFire.Path, flag.ContinueOnError)
 	repo := fs.String("repo", "", "repo directory (default: discovered via .sparkwing/)")
@@ -70,15 +60,6 @@ func runHooksFire(args []string) error {
 	return nil
 }
 
-// unenforcedResults are the repositories that did not refuse the commit with a
-// gate of their own. A repository with no gate to fire is not among them;
-// everything else is, including the verdicts that mean the question could not
-// be answered.
-//
-// Exiting non-zero on those is deliberate. An unanswered enforcement question
-// read as a pass is how a fleet comes to believe in gates it does not have,
-// which is the whole reason this command exists rather than a directory
-// listing.
 func unenforcedResults(results []githooks.FireResult) []githooks.FireResult {
 	var out []githooks.FireResult
 	for _, r := range results {
@@ -93,7 +74,7 @@ func unenforcedResults(results []githooks.FireResult) []githooks.FireResult {
 func renderHooksFire(w io.Writer, results []githooks.FireResult, format string) error {
 	switch format {
 	case "json":
-		// NDJSON: one fire result per line. No repos is an empty stream.
+
 		return ndjson.Write(w, results)
 	case "plain":
 		for _, r := range results {
@@ -130,7 +111,6 @@ func renderHooksFire(w io.Writer, results []githooks.FireResult, format string) 
 	return nil
 }
 
-// fireRemedy is the command that turns an unenforced verdict into a refusal.
 func fireRemedy(r githooks.FireResult) string {
 	switch r.Verdict {
 	case githooks.FireBorrowed:

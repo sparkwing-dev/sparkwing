@@ -50,13 +50,6 @@ func TestInstallConflict_ReportsEveryOtherInstall(t *testing.T) {
 	}
 }
 
-// TestInstallConflict_SeesInstallsOffTheCallersPath covers differing process
-// environments: the interactive shell that runs doctor and the background
-// job that resolves the rival do not share a PATH. A copy sitting only
-// in a well-known install directory -- reachable to a job whose PATH
-// lists it, invisible to the caller's -- must still be reported, or the
-// conflicted machine reads as clean from the very shell whose neighbor
-// is the conflict.
 func TestInstallConflict_SeesInstallsOffTheCallersPath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the well-known POSIX install dirs do not apply")
@@ -77,10 +70,6 @@ func TestInstallConflict_SeesInstallsOffTheCallersPath(t *testing.T) {
 	}
 }
 
-// TestInstallConflict_MakesTheSweepUnclean pins the finding to doctor's
-// verdict. A machine where the next command could be either of two
-// builds is not healthy, and a report that said so while printing
-// "healthy" would be the false all-clear this surface refuses.
 func TestInstallConflict_MakesTheSweepUnclean(t *testing.T) {
 	r := opsview.DoctorReport{
 		InstallConflict: &opsview.DoctorInstallConflict{
@@ -93,11 +82,6 @@ func TestInstallConflict_MakesTheSweepUnclean(t *testing.T) {
 	}
 }
 
-// TestRenderDoctor_ExplainsCompetingInstalls holds the render to a
-// report an operator can act on: which binary produced it, which others
-// exist, the exact reversible mv that retires each, and why PATH is the
-// mechanism -- with no claim about which install is the right one,
-// because nothing measured that.
 func TestRenderDoctor_ExplainsCompetingInstalls(t *testing.T) {
 	r := opsview.DoctorReport{
 		InstallConflict: &opsview.DoctorInstallConflict{
@@ -138,10 +122,6 @@ func TestRenderDoctor_ExplainsCompetingInstalls(t *testing.T) {
 	}
 }
 
-// TestRenderDoctor_QuotesRemedyPathsWithSpaces: the retire remedy is a
-// command the operator pastes, so a competing copy under a directory
-// with a space must render quoted -- bare, the pasted `mv` would parse
-// the path as several arguments and rename files the report never named.
 func TestRenderDoctor_QuotesRemedyPathsWithSpaces(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("asserts the POSIX-quoted form")

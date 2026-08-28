@@ -6,9 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Defect 9: the scope-qualified key must be unambiguous. A Global group
-// whose name contains the qualifier separator must not collide with a
-// Box group of the bare name on that host.
 func TestScopeKey_GlobalNameWithSeparatorDoesNotCollideWithBox(t *testing.T) {
 	t.Setenv("SPARKWING_BOX_ID", "advbox-host")
 
@@ -26,9 +23,6 @@ func TestScopeKey_GlobalNameWithSeparatorDoesNotCollideWithBox(t *testing.T) {
 	}
 }
 
-// Defect 10: the scope label is read from the scheme tag, not the
-// presence of the qualifier separator, so a global group whose name
-// contains the separator is still labeled global.
 func TestScopeKey_LabelReadsSchemeTagNotSeparator(t *testing.T) {
 	t.Setenv("SPARKWING_BOX_ID", "host1")
 

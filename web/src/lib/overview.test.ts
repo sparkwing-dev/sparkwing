@@ -25,8 +25,6 @@ function run(over: Partial<Run> & { id: string }): Run {
   } as Run;
 }
 
-// finishedAgo builds a completed run that finished `ms` before NOW, with
-// a build duration of `durMs`.
 function finishedAgo(
   id: string,
   ms: number,
@@ -133,10 +131,8 @@ describe("lastDeploy", () => {
 describe("summarize", () => {
   it("compares the current window against the anchor-shifted window", () => {
     const runs = [
-      // current 7d: two deploys, one in the last 24h
       finishedAgo("c1", 2 * DAY_MS, "success"),
       finishedAgo("c2", 1 * 60_000, "success"),
-      // previous week (anchor = 1w): one deploy
       finishedAgo("p1", WEEK_MS + 2 * DAY_MS, "failed"),
     ];
     const ov = summarize(runs, NOW, WEEK_MS);

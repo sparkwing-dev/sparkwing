@@ -30,8 +30,6 @@ func TestSectionsCoverTheWholeDoc(t *testing.T) {
 	}
 }
 
-// A section has to include its own heading: the heading is most of what
-// tells a reader whether the body under it is the answer.
 func TestSectionBodyIncludesItsHeading(t *testing.T) {
 	secs, err := docs.Sections("hooks")
 	if err != nil {
@@ -48,10 +46,6 @@ func TestSectionBodyIncludesItsHeading(t *testing.T) {
 	}
 }
 
-// A `#` inside a fenced block is a comment. Reading it as a heading
-// does not just add a junk section -- it truncates the real one to its
-// opening fence and strands the content under a filename. This is how
-// "pull request triggers" came to render as a bare ```yaml.
 func TestFencedCommentsAreNotHeadings(t *testing.T) {
 	for _, slug := range []string{"hooks", "pipelines", "getting-started", "cli-reference", "cli-runs"} {
 		t.Run(slug, func(t *testing.T) {
@@ -60,9 +54,7 @@ func TestFencedCommentsAreNotHeadings(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, s := range secs {
-				// A slash with no spaces around it is a path, so a
-				// filename comment; "Manual / API invocation" is prose
-				// and "`.Inline()`" is a symbol.
+
 				if !strings.Contains(s.Heading, " ") && strings.Contains(s.Heading, "/") {
 					t.Errorf("section heading %q is a path; a fenced comment was read as a heading", s.Heading)
 				}
@@ -80,8 +72,6 @@ func TestFencedCommentsAreNotHeadings(t *testing.T) {
 	}
 }
 
-// Every fenced block must survive splitting intact. A section that ends
-// mid-fence is a section whose example got cut in half.
 func TestSectionsDoNotSplitInsideAFence(t *testing.T) {
 	for _, e := range docs.List() {
 		secs, err := docs.Sections(e.Slug)
@@ -97,10 +87,6 @@ func TestSectionsDoNotSplitInsideAFence(t *testing.T) {
 	}
 }
 
-// A design sketch and a version-upgrade guide must never be the answer
-// to "how does this work" when a reference page also matched. Both are
-// short, and the tie-break favors short sections, so without a penalty
-// they win precisely the broad queries where the asker knows least.
 func TestNonCurrentDocsNeverOutrankReference(t *testing.T) {
 	for _, q := range []string{"trigger", "admission", "cache", "pipeline"} {
 		hits := docs.SearchSections(q)
@@ -125,9 +111,6 @@ func TestNonCurrentDocsNeverOutrankReference(t *testing.T) {
 	}
 }
 
-// The scaffolder tells an author to run this query to learn the trigger
-// schema. If it stops landing on the schema, the tip is a dead end that
-// costs a round-trip -- the exact cost it was added to remove.
 func TestScaffoldTriggerQueryFindsTheSchema(t *testing.T) {
 	hits := docs.SearchSections("on: trigger")
 	if len(hits) == 0 {
@@ -141,9 +124,6 @@ func TestScaffoldTriggerQueryFindsTheSchema(t *testing.T) {
 	}
 }
 
-// The queries agents actually run are exact identifiers -- YAML keys and
-// Go symbols read out of an error or a struct -- so those are what the
-// ranking has to get right.
 func TestSearchSectionsFindsTheDefiningSection(t *testing.T) {
 	cases := []struct {
 		query     string
@@ -167,9 +147,6 @@ func TestSearchSectionsFindsTheDefiningSection(t *testing.T) {
 	}
 }
 
-// The point of a section hit is that it is small enough to read. If the
-// top hit for a precise symbol is the whole reference page, this has
-// bought nothing over `docs read`.
 func TestSearchSectionsReturnsSomethingSmallEnoughToRead(t *testing.T) {
 	hits := docs.SearchSections("ApprovalConfig")
 	if len(hits) == 0 {
@@ -205,11 +182,6 @@ func TestSearchSectionsPrefersHeadingMatches(t *testing.T) {
 	}
 }
 
-// The question every agent trial asked after scaffolding, in the
-// spellings they actually typed. Each has to reach a section about
-// running a shell command; before this, all of them reached a table of
-// CLI verb names and the agents fell back to reading the whole SDK
-// reference.
 func TestShellCommandQueriesReachTheRightSection(t *testing.T) {
 	queries := []string{
 		"run shell command",
@@ -232,8 +204,6 @@ func TestShellCommandQueriesReachTheRightSection(t *testing.T) {
 	}
 }
 
-// A one-letter token matches nearly every section, so it narrows
-// nothing while still contributing to the score.
 func TestSingleCharacterTokensAreIgnored(t *testing.T) {
 	with := docs.SearchSections("Exec run a command")
 	without := docs.SearchSections("Exec run command")
@@ -249,10 +219,6 @@ func TestSingleCharacterTokensAreIgnored(t *testing.T) {
 	}
 }
 
-// A heading that repeats across a doc identifies nothing. A generated
-// CLI reference group page has one "Examples" section per verb, so a
-// result list of them is unreadable without saying which verb each
-// belongs to.
 func TestRepeatedHeadingsAreDisambiguatedByBreadcrumb(t *testing.T) {
 	secs, err := docs.Sections("cli-runs")
 	if err != nil {
@@ -276,10 +242,6 @@ func TestRepeatedHeadingsAreDisambiguatedByBreadcrumb(t *testing.T) {
 	}
 }
 
-// A breadcrumb says what a section sits under, not what it is about, so
-// it must not answer a query as strongly as a heading. Every
-// "Subcommands" table beneath `sparkwing runs triggers` otherwise
-// outranks the section that documents triggers.
 func TestBreadcrumbMatchesRankBelowHeadingMatches(t *testing.T) {
 	hits := docs.SearchSections("Triggers")
 	if len(hits) == 0 {

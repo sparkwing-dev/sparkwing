@@ -30,8 +30,6 @@ func TestClientBackend_Capabilities(t *testing.T) {
 	}
 }
 
-// fakeController stands in for the cluster controller. Only routes
-// ClientBackend touches are wired.
 func fakeController(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()

@@ -14,14 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// An OnFailure recovery node is dispatched through the runner like any
-// other node, so it carries the same envelope: the cache lookup, the
-// concurrency slot, and SkipIf. A pod has always run recovery nodes
-// that way -- RunNodeOnce is the whole envelope and nothing about it
-// is conditional on the node being a recovery node -- while the local
-// dispatcher used to short-circuit straight to the body. These three
-// tests pin the envelope the local path now applies.
-
 var recoveryMemoizeRuns atomic.Int32
 
 type onFailureMemoizePipe struct{ sparkwing.Base }
@@ -54,8 +46,6 @@ func (onFailureSkipIfPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spa
 	return nil
 }
 
-// recoveryHolderGate lets the test hold the group's only slot while
-// the recovery node asks for it, then release it so the run can end.
 type recoveryHolderGate struct {
 	acquired    chan struct{}
 	release     chan struct{}
@@ -129,17 +119,6 @@ func init() {
 	register("mod-onfailure-concurrency", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &onFailureConcurrencyPipe{} })
 }
 
-// TestOnFailure_RecoveryNodeMemoizes pins that a recovery node
-// declaring Memoize gets the cache lookup, so a second identical
-// failure replays the stored rollback instead of running it again.
-//
-// This is the behavior to want, not merely the behavior that falls
-// out: an author who writes Memoize on a recovery node opted that node
-// into memoization the same way they would any other node, and an
-// author who wants the rollback to run every time simply does not
-// declare it. Making recovery the one node kind whose Memoize is
-// silently ignored would be the surprising rule, and it is not the
-// rule a pod follows.
 func TestOnFailure_RecoveryNodeMemoizes(t *testing.T) {
 	recoveryMemoizeRuns.Store(0)
 	p := newPaths(t)
@@ -176,10 +155,6 @@ func TestOnFailure_RecoveryNodeMemoizes(t *testing.T) {
 	}
 }
 
-// TestOnFailure_RecoveryNodeHonorsSkipIf pins that a recovery node's
-// SkipIf is evaluated. The local shortcut used to run the body without
-// asking, so a rollback guarded by "only in staging" fired in
-// production locally and was skipped in a pod.
 func TestOnFailure_RecoveryNodeHonorsSkipIf(t *testing.T) {
 	recoverySkipIfRuns.Store(0)
 	p := newPaths(t)
@@ -204,12 +179,6 @@ func TestOnFailure_RecoveryNodeHonorsSkipIf(t *testing.T) {
 	}
 }
 
-// TestOnFailure_RecoveryNodeTakesAConcurrencySlot pins the sharpest
-// edge of the envelope change: a recovery node enrolled in a full
-// group under OnLimit:Fail now fails there. It used to run, because
-// the local shortcut never asked the group for a slot -- so a rollback
-// declared as "at most one of these at a time" could run alongside the
-// very work it was meant to be exclusive with.
 func TestOnFailure_RecoveryNodeTakesAConcurrencySlot(t *testing.T) {
 	recoveryConcurrencyRuns.Store(0)
 	gate := installRecoveryHolderGate(t)
@@ -231,9 +200,7 @@ func TestOnFailure_RecoveryNodeTakesAConcurrencySlot(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("hold never took the group's slot")
 	}
-	// The holder keeps the only slot until the recovery node has been
-	// resolved against it, so the run cannot finish before the thing
-	// under test happens.
+
 	awaitTerminalNode(t, p, "rollback")
 	gate.letGo()
 
@@ -264,9 +231,6 @@ func TestOnFailure_RecoveryNodeTakesAConcurrencySlot(t *testing.T) {
 	}
 }
 
-// awaitTerminalNode blocks until nodeID of the newest run in the store
-// carries an outcome, so a test can act on a mid-run fact without
-// racing the dispatcher.
 func awaitTerminalNode(t *testing.T, p orchestrator.Paths, nodeID string) {
 	t.Helper()
 	st, err := store.Open(p.StateDB())

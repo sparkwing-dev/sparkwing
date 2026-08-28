@@ -13,32 +13,19 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Bumped when the persisted envelope shape changes incompatibly.
-// Replay rejects unknown versions loudly.
 const dispatchEnvelopeVersion = 1
 
-// dispatchEnvelope is the JSON persisted into
-// node_dispatches.input_envelope_json. ScalarFields is the post-Ref-
-// resolution job marshal; replay rehydrates Refs against the original
-// run.
 type dispatchEnvelope struct {
 	Version      int             `json:"version"`
 	TypeName     string          `json:"type_name"`
 	ScalarFields json.RawMessage `json:"scalar_fields,omitempty"`
 }
 
-// Env-var name prefixes captured into node_dispatches.env_json. Keeps
-// operator credentials off disk while preserving everything needed to
-// reproduce RuntimeConfig and git context.
 var envAllowPrefixes = []string{
 	"SPARKWING_",
 	"GITHUB_",
 }
 
-// envAllowExact pins names that don't fit a prefix but are needed
-// to reproduce dispatch-time behavior (the AWS SDK + Go runtime
-// honor a few non-prefixed vars whose values shape what the snapshot
-// would have observed at run time).
 var envAllowExact = map[string]bool{
 	"KUBERNETES_SERVICE_HOST": true,
 	"PATH":                    true,
@@ -46,9 +33,6 @@ var envAllowExact = map[string]bool{
 	"HOSTNAME":                true,
 }
 
-// writeDispatchSnapshot captures the dispatch frame for one
-// (run, node, attempt). Called before BeforeRun so replays re-run
-// hooks and pick up rotated secrets lazily.
 func (r *NodeExecutor) writeDispatchSnapshot(ctx context.Context, runID string, node *sparkwing.JobNode) error {
 	scalar, err := json.Marshal(node.Job())
 	if err != nil {
@@ -113,8 +97,6 @@ func (r *NodeExecutor) writeDispatchSnapshot(ctx context.Context, runID string, 
 	})
 }
 
-// collectDispatchEnv layers env (last-wins): allowlisted os.Environ,
-// synthesized run-context vars, then node.EnvMap. run may be nil.
 func collectDispatchEnv(node *sparkwing.JobNode, runID string, run *store.Run) map[string]string {
 	out := map[string]string{}
 	for _, kv := range os.Environ() {
@@ -152,20 +134,6 @@ func collectDispatchEnv(node *sparkwing.JobNode, runID string, run *store.Run) m
 	return out
 }
 
-// envDenyExact names variables the prefixes would otherwise sweep in but
-// that must not be persisted into a dispatch snapshot.
-//
-// The rule: host-local executable paths never travel in dispatch
-// snapshots. A snapshot is replayed later, and by `sparkwing debug rerun`
-// on a different machine than the one that captured it, so a value naming
-// a path that gets executed would send the replay to a path that is
-// absent there or -- worse -- present and something else. Anything added
-// here should be a variable whose value is such a path; a variable that
-// merely differs per machine is fine to capture, because reproducing what
-// the original dispatch observed is the point.
-//
-// SPARKWING_WINGD_BIN is the binary a run spawns to host the admission
-// daemon. The replaying machine must resolve its own.
 var envDenyExact = map[string]bool{
 	wingdclient.HostBinEnv: true,
 }

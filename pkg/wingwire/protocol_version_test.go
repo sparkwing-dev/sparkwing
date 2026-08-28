@@ -28,9 +28,6 @@ func TestReleasedProtocolFloors_CoverEveryMajorUpToTheCurrentOne(t *testing.T) {
 	}
 }
 
-// Every release below a major's floor speaks a major below it, and every
-// release at or above it speaks that major or newer. That ordering is what
-// lets a caller holding a peer's major place a pin with one comparison.
 func TestMinVersionSpeaking_SortsEveryReleaseOntoTheRightSideOfAFloor(t *testing.T) {
 	floors := ProtocolFloors{
 		{Major: 1, MinVersion: "v0.0.0"},

@@ -8,8 +8,6 @@ import (
 	"sync"
 )
 
-// ResolveDevEnvURL returns os.Getenv(key), or the value from
-// $SPARKWING_HOME/dev.env, or "".
 func ResolveDevEnvURL(key string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -22,8 +20,6 @@ var (
 	devEnvMap  map[string]string
 )
 
-// devEnvFile lazily loads $SPARKWING_HOME/dev.env once per process.
-// Long-running consumers will see stale values if the server restarts.
 func devEnvFile() map[string]string {
 	devEnvOnce.Do(func() {
 		devEnvMap = map[string]string{}

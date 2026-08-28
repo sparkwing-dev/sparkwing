@@ -191,9 +191,6 @@ func TestParseInputsSchema_MapWithoutExtraRejected(t *testing.T) {
 	}
 }
 
-// Fields without a `flag` tag are silently skipped (treated as
-// internal helpers, not flags). Verifies the parser doesn't trip on
-// state-keeping fields someone might add to their Inputs struct.
 type withUntaggedField struct {
 	Tagged string `flag:"x"`
 	//lint:ignore U1000 exists to exercise the untagged-field skip path
@@ -431,8 +428,6 @@ func (sp *secretPipe) Plan(_ context.Context, plan *Plan, in secretInputs, rc Ru
 	return nil
 }
 
-// secretValuesCreds is at package scope so the Pipeline[T] inferred
-// type and the Plan signature reference the same named struct.
 type secretValuesCreds struct {
 	Token   string `flag:"token" secret:"true"`
 	Backup  string `flag:"backup" secret:"true" default:"fallback-secret"`
@@ -446,9 +441,6 @@ func (secretValuesPipe) Plan(_ context.Context, _ *Plan, _ secretValuesCreds, _ 
 	return nil
 }
 
-// SecretValues is what the orchestrator pulls into the run's Masker.
-// Verifies passed values, defaulted values, and that empty/non-secret
-// fields are excluded.
 func TestRegistration_SecretValues(t *testing.T) {
 	name := inputsSchemaTestName("secret-values-fixture-")
 	Register[secretValuesCreds](name, func() Pipeline[secretValuesCreds] {
@@ -565,11 +557,6 @@ func TestFlattenInputs_AnonymousEmbedRoundTrip(t *testing.T) {
 	}
 }
 
-// Pointer-to-struct embeds should also work: the populator must
-// allocate the embedded struct on demand so the leaf is settable.
-// The embedded type must be exported because Go disallows
-// reflect.Set on unexported fields, including the synthesized
-// field that anonymous embeds produce.
 type EmbeddedSkipFilter struct {
 	Skip string `flag:"skip" desc:"comma-separated job names to skip"`
 	Only string `flag:"only" desc:"comma-separated job names to run exclusively"`
@@ -601,8 +588,6 @@ func TestPopulateInputs_AnonymousPointerEmbedAllocates(t *testing.T) {
 	}
 }
 
-// Outer flags shadow inner flags with the same name (Go embedding
-// semantics). The outer wins; the inner is silently dropped.
 type embedShadowed struct {
 	Version string `flag:"version" desc:"outer wins"`
 	embeddedVersion
@@ -628,8 +613,6 @@ func TestParseInputsSchema_OuterShadowsEmbeddedFlag(t *testing.T) {
 	}
 }
 
-// Nested anonymous embeds (struct embeds struct embeds struct) are
-// walked transitively.
 type level3 struct {
 	Deep string `flag:"deep"`
 }

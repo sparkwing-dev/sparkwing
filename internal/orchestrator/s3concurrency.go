@@ -19,43 +19,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// s3CASMaxRetries bounds the read-modify-PutIfMatch loop. Contended
-// keys serialize through the loop one winner per round, so the bound
-// must exceed the realistic number of simultaneous contenders; beyond
-// it the caller sees a transient error and the orchestrator's release
-// reaper recovers the slot.
 const s3CASMaxRetries = 200
 
-// s3CASBackoffStep and s3CASBackoffCap shape the per-attempt sleep
-// between lost CAS rounds. A holder-derived offset spreads contenders
-// so they don't re-collide in lockstep.
 const (
 	s3CASBackoffStep = 2 * time.Millisecond
 	s3CASBackoffCap  = 40 * time.Millisecond
 )
 
-// s3FinishedRetention bounds how long a drained coalesce leader's
-// terminal outcome lingers in the slot so a slow follower can still
-// inherit it. Pruned on the next write past the window.
 const s3FinishedRetention = 5 * time.Minute
 
-// s3Concurrency is the Mode 2 (object-store) ConcurrencyBackend. It
-// holds the full coordination state for each concurrency key in a
-// single versioned slot object and mutates it under conditional-write
-// CAS, so N runners against one bucket coalesce on a key instead of
-// every slot being granted unconditionally.
-//
-// Every mutation is a read-modify-PutIfMatch retry loop against one
-// object per key. This is the deliberate tradeoff: a heavily-contended
-// key serializes its acquires/releases as retries against a single
-// object, so its tail latency is higher than a database's row lock.
-// Uncontended keys touch the object once.
-//
-// When the configured endpoint does not enforce write preconditions
-// (ConditionalWritesSupported reports false), the backend falls back to
-// noopConcurrency behavior -- granting every slot with a warning --
-// rather than handing out unsafe locks against an endpoint that ignores
-// the CAS.
 type s3Concurrency struct {
 	cw storage.ConditionalWriter
 
@@ -64,12 +36,6 @@ type s3Concurrency struct {
 	noop      *noopConcurrency
 }
 
-// NewS3Concurrency returns a cross-runner ConcurrencyBackend over the
-// artifact store's conditional-write capability. When the store does
-// not implement ConditionalWriter (or art is nil), it returns the
-// no-op backend directly. When it does, the live-endpoint capability is
-// probed lazily on first use; an endpoint that ignores preconditions
-// degrades to no-op coordination.
 func NewS3Concurrency(art storage.ArtifactStore) ConcurrencyBackend {
 	cw, ok := storage.Conditional(art)
 	if !ok {
@@ -78,9 +44,6 @@ func NewS3Concurrency(art storage.ArtifactStore) ConcurrencyBackend {
 	return &s3Concurrency{cw: cw, noop: &noopConcurrency{}}
 }
 
-// fallback returns the no-op backend when conditional writes are
-// unavailable, or nil when the CAS path is usable. The capability probe
-// runs once.
 func (c *s3Concurrency) fallback(ctx context.Context) ConcurrencyBackend {
 	c.probeOnce.Do(func() {
 		ok, err := c.cw.ConditionalWritesSupported(ctx)
@@ -101,10 +64,6 @@ func (c *s3Concurrency) fallback(ctx context.Context) ConcurrencyBackend {
 	return nil
 }
 
-// s3SlotDoc is the full coordination state for one concurrency key,
-// serialized as one object. Holders draw budget; waiters await it;
-// cache memoizes a finished leader's output; finished records carry a
-// drained coalesce leader's outcome to its followers.
 type s3SlotDoc struct {
 	Key      string             `json:"key"`
 	Capacity int                `json:"capacity"`
@@ -170,10 +129,6 @@ type s3Cache struct {
 	ExpiresNS    int64  `json:"expires_ns"`
 }
 
-// s3FinishedHolder records a drained coalesce leader's terminal outcome
-// so a follower that resolves after the drain inherits it (the cache
-// path covers a successful leader; this covers a leader that wrote no
-// cache entry).
 type s3FinishedHolder struct {
 	RunID      string `json:"run_id"`
 	NodeID     string `json:"node_id"`
@@ -181,8 +136,6 @@ type s3FinishedHolder struct {
 	RecordedNS int64  `json:"recorded_ns"`
 }
 
-// s3SlotKey maps an arbitrary coordination key (which may contain any
-// byte) to a stable, safe object key.
 func s3SlotKey(key string) string {
 	sum := sha256.Sum256([]byte(key))
 	return "concurrency/" + hex.EncodeToString(sum[:]) + ".json"
@@ -195,9 +148,6 @@ func nodeOrDash(nodeID string) string {
 	return nodeID
 }
 
-// load reads and decodes the slot object. A missing object yields a
-// fresh empty doc with exists=false so the first writer uses
-// PutIfAbsent.
 func (c *s3Concurrency) load(ctx context.Context, objKey string) (*s3SlotDoc, storage.ETag, bool, error) {
 	rc, etag, err := c.cw.GetWithETag(ctx, objKey)
 	if errors.Is(err, storage.ErrNotFound) {
@@ -221,10 +171,6 @@ func (c *s3Concurrency) load(ctx context.Context, objKey string) (*s3SlotDoc, st
 	return &doc, etag, true, nil
 }
 
-// mutate runs fn against the current slot state and, when fn requests a
-// write, commits it under CAS. A lost precondition re-reads and retries.
-// fn returns (write, err): a returned error aborts without writing and
-// propagates verbatim so sentinels survive errors.Is.
 func (c *s3Concurrency) mutate(ctx context.Context, key string, fn func(doc *s3SlotDoc, exists bool, now time.Time) (bool, error)) error {
 	objKey := s3SlotKey(key)
 	for attempt := 0; ; attempt++ {
@@ -265,9 +211,6 @@ func (c *s3Concurrency) mutate(ctx context.Context, key string, fn func(doc *s3S
 	}
 }
 
-// casBackoff grows the inter-attempt sleep linearly to the cap, offset
-// by a key-derived jitter so contenders on one slot don't re-collide in
-// lockstep round after round.
 func casBackoff(attempt int, key string) time.Duration {
 	d := time.Duration(attempt+1) * s3CASBackoffStep
 	if d > s3CASBackoffCap {
@@ -412,9 +355,6 @@ func oldestLiveHolder(doc *s3SlotDoc, nowNS int64) *s3Holder {
 	return best
 }
 
-// parkWaiter inserts or replaces the waiter for (runID, nodeID): a
-// re-arrival overwrites its prior parked row, mirroring the store's
-// primary-key replace.
 func parkWaiter(doc *s3SlotDoc, w s3Waiter) {
 	for i := range doc.Waiters {
 		if doc.Waiters[i].RunID == w.RunID && doc.Waiters[i].NodeID == w.NodeID {
@@ -560,9 +500,6 @@ func finishedOutcome(doc *s3SlotDoc, runID, nodeID string) string {
 	return ""
 }
 
-// prune drops expired holders (reclaiming their budget for the next
-// acquirer), expired cache entries, and stale finished records. Applied
-// inside any write path; never persisted on a read-only path.
 func prune(doc *s3SlotDoc, nowNS int64) {
 	if len(doc.Holders) > 0 {
 		kept := doc.Holders[:0]
@@ -590,10 +527,6 @@ func prune(doc *s3SlotDoc, nowNS int64) {
 	}
 }
 
-// promoteWaiters admits queue/cancel_others waiters in arrival order. A
-// waiter that does not fit may be bypassed only while older holders are what
-// block it; once younger backfilled holders are the blocker, promotion stops
-// behind that waiter. Returns whether any were promoted.
 func promoteWaiters(doc *s3SlotDoc, now time.Time, lease time.Duration) bool {
 	nowNS := now.UnixNano()
 	entryCap := doc.Capacity
@@ -1242,9 +1175,6 @@ func (c *s3Concurrency) CancelWaiter(ctx context.Context, key, runID, nodeID str
 	return removed, err
 }
 
-// splitHolderID recovers (runID, nodeID) from the "runID/nodeID"
-// convention, splitting on the last separator so a runID with no
-// separator is preserved. A trailing "-" decodes to an empty nodeID.
 func splitHolderID(holderID string) (string, string) {
 	for i := len(holderID) - 1; i >= 0; i-- {
 		if holderID[i] == '/' {

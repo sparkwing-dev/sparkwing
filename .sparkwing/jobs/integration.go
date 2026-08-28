@@ -12,22 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Integration runs sparkwing's env-gated Postgres/S3 integration suite
-// against real backends spun up in Docker. It brings up Postgres + MinIO,
-// waits for them to be ready (via the Verify postcondition gate -- "the
-// fixtures I started are actually accepting connections"), runs the
-// integration tests with the gating env vars set, and tears the
-// containers down on success or failure.
-//
-// Postgres unlocks the bulk of the suite: the pkg/store conformance
-// tests and the orchestrator shared-state integration tests (whose S3
-// half runs against an in-process gofakes3 server, so it needs no
-// external S3). MinIO additionally unlocks the storeurl real-bucket
-// round-trip, which honors $SPARKWING_S3_ENDPOINT.
-//
-// Requires a running Docker daemon, the `go` toolchain, `curl` (the
-// MinIO readiness probe) and the `aws` CLI (creates the test bucket).
-// Designed for local runs and CI alike.
 type Integration struct{ sparkwing.Base }
 
 func (Integration) ShortHelp() string {
@@ -66,8 +50,6 @@ func (Integration) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoI
 	return nil
 }
 
-// startFixtures removes any stale containers from an interrupted prior
-// run, then starts fresh Postgres + MinIO.
 func startFixtures(ctx context.Context) error {
 	_ = run(ctx, "", "docker", "rm", "-f", itPGName, itMinioName)
 	sparkwing.Info(ctx, "starting postgres (%s) on :%s", itPGName, itPGPort)
@@ -85,8 +67,6 @@ func startFixtures(ctx context.Context) error {
 	return nil
 }
 
-// fixturesReady is the Verify postcondition: poll until Postgres accepts
-// connections and MinIO reports healthy, then create the test bucket.
 func fixturesReady(ctx context.Context) error {
 	deadline := time.Now().Add(90 * time.Second)
 	for {
@@ -115,8 +95,6 @@ func fixturesReady(ctx context.Context) error {
 	return nil
 }
 
-// runIntegrationSuite runs `go test ./...` on the main module with the
-// integration-gating env set so the env-skipped tests execute.
 func runIntegrationSuite(ctx context.Context) error {
 	root, err := mainModuleRoot()
 	if err != nil {
@@ -148,8 +126,6 @@ func teardownFixtures(ctx context.Context) error {
 	return nil
 }
 
-// run executes a command (optionally in dir), discarding output. Returns
-// the command error so callers can branch on success.
 func run(ctx context.Context, dir, name string, args ...string) error {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
@@ -158,9 +134,6 @@ func run(ctx context.Context, dir, name string, args ...string) error {
 	return cmd.Run()
 }
 
-// mainModuleRoot walks up from cwd to the directory whose go.mod declares
-// the sparkwing module (the integration tests live there, not in the
-// .sparkwing/ pipelines module).
 func mainModuleRoot() (string, error) {
 	wd, err := os.Getwd()
 	if err != nil {

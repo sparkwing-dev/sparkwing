@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// dialAtMajor opens a raw connection to home's daemon and completes the
-// handshake as a client speaking major, which the real client library
-// cannot do for a major other than its own.
 func dialAtMajor(t *testing.T, home string, major int) (net.Conn, wingwire.HelloAck) {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)
@@ -95,10 +92,6 @@ func TestOlderProtocolClientIsGrantedAdmission(t *testing.T) {
 	}
 }
 
-// A semaphores-only request means an internal, non-finalizing acquisition
-// in the oldest served major, and a run-level claim that does finalize in
-// this build's. Reading the older client's request by this build's rule
-// would finalize a row its run also writes for itself.
 func TestOlderProtocolSemaphoresOnlyLeaseDoesNotFinalizeRun(t *testing.T) {
 	home := shortHome(t)
 	finalized := make(chan string, 1)

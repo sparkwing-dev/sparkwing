@@ -35,10 +35,6 @@ import (
 // Jobs that take no args simply don't embed WithArgs (or embed
 // WithArgs[NoInputs] if they want to write the call uniformly).
 type WithArgs[T any] struct {
-	// bound stores the resolved args once the framework populates them
-	// just before Work runs. Pointer so a zero-valued WithArgs[T]
-	// (the common case during job construction) doesn't carry a stale
-	// zero T.
 	bound *T
 }
 
@@ -88,22 +84,11 @@ func (w *WithArgs[T]) ArgsType() reflect.Type {
 	return reflect.TypeOf(zero)
 }
 
-// argsHolder is the structural interface a WithArgs[T] satisfies.
-// internal/orchestrator uses this to discover whether a job declares
-// typed args (and which T to build a Schema over) without needing a
-// generic type assertion (which Go doesn't support).
 type argsHolder interface {
 	ArgsType() reflect.Type
 	BindFromAny(val any) error
 }
 
-// embeddedArgs finds the args-holder embedded in a job's struct, if
-// any, and returns (its reflect-addressable handle, T). Returns
-// (zero, nil) when the job doesn't embed WithArgs.
-//
-// Scans only the top-level anonymous fields -- args-holders nested
-// behind other anonymous structs are ignored on purpose (keeps the
-// job-construction model flat and discoverable).
 func embeddedArgs(jobPtr any) (argsHolder, reflect.Type) {
 	v := reflect.ValueOf(jobPtr)
 	if !v.IsValid() {

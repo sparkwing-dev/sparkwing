@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { type Job, type Agent } from "@/lib/api";
 import AgentUtilization from "@/components/AgentUtilization";
 import { ResponsiveContainer, BarChart, Bar, Tooltip } from "recharts";
@@ -31,7 +32,6 @@ function p95(values: number[]): number {
   return sorted[Math.floor(sorted.length * 0.95)];
 }
 
-// Activity sparkline -- shows job volume over recent time buckets
 function Sparkline({
   jobs,
   buckets = 12,
@@ -41,7 +41,11 @@ function Sparkline({
   buckets?: number;
   windowHours?: number;
 }) {
-  const now = Date.now();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(Date.now()), 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
   const windowMs = windowHours * 3600 * 1000;
   const bucketMs = windowMs / buckets;
 
@@ -172,11 +176,10 @@ export default function MetricsPanel({
   const utilized = agents.reduce((s, a) => s + (a.active_jobs?.length || 0), 0);
 
   const pipelineStats = computePipelineStats(topLevel);
-  const maxPipelineTotal = Math.max(1, ...pipelineStats.map((p) => p.total));
 
   return (
     <div className="space-y-4">
-      {/* Row 1: Key rates */}
+      {                      }
       <div className="grid grid-cols-4 gap-3">
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
           <div className="text-xl font-bold text-green-400">
@@ -206,7 +209,7 @@ export default function MetricsPanel({
         </div>
       </div>
 
-      {/* Row 2: Activity sparkline + p95 */}
+      {                                     }
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
           <div className="text-[10px] text-[var(--muted)] mb-2">
@@ -227,7 +230,7 @@ export default function MetricsPanel({
         </div>
       </div>
 
-      {/* Row 3: Per-pipeline breakdown */}
+      {                                   }
       {pipelineStats.length > 0 && (
         <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
           <div className="text-[10px] text-[var(--muted)] mb-2">Pipelines</div>
@@ -285,7 +288,7 @@ export default function MetricsPanel({
         </div>
       )}
 
-      {/* Row 4: Agent utilization timeline */}
+      {                                       }
       <div className="bg-[var(--surface)] border border-[var(--border)] rounded-lg p-3">
         <AgentUtilization jobs={jobs} agents={agents} />
       </div>

@@ -74,9 +74,6 @@ func TestTriggerRunnerArgsK8s(t *testing.T) {
 	}
 }
 
-// The child inherits SPARKWING_GITCACHE_URL from this process and
-// would re-derive a proxy from it, so "no proxy" has to travel as an
-// explicit flag rather than an omitted one.
 func TestTriggerRunnerArgsForwardsDependencyProxyOptOut(t *testing.T) {
 	got := triggerRunnerArgs(TriggerLoopOptions{
 		RunnerKind:   "k8s",

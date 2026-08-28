@@ -47,9 +47,6 @@ func TestDotenvSource_RoundTrip(t *testing.T) {
 	}
 }
 
-// : config.env entries surface as masked=false; on collision
-// the plain entry wins so an explicit "I marked this as plain" beats
-// the safe default.
 func TestDotenvSource_PlainAndMasked(t *testing.T) {
 	dir := t.TempDir()
 	secretsPath := filepath.Join(dir, "secrets.env")
@@ -181,9 +178,6 @@ func TestCached_DoesNotCacheErrors(t *testing.T) {
 	}
 }
 
-// : Cached only registers values with the masker when masked
-// is true. Plain config values must render in run output without
-// redaction so operators can see what was actually configured.
 func TestCached_DoesNotMaskUnmaskedEntries(t *testing.T) {
 	src := SourceFunc(func(name string) (string, bool, error) {
 		return "us-east-1", false, nil

@@ -9,7 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// fixedRun returns a deterministic store.Run for hash-stability tests.
 func fixedRun() *store.Run {
 	start := time.Date(2026, 5, 6, 12, 0, 0, 0, time.UTC)
 	end := start.Add(15 * time.Second)
@@ -25,7 +24,6 @@ func fixedRun() *store.Run {
 	}
 }
 
-// node helper mints a finished node with the given times + outcome.
 func node(id, outcome string, started time.Time, dur time.Duration, output []byte, deps ...string) *store.Node {
 	finished := started.Add(dur)
 	return &store.Node{
@@ -204,9 +202,6 @@ func TestBuildReceipt_NilRunReturnsZeroValue(t *testing.T) {
 	}
 }
 
-// The receipt is the audit artifact `sparkwing runs receipt` prints and
-// GET /api/v1/runs/{id}/receipt serves; its invocation block carries
-// the args and the reproducer command.
 func TestBuildReceipt_RedactsSecretArgsInInvocation(t *testing.T) {
 	run := fixedRun()
 	run.Args = map[string]string{"token": "s3cr3t-token-value", "env": "prod"}
@@ -227,7 +222,7 @@ func TestBuildReceipt_RedactsSecretArgsInInvocation(t *testing.T) {
 	if repro, _ := rec.Invocation["reproducer"].(string); strings.Contains(repro, "s3cr3t-token-value") {
 		t.Errorf("receipt reproducer leaked the secret: %q", repro)
 	}
-	// The source row must survive untouched: retry re-executes from it.
+
 	if run.Args["token"] != "s3cr3t-token-value" {
 		t.Errorf("BuildReceipt mutated the run: %q", run.Args["token"])
 	}
@@ -236,9 +231,6 @@ func TestBuildReceipt_RedactsSecretArgsInInvocation(t *testing.T) {
 	}
 }
 
-// receipt_sha must certify the document the caller receives. Hashing
-// the plaintext and shipping the redaction would make the receipt
-// unverifiable by anyone who is allowed to read it.
 func TestBuildReceipt_SHACoversTheRedactedDocument(t *testing.T) {
 	run := fixedRun()
 	run.Invocation = map[string]any{
@@ -247,8 +239,6 @@ func TestBuildReceipt_SHACoversTheRedactedDocument(t *testing.T) {
 	}
 	redacted := receipt.BuildReceipt(run, nil, 0, "")
 
-	// Same run, already redacted at rest: identical delivered bytes
-	// must produce an identical receipt_sha.
 	plain := fixedRun()
 	plain.Invocation = map[string]any{
 		"args":                        map[string]string{"token": store.RedactedArgValue},

@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/conformance"
 )
 
-// TestConformance_ArtifactStore wires the shared conformance suite
-// against an in-memory gofakes3 server. Each subtest gets a fresh
-// store via a unique prefix under the same bucket.
 func TestConformance_ArtifactStore(t *testing.T) {
 	client, closer := fakeS3(t)
 	defer closer()
@@ -24,9 +21,6 @@ func TestConformance_ArtifactStore(t *testing.T) {
 	})
 }
 
-// TestConformance_ConditionalWriter runs the optional CAS-capability
-// suite against the in-memory gofakes3 server, which enforces
-// If-None-Match / If-Match preconditions.
 func TestConformance_ConditionalWriter(t *testing.T) {
 	client, closer := fakeS3(t)
 	defer closer()
@@ -39,9 +33,6 @@ func TestConformance_ConditionalWriter(t *testing.T) {
 	})
 }
 
-// TestConformance_LogStore wires the shared conformance suite for
-// log stores against the in-memory gofakes3 server. Same isolation
-// approach: unique prefix per factory call.
 func TestConformance_LogStore(t *testing.T) {
 	client, closer := fakeS3(t)
 	defer closer()

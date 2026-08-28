@@ -7,9 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// daemonGraceStable uses the serving daemon's own uptime to cover every
-// successor path, including version takeover. Harness-side kill timestamps
-// cannot observe a cooperative takeover initiated by a client.
 func daemonGraceStable(qs wingwire.QueueState, grace, settle time.Duration) bool {
 	if qs.DaemonUptimeMS == 0 {
 		return true
@@ -17,15 +14,8 @@ func daemonGraceStable(qs wingwire.QueueState, grace, settle time.Duration) bool
 	return time.Duration(qs.DaemonUptimeMS)*time.Millisecond > grace+settle
 }
 
-// capacityEpsilon absorbs float rounding when comparing held cost to
-// declared capacity; it is far below any real over-admission.
 const capacityEpsilon = 1e-6
 
-// checkLedgerTruth asserts the invariants that must hold on every
-// [wingwire.QueueState] read: granted cost never exceeds capacity, holds
-// are non-negative, holders and waiters are disjoint and duplicate-free,
-// and waiter timings are sane. It returns one violation string per
-// broken invariant; an empty slice means the snapshot is sound.
 func checkLedgerTruth(qs wingwire.QueueState) []string {
 	var v []string
 	for _, r := range qs.Resources {
@@ -63,12 +53,6 @@ func checkLedgerTruth(qs wingwire.QueueState) []string {
 	return v
 }
 
-// checkLivenessTruth asserts the liveness floor's guarantee that sparkwing
-// never refuses all work: whenever no run holds admission and no host capacity
-// is held, no run may be left queued. The floor admits the queue head on an
-// otherwise-idle box regardless of the reserve or external load, so a waiter
-// stranded behind zero holders is a liveness bug. It returns one violation
-// string when the invariant is broken, else nil.
 func checkLivenessTruth(qs wingwire.QueueState) []string {
 	if len(qs.Holders) > 0 || len(qs.Waiters) == 0 {
 		return nil
@@ -82,15 +66,6 @@ func checkLivenessTruth(qs wingwire.QueueState) []string {
 		"liveness floor violated: %d waiter(s) queued while no run holds admission", len(qs.Waiters))}
 }
 
-// checkOSTruth cross-checks the daemon's holder set against the set of
-// crashdummy processes the harness believes are alive. A holder the
-// harness never spawned is a phantom -- always a violation. A holder whose
-// process is confirmed dead is a leaked lease, but only when leakStable is
-// true: right after a daemon kill the successor restores leases and holds
-// them for the reattach grace window, so a dead client's restored lease
-// legitimately lingers until grace expiry. Permanent leaks are caught by
-// [checkConverged] regardless, so gating the transient check on daemon
-// stability trades no real coverage for freedom from grace-window flakes.
 func checkOSTruth(qs wingwire.QueueState, live, known map[string]bool, leakStable bool) []string {
 	var v []string
 	for _, h := range qs.Holders {
@@ -105,9 +80,6 @@ func checkOSTruth(qs wingwire.QueueState, live, known map[string]bool, leakStabl
 	return v
 }
 
-// checkConverged asserts total quiescence: no holders, no waiters, no
-// held capacity. It is evaluated only after the harness has stopped
-// injecting faults and waited out the settle window.
 func checkConverged(qs wingwire.QueueState) []string {
 	var v []string
 	if n := len(qs.Holders); n > 0 {

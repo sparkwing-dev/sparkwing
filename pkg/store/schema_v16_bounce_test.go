@@ -9,10 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestSchemaV16_UpgradeOfARealV15ShapeAddsTheBounceTable reconstructs what a
-// v15 database holds -- runs and nodes, and no record of a bounce ever having
-// been requested -- opens it with the current binary, and asserts the upgrade
-// creates the table without disturbing the rows carried across it.
 func TestSchemaV16_UpgradeOfARealV15ShapeAddsTheBounceTable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "real15.db")
 	st, err := store.Open(path)
@@ -55,10 +51,6 @@ func TestSchemaV16_UpgradeOfARealV15ShapeAddsTheBounceTable(t *testing.T) {
 	}
 }
 
-// TestSchemaV16_UpgradeIsSafeToReplay covers the SQLite path applying
-// migration steps outside a transaction: a process killed between the step and
-// its version stamp re-applies the step on the next open, which must neither
-// fail on the table already existing nor discard the requests already in it.
 func TestSchemaV16_UpgradeIsSafeToReplay(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "replay16.db")
 	st, err := store.Open(path)

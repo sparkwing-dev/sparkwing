@@ -9,8 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/chaos"
 )
 
-// seedFromEnv reads SPARKWING_CHAOS_SEED, falling back to a clock-derived
-// seed so every run is reproducible from the value the harness prints.
 func seedFromEnv(t *testing.T) int64 {
 	t.Helper()
 	if s := os.Getenv("SPARKWING_CHAOS_SEED"); s != "" {
@@ -23,9 +21,6 @@ func seedFromEnv(t *testing.T) int64 {
 	return time.Now().UnixNano()
 }
 
-// TestChaos_CI runs the bounded adversarial scenario as a regression gate.
-// It is skipped under -short so it does not slow the fast unit loop; the
-// pre-push pipeline runs the full suite and so includes it.
 func TestChaos_CI(t *testing.T) {
 	if testing.Short() {
 		t.Skip("chaos CI run skipped in -short")
@@ -41,8 +36,6 @@ func TestChaos_CI(t *testing.T) {
 	chaos.Run(t, cfg)
 }
 
-// TestChaos_Soak runs a long, heavier scenario for nightly or manual use.
-// It runs only when SPARKWING_CHAOS_SOAK names a duration.
 func TestChaos_Soak(t *testing.T) {
 	raw := os.Getenv("SPARKWING_CHAOS_SOAK")
 	if raw == "" {

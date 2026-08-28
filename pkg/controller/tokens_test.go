@@ -9,7 +9,6 @@ import (
 	"testing"
 )
 
-// createTokenBody is the request shape POST /api/v1/tokens accepts.
 func createTokenBody(principal string, scopes []string) map[string]any {
 	return map[string]any{
 		"principal": principal,
@@ -18,9 +17,6 @@ func createTokenBody(principal string, scopes []string) map[string]any {
 	}
 }
 
-// decodeErrorMessage pulls the human message out of the controller's
-// canonical `{"error": "..."}` body so assertions read the unescaped
-// text.
 func decodeErrorMessage(t *testing.T, body string) string {
 	t.Helper()
 	var out struct {
@@ -32,10 +28,6 @@ func decodeErrorMessage(t *testing.T, body string) string {
 	return out.Error
 }
 
-// TestCreateToken_UnknownScopeRejected pins the creation-time
-// allowlist: a scope the controller does not honor is a 400 naming
-// the offender and the valid set, not a minted token that 403s on
-// every subsequent call.
 func TestCreateToken_UnknownScopeRejected(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
@@ -64,9 +56,6 @@ func TestCreateToken_UnknownScopeRejected(t *testing.T) {
 	}
 }
 
-// TestCreateToken_MixedValidAndUnknownRejected covers the partial
-// typo: one good scope does not carry a bad one through, and every
-// offender is named.
 func TestCreateToken_MixedValidAndUnknownRejected(t *testing.T) {
 	base, st, cleanup := newTestServer(t)
 	defer cleanup()
@@ -95,8 +84,6 @@ func TestCreateToken_MixedValidAndUnknownRejected(t *testing.T) {
 	}
 }
 
-// TestCreateToken_ValidScopesAccepted checks the allowlist does not
-// reject the scopes the controller actually enforces.
 func TestCreateToken_ValidScopesAccepted(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
@@ -124,8 +111,6 @@ func TestCreateToken_ValidScopesAccepted(t *testing.T) {
 	}
 }
 
-// TestCreateToken_EmptyScopesAccepted preserves the pre-existing
-// behavior for a request with no scopes: a scopeless token is legal.
 func TestCreateToken_EmptyScopesAccepted(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
@@ -154,9 +139,6 @@ func TestCreateToken_EmptyScopesAccepted(t *testing.T) {
 	}
 }
 
-// TestCreateToken_BlankAndPaddedScopesTolerated keeps validation from
-// being stricter than storage: the store trims and drops blank scope
-// entries on write, so a padded or empty entry is not an error.
 func TestCreateToken_BlankAndPaddedScopesTolerated(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
@@ -179,15 +161,8 @@ func TestCreateToken_BlankAndPaddedScopesTolerated(t *testing.T) {
 	}
 }
 
-// scopeConstRE matches the `ScopeRunsRead = "runs.read"` declarations
-// in auth.go.
 var scopeConstRE = regexp.MustCompile(`\bScope\w*\s*=\s*"([a-z][a-z.]*)"`)
 
-// TestCreateToken_AllowlistCoversEveryScopeConstant guards against a
-// new Scope* constant that the creation-time allowlist never learns
-// about, which would reject a scope the routes enforce. It reads the
-// constants out of auth.go and asserts each one shows up in the valid
-// set the rejection message reports.
 func TestCreateToken_AllowlistCoversEveryScopeConstant(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()

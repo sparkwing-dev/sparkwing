@@ -2,9 +2,6 @@ package orchestrator
 
 import "github.com/sparkwing-dev/sparkwing/pkg/color"
 
-// colorStatus returns the run-status word with an outcome-tinted
-// color. Mirrors the renderer's status palette: success=green,
-// failed/cancelled=red, running/pending=cyan, anything else dim.
 func colorStatus(status string) string {
 	switch status {
 	case "success":
@@ -18,7 +15,6 @@ func colorStatus(status string) string {
 	}
 }
 
-// colorOutcome returns a node outcome with the matching tint.
 func colorOutcome(outcome string) string {
 	switch outcome {
 	case "success":
@@ -34,8 +30,6 @@ func colorOutcome(outcome string) string {
 	}
 }
 
-// colorStepGlyph wraps stepGlyph's unicode marker with a
-// status-matching color.
 func colorStepGlyph(status string) string {
 	g := stepGlyph(status)
 	switch status {

@@ -47,24 +47,6 @@ func runReleaseBinaryVulnerabilityScan(ctx context.Context) error {
 	return nil
 }
 
-// PrePush provides slower release-boundary checks: full golangci-lint,
-// `go test -race` in the .sparkwing pipeline module, the
-// version-freshness check against the sparkwing ecosystem, the
-// public API-surface drift gate (bin/check-api-snapshot.sh, which
-// covers the `pkg/` surfaces the generated-reference diffs miss),
-// and a hard ban on `replace` directives in a committed `go.mod`
-// (excepting `.sparkwing/go.mod`'s dogfood self-replace to `..`).
-//
-// It is not purely a verification pipeline: a stale `.sparkwing`
-// sparkwing pin is auto-bumped, tidied and committed so the bump
-// rides along with the push.
-//
-// The repository keeps this pipeline manual so a lead can select it for a
-// dangerous change or release boundary. Tooling assumed on PATH:
-// golangci-lint, staticcheck (called by golangci-lint), shellcheck,
-// and terraform (for the Mode 3 module gate; .tool-versions pins it).
-// Markdownlint, actionlint, and the release artifact scanner self-provision
-// pinned versions when their tools are absent.
 type PrePush struct {
 	sparkwing.Base
 	AllowReleaseLineSelfReplace bool
@@ -315,15 +297,6 @@ func (p *PrePush) run(ctx context.Context) error {
 	return nil
 }
 
-// committedGoMods returns every go.mod git tracks, as repo-root-relative
-// paths. Asking the index rather than the filesystem keeps scratch modules
-// that are never pushed out of the checks that walk this list.
-//
-// Modules under a testdata/ directory are excluded. Such a module is a
-// fixture -- input to a test, not part of this repo's build surface --
-// and it is deliberately absent from go.work, so building or vetting it
-// fails on a tree that is entirely correct. The go tool ignores
-// testdata for the same reason.
 func committedGoMods(ctx context.Context) ([]string, error) {
 	// safety: git -C anchors paths to repo root regardless of process cwd.
 	out, err := sparkwing.Bash(ctx,
@@ -341,17 +314,10 @@ func committedGoMods(ctx context.Context) ([]string, error) {
 	return mods, nil
 }
 
-// isTestdataPath reports whether rel lives under a testdata/ directory
-// at any depth.
 func isTestdataPath(rel string) bool {
 	return strings.HasPrefix(rel, "testdata/") || strings.Contains(rel, "/testdata/")
 }
 
-// committedModuleDirs returns the directory of every committed go.mod,
-// repo-root-relative, with the root module reported as ".". Every check
-// that runs per module reads this one answer, so a module added later is
-// covered on the day its go.mod lands rather than on the day someone
-// remembers to extend a list.
 func committedModuleDirs(ctx context.Context) ([]string, error) {
 	mods, err := committedGoMods(ctx)
 	if err != nil {
@@ -364,19 +330,6 @@ func committedModuleDirs(ctx context.Context) ([]string, error) {
 	return dirs, nil
 }
 
-// checkNoReplaceDirectivesInCommittedGoMods refuses to let any
-// committed go.mod ship with a `replace` line. Replace directives
-// are intended for local iteration; once they leak into main they
-// break every consumer of this repo (Go module proxy can't resolve
-// a local-path replace, so anyone cloning will fail to build).
-//
-// Carve-out: .sparkwing/go.mod's dogfood self-replace
-// (`github.com/sparkwing-dev/sparkwing => ..`) is allowed. The
-// .sparkwing/ directory is a separate Go module (declared
-// `module sparkwing-pipelines`) and is excluded from the parent
-// module's proxy archive, so the replace target `..` always
-// resolves to the parent checkout for anyone who could possibly
-// build it. See isSparkwingDogfoodReplace for the exact pattern.
 func checkNoReplaceDirectivesInCommittedGoMods(ctx context.Context) error {
 	mods, err := committedGoMods(ctx)
 	if err != nil {
@@ -410,12 +363,6 @@ func checkNoReplaceDirectivesInCommittedGoMods(ctx context.Context) error {
 	)
 }
 
-// isSparkwingDogfoodReplace recognizes the one replace the sparkwing
-// repo ships in main: .sparkwing/go.mod redirects the sparkwing module
-// to the parent checkout (`..`) so the repo's own pipelines compile
-// against the in-flight SDK source rather than the last-published tag
-// via the module proxy. Anything else in .sparkwing/go.mod or any
-// replace in another go.mod still fails the check.
 func isSparkwingDogfoodReplace(path string, r *modfile.Replace) bool {
 	return path == ".sparkwing/go.mod" &&
 		r.Old.Path == "github.com/sparkwing-dev/sparkwing" &&
@@ -424,12 +371,6 @@ func isSparkwingDogfoodReplace(path string, r *modfile.Replace) bool {
 		r.New.Version == ""
 }
 
-// checkNoCommittedGoWorkFiles refuses to let a workspace file ship.
-// `go.work` and `go.work.sum` are local-iteration scaffolding (they
-// point at relative paths on the developer's machine) and break
-// builds for anyone who clones the repo. The matching gitignore
-// patterns should prevent these from ever being staged, but the
-// check is belt-and-suspenders.
 func checkNoCommittedGoWorkFiles(ctx context.Context) error {
 	out, err := sparkwing.Bash(ctx,
 		`git ls-files | grep -E '(^|/)go\.work(\.sum)?$' || true`,

@@ -1,6 +1,3 @@
-// `sparkwing image rollout` rewrites kustomization.yaml + commits +
-// pushes (core); --wait / --tail-logs invoke argocd / kubectl (opt-in).
-// Does NOT build or push images.
 package main
 
 import (
@@ -32,8 +29,6 @@ func runImage(args []string) error {
 	}
 }
 
-// runImageRollout is idempotent: re-running with the same --tag prints
-// "nothing to commit" but still runs sync + wait, so it's safe in retries.
 func runImageRollout(args []string) error {
 	fs := flag.NewFlagSet(cmdImageRollout.Path, flag.ContinueOnError)
 	image := fs.String("image", "", "short image name (matches suffix of ECR URL)")
@@ -127,9 +122,6 @@ func runImageRollout(args []string) error {
 	return nil
 }
 
-// resolveGitopsRepo never guesses a workstation layout. The flag is best for
-// one-off use; SPARKWING_GITOPS_REPO provides explicit local configuration for
-// callers that repeatedly target the same repository.
 func resolveGitopsRepo(explicit string) (string, error) {
 	candidate := strings.TrimSpace(explicit)
 	source := "--gitops-repo"
@@ -147,10 +139,6 @@ func resolveGitopsRepo(explicit string) (string, error) {
 	return abs, nil
 }
 
-// findImageEntry walks the images: array of a kustomization.yaml
-// looking for an entry whose name: ends in "/"+target (suffix match),
-// returning the full matched name and the current newTag. Error if
-// zero or more than one entry matches.
 func findImageEntry(path, target string) (matchedName, currentTag string, err error) {
 	data, rerr := os.ReadFile(path)
 	if rerr != nil {
@@ -190,7 +178,6 @@ func findImageEntry(path, target string) (matchedName, currentTag string, err er
 	}
 }
 
-// rewriteImageTag rewrites newTag preserving file shape (comments etc).
 func rewriteImageTag(path, target, newTag string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -271,7 +258,6 @@ func scalarField(m *yaml.Node, key string) string {
 	return ""
 }
 
-// setScalarField overwrites or appends a scalar key/value on a MappingNode.
 func setScalarField(m *yaml.Node, key, value string) error {
 	if m.Kind != yaml.MappingNode {
 		return errors.New("setScalarField: not a mapping")
@@ -291,8 +277,6 @@ func setScalarField(m *yaml.Node, key, value string) error {
 	return nil
 }
 
-// imageNameMatches: exact match or "/<target>" suffix; "/" prevents
-// partial-word matches (`runner` mustn't match `sparkwing-runner-extra`).
 func imageNameMatches(fullName, target string) bool {
 	if fullName == "" || target == "" {
 		return false
@@ -303,8 +287,6 @@ func imageNameMatches(fullName, target string) bool {
 	return strings.HasSuffix(fullName, "/"+target)
 }
 
-// gitCommitAndPush is idempotent on no-diff: clean index returns
-// committed=false + current HEAD so callers continue.
 func gitCommitAndPush(repoRoot, kustPath, message string) (sha string, committed bool, err error) {
 	relPath, rerr := filepath.Rel(repoRoot, kustPath)
 	if rerr != nil {
@@ -335,7 +317,6 @@ func gitCommitAndPush(repoRoot, kustPath, message string) (sha string, committed
 	return sha, true, nil
 }
 
-// maybeArgoCDSync skips cleanly when argocd isn't on PATH.
 func maybeArgoCDSync(app string) error {
 	if _, err := exec.LookPath("argocd"); err != nil {
 		fmt.Fprintln(os.Stdout, "  argocd not on PATH, skipping sync")
@@ -351,9 +332,6 @@ func maybeArgoCDSync(app string) error {
 	return nil
 }
 
-// kubectlRolloutStatus blocks until `kubectl rollout status
-// deployment/<name> -n <ns>` returns. Errors cleanly when kubectl
-// isn't on PATH so operators know why --wait failed.
 func kubectlRolloutStatus(deploy, namespace string) error {
 	if _, err := exec.LookPath("kubectl"); err != nil {
 		return fmt.Errorf("kubectl not on PATH; --wait requires kubectl")
@@ -368,9 +346,6 @@ func kubectlRolloutStatus(deploy, namespace string) error {
 	return nil
 }
 
-// kubectlTailLogs runs `kubectl logs -f -l app=<name> -n <ns>` and
-// inherits stdin/stdout/stderr so ctrl-c terminates the child
-// cleanly. Blocks until the user interrupts.
 func kubectlTailLogs(deploy, namespace string) error {
 	if _, err := exec.LookPath("kubectl"); err != nil {
 		return fmt.Errorf("kubectl not on PATH; --tail-logs requires kubectl")
@@ -386,18 +361,10 @@ func kubectlTailLogs(deploy, namespace string) error {
 	return nil
 }
 
-// deriveDeploymentName maps image -> Deployment name. The author's
-// convention is 1:1 (image "sparkwing-runner" -> Deployment
-// "sparkwing-runner"); --argocd-app / future flags can extend this
-// if the convention drifts.
 func deriveDeploymentName(image string) string {
 	return image
 }
 
-// deriveArgoCDApp maps image -> ArgoCD app. Convention: any
-// "sparkwing*" image lives inside the single "sparkwing" app, since
-// one Application pulls the whole kustomize overlay. Non-sparkwing
-// images fall back to the image name itself.
 func deriveArgoCDApp(image string) string {
 	if strings.HasPrefix(image, "sparkwing") {
 		return "sparkwing"
@@ -405,9 +372,6 @@ func deriveArgoCDApp(image string) string {
 	return image
 }
 
-// planSyncAndWait prints the would-happen sync+wait lines for
-// --dry-run output. Keeps the dry-run plan faithful to the post-
-// commit branch below.
 func planSyncAndWait(image, argocdApp, namespace string, wait, tailLogs bool) {
 	app := argocdApp
 	if app == "" {

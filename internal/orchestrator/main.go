@@ -19,16 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Main is the entry point for .sparkwing/main.go. Subcommands:
-// --describe (JSON pipeline schemas), <pipeline> (local run),
-// handle-trigger <id>, run-node <runID> <nodeID>, replay-node.
-// Cluster-mode subcommands live in cluster.Main to keep heavy deps
-// out of consumer pipeline binaries.
-//
-// The pipeline binary deliberately does not serve the `wingd` verbs. The
-// installed Sparkwing distribution owns daemon lifecycle; this binary's
-// admission client uses the running daemon and, when none is running,
-// spawns the installed sparkwing to host one (see pipelineAdmission).
 func Main() {
 	projectCfg := bindProjectPipelines()
 
@@ -209,13 +199,6 @@ func Main() {
 	}
 }
 
-// bindProjectPipelines discovers the project config from the working
-// directory and binds its YAML pipeline entries into the registry, so a
-// typed-Args entrypoint resolves by its pipeline name for every
-// subcommand -- --describe, `<pipeline> --help|--explain|--plan`, and
-// config inspect all run before the plain-run path would otherwise
-// bind. Binding is best-effort and idempotent: a missing or malformed
-// config yields a nil result and never blocks dispatch.
 func bindProjectPipelines() *projectconfig.Config {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -229,9 +212,6 @@ func bindProjectPipelines() *projectconfig.Config {
 	return cfg
 }
 
-// selectLocalRenderer chooses the live delegate based on
-// SPARKWING_LOG_FORMAT (explicit: pretty | json | quiet) or stdout TTY
-// (default: pretty on a terminal, json otherwise).
 func selectLocalRenderer() sparkwing.Logger {
 	switch strings.ToLower(os.Getenv("SPARKWING_LOG_FORMAT")) {
 	case "json":
@@ -247,8 +227,6 @@ func selectLocalRenderer() sparkwing.Logger {
 	return NewJSONRenderer()
 }
 
-// isInteractiveStdout duplicates pkg/color.IsInteractiveStdout to keep
-// pkg/color out of consumer pipeline deps. Keep in sync.
 func isInteractiveStdout() bool {
 	if term.IsTerminal(int(os.Stdout.Fd())) {
 		return true
@@ -284,7 +262,6 @@ func printUsage() {
 	}
 }
 
-// printPipelineHelp dumps a help page from the reflected Argser schema.
 func printPipelineHelp(pipeline string) error {
 	schema, ok, err := sparkwingruntime.DescribePipelineByName(pipeline)
 	if err != nil {
@@ -363,11 +340,6 @@ func printPipelineHelp(pipeline string) error {
 	return nil
 }
 
-// printSparkwingFlagsSection renders the "SPARKWING FLAGS" block of
-// per-pipeline help. Flags walk in SparkwingFlagDocs order. The
-// trailing hint points users at the top-level help for prose detail.
-//
-// Takes io.Writer (not *os.File) so tests can capture into a buffer.
 func printSparkwingFlagsSection(w io.Writer) {
 	docs := sparkwing.SparkwingFlagDocs()
 	if len(docs) == 0 {
@@ -388,19 +360,6 @@ func printSparkwingFlagsSection(w io.Writer) {
 	fmt.Fprintln(w, "See `sparkwing run --help` for prose explanations of each sparkwing flag.")
 }
 
-// printPipelinePlan emits the plan snapshot without dispatch. Missing
-// required args are non-fatal; a best-effort plan is more useful for
-// inspection.
-//
-// The inner pipeline binary is invoked with the user's full argv
-// (e.g. `sparkwing run X --explain --skip Y -o json`). `-o` / `--output` /
-// `--json` are explain-output formatting flags owned by the wrapper,
-// not pipeline args -- they must be stripped before parseTypedFlags
-// sees them. Otherwise an unknown-flag error in parseTypedFlags falls
-// back to an empty argsMap, silently dropping `--skip` / `--only` /
-// any other typed pipeline flag the user passed alongside `-o`. The
-// result was a Plan rendered with no SkipFilter applied -- diverging
-// from `sparkwing run X --explain --skip Y` (no `-o`), which parsed cleanly.
 func printPipelinePlan(pipeline string, rest []string) error {
 	reg, ok := sparkwing.Lookup(pipeline)
 	if !ok {
@@ -428,7 +387,6 @@ func printPipelinePlan(pipeline string, rest []string) error {
 	return nil
 }
 
-// filterTok drops every occurrence of drop from args.
 func filterTok(args []string, drop string) []string {
 	out := make([]string, 0, len(args))
 	for _, a := range args {
@@ -439,15 +397,6 @@ func filterTok(args []string, drop string) []string {
 	return out
 }
 
-// stripExplainOutputFlags removes explain-output formatting flags
-// (`-o` / `--output`) from args. The pipeline binary always emits a
-// JSON plan snapshot for `--explain`; the surrounding
-// `sparkwing pipeline explain` / `sparkwing run` wrapper is responsible for
-// any pretty-printing, so these flags are noise to the inner Plan-
-// builder. Stripping them keeps parseTypedFlags from rejecting them
-// as unknown -- which used to drop *all* typed flags (including
-// --skip / --only) into an empty map and silently disable
-// SkipFilter.
 func stripExplainOutputFlags(args []string) []string {
 	out := make([]string, 0, len(args))
 	for i := 0; i < len(args); i++ {
@@ -466,15 +415,6 @@ func stripExplainOutputFlags(args []string) []string {
 	return out
 }
 
-// parseTypedFlags reflects the pipeline's Argser schema and parses
-// args into a string map. Bool flags accept "--flag" or "--flag=v";
-// others require values. Unknown flags are rejected unless the
-// schema has Extra=true. Enums are validated.
-//
-// It is parse-only: schema defaults and required-arg validation happen
-// later, after the run merges DefaultArgs, the pipeline's sparkwing.yaml
-// args:, and the CLI flags. Applying them here would reject a required
-// value that args: supplies and let a schema default outrank args:.
 func parseTypedFlags(pipeline string, args []string) (map[string]string, error) {
 	schema, ok, err := sparkwingruntime.DescribePipelineByName(pipeline)
 	if err != nil {
@@ -573,7 +513,6 @@ func inEnumList(v string, enum []string) bool {
 	return false
 }
 
-// readDebugDirectivesFromEnv resolves SPARKWING_DEBUG_PAUSE_* vars.
 func readDebugDirectivesFromEnv() DebugDirectives {
 	d := DebugDirectives{}
 	if v := os.Getenv("SPARKWING_DEBUG_PAUSE_BEFORE"); v != "" {
@@ -588,10 +527,6 @@ func readDebugDirectivesFromEnv() DebugDirectives {
 	return d
 }
 
-// loadPipelineYAML walks up from cwd looking for
-// .sparkwing/sparkwing.yaml and returns the entry for the named
-// pipeline (nil when there's no sparkwing.yaml or the pipeline isn't
-// listed).
 func loadPipelineYAML(pipeline string) *pipelines.Pipeline {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -616,9 +551,6 @@ func splitCommaClean(s string) []string {
 	return out
 }
 
-// detectGit populates *Git via best-effort `git` calls. Missing git
-// or repo yields a workDir-only Git so plan code can call live
-// methods safely.
 func detectGit() *sparkwing.Git {
 	g := &sparkwing.Git{}
 	if cwd, err := os.Getwd(); err == nil {
@@ -647,7 +579,6 @@ func detectGit() *sparkwing.Git {
 	return g
 }
 
-// parseGithubURL extracts owner/repo from ssh or https github URLs.
 func parseGithubURL(url string) (owner, repo string) {
 	url = strings.TrimSuffix(url, ".git")
 	var path string

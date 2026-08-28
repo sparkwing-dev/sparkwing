@@ -19,11 +19,6 @@ func (secretNamesPipe) Plan(_ context.Context, _ *Plan, _ secretNamesInputs, _ R
 	return nil
 }
 
-// SecretArgNames is the classification the orchestrator records on the
-// run so read paths can redact without the schema. It must name every
-// secret-declared field whether or not the run supplied one, and must
-// skip the non-secret field and the `,extra` bag (whose keys carry no
-// per-key opt-in).
 func TestRegistration_SecretArgNames(t *testing.T) {
 	Register[secretNamesInputs]("secret-names-fixture", func() Pipeline[secretNamesInputs] {
 		return secretNamesPipe{}
@@ -49,9 +44,6 @@ func (noSecretPipe) Plan(_ context.Context, _ *Plan, _ noSecretInputs, _ RunCont
 	return nil
 }
 
-// A pipeline with no secret inputs yields nil, so the orchestrator
-// writes no classification key and those runs keep the pre-change
-// invocation shape byte-for-byte.
 func TestRegistration_SecretArgNamesEmptyWhenNoneDeclared(t *testing.T) {
 	Register[noSecretInputs]("no-secret-names-fixture", func() Pipeline[noSecretInputs] {
 		return noSecretPipe{}

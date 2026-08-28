@@ -8,7 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// ctxT is a fresh context bounded by the test deadline.
 func ctxT(t *testing.T) context.Context {
 	t.Helper()
 	if dl, ok := t.Deadline(); ok {
