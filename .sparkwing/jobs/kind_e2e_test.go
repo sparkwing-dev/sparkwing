@@ -612,7 +612,8 @@ func TestHostedKindE2EIsPathScopedPinnedAndReadOnly(t *testing.T) {
 		"node-version: \"20\"",
 		"cache-dependency-path: web/package-lock.json",
 		"go install sigs.k8s.io/kind@v0.32.0",
-		"go install k8s.io/kubectl/cmd/kubectl@v0.36.1",
+		`kubectl_url="https://dl.k8s.io/release/v1.36.1/bin/linux/amd64/kubectl"`,
+		`kubectl_sha256="629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7"`,
 		"go install helm.sh/helm/v4/cmd/helm@v4.2.4",
 		"run: '\"$RUNNER_TEMP/sparkwing\" run kind-e2e'",
 		"if: failure() || cancelled()",
@@ -641,6 +642,15 @@ func TestHostedKindE2EIsPathScopedPinnedAndReadOnly(t *testing.T) {
 	}
 	if strings.Contains(body, "\n        if: failure()\n") {
 		t.Fatal("Kind workflow drops diagnostics when a run is cancelled")
+	}
+	if strings.Contains(body, "go install k8s.io/kubectl") {
+		t.Fatal("Kind workflow uses the kubectl module as an installable package")
+	}
+	kubectlDownload := strings.Index(body, `curl --fail --location --silent --show-error --output "$kubectl_path" "$kubectl_url"`)
+	kubectlVerify := strings.Index(body, `printf '%s  %s\n' "$kubectl_sha256" "$kubectl_path" | sha256sum --check --strict`)
+	kubectlInstall := strings.Index(body, `install -m 0755 "$kubectl_path" "$GOBIN/kubectl"`)
+	if kubectlDownload < 0 || kubectlVerify < kubectlDownload || kubectlInstall < kubectlVerify {
+		t.Fatal("Kind workflow does not verify the pinned kubectl artifact before installing it")
 	}
 	nodeSetup := strings.Index(body, "actions/setup-node@")
 	harnessRun := strings.Index(body, `run: '"$RUNNER_TEMP/sparkwing" run kind-e2e'`)
