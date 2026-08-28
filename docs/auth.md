@@ -66,6 +66,10 @@ metrics probes the same way. Every registered route is listed in
 
 ## First-visit signup
 
+Controller authentication is enabled at startup when the tokens table contains
+an active token. `--require-auth` makes startup fail when it does not; see the
+[security operator checklist](security.md#operator-checklist).
+
 A freshly-installed sparkwing cluster has no users, so there is
 nothing to log in *as*. While controller authentication is disabled,
 browsing to `/login` on an empty cluster renders a "Create first admin"
