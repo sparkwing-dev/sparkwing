@@ -33,7 +33,7 @@ while IFS= read -r -d '' f; do
   if [[ -n "$include" ]]; then
     scripts+=("$f")
   fi
-done < <(git ls-files -z 2>/dev/null | sort -zu)
+done < <(git ls-files -z 2>/dev/null | LC_ALL=C sort -zu)
 
 if [[ ${#scripts[@]} -eq 0 ]]; then
   exit 0

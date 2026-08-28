@@ -19,6 +19,8 @@ func TestEnsureLineageContainsLatestRelease(t *testing.T) {
 	runTestGit(t, root, "clone", remote, work)
 	runTestGit(t, work, "config", "user.name", "Test User")
 	runTestGit(t, work, "config", "user.email", "test@example.com")
+	runTestGit(t, work, "config", "commit.gpgsign", "false")
+	runTestGit(t, work, "config", "tag.gpgsign", "false")
 	if err := os.WriteFile(filepath.Join(work, "README.md"), []byte("one\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +42,10 @@ func TestEnsureLineageContainsLatestRelease(t *testing.T) {
 	runTestGit(t, root, "clone", remote, side)
 	runTestGit(t, side, "config", "user.name", "Test User")
 	runTestGit(t, side, "config", "user.email", "test@example.com")
-	runTestGit(t, side, "checkout", "-b", "release-line")
+	runTestGit(t, side, "config", "commit.gpgsign", "false")
+	runTestGit(t, side, "config", "tag.gpgsign", "false")
+	runTestGit(t, side, "checkout", "-b", "release-line", "origin/main")
+	runTestGit(t, side, "merge-base", "--is-ancestor", "origin/main", "HEAD")
 	if err := os.WriteFile(filepath.Join(side, "README.md"), []byte("orphan\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}

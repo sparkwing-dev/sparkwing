@@ -14,12 +14,31 @@ git -C "$fixture" config user.name test
 git -C "$fixture" config commit.gpgsign false
 git -C "$fixture" add .
 git -C "$fixture" commit -qm baseline
+export BASE_REF=HEAD
+if ! /bin/bash "$fixture/bin/check-changelog.sh"; then
+  echo "check-changelog-test: unchanged fixture failed" >&2
+  exit 1
+fi
 
 changed=$'sparkwing/name with spaces\nand newline.go'
 printf 'package fixture\n' > "$fixture/$changed"
-export BASE_REF=HEAD
-if /bin/bash "$fixture/bin/check-changelog.sh" >/dev/null 2>&1; then
-  echo "check-changelog-test: covered filename did not require a changelog entry" >&2
+git -C "$fixture" add -- "$changed"
+if git -C "$fixture" diff --cached --quiet -- "$changed"; then
+  echo "check-changelog-test: covered fixture was not staged" >&2
+  exit 1
+fi
+set +e
+output="$(/bin/bash "$fixture/bin/check-changelog.sh" 2>&1)"
+status=$?
+set -e
+if [[ $status -ne 1 ]]; then
+  echo "check-changelog-test: covered filename exited $status, want 1" >&2
+  exit 1
+fi
+if [[ "$output" != *"check-changelog: CHANGELOG.md update required"* ]] ||
+   [[ "$output" != *"$changed"* ]]; then
+  echo "check-changelog-test: covered filename did not produce the policy diagnostic" >&2
+  printf '%s\n' "$output" >&2
   exit 1
 fi
 

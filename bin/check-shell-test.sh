@@ -46,12 +46,12 @@ bash "$CASE_ROOT/repo/bin/check-shell.sh"
 printf '%s\0' \
   '--severity=warning' \
   '--shell=bash' \
+  'bin/B.sh' \
   'bin/[.sh' \
   'bin/alpha.sh' \
-  'bin/B.sh' \
   'bin/command with spaces' \
-  'bin/é.sh' \
   "$newline_script" \
+  'bin/é.sh' \
   'scripts/beta script.sh' \
   'scripts/z command' \
   >"$CASE_ROOT/expected"

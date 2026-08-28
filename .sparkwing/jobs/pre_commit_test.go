@@ -394,6 +394,39 @@ func TestFrontendUnitSuitePropagatesTheNPMVerdict(t *testing.T) {
 	}
 }
 
+func TestFrontendUnitRunnerRejectsZeroDiscovery(t *testing.T) {
+	root, err := repoRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	packageJSON := readHostedCIFile(t, "web/package.json")
+	requireWorkflowText(t, packageJSON, `"test": "node scripts/run-tests.mjs"`)
+
+	runner := readHostedCIFile(t, "web/scripts/run-tests.mjs")
+	requireWorkflowText(t, runner,
+		`/\.test\.tsx?$/`,
+		`tests.length === 0`,
+		`["--import", "tsx", "--test", "--test-reporter=tap", ...tests]`,
+		`/^1\.\.0\r?$/m`,
+	)
+
+	fixture := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(fixture, "src"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runnerPath := filepath.Join(fixture, "scripts", "run-tests.mjs")
+	writeGoFile(t, runnerPath, runner)
+	cmd := exec.Command("node", runnerPath)
+	cmd.Dir = filepath.Join(root, "web")
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("frontend unit runner accepted an empty source tree")
+	}
+	if !strings.Contains(string(output), "no .test.ts or .test.tsx files found") {
+		t.Fatalf("empty-suite failure = %q, want zero-discovery diagnostic", output)
+	}
+}
+
 // The sweeps read this file too, so the fixtures spell their patterns with an
 // escape and a join rather than literally. Written out, they are the real
 // thing; read as source, neither trips the check under test.

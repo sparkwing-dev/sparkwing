@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test"
+    "test": "node scripts/run-tests.mjs"
   },
   "dependencies": {
     "next": "16.3.3",

@@ -259,8 +259,10 @@ func spawnTriggerConsumer(home string, idle, claimLease time.Duration) error {
 	}
 	defer func() { _ = logF.Close() }()
 
-	spawnArgs := []string{consumerSpawnVerb, "--home", layout.Home,
-		"--version", installedVersion()}
+	spawnArgs := []string{
+		consumerSpawnVerb, "--home", layout.Home,
+		"--version", installedVersion(),
+	}
 	if idle > 0 {
 		spawnArgs = append(spawnArgs, "--idle", idle.String())
 	}

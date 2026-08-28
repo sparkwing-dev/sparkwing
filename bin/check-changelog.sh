@@ -51,6 +51,10 @@ done < <(
   } | sort -zu
 )
 
+if [[ ${#changed[@]} -eq 0 ]]; then
+  exit 0
+fi
+
 is_covered() {
   local f="$1"
   case "$f" in

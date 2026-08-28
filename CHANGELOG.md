@@ -53,7 +53,8 @@ code change to unlock.
 - **release:** Pull requests, main, and release tags now run the canonical
   pre-commit and release-boundary gates in hosted CI. Artifact builds and
   publication wait for the tagged commit to pass, and verification jobs hold
-  read-only repository permissions.
+  read-only repository permissions. Hosted frontend verification enumerates
+  TypeScript tests explicitly and fails when none are discovered.
 - **release:** Release builds now scan every exact Go binary, the production
   dashboard dependency tree, and both architectures of every container image
   before version or latest tag promotion. The shipped gRPC and OpenTelemetry

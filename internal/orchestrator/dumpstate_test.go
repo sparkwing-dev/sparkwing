@@ -189,6 +189,7 @@ func assertAllExportedNonZero(t *testing.T, label string, v any) {
 }
 
 func normalizeRunTimes(r *store.Run) {
+	r.CreatedAt = r.CreatedAt.UTC()
 	r.StartedAt = r.StartedAt.UTC()
 	if r.FinishedAt != nil {
 		t := r.FinishedAt.UTC()
