@@ -268,17 +268,18 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	}
 
 	pendingStatus := s.reserveGitHubCommitStatus(r.Context(), runID, "pending")
+	dispatchAccepted := false
+	defer func() { pendingStatus(dispatchAccepted) }()
 	if err := s.dispatcher.Dispatch(r.Context(), RunRequest{
 		RunID:    runID,
 		Pipeline: pipeline,
 		Trigger:  trigger,
 		Git:      g,
 	}); err != nil {
-		pendingStatus(false)
 		writeError(w, http.StatusInternalServerError, err)
 		return
 	}
-	pendingStatus(true)
+	dispatchAccepted = true
 
 	s.logger.Info(
 		"github pull_request webhook accepted",

@@ -132,7 +132,7 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.storage.pvc.keepOnUninstall` | Annotate PVC `helm.sh/resource-policy: keep`. | `true` |
 | `controller.githubWebhookSecret.name` | Secret holding `webhook-secret`. | `""` |
 | `controller.githubStatusToken.name` | Secret holding a GitHub token with commit-status write access. | `""` |
-| `controller.dashboardURL` | Public dashboard base URL for commit-status run links. | `""` |
+| `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for commit-status run links; invalid values omit the link. | `""` |
 | `controller.secretsKey.name` | Secret holding 32-byte encryption key. | `""` |
 | `controller.pool.enabled` | Enable warm-PVC pool (needs RBAC). | `true` |
 

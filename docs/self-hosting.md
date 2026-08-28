@@ -40,9 +40,11 @@ To publish pull-request results back to GitHub, set `GITHUB_TOKEN` in
 for every repository this controller serves, or a classic token with
 `repo:status`. The compose deployment passes `DASHBOARD_URL` through as
 `SPARKWING_DASHBOARD_URL`, so each `sparkwing/<pipeline>` status links to
-that run in the dashboard. Leave `GITHUB_TOKEN` unset to disable outbound
-status reporting. A GitHub API failure is logged and does not reject the
-webhook or change the run result.
+that run in the dashboard. The dashboard URL must use HTTP or HTTPS, include
+a host, and omit credentials, a query, and a fragment; invalid values omit
+the status link. Leave `GITHUB_TOKEN` unset to disable outbound status
+reporting. A GitHub API failure is logged and does not reject the webhook or
+change the run result.
 
 What runs:
 

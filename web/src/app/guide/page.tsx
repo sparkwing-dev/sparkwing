@@ -829,7 +829,7 @@ Sparkwing receives GitHub push/PR events and triggers builds automatically.
 **Required environment:**
 - \`GITHUB_WEBHOOK_SECRET\` -- HMAC signing secret (must match GitHub)
 - \`GITHUB_TOKEN\` -- commit-status token with write access (optional)
-- \`SPARKWING_DASHBOARD_URL\` -- public base URL for status links (optional)
+- \`SPARKWING_DASHBOARD_URL\` -- query-free HTTP(S) base URL for status links (optional)
 
 ## Test webhook delivery
 

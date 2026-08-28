@@ -66,8 +66,8 @@ controller:
     name: ""
     key: token
 
-  # Public dashboard base URL used for each commit status's run link.
-  # Empty keeps status reporting enabled but omits the target URL.
+  # Query-free HTTP(S) dashboard base URL used for commit-status run links.
+  # Empty or invalid keeps reporting enabled but omits the target URL.
   dashboardURL: ""
 
   # Secrets-store encryption key. When set, the controller encrypts

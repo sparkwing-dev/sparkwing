@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -74,6 +75,7 @@ func TestGitHubCommitStatusReporterPostsGitHubContract(t *testing.T) {
 		github.URL,
 		github.Client(),
 	)
+	shutdownGitHubStatusReporter(t, reporter)
 	err := reporter.post(context.Background(), githubCommitStatus{
 		Owner:       "acme",
 		Repo:        "sample-app",
@@ -132,6 +134,7 @@ func TestGitHubCommitStatusReporterPreservesRunOrder(t *testing.T) {
 	defer github.Close()
 
 	reporter := newGitHubCommitStatusReporter("token", "", github.URL, github.Client())
+	shutdownGitHubStatusReporter(t, reporter)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	base := githubCommitStatus{
 		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1",
@@ -178,6 +181,7 @@ func TestGitHubCommitStatusRejectedDispatchReleasesRunSlot(t *testing.T) {
 	defer github.Close()
 
 	reporter := newGitHubCommitStatusReporter("token", "", github.URL, github.Client())
+	shutdownGitHubStatusReporter(t, reporter)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	base := githubCommitStatus{
 		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1",
@@ -206,19 +210,6 @@ func TestGitHubCommitStatusRejectedDispatchReleasesRunSlot(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		reporter.mu.Lock()
-		queued := len(reporter.tails)
-		reporter.mu.Unlock()
-		if queued == 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("status queue retained %d run slot(s)", queued)
-		}
-		time.Sleep(time.Millisecond)
-	}
 }
 
 func TestGitHubCommitStatusFromTriggerIsPullRequestOnly(t *testing.T) {
@@ -270,6 +261,292 @@ func TestGitHubCommitStatusFromTriggerIsPullRequestOnly(t *testing.T) {
 	}
 }
 
+func TestGitHubCommitStatusReporterDropsWhenQueueIsFull(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	received := make(chan string, 2)
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body githubCommitStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode status: %v", err)
+		}
+		received <- body.State
+		if body.State == "pending" {
+			started <- struct{}{}
+			<-release
+		}
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer github.Close()
+
+	logs := &lockedBuffer{}
+	logger := slog.New(slog.NewTextHandler(logs, nil))
+	reporter := newGitHubCommitStatusReporterWithCapacity("token", "", github.URL, github.Client(), 1)
+	base := githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1",
+	}
+	first := base
+	first.State = "pending"
+	first.Description = "running"
+	second := base
+	second.State = "success"
+	second.Description = "passed"
+	third := base
+	third.State = "failure"
+	third.Description = "failed"
+
+	if !reporter.enqueue(logger, first) {
+		t.Fatal("first status was dropped")
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first status request did not start")
+	}
+	if !reporter.enqueue(logger, second) {
+		t.Fatal("second status was dropped")
+	}
+	if reporter.enqueue(logger, third) {
+		t.Fatal("third status entered a full queue")
+	}
+	releaseOnce.Do(func() { close(release) })
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := reporter.shutdown(shutdownCtx); err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+	if got := <-received; got != "pending" {
+		t.Fatalf("first state = %q, want pending", got)
+	}
+	if got := <-received; got != "success" {
+		t.Fatalf("second state = %q, want success", got)
+	}
+	select {
+	case got := <-received:
+		t.Fatalf("dropped state was posted as %q", got)
+	default:
+	}
+	if !strings.Contains(logs.String(), "github commit status update dropped") {
+		t.Fatalf("drop was not logged: %s", logs.String())
+	}
+}
+
+func TestGitHubCommitStatusReporterShutdownDrainsAcceptedStatus(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		started <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer github.Close()
+
+	reporter := newGitHubCommitStatusReporter("token", "", github.URL, github.Client())
+	if !reporter.enqueue(slog.Default(), githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1", State: "success",
+	}) {
+		t.Fatal("status was dropped")
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("status request did not start")
+	}
+	shutdownDone := make(chan error, 1)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go func() { shutdownDone <- reporter.shutdown(shutdownCtx) }()
+	select {
+	case err := <-shutdownDone:
+		t.Fatalf("shutdown returned before delivery completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(release) })
+	if err := <-shutdownDone; err != nil {
+		t.Fatalf("shutdown: %v", err)
+	}
+}
+
+func TestServeWithDrainsGitHubCommitStatuses(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		started <- struct{}{}
+		<-release
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer github.Close()
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	srv := New(st, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	srv.githubCommitStatuses = newGitHubCommitStatusReporter("token", "", github.URL, github.Client())
+	if !srv.githubCommitStatuses.enqueue(srv.logger, githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1", State: "success",
+	}) {
+		t.Fatal("status was dropped")
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("status request did not start")
+	}
+	serveCtx, cancelServe := context.WithCancel(context.Background())
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- ServeWith(serveCtx, srv, "127.0.0.1:0") }()
+	cancelServe()
+	select {
+	case err := <-serveDone:
+		t.Fatalf("ServeWith returned before status delivery completed: %v", err)
+	case <-time.After(50 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(release) })
+	select {
+	case err := <-serveDone:
+		if err != nil {
+			t.Fatalf("ServeWith: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeWith did not return after status delivery")
+	}
+}
+
+func TestGitHubCommitStatusReporterShutdownCancelsDeliveryAtDeadline(t *testing.T) {
+	started := make(chan struct{}, 1)
+	canceled := make(chan struct{}, 1)
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		started <- struct{}{}
+		<-req.Context().Done()
+		canceled <- struct{}{}
+		return nil, req.Context().Err()
+	})}
+	reporter := newGitHubCommitStatusReporter("token", "", "https://api.github.test", client)
+	if !reporter.enqueue(slog.Default(), githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1", State: "success",
+	}) {
+		t.Fatal("status was dropped")
+	}
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("status request did not start")
+	}
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := reporter.shutdown(shutdownCtx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shutdown error = %v, want deadline exceeded", err)
+	}
+	select {
+	case <-canceled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("status request did not observe cancellation")
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func TestGitHubCommitStatusReporterShutdownCancelsUnresolvedReservation(t *testing.T) {
+	reporter := newGitHubCommitStatusReporter("token", "", "http://127.0.0.1", http.DefaultClient)
+	reporter.reserve(slog.Default(), githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1", State: "pending",
+	})
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err := reporter.shutdown(shutdownCtx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("shutdown error = %v, want deadline exceeded", err)
+	}
+	select {
+	case <-reporter.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("reporter did not stop after reservation cancellation")
+	}
+}
+
+type panickingGitHubStatusDispatcher struct {
+	beforePanic func()
+}
+
+func (d panickingGitHubStatusDispatcher) Dispatch(context.Context, RunRequest) error {
+	d.beforePanic()
+	panic("dispatch panic")
+}
+
+func TestGitHubCommitStatusDispatchPanicReleasesReservation(t *testing.T) {
+	received := make(chan string, 1)
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body githubCommitStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode status: %v", err)
+		}
+		received <- body.State
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer github.Close()
+
+	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	srv := New(st, nil)
+	srv.githubCommitStatuses = newGitHubCommitStatusReporter("token", "", github.URL, github.Client())
+	shutdownGitHubStatusReporter(t, srv.githubCommitStatuses)
+	srv.WithDispatcher(panickingGitHubStatusDispatcher{beforePanic: func() {
+		if !srv.githubCommitStatuses.enqueue(srv.logger, githubCommitStatus{
+			Owner: "acme", Repo: "sample-app", SHA: "abc123", Pipeline: "pr-gate", RunID: "terminal", State: "success",
+		}) {
+			t.Error("terminal status was dropped")
+		}
+	}})
+	body := []byte(`{
+		"action":"opened",
+		"number":42,
+		"pull_request":{
+			"head":{"ref":"feature","sha":"abc123"},
+			"base":{"ref":"main","sha":"def456"},
+			"user":{"login":"bob"}
+		},
+		"repository":{"full_name":"acme/sample-app"}
+	}`)
+	panicked := false
+	func() {
+		defer func() { panicked = recover() != nil }()
+		srv.handleGitHubPullRequest(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body)),
+			"pr-gate",
+			"delivery-1",
+			body,
+		)
+	}()
+	if !panicked {
+		t.Fatal("dispatcher panic did not propagate")
+	}
+	if got := waitForGitHubState(t, received); got != "success" {
+		t.Fatalf("state after panic = %q, want success", got)
+	}
+	select {
+	case got := <-received:
+		t.Fatalf("rejected pending status was posted as %q", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestGitHubCommitStatusesFollowWebhookRunLifecycle(t *testing.T) {
 	received := make(chan recordedGitHubStatus, 2)
 	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -291,6 +568,7 @@ func TestGitHubCommitStatusesFollowWebhookRunLifecycle(t *testing.T) {
 	srv := New(st, nil).WithGitHubWebhookSecret("webhook-secret")
 	srv.githubCommitStatuses = newGitHubCommitStatusReporter(
 		"github-token", "https://sparkwing.example.com", github.URL, github.Client())
+	shutdownGitHubStatusReporter(t, srv.githubCommitStatuses)
 	controller := httptest.NewServer(srv.Handler())
 	defer controller.Close()
 
@@ -382,6 +660,7 @@ func TestGitHubCommitStatusFailureDoesNotRejectWebhook(t *testing.T) {
 	srv := New(st, slog.New(slog.NewTextHandler(logs, nil))).WithGitHubWebhookSecret("webhook-secret")
 	srv.githubCommitStatuses = newGitHubCommitStatusReporter(
 		"github-token", "", github.URL, github.Client())
+	shutdownGitHubStatusReporter(t, srv.githubCommitStatuses)
 	controller := httptest.NewServer(srv.Handler())
 	defer controller.Close()
 
@@ -467,12 +746,39 @@ func TestWithGitHubCommitStatusesEmptyTokenDisablesReporting(t *testing.T) {
 	if srv.githubCommitStatuses != nil {
 		t.Fatal("empty token left status reporting enabled")
 	}
-	if got := githubRunTargetURL("not-an-absolute-url", "run-1"); got != "" {
-		t.Errorf("invalid dashboard URL produced %q", got)
+	for _, tc := range []struct {
+		name string
+		base string
+		want string
+	}{
+		{name: "http", base: "http://sparkwing.example.com", want: "http://sparkwing.example.com/runs?run=run-1"},
+		{name: "https path", base: "https://sparkwing.example.com/team/", want: "https://sparkwing.example.com/team/runs?run=run-1"},
+		{name: "relative", base: "not-an-absolute-url"},
+		{name: "hostless", base: "https:///dashboard"},
+		{name: "scheme", base: "ftp://sparkwing.example.com"},
+		{name: "credentials", base: "https://user:password@sparkwing.example.com"},
+		{name: "query", base: "https://sparkwing.example.com?team=platform"},
+		{name: "empty query", base: "https://sparkwing.example.com?"},
+		{name: "fragment", base: "https://sparkwing.example.com#runs"},
+		{name: "empty fragment", base: "https://sparkwing.example.com#"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := githubRunTargetURL(tc.base, "run-1"); got != tc.want {
+				t.Errorf("target URL = %q, want %q", got, tc.want)
+			}
+		})
 	}
-	if got := githubRunTargetURL("https://user:password@sparkwing.example.com", "run-1"); got != "" {
-		t.Errorf("credential-bearing dashboard URL produced %q", got)
-	}
+}
+
+func shutdownGitHubStatusReporter(t *testing.T, reporter *githubCommitStatusReporter) {
+	t.Helper()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := reporter.shutdown(ctx); err != nil {
+			t.Errorf("shutdown github status reporter: %v", err)
+		}
+	})
 }
 
 func waitForGitHubStatus(t *testing.T, statuses <-chan recordedGitHubStatus) recordedGitHubStatus {

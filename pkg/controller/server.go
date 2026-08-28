@@ -25,7 +25,7 @@ type Server struct {
 
 	auth *Authenticator
 
-	githubWebhookSecret string
+	githubWebhookSecret  string
 	githubCommitStatuses *githubCommitStatusReporter
 
 	queueTimeout time.Duration
@@ -451,13 +451,28 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			s.logger.Warn("controller HTTP shutdown incomplete", "err", err)
+		}
+		s.shutdownGitHubCommitStatuses(shutdownCtx)
 		return nil
 	case err := <-errCh:
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.shutdownGitHubCommitStatuses(shutdownCtx)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
+	}
+}
+
+func (s *Server) shutdownGitHubCommitStatuses(ctx context.Context) {
+	if s.githubCommitStatuses == nil {
+		return
+	}
+	if err := s.githubCommitStatuses.shutdown(ctx); err != nil {
+		s.logger.Warn("github commit status shutdown incomplete", "err", err)
 	}
 }
 

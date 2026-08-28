@@ -88,9 +88,11 @@ Each pipeline uses one context named `sparkwing/<pipeline>`. The
 controller posts `pending` after dispatch, then `success`, `failure`, or
 `error` when the run finishes. Set `SPARKWING_DASHBOARD_URL` to the public
 dashboard base URL to make each status link to `/runs?run=<run-id>`;
-omit it to publish statuses without a target link. Status delivery is
-best-effort: GitHub errors are logged and never change webhook admission
-or the run result. Push, manual, and retry runs do not publish statuses.
+the URL must use HTTP or HTTPS, include a host, and omit credentials, a
+query, and a fragment. Omitted or invalid values publish statuses without a
+target link. Status delivery is best-effort: GitHub errors are logged and
+never change webhook admission or the run result. Push, manual, and retry
+runs do not publish statuses.
 
 ## Manual / API invocation
 
