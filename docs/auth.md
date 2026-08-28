@@ -58,12 +58,21 @@ the auth middleware runs, so they are open regardless of auth config:
 the health and metrics probes (k8s httpGet probes and Prometheus
 scrapes can't carry `Authorization`), the service-discovery endpoint
 the runner uses to find the cache pod, the browser session endpoints
-the dashboard needs before it holds a token (login, logout, session),
+the dashboard uses to establish, validate, and end a session (login,
+logout, session),
 the bootstrap probe and the bootstrap-or-admin `POST /api/v1/users`
 (see below), and the GitHub webhook, which is HMAC-verified instead of
 bearer-authenticated. The logs service opens its health and metrics
 probes the same way. Every registered route is listed in
 [api-reference.md](api-reference.md).
+
+With controller-backed dashboard login enabled, the browser authenticates
+same-origin dashboard requests with its `HttpOnly` session cookie. The
+dashboard validates that session before its server-side proxy adds the service
+bearer to an upstream controller request; the service credential never enters
+browser HTML or JavaScript. CLI and automation clients should authenticate
+directly to the controller through a profile rather than send a bearer to the
+browser-facing dashboard proxy.
 
 ## First-visit signup
 

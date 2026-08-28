@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -148,5 +149,31 @@ func TestRenderSSELogLine_NonJSON(t *testing.T) {
 	got := renderSSELogLine([]byte("not json"), formatPlain)
 	if len(got) != 1 || got[0] != "not json" {
 		t.Fatalf("expected verbatim passthrough, got %q", got)
+	}
+}
+
+func TestServeLogStreamKeepsNDJSONEventsRaw(t *testing.T) {
+	source := "data: {\"ts\":\"2026-08-28T00:00:00Z\",\"level\":\"info\",\"node\":\"verify\",\"event\":\"step_start\",\"msg\":\"tests\"}\n\n" +
+		"data: {\"ts\":\"2026-08-28T00:00:01Z\",\"level\":\"info\",\"node\":\"verify\",\"step\":\"tests\",\"event\":\"exec_line\",\"msg\":\"PASS browser\"}\n\n"
+	b := &fakeBackend{streamLog: func(runID, nodeID string) (io.ReadCloser, error) {
+		if runID != "run-one" || nodeID != "verify" {
+			t.Fatalf("stream target = %s/%s", runID, nodeID)
+		}
+		return io.NopCloser(strings.NewReader(source)), nil
+	}}
+
+	raw := httptest.NewRecorder()
+	serveLogStream(b, raw, httptest.NewRequest(http.MethodGet, "/stream?format=ndjson", nil), "run-one", "verify")
+	if raw.Body.String() != source {
+		t.Fatalf("ndjson stream changed event envelopes:\n%s", raw.Body.String())
+	}
+
+	ansi := httptest.NewRecorder()
+	serveLogStream(b, ansi, httptest.NewRequest(http.MethodGet, "/stream?format=ansi", nil), "run-one", "verify")
+	if strings.Contains(ansi.Body.String(), `"event":"step_start"`) {
+		t.Fatalf("ansi stream retained the structured event envelope:\n%s", ansi.Body.String())
+	}
+	if !strings.Contains(ansi.Body.String(), "tests") || !strings.Contains(ansi.Body.String(), "PASS browser") {
+		t.Fatalf("ansi stream lost pretty-rendered content:\n%s", ansi.Body.String())
 	}
 }

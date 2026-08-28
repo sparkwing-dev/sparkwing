@@ -168,6 +168,17 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 
 // HandlerFromOptions returns the full dashboard HTTP handler.
 func HandlerFromOptions(opts HandlerOptions) http.Handler {
+	subFS, err := fs.Sub(nextBundle, "next-out")
+	if err != nil {
+		panic(fmt.Sprintf("web: embed fs.Sub failed: %v", err)) //nolint:forbidigo // unreachable post-VerifyBundleEmbedded; build-time invariant
+	}
+	return HandlerFromOptionsWithBundle(opts, subFS)
+}
+
+// HandlerFromOptionsWithBundle serves a supplied static export through the
+// production handler. Internal browser tests use it so they never rewrite the
+// embedded source directory while the Go gate compiles in parallel.
+func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Handler {
 	authedMux := http.NewServeMux()
 
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs", runLogsHandler(opts.Backend))
@@ -201,11 +212,7 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	// reach the listener while the rest of the dashboard needs a session.
 	authedMux.Handle("GET /docs", docsweb.Handler())
 
-	subFS, err := fs.Sub(nextBundle, "next-out")
-	if err != nil {
-		panic(fmt.Sprintf("web: embed fs.Sub failed: %v", err)) //nolint:forbidigo // unreachable post-VerifyBundleEmbedded; build-time invariant
-	}
-	authedMux.Handle("/", spaHandler(subFS, opts))
+	authedMux.Handle("/", spaHandler(bundleFS, opts))
 
 	router := http.NewServeMux()
 	router.HandleFunc("/api/health", healthHandler)
@@ -271,15 +278,25 @@ func serveTemplatedHTML(w http.ResponseWriter, _ *http.Request, bundleFS fs.FS, 
 		http.NotFound(w, nil)
 		return
 	}
+	effectiveLogin := loginRequired(opts)
+	frontendToken := opts.Token
+	frontendAPIURL := opts.APIURL
+	if effectiveLogin {
+		frontendToken = ""
+		frontendAPIURL = ""
+	}
 	body := bytes.ReplaceAll(raw,
 		[]byte("__SPARKWING_TOKEN_MARKER__"),
-		[]byte(jsStringEscape(opts.Token)))
+		[]byte(jsStringEscape(frontendToken)))
 	body = bytes.ReplaceAll(body,
 		[]byte("__SPARKWING_API_URL_MARKER__"),
-		[]byte(jsStringEscape(opts.APIURL)))
+		[]byte(jsStringEscape(frontendAPIURL)))
 	body = bytes.ReplaceAll(body,
 		[]byte("__SPARKWING_VERSION_MARKER__"),
 		[]byte(jsStringEscape(opts.Version)))
+	body = bytes.ReplaceAll(body,
+		[]byte("__SPARKWING_REQUIRE_LOGIN_MARKER__"),
+		[]byte(strconv.FormatBool(effectiveLogin)))
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(body)

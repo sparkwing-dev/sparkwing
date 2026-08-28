@@ -29,7 +29,8 @@ import (
 // embedded copies) have drifted, so an edit to either source can't be
 // committed without re-running bin/sync-docs.sh; the comment
 // check fails when the staged diff adds a comment the policy disallows;
-// the frontend-unit step runs the dashboard's TypeScript unit suite;
+// the frontend chain runs the dashboard's TypeScript unit, production build,
+// browser-test lint, and browser smoke suites;
 // the home-resolution check fails when product code resolves the
 // sparkwing home itself -- reading SPARKWING_HOME, or building the path
 // from a home directory -- instead of through
@@ -40,11 +41,11 @@ import (
 type PreCommit struct{ sparkwing.Base }
 
 func (PreCommit) ShortHelp() string {
-	return "Broad local verification: Go gates, frontend unit tests, source-policy sweeps, and docs sync"
+	return "Broad local verification: Go gates, frontend checks, source-policy sweeps, and docs sync"
 }
 
 func (PreCommit) Help() string {
-	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs the dashboard's TypeScript unit suite as `npm --prefix web test`, plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
+	return "Runs gofmt over the tree and go vet / go build / go test / golangci-lint in every committed Go module (today the repo root and .sparkwing/), runs the dashboard's TypeScript unit, production-build, browser-test lint, and Playwright browser-smoke suites, plus checks on the staged change: the configured formatters (gofumpt + goimports), no em dashes, no internal tracker IDs (IMP-/SDK-/LOCAL-/RUN-/ORG-/REG-/TOD-), no disallowed comments (only godoc on declarations and // hack:/safety:/bug:/perf: tags), and repo-wide, that the embedded pkg/docs/ copies match the docs/ and CHANGELOG.md sources (via `bin/sync-docs.sh --check`; run bin/sync-docs.sh without the flag if it drifted) and that no product file resolves the sparkwing home itself, by reading SPARKWING_HOME or by joining a home directory with .sparkwing, instead of through internal/paths.DefaultPaths. The lint step names the modules it covered and the baseline it judged against. Set SPARKWING_REGEX_SWEEP_ALL=1 to sweep the whole tree for em dashes and tracker IDs."
 }
 
 func (PreCommit) Examples() []sparkwing.Example {
@@ -90,10 +91,12 @@ func boundedGoCommand(cpuCount int, verb, args string) string {
 // same tier as test. It also needs a tree that compiles, which is what
 // build and test establish.
 //
-// The six fast checks stay parallel. Nothing downstream waits on them and
-// each finishes in well under a second (docs-mirror 0.02s,
-// frontend-unit 0.2s, home-resolution 0.15s, comments 0.5s), so ordering
-// them would only delay their verdict without saving any work.
+// The seven policy and frontend roots stay parallel with the Go chain. In a
+// measured warm run, frontend-unit took 0.7s and frontend-browser-lint 2.2s;
+// their shared frontend-build successor took 4.5s, then frontend-browser took
+// 11.0s including the cached browser install and authenticated Go fixture.
+// That dependency chain avoids
+// testing a stale static export.
 func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	w.ParallelFailures(sparkwing.FailFast)
 	gofmtStep := sparkwing.Step(w, "gofmt", runGofmt)
@@ -107,13 +110,47 @@ func (p *PreCommit) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	sparkwing.Step(w, "docs-mirror", checkDocsMirror)
 	sparkwing.Step(w, "comments", checkComments)
 	sparkwing.Step(w, "home-resolution", checkHomeResolution)
-	sparkwing.Step(w, "frontend-unit", runFrontendUnit)
+	frontendUnit := sparkwing.Step(w, "frontend-unit", runFrontendUnit)
+	frontendBrowserLint := sparkwing.Step(w, "frontend-browser-lint", runFrontendBrowserLint)
+	frontendBuild := sparkwing.Step(w, "frontend-build", runFrontendBuild).Needs(frontendUnit, frontendBrowserLint)
+	sparkwing.Step(w, "frontend-browser", runFrontendBrowser).Needs(frontendBuild)
 	return nil, nil
 }
 
 func runFrontendUnit(ctx context.Context) error {
 	if _, err := sparkwing.Bash(ctx, "npm --prefix web test").Run(); err != nil {
 		return fmt.Errorf("frontend unit suite: %w", err)
+	}
+	return nil
+}
+
+func runFrontendBrowserLint(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx, "npm --prefix web run lint:browser").Run(); err != nil {
+		return fmt.Errorf("frontend browser-test lint: %w", err)
+	}
+	return nil
+}
+
+func runFrontendBuild(ctx context.Context) error {
+	if _, err := sparkwing.Bash(ctx, "npm --prefix web run build").Run(); err != nil {
+		return fmt.Errorf("frontend production build: %w", err)
+	}
+	return nil
+}
+
+func runFrontendBrowser(ctx context.Context) error {
+	marker := filepath.Join(sparkwing.WorkDir(), "web", "test-results", ".sparkwing-browser-failed")
+	if err := os.Remove(marker); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clear frontend browser failure marker: %w", err)
+	}
+	if _, err := sparkwing.Bash(ctx, "npm --prefix web run test:browser:gate").Run(); err != nil {
+		if markerErr := os.MkdirAll(filepath.Dir(marker), 0o755); markerErr != nil {
+			return errors.Join(fmt.Errorf("frontend browser smoke suite: %w", err), fmt.Errorf("create browser failure artifact directory: %w", markerErr))
+		}
+		if markerErr := os.WriteFile(marker, []byte("failed\n"), 0o644); markerErr != nil {
+			return errors.Join(fmt.Errorf("frontend browser smoke suite: %w", err), fmt.Errorf("write browser failure artifact marker: %w", markerErr))
+		}
+		return fmt.Errorf("frontend browser smoke suite: %w", err)
 	}
 	return nil
 }

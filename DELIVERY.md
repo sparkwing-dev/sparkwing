@@ -10,14 +10,20 @@ this file is a menu and checklist, not a command that every change must run.
   `test`, and `build` pipelines are focused checks when their whole boundary is
   relevant; invoke one with `sparkwing run <name>`.
 - **Normal broad check:** `sparkwing run pre-commit` covers every committed Go
-  module, the dashboard TypeScript unit suite, formatting, vet, build, tests,
-  lint, documentation mirrors, and source policy.
+  module, the dashboard TypeScript unit, production build, browser-test lint,
+  and browser smoke suites, formatting, vet, build, tests, documentation
+  mirrors, and source policy. Unit and browser-test lint run in parallel; the
+  production build then feeds the browser suite. A measured warm browser chain
+  takes about 18 seconds (0.7s unit, 2.2s lint, 4.5s build, 11.0s browser,
+  including its cached browser install and authenticated Go fixture).
 - **Expensive or release-boundary:** `sparkwing run pre-push` adds race, chaos,
   vulnerability, dependency-freshness, API, and Terraform gates. Use
   `integration`, `template-verify`, `static-analysis`, and image builds only when
-  the change touches those boundaries. Dashboard changes have no automated
-  browser gate; verify them by hand with `bash bin/dev-start.sh` (dashboard
-  backend on :4343, `next dev` on :3100) and stop it with `bash bin/dev-stop.sh`.
+  the change touches those boundaries. Verify dashboard changes against real
+  local state with `bash bin/dev-start.sh` (dashboard backend on :4343, `next
+  dev` on :3100) and stop it with `bash bin/dev-stop.sh`; the browser gate uses
+  deterministic API fixtures on OS-assigned local ports and does not replace
+  that product exercise or exercise Kubernetes.
 
 ## Decisions before landing
 

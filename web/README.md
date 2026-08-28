@@ -17,7 +17,14 @@ with sibling routes for runs, queue, cluster, analytics and the docs guide.
 Shared UI is in `src/components/`. Edits hot-reload.
 
 Run `npm test` for the dashboard's TypeScript unit suite, `npm run lint` for
-ESLint, and `npm run build` for the production static export.
+ESLint, and `npm run build` for the production static export. Run `npm run
+test:browser:install` once to cache Chromium, then `npm run test:browser` to
+rebuild the static export and exercise the dashboard smoke suite. Failed
+browser runs retain their trace, screenshot, video, and HTML report under
+`test-results/` and `playwright-report/`; the hosted pre-commit gate uploads
+those directories for 14 days when the browser suite fails. The suite runs
+deterministic API fixtures against OS-assigned loopback ports; it needs no
+controller, hosted secret, or Kubernetes cluster.
 
 ## How this ships
 
@@ -30,6 +37,12 @@ install and released artifact ships the current dashboard. Static export has
 no request lifecycle, so runtime config (API token, controller URL) is
 injected by the Go server via HTML templating. Set `SKIP_WEB_BUILD=1` on
 `bin/install.sh` to reuse the existing bundle when iterating on Go code only.
+
+When controller-backed login is active, browser requests stay same-origin and
+authenticate with the session cookie, and the shared navigation shows `Log out`
+at its right edge. The service bearer stays server-side; only the dashboard
+proxy adds it to controller requests. Sessionless local dashboards retain their
+existing runtime-token behavior.
 
 ## Learn more
 

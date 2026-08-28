@@ -90,6 +90,14 @@ func TestCanonicalWorkflowPinsEveryExternalAction(t *testing.T) {
 		"actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0",
 		"golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0",
 		"hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1",
+		"actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2",
+	)
+}
+
+func TestCanonicalWorkflowUploadsOnlyFailedBrowserEvidence(t *testing.T) {
+	body := readHostedCIFile(t, ".github/workflows/canonical-gates.yaml")
+	requireWorkflowText(t, body,
+		"- name: Upload dashboard browser failure artifacts\n        if: ${{ failure() && matrix.gate == 'pre-commit' && hashFiles('web/test-results/.sparkwing-browser-failed') != '' }}\n        continue-on-error: true\n        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2\n        with:\n          name: dashboard-browser-${{ github.run_id }}-${{ github.run_attempt }}\n          path: |\n            web/test-results/\n            web/playwright-report/\n          if-no-files-found: ignore\n          retention-days: 14",
 	)
 }
 

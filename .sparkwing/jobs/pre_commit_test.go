@@ -2,6 +2,7 @@ package jobs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -368,6 +369,27 @@ func TestPreCommitRunsFrontendUnitSuiteAsAnIndependentStep(t *testing.T) {
 	}
 }
 
+func TestPreCommitRunsFrontendChecksBeforeBrowserSmoke(t *testing.T) {
+	w := sparkwing.NewWork()
+	if _, err := (&PreCommit{}).Work(w); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"frontend-browser-lint", "frontend-build", "frontend-browser"} {
+		if w.StepByID(id) == nil {
+			t.Fatalf("pre-commit does not run %s", id)
+		}
+	}
+	if !stepWaitsOn(w, "frontend-build", "frontend-unit") {
+		t.Fatal("frontend-build does not wait on frontend-unit")
+	}
+	if !stepWaitsOn(w, "frontend-build", "frontend-browser-lint") {
+		t.Fatal("frontend-build does not wait on frontend-browser-lint")
+	}
+	if !stepWaitsOn(w, "frontend-browser", "frontend-build") {
+		t.Fatal("frontend-browser does not wait on frontend-build")
+	}
+}
+
 func TestFrontendUnitSuitePropagatesTheNPMVerdict(t *testing.T) {
 	root := t.TempDir()
 	web := filepath.Join(root, "web")
@@ -424,6 +446,69 @@ func TestFrontendUnitRunnerRejectsZeroDiscovery(t *testing.T) {
 	}
 	if !strings.Contains(string(output), "no .test.ts or .test.tsx files found") {
 		t.Fatalf("empty-suite failure = %q, want zero-discovery diagnostic", output)
+	}
+}
+
+func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
+	tests := []struct {
+		name    string
+		script  string
+		run     func(context.Context) error
+		failure string
+	}{
+		{name: "browser lint", script: "lint:browser", run: runFrontendBrowserLint, failure: "frontend browser-test lint"},
+		{name: "build", script: "build", run: runFrontendBuild, failure: "frontend production build"},
+		{name: "browser", script: "test:browser:gate", run: runFrontendBrowser, failure: "frontend browser smoke suite"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			web := filepath.Join(root, "web")
+			if err := os.MkdirAll(web, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			previous := sparkwing.WorkDir()
+			sparkwing.SetWorkDir(root)
+			t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+
+			writeGoFile(t, filepath.Join(web, "package.json"), fmt.Sprintf(`{"scripts":{"%s":"node -e \"process.exit(1)\""}}`, tc.script))
+			err := tc.run(context.Background())
+			if err == nil || !strings.Contains(err.Error(), tc.failure) {
+				t.Fatalf("%s failure = %v, want named verdict", tc.name, err)
+			}
+		})
+	}
+}
+
+func TestFrontendBrowserMarksOnlyFailedRunsForHostedArtifacts(t *testing.T) {
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	if err := os.MkdirAll(web, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	previous := sparkwing.WorkDir()
+	sparkwing.SetWorkDir(root)
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+	marker := filepath.Join(web, "test-results", ".sparkwing-browser-failed")
+
+	if err := os.MkdirAll(filepath.Dir(marker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeGoFile(t, marker, "stale\n")
+	writeGoFile(t, filepath.Join(web, "package.json"), `{"scripts":{"test:browser:gate":"node -e \"process.exit(0)\""}}`)
+	if err := runFrontendBrowser(context.Background()); err != nil {
+		t.Fatalf("frontend-browser rejected a passing npm script: %v", err)
+	}
+	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("passing browser run left failure marker: %v", err)
+	}
+
+	writeGoFile(t, filepath.Join(web, "package.json"), `{"scripts":{"test:browser:gate":"node -e \"process.exit(1)\""}}`)
+	if err := runFrontendBrowser(context.Background()); err == nil {
+		t.Fatal("frontend-browser accepted a failing npm script")
+	}
+	if body, err := os.ReadFile(marker); err != nil || string(body) != "failed\n" {
+		t.Fatalf("browser failure marker = %q, %v", body, err)
 	}
 }
 

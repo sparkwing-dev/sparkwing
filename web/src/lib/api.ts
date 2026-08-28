@@ -529,7 +529,7 @@ export async function searchRunLogs(
 }
 
 export function getNodeStreamUrl(runID: string, nodeID: string): string {
-  return `${API_URL}/api/v1/runs/${runID}/logs/${nodeID}/stream?format=ansi`;
+  return `${API_URL}/api/v1/runs/${runID}/logs/${nodeID}/stream?format=ndjson`;
 }
 
 export interface RunsGrepMatch {

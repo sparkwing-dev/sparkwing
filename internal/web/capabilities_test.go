@@ -22,6 +22,7 @@ type fakeBackend struct {
 	listNodes   func(string) ([]*store.Node, error)
 	listEvents  func(string, int64, int) ([]store.Event, error)
 	readNodeLog func(string, string, backend.ReadOpts) ([]byte, error)
+	streamLog   func(string, string) (io.ReadCloser, error)
 }
 
 var _ backend.Backend = (*fakeBackend)(nil)
@@ -65,7 +66,10 @@ func (f *fakeBackend) ReadNodeLog(_ context.Context, runID, nodeID string, opts 
 	return f.readNodeLog(runID, nodeID, opts)
 }
 
-func (f *fakeBackend) StreamNodeLog(context.Context, string, string) (io.ReadCloser, error) {
+func (f *fakeBackend) StreamNodeLog(_ context.Context, runID, nodeID string) (io.ReadCloser, error) {
+	if f.streamLog != nil {
+		return f.streamLog(runID, nodeID)
+	}
 	return nil, nil
 }
 

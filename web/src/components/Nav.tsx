@@ -14,7 +14,7 @@ const tabs: Tab[] = [
   { href: "/queue", label: "Queue" },
   { href: "/capacity", label: "Capacity" },
   { href: "/cluster", label: "Cluster" },
-  { href: "/analytics", label: "Analytics" },
+  { href: "/analytics", label: "Analytics (preview)" },
   { href: "https://sparkwing.dev/docs/", label: "Docs", external: true },
 ];
 
@@ -100,7 +100,29 @@ export default function Nav() {
         onToggle={() => setOpen((v) => !v)}
         onClose={() => setOpen(false)}
       />
+      <LogoutControl />
     </div>
+  );
+}
+
+function LogoutControl() {
+  const [required, setRequired] = useState(false);
+  useEffect(() => {
+    const configured = (
+      window as unknown as { __SPARKWING_REQUIRE_LOGIN__?: string }
+    ).__SPARKWING_REQUIRE_LOGIN__;
+    setRequired(configured === "true");
+  }, []);
+  if (!required) return null;
+  return (
+    <form method="POST" action="/logout">
+      <button
+        type="submit"
+        className="ml-2 px-2 py-1 text-xs rounded-sm border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
+      >
+        Log out
+      </button>
+    </form>
   );
 }
 

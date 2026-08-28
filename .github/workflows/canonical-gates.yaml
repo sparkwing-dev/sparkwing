@@ -112,3 +112,15 @@ jobs:
           set -euo pipefail
           "$RUNNER_TEMP/sparkwing" run pre-push
           bash bin/check-hosted-gate-clean.sh "$TARGET_SHA"
+
+      - name: Upload dashboard browser failure artifacts
+        if: ${{ failure() && matrix.gate == 'pre-commit' && hashFiles('web/test-results/.sparkwing-browser-failed') != '' }}
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dashboard-browser-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            web/test-results/
+            web/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 14

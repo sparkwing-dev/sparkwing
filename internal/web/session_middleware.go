@@ -9,18 +9,14 @@ import (
 )
 
 // sessionAuthMiddleware gates /api/v1/* and SPA routes behind a session
-// cookie when RequireLogin is set. Bearer tokens bypass the cookie
-// lookup so scripts and agents authenticate via the upstream controller.
+// cookie when RequireLogin is set. Service credentials stay behind the
+// reverse proxy and cannot bypass a browser session after logout.
 func sessionAuthMiddleware(opts HandlerOptions, next http.Handler) http.Handler {
-	if !opts.RequireLogin || opts.ControllerURL == "" {
+	if !loginRequired(opts) {
 		return next
 	}
 	cache := newSessionCache(60 * time.Second)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
-			next.ServeHTTP(w, r)
-			return
-		}
 		cookie, err := r.Cookie(sessionCookieName)
 		if err != nil || cookie.Value == "" {
 			redirectOrUnauth(w, r)
@@ -35,6 +31,10 @@ func sessionAuthMiddleware(opts HandlerOptions, next http.Handler) http.Handler 
 		r = r.WithContext(contextWithWebPrincipal(r.Context(), sess))
 		next.ServeHTTP(w, r)
 	})
+}
+
+func loginRequired(opts HandlerOptions) bool {
+	return opts.RequireLogin && opts.ControllerURL != ""
 }
 
 // redirectOrUnauth sends a browser to /login (303) and an XHR/API caller

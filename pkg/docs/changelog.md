@@ -50,6 +50,14 @@ code change to unlock.
 ## [Unreleased]
 ### Fixed
 
+- **web (Breaking):** Live dashboard node logs now retain structured step buckets instead
+  of collapsing pretty-rendered stream output into preamble. Authenticated
+  dashboards also provide a `Log out` control in the top navigation and keep
+  the controller service credential out of browser HTML and requests; the
+  server-side proxy adds that credential only after validating the user's
+  session cookie. Clients that sent a bearer token directly to a login-gated
+  dashboard proxy must use a browser session or call the controller API
+  directly. See the [migration guide](docs/migrations/_unreleased.md#authenticated-dashboard-proxy-sessions).
 - **release:** Pull requests, main, and release tags now run the canonical
   pre-commit and release-boundary gates in hosted CI. Artifact builds and
   publication wait for the tagged commit to pass, and verification jobs hold
