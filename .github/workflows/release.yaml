@@ -37,6 +37,11 @@ on:
         description: Existing release tag to rebuild after a publication-only failure
         required: true
         type: string
+      publish_images:
+        description: Publish container images as part of the rebuild
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   actions: read
@@ -117,6 +122,14 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.tag || github.sha }}
 
+      - name: Checkout current release scanner
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .release-tools
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.6"
@@ -190,7 +203,7 @@ jobs:
           set -euo pipefail
           ext=""
           [ "$TARGET_GOOS" = "windows" ] && ext=".exe"
-          bash bin/check-release-binary-vulnerabilities.sh \
+          bash "${{ github.event_name == 'workflow_dispatch' && '.release-tools/bin/check-release-binary-vulnerabilities.sh' || 'bin/check-release-binary-vulnerabilities.sh' }}" \
             "dist/${BIN}-${TARGET_GOOS}-${TARGET_GOARCH}${ext}"
 
       # Each cell uploads exactly one binary as a uniquely-named
@@ -216,6 +229,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.tag || github.sha }}
+
+      - name: Checkout current release scanner
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .release-tools
 
       - uses: actions/setup-go@v5
         with:
@@ -265,7 +286,7 @@ jobs:
           rm -rf rcodesign.tar.gz apple-codesign-*
 
       - name: Scan assembled release binaries
-        run: bash bin/check-release-binary-vulnerabilities.sh dist/sparkwing-*
+        run: bash "${{ github.event_name == 'workflow_dispatch' && '.release-tools/bin/check-release-binary-vulnerabilities.sh' || 'bin/check-release-binary-vulnerabilities.sh' }}" dist/sparkwing-*
 
       - name: Upload scanned release binaries
         uses: actions/upload-artifact@v4
@@ -277,6 +298,7 @@ jobs:
 
   release:
     needs: [prepare-binaries, publish-images]
+    if: ${{ always() && needs.prepare-binaries.result == 'success' && (needs.publish-images.result == 'success' || (github.event_name == 'workflow_dispatch' && inputs.publish_images == false && needs.publish-images.result == 'skipped')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -410,7 +432,7 @@ jobs:
   build-images:
     name: Build & scan container images
     needs: [validate-tag, canonical]
-    if: ${{ always() && needs.validate-tag.result == 'success' && (needs.canonical.result == 'success' || github.event_name == 'workflow_dispatch') }}
+    if: ${{ always() && needs.validate-tag.result == 'success' && (needs.canonical.result == 'success' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || inputs.publish_images) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

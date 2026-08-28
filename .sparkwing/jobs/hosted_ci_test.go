@@ -135,6 +135,8 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 		"needs: [validate-tag, canonical]",
 		"github.event_name == 'workflow_dispatch'",
 		"ref: ${{ inputs.tag || github.sha }}",
+		"path: .release-tools",
+		".release-tools/bin/check-release-binary-vulnerabilities.sh",
 		`go-version: "1.26.6"`,
 	)
 	requireWorkflowText(t, workflowJob(t, body, "build-images"),
@@ -152,6 +154,7 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 		"packages: write",
 	)
 	requireWorkflowText(t, workflowJob(t, body, "release"),
+		"inputs.publish_images == false",
 		"contents: write",
 		"persist-credentials: false",
 		"ref: ${{ inputs.tag || github.sha }}",
