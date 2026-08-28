@@ -167,12 +167,11 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCreateUserOrBootstrap accepts a first-admin create while
-// controller authentication is disabled and otherwise creates an
-// additional user. The route's auth middleware requires an admin
-// principal whenever authentication is enabled. CreateFirstUser
-// re-checks emptiness in-tx so two concurrent bootstrap POSTs cannot
-// both succeed.
+// handleCreateUserOrBootstrap accepts a first-admin create while the
+// users table is empty and otherwise creates an additional user. The
+// route's auth middleware requires an admin principal whenever
+// authentication is enabled. CreateFirstUser re-checks emptiness in-tx
+// so two concurrent bootstrap POSTs cannot both succeed.
 func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Request) {
 	if !s.bootstrapAllowed() {
 		s.handleCreateUser(w, r)
@@ -193,8 +192,13 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	s.logger.Warn("bootstrap signup accepted: first admin created while controller authentication is disabled",
-		"name", u.Name)
+	if principal, ok := PrincipalFromContext(r.Context()); ok {
+		s.logger.Info("bootstrap signup accepted: first admin created by authenticated principal",
+			"name", u.Name, "principal", principal.label())
+	} else {
+		s.logger.Warn("bootstrap signup accepted: first admin created while controller authentication is disabled",
+			"name", u.Name)
+	}
 	s.markBootstrapClosed()
 	writeJSON(w, http.StatusCreated, userJSON{
 		Name:      u.Name,

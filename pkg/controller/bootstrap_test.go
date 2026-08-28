@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -86,7 +88,9 @@ func TestBootstrap_AuthEnabledRequiresAdminForFirstUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed non-admin token: %v", err)
 	}
-	srv := httptest.NewServer(controller.New(st, nil).EnableAuthFromStore().Handler())
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logs, nil))
+	srv := httptest.NewServer(controller.New(st, logger).EnableAuthFromStore().Handler())
 	defer srv.Close()
 
 	if getBootstrapNeeded(t, srv.URL) {
@@ -117,6 +121,12 @@ func TestBootstrap_AuthEnabledRequiresAdminForFirstUser(t *testing.T) {
 	status, body = postJSONWithBearer(t, srv.URL+"/api/v1/users", token, requestBody)
 	if status != http.StatusCreated {
 		t.Fatalf("authenticated first-user create status=%d body=%s; want 201", status, body)
+	}
+	if strings.Contains(logs.String(), "authentication is disabled") {
+		t.Fatalf("authenticated first-user create logged disabled authentication: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "authenticated principal") {
+		t.Fatalf("authenticated first-user create did not identify its authorization path: %s", logs.String())
 	}
 }
 
