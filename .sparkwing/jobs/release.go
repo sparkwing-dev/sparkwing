@@ -141,7 +141,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 		)
 		return err
 	})
-	gateTemplates.Needs(clean, gatePrePush)
+	gateTemplates.Needs(clean, gatePreCommit, gatePrePush)
 
 	gateLineage := sparkwing.Job(plan, "gate-release-lineage", &checkReleaseLineageJob{
 		RepoDir: repoDir,
