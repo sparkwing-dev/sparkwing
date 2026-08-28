@@ -136,6 +136,7 @@ func (s *Server) handleFinishRun(w http.ResponseWriter, r *http.Request) {
 			s.foldRunProfiles(r.Context(), refreshed)
 		}
 	}
+	s.reportGitHubCommitStatus(r.Context(), runID, body.Status)
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -92,6 +92,7 @@ func run(args []string) error {
 	srv := controller.New(st, nil).
 		EnableAuthFromStore().
 		WithGitHubWebhookSecret(os.Getenv("GITHUB_WEBHOOK_SECRET")).
+		WithGitHubCommitStatuses(os.Getenv("GITHUB_TOKEN"), os.Getenv("SPARKWING_DASHBOARD_URL")).
 		WithCachePodURL(*cachePodURL).
 		WithLogsURL(*logsURL).
 		WithCacheURL(*cacheURL)

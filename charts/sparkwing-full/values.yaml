@@ -58,6 +58,17 @@ controller:
     name: ""
     key: webhook-secret
 
+  # GitHub commit statuses for pull_request webhook runs. The token
+  # needs commit-status write access to every repository whose webhook
+  # reaches this controller. Empty name disables status reporting.
+  githubStatusToken:
+    name: ""
+    key: token
+
+  # Query-free HTTP(S) dashboard base URL used for commit-status run links.
+  # Empty or invalid keeps reporting enabled but omits the target URL.
+  dashboardURL: ""
+
   # Secrets-store encryption key. When set, the controller encrypts
   # secret values stored in the state DB at rest. Without it, the
   # controller logs a WARNING at startup and stores plaintext.

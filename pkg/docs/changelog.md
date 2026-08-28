@@ -48,6 +48,17 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Added
+
+- **controller:** Pull-request webhook runs now publish best-effort GitHub
+  commit statuses under `sparkwing/<pipeline>` when `GITHUB_TOKEN` is set.
+  `SPARKWING_DASHBOARD_URL` optionally adds a run-detail link. GitHub delivery
+  errors are logged and never change webhook admission or the run result.
+  Overlapping deliveries for the same commit and pipeline suppress terminal
+  updates from superseded runs so they cannot overwrite the current result.
+  Programs serving `Server.Handler` directly must call `Server.Shutdown`.
+
+### Security
 
 - **web (Breaking):** Login-required dashboards now refuse to start without a
   controller session backend. Login, first-admin, and logout forms enforce

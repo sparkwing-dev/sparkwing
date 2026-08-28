@@ -74,6 +74,11 @@ running install:
 kubectl -n sparkwing create secret generic sparkwing-webhook \
     --from-literal=webhook-secret=<your-shared-secret>
 
+# GitHub token for PR commit statuses. Use a fine-grained token with
+# Commit statuses: Read and write for every repository this controller serves.
+kubectl -n sparkwing create secret generic sparkwing-github-status \
+    --from-literal=token=<your-github-token>
+
 # At-rest encryption key for the controller's secrets store.
 # Skip and the controller logs a WARNING + stores plaintext.
 openssl rand -base64 32 > /tmp/sparkwing-key
@@ -174,6 +179,8 @@ helm install sparkwing ./charts/sparkwing-full \
     --namespace sparkwing --create-namespace \
     -f compatible-images.yaml \
     --set controller.githubWebhookSecret.name=sparkwing-webhook \
+    --set controller.githubStatusToken.name=sparkwing-github-status \
+    --set controller.dashboardURL=https://sparkwing.example.com \
     --set controller.secretsKey.name=sparkwing-secrets-key \
     --set web.tokenSecret.name=sparkwing-token \
     --set sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token \
@@ -198,6 +205,8 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `controller.storage.pvc.storageClassName` | Override default StorageClass. | `""` |
 | `controller.storage.pvc.keepOnUninstall` | Annotate PVC `helm.sh/resource-policy: keep`. | `true` |
 | `controller.githubWebhookSecret.name` | Secret holding `webhook-secret`. | `""` |
+| `controller.githubStatusToken.name` | Secret holding a GitHub token with commit-status write access. | `""` |
+| `controller.dashboardURL` | Query-free HTTP(S) dashboard base URL for commit-status run links; invalid values omit the link. | `""` |
 | `controller.secretsKey.name` | Secret holding 32-byte encryption key. | `""` |
 | `controller.pool.enabled` | Enable warm-PVC pool (needs RBAC). | `true` |
 

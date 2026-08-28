@@ -25,7 +25,8 @@ type Server struct {
 
 	auth *Authenticator
 
-	githubWebhookSecret string
+	githubWebhookSecret  string
+	githubCommitStatuses *githubCommitStatusReporter
 
 	queueTimeout time.Duration
 
@@ -248,7 +249,8 @@ func (s *Server) WithAuthenticator(a *Authenticator) *Server {
 }
 
 // Handler returns the HTTP router. Exposed separately from Serve so
-// tests can wrap it in httptest without binding a real port.
+// tests can wrap it in httptest without binding a real port. Callers using
+// Handler directly must call Shutdown to drain server-owned background work.
 //
 // Auth shape:
 //   - /api/v1/health is always unauthenticated so k8s probes don't
@@ -450,14 +452,35 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			s.logger.Warn("controller HTTP shutdown incomplete", "err", err)
+		}
+		s.shutdownGitHubCommitStatuses(shutdownCtx)
 		return nil
 	case err := <-errCh:
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		s.shutdownGitHubCommitStatuses(shutdownCtx)
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil
 		}
 		return err
 	}
+}
+
+func (s *Server) shutdownGitHubCommitStatuses(ctx context.Context) {
+	if err := s.Shutdown(ctx); err != nil {
+		s.logger.Warn("github commit status shutdown incomplete", "err", err)
+	}
+}
+
+// Shutdown drains server-owned background work until ctx expires. ServeWith
+// calls Shutdown automatically; callers serving Handler directly must call it.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.githubCommitStatuses == nil {
+		return nil
+	}
+	return s.githubCommitStatuses.shutdown(ctx)
 }
 
 func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
@@ -525,7 +548,11 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			for _, id := range ids {
 				run, err := s.store.GetRun(ctx, id)
 				if err == nil && run.FinishedAt == nil {
-					_ = s.store.FinishRun(ctx, id, "failed", "runner lease expired")
+					if ferr := s.store.FinishRun(ctx, id, "failed", "runner lease expired"); ferr != nil {
+						s.logger.Error("finish reaped run failed", "run_id", id, "err", ferr)
+					} else {
+						s.reportGitHubCommitStatus(ctx, id, "failed")
+					}
 					if nids, nerr := store.Maintenance.FailNodesInRun(s.store, ctx, id,
 						"runner lease expired before node reported completion",
 						store.FailureRunnerLeaseExpired); nerr != nil {
@@ -551,6 +578,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale pending run", "run_id", id)
+					s.reportGitHubCommitStatus(ctx, id, "failed")
 				}
 			}
 
@@ -561,6 +589,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale running run", "run_id", id)
+					s.reportGitHubCommitStatus(ctx, id, "failed")
 				}
 			}
 

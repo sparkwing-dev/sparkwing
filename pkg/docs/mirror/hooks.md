@@ -78,12 +78,25 @@ func (p *PRGate) Plan(_ context.Context, plan *sw.Plan, _ sw.NoInputs, rc sw.Run
 }
 ```
 
-**Status reporting.** sparkwing does not yet report a run's result back
-to the pull request as a GitHub commit status or check. A `pull_request`
-run executes and shows up on the sparkwing dashboard, but GitHub's
-merge-blocking required-checks UI will not see it. Gate merges on the
-sparkwing side (or via a thin GitHub Action that waits on the run) until
-native status reporting lands.
+**Status reporting.** Set `GITHUB_TOKEN` on the controller to report
+`pull_request` webhook runs to their head commits. The token needs
+**Commit statuses: Read and write** on every repository the controller
+serves (or `repo:status` for a classic token). An empty token disables
+reporting.
+
+Each pipeline uses one context named `sparkwing/<pipeline>`. The
+controller posts `pending` after dispatch, then `success`, `failure`, or
+`error` when the run finishes. Set `SPARKWING_DASHBOARD_URL` to the public
+dashboard base URL to make each status link to `/runs?run=<run-id>`;
+the URL must use HTTP or HTTPS, include a host, and omit credentials, a
+query, and a fragment. Omitted or invalid values publish statuses without a
+target link. Status delivery is best-effort: GitHub errors are logged and
+never change webhook admission or the run result. Push, manual, and retry
+runs do not publish statuses. When overlapping or redelivered webhooks target
+the same commit and pipeline, the newest accepted run owns the status;
+terminal updates from superseded runs are ignored. Programs serving
+`controller.Server.Handler` directly must call `Server.Shutdown`; `ServeWith`
+does this automatically.
 
 ## Manual / API invocation
 
