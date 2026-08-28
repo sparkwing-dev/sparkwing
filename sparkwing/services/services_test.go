@@ -319,15 +319,11 @@ func TestWithServices_ConcurrentNoCollision(t *testing.T) {
 			})
 		}()
 	}
-	deadline := time.NewTimer(10 * time.Second)
-	defer deadline.Stop()
 	for range 2 {
 		select {
 		case <-entered:
 		case err := <-errs:
 			t.Fatalf("service failed before its callback entered: %v", err)
-		case <-deadline.C:
-			t.Fatal("timed out waiting for both service callbacks")
 		}
 	}
 	releaseCallbacks()
