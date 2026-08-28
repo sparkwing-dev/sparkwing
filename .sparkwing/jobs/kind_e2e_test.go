@@ -239,7 +239,7 @@ func TestKindE2EExistingClusterCleanupBeforeHelmDeletesOnlyOwnedObjects(t *testi
 		t.Fatalf("existing cleanup did not atomically claim and verify its namespace before deleting owned objects:\n%s", got)
 	}
 	if strings.Contains(got, " helm --kube-context remote-e2e uninstall ") ||
-		strings.Contains(got, "helm --kube-context remote-e2e list --all") ||
+		strings.Contains(got, "helm --kube-context remote-e2e list --namespace") ||
 		strings.Contains(got, "label persistentvolumeclaim") {
 		t.Fatalf("pre-Helm failure inspected, labeled, or uninstalled release resources it never attempted:\n%s", got)
 	}
@@ -349,6 +349,7 @@ func TestKindE2EExistingClusterUninstallsOnlyItsAttemptedRelease(t *testing.T) {
 		"NAMESPACE_OWNER_TOKEN="+kindE2ETestOwner,
 		"FAIL_AT=helm-install",
 		"HELM_RELEASE=sparkwing",
+		"HELM_RELEASE_STATUS=failed",
 		"SPARKWING_KIND_E2E_ARTIFACT_DIR="+artifacts,
 		"SPARKWING_KIND_E2E_PROVISION=existing",
 		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
@@ -366,7 +367,7 @@ func TestKindE2EExistingClusterUninstallsOnlyItsAttemptedRelease(t *testing.T) {
 	got := string(body)
 	attempt := strings.Index(got, "install sparkwing ")
 	attemptOwner := strings.Index(got, "--labels sparkwing.dev/e2e-owner="+kindE2ETestOwner)
-	ownedList := strings.Index(got, "list --all --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner)
+	ownedList := strings.Index(got, "list --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner)
 	labelReleasePVCs := strings.Index(got, "label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing")
 	labelPoolPVCs := strings.Index(got, "label persistentvolumeclaim -l app=sparkwing-cache-pool,sparkwing.dev/managed=pool-manager,sparkwing.dev/pool=cache")
 	uninstall := strings.Index(got, "uninstall sparkwing --namespace sparkwing-e2e")
@@ -374,6 +375,44 @@ func TestKindE2EExistingClusterUninstallsOnlyItsAttemptedRelease(t *testing.T) {
 	if attempt < 0 || attemptOwner < attempt || ownedList < attemptOwner || labelReleasePVCs < ownedList ||
 		labelPoolPVCs < labelReleasePVCs || uninstall < labelPoolPVCs || ownedDelete < uninstall {
 		t.Fatalf("attempted release was not ownership-proved before labeling PVCs and uninstalling:\n%s", got)
+	}
+}
+
+func TestKindE2EExistingClusterReprovesDeployedReleaseBeforeCleanup(t *testing.T) {
+	bin, calls, artifacts := existingClusterFailureHarness(t)
+	result := runKindScriptFullWithEnv(t, bin,
+		"CALL_RECORD="+calls,
+		"NAMESPACE_OWNER=true",
+		"NAMESPACE_OWNER_TOKEN="+kindE2ETestOwner,
+		"FAIL_AT=post-install-resource",
+		"HELM_RELEASE=sparkwing",
+		"HELM_RELEASE_STATUS=deployed",
+		"SPARKWING_KIND_E2E_ARTIFACT_DIR="+artifacts,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing",
+	)
+	if result.err == nil {
+		t.Fatal("post-install resource failure unexpectedly passed")
+	}
+	body, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	ownedList := strings.Index(got, "list --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner)
+	if ownedList < 0 {
+		t.Fatalf("cleanup did not query deployed release ownership:\n%s", got)
+	}
+	afterProof := got[ownedList:]
+	labelReleasePVCs := strings.Index(afterProof, "label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing")
+	labelPoolPVCs := strings.Index(afterProof, "label persistentvolumeclaim -l app=sparkwing-cache-pool,sparkwing.dev/managed=pool-manager,sparkwing.dev/pool=cache")
+	uninstall := strings.Index(afterProof, "uninstall sparkwing --namespace sparkwing-e2e")
+	ownedDelete := strings.Index(afterProof, "delete deployment,service,configmap,secret,persistentvolumeclaim -l sparkwing.dev/e2e-owned=true,sparkwing.dev/e2e-owner="+kindE2ETestOwner)
+	if labelReleasePVCs < 0 || labelPoolPVCs < labelReleasePVCs || uninstall < labelPoolPVCs || ownedDelete < uninstall {
+		t.Fatalf("deployed release ownership did not authorize cleanup in order:\n%s", afterProof)
 	}
 }
 
@@ -399,7 +438,7 @@ func TestKindE2EExistingClusterRetainsAReleaseWithoutItsOwnerLabel(t *testing.T)
 		t.Fatal(err)
 	}
 	got := string(body)
-	if !strings.Contains(got, "list --all --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner) {
+	if !strings.Contains(got, "list --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner) {
 		t.Fatalf("failed install did not query durable per-run Helm metadata:\n%s", got)
 	}
 	if strings.Contains(got, "label persistentvolumeclaim") ||
@@ -430,7 +469,7 @@ func TestKindE2EExistingClusterReprovesSuccessfulReleaseBeforeCleanup(t *testing
 		t.Fatal(err)
 	}
 	got := string(body)
-	ownedList := strings.Index(got, "list --all --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner)
+	ownedList := strings.Index(got, "list --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner)
 	if ownedList < 0 {
 		t.Fatalf("cleanup trusted stale successful-install ownership:\n%s", got)
 	}
@@ -453,6 +492,7 @@ func TestKindE2EExistingClusterRetainsReleaseWhenPVCAdoptionIsIncomplete(t *test
 		"NAMESPACE_OWNER_TOKEN="+kindE2ETestOwner,
 		"FAIL_AT=cleanup-release-pvc-label",
 		"HELM_RELEASE=sparkwing",
+		"HELM_RELEASE_STATUS=failed",
 		"SPARKWING_KIND_E2E_ARTIFACT_DIR="+artifacts,
 		"SPARKWING_KIND_E2E_PROVISION=existing",
 		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
@@ -468,7 +508,7 @@ func TestKindE2EExistingClusterRetainsReleaseWhenPVCAdoptionIsIncomplete(t *test
 		t.Fatal(err)
 	}
 	got := string(body)
-	ownedList := strings.Index(got, "list --all --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner)
+	ownedList := strings.Index(got, "list --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner)
 	if ownedList < 0 {
 		t.Fatalf("cleanup did not prove current release ownership:\n%s", got)
 	}
@@ -519,6 +559,11 @@ case "$*" in
       exit 23
     fi
     ;;
+  *"get deployment -l app.kubernetes.io/instance=sparkwing,app.kubernetes.io/component=controller"*)
+    if [ "${FAIL_AT:-}" = "post-install-resource" ]; then
+      exit 23
+    fi
+    ;;
   *"label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing"*)
     if [ "${FAIL_AT:-}" = "post-install" ] || [ "${FAIL_AT:-}" = "cleanup-release-pvc-label" ]; then
       exit 23
@@ -529,14 +574,17 @@ esac
 	writeStub(t, bin, "helm", `
 printf 'helm %s\n' "$*" >>"$CALL_RECORD"
 case "$*" in
+  *" list --all "*)
+    exit 64
+    ;;
   *" install sparkwing "*)
     if [ "${FAIL_AT:-}" = "helm-install" ] || [ "${FAIL_AT:-}" = "cleanup-release-pvc-label" ]; then
       exit 23
     fi
     ;;
-  *"list --all --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="*)
+  *"list --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="*)
     if [ -n "${HELM_RELEASE:-}" ]; then
-      printf '[{"name":"%s"}]\n' "$HELM_RELEASE"
+      printf '[{"name":"%s","status":"%s"}]\n' "$HELM_RELEASE" "$HELM_RELEASE_STATUS"
     else
       printf '[]\n'
     fi
@@ -667,6 +715,9 @@ func TestKindE2EOwnsReleaseImagesAndFailureEvidence(t *testing.T) {
 	}
 	if strings.Contains(script, "command -v git-daemon") {
 		t.Fatal("Kind harness requires git-daemon as a standalone PATH binary")
+	}
+	if strings.Contains(script, "helm_e2e list --all") {
+		t.Fatal("Kind harness uses Helm v3's removed list --all flag")
 	}
 	if strings.Contains(script, "hostPath:") || strings.Contains(script, "extraMounts:") {
 		t.Fatal("Kubernetes fixture depends on a Kind-only host mount")

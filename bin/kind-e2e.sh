@@ -269,7 +269,7 @@ cleanup_existing_resources() {
 
   if ((release_install_attempted == 1)); then
     release_owned=0
-    if ! release_list="$(helm_e2e list --all --namespace "$namespace" \
+    if ! release_list="$(helm_e2e list --namespace "$namespace" \
       --selector "$owner_token_label" -o json)"; then
       echo "kind-e2e: refusing cleanup: cannot verify Helm release ownership" >&2
       return 1
