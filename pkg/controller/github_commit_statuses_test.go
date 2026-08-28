@@ -232,7 +232,7 @@ func TestGitHubCommitStatusReporterSkipsUnresolvedReservation(t *testing.T) {
 		Owner: "acme", Repo: "sample-app", SHA: "head-1", Pipeline: "blocked", RunID: "run-1", State: "pending",
 	})
 	if !reporter.enqueue(logger, githubCommitStatus{
-		Owner: "acme", Repo: "sample-app", SHA: "head-2", Pipeline: "ready", RunID: "run-2", State: "success",
+		Owner: "acme", Repo: "sample-app", SHA: "head-2", Pipeline: "ready", RunID: "run-2", State: "pending",
 	}) {
 		t.Fatal("ready status was dropped")
 	}
@@ -526,14 +526,75 @@ func TestGitHubCommitStatusReporterBoundsGenerationHistory(t *testing.T) {
 	}
 }
 
+func TestGitHubCommitStatusReporterRejectsTerminalAfterHistoryEviction(t *testing.T) {
+	received := make(chan string, 5)
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body githubCommitStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode status: %v", err)
+		}
+		received <- body.State
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer github.Close()
+
+	reporter := newGitHubCommitStatusReporterWithCapacity("token", "", github.URL, github.Client(), 1)
+	reporter.historyLimit = 1
+	shutdownGitHubStatusReporter(t, reporter)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	first := githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: "sha-a", Pipeline: "verify", RunID: "run-a", State: "pending",
+	}
+	second := first
+	second.SHA = "sha-b"
+	second.RunID = "run-b"
+	for _, status := range []*githubCommitStatus{&first, &second} {
+		if !reporter.enqueue(logger, *status) {
+			t.Fatalf("pending for %s was dropped", status.RunID)
+		}
+		if got := waitForGitHubState(t, received); got != "pending" {
+			t.Fatalf("pending for %s posted %q", status.RunID, got)
+		}
+		status.State = "success"
+		if !reporter.enqueue(logger, *status) {
+			t.Fatalf("terminal for %s was dropped", status.RunID)
+		}
+		if got := waitForGitHubState(t, received); got != "success" {
+			t.Fatalf("terminal for %s posted %q", status.RunID, got)
+		}
+		waitForGitHubStatusSlotRemoved(t, reporter, *status)
+	}
+	reporter.mu.Lock()
+	_, firstRetained := reporter.generations[githubCommitStatusTargetFor(first)]
+	reporter.mu.Unlock()
+	if firstRetained {
+		t.Fatal("first target was not evicted from generation history")
+	}
+	first.State = "failure"
+	if reporter.enqueue(logger, first) {
+		t.Fatal("late terminal allocated a new generation after history eviction")
+	}
+	select {
+	case got := <-received:
+		t.Fatalf("late terminal posted %q", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestServerShutdownDrainsHandlerReporter(t *testing.T) {
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
-	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		started <- struct{}{}
-		<-release
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body githubCommitStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode status: %v", err)
+		}
+		if body.State == "success" {
+			started <- struct{}{}
+			<-release
+		}
 		w.WriteHeader(http.StatusCreated)
 	}))
 	defer github.Close()
@@ -544,10 +605,18 @@ func TestServerShutdownDrainsHandlerReporter(t *testing.T) {
 			"token", "", github.URL, github.Client(),
 		),
 	}
-	if !srv.githubCommitStatuses.enqueue(srv.logger, githubCommitStatus{
-		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1", State: "success",
-	}) {
-		t.Fatal("status was dropped")
+	status := githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1", State: "pending",
+	}
+	if !srv.githubCommitStatuses.enqueue(srv.logger, status) {
+		t.Fatal("pending status was dropped")
+	}
+	waitForGitHubStatusSlot(t, srv.githubCommitStatuses, status, func(slot *githubCommitStatusSlot) bool {
+		return !slot.inFlight && slot.awaitingTerminal
+	})
+	status.State = "success"
+	if !srv.githubCommitStatuses.enqueue(srv.logger, status) {
+		t.Fatal("terminal status was dropped")
 	}
 	select {
 	case <-started:
@@ -608,9 +677,15 @@ func TestServeWithDrainsGitHubCommitStatuses(t *testing.T) {
 	release := make(chan struct{})
 	var releaseOnce sync.Once
 	t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
-	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		started <- struct{}{}
-		<-release
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body githubCommitStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode status: %v", err)
+		}
+		if body.State == "success" {
+			started <- struct{}{}
+			<-release
+		}
 		w.WriteHeader(http.StatusCreated)
 	}))
 	defer github.Close()
@@ -622,10 +697,18 @@ func TestServeWithDrainsGitHubCommitStatuses(t *testing.T) {
 	defer func() { _ = st.Close() }()
 	srv := New(st, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	srv.githubCommitStatuses = newGitHubCommitStatusReporter("token", "", github.URL, github.Client())
-	if !srv.githubCommitStatuses.enqueue(srv.logger, githubCommitStatus{
-		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1", State: "success",
-	}) {
-		t.Fatal("status was dropped")
+	status := githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1", State: "pending",
+	}
+	if !srv.githubCommitStatuses.enqueue(srv.logger, status) {
+		t.Fatal("pending status was dropped")
+	}
+	waitForGitHubStatusSlot(t, srv.githubCommitStatuses, status, func(slot *githubCommitStatusSlot) bool {
+		return !slot.inFlight && slot.awaitingTerminal
+	})
+	status.State = "success"
+	if !srv.githubCommitStatuses.enqueue(srv.logger, status) {
+		t.Fatal("terminal status was dropped")
 	}
 	select {
 	case <-started:
@@ -663,7 +746,7 @@ func TestGitHubCommitStatusReporterShutdownCancelsDeliveryAtDeadline(t *testing.
 	})}
 	reporter := newGitHubCommitStatusReporter("token", "", "https://api.github.test", client)
 	if !reporter.enqueue(slog.Default(), githubCommitStatus{
-		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1", State: "success",
+		Owner: "acme", Repo: "sample-app", SHA: "head", Pipeline: "verify", RunID: "run-1", State: "pending",
 	}) {
 		t.Fatal("status was dropped")
 	}

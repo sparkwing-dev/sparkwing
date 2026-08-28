@@ -190,14 +190,7 @@ func (r *githubCommitStatusReporter) enqueue(logger *slog.Logger, status githubC
 	slot := r.slots[key]
 	accepted := false
 	reason := "capacity"
-	if r.accepting && status.State != "pending" && (slot == nil || !slot.unresolved) {
-		if current, ok := r.generations[target]; ok && current.runID != status.RunID {
-			reason = "superseded"
-		} else {
-			r.touchGenerationLocked(target)
-		}
-	}
-	if r.accepting && reason != "superseded" {
+	if r.accepting && status.State == "pending" {
 		if slot == nil && len(r.slots) < r.capacity {
 			slot = &githubCommitStatusSlot{target: target}
 			r.slots[key] = slot
@@ -209,22 +202,35 @@ func (r *githubCommitStatusReporter) enqueue(logger *slog.Logger, status githubC
 			job := &githubCommitStatusJob{
 				key: key, logger: logger, status: status,
 			}
-			if status.State == "pending" {
-				if r.activateGenerationLocked(key, slot) {
-					slot.pending = job
-					slot.awaitingTerminal = slot.terminal == nil
-					accepted = true
-				} else {
-					reason = "superseded"
-				}
-			} else if slot.unresolved {
+			if r.activateGenerationLocked(key, slot) {
+				slot.pending = job
+				slot.awaitingTerminal = slot.terminal == nil
+				accepted = true
+			} else {
+				reason = "superseded"
+			}
+		}
+	} else if r.accepting {
+		reason = "stale"
+		current, tracked := r.generations[target]
+		if tracked && current.runID != status.RunID {
+			reason = "superseded"
+		}
+		if slot != nil && slot.target == target {
+			job := &githubCommitStatusJob{
+				key: key, logger: logger, status: status,
+			}
+			if slot.unresolved && (!tracked || current.generation <= slot.generation) {
 				slot.terminal = job
 				slot.awaitingTerminal = false
 				accepted = true
-			} else if _, ok := r.generations[target]; ok || r.rememberGenerationLocked(target, status.RunID, slot.generation) {
+			} else if tracked && current.runID == status.RunID && current.generation == slot.generation {
+				r.touchGenerationLocked(target)
 				slot.terminal = job
 				slot.awaitingTerminal = false
 				accepted = true
+			} else if tracked {
+				reason = "superseded"
 			}
 		}
 	}
