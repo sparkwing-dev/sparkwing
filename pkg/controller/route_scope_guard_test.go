@@ -130,6 +130,8 @@ func muxRoutes(t *testing.T, file string) map[string]string {
 		}
 		lit, ok := call.Args[0].(*ast.BasicLit)
 		if !ok {
+			t.Errorf("%s:%d: %s route pattern is not a string literal; the guard cannot verify it",
+				file, fset.Position(call.Pos()).Line, receiver)
 			return true
 		}
 		pattern, err := strconv.Unquote(lit.Value)
