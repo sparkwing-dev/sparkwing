@@ -255,6 +255,14 @@ containerSecurityContext:
   capabilities:
     drop: ["ALL"]
 
+# The application tightens SPARKWING_HOME to owner-only access at startup.
+# Kubernetes mounts PVC and emptyDir roots as root, so a short init container
+# gives the configured runtime UID ownership before the non-root process starts.
+# Enabled requires /bin/chown in controller/web images and is incompatible with
+# Restricted Pod Security. Disable only when storage already has this ownership.
+volumePermissions:
+  enabled: true
+
 # -----------------------------------------------------------------------
 # 7. Sub-chart: sparkwing-runner-bundle. All values nested here are
 #    forwarded as the sub-chart's `.Values`. Defaults below override

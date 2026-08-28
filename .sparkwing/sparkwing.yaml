@@ -53,11 +53,10 @@ pipelines:
   - name: build-images
     entrypoint: BuildImages
 
-  # kind-e2e: builds and loads all release-shaped images into a disposable
-  # local Kind cluster, installs the full chart, then proves authenticated
-  # webhook-to-runner execution, logs, cancellation, retry, restarts, and
-  # retained state. It requires a running Docker daemon and local Kubernetes
-  # tools; failure evidence is preserved outside the cluster.
+  # kind-e2e: proves authenticated webhook-to-runner execution, logs,
+  # cancellation, retry, restarts, and retained state. Its default provisions
+  # a disposable Kind cluster and locally built images. Existing-cluster mode
+  # requires explicit context, image coordinates, and cleanup allow-list.
   - name: kind-e2e
     entrypoint: KindE2E
 

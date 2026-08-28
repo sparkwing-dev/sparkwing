@@ -7,6 +7,7 @@ package charts
 import (
 	"io"
 	"os/exec"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -198,9 +199,33 @@ type renderedEnvVar struct {
 	Value string `yaml:"value"`
 }
 
+type renderedCapabilities struct {
+	Add  []string `yaml:"add"`
+	Drop []string `yaml:"drop"`
+}
+
+type renderedSecurityContext struct {
+	RunAsNonRoot             *bool                `yaml:"runAsNonRoot"`
+	RunAsUser                *int64               `yaml:"runAsUser"`
+	RunAsGroup               *int64               `yaml:"runAsGroup"`
+	AllowPrivilegeEscalation *bool                `yaml:"allowPrivilegeEscalation"`
+	ReadOnlyRootFilesystem   *bool                `yaml:"readOnlyRootFilesystem"`
+	Capabilities             renderedCapabilities `yaml:"capabilities"`
+}
+
+type renderedVolumeMount struct {
+	Name      string `yaml:"name"`
+	MountPath string `yaml:"mountPath"`
+}
+
 type renderedContainer struct {
-	Args []string         `yaml:"args"`
-	Env  []renderedEnvVar `yaml:"env"`
+	Name            string                  `yaml:"name"`
+	Image           string                  `yaml:"image"`
+	Command         []string                `yaml:"command"`
+	Args            []string                `yaml:"args"`
+	Env             []renderedEnvVar        `yaml:"env"`
+	SecurityContext renderedSecurityContext `yaml:"securityContext"`
+	VolumeMounts    []renderedVolumeMount   `yaml:"volumeMounts"`
 }
 
 type renderedDeployment struct {
@@ -208,7 +233,9 @@ type renderedDeployment struct {
 	Spec struct {
 		Template struct {
 			Spec struct {
-				Containers []renderedContainer `yaml:"containers"`
+				SecurityContext renderedSecurityContext `yaml:"securityContext"`
+				InitContainers  []renderedContainer     `yaml:"initContainers"`
+				Containers      []renderedContainer     `yaml:"containers"`
 			} `yaml:"spec"`
 		} `yaml:"template"`
 	} `yaml:"spec"`
@@ -223,7 +250,8 @@ type renderedResource struct {
 	Spec struct {
 		Template struct {
 			Spec struct {
-				Containers []renderedContainer `yaml:"containers"`
+				InitContainers []renderedContainer `yaml:"initContainers"`
+				Containers     []renderedContainer `yaml:"containers"`
 			} `yaml:"spec"`
 		} `yaml:"template"`
 	} `yaml:"spec"`
@@ -294,6 +322,16 @@ func resourceContainer(t *testing.T, resource renderedResource) renderedContaine
 // mean "the default was never emitted".
 func runnerContainer(t *testing.T, rendered string) renderedContainer {
 	t.Helper()
+	doc := deploymentDocument(t, rendered)
+	containers := doc.Spec.Template.Spec.Containers
+	if len(containers) != 1 {
+		t.Fatalf("containers = %d, want 1:\n%s", len(containers), rendered)
+	}
+	return containers[0]
+}
+
+func deploymentDocument(t *testing.T, rendered string) renderedDeployment {
+	t.Helper()
 	var doc renderedDeployment
 	dec := yaml.NewDecoder(strings.NewReader(rendered))
 	for {
@@ -304,11 +342,62 @@ func runnerContainer(t *testing.T, rendered string) renderedContainer {
 			break
 		}
 	}
-	containers := doc.Spec.Template.Spec.Containers
-	if len(containers) != 1 {
-		t.Fatalf("containers = %d, want 1:\n%s", len(containers), rendered)
+	return doc
+}
+
+func TestFullChartPreparesWritableHomesWithoutWeakeningTheRuntime(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		template string
+		path     string
+		volume   string
+	}{
+		{name: "controller PVC", template: "templates/controller-deployment.yaml", path: "/data", volume: "data"},
+		{name: "web scratch", template: "templates/web-deployment.yaml", path: "/tmp/sparkwing", volume: "sparkwing-home"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			doc := deploymentDocument(t, helmRender(t, "./sparkwing-full", test.template, "sparkwing"))
+			pod := doc.Spec.Template.Spec
+			if pod.SecurityContext.RunAsNonRoot == nil || !*pod.SecurityContext.RunAsNonRoot ||
+				pod.SecurityContext.RunAsUser == nil || *pod.SecurityContext.RunAsUser != 65534 {
+				t.Fatalf("runtime pod security = %+v, want non-root uid 65534", pod.SecurityContext)
+			}
+			if len(pod.InitContainers) != 1 {
+				t.Fatalf("init containers = %d, want one ownership initializer", len(pod.InitContainers))
+			}
+			init := pod.InitContainers[0]
+			if init.Name != "volume-permissions" || !reflect.DeepEqual(init.Command, []string{"/bin/chown"}) ||
+				!reflect.DeepEqual(init.Args, []string{"65534:65534", test.path}) {
+				t.Fatalf("ownership init = %+v", init)
+			}
+			if len(pod.Containers) != 1 || init.Image != pod.Containers[0].Image {
+				t.Fatalf("ownership image %q does not match runtime image", init.Image)
+			}
+			security := init.SecurityContext
+			if security.RunAsNonRoot == nil || *security.RunAsNonRoot ||
+				security.RunAsUser == nil || *security.RunAsUser != 0 ||
+				security.RunAsGroup == nil || *security.RunAsGroup != 0 ||
+				security.AllowPrivilegeEscalation == nil || *security.AllowPrivilegeEscalation ||
+				security.ReadOnlyRootFilesystem == nil || !*security.ReadOnlyRootFilesystem ||
+				!reflect.DeepEqual(security.Capabilities.Drop, []string{"ALL"}) ||
+				!reflect.DeepEqual(security.Capabilities.Add, []string{"CHOWN"}) {
+				t.Fatalf("ownership init security = %+v, want root with CHOWN only", security)
+			}
+			wantMounts := []renderedVolumeMount{{Name: test.volume, MountPath: test.path}}
+			if !reflect.DeepEqual(init.VolumeMounts, wantMounts) {
+				t.Fatalf("ownership init mounts = %+v, want %+v", init.VolumeMounts, wantMounts)
+			}
+		})
 	}
-	return containers[0]
+}
+
+func TestFullChartVolumePermissionsCanBeDisabled(t *testing.T) {
+	for _, template := range []string{"templates/controller-deployment.yaml", "templates/web-deployment.yaml"} {
+		doc := deploymentDocument(t, helmRender(t, "./sparkwing-full", template, "sparkwing", "volumePermissions.enabled=false"))
+		if len(doc.Spec.Template.Spec.InitContainers) != 0 {
+			t.Fatalf("%s rendered ownership init with volumePermissions disabled", template)
+		}
+	}
 }
 
 func runnerEnv(t *testing.T, rendered string) map[string]string {

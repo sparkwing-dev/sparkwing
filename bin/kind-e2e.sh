@@ -7,11 +7,24 @@ cluster_name="${SPARKWING_KIND_E2E_CLUSTER:-sparkwing-e2e}"
 namespace="${SPARKWING_KIND_E2E_NAMESPACE:-sparkwing-e2e}"
 release_name="${SPARKWING_KIND_E2E_RELEASE:-sparkwing}"
 image_tag="${SPARKWING_KIND_E2E_TAG:-kind-e2e}"
+provision_mode="${SPARKWING_KIND_E2E_PROVISION:-kind}"
+image_prefix="${SPARKWING_KIND_E2E_IMAGE_PREFIX:-}"
+image_pull_policy="${SPARKWING_KIND_E2E_PULL_POLICY:-}"
+kube_context="${SPARKWING_KIND_E2E_KUBE_CONTEXT:-}"
+cleanup_allow="${SPARKWING_KIND_E2E_ALLOW_CLEANUP:-}"
 keep_cluster="${SPARKWING_KIND_E2E_KEEP_CLUSTER:-0}"
+keep_resources="${SPARKWING_KIND_E2E_KEEP_RESOURCES:-0}"
 webhook_secret="sparkwing-kind-webhook"
+ownership_label="sparkwing.dev/e2e-owned=true"
+owner_token_label=""
+ownership_selector=""
+release_owner_description=""
 artifact_dir=""
 cluster_owned=0
+namespace_owned=0
 release_installed=0
+release_install_attempted=0
+release_owned=0
 admin_token=""
 controller_port=""
 web_port=""
@@ -41,25 +54,91 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || die "required command '$1' is not installed"
 }
 
+kube() {
+  command kubectl --context "$kube_context" "$@"
+}
+
+helm_e2e() {
+  command helm --kube-context "$kube_context" "$@"
+}
+
+image_ref() {
+  printf '%s%s:%s' "$image_prefix" "$1" "$image_tag"
+}
+
+create_owned_namespace() {
+  kube create namespace "$namespace" --dry-run=client -o yaml | \
+    kube label --local -f - "$ownership_label" "$owner_token_label" -o yaml | \
+    kube create -f -
+}
+
+create_owned_secret() {
+  local name=$1
+  shift
+  kube --namespace "$namespace" create secret generic "$name" "$@" --dry-run=client -o yaml | \
+    kube --namespace "$namespace" label --local -f - "$ownership_label" "$owner_token_label" -o yaml | \
+    kube --namespace "$namespace" apply -f -
+}
+
+create_owned_configmap() {
+  local name=$1
+  shift
+  kube --namespace "$namespace" create configmap "$name" "$@" --dry-run=client -o yaml | \
+    kube --namespace "$namespace" label --local -f - "$ownership_label" "$owner_token_label" -o yaml | \
+    kube --namespace "$namespace" apply -f -
+}
+
+label_owned_release_pvcs() {
+  kube --namespace "$namespace" label persistentvolumeclaim \
+    -l "app.kubernetes.io/instance=$release_name" \
+    "$ownership_label" "$owner_token_label" --overwrite
+}
+
 preflight() {
   local command_name
-  for command_name in docker kind kubectl helm curl jq git openssl; do
-    require_command "$command_name"
-  done
-  docker info >/dev/null 2>&1 || die "Docker daemon is unavailable; start Docker Desktop, Colima, or dockerd, then retry"
-  docker buildx version >/dev/null 2>&1 || die "docker buildx is unavailable"
-  kind version >/dev/null
-  kubectl version --client >/dev/null
-  helm version --short >/dev/null
+  case "$provision_mode" in
+    kind)
+      [[ -z "$image_prefix" ]] || die "SPARKWING_KIND_E2E_IMAGE_PREFIX is only valid when SPARKWING_KIND_E2E_PROVISION=existing"
+      for command_name in docker kind kubectl helm curl jq openssl; do
+        require_command "$command_name"
+      done
+      docker info >/dev/null 2>&1 || die "Docker daemon is unavailable; start Docker Desktop, Colima, or dockerd, then retry"
+      docker buildx version >/dev/null 2>&1 || die "docker buildx is unavailable"
+      kind version >/dev/null
+      kubectl version --client >/dev/null
+      helm version --short >/dev/null
+      ;;
+    existing)
+      for command_name in kubectl helm curl jq openssl; do
+        require_command "$command_name"
+      done
+      [[ -n "$kube_context" ]] || die "SPARKWING_KIND_E2E_KUBE_CONTEXT is required when SPARKWING_KIND_E2E_PROVISION=existing"
+      [[ -n "${SPARKWING_KIND_E2E_IMAGE_PREFIX:-}" ]] || die "SPARKWING_KIND_E2E_IMAGE_PREFIX is required when SPARKWING_KIND_E2E_PROVISION=existing"
+      [[ "$image_prefix" =~ ^[a-z0-9][a-z0-9._:/-]*$ ]] || die "SPARKWING_KIND_E2E_IMAGE_PREFIX contains characters that are unsafe in an image repository"
+      [[ -n "${SPARKWING_KIND_E2E_TAG:-}" ]] || die "SPARKWING_KIND_E2E_TAG is required when SPARKWING_KIND_E2E_PROVISION=existing"
+      [[ "$cleanup_allow" == "$namespace/$release_name" ]] || die "SPARKWING_KIND_E2E_ALLOW_CLEANUP must equal $namespace/$release_name in existing-cluster mode"
+      kubectl version --client >/dev/null
+      helm version --short >/dev/null
+      kubectl config get-contexts "$kube_context" >/dev/null 2>&1 || die "Kubernetes context '$kube_context' does not exist"
+      kube version --request-timeout=10s >/dev/null || die "Kubernetes context '$kube_context' is unavailable"
+      ;;
+    *)
+      die "SPARKWING_KIND_E2E_PROVISION must be kind or existing"
+      ;;
+  esac
 }
 
 usage() {
   cat <<'EOF'
 usage: bin/kind-e2e.sh [--preflight]
 
-Runs the complete Sparkwing controller/runner golden path in a disposable
-local Kind cluster. --preflight checks tools and the Docker daemon without
-building images or creating resources.
+Runs the complete Sparkwing controller/runner golden path. The default builds
+images and provisions a disposable local Kind cluster. Set
+SPARKWING_KIND_E2E_PROVISION=existing plus an explicit Kubernetes context,
+image prefix, tag, and namespace/release cleanup allow-list to exercise an
+existing cluster without creating or deleting cluster infrastructure.
+
+--preflight checks the tools and selected target without creating resources.
 EOF
 }
 
@@ -86,6 +165,20 @@ preflight
 [[ "$namespace" =~ ^[a-z0-9][a-z0-9.-]{0,62}$ ]] || die "invalid namespace: $namespace"
 [[ "$release_name" =~ ^[a-z0-9][a-z0-9.-]{0,52}$ ]] || die "invalid Helm release name: $release_name"
 [[ "$image_tag" =~ ^[a-z0-9][a-z0-9._-]{0,127}$ ]] || die "invalid image tag: $image_tag"
+[[ "$keep_cluster" == "0" || "$keep_cluster" == "1" ]] || die "SPARKWING_KIND_E2E_KEEP_CLUSTER must be 0 or 1"
+[[ "$keep_resources" == "0" || "$keep_resources" == "1" ]] || die "SPARKWING_KIND_E2E_KEEP_RESOURCES must be 0 or 1"
+
+if [[ "$provision_mode" == "kind" ]]; then
+  kube_context="kind-$cluster_name"
+  image_pull_policy="Never"
+else
+  image_prefix="${image_prefix%/}/"
+  image_pull_policy="${image_pull_policy:-IfNotPresent}"
+fi
+case "$image_pull_policy" in
+  Always|IfNotPresent|Never) ;;
+  *) die "SPARKWING_KIND_E2E_PULL_POLICY must be Always, IfNotPresent, or Never" ;;
+esac
 
 if [[ -n "${SPARKWING_KIND_E2E_ARTIFACT_DIR:-}" ]]; then
   artifact_dir="$SPARKWING_KIND_E2E_ARTIFACT_DIR"
@@ -95,6 +188,11 @@ else
 fi
 artifact_dir="$(cd "$artifact_dir" && pwd -P)"
 echo "kind-e2e: diagnostics: $artifact_dir"
+run_owner="$(openssl rand -hex 16)"
+[[ "$run_owner" =~ ^[0-9a-f]{32}$ ]] || die "OpenSSL returned an invalid E2E ownership token"
+owner_token_label="sparkwing.dev/e2e-owner=$run_owner"
+ownership_selector="$ownership_label,$owner_token_label"
+release_owner_description="sparkwing-e2e-owner=$run_owner"
 
 stop_forwards() {
   local pid
@@ -118,28 +216,80 @@ collect_diagnostics() {
   local pod
   echo "kind-e2e: collecting failure diagnostics in $artifact_dir" >&2
   mkdir -p "$artifact_dir/kubernetes" "$artifact_dir/pod-logs" "$artifact_dir/kind-logs"
-  helm get values "$release_name" --namespace "$namespace" --all >"$artifact_dir/kubernetes/helm-values-live.yaml" 2>&1 || true
-  helm get manifest "$release_name" --namespace "$namespace" >"$artifact_dir/kubernetes/helm-manifest-live.yaml" 2>&1 || true
-  kubectl --namespace "$namespace" get all,pvc,jobs -o wide >"$artifact_dir/kubernetes/resources.txt" 2>&1 || true
-  kubectl --namespace "$namespace" get events --sort-by=.metadata.creationTimestamp >"$artifact_dir/kubernetes/events.txt" 2>&1 || true
-  kubectl --namespace "$namespace" describe deployments,pods,pvc,jobs >"$artifact_dir/kubernetes/describe.txt" 2>&1 || true
+  helm_e2e get values "$release_name" --namespace "$namespace" --all >"$artifact_dir/kubernetes/helm-values-live.yaml" 2>&1 || true
+  helm_e2e get manifest "$release_name" --namespace "$namespace" >"$artifact_dir/kubernetes/helm-manifest-live.yaml" 2>&1 || true
+  kube --namespace "$namespace" get all,pvc,jobs -o wide >"$artifact_dir/kubernetes/resources.txt" 2>&1 || true
+  kube --namespace "$namespace" get events --sort-by=.metadata.creationTimestamp >"$artifact_dir/kubernetes/events.txt" 2>&1 || true
+  kube --namespace "$namespace" describe deployments,pods,pvc,jobs >"$artifact_dir/kubernetes/describe.txt" 2>&1 || true
   while IFS= read -r pod; do
     [[ -n "$pod" ]] || continue
-    kubectl --namespace "$namespace" logs "$pod" --all-containers --timestamps >"$artifact_dir/pod-logs/${pod#pod/}.log" 2>&1 || true
-    kubectl --namespace "$namespace" logs "$pod" --all-containers --timestamps --previous >"$artifact_dir/pod-logs/${pod#pod/}.previous.log" 2>&1 || true
-  done < <(kubectl --namespace "$namespace" get pods -o name 2>/dev/null || true)
+    kube --namespace "$namespace" logs "$pod" --all-containers --timestamps >"$artifact_dir/pod-logs/${pod#pod/}.log" 2>&1 || true
+    kube --namespace "$namespace" logs "$pod" --all-containers --timestamps --previous >"$artifact_dir/pod-logs/${pod#pod/}.previous.log" 2>&1 || true
+  done < <(kube --namespace "$namespace" get pods -o name 2>/dev/null || true)
   if [[ -n "$admin_token" && -n "$controller_port" ]]; then
     api_get "/api/v1/runs?limit=100" >"$artifact_dir/kubernetes/runs.json" 2>&1 || true
     api_get "/api/v1/agents" >"$artifact_dir/kubernetes/agents.json" 2>&1 || true
   fi
-  kind export logs "$artifact_dir/kind-logs" --name "$cluster_name" >/dev/null 2>&1 || true
+  if ((cluster_owned == 1)); then
+    kind export logs "$artifact_dir/kind-logs" --name "$cluster_name" >/dev/null 2>&1 || true
+  else
+    kube cluster-info dump --namespaces "$namespace" \
+      --output-directory="$artifact_dir/kubernetes/cluster-dump" >/dev/null 2>&1 || true
+  fi
+}
+
+cleanup_existing_resources() {
+  local namespace_owner release_list release_present cleanup_status=0
+  [[ "$cleanup_allow" == "$namespace/$release_name" ]] || {
+    echo "kind-e2e: refusing cleanup: allow-list no longer equals $namespace/$release_name" >&2
+    return 1
+  }
+  namespace_owner="$(kube get namespace "$namespace" \
+    -o 'jsonpath={.metadata.labels.sparkwing\.dev/e2e-owned}{"\t"}{.metadata.labels.sparkwing\.dev/e2e-owner}' 2>/dev/null)" || {
+    echo "kind-e2e: refusing cleanup: cannot verify namespace $namespace" >&2
+    return 1
+  }
+  [[ "$namespace_owner" == $'true\t'"$run_owner" ]] || {
+    echo "kind-e2e: refusing cleanup: namespace $namespace is not owned by this run" >&2
+    return 1
+  }
+
+  if ((release_owned == 0 && release_install_attempted == 1)); then
+    if ! release_list="$(helm_e2e list --all --namespace "$namespace" \
+      --selector "$owner_token_label" -o json)"; then
+      cleanup_status=1
+    elif ! release_present="$(jq -r --arg name "$release_name" \
+      'if type == "array" then any(.[]; .name == $name) else error("Helm list was not an array") end' \
+      <<<"$release_list")"; then
+      cleanup_status=1
+    elif [[ "$release_present" == "true" ]]; then
+      # Helm replaces Info.Description when an install fails. Release labels
+      # survive that transition, so the selector is the durable ownership proof.
+      release_owned=1
+    fi
+  fi
+  if ((release_owned == 1)); then
+    # Preserve only PVCs from a release whose per-run Helm metadata proved
+    # ownership before uninstall removes the other release objects.
+    label_owned_release_pvcs || cleanup_status=1
+    if helm_e2e uninstall "$release_name" --namespace "$namespace" --timeout 5m; then
+      release_owned=0
+      release_installed=0
+    else
+      cleanup_status=1
+    fi
+  fi
+  kube --namespace "$namespace" delete \
+    deployment,service,configmap,secret,persistentvolumeclaim \
+    -l "$ownership_selector" --ignore-not-found --wait=true || cleanup_status=1
+  return "$cleanup_status"
 }
 
 finish() {
-  local status=$?
+  local status=$? cleanup_failed=0
   trap - EXIT
   set +e
-  if ((status != 0)) && ((cluster_owned == 1)); then
+  if ((status != 0)) && ((cluster_owned == 1 || namespace_owned == 1)); then
     collect_diagnostics
   fi
   stop_forwards
@@ -148,10 +298,20 @@ finish() {
       echo "kind-e2e: preserving cluster $cluster_name" >&2
     else
       if ((release_installed == 1)); then
-        helm uninstall "$release_name" --namespace "$namespace" >/dev/null 2>&1 || true
+        helm_e2e uninstall "$release_name" --namespace "$namespace" >/dev/null 2>&1 || true
       fi
       kind delete cluster --name "$cluster_name" >/dev/null 2>&1 || true
     fi
+  elif ((namespace_owned == 1)); then
+    if [[ "$keep_resources" == "1" ]]; then
+      echo "kind-e2e: preserving resources in namespace $namespace" >&2
+    elif ! cleanup_existing_resources; then
+      cleanup_failed=1
+      echo "kind-e2e: cleanup failed; retained namespace: $namespace" >&2
+    fi
+  fi
+  if ((cleanup_failed == 1)) && ((status == 0)); then
+    status=1
   fi
   if ((status == 0)); then
     echo "kind-e2e: passed; evidence: $artifact_dir"
@@ -165,69 +325,84 @@ trap finish EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-if kind get clusters | grep -Fxq "$cluster_name"; then
-  die "Kind cluster '$cluster_name' already exists; choose SPARKWING_KIND_E2E_CLUSTER or remove it explicitly"
-fi
+if [[ "$provision_mode" == "kind" ]]; then
+  if kind get clusters | grep -Fxq "$cluster_name"; then
+    die "Kind cluster '$cluster_name' already exists; choose SPARKWING_KIND_E2E_CLUSTER or remove it explicitly"
+  fi
 
-echo "kind-e2e: building dashboard bundle"
-bash "$repo_root/bin/build-web.sh"
+  echo "kind-e2e: building dashboard bundle"
+  bash "$repo_root/bin/build-web.sh"
 
-echo "kind-e2e: building five release-shaped images"
-for i in "${!components[@]}"; do
-  component=${components[$i]}
-  dockerfile=${dockerfiles[$i]}
-  docker buildx build \
-    --load \
-    --file "$repo_root/$dockerfile" \
-    --build-arg "BINARY=$component" \
-    --build-arg "SPARKWING_VERSION=$image_tag" \
-    --tag "$component:$image_tag" \
-    "$repo_root"
-done
+  echo "kind-e2e: building five release-shaped images"
+  for i in "${!components[@]}"; do
+    component=${components[$i]}
+    dockerfile=${dockerfiles[$i]}
+    docker buildx build \
+      --load \
+      --file "$repo_root/$dockerfile" \
+      --build-arg "BINARY=$component" \
+      --build-arg "SPARKWING_VERSION=$image_tag" \
+      --tag "$(image_ref "$component")" \
+      "$repo_root"
+  done
+  docker run --rm --entrypoint /bin/sh "$(image_ref sparkwing-runner)" \
+    -ec '
+      command -v git-daemon >/dev/null
+      git init --bare /tmp/smoke.git >/dev/null
+      touch /tmp/smoke.git/git-daemon-export-ok
+      git daemon --reuseaddr --base-path=/tmp --export-all --listen=127.0.0.1 --port=9418 /tmp &
+      daemon_pid=$!
+      trap '\''kill "$daemon_pid" >/dev/null 2>&1 || true; wait "$daemon_pid" >/dev/null 2>&1 || true'\'' EXIT
+      for delay in 0.05 0.1 0.2 0.4 0.8; do
+        if git ls-remote git://127.0.0.1/smoke.git >/dev/null 2>&1; then
+          exit 0
+        fi
+        sleep "$delay"
+      done
+      exit 1
+    '
 
-fixture_work="$artifact_dir/fixture-work"
-fixture_bare="$artifact_dir/fixture-bare"
-mkdir -p "$fixture_work" "$fixture_bare"
-cp -R "$repo_root/testdata/kind-e2e/repo/." "$fixture_work/"
-git -C "$fixture_work" init --initial-branch=main
-git -C "$fixture_work" config user.name "Sparkwing Kind E2E"
-git -C "$fixture_work" config user.email "kind-e2e@sparkwing.invalid"
-git -C "$fixture_work" add .
-GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
-  git -C "$fixture_work" commit --message "test: add Kind golden-path fixture"
-git clone --bare "$fixture_work" "$fixture_bare/e2e.git"
-touch "$fixture_bare/e2e.git/git-daemon-export-ok"
-chmod -R a+rX "$fixture_bare"
-fixture_sha="$(git -C "$fixture_work" rev-parse HEAD)"
-
-kind_config="$artifact_dir/kind-config.yaml"
-cat >"$kind_config" <<EOF
+  kind_config="$artifact_dir/kind-config.yaml"
+  cat >"$kind_config" <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
-    extraMounts:
-      - hostPath: $fixture_bare
-        containerPath: /sparkwing-kind-fixture
-        readOnly: true
 EOF
 
-echo "kind-e2e: creating Kind cluster $cluster_name"
-cluster_owned=1
-kind create cluster --name "$cluster_name" --config "$kind_config" --wait 180s
+  echo "kind-e2e: creating Kind cluster $cluster_name"
+  cluster_owned=1
+  kind create cluster --name "$cluster_name" --config "$kind_config" --wait 180s
 
-echo "kind-e2e: loading images"
-images=()
-for component in "${components[@]}"; do
-  images+=("$component:$image_tag")
-done
-kind load docker-image --name "$cluster_name" "${images[@]}"
+  echo "kind-e2e: loading images"
+  images=()
+  for component in "${components[@]}"; do
+    images+=("$(image_ref "$component")")
+  done
+  kind load docker-image --name "$cluster_name" "${images[@]}"
+else
+  echo "kind-e2e: using existing Kubernetes context $kube_context"
+fi
 
-kubectl create namespace "$namespace"
-kubectl --namespace "$namespace" create secret generic sparkwing-webhook \
+namespace_resource="$(kube get namespace "$namespace" --ignore-not-found -o name)" || \
+  die "failed to check whether namespace '$namespace' exists"
+if [[ -n "$namespace_resource" ]]; then
+  die "namespace '$namespace' already exists; choose a dedicated empty namespace"
+fi
+create_owned_namespace
+namespace_owned=1
+create_owned_secret sparkwing-webhook \
   --from-literal="webhook-secret=$webhook_secret"
-kubectl --namespace "$namespace" create secret generic sparkwing-secrets-key \
+create_owned_secret sparkwing-secrets-key \
   --from-literal="key=$(openssl rand -base64 32)"
+
+fixture_root="$repo_root/testdata/kind-e2e/repo/.sparkwing"
+create_owned_configmap sparkwing-kind-fixture \
+  --from-file="go.mod=$fixture_root/go.mod" \
+  --from-file="go.sum=$fixture_root/go.sum" \
+  --from-file="main.go=$fixture_root/main.go" \
+  --from-file="kind.go=$fixture_root/jobs/kind.go" \
+  --from-file="kind_test.go=$fixture_root/jobs/kind_test.go"
 
 cat >"$artifact_dir/git-fixture.yaml" <<EOF
 apiVersion: v1
@@ -237,6 +412,8 @@ metadata:
   namespace: $namespace
   labels:
     app.kubernetes.io/name: sparkwing-kind-repo
+    sparkwing.dev/e2e-owned: "true"
+    sparkwing.dev/e2e-owner: "$run_owner"
 spec:
   selector:
     app.kubernetes.io/name: sparkwing-kind-repo
@@ -252,6 +429,8 @@ metadata:
   namespace: $namespace
   labels:
     app.kubernetes.io/name: sparkwing-kind-repo
+    sparkwing.dev/e2e-owned: "true"
+    sparkwing.dev/e2e-owner: "$run_owner"
 spec:
   replicas: 1
   selector:
@@ -261,37 +440,74 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: sparkwing-kind-repo
+        sparkwing.dev/e2e-owned: "true"
+        sparkwing.dev/e2e-owner: "$run_owner"
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+      initContainers:
+        - name: prepare
+          image: $(image_ref sparkwing-runner)
+          imagePullPolicy: $image_pull_policy
+          command: ["/bin/sh", "-ec"]
+          args:
+            - |
+              mkdir -p /work/source/.sparkwing/jobs
+              cp /fixture/go.mod /fixture/go.sum /fixture/main.go /work/source/.sparkwing/
+              cp /fixture/kind.go /fixture/kind_test.go /work/source/.sparkwing/jobs/
+              git -C /work/source init --initial-branch=main
+              git -C /work/source config user.name "Sparkwing Kubernetes E2E"
+              git -C /work/source config user.email "kubernetes-e2e@sparkwing.invalid"
+              git -C /work/source add .
+              GIT_AUTHOR_DATE="2000-01-01T00:00:00Z" GIT_COMMITTER_DATE="2000-01-01T00:00:00Z" \
+                git -C /work/source commit --message "test: add Kubernetes golden-path fixture"
+              git clone --bare /work/source /work/e2e.git
+              touch /work/e2e.git/git-daemon-export-ok
+          volumeMounts:
+            - name: source
+              mountPath: /fixture
+              readOnly: true
+            - name: repository
+              mountPath: /work
       containers:
         - name: git
-          image: sparkwing-runner:$image_tag
-          imagePullPolicy: Never
+          image: $(image_ref sparkwing-runner)
+          imagePullPolicy: $image_pull_policy
           command: ["git"]
           args: ["daemon", "--reuseaddr", "--base-path=/srv/git", "--export-all", "--verbose", "/srv/git"]
           ports:
             - name: git
               containerPort: 9418
           volumeMounts:
-            - name: fixture
+            - name: repository
               mountPath: /srv/git
               readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: git
+            initialDelaySeconds: 1
+            periodSeconds: 1
       volumes:
-        - name: fixture
-          hostPath:
-            path: /sparkwing-kind-fixture
-            type: Directory
+        - name: source
+          configMap:
+            name: sparkwing-kind-fixture
+        - name: repository
+          emptyDir: {}
 EOF
-kubectl apply -f "$artifact_dir/git-fixture.yaml"
-kubectl --namespace "$namespace" rollout status deployment/kind-repo --timeout=180s
+kube apply -f "$artifact_dir/git-fixture.yaml"
+kube --namespace "$namespace" rollout status deployment/kind-repo --timeout=180s
 
 write_bootstrap_values() {
   local path=$1
   cat >"$path" <<EOF
 controller:
   image:
-    repository: sparkwing-controller
+    repository: ${image_prefix}sparkwing-controller
     tag: $image_tag
-    pullPolicy: Never
+    pullPolicy: $image_pull_policy
   githubWebhookSecret:
     name: sparkwing-webhook
   secretsKey:
@@ -302,24 +518,24 @@ controller:
       keepOnUninstall: true
 web:
   image:
-    repository: sparkwing-web
+    repository: ${image_prefix}sparkwing-web
     tag: $image_tag
-    pullPolicy: Never
+    pullPolicy: $image_pull_policy
 sparkwing-runner-bundle:
   runner:
     replicas: 1
     image:
-      repository: sparkwing-runner
+      repository: ${image_prefix}sparkwing-runner
       tag: $image_tag
-      pullPolicy: Never
+      pullPolicy: $image_pull_policy
     labels: [cluster]
     maxClaimsBeforeRestart: 0
     alsoClaimTriggers: true
   cache:
     image:
-      repository: sparkwing-cache
+      repository: ${image_prefix}sparkwing-cache
       tag: $image_tag
-      pullPolicy: Never
+      pullPolicy: $image_pull_policy
     dependencyProxy:
       enabled: false
     storage:
@@ -327,9 +543,9 @@ sparkwing-runner-bundle:
       keepOnUninstall: true
   logs:
     image:
-      repository: sparkwing-logs
+      repository: ${image_prefix}sparkwing-logs
       tag: $image_tag
-      pullPolicy: Never
+      pullPolicy: $image_pull_policy
     storage:
       enabled: true
       keepOnUninstall: true
@@ -353,18 +569,22 @@ sparkwing-runner-bundle:
       name: sparkwing-token
 EOF
 
-helm lint "$repo_root/charts/sparkwing-full" -f "$bootstrap_values"
-helm template "$release_name" "$repo_root/charts/sparkwing-full" \
+helm_e2e lint "$repo_root/charts/sparkwing-full" -f "$bootstrap_values"
+helm_e2e template "$release_name" "$repo_root/charts/sparkwing-full" \
   --namespace "$namespace" -f "$bootstrap_values" -f "$authenticated_values" >"$artifact_dir/rendered-chart.yaml"
-helm install "$release_name" "$repo_root/charts/sparkwing-full" \
-  --namespace "$namespace" -f "$bootstrap_values" --timeout 5m --wait
+release_install_attempted=1
+helm_e2e install "$release_name" "$repo_root/charts/sparkwing-full" \
+  --namespace "$namespace" --description "$release_owner_description" --labels "$owner_token_label" \
+  -f "$bootstrap_values" --timeout 5m --wait
 release_installed=1
+release_owned=1
+label_owned_release_pvcs
 
 resource_name() {
   local resource=$1
   local component=$2
   local names
-  names="$(kubectl --namespace "$namespace" get "$resource" \
+  names="$(kube --namespace "$namespace" get "$resource" \
     -l "app.kubernetes.io/instance=$release_name,app.kubernetes.io/component=$component" \
     -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')"
   [[ "$(printf '%s\n' "$names" | sed '/^$/d' | wc -l | tr -d ' ')" == "1" ]] || \
@@ -374,7 +594,7 @@ resource_name() {
 
 ready_pod_identity() {
   local component=$1
-  kubectl --namespace "$namespace" get pods \
+  kube --namespace "$namespace" get pods \
     -l "app.kubernetes.io/instance=$release_name,app.kubernetes.io/component=$component" \
     -o json | jq -er '
       [.items[] | select(any(.status.conditions[]?; .type == "Ready" and .status == "True"))]
@@ -392,7 +612,7 @@ runner_deployment="$(resource_name deployment runner)"
 cache_deployment="$(resource_name deployment cache)"
 controller_pvc="$(resource_name pvc controller)"
 
-kubectl --namespace "$namespace" wait deployment \
+kube --namespace "$namespace" wait deployment \
   -l "app.kubernetes.io/instance=$release_name" \
   --for=condition=Available --timeout=300s
 
@@ -402,7 +622,7 @@ start_forward() {
   local label=$3
   local log="$artifact_dir/port-forward-$label.log"
   local pid port
-  kubectl --namespace "$namespace" port-forward "service/$service" ":$remote_port" >"$log" 2>&1 &
+  kube --namespace "$namespace" port-forward "service/$service" ":$remote_port" >"$log" 2>&1 &
   pid=$!
   forward_pids+=("$pid")
   for _ in {1..100}; do
@@ -434,11 +654,11 @@ token_response="$(curl --fail --silent --show-error --max-time 10 \
 admin_token="$(jq -er '.token' <<<"$token_response")"
 [[ "$admin_token" == sw* ]] || die "controller returned an invalid bootstrap token"
 
-kubectl --namespace "$namespace" create secret generic sparkwing-token \
+create_owned_secret sparkwing-token \
   --from-literal="token=$admin_token"
-helm upgrade "$release_name" "$repo_root/charts/sparkwing-full" \
+helm_e2e upgrade "$release_name" "$repo_root/charts/sparkwing-full" \
   --namespace "$namespace" -f "$bootstrap_values" -f "$authenticated_values" --timeout 5m --wait
-kubectl --namespace "$namespace" wait deployment \
+kube --namespace "$namespace" wait deployment \
   -l "app.kubernetes.io/instance=$release_name" \
   --for=condition=Available --timeout=300s
 stop_forwards
@@ -452,13 +672,12 @@ unauthenticated_status="$(curl --silent --show-error --max-time 5 \
 [[ "$unauthenticated_status" == "401" ]] || die "protected controller read returned $unauthenticated_status without a token"
 api_get "/api/v1/runs?limit=1" >/dev/null
 
-kubectl --namespace "$namespace" exec "deployment/$cache_deployment" -- \
+kube --namespace "$namespace" exec "deployment/$cache_deployment" -- \
   git config --global url."git://kind-repo.${namespace}.svc.cluster.local/".insteadOf \
   "https://github.com/sparkwing-kind/"
-resolved_fixture_sha="$(kubectl --namespace "$namespace" exec "deployment/$cache_deployment" -- \
+fixture_sha="$(kube --namespace "$namespace" exec "deployment/$cache_deployment" -- \
   git ls-remote "https://github.com/sparkwing-kind/e2e.git" refs/heads/main | awk '{print $1}')"
-[[ "$resolved_fixture_sha" == "$fixture_sha" ]] || \
-  die "in-cluster Git resolved $resolved_fixture_sha, want fixture commit $fixture_sha"
+[[ "$fixture_sha" =~ ^[0-9a-f]{40}$ ]] || die "in-cluster Git returned invalid fixture commit $fixture_sha"
 
 webhook_payload() {
   jq -nc --arg sha "$fixture_sha" '{
@@ -569,9 +788,9 @@ wait_run_status "$cancelled_run" cancelled 120
 echo "kind-e2e: proving runner restart and a fresh claim"
 runner_pod_before=$initial_runner_pod
 runner_uid_before=$initial_runner_uid
-kubectl --namespace "$namespace" rollout restart "deployment/$runner_deployment"
-kubectl --namespace "$namespace" rollout status "deployment/$runner_deployment" --timeout=300s
-kubectl --namespace "$namespace" get "deployment/$runner_deployment" -o json | \
+kube --namespace "$namespace" rollout restart "deployment/$runner_deployment"
+kube --namespace "$namespace" rollout status "deployment/$runner_deployment" --timeout=300s
+kube --namespace "$namespace" get "deployment/$runner_deployment" -o json | \
   jq -e '.spec.replicas == 1 and .status.readyReplicas == 1 and .status.updatedReplicas == 1 and (.status.unavailableReplicas // 0) == 0' >/dev/null
 IFS=$'\t' read -r runner_pod_after runner_uid_after < <(ready_pod_identity runner)
 [[ "$runner_uid_after" != "$runner_uid_before" ]] || die "runner rollout did not replace its pod"
@@ -586,8 +805,8 @@ post_runner_claim="$(jq -er '.nodes[0].claimed_by | select(startswith("runner:")
 
 echo "kind-e2e: proving controller restart and retained run state"
 IFS=$'\t' read -r controller_pod_before controller_uid_before < <(ready_pod_identity controller)
-kubectl --namespace "$namespace" rollout restart "deployment/$controller_deployment"
-kubectl --namespace "$namespace" rollout status "deployment/$controller_deployment" --timeout=300s
+kube --namespace "$namespace" rollout restart "deployment/$controller_deployment"
+kube --namespace "$namespace" rollout status "deployment/$controller_deployment" --timeout=300s
 IFS=$'\t' read -r controller_pod_after controller_uid_after < <(ready_pod_identity controller)
 [[ "$controller_uid_after" != "$controller_uid_before" ]] || die "controller rollout did not replace its pod"
 [[ "$controller_pod_after" != "$controller_pod_before" ]] || die "controller rollout did not replace its pod name"
@@ -623,19 +842,24 @@ curl --fail --silent --show-error --max-time 10 \
   grep -q "sparkwing-kind-e2e-success run_id=$retry_run"
 
 echo "kind-e2e: proving uninstall retention and reinstall recovery"
-controller_pvc_uid="$(kubectl --namespace "$namespace" get pvc "$controller_pvc" -o jsonpath='{.metadata.uid}')"
+controller_pvc_uid="$(kube --namespace "$namespace" get pvc "$controller_pvc" -o jsonpath='{.metadata.uid}')"
 stop_forwards
 controller_port=""
 web_port=""
-helm uninstall "$release_name" --namespace "$namespace" --timeout 5m
+helm_e2e uninstall "$release_name" --namespace "$namespace" --timeout 5m
 release_installed=0
-retained_pvc_uid="$(kubectl --namespace "$namespace" get pvc "$controller_pvc" -o jsonpath='{.metadata.uid}')"
+release_owned=0
+release_install_attempted=0
+retained_pvc_uid="$(kube --namespace "$namespace" get pvc "$controller_pvc" -o jsonpath='{.metadata.uid}')"
 [[ "$retained_pvc_uid" == "$controller_pvc_uid" ]] || die "controller PVC was not retained across uninstall"
 
-helm install "$release_name" "$repo_root/charts/sparkwing-full" \
-  --namespace "$namespace" -f "$bootstrap_values" -f "$authenticated_values" --timeout 5m --wait
+release_install_attempted=1
+helm_e2e install "$release_name" "$repo_root/charts/sparkwing-full" \
+  --namespace "$namespace" --description "$release_owner_description" --labels "$owner_token_label" \
+  -f "$bootstrap_values" -f "$authenticated_values" --timeout 5m --wait
 release_installed=1
-kubectl --namespace "$namespace" wait deployment \
+release_owned=1
+kube --namespace "$namespace" wait deployment \
   -l "app.kubernetes.io/instance=$release_name" \
   --for=condition=Available --timeout=300s
 start_forward "$controller_service" 80 controller-reinstall
@@ -649,6 +873,12 @@ curl --fail --silent --show-error --max-time 10 \
 
 cat >"$artifact_dir/result.txt" <<EOF
 status=success
+provision_mode=$provision_mode
+kube_context=$kube_context
+namespace=$namespace
+release=$release_name
+image_prefix=$image_prefix
+image_tag=$image_tag
 success_run=$success_run
 cancelled_run=$cancelled_run
 post_runner_restart_run=$post_runner_restart_run

@@ -103,7 +103,21 @@ code change to unlock.
   every enabled image until that release blocker is cleared.
 - **release:** Container publication now builds `sparkwing-runner` from its
   dedicated image contract, preserving the entrypoint, Go toolchain, and SSH
-  client the Helm workload requires.
+  client the Helm workload requires. The image also includes the split Alpine
+  `git-daemon` package, so repository fixtures and other daemon-mode Git
+  workloads do not fail after scheduling.
+- **release:** The Kubernetes golden-path proof can target either a disposable
+  local Kind cluster or an explicit existing-cluster context with caller-supplied
+  image coordinates. Existing-cluster runs require an exact namespace/release
+  cleanup allow-list, use a ConfigMap-backed Git fixture instead of a node host
+  mount, and leave cluster infrastructure intact.
+- **chart:** Controller and web volumes are now assigned to the configured
+  non-root UID by a short CHOWN-only init container before startup, so their
+  private Sparkwing homes work on root-owned PVC and `emptyDir` mounts without
+  weakening the application containers. Operators whose storage driver already
+  sets ownership can disable `volumePermissions.enabled`; this is also required
+  by Restricted Pod Security and by custom images that do not contain
+  `/bin/chown`.
 - **s3 state:** The local SQLite outbox now retains a queued state or artifact
   write when replay reaches a non-transient object-store error, and `Drain`
   returns that error. The background drainer emits one structured warning for

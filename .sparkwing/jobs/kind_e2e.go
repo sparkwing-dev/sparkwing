@@ -11,15 +11,15 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// KindE2E runs the release-shaped Kubernetes stack in a disposable Kind cluster.
+// KindE2E runs the release-shaped Kubernetes stack locally or against an existing cluster.
 type KindE2E struct{ sparkwing.Base }
 
 func (KindE2E) ShortHelp() string {
-	return "Prove the controller and runner golden path in a local Kind cluster"
+	return "Prove the controller and runner golden path in Kubernetes"
 }
 
 func (KindE2E) Help() string {
-	return "Builds the five deployable images from the checkout, loads them into a disposable Kind cluster, installs the full Helm chart, and exercises auth, GitHub webhook intake, runner execution, logs, restarts, retry, cancellation, and retained state. Requires a running local Docker daemon, kind, kubectl, helm, curl, jq, git, and openssl."
+	return "Installs the full Helm chart and exercises auth, GitHub webhook intake, runner execution, logs, restarts, retry, cancellation, and retained state. By default it builds the five deployable images and loads them into a disposable Kind cluster. SPARKWING_KIND_E2E_PROVISION=existing targets an explicit Kubernetes context with caller-supplied image coordinates and an exact namespace/release cleanup allow-list."
 }
 
 func (KindE2E) Examples() []sparkwing.Example {

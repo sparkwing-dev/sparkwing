@@ -132,7 +132,7 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, required := range []string{
-		"RUN apk add --no-cache ca-certificates git openssh-client",
+		"RUN apk add --no-cache ca-certificates git git-daemon openssh-client",
 		"COPY --from=golang:1.26-alpine /usr/local/go /usr/local/go",
 		"COPY build/runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh",
 		"COPY --from=build /out/sparkwing-runner /usr/local/bin/sparkwing-runner",

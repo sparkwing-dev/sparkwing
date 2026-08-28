@@ -133,6 +133,329 @@ func TestKindE2EPreflightOnlyProbesTools(t *testing.T) {
 	}
 }
 
+func TestKindE2EExistingClusterPreflightIsExplicitAndDockerFree(t *testing.T) {
+	bin := t.TempDir()
+	record := filepath.Join(t.TempDir(), "calls")
+	writeStub(t, bin, "kubectl", `printf 'kubectl %s\n' "$*" >>"$CALL_RECORD"`)
+	writeStub(t, bin, "helm", `printf 'helm %s\n' "$*" >>"$CALL_RECORD"`)
+	for _, name := range []string{"curl", "jq", "openssl"} {
+		writeStub(t, bin, name, "exit 0\n")
+	}
+	result := runKindScriptWithEnv(t, bin,
+		"CALL_RECORD="+record,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing",
+	)
+	if result.err != nil {
+		t.Fatalf("existing-cluster preflight: %v\n%s", result.err, result.output)
+	}
+	body, err := os.ReadFile(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := string(body)
+	for _, want := range []string{
+		"kubectl version --client",
+		"helm version --short",
+		"kubectl config get-contexts remote-e2e",
+		"kubectl --context remote-e2e version --request-timeout=10s",
+	} {
+		if !strings.Contains(calls, want) {
+			t.Errorf("existing preflight calls missing %q:\n%s", want, calls)
+		}
+	}
+	if strings.Contains(calls, "docker") || strings.Contains(calls, "kind") {
+		t.Fatalf("existing-cluster preflight touched local infrastructure:\n%s", calls)
+	}
+}
+
+func TestKindE2EExistingClusterPreflightRequiresExactCleanupAllowList(t *testing.T) {
+	bin := t.TempDir()
+	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl"} {
+		writeStub(t, bin, name, "exit 0\n")
+	}
+	result := runKindScriptWithEnv(t, bin,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=wrong/release",
+	)
+	if result.err == nil || !strings.Contains(result.output, "must equal sparkwing-e2e/sparkwing") {
+		t.Fatalf("mismatched cleanup allow-list result = %v, %q", result.err, result.output)
+	}
+}
+
+func TestKindE2EExistingClusterPreflightRejectsAnUnsafeImagePrefix(t *testing.T) {
+	bin := t.TempDir()
+	for _, name := range []string{"kubectl", "helm", "curl", "jq", "openssl"} {
+		writeStub(t, bin, name, "exit 0\n")
+	}
+	result := runKindScriptWithEnv(t, bin,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing\nsecurityContext:",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing",
+	)
+	if result.err == nil || !strings.Contains(result.output, "unsafe in an image repository") {
+		t.Fatalf("unsafe image prefix result = %v, %q", result.err, result.output)
+	}
+}
+
+const kindE2ETestOwner = "0123456789abcdef0123456789abcdef"
+
+func TestKindE2EExistingClusterCleanupBeforeHelmDeletesOnlyOwnedObjects(t *testing.T) {
+	bin, calls, artifacts := existingClusterFailureHarness(t)
+	result := runKindScriptFullWithEnv(t, bin,
+		"CALL_RECORD="+calls,
+		"NAMESPACE_OWNER=true",
+		"NAMESPACE_OWNER_TOKEN="+kindE2ETestOwner,
+		"FAIL_AT=fixture",
+		"SPARKWING_KIND_E2E_ARTIFACT_DIR="+artifacts,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing",
+	)
+	if result.err == nil {
+		t.Fatal("forced fixture rollout failure unexpectedly passed")
+	}
+	body, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	lookup := strings.Index(got, "get namespace sparkwing-e2e --ignore-not-found -o name")
+	atomicCreate := strings.Index(got, "kubectl --context remote-e2e create -f -")
+	ownerCheck := strings.Index(got, "get namespace sparkwing-e2e -o jsonpath={.metadata.labels.sparkwing\\.dev/e2e-owned}")
+	ownedDelete := strings.Index(got, "delete deployment,service,configmap,secret,persistentvolumeclaim -l sparkwing.dev/e2e-owned=true,sparkwing.dev/e2e-owner="+kindE2ETestOwner)
+	if lookup < 0 || atomicCreate < lookup || ownerCheck < atomicCreate || ownedDelete < ownerCheck {
+		t.Fatalf("existing cleanup did not atomically claim and verify its namespace before deleting owned objects:\n%s", got)
+	}
+	if strings.Contains(got, " helm --kube-context remote-e2e uninstall ") ||
+		strings.Contains(got, "helm --kube-context remote-e2e list --all") ||
+		strings.Contains(got, "label persistentvolumeclaim") {
+		t.Fatalf("pre-Helm failure inspected, labeled, or uninstalled release resources it never attempted:\n%s", got)
+	}
+	for _, forbidden := range []string{"delete namespace", "delete cluster", "docker ", "kind "} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("existing cleanup touched cluster infrastructure via %q:\n%s", forbidden, got)
+		}
+	}
+}
+
+func TestKindE2EExistingClusterCleanupRefusesANamespaceOwnedByAnotherRun(t *testing.T) {
+	bin, calls, artifacts := existingClusterFailureHarness(t)
+	result := runKindScriptFullWithEnv(t, bin,
+		"CALL_RECORD="+calls,
+		"NAMESPACE_OWNER=true",
+		"NAMESPACE_OWNER_TOKEN=ffffffffffffffffffffffffffffffff",
+		"FAIL_AT=fixture",
+		"SPARKWING_KIND_E2E_ARTIFACT_DIR="+artifacts,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing",
+	)
+	if result.err == nil || !strings.Contains(result.output, "namespace sparkwing-e2e is not owned by this run") {
+		t.Fatalf("unowned cleanup result = %v, %q", result.err, result.output)
+	}
+	body, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	if strings.Contains(got, " uninstall ") || strings.Contains(got, " delete ") {
+		t.Fatalf("unowned namespace cleanup issued a destructive call:\n%s", got)
+	}
+}
+
+func TestKindE2EExistingClusterLookupErrorStopsBeforeNamespaceCreate(t *testing.T) {
+	bin, calls, artifacts := existingClusterFailureHarness(t)
+	result := runKindScriptFullWithEnv(t, bin,
+		"CALL_RECORD="+calls,
+		"NAMESPACE_LOOKUP_ERROR=1",
+		"SPARKWING_KIND_E2E_ARTIFACT_DIR="+artifacts,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing",
+	)
+	if result.err == nil || !strings.Contains(result.output, "failed to check whether namespace 'sparkwing-e2e' exists") {
+		t.Fatalf("namespace lookup error result = %v, %q", result.err, result.output)
+	}
+	body, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(body); strings.Contains(got, " create namespace ") || strings.Contains(got, " create -f -") {
+		t.Fatalf("namespace lookup error proceeded to create:\n%s", got)
+	}
+}
+
+func TestKindE2EExistingClusterCreateConflictDoesNotReadOrMutateTheWinner(t *testing.T) {
+	bin, calls, artifacts := existingClusterFailureHarness(t)
+	result := runKindScriptFullWithEnv(t, bin,
+		"CALL_RECORD="+calls,
+		"FAIL_AT=namespace-create",
+		"SPARKWING_KIND_E2E_ARTIFACT_DIR="+artifacts,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing",
+	)
+	if result.err == nil {
+		t.Fatal("namespace create conflict unexpectedly passed")
+	}
+	if strings.Contains(result.output, "collecting failure diagnostics") {
+		t.Fatalf("namespace create conflict collected a foreign namespace's diagnostics: %q", result.output)
+	}
+	body, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	if !strings.Contains(got, "kubectl --context remote-e2e create -f -") {
+		t.Fatalf("namespace create conflict never reached the atomic create:\n%s", got)
+	}
+	for _, forbidden := range []string{
+		"get namespace sparkwing-e2e -o jsonpath=",
+		"helm --kube-context",
+		" delete ",
+		" logs ",
+		"cluster-info dump",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("namespace create conflict crossed the foreign-namespace boundary via %q:\n%s", forbidden, got)
+		}
+	}
+}
+
+func TestKindE2EExistingClusterUninstallsOnlyItsAttemptedRelease(t *testing.T) {
+	bin, calls, artifacts := existingClusterFailureHarness(t)
+	result := runKindScriptFullWithEnv(t, bin,
+		"CALL_RECORD="+calls,
+		"NAMESPACE_OWNER=true",
+		"NAMESPACE_OWNER_TOKEN="+kindE2ETestOwner,
+		"FAIL_AT=helm-install",
+		"HELM_RELEASE=sparkwing",
+		"SPARKWING_KIND_E2E_ARTIFACT_DIR="+artifacts,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing",
+	)
+	if result.err == nil {
+		t.Fatal("forced Helm install failure unexpectedly passed")
+	}
+	body, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	attempt := strings.Index(got, "install sparkwing ")
+	attemptOwner := strings.Index(got, "--labels sparkwing.dev/e2e-owner="+kindE2ETestOwner)
+	ownedList := strings.Index(got, "list --all --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner)
+	labelPVCs := strings.Index(got, "label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing")
+	uninstall := strings.Index(got, "uninstall sparkwing --namespace sparkwing-e2e")
+	if attempt < 0 || attemptOwner < attempt || ownedList < attemptOwner || labelPVCs < ownedList || uninstall < labelPVCs {
+		t.Fatalf("attempted release was not ownership-proved before labeling PVCs and uninstalling:\n%s", got)
+	}
+}
+
+func TestKindE2EExistingClusterRetainsAReleaseWithoutItsOwnerLabel(t *testing.T) {
+	bin, calls, artifacts := existingClusterFailureHarness(t)
+	result := runKindScriptFullWithEnv(t, bin,
+		"CALL_RECORD="+calls,
+		"NAMESPACE_OWNER=true",
+		"NAMESPACE_OWNER_TOKEN="+kindE2ETestOwner,
+		"FAIL_AT=helm-install",
+		"SPARKWING_KIND_E2E_ARTIFACT_DIR="+artifacts,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing",
+	)
+	if result.err == nil {
+		t.Fatal("forced Helm install failure unexpectedly passed")
+	}
+	body, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	if !strings.Contains(got, "list --all --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner) {
+		t.Fatalf("failed install did not query durable per-run Helm metadata:\n%s", got)
+	}
+	if strings.Contains(got, "label persistentvolumeclaim") ||
+		strings.Contains(got, " uninstall sparkwing ") {
+		t.Fatalf("release without the per-run owner label was labeled or uninstalled:\n%s", got)
+	}
+}
+
+func existingClusterFailureHarness(t *testing.T) (bin, calls, artifacts string) {
+	t.Helper()
+	bin = t.TempDir()
+	for _, name := range []string{"cat", "dirname", "grep", "jq", "mkdir"} {
+		linkTool(t, bin, name)
+	}
+	calls = filepath.Join(t.TempDir(), "calls")
+	writeStub(t, bin, "kubectl", `
+printf 'kubectl %s\n' "$*" >>"$CALL_RECORD"
+case "$*" in
+  *"get namespace sparkwing-e2e --ignore-not-found -o name"*)
+    if [ "${NAMESPACE_LOOKUP_ERROR:-0}" = "1" ]; then
+      exit 42
+    fi
+    ;;
+  *"get namespace sparkwing-e2e -o jsonpath="*)
+    printf '%s\t%s' "$NAMESPACE_OWNER" "$NAMESPACE_OWNER_TOKEN"
+    ;;
+  *"--context remote-e2e create -f -"*)
+    if [ "${FAIL_AT:-}" = "namespace-create" ]; then
+      exit 23
+    fi
+    ;;
+  *"rollout status deployment/kind-repo"*)
+    if [ "${FAIL_AT:-}" = "fixture" ]; then
+      exit 23
+    fi
+    ;;
+esac
+`)
+	writeStub(t, bin, "helm", `
+printf 'helm %s\n' "$*" >>"$CALL_RECORD"
+case "$*" in
+  *" install sparkwing "*)
+    if [ "${FAIL_AT:-}" = "helm-install" ]; then
+      exit 23
+    fi
+    ;;
+  *"list --all --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="*)
+    if [ -n "${HELM_RELEASE:-}" ]; then
+      printf '[{"name":"%s"}]\n' "$HELM_RELEASE"
+    else
+      printf '[]\n'
+    fi
+    ;;
+esac
+`)
+	writeStub(t, bin, "curl", "exit 0\n")
+	writeStub(t, bin, "openssl", "printf '"+kindE2ETestOwner+"\\n'\n")
+	artifacts = filepath.Join(t.TempDir(), "artifacts")
+	return bin, calls, artifacts
+}
+
 func TestKindE2EDeletesAClusterLeftByFailedCreation(t *testing.T) {
 	bin := t.TempDir()
 	for _, name := range []string{"cat", "chmod", "cp", "dirname", "grep", "mkdir", "touch"} {
@@ -142,9 +465,10 @@ func TestKindE2EDeletesAClusterLeftByFailedCreation(t *testing.T) {
 	writeStub(t, bin, "docker", "exit 0\n")
 	writeStub(t, bin, "kubectl", "exit 0\n")
 	writeStub(t, bin, "helm", "exit 0\n")
-	for _, name := range []string{"curl", "jq", "openssl"} {
+	for _, name := range []string{"curl", "jq"} {
 		writeStub(t, bin, name, "exit 0\n")
 	}
+	writeStub(t, bin, "openssl", "printf '"+kindE2ETestOwner+"\\n'\n")
 	writeStub(t, bin, "git", `
 if [ "$1" = "clone" ]; then
   mkdir -p "$4"
@@ -195,8 +519,25 @@ func TestKindE2EOwnsReleaseImagesAndFailureEvidence(t *testing.T) {
 	}
 	for _, marker := range []string{
 		"docker buildx build",
+		"command -v git-daemon",
+		"git ls-remote git://127.0.0.1/smoke.git",
 		"kind load docker-image",
-		"helm install",
+		"helm_e2e install",
+		"SPARKWING_KIND_E2E_PROVISION",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP",
+		"create namespace \"$namespace\" --dry-run=client -o yaml",
+		"sparkwing.dev/e2e-owner=$run_owner",
+		"--description \"$release_owner_description\"",
+		"--labels \"$owner_token_label\"",
+		"provision_mode=$provision_mode",
+		"kube_context=$kube_context",
+		"namespace=$namespace",
+		"release=$release_name",
+		"image_prefix=$image_prefix",
+		"image_tag=$image_tag",
+		"configmap sparkwing-kind-fixture",
+		"initContainers:",
+		"readinessProbe:",
 		"invalid webhook returned $invalid_webhook_status, want 401",
 		"sha256=0000000000000000000000000000000000000000000000000000000000000000",
 		".runs | length == 0",
@@ -216,7 +557,7 @@ func TestKindE2EOwnsReleaseImagesAndFailureEvidence(t *testing.T) {
 		"web_static_path",
 		"referenced web static asset was empty",
 		"controller PVC was not retained across uninstall",
-		"helm get manifest",
+		"helm_e2e get manifest",
 		"get events --sort-by=.metadata.creationTimestamp",
 		"logs \"$pod\" --all-containers",
 		"kind export logs",
@@ -228,6 +569,9 @@ func TestKindE2EOwnsReleaseImagesAndFailureEvidence(t *testing.T) {
 	}
 	if strings.Contains(script, "docker push") || strings.Contains(script, "kind create cluster --image") {
 		t.Fatal("Kind harness gained a registry push or an unowned node-image override")
+	}
+	if strings.Contains(script, "hostPath:") || strings.Contains(script, "extraMounts:") {
+		t.Fatal("Kubernetes fixture depends on a Kind-only host mount")
 	}
 	if strings.Contains(script, `post_runner_claim" != "$success_claim`) {
 		t.Fatal("runner restart proof compares per-claim nonce values instead of the replacement pod hostname")

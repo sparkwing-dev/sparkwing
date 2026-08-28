@@ -131,12 +131,41 @@ cluster:
 sparkwing run kind-e2e
 ```
 
-The pipeline requires a running Docker daemon plus Kind, kubectl, Helm, curl,
-jq, git, and OpenSSL. It refuses to reuse an existing cluster with the selected
+The local mode requires a running Docker daemon plus Kind, kubectl, Helm, curl,
+jq, and OpenSSL. It refuses to reuse an existing cluster with the selected
 name, preserves diagnostics outside the cluster, and removes only the cluster
 it created. Set `SPARKWING_KIND_E2E_KEEP_CLUSTER=1` to retain a failed cluster
-for inspection. This verifies the current source revision; it does not make the
-chart's incompatible default public image tags runnable.
+for inspection.
+
+The same protocol proof can target an existing cluster without provisioning or
+deleting cluster infrastructure. Use a dedicated namespace and immutable image
+tag:
+
+```bash
+export SPARKWING_KIND_E2E_PROVISION=existing
+export SPARKWING_KIND_E2E_KUBE_CONTEXT=sparkwing-e2e
+export SPARKWING_KIND_E2E_NAMESPACE=sparkwing-e2e-verify
+export SPARKWING_KIND_E2E_RELEASE=sparkwing-e2e
+export SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing
+export SPARKWING_KIND_E2E_TAG=commit-0123456789ab
+export SPARKWING_KIND_E2E_ALLOW_CLEANUP="$SPARKWING_KIND_E2E_NAMESPACE/$SPARKWING_KIND_E2E_RELEASE"
+sparkwing run kind-e2e
+```
+
+Existing-cluster mode refuses an absent context, implicit image coordinates, a
+pre-existing namespace, or an allow-list that differs from the
+configured namespace and release. It installs the Git fixture from a ConfigMap
+instead of a node host mount. Cleanup rechecks a unique per-run namespace owner
+token, uninstalls the allow-listed Helm release only when its durable Helm
+release metadata carries the same token, and deletes only resources carrying
+both ownership labels. It leaves the cluster and namespace intact. Set
+`SPARKWING_KIND_E2E_KEEP_RESOURCES=1` to retain those resources for inspection.
+
+Local mode builds and verifies images from the checkout. Existing-cluster mode
+exercises the caller-selected repository prefix and tag and records those
+coordinates in its evidence; it does not resolve a mutable tag to a digest or
+prove how those images were built. Neither mode makes the chart's incompatible
+default public image tags runnable.
 
 For a production install, attach the Secrets you created above:
 
@@ -183,6 +212,14 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `web.cache.url` | Cache the services panel probes. Probe-only; empty and no bundled cache leaves it off the panel. | (auto-computed from sub-chart) |
 | `web.tokenSecret.name` | Secret holding the controller-bearer token. | `""` |
 | `web.requireLogin` | Gate the dashboard behind /login (first visit offers first-admin signup). | `false` |
+
+### Security and volume ownership
+
+| Key | Purpose | Default |
+| --- | --- | --- |
+| `podSecurityContext.runAsUser` | Non-root UID for controller and web. | `65534` |
+| `podSecurityContext.fsGroup` | Group for mounted storage. | `65534` |
+| `volumePermissions.enabled` | Run a CHOWN-only init container before controller and web. | `true` |
 
 ### Ingress
 
@@ -259,6 +296,24 @@ doesn't wipe run history. Disable with
 `controller.storage.pvc.keepOnUninstall=false`, or
 `controller.storage.type=emptyDir` for a fully ephemeral install
 (only useful for kind / CI smoke tests).
+
+By default, controller and web each run a short ownership init container before
+the non-root application starts. The init container runs as UID 0 with a
+read-only root filesystem, no privilege escalation, and only the `CHOWN`
+capability; it assigns the mounted Sparkwing home root to
+`podSecurityContext.runAsUser:podSecurityContext.fsGroup`. The application
+container remains non-root with all capabilities dropped. Set
+`volumePermissions.enabled=false` only when the storage driver provisions the
+mounted root with that ownership already. The enabled path requires controller
+and web images containing `/bin/chown`; Sparkwing's release-shaped Alpine images
+include it, but custom images must provide it themselves.
+
+The ownership init container runs as UID 0 with `CHOWN`, so Kubernetes' baseline
+policy admits it but the Restricted Pod Security Standard does not. In a
+Restricted namespace, arrange the configured UID/GID through the CSI driver or
+another provisioning step and set `volumePermissions.enabled=false`. This
+opt-out removes only the init container; the application containers retain the
+chart's non-root, drop-all-capabilities security context.
 
 For a clean uninstall:
 
