@@ -50,6 +50,16 @@ code change to unlock.
 ## [Unreleased]
 ### Added
 
+- **cli:** `sparkwing pipeline trigger --working-tree` now freezes tracked
+  edits and untracked non-ignored files into an immutable Git snapshot, seeds
+  it before admission, and runs it remotely without an origin push. Remote
+  runners can clone source through the controller's admin-authenticated,
+  read-only Git proxy using outbound HTTPS only. Login-enabled dashboard
+  ingress accepts machine bearers on that proxy, direct-cache writes use only
+  the cache token, exact bytes are restored after Git checkout, retries and
+  same-repository children retain desktop placement, and each repository admits
+  at most 128 distinct workspace refs without evicting admitted work.
+
 - **controller:** Pull-request webhook runs now publish best-effort GitHub
   commit statuses under `sparkwing/<pipeline>` when `GITHUB_TOKEN` is set.
   `SPARKWING_DASHBOARD_URL` optionally adds a run-detail link. GitHub delivery

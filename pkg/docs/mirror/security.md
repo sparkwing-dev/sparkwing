@@ -71,6 +71,16 @@ empty token disables auth. Read endpoints (clone, file access, repo
 listing) are reachable only in-cluster via the Service, not the
 ingress. In-cluster callers reach it directly without a token.
 
+Off-cluster runners read Git through the controller's admin-scoped
+`/api/v1/gitcache/git/...` proxy. The controller removes its bearer before the
+internal request and permits only registration and upload-pack reads. A
+login-enabled dashboard exposes that path to machine bearers without accepting
+browser session credentials. Direct-cache binary and seed writes use only
+`SPARKWING_CACHE_TOKEN`; direct-cache mode never receives the controller bearer.
+Keep the raw cache Service private: `pipeline trigger --working-tree` may seed
+uncommitted source, and the cache retains up to 128 workspace refs per
+repository.
+
 ## Container hardening
 
 The Helm charts run the long-lived services as non-root with explicit

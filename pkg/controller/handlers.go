@@ -487,6 +487,9 @@ func (s *Server) handleTrigger(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if body.Git.Repo == "" {
+			if strings.HasPrefix(parent.TriggerSource, "pipeline-working-tree@") {
+				body.Trigger.Source = parent.TriggerSource
+			}
 			body.Git.Repo = parent.Repo
 			body.Git.RepoURL = parent.RepoURL
 			if body.Git.Branch == "" {

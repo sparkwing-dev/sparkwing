@@ -440,6 +440,74 @@ func TestSessionlessProxyPreservesDirectAuthorization(t *testing.T) {
 	}
 }
 
+func TestGitcacheMachineProxyBypassesBrowserSessionAndPreservesBearer(t *testing.T) {
+	t.Parallel()
+	var authorization, proxyAuthorization, cookie, csrf, path string
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorization = r.Header.Get("Authorization")
+		proxyAuthorization = r.Header.Get("Proxy-Authorization")
+		cookie = r.Header.Get("Cookie")
+		csrf = r.Header.Get(csrfHeaderName)
+		path = r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(controller.Close)
+	handler := HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle)
+	req := httptest.NewRequest(http.MethodPost, "https://dashboard.example.com/api/v1/gitcache/seed", strings.NewReader("bundle"))
+	req.Header.Set("Authorization", "Bearer runner-admin-token")
+	req.Header.Set("Proxy-Authorization", "Bearer proxy-secret")
+	req.Header.Set(csrfHeaderName, "browser-token")
+	req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "browser-session"})
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("machine proxy status = %d, want 204", rec.Code)
+	}
+	if path != "/api/v1/gitcache/seed" || authorization != "Bearer runner-admin-token" || proxyAuthorization != "" || cookie != "" || csrf != "" {
+		t.Fatalf("machine proxy boundary = path %q Authorization %q Proxy-Authorization %q Cookie %q CSRF %q", path, authorization, proxyAuthorization, cookie, csrf)
+	}
+}
+
+func TestGitcacheMachineProxyAllowsSlowPackStreamBeyondDefaultDeadline(t *testing.T) {
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "first")
+		if flush, ok := w.(http.Flusher); ok {
+			flush.Flush()
+		}
+		time.Sleep(60 * time.Millisecond)
+		_, _ = io.WriteString(w, "second")
+	}))
+	defer controller.Close()
+	dashboard := httptest.NewUnstartedServer(HandlerFromOptionsWithBundle(HandlerOptions{
+		ControllerURL: controller.URL,
+		RequireLogin:  true,
+	}, authTestBundle))
+	dashboard.Config.WriteTimeout = 20 * time.Millisecond
+	dashboard.Start()
+	defer dashboard.Close()
+	req, err := http.NewRequest(http.MethodGet, dashboard.URL+"/api/v1/gitcache/git/widgets/info/refs?service=git-upload-pack", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer runner-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != "firstsecond" {
+		t.Fatalf("body = %q", body)
+	}
+}
+
 func TestSessionBackendFailuresRetainBrowserCookies(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -12,16 +12,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/color"
 )
 
-func parseTriggerFlags(args []string) (pipelineName, profileName string, detach, wantHelp bool, passthrough []string, err error) {
+func parseTriggerFlags(args []string) (pipelineName, profileName string, detach, workingTree, wantHelp bool, passthrough []string, err error) {
 	if len(args) == 0 {
-		return "", "", false, false, nil, errors.New("pipeline name required (e.g. `sparkwing pipeline trigger release --profile prod`)")
+		return "", "", false, false, false, nil, errors.New("pipeline name required (e.g. `sparkwing pipeline trigger release --profile prod`)")
 	}
 	if args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		return "", "", false, true, nil, nil
+		return "", "", false, false, true, nil, nil
 	}
 	pipelineName = args[0]
 	if strings.HasPrefix(pipelineName, "-") {
-		return "", "", false, false, nil, fmt.Errorf("pipeline name must come first; got flag %q", pipelineName)
+		return "", "", false, false, false, nil, fmt.Errorf("pipeline name must come first; got flag %q", pipelineName)
 	}
 
 	rest := args[1:]
@@ -29,8 +29,11 @@ func parseTriggerFlags(args []string) (pipelineName, profileName string, detach,
 	for i < len(rest) {
 		a := rest[i]
 		switch {
+		case a == "--":
+			passthrough = append(passthrough, rest[i+1:]...)
+			i = len(rest)
 		case a == "-h" || a == "--help":
-			return "", "", false, true, nil, nil
+			return "", "", false, false, true, nil, nil
 		case a == "--profile":
 			if i+1 < len(rest) {
 				profileName = rest[i+1]
@@ -50,16 +53,22 @@ func parseTriggerFlags(args []string) (pipelineName, profileName string, detach,
 		case a == "--detach=false":
 			detach = false
 			i++
+		case a == "--working-tree" || a == "--working-tree=true":
+			workingTree = true
+			i++
+		case a == "--working-tree=false":
+			workingTree = false
+			i++
 		default:
 			passthrough = append(passthrough, a)
 			i++
 		}
 	}
-	return pipelineName, profileName, detach, false, passthrough, nil
+	return pipelineName, profileName, detach, workingTree, false, passthrough, nil
 }
 
 func runPipelineTrigger(args []string) error {
-	pipelineName, profileName, detach, wantHelp, passthrough, err := parseTriggerFlags(args)
+	pipelineName, profileName, detach, workingTree, wantHelp, passthrough, err := parseTriggerFlags(args)
 	if wantHelp {
 		PrintHelp(cmdPipelineTrigger, os.Stdout)
 		return nil
@@ -81,7 +90,11 @@ func runPipelineTrigger(args []string) error {
 			"Use sparkwing run --profile %s for local execution against this profile's storage instead", prof.Name, prof.Name)
 	}
 
-	resp, err := createRemoteTrigger(prof, pipelineName, triggerSource("pipeline-trigger"), runFlags{}, passthrough)
+	source := triggerSource("pipeline-trigger")
+	if workingTree {
+		source = triggerSource("pipeline-working-tree")
+	}
+	resp, err := createRemoteTrigger(prof, pipelineName, source, runFlags{}, passthrough, workingTree)
 	if err != nil {
 		return err
 	}

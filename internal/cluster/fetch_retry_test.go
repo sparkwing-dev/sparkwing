@@ -23,7 +23,7 @@ func TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures(t *testing.T) {
 	triggerFetchMaxAttempts = 3
 
 	var calls int32
-	fetchSourceFn = func(gcURL, repoURL, branch, sha, parentDir string) (string, error) {
+	fetchSourceFn = func(gcURL, controllerURL, token, repoURL, branch, sha, parentDir string) (string, error) {
 		n := atomic.AddInt32(&calls, 1)
 		if n < 3 {
 			return "", errors.New("git fetch --depth 1 origin abc123: exit status 128: fatal: remote error: upload-pack: not our ref abc123")
@@ -32,7 +32,7 @@ func TestFetchPipelineSourceWithRetry_RecoversAfterTwoFailures(t *testing.T) {
 	}
 
 	got, err := fetchPipelineSourceWithRetry(context.Background(),
-		"http://cache", "git@github.com:o/r.git", "main", "abc123", "/tmp/work",
+		"http://cache", "http://controller", "token", "git@github.com:o/r.git", "main", "abc123", "/tmp/work",
 		slog.Default(), "run-1")
 	if err != nil {
 		t.Fatalf("expected success after retries, got %v", err)
@@ -59,13 +59,13 @@ func TestFetchPipelineSourceWithRetry_ExhaustsAndRewritesError(t *testing.T) {
 
 	underlying := errors.New("fatal: remote error: upload-pack: not our ref deadbeef")
 	var calls int32
-	fetchSourceFn = func(gcURL, repoURL, branch, sha, parentDir string) (string, error) {
+	fetchSourceFn = func(gcURL, controllerURL, token, repoURL, branch, sha, parentDir string) (string, error) {
 		atomic.AddInt32(&calls, 1)
 		return "", underlying
 	}
 
 	_, err := fetchPipelineSourceWithRetry(context.Background(),
-		"http://cache", "git@github.com:o/r.git", "main", "deadbeef", "/tmp/work",
+		"http://cache", "http://controller", "token", "git@github.com:o/r.git", "main", "deadbeef", "/tmp/work",
 		slog.Default(), "run-2")
 	if err == nil {
 		t.Fatal("expected error after exhausted retries")
@@ -98,14 +98,14 @@ func TestFetchPipelineSourceWithRetry_FailsFastOnUnrelatedError(t *testing.T) {
 
 	authErr := errors.New("git fetch: Permission denied (publickey)")
 	var calls int32
-	fetchSourceFn = func(gcURL, repoURL, branch, sha, parentDir string) (string, error) {
+	fetchSourceFn = func(gcURL, controllerURL, token, repoURL, branch, sha, parentDir string) (string, error) {
 		atomic.AddInt32(&calls, 1)
 		return "", authErr
 	}
 
 	start := time.Now()
 	_, err := fetchPipelineSourceWithRetry(context.Background(),
-		"http://cache", "git@github.com:o/r.git", "main", "abc", "/tmp/work",
+		"http://cache", "http://controller", "token", "git@github.com:o/r.git", "main", "abc", "/tmp/work",
 		slog.Default(), "run-3")
 	elapsed := time.Since(start)
 
@@ -133,7 +133,7 @@ func TestFetchPipelineSourceWithRetry_HonorsContextCancel(t *testing.T) {
 	triggerFetchMaxAttempts = 3
 
 	attempted := make(chan struct{}, 1)
-	fetchSourceFn = func(gcURL, repoURL, branch, sha, parentDir string) (string, error) {
+	fetchSourceFn = func(gcURL, controllerURL, token, repoURL, branch, sha, parentDir string) (string, error) {
 		select {
 		case attempted <- struct{}{}:
 		default:
@@ -155,7 +155,7 @@ func TestFetchPipelineSourceWithRetry_HonorsContextCancel(t *testing.T) {
 
 	start := time.Now()
 	_, err := fetchPipelineSourceWithRetry(ctx,
-		"http://cache", "git@github.com:o/r.git", "main", "abc", "/tmp/work",
+		"http://cache", "http://controller", "token", "git@github.com:o/r.git", "main", "abc", "/tmp/work",
 		slog.Default(), "run-4")
 	<-cancelDone
 	elapsed := time.Since(start)

@@ -661,6 +661,9 @@ func (b *Backend) EnqueueTriggerWithEnv(
 		tg.GithubRepo = name
 	} else if parentRunID != "" {
 		if parent, perr := b.GetRun(ctx, parentRunID); perr == nil && parent != nil {
+			if strings.HasPrefix(parent.TriggerSource, "pipeline-working-tree@") {
+				tg.TriggerSource = parent.TriggerSource
+			}
 			tg.Repo = parent.Repo
 			tg.RepoURL = parent.RepoURL
 			tg.GitBranch = firstNonEmpty(branch, parent.GitBranch)
