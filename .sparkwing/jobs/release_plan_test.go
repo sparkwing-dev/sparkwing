@@ -5,9 +5,16 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
+
+func TestReleaseTemplateVerificationAllowsSerializedAdmission(t *testing.T) {
+	if templateVerifyReleaseTimeout < time.Hour {
+		t.Fatalf("template verification timeout = %s, want at least 1h", templateVerifyReleaseTimeout)
+	}
+}
 
 // releaseGateNodes are the nodes whose failure must stop a release. A
 // release that reaches push-tag without all of them green has traded an
