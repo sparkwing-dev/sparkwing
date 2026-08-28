@@ -49,6 +49,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.37.1] - 2026-08-28
 ### Fixed
 
 - **release:** Release builds now pin Go 1.26.6 across every binary and image
