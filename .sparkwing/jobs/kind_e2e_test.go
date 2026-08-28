@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -271,7 +272,8 @@ func TestKindE2EExistingClusterCleanupRefusesANamespaceOwnedByAnotherRun(t *test
 		t.Fatal(err)
 	}
 	got := string(body)
-	if strings.Contains(got, " uninstall ") || strings.Contains(got, " delete ") {
+	if strings.Contains(got, " uninstall ") || strings.Contains(got, " delete ") ||
+		strings.Contains(got, "label persistentvolumeclaim") {
 		t.Fatalf("unowned namespace cleanup issued a destructive call:\n%s", got)
 	}
 }
@@ -365,9 +367,12 @@ func TestKindE2EExistingClusterUninstallsOnlyItsAttemptedRelease(t *testing.T) {
 	attempt := strings.Index(got, "install sparkwing ")
 	attemptOwner := strings.Index(got, "--labels sparkwing.dev/e2e-owner="+kindE2ETestOwner)
 	ownedList := strings.Index(got, "list --all --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner)
-	labelPVCs := strings.Index(got, "label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing")
+	labelReleasePVCs := strings.Index(got, "label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing")
+	labelPoolPVCs := strings.Index(got, "label persistentvolumeclaim -l app=sparkwing-cache-pool,sparkwing.dev/managed=pool-manager,sparkwing.dev/pool=cache")
 	uninstall := strings.Index(got, "uninstall sparkwing --namespace sparkwing-e2e")
-	if attempt < 0 || attemptOwner < attempt || ownedList < attemptOwner || labelPVCs < ownedList || uninstall < labelPVCs {
+	ownedDelete := strings.Index(got, "delete deployment,service,configmap,secret,persistentvolumeclaim -l sparkwing.dev/e2e-owned=true,sparkwing.dev/e2e-owner="+kindE2ETestOwner)
+	if attempt < 0 || attemptOwner < attempt || ownedList < attemptOwner || labelReleasePVCs < ownedList ||
+		labelPoolPVCs < labelReleasePVCs || uninstall < labelPoolPVCs || ownedDelete < uninstall {
 		t.Fatalf("attempted release was not ownership-proved before labeling PVCs and uninstalling:\n%s", got)
 	}
 }
@@ -403,6 +408,89 @@ func TestKindE2EExistingClusterRetainsAReleaseWithoutItsOwnerLabel(t *testing.T)
 	}
 }
 
+func TestKindE2EExistingClusterReprovesSuccessfulReleaseBeforeCleanup(t *testing.T) {
+	bin, calls, artifacts := existingClusterFailureHarness(t)
+	result := runKindScriptFullWithEnv(t, bin,
+		"CALL_RECORD="+calls,
+		"NAMESPACE_OWNER=true",
+		"NAMESPACE_OWNER_TOKEN="+kindE2ETestOwner,
+		"FAIL_AT=post-install",
+		"SPARKWING_KIND_E2E_ARTIFACT_DIR="+artifacts,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing",
+	)
+	if result.err == nil {
+		t.Fatal("post-install failure unexpectedly passed")
+	}
+	body, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	ownedList := strings.Index(got, "list --all --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner)
+	if ownedList < 0 {
+		t.Fatalf("cleanup trusted stale successful-install ownership:\n%s", got)
+	}
+	afterProof := got[ownedList:]
+	for _, forbidden := range []string{"label persistentvolumeclaim", " uninstall ", " delete "} {
+		if strings.Contains(afterProof, forbidden) {
+			t.Fatalf("cleanup crossed failed current-release ownership proof via %q:\n%s", forbidden, afterProof)
+		}
+	}
+	if !strings.Contains(result.output, "cleanup failed; retained namespace: sparkwing-e2e") {
+		t.Fatalf("cleanup output = %q, want retained namespace", result.output)
+	}
+}
+
+func TestKindE2EExistingClusterRetainsReleaseWhenPVCAdoptionIsIncomplete(t *testing.T) {
+	bin, calls, artifacts := existingClusterFailureHarness(t)
+	result := runKindScriptFullWithEnv(t, bin,
+		"CALL_RECORD="+calls,
+		"NAMESPACE_OWNER=true",
+		"NAMESPACE_OWNER_TOKEN="+kindE2ETestOwner,
+		"FAIL_AT=cleanup-release-pvc-label",
+		"HELM_RELEASE=sparkwing",
+		"SPARKWING_KIND_E2E_ARTIFACT_DIR="+artifacts,
+		"SPARKWING_KIND_E2E_PROVISION=existing",
+		"SPARKWING_KIND_E2E_KUBE_CONTEXT=remote-e2e",
+		"SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing",
+		"SPARKWING_KIND_E2E_TAG=commit-0123456789ab",
+		"SPARKWING_KIND_E2E_ALLOW_CLEANUP=sparkwing-e2e/sparkwing",
+	)
+	if result.err == nil {
+		t.Fatal("incomplete PVC adoption unexpectedly passed")
+	}
+	body, err := os.ReadFile(calls)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(body)
+	ownedList := strings.Index(got, "list --all --namespace sparkwing-e2e --selector sparkwing.dev/e2e-owner="+kindE2ETestOwner)
+	if ownedList < 0 {
+		t.Fatalf("cleanup did not prove current release ownership:\n%s", got)
+	}
+	afterProof := got[ownedList:]
+	for _, required := range []string{
+		"label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing",
+		"label persistentvolumeclaim -l app=sparkwing-cache-pool,sparkwing.dev/managed=pool-manager,sparkwing.dev/pool=cache",
+	} {
+		if !strings.Contains(afterProof, required) {
+			t.Fatalf("cleanup did not attempt PVC adoption via %q:\n%s", required, afterProof)
+		}
+	}
+	for _, forbidden := range []string{" uninstall ", " delete "} {
+		if strings.Contains(afterProof, forbidden) {
+			t.Fatalf("cleanup crossed incomplete PVC adoption via %q:\n%s", forbidden, afterProof)
+		}
+	}
+	if !strings.Contains(result.output, "cleanup failed; retained namespace: sparkwing-e2e") {
+		t.Fatalf("cleanup output = %q, want retained namespace", result.output)
+	}
+}
+
 func existingClusterFailureHarness(t *testing.T) (bin, calls, artifacts string) {
 	t.Helper()
 	bin = t.TempDir()
@@ -431,13 +519,18 @@ case "$*" in
       exit 23
     fi
     ;;
+  *"label persistentvolumeclaim -l app.kubernetes.io/instance=sparkwing"*)
+    if [ "${FAIL_AT:-}" = "post-install" ] || [ "${FAIL_AT:-}" = "cleanup-release-pvc-label" ]; then
+      exit 23
+    fi
+    ;;
 esac
 `)
 	writeStub(t, bin, "helm", `
 printf 'helm %s\n' "$*" >>"$CALL_RECORD"
 case "$*" in
   *" install sparkwing "*)
-    if [ "${FAIL_AT:-}" = "helm-install" ]; then
+    if [ "${FAIL_AT:-}" = "helm-install" ] || [ "${FAIL_AT:-}" = "cleanup-release-pvc-label" ]; then
       exit 23
     fi
     ;;
@@ -519,8 +612,10 @@ func TestKindE2EOwnsReleaseImagesAndFailureEvidence(t *testing.T) {
 	}
 	for _, marker := range []string{
 		"docker buildx build",
-		"command -v git-daemon",
 		"git ls-remote git://127.0.0.1/smoke.git",
+		`git config --global --add url."git://kind-repo.${namespace}.svc.cluster.local/".insteadOf`,
+		`"https://github.com/sparkwing-kind/"`,
+		`"git@github.com:sparkwing-kind/"`,
 		"kind load docker-image",
 		"helm_e2e install",
 		"SPARKWING_KIND_E2E_PROVISION",
@@ -570,6 +665,9 @@ func TestKindE2EOwnsReleaseImagesAndFailureEvidence(t *testing.T) {
 	if strings.Contains(script, "docker push") || strings.Contains(script, "kind create cluster --image") {
 		t.Fatal("Kind harness gained a registry push or an unowned node-image override")
 	}
+	if strings.Contains(script, "command -v git-daemon") {
+		t.Fatal("Kind harness requires git-daemon as a standalone PATH binary")
+	}
 	if strings.Contains(script, "hostPath:") || strings.Contains(script, "extraMounts:") {
 		t.Fatal("Kubernetes fixture depends on a Kind-only host mount")
 	}
@@ -598,6 +696,103 @@ func TestKindE2EOwnsReleaseImagesAndFailureEvidence(t *testing.T) {
 			t.Errorf("Kind fixture is missing causal retry marker %q", marker)
 		}
 	}
+}
+
+func TestKindE2EWaitRunStatusRetriesOnlyNotFound(t *testing.T) {
+	result, calls := runWaitRunStatus(t,
+		"{\"message\":\"not found\"}\n404",
+		"{\"status\":\"success\"}\n200",
+	)
+	if result.err != nil {
+		t.Fatalf("transient run lookup: %v\n%s", result.err, result.output)
+	}
+	if calls != 2 {
+		t.Fatalf("run lookup calls = %d, want 2", calls)
+	}
+}
+
+func TestKindE2EWaitRunStatusRejectsOtherHTTPFailures(t *testing.T) {
+	result, calls := runWaitRunStatus(t, "{\"message\":\"unavailable\"}\n500")
+	if result.err == nil {
+		t.Fatal("run lookup accepted HTTP 500")
+	}
+	if calls != 1 {
+		t.Fatalf("run lookup calls = %d, want 1", calls)
+	}
+	if !strings.Contains(result.output, "run run-1 returned HTTP 500 while waiting for success") {
+		t.Fatalf("run lookup output = %q, want HTTP 500 failure", result.output)
+	}
+}
+
+func runWaitRunStatus(t *testing.T, responses ...string) (scriptResult, int) {
+	t.Helper()
+	script := readHostedCIFile(t, "bin/kind-e2e.sh")
+	waitFunction := "wait_run_status() {\n" + between(t, script,
+		"wait_run_status() {\n",
+		"\n}\n\necho \"kind-e2e: proving invalid webhook authentication\"",
+	) + "\n}\n"
+	responseDir := t.TempDir()
+	for i, response := range responses {
+		if err := os.WriteFile(filepath.Join(responseDir, strconv.Itoa(i)), []byte(response), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	countFile := filepath.Join(t.TempDir(), "count")
+	if err := os.WriteFile(countFile, []byte("0"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	harness := `set -Eeuo pipefail
+next_response() {
+  local index response_path
+  index="$(<"$COUNT_FILE")"
+  response_path="$RESPONSES_DIR/$index"
+  printf '%s' "$((index + 1))" >"$COUNT_FILE"
+  if [[ ! -f "$response_path" ]]; then
+    printf '{}\n599'
+    return
+  fi
+  printf '%s' "$(<"$response_path")"
+}
+api_get() {
+  local response status
+  response="$(next_response)"
+  status="${response##*$'\n'}"
+  [[ "$status" == "200" ]] || return 22
+  printf '%s' "${response%$'\n'*}"
+}
+api_get_with_status() {
+  next_response
+}
+jq() {
+  local input= line
+  while IFS= read -r line; do
+    input+="$line"
+  done
+  input="${input#*\"status\":\"}"
+  printf '%s\n' "${input%%\"*}"
+}
+sleep() {
+  :
+}
+die() {
+  printf 'kind-e2e: %s\n' "$*" >&2
+  exit 1
+}
+` + waitFunction + `
+wait_run_status run-1 success 5
+`
+	cmd := exec.Command("/bin/bash", "-c", harness)
+	cmd.Env = append(os.Environ(), "COUNT_FILE="+countFile, "RESPONSES_DIR="+responseDir)
+	out, runErr := cmd.CombinedOutput()
+	countBody, err := os.ReadFile(countFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls, err := strconv.Atoi(string(countBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return scriptResult{output: string(out), err: runErr}, calls
 }
 
 func TestHostedKindE2EIsPathScopedPinnedAndReadOnly(t *testing.T) {
