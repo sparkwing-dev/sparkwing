@@ -173,7 +173,7 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 	go func() { finished <- group.Finish(context.Background(), queueExecCleanupTimeout) }()
 	go func() {
 		<-group.LeaderExited()
-		// Declare at exit observation, before a successor can reconcile the
+		// safety: Declare at exit observation, before a successor can reconcile the
 		// same empty session and reject reattachment. The main path retries
 		// any write failure below; CompleteGuard is idempotent.
 		_ = queueExecDeclareGuardComplete(lease)
@@ -192,7 +192,7 @@ func runQueueExecContext(ctx context.Context, args []string) error {
 			commandErr = errors.Join(errQueueExecLeaseLost, terminateQueueExec(group))
 		}
 	case <-completionAck:
-		// The successor can durably observe the exited process session before
+		// safety: The successor can durably observe the exited process session before
 		// the local group waiter finishes reaping its leader.
 		commandErr = <-finished
 	case <-ctx.Done():

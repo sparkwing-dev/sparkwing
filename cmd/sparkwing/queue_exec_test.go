@@ -394,8 +394,6 @@ func TestQueueExecLeaderExitDeclaresCompletionBeforeRejectedReattach(t *testing.
 	t.Cleanup(func() { queueExecDeclareGuardComplete = originalDeclaration })
 	originalWatcher := queueExecWatchGuard
 	queueExecWatchGuard = func(_ *wingdclient.Lease, _ func(wingwire.Cancel), onComplete func()) {
-		// A rejected reattach is completion only after the client has declared
-		// that its direct session leader exited; the watcher then ends.
 		<-completionDeclared
 		onComplete()
 	}
