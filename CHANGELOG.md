@@ -48,6 +48,12 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Security
+
+- **controller:** First-admin creation now requires an admin bearer token when
+  controller authentication is enabled. The unauthenticated first-visit signup
+  remains available only while controller authentication is disabled.
+
 ### Fixed
 
 - **release:** Pull requests, main, and release tags now run the canonical
