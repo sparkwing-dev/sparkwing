@@ -202,7 +202,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer stateStore.Close()
+	defer func() { _ = stateStore.Close() }()
 
 	state := &controllerState{activeSessions: map[string]bool{}}
 	controllerListener, controllerServer, err := listen(http.HandlerFunc(state.handler))
