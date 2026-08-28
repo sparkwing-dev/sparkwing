@@ -247,7 +247,7 @@ func TestHandleProxy_TTLExpiry(t *testing.T) {
 	defer upstream.Close()
 
 	oldTTL := proxyCacheTTL
-	proxyCacheTTL = 1 * time.Second
+	proxyCacheTTL = 10 * time.Second
 	defer func() { proxyCacheTTL = oldTTL }()
 
 	withTestProxy(t, map[string]Registry{
