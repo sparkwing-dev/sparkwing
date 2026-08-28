@@ -17,8 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// AgentConfig mirrors the on-disk layout of
-// `~/.config/sparkwing/agent.yaml`. Fields optional unless noted.
 type AgentConfig struct {
 	Controller    string        `yaml:"controller"`
 	Logs          string        `yaml:"logs"`
@@ -31,21 +29,12 @@ type AgentConfig struct {
 	Poll          time.Duration `yaml:"poll"`
 	Lease         time.Duration `yaml:"lease"`
 	Heartbeat     time.Duration `yaml:"heartbeat"`
-	// LocalAdmission routes controller-dispatched nodes through this box's
-	// local admission daemon, so they share one FIFO queue with the
-	// operator's own local runs. Set it on a box that both runs local
-	// pipelines and serves this controller.
+
 	LocalAdmission bool `yaml:"local_admission"`
-	// LocalReserve is host capacity held back from what the agent
-	// advertises to the controller (daemon budget grammar, e.g. "2,4gb" or
-	// "10%"), so local work keeps room the controller will not fill.
+
 	LocalReserve string `yaml:"local_reserve"`
 }
 
-// LoadAgentConfig reads an agent.yaml from path. Missing file is an
-// error (we don't want the agent to silently claim without labels
-// the user believed were set). Zero values for unspecified fields
-// are normalized in ValidateAgentConfig.
 func LoadAgentConfig(path string) (*AgentConfig, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -58,9 +47,6 @@ func LoadAgentConfig(path string) (*AgentConfig, error) {
 	return &cfg, nil
 }
 
-// ValidateAgentConfig enforces required fields and applies defaults.
-// Returns a normalized copy rather than mutating the input so callers
-// can keep the on-disk shape for logging / diagnostics.
 func ValidateAgentConfig(in AgentConfig) (AgentConfig, error) {
 	out := in
 	if out.Controller == "" {
@@ -99,9 +85,6 @@ func ValidateAgentConfig(in AgentConfig) (AgentConfig, error) {
 	return out, nil
 }
 
-// DefaultAgentConfigPath returns the canonical agent.yaml location.
-// Honors XDG_CONFIG_HOME when set; otherwise falls back to
-// ~/.config/sparkwing/agent.yaml.
 func DefaultAgentConfigPath() (string, error) {
 	if v := os.Getenv("XDG_CONFIG_HOME"); v != "" {
 		return filepath.Join(v, "sparkwing", "agent.yaml"), nil
@@ -113,11 +96,6 @@ func DefaultAgentConfigPath() (string, error) {
 	return filepath.Join(home, ".config", "sparkwing", "agent.yaml"), nil
 }
 
-// RunAgentCLI implements `sparkwing agent` -- the laptop / off-cluster
-// runner. Reads ~/.config/sparkwing/agent.yaml (or --config PATH),
-// claims node work via the session-3 node-claim endpoints with the
-// configured labels + bearer token, and executes via the shared
-// RunPoolLoop code path.
 func RunAgentCLI(args []string) error {
 	fs := flag.NewFlagSet("agent", flag.ExitOnError)
 	configPath := fs.String("config", "", "path to agent.yaml (default: ~/.config/sparkwing/agent.yaml)")

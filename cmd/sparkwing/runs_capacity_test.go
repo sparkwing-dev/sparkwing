@@ -121,9 +121,6 @@ func TestRunCapacityReset_ClearsAFloorWithNoSamplesBehindIt(t *testing.T) {
 	}
 }
 
-// TestRunCapacityReset_SaysNothingIsStoredWhenNothingIs holds the verb honest
-// in the other direction: the wider bare-name reach must not turn "there is
-// genuinely no profile" into a claim that something was cleared.
 func TestRunCapacityReset_SaysNothingIsStoredWhenNothingIs(t *testing.T) {
 	paths := orchestrator.PathsAt(t.TempDir())
 	ctx := context.Background()
@@ -192,8 +189,6 @@ func TestFmtWaitCells_DashBeforeAnyObservation(t *testing.T) {
 	}
 }
 
-// TestGroupCapacityStats_CarriesDistributionFields pins that grouping
-// keeps the rollup's percentile fields intact for the JSON view.
 func TestGroupCapacityStats_CarriesDistributionFields(t *testing.T) {
 	stats := groupCapacityStats([]store.PipelineProfile{
 		{
@@ -214,10 +209,6 @@ func TestGroupCapacityStats_CarriesDistributionFields(t *testing.T) {
 	}
 }
 
-// TestDeriveSource_MeasuringAndFloorStates pins that the capacity view names
-// a still-measuring version's charge source: a contended-run floor as floor,
-// a predecessor peak (a structural change) as measuring, and a version still
-// gathering its first clean samples as the plain cold-start default.
 func TestDeriveSource_MeasuringAndFloorStates(t *testing.T) {
 	cases := []struct {
 		name   string

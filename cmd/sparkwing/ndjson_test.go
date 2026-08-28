@@ -11,10 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// decodeNDJSON reads a list verb's `-o json` output the way a consumer
-// now has to: a line at a time. It fails the test on the first line
-// that is not a complete JSON value, which is the property the whole
-// change exists to provide.
 func decodeNDJSON[T any](t *testing.T, out string) []T {
 	t.Helper()
 	dec := json.NewDecoder(strings.NewReader(out))
@@ -32,11 +28,6 @@ func decodeNDJSON[T any](t *testing.T, out string) []T {
 	}
 }
 
-// TestCommandsJSONIsNDJSON is the acceptance criterion from the ticket:
-// the discovery path AGENTS.md points a fresh agent at has to survive
-// `head`. Truncating to five lines and parsing each one is exactly what
-// a context-limited caller does, and the old pretty-printed array made
-// it return nothing at all.
 func TestCommandsJSONIsNDJSON(t *testing.T) {
 	out := commandsOutput(t, "-o", "json")
 
@@ -55,8 +46,6 @@ func TestCommandsJSONIsNDJSON(t *testing.T) {
 		}
 	}
 
-	// Every line stands alone, and the stream carries the whole
-	// registry rather than a truncated prefix of it.
 	all := decodeNDJSON[CommandIndexJSON](t, out)
 	if len(all) != len(lines) {
 		t.Fatalf("decoded %d records from %d lines; a record spans more than its line", len(all), len(lines))
@@ -66,10 +55,6 @@ func TestCommandsJSONIsNDJSON(t *testing.T) {
 	}
 }
 
-// TestCommandsJSONHonorsPathFilter keeps the NDJSON path wired to the
-// same filter the other modes use -- a stream that ignores --path would
-// hand back the whole 200KB surface to a caller that asked for a
-// subtree, which is the failure this ticket is about.
 func TestCommandsJSONHonorsPathFilter(t *testing.T) {
 	records := decodeNDJSON[CommandIndexJSON](t, commandsOutput(t, "--path", "docs", "-o", "json"))
 	if len(records) == 0 {
@@ -82,10 +67,6 @@ func TestCommandsJSONHonorsPathFilter(t *testing.T) {
 	}
 }
 
-// A listing carries what a reader needs to choose; the read verb carries the
-// content (house rule 13). `pipeline list` shipped every pipeline's full help
-// text and examples, which made a five-entry catalog 2.7KB of prose nobody had
-// asked for -- and `pipeline describe` was already the place to ask.
 func TestPipelineListIsAnIndexAndDescribeKeepsTheDetail(t *testing.T) {
 	full := Pipeline{
 		Name:       "release",
@@ -110,17 +91,13 @@ func TestPipelineListIsAnIndexAndDescribeKeepsTheDetail(t *testing.T) {
 			t.Errorf("the listing dropped %q, which a caller chooses by: %s", choosing, line)
 		}
 	}
-	// Dropping the help is only sound because a pipeline that has nothing else
-	// to say still gets a line worth reading.
+
 	bare := Pipeline{Name: "quiet", Help: "first line\nsecond line"}
 	if got := bare.index().Short; got != "first line" {
 		t.Errorf("a pipeline with no short summarized as %q, want the first line of its help", got)
 	}
 }
 
-// The token is redacted in the machine-readable listing too. A JSON listing is
-// the shape most likely to be piped into a log, and a secret that leaves the
-// process once has left it.
 func TestProfilesListStreamsRedactedRecords(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "profiles.yaml")

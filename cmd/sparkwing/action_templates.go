@@ -1,8 +1,3 @@
-// `sparkwing examples` browses the sparks-core registry: complete,
-// working pipelines to read rather than starting points to scaffold.
-// `pipeline new --template <shape>` starts a pipeline; an example shows
-// how a real one is built. --name switches to a detail view, --body
-// prints the source, --category / --cloud filter.
 package main
 
 import (
@@ -24,25 +19,14 @@ import (
 	templates "github.com/sparkwing-dev/sparks-core/templates"
 )
 
-// uncategorizedLabel is the bucket header for templates whose manifest
-// declares no applicability category.
 const uncategorizedLabel = "uncategorized"
 
-// templateDetailJSON is the -o json shape for the --name detail view.
-// RenderedBody is populated only when --body is passed.
 type templateDetailJSON struct {
 	Manifest     templates.Manifest `json:"manifest"`
 	ReadMe       string             `json:"readme,omitempty"`
 	RenderedBody string             `json:"rendered_body,omitempty"`
 }
 
-// runExamples browses the worked-example corpus.
-//
-// These are working pipelines, not starting points. `pipeline new`
-// scaffolds a shape; an example shows how a real one is built, and is
-// read rather than copied wholesale -- which is why it lives under its
-// own verb instead of behind --template, where choosing between forty
-// of them was a quarter of an agent trial's turns.
 func runExamples(args []string) error {
 	if len(args) > 0 && args[0] == "scaffold" {
 		return runExampleScaffold(args[1:])
@@ -75,13 +59,6 @@ func runExamples(args []string) error {
 	return listTemplates(category, cloud, output)
 }
 
-// listTemplates renders the registry, optionally filtered by category
-// and cloud.
-//
-// A filter that matches nothing prints the values that do exist. The
-// miss is nearly always a guessed filter, and without the list the only
-// way to recover is to dump the unfiltered registry and reverse-engineer
-// the vocabulary from it.
 func listTemplates(category, cloud, output string) error {
 	list, err := templates.List()
 	if err != nil {
@@ -100,7 +77,7 @@ func listTemplates(category, cloud, output string) error {
 		for _, t := range filtered {
 			manifests = append(manifests, t.Manifest)
 		}
-		// NDJSON: one example manifest per line.
+
 		return ndjson.Write(os.Stdout, manifests)
 	case "pretty", "":
 		if len(filtered) == 0 {
@@ -122,21 +99,6 @@ func listTemplates(category, cloud, output string) error {
 	}
 }
 
-// renderTemplateList prints the pretty catalog: templates grouped under
-// category headers, followed by the affordance footer.
-// renderTemplateList prints one line per template: the name and the
-// first line of when to reach for it.
-//
-// The full manifest for every template ran to six hundred lines, which
-// is not a list anyone reads -- agent trials grepped it, re-dumped it as
-// JSON, and parsed it with python before picking, four turns to answer
-// "which one runs go test". Choosing needs the name and one line;
-// everything else belongs behind --name.
-//
-// The built-in shapes are listed alongside, marked, because they were
-// the other half of that cost: `ci-pr-check` is named for a job a
-// registry template actually does, and reads as the answer until you
-// open it and find echo placeholders.
 func renderTemplateList(filtered []templates.Template) {
 	groups := groupTemplatesByCategory(filtered)
 	for i, g := range groups {
@@ -151,8 +113,6 @@ func renderTemplateList(filtered []templates.Template) {
 	printTemplateListFooter(len(filtered), len(groups))
 }
 
-// printTemplateLine is the one-line form: name, then the first sentence
-// of whenToUse.
 func printTemplateLine(m templates.Manifest) {
 	signal := strings.TrimSpace(m.WhenToUse)
 	if signal == "" {
@@ -171,16 +131,11 @@ func printTemplateLine(m templates.Manifest) {
 	fmt.Printf("  %s%s %s\n", color.Bold(name), pad, color.Dim(truncateLine(signal)))
 }
 
-// templateCategoryGroup is one category header plus the templates filed
-// under it, as rendered by the pretty list.
 type templateCategoryGroup struct {
 	category  string
 	templates []templates.Template
 }
 
-// groupTemplatesByCategory buckets templates by their applicability
-// category, preserving each template's incoming order within a bucket.
-// Categories sort alphabetically; the uncategorized bucket sorts last.
 func groupTemplatesByCategory(list []templates.Template) []templateCategoryGroup {
 	order := make([]string, 0)
 	byCat := make(map[string][]templates.Template)
@@ -211,10 +166,6 @@ func groupTemplatesByCategory(list []templates.Template) []templateCategoryGroup
 	return groups
 }
 
-// printTemplateListFooter advertises the list's own affordances: the
-// counts just shown, the narrowing filters, the detail view, and the
-// scaffold command. It mirrors the tip footers other verbs print so a
-// reader never has to grep the raw list to discover the flags.
 func printTemplateListFooter(shown, categories int) {
 	fmt.Println()
 	printAlignedSteps([]InfoNextStep{
@@ -227,7 +178,6 @@ func printTemplateListFooter(shown, categories int) {
 		countNoun(shown, "example", "examples"), countNoun(categories, "category", "categories"))))
 }
 
-// countNoun formats a count with the singular or plural noun.
 func countNoun(n int, singular, plural string) string {
 	if n == 1 {
 		return fmt.Sprintf("%d %s", n, singular)
@@ -235,8 +185,6 @@ func countNoun(n int, singular, plural string) string {
 	return fmt.Sprintf("%d %s", n, plural)
 }
 
-// clearedFilterSuffix echoes back the filters that produced an empty
-// list so the no-match hint shows what to drop.
 func clearedFilterSuffix(category, cloud string) string {
 	var parts []string
 	if strings.TrimSpace(category) != "" {
@@ -251,9 +199,6 @@ func clearedFilterSuffix(category, cloud string) string {
 	return color.Dim(" (without " + strings.Join(parts, " ") + ")")
 }
 
-// showTemplateDetail renders one template in full: manifest metadata,
-// the parameters table, applicability, README, and -- with body -- the
-// rendered pipeline body under default + placeholder parameter values.
 func showTemplateDetail(name string, body bool, output string) error {
 	tmpl, err := templates.Get(name)
 	if err != nil {
@@ -331,14 +276,6 @@ func printTemplateDetail(tmpl templates.Template, rendered string, body bool) {
 	printExampleFooter(body)
 }
 
-// printExampleFooter closes a worked example with what to do next.
-//
-// It cannot offer to scaffold this example: `pipeline new --template`
-// takes a shape, and passing a registry name is now an error. Nor
-// should it -- an example is a finished pipeline for someone else's
-// repo, and starting from one means deleting its assumptions before
-// writing your own. Read it, scaffold the shape it uses, write the
-// bodies you need.
 func printExampleFooter(body bool) {
 	fmt.Println()
 	if !body {
@@ -349,10 +286,6 @@ func printExampleFooter(body bool) {
 		color.Dim("start your own:"), strings.Join(builtinShapeNames(), " | "))
 }
 
-// renderTemplateWithPlaceholders renders the template body using the
-// manifest defaults, synthesizing `<param>` placeholders for required
-// parameters that declare no default so Render (which errors on a
-// missing required param) succeeds for a preview.
 func renderTemplateWithPlaceholders(tmpl templates.Template) (string, error) {
 	params := map[string]string{}
 	for _, p := range tmpl.Manifest.Parameters {
@@ -363,10 +296,6 @@ func renderTemplateWithPlaceholders(tmpl templates.Template) (string, error) {
 	return templates.Render(tmpl.Manifest.Name, params)
 }
 
-// templateMatchesCategory reports whether m passes the --category
-// filter. An empty filter matches everything.
-// templateCategories returns every category the registry declares,
-// sorted and deduplicated.
 func templateCategories(list []templates.Template) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -380,8 +309,6 @@ func templateCategories(list []templates.Template) []string {
 	return out
 }
 
-// templateClouds returns every cloud the registry declares, sorted and
-// deduplicated.
 func templateClouds(list []templates.Template) []string {
 	seen := map[string]bool{}
 	var out []string
@@ -404,9 +331,6 @@ func templateMatchesCategory(m templates.Manifest, category string) bool {
 	return strings.EqualFold(strings.TrimSpace(m.Applicability.Category), strings.TrimSpace(category))
 }
 
-// templateMatchesCloud reports whether m passes the --cloud filter. An
-// empty filter matches everything; a template that declares no cloud is
-// cloud-agnostic and matches every cloud filter.
 func templateMatchesCloud(m templates.Manifest, cloud string) bool {
 	if cloud == "" {
 		return true
@@ -422,8 +346,6 @@ func templateMatchesCloud(m templates.Manifest, cloud string) bool {
 	return false
 }
 
-// applicabilityLine formats the applicability metadata as a single
-// human-readable string, or "" when nothing is declared.
 func applicabilityLine(a templates.Applicability) string {
 	var parts []string
 	if cat := strings.TrimSpace(a.Category); cat != "" {
@@ -437,14 +359,6 @@ func applicabilityLine(a templates.Applicability) string {
 	return strings.Join(parts, "  ")
 }
 
-// runExampleScaffold materializes an example into a repo.
-//
-// It exists so template-verify can keep proving every example
-// compiles, lints, and explains (and that runnable-tier ones run) --
-// the property that makes them worth
-// reading. It is not the path to start a pipeline, which is why the
-// verb is hidden and `pipeline new --template` no longer accepts an
-// example name.
 func runExampleScaffold(args []string) error {
 	fs := flag.NewFlagSet(cmdExampleScaffold.Path, flag.ContinueOnError)
 	name := fs.String("name", "", "example to materialize")
@@ -479,7 +393,6 @@ func runExampleScaffold(args []string) error {
 	return scaffoldFromRegistry(sparkwingDir, *name, *name, *params, false, bootstrapped)
 }
 
-// builtinShapeNames is the set `pipeline new --template` accepts.
 func builtinShapeNames() []string {
 	out := make([]string, 0, len(builtinShapes))
 	for _, s := range builtinShapes {

@@ -89,11 +89,6 @@ type InputField struct {
 	Secret      bool     // mask in logs / dashboard
 	Enum        []string // allowed values; empty means unconstrained
 
-	// fieldIndex is the reflect.Value.FieldByIndex path to reach the
-	// underlying struct field. A single element for top-level fields,
-	// multiple elements when the field is reached through anonymous
-	// embedded structs (e.g. [2,0] for the first field of the third
-	// top-level embedded struct).
 	fieldIndex []int
 	isExtraBag bool
 }
@@ -119,10 +114,6 @@ const (
 	kindExtraMap
 )
 
-// maxEmbedDepth caps anonymous-embed recursion. Real-world flag
-// structs nest at most a handful of levels deep; this is a safety
-// net against pathological pointer-to-struct chains, not a feature
-// limit.
 const maxEmbedDepth = 8
 
 func parseInputsSchema(t reflect.Type) (InputSchema, error) {
@@ -144,14 +135,6 @@ func parseInputsSchema(t reflect.Type) (InputSchema, error) {
 	return schema, nil
 }
 
-// walkInputFields collects flag-tagged fields from t into schema.
-// Anonymous embedded structs are walked recursively so that shared
-// flag bundles (e.g. type SkipFilterArgs struct{ ... }) can be
-// embedded into a pipeline's Inputs and have their flags surface
-// on the CLI. Per Go embedding semantics, an outer flag name
-// shadows an inner one with the same name (first-declared wins),
-// so we silently skip embedded fields whose flag name was already
-// declared closer to the root.
 func walkInputFields(
 	t reflect.Type,
 	parentIndex []int,
@@ -294,9 +277,6 @@ func walkInputFields(
 	return nil
 }
 
-// populateInputs writes flag values from m into the Inputs struct.
-// Defaults apply for unset fields; required-missing errors; unknown
-// flags error unless the schema declares an `,extra` bag.
 func populateInputs(schema InputSchema, dst reflect.Value, m map[string]string) error {
 	byName := map[string]int{}
 	for i, f := range schema.Fields {
@@ -375,9 +355,6 @@ func populateInputs(schema InputSchema, dst reflect.Value, m map[string]string) 
 	return nil
 }
 
-// readFieldByIndex walks idx into v read-only. If a nil pointer
-// embed is encountered the leaf is unreachable, so ok=false signals
-// "treat as zero / absent" without panicking.
 func readFieldByIndex(v reflect.Value, idx []int) (reflect.Value, bool) {
 	for i, n := range idx {
 		if i > 0 && v.Kind() == reflect.Pointer {
@@ -391,10 +368,6 @@ func readFieldByIndex(v reflect.Value, idx []int) (reflect.Value, bool) {
 	return v, true
 }
 
-// fieldByIndexAlloc walks idx into v, allocating any nil pointer
-// fields encountered along anonymous-embed chains so the leaf is
-// settable. reflect.Value.FieldByIndex panics on a nil pointer
-// embed; this helper materializes the embed instead.
 func fieldByIndexAlloc(v reflect.Value, idx []int) (reflect.Value, error) {
 	for i, n := range idx {
 		if i > 0 && v.Kind() == reflect.Pointer {
@@ -529,8 +502,6 @@ func allInEnum(vals, enum []string) bool {
 	return true
 }
 
-// flattenInputs walks the typed Inputs struct and produces the
-// wire-format map[string]string. Inverse of populateInputs.
 func flattenInputs[T any](in T) (map[string]string, error) {
 	var zero T
 	t := reflect.TypeOf(zero)
@@ -571,9 +542,6 @@ func flattenInputs[T any](in T) (map[string]string, error) {
 	return out, nil
 }
 
-// formatField renders a typed field value as the wire-format string.
-// Zero values return ok=false so they round-trip as "absent" rather
-// than an explicit "0" / "".
 func formatField(fv reflect.Value) (string, bool) {
 	switch classifyKind(fv.Type()) {
 	case kindString:

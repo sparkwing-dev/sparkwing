@@ -6,8 +6,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// qs builds a QueueState with the two host resource rows the advertisement
-// reads, plus a waiter count.
 func qs(availCores, capCores float64, availMem, capMem int64, waiters int) wingwire.QueueState {
 	q := wingwire.QueueState{
 		Resources: []wingwire.ResourceState{

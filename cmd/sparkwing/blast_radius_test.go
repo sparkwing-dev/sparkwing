@@ -118,9 +118,6 @@ func TestEnforceRiskGate_NoFindings(t *testing.T) {
 	}
 }
 
-// TestEnforceRiskGate_NamesEveryMissingLabel: two steps each declare
-// a different label; neither is in --sw-allow. The error must name
-// both labels so the operator can authorize them in one retry.
 func TestEnforceRiskGate_NamesEveryMissingLabel(t *testing.T) {
 	findings := []stepRiskFinding{
 		{NodeID: "n1", StepID: "step-a", Labels: []string{"destructive"}},
@@ -137,8 +134,6 @@ func TestEnforceRiskGate_NamesEveryMissingLabel(t *testing.T) {
 	}
 }
 
-// TestEnforceRiskGate_PartialAllow: --sw-allow covers some labels;
-// the error names only the still-missing ones.
 func TestEnforceRiskGate_PartialAllow(t *testing.T) {
 	findings := []stepRiskFinding{
 		{NodeID: "n1", StepID: "step-a", Labels: []string{"destructive", "prod"}},
@@ -154,8 +149,6 @@ func TestEnforceRiskGate_PartialAllow(t *testing.T) {
 	}
 }
 
-// TestEnforceRiskGate_AuthorDefinedLabel confirms arbitrary author
-// labels participate in the gate without requiring SDK changes.
 func TestEnforceRiskGate_AuthorDefinedLabel(t *testing.T) {
 	findings := []stepRiskFinding{
 		{StepID: "rotate", Labels: []string{"rotates-key"}},
@@ -169,8 +162,6 @@ func TestEnforceRiskGate_AuthorDefinedLabel(t *testing.T) {
 	}
 }
 
-// TestLookupCachedRisks_DegradesGracefully confirms the gate
-// returns nil when no describe cache is present.
 func TestLookupCachedRisks_DegradesGracefully(t *testing.T) {
 	tmp := t.TempDir()
 	if got := lookupCachedRisks(tmp, "any"); got != nil {

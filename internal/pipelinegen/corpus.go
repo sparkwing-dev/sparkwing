@@ -1,17 +1,3 @@
-// Package pipelinegen is the AI-generation eval harness for sparkwing
-// pipelines: a corpus of natural-language pipeline specs, a generator
-// that turns each spec into pipeline source, and a scorer that runs the
-// generation through the same bar a human pipeline must clear -- gofmt,
-// compile, `go vet`, `pipeline explain`, and `pipeline lint`. The harness reports
-// a pass-rate and wall-clock latency so "AI can generate idiomatic
-// pipelines" is measured, not asserted.
-//
-// The corpus is fixture-backed by default (each spec ships the source a
-// generator is expected to produce, so a run is deterministic and
-// reproducible) and pluggable: pass a generator command to score a live
-// model instead. Specs carry an expected outcome -- a deliberately bad
-// generation is expected to fail lint or explain -- so the corpus is
-// also a regression gate on the linter and the template catalog.
 package pipelinegen
 
 import (
@@ -23,50 +9,31 @@ import (
 	"strings"
 )
 
-// Expectation is whether a generated pipeline should clear the
-// compile+explain+lint bar.
 type Expectation string
 
 const (
-	// ExpectPass marks an idiomatic spec: the generation must compile,
-	// explain clean, and lint clean.
 	ExpectPass Expectation = "pass"
-	// ExpectFail marks a deliberately bad spec: the generation must be
-	// rejected by at least one check (lint or explain).
+
 	ExpectFail Expectation = "fail"
 )
 
-// Spec is one corpus entry: a natural-language prompt plus the metadata
-// needed to wire and score the generation it should produce.
 type Spec struct {
-	// Name is the registered pipeline name the generation uses; it is
-	// also the corpus directory name.
 	Name string
-	// Entrypoint is the Go struct the generation registers under Name.
+
 	Entrypoint string
-	// Shape is a free-form label for the pipeline shape (gate, release,
-	// matrix-fanout, approval-gated, ...); used only to group the report.
+
 	Shape string
-	// Expect is whether scoring should pass or fail.
+
 	Expect Expectation
-	// GuardRequire and GuardReject are the `guards:` tokens written into
-	// the scored project's sparkwing.yaml. They exist so the corpus can
-	// reach the guard-misuse lint rule, which reads the config rather
-	// than the Plan body and is otherwise unreachable from Go source
-	// alone. Specs that use them are necessarily fixture-only.
+
 	GuardRequire []string
 	GuardReject  []string
-	// Prompt is the natural-language spec a generator turns into source.
+
 	Prompt string
 }
 
-// HasGuards reports whether the spec declares a guards: block.
 func (s Spec) HasGuards() bool { return len(s.GuardRequire) > 0 || len(s.GuardReject) > 0 }
 
-// LoadCorpus reads every spec under root in fsys. Each immediate
-// subdirectory is one spec, identified by a spec.md carrying the
-// frontmatter (shape, expect, entrypoint) and the prompt body. Specs
-// are returned sorted by name for a reproducible report ordering.
 func LoadCorpus(fsys fs.FS, root string) ([]Spec, error) {
 	entries, err := fs.ReadDir(fsys, root)
 	if err != nil {
@@ -95,9 +62,6 @@ func LoadCorpus(fsys fs.FS, root string) ([]Spec, error) {
 	return specs, nil
 }
 
-// parseSpec reads a spec.md: a `---`-delimited key/value frontmatter
-// block followed by the free-form prompt. Recognized keys are shape,
-// expect, and entrypoint; name comes from the directory.
 func parseSpec(name, content string) (Spec, error) {
 	spec := Spec{Name: name}
 	sc := bufio.NewScanner(strings.NewReader(content))
@@ -141,8 +105,6 @@ func parseSpec(name, content string) (Spec, error) {
 	return Spec{}, fmt.Errorf("unterminated frontmatter (missing closing ---)")
 }
 
-// splitTokens parses a comma-separated frontmatter list, dropping empty
-// entries so a trailing comma is not read as a blank guard token.
 func splitTokens(val string) []string {
 	var out []string
 	for _, part := range strings.Split(val, ",") {

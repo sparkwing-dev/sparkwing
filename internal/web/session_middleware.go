@@ -11,9 +11,6 @@ import (
 	"time"
 )
 
-// sessionAuthMiddleware gates /api/v1/* and SPA routes behind a session
-// cookie when RequireLogin is set. Service credentials stay behind the
-// reverse proxy and cannot bypass a browser session after logout.
 func sessionAuthMiddleware(opts HandlerOptions, bundleFS fs.FS, next http.Handler) http.Handler {
 	if !loginRequired(opts) {
 		return next
@@ -87,8 +84,6 @@ func loginRequired(opts HandlerOptions) bool {
 	return opts.RequireLogin
 }
 
-// redirectOrUnauth sends a browser to /login (303) and an XHR/API caller
-// to 401, distinguished by the Accept header and path prefix.
 func redirectOrUnauth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	accept := r.Header.Get("Accept")
@@ -102,7 +97,6 @@ func redirectOrUnauth(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login?"+query.Encode(), http.StatusSeeOther)
 }
 
-// webPrincipal is the logged-in user stamped on the request context.
 type webPrincipal struct {
 	Name      string
 	Scopes    []string
@@ -119,8 +113,6 @@ func contextWithWebPrincipal(ctx context.Context, sess *sessionResp) context.Con
 	})
 }
 
-// WebPrincipalFromContext returns the logged-in user from the request
-// context, if any.
 func WebPrincipalFromContext(ctx context.Context) (*webPrincipal, bool) {
 	p, ok := ctx.Value(webPrincipalCtxKey{}).(*webPrincipal)
 	return p, ok

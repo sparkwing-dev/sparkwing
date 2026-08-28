@@ -20,70 +20,36 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// PoolLoopConfig is the parameter set shared by every caller of
-// RunPoolLoop: the in-cluster warm pool pod (`sparkwing cluster worker`), the
-// off-cluster laptop agent (`sparkwing agent`), and anything else
-// that wants to claim node work off the controller queue and execute
-// it in-process via orchestrator.RunNodeOnce. Flag / YAML parsing lives
-// in the respective CLI entry points; the loop itself is flag-agnostic.
 type PoolLoopConfig struct {
-	ControllerURL     string        // required
-	LogsURL           string        // optional; empty = stdout only
-	Token             string        // optional; empty = no auth header
-	HolderPrefix      string        // e.g. "runner:hostname" or "agent:hostname"
-	Labels            []string      // advertised to the controller's claim SQL
-	MaxConcurrent     int           // in-flight claims; <=0 treated as 1
-	PollInterval      time.Duration // back-off when the claim queue is empty
-	Lease             time.Duration // initial claim lease granted per claim
-	HeartbeatInterval time.Duration // 0 = lease/3
-	// MaxClaims bounds how many successful claims the loop will dispatch
-	// before returning nil. 0 = unlimited (laptop-agent default -- an
-	// agent with no kubelet supervisor should not silently stop accepting
-	// work). The in-cluster `sparkwing cluster worker` sets this to 25 so the kubelet
-	// restarts the container periodically, shedding accumulated PVC state
-	// and any in-process drift.
+	ControllerURL     string
+	LogsURL           string
+	Token             string
+	HolderPrefix      string
+	Labels            []string
+	MaxConcurrent     int
+	PollInterval      time.Duration
+	Lease             time.Duration
+	HeartbeatInterval time.Duration
+
 	MaxClaims int
-	// SourceName is the human-readable label used in log lines
-	// ("pool runner", "agent"). Lets operators distinguish the two
-	// shapes at a glance in mixed log output.
+
 	SourceName string
-	// LocalAdmission engages the box's local admission daemon: every
-	// claimed node is submitted to the same daemon and FIFO queue as the
-	// operator's own local runs, tagged [wingwire.OriginController], and
-	// the runner advertises the daemon's live headroom to the controller.
-	// Off by default -- an in-cluster warm pod is admitted by the
-	// Kubernetes scheduler and must never engage a daemon.
+
 	LocalAdmission bool
-	// LocalReserve is the host capacity held back from what the runner
-	// advertises to the controller, in the daemon budget grammar (e.g.
-	// "2,4gb" or "10%"). Empty reserves nothing. Ignored unless
-	// LocalAdmission is set.
+
 	LocalReserve string
-	// Home is the sparkwing home whose local daemon arbitrates. Empty
-	// resolves the default. Meaningful only with LocalAdmission.
+
 	Home string
-	// Version is this binary's version for the daemon handshake. Empty
-	// never triggers a version takeover.
+
 	Version string
 }
 
-// nodeClaimer is the narrow subset of controller-client methods
-// runPoolLoop needs to claim work. Extracted as an interface so
-// tests can drive the loop with a stub without spinning up an HTTP
-// server or the full client.
 type nodeClaimer interface {
 	ClaimNode(ctx context.Context, holderID string, labels []string, lease time.Duration, headroom *client.Headroom) (*store.Node, error)
 }
 
-// poolExecFn is the per-claim executor. The real implementation
-// (executePooledNode) runs the node to terminal state while
-// heartbeating; tests swap in a no-op to exercise the claim-counting
-// machinery without pulling in orchestrator.RunNodeOnce.
 type poolExecFn func(ctx context.Context, n *store.Node, holderID string)
 
-// RunPoolLoop is the claim / execute / heartbeat loop shared by
-// `sparkwing cluster worker` (in-cluster warm pool) and `sparkwing agent` (laptop
-// agent). Blocks until ctx is cancelled or MaxClaims is reached.
 func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) error {
 	if cfg.ControllerURL == "" {
 		return errors.New("pool loop: ControllerURL is required")
@@ -120,9 +86,6 @@ func RunPoolLoop(ctx context.Context, cfg PoolLoopConfig, logger *slog.Logger) e
 	return runPoolLoop(ctx, cfg, ctrl, exec, provider, logger)
 }
 
-// normalizePoolLoopConfig fills defaults. Split out so the testable
-// runPoolLoop and the real RunPoolLoop share one definition of
-// "what's a valid cfg".
 func normalizePoolLoopConfig(cfg PoolLoopConfig) PoolLoopConfig {
 	if cfg.MaxConcurrent < 1 {
 		cfg.MaxConcurrent = 1
@@ -146,8 +109,6 @@ func normalizePoolLoopConfig(cfg PoolLoopConfig) PoolLoopConfig {
 	return cfg
 }
 
-// runPoolLoop is the testable core. cfg must already be normalized.
-// claimer + exec are injected so tests don't need an HTTP stack.
 func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, exec poolExecFn, provider headroomProvider, logger *slog.Logger) error {
 	logger.Info(
 		cfg.SourceName+" started",
@@ -217,8 +178,6 @@ func runPoolLoop(ctx context.Context, cfg PoolLoopConfig, claimer nodeClaimer, e
 	}
 }
 
-// runRunnerCLI implements `sparkwing cluster worker` -- the long-lived warm pool
-// runner pod. Thin CLI wrapper around RunPoolLoop.
 func runRunnerCLI(args []string) error {
 	fs := flag.NewFlagSet("runner", flag.ExitOnError)
 	controllerURL := fs.String("controller", os.Getenv("SPARKWING_CONTROLLER_URL"),
@@ -345,9 +304,7 @@ func runRunnerCLI(args []string) error {
 				ArtifactStore:   *triggerArtifactStore,
 				K8sNodeSelector: triggerRunnerNodeSelector,
 				K8sTolerations:  triggerRunnerTolerations,
-				// The cache pod serves both the gitcache and /proxy/,
-				// so --gitcache is the proxy base when nothing else
-				// names one.
+
 				DependencyProxy:    k8srunner.ResolveDependencyProxy(*triggerDependencyProxy, *gitcacheURL),
 				K8sImagePullPolicy: *triggerRunnerPullPolicy,
 				Poll:               *poll,
@@ -383,9 +340,6 @@ func runRunnerCLI(args []string) error {
 	}, slog.Default())
 }
 
-// currentHeadroom evaluates the provider, tolerating a nil provider (no
-// local admission engaged) so callers pass its result straight to the
-// claim/heartbeat calls.
 func currentHeadroom(ctx context.Context, provider headroomProvider) *client.Headroom {
 	if provider == nil {
 		return nil
@@ -393,9 +347,6 @@ func currentHeadroom(ctx context.Context, provider headroomProvider) *client.Hea
 	return provider(ctx)
 }
 
-// executePooledNode runs one claimed node to terminal state. Spawns a
-// heartbeat goroutine so the claim lease stays alive for the life of
-// the execution, cancels it on return.
 func executePooledNode(
 	ctx context.Context,
 	ctrl *client.Client,
@@ -439,35 +390,14 @@ func executePooledNode(
 		"run_id", n.RunID, "node_id", n.NodeID, "outcome", res.Outcome)
 }
 
-// Timing knobs for the node-claim heartbeat. Vars (not consts) so
-// tests can shrink them to millisecond-scale. Semantics match the
-// trigger heartbeat: a single successful tick extends the lease by
-// its full duration; silence beyond the lease window cancels the
-// node work; ErrLockHeld (reaper flipped the claim) also cancels.
 var (
-	// poolHeartbeatDefaultInterval is the cadence when the caller
-	// passes hbInterval <= 0. Mirrors triggerHeartbeatInterval for
-	// symmetric behavior across the two claim layers.
 	poolHeartbeatDefaultInterval = 3 * time.Second
 
-	// poolHeartbeatTimeout is the per-call HTTP timeout. Strictly
-	// less than poolHeartbeatDefaultInterval.
 	poolHeartbeatTimeout = 2 * time.Second
 
-	// poolHeartbeatMaxSilence bounds how long node work keeps
-	// running without successful controller contact. At this point
-	// the controller's reaper has almost certainly flipped our
-	// claim; continuing to execute would race its subsequent
-	// claimer and produce duplicate node-terminal writes.
 	poolHeartbeatMaxSilence = 3 * time.Minute
 )
 
-// runPoolHeartbeat keeps the claim lease fresh until ctx cancels.
-// On terminal signals -- ErrLockHeld (reaper flipped our claim) or
-// ≥3min of consecutive heartbeat failures -- it invokes killNode
-// to cancel the in-flight node execution and returns. Transient
-// failures are logged but absorbed: the 3min lease window gives
-// plenty of headroom for a cold GC or controller blip.
 func runPoolHeartbeat(
 	ctx context.Context,
 	ctrl *client.Client,

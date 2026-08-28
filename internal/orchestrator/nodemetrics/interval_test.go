@@ -6,10 +6,6 @@ import (
 	"time"
 )
 
-// TestIntervalMillicores_ClampsReapBurstToHostCores pins the sampler clamp: a
-// reaped subtree's cumulative CPU landing in one short interval would read as a
-// rate no machine could sustain, so the derived rate caps at host cores; an
-// in-range rate passes through and a non-positive interval draws nothing.
 func TestIntervalMillicores_ClampsReapBurstToHostCores(t *testing.T) {
 	host := int64(runtime.NumCPU()) * 1000
 

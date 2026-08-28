@@ -1,25 +1,4 @@
 #!/usr/bin/env bash
-# Verify CHANGELOG.md is updated when a commit touches a covered
-# stability surface. See VERSIONING.md for the policy.
-#
-# Covered surfaces (any change to these requires a CHANGELOG entry):
-#   - pkg/**         (public API)
-#   - sparkwing/**   (author SDK)
-#   - cmd/**/*.go    (CLI flag definitions; coarse-grained)
-#
-# Exclusions (no CHANGELOG entry required):
-#   - **/*_test.go
-#   - internal/**
-#   - **/testdata/**
-#   - docs/**, examples/**, bench/**, build/**, charts/**, install/**, web/**
-#
-# Comparison base:
-#   - BASE_REF env var (CI sets this to the merge target)
-#   - origin/main if it exists
-#   - HEAD~1 otherwise (first commit on a fresh clone falls through)
-#
-# Pass: silent exit 0.
-# Fail: prints offending files and exits 1.
 
 set -euo pipefail
 
@@ -38,8 +17,6 @@ if [[ -z "$base" ]]; then
   fi
 fi
 
-# Compare base..HEAD union'd with the working tree so the check fires
-# on both committed work and staged-but-uncommitted changes.
 changed=()
 while IFS= read -r -d '' f; do
   changed+=("$f")
@@ -90,7 +67,6 @@ if [[ ${#covered_changes[@]} -eq 0 ]]; then
 fi
 
 if [[ "$changelog_touched" == "true" ]]; then
-  # Verify the [Unreleased] section actually grew (not just whitespace).
   added=$(
     {
       git diff "$base"...HEAD -- CHANGELOG.md

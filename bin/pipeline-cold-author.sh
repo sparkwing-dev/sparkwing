@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Cold-author driver for the acceptance harness. Read a natural-language
-# pipeline spec on stdin, ask a fresh model (claude --print) to author the
-# .sparkwing/jobs/candidate.go source given ONLY the authoring guide and the
-# SDK reference, and write that Go source to stdout. Empty output is a
-# failure.
-#
-# Each invocation is an independent session with no shared state -- the "cold
-# agent" the harness scores. Used by acceptance-pipelines.sh --live as the
-# --command generator. Requires the claude CLI and jq on PATH.
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -37,7 +28,6 @@ ${sdkref}"
 result="$(claude --print --output-format json --system-prompt "$system" <<<"$spec")"
 source="$(jq -r '.result' <<<"$result")"
 
-# Drop any markdown code fences the model added around the source.
 source="$(printf '%s\n' "$source" | sed -e '/^```/d')"
 
 if [[ -z "$(printf '%s' "$source" | tr -d '[:space:]')" ]]; then

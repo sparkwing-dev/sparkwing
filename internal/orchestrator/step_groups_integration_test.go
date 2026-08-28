@@ -11,11 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// ciBuild mirrors the shape the public example pipeline uses: a
-// fetch step, a GroupSteps "ci" cluster of three siblings, and a
-// downstream compile step. It's intentionally tiny -- we're
-// exercising the snapshot persistence + decoration path, not the
-// example pipeline itself.
 type ciBuild struct{ sparkwing.Base }
 
 func (ciBuild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -38,12 +33,6 @@ func init() {
 	register("orch-ci-groups", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &ciPipe{} })
 }
 
-// TestRun_StepGroupsSurviveStoreToAPI runs a pipeline that declares
-// a GroupSteps cluster, then reads the run back through the same
-// path the controller uses to serve GET /api/v1/runs/{id}?include=
-// nodes (store.GetRun + store.ListNodes + api.DecorateNodes). The
-// decorated build node's work.step_groups must contain the cluster
-// in declaration order.
 func TestRun_StepGroupsSurviveStoreToAPI(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,

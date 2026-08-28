@@ -40,9 +40,6 @@ func TestProfileSamples_ReturnsWindowOldestFirst(t *testing.T) {
 	}
 }
 
-// The charge a profile stores must be reproducible from the window it
-// stores beside it: that identity is what lets a reader recompute a price by
-// eye, so it is asserted here rather than assumed.
 func TestProfileSamples_ReproduceStoredCharges(t *testing.T) {
 	st := openTestStore(t)
 	ctx := context.Background()
@@ -108,7 +105,7 @@ func TestNearestRankIndex_TiesPickTheOldestSample(t *testing.T) {
 	if got := store.NearestRankIndex(nil, 0.95); got != -1 {
 		t.Errorf("NearestRankIndex(nil) = %d, want -1", got)
 	}
-	// Rank arithmetic must agree with the value the same percentile takes.
+
 	vals := []float64{9, 1, 5, 7, 3}
 	idx := store.NearestRankIndex(vals, 0.5)
 	if vals[idx] != store.NearestRankPercentile(vals, 0.5) {

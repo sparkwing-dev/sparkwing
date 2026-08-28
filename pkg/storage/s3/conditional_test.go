@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage"
 )
 
-// ignorePreconditionsAPI is an S3 endpoint that accepts the
-// conditional-write headers and silently ignores them: every PutObject
-// succeeds regardless of If-None-Match / If-Match. It models an
-// S3-compatible gateway without real CAS support.
 type ignorePreconditionsAPI struct {
 	API
 	puts atomic.Int64

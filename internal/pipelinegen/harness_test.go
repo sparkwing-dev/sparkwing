@@ -11,7 +11,6 @@ import (
 	"testing"
 )
 
-// stubGenerator returns canned source (or an error) per spec name.
 type stubGenerator struct {
 	src  map[string]string
 	errs map[string]error
@@ -26,8 +25,6 @@ func (g stubGenerator) Generate(_ context.Context, spec Spec) (string, error) {
 	return g.src[spec.Name], nil
 }
 
-// stubScorer fails the named specs (one failing lint check) and passes
-// the rest, so a run is fully deterministic without building anything.
 type stubScorer struct{ failing map[string]bool }
 
 func (s stubScorer) Score(_ context.Context, spec Spec, _ string) ([]CheckResult, error) {
@@ -36,10 +33,6 @@ func (s stubScorer) Score(_ context.Context, spec Spec, _ string) ([]CheckResult
 	return checks, nil
 }
 
-// revisingGenerator emits bad source until it has been given feedback
-// reviseAfter times, then emits good source. It records the feedback it
-// was handed so a test can assert the oracle output actually reaches the
-// author.
 type revisingGenerator struct {
 	reviseAfter int
 	rounds      int
@@ -62,7 +55,6 @@ func (g *revisingGenerator) Revise(_ context.Context, _ Spec, _, feedback string
 	return "bad", nil
 }
 
-// sourceScorer passes only the exact source "good".
 type sourceScorer struct{}
 
 func (sourceScorer) Score(_ context.Context, _ Spec, source string) ([]CheckResult, error) {
@@ -112,8 +104,6 @@ func TestRunWithoutReviseStaysOneShot(t *testing.T) {
 	}
 }
 
-// An expect=fail spec encodes an anti-pattern on purpose, so feeding it
-// the linter's complaint would ask it to stop being the thing under test.
 func TestRunWithDoesNotReviseAntiPatternSpecs(t *testing.T) {
 	specs := []Spec{{Name: "bad", Expect: ExpectFail}}
 	gen := &revisingGenerator{reviseAfter: 1}
@@ -231,12 +221,6 @@ func TestRunGenerationErrorMatchesOnlyExpectFail(t *testing.T) {
 	}
 }
 
-// TestEvalHarnessEndToEnd is the acceptance instrument: it generates the
-// whole corpus (fixture-backed) and scores each through the real
-// compile + `pipeline explain` + `pipeline lint` bar, asserting every
-// spec agrees with its expectation and the idiomatic specs all pass. It
-// builds the sparkwing binary and compiles a project per spec, so it is
-// opt-in via SPARKWING_PIPELINEGEN_E2E=1 (and skipped in -short).
 func TestEvalHarnessEndToEnd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("end-to-end harness skipped in -short mode")

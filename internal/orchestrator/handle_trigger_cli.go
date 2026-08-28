@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-// runHandleTriggerCLI handles `sparkwing handle-trigger <id> [flags]`.
-// Adopts an already-claimed trigger and runs it to terminal state.
-// --local skips the controller and uses LocalBackends.
 func runHandleTriggerCLI(args []string) error {
 	fs := flag.NewFlagSet("handle-trigger", flag.ExitOnError)
 	controllerURL := fs.String("controller", ResolveDevEnvURL("SPARKWING_CONTROLLER_URL"),

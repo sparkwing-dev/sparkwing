@@ -1,15 +1,5 @@
 "use client";
 
-// Shared run-filter machinery used by /runs (Activity view) and the
-// PipelineOverview component (By pipeline view). Filter state lives
-// in URL params so it persists across the pivot toggle, survives
-// reloads, and can be shared as a link.
-//
-// Encoded URL params:
-//   status, repo, pipeline, branch, commit, tag        → comma-joined includes
-//   nstatus, nrepo, npipeline, nbranch, ncommit, ntag  → comma-joined excludes
-//   startedAfter, startedBefore, finishedAfter, finishedBefore → loose date strings
-//   q → free-text search (space = AND, "-" prefix = exclude)
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -17,7 +7,6 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { Run, PipelineMeta } from "@/lib/api";
 import Tooltip from "@/components/Tooltip";
 
-// ─── URL state hook ────────────────────────────────────────────────────────
 
 const FILTER_URL_KEYS = [
   "status",
@@ -45,10 +34,6 @@ export function useUrlFilterState() {
   const router = useRouter();
   const pathname = usePathname();
 
-  // Batch sync setParams calls in a microtask so multi-key updates
-  // (date-preset writing 4 keys, etc.) merge into one router.replace.
-  // Next 16's router.replace doesn't synchronously update
-  // window.location, so reading it back between rapid calls is stale.
   const pendingRef = useRef<Record<string, string | string[]> | null>(null);
   const setParams = useCallback(
     (updates: Record<string, string | string[]>) => {
@@ -115,60 +100,61 @@ export function useUrlFilterState() {
     else sessionStorage.removeItem(FILTER_STORAGE_KEY);
   }, [searchParams]);
 
-  const getList = (key: string): string[] => {
-    const v = searchParams.get(key);
-    return v ? v.split(",").filter(Boolean) : [];
-  };
-  const getStr = (key: string): string => searchParams.get(key) || "";
+  return useMemo(() => {
+    const getList = (key: string): string[] => {
+      const value = searchParams.get(key);
+      return value ? value.split(",").filter(Boolean) : [];
+    };
+    const getString = (key: string): string => searchParams.get(key) || "";
 
-  return {
-    filterStatus: getList("status"),
-    setFilterStatus: (v: string[]) => setParams({ status: v }),
-    excludeStatus: getList("nstatus"),
-    setExcludeStatus: (v: string[]) => setParams({ nstatus: v }),
+    return {
+      filterStatus: getList("status"),
+      setFilterStatus: (value: string[]) => setParams({ status: value }),
+      excludeStatus: getList("nstatus"),
+      setExcludeStatus: (value: string[]) => setParams({ nstatus: value }),
 
-    filterRepo: getList("repo"),
-    setFilterRepo: (v: string[]) => setParams({ repo: v }),
-    excludeRepo: getList("nrepo"),
-    setExcludeRepo: (v: string[]) => setParams({ nrepo: v }),
+      filterRepo: getList("repo"),
+      setFilterRepo: (value: string[]) => setParams({ repo: value }),
+      excludeRepo: getList("nrepo"),
+      setExcludeRepo: (value: string[]) => setParams({ nrepo: value }),
 
-    filterPipeline: getList("pipeline"),
-    setFilterPipeline: (v: string[]) => setParams({ pipeline: v }),
-    excludePipeline: getList("npipeline"),
-    setExcludePipeline: (v: string[]) => setParams({ npipeline: v }),
+      filterPipeline: getList("pipeline"),
+      setFilterPipeline: (value: string[]) => setParams({ pipeline: value }),
+      excludePipeline: getList("npipeline"),
+      setExcludePipeline: (value: string[]) => setParams({ npipeline: value }),
 
-    filterBranch: getList("branch"),
-    setFilterBranch: (v: string[]) => setParams({ branch: v }),
-    excludeBranch: getList("nbranch"),
-    setExcludeBranch: (v: string[]) => setParams({ nbranch: v }),
+      filterBranch: getList("branch"),
+      setFilterBranch: (value: string[]) => setParams({ branch: value }),
+      excludeBranch: getList("nbranch"),
+      setExcludeBranch: (value: string[]) => setParams({ nbranch: value }),
 
-    filterCommit: getList("commit"),
-    setFilterCommit: (v: string[]) => setParams({ commit: v }),
-    excludeCommit: getList("ncommit"),
-    setExcludeCommit: (v: string[]) => setParams({ ncommit: v }),
+      filterCommit: getList("commit"),
+      setFilterCommit: (value: string[]) => setParams({ commit: value }),
+      excludeCommit: getList("ncommit"),
+      setExcludeCommit: (value: string[]) => setParams({ ncommit: value }),
 
-    filterTag: getList("tag"),
-    setFilterTag: (v: string[]) => setParams({ tag: v }),
-    excludeTag: getList("ntag"),
-    setExcludeTag: (v: string[]) => setParams({ ntag: v }),
+      filterTag: getList("tag"),
+      setFilterTag: (value: string[]) => setParams({ tag: value }),
+      excludeTag: getList("ntag"),
+      setExcludeTag: (value: string[]) => setParams({ ntag: value }),
 
-    startedAfter: getStr("startedAfter"),
-    setStartedAfter: (v: string) => setParams({ startedAfter: v }),
-    startedBefore: getStr("startedBefore"),
-    setStartedBefore: (v: string) => setParams({ startedBefore: v }),
-    finishedAfter: getStr("finishedAfter"),
-    setFinishedAfter: (v: string) => setParams({ finishedAfter: v }),
-    finishedBefore: getStr("finishedBefore"),
-    setFinishedBefore: (v: string) => setParams({ finishedBefore: v }),
+      startedAfter: getString("startedAfter"),
+      setStartedAfter: (value: string) => setParams({ startedAfter: value }),
+      startedBefore: getString("startedBefore"),
+      setStartedBefore: (value: string) => setParams({ startedBefore: value }),
+      finishedAfter: getString("finishedAfter"),
+      setFinishedAfter: (value: string) => setParams({ finishedAfter: value }),
+      finishedBefore: getString("finishedBefore"),
+      setFinishedBefore: (value: string) => setParams({ finishedBefore: value }),
 
-    filterText: getStr("q"),
-    setFilterText: (v: string) => setParams({ q: v }),
-  };
+      filterText: getString("q"),
+      setFilterText: (value: string) => setParams({ q: value }),
+    };
+  }, [searchParams, setParams]);
 }
 
 export type RunFilterState = ReturnType<typeof useUrlFilterState>;
 
-// ─── Helpers ───────────────────────────────────────────────────────────────
 
 export function repoLabel(r: Run): string {
   const raw = r.repo || r.github_repo || "unknown";
@@ -194,10 +180,6 @@ export function parseLooseDate(s: string): number | null {
     const d = new Date(t.replace(" ", "T"));
     return isNaN(d.getTime()) ? null : d.getTime();
   }
-  // Slash form: M/D, M/D/YYYY, M/D HH:MM, M/D/YYYY HH:MM. Year-less
-  // forms default to current year (local). 2-digit years map into
-  // 2000-2099 since older years aren't a useful date filter target
-  // for a CI dashboard.
   const slash = t.match(
     /^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/,
   );
@@ -216,10 +198,6 @@ export function parseLooseDate(s: string): number | null {
   return isNaN(d.getTime()) ? null : d.getTime();
 }
 
-// msToUrlString encodes an absolute timestamp as an ISO-8601 string
-// with explicit local offset, e.g. 2026-05-07T00:00-07:00. Stored in
-// URL so shared links round-trip to the same absolute instant
-// regardless of recipient's timezone.
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
 }
@@ -235,10 +213,6 @@ function msToUrlString(ms: number): string {
   );
 }
 
-// urlToInputString turns a stored URL value back into a tidy local
-// form suitable for displaying in the input field. The offset, if
-// any, is stripped from the display since the user shouldn't have to
-// reason about it.
 export function urlToInputString(s: string): string {
   if (!s) return "";
   const ms = parseLooseDate(s);
@@ -250,10 +224,6 @@ export function urlToInputString(s: string): string {
   );
 }
 
-// onDateInputChange parses a user-typed value, converts it to the
-// canonical URL form when parseable, and passes that to `setter`.
-// Unparseable strings are passed through verbatim so the filter
-// no-ops while the user is still typing.
 export function commitDateInput(value: string, setter: (v: string) => void) {
   if (!value.trim()) {
     setter("");
@@ -266,9 +236,6 @@ export function commitDateInput(value: string, setter: (v: string) => void) {
 
 export function fmtDateChip(local: string): string {
   if (!local) return "";
-  // Parse via parseLooseDate so the chip matches what the filter
-  // actually uses -- otherwise "5/11" displays a misleading year-2001
-  // date here but the filter sees a different (also wrong) year.
   const ms = parseLooseDate(local);
   if (ms === null) return local;
   const d = new Date(ms);
@@ -313,8 +280,6 @@ export function serializeSearch(terms: SearchTerm[]): string {
     .join(" ");
 }
 
-// runMatchesFilter returns true if a run passes every active filter
-// in `s`. Used by both views to filter their data identically.
 export function runMatchesFilter(
   r: Run,
   s: RunFilterState,
@@ -392,8 +357,6 @@ export function runMatchesFilter(
   return true;
 }
 
-// activeFilterCount returns how many filter slots are currently set.
-// Used to show the "clear all" button and gate the chip strip.
 export function activeFilterCount(s: RunFilterState): number {
   return (
     s.filterStatus.length +
@@ -414,7 +377,6 @@ export function activeFilterCount(s: RunFilterState): number {
   );
 }
 
-// clearAllFilters wipes every facet at once.
 export function clearAllFilters(s: RunFilterState) {
   s.setFilterRepo([]);
   s.setFilterPipeline([]);
@@ -435,7 +397,6 @@ export function clearAllFilters(s: RunFilterState) {
   s.setExcludeTag([]);
 }
 
-// ─── Filter bar ────────────────────────────────────────────────────────────
 
 export interface FilterGroup {
   key: string;
@@ -461,9 +422,6 @@ export interface DateGroup {
   setFinishedBefore: (v: string) => void;
 }
 
-// buildGroupsFromState constructs the standard 6-facet group config
-// from a RunFilterState plus the option lists derived from the
-// caller's runs data.
 export function buildGroupsFromState(
   s: RunFilterState,
   options: {
@@ -551,8 +509,6 @@ export function buildGroupsFromState(
   ];
 }
 
-// computeOptions derives the available filter options from a runs
-// list and pipeline metadata.
 export function computeOptions(
   runs: Run[],
   pipelineMeta: Record<string, PipelineMeta>,
@@ -928,9 +884,6 @@ export function FullFilterBar({
   );
 }
 
-// DebouncedSearchInput keeps the visible value in local state for
-// snappy typing, then commits upstream (URL/router) after a brief
-// idle so each keystroke doesn't trigger a full filter rerun.
 function DebouncedSearchInput({
   value,
   onCommit,
@@ -991,26 +944,21 @@ function DateInput({
   setUrl: (v: string) => void;
 }) {
   const [local, setLocal] = useState(() => urlToInputString(urlValue));
-  const focusedRef = useRef(false);
-  // Sync local from URL when it changes externally and the field
-  // isn't being typed in. Keeps round-trips from share-links clean.
-  useEffect(() => {
-    if (focusedRef.current) return;
-    setLocal(urlToInputString(urlValue));
-  }, [urlValue]);
+  const [focused, setFocused] = useState(false);
+  const value = focused ? local : urlToInputString(urlValue);
   return (
     <label className="block text-[10px] text-[var(--muted)]">
       {label}
       <input
         type="text"
         placeholder="YYYY-MM-DD [HH:MM]"
-        value={local}
-        onFocus={() => {
-          focusedRef.current = true;
+        value={value}
+        onFocus={(event) => {
+          setLocal(event.currentTarget.value);
+          setFocused(true);
         }}
         onBlur={() => {
-          focusedRef.current = false;
-          setLocal(urlToInputString(urlValue));
+          setFocused(false);
         }}
         onChange={(e) => {
           setLocal(e.target.value);
@@ -1022,11 +970,6 @@ function DateInput({
   );
 }
 
-// Common time-range shortcuts. Each preset writes started-axis
-// boundaries and clears the finished-axis so the result is unambiguous.
-// "Today" sets startedAfter to local midnight today, leaves before
-// open; "Yesterday" pins to the full local day; "Last N" presets are
-// rolling windows ending now.
 const DATE_PRESETS: { label: string; apply: (g: DateGroup) => void }[] = [
   {
     label: "Today",
@@ -1175,10 +1118,6 @@ function DateFilterButton({
   );
 }
 
-// useFilterDropdownState provides the openDropdown state + outside-
-// click + Escape handler shared by FullFilterBar consumers. The
-// wrapping ref is returned so callers can attach it to their filter
-// container element.
 export function useFilterDropdownState() {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const filterRef = useRef<HTMLDivElement>(null);
@@ -1187,17 +1126,11 @@ export function useFilterDropdownState() {
     const handler = (e: MouseEvent) => {
       if (!filterRef.current) return;
       const target = e.target as Element;
-      // Click landed inside a dropdown trigger or panel -- let it
-      // handle itself (toggle, switch to another dropdown, etc.).
       if (target.closest("[data-dropdown-region]")) return;
-      // Click outside the filter bar entirely -- swallow so the
-      // hidden detail row underneath doesn't also get hit.
       if (!filterRef.current.contains(target)) {
         e.stopPropagation();
         e.preventDefault();
       }
-      // Empty space inside the filter bar -- close without swallowing
-      // so other inline controls (chips, search input) still react.
       setOpenDropdown(null);
     };
     const onKey = (e: KeyboardEvent) => {
@@ -1213,7 +1146,6 @@ export function useFilterDropdownState() {
   return { openDropdown, setOpenDropdown, filterRef };
 }
 
-// ─── Filterable value (click-to-filter pill) ──────────────────────────────
 
 export type FilterFacet =
   | "status"
@@ -1238,107 +1170,100 @@ export interface FilterCtx {
   ) => void;
 }
 
-// useFilterCtx returns a stable FilterCtx bound to the given filter
-// state. Reads/writes pass through to the URL via a ref so the ctx
-// identity stays constant -- consumers can pass it through memoized
-// components without busting them.
-export function useFilterCtx(filterState: RunFilterState): FilterCtx {
-  const ref = useRef(filterState);
-  ref.current = filterState;
-  return useMemo<FilterCtx>(() => {
-    const facet = (f: FilterFacet) => {
-      const s = ref.current;
-      switch (f) {
-        case "status":
-          return [
-            s.filterStatus,
-            s.setFilterStatus,
-            s.excludeStatus,
-            s.setExcludeStatus,
-          ] as const;
-        case "repo":
-          return [
-            s.filterRepo,
-            s.setFilterRepo,
-            s.excludeRepo,
-            s.setExcludeRepo,
-          ] as const;
-        case "pipeline":
-          return [
-            s.filterPipeline,
-            s.setFilterPipeline,
-            s.excludePipeline,
-            s.setExcludePipeline,
-          ] as const;
-        case "branch":
-          return [
-            s.filterBranch,
-            s.setFilterBranch,
-            s.excludeBranch,
-            s.setExcludeBranch,
-          ] as const;
-        case "commit":
-          return [
-            s.filterCommit,
-            s.setFilterCommit,
-            s.excludeCommit,
-            s.setExcludeCommit,
-          ] as const;
-        case "tag":
-          return [
-            s.filterTag,
-            s.setFilterTag,
-            s.excludeTag,
-            s.setExcludeTag,
-          ] as const;
-      }
-    };
-    return {
-      isIncluded: (f, v) => facet(f)[0].includes(v),
-      isExcluded: (f, v) => facet(f)[2].includes(v),
-      toggle: (f, v, mode) => {
-        const [inc, setInc, exc, setExc] = facet(f);
-        if (mode === "include") {
-          if (inc.includes(v)) setInc(inc.filter((x) => x !== v));
-          else {
-            setInc([...inc, v]);
-            if (exc.includes(v)) setExc(exc.filter((x) => x !== v));
-          }
-        } else {
+export function createFilterCtx(filterState: RunFilterState): FilterCtx {
+  const facet = (f: FilterFacet) => {
+    const s = filterState;
+    switch (f) {
+      case "status":
+        return [
+          s.filterStatus,
+          s.setFilterStatus,
+          s.excludeStatus,
+          s.setExcludeStatus,
+        ] as const;
+      case "repo":
+        return [
+          s.filterRepo,
+          s.setFilterRepo,
+          s.excludeRepo,
+          s.setExcludeRepo,
+        ] as const;
+      case "pipeline":
+        return [
+          s.filterPipeline,
+          s.setFilterPipeline,
+          s.excludePipeline,
+          s.setExcludePipeline,
+        ] as const;
+      case "branch":
+        return [
+          s.filterBranch,
+          s.setFilterBranch,
+          s.excludeBranch,
+          s.setExcludeBranch,
+        ] as const;
+      case "commit":
+        return [
+          s.filterCommit,
+          s.setFilterCommit,
+          s.excludeCommit,
+          s.setExcludeCommit,
+        ] as const;
+      case "tag":
+        return [
+          s.filterTag,
+          s.setFilterTag,
+          s.excludeTag,
+          s.setExcludeTag,
+        ] as const;
+    }
+  };
+  return {
+    isIncluded: (f, v) => facet(f)[0].includes(v),
+    isExcluded: (f, v) => facet(f)[2].includes(v),
+    toggle: (f, v, mode) => {
+      const [inc, setInc, exc, setExc] = facet(f);
+      if (mode === "include") {
+        if (inc.includes(v)) setInc(inc.filter((x) => x !== v));
+        else {
+          setInc([...inc, v]);
           if (exc.includes(v)) setExc(exc.filter((x) => x !== v));
-          else {
-            setExc([...exc, v]);
-            if (inc.includes(v)) setInc(inc.filter((x) => x !== v));
-          }
         }
-      },
-      setDateBound: (field, bound, iso) => {
-        const d = new Date(iso);
-        const local = isNaN(d.getTime())
-          ? ""
-          : new Date(d.getTime() - d.getTimezoneOffset() * 60000)
-              .toISOString()
-              .slice(0, 16);
-        const s = ref.current;
-        if (field === "started" && bound === "before")
-          s.setStartedBefore(local);
-        else if (field === "started" && bound === "after")
-          s.setStartedAfter(local);
-        else if (field === "finished" && bound === "before")
-          s.setFinishedBefore(local);
-        else if (field === "finished" && bound === "after")
-          s.setFinishedAfter(local);
-      },
-    };
-  }, []);
+      } else {
+        if (exc.includes(v)) setExc(exc.filter((x) => x !== v));
+        else {
+          setExc([...exc, v]);
+          if (inc.includes(v)) setInc(inc.filter((x) => x !== v));
+        }
+      }
+    },
+    setDateBound: (field, bound, iso) => {
+      const d = new Date(iso);
+      const local = isNaN(d.getTime())
+        ? ""
+        : new Date(d.getTime() - d.getTimezoneOffset() * 60000)
+            .toISOString()
+            .slice(0, 16);
+      const s = filterState;
+      if (field === "started" && bound === "before")
+        s.setStartedBefore(local);
+      else if (field === "started" && bound === "after")
+        s.setStartedAfter(local);
+      else if (field === "finished" && bound === "before")
+        s.setFinishedBefore(local);
+      else if (field === "finished" && bound === "after")
+        s.setFinishedAfter(local);
+    },
+  };
+}
+
+export function useFilterCtx(filterState: RunFilterState): FilterCtx {
+  return useMemo(() => createFilterCtx(filterState), [filterState]);
 }
 
 function useClickPopup<T extends HTMLElement>() {
   const [open, setOpen] = useState(false);
   const ref = useRef<T>(null);
-  // Popup body is rendered via portal at document.body so overflow
-  // ancestors don't clip it; we still need outside-click detection,
-  // so the consumer wires `popupRef` to the portal's root node.
   const popupRef = useRef<HTMLElement | null>(null);
   useEffect(() => {
     if (!open) return;

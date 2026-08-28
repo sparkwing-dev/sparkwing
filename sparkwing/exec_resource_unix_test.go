@@ -44,9 +44,6 @@ func (c *sampleCollector) peak() (cpu, mem int64) {
 	return cpu, mem
 }
 
-// A shell-step busy loop consumes CPU in a spawned process, not the
-// orchestrator goroutine, so its cost is invisible to RUSAGE_SELF. The
-// per-command rusage must surface a true nonzero CPU peak.
 func TestExec_ShellBurnerRecordsNonzeroCPU(t *testing.T) {
 	col := &sampleCollector{}
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
@@ -65,8 +62,6 @@ func TestExec_ShellBurnerRecordsNonzeroCPU(t *testing.T) {
 	}
 }
 
-// A spawned binary that burns CPU (awk arithmetic loop) is a separate
-// process; its cost must be measured through the command's rusage.
 func TestExec_SpawnedBinaryBurnerRecordsNonzeroCPU(t *testing.T) {
 	if _, err := exec.LookPath("awk"); err != nil {
 		t.Skip("awk not on PATH")
@@ -85,21 +80,6 @@ func TestExec_SpawnedBinaryBurnerRecordsNonzeroCPU(t *testing.T) {
 	}
 }
 
-// TestExec_ResourceReportIsFiledAtTheReapNotAfterTheDrain pins the order of
-// two things that used to happen in the wrong sequence.
-//
-// A command's report tells the node sampler which reaped-child CPU has
-// already been accounted for. The sampler keeps ticking meanwhile, so any
-// delay between the reap and the report is a window in which a tick charges
-// that CPU a second time -- once as the sampler's own RUSAGE_CHILDREN delta
-// and once as the command's report. The delay was real: a surviving
-// grandchild holding the command's stdout open makes the drain wait out its
-// whole grace window, and the report used to be filed after that.
-//
-// The background process here holds the inherited pipe for far longer than
-// the grace, so a report that waits for the drain cannot arrive in time. The
-// 300ms budget is loose on purpose: what it pins is which side of the 500ms
-// grace the report falls on, not how fast the box is.
 func TestExec_ResourceReportIsFiledAtTheReapNotAfterTheDrain(t *testing.T) {
 	reported := make(chan time.Duration, 4)
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
@@ -122,8 +102,6 @@ func TestExec_ResourceReportIsFiledAtTheReapNotAfterTheDrain(t *testing.T) {
 	}
 }
 
-// A command with no resource reporter installed runs normally: reporting
-// is a no-op, never a failure.
 func TestExec_NoReporterIsHarmless(t *testing.T) {
 	ctx := sparkwingruntime.WithLogger(context.Background(), &recordingLogger{})
 	if _, err := sparkwing.Bash(ctx, "true").Run(); err != nil {
@@ -131,9 +109,6 @@ func TestExec_NoReporterIsHarmless(t *testing.T) {
 	}
 }
 
-// Cancelling a node whose shell backgrounds a child must tear down the
-// whole process group: the grandchild is signalled via the negative pgid,
-// so no burner is orphaned after cancel.
 func TestExec_CancelKillsProcessTree(t *testing.T) {
 	dir := t.TempDir()
 	pidfile := filepath.Join(dir, "child.pid")
@@ -212,8 +187,6 @@ func waitForSignal(t *testing.T, done <-chan struct{}, timeout time.Duration, fa
 	}
 }
 
-// pidAlive reports whether pid names a live process; signal 0 probes
-// existence without delivering anything.
 func pidAlive(pid int) bool {
 	return syscall.Kill(pid, 0) == nil
 }

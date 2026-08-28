@@ -55,13 +55,9 @@ func TestResolveHostBin_NothingResolvesReportsFalse(t *testing.T) {
 	}
 }
 
-// A typo'd or stale $SPARKWING_WINGD_BIN is the common way to get a host
-// that cannot start. The error must name the variable and the value,
-// because "could not reach the admission daemon" sends the reader to
-// inspect a daemon when what is wrong is a path they typed.
 func TestHostSpawn_UnstartableHostNamesTheVariableAndValue(t *testing.T) {
 	home := shortHome(t)
-	missing := filepath.Join(t.TempDir(), "sparkwign") // deliberate typo
+	missing := filepath.Join(t.TempDir(), "sparkwign")
 	t.Setenv(HostBinEnv, missing)
 	spawn, ok := HostSpawn()
 	if !ok {
@@ -77,7 +73,6 @@ func TestHostSpawn_UnstartableHostNamesTheVariableAndValue(t *testing.T) {
 		}
 	}
 
-	// And it must reach a caller intact rather than as "unreachable".
 	_, cerr := EnsureDaemon(context.Background(), Options{
 		Home:        home,
 		Spawn:       spawn,
@@ -93,11 +88,6 @@ func TestHostSpawn_UnstartableHostNamesTheVariableAndValue(t *testing.T) {
 	}
 }
 
-// A host binary that starts and immediately exits non-zero -- the shape
-// of an installed sparkwing too old to know the verb it was handed --
-// must fail the connect promptly, carrying the host's own reason, rather
-// than waiting out the full socket budget for a socket that will never
-// appear.
 func TestSpawn_HostThatExitsImmediatelyFailsFast(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fixture below is a unix shell script")
@@ -136,13 +126,6 @@ func TestSpawn_HostThatExitsImmediatelyFailsFast(t *testing.T) {
 	}
 }
 
-// The same fast-fail has to hold on the takeover path, which is worse
-// than a cold start: the old daemon has already been drained, so a
-// successor that cannot start leaves the box with nothing while the
-// client spends its whole takeover budget re-draining and re-spawning.
-//
-// It is also where "the socket exists" stops meaning "the host is up":
-// the predecessor's socket is still in place when the successor starts.
 func TestTakeover_BrokenSuccessorFailsFastNamingTheBinary(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fixture below is a unix shell script")
@@ -166,7 +149,7 @@ func TestTakeover_BrokenSuccessorFailsFastNamingTheBinary(t *testing.T) {
 	start := time.Now()
 	_, err := EnsureDaemon(context.Background(), Options{
 		Home:        home,
-		Version:     "v9.9.9", // supersedes the fixture daemon, so this takes over
+		Version:     "v9.9.9",
 		Spawn:       spawn,
 		DialTimeout: 200 * time.Millisecond,
 		Backoff:     5 * time.Millisecond,
@@ -185,9 +168,6 @@ func TestTakeover_BrokenSuccessorFailsFastNamingTheBinary(t *testing.T) {
 	}
 }
 
-// A spawn that never runs must not leave an empty daemon log behind: a
-// zero-byte d.log reads as "a daemon ran here and said nothing", which
-// is the opposite of what happened.
 func TestSpawn_FailedStartLeavesNoEmptyDaemonLog(t *testing.T) {
 	home := shortHome(t)
 	logPath, err := wingd.LogPath(home)
@@ -202,8 +182,6 @@ func TestSpawn_FailedStartLeavesNoEmptyDaemonLog(t *testing.T) {
 	}
 }
 
-// A no-takeover client may share a same-source daemon even when their display
-// versions differ.
 func TestEnsureDaemon_NoTakeoverAcceptsSameSourceDaemon(t *testing.T) {
 	home := shortHome(t)
 	var spawns atomic.Int32
@@ -214,7 +192,7 @@ func TestEnsureDaemon_NoTakeoverAcceptsSameSourceDaemon(t *testing.T) {
 	}
 	_, err := EnsureDaemon(context.Background(), Options{
 		Home:        home,
-		Version:     "v2.0.0", // supersedes the in-process daemon's v1.0.0
+		Version:     "v2.0.0",
 		Spawn:       spawn,
 		NoTakeover:  true,
 		DialTimeout: 500 * time.Millisecond,
@@ -228,8 +206,6 @@ func TestEnsureDaemon_NoTakeoverAcceptsSameSourceDaemon(t *testing.T) {
 	}
 }
 
-// oneShotDaemon answers a single handshake with the given ack and then
-// keeps the connection open, which is enough to drive a connect decision.
 func oneShotDaemon(t *testing.T, home string, ack wingwire.HelloAck) {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)
@@ -266,10 +242,6 @@ func oneShotDaemon(t *testing.T, home string, ack wingwire.HelloAck) {
 	}()
 }
 
-// A no-takeover client facing a daemon whose protocol is older than it
-// speaks must fail with advice aimed at the daemon's binary -- the
-// installed sparkwing -- rather than attempt a replacement it cannot
-// perform, and must spend no takeover budget doing so.
 func TestEnsureDaemon_NoTakeoverDaemonProtocolTooOldFails(t *testing.T) {
 	home := shortHome(t)
 	oneShotDaemon(t, home, wingwire.HelloAck{
@@ -298,8 +270,7 @@ func TestEnsureDaemon_NoTakeoverDaemonProtocolTooOldFails(t *testing.T) {
 			t.Errorf("message %q omits %q", msg, want)
 		}
 	}
-	// A private home gets its own daemon from the same unusable
-	// installation, so suggesting one would send the reader in a circle.
+
 	if strings.Contains(msg, "SPARKWING_HOME") {
 		t.Errorf("message %q suggests an escape that does not escape anything", msg)
 	}
@@ -310,10 +281,6 @@ func TestEnsureDaemon_NoTakeoverDaemonProtocolTooOldFails(t *testing.T) {
 	}
 }
 
-// The release an operator must install is the higher of two bars: new
-// enough to speak this client's protocol, and new enough to host a daemon
-// at all. Naming only the protocol floor would send them to a build that
-// clears the handshake and still cannot serve the spawn verb.
 func TestMinHostingRelease_TakesTheHigherOfBothBars(t *testing.T) {
 	got := minHostingRelease()
 	if semver.Compare(got, FirstHostingRelease) < 0 {
@@ -329,18 +296,6 @@ func TestMinHostingRelease_TakesTheHigherOfBothBars(t *testing.T) {
 	}
 }
 
-// TestFirstHostingRelease_NamesAHostingCapableRelease is the live half
-// of keeping that constant honest. It names the first release able to
-// host a daemon on request, and it can be wrong in two ways: while the
-// feature is unreleased, the tag must not exist yet (a tag cut without
-// this work would send operators to a build that cannot host); once the
-// release ships, the tag must actually contain the hosting code (a
-// bumped constant naming some future release would fail the moment that
-// release shipped without it). The supervisor package is the marker --
-// it is what the spawn verb reaches, so a tag that carries it can host.
-//
-// The release pipeline carries the pre-release half at tag time. This
-// test is what catches both halves on a branch, before anyone releases.
 func TestFirstHostingRelease_NamesAHostingCapableRelease(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available; the release pipeline carries the same check")
@@ -353,8 +308,7 @@ func TestFirstHostingRelease_NamesAHostingCapableRelease(t *testing.T) {
 		t.Skipf("git tag --list: %v (not a checkout with tags; the release pipeline carries the same check)", err)
 	}
 	if strings.TrimSpace(string(out)) == "" {
-		// Unreleased: nothing to verify until the tag exists, and the
-		// release pipeline refuses to cut a mismatched version.
+
 		return
 	}
 	const marker = "internal/wingd/supervise/supervise.go"
@@ -367,8 +321,6 @@ func TestFirstHostingRelease_NamesAHostingCapableRelease(t *testing.T) {
 	}
 }
 
-// repoRootForTest walks up to the module root so `git` runs inside the
-// checkout regardless of where the test binary was invoked from.
 func repoRootForTest(t *testing.T) string {
 	t.Helper()
 	dir, err := os.Getwd()
@@ -387,11 +339,6 @@ func repoRootForTest(t *testing.T) string {
 	}
 }
 
-// With no daemon running and a spawn that declares no host exists, the
-// connect loop must surface ErrNoDaemonHost bare, so callers can choose to
-// run without local coordination instead of failing the run. Reporting it
-// as a spawn failure -- with some earlier daemon's log tail attached --
-// would send the reader after a process that is not the obstacle.
 func TestEnsureDaemon_NoHostSentinelSurfaces(t *testing.T) {
 	home := shortHome(t)
 	_, err := EnsureDaemon(context.Background(), Options{
@@ -408,10 +355,6 @@ func TestEnsureDaemon_NoHostSentinelSurfaces(t *testing.T) {
 	}
 }
 
-// A no-takeover client with no Spawn wired must not fall back to the
-// self-exec default: that default re-execs this binary as `wingd
-// supervise`, and a no-takeover client is by definition one that does not
-// serve those verbs.
 func TestEnsureDaemon_NoTakeoverNeverSelfExecs(t *testing.T) {
 	home := shortHome(t)
 	_, err := EnsureDaemon(context.Background(), Options{
@@ -425,10 +368,6 @@ func TestEnsureDaemon_NoTakeoverNeverSelfExecs(t *testing.T) {
 	}
 }
 
-// The hosting binaries keep the behavior this feature removes from
-// pipeline binaries: sparkwing-runner's in-process client leaves
-// NoTakeover unset, and must still drain a daemon its build supersedes and
-// bring up its own as the successor.
 func TestEnsureDaemon_HostingClientStillTakesOver(t *testing.T) {
 	home := shortHome(t)
 	oneShotDaemon(t, home, wingwire.HelloAck{
@@ -444,8 +383,7 @@ func TestEnsureDaemon_HostingClientStillTakesOver(t *testing.T) {
 		DialTimeout: 200 * time.Millisecond,
 		Backoff:     5 * time.Millisecond,
 	})
-	// The fixture never yields, so the budget is what ends this -- but only
-	// after the takeovers were actually attempted, which is the point.
+
 	if !errors.Is(err, ErrTakeoverExhausted) {
 		t.Fatalf("hosting client ended with %v, want the exhausted-takeover report", err)
 	}

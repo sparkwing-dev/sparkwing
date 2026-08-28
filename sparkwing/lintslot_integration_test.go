@@ -12,22 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// lintSlotIntegrationPool is the pool size the integration tests run
-// with. These tests are the only control over the PWD mechanism the
-// whole slot design rests on, so acquisition must not be able to fail
-// for want of a free slot: a control that stands down when the machine
-// is busy stands down exactly when slots are being used, and a skip
-// reports as a pass. Eight is well above the two any test needs.
 const lintSlotIntegrationPool = "8"
 
-// lintSlotFixtureRoot is lintFixtureRoot with a skip that says what
-// stopped being checked. These three tests are the end-to-end control
-// over the PWD mechanism and they need a real golangci-lint, so -short
-// legitimately drops them -- but a bare "skip" in a green run tells a
-// reader nothing, and the whole point of this control is that silence
-// must not read as health. The named test in the message runs in every
-// mode and needs no toolchain, so a reader can tell how much cover is
-// left.
 func lintSlotFixtureRoot(t *testing.T) string {
 	t.Helper()
 	if testing.Short() {
@@ -40,11 +26,6 @@ func lintSlotFixtureRoot(t *testing.T) string {
 	return lintFixtureRoot(t)
 }
 
-// requireCanonicalSlot fails rather than skips when a lease came back
-// as the private-cache fallback. Every caller here uses a tool name no
-// other process knows and a pool of lintSlotIntegrationPool, so a
-// fallback is not a busy machine -- it is claimLintSlot failing to make
-// the slot, which is the design breaking and must be loud.
 func requireCanonicalSlot(t *testing.T, slot *sparkwing.LintSlot, what string) {
 	t.Helper()
 	if !slot.Canonical {
@@ -55,9 +36,6 @@ func requireCanonicalSlot(t *testing.T, slot *sparkwing.LintSlot, what string) {
 	}
 }
 
-// seedLintTree writes a module whose only finding names symbol, so two
-// fixtures can be told apart by what they report rather than only by
-// where they are.
 func seedLintTree(t *testing.T, dir, symbol string) string {
 	t.Helper()
 	pkgDir := filepath.Join(dir, "pkg", "sample")
@@ -76,12 +54,6 @@ func seedLintTree(t *testing.T, dir, symbol string) string {
 	return dir
 }
 
-// lintThroughSlot runs golangci-lint the way a gate would, through the
-// slot rather than in the worktree, and returns the combined output.
-// Findings are expected, so a non-zero exit is not a failure.
-// --path-mode abs makes the reported location unambiguous, and a
-// private TMPDIR keeps golangci-lint's box-wide parallel-runner lock
-// off the one the fleet's gates are using.
 func lintThroughSlot(t *testing.T, slot *sparkwing.LintSlot) string {
 	t.Helper()
 	cmd := sparkwing.Bash(context.Background(), "golangci-lint run --no-config --path-mode abs ./...")
@@ -99,7 +71,6 @@ func lintThroughSlot(t *testing.T, slot *sparkwing.LintSlot) string {
 	return out
 }
 
-// reportedFiles pulls the absolute .go paths out of a lint report.
 func reportedFiles(out string) []string {
 	var files []string
 	for _, field := range strings.FieldsFunc(out, func(r rune) bool {
@@ -114,11 +85,6 @@ func reportedFiles(out string) []string {
 	return files
 }
 
-// The negative control this design exists to pass: two worktrees
-// linting at the same time through canonical paths, each with a real
-// finding of its own, and neither told about the other. A shared cache
-// directory fails this -- measured on sparkwing, all 49 findings in the
-// second worktree carried the first worktree's paths.
 func TestLintSlots_ConcurrentWorktreesEachReportOnlyTheirOwnPaths(t *testing.T) {
 	t.Setenv(sparkwing.LintSlotsEnv, lintSlotIntegrationPool)
 	root := lintSlotFixtureRoot(t)
@@ -160,11 +126,6 @@ func TestLintSlots_ConcurrentWorktreesEachReportOnlyTheirOwnPaths(t *testing.T) 
 	}
 }
 
-// The failure a per-worktree cache exists to prevent, reached the way
-// the fleet reaches it: a worktree lands, is deleted, and the next
-// ticket's worktree inherits its warm cache. Through a slot the stored
-// path is the slot's, so it follows the new holder instead of naming a
-// tree that is gone.
 func TestLintSlot_ReusedCacheNamesTheNewHolderNotTheDeletedDonor(t *testing.T) {
 	t.Setenv(sparkwing.LintSlotsEnv, lintSlotIntegrationPool)
 	root := lintSlotFixtureRoot(t)
@@ -212,10 +173,6 @@ func TestLintSlot_ReusedCacheNamesTheNewHolderNotTheDeletedDonor(t *testing.T) {
 	}
 }
 
-// A cache that makes lint fast by not looking is worse than a slow
-// lint. The finding planted here is new to the tree that inherited the
-// warm cache, so only a run that actually analyzed the changed package
-// can report it.
 func TestLintSlot_WarmCacheStillCatchesANewViolation(t *testing.T) {
 	t.Setenv(sparkwing.LintSlotsEnv, lintSlotIntegrationPool)
 	root := lintSlotFixtureRoot(t)

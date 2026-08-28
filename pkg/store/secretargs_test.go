@@ -7,9 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// secretRun builds a run shaped like one the orchestrator writes: the
-// row and the invocation both carry plaintext, and the invocation
-// carries the secret-arg classification alongside them.
 func secretRun() store.Run {
 	return store.Run{
 		ID:       "r1",
@@ -46,7 +43,7 @@ func TestRedactedForDisplay_RedactsArgsInvocationAndReproducer(t *testing.T) {
 	if repro != want {
 		t.Errorf("reproducer = %q, want %q", repro, want)
 	}
-	// Fields the dashboard reads for non-arg purposes must survive.
+
 	if got.Invocation["inputs_hash"] != "abc123" {
 		t.Errorf("inputs_hash lost: %v", got.Invocation["inputs_hash"])
 	}
@@ -55,8 +52,6 @@ func TestRedactedForDisplay_RedactsArgsInvocationAndReproducer(t *testing.T) {
 	}
 }
 
-// The plaintext the masker and retry depend on must survive redaction
-// of a copy. This is the invariant that keeps the fix render-time.
 func TestRedactedForDisplay_LeavesSourceRunUntouched(t *testing.T) {
 	src := secretRun()
 	_ = src.RedactedForDisplay()
@@ -73,9 +68,6 @@ func TestRedactedForDisplay_LeavesSourceRunUntouched(t *testing.T) {
 	}
 }
 
-// A run written before the classification existed has no secret_args
-// entry and must render exactly as it did before -- there is no schema
-// at read time to reclassify it from.
 func TestRedactedForDisplay_GrandfathersRunsWithoutClassification(t *testing.T) {
 	old := store.Run{
 		ID:   "old",
@@ -94,8 +86,6 @@ func TestRedactedForDisplay_GrandfathersRunsWithoutClassification(t *testing.T) 
 	}
 }
 
-// A pipeline that declares a secret input but whose run supplied no
-// value for it must not sprout a phantom redacted arg.
 func TestRedactedForDisplay_DeclaredButUnsuppliedSecretIsNotInvented(t *testing.T) {
 	r := store.Run{
 		ID:   "r",
@@ -114,9 +104,6 @@ func TestRedactedForDisplay_DeclaredButUnsuppliedSecretIsNotInvented(t *testing.
 	}
 }
 
-// Reading a row back out of SQLite turns []string into []any and
-// map[string]string into map[string]any. Redaction has to survive that
-// or it silently no-ops on every persisted run.
 func TestRedactedForDisplay_SurvivesJSONRoundTrip(t *testing.T) {
 	raw, err := json.Marshal(secretRun().Invocation)
 	if err != nil {
@@ -144,9 +131,6 @@ func TestRedactedForDisplay_SurvivesJSONRoundTrip(t *testing.T) {
 	}
 }
 
-// The reproducer rewrite is anchored on the flag name, so a secret
-// whose value happens to be a common token cannot shred the rest of
-// the command line.
 func TestRedactedForDisplay_ReproducerAnchorsOnFlagName(t *testing.T) {
 	r := store.Run{
 		ID:   "r",
@@ -205,7 +189,7 @@ func TestInheritSecretArgs_CarriesClassificationToAMintedRun(t *testing.T) {
 	if minted.RedactedForDisplay().Args["token"] != store.RedactedArgValue {
 		t.Error("minted run does not redact")
 	}
-	// Only the classification travels; the source's args must not.
+
 	if _, ok := inv["args"]; ok {
 		t.Errorf("InheritSecretArgs carried more than the classification: %v", inv)
 	}

@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestSchemaVersion_FreshSQLiteRecordsExpected covers the first-open
-// flow on SQLite: after migrate() runs, the version table has one row
-// at the expected version.
 func TestSchemaVersion_FreshSQLiteRecordsExpected(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "fresh.db"))
 	if err != nil {
@@ -29,9 +26,6 @@ func TestSchemaVersion_FreshSQLiteRecordsExpected(t *testing.T) {
 	}
 }
 
-// TestSchemaVersion_ReopenSQLiteIsNoOp ensures a second Open against
-// an already-migrated database doesn't re-run migrations (and doesn't
-// produce duplicate version rows, which the PK would reject).
 func TestSchemaVersion_ReopenSQLiteIsNoOp(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "reopen.db")
 
@@ -54,10 +48,6 @@ func TestSchemaVersion_ReopenSQLiteIsNoOp(t *testing.T) {
 	}
 }
 
-// TestSchemaVersion_SQLiteSkewRefuses confirms the dialect-agnostic
-// forward-skew error: a DB at a newer version than the binary refuses
-// to open and the message mentions both versions plus the "upgrade
-// sparkwing" hint.
 func TestSchemaVersion_SQLiteSkewRefuses(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "skew.db")
 
@@ -95,9 +85,6 @@ func TestSchemaVersion_SQLiteSkewRefuses(t *testing.T) {
 	}
 }
 
-// TestSchemaVersion_FreshPostgresRecordsExpected mirrors the SQLite
-// fresh-open test on the Postgres path so the version-table machinery
-// is exercised under the advisory-lock path too.
 func TestSchemaVersion_FreshPostgresRecordsExpected(t *testing.T) {
 	st := openPGTestStore(t)
 	v := readSchemaVersion(t, st.DB())
@@ -106,9 +93,6 @@ func TestSchemaVersion_FreshPostgresRecordsExpected(t *testing.T) {
 	}
 }
 
-// TestSchemaVersion_PostgresSkewRefuses covers the forward-skew refusal
-// on Postgres. Same shape as the SQLite test; the failure must
-// surface SkewError so callers can detect it programmatically.
 func TestSchemaVersion_PostgresSkewRefuses(t *testing.T) {
 	dsn := pgTestDSN(t)
 	st := openPGTestStore(t)
@@ -142,11 +126,6 @@ func TestSchemaVersion_PostgresSkewRefuses(t *testing.T) {
 	}
 }
 
-// TestSchemaVersion_ConcurrentPostgresOpens is the contention test:
-// N goroutines call OpenPostgres against the same fresh schema
-// simultaneously. The advisory lock should make exactly one of them
-// the migrator; the rest find the version row already present and
-// no-op. All N must succeed.
 func TestSchemaVersion_ConcurrentPostgresOpens(t *testing.T) {
 	dsn := pgTestDSN(t)
 	schema := "sw_test_concurrent_" + uniq()
@@ -210,8 +189,6 @@ func TestSchemaVersion_ConcurrentPostgresOpens(t *testing.T) {
 	}
 }
 
-// readSchemaVersion returns MAX(version) from sparkwing_schema_version
-// or 0 when the table is empty.
 func readSchemaVersion(t *testing.T, db *sql.DB) int {
 	t.Helper()
 	var v sql.NullInt64

@@ -14,9 +14,6 @@ const (
 	webVisibleValue = "prod"
 )
 
-// webSecretRun mirrors what the orchestrator persists for a pipeline
-// with a `secret:"true"` input: plaintext everywhere, plus the
-// classification the read path redacts from.
 func webSecretRun(id string) *store.Run {
 	return &store.Run{
 		ID:       id,
@@ -43,10 +40,6 @@ func assertWebRedacted(t *testing.T, surface, body string) {
 	}
 }
 
-// The dashboard's SetupPanel reads invocation.args, run.args, and
-// invocation.reproducer straight off these responses. Redacting
-// server-side is what keeps the value out of the browser at all,
-// rather than merely out of the rendered DOM.
 func TestSecretArgs_ListRunsHandlerRedacts(t *testing.T) {
 	t.Parallel()
 	b := &fakeBackend{
@@ -85,8 +78,6 @@ func TestSecretArgs_GetRunHandlerRedacts(t *testing.T) {
 	assertWebRedacted(t, "dashboard GET /api/v1/runs/{id}?include=nodes", recNodes.Body.String())
 }
 
-// Redaction must not mutate the backend's run: an S3-backed dashboard
-// hands out cached *store.Run pointers that other readers share.
 func TestSecretArgs_GetRunHandlerLeavesBackendRunUntouched(t *testing.T) {
 	t.Parallel()
 	shared := webSecretRun("r1")

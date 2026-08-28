@@ -15,20 +15,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// errNodeQueueTimeout marks a bounded node-level admission wait that
-// elapsed without a grant.
 var errNodeQueueTimeout = errors.New("queue timeout")
 
-// runNodeUnderDaemonSem runs a node whose concurrency group is
-// arbitrated by the local admission daemon. When the run already holds
-// host admission, the node acquires only the concurrency semaphore.
-// Otherwise the node acquires host resources and the concurrency
-// semaphore in one daemon request. Node timeouts are armed inside
-// executeNode, after the grant, so time spent queued for admission is
-// never charged against the node's timeout. An eviction pushed while
-// the node runs (a cancel_others arrival) cancels execution and
-// finalizes the node as superseded, naming the key and the superseding
-// run.
 func (r *NodeExecutor) runNodeUnderDaemonSem(ctx context.Context, req runner.Request, la *LocalAdmission, group *sparkwing.ConcurrencyGroup) runner.Result {
 	node := req.Node
 	_, _, hostAdmitted := localAdmissionFromContext(ctx)
@@ -162,10 +150,6 @@ func (r *NodeExecutor) runNodeUnderDaemonSem(ctx context.Context, req runner.Req
 	return runner.Result{Outcome: sparkwing.Success, Output: output}
 }
 
-// failedDaemonAcquire maps a failed daemon acquisition onto the node's
-// terminal outcome: skip and fail policies mirror the store path's
-// outcomes, a bounded queue wait that elapsed finalizes with the
-// queue_timeout failure reason, and a cancelled run stays a cancellation.
 func (r *NodeExecutor) failedDaemonAcquire(ctx, acquireCtx context.Context, req runner.Request, key string, queueTimeout time.Duration, err error) runner.Result {
 	node := req.Node
 	if errors.Is(context.Cause(acquireCtx), errNodeQueueTimeout) && ctx.Err() == nil {

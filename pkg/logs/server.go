@@ -27,13 +27,10 @@ type Server struct {
 	logger   *slog.Logger
 	dirMode  os.FileMode
 	fileMode os.FileMode
-	mu       sync.Mutex // guards concurrent opens of the same file
-	// Auth is whoami-based: forward the incoming Authorization header
-	// to the controller's /api/v1/auth/whoami endpoint, cache the
-	// resolved principal, enforce per-route scope checks. Empty
-	// controllerURL = auth off (laptop-local dev).
+	mu       sync.Mutex
+
 	controllerURL string
-	authCache     sync.Map // map[string]*logsAuthCacheEntry
+	authCache     sync.Map
 	authCacheTTL  time.Duration
 	authHTTP      *http.Client
 }
@@ -141,9 +138,6 @@ func (s *Server) Handler() http.Handler {
 	return otelutil.WrapHandler("sparkwing-logs", withRequestLog(router, s.logger))
 }
 
-// Scope constants mirrored from pkg/controller to avoid importing it.
-// Kept in sync manually; the set is small and changes rarely. A lint
-// task or a shared package can land later.
 const (
 	scopeLogsRead  = "logs.read"
 	scopeLogsWrite = "logs.write"
@@ -185,15 +179,10 @@ type logsAuthCacheEntry struct {
 	expires   time.Time
 }
 
-// authDisabled reports whether both local legacy tokens AND controller
-// whoami are unconfigured, in which case the middleware is
-// pass-through.
 func (s *Server) authDisabled() bool {
 	return s.controllerURL == ""
 }
 
-// authMiddleware authenticates the caller and stamps a logsPrincipal
-// on the request context. When auth is disabled, it's a pass-through.
 func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	if s.authDisabled() {
 		return next
@@ -219,8 +208,6 @@ func (s *Server) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-// requireScope wraps a handler so only principals with the given
-// scope (or admin) can reach it. Pass-through when auth is disabled.
 func (s *Server) requireScope(scope string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, ok := logsPrincipalFromContext(r.Context())
@@ -241,9 +228,6 @@ func (s *Server) requireScope(scope string, next http.Handler) http.Handler {
 	})
 }
 
-// label renders a principal as "<kind>:<name>" for the auth-error
-// response body. Empty when the principal is nil so the JSON omits
-// the field entirely.
 func (p *logsPrincipal) label() string {
 	if p == nil {
 		return ""
@@ -254,10 +238,6 @@ func (p *logsPrincipal) label() string {
 	return p.Kind + ":" + p.Name
 }
 
-// writeAuthErrorJSON serializes an AuthErrorBody to the response with
-// Content-Type: application/json. Auth-error parsing is structured-
-// first so callers (logs client, dashboard, MCP) don't scrape the
-// human message.
 func writeAuthErrorJSON(w http.ResponseWriter, status int, body AuthErrorBody) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -273,10 +253,6 @@ func extractBearer(r *http.Request) (string, error) {
 	return strings.TrimSpace(strings.TrimPrefix(h, prefix)), nil
 }
 
-// authenticate resolves a raw bearer token to a principal by calling
-// the controller's /api/v1/auth/whoami endpoint. Results are cached
-// per token for authCacheTTL to keep the per-request cost off the
-// wire under normal load.
 func (s *Server) authenticate(ctx context.Context, raw string) (*logsPrincipal, error) {
 	if raw == "" {
 		return nil, errors.New("missing bearer token")
@@ -313,8 +289,6 @@ func (s *Server) cacheAuth(raw string, p *logsPrincipal) {
 	})
 }
 
-// whoamiResp mirrors controller.whoamiResp. Kept as a local type to
-// avoid importing the controller package.
 type whoamiResp struct {
 	Principal   string   `json:"principal"`
 	Kind        string   `json:"kind"`
@@ -412,15 +386,6 @@ func serveWithTokens(ctx context.Context, root, addr, controllerURL string, logg
 	}
 }
 
-// handleHealth reports log-service self-health as a degraded-list:
-//
-//	{"status": "ok" | "degraded", "problems": ["comp: detail", ...]}
-//
-// Checks: root dir writable + disk-free headroom. The goal isn't an
-// exhaustive tripwire; it's "sparkwing health --on prod" surfacing
-// the usual "my log volume filled up" symptom without an on-call
-// having to kubectl-exec. Only a hard failure (root missing /
-// unwritable) drops HTTP status to 503 -- disk-low degrades in-body.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	var problems []string
 
@@ -462,9 +427,6 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	fmt.Fprint(w, resp)
 }
 
-// formatBytes prints a compact GiB/MiB/KiB string for one number.
-// Precision is coarse on purpose -- health output is for skimming,
-// not for exact accounting.
 func formatBytes(n uint64) string {
 	const (
 		ki = 1 << 10
@@ -563,14 +525,10 @@ func (s *Server) handleRead(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(filter.apply(data))
 }
 
-// logFilter collects the server-side filter knobs for handleRead.
-// The same semantics are available client-side (pkg/logs helpers)
-// and cluster-side (this handler), so `sparkwing runs logs --tail N`
-// behaves identically against local files and remote log bytes.
 type logFilter struct {
 	tail  int
 	head  int
-	lines string // "A:B" inclusive 1-indexed
+	lines string
 	grep  string
 }
 
@@ -599,16 +557,10 @@ func parseLogFilter(r *http.Request) (logFilter, error) {
 	return f, nil
 }
 
-// passThrough is true when no filter was requested. Lets the GET
-// handler stream without buffering the whole file.
 func (f logFilter) passThrough() bool {
 	return f.tail == 0 && f.head == 0 && f.lines == "" && f.grep == ""
 }
 
-// apply filters raw bytes according to the requested knobs. Order:
-// grep first (so tail/head count filtered lines), then lines window,
-// then tail/head. tail wins if both tail and head are set, matching
-// the old semantics of "take the last N".
 func (f logFilter) apply(data []byte) []byte {
 	text := string(data)
 	trailingNL := strings.HasSuffix(text, "\n")
@@ -660,8 +612,6 @@ func (f logFilter) apply(data []byte) []byte {
 	return []byte(out.String())
 }
 
-// parseLinesRange parses "A:B" into 1-indexed inclusive bounds.
-// A must be >= 1; B may be 0 meaning "to end".
 func parseLinesRange(spec string) (int, int, error) {
 	parts := strings.SplitN(spec, ":", 2)
 	if len(parts) != 2 {
@@ -681,8 +631,6 @@ func parseLinesRange(spec string) (int, int, error) {
 	return a, b, nil
 }
 
-// sliceRange returns lines[a-1:b] with 1-indexed inclusive bounds,
-// clamped to the actual slice length. b==0 means "until end".
 func sliceRange[T any](lines []T, a, b int) []T {
 	if a < 1 {
 		a = 1
@@ -696,9 +644,6 @@ func sliceRange[T any](lines []T, a, b int) []T {
 	return lines[a-1 : b]
 }
 
-// handleDeleteRun removes every log file for the run (the whole
-// runs/<runID> directory). 204 whether or not the dir existed so
-// `sparkwing runs prune` can run repeatedly without babysitting.
 func (s *Server) handleDeleteRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runID")
 	if err := validateID(runID); err != nil {
@@ -752,19 +697,6 @@ func (s *Server) handleReadRun(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleStream serves a Server-Sent Events (text/event-stream) feed
-// of new bytes appended to a node's log. One event per poll cycle
-// when there's new data; silent otherwise. Polling over fsnotify
-// for v1 simplicity -- 200ms latency is imperceptible for UX and
-// avoids per-connection watcher bookkeeping.
-//
-// Each event's "data:" field contains one line of log content. Empty
-// log lines are preserved so the dashboard can reconstruct the
-// original file byte-for-byte.
-//
-// Never self-terminates: the logs service has no way to know when a
-// run is done. The caller (dashboard or CLI) closes the connection
-// when the run reaches a terminal state.
 func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("runID")
 	nodeID := r.PathValue("nodeID")
@@ -838,9 +770,6 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// splitKeepPartial separates complete lines (ending in "\n") from a
-// trailing partial line. Callers hold the partial across polls so
-// SSE events always contain a whole line.
 type splitResult struct {
 	complete []string
 	trailing string
@@ -856,19 +785,12 @@ func splitKeepPartial(s string) splitResult {
 	return out
 }
 
-// sseEscape removes characters that would break the "data: ..." line
-// contract. Newlines in payloads would split the event; CRs would
-// mess with some SSE polyfills. We never generate either in the
-// logger, but belt-and-braces since the bytes come from a file.
 func sseEscape(s string) string {
 	s = strings.ReplaceAll(s, "\n", " ")
 	s = strings.ReplaceAll(s, "\r", "")
 	return s
 }
 
-// pathFor computes and validates the filesystem path for a node's
-// log file. Returns an error on any component that could escape the
-// root (path traversal), rather than attempting to sanitize.
 func (s *Server) pathFor(runID, nodeID string) (string, error) {
 	if err := validateID(runID); err != nil {
 		return "", fmt.Errorf("runID: %w", err)
@@ -883,9 +805,6 @@ func (s *Server) pathFor(runID, nodeID string) (string, error) {
 	return filepath.Join(dir, nodeID+".log"), nil
 }
 
-// validateID rejects path-traversal chars. Node/run IDs in sparkwing
-// are ASCII alphanumeric + hyphens + underscores; this is a
-// conservative guard rather than a full charset definition.
 func validateID(s string) error {
 	if s == "" {
 		return errors.New("empty")

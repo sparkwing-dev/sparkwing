@@ -7,11 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// A waiter promoted into a holder_id that still owns a superseded row (a
-// CancelOthers eviction not yet reaped) must reclaim it via ON CONFLICT,
-// not abort the promotion transaction on the UNIQUE constraint and
-// strand the queue. The admission grant path got this clause; the
-// promotion path needs the same.
 func TestConcurrency_PromoteOntoSupersededHolderDoesNotCrash(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -45,10 +40,6 @@ func TestConcurrency_PromoteOntoSupersededHolderDoesNotCrash(t *testing.T) {
 	}
 }
 
-// A waiter promoted into a holder_id that still owns a lease-expired
-// (but not yet reaped) row must reclaim it the same way the admission
-// grant path does, not abort the release transaction on the UNIQUE
-// constraint and strand the queue.
 func TestConcurrency_PromoteOntoExpiredHolderReclaimsRow(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{

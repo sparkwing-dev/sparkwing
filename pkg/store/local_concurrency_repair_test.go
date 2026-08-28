@@ -6,8 +6,6 @@ import (
 	"time"
 )
 
-// seedConcurrencyRun creates a run row so a concurrency row can point at
-// a run with a known status.
 func seedConcurrencyRun(t *testing.T, s *Store, id, status string) {
 	t.Helper()
 	if err := s.CreateRun(context.Background(), Run{

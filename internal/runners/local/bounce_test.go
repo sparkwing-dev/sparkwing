@@ -24,16 +24,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// bounceScript is a fake pipeline binary that records one line per
-// attempt. The first attempt blocks, so the process an operator
-// bounces is still alive when the kill arrives; every later attempt
-// blocks until the test releases it, so the replacement is provably
-// still running while the test inspects the node row.
-//
-// The replacement waiting is the whole point. A replacement that
-// exited on its own would reach a terminal row of its own before the
-// assertion could look, and the test would report the invariant broken
-// when what actually happened is that the next attempt finished.
 func bounceScript(t *testing.T) (script, attempts, release string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -41,15 +31,12 @@ func bounceScript(t *testing.T) (script, attempts, release string) {
 	release = filepath.Join(dir, "release")
 	return "echo $$ >> " + attempts + "\n" +
 		"if [ \"$(wc -l < " + attempts + ")\" -eq 1 ]; then sleep 60; fi\n" +
-		// safety: bounded, so a failing test cannot leave a process behind
-		// waiting for a release file nobody is going to write.
+
 		"i=0\n" +
 		"while [ ! -f " + release + " ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i+1)); done\n" +
 		"exit 0", attempts, release
 }
 
-// releaseAttempt lets a waiting replacement attempt exit, so the test
-// finishes in milliseconds rather than waiting out a timeout.
 func releaseAttempt(t *testing.T, release string) {
 	t.Helper()
 	if err := os.WriteFile(release, []byte("go\n"), 0o644); err != nil {
@@ -57,7 +44,6 @@ func releaseAttempt(t *testing.T, release string) {
 	}
 }
 
-// attemptPIDs returns the pid of every attempt recorded so far.
 func attemptPIDs(t *testing.T, path string) []string {
 	t.Helper()
 	raw, err := os.ReadFile(path)
@@ -67,7 +53,6 @@ func attemptPIDs(t *testing.T, path string) []string {
 	return strings.Fields(string(raw))
 }
 
-// waitForAttempts blocks until at least n attempts have been recorded.
 func waitForAttempts(t *testing.T, path string, n int, timeout time.Duration) []string {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -83,10 +68,6 @@ func waitForAttempts(t *testing.T, path string, n int, timeout time.Duration) []
 	}
 }
 
-// newBlockedReadFixture returns a Runner talking to the fixture's
-// controller through a proxy that fails node reads and passes
-// everything else through -- one loopback going deaf on one route,
-// which is the shape of the hiccup the runner must not misread.
 func newBlockedReadFixture(t *testing.T, f *spawnFixture) *Runner {
 	t.Helper()
 	upstream, err := url.Parse(f.url)
@@ -130,11 +111,6 @@ func nodeEvents(t *testing.T, f *spawnFixture, runID, kind string) []store.Event
 	return out
 }
 
-// A bounce kills the node's process and runs the node again, and the
-// node row never goes terminal in between. That absence is the whole
-// point: a terminal row would wake the dispatcher's waiters, and a
-// failed one would cascade into every downstream node -- for what an
-// operator asked to be a restart.
 func TestRunNode_BounceKillsTheProcessAndRunsTheNodeAgain(t *testing.T) {
 	script, attempts, release := bounceScript(t)
 	f := newSpawnFixture(t, fakeNodeBinary(t, script))
@@ -148,17 +124,14 @@ func TestRunNode_BounceKillsTheProcessAndRunsTheNodeAgain(t *testing.T) {
 	go func() { done <- f.runner.RunNode(ctx, runner.Request{RunID: "run-b1", NodeID: "build"}) }()
 
 	waitForAttempts(t, attempts, 1, 15*time.Second)
-	// safety: the first attempt has to be measurably alive, so the accumulated
-	// wall time below cannot be explained by the replacement alone.
+
 	time.Sleep(200 * time.Millisecond)
 	if _, err := f.store.RequestNodeBounce(ctx, "run-b1", "build", "korey"); err != nil {
 		t.Fatalf("RequestNodeBounce: %v", err)
 	}
 
 	pids := waitForAttempts(t, attempts, 2, 15*time.Second)
-	// The replacement is live -- it waits for the release file below -- and
-	// the killed attempt is reaped, so this is the moment a terminal row
-	// would have to exist if one were written.
+
 	mid, err := f.store.GetNode(ctx, "run-b1", "build")
 	if err != nil {
 		t.Fatalf("get node mid-bounce: %v", err)
@@ -211,13 +184,6 @@ func TestRunNode_BounceKillsTheProcessAndRunsTheNodeAgain(t *testing.T) {
 	}
 }
 
-// A node that finishes before the kill lands is a no-op. The terminal
-// row wins -- it is the authority on how the work went -- so the
-// request is closed as missed and nothing is re-run.
-//
-// The row is terminal from the start here rather than mid-flight, which
-// is the same state the runner reads at kill time and makes the race
-// deterministic instead of a sleep race.
 func TestRunNode_BounceOfANodeThatAlreadyFinishedIsANoOp(t *testing.T) {
 	script, attempts, _ := bounceScript(t)
 	f := newSpawnFixture(t, fakeNodeBinary(t, script))
@@ -238,10 +204,7 @@ func TestRunNode_BounceOfANodeThatAlreadyFinishedIsANoOp(t *testing.T) {
 	if res.Outcome != sparkwing.Success {
 		t.Fatalf("outcome = %q (err=%v), want the terminal row's success", res.Outcome, res.Err)
 	}
-	// safety: at most one, not exactly one. The kill can land before the
-	// first attempt's shell reaches its own echo, which is a fast
-	// machine rather than a wrong outcome; a second attempt is the
-	// failure -- a finished node has nothing to re-run.
+
 	if pids := attemptPIDs(t, attempts); len(pids) > 1 {
 		t.Errorf("attempts = %d, want no re-run of a node that already finished", len(pids))
 	}
@@ -261,18 +224,6 @@ func TestRunNode_BounceOfANodeThatAlreadyFinishedIsANoOp(t *testing.T) {
 	}
 }
 
-// A request the node outran is closed when the node ends, not left
-// open.
-//
-// The kill was never delivered -- the node reached its own outcome
-// before the poll came round -- so the request is a miss. Leaving it
-// pending would be worse than untidy: nothing distinguishes a stale
-// row from a fresh one, and the next thing to run this node id would
-// read it as an instruction.
-//
-// The long supervision interval is what makes this deterministic: the
-// poll provably cannot fire inside the node's life, so the request is
-// still open when the node ends, every time.
 func TestRunNode_RequestTheNodeOutranIsConsumedAsMissed(t *testing.T) {
 	f := newSpawnFixture(t, fakeNodeBinary(t, "exit 0"), func(c *Config) {
 		c.SuperviseInterval = time.Hour
@@ -307,15 +258,6 @@ func TestRunNode_RequestTheNodeOutranIsConsumedAsMissed(t *testing.T) {
 	}
 }
 
-// The sweep closes a request that was handed to an attempt but never
-// settled, and closes it with the verdict that attempt reached.
-//
-// Two real paths land here. The attempt's select can take the
-// process's own exit while a handed request sits in the channel, and a
-// consume can fail after the runner has already acted. In the first
-// the runner reached no verdict, so the request is a miss; in the
-// second it did, and the ledger is what keeps the sweep from
-// relabelling an honored request as one that never landed.
 func TestSettleOpenBounces_ClosesWhatAnAttemptLeftOpen(t *testing.T) {
 	ctx := context.Background()
 	for _, tc := range []struct {
@@ -369,21 +311,12 @@ func TestSettleOpenBounces_ClosesWhatAnAttemptLeftOpen(t *testing.T) {
 	}
 }
 
-// A second dispatch of the same node -- an auto-retry is exactly that
-// -- must not inherit the previous dispatch's requests.
-//
-// The poll is per node id, not per attempt, so a request left open by
-// the dispatch before it reads to the next one as a fresh instruction.
-// This asserts the retry runs its attempt to completion and that no
-// bounce is recorded against a dispatch nobody bounced.
 func TestRunNode_ARetryDispatchInheritsNoBounce(t *testing.T) {
 	dir := t.TempDir()
 	attempts := filepath.Join(dir, "attempts")
 	wait := filepath.Join(dir, "wait")
 	release := filepath.Join(dir, "release")
-	// The first dispatch exits at once; the retry's attempt waits, so it
-	// is alive across many poll ticks. A stale request would have every
-	// opportunity to be picked up and would show as a second attempt.
+
 	f := newSpawnFixture(t, fakeNodeBinary(t,
 		"echo $$ >> "+attempts+"\n"+
 			"if [ -f "+wait+" ]; then\n"+
@@ -399,9 +332,7 @@ func TestRunNode_ARetryDispatchInheritsNoBounce(t *testing.T) {
 	if _, err := f.store.RequestNodeBounce(ctx, "run-b5", "build", "korey"); err != nil {
 		t.Fatalf("RequestNodeBounce: %v", err)
 	}
-	// safety: terminal before the first dispatch, so that dispatch cannot
-	// honor the request -- it settles it as a miss, which is the state
-	// the retry below must not be able to act on.
+
 	if err := f.store.FinishNode(ctx, "run-b5", "build",
 		string(sparkwing.Success), "", nil); err != nil {
 		t.Fatalf("finish node: %v", err)
@@ -409,7 +340,6 @@ func TestRunNode_ARetryDispatchInheritsNoBounce(t *testing.T) {
 	f.runner.RunNode(ctx, runner.Request{RunID: "run-b5", NodeID: "build"})
 	firstDispatch := len(attemptPIDs(t, attempts))
 
-	// The retry: the node is running again under the same id.
 	if err := f.store.StartNode(ctx, "run-b5", "build"); err != nil {
 		t.Fatalf("restart node: %v", err)
 	}
@@ -419,9 +349,7 @@ func TestRunNode_ARetryDispatchInheritsNoBounce(t *testing.T) {
 	done := make(chan runner.Result, 1)
 	go func() { done <- f.runner.RunNode(ctx, runner.Request{RunID: "run-b5", NodeID: "build"}) }()
 	waitForAttempts(t, attempts, firstDispatch+1, 15*time.Second)
-	// safety: many supervision ticks (25ms apart) while the retry's process
-	// is alive. A stale request would have been handed over inside this
-	// window, so passing it is evidence rather than luck.
+
 	time.Sleep(500 * time.Millisecond)
 	if retried := len(attemptPIDs(t, attempts)) - firstDispatch; retried != 1 {
 		t.Errorf("the retry ran %d attempt(s) so far, want exactly 1: a stale request killed one of them", retried)
@@ -445,14 +373,6 @@ func TestRunNode_ARetryDispatchInheritsNoBounce(t *testing.T) {
 	}
 }
 
-// When the node's state cannot be read after the kill, the node is not
-// re-run.
-//
-// The read is what tells "killed live work" from "the node had already
-// finished", and guessing the first is not free: it re-executes the
-// node's steps, potentially over a node that had already succeeded.
-// The runner retries the read, and if it still cannot answer it
-// declines to re-run and closes the request saying why.
 func TestSettleBounce_DoesNotRespawnWhenTheNodeCannotBeRead(t *testing.T) {
 	f := newSpawnFixture(t, fakeNodeBinary(t, "exit 0"))
 	f.seedNode(t, "run-b6", "build")
@@ -465,9 +385,6 @@ func TestSettleBounce_DoesNotRespawnWhenTheNodeCannotBeRead(t *testing.T) {
 		t.Fatalf("RequestNodeBounce: %v", err)
 	}
 
-	// safety: a controller that refuses reads but accepts writes, which is
-	// what a loopback hiccup looks like from here -- the runner must
-	// not read "no answer" as "the node is still live".
 	blocked := newBlockedReadFixture(t, f)
 	verdict := blocked.settleBounce(ctx,
 		runner.Request{RunID: "run-b6", NodeID: "build"}, b, bounceLedger{}, false)
@@ -495,14 +412,6 @@ func TestSettleBounce_DoesNotRespawnWhenTheNodeCannotBeRead(t *testing.T) {
 	}
 }
 
-// A controller that stops answering the bounce poll must not stall the
-// heartbeat sharing that loop.
-//
-// The two calls are on one goroutine, so an unbounded poll would hold
-// the heartbeat for the client's full 30-second timeout. A node whose
-// heartbeat goes stale past the reconciler's threshold is reaped as
-// abandoned and its run fails -- so an operator convenience with no
-// deadline on it could take down the run it exists to save.
 func TestSupervise_AHungBouncePollDoesNotStallTheHeartbeat(t *testing.T) {
 	f := newSpawnFixture(t, fakeNodeBinary(t, "exit 0"))
 	ctx := context.Background()
@@ -520,8 +429,7 @@ func TestSupervise_AHungBouncePollDoesNotStallTheHeartbeat(t *testing.T) {
 	var beats []time.Time
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/bounce") {
-			// safety: far longer than any deadline the loop should allow, so a
-			// poll that is not bounded here shows up as missing heartbeats.
+
 			select {
 			case <-time.After(30 * time.Second):
 			case <-r.Context().Done():
@@ -561,8 +469,7 @@ func TestSupervise_AHungBouncePollDoesNotStallTheHeartbeat(t *testing.T) {
 
 	mu.Lock()
 	defer mu.Unlock()
-	// Each round costs one bouncePollTimeout, so the window holds several
-	// heartbeats. Unbounded, it would hold the first and one more.
+
 	if len(beats) < 3 {
 		t.Fatalf("%d heartbeats in %s; the poll is holding the loop", len(beats), window)
 	}
@@ -578,10 +485,6 @@ func TestSupervise_AHungBouncePollDoesNotStallTheHeartbeat(t *testing.T) {
 	}
 }
 
-// A bounce that lands while the run is being torn down restarts
-// nothing: there is no run left to restart the node for. The request is
-// still consumed, so it cannot be waiting for the next process that
-// happens to claim this node.
 func TestSettleBounce_DuringTeardownRestartsNothing(t *testing.T) {
 	f := newSpawnFixture(t, fakeNodeBinary(t, "exit 0"))
 	f.seedNode(t, "run-b3", "build")

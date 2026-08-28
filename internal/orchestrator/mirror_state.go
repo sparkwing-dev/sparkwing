@@ -9,32 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// mirrorStateBackend tees state writes to a canonical StateBackend and a
-// best-effort local SQLite mirror, so `sparkwing run --profile <remote>`
-// from a laptop keeps a local shadow of the run the laptop can still
-// browse afterward. It operates at the StateBackend layer (not the
-// narrower storage.StateStore) because that is what the orchestrator's
-// run path consumes: the tee must cover AppendEvent and the rest of the
-// StateBackend surface, not just the bare store methods.
-//
-// Scope: STATE ONLY. Per-node log appends, cache writes, and concurrency
-// acquires are not mirrored -- those surfaces stay single-write.
-//
-// Write semantics: each mutating method dispatches to both backends in
-// parallel and returns when both complete. canonical's error is returned
-// (canonical is authoritative); local's error is logged at warn and
-// otherwise swallowed. A canonical error does not abort the local write.
-//
-// Read semantics: reads delegate to canonical. The local mirror is
-// write-only here; read commands hit canonical via the profile's
-// resolved backend (OpenReadBackendForProfile).
-//
-// EnqueueTrigger is the deliberate exception: it is NOT teed. Spawned
-// child triggers are consumed by the canonical's trigger rendezvous
-// (controller / Postgres), run elsewhere, and never land in the laptop's
-// mirror anyway; teeing would only plant orphan trigger rows with a
-// divergent id. It delegates to canonical alone, which also owns cycle
-// detection and id authority.
 type mirrorStateBackend struct {
 	canonical StateBackend
 	local     StateBackend
@@ -43,10 +17,6 @@ type mirrorStateBackend struct {
 
 var _ StateBackend = (*mirrorStateBackend)(nil)
 
-// newMirrorStateBackend wraps canonical with a local SQLite mirror. The
-// local store is adapted to a StateBackend via localState (which already
-// supplies AppendEvent / GetNodeOutput / EnqueueTrigger). RunLocal owns
-// closing the local store; pass nil logger to use slog.Default().
 func newMirrorStateBackend(canonical StateBackend, local *store.Store, logger *slog.Logger) *mirrorStateBackend {
 	if logger == nil {
 		logger = slog.Default()
@@ -54,8 +24,6 @@ func newMirrorStateBackend(canonical StateBackend, local *store.Store, logger *s
 	return &mirrorStateBackend{canonical: canonical, local: localState{st: local}, logger: logger}
 }
 
-// tee runs canon and local in parallel, waits for both, logs local's
-// error at warn (best-effort), and returns canon's error (authoritative).
 func (m *mirrorStateBackend) tee(method, runID string, canon, local func() error) error {
 	var wg sync.WaitGroup
 	var canonErr, localErr error
@@ -69,10 +37,6 @@ func (m *mirrorStateBackend) tee(method, runID string, canon, local func() error
 	return canonErr
 }
 
-// Close cascades to both backends: close canonical, close local, return
-// the first non-nil error. RunLocal normally closes the canonical and
-// the local store directly; this exists for interface completeness and
-// is safe to call redundantly (sql.DB.Close is idempotent).
 func (m *mirrorStateBackend) Close() error {
 	canonErr := m.canonical.Close()
 	localErr := m.local.Close()
@@ -110,11 +74,6 @@ func (m *mirrorStateBackend) GetRun(ctx context.Context, runID string) (*store.R
 	return m.canonical.GetRun(ctx, runID)
 }
 
-// GetRunForExecution forwards the execution read to the canonical
-// backend. Without it the mirror hides the controller client's
-// implementation of executionRunGetter behind a wrapper that does not
-// satisfy it, and a `sparkwing run --profile <controller>` retry from
-// a laptop would silently plan with redacted args.
 func (m *mirrorStateBackend) GetRunForExecution(ctx context.Context, runID string) (*store.Run, error) {
 	return runForExecution(ctx, m.canonical, runID)
 }
@@ -285,9 +244,6 @@ func (m *mirrorStateBackend) GetApproval(ctx context.Context, runID, nodeID stri
 	return m.canonical.GetApproval(ctx, runID, nodeID)
 }
 
-// ResolveApproval is a write that returns the resolved row. Both
-// backends are written in parallel; canonical's (value, error) is
-// returned and local's error logged best-effort.
 func (m *mirrorStateBackend) ResolveApproval(ctx context.Context, runID, nodeID, resolution, approver, comment string) (*store.Approval, error) {
 	var wg sync.WaitGroup
 	var canonVal *store.Approval
@@ -312,28 +268,20 @@ func (m *mirrorStateBackend) ListPendingApprovals(ctx context.Context) ([]*store
 	return m.canonical.ListPendingApprovals(ctx)
 }
 
-// AppendEvent is a write and is teed: run-level events (run_start, node
-// events, ...) are part of the state the laptop mirror should reflect.
 func (m *mirrorStateBackend) AppendEvent(ctx context.Context, runID, nodeID, kind string, payload []byte) error {
 	return m.tee("AppendEvent", runID,
 		func() error { return m.canonical.AppendEvent(ctx, runID, nodeID, kind, payload) },
 		func() error { return m.local.AppendEvent(ctx, runID, nodeID, kind, payload) })
 }
 
-// GetNodeOutput is a read; delegate to canonical.
 func (m *mirrorStateBackend) GetNodeOutput(ctx context.Context, runID, nodeID string) ([]byte, error) {
 	return m.canonical.GetNodeOutput(ctx, runID, nodeID)
 }
 
-// EnqueueTrigger is NOT teed -- see the type doc. Canonical owns trigger
-// rendezvous, cycle detection, and id authority.
 func (m *mirrorStateBackend) EnqueueTrigger(ctx context.Context, pipeline string, args map[string]string, parentRunID, parentNodeID, retryOf, source, user, repo, branch string) (string, error) {
 	return m.canonical.EnqueueTrigger(ctx, pipeline, args, parentRunID, parentNodeID, retryOf, source, user, repo, branch)
 }
 
-// EnqueueTriggerWithEnv is NOT teed for the same reason as EnqueueTrigger:
-// the canonical backend owns child-trigger identity and rendezvous. The
-// trigger env is still part of that canonical enqueue contract.
 func (m *mirrorStateBackend) EnqueueTriggerWithEnv(
 	ctx context.Context,
 	pipeline string,

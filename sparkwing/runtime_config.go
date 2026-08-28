@@ -52,9 +52,6 @@ func detectRuntime() RuntimeConfig {
 	return rc
 }
 
-// walkUpToProject ascends from start looking for a directory that
-// contains a `.sparkwing/` child. Returns that directory (the repo
-// root) on success, or "" on failure.
 func walkUpToProject(start string) string {
 	dir := start
 	for {

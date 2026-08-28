@@ -33,15 +33,12 @@ func isPlaceholderUpdateKey(key ed25519.PublicKey) bool {
 	return true
 }
 
-// verifiedReleaseAsset is the byte boundary the installer consumes.
 type verifiedReleaseAsset struct {
 	name   string
 	bytes  []byte
 	digest string
 }
 
-// verifyReleaseAsset isolates the updater's existing checksum contract so the
-// release-authentication boundary can be specified without filesystem writes.
 func verifyReleaseAsset(publicKey ed25519.PublicKey, manifest, manifestSig []byte, assetName string, asset, assetSig []byte) (verifiedReleaseAsset, error) {
 	if len(publicKey) != ed25519.PublicKeySize {
 		return verifiedReleaseAsset{}, errors.New("release public key is invalid")

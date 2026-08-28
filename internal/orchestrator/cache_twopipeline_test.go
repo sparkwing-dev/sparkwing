@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// sharedS3 is the mocked push target for both pipelines. Every time
-// either pipeline's "push-s3" step fires, we observe the in-flight
-// count. Peak must stay at 1.
 var sharedS3 struct {
 	inflight    atomic.Int32
 	maxInflight atomic.Int32
@@ -81,7 +78,6 @@ func unsharedStep() func(context.Context) error {
 	return func(context.Context) error { return nil }
 }
 
-// publishReleasePipe: build -> push-s3 -> notify
 type publishReleasePipe struct{ sparkwing.Base }
 
 func (publishReleasePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -93,7 +89,6 @@ func (publishReleasePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ spar
 	return nil
 }
 
-// syncBackupPipe: snapshot -> push-s3 -> inventory
 type syncBackupPipe struct{ sparkwing.Base }
 
 func (syncBackupPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -110,11 +105,6 @@ func init() {
 	register("sync-backup", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &syncBackupPipe{} })
 }
 
-// runWithSharedStore dispatches opts against a single shared Store.
-// RunLocal opens its own *store.Store on every call, which races on
-// schema migration when two callers fire concurrently against the
-// same paths. Sharing one store mirrors how sparkwing dev actually
-// works (one process, one store) and is the correct test topology.
 func runWithSharedStore(ctx context.Context, t *testing.T, paths orchestrator.Paths, st *store.Store, opts orchestrator.Options) (*orchestrator.Result, error) {
 	t.Helper()
 	if err := paths.EnsureRoot(); err != nil {
@@ -261,10 +251,6 @@ func TestCache_TwoPipelinesShareKey_PushSerializes(t *testing.T) {
 	}
 }
 
-// TestCache_TwoPipelinesShareKey_AcrossMultipleBursts verifies the
-// coordination holds under sustained traffic: fire K pairs of the
-// two pipelines over a loop. Peak inflight must stay at 1 over the
-// whole duration.
 func TestCache_TwoPipelinesShareKey_AcrossMultipleBursts(t *testing.T) {
 	resetSharedS3()
 	p := newPaths(t)
@@ -298,11 +284,6 @@ func TestCache_TwoPipelinesShareKey_AcrossMultipleBursts(t *testing.T) {
 	}
 }
 
-// Helper: print a compact state dump for ad-hoc debugging during
-// test development. Unused by default; retained because the
-// concurrency primitive's state is otherwise opaque from the test
-// vantage point.
-//
 //lint:ignore U1000 ad-hoc debug helper retained for future test development
 func debugConcurrencyState(t *testing.T, st *store.Store, key string) {
 	state, err := st.GetConcurrencyState(context.Background(), key)

@@ -7,10 +7,6 @@ import (
 	"testing"
 )
 
-// Pin the wire shape that the logs service emits on 403.
-// White-box test: drives requireScope directly with a logsPrincipal
-// in context, so we don't have to spin up a fake controller for
-// whoami auth.
 func TestRequireScope_ForbiddenBodyShape(t *testing.T) {
 	s := &Server{}
 	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

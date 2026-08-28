@@ -15,9 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// newTestServer spins up an httptest.Server backed by a fresh SQLite
-// file. Caller gets the base URL + the store handle (for assertions)
-// and a cleanup closure.
 func newTestServer(t *testing.T) (baseURL string, st *store.Store, cleanup func()) {
 	t.Helper()
 	dir := t.TempDir()
@@ -271,10 +268,6 @@ func TestController_RunLifecycle(t *testing.T) {
 	}
 }
 
-// GET /api/v1/runs/{id} returns raw store.Run by default, but with
-// ?include=nodes wraps the response as {run, nodes}. Both shapes
-// must keep working: the dashboard consumes the wrapped form, the
-// CLI + cluster runner consume the unwrapped one.
 func TestController_GetRun_IncludeNodes(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
@@ -331,11 +324,6 @@ func TestController_GetRun_IncludeNodes(t *testing.T) {
 	}
 }
 
-// When the run carries a plan snapshot, GET /api/v1/runs/{id}?include=nodes
-// attaches per-node decorations (modifiers, groups, approval,
-// on_failure_of, dynamic, inner-Work tree) under a nested
-// `decorations` object. Nodes without snapshot adornments emit no
-// `decorations` key.
 func TestController_GetRun_IncludeNodes_Decorations(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
@@ -416,9 +404,6 @@ func TestController_GetRun_IncludeNodes_Decorations(t *testing.T) {
 	}
 }
 
-// With no PlanSnapshot, every wrapped node marshals as bare
-// store.Node fields and no `decorations` key appears anywhere in
-// the response.
 func TestController_GetRun_IncludeNodes_NoSnapshot(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()
@@ -451,9 +436,6 @@ func TestController_GetRun_IncludeNodes_NoSnapshot(t *testing.T) {
 	}
 }
 
-// The dashboard SPA reads debug pauses via /api/v1/runs/{id}/paused,
-// an alias of GET /api/v1/runs/{id}/debug-pauses. Both routes must
-// return identical shapes.
 func TestController_ListPausesAlias(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()

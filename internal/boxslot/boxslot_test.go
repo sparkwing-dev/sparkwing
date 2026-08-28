@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// seedStale writes a holder marker whose flock nobody holds, so it reads
-// as a dead owner's leftover.
 func seedStale(t *testing.T, dir, name, body string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o700); err != nil {
@@ -20,8 +18,6 @@ func seedStale(t *testing.T, dir, name, body string) {
 	}
 }
 
-// seedLive creates a holder marker and holds its exclusive flock for the
-// rest of the test, so it reads as a live owner.
 func seedLive(t *testing.T, dir, name, body string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o700); err != nil {

@@ -14,10 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 )
 
-// runGC implements `sparkwing gc` -- manual invocation of the warm-PVC
-// sweep. Normally fires at `sparkwing cluster worker` startup; exposed as a
-// subcommand so operators can trigger it against a running pod via
-// `kubectl exec` during incident response.
 func runGC(args []string) error {
 	fs := flag.NewFlagSet(cmdGC.Path, flag.ContinueOnError)
 	root := fs.String("root", "",

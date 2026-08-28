@@ -1,17 +1,10 @@
 #!/usr/bin/env bash
-# Stop the dashboard dev loop started by bin/dev-start.sh.
-#
-# Idempotent: missing/stale pidfiles are silently ignored so this can
-# be the first thing dev-start.sh runs to clean up leftover state from
-# a previous crash.
 
 set -uo pipefail
 
 RUN_DIR="/tmp/sparkwing-dev"
 pid_web="$RUN_DIR/web.pid"
 
-# Sparkwing dashboard manages its own pid file; defer to its kill verb,
-# which is idempotent ("dashboard not running" is a clean exit 0).
 if command -v sparkwing >/dev/null 2>&1; then
   echo "==> sparkwing dashboard: stopping"
   sparkwing dashboard kill || true
@@ -36,9 +29,6 @@ stop_next_dev() {
     return 0
   fi
   echo "==> $label: stopping pid $pid"
-  # SIGTERM gives next dev a chance to flush its terminal restoration.
-  # SIGKILL after 3s if it ignores us. We also kill the process group
-  # so child processes (next dev's worker procs) are cleaned up.
   if kill -- -"$pid" 2>/dev/null; then
     :
   else

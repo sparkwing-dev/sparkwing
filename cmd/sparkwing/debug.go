@@ -17,10 +17,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// runDebug dispatches `sparkwing debug <verb>`. The interactive
-// debugging surface lives entirely under this namespace; the regular
-// run dispatch stays free of any pause / attach / release flag so
-// production runs cannot accidentally carry a debug directive.
 func runDebug(args []string) error {
 	if handleParentHelp(cmdDebug, args) {
 		return nil
@@ -48,9 +44,6 @@ func runDebug(args []string) error {
 	}
 }
 
-// runDebugRun parses debug-owned flags, converts them to env vars the
-// pipeline binary reads in orchestrator.Main, and then forwards the
-// pipeline name + remaining args through the normal run dispatch.
 func runDebugRun(args []string) error {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
 		PrintHelp(cmdDebugRun, os.Stdout)
@@ -136,9 +129,6 @@ func runDebugRun(args []string) error {
 	return dispatchRun(append([]string{pipelineName}, remaining...))
 }
 
-// debugTargetFlags are the shared --run/--node/--profile parse surface
-// for release/attach/env. Pulling this into a helper keeps the three
-// CLI entry points terse.
 type debugTargetFlags struct {
 	run  string
 	node string
@@ -159,9 +149,6 @@ func parseDebugTarget(cmd Command, args []string) (debugTargetFlags, error) {
 	return debugTargetFlags{run: *runID, node: *nodeID, on: *on}, nil
 }
 
-// runDebugRelease writes the released row. Local mode opens the
-// SQLite store directly; cluster mode talks to the controller via
-// POST /api/v1/runs/{id}/nodes/{node}/release.
 func runDebugRelease(args []string) error {
 	t, err := parseDebugTarget(cmdDebugRelease, args)
 	if err != nil {
@@ -208,12 +195,6 @@ func runDebugRelease(args []string) error {
 	return nil
 }
 
-// runDebugAttach shells out to `kubectl exec -it` against the pod
-// holding the node's claim. claimed_by is conventionally
-// "pod:<runID>:<nodeID>" for K8s Jobs, "runner:<host>" for warm
-// runners, and "agent:<host>" for laptop agents. We only know the
-// pod name for the pod: and runner: forms running in-cluster; the
-// agent case surfaces a clear "no pod to attach to" message.
 func runDebugAttach(args []string) error {
 	t, err := parseDebugTarget(cmdDebugAttach, args)
 	if err != nil {
@@ -261,9 +242,6 @@ func runDebugAttach(args []string) error {
 	return syscall.Exec(bin, []string{"kubectl", "exec", "-it", "-n", ns, pod, "--", "bash"}, os.Environ())
 }
 
-// runDebugEnv prints env vars + workdir + claim holder for a node.
-// Reads straight from the node row (env snapshot comes from the
-// plan snapshot; claim holder is the pod / runner owning the lease).
 func runDebugEnv(args []string) error {
 	t, err := parseDebugTarget(cmdDebugEnv, args)
 	if err != nil {
@@ -331,8 +309,6 @@ func runDebugEnv(args []string) error {
 	return nil
 }
 
-// claimToPod parses a claim-holder string into (pod, namespace). The
-// wire format varies by runner type:
 func claimToPod(claim string) (pod, namespace string) {
 	namespace = os.Getenv("SPARKWING_NAMESPACE")
 	if namespace == "" {
@@ -347,8 +323,6 @@ func claimToPod(claim string) (pod, namespace string) {
 	return "", namespace
 }
 
-// whoami returns the OS user for released_by audit, falling back to
-// "cli" when the user lookup fails (CI sandboxes, etc.).
 func whoami() string {
 	if u, err := user.Current(); err == nil && u.Username != "" {
 		return u.Username

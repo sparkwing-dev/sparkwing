@@ -1,14 +1,3 @@
-// Package capacity resolves a run's admission cost from measurement. The
-// authoritative order is: an explicit .Resources() pin wins; else a
-// measured profile once it has enough samples; else a conservative
-// cold-start default that biases toward serializing an unknown pipeline's
-// first runs. It also polices pins, warning when one has drifted far from
-// what the pipeline actually costs.
-//
-// The functions here are pure so the resolution table and the
-// drift-warning gating can be tested without a store or a daemon; the
-// orchestrator supplies the pin, the measured profile, and the machine
-// size.
 package capacity
 
 import (
@@ -21,86 +10,34 @@ import (
 )
 
 const (
-	// MinSamples is how many measured runs a profile needs before
-	// admission trusts it over the cold-start default, and before a pin is
-	// judged against it. Small enough to learn fast, large enough that one
-	// odd run cannot flip a decision.
 	MinSamples = 3
-	// DriftFraction is the relative gap between a pin and what measurement
-	// would charge on that dimension that trips a drift warning. Below it,
-	// the pin and reality agree closely enough to stay quiet.
+
 	DriftFraction = 0.25
-	// coldStartFraction is the share of the machine an unknown pipeline's
-	// first run is charged. Half the machine means two unknown runs cannot
-	// both hold capacity at once, so unknown heavy work serializes until
-	// the sampler has profiled it.
+
 	coldStartFraction = 0.5
-	// measuredCoreFloor is the minimum core charge for a measured profile,
-	// so a pipeline the sampler observed drawing near-zero CPU (a poller,
-	// approval waiter, or lock holder) is still accounted for rather than
-	// admitted for free, while costing far less than the cold-start default.
+
 	measuredCoreFloor = 0.1
-	// WarmStartMultiple prices a version whose fingerprint changed: this
-	// multiple of the predecessor's measured peak, charged until the new
-	// version graduates its own clean samples. Parity rather than padding,
-	// because an under-charge self-corrects -- a contended run raises the
-	// demand floor and SafetyMultiple escalation climbs from there.
+
 	WarmStartMultiple = 1.0
-	// SafetyMultiple prices a still-measuring version from the demand floor
-	// its contended runs proved. It sets ramp speed, not safety: ceiling-hit
-	// escalation makes each contended run that consumes its whole charge
-	// double the next, a log2 search that converges on true demand from
-	// below, the same doubling reasoning as TCP slow-start.
+
 	SafetyMultiple = 2.0
-	// SustainedPercentile is the rank a run's sustained core demand takes
-	// from its own per-interval readings: the level that covers four ticks in
-	// five. Cores are charged from it rather than from the burst peak because
-	// cores are compressible -- the kernel time-slices two runs that collide
-	// for a tick -- so reserving a one-tick peak for a whole hold refuses work
-	// the box could have run. Memory keeps charging the peak: an
-	// oversubscribed box does not time-slice, it OOMs. A run of a few
-	// intervals has no plateau to find and this rank degenerates to its
-	// maximum, so short runs price unchanged. The fold guards the rank from
-	// below with the run's mean draw: summed means are the load a box
-	// actually carries, and a tail-heavy run whose hot intervals hold most
-	// of its CPU integral would otherwise price below its own average.
+
 	SustainedPercentile = 0.80
-	// CeilingHitFraction is how much of its admitted charge a contended run
-	// must consume for the charge to count as a proven demand minimum: at or
-	// above this fraction the run wanted at least its whole charge, so the
-	// floor rises to the charge and the next run doubles. Below it, the run's
-	// measured peak alone raises the floor and the charge does not escalate.
-	// Consumption is judged on peaks on both dimensions, including cores,
-	// even though a graduated profile charges cores from sustained demand: a
-	// contended run's sustained reading is the allocation contention left it,
-	// so a floor fed from it would decay toward that allocation and never
-	// clear this fraction of its own SafetyMultiple charge, stalling the
-	// escalation search exactly when it is needed.
+
 	CeilingHitFraction = 0.9
-	// CacheDominantFraction is the share of a run's completed nodes that must
-	// be cache hits for the run to count as cache-dominant and be excluded from
-	// profile learning. A run at or above this threshold measured the cache,
-	// not the work -- its wall time collapses and its CPU is near zero -- so
-	// folding it would poison durations and age real peaks out of the window,
-	// the same measurement contamination contention already guards against.
+
 	CacheDominantFraction = 0.9
 )
 
-// Pin is an explicit .Resources() declaration flattened to host figures.
-// A nil Pin means the pipeline declared nothing.
 type Pin struct {
 	Cores       float64
 	MemoryBytes int64
 }
 
-// Empty reports whether the pin declares neither cores nor memory.
 func (p *Pin) Empty() bool {
 	return p == nil || (p.Cores <= 0 && p.MemoryBytes <= 0)
 }
 
-// Resolution is the resolved admission cost plus its provenance and the
-// expected duration ETA uses. ExpectedDuration is zero when no measured
-// profile backs it.
 type Resolution struct {
 	Cores            float64
 	MemoryBytes      int64
@@ -118,29 +55,6 @@ type Resolution struct {
 // otherwise the cold-start default is charged.
 // ExpectedDuration is filled from the profile whenever one exists, even when
 // a pin sets the cost, so ETA still has a duration to simulate with.
-//
-// safety: the cluster runner resolves pod requests AND limits from this same
-// Cores figure (internal/runners/k8s.podResources), and a Kubernetes CPU
-// limit is a hard CFS quota rather than the compressible time-slicing that
-// justifies charging sustained demand locally. Cluster profiles therefore
-// leave [store.PipelineProfile.SustainedCores] zero and fall back to the
-// peak on purpose. Do not "fix" that asymmetry by mirroring sustained into
-// the controller's fold: it would throttle every spiky pod at its plateau.
-//
-// planHash is the DAG-topology fingerprint of the version being admitted.
-// When it differs from the stored profile's hash the pipeline changed
-// structurally and its measured peaks no longer describe it, so admission
-// re-measures from the predecessor rather than pricing on stale samples. An
-// empty planHash disables version tracking (per-node and cluster paths that
-// do not carry one), keeping the pin-measured-default order.
-//
-// A profile qualifies as measured on sample count plus evidence the
-// sampler was not blind: either a positive peak, or a healthy sampler
-// (CPUMeasured) that observed a genuine near-zero peak. A near-zero
-// measured pipeline is charged its measured memory plus a small core
-// floor, so quiet pollers and lock holders admit at their true tiny cost
-// instead of queueing behind the conservative default forever. A blind
-// sampler's zero never qualifies, keeping the conservative default.
 func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash string) Resolution {
 	res := Resolution{}
 	if profile != nil {
@@ -167,11 +81,6 @@ func Resolve(pin *Pin, profile *store.PipelineProfile, numCPU int, planHash stri
 	return measuringResolution(res, profile, numCPU, versionChanged)
 }
 
-// chargedCores is the core figure a measured profile prices a run at: its
-// sustained demand, since a hold reserves cores for the run's whole life and
-// the kernel time-slices the transient collisions a burst peak would reserve
-// against. A profile measured before sustained figures were recorded carries
-// none; it keeps pricing off the peak, as it did, until its window refills.
 func chargedCores(profile *store.PipelineProfile) float64 {
 	if profile.SustainedCores > 0 {
 		return profile.SustainedCores
@@ -179,12 +88,6 @@ func chargedCores(profile *store.PipelineProfile) float64 {
 	return profile.PeakCores
 }
 
-// carriedCores is chargedCores for the predecessor figures a plan-hash
-// change carried across: what the previous version was charged, not what it
-// peaked at. Charging the carried peak would spike a spiky pipeline's price
-// on every structural edit -- the opposite of the parity WarmStartMultiple
-// promises. Zero on profiles whose predecessor predates sustained figures,
-// which fall back to its peak.
 func carriedCores(profile *store.PipelineProfile) float64 {
 	if profile.PrevSustainedCores > 0 {
 		return profile.PrevSustainedCores
@@ -192,14 +95,6 @@ func carriedCores(profile *store.PipelineProfile) float64 {
 	return profile.PrevPeakCores
 }
 
-// measuringResolution prices a version that has not finalized a measured
-// price for the run's structure: one that changed shape, or one still short
-// of MinSamples clean runs. The charge is the largest of a warm start (what
-// the predecessor was charged, else the half-machine default for a pipeline
-// with no prior measurement), the safety multiple of the demand floor its own
-// contended runs proved, and the small absolute core floor.
-// The floor's evidence belongs to the current version only, so a structural
-// change ignores it and re-measures from the predecessor.
 func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU int, versionChanged bool) Resolution {
 	var prevCores float64
 	var prevMem int64
@@ -237,27 +132,6 @@ func measuringResolution(res Resolution, profile *store.PipelineProfile, numCPU 
 	return res
 }
 
-// ApplyHostCeiling caps a measured/default charge at the machine's idle
-// grantable ceiling, on both cores and memory, so an oversized charge
-// serializes alone instead of never fitting. Explicit pins are left intact and
-// only warned about; admission enforces those as hard budgets. A non-positive
-// ceiling on a dimension, or a charge already within it, leaves that dimension
-// unchanged.
-//
-// Capping memory is what keeps the demand floor bounded by construction. A
-// contended run that consumes its whole charge raises the floor to that
-// charge, and the next run is charged a safety multiple of the floor, so an
-// uncapped memory charge doubles every contended run with nothing to stop it.
-// Memory admission has no sole-run escape the way cores do, so a floor that
-// climbed past what the machine grants was a permanent refusal that could
-// never measure its way back down.
-//
-// pipeline is the stored profile key, named in the warning when a
-// still-measuring charge (floor or warm-start priced) is what got capped:
-// that is the poisoned-profile signature -- a contention-ratcheted floor or a
-// stale predecessor peak holding the whole machine -- and the run would
-// otherwise serialize silently, with nothing pointing at the reset that
-// clears it.
 func ApplyHostCeiling(res Resolution, pipeline string, machineCores, grantableCores float64, grantableMemoryBytes int64) (Resolution, string) {
 	warning := ""
 	if res.Source == store.CostSourcePin {
@@ -285,23 +159,11 @@ func ApplyHostCeiling(res Resolution, pipeline string, machineCores, grantableCo
 	return res, warning
 }
 
-// measurementQualifies reports whether a profile has enough evidence to
-// cost a run by measurement rather than the cold-start default: at least
-// MinSamples observations, and either a positive measured peak or a
-// healthy sampler that recorded a real near-zero peak. A blind sampler's
-// zero peak (CPUMeasured false, PeakCores zero) never qualifies.
 func measurementQualifies(profile *store.PipelineProfile) bool {
 	return profile != nil && profile.SampleCount >= MinSamples &&
 		(profile.PeakCores > 0 || profile.CPUMeasured)
 }
 
-// FloorPoisoned reports whether a rollup profile is in the poisoned state
-// contention ratchets a still-measuring version into: no finalized measured
-// price, no pin to override it, and a contended-run demand floor whose
-// SafetyMultiple charge is at or above the machine's grantable ceiling --
-// every run admitted alone until the floor decays or the profile is reset.
-// Doctor surfaces it with the reset command, since at admission time the
-// only trace is a per-run warning that is easy to miss.
 func FloorPoisoned(profile *store.PipelineProfile, grantableCores float64) bool {
 	if profile == nil || grantableCores <= 0 {
 		return false
@@ -315,27 +177,19 @@ func FloorPoisoned(profile *store.PipelineProfile, grantableCores float64) bool 
 	return profile.FloorCores > 0 && SafetyMultiple*profile.FloorCores >= grantableCores
 }
 
-// coldStartCores is the conservative charge for an unknown pipeline: half
-// the machine, never below one core.
 func coldStartCores(numCPU int) float64 {
 	half := math.Ceil(coldStartFraction * float64(numCPU))
 	return math.Max(1, half)
 }
 
-// DriftClass names how a pin has diverged from measurement.
 type DriftClass string
 
 const (
-	// DriftUnderPinned marks a pin set well below the measured peak: the
-	// run is charged less than it uses, so the machine oversubscribes.
 	DriftUnderPinned DriftClass = "under_pinned"
-	// DriftOverPinned marks a pin set far above the measured peak: capacity
-	// is reserved and never used, needlessly queueing other work.
+
 	DriftOverPinned DriftClass = "over_pinned"
 )
 
-// Drift describes a pin that has drifted from measured reality, with a
-// one-line message carrying the exact fix.
 type Drift struct {
 	Class         DriftClass `json:"class"`
 	PinCores      float64    `json:"pin_cores"`
@@ -344,17 +198,6 @@ type Drift struct {
 	Message       string     `json:"message"`
 }
 
-// CheckDrift compares an explicit pin against the measured profile and
-// returns a warning when they diverge past DriftFraction. It returns nil
-// -- never warns -- for an unpinned pipeline, a profile with fewer than
-// MinSamples, or a pin that agrees with measurement. Cores drive the
-// comparison; a memory-only pin falls back to the memory dimension.
-//
-// Each dimension is judged against the figure that dimension would be
-// charged, which for cores is sustained demand. Judging a core pin against
-// the peak would tell the author of a spiky pipeline to raise a pin that
-// already matches what the pipeline is charged, multiplying their cost to
-// silence a warning that was wrong.
 func CheckDrift(pin *Pin, profile *store.PipelineProfile) *Drift {
 	if pin.Empty() || profile == nil || profile.SampleCount < MinSamples {
 		return nil
@@ -400,8 +243,6 @@ func memoryDrift(pinBytes, measuredBytes int64, samples int) *Drift {
 	}
 }
 
-// classify maps a pin/measured ratio to a drift class, reporting whether
-// it is past the threshold in either direction.
 func classify(ratio float64) (DriftClass, bool) {
 	switch {
 	case ratio < 1-DriftFraction:

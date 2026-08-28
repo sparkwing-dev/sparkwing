@@ -14,10 +14,6 @@ import (
 
 const subtreeSampleWindow = 500 * time.Millisecond
 
-// TestCollectSubtree_GathersEveryDescendant is the platform-independent
-// core of the fix: a holder's forked work must be reachable from its pid
-// through the parent->children map, several levels deep, while an
-// unrelated tree stays out.
 func TestCollectSubtree_GathersEveryDescendant(t *testing.T) {
 	children := map[int][]int{
 		10: {11, 12},
@@ -34,8 +30,6 @@ func TestCollectSubtree_GathersEveryDescendant(t *testing.T) {
 	}
 }
 
-// TestCollectSubtree_ToleratesCycle guards against a hang when recycled
-// pids make the parent map circular.
 func TestCollectSubtree_ToleratesCycle(t *testing.T) {
 	children := map[int][]int{1: {2}, 2: {1}}
 	got := collectSubtree(1, children)
@@ -45,10 +39,6 @@ func TestCollectSubtree_ToleratesCycle(t *testing.T) {
 	}
 }
 
-// TestProcSampler_CountsChildSubtreeCPU spawns a holder whose own process
-// only waits while a busy loop burns a core in a descendant, and asserts
-// the sampler credits that descendant's CPU to the holder pid. A sampler
-// that read only the holder's own pid would report near-idle.
 func TestProcSampler_CountsChildSubtreeCPU(t *testing.T) {
 	requireObservableProcCPU(t)
 	root := startProcessTree(t, `sh -c "while :; do :; done" & sleep 5`)
@@ -59,9 +49,6 @@ func TestProcSampler_CountsChildSubtreeCPU(t *testing.T) {
 	}
 }
 
-// TestProcSampler_IdleTreeIsZero spawns a holder whose whole tree only
-// sleeps, and asserts the sampler reports it near-idle -- the tree walk
-// must not manufacture CPU where none is spent.
 func TestProcSampler_IdleTreeIsZero(t *testing.T) {
 	requireObservableProcCPU(t)
 	root := startProcessTree(t, `sleep 5 & wait`)
@@ -88,10 +75,6 @@ func sampleSubtreeCPU(t *testing.T, sampler *procSampler, root int) ProcUsage {
 	return usage
 }
 
-// requireObservableProcCPU skips where per-process CPU cannot be read
-// cheaply. macOS kinfo_proc P_pctcpu is unmaintained on current releases
-// -- it reads zero even for a pegged process -- so the magnitude
-// assertions only hold on Linux, where /proc exposes cumulative CPU.
 func requireObservableProcCPU(t *testing.T) {
 	t.Helper()
 	if runtime.GOOS != "linux" {
@@ -99,10 +82,6 @@ func requireObservableProcCPU(t *testing.T) {
 	}
 }
 
-// startProcessTree launches "sh -c script" in its own process group --
-// mirroring how sparkwing runs each command -- so the busy work lives in
-// a descendant the holder pid never touches, proving the sampler walks
-// the tree rather than grouping by pgid. Cleanup kills the whole group.
 func startProcessTree(t *testing.T, script string) int {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", script)

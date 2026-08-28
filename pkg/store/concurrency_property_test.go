@@ -14,12 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// A granted arrival must not leave its own stale waiter row behind: a
-// queued participant whose slot freed without a promotion (release
-// without notify) re-acquires, is granted, and the parked row from the
-// first attempt has to vanish -- otherwise a later promote pass tries
-// to promote it on top of its own live holder and aborts an unrelated
-// release.
 func TestConcurrency_GrantClearsOwnStaleWaiterRow(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -111,13 +105,6 @@ func fuzzOps(full int) int {
 	return full
 }
 
-// concurrencyFuzzOp drives one random store operation. The store's own
-// transaction-boundary invariant checks run in fail-fast mode under go
-// test, so any sequence that violates an invariant surfaces as an error
-// from the op that broke it. The mix covers node-level and plan-level
-// (empty NodeID) participants, capacity drift between arrivals, instant
-// lease expiry, every release outcome, both reapers, the cache sweeps,
-// and the startup reconcile pass.
 func concurrencyFuzzOp(ctx context.Context, s *store.Store, rng *rand.Rand) error {
 	keys := []string{"ka", "kb", "kc"}
 	runs := []string{"r0", "r1", "r2", "r3", "r4"}
@@ -297,8 +284,6 @@ func TestConcurrency_PropertyConcurrentOpsHoldInvariants_Postgres(t *testing.T) 
 	runConcurrentPropertySuite(t, openPGTestStore)
 }
 
-// Promotion among queue-policy waiters must follow arrival order
-// exactly, across a random mix of grants, queues, and releases.
 func TestConcurrency_PropertyFIFOPromotionOrder(t *testing.T) {
 	runFIFOPropertySuite(t, newStoreT)
 }

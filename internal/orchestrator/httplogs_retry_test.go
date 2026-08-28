@@ -30,8 +30,7 @@ func TestHTTPLogs_5xxRetriesThenCountsDrop(t *testing.T) {
 	defer srv.Close()
 
 	orchestrator.SetTestHTTPNodeLogRetry(t, 3, 1)
-	// Cooldown off: this test is about the retry budget and the
-	// recovery probe, both of which the breaker window would hide.
+
 	orchestrator.SetTestHTTPNodeLogDropCooldown(t, 0)
 
 	be := orchestrator.NewHTTPLogs(srv.URL, nil, nil)
@@ -77,9 +76,6 @@ func TestHTTPLogs_5xxRetriesThenCountsDrop(t *testing.T) {
 	}
 }
 
-// A 401/403 response latches Fatal immediately so subsequent emits
-// short-circuit. Lets the orchestrator stop wasting cycles once the
-// deploy-time auth misconfig is detected.
 func TestHTTPLogs_AuthLatchedShortCircuitsLaterEmits(t *testing.T) {
 	var posts atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,11 +111,6 @@ func TestHTTPLogs_AuthLatchedShortCircuitsLaterEmits(t *testing.T) {
 	}
 }
 
-// A store that is down rather than flaky must not charge the retry
-// budget to every line. After one line exhausts its budget the
-// breaker window swallows the rest without touching the network --
-// and still counts them, because a fast run that quietly lost its
-// logs is the defect this whole path exists to avoid.
 func TestHTTPLogs_DropCooldownStopsAttemptsButKeepsCounting(t *testing.T) {
 	var posts atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,9 +148,6 @@ func TestHTTPLogs_DropCooldownStopsAttemptsButKeepsCounting(t *testing.T) {
 	}
 }
 
-// Once the window elapses the next line probes the store again, so a
-// store that comes back mid-run resumes instead of staying dark for
-// the rest of the node.
 func TestHTTPLogs_DropCooldownExpiryProbesAgain(t *testing.T) {
 	var posts atomic.Int64
 	var healthy atomic.Bool

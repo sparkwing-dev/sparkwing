@@ -9,10 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestSecretsRoundTrip exercises the full HTTP surface: set, get, list
-// (ensuring values are blanked), delete, and the 404 path. Uses the
-// shared newTestServer helper (no auth, so every request passes the
-// pass-through authenticator).
 func TestSecretsRoundTrip(t *testing.T) {
 	base, _, cleanup := newTestServer(t)
 	defer cleanup()

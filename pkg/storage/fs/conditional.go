@@ -16,11 +16,6 @@ import (
 
 var _ storage.ConditionalWriter = (*ArtifactStore)(nil)
 
-// keyMu returns a mutex unique to key, creating it on first use. It
-// serializes the read-check-write critical section of a conditional
-// write so PutIfAbsent / PutIfMatch are atomic within this process.
-// The fs backend serves local-only mode (a single runner); true
-// cross-runner CAS is the object-store backends' job.
 func (s *ArtifactStore) keyMu(key string) *sync.Mutex {
 	m, _ := s.casLocks.LoadOrStore(key, &sync.Mutex{})
 	return m.(*sync.Mutex)
@@ -81,8 +76,6 @@ func (s *ArtifactStore) ConditionalWritesSupported(context.Context) (bool, error
 	return true, nil
 }
 
-// writeAtomic writes r to key via a temp file + rename and returns the
-// new content ETag. Callers hold the key mutex.
 func (s *ArtifactStore) writeAtomic(key string, r io.Reader) (storage.ETag, error) {
 	body, err := io.ReadAll(r)
 	if err != nil {

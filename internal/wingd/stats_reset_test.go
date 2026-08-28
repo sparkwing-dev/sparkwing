@@ -8,9 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// TestStatsReset_ClearsTheEventWindow proves a control client can zero the
-// daemon's rolling admission-outcome window: after a grant the window reports
-// a run, and after a reset it reports nothing.
 func TestStatsReset_ClearsTheEventWindow(t *testing.T) {
 	home := shortHome(t)
 	startDaemon(t, wingd.Config{Home: home, GraceWindow: -1})

@@ -1,30 +1,10 @@
-# The sparkwing registry for the public sparkwing repo. Every entry is a
-# Go struct registered via sparkwing.Register(...) in jobs/ that
-# `sparkwing run` can invoke.
-#
-# This .sparkwing/ tree is intentionally minimal: it covers the
-# build / lint / test / static-analysis / release pipelines that
-# operate on this repo's OSS surface (SDK, CLI, embedded docs).
 pipelines:
-  # pre-commit: explicitly selected broad local verification. gofmt, vet,
-  # build, test and golangci-lint run in every committed Go module (the repo
-  # root and .sparkwing/). The frontend chain runs unit tests and browser-test
-  # lint in parallel, then the production build and Playwright smoke suite.
-  # Chromium is installed on demand; the deterministic browser fixtures need
-  # no controller, hosted secret, or Kubernetes cluster. The formatters and
-  # regex sweeps read the staged change. It has no automatic Git trigger.
   - name: pre-commit
     entrypoint: PreCommit
 
-  # pre-push: explicitly selected release-boundary verification. Full
-  # golangci-lint, `go test -race`, govulncheck, version-freshness, and a hard
-  # refusal when a committed go.mod has a `replace`. It has no automatic Git
-  # trigger.
   - name: pre-push
     entrypoint: PrePush
 
-  # push-checks is the fleet wrapper's repository-neutral dispatch name.
-  # It preserves one gate implementation by binding to PrePush.
   - name: push-checks
     entrypoint: PrePush
 
@@ -37,55 +17,26 @@ pipelines:
   - name: static-analysis
     entrypoint: StaticAnalysis
 
-  # integration: spins up Postgres + MinIO in Docker, waits for them to
-  # be ready (Verify gate), runs the env-gated integration suite against
-  # them, and tears the containers down. Requires Docker + go.
   - name: integration
     entrypoint: Integration
 
   - name: build
     entrypoint: Build
 
-  # build-images: builds one Docker image per deployable component
-  # (controller, web, logs, cache, runner). Local single-arch by
-  # default; --registry + --push switches to multi-arch buildx push.
-  # Downstream consumers parse the final RELEASE_IMAGES summary line.
   - name: build-images
     entrypoint: BuildImages
 
-  # kind-e2e: proves authenticated webhook-to-runner execution, logs,
-  # cancellation, retry, restarts, and retained state. Its default provisions
-  # a disposable Kind cluster and locally built images. Existing-cluster mode
-  # requires explicit context, image coordinates, and cleanup allow-list.
   - name: kind-e2e
     entrypoint: KindE2E
 
-  # release: cuts a sparkwing tag and pushes it. The
-  # .github/workflows/release.yaml workflow takes over from the tag
-  # push to publish binaries to GH Releases and multi-arch images to
-  # GHCR. This pipeline deliberately does NOT duplicate that work --
-  # its job is just to validate the release shape (clean tree, free
-  # tag, non-empty CHANGELOG [Unreleased]) and push the tag.
   - name: release
     entrypoint: Release
 
-  # template-verify: proves every sparks-core template is a working
-  # pipeline. Builds the CLI from the working tree, then scaffolds,
-  # compiles, lints, explains (and for runnable templates, runs) each
-  # registry template in a throwaway repo. The release pipeline gates
-  # on this being green.
   - name: template-verify
     entrypoint: TemplateVerify
 
-  # example: reference pipeline that exercises the two-layer
-  # Plan/Work model -- a Plan with two Nodes where the first Node's
-  # Work mixes a sequential chain with a parallel group. Anyone
-  # checking out the repo can `sparkwing run example` to see the SDK shape
-  # render in the dashboard.
   - name: example
     entrypoint: Example
 
-  # weather-report: tiny standalone pipeline the example calls via
-  # sparkwing.RunAndAwait to exercise cross-pipeline dependencies.
   - name: weather-report
     entrypoint: WeatherReport

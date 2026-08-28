@@ -14,9 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// decodeNDJSON reads a list verb's JSON output a line at a time, the
-// way a consumer now has to. It fails on the first line that is not a
-// complete JSON value.
 func decodeNDJSON[T any](t *testing.T, out string) []T {
 	t.Helper()
 	dec := json.NewDecoder(strings.NewReader(out))
@@ -34,10 +31,6 @@ func decodeNDJSON[T any](t *testing.T, out string) []T {
 	}
 }
 
-// TestRunsListJSONIsNDJSON pins the second surface the ticket names:
-// `runs list -o json` was 23KB across 631 pretty-printed lines, so a
-// caller that could not afford all of it got a truncated array and
-// parsed none of it. One run per line makes `head -5` five runs.
 func TestRunsListJSONIsNDJSON(t *testing.T) {
 	out := seedRunsAndList(t, 6)
 
@@ -60,8 +53,6 @@ func TestRunsListJSONIsNDJSON(t *testing.T) {
 	}
 }
 
-// seedRunsAndList writes n finished runs and returns `runs list -o
-// json` over them.
 func seedRunsAndList(t *testing.T, n int) string {
 	t.Helper()
 	p := newPaths(t)

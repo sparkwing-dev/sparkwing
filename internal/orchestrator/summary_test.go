@@ -11,10 +11,6 @@ import (
 
 type summaryNodePipe struct{ sparkwing.Base }
 
-// Summary fires from BeforeRun so ctx carries WithNode but no
-// WithStep -- exercises the node-scope branch of the wrapper.
-// Plain sparkwing.Job(plan, id, fn) auto-wraps fn as Step("run"),
-// which would put the summary on the step row instead.
 func (summaryNodePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, rc.Pipeline, func(ctx context.Context) error {
 		return nil

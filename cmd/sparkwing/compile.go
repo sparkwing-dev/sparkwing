@@ -16,21 +16,11 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/storeurl"
 )
 
-// compileAndExec compiles the .sparkwing/ Go module to a cache
-// directory keyed on a fingerprint of the module plus every local
-// `replace` target, then execs the cached binary with the given
-// args. Subsequent invocations with no source changes skip the
-// compile entirely.
 func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions) error {
 	if err := resolveSparks(context.Background(), sparkwingDir, opts); err != nil {
 		return err
 	}
 
-	// The pipeline binary is a wingd client but never a wingd host: hand
-	// it this CLI as the binary to spawn for the daemon. Bringing the
-	// daemon to this CLI's version happens in dispatchRun, gated on the
-	// invocation actually admitting work -- not here, where debug replay
-	// also passes through.
 	env = withWingdHost(env)
 
 	if os.Getenv("SPARKWING_NO_BINCACHE") != "" {
@@ -99,10 +89,6 @@ func compileAndExec(sparkwingDir string, args, env []string, opts compileOptions
 	return lease.ExecReplace(args, sparkwingDir, env)
 }
 
-// ensureDescribeCache writes the describe-cache file if it's missing
-// for the current PipelineCacheKey. Failures are logged at debug-
-// level and swallowed -- the cache is a perf optimization, not a
-// correctness gate on the pipeline run.
 func ensureDescribeCache(sparkwingDir, key, binPath string) {
 	if _, err := os.Stat(describeCachePath(key)); err == nil {
 		return
@@ -112,12 +98,6 @@ func ensureDescribeCache(sparkwingDir, key, binPath string) {
 	}
 }
 
-// announceCompile prints a one-line stderr message before a local
-// compile so the user knows why this run is slower than steady-state.
-// Distinguishes "first time ever" (no other cached pipeline binaries
-// on this laptop) from "source changed since last run" (cache root
-// has entries, just not for this hash). Stays silent when stderr
-// isn't a TTY (agents and pipes get clean logs already).
 func announceCompile() {
 	cacheRoot := filepath.Join(bincache.SparkwingHome(), "cache", "pipelines", "v1", "entries")
 	firstEver := true
@@ -133,9 +113,6 @@ func announceCompile() {
 	fmt.Fprintln(os.Stderr, color.Dim(msg))
 }
 
-// runExec runs a binary with the given args/env and propagates its
-// exit code to the current process on non-zero termination. Used by
-// runGo for the `go run .` fallback.
 func runExec(bin string, args []string, dir string, env []string) error {
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = dir
@@ -153,10 +130,6 @@ func runExec(bin string, args []string, dir string, env []string) error {
 	return nil
 }
 
-// runGo shells out to the `go` toolchain. Mirrors the pre-flight
-// check in bincache.CompilePipeline so the SPARKWING_NO_BINCACHE
-// (`go run .`) escape hatch and the cache-miss compile path
-// produce the same actionable error message when Go is missing.
 func runGo(dir string, args, env []string) error {
 	if !goOnPath() {
 		return fmt.Errorf(
@@ -167,25 +140,10 @@ func runGo(dir string, args, env []string) error {
 	return runExec("go", args, dir, env)
 }
 
-// compileOptions bundles the subset of sparkwing flags that affects how we
-// prepare the module graph before compile. Today only `--no-update`
-// (gate on sparks auto-resolve); extend here rather than threading
-// booleans one at a time through compileAndExec.
 type compileOptions struct {
-	// NoUpdate skips the sparks auto-resolve step. Set when the
-	// operator passed --no-update or when SPARKWING_NO_SPARKS_RESOLVE=1
-	// is exported. Absent sparks.yaml is already a no-op regardless of
-	// this flag.
 	NoUpdate bool
 }
 
-// resolveSparks invokes sparks.ResolveAndWrite unless the operator
-// opted out. When the sparks manifest is absent ResolveAndWrite is a
-// single stat call, so the fast-path cost is negligible. Errors bubble
-// up as compile failures by default -- an agent wanting `latest`
-// should fail loudly rather than silently pin to stale `go.mod`
-// versions. `--no-update` (or SPARKWING_NO_SPARKS_RESOLVE=1) flips to
-// the "warn and fall back" path for offline work.
 func resolveSparks(ctx context.Context, sparkwingDir string, opts compileOptions) error {
 	noUpdate := opts.NoUpdate || os.Getenv("SPARKWING_NO_SPARKS_RESOLVE") != ""
 	if noUpdate {

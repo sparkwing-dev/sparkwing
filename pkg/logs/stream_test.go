@@ -14,10 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/logs"
 )
 
-// TestStream_TailsAppendedContent is the core SSE contract: append
-// to a node's log from one goroutine while another reads the stream
-// and verify every line eventually arrives, in order, as "data:"
-// events.
 func TestStream_TailsAppendedContent(t *testing.T) {
 	dir := t.TempDir()
 	s, err := logs.New(dir, nil)
@@ -115,9 +111,6 @@ func TestStream_TailsAppendedContent(t *testing.T) {
 	}
 }
 
-// TestStream_ContextCancellationStops ensures the server terminates
-// the stream goroutine when the client's ctx is cancelled. Without
-// this the service leaks a goroutine per dropped viewer.
 func TestStream_ContextCancellationStops(t *testing.T) {
 	dir := t.TempDir()
 	s, err := logs.New(dir, nil)
@@ -143,8 +136,6 @@ func TestStream_ContextCancellationStops(t *testing.T) {
 	_ = filepath.Join(dir)
 }
 
-// TestStream_EscapesEmbeddedNewlines prevents a malformed log line
-// from splitting one event into two on the wire.
 func TestStream_EscapesEmbeddedNewlines(t *testing.T) {
 	dir := t.TempDir()
 	s, err := logs.New(dir, nil)

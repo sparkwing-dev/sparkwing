@@ -10,8 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// PreviewPlan must NOT execute step bodies. The canary counters in
-// this file's test pipelines must remain zero after every call.
 var previewExecCounter atomic.Int64
 
 func nopStep(ctx context.Context) error {

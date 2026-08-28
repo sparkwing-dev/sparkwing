@@ -1,19 +1,3 @@
-// Package swtags parses the `sw:"..."` struct tag and assigns typed
-// values back to struct fields by reflection. The reflection is shared
-// between the sparkwing package (InspectPipelineConfig /
-// ResolvePipelineConfig) and internal/sparkwingruntime
-// (ResolvePipelineSecrets / DecodePipelineConfig); centralizing it
-// here keeps the two import paths from carrying duplicate copies.
-//
-// Tag grammar:
-//
-//	`sw:"<name>"`
-//	`sw:"<name>,required"`
-//	`sw:"<name>,optional"`
-//
-// Combined with a `default:"..."` tag on the same field to supply a
-// fallback when no value layers in. `required` and `default` are
-// mutually exclusive.
 package swtags
 
 import (
@@ -23,20 +7,15 @@ import (
 	"strings"
 )
 
-// FieldSpec captures the parsed sw + default tags on one struct field.
 type FieldSpec struct {
 	Field      reflect.StructField
-	Name       string // sw:"<name>"
+	Name       string
 	Required   bool
 	Optional   bool
-	DefaultRaw string // default:"..."; "" when absent
+	DefaultRaw string
 	HasDefault bool
 }
 
-// Parse walks the exported fields of t (a struct type) and returns
-// the field-level parsed specs. Unexported and untagged fields are
-// skipped silently. Conflicts (required + default, required +
-// optional) error.
 func Parse(t reflect.Type) ([]FieldSpec, error) {
 	if t.Kind() == reflect.Pointer {
 		t = t.Elem()
@@ -86,10 +65,6 @@ func Parse(t reflect.Type) ([]FieldSpec, error) {
 	return out, nil
 }
 
-// CoerceAssign converts raw into the Go kind of fv and assigns it.
-// Supports string, bool, int family, float family, plus a last-resort
-// type-assignable path so yaml-decoded slices/maps land in struct
-// fields of matching type.
 func CoerceAssign(fv reflect.Value, raw any, fieldName string) error {
 	if !fv.CanSet() {
 		return fmt.Errorf("field %s: cannot set", fieldName)

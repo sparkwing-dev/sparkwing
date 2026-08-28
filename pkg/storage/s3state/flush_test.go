@@ -12,9 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// gatedArt holds the first Put open until the test releases it, which
-// keeps one flush in flight for as long as an assertion needs without
-// depending on load or timing to collide with the flush ticker.
 type gatedArt struct {
 	*memArt
 	entered     chan string
@@ -74,8 +71,6 @@ func TestBackend_EnvelopeAppendedDuringAFlushIsStillWrittenOnClose(t *testing.T)
 	}
 	<-art.entered
 
-	// safety: the held PUT carries a snapshot taken before this node existed,
-	// so only a later flush can make the node durable.
 	if err := b.CreateNode(ctx, store.Node{RunID: "r", NodeID: "n1", Status: "running"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}

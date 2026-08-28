@@ -21,18 +21,6 @@ export const metadata: Metadata = {
   description: "CI/CD pipelines in Go",
 };
 
-// Runtime config (token + API URL + CLI version) is injected by the
-// Go server at serve time via HTML templating. The markers below are
-// substituted by `internal/web` before the HTML reaches the browser:
-//
-//   __SPARKWING_TOKEN_MARKER__   ->  controller bearer token in sessionless mode
-//   __SPARKWING_API_URL_MARKER__ ->  controller URL (empty = same origin)
-//   __SPARKWING_VERSION_MARKER__ ->  serving binary's version (e.g. "v0.6.2")
-//   __SPARKWING_REQUIRE_LOGIN_MARKER__ -> whether the server requires a session
-//
-// Static export means no server lifecycle at request time; per-
-// deployment values must come from the serving layer, not from
-// `next build`.
 export default function RootLayout({
   children,
 }: Readonly<{
@@ -45,7 +33,6 @@ export default function RootLayout({
     >
       <head>
         <script
-          // eslint-disable-next-line react/no-danger
           dangerouslySetInnerHTML={{
             __html:
               'window.__SPARKWING_TOKEN__="__SPARKWING_TOKEN_MARKER__";' +
@@ -53,9 +40,6 @@ export default function RootLayout({
               'window.__SPARKWING_VERSION__="__SPARKWING_VERSION_MARKER__";' +
               'window.__SPARKWING_REQUIRE_LOGIN__="__SPARKWING_REQUIRE_LOGIN_MARKER__";',
           }}
-          // Ad-blocker extensions sometimes rewrite scripts in the
-          // head before React hydrates; suppress the hydration warning
-          // since we set the content explicitly.
           suppressHydrationWarning
         />
       </head>

@@ -1,10 +1,4 @@
 #!/usr/bin/env bash
-# Regenerate the SDK reference -- docs/sdk-reference.md (root package +
-# subpackage index) plus one docs/sdk-<name>.md per subpackage -- from
-# the `sparkwing` package via go/doc, then re-sync the embedded mirror.
-# These pages are GENERATED -- never edit them by hand; change the
-# exported API / its godoc and rerun this. The pre-push docs-generated
-# gate fails until the committed files match.
 
 set -euo pipefail
 

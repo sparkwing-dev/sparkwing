@@ -1,18 +1,3 @@
-// The run output is the only doc every agent reliably reads, so a CLI
-// version change pushes a one-line pointer at the changelog instead of
-// hoping the agent browses docs. The last-run version is stamped in the
-// sparkwing home; the first invocation after the binary changes prints
-// one stderr line (and surfaces the same line in `sparkwing info`),
-// then never again for that transition.
-//
-// The stamp is per install, keyed by the running binary's resolved
-// path. A machine with two sparkwing binaries on two different PATHs --
-// the shell's and a launchd job's -- would otherwise have each rewrite
-// a shared stamp with its own version on every run, and the record
-// would read as a stream of upgrades and downgrades that never
-// happened. Each install comparing only against what it itself last
-// ran as makes the notice true no matter how many copies exist, without
-// any binary having to know about, own, or touch the others.
 package main
 
 import (
@@ -27,15 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
-// pendingUpgradeNotice is set once per process by
-// noteVersionTransition when the running binary differs from the
-// stamped last-run version, so `sparkwing info` can render the same
-// pointer the dispatcher emitted to stderr.
 var pendingUpgradeNotice string
 
-// upgradeNoticeLine is the one-line pointer emitted on a version
-// transition. One line, with embedded-docs pointers only -- it must
-// never grow into a nag.
 func upgradeNoticeLine(prev, cur string) string {
 	return fmt.Sprintf(
 		"sparkwing changed %s -> %s: see `sparkwing docs read --topic %s`; "+
@@ -43,10 +21,6 @@ func upgradeNoticeLine(prev, cur string) string {
 		prev, cur, "changelog")
 }
 
-// versionTransition reports whether prev->cur is a transition worth
-// announcing: both sides known and different. Unknown/missing versions
-// (a fresh home, a first run of this install, a build without version
-// metadata) never announce.
 func versionTransition(prev, cur string) bool {
 	if prev == "" || cur == "" {
 		return false
@@ -57,12 +31,6 @@ func versionTransition(prev, cur string) bool {
 	return prev != cur
 }
 
-// noteVersionTransition reads the running install's last-run stamp,
-// compares it to the running binary, and re-stamps. On a transition it
-// records the pointer in pendingUpgradeNotice and, unless the verb owns
-// its own rendering (info), writes the line to w. Best-effort: a
-// read-only or absent home, or a binary whose own path will not
-// resolve, never breaks dispatch.
 func noteVersionTransition(w io.Writer, verb string) {
 	if quietNoticeVerb(verb) {
 		return
@@ -93,9 +61,6 @@ func noteVersionTransitionForExe(w io.Writer, verb string, p paths.Paths, exe st
 	}
 }
 
-// readVersionStamp returns the version recorded in file: the first line
-// that is not blank and not a `#` comment, so the stamp can carry the
-// binary path it describes as a note to the operator reading the file.
 func readVersionStamp(file string) string {
 	body, err := os.ReadFile(file)
 	if err != nil {
@@ -121,9 +86,6 @@ func writeVersionStamp(file, exe, version string) {
 	_ = fssecure.WriteFile(file, []byte("# "+exe+"\n"+version+"\n"))
 }
 
-// quietNoticeVerb suppresses the transition line for machine-facing
-// verbs: shell completion, internal helpers, the trigger shim, and the
-// daemons. Their output is parsed, not read.
 func quietNoticeVerb(verb string) bool {
 	if strings.HasPrefix(verb, "_") {
 		return true

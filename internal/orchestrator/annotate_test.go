@@ -25,11 +25,6 @@ func init() {
 	register("orch-annotate", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &annotatingPipe{} })
 }
 
-// sparkwing.Annotate routing is disjoint: messages emitted inside a
-// step body land on the step row, messages emitted between steps land
-// on the node row. The func(ctx) error form passed to sparkwing.Job
-// is implicitly wrapped in a single step named "run", so annotations
-// fired from inside that closure land on that step's row.
 func TestRun_AnnotatePersistsToStepRow(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,

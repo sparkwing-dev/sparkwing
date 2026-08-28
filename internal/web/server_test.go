@@ -16,8 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Registration is guarded to avoid duplicate panics across test
-// invocations.
 var registerOnce sync.Map
 
 func register(name string, factory func() sparkwing.Pipeline[sparkwing.NoInputs]) {
@@ -45,8 +43,6 @@ func (webDAG) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInpu
 	return nil
 }
 
-// webANSI emits a Msg with a real SGR escape so negotiation tests can
-// verify plain strips it and text/x-ansi preserves it.
 type webANSI struct{ sparkwing.Base }
 
 func (webANSI) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -63,7 +59,6 @@ func init() {
 	register("web-ansi", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &webANSI{} })
 }
 
-// startServer spins up the web server on an ephemeral port.
 func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	t.Helper()
 	if reason := web.BundleSkipReason(); reason != "" {
@@ -133,8 +128,6 @@ func startServer(t *testing.T, paths orchestrator.Paths) (string, func()) {
 	}
 }
 
-// TestAPI_Logs covers the dashboard-owned log endpoints under
-// /api/v1/runs/{id}/logs[/{node}].
 func TestAPI_Logs(t *testing.T) {
 	root := t.TempDir()
 	paths := orchestrator.PathsAt(root)
@@ -184,10 +177,6 @@ func TestAPI_StaticIndexServed(t *testing.T) {
 	}
 }
 
-// TestAPI_LogsAcceptNegotiation pins the format negotiation contract:
-//   - Default: pretty plain text, no ANSI anywhere.
-//   - Accept: text/x-ansi: pretty + renderer SGR + Msg ANSI passthrough.
-//   - Accept: application/x-ndjson: raw JSONL envelope intact.
 func TestAPI_LogsAcceptNegotiation(t *testing.T) {
 	root := t.TempDir()
 	paths := orchestrator.PathsAt(root)

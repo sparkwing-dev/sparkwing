@@ -274,10 +274,6 @@ func DecorateNodes(nodes []*store.Node, snapshot []byte, steps []*store.NodeStep
 	return out
 }
 
-// populateSpawnedPipelines attaches each SpawnedChild row to its
-// parent node's Decorations. Lazily creates a Decorations entry for
-// nodes whose snapshot carried no decoration so a runtime-spawned
-// pipeline isn't silently dropped from the wire shape.
 func populateSpawnedPipelines(dmap map[string]*Decorations, spawned []store.SpawnedChild) {
 	for _, c := range spawned {
 		if c.ParentNodeID == "" {
@@ -295,10 +291,6 @@ func populateSpawnedPipelines(dmap map[string]*Decorations, spawned []store.Spaw
 	}
 }
 
-// populateApprovalState attaches each Approval row to its node's
-// Decorations. Lazily creates a Decorations entry for nodes whose
-// snapshot carried no decoration (otherwise we'd silently drop the
-// runtime state on a node the snapshot didn't pre-decorate).
 func populateApprovalState(dmap map[string]*Decorations, approvals []*store.Approval) {
 	for _, a := range approvals {
 		if a == nil {
@@ -322,10 +314,6 @@ func populateApprovalState(dmap map[string]*Decorations, approvals []*store.Appr
 	}
 }
 
-// populateStepRuntime stamps each NodeStep with its runtime state
-// from node_steps rows. Walks the entire Work tree (including spawn
-// target_work and spawn_each item_template_work) so steps nested
-// inside spawned sub-jobs get populated too.
 func populateStepRuntime(dmap map[string]*Decorations, steps []*store.NodeStep) {
 	byNode := make(map[string]map[string]*store.NodeStep, len(steps))
 	for _, s := range steps {

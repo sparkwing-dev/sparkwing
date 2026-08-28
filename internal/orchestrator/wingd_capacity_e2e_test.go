@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// wingdBurnerPipe runs a make -j-style parallel burst: eight child processes
-// each churning CPU, reaped together. It exercises the real
-// measurement -> profile chain so the stored peak can be checked against host
-// capacity end to end.
 type wingdBurnerPipe struct{ sparkwing.Base }
 
 func (wingdBurnerPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, _ sparkwing.RunContext) error {
@@ -36,10 +32,6 @@ func registerWingdCapacityE2EPipelines() {
 	})
 }
 
-// TestWingd_ParallelBurnerProfilePeakStaysWithinHost drives the measurement
-// fix end to end: a parallel child burst is measured, folded into the stored
-// profile, and its recorded peak stays within host capacity -- the reap-burst
-// overshoot that recorded 18.9 cores on a 14-core box can no longer happen.
 func TestWingd_ParallelBurnerProfilePeakStaysWithinHost(t *testing.T) {
 	registerWingdCapacityE2EPipelines()
 	home := wingdTestHome(t)
@@ -68,11 +60,6 @@ func TestWingd_ParallelBurnerProfilePeakStaysWithinHost(t *testing.T) {
 	}
 }
 
-// TestWingd_OversizedMeasuredCostRunsAloneNeverBricks reproduces the field-
-// down state -- a measured peak far above host capacity (18.9 cores) -- and
-// proves the fix: the run is admitted alone at a clamped charge rather than
-// rejected as never-admissible, and a second run of the same oversized
-// pipeline serializes behind it instead of bricking the pipeline.
 func TestWingd_OversizedMeasuredCostRunsAloneNeverBricks(t *testing.T) {
 	registerWingdE2EPipelines()
 	home := wingdTestHome(t)

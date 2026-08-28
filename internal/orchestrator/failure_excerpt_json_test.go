@@ -19,8 +19,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// A node that fails with a plain Go error has no command output to
-// excerpt. Absence is the honest report; the error still stands.
 type plainFailJob struct{ sparkwing.Base }
 
 func (j *plainFailJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -37,8 +35,6 @@ func (plainFailPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
-// A short command failure fits inside the bound: excerpt present,
-// truncation flag false.
 type shortFailJob struct{ sparkwing.Base }
 
 func (j *shortFailJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -73,8 +69,6 @@ func runsErrorsJSON(t *testing.T, p orchestrator.Paths, runID string) []map[stri
 	return decodeNDJSON[map[string]any](t, buf.String())
 }
 
-// No output, no excerpt: the fields are absent rather than empty, so a
-// consumer can tell "nothing was captured" from "captured nothing".
 func TestJobErrorsJSON_PlainErrorHasNoExcerpt(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
@@ -101,8 +95,6 @@ func TestJobErrorsJSON_PlainErrorHasNoExcerpt(t *testing.T) {
 	}
 }
 
-// Output that fits keeps the excerpt and reports truncated=false --
-// the flag has to be usable in both directions.
 func TestJobErrorsJSON_ShortOutputNotTruncated(t *testing.T) {
 	p := newPaths(t)
 	res, err := orchestrator.RunLocal(context.Background(), p,
@@ -123,9 +115,6 @@ func TestJobErrorsJSON_ShortOutputNotTruncated(t *testing.T) {
 	}
 }
 
-// Remote parity: the excerpt rides the run's event stream, which every
-// backend serves, so a controller-backed read renders the same pair a
-// local read does.
 func TestJobsRemoteJSON_CarriesFailureExcerpt(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
 	if err != nil {

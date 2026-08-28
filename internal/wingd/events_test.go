@@ -138,8 +138,6 @@ func TestEventWindow_SurvivesStateRoundTrip(t *testing.T) {
 	}
 }
 
-// TestReadState_ToleratesEventlessFile pins that a state file written
-// before the event window existed restores with an empty window.
 func TestReadState_ToleratesEventlessFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	if err := writeState(path, admission.Snapshot{TotalMilliCores: 4000, TotalMemoryBytes: 1 << 30}, nil); err != nil {

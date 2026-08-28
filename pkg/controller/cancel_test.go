@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestCancel_HeartbeatReportsFlag exercises the RequestCancel →
-// heartbeat → cancel-requested propagation path. Workers see the
-// cancel signal on their next heartbeat and cancel the run ctx.
 func TestCancel_HeartbeatReportsFlag(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -58,9 +55,6 @@ func TestCancel_HeartbeatReportsFlag(t *testing.T) {
 	}
 }
 
-// TestCancel_Idempotent: repeated cancels are no-ops (the second
-// call MUST NOT overwrite the timestamp -- otherwise a delayed
-// admin would look like the sole canceller).
 func TestCancel_Idempotent(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -85,8 +79,6 @@ func TestCancel_Idempotent(t *testing.T) {
 	}
 }
 
-// TestCancel_MissingRun returns 404 so the CLI can surface a clear
-// error.
 func TestCancel_MissingRun(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

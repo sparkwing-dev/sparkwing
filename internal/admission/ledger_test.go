@@ -116,9 +116,6 @@ func TestSubmit_RejectsInvalidRequests(t *testing.T) {
 	}
 }
 
-// TestSubmit_HostCPUAboveTotalAdmitsClampedAlone records the admission
-// invariant: CPU demand above this box's total is capped to the total and
-// admitted alone rather than refused.
 func TestSubmit_HostCPUAboveTotalAdmitsClampedAlone(t *testing.T) {
 	l := testLedger(t, 4, 1024)
 	d, _, err := l.Submit(Request{ID: "r", Cores: 10})
@@ -171,11 +168,6 @@ func TestSubmit_StrictHostCPUAboveTotalFails(t *testing.T) {
 	}
 }
 
-// TestLivenessFloor_SoleRunAdmitsUnderZeroHeadroom pins the floor: with no
-// sparkwing holders, the queue head admits even when headroom has collapsed to
-// zero under external load, so a fully loaded box still runs exactly one
-// pipeline rather than none. The second arrival then queues, and the floor
-// never strands a waiter while holders are zero (the promotion invariant).
 func TestLivenessFloor_SoleRunAdmitsUnderZeroHeadroom(t *testing.T) {
 	l := testLedger(t, 8, 8<<30)
 	if _, err := l.SetHeadroom(0, 0); err != nil {
@@ -218,11 +210,6 @@ func TestSoftHostCPUDeficitAdmitsOneAdditionalMemoryFittingRun(t *testing.T) {
 	}
 }
 
-// TestSubmit_UnsatisfiableRefusesWithArithmeticWhileBusyOnlyQueues separates
-// the two answers an operator kept seeing as one. A box that is merely busy
-// queues the request, and a release fixes it. A request larger than the box
-// is refused now, in the arithmetic that settled it, rather than queued to a
-// timeout that reads like progress for half an hour.
 func TestSubmit_UnsatisfiableRefusesWithArithmeticWhileBusyOnlyQueues(t *testing.T) {
 	l := testLedger(t, 8, 8<<30)
 	mustGrant(t, l, Request{ID: "holder", Cores: 1, MemoryBytes: 6 << 30})
@@ -245,9 +232,6 @@ func TestSubmit_UnsatisfiableRefusesWithArithmeticWhileBusyOnlyQueues(t *testing
 	}
 }
 
-// TestSubmit_UnsatisfiableCoresPinRefusesWithArithmetic is the CPU half: a
-// pin above the machine is strict, so it is refused with its own arithmetic
-// rather than capped and serialized the way a measured charge is.
 func TestSubmit_UnsatisfiableCoresPinRefusesWithArithmetic(t *testing.T) {
 	l := testLedger(t, 8, 8<<30)
 
@@ -889,10 +873,6 @@ func TestResizeTotals_GatesNewAdmission(t *testing.T) {
 	mustQueue(t, l, Request{ID: "waiter", Cores: 2, MemoryBytes: 1024})
 }
 
-// TestLivenessFloor_IdleBoxAdmitsChargeAboveHeadroom reproduces a field
-// incident: a restored ledger whose headroom sits one millicore below a
-// run's measured cost (3199 vs 3200) must still admit that run on an
-// otherwise-idle box, not park it forever a hair short of grantable.
 func TestLivenessFloor_IdleBoxAdmitsChargeAboveHeadroom(t *testing.T) {
 	l := testLedger(t, 4, 8<<30)
 	if _, err := l.SetHeadroom(3.199, 8<<30); err != nil {
@@ -908,12 +888,6 @@ func TestLivenessFloor_IdleBoxAdmitsChargeAboveHeadroom(t *testing.T) {
 	}
 }
 
-// TestResizeTotals_GrowAdmitsSecondRunAgainstRealBudget covers the same
-// incident's other half: a snapshot restored with a stale, too-small total
-// (a cgroup-capped or pre-resize capacity) is grown to the machine's real
-// budget, so a second concurrent run the stale total could never fit admits
-// once headroom reflects the real box. Fails without ResizeTotals: the stale
-// total keeps the effective capacity pinned below the second run.
 func TestResizeTotals_GrowAdmitsSecondRunAgainstRealBudget(t *testing.T) {
 	l := testLedger(t, 4, 4<<30)
 	mustGrant(t, l, Request{ID: "holder", Cores: 3})
@@ -931,11 +905,6 @@ func TestResizeTotals_GrowAdmitsSecondRunAgainstRealBudget(t *testing.T) {
 	}
 }
 
-// TestResizeTotals_SoftOvercommitSurvivesShrink covers a field incident:
-// soft-core grants may legally overcommit the core total (the ledger
-// invariant permits it), and a daemon restart persists that state. The
-// restore-time resize must accept it, same as the invariant does, or the
-// state file wedges the daemon at startup.
 func TestResizeTotals_SoftOvercommitSurvivesShrink(t *testing.T) {
 	l := testLedger(t, 14, 4<<30)
 	a := mustGrant(t, l, Request{ID: "a", Cores: 11.2, SoftCores: true})

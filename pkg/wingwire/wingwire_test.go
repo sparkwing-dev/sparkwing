@@ -194,9 +194,6 @@ func TestEncode_RejectsNilMessage(t *testing.T) {
 	}
 }
 
-// TestLeaseTokenEnv_IsStable pins the variable name: compiled pipeline
-// binaries bake it in, so renaming it orphans every child spawned by
-// an older parent.
 func TestLeaseTokenEnv_IsStable(t *testing.T) {
 	if LeaseTokenEnv != "SPARKWING_LEASE_TOKEN" {
 		t.Fatalf("LeaseTokenEnv = %q", LeaseTokenEnv)

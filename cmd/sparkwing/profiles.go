@@ -1,7 +1,3 @@
-// `sparkwing configure profiles` subcommand. Manages ~/.config/sparkwing/profiles.yaml,
-// which is the SOLE source of connection info for every human-driven
-// client command (tokens, users, runs retry/cancel/prune/logs, gc,
-// fleet-worker, cluster-mode web).
 package main
 
 import (
@@ -46,8 +42,6 @@ func runProfiles(args []string) error {
 	}
 }
 
-// loadCfg is a thin wrapper that returns the config + the path it
-// came from, so helpers can save back to the same location.
 func loadCfg() (*profile.Config, string, error) {
 	path, err := profile.DefaultPath()
 	if err != nil {
@@ -91,10 +85,6 @@ func runProfilesAdd(args []string) error {
 	return nil
 }
 
-// profileIndex is one line of `configure profiles list`. The token is redacted
-// here and not anywhere downstream: a machine-readable listing is the shape most
-// likely to be piped into a log, and a secret that leaves the process once has
-// left it.
 type profileIndex struct {
 	Name       string `json:"name"`
 	Controller string `json:"controller,omitempty"`
@@ -120,9 +110,7 @@ func runProfilesList(args []string) error {
 	if err != nil {
 		return err
 	}
-	// A machine reading the listing gets an empty stream and exit 0: no
-	// profiles is an answer, and the advice belongs on stderr where it cannot
-	// be mistaken for a record.
+
 	if len(cfg.Profiles) == 0 {
 		fmt.Fprintln(os.Stderr, "no profiles configured")
 		fmt.Fprintf(os.Stderr, "expected at %s -- register one with `sparkwing configure profiles add --name NAME --controller URL`\n", path)
@@ -214,10 +202,6 @@ func runProfilesRemove(args []string) error {
 	return nil
 }
 
-// runProfilesSet updates one or more fields on an existing profile
-// without removing and re-adding. Unspecified flags leave the
-// existing value untouched. Use --token="" to explicitly clear the
-// token (empty-string flag, not omitted).
 func runProfilesSet(args []string) error {
 	fs := flag.NewFlagSet(cmdProfilesSet.Path, flag.ContinueOnError)
 	nameFlag := fs.String("name", "", "profile name to mutate")
@@ -292,8 +276,6 @@ func runProfilesDuplicate(args []string) error {
 	return nil
 }
 
-// redactToken shows a non-secret prefix only. Empty token prints
-// "(none)" so operators see unambiguously that auth is disabled.
 func redactToken(t string) string {
 	if t == "" {
 		return "(none)"

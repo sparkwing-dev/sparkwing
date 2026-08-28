@@ -107,9 +107,6 @@ func TestLogs_ReadRunConcatenates(t *testing.T) {
 	}
 }
 
-// TestLogs_PathTraversalRejected locks in the ID guard. Log
-// endpoints take IDs straight from the URL; anything that could
-// escape the root would be a serious bug.
 func TestLogs_PathTraversalRejected(t *testing.T) {
 	_, _, stop := newLogsServer(t)
 	defer stop()

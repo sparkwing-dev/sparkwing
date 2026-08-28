@@ -14,11 +14,6 @@ import (
 
 type spawnerOut struct{}
 
-// spawnerNode calls RunAndAwait with a tight timeout so the
-// spawn unblocks the test without needing a worker to actually
-// process the spawned trigger. Test asserts on the trigger row,
-// which is created synchronously inside pipelineAwaiter before the
-// poll-for-terminal loop runs.
 type spawnerNode struct{ sparkwing.Base }
 
 func (j *spawnerNode) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -39,8 +34,6 @@ func (spawnRetryParentPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sp
 	return nil
 }
 
-// gateCounter is reset per-test to keep the "fail first time" gate
-// independent across scenarios within the same process.
 var gateCounter struct {
 	mu sync.Mutex
 	n  int
@@ -70,10 +63,6 @@ func (earlyGate) run(ctx context.Context) error {
 	return nil
 }
 
-// earlyFailSpawnPipe puts a gate before the spawner so the first
-// run can fail before reaching the spawn point. The retry then
-// reaches the spawner for the first time -- there's no prior child
-// trigger to chain from, so the new spawn's retry_of must be empty.
 type earlyFailSpawnPipe struct{ sparkwing.Base }
 
 func (earlyFailSpawnPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -95,10 +84,6 @@ func init() {
 	register("spawn-retry-child", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &spawnRetryChildPipe{} })
 }
 
-// TestRun_NestedSpawnRetryOf_Chained: parent reaches spawner on the
-// first run, spawn times out, parent fails. On retry the spawner
-// re-runs (skip-passed only skips successes) and the new child
-// trigger's retry_of must point to the first run's child trigger.
 func TestRun_NestedSpawnRetryOf_Chained(t *testing.T) {
 	p := newPaths(t)
 	ctx := context.Background()
@@ -162,13 +147,6 @@ func TestRun_NestedSpawnRetryOf_Chained(t *testing.T) {
 	}
 }
 
-// TestRun_NestedSpawnRetryOf_NoPriorChild: parent fails BEFORE the
-// spawner runs (gate fails first time). On retry the gate succeeds
-// from rehydration... wait, no -- gate FAILED in the first run, so
-// skip-passed re-runs it. The per-process counter makes it succeed
-// on the retry, then the spawner runs for the first time. There's
-// no prior child trigger at "spawner" in p1, so the new child's
-// retry_of must be empty.
 func TestRun_NestedSpawnRetryOf_NoPriorChild(t *testing.T) {
 	resetGateCounter()
 	p := newPaths(t)

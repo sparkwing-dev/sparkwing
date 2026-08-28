@@ -31,241 +31,110 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// doctorRunOrphanGrace is how long a running run row must have gone without a
-// heartbeat before doctor treats it as orphaned. A live run heartbeats well
-// inside this window, so the grace keeps a briefly-busy run from being
-// finalized out from under itself.
 const doctorRunOrphanGrace = 2 * time.Minute
 
-// doctorRejectionPatternThreshold is how many malformed-request rejections
-// of one cause the daemon must have tallied in its outcome window before
-// doctor calls it a pattern worth surfacing. A lone rejection is noise; a
-// repeat is a standing misconfiguration or version skew.
 const doctorRejectionPatternThreshold = 3
 
-// DoctorReport is what a doctor sweep found and repaired, and the wire shape
-// of its -o json output.
 type DoctorReport struct {
-	// DryRun reports that nothing was changed; the counts are what would have
-	// been repaired.
 	DryRun bool `json:"dry_run"`
-	// PermissionRepairs names private-home paths whose POSIX permissions were
-	// tightened, or would be tightened during a dry run.
+
 	PermissionRepairs []fssecure.Change `json:"permission_repairs,omitempty"`
-	// PermissionAuditUnverified reports that this platform's access control
-	// cannot be verified through portable POSIX mode bits. Windows uses DACLs,
-	// so doctor refuses to present a false all-clear for local file access.
+
 	PermissionAuditUnverified bool `json:"permission_audit_unverified,omitempty"`
-	// OrphanedRuns are run ids that were marked running with no live process
-	// and no daemon lease, finalized as interrupted.
+
 	OrphanedRuns []string `json:"orphaned_runs,omitempty"`
-	// LegacyBoxSlotFilesRemoved counts lock files cleared from an idle legacy
-	// box-slot directory.
+
 	LegacyBoxSlotFilesRemoved int `json:"legacy_box_slot_files_removed"`
-	// LiveLegacyHolders are box-slot locks still held by an older-pinned
-	// pipeline binary admitting outside the daemon -- reported, never removed.
+
 	LiveLegacyHolders []DoctorLegacyHolder `json:"live_legacy_holders,omitempty"`
-	// DeadConcurrencyHolders and DeadConcurrencyWaiters count local-scope
-	// concurrency rows removed because their run has ended.
+
 	DeadConcurrencyHolders int `json:"dead_concurrency_holders"`
 	DeadConcurrencyWaiters int `json:"dead_concurrency_waiters"`
-	// DanglingRunDirs are run artifact directories removed because their run
-	// row no longer exists.
+
 	DanglingRunDirs []string `json:"dangling_run_dirs,omitempty"`
-	// AdmissionRejections are repeated malformed-request rejections the local
-	// admission daemon tallied in its outcome window -- a standing pattern,
-	// not a one-off. Reported with an explanation, never repaired.
+
 	AdmissionRejections []DoctorRejection `json:"admission_rejections,omitempty"`
-	// DaemonVersionSkew is set when the running binary and the live admission
-	// daemon are different builds -- a skew that does not always resolve by
-	// takeover and can leave the daemon rejecting a newer client's requests.
-	// Reported with an explanation, never repaired.
+
 	DaemonVersionSkew *DoctorVersionSkew `json:"daemon_version_skew,omitempty"`
-	// LockedOutRepos are registered repos whose SDK pin sits below the release
-	// that speaks to the resident daemon, so every gate they run is refused
-	// until the pin moves. This is the skew that blocks work: DaemonVersionSkew
-	// compares the CLI, which is not a party to a pipeline's handshake.
-	// Reported with the pin to raise, never repaired -- editing another repo's
-	// go.mod is not doctor's call.
+
 	LockedOutRepos []DoctorLockedOutRepo `json:"locked_out_repos,omitempty"`
-	// DaemonProtocolGap is set when the resident daemon speaks a wire protocol
-	// major newer than any this build's release table covers. This binary then
-	// cannot query that daemon at all, and cannot name the release that first
-	// spoke its major, so LockedOutRepos is measured against the daemon's own
-	// release rather than the lowest one that would do. Reported with the
-	// remedy -- update this CLI -- never repaired.
+
 	DaemonProtocolGap *DoctorProtocolGap `json:"daemon_protocol_gap,omitempty"`
-	// QuarantinedLedgers are admission state files the daemon moved aside
-	// because it could not restore them, serving with a fresh ledger instead.
-	// They are forensic copies: reported with an explanation, never removed.
+
 	QuarantinedLedgers []string `json:"quarantined_ledgers,omitempty"`
-	// PoisonedProfiles are capacity profiles whose contended-run demand floor
-	// prices every run at or above the machine's grantable ceiling, so the
-	// pipeline serializes the whole box until the floor decays or an operator
-	// resets the profile. Reported with the reset command, never repaired --
-	// discarding learned measurements is the operator's call.
+
 	PoisonedProfiles []DoctorPoisonedProfile `json:"poisoned_profiles,omitempty"`
-	// ShadowedHooks is set when the checkout doctor runs in has sparkwing
-	// hooks installed that git will not run, because core.hooksPath points at
-	// another directory -- a commit or push gate that is silently gone.
-	// Reported with the fix, never repaired: rewriting an operator's git
-	// config is not doctor's call.
+
 	ShadowedHooks *githooks.Shadow `json:"shadowed_hooks,omitempty"`
-	// UngatedRepos are the registered checkouts whose pipelines declare a
-	// commit or push hook that git runs nothing for -- shadowed by a
-	// core.hooksPath, or never installed. It answers for the whole registry
-	// rather than the checkout doctor was run from, so a repo registered
-	// after the last sweep reports itself instead of waiting to be noticed.
-	// Reported with the fix, never repaired: arming a repo runs its gate,
-	// and a gate that cannot run turns every commit there into a failure.
+
 	UngatedRepos []githooks.RepoGates `json:"ungated_repos,omitempty"`
-	// GatesSurveyed is how many registered checkouts the gate survey
-	// classified. It carries no omitempty and is rendered on the healthy path
-	// so a clean answer is stated rather than implied by silence.
-	//
-	// An empty UngatedRepos alone cannot be read as a gated fleet: a build
-	// that never ran the survey omits the field entirely, and a reader looking
-	// for problems finds none either way. That is the false all-clear this
-	// whole report exists to refuse -- a surface that cannot answer must not
-	// look like one answering "fine" -- so the count is what says the question
-	// was asked, and zero surveyed says it was not.
+
 	GatesSurveyed int `json:"gates_surveyed"`
-	// GatesSurveyError is why the gate survey could not run at all, most
-	// often a repo registry that would not parse. It is what the report says
-	// instead of a zero UngatedRepos count, because "no repo is ungated" and
-	// "I could not read the list of repos" are opposite answers that an
-	// empty list renders identically.
-	//
-	// GatesSurveyed stays zero alongside it. The count says the question was
-	// asked; this field says why the answer is missing, and a reader needs
-	// both to tell an unregistered machine from an unreadable one.
+
 	GatesSurveyError string `json:"gates_survey_error,omitempty"`
-	// MachineBudget is set when the resident admission daemon runs under a
-	// machine budget -- a cap on the capacity it admits into, OS-level
-	// enforcement, or `ignore-external`, which makes it admit against total
-	// capacity and disregard measured non-sparkwing load.
-	//
-	// It is a setting, not a fault, so it never makes a sweep unclean. It is
-	// reported because the daemon is spawned on demand by whichever gate
-	// runs first: the budget in force belongs to whatever that process's
-	// environment or config said, which is often not what the person now
-	// looking at a slow machine believes is set. Reported with the setting
-	// that produced it, never changed -- an operator's cap is theirs.
+
 	MachineBudget *DoctorMachineBudget `json:"machine_budget,omitempty"`
-	// StrayDaemons are admission daemons serving other sparkwing homes that
-	// report a version no released build carries -- scratch binaries left
-	// running, which look like the machine's resident daemon in a process
-	// list. Reported with an explanation, never stopped: doctor does not end
-	// processes it does not own.
+
 	StrayDaemons []DoctorStrayDaemon `json:"stray_daemons,omitempty"`
-	// InstallConflict is set when this machine has more than one sparkwing
-	// binary reachable on a search path, so which one a caller gets depends
-	// on whose PATH resolved it -- an interactive shell and a launchd job
-	// order theirs differently and can land on different builds. Reported
-	// with the remedy, never repaired: doctor removes state whose owner is
-	// provably gone, and a second binary is a file somebody installed on
-	// purpose, not a corpse. Retiring one is the operator's call.
+
 	InstallConflict *DoctorInstallConflict `json:"install_conflict,omitempty"`
-	// Daemon is what the sweep learned about this home's admission daemon. It
-	// carries no omitempty and is rendered on every path, because the whole
-	// point is that "the daemon is healthy" and "I never reached the daemon"
-	// stop looking alike. Every daemon-dependent check above -- the rejection
-	// pattern, the version skew, the lockouts -- can only run when this says
-	// the daemon answered, so their emptiness means nothing without it.
+
 	Daemon DoctorDaemon `json:"daemon"`
 }
 
-// DoctorDaemon is the sweep's answer about this home's admission daemon: was
-// it reached, and if so what is it.
 type DoctorDaemon struct {
-	// Reachable reports that the daemon answered a handshake. False covers
-	// both an absent daemon and one that could not be reached, which State
-	// tells apart.
 	Reachable bool `json:"reachable"`
-	// State is one of [ReachServing], [ReachAbsent], or [ReachUnreachable].
+
 	State string `json:"state"`
-	// Socket is the address the sweep looked at.
+
 	Socket string `json:"socket,omitempty"`
-	// Version is the daemon's reported build. Empty unless it answered.
+
 	Version string `json:"version,omitempty"`
-	// ProtocolMajor is the newest wire major it speaks. Zero unless it
-	// answered.
+
 	ProtocolMajor int `json:"protocol_major,omitempty"`
-	// Detail explains a state the reader has to act on: why the socket could
-	// not be reached, or that an absent daemon is the ordinary idle state.
+
 	Detail string `json:"detail,omitempty"`
 }
 
-// Blind reports that the sweep could not determine the daemon's state, so
-// every daemon-dependent finding in the report is unanswered rather than
-// clean. An absent daemon is not blind: nothing listening is a fact.
 func (d DoctorDaemon) Blind() bool { return d.State == ReachUnreachable }
 
-// DoctorInstallConflict names every other sparkwing binary the sweep
-// found on a search path, so a machine where the same command can be
-// two different builds stops reading as healthy. There is no verdict
-// about which install is the right one: each install keeps its own
-// version memory, and which copy a process runs is decided by that
-// process's PATH, which this sweep cannot see.
 type DoctorInstallConflict struct {
-	// Self is the running binary's own resolved path -- the one install
-	// the reader provably has in hand.
 	Self string `json:"self"`
-	// Competing are the other reachable installs, newest-modified first.
+
 	Competing []DoctorInstallCopy `json:"competing"`
 }
 
-// DoctorInstallCopy is one competing sparkwing binary.
 type DoctorInstallCopy struct {
-	// Path is where it was found; Resolved is that path with symlinks
-	// followed, present only when the two differ.
 	Path     string `json:"path"`
 	Resolved string `json:"resolved,omitempty"`
-	// Modified is its file modification time in RFC3339. It is the
-	// sweep's only evidence about which copy is stale, and it is a weak
-	// one -- doctor will not execute an unknown binary to ask its
-	// version -- so it is reported for a human to read, never compared
-	// to decide which install wins.
+
 	Modified string `json:"modified,omitempty"`
 }
 
-// DoctorMachineBudget is the non-default machine budget the resident
-// admission daemon is running under, with the setting it came from.
 type DoctorMachineBudget struct {
-	// Source names which kind of setting produced the budget: "flag",
-	// "env", "config", or "unknown".
 	Source string `json:"source"`
-	// Origin is the exact setting -- the flag, the environment variable,
-	// or the config file path.
+
 	Origin string `json:"origin,omitempty"`
-	// Raw is the budget setting string as the operator wrote it.
+
 	Raw string `json:"raw,omitempty"`
-	// Cores and MachineCores are the budgeted core cap and the machine's
-	// full measured cores. Equal when the budget caps no cores.
+
 	Cores        float64 `json:"cores,omitempty"`
 	MachineCores float64 `json:"machine_cores,omitempty"`
-	// MemoryBytes and MachineMemoryBytes are the same for memory.
+
 	MemoryBytes        int64 `json:"memory_bytes,omitempty"`
 	MachineMemoryBytes int64 `json:"machine_memory_bytes,omitempty"`
-	// Enforce reports OS-level hardening of the cap.
+
 	Enforce bool `json:"enforce,omitempty"`
-	// IgnoreExternal reports that admission is disregarding measured
-	// non-sparkwing load.
+
 	IgnoreExternal bool `json:"ignore_external,omitempty"`
 }
 
-// DoctorStrayDaemon is one live admission daemon serving another sparkwing
-// home whose reported version marks it as a scratch build.
 type DoctorStrayDaemon struct {
-	// Socket is the address the daemon answered on.
 	Socket string `json:"socket"`
-	// Version is the version it reported for its own build.
+
 	Version string `json:"version"`
 }
 
-// DoctorPoisonedProfile is one contention-poisoned capacity profile in the
-// report: the stored profile key, the floor and the charge it prices, and
-// the grantable ceiling that charge meets or exceeds.
 type DoctorPoisonedProfile struct {
 	Pipeline       string  `json:"pipeline"`
 	FloorCores     float64 `json:"floor_cores"`
@@ -273,90 +142,43 @@ type DoctorPoisonedProfile struct {
 	GrantableCores float64 `json:"grantable_cores"`
 }
 
-// DoctorRejection is one repeated malformed-request rejection cause in the
-// report: the stable cause label the daemon tallied and how many times it
-// fired in the window.
 type DoctorRejection struct {
 	Cause string `json:"cause"`
 	Count int    `json:"count"`
 }
 
-// DoctorVersionSkew names a mismatch between the running binary and the live
-// admission daemon it talks to.
 type DoctorVersionSkew struct {
-	// Self is the running binary's version.
 	Self string `json:"self"`
-	// Daemon is the live daemon's reported version.
+
 	Daemon string `json:"daemon"`
 }
 
-// DoctorLockedOutRepo is one registered repo whose pinned SDK sits below the
-// release that speaks to the resident daemon, so the daemon refuses it and no
-// takeover can resolve that, because takeover runs from the client side.
 type DoctorLockedOutRepo struct {
-	// Name is the checkout directory's base name.
 	Name string `json:"name"`
-	// Path is the registered checkout root whose .sparkwing/go.mod carries
-	// Pin. A linked worktree gets its own row rather than folding into its
-	// primary: the pipeline binary is built from the .sparkwing of whichever
-	// checkout runs the gate, and a worktree's pin can differ from the
-	// primary's, so canonicalizing here would report a pin nothing runs and
-	// hide the one that is refused.
+
 	Path string `json:"path"`
-	// Worktree marks a row whose Path is a linked worktree, so a Name that
-	// reads as a branch rather than a repo is not a surprise.
+
 	Worktree bool `json:"worktree,omitempty"`
-	// Pin is the SDK version in the checkout's .sparkwing/go.mod.
+
 	Pin string `json:"pin"`
-	// RaiseTo is the SDK release this pin has to reach to speak to the
-	// resident daemon: the lowest release at the daemon's protocol major,
-	// or -- when this build's table ends below that major, which
-	// [DoctorReport.DaemonProtocolGap] then reports -- the daemon's own
-	// release, which speaks it but need not be the lowest that does.
+
 	RaiseTo string `json:"raise_to"`
 }
 
-// DoctorProtocolGap names a resident daemon speaking a wire protocol major
-// this build does not know, which is both why this CLI cannot query it and
-// why a lockout diagnosis against it can only give a floor.
 type DoctorProtocolGap struct {
-	// Self is the newest protocol major this build's release table covers,
-	// which is the major this build speaks.
 	Self int `json:"self"`
-	// Daemon is the protocol major the daemon reported in its handshake ack.
+
 	Daemon int `json:"daemon"`
-	// DaemonVersion is the release the daemon reports for its own build.
+
 	DaemonVersion string `json:"daemon_version"`
 }
 
-// DoctorLegacyHolder is one live legacy box-slot holder in the report.
 type DoctorLegacyHolder struct {
 	PID   int    `json:"pid"`
 	RunID string `json:"run_id,omitempty"`
 	Lock  string `json:"lock"`
 }
 
-// Clean reports whether the sweep found nothing to repair and no legacy binary
-// admitting outside the daemon. It answers for the home that was swept, so
-// [DoctorReport.StrayDaemons] -- other homes' processes, which this home's
-// state says nothing about -- deliberately does not count: a clean home
-// stays clean whatever else is running on the machine, and the stray is
-// reported alongside rather than folded in.
-//
-// [DoctorReport.LockedOutRepos] counts because the refusing daemon belongs to
-// this home: a pin that sits below what this home's daemon speaks is a defect
-// in this home's configuration, not a property of some other home.
-//
-// [DoctorReport.UngatedRepos] is excluded because the question of which
-// repositories git-gate their pipelines is answered by the machine's git
-// configuration, not by this home's daemon. It is rendered on the healthy path
-// too, so an ungated repo is still reported by a run that finds nothing to
-// repair.
-//
-// A daemon the sweep could not reach counts, and it is the one entry here that
-// is not a finding but the absence of one: with the daemon unreachable, four
-// of the checks below never ran, so "nothing to repair" would be a verdict
-// this run did not earn. A green that means nothing is worse than a red.
 func (r DoctorReport) Clean() bool {
 	return !r.Daemon.Blind() &&
 		len(r.PermissionRepairs) == 0 &&
@@ -377,15 +199,6 @@ func (r DoctorReport) Clean() bool {
 		r.ShadowedHooks == nil
 }
 
-// Diagnose runs every doctor check against the sparkwing home and repairs what
-// it safely can (unless dryRun). It never returns early on a single check's
-// failure so a healthy check still reports even if another errors. selfVersion
-// is the running binary's own version, compared against the live daemon's to
-// flag a version skew; pass "" to skip that check.
-//
-// The permission audit runs before state is opened, so it can report legacy
-// database modes. The daemon probe follows before any daemon-dependent check;
-// whether it answered decides what those checks may conclude.
 func Diagnose(ctx context.Context, p paths.Paths, home, selfVersion string, dryRun bool) (DoctorReport, error) {
 	report := DoctorReport{DryRun: dryRun}
 	if err := validateDoctorRoot(p, home); err != nil {
@@ -680,9 +493,6 @@ func validateDoctorMutationPaths(p paths.Paths, expectedRoot os.FileInfo, expect
 	return nil
 }
 
-// recognizedSparkwingHome keeps doctor's recursive chmod away from arbitrary
-// directories. It returns the root identity that permission repair must still
-// observe after recognition.
 func recognizedSparkwingHome(p paths.Paths) (os.FileInfo, bool, error) {
 	rootInfo, err := os.Lstat(p.Root)
 	if err != nil {
@@ -787,15 +597,6 @@ func sqliteHasTables(path string, names ...string) bool {
 	return true
 }
 
-// diagnoseInstallConflict scans the machine for sparkwing binaries
-// other than the one running.
-//
-// It is skipped under a test binary. A `go test` process is not an
-// installed sparkwing, so every copy on the developer's real PATH would
-// answer as a rival to it and every doctor assertion on a laptop with a
-// normal install would fail on a conflict the suite invented. The
-// classification itself is exercised through [InstallConflict], which
-// takes the machine as an argument instead of reading it.
 func diagnoseInstallConflict(report *DoctorReport) {
 	if paths.UnderTest() {
 		return
@@ -811,11 +612,6 @@ func diagnoseInstallConflict(report *DoctorReport) {
 	report.InstallConflict = InstallConflict(self, installsite.SearchDirs(os.Getenv, userHome))
 }
 
-// InstallConflict reports the sparkwing binaries in dirs that are not
-// the running one, and returns nil when there is nothing to say -- one
-// install, or none the scan could see. Read-only: the scan decides
-// nothing about which install should win, it just refuses to let a
-// split machine read as clean.
 func InstallConflict(self string, dirs []string) *DoctorInstallConflict {
 	competing := installsite.Competing(installsite.Scan(dirs), self)
 	if len(competing) == 0 {
@@ -835,21 +631,8 @@ func InstallConflict(self string, dirs []string) *DoctorInstallConflict {
 	return out
 }
 
-// scratchModuleVersion is the version a binary reports for the sparkwing
-// SDK when its module requires the placeholder and points a replace
-// directive at a local checkout. No release carries it and no ordinary
-// project builds with it, so a daemon reporting it came from a scratch
-// module -- in practice one a test scaffolded under a temp directory,
-// ran, and left behind.
 const scratchModuleVersion = "v0.0.0"
 
-// diagnoseStrayDaemons probes this user's daemons for other sparkwing
-// homes and reports any built from a scratch module. Such a daemon is
-// invisible from this home, which reaches only its own socket, yet it
-// stands beside the resident daemon in any process listing and is easily
-// read as production state -- its log and its bind failures then explain
-// outages it has nothing to do with. Read-only: doctor names it and
-// leaves stopping it to the operator, who owns that process.
 func diagnoseStrayDaemons(ctx context.Context, home string, report *DoctorReport) {
 	socks, err := wingd.PeerSockets(home)
 	if err != nil {
@@ -865,21 +648,10 @@ func diagnoseStrayDaemons(ctx context.Context, home string, report *DoctorReport
 	}
 }
 
-// scratchBuild reports whether a daemon's version marks it as a scratch
-// build. A daemon on a release or a source build of the SDK is somebody's
-// deliberate second home -- an isolated one is a documented remedy here --
-// so only the placeholder counts.
 func scratchBuild(version string) bool {
 	return strings.TrimSpace(version) == scratchModuleVersion
 }
 
-// diagnosePoisonedProfiles scans the stored capacity rollups for profiles
-// whose contended-run demand floor prices runs at or above the machine's
-// grantable ceiling -- contention poisoning that otherwise surfaces only as
-// a per-run warning while every run silently holds the whole box. Read-only:
-// the remedy discards learned measurements, so it is named, not applied. The
-// ceiling comes from the live daemon; with none running, the raw core count
-// stands in (a higher bar, so absence of the daemon never over-flags).
 func diagnosePoisonedProfiles(ctx context.Context, st *store.Store, queueState wingwire.QueueState, queueRead bool, report *DoctorReport) error {
 	profiles, err := st.ListPipelineProfiles(ctx, "")
 	if err != nil {
@@ -900,9 +672,6 @@ func diagnosePoisonedProfiles(ctx context.Context, st *store.Store, queueState w
 	return nil
 }
 
-// grantableCores is the largest CPU charge the local daemon grants a single
-// run on an idle box (capacity minus its reserve), else the machine's core
-// count when no daemon answers.
 func grantableCores(queueState wingwire.QueueState, queueRead bool) float64 {
 	if queueRead {
 		for _, r := range queueState.Resources {
@@ -914,10 +683,6 @@ func grantableCores(queueState wingwire.QueueState, queueRead bool) float64 {
 	return float64(runtime.NumCPU())
 }
 
-// diagnoseQuarantinedLedgers reports admission state files the daemon
-// quarantined after failing to restore them. They are evidence of a past
-// bad shutdown or ledger defect, kept for inspection; doctor names them
-// so they are found, and leaves removal to the operator.
 func diagnoseQuarantinedLedgers(home string, report *DoctorReport) {
 	dir, err := wingd.StateDir(home)
 	if err != nil {
@@ -930,32 +695,6 @@ func diagnoseQuarantinedLedgers(home string, report *DoctorReport) {
 	report.QuarantinedLedgers = matches
 }
 
-// diagnoseDaemonHealth reads the resident daemon and reports the standing
-// problems a fresh user on the happy path otherwise only sees as an opaque
-// per-run failure: a repeated malformed-request rejection pattern (from the
-// outcome window), a version skew between this binary and the daemon
-// (takeover resolves a skew only when the client build supersedes the
-// daemon's; otherwise the daemon stays and may reject requests it cannot
-// honor), and the checkouts the daemon's protocol major locks out. It is
-// read-only; a daemon that did not answer yields nothing, which is why
-// [probeDaemon]'s verdict is reported separately and unconditionally -- these
-// findings being empty says nothing on its own.
-//
-// Who the daemon is comes from the handshake ack, not from the queue state:
-// a daemon speaking a protocol major this build does not refuses the queue
-// read outright, and that refusal is the very incident the lockout scan
-// exists to explain. A probe reads the ack before asking the daemon for
-// anything, so it still learns which daemon is resident and what it speaks.
-// The queue state is then read separately, for the checks that need it.
-// probeDaemon answers what the resident daemon is, or why the sweep could not
-// find out. It is the report's one unconditional daemon finding: it returns a
-// filled-in state on every path, including the paths where the older code
-// simply returned and left the reader with no daemon fields at all.
-//
-// Only two outcomes count as absence -- a resolved socket with nothing
-// listening. Anything else is a socket that would not answer: blocked, wedged,
-// or speaking something this build cannot handshake. That daemon may well be
-// running and holding leases, so calling it absent is the false all-clear.
 func probeDaemon(ctx context.Context, home string) DoctorDaemon {
 	sock, err := wingd.SocketPath(home)
 	if err != nil {
@@ -1010,10 +749,6 @@ func diagnoseDaemonHealth(selfVersion string, queueState wingwire.QueueState, qu
 	}
 }
 
-// machineBudget lifts a non-default budget out of the daemon's queue
-// state for the doctor report. Nil when no budget is in force, and nil
-// when the daemon did not report its budget at all: doctor names settings
-// it can see, and says nothing about ones it cannot.
 func machineBudget(qs wingwire.QueueState) *DoctorMachineBudget {
 	b := qs.Budget
 	if b == nil || b.Source == "" || b.Source == string(wingwire.BudgetSourceUnset) {
@@ -1032,41 +767,6 @@ func machineBudget(qs wingwire.QueueState) *DoctorMachineBudget {
 	}
 }
 
-// diagnoseLockedOutRepos names the registered repos whose pinned SDK sits
-// below the release that speaks to the resident daemon, so it refuses them.
-//
-// This is the skew that actually stops work, and it is invisible from inside
-// the repo that hits it: the daemon is machine-wide and the first run needing
-// one brings it up, so a single current repo can lock out every older one and
-// the error surfaces in the victim rather than the cause. Read-only -- the
-// remedy edits another repo's go.mod, which is the operator's call.
-//
-// daemonMajor is what the daemon said in its handshake ack, never what its
-// version implies: a table can place a release only below its newest row, so
-// reading a major off a version quietly reports a floor and calls a daemon
-// past that row current. Each pin is then placed by one comparison against
-// raiseTo, the lowest release known to speak daemonMajor -- the table's
-// majors ascend with their floors, so a pin below that release speaks an
-// older major and a pin at or above it does not.
-//
-// When the table ends below daemonMajor this build cannot name that release:
-// which release first spoke a major was decided after this build was cut. The
-// daemon is running one that speaks it, so its own version stands in as a
-// target that provably works, and the gap is reported alongside
-// ([DoctorReport.DaemonProtocolGap]) so a floor is never read as exact. The
-// set of repos then errs wide rather than silent: a pin between the true
-// floor and the daemon's release is named although it may already be high
-// enough, which costs an operator a pin bump they did not need, against a
-// silence that costs them the whole diagnosis. A pin that will not parse is
-// not evidence against anyone; neither is a daemon version that will not parse,
-// names a scratch build, or is a prerelease -- a prerelease sorts below the
-// release it names, which would clear pins at that release rather than flag
-// them, and a prerelease cannot be written into go.mod as a target. Repos
-// whose SDK is supplied by a replace directive or a go.work `use` are
-// exonerated last, after the pin has already been found wanting -- those
-// build the pipeline from a local checkout, so the declared pin describes
-// nothing that runs and naming it would send an operator to edit a line that
-// changes no behavior.
 func diagnoseLockedOutRepos(daemonMajor int, daemonVersion string, floors wingwire.ProtocolFloors, report *DoctorReport) {
 	newest, covered := floors.Newest()
 	if !covered || daemonMajor <= 0 {
@@ -1113,9 +813,6 @@ func diagnoseLockedOutRepos(daemonMajor int, daemonVersion string, floors wingwi
 	})
 }
 
-// versionSkewed reports whether the running binary and the live daemon are
-// provably different builds. Empty or unknown versions on either side are not
-// a provable skew, so they never flag.
 func versionSkewed(self, daemon string) bool {
 	if self == "" || daemon == "" || self == "(unknown)" || daemon == "(unknown)" {
 		return false
@@ -1123,8 +820,6 @@ func versionSkewed(self, daemon string) bool {
 	return self != daemon
 }
 
-// rejectionExplanation renders the human cause and recommended action for a
-// repeated admission-rejection cause.
 func rejectionExplanation(cause string) string {
 	switch cause {
 	case "cost_source":
@@ -1136,9 +831,6 @@ func rejectionExplanation(cause string) string {
 	}
 }
 
-// liveDaemonRuns returns the set of run ids the local admission daemon is
-// holding or queueing, so orphan detection never finalizes a run the daemon
-// still tracks. An absent daemon means no live leases, so the set is empty.
 func liveDaemonRuns(queueState wingwire.QueueState, queueRead bool) map[string]struct{} {
 	live := map[string]struct{}{}
 	if !queueRead {
@@ -1167,14 +859,6 @@ func probeDaemonQueue(ctx context.Context, report *DoctorReport) (wingwire.Queue
 	return wingwire.QueueState{}, false
 }
 
-// diagnoseOrphanRuns finalizes run rows still marked running whose process is
-// gone and which the daemon does not know about.
-//
-// blind skips the whole check. An unreachable daemon yields an empty live-run
-// set, which is indistinguishable from a daemon holding no leases, and acting
-// on it would cancel the very runs the daemon is holding right now. Repairing
-// on evidence a blind sweep cannot have is worse than leaving the rows alone,
-// so the check reports nothing and the daemon section says why.
 func diagnoseOrphanRuns(ctx context.Context, st *store.Store, daemonLive, legacyRuns map[string]struct{}, blind, dryRun bool, report *DoctorReport) error {
 	if blind {
 		return nil
@@ -1323,9 +1007,6 @@ func diagnoseDanglingRunDirs(ctx context.Context, st *store.Store, runsRoot *os.
 	return nil
 }
 
-// RenderDoctor writes r in the requested format: "json", "plain", or pretty.
-// legacyLine, when non-empty, is the legacy-coexistence warning appended to
-// the pretty view (the caller owns the legacy-count phrasing).
 func RenderDoctor(w io.Writer, r DoctorReport, format, legacyLine string) error {
 	switch format {
 	case "json":
@@ -1491,13 +1172,6 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 	return nil
 }
 
-// renderDaemonSection writes what the sweep learned about the admission
-// daemon, on every path and in every state.
-//
-// It runs on the healthy path too, and that is the point of the whole section:
-// a doctor run against a daemon it never reached used to print the same four
-// zeros a healthy machine prints, and an operator reading those zeros stops
-// looking. Three states, three different lines, none of them silence.
 func renderDaemonSection(w io.Writer, r DoctorReport) {
 	d := r.Daemon
 	switch d.State {
@@ -1518,13 +1192,6 @@ func renderDaemonSection(w io.Writer, r DoctorReport) {
 	}
 }
 
-// renderMachineBudget states the machine budget the resident daemon runs
-// under and the setting that put it there. It is a note, not a warning:
-// a cap an operator meant to set is not a fault. `ignore-external` gets
-// its own line, because a machine admitting against total capacity while
-// real external load goes unsubtracted is a state worth finding without
-// already suspecting it -- it is exactly what a slow, over-admitted
-// machine looks like from the inside.
 func renderMachineBudget(w io.Writer, r DoctorReport) {
 	b := r.MachineBudget
 	if b == nil {
@@ -1557,17 +1224,6 @@ func renderMachineBudget(w io.Writer, r DoctorReport) {
 	}
 }
 
-// renderLockedOutRepos writes the checkouts the resident daemon refuses, each
-// with the release its own pin has to reach, and then the protocol gap when
-// this build is the older side of the handshake as well.
-//
-// Which lever moves is the whole point of the warning, and it is not the same
-// lever in both states. With the daemon's protocol known, the CLI is a
-// bystander to the refusal and upgrading it changes nothing. With the daemon
-// past this build's table, the CLI is refused too and carries the stale table
-// the targets were read from, so updating it is exactly what sharpens the
-// answer -- printing the bystander sentence there would argue against the one
-// action that helps.
 func renderLockedOutRepos(w io.Writer, r DoctorReport) {
 	if n := len(r.LockedOutRepos); n > 0 {
 		fmt.Fprintf(w, "\nwarning: %d checkout(s) cannot gate against the resident admission daemon -- their pinned SDK is below the release that speaks to it\n", n)
@@ -1602,13 +1258,6 @@ func renderLockedOutRepos(w io.Writer, r DoctorReport) {
 		g.Daemon)
 }
 
-// renderUngatedRepos writes the fleet-wide ungated warning, skipping the
-// checkout ShadowedHooks already described in full so one repository is not
-// reported twice under two headings.
-//
-// A survey that could not run at all comes first and replaces the whole gate
-// section, because every count under it is zero for the same reason and
-// printing them would offer a clean fleet as the finding.
 func renderUngatedRepos(w io.Writer, r DoctorReport) {
 	if r.GatesSurveyError != "" {
 		fmt.Fprintf(w, "\nwarning: the gate survey could not run, so no repo here was checked for a gate\n  %s\n"+
@@ -1638,10 +1287,6 @@ func renderUngatedRepos(w io.Writer, r DoctorReport) {
 	}
 }
 
-// renderGateSurveyClean states that the survey ran and found every declared
-// gate firing. Saying nothing would make a clean fleet look exactly like a
-// build too old to survey one, and the whole value of this report is that the
-// two are told apart.
 func renderGateSurveyClean(w io.Writer, r DoctorReport) {
 	if r.GatesSurveyed == 0 {
 		return
@@ -1649,10 +1294,6 @@ func renderGateSurveyClean(w io.Writer, r DoctorReport) {
 	fmt.Fprintf(w, "gates: %d registered repo(s) surveyed, every declared gate fires\n", r.GatesSurveyed)
 }
 
-// renderInstallConflict explains the competing installs and how to get
-// back to one. Each Unix copy gets an exact guarded rename and undo;
-// Windows gets manual shell-specific guidance. Doctor never runs either,
-// because it cannot know which binary the operator meant to keep.
 func renderInstallConflict(w io.Writer, r DoctorReport) {
 	c := r.InstallConflict
 	if c == nil {
@@ -1678,9 +1319,6 @@ func renderInstallConflict(w io.Writer, r DoctorReport) {
 	fmt.Fprintf(w, "  to resolve: keep one and retire the rest with the guidance above, or point each job at the absolute path of the copy you mean\n")
 }
 
-// renderStrayDaemons writes the stray-daemon warnings. It runs on both the
-// healthy and the unhealthy path, since a stray belongs to no home and a
-// home with nothing to repair is exactly where one goes unnoticed.
 func renderStrayDaemons(w io.Writer, r DoctorReport) {
 	for _, d := range r.StrayDaemons {
 		fmt.Fprintf(w, "\nwarning: an admission daemon for another sparkwing home reports version %s, which no release carries\n"+

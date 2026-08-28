@@ -1,8 +1,3 @@
-// Package repos manages the laptop's registry of sparkwing-bearing
-// checkouts. The cluster's controller knows which workers are wired
-// to which repos via the agent token; locally, there's no such
-// authority, so we keep an explicit list at
-// ~/.config/sparkwing/repos.yaml plus optional fallback search paths.
 package repos
 
 import (
@@ -18,36 +13,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/paths"
 )
 
-// Entry is one registered repo. Path is the only required field;
-// future fields (e.g. labels, default-branch override) land here
-// without breaking the YAML shape.
 type Entry struct {
 	Path string `yaml:"path"`
 }
 
-// Config is the on-disk repos.yaml shape.
 type Config struct {
-	// Repos are the explicitly registered checkouts. Order is
-	// preserved -- first match wins in resolution, so users can
-	// promote a primary checkout above feature worktrees they
-	// also registered explicitly.
 	Repos []*Entry `yaml:"repos,omitempty"`
 
-	// FallbackPaths are directories scanned for `*/.sparkwing/`
-	// subdirectories when nothing in Repos matches a pipeline
-	// lookup. Empty by default; a power user adding `~/code` here
-	// gets the legacy "sibling checkout convention" back as an
-	// opt-in.
 	FallbackPaths []string `yaml:"fallback_paths,omitempty"`
 }
 
-// DefaultPath returns the resolved repos.yaml path. Honors
-// SPARKWING_REPOS > XDG_CONFIG_HOME > $HOME, mirroring profile.go.
-//
-// A test binary that set neither override gets a disposable sandbox
-// instead of the developer's registry. This file is the laptop's fleet
-// registry, so a fixture that writes it does not just dirty a scratch
-// file: it decides what `hooks survey` and every --fleet sweep can see.
 func DefaultPath() (string, error) {
 	if v := os.Getenv("SPARKWING_REPOS"); v != "" {
 		return v, nil
@@ -65,9 +40,6 @@ func DefaultPath() (string, error) {
 	return filepath.Join(home, ".config", "sparkwing", "repos.yaml"), nil
 }
 
-// Load reads repos.yaml at path. Missing file returns an empty
-// Config without error -- a fresh laptop hasn't registered anything
-// yet, and that's a normal state, not an error.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -83,33 +55,6 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-// Save writes cfg to path atomically: marshal, write a private temp
-// file, fsync it, rename over the target. Creates parent dirs as needed.
-// 0644 because repos.yaml is just pointers to checkouts -- no secrets,
-// fine for casual sharing.
-//
-// The temp file gets a unique name from os.CreateTemp. It used to be the
-// fixed path+".tmp", which made the rename atomic against a crash but
-// not against a second writer. Concurrent registration is normal here,
-// because every `sparkwing run` auto-registers on startup and the
-// orchestrator runs pipeline jobs in parallel, and with one shared
-// staging name those writers collide: each opens it with O_TRUNC, and
-// the first rename moves it out from under everyone else, so the losers
-// fail with ENOENT. main.go discards AutoRegister's error, so that loss
-// was silent. The regression test beside this file reproduces it against
-// the old code on every run.
-//
-// Two writers sharing a descriptor target can strand the tail of a longer
-// write past the end of a shorter one,
-// which is the shape of the damage found (a stray "e" after the
-// fallback_paths key, where the file's last entry is "- ~/code"), but a
-// direct reproduction of the byte interleaving did not fire on APFS,
-// where each write lands in one syscall. The unique name removes the
-// whole class either way.
-//
-// The fsync is what makes the rename mean anything after a power loss:
-// without it the directory entry can land while the contents are still
-// in the page cache.
 func Save(path string, cfg *Config) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -146,16 +91,6 @@ func Save(path string, cfg *Config) error {
 	return nil
 }
 
-// AutoRegister records absPath in repos.yaml if it isn't already
-// there. Idempotent. Skips worktree checkouts (.git is a regular
-// file, not a directory) unless SPARKWING_AUTO_REGISTER_WORKTREES=1
-// is set -- a feature-branch worktree shouldn't silently shadow
-// main's pipelines for cross-repo lookups, but power users who
-// orchestrate from worktrees can opt in.
-//
-// It also skips checkouts under the system temp directory, because a
-// scaffolded repository there is deleted minutes later and leaves an entry
-// that can never resolve again.
 func AutoRegister(absPath string) error {
 	if os.Getenv("SPARKWING_NO_AUTO_REGISTER") == "1" {
 		return nil
@@ -195,9 +130,6 @@ func AutoRegister(absPath string) error {
 	return Save(cfgPath, cfg)
 }
 
-// Add registers absPath explicitly. Unlike AutoRegister, this
-// surfaces errors directly and does NOT skip worktrees -- the user
-// asked for it. Idempotent.
 func Add(absPath string) error {
 	abs, err := filepath.Abs(absPath)
 	if err != nil {
@@ -223,10 +155,6 @@ func Add(absPath string) error {
 	return Save(cfgPath, cfg)
 }
 
-// Remove drops every entry whose path equals (or whose basename
-// equals) match. Returns the number of removed entries; zero is
-// not an error. Lets the operator say `sparkwing pipeline remove
-// sparkwing` without typing the full path.
 func Remove(match string) (int, error) {
 	cfgPath, err := DefaultPath()
 	if err != nil {
@@ -253,10 +181,6 @@ func Remove(match string) (int, error) {
 	return removed, Save(cfgPath, cfg)
 }
 
-// Prune drops every entry whose path no longer points at a
-// .sparkwing/-bearing checkout (deleted, renamed, .sparkwing/ dir
-// removed). Returns the dropped paths. Useful as a one-shot tidy
-// when the laptop's checkout layout has shifted.
 func Prune() ([]string, error) {
 	cfgPath, err := DefaultPath()
 	if err != nil {
@@ -282,10 +206,6 @@ func Prune() ([]string, error) {
 	return dropped, Save(cfgPath, cfg)
 }
 
-// List returns the current registry, with each entry's status
-// classified for display: "ok", "stale" (path missing or has no
-// .sparkwing/), "worktree" (registered explicitly via Add). Used
-// by the `sparkwing pipeline list` CLI.
 type ListEntry struct {
 	Path     string
 	Status   string
@@ -318,8 +238,6 @@ func List() ([]ListEntry, error) {
 	return out, nil
 }
 
-// FallbackDirs returns the registered fallback search paths. Used
-// by the resolver when an explicit-repos lookup misses.
 func FallbackDirs() ([]string, error) {
 	cfgPath, err := DefaultPath()
 	if err != nil {
@@ -337,11 +255,6 @@ func FallbackDirs() ([]string, error) {
 	return out, nil
 }
 
-// CandidatePaths returns every path the resolver should consider for
-// a pipeline lookup: explicit repos first (in declaration order),
-// then a deduped scan of fallback_paths/*/.sparkwing/. Stale paths
-// (missing .sparkwing/) are filtered out. Worktrees stay in the list
-// but are tagged so the resolver can deprioritize them on tie.
 type Candidate struct {
 	Path     string
 	Worktree bool
@@ -401,9 +314,6 @@ const (
 	repoKindWorktree
 )
 
-// repoKind classifies a path's git checkout flavor: regular (own
-// .git/ dir), worktree (.git is a file pointer to the parent's
-// .git/worktrees/<name>/), or missing.
 func repoKind(absPath string) (repoKindEnum, error) {
 	if absPath == "" {
 		return repoKindMissing, errors.New("empty path")
@@ -422,9 +332,6 @@ func repoKind(absPath string) (repoKindEnum, error) {
 	return repoKindMissing, fmt.Errorf("%s/.git: unexpected mode %v", absPath, fi.Mode())
 }
 
-// hasSparkwingDir is a cheaper-than-Stat existence check used in
-// the hot path of CandidatePaths. Just checks for a directory
-// entry; doesn't validate that it parses as Go.
 func hasSparkwingDir(absPath string) bool {
 	fi, err := os.Stat(filepath.Join(absPath, ".sparkwing"))
 	if err != nil {
@@ -433,15 +340,6 @@ func hasSparkwingDir(absPath string) bool {
 	return fi.IsDir()
 }
 
-// underTempDir reports whether abs sits inside the system temp
-// directory.
-//
-// Each side is compared in both its raw and its symlink-resolved form,
-// because macOS hands out /var/folders/... temp paths that are really
-// /private/var/folders/..., and EvalSymlinks only resolves a path that
-// already exists. A checkout sparkwing is about to create resolves to
-// nothing, so matching resolved-against-resolved alone would miss
-// exactly the scratch directories this filter is for.
 func underTempDir(abs string) bool {
 	roots := symlinkForms(os.TempDir())
 	targets := symlinkForms(abs)
@@ -455,8 +353,6 @@ func underTempDir(abs string) bool {
 	return false
 }
 
-// symlinkForms returns the cleaned path and, when it resolves, its
-// symlink-resolved twin.
 func symlinkForms(p string) []string {
 	out := []string{filepath.Clean(p)}
 	if r, err := filepath.EvalSymlinks(p); err == nil {
@@ -467,7 +363,6 @@ func symlinkForms(p string) []string {
 	return out
 }
 
-// withinDir reports whether target is dir or sits beneath it.
 func withinDir(dir, target string) bool {
 	rel, err := filepath.Rel(dir, target)
 	if err != nil {
@@ -476,12 +371,6 @@ func withinDir(dir, target string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
-// pathsEqual compares two filesystem paths after Clean+Abs+
-// EvalSymlinks. Avoids "registered twice" because of trailing
-// slashes or symlink-vs-real path differences. EvalSymlinks
-// failures fall back to the cleaned path comparison so a missing
-// dir doesn't error -- the caller has already validated existence
-// when it matters.
 func pathsEqual(a, b string) bool {
 	ca := filepath.Clean(a)
 	cb := filepath.Clean(b)
@@ -497,10 +386,6 @@ func pathsEqual(a, b string) bool {
 	return ca == cb
 }
 
-// expandHome resolves a leading ~ or ~/ prefix to the user's home.
-// Any other shell-isms (env interpolation, $VAR) are left alone --
-// repos.yaml is hand-edited config, and surprising expansion would
-// be worse than keeping `~` as the only sugar.
 func expandHome(p string) string {
 	if p == "" {
 		return p

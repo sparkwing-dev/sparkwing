@@ -22,14 +22,11 @@ const (
 type logFormat int
 
 const (
-	formatPlain logFormat = iota // pretty text, no SGR, Msg ANSI stripped
-	formatANSI                   // pretty text + renderer SGR + Msg ANSI passthrough
-	formatRaw                    // upstream JSONL bytes, untouched
+	formatPlain logFormat = iota
+	formatANSI
+	formatRaw
 )
 
-// negotiateLogFormat picks a render mode from `?format=` (when present)
-// or the `Accept` header; query takes precedence. Unknown values fall
-// back to plain.
 func negotiateLogFormat(r *http.Request) logFormat {
 	if q := r.URL.Query().Get("format"); q != "" {
 		switch q {
@@ -52,7 +49,6 @@ func negotiateLogFormat(r *http.Request) logFormat {
 	}
 }
 
-// contentTypeFor returns the Content-Type header value for a format.
 func contentTypeFor(f logFormat) string {
 	switch f {
 	case formatRaw:
@@ -64,9 +60,6 @@ func contentTypeFor(f logFormat) string {
 	}
 }
 
-// renderJSONL pretty-prints a JSONL LogRecord stream into w. Lines that
-// don't parse as a LogRecord are written through verbatim (stripped of
-// ANSI in plain mode) so a misconfigured pipeline still surfaces.
 func renderJSONL(src []byte, w io.Writer, f logFormat) {
 	useColor := f == formatANSI
 	pr := logpretty.NewPrettyRendererTo(w, useColor)
@@ -97,9 +90,6 @@ func renderJSONL(src []byte, w io.Writer, f logFormat) {
 	pr.Flush()
 }
 
-// streamPrettySSE re-emits upstream SSE log frames in the chosen render
-// format. Each upstream record can produce multiple output lines, so we
-// emit one SSE event per output line to keep `data:` values newline-free.
 func streamPrettySSE(body io.Reader, w io.Writer, flusher http.Flusher, f logFormat) {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -131,9 +121,6 @@ func streamPrettySSE(body io.Reader, w io.Writer, flusher http.Flusher, f logFor
 	}
 }
 
-// renderSSELogLine converts one JSONL LogRecord into pretty-rendered
-// text lines. Returns the input verbatim (stripped in plain mode) when
-// the line isn't valid JSON.
 func renderSSELogLine(payload []byte, f logFormat) []string {
 	var rec sparkwing.LogRecord
 	if err := json.Unmarshal(payload, &rec); err != nil {

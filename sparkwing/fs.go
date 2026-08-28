@@ -91,7 +91,6 @@ func Glob(pattern string) ([]string, error) {
 	return matches, nil
 }
 
-// requireWorkDir returns WorkDir() or panics with ErrNoProject.
 func requireWorkDir() string {
 	wd := WorkDir()
 	if wd == "" {
@@ -100,9 +99,6 @@ func requireWorkDir() string {
 	return wd
 }
 
-// resolvePath is the shared relative->WorkDir resolution. Absolute
-// input passes through unchanged; relative input returns ErrNoProject
-// when WorkDir is empty.
 func resolvePath(p string) (string, error) {
 	if filepath.IsAbs(p) {
 		return p, nil

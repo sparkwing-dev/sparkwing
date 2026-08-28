@@ -66,10 +66,6 @@ func TestSecret_PropagatesResolverError(t *testing.T) {
 	}
 }
 
-// Secret refuses to read entries that were stored as plain
-// (masked=false). The mismatch keeps the call-site signal honest --
-// a future operator who flips an entry from masked=true to false
-// gets a loud failure instead of a silent log leak.
 func TestSecret_RejectsUnmaskedEntry(t *testing.T) {
 	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
 		func(ctx context.Context, name string) (string, bool, error) {
@@ -85,9 +81,6 @@ func TestSecret_RejectsUnmaskedEntry(t *testing.T) {
 	}
 }
 
-// Config refuses entries stored as masked=true, mirroring Secret's
-// rejection. Symmetric strictness avoids "I called Config but my
-// secret got returned anyway" footguns.
 func TestConfig_RejectsMaskedEntry(t *testing.T) {
 	ctx := WithSecretResolver(context.Background(), SecretResolverFunc(
 		func(ctx context.Context, name string) (string, bool, error) {
@@ -118,9 +111,6 @@ func TestConfig_ReadsUnmaskedEntry(t *testing.T) {
 	}
 }
 
-// MustSecret's panic value must include the secret name so a failed
-// run's stack trace says which lookup blew up rather than just "no
-// resolver installed" with no caller context.
 func TestMustSecret_PanicMessageIncludesName(t *testing.T) {
 	defer func() {
 		r := recover()

@@ -5,10 +5,6 @@ import (
 	"testing"
 )
 
-// Fixtures use the `pid ppid time` form printed by `ps -Ao pid=,ppid=,time=`.
-// The third column is cumulative CPU time. Utilization is the difference
-// between two of these over the wall time between them.
-
 func TestDarwinCPUSnapshotPairsHostAndOwnedUnion(t *testing.T) {
 	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n10 1 0:00.00\n11 10 0:00.00\n20 1 0:00.00\n")
 	if !ok {
@@ -19,8 +15,6 @@ func TestDarwinCPUSnapshotPairsHostAndOwnedUnion(t *testing.T) {
 		t.Fatal("parse current snapshot failed")
 	}
 
-	// 30 CPU-seconds burned across 10 wall seconds is 3 busy cores; the roots'
-	// union burned 15, so 1.5.
 	host, hostMeasured, owned, ownedMeasured := darwinCPUFromSnapshot(current, previous, 10, []int{10, 11}, 8)
 
 	if !hostMeasured || math.Abs(host-3) > 0.0001 {
@@ -32,10 +26,7 @@ func TestDarwinCPUSnapshotPairsHostAndOwnedUnion(t *testing.T) {
 }
 
 func TestDarwinCPUSnapshotCreditsNoCPUToAnIdleLongLivedProcess(t *testing.T) {
-	// A process that burned hours of CPU earlier and is now idle carries a large
-	// cumulative total, so its lifetime average from `ps -o pcpu=` remains high.
-	// Differencing two readings must credit it zero because it did no work between
-	// them.
+
 	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n99 1 9:59:59.00\n")
 	if !ok {
 		t.Fatal("parse previous snapshot failed")
@@ -56,9 +47,7 @@ func TestDarwinCPUSnapshotCreditsNoCPUToAnIdleLongLivedProcess(t *testing.T) {
 }
 
 func TestDarwinCPUSnapshotFirstTickIsUnmeasured(t *testing.T) {
-	// With nothing to difference against, the result is "no reading",
-	// never a since-start average. Reporting one would book cores against work
-	// that finished before the daemon started.
+
 	current, ok := parseDarwinCPUSnapshot("1 0 5:00.00\n")
 	if !ok {
 		t.Fatal("parse snapshot failed")
@@ -72,9 +61,7 @@ func TestDarwinCPUSnapshotFirstTickIsUnmeasured(t *testing.T) {
 }
 
 func TestDarwinCPUSnapshotIgnoresABackwardsOrNewPID(t *testing.T) {
-	// A PID reused by a shorter-lived process reads backwards, and a process
-	// born since the last tick has no baseline. Crediting either imports CPU from
-	// outside the interval.
+
 	previous, ok := parseDarwinCPUSnapshot("1 0 1:00.00\n")
 	if !ok {
 		t.Fatal("parse previous snapshot failed")

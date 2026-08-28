@@ -11,10 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// The declared type passes the plan-time check -- an `any` field can
-// hold anything -- and the value in it cannot be encoded. That gap is
-// exactly why the execution-time check exists alongside the plan-time
-// one.
 type smuggledPayload struct {
 	Name string `json:"name"`
 	Data any    `json:"data"`
@@ -47,10 +43,6 @@ func registerSmugglerPipe() {
 	})
 }
 
-// A node whose output will not encode has produced nothing a
-// downstream node can read. Reporting success drops the output on the
-// floor and hands every consumer an empty value, so the node fails and
-// says why.
 func TestRun_UnencodableNodeOutputFailsTheNode(t *testing.T) {
 	registerSmugglerPipe()
 	p := newPaths(t)

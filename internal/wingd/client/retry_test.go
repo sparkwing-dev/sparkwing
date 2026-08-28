@@ -62,11 +62,6 @@ func TestRetryReturnsOnceTheCallerGivesUp(t *testing.T) {
 	}
 }
 
-// failingDaemon accepts, answers the handshake, and then closes every
-// connection without answering the request on it. It is the daemon shape
-// that turned a client retry loop into a spin: each dropped connection
-// costs the daemon a state fsync, so an unpaced client burns a core on
-// each side of the socket.
 func failingDaemon(t *testing.T, home string) *atomic.Int64 {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)
@@ -111,9 +106,6 @@ func failingDaemon(t *testing.T, home string) *atomic.Int64 {
 	return accepted
 }
 
-// TestQueueStateGivesUpRatherThanRetryingForever bounds the read-only
-// path. Nothing depends on a status read eventually succeeding, so a
-// daemon that keeps failing it must be reported, not asked forever.
 func TestQueueStateGivesUpRatherThanRetryingForever(t *testing.T) {
 	home := shortHome(t)
 	failingDaemon(t, home)

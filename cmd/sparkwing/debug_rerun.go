@@ -23,8 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// rerunFlags is rerun's parse surface. parseDebugTarget doesn't fit
-// because rerun also accepts --seq and (for cluster mode) --image.
 type rerunFlags struct {
 	run   string
 	node  string
@@ -52,11 +50,6 @@ func parseRerunFlags(args []string) (rerunFlags, error) {
 	}, nil
 }
 
-// runDebugRerun reproduces the dispatch frame for one (run, node, seq)
-// and drops the operator into a shell. Local mode exec's $SHELL with
-// the snapshot env applied; cluster mode shells out to `kubectl run`
-// against a runner image so the operator gets a pod that mirrors the
-// dispatch environment.
 func runDebugRerun(args []string) error {
 	t, err := parseRerunFlags(args)
 	if err != nil {
@@ -73,9 +66,6 @@ func runDebugRerun(args []string) error {
 	return runDebugRerunLocal(ctx, t)
 }
 
-// runDebugRerunLocal opens the local store, fetches the dispatch
-// snapshot, materializes upstream Ref outputs to a scratch dir, and
-// exec's the user's shell with the snapshot env applied.
 func runDebugRerunLocal(ctx context.Context, t rerunFlags) error {
 	paths, err := orchestrator.DefaultPaths()
 	if err != nil {
@@ -124,10 +114,6 @@ func runDebugRerunLocal(ctx context.Context, t rerunFlags) error {
 	return syscall.Exec(shell, []string{shell}, envList)
 }
 
-// runDebugRerunCluster builds and exec's a `kubectl run` command with
-// the snapshot env materialized as --env=K=V flags. The image comes
-// from --image > $SPARKWING_RERUN_IMAGE; absence is a hard error so
-// the operator knows what to set.
 func runDebugRerunCluster(ctx context.Context, t rerunFlags) error {
 	prof, err := resolveProfile(t.on)
 	if err != nil {
@@ -185,11 +171,6 @@ func runDebugRerunCluster(ctx context.Context, t rerunFlags) error {
 	return syscall.Exec(bin, args, os.Environ())
 }
 
-// BuildRerunEnv overlays the dispatch snapshot env on top of base so
-// SPARKWING_* keys win without losing the operator's PATH / shell
-// integrations. Adds SPARKWING_RERUN=1 and points
-// SPARKWING_RERUN_REFS_DIR at refsDir when non-empty. Exported so the
-// PR 2 tests + future debug-env consumer can call through it.
 func BuildRerunEnv(snap *store.NodeDispatch, refsDir string, base []string) ([]string, error) {
 	merged := map[string]string{}
 	for _, kv := range base {
@@ -229,9 +210,6 @@ func decodeSnapshotEnv(raw []byte) (map[string]string, error) {
 	return out, nil
 }
 
-// materializeLocalRefs writes each upstream node's output_json under
-// refsDir/<dep_node_id>.json. Called by local rerun so the operator
-// can grep / cat upstream outputs without re-running them.
 func materializeLocalRefs(ctx context.Context, st *store.Store, refsDir, runID string, deps []string) error {
 	if len(deps) == 0 {
 		return nil
@@ -291,8 +269,6 @@ func printRerunBanner(w io.Writer, snap *store.NodeDispatch, node *store.Node, r
 	fmt.Fprintln(w, "─────────────────────────────────────────────────────────")
 }
 
-// pickShell picks the shell to exec for local rerun. Honors $SHELL
-// when valid, else /bin/bash, else /bin/sh.
 func pickShell() string {
 	if s := os.Getenv("SHELL"); s != "" {
 		if _, err := os.Stat(s); err == nil {
@@ -305,10 +281,6 @@ func pickShell() string {
 	return "/bin/sh"
 }
 
-// podName produces a DNS-label-safe pod name for cluster rerun.
-// Format: sparkwing-rerun-<6-hex>. We don't try to encode run/node in
-// the name -- pod labels carry the lineage, the name just needs to be
-// unique enough across concurrent debugs.
 func podName(runID, nodeID string) string {
 	var buf [3]byte
 	_, _ = rand.Read(buf[:])

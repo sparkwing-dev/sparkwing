@@ -6,7 +6,6 @@ import (
 	"testing"
 )
 
-// TestWorkStep_Risk_Single verifies one label records on the step.
 func TestWorkStep_Risk_Single(t *testing.T) {
 	w := NewWork()
 	s := Step(w, "apply", func(ctx context.Context) error { return nil }).Risk("destructive")
@@ -17,8 +16,6 @@ func TestWorkStep_Risk_Single(t *testing.T) {
 	}
 }
 
-// TestWorkStep_Risk_VariadicAccumulates verifies multiple labels in
-// one call land in declaration order.
 func TestWorkStep_Risk_VariadicAccumulates(t *testing.T) {
 	w := NewWork()
 	s := Step(w, "destroy-prod-eks", func(ctx context.Context) error { return nil }).
@@ -30,8 +27,6 @@ func TestWorkStep_Risk_VariadicAccumulates(t *testing.T) {
 	}
 }
 
-// TestWorkStep_Risk_ChainedCallsAccumulate verifies chained .Risk()
-// calls extend the set in declaration order.
 func TestWorkStep_Risk_ChainedCallsAccumulate(t *testing.T) {
 	w := NewWork()
 	s := Step(w, "destroy", func(ctx context.Context) error { return nil }).
@@ -44,7 +39,6 @@ func TestWorkStep_Risk_ChainedCallsAccumulate(t *testing.T) {
 	}
 }
 
-// TestWorkStep_Risk_DuplicatesCollapse confirms repeats are dropped.
 func TestWorkStep_Risk_DuplicatesCollapse(t *testing.T) {
 	w := NewWork()
 	s := Step(w, "dup", func(ctx context.Context) error { return nil }).
@@ -57,8 +51,6 @@ func TestWorkStep_Risk_DuplicatesCollapse(t *testing.T) {
 	}
 }
 
-// TestWorkStep_Risk_EmptyLabelsIgnored confirms whitespace and empty
-// labels don't pollute the set.
 func TestWorkStep_Risk_EmptyLabelsIgnored(t *testing.T) {
 	w := NewWork()
 	s := Step(w, "ws", func(ctx context.Context) error { return nil }).
@@ -70,8 +62,6 @@ func TestWorkStep_Risk_EmptyLabelsIgnored(t *testing.T) {
 	}
 }
 
-// TestWorkStep_Default confirms an unmarked step returns an empty
-// label set.
 func TestWorkStep_Default(t *testing.T) {
 	w := NewWork()
 	s := Step(w, "plain", func(ctx context.Context) error { return nil })
@@ -80,8 +70,6 @@ func TestWorkStep_Default(t *testing.T) {
 	}
 }
 
-// TestWorkStep_Risk_AuthorDefinedLabels confirms arbitrary author
-// labels round-trip verbatim.
 func TestWorkStep_Risk_AuthorDefinedLabels(t *testing.T) {
 	w := NewWork()
 	s := Step(w, "rotate", func(ctx context.Context) error { return nil }).
@@ -93,7 +81,6 @@ func TestWorkStep_Risk_AuthorDefinedLabels(t *testing.T) {
 	}
 }
 
-// TestRiskBlockedError_Message confirms the canonical error text.
 func TestRiskBlockedError_Message(t *testing.T) {
 	err := &RiskBlockedError{
 		Pipeline:      "release-pi",

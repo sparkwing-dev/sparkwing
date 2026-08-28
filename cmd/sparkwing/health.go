@@ -1,9 +1,3 @@
-// `sparkwing health` -- a superset of `profiles test` that answers
-// "is prod alive?" rather than "is my profile configured correctly?".
-// Runs the connectivity / auth probes from profiles test AND polls
-// the controller for fleet + queue state so operators have a single
-// command that covers the common "why's this cluster misbehaving?"
-// troubleshooting path.
 package main
 
 import (
@@ -24,10 +18,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// healthSection groups probes into CONNECTIVITY / FLEET / QUEUE so
-// the table renders with headers matching the help text. Reuses the
-// profileProbeResult type from profiles_test_cmd.go because the row
-// shape is identical (name / status / target / detail / latency).
 type healthSection struct {
 	Name   string               `json:"name"`
 	Probes []profileProbeResult `json:"probes"`
@@ -37,9 +27,7 @@ type healthReport struct {
 	Profile  string          `json:"profile"`
 	Sections []healthSection `json:"sections"`
 	OK       bool            `json:"ok"`
-	// Warnings counts warn-level results across all sections so the
-	// summary line can surface "3 warnings" without reiterating the
-	// per-probe detail.
+
 	Warnings int `json:"warnings"`
 }
 
@@ -143,11 +131,6 @@ func runHealth(args []string) error {
 	return errors.New("one or more probes failed")
 }
 
-// probeAgentsFleet hits /api/v1/agents and categorizes the roster
-// into connected vs stale. An agent is "stale" when its last_seen
-// timestamp is more than staleAgentThreshold ago -- the agent is
-// still in the controller's memory but hasn't heartbeated recently.
-// Zero agents returns warn (fleet is idle, not broken).
 func probeAgentsFleet(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "agents", Target: prof.ControllerURL()}
 	if prof.ControllerURL() == "" {
@@ -191,12 +174,6 @@ func probeAgentsFleet(ctx context.Context, prof *profile.Profile) profileProbeRe
 	return r
 }
 
-// probePool hits /api/v1/pool and summarizes warm-runner capacity.
-// Shape of the response is a list of pool entries each with a status
-// field ("idle" / "in_use" / etc.). We count each bucket and report
-// "cap=N idle=X in-use=Y". Zero-capacity pools are warn (prod has no
-// warm runners) rather than fail -- triggers still run via the K8s
-// Runner fallback path.
 func probePool(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "pool", Target: prof.ControllerURL()}
 	if prof.ControllerURL() == "" {
@@ -258,10 +235,6 @@ func probePool(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	return r
 }
 
-// probeStuckTriggers fetches triggers with status=claimed and reports
-// any whose claim lease is older than stuckThreshold. A stuck trigger
-// typically means the claiming worker died without calling /done --
-// something an operator wants to know about immediately.
 func probeStuckTriggers(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "triggers", Target: prof.ControllerURL()}
 	if prof.ControllerURL() == "" {
@@ -301,11 +274,6 @@ func probeStuckTriggers(ctx context.Context, prof *profile.Profile) profileProbe
 	return r
 }
 
-// probeRecentRuns tallies the last 24h of runs and reports a
-// success-rate percentage. Threshold: <95% drops to warn, <80% is
-// fail-worthy but stays warn here because infra health doesn't
-// depend on pipelines always succeeding -- a buggy release can
-// tank success rate without any controller / agent problem.
 func probeRecentRuns(ctx context.Context, prof *profile.Profile) profileProbeResult {
 	r := profileProbeResult{Name: "runs (24h)", Target: prof.ControllerURL()}
 	if prof.ControllerURL() == "" {

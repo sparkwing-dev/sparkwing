@@ -14,9 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// captureBackend is a StateBackend that records each WriteNodeDispatch
-// call without persisting it. Anything else returns nil/zero so nodes
-// run to completion through the orchestrator without a real store.
 type captureBackend struct {
 	captured []store.NodeDispatch
 	writeErr error
@@ -146,10 +143,6 @@ func (b *captureBackend) ListNodeDispatches(ctx context.Context, _, _ string) ([
 	return nil, nil
 }
 
-// stubJob is a job whose Run does nothing observable. The dispatch
-// snapshot doesn't depend on Run side effects, only on the resolved
-// input struct, so this minimal implementation is enough to exercise
-// the snapshot path.
 type stubJob struct {
 	Region string `json:"region"`
 	Token  string `json:"token,omitempty"`
@@ -160,18 +153,11 @@ func (j *stubJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-// buildNode returns a *sparkwing.JobNode carrying the given job, with
-// any modifiers callers want to set up. Lives here so tests don't
-// have to spin a full Plan when only one node is needed.
 func buildNode(t *testing.T, id string, job sparkwing.Workable) *sparkwing.JobNode {
 	t.Helper()
 	return sparkwing.Job(sparkwing.NewPlan(), id, job)
 }
 
-// TestDispatchSnapshot_CapturesEnvelope runs writeDispatchSnapshot
-// directly (sidestepping the full executeNode goroutine setup) and
-// asserts the captured envelope shape: version, type_name, scalar
-// fields round-tripped via JSON.
 func TestDispatchSnapshot_CapturesEnvelope(t *testing.T) {
 	be := &captureBackend{gitSHA: "deadbeef"}
 	r := NewNodeExecutor(Backends{State: be})
@@ -213,10 +199,6 @@ func TestDispatchSnapshot_CapturesEnvelope(t *testing.T) {
 	}
 }
 
-// TestDispatchSnapshot_MaskerRedactsScalar confirms that values
-// registered with the run's masker are *** in the persisted scalar
-// fields. Belt-and-suspenders for raw os.Getenv-baked tokens that
-// bypass sparkwing.Secret.
 func TestDispatchSnapshot_MaskerRedactsScalar(t *testing.T) {
 	be := &captureBackend{}
 	r := NewNodeExecutor(Backends{State: be})
@@ -241,11 +223,6 @@ func TestDispatchSnapshot_MaskerRedactsScalar(t *testing.T) {
 	}
 }
 
-// TestDispatchSnapshot_BestEffortFailureNonFatal -- a backend whose
-// WriteNodeDispatch errors must surface the error to the caller (so
-// the node executor can log it) but the caller decides
-// whether to fail the node. This test asserts the error returns and
-// no row is captured.
 func TestDispatchSnapshot_BestEffortFailureNonFatal(t *testing.T) {
 	be := &captureBackend{writeErr: errors.New("backend kaput")}
 	r := NewNodeExecutor(Backends{State: be})
@@ -260,10 +237,6 @@ func TestDispatchSnapshot_BestEffortFailureNonFatal(t *testing.T) {
 	}
 }
 
-// TestCollectDispatchEnv filters to allowlisted prefixes and overlays
-// node EnvMap on top of inherited values. The runID + run row layer
-// synthesizes keys that wouldn't be in os.Environ() under laptop
-// dispatch (the orchestrator process started without them).
 func TestCollectDispatchEnv(t *testing.T) {
 	t.Setenv("SPARKWING_FOO", "from-env")
 	t.Setenv("GITHUB_TOKEN", "redact-me-in-mask-not-here")
@@ -302,12 +275,6 @@ func TestCollectDispatchEnv(t *testing.T) {
 	}
 }
 
-// TestCollectDispatchEnv_ExcludesTheDaemonHostPath keeps a local
-// executable path out of a record that travels. The snapshot is
-// persisted and replayed by `sparkwing debug rerun`, potentially on
-// another machine, where the captured $SPARKWING_WINGD_BIN would name a
-// path that is absent -- or present and a different binary. The
-// replaying host has to resolve its own daemon host.
 func TestCollectDispatchEnv_ExcludesTheDaemonHostPath(t *testing.T) {
 	t.Setenv(wingdclient.HostBinEnv, "/opt/this-machine-only/bin/sparkwing")
 	t.Setenv("SPARKWING_FOO", "kept")
@@ -322,8 +289,6 @@ func TestCollectDispatchEnv_ExcludesTheDaemonHostPath(t *testing.T) {
 	}
 }
 
-// TestCollectDispatchEnv_NilRun degrades gracefully when the GetRun
-// fetch failed or the row is missing.
 func TestCollectDispatchEnv_NilRun(t *testing.T) {
 	node := buildNode(t, "deploy", &stubJob{})
 	got := collectDispatchEnv(node, "run-7", nil)

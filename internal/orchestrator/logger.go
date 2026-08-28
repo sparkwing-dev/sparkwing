@@ -12,17 +12,14 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// nodeLogger persists one node's LogRecords as JSONL and tees to an
-// optional live delegate. Implements sparkwing.Logger.
 type nodeLogger struct {
 	mu       sync.Mutex
 	file     io.WriteCloser
 	enc      *json.Encoder
-	delegate sparkwing.Logger // optional tee, may be nil
+	delegate sparkwing.Logger
 	nodeID   string
 }
 
-// newNodeLogger opens path for append. Caller must Close.
 func newNodeLogger(path, nodeID string, delegate sparkwing.Logger) (*nodeLogger, error) {
 	f, err := fssecure.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 	if err != nil {
@@ -61,34 +58,25 @@ func (l *nodeLogger) Close() error {
 	return l.file.Close()
 }
 
-// PrettyRenderer is the TTY-facing Logger.
 type PrettyRenderer = logpretty.PrettyRenderer
 
-// NewPrettyRenderer writes to stdout/stderr with color unless NO_COLOR is set.
 func NewPrettyRenderer() *PrettyRenderer { return logpretty.NewPrettyRenderer() }
 
-// NewPrettyRendererTo writes all output to w with color forced via useColor.
 func NewPrettyRendererTo(w io.Writer, useColor bool) *PrettyRenderer {
 	return logpretty.NewPrettyRendererTo(w, useColor)
 }
 
-// QuietRenderer collapses a run to a progress line plus a one-line
-// final status, surfacing per-step detail only on failure.
 type QuietRenderer = logpretty.QuietRenderer
 
-// NewQuietRenderer writes to stdout/stderr with color unless NO_COLOR is set.
 func NewQuietRenderer() *QuietRenderer { return logpretty.NewQuietRenderer() }
 
-// StripANSI removes ANSI CSI/SGR escape sequences from s.
 func StripANSI(s string) string { return logpretty.StripANSI(s) }
 
-// JSONRenderer prints one record per line as JSON.
 type JSONRenderer struct {
 	mu  sync.Mutex
 	enc *json.Encoder
 }
 
-// NewJSONRenderer writes to os.Stdout regardless of level.
 func NewJSONRenderer() *JSONRenderer {
 	return &JSONRenderer{enc: json.NewEncoder(os.Stdout)}
 }
@@ -106,28 +94,13 @@ func (j *JSONRenderer) Emit(rec sparkwing.LogRecord) {
 	_ = j.enc.Encode(&rec)
 }
 
-// envelopeLogger persists run-level envelope events as JSONL and
-// tees to the user-facing delegate. Envelope events (run_start,
-// run_plan, run_finish, plan_warn, validation warnings,
-// the run_summary, etc.) used to live only on the dispatcher's
-// stdout; this tee is the storage half that lets `sparkwing runs
-// logs --follow` reconstruct the same event stream a remote operator
-// would never see otherwise. Per-node body output keeps writing to
-// the node's own log file via nodeLogger -- the merged-stream reader
-// in jobs_cli.go interleaves the two by timestamp.
-//
-// Records that already carry a Node are written verbatim (so a
-// node-tagged plan_warn still threads through the envelope file
-// where the merged reader can find it). Records without a Node are
-// pure run-level events.
 type envelopeLogger struct {
 	mu       sync.Mutex
 	file     io.WriteCloser
 	enc      *json.Encoder
-	delegate sparkwing.Logger // optional tee, may be nil
+	delegate sparkwing.Logger
 }
 
-// newEnvelopeLogger opens path for append. Caller must Close.
 func newEnvelopeLogger(path string, delegate sparkwing.Logger) (*envelopeLogger, error) {
 	f, err := fssecure.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND)
 	if err != nil {

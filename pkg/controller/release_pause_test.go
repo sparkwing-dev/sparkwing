@@ -12,9 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// newPauseTestServer wires up a Server backed by a fresh SQLite store
-// with auth enabled (one user-scoped token). Returns the Server, the
-// raw bearer token, and the store handle for assertions.
 func newPauseTestServer(t *testing.T) (*Server, string, *store.Store) {
 	t.Helper()
 	dir := t.TempDir()
@@ -35,8 +32,6 @@ func newPauseTestServer(t *testing.T) (*Server, string, *store.Store) {
 	return srv, raw, st
 }
 
-// seedActivePause inserts a run + node + open debug_pause row so the
-// release endpoint has something to flip.
 func seedActivePause(t *testing.T, st *store.Store, runID, nodeID string) {
 	t.Helper()
 	ctx := context.Background()
@@ -62,8 +57,6 @@ func seedActivePause(t *testing.T, st *store.Store, runID, nodeID string) {
 	}
 }
 
-// assertReleasedBy reads back the pause row and checks the audit
-// column matches expected.
 func assertReleasedBy(t *testing.T, st *store.Store, runID, nodeID, want string) {
 	t.Helper()
 	rows, err := st.ListDebugPauses(context.Background(), runID)
@@ -81,9 +74,6 @@ func assertReleasedBy(t *testing.T, st *store.Store, runID, nodeID, want string)
 	}
 }
 
-// TestReleaseDebugPause_RecordsAuthPrincipal: with a valid bearer
-// token, the released_by column gets the principal name regardless of
-// what the body says.
 func TestReleaseDebugPause_RecordsAuthPrincipal(t *testing.T) {
 	srv, raw, st := newPauseTestServer(t)
 	seedActivePause(t, st, "run-1", "node-a")
@@ -100,8 +90,6 @@ func TestReleaseDebugPause_RecordsAuthPrincipal(t *testing.T) {
 	assertReleasedBy(t, st, "run-1", "node-a", "alice")
 }
 
-// TestReleaseDebugPause_AuthOverridesBody: the auth principal wins
-// even when the request body tries to spoof a different released_by.
 func TestReleaseDebugPause_AuthOverridesBody(t *testing.T) {
 	srv, raw, st := newPauseTestServer(t)
 	seedActivePause(t, st, "run-2", "node-b")
@@ -120,9 +108,6 @@ func TestReleaseDebugPause_AuthOverridesBody(t *testing.T) {
 	assertReleasedBy(t, st, "run-2", "node-b", "alice")
 }
 
-// TestReleaseDebugPause_Unauthenticated: with auth enabled and no
-// bearer header, the request is rejected before it can touch the
-// store. The pause row stays open.
 func TestReleaseDebugPause_Unauthenticated(t *testing.T) {
 	srv, _, st := newPauseTestServer(t)
 	seedActivePause(t, st, "run-3", "node-c")
@@ -145,10 +130,6 @@ func TestReleaseDebugPause_Unauthenticated(t *testing.T) {
 	}
 }
 
-// TestReleaseDebugPause_AuthDisabledFallback: with auth disabled
-// (laptop dev, no tokens minted), the released_by column falls back
-// to "anonymous" instead of an empty string so the audit row stays
-// meaningful.
 func TestReleaseDebugPause_AuthDisabledFallback(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

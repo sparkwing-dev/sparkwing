@@ -1,67 +1,6 @@
 #!/usr/bin/env bash
-# Time an agent going from an empty repo to working pipelines, and show
-# the path it took to get there.
-#
-# This answers a different question than bin/acceptance-pipelines.sh.
-# That one scores generated source against the oracle bar; it says
-# nothing about how an agent arrives at the source, because it hands the
-# model the docs and takes one shot. This runs the real product flow: a
-# fresh repo with no .sparkwing/, a real agent, the real CLI, and the
-# template catalog -- which is how a pipeline is actually supposed to get
-# written. Authoring from a blank file is the fallback, not the path.
-#
-# The report is the point. Wall-clock says whether the flow is fast
-# enough; the ORIENTATION PATH says why it wasn't. A step the agent
-# repeats, a doc it re-reads, or SDK source it opens out of the module
-# cache is a question the tooling should have answered the first time.
-#
-# The trial repo is materialized outside this checkout so nothing in the
-# agent's working directory points at sparkwing's own pipelines. That is
-# a starting position, not a sandbox: the agent has a shell and can read
-# anything this user can, and trials have been observed listing the
-# sparkwing checkout. Read the orientation path before trusting a run.
-#
-# Three fixtures, measuring different things. Do not compare their
-# numbers to each other:
-#
-#   --fixture small     (default) the committed
-#                       internal/agenttrial/testdata/trial-repo. Fast,
-#                       offline, no existing CI. Measures authoring a
-#                       pipeline from a description.
-#
-#   --fixture migrate   the same tree plus a GitHub Actions workflow,
-#                       applied as an overlay so the two differ in
-#                       exactly one thing. Measures translating CI that
-#                       already exists -- the agent has a spec to read
-#                       instead of a description to interpret, which is
-#                       the more common way anyone actually arrives.
-#
-#   --fixture miniflux  a pinned commit of miniflux/v2 (Apache-2.0, 87
-#                       packages, 133 SQL migrations), cloned and cached
-#                       on first use. It ships ten GitHub Actions
-#                       workflows, so an agent will read and translate
-#                       them: this measures migrating an existing CI
-#                       setup at real-world scale, against CI nobody
-#                       wrote for this test.
-#
-# --agent selects the harness under test (claude, codex) and --model the
-# model within it. Command counts come from a PATH shim that logs every
-# `sparkwing` invocation, not from any agent's transcript format, so the
-# numbers mean the same thing across agents. Design conclusions drawn
-# from one agent's habits are worth exactly one agent.
-#
-# Usage: agent-trial.sh --prompt-file <path> [--name <trial>]
-#                       [--fixture small|migrate|miniflux]
-#                       [--agent claude|codex] [--model <model>] [--effort low|medium|high]
-#        agent-trial.sh --prompt "build me a lint pipeline"
-#
-# Requires: claude + jq on PATH. Costs real model calls.
 set -uo pipefail
 
-# Anchor on this script's own location rather than the caller's working
-# directory: the trial cd's into a throwaway repo, and resolving the
-# fixture through `git rev-parse` from wherever the caller happened to
-# stand silently yields the wrong tree (or an empty one).
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 prompt_file=""
 prompt_text=""
@@ -71,9 +10,6 @@ agent="claude"
 model=""
 effort=""
 
-# A real upstream project, pinned. Cloned at trial time rather than
-# vendored: this repo does not need to redistribute someone else's
-# Apache-2.0 tree, and the pin is what keeps two runs comparable.
 MINIFLUX_REPO="https://github.com/miniflux/v2.git"
 MINIFLUX_SHA="69756868dd1edbe62801c3a2a214c59d286320ce"
 
@@ -111,14 +47,8 @@ if [[ -n "$prompt_text" ]]; then
   printf '%s\n' "$prompt_text" > "$prompt_file"
 fi
 [[ -n "$prompt_file" && -r "$prompt_file" ]] || { echo "agent-trial: need --prompt or --prompt-file" >&2; exit 2; }
-# Absolute before the cd below: a relative --prompt-file is relative to
-# the caller, and resolving it from inside the trial repo silently feeds
-# the agent nothing.
 prompt_file="$(cd "$(dirname "$prompt_file")" && pwd)/$(basename "$prompt_file")"
 
-# The fixture is fixed input, not something generated here, so two runs
-# a week apart are comparable and a change in the number is a change in
-# sparkwing rather than in the scaffolding.
 case "$fixture" in
   small)
     FIXTURE="$REPO_ROOT/internal/agenttrial/testdata/trial-repo"
@@ -126,10 +56,6 @@ case "$fixture" in
     cp -R "$FIXTURE/." "$TRIAL/"
     ;;
   migrate)
-    # The same repo plus a GitHub Actions workflow, as an overlay rather
-    # than a second copy of the tree: migrating existing CI and authoring
-    # from nothing have to differ in exactly one thing, or the two
-    # numbers are not comparable.
     FIXTURE="$REPO_ROOT/internal/agenttrial/testdata/trial-repo"
     OVERLAY="$REPO_ROOT/internal/agenttrial/testdata/gha-overlay"
     [[ -d "$FIXTURE" ]] || { echo "agent-trial: missing fixture $FIXTURE" >&2; exit 1; }
@@ -138,7 +64,6 @@ case "$fixture" in
     cp -R "$OVERLAY/." "$TRIAL/"
     ;;
   miniflux)
-    # Cache the pinned tree so repeat trials do not refetch it.
     CACHE="$WORK/cache-miniflux-$MINIFLUX_SHA"
     if [[ ! -d "$CACHE" ]]; then
       echo "fetching pinned fixture $MINIFLUX_SHA ..."
@@ -170,31 +95,11 @@ echo "trial repo: $TRIAL (no .sparkwing/)"
 echo "prompt:     $(head -c 120 "$prompt_file")..."
 echo
 
-# bypassPermissions: the agent must run `sparkwing` and write files
-# without a prompt, and this is a throwaway repo. It is still an
-# unrestricted agent on this machine -- that is the cost of measuring
-# the real flow rather than a sandboxed imitation of it.
-#
-# A machine-local agent bootstrap (e.g. a personal ~/.claude/CLAUDE.md
-# pointing at internal tooling) will hijack the trial: an agent that
-# treats the prompt as tracked work moves into some other workspace and
-# the run measures that instead. Asking it not to via
-# --append-system-prompt does not hold, so the report detects the
-# escape below rather than pretending to prevent it.
-# Every sparkwing invocation is logged by a shim ahead of the real
-# binary on PATH. Transcript formats differ per agent and change under
-# us; argv does not, so the command trace is the one measurement that
-# means the same thing for all of them.
 SHIM="$WORK/$name.shim"
 CMDLOG="$WORK/$name.commands"
 rm -rf "$SHIM"; mkdir -p "$SHIM"
 : > "$CMDLOG"
 real_sparkwing="$(command -v sparkwing)"
-# Logs when each invocation started AND finished. The finish time of
-# the last one is time-to-green: everything after it is the agent
-# composing its closing message, which is this harness's own overhead
-# and not something a user waits for. Reporting only total wall-clock
-# billed the product ~12s per run for writing a friction report.
 cat > "$SHIM/sparkwing" <<SHIMEOF
 #!/usr/bin/env bash
 start=\$(date +%s)
@@ -216,15 +121,6 @@ case "$agent" in
     agent_exit=$?
     ;;
   codex)
-    # </dev/null because codex exec appends stdin to the prompt and
-    # waits for EOF to do it. With stdin inherited from a pipe that
-    # nobody closes -- a backgrounded sweep, say -- it prints "Reading
-    # additional input from stdin..." and blocks forever, which reads
-    # as a slow agent rather than a stuck harness.
-    #
-    # Reasoning effort goes through -c rather than a flag: a ChatGPT
-    # account rejects every --model but its default, so effort is the
-    # only axis that varies here.
     codex exec --json --dangerously-bypass-approvals-and-sandbox \
       ${model:+--model "$model"} \
       ${effort:+-c "model_reasoning_effort=\"$effort\""} \
@@ -238,17 +134,9 @@ case "$agent" in
 esac
 ELAPSED=$(( $(date +%s) - START ))
 
-# Stop logging before this script starts running sparkwing itself. The
-# scoring below is not the agent's work, and counting it made every
-# agent look like it ran four commands it never ran -- including one
-# that ran none.
 PATH="${PATH#"$SHIM":}"
 AGENT_CALLS=$(wc -l < "$CMDLOG" | tr -d ' ')
 
-# Time-to-green: the last sparkwing invocation's finish. Everything
-# after it is the agent writing its closing FRICTION report, which this
-# harness asked for and no user waits for -- ~12s a run, or a fifth of
-# the total, billed to the product for the privilege of being measured.
 GREEN=""
 if [[ -s "$CMDLOG" ]]; then
   last_end=$(awk -F'\t' '$2 != "" {e=$2} END {print e}' "$CMDLOG")
@@ -261,8 +149,6 @@ else
 fi
 echo
 
-# A report for a run that never happened reads exactly like a report for
-# a run that failed on the merits. Stop here instead.
 if [[ "$agent_exit" -ne 0 ]] || [[ ! -s "$TRACE" ]]; then
   echo "agent-trial: the agent did not run to completion; no measurement to report." >&2
   echo "  stderr: $WORK/$name.err" >&2
@@ -275,15 +161,7 @@ cmds() {
          | select(.type=="tool_use" and .name=="Bash") | .input.command' "$TRACE" 2>/dev/null
 }
 
-# An agent whose shell rebuilds PATH from a login profile never sees the
-# shim. Fall back to its transcript, which is per-agent but is the only
-# record left; say which source the numbers came from either way.
 if [[ "$AGENT_CALLS" -eq 0 ]] && [[ -s "$TRACE" ]]; then
-  # Codex runs each command through `zsh -lc`, and a login shell
-  # rebuilds PATH from the profile, so the shim never sees it. Its
-  # transcript records executions as typed events; read those rather
-  # than grepping prose, which counted every mention of a command in
-  # the agent's own reasoning as a call and turned eleven into 176.
   jq -r 'select(.type=="item.completed") | select(.item.type=="command_execution")
          | .item.command' "$TRACE" 2>/dev/null \
     | grep -oE '\bsparkwing [a-z][a-z0-9 ._=<>/-]*' \
@@ -306,8 +184,6 @@ docs_reads=$(cut -f4- "$CMDLOG" | grep -cE '^docs read')
 docs_uniq=$(cut -f4- "$CMDLOG" | grep -oE 'docs read --topic [a-z/-]+' | sort -u | wc -l | tr -d ' ')
 printf '  %-38s %s (%s distinct topics)\n' "docs read calls:" "$docs_reads" "$docs_uniq"
 
-# Everything below reads the agent's own transcript, whose shape is
-# per-agent. Absent one, the shim numbers above still stand.
 if [[ "$agent" == "claude" ]]; then
   total_bash=$(jq -r 'select(.type=="assistant") | .message.content[]?
                       | select(.type=="tool_use") | .name' "$TRACE" 2>/dev/null \
@@ -317,13 +193,6 @@ if [[ "$agent" == "claude" ]]; then
   printf '  %-38s %s\n' "reads of SDK source / go doc:" "$sdk_source"
 fi
 
-# An agent that cd's somewhere else is no longer being measured. Report
-# it as a failed trial, not as a slow one.
-#
-# Compare resolved paths: on macOS the trial lives under $TMPDIR in
-# /var/..., which is a symlink to /private/var/..., and an agent that
-# resolves it reports the second form. Comparing the literal strings
-# calls every run an escape.
 trial_real="$(cd "$TRIAL" && pwd -P)"
 escaped=$(cmds | grep -oE 'cd +/[^ &;|]*' | awk '{print $2}' \
   | sed 's|^/private/|/|' \
@@ -341,15 +210,6 @@ if [[ "${sdk_source:-0}" -gt 0 ]]; then
 fi
 echo
 
-# The agent is the only witness to what it had to guess at. A prompt
-# that asks for a FRICTION section turns that into a report line rather
-# than something to reconstruct from the trace afterwards.
-#
-# Each harness buries the closing message somewhere different: claude in
-# a final `result` field, codex in the last `agent_message` item. Both
-# store it as one JSON-escaped line, so the raw-text fallback below only
-# catches an agent that prints it unencoded -- it cannot substitute for
-# knowing the shape.
 extract_friction() { awk '/^[^a-z]*FRICTION:/{found=1} found{print}'; }
 friction=$(jq -r 'select(.type=="result") | .result' "$TRACE" 2>/dev/null | extract_friction)
 if [[ -z "$friction" ]]; then
@@ -373,11 +233,6 @@ sparkwing pipeline list -o json 2>/dev/null | jq -r '.[] | "  \(.name)\t\(.short
 echo
 echo "  lint:    $(sparkwing pipeline lint --all >/dev/null 2>&1 && echo PASS || echo FAIL)"
 
-# Explain each pipeline separately under --sw-dry-run. `explain --all`
-# refuses a pipeline whose steps carry risk labels, and rejects the
-# --sw-dry-run that would waive them ("--all does not accept
-# pipeline-specific flags"), so scoring with it marks a correct
-# prod-deploy pipeline as broken.
 explain_ok=0
 explain_bad=""
 for p in $(sparkwing pipeline list -o json 2>/dev/null | jq -r '.[].name' 2>/dev/null); do
@@ -393,15 +248,6 @@ else
   echo "  explain: PASS ($explain_ok pipelines)"
 fi
 
-# lint and explain say a pipeline is well-formed. Neither knows what the
-# prompt asked for, and the gap is not theoretical: a trial scored clean
-# here having produced a pipeline with no trigger at all -- it compiled,
-# linted, explained, ran green, reported no friction, and was the
-# fastest run in its sweep. Every signal said it was the best result.
-#
-# The expectations live beside each prompt as <prompt>.expect and are
-# deliberately coarse. They answer "did it do the task", not "did it do
-# the task the way I would have".
 EXPECT="${prompt_file%.txt}.expect"
 if [[ -r "$EXPECT" ]]; then
   yaml_all=$(cat "$TRIAL"/.sparkwing/sparkwing.yaml 2>/dev/null)
@@ -435,11 +281,6 @@ else
   echo "  task:    (no $(basename "$EXPECT"); lint+explain do not check whether the prompt was satisfied)"
 fi
 echo
-# The agent records its own elapsed time. A harness wall-clock much
-# larger than that is this machine being busy, not sparkwing being slow
-# -- a trial run alongside a build has been observed at 6x the agent's
-# own number. Print both so a contended run is obvious instead of
-# quietly becoming a data point.
 agent_ms=$(tail -1 "$TRACE" 2>/dev/null | jq -r '.duration_ms // empty' 2>/dev/null)
 if [[ -n "$GREEN" ]]; then
   echo "time-to-green: ${GREEN}s   (+$(( ELAPSED - GREEN ))s writing the FRICTION report: harness overhead, not product)"

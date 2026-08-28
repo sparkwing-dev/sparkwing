@@ -10,18 +10,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// QuietRenderer collapses a run to a single progress line and a
-// one-line final status (a pass/fail mark, the duration, and the run
-// id). It drops every per-node and per-step event from the live
-// stream; the full log stays on disk and is retrievable with
-// `sparkwing runs logs --run <id>`. On failure it surfaces the failing
-// step's error, and nothing else.
-//
-// It is built for git-hook runs (pre-commit, pre-push), where
-// streaming every step's output into the committing process is pure
-// context noise. The pretty and JSON renderers are unchanged; this one
-// is selected with SPARKWING_LOG_FORMAT=quiet, which the managed hook
-// scripts set by default.
 type QuietRenderer struct {
 	mu       sync.Mutex
 	w        io.Writer
@@ -31,7 +19,6 @@ type QuietRenderer struct {
 	pendingSummary *sparkwing.LogRecord
 }
 
-// NewQuietRenderer writes to stdout/stderr with color unless NO_COLOR is set.
 func NewQuietRenderer() *QuietRenderer {
 	return &QuietRenderer{
 		w:        os.Stdout,
@@ -40,7 +27,6 @@ func NewQuietRenderer() *QuietRenderer {
 	}
 }
 
-// NewQuietRendererTo writes all output to w with color forced via useColor.
 func NewQuietRendererTo(w io.Writer, useColor bool) *QuietRenderer {
 	return &QuietRenderer{w: w, errW: w, useColor: useColor}
 }
@@ -56,9 +42,6 @@ func (q *QuietRenderer) Log(level, msg string) {
 	q.Emit(sparkwing.LogRecord{Level: level, Msg: msg})
 }
 
-// Emit renders only run_start (one progress line) and run_finish (the
-// final status, plus the failing step on failure). run_summary is
-// buffered for its node/duration detail; all other events are dropped.
 func (q *QuietRenderer) Emit(rec sparkwing.LogRecord) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -74,9 +57,6 @@ func (q *QuietRenderer) Emit(rec sparkwing.LogRecord) {
 	}
 }
 
-// Flush emits a buffered summary if no run_finish arrived (e.g. the run
-// was killed mid-stream). Mirrors PrettyRenderer.Flush so end-of-stream
-// callers do not drop the final block.
 func (q *QuietRenderer) Flush() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -93,10 +73,7 @@ func (q *QuietRenderer) writeStart(rec sparkwing.LogRecord) {
 	}
 	runID, _ := rec.Attrs["run_id"].(string)
 	line := q.color("▶", ansiBlue) + " " + q.color(pipeline, ansiBold) + q.color(" running…", ansiDim)
-	// The active profile is named because this renderer is what a git
-	// hook prints: two identical commits whose runs landed in different
-	// stores both printed the same green tick, and nothing on the line
-	// said which store either one used.
+
 	if name := profileName(rec.Attrs); name != "" {
 		line += q.color("  profile "+name, ansiDim)
 	}
@@ -106,9 +83,6 @@ func (q *QuietRenderer) writeStart(rec sparkwing.LogRecord) {
 	fmt.Fprintln(q.w, line)
 }
 
-// profileName digs the active profile's name out of a run_start
-// record's nested profile attribute. Empty when no profile is active,
-// which is the honest answer for a run on the built-in local defaults.
 func profileName(attrs map[string]any) string {
 	p, ok := attrs["profile"].(map[string]any)
 	if !ok {
@@ -154,11 +128,6 @@ func (q *QuietRenderer) writeFinish(finish sparkwing.LogRecord) {
 	}
 }
 
-// writeFailureDetail prints each failed node's error verbatim (the full
-// message, not just its tail -- an aggregating job folds every failed
-// check into that message) and a pointer to the retained log. Cancelled
-// and skipped nodes are downstream cascade, not the cause, so they are
-// omitted.
 func (q *QuietRenderer) writeFailureDetail(sink io.Writer, nodes []any, runID string) {
 	for _, n := range nodes {
 		m, ok := n.(map[string]any)

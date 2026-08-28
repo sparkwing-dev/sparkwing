@@ -27,15 +27,6 @@ type SearchResponse struct {
 	Total   int            `json:"total"`
 }
 
-// handleSearch greps every log file under root for the `q` param.
-// Case-insensitive substring match; no regex (yet). Supports
-// optional run_id / node_id prefix filters to narrow the file scan.
-// limit defaults to 100 and caps at 500 to keep responses bounded.
-//
-// This is a v0 implementation: walks the filesystem on every query,
-// no index. Ships fast and handles log volumes sparkwing currently
-// generates. Revisit with a real index (SQLite FTS or bleve) when
-// latency gets noticeable.
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {

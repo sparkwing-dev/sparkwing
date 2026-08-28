@@ -16,8 +16,6 @@ import (
 
 var s3IntegRegisterOnce sync.Once
 
-// invocations counter is captured at registration time so each Run
-// can verify whether its cacheable step actually executed.
 var s3CachedInvocations atomic.Int32
 
 type s3CachedJobOut struct {
@@ -46,11 +44,6 @@ func (s3CachedPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 	return nil
 }
 
-// s3TriggerPipe calls RunAndAwait to force the orchestrator to call
-// EnqueueTrigger on the configured state backend. In Mode 2 that
-// records a discrete child-trigger CAS record for a cross-runner to
-// claim; the single-process test has no such runner, so the await
-// times out.
 type s3TriggerPipe struct{ sparkwing.Base }
 
 func (s3TriggerPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
@@ -74,15 +67,6 @@ func registerS3IntegPipelines(t *testing.T) {
 	})
 }
 
-// TestS3Sharing_TwoRunsBothSucceed pins down the Mode 2 contract: two
-// runners hitting the same cache key against a shared bucket coordinate
-// through the conditional-write CAS semaphore, so the second run reuses
-// the first's memoized result instead of recomputing. The first run
-// computes and writes the cache memo under If-Match; the second run's
-// memo acquire sees the entry and replays it. Both runs succeed and the
-// cacheable step executes exactly once. This is the cross-runner cache
-// reservation contract; the no-op fallback (no CAS) is exercised
-// separately in TestS3Concurrency_FallsBackWhenPreconditionsIgnored.
 func TestS3Sharing_TwoRunsBothSucceed(t *testing.T) {
 	registerS3IntegPipelines(t)
 	art, logs := openIntegrationS3(t)
@@ -111,10 +95,6 @@ func TestS3Sharing_TwoRunsBothSucceed(t *testing.T) {
 	}
 }
 
-// TestS3Sharing_StateVisibleToDashboard pairs a Run A invocation with
-// a separate S3Backend pointed at the same bucket. ListRuns / GetRun /
-// ListNodes must return Run A's writes; this is what makes the
-// dashboard work in Mode 2.
 func TestS3Sharing_StateVisibleToDashboard(t *testing.T) {
 	registerS3IntegPipelines(t)
 	art, logs := openIntegrationS3(t)
@@ -170,13 +150,6 @@ func TestS3Sharing_StateVisibleToDashboard(t *testing.T) {
 	}
 }
 
-// TestS3Sharing_TriggerEnqueuesChildRecord pins the reversed Mode 2
-// boundary: a pipeline that spawns a child run via RunAndAwait now
-// enqueues a discrete child-trigger CAS record instead of failing with
-// ErrNotSupported. The single-process harness has no second runner to
-// claim the child, so the await times out and the run fails; the
-// enqueued record -- resolvable via FindSpawnedChildTriggerID -- is the
-// cross-runner handoff a real Mode 2 deployment relies on.
 func TestS3Sharing_TriggerEnqueuesChildRecord(t *testing.T) {
 	registerS3IntegPipelines(t)
 	art, logs := openIntegrationS3(t)

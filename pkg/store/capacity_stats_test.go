@@ -69,9 +69,6 @@ func TestRecordWaitObservation_AgesOutOldSamples(t *testing.T) {
 	}
 }
 
-// TestRecordWaitObservation_CoexistsWithProfileUpserts pins that the wait
-// upsert never clobbers measured profile columns and vice versa,
-// whichever lands first.
 func TestRecordWaitObservation_CoexistsWithProfileUpserts(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "waits.db"))
 	if err != nil {

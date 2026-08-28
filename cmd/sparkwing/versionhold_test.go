@@ -74,9 +74,6 @@ func TestHoldHasPatch(t *testing.T) {
 	}
 }
 
-// TestHoldRefusalOmitsOverride pins the footgun rule: the refusal an
-// agent sees names the operator setting but never advertises the
-// escape hatch.
 func TestHoldRefusalOmitsOverride(t *testing.T) {
 	err := holdRefusal("v0.16.0", versionHold{Value: "v0.15", Source: "/tmp/version-hold"})
 	msg := err.Error()

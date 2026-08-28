@@ -12,12 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// explainSkipInputs mirrors the embedded SkipFilterArgs pattern used by
-// the platform's release pipelines: --skip and --only become
-// first-class typed flags on the pipeline. The test pipeline below
-// consults Skip in its own Plan() to drop a named node, mimicking
-// how SkipFilter actually reshapes the DAG at Plan-construction
-// time.
 type explainSkipInputs struct {
 	Skip string `flag:"skip" desc:"comma-separated step names to skip"`
 }
@@ -50,10 +44,6 @@ func init() {
 	})
 }
 
-// captureExplainStdout runs printPipelinePlan with the given args
-// and returns its stdout bytes. printPipelinePlan writes directly
-// to os.Stdout (it's a CLI entrypoint), so the test redirects the
-// real fd through a pipe.
 func captureExplainStdout(t *testing.T, pipeline string, rest []string) []byte {
 	t.Helper()
 	r, w, err := os.Pipe()
@@ -77,10 +67,6 @@ func captureExplainStdout(t *testing.T, pipeline string, rest []string) []byte {
 	return <-done
 }
 
-// nodeIDsFromSnapshot decodes a planSnapshot JSON blob and returns
-// its sorted top-level node IDs. Sorting normalizes any deterministic-
-// but-still-structural ordering differences so the two paths can be
-// compared as sets.
 func nodeIDsFromSnapshot(t *testing.T, raw []byte) []string {
 	t.Helper()
 	var snap planSnapshot
@@ -95,11 +81,6 @@ func nodeIDsFromSnapshot(t *testing.T, raw []byte) []string {
 	return ids
 }
 
-// TestPrintPipelinePlan_SkipParityAcrossOutputFlags is the load-bearing
-// regression: invoking the explain entrypoint with --skip alone vs.
-// --skip alongside -o json must produce the exact same node set. The
-// fix lives in printPipelinePlan / stripExplainOutputFlags
-// (orchestrator/main.go).
 func TestPrintPipelinePlan_SkipParityAcrossOutputFlags(t *testing.T) {
 	cases := []struct {
 		name string
@@ -132,10 +113,6 @@ func TestPrintPipelinePlan_SkipParityAcrossOutputFlags(t *testing.T) {
 	}
 }
 
-// TestStripExplainOutputFlags_RemovesWrapperFlagsKeepsRest pins the
-// helper's contract: every shape of -o / --output (with or without =,
-// with or without a separate value) is consumed; every other token
-// survives in original order.
 func TestStripExplainOutputFlags_RemovesWrapperFlagsKeepsRest(t *testing.T) {
 	cases := []struct {
 		in, want []string

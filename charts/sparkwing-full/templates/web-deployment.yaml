@@ -7,8 +7,6 @@ metadata:
     {{- include "sparkwing-full.componentLabels" (dict "root" . "component" "web") | nindent 4 }}
 spec:
   replicas: {{ .Values.web.replicas }}
-  # Web is stateless (proxies to the controller; SPA bundle is
-  # baked into the binary). RollingUpdate is fine.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -87,17 +85,9 @@ spec:
             - "--require-login"
             {{- end }}
           env:
-            # runWeb() -> orchestrator.DefaultPaths() mkdir's
-            # SPARKWING_HOME at startup; runAsUser 65534 can't
-            # write to "/", so point it at a writable scratch
-            # volume.
             - name: SPARKWING_HOME
               value: /tmp/sparkwing
             {{- if .Values.web.tokenSecret.name }}
-            # Service-principal bearer token. Web proxies every
-            # /api/v1/* request to the controller with this token
-            # stamped, so it must carry the union of scopes the
-            # dashboard's SPA ever triggers.
             - name: SPARKWING_AGENT_TOKEN
               valueFrom:
                 secretKeyRef:

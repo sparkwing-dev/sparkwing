@@ -11,8 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
-// fakeGit answers core.hooksPath lookups from an in-memory git config and
-// records what an install writes back to the repository scope.
 type fakeGit struct {
 	global string
 	local  string
@@ -51,8 +49,6 @@ func configValue(v string) (string, error) {
 	return v + "\n", nil
 }
 
-// gateRepo builds a checkout declaring a pre-commit and a post-commit
-// pipeline, with an empty hook directory ready to install into.
 func gateRepo(t *testing.T) string {
 	t.Helper()
 	repo := t.TempDir()
@@ -157,8 +153,6 @@ func TestRenderHookScript_ForwarderOnlyChains(t *testing.T) {
 	}
 }
 
-// The guard is what lets `hooks fire` establish a gate without running one, so
-// a gate rendered without it can never be shown to work.
 func TestRenderHookScript_BlockingGatesCarryTheSelfTestGuard(t *testing.T) {
 	for _, hook := range []string{"pre-commit", "pre-push"} {
 		script := renderHookScript(hook, []string{"gate"}, false, "")
@@ -173,8 +167,6 @@ func TestRenderHookScript_BlockingGatesCarryTheSelfTestGuard(t *testing.T) {
 	}
 }
 
-// Nothing that cannot refuse work is worth asking. A post-commit hook runs
-// after the commit landed and a forwarder gates nothing.
 func TestRenderHookScript_NothingButABlockingGateCarriesTheGuard(t *testing.T) {
 	for name, script := range map[string]string{
 		"post-commit": renderHookScript("post-commit", []string{"notify"}, false, ""),
@@ -287,9 +279,6 @@ func TestHooksInstall_IsIdempotentOnRerun(t *testing.T) {
 	}
 }
 
-// TestHooksInstall_RefusesTheClaimWhenAHandWrittenHookBlocksAGlobalForwarder
-// runs over one hook name sparkwing also gates and one only the machine
-// defines, so the refusal is proven from both of the install's write paths.
 func TestHooksInstall_RefusesTheClaimWhenAHandWrittenHookBlocksAGlobalForwarder(t *testing.T) {
 	for _, blocked := range []string{"prepare-commit-msg", "pre-commit"} {
 		t.Run(blocked, func(t *testing.T) {
@@ -615,11 +604,6 @@ func TestHooksGuidance_NamesCommandsTheCLIDispatches(t *testing.T) {
 	}
 }
 
-// sparkwingCommandsNamedIn returns the sparkwing invocations an
-// operator-facing string tells them to run: the backticked ones, and the
-// bare ones a line offers as a command to type, either on its own or after
-// a "run:" lead-in. Prose that merely mentions the binary names it
-// mid-sentence, so it is not collected.
 func sparkwingCommandsNamedIn(text string) []string {
 	var found []string
 	for line := range strings.SplitSeq(text, "\n") {
@@ -637,9 +621,6 @@ func sparkwingCommandsNamedIn(text string) []string {
 	return found
 }
 
-// dispatchesCommand reports whether a command line starts with a registered
-// command path. The bare `sparkwing` root does not count: every misspelling
-// would match it.
 func dispatchesCommand(cmdline string) bool {
 	registered := map[string]bool{}
 	for _, c := range allCommands {

@@ -19,44 +19,25 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// DefaultGoProxy is the public Google-operated Go module proxy.
 const DefaultGoProxy = "https://proxy.golang.org"
 
-// proxyClient is package-global so tests can swap it. Callers should not
-// mutate it directly; use ResolveWithClient instead.
 var proxyClient = &http.Client{Timeout: 30 * time.Second}
 
-// Resolver captures the environment used to answer proxy queries. Most
-// callers use the default via Resolve(); tests construct their own pointing
-// at an httptest.Server.
 type Resolver struct {
-	// Proxies is the ordered list of module-proxy base URLs. Each entry
-	// is tried in order until one returns a non-4xx response. Empty ->
-	// [DefaultGoProxy].
 	Proxies []string
-	// Private is the GOPRIVATE glob list; modules matching any entry
-	// skip the proxy and fall back to `go list -m <module>@<query>`.
+
 	Private []string
-	// HTTPClient is used for proxy requests. Nil -> package default.
+
 	HTTPClient *http.Client
-	// GoBin is the `go` command to invoke for GOPRIVATE fallbacks.
-	// Empty -> "go".
+
 	GoBin string
 }
 
-// Resolve resolves each library in the manifest to a concrete version by
-// querying the module proxy. Entries pinned to an exact semver tag bypass
-// the network and are only validated locally. Returns a map of module
-// path -> resolved version (e.g. "v0.10.3").
 func Resolve(ctx context.Context, m *Manifest) (map[string]string, error) {
 	r := NewResolverFromEnv()
 	return r.Resolve(ctx, m)
 }
 
-// NewResolverFromEnv builds a Resolver from GOPROXY and GOPRIVATE env
-// vars. `direct` and `off` entries in GOPROXY are dropped - sparks does
-// not implement VCS-direct fetch (Go's own tooling handles that under the
-// GOPRIVATE fallback).
 func NewResolverFromEnv() *Resolver {
 	var proxies []string
 	for _, p := range strings.Split(goEnvValue("GOPROXY"), ",") {
@@ -79,12 +60,6 @@ func NewResolverFromEnv() *Resolver {
 	return &Resolver{Proxies: proxies, Private: private}
 }
 
-// goEnvValue returns the effective value of a Go env var. Checks the
-// process environment first (a real shell export wins), then falls back
-// to `go env NAME` so values from Go's own config file at
-// $GOENV / ~/.config/go/env get honored. Without this fallback
-// interactive users who set GOPRIVATE via `go env -w` would see the
-// resolver ignore it and hit proxy.golang.org for private modules.
 func goEnvValue(name string) string {
 	if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 		return v
@@ -98,7 +73,6 @@ func goEnvValue(name string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// Resolve is the method form of the top-level Resolve() function.
 func (r *Resolver) Resolve(ctx context.Context, m *Manifest) (map[string]string, error) {
 	if m == nil {
 		return map[string]string{}, nil
@@ -147,7 +121,6 @@ func (r *Resolver) isPrivate(modPath string) bool {
 	return module.MatchPrefixPatterns(strings.Join(r.Private, ","), modPath)
 }
 
-// httpc returns the active HTTP client.
 func (r *Resolver) httpc() *http.Client {
 	if r.HTTPClient != nil {
 		return r.HTTPClient
@@ -155,9 +128,6 @@ func (r *Resolver) httpc() *http.Client {
 	return proxyClient
 }
 
-// resolveLatest hits <proxy>/<module>/@latest, which returns JSON with a
-// "Version" field. Module path is lower-escaped per the Go module proxy
-// protocol.
 func (r *Resolver) resolveLatest(ctx context.Context, modPath string) (string, error) {
 	escaped, err := module.EscapePath(modPath)
 	if err != nil {
@@ -190,8 +160,6 @@ func (r *Resolver) resolveLatest(ctx context.Context, modPath string) (string, e
 	return "", lastErr
 }
 
-// resolveRange picks the highest tag satisfying the constraint from the
-// proxy's `@v/list` endpoint. List is newline-separated versions.
 func (r *Resolver) resolveRange(ctx context.Context, modPath, constraint string) (string, error) {
 	escaped, err := module.EscapePath(modPath)
 	if err != nil {
@@ -222,8 +190,6 @@ func (r *Resolver) resolveRange(ctx context.Context, modPath, constraint string)
 	return "", lastErr
 }
 
-// resolveViaGoList falls back to `go list -m -json <module>@<query>` for
-// GOPRIVATE modules. The Go toolchain handles netrc / SSH / VCS access.
 func (r *Resolver) resolveViaGoList(ctx context.Context, lib Library) (string, error) {
 	bin := r.GoBin
 	if bin == "" {
@@ -320,9 +286,6 @@ func pickBest(versions []string, constraint string) (string, error) {
 	return "", fmt.Errorf("no version satisfies %s", constraint)
 }
 
-// constraintAllows reports whether `v` satisfies `constraint`. Supported
-// forms: "^vX.Y.Z", "~vX.Y.Z", ">=vX.Y.Z", ">vX.Y.Z", "<=vX.Y.Z",
-// "<vX.Y.Z", "latest", or an exact semver tag (equality).
 func constraintAllows(constraint, v string) bool {
 	c := strings.TrimSpace(constraint)
 	if c == "" || strings.EqualFold(c, "latest") {

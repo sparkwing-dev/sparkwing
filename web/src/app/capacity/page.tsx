@@ -1,12 +1,5 @@
 "use client";
 
-// Capacity: what admission is doing on this machine right now, and how it
-// arrived at every number. The host section is the live ledger the daemon
-// admits against, the priced table is what measurement learned per pipeline,
-// and the explain section shows the sample window a charge was ranked out of
-// with the selected run marked. Nothing here mutates state; the panel exists
-// so a human can recompute a charge by eye and catch the capacity system
-// getting it wrong.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -53,11 +46,7 @@ import {
 } from "@/lib/capacity";
 import Tooltip from "@/components/Tooltip";
 
-// HOST_POLL_MS matches the daemon's own sampling cadence: polling faster
-// would redraw the same reading, slower would lag the ledger it describes.
 const HOST_POLL_MS = 2000;
-// Learned pricing moves once per finished run, so it is read at a calm
-// interval rather than with the live ledger.
 const PRICING_POLL_MS = 10000;
 
 export default function CapacityPage() {
@@ -86,28 +75,43 @@ export default function CapacityPage() {
   }, []);
 
   useEffect(() => {
-    refreshHost();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refreshHost();
+    });
     const i = window.setInterval(() => {
       if (!document.hidden) refreshHost();
     }, HOST_POLL_MS);
     return () => {
+      cancelled = true;
       window.clearInterval(i);
       if (pulseTimer.current) clearTimeout(pulseTimer.current);
     };
   }, [refreshHost]);
 
   useEffect(() => {
-    refreshPricing();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refreshPricing();
+    });
     const i = window.setInterval(() => {
       if (!document.hidden) refreshPricing();
     }, PRICING_POLL_MS);
-    return () => window.clearInterval(i);
+    return () => {
+      cancelled = true;
+      window.clearInterval(i);
+    };
   }, [refreshPricing]);
 
   useEffect(() => {
     if (!selected) {
-      setExplain(null);
-      return;
+      let cancelled = false;
+      queueMicrotask(() => {
+        if (!cancelled) setExplain(null);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
     let cancelled = false;
     async function load() {
@@ -507,9 +511,6 @@ function WaiterRow({ w }: { w: QueueWaiter }) {
       </Td>
       <Td>
         {w.blocking_reason ? (
-          // Verbatim: the daemon's own sentence is the evidence, and
-          // paraphrasing it here would be one more place for the two views
-          // to disagree.
           <span className="text-xs text-[var(--warning)]">
             {w.blocking_reason}
           </span>

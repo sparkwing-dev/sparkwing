@@ -37,8 +37,6 @@ func TestProtocolTooOld_DoesNotTellTheOperatorToUpgradeTheCLI(t *testing.T) {
 	}
 }
 
-// A daemon speaking a major this build predates has no floor in the table, so
-// the remedy names the daemon's own release: the one version known to speak it.
 func TestProtocolTooOld_RaisesToTheDaemonsReleaseForAMajorThisBuildPredates(t *testing.T) {
 	err := protocolTooOld("v0.22.0", wingwire.HelloAck{ProtocolMajor: wingwire.ProtocolMajor + 1, BinaryVersion: "v0.40.0"})
 	if !strings.Contains(err.Error(), "pin to v0.40.0 or newer") {
@@ -61,8 +59,6 @@ func TestProtocolTooOld_LabelsUnknownVersionsRatherThanPrintingEmpty(t *testing.
 	}
 }
 
-// A prerelease daemon version sorts below the release it names and cannot be
-// written into go.mod, so it is not a usable pin target.
 func TestProtocolTooOld_AsksForAReleaseByProtocolWhenTheDaemonVersionIsAPrerelease(t *testing.T) {
 	err := protocolTooOld("v0.22.0", wingwire.HelloAck{ProtocolMajor: wingwire.ProtocolMajor + 1, BinaryVersion: "v0.22.0-dev+b9ade496"})
 	want := fmt.Sprintf("a release speaking protocol %d", wingwire.ProtocolMajor+1)

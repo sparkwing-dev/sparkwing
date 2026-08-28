@@ -8,10 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestResolveTriggerArgs covers the retry-args contract: on retry-of,
-// the resolver returns the *original* run's args, not the args passed
-// on the retry trigger. Pre-fix this returned trigger.Args
-// unconditionally and caused the v0.52.0 -> v0.53.0 publish skew.
 func TestResolveTriggerArgs(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

@@ -1,12 +1,5 @@
 "use client";
 
-// Home: executive summary. Answers "is delivery healthy and trending the
-// right way?" at a glance -- current build time, deploy volume, success
-// rate, and the last deploy, each compared against an adjustable anchor.
-// Resolved past failures are deliberately absent: they are not
-// actionable. Chronological build/failure detail lives on Runs; long-term
-// trends live on Analytics. The only historical signal kept here is a red
-// last deploy, because that is current state worth acting on.
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
@@ -46,8 +39,6 @@ export default function Home() {
   const [now, setNow] = useState(() => Date.now());
 
   const refresh = useCallback(async () => {
-    // Fetch enough history to cover the longest metric window (7d) sitting
-    // behind the anchor, plus a margin.
     const sinceHrs = Math.ceil((anchorMs + WEEK_MS) / (60 * 60 * 1000)) + 24;
     const [rs, ap, svc] = await Promise.all([
       getRuns({ since: `${sinceHrs}h`, limit: 2000 }),
@@ -62,11 +53,17 @@ export default function Home() {
   }, [anchorMs]);
 
   useEffect(() => {
-    refresh();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void refresh();
+    });
     const i = window.setInterval(() => {
       if (!document.hidden) refresh();
     }, POLL_MS);
-    return () => window.clearInterval(i);
+    return () => {
+      cancelled = true;
+      window.clearInterval(i);
+    };
   }, [refresh]);
 
   const overview = useMemo(
@@ -333,9 +330,9 @@ function NeedsAttention({
                 <span className="font-mono text-xs truncate flex-1">
                   {a.node_id}
                 </span>
-                {/* Approvals can sit for weeks -- "38d ago" alone
-                  doesn't tell you which day it was asked for, so the
-                  date rides along instead of hiding in the tooltip. */}
+                {
+
+                                                                       }
                 <Tooltip content={fmtFullDate(a.requested_at)}>
                   <span className="text-[11px] font-mono text-[var(--muted)] shrink-0 cursor-default">
                     {fmtDateTime(a.requested_at)} · {fmtAgo(a.requested_at)}

@@ -1,32 +1,3 @@
-// Package nodemetrics samples the CPU and memory of the process it runs in
-// and divides each reading evenly among the nodes attached at the time. What
-// a reading means therefore depends on how many nodes that is.
-//
-// With one attachment the division is by one and the reading is that node's
-// exact usage. That is the common shape: a plan-level node of a local run or
-// of a Kubernetes pod has a process to itself.
-//
-// Several nodes share one sampler whenever several nodes share one process,
-// and that is not only a test-time shape:
-//
-//   - A JobSpawn child runs inside its parent's process while the parent is
-//     still attached, so a parent plus its children is up to NumCPU+1
-//     attachments in an ordinary production run.
-//   - `sparkwing cluster worker --runner inprocess` and
-//     `sparkwing handle-trigger --runner inprocess` -- the default runner
-//     kind for both -- execute every node of a claimed trigger in the one
-//     worker process.
-//   - A test binary or a library embedder running nodes with
-//     Options.ProcessPerNode false.
-//
-// A per-node value is an estimate in those cases, but the values sum to the
-// process's real usage, which is the property admission needs: charging every
-// node of a parallel fan-out the whole process reads as N times the cost the
-// machine actually paid. A node joins and leaves on tick boundaries, so up to
-// one interval of its cost can smear onto the nodes beside it.
-//
-// Nothing branches on which shape it is in; the arithmetic is the same and
-// the one-attachment case is its exact answer.
 package nodemetrics
 
 import (
@@ -38,44 +9,25 @@ import (
 	"time"
 )
 
-// Sample is one resource reading.
 type Sample struct {
 	TS            time.Time
 	CPUMillicores int64
 	MemoryBytes   int64
 }
 
-// Sink absorbs samples.
 type Sink interface {
 	Push(ctx context.Context, sample Sample) error
 }
 
-// defaultInterval is the cadence the shared loop samples at.
 const defaultInterval = 2 * time.Second
 
-// intervalNanos overrides defaultInterval when positive.
 var intervalNanos atomic.Int64
 
-// SetIntervalForTest drives the shared loop faster than the default and
-// returns a func restoring the previous cadence. The cadence is process-wide
-// because the loop is, and a loop reads it once at start, so a test sets it
-// before attaching. Nothing in production calls this; it is exported because
-// the sampler's callers live in other packages and cannot wait real seconds
-// for a tick.
 func SetIntervalForTest(d time.Duration) (restore func()) {
 	previous := intervalNanos.Swap(int64(d))
 	return func() { intervalNanos.Store(previous) }
 }
 
-// Interval is the cadence the next loop will start with, and the width
-// of the window a reader must group samples into to reconstruct what
-// the machine drew at one moment. Nodes in separate processes each run
-// their own sampler, so they stamp a tick with timestamps that are
-// close but never equal; a reader that grouped on the exact timestamp
-// would see one node per group and mistake a parallel stage's widest
-// share for the whole stage. Exported so the fold and the
-// sampler cannot drift: the cadence samples are produced at is the
-// cadence they are grouped at, test override included.
 func Interval() time.Duration {
 	if d := time.Duration(intervalNanos.Load()); d > 0 {
 		return d
@@ -83,56 +35,31 @@ func Interval() time.Duration {
 	return defaultInterval
 }
 
-// cpuReader and rssReader stand between the loop and the platform so a test
-// can drive the split arithmetic from known readings; against a live process
-// whose true usage nothing can pin down, the arithmetic is unobservable.
 var (
 	cpuReader = readCPUTime
 	rssReader = readMemoryBytes
 )
 
-// CPUAccountingAvailable reports whether this platform can measure a
-// process's CPU time, so a caller can tell a healthy sampler's genuine
-// near-zero CPU reading (a sleep-heavy pipeline) from a blind sampler's
-// uninformative zero. It matches the signal the sampler itself uses to
-// decide whether to emit real CPU numbers or announce its blindness.
 func CPUAccountingAvailable() bool {
 	_, ok := readCPUTime()
 	return ok
 }
 
-// reportedChildCPU is the cumulative user+system CPU that the per-command
-// wait4 path has already attributed to finished SDK commands. RUSAGE_CHILDREN
-// counts every reaped child, so the sampler subtracts this to avoid counting
-// an SDK command twice; children spawned outside the SDK wrapper leave no
-// entry here and so still surface through the RUSAGE_CHILDREN delta.
 var reportedChildCPU atomic.Int64
 
-// AddReportedChildCPU records CPU a per-command resource report has already
-// accounted for, so the sampler does not re-count the same usage when it
-// lands in RUSAGE_CHILDREN at reap. It is process-wide, matching the scope of
-// RUSAGE_CHILDREN and of the shared sampler.
 func AddReportedChildCPU(d time.Duration) {
 	if d > 0 {
 		reportedChildCPU.Add(int64(d))
 	}
 }
 
-// blindOnce guards the single log line emitted when the platform offers
-// no CPU accounting, so a blind sampler announces itself instead of
-// masquerading as a healthy one reporting genuine zeros.
 var blindOnce sync.Once
 
-// attachment is one node's claim on the shared sampler. It carries the node's
-// context so a store write inherits the node's cancellation.
 type attachment struct {
 	ctx  context.Context
 	sink Sink
 }
 
-// sharedSampler owns the process's one sampling loop and the set of nodes it
-// divides each reading among. stop is non-nil exactly while a loop owns the
-// registry, so it doubles as the running flag and as that loop's identity.
 type sharedSampler struct {
 	mu    sync.Mutex
 	sinks map[*attachment]struct{}
@@ -141,24 +68,14 @@ type sharedSampler struct {
 
 var shared = &sharedSampler{sinks: make(map[*attachment]struct{})}
 
-// loopsRunning counts live sampling goroutines, a retired generation still
-// winding down included. Owning the registry and still executing are separate
-// states, so a test that injects package-level readers has no other way to
-// know every loop has stopped reading them.
 var loopsRunning sync.WaitGroup
 
-// Attach gives sink a share of every interval it is attached for and returns
-// a func that ends its participation. The first attachment starts the shared
-// loop and the last one to leave stops it, so an idle process carries no
-// sampling goroutine. Samples are pushed with ctx, and a node whose ctx is
-// cancelled stops taking a share whether or not it detached.
 func Attach(ctx context.Context, sink Sink) (detach func()) {
 	a := &attachment{ctx: ctx, sink: sink}
 	shared.add(a)
 	return func() { shared.remove(a) }
 }
 
-// add registers an attachment, starting a loop if none is running.
 func (s *sharedSampler) add(a *attachment) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -171,7 +88,6 @@ func (s *sharedSampler) add(a *attachment) {
 	}
 }
 
-// remove drops an attachment and ends the loop with the last one.
 func (s *sharedSampler) remove(a *attachment) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -182,11 +98,6 @@ func (s *sharedSampler) remove(a *attachment) {
 	}
 }
 
-// liveSinks returns the attachments a tick divides its reading among, first
-// dropping any whose node has been cancelled: a node that ended between ticks
-// must not be charged for an interval it did not run in. An empty result
-// means the calling loop is finished -- either the registry emptied or a
-// newer loop already owns it.
 func (s *sharedSampler) liveSinks(stop chan struct{}) []*attachment {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -210,9 +121,6 @@ func (s *sharedSampler) liveSinks(stop chan struct{}) []*attachment {
 	return live
 }
 
-// loop samples until stop closes or the last attachment goes away. It carries
-// the previous CPU reading, so only one loop may run at a time: two would each
-// subtract from their own baseline and charge the same CPU twice.
 func (s *sharedSampler) loop(stop chan struct{}, interval time.Duration) {
 	defer loopsRunning.Done()
 	prevCPU, havePrev := cpuReader()
@@ -259,13 +167,6 @@ func (s *sharedSampler) loop(stop chan struct{}, interval time.Duration) {
 	}
 }
 
-// intervalMillicores derives an interval's average CPU draw in millicores
-// from the CPU consumed and the wall time it spanned, clamped to the host's
-// core count. The clamp is load-bearing: a reaped subtree's cumulative CPU
-// (a long `make -j`) becomes visible to RUSAGE_CHILDREN all at once, so
-// dividing it by a single short interval reads as a rate no physical machine
-// could sustain; capping at host cores keeps that artifact from being stored
-// as a peak far above real concurrency. A non-positive interval draws nothing.
 func intervalMillicores(cpu, wall time.Duration) int64 {
 	if wall <= 0 {
 		return 0
@@ -280,8 +181,6 @@ func intervalMillicores(cpu, wall time.Duration) int64 {
 	return millicores
 }
 
-// readMemoryBytes returns process RSS from the platform source, falling
-// back to runtime.MemStats.Sys where no per-process RSS is available.
 func readMemoryBytes() int64 {
 	if rss, ok := processRSS(); ok {
 		return rss

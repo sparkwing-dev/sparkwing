@@ -62,6 +62,133 @@ func unused() {} // bug: never called, kept for symmetry
 	}
 }
 
+func TestCheckFile_RejectsDocsOnUnexportedDeclarations(t *testing.T) {
+	src := `package widget
+
+// exportedValue is internal.
+const exportedValue = 1
+
+// helper is internal.
+func helper() {}
+
+// hidden is internal.
+type hidden struct {
+	// value is internal.
+	value int
+}
+
+// Public is exported.
+type Public struct {
+	// Value is exported.
+	Value int
+}
+
+// Build is exported.
+func Build() {}
+`
+	path := filepath.Join(t.TempDir(), "widget.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatalf("checkFile: %v", err)
+	}
+
+	gotLines := map[int]bool{}
+	for _, v := range got {
+		gotLines[v.line] = true
+	}
+	for _, line := range []int{3, 6, 9, 11} {
+		if !gotLines[line] {
+			t.Errorf("expected internal documentation on line %d to be rejected", line)
+		}
+	}
+	for _, line := range []int{15, 17, 21} {
+		if gotLines[line] {
+			t.Errorf("expected exported API documentation on line %d to be allowed", line)
+		}
+	}
+}
+
+func TestCheckFile_AllowsDocsOnExportedEmbeddedGenerics(t *testing.T) {
+	src := `package widget
+
+type Box[T any] struct{}
+
+type Public struct {
+	// Box carries the value.
+	Box[int]
+	// Other carries another value.
+	*Other[string, int]
+}
+
+type Other[K, V any] struct{}
+`
+	path := filepath.Join(t.TempDir(), "widget.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatalf("checkFile: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("violations = %+v, want exported embedded generic docs allowed", got)
+	}
+}
+
+func TestCheckFile_RejectsLongTaggedComments(t *testing.T) {
+	src := `package widget
+
+func allowed() {
+	// safety: one
+	// two
+	// three
+	// four
+}
+
+func rejected() {
+	// safety: one
+	// two
+	// three
+	// four
+	// five
+}
+
+func tooWide() {
+	// safety: xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+}
+
+func blockBypass() {
+	// safety: tagged line
+	/* two
+	three
+	four
+	five
+	six */
+}
+
+func emptyRationale() {
+	// safety:
+}
+`
+	path := filepath.Join(t.TempDir(), "widget.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatalf("checkFile: %v", err)
+	}
+	if len(got) != 4 || got[0].line != 11 || got[1].line != 19 || got[2].line != 23 || got[3].line != 32 {
+		t.Fatalf("violations = %+v, want the five-line, overlong, block-bypass, and empty tagged comments", got)
+	}
+}
+
 func TestCheckFile_AllowsExampleOutputMarkers(t *testing.T) {
 	src := `package widget_test
 
@@ -153,18 +280,50 @@ func Remove() {}
 
 func TestIsDirective(t *testing.T) {
 	cases := map[string]bool{
-		"//go:build linux":   true,
-		"//go:embed docs":    true,
-		"//nolint:errcheck":  true,
-		"// hack: not a dir": false,
-		"// regular comment": false,
-		"//just text":        false,
-		"//TODO:nope":        false,
+		"//go:build linux":                true,
+		"//go:embed docs":                 true,
+		"//nolint:errcheck":               true,
+		"//lint:ignore U1000 reason":      true,
+		"//lint:file-ignore U1000 reason": true,
+		"//why:not allowed":               false,
+		"// hack: not a dir":              false,
+		"// regular comment":              false,
+		"//just text":                     false,
+		"//TODO:nope":                     false,
 	}
 	for text, want := range cases {
 		if got := isDirective(text); got != want {
 			t.Errorf("isDirective(%q) = %v, want %v", text, got, want)
 		}
+	}
+}
+
+func TestCheckFile_DirectivesDoNotCloakNarration(t *testing.T) {
+	src := `package widget
+
+//go:generate echo generated
+// this ordinary narration is not a directive
+var generatedValue int
+
+//nolint:unused
+// this is ordinary narration too
+var lintedValue int
+
+//go:generate echo one
+//go:generate echo two
+var generatedTwice int
+`
+	path := filepath.Join(t.TempDir(), "widget.go")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := checkFile(path)
+	if err != nil {
+		t.Fatalf("checkFile: %v", err)
+	}
+	if len(got) != 2 || got[0].line != 4 || got[1].line != 8 {
+		t.Fatalf("violations = %+v, want only narration adjacent to directives", got)
 	}
 }
 

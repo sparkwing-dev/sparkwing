@@ -11,9 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/githooks"
 )
 
-// gateProject declares a commit gate; noTriggerProject declares a pipeline
-// nothing runs it from, which is the shape of a repo a fleet sweep has
-// nothing to arm in.
 const (
 	gateProject = `pipelines:
   - name: gate
@@ -27,8 +24,6 @@ const (
 `
 )
 
-// addRepo builds another checkout beside the fixture's own, so a fleet sweep
-// has more than one repo to reach.
 func (f *chainFixture) addRepo(t *testing.T, name, project string) string {
 	t.Helper()
 	dir := filepath.Join(f.root, name)
@@ -40,7 +35,6 @@ func (f *chainFixture) addRepo(t *testing.T, name, project string) string {
 	return dir
 }
 
-// registerRepos writes the machine registry a fleet sweep enumerates.
 func (f *chainFixture) registerRepos(t *testing.T, dirs ...string) {
 	t.Helper()
 	var b strings.Builder
@@ -53,7 +47,6 @@ func (f *chainFixture) registerRepos(t *testing.T, dirs ...string) {
 	t.Setenv("SPARKWING_REPOS", path)
 }
 
-// proverFailingIn fails the proof for one repo and passes everywhere else.
 func proverFailingIn(dir string) Prover {
 	return func(repoRoot, _ string) error {
 		if filepath.Base(repoRoot) == filepath.Base(dir) {
@@ -63,8 +56,6 @@ func proverFailingIn(dir string) Prover {
 	}
 }
 
-// A sweep that reports repos it left ungated as installed is the silent,
-// partial coverage the sweep exists to end, wearing a green summary.
 func TestInstallFleet_CountsWhatItArmedAndNamesWhatItDidNot(t *testing.T) {
 	f := newChainFixture(t)
 	f.asProcessEnv(t)
@@ -87,9 +78,6 @@ func TestInstallFleet_CountsWhatItArmedAndNamesWhatItDidNot(t *testing.T) {
 	}
 }
 
-// A repo whose only hook runs after the commit has landed is neither armed
-// nor left ungated: there is no gate in it for a re-run to arm, and calling
-// it armed reports a swept fleet as gated while its commits go unchecked.
 func TestInstallFleet_CountsARepoWithNoGateApartFromTheOnesItArmed(t *testing.T) {
 	f := newChainFixture(t)
 	f.asProcessEnv(t)
@@ -109,8 +97,6 @@ func TestInstallFleet_CountsARepoWithNoGateApartFromTheOnesItArmed(t *testing.T)
 	}
 }
 
-// The repo whose gate could not run must come out of the sweep exactly as it
-// went in: unclaimed, so its commits still land, and with the hooks it had.
 func TestInstallFleet_LeavesTheRepoWhoseGateCannotRunUnarmed(t *testing.T) {
 	f := newChainFixture(t)
 	f.asProcessEnv(t)
@@ -131,8 +117,6 @@ func TestInstallFleet_LeavesTheRepoWhoseGateCannotRunUnarmed(t *testing.T) {
 	}
 }
 
-// The sweep answers for the checkouts the machine registered and no others,
-// which is the limit of what it can claim to cover.
 func TestInstallFleet_SweepsOnlyTheRegisteredCheckouts(t *testing.T) {
 	f := newChainFixture(t)
 	f.asProcessEnv(t)

@@ -10,9 +10,6 @@ import (
 	"testing"
 )
 
-// withRepo creates a fresh git repo in a temp dir and returns its
-// absolute path. Every helper takes repoDir explicitly, so we no
-// longer chdir.
 func withRepo(t *testing.T) string {
 	t.Helper()
 	isolateGitConfig(t)
@@ -448,9 +445,6 @@ func TestPushTagRefusesExisting(t *testing.T) {
 	}
 }
 
-// TestNoEnvFallback_OutsideGitRepo: env vars must never short-circuit
-// real git output. Even with SPARKWING_COMMIT/BRANCH set, calls
-// against a non-repo dir error out.
 func TestNoEnvFallback_OutsideGitRepo(t *testing.T) {
 	dir := t.TempDir()
 

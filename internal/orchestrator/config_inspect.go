@@ -11,20 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// runPipelineConfigInspect prints the declared secrets list (with
-// per-field provenance and resolution status when a source is
-// configured) for the given pipeline. Pure inspection: no Plan, no
-// dispatch, no SecretResolver wiring beyond what the source binding
-// would install.
-//
-// The verb retains the historical `<pipeline> config` name even
-// though v0.6 removed the typed-Config surface; what's left is the
-// secrets view. Future verb rename targeted for v0.7.
-//
-// Flags consumed from extra:
-//
-//	--output / -o   pretty | json (default pretty)
-//	--json          alias for --output json
 func runPipelineConfigInspect(pipeline string, extra []string) error {
 	format := "pretty"
 	for i := 0; i < len(extra); i++ {

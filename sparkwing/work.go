@@ -170,10 +170,6 @@ func Step(w *Work, id string, fn any) *WorkStep {
 	return s
 }
 
-// validateStepFn checks Step's reflective contract at register time
-// so a bad fn signature panics during Work construction rather than
-// at dispatch. Returns the typed output reflect.Type (nil for untyped
-// steps) and the unified dispatch closure the runner invokes.
 func validateStepFn(fn any) (reflect.Type, func(ctx context.Context) (any, error)) {
 	if fn == nil {
 		panic("sparkwing: Step: fn must be non-nil")
@@ -356,11 +352,6 @@ func JobSpawnEach(w *Work, items, fn any) *SpawnGenSpec {
 	return spec
 }
 
-// validateSpawnEach checks JobSpawnEach's reflective contract at
-// Plan time so a bad fn signature panics during plan construction
-// rather than at dispatch -- matches how every other structural
-// SDK error (Produces/Work-return mismatch, duplicate IDs, invalid
-// Approval.OnExpiry) surfaces.
 func validateSpawnEach(items, fn any) {
 	if items == nil {
 		panic("sparkwing: JobSpawnEach: items must be non-nil")
@@ -437,9 +428,6 @@ func CoerceSpawnEachJob(v any) (Workable, error) {
 	return nil, fmt.Errorf("sparkwing: JobSpawnEach: per-item job has unsupported type %T", v)
 }
 
-// coerceSpawnEachJob is the panic-on-error variant used inside the
-// runner where a structurally-valid spec is already guaranteed by
-// validateSpawnEach.
 func coerceSpawnEachJob(v any) Workable {
 	job, err := CoerceSpawnEachJob(v)
 	if err != nil {
@@ -465,18 +453,10 @@ type WorkStep struct {
 	continueOnError bool
 	optional        bool
 	finally         bool
-	// Dry-run contract. dryRunFn is installed via
-	// .DryRun(fn) and runs in place of fn when the orchestrator
-	// dispatches under WithDryRun(ctx). safeWithoutDryRun is the
-	// explicit "this step has no side effects" marker that lets fn
-	// execute under --dry-run unmodified.
+
 	dryRunFn          func(ctx context.Context) error
 	safeWithoutDryRun bool
-	// Author-declared risk labels. The dispatcher walks this set per
-	// step, unions across the plan, and refuses dispatch when any
-	// label is missing from --sw-allow (and bypasses entirely under
-	// --sw-dry-run). An empty set means "no declared risk" -- the
-	// gate doesn't fire.
+
 	risks []string
 
 	mu       sync.Mutex
@@ -524,8 +504,6 @@ func (g *SpawnGenSpec) workDepID() string {
 	return g.syntheticID()
 }
 
-// Compile-time conformance assertions: every Work-layer dep type
-// satisfies [WorkDep]. A regression here surfaces as a build break.
 var (
 	_ WorkDep = (*WorkStep)(nil)
 	_ WorkDep = (*StepGroup)(nil)
@@ -544,9 +522,6 @@ func (s *WorkStep) Needs(deps ...WorkDep) *WorkStep {
 	return s
 }
 
-// addWorkDep appends the IDs implied by d to out, deduping. *StepGroup
-// expands to its member IDs; *SpawnGenSpec uses the generator's
-// synthetic id (members aren't known until the generator runs).
 func addWorkDep(d WorkDep, out *[]string) {
 	if d == nil {
 		return
@@ -634,10 +609,6 @@ func (s *WorkStep) Finally() *WorkStep {
 // IsFinally reports whether this step is cleanup that survives sibling failure.
 func (s *WorkStep) IsFinally() bool { return s.finally }
 
-// markDone is called by the runner once the step terminates. Stores
-// the typed output so downstream sparkwing.StepGet[T](ctx, step) calls
-// resolve. Exposed to the orchestrator via
-// RuntimePlumbing.Fns.WorkStepMarkDone.
 func (s *WorkStep) markDone(out any) {
 	s.mu.Lock()
 	if s.done == nil {
@@ -787,18 +758,12 @@ func (s *SpawnSpec) DepIDs() []string {
 // SkipPredicates returns the spawn's registered predicates.
 func (s *SpawnSpec) SkipPredicates() []SkipPredicate { return s.skipIf }
 
-// setResolvedID records the namespaced Plan node id assigned when the
-// spawn fires. Exposed to the orchestrator via
-// RuntimePlumbing.Fns.SpawnSpecSetResolvedID.
 func (s *SpawnSpec) setResolvedID(id string) { s.resolvedID = id }
 
 // ResolvedID returns the assigned Plan node id, populated after the
 // spawn fires. Empty before then.
 func (s *SpawnSpec) ResolvedID() string { return s.resolvedID }
 
-// markDone is called by the orchestrator once the spawned node
-// terminates so downstream SpawnSpec.Get calls resolve. Exposed to the
-// orchestrator via RuntimePlumbing.Fns.SpawnSpecMarkDone.
 func (s *SpawnSpec) markDone(out any) {
 	s.mu.Lock()
 	if s.done == nil {
@@ -814,11 +779,6 @@ func (s *SpawnSpec) markDone(out any) {
 	s.mu.Unlock()
 }
 
-// awaitDone is the reader half of the done/resolved/out channel
-// pattern; the writer half (markDone) is wired through
-// RuntimePlumbing.Fns.SpawnSpecMarkDone. No call site exists yet --
-// this is scaffolding for a future SpawnSpec.Get API.
-//
 //lint:ignore U1000 reader half of unwired SpawnSpec.Get scaffolding; keep paired with markDone
 func (s *SpawnSpec) awaitDone(ctx context.Context) error {
 	s.mu.Lock()
@@ -867,8 +827,6 @@ type SpawnGenSpec struct {
 	needs []string
 }
 
-// syntheticID returns the scheduling-id for a JobSpawnEach
-// fan-out group.
 func (g *SpawnGenSpec) syntheticID() string { return g.id }
 
 // ID exposes the synthetic id (e.g. "__spawn_each_0") to renderers
@@ -898,10 +856,6 @@ func (g *SpawnGenSpec) Needs(deps ...WorkDep) *SpawnGenSpec {
 	return g
 }
 
-// jobFn is the unexported Workable wrapper used internally when
-// sparkwing.Job receives a func(ctx) error directly. Pipeline authors
-// don't construct it -- pass the closure to sparkwing.Job and the
-// plan-time wrapper installs it transparently.
 type jobFn struct {
 	fn func(ctx context.Context) error
 }

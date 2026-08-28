@@ -32,8 +32,6 @@ func TestDogfoodPipelineModuleIsTidy(t *testing.T) {
 	}
 }
 
-// The replace ban and the pre-commit Go steps read one module walk between
-// them, so a module added after the fact is checked by both.
 func TestReplaceBanReadsEveryCommittedGoMod(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -51,8 +49,6 @@ func TestReplaceBanReadsEveryCommittedGoMod(t *testing.T) {
 	}
 }
 
-// The one replace this repo ships stays allowed: .sparkwing/ redirects the
-// sparkwing module to the parent checkout it is dogfooding.
 func TestReplaceBanAllowsTheDogfoodSelfReplace(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -66,9 +62,6 @@ func TestReplaceBanAllowsTheDogfoodSelfReplace(t *testing.T) {
 	}
 }
 
-// A go.mod under testdata/ is a fixture, not part of this repo's build
-// surface: it is absent from go.work on purpose, so vetting it fails on
-// a tree that is entirely correct.
 func TestIsTestdataPath(t *testing.T) {
 	inside := []string{
 		"testdata/trial-repo/go.mod",

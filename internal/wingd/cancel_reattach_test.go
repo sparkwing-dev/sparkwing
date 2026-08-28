@@ -9,10 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// TestCancel_ReattachedHolderIsCancellable proves a holder that reclaims its
-// lease after a daemon restart stays cancellable: the successor daemon marks
-// the reattached connection finalizable, so a control client's CancelLease
-// finds the run and the holder's watch observes the terminal cancel.
 func TestCancel_ReattachedHolderIsCancellable(t *testing.T) {
 	t.Parallel()
 

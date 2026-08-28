@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestFinishNodeWithReason_PersistsStructuredMetadata verifies that
-// the reason + exit code make it onto the node row and round-trip
-// through GetNode.
 func TestFinishNodeWithReason_PersistsStructuredMetadata(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -100,9 +97,6 @@ func TestFinishNodeWithReason_FinalizesDoneNodeWithEmptyOutcome(t *testing.T) {
 	}
 }
 
-// TestFinishNode_LeavesReasonEmpty is the backwards-compat check:
-// callers that never opt into the new signature get the same row
-// shape as before (empty reason, NULL exit_code).
 func TestFinishNode_LeavesReasonEmpty(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -120,10 +114,6 @@ func TestFinishNode_LeavesReasonEmpty(t *testing.T) {
 	}
 }
 
-// TestFailExpiredNodeClaims_TerminatesWithAgentLost registers a
-// claim, lets the lease elapse, and asserts the reaper flips the
-// node to failed with reason=agent_lost instead of simply clearing
-// the claim.
 func TestFailExpiredNodeClaims_TerminatesWithAgentLost(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -156,9 +146,6 @@ func TestFailExpiredNodeClaims_TerminatesWithAgentLost(t *testing.T) {
 	}
 }
 
-// TestFailStaleQueuedNodes_TerminatesWithQueueTimeout inserts a
-// ready-but-unclaimed node whose ready_at is older than the
-// threshold, runs the sweep, and asserts queue_timeout.
 func TestFailStaleQueuedNodes_TerminatesWithQueueTimeout(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -192,9 +179,6 @@ func TestFailStaleQueuedNodes_TerminatesWithQueueTimeout(t *testing.T) {
 	}
 }
 
-// TestFailStaleQueuedNodes_SkipsClaimedAndFresh ensures the sweep
-// leaves alone nodes that are either already claimed (a runner has
-// picked them up) or whose ready_at is fresher than the threshold.
 func TestFailStaleQueuedNodes_SkipsClaimedAndFresh(t *testing.T) {
 	s := newStoreT(t)
 	ctx := context.Background()
@@ -228,6 +212,4 @@ func TestFailStaleQueuedNodes_SkipsClaimedAndFresh(t *testing.T) {
 	}
 }
 
-// compile-time guard: make sure the nil-exit-code path doesn't
-// accidentally write 0 as a concrete NULL vs INTEGER mismatch.
 var _ sql.NullInt64 = sql.NullInt64{}

@@ -32,16 +32,6 @@ func TestCanceledByRun_DistinguishesTeardownFromGenuineFault(t *testing.T) {
 	}
 }
 
-// TestFailureFrom_StageFromReasonSurvivesBoundary verifies the failing
-// stage is attributed from the serializable store reason, not the Go
-// error type. In-process a failure carries a typed *sparkwing.VerifyError;
-// on the cluster path the controller has only the flattened string from
-// store.Node.Error (the pod's typed error cannot cross the process
-// boundary, see warmpool.resultFromNode / k8s.readFinalResult). Both must
-// resolve to StageVerify because both runners persist
-// failure_reason="verify", which is what failureFrom keys on -- so an
-// OnFailure recovery that branches on f.Stage behaves the same in-process
-// and on the controller.
 func TestFailureFrom_StageFromReasonSurvivesBoundary(t *testing.T) {
 	inproc := failureFrom(store.FailureVerify, &sparkwing.VerifyError{Err: errors.New("unhealthy")})
 	if inproc.Stage != sparkwing.StageVerify {

@@ -14,9 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Nothing in sparkwing sends an unprompted SIGKILL, so when one
-// arrives with no cancellation in flight the kernel sent it, and an
-// operator's next question is how much memory the node was using.
 func TestClassifyExit_UnpromptedSIGKILLNamesTheNodeAndItsPeakRSS(t *testing.T) {
 	usage := &runner.ResourceUsage{MaxRSSBytes: 3 << 30}
 	v := classifyExit("build", exitInfo{signaled: true, signal: syscall.SIGKILL, code: -1}, false, usage)
@@ -29,9 +26,7 @@ func TestClassifyExit_UnpromptedSIGKILLNamesTheNodeAndItsPeakRSS(t *testing.T) {
 			t.Errorf("message %q does not mention %q", v.message, want)
 		}
 	}
-	// safety: a signal alone is not corroboration. Recording FailureOOMKilled
-	// from it would put verdicts in the run history that no cgroup or
-	// kernel ever made.
+
 	if v.reason != store.FailureUnknown {
 		t.Errorf("reason = %q, want %q", v.reason, store.FailureUnknown)
 	}
@@ -47,21 +42,17 @@ func TestClassifyExit_SIGKILLWithoutUsageOmitsThePeak(t *testing.T) {
 	}
 }
 
-// The SIGTERM came from this runner, so the node was cancelled.
 func TestClassifyExit_CancelledIsCancelledNotFailed(t *testing.T) {
 	v := classifyExit("build", exitInfo{signaled: true, signal: syscall.SIGTERM}, true, nil)
 	if v.result.Outcome != sparkwing.Cancelled {
 		t.Fatalf("outcome = %q, want cancelled", v.result.Outcome)
 	}
-	// safety: the dispatcher decides a node was cancelled by the run by
-	// unwrapping to context.Canceled.
+
 	if !errors.Is(v.result.Err, context.Canceled) {
 		t.Errorf("Err = %v, want it to wrap context.Canceled", v.result.Err)
 	}
 }
 
-// A cancelled tree that ignored SIGTERM gets SIGKILL from us after the
-// grace period; that is still a cancellation, not an OOM.
 func TestClassifyExit_CancelledSIGKILLIsStillCancelled(t *testing.T) {
 	v := classifyExit("build", exitInfo{signaled: true, signal: syscall.SIGKILL}, true, nil)
 	if v.result.Outcome != sparkwing.Cancelled {
@@ -85,9 +76,6 @@ func TestClassifyExit_NonZeroExitCarriesTheCode(t *testing.T) {
 	}
 }
 
-// A process that exits 0 without writing a terminal row produced no
-// outcome, and treating "it did not crash" as success would report a
-// node green that never recorded doing anything.
 func TestClassifyExit_CleanExitWithoutTerminalStateFails(t *testing.T) {
 	v := classifyExit("build", exitInfo{code: 0}, false, nil)
 	if v.result.Outcome != sparkwing.Failed {

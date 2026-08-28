@@ -1,18 +1,3 @@
-// logParser.ts -- Parse sparkwing logs into structured sections.
-//
-// Sparkwing logs come in two on-disk formats:
-//
-//   * JSONL (current): one LogRecord per line. Envelope fields
-//     (ts, level, node, event) are structure; `msg` may contain raw
-//     ANSI from child processes. node_start / node_end events bracket
-//     each node's output -- we map each bracketed span onto a
-//     StepSection so the existing LogBucketView renders them as
-//     collapsible buckets. run_summary records become the summary
-//     section.
-//
-//   * Legacy STEP banners (pre-rewrite): ANSI-colored text lines
-//     like `──── STEP: name ────` / `✓ name (Ns) ────`. Kept so old
-//     stored runs stay readable; new runs don't emit this shape.
 
 export type SectionType = "preamble" | "step" | "between" | "summary";
 
@@ -27,9 +12,6 @@ export interface StepSection extends LogSection {
   status: "passed" | "failed" | "cancelled" | "running";
   duration: string | null;
   durationMs: number | null;
-  // startedAtMs is the unix-millis at which the step began, parsed
-  // from the step_start log record's timestamp. Null when the parser
-  // didn't observe a step_start (older logs, manual phase buckets).
   startedAtMs: number | null;
 }
 
@@ -43,17 +25,12 @@ export function stripAnsi(line: string): string {
   return line.replace(ANSI_RE, "");
 }
 
-// ──── STEP: name ────
 const STEP_START_RE = /STEP:\s+(.+?)\s*─/;
 
-// ✓ name (1.827s) ──── or ✓ name ────
-// Group 1: step name, Group 2: duration (optional)
 const STEP_PASS_RE = /^✓\s+(.+?)(?:\s+\(([^)]+)\))?\s+─/;
 
-// ✗ name (35ms) ──── or ✗ name ────
 const STEP_FAIL_RE = /^✗\s+(.+?)(?:\s+\(([^)]+)\))?\s+─/;
 
-// ──── SUMMARY: results ────
 const SUMMARY_RE = /SUMMARY:/;
 
 function isBlankSection(lines: string[]): boolean {
@@ -79,49 +56,15 @@ function looksLikeJSONL(lines: string[]): boolean {
   return false;
 }
 
-// parseJSONLLogs converts a JSONL record stream into the ParsedLog
-// shape LogBucketView already knows how to render.
-//
-// Bucket model:
-//   - `node_start` opens a node-scope StepSection named after the
-//     node id. Any records that arrive before the first `step` event
-//     accumulate into it as the node's "setup" phase.
-//   - Each `step` event flushes the currently open bucket (node-
-//     scope or a previous step) and opens a new StepSection named
-//     `<node> · <step>`. Duration is derived from the delta between
-//     consecutive step timestamps (or between the last step and
-//     `node_end`).
-//   - `node_end` closes the active bucket. If the node itself failed,
-//     the *last* bucket inherits the failed status since that's
-//     where execution stopped; earlier closed buckets stay passed.
-//   - `run_summary` becomes the summary section.
-//
-// The result is a flat list of StepSections -- one per phase when a
-// node used Step(), one per node when it didn't. LogBucketView
-// renders them identically so no UI changes are needed for the
-// Step-aware view.
 function parseJSONLLogs(lines: string[]): ParsedLog {
   const sections: (LogSection | StepSection)[] = [];
   let preamble: LogSection = { type: "preamble", lines: [] };
 
-  // Node-scope bucket -- holds lines emitted between node_start and
-  // the first step_start, or after step_end before node_end. Lives
-  // separately from step buckets so it doesn't have to share state.
   let nodeScope: StepSection | null = null;
   let nodeScopeStartedAt: number | null = null;
   let nodeScopeHasContent = false;
   let currentNode: string = "";
-  // Index of the most recently started step section in `sections`.
-  // Used for retroactive failure attribution at node_end when no
-  // explicit step_end:failed lands.
   let lastPhaseIdx: number = -1;
-  // Parallel-aware: the orchestrator runs steps concurrently inside
-  // one node (parallel shard pattern), so we keep every in-flight
-  // step in a map keyed on step id. Log records carry rec.step set
-  // inside the step body, which we use to route lines to the right
-  // bucket. step_start pushes a section into `sections` immediately
-  // so order reflects start-order; step_end finalizes the bucket in
-  // place and removes it from the map.
   const openSteps = new Map<
     string,
     { section: StepSection; startedAtMs: number | null }
@@ -140,10 +83,6 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
     return isNaN(ms) ? null : ms;
   };
 
-  // closeNodeScope flushes the node-scope setup bucket. `isFinal`
-  // means an explicit boundary (node_end / run_summary); stream-
-  // tail flushes pass false so a still-mid-flight setup keeps its
-  // "running" marker.
   const closeNodeScope = (nextTS: number | null, isFinal: boolean) => {
     if (!nodeScope) return;
     if (!nodeScopeHasContent) {
@@ -163,10 +102,6 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
     nodeScopeHasContent = false;
   };
 
-  // closeStep finalizes one step bucket by id. Outcome comes from
-  // step_end.attrs (preferred); when null (node_end sweep or stream-
-  // tail), the bucket keeps its current status unless `done` is true
-  // and it's still "running" -- then we promote to passed.
   const closeStep = (
     stepID: string,
     nextTS: number | null,
@@ -216,9 +151,6 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
     try {
       rec = JSON.parse(t);
     } catch {
-      // Non-JSON line: route to node-scope (or preamble before any
-      // node has started). Can't attribute to a parallel step
-      // because there's no rec.step on a raw text line.
       if (nodeScope) {
         nodeScope.lines.push(raw);
         nodeScopeHasContent = true;
@@ -249,11 +181,6 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
         break;
       }
       case "step_start": {
-        // First step_start of the node flushes the setup bucket (it
-        // had its chance to collect pre-step lines). Subsequent
-        // step_starts that fire while the node-scope is already null
-        // are no-ops on closeNodeScope. Each step pushes its own
-        // section now so the rendered order matches start-order.
         closeNodeScope(recTS, false);
         const stepID = rec.msg || "step";
         const sec: StepSection = {
@@ -299,11 +226,6 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
           outcome !== "cached" &&
           outcome !== "skipped" &&
           outcome !== "cancelled";
-        // Any step still running at node_end inherits the node's
-        // failure. If everything was already closed and the node
-        // still failed (e.g. failed in the dispatch envelope), tag
-        // the most recently started step so the UI has somewhere
-        // to surface the red marker.
         if (openSteps.size > 0) {
           closeAllOpenSteps(recTS, failed, true);
         } else if (failed && lastPhaseIdx >= 0) {
@@ -328,9 +250,6 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
         break;
       }
       default: {
-        // Route the line to its owning step bucket via rec.step.
-        // Falls back to the node-scope bucket when the record has
-        // no step attribution (between-step Info logs, etc.).
         const stepID = rec.step || "";
         const entry = stepID ? openSteps.get(stepID) : null;
         if (entry) {
@@ -345,22 +264,12 @@ function parseJSONLLogs(lines: string[]): ParsedLog {
       }
     }
   }
-  // Stream-tail flush: keep open steps in their current status
-  // (typically "running") for the live viewer. Tail-flushes pass
-  // done=false so an in-flight step doesn't get prematurely promoted
-  // to "passed" before its actual step_end arrives.
   closeAllOpenSteps(null, false, false);
   closeNodeScope(null, false);
   pushPreamble();
   return { sections };
 }
 
-// recordToLine produces the in-bucket display text for one log
-// record. Node + step are deliberately omitted from the line itself
-// because the enclosing StepSection already encodes them in its
-// `name` field; repeating them on every line is the "<node> ›
-// <step> │" breadcrumb noise that the user sees in the bucket
-// view.
 function recordToLine(rec: LogRecord): string {
   const parts: string[] = [];
   const ts = fmtTSInline(rec.ts);
@@ -378,14 +287,6 @@ function recordToLine(rec: LogRecord): string {
   return parts.join(" ");
 }
 
-// fmtTSInline renders a record's timestamp as a bracketed
-// YYYY-MM-DD HH:MM:SS.mmm prefix. The renderer detects this fixed
-// shape and shows the clock, the whole stamp, or nothing depending on
-// the viewer's toggles; baking it into the line keeps parseLogLines'
-// shape (string[]) intact. The date is always present in the string
-// so the copy/download path carries full timestamps even while the
-// on-screen default hides the date -- a pasted log with no date in it
-// is a recurring nuisance when reading old runs.
 function fmtTSInline(ts?: string): string {
   if (!ts) return "";
   const d = new Date(ts);
@@ -398,11 +299,6 @@ function fmtTSInline(ts?: string): string {
   return `[${date} ${h}:${m}:${s}.${ms}]`;
 }
 
-// stepNameFromSection extracts the bare step name out of a
-// StepSection's `name` field (which is "<node> · <step>" for phase
-// buckets, "<node>" for whole-node buckets). The inline view uses
-// this to prefix each line with `<step> | <line>` so a flat scroll
-// through a multi-step run stays attributable.
 export function stepNameFromSection(section: StepSection): string {
   const sep = section.name.indexOf(" · ");
   return sep >= 0 ? section.name.slice(sep + 3) : section.name;
@@ -449,11 +345,8 @@ export function parseLogLines(lines: string[]): ParsedLog {
   let current: LogSection | StepSection = { type: "preamble", lines: [] };
 
   function pushCurrent() {
-    // Skip empty between sections (just blank lines between steps)
     if (current.type === "between" && isBlankSection(current.lines)) return;
-    // Skip empty preamble
     if (current.type === "preamble" && isBlankSection(current.lines)) return;
-    // Always push steps and summary (a step with no output is still meaningful)
     if (current.type === "step" || current.type === "summary") {
       sections.push(current);
       return;
@@ -466,7 +359,6 @@ export function parseLogLines(lines: string[]): ParsedLog {
   for (const raw of lines) {
     const stripped = stripAnsi(raw);
 
-    // Check for step start banner
     const stepMatch = STEP_START_RE.exec(stripped);
     if (stepMatch && stripped.includes("─")) {
       pushCurrent();
@@ -482,14 +374,12 @@ export function parseLogLines(lines: string[]): ParsedLog {
       continue;
     }
 
-    // Check for summary banner
     if (SUMMARY_RE.test(stripped) && stripped.includes("─")) {
       pushCurrent();
       current = { type: "summary", lines: [] };
       continue;
     }
 
-    // Check for step pass result line
     const passMatch = STEP_PASS_RE.exec(stripped);
     if (passMatch && current.type === "step") {
       (current as StepSection).status = "passed";
@@ -499,7 +389,6 @@ export function parseLogLines(lines: string[]): ParsedLog {
       continue;
     }
 
-    // Check for step fail result line
     const failMatch = STEP_FAIL_RE.exec(stripped);
     if (failMatch && current.type === "step") {
       (current as StepSection).status = "failed";
@@ -509,9 +398,6 @@ export function parseLogLines(lines: string[]): ParsedLog {
       continue;
     }
 
-    // Regular line -- keep the raw bytes so SGR escapes survive into
-    // the renderer (LogLines paints them via ansiToHtml). The
-    // `stripped` form above is used only for banner regex matching.
     current.lines.push(raw);
   }
 

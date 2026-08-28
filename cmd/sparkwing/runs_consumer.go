@@ -1,15 +1,3 @@
-// `sparkwing runs consumer {start,status,stop}` and the detached body
-// behind them -- lifecycle for the process that executes submitted runs.
-//
-// The installed distribution owns this process, the same rule the
-// admission daemon follows: this CLI re-execs itself as the consumer, so
-// the binary serving a home's queue is always one that knows the verb.
-// A compiled pipeline binary never hosts one.
-//
-// Most people never type these verbs. `runs submit` starts a consumer
-// when none is running, and the consumer exits on its own after a quiet
-// window. They exist for the operator who wants to see whether one is
-// resident, and for stopping it deliberately.
 package main
 
 import (
@@ -28,19 +16,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/orchestrator"
 )
 
-// consumerSpawnVerb is the hidden subcommand a spawned consumer is
-// started with. Like the dashboard supervisor's, it is not in the
-// command registry: it is an implementation detail of the spawn, not a
-// surface anyone should type.
 const consumerSpawnVerb = "__runs-consume"
 
-// consumerStartTimeout bounds how long a spawn waits to see the new
-// consumer take the election lock. Generous because the consumer opens
-// (and may migrate) the state database on the way up, and a loaded
-// machine should not read as a failed start.
 const consumerStartTimeout = 20 * time.Second
 
-// consumerStartPoll is how often the wait re-checks the lock.
 const consumerStartPoll = 25 * time.Millisecond
 
 func runRunsConsumer(args []string) error {
@@ -144,17 +123,6 @@ func runRunsConsumerStop(args []string) error {
 	return nil
 }
 
-// ensureTriggerConsumer guarantees a consumer owns home's queue before
-// the caller acknowledges anything, spawning one when none is resident.
-//
-// The wait is the load-bearing part. Returning as soon as the child
-// process starts would acknowledge a run whose executor might still die
-// during startup -- a schema-skew refusal, an unwritable home. Waiting
-// for the election lock to be held means the acknowledgment is backed by
-// a process that got far enough to own the queue.
-//
-// A consumer that is already resident satisfies this immediately; the
-// spawn is only for the cold case.
 func ensureTriggerConsumer(home string, idle, claimLease time.Duration) error {
 	running, err := orchestrator.ConsumerRunning(home)
 	if err != nil {
@@ -187,20 +155,6 @@ func ensureTriggerConsumer(home string, idle, claimLease time.Duration) error {
 		consumerStartTimeout, layout.Log, tail)
 }
 
-// rotateOutdatedConsumer stops a resident consumer built from a
-// different sparkwing version than this CLI, and reports whether the
-// queue is now free for a fresh one.
-//
-// Without it an upgrade silently does not take. A consumer keeps its
-// queue for as long as work keeps arriving, and `runs submit` only ever
-// asked whether *a* consumer was running -- so on a busy home the newly
-// installed binary would hand every run to the old build indefinitely,
-// including runs submitted precisely to pick up a fix.
-//
-// A consumer that records no version predates the stamp; it is rotated
-// too, since an unknown build is exactly the stale case. Failing to stop
-// it is not fatal: the existing consumer still executes the run, which
-// is better than refusing to submit.
 func rotateOutdatedConsumer(home string) bool {
 	info, ok := orchestrator.ConsumerInfo(home)
 	if !ok {
@@ -235,12 +189,6 @@ func consumerVersionLabel(v string) string {
 	return v
 }
 
-// spawnTriggerConsumer re-execs this binary as a detached consumer.
-//
-// Detaching from the terminal's process group is what makes a submitted
-// run survive the submitting shell: without Setsid, a Ctrl-C in that
-// shell reaches the consumer through the foreground process group and
-// kills the very thing that was supposed to outlive it.
 func spawnTriggerConsumer(home string, idle, claimLease time.Duration) error {
 	self, err := os.Executable()
 	if err != nil {
@@ -273,11 +221,7 @@ func spawnTriggerConsumer(home string, idle, claimLease time.Duration) error {
 	cmd.Stdin = nil
 	cmd.Stdout = logF
 	cmd.Stderr = logF
-	// The consumer serves the home it was given, and so must everything
-	// it launches. Each dispatched run re-execs a pipeline binary that
-	// resolves its own paths from $SPARKWING_HOME; inheriting a different
-	// value than --home would have the consumer claim triggers from one
-	// store and the run it dispatched write its results to another.
+
 	cmd.Env = setEnv(os.Environ(), "SPARKWING_HOME", layout.Home)
 	cmd.SysProcAttr = newDetachSysProcAttr()
 	if err := cmd.Start(); err != nil {
@@ -290,13 +234,6 @@ func spawnTriggerConsumer(home string, idle, claimLease time.Duration) error {
 	return nil
 }
 
-// runRunsConsumeDetached is the body of the spawned consumer. It serves
-// until the idle window elapses or it is signalled.
-//
-// Losing the election exits zero on purpose: two submissions racing to
-// spawn both start a process, one wins the lock, and the loser has
-// nothing to complain about -- the queue is owned, which is all either
-// caller wanted.
 func runRunsConsumeDetached(args []string) error {
 	fs := flag.NewFlagSet(consumerSpawnVerb, flag.ContinueOnError)
 	home := fs.String("home", "", "")

@@ -117,8 +117,6 @@ func TestEmitGrepMatches_NoMatchesPrintsHint(t *testing.T) {
 	}
 }
 
-// No matches is an empty stream: with one id per line, zero matches is
-// zero lines. The exit code, not the bytes, says whether the search ran.
 func TestEmitGrepMatches_QuietJSONEmptyStream(t *testing.T) {
 	var buf bytes.Buffer
 	if err := emitGrepMatches(nil, GrepOpts{Quiet: true, JSON: true}, &buf); err != nil {

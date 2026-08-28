@@ -26,7 +26,6 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-// buildFixture compiles the testprog helper once per test binary.
 func buildFixture(t *testing.T) string {
 	t.Helper()
 	fixtureOnce.Do(func() {
@@ -63,9 +62,6 @@ func startProc(t *testing.T, args ...string) *procHandle {
 	return startProcEnv(t, nil, args...)
 }
 
-// startProcEnv is [startProc] with extra environment entries appended to
-// the inherited environment, for the paths whose behavior is decided by
-// the environment the process is launched with.
 func startProcEnv(t *testing.T, extraEnv []string, args ...string) *procHandle {
 	t.Helper()
 	bin := buildFixture(t)
@@ -219,9 +215,6 @@ func waitForDaemonLineCount(t *testing.T, home string, want int, timeout time.Du
 	}
 }
 
-// TestProcess_ElectionRaceSingleDaemon starts several client processes at
-// once, each of which will spawn a daemon if none is running; the flock
-// election must leave exactly one daemon serving all of them.
 func TestProcess_ElectionRaceSingleDaemon(t *testing.T) {
 	t.Parallel()
 
@@ -250,9 +243,6 @@ func TestProcess_ElectionRaceSingleDaemon(t *testing.T) {
 	}
 }
 
-// TestProcess_ClientKillReleasesAndPromotes SIGKILLs a lease holder and
-// asserts the queued waiter is promoted -- the kernel closing the socket
-// is the only liveness signal.
 func TestProcess_ClientKillReleasesAndPromotes(t *testing.T) {
 	t.Parallel()
 
@@ -270,11 +260,6 @@ func TestProcess_ClientKillReleasesAndPromotes(t *testing.T) {
 	b.waitOK(5 * time.Second)
 }
 
-// TestProcess_CancelOthersEvictsHolderAcrossProcesses starts two real
-// processes contending on a capacity-1 semaphore under cancel_others: the
-// newer arrival must evict the older holder (newest wins), the holder
-// must observe the eviction naming the contested key and superseding run,
-// and the aggressor must be admitted -- never queued behind the holder.
 func TestProcess_CancelOthersEvictsHolderAcrossProcesses(t *testing.T) {
 	if testing.Short() {
 		t.Skip("process test skipped in -short")
@@ -296,11 +281,6 @@ func TestProcess_CancelOthersEvictsHolderAcrossProcesses(t *testing.T) {
 	}
 }
 
-// TestProcess_SelfSpawnedDaemonWritesLogFile exercises the real default
-// spawn path (no injected spawner): a client that finds no daemon
-// re-execs the binary as `wingd run`, which must reliably create the
-// documented log file and record its history there -- the log is the only
-// witness when the invisible daemon misbehaves.
 func TestProcess_SelfSpawnedDaemonWritesLogFile(t *testing.T) {
 	if testing.Short() {
 		t.Skip("process test skipped in -short")
@@ -316,16 +296,6 @@ func TestProcess_SelfSpawnedDaemonWritesLogFile(t *testing.T) {
 	}
 }
 
-// TestProcess_PipelineClientStartsDaemonViaHostBinary exercises the one
-// spawn path a non-hosting client retains. A compiled pipeline binary
-// invoked directly -- a systemd unit, a deploy box, no CLI in the loop --
-// with $SPARKWING_WINGD_BIN naming an installed sparkwing must bring the
-// daemon up by starting *that* binary, never by re-execing itself.
-//
-// The daemon's advertised version is the proof: the host binary names its
-// own build, and the spawn deliberately drops the client's, so a daemon
-// reporting anything but the host's default would mean the client hosted
-// itself after all.
 func TestProcess_PipelineClientStartsDaemonViaHostBinary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("process test skipped in -short")
@@ -334,9 +304,7 @@ func TestProcess_PipelineClientStartsDaemonViaHostBinary(t *testing.T) {
 	hostBin := buildFixture(t)
 	env := []string{
 		"SPARKWING_WINGD_BIN=" + hostBin,
-		// An empty PATH proves the env var is what resolved the host: with
-		// a sparkwing on the developer's PATH the fallback would pass this
-		// test for the wrong reason.
+
 		"PATH=" + t.TempDir(),
 	}
 	h := startProcEnv(t, env, "hold",
@@ -354,10 +322,6 @@ func TestProcess_PipelineClientStartsDaemonViaHostBinary(t *testing.T) {
 	}
 }
 
-// TestProcess_PipelineClientWithoutAHostStartsNothing is the other half:
-// with no host binary resolvable, a non-hosting client must report the
-// absence with its sentinel rather than fall back to hosting itself. A
-// caller that can run uncoordinated keys off exactly that sentinel.
 func TestProcess_PipelineClientWithoutAHostStartsNothing(t *testing.T) {
 	if testing.Short() {
 		t.Skip("process test skipped in -short")
@@ -375,9 +339,6 @@ func TestProcess_PipelineClientWithoutAHostStartsNothing(t *testing.T) {
 	}
 }
 
-// TestProcess_DaemonKillRestoresAndReattaches SIGKILLs the daemon and proves
-// the surviving holder reclaims its lease from the successor. A second token
-// claimant would compete with the holder rather than exercise holder recovery.
 func TestProcess_DaemonKillRestoresAndReattaches(t *testing.T) {
 	t.Parallel()
 

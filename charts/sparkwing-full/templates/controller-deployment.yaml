@@ -7,10 +7,6 @@ metadata:
     {{- include "sparkwing-full.componentLabels" (dict "root" . "component" "controller") | nindent 4 }}
 spec:
   replicas: {{ .Values.controller.replicas }}
-  # Recreate, not RollingUpdate: the controller's state DB is local
-  # SQLite on an RWO PVC. A second pod can't multi-attach; rolling
-  # would deadlock. Single-instance posture per decision 0001 --
-  # multi-replica HA lives in the paid feature pack.
   strategy:
     type: Recreate
   selector:
@@ -90,9 +86,6 @@ spec:
             - {{ printf "--logs-url=%s" $logsURL | quote }}
             {{- end }}
           env:
-            # SPARKWING_HOME on a writable mount: the orchestrator's
-            # DefaultPaths() mkdir's this at startup, and runAsUser
-            # 65534 can't write to "/".
             - name: SPARKWING_HOME
               value: /data
             - name: POD_NAMESPACE
@@ -100,7 +93,6 @@ spec:
                 fieldRef:
                   fieldPath: metadata.namespace
             {{- if .Values.controller.githubWebhookSecret.name }}
-            # Verifies HMAC signatures on POST /webhooks/github/{pipeline}.
             - name: GITHUB_WEBHOOK_SECRET
               valueFrom:
                 secretKeyRef:
@@ -108,9 +100,6 @@ spec:
                   key: {{ .Values.controller.githubWebhookSecret.key | quote }}
             {{- end }}
             {{- if .Values.controller.secretsKey.name }}
-            # AT-REST encryption key for the secrets store.
-            # Without it, the controller logs a WARNING at startup
-            # and stores secret values as plaintext in its DB.
             - name: SPARKWING_SECRETS_KEY
               valueFrom:
                 secretKeyRef:

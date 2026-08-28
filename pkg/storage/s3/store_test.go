@@ -20,7 +20,6 @@ import (
 
 const testBucket = "sparkwing-test"
 
-// fakeS3 spins up an in-memory S3 server (gofakes3).
 func fakeS3(t *testing.T) (*awss3.Client, func()) {
 	t.Helper()
 	backend := s3mem.New()

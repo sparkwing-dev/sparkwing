@@ -1,18 +1,5 @@
 "use client";
 
-// Pipelines explorer: 3-column workflow view. Lists runs (left), the
-// nodes inside the selected run (middle), and detail + logs for the
-// selected node (right). Filters over repo / pipeline / branch /
-// status / tag narrow the run list. Repo comes from the Run record
-// populated at trigger / CreateRun; pipelines.yaml provides the tag
-// set.
-//
-// Port of web/src/_stash/pipelines-page.tsx.bak, adapted to the Run /
-// Node model. Fields the old Job carried but the new Run does not
-// (heartbeat, status_detail, failure_reason, retry_of, prefer /
-// require, env.TEST_NAME) are omitted rather than stubbed -- future
-// plumbing sessions can re-introduce them when the backend stores
-// them.
 
 import {
   Suspense,
@@ -60,11 +47,11 @@ import {
   getRuns,
   parseHolder,
   retryRun,
-  runDurationMs,
   searchRunLogs,
   searchRunsGrep,
 } from "@/lib/api";
 import { useRunEvents } from "@/lib/useRunEvents";
+import { useCurrentTime } from "@/lib/useCurrentTime";
 import {
   fmtAgo,
   fmtAgoShort,
@@ -90,17 +77,10 @@ import { toast } from "@/components/Toasts";
 import ActionMenu from "@/components/ActionMenu";
 import AttemptsDropdown from "@/components/AttemptsDropdown";
 
-// Runs-list still polls: the event stream is per-run, not global, so
-// the left sidebar can't subscribe to "anything new". The detail
-// view (middle + right columns) is event-driven -- see the
-// useRunEvents wiring in Pipelines() below.
 const POLL_MS = 2000;
-// Fallback detail refresh when the event stream is unavailable
-// (auth drop, proxy cuts the connection, browser tab backgrounded
-// long enough for the server to timeout). Slower than pre-SSE since
-// it's belt-and-suspenders, not the primary signal.
 const DETAIL_FALLBACK_POLL_MS = 8000;
 const RUNS_WINDOW = 200;
+const EMPTY_NODES: RunNode[] = [];
 
 function statusDot(status: string): string {
   switch (status) {
@@ -124,20 +104,11 @@ function statusDot(status: string): string {
 }
 
 function outcomeDot(outcome: string, status: string, reused = false): string {
-  // Reused-from-retry nodes inherit outcome=success but should
-  // read as teal so the sidebar distinguishes carried-forward
-  // success from a fresh execution in this attempt.
   if (reused) return "bg-teal-300";
   if (outcome) return statusDot(outcome === "success" ? "success" : outcome);
   return statusDot(status);
 }
 
-// collectNodeAnnotations returns the full annotation set for one
-// node, in display order: step-scoped first (with their step id),
-// then node-scoped (between-step). Step annotations live on the
-// step rows now -- reading n.annotations alone misses them.
-// Dual-persisted older runs may carry the same string on both
-// node + step rows; the dedup keeps the step entry.
 function collectNodeAnnotations(
   n: RunNode,
 ): { stepID: string | null; text: string }[] {
@@ -154,19 +125,6 @@ function collectNodeAnnotations(
     out.push({ stepID: null, text: a });
   }
   return out;
-}
-
-function TimeAgo({ ts }: { ts: string }) {
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    const i = setInterval(() => setTick((t) => t + 1), 1000);
-    return () => clearInterval(i);
-  }, []);
-  const sec = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
-  if (sec < 60) return <span>-{sec}s</span>;
-  if (sec < 3600) return <span>-{Math.floor(sec / 60)}m</span>;
-  if (sec < 86_400) return <span>-{Math.floor(sec / 3600)}h</span>;
-  return <span>-{Math.floor(sec / 86_400)}d</span>;
 }
 
 function nodeDuration(n: RunNode): number {
@@ -271,10 +229,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const initialRun = searchParams.get("run");
   const [selectedRun, setSelectedRun] = useState<string | null>(initialRun);
-  // checkedRuns is the selection set -- what rerun / delete operate
-  // on. The detail pane (selectedRun) is a separate "viewing" state;
-  // opening a detail also adds that run to the selection so the user
-  // sees what's selected, but un-viewing doesn't drop it from the set.
   const [checkedRuns, setCheckedRuns] = useState<Set<string>>(() =>
     initialRun ? new Set([initialRun]) : new Set(),
   );
@@ -286,31 +240,11 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       return next;
     });
   };
-  // ?node= is written by every deep link into a specific node -- the
-  // Home "Needs attention" list, the Nav approvals dropdown. Seeding
-  // state from it is what makes those links land on the node instead
-  // of just the run.
   const [selectedNode, setSelectedNode] = useState<string | null>(
     searchParams.get("node"),
   );
-  // Selected step id within the selected node (or null if no step is
-  // currently focused). Shared across:
-  //   - the left Nodes panel (highlights the row + scrolls into view)
-  //   - the StepDag (paints the step gold)
-  //   - the Logs tab (expands+scrolls to the step bucket)
-  // Cleared when the selected node changes via selectNode.
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
-  // Query strings this view wrote itself, oldest first. The
-  // adopt-from-URL effect below consumes them so it can tell an
-  // external navigation from the delayed echo of our own replace.
-  // Bounded because a coalesced replace may never echo back.
   const selfWritten = useRef<string[]>([]);
-  // writeParams is the single writer for this view's URL state (run,
-  // node). It reads window.location.search rather than the
-  // searchParams snapshot because router.replace doesn't update the
-  // snapshot synchronously -- a second write in the same tick would
-  // otherwise resurrect the value the first one just changed. Callers
-  // that touch both keys pass them together for the same reason.
   const writeParams = useCallback(
     (updates: Record<string, string | null>) => {
       const base =
@@ -328,11 +262,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     },
     [router],
   );
-  // Wrappers so callers don't have to remember to coordinate the two
-  // pieces of state. selectNode clears any step focus; selectStep
-  // assigns both at once so the post-render reads them consistently.
-  // Both keep ?node= current so a reload or a shared URL reopens what
-  // the user was looking at.
   const selectNode = useCallback(
     (id: string | null) => {
       setSelectedNode(id);
@@ -349,12 +278,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     },
     [writeParams],
   );
-  // Adopt run/node from the URL when someone else navigates us. The
-  // Nav approvals dropdown links to /runs from the /runs page itself,
-  // so React never remounts this view and the useState seeds above
-  // never re-read -- the click used to change the address bar and
-  // nothing else. Echoes of our own writes are skipped so a selection
-  // can't be dragged backwards by a lagging snapshot.
   const queryString = searchParams.toString();
   const selectionRef = useRef({ run: selectedRun, node: selectedNode });
   selectionRef.current = { run: selectedRun, node: selectedNode };
@@ -380,15 +303,22 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const filterState = useUrlFilterState();
   const { openDropdown, setOpenDropdown, filterRef } = useFilterDropdownState();
   const [showTrigger, setShowTrigger] = useState(false);
-  // When set, RunDetailPane consumes it once: switches to Logs tab,
-  // selects the node, and focuses the line. Used by the Search view
-  // to deep-link a result click into the Activity view via
-  // sessionStorage hand-off.
   const [pendingLogFocus, setPendingLogFocus] = useState<{
     nodeID: string;
     stepID: string | null;
     line: number;
   } | null>(null);
+  const consumePendingLogFocus = useCallback(
+    () => setPendingLogFocus(null),
+    [],
+  );
+  const adoptPendingLogFocus = useCallback(
+    (focus: { nodeID: string; stepID: string | null }) => {
+      setSelectedNode(focus.nodeID);
+      setSelectedStep(focus.stepID);
+    },
+    [],
+  );
   useEffect(() => {
     if (typeof window === "undefined") return;
     const raw = sessionStorage.getItem("sparkwing.searchResultFocus");
@@ -408,7 +338,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         });
       }
     } catch {
-      // ignore malformed handoff
     }
   }, []);
 
@@ -434,10 +363,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     return () => clearInterval(i);
   }, [refresh]);
 
-  // Live progress for running runs. Fetches detail for each running
-  // run on every poll cycle and caches node counts so the list can
-  // show "3/8" badges without opening the detail pane. Skipped when
-  // there are no running runs to keep network quiet.
   const [runProgress, setRunProgress] = useState<
     Record<string, { done: number; total: number }>
   >({});
@@ -470,12 +395,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     };
   }, [runs]);
 
-  // Kick an initial detail fetch when a run is selected so the UI
-  // has a baseline to mutate against. Subsequent updates come from
-  // the SSE event stream (see the useRunEvents block just below) --
-  // event-driven, ~sub-100ms latency, no 2s poll. A slow fallback
-  // poll still fires while a run is selected in case the stream
-  // can't open (auth drop, proxy cut, etc.).
   useEffect(() => {
     if (!selectedRun) {
       setDetail(null);
@@ -488,11 +407,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     return () => clearInterval(i);
   }, [selectedRun, loadDetail]);
 
-  // Coalesced refetch driver: every event from the stream marks the
-  // detail as stale. A single in-flight fetch drains the staleness;
-  // if more events arrive mid-fetch, a trailing fetch fires. This
-  // keeps us O(1) network calls per burst of events rather than one
-  // per event.
   const refetchState = useRef<{ inFlight: boolean; stale: boolean }>({
     inFlight: false,
     stale: false,
@@ -537,15 +451,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setFinishedAfter: filterState.setFinishedAfter,
     setFinishedBefore: filterState.setFinishedBefore,
   };
-  // The list only holds the RUNS_WINDOW most recent runs, and the
-  // filters cut it down further. A run opened by deep link (Home
-  // "Needs attention", the Nav approvals dropdown, a shared URL) can
-  // easily fall outside both -- an approval left pending for weeks
-  // sits well behind the window. Without folding it back in, the
-  // detail pane shows the run while the list has no row to highlight
-  // and no row to scroll to, which reads as a broken link. So: splice
-  // the loaded detail's run in when the list is missing it, and never
-  // let a filter hide the run currently being viewed.
   const detailRun = detail?.run ?? null;
   const topLevel = useMemo(() => {
     const withSelected =
@@ -567,15 +472,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }, [runs, detailRun, selectedRun, filterState, pipelineMeta]);
   const activeCount = activeFilterCount(filterState);
 
-  // When a run is selected via URL (typically arriving from the By
-  // pipeline view) and the row mounts in topLevel, scroll it into
-  // view once. Tracked per-id so polls don't keep re-scrolling.
-  //
-  // The runs list and the run detail load in a race, and on a deep
-  // link the detail often wins. Scrolling then is wasted: the list is
-  // the single spliced-in row, already in view, and consuming the
-  // one-shot there means the row never gets scrolled to once the real
-  // 200 rows land above it. So wait for the list itself to arrive.
   const scrolledForRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedRun) return;
@@ -591,22 +487,13 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }, [selectedRun, topLevel, runs.length]);
 
   const run = detail?.run || null;
-  const nodes = detail?.nodes || [];
+  const nodes = detail?.nodes ?? EMPTY_NODES;
   const node = nodes.find((n) => n.id === selectedNode) || null;
-  // Single source of truth for "which nodes did the orchestrator
-  // rehydrate from a prior attempt." Computed once at the page
-  // level and threaded into both NodesList (sidebar dots) and
-  // RunDetailPane (DAG pills + reuse summary banner).
   const { ids: reusedNodeIDs, priorRunID: reusedPriorRunID } =
     useReusedNodeIDs(run);
 
   const filterCtx = useFilterCtx(filterState);
 
-  // Keyboard cursor: j/down moves to next row, k/up to previous,
-  // Enter opens the focused run, Esc closes the detail (or clears
-  // focus when nothing is open). Cursor is separate from selectedRun
-  // so the user can scroll through rows without fetching detail on
-  // every keystroke.
   const [focusedRun, setFocusedRun] = useState<string | null>(null);
   const [focusedNode, setFocusedNode] = useState<string | null>(null);
   const [focusedColumn, setFocusedColumn] = useState<"runs" | "nodes">("runs");
@@ -645,8 +532,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       const ns = nodesRef.current;
       const col = focusedColumnRef.current;
       const tabs = visibleTabsRef.current;
-      // Tab / Shift+Tab cycles the active tab. Wraps in both
-      // directions so repeated presses keep moving.
       if (e.key === "Tab") {
         if (!selectedRunRef.current || tabs.length === 0) return;
         e.preventDefault();
@@ -660,7 +545,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         if (next) setTab(next.key);
         return;
       }
-      // ── Column transitions ──────────────────────────────────────
       if (e.key === "h" || e.key === "ArrowLeft") {
         e.preventDefault();
         if (col === "nodes") setFocusedColumn("runs");
@@ -680,7 +564,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         }
         return;
       }
-      // ── Per-column j/k/Enter/Escape ─────────────────────────────
       if (col === "nodes" && ns.length > 0) {
         const cur =
           focusedNodeRef.current ?? selectedNodeRef.current ?? ns[0].id;
@@ -701,7 +584,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           selectNode(next);
         } else if (e.key === "Enter") {
           e.preventDefault();
-          // Header parked (no node focus): Enter clears selection.
           if (!focusedNodeRef.current) {
             selectNode(null);
             return;
@@ -746,9 +628,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [selectNode]);
 
-  // Scroll focused row into view when it changes via keyboard.
   useEffect(() => {
     if (!focusedRun) return;
     const el = document.querySelector(
@@ -758,7 +639,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusedRun]);
 
-  // Same for focused node.
   useEffect(() => {
     if (!focusedNode) return;
     const el = document.querySelector(
@@ -768,7 +648,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     el.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [focusedNode]);
 
-  // Scroll the active tab into view when it changes via Tab key.
   useEffect(() => {
     const el = document.querySelector(
       `[data-tab-key="${tab}"]`,
@@ -776,9 +655,6 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     el?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [tab]);
 
-  // When a node selection clears, drop the keyboard focus off any
-  // specific node so the cursor parks on the Nodes header instead of
-  // staying on whatever was just deselected.
   const prevSelectedNodeRef = useRef(selectedNode);
   useEffect(() => {
     if (prevSelectedNodeRef.current && !selectedNode) setFocusedNode(null);
@@ -787,25 +663,14 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
 
   const selectRun = (id: string | null) => {
     setSelectedRun(id);
-    // Switching runs drops the node selection: node ids are scoped to
-    // a run, so carrying one across would point at nothing. Cleared
-    // inline (not via selectNode) so run and node land in one URL
-    // write -- see writeParams on why two writes would race.
     setSelectedNode(null);
     setSelectedStep(null);
-    // Row body click is single-select: replace the selection set so
-    // only this row is highlighted. When exiting the collapsed view
-    // (id=null), keep the previous selection in checkedRuns so the
-    // user can spot where they came from on the expanded list.
     if (id) setCheckedRuns(new Set([id]));
     writeParams({ run: id, node: null });
   };
   const selectRunRef = useRef(selectRun);
   selectRunRef.current = selectRun;
 
-  // Lineage chips on each row fire SELECT_RUN_EVENT to jump across
-  // retry edges. We route the id back through selectRun so URL,
-  // scroll, and the row's checkbox highlight all stay in sync.
   useEffect(() => {
     const handler = (e: Event) => {
       const ce = e as CustomEvent<string>;
@@ -1023,8 +888,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
       </div>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Left: Runs list. Collapses to a sidebar when a run is
-          selected; expands to fill the screen otherwise. */}
+        {
+                                                            }
         <div
           className={`${run ? "w-52 shrink-0" : "flex-1"} border-r border-[var(--border)] flex flex-col transition-all`}
         >
@@ -1089,7 +954,7 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           </div>
         </div>
 
-        {/* Middle: RunNodes in run */}
+        {                             }
         {run && detail && (
           <div className="w-44 border-r border-[var(--border)] flex flex-col shrink-0 overflow-y-auto">
             <div
@@ -1140,8 +1005,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           </div>
         )}
 
-        {/* Right: detail + logs. Hidden until a run is selected so the
-          runs list above can spread across the full viewport. */}
+        {
+                                                                 }
         {run && (
           <div className="flex-1 flex flex-col overflow-hidden">
             <RunDetailPane
@@ -1164,7 +1029,8 @@ function Pipelines({ pivotTabs }: { pivotTabs: React.ReactNode }) {
                   ? pendingLogFocus
                   : null
               }
-              onConsumePendingLogFocus={() => setPendingLogFocus(null)}
+              onAdoptPendingLogFocus={adoptPendingLogFocus}
+              onConsumePendingLogFocus={consumePendingLogFocus}
               reusedNodeIDs={reusedNodeIDs ?? undefined}
               reusedPriorRunID={reusedPriorRunID}
             />
@@ -1263,25 +1129,13 @@ function FilterableTimestamp({
   );
 }
 
-// --- nodes list (middle column) ---
 
-// partitionByGroup walks the nodes in order and produces a list of
-// sections preserving the plan's original sequencing. A group is
-// "opened" at the position of its first member; subsequent members
-// collect into that same section even if other nodes appear between
-// them, so the header stays anchored to where the group begins in
-// the plan. Ungrouped nodes stay inline and get split into runs
-// around any grouped section they straddle -- this is what makes the
-// group header show up where the author put it in the DSL, not
-// bottom-pinned.
 function partitionByGroup(
   nodes: RunNode[],
 ): { group: string; nodes: RunNode[] }[] {
   const sections: { group: string; nodes: RunNode[] }[] = [];
   const groupSection = new Map<string, number>();
   for (const n of nodes) {
-    // A node may belong to multiple named groups; for partitioning we
-    // anchor it to its first declared group (the primary cluster).
     const g = n.groups?.[0] || "";
     if (g === "") {
       const last = sections[sections.length - 1];
@@ -1305,10 +1159,6 @@ function partitionByGroup(
 
 type GroupAgg = "failed" | "running" | "pending" | "success";
 
-// aggregateGroupStatus reduces a group's child nodes into a single
-// pill status. Priority failed > running > pending > success matches
-// the design doc: the most-attention-worthy state wins. "claimed" is
-// treated as running; cached/skipped count toward success.
 function aggregateGroupStatus(nodes: RunNode[]): GroupAgg {
   let hasRunning = false;
   let hasPending = false;
@@ -1323,13 +1173,6 @@ function aggregateGroupStatus(nodes: RunNode[]): GroupAgg {
   return "success";
 }
 
-// RunsSearchView is the Search pivot: a dedicated cross-run log grep
-// page. Filter chips are shared with the Activity view (same
-// useUrlFilterState hook backs them) so the candidate set survives
-// pivot changes. Clicking a result navigates to the Activity view
-// with the run/node opened and the Logs tab scrolled to the matching
-// line; the line target hands off via sessionStorage so the URL
-// stays clean.
 function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1366,11 +1209,6 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     setFinishedBefore: filterState.setFinishedBefore,
   };
 
-  // gq + since live in the URL so the search survives refresh, is
-  // shareable, and the browser back button restores the same state
-  // when the user navigates from a result row into a run and back.
-  // Using `gq` (not `q`) because the filter bar already owns `q` for
-  // its text search.
   const initialQuery = searchParams.get("gq") || "";
   const initialSince = searchParams.get("gsince") || "24h";
   const [query, setQuery] = useState(initialQuery);
@@ -1405,8 +1243,6 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
           limit: 200,
           maxMatches: 10,
         });
-        // Server marshals a nil slice as `null`; normalize so the
-        // empty-state branch fires (it checks `!== null`).
         setResults(resp.matches ?? []);
         setRunsMap(resp.runs ?? {});
         setRunsScanned(resp.runs_scanned);
@@ -1428,8 +1264,6 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
     router.replace(`/runs?${params.toString()}`, { scroll: false });
     runGrep(query, since);
   }, [query, since, searchParams, router, runGrep]);
-  // Auto-run on mount when the URL arrived with a gq -- e.g., direct
-  // link, refresh, or the user pressing Back from a run detail.
   const ranInitialRef = useRef(false);
   useEffect(() => {
     if (ranInitialRef.current) return;
@@ -1439,10 +1273,6 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
   }, []);
   const onResultClick = (m: RunsGrepMatch) => {
     if (typeof window !== "undefined") {
-      // step_id rides along so the receiving page can drill into
-      // the matching step bucket; without it the Logs view picks
-      // the node section but the user still has to expand the
-      // correct step manually.
       sessionStorage.setItem(
         "sparkwing.searchResultFocus",
         JSON.stringify({
@@ -1452,11 +1282,10 @@ function RunsSearchView({ pivotTabs }: { pivotTabs: React.ReactNode }) {
         }),
       );
     }
-    // Keep gq + gsince in the URL so the browser back button drops
-    // the user right back into the search view with the same query.
     const params = new URLSearchParams(searchParams.toString());
     params.delete("view");
     params.set("run", m.run_id);
+    params.set("node", m.node_id);
     router.push(`/runs?${params.toString()}`);
   };
   const byRun = new Map<string, RunsGrepMatch[]>();
@@ -1644,20 +1473,9 @@ function NodesList({
   focusedColumnActive?: boolean;
   onSelect: (id: string | null) => void;
   onSelectStep: (nodeId: string, stepId: string | null) => void;
-  // Node ids the orchestrator rehydrated from a prior attempt.
-  // Drives the teal "reused" dot color so the sidebar matches the
-  // DAG's REUSED treatment.
   reusedNodeIDs?: Set<string>;
 }) {
   const groups = partitionByGroup(nodes);
-  // Collapse state is keyed on the group name and driven by the
-  // design-doc default: expanded while anything's still moving or
-  // failed; collapsed once every child succeeded. The user can
-  // override either way by clicking the header; we track that as an
-  // explicit toggle so auto-collapse doesn't fight them.
-  // Groups default to expanded so every node is visible without
-  // hunting; the user can collapse one explicitly via the header
-  // chevron. Tracked as a Set so the default state is "open".
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(),
   );
@@ -1668,10 +1486,6 @@ function NodesList({
       else next.add(g);
       return next;
     });
-  // Per-node step expansion. Default collapsed so the panel stays
-  // dense; user clicks the caret to drill into a node's steps. Also
-  // auto-expands when a step gets selected elsewhere (StepDag click,
-  // logs nav) so the row reveals its children without manual toggle.
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const toggleNode = (id: string) =>
     setExpandedNodes((prev) => {
@@ -1682,20 +1496,25 @@ function NodesList({
     });
   useEffect(() => {
     if (!selectedStep || !selectedNode) return;
-    setExpandedNodes((prev) => {
-      if (prev.has(selectedNode)) return prev;
-      const next = new Set(prev);
-      next.add(selectedNode);
-      return next;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setExpandedNodes((prev) => {
+        if (prev.has(selectedNode)) return prev;
+        const next = new Set(prev);
+        next.add(selectedNode);
+        return next;
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedStep, selectedNode]);
 
   return (
     <>
       {groups.map(({ group, nodes: children }) => {
         if (!group) {
-          // Ungrouped nodes render flat at the top -- preserves the
-          // pre-group look for pipelines that haven't opted in.
           return children.map((n) => (
             <NodeRow
               key={n.id}
@@ -1754,9 +1573,6 @@ function NodesList({
   );
 }
 
-// groupAccentClass picks a stable Tailwind background class for the
-// vertical bar marking nodes in a group. Hashes by group name so the
-// same group keeps the same color across renders.
 function groupAccentClass(name: string): string {
   const palette = [
     "bg-cyan-400/70",
@@ -1839,8 +1655,6 @@ function NodeRow({
   onToggleExpand?: () => void;
   onSelect: (id: string | null) => void;
   onSelectStep?: (nodeId: string, stepId: string | null) => void;
-  // True when the orchestrator rehydrated this node from the source
-  // attempt instead of re-executing it.
   reused?: boolean;
 }) {
   const label = n.id.length > 20 ? n.id.slice(0, 19) + "…" : n.id;
@@ -1933,6 +1747,8 @@ function StepRow({
   selected?: boolean;
   onClick: () => void;
 }) {
+  const status = s.status;
+  const now = useCurrentTime(status === "running");
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (selected) {
@@ -1940,7 +1756,6 @@ function StepRow({
     }
   }, [selected]);
   const label = s.id.length > 22 ? s.id.slice(0, 21) + "…" : s.id;
-  const status = s.status;
   const dot =
     status === "passed"
       ? "bg-green-400"
@@ -1955,7 +1770,7 @@ function StepRow({
               : "bg-slate-600";
   let durMs = s.duration_ms ?? 0;
   if (!durMs && status === "running" && s.started_at) {
-    durMs = Math.max(0, Date.now() - new Date(s.started_at).getTime());
+    durMs = Math.max(0, now - new Date(s.started_at).getTime());
   }
   return (
     <div
@@ -1987,13 +1802,7 @@ function StepRow({
   );
 }
 
-// --- run row variants ---
 
-// SELECT_RUN_EVENT lets the lineage chips drive selection without
-// having to thread the page's selectRun callback through every row
-// component. The page registers a window listener that calls
-// selectRun on the matching id. URL stays canonical via selectRun
-// itself, which also handles scrolling and focus.
 const SELECT_RUN_EVENT = "sparkwing:select-run";
 
 const FullRunRow = memo(function FullRunRow({
@@ -2007,10 +1816,13 @@ const FullRunRow = memo(function FullRunRow({
   compact?: boolean;
   progress?: { done: number; total: number };
 }) {
-  if (compact) return <CompactFullRunRow r={r} ctx={ctx} progress={progress} />;
+  const now = useCurrentTime(!r.finished_at);
+  if (compact) {
+    return <CompactFullRunRow r={r} ctx={ctx} progress={progress} now={now} />;
+  }
   const startedMs = new Date(r.started_at).getTime();
   const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
-  const elapsedMs = (finishedMs || Date.now()) - startedMs;
+  const elapsedMs = (finishedMs || now) - startedMs;
   const sinceTs = r.finished_at || r.started_at;
   const repo = repoLabel(r);
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
@@ -2184,14 +1996,16 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
   r,
   ctx,
   progress,
+  now,
 }: {
   r: Run;
   ctx: FilterCtx;
   progress?: { done: number; total: number };
+  now: number;
 }) {
   const startedMs = new Date(r.started_at).getTime();
   const finishedMs = r.finished_at ? new Date(r.finished_at).getTime() : 0;
-  const elapsedMs = (finishedMs || Date.now()) - startedMs;
+  const elapsedMs = (finishedMs || now) - startedMs;
   const sinceTs = r.finished_at || r.started_at;
   const repo = repoLabel(r);
   const sha7 = r.git_sha ? r.git_sha.slice(0, 7) : "";
@@ -2277,49 +2091,6 @@ const CompactFullRunRow = memo(function CompactFullRunRow({
   );
 });
 
-function CompactRunRow({ r }: { r: Run }) {
-  return (
-    <div className="flex items-center gap-2">
-      <Tooltip
-        content={
-          <>
-            {r.status}
-            {(() => {
-              const ms = runDurationMs(r);
-              return ms ? ` in ${fmtMs(ms)}` : "";
-            })()}
-          </>
-        }
-      >
-        <span
-          className={`w-2.5 h-2.5 rounded-full shrink-0 ${statusDot(r.status)}`}
-        />
-      </Tooltip>
-      <Tooltip
-        content={
-          <>
-            <span className="text-[var(--muted)]">Pipeline:</span> {r.pipeline}
-            <br />
-            <span className="text-[var(--muted)]">Repo:</span> {repoLabel(r)}
-            <br />
-            <span className="text-[var(--muted)]">Branch:</span>{" "}
-            {r.git_branch || "-"}
-            <br />
-            <span className="text-[var(--muted)]">ID:</span>{" "}
-            <span className="font-mono">{r.id}</span>
-          </>
-        }
-      >
-        <span className="text-xs text-violet-300 truncate">{r.pipeline}</span>
-      </Tooltip>
-      <span className="ml-auto shrink-0 text-[10px] font-mono text-[var(--muted)]">
-        <TimeAgo ts={r.started_at} />
-      </span>
-    </div>
-  );
-}
-
-// --- detail pane ---
 
 type TabKey = "logs" | "resources" | "dag" | "timeline" | "summary" | "setup";
 
@@ -2334,10 +2105,6 @@ function buildVisibleTabs(
   nodes: RunNode[],
   findCounts?: Partial<Record<TabKey, number>> | null,
 ): TabDescriptor[] {
-  // When a find is active, the badge text becomes the per-tab match
-  // count (e.g. "3 hits") so the user can see at-a-glance where the
-  // query lands. Falls back to the static count (node total on the
-  // DAG tab) when there's no query.
   const formatCount = (key: TabKey, fallback: string | undefined) => {
     if (!findCounts) return fallback;
     const n = findCounts[key];
@@ -2399,6 +2166,7 @@ function RunDetailPane({
   tab,
   setTab,
   pendingLogFocus,
+  onAdoptPendingLogFocus,
   onConsumePendingLogFocus,
   reusedNodeIDs,
   reusedPriorRunID,
@@ -2414,35 +2182,21 @@ function RunDetailPane({
   onRefresh: () => void;
   tab: TabKey;
   setTab: (k: TabKey) => void;
-  // Cross-run grep deep link. When set, switches to the Logs tab and
-  // focuses the matching line; consumed once via onConsumePendingLogFocus.
   pendingLogFocus?: {
     nodeID: string;
     stepID: string | null;
     line: number;
   } | null;
+  onAdoptPendingLogFocus?: (focus: {
+    nodeID: string;
+    stepID: string | null;
+  }) => void;
   onConsumePendingLogFocus?: () => void;
-  // Set of node ids the orchestrator rehydrated from a prior attempt
-  // (drives the DAG REUSED pill + teal status dot). Computed at the
-  // page level so the sidebar NodesList sees the same data.
   reusedNodeIDs?: Set<string>;
   reusedPriorRunID?: string | null;
 }) {
   const selected = node;
-  const selectedIsRunning =
-    !!selected && !selected.finished_at && selected.status !== "pending";
   const runIsActive = run.status === "running";
-  const isTerminal =
-    run.status === "success" ||
-    run.status === "failed" ||
-    run.status === "cancelled";
-  // --- Top-level find (cross-pane) ---
-  // Structured matches (nodes/steps/annotations) are computed
-  // synchronously from data we already have in memory. Log matches
-  // come from a debounced server call so we don't pull megabytes of
-  // log text into the browser just to grep them. Per-tab badges show
-  // whatever count is relevant to that tab; prev/next arrows walk the
-  // active tab's matches.
   const [findQuery, setFindQuery] = useState("");
   const [findCursor, setFindCursor] = useState(0);
   const [findLogResults, setFindLogResults] = useState<RunLogMatch[]>([]);
@@ -2450,31 +2204,33 @@ function RunDetailPane({
   const [findLogSearching, setFindLogSearching] = useState(false);
   useEffect(() => {
     const q = findQuery.trim();
+    let cancelled = false;
     if (q === "") {
-      setFindLogResults([]);
-      setFindLogTotal(0);
-      setFindLogSearching(false);
-      return;
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setFindLogResults([]);
+        setFindLogTotal(0);
+        setFindLogSearching(false);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
-    setFindLogSearching(true);
+    queueMicrotask(() => {
+      if (!cancelled) setFindLogSearching(true);
+    });
     const t = setTimeout(async () => {
       const resp = await searchRunLogs(run.id, q, 500);
+      if (cancelled) return;
       setFindLogResults(resp.results || []);
       setFindLogTotal(resp.total || 0);
       setFindLogSearching(false);
     }, 250);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
   }, [findQuery, run.id]);
-  // Each find target is its own hit so the walker behaves like Ctrl-F
-  // on the Summary view: cycle through every matching item, scrolling
-  // each into view. Kinds correspond to distinct DOM targets:
-  //   node      -- id (or group) match → Jobs row + DAG/Timeline ring
-  //   node-err  -- error message match → Errors list row
-  //   node-anno -- node-scoped annotation match → annotation row
-  //   step      -- step id match → DAG/Timeline ring (no Summary row)
-  //   step-anno -- step-scoped annotation match → annotation row
-  // DAG/Timeline restrict to id-based kinds (node, step); Summary
-  // walks all of them.
   type FindHit =
     | { kind: "node"; nodeID: string }
     | { kind: "node-err"; nodeID: string }
@@ -2494,9 +2250,6 @@ function RunDetailPane({
       if (has(n.error) || has(n.failure_reason)) {
         out.push({ kind: "node-err", nodeID: n.id });
       }
-      // Drop node-level annotations that appear on any step too;
-      // older runs dual-persisted step annotations onto the node row,
-      // and we already emit step-anno hits for those.
       const stepTexts = new Set<string>();
       for (const s of n.work?.steps ?? []) {
         for (const a of s.annotations ?? []) stepTexts.add(a);
@@ -2523,8 +2276,6 @@ function RunDetailPane({
     }
     return out;
   }, [findQuery, nodes]);
-  // DOM data-find-key for the active hit so the Summary tab walker can
-  // querySelector → scrollIntoView. Each summary item renders this key.
   const findHitDomKey = (h: FindHit): string => {
     switch (h.kind) {
       case "node":
@@ -2539,9 +2290,6 @@ function RunDetailPane({
         return `step-anno::${h.nodeID}::${h.stepID}::${h.annoIdx}`;
     }
   };
-  // Only true node-id matches paint the Summary Jobs row (and the
-  // DAG/Timeline ring). Error / annotation matches have their own
-  // target rows so they don't drag the whole node into highlight.
   const findMatchedNodes = useMemo(() => {
     const set = new Set<string>();
     for (const h of findStructuredHits) {
@@ -2556,21 +2304,6 @@ function RunDetailPane({
     }
     return set;
   }, [findStructuredHits]);
-  // Keys: "<nodeID>::<stepID>" -- disambiguates step names reused across nodes.
-  const findMatchedSteps = useMemo(() => {
-    const set = new Set<string>();
-    for (const h of findStructuredHits) {
-      if (h.kind === "step" || h.kind === "step-anno") {
-        set.add(`${h.nodeID}::${h.stepID}`);
-      }
-    }
-    return set;
-  }, [findStructuredHits]);
-  // DAG and Timeline match on node/step *names* only. Annotation
-  // matches don't decorate those views because the annotation text
-  // isn't visible there -- a fuchsia ring with no on-screen reason
-  // is confusing. Summary still uses the full hit set since its
-  // job is to surface annotations.
   const findNameHits = useMemo(
     () =>
       findStructuredHits.filter((h) => h.kind === "node" || h.kind === "step"),
@@ -2588,10 +2321,6 @@ function RunDetailPane({
     }
     return set;
   }, [findNameHits]);
-  // Timeline drops nodes without started_at -- they never ran, so a
-  // fuchsia ring with no bar to sit on would be misleading. Filter
-  // both the count and the hit list so the walker can't land on an
-  // invisible match.
   const findTimelineHits = useMemo(() => {
     const startedNodes = new Set(
       nodes.filter((n) => !!n.started_at).map((n) => n.id),
@@ -2610,7 +2339,6 @@ function RunDetailPane({
     }
     return set;
   }, [findTimelineHits]);
-  // Resources tab matches on node ids only -- that's the visible text.
   type ResourceHit = { nodeID: string };
   const findResourceHits = useMemo<ResourceHit[]>(() => {
     const q = findQuery.trim().toLowerCase();
@@ -2623,10 +2351,6 @@ function RunDetailPane({
     () => new Set(findResourceHits.map((h) => h.nodeID)),
     [findResourceHits],
   );
-  // Setup tab is a flat list of run-config rows; each row that
-  // contains the query becomes a hit. The DOM-key carries the row's
-  // semantic name so SetupPanel can attach data-find-key in the
-  // matching spot.
   type SetupHit = { fieldKey: string };
   const findSetupHits = useMemo<SetupHit[]>(() => {
     const q = findQuery.trim().toLowerCase();
@@ -2664,10 +2388,6 @@ function RunDetailPane({
     () => new Set(findSetupHits.map((h) => h.fieldKey)),
     [findSetupHits],
   );
-  // Per-(node, idx) and per-(node, step, idx) annotation hit sets so
-  // tooltips / NodeLogSummary / RunAnnotationsList can paint just the
-  // matching annotation rows fuchsia instead of every annotation under
-  // a matching node.
   const findMatchedNodeAnnos = useMemo(() => {
     const map = new Map<string, Set<number>>();
     for (const h of findStructuredHits) {
@@ -2707,7 +2427,6 @@ function RunDetailPane({
     }
     return out;
   }, [findLogResults]);
-  // Setup / Resources opt out -- no per-node content to match against.
   const findCounts: Partial<Record<TabKey, number>> = {
     summary: findStructuredHits.length,
     dag: findNameHits.length,
@@ -2717,15 +2436,15 @@ function RunDetailPane({
     logs: findLogTotal,
   };
   useEffect(() => {
-    setFindCursor(0);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setFindCursor(0);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [findQuery, tab]);
-  // findActiveKey is the data-find-key of the current hit; Summary
-  // items watch it to mark themselves "current" (brighter fuchsia).
   const [findActiveKey, setFindActiveKey] = useState<string | null>(null);
-  // Summary tab walker: scroll the matching item within the page
-  // (jobs list row / annotation row) without touching sidebar
-  // selection. The DAG/Timeline tabs still drive selection because
-  // their job IS to focus a node/step.
   const scrollToFindKey = (key: string, fallback?: string) => {
     requestAnimationFrame(() => {
       const el =
@@ -2789,8 +2508,6 @@ function RunDetailPane({
       if (selectedStep && selected) {
         onSelectStep(selected.id, null);
       }
-      // Step-level hits have no per-step row in Summary; fall back
-      // to the parent node's job row.
       const fallback = hit.kind === "step" ? `node::${hit.nodeID}` : undefined;
       scrollToFindKey(key, fallback);
       return;
@@ -2803,43 +2520,46 @@ function RunDetailPane({
   };
   const nextFind = () => jumpFind(findCursor + 1);
   const prevFind = () => jumpFind(findCursor - 1);
-  // focusLine state passed down to the Logs view so jumping a Logs
-  // match scrolls to the exact line, not just the node header.
   const [findLogFocus, setFindLogFocus] = useState<{
     nodeID: string;
     line: number;
   } | null>(null);
-  // Cross-run grep deep link: arriving with a pendingLogFocus means
-  // the user clicked a result row in the Search view. Land on the
-  // Logs tab AND drive the same selection callbacks a regular row
-  // click fires so the sidebar Nodes column highlights the match
-  // and the LogBucketView opens the right step automatically.
-  // Without firing onSelectNode/onSelectStep here, the Logs section
-  // expanded but neither the sidebar nor the step bucket reflected
-  // which result the user clicked.
   useEffect(() => {
     if (!pendingLogFocus) return;
-    setTab("logs");
-    setFindLogFocus(pendingLogFocus);
-    onSelectNode(pendingLogFocus.nodeID);
-    if (pendingLogFocus.stepID) {
-      onSelectStep(pendingLogFocus.nodeID, pendingLogFocus.stepID);
-    }
-    onConsumePendingLogFocus?.();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setTab("logs");
+      setFindLogFocus(pendingLogFocus);
+      onAdoptPendingLogFocus?.(pendingLogFocus);
+      onConsumePendingLogFocus?.();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [
     pendingLogFocus,
     setTab,
+    onAdoptPendingLogFocus,
     onConsumePendingLogFocus,
-    onSelectNode,
-    onSelectStep,
   ]);
-  // Clear the focus when the query clears so a stale jump doesn't
-  // ride into the next session.
+  const hadFindQueryRef = useRef(false);
   useEffect(() => {
-    if (findQuery.trim() === "") {
+    if (findQuery.trim() !== "") {
+      hadFindQueryRef.current = true;
+      return;
+    }
+    if (!hadFindQueryRef.current) return;
+    hadFindQueryRef.current = false;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
       setFindLogFocus(null);
       setFindActiveKey(null);
-    }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [findQuery]);
   const visibleTabs = buildVisibleTabs(
     nodes,
@@ -2848,17 +2568,11 @@ function RunDetailPane({
 
   const selectedId = selected?.id ?? null;
   const tabContentRef = useRef<HTMLDivElement>(null);
-  // Reset scroll position when switching tabs so the new tab opens
-  // at the top, not wherever the previous tab was parked.
   useEffect(() => {
     tabContentRef.current?.scrollTo({ top: 0 });
   }, [tab]);
   const prevSelectedRef = useRef<string | null>(selectedId);
 
-  // The previous-selection ref is kept so future routing decisions
-  // could compare against it, but we intentionally do NOT auto-switch
-  // the tab on selection changes -- the user's tab choice persists
-  // when flipping nodes or deselecting.
   useEffect(() => {
     prevSelectedRef.current = selectedId;
   }, [selectedId]);
@@ -2887,10 +2601,10 @@ function RunDetailPane({
           >
             #{run.id}
           </span>
-          {/* When the run started, spelled out. The run id carries a
-            date but only as a packed YYYYMMDD, and every other stamp
-            in this pane is a bare clock -- without this the header
-            never says which day you're looking at. */}
+          {
+
+
+                                                      }
           <span
             className="font-mono text-[var(--muted)] whitespace-nowrap"
             title={`Started ${fmtFullDate(run.started_at)}${
@@ -3079,7 +2793,6 @@ function RunDetailPane({
               selectedStep={selectedStep}
               onSelect={onSelectNode}
               onSelectStep={onSelectStep}
-              runId={run.id}
               findMatched={findMatchedNodesByName}
               findMatchedSteps={findMatchedStepsByName}
               reusedNodeIDs={reusedNodeIDs ?? undefined}
@@ -3137,7 +2850,7 @@ function RunDetailPane({
               onOpenRun={(id) => {
                 const el = document.querySelector(`[data-run-id="${id}"]`);
                 if (el) (el as HTMLElement).click();
-                else window.location.assign(`?run=${id}`);
+                else window.location.assign(new URL(`?run=${id}`, window.location.href));
               }}
               findMatchedFields={findMatchedSetupFields}
               findActiveKey={findActiveKey}
@@ -3149,12 +2862,6 @@ function RunDetailPane({
   );
 }
 
-// PendingApprovalsBanner surfaces every approval_pending node at the
-// top of the detail pane so operators can approve / deny without
-// having to click through to the specific node in the middle column.
-// One ApprovalPane per pending gate; clicking the header jumps the
-// log pane to that node so the usual context (step output, pause
-// controls, etc.) is still one click away.
 function PendingApprovalsBanner({
   runID,
   nodes,
@@ -3184,7 +2891,6 @@ function PendingApprovalsBanner({
   );
 }
 
-// --- logs ---
 
 function LogsPane({
   run,
@@ -3216,8 +2922,6 @@ function LogsPane({
   );
 }
 
-// SingleNodeLogs renders the streaming/stored log body for one
-// node, deciding by status. Used inside AllNodesLogs sections.
 function SingleNodeLogs({
   run,
   node,
@@ -3244,6 +2948,7 @@ function SingleNodeLogs({
   const body =
     node.status === "approval_pending" || !node.finished_at ? (
       <StreamingLogs
+        key={`stream:${run.id}:${node.id}`}
         runID={run.id}
         nodeID={node.id}
         focusStep={focusStep}
@@ -3254,6 +2959,7 @@ function SingleNodeLogs({
       />
     ) : (
       <StoredLogs
+        key={`stored:${run.id}:${node.id}`}
         runID={run.id}
         nodeID={node.id}
         focusStep={focusStep}
@@ -3271,18 +2977,12 @@ function SingleNodeLogs({
   );
 }
 
-// NodeLogSummary shows a one-or-two-line, glanceable block above the
-// step list: outcome, failure reason / error message, exit code,
-// duration. Hidden entirely when there's nothing useful to add
-// beyond a plain "success".
 function NodeLogSummary({ node }: { node: RunNode }) {
   const outcome = node.outcome || node.status;
   const isFailed =
     outcome === "failed" || node.status === "failed" || !!node.error;
   const isRunning = !node.finished_at && node.status !== "pending";
   const annotations = collectNodeAnnotations(node);
-  // Plain success with nothing to surface: hide the block entirely so
-  // it doesn't add noise.
   if (
     !isFailed &&
     !isRunning &&
@@ -3365,10 +3065,6 @@ function NodeLogSummary({ node }: { node: RunNode }) {
   );
 }
 
-// RunSummariesList renders every sparkwing.Summary() markdown blob
-// posted during the run, grouped by node + step. Overwrite-on-write
-// so each entry is whatever the last Summary call left behind. Sits
-// at the top of the Summary tab as the run's "what happened" pane.
 function RunSummariesList({
   nodes,
   onSelectNode,
@@ -3378,9 +3074,6 @@ function RunSummariesList({
   onSelectNode: (id: string | null) => void;
   onSelectStep: (nodeId: string, stepId: string | null) => void;
 }) {
-  // Flatten into one card per summary: a node-scope summary and each
-  // step-scope summary are siblings, each with their own `status >
-  // job > step?` header line.
   type Card =
     | { kind: "node"; node: RunNode; md: string; key: string }
     | {
@@ -3463,10 +3156,6 @@ function RunSummariesList({
   );
 }
 
-// SummaryCard renders one summary blob with a pretty/raw toggle and
-// a copy button. Raw mode preserves whitespace so users can grab the
-// markdown source for an issue / chat paste; pretty mode is the
-// default reading view.
 function SummaryCard({
   md,
   raw,
@@ -3515,10 +3204,6 @@ function SummaryCard({
   );
 }
 
-// RunAnnotationsList shows every annotation in a run, grouped first by
-// node and then by step. The Summary tab uses it as the destination
-// the find walker scrolls into; each <li> carries a data-find-key so
-// jumpFind can target an individual annotation.
 function RunAnnotationsList({
   nodes,
   onSelectNode,
@@ -3539,10 +3224,6 @@ function RunAnnotationsList({
       const stepAnnos = (n.work?.steps ?? [])
         .map((s) => ({ stepID: s.id, annos: s.annotations ?? [] }))
         .filter((sg) => sg.annos.length > 0);
-      // Older runs dual-persisted step annotations onto the node row;
-      // drop any node-level entry whose text is also on a step so we
-      // don't render the same line twice. Original index is preserved
-      // for data-find-key alignment with findMatchedNodeAnnos.
       const stepTexts = new Set<string>();
       for (const sg of stepAnnos) for (const a of sg.annos) stepTexts.add(a);
       const nodeAnnos = (n.annotations ?? [])
@@ -3570,9 +3251,6 @@ function RunAnnotationsList({
     if (match) return "bg-fuchsia-400/15 ring-1 ring-fuchsia-400/40";
     return "";
   };
-  // Flat per-annotation row: `<node> › <step?> › <text>`. Same
-  // data-find-key shape as before so the cursor walker still scrolls
-  // each match into view individually.
   type Row =
     | { kind: "node"; nodeID: string; idx: number; text: string; key: string }
     | {
@@ -3657,10 +3335,6 @@ function RunAnnotationsList({
   );
 }
 
-// AllNodesLogs renders one collapsible block per node. Expanding a
-// block lazy-mounts the existing single-node LogsPane underneath
-// (StreamingLogs for live nodes, StoredLogs for finished ones, both
-// of which use LogBucketView with step-level collapses inside).
 function AllNodesLogs({
   run,
   nodes,
@@ -3675,18 +3349,10 @@ function AllNodesLogs({
   focusNode?: string | null;
   focusStep?: string | null;
   onSelectNode?: (id: string) => void;
-  // Driven by the top-level find bar. When a Logs-tab match is
-  // navigated to, the parent sets {nodeID, line}; we expand the
-  // owning node section and pass focusLine down to LogBucketView
-  // so the bucket auto-expands and scrolls to the exact line.
   externalFindFocus?: { nodeID: string; line: number } | null;
-  // Per-node line numbers that match the top-level find query;
-  // LogBucketView paints these fuchsia.
   findMatchedLogsByNode?: Map<string, Set<number>>;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
-  // Brief purple flash on collapse so the user can locate the now-
-  // collapsed header -- handy when it isn't pinned at the top.
   const [flashing, setFlashing] = useState<Set<string>>(new Set());
   const toggle = (id: string) => {
     const wasOpen = expanded.has(id);
@@ -3726,39 +3392,51 @@ function AllNodesLogs({
       });
     }
   };
-  // When a node selection arrives from outside, collapse other
-  // sections so only the selected node is open, then scroll it in.
   useEffect(() => {
     if (!focusNode) return;
-    setExpanded(new Set([focusNode]));
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setExpanded(new Set([focusNode]));
+    });
     requestAnimationFrame(() => {
+      if (cancelled) return;
       const el = document.querySelector(
         `[data-log-node-id="${focusNode}"]`,
       ) as HTMLElement | null;
       el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [focusNode]);
-  // Open the owning section so LogBucketView mounts and its
-  // focusLine effect can scroll the exact line into view. Don't
-  // scroll the node-header here -- the deeper line scroll handles
-  // positioning, and scrolling both races and ends at the node top.
   useEffect(() => {
     if (!externalFindFocus) return;
-    setExpanded((prev) => {
-      if (prev.has(externalFindFocus.nodeID) && prev.size === 1) return prev;
-      return new Set([externalFindFocus.nodeID]);
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setExpanded((prev) => {
+        if (prev.has(externalFindFocus.nodeID) && prev.size === 1) return prev;
+        return new Set([externalFindFocus.nodeID]);
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [externalFindFocus]);
-  // Auto-expand every node section whose logs contain a find match.
-  // Users typing a query expect to see fuchsia highlights without
-  // hunting through collapsed nodes.
   useEffect(() => {
     if (!findMatchedLogsByNode || findMatchedLogsByNode.size === 0) return;
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      for (const id of findMatchedLogsByNode.keys()) next.add(id);
-      return next;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const id of findMatchedLogsByNode.keys()) next.add(id);
+        return next;
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [findMatchedLogsByNode]);
   if (nodes.length === 0) {
     return (
@@ -3884,9 +3562,6 @@ function AllNodesLogs({
   );
 }
 
-// AllNodesResources renders one collapsible block per node with a
-// ResourceChart inside. Selection auto-expands + scrolls just like
-// AllNodesLogs; other sections collapse on selection.
 function AllNodesResources({
   run,
   nodes,
@@ -3912,25 +3587,37 @@ function AllNodesResources({
     });
   useEffect(() => {
     if (!focusNode) return;
-    setExpanded(new Set([focusNode]));
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) setExpanded(new Set([focusNode]));
+    });
     requestAnimationFrame(() => {
+      if (cancelled) return;
       const el = document.querySelector(
         `[data-resource-node-id="${focusNode}"]`,
       ) as HTMLElement | null;
       el?.scrollIntoView({ block: "start", behavior: "smooth" });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [focusNode]);
-  // Auto-expand the section the find walker just landed on so the
-  // chart loads instead of just scrolling the collapsed header.
   useEffect(() => {
     if (!findActiveKey?.startsWith("resource-node::")) return;
     const id = findActiveKey.slice("resource-node::".length);
-    setExpanded((prev) => {
-      if (prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.add(id);
-      return next;
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setExpanded((prev) => {
+        if (prev.has(id)) return prev;
+        const next = new Set(prev);
+        next.add(id);
+        return next;
+      });
     });
+    return () => {
+      cancelled = true;
+    };
   }, [findActiveKey]);
   if (nodes.length === 0) {
     return (
@@ -4064,16 +3751,12 @@ function StreamingLogs({
 }) {
   const [lines, setLines] = useState<string[]>([]);
   const endRef = useRef<HTMLDivElement>(null);
+  const parsed = useMemo(() => parseLogLines(lines), [lines]);
 
   useEffect(() => {
-    setLines([]);
     const url = getNodeStreamUrl(runID, nodeID);
     const es = new EventSource(url, { withCredentials: true });
     es.onmessage = (e) => {
-      // SSE may bundle several JSONL records into one data chunk
-      // (one-per-line). Split so each record becomes its own entry
-      // in state -- parseLogLines wants line granularity to detect
-      // JSONL vs legacy text.
       const incoming = (e.data as string).split("\n").filter((s) => s !== "");
       setLines((prev) => [...prev, ...incoming]);
     };
@@ -4090,7 +3773,6 @@ function StreamingLogs({
   if (lines.length === 0) {
     return <div className="text-sm text-[var(--muted)] p-4">streaming...</div>;
   }
-  const parsed = parseLogLines(lines);
   return (
     <>
       <LogBucketView
@@ -4125,10 +3807,13 @@ function StoredLogs({
   findCurrentLine?: number | null;
 }) {
   const [text, setText] = useState<string | null>(null);
+  const parsed = useMemo(
+    () => (text === null ? null : parseLogLines(text.split("\n"))),
+    [text],
+  );
 
   useEffect(() => {
     let cancelled = false;
-    setText(null);
     (async () => {
       const t = await getNodeLogs(runID, nodeID);
       if (!cancelled) setText(t);
@@ -4138,7 +3823,7 @@ function StoredLogs({
     };
   }, [runID, nodeID]);
 
-  if (text === null) {
+  if (text === null || parsed === null) {
     return <div className="text-sm text-[var(--muted)]">loading...</div>;
   }
   if (text.trim() === "") {
@@ -4148,7 +3833,6 @@ function StoredLogs({
       </div>
     );
   }
-  const parsed = parseLogLines(text.split("\n"));
   return (
     <LogBucketView
       parsed={parsed}
@@ -4162,22 +3846,13 @@ function StoredLogs({
   );
 }
 
-// --- DAG ---
 
-// DAG renders nodes laid out in columns by topological depth, with
-// bezier edges drawn from each dep's right side to the node's left.
-// Click a node to select it (same effect as clicking its row in the
-// middle column). The layout is purely structural -- timing lives in
-// the Timeline block below. Node width / gaps chosen to keep the
-// whole graph visible on typical dashboards without scrolling; wide
-// DAGs scroll horizontally.
 function DAG({
   nodes,
   selected,
   selectedStep,
   onSelect,
   onSelectStep,
-  runId,
   findMatched,
   findMatchedSteps,
   reusedNodeIDs,
@@ -4187,18 +3862,11 @@ function DAG({
   selectedStep: string | null;
   onSelect: (id: string | null) => void;
   onSelectStep: (nodeId: string, stepId: string | null) => void;
-  runId?: string;
   findMatched?: Set<string>;
   findMatchedSteps?: Set<string>;
-  // Node ids the orchestrator rehydrated from the source attempt
-  // (only populated on retry-of runs). Drives the REUSED pill.
   reusedNodeIDs?: Set<string>;
 }) {
   const dagRouter = useRouter();
-  // Auto-scroll the selected node into view when arriving with a
-  // selection (e.g. switching to the DAG tab from elsewhere) or when
-  // selection changes. The node's group is tagged with data-node-id
-  // so a querySelector lookup finds it after layout.
   const dagRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!selected) return;
@@ -4206,9 +3874,6 @@ function DAG({
       const el = dagRef.current?.querySelector(
         `[data-node-id="${selected}"]`,
       ) as SVGGElement | null;
-      // "nearest" leaves the viewport alone when the node is already
-      // visible; only scrolls the minimum needed to reveal it. Avoids
-      // snapping the page on every click when the whole DAG fits.
       el?.scrollIntoView({
         behavior: "smooth",
         block: "nearest",
@@ -4216,11 +3881,6 @@ function DAG({
       });
     });
   }, [selected]);
-  // Hover state for the floating tooltip overlay. Tracks which node
-  // the pointer is currently over plus its viewport coords so we can
-  // render a position:fixed card next to the cursor. The card waits
-  // 500ms before appearing so a quick mouse-over doesn't flash a card
-  // every time the cursor crosses the DAG.
   const [hover, setHover] = useState<{
     node: RunNode;
     x: number;
@@ -4246,10 +3906,6 @@ function DAG({
     x: number;
     y: number;
   } | null>(null);
-  // Collapsed groups: while a name is in this set, its member nodes
-  // hide and the group frame renders as a single solid card. Edges in
-  // and out of the group reroute to the card's edge and dedupe so a
-  // 5-fanout into a collapsed group becomes one visual line.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(
     new Set(),
   );
@@ -4260,8 +3916,6 @@ function DAG({
       else next.add(name);
       return next;
     });
-  // When a node with inner steps is selected, render its step DAG as
-  // a stacked panel beneath the main DAG.
   const selectedNode = selected
     ? (nodes.find((n) => n.id === selected) ?? null)
     : null;
@@ -4271,13 +3925,8 @@ function DAG({
   const rowGap = 26;
   const padX = 12;
   const padY = 32;
-  const nodeHeight = () => nodeH;
 
   const byID = new Map(nodes.map((n) => [n.id, n]));
-  // Treat `on_failure_of` as a virtual dep for column placement: a
-  // rollback node anchored to its parent sits one column to the
-  // right of the parent, so it doesn't strand at level 0 as an
-  // island. Still rendered with a distinct dashed edge below.
   const effectiveDeps = (n: RunNode): string[] => {
     const base = n.deps || [];
     if (n.on_failure_of) return [...base, n.on_failure_of];
@@ -4297,8 +3946,6 @@ function DAG({
       level.set(id, 0);
       return 0;
     }
-    // Guard against cycles: pre-seed self at 0 so a self-loop
-    // collapses to the same level rather than recursing forever.
     level.set(id, 0);
     let l = 0;
     for (const d of deps) {
@@ -4315,16 +3962,6 @@ function DAG({
     if (!columns[l]) columns[l] = [];
     columns[l].push(n);
   }
-  // Within-column ordering follows declaration order, with groups
-  // anchored to their first member's position. Each "cluster" (a
-  // named group, or a singleton ungrouped node) takes the minimum
-  // declaration index of its members in this column. Clusters sort
-  // by that anchor; group members sort by declaration index within.
-  //
-  // Result: the column reads in the same sequence the user wrote in
-  // their DSL (and that the left Nodes panel renders), but grouped
-  // members are still adjacent so the frame overlay's bounding box
-  // doesn't swallow an outsider.
   const nodeOrder = new Map(nodes.map((n, i) => [n.id, i]));
   const nodeClusterKey = (n: RunNode): string => n.groups?.[0] || `:${n.id}`;
   for (const col of columns) {
@@ -4346,14 +3983,7 @@ function DAG({
     });
   }
 
-  // Per-column max widths so nodes size to their labels but still
-  // line up vertically. ~7px per mono char at fontSize=11, plus the
-  // status dot (24px), duration cell (~46px), zoom chip (22px),
-  // pills, and edge padding. Cap at a generous max so a long step id
-  // doesn't run the column off-screen.
   const charPxApprox = 7;
-  // dot(24) + duration(46) + pad(16). Step-count + error pills hang
-  // off the bottom edge now, so they don't claim inline width.
   const baseChrome = 24 + 46 + 16;
   const measureNodeW = (n: RunNode): number => {
     const w = Math.ceil(n.id.length * charPxApprox + baseChrome);
@@ -4371,13 +4001,6 @@ function DAG({
     });
   }
 
-  // Group frames extend groupFramePad below the last member and
-  // groupFramePad + groupLabelOffset above the first (for the label
-  // strip). Pre-reserve that space when a column transitions between
-  // groups (or in/out of ungrouped). Nodes also carry bottom-edge
-  // badges (SKIPPED / annotation / error) that hang ~7px below the
-  // rect, so the reservation is layered on TOP of rowGap rather than
-  // collapsing into it -- a max() would let the frame eat the badge.
   const groupFramePad = 8;
   const groupLabelOffset = 14;
   const primaryGroupOf = (n: RunNode): string => n.groups?.[0] || "";
@@ -4388,11 +4011,6 @@ function DAG({
     let y = padY;
     const w = columnWidths[ci];
     let prevGroup: string | null = null;
-    // For collapsed groups, every member shares the same y slot so
-    // the frame's bounding box squashes to one node-row tall (we
-    // still allocate width = columnWidth, but height = nodeH). The
-    // first member claims the slot and advances y; subsequent
-    // members reuse it without advancing.
     const collapsedSlot = new Map<string, number>();
     col.forEach((n, idx) => {
       const g = primaryGroupOf(n);
@@ -4432,14 +4050,6 @@ function DAG({
       rawEdges.push({ src: n.on_failure_of, dst: n.id, onFailure: true });
     }
   }
-  // Edge collapsing in two directions:
-  //   1. src → group:   one source has ≥2 edges into the same dest
-  //      group → draw one line into the group frame instead of N.
-  //      Keeps fan-out patterns (build → publish-{linux,darwin,...})
-  //      readable.
-  //   2. group → dst:   ≥2 sources in one group all point at the same
-  //      destination → draw one line out of the group frame.
-  //      Symmetric optimization for fan-in patterns.
   type CollapsedEdge =
     | {
         kind: "node";
@@ -4462,7 +4072,6 @@ function DAG({
     const n = byID.get(id);
     return n?.groups?.[0] || null;
   };
-  // Pass 1: collapse src → group.
   const pass1: CollapsedEdge[] = [];
   type Bucket = { dsts: string[] };
   const toGroupBuckets = new Map<string, Bucket>();
@@ -4498,9 +4107,6 @@ function DAG({
       });
     }
   }
-  // Pass 2: collapse group → dst. Only inspects plain node edges
-  // (failure stays 1:1 for readability; to-group is already collapsed
-  // by direction-1 and doesn't participate here).
   const edges: CollapsedEdge[] = [];
   const fromGroupBuckets = new Map<string, string[]>();
   for (const e of pass1) {
@@ -4528,13 +4134,6 @@ function DAG({
     }
   }
 
-  // Group frames: compute the bounding box around every node sharing
-  // the same `.Group("name")` tag so we can draw a labeled dashed
-  // container behind them. Rendered before edges/nodes so it sits
-  // visually beneath the DAG's active elements. Single-member groups
-  // still get a frame so the visual grouping matches the nodes list
-  // on the left -- the (safety) header shouldn't look like a
-  // different feature from the DAG container.
   const groupFrames: {
     name: string;
     x: number;
@@ -4574,10 +4173,6 @@ function DAG({
     });
   }
   const groupFrameByName = new Map(groupFrames.map((g) => [g.name, g]));
-  // collapsedGroupOf: if a node belongs to any group that's currently
-  // collapsed, returns the first such group name; otherwise null. The
-  // renderer hides the node and reroutes its edges to the group's
-  // card.
   const collapsedGroupOf = (nodeID: string): string | null => {
     const n = byID.get(nodeID);
     if (!n?.groups) return null;
@@ -4612,10 +4207,10 @@ function DAG({
           style={{ minWidth: width, display: "block" }}
         >
           <defs>
-            {/* Rainbow gradient for the DYNAMIC pill. Stops mirror the
-              subset of `nodePalette` hues the terminal renderer uses
-              for its rainbow-letter [dynamic] tag -- keeps the two
-              surfaces visually linked. */}
+            {
+
+
+                                          }
             <linearGradient id="dynamic-pill-grad" x1="0" y1="0" x2="1" y2="0">
               <stop offset="0%" stopColor="#ffaf00" />
               <stop offset="20%" stopColor="#87d7ff" />
@@ -4669,13 +4264,6 @@ function DAG({
             );
           })}
           {(() => {
-            // Resolve an edge endpoint to coordinates + a stable key.
-            // If a node belongs to a collapsed group, the endpoint
-            // shifts to the group's frame so edges route to the card.
-            // Group-frame endpoints (the to-group / from-group kinds)
-            // resolve to the frame directly. Returned `key` is what
-            // we dedupe on -- multiple parallel edges into one
-            // collapsed group fold to one visual line.
             const resolveEnd = (
               kind: "node" | "group",
               id: string,
@@ -4740,7 +4328,7 @@ function DAG({
                 touched = e.src === selected || e.dst === selected;
               }
               if (!from || !to) return;
-              if (from.key === to.key) return; // collapses to a loop
+              if (from.key === to.key) return;
               const dedupKey = `${from.key}->${to.key}${e.kind === "node" && (e as { onFailure?: boolean }).onFailure ? "*" : ""}`;
               if (seen.has(dedupKey)) return;
               seen.add(dedupKey);
@@ -4762,8 +4350,6 @@ function DAG({
           {nodes.map((n) => {
             const p = pos.get(n.id);
             if (!p) return null;
-            // Members of a collapsed group are absorbed into the
-            // group's card; skip their individual node render.
             if (collapsedGroupOf(n.id)) return null;
             const isSel = selected === n.id;
             const isFindHit = findMatched?.has(n.id) ?? false;
@@ -4843,16 +4429,6 @@ function DAG({
                   {fmtMs(nodeDuration(n))}
                 </text>
                 {(() => {
-                  // Top-pill stack. Each pill type self-reports its
-                  // width so the layout pass can lay them out side-by-
-                  // side, centered as a group, instead of having every
-                  // pill self-center and clobber its neighbors. The
-                  // priority order below is also the left-to-right
-                  // visual order on the node (most important read
-                  // first): state markers (dynamic / approval) on the
-                  // left, lineage hints (reused / cached) in the
-                  // middle, structural markers (inline / spawn) on
-                  // the right.
                   type TopPill =
                     | { kind: "dynamic"; w: number }
                     | { kind: "approval"; w: number }
@@ -4958,12 +4534,6 @@ function DAG({
                   );
                 })()}
                 {(() => {
-                  // Bottom-right stack. Step-count pill anchors to the
-                  // right edge; the error chip (when present) sits one
-                  // slot to its left. Anchoring the step count there
-                  // keeps the in-rect duration text free of the chip
-                  // and gives the eye a stable "X steps · Y duration"
-                  // read on every node.
                   const stepCount = n.work?.steps?.length ?? 0;
                   const hasError =
                     !!n.error ||
@@ -5091,37 +4661,21 @@ function DAG({
   );
 }
 
-// DagNodeTooltip is the floating info card shown on DAG-node hover.
-// Rendered as a position:fixed sibling of the SVG so it escapes the
-// SVG coordinate system and tracks the viewport cursor cleanly.
-// Offset 14px down-right of the cursor so it doesn't sit under the
-// mouse. Right-anchors when near the viewport edge so the card
-// doesn't clip off-screen on rightmost-column hovers.
-// StepDag is the zoomed-in view: the work.steps of one parent node
-// rendered as a full-size DAG using the same dims as the outer
-// graph. The header carries a breadcrumb back to the run-level view.
-// stepColorFor hashes the step id into a stable palette pick so
-// neighboring steps don't look like one big block. Two-tone (low-
-// alpha fill + saturated stroke) keeps the inner step DAG legible
-// against the dark canvas.
 function stepColorFor(id: string): { fill: string; stroke: string } {
   const palette = [
-    { fill: "rgba(56,189,248,0.18)", stroke: "rgba(56,189,248,0.9)" }, // cyan
-    { fill: "rgba(167,139,250,0.18)", stroke: "rgba(167,139,250,0.9)" }, // violet
-    { fill: "rgba(244,114,182,0.18)", stroke: "rgba(244,114,182,0.9)" }, // pink
-    { fill: "rgba(34,197,94,0.18)", stroke: "rgba(34,197,94,0.9)" }, // green
-    { fill: "rgba(251,191,36,0.18)", stroke: "rgba(251,191,36,0.9)" }, // amber
-    { fill: "rgba(96,165,250,0.18)", stroke: "rgba(96,165,250,0.9)" }, // blue
-    { fill: "rgba(248,113,113,0.18)", stroke: "rgba(248,113,113,0.9)" }, // red
+    { fill: "rgba(56,189,248,0.18)", stroke: "rgba(56,189,248,0.9)" },
+    { fill: "rgba(167,139,250,0.18)", stroke: "rgba(167,139,250,0.9)" },
+    { fill: "rgba(244,114,182,0.18)", stroke: "rgba(244,114,182,0.9)" },
+    { fill: "rgba(34,197,94,0.18)", stroke: "rgba(34,197,94,0.9)" },
+    { fill: "rgba(251,191,36,0.18)", stroke: "rgba(251,191,36,0.9)" },
+    { fill: "rgba(96,165,250,0.18)", stroke: "rgba(96,165,250,0.9)" },
+    { fill: "rgba(248,113,113,0.18)", stroke: "rgba(248,113,113,0.9)" },
   ];
   let h = 0;
   for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) | 0;
   return palette[Math.abs(h) % palette.length];
 }
 
-// Step rect coloring keyed by runtime status. Mirrors dagNodeColors:
-// skipped is the lightest, pending the dim default, and terminal
-// outcomes use dedicated hues.
 function stepStatusColors(
   status?: "passed" | "failed" | "cancelled" | "running" | "skipped",
 ): {
@@ -5146,7 +4700,6 @@ function stepStatusColors(
         border: "rgba(148,163,184,0.25)",
       };
     default:
-      // pending (no step_start yet)
       return {
         fill: "rgba(100,116,139,0.08)",
         border: "rgba(100,116,139,0.30)",
@@ -5177,11 +4730,8 @@ function StepDag({
   onBack?: () => void;
   selectedStep?: string | null;
   onSelectStep?: (stepId: string | null) => void;
-  // Keys: "<nodeID>::<stepID>" -- same shape as the run-level set.
   findMatchedSteps?: Set<string>;
 }) {
-  // Auto-scroll selected step into view (mirrors the run-level DAG).
-  // "nearest" so we don't snap when the step is already visible.
   const stepDagRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!selectedStep) return;
@@ -5196,8 +4746,6 @@ function StepDag({
       });
     });
   }, [selectedStep]);
-  // Hover state for the floating tooltip. Mirrors the run-level DAG:
-  // 500ms delay before showing so a quick mouse-over doesn't flash.
   const [hover, setHover] = useState<{
     step: NodeWorkStep;
     x: number;
@@ -5236,8 +4784,6 @@ function StepDag({
     return l;
   };
   for (const s of steps) resolve(s.id);
-  // Map step id → its first named group (so column sort + frame
-  // computation match the run-level DAG's per-row clustering).
   const stepGroupOf = new Map<string, string>();
   const stepGroups = node.work?.step_groups ?? [];
   for (const g of stepGroups) {
@@ -5252,10 +4798,6 @@ function StepDag({
     if (!cols[l]) cols[l] = [];
     cols[l].push(s);
   }
-  // Mirror the run-level DAG: each column orders by declaration
-  // index with groups anchored to their first member. Keeps grouped
-  // members adjacent (needed by the frame overlay) while letting the
-  // overall column flow read the same as the left Nodes panel.
   const stepOrder = new Map(steps.map((s, i) => [s.id, i]));
   const stepClusterKey = (s: NodeWorkStep): string =>
     stepGroupOf.get(s.id) || `:${s.id}`;
@@ -5277,9 +4819,6 @@ function StepDag({
       return (stepOrder.get(a.id) ?? 0) - (stepOrder.get(b.id) ?? 0);
     });
   }
-  // Mirror the run-level DAG spacing: reserve frame-label space and
-  // bottom padding on top of rowGap when crossing a group boundary,
-  // so a frame doesn't bleed into the row above or below.
   const groupFramePad = 8;
   const groupLabelOffset = 14;
   const pos = new Map<string, { x: number; y: number }>();
@@ -5309,7 +4848,6 @@ function StepDag({
     Math.max(0, cols.length - 1) * colGap;
   const height = padY + Math.max(padY, ...colMaxY);
 
-  // Step-group frames: bounding box around each group's members.
   const stepGroupFrames: {
     name: string;
     accent: string;
@@ -5343,11 +4881,6 @@ function StepDag({
     });
   }
   const stepGroupFrameByName = new Map(stepGroupFrames.map((f) => [f.name, f]));
-  // Collapse step edges in both directions:
-  //   1. step → group:  one source with ≥2 needs in the same group →
-  //      one line into the group frame.
-  //   2. group → step:  ≥2 sources in one group all feed the same
-  //      destination → one line out of the group frame.
   type StepEdge =
     | { kind: "step"; src: string; dst: string }
     | { kind: "to-group"; src: string; groupName: string }
@@ -5506,9 +5039,6 @@ function StepDag({
           ))}
           {stepEdges.map((e, i) => {
             let x1: number, y1: number, x2: number, y2: number;
-            // Mirror the run-level DAG: any edge connected to the
-            // selected step (or to a group whose members include it)
-            // paints gold so the in/out neighborhood pops out.
             let touched = false;
             const stepInGroup = (g: string): boolean =>
               !!selectedStep && stepGroupOf.get(selectedStep) === g;
@@ -5649,9 +5179,6 @@ function StepDag({
                   );
                 })()}
                 {(() => {
-                  // Edge badges, stacked along the top edge. Result
-                  // pill sits rightmost; skipIf to its left when both
-                  // are present.
                   const badges: {
                     label: string;
                     fill: string;
@@ -5719,6 +5246,7 @@ function StepTooltip({
   y: number;
 }) {
   const status = step.status || "pending";
+  const now = useCurrentTime(status === "running");
   const dot =
     status === "passed"
       ? "bg-green-400"
@@ -5733,7 +5261,7 @@ function StepTooltip({
               : "bg-slate-600";
   let dur = step.duration_ms ?? 0;
   if (!dur && status === "running" && step.started_at) {
-    dur = Math.max(0, Date.now() - new Date(step.started_at).getTime());
+    dur = Math.max(0, now - new Date(step.started_at).getTime());
   }
   const alignRight = x > window.innerWidth - 280;
   const style: React.CSSProperties = {
@@ -5908,12 +5436,6 @@ function DagNodeTooltip({
   );
 }
 
-// NodeBadge is the shared pill primitive every node-attached chip
-// renders through (SKIPPED / annotation count / error indicator /
-// step ★result + skipIf flags). Pill-shaped (rx = h/2), opaque fill,
-// sans-serif label -- matches the corner-pill family (DynamicPill /
-// ApprovalPill / CachedPill) so the whole node visual reads as one
-// design system instead of two eras of ad-hoc inline SVG.
 function NodeBadge({
   x,
   y,
@@ -5976,19 +5498,10 @@ function NodeBadge({
   );
 }
 
-// DynamicPill is the rainbow-gradient "DYNAMIC" corner badge painted
-// on a DAG node whose shape is runtime-variable. Centered along the
-// top edge of the node, overhanging upward -- keeps the pill from
-// clipping the left or right SVG boundary regardless of column.
-// DynamicPill width is exported so the top-pill layout can budget
-// space for the badge before painting. See PILL_W.
 const DYNAMIC_PILL_W = 56;
 function DynamicPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
   const pillW = DYNAMIC_PILL_W;
   const pillH = 15;
-  // Horizontally centered when no override, or anchored to the x
-  // assigned by the layout pass when multiple pills stack on the
-  // top edge.
   const x = xOverride ?? (nodeW - pillW) / 2;
   const y = -6;
   return (
@@ -6021,14 +5534,6 @@ function DynamicPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
   );
 }
 
-// ApprovalPill is the always-on corner badge that tracks an approval
-// gate's lifecycle. Three tiers:
-//   - grey "APPROVAL" when the gate hasn't been reached yet
-//     (node still pending on upstream deps)
-//   - amber pulsing "AWAITING" while a human decision is outstanding
-//   - solid green "APPROVED" or red "DENIED" once resolved
-// Stays visible at every stage so the DAG always shows which nodes
-// are human gates, not only when someone is currently blocked.
 function approvalPillWidth(n: RunNode): number {
   const { label } = approvalPillVisuals(n);
   return label === "AWAITING" ? 60 : label === "APPROVAL" ? 58 : 64;
@@ -6080,15 +5585,9 @@ function approvalPillVisuals(n: RunNode): {
   fill: string;
   pulse: boolean;
 } {
-  // approval_pending is the canonical "human blocked" state --
-  // yellow pulse to match the sidebar's pending-on-humans band.
   if (n.status === "approval_pending") {
     return { label: "AWAITING", fill: "rgba(250,204,21,0.95)", pulse: true };
   }
-  // Once the node has an outcome, the gate has been resolved one way
-  // or another. Outcome "success" = approval went through (node ran
-  // and succeeded). Failed/cancelled = denied or otherwise rejected.
-  // Skipped is treated as denied-ish since the node never ran.
   if (n.outcome) {
     switch (n.outcome) {
       case "success":
@@ -6108,22 +5607,9 @@ function approvalPillVisuals(n: RunNode): {
         };
     }
   }
-  // Gate not yet reached: the node is still pending deps or running
-  // its pre-approval work. Grey + no pulse so it reads as "placeholder".
   return { label: "APPROVAL", fill: "rgba(148,163,184,0.75)", pulse: false };
 }
 
-// CachedPill signals that a node's output came out of the cache
-// instead of being freshly computed. Violet matches the node-rect
-// tint for cached outcomes so the pill and body read as one visual
-// treatment. Not shown when the node is also an approval gate --
-// the ApprovalPill already encodes "APPROVED" for that case and we
-// don't want two pills overlapping at the top of the rect.
-// InlinePill marks a job declared with .Inline() -- runs in the
-// orchestrator process instead of dispatching to a runner, so it
-// shows up as a lightweight slate pill (no hue commitment). Hidden
-// when a more specific pill (dynamic / approval / cached / cross-
-// pipeline) takes the top slot for this node.
 const INLINE_PILL_W = 48;
 function InlinePill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
   const pillW = INLINE_PILL_W;
@@ -6157,12 +5643,6 @@ function InlinePill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
   );
 }
 
-// ReusedPill marks a node that was rehydrated from the source
-// attempt's success outcome instead of being re-executed in this
-// rerun. Painted in the same emerald family the ReuseSummary banner
-// uses so the two visuals read as one signal. Hidden when a more
-// specific pill claims the top slot (dynamic / approval / cached /
-// cross-pipeline).
 const REUSED_PILL_W = 52;
 function ReusedPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
   const pillW = REUSED_PILL_W;
@@ -6229,12 +5709,6 @@ function CachedPill({ nodeW, x: xOverride }: { nodeW: number; x?: number }) {
   );
 }
 
-// CrossPipelinePill marks a node that fired sparkwing.RunAndAwait
-// during its body. Sky-cyan to read as "outgoing connection." Label
-// is the generic "SPAWNS" (with a count when there are several) so
-// pill width is stable across pipeline names. Clicking the pill
-// jumps to the spawned run -- for multi-spawn nodes it routes to the
-// first child; the hover tooltip lists the full set.
 function crossPipelinePillWidth(pipelines: SpawnedPipelineRef[]): number {
   const label =
     pipelines.length === 1 ? "↗ SPAWNS" : `↗ SPAWNS ×${pipelines.length}`;
@@ -6300,19 +5774,12 @@ function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
 
-// waterFill distributes a total character budget across `items` so
-// short strings stay intact and the slack goes to longer ones. Each
-// returned string is the original truncated with an ellipsis when it
-// got squeezed, or untouched when it fit within its share.
 function waterFill(items: string[], total: number): string[] {
   const n = items.length;
   const lengths = items.map((s) => s.length);
   const assigned = new Array<number>(n).fill(0);
   let active = lengths.map((_, i) => i).filter((i) => lengths[i] > 0);
   let remaining = total;
-  // Each pass: split remaining budget evenly among items still under
-  // their natural length. Items that hit their full length drop out;
-  // their unused portion gets redistributed in the next pass.
   while (active.length > 0 && remaining > 0) {
     const share = remaining / active.length;
     const stillActive: number[] = [];
@@ -6354,14 +5821,6 @@ function dagEdgeColor(dst?: RunNode): string {
   }
 }
 
-// Node rect colors keyed on the lifecycle state. Pending / skipped /
-// cancelled used to all read as one wash of slate; the palette below
-// pushes them apart on the lightness axis so operators can spot each
-// at a glance:
-//   skipped     -> lightest ghosted grey (deliberately not run)
-//   pending     -> dim slate (hasn't started)
-//   cancelled   -> charcoal, more solid (stopped with prejudice)
-// Running, success, failed, cached keep their dedicated hue.
 function dagNodeColors(
   n: RunNode,
   isSelected: boolean,
@@ -6384,8 +5843,6 @@ function dagNodeColors(
       border = "rgba(129,140,248,0.55)";
       break;
     case "cancelled":
-      // Charcoal: stopped with prejudice. Darker + more solid than
-      // pending or skipped so it reads as a deliberate halt.
       fill = "rgba(30,41,59,0.45)";
       border = "rgba(71,85,105,0.75)";
       break;
@@ -6394,29 +5851,18 @@ function dagNodeColors(
       border = "rgba(167,139,250,0.55)";
       break;
     case "skipped":
-      // Lightest ghosted grey: intentionally not run. Pushes lighter
-      // than the pending default so the eye reads "decided to skip"
-      // versus "waiting to start".
       fill = "rgba(148,163,184,0.04)";
       border = "rgba(148,163,184,0.25)";
       break;
     case "skipped-concurrent":
-      // OnLimit:Skip -- slot was full, not a deliberate skip. Sits
-      // between pending and cancelled in weight so it reads as
-      // "blocked from running" rather than "chose not to run".
       fill = "rgba(71,85,105,0.22)";
       border = "rgba(100,116,139,0.6)";
       break;
     case "superseded":
-      // CancelOthers eviction. Amber (distinct from
-      // cancelled's slate) signals "replaced by newer run."
       fill = "rgba(245,158,11,0.14)";
       border = "rgba(251,191,36,0.7)";
       break;
     case "approval_pending":
-      // Yellow pulse, matching the "waiting on humans / resources"
-      // band used for pending in the sidebar. Keeps the gate visually
-      // distinct from cancelled (slate) and cached (violet).
       fill = "rgba(250,204,21,0.14)";
       border = "rgba(250,204,21,0.8)";
       break;
@@ -6426,11 +5872,6 @@ function dagNodeColors(
 }
 
 function dagStatusClass(n: RunNode, reused = false): string {
-  // Reused-from-retry nodes have outcome=success but we want them
-  // visually distinct from a fresh success so the operator can tell
-  // at a glance which nodes actually executed in this attempt. Teal
-  // keys off the same emerald family the REUSED pill uses but skews
-  // lighter so the dot reads as "passive carry-forward".
   if (reused) return "fill-teal-300";
   const k = n.outcome || n.status;
   switch (k) {
@@ -6442,12 +5883,10 @@ function dagStatusClass(n: RunNode, reused = false): string {
     case "claimed":
       return "fill-indigo-400";
     case "cancelled":
-      // Light dot on the charcoal rect reads as "stopped".
       return "fill-slate-300";
     case "cached":
       return "fill-violet-400";
     case "skipped":
-      // Faint dot on the ghosted rect -- "decided to skip".
       return "fill-slate-400";
     case "skipped-concurrent":
       return "fill-slate-500";
@@ -6456,19 +5895,10 @@ function dagStatusClass(n: RunNode, reused = false): string {
     case "approval_pending":
       return "fill-yellow-400 animate-pulse";
     default:
-      // pending (no outcome, no running status yet)
       return "fill-slate-600";
   }
 }
 
-// useReusedNodeIDs queries the run's event log for
-// `node_skipped_from_retry` events and returns the set of node ids
-// the orchestrator rehydrated from the source attempt. Empty when
-// the run has no retry_of (it isn't a rerun) or when the run ran in
-// "Rerun all" mode (no rehydration events).
-//
-// Returns null while loading so the caller can render a quiet
-// placeholder instead of flashing an empty state.
 function useReusedNodeIDs(run: Run | null): {
   ids: Set<string> | null;
   priorRunID: string | null;
@@ -6478,14 +5908,17 @@ function useReusedNodeIDs(run: Run | null): {
   const runID = run?.id ?? null;
   const retryOf = run?.retry_of ?? null;
   useEffect(() => {
-    setIds(null);
-    setPriorRunID(null);
-    if (!runID) return;
-    if (!retryOf) {
-      setIds(new Set());
-      return;
-    }
     let cancelled = false;
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setIds(runID && !retryOf ? new Set() : null);
+      setPriorRunID(null);
+    });
+    if (!runID || !retryOf) {
+      return () => {
+        cancelled = true;
+      };
+    }
     listRunEvents(runID, { limit: 1000 }).then((events) => {
       if (cancelled) return;
       const next = new Set<string>();
@@ -6508,11 +5941,6 @@ function useReusedNodeIDs(run: Run | null): {
   return { ids, priorRunID };
 }
 
-// rerunMode reads run.invocation?.flags?.full to distinguish the
-// two retry choices the dashboard offers. Returns "full" / "failed"
-// for runs the orchestrator has already executed (invocation is set
-// at orchestrator.Run startup, so newly-queued runs return null
-// briefly until the subprocess promotes them).
 function rerunMode(run: Run): "full" | "failed" | null {
   if (!run.retry_of) return null;
   const flags = run.invocation?.flags;
@@ -6520,15 +5948,6 @@ function rerunMode(run: Run): "full" | "failed" | null {
   return flags.full === true ? "full" : "failed";
 }
 
-// ReuseSummary confirms what "Rerun from failed" actually skipped.
-// On any run with retry_of set, it counts node_skipped_from_retry
-// events emitted by the orchestrator (one per node rehydrated from
-// the prior attempt) and renders a one-line summary with the exact
-// reused node ids in the tooltip.
-//
-// Hidden when there's no retry_of (the run isn't a rerun) or when
-// the count is zero (the rerun was a "Rerun all" or had nothing
-// passable to reuse).
 function ReuseSummary({
   run,
   nodes,
@@ -6583,12 +6002,6 @@ function ReuseSummary({
   );
 }
 
-// RerunModeChip surfaces "rerun: all" vs "rerun: from failed" in the
-// run header so the operator can tell which choice the new attempt
-// was launched with. Reads from run.invocation.flags.full (set by
-// the orchestrator at run start). Stays hidden for non-retry runs
-// and for the brief window before the orchestrator has stamped the
-// invocation snapshot.
 function RerunModeChip({ run }: { run: Run }) {
   const mode = rerunMode(run);
   if (!mode) return null;
@@ -6614,7 +6027,6 @@ function RerunModeChip({ run }: { run: Run }) {
   );
 }
 
-// --- action buttons ---
 
 function CancelButton({
   runId,
@@ -6624,9 +6036,6 @@ function CancelButton({
   onDone: () => void;
 }) {
   const [loading, setLoading] = useState(false);
-  // Two-step inline confirmation. First click flips to "Confirm" +
-  // back-arrow; second click commits. Avoids the native browser
-  // confirm() dialog that breaks the dashboard's visual tone.
   const [armed, setArmed] = useState(false);
   useEffect(() => {
     if (!armed) return;
@@ -6709,9 +6118,6 @@ function RetryButton({ runId, onDone }: { runId: string; onDone: () => void }) {
           : `Rerun (from failed) queued as ${fresh.id}`,
         "success",
       );
-      // Let the Attempts dropdown (and any other listeners) refetch
-      // immediately so the new attempt appears without the user
-      // having to navigate away and back.
       window.dispatchEvent(new CustomEvent("sparkwing:runs-changed"));
     } else {
       toast(`Rerun failed for ${runId}`, "error");

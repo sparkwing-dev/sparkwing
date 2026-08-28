@@ -18,10 +18,6 @@ func fsCacheProfile(dir string) *profile.Profile {
 	}
 }
 
-// The dispatcher resolved this run's cache from its profile, and the
-// node has to publish into that same store. A dashboard's dev.env
-// entry naming a different one would split a node's artifacts from
-// the manifest that records them.
 func TestCoordinatedArtifactStore_ProfileWinsOverExplicitEnv(t *testing.T) {
 	profileDir := t.TempDir()
 	envDir := t.TempDir()
@@ -64,9 +60,6 @@ func TestCoordinatedArtifactStore_ExplicitEnvFillsInWithoutAProfileCache(t *test
 	}
 }
 
-// dev.env belongs to whatever dashboard is resident on this machine,
-// not to this run. A node that read it would stage from the
-// dashboard's cache while recording a manifest elsewhere.
 func TestCoordinatedArtifactStore_NeverReadsDevEnv(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("SPARKWING_HOME", home)

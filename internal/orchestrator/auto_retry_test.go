@@ -52,10 +52,6 @@ func init() {
 	register("auto-retry-exhausts", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &autoRetryExhaustsAttemptsPipe{} })
 }
 
-// TestAutoRetry_RecoversAfterTransientFailures verifies the happy
-// path: a node that fails twice then succeeds on the third dispatch
-// completes with the run reported as success. AutoRetry(2) means up
-// to 2 re-dispatches beyond the initial = 3 total attempts.
 func TestAutoRetry_RecoversAfterTransientFailures(t *testing.T) {
 	autoRetryCount.Store(0)
 	p := newPaths(t)
@@ -87,9 +83,6 @@ func TestAutoRetry_RecoversAfterTransientFailures(t *testing.T) {
 	}
 }
 
-// TestAutoRetry_FailsAfterExhaustingAttempts verifies the budget is
-// enforced: a node that always fails completes with the run failed
-// after AutoRetry(2)+1 = 3 total dispatches.
 func TestAutoRetry_FailsAfterExhaustingAttempts(t *testing.T) {
 	autoRetryCount.Store(0)
 	p := newPaths(t)

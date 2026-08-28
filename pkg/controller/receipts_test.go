@@ -15,9 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestReceiptEndpoint_RoundTrip seeds a finished run + two nodes,
-// hits the controller, and pins the receipt-shape contract: every
-// documented field present, hashes non-empty, cost honors the rate.
 func TestReceiptEndpoint_RoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -101,8 +98,6 @@ func TestReceiptEndpoint_RoundTrip(t *testing.T) {
 	}
 }
 
-// TestReceiptEndpoint_NotFound proves the 404 path tunnels through to
-// store.ErrNotFound on the client side.
 func TestReceiptEndpoint_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

@@ -10,12 +10,6 @@ import (
 	"testing"
 )
 
-// TestShellStdinPlumbing is a canary for TestLoginSecretNotInArgv: it
-// asserts that a `#!/bin/sh` fake docker can receive stdin from
-// os/exec and redirect it to a file. When this test fails, the
-// Login-via-stdin test will fail for the same root cause (PATH
-// restriction, missing /bin/cat, etc.) and pinpoint the plumbing
-// rather than the production code.
 func TestShellStdinPlumbing(t *testing.T) {
 	dir := t.TempDir()
 	stdinFile := filepath.Join(dir, "stdin")

@@ -6,9 +6,6 @@ import (
 	"testing"
 )
 
-// withResolvedArgs is a test helper that mimics what the framework
-// does at dispatch time -- it installs a resolved-args map on the
-// context so Arg[T] / ArgOrDefault can read from it.
 func withResolvedArgs(ctx context.Context, args map[string]any) context.Context {
 	return context.WithValue(ctx, keyResolvedArgs, args)
 }

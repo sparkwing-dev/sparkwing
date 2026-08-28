@@ -1,5 +1,3 @@
-// `sparkwing pipeline hooks` subcommand. Installs, uninstalls, and reports on
-// git hook scripts that fire sparkwing pipelines on commit / push.
 package main
 
 import (
@@ -26,9 +24,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-// sparkwingHookMarker identifies hook files this command manages.
-// Any script containing this string is considered ours for
-// uninstall / status purposes.
 const sparkwingHookMarker = githooks.Marker
 
 func runHooks(args []string) error {
@@ -93,24 +88,6 @@ func runHooksInstall(args []string) error {
 	return nil
 }
 
-// installFleet runs the install in every repo the machine has registered.
-//
-// The sweep enumerates the registry rather than taking a list of repositories
-// from its caller, so a checkout registered after this code was written is
-// swept without anyone remembering it exists -- the failure that left single
-// repositories ungated for weeks each time a sweep was scoped by hand.
-//
-// One repository's failure does not stop the others: a sweep that aborts
-// partway leaves exactly the silent, partial coverage it was run to end.
-//
-// The summary counts what each install left behind rather than that it
-// returned without an error. An install that proves a repository's gates,
-// finds none of them able to run and therefore arms nothing is a complete,
-// unexceptional run -- counting it as armed would report a swept fleet as
-// gated while every commit in it still goes ungated. A repository that
-// declares no hook git can refuse work with is counted apart for the same
-// reason, and is not a repository the sweep left ungated: there is nothing
-// there for a re-run to arm.
 func installFleet(opts installOptions) error {
 	roots, err := fleetRepoRoots(runGit)
 	if err != nil {
@@ -156,19 +133,6 @@ func installFleet(opts installOptions) error {
 	return nil
 }
 
-// fleetRepoRoots enumerates the machine's sparkwing checkouts, canonicalized
-// to primary repositories so a linked worktree does not become a row of its
-// own -- git keeps one hook directory per repository, and arming it twice
-// through two paths is the same claim made twice.
-//
-// A registry it could not read is an error, never an empty fleet. The two
-// answers render identically once the list is empty -- no rows, no ungated
-// repos, nothing to install -- so a corrupt repos.yaml reported a swept,
-// clean machine while every gate question went unasked. Whoever holds the
-// list decides which it was, because by the time the caller has a slice the
-// evidence is gone. Load treats a *missing* file as an empty config on
-// purpose, and that stays: a laptop that has registered nothing really has
-// an empty fleet.
 func fleetRepoRoots(git repos.Git) ([]string, error) {
 	cands, err := repos.CandidatePaths()
 	if err != nil {
@@ -191,26 +155,14 @@ func fleetRepoRoots(git repos.Git) ([]string, error) {
 	return out, nil
 }
 
-// Prover runs one of repoRoot's pipelines the way an installed hook will. An
-// install takes it as a dependency so the proof can be faked in tests and
-// skipped by an operator who has already made it.
 type Prover func(repoRoot, pipeline string) error
 
-// installOptions carry what an install needs beyond the repository itself.
 type installOptions struct {
-	// prove runs a blocking gate before core.hooksPath is claimed. Nil arms
-	// the repository without the proof.
 	prove Prover
 
-	// profile pins the generated hooks to one storage profile. Empty
-	// leaves the selection to the project's own config, which is still
-	// deterministic -- what the hook must never do is take it from the
-	// shell that happened to invoke git.
 	profile string
 }
 
-// declaredHooks maps every git hook name repoRoot's pipelines ask for to the
-// pipelines that asked for it.
 func declaredHooks(sparkwingDir string) (map[string][]string, error) {
 	cfg, err := projectconfig.Load(filepath.Join(sparkwingDir, projectconfig.Filename))
 	if err != nil {
@@ -234,9 +186,6 @@ func declaredHooks(sparkwingDir string) (map[string][]string, error) {
 	return out, nil
 }
 
-// declaredHookNames returns the hook names repoRoot asks git to run, sorted.
-// A project that cannot be read declares nothing, so a survey still reports
-// the repository instead of dropping it.
 func declaredHookNames(repoRoot string) []string {
 	declared, err := declaredHooks(filepath.Join(repoRoot, ".sparkwing"))
 	if err != nil {
@@ -245,29 +194,6 @@ func declaredHookNames(repoRoot string) []string {
 	return slices.Sorted(maps.Keys(declared))
 }
 
-// installHooks writes a managed hook for every trigger repoRoot's pipelines
-// declare, then makes sure git will actually read them.
-//
-// A core.hooksPath in the machine's global git config replaces .git/hooks
-// for every repository, so an install that only writes files leaves the gate
-// dead. The install therefore claims core.hooksPath for this repository and
-// chains the global hooks from it: a hook name both layers define runs the
-// pipeline first and hands off to the global hook after, and a name only the
-// global layer defines gets a forwarder. Nothing the machine configured is
-// dropped, and nothing sparkwing installed is shadowed.
-//
-// The claim is only safe once every global hook name has a forwarder behind
-// it, so a name whose forwarder could not be written -- a hand-written hook
-// sits there -- holds the claim back rather than silencing the machine's
-// hook. A repository already carrying the claim reaches no such decision, so
-// the install reports any global hook nothing hands off to on its way out.
-//
-// It reports whether git ends up running a gate for every one the repository
-// declares, which is not the same question as whether the install failed:
-// proving a repository's gates and finding none of them able to run is a
-// complete run that arms nothing. A repository that declares no gate reports
-// false too -- there was never one to arm, and a commit in it goes unchecked
-// whatever this run did.
 func installHooks(git githooks.Git, repoRoot, sparkwingDir string, opts installOptions) (bool, error) {
 	hooksToRun, err := declaredHooks(sparkwingDir)
 	if err != nil {
@@ -476,10 +402,6 @@ func localHooksPathValue(git githooks.Git, repoRoot string) (string, bool) {
 	return strings.TrimSuffix(out, "\n"), true
 }
 
-// unforwardedGlobalHooks returns the global hook names hooksDir does not hand
-// off to, sorted. Reading the directory back rather than trusting what the
-// install just wrote keeps the answer true of hooks a previous run left
-// behind, and of names an unmanaged file displaced.
 func unforwardedGlobalHooks(globalHooks map[string]bool, hooksDir string) []string {
 	var names []string
 	for _, name := range slices.Sorted(maps.Keys(globalHooks)) {
@@ -495,10 +417,6 @@ func unforwardedGlobalHooks(globalHooks map[string]bool, hooksDir string) []stri
 	return names
 }
 
-// gitHookNames are the hook names git runs, per githooks(5). A hooks
-// directory is a plain directory an operator may also keep helper scripts
-// and notes in, and only a name git would ever execute is worth forwarding
-// -- or worth holding the hooks-path claim back.
 var gitHookNames = map[string]bool{
 	"applypatch-msg": true, "pre-applypatch": true, "post-applypatch": true,
 	"pre-commit": true, "pre-merge-commit": true, "prepare-commit-msg": true,
@@ -513,11 +431,6 @@ var gitHookNames = map[string]bool{
 	"post-index-change": true,
 }
 
-// chainableGlobalHooks returns the hook names the machine's global
-// core.hooksPath directory offers, which the install has to keep alive once
-// it claims the hooks path for this repository. A global directory that is
-// already this repository's own hook directory chains nothing -- forwarding
-// it to itself would recurse.
 func chainableGlobalHooks(git githooks.Git, hooksDir string) map[string]bool {
 	dir := githooks.GlobalPath(git)
 	names := map[string]bool{}
@@ -548,8 +461,6 @@ func chainSuffix(chained bool) string {
 	return ""
 }
 
-// writeManagedHook writes a sparkwing-managed hook, refusing to overwrite a
-// hook the operator wrote by hand. It reports whether the file was written.
 func writeManagedHook(hooksDir, name, content string) (bool, error) {
 	path := filepath.Join(hooksDir, name)
 	if existing, err := os.ReadFile(path); err == nil && !strings.Contains(string(existing), sparkwingHookMarker) {
@@ -667,20 +578,6 @@ func sameGlobalHookState(before, after globalHookState) bool {
 	return true
 }
 
-// armHooks makes the hooks just written the ones git runs for this
-// repository, and reports whether git ends up running a gate for every one
-// the repository declares.
-//
-// Two things stand between a written hook and a firing one. A core.hooksPath
-// override sends git to another directory, which the install claims away when
-// the machine set it -- an override the repository itself carries was set
-// deliberately, so it is reported instead. unforwarded names the machine's
-// hooks nothing in hooksDir hands off to; claiming the path while any remain
-// would trade one silent gate for another, so the claim is refused and the
-// hook to clear is named.
-//
-// armHooks claims the repository hook path after every candidate hook has
-// been published. Proof and feasibility checks have already passed.
 func armHooks(git githooks.Git, repoRoot, hooksDir string, unforwarded []string, hooksToRun map[string][]string, plan hookInstallPlan) (bool, error) {
 	if !slices.Equal(unforwarded, plan.unforwarded) {
 		return false, fmt.Errorf("global hook forwarding changed while hooks were being installed: %s", strings.Join(unforwarded, ", "))
@@ -701,13 +598,6 @@ func armHooks(git githooks.Git, repoRoot, hooksDir string, unforwarded []string,
 	return gatesLive(hooksDir, gates), nil
 }
 
-// declaredGates returns the hooks among hookNames that can refuse work, in
-// the order they are proven.
-//
-// It is what the arming path counts rather than every declared hook: only a
-// blocking hook is ever proven, so a repository that also declares
-// post-commit could never fail as many proofs as it declares hooks, and read
-// as having something left to arm with every gate it owns red.
 func declaredGates(hookNames []string) []string {
 	var gates []string
 	for _, name := range githooks.BlockingHooks {
@@ -718,15 +608,6 @@ func declaredGates(hookNames []string) []string {
 	return gates
 }
 
-// gatesLive reports whether hooksDir -- by now the directory git reads for
-// this repository -- holds a managed hook for every gate in declared.
-//
-// It answers [githooks.RepoGates.Gated]'s question of a directory an install
-// has just written rather than of a survey, so a sweep and a survey say the
-// same thing about the same repository. They part on one that declares no
-// gate: the survey has nothing missing to report, while the install armed
-// nothing and says so rather than let a fleet summary count it among the
-// repositories a gate now fires in.
 func gatesLive(hooksDir string, declared []string) bool {
 	if len(declared) == 0 {
 		return false
@@ -740,19 +621,6 @@ func gatesLive(hooksDir string, declared []string) bool {
 	return true
 }
 
-// proveGates runs each blocking gate once, before the hooks that run it can
-// fire, and returns the hook names whose gate did not pass.
-//
-// While a repository's hooks are inert a gate that cannot execute at all --
-// an admission daemon it cannot speak to, a pipeline red on the default
-// branch -- is indistinguishable from a gate that passes. Arming converts the
-// first case into a commit that fails every time, which is worse than the
-// silence it replaces: an ungated repository still accepts work. Running the
-// gate first is what separates the two, and it costs one run per install of a
-// repository that is about to gate its own commits.
-//
-// Every blocking hook is proven even after one fails, so the caller can arm
-// the gates that work rather than the whole repository or none of it.
 func proveGates(prove Prover, repoRoot string, hooksToRun map[string][]string) map[string]error {
 	failed := map[string]error{}
 	if prove == nil {
@@ -771,11 +639,6 @@ func proveGates(prove Prover, repoRoot string, hooksToRun map[string][]string) m
 	return failed
 }
 
-// runPipelineForProof runs a pipeline the way the installed hook will: the
-// `sparkwing` on PATH, in the repository being armed. Reusing the hook's own
-// command is what makes the proof cover the binary that will actually run,
-// which for a pipeline built from the repository's own SDK pin is not the
-// process making the install.
 func runPipelineForProof(repoRoot, pipeline string) error {
 	cmd := exec.Command("sparkwing", "run", pipeline)
 	cmd.Dir = repoRoot
@@ -787,8 +650,6 @@ func runPipelineForProof(repoRoot, pipeline string) error {
 	return fmt.Errorf("%w: %s", err, lastLine(out))
 }
 
-// lastLine is the final non-empty line of a command's output, which for a
-// failed pipeline run is the message worth repeating.
 func lastLine(out []byte) string {
 	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
@@ -818,13 +679,6 @@ func runHooksUninstall(args []string) error {
 	return nil
 }
 
-// uninstallHooks removes every hook sparkwing manages in repoRoot, including
-// the forwarders that kept the machine's global hooks reachable, and then
-// releases the hooks-path claim so those global hooks apply again.
-//
-// The claim is released whether or not this run removed anything: hooks that
-// vanished by other means leave the same claim pointing at a directory with
-// no forwarders in it, which is the state the release exists to prevent.
 func uninstallHooks(git githooks.Git, repoRoot string) error {
 	hooksDir, err := githooks.Dir(repoRoot)
 	if err != nil {
@@ -864,11 +718,6 @@ func uninstallHooks(git githooks.Git, repoRoot string) error {
 	return nil
 }
 
-// releaseHooksPath undoes the hooks-path claim an install made. The claim
-// only exists to outrank a global core.hooksPath, and the forwarders that
-// kept the machine's hooks reachable are gone with the rest, so leaving it
-// in place would strand those hooks. A hooks path pointing anywhere else is
-// the operator's and is left alone.
 func releaseHooksPath(git githooks.Git, repoRoot, hooksDir string) {
 	if githooks.GlobalPath(git) == "" {
 		return
@@ -902,8 +751,6 @@ func runHooksStatus(args []string) error {
 	return nil
 }
 
-// statusHooks reports the managed hooks installed in repoRoot, what each
-// one does, and whether git is reading them at all.
 func statusHooks(git githooks.Git, repoRoot string) error {
 	hooksDir, err := githooks.Dir(repoRoot)
 	if err != nil {
@@ -949,10 +796,6 @@ func statusHooks(git githooks.Git, repoRoot string) error {
 	return nil
 }
 
-// reportSilencedGlobalHooks warns about the machine's global hooks that stop
-// firing because git reads this repository's hook directory and nothing there
-// hands off to them. It only applies while the repository's hooks are the
-// ones git reads: anywhere else the global hooks are still in charge.
 func reportSilencedGlobalHooks(git githooks.Git, repoRoot, hooksDir string) {
 	active, _ := githooks.ActivePath(git, repoRoot)
 	if active == "" || !githooks.SameDir(active, hooksDir) {
@@ -967,13 +810,6 @@ func reportSilencedGlobalHooks(git githooks.Git, repoRoot, hooksDir string) {
 		strings.Join(silenced, ", "), hooksDir)
 }
 
-// runHooksSurvey reports what git gates in every registered repository.
-//
-// A survey that could not read the registry writes nothing and exits
-// non-zero. Rendering an empty fleet would print "no repos registered", or
-// `[]` under -o json, which is what a genuinely clean machine prints, and a
-// reader who believes that stops looking. The error is the only output that
-// cannot be mistaken for an answer.
 func runHooksSurvey(args []string) error {
 	fs := flag.NewFlagSet(cmdHooksSurvey.Path, flag.ContinueOnError)
 	outFmt := fs.StringP("output", "o", "", "output format: pretty|json|plain")
@@ -998,12 +834,6 @@ func runHooksSurvey(args []string) error {
 	return renderHooksSurvey(os.Stdout, rows, format)
 }
 
-// surveyFleet classifies every registered repository's gates. It is the one
-// place the fleet is enumerated, so `survey`, `install --fleet` and `doctor`
-// all answer for the same set of repositories.
-//
-// It returns the registry's error rather than an empty survey, so every one
-// of those three has to decide what to say when it could not look.
 func surveyFleet(git githooks.Git) ([]githooks.RepoGates, error) {
 	roots, err := fleetRepoRoots(repos.Git(git))
 	if err != nil {
@@ -1015,15 +845,10 @@ func surveyFleet(git githooks.Git) ([]githooks.RepoGates, error) {
 func renderHooksSurvey(w io.Writer, rows []githooks.RepoGates, format string) error {
 	switch format {
 	case "json":
-		// NDJSON: one repo per line, so `head` returns whole repos. An
-		// empty fleet is an empty stream.
+
 		return ndjson.Write(w, rows)
 	case "plain":
-		// One tab-separated row per repo, no summary and no alignment, so
-		// `cut` and `awk` get a stable shape whatever the fleet looks like.
-		// The column count stays put: a borrowed gate is already named by the
-		// state, and widening a shape `cut` reads would break the readers this
-		// format exists for.
+
 		for _, r := range rows {
 			fmt.Fprintf(w, "%s\t%s\t%s\n", r.Repo, r.State, strings.Join(r.NotFiring(), ","))
 		}
@@ -1066,9 +891,6 @@ func joinOrDash(names []string) string {
 	return strings.Join(names, ",")
 }
 
-// describeManagedHook reads back what a managed hook script does: the
-// pipelines it runs, and whether it hands off to the machine's global hook
-// of the same name afterwards.
 func describeManagedHook(script string) (pipes []string, chained bool) {
 	for line := range strings.SplitSeq(script, "\n") {
 		line = strings.TrimSpace(line)
@@ -1083,9 +905,6 @@ func describeManagedHook(script string) (pipes []string, chained bool) {
 	return pipes, chained
 }
 
-// resolveHooksRepo returns the repo root + .sparkwing dir for the
-// given --repo flag. Empty --repo triggers the usual findSparkwingDir
-// walk from cwd.
 func resolveHooksRepo(repo string) (repoRoot, sparkwingDir string, err error) {
 	if repo == "" {
 		dir, err := findSparkwingDir()
@@ -1105,43 +924,6 @@ func resolveHooksRepo(repo string) (repoRoot, sparkwingDir string, err error) {
 	return abs, candidate, nil
 }
 
-// renderHookScript builds the hook file contents. Short POSIX sh so it
-// runs anywhere git does.
-//
-// Blocking hooks (pre-commit, pre-push) exit non-zero on the first
-// pipeline failure so git aborts the commit / push as operators expect.
-// The post-commit hook is non-blocking: the commit has already landed,
-// so it runs every pipeline, tolerates failures, and always exits zero
-// rather than leaving git reporting a failed post-commit step.
-//
-// chainGlobal appends a hand-off to the same-named hook in the machine's
-// global core.hooksPath, which this repository's own hooks path override
-// would otherwise shadow. The pipelines run first and the hand-off replaces
-// the shell, so the global hook decides the hook's exit status; a failed
-// blocking pipeline aborts before reaching it, which is what the operator
-// asked for. Pipelines read from /dev/null in that case so the hook's own
-// stdin -- the ref list git feeds pre-push -- reaches the global hook
-// untouched. Passing no pipelines renders a pure forwarder, for hook names
-// only the global layer defines.
-//
-// The global path is resolved when the hook runs rather than baked in, so
-// changing the machine's hooks directory does not require reinstalling.
-//
-// A blocking hook that runs pipelines opens with the self-test guard, so
-// `sparkwing pipeline hooks fire` can see it refuse a commit without paying
-// for the gate. Nothing about a hook that only forwards is worth proving --
-// it gates nothing -- and the guard can only refuse, never allow, so it adds
-// no way past a gate.
-//
-// The pipelines run in a subshell that drops the repository-binding GIT_*
-// variables git hands every hook, keeping the index git is composing the
-// commit in as SPARKWING_GATE_INDEX, so a step that runs git elsewhere is not
-// silently redirected at the repository being gated and a step that wants what
-// is being committed can still ask for it. sparkwing unbinds itself too; doing
-// it here as well covers the sparkwing on PATH being older than the install
-// that wrote this file. The subshell is what keeps the scrub off the hand-off:
-// the global hook is git's to configure, and it gets the environment git meant
-// it to have.
 func renderHookScript(hookName string, pipes []string, chainGlobal bool, profileName string) string {
 	blocking := hookName != "post-commit"
 	var b strings.Builder
@@ -1166,12 +948,7 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool, profile
 	if len(pipes) > 0 {
 		b.WriteString("(\n")
 		b.WriteString(gitenv.ShellUnbind())
-		// SPARKWING_PROFILE is scrubbed for the same reason the GIT_*
-		// bindings are: a hook must run against the store its repository
-		// declares, not the store the invoking shell happened to name.
-		// Leaving it inherited put two identical commits seconds apart
-		// into different stores -- one local, one in a bucket -- and both
-		// printed a green tick.
+
 		b.WriteString("unset SPARKWING_PROFILE\n")
 		flag := ""
 		if profileName != "" {
@@ -1192,9 +969,6 @@ func renderHookScript(hookName string, pipes []string, chainGlobal bool, profile
 	return b.String()
 }
 
-// renderGlobalChain is the tail that hands a hook off to the same-named hook
-// in the machine's global core.hooksPath. A machine that sets no global
-// hooks path, or offers no such hook, ends the script cleanly.
 func renderGlobalChain(hookName string) string {
 	return "global=\"$(git config --global --type=path core.hooksPath 2>/dev/null)\" || exit 0\n" +
 		"[ -n \"$global\" ] || exit 0\n" +
@@ -1203,9 +977,6 @@ func renderGlobalChain(hookName string) string {
 		"exec \"$hook\" \"$@\"\n"
 }
 
-// shellSingleQuote renders s as one POSIX sh single-quoted word, so a
-// profile name carrying a space or a metacharacter reaches sparkwing
-// as the name the operator typed rather than as shell syntax.
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

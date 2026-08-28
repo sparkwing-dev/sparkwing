@@ -7,7 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/projectconfig"
 )
 
-// pipelinesPayload mirrors web/src/lib/api.ts:PipelineMeta.
 type pipelinesPayload struct {
 	Pipelines map[string]pipelineEntry `json:"pipelines"`
 }
@@ -24,9 +23,6 @@ type pipelineArg struct {
 	Default  string `json:"default,omitempty"`
 }
 
-// pipelinesHandler serves pipelines discovered from the nearest
-// .sparkwing/sparkwing.yaml. Args schemas are empty until argument
-// introspection is plumbed in from the compiled pipeline binary.
 func pipelinesHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		payload := pipelinesPayload{Pipelines: map[string]pipelineEntry{}}

@@ -1,22 +1,4 @@
 #!/usr/bin/env bash
-# Mirror docs/ (the canonical source) -> pkg/docs/mirror/ so the CLI
-# embed picks up new markdown. docs/ is also consumed by the
-# sparkwing-product website build; pkg/docs/mirror/ is generated --
-# never edit it directly. Run this after editing anything under docs/;
-# the pre-commit gate and the TestPkgDocsContentMatchesDocsRoot guard
-# test fail until it is run.
-#
-# Also copies CHANGELOG.md into pkg/docs/changelog.md so the CLI can
-# embed it as the `changelog` docs topic. Run this after editing
-# CHANGELOG.md too; the TestEmbeddedChangelogMatchesRoot guard test
-# fails until it is run.
-#
-# `--check` reports drift instead of fixing it: it writes nothing and
-# exits non-zero listing the files that differ. That is the mode a
-# reviewer asked to "run the drift check" wants, and the mode the
-# pre-commit docs-mirror gate runs -- a check that repairs the tree it
-# was pointed at cannot report on it, and until this flag existed an
-# unknown argument was ignored and a real sync happened instead.
 
 set -euo pipefail
 
@@ -59,10 +41,6 @@ if [ ! -d "$SRC" ]; then
 fi
 
 if [ "$check" -eq 1 ]; then
-  # The sync is `rm -rf DST; cp -r SRC DST`, so the would-be output is
-  # docs/ byte for byte and a recursive diff is the whole comparison.
-  # Run it from the repo root so the report names the paths a reader
-  # would edit rather than absolute ones.
   cd "$REPO_ROOT"
   drift=""
   if [ ! -d "pkg/docs/mirror" ]; then

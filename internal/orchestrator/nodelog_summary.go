@@ -6,34 +6,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// summarizingNodeLog observes LogRecords for the node_summary event
-// emitted by sparkwing.Summary and forwards the markdown payload to
-// the State backend. Summaries fired inside a step body (rec.Step
-// set) land on the per-step row; everything else lands on the node
-// row. Persistence is overwrite-on-write: the last value per
-// (node, step) scope wins.
-//
-// The wrapper holds its own background context for the persist call
-// so a summary that fires late in a canceled step still lands.
-// Persist errors are intentionally swallowed: summaries are advisory
-// metadata, never load-bearing for run correctness.
 type summarizingNodeLog struct {
 	inner       NodeLog
 	persistNode func(md string)
 	persistStep func(stepID, md string)
 }
 
-// wrapNodeLogWithSummary returns inner unchanged when state is nil.
-// The returned wrapper writes summary markdown to state and then
-// delegates the original record to inner so the JSONL log file,
-// pretty renderer, and dashboard tail all still see the event.
-//
-// Summary routing: when the LogRecord carries a Step (set by
-// recordEnvelope while inside a step body), the markdown lands on
-// the node_steps row instead of the node row. Summaries fired
-// between steps (node setup, after-hooks, etc.) land on the node
-// row. The two rows are disjoint -- a step body's summary belongs on
-// that step, never both places.
 func wrapNodeLogWithSummary(inner NodeLog, state StateBackend, runID, nodeID string) NodeLog {
 	if inner == nil || state == nil {
 		return inner

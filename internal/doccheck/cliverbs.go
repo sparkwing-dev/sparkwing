@@ -8,25 +8,12 @@ import (
 	"strings"
 )
 
-// registryPathRE captures the full command path of every Command literal
-// in the help registry (`Path: "sparkwing ..."`). The registry is the
-// source of truth for the user-facing command tree; help output,
-// completion, and dispatch all read from it.
 var registryPathRE = regexp.MustCompile(`Path:\s*"(sparkwing[^"]*)"`)
 
-// posArgsFieldRE marks a Command that declares a positional argument. A
-// command with a PosArg (e.g. `run <pipeline>`) swallows the next token
-// as a value, so a bare word there is data, not a typo'd verb.
 var posArgsFieldRE = regexp.MustCompile(`^\s*PosArgs:`)
 
-// hiddenTopLevel are verbs the CLI dispatches but deliberately keeps out
-// of the help surface: the per-node execution entrypoints that the
-// runner and worker spawn as child processes. Architecture/internals docs
-// legitimately name them, so they resolve here even though no Path lists
-// them.
 var hiddenTopLevel = []string{"run-node", "handle-trigger"}
 
-// cliVerb is one `sparkwing ...` invocation lifted from the docs.
 type cliVerb struct {
 	file   string
 	line   int
@@ -34,10 +21,6 @@ type cliVerb struct {
 	raw    string
 }
 
-// shellLangs are the fenced-block languages whose lines are shell
-// commands (a no-language fence is commonly shell in these docs). Go,
-// yaml, and json blocks are handled by other gates and never carry a bare
-// `sparkwing` invocation to resolve.
 var shellLangs = map[string]bool{
 	"":        true,
 	"bash":    true,
@@ -47,20 +30,8 @@ var shellLangs = map[string]bool{
 	"text":    true,
 }
 
-// unshippedDesignRE detects a doc that declares itself a design sketch
-// for an unshipped feature (a top-of-file status banner). Such a doc
-// intentionally names commands that don't exist yet, so it is exempt from
-// verb resolution; when the feature ships and the banner comes off, the
-// doc is checked like any other.
 var unshippedDesignRE = regexp.MustCompile(`(?i)not yet shipped|STATUS:\s*design`)
 
-// checkCLIVerbs resolves every `sparkwing <verb> <subverb> ...`
-// invocation shown in the docs against the CLI command tree and fails on
-// any invocation naming a subcommand that doesn't exist -- one that was
-// renamed or never existed. Flags, positional values, and comment tails
-// end the path walk; only the leading run of subcommand words is
-// resolved, so `sparkwing run my-pipeline --sw-dry-run` checks `run` and
-// stops at the pipeline name. Returns false on any drift.
 func checkCLIVerbs(contentDir, repoRoot string) bool {
 	valid, posArgs, err := loadRegistry(repoRoot)
 	if err != nil {
@@ -110,16 +81,6 @@ func checkCLIVerbs(contentDir, repoRoot string) bool {
 	return true
 }
 
-// loadRegistry reads the help registry and returns the set of valid
-// command paths (Path literals plus the hidden execution verbs) and
-// the subset of paths that accept a positional argument.
-//
-// Path literals are the whole set. This used to also scrape the
-// help-display subcommand list, because `configure xrepo` was named
-// there and nowhere else -- a group the CLI dispatched but never
-// registered. That command has its own Path now, so a doc verb
-// resolves against the registry alone and a group cannot become
-// checkable by being mentioned.
 func loadRegistry(repoRoot string) (valid, posArgs map[string]bool, err error) {
 	data, err := os.ReadFile(filepath.Join(repoRoot, "cmd", "sparkwing", "help_registry.go"))
 	if err != nil {
@@ -153,13 +114,6 @@ func loadRegistry(repoRoot string) (valid, posArgs map[string]bool, err error) {
 
 var inlineCodeRE = regexp.MustCompile("`([^`]+)`")
 
-// extractInvocations pulls candidate `sparkwing ...` commands out of a
-// markdown document: the command at the start of each line inside a
-// shell-ish fenced block, and each inline code span that is itself a
-// `sparkwing` command. Requiring the invocation to start the line/span
-// keeps prose that merely mentions the word (a numbered "sparkwing
-// resolves the profile" flow step, a `# comment` tail) from being parsed
-// as a command.
 func extractInvocations(file, doc string) []cliVerb {
 	var out []cliVerb
 	lines := strings.Split(doc, "\n")
@@ -195,15 +149,8 @@ func extractInvocations(file, doc string) []cliVerb {
 	return out
 }
 
-// subcmdTokenRE matches a bare lowercase word: the only shape a
-// subcommand token can take. Flags, placeholders (<pipeline>), variables,
-// and paths never match, so the path walk stops at them.
 var subcmdTokenRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
-// parseInvocation reads a single shell line or inline span and, when it
-// starts with the `sparkwing` command word (optionally behind a `$`/`#`
-// prompt), returns the run of subcommand tokens that follow. Tokens after
-// a shell operator or comment are dropped.
 func parseInvocation(file string, line int, s string) (cliVerb, bool) {
 	fields := strings.Fields(strings.TrimSpace(s))
 	if len(fields) > 0 && (fields[0] == "$" || fields[0] == "#") {
@@ -231,11 +178,6 @@ func isShellOperator(tok string) bool {
 	return false
 }
 
-// resolvePath walks the subcommand tokens against the valid command
-// paths. It returns "" when the invocation resolves (or terminates at a
-// flag, a positional value, or a leaf command) and the offending token
-// when a bare word names a subcommand that doesn't exist under an
-// existing command group.
 func resolvePath(tokens []string, valid, posArgs map[string]bool) string {
 	cur := "sparkwing"
 	for _, t := range tokens {
@@ -258,9 +200,6 @@ func resolvePath(tokens []string, valid, posArgs map[string]bool) string {
 	return ""
 }
 
-// isGroup reports whether cur has at least one child command in the
-// registry, which makes an unknown next token a real drift rather than a
-// positional value.
 func isGroup(cur string, valid map[string]bool) bool {
 	prefix := cur + " "
 	for p := range valid {

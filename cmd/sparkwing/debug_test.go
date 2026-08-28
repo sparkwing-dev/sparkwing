@@ -4,8 +4,6 @@ import (
 	"testing"
 )
 
-// TestClaimToPod exercises the claim-string parser used by
-// `sparkwing debug attach` to derive the pod name + namespace.
 func TestClaimToPod(t *testing.T) {
 	t.Setenv("SPARKWING_NAMESPACE", "test-ns")
 	cases := []struct {
@@ -27,8 +25,6 @@ func TestClaimToPod(t *testing.T) {
 	}
 }
 
-// TestParseDebugTarget_RequiresRunAndNode verifies the shared flag
-// parser rejects missing --run or --node.
 func TestParseDebugTarget_RequiresRunAndNode(t *testing.T) {
 	if _, err := parseDebugTarget(cmdDebugRelease, []string{"--run", "r1"}); err == nil {
 		t.Fatal("expected error when --node missing")

@@ -12,8 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// stubRunLister returns a canned list of runs regardless of filter.
-// Good enough for GCWarmRoot's one call.
 type stubRunLister struct {
 	runs []*store.Run
 	err  error

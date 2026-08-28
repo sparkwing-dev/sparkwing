@@ -7,14 +7,6 @@ import (
 	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
-// TestRunWingdServesEveryVerbASpawnInvokes is the sparkwing-runner half of
-// the lockstep pin in cmd/sparkwing. The runner's in-process admission
-// client self-spawns, so it must serve every verb that spawn invokes --
-// it did not, and `sparkwing-runner --local-admission` could not bring up
-// the daemon it depends on.
-//
-// Probed with an unparseable flag so a served verb rejects the flag
-// instead of starting a daemon.
 func TestRunWingdServesEveryVerbASpawnInvokes(t *testing.T) {
 	for _, verb := range []string{"run", wingdclient.DaemonSpawnVerb} {
 		err := RunWingd([]string{verb, "--this-flag-does-not-exist"})

@@ -2,9 +2,6 @@ package logs
 
 import "testing"
 
-// parseMissingScope is the chokepoint for AuthError.Scope.
-// Pin all three input shapes here so a future tweak to either the
-// JSON parsing or the string-match fallback gets caught immediately.
 func TestParseMissingScope(t *testing.T) {
 	cases := []struct {
 		name string

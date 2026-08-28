@@ -80,7 +80,6 @@ func (e *ExecError) Error() string {
 
 func (e *ExecError) Unwrap() error { return e.Cause }
 
-// cmdKind selects the executor used for a Cmd: bash or argv exec.
 type cmdKind int
 
 const (
@@ -98,8 +97,7 @@ const (
 type Cmd struct {
 	ctx  context.Context
 	kind cmdKind
-	// For kindBash, line holds the (already-formatted) command line.
-	// For kindExec, name + args hold the argv.
+
 	line string
 	name string
 	args []string
@@ -402,11 +400,8 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		Debug(ctx, "exec env: %s", formatEnvDiff(extraEnv))
 	}
 
-	// safety: these pipes are ours rather than cmd.StdoutPipe's, because
-	// exec.Cmd.Wait closes the pipes it hands out the instant the child is
-	// reaped. That races the reader goroutines, and on a loaded box the
-	// readers lose: a command that exited 0 reports empty output. Pipes we
-	// own stay readable until the readers have actually drained them.
+	// safety: own the pipes so Cmd.Wait cannot close them before reader
+	// goroutines drain a fast child's output.
 	outR, outW, err := os.Pipe()
 	if err != nil {
 		return ExecResult{Command: display}, &ExecError{Command: display, ExitCode: ExitNotStarted, Cause: err}
@@ -435,12 +430,8 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 
 	waitErr := cmd.Wait()
 	wall := time.Since(startedAt)
-	// safety: the report is filed at the reap, ahead of the drain, because the
-	// node sampler is ticking the whole time. The report tells the sampler
-	// which reaped-child CPU it has already accounted for, and a tick landing
-	// inside the drain's grace window would otherwise charge that CPU a second
-	// time -- the same CPU, once as the command's report and once as the
-	// sampler's own RUSAGE_CHILDREN delta.
+	// safety: report at reap before draining so a sampler tick cannot charge the
+	// same RUSAGE_CHILDREN delta again during the drain window.
 	emitCommandResources(ctx, cmd, wall)
 
 	drainStreams(&wg, outR, errR)
@@ -474,12 +465,6 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	return res, nil
 }
 
-// terminationReason classifies a process that its ExitError says was
-// killed rather than exited: "cancellation" when the run's context has
-// ended (exec.CommandContext SIGKILLed the child on teardown), "signal"
-// for any other kill (an external SIGKILL, an OOM). It returns "" for a
-// process that exited on its own, so a genuine non-zero exit keeps the
-// "command failed (exit N)" wording.
 func terminationReason(ctx context.Context, ee *exec.ExitError) string {
 	if ee.Exited() {
 		return ""
@@ -490,12 +475,6 @@ func terminationReason(ctx context.Context, ee *exec.ExitError) string {
 	return "signal"
 }
 
-// emitCommandResources measures the finished command's CPU and peak memory
-// from its wait4 rusage and reports them to the node's resource reporter, so
-// subprocess cost lands in the run's measured profile. cpu/wall gives the
-// command's average core draw over its span; wall is the command's real
-// duration, so a subtree that ran for many seconds is not mistaken for a
-// same-cost burst. Best-effort: a missing rusage or reporter is a no-op.
 func emitCommandResources(ctx context.Context, cmd *exec.Cmd, wall time.Duration) {
 	cpu, maxRSS, ok := commandResourceUsage(cmd)
 	if !ok {
@@ -504,14 +483,6 @@ func emitCommandResources(ctx context.Context, cmd *exec.Cmd, wall time.Duration
 	reportResource(ctx, ResourceSample{CPUMillicores: amortizedMillicores(cpu, wall), MemoryBytes: maxRSS, CPUTime: cpu})
 }
 
-// amortizedMillicores spreads a finished command's total CPU over its own wall
-// duration, yielding its average concurrent core draw rather than an
-// instantaneous burst. A parallel subtree (say `make -j8` running 2s and
-// drawing 16 CPU-seconds) reports ~8 cores -- its real concurrency -- not the
-// 20-plus a single sampler interval would show if the reaped CPU landed there
-// all at once. The result is inherently bounded by host cores, since a subtree
-// cannot burn more CPU-seconds than cores times wall. A non-positive wall (a
-// command with no measurable span) draws nothing.
 func amortizedMillicores(cpu, wall time.Duration) int64 {
 	if wall <= 0 {
 		return 0
@@ -523,19 +494,8 @@ func amortizedMillicores(cpu, wall time.Duration) int64 {
 	return millicores
 }
 
-// streamDrainGrace bounds how long a reaped command's output is still
-// drained. A normal command never waits: it held the last write end, so EOF
-// is already pending when Wait returns and the readers only have to sweep up
-// bytes that are sitting in the pipe. The window exists for the forked
-// grandchild that outlives its parent and keeps the write end open, where
-// blocking on EOF would wedge the node forever. It is deliberately far larger
-// than the microseconds a buffered drain needs and far smaller than a step a
-// human would notice, since a daemonizing step pays it in full.
 const streamDrainGrace = 500 * time.Millisecond
 
-// drainStreams waits for the reader goroutines to finish draining a reaped
-// command's pipes, force-closing the read ends if a surviving grandchild is
-// still holding them open past the grace window.
 func drainStreams(wg *sync.WaitGroup, pipes ...*os.File) {
 	drained := make(chan struct{})
 	go func() {
@@ -558,8 +518,6 @@ func closeFiles(files ...*os.File) {
 	}
 }
 
-// streamLines reads r line-by-line, tees to buf, and pushes each line
-// to the logger as an exec_line record.
 func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level string, logger Logger, buf *strings.Builder) {
 	defer wg.Done()
 	defer r.Close()
@@ -584,8 +542,6 @@ func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level
 	}
 }
 
-// renderCommand produces a single-line display of the command. No
-// quoting; good enough for log banners.
 func renderCommand(name string, args []string) string {
 	if name == "bash" && len(args) == 2 && args[0] == "-c" {
 		return args[1]
@@ -594,9 +550,6 @@ func renderCommand(name string, args []string) string {
 	return strings.Join(parts, " ")
 }
 
-// formatEnvDiff renders extra env vars as a stable, sorted KEY=VALUE
-// list. Values pass through the logger's Masker, so any registered
-// Secret value renders as `***`.
 func formatEnvDiff(env map[string]string) string {
 	keys := make([]string, 0, len(env))
 	for k := range env {

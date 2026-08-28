@@ -13,8 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// fakeSampler feeds a controllable host reading so admission gating is
-// exercised without touching the real machine.
 type fakeSampler struct {
 	mu   sync.Mutex
 	stat wingd.HostStat
@@ -42,8 +40,6 @@ func (f *fakeSampler) set(stat wingd.HostStat) {
 	f.stat = stat
 }
 
-// shortHome returns a scratch sparkwing home under /tmp so the unix
-// socket path stays within the OS length limit.
 func shortHome(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("/tmp", "wd")
@@ -62,8 +58,6 @@ type testDaemon struct {
 	stop     context.CancelFunc
 }
 
-// startDaemon runs a daemon in the background and waits until it is
-// serving. It fails the test if the daemon exits before becoming ready.
 func startDaemon(t *testing.T, cfg wingd.Config) *testDaemon {
 	t.Helper()
 	if cfg.Version == "" {
@@ -120,8 +114,6 @@ func errSpawn(string, string) error {
 	return errors.New("spawn not expected: daemon already running")
 }
 
-// ensure connects a client to an already-running daemon; Spawn must not
-// fire because the daemon is up.
 func ensure(t *testing.T, home, version string) *client.Client {
 	t.Helper()
 	if version == "" {
@@ -141,7 +133,6 @@ func ensure(t *testing.T, home, version string) *client.Client {
 	return cl
 }
 
-// semReq builds an admission request holding one named semaphore.
 func semReq(runID, key string, capacity, cost int, policy wingwire.Policy) wingwire.AdmissionRequest {
 	return wingwire.AdmissionRequest{
 		RunID:     runID,
@@ -157,9 +148,6 @@ type acquireResult struct {
 	err   error
 }
 
-// acquireAsync starts an Acquire in the background, reporting queue
-// positions on the returned channel and the final outcome on the result
-// channel.
 func acquireAsync(cl *client.Client, req wingwire.AdmissionRequest) (<-chan wingwire.Queued, <-chan acquireResult) {
 	positions := make(chan wingwire.Queued, 8)
 	result := make(chan acquireResult, 1)

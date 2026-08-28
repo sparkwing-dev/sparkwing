@@ -1,7 +1,3 @@
-// `sparkwing users` subcommand (FOLLOWUPS #2 phase 2). Seeds admin
-// credentials in the controller's users table, used by the web pod's
-// login flow. v1 ships a single-admin model; multi-user support is a
-// later session.
 package main
 
 import (

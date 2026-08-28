@@ -28,10 +28,6 @@ func (httpLogsPipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.
 	return nil
 }
 
-// TestHTTPLogs_PipelineLogsReachService runs a real pipeline with
-// HTTPLogs as the LogBackend and confirms every Log() call landed
-// in the logs service's storage. This is the full "cluster-mode
-// log routing" slice.
 func TestHTTPLogs_PipelineLogsReachService(t *testing.T) {
 	register("httplogs-demo", func() sparkwing.Pipeline[sparkwing.NoInputs] { return httpLogsPipe{} })
 

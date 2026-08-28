@@ -1,48 +1,3 @@
-// Command commentcheck enforces the repo comment policy: comments are scarce
-// and trustworthy, never narration that rots when the code moves out from
-// under it.
-//
-// Two kinds of comment are allowed:
-//
-//   - godoc attached to a top-level declaration (package, func, type, const,
-//     var, import) and to struct fields / interface methods. These render in
-//     an editor and on pkg.go.dev, so they document a contract rather than
-//     restating the code.
-//
-//   - a tiny allowlist of tagged implementation comments that force the
-//     author to justify the comment's existence:
-//
-//     // hack:   a deliberate deviation from the obvious/correct approach
-//     // safety: an invariant that must hold but isn't visible locally
-//     // bug:    a known defect left in on purpose
-//     // perf:   a non-obvious optimization worth defending
-//
-// Everything else -- free-floating comments, narration inside function
-// bodies, section dividers, "what" comments that restate the code -- is
-// rejected. Compiler directives (//go:build, //go:embed, //nolint:...) are
-// always allowed regardless of position.
-//
-// A claim about another package's behavior belongs in a test or a type that
-// fails loudly when it stops being true, never in prose that degrades
-// silently. This tool can't see meaning, so it can't enforce that directly;
-// it enforces scarcity, which collapses the surface where such claims hide.
-//
-// Usage:
-//
-//	commentcheck <root>              audit the whole tree; fail on any violation
-//	commentcheck -staged <root>      fail only on comments in the staged diff
-//	                                 (the pre-commit gate)
-//	commentcheck -base <ref> <root>  fail only on comments added vs the fork
-//	                                 point from <ref>
-//
-// The -staged and -base modes scope the gate to lines a change introduces, so
-// the pre-existing comment corpus is never charged to a new commit. They fail
-// open (warn and pass) if git can't produce the diff.
-//
-// Under a git hook the staged change lives in the index git is composing the
-// commit in, not in the repository's own index, so -staged reads the one
-// sparkwing put in SPARKWING_GATE_INDEX when it unbound the pipeline from the
-// gated repository.
 package main
 
 import (
@@ -59,14 +14,13 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/sparkwing-dev/sparkwing/internal/gitenv"
 )
 
-var tagRE = regexp.MustCompile(`(?i)^// ?(hack|safety|bug|perf):`)
+var tagRE = regexp.MustCompile(`(?i)^// ?(hack|safety|bug|perf):[[:space:]]*\S`)
 
-// outputRE matches the Go testable-example output markers recognized by
-// the testing package: "// Output:" and "// Unordered output:".
 var outputRE = regexp.MustCompile(`(?i)^// (Unordered output|Output):`)
 
 var opaqueTicketRE = regexp.MustCompile(`(?i)\bBW-\d+\b`)
@@ -156,7 +110,9 @@ func checkFile(path string) ([]violation, error) {
 	for _, decl := range f.Decls {
 		switch d := decl.(type) {
 		case *ast.FuncDecl:
-			mark(allowed, d.Doc)
+			if d.Name != nil && d.Name.IsExported() {
+				mark(allowed, d.Doc)
+			}
 			if d.Name != nil && strings.HasPrefix(d.Name.Name, "Example") && d.Body != nil {
 				bodyStart := d.Body.Lbrace
 				bodyEnd := d.Body.Rbrace
@@ -167,9 +123,12 @@ func checkFile(path string) ([]violation, error) {
 				}
 			}
 		case *ast.GenDecl:
-			mark(allowed, d.Doc)
+			exported := false
 			for _, spec := range d.Specs {
-				collectSpec(allowed, spec)
+				exported = collectSpec(allowed, spec) || exported
+			}
+			if exported {
+				mark(allowed, d.Doc)
 			}
 		}
 	}
@@ -185,7 +144,23 @@ func checkFile(path string) ([]violation, error) {
 			continue
 		}
 		first := cg.List[0].Text
-		if isDirective(first) || tagRE.MatchString(first) {
+		if isDirective(first) {
+			for _, comment := range cg.List[1:] {
+				if isDirective(comment.Text) {
+					continue
+				}
+				pos := fset.Position(comment.Pos())
+				out = append(out, violation{pos.Filename, pos.Line, firstLine(comment.Text)})
+			}
+			continue
+		}
+		if tagRE.MatchString(first) {
+			reason := tagGroupViolation(cg)
+			if reason == "" {
+				continue
+			}
+			pos := fset.Position(cg.Pos())
+			out = append(out, violation{pos.Filename, pos.Line, firstLine(first) + " (" + reason + ")"})
 			continue
 		}
 		pos := fset.Position(cg.Pos())
@@ -194,35 +169,65 @@ func checkFile(path string) ([]violation, error) {
 	return out, nil
 }
 
-// collectSpec marks godoc attached to a top-level spec and, for type specs,
-// recurses into struct fields and interface methods so their godoc survives.
-// It never descends into function bodies -- comments there are implementation
-// comments and must earn their place through the tag allowlist.
-func collectSpec(allowed map[*ast.CommentGroup]bool, spec ast.Spec) {
+func tagGroupViolation(cg *ast.CommentGroup) string {
+	lines := 0
+	for _, comment := range cg.List {
+		lines += strings.Count(comment.Text, "\n") + 1
+	}
+	if lines > 4 {
+		return "tagged comments are limited to four lines"
+	}
+	for _, comment := range cg.List {
+		for line := range strings.SplitSeq(comment.Text, "\n") {
+			if utf8.RuneCountInString(line) > 120 {
+				return "tagged comment lines are limited to 120 characters"
+			}
+		}
+	}
+	return ""
+}
+
+func collectSpec(allowed map[*ast.CommentGroup]bool, spec ast.Spec) bool {
 	switch s := spec.(type) {
 	case *ast.TypeSpec:
+		if !s.Name.IsExported() {
+			return false
+		}
 		mark(allowed, s.Doc)
 		mark(allowed, s.Comment)
 		collectType(allowed, s.Type)
+		return true
 	case *ast.ValueSpec:
+		exported := false
+		for _, name := range s.Names {
+			exported = exported || name.IsExported()
+		}
+		if !exported {
+			return false
+		}
 		mark(allowed, s.Doc)
 		mark(allowed, s.Comment)
-	case *ast.ImportSpec:
-		mark(allowed, s.Doc)
-		mark(allowed, s.Comment)
+		return true
 	}
+	return false
 }
 
 func collectType(allowed map[*ast.CommentGroup]bool, expr ast.Expr) {
 	switch t := expr.(type) {
 	case *ast.StructType:
 		for _, fld := range t.Fields.List {
+			if !fieldExported(fld) {
+				continue
+			}
 			mark(allowed, fld.Doc)
 			mark(allowed, fld.Comment)
 			collectType(allowed, fld.Type)
 		}
 	case *ast.InterfaceType:
 		for _, m := range t.Methods.List {
+			if !fieldExported(m) {
+				continue
+			}
 			mark(allowed, m.Doc)
 			mark(allowed, m.Comment)
 		}
@@ -236,31 +241,48 @@ func collectType(allowed map[*ast.CommentGroup]bool, expr ast.Expr) {
 	}
 }
 
+func fieldExported(field *ast.Field) bool {
+	for _, name := range field.Names {
+		if name.IsExported() {
+			return true
+		}
+	}
+	if len(field.Names) != 0 {
+		return false
+	}
+	name := embeddedFieldName(field.Type)
+	return name != nil && name.IsExported()
+}
+
+func embeddedFieldName(expr ast.Expr) *ast.Ident {
+	switch expr := expr.(type) {
+	case *ast.Ident:
+		return expr
+	case *ast.SelectorExpr:
+		return expr.Sel
+	case *ast.StarExpr:
+		return embeddedFieldName(expr.X)
+	case *ast.IndexExpr:
+		return embeddedFieldName(expr.X)
+	case *ast.IndexListExpr:
+		return embeddedFieldName(expr.X)
+	case *ast.ParenExpr:
+		return embeddedFieldName(expr.X)
+	}
+	return nil
+}
+
 func mark(allowed map[*ast.CommentGroup]bool, cg *ast.CommentGroup) {
 	if cg != nil {
 		allowed[cg] = true
 	}
 }
 
-// isDirective reports whether a //-comment is a compiler directive such as
-// //go:build, //go:embed, or //nolint:all -- the form is //word:rest with no
-// space after the slashes. The required leading space in "// hack:" is what
-// keeps human tags from being mistaken for directives, and vice versa.
 func isDirective(text string) bool {
-	s, ok := strings.CutPrefix(text, "//")
-	if !ok || s == "" || s[0] == ' ' {
-		return false
-	}
-	i := strings.IndexByte(s, ':')
-	if i <= 0 {
-		return false
-	}
-	for _, r := range s[:i] {
-		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') {
-			return false
-		}
-	}
-	return true
+	return strings.HasPrefix(text, "//go:") ||
+		strings.HasPrefix(text, "//nolint:") ||
+		strings.HasPrefix(text, "//lint:ignore ") ||
+		strings.HasPrefix(text, "//lint:file-ignore ")
 }
 
 func firstLine(text string) string {
@@ -274,10 +296,6 @@ func firstLine(text string) string {
 	return text
 }
 
-// scopedAdds returns, per repo-relative path, the set of line numbers a change
-// introduces. In staged mode that's the staged diff against HEAD; in base mode
-// it's the diff against the merge-base with base, so lines that landed on base
-// after the branch forked aren't charged to the branch.
 func scopedAdds(root string, staged bool, base string) (map[string]map[int]bool, error) {
 	args := []string{"diff", "--unified=0", "--no-color"}
 	var index string
@@ -300,12 +318,6 @@ func scopedAdds(root string, staged bool, base string) (map[string]map[int]bool,
 	return parseAddedLines(diff), nil
 }
 
-// stagedIndex returns the index a staged read has to go through, or "" to use
-// whichever index git would pick on its own. An inherited GIT_INDEX_FILE is a
-// caller binding this run deliberately and wins; failing that, a hook-launched
-// run reads the gate's index, because the repository's own index is stale under
-// `git commit -a` and under a partial commit -- it would report an empty change
-// and pass a commit nobody checked.
 func stagedIndex() string {
 	if os.Getenv("GIT_INDEX_FILE") != "" {
 		return ""
@@ -364,9 +376,6 @@ func git(root string, args ...string) (string, error) {
 	return gitWithIndex(root, "", args...)
 }
 
-// gitWithIndex runs git against a named index file, or against the repository's
-// own when index is empty. The binding is set on the one command rather than
-// exported, so nothing else in the process tree can write through it.
 func gitWithIndex(root, index string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
 	if index != "" {
@@ -390,10 +399,10 @@ func report(violations []violation) {
 		fmt.Println(l)
 	}
 	fmt.Printf("\ncommentcheck: %d disallowed comment(s).\n\n", len(violations))
-	fmt.Println("Allowed: godoc on top-level declarations (and struct fields), plus")
-	fmt.Println("  // hack:   deliberate deviation from the obvious approach")
+	fmt.Println("Allowed: GoDoc on exported API declarations and fields, plus")
+	fmt.Println("  // hack:   a necessary deviation from the obvious approach")
 	fmt.Println("  // safety: an invariant that isn't visible locally")
-	fmt.Println("  // bug:    a known defect left in on purpose")
+	fmt.Println("  // bug:    a known defect that remains unresolved")
 	fmt.Println("  // perf:   a non-obvious optimization")
-	fmt.Println("Fix: delete the comment, move it onto the declaration as godoc, or tag it.")
+	fmt.Println("Fix: delete the comment, document the exported API, or tag the invariant.")
 }

@@ -7,9 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Mixed-Dep wiring exercises every Plan-layer implementor in one
-// Needs call. A regression where one of the types stops satisfying
-// [sparkwing.Dep] surfaces as a compile error, not a runtime failure.
 func TestDep_MixedTypesCompose(t *testing.T) {
 	plan := sparkwing.NewPlan()
 	a := sparkwing.Job(plan, "a", &buildJob{})
@@ -31,9 +28,6 @@ func TestDep_MixedTypesCompose(t *testing.T) {
 	}
 }
 
-// WorkDep parallels Dep at the Work layer: every Work-layer dep type
-// must compose in a single Needs call. Compile-time conformance plus
-// a runtime smoke that the deps land on the step.
 func TestWorkDep_MixedTypesCompose(t *testing.T) {
 	w := sparkwing.NewWork()
 	a := sparkwing.Step(w, "a", func(ctx context.Context) error { return nil })

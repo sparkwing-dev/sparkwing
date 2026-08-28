@@ -8,15 +8,8 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-// consumerLockBytes is the byte range locked on the consumer lock file.
-// Windows locks ranges rather than whole files; a range wider than the
-// (empty) lock file is the standard way to emulate flock.
 const consumerLockBytes = 1 << 30
 
-// flockTry takes a non-blocking exclusive lock on f. ok is false when
-// another process holds it. Windows releases the lock when the handle
-// closes, including on abnormal termination, matching the Unix build's
-// crash semantics.
 func flockTry(f *os.File) (ok bool, err error) {
 	var ol windows.Overlapped
 	err = windows.LockFileEx(

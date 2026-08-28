@@ -33,10 +33,6 @@ func skipIfIntegrationDisabled(t *testing.T) {
 	}
 }
 
-// openIntegrationPostgres returns a *store.Store backed by a per-test
-// schema on the shared Postgres instance. Each test gets isolation
-// without the cost of spinning up a fresh database. Skips when no
-// Postgres URL is configured.
 func openIntegrationPostgres(t *testing.T) *store.Store {
 	t.Helper()
 	skipIfIntegrationDisabled(t)
@@ -76,10 +72,6 @@ func openIntegrationPostgres(t *testing.T) *store.Store {
 	return st
 }
 
-// openIntegrationPostgresAt opens a second connection against the
-// same per-test schema as src. Used by tests that want two
-// independent *store.Store handles sharing one database -- the cross-
-// runner pattern in production.
 func openIntegrationPostgresAt(t *testing.T, src *store.Store) *store.Store {
 	t.Helper()
 	dsn := os.Getenv(pgTestURLEnv)
@@ -100,16 +92,6 @@ func openIntegrationPostgresAt(t *testing.T, src *store.Store) *store.Store {
 	return st
 }
 
-// openIntegrationS3 returns a fresh ArtifactStore and LogStore backed
-// by an in-process gofakes3 server. The server speaks the real S3
-// protocol over HTTP; the storage/s3 client code under test is the
-// same as production. Returned closer tears down the server when the
-// test ends.
-//
-// gofakes3 is used in preference to a dockerized minio: it exercises
-// the same protocol code, avoids the Docker dependency, and runs in
-// well under a second. Cross-runner sharing is the assertion target,
-// not the durability properties of the object store.
 func openIntegrationS3(t *testing.T) (storage.ArtifactStore, storage.LogStore) {
 	t.Helper()
 	skipIfIntegrationDisabled(t)
@@ -151,8 +133,6 @@ func uniqSuffix() string {
 	return fmt.Sprintf("%d_%d", time.Now().UnixNano()&0xffffff, uniqN)
 }
 
-// bucketSafeSuffix returns an S3-bucket-safe identifier (lowercase
-// alphanumerics + hyphens only; no underscores).
 func bucketSafeSuffix() string {
 	uniqMu.Lock()
 	defer uniqMu.Unlock()

@@ -8,7 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// activeHolders counts non-superseded, unexpired holders for a key.
 func activeHolders(t *testing.T, s *store.Store, key string) int {
 	t.Helper()
 	st, err := s.GetConcurrencyState(ctxT(t), key)
@@ -28,9 +27,6 @@ func activeHolders(t *testing.T, s *store.Store, key string) int {
 	return n
 }
 
-// Defect 1: a heartbeat landing after the lease expired must NOT revive
-// the holder -- admission may have already reassigned that budget, so
-// reviving would put two live holders on a capacity-1 key.
 func TestConcurrency_HeartbeatOnExpiredLeaseDoesNotRevive(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -58,9 +54,6 @@ func TestConcurrency_HeartbeatOnExpiredLeaseDoesNotRevive(t *testing.T) {
 	}
 }
 
-// Defect 2: re-acquiring a holder_id whose row is superseded-but-live
-// must take the slot cleanly via ON CONFLICT, not crash on the UNIQUE
-// constraint.
 func TestConcurrency_ReacquireSupersededHolderDoesNotCrash(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -86,8 +79,6 @@ func TestConcurrency_ReacquireSupersededHolderDoesNotCrash(t *testing.T) {
 	}
 }
 
-// Defect 6: a parked low-capacity waiter must not drag effective
-// capacity below the already-admitted holders (used <= effective).
 func TestConcurrency_ParkedWaiterDoesNotInvertEffectiveCapacity(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -110,8 +101,6 @@ func TestConcurrency_ParkedWaiterDoesNotInvertEffectiveCapacity(t *testing.T) {
 	}
 }
 
-// Defect 6 (cont.): a later parked low-capacity waiter must not block a
-// FIFO-head waiter that fits under its own declared capacity.
 func TestConcurrency_ParkedWaiterDoesNotStallFIFOHeadPromotion(t *testing.T) {
 	s := newStoreT(t)
 	acquireT(t, s, store.AcquireSlotRequest{
@@ -138,8 +127,6 @@ func TestConcurrency_ParkedWaiterDoesNotStallFIFOHeadPromotion(t *testing.T) {
 	}
 }
 
-// Defect 7: an arrival whose cost exceeds capacity can never be admitted
-// and must be rejected at admission, not queued to strand forever.
 func TestConcurrency_CostOverCapacityRejectedNotStranded(t *testing.T) {
 	s := newStoreT(t)
 	if r := acquireT(t, s, store.AcquireSlotRequest{

@@ -20,45 +20,21 @@ type Plan struct {
 	nodes      []*JobNode
 	byID       map[string]*JobNode
 	expansions []Expansion
-	// groups tracks every *JobGroup declared via sw.Group in
-	// declaration order. Unnamed groups are tracked too but contribute
-	// no name to membership output.
+
 	groups []*JobGroup
 
-	// planConcurrency is the whole-run coordination set declared via
-	// Plan.Concurrency. Plans never memoize, so there is no plan-level
-	// content cache.
 	planConcurrency []PlanConcurrency
 
-	// resources is the whole-run cold-start cost hint set declared via
-	// Plan.Resources; nil when the plan declared none.
 	resources *ResourceHints
 
-	// priority is the run's local admission priority.
 	priority int
 
-	// lintWarnings accumulates non-fatal Plan-time advisories.
 	lintWarnings []LintWarning
 
-	// inputs captures the typed Inputs value the registration's
-	// invoke wrapper parsed for this run. The orchestrator reads this
-	// back via Plan.Inputs() and installs it on dispatch ctx so step
-	// bodies can call sparkwing.Inputs[T](ctx) instead of threading
-	// the value through closures.
 	inputs any
 
-	// jobArgs holds the resolved arg [Schema] per node id, populated
-	// by registerJobArgs whenever a job embedding WithArgs[T] is
-	// added to the plan. Used by the CLI flag registrar to compute
-	// the pipeline's transitive arg surface. Absent entries mean the
-	// job declared no typed args.
 	jobArgs map[string]*Schema
 
-	// resolvedArgs is the merged map of every job's typed-args
-	// resolution result, keyed by CLI flag name. Populated by
-	// resolveAndBindJobArgs in the pipeline-registration invoke
-	// flow; the orchestrator installs it on per-step contexts so
-	// sparkwing.Arg[T] can read across jobs.
 	resolvedArgs map[string]any
 }
 
@@ -90,9 +66,6 @@ func (p *Plan) Inputs() any {
 	return p.inputs
 }
 
-// setInputs stores the parsed Inputs value on the Plan. Called by
-// the registration's invoke wrapper after parseInputs returns;
-// pipeline authors don't call this directly.
 func (p *Plan) setInputs(in any) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -154,21 +127,6 @@ type Expansion struct {
 	Gen    ExpandGenerator
 }
 
-// newNode builds a detached *JobNode from (id, job). Shared by Job
-// (which then registers on the plan), JobFanOutDynamic children,
-// Job.OnFailure recovery nodes, and the orchestrator's SpawnNode
-// dispatch path -- every caller that needs a node before it has a
-// home in p.nodes / p.byID.
-//
-// validateNodeID rejects identifiers that cannot safely travel
-// everywhere a node id goes: log file paths, object-store key
-// segments, and the runID/nodeID holder convention. Slashes are
-// allowed as hierarchy separators (spawned children are
-// "parent/child") but every segment must stand on its own -- no
-// traversal references, empty segments, backslashes, or control
-// characters. The storage backends enforce the same rule at their
-// boundary; this check fails at the author's call site instead of
-// deep inside a run.
 func validateNodeID(id string) error {
 	for _, seg := range strings.Split(id, "/") {
 		if seg == "" {
@@ -186,13 +144,6 @@ func validateNodeID(id string) error {
 	return nil
 }
 
-// Runs the same validation Job does so a Produces/SetResult typo or
-// an invalid Approval timeout panics at the same point regardless of
-// where the node is destined to live.
-//
-// caller is the verb the user typed (e.g. "Job", "OnFailure"); it
-// shows up in panic messages so the error points at the user's call
-// site, not this helper.
 func newNode(caller, id string, job Workable) *JobNode {
 	if id == "" {
 		panic(fmt.Sprintf("sparkwing: %s: id must not be empty", caller))
@@ -276,11 +227,6 @@ func NewDetachedNode(id string, job Workable) *JobNode {
 	return newNode("NewDetachedNode", id, job)
 }
 
-// insertChild splices a fresh node into the running plan WITHOUT
-// wiring any dependency. Used by the SpawnNode dispatch path: the
-// spawning runner is suspended waiting on the child's outcome, so
-// adding child.Needs(parent) would deadlock. Exposed to the orchestrator
-// via RuntimePlumbing.Fns.PlanInsertChild.
 func (p *Plan) insertChild(child *JobNode) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -295,9 +241,6 @@ func (p *Plan) insertChild(child *JobNode) error {
 	return nil
 }
 
-// insertExpanded splices dynamically generated children into the plan.
-// Each child automatically gets Needs(source). Exposed to the
-// orchestrator via RuntimePlumbing.Fns.PlanInsertExpanded.
 func (p *Plan) insertExpanded(source *JobNode, children []*JobNode) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -365,10 +308,6 @@ func Job(p *Plan, id string, x any) *JobNode {
 	return n
 }
 
-// coerceJobArg validates the third argument of Job (or any caller that
-// accepts the same author-facing shapes) and returns the underlying
-// Workable. nil and unsupported types panic with a typed message
-// pointing at the calling verb.
 func coerceJobArg(caller, id string, x any) Workable {
 	switch v := x.(type) {
 	case nil:
@@ -386,9 +325,6 @@ func coerceJobArg(caller, id string, x any) Workable {
 	}
 }
 
-// coerceRecoveryArg accepts everything coerceJobArg does, plus a
-// failure-aware FailureRecoveryFn (func(ctx, Failure) error) that
-// receives the parent's Failure at run time. Used by OnFailure.
 func coerceRecoveryArg(caller, id string, x any) Workable {
 	switch v := x.(type) {
 	case FailureRecoveryFn:
@@ -411,12 +347,6 @@ func (p *Plan) LintWarnings() []LintWarning {
 	return out
 }
 
-// materializeWork constructs a fresh *Work, calls job.Work(w) under
-// panic recovery so a pathological body produces a helpful Plan-time
-// error, and returns both the populated Work and the *WorkStep the
-// Job designated as its typed output (nil for untyped Jobs). A
-// non-nil error from Work surfaces as a node-id-tagged panic
-// matching the structural-error pattern used elsewhere.
 func materializeWork(id string, job Workable) (*Work, *WorkStep) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -439,88 +369,51 @@ func materializeWork(id string, job Workable) (*Work, *WorkStep) {
 type JobNode struct {
 	id         string
 	job        Workable
-	work       *Work     // materialized inner DAG; empty for Approval gates
-	resultStep *WorkStep // step Work() returned as the typed output; nil for untyped Jobs
+	work       *Work
+	resultStep *WorkStep
 	needs      []string
 	env        map[string]string
 	outType    reflect.Type
 
-	// Resilience modifiers. retryAuto switches from in-runner step
-	// re-run to whole-node re-dispatch (right for infra flakes where
-	// a fresh runner boot is more likely to recover).
 	retryAttempts     int
 	retryBackoff      time.Duration
 	retryAuto         bool
-	timeout           time.Duration // per-attempt; zero = unlimited
+	timeout           time.Duration
 	noProgressTimeout time.Duration
 
-	onFailure *JobNode // dispatched when this node fails
+	onFailure *JobNode
 
-	// Multiple skipIf predicates accumulate with OR semantics.
 	skipIf        []SkipPredicate
 	skipIfTimeout time.Duration
 
-	// contentCache memoizes the node's result on content (JobNode.Cache);
-	// concurrency enrolls it in a shared budget (JobNode.Concurrency).
-	// The two are independent: a node may set either, both, or neither.
 	contentCache *MemoizeConfig
 	concurrency  *concurrencyMembership
 
-	// dirCaches are the dependency-directory caches declared via
-	// JobNode.CacheDir, in declaration order. Execution rides the
-	// beforeRun/afterRun hooks; this slice exists for introspection.
 	dirCaches []DirCache
 
-	// resources is the node's cold-start cost hint set declared via
-	// JobNode.Resources; nil when the node declared none.
 	resources *ResourceHints
 
 	beforeRun []BeforeRunFn
 	afterRun  []AfterRunFn
 
-	// verify is the postcondition checked after the action succeeds; a
-	// non-nil return fails the node at StageVerify. Nil = no check.
 	verify VerifyFn
 
-	// requires holds label terms stored with non-inline dispatched jobs for
-	// runner-claim filtering. Direct and inline execution do not consult them
-	// for runner selection. Empty permits any runner to claim.
 	requires []string
 
-	// prefers records ordered runner-label preferences in plan-snapshot
-	// metadata. Preferences do not affect runner selection.
 	prefers []string
 
-	// whenRunner marks the job as conditional on the dispatching
-	// runner advertising the listed labels (same comma-OR / AND
-	// semantics as requires). When no available runner satisfies
-	// these labels the job is skipped at dispatch time and Needs
-	// treats it as satisfied. When a runner does match, these
-	// labels behave as an additional requires term for that job.
 	whenRunner []string
 
-	// inline marks lightweight nodes for in-process execution on the
-	// dispatcher, bypassing the configured Runner. Opt-in via
-	// .Inline(); a CPU-bound or blocking inline node stalls the
-	// dispatcher.
 	inline bool
 
 	continueOnError bool
 	optional        bool
 	needsOptional   []string
 
-	// Dynamic-group dependencies resolve at dispatch time rather than
-	// plan construction.
 	needsGroups []*JobGroup
 
-	// approval is non-nil when the node's job is an approval gate; the
-	// orchestrator routes these through the approval waiter.
 	approval *ApprovalConfig
 
-	// outputGlobs are the artifact output globs declared via Outputs
-	// (the union across calls); empty for nodes that produce no
-	// artifacts. consumes are the artifact edges declared via Consumes,
-	// in declaration order.
 	outputGlobs []string
 	consumes    []consumeEdge
 }
@@ -552,10 +445,6 @@ type ApprovalConfig struct {
 	OnExpiry ApprovalTimeoutPolicy
 }
 
-// approvalJob is the unexported Workable that backs an approval gate.
-// Pipeline authors don't construct it directly; sw.JobApproval builds
-// it internally and the orchestrator detects it via the type
-// assertion in newNode.
 type approvalJob struct {
 	Base
 	cfg ApprovalConfig
@@ -750,9 +639,6 @@ func (n *JobNode) depID() string      { return n.id }
 func (g *ApprovalGate) depID() string { return g.n.id }
 func (g *JobGroup) depID() string     { return g.name }
 
-// Compile-time conformance assertions: every Plan-layer dep type
-// satisfies [Dep]. A regression here surfaces as a build break,
-// not a runtime panic.
 var (
 	_ Dep = (*JobNode)(nil)
 	_ Dep = (*ApprovalGate)(nil)
@@ -1143,9 +1029,6 @@ func (n *JobNode) WhenRunnerLabels() []string {
 	return copyLabels(n.whenRunner)
 }
 
-// normalizeLabels strips empty entries from a label list. Returns
-// nil for an empty (or all-empty) input so default-value semantics
-// match across Requires / Prefers / WhenRunner.
 func normalizeLabels(in []string) []string {
 	if len(in) == 0 {
 		return nil

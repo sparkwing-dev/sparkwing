@@ -13,7 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// logSink collects the daemon's log lines for assertions.
 type logSink struct {
 	mu      sync.Mutex
 	lines   []string
@@ -44,11 +43,6 @@ func (s *logSink) matching(re *regexp.Regexp) []string {
 
 var disconnectLine = regexp.MustCompile(`^conn (\d+) disconnected while `)
 
-// Two clients that both went away must be distinguishable in the
-// daemon log. They are not distinguishable by address: an unbound
-// unix-socket peer's RemoteAddr renders as "@", so every client looks
-// like the same client. The per-connection id is what makes the two
-// disconnects two events.
 func TestDaemon_LogsDistinctConnIDsPerClient(t *testing.T) {
 	home := shortHome(t)
 	sink := &logSink{changed: make(chan struct{}, 1)}
@@ -93,8 +87,6 @@ func TestDaemon_LogsDistinctConnIDsPerClient(t *testing.T) {
 		ids[id] = l
 	}
 
-	// The ids have to be tied to the runs an operator is actually
-	// asking about, or the number identifies nothing.
 	for _, want := range []string{"run-a", "run-b"} {
 		found := false
 		for _, l := range lines {

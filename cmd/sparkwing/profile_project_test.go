@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// projectAt writes a .sparkwing/sparkwing.yaml carrying body and makes
-// it the working directory, so findSparkwingDir resolves to it.
 func projectAt(t *testing.T, body string) {
 	t.Helper()
 	dir := t.TempDir()
@@ -48,11 +46,6 @@ profiles:
     cache: { type: s3, bucket: example-bucket, prefix: cache }
 `
 
-// --profile NAME must reach a profile declared in the project's own
-// sparkwing.yaml. Before this, the flag addressed only the user's
-// profiles.yaml, so a profile the project shipped -- and that a bare
-// `sparkwing run` already used -- was unreachable by the flag every
-// doc example teaches.
 func TestResolveProfileFlag_FindsProjectProfile(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
 	projectAt(t, bucketProject)
@@ -67,8 +60,6 @@ func TestResolveProfileFlag_FindsProjectProfile(t *testing.T) {
 	}
 }
 
-// A name in both files resolves to the user's, because that file is
-// the operator's own override of what the repository ships.
 func TestResolveProfileFlag_UserProfileWinsNameCollision(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  bucket: { state: { type: sqlite, path: /tmp/user.db } }\n")
 	projectAt(t, bucketProject)
@@ -83,8 +74,6 @@ func TestResolveProfileFlag_UserProfileWinsNameCollision(t *testing.T) {
 	}
 }
 
-// A name in neither file must say both were checked, so the reader is
-// not left looking in one namespace for something declared in neither.
 func TestResolveProfileFlag_NotFoundNamesBothNamespaces(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
 	projectAt(t, bucketProject)
@@ -98,10 +87,6 @@ func TestResolveProfileFlag_NotFoundNamesBothNamespaces(t *testing.T) {
 	}
 }
 
-// With no flag the read side must report the project's
-// defaults.profile -- the same selection `sparkwing run` makes.
-// Reporting "project defaults apply" and then rendering every surface
-// as unset left no way to ask sparkwing which store a run used.
 func TestResolveProfileChain_NoFlagUsesProjectDefault(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
 	projectAt(t, bucketProject)
@@ -122,8 +107,6 @@ func TestResolveProfileChain_NoFlagUsesProjectDefault(t *testing.T) {
 	}
 }
 
-// A project with no defaults.profile still resolves to nothing, so the
-// built-in local defaults keep applying.
 func TestResolveProfileChain_NoFlagNoProjectDefault(t *testing.T) {
 	writeProfilesFixture(t, "profiles:\n  laptop: { state: { type: sqlite } }\n")
 	projectAt(t, "pipelines:\n  - name: demo\n    entrypoint: Demo\n")

@@ -8,8 +8,6 @@ import (
 	"strings"
 )
 
-// processRSS returns the process resident set size from /proc/self/statm,
-// whose second field is the resident page count.
 func processRSS() (int64, bool) {
 	data, err := os.ReadFile("/proc/self/statm")
 	if err != nil {

@@ -11,9 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// Under WithDryRun(ctx), a step's DryRunFn must run in place of its
-// apply Fn. Pin both with separate counters so a regression that
-// calls both (or the wrong one) is obvious.
 func TestDryRun_StepWithDryRunFn_DryRunCalledApplySkipped(t *testing.T) {
 	var applyCount, dryCount atomic.Int64
 	w := sparkwing.NewWork()
@@ -37,9 +34,6 @@ func TestDryRun_StepWithDryRunFn_DryRunCalledApplySkipped(t *testing.T) {
 	}
 }
 
-// SafeWithoutDryRun marks the apply Fn as read-only by author
-// contract, so it runs unmodified under --dry-run. Pin the contract
-// so a regression doesn't accidentally skip safe steps.
 func TestDryRun_SafeWithoutDryRun_ApplyRunsUnchanged(t *testing.T) {
 	var count atomic.Int64
 	w := sparkwing.NewWork()
@@ -57,10 +51,6 @@ func TestDryRun_SafeWithoutDryRun_ApplyRunsUnchanged(t *testing.T) {
 	}
 }
 
-// A step with neither DryRunFn nor SafeWithoutDryRun marker is
-// soft-skipped under --dry-run with reason `no_dry_run_defined`.
-// Soft-skip (not panic) is the v1 behavior so existing pipelines
-// keep working under --dry-run.
 func TestDryRun_StepWithoutDryRunOrSafeMarker_SoftSkipped(t *testing.T) {
 	var count atomic.Int64
 	w := sparkwing.NewWork()
@@ -78,9 +68,6 @@ func TestDryRun_StepWithoutDryRunOrSafeMarker_SoftSkipped(t *testing.T) {
 	}
 }
 
-// Outside dry-run mode, the apply Fn runs as normal even when a
-// DryRunFn is registered -- the registration is silent unless
-// WithDryRun(ctx) is in scope.
 func TestDryRun_NotInDryRunMode_ApplyRunsAsUsual(t *testing.T) {
 	var applyCount, dryCount atomic.Int64
 	w := sparkwing.NewWork()
@@ -103,9 +90,6 @@ func TestDryRun_NotInDryRunMode_ApplyRunsAsUsual(t *testing.T) {
 	}
 }
 
-// A DryRunFn that fails surfaces the error through RunWork the same
-// way an apply-Fn failure would. Important so the operator sees
-// "your dry-run is broken" rather than a silent success.
 func TestDryRun_DryRunFnFailure_PropagatedAsStepError(t *testing.T) {
 	w := sparkwing.NewWork()
 	wantErr := errors.New("plan output mismatch")
@@ -123,12 +107,6 @@ func TestDryRun_DryRunFnFailure_PropagatedAsStepError(t *testing.T) {
 	}
 }
 
-// Dry-run + preview integration: PreviewPlan(opts.DryRun=true)
-// renders Decision according to the dry-run lens. Three cases on
-// one Work pin the contract:
-//   - DryRunFn declared    -> would_dry_run
-//   - SafeWithoutDryRun    -> would_run (apply Fn is read-only)
-//   - neither              -> would_skip + reason no_dry_run_defined
 type previewDryRunJob struct{ sparkwing.Base }
 
 func (previewDryRunJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -181,10 +159,6 @@ func TestPreviewPlan_DryRunRendersThreeDecisions(t *testing.T) {
 	}
 }
 
-// IsDryRun pivots the user's own step body if they want to branch
-// inside the apply path -- some helpers (e.g. structured-log
-// "would do X" for a command that has no dry-run flag of its own)
-// need to read the mode directly.
 func TestDryRun_IsDryRunReadableFromCtx(t *testing.T) {
 	var seenDryRun bool
 	w := sparkwing.NewWork()

@@ -15,32 +15,16 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// runNodeConfig is the resolved option set for one RunNodeOnce call.
 type runNodeConfig struct {
 	coordinated bool
 }
 
-// RunNodeOption selects a RunNodeOnce execution mode.
 type RunNodeOption func(*runNodeConfig)
 
-// Coordinated declares that a local dispatcher owns this node's
-// coordination and has already resolved it: the cache lookup, the
-// concurrency slot, and the SkipIf predicates all ran before the
-// dispatcher decided to spawn this process at all. Re-running them
-// here would take a second slot against the same budget, re-evaluate a
-// predicate whose answer the dispatcher already acted on, and turn a
-// cache miss the dispatcher observed into a second store round trip.
-//
-// Without it RunNodeOnce keeps the pod contract, where nothing
-// upstream resolved anything.
 func Coordinated() RunNodeOption {
 	return func(c *runNodeConfig) { c.coordinated = true }
 }
 
-// executeCoordinated runs the node body directly, skipping the
-// coordination the dispatcher already did. Terminal state is written
-// by the execution path itself, exactly as on the in-process path;
-// the returned Result is what the parent reads if it can.
 func (r *NodeExecutor) executeCoordinated(ctx context.Context, req runner.Request) runner.Result {
 	node := req.Node
 	if node == nil {
@@ -61,21 +45,6 @@ func (r *NodeExecutor) executeCoordinated(ctx context.Context, req runner.Reques
 	return runner.Result{Outcome: sparkwing.Success, Output: output}
 }
 
-// installStepControlsFromEnv puts the run's step-range and dry-run
-// selections onto ctx from the environment the dispatcher stamped.
-// These are run-level decisions made before any node was created, so a
-// node executing in its own process has to be told: without them a
-// --dry-run run applies for real from the first spawned node, and a
-// --start-at window silently covers nothing.
-//
-// Only the coordinated path reads them, and the gate is not
-// cosmetic. A pod or a warm-pool runner inherits an ambient
-// environment nobody set for this run -- the pool worker takes the
-// admission daemon's shell env -- so an operator who once exported
-// SPARKWING_DRY_RUN would silently dry-run every node the pool
-// executed, and a stale SPARKWING_START_AT would hard-fail them. A
-// spawned node's environment, by contrast, is the one childEnv
-// wrote.
 func installStepControlsFromEnv(ctx context.Context, plan *sparkwing.Plan) (context.Context, error) {
 	startAt := os.Getenv("SPARKWING_START_AT")
 	stopAt := os.Getenv("SPARKWING_STOP_AT")
@@ -91,18 +60,6 @@ func installStepControlsFromEnv(ctx context.Context, plan *sparkwing.Plan) (cont
 	return ctx, nil
 }
 
-// coordinatedChildSurfaces rebuilds the secrets source, artifact store,
-// and log sink a locally-dispatched node needs, from the same profile
-// resolution the dispatcher ran.
-//
-// Every local secrets backend is bound to a file or the environment
-// rather than to the dispatcher's memory (dotenv, filesystem, env), so
-// re-resolving it here reaches the same values. A controller-backed
-// profile resolves the same way it does for the dispatcher.
-//
-// A nil log backend means the caller keeps its own default, which is
-// the run's local log files -- the right answer for a profile that
-// names no logs surface.
 func coordinatedChildSurfaces(ctx context.Context, pipeline string) (secrets.Source, storage.ArtifactStore, LogBackend, error) {
 	projectCfg := bindProjectPipelines()
 	prof, _, err := resolveActiveProfile(loadPipelineYAML(pipeline), projectCfg)
@@ -134,26 +91,6 @@ func coordinatedChildSurfaces(ctx context.Context, pipeline string) (secrets.Sou
 	return source, art, logs, nil
 }
 
-// coordinatedLogBackend opens the log sink the run's profile named, so
-// a node's log lands where the run says its logs live.
-//
-// The node process writes its own node log -- the dispatcher only
-// relays the child's stdout into the run's delegate -- so without this
-// a run whose profile puts logs on a bucket or a logs service would
-// have written them to the executing machine's disk instead, and
-// `sparkwing runs logs` would find nothing. It is the same rule the
-// secrets source and artifact store follow: the child rebuilds the
-// run's surfaces, it does not substitute the machine's.
-//
-// A surface that will not open fails the node. Falling back to local
-// files would put half a run's logs on a worker's disk and half on the
-// declared surface, with nothing saying which; a loud failure at node
-// startup is the same answer a Mode 2 run already gives when its state
-// surface will not open.
-//
-// A profile naming no logs surface returns (nil, nil), which leaves the
-// caller on the run's local log files -- byte-identical to what a
-// laptop SQLite run wrote before nodes moved into their own processes.
 func coordinatedLogBackend(ctx context.Context, prof *profile.Profile) (LogBackend, error) {
 	if prof == nil {
 		return nil, nil
@@ -171,22 +108,6 @@ func coordinatedLogBackend(ctx context.Context, prof *profile.Profile) (LogBacke
 	return NewLogStoreBackend(sink, nil), nil
 }
 
-// coordinatedArtifactStore opens the store a locally dispatched node
-// publishes outputs to and stages consumed inputs from. Precedence,
-// highest first:
-//
-//  1. the run profile's cache surface -- what the dispatcher itself
-//     resolved, so the node writes where the run's manifest is read;
-//  2. an explicit SPARKWING_CACHE_URL in the environment, which the
-//     dispatcher pinned from its own for exactly this purpose;
-//  3. nothing, which leaves the node without artifacts.
-//
-// $SPARKWING_HOME/dev.env is deliberately not consulted, for the same
-// reason the child is passed --logs= empty: a resident dashboard
-// writes its own URLs into that file, and a run whose profile names
-// S3 would otherwise stage from the dashboard's local cache while
-// recording a manifest in the bucket. The two halves of a node's
-// artifacts must not come from different stores.
 func coordinatedArtifactStore(ctx context.Context, prof *profile.Profile) (storage.ArtifactStore, error) {
 	if prof != nil {
 		if _, _, cache := profileSurfaceSpecs(prof, ""); cache != nil {

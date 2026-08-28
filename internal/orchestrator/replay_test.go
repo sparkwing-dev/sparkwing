@@ -9,9 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// TestEnvelopeTruncated catches the truncation stub the store writes
-// when an envelope exceeds MaxNodeDispatchEnvelope. Replay must
-// refuse to run against a stub.
 func TestEnvelopeTruncated(t *testing.T) {
 	cases := []struct {
 		name string
@@ -32,9 +29,6 @@ func TestEnvelopeTruncated(t *testing.T) {
 	}
 }
 
-// TestMintReplayRun creates a replay run linked to an original run +
-// dispatch snapshot. Asserts the new run's replay_of_* lineage and
-// that the original run is untouched.
 func TestMintReplayRun(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -109,9 +103,6 @@ func TestMintReplayRun(t *testing.T) {
 	}
 }
 
-// TestMintReplayRun_NoSnapshot rejects when the original (run, node)
-// has no dispatch snapshot. Without the snapshot there's nothing to
-// reconstitute the input from.
 func TestMintReplayRun_NoSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -136,14 +127,8 @@ func TestMintReplayRun_NoSnapshot(t *testing.T) {
 	}
 }
 
-// TestRunReplayNode_CodeDrift refuses to run when the snapshot's
-// type_name doesn't match the registered pipeline's job type. We
-// don't try to test the happy path here -- it would require a
-// registered pipeline, which test fixtures don't easily provide.
 func TestRunReplayNode_CodeDrift(t *testing.T) {
-	// Replay re-reads the executing checkout's argument layers, so the
-	// runtime must point somewhere this test owns; otherwise this repo's
-	// own sparkwing.yaml would be a live input to it.
+
 	pointRuntimeAt(t, t.TempDir())
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -181,9 +166,6 @@ func TestRunReplayNode_CodeDrift(t *testing.T) {
 	}
 }
 
-// TestRunReplayNode_NotAReplayRun fails when the run isn't actually
-// a replay (replay_of_* unset). Guards against accidental misuse on
-// a regular run id.
 func TestRunReplayNode_NotAReplayRun(t *testing.T) {
 	pointRuntimeAt(t, t.TempDir())
 	dir := t.TempDir()
@@ -205,11 +187,6 @@ func TestRunReplayNode_NotAReplayRun(t *testing.T) {
 	}
 }
 
-// A replay row is minted straight from the source run rather than
-// through buildRunInvocation, so it must inherit the source's
-// secret-arg classification. Without it the replay renders the same
-// plaintext args the original redacts -- and permanently, since no
-// later write fills the classification in.
 func TestMintReplayRun_InheritsSecretArgClassification(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))
@@ -255,14 +232,12 @@ func TestMintReplayRun_InheritsSecretArgClassification(t *testing.T) {
 	if replay.RedactedForDisplay().Args["token"] != store.RedactedArgValue {
 		t.Errorf("replay run renders the secret arg in the clear")
 	}
-	// Replay still re-executes: the row keeps plaintext for reg.Invoke.
+
 	if replay.Args["token"] != secret {
 		t.Errorf("replay run args[token] = %q, want plaintext", replay.Args["token"])
 	}
 }
 
-// A source run with no classification must not sprout an invocation
-// on its replay -- that would change the shape of grandfathered rows.
 func TestMintReplayRun_UnclassifiedSourceStaysUnclassified(t *testing.T) {
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

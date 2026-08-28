@@ -8,21 +8,8 @@ import (
 	"strings"
 )
 
-// lintSlotRoot is the directory under toolCacheRoot that parents every
-// lint slot.
 const lintSlotRoot = "lintslots"
 
-// defaultLintSlots is how many canonical paths a tool gets. The number
-// trades reuse against fallbacks: a run that finds every slot busy
-// falls back to a private cache and pays a cold start, while every
-// extra slot is one more cache that has to warm up and stay on disk.
-//
-// Four is deliberate rather than tuned. golangci-lint takes a
-// box-wide lock, so with --allow-serial-runners the effective number
-// of lints running at once on a machine is one and even two slots
-// would rarely fall back. Four leaves room for repos that pass
-// --allow-parallel-runners without letting the slot set grow to the
-// point where slots stop being reused.
 const defaultLintSlots = 4
 
 // LintSlotsEnv overrides how many slots a tool gets. A value below one,
@@ -125,14 +112,8 @@ func AcquireLintSlot(tool string) (*LintSlot, error) {
 	return fallback, nil
 }
 
-// errLintSlotBusy means another process holds this slot. It is an
-// ordinary outcome, not a failure: the caller tries the next slot.
 var errLintSlotBusy = errors.New("lint slot busy")
 
-// claimLintSlot takes slot i under root for the tree at scope. It
-// creates the slot's directories, takes the exclusive lock without
-// waiting, and only then repoints the slot's tree symlink -- holding
-// the lock is what makes replacing the symlink safe.
 func claimLintSlot(root string, i int, scope string) (*LintSlot, error) {
 	dir := filepath.Join(root, "slot-"+strconv.Itoa(i))
 	cache := filepath.Join(dir, "cache")
@@ -202,7 +183,6 @@ func (s *LintSlot) ConfigureIn(c *Cmd, rel, cacheVar string) *Cmd {
 	return c.Dir(dir).Env("PWD", dir).Env(cacheVar, s.Cache)
 }
 
-// isWithin reports whether path is root or sits under it.
 func isWithin(root, path string) bool {
 	if path == root {
 		return true
@@ -226,15 +206,11 @@ func (s *LintSlot) Release() {
 	s.lock = nil
 }
 
-// releaseLintLock unlocks and closes a slot lock file. Closing alone
-// would drop the flock, but unlocking first says so.
 func releaseLintLock(f *os.File) {
 	_ = flockUnlock(f)
 	_ = f.Close()
 }
 
-// lintSlotCount is how many slots to try, from LintSlotsEnv or the
-// default.
 func lintSlotCount() int {
 	if n, err := strconv.Atoi(os.Getenv(LintSlotsEnv)); err == nil && n > 0 {
 		return n
@@ -242,8 +218,6 @@ func lintSlotCount() int {
 	return defaultLintSlots
 }
 
-// lintScope is the absolute directory a lease is for: the pipeline's
-// work directory, or the process's own when there is none.
 func lintScope() string {
 	if dir := WorkDir(); dir != "" {
 		return dir

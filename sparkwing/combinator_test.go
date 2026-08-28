@@ -94,11 +94,6 @@ func TestGroup_ResilienceModifiersApplyToEveryMember(t *testing.T) {
 	}
 }
 
-// TestGroupModifiersMirrorNode is the drift-protection guard.
-// Every chainable *JobNode modifier (one returning *JobNode) should have a
-// *JobGroup counterpart returning *JobGroup, applied uniformly to
-// every member. OnFailure is intentionally exempt: recovery handlers
-// are per-node by intent.
 func TestGroupModifiersMirrorNode(t *testing.T) {
 	exempt := map[string]bool{
 		"OnFailure":     true,
@@ -121,10 +116,6 @@ func TestGroupModifiersMirrorNode(t *testing.T) {
 	}
 }
 
-// chainableMethods returns the names of methods on t that take only
-// the receiver-or-trailing args and return the same type t (i.e. the
-// builder-chainable surface). Methods are considered chainable when
-// their single return value is t itself.
 func chainableMethods(t reflect.Type) []string {
 	var names []string
 	for i := range t.NumMethod() {

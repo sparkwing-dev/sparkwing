@@ -7,15 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
-// explain says what is true of this pipeline. A note that delivery
-// depends on a GitHub webhook is true of every push and pull_request
-// trigger in every repo, so it describes the system rather than the
-// pipeline -- and printed under a heading with a command attached, it
-// reads as a defect to someone whose webhook is fine.
-//
-// explain is also offline: it reads sparkwing.yaml and nothing else, so
-// any claim here about GitHub's state would be unverified. An earlier
-// version asserted "not yet live".
 func TestTriggerLinesDescribeThePipelineOnly(t *testing.T) {
 	lines := describeTriggers(pipelines.Triggers{
 		PullRequest: &pipelines.PullRequestTrigger{},
@@ -35,8 +26,6 @@ func TestTriggerLinesDescribeThePipelineOnly(t *testing.T) {
 	}
 }
 
-// A declared filter that nothing reads has to be marked, or `branches:
-// [main]` reads as scoping a trigger it does not scope.
 func TestUnenforcedFiltersAreMarkedAdvisory(t *testing.T) {
 	lines := describeTriggers(pipelines.Triggers{
 		PullRequest: &pipelines.PullRequestTrigger{Branches: []string{"main"}},
@@ -47,16 +36,13 @@ func TestUnenforcedFiltersAreMarkedAdvisory(t *testing.T) {
 	if !strings.Contains(lines[0].Advisory, "branches") {
 		t.Errorf("advisory does not name the field: %q", lines[0].Advisory)
 	}
-	// And stays silent when no filter is declared.
+
 	plain := describeTriggers(pipelines.Triggers{PullRequest: &pipelines.PullRequestTrigger{}})
 	if plain[0].Advisory != "" {
 		t.Errorf("advisory fired with no filter declared: %q", plain[0].Advisory)
 	}
 }
 
-// Every trigger kind the config accepts has to render. A kind that
-// decodes but does not appear here is invisible in exactly the way this
-// section exists to prevent.
 func TestEveryTriggerKindRenders(t *testing.T) {
 	all := pipelines.Triggers{
 		Push:           &pipelines.PushTrigger{},

@@ -14,8 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// putState writes a state.ndjson dump for one run, matching the
-// format orchestrator.dumpRunState produces.
 func putState(t *testing.T, s storage.ArtifactStore, run store.Run, nodes ...store.Node) {
 	t.Helper()
 	var b strings.Builder
@@ -136,9 +134,6 @@ func mkNode(runID, nodeID, status string) store.Node {
 	return store.Node{RunID: runID, NodeID: nodeID, Status: status}
 }
 
-// TestS3Backend_ListEventsAfter_ReadsEventEnvelopes verifies the
-// dashboard parses Mode 2 event envelopes from state.ndjson and
-// returns them filtered by sequence.
 func TestS3Backend_ListEventsAfter_ReadsEventEnvelopes(t *testing.T) {
 	t.Parallel()
 	st := mustFS(t)

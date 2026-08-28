@@ -12,21 +12,8 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// errNoLocalAdmission is what a tool-slot acquire reports when the run
-// carries no admission daemon, so [sparkwing.ToolSlot] can narrate the
-// fallback instead of proceeding as if it held a budget.
 var errNoLocalAdmission = errors.New("run has no local admission daemon")
 
-// toolSlotProvider builds the [sparkwing.ToolSlotProvider] installed on
-// a node's context. It acquires the group as a semaphores-only sub-lease
-// on the daemon, which is what the wire protocol already reserves for
-// "short-lived semaphore acquisitions made from inside an already-admitted
-// run", so a tool lock needs no new resource kind.
-//
-// The lease is a fresh connection held for the tool's runtime only, not
-// the node's, because a gate step that serializes a linter must release
-// the budget the moment the linter exits rather than pinning it through
-// the rest of a long job.
 func (r *NodeExecutor) toolSlotProvider(runID, nodeID string, delegate sparkwing.Logger) sparkwing.ToolSlotProvider {
 	return func(ctx context.Context, group *sparkwing.ConcurrencyGroup, cost int) (func(), error) {
 		la, _, _ := localAdmissionFromContext(ctx)
@@ -99,9 +86,6 @@ func (r *NodeExecutor) toolSlotProvider(runID, nodeID string, delegate sparkwing
 	}
 }
 
-// emitToolSlotLog mirrors a tool-slot wait line into the node log so the
-// position shows up where an operator is already looking, matching how a
-// queued node reports itself.
 func (r *NodeExecutor) emitToolSlotLog(runID, nodeID string, delegate sparkwing.Logger, detail string) {
 	nlog, err := r.backends.Logs.OpenNodeLog(runID, nodeID, delegate)
 	if err != nil {

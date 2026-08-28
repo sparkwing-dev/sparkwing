@@ -98,11 +98,6 @@ func TestRun_AdmissionFailureEmitsDelegateFinish(t *testing.T) {
 	}
 }
 
-// TestAdmissionFailure_NeverAdmissibleCarriesTheDaemonsArithmetic proves the
-// refusal an operator reads names what was asked for against what exists. The
-// old wording blamed a concurrency group for every never-admissible answer,
-// including the host-capacity ones, which sent the reader to look at limits
-// that had nothing to do with it.
 func TestAdmissionFailure_NeverAdmissibleCarriesTheDaemonsArithmetic(t *testing.T) {
 	err := admissionFailure(&wingdclient.AdmissionError{
 		Key:    "never_admissible",

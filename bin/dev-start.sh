@@ -1,20 +1,4 @@
 #!/usr/bin/env bash
-# Start the local dashboard dev loop:
-#   * sparkwing dashboard start -- detached supervisor on :4343 that
-#     serves /api/v1/* off the local SQLite store at ~/.sparkwing/state.db
-#     (the same store sparkwing writes to). Lifecycle managed by sparkwing.
-#   * next dev on :3100 -- serves the SPA with HMR. The dev rewrite in
-#     web/next.config.ts proxies /api/* to :4343, so a UI change hot-
-#     reloads in <1s without rebuilding the Go binary.
-#
-# Iteration loop: edit a .tsx, see it in the browser. Edit Go code,
-# bash bin/install.sh && bash bin/dev-restart.sh.
-#
-# Logs land in /tmp/sparkwing-dev/web.log (next dev) and
-# ~/.sparkwing/dashboard.log (supervisor). PIDs for next dev live in
-# /tmp/sparkwing-dev/web.pid; the supervisor manages its own pid file
-# at ~/.sparkwing/dashboard.pid via `sparkwing dashboard status`.
-# bash bin/dev-stop.sh stops both.
 
 set -uo pipefail
 
@@ -34,9 +18,6 @@ alive() {
   kill -0 "$pid" 2>/dev/null
 }
 
-# Best-effort cleanup of half-running state from a previous start that
-# died mid-launch -- we don't want a stale pidfile to silently mask a
-# fresh start failure.
 bash "$REPO/bin/dev-stop.sh" >/dev/null 2>&1 || true
 
 if ! command -v sparkwing >/dev/null 2>&1; then

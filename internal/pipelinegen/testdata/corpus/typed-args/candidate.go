@@ -8,9 +8,6 @@ import (
 
 type GenTypedArgs struct{ sw.Base }
 
-// GenTypedArgsInput is the pipeline's typed arg struct. Each field's
-// `flag` tag is the CLI flag `sparkwing run` exposes, and `desc` is the
-// help text shown beside it.
 type GenTypedArgsInput struct {
 	Environment string `flag:"environment" desc:"Target environment to deploy to (e.g. staging, prod)."`
 	DryRun      bool   `flag:"dry-run" desc:"Render the manifests without applying them."`

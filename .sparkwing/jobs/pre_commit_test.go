@@ -14,9 +14,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// gateFixtureRepo builds a two-module repo shaped like this one: the product
-// module at the root and the pipeline module in .sparkwing/. The gate is
-// pointed at it for the duration of the test.
 func gateFixtureRepo(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -50,7 +47,6 @@ func TestPreCommitReservesAndBoundsItsCPU(t *testing.T) {
 	}
 }
 
-// gitInit makes dir a git work tree.
 func gitInit(t *testing.T, dir string) {
 	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
@@ -59,14 +55,11 @@ func gitInit(t *testing.T, dir string) {
 	runTestGit(t, dir, "init")
 }
 
-// gitAddAll stages everything under dir, which is what puts the fixture's
-// go.mod files where the gate's module walk reads them.
 func gitAddAll(t *testing.T, dir string) {
 	t.Helper()
 	runTestGit(t, dir, "add", "-A")
 }
 
-// writeGoFile writes content at path, creating parent directories.
 func writeGoFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -77,7 +70,6 @@ func writeGoFile(t *testing.T, path, content string) {
 	}
 }
 
-// Narrowing the Go steps back to .sparkwing/ passes this broken tree.
 func TestGoStepsRefuseAnUnparseableFileInTheProductModule(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -113,8 +105,6 @@ func TestGoStepsRefuseAnUnparseableFileInTheProductModule(t *testing.T) {
 	}
 }
 
-// A product module that compiles but whose tests fail must still be refused,
-// so the test step is doing work the build step cannot.
 func TestTestStepRefusesAFailingProductTest(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -130,8 +120,6 @@ func TestTestStepRefusesAFailingProductTest(t *testing.T) {
 	}
 }
 
-// The pipeline module stays covered alongside the product module: a break in
-// .sparkwing/ must fail the same steps.
 func TestGoStepsStillCoverThePipelineModule(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -144,7 +132,6 @@ func TestGoStepsStillCoverThePipelineModule(t *testing.T) {
 	}
 }
 
-// A module added after the fact is covered the day its go.mod lands.
 func TestGoStepsCoverEveryCommittedModule(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -158,9 +145,6 @@ func TestGoStepsCoverEveryCommittedModule(t *testing.T) {
 	}
 }
 
-// The gate's own bindings must be absent from the test step's children, not
-// merely empty: a reader that asks whether a variable is set still sees an
-// empty one, and git acts on an empty GIT_INDEX_FILE.
 func TestTheTestStepStripsTheGatesOwnBindingsFromItsChildren(t *testing.T) {
 	ctx := context.Background()
 	var probe string
@@ -186,10 +170,6 @@ func TestTheTestStepStripsTheGatesOwnBindingsFromItsChildren(t *testing.T) {
 	}
 }
 
-// A suite the test step runs stages into its own repository. While the gate's
-// index is bound, every git the suite spawns reads and writes that one
-// instead, which is how a real repository's paths surface inside a temp-dir
-// fixture.
 func TestTheTestStepDoesNotHandTheGateIndexToTheSuitesItRuns(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -272,8 +252,6 @@ func assertTestScratchRemoved(t *testing.T, marker string) {
 	}
 }
 
-// gitIndexProbe is a product test that stages a file in a repository of its
-// own. Its index holds that one file until something binds git elsewhere.
 const gitIndexProbe = `package internal
 
 import (
@@ -304,8 +282,6 @@ func TestGitStagesIntoThisSuitesOwnIndex(t *testing.T) {
 }
 `
 
-// gateIndexSnapshot stages root into the throwaway index accepted by
-// `sparkwing run --sw-index`.
 func gateIndexSnapshot(t *testing.T, root string) string {
 	t.Helper()
 	index := filepath.Join(t.TempDir(), "gate.index")
@@ -317,9 +293,6 @@ func gateIndexSnapshot(t *testing.T, root string) string {
 	return index
 }
 
-// A module can hold a committed go.mod and no buildable packages -- every
-// package behind a build tag, or none written yet. vet and test exit 1 there
-// while build exits 0, so the walk has to step over it.
 func TestGoStepsSkipACommittedModuleWithNoPackages(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -335,9 +308,6 @@ func TestGoStepsSkipACommittedModuleWithNoPackages(t *testing.T) {
 	}
 }
 
-// A failure in any mandatory step must land before the steps that cost more
-// than it does, so the author waits on the cheapest verdict a broken tree can
-// produce.
 func TestEachMandatoryStepWaitsOnTheOneBeforeIt(t *testing.T) {
 	w := sparkwing.NewWork()
 	if _, err := (&PreCommit{}).Work(w); err != nil {
@@ -374,16 +344,19 @@ func TestPreCommitRunsFrontendChecksBeforeBrowserSmoke(t *testing.T) {
 	if _, err := (&PreCommit{}).Work(w); err != nil {
 		t.Fatal(err)
 	}
-	for _, id := range []string{"frontend-browser-lint", "frontend-build", "frontend-browser"} {
+	for _, id := range []string{"frontend-lint", "frontend-build", "frontend-browser"} {
 		if w.StepByID(id) == nil {
 			t.Fatalf("pre-commit does not run %s", id)
 		}
 	}
+	if deps := w.StepByID("frontend-lint").DepIDs(); len(deps) != 0 {
+		t.Fatalf("frontend-lint dependencies = %v, want an independent fast check", deps)
+	}
 	if !stepWaitsOn(w, "frontend-build", "frontend-unit") {
 		t.Fatal("frontend-build does not wait on frontend-unit")
 	}
-	if !stepWaitsOn(w, "frontend-build", "frontend-browser-lint") {
-		t.Fatal("frontend-build does not wait on frontend-browser-lint")
+	if !stepWaitsOn(w, "frontend-build", "frontend-lint") {
+		t.Fatal("frontend-build does not wait on frontend-lint")
 	}
 	if !stepWaitsOn(w, "frontend-browser", "frontend-build") {
 		t.Fatal("frontend-browser does not wait on frontend-build")
@@ -456,7 +429,6 @@ func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
 		run     func(context.Context) error
 		failure string
 	}{
-		{name: "browser lint", script: "lint:browser", run: runFrontendBrowserLint, failure: "frontend browser-test lint"},
 		{name: "build", script: "build", run: runFrontendBuild, failure: "frontend production build"},
 		{name: "browser", script: "test:browser:gate", run: runFrontendBrowser, failure: "frontend browser smoke suite"},
 	}
@@ -477,6 +449,37 @@ func TestFrontendChecksPropagateNamedNPMVerdicts(t *testing.T) {
 				t.Fatalf("%s failure = %v, want named verdict", tc.name, err)
 			}
 		})
+	}
+}
+
+func TestFrontendLintPropagatesVerdictWithoutInstallingDependencies(t *testing.T) {
+	root := t.TempDir()
+	web := filepath.Join(root, "web")
+	if err := os.MkdirAll(web, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	packageJSON := filepath.Join(web, "package.json")
+	previous := sparkwing.WorkDir()
+	sparkwing.SetWorkDir(root)
+	t.Cleanup(func() { sparkwing.SetWorkDir(previous) })
+
+	writeGoFile(t, packageJSON, `{"scripts":{"lint":"node -e \"process.exit(1)\""}}`)
+	err := runFrontendLint(context.Background())
+	if err == nil {
+		t.Fatal("frontend-lint accepted a failing npm lint script")
+	}
+	if !strings.Contains(err.Error(), "frontend ESLint suite") {
+		t.Fatalf("frontend-lint failure = %q, want named suite", err)
+	}
+
+	writeGoFile(t, packageJSON, `{"scripts":{"lint":"node -e \"process.exit(0)\""}}`)
+	if err := runFrontendLint(context.Background()); err != nil {
+		t.Fatalf("frontend-lint rejected a passing npm lint script: %v", err)
+	}
+	for _, path := range []string{filepath.Join(web, "package-lock.json"), filepath.Join(web, "node_modules")} {
+		if _, err := os.Stat(path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("frontend-lint created dependency state at %s: %v", path, err)
+		}
 	}
 }
 
@@ -512,16 +515,11 @@ func TestFrontendBrowserMarksOnlyFailedRunsForHostedArtifacts(t *testing.T) {
 	}
 }
 
-// The sweeps read this file too, so the fixtures spell their patterns with an
-// escape and a join rather than literally. Written out, they are the real
-// thing; read as source, neither trips the check under test.
 const (
 	emDash    = "\u2014"
 	trackerID = "TOD" + "-42"
 )
 
-// gitCommitAll stages and commits everything under dir, so later staging
-// produces a diff against a real HEAD rather than against an empty tree.
 func gitCommitAll(t *testing.T, dir, message string) {
 	t.Helper()
 	gitAddAll(t, dir)
@@ -529,8 +527,6 @@ func gitCommitAll(t *testing.T, dir, message string) {
 		"-c", "commit.gpgsign=false", "commit", "-q", "-m", message)
 }
 
-// A commit is judged on what it changes. The sweeps once read the whole
-// tracked tree, so history nobody touched could refuse an unrelated commit.
 func TestRegexSweepsIgnoreAFileTheCommitDoesNotTouch(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -550,8 +546,6 @@ func TestRegexSweepsIgnoreAFileTheCommitDoesNotTouch(t *testing.T) {
 	}
 }
 
-// The narrowing must not disarm the sweeps: content the commit actually
-// introduces is still refused.
 func TestRegexSweepsRefuseWhatTheStagedChangeIntroduces(t *testing.T) {
 	cases := []struct {
 		name  string
@@ -576,8 +570,6 @@ func TestRegexSweepsRefuseWhatTheStagedChangeIntroduces(t *testing.T) {
 	}
 }
 
-// The whole-tree audit is how pre-existing drift still gets found, off the
-// critical path of an unrelated commit.
 func TestRegexSweepAllReadsPastTheStagedChange(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -595,16 +587,8 @@ func TestRegexSweepAllReadsPastTheStagedChange(t *testing.T) {
 	}
 }
 
-// gofumptDrift is formatted for gofmt and not for gofumpt: gofumpt's extra
-// rules collapse the empty line after the opening brace. gofmt passing it is
-// the point -- gofmt is the only formatting the gate enforced, and gofumpt
-// with extra-rules is a strict superset of it, so a tree stays gofmt-clean
-// and formatter-dirty indefinitely.
 const gofumptDrift = "package internal\n\nfunc Drifted() int {\n\n\treturn 1\n}\n"
 
-// formattersFixtureConfig is the formatters: block this repo ships. The
-// fixture needs it because `golangci-lint fmt` with no config runs gofmt
-// alone, which would pass every case below and prove nothing.
 const formattersFixtureConfig = `version: "2"
 formatters:
   enable:
@@ -618,17 +602,11 @@ formatters:
         - github.com/sparkwing-dev
 `
 
-// withFormattersConfig gives the fixture repo the formatters this repo
-// configures.
 func withFormattersConfig(t *testing.T, root string) {
 	t.Helper()
 	writeGoFile(t, filepath.Join(root, ".golangci.yml"), formattersFixtureConfig)
 }
 
-// The formatters step reads the staged change, so drift the commit did not
-// touch never charges an unrelated author. Twenty files in the product tree
-// are drifting today; a gate that reds on all of them is a gate somebody
-// passes --no-verify within a day.
 func TestFormattersIgnoreAFileTheCommitDoesNotTouch(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -647,9 +625,6 @@ func TestFormattersIgnoreAFileTheCommitDoesNotTouch(t *testing.T) {
 	}
 }
 
-// The narrowing must not disarm the check: drift the commit stages is still
-// refused, and gofmt passing the same file is what makes the step worth
-// running at all.
 func TestFormattersRefuseDriftTheStagedChangeIntroduces(t *testing.T) {
 	root := gateFixtureRepo(t)
 	ctx := context.Background()
@@ -675,8 +650,6 @@ func TestFormattersRefuseDriftTheStagedChangeIntroduces(t *testing.T) {
 	}
 }
 
-// Third-party Go arriving through npm is not this repo's to format, and a
-// dependency update must not be able to red a commit that did not cause it.
 func TestStagedGoFilesSkipsNodeModules(t *testing.T) {
 	root := gateFixtureRepo(t)
 	gitCommitAll(t, root, "clean base")
@@ -700,8 +673,6 @@ func TestStagedGoFilesSkipsNodeModules(t *testing.T) {
 	}
 }
 
-// requireGolangciLint skips when the linter is not installed, which is the
-// one honest thing to do: a step that cannot run must not report a pass.
 func requireGolangciLint(t *testing.T) {
 	t.Helper()
 	if _, err := exec.LookPath("golangci-lint"); err != nil {
@@ -709,8 +680,6 @@ func requireGolangciLint(t *testing.T) {
 	}
 }
 
-// stepWaitsOn reports whether step depends on dep, directly or through
-// another step.
 func stepWaitsOn(w *sparkwing.Work, step, dep string) bool {
 	s := w.StepByID(step)
 	if s == nil {
@@ -724,39 +693,22 @@ func stepWaitsOn(w *sparkwing.Work, step, dep string) bool {
 	return false
 }
 
-// The fixtures below spell the forbidden patterns with a join rather
-// than literally, so this file does not itself carry what the gate
-// refuses. Written out they are the real thing, which is what makes them
-// fixtures rather than approximations.
 const (
-	// homeEnvViolation reads the variable directly.
 	homeEnvViolation = "package internal\n\nimport \"os\"\n\n" +
 		"func Home() string { return os.Getenv(\"SPARKWING_" + "HOME\") }\n"
 
-	// homeJoinViolation skips the variable entirely and builds the path
-	// from the user's home directory, which is the half of the original
-	// bug an environment-only rule sails past.
 	homeJoinViolation = "package internal\n\nimport (\n\t\"os\"\n\t\"path/filepath\"\n)\n\n" +
 		"func Home() string {\n\thome, _ := os.UserHomeDir()\n\treturn filepath.Join(home, \"" + ".sparkwing\")\n}\n"
 
-	// projectDirJoin builds the per-repo pipeline module directory from a
-	// checkout path. Same literal, different thing, and there are roughly
-	// two dozen of these in the tree.
 	projectDirJoin = "package internal\n\nimport \"path/filepath\"\n\n" +
 		"func Dir(cwd string) string { return filepath.Join(cwd, \"" + ".sparkwing\") }\n"
 )
 
-// homeRuleFixtures pairs each rule with source that violates it, so the
-// cases below stay in step with the rule table rather than restating it.
 var homeRuleFixtures = map[string]string{
 	"read SPARKWING_HOME from the environment":       homeEnvViolation,
 	"build the sparkwing home from a home directory": homeJoinViolation,
 }
 
-// The gate has to refuse a fresh bypass of either shape, or it is
-// decoration. These are the two shapes internal/bincache carried: it
-// read the variable, and when that was unset it built the path from the
-// user's home directory.
 func TestHomeResolutionRefusesEveryBypassShape(t *testing.T) {
 	for _, rule := range homeRules {
 		body, ok := homeRuleFixtures[rule.label]
@@ -793,9 +745,6 @@ func TestHomeResolutionRefusesEveryBypassShape(t *testing.T) {
 	}
 }
 
-// The allowlist has to actually exempt its entries, and it has to key on
-// the path rather than on anything about the content, so an entry keeps
-// working when the file around it is edited.
 func TestHomeResolutionExemptsTheAllowlist(t *testing.T) {
 	for _, rule := range homeRules {
 		t.Run(rule.label, func(t *testing.T) {
@@ -812,10 +761,6 @@ func TestHomeResolutionExemptsTheAllowlist(t *testing.T) {
 	}
 }
 
-// The join rule keys on the argument, not the literal, because the same
-// literal names the per-repo pipeline module directory in roughly two
-// dozen correct call sites. Firing on those would make the gate noise
-// somebody silences rather than a rule anybody keeps.
 func TestHomeResolutionAllowsTheProjectPipelineDirectory(t *testing.T) {
 	root := gateFixtureRepo(t)
 	writeGoFile(t, filepath.Join(root, "internal", "projectdir.go"), projectDirJoin)
@@ -826,9 +771,6 @@ func TestHomeResolutionAllowsTheProjectPipelineDirectory(t *testing.T) {
 	}
 }
 
-// Prose has to be able to quote the call it forbids. A rule nobody can
-// write about is one nobody can document, and the doc comments on the
-// fixed packages quote exactly these calls.
 func TestHomeResolutionIgnoresCommentsQuotingTheForbiddenCalls(t *testing.T) {
 	root := gateFixtureRepo(t)
 	quoted := "package internal\n\n"
@@ -849,10 +791,6 @@ func TestHomeResolutionIgnoresCommentsQuotingTheForbiddenCalls(t *testing.T) {
 	}
 }
 
-// Three exemptions the gate has to hold, each for its own reason: a test
-// reading the variable is asserting something about it, .sparkwing/ is a
-// separate module that cannot import internal/paths at all, and setting
-// the variable is the isolation this rule exists to make reliable.
 func TestHomeResolutionExemptions(t *testing.T) {
 	setter := "package internal\n\nimport \"testing\"\n\n" +
 		"func Isolate(t *testing.T) { t.Setenv(\"SPARKWING_" + "HOME\", t.TempDir()) }\n"

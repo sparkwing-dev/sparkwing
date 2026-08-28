@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// jobargsArgs1 / jobargsArgs2 are deliberately disjoint so we can
-// verify the union across two jobs in one plan.
 type jobargsArgs1 struct {
 	Replicas int    `desc:"replicas"`
 	Image    string `desc:"image"`
@@ -27,7 +25,6 @@ func (j *jobargsJob1) Work(w *Work) (*WorkStep, error) {
 	return Step(w, "run", func(_ context.Context) error { return nil }), nil
 }
 
-// jobargsJob1WithSchema declares constraints via SchemaProvider.
 type jobargsJob1WithSchema struct {
 	Base
 	WithArgs[jobargsArgs1]
@@ -43,8 +40,6 @@ func (jobargsJob1WithSchema) Schema() (*Schema, error) {
 	return s.Build()
 }
 
-// jobargsJob2 has a different args type; used to verify cross-job
-// union without collisions.
 type jobargsJob2 struct {
 	Base
 	WithArgs[jobargsArgs2]
@@ -54,7 +49,6 @@ func (j *jobargsJob2) Work(w *Work) (*WorkStep, error) {
 	return Step(w, "run", func(_ context.Context) error { return nil }), nil
 }
 
-// jobargsJobNoArgs has no WithArgs embedded.
 type jobargsJobNoArgs struct {
 	Base
 }
@@ -63,8 +57,6 @@ func (j *jobargsJobNoArgs) Work(w *Work) (*WorkStep, error) {
 	return Step(w, "run", func(_ context.Context) error { return nil }), nil
 }
 
-// jobargsCollidingArgs declares a flag that collides with
-// jobargsArgs1.Replicas (via the kebab-cased default).
 type jobargsCollidingArgs struct {
 	Replicas int `desc:"colliding name"`
 }
@@ -78,7 +70,6 @@ func (j *jobargsJobColliding) Work(w *Work) (*WorkStep, error) {
 	return Step(w, "run", func(_ context.Context) error { return nil }), nil
 }
 
-// jobargsJobBadSchema returns an error from Schema().
 type jobargsJobBadSchema struct {
 	Base
 	WithArgs[jobargsArgs1]

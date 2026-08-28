@@ -220,8 +220,6 @@ func compilePattern(pattern string) func(string) bool {
 	}
 }
 
-// globToRegex translates a glob (with **/* support) to a regex
-// anchored at both ends.
 func globToRegex(pat string) *regexp.Regexp {
 	var b strings.Builder
 	b.WriteString(`\A`)
@@ -253,8 +251,6 @@ func globToRegex(pat string) *regexp.Regexp {
 	return regexp.MustCompile(b.String())
 }
 
-// resolveTreeRoot turns Tree's root argument into an absolute path,
-// anchoring relative inputs at the repo root.
 func resolveTreeRoot(ctx context.Context, root string) (string, error) {
 	if filepath.IsAbs(root) {
 		return root, nil
@@ -266,10 +262,6 @@ func resolveTreeRoot(ctx context.Context, root string) (string, error) {
 	return filepath.Clean(filepath.Join(base, root)), nil
 }
 
-// hashTree walks root, collects regular file paths in stable order,
-// and hashes their contents. Mirrors hashTrackedFiles' digest shape
-// so cache keys from RepoFiles and Tree are interchangeable in
-// Compose. Symlinks are skipped.
 func hashTree(root string) (string, error) {
 	info, err := os.Stat(root)
 	if err != nil {
@@ -316,13 +308,6 @@ func hashTree(root string) (string, error) {
 	return fmt.Sprintf("%x", sum)[:12], nil
 }
 
-// hashTrackedFiles enumerates `git ls-files` from the repo top-level
-// and hashes the working-tree contents of the kept paths in stable
-// order. nil keep = keep all.
-//
-// Reads the working tree (not `git show :path`) so uncommitted edits
-// invalidate the cache. Files in the index but missing from disk
-// (mid-rename, staged delete) are skipped.
 func hashTrackedFiles(ctx context.Context, keep pathMatcher) (string, error) {
 	root, err := repoRoot(ctx)
 	if err != nil {
@@ -359,8 +344,6 @@ func hashTrackedFiles(ctx context.Context, keep pathMatcher) (string, error) {
 	return fmt.Sprintf("%x", sum)[:12], nil
 }
 
-// repoRoot returns the absolute path of the git repo's working tree
-// root. Errors loudly when not in a git repo.
 func repoRoot(ctx context.Context) (string, error) {
 	out, err := runShell(ctx, "git", "rev-parse", "--show-toplevel")
 	if err != nil {
@@ -369,9 +352,6 @@ func repoRoot(ctx context.Context) (string, error) {
 	return strings.TrimRight(out, "\n"), nil
 }
 
-// lsFiles enumerates the tracked files in dir via `git ls-files -z`.
-// Output paths are relative to dir; callers pass repoRoot so
-// enumeration covers the whole tree regardless of WorkDir().
 func lsFiles(ctx context.Context, dir string) ([]string, error) {
 	out, err := runShellAt(ctx, dir, "git", "ls-files", "-z")
 	if err != nil {
@@ -384,9 +364,6 @@ func lsFiles(ctx context.Context, dir string) ([]string, error) {
 	return strings.Split(raw, "\x00"), nil
 }
 
-// runShell runs in sparkwing.WorkDir() so the cache key reflects the
-// repo being built. Refuses to run with an empty WorkDir to avoid
-// silently producing a hash for the wrong tree.
 func runShell(ctx context.Context, name string, args ...string) (string, error) {
 	wd := sparkwing.WorkDir()
 	if wd == "" {
@@ -395,7 +372,6 @@ func runShell(ctx context.Context, name string, args ...string) (string, error) 
 	return runShellAt(ctx, wd, name, args...)
 }
 
-// runShellAt is runShell with an explicit working directory.
 func runShellAt(ctx context.Context, dir, name string, args ...string) (string, error) {
 	if dir == "" {
 		return "", fmt.Errorf("inputs.runShellAt(%s): %w", name, sparkwing.ErrNoProject)
@@ -409,9 +385,6 @@ func runShellAt(ctx context.Context, dir, name string, args ...string) (string, 
 	return string(out), nil
 }
 
-// logHashError emits a loud line so a failed CacheKey computation
-// is visible. Returning the empty key prevents caching on a partial
-// enumeration; the log tells the operator why.
 func logHashError(ctx context.Context, fn string, err error) {
 	sparkwing.LoggerFromContext(ctx).Log("error",
 		fmt.Sprintf("sparkwing.%s: hash failed (proceeding uncached): %v", fn, err))

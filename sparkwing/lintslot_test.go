@@ -12,10 +12,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// lintSlotTool returns a tool name no other test or gate uses, so a
-// test never takes a slot the fleet's own lint runs are holding, and
-// removes the slot tree afterwards. Slots live under the OS temp dir
-// rather than a t.TempDir, so nothing else reclaims them.
 func lintSlotTool(t *testing.T) string {
 	t.Helper()
 	safe := strings.Map(func(r rune) rune {
@@ -33,7 +29,6 @@ func lintSlotTool(t *testing.T) string {
 	return tool
 }
 
-// acquireFor leases a slot as if the pipeline were running in dir.
 func acquireFor(t *testing.T, tool, dir string) *sparkwing.LintSlot {
 	t.Helper()
 	sparkwing.SetWorkDir(dir)
@@ -45,7 +40,6 @@ func acquireFor(t *testing.T, tool, dir string) *sparkwing.LintSlot {
 	return slot
 }
 
-// resolves reports the real directory a slot path leads to.
 func resolves(t *testing.T, path string) string {
 	t.Helper()
 	real, err := filepath.EvalSymlinks(path)
@@ -55,9 +49,6 @@ func resolves(t *testing.T, path string) string {
 	return real
 }
 
-// The point of a slot is that it is an alias, not a copy: the stable
-// path has to lead to the worktree that holds it, or a finding
-// reported against it names a file the reader cannot open.
 func TestAcquireLintSlot_CanonicalPathLeadsToTheWorktree(t *testing.T) {
 	wt := t.TempDir()
 	useWorkDir(t, wt)
@@ -74,8 +65,6 @@ func TestAcquireLintSlot_CanonicalPathLeadsToTheWorktree(t *testing.T) {
 	}
 }
 
-// Reuse is the whole saving. A worktree that arrives after another has
-// released must inherit that slot's warm cache, not a fresh one.
 func TestAcquireLintSlot_ReuseKeepsTheCacheAndFollowsTheNewHolder(t *testing.T) {
 	tool := lintSlotTool(t)
 	donor, target := t.TempDir(), t.TempDir()
@@ -99,8 +88,6 @@ func TestAcquireLintSlot_ReuseKeepsTheCacheAndFollowsTheNewHolder(t *testing.T) 
 	}
 }
 
-// Two worktrees linting at once must not land on one slot, or they
-// would share a path while holding different content.
 func TestAcquireLintSlot_ConcurrentHoldersGetDifferentSlots(t *testing.T) {
 	tool := lintSlotTool(t)
 	first, second := t.TempDir(), t.TempDir()
@@ -125,9 +112,6 @@ func TestAcquireLintSlot_ConcurrentHoldersGetDifferentSlots(t *testing.T) {
 	}
 }
 
-// With every slot taken the lease must degrade to the private
-// per-worktree cache rather than queue or share. Cold is acceptable;
-// waiting on a neighbour's lint, or reporting its paths, is not.
 func TestAcquireLintSlot_FallsBackToThePrivateCacheWhenAllSlotsAreBusy(t *testing.T) {
 	t.Setenv(sparkwing.LintSlotsEnv, "1")
 	tool := lintSlotTool(t)
@@ -149,10 +133,6 @@ func TestAcquireLintSlot_FallsBackToThePrivateCacheWhenAllSlotsAreBusy(t *testin
 	t.Cleanup(func() { _ = os.RemoveAll(sparkwing.ToolCacheDir(tool)) })
 }
 
-// A released slot has to become claimable again, or the pool drains to
-// nothing over a session and every run after that is cold. Release is
-// called twice here because the intended shape is an explicit release
-// followed by a deferred one, and the second must not panic.
 func TestLintSlot_ReleaseFreesTheSlotAndRepeatsSafely(t *testing.T) {
 	t.Setenv(sparkwing.LintSlotsEnv, "1")
 	tool := lintSlotTool(t)
@@ -168,8 +148,6 @@ func TestLintSlot_ReleaseFreesTheSlotAndRepeatsSafely(t *testing.T) {
 	}
 }
 
-// The override is what lets a machine trade fallbacks against disk, so
-// it has to actually bound the pool.
 func TestAcquireLintSlot_SlotCountHonoursTheEnvOverride(t *testing.T) {
 	t.Setenv(sparkwing.LintSlotsEnv, "2")
 	tool := lintSlotTool(t)
@@ -187,12 +165,6 @@ func TestAcquireLintSlot_SlotCountHonoursTheEnvOverride(t *testing.T) {
 	t.Cleanup(func() { _ = os.RemoveAll(c.Cache) })
 }
 
-// Configure has to set PWD as well as the directory. Go's os.Getwd
-// prefers $PWD, so without it the linter resolves the slot symlink,
-// sees the worktree's own path, and stores that in the shared cache --
-// the slot silently stops working. Both variables are echoed rather
-// than read with printenv, because the BSD printenv on this platform
-// takes a single name.
 func TestLintSlotConfigure_SetsPWDAndTheCacheVariable(t *testing.T) {
 	wt := t.TempDir()
 	useWorkDir(t, wt)
@@ -215,10 +187,6 @@ func TestLintSlotConfigure_SetsPWDAndTheCacheVariable(t *testing.T) {
 	}
 }
 
-// A repo with more than one Go module lints each in turn under one
-// lease, so a submodule must get the canonical path too. Setting only
-// the directory here is the same silent failure as dropping PWD at the
-// top level.
 func TestLintSlotConfigureIn_KeepsTheSubmoduleOnTheCanonicalPath(t *testing.T) {
 	wt := t.TempDir()
 	sub := filepath.Join(wt, "tools")
@@ -246,9 +214,6 @@ func TestLintSlotConfigureIn_KeepsTheSubmoduleOnTheCanonicalPath(t *testing.T) {
 	}
 }
 
-// A rel that climbs out of the lease must not be honored: a command run
-// outside the canonical path writes worktree paths into the shared
-// cache, which is the failure the design exists to stop.
 func TestLintSlotConfigureIn_RefusesToLeaveTheLease(t *testing.T) {
 	wt := t.TempDir()
 	useWorkDir(t, wt)
@@ -264,25 +229,8 @@ func TestLintSlotConfigureIn_RefusesToLeaveTheLease(t *testing.T) {
 	}
 }
 
-// lintSlotGetwdProbeEnv turns a re-executed copy of this test binary
-// into a probe that prints its own os.Getwd and exits.
 const lintSlotGetwdProbeEnv = "SPARKWING_LINTSLOT_GETWD_PROBE"
 
-// The whole slot design rests on one behavior nobody here controls:
-// Go's os.Getwd returns $PWD when $PWD stats to the same directory as
-// ".", so a process placed in the slot by a bare chdir still reports
-// the slot path rather than the worktree the symlink resolves to.
-// golangci-lint inherits that from the runtime, not from anything
-// golangci-specific, so it can be checked without golangci-lint --
-// which matters, because the tests that check it end to end need a
-// toolchain and are allowed to skip under -short. This one needs
-// neither a toolchain nor a network and must never skip: it re-executes
-// this test binary as a probe, placed exactly the way exec.Cmd.Dir
-// places a command.
-//
-// Both directions are asserted. Without PWD the probe must report the
-// RESOLVED path, or the first assertion would hold for a slot that is
-// not a symlink at all and would prove nothing.
 func TestLintSlot_GetwdPrefersPWDOverTheResolvedPath(t *testing.T) {
 	if os.Getenv(lintSlotGetwdProbeEnv) != "" {
 		wd, err := os.Getwd()
@@ -327,10 +275,6 @@ func TestLintSlot_GetwdPrefersPWDOverTheResolvedPath(t *testing.T) {
 	}
 }
 
-// runGetwdProbe re-executes this test binary in dir the way exec.Cmd.Dir
-// does -- a bare chdir, which lands the process in the resolved
-// directory -- and returns the os.Getwd it reports. pwd is set as $PWD
-// when non-empty and stripped from the environment when empty.
 func runGetwdProbe(t *testing.T, dir, pwd string) string {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=^TestLintSlot_GetwdPrefersPWDOverTheResolvedPath$")
@@ -358,8 +302,6 @@ func runGetwdProbe(t *testing.T, dir, pwd string) string {
 	return lines[len(lines)-1]
 }
 
-// A run through the slot must actually happen inside the holder's
-// tree, not merely be told a path.
 func TestLintSlotConfigure_RunsInsideTheHoldersTree(t *testing.T) {
 	wt := t.TempDir()
 	if err := os.WriteFile(filepath.Join(wt, "marker.txt"), []byte("holder"), 0o644); err != nil {

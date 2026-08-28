@@ -5,13 +5,8 @@ import (
 	"time"
 )
 
-// localScopeKeyClause matches concurrency keys whose scope is local to
-// one machine: run scope ("r:") and box scope ("b:"). Global scope
-// ("g:") -- the cluster's fleet-wide locks -- is deliberately excluded.
 const localScopeKeyClause = "(key LIKE 'r:%' OR key LIKE 'b:%')"
 
-// deadLocalPredicate selects a local-scope row whose owning run is no
-// longer running: absent from the runs table, or present but terminal.
 const deadLocalPredicate = localScopeKeyClause +
 	" AND run_id NOT IN (SELECT id FROM runs WHERE status = ?)"
 

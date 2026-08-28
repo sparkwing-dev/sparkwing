@@ -11,24 +11,10 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/wingwire"
 )
 
-// stallRecoveryCommand is the single non-destructive verb a queue view
-// advertises for a wedged holder. It cancels one run by id and never
-// touches shared host state.
 func stallRecoveryCommand(runID string) string {
 	return fmt.Sprintf("sparkwing runs cancel --run %s", runID)
 }
 
-// buildQueueStateLocked renders the current admission picture for the
-// read-only queue view: capacity rows with held amounts, holders with
-// elapsed time and cost, and waiters in admission order, each annotated
-// with its cost source, drift warning, and -- for waiters -- an estimated
-// start time. The caller holds d.mu.
-//
-// The machine budget is reported whether or not one is set. An operator
-// reading the queue to find out why admission is capped needs "nothing is
-// set" to be an answer the view gives, not one they infer from a missing
-// row, and the source travels with it so a budget they did not set is one
-// they can locate and revoke.
 func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	snap := d.ledger.Snapshot()
 	var qs wingwire.QueueState
@@ -234,9 +220,6 @@ func (d *Daemon) buildQueueStateLocked() wingwire.QueueState {
 	return qs
 }
 
-// leaseHoldsResources reports whether a lease owns any positive live grant.
-// A run-registration lease can be present with zero host cost and no
-// semaphore cost; that is a connection, not admitted work.
 func leaseHoldsResources(snap admission.Snapshot, ls admission.LeaseState) bool {
 	if ls.MilliCores > 0 || ls.MemoryBytes > 0 {
 		return true
@@ -293,11 +276,6 @@ func queueBlockingReason(hostReason string, waitingOn []string, position int) st
 	return "waiting behind earlier queued work"
 }
 
-// attachedChildHoldersLocked renders the child runs riding a lease as
-// zero-cost holders under their parent, so an attached child appears in
-// the queue as what it is rather than a run holding nothing. Members are
-// walked in the lease's stored order; the lease's own requester is
-// skipped. The caller holds d.mu.
 func (d *Daemon) attachedChildHoldersLocked(ls admission.LeaseState, now time.Time) []wingwire.Holder {
 	var out []wingwire.Holder
 	for _, member := range ls.Members {
@@ -372,14 +350,6 @@ func decodeNodeParticipantID(participantID string) (ownerRunID, displayRunID str
 	return "", "", false
 }
 
-// annotateETA fills each waiter's ExpectedStartMS and the queue's
-// ExpectedClearMS by simulating the FIFO queue with measured durations and
-// costs. Capacity is the grantable ceiling (total capped by headroom).
-// Only host-drawing runs are simulated: a semaphore-only hold or wait
-// (zero cores and memory) draws no host budget, so it neither gates host
-// admission nor bounds the clear time. A run whose duration is unknown
-// never finishes in the simulation, so any estimate that would depend on
-// it is left nil rather than fabricated.
 func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 	capCores := float64(min64(snap.TotalMilliCores, snap.HeadroomMilliCores)) / 1000.0
 	capMem := float64(minU64(snap.TotalMemoryBytes, snap.HeadroomMemoryBytes))
@@ -421,10 +391,6 @@ func annotateETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 	}
 }
 
-// annotateSemaphoreETA replaces the host-only estimates with one simulation
-// of every host and semaphore resource. Admissions are atomic across all
-// resources, and each promotion uses the ledger's FIFO and backfill rules.
-// qs.Waiters is index-aligned with snap.Waiters, as annotateETA requires.
 func annotateSemaphoreETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 	starts, clear := simulateAdmissionETA(qs, snap)
 	for i := range qs.Waiters {
@@ -440,10 +406,6 @@ func annotateSemaphoreETA(qs *wingwire.QueueState, snap admission.Snapshot) {
 	}
 }
 
-// semaphoreETACapacity is the capacity the simulation charges a key
-// against. It is the smallest capacity any live hold or queued claim
-// declares, matching the ledger's most-restrictive-wins rule. Zero means
-// nothing live names the key, so there is nothing to simulate.
 func semaphoreETACapacity(snap admission.Snapshot, key string) int {
 	eff := 0
 	for _, ss := range snap.Semaphores {
@@ -462,10 +424,6 @@ func semaphoreETACapacity(snap admission.Snapshot, key string) int {
 	return eff
 }
 
-// semaphoreETAHolderRows indexes holder rows by lease, so a semaphore
-// hold can be matched back to the run's measured duration and elapsed
-// time. A row is found by the participant id it was rendered from, which
-// is the lease's request id.
 func semaphoreETAHolderRows(qs *wingwire.QueueState, snap admission.Snapshot) map[admission.LeaseID]wingwire.Holder {
 	byParticipant := make(map[string]wingwire.Holder, len(qs.Holders))
 	for _, h := range qs.Holders {
@@ -484,9 +442,6 @@ func semaphoreETAHolderRows(qs *wingwire.QueueState, snap admission.Snapshot) ma
 	return rows
 }
 
-// simRun is one run in the ETA simulation. finish is a holder's remaining
-// milliseconds; duration is a waiter's run length. Either is +Inf when the
-// run's duration is unmeasured.
 type simRun struct {
 	cores     float64
 	softCores bool
@@ -495,18 +450,12 @@ type simRun struct {
 	duration  float64
 }
 
-// simEvent is a scheduled resource release at a point in simulated time.
 type simEvent struct {
 	at    float64
 	cores float64
 	mem   float64
 }
 
-// simulateQueue advances a FIFO admission queue in simulated time and
-// returns each waiter's estimated start offset (ms from now) and the time
-// the queue fully clears. An unmeasured duration propagates as +Inf: a
-// waiter that must wait behind it starts at +Inf, and the clear time is
-// +Inf when any run never finishes.
 func simulateQueue(capCores, capMem float64, holders, waiters []simRun) (starts []float64, clear float64) {
 	const eps = 1e-9
 	freeCores := capCores
@@ -574,7 +523,6 @@ func simFits(w simRun, capCores, freeCores, freeMem, eps float64) bool {
 	return w.softCores && freeCores >= capCores-eps
 }
 
-// popEarliest removes and returns the event with the smallest time.
 func popEarliest(events *[]simEvent) (simEvent, bool) {
 	es := *events
 	if len(es) == 0 {
@@ -591,9 +539,6 @@ func popEarliest(events *[]simEvent) (simEvent, bool) {
 	return e, true
 }
 
-// remainingMS is a holder's estimated milliseconds left: its measured p50
-// minus elapsed. An unmeasured or exhausted duration is +Inf: an active
-// holder has disproved an estimate that says it has already finished.
 func remainingMS(expectedMS, elapsedMS int64) float64 {
 	if expectedMS <= 0 {
 		return math.Inf(1)
@@ -605,7 +550,6 @@ func remainingMS(expectedMS, elapsedMS int64) float64 {
 	return rem
 }
 
-// durationMS is a waiter's measured run length, or +Inf when unmeasured.
 func durationMS(expectedMS int64) float64 {
 	if expectedMS <= 0 {
 		return math.Inf(1)
@@ -627,9 +571,6 @@ func minU64(a, b uint64) uint64 {
 	return b
 }
 
-// externalSource labels an external figure with where it came from, so a
-// dimension the sampler could not read is never read as one it measured
-// at zero.
 func externalSource(measured bool) string {
 	if measured {
 		return wingwire.ExternalMeasured
@@ -637,10 +578,6 @@ func externalSource(measured bool) string {
 	return wingwire.ExternalUnmeasured
 }
 
-// waitingOn names the resources a waiter cannot fit into right now: host
-// dimensions and full semaphore keys whose remaining room is smaller than
-// what the waiter draws. An empty result means the waiter is blocked only
-// by admission order behind a heavier request ahead of it.
 func waitingOn(w admission.WaiterState, remaining map[string]float64) []string {
 	var keys []string
 	if cores := float64(w.MilliCores) / 1000.0; cores > 0 && remaining["cores"] < cores {
@@ -657,8 +594,6 @@ func waitingOn(w admission.WaiterState, remaining map[string]float64) []string {
 	return keys
 }
 
-// effectiveCapacity is the smallest capacity any live hold declares for a
-// semaphore, matching the ledger's most-restrictive-wins rule.
 func effectiveCapacity(ss admission.SemaphoreState) int {
 	eff := 0
 	for _, h := range ss.Holds {
@@ -675,9 +610,6 @@ func effectiveCapacity(ss admission.SemaphoreState) int {
 	return eff
 }
 
-// hostBlockingReasonLocked renders the host-pressure blocking reason for a
-// run charged res against the daemon's current headroom. Empty when host
-// capacity is not what holds the run back. The caller holds d.mu.
 func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale string) string {
 	if res.Cores <= 0 && res.MemoryBytes <= 0 {
 		return ""
@@ -711,13 +643,6 @@ func (d *Daemon) hostBlockingReasonLocked(res wingwire.HostResources, rationale 
 	return hostBlockingReason(res.Cores, float64(res.MemoryBytes), avail, rationale)
 }
 
-// hostBlockingReason renders the one-line reason a run cannot be admitted
-// on host capacity right now, comparing what it needs against what is
-// grantable and naming external load when it is the binding constraint.
-// Cores bind before memory. rationale, when non-empty, explains where the
-// charge came from and is folded in right after the need ("needs 5.0 cores
-// (measured sustained p95 over 12 runs); ..."). Empty when neither host
-// dimension blocks the run (a pure semaphore or admission-order wait).
 func hostBlockingReason(needCores, needMem float64, available map[string]wingwire.ResourceState, rationale string) string {
 	if needCores > 0 {
 		if r, ok := available["cores"]; ok && r.Available < needCores {
@@ -740,8 +665,6 @@ func hostBlockingReason(needCores, needMem float64, available map[string]wingwir
 	return ""
 }
 
-// costParen wraps a charge rationale in a parenthetical, or returns "" when
-// there is no rationale to show.
 func costParen(rationale string) string {
 	if rationale == "" {
 		return ""
@@ -749,8 +672,6 @@ func costParen(rationale string) string {
 	return " (" + rationale + ")"
 }
 
-// costRationale is the shared charge-provenance phrase for a connection's
-// resolved cost, or "" when the connection is gone. The caller holds d.mu.
 func (d *Daemon) costRationale(c *conn) string {
 	if c == nil {
 		return ""
@@ -758,11 +679,8 @@ func (d *Daemon) costRationale(c *conn) string {
 	return wingwire.CostRationale(wingwire.CostSource(c.costSource), c.sampleCount)
 }
 
-// trimCores formats a core count with a single decimal place.
 func trimCores(v float64) string { return fmt.Sprintf("%.1f", v) }
 
-// humanBytesShort renders a byte count in the largest binary unit that
-// keeps it readable, for blocking-reason strings.
 func humanBytesShort(v float64) string {
 	const unit = 1024.0
 	if v < unit {

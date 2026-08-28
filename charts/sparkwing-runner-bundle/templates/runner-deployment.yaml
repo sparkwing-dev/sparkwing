@@ -8,9 +8,6 @@ metadata:
     {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "runner") | nindent 4 }}
 spec:
   replicas: {{ .Values.runner.replicas }}
-  # RollingUpdate so a `helm upgrade` doesn't drop the entire pool
-  # at once; the controller's lease reaper handles in-flight claims
-  # on the rolled pod.
   strategy:
     type: RollingUpdate
     rollingUpdate:
@@ -49,10 +46,6 @@ spec:
           imagePullPolicy: {{ .Values.runner.image.pullPolicy }}
           securityContext:
             {{- toYaml .Values.containerSecurityContext | nindent 12 }}
-          # The runner image entrypoint is runner-entrypoint.sh which
-          # seeds ~/.netrc from $GITHUB_TOKEN before exec'ing the
-          # binary. Keep the wrapper in the command chain; pass
-          # subcommand + flags through args.
           command:
             - /usr/local/bin/runner-entrypoint.sh
             - /usr/local/bin/sparkwing-runner
@@ -67,9 +60,6 @@ spec:
             {{- if .Values.cache.enabled }}
             - {{ printf "--gitcache=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
             {{- if not .Values.cache.dependencyProxy.enabled }}
-            # The runner otherwise derives the dependency proxy for the
-            # pods it spawns from --gitcache; the opt-out has to be
-            # explicit to reach them.
             - --dependency-proxy=off
             {{- end }}
             {{- end }}
@@ -91,9 +81,6 @@ spec:
               containerPort: {{ .Values.runner.metricsPort }}
           {{- end }}
           env:
-            # HOME on the writable scratch volume so runner-entrypoint
-            # can write ~/.netrc (private go-mod fetch) and `go build`
-            # has somewhere to land caches.
             - name: HOME
               value: /tmp/sparkwing
             - name: SPARKWING_HOME
@@ -111,9 +98,6 @@ spec:
                 fieldRef:
                   fieldPath: metadata.name
             {{- if and .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key }}
-            # Bearer token for both controller-claim auth and
-            # logs-service auth (logs forwards to controller's
-            # /api/v1/auth/whoami).
             - name: SPARKWING_AGENT_TOKEN
               valueFrom:
                 secretKeyRef:

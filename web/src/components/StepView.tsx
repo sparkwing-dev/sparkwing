@@ -82,7 +82,6 @@ export default function StepView({
   steps: StepResult[];
   jobId?: string;
 }) {
-  // Auto-expand failed steps, collapse passed ones
   const [expanded, setExpanded] = useState<Set<number>>(() => {
     const initial = new Set<number>();
     steps.forEach((s, i) => {
@@ -117,7 +116,7 @@ export default function StepView({
 
   return (
     <div className="bg-[#0d1117] border border-[var(--border)] rounded-lg overflow-hidden">
-      {/* Header */}
+      {            }
       <div className="flex items-center gap-2 px-3 py-1.5 border-b border-[var(--border)] bg-[#161b22]">
         <span className="text-[10px] text-[var(--muted)] uppercase tracking-wider">
           {steps.length} steps
@@ -133,7 +132,7 @@ export default function StepView({
         <DownloadButton text={allLogs} filename={filename} />
       </div>
 
-      {/* Steps */}
+      {           }
       {steps.map((step, i) => {
         const isExpanded = expanded.has(i);
         const si = statusIcon[step.status] || statusIcon.skipped;
@@ -144,7 +143,7 @@ export default function StepView({
             key={i}
             className={`border-b border-[var(--border)] last:border-b-0 ${isFailed ? "bg-red-500/5" : ""}`}
           >
-            {/* Step header */}
+            {                 }
             <button
               onClick={() => toggle(i)}
               className="w-full flex items-center gap-2 px-3 py-2 text-xs hover:bg-[#1e293b]/50 transition-colors"
@@ -167,7 +166,7 @@ export default function StepView({
               </span>
             </button>
 
-            {/* Step logs */}
+            {               }
             {isExpanded && (
               <div className="px-3 pb-2">
                 {step.logs ? (

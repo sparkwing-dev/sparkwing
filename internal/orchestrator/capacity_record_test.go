@@ -65,11 +65,6 @@ func TestRecordRunProfile_AggregatesNodeMetricsIntoProfiles(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_ContendedCeilingHitEscalatesFloor verifies that a
-// contended run which consumed essentially its whole charge
-// proves it wanted at least that much, so the demand floor rises to the
-// charge (not merely the throttled measured peak), and the clean window is
-// left untouched so contention never graduates the version.
 func TestRecordRunProfile_ContendedCeilingHitEscalatesFloor(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -108,9 +103,6 @@ func TestRecordRunProfile_ContendedCeilingHitEscalatesFloor(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_ContendedBelowCeilingSetsFloorOnly confirms a
-// contended run that stayed well under its charge only raises the floor to
-// its measured peak; it does not escalate to the charge.
 func TestRecordRunProfile_ContendedBelowCeilingSetsFloorOnly(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -181,16 +173,6 @@ func TestRecordRunProfile_CapsCPUProfileAtHostCapacity(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto pins the
-// rollup a parallel stage folds to. Each node reads what it drew in an
-// interval, so the run drew what one interval's readings sum to; taking the
-// widest node's reading instead would price the whole fan-out at half the
-// machine it used and admit twice as many of them. A sample carrying its own
-// timestamp, as a per-command report does, joins the interval it happened in
-// and adds to it: that CPU really was drawn beside the nodes sampling around
-// it. The run start is aligned to the sampling cadence the fold groups on, so
-// the one-shot lands inside the tick it is offset from instead of straddling
-// a window boundary at random.
 func TestRecordRunProfile_RollupSumsTheSharesOneIntervalWasSplitInto(t *testing.T) {
 	if runtime.NumCPU() < 3 {
 		t.Skip("host cannot hold a three-core reading")
@@ -299,9 +281,6 @@ func TestRecordRunProfile_ClearsStoredPinWhenPlanDeclaresNone(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_DurationExcludesQueueWait verifies that the rollup
-// measures grant-to-finish (execStart..execEnd), so a run that
-// waited in admission before executing records only its execution time.
 func TestRecordRunProfile_DurationExcludesQueueWait(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -338,11 +317,6 @@ func TestRecordRunProfile_DurationExcludesQueueWait(t *testing.T) {
 	}
 }
 
-// TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks establishes a
-// profile from real measured runs, then folds a burst of fully-cached runs and
-// asserts the profile is untouched: cached runs measure the cache, not the
-// work, so they must not collapse the p50 or age out the real peak. The burst
-// is also surfaced separately as the cache-excluded count.
 func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
@@ -416,9 +390,6 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 	}
 }
 
-// TestRecordRunProfile_MixedRunBelowThresholdStillFolds confirms a run with a
-// minority of cache hits is not treated as cache-dominant: its executed work is
-// real, so the rollup still folds.
 func TestRecordRunProfile_MixedRunBelowThresholdStillFolds(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {

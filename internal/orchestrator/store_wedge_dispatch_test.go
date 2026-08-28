@@ -21,8 +21,6 @@ func (wedgePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwing.NoInp
 	return nil
 }
 
-// wedgeConcurrency queues every arrival and errors ResolveWaiter for
-// the first failResolves polls (forever when negative), then promotes.
 type wedgeConcurrency struct {
 	fakeConcurrency
 	mu           sync.Mutex
@@ -45,8 +43,6 @@ func (w *wedgeConcurrency) ResolveWaiter(ctx context.Context, key, runID, nodeID
 	return store.WaiterResolution{Status: store.WaiterPromoted, HolderID: runID + "/" + nodeID}, nil
 }
 
-// nodeErrRecordingState wraps fakeState to capture each node's
-// terminal errMsg, since Result.Error only lists failed node ids.
 type nodeErrRecordingState struct {
 	*fakeState
 	mu       sync.Mutex

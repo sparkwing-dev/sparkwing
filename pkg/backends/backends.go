@@ -175,7 +175,6 @@ func envOr(name, fallback string) string {
 	return fallback
 }
 
-// lookupEnv is a thin wrapper kept for test injection if ever needed.
 var lookupEnv = os.LookupEnv
 
 // LayerSurfaces overlays over on top of base per surface: a non-nil
@@ -221,9 +220,6 @@ func secretsErr(format string, a ...any) error {
 	return fmt.Errorf("secrets backend: "+format, a...)
 }
 
-// layerSpec overlays over on top of base per non-zero field. A
-// different over.Type takes everything from over and ignores base
-// (a kind change resets the spec).
 func layerSpec(base, over *Spec) *Spec {
 	if over == nil {
 		return base

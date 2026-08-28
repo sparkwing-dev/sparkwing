@@ -7,14 +7,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// RefreshResult reports the daemon identity before and after a refresh.
 type RefreshResult struct {
 	PreviousVersion string
 	RunningVersion  string
 	Restarted       bool
 }
 
-// RefreshRunning replaces an answering daemon with opts.Version and leaves an absent daemon stopped.
 func RefreshRunning(ctx context.Context, opts Options) (RefreshResult, error) {
 	sock, err := wingd.SocketPath(opts.Home)
 	if err != nil {

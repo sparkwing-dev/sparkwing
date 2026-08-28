@@ -121,10 +121,6 @@ func TestSeedFixture_RejectsUnknown(t *testing.T) {
 	}
 }
 
-// TestGoModuleFixture_HasCoverableStatements guards the coverage-gated
-// template: the fixture's coverprofile must report nonzero total
-// statements (a profile with only the "mode:" header means the gate
-// errors with "zero total statements").
 func TestGoModuleFixture_HasCoverableStatements(t *testing.T) {
 	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("go not installed")

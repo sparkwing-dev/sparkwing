@@ -8,8 +8,6 @@ import (
 	"testing"
 )
 
-// writeGoMod writes a minimal go.mod at path for tests. The module path
-// is irrelevant to overlay generation; the require block is what matters.
 func writeGoMod(t *testing.T, dir string, requires map[string]string) {
 	t.Helper()
 	var b strings.Builder
@@ -30,9 +28,6 @@ func writeGoMod(t *testing.T, dir string, requires map[string]string) {
 	}
 }
 
-// fakeGoBin installs a shell script named `go` in a temp dir and points
-// SPARKS_GO_BIN at it so WriteOverlay can invoke `go mod download`
-// without actually doing network I/O.
 func fakeGoBin(t *testing.T) {
 	t.Helper()
 	dir := t.TempDir()

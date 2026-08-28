@@ -191,8 +191,6 @@ func TestInitLedger_ResizesRestoredTotalsToCurrentBudget(t *testing.T) {
 	}
 }
 
-// newHeadroomDaemon builds a daemon with a ready ledger but no listener,
-// for exercising the headroom controller in isolation.
 func newHeadroomDaemon(t *testing.T, totalCores, frac float64) *Daemon {
 	t.Helper()
 	home := t.TempDir()
@@ -262,10 +260,6 @@ func TestApplyHeadroom_IgnoreExternalAdmitsUnderLoad(t *testing.T) {
 	}
 }
 
-// TestApplyHeadroom_IgnoreExternalStillDetectsSaturation pins that
-// ignore-external only relaxes admission: contention accounting keeps
-// folding the real saturation into a holder, so observability stays
-// truthful while admission stops subtracting external load.
 func TestApplyHeadroom_IgnoreExternalStillDetectsSaturation(t *testing.T) {
 	d := newHeadroomDaemon(t, 8, 0.2)
 	d.cfg.Budget = Budget{IgnoreExternal: true}
@@ -497,11 +491,6 @@ func TestRefreshHeadroom_FailedSampleDoesNotRefreshOrAdmit(t *testing.T) {
 	}
 }
 
-// TestClampHostChargeLocked_CapsMemoryLikeCores is the daemon-side backstop
-// for a charge resolved with no daemon answering: both host dimensions cap at
-// what the box grants a single run, so a still-measuring pipeline can never
-// submit a demand the machine will refuse forever. An explicit pin stays hard
-// on both dimensions, since a pin is the operator saying they mean it.
 func TestClampHostChargeLocked_CapsMemoryLikeCores(t *testing.T) {
 	d := &Daemon{
 		cfg:           Config{HeadroomFraction: 0.1},

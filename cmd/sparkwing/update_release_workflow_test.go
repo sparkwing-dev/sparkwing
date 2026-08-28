@@ -26,7 +26,7 @@ func TestReleaseWorkflowPublishesImmutableSignedUpdaterAssets(t *testing.T) {
 		"--json isDraft",
 		"gh release delete \"$tag\" --yes",
 		"trap cleanup_draft EXIT",
-		"group: release-${{ github.ref_name }}",
+		"group: release-${{ inputs.tag || github.ref_name }}",
 		"if [ \"$state\" = true ]",
 	} {
 		if !strings.Contains(workflow, required) {

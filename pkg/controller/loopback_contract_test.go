@@ -23,9 +23,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// memArt is an in-memory ArtifactStore, the same shape the s3state
-// package's own tests use, so the loopback runs over the object-store
-// state backend without an AWS endpoint.
 type memArt struct {
 	mu   sync.Mutex
 	data map[string][]byte
@@ -80,41 +77,12 @@ func (m *memArt) List(_ context.Context, prefix string) ([]string, error) {
 	return out, nil
 }
 
-// s3Adapter is the orchestrator's own object-store StateBackend shape:
-// *s3state.Backend answers every method of it directly. Declared here
-// so the contract test drives the exact surface the orchestrator hands
-// the loopback, without importing the orchestrator (which imports this
-// package).
 type s3Adapter struct{ *s3state.Backend }
 
-// loopbackToken is the run-scoped bearer both sides of the contract
-// authenticate with.
 const loopbackToken = "swl_contract"
 
-// contractRunID is the run every loopback in this file is scoped to.
 const contractRunID = "run-contract"
 
-// TestLoopbackContract_EveryRouteTheNodeClientCalls drives the surface
-// a coordinated node process reaches through client.Client against the
-// loopback over object-store state.
-//
-// The list is the scouted call set, not a sample: RunNodeOnce's own
-// reads, everything it installs on the context (ref resolution, the
-// cross-pipeline resolver, the awaiter), the state writes the execution
-// path makes for every node, the spawn handler's child rows, the
-// metrics and heartbeat wires, and the artifact manifest. A route that
-// leaves this list is a route a node can no longer reach.
-//
-// Every route is EXERCISED on both halves, but not every route is
-// ASSERTED on both. The object-store backend refuses the records that
-// need compare-and-swap when the store cannot do it, and an in-memory
-// bucket cannot: triggers (enqueue, spawned-child lookup), approvals,
-// debug pauses, and dispatch snapshots therefore reach a real
-// assertion only against SQLite here, and answer not-supported on the
-// s3 half. That refusal is itself part of the contract -- it has to
-// arrive as a declined operation rather than a transport failure --
-// which is what isUnsupported checks. The cross-runner CAS behavior of
-// those same records is covered in pkg/storage/s3state.
 func TestLoopbackContract_EveryRouteTheNodeClientCalls(t *testing.T) {
 	t.Parallel()
 	art := newMemArt()
@@ -124,8 +92,6 @@ func TestLoopbackContract_EveryRouteTheNodeClientCalls(t *testing.T) {
 	c, _ := newLoopbackClient(t, s3Adapter{Backend: backend}, contractRunID, nil, art)
 	runContractSurface(t, c, "s3")
 
-	// safety: the run really landed on the bucket, not only in the backend's
-	// memory -- Mode 2's whole promise is the NDJSON object.
 	if err := backend.Close(); err != nil {
 		t.Fatalf("close backend: %v", err)
 	}
@@ -134,11 +100,6 @@ func TestLoopbackContract_EveryRouteTheNodeClientCalls(t *testing.T) {
 	}
 }
 
-// TestLoopbackContract_MatchesTheRealController runs the identical
-// surface against controller.Server over a SQLite store. It is the
-// anti-drift half: the loopback's route patterns, status codes, and
-// wire types are only "the controller's" for as long as the same client
-// calls succeed against both.
 func TestLoopbackContract_MatchesTheRealController(t *testing.T) {
 	t.Parallel()
 	st, err := store.Open(filepath.Join(t.TempDir(), "state.db"))
@@ -153,8 +114,6 @@ func TestLoopbackContract_MatchesTheRealController(t *testing.T) {
 	runContractSurface(t, client.NewWithToken(srv.URL, nil, ""), "sqlite")
 }
 
-// newLoopbackClient mounts a loopback scoped to runID and returns a
-// client carrying the run's bearer.
 func newLoopbackClient(t *testing.T, state controller.LoopbackState, runID string, conc controller.LoopbackConcurrency, art storage.ArtifactStore) (*client.Client, *httptest.Server) {
 	t.Helper()
 	lb := controller.NewLoopback(state, runID, loopbackToken, quietLogger()).
@@ -169,15 +128,11 @@ func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{Level: slog.LevelError}))
 }
 
-// runContractSurface exercises every controller call a node process
-// makes. backing names which state is underneath, so a failure says
-// which of the two answered wrong.
 func runContractSurface(t *testing.T, c *client.Client, backing string) {
 	t.Helper()
 	ctx := context.Background()
 	const runID = contractRunID
 
-	// --- what the dispatcher wrote before the child started ---
 	if err := c.CreateRun(ctx, store.Run{
 		ID: runID, Pipeline: "contract", Status: "running",
 		Args: map[string]string{"token": "s3cret"}, StartedAt: time.Now().UTC(),
@@ -188,7 +143,6 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 		t.Fatalf("UpdatePlanSnapshot: %v", err)
 	}
 
-	// --- RunNodeOnce's opening reads ---
 	run, err := c.GetRunForExecution(ctx, runID)
 	if err != nil {
 		t.Fatalf("GetRunForExecution: %v", err)
@@ -203,7 +157,6 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 		t.Fatalf("GetTrigger: %v", err)
 	}
 
-	// --- the node's own row, start to terminal ---
 	if err := c.CreateNode(ctx, store.Node{RunID: runID, NodeID: "produce", Status: "pending"}); err != nil {
 		t.Fatalf("CreateNode: %v", err)
 	}
@@ -243,7 +196,6 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 		t.Fatalf("AppendEvent: %v", err)
 	}
 
-	// --- per-step state ---
 	if err := c.StartNodeStep(ctx, runID, "produce", "run"); err != nil {
 		t.Fatalf("StartNodeStep: %v", err)
 	}
@@ -267,7 +219,6 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 		t.Error("ListNodeSteps returned nothing after two step writes")
 	}
 
-	// --- terminal row and the typed output crossing back ---
 	if err := c.FinishNodeWithReason(ctx, runID, "produce", "success", "",
 		[]byte(`{"digest":"sha-abc123"}`), "", nil); err != nil {
 		t.Fatalf("FinishNodeWithReason: %v", err)
@@ -287,7 +238,6 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 		t.Errorf("node outcome = %q, want success", node.Outcome)
 	}
 
-	// --- the spawn handler's child row, with lineage in its id ---
 	if err := c.CreateNode(ctx, store.Node{
 		RunID: runID, NodeID: "produce/scan", Status: "pending",
 	}); err != nil {
@@ -304,7 +254,6 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 		t.Errorf("spawn child output = %s", childOut)
 	}
 
-	// --- the dispatch snapshot ---
 	if err := c.WriteNodeDispatch(ctx, store.NodeDispatch{
 		RunID: runID, NodeID: "produce", Seq: 1, CodeVersion: "local", DispatchedAt: time.Now().UTC(),
 	}); err != nil && !isUnsupported(err) {
@@ -318,7 +267,6 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 		}
 	}
 
-	// --- cross-pipeline ref resolution ---
 	if err := c.FinishRun(ctx, runID, "success", ""); err != nil {
 		t.Fatalf("FinishRun: %v", err)
 	}
@@ -329,7 +277,7 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 	if latest.ID != runID {
 		t.Errorf("GetLatestRun = %q, want %q", latest.ID, runID)
 	}
-	// --- the awaiter's child lookup and spawn ---
+
 	if id, err := c.FindSpawnedChildTriggerID(ctx, runID, "produce", "child-pipeline"); err != nil {
 		if !isUnsupported(err) {
 			t.Fatalf("FindSpawnedChildTriggerID: %v", err)
@@ -346,22 +294,12 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 		if childRunID == "" {
 			t.Error("EnqueueTriggerWithEnv returned an empty child run id")
 		}
-		// The spawned child is findable by (parent run, parent node,
-		// pipeline) afterward, which is what threads retry lineage across
-		// a re-run of the parent.
-		//
-		// Repeat-enqueue behavior is NOT asserted, because the two backings
-		// genuinely differ and neither is this shim's doing: the object
-		// store makes the child index a PutIfAbsent and returns the
-		// original id, while the controller mints a fresh trigger every
-		// call. Nothing on the node path enqueues twice for one node
-		// execution, so the divergence is latent rather than live.
+
 		if id, ferr := c.FindSpawnedChildTriggerID(ctx, runID, "produce", "child-pipeline"); ferr == nil && id == "" {
 			t.Errorf("FindSpawnedChildTriggerID found no child after enqueueing %q", childRunID)
 		}
 	}
 
-	// --- debug pauses ---
 	pauseErr := c.CreateDebugPause(ctx, store.DebugPause{
 		RunID: runID, NodeID: "produce", Reason: "contract", PausedAt: time.Now().UTC(),
 	})
@@ -380,7 +318,6 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 		}
 	}
 
-	// --- approvals ---
 	if err := c.CreateApproval(ctx, store.Approval{RunID: runID, NodeID: "gate", Message: "ok?"}); err != nil {
 		if !isUnsupported(err) {
 			t.Fatalf("CreateApproval: %v", err)
@@ -398,7 +335,6 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 		}
 	}
 
-	// --- not-found is the same error on both backings ---
 	if _, err := c.GetRun(ctx, "run-does-not-exist"); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("GetRun(missing) on %s = %v, want store.ErrNotFound", backing, err)
 	}
@@ -407,42 +343,15 @@ func runContractSurface(t *testing.T, c *client.Client, backing string) {
 	}
 }
 
-// isUnsupported reports whether err is a backend declining an
-// operation it does not implement, which is the escape hatch the
-// assertions above take on the s3 half.
-//
-// It is reached for exactly the CAS-dependent records: trigger enqueue
-// and spawned-child lookup, approvals, debug pauses, and dispatch
-// snapshots. An in-memory bucket implements no conditional writes, so
-// the object-store backend declines those and the assertions that
-// follow them run only against SQLite. Everything else -- run and node
-// rows, outputs, steps, events, metrics, heartbeats -- is asserted on
-// both halves.
-//
-// The string check is not laziness: the client turns a 501 into a
-// transport-shaped error and the sentinel does not survive the wire, so
-// the message is what is left to key on.
 func isUnsupported(err error) bool {
 	return errors.Is(err, storage.ErrNotSupported) ||
 		strings.Contains(err.Error(), "not supported")
 }
 
-// TestLoopback_RefusesMutationsAimedAtAnotherRun is the blast-radius
-// gate on the run-scoped bearer.
-//
-// The token sits in the environment of every node process the run
-// spawned, and a node body is arbitrary user code. On a shared CI
-// bucket every other run in the organization is in the same backing
-// store, so an ungated loopback would let one run's node finish,
-// cancel, or rewrite another's rows. Reads stay open: a cross-pipeline
-// ref and a RunAndAwait poll read runs that are legitimately not this
-// one.
 func TestLoopback_RefusesMutationsAimedAtAnotherRun(t *testing.T) {
 	t.Parallel()
 	art := newMemArt()
-	// safety: a one-byte buffer threshold flushes every append, so the
-	// cross-pipeline read below sees the seeded run in the bucket's key
-	// listing rather than racing the flush ticker.
+
 	backend := s3state.New(art, s3state.WithBufferThreshold(1))
 	t.Cleanup(func() { _ = backend.Close() })
 
@@ -506,8 +415,6 @@ func TestLoopback_RefusesMutationsAimedAtAnotherRun(t *testing.T) {
 		}
 	}
 
-	// safety: the victim's rows are untouched -- a refusal that still wrote
-	// would pass the loop above.
 	n, err := backend.GetNode(ctx, victim, "n")
 	if err != nil {
 		t.Fatalf("read victim node: %v", err)
@@ -523,8 +430,6 @@ func TestLoopback_RefusesMutationsAimedAtAnotherRun(t *testing.T) {
 		t.Errorf("victim run status = %q, want running", run.Status)
 	}
 
-	// safety: reads across runs must still work, or a cross-pipeline ref and
-	// every RunAndAwait poll break.
 	if got, rerr := c.GetRun(ctx, victim); rerr != nil || got.Pipeline != "other" {
 		t.Errorf("cross-run read = (%+v, %v), want the victim run", got, rerr)
 	}
@@ -535,8 +440,6 @@ func TestLoopback_RefusesMutationsAimedAtAnotherRun(t *testing.T) {
 		t.Errorf("cross-pipeline latest read: %v", rerr)
 	}
 
-	// safety: the same calls against the loopback's own run still work, so
-	// the gate is scoping and not blanket refusal.
 	if err := c.CreateNode(ctx, store.Node{RunID: contractRunID, NodeID: "mine", Status: "pending"}); err != nil {
 		t.Fatalf("same-run CreateNode: %v", err)
 	}
@@ -545,19 +448,12 @@ func TestLoopback_RefusesMutationsAimedAtAnotherRun(t *testing.T) {
 	}
 }
 
-// brokenState fails one read the way a transport fault would: not
-// found, not unsupported, just broken.
 type brokenState struct{ controller.LoopbackState }
 
 func (brokenState) GetRun(context.Context, string) (*store.Run, error) {
 	return nil, errors.New("bucket unreachable")
 }
 
-// TestLoopback_PlainBackendErrorIs500 pins the fallthrough of the
-// error mapping. A state error that is neither absence nor a declined
-// operation has to reach the client as a 500 carrying its message --
-// the arm with no sentinel to key on, and therefore the one a mapping
-// bug hides in.
 func TestLoopback_PlainBackendErrorIs500(t *testing.T) {
 	t.Parallel()
 	backend := s3state.New(newMemArt())
@@ -580,10 +476,6 @@ func TestLoopback_PlainBackendErrorIs500(t *testing.T) {
 	}
 }
 
-// TestLoopback_RejectsAnyOtherBearer pins the run-scoped credential.
-// The listener is on loopback, but every process on the box can reach
-// it, and the token is the only thing separating this run's state from
-// them.
 func TestLoopback_RejectsAnyOtherBearer(t *testing.T) {
 	t.Parallel()
 	backend := s3state.New(newMemArt())
@@ -608,8 +500,6 @@ func TestLoopback_RejectsAnyOtherBearer(t *testing.T) {
 		}
 	}
 
-	// safety: health has to stay open, for the same reason it is open on the
-	// real controller -- a probe must not need the run's credential.
 	resp, err := http.Get(srv.URL + "/api/v1/health")
 	if err != nil {
 		t.Fatalf("health: %v", err)
@@ -620,14 +510,6 @@ func TestLoopback_RejectsAnyOtherBearer(t *testing.T) {
 	}
 }
 
-// TestLoopback_ConcurrentNodeWritesSerializeOnOneRun is the
-// process-per-node concurrency claim: N node processes write one run's
-// state through one shim, so the object-store backend -- which
-// rewrites the run's whole NDJSON blob on every flush -- sees one
-// writer, not N.
-//
-// Run with -race, the assertion is that no write is lost: every node's
-// terminal row is present afterward.
 func TestLoopback_ConcurrentNodeWritesSerializeOnOneRun(t *testing.T) {
 	t.Parallel()
 	art := newMemArt()
@@ -691,8 +573,6 @@ func TestLoopback_ConcurrentNodeWritesSerializeOnOneRun(t *testing.T) {
 		}
 	}
 
-	// safety: the durable blob has to carry every node too, not just the
-	// backend's memory -- a lost envelope is only visible after a flush.
 	if err := backend.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
@@ -711,8 +591,7 @@ func TestLoopback_ConcurrentNodeWritesSerializeOnOneRun(t *testing.T) {
 		if json.Unmarshal([]byte(line), &env) != nil {
 			continue
 		}
-		// safety: a node row's id field is "id", not "node_id"; matching the
-		// wrong name would count nothing and pass vacuously.
+
 		var row struct {
 			NodeID  string `json:"id"`
 			Outcome string `json:"outcome"`

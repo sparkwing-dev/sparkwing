@@ -5,13 +5,17 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// releaseGateNodes are the nodes whose failure must stop a release. A
-// release that reaches push-tag without all of them green has traded an
-// unsatisfiable pipeline for an unsafe one.
+func TestReleaseTemplateVerificationAllowsSerializedAdmission(t *testing.T) {
+	if templateVerifyReleaseTimeout < time.Hour {
+		t.Fatalf("template verification timeout = %s, want at least 1h", templateVerifyReleaseTimeout)
+	}
+}
+
 var releaseGateNodes = []string{
 	"validate-version",
 	"check-clean-tree",
@@ -55,8 +59,6 @@ func TestReleasePreviewExampleUsesTheReservedRunFlag(t *testing.T) {
 	}
 }
 
-// ancestors returns every node id that id depends on, directly or
-// transitively.
 func ancestors(t *testing.T, plan *sparkwing.Plan, id string) map[string]bool {
 	t.Helper()
 	seen := map[string]bool{}
@@ -121,6 +123,27 @@ func TestReleasePlanDoesNotCommitChangelogBeforeIndependentGatesPass(t *testing.
 		if !deps[gate] {
 			t.Errorf("prepare-changelog must depend on %s so a failed gate leaves HEAD unchanged", gate)
 		}
+	}
+}
+
+func TestReleasePlanSerializesTemplateVerificationAfterLocalGates(t *testing.T) {
+	plan := releasePlan(t)
+	deps := ancestors(t, plan, "gate-template-verify")
+	for _, gate := range []string{"gate-pre-commit", "gate-pre-push"} {
+		if !deps[gate] {
+			t.Errorf("gate-template-verify must depend on %s", gate)
+		}
+	}
+	hints := mustNode(t, plan, "gate-template-verify").ResourceHints()
+	if hints == nil || hints.Cores != 0.5 {
+		t.Fatalf("gate-template-verify resources = %+v, want 0.5 coordinator cores", hints)
+	}
+}
+
+func TestReleasePlanSerializesPrePushAfterPreCommit(t *testing.T) {
+	deps := ancestors(t, releasePlan(t), "gate-pre-push")
+	if !deps["gate-pre-commit"] {
+		t.Error("gate-pre-push must depend on gate-pre-commit")
 	}
 }
 

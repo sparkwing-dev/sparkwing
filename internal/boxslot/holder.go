@@ -10,35 +10,20 @@ import (
 	"time"
 )
 
-// holderPrefix scopes the per-process lock files a holder creates, so a
-// scan doesn't trip on the coordination file or any other file an older
-// binary dropped into the directory.
 const holderPrefix = "holder-"
 
-// Holder describes one holder marker in the lock dir, as reported by
-// [Holders]. Zero PID / ClaimedAt mean the filename didn't carry the
-// pid<PID>-<unixNano> shape (a hand-made or truncated marker) -- the
-// flock is the authority, the name is metadata.
 type Holder struct {
-	// PID is the owner process id parsed from the marker filename.
 	PID int
-	// ClaimedAt is the slot claim time parsed from the marker filename.
+
 	ClaimedAt time.Time
-	// RunID is the run the owner recorded in the marker; empty until the
-	// owner annotated one. The last run= line wins when the owner ran
-	// several pipelines under one slot.
+
 	RunID string
-	// Path is the marker's absolute location.
+
 	Path string
-	// Live reports whether the owner still holds its flock: a failed
-	// non-blocking flock probe means the owner is alive, a successful
-	// one means the kernel released the lock on process death.
+
 	Live bool
 }
 
-// Holders reports every holder marker in lockDir without mutating it,
-// filesystem and flock only. An absent lockDir reports no holders.
-// Markers are ordered oldest claim first.
 func Holders(lockDir string) ([]Holder, error) {
 	entries, err := os.ReadDir(lockDir)
 	if err != nil {
@@ -77,9 +62,6 @@ func Holders(lockDir string) ([]Holder, error) {
 	return holders, nil
 }
 
-// HoldersInRoot reports holder markers through an already-open directory.
-// The root keeps every read and flock probe attached to the directory the
-// caller validated even if its pathname is renamed or replaced concurrently.
 func HoldersInRoot(root *os.Root, displayPath string) ([]Holder, error) {
 	dir, err := root.Open(".")
 	if err != nil {
@@ -129,8 +111,6 @@ func HoldersInRoot(root *os.Root, displayPath string) ([]Holder, error) {
 	return holders, nil
 }
 
-// lastRunLine extracts the run id from the last run= line of a holder
-// marker's contents; empty when the marker was never annotated.
 func lastRunLine(b []byte) string {
 	run := ""
 	for _, line := range strings.Split(string(b), "\n") {
@@ -141,11 +121,6 @@ func lastRunLine(b []byte) string {
 	return run
 }
 
-// parseHolderName extracts the owner pid and claim time from a holder
-// marker filename of the shape holder-pid<PID>-<unixNano>-<seq>.lock.
-// ok is false for markers that don't carry the shape (hand-made or
-// truncated files), which still hold or free a slot -- the flock is the
-// authority, the name is metadata.
 func parseHolderName(name string) (pid int, claimedAt time.Time, ok bool) {
 	pid, nano, _, ok := parseMarkerName(name, holderPrefix)
 	if !ok {
@@ -154,10 +129,6 @@ func parseHolderName(name string) (pid int, claimedAt time.Time, ok bool) {
 	return pid, time.Unix(0, nano), true
 }
 
-// parseMarkerName decomposes a lock-file name of the shape
-// <prefix>pid<PID>-<unixNano>-<seq>.lock into its parts. ok is false for
-// a name that doesn't carry the shape; the flock is the authority, the
-// name is metadata.
 func parseMarkerName(name, prefix string) (pid int, nano int64, seq uint64, ok bool) {
 	body, found := strings.CutPrefix(name, prefix+"pid")
 	if !found {

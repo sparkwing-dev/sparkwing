@@ -1,8 +1,3 @@
-// Package web serves the sparkwing dashboard: the dashboard-owned
-// slice of /api/v1/* (logs, events SSE), a reverse proxy of the rest
-// to the controller, and the embedded Next.js bundle at /. The bundle
-// lives under pkg/orchestrator/web/next-out/ and is populated by
-// `bin/install.sh` (or the Dockerfile) before `go build` runs.
 package web
 
 import (
@@ -33,11 +28,6 @@ import (
 //go:embed all:next-out
 var nextBundle embed.FS
 
-// VerifyBundleEmbedded reports an error when this binary was built
-// without the Next.js dashboard bundle. The bundle is generated and
-// gitignored, so a plain "go install" or "go build" produces a binary
-// that compiles cleanly but serves a 404 on every dashboard page --
-// this guard surfaces that condition at startup instead.
 func VerifyBundleEmbedded() error {
 	if bundleSkipReason(nextBundle) != "" {
 		return errors.New(missingBundleMessage)
@@ -45,10 +35,6 @@ func VerifyBundleEmbedded() error {
 	return nil
 }
 
-// BundleSkipReason returns why a test that needs a served dashboard cannot run
-// against this binary, or "" when it can. A checkout that has never run
-// bin/build-web.sh embeds only the .gitkeep, and no change to the tree under
-// test can clear that, so a suite reads this and skips rather than failing.
 func BundleSkipReason() string {
 	return bundleSkipReason(nextBundle)
 }
@@ -88,39 +74,23 @@ bundle first, then reinstall:
   bash bin/build-web.sh
   go install ./cmd/sparkwing`
 
-// HandlerOptions bundles everything the dashboard handler needs.
-// Zero value is the local-mode default.
 type HandlerOptions struct {
 	Backend           backend.Backend
 	Paths             swpaths.Paths
-	ControllerURL     string // if set, /api/v1/* proxies to this URL
+	ControllerURL     string
 	AuthControllerURL string // safety: login stays controller-backed when data reads a shared store directly
-	LogsURL           string // sparkwing-logs base URL (for /api/v1/health/services probe)
-	CacheURL          string // sparkwing-cache base URL (probe only; empty leaves it off the panel)
-	Token             string // controller bearer token (cluster mode)
-	// APIURL is injected into the SPA HTML as window.__SPARKWING_API_URL__.
-	// Empty means same-origin.
+	LogsURL           string
+	CacheURL          string
+	Token             string
+
 	APIURL string
-	// Version is injected into the SPA HTML as window.__SPARKWING_VERSION__
-	// and rendered as a small pill in the nav. Operators use it to
-	// confirm which CLI build they're connected to. Empty renders no pill.
+
 	Version       string
 	ExtraServices []HealthService
-	// RequireLogin gates the browser-facing surface behind the
-	// session-cookie flow. Its controller session backend is mandatory;
-	// laptop-local dashboards leave this disabled.
+
 	RequireLogin bool
 }
 
-// Serve starts the dashboard in local mode, reading state from the
-// SQLite store at paths.StateDB().
-//
-// The dashboard never writes state, so it serves through a read-only
-// connection: it can't take a write lock and starve out the
-// `sparkwing run` processes that share the same state.db. A brief
-// read-write open first guarantees the schema exists (the runner that
-// populated the database may not have run yet on a fresh home) before
-// the long-lived read-only connection takes over.
 func Serve(ctx context.Context, paths swpaths.Paths, addr string) error {
 	if err := paths.EnsureRoot(); err != nil {
 		return err
@@ -140,7 +110,6 @@ func Serve(ctx context.Context, paths swpaths.Paths, addr string) error {
 		addr)
 }
 
-// ServeWithOptions starts a dashboard from fully resolved options.
 func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) error {
 	if err := validateAuthOptions(opts); err != nil {
 		return err
@@ -170,7 +139,6 @@ func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) err
 	return nil
 }
 
-// HandlerFromOptions returns the full dashboard HTTP handler.
 func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	subFS, err := fs.Sub(nextBundle, "next-out")
 	if err != nil {
@@ -179,9 +147,6 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 	return HandlerFromOptionsWithBundle(opts, subFS)
 }
 
-// HandlerFromOptionsWithBundle serves a supplied static export through the
-// production handler. Internal browser tests use it so they never rewrite the
-// embedded source directory while the Go gate compiles in parallel.
 func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Handler {
 	if err := validateAuthOptions(opts); err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -260,10 +225,6 @@ func validateAuthOptions(opts HandlerOptions) error {
 	return nil
 }
 
-// spaHandler serves the Next.js static export, templating HTML files
-// to inject window globals and falling through to index.html for SPA
-// client-side routes. Next 16 emits top-level <route>.html; older
-// exports (Next <= 15) used <route>/index.html, so both layouts work.
 func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 	fileServer := http.FileServer(http.FS(bundleFS))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -279,7 +240,8 @@ func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 			return
 		}
 
-		// hack: stat <route>.html before the directory check; Next 16 emits a same-named Turbopack dir that http.FileServer 301s into a dead end.
+		// hack: prefer <route>.html because Next 16 emits a same-named Turbopack
+		// directory that FileServer redirects into a dead end.
 		if _, err := fs.Stat(bundleFS, p+".html"); err == nil {
 			serveTemplatedHTML(w, r, bundleFS, p+".html", opts)
 			return
@@ -299,8 +261,6 @@ func spaHandler(bundleFS fs.FS, opts HandlerOptions) http.Handler {
 	})
 }
 
-// isTemplatedPath returns true for HTML files that contain the
-// runtime-config markers (every top-level Next page via layout.tsx).
 func isTemplatedPath(p string) bool {
 	return !strings.HasPrefix(p, "_next/") && !strings.HasPrefix(p, "next-dev/")
 }
@@ -335,8 +295,6 @@ func serveTemplatedHTML(w http.ResponseWriter, _ *http.Request, bundleFS fs.FS, 
 	_, _ = w.Write(body)
 }
 
-// jsStringEscape escapes characters that would break out of the
-// double-quoted JS string literal in layout.tsx.
 func jsStringEscape(s string) string {
 	var b strings.Builder
 	for _, r := range s {
@@ -392,9 +350,6 @@ func healthHandler(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-// serveLogStream proxies the logs-service SSE stream through the
-// dashboard. Closing either end tears the whole thing down via context
-// cancellation.
 func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, runID, nodeID string) {
 	body, err := b.StreamNodeLog(r.Context(), runID, nodeID)
 	if err != nil {
@@ -437,10 +392,6 @@ func serveLogStream(b backend.Backend, w http.ResponseWriter, r *http.Request, r
 	streamPrettySSE(body, w, flusher, format)
 }
 
-// serveEventsStream tails the run's events table as an SSE stream:
-// backlog after Last-Event-ID, then poll every 250ms for new rows
-// until the run is terminal. Each frame uses ev.Seq as the SSE id so
-// the browser's automatic Last-Event-ID retry resumes cleanly.
 func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request, runID string) {
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -528,8 +479,6 @@ func serveEventsStream(b backend.Backend, w http.ResponseWriter, r *http.Request
 	}
 }
 
-// parseLastEventID parses the browser-sent Last-Event-ID. Missing or
-// invalid values resume from 0 (full backlog).
 func parseLastEventID(h string) int64 {
 	if h == "" {
 		return 0
@@ -541,9 +490,6 @@ func parseLastEventID(h string) int64 {
 	return n
 }
 
-// isRunTerminal reports whether a run status means no more events
-// will be emitted. Unknown statuses are treated as still-running so
-// the stream stays open.
 func isRunTerminal(status string) bool {
 	switch status {
 	case "success", "failed", "cancelled":
@@ -552,8 +498,6 @@ func isRunTerminal(status string) bool {
 	return false
 }
 
-// writeEventSSE writes one event row as an SSE frame. Returns false on
-// write failure so the caller can exit the loop.
 func writeEventSSE(w io.Writer, ev store.Event) bool {
 	type wire struct {
 		RunID   string          `json:"run_id"`
@@ -628,26 +572,6 @@ func runLogsHandler(b backend.Backend) http.HandlerFunc {
 	}
 }
 
-// runLogsSearchHandler greps every node's log file in one run for
-// case-insensitive substring matches of `q`. Returns matches with
-// (node_id, line, content) so the dashboard's "search all logs"
-// box can render results without pulling N node-log payloads to
-// the browser. limit caps total matches returned (default 500,
-// max 5000); the server walks every line so the total count
-// reflects the full run.
-// displayBodyForLogLine mirrors the frontend's parseJSONLLogs +
-// recordToLine: only records that produce a visible line in the
-// dashboard contribute to the display-line counter, and the body
-// matched is what the user actually sees (msg / attrs / synthetic
-// "[skipped: …]"), not the raw NDJSON framing.
-//
-// Returns (body, true) when the line corresponds to a displayed row,
-// or ("", false) for framing events the parser swallows (node_start,
-// step_start, step_end, node_end, run_summary).
-// displayLine is the result of decoding one raw log line for grep:
-// the visible body that would render in the dashboard, plus the step
-// the record was emitted from (empty when between steps), plus a
-// flag indicating whether the line corresponds to a displayed row.
 type displayLine struct {
 	body string
 	step string
@@ -788,15 +712,6 @@ func runLogsSearchHandler(b backend.Backend) http.HandlerFunc {
 	}
 }
 
-// runsGrepHandler walks recent runs matching the supplied filter set
-// and substring-greps every node log. Mirrors `sparkwing runs grep`
-// from the CLI: same filter shape, same row schema. Each (run, node)
-// log read fans out so the wall-clock cost is dominated by the
-// slowest single read instead of summing all of them.
-//
-// Matching uses displayBodyForLogLine, so node id / step framing in
-// NDJSON metadata doesn't generate spurious hits -- only what the
-// dashboard's Logs tab would actually display.
 func runsGrepHandler(b backend.Backend) http.HandlerFunc {
 	type match struct {
 		RunID    string `json:"run_id"`
@@ -982,9 +897,6 @@ func applyGrepExcludes(runs []*store.Run, ex grepExcludes) []*store.Run {
 	return out
 }
 
-// filterRunsByBranchSHA mirrors the CLI's --branch / --sha narrowing.
-// Empty filter lists short-circuit at the call site so we can keep
-// the body trivial.
 func filterRunsByBranchSHA(runs []*store.Run, branches, shaPrefixes []string) []*store.Run {
 	out := runs[:0]
 	for _, run := range runs {

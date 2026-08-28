@@ -26,7 +26,6 @@ type LogStore struct {
 	Prefix string
 	Client API
 
-	// seq disambiguates Appends that land in the same nanosecond.
 	seq atomic.Uint64
 }
 
@@ -240,7 +239,6 @@ func (s *LogStore) getObject(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
-// applyReadOpts mirrors the filter semantics in pkg/storage/fs.
 func applyReadOpts(data []byte, opts storage.ReadOpts) ([]byte, error) {
 	if (opts == storage.ReadOpts{}) {
 		return data, nil

@@ -1,10 +1,3 @@
-# Plan-only harness for the mode3-postgres module. The AWS provider is
-# configured with mock credentials and every validation skip flag, so
-# `terraform plan` enumerates the module's resource graph offline with
-# no AWS account. It asserts the count-gated engine branches and the
-# networking wiring without standing up real infrastructure. Drive the
-# engine knob with `-var engine=rds` or `-var engine=aurora-serverless-v2`.
-
 terraform {
   required_version = ">= 1.5"
 

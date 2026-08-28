@@ -8,8 +8,6 @@ import (
 	"time"
 )
 
-// Per-IP cap for POST /login and POST /login/bootstrap: generous for
-// humans, painful for credential-stuffing scripts.
 const (
 	loginRateBurst  = 10
 	loginRateWindow = 60 * time.Second
@@ -35,7 +33,6 @@ func newRateLimiter(burst int, window time.Duration) *rateLimiter {
 	}
 }
 
-// allow reports whether a request from key should be served.
 func (l *rateLimiter) allow(key string, now time.Time) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -57,9 +54,6 @@ func (l *rateLimiter) allow(key string, now time.Time) bool {
 	return true
 }
 
-// gc drops fully-refilled buckets untouched for window*2. Bounded
-// growth without a per-request scan; a missing call lets the map grow
-// but is safe.
 func (l *rateLimiter) gc(now time.Time) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -70,8 +64,6 @@ func (l *rateLimiter) gc(now time.Time) {
 	}
 }
 
-// rateLimitMiddleware wraps a handler with per-IP token-bucket
-// limiting. GETs bypass since only POSTs are brute-forceable.
 func rateLimitMiddleware(l *rateLimiter, next http.Handler) http.Handler {
 	go func() {
 		t := time.NewTicker(5 * time.Minute)
@@ -96,9 +88,6 @@ func rateLimitMiddleware(l *rateLimiter, next http.Handler) http.Handler {
 	})
 }
 
-// clientIP picks the best-effort source IP for rate-limit keying.
-// Honors X-Forwarded-For first-hop (nginx in prod), falls back to
-// RemoteAddr.
 func clientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		if i := strings.IndexByte(xff, ','); i >= 0 {

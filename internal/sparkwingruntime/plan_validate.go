@@ -8,15 +8,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// ValidateStepRange resolves a --start-at / --stop-at pair against
-// every Work materialized in p. Returns a non-nil error when a
-// non-empty bound doesn't match any WorkStep / SpawnNode /
-// SpawnNodeForEach id reachable from the Plan. The error message
-// reuses the same `did you mean X?` formatting as the typo-detector
-// so the operator sees one consistent class of typo error from every
-// string-keyed flag.
-//
-// Empty bounds are no-ops (return nil). nil Plan returns nil.
 func ValidateStepRange(p *sparkwing.Plan, startAt, stopAt string) error {
 	if p == nil || (startAt == "" && stopAt == "") {
 		return nil
@@ -45,12 +36,6 @@ func ValidateStepRange(p *sparkwing.Plan, startAt, stopAt string) error {
 	return nil
 }
 
-// SuggestClosest is the public projection of closestMatch for callers
-// outside the sparkwing package (orchestrator main, cmd/sparkwing). It
-// returns the candidate with the smallest Levenshtein distance to
-// target, or "" if no candidate is close enough. Used to share the
-// typo-suggestion threshold across "unknown pipeline" sites without
-// duplicating the helper.
 func SuggestClosest(target string, candidates []string) string {
 	return closestMatch(target, candidates)
 }

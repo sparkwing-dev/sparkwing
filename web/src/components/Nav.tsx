@@ -18,9 +18,6 @@ const tabs: Tab[] = [
   { href: "https://sparkwing.dev/docs/", label: "Docs", external: true },
 ];
 
-// Polling cadence for the pending-approvals badge. 10s is a compromise
-// between "badge feels live" and "don't thrash the controller while
-// dashboards are left open in a tab all day".
 const APPROVALS_POLL_MS = 10_000;
 
 export default function Nav() {
@@ -150,18 +147,20 @@ function emptyLogoutCSRFToken() {
   return "";
 }
 
-// VersionPill surfaces the CLI version the serving binary reports
-// (injected by internal/web via __SPARKWING_VERSION_MARKER__). Hidden
-// when the server doesn't inject a value -- typically a non-cluster
-// dev build with no -ldflags="-X main.Version=..." set.
 function VersionPill() {
   const [version, setVersion] = useState<string>("");
   useEffect(() => {
-    const v = (window as unknown as { __SPARKWING_VERSION__?: string })
-      .__SPARKWING_VERSION__;
-    if (v && v !== "__SPARKWING_VERSION_MARKER__") {
-      setVersion(v);
-    }
+    let cancelled = false;
+    queueMicrotask(() => {
+      const v = (window as unknown as { __SPARKWING_VERSION__?: string })
+        .__SPARKWING_VERSION__;
+      if (!cancelled && v && v !== "__SPARKWING_VERSION_MARKER__") {
+        setVersion(v);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
   if (!version) return null;
   return (

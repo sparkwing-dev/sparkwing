@@ -11,8 +11,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// Cardinality rule: `pipeline` is bounded and safe. Never label with
-// `node_id` or `principal` -- both are effectively unbounded.
 var (
 	metricsRegistry = prometheus.NewRegistry()
 
@@ -55,8 +53,6 @@ var (
 		},
 	)
 
-	// `route` is a normalized path pattern (ids/keys replaced with
-	// placeholders); raw URL paths never enter a label.
 	httpRequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "sparkwing_http_requests_total",
@@ -89,9 +85,6 @@ func init() {
 	)
 }
 
-// metricsHandler serves /metrics from the controller's custom registry
-// plus the standard Go runtime + process collectors. Safe to route
-// unauthenticated -- no principal values or per-node cardinality.
 func metricsHandler() http.Handler {
 	return promhttp.HandlerFor(metricsRegistry, promhttp.HandlerOpts{})
 }
@@ -116,9 +109,6 @@ func observeNodeClaim(pipeline string) {
 func setPendingNodes(n int)  { pendingNodesGauge.Set(float64(n)) }
 func setActiveRunners(n int) { activeRunnersGauge.Set(float64(n)) }
 
-// observeHTTPRequest records one HTTP request's outcome against the
-// httpRequestsTotal counter and httpRequestDurationSeconds histogram.
-// Callers must pass a pre-normalized route (see normalizeRoute).
 func observeHTTPRequest(route, method string, status int, d time.Duration) {
 	if route == "" {
 		route = "unknown"
@@ -142,9 +132,6 @@ var (
 	rxMultiSlashCleanup = regexp.MustCompile(`/{2,}`)
 )
 
-// normalizeRoute collapses variable-identifier URL segments into
-// placeholders. Paths that don't match any known shape fall into the
-// "other" bucket to cap unknown-route cardinality.
 func normalizeRoute(path string) string {
 	if path == "" {
 		return "unknown"

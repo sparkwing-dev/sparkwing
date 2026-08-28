@@ -18,8 +18,6 @@ type discoverJob struct {
 	sparkwing.Produces[[]string]
 }
 
-// discoverItems is how each test case plants the list the generator
-// will see. Set to some non-nil value before Run().
 var discoverItems atomic.Pointer[[]string]
 
 func (j *discoverJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -34,8 +32,6 @@ func (discoverJob) run(ctx context.Context) ([]string, error) {
 	return *p, nil
 }
 
-// expandOK: discover emits N images, JobFanOutDynamic fans out N
-// build-<img> nodes, a downstream fanin depends on the whole group.
 type expandOK struct{ sparkwing.Base }
 
 var (
@@ -56,7 +52,6 @@ func (expandOK) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoIn
 	return nil
 }
 
-// recordingBuild appends its image name to builtImages when run.
 type recordingBuild struct {
 	sparkwing.Base
 	image string
@@ -74,9 +69,6 @@ func (r *recordingBuild) run(ctx context.Context) error {
 	return nil
 }
 
-// expandEmpty: source emits zero items. Generator produces zero
-// children. Downstream fanin should still dispatch (an empty group is
-// a no-op dependency).
 type expandEmpty struct{ sparkwing.Base }
 
 var emptyFaninRan atomic.Bool
@@ -93,8 +85,6 @@ func (expandEmpty) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.N
 	return nil
 }
 
-// expandSourceFails: discover fails; generator should not run; fanin
-// should cancel.
 type expandSourceFails struct{ sparkwing.Base }
 
 var (
@@ -128,8 +118,6 @@ func (expandSourceFails) Plan(ctx context.Context, plan *sparkwing.Plan, _ spark
 	return nil
 }
 
-// expandGenPanics: generator panics; orchestrator recovers, marks
-// group with error, downstream cancels cleanly.
 type expandGenPanics struct{ sparkwing.Base }
 
 var panicFaninRan atomic.Bool

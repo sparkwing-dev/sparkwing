@@ -5,18 +5,10 @@ import (
 	"fmt"
 )
 
-// keyResolvedArgs is the context-key carrying the resolved-args map
-// installed by the framework after Schema.Resolve. Internal-only;
-// pipeline authors reach for the typed accessor [Arg] instead of
-// the raw key.
 type keyResolvedArgsType struct{}
 
 var keyResolvedArgs = keyResolvedArgsType{}
 
-// resolvedArgsFromContext extracts the framework-installed args map
-// (keyed by flag name). Returns nil + false when no args have been
-// installed -- e.g. when called before the framework's dispatch
-// wires the resolved set onto the run context.
 func resolvedArgsFromContext(ctx context.Context) (map[string]any, bool) {
 	v := ctx.Value(keyResolvedArgs)
 	if v == nil {

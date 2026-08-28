@@ -29,8 +29,6 @@ func TestFormatScopes(t *testing.T) {
 	}
 }
 
-// fixedTokens is the canonical fixture used across the renderer tests
-// so the table + JSON expectations stay aligned.
 func fixedTokens() []tokenListItem {
 	last := int64(1714867200)
 	revoked := int64(1714953600)
@@ -153,9 +151,6 @@ func TestRenderTokensJSON_ExposesScopesArray(t *testing.T) {
 	}
 }
 
-// No tokens is an empty stream, not `[]`: with records as lines, zero
-// records is zero lines. A consumer that read empty output as an error
-// has to read it as zero records.
 func TestRenderTokensJSON_NilTokensEmitsAnEmptyStream(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer

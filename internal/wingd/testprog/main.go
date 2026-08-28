@@ -1,7 +1,3 @@
-// Command testprog is a wingd test fixture: a standalone binary that can
-// run the daemon or a lease-holding client in a real OS process, so tests
-// can exercise election across processes and connection liveness under
-// SIGKILL. It is not part of the shipped CLI.
 package main
 
 import (
@@ -40,10 +36,6 @@ func main() {
 	}
 }
 
-// runWingdMode serves the `wingd run` and `wingd supervise` subcommands
-// the client's default spawn re-execs, mirroring the shipped daemon's
-// log wiring: operational lines go to stderr, which the spawn points at
-// the daemon log file.
 func runWingdMode(args []string) {
 	if len(args) == 0 || (args[0] != "run" && args[0] != "supervise") {
 		fail("usage: wingd run|supervise [--home DIR]")
@@ -55,11 +47,7 @@ func runWingdMode(args []string) {
 	fs := flag.NewFlagSet("wingd run", flag.ExitOnError)
 	home := fs.String("home", "", "")
 	version := fs.String("version", "v1.0.0", "")
-	// The host-spawn path builds its own argv and cannot pass --idle-ms, so
-	// this default also has to cover a daemon that a spawning client has
-	// not connected to yet. The client dials every few tens of
-	// milliseconds from the moment it spawns, so the window is generous
-	// even with the supervisor hop in between.
+
 	idleMS := fs.Int("idle-ms", 3000, "")
 	_ = fs.Parse(args[1:])
 
@@ -82,12 +70,6 @@ func runWingdMode(args []string) {
 	}
 }
 
-// superviseMode mirrors the shipped `wingd supervise` verb just far
-// enough for the client's default spawn to work against this fixture:
-// it re-execs itself as `wingd run` with the same flags and inherits
-// stdout/stderr, so daemon lines still land in the spawn's log file.
-// Restart supervision is deliberately not mirrored -- the shipped
-// supervisor owns that behavior and carries its own tests.
 func superviseMode(args []string) {
 	self, err := os.Executable()
 	if err != nil {
@@ -131,8 +113,6 @@ func runDaemon(args []string) {
 	}
 }
 
-// recordWin appends this process's pid to a log the election test reads
-// to prove exactly one daemon ever served.
 func recordWin(home string) {
 	dir, err := wingd.StateDir(home)
 	if err != nil {
@@ -159,10 +139,7 @@ func runHold(args []string) {
 	idleMS := fs.Int("daemon-idle-ms", 30000, "")
 	semaphoresOnly := fs.Bool("semaphores-only", false, "")
 	realSpawn := fs.Bool("real-spawn", false, "")
-	// hostSpawn makes this fixture behave as a compiled pipeline binary:
-	// it never hosts the daemon, and starts one only by spawning the
-	// installed binary named by $SPARKWING_WINGD_BIN (else a `sparkwing`
-	// on PATH).
+
 	hostSpawn := fs.Bool("host-spawn", false, "")
 	version := fs.String("version", "v1.0.0", "")
 	_ = fs.Parse(args)
@@ -185,8 +162,7 @@ func runHold(args []string) {
 	}
 	cl, err := client.EnsureDaemon(context.Background(), opts)
 	if err != nil {
-		// Printed rather than failed to stderr so a test can assert on the
-		// sentinel without parsing the process's error stream.
+
 		fmt.Printf("ENSURE-ERR %v\n", err)
 		_ = os.Stdout.Sync()
 		os.Exit(1)
@@ -253,8 +229,6 @@ func runReattach(args []string) {
 	block()
 }
 
-// daemonSpawner returns a Spawn hook that re-execs this fixture as a
-// detached daemon.
 func daemonSpawner(graceMS, idleMS int) func(home, version string) error {
 	return func(home, version string) error {
 		self, err := os.Executable()

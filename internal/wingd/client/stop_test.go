@@ -13,9 +13,6 @@ import (
 
 const stopTestWait = 10 * time.Second
 
-// runDaemon starts a real daemon for home in this process and returns the
-// channel its Run reports on, so a test can prove the process-side loop
-// actually ended rather than only that the socket went quiet.
 func runDaemon(t *testing.T, home, version string) chan error {
 	t.Helper()
 	d, err := wingd.New(wingd.Config{Home: home, Version: version})
@@ -72,15 +69,8 @@ func TestStop_EndsTheDaemonAndLeavesNothingAnswering(t *testing.T) {
 	}
 }
 
-// stopReleaseRounds repeats the check because the window is a race the
-// daemon has to win: one round proves little, twenty is near-certain.
 const stopReleaseRounds = 20
 
-// TestStop_ReturnsOnlyAfterTheDaemonReleasedTheHome pins what a caller
-// that deletes the home needs and what a quiet socket does not give it: a
-// draining daemon closes its listener before writing its final snapshot
-// under the home. The election lock is released after that write, so a
-// lock still held here means the home came back too early.
 func TestStop_ReturnsOnlyAfterTheDaemonReleasedTheHome(t *testing.T) {
 	for round := range stopReleaseRounds {
 		t.Run(fmt.Sprintf("round-%d", round), func(t *testing.T) {
@@ -119,9 +109,6 @@ func TestStop_ReturnsOnlyAfterTheDaemonReleasedTheHome(t *testing.T) {
 	}
 }
 
-// TestStop_DoesNotStartOneToStopIt pins the property a teardown depends
-// on: asking for a home to be daemon-free must never leave a daemon
-// behind, however it is spelled.
 func TestStop_DoesNotStartOneToStopIt(t *testing.T) {
 	home := shortHome(t)
 	ctx, cancel := context.WithTimeout(context.Background(), stopTestWait)
@@ -135,9 +122,6 @@ func TestStop_DoesNotStartOneToStopIt(t *testing.T) {
 	}
 }
 
-// TestStop_KeepsANewerBuildFromTakingOverInstead guards the version path:
-// a caller whose build supersedes the daemon's must still get the daemon
-// stopped, not drained and replaced by a successor.
 func TestStop_KeepsANewerBuildFromTakingOverInstead(t *testing.T) {
 	home := shortHome(t)
 	done := runDaemon(t, home, "v1.0.0")

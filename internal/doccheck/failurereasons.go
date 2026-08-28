@@ -10,13 +10,6 @@ import (
 
 var failureConstRE = regexp.MustCompile(`Failure\w+\s*=\s*"([a-z_]+)"`)
 
-// checkFailureReasons keeps docs/observability.md in sync with the
-// canonical failure-reason set. The reasons are a single clean enum
-// (pkg/store: Failure* constants); the doc's per-reason guidance is
-// hand-written and stays so, but the *set* must be complete -- a new
-// reason added to the store without a doc row fails here. (This is the
-// gate that would have caught observability.md inventing `pod_error`
-// and omitting `verify`/`runner_lease_expired`/`logs_auth`.)
 func checkFailureReasons(contentDir, repoRoot string) bool {
 	store, err := os.ReadFile(filepath.Join(repoRoot, "pkg", "store", "store.go"))
 	if err != nil {

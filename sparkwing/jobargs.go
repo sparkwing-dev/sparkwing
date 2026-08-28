@@ -52,18 +52,6 @@ func (p *Plan) JobArgSchema(id string) *Schema {
 	return p.jobArgs[id]
 }
 
-// registerJobArgs is the internal hook called from [Job] (and the
-// other registration verbs) to discover and store the job's args
-// schema. The job's [SchemaProvider] method takes precedence; absent
-// that we synthesize from the embedded WithArgs[T]'s type. Errors
-// from either path bubble up as panics with the job id in context --
-// schema construction is a registration-time concern and the panic
-// surfaces at Plan() rather than at run time.
-//
-// Also enforces cross-job flag-name uniqueness within the plan: two
-// jobs each declaring --replicas in the same pipeline is rejected
-// here with a clear message naming the colliding ids. The author
-// can fix it via a `flag:"override"` struct tag on one of them.
 func registerJobArgs(p *Plan, id string, jobValue any) {
 	holder, argsType := embeddedArgs(jobValue)
 	if holder == nil || argsType == nil {
@@ -102,10 +90,6 @@ func registerJobArgs(p *Plan, id string, jobValue any) {
 	p.jobArgs[id] = schema
 }
 
-// assertNoFlagCollisions walks already-registered job schemas for
-// flag-name collisions with the new schema. Reports the prior job
-// that owns the colliding flag so the author can disambiguate
-// (either rename one job's field or add a `flag:"..."` struct tag).
 func assertNoFlagCollisions(p *Plan, newID string, newSchema *Schema) error {
 	if newSchema == nil {
 		return nil
@@ -177,12 +161,6 @@ type TransitiveArg struct {
 	Schema    *Schema
 }
 
-// assertJobArgsCoverage rejects keys in extra that no job's
-// WithArgs[T] schema claims as one of its flag names. Called from
-// invoke() after Plan() has run so the per-job schemas are known;
-// pairs with populateInputs's strict-unknown check for the v0.5
-// pipeline-level Inputs surface. The error message lists every
-// unclaimed key alphabetically so reruns produce stable output.
 func assertJobArgsCoverage(p *Plan, extra map[string]string) error {
 	if p == nil || len(extra) == 0 {
 		return nil
@@ -215,9 +193,6 @@ func assertJobArgsCoverage(p *Plan, extra map[string]string) error {
 	return fmt.Errorf("unknown flags: --%s", strings.Join(unknown, ", --"))
 }
 
-// setResolvedArgs stores the merged resolved-args map on the plan.
-// Called by [resolveAndBindJobArgs] in the pipeline-registration
-// invoke flow; pipeline authors don't call this directly.
 func (p *Plan) setResolvedArgs(m map[string]any) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

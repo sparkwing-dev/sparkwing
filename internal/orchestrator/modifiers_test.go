@@ -15,9 +15,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// flakyState counts invocations of a closure so tests can assert on
-// retry behavior without racy sleeps. One instance per registered
-// pipeline (orch.Register is global).
 type flakyState struct {
 	attempts     int32
 	succeedAfter int32
@@ -215,11 +212,6 @@ func (onFailurePipe) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing
 	return nil
 }
 
-// onFailureDetachedPipe exercises the "detached recovery" shape:
-// the recovery node is constructed inside .OnFailure(id, job) and
-// is not in plan.Nodes(). Regression guard: dispatch must still
-// schedule the recovery goroutine so it fires when the parent
-// fails.
 type onFailureDetachedPipe struct{ sparkwing.Base }
 
 var detachedRecoveryCalled atomic.Bool
@@ -628,12 +620,6 @@ func TestOnFailure_SkippedWhenParentSucceeds(t *testing.T) {
 	}
 }
 
-// TestOnFailure_DetachedRecoveryRuns verifies that a recovery node
-// attached via .OnFailure(id, job) -- the recovery is constructed
-// detached and is NOT in plan.Nodes() -- is still scheduled by
-// dispatch and fires when the parent fails. Previously dispatch
-// only iterated plan.Nodes(), so detached recovery goroutines never
-// started and the rollback silently didn't run.
 func TestOnFailure_DetachedRecoveryRuns(t *testing.T) {
 	detachedRecoveryCalled.Store(false)
 	p := newPaths(t)

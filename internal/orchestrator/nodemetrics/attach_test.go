@@ -9,8 +9,6 @@ import (
 	"time"
 )
 
-// stubReaders points the loop at known readings for the duration of the test.
-// The restore waits for the loop to exit so the write cannot race the read.
 func stubReaders(t *testing.T, cpu func() (time.Duration, bool), rss func() int64) {
 	t.Helper()
 	if samplerRunning() {
@@ -24,9 +22,6 @@ func stubReaders(t *testing.T, cpu func() (time.Duration, bool), rss func() int6
 	})
 }
 
-// clampingCPU reads far more CPU than any interval can hold, so every tick's
-// process total lands on the host-cores clamp and the split is arithmetic a
-// test can predict.
 func clampingCPU() func() (time.Duration, bool) {
 	var cumulative time.Duration
 	return func() (time.Duration, bool) {
@@ -41,9 +36,6 @@ func samplerRunning() bool {
 	return shared.stop != nil
 }
 
-// waitForSamplerStop blocks until every loop goroutine has exited, retired
-// generations included -- a loop that no longer owns the registry is still
-// reading the package-level readers until it returns.
 func waitForSamplerStop(t *testing.T) {
 	t.Helper()
 	stopped := make(chan struct{})
@@ -64,7 +56,6 @@ func (s *captureSink) snapshot() []Sample {
 	return append([]Sample(nil), s.samples...)
 }
 
-// awaitSampleAfter waits for a sample the sink took after boundary.
 func awaitSampleAfter(t *testing.T, sink *captureSink, boundary time.Time) Sample {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -80,8 +71,6 @@ func awaitSampleAfter(t *testing.T, sink *captureSink, boundary time.Time) Sampl
 	return Sample{}
 }
 
-// awaitSharedTick waits for one tick both sinks were attached for, which is
-// the only tick whose division across both is decided.
 func awaitSharedTick(t *testing.T, a, b *captureSink) (Sample, Sample) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -100,10 +89,6 @@ func awaitSharedTick(t *testing.T, a, b *captureSink) (Sample, Sample) {
 	return Sample{}, Sample{}
 }
 
-// TestAttach_SplitsIntervalAcrossAttachedNodes pins the property admission
-// depends on: two nodes running in the same interval are charged half the
-// process each, summing to the process total instead of double-counting it,
-// and the survivor takes the whole reading once its neighbor leaves.
 func TestAttach_SplitsIntervalAcrossAttachedNodes(t *testing.T) {
 	const processRSSBytes = 1000
 	hostMilli := int64(runtime.NumCPU()) * 1000
@@ -140,9 +125,6 @@ func TestAttach_SplitsIntervalAcrossAttachedNodes(t *testing.T) {
 	}
 }
 
-// TestAttach_LoopStopsWithLastNodeAndRestarts pins the lifecycle: an idle
-// process carries no sampling goroutine, a later node starts one again, and a
-// cancelled node counts as gone whether or not its detach ran.
 func TestAttach_LoopStopsWithLastNodeAndRestarts(t *testing.T) {
 	stubReaders(t, clampingCPU(), func() int64 { return 1000 })
 	t.Cleanup(SetIntervalForTest(5 * time.Millisecond))
@@ -175,13 +157,6 @@ func TestAttach_LoopStopsWithLastNodeAndRestarts(t *testing.T) {
 	}
 }
 
-// TestAttach_RetiredLoopNeverChargesTheLoopThatReplacedIt forces the window a
-// stop and an immediate re-attach open: the retired loop is inside a tick when
-// the registry changes hands. Its reading belongs to an interval the new node
-// did not run in, and its stop channel is already closed, so charging the new
-// registry would both double-count the interval and close that channel twice.
-// Only the retired loop's tick is given a CPU delta, so any CPU charged to the
-// replacement's sink came from the generation that retired.
 func TestAttach_RetiredLoopNeverChargesTheLoopThatReplacedIt(t *testing.T) {
 	inTick := make(chan struct{})
 	release := make(chan struct{})
@@ -237,9 +212,6 @@ func TestAttach_RetiredLoopNeverChargesTheLoopThatReplacedIt(t *testing.T) {
 	}
 }
 
-// TestAttach_ConcurrentAttachDetachWhileTicking exercises the registry against
-// a ticking loop, where -race is the assertion; it also pins that a burst of
-// nodes leaving by either route still lands the process back at idle.
 func TestAttach_ConcurrentAttachDetachWhileTicking(t *testing.T) {
 	stubReaders(t, clampingCPU(), func() int64 { return 1000 })
 	t.Cleanup(SetIntervalForTest(time.Millisecond))

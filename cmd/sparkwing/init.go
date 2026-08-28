@@ -1,4 +1,3 @@
-// Bootstrap helpers for `sparkwing pipeline new` first-run scaffolding.
 package main
 
 import (
@@ -17,10 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/scaffold"
 )
 
-// bootstrapDotSparkwingOpts writes the .sparkwing/ skeleton. `go mod
-// tidy` is deferred to the caller because tidy fails on the empty
-// jobs/ package until the first scaffolded file lands.
-// terse=true suppresses the "next steps" block (the scaffolder owns it).
 func bootstrapDotSparkwingOpts(cwd, sparkwingDir string, terse bool) error {
 	moduleName := filepath.Base(cwd) + "-pipelines"
 	existed := dirExists(sparkwingDir)
@@ -35,7 +30,7 @@ func bootstrapDotSparkwingOpts(cwd, sparkwingDir string, terse bool) error {
 type initFileReport struct {
 	Created []string
 	Existed []string
-	Skipped []string // existed without --force
+	Skipped []string
 }
 
 func writeSkeleton(sparkwingDir, moduleName string, force bool) (initFileReport, error) {
@@ -95,12 +90,6 @@ require github.com/sparkwing-dev/sparkwing %s
 `, moduleName, goDirective, sdkRequirementVersion())
 }
 
-// sdkRequirementVersion picks the version string to write into a fresh
-// .sparkwing/go.mod. Prefers the running CLI's ldflag-stamped version
-// (so scaffolds pin to the operator's installed line), falls back to
-// scaffold.FallbackSDKVersion otherwise. Pseudo-versions and "(devel)" /
-// "(unknown)" strings fall through to the fallback -- those can't be
-// require-d in downstream go.mod files.
 func sdkRequirementVersion() string {
 	v := installedVersion()
 	if isResolvableModuleVersion(v) {
@@ -109,35 +98,8 @@ func sdkRequirementVersion() string {
 	return scaffold.FallbackSDKVersion
 }
 
-// pseudoVersionRE matches Go module pseudo-versions: timestamp +
-// abbreviated commit hash. Examples:
-//   - v0.6.3-0.20260531005950-041d1c11f150        (no tag yet, base v0.6.3)
-//   - v1.0.0-20260531005950-041d1c11f150          (no pre-release tag)
-//   - v0.6.3-pre.0.20260531005950-041d1c11f150    (pre-release base)
-//
-// The +dirty suffix tacks onto any of these for a worktree with uncommitted
-// changes. Either form is unresolvable from a fresh `go mod` install.
-// The timestamp+hash is preceded by `-` (form vX.0.0-<ts>-<hash>) or by
-// `.` (forms vX.Y.Z-0.<ts>-<hash> and vX.Y.Z-pre.0.<ts>-<hash>, used for
-// a commit after a released tag), so the leading separator is [-.].
 var pseudoVersionRE = regexp.MustCompile(`[-.]\d{14}-[0-9a-f]{12}(\+dirty)?$`)
 
-// isResolvableModuleVersion reports whether v looks like a published
-// semver tag (e.g. "v0.6.2") that `go mod` can resolve from a fresh
-// repo. Rejects "(unknown)" / "(devel)" fallbacks, pseudo-versions
-// whose commit isn't on a published branch yet, and two forms a local
-// build produces:
-//
-// Build metadata other than "+incompatible" -- the module system
-// rejects it outright, so "+dirty" and the "+<sha>" a source build
-// stamps are both unusable in a require directive.
-//
-// Any "-dev" prerelease. No released tag carries one, and unlike the
-// above it is syntactically valid, which is what makes it dangerous:
-// `go get` accepts the require line and only then fails to find the
-// tag. A scaffold pinned this way did not build, and `version update
-// --sdk` could not repair it, because `go get` parses the broken
-// go.mod before it can bump anything.
 func isResolvableModuleVersion(v string) bool {
 	if v == "" || strings.HasPrefix(v, "(") {
 		return false
@@ -219,7 +181,6 @@ pipelines:
 `
 }
 
-// ensureGitignoreEntry idempotently appends a line to .gitignore.
 func ensureGitignoreEntry(repoRoot, entry string) error {
 	path := filepath.Join(repoRoot, ".gitignore")
 	body, err := os.ReadFile(path)
@@ -259,8 +220,6 @@ type tidyStatus struct {
 	Err     string
 }
 
-// tidySkeleton runs `go mod tidy` so go.sum is populated before the
-// first `sparkwing run <name>`. Captures Go's noisy stdout/stderr; dumps only on failure.
 func tidySkeleton(sparkwingDir string) tidyStatus {
 	if !goOnPath() {
 		return tidyStatus{Skipped: true}
@@ -282,7 +241,6 @@ func tidySkeleton(sparkwingDir string) tidyStatus {
 	return tidyStatus{OK: true, Note: "resolved dependencies (go mod tidy)"}
 }
 
-// startSpinner ticks a Braille spinner until cancel(). Non-TTY = no-op.
 func startSpinner(label string) func() {
 	if !color.IsInteractiveStdout() {
 		fmt.Fprintln(os.Stderr, color.Dim("==> "+label+" ..."))

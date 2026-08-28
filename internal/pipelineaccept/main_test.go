@@ -133,12 +133,6 @@ func TestEmitRejectsUnknownFormat(t *testing.T) {
 	}
 }
 
-// TestRunFixtureCorpusEndToEnd exercises the runner over the whole fixture
-// corpus through the real gofmt/compile/vet/explain/lint bar: it builds
-// sparkwing and compiles a project per spec, so it is opt-in via
-// SPARKWING_PIPELINEGEN_E2E=1 (and skipped in -short). Every spec must
-// agree with its expectation, and the pass specs must clear the two oracles
-// this runner adds (format, vet).
 func TestRunFixtureCorpusEndToEnd(t *testing.T) {
 	if testing.Short() {
 		t.Skip("end-to-end runner skipped in -short mode")

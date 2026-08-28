@@ -15,26 +15,14 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// linuxClockTicks is the kernel's USER_HZ. It is fixed at 100 on every
-// mainstream Linux build, so the stall heuristic reads /proc directly
-// rather than pulling in a sysconf dependency for a threshold check.
 const linuxClockTicks = 100.0
 
-// sample derives a process tree's CPU as a fraction of one core from the
-// change in cumulative user+system time between two /proc readings. The
-// first reading for every live pid has no baseline; sample reports once
-// at least one process in the tree has two readings.
 func (p *procSampler) sample(pid int) (ProcUsage, bool) {
 	usages := p.sampleMany([]int{pid})
 	usage, ok := usages[pid]
 	return usage, ok
 }
 
-// sampleMany derives each holder's process-tree CPU -- the holder and
-// every descendant -- from a single /proc enumeration shared by every
-// requested pid. Reading only a holder's own pid would miss work that
-// runs in forked children, so a busy holder driving child processes
-// would read idle.
 func (p *procSampler) sampleMany(pids []int) map[int]ProcUsage {
 	procs, ok := linuxProcesses()
 	if !ok {
@@ -152,10 +140,6 @@ func linuxProcesses() (map[int]linuxProc, bool) {
 	return procs, true
 }
 
-// linuxProcess parses /proc/<pid>/stat into its parent pid and cumulative
-// user+system (+reaped-children) CPU seconds. It splits after the comm
-// field (parenthesized and possibly containing spaces) so the numeric
-// fields line up regardless of the process name.
 func linuxProcess(pid int) (linuxProc, bool) {
 	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
@@ -193,8 +177,6 @@ func parseLinuxProcessStat(line string) (linuxProc, bool) {
 	}, true
 }
 
-// forget drops a dead pid's baseline so the map does not grow without
-// bound as runs come and go.
 func (p *procSampler) forget(pid int) {
 	p.mu.Lock()
 	delete(p.last, pid)
@@ -219,10 +201,6 @@ func (p *procSampler) pruneTreeLocked(root int, live map[int]struct{}) {
 	p.tree[root] = live
 }
 
-// sampleHost reads the machine's capacity and live pressure from Sysinfo.
-// A Sysinfo that returns is a reading of both dimensions, so both are
-// marked measured; MemAvailable only refines the memory figure and never
-// stands in for a read that failed.
 func sampleHost() (HostStat, error) {
 	stat := HostStat{TotalCores: float64(runtime.NumCPU())}
 

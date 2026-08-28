@@ -155,8 +155,6 @@ func (n *JobNode) Concurrency(g *ConcurrencyGroup, cost ...int) *JobNode {
 	return n
 }
 
-// concurrencyMembership records a node's enrollment in a
-// [ConcurrencyGroup] plus the admission cost it declared.
 type concurrencyMembership struct {
 	group *ConcurrencyGroup
 	cost  int

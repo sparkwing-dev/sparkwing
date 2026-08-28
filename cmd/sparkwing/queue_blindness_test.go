@@ -11,9 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
 )
 
-// blockQueueSocket strips search permission from the directory holding home's
-// daemon socket, so a dial fails with EACCES the way a sandbox denial does
-// rather than with the ENOENT an idle machine produces.
 func blockQueueSocket(t *testing.T, home string) {
 	t.Helper()
 	sock, err := wingd.SocketPath(home)
@@ -35,8 +32,6 @@ func blockQueueSocket(t *testing.T, home string) {
 
 const queueBlindnessWait = 10 * time.Second
 
-// queueHome returns a scratch sparkwing home whose daemon socket stays inside
-// the OS length limit, which t.TempDir cannot promise on macOS.
 func queueHome(t *testing.T) string {
 	t.Helper()
 	previousVersion := Version
@@ -50,7 +45,6 @@ func queueHome(t *testing.T) string {
 	return dir
 }
 
-// serveQueueDaemon runs an idle daemon for home until the test ends.
 func serveQueueDaemon(t *testing.T, home string) {
 	t.Helper()
 	d, err := wingd.New(queueDaemonConfig(home))
@@ -120,11 +114,6 @@ func queueOutput(t *testing.T, home string) string {
 	return out
 }
 
-// TestRunQueue_NoDaemonDoesNotPrintWhatAnIdleDaemonPrints is the command-level
-// negative control. `sparkwing queue -o json` printed `{}` when it had not
-// reached the daemon, which is what an idle machine prints, so the command
-// that promises "the truthful view of local admission" reported a quiet queue
-// while it was blind.
 func TestRunQueue_NoDaemonDoesNotPrintWhatAnIdleDaemonPrints(t *testing.T) {
 	quiet := queueHome(t)
 	idle := queueHome(t)
@@ -147,9 +136,6 @@ func TestRunQueue_NoDaemonDoesNotPrintWhatAnIdleDaemonPrints(t *testing.T) {
 	}
 }
 
-// A daemon that could not be reached must fail rather than exit 0 with an
-// empty queue, and it must fail with the infrastructure code so a script can
-// tell "I could not look" from "the queue is empty".
 func TestRunQueue_UnreachableDaemonExitsWithTheInfrastructureCode(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reaches a socket whatever its directory mode")

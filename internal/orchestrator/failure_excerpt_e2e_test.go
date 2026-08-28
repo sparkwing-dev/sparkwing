@@ -17,9 +17,6 @@ import (
 
 const excerptSecretValue = "excerpt-deploy-token"
 
-// excerptBuildJob fails the way a real build step does: an ExecError
-// whose message embeds the command's whole stderr, here long enough to
-// need bounding and carrying a secret the step had resolved.
 type excerptBuildJob struct{ sparkwing.Base }
 
 func (j *excerptBuildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -60,12 +57,6 @@ func init() {
 	register("excerpt-fail", func() sparkwing.Pipeline[sparkwing.NoInputs] { return &excerptPipe{} })
 }
 
-// TestRun_FailedNodeRecordsBoundedMaskedExcerpt is the end-to-end shape
-// of the change: what a failing node persists is a bounded, masked tail
-// of the command output plus a pointer to the full log -- not the raw
-// unbounded stderr. The cancelled downstream node is left alone: it has
-// no output of its own, and going to the logs for it is exactly what
-// this must not do.
 func TestRun_FailedNodeRecordsBoundedMaskedExcerpt(t *testing.T) {
 	p := newPaths(t)
 	dotenv := t.TempDir() + "/secrets.env"
@@ -115,9 +106,6 @@ func TestRun_FailedNodeRecordsBoundedMaskedExcerpt(t *testing.T) {
 		t.Fatalf("persisted error missing %q:\n%s", wantPointer, build.Error)
 	}
 
-	// The node log holds the full output, and every record in it --
-	// including the structured attributes of step_end, which carry the
-	// failed command's whole error text -- is redacted.
 	logBody, err := os.ReadFile(p.NodeLog(res.RunID, "build"))
 	if err != nil {
 		t.Fatalf("read node log: %v", err)
@@ -150,8 +138,6 @@ func TestRun_FailedNodeRecordsBoundedMaskedExcerpt(t *testing.T) {
 		t.Fatal("expected a step_end record carrying the step's error in attrs")
 	}
 
-	// `runs errors -o json`: the same excerpt as structured data, so a
-	// consumer never has to parse the error string.
 	var errBuf bytes.Buffer
 	if err := orchestrator.JobErrors(ctx, p, res.RunID, true, &errBuf); err != nil {
 		t.Fatalf("JobErrors: %v", err)
@@ -180,8 +166,6 @@ func TestRun_FailedNodeRecordsBoundedMaskedExcerpt(t *testing.T) {
 		t.Fatalf("log_excerpt is %d lines, want at most 20", n)
 	}
 
-	// `runs status -o json` carries the same pair per node, and only
-	// for the node that owns the failure.
 	var statusBuf bytes.Buffer
 	if err := orchestrator.JobStatus(ctx, p, res.RunID,
 		orchestrator.StatusOpts{JSON: true}, &statusBuf); err != nil {

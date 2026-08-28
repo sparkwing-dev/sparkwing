@@ -52,9 +52,7 @@ func TestForwardRecords_ReplaysNDJSONAsRecords(t *testing.T) {
 		t.Errorf("record 1 = %+v", got[1])
 	}
 	for i, r := range got {
-		// safety: a record with no timestamp would sort to the epoch in the
-		// merged stream and a record with no job would not attach to a
-		// node in the dashboard.
+
 		if r.TS.IsZero() {
 			t.Errorf("record %d has no timestamp", i)
 		}
@@ -64,10 +62,6 @@ func TestForwardRecords_ReplaysNDJSONAsRecords(t *testing.T) {
 	}
 }
 
-// Output the node produced is output the operator wants to see. A
-// subprocess or a stray print writing beside the logger is exactly the
-// case where dropping it hurts, so an undecodable line is forwarded as
-// a warning rather than discarded.
 func TestForwardRecords_UndecodableLineIsForwardedAsWarn(t *testing.T) {
 	stdout := strings.NewReader("total 42 files changed\n" +
 		`{"level":"info","msg":"done"}` + "\n" +
@@ -106,8 +100,6 @@ func TestForwardRecords_SkipsBlankLinesAndPreservesGivenTimestamps(t *testing.T)
 	}
 }
 
-// Nothing on stderr is structured: a node process writes there only
-// when something bypassed the logger.
 func TestForwardStderr_EveryLineIsAWarning(t *testing.T) {
 	cap := &captureLogger{}
 	forwardStderr(strings.NewReader("warning: deprecated flag\n\nlink error\n"),
@@ -132,10 +124,6 @@ func TestForward_NilDelegateDrainsWithoutPanicking(t *testing.T) {
 	forwardStderr(strings.NewReader("x\n"), runner.Request{NodeID: "b"})
 }
 
-// A forwarder that stops before EOF stops draining a pipe the child is
-// still writing to, and the child then blocks in write(2) forever. Its
-// own node timeout cannot rescue it, because that timeout runs inside
-// the blocked process. So one oversized line must never end the loop.
 func TestForwardRecords_OversizedLineDoesNotStopTheStream(t *testing.T) {
 	var b strings.Builder
 	b.WriteString(strings.Repeat("x", 2<<20))
@@ -159,9 +147,6 @@ func TestForwardRecords_OversizedLineDoesNotStopTheStream(t *testing.T) {
 	}
 }
 
-// The reviewer's second shape: a single oversized line and nothing
-// else. Before the fix this forwarded zero records -- total silent
-// loss of the node's output, not the truncation the code claimed.
 func TestForwardRecords_OversizedFinalLineIsTruncatedNotDropped(t *testing.T) {
 	line := strings.Repeat("y", 1_100_000)
 	cap := &captureLogger{}
@@ -183,9 +168,6 @@ func TestForwardRecords_OversizedFinalLineIsTruncatedNotDropped(t *testing.T) {
 	}
 }
 
-// A line long enough to be cut cannot still be the JSON the node
-// began, so the fragment is reported as raw output rather than
-// decoded into a record the node never emitted.
 func TestForwardRecords_TruncatedLineIsNotParsedAsJSON(t *testing.T) {
 	huge := `{"level":"info","msg":"` + strings.Repeat("z", 2<<20) + `"}`
 	cap := &captureLogger{}
@@ -214,8 +196,6 @@ func TestForwardStderr_OversizedLineDoesNotStopTheStream(t *testing.T) {
 	}
 }
 
-// A line that exactly fills a read buffer, and one that straddles
-// several, must reassemble whole.
 func TestForwardLines_ReassemblesAcrossReadBuffers(t *testing.T) {
 	long := strings.Repeat("a", lineReadBufferBytes*3+17)
 	var lines []string

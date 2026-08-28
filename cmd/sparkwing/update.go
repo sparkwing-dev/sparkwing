@@ -1,6 +1,3 @@
-// CLI self-update verbs. Mirrors install.sh: fetch the bare per-platform
-// binary, verify SHA256, atomic-rename onto the running binary. macOS
-// gets ad-hoc codesigning; Windows uses a rename-aside dance.
 package main
 
 import (
@@ -39,8 +36,6 @@ var (
 	updateVerifyKey       ed25519.PublicKey
 )
 
-// runUpdate is the top-level binary self-update verb (CLI only; for
-// SDK pins, see `sparkwing version update --sdk`).
 func runUpdate(args []string) error {
 	fs := flag.NewFlagSet(cmdUpdate.Path, flag.ContinueOnError)
 	check := fs.Bool("check", false, "report current vs latest; exit 1 if a newer release exists")
@@ -84,31 +79,16 @@ func runUpdateCheck() error {
 	}
 }
 
-// downgradeKind classifies a move from the installed version to a
-// resolved target.
 type downgradeKind int
 
 const (
-	// downgradeAllowed: the target is the same or newer, or the versions
-	// aren't comparable, so the move proceeds unremarked.
 	downgradeAllowed downgradeKind = iota
-	// downgradeRebaseline: the target sorts older, but the installed
-	// build is unpublished (a pseudo-version or dirty worktree) and so is
-	// not a release worth protecting. Moving to the published target is a
-	// re-baseline, not a downgrade, and proceeds without --force.
+
 	downgradeRebaseline
-	// downgradeNeedsForce: both versions are resolvable published
-	// releases and the target is older, so the move is a real downgrade
-	// gated behind --force.
+
 	downgradeNeedsForce
 )
 
-// classifyDowngrade decides how a move from current to resolved is
-// treated. The downgrade guard protects only between two published
-// releases: an unpublished build (pseudo-version such as
-// v1.6.2-0.<ts>-<hash>, or a +dirty worktree) that merely sorts above
-// the published latest must still re-baseline to it, not be mistaken
-// for a newer release the guard should defend.
 func classifyDowngrade(current, resolved string) downgradeKind {
 	if !isSemver(current) || !isSemver(resolved) || semver.Compare(resolved, current) >= 0 {
 		return downgradeAllowed
@@ -119,10 +99,6 @@ func classifyDowngrade(current, resolved string) downgradeKind {
 	return downgradeRebaseline
 }
 
-// runUpdateBinary downloads, authenticates, and installs a release. An operator
-// version hold is enforced here (unless overrideHold): the ceiling
-// binds every self-upgrade path, `sparkwing update` and
-// `sparkwing version update --cli` alike.
 func runUpdateBinary(version string, force, overrideHold bool) error {
 	resolved := strings.TrimSpace(version)
 	if resolved == "" {
@@ -182,14 +158,6 @@ func runUpdateBinary(version string, force, overrideHold bool) error {
 	return nil
 }
 
-// reportOtherInstalls names every other sparkwing binary reachable on
-// the machine after an install landed at installedBin, with the exact
-// remedy per copy. It is strictly read-only: renaming a binary
-// elsewhere on the user's machine is a bigger action than update was
-// asked for, and the operator may well have installed the other copy
-// on purpose. Nothing here is an error -- the install itself succeeded,
-// and failing after it would send the caller looking for a broken
-// binary that is fine.
 func reportOtherInstalls(w io.Writer, installedBin string) {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -216,8 +184,6 @@ func writeOtherInstallsNote(w io.Writer, installedBin string, others []installsi
 	fmt.Fprintf(w, "  keep one, or point each job at %s by absolute path. `sparkwing doctor` shows the full picture.\n", installedBin)
 }
 
-// runVersionUpdate dispatches `sparkwing version update`. Requires
-// exactly one of --cli or --sdk so it can't silently flip the wrong half.
 func runVersionUpdate(args []string) error {
 	fs := flag.NewFlagSet(cmdVersionUpdate.Path, flag.ContinueOnError)
 	cli := fs.Bool("cli", false, "self-update the sparkwing CLI binary")
@@ -246,8 +212,6 @@ func runVersionUpdate(args []string) error {
 	}
 }
 
-// installedVersion prefers the ldflag-injected main.Version (survives
-// -trimpath, no "+dirty" suffix) then runtime/debug.ReadBuildInfo.
 func installedVersion() string {
 	if Version != "" {
 		return Version
@@ -260,7 +224,6 @@ func installedVersion() string {
 	return "(unknown)"
 }
 
-// Version is injected via -ldflags="-X main.Version=vX.Y.Z" at release.
 var Version string
 
 type installedRelease struct {
@@ -269,7 +232,6 @@ type installedRelease struct {
 	digest  string
 }
 
-// downloadAndInstall authenticates the manifest and platform asset before installation.
 func downloadAndInstall(version, currentBin string) (installedRelease, error) {
 	suffix := runtime.GOOS + "-" + runtime.GOARCH
 	ext := ""
@@ -331,7 +293,6 @@ func downloadAndInstall(version, currentBin string) (installedRelease, error) {
 	return installedRelease{path: currentBin, version: version, digest: verified.digest}, nil
 }
 
-// cleanupStaleUpdate removes residue left by pre-integrity Windows updaters.
 func cleanupStaleUpdate() {
 	if runtime.GOOS != "windows" {
 		return

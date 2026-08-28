@@ -11,9 +11,6 @@ import (
 	"golang.org/x/mod/module"
 )
 
-// newMockProxy spins an httptest.Server behaving like proxy.golang.org.
-// `versions` maps module-path -> sorted list of tags (newest last); the
-// server serves @latest = last, @v/list = newline-joined.
 func newMockProxy(t *testing.T, versions map[string][]string) *httptest.Server {
 	t.Helper()
 	escaped := make(map[string][]string, len(versions))

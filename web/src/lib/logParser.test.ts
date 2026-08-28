@@ -9,7 +9,6 @@ import {
   type LogSection,
 } from "./logParser";
 
-// Real ANSI output from the sparkwing CLI
 const cyan = "\x1b[36m";
 const green = "\x1b[32m";
 const red = "\x1b[31m";
@@ -107,8 +106,6 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
       nodeEnd("build", "success", 2000, "2026-04-23T00:00:02.000Z"),
     ];
     const result = parseLogLines(lines);
-    // Two phase buckets (compile, push) + no setup bucket because
-    // node went straight into its first step with no prior content.
     assert.equal(result.sections.length, 2);
     const compile = result.sections[0] as StepSection;
     const push = result.sections[1] as StepSection;
@@ -127,7 +124,6 @@ describe("parseJSONLLogs (via parseLogLines auto-detect)", () => {
       nodeStart("build", "2026-04-23T00:00:00Z"),
       stepStart("build", "compile", "2026-04-23T00:00:00.100Z"),
       execLine("build", "compiling...", "2026-04-23T00:00:00.200Z", "compile"),
-      // Stream cut here -- no step_end / node_end yet.
     ];
     const result = parseLogLines(lines);
     assert.equal(result.sections.length, 1);
@@ -292,7 +288,6 @@ describe("parseLogLines", () => {
     ];
     const result = parseLogLines(lines);
 
-    // Should be: step(init), between(current/new), step(run tests)
     assert.equal(result.sections.length, 3);
     assert.equal(result.sections[0].type, "step");
     assert.equal(result.sections[1].type, "between");
@@ -347,7 +342,6 @@ describe("parseLogLines", () => {
     ];
     const result = parseLogLines(lines);
 
-    // Should be just two steps, no between section for blank lines
     assert.equal(result.sections.length, 2);
     assert.equal(result.sections[0].type, "step");
     assert.equal(result.sections[1].type, "step");
@@ -379,13 +373,12 @@ describe("parseLogLines", () => {
 
     const step = result.sections[0] as StepSection;
     assert.equal(step.status, "passed");
-    assert.equal(step.duration, "0s"); // fallback for missing duration
+    assert.equal(step.duration, "0s");
   });
 });
 
 describe("parseLogSections", () => {
   it("works with real CLI output string", () => {
-    // Simulate the exact output from the user's example
     const raw = [
       `${cyan}────────────── STEP: init ──────────────${reset}`,
       "prepare    main@af1a99c",
@@ -424,7 +417,6 @@ describe("parseLogSections", () => {
 
     const result = parseLogSections(raw);
 
-    // Should have: step(init), between(current/new), step(run tests), step(update-version), step(tag and release), summary
     const steps = result.sections.filter(
       (s) => s.type === "step",
     ) as StepSection[];
@@ -444,12 +436,10 @@ describe("parseLogSections", () => {
     assert.equal(steps[3].status, "failed");
     assert.equal(steps[3].duration, "35ms");
 
-    // Between section with version info
     const between = result.sections.find((s) => s.type === "between");
     assert.ok(between);
     assert.ok(between!.lines.some((l) => l.includes("v0.15.0")));
 
-    // Summary section exists
     const summary = result.sections.find((s) => s.type === "summary");
     assert.ok(summary);
   });

@@ -22,9 +22,6 @@ type pipelineLintArgs struct {
 	rules    bool
 }
 
-// parsePipelineLintArgs hand-parses lint's flags. lint takes no
-// pipeline-binary passthrough (it never builds or runs a pipeline), so
-// any unrecognized token is an error rather than forwarded.
 func parsePipelineLintArgs(args []string) (pipelineLintArgs, bool, error) {
 	parsed := pipelineLintArgs{output: "pretty"}
 	for i := 0; i < len(args); i++ {
@@ -86,13 +83,6 @@ func parsePipelineLintArgs(args []string) (pipelineLintArgs, bool, error) {
 	return parsed, false, nil
 }
 
-// runPipelineLint lints the repo's pipelines.
-//
-// With no --name and no --all it lints everything. Linting is read-only
-// static analysis, so the whole repo is both the safe default and what
-// a bare `sparkwing pipeline lint` plainly means; requiring a target
-// made that command print a screen of help and exit non-zero, costing a
-// second invocation to say what the first already said.
 func runPipelineLint(args []string) error {
 	parsed, helpRequested, err := parsePipelineLintArgs(args)
 	if err != nil {
@@ -154,10 +144,6 @@ func runPipelineLint(args []string) error {
 	return nil
 }
 
-// resolveLintSourceDir picks the directory of pipeline source to scan.
-// An explicit --dir wins; otherwise the convention is <.sparkwing>/jobs
-// (where `pipeline new` scaffolds entrypoints), falling back to the
-// .sparkwing directory itself when no jobs/ subdir exists.
 func resolveLintSourceDir(dir, configPath string) (string, error) {
 	if dir != "" {
 		return dir, nil
@@ -183,8 +169,7 @@ func filterFindings(findings []pipelinelint.Finding, name, entrypoint string) []
 func renderLintFindings(findings []pipelinelint.Finding, format string) error {
 	switch format {
 	case "json":
-		// NDJSON: one finding per line. A clean lint is an empty
-		// stream, which is what zero findings looks like in lines.
+
 		return ndjson.Write(os.Stdout, findings)
 	case "plain":
 		for _, f := range findings {
@@ -220,7 +205,7 @@ func printLintTable(findings []pipelinelint.Finding) {
 func printLintRules(format string) error {
 	rules := pipelinelint.Rules()
 	if format == "json" {
-		// NDJSON: one rule per line.
+
 		return ndjson.Write(os.Stdout, rules)
 	}
 	for i, r := range rules {

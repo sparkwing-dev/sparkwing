@@ -5,11 +5,6 @@ import (
 	"testing"
 )
 
-// detectRuntime no longer reads SPARKWING_RUN_ID / SPARKWING_NODE_ID
-// / SPARKWING_DEBUG / SPARKWING_HOST / KUBERNETES_SERVICE_HOST. The
-// only env var that survives at this layer is the implicit cwd; the
-// resulting struct must be byte-identical regardless of the legacy
-// env signals.
 func TestDetectRuntime_IgnoresLegacyEnvSignals(t *testing.T) {
 	for _, k := range []string{
 		"SPARKWING_RUN_ID", "SPARKWING_NODE_ID", "SPARKWING_DEBUG",
@@ -31,9 +26,6 @@ func TestDetectRuntime_IgnoresLegacyEnvSignals(t *testing.T) {
 	}
 }
 
-// detectRuntime ignores SPARKWING_WORK_DIR even when set, since the
-// stale-env-var hijack scenario was the bug we were trying to
-// eliminate. Walk-up from cwd is the sole source of truth.
 func TestDetectRuntime_IgnoresLegacyWorkDirEnv(t *testing.T) {
 	t.Setenv("SPARKWING_WORK_DIR", "/some/stale/path/that/does/not/exist")
 	rc := detectRuntime()
@@ -43,8 +35,6 @@ func TestDetectRuntime_IgnoresLegacyWorkDirEnv(t *testing.T) {
 	}
 }
 
-// walkUpToProject finds `.sparkwing/` ascending from start and
-// returns its parent. Mirrors how git locates a repo root.
 func TestWalkUpToProject_FindsMarker(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(root+"/sub/deep", 0o755); err != nil {
@@ -59,9 +49,6 @@ func TestWalkUpToProject_FindsMarker(t *testing.T) {
 	}
 }
 
-// walkUpToProject returns "" when there's no `.sparkwing/` above
-// start. Helpers see this and refuse to run rather than silently
-// fall back to cwd.
 func TestWalkUpToProject_ReturnsEmptyWhenNoProject(t *testing.T) {
 	root := t.TempDir()
 	got := walkUpToProject(root)
@@ -70,7 +57,6 @@ func TestWalkUpToProject_ReturnsEmptyWhenNoProject(t *testing.T) {
 	}
 }
 
-// SetGit attaches a populated *Git, visible via CurrentRuntime().Git.
 func TestSetGit_AttachesPopulatedGit(t *testing.T) {
 	prev := runtime.Git
 	t.Cleanup(func() { runtimeMu.Lock(); runtime.Git = prev; runtimeMu.Unlock() })

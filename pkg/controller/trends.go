@@ -22,12 +22,6 @@ type TrendPoint struct {
 	AvgWaitMs int64  `json:"avg_wait_ms"`
 }
 
-// handleTrends aggregates the runs table into hourly buckets over the
-// last N hours (default 24, capped at 14d). Cached runs = every node
-// finished with outcome=cached. avg_wait_ms is the mean intake-to-start
-// latency (started_at - created_at) across the bucket's runs; rows with
-// a zero created_at (legacy sentinel) or with created_at > started_at
-// (clock skew) are excluded so the average reflects real waits.
 func (s *Server) handleTrends(w http.ResponseWriter, r *http.Request) {
 	hours := 24
 	if v := r.URL.Query().Get("hours"); v != "" {

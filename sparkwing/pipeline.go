@@ -35,23 +35,14 @@ type Registration struct {
 	// pipeline, and call its Plan.
 	Invoke func(ctx context.Context, args map[string]string, rc RunContext) (*Plan, error)
 
-	// instance returns a fresh pipeline value, used by introspection
-	// helpers that need to look at provider interfaces (HelpProvider,
-	// ShortHelpProvider, ExampleProvider).
 	instance func() any
 }
 
 var (
 	registryMu sync.RWMutex
-	// registry is keyed by *pipeline* name -- what the operator types
-	// after `sparkwing run`. A single registry entry produces a *Plan
-	// per invocation.
+
 	registry = map[string]*Registration{}
-	// entrypointRegistry is keyed by *entrypoint* name -- the YAML
-	// `entrypoint:` field. The v0.6 redesign separates the two so one
-	// entrypoint can back many pipelines: Go calls RegisterEntrypoint
-	// once with the entrypoint name; YAML enumerates pipelines and
-	// names the entrypoint for each.
+
 	entrypointRegistry = map[string]*Registration{}
 )
 
@@ -103,13 +94,6 @@ func Register[T any](name string, factory func() Pipeline[T]) {
 	}
 }
 
-// buildRegistration is the private workhorse shared by [Register]
-// and [RegisterEntrypoint]. It builds the schema, the invoke closure,
-// and the *Registration; the caller writes the entry into the
-// appropriate registry map.
-//
-// callerLabel is the SDK-author-facing identifier ("sparkwing.Register"
-// or "sparkwing.RegisterEntrypoint") that surfaces in panic messages.
 func buildRegistration[T any](name string, factory func() Pipeline[T], callerLabel string) *Registration {
 	if name == "" {
 		panic(callerLabel + ": name must not be empty")

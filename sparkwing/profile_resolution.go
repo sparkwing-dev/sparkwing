@@ -32,11 +32,6 @@ type keyProfileResolutionType struct{}
 
 var keyProfileResolution = keyProfileResolutionType{}
 
-// profileResolutionFromContext extracts the framework-installed
-// profile-resolution context. Returns the zero value when none is
-// installed, which the resolver treats as "no profile defaults, no
-// name, not local" -- the same as a vanilla local dispatch with no
-// profile chain.
 func profileResolutionFromContext(ctx context.Context) ProfileResolutionContext {
 	if ctx == nil {
 		return ProfileResolutionContext{}
@@ -67,8 +62,6 @@ func SkipArgResolve(ctx context.Context) context.Context {
 	return context.WithValue(ctx, keySkipArgResolve, true)
 }
 
-// skipArgResolveFromContext reports whether ctx carries the describe-
-// mode marker installed by [SkipArgResolve]. Internal to the package.
 func skipArgResolveFromContext(ctx context.Context) bool {
 	if ctx == nil {
 		return false

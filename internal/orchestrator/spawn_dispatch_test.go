@@ -32,9 +32,6 @@ func (j *spawnedChildJob) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
 	return nil, nil
 }
 
-// spawnSingleParent declares one SpawnNode after a setup step. The
-// parent's third step waits on the spawn and reads through
-// the SpawnSpec to confirm the suspended-runner round-trip.
 type spawnSingleParent struct {
 	sparkwing.Base
 	childRan *atomic.Bool
@@ -63,8 +60,6 @@ func (sp *spawnSinglePipe) Plan(_ context.Context, plan *sparkwing.Plan, _ spark
 	return nil
 }
 
-// spawnFailingChild has a child whose Work errors; the spawn should
-// surface the failure to the parent step, failing the parent.
 type spawnFailingChild struct{ sparkwing.Base }
 
 func (spawnFailingChild) Work(w *sparkwing.Work) (*sparkwing.WorkStep, error) {
@@ -143,10 +138,6 @@ func (spawnProgressPipe) Plan(_ context.Context, plan *sparkwing.Plan, _ sparkwi
 	return nil
 }
 
-// spawnEachParent uses SpawnNodeForEach to fan out N children. Each
-// child increments a shared counter; the test asserts the counter
-// equals the slice length and that each child got a unique
-// namespaced id in the plan.
 type spawnEachParent struct {
 	sparkwing.Base
 	count *atomic.Int32

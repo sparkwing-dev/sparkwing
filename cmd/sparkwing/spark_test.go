@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-// writeSparkFixture materializes a library tree from relative path ->
-// content and returns its root.
 func writeSparkFixture(t *testing.T, files map[string]string) string {
 	t.Helper()
 	root := t.TempDir()
@@ -24,7 +22,6 @@ func writeSparkFixture(t *testing.T, files map[string]string) string {
 	return root
 }
 
-// joinProblems flattens lint problems for substring assertions.
 func joinProblems(problems []string) string {
 	return strings.Join(problems, "\n")
 }

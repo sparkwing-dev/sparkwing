@@ -6,22 +6,13 @@ import (
 	"time"
 )
 
-// stepRangeKey scopes the --start-at / --stop-at context value
-// installed by internal/sparkwingruntime.WithStepRange.
 type stepRangeKey struct{}
 
-// stepRange carries the operator-supplied --start-at / --stop-at
-// strings into RunWork. Empty values mean "no bound on that side."
-// Both empty = no range filtering applies.
 type stepRange struct {
 	start string
 	stop  string
 }
 
-// stepRangeFromContext reads the bounds that
-// internal/sparkwingruntime.WithStepRange installed on ctx. The
-// cross-package carrier is [2]string{start, stop} so the runtime
-// package does not need to name an unexported sparkwing type.
 func stepRangeFromContext(ctx context.Context) (stepRange, bool) {
 	v, ok := ctx.Value(stepRangeKey{}).([2]string)
 	if !ok || (v[0] == "" && v[1] == "") {
@@ -30,20 +21,6 @@ func stepRangeFromContext(ctx context.Context) (stepRange, bool) {
 	return stepRange{start: v[0], stop: v[1]}, true
 }
 
-// computeStepRangeSkips returns the set of work-item IDs that should
-// be skipped given the requested range, plus a human-readable
-// reason for the `step_skipped` event. The semantics:
-//
-//   - --start-at X: skip every item NOT in {X} ∪ descendants(X).
-//   - --stop-at  Y: skip every item NOT in {Y} ∪ ancestors(Y).
-//   - both:        intersect the two keep-sets, skip the rest.
-//
-// Items the bound doesn't reference (because the bound names a step
-// in another Work) leave the keep-set unconstrained on that side.
-// The DAG can have multiple valid topological orders; this set-based
-// reachability formulation makes the skip decision deterministic
-// and parallelism-aware -- "--start-at X on a downstream branch
-// skips ALL upstream including sibling branches" falls out naturally.
 func computeStepRangeSkips(items map[string]*workItem, children map[string][]string, r stepRange) map[string]string {
 	parents := make(map[string][]string, len(items))
 	for id, it := range items {
@@ -133,9 +110,6 @@ func (w *Work) PreviewSkipForRange(startAt, stopAt string) map[string]string {
 	return computeStepRangeSkips(items, children, stepRange{start: startAt, stop: stopAt})
 }
 
-// reachable returns the set of nodes reachable from `start` by
-// following the given adjacency map. start itself is NOT included
-// in the returned set (callers add it explicitly when needed).
 func reachable(start string, adj map[string][]string) map[string]bool {
 	out := make(map[string]bool)
 	stack := append([]string(nil), adj[start]...)
@@ -151,8 +125,6 @@ func reachable(start string, adj map[string][]string) map[string]bool {
 	return out
 }
 
-// stepRangeReasonString formats the skip reason carried in the
-// step_skipped event Attrs.
 func stepRangeReasonString(r stepRange) string {
 	switch {
 	case r.start != "" && r.stop != "":
@@ -165,9 +137,6 @@ func stepRangeReasonString(r stepRange) string {
 	return ""
 }
 
-// emitStepSkippedWithReason emits the `step_skipped` event with the
-// range-skip reason on Attrs so renderers can distinguish a user
-// SkipIf predicate from a sparkwing-level --start-at/--stop-at filter.
 func emitStepSkippedWithReason(ctx context.Context, stepID, reason string) {
 	LoggerFromContext(ctx).Emit(recordEnvelope(ctx, LogRecord{
 		TS:    time.Now(),

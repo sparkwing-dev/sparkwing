@@ -64,9 +64,6 @@ func TestCapacityFingerprint_IncludesPlanLevelGroups(t *testing.T) {
 	}
 }
 
-// TestPlanTopologyHash_UnchangedByConcurrency confirms the topology hash
-// stays declaration-blind, so a live run_plan record still matches a
-// post-hoc receipt.
 func TestPlanTopologyHash_UnchangedByConcurrency(t *testing.T) {
 	if a, b := planTopologyHash(fingerprintPlan(4).Nodes()), planTopologyHash(fingerprintPlan(1).Nodes()); a != b {
 		t.Errorf("topology hash moved with concurrency declarations: %q vs %q", a, b)

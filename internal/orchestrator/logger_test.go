@@ -9,13 +9,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// TestPrettyRenderer_StepEvents asserts the renderer recognizes the
-// current step event names (`step_start`, `step_end`,
-// `step_skipped`). Before this fix the switch only matched a literal
-// `"step"` event, so the new names fell through to the default branch
-// and rendered as plain breadcrumb lines -- losing both the step
-// glyph and the duration tail. Guard with this so a future rename
-// trips a check instead of silently regressing the CLI.
 func TestPrettyRenderer_StepEvents(t *testing.T) {
 	t.Parallel()
 

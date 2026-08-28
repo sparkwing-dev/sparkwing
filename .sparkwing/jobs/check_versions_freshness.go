@@ -15,8 +15,6 @@ import (
 	"golang.org/x/mod/semver"
 )
 
-// sdkModulePath is the SDK module whose latest release the scaffold
-// fallback pin is measured against.
 const sdkModulePath = "github.com/sparkwing-dev/sparkwing"
 
 const scaffoldFallbackRel = "pkg/scaffold/version.go"
@@ -36,19 +34,6 @@ type VersionFreshnessOptions struct {
 	AllowReleaseLineSelfReplace bool
 }
 
-// CheckVersionsFreshness verifies every sparkwing-ecosystem dependency
-// in every go.mod under repoRoot is current:
-//
-//   - Direct require (no replace): the pinned version must be >= the
-//     latest released tag.
-//   - Replace -> local path: the local checkout must not be behind its
-//     origin/main.
-//
-// Returns nil when everything is current. Returns a non-nil error
-// listing every problem when anything is behind.
-//
-// Watched module prefixes are listed in watchedModulePrefixes. Add
-// more there as the ecosystem grows.
 func CheckVersionsFreshness(ctx context.Context, repoRoot string) error {
 	return CheckVersionsFreshnessWithOptions(ctx, repoRoot, VersionFreshnessOptions{})
 }
@@ -133,18 +118,6 @@ func shouldCheckLocalReplaceFreshness(relMod, modulePath, localPath, repoRoot st
 	return filepath.Clean(absLocalPath) != filepath.Clean(absRepoRoot)
 }
 
-// checkScaffoldFallbackPin verifies the SDK version baked into the
-// scaffolder's fallback constant (scaffold.FallbackSDKVersion) is not
-// behind the latest released SDK. A source-built CLI with no release
-// ldflag pins fresh scaffolds to this constant, so a stale fallback
-// ships a go.mod that can't build the current templates -- the very
-// drift the go.mod pins above are checked for. Returns "" when current,
-// or a problem description otherwise.
-//
-// The latest release is read from repoRoot's own git tags: this repo IS
-// the SDK, so `go list -m -versions` can't self-resolve it (and the
-// dogfood replace short-circuits the proxy anyway), but the release tags
-// live right here.
 func checkScaffoldFallbackPin(ctx context.Context, repoRoot string) string {
 	latest, err := latestReleasedTag(ctx, repoRoot, majorCapFor(sdkModulePath))
 	if err != nil {
@@ -157,10 +130,6 @@ func checkScaffoldFallbackPin(ctx context.Context, repoRoot string) string {
 	return scaffoldFallbackProblem(pinned, latest)
 }
 
-// latestReleasedTag returns the highest stable semver git tag in the
-// repo at repoRoot, honoring an optional major-version cap (-1 for
-// none). Pre-releases and tags above the cap are skipped, so the bogus
-// v1.x tags on the SDK (see maxAllowedMajor) never win.
 func latestReleasedTag(ctx context.Context, repoRoot string, cap int) (string, error) {
 	out, err := captureGit(ctx, repoRoot, "tag", "--list", "v*")
 	if err != nil {
@@ -186,10 +155,6 @@ func latestReleasedTag(ctx context.Context, repoRoot string, cap int) (string, e
 	return stable[len(stable)-1], nil
 }
 
-// scaffoldFallbackProblem compares the scaffold fallback pin against the
-// latest released SDK version and returns a problem description, or ""
-// when the pin is a valid semver that is current or ahead. Pure so the
-// comparison is unit-testable without resolving the proxy.
 func scaffoldFallbackProblem(pinned, latest string) string {
 	if !semver.IsValid(pinned) {
 		return fmt.Sprintf(
@@ -206,22 +171,11 @@ func scaffoldFallbackProblem(pinned, latest string) string {
 	return ""
 }
 
-// watchedModulePrefixes lists every module path whose freshness we
-// track. Anything not matching is skipped (third-party deps are out
-// of scope; this check only enforces the sparkwing ecosystem stays
-// current against itself).
 var watchedModulePrefixes = []string{
 	"github.com/sparkwing-dev/sparkwing",
 	"github.com/sparkwing-dev/sparks-core",
 }
 
-// maxAllowedMajor is the highest semver major allowed for a watched
-// module. The SDK is intentionally pinned below v1.0.0 (the README
-// states this explicitly). The proxy carries v1.0.0+ tags that were
-// pushed by mistake and the cache can't be undone; the linter rejects
-// any consumer pinned at those versions and refuses to treat them as
-// "latest" when picking a target to bump to. Modules absent from this
-// map have no major-version cap.
 var maxAllowedMajor = map[string]int{
 	"github.com/sparkwing-dev/sparkwing": 0,
 }
@@ -235,8 +189,6 @@ func isWatchedModule(path string) bool {
 	return false
 }
 
-// majorCapFor returns the highest allowed semver major for modulePath,
-// or -1 when there is no cap.
 func majorCapFor(modulePath string) int {
 	if cap, ok := maxAllowedMajor[modulePath]; ok {
 		return cap
@@ -244,8 +196,6 @@ func majorCapFor(modulePath string) int {
 	return -1
 }
 
-// findGoModFiles returns every go.mod under root, skipping vendored
-// trees and the .git tree.
 func findGoModFiles(root string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
@@ -267,8 +217,6 @@ func findGoModFiles(root string) ([]string, error) {
 	return out, err
 }
 
-// findReplaceFor returns the replace directive matching modulePath if
-// any, else nil.
 func findReplaceFor(f *modfile.File, modulePath string) *modfile.Replace {
 	for _, r := range f.Replace {
 		if r.Old.Path == modulePath {
@@ -278,15 +226,11 @@ func findReplaceFor(f *modfile.File, modulePath string) *modfile.Replace {
 	return nil
 }
 
-// isLocalReplace reports whether the replace target is a filesystem
-// path (./... or ../... or absolute) rather than another module.
 func isLocalReplace(r *modfile.Replace) bool {
 	p := r.New.Path
 	return strings.HasPrefix(p, ".") || strings.HasPrefix(p, "/")
 }
 
-// resolveLocalReplacePath resolves a replace's filesystem target
-// against the directory containing the go.mod that declares it.
 func resolveLocalReplacePath(target, modPath string) (string, error) {
 	dir := filepath.Dir(modPath)
 	abs, err := filepath.Abs(filepath.Join(dir, target))
@@ -299,13 +243,6 @@ func resolveLocalReplacePath(target, modPath string) (string, error) {
 	return abs, nil
 }
 
-// localBehindRemote checks whether the git repo at localPath is
-// behind its origin/main. Returns (behind, count, error). If there
-// is no `origin` remote or no `main` branch, returns (false, 0, nil)
-// rather than failing -- the local clone may be a personal fork with
-// a different default branch, and the freshness check should not
-// blow up on that. fetches origin/main first so the comparison is
-// against current remote state.
 func localBehindRemote(ctx context.Context, localPath string) (bool, int, error) {
 	if _, err := os.Stat(filepath.Join(localPath, ".git")); err != nil {
 		return false, 0, nil
@@ -325,10 +262,6 @@ func localBehindRemote(ctx context.Context, localPath string) (bool, int, error)
 	return n > 0, n, nil
 }
 
-// checkAgainstLatest compares pinned against the module's latest
-// released tag (respecting the per-module major-version cap). Returns
-// an empty string when pinned is current or ahead, or a problem
-// description otherwise.
 func checkAgainstLatest(ctx context.Context, modulePath, pinned, fromModFile string) string {
 	if pinned == "" {
 		return ""
@@ -354,9 +287,6 @@ func checkAgainstLatest(ctx context.Context, modulePath, pinned, fromModFile str
 		modulePath, pinned, latest, modulePath, latest)
 }
 
-// semverMajor returns the major-version integer of a v-prefixed
-// semver string ("v1.2.3" -> 1). Returns (0, false) when the input
-// isn't a valid semver.
 func semverMajor(v string) (int, bool) {
 	if !semver.IsValid(v) {
 		return 0, false
@@ -372,14 +302,6 @@ func semverMajor(v string) (int, bool) {
 	return n, true
 }
 
-// latestReleasedVersion uses `go list -m -versions` to discover the
-// highest released semver tag for modulePath. The command runs from
-// the directory of the consuming go.mod so module-resolution config
-// (GOPROXY, GOPRIVATE, replace directives) is respected. When the
-// module has a configured major-version cap (see maxAllowedMajor),
-// versions above the cap are filtered out so the returned "latest"
-// is the highest tag the consumer should actually pin to, not the
-// highest tag the proxy happens to know about.
 func latestReleasedVersion(ctx context.Context, modulePath, fromModFile string) (string, error) {
 	dir := filepath.Dir(fromModFile)
 	out, err := captureCmd(ctx, dir, "go", "list", "-m", "-versions", modulePath)
@@ -430,14 +352,6 @@ func captureCmd(ctx context.Context, dir, name string, args ...string) (string, 
 	return string(out), err
 }
 
-// autoBumpSparkwingPinIfStale detects whether the scaffold fallback pin
-// (pkg/scaffold/version.go:FallbackSDKVersion) is behind the latest
-// released sparkwing tag. When it is, it bumps FallbackSDKVersion, the
-// .sparkwing/go.mod require-version placeholder, .sparkwing/go.sum
-// (via go mod tidy), and the public API snapshots, then commits them so the
-// bump rides along with the triggering push. Returns ("", nil) when already
-// current, or (bumpedVersion, nil) on a successful bump. Only the sparkwing
-// self-pin is touched; other watched modules are left for the freshness check.
 func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string, retErr error) {
 	latest, err := latestReleasedTag(ctx, repoRoot, majorCapFor(sdkModulePath))
 	if err != nil {
@@ -529,8 +443,6 @@ func restoreSparkwingPinArtifacts(ctx context.Context, repoRoot string) error {
 	return nil
 }
 
-// bumpFallbackSDKVersionFile rewrites the FallbackSDKVersion assignment
-// in pkg/scaffold/version.go to the given semver string.
 func bumpFallbackSDKVersionFile(repoRoot, version string) error {
 	path := filepath.Join(repoRoot, filepath.FromSlash(scaffoldFallbackRel))
 	data, err := os.ReadFile(path)
@@ -557,7 +469,6 @@ func readFallbackSDKVersionFile(repoRoot string) (string, error) {
 	return string(match[1]), nil
 }
 
-// commitSparkwingPinBump stages the auto-bump artifacts and commits them.
 func commitSparkwingPinBump(ctx context.Context, repoRoot, version string) error {
 	addArgs := []string{
 		"-C", repoRoot, "add", "--",

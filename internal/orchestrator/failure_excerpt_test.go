@@ -13,9 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// execErrorWithStderr builds the error shape a failing sparkwing.Bash
-// step produces: an ExecError whose message embeds the raw stderr,
-// wrapped by the step and node layers above it.
 func execErrorWithStderr(stderr string) error {
 	return fmt.Errorf("build: %w", &sparkwing.ExecError{
 		Command:  "go build ./...",
@@ -32,9 +29,6 @@ func lines(n int, format string) string {
 	return strings.Join(out, "\n")
 }
 
-// A failing build prints its conclusion last, so the excerpt keeps the
-// end of the output, drops the rest behind a marker, and the marker
-// names the command that prints the whole thing.
 func TestBoundedFailureText_ExecErrorKeepsMarkedTail(t *testing.T) {
 	err := execErrorWithStderr(lines(500, "compile error on file %d"))
 	got := boundedFailureText(context.Background(), "run-1", "build", err)
@@ -57,8 +51,6 @@ func TestBoundedFailureText_ExecErrorKeepsMarkedTail(t *testing.T) {
 	}
 }
 
-// The stdout fallback matters for tools that report on stdout and exit
-// non-zero without writing to stderr at all.
 func TestBoundedFailureText_FallsBackToStdout(t *testing.T) {
 	err := fmt.Errorf("lint: %w", &sparkwing.ExecError{
 		Command:  "golangci-lint run",
@@ -74,10 +66,6 @@ func TestBoundedFailureText_FallsBackToStdout(t *testing.T) {
 	}
 }
 
-// Command output is a common place for a secret to surface (a curl
-// that echoes its own URL, an env dump on failure). The excerpt is
-// persisted where `runs status` and the dashboard read it, so it goes
-// through the run's masker first.
 func TestBoundedFailureText_MasksSecretsInOutput(t *testing.T) {
 	const secret = "hunter2-deploy-token"
 	m := secrets.NewMasker()
@@ -94,8 +82,6 @@ func TestBoundedFailureText_MasksSecretsInOutput(t *testing.T) {
 	}
 }
 
-// A plain Go error is the common case and must round-trip untouched:
-// no marker, no reformatting, byte-identical to err.Error().
 func TestBoundedFailureText_PlainErrorUnchanged(t *testing.T) {
 	err := fmt.Errorf("deploy: %w", errors.New("no such cluster \"prod-2\""))
 	got := boundedFailureText(context.Background(), "run-1", "deploy", err)
@@ -107,7 +93,6 @@ func TestBoundedFailureText_PlainErrorUnchanged(t *testing.T) {
 	}
 }
 
-// Both bounds are live: 20 lines is not a licence for 20 megabytes.
 func TestBoundedFailureText_ByteBoundBitesBeforeLineBound(t *testing.T) {
 	wide := make([]string, 10)
 	for i := range wide {
@@ -131,8 +116,6 @@ func TestBoundedFailureText_ByteBoundBitesBeforeLineBound(t *testing.T) {
 	}
 }
 
-// A minified bundler error or a base64 blob arrives as one enormous
-// line: the byte bound still holds, and the cut leaves valid UTF-8.
 func TestBoundedFailureText_SingleHugeLineStaysValidUTF8(t *testing.T) {
 	err := execErrorWithStderr(strings.Repeat("é", 8000))
 	got := boundedFailureText(context.Background(), "run-1", "bundle", err)
@@ -144,7 +127,6 @@ func TestBoundedFailureText_SingleHugeLineStaysValidUTF8(t *testing.T) {
 	}
 }
 
-// Output that already fits stays whole -- no marker, no lost bytes.
 func TestBoundedFailureText_ShortOutputKeptWhole(t *testing.T) {
 	err := execErrorWithStderr("undefined: Foo\nexit status 2")
 	got := boundedFailureText(context.Background(), "run-1", "build", err)
@@ -156,9 +138,6 @@ func TestBoundedFailureText_ShortOutputKeptWhole(t *testing.T) {
 	}
 }
 
-// sparkwing.Bash renders the whole script into ExecError.Command, so
-// the headline is attacker-sized input, not a label. A generated
-// several-hundred-kilobyte script must not reach the state row.
 func TestBoundedFailureText_HugeCommandIsBounded(t *testing.T) {
 	script := "set -euo pipefail\n" + strings.Repeat("echo aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", 8000)
 	if len(script) < 200_000 {
@@ -189,8 +168,6 @@ func TestBoundedFailureText_HugeCommandIsBounded(t *testing.T) {
 	}
 }
 
-// A single-line command that is merely long is truncated the same way,
-// and one that fits is left alone.
 func TestBoundedFailureHead_BoundsAndPreserves(t *testing.T) {
 	short := "deploy: command failed (exit 1): kubectl apply -f app.yaml"
 	if got := boundedFailureHead(short); got != short {
@@ -212,9 +189,6 @@ func TestBoundedFailureHead_BoundsAndPreserves(t *testing.T) {
 	}
 }
 
-// Node ids are built from data (JobSpawnEach), so a long one must not
-// eat the whole headline budget and leave the exit code and command --
-// the part that says what actually failed -- on the floor.
 func TestBoundedFailureHead_LongNodeIDKeepsTheIdentifyingTail(t *testing.T) {
 	nodeID := "deploy-" + strings.Repeat("region-eu-west-1-", 13)
 	if len(nodeID) < 224 {
@@ -248,9 +222,6 @@ func TestBoundedFailureHead_LongNodeIDKeepsTheIdentifyingTail(t *testing.T) {
 	}
 }
 
-// A plain error has no conclusion at the end: the message leads with
-// what failed, so the front is what must survive -- and nothing points
-// at a log that does not contain the message.
 func TestBoundedFailureText_PlainErrorKeepsHead(t *testing.T) {
 	body := "config validation failed for cluster prod-2 (3 fatal problems)\n" +
 		lines(40, "  - problem %d: field is required")
@@ -274,8 +245,6 @@ func TestBoundedFailureText_PlainErrorKeepsHead(t *testing.T) {
 	}
 }
 
-// A message that opens with a newline must still be cut at a line
-// boundary, not mid-line.
 func TestFailureMessageHead_LeadingNewlineStillCutsAtALine(t *testing.T) {
 	msg := "\n" + lines(6, "line %d "+strings.Repeat("x", 60))
 	got, truncated := failureMessageHead(msg, 100, 200)
@@ -291,9 +260,6 @@ func TestFailureMessageHead_LeadingNewlineStillCutsAtALine(t *testing.T) {
 	}
 }
 
-// The text and the structured excerpt read the same split, so a
-// wrapper that appends after the output cannot leave one carrier with
-// an excerpt and the other without.
 func TestNodeFailureExcerpt_SurvivesSuffixWrapping(t *testing.T) {
 	inner := &sparkwing.ExecError{
 		Command:  "go test ./...",
@@ -321,8 +287,6 @@ func TestNodeFailureExcerpt_SurvivesSuffixWrapping(t *testing.T) {
 	}
 }
 
-// CRLF output must not leave stray carriage returns in the persisted
-// text, and output that is only whitespace is not a diagnostic.
 func TestBoundedFailureText_NormalizesAndDropsBlankOutput(t *testing.T) {
 	crlf := execErrorWithStderr("first line\r\nsecond line\r\n")
 	got := boundedFailureText(context.Background(), "run-1", "build", crlf)
@@ -346,8 +310,6 @@ func TestBoundedFailureText_NormalizesAndDropsBlankOutput(t *testing.T) {
 	}
 }
 
-// countingEvents is an eventLister over a fixed event list that
-// records how many pages were requested.
 type countingEvents struct {
 	events []store.Event
 	calls  int
@@ -386,9 +348,6 @@ func filler(from, to int64) []store.Event {
 	return out
 }
 
-// Scanning a run's event stream is a paged HTTP call on a controller
-// profile. A run with no failures must not pay for one, and a scan that
-// has found every excerpt it wants must stop.
 func TestFailureExcerptsFor_ScansOnlyWhenItMustAndStopsEarly(t *testing.T) {
 	src := &countingEvents{events: filler(1, 5000)}
 	ix := failureExcerptsFor(context.Background(), src, "run-1", nil)
@@ -413,9 +372,6 @@ func TestFailureExcerptsFor_ScansOnlyWhenItMustAndStopsEarly(t *testing.T) {
 	}
 }
 
-// Absence has to be earned. When the scan runs out of budget, or the
-// backend refuses, a missing excerpt is reported as unavailable rather
-// than as "this node published none".
 func TestFailureExcerptsFor_IncompleteScanReportsUnavailable(t *testing.T) {
 	want := map[string]struct{}{"build": {}}
 
@@ -437,7 +393,6 @@ func TestFailureExcerptsFor_IncompleteScanReportsUnavailable(t *testing.T) {
 		t.Fatal("a backend that cannot serve events yields unavailable, not absent")
 	}
 
-	// A completed scan that simply found nothing is authoritative.
 	quiet := &countingEvents{events: filler(1, 10)}
 	ix = failureExcerptsFor(context.Background(), quiet, "run-1", want)
 	if ix.Incomplete || ix.Unavailable("build") {
@@ -445,7 +400,6 @@ func TestFailureExcerptsFor_IncompleteScanReportsUnavailable(t *testing.T) {
 	}
 }
 
-// The two renderers agree on how the three states look.
 func TestFailedNodeReports_MarksUnavailableNotAbsent(t *testing.T) {
 	nodes := []*store.Node{
 		{NodeID: "build", Outcome: "failed", Error: "boom"},
@@ -461,9 +415,6 @@ func TestFailedNodeReports_MarksUnavailableNotAbsent(t *testing.T) {
 		t.Fatalf("complete index should report plain absence: %+v", rows)
 	}
 
-	// The zero value is what the human paths declare when they skip the
-	// lookup entirely: it must claim nothing, not flag every failure in
-	// the run as unavailable.
 	rows = failedNodeReports(nodes, failureExcerptIndex{})
 	if len(rows) != 1 || rows[0].LogExcerptUnavailable || rows[0].LogExcerpt != "" {
 		t.Fatalf("the zero index must make no claim either way: %+v", rows)
@@ -484,8 +435,6 @@ func TestFailedNodeReports_MarksUnavailableNotAbsent(t *testing.T) {
 	}
 }
 
-// Without a run/node pair the marker degrades to a generic pointer
-// rather than emitting a command a reader cannot run.
 func TestFailureExcerptMarker_DegradesWithoutIDs(t *testing.T) {
 	if got := failureExcerptMarker("", ""); strings.Contains(got, "--run") {
 		t.Fatalf("marker with no ids must not name a command: %q", got)

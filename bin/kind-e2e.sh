@@ -263,14 +263,12 @@ cleanup_existing_resources() {
       <<<"$release_list")"; then
       cleanup_status=1
     elif [[ "$release_present" == "true" ]]; then
-      # Helm replaces Info.Description when an install fails. Release labels
-      # survive that transition, so the selector is the durable ownership proof.
+      # safety: Helm overwrites failed release descriptions, but owner labels remain queryable.
       release_owned=1
     fi
   fi
   if ((release_owned == 1)); then
-    # Preserve only PVCs from a release whose per-run Helm metadata proved
-    # ownership before uninstall removes the other release objects.
+    # safety: Prove Helm ownership before labeling retained PVCs or uninstalling.
     label_owned_release_pvcs || cleanup_status=1
     if helm_e2e uninstall "$release_name" --namespace "$namespace" --timeout 5m; then
       release_owned=0

@@ -1,7 +1,3 @@
-// Login / logout handlers + session cookie helpers. Browsers POST a
-// username+password form; the cookie carries a session id resolved by
-// the controller's /api/v1/auth/session endpoint. Upstream proxy calls
-// continue to use opts.Token (the web pod's own service token).
 package web
 
 import (
@@ -30,8 +26,6 @@ const (
 
 var errInvalidControllerSession = errors.New("invalid controller session")
 
-// Pure HTML + CSS (no JavaScript) so the session id never touches the
-// JS runtime.
 const loginHTML = `<!doctype html>
 <html lang="en">
 <head>
@@ -90,11 +84,9 @@ type loginPageData struct {
 	Error     string
 	Next      string
 	CSRFToken string
-	Bootstrap bool // render the "create first admin" form
+	Bootstrap bool
 }
 
-// loginPageHandler renders the login form, or a "Create first admin"
-// form while the controller is fresh and its authentication is disabled.
 func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -119,9 +111,6 @@ func loginPageHandler(opts HandlerOptions) http.HandlerFunc {
 	}
 }
 
-// loginSubmitHandler validates creds via the controller, sets the
-// session cookies, and redirects to ?next=. On failure, re-renders the
-// login page with the error.
 func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -146,9 +135,6 @@ func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 	}
 }
 
-// bootstrapSubmitHandler creates the first admin while controller authentication
-// is disabled, then auto-logs-in so the user lands on the dashboard rather than
-// a re-rendered login page.
 func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -185,7 +171,6 @@ func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 	}
 }
 
-// logoutHandler clears cookies only after the controller drops the session.
 func logoutHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -293,10 +278,6 @@ func controllerLogout(ctx context.Context, controllerURL, sessionID string) erro
 	return nil
 }
 
-// safeNext sanitizes the post-login redirect to a same-origin path.
-// Rejects protocol-relative URLs (//evil.com/...) that a naive
-// HasPrefix(next, "/") check would let through, plus back-slash
-// variants browsers occasionally normalize.
 func safeNext(next string) string {
 	u, err := url.ParseRequestURI(next)
 	if err != nil || strings.Contains(next, "#") || u.IsAbs() || u.Host != "" || u.Fragment != "" || u.Opaque != "" {
@@ -380,9 +361,6 @@ func sessionBackendError(w http.ResponseWriter) {
 	http.Error(w, "controller session validation unavailable", http.StatusBadGateway)
 }
 
-// controllerBootstrapNeeded returns true only on a positive "needed"
-// answer; errors and non-2xx are treated as not-needed so a network
-// hiccup keeps users on the familiar login form.
 func controllerBootstrapNeeded(ctx context.Context, controllerURL string) bool {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet,
 		strings.TrimRight(controllerURL, "/")+"/api/v1/auth/bootstrap-needed", nil)
@@ -404,9 +382,6 @@ func controllerBootstrapNeeded(ctx context.Context, controllerURL string) bool {
 	return body.Needed
 }
 
-// controllerCreateFirstUser posts without a bearer because bootstrap is only
-// available while controller authentication is disabled and the users table is
-// empty. A closed bootstrap returns an error to the login page.
 func controllerCreateFirstUser(ctx context.Context, controllerURL, user, pass string) error {
 	body, _ := json.Marshal(map[string]string{"name": user, "password": pass})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -502,8 +477,6 @@ func clearSessionCookies(w http.ResponseWriter) {
 	}
 }
 
-// cookieSecure defaults to true; a loopback-only development process can
-// opt into plain HTTP with SPARKWING_WEB_INSECURE_COOKIES.
 var cookieSecure = func() bool {
 	v := os.Getenv("SPARKWING_WEB_INSECURE_COOKIES")
 	return !(v == "1" || strings.EqualFold(v, "true"))

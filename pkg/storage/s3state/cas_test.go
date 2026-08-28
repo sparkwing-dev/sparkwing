@@ -16,10 +16,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// memCondArt is an in-memory ArtifactStore that also implements
-// storage.ConditionalWriter with content-hash ETags, so the s3state CAS
-// records run without a live object store. unsupported flips the live
-// probe to false to exercise the last-write-wins fallback.
 type memCondArt struct {
 	mu          sync.Mutex
 	data        map[string][]byte
@@ -129,8 +125,6 @@ func newCASBackend(t *testing.T) *s3state.Backend {
 	return b
 }
 
-// newCASBackendWithArt returns the backend plus the underlying CAS store
-// so a test can count the discrete records the backend wrote.
 func newCASBackendWithArt(t *testing.T) (*s3state.Backend, *memCondArt) {
 	t.Helper()
 	art := newMemCondArt()
@@ -139,7 +133,6 @@ func newCASBackendWithArt(t *testing.T) (*s3state.Backend, *memCondArt) {
 	return b, art
 }
 
-// countKeys returns how many objects exist under prefix.
 func (m *memCondArt) countKeys(prefix string) int {
 	keys, _ := m.List(context.Background(), prefix)
 	return len(keys)
@@ -458,11 +451,6 @@ func TestS3CAS_FallbackWhenEndpointIgnoresPreconditions(t *testing.T) {
 	}
 }
 
-// TestS3CAS_ConcurrentEnqueueTrigger_CoalescesToOneRecord exercises the
-// PutIfAbsent child-trigger race: many goroutines spawn the same child
-// from one (parentRun, node, pipeline). Exactly one trigger record must
-// exist and every caller -- winner and losers alike -- must return that
-// single run ID.
 func TestS3CAS_ConcurrentEnqueueTrigger_CoalescesToOneRecord(t *testing.T) {
 	b, art := newCASBackendWithArt(t)
 	ctx := context.Background()
@@ -506,11 +494,6 @@ func TestS3CAS_ConcurrentEnqueueTrigger_CoalescesToOneRecord(t *testing.T) {
 	}
 }
 
-// TestS3CAS_ConcurrentResolveApproval_ExactlyOneWins exercises the
-// PutIfMatch resolve race: many goroutines resolve one pending approval
-// at once. Exactly one succeeds; the rest lose the compare-and-swap,
-// re-read the now-resolved record, and report store.ErrLockHeld (the
-// Mode 3 "already resolved" contract, not a raw ErrPreconditionFailed).
 func TestS3CAS_ConcurrentResolveApproval_ExactlyOneWins(t *testing.T) {
 	b := newCASBackend(t)
 	ctx := context.Background()
@@ -553,10 +536,6 @@ func TestS3CAS_ConcurrentResolveApproval_ExactlyOneWins(t *testing.T) {
 	}
 }
 
-// TestS3CAS_ConcurrentDebugPauseCreateRelease_RaceSafe exercises the
-// upsert-reset RMW and the release CAS under contention: concurrent
-// creates of one pause settle to a single open record, then concurrent
-// releases resolve it exactly once with no corruption.
 func TestS3CAS_ConcurrentDebugPauseCreateRelease_RaceSafe(t *testing.T) {
 	b := newCASBackend(t)
 	ctx := context.Background()

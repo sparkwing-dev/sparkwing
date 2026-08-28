@@ -9,8 +9,6 @@ metadata:
     {{- include "sparkwing-runner-bundle.componentLabels" (dict "root" . "component" "logs") | nindent 4 }}
 spec:
   replicas: {{ .Values.logs.replicas }}
-  # Recreate, not RollingUpdate: same RWO-PVC reasoning as the cache
-  # Deployment.
   strategy:
     type: Recreate
   selector:
@@ -53,10 +51,6 @@ spec:
             - --root
             - {{ .Values.logs.rootPath | quote }}
             {{- if and $controllerURL .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key }}
-            # whoami-based auth: incoming Authorization headers get
-            # forwarded to <controller>/api/v1/auth/whoami to resolve
-            # principal + scopes. Empty controller = auth off
-            # (kind / single-tenant test only).
             - --controller
             - {{ $controllerURL | quote }}
             {{- end }}

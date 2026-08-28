@@ -11,10 +11,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// stdoutLogger is a local copy of orchestrator.stdoutLogger. Lives
-// here so cluster code doesn't need to export a helper only cluster-
-// side CLIs use. Forwards log lines to stdout/stderr with light level
-// prefixes.
 type stdoutLogger struct {
 	mu sync.Mutex
 }
@@ -45,15 +41,11 @@ func (s *stdoutLogger) Emit(rec sparkwing.LogRecord) {
 	}
 }
 
-// multiFlag collects repeated --flag values into a slice. Standard
-// library Go equivalent of Cobra's StringArrayP. Local copy so the
-// worker / runner CLI flag plumbing doesn't need orchestrator.MultiFlag.
 type multiFlag []string
 
 func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
-// sleepOrCancel waits d or until ctx is done, whichever comes first.
 func sleepOrCancel(ctx context.Context, d time.Duration) {
 	t := time.NewTimer(d)
 	defer t.Stop()
@@ -63,9 +55,6 @@ func sleepOrCancel(ctx context.Context, d time.Duration) {
 	}
 }
 
-// firstNonEmpty returns a if non-empty, otherwise b. Local copy so
-// factories.go / worker_cli.go can pick a default URL without
-// reaching into orchestrator.
 func firstNonEmpty(a, b string) string {
 	if a != "" {
 		return a
@@ -73,9 +62,6 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
-// splitCSV splits a comma-separated string into a trimmed, non-empty
-// string slice. Empty input returns nil so callers can distinguish
-// "not set" from an empty list.
 func splitCSV(s string) []string {
 	if s == "" {
 		return nil

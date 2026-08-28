@@ -7,8 +7,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/pipelines"
 )
 
-// ExampleParse reads a standalone pipeline registry document and walks
-// the registered pipeline names.
 func ExampleParse() {
 	yaml := `
 pipelines:

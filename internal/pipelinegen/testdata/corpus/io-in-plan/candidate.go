@@ -20,8 +20,7 @@ func (GenIOInPlan) Examples() []sw.Example {
 }
 
 func (GenIOInPlan) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-	// Anti-pattern: reading a file while the DAG is built. Plan() must
-	// be pure-declarative; this should run inside a Job or Step body.
+
 	data, _ := os.ReadFile("VERSION")
 	_ = data
 	sw.Job(plan, run.Pipeline, &genIOJob{})

@@ -10,9 +10,6 @@ import (
 	"testing"
 )
 
-// TestSignFileRoundTrips proves the detached signature this tool writes
-// verifies against the corresponding public key with the same crypto the
-// updater uses -- signer and verifier agree byte-for-byte.
 func TestSignFileRoundTrips(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -39,14 +36,12 @@ func TestSignFileRoundTrips(t *testing.T) {
 	if !ed25519.Verify(pub, manifest, sig) {
 		t.Fatal("signature did not verify against the public key")
 	}
-	// Tamper with the manifest: the same signature must not verify.
+
 	if ed25519.Verify(pub, append(manifest, 'x'), sig) {
 		t.Fatal("signature verified over tampered manifest")
 	}
 }
 
-// TestLoadSigningKey accepts both a full 64-byte private key and a bare
-// 32-byte seed, and rejects garbage.
 func TestLoadSigningKey(t *testing.T) {
 	pub, priv, err := ed25519.GenerateKey(nil)
 	if err != nil {
@@ -96,16 +91,16 @@ func TestVerifyFile_MatchAndMismatch(t *testing.T) {
 	if err := signFile(priv, in, sig); err != nil {
 		t.Fatal(err)
 	}
-	// Matching key verifies.
+
 	if err := verifyFile(hex.EncodeToString(pub), in, sig); err != nil {
 		t.Fatalf("matching key failed to verify: %v", err)
 	}
-	// A different key (the mismatch we are guarding against) fails.
+
 	otherPub, _, _ := ed25519.GenerateKey(rand.Reader)
 	if err := verifyFile(hex.EncodeToString(otherPub), in, sig); err == nil {
 		t.Fatal("a mismatched public key verified; the CI guard would not catch a keypair mismatch")
 	}
-	// The all-zero placeholder is rejected as unarmed.
+
 	zero := hex.EncodeToString(make([]byte, ed25519.PublicKeySize))
 	if err := verifyFile(zero, in, sig); err == nil {
 		t.Fatal("placeholder key verified; unarmed build not rejected")

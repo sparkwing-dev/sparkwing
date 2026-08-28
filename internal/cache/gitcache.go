@@ -63,7 +63,6 @@ func initGitcacheMetrics() {
 		metric.WithUnit("{reclone}"))
 }
 
-// Proxy metrics
 var (
 	proxyCacheHitsCounter   metric.Int64Counter
 	proxyCacheMissesCounter metric.Int64Counter
@@ -84,7 +83,6 @@ func initProxyMetrics() {
 		metric.WithExplicitBucketBoundaries(0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10))
 }
 
-// validGitRef matches safe git branch/tag names -- no shell metacharacters.
 var validGitRef = regexp.MustCompile(`^[a-zA-Z0-9_./-]+$`)
 
 var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
@@ -109,26 +107,15 @@ var (
 	artifactsDir = "/data/artifacts"
 	binsDir      = "/data/bins"
 	cacheDir     = "/data/cache"
-	// Knobs resolved from Config by New(). Package-level so the
-	// existing handlers + background loops can keep reading them
-	// directly without threading *Server through every call site.
+
 	apiToken              string
 	sshKeyDir             = "/etc/ssh-key"
 	autoRegisterReposSpec string
-	// fetchFreshWindow is how long a successful mirror fetch keeps a
-	// repo "fresh". Request handlers skip their own synchronous fetch
-	// inside the window because backgroundFetchLoop (or another
-	// request) already pulled from the remote that recently. Every
-	// skipped fetch is one fewer NAT egress round trip to GitHub, and
-	// under a webhook burst that is the difference between one fetch
-	// and one fetch per request.
+
 	fetchFreshWindow = 15 * time.Second
-	// recloneCooldown bounds handleArchive's delete-and-reclone
-	// recovery. A fetch that fails persistently (a ref conflict after
-	// a branch rename, say) would otherwise re-download the whole
-	// repository on every archive request.
+
 	recloneCooldown = 1 * time.Hour
-	// Per-repo locks to allow concurrent fetches of different repos
+
 	repoLocks   = map[string]*sync.Mutex{}
 	repoLocksMu sync.Mutex
 )
@@ -177,8 +164,6 @@ func setupSSH() {
 	log.Printf("SSH key configured from %s", sshKeyDir)
 }
 
-// requireToken bears auth on external requests; in-cluster callers
-// (no X-Forwarded-For) skip. Empty Config.APIToken disables auth.
 func requireToken(next http.HandlerFunc) http.HandlerFunc {
 	token := apiToken
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -200,33 +185,26 @@ func requireToken(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// fetchState is shared between the background fetch loop and /health.
 type fetchState struct {
 	mu         sync.RWMutex
-	repos      map[string]*repoFetchState // keyed by bare repo dirname (e.g. "abc123.git")
-	allFailing bool                       // true if last cycle had 100% failure
+	repos      map[string]*repoFetchState
+	allFailing bool
 }
 
 type repoFetchState struct {
-	lastError   string    // empty on success
-	lastErrorAt time.Time // when the last error occurred
-	nextRetry   time.Time // backoff: when to retry
+	lastError   string
+	lastErrorAt time.Time
+	nextRetry   time.Time
 	backoff     time.Duration
-	lastOK      time.Time   // last successful fetch (freshness throttle)
-	lastReclone time.Time   // last recovery reclone (circuit breaker)
-	reclones    []time.Time // recovery reclones inside the last 24h
+	lastOK      time.Time
+	lastReclone time.Time
+	reclones    []time.Time
 }
 
 var bgFetch = &fetchState{repos: map[string]*repoFetchState{}}
 
-// stateKey maps a repo hash to the bgFetch key. The background loop
-// walks repoDir and keys by directory name, so request handlers -- which
-// only hold the hash -- have to agree on that spelling for the
-// freshness throttle to see the loop's fetches at all.
 func stateKey(hash string) string { return hash + ".git" }
 
-// entry returns the state for a repo, creating it if absent.
-// Caller holds fs.mu for writing.
 func (fs *fetchState) entry(name string) *repoFetchState {
 	rs := fs.repos[name]
 	if rs == nil {
@@ -236,8 +214,6 @@ func (fs *fetchState) entry(name string) *repoFetchState {
 	return rs
 }
 
-// markFetched records a successful fetch, which starts the freshness
-// window other callers throttle against.
 func (fs *fetchState) markFetched(name string) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -245,14 +221,10 @@ func (fs *fetchState) markFetched(name string) {
 	rs.lastOK = time.Now()
 	rs.lastError = ""
 	rs.backoff = 0
-	// A fetch just succeeded, so the loop's retry backoff is stale
-	// news; leaving nextRetry in the future would keep the background
-	// loop skipping a repo that demonstrably works.
+
 	rs.nextRetry = time.Time{}
 }
 
-// fresh reports whether the mirror was fetched successfully within
-// fetchFreshWindow. A non-positive window disables the throttle.
 func (fs *fetchState) fresh(name string) bool {
 	if fetchFreshWindow <= 0 {
 		return false
@@ -266,12 +238,6 @@ func (fs *fetchState) fresh(name string) bool {
 	return time.Since(rs.lastOK) < fetchFreshWindow
 }
 
-// allowReclone reports whether a recovery reclone may run now, and
-// records it when the answer is yes. Callers hold the per-repo lock, so
-// two archive requests for the same repo cannot both be granted. The
-// slot is consumed before the clone runs, on purpose: a reclone that
-// fails halfway still spent egress, and a doomed clone retried per
-// request is exactly what the breaker exists to stop.
 func (fs *fetchState) allowReclone(name string) bool {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
@@ -291,8 +257,6 @@ func (fs *fetchState) allowReclone(name string) bool {
 	return true
 }
 
-// recloneCooldownRemaining is how much of the cooldown is left, for the
-// error the client gets instead of another full re-download.
 func (fs *fetchState) recloneCooldownRemaining(name string) time.Duration {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
@@ -307,28 +271,17 @@ func (fs *fetchState) recloneCooldownRemaining(name string) time.Duration {
 	return left.Truncate(time.Second)
 }
 
-// mirrorFetch pulls origin's heads into a bare mirror. It is a var so
-// tests can count fetches; production never reassigns it.
 var mirrorFetch = func(timeout time.Duration, bareRepo string) (string, error) {
 	return gitCmdTimeout(timeout, "-C", bareRepo, "fetch", "--prune", "origin", "+refs/heads/*:refs/heads/*")
 }
 
-// recloneMirror is handleArchive's recovery path: throw the mirror away
-// and clone it again. A var for the same reason as mirrorFetch -- the
-// circuit-breaker tests need to count reclones, and counting a
-// terabyte-scale operation is the whole point of the breaker.
 var recloneMirror = func(repoURL, bareRepo string) (string, error) {
 	_ = os.RemoveAll(bareRepo)
 	return gitCmd("clone", "--bare", repoURL, bareRepo)
 }
 
-// mirrorFetchTimeout matches the old gitCmd default the request
-// handlers used before the fetch was funneled through one helper.
 const mirrorFetchTimeout = 2 * time.Minute
 
-// fetchMirrorIfStale runs the mirror fetch unless the repo is still
-// inside its freshness window, in which case it reports skipped=true
-// and touches the network not at all.
 func fetchMirrorIfStale(hash, bareRepo string) (out string, skipped bool, err error) {
 	name := stateKey(hash)
 	if bgFetch.fresh(name) {
@@ -341,10 +294,6 @@ func fetchMirrorIfStale(hash, bareRepo string) (out string, skipped bool, err er
 	return out, false, err
 }
 
-// refreshMirrorBestEffort is the throttled fetch for read-only handlers
-// that can serve slightly stale refs: a failure is logged, never fatal.
-// Before the throttle these handlers dropped the fetch error on the
-// floor, so the log line is new information.
 func refreshMirrorBestEffort(hash, bareRepo string) {
 	if _, skipped, err := fetchMirrorIfStale(hash, bareRepo); err != nil {
 		log.Printf("warning: mirror fetch for %s failed, serving cached refs: %v", hash, err)
@@ -380,9 +329,6 @@ func (fs *fetchState) problems() []string {
 	return msgs
 }
 
-// recentReclones counts reclones inside the last 24h. allowReclone
-// prunes the slice as it appends, but /health can be read long after
-// the last reclone, so the window is applied on read too.
 func recentReclones(at []time.Time) int {
 	n := 0
 	for _, t := range at {
@@ -393,7 +339,6 @@ func recentReclones(at []time.Time) int {
 	return n
 }
 
-// friendlyFetchError translates raw git/SSH errors into actionable messages.
 func friendlyFetchError(raw string) string {
 	switch {
 	case strings.Contains(raw, "cannot fork"):
@@ -416,9 +361,6 @@ func friendlyFetchError(raw string) string {
 	}
 }
 
-// backgroundFetchLoop keeps gitcache fresh. Per-repo failure doubles
-// the retry interval (cap 10m); a 100% failure cycle backs the whole
-// loop off to avoid fork-exhaustion death spirals.
 func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 	if interval <= 0 {
 		interval = 30 * time.Second
@@ -480,10 +422,7 @@ func backgroundFetchLoop(ctx context.Context, interval time.Duration) {
 				bgFetch.mu.Unlock()
 				log.Printf("background fetch: %s failed (retry in %s): %s", e.Name(), rs.backoff, errMsg)
 			} else {
-				// Record success even for repos with no prior state:
-				// lastOK is what the request-side freshness throttle
-				// reads, so a repo that has never failed still needs
-				// an entry.
+
 				rs = bgFetch.entry(e.Name())
 				rs.lastError = ""
 				rs.backoff = 0
@@ -536,7 +475,6 @@ func handleHealthCombined(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-// GET /archive?repo=...&branch=... → tar.gz, cached by commit hash.
 func handleArchive(w http.ResponseWriter, r *http.Request) {
 	repoURL := r.URL.Query().Get("repo")
 	branch := r.URL.Query().Get("branch")
@@ -577,11 +515,7 @@ func handleArchive(w http.ResponseWriter, r *http.Request) {
 		case skipped:
 			log.Printf("archive: %s fetched within %s, serving mirror as-is", hash, fetchFreshWindow)
 		case err != nil:
-			// A persistently failing fetch used to re-download the
-			// entire repository once per archive request. The breaker
-			// hands the git error to the client instead; the error text
-			// names the actual problem (a conflicting ref, say) and no
-			// operator can fix what they never see.
+
 			if !bgFetch.allowReclone(stateKey(hash)) {
 				left := bgFetch.recloneCooldownRemaining(stateKey(hash))
 				log.Printf("archive: fetch failed for %s and recovery reclone is on cooldown (%s left): %v", hash, left, err)
@@ -684,7 +618,6 @@ func handleRepos(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(repos)
 }
 
-// sshHint returns a helpful message if the git error looks like an SSH auth failure.
 func sshHint(output string) string {
 	if strings.Contains(output, "Permission denied") || strings.Contains(output, "Host key verification failed") {
 		return "hint: SSH key rejected -- run: sparkwing cluster update-ssh-key --name <cluster> --github-ssh-key ~/.ssh/<your-key>"
@@ -692,15 +625,10 @@ func sshHint(output string) string {
 	return ""
 }
 
-// gitCmd runs a git command with a default 2-minute timeout.
-// Prevents hung git operations (network issues, unresponsive remotes)
-// from blocking HTTP handlers indefinitely.
 func gitCmd(args ...string) (string, error) {
 	return gitCmdTimeout(2*time.Minute, args...)
 }
 
-// enableSHAFetch flips uploadpack.allowReachableSHA1InWant so runners
-// can `git fetch --depth 1 origin <SHA>`. Idempotent; failure logs only.
 func enableSHAFetch(bareRepo string) {
 	if out, err := gitCmd("-C", bareRepo, "config",
 		"uploadpack.allowReachableSHA1InWant", "true"); err != nil {
@@ -708,11 +636,6 @@ func enableSHAFetch(bareRepo string) {
 	}
 }
 
-// gitForkSem caps concurrent git subprocesses; webhook bursts at
-// tight memory limits otherwise hit fork() EAGAIN. Capacity is set
-// by cache.New from Config.GitForkLimit. The default capacity here
-// keeps unit tests that exercise gitCmd directly (without going
-// through cache.New) workable.
 var gitForkSem = make(chan struct{}, 4)
 
 func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
@@ -740,8 +663,6 @@ func gitCmdTimeout(timeout time.Duration, args ...string) (string, error) {
 	return string(out), err
 }
 
-// archiveToFile runs `git archive --format=tar <branch> | gzip > <outPath>`
-// using piped exec commands -- no shell involved, safe from injection.
 func archiveToFile(bareRepo, branch, outPath string) error {
 	gitArchive := exec.Command("git", "-C", bareRepo, "archive", "--format=tar", "--", branch)
 	gzipCmd := exec.Command("gzip")
@@ -777,8 +698,6 @@ func archiveToFile(bareRepo, branch, outPath string) error {
 	return nil
 }
 
-// GET /file?repo=X&branch=Y&path=.sparkwing/sparkwing.yaml
-// Returns the raw content of a single file from the cached bare repo.
 func handleFile(w http.ResponseWriter, r *http.Request) {
 	repoURL := r.URL.Query().Get("repo")
 	branch := r.URL.Query().Get("branch")
@@ -819,9 +738,6 @@ func handleFile(w http.ResponseWriter, r *http.Request) {
 	w.Write(out)
 }
 
-// GET /tree-hash?repo=X&branch=Y&path=services/api
-// Returns the git tree hash for a subdirectory -- content-addressable.
-// Same content = same hash, regardless of commit.
 func handleTreeHash(w http.ResponseWriter, r *http.Request) {
 	repoURL := r.URL.Query().Get("repo")
 	branch := r.URL.Query().Get("branch")
@@ -863,8 +779,6 @@ func handleTreeHash(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(strings.TrimSpace(string(out))))
 }
 
-// GET /branch-contains?repo=X&branch=main&commit=abc123
-// Returns 200 if the commit is an ancestor of the branch, 404 otherwise.
 func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 	repoURL := r.URL.Query().Get("repo")
 	branch := r.URL.Query().Get("branch")
@@ -905,10 +819,6 @@ func handleBranchContains(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "commit %s is on branch %s", commit, branch)
 }
 
-// POST /artifacts/{jobID}?path=coverage/report.html -- upload a file
-// GET  /artifacts/{jobID}?glob=*.html -- download artifacts as tar.gz
-// GET  /artifacts/{jobID} -- list artifacts for a job
-// handleBin serves compiled pipeline binaries by content hash.
 var validBinHash = regexp.MustCompile(`^[0-9a-f]{8}(-[0-9a-f]{8}){0,3}$`)
 
 func handleBin(w http.ResponseWriter, r *http.Request) {
@@ -955,13 +865,8 @@ func handleBin(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// Cache key validation: alphanumeric, hyphens, underscores, dots, 1-128 chars.
-// Keys are user-generated from lockfile hashes, e.g. "gems-abc123def456".
 var validCacheKey = regexp.MustCompile(`^[a-zA-Z0-9._-]{1,128}$`)
 
-// handleCache implements a content-addressed blob store for dependency caches.
-// Pipelines tar up their dependency directories (gems, node_modules, etc.)
-// and store/restore them keyed by a hash of the lockfile.
 func handleCache(w http.ResponseWriter, r *http.Request) {
 	key := strings.TrimPrefix(r.URL.Path, "/cache/")
 	if !validCacheKey.MatchString(key) {
@@ -1185,10 +1090,6 @@ func contains(s []string, v string) bool {
 
 var uploadsDir = "/data/uploads"
 
-// POST /upload -- accepts a tarball, stores with content-addressed ID, returns the ID.
-// Optional query params:
-//   - repo: git repo URL (for incremental sync)
-//   - base: commit hash to overlay the upload on top of (incremental sync)
 func handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -1228,8 +1129,6 @@ func handleUpload(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "size": len(data)})
 }
 
-// handleIncrementalUpload checks out the base commit, extracts the diff tarball on top,
-// then creates a new combined tarball.
 func handleIncrementalUpload(diffData []byte, repoURL, base string) (string, int, error) {
 	if err := validateGitRef(base); err != nil {
 		return "", 0, fmt.Errorf("invalid base ref: %w", err)
@@ -1294,7 +1193,6 @@ func handleIncrementalUpload(diffData []byte, repoURL, base string) (string, int
 	return id, len(combined), nil
 }
 
-// archiveToDir extracts a git archive of the given ref into a directory.
 func archiveToDir(bareRepo, ref, dir string) error {
 	gitArchive := exec.Command("git", "-C", bareRepo, "archive", "--format=tar", "--", ref)
 	tarExtract := exec.Command("tar", "-xf", "-", "-C", dir)
@@ -1319,7 +1217,6 @@ func archiveToDir(bareRepo, ref, dir string) error {
 	return tarExtract.Wait()
 }
 
-// GET /uploads/{id} -- download a previously uploaded tarball.
 func handleUploadDownload(w http.ResponseWriter, r *http.Request) {
 	id := strings.TrimPrefix(r.URL.Path, "/uploads/")
 	id = strings.TrimSuffix(id, ".tar.gz")
@@ -1337,9 +1234,6 @@ func handleUploadDownload(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, path)
 }
 
-// POST /sync/negotiate -- find common ancestor between sparkwing's local commits and gitcache's repo.
-// Request: {"repo": "git@...", "commits": ["abc123", "def456", ...]}
-// Response: {"ancestor": "def456", "found": true} or {"ancestor": "", "found": false}
 func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -1388,8 +1282,6 @@ func handleSyncNegotiate(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ancestor": "", "found": false})
 }
 
-// POST /sync/seed?repo=git@github.com:user/repo.git&sha=<commit> -- receive a git bundle and create/update a bare repo.
-// This lets the gitcache have git history without needing SSH access to clone.
 func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -1473,7 +1365,7 @@ func pruneUnreachableSeedObjects(bareRepo string) {
 }
 
 var (
-	repoNames   = map[string]string{} // name → repoURL
+	repoNames   = map[string]string{}
 	repoNamesMu sync.RWMutex
 	namesFile   = "/data/repo-names.json"
 )
@@ -1498,9 +1390,6 @@ func saveRepoNames() {
 	}
 }
 
-// POST /git/register?name=gitops&repo=git@github.com:user/repo.git
-// Registers a friendly name for a repo URL. If the repo isn't cached yet and
-// SSH is available, clones it. Otherwise it can be seeded via /sync/seed.
 func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -1551,17 +1440,6 @@ func handleGitRegister(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"name": name, "hash": hash, "cloned": true})
 }
 
-// POST /git/refresh?name=<friendly-name>  (or ?repo=<url>)
-//
-// Synchronously runs `git fetch` on the named bare repo so a freshly
-// pushed SHA shows up before the next dispatch tries to fetch it.
-// Closes the gitcache-lag race window. Best-effort: callers pass a
-// short timeout and continue on failure.
-//
-// Either `name` (preferred -- already registered) or `repo` (full URL,
-// auto-resolves via repoHash) works. Returns 404 if neither resolves
-// to a cached bare repo. Concurrent refreshes coalesce on the per-repo
-// lock so a webhook burst doesn't fan out N fetches.
 func handleGitRefresh(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -1595,9 +1473,7 @@ func handleGitRefresh(w http.ResponseWriter, r *http.Request) {
 	defer lock.Unlock()
 
 	enableSHAFetch(bareRepo)
-	// Deliberately NOT throttled by fetchFreshWindow: this endpoint
-	// exists to close the push-then-trigger race, so a caller who just
-	// pushed must get a real fetch even if one ran a second ago.
+
 	out, err := mirrorFetch(45*time.Second, bareRepo)
 	if err != nil {
 		log.Printf("eager refresh: %s failed: %v %s", hash, err, out)
@@ -1610,10 +1486,6 @@ func handleGitRefresh(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "hash": hash})
 }
 
-// autoRegisterRepos registers repos listed in
-// Config.AutoRegisterRepos on startup. Format: comma-separated
-// "name=url" pairs, e.g.
-// "gitops=git@github.com:your-org/gitops.git,my-app=git@github.com:..."
 func autoRegisterRepos() {
 	if autoRegisterReposSpec == "" {
 		return
@@ -1658,8 +1530,6 @@ func autoRegisterRepos() {
 	}
 }
 
-// handleGit routes git smart HTTP protocol requests.
-// URL pattern: /git/<name>/info/refs, /git/<name>/git-upload-pack, /git/<name>/git-receive-pack
 func handleGit(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/git/")
 	parts := strings.SplitN(path, "/", 2)

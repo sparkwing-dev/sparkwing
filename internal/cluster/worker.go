@@ -13,12 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-// RunWorker claims and executes triggers from the controller until
-// ctx is cancelled. Graceful shutdown: in-flight runs complete, new
-// polls stop. Returns nil on clean shutdown; a non-nil error only
-// for setup problems that make the worker unable to function
-// (unreachable controller at startup is NOT such a problem -- we
-// log and keep polling).
 func RunWorker(ctx context.Context, opts orchestrator.WorkerOptions) error {
 	if opts.ControllerURL == "" {
 		return errors.New("WorkerOptions.ControllerURL is required")

@@ -13,13 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// pgTestDSN returns the DSN to point Postgres conformance tests at,
-// or "" if no DSN is configured. Tests use t.Skip when this returns
-// empty so developers without a Postgres available still get a green
-// `go test ./pkg/store/...` run.
-//
-// CI is expected to set SPARKWING_TEST_PG_URL to a database the suite
-// can freely write to (it creates and drops schemas per test).
 func pgTestDSN(t *testing.T) string {
 	t.Helper()
 	dsn := os.Getenv("SPARKWING_TEST_PG_URL")
@@ -29,10 +22,6 @@ func pgTestDSN(t *testing.T) string {
 	return dsn
 }
 
-// openPGTestStore spins up a fresh Postgres schema scoped to the
-// current test, returning a *store.Store that operates against it and
-// a cleanup that drops the schema. Per-test isolation via schemas
-// (cheap) avoids needing per-test databases (expensive).
 func openPGTestStore(t *testing.T) *store.Store {
 	t.Helper()
 	baseDSN := pgTestDSN(t)
@@ -99,10 +88,6 @@ func withSearchPath(dsn, schema string) string {
 	return fmt.Sprintf("%s%ssearch_path=%s", dsn, sep, schema)
 }
 
-// TestPostgresOpenAndMigrate exercises the most basic guarantee: a
-// fresh Postgres database accepts the canonical schema and the store
-// reports its dialect correctly. Run with SPARKWING_TEST_PG_URL set;
-// skips otherwise.
 func TestPostgresOpenAndMigrate(t *testing.T) {
 	st := openPGTestStore(t)
 	if got, want := st.Dialect(), store.DialectPostgres; got != want {
@@ -127,11 +112,6 @@ func TestPostgresOpenAndMigrate(t *testing.T) {
 	}
 }
 
-// TestPostgresClaimNextReadyNode_Concurrent verifies the
-// FOR UPDATE SKIP LOCKED branch: two concurrent claimants against a
-// single ready node both succeed at running their transactions, but
-// only one wins the claim. The other should get ErrNotFound (no other
-// ready node), not block forever on the row lock.
 func TestPostgresClaimNextReadyNode_Concurrent(t *testing.T) {
 	st := openPGTestStore(t)
 	ctx := context.Background()
@@ -181,11 +161,6 @@ func TestPostgresClaimNextReadyNode_Concurrent(t *testing.T) {
 	}
 }
 
-// TestPostgresAcquireConcurrencySlot_Serializes verifies the FOR
-// UPDATE serialization on concurrency_entries: 5 concurrent
-// AcquireConcurrencySlot calls for the same key with capacity=1 must
-// produce exactly one Granted; the rest fall into Queue (default
-// policy). No call returns an error.
 func TestPostgresAcquireConcurrencySlot_Serializes(t *testing.T) {
 	st := openPGTestStore(t)
 	ctx := context.Background()

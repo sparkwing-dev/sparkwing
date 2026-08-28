@@ -13,10 +13,6 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/storage/conformance"
 )
 
-// TestConformance_ArtifactStore wires the shared conformance suite
-// against an in-process stub of the sparkwing-cache /bin/<key>
-// HTTP service. Each factory call gets a fresh stub (and therefore
-// fresh storage) so subtests stay isolated.
 func TestConformance_ArtifactStore(t *testing.T) {
 	conformance.TestArtifactStore(t, func() storage.ArtifactStore {
 		var mu sync.Mutex
@@ -54,5 +50,4 @@ func TestConformance_ArtifactStore(t *testing.T) {
 	})
 }
 
-// silence linter
 var _ = bytes.NewReader

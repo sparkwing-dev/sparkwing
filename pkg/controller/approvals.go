@@ -10,15 +10,12 @@ import (
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
 
-// requestApprovalReq is the body of POST /api/v1/runs/{run}/approvals/{node}/request.
 type requestApprovalReq struct {
 	Message   string `json:"message,omitempty"`
 	TimeoutMS int64  `json:"timeout_ms,omitempty"`
 	OnTimeout string `json:"on_timeout,omitempty"`
 }
 
-// handleRequestApproval creates an approvals row and flips the node to
-// approval_pending. Admin-scoped: only workers should create gates.
 func (s *Server) handleRequestApproval(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -60,19 +57,13 @@ func (s *Server) handleRequestApproval(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-// resolveApprovalReq is the body of POST /api/v1/runs/{run}/approvals/{node}.
 type resolveApprovalReq struct {
 	Resolution string `json:"resolution"`
 	Comment    string `json:"comment,omitempty"`
-	// Approver is honored only when auth is disabled or for
-	// timed_out resolutions from the orchestrator. Authenticated
-	// requests take the approver from the principal to prevent
-	// spoofing.
+	// safety: authenticated requests derive the approver from the principal.
 	Approver string `json:"approver,omitempty"`
 }
 
-// handleResolveApproval writes a human (or timeout) decision onto a
-// pending approval row.
 func (s *Server) handleResolveApproval(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -120,7 +111,6 @@ func (s *Server) handleResolveApproval(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, got)
 }
 
-// handleGetApproval returns the single approval row for a node.
 func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	nodeID := r.PathValue("nodeID")
@@ -136,8 +126,6 @@ func (s *Server) handleGetApproval(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, a)
 }
 
-// handleListApprovalsForRun returns every approval record attached to
-// a single run (pending + history).
 func (s *Server) handleListApprovalsForRun(w http.ResponseWriter, r *http.Request) {
 	runID := r.PathValue("id")
 	rows, err := s.store.ListApprovalsForRun(r.Context(), runID)
@@ -151,8 +139,6 @@ func (s *Server) handleListApprovalsForRun(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, map[string]any{"approvals": rows})
 }
 
-// handleListPendingApprovals returns every unresolved approval across
-// all runs.
 func (s *Server) handleListPendingApprovals(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.store.ListPendingApprovals(r.Context())
 	if err != nil {

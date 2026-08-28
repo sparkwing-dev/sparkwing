@@ -1,17 +1,4 @@
 #!/usr/bin/env bash
-#
-# Sparkwing Proxy Benchmark
-#
-# Demonstrates the impact of sparkwing-cache on Docker build times
-# for a full-stack Ruby + Node application.
-#
-# Scenarios:
-#   1. Cold build (no proxy, no cache)     -- baseline, everything from internet
-#   2. Rebuild (Docker layer cache)         -- fast, layers already exist
-#   3. Cold build with proxy (proxy warms)  -- similar to #1, but populates proxy
-#   4. New base image + proxy (proxy warm)  -- THE MONEY SHOT: layers busted, proxy saves the day
-#   5. New base image, no proxy             -- comparison: how slow without proxy
-#
 set -e
 cd "$(dirname "$0")"
 
@@ -19,7 +6,6 @@ PROXY_PORT=9777
 PROXY_PID=""
 RESULTS=()
 
-# ── helpers ──────────────────────────────────────────────
 
 cleanup() {
     if [ -n "$PROXY_PID" ]; then
@@ -51,7 +37,6 @@ time_build() {
     RESULTS+=("$label|${elapsed}")
 }
 
-# ── start proxy ──────────────────────────────────────────
 
 echo "Building sparkwing-cache..."
 (cd .. && go build -o /tmp/sparkwing-cache ./cmd/sparkwing-cache/)
@@ -70,17 +55,13 @@ done
 
 PROXY_URL="http://host.docker.internal:$PROXY_PORT"
 
-# ── Gemfile.lock ─────────────────────────────────────────
-# Generate Gemfile.lock if missing (needed for bundle install in Docker)
 if [ ! -f Gemfile.lock ]; then
     echo "Generating Gemfile.lock (one-time)..."
     docker run --rm -v "$PWD":/app -w /app ruby:3.3-alpine \
         sh -c "apk add --no-cache build-base postgresql-dev linux-headers gcompat && bundle lock" 2>&1 | tail -3
 fi
 
-# ── benchmarks ───────────────────────────────────────────
 
-# 1. Cold build -- no proxy, no cache
 echo ""
 echo "Clearing Docker build cache..."
 docker builder prune -af > /dev/null 2>&1 || true
@@ -91,13 +72,11 @@ time_build \
     --build-arg PROXY_URL="" \
     -t bench-cold
 
-# 2. Rebuild -- Docker layer cache
 time_build \
     "2. Warm rebuild (Docker cache)" \
     --build-arg PROXY_URL="" \
     -t bench-warm
 
-# 3. Cold build with proxy -- warms the proxy cache
 echo ""
 echo "Clearing Docker build cache..."
 docker builder prune -af > /dev/null 2>&1 || true
@@ -108,13 +87,11 @@ time_build \
     --build-arg PROXY_URL="$PROXY_URL" \
     -t bench-proxy-warm
 
-# Show proxy stats
 echo ""
 echo "Proxy cache after warming:"
 curl -s "http://localhost:$PROXY_PORT/stats" | python3 -m json.tool 2>/dev/null || \
     curl -s "http://localhost:$PROXY_PORT/stats"
 
-# 4. New base image + proxy -- cache busted, proxy saves the day
 echo ""
 echo "Clearing Docker build cache..."
 docker builder prune -af > /dev/null 2>&1 || true
@@ -127,7 +104,6 @@ time_build \
     --build-arg PROXY_URL="$PROXY_URL" \
     -t bench-newbase-proxy
 
-# 5. New base image, no proxy -- comparison
 echo ""
 echo "Clearing Docker build cache..."
 docker builder prune -af > /dev/null 2>&1 || true
@@ -140,7 +116,6 @@ time_build \
     --build-arg PROXY_URL="" \
     -t bench-newbase-noproxy
 
-# ── results ──────────────────────────────────────────────
 
 echo ""
 echo ""
@@ -158,7 +133,6 @@ done
 
 echo "╚══════════════════════════════════════════════════════════════╝"
 
-# Compute speedup
 if [ ${#RESULTS[@]} -ge 5 ]; then
     cold="${RESULTS[0]##*|}"
     newbase_proxy="${RESULTS[3]##*|}"
