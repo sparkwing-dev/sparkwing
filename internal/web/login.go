@@ -138,9 +138,9 @@ func loginSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 	}
 }
 
-// bootstrapSubmitHandler creates the first admin via the controller's
-// unauthenticated bootstrap path, then auto-logs-in so the user lands
-// on the dashboard rather than a re-rendered login page.
+// bootstrapSubmitHandler creates the first admin while controller authentication
+// is disabled, then auto-logs-in so the user lands on the dashboard rather than
+// a re-rendered login page.
 func bootstrapSubmitHandler(opts HandlerOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if opts.ControllerURL == "" {
@@ -285,9 +285,9 @@ func controllerBootstrapNeeded(ctx context.Context, controllerURL string) bool {
 	return body.Needed
 }
 
-// controllerCreateFirstUser posts an unauthenticated create-user. The
-// controller accepts it iff the users table is empty; otherwise it
-// returns 409 ("bootstrap closed") which bubbles up as an error here.
+// controllerCreateFirstUser posts without a bearer because bootstrap is only
+// available while controller authentication is disabled and the users table is
+// empty. A closed bootstrap returns an error to the login page.
 func controllerCreateFirstUser(ctx context.Context, controllerURL, user, pass string) error {
 	body, _ := json.Marshal(map[string]string{"name": user, "password": pass})
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost,

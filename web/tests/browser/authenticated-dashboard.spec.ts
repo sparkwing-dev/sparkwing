@@ -12,7 +12,7 @@ type ControllerState = {
   proxy_authorizations: string[];
 };
 
-test("authenticates the real dashboard without exposing its service bearer", async ({
+test("auth-disabled bootstrap authenticates the dashboard without exposing its service bearer", async ({
   page,
   context,
 }) => {

@@ -59,11 +59,10 @@ the health and metrics probes (k8s httpGet probes and Prometheus
 scrapes can't carry `Authorization`), the service-discovery endpoint
 the runner uses to find the cache pod, the browser session endpoints
 the dashboard uses to establish, validate, and end a session (login,
-logout, session), the bootstrap probe and the bootstrap-or-admin
-`POST /api/v1/users` (see below), and the GitHub webhook, which is
-HMAC-verified instead of bearer-authenticated. The logs service opens
-its health and metrics probes the same way. Every registered route is
-listed in
+logout, session), the bootstrap probe, and the GitHub webhook, which
+is HMAC-verified instead of bearer-authenticated. The logs service
+opens its health and metrics probes the same way. Every registered
+route is listed in
 [api-reference.md](api-reference.md).
 
 With controller-backed dashboard login enabled, the browser authenticates
