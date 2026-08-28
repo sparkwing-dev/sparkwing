@@ -29,6 +29,9 @@ type Server struct {
 	// githubWebhookSecret verifies HMAC signatures on /webhooks/github
 	// deliveries. Empty = endpoint returns 503.
 	githubWebhookSecret string
+	// githubCommitStatuses posts pull-request run outcomes back to the
+	// head commit. Nil disables outbound GitHub status reporting.
+	githubCommitStatuses *githubCommitStatusReporter
 	// queueTimeout is how long a node may sit with ready_at set and
 	// claimed_by NULL before the reaper terminates it with
 	// failure_reason=queue_timeout. Zero disables the sweep.
@@ -585,7 +588,11 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			for _, id := range ids {
 				run, err := s.store.GetRun(ctx, id)
 				if err == nil && run.FinishedAt == nil {
-					_ = s.store.FinishRun(ctx, id, "failed", "runner lease expired")
+					if ferr := s.store.FinishRun(ctx, id, "failed", "runner lease expired"); ferr != nil {
+						s.logger.Error("finish reaped run failed", "run_id", id, "err", ferr)
+					} else {
+						s.reportGitHubCommitStatus(ctx, id, "failed")
+					}
 					if nids, nerr := store.Maintenance.FailNodesInRun(s.store, ctx, id,
 						"runner lease expired before node reported completion",
 						store.FailureRunnerLeaseExpired); nerr != nil {
@@ -611,6 +618,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale pending run", "run_id", id)
+					s.reportGitHubCommitStatus(ctx, id, "failed")
 				}
 			}
 
@@ -621,6 +629,7 @@ func (s *Server) runReaper(ctx context.Context, interval time.Duration) {
 			} else {
 				for _, id := range ids {
 					s.logger.Warn("reaped stale running run", "run_id", id)
+					s.reportGitHubCommitStatus(ctx, id, "failed")
 				}
 			}
 

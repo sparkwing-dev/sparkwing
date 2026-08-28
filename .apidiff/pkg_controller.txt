@@ -101,6 +101,7 @@ func (s *Server) WithCachePodURL(url string) *Server
 func (s *Server) WithCacheURL(url string) *Server
 func (s *Server) WithCostRate(rate float64, source string) *Server
 func (s *Server) WithDispatcher(d Dispatcher) *Server
+func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server
 func (s *Server) WithGitHubWebhookSecret(secret string) *Server
 func (s *Server) WithLogsURL(url string) *Server
 func (s *Server) WithQueueTimeout(d time.Duration) *Server

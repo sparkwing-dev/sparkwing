@@ -99,7 +99,7 @@ services:
       - SPARKWING_CORS_ORIGIN=${DASHBOARD_URL:-https://sparkwing.example.com}
       # GitHub webhook secret for HMAC verification on /webhooks/github.
       - GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET:?GITHUB_WEBHOOK_SECRET must be set in .env}
-      # Optional: GitHub token for posting status checks back to PRs.
+      # Optional: GitHub token for posting commit statuses back to PRs.
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
 
   # -------- sparkwing-web --------

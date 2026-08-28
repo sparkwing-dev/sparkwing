@@ -85,6 +85,18 @@ spec:
                   name: {{ .Values.controller.githubWebhookSecret.name | quote }}
                   key: {{ .Values.controller.githubWebhookSecret.key | quote }}
             {{- end }}
+            {{- if .Values.controller.githubStatusToken.name }}
+            # Posts pull_request run outcomes to the GitHub head commit.
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.controller.githubStatusToken.name | quote }}
+                  key: {{ .Values.controller.githubStatusToken.key | quote }}
+            {{- end }}
+            {{- if .Values.controller.dashboardURL }}
+            - name: SPARKWING_DASHBOARD_URL
+              value: {{ .Values.controller.dashboardURL | quote }}
+            {{- end }}
             {{- if .Values.controller.secretsKey.name }}
             # AT-REST encryption key for the secrets store.
             # Without it, the controller logs a WARNING at startup

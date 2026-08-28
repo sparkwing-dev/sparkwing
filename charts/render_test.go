@@ -135,8 +135,18 @@ func TestWebCacheURLFollowsTheSubChartNaming(t *testing.T) {
 // renderedEnvVar / renderedContainer / renderedDeployment are the
 // slice of a Deployment these tests read.
 type renderedEnvVar struct {
-	Name  string `yaml:"name"`
-	Value string `yaml:"value"`
+	Name      string                  `yaml:"name"`
+	Value     string                  `yaml:"value"`
+	ValueFrom *renderedEnvValueSource `yaml:"valueFrom"`
+}
+
+type renderedEnvValueSource struct {
+	SecretKeyRef *renderedSecretKeyRef `yaml:"secretKeyRef"`
+}
+
+type renderedSecretKeyRef struct {
+	Name string `yaml:"name"`
+	Key  string `yaml:"key"`
 }
 
 type renderedContainer struct {
@@ -194,6 +204,46 @@ func runnerEnv(t *testing.T, rendered string) map[string]string {
 func renderRunner(t *testing.T, sets ...string) string {
 	t.Helper()
 	return helmRender(t, "./sparkwing-runner-bundle", "templates/runner-deployment.yaml", "sparkwing", sets...)
+}
+
+func renderController(t *testing.T, sets ...string) renderedContainer {
+	t.Helper()
+	rendered := helmRender(t, "./sparkwing-full", "templates/controller-deployment.yaml", "sparkwing", sets...)
+	return runnerContainer(t, rendered)
+}
+
+func TestControllerGitHubStatusEnvironment(t *testing.T) {
+	defaultController := renderController(t)
+	for _, env := range defaultController.Env {
+		if env.Name == "GITHUB_TOKEN" || env.Name == "SPARKWING_DASHBOARD_URL" {
+			t.Errorf("default controller unexpectedly sets %s", env.Name)
+		}
+	}
+
+	configured := renderController(t,
+		"controller.githubStatusToken.name=github-status",
+		"controller.githubStatusToken.key=credential",
+		"controller.dashboardURL=https://sparkwing.example.com/team",
+	)
+	var token *renderedEnvVar
+	dashboardURL := ""
+	for i := range configured.Env {
+		switch configured.Env[i].Name {
+		case "GITHUB_TOKEN":
+			token = &configured.Env[i]
+		case "SPARKWING_DASHBOARD_URL":
+			dashboardURL = configured.Env[i].Value
+		}
+	}
+	if token == nil || token.ValueFrom == nil || token.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("GITHUB_TOKEN secretKeyRef missing: %+v", token)
+	}
+	if got := *token.ValueFrom.SecretKeyRef; got.Name != "github-status" || got.Key != "credential" {
+		t.Errorf("GITHUB_TOKEN secretKeyRef = %+v", got)
+	}
+	if dashboardURL != "https://sparkwing.example.com/team" {
+		t.Errorf("SPARKWING_DASHBOARD_URL = %q", dashboardURL)
+	}
 }
 
 // A default install pays for every dependency fetch twice: once in

@@ -21,6 +21,13 @@ and on `pull_request` (opened / synchronize / reopened, against the PR
 head), and answers `ping`; other event types and other `pull_request`
 actions are accepted and ignored.
 
+When `GITHUB_TOKEN` is set, the controller uses it only for outbound
+commit-status requests for `pull_request` webhook runs. Prefer a
+fine-grained token limited to the served repositories with **Commit
+statuses: Read and write**. The token never enters trigger environment,
+run state, logs, or the dashboard. An empty token disables outbound
+status reporting.
+
 ## Secrets at rest
 
 Encryption at rest is **opt-in and off by default.** Configure a master
@@ -123,3 +130,5 @@ The signing key is release machinery, not per-user configuration:
 - **Encrypt etcd / your secret store.** Kubernetes Secrets are
   base64, not encrypted, unless the cluster enables it.
 - **Rotate the GitHub credentials and cache SSH key** periodically.
+- **Limit the status token.** Give the controller's `GITHUB_TOKEN` commit-status
+  write access only to repositories whose pull requests Sparkwing reports.
