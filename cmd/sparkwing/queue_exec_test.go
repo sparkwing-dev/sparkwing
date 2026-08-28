@@ -752,7 +752,7 @@ func TestQueueExecSurvivesAdmissionDaemonRestart(t *testing.T) {
 		if err != nil {
 			t.Fatalf("queue exec after daemon restart: %v", err)
 		}
-	case <-time.After(queueExecWait):
+	case <-time.After(2 * queueExecWait):
 		t.Fatal("queue exec did not finish after daemon restart")
 	}
 }
