@@ -252,6 +252,7 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.controller.tokenSecret.name` | Bearer-token Secret. | `""` |
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
+| `sparkwing-runner-bundle.volumePermissions.enabled` | Run a CHOWN-only init before the runner. | `true` |
 | `sparkwing-runner-bundle.cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 
 The automatic controller URL follows the chart's default resource names. If
@@ -323,6 +324,10 @@ Restricted namespace, arrange the configured UID/GID through the CSI driver or
 another provisioning step and set `volumePermissions.enabled=false`. This
 opt-out removes only the init container; the application containers retain the
 chart's non-root, drop-all-capabilities security context.
+
+The runner sub-chart applies the same bounded ownership init to its
+`/tmp/sparkwing` home. Configure its independent opt-out with
+`sparkwing-runner-bundle.volumePermissions.enabled=false`.
 
 For a clean uninstall:
 

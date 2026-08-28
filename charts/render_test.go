@@ -380,6 +380,66 @@ func TestFullChartVolumePermissionsCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestRunnerBundlePreparesWritableHomeWithoutWeakeningTheRuntime(t *testing.T) {
+	doc := deploymentDocument(t, renderRunner(t))
+	pod := doc.Spec.Template.Spec
+	if pod.SecurityContext.RunAsNonRoot == nil || !*pod.SecurityContext.RunAsNonRoot ||
+		pod.SecurityContext.RunAsUser == nil || *pod.SecurityContext.RunAsUser != 65534 {
+		t.Fatalf("runtime pod security = %+v, want non-root uid 65534", pod.SecurityContext)
+	}
+	if len(pod.InitContainers) != 1 {
+		t.Fatalf("init containers = %d, want one ownership initializer", len(pod.InitContainers))
+	}
+	init := pod.InitContainers[0]
+	if init.Name != "volume-permissions" || !reflect.DeepEqual(init.Command, []string{"/bin/chown"}) ||
+		!reflect.DeepEqual(init.Args, []string{"65534:65534", "/tmp/sparkwing"}) {
+		t.Fatalf("ownership init = %+v", init)
+	}
+	if len(pod.Containers) != 1 || init.Image != pod.Containers[0].Image {
+		t.Fatalf("ownership image %q does not match runtime image", init.Image)
+	}
+	security := init.SecurityContext
+	if security.RunAsNonRoot == nil || *security.RunAsNonRoot ||
+		security.RunAsUser == nil || *security.RunAsUser != 0 ||
+		security.RunAsGroup == nil || *security.RunAsGroup != 0 ||
+		security.AllowPrivilegeEscalation == nil || *security.AllowPrivilegeEscalation ||
+		security.ReadOnlyRootFilesystem == nil || !*security.ReadOnlyRootFilesystem ||
+		!reflect.DeepEqual(security.Capabilities.Drop, []string{"ALL"}) ||
+		!reflect.DeepEqual(security.Capabilities.Add, []string{"CHOWN"}) {
+		t.Fatalf("ownership init security = %+v, want root with CHOWN only", security)
+	}
+	wantMounts := []renderedVolumeMount{{Name: "sparkwing-home", MountPath: "/tmp/sparkwing"}}
+	if !reflect.DeepEqual(init.VolumeMounts, wantMounts) {
+		t.Fatalf("ownership init mounts = %+v, want %+v", init.VolumeMounts, wantMounts)
+	}
+}
+
+func TestRunnerBundleVolumePermissionsCanBeDisabled(t *testing.T) {
+	doc := deploymentDocument(t, renderRunner(t, "volumePermissions.enabled=false"))
+	if len(doc.Spec.Template.Spec.InitContainers) != 0 {
+		t.Fatal("runner rendered ownership init with volumePermissions disabled")
+	}
+}
+
+func TestFullChartVendorsRunnerVolumePermissions(t *testing.T) {
+	resources := renderedResources(t, helmRenderAll(t, "./sparkwing-full", "sparkwing", "default"))
+	runner := componentResource(t, resources, "Deployment", "runner")
+	if len(runner.Spec.Template.Spec.InitContainers) != 1 {
+		t.Fatalf("vendored runner init containers = %d, want one", len(runner.Spec.Template.Spec.InitContainers))
+	}
+	init := runner.Spec.Template.Spec.InitContainers[0]
+	if init.Name != "volume-permissions" || !reflect.DeepEqual(init.Args, []string{"65534:65534", "/tmp/sparkwing"}) {
+		t.Fatalf("vendored runner ownership init = %+v", init)
+	}
+
+	resources = renderedResources(t, helmRenderAll(t, "./sparkwing-full", "sparkwing", "default",
+		"sparkwing-runner-bundle.volumePermissions.enabled=false"))
+	runner = componentResource(t, resources, "Deployment", "runner")
+	if len(runner.Spec.Template.Spec.InitContainers) != 0 {
+		t.Fatal("vendored runner rendered ownership init with volumePermissions disabled")
+	}
+}
+
 func runnerEnv(t *testing.T, rendered string) map[string]string {
 	t.Helper()
 	out := map[string]string{}

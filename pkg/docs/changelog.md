@@ -132,13 +132,13 @@ code change to unlock.
   image coordinates. Existing-cluster runs require an exact namespace/release
   cleanup allow-list, use a ConfigMap-backed Git fixture instead of a node host
   mount, and leave cluster infrastructure intact.
-- **chart:** Controller and web volumes are now assigned to the configured
+- **chart:** Controller, web, and runner home volumes are now assigned to the configured
   non-root UID by a short CHOWN-only init container before startup, so their
   private Sparkwing homes work on root-owned PVC and `emptyDir` mounts without
   weakening the application containers. Operators whose storage driver already
-  sets ownership can disable `volumePermissions.enabled`; this is also required
-  by Restricted Pod Security and by custom images that do not contain
-  `/bin/chown`.
+  sets ownership can disable the corresponding `volumePermissions.enabled`;
+  this is also required by Restricted Pod Security and by custom images that
+  do not contain `/bin/chown`.
 - **s3 state:** The local SQLite outbox now retains a queued state or artifact
   write when replay reaches a non-transient object-store error, and `Drain`
   returns that error. The background drainer emits one structured warning for

@@ -279,6 +279,9 @@ rbac:
 imagePullSecrets: []
 # - name: ghcr-pull-secret
 
+volumePermissions:
+  enabled: true
+
 # -----------------------------------------------------------------------
 # 7. Pod-level security defaults. Applied uniformly across runner +
 #    cache + logs unless a per-component override sets its own.

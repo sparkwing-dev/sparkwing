@@ -169,6 +169,18 @@ For an ephemeral install (kind / CI / a throwaway test):
 
 Both volumes fall back to `emptyDir` when storage is disabled.
 
+The runner's Sparkwing home is also an `emptyDir`. By default, a short init
+container assigns its mount root to the configured non-root UID and GID before
+the runner starts. The init runs as UID 0 with a read-only root filesystem, no
+privilege escalation, and only the `CHOWN` capability; the runner remains
+non-root with all capabilities dropped. The enabled path requires the runner
+image to contain `/bin/chown`.
+
+Set `volumePermissions.enabled=false` when the mount is already owned by
+`podSecurityContext.runAsUser:podSecurityContext.fsGroup`. The opt-out is also
+required by Restricted Pod Security, which rejects the default UID 0 init
+container.
+
 ## RBAC
 
 The chart creates a namespace-scoped Role + RoleBinding. The runner
