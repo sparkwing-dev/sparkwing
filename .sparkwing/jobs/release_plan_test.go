@@ -140,6 +140,13 @@ func TestReleasePlanSerializesTemplateVerificationAfterLocalGates(t *testing.T) 
 	}
 }
 
+func TestReleasePlanSerializesPrePushAfterPreCommit(t *testing.T) {
+	deps := ancestors(t, releasePlan(t), "gate-pre-push")
+	if !deps["gate-pre-commit"] {
+		t.Error("gate-pre-push must depend on gate-pre-commit")
+	}
+}
+
 func TestReleasePlanRestoreDoesNotGateTagPush(t *testing.T) {
 	plan := releasePlan(t)
 
