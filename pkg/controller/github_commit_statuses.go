@@ -19,10 +19,11 @@ import (
 )
 
 const (
-	githubAPIBaseURL       = "https://api.github.com"
-	githubStatusAPIVersion = "2022-11-28"
-	githubStatusTimeout    = 10 * time.Second
-	githubStatusQueueSize  = 64
+	githubAPIBaseURL        = "https://api.github.com"
+	githubStatusAPIVersion  = "2022-11-28"
+	githubStatusTimeout     = 10 * time.Second
+	githubStatusQueueSize   = 64
+	githubStatusHistorySize = 4096
 )
 
 type githubCommitStatusReporter struct {
@@ -37,7 +38,11 @@ type githubCommitStatusReporter struct {
 	mu           sync.Mutex
 	accepting    bool
 	capacity     int
+	historyLimit int
 	slots        map[githubCommitStatusKey]*githubCommitStatusSlot
+	generations  map[githubCommitStatusTarget]githubCommitStatusGeneration
+	sequence     uint64
+	touched      uint64
 }
 
 type githubCommitStatusJob struct {
@@ -52,11 +57,26 @@ type githubCommitStatusKey struct {
 }
 
 type githubCommitStatusSlot struct {
+	target           githubCommitStatusTarget
+	generation       uint64
 	pending          *githubCommitStatusJob
 	terminal         *githubCommitStatusJob
 	unresolved       bool
 	inFlight         bool
 	awaitingTerminal bool
+}
+
+type githubCommitStatusTarget struct {
+	owner   string
+	repo    string
+	sha     string
+	context string
+}
+
+type githubCommitStatusGeneration struct {
+	runID      string
+	generation uint64
+	touched    uint64
 }
 
 type githubCommitStatusRequest struct {
@@ -80,7 +100,8 @@ type githubCommitStatus struct {
 // pull_request webhook runs. token authenticates requests to GitHub; an empty
 // token disables reporting. dashboardURL optionally supplies the dashboard
 // base URL used for each status's run-detail link. The dashboard URL must be
-// HTTP(S), include a host, and omit credentials, query, and fragment.
+// HTTP(S), include a host, and omit credentials, query, and fragment. For one
+// commit and pipeline, a newer accepted run suppresses older terminal updates.
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server {
 	if s.githubCommitStatuses != nil {
 		s.githubCommitStatuses.stop()
@@ -118,7 +139,9 @@ func newGitHubCommitStatusReporterWithCapacity(token, dashboardURL, apiBaseURL s
 		done:         make(chan struct{}),
 		accepting:    true,
 		capacity:     capacity,
+		historyLimit: githubStatusHistorySize,
 		slots:        make(map[githubCommitStatusKey]*githubCommitStatusSlot),
+		generations:  make(map[githubCommitStatusTarget]githubCommitStatusGeneration),
 	}
 	go r.run()
 	return r
@@ -162,49 +185,84 @@ func (s *Server) githubCommitStatus(ctx context.Context, runID, runStatus string
 
 func (r *githubCommitStatusReporter) enqueue(logger *slog.Logger, status githubCommitStatus) bool {
 	key := githubCommitStatusKey{runID: status.RunID, pipeline: status.Pipeline}
-	job := &githubCommitStatusJob{key: key, logger: logger, status: status}
+	target := githubCommitStatusTargetFor(status)
 	r.mu.Lock()
 	slot := r.slots[key]
-	if slot == nil && r.accepting && len(r.slots) < r.capacity {
-		slot = &githubCommitStatusSlot{}
-		r.slots[key] = slot
-	}
-	accepted := r.accepting && slot != nil
-	if accepted {
-		if status.State == "pending" {
-			slot.pending = job
-			slot.awaitingTerminal = slot.terminal == nil
+	accepted := false
+	reason := "capacity"
+	if r.accepting && status.State != "pending" && (slot == nil || !slot.unresolved) {
+		if current, ok := r.generations[target]; ok && current.runID != status.RunID {
+			reason = "superseded"
 		} else {
-			slot.terminal = job
-			slot.awaitingTerminal = false
+			r.touchGenerationLocked(target)
 		}
+	}
+	if r.accepting && reason != "superseded" {
+		if slot == nil && len(r.slots) < r.capacity {
+			slot = &githubCommitStatusSlot{target: target}
+			r.slots[key] = slot
+		}
+		if slot != nil && slot.target == target {
+			if slot.generation == 0 {
+				slot.generation = r.nextGenerationLocked()
+			}
+			job := &githubCommitStatusJob{
+				key: key, logger: logger, status: status,
+			}
+			if status.State == "pending" {
+				if r.activateGenerationLocked(key, slot) {
+					slot.pending = job
+					slot.awaitingTerminal = slot.terminal == nil
+					accepted = true
+				} else {
+					reason = "superseded"
+				}
+			} else if slot.unresolved {
+				slot.terminal = job
+				slot.awaitingTerminal = false
+				accepted = true
+			} else if _, ok := r.generations[target]; ok || r.rememberGenerationLocked(target, status.RunID, slot.generation) {
+				slot.terminal = job
+				slot.awaitingTerminal = false
+				accepted = true
+			}
+		}
+	}
+	if accepted {
 		r.signalLocked()
+	} else if slot != nil && !slot.inFlight && !slot.unresolved && slot.pending == nil && slot.terminal == nil {
+		delete(r.slots, key)
 	}
 	r.mu.Unlock()
 	if !accepted {
-		logGitHubCommitStatusDrop(logger, status)
+		logGitHubCommitStatusDrop(logger, status, reason)
 	}
 	return accepted
 }
 
 func (r *githubCommitStatusReporter) reserve(logger *slog.Logger, status githubCommitStatus) func(bool) {
 	key := githubCommitStatusKey{runID: status.RunID, pipeline: status.Pipeline}
-	job := &githubCommitStatusJob{key: key, logger: logger, status: status}
+	targetKey := githubCommitStatusTargetFor(status)
 	r.mu.Lock()
 	slot := r.slots[key]
 	if slot == nil && r.accepting && len(r.slots) < r.capacity {
-		slot = &githubCommitStatusSlot{}
+		slot = &githubCommitStatusSlot{target: targetKey, generation: r.nextGenerationLocked()}
 		r.slots[key] = slot
 	}
-	accepted := r.accepting && slot != nil
+	accepted := r.accepting && slot != nil && slot.target == targetKey
 	if accepted {
-		slot.pending = job
+		if slot.generation == 0 {
+			slot.generation = r.nextGenerationLocked()
+		}
+		slot.pending = &githubCommitStatusJob{
+			key: key, logger: logger, status: status,
+		}
 		slot.unresolved = true
 		r.signalLocked()
 	}
 	r.mu.Unlock()
 	if !accepted {
-		logGitHubCommitStatusDrop(logger, status)
+		logGitHubCommitStatusDrop(logger, status, "capacity")
 	}
 	var once sync.Once
 	return func(dispatchAccepted bool) {
@@ -217,12 +275,21 @@ func (r *githubCommitStatusReporter) reserve(logger *slog.Logger, status githubC
 }
 
 func (r *githubCommitStatusReporter) resolve(key githubCommitStatusKey, target *githubCommitStatusSlot, accepted bool) {
+	var dropped *githubCommitStatusJob
 	r.mu.Lock()
 	slot := r.slots[key]
 	if slot == target {
 		slot.unresolved = false
 		if !accepted {
 			slot.pending = nil
+			slot.awaitingTerminal = false
+			if current, ok := r.generations[slot.target]; ok && current.runID != key.runID {
+				slot.terminal = nil
+			}
+		} else if !r.activateGenerationLocked(key, slot) {
+			dropped = slot.pending
+			slot.pending = nil
+			slot.terminal = nil
 			slot.awaitingTerminal = false
 		} else {
 			slot.awaitingTerminal = slot.terminal == nil
@@ -233,6 +300,98 @@ func (r *githubCommitStatusReporter) resolve(key githubCommitStatusKey, target *
 		r.signalLocked()
 	}
 	r.mu.Unlock()
+	if dropped != nil {
+		logGitHubCommitStatusDrop(dropped.logger, dropped.status, "superseded")
+	}
+}
+
+func (r *githubCommitStatusReporter) nextGenerationLocked() uint64 {
+	r.sequence++
+	return r.sequence
+}
+
+func (r *githubCommitStatusReporter) activateGenerationLocked(key githubCommitStatusKey, slot *githubCommitStatusSlot) bool {
+	current, ok := r.generations[slot.target]
+	if ok && current.runID != key.runID && current.generation > slot.generation {
+		return false
+	}
+	if !ok || current.runID != key.runID || current.generation < slot.generation {
+		if !r.rememberGenerationLocked(slot.target, key.runID, slot.generation) {
+			return false
+		}
+		for otherKey, other := range r.slots {
+			if otherKey == key || other.target != slot.target || other.generation >= slot.generation {
+				continue
+			}
+			other.pending = nil
+			other.terminal = nil
+			other.awaitingTerminal = false
+			if !other.inFlight && !other.unresolved {
+				delete(r.slots, otherKey)
+			}
+		}
+	} else {
+		r.touchGenerationLocked(slot.target)
+	}
+	return true
+}
+
+func (r *githubCommitStatusReporter) rememberGenerationLocked(target githubCommitStatusTarget, runID string, generation uint64) bool {
+	if _, ok := r.generations[target]; !ok {
+		limit := r.historyLimit
+		if limit < 1 {
+			limit = 1
+		}
+		for len(r.generations) >= limit {
+			var oldestTarget githubCommitStatusTarget
+			oldestTouched := ^uint64(0)
+			found := false
+			for candidate, state := range r.generations {
+				if state.touched < oldestTouched && !r.targetActiveLocked(candidate) {
+					oldestTarget = candidate
+					oldestTouched = state.touched
+					found = true
+				}
+			}
+			if !found {
+				return false
+			}
+			delete(r.generations, oldestTarget)
+		}
+	}
+	r.touched++
+	r.generations[target] = githubCommitStatusGeneration{
+		runID: runID, generation: generation, touched: r.touched,
+	}
+	return true
+}
+
+func (r *githubCommitStatusReporter) touchGenerationLocked(target githubCommitStatusTarget) {
+	state, ok := r.generations[target]
+	if !ok {
+		return
+	}
+	r.touched++
+	state.touched = r.touched
+	r.generations[target] = state
+}
+
+func (r *githubCommitStatusReporter) targetActiveLocked(target githubCommitStatusTarget) bool {
+	for _, slot := range r.slots {
+		if slot.target == target {
+			return true
+		}
+	}
+	return false
+}
+
+func githubCommitStatusTargetFor(status githubCommitStatus) githubCommitStatusTarget {
+	return githubCommitStatusTarget{
+		owner:   strings.ToLower(status.Owner),
+		repo:    strings.ToLower(status.Repo),
+		sha:     strings.ToLower(status.SHA),
+		context: "sparkwing/" + status.Pipeline,
+	}
 }
 
 func (r *githubCommitStatusReporter) run() {
@@ -315,7 +474,7 @@ func (r *githubCommitStatusReporter) deliver(job githubCommitStatusJob) {
 	}
 }
 
-func logGitHubCommitStatusDrop(logger *slog.Logger, status githubCommitStatus) {
+func logGitHubCommitStatusDrop(logger *slog.Logger, status githubCommitStatus, reason string) {
 	if logger == nil {
 		return
 	}
@@ -324,6 +483,7 @@ func logGitHubCommitStatusDrop(logger *slog.Logger, status githubCommitStatus) {
 		"run_id", status.RunID,
 		"pipeline", status.Pipeline,
 		"state", status.State,
+		"reason", reason,
 	)
 }
 

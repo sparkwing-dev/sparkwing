@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -349,6 +350,179 @@ func TestGitHubCommitStatusReporterDropsWhenQueueIsFull(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "github commit status update dropped") {
 		t.Fatalf("drop was not logged: %s", logs.String())
+	}
+}
+
+func TestGitHubCommitStatusReporterSuppressesSupersededRedeliveryTerminal(t *testing.T) {
+	received := make(chan string, 3)
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body githubCommitStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode status: %v", err)
+		}
+		received <- body.State
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer github.Close()
+
+	logs := &lockedBuffer{}
+	logger := slog.New(slog.NewTextHandler(logs, nil))
+	reporter := newGitHubCommitStatusReporterWithCapacity("token", "", github.URL, github.Client(), 2)
+	shutdownGitHubStatusReporter(t, reporter)
+	first := githubCommitStatus{
+		Owner: "Acme", Repo: "Sample-App", SHA: "ABC123", Pipeline: "verify", RunID: "run-delivery-1", State: "pending",
+	}
+	second := githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: "abc123", Pipeline: "verify", RunID: "run-delivery-2", State: "pending",
+	}
+	resolveFirst := reporter.reserve(logger, first)
+	resolveFirst(true)
+	if got := waitForGitHubState(t, received); got != "pending" {
+		t.Fatalf("first state = %q, want pending", got)
+	}
+	resolveSecond := reporter.reserve(logger, second)
+	resolveSecond(true)
+	if got := waitForGitHubState(t, received); got != "pending" {
+		t.Fatalf("redelivery state = %q, want pending", got)
+	}
+	second.State = "failure"
+	if !reporter.enqueue(logger, second) {
+		t.Fatal("current terminal status was dropped")
+	}
+	if got := waitForGitHubState(t, received); got != "failure" {
+		t.Fatalf("current terminal state = %q, want failure", got)
+	}
+	first.State = "success"
+	if reporter.enqueue(logger, first) {
+		t.Fatal("superseded terminal status was accepted")
+	}
+	select {
+	case got := <-received:
+		t.Fatalf("superseded terminal was posted as %q", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+	if !strings.Contains(logs.String(), "reason=superseded") {
+		t.Fatalf("superseded terminal was not identified in logs: %s", logs.String())
+	}
+}
+
+func TestGitHubCommitStatusReporterIgnoresLateOlderReservationAcceptance(t *testing.T) {
+	received := make(chan string, 2)
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body githubCommitStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode status: %v", err)
+		}
+		received <- body.State
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer github.Close()
+
+	reporter := newGitHubCommitStatusReporterWithCapacity("token", "", github.URL, github.Client(), 2)
+	shutdownGitHubStatusReporter(t, reporter)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	older := githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: "abc123", Pipeline: "verify", RunID: "run-older", State: "pending",
+	}
+	newer := older
+	newer.RunID = "run-newer"
+	resolveOlder := reporter.reserve(logger, older)
+	resolveNewer := reporter.reserve(logger, newer)
+	resolveNewer(true)
+	if got := waitForGitHubState(t, received); got != "pending" {
+		t.Fatalf("newer state = %q, want pending", got)
+	}
+	resolveOlder(true)
+	select {
+	case got := <-received:
+		t.Fatalf("older pending was posted after newer pending as %q", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+	newer.State = "failure"
+	if !reporter.enqueue(logger, newer) {
+		t.Fatal("newer terminal was dropped")
+	}
+	if got := waitForGitHubState(t, received); got != "failure" {
+		t.Fatalf("newer terminal state = %q, want failure", got)
+	}
+}
+
+func TestGitHubCommitStatusReporterDroppedRedeliveryDoesNotSupersedeCurrentRun(t *testing.T) {
+	received := make(chan string, 2)
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body githubCommitStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode status: %v", err)
+		}
+		received <- body.State
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer github.Close()
+
+	reporter := newGitHubCommitStatusReporterWithCapacity("token", "", github.URL, github.Client(), 1)
+	shutdownGitHubStatusReporter(t, reporter)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	current := githubCommitStatus{
+		Owner: "acme", Repo: "sample-app", SHA: "abc123", Pipeline: "verify", RunID: "run-1", State: "pending",
+	}
+	resolveCurrent := reporter.reserve(logger, current)
+	resolveCurrent(true)
+	if got := waitForGitHubState(t, received); got != "pending" {
+		t.Fatalf("current state = %q, want pending", got)
+	}
+	dropped := current
+	dropped.RunID = "run-2"
+	resolveDropped := reporter.reserve(logger, dropped)
+	resolveDropped(true)
+	current.State = "success"
+	if !reporter.enqueue(logger, current) {
+		t.Fatal("current terminal was superseded by a dropped reservation")
+	}
+	if got := waitForGitHubState(t, received); got != "success" {
+		t.Fatalf("terminal state = %q, want success", got)
+	}
+}
+
+func TestGitHubCommitStatusReporterBoundsGenerationHistory(t *testing.T) {
+	received := make(chan string, 8)
+	github := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body githubCommitStatusRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode status: %v", err)
+		}
+		received <- body.State
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer github.Close()
+
+	reporter := newGitHubCommitStatusReporterWithCapacity("token", "", github.URL, github.Client(), 1)
+	reporter.historyLimit = 2
+	shutdownGitHubStatusReporter(t, reporter)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	for i := 0; i < 4; i++ {
+		status := githubCommitStatus{
+			Owner: "acme", Repo: "sample-app", SHA: fmt.Sprintf("sha-%d", i), Pipeline: "verify", RunID: fmt.Sprintf("run-%d", i), State: "pending",
+		}
+		if !reporter.enqueue(logger, status) {
+			t.Fatalf("pending %d was dropped", i)
+		}
+		if got := waitForGitHubState(t, received); got != "pending" {
+			t.Fatalf("pending %d state = %q", i, got)
+		}
+		status.State = "success"
+		if !reporter.enqueue(logger, status) {
+			t.Fatalf("terminal %d was dropped", i)
+		}
+		if got := waitForGitHubState(t, received); got != "success" {
+			t.Fatalf("terminal %d state = %q", i, got)
+		}
+		waitForGitHubStatusSlotRemoved(t, reporter, status)
+	}
+	reporter.mu.Lock()
+	historySize := len(reporter.generations)
+	reporter.mu.Unlock()
+	if historySize > 2 {
+		t.Fatalf("generation history size = %d, want at most 2", historySize)
 	}
 }
 
@@ -871,6 +1045,24 @@ func waitForGitHubStatusSlot(t *testing.T, reporter *githubCommitStatusReporter,
 		}
 		if time.Now().After(deadline) {
 			t.Fatal("github status slot did not reach expected state")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func waitForGitHubStatusSlotRemoved(t *testing.T, reporter *githubCommitStatusReporter, status githubCommitStatus) {
+	t.Helper()
+	key := githubCommitStatusKey{runID: status.RunID, pipeline: status.Pipeline}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		reporter.mu.Lock()
+		_, exists := reporter.slots[key]
+		reporter.mu.Unlock()
+		if !exists {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("github status slot was not removed")
 		}
 		time.Sleep(time.Millisecond)
 	}

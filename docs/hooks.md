@@ -92,8 +92,11 @@ the URL must use HTTP or HTTPS, include a host, and omit credentials, a
 query, and a fragment. Omitted or invalid values publish statuses without a
 target link. Status delivery is best-effort: GitHub errors are logged and
 never change webhook admission or the run result. Push, manual, and retry
-runs do not publish statuses. Programs serving `controller.Server.Handler`
-directly must call `Server.Shutdown`; `ServeWith` does this automatically.
+runs do not publish statuses. When overlapping or redelivered webhooks target
+the same commit and pipeline, the newest accepted run owns the status;
+terminal updates from superseded runs are ignored. Programs serving
+`controller.Server.Handler` directly must call `Server.Shutdown`; `ServeWith`
+does this automatically.
 
 ## Manual / API invocation
 
