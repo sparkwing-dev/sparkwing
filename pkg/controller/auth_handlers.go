@@ -167,16 +167,15 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCreateUserOrBootstrap is the outer-router entry for
-// POST /api/v1/users. When the users table is empty it accepts an
-// unauthenticated first-admin create; otherwise it delegates to the
-// admin-scoped handler. CreateFirstUser re-checks emptiness in-tx so
-// two concurrent bootstrap POSTs cannot both succeed.
+// handleCreateUserOrBootstrap accepts a first-admin create while
+// controller authentication is disabled and otherwise creates an
+// additional user. The route's auth middleware requires an admin
+// principal whenever authentication is enabled. CreateFirstUser
+// re-checks emptiness in-tx so two concurrent bootstrap POSTs cannot
+// both succeed.
 func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Request) {
 	if !s.bootstrapAllowed() {
-		s.authMiddleware().Middleware(
-			requireScope(ScopeAdmin, http.HandlerFunc(s.handleCreateUser)),
-		).ServeHTTP(w, r)
+		s.handleCreateUser(w, r)
 		return
 	}
 	var req createUserReq
@@ -194,7 +193,7 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
-	s.logger.Warn("bootstrap signup accepted: first admin created via unauthenticated /login",
+	s.logger.Warn("bootstrap signup accepted: first admin created while controller authentication is disabled",
 		"name", u.Name)
 	s.markBootstrapClosed()
 	writeJSON(w, http.StatusCreated, userJSON{
@@ -204,10 +203,12 @@ func (s *Server) handleCreateUserOrBootstrap(w http.ResponseWriter, r *http.Requ
 }
 
 // handleBootstrapNeeded is the unauthenticated probe the web pod hits
-// before rendering /login. Cached for 60s; latched false once any
-// user exists.
+// before rendering /login. Signup is available only while controller
+// authentication is disabled and the users table is empty.
 func (s *Server) handleBootstrapNeeded(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"needed": s.bootstrapAllowed()})
+	writeJSON(w, http.StatusOK, map[string]bool{
+		"needed": !s.AuthEnabled() && s.bootstrapAllowed(),
+	})
 }
 
 func (s *Server) handleListUsers(w http.ResponseWriter, r *http.Request) {

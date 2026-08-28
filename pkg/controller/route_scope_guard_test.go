@@ -14,7 +14,7 @@ import (
 // Every route registered on the authenticated mux must pass through
 // requireScope; an endpoint registered bare would be reachable by any
 // authenticated principal regardless of token scope. Routes that are
-// deliberately public (login, bootstrap, health, metrics) live on the
+// deliberately public (login, bootstrap probe, health, metrics) live on the
 // outer router, which this guard does not constrain. Mux routes that
 // deliberately accept any authenticated principal must be listed here
 // so the exception is a conscious, reviewed act.
