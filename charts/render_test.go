@@ -1,7 +1,10 @@
 package charts
 
 import (
+	"io"
 	"os/exec"
+	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -21,6 +24,57 @@ func helmRender(t *testing.T, chart, showOnly, release string, sets ...string) s
 	out, err := exec.Command(helm, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("helm %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+func helmRenderInNamespace(t *testing.T, chart, showOnly, release, namespace string, sets ...string) string {
+	t.Helper()
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm not installed; chart rendering not exercised")
+	}
+	args := []string{"template", release, chart, "--namespace", namespace, "--show-only", showOnly}
+	for _, s := range sets {
+		args = append(args, "--set", s)
+	}
+	out, err := exec.Command(helm, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+func helmRenderAll(t *testing.T, chart, release, namespace string, sets ...string) string {
+	t.Helper()
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm not installed; chart rendering not exercised")
+	}
+	args := []string{"template", release, chart, "--namespace", namespace}
+	for _, s := range sets {
+		args = append(args, "--set", s)
+	}
+	out, err := exec.Command(helm, args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+func helmRenderError(t *testing.T, chart, release string, sets ...string) string {
+	t.Helper()
+	helm, err := exec.LookPath("helm")
+	if err != nil {
+		t.Skip("helm not installed; chart rendering not exercised")
+	}
+	args := []string{"template", release, chart}
+	for _, s := range sets {
+		args = append(args, "--set", s)
+	}
+	out, err := exec.Command(helm, args...).CombinedOutput()
+	if err == nil {
+		t.Fatalf("helm %s succeeded, want an actionable render failure", strings.Join(args, " "))
 	}
 	return string(out)
 }
@@ -87,13 +141,19 @@ func TestWebCacheURLOverrideWins(t *testing.T) {
 func TestWebHasNoCacheFlagWhenNoCacheIsDeployed(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		set  string
+		sets []string
 	}{
-		{name: "cache component disabled", set: "sparkwing-runner-bundle.cache.enabled=false"},
-		{name: "whole bundle disabled", set: "sparkwing-runner-bundle.enabled=false"},
+		{
+			name: "cache component disabled for a node-only pool",
+			sets: []string{
+				"sparkwing-runner-bundle.cache.enabled=false",
+				"sparkwing-runner-bundle.runner.alsoClaimTriggers=false",
+			},
+		},
+		{name: "whole bundle disabled", sets: []string{"sparkwing-runner-bundle.enabled=false"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			args := webArgs(t, helmTemplate(t, "sparkwing", tc.set))
+			args := webArgs(t, helmTemplate(t, "sparkwing", tc.sets...))
 			if got, ok := hasFlag(args, "--cache="); ok {
 				t.Errorf("rendered %q with no cache deployed", got)
 			}
@@ -124,9 +184,33 @@ type renderedSecretKeyRef struct {
 	Key  string `yaml:"key"`
 }
 
+type renderedCapabilities struct {
+	Add  []string `yaml:"add"`
+	Drop []string `yaml:"drop"`
+}
+
+type renderedSecurityContext struct {
+	RunAsNonRoot             *bool                `yaml:"runAsNonRoot"`
+	RunAsUser                *int64               `yaml:"runAsUser"`
+	RunAsGroup               *int64               `yaml:"runAsGroup"`
+	AllowPrivilegeEscalation *bool                `yaml:"allowPrivilegeEscalation"`
+	ReadOnlyRootFilesystem   *bool                `yaml:"readOnlyRootFilesystem"`
+	Capabilities             renderedCapabilities `yaml:"capabilities"`
+}
+
+type renderedVolumeMount struct {
+	Name      string `yaml:"name"`
+	MountPath string `yaml:"mountPath"`
+}
+
 type renderedContainer struct {
-	Args []string         `yaml:"args"`
-	Env  []renderedEnvVar `yaml:"env"`
+	Name            string                  `yaml:"name"`
+	Image           string                  `yaml:"image"`
+	Command         []string                `yaml:"command"`
+	Args            []string                `yaml:"args"`
+	Env             []renderedEnvVar        `yaml:"env"`
+	SecurityContext renderedSecurityContext `yaml:"securityContext"`
+	VolumeMounts    []renderedVolumeMount   `yaml:"volumeMounts"`
 }
 
 type renderedDeployment struct {
@@ -134,13 +218,99 @@ type renderedDeployment struct {
 	Spec struct {
 		Template struct {
 			Spec struct {
-				Containers []renderedContainer `yaml:"containers"`
+				SecurityContext renderedSecurityContext `yaml:"securityContext"`
+				InitContainers  []renderedContainer     `yaml:"initContainers"`
+				Containers      []renderedContainer     `yaml:"containers"`
 			} `yaml:"spec"`
 		} `yaml:"template"`
 	} `yaml:"spec"`
 }
 
+type renderedResource struct {
+	Kind     string `yaml:"kind"`
+	Metadata struct {
+		Name   string            `yaml:"name"`
+		Labels map[string]string `yaml:"labels"`
+	} `yaml:"metadata"`
+	Spec struct {
+		Template struct {
+			Spec struct {
+				InitContainers []renderedContainer `yaml:"initContainers"`
+				Containers     []renderedContainer `yaml:"containers"`
+			} `yaml:"spec"`
+		} `yaml:"template"`
+	} `yaml:"spec"`
+}
+
+func renderedResources(t *testing.T, rendered string) []renderedResource {
+	t.Helper()
+	dec := yaml.NewDecoder(strings.NewReader(rendered))
+	var resources []renderedResource
+	for {
+		var resource renderedResource
+		err := dec.Decode(&resource)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("decode rendered resources: %v\n%s", err, rendered)
+		}
+		if resource.Kind != "" {
+			resources = append(resources, resource)
+		}
+	}
+	return resources
+}
+
+var dnsLabel = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$`)
+
+func assertValidUniqueResourceNames(t *testing.T, resources []renderedResource) {
+	t.Helper()
+	seen := map[string]bool{}
+	for _, resource := range resources {
+		name := resource.Metadata.Name
+		if len(name) > 63 || !dnsLabel.MatchString(name) {
+			t.Errorf("%s name %q is not a valid DNS label", resource.Kind, name)
+		}
+		key := resource.Kind + "/" + name
+		if seen[key] {
+			t.Errorf("rendered duplicate %s", key)
+		}
+		seen[key] = true
+	}
+}
+
+func componentResource(t *testing.T, resources []renderedResource, kind, component string) renderedResource {
+	t.Helper()
+	for _, resource := range resources {
+		if resource.Kind == kind && resource.Metadata.Labels["app.kubernetes.io/component"] == component {
+			return resource
+		}
+	}
+	t.Fatalf("no %s with component=%s", kind, component)
+	return renderedResource{}
+}
+
+func resourceContainer(t *testing.T, resource renderedResource) renderedContainer {
+	t.Helper()
+	containers := resource.Spec.Template.Spec.Containers
+	if len(containers) != 1 {
+		t.Fatalf("%s/%s containers = %d, want 1", resource.Kind, resource.Metadata.Name, len(containers))
+	}
+	return containers[0]
+}
+
 func runnerContainer(t *testing.T, rendered string) renderedContainer {
+	t.Helper()
+	doc := deploymentDocument(t, rendered)
+	containers := doc.Spec.Template.Spec.Containers
+	if len(containers) != 1 {
+		t.Fatalf("containers = %d, want 1:\n%s", len(containers), rendered)
+	}
+	return containers[0]
+}
+
+func deploymentDocument(t *testing.T, rendered string) renderedDeployment {
 	t.Helper()
 	var doc renderedDeployment
 	dec := yaml.NewDecoder(strings.NewReader(rendered))
@@ -152,11 +322,62 @@ func runnerContainer(t *testing.T, rendered string) renderedContainer {
 			break
 		}
 	}
-	containers := doc.Spec.Template.Spec.Containers
-	if len(containers) != 1 {
-		t.Fatalf("containers = %d, want 1:\n%s", len(containers), rendered)
+	return doc
+}
+
+func TestFullChartPreparesWritableHomesWithoutWeakeningTheRuntime(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		template string
+		path     string
+		volume   string
+	}{
+		{name: "controller PVC", template: "templates/controller-deployment.yaml", path: "/data", volume: "data"},
+		{name: "web scratch", template: "templates/web-deployment.yaml", path: "/tmp/sparkwing", volume: "sparkwing-home"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			doc := deploymentDocument(t, helmRender(t, "./sparkwing-full", test.template, "sparkwing"))
+			pod := doc.Spec.Template.Spec
+			if pod.SecurityContext.RunAsNonRoot == nil || !*pod.SecurityContext.RunAsNonRoot ||
+				pod.SecurityContext.RunAsUser == nil || *pod.SecurityContext.RunAsUser != 65534 {
+				t.Fatalf("runtime pod security = %+v, want non-root uid 65534", pod.SecurityContext)
+			}
+			if len(pod.InitContainers) != 1 {
+				t.Fatalf("init containers = %d, want one ownership initializer", len(pod.InitContainers))
+			}
+			init := pod.InitContainers[0]
+			if init.Name != "volume-permissions" || !reflect.DeepEqual(init.Command, []string{"/bin/chown"}) ||
+				!reflect.DeepEqual(init.Args, []string{"65534:65534", test.path}) {
+				t.Fatalf("ownership init = %+v", init)
+			}
+			if len(pod.Containers) != 1 || init.Image != pod.Containers[0].Image {
+				t.Fatalf("ownership image %q does not match runtime image", init.Image)
+			}
+			security := init.SecurityContext
+			if security.RunAsNonRoot == nil || *security.RunAsNonRoot ||
+				security.RunAsUser == nil || *security.RunAsUser != 0 ||
+				security.RunAsGroup == nil || *security.RunAsGroup != 0 ||
+				security.AllowPrivilegeEscalation == nil || *security.AllowPrivilegeEscalation ||
+				security.ReadOnlyRootFilesystem == nil || !*security.ReadOnlyRootFilesystem ||
+				!reflect.DeepEqual(security.Capabilities.Drop, []string{"ALL"}) ||
+				!reflect.DeepEqual(security.Capabilities.Add, []string{"CHOWN"}) {
+				t.Fatalf("ownership init security = %+v, want root with CHOWN only", security)
+			}
+			wantMounts := []renderedVolumeMount{{Name: test.volume, MountPath: test.path}}
+			if !reflect.DeepEqual(init.VolumeMounts, wantMounts) {
+				t.Fatalf("ownership init mounts = %+v, want %+v", init.VolumeMounts, wantMounts)
+			}
+		})
 	}
-	return containers[0]
+}
+
+func TestFullChartVolumePermissionsCanBeDisabled(t *testing.T) {
+	for _, template := range []string{"templates/controller-deployment.yaml", "templates/web-deployment.yaml"} {
+		doc := deploymentDocument(t, helmRender(t, "./sparkwing-full", template, "sparkwing", "volumePermissions.enabled=false"))
+		if len(doc.Spec.Template.Spec.InitContainers) != 0 {
+			t.Fatalf("%s rendered ownership init with volumePermissions disabled", template)
+		}
+	}
 }
 
 func runnerEnv(t *testing.T, rendered string) map[string]string {
@@ -216,6 +437,16 @@ func TestControllerGitHubStatusEnvironment(t *testing.T) {
 	}
 }
 
+func renderLogs(t *testing.T, sets ...string) string {
+	t.Helper()
+	return helmRender(t, "./sparkwing-runner-bundle", "templates/logs-deployment.yaml", "sparkwing", sets...)
+}
+
+func renderCache(t *testing.T, sets ...string) string {
+	t.Helper()
+	return helmRender(t, "./sparkwing-runner-bundle", "templates/cache-deployment.yaml", "sparkwing", sets...)
+}
+
 func TestRunnerPackageManagersUseTheBundledDependencyProxy(t *testing.T) {
 	env := runnerEnv(t, renderRunner(t))
 	const host = "sparkwing-sparkwing-runner-bundle-cache.default.svc.cluster.local"
@@ -257,7 +488,7 @@ func TestRunnerDependencyProxyOptOut(t *testing.T) {
 }
 
 func TestRunnerHasNoDependencyProxyWhenNoCacheIsDeployed(t *testing.T) {
-	rendered := renderRunner(t, "cache.enabled=false")
+	rendered := renderRunner(t, "cache.enabled=false", "runner.alsoClaimTriggers=false")
 	env := runnerEnv(t, rendered)
 	for _, key := range []string{"GOPROXY", "npm_config_registry", "PIP_INDEX_URL", "PIP_TRUSTED_HOST"} {
 		if _, ok := env[key]; ok {
@@ -271,6 +502,33 @@ func TestRunnerHasNoDependencyProxyWhenNoCacheIsDeployed(t *testing.T) {
 	}
 }
 
+func TestTriggerClaimingWithoutGitcacheFailsAtRender(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-runner-bundle", "sparkwing", "cache.enabled=false")
+	if !strings.Contains(out, "runner.alsoClaimTriggers=true requires cache.enabled=true or runner.extraEnv SPARKWING_GITCACHE_URL") {
+		t.Fatalf("render error does not identify the missing gitcache URL:\n%s", out)
+	}
+}
+
+func TestTriggerClaimingAcceptsAnExternalGitcache(t *testing.T) {
+	rendered := renderRunner(t,
+		"cache.enabled=false",
+		"runner.extraEnv[0].name=SPARKWING_GITCACHE_URL",
+		"runner.extraEnv[0].value=https://gitcache.example.com")
+	if got := runnerEnv(t, rendered)["SPARKWING_GITCACHE_URL"]; got != "https://gitcache.example.com" {
+		t.Errorf("SPARKWING_GITCACHE_URL = %q, want external gitcache URL", got)
+	}
+	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--also-claim-triggers") {
+		t.Errorf("runner args = %v, want trigger claiming preserved", args)
+	}
+}
+
+func TestRunnerDoesNotAdvertiseAMissingBakedBinary(t *testing.T) {
+	env := runnerEnv(t, renderRunner(t))
+	if got, exists := env["SPARKWING_BAKED_BINARY"]; exists {
+		t.Errorf("SPARKWING_BAKED_BINARY = %q, but the runner image contains no pipeline binary", got)
+	}
+}
+
 func TestFullChartCarriesTheDependencyProxyWiring(t *testing.T) {
 	env := runnerEnv(t, helmRender(t, "./sparkwing-full",
 		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing"))
@@ -278,6 +536,284 @@ func TestFullChartCarriesTheDependencyProxyWiring(t *testing.T) {
 	if got := env["GOPROXY"]; got != "http://"+host+"/proxy/golang|https://proxy.golang.org,direct" {
 		t.Errorf("GOPROXY = %q; the vendored sub-chart may be stale. "+
 			"Fix: helm dep up ./charts/sparkwing-full", got)
+	}
+}
+
+func TestFullChartPointsTheRunnerAtItsController(t *testing.T) {
+	rendered := helmRenderInNamespace(t, "./sparkwing-full",
+		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing", "sparkwing")
+	const controllerURL = "http://sparkwing-sparkwing-full-controller.sparkwing.svc.cluster.local"
+	if args := runnerContainer(t, rendered).Args; !containsArg(args, "--controller="+controllerURL) {
+		t.Errorf("runner args = %v, want controller URL %q", args, controllerURL)
+	}
+}
+
+func TestFullChartLeavesLogsAuthOffWithoutAToken(t *testing.T) {
+	rendered := helmRenderInNamespace(t, "./sparkwing-full",
+		"charts/sparkwing-runner-bundle/templates/logs-deployment.yaml", "sparkwing", "sparkwing")
+	args := runnerContainer(t, rendered).Args
+	if containsArg(args, "--controller") {
+		t.Errorf("logs args = %v, want no controller-backed auth in the unauthenticated default install", args)
+	}
+}
+
+func TestFullChartEnablesLogsAuthAgainstItsController(t *testing.T) {
+	rendered := helmRenderInNamespace(t, "./sparkwing-full",
+		"charts/sparkwing-runner-bundle/templates/logs-deployment.yaml", "sparkwing", "sparkwing",
+		"sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token")
+	args := runnerContainer(t, rendered).Args
+	const controllerURL = "http://sparkwing-sparkwing-full-controller.sparkwing.svc.cluster.local"
+	if !containsArg(args, "--controller") || !containsArg(args, controllerURL) {
+		t.Errorf("logs args = %v, want controller-backed auth at %q", args, controllerURL)
+	}
+	if _, exists := runnerEnv(t, rendered)["SPARKWING_API_TOKEN"]; exists {
+		t.Error("logs received an unused service bearer instead of validating the caller's Authorization header")
+	}
+}
+
+func TestLogsControllerURLAloneDoesNotEnableAuth(t *testing.T) {
+	args := runnerContainer(t, renderLogs(t, "controller.url=https://controller.example.com")).Args
+	if containsArg(args, "--controller") {
+		t.Errorf("logs args = %v, want auth disabled without a token Secret", args)
+	}
+}
+
+func TestFullChartControllerURLOverrideWins(t *testing.T) {
+	rendered := helmRender(t, "./sparkwing-full",
+		"charts/sparkwing-runner-bundle/templates/runner-deployment.yaml", "sparkwing",
+		"nameOverride=wing",
+		"sparkwing-runner-bundle.controller.url=https://controller.example.com")
+	const want = "--controller=https://controller.example.com"
+	if args := runnerContainer(t, rendered).Args; !containsArg(args, want) {
+		t.Errorf("runner args = %v, want %q", args, want)
+	}
+}
+
+func TestFullChartNamingOverrideRequiresControllerURL(t *testing.T) {
+	out := helmRenderError(t, "./sparkwing-full", "sparkwing", "fullnameOverride=wing")
+	if !strings.Contains(out, "set sparkwing-runner-bundle.controller.url explicitly") {
+		t.Fatalf("render error does not identify the required controller URL override:\n%s", out)
+	}
+}
+
+func TestFullChartNamingOverrideNeedsNoURLWithoutRunnerBundle(t *testing.T) {
+	helmRenderAll(t, "./sparkwing-full", "sparkwing", "sparkwing",
+		"nameOverride=wing", "sparkwing-runner-bundle.enabled=false")
+}
+
+func TestConfiguredSecretRefsAreRequired(t *testing.T) {
+	runner := renderRunner(t, "controller.tokenSecret.name=sparkwing-token")
+	if strings.Contains(runner, "optional: true") {
+		t.Fatalf("configured runner token Secret is optional:\n%s", runner)
+	}
+	cache := renderCache(t,
+		"controller.tokenSecret.name=sparkwing-token",
+		"cache.sshKeySecret.name=sparkwing-ssh")
+	if strings.Contains(cache, "optional: true") {
+		t.Fatalf("configured cache Secret is optional:\n%s", cache)
+	}
+	for _, name := range []string{"sparkwing-token", "sparkwing-ssh"} {
+		if !strings.Contains(cache, "name: \""+name+"\"") && !strings.Contains(cache, "secretName: \""+name+"\"") {
+			t.Errorf("cache did not render required Secret %q:\n%s", name, cache)
+		}
+	}
+}
+
+func TestConfiguredSecretNamesRequireKeys(t *testing.T) {
+	tests := []struct {
+		name  string
+		chart string
+		sets  []string
+		want  string
+	}{
+		{
+			name:  "runner controller token",
+			chart: "./sparkwing-runner-bundle",
+			sets:  []string{"controller.tokenSecret.name=sparkwing-token", "controller.tokenSecret.key="},
+			want:  "controller.tokenSecret.key is required",
+		},
+		{
+			name:  "full chart runner controller token",
+			chart: "./sparkwing-full",
+			sets: []string{
+				"sparkwing-runner-bundle.controller.tokenSecret.name=sparkwing-token",
+				"sparkwing-runner-bundle.controller.tokenSecret.key=",
+			},
+			want: "controller.tokenSecret.key is required",
+		},
+		{
+			name:  "controller webhook",
+			chart: "./sparkwing-full",
+			sets:  []string{"controller.githubWebhookSecret.name=webhook", "controller.githubWebhookSecret.key="},
+			want:  "controller.githubWebhookSecret.key is required",
+		},
+		{
+			name:  "controller encryption",
+			chart: "./sparkwing-full",
+			sets:  []string{"controller.secretsKey.name=encryption", "controller.secretsKey.key="},
+			want:  "controller.secretsKey.key is required",
+		},
+		{
+			name:  "web controller token",
+			chart: "./sparkwing-full",
+			sets:  []string{"web.tokenSecret.name=web-token", "web.tokenSecret.key="},
+			want:  "web.tokenSecret.key is required",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			out := helmRenderError(t, test.chart, "sparkwing", test.sets...)
+			if !strings.Contains(out, test.want) {
+				t.Fatalf("render error does not identify the incomplete Secret reference:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestFullChartServiceURLsFollowNestedBundleNaming(t *testing.T) {
+	tests := []struct {
+		name     string
+		set      string
+		fullname string
+	}{
+		{name: "name override", set: "sparkwing-runner-bundle.nameOverride=data", fullname: "sparkwing-data"},
+		{name: "fullname override", set: "sparkwing-runner-bundle.fullnameOverride=data-plane", fullname: "data-plane"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			web := webArgs(t, helmTemplate(t, "sparkwing", test.set))
+			logsURL := "http://" + test.fullname + "-logs.default.svc.cluster.local"
+			cacheURL := "http://" + test.fullname + "-cache.default.svc.cluster.local"
+			if got, _ := hasFlag(web, "--logs="); got != "--logs="+logsURL {
+				t.Errorf("web logs flag = %q, want nested bundle Service %q", got, logsURL)
+			}
+			if got, _ := hasFlag(web, "--cache="); got != "--cache="+cacheURL {
+				t.Errorf("web cache flag = %q, want nested bundle Service %q", got, cacheURL)
+			}
+
+			controller := webArgs(t, helmRender(t, "./sparkwing-full",
+				"templates/controller-deployment.yaml", "sparkwing", test.set))
+			if got, _ := hasFlag(controller, "--logs-url="); got != "--logs-url="+logsURL {
+				t.Errorf("controller logs flag = %q, want nested bundle Service %q", got, logsURL)
+			}
+		})
+	}
+}
+
+func TestMaximumLengthReleaseKeepsComponentNamesAndServiceURLsDistinct(t *testing.T) {
+	const namespace = "sparkwing-system"
+	const maxHelmReleaseNameLength = 53
+	release := strings.Repeat("r", maxHelmReleaseNameLength)
+	rendered := helmRenderAll(t, "./sparkwing-full", release, namespace)
+	resources := renderedResources(t, rendered)
+	assertValidUniqueResourceNames(t, resources)
+
+	controllerService := componentResource(t, resources, "Service", "controller").Metadata.Name
+	webService := componentResource(t, resources, "Service", "web").Metadata.Name
+	logsService := componentResource(t, resources, "Service", "logs").Metadata.Name
+	cacheService := componentResource(t, resources, "Service", "cache").Metadata.Name
+	if len(map[string]bool{
+		controllerService: true,
+		webService:        true,
+		logsService:       true,
+		cacheService:      true,
+	}) != 4 {
+		t.Fatalf("component Service names collide: controller=%q web=%q logs=%q cache=%q",
+			controllerService, webService, logsService, cacheService)
+	}
+
+	serviceURL := func(name string) string {
+		return "http://" + name + "." + namespace + ".svc.cluster.local"
+	}
+	controllerURL := serviceURL(controllerService)
+	logsURL := serviceURL(logsService)
+	cacheURL := serviceURL(cacheService)
+	webArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "web")).Args
+	for _, want := range []string{"--controller=" + controllerURL, "--logs=" + logsURL, "--cache=" + cacheURL} {
+		if !containsArg(webArgs, want) {
+			t.Errorf("web args = %v, want %q", webArgs, want)
+		}
+	}
+	runnerArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "runner")).Args
+	for _, want := range []string{"--controller=" + controllerURL, "--logs=" + logsURL, "--gitcache=" + cacheURL} {
+		if !containsArg(runnerArgs, want) {
+			t.Errorf("runner args = %v, want %q", runnerArgs, want)
+		}
+	}
+	controllerArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "controller")).Args
+	if !containsArg(controllerArgs, "--logs-url="+logsURL) {
+		t.Errorf("controller args = %v, want logs Service URL %q", controllerArgs, logsURL)
+	}
+}
+
+func TestMaximumLengthOverridesKeepComponentNamesDistinct(t *testing.T) {
+	override := strings.Repeat("o", 63)
+	for _, test := range []struct {
+		name  string
+		chart string
+		sets  []string
+	}{
+		{
+			name:  "full nameOverride",
+			chart: "./sparkwing-full",
+			sets:  []string{"nameOverride=" + override, "sparkwing-runner-bundle.enabled=false"},
+		},
+		{
+			name:  "full fullnameOverride",
+			chart: "./sparkwing-full",
+			sets:  []string{"fullnameOverride=" + override, "sparkwing-runner-bundle.enabled=false"},
+		},
+		{
+			name:  "runner bundle nameOverride",
+			chart: "./sparkwing-runner-bundle",
+			sets:  []string{"nameOverride=" + override, "controller.url=https://controller.example.com"},
+		},
+		{
+			name:  "runner bundle fullnameOverride",
+			chart: "./sparkwing-runner-bundle",
+			sets:  []string{"fullnameOverride=" + override, "controller.url=https://controller.example.com"},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			resources := renderedResources(t, helmRenderAll(t, test.chart, "sparkwing", "sparkwing", test.sets...))
+			assertValidUniqueResourceNames(t, resources)
+			deployments := map[string]string{}
+			for _, resource := range resources {
+				if resource.Kind == "Deployment" {
+					component := resource.Metadata.Labels["app.kubernetes.io/component"]
+					deployments[component] = resource.Metadata.Name
+				}
+			}
+			if len(deployments) < 2 {
+				t.Fatalf("component Deployments = %v, want multiple distinct names", deployments)
+			}
+		})
+	}
+}
+
+func TestParentURLsMatchMaximumLengthBundleOverrides(t *testing.T) {
+	const namespace = "sparkwing-system"
+	override := strings.Repeat("d", 63)
+	rendered := helmRenderAll(t, "./sparkwing-full", "sparkwing", namespace,
+		"sparkwing-runner-bundle.fullnameOverride="+override)
+	resources := renderedResources(t, rendered)
+	assertValidUniqueResourceNames(t, resources)
+	logsService := componentResource(t, resources, "Service", "logs").Metadata.Name
+	cacheService := componentResource(t, resources, "Service", "cache").Metadata.Name
+	if logsService == cacheService || !strings.HasSuffix(logsService, "-logs") || !strings.HasSuffix(cacheService, "-cache") {
+		t.Fatalf("bundle Service names do not preserve suffixes: logs=%q cache=%q", logsService, cacheService)
+	}
+	logsURL := "http://" + logsService + "." + namespace + ".svc.cluster.local"
+	cacheURL := "http://" + cacheService + "." + namespace + ".svc.cluster.local"
+	webArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "web")).Args
+	for _, want := range []string{"--logs=" + logsURL, "--cache=" + cacheURL} {
+		if !containsArg(webArgs, want) {
+			t.Errorf("web args = %v, want %q", webArgs, want)
+		}
+	}
+	controllerArgs := resourceContainer(t, componentResource(t, resources, "Deployment", "controller")).Args
+	if !containsArg(controllerArgs, "--logs-url="+logsURL) {
+		t.Errorf("controller args = %v, want logs Service URL %q", controllerArgs, logsURL)
 	}
 }
 

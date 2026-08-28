@@ -1,3 +1,4 @@
+{{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -50,8 +51,8 @@ spec:
             - /usr/local/bin/sparkwing-runner
           args:
             - runner
-            {{- if .Values.controller.url }}
-            - {{ printf "--controller=%s" .Values.controller.url | quote }}
+            {{- if $controllerURL }}
+            - {{ printf "--controller=%s" $controllerURL | quote }}
             {{- end }}
             {{- if .Values.logs.enabled }}
             - {{ printf "--logs=http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.logs.fullname" .) .Release.Namespace | quote }}
@@ -88,8 +89,6 @@ spec:
               value: /tmp/sparkwing/gocache
             - name: GOMODCACHE
               value: /tmp/sparkwing/gomodcache
-            - name: SPARKWING_BAKED_BINARY
-              value: /usr/local/bin/sparkwing
             {{- if .Values.cache.enabled }}
             - name: SPARKWING_GITCACHE_URL
               value: {{ printf "http://%s.%s.svc.cluster.local" (include "sparkwing-runner-bundle.cache.fullname" .) .Release.Namespace | quote }}
@@ -104,7 +103,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.controller.tokenSecret.name | quote }}
                   key: {{ .Values.controller.tokenSecret.key | quote }}
-                  optional: true
             {{- end }}
             {{- with (include "sparkwing-runner-bundle.runnerDependencyProxyEnv" .) }}
             {{- . | nindent 12 }}

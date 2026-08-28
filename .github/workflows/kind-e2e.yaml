@@ -1,0 +1,99 @@
+name: Kind controller E2E
+
+on:
+  pull_request:
+    paths: &kind_paths
+      - ".github/workflows/kind-e2e.yaml"
+      - ".dockerignore"
+      - ".sparkwing/**"
+      - "bin/build-web.sh"
+      - "bin/kind-e2e.sh"
+      - "build/**"
+      - "charts/**"
+      - "cmd/**"
+      - "internal/**"
+      - "pkg/**"
+      - "sparkwing/**"
+      - "testdata/kind-e2e/**"
+      - "web/**"
+      - "go.mod"
+      - "go.sum"
+  push:
+    branches: [main]
+    paths: *kind_paths
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kind-e2e-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  kind-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      GOWORK: "off"
+      GOBIN: /tmp/sparkwing-kind-tools
+      SPARKWING_HOME: /tmp/sparkwing-home
+      SPARKWING_KIND_E2E_ARTIFACT_DIR: /tmp/sparkwing-kind-e2e-artifacts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            go.sum
+            .sparkwing/go.sum
+            testdata/kind-e2e/repo/.sparkwing/go.sum
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install pinned Kubernetes tools
+        run: |
+          set -euo pipefail
+          mkdir -p "$GOBIN"
+          go install sigs.k8s.io/kind@v0.32.0
+          kubectl_path="$RUNNER_TEMP/kubectl-v1.36.1-linux-amd64"
+          kubectl_url="https://dl.k8s.io/release/v1.36.1/bin/linux/amd64/kubectl"
+          kubectl_sha256="629d3f410e09bf49b64ae7079f7f0bda1191efed311f7d37fdbab0ad5b0ec2b7"
+          curl --fail --location --silent --show-error --output "$kubectl_path" "$kubectl_url"
+          printf '%s  %s\n' "$kubectl_sha256" "$kubectl_path" | sha256sum --check --strict
+          install -m 0755 "$kubectl_path" "$GOBIN/kubectl"
+          go install helm.sh/helm/v4/cmd/helm@v4.2.4
+          echo "$GOBIN" >> "$GITHUB_PATH"
+
+      - name: Verify hosted tools
+        run: |
+          set -euo pipefail
+          docker info
+          docker buildx version
+          kind version
+          kubectl version --client
+          helm version --short
+
+      - name: Build the checked-out Sparkwing CLI
+        run: go build -trimpath -o "$RUNNER_TEMP/sparkwing" ./cmd/sparkwing
+
+      - name: Run local Kubernetes golden path
+        run: '"$RUNNER_TEMP/sparkwing" run kind-e2e'
+
+      - name: Upload failure evidence
+        if: failure() || cancelled()
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: kind-e2e-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.SPARKWING_KIND_E2E_ARTIFACT_DIR }}
+          if-no-files-found: ignore
+          retention-days: 14

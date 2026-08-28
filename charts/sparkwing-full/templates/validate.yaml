@@ -1,0 +1,13 @@
+{{- $bundle := index .Values "sparkwing-runner-bundle" -}}
+{{- if and (index $bundle "enabled") (or .Values.nameOverride .Values.fullnameOverride) (not (index $bundle "controller" "url")) -}}
+{{- fail "sparkwing-full: nameOverride/fullnameOverride changes the controller Service name; set sparkwing-runner-bundle.controller.url explicitly" -}}
+{{- end -}}
+{{- if and .Values.controller.githubWebhookSecret.name (not .Values.controller.githubWebhookSecret.key) -}}
+{{- fail "sparkwing-full: controller.githubWebhookSecret.key is required when controller.githubWebhookSecret.name is set" -}}
+{{- end -}}
+{{- if and .Values.controller.secretsKey.name (not .Values.controller.secretsKey.key) -}}
+{{- fail "sparkwing-full: controller.secretsKey.key is required when controller.secretsKey.name is set" -}}
+{{- end -}}
+{{- if and .Values.web.tokenSecret.name (not .Values.web.tokenSecret.key) -}}
+{{- fail "sparkwing-full: web.tokenSecret.key is required when web.tokenSecret.name is set" -}}
+{{- end -}}

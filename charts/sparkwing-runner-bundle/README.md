@@ -23,6 +23,12 @@ If you want the whole stack in one cluster, install
 `sparkwing-full`. Use this chart when the controller already
 exists somewhere else and you just need a runner pool.
 
+> **Release blocker:** The checked-in default repositories and
+> `appVersion` do not currently identify a compatible public runner/cache/logs
+> image set. Until a corrected release is published, build or mirror all three
+> images from one compatible Sparkwing revision and explicitly set each
+> enabled component's `image.repository` and `image.tag`.
+
 ## Topology
 
 ```
@@ -45,6 +51,9 @@ exists somewhere else and you just need a runner pool.
 
 - Kubernetes 1.27+ (the chart targets standard apps/v1, batch/v1,
   rbac.authorization.k8s.io/v1).
+- Explicit repositories and tags for a mutually compatible runner, cache, and
+  logs image set. The current default GHCR/appVersion combination is not a
+  runnable release.
 - A reachable Sparkwing controller URL.
 - A pre-created Secret holding the agent bearer token (see Auth
   below). Optional for kind / single-tenant test installs where the
@@ -53,6 +62,17 @@ exists somewhere else and you just need a runner pool.
   the cache + logs PVCs. Both are RWO.
 
 ## Install
+
+Create `compatible-images.yaml` before installing:
+
+```yaml
+runner:
+  image: {repository: registry.example/sparkwing-runner, tag: <compatible-tag>}
+cache:
+  image: {repository: registry.example/sparkwing-cache, tag: <compatible-tag>}
+logs:
+  image: {repository: registry.example/sparkwing-logs, tag: <compatible-tag>}
+```
 
 ```bash
 # 1. Create the namespace.
@@ -65,6 +85,7 @@ kubectl -n sparkwing create secret generic sparkwing-token \
 # 3. Install the chart.
 helm install runners ./charts/sparkwing-runner-bundle \
     --namespace sparkwing \
+    -f compatible-images.yaml \
     --set controller.url=https://app.sparkwing.dev \
     --set controller.tokenSecret.name=sparkwing-token \
     --set runner.labels='{cluster,arch=amd64}'
@@ -75,6 +96,7 @@ For a fully unauthenticated test against a kind cluster:
 ```bash
 helm install runners ./charts/sparkwing-runner-bundle \
     --namespace sparkwing --create-namespace \
+    -f compatible-images.yaml \
     --set controller.url=http://sparkwing-controller.sparkwing.svc.cluster.local
 ```
 
@@ -91,10 +113,12 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `runner.labels` | `--label` flags for `Requires` matching. | `[cluster]` |
 | `runner.maxConcurrent` | Per-pod node concurrency. | `2` |
 | `runner.alsoClaimTriggers` | Pool also claims webhook triggers. | `true` |
+| `runner.extraEnv` | Extra runner environment, including an external `SPARKWING_GITCACHE_URL`. | `[]` |
 | `runner.image.tag` | Override sparkwing-runner tag. | (chart appVersion) |
 | `cache.enabled` | Toggle the in-cluster git cache. | `true` |
 | `cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
 | `cache.repos` | `GITCACHE_REPOS` -- comma-separated `alias=url`. | `""` |
+| `cache.sshKeySecret.name` | Required SSH-key Secret when configured. | `""` |
 | `cache.storage.size` | Cache PVC size. | `20Gi` |
 | `cache.storage.storageClassName` | Override default StorageClass. | `""` |
 | `logs.enabled` | Toggle the log-store sidecar. | `true` |
@@ -104,10 +128,20 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 
 ## Auth
 
-The runner identifies itself to the controller with a bearer token
-read from the `controller.tokenSecret`. The same token is mounted on
-the logs service so it can call the controller's
-`/api/v1/auth/whoami` endpoint to resolve incoming requests.
+The runner reads its bearer token from `controller.tokenSecret` and uses it
+for controller claims and writes to the logs service. Configuring that Secret
+also enables logs-service auth: the logs service forwards each caller's
+incoming Authorization header to the resolved controller's
+`/api/v1/auth/whoami` endpoint and enforces the returned scopes. It does not
+receive a second service bearer. Leaving the Secret name empty keeps both the
+standalone and full chart's documented test install unauthenticated. Once a
+Secret name is configured, its key and the Secret itself are required.
+
+Trigger claiming always needs a gitcache because it clones and compiles the
+repository before creating a run. If `cache.enabled=false` while
+`runner.alsoClaimTriggers=true`, add a non-empty `SPARKWING_GITCACHE_URL` to
+`runner.extraEnv`; the chart rejects the incomplete combination at render
+time. A node-only pool can instead set `runner.alsoClaimTriggers=false`.
 
 The chart does NOT create the Secret -- bring your own. This means
 rotating the token is `kubectl create secret ... --dry-run=client -o
@@ -158,14 +192,15 @@ If you don't want the chart-managed Role at all:
 
 ## Image registry
 
-Default images:
+Fallback image references rendered when a component tag is empty:
 
 - `ghcr.io/sparkwing-dev/sparkwing-runner:<chart appVersion>`
 - `ghcr.io/sparkwing-dev/sparkwing-cache:<chart appVersion>`
 - `ghcr.io/sparkwing-dev/sparkwing-logs:<chart appVersion>`
 
-Override `<component>.image.repository` if you mirror images
-internally.
+These fallbacks describe the intended registry layout, not a compatible public
+release contract for this chart version. Pin repository and tag for every
+enabled component to images built from one Sparkwing revision.
 
 > The runner Deployment's command is
 > `/usr/local/bin/runner-entrypoint.sh /usr/local/bin/sparkwing-runner`,
@@ -173,20 +208,6 @@ internally.
 > (git + Go toolchain + the netrc-seeding entrypoint). Point
 > `runner.image.repository` at an image built from that Dockerfile.
 
-> **NOTE:** Multi-arch (linux/amd64 + linux/arm64) images are
-> published to GHCR on every `v*` tag push by
-> `.github/workflows/release.yaml`. Each release pushes
-> `:vX.Y.Z`; stable (non-pre-release) tags also update `:latest`.
-> All images are cosign-keyless-signed via GitHub OIDC -- verify
-> with:
->
-> ```bash
-> cosign verify ghcr.io/sparkwing-dev/sparkwing-runner:vX.Y.Z \
->     --certificate-identity-regexp "https://github.com/sparkwing-dev/sparkwing/" \
->     --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
-> ```
->
-> Override `*.image.repository` if you mirror images internally.
 
 ## Upgrade
 

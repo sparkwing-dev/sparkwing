@@ -38,6 +38,28 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
+      {{- if .Values.volumePermissions.enabled }}
+      initContainers:
+        - name: volume-permissions
+          image: {{ include "sparkwing-full.image" (dict "img" .Values.web.image "root" .) | quote }}
+          imagePullPolicy: {{ .Values.web.image.pullPolicy }}
+          securityContext:
+            runAsNonRoot: false
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["CHOWN"]
+          command: ["/bin/chown"]
+          args:
+            - {{ printf "%d:%d" (int .Values.podSecurityContext.runAsUser) (int .Values.podSecurityContext.fsGroup) | quote }}
+            - "/tmp/sparkwing"
+          volumeMounts:
+            - name: sparkwing-home
+              mountPath: /tmp/sparkwing
+      {{- end }}
       containers:
         - name: web
           image: {{ include "sparkwing-full.image" (dict "img" .Values.web.image "root" .) | quote }}

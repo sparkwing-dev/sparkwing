@@ -9,10 +9,17 @@ single Kubernetes cluster:
 - `sparkwing-runner-bundle` (sub-chart) -- runner + cache + logs
 
 This is the chart referenced in architectural decision 0001 for the
-**Enterprise self-host** topology -- one `helm install` and you have
-a working Sparkwing instance. Single-tenant, single-instance: HA
-features (multi-replica controller, leader election, replication,
-zero-downtime upgrades) are paid tier and live in separate charts.
+**Enterprise self-host** topology. It models the complete stack as one
+Helm release. Single-tenant, single-instance: HA features (multi-replica
+controller, leader election, replication, zero-downtime upgrades) are
+paid tier and live in separate charts.
+
+> **Release blocker:** The checked-in default repositories and
+> `appVersion` do not currently identify a compatible public image set. A bare
+> install renders the intended topology, but it is not a supported runnable
+> release. Until a corrected release is published, build or mirror one
+> mutually compatible controller, web, runner, cache, and logs image set and
+> explicitly set every enabled component's `image.repository` and `image.tag`.
 
 If you only need a runner pool against a remote controller (Cloud or
 external self-host), use the standalone
@@ -48,6 +55,8 @@ instead -- this chart pulls it in as a dependency.
 ## Requirements
 
 - Kubernetes 1.27+
+- Explicit repositories and tags for a mutually compatible image set. The
+  current default GHCR/appVersion combination is not a runnable release.
 - A default `StorageClass` (or set `controller.storage.pvc.storageClassName`
   / equivalents on the sub-chart). The controller, cache, and logs
   PVCs are all RWO.
@@ -86,24 +95,89 @@ kubectl -n sparkwing create secret generic sparkwing-secrets-key \
 # `admin` token covers both.
 ```
 
-## Quick install
+## Install from source
+
+Create `compatible-images.yaml` with images built from the same Sparkwing
+revision or copied together into your registry:
+
+```yaml
+controller:
+  image: {repository: registry.example/sparkwing-controller, tag: <compatible-tag>}
+web:
+  image: {repository: registry.example/sparkwing-web, tag: <compatible-tag>}
+sparkwing-runner-bundle:
+  runner:
+    image: {repository: registry.example/sparkwing-runner, tag: <compatible-tag>}
+  cache:
+    image: {repository: registry.example/sparkwing-cache, tag: <compatible-tag>}
+  logs:
+    image: {repository: registry.example/sparkwing-logs, tag: <compatible-tag>}
+```
 
 ```bash
 # Vendor the sub-chart into ./charts/ (one-time per chart change).
 helm dep up ./charts/sparkwing-full
 
-# Install. With nothing pre-created, this gives you a working
-# stack on a kind cluster -- no auth, no webhook verification,
-# no encryption-at-rest.
+# Install the complete stack with an explicitly compatible image set. This
+# source-test configuration has no auth, webhook verification, or encryption-at-rest.
 helm install sparkwing ./charts/sparkwing-full \
-    --namespace sparkwing --create-namespace
+    --namespace sparkwing --create-namespace \
+    -f compatible-images.yaml
 ```
+
+### Verify the source stack locally
+
+From the Sparkwing checkout, the repository pipeline builds the five images,
+loads them into a disposable Kind cluster, installs this chart, and exercises
+the authenticated controller-to-runner path without a registry or cloud
+cluster:
+
+```bash
+sparkwing run kind-e2e
+```
+
+The local mode requires a running Docker daemon plus Kind, kubectl, Helm, curl,
+jq, and OpenSSL. It refuses to reuse an existing cluster with the selected
+name, preserves diagnostics outside the cluster, and removes only the cluster
+it created. Set `SPARKWING_KIND_E2E_KEEP_CLUSTER=1` to retain a failed cluster
+for inspection.
+
+The same protocol proof can target an existing cluster without provisioning or
+deleting cluster infrastructure. Use a dedicated namespace and immutable image
+tag:
+
+```bash
+export SPARKWING_KIND_E2E_PROVISION=existing
+export SPARKWING_KIND_E2E_KUBE_CONTEXT=sparkwing-e2e
+export SPARKWING_KIND_E2E_NAMESPACE=sparkwing-e2e-verify
+export SPARKWING_KIND_E2E_RELEASE=sparkwing-e2e
+export SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing
+export SPARKWING_KIND_E2E_TAG=commit-0123456789ab
+export SPARKWING_KIND_E2E_ALLOW_CLEANUP="$SPARKWING_KIND_E2E_NAMESPACE/$SPARKWING_KIND_E2E_RELEASE"
+sparkwing run kind-e2e
+```
+
+Existing-cluster mode refuses an absent context, implicit image coordinates, a
+pre-existing namespace, or an allow-list that differs from the
+configured namespace and release. It installs the Git fixture from a ConfigMap
+instead of a node host mount. Cleanup rechecks a unique per-run namespace owner
+token, uninstalls the allow-listed Helm release only when its durable Helm
+release metadata carries the same token, and deletes only resources carrying
+both ownership labels. It leaves the cluster and namespace intact. Set
+`SPARKWING_KIND_E2E_KEEP_RESOURCES=1` to retain those resources for inspection.
+
+Local mode builds and verifies images from the checkout. Existing-cluster mode
+exercises the caller-selected repository prefix and tag and records those
+coordinates in its evidence; it does not resolve a mutable tag to a digest or
+prove how those images were built. Neither mode makes the chart's incompatible
+default public image tags runnable.
 
 For a production install, attach the Secrets you created above:
 
 ```bash
 helm install sparkwing ./charts/sparkwing-full \
     --namespace sparkwing --create-namespace \
+    -f compatible-images.yaml \
     --set controller.githubWebhookSecret.name=sparkwing-webhook \
     --set controller.githubStatusToken.name=sparkwing-github-status \
     --set controller.dashboardURL=https://sparkwing.example.com \
@@ -148,6 +222,14 @@ Full schema in [`values.yaml`](./values.yaml). Most-edited keys:
 | `web.tokenSecret.name` | Secret holding the controller-bearer token. | `""` |
 | `web.requireLogin` | Gate the dashboard behind /login (first visit offers first-admin signup). | `false` |
 
+### Security and volume ownership
+
+| Key | Purpose | Default |
+| --- | --- | --- |
+| `podSecurityContext.runAsUser` | Non-root UID for controller and web. | `65534` |
+| `podSecurityContext.fsGroup` | Group for mounted storage. | `65534` |
+| `volumePermissions.enabled` | Run a CHOWN-only init container before controller and web. | `true` |
+
 ### Ingress
 
 | Key | Purpose | Default |
@@ -171,6 +253,14 @@ for the full schema; a few commonly overridden keys:
 | `sparkwing-runner-bundle.runner.replicas` | Pool size. | `1` |
 | `sparkwing-runner-bundle.runner.labels` | `Requires` labels. | `[cluster]` |
 | `sparkwing-runner-bundle.cache.dependencyProxy.enabled` | Point the runner's go / npm / pip at the cache's pull-through proxy. | `true` |
+
+The automatic controller URL follows the chart's default resource names. If
+you set top-level `nameOverride` or `fullnameOverride`, also set
+`sparkwing-runner-bundle.controller.url` to the resulting controller Service;
+the chart stops at render time with this instruction when the URL is missing.
+Nested `sparkwing-runner-bundle.nameOverride` and `fullnameOverride` values are
+included in the web and controller URLs for the bundled logs and cache
+Services.
 
 ## Auth
 
@@ -196,6 +286,10 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    above) and reference it from `web.tokenSecret.name` /
    `sparkwing-runner-bundle.controller.tokenSecret.name`.
 
+   A configured Secret name requires a non-empty key; the chart rejects
+   incomplete pairs. Runner and cache Secret references are required, so
+   Kubernetes holds those pods until the configured Secret is present.
+
 3. Set `web.requireLogin=true` to gate the dashboard behind `/login`.
    On a fresh cluster `/login` renders a "create first admin" form and
    the account you create there becomes the admin; afterwards, seed
@@ -211,6 +305,24 @@ doesn't wipe run history. Disable with
 `controller.storage.pvc.keepOnUninstall=false`, or
 `controller.storage.type=emptyDir` for a fully ephemeral install
 (only useful for kind / CI smoke tests).
+
+By default, controller and web each run a short ownership init container before
+the non-root application starts. The init container runs as UID 0 with a
+read-only root filesystem, no privilege escalation, and only the `CHOWN`
+capability; it assigns the mounted Sparkwing home root to
+`podSecurityContext.runAsUser:podSecurityContext.fsGroup`. The application
+container remains non-root with all capabilities dropped. Set
+`volumePermissions.enabled=false` only when the storage driver provisions the
+mounted root with that ownership already. The enabled path requires controller
+and web images containing `/bin/chown`; Sparkwing's release-shaped Alpine images
+include it, but custom images must provide it themselves.
+
+The ownership init container runs as UID 0 with `CHOWN`, so Kubernetes' baseline
+policy admits it but the Restricted Pod Security Standard does not. In a
+Restricted namespace, arrange the configured UID/GID through the CSI driver or
+another provisioning step and set `volumePermissions.enabled=false`. This
+opt-out removes only the init container; the application containers retain the
+chart's non-root, drop-all-capabilities security context.
 
 For a clean uninstall:
 
@@ -246,7 +358,7 @@ create one.
 ```yaml
 dependencies:
   - name: sparkwing-runner-bundle
-    version: "0.1.0"
+    version: "0.1.1"
     repository: "file://../sparkwing-runner-bundle"
     condition: sparkwing-runner-bundle.enabled
 ```
@@ -267,27 +379,18 @@ This refreshes `Chart.lock` and re-vendors the sub-chart under
 
 ## Image registry
 
-Default images:
+Fallback image references rendered when a component tag is empty:
 
 - `ghcr.io/sparkwing-dev/sparkwing-controller:<chart appVersion>`
 - `ghcr.io/sparkwing-dev/sparkwing-web:<chart appVersion>`
 - (sub-chart) `ghcr.io/sparkwing-dev/sparkwing-runner:<...>`,
   `sparkwing-cache`, `sparkwing-logs`
 
-> **NOTE:** Multi-arch (linux/amd64 + linux/arm64) images are
-> published to GHCR on every `v*` tag push by
-> `.github/workflows/release.yaml`. Each release pushes
-> `:vX.Y.Z`; stable (non-pre-release) tags also update `:latest`.
-> All images are cosign-keyless-signed via GitHub OIDC -- verify
-> with:
->
-> ```bash
-> cosign verify ghcr.io/sparkwing-dev/sparkwing-controller:vX.Y.Z \
->     --certificate-identity-regexp "https://github.com/sparkwing-dev/sparkwing/" \
->     --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
-> ```
->
-> Override `*.image.repository` if you mirror images internally.
+These fallbacks describe the chart's intended registry layout; they are not a
+compatible public release contract for the current chart version. Pin both
+repository and tag for every enabled image. Keep all five images on the same
+compatible Sparkwing revision until a corrected chart release publishes and
+verifies a public default set.
 
 ## Upgrade
 

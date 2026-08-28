@@ -127,4 +127,51 @@ func TestReleaseWorkflowUsesTheRunnerImageContract(t *testing.T) {
 	if !strings.Contains(string(body), dockerfileSelection) {
 		t.Fatalf("release workflow does not select the dedicated runner Dockerfile:\nwant %s", dockerfileSelection)
 	}
+	runnerDockerfile, err := os.ReadFile("../../build/Dockerfile.runner")
+	if err != nil {
+		t.Fatal(err)
+	}
+	instructions := dockerfileInstructions(runnerDockerfile)
+	const goVersion = "1.26.6"
+	const goImage = "golang:" + goVersion + "-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83"
+	const alpineImage = "alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b"
+	for _, required := range []string{
+		"FROM --platform=$BUILDPLATFORM " + goImage + " AS build",
+		"FROM " + alpineImage,
+		"RUN apk upgrade --no-cache && apk add --no-cache ca-certificates git git-daemon openssh-client",
+		"COPY --from=" + goImage + " /usr/local/go /usr/local/go",
+		"COPY build/runner-entrypoint.sh /usr/local/bin/runner-entrypoint.sh",
+		"COPY --from=build /out/sparkwing-runner /usr/local/bin/sparkwing-runner",
+		`ENTRYPOINT ["/usr/local/bin/runner-entrypoint.sh"]`,
+		`CMD ["/usr/local/bin/sparkwing-runner"]`,
+	} {
+		if !containsDockerInstruction(instructions, required) {
+			t.Errorf("runner image contract missing %q", required)
+		}
+	}
+	if !strings.Contains(string(body), `go-version: "`+goVersion+`"`) {
+		t.Errorf("release workflow Go version does not match runner toolchain %s", goVersion)
+	}
+}
+
+func dockerfileInstructions(body []byte) []string {
+	logical := strings.ReplaceAll(string(body), "\\\n", " ")
+	var instructions []string
+	for _, line := range strings.Split(logical, "\n") {
+		line = strings.Join(strings.Fields(line), " ")
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		instructions = append(instructions, line)
+	}
+	return instructions
+}
+
+func containsDockerInstruction(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

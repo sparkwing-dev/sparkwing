@@ -26,6 +26,9 @@ pipelines:
   - name: build-images
     entrypoint: BuildImages
 
+  - name: kind-e2e
+    entrypoint: KindE2E
+
   - name: release
     entrypoint: Release
 

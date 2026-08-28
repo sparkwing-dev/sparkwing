@@ -6,21 +6,41 @@ Expand the name of the chart.
 {{- end }}
 
 {{/*
+Create the untruncated fully qualified app-name base. Component helpers
+truncate this base before adding their suffix so long names stay distinct.
+*/}}
+{{- define "sparkwing-full.fullnameBase" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Create a default fully qualified app name. Truncated at 63 chars to
 satisfy DNS label constraints; suffix-trimmed so we never end on a
 hyphen (DNS labels aren't allowed to).
 */}}
 {{- define "sparkwing-full.fullname" -}}
-{{- if .Values.fullnameOverride }}
-{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- $name := default .Chart.Name .Values.nameOverride }}
-{{- if contains $name .Release.Name }}
-{{- .Release.Name | trunc 63 | trimSuffix "-" }}
-{{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- include "sparkwing-full.fullnameBase" . | trunc 63 | trimSuffix "-" }}
 {{- end }}
-{{- end }}
+
+{{/*
+Reserve room for a component suffix before truncating the shared base.
+Truncating a complete <base>-<component> from the right would erase the
+component on long release names and make sibling resources collide.
+*/}}
+{{- define "sparkwing-full.componentFullname" -}}
+{{- $suffix := printf "-%s" .component -}}
+{{- $baseLimit := sub 63 (len $suffix) | int -}}
+{{- $base := include "sparkwing-full.fullnameBase" .root | trunc $baseLimit | trimSuffix "-" -}}
+{{- printf "%s%s" $base $suffix -}}
 {{- end }}
 
 {{/*
@@ -70,11 +90,15 @@ Per-component fully qualified resource names. Component suffix
 keeps controller + web distinct under one release.
 */}}
 {{- define "sparkwing-full.controller.fullname" -}}
-{{- printf "%s-controller" (include "sparkwing-full.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- include "sparkwing-full.componentFullname" (dict "root" . "component" "controller") }}
 {{- end }}
 
 {{- define "sparkwing-full.web.fullname" -}}
-{{- printf "%s-web" (include "sparkwing-full.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- include "sparkwing-full.componentFullname" (dict "root" . "component" "web") }}
+{{- end }}
+
+{{- define "sparkwing-full.controller.storageClassesFullname" -}}
+{{- include "sparkwing-full.componentFullname" (dict "root" . "component" "controller-storageclasses") }}
 {{- end }}
 
 {{/*
@@ -135,7 +159,7 @@ sub-chart logs).
 {{- if .Values.web.logs.url -}}
 {{- .Values.web.logs.url -}}
 {{- else if and (index .Values "sparkwing-runner-bundle" "enabled") (index .Values "sparkwing-runner-bundle" "logs" "enabled") -}}
-{{- printf "http://%s-logs.%s.svc.cluster.local" (include "sparkwing-full.bundle.fullname" .) .Release.Namespace -}}
+{{- printf "http://%s.%s.svc.cluster.local" (include "sparkwing-full.bundle.logs.fullname" .) .Release.Namespace -}}
 {{- end -}}
 {{- end }}
 
@@ -154,20 +178,45 @@ this empty without losing anything else.
 {{- if .Values.web.cache.url -}}
 {{- .Values.web.cache.url -}}
 {{- else if and (index .Values "sparkwing-runner-bundle" "enabled") (index .Values "sparkwing-runner-bundle" "cache" "enabled") -}}
-{{- printf "http://%s-cache.%s.svc.cluster.local" (include "sparkwing-full.bundle.fullname" .) .Release.Namespace -}}
+{{- printf "http://%s.%s.svc.cluster.local" (include "sparkwing-full.bundle.cache.fullname" .) .Release.Namespace -}}
 {{- end -}}
 {{- end }}
 
 {{/*
-The runner-bundle sub-chart's release-qualified name, reproducing its
-own fullname helper (<release-name>-sparkwing-runner-bundle) because a
-parent chart cannot call into a sub-chart's helpers. Its Service names
-are that name plus a component suffix.
+The runner-bundle sub-chart's untruncated release-qualified base,
+reproducing its own helper because a parent chart cannot call into a
+sub-chart's helpers.
 */}}
-{{- define "sparkwing-full.bundle.fullname" -}}
-{{- $bundleFull := printf "%s-sparkwing-runner-bundle" .Release.Name | trunc 63 | trimSuffix "-" -}}
-{{- if contains "sparkwing-runner-bundle" .Release.Name -}}
-{{- $bundleFull = .Release.Name | trunc 63 | trimSuffix "-" -}}
+{{- define "sparkwing-full.bundle.fullnameBase" -}}
+{{- $bundle := index .Values "sparkwing-runner-bundle" -}}
+{{- if (index $bundle "fullnameOverride") -}}
+{{- index $bundle "fullnameOverride" | trimSuffix "-" -}}
+{{- else -}}
+{{- $name := default "sparkwing-runner-bundle" (index $bundle "nameOverride") -}}
+{{- if contains $name .Release.Name -}}
+{{- .Release.Name | trimSuffix "-" -}}
+{{- else -}}
+{{- printf "%s-%s" .Release.Name $name | trimSuffix "-" -}}
 {{- end -}}
-{{- $bundleFull -}}
+{{- end -}}
+{{- end }}
+
+{{- define "sparkwing-full.bundle.fullname" -}}
+{{- include "sparkwing-full.bundle.fullnameBase" . | trunc 63 | trimSuffix "-" -}}
+{{- end }}
+
+{{/* Keep parent-computed URLs byte-for-byte aligned with sub-chart resources. */}}
+{{- define "sparkwing-full.bundle.componentFullname" -}}
+{{- $suffix := printf "-%s" .component -}}
+{{- $baseLimit := sub 63 (len $suffix) | int -}}
+{{- $base := include "sparkwing-full.bundle.fullnameBase" .root | trunc $baseLimit | trimSuffix "-" -}}
+{{- printf "%s%s" $base $suffix -}}
+{{- end }}
+
+{{- define "sparkwing-full.bundle.logs.fullname" -}}
+{{- include "sparkwing-full.bundle.componentFullname" (dict "root" . "component" "logs") -}}
+{{- end }}
+
+{{- define "sparkwing-full.bundle.cache.fullname" -}}
+{{- include "sparkwing-full.bundle.componentFullname" (dict "root" . "component" "cache") -}}
 {{- end }}
