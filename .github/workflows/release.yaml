@@ -222,6 +222,7 @@ jobs:
   prepare-binaries:
     name: Assemble & scan release binaries
     needs: build
+    if: ${{ always() && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       # The scanner script and Go vulnerability tooling come from the exact

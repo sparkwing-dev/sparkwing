@@ -161,6 +161,9 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 		`go-version: "1.26.6"`,
 		"TAG: ${{ inputs.tag || github.ref_name }}",
 	)
+	requireWorkflowText(t, workflowJob(t, body, "prepare-binaries"),
+		"always() && needs.build.result == 'success'",
+	)
 
 	for permission, want := range map[string]int{
 		"contents: write": 1,
