@@ -143,15 +143,22 @@ export async function startAuthenticatedDashboard(
       ],
       options.buildTimeoutMs ?? 60_000,
     );
-    const fixture = spawn(binary, [], {
-      cwd: repositoryRoot,
-      env: {
-        ...process.env,
-        SPARKWING_BROWSER_FIXTURE_HOME: join(temporary, "fixture-home"),
-        SPARKWING_BROWSER_WEB_OUT: output,
-        SPARKWING_WEB_INSECURE_COOKIES: "1",
+    const fixture = spawn(
+      binary,
+      [
+        "--fixture-home",
+        join(temporary, "fixture-home"),
+        "--web-out",
+        output,
+      ],
+      {
+        cwd: repositoryRoot,
+        env: {
+          ...process.env,
+          SPARKWING_WEB_INSECURE_COOKIES: "1",
+        },
       },
-    });
+    );
     child = fixture;
     const started = await waitForStart(fixture);
     return {

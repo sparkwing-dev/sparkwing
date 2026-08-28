@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net"
@@ -138,14 +139,19 @@ func listen(handler http.Handler) (net.Listener, *http.Server, error) {
 }
 
 func main() {
-	root := os.Getenv("SPARKWING_BROWSER_FIXTURE_HOME")
-	if root == "" {
-		log.Fatal("SPARKWING_BROWSER_FIXTURE_HOME is required")
+	root := flag.String("fixture-home", "", "temporary fixture state directory")
+	webOutput := flag.String("web-out", "", "dashboard static export directory")
+	flag.Parse()
+	if *root == "" {
+		log.Fatal("--fixture-home is required")
 	}
-	if err := os.MkdirAll(root, 0o700); err != nil {
+	if *webOutput == "" {
+		log.Fatal("--web-out is required")
+	}
+	if err := os.MkdirAll(*root, 0o700); err != nil {
 		log.Fatal(err)
 	}
-	dashboardPaths := paths.PathsAt(filepath.Join(root, "home"))
+	dashboardPaths := paths.PathsAt(filepath.Join(*root, "home"))
 	if err := dashboardPaths.EnsureRoot(); err != nil {
 		log.Fatal(err)
 	}
@@ -161,10 +167,6 @@ func main() {
 		log.Fatal(err)
 	}
 	controllerOrigin := "http://" + controllerListener.Addr().String()
-	webOutput := os.Getenv("SPARKWING_BROWSER_WEB_OUT")
-	if webOutput == "" {
-		log.Fatal("SPARKWING_BROWSER_WEB_OUT is required")
-	}
 	dashboardHandler := dashboard.HandlerFromOptionsWithBundle(dashboard.HandlerOptions{
 		Backend:       backend.NewStoreBackend(stateStore, dashboardPaths, nil),
 		Paths:         dashboardPaths,
@@ -173,7 +175,7 @@ func main() {
 		Token:         serviceToken,
 		Version:       "auth-browser-fixture",
 		RequireLogin:  true,
-	}, os.DirFS(webOutput))
+	}, os.DirFS(*webOutput))
 	dashboardListener, dashboardServer, err := listen(dashboardHandler)
 	if err != nil {
 		_ = controllerServer.Close()
