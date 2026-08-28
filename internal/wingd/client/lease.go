@@ -202,23 +202,24 @@ func (l *Lease) WatchControl(onEvicted func(wingwire.Evicted), onCancel func(win
 // daemon that accepts and immediately closes cannot turn the watcher into
 // a reconnect loop running at socket speed. The pacing returns to its
 // base once a frame arrives, which is the only proof the watch is working
-// again.
-func (l *Lease) WatchGuard(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel), onComplete func()) {
+// again. It returns [ErrReattachRejected] when a successor no longer has
+// the guarded lease, or the recovery error that otherwise ended the watch.
+func (l *Lease) WatchGuard(onEvicted func(wingwire.Evicted), onCancel func(wingwire.Cancel), onComplete func()) error {
 	retry := newRetry("guard watch", 0)
 	for {
 		msg, err := l.cl.dec.read()
 		if err != nil {
 			if !l.cl.closed.Load() {
 				if werr := retry.wait(context.Background(), err); werr != nil {
-					return
+					return werr
 				}
 			}
-			recovered, guardGone := l.recoverWatch()
+			recovered, guardGone, recoverErr := l.recoverWatch()
 			if !recovered {
 				if guardGone && onComplete != nil {
 					onComplete()
 				}
-				return
+				return recoverErr
 			}
 			continue
 		}
@@ -236,7 +237,7 @@ func (l *Lease) WatchGuard(onEvicted func(wingwire.Evicted), onCancel func(wingw
 			if onComplete != nil {
 				onComplete()
 			}
-			return
+			return nil
 		case *wingwire.LivenessProbe:
 			if err := l.cl.write(&wingwire.LivenessAck{Nonce: m.Nonce}); err != nil {
 				continue
@@ -256,12 +257,12 @@ func (l *Lease) WatchGuard(onEvicted func(wingwire.Evicted), onCancel func(wingw
 // cannot be cancelled through the daemon. A client whose Spawn cannot host a
 // successor ([ErrNoDaemonHost]) lands here on any mid-run daemon death, so
 // this is the line that explains an otherwise invisible loss of arbitration.
-func (l *Lease) recoverWatch() (recovered, guardGone bool) {
+func (l *Lease) recoverWatch() (recovered, guardGone bool, recoverErr error) {
 	if l.cl.closed.Load() {
 		// Not a diagnostic: this is how every lease ends. The caller closed
 		// the connection deliberately, and the watch stopping is the
 		// intended consequence, not a loss of arbitration to report.
-		return false, false
+		return false, false, nil
 	}
 	l.guardMu.Lock()
 	defer l.guardMu.Unlock()
@@ -269,19 +270,21 @@ func (l *Lease) recoverWatch() (recovered, guardGone bool) {
 	defer cancel()
 	if err := l.cl.connect(ctx); err != nil {
 		l.cl.opts.logf("lease %s: daemon connection lost and not recovered (%v); run continues without eviction watch or daemon-side cancel", l.RunID, err)
-		return false, false
+		return false, false, err
 	}
 	_, terminal, transient := l.cl.readReattach(l.Token)
 	if terminal != nil || transient != nil {
+		recoverErr := errors.Join(terminal, transient)
 		l.cl.opts.logf("lease %s: reattach after daemon restart failed (%v); run continues without eviction watch or daemon-side cancel",
-			l.RunID, errors.Join(terminal, transient))
-		return false, l.guardComplete.Load() && errors.Is(terminal, ErrReattachRejected)
+			l.RunID, recoverErr)
+		return false, l.guardComplete.Load() && errors.Is(terminal, ErrReattachRejected), recoverErr
 	}
 	l.guardSent = false
 	if l.guardComplete.Load() {
-		return l.sendGuardCompleteLocked() == nil, false
+		err := l.sendGuardCompleteLocked()
+		return err == nil, false, err
 	}
-	return true, false
+	return true, false, nil
 }
 
 // CancelLease asks the daemon to cancel a local run it arbitrates, by run
