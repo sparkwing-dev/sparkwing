@@ -1,9 +1,11 @@
 # Default values for sparkwing-full.
 #
 # Override with `helm install ... --set key=value` or `-f
-# my-values.yaml`. The minimum-viable override is nothing -- a bare
-# `helm install` produces a working single-instance stack assuming
-# the cluster has a default StorageClass.
+# my-values.yaml`. This chart version has no compatible public image
+# default: a bare install is not a runnable release. Build or mirror a
+# mutually compatible image set and explicitly set image.repository
+# and image.tag for every enabled component until a corrected release
+# is published.
 #
 # Sections, in roughly the order operators care about:
 #   1. controller.*               -- the orchestrator
@@ -26,12 +28,9 @@ controller:
   replicas: 1
 
   image:
-    # Default assumes images publish to GHCR under sparkwing-dev. If
-    # you mirror images internally, point this at your registry.
-    # NOTE: GHCR publishing is in flight. Until container images are
-    # published, build the binary locally with
-    # `go install github.com/sparkwing-dev/sparkwing/cmd/sparkwing@latest`
-    # or point at your own mirror.
+    # Registry-layout fallback only. The current appVersion is not a
+    # compatible public image contract; set repository and tag to an
+    # image built or mirrored with the other enabled components.
     repository: ghcr.io/sparkwing-dev/sparkwing-controller
     tag: "" # falls back to .Chart.AppVersion when empty
     pullPolicy: IfNotPresent
@@ -113,6 +112,8 @@ web:
   replicas: 1
 
   image:
+    # Pin this with the controller and runner-bundle images; the
+    # appVersion fallback is not a runnable public release default.
     repository: ghcr.io/sparkwing-dev/sparkwing-web
     tag: ""
     pullPolicy: IfNotPresent
@@ -270,10 +271,10 @@ sparkwing-runner-bundle:
 
   controller:
     # Wire the bundled runner at the bundled controller's Service.
-    # Empty here means "the chart will inject the in-cluster
-    # service URL via templates/_helpers.tpl". If you want the
-    # runner to claim from a *different* controller, override.
+    # An explicit URL still wins when the runner should claim from a
+    # different controller.
     url: ""
+    bundled: true
     # The controller-token Secret the runner mounts. Empty =
     # unauthenticated to the controller (fine for kind / dev;
     # not for shared installs). Pre-create with:

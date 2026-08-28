@@ -1,4 +1,5 @@
 {{- if .Values.logs.enabled -}}
+{{- $controllerURL := include "sparkwing-runner-bundle.controllerURL" . -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -51,26 +52,17 @@ spec:
             - {{ printf "0.0.0.0:%d" (int .Values.logs.service.targetPort) | quote }}
             - --root
             - {{ .Values.logs.rootPath | quote }}
-            {{- if .Values.controller.url }}
+            {{- if and $controllerURL .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key }}
             # whoami-based auth: incoming Authorization headers get
             # forwarded to <controller>/api/v1/auth/whoami to resolve
             # principal + scopes. Empty controller = auth off
             # (kind / single-tenant test only).
             - --controller
-            - {{ .Values.controller.url | quote }}
+            - {{ $controllerURL | quote }}
             {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.logs.service.targetPort }}
-          env:
-            {{- if and .Values.controller.tokenSecret.name .Values.controller.tokenSecret.key }}
-            - name: SPARKWING_API_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.controller.tokenSecret.name | quote }}
-                  key: {{ .Values.controller.tokenSecret.key | quote }}
-                  optional: true
-            {{- end }}
           volumeMounts:
             - name: data
               mountPath: {{ .Values.logs.rootPath | quote }}

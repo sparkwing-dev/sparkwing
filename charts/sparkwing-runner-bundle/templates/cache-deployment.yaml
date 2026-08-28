@@ -62,7 +62,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.controller.tokenSecret.name | quote }}
                   key: {{ .Values.controller.tokenSecret.key | quote }}
-                  optional: true
             {{- end }}
           ports:
             - name: http
@@ -95,7 +94,6 @@ spec:
           secret:
             secretName: {{ .Values.cache.sshKeySecret.name | quote }}
             defaultMode: 0400
-            optional: true
         {{- end }}
         - name: data
           {{- if .Values.cache.storage.enabled }}

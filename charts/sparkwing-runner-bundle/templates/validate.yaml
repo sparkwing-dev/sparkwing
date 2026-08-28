@@ -1,0 +1,14 @@
+{{- if and .Values.controller.tokenSecret.name (not .Values.controller.tokenSecret.key) -}}
+{{- fail "sparkwing-runner-bundle: controller.tokenSecret.key is required when controller.tokenSecret.name is set" -}}
+{{- end -}}
+{{- $externalGitcache := false -}}
+{{- range .Values.runner.extraEnv -}}
+{{- if eq (default "" .name) "SPARKWING_GITCACHE_URL" -}}
+{{- if or (and (hasKey . "value") (not (empty .value))) (and (hasKey . "valueFrom") (not (empty .valueFrom))) -}}
+{{- $externalGitcache = true -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and .Values.runner.alsoClaimTriggers (not .Values.cache.enabled) (not $externalGitcache) -}}
+{{- fail "sparkwing-runner-bundle: runner.alsoClaimTriggers=true requires cache.enabled=true or runner.extraEnv SPARKWING_GITCACHE_URL with an external gitcache URL" -}}
+{{- end -}}
