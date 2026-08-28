@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestSave_ConcurrentWritersNeverLeaveAnUnparseableFile(t *testing.T) {
@@ -113,6 +114,8 @@ func TestSave_AFailedWriteLeavesThePreviousRegistryIntact(t *testing.T) {
 
 const killSentinel = "SPARKWING_TEST_SAVE_UNTIL_KILLED"
 
+const killedSaveEntries = 100000
+
 func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T) {
 	if os.Getenv(killSentinel) != "" {
 		saveUntilKilled(os.Getenv(killSentinel))
@@ -132,23 +135,27 @@ func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start child: %v", err)
 	}
-	waitForGrowth(t, path)
+	waited := false
+	defer func() {
+		if waited {
+			return
+		}
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+	waitForStagingFile(t, dir)
 	if err := cmd.Process.Kill(); err != nil {
 		t.Fatalf("kill child: %v", err)
 	}
 	_ = cmd.Wait()
+	waited = true
 
 	cfg, err := Load(path)
 	if err != nil {
 		t.Fatalf("the registry a killed writer left does not parse: %v", err)
 	}
-	if len(cfg.Repos) == 0 {
-		t.Fatal("the registry came back empty, so the kill lost the file")
-	}
-	for _, e := range cfg.Repos {
-		if e.Path != "/keep/me" && !strings.HasPrefix(e.Path, "/child/") {
-			t.Errorf("entry %q belongs to neither the original nor the child config", e.Path)
-		}
+	if !isOriginalRegistry(cfg) && !isKilledChildRegistry(cfg) {
+		t.Fatalf("the interrupted save replaced the previous registry: %+v", cfg.Repos)
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -162,22 +169,46 @@ func TestSave_AProcessKilledMidWriteLeavesThePreviousRegistryIntact(t *testing.T
 }
 
 func saveUntilKilled(path string) {
-	cfg := &Config{FallbackPaths: []string{"~/code"}}
-	for i := 0; ; i++ {
+	cfg := &Config{FallbackPaths: []string{"~/code"}, Repos: make([]*Entry, 0, killedSaveEntries)}
+	for i := range killedSaveEntries {
 		cfg.Repos = append(cfg.Repos, &Entry{Path: fmt.Sprintf("/child/checkout-%06d", i)})
+	}
+	for {
 		if err := Save(path, cfg); err != nil {
 			return
 		}
 	}
 }
 
-func waitForGrowth(t *testing.T, path string) {
-	t.Helper()
-	for range 20000 {
-		cfg, err := Load(path)
-		if err == nil && len(cfg.Repos) > 200 {
-			return
+func isOriginalRegistry(cfg *Config) bool {
+	return len(cfg.FallbackPaths) == 1 && cfg.FallbackPaths[0] == "~/code" &&
+		len(cfg.Repos) == 1 && cfg.Repos[0] != nil && cfg.Repos[0].Path == "/keep/me"
+}
+
+func isKilledChildRegistry(cfg *Config) bool {
+	if len(cfg.FallbackPaths) != 1 || cfg.FallbackPaths[0] != "~/code" || len(cfg.Repos) != killedSaveEntries {
+		return false
+	}
+	for i, entry := range cfg.Repos {
+		if entry == nil || entry.Path != fmt.Sprintf("/child/checkout-%06d", i) {
+			return false
 		}
 	}
-	t.Fatal("the child never wrote a registry large enough to interrupt")
+	return true
+}
+
+func waitForStagingFile(t *testing.T, dir string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		matches, err := filepath.Glob(filepath.Join(dir, ".repos-*.yaml"))
+		if err != nil {
+			t.Fatalf("match staging file: %v", err)
+		}
+		if len(matches) > 0 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("the child never exposed an in-progress staging file")
 }

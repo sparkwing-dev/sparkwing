@@ -329,7 +329,10 @@ func TestQueueExecLeaseLossTerminatesBeforePromotingNextCommand(t *testing.T) {
 	serveQueueDaemon(t, home)
 	lost := make(chan struct{})
 	originalWatcher := queueExecWatchGuard
-	queueExecWatchGuard = func(*wingdclient.Lease, func(wingwire.Cancel), func()) { <-lost }
+	queueExecWatchGuard = func(*wingdclient.Lease, func(wingwire.Cancel), func()) error {
+		<-lost
+		return nil
+	}
 	t.Cleanup(func() { queueExecWatchGuard = originalWatcher })
 
 	tmp := t.TempDir()
@@ -376,6 +379,235 @@ func TestQueueExecLeaseLossTerminatesBeforePromotingNextCommand(t *testing.T) {
 	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
 		return len(qs.Holders) == 0 && len(qs.Waiters) == 0
 	})
+}
+
+func TestQueueExecLeaderExitDeclaresCompletionBeforeRejectedReattach(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exact process-session ownership is unavailable on Windows")
+	}
+	home := queueHome(t)
+	serveQueueDaemon(t, home)
+	completionDeclared := make(chan struct{})
+	originalDeclaration := queueExecDeclareGuardComplete
+	queueExecDeclareGuardComplete = func(lease *wingdclient.Lease) error {
+		err := lease.CompleteGuard()
+		close(completionDeclared)
+		return err
+	}
+	t.Cleanup(func() { queueExecDeclareGuardComplete = originalDeclaration })
+	originalWatcher := queueExecWatchGuard
+	queueExecWatchGuard = func(_ *wingdclient.Lease, _ func(wingwire.Cancel), onComplete func()) error {
+		<-completionDeclared
+		onComplete()
+		return nil
+	}
+	t.Cleanup(func() { queueExecWatchGuard = originalWatcher })
+
+	tmp := t.TempDir()
+	started := filepath.Join(tmp, "started")
+	release := filepath.Join(tmp, "release")
+	t.Cleanup(func() { _ = os.WriteFile(release, nil, 0o600) })
+	result := make(chan error, 1)
+	go func() {
+		result <- runQueue([]string{
+			"exec", "--home", home, "--run-id", "completed-bootstrap", "--cores", "0.1",
+			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", started, "0", release,
+		})
+	}()
+	waitForFile(t, started)
+	select {
+	case <-completionDeclared:
+		t.Fatal("guard completion was declared before the direct leader exited")
+	default:
+	}
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-completionDeclared:
+	case <-time.After(queueExecWait):
+		t.Fatal("direct leader exit did not declare guard completion")
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("queue exec after rejected reattach completion: %v", err)
+		}
+	case <-time.After(queueExecWait):
+		t.Fatal("queue exec did not finish after rejected reattach completion")
+	}
+}
+
+func TestQueueExecAcceptsRejectedReattachAfterExactSessionIsEmpty(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exact process-session ownership is unavailable on Windows")
+	}
+	home := queueHome(t)
+	serveQueueDaemon(t, home)
+	watched := make(chan *wingdclient.Lease, 1)
+	reject := make(chan struct{})
+	var rejectOnce sync.Once
+	rejectWatch := func() { rejectOnce.Do(func() { close(reject) }) }
+	t.Cleanup(rejectWatch)
+	originalWatcher := queueExecWatchGuard
+	queueExecWatchGuard = func(lease *wingdclient.Lease, _ func(wingwire.Cancel), _ func()) error {
+		watched <- lease
+		<-reject
+		return wingdclient.ErrReattachRejected
+	}
+	t.Cleanup(func() { queueExecWatchGuard = originalWatcher })
+	declarationStarted := make(chan struct{})
+	allowDeclaration := make(chan struct{})
+	var declarationOnce sync.Once
+	var allowOnce sync.Once
+	releaseDeclaration := func() { allowOnce.Do(func() { close(allowDeclaration) }) }
+	t.Cleanup(releaseDeclaration)
+	originalDeclaration := queueExecDeclareGuardComplete
+	queueExecDeclareGuardComplete = func(*wingdclient.Lease) error {
+		declarationOnce.Do(func() { close(declarationStarted) })
+		<-allowDeclaration
+		return nil
+	}
+	t.Cleanup(func() { queueExecDeclareGuardComplete = originalDeclaration })
+
+	tmp := t.TempDir()
+	started := filepath.Join(tmp, "started")
+	release := filepath.Join(tmp, "release")
+	result := make(chan error, 1)
+	go func() {
+		result <- runQueue([]string{
+			"exec", "--home", home, "--run-id", "rejected-empty", "--cores", "0.1",
+			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", started, "0", release,
+		})
+	}()
+	waitForFile(t, started)
+	lease := <-watched
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-declarationStarted:
+	case <-time.After(queueExecWait):
+		t.Fatal("leader exit was not observed")
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatalf("disconnect completed guard: %v", err)
+	}
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 0
+	})
+	rejectWatch()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("queue exec after authoritative rejection: %v", err)
+		}
+	case <-time.After(queueExecWait):
+		t.Fatal("queue exec waited for an impossible completion acknowledgement")
+	}
+	releaseDeclaration()
+}
+
+func TestQueueExecRejectsReattachWhileExactSessionIsLive(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exact process-session ownership is unavailable on Windows")
+	}
+	home := queueHome(t)
+	serveQueueDaemon(t, home)
+	watching := make(chan struct{})
+	reject := make(chan struct{})
+	var watchingOnce sync.Once
+	var rejectOnce sync.Once
+	rejectWatch := func() { rejectOnce.Do(func() { close(reject) }) }
+	t.Cleanup(rejectWatch)
+	originalWatcher := queueExecWatchGuard
+	queueExecWatchGuard = func(*wingdclient.Lease, func(wingwire.Cancel), func()) error {
+		watchingOnce.Do(func() { close(watching) })
+		<-reject
+		return wingdclient.ErrReattachRejected
+	}
+	t.Cleanup(func() { queueExecWatchGuard = originalWatcher })
+
+	tmp := t.TempDir()
+	started := filepath.Join(tmp, "started")
+	neverRelease := filepath.Join(tmp, "never-release")
+	t.Cleanup(func() { _ = os.WriteFile(neverRelease, nil, 0o600) })
+	result := make(chan error, 1)
+	go func() {
+		result <- runQueue([]string{
+			"exec", "--home", home, "--run-id", "rejected-live", "--cores", "0.1",
+			"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", started, "0", neverRelease,
+		})
+	}()
+	startedBody := waitForFileContents(t, started)
+	select {
+	case <-watching:
+	case <-time.After(queueExecWait):
+		t.Fatal("guard watch did not start")
+	}
+	rejectWatch()
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "admission lease") {
+			t.Fatalf("live-session rejection = %v, want lease loss", err)
+		}
+	case <-time.After(queueExecWait):
+		t.Fatal("live-session rejection did not terminate the command")
+	}
+	pid, err := strconv.Atoi(string(startedBody))
+	if err != nil {
+		t.Fatalf("parse child pid %q: %v", startedBody, err)
+	}
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Fatalf("child %d survived authoritative rejection: %v", pid, err)
+	}
+	waitForQueueExecState(t, home, func(qs wingwire.QueueState) bool {
+		return len(qs.Holders) == 0
+	})
+}
+
+func TestQueueExecRejectedReattachFailsClosedWhenSessionCannotBeInspected(t *testing.T) {
+	gone, err := queueExecGuardAlreadyGone(wingdclient.ErrReattachRejected, procgroup.SessionIdentity{})
+	if gone || err == nil {
+		t.Fatalf("uninspectable session = gone %v, error %v", gone, err)
+	}
+}
+
+func TestQueueExecFinishedFirstPreservesWatchFailure(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("exact process-session ownership is unavailable on Windows")
+	}
+	home := queueHome(t)
+	serveQueueDaemon(t, home)
+	releaseStarted := make(chan struct{})
+	var releaseOnce sync.Once
+	originalRelease := queueExecReleaseGuard
+	queueExecReleaseGuard = func(*wingdclient.Lease) error {
+		releaseOnce.Do(func() { close(releaseStarted) })
+		return nil
+	}
+	t.Cleanup(func() { queueExecReleaseGuard = originalRelease })
+	watchFailure := errors.New("watch recovery failed")
+	originalWatcher := queueExecWatchGuard
+	queueExecWatchGuard = func(*wingdclient.Lease, func(wingwire.Cancel), func()) error {
+		<-releaseStarted
+		return watchFailure
+	}
+	t.Cleanup(func() { queueExecWatchGuard = originalWatcher })
+
+	tmp := t.TempDir()
+	started := filepath.Join(tmp, "started")
+	release := filepath.Join(tmp, "release")
+	if err := os.WriteFile(release, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := runQueue([]string{
+		"exec", "--home", home, "--run-id", "finished-first", "--cores", "0.1",
+		"--semaphore", "bootstrap", "--", os.Args[0], "-test.run=TestQueueExecHelperProcess", "--", started, "0", release,
+	})
+	if !errors.Is(err, watchFailure) {
+		t.Fatalf("queue exec error = %v, want watch failure", err)
+	}
 }
 
 func TestQueueExecSupervisorDeathRetainsAdmissionUntilCommandSessionEnds(t *testing.T) {
