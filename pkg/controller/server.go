@@ -249,7 +249,8 @@ func (s *Server) WithAuthenticator(a *Authenticator) *Server {
 }
 
 // Handler returns the HTTP router. Exposed separately from Serve so
-// tests can wrap it in httptest without binding a real port.
+// tests can wrap it in httptest without binding a real port. Callers using
+// Handler directly must call Shutdown to drain server-owned background work.
 //
 // Auth shape:
 //   - /api/v1/health is always unauthenticated so k8s probes don't
@@ -468,12 +469,18 @@ func ServeWith(ctx context.Context, s *Server, addr string) error {
 }
 
 func (s *Server) shutdownGitHubCommitStatuses(ctx context.Context) {
-	if s.githubCommitStatuses == nil {
-		return
-	}
-	if err := s.githubCommitStatuses.shutdown(ctx); err != nil {
+	if err := s.Shutdown(ctx); err != nil {
 		s.logger.Warn("github commit status shutdown incomplete", "err", err)
 	}
+}
+
+// Shutdown drains server-owned background work until ctx expires. ServeWith
+// calls Shutdown automatically; callers serving Handler directly must call it.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.githubCommitStatuses == nil {
+		return nil
+	}
+	return s.githubCommitStatuses.shutdown(ctx)
 }
 
 func (s *Server) runReaper(ctx context.Context, interval time.Duration) {

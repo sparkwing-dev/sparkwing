@@ -54,6 +54,7 @@ code change to unlock.
   commit statuses under `sparkwing/<pipeline>` when `GITHUB_TOKEN` is set.
   `SPARKWING_DASHBOARD_URL` optionally adds a run-detail link. GitHub delivery
   errors are logged and never change webhook admission or the run result.
+  Programs serving `Server.Handler` directly must call `Server.Shutdown`.
 
 ### Security
 

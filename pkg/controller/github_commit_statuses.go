@@ -32,16 +32,31 @@ type githubCommitStatusReporter struct {
 	httpClient   *http.Client
 	ctx          context.Context
 	cancel       context.CancelFunc
-	jobs         chan githubCommitStatusJob
+	wake         chan struct{}
 	done         chan struct{}
 	mu           sync.Mutex
 	accepting    bool
+	capacity     int
+	slots        map[githubCommitStatusKey]*githubCommitStatusSlot
 }
 
 type githubCommitStatusJob struct {
-	logger           *slog.Logger
-	status           githubCommitStatus
-	dispatchAccepted <-chan bool
+	key    githubCommitStatusKey
+	logger *slog.Logger
+	status githubCommitStatus
+}
+
+type githubCommitStatusKey struct {
+	runID    string
+	pipeline string
+}
+
+type githubCommitStatusSlot struct {
+	pending          *githubCommitStatusJob
+	terminal         *githubCommitStatusJob
+	unresolved       bool
+	inFlight         bool
+	awaitingTerminal bool
 }
 
 type githubCommitStatusRequest struct {
@@ -67,9 +82,12 @@ type githubCommitStatus struct {
 // base URL used for each status's run-detail link. The dashboard URL must be
 // HTTP(S), include a host, and omit credentials, query, and fragment.
 func (s *Server) WithGitHubCommitStatuses(token, dashboardURL string) *Server {
+	if s.githubCommitStatuses != nil {
+		s.githubCommitStatuses.stop()
+		s.githubCommitStatuses = nil
+	}
 	token = strings.TrimSpace(token)
 	if token == "" {
-		s.githubCommitStatuses = nil
 		return s
 	}
 	s.githubCommitStatuses = newGitHubCommitStatusReporter(
@@ -96,9 +114,11 @@ func newGitHubCommitStatusReporterWithCapacity(token, dashboardURL, apiBaseURL s
 		httpClient:   httpClient,
 		ctx:          ctx,
 		cancel:       cancel,
-		jobs:         make(chan githubCommitStatusJob, capacity),
+		wake:         make(chan struct{}, 1),
 		done:         make(chan struct{}),
 		accepting:    true,
+		capacity:     capacity,
+		slots:        make(map[githubCommitStatusKey]*githubCommitStatusSlot),
 	}
 	go r.run()
 	return r
@@ -141,74 +161,147 @@ func (s *Server) githubCommitStatus(ctx context.Context, runID, runStatus string
 }
 
 func (r *githubCommitStatusReporter) enqueue(logger *slog.Logger, status githubCommitStatus) bool {
-	return r.enqueueAfter(logger, status, nil)
+	key := githubCommitStatusKey{runID: status.RunID, pipeline: status.Pipeline}
+	job := &githubCommitStatusJob{key: key, logger: logger, status: status}
+	r.mu.Lock()
+	slot := r.slots[key]
+	if slot == nil && r.accepting && len(r.slots) < r.capacity {
+		slot = &githubCommitStatusSlot{}
+		r.slots[key] = slot
+	}
+	accepted := r.accepting && slot != nil
+	if accepted {
+		if status.State == "pending" {
+			slot.pending = job
+			slot.awaitingTerminal = slot.terminal == nil
+		} else {
+			slot.terminal = job
+			slot.awaitingTerminal = false
+		}
+		r.signalLocked()
+	}
+	r.mu.Unlock()
+	if !accepted {
+		logGitHubCommitStatusDrop(logger, status)
+	}
+	return accepted
 }
 
 func (r *githubCommitStatusReporter) reserve(logger *slog.Logger, status githubCommitStatus) func(bool) {
-	dispatchAccepted := make(chan bool, 1)
-	r.enqueueAfter(logger, status, dispatchAccepted)
+	key := githubCommitStatusKey{runID: status.RunID, pipeline: status.Pipeline}
+	job := &githubCommitStatusJob{key: key, logger: logger, status: status}
+	r.mu.Lock()
+	slot := r.slots[key]
+	if slot == nil && r.accepting && len(r.slots) < r.capacity {
+		slot = &githubCommitStatusSlot{}
+		r.slots[key] = slot
+	}
+	accepted := r.accepting && slot != nil
+	if accepted {
+		slot.pending = job
+		slot.unresolved = true
+		r.signalLocked()
+	}
+	r.mu.Unlock()
+	if !accepted {
+		logGitHubCommitStatusDrop(logger, status)
+	}
 	var once sync.Once
-	return func(accepted bool) {
+	return func(dispatchAccepted bool) {
 		once.Do(func() {
-			dispatchAccepted <- accepted
-			close(dispatchAccepted)
+			if accepted {
+				r.resolve(key, slot, dispatchAccepted)
+			}
 		})
 	}
 }
 
-func (r *githubCommitStatusReporter) enqueueAfter(logger *slog.Logger, status githubCommitStatus, dispatchAccepted <-chan bool) bool {
-	job := githubCommitStatusJob{
-		logger:           logger,
-		status:           status,
-		dispatchAccepted: dispatchAccepted,
-	}
+func (r *githubCommitStatusReporter) resolve(key githubCommitStatusKey, target *githubCommitStatusSlot, accepted bool) {
 	r.mu.Lock()
-	accepted := false
-	if r.accepting {
-		select {
-		case r.jobs <- job:
-			accepted = true
-		default:
+	slot := r.slots[key]
+	if slot == target {
+		slot.unresolved = false
+		if !accepted {
+			slot.pending = nil
+			slot.awaitingTerminal = false
+		} else {
+			slot.awaitingTerminal = slot.terminal == nil
 		}
+		if !slot.inFlight && slot.pending == nil && slot.terminal == nil && !slot.awaitingTerminal {
+			delete(r.slots, key)
+		}
+		r.signalLocked()
 	}
 	r.mu.Unlock()
-	if !accepted && logger != nil {
-		logger.Warn(
-			"github commit status update dropped",
-			"run_id", status.RunID,
-			"pipeline", status.Pipeline,
-			"state", status.State,
-		)
-	}
-	return accepted
 }
 
 func (r *githubCommitStatusReporter) run() {
 	defer close(r.done)
 	for {
+		if r.ctx.Err() != nil {
+			return
+		}
+		job, exit := r.takeReady()
+		if job != nil {
+			r.deliver(*job)
+			r.finish(job.key)
+			continue
+		}
+		if exit {
+			return
+		}
 		select {
 		case <-r.ctx.Done():
 			return
-		case job, ok := <-r.jobs:
-			if !ok {
-				return
-			}
-			r.deliver(job)
+		case <-r.wake:
 		}
 	}
 }
 
-func (r *githubCommitStatusReporter) deliver(job githubCommitStatusJob) {
-	if job.dispatchAccepted != nil {
-		select {
-		case accepted := <-job.dispatchAccepted:
-			if !accepted {
-				return
-			}
-		case <-r.ctx.Done():
-			return
+func (r *githubCommitStatusReporter) takeReady() (*githubCommitStatusJob, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, slot := range r.slots {
+		if slot.inFlight || slot.unresolved {
+			continue
+		}
+		var job *githubCommitStatusJob
+		if slot.pending != nil {
+			job = slot.pending
+			slot.pending = nil
+		} else if slot.terminal != nil {
+			job = slot.terminal
+			slot.terminal = nil
+		}
+		if job != nil {
+			slot.inFlight = true
+			return job, false
 		}
 	}
+	return nil, !r.accepting && len(r.slots) == 0
+}
+
+func (r *githubCommitStatusReporter) finish(key githubCommitStatusKey) {
+	r.mu.Lock()
+	slot := r.slots[key]
+	if slot != nil {
+		slot.inFlight = false
+		if !slot.unresolved && slot.pending == nil && slot.terminal == nil && (!slot.awaitingTerminal || !r.accepting) {
+			delete(r.slots, key)
+		}
+		r.signalLocked()
+	}
+	r.mu.Unlock()
+}
+
+func (r *githubCommitStatusReporter) signalLocked() {
+	select {
+	case r.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (r *githubCommitStatusReporter) deliver(job githubCommitStatusJob) {
 	postCtx, cancel := context.WithTimeout(r.ctx, githubStatusTimeout)
 	defer cancel()
 	if err := r.post(postCtx, job.status); err != nil && job.logger != nil {
@@ -222,12 +315,27 @@ func (r *githubCommitStatusReporter) deliver(job githubCommitStatusJob) {
 	}
 }
 
+func logGitHubCommitStatusDrop(logger *slog.Logger, status githubCommitStatus) {
+	if logger == nil {
+		return
+	}
+	logger.Warn(
+		"github commit status update dropped",
+		"run_id", status.RunID,
+		"pipeline", status.Pipeline,
+		"state", status.State,
+	)
+}
+
 func (r *githubCommitStatusReporter) shutdown(ctx context.Context) error {
 	r.mu.Lock()
-	if r.accepting {
-		r.accepting = false
-		close(r.jobs)
+	r.accepting = false
+	for key, slot := range r.slots {
+		if !slot.inFlight && !slot.unresolved && slot.pending == nil && slot.terminal == nil {
+			delete(r.slots, key)
+		}
 	}
+	r.signalLocked()
 	r.mu.Unlock()
 
 	select {
@@ -236,8 +344,20 @@ func (r *githubCommitStatusReporter) shutdown(ctx context.Context) error {
 		return nil
 	case <-ctx.Done():
 		r.cancel()
-		return ctx.Err()
+		select {
+		case <-r.done:
+			return nil
+		default:
+			return ctx.Err()
+		}
 	}
+}
+
+func (r *githubCommitStatusReporter) stop() {
+	r.mu.Lock()
+	r.accepting = false
+	r.mu.Unlock()
+	r.cancel()
 }
 
 func githubCommitStatusFromTrigger(trigger *store.Trigger, runStatus string) (githubCommitStatus, bool) {
@@ -321,9 +441,12 @@ func githubRunTargetURL(baseURL, runID string) string {
 		return ""
 	}
 	u, err := url.Parse(baseURL)
-	if err != nil ||
-		(u.Scheme != "http" && u.Scheme != "https") ||
-		u.Host == "" ||
+	if err != nil {
+		return ""
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if (scheme != "http" && scheme != "https") ||
+		u.Hostname() == "" ||
 		u.User != nil ||
 		u.RawQuery != "" ||
 		u.ForceQuery ||
@@ -331,6 +454,7 @@ func githubRunTargetURL(baseURL, runID string) string {
 		strings.Contains(baseURL, "#") {
 		return ""
 	}
+	u.Scheme = scheme
 	u.Path = strings.TrimRight(u.Path, "/") + "/runs"
 	u.RawPath = ""
 	q := url.Values{}

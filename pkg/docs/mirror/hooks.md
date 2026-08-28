@@ -92,7 +92,8 @@ the URL must use HTTP or HTTPS, include a host, and omit credentials, a
 query, and a fragment. Omitted or invalid values publish statuses without a
 target link. Status delivery is best-effort: GitHub errors are logged and
 never change webhook admission or the run result. Push, manual, and retry
-runs do not publish statuses.
+runs do not publish statuses. Programs serving `controller.Server.Handler`
+directly must call `Server.Shutdown`; `ServeWith` does this automatically.
 
 ## Manual / API invocation
 
