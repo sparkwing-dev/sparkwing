@@ -30,7 +30,8 @@ RUN --mount=type=cache,target=/go/pkg/mod \
       ./cmd/sparkwing-runner
 
 FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
-RUN apk add --no-cache ca-certificates git
+RUN apk upgrade --no-cache && \
+    apk add --no-cache ca-certificates git
 # Match Dockerfile.binary: seed a passwd entry for uid 1000 so SSH
 # client + git's getpwuid lookups don't fail when the pod runs under
 # a cluster-set uid that isn't in alpine's default /etc/passwd.

@@ -455,6 +455,21 @@ jobs:
           persist-credentials: false
           ref: ${{ inputs.tag || github.sha }}
 
+      # Recovery keeps application source pinned to the immutable tag while
+      # allowing the current release branch to repair the image recipe after
+      # a base-package vulnerability blocks publication.
+      - name: Checkout current image recipe
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+          path: .release-tools
+
+      - name: Apply current image recipe
+        if: github.event_name == 'workflow_dispatch'
+        run: cp .release-tools/.dockerignore .dockerignore && cp .release-tools/build/Dockerfile.binary .release-tools/build/Dockerfile.runner build/
+
       - uses: actions/setup-go@v5
         with:
           go-version: "1.26.6"

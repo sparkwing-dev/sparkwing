@@ -46,7 +46,8 @@ FROM alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec4
 # sparkwing-runner both shell out to it (clone, fetch, advertise);
 # adding ~15MB to the other three images is cheaper than maintaining
 # per-binary apk variants.
-RUN apk add --no-cache ca-certificates git openssh-client
+RUN apk upgrade --no-cache && \
+    apk add --no-cache ca-certificates git openssh-client
 # Kubernetes pods run these images under arbitrary uids set by the
 # cluster's securityContext (typically 1000). OpenSSH's client calls
 # getpwuid(getuid()) at startup and aborts with "No user exists for

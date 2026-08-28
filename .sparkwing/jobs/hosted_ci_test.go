@@ -146,6 +146,8 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 		"packages: write",
 		"persist-credentials: false",
 		"ref: ${{ inputs.tag || github.sha }}",
+		"Checkout current image recipe",
+		"cp .release-tools/.dockerignore .dockerignore",
 		`go-version: "1.26.6"`,
 	)
 	requireWorkflowText(t, workflowJob(t, body, "publish-images"),
