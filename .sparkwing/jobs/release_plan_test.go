@@ -132,11 +132,16 @@ func TestReleasePlanDoesNotCommitChangelogBeforeIndependentGatesPass(t *testing.
 }
 
 func TestReleasePlanSerializesTemplateVerificationAfterLocalGates(t *testing.T) {
-	deps := ancestors(t, releasePlan(t), "gate-template-verify")
+	plan := releasePlan(t)
+	deps := ancestors(t, plan, "gate-template-verify")
 	for _, gate := range []string{"gate-pre-commit", "gate-pre-push"} {
 		if !deps[gate] {
 			t.Errorf("gate-template-verify must depend on %s", gate)
 		}
+	}
+	hints := mustNode(t, plan, "gate-template-verify").ResourceHints()
+	if hints == nil || hints.Cores != 0.5 {
+		t.Fatalf("gate-template-verify resources = %+v, want 0.5 coordinator cores", hints)
 	}
 }
 

@@ -140,7 +140,7 @@ func (r *Release) Plan(_ context.Context, plan *sparkwing.Plan, in ReleaseArgs, 
 			sparkwing.WithFreshTimeout(templateVerifyReleaseTimeout),
 		)
 		return err
-	})
+	}).Resources(sparkwing.Cores(0.5))
 	gateTemplates.Needs(clean, gatePreCommit, gatePrePush)
 
 	gateLineage := sparkwing.Job(plan, "gate-release-lineage", &checkReleaseLineageJob{
