@@ -265,8 +265,8 @@ The cache moves each accepted snapshot from the transient seed namespace into
 repository. Re-seeding the same snapshot refreshes one ref. A new snapshot is
 rejected before trigger admission when the repository is full; Sparkwing never
 evicts an admitted snapshot to make room. Treat those refs as retained
-unpublished source, keep the cache private, and remove obsolete refs before
-retrying a rejected upload.
+unpublished source and keep the cache private. Before retrying a rejected
+upload, delete workspace refs that no admitted run needs.
 
 The cache also exposes tarball-upload and ancestor-negotiation endpoints
 (`/upload`, `/uploads/<id>`, `/sync/negotiate`) for code-sync flows; see
