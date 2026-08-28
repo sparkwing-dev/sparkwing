@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.37.0] - 2026-08-28
 ### Fixed
 
 - **web (Breaking):** Live dashboard node logs now retain structured step buckets instead
