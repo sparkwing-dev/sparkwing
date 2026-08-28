@@ -26,7 +26,6 @@ func TestDarwinCPUSnapshotPairsHostAndOwnedUnion(t *testing.T) {
 }
 
 func TestDarwinCPUSnapshotCreditsNoCPUToAnIdleLongLivedProcess(t *testing.T) {
-
 	previous, ok := parseDarwinCPUSnapshot("1 0 0:00.00\n99 1 9:59:59.00\n")
 	if !ok {
 		t.Fatal("parse previous snapshot failed")
@@ -47,7 +46,6 @@ func TestDarwinCPUSnapshotCreditsNoCPUToAnIdleLongLivedProcess(t *testing.T) {
 }
 
 func TestDarwinCPUSnapshotFirstTickIsUnmeasured(t *testing.T) {
-
 	current, ok := parseDarwinCPUSnapshot("1 0 5:00.00\n")
 	if !ok {
 		t.Fatal("parse snapshot failed")
@@ -61,7 +59,6 @@ func TestDarwinCPUSnapshotFirstTickIsUnmeasured(t *testing.T) {
 }
 
 func TestDarwinCPUSnapshotIgnoresABackwardsOrNewPID(t *testing.T) {
-
 	previous, ok := parseDarwinCPUSnapshot("1 0 1:00.00\n")
 	if !ok {
 		t.Fatal("parse previous snapshot failed")

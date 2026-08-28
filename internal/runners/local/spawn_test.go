@@ -192,7 +192,6 @@ func TestRunNode_CancelTerminatesAndReportsCancelled(t *testing.T) {
 }
 
 func TestRunNode_PassesTheParentLivenessPipeOnFD3(t *testing.T) {
-
 	f := newSpawnFixture(t, fakeNodeBinary(t,
 		"if [ -r /dev/fd/3 ]; then echo '{\"level\":\"info\",\"msg\":\"fd3 present\"}'; else exit 9; fi"))
 	f.seedNode(t, "run-5", "build")

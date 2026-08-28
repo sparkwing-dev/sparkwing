@@ -82,7 +82,6 @@ func runTriggersList(args []string) error {
 	}
 
 	if strings.EqualFold(*output, "json") {
-
 		return ndjson.Write(os.Stdout, trigs)
 	}
 	if *quiet {

@@ -3338,7 +3338,6 @@ func (s *Store) FinishRunAtGeneration(ctx context.Context, runID string, seq int
 	current, err := s.TriggerClaimGeneration(ctx, runID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
-
 			return true, s.FinishRun(ctx, runID, status, errMsg)
 		}
 		return false, err

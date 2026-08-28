@@ -177,7 +177,6 @@ func renderFailures(rows []failureRow, groupBy string, asJSON bool) error {
 		return renderFailureClusters(rows, groupBy, asJSON)
 	}
 	if asJSON {
-
 		return ndjson.Write(os.Stdout, rows)
 	}
 	if len(rows) == 0 {
@@ -232,7 +231,6 @@ func renderFailureClusters(rows []failureRow, groupBy string, asJSON bool) error
 		return clusters[i].Last.After(clusters[j].Last)
 	})
 	if asJSON {
-
 		return ndjson.Write(os.Stdout, clusters)
 	}
 	if len(clusters) == 0 {
@@ -341,7 +339,6 @@ func runJobsStats(ctx context.Context, paths orchestrator.Paths, args []string) 
 	sort.Slice(stats, func(i, j int) bool { return stats[i].Pipeline < stats[j].Pipeline })
 
 	if emitJSON {
-
 		return ndjson.Write(os.Stdout, stats)
 	}
 	if len(stats) == 0 {
@@ -563,7 +560,6 @@ func runJobsTree(ctx context.Context, paths orchestrator.Paths, args []string) e
 
 	var build func(r *store.Run) (*runNode, error)
 	build = func(r *store.Run) (*runNode, error) {
-
 		node := &runNode{Run: store.RedactedRun(r)}
 		kids, err := fetchChildren(r.ID)
 		if err != nil {
@@ -894,7 +890,6 @@ func renderFindResults(runs []*store.Run, format string, quiet bool) error {
 		return nil
 	}
 	if format == "json" {
-
 		return ndjson.Write(os.Stdout, store.RedactedRuns(runs))
 	}
 	if len(runs) == 0 {

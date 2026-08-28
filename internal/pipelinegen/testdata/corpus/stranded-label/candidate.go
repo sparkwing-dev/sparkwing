@@ -21,7 +21,6 @@ func (GenStrandedLabel) Examples() []sw.Example {
 }
 
 func (GenStrandedLabel) Plan(ctx context.Context, plan *sw.Plan, _ sw.NoInputs, run sw.RunContext) error {
-
 	sw.Job(plan, "build", genStrandedStep).Requires("")
 
 	sw.Job(plan, "setup", genStrandedStep).Inline().Requires("linux")

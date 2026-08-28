@@ -219,12 +219,10 @@ func darwinCPUFromSnapshot(
 		children[process.parentPID] = append(children[process.parentPID], processID)
 		prior, seen := previous[processID]
 		if !seen {
-
 			continue
 		}
 		delta := process.cpuSeconds - prior.cpuSeconds
 		if delta <= 0 {
-
 			continue
 		}
 		fraction := delta / elapsedSeconds

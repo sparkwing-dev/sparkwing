@@ -270,11 +270,9 @@ func spawnFailed(home, sock string, serr, dialErr error) error {
 		return u
 	}
 	if errors.Is(serr, ErrNoDaemon) || errors.Is(serr, ErrNoDaemonHost) {
-
 		return serr
 	}
 	if errors.Is(serr, ErrDaemonHostUnusable) || errors.Is(serr, ErrDaemonHostFailed) {
-
 		return serr
 	}
 	if tail := daemonLogTail(home); tail != "" {

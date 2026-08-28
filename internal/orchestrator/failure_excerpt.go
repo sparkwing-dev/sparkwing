@@ -132,7 +132,6 @@ func nodeFailureExcerpt(ctx context.Context, err error) (failureExcerpt, bool) {
 	}
 	_, body, isOutput := splitFailure(err)
 	if !isOutput {
-
 		return failureExcerpt{}, false
 	}
 	tail, truncated := failureExcerptTail(secrets.MaskCtx(ctx, body),
@@ -184,7 +183,6 @@ func (ix failureExcerptIndex) Unavailable(nodeID string) bool {
 
 func failureExcerptsFor(ctx context.Context, src eventLister, runID string, want map[string]struct{}) failureExcerptIndex {
 	if src == nil || runID == "" || len(want) == 0 {
-
 		return failureExcerptIndex{}
 	}
 	ix := failureExcerptIndex{byNode: map[string]failureExcerpt{}, Incomplete: true}
@@ -241,7 +239,6 @@ func splitFailure(err error) (head, body string, isOutput bool) {
 		out = strings.TrimSpace(ee.Stdout)
 	}
 	if out == "" {
-
 		return "", full, false
 	}
 	i := strings.LastIndex(full, out)
@@ -282,7 +279,6 @@ func failureExcerptTail(s string, maxLines, maxBytes int) (string, bool) {
 		if i := strings.IndexByte(out, '\n'); i >= 0 {
 			out = out[i+1:]
 		} else {
-
 			for len(out) > 0 && !utf8.RuneStart(out[0]) {
 				out = out[1:]
 			}
@@ -296,7 +292,6 @@ func failureExcerptTail(s string, maxLines, maxBytes int) (string, bool) {
 }
 
 func failureMessageHead(s string, maxLines, maxBytes int) (string, bool) {
-
 	s = strings.Trim(normalizeNewlines(s), "\n")
 	if strings.TrimSpace(s) == "" {
 		return "", false

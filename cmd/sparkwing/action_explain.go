@@ -265,7 +265,6 @@ func runPipelineExplainAll(format string) error {
 		results = append(results, row)
 	}
 	if format == "json" {
-
 		if err := ndjson.Write(os.Stdout, results); err != nil {
 			return err
 		}

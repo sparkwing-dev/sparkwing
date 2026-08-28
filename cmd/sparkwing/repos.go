@@ -272,7 +272,6 @@ func runReposUpdate(args []string) error {
 	verdicts := repos.UpdateFleet(&execOps{}, fleet, cfg)
 
 	if strings.ToLower(output) == "json" {
-
 		return ndjson.Write(os.Stdout, verdicts)
 	}
 	printVerdicts(verdicts, fleet, cfg)
