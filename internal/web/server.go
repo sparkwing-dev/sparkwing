@@ -91,12 +91,13 @@ bundle first, then reinstall:
 // HandlerOptions bundles everything the dashboard handler needs.
 // Zero value is the local-mode default.
 type HandlerOptions struct {
-	Backend       backend.Backend
-	Paths         swpaths.Paths
-	ControllerURL string // if set, /api/v1/* proxies to this URL
-	LogsURL       string // sparkwing-logs base URL (for /api/v1/health/services probe)
-	CacheURL      string // sparkwing-cache base URL (probe only; empty leaves it off the panel)
-	Token         string // controller bearer token (cluster mode)
+	Backend           backend.Backend
+	Paths             swpaths.Paths
+	ControllerURL     string // if set, /api/v1/* proxies to this URL
+	AuthControllerURL string // safety: login stays controller-backed when data reads a shared store directly
+	LogsURL           string // sparkwing-logs base URL (for /api/v1/health/services probe)
+	CacheURL          string // sparkwing-cache base URL (probe only; empty leaves it off the panel)
+	Token             string // controller bearer token (cluster mode)
 	// APIURL is injected into the SPA HTML as window.__SPARKWING_API_URL__.
 	// Empty means same-origin.
 	APIURL string
@@ -106,8 +107,8 @@ type HandlerOptions struct {
 	Version       string
 	ExtraServices []HealthService
 	// RequireLogin gates the browser-facing surface behind the
-	// session-cookie flow. Disabled in laptop-local dev where an empty
-	// tokens table would make the login redirect a dead-end loop.
+	// session-cookie flow. Its controller session backend is mandatory;
+	// laptop-local dashboards leave this disabled.
 	RequireLogin bool
 }
 
@@ -139,8 +140,11 @@ func Serve(ctx context.Context, paths swpaths.Paths, addr string) error {
 		addr)
 }
 
-// ServeWithOptions is the cluster-mode entry point.
+// ServeWithOptions starts a dashboard from fully resolved options.
 func ServeWithOptions(ctx context.Context, opts HandlerOptions, addr string) error {
+	if err := validateAuthOptions(opts); err != nil {
+		return err
+	}
 	if err := VerifyBundleEmbedded(); err != nil {
 		return err
 	}
@@ -179,6 +183,12 @@ func HandlerFromOptions(opts HandlerOptions) http.Handler {
 // production handler. Internal browser tests use it so they never rewrite the
 // embedded source directory while the Go gate compiles in parallel.
 func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Handler {
+	if err := validateAuthOptions(opts); err != nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Cache-Control", "no-store")
+			http.Error(w, "dashboard authentication unavailable: "+err.Error(), http.StatusServiceUnavailable)
+		})
+	}
 	authedMux := http.NewServeMux()
 
 	authedMux.HandleFunc("GET /api/v1/runs/{id}/logs", runLogsHandler(opts.Backend))
@@ -197,10 +207,10 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	authedMux.HandleFunc("GET /api/v1/capacity/profiles/explain", capacityExplainHandler(opts.Backend))
 
 	if opts.LogsURL != "" {
-		authedMux.Handle("/api/v1/logs/", controllerProxy(opts.LogsURL, opts.Token))
+		authedMux.Handle("/api/v1/logs/", controllerProxy(opts.LogsURL, opts.Token, loginRequired(opts)))
 	}
 	if opts.ControllerURL != "" {
-		authedMux.Handle("/api/v1/", controllerProxy(opts.ControllerURL, opts.Token))
+		authedMux.Handle("/api/v1/", controllerProxy(opts.ControllerURL, opts.Token, loginRequired(opts)))
 	} else {
 		authedMux.HandleFunc("GET /api/v1/runs", ListRunsHandler(opts.Backend))
 		authedMux.HandleFunc("GET /api/v1/runs/{id}", GetRunHandler(opts.Backend))
@@ -219,12 +229,35 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	router.HandleFunc("GET /login", loginPageHandler(opts))
 	loginLimiter := newRateLimiter(loginRateBurst, loginRateWindow)
 	router.Handle("POST /login",
-		rateLimitMiddleware(loginLimiter, loginSubmitHandler(opts)))
+		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, loginSubmitHandler(opts))))
 	router.Handle("POST /login/bootstrap",
-		rateLimitMiddleware(loginLimiter, bootstrapSubmitHandler(opts)))
-	router.HandleFunc("POST /logout", logoutHandler(opts))
-	router.Handle("/", sessionAuthMiddleware(opts, authedMux))
+		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, bootstrapSubmitHandler(opts))))
+	router.Handle("POST /logout", csrfFormMiddleware(logoutHandler(opts)))
+	router.Handle("/", sessionAuthMiddleware(opts, bundleFS, authedMux))
 	return router
+}
+
+func authControllerURL(opts HandlerOptions) string {
+	if opts.AuthControllerURL != "" {
+		return opts.AuthControllerURL
+	}
+	return opts.ControllerURL
+}
+
+func validateAuthOptions(opts HandlerOptions) error {
+	if !opts.RequireLogin {
+		return nil
+	}
+	raw := authControllerURL(opts)
+	if raw == "" {
+		return errors.New("login-required mode needs a controller session backend")
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") ||
+		u.User != nil || u.RawQuery != "" || u.Fragment != "" || strings.TrimSpace(raw) != raw {
+		return fmt.Errorf("controller session backend must be an absolute http(s) URL without credentials, query, or fragment: %q", raw)
+	}
+	return nil
 }
 
 // spaHandler serves the Next.js static export, templating HTML files
@@ -325,7 +358,7 @@ func jsStringEscape(s string) string {
 	return b.String()
 }
 
-func controllerProxy(controllerURL, token string) http.Handler {
+func controllerProxy(controllerURL, token string, loginRequired bool) http.Handler {
 	u, err := url.Parse(controllerURL)
 	if err != nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -335,6 +368,12 @@ func controllerProxy(controllerURL, token string) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.SetURL(u)
+			pr.Out.Header.Del("Cookie")
+			pr.Out.Header.Del(csrfHeaderName)
+			if loginRequired {
+				pr.Out.Header.Del("Authorization")
+				pr.Out.Header.Del("Proxy-Authorization")
+			}
 			if token != "" {
 				pr.Out.Header.Set("Authorization", "Bearer "+token)
 			}

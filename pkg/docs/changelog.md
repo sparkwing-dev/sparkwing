@@ -53,6 +53,15 @@ code change to unlock.
 - **controller:** First-admin creation now requires an admin bearer token when
   controller authentication is enabled. The unauthenticated first-visit signup
   remains available only while controller authentication is disabled.
+- **web (Breaking):** Login-required dashboards now refuse to start without a
+  controller session backend. Login, first-admin, and logout forms enforce
+  same-origin CSRF tokens; post-login redirects accept encoded same-origin
+  paths only; unsafe browser API mutations require the live session's CSRF
+  header; browser cookies never cross the service-bearer proxy boundary; and
+  controller-side session revocation takes effect on the next protected data
+  request instead of after a 60-second web cache. Transient session-backend
+  failures return `502` without deleting browser cookies. See the
+  [migration guide](docs/migrations/_unreleased.md#dashboard-browser-session-hardening).
 
 ### Fixed
 

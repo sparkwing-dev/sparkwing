@@ -1,7 +1,8 @@
 // API client for the sparkwing dashboard. Talks to the controller
 // over HTTP; browser-side client. The Go server that serves this
-// SPA templates the token + API URL into window globals at request
-// time -- see pkg/orchestrator/web for the templating side.
+// SPA templates runtime auth + API URL globals at request time. In
+// login-required mode the browser receives no service bearer and uses
+// its session cookie plus a CSRF header for unsafe same-origin calls.
 //
 // Public surface (2026-05-04):
 //
@@ -56,6 +57,32 @@ function getAuthHeaders(): HeadersInit {
   return { Authorization: `Bearer ${token}` };
 }
 
+function getSessionCSRFHeaders(method: string | undefined): HeadersInit {
+  if (typeof window === "undefined" || typeof document === "undefined") {
+    return {};
+  }
+  const runtime = window as unknown as Record<string, unknown>;
+  if (runtime.__SPARKWING_REQUIRE_LOGIN__ !== "true") return {};
+  switch ((method || "GET").toUpperCase()) {
+    case "GET":
+    case "HEAD":
+    case "OPTIONS":
+    case "TRACE":
+      return {};
+  }
+  const cookie = document.cookie
+    .split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith("sw_csrf="));
+  if (!cookie) return {};
+  const token = cookie.slice("sw_csrf=".length);
+  try {
+    return { "X-CSRF-Token": decodeURIComponent(token) };
+  } catch {
+    return {};
+  }
+}
+
 // --- Connection health tracking ---
 export type ConnectionStatus = "ok" | "unreachable" | "unauthorized";
 type StatusListener = (status: ConnectionStatus) => void;
@@ -91,7 +118,11 @@ function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
   const timeout = setTimeout(() => controller.abort(), 10_000);
   return fetch(url, {
     ...opts,
-    headers: { ...getAuthHeaders(), ...opts.headers },
+    headers: {
+      ...getAuthHeaders(),
+      ...opts.headers,
+      ...getSessionCSRFHeaders(opts.method),
+    },
     signal: controller.signal,
   })
     .then((res) => {

@@ -42,7 +42,19 @@ When controller-backed login is active, browser requests stay same-origin and
 authenticate with the session cookie, and the shared navigation shows `Log out`
 at its right edge. The service bearer stays server-side; only the dashboard
 proxy adds it to controller requests. Sessionless local dashboards retain their
-existing runtime-token behavior.
+existing runtime-token behavior. Login, bootstrap, and logout forms require a
+same-origin CSRF token. Unsafe `/api/v1/*` requests also send the session CSRF
+token in `X-CSRF-Token`; the Go proxy strips browser cookies and that header
+before adding its service bearer upstream. HTML, data, and API requests
+revalidate the controller session, so logout or controller-side revocation
+takes effect on the next protected data request. Immutable `/_next/static/`
+assets do not resolve a session.
+
+`sparkwing-web --require-login` refuses to start without `--controller URL` or
+a selected profile that declares `controller.url`. A state-only backend does
+not provide browser sessions by itself. Login cookies are `Secure`; use HTTPS,
+or set `SPARKWING_WEB_INSECURE_COOKIES=1` only for a loopback-only local
+development process.
 
 ## Learn more
 

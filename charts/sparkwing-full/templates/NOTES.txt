@@ -17,12 +17,23 @@ Reach the dashboard:
 
 {{- if .Values.ingress.enabled }}
 {{- range .Values.ingress.hosts }}
-  https://{{ .host }}
+  {{- if $.Values.ingress.tls }}https{{ else }}http{{ end }}://{{ .host }}
+{{- end }}
+{{- if and .Values.web.requireLogin (not .Values.ingress.tls) }}
+
+  WARNING: web.requireLogin is enabled, but ingress.tls is empty. Sparkwing's
+  login cookies are Secure, so configure TLS before signing in.
 {{- end }}
 {{- else }}
   # Port-forward (no ingress configured):
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "sparkwing-full.web.fullname" . }} 8080:80
   # then open http://localhost:8080
+{{- if .Values.web.requireLogin }}
+
+  WARNING: web.requireLogin is enabled, and Sparkwing's login cookies are
+  Secure. The HTTP port-forward can probe the service but cannot retain a
+  browser login. Configure an HTTPS ingress before signing in.
+{{- end }}
 
   # Or expose via your own ingress / Service of type LoadBalancer.
 {{- end }}

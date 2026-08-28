@@ -77,6 +77,9 @@ type controllerState struct {
 	sessionHeaders      []string
 	logoutSessions      []string
 	proxyAuthorizations []string
+	proxyCookies        []string
+	proxyCSRFHeaders    []string
+	mutationBodies      []string
 	activeSessions      map[string]bool
 }
 
@@ -86,23 +89,42 @@ type stateSnapshot struct {
 	SessionHeaders      []string `json:"session_headers"`
 	LogoutSessions      []string `json:"logout_sessions"`
 	ProxyAuthorizations []string `json:"proxy_authorizations"`
+	ProxyCookies        []string `json:"proxy_cookies"`
+	ProxyCSRFHeaders    []string `json:"proxy_csrf_headers"`
+	MutationBodies      []string `json:"mutation_bodies"`
+	ActiveSessions      []string `json:"active_sessions"`
 }
 
 func (s *controllerState) snapshot() stateSnapshot {
 	s.Lock()
 	defer s.Unlock()
+	active := make([]string, 0, len(s.activeSessions))
+	for sessionID := range s.activeSessions {
+		active = append(active, sessionID)
+	}
 	return stateSnapshot{
 		Created:             s.created,
 		LoginCalls:          s.loginCalls,
-		SessionHeaders:      append([]string(nil), s.sessionHeaders...),
-		LogoutSessions:      append([]string(nil), s.logoutSessions...),
-		ProxyAuthorizations: append([]string(nil), s.proxyAuthorizations...),
+		SessionHeaders:      append([]string{}, s.sessionHeaders...),
+		LogoutSessions:      append([]string{}, s.logoutSessions...),
+		ProxyAuthorizations: append([]string{}, s.proxyAuthorizations...),
+		ProxyCookies:        append([]string{}, s.proxyCookies...),
+		ProxyCSRFHeaders:    append([]string{}, s.proxyCSRFHeaders...),
+		MutationBodies:      append([]string{}, s.mutationBodies...),
+		ActiveSessions:      active,
 	}
 }
 
 func (s *controllerState) handler(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/__fixture/state" {
 		_ = json.NewEncoder(w).Encode(s.snapshot())
+		return
+	}
+	if r.URL.Path == "/__fixture/revoke" {
+		s.Lock()
+		delete(s.activeSessions, r.URL.Query().Get("session_id"))
+		s.Unlock()
+		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
@@ -160,12 +182,25 @@ func (s *controllerState) handler(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	case "/api/v1/runs":
 		s.proxyAuthorizations = append(s.proxyAuthorizations, r.Header.Get("Authorization"))
+		s.proxyCookies = append(s.proxyCookies, r.Header.Get("Cookie"))
+		s.proxyCSRFHeaders = append(s.proxyCSRFHeaders, r.Header.Get("X-CSRF-Token"))
 		_ = json.NewEncoder(w).Encode(map[string]any{"runs": []any{}})
+	case "/api/v1/runs/cancel-me/cancel":
+		body, _ := io.ReadAll(r.Body)
+		s.proxyAuthorizations = append(s.proxyAuthorizations, r.Header.Get("Authorization"))
+		s.proxyCookies = append(s.proxyCookies, r.Header.Get("Cookie"))
+		s.proxyCSRFHeaders = append(s.proxyCSRFHeaders, r.Header.Get("X-CSRF-Token"))
+		s.mutationBodies = append(s.mutationBodies, string(body))
+		w.WriteHeader(http.StatusNoContent)
 	case "/api/v1/approvals/pending":
 		s.proxyAuthorizations = append(s.proxyAuthorizations, r.Header.Get("Authorization"))
+		s.proxyCookies = append(s.proxyCookies, r.Header.Get("Cookie"))
+		s.proxyCSRFHeaders = append(s.proxyCSRFHeaders, r.Header.Get("X-CSRF-Token"))
 		_ = json.NewEncoder(w).Encode(map[string]any{"approvals": []any{}})
 	case "/api/v1/health":
 		s.proxyAuthorizations = append(s.proxyAuthorizations, r.Header.Get("Authorization"))
+		s.proxyCookies = append(s.proxyCookies, r.Header.Get("Cookie"))
+		s.proxyCSRFHeaders = append(s.proxyCSRFHeaders, r.Header.Get("X-CSRF-Token"))
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	default:
 		http.NotFound(w, r)

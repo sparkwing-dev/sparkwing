@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { type Approval, getPendingApprovals } from "@/lib/api";
 import { fmtDateTime, fmtFullDate } from "@/lib/timeFormat";
 
@@ -106,16 +106,15 @@ export default function Nav() {
 }
 
 function LogoutControl() {
-  const [required, setRequired] = useState(false);
-  useEffect(() => {
-    const configured = (
-      window as unknown as { __SPARKWING_REQUIRE_LOGIN__?: string }
-    ).__SPARKWING_REQUIRE_LOGIN__;
-    setRequired(configured === "true");
-  }, []);
-  if (!required) return null;
+  const csrfToken = useSyncExternalStore(
+    subscribeToLogoutConfig,
+    readLogoutCSRFToken,
+    emptyLogoutCSRFToken,
+  );
+  if (!csrfToken) return null;
   return (
     <form method="POST" action="/logout">
+      <input type="hidden" name="csrf_token" value={csrfToken} />
       <button
         type="submit"
         className="ml-2 px-2 py-1 text-xs rounded-sm border border-[var(--border)] text-[var(--muted)] hover:text-[var(--foreground)] hover:bg-[var(--surface-raised)]"
@@ -124,6 +123,31 @@ function LogoutControl() {
       </button>
     </form>
   );
+}
+
+function subscribeToLogoutConfig() {
+  return () => {};
+}
+
+function readLogoutCSRFToken() {
+  const configured = (
+    window as unknown as { __SPARKWING_REQUIRE_LOGIN__?: string }
+  ).__SPARKWING_REQUIRE_LOGIN__;
+  if (configured !== "true") return "";
+  const cookie = document.cookie
+    .split(";")
+    .map((value) => value.trim())
+    .find((value) => value.startsWith("sw_csrf="));
+  if (!cookie) return "";
+  try {
+    return decodeURIComponent(cookie.slice("sw_csrf=".length));
+  } catch {
+    return "";
+  }
+}
+
+function emptyLogoutCSRFToken() {
+  return "";
 }
 
 // VersionPill surfaces the CLI version the serving binary reports

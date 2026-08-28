@@ -91,7 +91,7 @@ func TestDocsRouteInheritsTheDashboardsAuthPosture(t *testing.T) {
 		t.Fatalf("unauthenticated GET /docs status %d, want 303 to the login page; got %s",
 			rec.Code, head(rec.Body.String()))
 	}
-	if loc := rec.Header().Get("Location"); !strings.HasPrefix(loc, "/login?next=/docs") {
+	if loc := rec.Header().Get("Location"); loc != "/login?next=%2Fdocs" {
 		t.Errorf("unauthenticated GET /docs redirected to %q, want the login page", loc)
 	}
 

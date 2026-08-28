@@ -190,7 +190,9 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
 3. Set `web.requireLogin=true` to gate the dashboard behind `/login`.
    On a fresh cluster `/login` renders a "create first admin" form and
    the account you create there becomes the admin; afterwards, seed
-   users with `sparkwing cluster users add`.
+   users with `sparkwing cluster users add`. Login cookies are `Secure`,
+   so configure an HTTPS ingress before signing in. The chart's plain HTTP
+   port-forward remains useful for probes but cannot retain a browser login.
 
 ## Storage
 
