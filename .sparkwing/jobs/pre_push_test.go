@@ -17,6 +17,13 @@ func TestMarkdownlintCommandIsPinnedAndSelfProvisioning(t *testing.T) {
 	}
 }
 
+func TestActionlintCommandIsPinned(t *testing.T) {
+	const want = "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"
+	if actionlintCommand != want {
+		t.Fatalf("actionlint command = %q, want exactly %q", actionlintCommand, want)
+	}
+}
+
 func TestDogfoodPipelineModuleIsTidy(t *testing.T) {
 	cmd := exec.Command("go", "mod", "tidy", "-diff")
 	cmd.Dir = ".."

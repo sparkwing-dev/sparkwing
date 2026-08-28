@@ -12,10 +12,18 @@ import (
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
-const markdownlintCommand = "npx --yes markdownlint-cli2@0.23.2"
+const (
+	markdownlintCommand = "npx --yes markdownlint-cli2@0.23.2"
+	actionlintCommand   = "go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12"
+)
 
 func runMarkdownlint(ctx context.Context) error {
 	_, err := sparkwing.Bash(ctx, markdownlintCommand).Run()
+	return err
+}
+
+func runActionlint(ctx context.Context) error {
+	_, err := sparkwing.Bash(ctx, actionlintCommand).Run()
 	return err
 }
 
@@ -54,10 +62,9 @@ func runReleaseBinaryVulnerabilityScan(ctx context.Context) error {
 // The repository keeps this pipeline manual so a lead can select it for a
 // dangerous change or release boundary. Tooling assumed on PATH:
 // golangci-lint, staticcheck (called by golangci-lint), shellcheck,
-// markdownlint-cli2, terraform (for the Mode 3 module gate;
-// .tool-versions pins it). The release artifact scanner uses an installed
-// govulncheck when present and otherwise fetches the pinned version with
-// `go run`.
+// and terraform (for the Mode 3 module gate; .tool-versions pins it).
+// Markdownlint, actionlint, and the release artifact scanner self-provision
+// pinned versions when their tools are absent.
 type PrePush struct {
 	sparkwing.Base
 	AllowReleaseLineSelfReplace bool
@@ -82,8 +89,9 @@ func (PrePush) Help() string {
 		"`.sparkwing/go.mod`'s dogfood self-replace to `..`, and refuses to push " +
 		"if `go.work` / `go.work.sum` have been committed (workspaces are " +
 		"local-iteration scaffolding and can't be resolved by the Go " +
-		"module proxy), and validates + offline-plans the Mode 3 Postgres " +
-		"Terraform module for both engine knobs (bin/check-terraform.sh). " +
+		"module proxy), validates + offline-plans the Mode 3 Postgres " +
+		"Terraform module for both engine knobs (bin/check-terraform.sh), " +
+		"and validates every GitHub Actions workflow with pinned actionlint. " +
 		"Not read-only: when the .sparkwing sparkwing pin is behind the " +
 		"latest released tag, pre-push bumps the pin and pkg/scaffold's " +
 		"fallback version, tidies .sparkwing/go.mod, regenerates the public " +
@@ -182,6 +190,11 @@ func (p *PrePush) run(ctx context.Context) error {
 	} else {
 		sparkwing.Info(ctx, "shellcheck script portability: clean")
 	}
+	if _, err := sparkwing.Bash(ctx, "bash bin/check-hosted-gate-clean-test.sh").Run(); err != nil {
+		failures = append(failures, fmt.Sprintf("hosted gate mutation guard: %v", err))
+	} else {
+		sparkwing.Info(ctx, "hosted gate mutation guard: clean")
+	}
 	if _, err := sparkwing.Bash(ctx, "bash bin/check-release-binary-vulnerabilities-test.sh").Run(); err != nil {
 		failures = append(failures, fmt.Sprintf("release binary vulnerability scanner: %v", err))
 	} else {
@@ -214,6 +227,12 @@ func (p *PrePush) run(ctx context.Context) error {
 		failures = append(failures, fmt.Sprintf("markdownlint: %v", err))
 	} else {
 		sparkwing.Info(ctx, "markdownlint: clean")
+	}
+
+	if err := runActionlint(ctx); err != nil {
+		failures = append(failures, fmt.Sprintf("actionlint: %v", err))
+	} else {
+		sparkwing.Info(ctx, "actionlint: clean")
 	}
 
 	if _, err := sparkwing.Bash(ctx,

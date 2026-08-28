@@ -1,0 +1,114 @@
+name: Canonical gates
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    name: Canonical / ${{ matrix.gate }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [pre-commit, pre-push]
+    env:
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+          cache-dependency-path: |
+            go.sum
+            .sparkwing/go.sum
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dashboard dependencies
+        if: matrix.gate == 'pre-commit'
+        run: npm ci --prefix web
+
+      - name: Install golangci-lint
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.12.2
+          install-only: true
+          skip-cache: true
+
+      - name: Install Terraform
+        if: matrix.gate == 'pre-push'
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.14.4"
+          terraform_wrapper: false
+
+      - name: Verify hosted tools
+        run: |
+          set -euo pipefail
+          command -v golangci-lint
+          if [ "${{ matrix.gate }}" = pre-push ]; then
+            command -v shellcheck
+            command -v terraform
+          fi
+
+      - name: Build the checked-out Sparkwing CLI
+        run: go build -trimpath -o "$RUNNER_TEMP/sparkwing" ./cmd/sparkwing
+
+      # Diff-scoped pre-commit checks need the event's change in the index.
+      # Moving HEAD while retaining the target tree recreates the state a
+      # local pre-commit hook sees without changing any checked-out bytes.
+      - name: Stage the event change
+        if: matrix.gate == 'pre-commit'
+        env:
+          TARGET_SHA: ${{ github.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          base="$PUSH_BEFORE_SHA"
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            base="$PR_BASE_SHA"
+          fi
+          zero=0000000000000000000000000000000000000000
+          if [ -z "$base" ] || [ "$base" = "$zero" ] || ! git cat-file -e "$base^{commit}"; then
+            base="$(git rev-parse "$TARGET_SHA^")"
+          fi
+          git reset --soft "$base"
+          test "$(git write-tree)" = "$(git rev-parse "$TARGET_SHA^{tree}")"
+          git diff --quiet
+
+      # The release gate normally runs before creating a tag. Hiding the
+      # triggering tag locally preserves that freshness boundary and keeps
+      # pre-push from generating a post-release pin commit.
+      - name: Preserve the pre-tag release boundary
+        if: matrix.gate == 'pre-push' && github.ref_type == 'tag'
+        run: git tag --delete -- "$GITHUB_REF_NAME"
+
+      - name: Run canonical pre-commit
+        if: matrix.gate == 'pre-commit'
+        env:
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+        run: '"$RUNNER_TEMP/sparkwing" run pre-commit'
+
+      - name: Run canonical pre-push
+        if: matrix.gate == 'pre-push'
+        env:
+          SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
+          TARGET_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/sparkwing" run pre-push
+          bash bin/check-hosted-gate-clean.sh "$TARGET_SHA"

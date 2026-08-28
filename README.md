@@ -1,5 +1,7 @@
 # sparkwing
 
+[![CI](https://github.com/sparkwing-dev/sparkwing/actions/workflows/ci.yaml/badge.svg?branch=main)](https://github.com/sparkwing-dev/sparkwing/actions/workflows/ci.yaml)
+
 Pipelines as Go code. The public CLI + SDK for sparkwing.
 
 > **Status:** pre-release. Tester binaries are available; APIs may change.

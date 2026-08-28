@@ -33,17 +33,22 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write # required: gh release create + upload
-  packages: write # required: GHCR push (build-images job)
-  id-token: write # required: cosign keyless OIDC (build-images job)
+  contents: read
 
 jobs:
+  canonical:
+    name: Verify tagged source
+    uses: ./.github/workflows/canonical-gates.yaml
+    permissions:
+      contents: read
+
   build:
     # fail-fast: false so a cell failure doesn't cancel siblings and
     # leave the release half-built. The release job's `needs: build`
     # gate then refuses to run on partial results, so the user sees a
     # clean "build failed; release not created" outcome rather than a
     # release with missing assets.
+    needs: canonical
     strategy:
       fail-fast: false
       matrix:
@@ -70,6 +75,7 @@ jobs:
       # `go install ...@tag` compiles -- no provenance drift.
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
 
       - uses: actions/setup-go@v5
@@ -234,11 +240,14 @@ jobs:
   release:
     needs: [prepare-binaries, publish-images]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       # Checkout supplies the tagged changelog, verification code, and schema
       # reference. The binaries themselves come only from prepare-binaries.
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
 
       - uses: actions/setup-go@v5
@@ -353,13 +362,17 @@ jobs:
   # Each cell pushes an untagged digest and scans both architectures.
   # publish-images waits for the complete matrix before signing or tagging.
   #
-  # Cosign signs keylessly via GitHub OIDC (id-token: write at the
-  # workflow level). No KMS key, no secret -- the signature commits
+  # Cosign signs keylessly via GitHub OIDC. The publish-images job alone
+  # can mint an identity token. No KMS key, no secret -- the signature commits
   # the workflow + repo + tag triple as the signing identity, which
   # `cosign verify --certificate-identity-regexp ...` can attest.
   build-images:
     name: Build & scan container images
+    needs: canonical
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -374,6 +387,7 @@ jobs:
       # job so images and binaries ship from one identical tree.
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: ${{ github.sha }}
 
       - uses: actions/setup-go@v5
@@ -490,6 +504,10 @@ jobs:
     name: Publish scanned container images
     needs: [build-images, prepare-binaries]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
     steps:
       - uses: actions/download-artifact@v4
         with:
