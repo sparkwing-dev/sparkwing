@@ -53,6 +53,14 @@ pipelines:
   - name: build-images
     entrypoint: BuildImages
 
+  # kind-e2e: builds and loads all release-shaped images into a disposable
+  # local Kind cluster, installs the full chart, then proves authenticated
+  # webhook-to-runner execution, logs, cancellation, retry, restarts, and
+  # retained state. It requires a running Docker daemon and local Kubernetes
+  # tools; failure evidence is preserved outside the cluster.
+  - name: kind-e2e
+    entrypoint: KindE2E
+
   # release: cuts a sparkwing tag and pushes it. The
   # .github/workflows/release.yaml workflow takes over from the tag
   # push to publish binaries to GH Releases and multi-arch images to

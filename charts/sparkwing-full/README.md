@@ -120,6 +120,24 @@ helm install sparkwing ./charts/sparkwing-full \
     -f compatible-images.yaml
 ```
 
+### Verify the source stack locally
+
+From the Sparkwing checkout, the repository pipeline builds the five images,
+loads them into a disposable Kind cluster, installs this chart, and exercises
+the authenticated controller-to-runner path without a registry or cloud
+cluster:
+
+```bash
+sparkwing run kind-e2e
+```
+
+The pipeline requires a running Docker daemon plus Kind, kubectl, Helm, curl,
+jq, git, and OpenSSL. It refuses to reuse an existing cluster with the selected
+name, preserves diagnostics outside the cluster, and removes only the cluster
+it created. Set `SPARKWING_KIND_E2E_KEEP_CLUSTER=1` to retain a failed cluster
+for inspection. This verifies the current source revision; it does not make the
+chart's incompatible default public image tags runnable.
+
 For a production install, attach the Secrets you created above:
 
 ```bash

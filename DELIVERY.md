@@ -24,6 +24,15 @@ this file is a menu and checklist, not a command that every change must run.
   dev` on :3100) and stop it with `bash bin/dev-stop.sh`; the browser gate uses
   deterministic API fixtures on OS-assigned local ports and does not replace
   that product exercise or exercise Kubernetes.
+- **Kubernetes product path:** `sparkwing run kind-e2e` builds all five images
+  from the checkout, loads them into a disposable local Kind cluster, installs
+  the full chart, and proves authenticated webhook intake, runner execution,
+  logs, cancellation, retry, restarts, and retained state. It requires Docker,
+  Kind, kubectl, Helm, curl, jq, git, and OpenSSL, but no registry or cloud
+  cluster. The path-scoped hosted workflow runs the same pipeline for
+  controller, runner, chart, and persistence changes and uploads failure
+  evidence. Set `SPARKWING_KIND_E2E_KEEP_CLUSTER=1` to retain a failed local
+  cluster for inspection.
 
 ## Decisions before landing
 
