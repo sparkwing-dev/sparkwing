@@ -214,8 +214,10 @@ func TestSkipIf_PanickyPredicateDefaultsToRun(t *testing.T) {
 
 type generousTimeout struct{ sparkwing.Base }
 
-var generousRan atomic.Bool
-var generousCanceled chan struct{}
+var (
+	generousRan      atomic.Bool
+	generousCanceled chan struct{}
+)
 
 func (generousTimeout) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwing.NoInputs, rc sparkwing.RunContext) error {
 	sparkwing.Job(plan, "gated", func(ctx context.Context) error {

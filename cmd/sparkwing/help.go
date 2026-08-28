@@ -184,7 +184,6 @@ func PrintHelp(cmd Command, w io.Writer) {
 }
 
 func printHelpWithFlags(cmd Command, w io.Writer, flags []FlagSpec) {
-
 	visible := visibleSubcommands(cmd)
 
 	if cmd.Synopsis != "" {

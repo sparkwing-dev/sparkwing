@@ -205,7 +205,6 @@ func printLintTable(findings []pipelinelint.Finding) {
 func printLintRules(format string) error {
 	rules := pipelinelint.Rules()
 	if format == "json" {
-
 		return ndjson.Write(os.Stdout, rules)
 	}
 	for i, r := range rules {

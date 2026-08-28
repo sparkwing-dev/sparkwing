@@ -351,7 +351,6 @@ func localRepoDeclaring(start, pipeline string) (string, bool) {
 }
 
 var undetachableFlags = map[string]string{
-
 	"--sw-index": "an index binding is a live path this process holds open for the run; " +
 		"a detached run outlives the submitting process. Run it in the foreground with `sparkwing run --sw-index`",
 	"--sw-ref": "a --sw-ref worktree is created and removed around a foreground run; " +
@@ -462,7 +461,6 @@ func emitSubmitResult(r submitResult, format string) error {
 			fmt.Fprintf(os.Stdout, "  logs:   %s\n", r.LogPath)
 		}
 		if r.ConsumerPID != 0 {
-
 			fmt.Fprintf(os.Stdout, "  runner: consumer pid %d (started %s); the run uses ITS environment, not this shell's\n",
 				r.ConsumerPID, r.ConsumerStarted)
 		}

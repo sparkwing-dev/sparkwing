@@ -128,7 +128,6 @@ func TestMintReplayRun_NoSnapshot(t *testing.T) {
 }
 
 func TestRunReplayNode_CodeDrift(t *testing.T) {
-
 	pointRuntimeAt(t, t.TempDir())
 	dir := t.TempDir()
 	st, err := store.Open(filepath.Join(dir, "state.db"))

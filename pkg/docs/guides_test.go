@@ -27,7 +27,6 @@ func TestGuidesExcludeGeneratedReferences(t *testing.T) {
 	banned := map[string]bool{"sdk-reference": true, "changelog": true}
 	for _, g := range docs.Guides() {
 		for _, slug := range g.Topics {
-
 			if banned[slug] || strings.HasPrefix(slug, "cli-") {
 				t.Errorf("guide %q includes generated reference %q", g.Name, slug)
 			}

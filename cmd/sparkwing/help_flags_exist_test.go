@@ -25,7 +25,6 @@ func TestEveryRegistryFlagIsRegisteredInSource(t *testing.T) {
 		}
 		have, ok := registered[cmd.Path]
 		if !ok {
-
 			continue
 		}
 		checked++

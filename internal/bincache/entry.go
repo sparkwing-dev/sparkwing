@@ -23,8 +23,10 @@ const (
 
 var pipelineEntryKeyRE = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{8}$`)
 
-var removeCacheEntry = os.RemoveAll
-var cacheNow = time.Now
+var (
+	removeCacheEntry = os.RemoveAll
+	cacheNow         = time.Now
+)
 
 type Entry struct {
 	root string

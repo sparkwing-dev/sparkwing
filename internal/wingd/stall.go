@@ -132,7 +132,6 @@ func (d *Daemon) stallTick() {
 			unanswered := challenge.c.role == roleHolder && challenge.c.livenessNonce == challenge.nonce
 			runID := challenge.c.runID
 			if unanswered {
-
 				challenge.c.livenessNonce = 0
 			}
 			d.mu.Unlock()

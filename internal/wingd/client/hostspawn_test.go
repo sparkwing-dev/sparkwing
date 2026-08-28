@@ -308,7 +308,6 @@ func TestFirstHostingRelease_NamesAHostingCapableRelease(t *testing.T) {
 		t.Skipf("git tag --list: %v (not a checkout with tags; the release pipeline carries the same check)", err)
 	}
 	if strings.TrimSpace(string(out)) == "" {
-
 		return
 	}
 	const marker = "internal/wingd/supervise/supervise.go"
