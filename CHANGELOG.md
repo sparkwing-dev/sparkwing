@@ -48,12 +48,6 @@ code change to unlock.
 ---
 
 ## [Unreleased]
-### Security
-
-- **controller:** First-admin creation now requires an admin bearer token when
-  controller authentication is enabled. The unauthenticated first-visit signup
-  remains available only while controller authentication is disabled.
-
 ### Fixed
 
 - **web (Breaking):** Live dashboard node logs now retain structured step buckets instead
@@ -63,7 +57,7 @@ code change to unlock.
   server-side proxy adds that credential only after validating the user's
   session cookie. Clients that sent a bearer token directly to a login-gated
   dashboard proxy must use a browser session or call the controller API
-  directly. See the [migration guide](docs/migrations/_unreleased.md#authenticated-dashboard-proxy-sessions).
+  directly. See the [migration guide](docs/migrations/v0.37.0.md#authenticated-dashboard-proxy-sessions).
 - **release:** Pull requests, main, and release tags now run the canonical
   pre-commit and release-boundary gates in hosted CI. Artifact builds and
   publication wait for the tagged commit to pass, and verification jobs hold
@@ -88,6 +82,12 @@ code change to unlock.
   a stalled FIFO head, another only when the head or error changes, and one
   recovery notice when replay resumes. The row previously disappeared even
   though its staged write had never reached the bucket.
+
+### Security
+
+- **controller:** First-admin creation now requires an admin bearer token when
+  controller authentication is enabled. The unauthenticated first-visit signup
+  remains available only while controller authentication is disabled.
 
 ## [v0.36.0] - 2026-08-26
 ### Changed
