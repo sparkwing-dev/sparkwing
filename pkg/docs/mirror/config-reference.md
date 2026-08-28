@@ -31,7 +31,7 @@ The complete `.sparkwing/sparkwing.yaml` schema, generated from the Go structs t
 | `description` | `string` | no | Description is the one-line summary surfaced by `pipeline list`. |
 | `on` | `Triggers` | no | On declares the triggers that auto-fire this pipeline. Absent means manual-only (a command invoked by name). |
 | `hidden` | `bool` | no | Hidden omits the entry from default `pipeline list` output; it stays invocable by exact name and shows under `list --all`. |
-| `guards` | `Guards` | no | Guards gate dispatch on the resolved profile, args, and git branch. Reject fires before any step runs when any token matches; Require fires when not every token matches. Token vocabulary: `profile:local`, `profile:controller`, `profile:name=<name>`, `arg:<flag>=<value>`, `git:branch=<name>`, `git:branch=default`. `arg:` tokens read the merged argument set the run executes with, so a value supplied by defaults.args or this entry's own args: block is guarded exactly like one typed on the command line. See pkg/pipelines/guards.go. |
+| `guards` | `Guards` | no | Guards gate dispatch on the resolved profile, args, and git branch. Reject fires before any step runs when any token matches; Require fires when not every token matches. Token vocabulary: `profile:local`, `profile:controller`, `profile:name=<name>`, `arg:<flag>=<value>`, `git:branch=<name>`, `git:branch=default`. A literal branch matches the checked-out head. The default token matches only when the dispatch supplies default-branch metadata. `arg:` tokens read the merged argument set the run executes with, so a value supplied by defaults.args or this entry's own args: block is guarded exactly like one typed on the command line. See pkg/pipelines/guards.go. |
 | `args` | `map[string]string` | no | Args supplies per-arg default values. Higher priority than schema Default and Computed; lower than an explicit operator CLI flag. Keyed by CLI flag name (kebab-case, matching what the SDK's WithArgs[T] field tags resolve to). |
 | `profile` | `string` | no | Profile names the project profile (from sparkwing.yaml's profiles map) this pipeline uses. Empty means "fall back to the project's defaults.profile selector". The CLI's --profile flag (which targets ~/.config/sparkwing/profiles.yaml) overrides this when present. |
 | `requires` | `[]string` | no | Requires are runner-label requirements all jobs in this pipeline must satisfy in addition to their own Job.Requires(). Wholesale replaces defaults.requires when non-empty. The reserved label "local" pins execution to this machine (same effect as --sw-local-only). |
@@ -59,15 +59,15 @@ The complete `.sparkwing/sparkwing.yaml` schema, generated from the Go structs t
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `branches` | `[]string` | no | Branches limits the trigger to pushes on these branches (glob patterns); empty matches any branch. |
-| `paths` | `[]string` | no | Paths limits the trigger to pushes touching these path globs; empty matches any path. |
+| `branches` | `[]string` | no | Branches records the intended push branch globs. It does not gate webhook dispatch. |
+| `paths` | `[]string` | no | Paths records the intended changed-path globs. It does not gate webhook dispatch. |
 
 ## `on.pull_request`
 
 | Field | Type | Required | Description |
 |---|---|---|---|
-| `actions` | `[]string` | no | Actions limits the trigger to these pull_request actions; empty means the default set (opened, synchronize, reopened). |
-| `branches` | `[]string` | no | Branches limits the trigger to pull requests whose base branch matches these globs; empty matches any base branch. |
+| `actions` | `[]string` | no | Actions records the intended pull_request actions. The controller applies its opened, synchronize, and reopened set independently. |
+| `branches` | `[]string` | no | Branches records the intended pull-request base branch globs. It does not gate webhook dispatch. |
 
 ## `on.webhook`
 

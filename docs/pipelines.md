@@ -93,8 +93,13 @@ pipelines:
 
 `branches` / `paths` / `actions` record intent: the controller does not
 read your `sparkwing.yaml`, so it dispatches whichever pipeline the
-webhook URL names. Scope a trigger by pointing its GitHub webhook only
-at that pipeline's URL -- see [hooks](hooks.md).
+webhook URL names. To require a checked-out branch before any step runs,
+add `guards: {require: [git:branch=main]}` with its literal name. For pull
+requests this compares the head branch, not the base branch.
+`git:branch=default` requires default-branch metadata that controller webhook
+and local trigger claims do not supply. Branch guards do not express path
+restrictions, custom pull-request actions, or pull-request base-branch
+matching. See [hooks](hooks.md) for the enforcement boundary and examples.
 
 Webhook delivery is handled by the controller - see
 `POST /webhooks/github/{pipeline}` in [api](api.md). Git hooks are not

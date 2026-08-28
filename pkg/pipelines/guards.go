@@ -56,8 +56,8 @@ type GuardContext struct {
 	GitBranch string
 
 	// GitDefaultBranch is the repo's default branch (typically main
-	// or master). Used by git:branch=default. Empty when no git
-	// context is in scope.
+	// or master). Used by git:branch=default. Callers may leave it empty;
+	// the default token never matches without this metadata.
 	GitDefaultBranch string
 }
 
@@ -70,7 +70,7 @@ type GuardContext struct {
 //	profile:local            -- active profile has no controller
 //	profile:controller       -- active profile has a controller URL
 //	profile:name=NAME        -- active profile's name equals NAME
-//	git:branch=default       -- dispatch on the repo's default branch
+//	git:branch=default       -- dispatch on the supplied default branch
 //	git:branch=NAME          -- dispatch on the named branch
 //	arg:FLAG=VALUE           -- resolved arg equals the value
 func ParseGuardToken(raw string) (GuardToken, error) {

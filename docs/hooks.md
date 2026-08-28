@@ -37,9 +37,30 @@ Both `push` and `pull_request` arrive on the same GitHub webhook
 endpoint (`POST /webhooks/github/{pipeline}`) and fire the pipeline the
 URL names. The controller does not read your `sparkwing.yaml`, so the
 `branches` / `paths` / `actions` filters under `on:` are declarative:
-they document intent, but the controller does not gate on them. Scope a
-trigger by configuring the GitHub webhook to deliver only the events you
-want to that pipeline's URL.
+they document intent, but the controller does not gate on them.
+
+When the policy concerns the branch Sparkwing checks out, enforce it at
+run start with a pipeline guard. The guard blocks before any step runs:
+
+```yaml
+pipelines:
+  - name: deploy
+    entrypoint: Deploy
+    on:
+      push:
+        branches: [main] # documents the intended webhook delivery
+    guards:
+      require: [git:branch=main]
+```
+
+The literal name must match the checked-out head. For pull requests that is
+the head branch, not the base named by `pull_request.branches`.
+`git:branch=default` matches only when the dispatch supplies default-branch
+metadata; controller webhook and local trigger claims do not supply it, so
+use an explicit name for those paths. Branch guards do not implement path
+filters, custom pull-request action filters, or pull-request base-branch
+matching. Enforce those policies at the event source or in pipeline code;
+do not treat the `on:` fields as authorization controls.
 
 ## Pull request triggers
 
@@ -58,8 +79,8 @@ A `pull_request` trigger fires on the `opened`, `synchronize`, and
 `reopened` actions -- the ones that change the diff. Other actions
 (`labeled`, `closed`, `edited`, ...) are acknowledged and ignored, so a
 gate does not re-run every time someone relabels the PR. This default
-action set is applied by the controller; the `actions` field records
-intent but is not yet enforced.
+action set is applied by the controller; a configured `actions` field
+records intent and does not replace that set.
 
 The run checks out the **PR head** commit. The pipeline reads the PR
 context from `RunContext.Trigger.PullRequest`:

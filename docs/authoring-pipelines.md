@@ -279,6 +279,21 @@ content cache *memoizes the node*: on a hit, the job does not run. GitHub
 restores directories so the job runs faster. Porting `actions/cache` to
 `.Memoize()` will stop your tests executing.
 
+## Declarative trigger filters and run guards
+
+The `branches`, `paths`, and `actions` fields under `on.push` and
+`on.pull_request` record intent. The controller dispatches the pipeline
+named by the webhook URL without reading those fields.
+
+Use a pipeline guard when the policy depends on the branch Sparkwing checks
+out. `require: [git:branch=main]` blocks a run from any other checked-out
+branch before a step starts. The literal name matches the head branch; it does
+not match a pull request's base branch. `git:branch=default` matches only when
+the dispatch supplies default-branch metadata, which controller webhook and
+local trigger claims do not. These guards do not implement path filters,
+custom pull-request actions, or pull-request base-branch matching;
+[Triggers](hooks.md) describes that boundary.
+
 ## Unsatisfiable guards (`guard-misuse`)
 
 A pipeline's `guards:` block gates dispatch on the resolved profile,
@@ -288,7 +303,10 @@ args, and git branch -- `profile:local` / `profile:controller` /
 matches; `reject` blocks it when any token matches. A token in both
 lists, a `require` that names two mutually exclusive profiles, or a
 duplicate token describes a pipeline that can never dispatch. The config
-parser accepts the syntax; the linter catches the contradiction.
+parser accepts the syntax; the linter catches the contradiction. The
+`default` token matches only when the dispatch supplies default-branch
+metadata; use a literal branch for controller webhook and local trigger
+claims.
 
 Don't write guards that can never all hold:
 
@@ -311,7 +329,7 @@ pipelines:
     entrypoint: Deploy
     guards:
       require: [profile:controller]  # run only against a controller profile
-      reject:  [git:branch=default]  # never from the default branch
+      reject:  [git:branch=main]     # never from the checked-out main branch
 ```
 
 ## Running the linter
