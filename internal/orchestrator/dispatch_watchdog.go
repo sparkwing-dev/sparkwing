@@ -98,10 +98,90 @@ func admissionWaitParticipantFromContext(ctx context.Context) string {
 // turning an unbounded hang into a fail-fast within the same shift.
 const DefaultDispatchWaitTimeout = 30 * time.Minute
 
+// dispatchTimeoutDrainMargin lets a node report its timeout and complete the
+// dispatcher's state writes before the outer watchdog classifies it as wedged.
+const dispatchTimeoutDrainMargin = time.Minute
+
 // dispatchStackDumpBytes caps the captured goroutine dump so a
 // pathological hang in a process with thousands of goroutines can't
 // produce a multi-gigabyte envelope file.
 const dispatchStackDumpBytes = 1 << 20 // 1 MiB
+
+const maxDuration = time.Duration(1<<63 - 1)
+
+// defaultDispatchWaitTimeoutForPlan keeps the default outer watchdog beyond
+// the longest bounded path the plan declares. A node timeout is per attempt,
+// so its retry backoff and every permitted attempt belong to that path.
+func defaultDispatchWaitTimeoutForPlan(plan *sparkwing.Plan) time.Duration {
+	if plan == nil {
+		return DefaultDispatchWaitTimeout
+	}
+
+	nodes := plan.Nodes()
+	byID := make(map[string]*sparkwing.JobNode, len(nodes))
+	for _, node := range nodes {
+		byID[node.ID()] = node
+	}
+	memo := make(map[string]time.Duration, len(nodes))
+	visiting := make(map[string]bool, len(nodes))
+	var pathBudget func(*sparkwing.JobNode) time.Duration
+	pathBudget = func(node *sparkwing.JobNode) time.Duration {
+		if budget, ok := memo[node.ID()]; ok {
+			return budget
+		}
+		if visiting[node.ID()] {
+			return 0
+		}
+		visiting[node.ID()] = true
+		var dependencyBudget time.Duration
+		for _, dependencyID := range node.DepIDs() {
+			if dependency := byID[dependencyID]; dependency != nil {
+				dependencyBudget = max(dependencyBudget, pathBudget(dependency))
+			}
+		}
+		delete(visiting, node.ID())
+		budget := saturatingDurationAdd(dependencyBudget, nodeExecutionBudget(node))
+		memo[node.ID()] = budget
+		return budget
+	}
+
+	longest := DefaultDispatchWaitTimeout
+	for _, node := range nodes {
+		budget := pathBudget(node)
+		if recovery := node.OnFailureNode(); recovery != nil {
+			budget = saturatingDurationAdd(budget, nodeExecutionBudget(recovery))
+		}
+		longest = max(longest, saturatingDurationAdd(budget, dispatchTimeoutDrainMargin))
+	}
+	return longest
+}
+
+func nodeExecutionBudget(node *sparkwing.JobNode) time.Duration {
+	timeout := node.TimeoutDuration()
+	if timeout <= 0 {
+		return 0
+	}
+	retry := node.RetryConfig()
+	attempts := retry.Attempts + 1
+	if attempts <= 0 || int64(attempts) > int64(maxDuration/timeout) {
+		return maxDuration
+	}
+	budget := timeout * time.Duration(attempts)
+	for attempt := 1; attempt <= retry.Attempts; attempt++ {
+		budget = saturatingDurationAdd(budget, scaledBackoff(retry.Backoff, attempt))
+		if budget == maxDuration {
+			break
+		}
+	}
+	return budget
+}
+
+func saturatingDurationAdd(a, b time.Duration) time.Duration {
+	if b > 0 && a > maxDuration-b {
+		return maxDuration
+	}
+	return a + b
+}
 
 // dispatchWaitResult reports how waitForDispatch returned.
 type dispatchWaitResult int

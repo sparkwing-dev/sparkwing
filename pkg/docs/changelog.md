@@ -49,6 +49,13 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Fixed
+
+- **orchestrator:** The default dispatch watchdog now accounts for declared
+  node timeouts, retry attempts, retry backoff, dependency paths, and failure
+  recovery before classifying a run as wedged. Explicit
+  `SPARKWING_DISPATCH_WAIT_TIMEOUT` values remain exact operator overrides.
+
 ## [v0.37.0] - 2026-08-28
 ### Fixed
 

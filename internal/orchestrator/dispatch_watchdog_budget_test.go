@@ -33,7 +33,7 @@ func TestDefaultDispatchWaitTimeoutForPlan(t *testing.T) {
 			name: "retry envelope includes attempts and backoff",
 			node: func(plan *sparkwing.Plan) *sparkwing.JobNode {
 				return sparkwing.Job(plan, "job", func(context.Context) error { return nil }).
-					Timeout(10 * time.Minute).
+					Timeout(10*time.Minute).
 					Retry(2, sparkwing.RetryBackoff(2*time.Minute))
 			},
 			want: 36*time.Minute + dispatchTimeoutDrainMargin,
@@ -48,5 +48,34 @@ func TestDefaultDispatchWaitTimeoutForPlan(t *testing.T) {
 				t.Fatalf("defaultDispatchWaitTimeoutForPlan() = %s, want %s", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestDefaultDispatchWaitTimeoutForPlanUsesLongestDependencyPath(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	first := sparkwing.Job(plan, "first", func(context.Context) error { return nil }).
+		Timeout(20 * time.Minute)
+	sparkwing.Job(plan, "second", func(context.Context) error { return nil }).
+		Needs(first).
+		Timeout(20 * time.Minute)
+	sparkwing.Job(plan, "parallel", func(context.Context) error { return nil }).
+		Timeout(35 * time.Minute)
+
+	want := 40*time.Minute + dispatchTimeoutDrainMargin
+	if got := defaultDispatchWaitTimeoutForPlan(plan); got != want {
+		t.Fatalf("defaultDispatchWaitTimeoutForPlan() = %s, want %s", got, want)
+	}
+}
+
+func TestDefaultDispatchWaitTimeoutForPlanIncludesFailureRecovery(t *testing.T) {
+	plan := sparkwing.NewPlan()
+	sparkwing.Job(plan, "deploy", func(context.Context) error { return nil }).
+		Timeout(25*time.Minute).
+		OnFailure("rollback", func(context.Context) error { return nil })
+	plan.Job("rollback").Timeout(10 * time.Minute)
+
+	want := 35*time.Minute + dispatchTimeoutDrainMargin
+	if got := defaultDispatchWaitTimeoutForPlan(plan); got != want {
+		t.Fatalf("defaultDispatchWaitTimeoutForPlan() = %s, want %s", got, want)
 	}
 }
