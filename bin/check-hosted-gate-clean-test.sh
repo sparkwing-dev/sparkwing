@@ -101,7 +101,8 @@ sed -i.bak 's/v0.37.1/v0.37.2/; /replace github.com\/sparkwing-dev\/sparkwing =>
 rm "$CASE_ROOT/.sparkwing/go.mod.bak"
 sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/.sparkwing/go.sum"
 rm "$CASE_ROOT/.sparkwing/go.sum.bak"
-self_pin_oid="$(git -C "$CASE_ROOT" diff --binary -- .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum pkg/scaffold/version.go testdata/kind-e2e/repo/.sparkwing/go.mod testdata/kind-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
+git -C "$CASE_ROOT" add .sparkwing/go.mod .sparkwing/go.sum
+self_pin_oid="$(git -C "$CASE_ROOT" diff HEAD --binary -- .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum pkg/scaffold/version.go testdata/kind-e2e/repo/.sparkwing/go.mod testdata/kind-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
 (
   cd "$CASE_ROOT"
   bash "$CHECK" --release-self-pin v0.37.2 "$self_pin_oid" "$target"
@@ -117,7 +118,8 @@ for path in \
   sed -i.bak 's/v0.37.2/v0.37.2+meta/' "$CASE_ROOT/$path"
   rm "$CASE_ROOT/$path.bak"
 done
-metadata_oid="$(git -C "$CASE_ROOT" diff --binary -- .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum pkg/scaffold/version.go testdata/kind-e2e/repo/.sparkwing/go.mod testdata/kind-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
+git -C "$CASE_ROOT" add .sparkwing/go.mod .sparkwing/go.sum
+metadata_oid="$(git -C "$CASE_ROOT" diff HEAD --binary -- .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum pkg/scaffold/version.go testdata/kind-e2e/repo/.sparkwing/go.mod testdata/kind-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
 (
   cd "$CASE_ROOT"
   bash "$CHECK" --release-self-pin v0.37.2+meta "$metadata_oid" "$target"
@@ -132,6 +134,7 @@ for path in \
   sed -i.bak 's/v0.37.2+meta/v0.37.2/' "$CASE_ROOT/$path"
   rm "$CASE_ROOT/$path.bak"
 done
+git -C "$CASE_ROOT" add .sparkwing/go.mod .sparkwing/go.sum
 
 printf 'unrelated\n' >>"$CASE_ROOT/tracked.txt"
 if (
