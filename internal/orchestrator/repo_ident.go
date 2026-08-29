@@ -66,7 +66,7 @@ func repoNameFromURL(remote string) string {
 		return localRepoName(remote)
 	}
 	if !strings.Contains(remote, "://") {
-		if colon := strings.Index(remote, ":"); colon >= 0 && strings.Contains(remote[:colon], "@") {
+		if colon := strings.Index(remote, ":"); colon > 0 {
 			remote = "ssh://" + remote[:colon] + "/" + remote[colon+1:]
 		}
 	}
