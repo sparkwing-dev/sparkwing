@@ -70,6 +70,28 @@ code change to unlock.
   failures return `502` without deleting browser cookies. See the
   [migration guide](docs/migrations/_unreleased.md#dashboard-browser-session-hardening).
 
+## [v0.37.2] - 2026-08-28
+### Fixed
+
+- **admission:** A checkout is now identified by the repository it holds -- its
+  origin remote, or the object store it borrows from when it has no remote --
+  rather than by the directory it sits in, so two checkouts of one repository
+  share one capacity profile. A pipeline that clones into a fresh directory per run previously
+  recorded each run under a new key, so its node measurements never reached the
+  sample count that retires the cold-start charge and every run was priced at
+  half the host per node. Linked worktrees are unchanged, and a checkout with no
+  origin keeps its directory name.
+
+- **admission:** macOS hosts now charge external memory pressure when the
+  kernel reports no memory available. A `kern.memorystatus_level` of zero was
+  classified as an unread sensor rather than as a reading, and an unread
+  dimension charges nothing, so the host with nothing left granted its full
+  capacity -- the inverse of the guard at the one point it exists to act.
+  Linux already treated a zero available-memory reading as measured, so the
+  same exhausted host refused work there and admitted it here. A level the
+  kernel never populated still reports unmeasured: that sysctl fails rather
+  than answering zero, which is what separates the two.
+
 ## [v0.37.1] - 2026-08-28
 ### Fixed
 
