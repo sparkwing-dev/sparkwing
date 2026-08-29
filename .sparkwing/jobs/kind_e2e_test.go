@@ -688,11 +688,14 @@ func TestKindE2EOwnsReleaseImagesAndFailureEvidence(t *testing.T) {
 		"/webhooks/github/${pipeline}",
 		"/api/v1/tokens",
 		"/api/v1/agents",
+		`"/api/v1/runs/$run_id/nodes/$node_id/mark-ready"`,
+		`"needs_labels":["cluster"]`,
 		"/logs/prove-controller-runner-logs",
 		"/cancel",
 		"/retry?full=1",
 		"rollout restart \"deployment/$runner_deployment\"",
-		"does not identify replacement runner pod",
+		`prove_runner_claim "$initial_runner_pod" "initial runner"`,
+		`prove_runner_claim "$runner_pod_after" "post-restart runner"`,
 		".status.readyReplicas == 1",
 		"rollout restart \"deployment/$controller_deployment\"",
 		"sort_by(.metadata.creationTimestamp)",
@@ -724,6 +727,15 @@ func TestKindE2EOwnsReleaseImagesAndFailureEvidence(t *testing.T) {
 	}
 	if strings.Contains(script, `post_runner_claim" != "$success_claim`) {
 		t.Fatal("runner restart proof compares per-claim nonce values instead of the replacement pod hostname")
+	}
+	for _, block := range []string{
+		between(t, script, `success_nodes="$(api_get "/api/v1/runs/$success_run/nodes")"`, `start_forward "$web_service" 80 web`),
+		between(t, script, `post_runner_nodes="$(api_get "/api/v1/runs/$post_runner_restart_run/nodes")"`, `echo "kind-e2e: proving controller restart`),
+		between(t, script, `retry_nodes="$(api_get "/api/v1/runs/$retry_run/nodes")"`, `echo "kind-e2e: proving uninstall retention`),
+	} {
+		if strings.Contains(block, `claimed_by | startswith("runner:")`) {
+			t.Fatal("in-process trigger execution is presented as a pool-runner claim")
+		}
 	}
 	if strings.Contains(script, "<!DOCTYPE html") || strings.Contains(script, "logs, and dashboard") {
 		t.Fatal("Kind harness claims functional dashboard coverage from an HTML shell")
@@ -773,6 +785,103 @@ func TestKindE2EWaitRunStatusRejectsOtherHTTPFailures(t *testing.T) {
 	if !strings.Contains(result.output, "run run-1 returned HTTP 500 while waiting for success") {
 		t.Fatalf("run lookup output = %q, want HTTP 500 failure", result.output)
 	}
+}
+
+func TestKindE2EProvesTheExpectedRunnerPodClaimedTheProbe(t *testing.T) {
+	result, calls := runProveRunnerClaim(t,
+		`{"nodes":[{"claimed_by":null}]}`,
+		`{"nodes":[{"claimed_by":"runner:runner-new:123"}]}`,
+	)
+	if result.err != nil {
+		t.Fatalf("runner claim proof: %v\n%s", result.err, result.output)
+	}
+	for _, want := range []string{
+		"post-json /api/v1/runs ",
+		"post-json /api/v1/runs/kind-runner-probe-0123456789ab-1/nodes ",
+		"post /api/v1/runs/kind-runner-probe-0123456789ab-1/nodes/runner-claim/mark-ready",
+	} {
+		if !strings.Contains(calls, want) {
+			t.Errorf("runner probe calls missing %q:\n%s", want, calls)
+		}
+	}
+	if !strings.Contains(result.output, "runner:runner-new:123") {
+		t.Fatalf("runner claim proof output = %q", result.output)
+	}
+}
+
+func TestKindE2ERejectsAProbeClaimedByAnotherRunnerPod(t *testing.T) {
+	result, _ := runProveRunnerClaim(t,
+		`{"nodes":[{"claimed_by":"runner:runner-old:123"}]}`,
+	)
+	if result.err == nil {
+		t.Fatal("runner claim proof accepted another runner pod")
+	}
+	if !strings.Contains(result.output, "does not identify Ready runner pod runner-new") {
+		t.Fatalf("runner claim proof output = %q", result.output)
+	}
+}
+
+func runProveRunnerClaim(t *testing.T, responses ...string) (scriptResult, string) {
+	t.Helper()
+	script := readHostedCIFile(t, "bin/kind-e2e.sh")
+	proveFunction := "prove_runner_claim() {\n" + between(t, script,
+		"prove_runner_claim() {\n",
+		"\n}\n\nwait_run_status() {",
+	) + "\n}\n"
+	responseDir := t.TempDir()
+	for i, response := range responses {
+		if err := os.WriteFile(filepath.Join(responseDir, strconv.Itoa(i)), []byte(response), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	countFile := filepath.Join(t.TempDir(), "count")
+	if err := os.WriteFile(countFile, []byte("0"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	callsFile := filepath.Join(t.TempDir(), "calls")
+	harness := `set -Eeuo pipefail
+api_post_json() {
+  printf 'post-json %s %s\n' "$1" "$2" >>"$CALLS_FILE"
+}
+api_post() {
+  printf 'post %s\n' "$1" >>"$CALLS_FILE"
+}
+api_get() {
+  local index response_path
+  index="$(<"$COUNT_FILE")"
+  response_path="$RESPONSES_DIR/$index"
+  printf '%s' "$((index + 1))" >"$COUNT_FILE"
+  if [[ ! -f "$response_path" ]]; then
+    printf '{"nodes":[{"claimed_by":null}]}'
+    return
+  fi
+  cat "$response_path"
+}
+sleep() {
+  :
+}
+die() {
+  printf 'kind-e2e: %s\n' "$*" >&2
+  exit 1
+}
+run_owner=0123456789abcdef0123456789abcdef
+runner_probe_sequence=0
+` + proveFunction + `
+prove_runner_claim runner-new test
+printf '%s\n%s\n' "$runner_probe_run_id" "$runner_probe_claim"
+`
+	cmd := exec.Command("/bin/bash", "-c", harness)
+	cmd.Env = append(os.Environ(),
+		"CALLS_FILE="+callsFile,
+		"COUNT_FILE="+countFile,
+		"RESPONSES_DIR="+responseDir,
+	)
+	out, runErr := cmd.CombinedOutput()
+	calls, err := os.ReadFile(callsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return scriptResult{output: string(out), err: runErr}, string(calls)
 }
 
 func runWaitRunStatus(t *testing.T, responses ...string) (scriptResult, int) {

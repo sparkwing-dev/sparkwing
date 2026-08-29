@@ -225,6 +225,22 @@ api_get_with_status() {
     "http://127.0.0.1:${controller_port}${path}"
 }
 
+api_post() {
+  local path=$1
+  curl --fail --silent --show-error --max-time 10 \
+    -X POST -H "Authorization: Bearer $admin_token" \
+    "http://127.0.0.1:${controller_port}${path}"
+}
+
+api_post_json() {
+  local path=$1
+  local body=$2
+  curl --fail --silent --show-error --max-time 10 \
+    -X POST -H "Authorization: Bearer $admin_token" \
+    -H 'Content-Type: application/json' --data "$body" \
+    "http://127.0.0.1:${controller_port}${path}"
+}
+
 collect_diagnostics() {
   local pod
   echo "kind-e2e: collecting failure diagnostics in $artifact_dir" >&2
@@ -731,6 +747,35 @@ send_webhook() {
   webhook_run_id="$(jq -er '.run_id' <<<"$response")"
 }
 
+runner_probe_sequence=0
+prove_runner_claim() {
+  local runner_pod=$1
+  local phase=$2
+  local run_id node_id now nodes claim
+  runner_probe_sequence=$((runner_probe_sequence + 1))
+  run_id="kind-runner-probe-${run_owner:0:12}-${runner_probe_sequence}"
+  node_id="runner-claim"
+  now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  api_post_json "/api/v1/runs" "$(jq -nc \
+    --arg id "$run_id" --arg started "$now" \
+    '{id:$id,pipeline:"kind-runner-probe",status:"running",trigger_source:"kind-e2e",started_at:$started}')" >/dev/null
+  api_post_json "/api/v1/runs/$run_id/nodes" \
+    '{"id":"runner-claim","status":"pending","deps":[],"needs_labels":["cluster"]}' >/dev/null
+  api_post "/api/v1/runs/$run_id/nodes/$node_id/mark-ready" >/dev/null
+  for _ in {1..120}; do
+    nodes="$(api_get "/api/v1/runs/$run_id/nodes")"
+    claim="$(jq -r '.nodes[0].claimed_by // empty' <<<"$nodes")"
+    if [[ "$claim" == "runner:${runner_pod}:"* ]]; then
+      runner_probe_run_id=$run_id
+      runner_probe_claim=$claim
+      return 0
+    fi
+    [[ -z "$claim" ]] || die "$phase claim $claim does not identify Ready runner pod $runner_pod"
+    sleep 0.5
+  done
+  die "$phase node $run_id/$node_id was not claimed by Ready runner pod $runner_pod"
+}
+
 wait_run_status() {
   local run_id=$1
   local wanted=$2
@@ -785,14 +830,14 @@ send_webhook kind-success
 success_run=$webhook_run_id
 wait_run_status "$success_run" success 300
 success_nodes="$(api_get "/api/v1/runs/$success_run/nodes")"
-jq -e '.nodes | length == 1 and .[0].status == "done" and (. [0].claimed_by | startswith("runner:"))' \
-  <<<"$success_nodes" >/dev/null
-success_claim="$(jq -er '.nodes[0].claimed_by' <<<"$success_nodes")"
+jq -e '.nodes | length == 1 and .[0].status == "done"' <<<"$success_nodes" >/dev/null
 success_started="$(jq -er '.nodes[0].started_at' <<<"$success_nodes")"
-[[ "$success_claim" == "runner:${initial_runner_pod}:"* ]] || \
-  die "initial run claim $success_claim does not identify Ready runner pod $initial_runner_pod ($initial_runner_uid)"
+prove_runner_claim "$initial_runner_pod" "initial runner"
+initial_runner_probe_run=$runner_probe_run_id
+initial_runner_claim=$runner_probe_claim
 agents="$(api_get "/api/v1/agents")"
-jq -e '.agents | any(.type == "agent")' <<<"$agents" >/dev/null
+jq -e --arg name "$initial_runner_pod" \
+  '.agents | any(.type == "agent" and .name == $name)' <<<"$agents" >/dev/null
 
 start_forward "$web_service" 80 web
 web_port=$forward_port
@@ -834,9 +879,10 @@ send_webhook kind-success
 post_runner_restart_run=$webhook_run_id
 wait_run_status "$post_runner_restart_run" success 300
 post_runner_nodes="$(api_get "/api/v1/runs/$post_runner_restart_run/nodes")"
-post_runner_claim="$(jq -er '.nodes[0].claimed_by | select(startswith("runner:"))' <<<"$post_runner_nodes")"
-[[ "$post_runner_claim" == "runner:${runner_pod_after}:"* ]] || \
-  die "post-restart claim $post_runner_claim does not identify replacement runner pod $runner_pod_after"
+jq -e '.nodes | length == 1 and .[0].status == "done"' <<<"$post_runner_nodes" >/dev/null
+prove_runner_claim "$runner_pod_after" "post-restart runner"
+post_runner_probe_run=$runner_probe_run_id
+post_runner_claim=$runner_probe_claim
 
 echo "kind-e2e: proving controller restart and retained run state"
 IFS=$'\t' read -r controller_pod_before controller_uid_before < <(ready_pod_identity controller)
@@ -865,7 +911,6 @@ retry_nodes="$(api_get "/api/v1/runs/$retry_run/nodes")"
 jq -e --arg source_started "$success_started" '
   .nodes | length == 1
   and .[0].status == "done"
-  and (.[0].claimed_by | startswith("runner:"))
   and .[0].started_at != null
   and .[0].finished_at != null
   and .[0].started_at != $source_started
@@ -915,8 +960,12 @@ release=$release_name
 image_prefix=$image_prefix
 image_tag=$image_tag
 success_run=$success_run
+initial_runner_probe_run=$initial_runner_probe_run
+initial_runner_claim=$initial_runner_claim
 cancelled_run=$cancelled_run
 post_runner_restart_run=$post_runner_restart_run
+post_runner_probe_run=$post_runner_probe_run
+post_runner_claim=$post_runner_claim
 retry_run=$retry_run
 controller_pvc=$controller_pvc
 fixture_sha=$fixture_sha
