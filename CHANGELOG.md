@@ -68,6 +68,13 @@ code change to unlock.
   updates from superseded runs so they cannot overwrite the current result.
   Programs serving `Server.Handler` directly must call `Server.Shutdown`.
 
+### Fixed
+
+- **admission:** The daemon supervisor now treats a completed protocol handshake
+  as proof of liveness. Health checks no longer request a full queue snapshot, so
+  a large admission queue cannot make its own supervisor replace the serving
+  daemon and disconnect every active lease.
+
 ### Security
 
 - **web (Breaking):** Login-required dashboards now refuse to start without a
