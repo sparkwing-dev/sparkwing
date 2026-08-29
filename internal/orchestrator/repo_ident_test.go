@@ -87,8 +87,8 @@ func TestCurrentProfileKey_SurvivesABranchChange(t *testing.T) {
 	sparkwing.SetWorkDir(repo)
 	t.Chdir(repo)
 	want := currentProfileKey("pre-commit")
-	if want != "sample-repo/pre-commit" {
-		t.Fatalf("main checkout keyed %q, want sample-repo/pre-commit", want)
+	if want != "11:sample-repopre-commit" {
+		t.Fatalf("main checkout keyed %q, want 11:sample-repopre-commit", want)
 	}
 	sparkwing.SetWorkDir(first)
 	t.Chdir(first)
@@ -114,8 +114,8 @@ func TestCurrentProfileKey_UsesRunWorkDirAfterCWDChanges(t *testing.T) {
 	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
 	t.Chdir(t.TempDir())
 
-	if got := currentProfileKey("build"); got != "sample-repo/build" {
-		t.Fatalf("profile key after cwd change = %q, want sample-repo/build", got)
+	if got := currentProfileKey("build"); got != "11:sample-repobuild" {
+		t.Fatalf("profile key after cwd change = %q, want 11:sample-repobuild", got)
 	}
 }
 
@@ -131,8 +131,8 @@ func TestCurrentProfileKey_FallsBackToCWDWithoutRunWorkDir(t *testing.T) {
 	t.Cleanup(func() { sparkwing.SetWorkDir(previousWorkDir) })
 	t.Chdir(repo)
 
-	if got := currentProfileKey("build"); got != "fallback-repo/build" {
-		t.Fatalf("profile key without run directory = %q, want fallback-repo/build", got)
+	if got := currentProfileKey("build"); got != "13:fallback-repobuild" {
+		t.Fatalf("profile key without run directory = %q, want 13:fallback-repobuild", got)
 	}
 }
 
