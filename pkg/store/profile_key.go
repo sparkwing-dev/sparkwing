@@ -47,9 +47,11 @@ func DisplayProfileKey(key string) string {
 }
 
 // cutRepoLength parses the "<len>:" prefix of a scoped key. Every
-// digit is checked by hand because a bare pipeline name may itself
-// contain ":", and strconv alone would accept sign characters no
-// scoped key ever starts with.
+// digit is checked by hand because strconv alone would accept sign
+// characters no scoped key ever starts with. A bare pipeline name that
+// happens to look length-prefixed ("5:hellox") still decodes as scoped;
+// the ambiguity is inherent to the encoding and costs only display and
+// bare-name matching, never the stored key or an exact reset.
 func cutRepoLength(key string) (int, string, bool) {
 	digits, rest, ok := strings.Cut(key, ":")
 	if !ok || digits == "" {

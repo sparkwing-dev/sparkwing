@@ -1,6 +1,5 @@
 "use client";
 
-
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
@@ -669,7 +668,9 @@ function PricingSection({
                 }`}
               >
                 <Td>
-                  <span className="font-mono text-xs">{p.pipeline}</span>
+                  <span className="font-mono text-xs">
+                    {p.display || p.pipeline}
+                  </span>
                   <PinFlag p={p} />
                 </Td>
                 <Td right mono>
@@ -713,8 +714,10 @@ function PricingSection({
         .map((p) => (
           <div key={`drift-${p.pipeline}`} className="mt-2">
             <Callout tone="warning">
-              <span className="font-mono text-violet-300">{p.pipeline}</span>:{" "}
-              {p.drift}
+              <span className="font-mono text-violet-300">
+                {p.display || p.pipeline}
+              </span>
+              : {p.drift}
             </Callout>
           </div>
         ))}
@@ -776,7 +779,7 @@ function ExplainSection({
   return (
     <Section
       title="Show the work"
-      hint={`How ${explain.profile.pipeline} is priced, from the ${explain.samples.length} runs still in its window.`}
+      hint={`How ${explain.profile.display || explain.profile.pipeline} is priced, from the ${explain.samples.length} runs still in its window.`}
     >
       <ChainList chain={explain.chain} />
       <div className="mt-2 text-[11px] text-[var(--muted)]">

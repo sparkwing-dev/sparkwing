@@ -713,10 +713,11 @@ that does not mean "wait for the window to age out." There are two:
   what external load is reading, so a pipeline can always measure its way
   back down instead of being locked out by a floor it can never disprove.
   To clear a floor immediately anyway, reset with
-  `sparkwing runs stats --reset --pipeline <name>` (profiles are keyed
-  `repo/pipeline` for runs launched inside a git repo, exactly as
-  `runs stats --capacity` shows them; a bare pipeline name reaches every
-  repo-scoped key that carries it and the summary names each one): the
+  `sparkwing runs stats --reset --pipeline <name>` (profiles are scoped by the
+  repository's canonical identity for runs launched inside a git repo and
+  shown as `repo/pipeline`, exactly as `runs stats --capacity` prints them; a
+  bare pipeline name reaches every repo-scoped key that carries it and the
+  summary names each one): the
   learned samples, peaks, floors, waits, and contention tally are dropped
   so the pipeline re-learns from a cold start, and the command prints what
   it removed -- including a floor with no measured samples behind it, which

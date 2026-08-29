@@ -43,8 +43,12 @@ type capacityCharge struct {
 }
 
 type capacityProfile struct {
-	Pipeline string         `json:"pipeline"`
-	Charge   capacityCharge `json:"charge"`
+	Pipeline string `json:"pipeline"`
+	// Display is Pipeline decoded to the repo/pipeline form people see
+	// everywhere else; Pipeline stays the stored key because the explain
+	// endpoint is addressed by it.
+	Display string         `json:"display"`
+	Charge  capacityCharge `json:"charge"`
 
 	SampleCount     int     `json:"sample_count"`
 	PeakCores       float64 `json:"peak_cores"`
@@ -280,6 +284,7 @@ func newCapacityProfile(rollup store.PipelineProfile, nodeCount, numCPU int) cap
 	res := capacity.Resolve(pin, &rollup, numCPU, rollup.PlanHash)
 	out := capacityProfile{
 		Pipeline:          rollup.Pipeline,
+		Display:           store.DisplayProfileKey(rollup.Pipeline),
 		Charge:            chargeOf(res, rollup),
 		SampleCount:       rollup.SampleCount,
 		PeakCores:         rollup.PeakCores,

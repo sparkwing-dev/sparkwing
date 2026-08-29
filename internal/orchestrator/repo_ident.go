@@ -132,9 +132,11 @@ func alternatesRepoName(gitDir string) string {
 // repository it was branched from -- the canonical identity read from
 // the shared config or borrowed object store in the common git dir,
 // else that repository's directory name -- so a worktree and its main
-// checkout price against one profile. Any other pointer is a
-// submodule, its own repository for pricing: its gitdir carries its
-// own config.
+// checkout price against one profile. Reading the shared config also
+// means a per-worktree remote override (extensions.worktreeConfig)
+// does not split a worktree's pricing from its repo's. Any other
+// pointer is a submodule, its own repository for pricing: its gitdir
+// carries its own config and object store.
 func gitFileRepoName(gitFile, dir string) string {
 	gitDir := gitDirPointer(gitFile, dir)
 	if gitDir == "" {
@@ -154,6 +156,9 @@ func gitFileRepoName(gitFile, dir string) string {
 		return strings.TrimSuffix(filepath.Base(common), ".git")
 	}
 	if name := originRepoName(gitDir); name != "" {
+		return name
+	}
+	if name := alternatesRepoName(gitDir); name != "" {
 		return name
 	}
 	return filepath.Base(dir)

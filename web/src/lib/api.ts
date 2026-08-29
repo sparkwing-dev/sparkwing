@@ -1,4 +1,3 @@
-
 function literalMarker(s: unknown, marker: string): string {
   if (typeof s !== "string") return "";
   if (s === marker) return "";
@@ -119,7 +118,6 @@ function authFetch(url: string, opts: RequestInit = {}): Promise<Response> {
 export function getControllerUrl(): string {
   return API_URL;
 }
-
 
 export interface Run {
   id: string;
@@ -305,7 +303,6 @@ export function parseHolder(claimedBy?: string): {
   if (prefix === "pod") return { kind: "jobs", label: second };
   return { kind: "cluster", label: second };
 }
-
 
 export interface RunFilter {
   limit?: number;
@@ -538,7 +535,6 @@ export async function deleteRun(runID: string): Promise<void> {
   }
 }
 
-
 export interface Agent {
   name: string;
   type: string;
@@ -708,7 +704,6 @@ export async function retryRun(
   return res.json();
 }
 
-
 export interface Job {
   id: string;
   pipeline: string;
@@ -868,7 +863,6 @@ export async function getPaused(runID: string): Promise<PauseState[]> {
   return res.json();
 }
 
-
 export interface Approval {
   run_id: string;
   node_id: string;
@@ -936,7 +930,6 @@ export async function releaseNode(
     throw new Error(`release failed: ${res.status}`);
   }
 }
-
 
 export interface HostResources {
   cores?: number;
@@ -1027,7 +1020,6 @@ export async function getQueue(): Promise<QueueState | null> {
   return res.json();
 }
 
-
 export interface CapacityCharge {
   cores: number;
   memory_bytes: number;
@@ -1039,6 +1031,7 @@ export interface CapacityCharge {
 
 export interface CapacityProfile {
   pipeline: string;
+  display: string;
   charge: CapacityCharge;
   sample_count: number;
   peak_cores: number;

@@ -137,6 +137,54 @@ func TestRunCapacityReset_SaysNothingIsStoredWhenNothingIs(t *testing.T) {
 	}
 }
 
+// TestRunCapacityReset_ReachesEveryEncodingOfOneName seeds the alias a
+// store migration never cleaned up: a pre-v0.37.2 "repo/pipeline" row
+// and its encoded successor, which render to one display form. A reset
+// by that form must drop both, because dropping only the legacy row
+// reported success while the row actually pricing runs survived.
+func TestRunCapacityReset_ReachesEveryEncodingOfOneName(t *testing.T) {
+	paths := orchestrator.PathsAt(t.TempDir())
+	ctx := context.Background()
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := store.JoinProfileKey("sample-repo", "ci")
+	for _, key := range []string{"sample-repo/ci", encoded} {
+		if err := st.RecordProfileObservation(ctx, key, "", store.ProfileObservation{Duration: time.Second, PeakCores: 2, CPUMeasured: true}); err != nil {
+			t.Fatalf("seed %s: %v", key, err)
+		}
+	}
+	_ = st.Close()
+
+	out := captureStdout(t, func() {
+		if err := runCapacityReset(ctx, paths, "sample-repo/ci", false, false, false); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
+	})
+	if !strings.Contains(out, "dropped 2 row(s)") {
+		t.Errorf("reset should drop both encodings, got:\n%s", out)
+	}
+
+	st2, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st2.Close() }()
+	for _, key := range []string{"sample-repo/ci", encoded} {
+		prof, err := st2.GetPipelineProfile(ctx, key, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prof != nil {
+			t.Errorf("row %s should be gone after reset, got %+v", key, prof)
+		}
+	}
+}
+
 func TestBarePipeline_StripsRepoScope(t *testing.T) {
 	if got := barePipeline("myrepo/ci"); got != "ci" {
 		t.Errorf("barePipeline(myrepo/ci) = %q, want ci", got)

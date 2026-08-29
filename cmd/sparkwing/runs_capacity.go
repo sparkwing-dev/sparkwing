@@ -149,14 +149,11 @@ func runCapacityReset(ctx context.Context, paths orchestrator.Paths, pipeline st
 	return nil
 }
 
+// resetNamedProfile resets every stored profile the name addresses, not
+// just the first: a legacy "repo/pipeline" row and its encoded successor
+// render to the same display form, and resetting only one would report
+// success while the row actually pricing runs survives.
 func resetNamedProfile(ctx context.Context, st *store.Store, name string) (store.ProfileResetSummary, error) {
-	exact, err := st.ListPipelineProfiles(ctx, name)
-	if err != nil {
-		return store.ProfileResetSummary{}, err
-	}
-	if len(exact) > 0 {
-		return st.ResetPipelineProfile(ctx, name)
-	}
 	all, err := st.ListPipelineProfiles(ctx, "")
 	if err != nil {
 		return store.ProfileResetSummary{}, err
@@ -187,13 +184,17 @@ func barePipeline(key string) string {
 }
 
 // matchProfileName selects the stored profiles a user-supplied name
-// addresses without knowing the stored encoding: the bare pipeline name
-// or the displayed repo/pipeline form, both of which are what the
-// capacity table puts in front of them.
+// addresses: the stored key itself, the bare pipeline name, or the
+// displayed repo/pipeline form -- the spellings a user can copy from
+// output. Matching stays broad on the display form even
+// though it is not injective (a nested pipeline name and a
+// prefix-related repo identity can render alike): the callers reset or
+// list, and missing the row that is actually pricing runs costs more
+// than touching a lookalike.
 func matchProfileName(profiles []store.PipelineProfile, name string) []store.PipelineProfile {
 	var out []store.PipelineProfile
 	for _, p := range profiles {
-		if barePipeline(p.Pipeline) == name || store.DisplayProfileKey(p.Pipeline) == name {
+		if p.Pipeline == name || barePipeline(p.Pipeline) == name || store.DisplayProfileKey(p.Pipeline) == name {
 			out = append(out, p)
 		}
 	}
