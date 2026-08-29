@@ -71,4 +71,47 @@ git -C "$CASE_ROOT" commit --allow-empty -qm mutation
 expect_status committed ''
 expect_failure committed 'hosted gate changed HEAD'
 
+git -C "$CASE_ROOT" reset --hard -q "$target"
+mkdir -p "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing"
+cat >"$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.mod" <<'EOF'
+module release-fixture
+
+go 1.26.0
+
+require github.com/sparkwing-dev/sparkwing v0.37.1
+EOF
+printf 'github.com/sparkwing-dev/sparkwing v0.37.1 h1:old\n' >"$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.sum"
+git -C "$CASE_ROOT" add testdata
+git -C "$CASE_ROOT" commit -qm fixture
+target="$(git -C "$CASE_ROOT" rev-parse HEAD)"
+
+sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.mod"
+rm "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.mod.bak"
+sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.sum"
+rm "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.sum.bak"
+(
+  cd "$CASE_ROOT"
+  bash "$CHECK" --release-self-pin v0.37.2 "$target"
+)
+
+printf 'unrelated\n' >>"$CASE_ROOT/tracked.txt"
+if (
+  cd "$CASE_ROOT"
+  bash "$CHECK" --release-self-pin v0.37.2 "$target"
+) >"$OUTPUT" 2>&1; then
+  echo 'check-hosted-gate-clean-test: release allowance admitted an unrelated edit' >&2
+  exit 1
+fi
+grep -Fq 'hosted gate changed files outside the release self-pin allowance' "$OUTPUT"
+
+git -C "$CASE_ROOT" restore tracked.txt
+if (
+  cd "$CASE_ROOT"
+  bash "$CHECK" --release-self-pin v0.37.3 "$target"
+) >"$OUTPUT" 2>&1; then
+  echo 'check-hosted-gate-clean-test: release allowance admitted the wrong version' >&2
+  exit 1
+fi
+grep -Fq 'release fixture does not pin v0.37.3' "$OUTPUT"
+
 echo "check-hosted-gate-clean-test: ok"
