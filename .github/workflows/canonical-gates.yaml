@@ -108,7 +108,13 @@ jobs:
           git tag --delete -- "$RELEASE_TAG"
           go -C testdata/kind-e2e/repo/.sparkwing get github.com/sparkwing-dev/sparkwing@"$RELEASE_TAG"
           go -C testdata/kind-e2e/repo/.sparkwing mod tidy
-          patch_oid="$(git diff --binary -- testdata/kind-e2e/repo/.sparkwing/go.mod testdata/kind-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
+          sed -i "s/^const FallbackSDKVersion = \"[^\"]*\"$/const FallbackSDKVersion = \"$RELEASE_TAG\"/" pkg/scaffold/version.go
+          grep -Fxq "const FallbackSDKVersion = \"$RELEASE_TAG\"" pkg/scaffold/version.go
+          snapshot_dir="$(mktemp -d)"
+          trap 'rm -rf "$snapshot_dir"' EXIT
+          bash bin/regen-api-snapshot.sh "$snapshot_dir"
+          cp "$snapshot_dir/pkg_scaffold.txt" .apidiff/pkg_scaffold.txt
+          patch_oid="$(git diff --binary -- .apidiff/pkg_scaffold.txt pkg/scaffold/version.go testdata/kind-e2e/repo/.sparkwing/go.mod testdata/kind-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
           echo "RELEASE_SELF_PIN_PATCH_OID=$patch_oid" >>"$GITHUB_ENV"
 
       - name: Run canonical pre-commit

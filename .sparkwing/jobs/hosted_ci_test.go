@@ -74,12 +74,20 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 		"target_sha=\"$(git rev-parse HEAD)\"",
 		"git reset --soft \"$base\"",
 		"git tag --delete -- \"$RELEASE_TAG\"",
+		"pkg/scaffold/version.go",
 		"run pre-commit",
 		"run pre-push",
 		"bash bin/check-hosted-gate-clean.sh --release-self-pin \"$RELEASE_TAG\" \"$RELEASE_SELF_PIN_PATCH_OID\" \"$target_sha\"",
 	)
 	if strings.Contains(body, ": write") {
 		t.Fatal("canonical gates grant a write permission")
+	}
+	regenAt := strings.Index(body, `bash bin/regen-api-snapshot.sh "$snapshot_dir"`)
+	copyAt := strings.Index(body, `cp "$snapshot_dir/pkg_scaffold.txt" .apidiff/pkg_scaffold.txt`)
+	hashAt := strings.Index(body, `patch_oid="$(git diff --binary -- .apidiff/pkg_scaffold.txt`)
+	prePushAt := strings.Index(body, `"$RUNNER_TEMP/sparkwing" run pre-push`)
+	if regenAt < 0 || copyAt < regenAt || hashAt < copyAt || prePushAt < hashAt {
+		t.Fatal("release self-pin snapshot is not regenerated before fingerprinting and pre-push")
 	}
 }
 
@@ -146,7 +154,6 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 		"uses: ./.github/workflows/canonical-gates.yaml",
 		"source_ref: ${{ needs.validate-tag.outputs.source_sha }}",
 		"release_tag: ${{ inputs.tag || github.ref_name }}",
-		"pkg/scaffold/version.go",
 		"contents: read",
 	)
 	requireWorkflowText(t, workflowJob(t, body, "build"),
