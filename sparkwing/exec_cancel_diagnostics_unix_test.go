@@ -47,6 +47,7 @@ func TestExec_NoProgressCancellationCapturesDiagnosticBeforeGroupKill(t *testing
 
 	waitForFile(t, ready)
 	descendantPID := readPIDFile(t, descendant)
+	t.Cleanup(func() { _ = syscall.Kill(descendantPID, syscall.SIGKILL) })
 	started := time.Now()
 	cancel()
 
@@ -105,8 +106,11 @@ func TestExec_NoProgressCancellationCapturesGoRuntimeDump(t *testing.T) {
 	if got.err == nil {
 		t.Fatal("diagnostic cancellation returned success")
 	}
-	if !strings.Contains(got.result.Stderr, "SIGQUIT: quit") || !strings.Contains(got.result.Stderr, "goroutine") {
+	if !strings.Contains(got.result.Stderr, "SIGQUIT: quit") {
 		t.Fatal("stderr omitted the Go runtime dump header")
+	}
+	if count := strings.Count(got.result.Stderr, "TestExecCancellationDiagnosticHelper.func"); count < 5_000 {
+		t.Fatalf("runtime dump contains %d of 5,000 known blocked goroutines", count)
 	}
 }
 
@@ -158,6 +162,16 @@ func TestExec_OrdinaryCancellationKeepsImmediateGroupKill(t *testing.T) {
 }
 
 func TestExecCancellationDiagnosticHelper(t *testing.T) {
+	if os.Getenv("SPARKWING_EXEC_STUBBORN_DESCENDANT") == "1" {
+		signal.Ignore(syscall.SIGQUIT)
+		if err := os.WriteFile(os.Getenv("SPARKWING_EXEC_READY_FILE"), []byte("ready"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(3)
+		}
+		for {
+			time.Sleep(time.Hour)
+		}
+	}
 	if os.Getenv("SPARKWING_EXEC_RUNTIME_DUMP_HELPER") == "1" {
 		blocked := make(chan struct{})
 		for range 5_000 {
@@ -174,10 +188,26 @@ func TestExecCancellationDiagnosticHelper(t *testing.T) {
 	if os.Getenv("SPARKWING_EXEC_DIAGNOSTIC_HELPER") != "1" {
 		return
 	}
-	descendant := exec.Command("sleep", "3600")
+	descendantReady := os.Getenv("SPARKWING_EXEC_READY_FILE") + ".descendant"
+	descendant := exec.Command(os.Args[0], "-test.run=^TestExecCancellationDiagnosticHelper$")
+	descendant.Env = append(os.Environ(),
+		"SPARKWING_EXEC_STUBBORN_DESCENDANT=1",
+		"SPARKWING_EXEC_READY_FILE="+descendantReady,
+	)
 	if err := descendant.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(3)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, err := os.Stat(descendantReady); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			fmt.Fprintln(os.Stderr, "descendant did not become ready")
+			os.Exit(3)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 	if err := os.WriteFile(os.Getenv("SPARKWING_EXEC_DESCENDANT_FILE"), []byte(strconv.Itoa(descendant.Process.Pid)), 0o600); err != nil {
 		fmt.Fprintln(os.Stderr, err)
