@@ -40,7 +40,7 @@ if [ -n "$release_tag" ]; then
   snapshot=".apidiff/pkg_scaffold.txt"
   pipeline_mod=".sparkwing/go.mod"
   pipeline_sum=".sparkwing/go.sum"
-  expected_status="$(printf ' M %s\n M %s\n M %s\n M %s\n M %s\n M %s' "$snapshot" "$pipeline_mod" "$pipeline_sum" "$fallback" "$mod" "$sum")"
+  expected_status="$(printf ' M %s\nM  %s\nM  %s\n M %s\n M %s\n M %s' "$snapshot" "$pipeline_mod" "$pipeline_sum" "$fallback" "$mod" "$sum")"
   if [ "$status" != "$expected_status" ]; then
     echo "hosted gate changed files outside the release self-pin allowance:" >&2
     printf '%s\n' "$status" >&2
@@ -68,7 +68,7 @@ if [ -n "$release_tag" ]; then
     echo "release pipeline retains the local sparkwing self-replace" >&2
     exit 1
   fi
-  actual_patch_oid="$(git diff --binary -- "$snapshot" "$pipeline_mod" "$pipeline_sum" "$fallback" "$mod" "$sum" | git hash-object --stdin)"
+  actual_patch_oid="$(git diff HEAD --binary -- "$snapshot" "$pipeline_mod" "$pipeline_sum" "$fallback" "$mod" "$sum" | git hash-object --stdin)"
   if [ "$actual_patch_oid" != "$expected_patch_oid" ]; then
     echo "release self-pin patch changed during the hosted gate" >&2
     exit 1
