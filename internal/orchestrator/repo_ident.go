@@ -8,9 +8,9 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 
+	"github.com/sparkwing-dev/sparkwing/pkg/store"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -21,10 +21,7 @@ func repoShortName(dir string) string {
 		info, err := os.Stat(gitPath)
 		if err == nil {
 			if !info.IsDir() {
-				if main := worktreeRepoDir(gitPath, d); main != "" {
-					return filepath.Base(main)
-				}
-				return filepath.Base(d)
+				return gitFileRepoName(gitPath, d)
 			}
 			if name := originRepoName(gitPath); name != "" {
 				return name
@@ -130,33 +127,58 @@ func alternatesRepoName(gitDir string) string {
 	return ""
 }
 
-func worktreeRepoDir(gitFile, worktreeDir string) string {
+// gitFileRepoName resolves the identity behind a .git file, the marker
+// for linked worktrees and submodules. A worktree keys as the
+// repository it was branched from -- the canonical identity read from
+// the shared config or borrowed object store in the common git dir,
+// else that repository's directory name -- so a worktree and its main
+// checkout price against one profile. Any other pointer is a
+// submodule, its own repository for pricing: its gitdir carries its
+// own config.
+func gitFileRepoName(gitFile, dir string) string {
+	gitDir := gitDirPointer(gitFile, dir)
+	if gitDir == "" {
+		return filepath.Base(dir)
+	}
+	if filepath.Base(filepath.Dir(gitDir)) == "worktrees" {
+		common := filepath.Dir(filepath.Dir(gitDir))
+		if name := originRepoName(common); name != "" {
+			return name
+		}
+		if name := alternatesRepoName(common); name != "" {
+			return name
+		}
+		if filepath.Base(common) == ".git" {
+			return filepath.Base(filepath.Dir(common))
+		}
+		return strings.TrimSuffix(filepath.Base(common), ".git")
+	}
+	if name := originRepoName(gitDir); name != "" {
+		return name
+	}
+	return filepath.Base(dir)
+}
+
+func gitDirPointer(gitFile, dir string) string {
 	raw, err := os.ReadFile(gitFile)
 	if err != nil {
 		return ""
 	}
-	gitDir := ""
 	for _, line := range strings.Split(string(raw), "\n") {
-		if rest, ok := strings.CutPrefix(strings.TrimSpace(line), "gitdir:"); ok {
-			gitDir = strings.TrimSpace(rest)
-			break
+		rest, ok := strings.CutPrefix(strings.TrimSpace(line), "gitdir:")
+		if !ok {
+			continue
 		}
+		gitDir := strings.TrimSpace(rest)
+		if gitDir == "" {
+			return ""
+		}
+		if !filepath.IsAbs(gitDir) {
+			gitDir = filepath.Join(dir, gitDir)
+		}
+		return filepath.Clean(gitDir)
 	}
-	if gitDir == "" {
-		return ""
-	}
-	if !filepath.IsAbs(gitDir) {
-		gitDir = filepath.Join(worktreeDir, gitDir)
-	}
-	gitDir = filepath.Clean(gitDir)
-	if filepath.Base(filepath.Dir(gitDir)) != "worktrees" {
-		return ""
-	}
-	common := filepath.Dir(filepath.Dir(gitDir))
-	if filepath.Base(common) == ".git" {
-		return filepath.Dir(common)
-	}
-	return strings.TrimSuffix(common, ".git")
+	return ""
 }
 
 func currentRepoShortName() string {
@@ -171,10 +193,7 @@ func currentRepoShortName() string {
 }
 
 func scopedProfileKey(repo, pipeline string) string {
-	if repo == "" || pipeline == "" {
-		return pipeline
-	}
-	return strconv.Itoa(len(repo)) + ":" + repo + pipeline
+	return store.JoinProfileKey(repo, pipeline)
 }
 
 func currentProfileKey(pipeline string) string {

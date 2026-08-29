@@ -48,6 +48,24 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+### Fixed
+
+- **admission:** Linked worktrees now share their repository's canonical
+  capacity profile. v0.37.2 keyed a checkout by its origin remote (or borrowed
+  object store) but left worktrees on the repository's directory name, so a
+  worktree and its main checkout split onto two profiles and each re-learned
+  what the other already knew. A worktree resolves through the shared config
+  and object store in its common git dir, a submodule through its own gitdir
+  config, and both fall back to the directory name as before when the repo
+  names no remote.
+
+- **cli:** `runs stats` learned the v0.37.2 profile-key encoding. The capacity
+  table, drift lines, reset summaries, and doctor's poisoned-profile warning
+  print keys as repo/pipeline again instead of the stored length-prefixed
+  form, and `--reset --pipeline` accepts the bare pipeline name, the displayed
+  repo/pipeline form, or the stored key -- a bare name matched nothing under
+  the new encoding, leaving doctor's suggested reset the only working spelling.
+
 ### Added
 
 - **cli:** `sparkwing pipeline trigger --working-tree` now freezes tracked

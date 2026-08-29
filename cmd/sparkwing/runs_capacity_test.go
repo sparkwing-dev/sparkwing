@@ -144,19 +144,44 @@ func TestBarePipeline_StripsRepoScope(t *testing.T) {
 	if got := barePipeline("ci"); got != "ci" {
 		t.Errorf("barePipeline(ci) = %q, want ci", got)
 	}
+	if got := barePipeline(store.JoinProfileKey("github.com/example/acme-service", "ci")); got != "ci" {
+		t.Errorf("barePipeline(encoded key) = %q, want ci", got)
+	}
 }
 
-func TestMatchBarePipeline_FindsScopedRowsForBareName(t *testing.T) {
+func TestDisplayProfileKey_RendersRepoSlashPipeline(t *testing.T) {
+	key := store.JoinProfileKey("github.com/example/acme-service", "ci")
+	if got := store.DisplayProfileKey(key); got != "github.com/example/acme-service/ci" {
+		t.Errorf("store.DisplayProfileKey(%q) = %q, want github.com/example/acme-service/ci", key, got)
+	}
+	if got := store.DisplayProfileKey("legacy-repo/ci"); got != "legacy-repo/ci" {
+		t.Errorf("legacy key rendered as %q, want legacy-repo/ci", got)
+	}
+	if got := store.DisplayProfileKey("ci"); got != "ci" {
+		t.Errorf("bare key rendered as %q, want ci", got)
+	}
+}
+
+// TestMatchProfileName_FindsRowsByBareAndDisplayedNames keeps --reset
+// and --pipeline filters working against the names a user can actually
+// see: the bare pipeline name and the repo/pipeline form the table
+// prints, over both encoded and legacy stored keys.
+func TestMatchProfileName_FindsRowsByBareAndDisplayedNames(t *testing.T) {
+	encoded := store.JoinProfileKey("github.com/example/acme-service", "ci")
 	profiles := []store.PipelineProfile{
 		{Pipeline: "alpha/ci"},
 		{Pipeline: "beta/ci", NodeID: "build"},
 		{Pipeline: "alpha/deploy"},
+		{Pipeline: encoded},
 	}
-	got := matchBarePipeline(profiles, "ci")
-	if len(got) != 2 {
-		t.Fatalf("matched %d profiles, want the two scoped ci rows", len(got))
+	if got := matchProfileName(profiles, "ci"); len(got) != 3 {
+		t.Fatalf("bare name matched %d profiles, want the three ci rows", len(got))
 	}
-	if got := matchBarePipeline(profiles, "release"); len(got) != 0 {
+	got := matchProfileName(profiles, "github.com/example/acme-service/ci")
+	if len(got) != 1 || got[0].Pipeline != encoded {
+		t.Fatalf("displayed name matched %v, want the encoded ci row", got)
+	}
+	if got := matchProfileName(profiles, "release"); len(got) != 0 {
 		t.Errorf("matched %d profiles for an unknown name, want none", len(got))
 	}
 }
