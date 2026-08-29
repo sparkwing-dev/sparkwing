@@ -1,4 +1,4 @@
-//go:build unix
+//go:build linux || darwin
 
 package sparkwing
 
@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -178,6 +179,14 @@ func TestExec_DiagnosticCommandsCannotWriteCoreFiles(t *testing.T) {
 	}
 }
 
+func TestDiagnosticCommand_CoreLimitFailureStopsExec(t *testing.T) {
+	ctx := execdiag.WithPolicy(context.Background(), execdiag.Policy{Expired: func() bool { return false }})
+	cmd := commandContext(ctx, "target", "argument")
+	if len(cmd.Args) < 3 || cmd.Args[2] != `ulimit -c 0 && exec "$@"` {
+		t.Fatalf("diagnostic wrapper = %q, want fail-closed core suppression", cmd.Args)
+	}
+}
+
 func TestDiagnosticOutputLimiter_BoundsOnlyPostTimeoutOutput(t *testing.T) {
 	expired := false
 	limiter := &diagnosticOutputLimiter{
@@ -221,9 +230,15 @@ func TestExecCancellationDiagnosticHelper(t *testing.T) {
 	}
 	if os.Getenv("SPARKWING_EXEC_RUNTIME_DUMP_HELPER") == "1" {
 		blocked := make(chan struct{})
+		var started sync.WaitGroup
+		started.Add(5_000)
 		for range 5_000 {
-			go func() { <-blocked }()
+			go func() {
+				started.Done()
+				<-blocked
+			}()
 		}
+		started.Wait()
 		if err := os.WriteFile(os.Getenv("SPARKWING_EXEC_READY_FILE"), []byte("ready"), 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(3)
