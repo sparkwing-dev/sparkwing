@@ -146,6 +146,7 @@ type Dialect int
 func (d Dialect) String() string
 const DialectPostgres
 const DialectSQLite Dialect = iota
+func DisplayProfileKey(key string) string
 var ErrBootstrapClosed = errors.New("users: bootstrap closed (table not empty)")
 var ErrConcurrencySuperseded = errors.New("concurrency holder superseded")
 var ErrDuplicateIdempotencyKey = errors.New("store: idempotency key already claimed by another trigger")
@@ -176,6 +177,7 @@ const IncludeSecretValues = "secret_values"
 func InheritSecretArgs(inv map[string]any, src *Run) map[string]any
 const InvocationSecretArgsKey = "secret_args"
 func IsProtocolErr(err error) bool
+func JoinProfileKey(repo, pipeline string) string
 var Maintenance = storeMaintenanceFns{
 	ReapExpiredTriggers:          (*Store).reapExpiredTriggers,
 	ReapStalePendingRuns:         (*Store).reapStalePendingRuns,
@@ -449,6 +451,7 @@ type SpawnedChild struct {
 	Pipeline     string
 	ChildRunID   string
 }
+func SplitProfileKey(key string) (repo, pipeline string)
 const StepCancelled = "cancelled"
 const StepFailed = "failed"
 const StepPassed = "passed"

@@ -1158,7 +1158,7 @@ func renderDoctorPretty(w io.Writer, r DoctorReport, legacyLine string) error {
 
 	for _, p := range r.PoisonedProfiles {
 		fmt.Fprintf(w, "\nwarning: capacity profile %q looks poisoned by contention -- its demand floor %.1f cores prices runs at %.1f, at or over the grantable %.1f, so every run holds the whole machine\n  reset it: sparkwing runs stats --reset --pipeline %s\n",
-			p.Pipeline, p.FloorCores, p.ChargeCores, p.GrantableCores, p.Pipeline)
+			store.DisplayProfileKey(p.Pipeline), p.FloorCores, p.ChargeCores, p.GrantableCores, store.DisplayProfileKey(p.Pipeline))
 	}
 
 	if legacyLine != "" {

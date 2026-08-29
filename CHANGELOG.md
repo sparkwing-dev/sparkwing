@@ -68,6 +68,42 @@ code change to unlock.
   updates from superseded runs so they cannot overwrite the current result.
   Programs serving `Server.Handler` directly must call `Server.Shutdown`.
 
+- **store:** `JoinProfileKey`, `SplitProfileKey`, and `DisplayProfileKey`
+  expose the capacity-profile key encoding, so a program reading
+  `runs stats -o json` or the capacity API can decode a stored key into its
+  repo and pipeline halves.
+
+### Fixed
+
+- **admission:** Linked worktrees now share their repository's canonical
+  capacity profile. v0.37.2 keyed a checkout by its origin remote (or borrowed
+  object store) but left worktrees on the repository's directory name, so a
+  worktree and its main checkout split onto two profiles and each re-learned
+  what the other already knew. A worktree resolves through the shared config
+  and object store in its common git dir, a submodule through its own gitdir
+  config and object store, and both fall back to the directory name as before
+  when the repo names no remote.
+
+- **cli:** `runs stats` learned the v0.37.2 profile-key encoding. The capacity
+  table, drift lines, reset summaries, and doctor's poisoned-profile warning
+  print keys as repo/pipeline again instead of the stored length-prefixed
+  form, and `--reset --pipeline` accepts the bare pipeline name, the displayed
+  repo/pipeline form, or the stored key -- a bare name matched nothing under
+  the new encoding, leaving doctor's suggested reset the only working spelling.
+  A reset reaches every stored encoding of the name it is given, since a
+  pre-v0.37.2 row and its encoded successor display identically and the
+  survivor would otherwise keep pricing runs behind a success message.
+
+- **web:** The capacity dashboard prints profile keys as repo/pipeline instead
+  of the stored length-prefixed encoding, matching the CLI table.
+
+- **exec:** A no-progress timeout on Linux and macOS now sends `SIGQUIT` before
+  terminating the command session, making Go goroutine dumps available through
+  `runs logs`. Core-file generation is disabled for the diagnostic-enabled
+  session, ordinary cancellation remains immediate, diagnostic output is capped
+  at 16 MiB, and a process tree that ignores `SIGQUIT` is force-killed after ten
+  seconds.
+
 ### Security
 
 - **web (Breaking):** Login-required dashboards now refuse to start without a
@@ -79,15 +115,6 @@ code change to unlock.
   request instead of after a 60-second web cache. Transient session-backend
   failures return `502` without deleting browser cookies. See the
   [migration guide](docs/migrations/_unreleased.md#dashboard-browser-session-hardening).
-
-### Fixed
-
-- **exec:** A no-progress timeout on Linux and macOS now sends `SIGQUIT` before
-  terminating the command session, making Go goroutine dumps available through
-  `runs logs`. Core-file generation is disabled for the diagnostic-enabled
-  session, ordinary cancellation remains immediate, diagnostic output is capped
-  at 16 MiB, and a process tree that ignores `SIGQUIT` is force-killed after ten
-  seconds.
 
 ## [v0.37.2] - 2026-08-28
 ### Fixed

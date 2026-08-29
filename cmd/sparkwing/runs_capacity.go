@@ -39,12 +39,12 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 	if err != nil {
 		return err
 	}
-	if len(profiles) == 0 && pipeline != "" && !strings.Contains(pipeline, "/") {
+	if len(profiles) == 0 && pipeline != "" {
 		all, err := st.ListPipelineProfiles(ctx, "")
 		if err != nil {
 			return err
 		}
-		profiles = matchBarePipeline(all, pipeline)
+		profiles = matchProfileName(all, pipeline)
 	}
 	stats := groupCapacityStats(profiles)
 	cachedExcluded, err := st.CacheExcludedCounts(ctx, barePipeline(pipeline), string(sparkwing.Cached), capacity.CacheDominantFraction)
@@ -70,7 +70,7 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 	fmt.Fprintln(tw, "PIPELINE\tSOURCE\tP50\tP99\tCPU P50/P95/PEAK\tCPU CHARGE\tMEM P50/P95/PEAK\tWAIT P50/P99\tSAMPLES\tCONTENDED\tCACHED\tFLOOR")
 	for _, s := range stats {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\n",
-			s.Pipeline, s.Source, fmtDur(s.Rollup.P50Duration), fmtDur(s.Rollup.P99Duration),
+			store.DisplayProfileKey(s.Pipeline), s.Source, fmtDur(s.Rollup.P50Duration), fmtDur(s.Rollup.P99Duration),
 			fmtCPUCells(s.Rollup), fmtCPUChargeCell(s.Rollup), fmtMemCells(s.Rollup),
 			fmtWaitCells(s.Rollup), s.Rollup.SampleCount,
 			fmtContendedCell(s.Rollup), fmtCachedCell(s.CachedExcluded), fmtFloorCell(s.Rollup))
@@ -85,7 +85,7 @@ func runCapacityStats(ctx context.Context, paths orchestrator.Paths, pipeline st
 	}
 	for _, s := range stats {
 		if s.Drift != "" {
-			fmt.Fprintf(os.Stdout, "\n%s: %s\n", s.Pipeline, s.Drift)
+			fmt.Fprintf(os.Stdout, "\n%s: %s\n", store.DisplayProfileKey(s.Pipeline), s.Drift)
 		}
 	}
 	return nil
@@ -130,7 +130,11 @@ func runCapacityReset(ctx context.Context, paths orchestrator.Paths, pipeline st
 		}
 		return nil
 	}
-	scope := strings.Join(summary.Pipelines, ", ")
+	displayed := make([]string, len(summary.Pipelines))
+	for i, key := range summary.Pipelines {
+		displayed[i] = store.DisplayProfileKey(key)
+	}
+	scope := strings.Join(displayed, ", ")
 	if resetAll {
 		scope = fmt.Sprintf("%d pipeline(s)", len(summary.Pipelines))
 	}
@@ -145,21 +149,18 @@ func runCapacityReset(ctx context.Context, paths orchestrator.Paths, pipeline st
 	return nil
 }
 
+// resetNamedProfile resets every stored profile the name addresses, not
+// just the first: a legacy "repo/pipeline" row and its encoded successor
+// render to the same display form, and resetting only one would report
+// success while the row actually pricing runs survives.
 func resetNamedProfile(ctx context.Context, st *store.Store, name string) (store.ProfileResetSummary, error) {
-	exact, err := st.ListPipelineProfiles(ctx, name)
-	if err != nil {
-		return store.ProfileResetSummary{}, err
-	}
-	if len(exact) > 0 || strings.Contains(name, "/") {
-		return st.ResetPipelineProfile(ctx, name)
-	}
 	all, err := st.ListPipelineProfiles(ctx, "")
 	if err != nil {
 		return store.ProfileResetSummary{}, err
 	}
 	total := store.ProfileResetSummary{Pipelines: []string{}}
 	done := map[string]bool{}
-	for _, p := range matchBarePipeline(all, name) {
+	for _, p := range matchProfileName(all, name) {
 		if done[p.Pipeline] {
 			continue
 		}
@@ -178,16 +179,22 @@ func resetNamedProfile(ctx context.Context, st *store.Store, name string) (store
 }
 
 func barePipeline(key string) string {
-	if i := strings.LastIndex(key, "/"); i >= 0 {
-		return key[i+1:]
-	}
-	return key
+	_, pipeline := store.SplitProfileKey(key)
+	return pipeline
 }
 
-func matchBarePipeline(profiles []store.PipelineProfile, name string) []store.PipelineProfile {
+// matchProfileName selects the stored profiles a user-supplied name
+// addresses: the stored key itself, the bare pipeline name, or the
+// displayed repo/pipeline form -- the spellings a user can copy from
+// output. Matching stays broad on the display form even
+// though it is not injective (a nested pipeline name and a
+// prefix-related repo identity can render alike): the callers reset or
+// list, and missing the row that is actually pricing runs costs more
+// than touching a lookalike.
+func matchProfileName(profiles []store.PipelineProfile, name string) []store.PipelineProfile {
 	var out []store.PipelineProfile
 	for _, p := range profiles {
-		if barePipeline(p.Pipeline) == name {
+		if p.Pipeline == name || barePipeline(p.Pipeline) == name || store.DisplayProfileKey(p.Pipeline) == name {
 			out = append(out, p)
 		}
 	}
