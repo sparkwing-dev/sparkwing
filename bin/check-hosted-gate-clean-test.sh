@@ -89,15 +89,16 @@ sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go
 rm "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.mod.bak"
 sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.sum"
 rm "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.sum.bak"
+self_pin_oid="$(git -C "$CASE_ROOT" diff --binary -- testdata/kind-e2e/repo/.sparkwing/go.mod testdata/kind-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
 (
   cd "$CASE_ROOT"
-  bash "$CHECK" --release-self-pin v0.37.2 "$target"
+  bash "$CHECK" --release-self-pin v0.37.2 "$self_pin_oid" "$target"
 )
 
 printf 'unrelated\n' >>"$CASE_ROOT/tracked.txt"
 if (
   cd "$CASE_ROOT"
-  bash "$CHECK" --release-self-pin v0.37.2 "$target"
+  bash "$CHECK" --release-self-pin v0.37.2 "$self_pin_oid" "$target"
 ) >"$OUTPUT" 2>&1; then
   echo 'check-hosted-gate-clean-test: release allowance admitted an unrelated edit' >&2
   exit 1
@@ -107,11 +108,22 @@ grep -Fq 'hosted gate changed files outside the release self-pin allowance' "$OU
 git -C "$CASE_ROOT" restore tracked.txt
 if (
   cd "$CASE_ROOT"
-  bash "$CHECK" --release-self-pin v0.37.3 "$target"
+  bash "$CHECK" --release-self-pin v0.37.3 "$self_pin_oid" "$target"
 ) >"$OUTPUT" 2>&1; then
   echo 'check-hosted-gate-clean-test: release allowance admitted the wrong version' >&2
   exit 1
 fi
 grep -Fq 'release fixture does not pin v0.37.3' "$OUTPUT"
+
+sed -i.bak 's/h1:old/h1:tampered/' "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.sum"
+rm "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.sum.bak"
+if (
+  cd "$CASE_ROOT"
+  bash "$CHECK" --release-self-pin v0.37.2 "$self_pin_oid" "$target"
+) >"$OUTPUT" 2>&1; then
+  echo 'check-hosted-gate-clean-test: release allowance admitted a changed self-pin patch' >&2
+  exit 1
+fi
+grep -Fq 'release self-pin patch changed during the hosted gate' "$OUTPUT"
 
 echo "check-hosted-gate-clean-test: ok"

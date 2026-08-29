@@ -70,12 +70,13 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 		"permissions:\n  contents: read\n",
 		"gate: [pre-commit, pre-push]",
 		"persist-credentials: false",
-		"ref: ${{ github.sha }}",
+		"ref: ${{ inputs.source_ref || github.sha }}",
+		"target_sha=\"$(git rev-parse HEAD)\"",
 		"git reset --soft \"$base\"",
-		"git tag --delete -- \"$GITHUB_REF_NAME\"",
+		"git tag --delete -- \"$RELEASE_TAG\"",
 		"run pre-commit",
 		"run pre-push",
-		"bash bin/check-hosted-gate-clean.sh \"$TARGET_SHA\"",
+		"bash bin/check-hosted-gate-clean.sh --release-self-pin \"$RELEASE_TAG\" \"$RELEASE_SELF_PIN_PATCH_OID\" \"$target_sha\"",
 	)
 	if strings.Contains(body, ": write") {
 		t.Fatal("canonical gates grant a write permission")
@@ -138,18 +139,19 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 	)
 	requireWorkflowText(t, workflowJob(t, body, "validate-tag"),
 		"git ls-remote --exit-code --tags",
-		`"refs/tags/$TAG^{}"`,
+		`echo "source_sha=$source_sha" >>"$GITHUB_OUTPUT"`,
 	)
 	requireWorkflowText(t, workflowJob(t, body, "canonical"),
+		"needs: validate-tag",
 		"uses: ./.github/workflows/canonical-gates.yaml",
-		"source_ref: ${{ inputs.tag || github.sha }}",
+		"source_ref: ${{ needs.validate-tag.outputs.source_sha }}",
 		"release_tag: ${{ inputs.tag || github.ref_name }}",
 		"contents: read",
 	)
 	requireWorkflowText(t, workflowJob(t, body, "build"),
 		"needs: [validate-tag, canonical]",
 		"needs.canonical.result == 'success'",
-		"ref: ${{ inputs.tag || github.sha }}",
+		"ref: ${{ needs.validate-tag.outputs.source_sha }}",
 		"path: .release-tools",
 		".release-tools/bin/check-release-binary-vulnerabilities.sh",
 		`go-version: "1.26.6"`,
@@ -160,27 +162,54 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 		"contents: read",
 		"packages: write",
 		"persist-credentials: false",
-		"ref: ${{ inputs.tag || github.sha }}",
+		"ref: ${{ needs.validate-tag.outputs.source_sha }}",
 		"Checkout current image recipe",
 		"cp .release-tools/.dockerignore .dockerignore",
 		`go-version: "1.26.6"`,
 	)
 	requireWorkflowText(t, workflowJob(t, body, "publish-images"),
+		"needs: [validate-tag, build-images, prepare-binaries]",
 		"contents: read",
 		"id-token: write",
 		"packages: write",
+		"Verify release tag before signing images",
+		"EXPECTED_SHA: ${{ needs.validate-tag.outputs.source_sha }}",
 	)
 	requireWorkflowText(t, workflowJob(t, body, "release"),
 		"inputs.publish_images == false",
 		"contents: write",
 		"persist-credentials: false",
-		"ref: ${{ inputs.tag || github.sha }}",
+		"ref: ${{ needs.validate-tag.outputs.source_sha }}",
+		"Verify release tag remains pinned",
+		`test "$actual_sha" = "$EXPECTED_SHA"`,
 		`go-version: "1.26.6"`,
 		"TAG: ${{ inputs.tag || github.ref_name }}",
 	)
 	requireWorkflowText(t, workflowJob(t, body, "prepare-binaries"),
 		"always() && needs.build.result == 'success'",
 	)
+
+	publishImages := workflowJob(t, body, "publish-images")
+	checkAt := strings.Index(publishImages, "Verify release tag before signing images")
+	signAt := strings.Index(publishImages, "Sign scanned image digests")
+	tagAt := strings.Index(publishImages, "Publish scanned image tags")
+	tagCheckAt := strings.Index(publishImages[tagAt:], `test "$actual_sha" = "$EXPECTED_SHA"`)
+	if tagCheckAt >= 0 {
+		tagCheckAt += tagAt
+	}
+	tagMutationAt := strings.Index(publishImages, "docker buildx imagetools create")
+	if checkAt < 0 || signAt < 0 || tagAt < 0 || checkAt > signAt || tagCheckAt < tagAt || tagMutationAt < tagCheckAt {
+		t.Fatal("image signing and tagging are not guarded by tag stability checks")
+	}
+	releaseJob := workflowJob(t, body, "release")
+	initialCheckAt := strings.Index(releaseJob, `test "$actual_sha" = "$EXPECTED_SHA"`)
+	draftAt := strings.Index(releaseJob, `gh release create "$tag"`)
+	uploadAt := strings.Index(releaseJob, `gh release upload "$tag" dist/*`)
+	finalCheckAt := strings.LastIndex(releaseJob, `test "$actual_sha" = "${{ needs.validate-tag.outputs.source_sha }}"`)
+	publishAt := strings.Index(releaseJob, `gh release edit "$tag" --draft=false`)
+	if initialCheckAt < 0 || draftAt < initialCheckAt || uploadAt < draftAt || finalCheckAt < uploadAt || publishAt < finalCheckAt {
+		t.Fatal("draft publication is not guarded by a final tag stability check")
+	}
 
 	for permission, want := range map[string]int{
 		"contents: write": 1,

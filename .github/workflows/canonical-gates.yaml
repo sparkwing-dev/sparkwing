@@ -2,6 +2,17 @@ name: Canonical gates
 
 on:
   workflow_call:
+    inputs:
+      source_ref:
+        description: Git ref whose source the canonical gates verify
+        required: false
+        type: string
+        default: ""
+      release_tag:
+        description: Immutable release tag allowed for the isolated self-pin fixture update
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -22,7 +33,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ github.sha }}
+          ref: ${{ inputs.source_ref || github.sha }}
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
@@ -70,26 +81,35 @@ jobs:
       - name: Stage the event change
         if: matrix.gate == 'pre-commit'
         env:
-          TARGET_SHA: ${{ github.sha }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           set -euo pipefail
+          target_sha="$(git rev-parse HEAD)"
           base="$PUSH_BEFORE_SHA"
           if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
             base="$PR_BASE_SHA"
           fi
           zero=0000000000000000000000000000000000000000
           if [ -z "$base" ] || [ "$base" = "$zero" ] || ! git cat-file -e "$base^{commit}"; then
-            base="$(git rev-parse "$TARGET_SHA^")"
+            base="$(git rev-parse "$target_sha^")"
           fi
           git reset --soft "$base"
-          test "$(git write-tree)" = "$(git rev-parse "$TARGET_SHA^{tree}")"
+          test "$(git write-tree)" = "$(git rev-parse "$target_sha^{tree}")"
           git diff --quiet
 
-      - name: Preserve the pre-tag release boundary
-        if: matrix.gate == 'pre-push' && github.ref_type == 'tag'
-        run: git tag --delete -- "$GITHUB_REF_NAME"
+      - name: Prepare the immutable release self-pin fixture
+        if: matrix.gate == 'pre-push' && inputs.release_tag != ''
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$ ]]
+          git tag --delete -- "$RELEASE_TAG"
+          go -C testdata/kind-e2e/repo/.sparkwing get github.com/sparkwing-dev/sparkwing@"$RELEASE_TAG"
+          go -C testdata/kind-e2e/repo/.sparkwing mod tidy
+          patch_oid="$(git diff --binary -- testdata/kind-e2e/repo/.sparkwing/go.mod testdata/kind-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
+          echo "RELEASE_SELF_PIN_PATCH_OID=$patch_oid" >>"$GITHUB_ENV"
 
       - name: Run canonical pre-commit
         if: matrix.gate == 'pre-commit'
@@ -101,11 +121,16 @@ jobs:
         if: matrix.gate == 'pre-push'
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
-          TARGET_SHA: ${{ github.sha }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
+          target_sha="$(git rev-parse HEAD)"
           "$RUNNER_TEMP/sparkwing" run pre-push
-          bash bin/check-hosted-gate-clean.sh "$TARGET_SHA"
+          if [ -n "$RELEASE_TAG" ]; then
+            bash bin/check-hosted-gate-clean.sh --release-self-pin "$RELEASE_TAG" "$RELEASE_SELF_PIN_PATCH_OID" "$target_sha"
+          else
+            bash bin/check-hosted-gate-clean.sh "$target_sha"
+          fi
 
       - name: Upload dashboard browser failure artifacts
         if: ${{ failure() && matrix.gate == 'pre-commit' && hashFiles('web/test-results/.sparkwing-browser-failed') != '' }}
