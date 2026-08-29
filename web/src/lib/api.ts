@@ -1031,7 +1031,9 @@ export interface CapacityCharge {
 
 export interface CapacityProfile {
   pipeline: string;
-  display: string;
+  // Decoded repo/pipeline form of the stored key; absent from older
+  // backends, so renderers fall back to the raw pipeline key.
+  display?: string;
   charge: CapacityCharge;
   sample_count: number;
   peak_cores: number;
