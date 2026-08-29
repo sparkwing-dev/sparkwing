@@ -167,8 +167,6 @@ jobs:
         run: |
           set -euo pipefail
           target_sha="$(git rev-parse HEAD)"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           "$RUNNER_TEMP/sparkwing" run pre-push
           if [ -n "$RELEASE_TAG" ]; then
             if [ "$RELEASE_TAG" = v0.37.2 ]; then
