@@ -26,10 +26,10 @@ func TestHealthProbeCompletesAfterHandshake(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = listener.Close() })
 	release := make(chan struct{})
 	done := make(chan struct{})
 	t.Cleanup(func() {
+		_ = listener.Close()
 		close(release)
 		<-done
 	})

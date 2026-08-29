@@ -108,6 +108,7 @@ code change to unlock.
   session, ordinary cancellation remains immediate, diagnostic output is capped
   at 16 MiB, and a process tree that ignores `SIGQUIT` is force-killed after ten
   seconds.
+
 ### Security
 
 - **web (Breaking):** Login-required dashboards now refuse to start without a
