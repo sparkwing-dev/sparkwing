@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
@@ -181,13 +182,184 @@ func TestScopedProfileKey_SeparatesReposAndKeepsBareNameOutsideOne(t *testing.T)
 	if a, b := scopedProfileKey("alpha", "ci"), scopedProfileKey("beta", "ci"); a == b {
 		t.Errorf("scopedProfileKey pooled %q and %q onto one key %q", "alpha/ci", "beta/ci", a)
 	}
-	if got := scopedProfileKey("alpha", "ci"); got != "alpha/ci" {
-		t.Errorf("scopedProfileKey = %q, want alpha/ci", got)
+	if got := scopedProfileKey("alpha", "ci"); got != "5:alphaci" {
+		t.Errorf("scopedProfileKey = %q, want 5:alphaci", got)
 	}
 	if got := scopedProfileKey("", "ci"); got != "ci" {
 		t.Errorf("outside a repo: got %q, want the bare pipeline name", got)
 	}
 	if got := scopedProfileKey("alpha", ""); got != "" {
 		t.Errorf("empty pipeline: got %q, want empty", got)
+	}
+}
+
+func TestScopedProfileKey_SeparatesSlashBearingComponents(t *testing.T) {
+	a := scopedProfileKey("github.com/example/acme-service", "build")
+	b := scopedProfileKey("github.com/example", "acme-service/build")
+	if a == b {
+		t.Fatalf("distinct repository and pipeline components collapsed onto %q", a)
+	}
+}
+
+func cloneWithOrigin(t *testing.T, dirName, originURL string) string {
+	t.Helper()
+	root := t.TempDir()
+	clone := filepath.Join(root, dirName)
+	if err := os.MkdirAll(filepath.Join(clone, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := "[core]\n\trepositoryformatversion = 0\n[remote \"origin\"]\n\turl = " + originURL + "\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n"
+	if err := os.WriteFile(filepath.Join(clone, ".git", "config"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return clone
+}
+
+func TestRepoShortName_CloneIsNamedByOriginNotItsDirectory(t *testing.T) {
+	cases := []struct {
+		name      string
+		dir       string
+		originURL string
+	}{
+		{"ephemeral clone", "build-checkout-2602713005", "https://github.com/example/acme-service.git"},
+		{"scp form", "build-checkout-991", "git@github.com:example/acme-service.git"},
+		{"no dot-git suffix", "build-checkout-77", "https://github.com/example/acme-service"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clone := cloneWithOrigin(t, tc.dir, tc.originURL)
+			if got := repoShortName(clone); got != "github.com/example/acme-service" {
+				t.Fatalf("got %q, want github.com/example/acme-service; a clone keyed by its directory mints a fresh capacity profile per checkout, so measurements never reach MinSamples", got)
+			}
+		})
+	}
+}
+
+func TestRepoShortName_OriginsWithTheSameBasenameStaySeparate(t *testing.T) {
+	first := cloneWithOrigin(t, "first", "https://github.com/example/acme-service.git")
+	second := cloneWithOrigin(t, "second", "https://git.example.net/another/acme-service.git")
+	if a, b := repoShortName(first), repoShortName(second); a == b {
+		t.Fatalf("distinct origins collapsed onto %q", a)
+	}
+}
+
+func TestRepoShortName_OriginUsesGitConfigSemantics(t *testing.T) {
+	cases := []struct {
+		name   string
+		config string
+		extra  string
+	}{
+		{"case-insensitive key", "[remote \"origin\"]\n\tURL = https://github.com/example/acme-service.git\n", ""},
+		{"included config", "[include]\n\tpath = origin.inc\n", "[remote \"origin\"]\n\turl = https://github.com/example/acme-service.git\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clone := cloneWithOrigin(t, "checkout", "https://invalid.example/placeholder.git")
+			gitDir := filepath.Join(clone, ".git")
+			if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte(tc.config), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if tc.extra != "" {
+				if err := os.WriteFile(filepath.Join(gitDir, "origin.inc"), []byte(tc.extra), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := repoShortName(clone); got != "github.com/example/acme-service" {
+				t.Fatalf("got %q, want github.com/example/acme-service", got)
+			}
+		})
+	}
+}
+
+func TestRepoShortName_LocalOriginsAreStableAndPrivate(t *testing.T) {
+	origin := filepath.Join(t.TempDir(), "private", "acme-service.git")
+	first := cloneWithOrigin(t, "first", origin)
+	second := cloneWithOrigin(t, "second", "file://"+origin)
+	a, b := repoShortName(first), repoShortName(second)
+	if a != b {
+		t.Fatalf("equivalent local origins differ: %q and %q", a, b)
+	}
+	if strings.Contains(a, origin) || !strings.HasPrefix(a, "local:") {
+		t.Fatalf("local identity exposes its path: %q", a)
+	}
+}
+
+func TestRepoShortName_CloneWithoutOriginKeepsItsDirectoryName(t *testing.T) {
+	root := t.TempDir()
+	repo := filepath.Join(root, "local-only")
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoShortName(repo); got != "local-only" {
+		t.Fatalf("got %q, want local-only; a repo with no remote has no identity beyond its path", got)
+	}
+}
+
+func cloneWithAlternates(t *testing.T, dirName, objectsDir string) string {
+	t.Helper()
+	root := t.TempDir()
+	clone := filepath.Join(root, dirName)
+	info := filepath.Join(clone, ".git", "objects", "info")
+	if err := os.MkdirAll(info, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(clone, ".git", "config"), []byte("[core]\n\tbare = false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(info, "alternates"), []byte(objectsDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return clone
+}
+
+func objectStoreWithOrigin(t *testing.T, bare bool) string {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), "acme-service")
+	gitDir := filepath.Join(repo, ".git")
+	if bare {
+		gitDir = repo + ".git"
+	}
+	if err := os.MkdirAll(filepath.Join(gitDir, "objects"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := "[remote \"origin\"]\n\turl = https://github.com/example/acme-service.git\n"
+	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return filepath.Join(gitDir, "objects")
+}
+
+func TestRepoShortName_ThinCloneIsNamedByItsSharedObjectStore(t *testing.T) {
+	cases := []struct {
+		name string
+		dir  string
+		bare bool
+	}{
+		{"bare object store", "build-checkout-2602713005", true},
+		{"non-bare object store", "build-checkout-44", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			clone := cloneWithAlternates(t, tc.dir, objectStoreWithOrigin(t, tc.bare))
+			if got := repoShortName(clone); got != "github.com/example/acme-service" {
+				t.Fatalf("got %q, want github.com/example/acme-service; ephemeral clones with no remote use a shared object store, so origin alone leaves a run keyed by its throwaway directory", got)
+			}
+		})
+	}
+}
+
+func TestRepoShortName_RelativeAlternateResolvesFromObjectDatabase(t *testing.T) {
+	objectsDir := objectStoreWithOrigin(t, true)
+	clone := cloneWithAlternates(t, "build-checkout", objectsDir)
+	info := filepath.Join(clone, ".git", "objects", "info")
+	relative, err := filepath.Rel(filepath.Join(clone, ".git", "objects"), objectsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(info, "alternates"), []byte(relative+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoShortName(clone); got != "github.com/example/acme-service" {
+		t.Fatalf("got %q, want github.com/example/acme-service", got)
 	}
 }
