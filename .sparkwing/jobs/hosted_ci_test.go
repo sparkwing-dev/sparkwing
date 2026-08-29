@@ -74,6 +74,7 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 		"target_sha=\"$(git rev-parse HEAD)\"",
 		"git reset --soft \"$base\"",
 		"git tag --delete -- \"$RELEASE_TAG\"",
+		"-dropreplace=github.com/sparkwing-dev/sparkwing",
 		"pkg/scaffold/version.go",
 		"run pre-commit",
 		"run pre-push",
@@ -84,7 +85,7 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 	}
 	regenAt := strings.Index(body, `bash bin/regen-api-snapshot.sh "$snapshot_dir"`)
 	copyAt := strings.Index(body, `cp "$snapshot_dir/pkg_scaffold.txt" .apidiff/pkg_scaffold.txt`)
-	hashAt := strings.Index(body, `patch_oid="$(git diff --binary -- .apidiff/pkg_scaffold.txt`)
+	hashAt := strings.Index(body, `patch_oid="$(git diff --binary -- .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum`)
 	prePushAt := strings.Index(body, `"$RUNNER_TEMP/sparkwing" run pre-push`)
 	if regenAt < 0 || copyAt < regenAt || hashAt < copyAt || prePushAt < hashAt {
 		t.Fatal("release self-pin snapshot is not regenerated before fingerprinting and pre-push")

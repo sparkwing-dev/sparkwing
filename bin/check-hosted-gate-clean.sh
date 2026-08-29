@@ -38,7 +38,9 @@ if [ -n "$release_tag" ]; then
   sum="testdata/kind-e2e/repo/.sparkwing/go.sum"
   fallback="pkg/scaffold/version.go"
   snapshot=".apidiff/pkg_scaffold.txt"
-  expected_status="$(printf ' M %s\n M %s\n M %s\n M %s' "$snapshot" "$fallback" "$mod" "$sum")"
+  pipeline_mod=".sparkwing/go.mod"
+  pipeline_sum=".sparkwing/go.sum"
+  expected_status="$(printf ' M %s\n M %s\n M %s\n M %s\n M %s\n M %s' "$snapshot" "$pipeline_mod" "$pipeline_sum" "$fallback" "$mod" "$sum")"
   if [ "$status" != "$expected_status" ]; then
     echo "hosted gate changed files outside the release self-pin allowance:" >&2
     printf '%s\n' "$status" >&2
@@ -56,7 +58,15 @@ if [ -n "$release_tag" ]; then
     echo "release scaffold snapshot does not pin $release_tag" >&2
     exit 1
   fi
-  actual_patch_oid="$(git diff --binary -- "$snapshot" "$fallback" "$mod" "$sum" | git hash-object --stdin)"
+  if ! grep -Eq "^[[:space:]]*(require[[:space:]]+)?github.com/sparkwing-dev/sparkwing ${release_tag//./\\.}([[:space:]]|$)" "$pipeline_mod"; then
+    echo "release pipeline does not pin $release_tag" >&2
+    exit 1
+  fi
+  if grep -Eq '^[[:space:]]*(replace[[:space:]]+)?github.com/sparkwing-dev/sparkwing([[:space:]]|$).*=>' "$pipeline_mod"; then
+    echo "release pipeline retains the local sparkwing self-replace" >&2
+    exit 1
+  fi
+  actual_patch_oid="$(git diff --binary -- "$snapshot" "$pipeline_mod" "$pipeline_sum" "$fallback" "$mod" "$sum" | git hash-object --stdin)"
   if [ "$actual_patch_oid" != "$expected_patch_oid" ]; then
     echo "release self-pin patch changed during the hosted gate" >&2
     exit 1
