@@ -239,7 +239,7 @@ func sampleHost() (HostStat, error) {
 }
 
 func darwinFreeMemory(total uint64, level uint32, read bool) (uint64, bool) {
-	if !read || level == 0 || level > 100 {
+	if !read || level > 100 {
 		return 0, false
 	}
 	return uint64(float64(total) * float64(level) / 100.0), true
