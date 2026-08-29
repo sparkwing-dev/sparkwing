@@ -113,6 +113,32 @@ func TerminateSession(identity SessionIdentity) error {
 	return nil
 }
 
+func DiagnosticSession(identity SessionIdentity) error {
+	empty, err := inspectSession(identity, false)
+	if err != nil || empty {
+		return err
+	}
+	return signalDiagnosticSession(identity.SessionID)
+}
+
+func KillSession(identity SessionIdentity) error {
+	empty, err := inspectSession(identity, false)
+	if err != nil || empty {
+		return err
+	}
+	if err := signalGuardSession(identity.SessionID, true); err != nil {
+		return err
+	}
+	empty, err = waitSessionEmpty(identity, guardedSessionTerminateTimeout)
+	if err != nil {
+		return err
+	}
+	if !empty {
+		return fmt.Errorf("guarded session %d remained live after kill", identity.SessionID)
+	}
+	return nil
+}
+
 type backoffPoll struct {
 	interval time.Duration
 	max      time.Duration

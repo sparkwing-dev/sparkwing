@@ -10,6 +10,7 @@ type policyKey struct{}
 type Policy struct {
 	Expired         func() bool
 	EscalationLimit time.Duration
+	OutputLimit     int
 }
 
 func WithPolicy(ctx context.Context, policy Policy) context.Context {

@@ -26,6 +26,8 @@ type progressTimeoutController struct {
 
 const noProgressDiagnosticEscalationLimit = 5 * time.Second
 
+const noProgressDiagnosticOutputLimit = 16 << 20
+
 func newProgressTimeoutContext(parent context.Context, timeout time.Duration) (context.Context, *progressTimeoutController, context.CancelFunc) {
 	controller := &progressTimeoutController{
 		Context: parent,
@@ -44,6 +46,7 @@ func newProgressTimeoutContext(parent context.Context, timeout time.Duration) (c
 	ctx = execdiag.WithPolicy(ctx, execdiag.Policy{
 		Expired:         controller.timedOut,
 		EscalationLimit: noProgressDiagnosticEscalationLimit,
+		OutputLimit:     noProgressDiagnosticOutputLimit,
 	})
 	return ctx, controller, func() { controller.finish(context.Canceled) }
 }

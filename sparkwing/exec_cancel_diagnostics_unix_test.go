@@ -161,7 +161,54 @@ func TestExec_OrdinaryCancellationKeepsImmediateGroupKill(t *testing.T) {
 	waitForProcessExit(t, descendantPID)
 }
 
+func TestExec_DiagnosticCommandsCannotWriteCoreFiles(t *testing.T) {
+	ctx := execdiag.WithPolicy(context.Background(), execdiag.Policy{
+		Expired:         func() bool { return false },
+		EscalationLimit: time.Second,
+		OutputLimit:     1 << 20,
+	})
+	result, err := execCmd(ctx, os.Args[0], []string{"-test.run=^TestExecCancellationDiagnosticHelper$"}, t.TempDir(), map[string]string{
+		"SPARKWING_EXEC_CORE_LIMIT_HELPER": "1",
+	})
+	if err != nil {
+		t.Fatalf("execCmd: %v", err)
+	}
+	if !strings.Contains(result.Stderr, "core-limit=0") {
+		t.Fatalf("stderr = %q, want disabled core-file limit", result.Stderr)
+	}
+}
+
+func TestDiagnosticOutputLimiter_BoundsOnlyPostTimeoutOutput(t *testing.T) {
+	expired := false
+	limiter := &diagnosticOutputLimiter{
+		policy:    execdiag.Policy{Expired: func() bool { return expired }},
+		remaining: 8,
+	}
+	if got, keep := limiter.filter("ordinary output"); !keep || got != "ordinary output" {
+		t.Fatalf("pre-timeout output = %q, %t", got, keep)
+	}
+	expired = true
+	if got, keep := limiter.filter("short"); !keep || got != "short" {
+		t.Fatalf("in-budget diagnostic = %q, %t", got, keep)
+	}
+	if got, keep := limiter.filter("overflow"); !keep || got != diagnosticTruncationMarker {
+		t.Fatalf("first overflow = %q, %t", got, keep)
+	}
+	if got, keep := limiter.filter("more"); keep || got != "" {
+		t.Fatalf("post-marker overflow = %q, %t", got, keep)
+	}
+}
+
 func TestExecCancellationDiagnosticHelper(t *testing.T) {
+	if os.Getenv("SPARKWING_EXEC_CORE_LIMIT_HELPER") == "1" {
+		var limit syscall.Rlimit
+		if err := syscall.Getrlimit(syscall.RLIMIT_CORE, &limit); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(3)
+		}
+		fmt.Fprintf(os.Stderr, "core-limit=%d\n", limit.Cur)
+		return
+	}
 	if os.Getenv("SPARKWING_EXEC_STUBBORN_DESCENDANT") == "1" {
 		signal.Ignore(syscall.SIGQUIT)
 		if err := os.WriteFile(os.Getenv("SPARKWING_EXEC_READY_FILE"), []byte("ready"), 0o600); err != nil {

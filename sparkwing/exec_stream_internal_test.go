@@ -24,7 +24,7 @@ func TestDrainStreams_CollectsOutputBufferedBeforeAnyReaderExists(t *testing.T) 
 	var wg sync.WaitGroup
 	var buf strings.Builder
 	wg.Add(1)
-	go streamLines(withSilent(context.Background()), &wg, r, "info", nopLogger{}, &buf)
+	go streamLines(withSilent(context.Background()), &wg, r, "info", nopLogger{}, &buf, nil)
 	drainStreams(&wg, r)
 
 	if got := buf.String(); !strings.Contains(got, "buffered-line") {
@@ -42,7 +42,7 @@ func TestDrainStreams_GivesUpWhenAWriterOutlivesTheCommand(t *testing.T) {
 	var wg sync.WaitGroup
 	var buf strings.Builder
 	wg.Add(1)
-	go streamLines(withSilent(context.Background()), &wg, r, "info", nopLogger{}, &buf)
+	go streamLines(withSilent(context.Background()), &wg, r, "info", nopLogger{}, &buf, nil)
 
 	returned := make(chan struct{})
 	go func() {

@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/execdiag"
 	"github.com/sparkwing-dev/sparkwing/sparkwing/planguard"
 )
 
@@ -377,7 +378,7 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 		}
 	}
 
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := commandContext(ctx, name, args...)
 	cmd.Dir = dir
 	if len(extraEnv) > 0 {
 		cmd.Env = os.Environ()
@@ -385,7 +386,8 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
 	}
-	configureProcessGroup(ctx, cmd)
+	streamsDone := make(chan struct{})
+	configureProcessGroup(ctx, cmd, streamsDone)
 
 	logger := LoggerFromContext(ctx)
 	logger.Emit(recordEnvelope(ctx, LogRecord{
@@ -423,10 +425,15 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 	closeFiles(outW, errW)
 
 	var outBuf, errBuf strings.Builder
+	limiter := newDiagnosticOutputLimiter(ctx)
 	var wg sync.WaitGroup
 	wg.Add(2)
-	go streamLines(ctx, &wg, outR, "info", logger, &outBuf)
-	go streamLines(ctx, &wg, errR, "info", logger, &errBuf)
+	go streamLines(ctx, &wg, outR, "info", logger, &outBuf, limiter)
+	go streamLines(ctx, &wg, errR, "info", logger, &errBuf, limiter)
+	go func() {
+		wg.Wait()
+		close(streamsDone)
+	}()
 
 	waitErr := cmd.Wait()
 	wall := time.Since(startedAt)
@@ -518,7 +525,7 @@ func closeFiles(files ...*os.File) {
 	}
 }
 
-func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level string, logger Logger, buf *strings.Builder) {
+func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level string, logger Logger, buf *strings.Builder, limiter *diagnosticOutputLimiter) {
 	defer wg.Done()
 	defer r.Close()
 	node := NodeFromContext(ctx)
@@ -527,6 +534,13 @@ func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for sc.Scan() {
 		line := sc.Text()
+		if limiter != nil {
+			var keep bool
+			line, keep = limiter.filter(line)
+			if !keep {
+				continue
+			}
+		}
 		buf.WriteString(line)
 		buf.WriteByte('\n')
 		if silent {
@@ -540,6 +554,41 @@ func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level
 			Msg:   line,
 		}))
 	}
+}
+
+const diagnosticTruncationMarker = "… diagnostic output truncated at configured limit"
+
+type diagnosticOutputLimiter struct {
+	mu        sync.Mutex
+	policy    execdiag.Policy
+	remaining int
+	marked    bool
+}
+
+func newDiagnosticOutputLimiter(ctx context.Context) *diagnosticOutputLimiter {
+	policy, ok := execdiag.FromContext(ctx)
+	if !ok || policy.Expired == nil || policy.OutputLimit <= 0 {
+		return nil
+	}
+	return &diagnosticOutputLimiter{policy: policy, remaining: policy.OutputLimit}
+}
+
+func (l *diagnosticOutputLimiter) filter(line string) (string, bool) {
+	if !l.policy.Expired() {
+		return line, true
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	need := len(line) + 1
+	if need <= l.remaining {
+		l.remaining -= need
+		return line, true
+	}
+	if l.marked {
+		return "", false
+	}
+	l.marked = true
+	return diagnosticTruncationMarker, true
 }
 
 func renderCommand(name string, args []string) string {

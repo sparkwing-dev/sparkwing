@@ -80,6 +80,14 @@ code change to unlock.
   failures return `502` without deleting browser cookies. See the
   [migration guide](docs/migrations/_unreleased.md#dashboard-browser-session-hardening).
 
+### Fixed
+
+- **exec:** A no-progress timeout on Unix now sends `SIGQUIT` before terminating
+  the command session, making Go goroutine dumps available through `runs logs`.
+  The diagnostic-enabled session cannot write core files, ordinary cancellation
+  remains immediate, diagnostic output is capped at 16 MiB, and a process tree
+  that ignores `SIGQUIT` is force-killed after five seconds.
+
 ## [v0.37.2] - 2026-08-28
 ### Fixed
 
