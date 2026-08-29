@@ -146,6 +146,7 @@ func TestReleasePublicationDependsOnCanonicalChecks(t *testing.T) {
 		"uses: ./.github/workflows/canonical-gates.yaml",
 		"source_ref: ${{ needs.validate-tag.outputs.source_sha }}",
 		"release_tag: ${{ inputs.tag || github.ref_name }}",
+		"pkg/scaffold/version.go",
 		"contents: read",
 	)
 	requireWorkflowText(t, workflowJob(t, body, "build"),
