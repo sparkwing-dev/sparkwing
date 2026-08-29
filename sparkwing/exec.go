@@ -152,11 +152,11 @@ func commandEnvFromContext(ctx context.Context) map[string]string {
 // that genuinely need shell features (pipes, redirects, globs,
 // conditionals).
 //
-// Signal propagation: the child runs in its own process group, and ctx
-// cancellation SIGKILLs the whole group. A bash pipeline that forks
-// further -- backgrounded work, a wrapped long-lived helper -- is torn
-// down with it, so grandchildren do not outlive a cancelled run. Terminal
-// SIGINT (Ctrl-C) also reaches the group via the OS.
+// Signal propagation: the child runs in its own process group. Cancellation
+// force-kills the whole group, so grandchildren do not outlive a cancelled run.
+// On Unix, a no-progress timeout first requests a goroutine dump. A process that
+// remains alive after the diagnostic window is force-killed. Terminal SIGINT
+// (Ctrl-C) also reaches the group via the OS.
 func Bash(ctx context.Context, line string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindBash, line: line}
 }
@@ -169,11 +169,11 @@ func Bash(ctx context.Context, line string) *Cmd {
 //	sparkwing.Exec(ctx, "kubectl", "apply", "-f", manifestPath).Run()
 //	sparkwing.Exec(ctx, "docker", "push", tag).Run()
 //
-// Signal propagation: the binary runs in its own process group, and ctx
-// cancellation SIGKILLs the whole group. Single-process CLIs (go, kubectl,
-// docker, git) terminate cleanly; a binary that forks long-lived children
-// has them torn down too, since the group -- not just the direct child --
-// is signalled. Terminal SIGINT (Ctrl-C) reaches the group via the OS.
+// Signal propagation: the binary runs in its own process group. Cancellation
+// force-kills the whole group, so grandchildren do not outlive a cancelled run.
+// On Unix, a no-progress timeout first requests a goroutine dump. A process that
+// remains alive after the diagnostic window is force-killed. Terminal SIGINT
+// (Ctrl-C) also reaches the group via the OS.
 func Exec(ctx context.Context, name string, args ...string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindExec, name: name, args: args}
 }
@@ -385,7 +385,7 @@ func execCmd(ctx context.Context, name string, args []string, dir string, extraE
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
 	}
-	configureProcessGroup(cmd)
+	configureProcessGroup(ctx, cmd)
 
 	logger := LoggerFromContext(ctx)
 	logger.Emit(recordEnvelope(ctx, LogRecord{

@@ -8,8 +8,8 @@ import (
 type policyKey struct{}
 
 type Policy struct {
-	Expired func() bool
-	Grace   time.Duration
+	Expired         func() bool
+	EscalationLimit time.Duration
 }
 
 func WithPolicy(ctx context.Context, policy Policy) context.Context {

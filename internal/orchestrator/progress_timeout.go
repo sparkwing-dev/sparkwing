@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/execdiag"
 	"github.com/sparkwing-dev/sparkwing/sparkwing"
 )
 
@@ -23,6 +24,8 @@ type progressTimeoutController struct {
 	expired    bool
 }
 
+const noProgressDiagnosticEscalationLimit = 5 * time.Second
+
 func newProgressTimeoutContext(parent context.Context, timeout time.Duration) (context.Context, *progressTimeoutController, context.CancelFunc) {
 	controller := &progressTimeoutController{
 		Context: parent,
@@ -38,6 +41,10 @@ func newProgressTimeoutContext(parent context.Context, timeout time.Duration) (c
 		}
 	}()
 	ctx := context.WithValue(controller, progressTimeoutControllerKey{}, controller)
+	ctx = execdiag.WithPolicy(ctx, execdiag.Policy{
+		Expired:         controller.timedOut,
+		EscalationLimit: noProgressDiagnosticEscalationLimit,
+	})
 	return ctx, controller, func() { controller.finish(context.Canceled) }
 }
 

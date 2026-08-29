@@ -27,8 +27,8 @@ func TestExec_NoProgressCancellationCapturesDiagnosticBeforeGroupKill(t *testing
 	descendant := filepath.Join(dir, "descendant")
 	ctx, cancel := context.WithCancel(context.Background())
 	ctx = execdiag.WithPolicy(ctx, execdiag.Policy{
-		Expired: func() bool { return true },
-		Grace:   150 * time.Millisecond,
+		Expired:         func() bool { return true },
+		EscalationLimit: 150 * time.Millisecond,
 	})
 
 	type outcome struct {
@@ -39,8 +39,8 @@ func TestExec_NoProgressCancellationCapturesDiagnosticBeforeGroupKill(t *testing
 	go func() {
 		result, err := execCmd(ctx, os.Args[0], []string{"-test.run=^TestExecCancellationDiagnosticHelper$"}, dir, map[string]string{
 			"SPARKWING_EXEC_DIAGNOSTIC_HELPER": "1",
-			"SPARKWING_EXEC_READY_FILE":       ready,
-			"SPARKWING_EXEC_DESCENDANT_FILE":  descendant,
+			"SPARKWING_EXEC_READY_FILE":        ready,
+			"SPARKWING_EXEC_DESCENDANT_FILE":   descendant,
 		})
 		finished <- outcome{result: result, err: err}
 	}()
@@ -68,7 +68,109 @@ func TestExec_NoProgressCancellationCapturesDiagnosticBeforeGroupKill(t *testing
 	waitForProcessExit(t, descendantPID)
 }
 
+func TestExec_NoProgressCancellationCapturesGoRuntimeDump(t *testing.T) {
+	dir := t.TempDir()
+	ready := filepath.Join(dir, "ready")
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = execdiag.WithPolicy(ctx, execdiag.Policy{
+		Expired:         func() bool { return true },
+		EscalationLimit: 5 * time.Second,
+	})
+
+	type outcome struct {
+		result ExecResult
+		err    error
+	}
+	finished := make(chan outcome, 1)
+	go func() {
+		result, err := execCmd(ctx, os.Args[0], []string{"-test.run=^TestExecCancellationDiagnosticHelper$"}, dir, map[string]string{
+			"SPARKWING_EXEC_RUNTIME_DUMP_HELPER": "1",
+			"SPARKWING_EXEC_READY_FILE":          ready,
+		})
+		finished <- outcome{result: result, err: err}
+	}()
+
+	waitForFile(t, ready)
+	started := time.Now()
+	cancel()
+
+	var got outcome
+	select {
+	case got = <-finished:
+	case <-time.After(6 * time.Second):
+		t.Fatal("Go runtime dump did not complete before forced escalation")
+	}
+	elapsed := time.Since(started)
+	t.Logf("captured a 5,000-goroutine runtime dump in %s", elapsed)
+	if got.err == nil {
+		t.Fatal("diagnostic cancellation returned success")
+	}
+	if !strings.Contains(got.result.Stderr, "SIGQUIT: quit") || !strings.Contains(got.result.Stderr, "goroutine") {
+		t.Fatal("stderr omitted the Go runtime dump header")
+	}
+}
+
+func TestExec_OrdinaryCancellationKeepsImmediateGroupKill(t *testing.T) {
+	dir := t.TempDir()
+	ready := filepath.Join(dir, "ready")
+	descendant := filepath.Join(dir, "descendant")
+	ctx, cancel := context.WithCancel(context.Background())
+	ctx = execdiag.WithPolicy(ctx, execdiag.Policy{
+		Expired:         func() bool { return false },
+		EscalationLimit: time.Second,
+	})
+
+	type outcome struct {
+		result ExecResult
+		err    error
+	}
+	finished := make(chan outcome, 1)
+	go func() {
+		result, err := execCmd(ctx, os.Args[0], []string{"-test.run=^TestExecCancellationDiagnosticHelper$"}, dir, map[string]string{
+			"SPARKWING_EXEC_DIAGNOSTIC_HELPER": "1",
+			"SPARKWING_EXEC_READY_FILE":        ready,
+			"SPARKWING_EXEC_DESCENDANT_FILE":   descendant,
+		})
+		finished <- outcome{result: result, err: err}
+	}()
+
+	waitForFile(t, ready)
+	descendantPID := readPIDFile(t, descendant)
+	started := time.Now()
+	cancel()
+
+	var got outcome
+	select {
+	case got = <-finished:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("ordinary cancellation did not kill the process group immediately")
+	}
+	if elapsed := time.Since(started); elapsed > 250*time.Millisecond {
+		t.Fatalf("ordinary cancellation completed after %s, want immediate group kill", elapsed)
+	}
+	if got.err == nil {
+		t.Fatal("ordinary cancellation returned success")
+	}
+	if strings.Contains(got.result.Stderr, cancellationDiagnosticMarker) {
+		t.Fatalf("ordinary cancellation captured an unexpected diagnostic: %q", got.result.Stderr)
+	}
+	waitForProcessExit(t, descendantPID)
+}
+
 func TestExecCancellationDiagnosticHelper(t *testing.T) {
+	if os.Getenv("SPARKWING_EXEC_RUNTIME_DUMP_HELPER") == "1" {
+		blocked := make(chan struct{})
+		for range 5_000 {
+			go func() { <-blocked }()
+		}
+		if err := os.WriteFile(os.Getenv("SPARKWING_EXEC_READY_FILE"), []byte("ready"), 0o600); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(3)
+		}
+		for {
+			time.Sleep(time.Hour)
+		}
+	}
 	if os.Getenv("SPARKWING_EXEC_DIAGNOSTIC_HELPER") != "1" {
 		return
 	}
