@@ -223,6 +223,7 @@ func TestRepoShortName_CloneIsNamedByOriginNotItsDirectory(t *testing.T) {
 	}{
 		{"ephemeral clone", "build-checkout-2602713005", "https://github.com/example/acme-service.git"},
 		{"scp form", "build-checkout-991", "git@github.com:example/acme-service.git"},
+		{"scp form without user", "build-checkout-992", "github.com:example/acme-service.git"},
 		{"no dot-git suffix", "build-checkout-77", "https://github.com/example/acme-service"},
 	}
 	for _, tc := range cases {
