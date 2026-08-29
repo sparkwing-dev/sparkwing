@@ -130,12 +130,5 @@ func healthProbeOnce(ctx context.Context, sock string) error {
 	if _, err := cl.handshake(""); err != nil {
 		return fmt.Errorf("wingd/client: health probe %s: %w", sock, err)
 	}
-	if _, terminal, transient := cl.readQueueState(); terminal != nil || transient != nil {
-		err := terminal
-		if err == nil {
-			err = transient
-		}
-		return fmt.Errorf("wingd/client: health probe %s: %w", sock, err)
-	}
 	return nil
 }
