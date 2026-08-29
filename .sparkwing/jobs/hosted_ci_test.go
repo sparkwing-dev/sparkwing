@@ -81,10 +81,17 @@ func TestCanonicalWorkflowRunsTheCheckedOutEventChange(t *testing.T) {
 		"pkg/scaffold/version.go",
 		"run pre-commit",
 		"run pre-push",
-		"bash bin/check-hosted-gate-clean.sh --release-self-pin \"$RELEASE_TAG\" \"$RELEASE_SELF_PIN_PATCH_OID\" \"$target_sha\"",
 	)
 	if strings.Contains(body, ": write") {
 		t.Fatal("canonical gates grant a write permission")
+	}
+	verifierCheckoutAt := strings.Index(body, "- name: Checkout immutable release verifier")
+	verifierRefAt := strings.Index(body, "ref: ${{ github.sha }}")
+	verifierCopyAt := strings.Index(body, "- name: Copy the immutable release verifier")
+	sourceCheckoutAt := strings.Index(body, "ref: ${{ inputs.source_ref || github.sha }}")
+	verifierRunAt := strings.Index(body, `bash "$RUNNER_TEMP/check-hosted-gate-clean.sh" --release-self-pin`)
+	if verifierCheckoutAt < 0 || verifierRefAt < verifierCheckoutAt || verifierCopyAt < verifierRefAt || sourceCheckoutAt < verifierCopyAt || verifierRunAt < sourceCheckoutAt {
+		t.Fatal("release verifier is not copied from the caller SHA before tagged-source checkout and execution")
 	}
 	regenAt := strings.Index(body, `bash bin/regen-api-snapshot.sh "$snapshot_dir"`)
 	copyAt := strings.Index(body, `cp "$snapshot_dir/pkg_scaffold.txt" .apidiff/pkg_scaffold.txt`)

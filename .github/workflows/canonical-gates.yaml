@@ -29,6 +29,18 @@ jobs:
     env:
       GOWORK: "off"
     steps:
+      - name: Checkout immutable release verifier
+        if: inputs.release_tag != ''
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Copy the immutable release verifier
+        if: inputs.release_tag != ''
+        run: cp bin/check-hosted-gate-clean.sh "$RUNNER_TEMP/check-hosted-gate-clean.sh"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -136,7 +148,7 @@ jobs:
           target_sha="$(git rev-parse HEAD)"
           "$RUNNER_TEMP/sparkwing" run pre-push
           if [ -n "$RELEASE_TAG" ]; then
-            bash bin/check-hosted-gate-clean.sh --release-self-pin "$RELEASE_TAG" "$RELEASE_SELF_PIN_PATCH_OID" "$target_sha"
+            bash "$RUNNER_TEMP/check-hosted-gate-clean.sh" --release-self-pin "$RELEASE_TAG" "$RELEASE_SELF_PIN_PATCH_OID" "$target_sha"
           else
             bash bin/check-hosted-gate-clean.sh "$target_sha"
           fi
