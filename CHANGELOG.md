@@ -75,6 +75,11 @@ code change to unlock.
 
 ### Fixed
 
+- **admission:** The daemon supervisor now treats a completed protocol handshake
+  as proof of liveness. Health checks no longer request a full queue snapshot, so
+  a large admission queue cannot make its own supervisor replace the serving
+  daemon and disconnect every active lease.
+
 - **admission:** Linked worktrees now share their repository's canonical
   capacity profile. v0.37.2 keyed a checkout by its origin remote (or borrowed
   object store) but left worktrees on the repository's directory name, so a
