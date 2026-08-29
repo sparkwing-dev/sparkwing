@@ -134,13 +134,14 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
-		StartedAt:   time.Now(),
-		Repo:        "sample-app",
-		RepoURL:     "git@github.com:acme/sample-app.git",
-		GitBranch:   "main",
-		GitSHA:      "abc123",
-		GithubOwner: "acme",
-		GithubRepo:  "sample-app",
+		StartedAt:     time.Now(),
+		TriggerSource: "pipeline-working-tree@laptop.local",
+		Repo:          "sample-app",
+		RepoURL:       "git@github.com:acme/sample-app.git",
+		GitBranch:     "main",
+		GitSHA:        "abc123",
+		GithubOwner:   "acme",
+		GithubRepo:    "sample-app",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -148,7 +149,7 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	srv := httptest.NewServer(controller.New(st, nil).Handler())
 	defer srv.Close()
 
-	body := strings.NewReader(`{"pipeline":"build","parent_run_id":"parent","trigger":{"source":"manual"}}`)
+	body := strings.NewReader(`{"pipeline":"build","parent_run_id":"parent","trigger":{"source":"await-pipeline"}}`)
 	resp, err := http.Post(srv.URL+"/api/v1/triggers", "application/json", body)
 	if err != nil {
 		t.Fatal(err)
@@ -186,6 +187,9 @@ func TestTrigger_ParentRepoInheritance(t *testing.T) {
 	}
 	if got.GithubRepo != "sample-app" {
 		t.Errorf("GithubRepo: got %q", got.GithubRepo)
+	}
+	if got.TriggerSource != "pipeline-working-tree@laptop.local" {
+		t.Errorf("TriggerSource: got %q, want parent workspace placement", got.TriggerSource)
 	}
 }
 
@@ -257,11 +261,12 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	ctx := context.Background()
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "parent", Pipeline: "build-cluster", Status: "running",
-		StartedAt: time.Now(),
-		Repo:      "acme/sample-app",
-		RepoURL:   "git@github.com:acme/sample-app.git",
-		GitBranch: "main",
-		GitSHA:    "parentSHAofProduct",
+		StartedAt:     time.Now(),
+		TriggerSource: "pipeline-working-tree@laptop.local",
+		Repo:          "acme/sample-app",
+		RepoURL:       "git@github.com:acme/sample-app.git",
+		GitBranch:     "main",
+		GitSHA:        "parentSHAofProduct",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -272,8 +277,8 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	body := strings.NewReader(`{
 		"pipeline":"build",
 		"parent_run_id":"parent",
-		"trigger":{"source":"manual"},
-		"git":{"repo":"acme/sample-app","branch":"main"}
+		"trigger":{"source":"await-pipeline"},
+		"git":{"repo":"acme/other","branch":"main"}
 	}`)
 	resp, err := http.Post(srv.URL+"/api/v1/triggers", "application/json", body)
 	if err != nil {
@@ -295,14 +300,17 @@ func TestTrigger_CrossRepoAwait_DoesNotInheritParentSHA(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Repo != "acme/sample-app" {
-		t.Errorf("Repo = %q, want acme/sample-app", got.Repo)
+	if got.Repo != "acme/other" {
+		t.Errorf("Repo = %q, want acme/other", got.Repo)
 	}
 	if got.GitSHA != "" {
 		t.Errorf("GitSHA = %q, want empty (cross-repo must not inherit parent's SHA)", got.GitSHA)
 	}
 	if got.GitBranch != "main" {
 		t.Errorf("GitBranch = %q, want main", got.GitBranch)
+	}
+	if got.TriggerSource != "await-pipeline" {
+		t.Errorf("TriggerSource = %q, want explicit cross-repo placement", got.TriggerSource)
 	}
 }
 

@@ -1,6 +1,7 @@
 package bincache
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/cgi"
@@ -78,7 +79,7 @@ func makeBareRepoWithSparkwing(t *testing.T, repoParent, name, branch string) (o
 
 	work := filepath.Join(t.TempDir(), name+"-work")
 	mustGit := func(dir string, args ...string) string {
-		cmd := exec.Command("git", args...)
+		cmd := exec.Command("git", append([]string{"-c", "commit.gpgSign=false"}, args...)...)
 		cmd.Dir = dir
 		cmd.Env = append(
 			os.Environ(),
@@ -102,6 +103,15 @@ func makeBareRepoWithSparkwing(t *testing.T, repoParent, name, branch string) (o
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(work, ".sparkwing", "marker"), []byte("v1"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, ".gitattributes"), []byte("exact.txt text eol=crlf\nident.txt ident\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "exact.txt"), []byte("exact\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "ident.txt"), []byte("$Id$\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	mustGit(work, "add", ".")
@@ -271,5 +281,283 @@ func TestFetchPipelineSource_RegistersWithCache(t *testing.T) {
 	want := "name=sparkwing repo=git@github.com:sparkwing-dev/sparkwing.git"
 	if registered[0] != want {
 		t.Errorf("register call: got %q, want %q", registered[0], want)
+	}
+}
+
+func TestFetchPipelineSourceWithToken_AuthenticatesRegisterAndGit(t *testing.T) {
+	repoParent := t.TempDir()
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	execPath := gitExecPath(t)
+	if execPath == "" {
+		t.Skip("git --exec-path unavailable")
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/gitcache/git/register", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	mux.Handle("/api/v1/gitcache/git/", &cgi.Handler{
+		Path: filepath.Join(execPath, "git-http-backend"),
+		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
+		Root: "/api/v1/gitcache/git",
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer runner-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	sparkwingDir, err := FetchPipelineSourceWithToken(srv.URL+"/api/v1/gitcache", srv.URL, "runner-token",
+		"git@github.com:sparkwing-dev/sparkwing.git", "main", tipSHA, t.TempDir())
+	if err != nil {
+		t.Fatalf("FetchPipelineSourceWithToken: %v", err)
+	}
+	got, err := exec.Command("git", "-C", filepath.Dir(sparkwingDir), "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(got)) != tipSHA {
+		t.Fatalf("HEAD = %q, want %q", strings.TrimSpace(string(got)), tipSHA)
+	}
+}
+
+func TestFetchPipelineSourceWithToken_DoesNotSendControllerTokenToDirectCache(t *testing.T) {
+	repoParent := t.TempDir()
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	execPath := gitExecPath(t)
+	if execPath == "" {
+		t.Skip("git --exec-path unavailable")
+	}
+	var authorizations []string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/git/register", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	mux.Handle("/git/", &cgi.Handler{
+		Path: filepath.Join(execPath, "git-http-backend"),
+		Env:  []string{"GIT_PROJECT_ROOT=" + repoParent, "GIT_HTTP_EXPORT_ALL=1"},
+		Root: "/git",
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		authorizations = append(authorizations, r.Header.Get("Authorization"))
+		mux.ServeHTTP(w, r)
+	}))
+	defer srv.Close()
+
+	if _, err := FetchPipelineSourceWithToken(srv.URL, "https://controller.example", "controller-admin-token",
+		"git@github.com:sparkwing-dev/sparkwing.git", "main", tipSHA, t.TempDir()); err != nil {
+		t.Fatal(err)
+	}
+	for _, authorization := range authorizations {
+		if authorization != "" {
+			t.Fatalf("direct cache received controller authorization %q", authorization)
+		}
+	}
+}
+
+func TestFetchPipelineSourceWithToken_ControllerRedirectCannotCarryBearer(t *testing.T) {
+	var targetRequests int
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		targetRequests++
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Fatalf("redirect target received controller authorization %q", got)
+		}
+		http.Error(w, "unexpected", http.StatusInternalServerError)
+	}))
+	defer target.Close()
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer runner-token" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/git/register") {
+			_, _ = w.Write([]byte(`{"ok":true}`))
+			return
+		}
+		http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+	}))
+	defer controller.Close()
+
+	_, err := FetchPipelineSourceWithToken(controller.URL+"/api/v1/gitcache", controller.URL, "runner-token",
+		"git@github.com:sparkwing-dev/sparkwing.git", "main", strings.Repeat("a", 40), t.TempDir())
+	if err == nil {
+		t.Fatal("controller Git redirect unexpectedly succeeded")
+	}
+	if targetRequests != 0 {
+		t.Fatalf("redirect target requests = %d, want 0", targetRequests)
+	}
+}
+
+func TestFetchPipelineSource_DirectCacheRedirectsStayAtConfiguredOrigin(t *testing.T) {
+	for _, redirectPath := range []string{"register", "git"} {
+		t.Run(redirectPath, func(t *testing.T) {
+			var targetRequests int
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				targetRequests++
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer target.Close()
+			cache := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if redirectPath == "git" && strings.HasSuffix(r.URL.Path, "/git/register") {
+					_, _ = w.Write([]byte(`{"ok":true}`))
+					return
+				}
+				http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+			}))
+			defer cache.Close()
+			_, err := FetchPipelineSourceWithToken(cache.URL, "https://controller.example", "agent-token",
+				"git@github.com:sparkwing-dev/sparkwing.git", "main", strings.Repeat("a", 40), t.TempDir())
+			if err == nil {
+				t.Fatal("direct cache redirect unexpectedly succeeded")
+			}
+			if targetRequests != 0 {
+				t.Fatalf("redirect target requests = %d, want 0", targetRequests)
+			}
+		})
+	}
+}
+
+func TestFetchPipelineWorkspaceSource_RestoresRawGitBlobs(t *testing.T) {
+	repoParent := t.TempDir()
+	_, tipSHA := makeBareRepoWithSparkwing(t, repoParent, "sparkwing", "main")
+	bareRepo := filepath.Join(repoParent, "sparkwing.git")
+	tree, err := exec.Command("git", "-C", bareRepo, "rev-parse", tipSHA+"^{tree}").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit := exec.Command("git", "-C", bareRepo, "commit-tree", strings.TrimSpace(string(tree)), "-p", tipSHA)
+	commit.Env = append(os.Environ(),
+		"GIT_AUTHOR_NAME=Sparkwing", "GIT_AUTHOR_EMAIL=workspace@sparkwing.dev", "GIT_AUTHOR_DATE=2000-01-01T00:00:00Z",
+		"GIT_COMMITTER_NAME=Sparkwing", "GIT_COMMITTER_EMAIL=workspace@sparkwing.dev", "GIT_COMMITTER_DATE=2000-01-01T00:00:00Z",
+	)
+	commit.Stdin = strings.NewReader("sparkwing working-tree snapshot\n")
+	out, err := commit.CombinedOutput()
+	if err != nil {
+		t.Fatalf("commit workspace tree: %v: %s", err, out)
+	}
+	workspaceSHA := strings.TrimSpace(string(out))
+	if out, err := exec.Command("git", "-C", bareRepo, "update-ref", "refs/heads/workspace", workspaceSHA).CombinedOutput(); err != nil {
+		t.Fatalf("publish workspace test ref: %v: %s", err, out)
+	}
+	srv := startGitcacheTestServer(t, repoParent)
+	defer srv.Close()
+
+	sparkwingDir, err := FetchPipelineSourceWithToken(srv.URL, "https://controller.example", "ignored-controller-token",
+		"git@github.com:sparkwing-dev/sparkwing.git", "main", workspaceSHA, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := filepath.Dir(sparkwingDir)
+	for name, want := range map[string]string{"exact.txt": "exact\n", "ident.txt": "$Id$\n"} {
+		got, readErr := os.ReadFile(filepath.Join(root, name))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if string(got) != want {
+			t.Fatalf("%s = %q, want raw blob %q", name, got, want)
+		}
+	}
+}
+
+func TestControllerGitcacheToken_RequiresExactControllerOriginAndPath(t *testing.T) {
+	const token = "controller-admin-token"
+	controllerURL := "https://controller.example:8443/sparkwing"
+	for name, cacheURL := range map[string]string{
+		"foreign origin": "https://attacker.example/api/v1/gitcache",
+		"foreign port":   "https://controller.example/sparkwing/api/v1/gitcache",
+		"suffix path":    "https://controller.example:8443/other/api/v1/gitcache",
+		"query":          "https://controller.example:8443/sparkwing/api/v1/gitcache?target=other",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if got := ControllerGitcacheToken(cacheURL, controllerURL, token); got != "" {
+				t.Fatalf("token = %q, want empty", got)
+			}
+		})
+	}
+	if got := ControllerGitcacheToken(
+		"https://controller.example:8443/sparkwing/api/v1/gitcache/", controllerURL+"/", token,
+	); got != token {
+		t.Fatalf("token = %q, want %q", got, token)
+	}
+}
+
+func TestSeedWorkspaceBundle_DoesNotFollowRedirectWithToken(t *testing.T) {
+	var targetRequests int
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetRequests++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer cache-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+	bundle := filepath.Join(t.TempDir(), "snapshot.bundle")
+	if err := os.WriteFile(bundle, []byte("bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := SeedWorkspaceBundle(context.Background(), source.URL, "cache-token",
+		"https://git.example.com/acme/widgets.git", bundle, strings.Repeat("a", 40))
+	if err == nil || !strings.Contains(err.Error(), "307") {
+		t.Fatalf("error = %v, want redirect rejection", err)
+	}
+	if targetRequests != 0 {
+		t.Fatalf("redirect target requests = %d, want 0", targetRequests)
+	}
+}
+
+func TestUploadBinary_DoesNotFollowRedirectWithToken(t *testing.T) {
+	var targetRequests int
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetRequests++
+		w.WriteHeader(http.StatusCreated)
+	}))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer cache-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+	binary := filepath.Join(t.TempDir(), "pipeline")
+	if err := os.WriteFile(binary, []byte("binary"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	err := UploadBinary(source.URL, "cache-token", "deadbeef-cafebabe", binary)
+	if err == nil || !strings.Contains(err.Error(), "307") {
+		t.Fatalf("error = %v, want redirect rejection", err)
+	}
+	if targetRequests != 0 {
+		t.Fatalf("redirect target requests = %d, want 0", targetRequests)
+	}
+}
+
+func TestTryBinary_DoesNotInstallRedirectedContent(t *testing.T) {
+	var targetRequests int
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		targetRequests++
+		_, _ = w.Write([]byte("redirected executable"))
+	}))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+	dest := filepath.Join(t.TempDir(), "pipeline")
+	err := TryBinary(source.URL, "deadbeef-cafebabe", dest)
+	if err == nil || !strings.Contains(err.Error(), "307") {
+		t.Fatalf("error = %v, want redirect rejection", err)
+	}
+	if targetRequests != 0 {
+		t.Fatalf("redirect target requests = %d, want 0", targetRequests)
+	}
+	if _, err := os.Stat(dest); !os.IsNotExist(err) {
+		t.Fatalf("redirected binary was installed: %v", err)
 	}
 }

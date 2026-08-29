@@ -210,7 +210,11 @@ func handleOneTrigger(ctx context.Context, cli *client.Client, trigger *store.Tr
 		logger.Info("trigger loop: no trigger SHA, falling back to branch-tip clone",
 			"run_id", trigger.ID, "branch", branch)
 	}
-	sparkwingDir, fetchErr := fetchPipelineSourceWithRetry(ctx, opts.GitcacheURL, repoURL, branch, sha, workDir, logger, trigger.ID)
+	fetchSource := fetchPipelineSourceWithRetry
+	if strings.HasPrefix(trigger.TriggerSource, "pipeline-working-tree@") {
+		fetchSource = fetchPipelineWorkspaceSourceWithRetry
+	}
+	sparkwingDir, fetchErr := fetchSource(ctx, opts.GitcacheURL, opts.ControllerURL, opts.Token, repoURL, branch, sha, workDir, logger, trigger.ID)
 	if fetchErr != nil {
 		return awaitHeartbeat(), fmt.Errorf("fetch source: %w", fetchErr)
 	}
@@ -323,7 +327,10 @@ func shipCompileOutput(ctx context.Context, opts TriggerLoopOptions, runID strin
 	}
 }
 
-var fetchSourceFn = bincache.FetchPipelineSource
+var (
+	fetchSourceFn          = bincache.FetchPipelineSourceWithToken
+	fetchWorkspaceSourceFn = bincache.FetchPipelineWorkspaceSourceWithToken
+)
 
 var (
 	triggerFetchMaxAttempts = 3
@@ -332,14 +339,22 @@ var (
 
 const notOurRefSubstr = "not our ref"
 
-func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
+func fetchPipelineSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
+	return fetchPipelineSourceWithRetryFn(ctx, fetchSourceFn, gcURL, controllerURL, token, repoURL, branch, sha, workDir, logger, runID)
+}
+
+func fetchPipelineWorkspaceSourceWithRetry(ctx context.Context, gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
+	return fetchPipelineSourceWithRetryFn(ctx, fetchWorkspaceSourceFn, gcURL, controllerURL, token, repoURL, branch, sha, workDir, logger, runID)
+}
+
+func fetchPipelineSourceWithRetryFn(ctx context.Context, fetch func(string, string, string, string, string, string, string) (string, error), gcURL, controllerURL, token, repoURL, branch, sha, workDir string, logger *slog.Logger, runID string) (string, error) {
 	attempts := triggerFetchMaxAttempts
 	if attempts < 1 {
 		attempts = 1
 	}
 	var lastErr error
 	for i := 0; i < attempts; i++ {
-		sparkwingDir, err := fetchSourceFn(gcURL, repoURL, branch, sha, workDir)
+		sparkwingDir, err := fetch(gcURL, controllerURL, token, repoURL, branch, sha, workDir)
 		if err == nil {
 			return sparkwingDir, nil
 		}
@@ -387,9 +402,13 @@ func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, log
 		return triggerBinary{}, err
 	}
 	compiled := false
+	binaryCacheURL := opts.GitcacheURL
+	if bincache.ControllerGitcacheToken(opts.GitcacheURL, opts.ControllerURL, opts.Token) != "" {
+		binaryCacheURL = ""
+	}
 	lease, published, err := entry.AcquireOrMaterialize(context.Background(), func(tempPath string) error {
-		if opts.GitcacheURL != "" {
-			if fetchErr := bincache.TryBinary(opts.GitcacheURL, key, tempPath); fetchErr == nil {
+		if binaryCacheURL != "" {
+			if fetchErr := bincache.TryBinary(binaryCacheURL, key, tempPath); fetchErr == nil {
 				return nil
 			} else if !errors.Is(fetchErr, bincache.ErrMiss) {
 				logger.Warn("trigger loop: bin cache fetch failed; compiling", "err", fetchErr, "hash", key)
@@ -401,8 +420,8 @@ func triggerBuildOrFetchBinary(sparkwingDir string, opts TriggerLoopOptions, log
 	if err != nil {
 		return triggerBinary{}, err
 	}
-	if published && compiled && opts.GitcacheURL != "" {
-		if err := bincache.UploadBinary(opts.GitcacheURL, opts.Token, key, lease.Path()); err != nil {
+	if published && compiled && binaryCacheURL != "" {
+		if err := bincache.UploadBinary(binaryCacheURL, bincache.CacheToken(), key, lease.Path()); err != nil {
 			logger.Warn("trigger loop: bin cache upload failed", "err", err, "hash", key)
 		}
 	}

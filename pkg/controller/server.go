@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -293,6 +294,9 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/v1/triggers/{id}", requireScope(ScopeTriggersRead, http.HandlerFunc(s.handleGetTrigger)))
 	mux.Handle("POST /api/v1/gitcache/refresh", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleGitcacheRefresh)))
 	mux.Handle("POST /api/v1/gitcache/seed", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheSeed)))
+	mux.Handle("POST /api/v1/gitcache/git/register", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheRegister)))
+	mux.Handle("GET /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheGit)))
+	mux.Handle("POST /api/v1/gitcache/git/{path...}", requireScope(ScopeAdmin, http.HandlerFunc(s.handleGitcacheGit)))
 
 	mux.Handle("POST /api/v1/runs/{id}/cancel", requireScope(ScopeRunsWrite, http.HandlerFunc(s.handleCancelRun)))
 
@@ -403,7 +407,16 @@ func (s *Server) Handler() http.Handler {
 	router.Handle("POST /webhooks/github/{pipeline}", http.HandlerFunc(s.handleGitHubWebhook))
 	router.Handle("/", authed)
 
-	return otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger))
+	return gitcacheStreamDeadlineHandler(otelutil.WrapHandler("sparkwing-controller", withRequestLog(router, s.logger)))
+}
+
+func gitcacheStreamDeadlineHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/gitcache/seed" || strings.HasPrefix(r.URL.Path, "/api/v1/gitcache/git/") {
+			extendGitcacheStreamDeadline(w)
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Serve starts the HTTP listener and blocks until ctx is done. On

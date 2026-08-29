@@ -43,13 +43,17 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 
 	full := r.URL.Query().Get("full") == "1"
 	retryEnv := retryProvenance(src)
+	retrySource := "retry"
+	if strings.HasPrefix(src.TriggerSource, "pipeline-working-tree@") {
+		retrySource = src.TriggerSource
+	}
 
 	newID := newRunID()
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
 		ID:            newID,
 		Pipeline:      src.Pipeline,
 		Args:          src.Args,
-		TriggerSource: "retry",
+		TriggerSource: retrySource,
 		TriggerUser:   "",
 		TriggerEnv:    retryEnv,
 		GitBranch:     src.GitBranch,
@@ -71,7 +75,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		ID:            newID,
 		Pipeline:      src.Pipeline,
 		Status:        "pending",
-		TriggerSource: "retry",
+		TriggerSource: retrySource,
 		GitBranch:     src.GitBranch,
 		GitSHA:        src.GitSHA,
 		Args:          src.Args,
@@ -95,7 +99,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		RunID:    newID,
 		Pipeline: src.Pipeline,
 		Args:     src.Args,
-		Trigger:  sparkwing.TriggerInfo{Source: "retry"},
+		Trigger:  sparkwing.TriggerInfo{Source: retrySource},
 		Git: &sparkwing.Git{
 			Branch:  src.GitBranch,
 			SHA:     src.GitSHA,
@@ -113,7 +117,7 @@ func (s *Server) handleRetry(w http.ResponseWriter, r *http.Request) {
 		"id":             newID,
 		"pipeline":       src.Pipeline,
 		"status":         "pending",
-		"trigger_source": "retry",
+		"trigger_source": retrySource,
 		"git_branch":     src.GitBranch,
 		"git_sha":        src.GitSHA,
 		"started_at":     now.UTC().Format(time.RFC3339Nano),

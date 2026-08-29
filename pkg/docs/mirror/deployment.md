@@ -14,6 +14,7 @@ to a cluster via a profile's controller:
 | Local code | Local machine | `sparkwing run build` |
 | Local working tree at a git ref | Local machine | `sparkwing run build --sw-ref main` |
 | Committed ref at origin | Any cluster | `sparkwing pipeline trigger build --profile dev` |
+| Dirty working tree | Remote runner | `sparkwing pipeline trigger build --profile dev --working-tree` |
 
 The `--profile` flag resolves a **profile** - a named cluster endpoint.
 Every profile with a controller follows the same dispatch flow:
@@ -28,8 +29,13 @@ sparkwing pipeline trigger <pipeline> --profile <profile>
   → runner clones the ref and executes the pipeline
 ```
 
-The runner clones the named ref - your uncommitted working tree never
-leaves the laptop, and the command fails when cwd has no `origin` remote.
+The default clones the named commit and excludes uncommitted files.
+`--working-tree` instead creates a deterministic synthetic commit from tracked
+changes and untracked non-ignored files, uploads its Git bundle before trigger
+admission, and runs that exact snapshot without pushing it to the origin. The
+capture rejects conflicts, submodules, sparse checkouts, and Git content
+filters. It also requires a complete SHA-1 repository. Both modes require an
+`origin` URL as the cache namespace.
 A runner started with `--trigger-runner k8s` instead creates one Kubernetes
 Job per node; that is opt-in and neither Helm chart enables it.
 

@@ -198,8 +198,21 @@ func HandlerFromOptionsWithBundle(opts HandlerOptions, bundleFS fs.FS) http.Hand
 	router.Handle("POST /login/bootstrap",
 		csrfFormMiddleware(rateLimitMiddleware(loginLimiter, bootstrapSubmitHandler(opts))))
 	router.Handle("POST /logout", csrfFormMiddleware(logoutHandler(opts)))
+	if opts.ControllerURL != "" {
+		router.Handle("/api/v1/gitcache/", gitcacheStreamHandler(controllerProxy(opts.ControllerURL, "", false)))
+	}
 	router.Handle("/", sessionAuthMiddleware(opts, bundleFS, authedMux))
 	return router
+}
+
+func gitcacheStreamHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deadline := time.Now().Add(30 * time.Minute)
+		controller := http.NewResponseController(w)
+		_ = controller.SetReadDeadline(deadline)
+		_ = controller.SetWriteDeadline(deadline)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func authControllerURL(opts HandlerOptions) string {
@@ -328,9 +341,9 @@ func controllerProxy(controllerURL, token string, loginRequired bool) http.Handl
 			pr.SetURL(u)
 			pr.Out.Header.Del("Cookie")
 			pr.Out.Header.Del(csrfHeaderName)
+			pr.Out.Header.Del("Proxy-Authorization")
 			if loginRequired {
 				pr.Out.Header.Del("Authorization")
-				pr.Out.Header.Del("Proxy-Authorization")
 			}
 			if token != "" {
 				pr.Out.Header.Set("Authorization", "Bearer "+token)

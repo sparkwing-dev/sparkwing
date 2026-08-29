@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -335,7 +336,7 @@ func triggerSource(prefix string) string {
 	return prefix
 }
 
-func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf runFlags, passthrough []string) (*client.TriggerResponse, error) {
+func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf runFlags, passthrough []string, workingTree bool) (*client.TriggerResponse, error) {
 	args := collectPipelineArgs(passthrough)
 	var userName string
 	if u, err := user.Current(); err == nil {
@@ -356,6 +357,16 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		if err != nil {
 			return nil, fmt.Errorf("pipeline trigger %q: invalid git origin: %w", pipelineName, err)
 		}
+	}
+	var snapshot *worktreeSnapshot
+	if workingTree {
+		var err error
+		snapshot, err = captureWorktreeSnapshot(context.Background(), ".")
+		if err != nil {
+			return nil, fmt.Errorf("pipeline trigger %q: %w", pipelineName, err)
+		}
+		defer func() { _ = snapshot.close() }()
+		sha = snapshot.SHA
 	}
 	envMap := map[string]string{}
 	if repoSlug != "" {
@@ -408,7 +419,15 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		},
 	}
 
-	if repoURL != "" {
+	if snapshot != nil {
+		cacheURL := bincache.CacheURL()
+		seedErr := seedWorkingTreeSnapshot(prof, cacheURL, repoURL, snapshot, 2*time.Minute, 15*time.Minute)
+		if seedErr != nil {
+			return nil, fmt.Errorf("pipeline trigger %q: upload working-tree snapshot: %w", pipelineName, seedErr)
+		}
+		fmt.Fprintf(os.Stderr, "working tree: base %s snapshot %s (%d files, %s)\n",
+			snapshot.BaseSHA, snapshot.SHA, snapshot.FileCount, snapshotBytes(snapshot.Size))
+	} else if repoURL != "" {
 		discoverCtx, dCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		services, derr := discovery.ServicesFor(discoverCtx, prof.ControllerURL(), prof.ControllerToken())
 		dCancel()
@@ -421,6 +440,28 @@ func createRemoteTrigger(prof *profile.Profile, pipelineName, source string, wf 
 		return nil, fmt.Errorf("create trigger on %s: %w", prof.Name, err)
 	}
 	return resp, nil
+}
+
+func seedWorkingTreeSnapshot(prof *profile.Profile, cacheURL, repoURL string, snapshot *worktreeSnapshot, directTimeout, controllerTimeout time.Duration) error {
+	var directErr error
+	if cacheURL != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), directTimeout)
+		directErr = bincache.SeedWorkspaceBundle(ctx, cacheURL, bincache.CacheToken(), repoURL, snapshot.BundlePath, snapshot.SHA)
+		cancel()
+		if directErr == nil {
+			return nil
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), controllerTimeout)
+	controllerErr := bincache.SeedWorkspaceBundleViaController(ctx, prof.ControllerURL(), prof.ControllerToken(), repoURL, snapshot.BundlePath, snapshot.SHA)
+	cancel()
+	if controllerErr == nil {
+		return nil
+	}
+	if directErr != nil {
+		return errors.Join(fmt.Errorf("direct cache: %w", directErr), fmt.Errorf("controller proxy: %w", controllerErr))
+	}
+	return controllerErr
 }
 
 func seedTriggerSource(prof *profile.Profile, cacheURL string, discoveryErr error, repoURL, sha string) {

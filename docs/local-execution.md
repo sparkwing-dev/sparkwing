@@ -305,14 +305,13 @@ because the box paid for it.
 
 ```
 Your laptop:
-  1. sparkwing pipeline trigger tarballs .sparkwing/ + working tree
-     (incremental sync)
-  2. sparkwing POSTs the upload + a trigger to the profile's controller
+  1. sparkwing resolves the origin, branch, and commit
+  2. sparkwing refreshes or seeds that commit, then POSTs the trigger
 
-Cluster:
+Remote runner:
   3. Controller records the trigger; a polling runner claims it
-  4. Runner clones the upload, compiles, runs the pipeline
-  5. Your laptop streams logs back via the logs service
+  4. Runner clones the exact commit, compiles, and runs the pipeline
+  5. Runner streams logs through the logs service
 ```
 
 The controller is the gatekeeper for prod-side execution: only the
@@ -326,6 +325,45 @@ reaches a terminal state -- full log streaming when the profile defines a
 logs URL, node-status updates from the controller otherwise. Pass
 `--detach` to return as soon as the trigger is registered without
 following.
+
+Add `--working-tree` to run current tracked edits and untracked non-ignored
+files remotely without committing or pushing them. Sparkwing freezes those
+bytes as a synthetic Git commit, requires the bundle seed to finish before it
+admits the trigger, and prints the base SHA, snapshot SHA, file count, and
+bundle size. The source checkout's HEAD, refs, index, and object database stay
+unchanged. The bundle limit is 500 MiB.
+The remote checkout is clean and detached at the synthetic SHA; file contents
+match the laptop, but staged-versus-unstaged state is intentionally flattened.
+Capture requires a complete SHA-1 repository; shallow and SHA-256 repositories
+fail before upload. Workspace seed refs are capped at 128 distinct snapshots
+per repository; a full cache rejects a new snapshot before trigger admission.
+
+An off-cluster machine can claim only these triggers and compile them locally:
+
+```bash
+SPARKWING_AGENT_TOKEN=... sparkwing-runner runner \
+  --controller=https://sparkwing.example.com \
+  --logs=https://sparkwing.example.com \
+  --gitcache=https://sparkwing.example.com/api/v1/gitcache \
+  --also-claim-triggers --claim-nodes=false \
+  --trigger-sources=pipeline-working-tree@laptop-hostname \
+  --metrics-addr= --max-claims-before-restart=0
+```
+
+The source proxy and trigger claim require the current admin-capable runner
+token. Login-enabled dashboard ingress passes this machine bearer directly to
+the controller without a browser session or CSRF token. The process opens no
+listener. A private direct cache URL can replace the controller proxy when the
+machines already share a LAN, VPN, or tailnet. Direct cache binary and seed
+writes use only `SPARKWING_CACHE_TOKEN`; the agent/controller token is never
+sent to that raw cache. Raw Git reads have no cache-level auth, so keep a direct
+cache on a trusted private network. Upload and pack streams have
+a 30-minute server window; the CLI gives a direct upload two minutes before a
+fresh 15-minute controller fallback. Manual retries and same-repository
+`RunAndAwait` children retain the original `pipeline-working-tree@<host>`
+placement source.
+Do not leave an unrestricted cluster runner racing for the same trigger source
+when testing deterministic placement.
 
 A follow exits on the run's outcome, the same way a local `sparkwing run`
 does: 0 when the run succeeded, 1 when it failed or was cancelled, with the

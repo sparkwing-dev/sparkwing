@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,6 +103,48 @@ func TestRetry_CreatesNewTriggerWithSameInputs(t *testing.T) {
 	sum := sha256.Sum256(src.PlanSnapshot)
 	if got, want := trig.TriggerEnv[retryprovenance.PlanHashKey], fmt.Sprintf("sha256:%x", sum); got != want {
 		t.Errorf("retry plan hash=%q want %q", got, want)
+	}
+}
+
+func TestRetry_WorkingTreeRunRetainsDesktopClaimSource(t *testing.T) {
+	dir := t.TempDir()
+	st, err := store.Open(filepath.Join(dir, "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	source := "pipeline-working-tree@moonborn.local"
+	if err := st.CreateRun(ctx, store.Run{
+		ID: "workspace-run", Pipeline: "build", Status: "failed", TriggerSource: source,
+		GitSHA: strings.Repeat("a", 40), RepoURL: "https://git.example.com/acme/widgets.git", StartedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(controller.New(st, nil).Handler())
+	defer srv.Close()
+	resp, err := http.Post(srv.URL+"/api/v1/runs/workspace-run/retry", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	id, _ := body["id"].(string)
+	trigger, err := st.GetTrigger(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trigger.TriggerSource != source || body["trigger_source"] != source {
+		t.Fatalf("retry source = trigger %q response %v, want %q", trigger.TriggerSource, body["trigger_source"], source)
+	}
+	if trigger.RetryOf != "workspace-run" {
+		t.Fatalf("retry_of = %q", trigger.RetryOf)
 	}
 }
 

@@ -52,7 +52,8 @@ func TestLocalImplicitAwaitRetainsParentProvenanceWithoutForcingRegistryLookup(t
 	t.Cleanup(func() { _ = st.Close() })
 	if err := st.CreateRun(ctx, store.Run{
 		ID: "parent", Pipeline: "release", Status: "running",
-		Repo: "sparkwing-dev/sparkwing", RepoURL: "git@github.com:sparkwing-dev/sparkwing.git",
+		TriggerSource: "pipeline-working-tree@laptop.local",
+		Repo:          "sparkwing-dev/sparkwing", RepoURL: "git@github.com:sparkwing-dev/sparkwing.git",
 		GithubOwner: "sparkwing-dev", GithubRepo: "sparkwing",
 	}); err != nil {
 		t.Fatal(err)
@@ -74,6 +75,9 @@ func TestLocalImplicitAwaitRetainsParentProvenanceWithoutForcingRegistryLookup(t
 	}
 	if !trigger.RepoInherited {
 		t.Fatal("RepoInherited = false, want true")
+	}
+	if trigger.TriggerSource != "pipeline-working-tree@laptop.local" {
+		t.Fatalf("TriggerSource = %q, want parent workspace placement", trigger.TriggerSource)
 	}
 	if len(env) != 1 || env["CALLER_VALUE"] != "unchanged" {
 		t.Fatalf("caller trigger env mutated: %#v", env)

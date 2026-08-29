@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
 
+	"github.com/sparkwing-dev/sparkwing/internal/bincache"
 	"github.com/sparkwing-dev/sparkwing/internal/otelutil"
 	"github.com/sparkwing-dev/sparkwing/internal/sourceurl"
 )
@@ -1298,6 +1299,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "sha query param must be a 40-64 character hex object id", http.StatusBadRequest)
 		return
 	}
+	workspace := r.URL.Query().Get("workspace") == "1"
 
 	tmpBundle, err := os.CreateTemp("", "seed-*.bundle")
 	if err != nil {
@@ -1321,7 +1323,11 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	defer lock.Unlock()
 
 	bareRepo := filepath.Join(repoDir, hash+".git")
-	seedRef := "refs/sparkwing-seed/" + sha
+	bundleRef := bincache.SeedRef(sha)
+	seedRef := bundleRef
+	if workspace {
+		seedRef = "refs/sparkwing-workspace-incoming/" + sha
+	}
 
 	if _, err := os.Stat(bareRepo); os.IsNotExist(err) {
 		log.Printf("seed: creating bare repo from bundle for %s at %s", hash, sha[:8])
@@ -1329,7 +1335,7 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, fmt.Sprintf("init bare repo failed: %s\n%s", err, out), http.StatusInternalServerError)
 			return
 		}
-		if out, err := gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), seedRef+":"+seedRef); err != nil {
+		if out, err := gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), bundleRef+":"+seedRef); err != nil {
 			_ = os.RemoveAll(bareRepo)
 			http.Error(w, fmt.Sprintf("fetch seed ref failed: %s\n%s", err, out), http.StatusBadRequest)
 			return
@@ -1339,20 +1345,66 @@ func handleSyncSeed(w http.ResponseWriter, r *http.Request) {
 	} else {
 		enableSHAFetch(bareRepo)
 		log.Printf("seed: updating bare repo from bundle for %s at %s", hash, sha[:8])
-		if out, err := gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), seedRef+":"+seedRef); err != nil {
+		if out, err := gitCmd("-C", bareRepo, "fetch", tmpBundle.Name(), bundleRef+":"+seedRef); err != nil {
 			http.Error(w, fmt.Sprintf("fetch seed ref failed: %s\n%s", err, out), http.StatusBadRequest)
 			return
 		}
 	}
-	pruneUnreachableSeedObjects(bareRepo)
 	if out, err := gitCmd("-C", bareRepo, "cat-file", "-e", sha+"^{commit}"); err != nil {
+		if workspace {
+			_, _ = gitCmd("-C", bareRepo, "update-ref", "-d", seedRef)
+			pruneUnreachableSeedObjects(bareRepo)
+		}
 		http.Error(w, fmt.Sprintf("seeded commit missing: %s\n%s", err, out), http.StatusBadRequest)
 		return
 	}
+	if workspace {
+		if err := retainWorkspaceSeed(bareRepo, seedRef, sha, 128); err != nil {
+			_, _ = gitCmd("-C", bareRepo, "update-ref", "-d", seedRef)
+			pruneUnreachableSeedObjects(bareRepo)
+			http.Error(w, "retain workspace seed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	pruneUnreachableSeedObjects(bareRepo)
 
 	log.Printf("seed: %s seeded %s (%d bytes)", hash, sha[:8], size)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "size": size})
+}
+
+func retainWorkspaceSeed(bareRepo, seedRef, sha string, limit int) error {
+	out, err := gitCmd("-C", bareRepo, "for-each-ref", "--format=%(refname)", "--sort=-refname", "refs/sparkwing-workspace/")
+	if err != nil {
+		return fmt.Errorf("list workspace refs: %w: %s", err, out)
+	}
+	refs := strings.Fields(out)
+	kept := refs[:0]
+	var duplicates []string
+	for _, existing := range refs {
+		if strings.HasSuffix(existing, "/"+sha) {
+			duplicates = append(duplicates, existing)
+			continue
+		}
+		kept = append(kept, existing)
+	}
+	if len(kept) >= limit {
+		_, _ = gitCmd("-C", bareRepo, "update-ref", "-d", seedRef)
+		return fmt.Errorf("workspace ref limit %d reached", limit)
+	}
+	ref := fmt.Sprintf("refs/sparkwing-workspace/%020d/%s", time.Now().UTC().UnixNano(), sha)
+	if out, err := gitCmd("-C", bareRepo, "update-ref", ref, sha); err != nil {
+		return fmt.Errorf("create workspace ref: %w: %s", err, out)
+	}
+	for _, duplicate := range duplicates {
+		if deleted, deleteErr := gitCmd("-C", bareRepo, "update-ref", "-d", duplicate); deleteErr != nil {
+			return fmt.Errorf("refresh workspace ref %s: %w: %s", duplicate, deleteErr, deleted)
+		}
+	}
+	if out, err := gitCmd("-C", bareRepo, "update-ref", "-d", seedRef); err != nil {
+		return fmt.Errorf("remove transient seed ref: %w: %s", err, out)
+	}
+	return nil
 }
 
 func pruneUnreachableSeedObjects(bareRepo string) {

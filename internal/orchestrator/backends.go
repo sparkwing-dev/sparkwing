@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/discovery"
@@ -398,6 +399,9 @@ func (l localState) EnqueueTriggerWithEnv(
 	} else if parentRunID != "" {
 		parent, err := l.st.GetRun(ctx, parentRunID)
 		if err == nil && parent != nil {
+			if strings.HasPrefix(parent.TriggerSource, "pipeline-working-tree@") {
+				tg.TriggerSource = parent.TriggerSource
+			}
 			tg.Repo = parent.Repo
 			tg.RepoURL = parent.RepoURL
 			tg.GitBranch = firstNonEmptyStr(branch, parent.GitBranch)

@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sparkwing-dev/sparkwing/internal/profile"
 	"github.com/sparkwing-dev/sparkwing/pkg/controller/client"
 	"github.com/sparkwing-dev/sparkwing/pkg/store"
 )
@@ -28,6 +29,7 @@ type triggerSpy struct {
 	reqs           []string
 	bodies         [][]byte
 	failRefresh    bool
+	failSeed       bool
 	seedBodyBytes  int
 	seedRepoValues []string
 	seedSHAValues  []string
@@ -76,6 +78,10 @@ func (s *triggerSpy) handler() http.Handler {
 			s.seedRepoValues = append(s.seedRepoValues, r.URL.Query().Get("repo"))
 			s.seedSHAValues = append(s.seedSHAValues, r.URL.Query().Get("sha"))
 			s.mu.Unlock()
+			if s.failSeed {
+				http.Error(w, "seed failed", http.StatusBadGateway)
+				return
+			}
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"ok":true}`))
 		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/triggers":
@@ -156,6 +162,21 @@ func TestPipelineTrigger_MissingProfile(t *testing.T) {
 	}
 	if code := exitCodeFor(err); code != 2 {
 		t.Errorf("exit code = %d, want 2", code)
+	}
+}
+
+func TestPipelineTrigger_DelimiterProtectsWorkingTreePipelineArgument(t *testing.T) {
+	pipeline, profileName, detach, workingTree, help, passthrough, err := parseTriggerFlags([]string{
+		"release", "--profile", "prod", "--", "--working-tree", "--detach",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pipeline != "release" || profileName != "prod" || detach || workingTree || help {
+		t.Fatalf("parsed controls = %q %q detach=%t workingTree=%t help=%t", pipeline, profileName, detach, workingTree, help)
+	}
+	if !slices.Equal(passthrough, []string{"--working-tree", "--detach"}) {
+		t.Fatalf("passthrough = %v", passthrough)
 	}
 }
 
@@ -304,6 +325,144 @@ func TestPipelineTrigger_SeedsControllerGitcacheWhenRefreshFails(t *testing.T) {
 	}
 	if !slices.Contains(reqs, "POST /api/v1/gitcache/seed") {
 		t.Fatalf("expected seed fallback; got %v", reqs)
+	}
+}
+
+func TestPipelineTrigger_WorkingTreeSeedsBeforeAdmission(t *testing.T) {
+	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	spy := &triggerSpy{}
+	srv := httptest.NewServer(spy.handler())
+	defer srv.Close()
+	writeTriggerProfiles(t, srv.URL)
+	origin := "https://git.example.com/acme/widgets.git"
+	withGitCheckout(t, origin, func() {
+		base := strings.TrimSpace(runSnapshotGit(t, ".", "rev-parse", "HEAD"))
+		if err := os.WriteFile("README.md", []byte("dirty\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile("untracked.txt", []byte("local\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		stderr := captureStderr(t, func() {
+			_ = captureStdout(t, func() {
+				if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--working-tree", "--detach"}); err != nil {
+					t.Fatalf("trigger: %v", err)
+				}
+			})
+		})
+		if !strings.Contains(stderr, "working tree: base "+base+" snapshot ") {
+			t.Fatalf("stderr = %q", stderr)
+		}
+	})
+
+	reqs := spy.requests()
+	seedAt, triggerAt := slices.Index(reqs, "POST /api/v1/gitcache/seed"), slices.Index(reqs, "POST /api/v1/triggers")
+	if seedAt < 0 || triggerAt < 0 || seedAt >= triggerAt {
+		t.Fatalf("seed must finish before trigger admission: %v", reqs)
+	}
+	if slices.Contains(reqs, "POST /api/v1/gitcache/refresh") {
+		t.Fatalf("working-tree trigger must not refresh the origin: %v", reqs)
+	}
+	_, _, shas := spy.seedStats()
+	if len(shas) != 1 {
+		t.Fatalf("seed shas = %v", shas)
+	}
+	var req client.TriggerRequest
+	if err := json.Unmarshal(spy.bodies[0], &req); err != nil {
+		t.Fatal(err)
+	}
+	if req.Git.SHA != shas[0] {
+		t.Fatalf("trigger SHA = %q, seed SHA = %q", req.Git.SHA, shas[0])
+	}
+	if _, ok := req.Args["working-tree"]; ok {
+		t.Fatalf("working-tree flag leaked into pipeline args: %v", req.Args)
+	}
+	if !strings.HasPrefix(req.Trigger.Source, "pipeline-working-tree@") {
+		t.Fatalf("trigger source = %q", req.Trigger.Source)
+	}
+}
+
+func TestPipelineTrigger_WorkingTreeSeedFailureDoesNotAdmitTrigger(t *testing.T) {
+	t.Setenv("SPARKWING_GITCACHE_URL", "")
+	spy := &triggerSpy{failSeed: true}
+	srv := httptest.NewServer(spy.handler())
+	defer srv.Close()
+	writeTriggerProfiles(t, srv.URL)
+	withGitCheckout(t, "https://git.example.com/acme/widgets.git", func() {
+		if err := os.WriteFile("local.txt", []byte("dirty\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		err := runPipelineTrigger([]string{"release", "--profile", "prod", "--working-tree", "--detach"})
+		if err == nil || !strings.Contains(err.Error(), "upload working-tree snapshot") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	if slices.Contains(spy.requests(), "POST /api/v1/triggers") {
+		t.Fatalf("failed seed admitted trigger: %v", spy.requests())
+	}
+}
+
+func TestPipelineTrigger_WorkingTreeFallsBackFromDirectCacheToController(t *testing.T) {
+	var directRequests int
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directRequests++
+		http.Error(w, "direct unavailable", http.StatusBadGateway)
+	}))
+	defer direct.Close()
+	t.Setenv("SPARKWING_GITCACHE_URL", direct.URL)
+
+	spy := &triggerSpy{}
+	controllerServer := httptest.NewServer(spy.handler())
+	defer controllerServer.Close()
+	writeTriggerProfiles(t, controllerServer.URL)
+	withGitCheckout(t, "https://git.example.com/acme/widgets.git", func() {
+		if err := os.WriteFile("local.txt", []byte("dirty\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_ = captureStdout(t, func() {
+			if err := runPipelineTrigger([]string{"release", "--profile", "prod", "--working-tree", "--detach"}); err != nil {
+				t.Fatalf("trigger: %v", err)
+			}
+		})
+	})
+	if directRequests != 1 {
+		t.Fatalf("direct seed requests = %d, want 1", directRequests)
+	}
+	reqs := spy.requests()
+	seedAt, triggerAt := slices.Index(reqs, "POST /api/v1/gitcache/seed"), slices.Index(reqs, "POST /api/v1/triggers")
+	if seedAt < 0 || triggerAt < 0 || seedAt >= triggerAt {
+		t.Fatalf("controller fallback must seed before admission: %v", reqs)
+	}
+}
+
+func TestSeedWorkingTreeSnapshot_ControllerFallbackGetsFreshDeadline(t *testing.T) {
+	direct := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		time.Sleep(60 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer direct.Close()
+	var controllerRequests int
+	controller := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		controllerRequests++
+		if r.URL.Query().Get("workspace") != "1" {
+			http.Error(w, "missing workspace marker", http.StatusBadRequest)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer controller.Close()
+	bundle := filepath.Join(t.TempDir(), "snapshot.bundle")
+	if err := os.WriteFile(bundle, []byte("bundle"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	snapshot := &worktreeSnapshot{BundlePath: bundle, SHA: strings.Repeat("a", 40)}
+	prof := &profile.Profile{Controller: &profile.ControllerSpec{URL: controller.URL, Token: "runner-token"}}
+	if err := seedWorkingTreeSnapshot(prof, direct.URL, "https://git.example.com/acme/widgets.git", snapshot, 20*time.Millisecond, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	if controllerRequests != 1 {
+		t.Fatalf("controller fallback requests = %d, want 1", controllerRequests)
 	}
 }
 
@@ -542,7 +701,7 @@ func withGitCheckout(t *testing.T, origin string, fn func()) {
 	dir := t.TempDir()
 	run := func(args ...string) {
 		t.Helper()
-		cmd := exec.Command("git", args...)
+		cmd := exec.Command("git", append([]string{"-c", "commit.gpgSign=false"}, args...)...)
 		cmd.Dir = dir
 		out, err := cmd.CombinedOutput()
 		if err != nil {

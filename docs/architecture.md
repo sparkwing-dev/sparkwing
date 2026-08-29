@@ -96,7 +96,8 @@ clones over HTTP so runners do not need SSH keys.
 
 Also stores:
 
-- **Code uploads**: tarballs from `sparkwing pipeline trigger` invocations
+- **Source snapshots**: SHA-scoped Git bundles for unpublished commits and
+  opt-in working-tree triggers
 - **Artifacts**: job output files
 - **Binary cache**: compiled pipeline binaries
 - **Dependency cache**: saved / restored by pipelines (gems, node_modules, etc.)
@@ -171,8 +172,8 @@ Dashboard ─────► Logs              live log stream (SSE)
 
 Cache ─────────► GitHub            git fetch (background, every 30s)
 
-sparkwing CLI ──────► Cache             POST /upload (code tarball, incremental sync)
-                                   POST /sync/negotiate (ancestor negotiation)
+sparkwing CLI ──────► Cache             refresh or seed an exact Git commit
+sparkwing CLI ──────► Controller        seed/query source through authenticated proxy
 ```
 
 ### Network policies
@@ -256,17 +257,25 @@ sparkwing run build-deploy
 ```
 sparkwing pipeline trigger build-deploy --profile <cluster>
   1. sparkwing resolves the profile -> controller URL
-  2. sparkwing uploads code tarball to cache (incremental when possible)
-  3. sparkwing POST /trigger to controller (with upload_ref)
+  2. sparkwing refreshes or seeds the exact Git commit in the cache
+  3. sparkwing POSTs the trigger with that commit SHA
   4. controller enqueues run
   5. a runner polls the controller and claims the run
-  6. runner downloads code from cache
+  6. runner clones the exact SHA from cache
   7. runner compiles and runs the pipeline binary
   8. runner streams logs to logs service
   9. runner sends periodic heartbeats to controller to hold its claim
   10. runner reports completion to controller
-  11. sparkwing run polls the controller for run state and displays result
+  11. sparkwing pipeline trigger follows controller state and displays result
 ```
+
+`--working-tree` replaces step 2 with a mandatory synthetic-commit bundle
+seed. The trigger is not admitted if that upload fails. Off-cluster runners can
+read source through the controller's authenticated Git proxy, so they need only
+outbound HTTPS; a private direct cache remains an alternative, uses only
+`SPARKWING_CACHE_TOKEN` for writes, and never receives the controller bearer.
+Login-enabled dashboard ingress exposes the
+same machine-bearer proxy path without browser-session authentication.
 
 ### Git Push Trigger
 

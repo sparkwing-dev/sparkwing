@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -395,6 +396,43 @@ func TestS3CAS_EnqueueTriggerWithEnvStoresTriggerEnv(t *testing.T) {
 	}
 	if trigger.TriggerEnv["CHILD_BRANCH"] != "main" {
 		t.Fatalf("trigger env CHILD_BRANCH = %q, want main", trigger.TriggerEnv["CHILD_BRANCH"])
+	}
+}
+
+func TestS3CAS_EnqueueTriggerInheritsWorkspacePlacement(t *testing.T) {
+	b := newCASBackend(t)
+	ctx := context.Background()
+	if err := b.CreateRun(ctx, store.Run{
+		ID: "parent-workspace", Pipeline: "parent", Status: "running",
+		TriggerSource: "pipeline-working-tree@laptop.local",
+		GitSHA:        strings.Repeat("a", 40),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	id, err := b.EnqueueTrigger(ctx, "child", nil, "parent-workspace", "node", "", "await-pipeline", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	trigger, err := b.GetTrigger(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trigger.TriggerSource != "pipeline-working-tree@laptop.local" {
+		t.Fatalf("TriggerSource = %q, want parent workspace placement", trigger.TriggerSource)
+	}
+	if trigger.GitSHA != strings.Repeat("a", 40) {
+		t.Fatalf("GitSHA = %q, want inherited workspace SHA", trigger.GitSHA)
+	}
+	crossID, err := b.EnqueueTrigger(ctx, "other-child", nil, "parent-workspace", "other-node", "", "await-pipeline", "", "other/repo", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cross, err := b.GetTrigger(ctx, crossID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cross.TriggerSource != "await-pipeline" || cross.GitSHA != "" {
+		t.Fatalf("cross-repo trigger inherited workspace placement: source=%q sha=%q", cross.TriggerSource, cross.GitSHA)
 	}
 }
 

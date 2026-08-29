@@ -1002,6 +1002,12 @@ typed Arg, e.g. 'sparkwing pipeline trigger release --profile
 prod --version v1.2.3' passes --version through to the trigger
 payload -- same shape as 'sparkwing run'.
 
+--working-tree freezes tracked changes and untracked non-ignored
+files into an immutable Git snapshot, uploads it before admission,
+and runs that exact snapshot without pushing to the origin. It
+requires a complete SHA-1 repository; shallow and SHA-256 checkouts
+fail before upload.
+
 Requires a profile with controller: set. For local execution
 against a profile's storage, use 'sparkwing run --profile X'.
 
@@ -1015,6 +1021,7 @@ against a profile's storage, use 'sparkwing run --profile X'.
 |---|---|
 | `--profile NAME` | Profile (from ~/.config/sparkwing/profiles.yaml) whose controller runs the pipeline (required) |
 | `--detach` | Return once the trigger is registered (print the run id); don't follow |
+| `--working-tree` | Run tracked changes and untracked non-ignored files from an immutable remote snapshot |
 
 ### Examples
 
@@ -1024,4 +1031,7 @@ sparkwing pipeline trigger release --profile prod --version v1.2.3
 
 # Fire-and-forget; print run id and exit
 sparkwing pipeline trigger release --profile prod --detach
+
+# Run the current dirty tree remotely
+sparkwing pipeline trigger test --profile gaming --working-tree
 ```

@@ -31,6 +31,11 @@ var ErrMiss = errors.New("remote binary cache: miss")
 
 var gitObjectRE = regexp.MustCompile(`^[0-9a-fA-F]{40,64}$`)
 
+// SeedRef returns the only ref namespace accepted by the cache seed importer.
+func SeedRef(sha string) string {
+	return "refs/sparkwing-seed/" + sha
+}
+
 func CacheURL() string {
 	return strings.TrimRight(os.Getenv("SPARKWING_GITCACHE_URL"), "/")
 }
@@ -44,7 +49,12 @@ func TryBinary(gcURL, hash, dest string) error {
 	if err != nil {
 		return err
 	}
-	cli := &http.Client{Timeout: 30 * time.Second}
+	cli := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := cli.Do(req)
 	if err != nil {
 		return err
@@ -88,7 +98,12 @@ func UploadBinary(gcURL, token, hash, src string) error {
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	cli := &http.Client{Timeout: 60 * time.Second}
+	cli := &http.Client{
+		Timeout: 60 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := cli.Do(req)
 	if err != nil {
 		return err
@@ -102,6 +117,50 @@ func UploadBinary(gcURL, token, hash, src string) error {
 }
 
 func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
+	return fetchPipelineSource(gcURL, "", repoSSH, branch, sha, parentDir, false)
+}
+
+// FetchPipelineSourceWithToken authenticates cache reads only when gcURL is the controller's proxy.
+func FetchPipelineSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
+	bearer := ControllerGitcacheToken(gcURL, controllerURL, token)
+	return fetchPipelineSource(gcURL, bearer, repoSSH, branch, sha, parentDir, false)
+}
+
+// FetchPipelineWorkspaceSourceWithToken materializes workspace blobs without checkout transformations.
+func FetchPipelineWorkspaceSourceWithToken(gcURL, controllerURL, token, repoSSH, branch, sha, parentDir string) (sparkwingDir string, err error) {
+	bearer := ControllerGitcacheToken(gcURL, controllerURL, token)
+	return fetchPipelineSource(gcURL, bearer, repoSSH, branch, sha, parentDir, true)
+}
+
+// ControllerGitcacheToken returns token only for the controller's exact cache-proxy origin and path.
+func ControllerGitcacheToken(gcURL, controllerURL, token string) string {
+	if token == "" {
+		return ""
+	}
+	cache, cacheErr := parseCacheEndpoint(gcURL)
+	controller, controllerErr := parseCacheEndpoint(controllerURL)
+	if cacheErr != nil || controllerErr != nil ||
+		!strings.EqualFold(cache.Scheme, controller.Scheme) ||
+		!strings.EqualFold(cache.Host, controller.Host) {
+		return ""
+	}
+	wantPath := strings.TrimRight(controller.Path, "/") + "/api/v1/gitcache"
+	if strings.TrimRight(cache.Path, "/") != wantPath {
+		return ""
+	}
+	return token
+}
+
+func parseCacheEndpoint(raw string) (*neturl.URL, error) {
+	u, err := neturl.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" ||
+		u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
+		return nil, errors.New("invalid cache endpoint")
+	}
+	return u, nil
+}
+
+func fetchPipelineSource(gcURL, token, repoSSH, branch, sha, parentDir string, rawWorkspace bool) (sparkwingDir string, err error) {
 	if gcURL == "" {
 		return "", fmt.Errorf("FetchPipelineSource: SPARKWING_GITCACHE_URL not set")
 	}
@@ -117,7 +176,7 @@ func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwi
 		return "", fmt.Errorf("FetchPipelineSource: cannot derive repo name from %q", repoSSH)
 	}
 
-	if err := registerRepoWithCache(gcURL, name, repoSSH); err != nil {
+	if err := registerRepoWithCache(gcURL, token, name, repoSSH); err != nil {
 		return "", fmt.Errorf("git register: %w", err)
 	}
 
@@ -131,11 +190,20 @@ func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwi
 	}
 
 	if sha != "" {
-		if err := fetchExactSHA(cloneURL, sha, workTree); err != nil {
+		if err := fetchExactSHA(gcURL, cloneURL, token, sha, workTree); err != nil {
 			return "", err
 		}
+		workspaceCommit, inspectErr := isWorkspaceSnapshotCommit(workTree, sha)
+		if inspectErr != nil {
+			return "", inspectErr
+		}
+		if rawWorkspace || workspaceCommit {
+			if err := restoreRawCheckout(workTree, sha); err != nil {
+				return "", err
+			}
+		}
 	} else {
-		if err := shallowCloneBranch(cloneURL, branch, workTree); err != nil {
+		if err := shallowCloneBranch(gcURL, cloneURL, token, branch, workTree); err != nil {
 			return "", err
 		}
 	}
@@ -147,21 +215,21 @@ func FetchPipelineSource(gcURL, repoSSH, branch, sha, parentDir string) (sparkwi
 	return "", fmt.Errorf("cloned tree has no .sparkwing directory under %s", workTree)
 }
 
-func fetchExactSHA(cloneURL, sha, dest string) error {
+func fetchExactSHA(gcURL, cloneURL, token, sha, dest string) error {
 	if err := os.MkdirAll(dest, 0o755); err != nil {
 		return err
 	}
 	runIn := func(args ...string) ([]byte, error) {
 		cmd := exec.Command("git", args...)
 		cmd.Dir = dest
-		cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+		cmd.Env = gitHTTPEnv(gcURL, token)
 		return cmd.CombinedOutput()
 	}
 	steps := [][]string{
 		{"init", "--quiet"},
 		{"remote", "add", "origin", cloneURL},
 		{"fetch", "--depth", "1", "origin", sha},
-		{"checkout", "--quiet", "FETCH_HEAD"},
+		{"-c", "core.attributesFile=/dev/null", "checkout", "--quiet", "FETCH_HEAD"},
 	}
 	for _, step := range steps {
 		if out, err := runIn(step...); err != nil {
@@ -172,7 +240,78 @@ func fetchExactSHA(cloneURL, sha, dest string) error {
 	return nil
 }
 
-func shallowCloneBranch(cloneURL, branch, dest string) error {
+func isWorkspaceSnapshotCommit(repoDir, sha string) (bool, error) {
+	out, err := exec.Command("git", "-C", repoDir, "cat-file", "commit", sha).Output()
+	if err != nil {
+		return false, fmt.Errorf("inspect workspace commit: %w", err)
+	}
+	header, message, ok := bytes.Cut(out, []byte("\n\n"))
+	if !ok {
+		return false, fmt.Errorf("inspect workspace commit: malformed identity")
+	}
+	parents := 0
+	author := false
+	for _, line := range bytes.Split(header, []byte{'\n'}) {
+		if bytes.HasPrefix(line, []byte("parent ")) {
+			parents++
+		}
+		if bytes.HasPrefix(line, []byte("author Sparkwing <workspace@sparkwing.dev> ")) {
+			author = true
+		}
+	}
+	return author && parents == 1 && string(message) == "sparkwing working-tree snapshot\n", nil
+}
+
+func restoreRawCheckout(repoDir, sha string) error {
+	out, err := exec.Command("git", "-C", repoDir, "ls-tree", "-rz", "--full-tree", sha).Output()
+	if err != nil {
+		return fmt.Errorf("inspect workspace tree: %w", err)
+	}
+	for _, raw := range bytes.Split(out, []byte{0}) {
+		if len(raw) == 0 {
+			continue
+		}
+		metadata, name, ok := bytes.Cut(raw, []byte{'\t'})
+		fields := bytes.Fields(metadata)
+		if !ok || len(fields) != 3 || string(fields[1]) != "blob" {
+			return fmt.Errorf("inspect workspace tree: malformed blob entry")
+		}
+		rel := filepath.Clean(filepath.FromSlash(string(name)))
+		if rel == "." || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("inspect workspace tree: unsafe path %q", name)
+		}
+		blob, blobErr := exec.Command("git", "-C", repoDir, "cat-file", "blob", string(fields[2])).Output()
+		if blobErr != nil {
+			return fmt.Errorf("read workspace blob %q: %w", name, blobErr)
+		}
+		path := filepath.Join(repoDir, rel)
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("replace workspace path %q: %w", name, err)
+		}
+		switch string(fields[0]) {
+		case "100644":
+			err = os.WriteFile(path, blob, 0o644)
+			if err == nil {
+				err = os.Chmod(path, 0o644)
+			}
+		case "100755":
+			err = os.WriteFile(path, blob, 0o755)
+			if err == nil {
+				err = os.Chmod(path, 0o755)
+			}
+		case "120000":
+			err = os.Symlink(string(blob), path)
+		default:
+			return fmt.Errorf("workspace tree contains unsupported mode %s for %q", fields[0], name)
+		}
+		if err != nil {
+			return fmt.Errorf("restore workspace path %q: %w", name, err)
+		}
+	}
+	return nil
+}
+
+func shallowCloneBranch(gcURL, cloneURL, token, branch, dest string) error {
 	cmd := exec.Command(
 		"git", "clone",
 		"--depth", "1",
@@ -180,7 +319,7 @@ func shallowCloneBranch(cloneURL, branch, dest string) error {
 		"--branch", branch,
 		cloneURL, dest,
 	)
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	cmd.Env = gitHTTPEnv(gcURL, token)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("git clone %s (branch %s): %w: %s",
@@ -189,7 +328,7 @@ func shallowCloneBranch(cloneURL, branch, dest string) error {
 	return nil
 }
 
-func registerRepoWithCache(gcURL, name, repoURL string) error {
+func registerRepoWithCache(gcURL, token, name, repoURL string) error {
 	q := neturl.Values{}
 	q.Set("name", name)
 	q.Set("repo", repoURL)
@@ -198,18 +337,59 @@ func registerRepoWithCache(gcURL, name, repoURL string) error {
 	if err != nil {
 		return err
 	}
-	cli := &http.Client{Timeout: 30 * time.Second}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	cli := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
 	resp, err := cli.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)
 	return nil
+}
+
+func gitHTTPEnv(gcURL, token string) []string {
+	env := append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	count, countIndex := 0, -1
+	for i, value := range env {
+		if strings.HasPrefix(value, "GIT_CONFIG_COUNT=") {
+			_, _ = fmt.Sscanf(strings.TrimPrefix(value, "GIT_CONFIG_COUNT="), "%d", &count)
+			countIndex = i
+		}
+	}
+	entries := 1
+	if token != "" {
+		entries++
+	}
+	countValue := fmt.Sprintf("GIT_CONFIG_COUNT=%d", count+entries)
+	if countIndex >= 0 {
+		env[countIndex] = countValue
+	} else {
+		env = append(env, countValue)
+	}
+	if token != "" {
+		env = append(env,
+			fmt.Sprintf("GIT_CONFIG_KEY_%d=http.%s.extraHeader", count, strings.TrimRight(gcURL, "/")+"/"),
+			fmt.Sprintf("GIT_CONFIG_VALUE_%d=Authorization: Bearer %s", count, token),
+		)
+		count++
+	}
+	env = append(env,
+		fmt.Sprintf("GIT_CONFIG_KEY_%d=http.%s.followRedirects", count, strings.TrimRight(gcURL, "/")+"/"),
+		fmt.Sprintf("GIT_CONFIG_VALUE_%d=false", count),
+	)
+	return env
 }
 
 func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
@@ -228,12 +408,15 @@ func RefreshRepo(ctx context.Context, gcURL, repoURL string) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
@@ -260,34 +443,23 @@ func SeedRepo(ctx context.Context, gcURL, token, repoURL, repoDir, sha string) e
 	}
 	defer func() { _ = os.Remove(bundle) }()
 
-	f, err := os.Open(bundle)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
+	return SeedBundle(ctx, gcURL, token, repoURL, bundle, sha)
+}
 
-	q := neturl.Values{}
-	q.Set("repo", repoURL)
-	q.Set("sha", sha)
-	url := strings.TrimRight(gcURL, "/") + "/sync/seed?" + q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, f)
-	if err != nil {
-		return err
+// SeedBundle imports a prebuilt Git bundle into the cache under sha.
+func SeedBundle(ctx context.Context, gcURL, token, repoURL, bundle, sha string) error {
+	if strings.TrimSpace(gcURL) == "" {
+		return fmt.Errorf("SeedBundle: gitcache URL required")
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+	return seedBundle(ctx, strings.TrimRight(gcURL, "/")+"/sync/seed", token, repoURL, bundle, sha, false)
+}
+
+// SeedWorkspaceBundle imports a bounded-retention working-tree bundle.
+func SeedWorkspaceBundle(ctx context.Context, gcURL, token, repoURL, bundle, sha string) error {
+	if strings.TrimSpace(gcURL) == "" {
+		return fmt.Errorf("SeedWorkspaceBundle: gitcache URL required")
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
-	}
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return nil
+	return seedBundle(ctx, strings.TrimRight(gcURL, "/")+"/sync/seed", token, repoURL, bundle, sha, true)
 }
 
 func createRepoBundle(ctx context.Context, repoDir, sha string) (string, error) {
@@ -309,7 +481,7 @@ func createRepoBundle(ctx context.Context, repoDir, sha string) (string, error) 
 	}
 	_ = os.Remove(path)
 
-	ref := "refs/sparkwing-seed/" + sha
+	ref := SeedRef(sha)
 	if out, err := exec.CommandContext(ctx, "git", "-C", repoDir, "update-ref", ref, sha).CombinedOutput(); err != nil {
 		return "", fmt.Errorf("git seed ref: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -353,12 +525,15 @@ func RefreshRepoViaController(ctx context.Context, controllerURL, token, repoURL
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}
@@ -385,29 +560,70 @@ func SeedRepoViaController(ctx context.Context, controllerURL, token, repoURL, r
 	}
 	defer func() { _ = os.Remove(bundle) }()
 
+	return SeedBundleViaController(ctx, controllerURL, token, repoURL, bundle, sha)
+}
+
+// SeedBundleViaController imports a prebuilt Git bundle through the controller.
+func SeedBundleViaController(ctx context.Context, controllerURL, token, repoURL, bundle, sha string) error {
+	if strings.TrimSpace(controllerURL) == "" {
+		return fmt.Errorf("SeedBundleViaController: controller URL required")
+	}
+	return seedBundle(ctx, strings.TrimRight(controllerURL, "/")+"/api/v1/gitcache/seed", token, repoURL, bundle, sha, false)
+}
+
+// SeedWorkspaceBundleViaController imports a bounded-retention working-tree bundle through the controller.
+func SeedWorkspaceBundleViaController(ctx context.Context, controllerURL, token, repoURL, bundle, sha string) error {
+	if strings.TrimSpace(controllerURL) == "" {
+		return fmt.Errorf("SeedWorkspaceBundleViaController: controller URL required")
+	}
+	return seedBundle(ctx, strings.TrimRight(controllerURL, "/")+"/api/v1/gitcache/seed", token, repoURL, bundle, sha, true)
+}
+
+func seedBundle(ctx context.Context, endpoint, token, repoURL, bundle, sha string, workspace bool) error {
+	var err error
+	repoURL, err = sourceurl.ValidateCloneURL(repoURL)
+	if err != nil {
+		return fmt.Errorf("seed bundle: invalid repo URL: %w", err)
+	}
+	sha, err = validateGitObject(sha)
+	if err != nil {
+		return err
+	}
 	f, err := os.Open(bundle)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-
-	q := neturl.Values{}
-	q.Set("repo", repoURL)
-	q.Set("sha", sha)
-	url := strings.TrimRight(controllerURL, "/") + "/api/v1/gitcache/seed?" + q.Encode()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, f)
+	info, err := f.Stat()
 	if err != nil {
 		return err
 	}
+	if info.Size() > 500<<20 {
+		return fmt.Errorf("git bundle is %d bytes; limit is %d bytes", info.Size(), int64(500<<20))
+	}
+	q := neturl.Values{}
+	q.Set("repo", repoURL)
+	q.Set("sha", sha)
+	if workspace {
+		q.Set("workspace", "1")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint+"?"+q.Encode(), f)
+	if err != nil {
+		return err
+	}
+	req.ContentLength = info.Size()
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	}}
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 400 {
+	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return fmt.Errorf("%s: %s", resp.Status, strings.TrimSpace(string(body)))
 	}

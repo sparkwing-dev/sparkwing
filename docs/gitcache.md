@@ -1,9 +1,9 @@
 # Cache (Gitcache)
 
 sparkwing-cache is sparkwing's in-cluster git cache, blob store, and
-package proxy. It mirrors repositories from GitHub, serves git clones
-over HTTP, stores uploaded code tarballs, caches package registry
-responses, and keeps itself fresh with a background fetch loop.
+package proxy. It mirrors repositories from GitHub, serves git clones over
+HTTP, stores SHA-scoped Git bundles and legacy code uploads, caches package
+registry responses, and keeps itself fresh with a background fetch loop.
 
 The cache is **read-only for git** - pipelines clone from it but push
 directly to GitHub. This eliminates a class of divergence bugs where
@@ -106,6 +106,16 @@ SHA. The controller serves the proxy routes only when started with
 cache Service, so set both: `--cache-pod-url` for the
 externally-reachable URL operators hit directly, `--cache-url` for the
 controller-to-cache proxy target.
+
+Off-cluster runners can set `SPARKWING_GITCACHE_URL` to
+`https://<controller>/api/v1/gitcache`. The controller exposes admin-scoped
+registration and read-only smart-Git proxy routes at that prefix and removes
+the caller's bearer before contacting the internal cache. This keeps the raw
+Git cache private while a laptop, desktop, or bare-metal runner uses outbound
+HTTPS only. The dashboard ingress exposes this prefix as a machine-bearer route
+even when browser login is required. A direct cache URL over a LAN, VPN, or
+tailnet remains supported; direct binary and seed writes use only
+`SPARKWING_CACHE_TOKEN`, never the runner's controller token.
 
 ## Background Fetch
 
@@ -242,6 +252,22 @@ sparkwing CLI -> controller /api/v1/triggers (branch + SHA)
 runner        -> cache /git/<name>           (clone at SHA)
 ```
 
+With `--working-tree`, the CLI captures tracked changes plus untracked
+non-ignored files as a deterministic synthetic child commit. It seeds that
+bundle before creating the trigger and never refreshes the origin for the
+synthetic SHA. Capture rejects conflicts, submodules, sparse or shallow
+checkouts, SHA-256 repositories, and configured Git content filters. The source
+repository is not mutated.
+The runner sees a clean detached checkout at the synthetic SHA rather than the
+laptop's staged-versus-unstaged split.
+The cache moves each accepted snapshot from the transient seed namespace into
+`refs/sparkwing-workspace/*` and retains at most 128 distinct workspace refs per
+repository. Re-seeding the same snapshot refreshes one ref. A new snapshot is
+rejected before trigger admission when the repository is full; Sparkwing never
+evicts an admitted snapshot to make room. Treat those refs as retained
+unpublished source and keep the cache private. Before retrying a rejected
+upload, delete workspace refs that no admitted run needs.
+
 The cache also exposes tarball-upload and ancestor-negotiation endpoints
 (`/upload`, `/uploads/<id>`, `/sync/negotiate`) for code-sync flows; see
 the API table below.
@@ -266,8 +292,10 @@ The cache is exposed externally via ingress at your dashboard host's
 `cache-` subdomain. The blob and sync endpoints require a bearer token
 -- `/bin/...`, `/cache/...`, `/upload`, `/uploads/...`,
 `/sync/negotiate`, and `/sync/seed` -- on reads as well as writes. Git
-protocol, archive/file, artifact, proxy, and status routes are
-unauthenticated. Authenticated requests carry the token as:
+protocol, archive/file, artifact, proxy, and status routes on the raw cache are
+unauthenticated. Keep that service private when it can contain uncommitted
+source. The controller's `/api/v1/gitcache/git/...` proxy requires admin scope
+and permits upload-pack reads only. Authenticated requests carry the token as:
 
 ```
 Authorization: Bearer <SPARKWING_API_TOKEN>
@@ -306,7 +334,7 @@ the ingress sets.
 | POST | `/upload?repo=X&base=Y` | Incremental upload on base commit |
 | GET | `/uploads/<id>` | Download uploaded tarball (auth required) |
 | POST | `/sync/negotiate` | Find common ancestor (auth required) |
-| POST | `/sync/seed?repo=X&sha=Y` | Seed repo from a SHA-scoped git bundle (auth required) |
+| POST | `/sync/seed?repo=X&sha=Y[&workspace=1]` | Seed repo from a SHA-scoped git bundle; workspace mode caps retained refs (auth required) |
 
 ### Artifacts
 
