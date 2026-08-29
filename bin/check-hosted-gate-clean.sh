@@ -46,7 +46,8 @@ if [ -n "$release_tag" ]; then
     printf '%s\n' "$status" >&2
     exit 1
   fi
-  if ! grep -Eq "^require github.com/sparkwing-dev/sparkwing ${release_tag//./\\.}$" "$mod"; then
+  if ! awk -v module='github.com/sparkwing-dev/sparkwing' -v expected="$release_tag" \
+    '($1 == "require" && $2 == module && $3 == expected) || ($1 == module && $2 == expected) { found = 1 } END { exit !found }' "$mod"; then
     echo "release fixture does not pin $release_tag" >&2
     exit 1
   fi
@@ -58,7 +59,8 @@ if [ -n "$release_tag" ]; then
     echo "release scaffold snapshot does not pin $release_tag" >&2
     exit 1
   fi
-  if ! grep -Eq "^[[:space:]]*(require[[:space:]]+)?github.com/sparkwing-dev/sparkwing ${release_tag//./\\.}([[:space:]]|$)" "$pipeline_mod"; then
+  if ! awk -v module='github.com/sparkwing-dev/sparkwing' -v expected="$release_tag" \
+    '($1 == "require" && $2 == module && $3 == expected) || ($1 == module && $2 == expected) { found = 1 } END { exit !found }' "$pipeline_mod"; then
     echo "release pipeline does not pin $release_tag" >&2
     exit 1
   fi
