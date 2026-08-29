@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	gort "runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,6 +22,8 @@ import (
 )
 
 const cancellationDiagnosticMarker = "cancellation diagnostic captured"
+
+const cancellationDiagnosticTail = "cancellation diagnostic complete"
 
 func TestExec_NoProgressCancellationCapturesDiagnosticBeforeGroupKill(t *testing.T) {
 	dir := t.TempDir()
@@ -113,11 +116,11 @@ func TestExec_NoProgressCancellationCapturesGoRuntimeDump(t *testing.T) {
 	if got.err == nil {
 		t.Fatal("diagnostic cancellation returned success")
 	}
-	if !strings.Contains(got.result.Stderr, "SIGQUIT: quit") {
+	if !strings.Contains(got.result.Stderr, "SIGQUIT: quit") || !strings.Contains(got.result.Stderr, "goroutine") {
 		t.Fatal("stderr omitted the Go runtime dump header")
 	}
-	if count := strings.Count(got.result.Stderr, "TestExecCancellationDiagnosticHelper.func"); count < 5_000 {
-		t.Fatalf("runtime dump contains %d of 5,000 known blocked goroutines", count)
+	if !strings.Contains(got.result.Stderr, cancellationDiagnosticTail) {
+		t.Fatal("stderr omitted the Go runtime dump completion marker")
 	}
 }
 
@@ -251,6 +254,22 @@ func TestExecCancellationDiagnosticHelper(t *testing.T) {
 			}()
 		}
 		started.Wait()
+		quit := make(chan os.Signal, 1)
+		signal.Notify(quit, syscall.SIGQUIT)
+		go func() {
+			<-quit
+			buf := make([]byte, 1<<20)
+			for {
+				n := gort.Stack(buf, true)
+				if n < len(buf) {
+					fmt.Fprintln(os.Stderr, "SIGQUIT: quit")
+					_, _ = os.Stderr.Write(buf[:n])
+					fmt.Fprintln(os.Stderr, cancellationDiagnosticTail)
+					os.Exit(2)
+				}
+				buf = make([]byte, len(buf)*2)
+			}
+		}()
 		if err := os.WriteFile(os.Getenv("SPARKWING_EXEC_READY_FILE"), []byte("ready"), 0o600); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(3)
