@@ -15,7 +15,6 @@ func TestDarwinFreeMemory_UnreadableLevelReportsNoMeasurement(t *testing.T) {
 		wantOK   bool
 	}{
 		{"sysctl failed", 0, false, 0, false},
-		{"level zero", 0, true, 0, false},
 		{"level out of range", 101, true, 0, false},
 		{"idle machine", 37, true, 6356551598, true},
 		{"under pressure", 20, true, 3435973836, true},
@@ -35,13 +34,23 @@ func TestDarwinFreeMemory_UnreadableLevelReportsNoMeasurement(t *testing.T) {
 	}
 }
 
+func TestDarwinFreeMemory_ExhaustedMachineIsAReading(t *testing.T) {
+	const total = 17179869184
+
+	free, ok := darwinFreeMemory(total, 0, true)
+	if !ok {
+		t.Fatal("a level of zero from a sysctl that answered reported unmeasured; " +
+			"an exhausted machine is a reading, and an unread dimension charges no external memory")
+	}
+	if free != 0 {
+		t.Fatalf("free = %d, want 0", free)
+	}
+}
+
 func TestSampleHost_NeverClaimsAMeasurementItDoesNotHave(t *testing.T) {
 	stat, err := sampleHost()
 	if err != nil {
 		t.Fatalf("sample host: %v", err)
-	}
-	if stat.MemoryMeasured && stat.FreeMemoryBytes == 0 {
-		t.Fatal("memory reported measured with zero bytes free; a measurement that cannot be told from a full machine is not one")
 	}
 	if !stat.MemoryMeasured && stat.FreeMemoryBytes != 0 {
 		t.Fatalf("unmeasured memory carries %d bytes; an unread dimension must carry no figure", stat.FreeMemoryBytes)
