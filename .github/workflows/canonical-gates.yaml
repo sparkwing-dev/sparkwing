@@ -41,6 +41,12 @@ jobs:
         if: inputs.release_tag != ''
         run: cp bin/check-hosted-gate-clean.sh "$RUNNER_TEMP/check-hosted-gate-clean.sh"
 
+      - name: Copy the v0.37.2 test repair
+        if: inputs.release_tag == 'v0.37.2'
+        run: |
+          cp bin/apply-release-test-repair.sh "$RUNNER_TEMP/apply-release-test-repair.sh"
+          cp .github/release-recovery/v0.37.2-test-oracle.patch "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
+
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
@@ -53,6 +59,9 @@ jobs:
           cache-dependency-path: |
             go.sum
             .sparkwing/go.sum
+
+      - name: Capture the immutable source commit
+        run: echo "SOURCE_SHA=$(git rev-parse HEAD)" >>"$GITHUB_ENV"
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -132,11 +141,23 @@ jobs:
           patch_oid="$(git diff HEAD --binary -- .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum pkg/scaffold/version.go testdata/kind-e2e/repo/.sparkwing/go.mod testdata/kind-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
           echo "RELEASE_SELF_PIN_PATCH_OID=$patch_oid" >>"$GITHUB_ENV"
 
+      - name: Apply the audited tagged-test repair
+        if: inputs.release_tag == 'v0.37.2'
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: bash "$RUNNER_TEMP/apply-release-test-repair.sh" "$RELEASE_TAG" "$SOURCE_SHA" "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
+
       - name: Run canonical pre-commit
         if: matrix.gate == 'pre-commit'
         env:
           SPARKWING_HOME: ${{ runner.temp }}/sparkwing-home
-        run: '"$RUNNER_TEMP/sparkwing" run pre-commit'
+        run: |
+          "$RUNNER_TEMP/sparkwing" run pre-commit
+          if [ "${{ inputs.release_tag }}" = v0.37.2 ]; then
+            git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
+            git apply --unidiff-zero --reverse "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
+            git diff --quiet
+          fi
 
       - name: Run canonical pre-push
         if: matrix.gate == 'pre-push'
@@ -148,6 +169,11 @@ jobs:
           target_sha="$(git rev-parse HEAD)"
           "$RUNNER_TEMP/sparkwing" run pre-push
           if [ -n "$RELEASE_TAG" ]; then
+            if [ "$RELEASE_TAG" = v0.37.2 ]; then
+              git apply --unidiff-zero --reverse --check "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
+              git apply --unidiff-zero --reverse "$RUNNER_TEMP/v0.37.2-test-oracle.patch"
+              git diff --quiet HEAD -- internal/orchestrator/repo_ident_test.go
+            fi
             bash "$RUNNER_TEMP/check-hosted-gate-clean.sh" --release-self-pin "$RELEASE_TAG" "$RELEASE_SELF_PIN_PATCH_OID" "$target_sha"
           else
             bash bin/check-hosted-gate-clean.sh "$target_sha"
