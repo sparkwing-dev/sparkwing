@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,48 @@ import (
 
 func TestHealthProbeCompletesAfterHandshake(t *testing.T) {
 	t.Parallel()
+	home, _ := startHealthProbeServer(t, wingd.ProtocolMajor)
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := HealthProbe(ctx, home); err != nil {
+		t.Fatalf("health probe waited for queue-state work after a successful handshake: %v", err)
+	}
+}
+
+func TestHealthProbeRequiresCompatibleProtocol(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		protocolMajor int
+		wantErr       bool
+	}{
+		{name: "current", protocolMajor: wingd.ProtocolMajor},
+		{name: "lower", protocolMajor: wingd.ProtocolMajor - 1, wantErr: true},
+		{name: "higher", protocolMajor: wingd.ProtocolMajor + 1, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, sock := startHealthProbeServer(t, tt.protocolMajor)
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			err := healthProbeOnce(ctx, sock)
+			if tt.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "protocol") || !strings.Contains(err.Error(), "incompatible") {
+					t.Fatalf("health probe with protocol %d error = %v, want incompatible protocol error", tt.protocolMajor, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("health probe with protocol %d: %v", tt.protocolMajor, err)
+			}
+		})
+	}
+}
+
+func startHealthProbeServer(t *testing.T, protocolMajor int) (string, string) {
+	t.Helper()
 	home := shortHome(t)
 	sock, err := wingd.SocketPath(home)
 	if err != nil {
@@ -45,7 +88,7 @@ func TestHealthProbeCompletesAfterHandshake(t *testing.T) {
 			return
 		}
 		line, encodeErr := wingwire.Encode(&wingwire.HelloAck{
-			ProtocolMajor: wingd.ProtocolMajor,
+			ProtocolMajor: protocolMajor,
 			BinaryVersion: "test",
 		})
 		if encodeErr != nil {
@@ -56,10 +99,5 @@ func TestHealthProbeCompletesAfterHandshake(t *testing.T) {
 		}
 		<-release
 	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := HealthProbe(ctx, home); err != nil {
-		t.Fatalf("health probe waited for queue-state work after a successful handshake: %v", err)
-	}
+	return home, sock
 }
