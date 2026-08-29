@@ -72,7 +72,7 @@ expect_status committed ''
 expect_failure committed 'hosted gate changed HEAD'
 
 git -C "$CASE_ROOT" reset --hard -q "$target"
-mkdir -p "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing" "$CASE_ROOT/pkg/scaffold" "$CASE_ROOT/.apidiff"
+mkdir -p "$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing" "$CASE_ROOT/pkg/scaffold" "$CASE_ROOT/.apidiff" "$CASE_ROOT/.sparkwing"
 cat >"$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.mod" <<'EOF'
 module release-fixture
 
@@ -81,9 +81,11 @@ go 1.26.0
 require github.com/sparkwing-dev/sparkwing v0.37.1
 EOF
 printf 'github.com/sparkwing-dev/sparkwing v0.37.1 h1:old\n' >"$CASE_ROOT/testdata/kind-e2e/repo/.sparkwing/go.sum"
+printf 'module release-pipeline\n\ngo 1.26.0\n\nrequire github.com/sparkwing-dev/sparkwing v0.37.1\n\nreplace github.com/sparkwing-dev/sparkwing => ..\n' >"$CASE_ROOT/.sparkwing/go.mod"
+printf 'github.com/sparkwing-dev/sparkwing v0.37.1 h1:pipeline-old\n' >"$CASE_ROOT/.sparkwing/go.sum"
 printf 'package scaffold\n\nconst FallbackSDKVersion = "v0.37.1"\n' >"$CASE_ROOT/pkg/scaffold/version.go"
 printf '# pkg/scaffold\n\nconst FallbackSDKVersion = "v0.37.1"\n' >"$CASE_ROOT/.apidiff/pkg_scaffold.txt"
-git -C "$CASE_ROOT" add testdata pkg/scaffold/version.go .apidiff/pkg_scaffold.txt
+git -C "$CASE_ROOT" add testdata pkg/scaffold/version.go .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum
 git -C "$CASE_ROOT" commit -qm fixture
 target="$(git -C "$CASE_ROOT" rev-parse HEAD)"
 
@@ -95,7 +97,11 @@ sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/pkg/scaffold/version.go"
 rm "$CASE_ROOT/pkg/scaffold/version.go.bak"
 sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/.apidiff/pkg_scaffold.txt"
 rm "$CASE_ROOT/.apidiff/pkg_scaffold.txt.bak"
-self_pin_oid="$(git -C "$CASE_ROOT" diff --binary -- .apidiff/pkg_scaffold.txt pkg/scaffold/version.go testdata/kind-e2e/repo/.sparkwing/go.mod testdata/kind-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
+sed -i.bak 's/v0.37.1/v0.37.2/; /replace github.com\/sparkwing-dev\/sparkwing => ../d' "$CASE_ROOT/.sparkwing/go.mod"
+rm "$CASE_ROOT/.sparkwing/go.mod.bak"
+sed -i.bak 's/v0.37.1/v0.37.2/' "$CASE_ROOT/.sparkwing/go.sum"
+rm "$CASE_ROOT/.sparkwing/go.sum.bak"
+self_pin_oid="$(git -C "$CASE_ROOT" diff --binary -- .apidiff/pkg_scaffold.txt .sparkwing/go.mod .sparkwing/go.sum pkg/scaffold/version.go testdata/kind-e2e/repo/.sparkwing/go.mod testdata/kind-e2e/repo/.sparkwing/go.sum | git hash-object --stdin)"
 (
   cd "$CASE_ROOT"
   bash "$CHECK" --release-self-pin v0.37.2 "$self_pin_oid" "$target"
