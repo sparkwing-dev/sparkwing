@@ -28,8 +28,13 @@ func TestHealthProbeCompletesAfterHandshake(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = listener.Close() })
 	release := make(chan struct{})
-	t.Cleanup(func() { close(release) })
+	done := make(chan struct{})
+	t.Cleanup(func() {
+		close(release)
+		<-done
+	})
 	go func() {
+		defer close(done)
 		conn, acceptErr := listener.Accept()
 		if acceptErr != nil {
 			return
