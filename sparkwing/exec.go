@@ -155,9 +155,9 @@ func commandEnvFromContext(ctx context.Context) map[string]string {
 //
 // Signal propagation: the child runs in its own process group. Cancellation
 // force-kills the whole group, so grandchildren do not outlive a cancelled run.
-// On Unix, a no-progress timeout first requests a goroutine dump. A process that
-// remains alive after the diagnostic window is force-killed. Terminal SIGINT
-// (Ctrl-C) also reaches the group via the OS.
+// On Linux and macOS, a no-progress timeout first requests a goroutine dump. A
+// process that remains alive after the diagnostic window is force-killed.
+// Terminal SIGINT (Ctrl-C) also reaches the group via the OS.
 func Bash(ctx context.Context, line string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindBash, line: line}
 }
@@ -172,9 +172,9 @@ func Bash(ctx context.Context, line string) *Cmd {
 //
 // Signal propagation: the binary runs in its own process group. Cancellation
 // force-kills the whole group, so grandchildren do not outlive a cancelled run.
-// On Unix, a no-progress timeout first requests a goroutine dump. A process that
-// remains alive after the diagnostic window is force-killed. Terminal SIGINT
-// (Ctrl-C) also reaches the group via the OS.
+// On Linux and macOS, a no-progress timeout first requests a goroutine dump. A
+// process that remains alive after the diagnostic window is force-killed.
+// Terminal SIGINT (Ctrl-C) also reaches the group via the OS.
 func Exec(ctx context.Context, name string, args ...string) *Cmd {
 	return &Cmd{ctx: ctx, kind: kindExec, name: name, args: args}
 }
@@ -556,7 +556,7 @@ func streamLines(ctx context.Context, wg *sync.WaitGroup, r io.ReadCloser, level
 	}
 }
 
-const diagnosticTruncationMarker = "… diagnostic output truncated at configured limit"
+const diagnosticTruncationMarker = "...[diagnostic output truncated]"
 
 type diagnosticOutputLimiter struct {
 	mu        sync.Mutex
@@ -580,7 +580,8 @@ func (l *diagnosticOutputLimiter) filter(line string) (string, bool) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	need := len(line) + 1
-	if need <= l.remaining {
+	markerBytes := len(diagnosticTruncationMarker) + 1
+	if need+markerBytes <= l.remaining {
 		l.remaining -= need
 		return line, true
 	}
@@ -588,6 +589,10 @@ func (l *diagnosticOutputLimiter) filter(line string) (string, bool) {
 		return "", false
 	}
 	l.marked = true
+	if markerBytes > l.remaining {
+		return "", false
+	}
+	l.remaining -= markerBytes
 	return diagnosticTruncationMarker, true
 }
 

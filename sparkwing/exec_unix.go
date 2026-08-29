@@ -1,4 +1,4 @@
-//go:build unix
+//go:build linux || darwin
 
 package sparkwing
 
@@ -15,7 +15,7 @@ import (
 
 func commandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
 	if policy, ok := execdiag.FromContext(ctx); ok && policy.Expired != nil {
-		wrapped := []string{"-c", `ulimit -c 0; exec "$@"`, "sparkwing-exec", name}
+		wrapped := []string{"-c", `ulimit -c 0 && exec "$@"`, "sparkwing-exec", name}
 		wrapped = append(wrapped, args...)
 		return exec.CommandContext(ctx, "/bin/sh", wrapped...)
 	}
@@ -58,16 +58,4 @@ func killProcessGroup(group int) error {
 		return nil
 	}
 	return err
-}
-
-func commandResourceUsage(cmd *exec.Cmd) (cpu time.Duration, maxRSSBytes int64, ok bool) {
-	if cmd.ProcessState == nil {
-		return 0, 0, false
-	}
-	ru, ok := cmd.ProcessState.SysUsage().(*syscall.Rusage)
-	if !ok || ru == nil {
-		return 0, 0, false
-	}
-	cpu = time.Duration(ru.Utime.Nano()) + time.Duration(ru.Stime.Nano())
-	return cpu, maxRSSToBytes(ru.Maxrss), true
 }

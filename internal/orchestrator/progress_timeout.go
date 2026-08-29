@@ -24,7 +24,7 @@ type progressTimeoutController struct {
 	expired    bool
 }
 
-const noProgressDiagnosticEscalationLimit = 5 * time.Second
+const noProgressDiagnosticEscalationLimit = 10 * time.Second
 
 const noProgressDiagnosticOutputLimit = 16 << 20
 

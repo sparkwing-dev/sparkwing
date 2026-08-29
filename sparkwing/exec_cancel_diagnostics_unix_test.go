@@ -48,7 +48,12 @@ func TestExec_NoProgressCancellationCapturesDiagnosticBeforeGroupKill(t *testing
 
 	waitForFile(t, ready)
 	descendantPID := readPIDFile(t, descendant)
-	t.Cleanup(func() { _ = syscall.Kill(descendantPID, syscall.SIGKILL) })
+	cleanupArmed := true
+	t.Cleanup(func() {
+		if cleanupArmed {
+			_ = syscall.Kill(descendantPID, syscall.SIGKILL)
+		}
+	})
 	started := time.Now()
 	cancel()
 
@@ -68,6 +73,7 @@ func TestExec_NoProgressCancellationCapturesDiagnosticBeforeGroupKill(t *testing
 		t.Fatalf("stderr = %q, want cancellation diagnostic", got.result.Stderr)
 	}
 	waitForProcessExit(t, descendantPID)
+	cleanupArmed = false
 }
 
 func TestExec_NoProgressCancellationCapturesGoRuntimeDump(t *testing.T) {
@@ -191,7 +197,7 @@ func TestDiagnosticOutputLimiter_BoundsOnlyPostTimeoutOutput(t *testing.T) {
 	expired := false
 	limiter := &diagnosticOutputLimiter{
 		policy:    execdiag.Policy{Expired: func() bool { return expired }},
-		remaining: 8,
+		remaining: 64,
 	}
 	if got, keep := limiter.filter("ordinary output"); !keep || got != "ordinary output" {
 		t.Fatalf("pre-timeout output = %q, %t", got, keep)
@@ -200,8 +206,14 @@ func TestDiagnosticOutputLimiter_BoundsOnlyPostTimeoutOutput(t *testing.T) {
 	if got, keep := limiter.filter("short"); !keep || got != "short" {
 		t.Fatalf("in-budget diagnostic = %q, %t", got, keep)
 	}
-	if got, keep := limiter.filter("overflow"); !keep || got != diagnosticTruncationMarker {
+	used := len("short") + 1
+	if got, keep := limiter.filter(strings.Repeat("x", 64)); !keep || got != diagnosticTruncationMarker {
 		t.Fatalf("first overflow = %q, %t", got, keep)
+	} else {
+		used += len(got) + 1
+	}
+	if used > 64 {
+		t.Fatalf("diagnostic output used %d bytes, limit 64", used)
 	}
 	if got, keep := limiter.filter("more"); keep || got != "" {
 		t.Fatalf("post-marker overflow = %q, %t", got, keep)

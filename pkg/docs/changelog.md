@@ -82,11 +82,12 @@ code change to unlock.
 
 ### Fixed
 
-- **exec:** A no-progress timeout on Unix now sends `SIGQUIT` before terminating
-  the command session, making Go goroutine dumps available through `runs logs`.
-  The diagnostic-enabled session cannot write core files, ordinary cancellation
-  remains immediate, diagnostic output is capped at 16 MiB, and a process tree
-  that ignores `SIGQUIT` is force-killed after five seconds.
+- **exec:** A no-progress timeout on Linux and macOS now sends `SIGQUIT` before
+  terminating the command session, making Go goroutine dumps available through
+  `runs logs`. Core-file generation is disabled for the diagnostic-enabled
+  session, ordinary cancellation remains immediate, diagnostic output is capped
+  at 16 MiB, and a process tree that ignores `SIGQUIT` is force-killed after ten
+  seconds.
 
 ## [v0.37.2] - 2026-08-28
 ### Fixed
