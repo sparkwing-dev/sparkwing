@@ -50,7 +50,7 @@ sparkwing daemon recover-state --home /path/to/home --yes
 
 Refresh an answering wingd to this installed build
 
-Drain the current daemon, start this installed binary as its successor, and verify the successor reports the exact target build. Existing holders reconnect and reattach through durable leases. If no daemon is running, nothing is started.
+Refresh an answering daemon when its build differs from this installed build. With --force, drain and replace an answering daemon even when the builds match. Existing holders reconnect and reattach through durable leases. If no daemon is running, nothing is started.
 
 ### Flags
 
@@ -58,12 +58,16 @@ Drain the current daemon, start this installed binary as its successor, and veri
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
 | `--home DIR` | Sparkwing state directory |
+| `--force` | Replace the daemon even when it already serves this build |
 
 ### Examples
 
 ```sh
 # Refresh only if already running
 sparkwing daemon restart
+
+# Replace an answering daemon
+sparkwing daemon restart --force
 
 # Machine-readable result
 sparkwing daemon restart -o json

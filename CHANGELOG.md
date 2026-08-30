@@ -49,6 +49,12 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Added
+
+- **wingd:** `sparkwing daemon restart --force` replaces an answering daemon
+  even when it already serves the installed build. Existing holders reattach
+  to the successor, and an absent daemon stays stopped.
+
 ## [v0.37.3] - 2026-08-30
 ### Added
 
