@@ -48,6 +48,8 @@ code change to unlock.
 ---
 
 ## [Unreleased]
+
+## [v0.37.3] - 2026-08-30
 ### Added
 
 - **cli:** `sparkwing pipeline trigger --working-tree` now freezes tracked
