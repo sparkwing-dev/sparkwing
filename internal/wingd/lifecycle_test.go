@@ -391,6 +391,38 @@ func TestRefreshRunning_ReplacesSameReleaseSourceBuildAndReattachesHolder(t *tes
 	}
 }
 
+func TestRestartRunning_ReplacesExactBuildAndReattachesHolder(t *testing.T) {
+	home := shortHome(t)
+	version := "v0.22.2"
+	old := startDaemon(t, wingd.Config{Home: home, Version: version})
+
+	holder := ensure(t, home, version)
+	lease := mustAcquire(t, holder, coreReq("active", 1))
+	successor := newSuccessor(t, home, version)
+
+	result, err := client.RestartRunning(context.Background(), client.Options{
+		Home: home, Version: version, Spawn: successor.spawn,
+		DialTimeout: time.Second, Backoff: 20 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("restart: %v", err)
+	}
+	if !result.Restarted || result.PreviousVersion != version || result.RunningVersion != version {
+		t.Fatalf("restart result = %+v", result)
+	}
+	if err := old.waitExit(t, 3*time.Second); err != nil {
+		t.Fatalf("old daemon should exit: %v", err)
+	}
+	reconnect := ensure(t, home, version)
+	reclaimed, err := reconnect.Reattach(context.Background(), lease.Token)
+	if err != nil {
+		t.Fatalf("holder reattach: %v", err)
+	}
+	if reclaimed.RunID != "active" {
+		t.Fatalf("reattached run = %q, want active", reclaimed.RunID)
+	}
+}
+
 func TestRefreshRunning_LeavesStoppedDaemonStopped(t *testing.T) {
 	spawned := false
 	_, err := client.RefreshRunning(context.Background(), client.Options{

@@ -120,6 +120,15 @@ func TestDaemonRestartPipedDefaultPreservesStoppedDaemon(t *testing.T) {
 	}
 }
 
+func TestDaemonRestartDeclaresForceFlag(t *testing.T) {
+	for _, spec := range cmdDaemonRestart.Flags {
+		if spec.Name == "force" {
+			return
+		}
+	}
+	t.Fatal("daemon restart does not declare --force")
+}
+
 func TestDaemonCommandsRejectUnknownOutput(t *testing.T) {
 	for _, subcommand := range []string{"status", "restart"} {
 		err := runDaemon([]string{subcommand, "--home", t.TempDir(), "-o", "yaml"})
