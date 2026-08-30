@@ -55,6 +55,13 @@ code change to unlock.
   even when it already serves the installed build. Existing holders reattach
   to the successor, and an absent daemon stays stopped.
 
+### Fixed
+
+- **release:** The Kubernetes golden-path gate now proves that the Ready runner
+  pod claims an explicitly queued node before and after a rollout. Webhook and
+  retry checks separately verify in-process trigger execution, so those runs no
+  longer fail because they have no pool claimant.
+
 ## [v0.37.3] - 2026-08-30
 ### Added
 
