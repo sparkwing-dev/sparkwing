@@ -137,6 +137,54 @@ func TestRunCapacityReset_SaysNothingIsStoredWhenNothingIs(t *testing.T) {
 	}
 }
 
+// TestRunCapacityReset_ReachesEveryEncodingOfOneName seeds the alias a
+// store migration never cleaned up: a pre-v0.37.2 "repo/pipeline" row
+// and its encoded successor, which render to one display form. A reset
+// by that form must drop both, because dropping only the legacy row
+// reported success while the row actually pricing runs survived.
+func TestRunCapacityReset_ReachesEveryEncodingOfOneName(t *testing.T) {
+	paths := orchestrator.PathsAt(t.TempDir())
+	ctx := context.Background()
+	if err := paths.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := store.JoinProfileKey("sample-repo", "ci")
+	for _, key := range []string{"sample-repo/ci", encoded} {
+		if err := st.RecordProfileObservation(ctx, key, "", store.ProfileObservation{Duration: time.Second, PeakCores: 2, CPUMeasured: true}); err != nil {
+			t.Fatalf("seed %s: %v", key, err)
+		}
+	}
+	_ = st.Close()
+
+	out := captureStdout(t, func() {
+		if err := runCapacityReset(ctx, paths, "sample-repo/ci", false, false, false); err != nil {
+			t.Fatalf("reset: %v", err)
+		}
+	})
+	if !strings.Contains(out, "dropped 2 row(s)") {
+		t.Errorf("reset should drop both encodings, got:\n%s", out)
+	}
+
+	st2, err := store.Open(paths.StateDB())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st2.Close() }()
+	for _, key := range []string{"sample-repo/ci", encoded} {
+		prof, err := st2.GetPipelineProfile(ctx, key, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if prof != nil {
+			t.Errorf("row %s should be gone after reset, got %+v", key, prof)
+		}
+	}
+}
+
 func TestBarePipeline_StripsRepoScope(t *testing.T) {
 	if got := barePipeline("myrepo/ci"); got != "ci" {
 		t.Errorf("barePipeline(myrepo/ci) = %q, want ci", got)
@@ -144,19 +192,44 @@ func TestBarePipeline_StripsRepoScope(t *testing.T) {
 	if got := barePipeline("ci"); got != "ci" {
 		t.Errorf("barePipeline(ci) = %q, want ci", got)
 	}
+	if got := barePipeline(store.JoinProfileKey("github.com/example/acme-service", "ci")); got != "ci" {
+		t.Errorf("barePipeline(encoded key) = %q, want ci", got)
+	}
 }
 
-func TestMatchBarePipeline_FindsScopedRowsForBareName(t *testing.T) {
+func TestDisplayProfileKey_RendersRepoSlashPipeline(t *testing.T) {
+	key := store.JoinProfileKey("github.com/example/acme-service", "ci")
+	if got := store.DisplayProfileKey(key); got != "github.com/example/acme-service/ci" {
+		t.Errorf("store.DisplayProfileKey(%q) = %q, want github.com/example/acme-service/ci", key, got)
+	}
+	if got := store.DisplayProfileKey("legacy-repo/ci"); got != "legacy-repo/ci" {
+		t.Errorf("legacy key rendered as %q, want legacy-repo/ci", got)
+	}
+	if got := store.DisplayProfileKey("ci"); got != "ci" {
+		t.Errorf("bare key rendered as %q, want ci", got)
+	}
+}
+
+// TestMatchProfileName_FindsRowsByBareAndDisplayedNames keeps --reset
+// and --pipeline filters working against the names a user can actually
+// see: the bare pipeline name and the repo/pipeline form the table
+// prints, over both encoded and legacy stored keys.
+func TestMatchProfileName_FindsRowsByBareAndDisplayedNames(t *testing.T) {
+	encoded := store.JoinProfileKey("github.com/example/acme-service", "ci")
 	profiles := []store.PipelineProfile{
 		{Pipeline: "alpha/ci"},
 		{Pipeline: "beta/ci", NodeID: "build"},
 		{Pipeline: "alpha/deploy"},
+		{Pipeline: encoded},
 	}
-	got := matchBarePipeline(profiles, "ci")
-	if len(got) != 2 {
-		t.Fatalf("matched %d profiles, want the two scoped ci rows", len(got))
+	if got := matchProfileName(profiles, "ci"); len(got) != 3 {
+		t.Fatalf("bare name matched %d profiles, want the three ci rows", len(got))
 	}
-	if got := matchBarePipeline(profiles, "release"); len(got) != 0 {
+	got := matchProfileName(profiles, "github.com/example/acme-service/ci")
+	if len(got) != 1 || got[0].Pipeline != encoded {
+		t.Fatalf("displayed name matched %v, want the encoded ci row", got)
+	}
+	if got := matchProfileName(profiles, "release"); len(got) != 0 {
 		t.Errorf("matched %d profiles for an unknown name, want none", len(got))
 	}
 }

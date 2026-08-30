@@ -364,3 +364,70 @@ func TestRepoShortName_RelativeAlternateResolvesFromObjectDatabase(t *testing.T)
 		t.Fatalf("got %q, want github.com/example/acme-service", got)
 	}
 }
+
+// TestRepoShortName_WorktreeSharesItsRepoCanonicalIdentity keeps a linked
+// worktree on the same canonical key as the checkout it was branched from.
+// v0.37.2 keyed a checkout by its origin remote but left worktrees on the
+// repository's directory name, so a worktree and its main checkout split
+// onto two profiles and each re-learned what the other already knew.
+func TestRepoShortName_WorktreeSharesItsRepoCanonicalIdentity(t *testing.T) {
+	repo, worktree := linkedWorktree(t, "local-name", "feature")
+	config := "[remote \"origin\"]\n\turl = https://github.com/example/acme-service.git\n"
+	if err := os.WriteFile(filepath.Join(repo, ".git", "config"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoShortName(repo); got != "github.com/example/acme-service" {
+		t.Fatalf("main checkout: got %q, want github.com/example/acme-service", got)
+	}
+	if got := repoShortName(worktree); got != "github.com/example/acme-service" {
+		t.Errorf("linked worktree: got %q, want github.com/example/acme-service", got)
+	}
+}
+
+func TestRepoShortName_BareRepoWorktreeReadsTheBareConfig(t *testing.T) {
+	root := t.TempDir()
+	common := filepath.Join(root, "sample-repo.git")
+	if err := os.MkdirAll(filepath.Join(common, "worktrees", "feature"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	config := "[remote \"origin\"]\n\turl = git@github.com:example/acme-service.git\n"
+	if err := os.WriteFile(filepath.Join(common, "config"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	wt := filepath.Join(root, "linked-worktree")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	pointer := "gitdir: " + filepath.Join(common, "worktrees", "feature") + "\n"
+	if err := os.WriteFile(filepath.Join(wt, ".git"), []byte(pointer), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoShortName(wt); got != "github.com/example/acme-service" {
+		t.Errorf("bare-repo worktree: got %q, want github.com/example/acme-service", got)
+	}
+}
+
+// TestRepoShortName_SubmoduleUsesItsOwnOrigin prices a submodule as the
+// repository its own config names, not as its superproject and not as the
+// vendor directory it happens to sit in.
+func TestRepoShortName_SubmoduleUsesItsOwnOrigin(t *testing.T) {
+	root := t.TempDir()
+	sub := filepath.Join(root, "super", "vendor", "lib")
+	gitDir := filepath.Join(root, "super", ".git", "modules", "lib")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(gitDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, ".git"), []byte("gitdir: "+gitDir+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := "[remote \"origin\"]\n\turl = https://github.com/vendor/libupstream.git\n"
+	if err := os.WriteFile(filepath.Join(gitDir, "config"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := repoShortName(sub); got != "github.com/vendor/libupstream" {
+		t.Errorf("submodule: got %q, want github.com/vendor/libupstream", got)
+	}
+}

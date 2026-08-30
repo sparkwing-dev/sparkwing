@@ -127,15 +127,12 @@ func healthProbeOnce(ctx context.Context, sock string) error {
 	}
 	_ = nc.SetDeadline(deadline)
 	cl := &Client{nc: nc, dec: newFrameReader(nc), sock: sock, probe: true}
-	if _, err := cl.handshake(""); err != nil {
+	ack, err := cl.handshake("")
+	if err != nil {
 		return fmt.Errorf("wingd/client: health probe %s: %w", sock, err)
 	}
-	if _, terminal, transient := cl.readQueueState(); terminal != nil || transient != nil {
-		err := terminal
-		if err == nil {
-			err = transient
-		}
-		return fmt.Errorf("wingd/client: health probe %s: %w", sock, err)
+	if ack.ProtocolMajor != wingd.ProtocolMajor {
+		return fmt.Errorf("wingd/client: health probe %s: protocol %d is incompatible with %d", sock, ack.ProtocolMajor, wingd.ProtocolMajor)
 	}
 	return nil
 }

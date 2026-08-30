@@ -149,7 +149,8 @@ type AdmissionRequest struct {
 	// pipeline (a semaphores-only node acquisition inherits the run's).
 	Pipeline string `json:"pipeline,omitempty"`
 	// Repo is the short name of the repository the run was launched
-	// from (the git toplevel basename), carried purely for display so a
+	// from (its canonical identity when it names a remote, else the git
+	// toplevel basename), carried purely for display so a
 	// shared daemon's queue can say whose work each row is. Empty when
 	// the run started outside any repository.
 	Repo string `json:"repo,omitempty"`

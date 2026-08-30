@@ -321,7 +321,7 @@ func (la *LocalAdmission) applyHostCeiling(ctx context.Context, res capacity.Res
 	if !ok {
 		return res, ""
 	}
-	return capacity.ApplyHostCeiling(res, profileKey, machineCores, grantCores, grantMem)
+	return capacity.ApplyHostCeiling(res, store.DisplayProfileKey(profileKey), machineCores, grantCores, grantMem)
 }
 
 func (la *LocalAdmission) idleGrantableHost(ctx context.Context) (machineCores, grantableCores float64, grantableMemoryBytes int64, ok bool) {
