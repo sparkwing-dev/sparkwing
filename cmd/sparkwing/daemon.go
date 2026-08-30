@@ -113,6 +113,22 @@ func inspectDaemon(ctx context.Context, home string) (daemonReport, error) {
 }
 
 func runDaemonRestart(args []string) error {
+	return runDaemonRestartWith(args, daemonRestartDeps{
+		installedVersion: installedVersion,
+		refresh:          wingdclient.RefreshRunning,
+		restart:          wingdclient.RestartRunning,
+		inspect:          inspectDaemon,
+	})
+}
+
+type daemonRestartDeps struct {
+	installedVersion func() string
+	refresh          func(context.Context, wingdclient.Options) (wingdclient.RefreshResult, error)
+	restart          func(context.Context, wingdclient.Options) (wingdclient.RefreshResult, error)
+	inspect          func(context.Context, string) (daemonReport, error)
+}
+
+func runDaemonRestartWith(args []string, deps daemonRestartDeps) error {
 	fs := flag.NewFlagSet(cmdDaemonRestart.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 	home := fs.String("home", "", "sparkwing home to refresh")
@@ -129,10 +145,10 @@ func runDaemonRestart(args []string) error {
 	if err != nil {
 		return err
 	}
-	target := installedVersion()
-	replace := wingdclient.RefreshRunning
+	target := deps.installedVersion()
+	replace := deps.refresh
 	if *force {
-		replace = wingdclient.RestartRunning
+		replace = deps.restart
 	}
 	result, err := replace(ctx, wingdclient.Options{
 		Home:    *home,
@@ -140,7 +156,7 @@ func runDaemonRestart(args []string) error {
 		Logf:    func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
 	})
 	if errors.Is(err, wingdclient.ErrNoDaemon) {
-		report, inspectErr := inspectDaemon(ctx, *home)
+		report, inspectErr := deps.inspect(ctx, *home)
 		if inspectErr != nil {
 			return inspectErr
 		}
@@ -149,7 +165,7 @@ func runDaemonRestart(args []string) error {
 	if err != nil {
 		return fmt.Errorf("daemon restart: %w", err)
 	}
-	report, err := inspectDaemon(ctx, *home)
+	report, err := deps.inspect(ctx, *home)
 	if err != nil {
 		return err
 	}

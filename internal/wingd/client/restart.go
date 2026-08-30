@@ -17,6 +17,8 @@ func RefreshRunning(ctx context.Context, opts Options) (RefreshResult, error) {
 	return replaceRunning(ctx, opts, false)
 }
 
+// RestartRunning replaces an answering daemon even when it already serves the
+// requested build. An absent daemon remains stopped.
 func RestartRunning(ctx context.Context, opts Options) (RefreshResult, error) {
 	return replaceRunning(ctx, opts, true)
 }

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/sparkwing-dev/sparkwing/internal/wingd"
+	wingdclient "github.com/sparkwing-dev/sparkwing/internal/wingd/client"
 )
 
 func TestInspectDaemonReportsExactSourceRevision(t *testing.T) {
@@ -127,6 +128,65 @@ func TestDaemonRestartDeclaresForceFlag(t *testing.T) {
 		}
 	}
 	t.Fatal("daemon restart does not declare --force")
+}
+
+func TestDaemonRestartForceUsesForcedReplacement(t *testing.T) {
+	called := ""
+	deps := daemonRestartDeps{
+		installedVersion: func() string { return "v0.37.4" },
+		refresh: func(context.Context, wingdclient.Options) (wingdclient.RefreshResult, error) {
+			called = "refresh"
+			return wingdclient.RefreshResult{}, nil
+		},
+		restart: func(_ context.Context, opts wingdclient.Options) (wingdclient.RefreshResult, error) {
+			called = "restart:" + opts.Version
+			return wingdclient.RefreshResult{PreviousVersion: opts.Version, RunningVersion: opts.Version, Restarted: true}, nil
+		},
+		inspect: func(context.Context, string) (daemonReport, error) {
+			return daemonReport{Running: true, Healthy: true, BinaryVersion: "v0.37.4"}, nil
+		},
+	}
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runDaemonRestartWith([]string{"--force", "-o", "json"}, deps)
+	})
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	var report daemonReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	if called != "restart:v0.37.4" || !report.Running || !report.Healthy || !report.Restarted || report.BinaryVersion != "v0.37.4" || report.PreviousVersion != "v0.37.4" {
+		t.Fatalf("call = %q, report = %+v", called, report)
+	}
+}
+
+func TestDaemonRestartForcePreservesStoppedDaemon(t *testing.T) {
+	deps := daemonRestartDeps{
+		installedVersion: func() string { return "v0.37.4" },
+		refresh:          wingdclient.RefreshRunning,
+		restart: func(context.Context, wingdclient.Options) (wingdclient.RefreshResult, error) {
+			return wingdclient.RefreshResult{}, wingdclient.ErrNoDaemon
+		},
+		inspect: func(context.Context, string) (daemonReport, error) {
+			return daemonReport{Socket: "/tmp/stopped.sock"}, nil
+		},
+	}
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runDaemonRestartWith([]string{"--force", "-o", "json"}, deps)
+	})
+	if runErr != nil {
+		t.Fatal(runErr)
+	}
+	var report daemonReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatal(err)
+	}
+	if report.Running || report.Restarted {
+		t.Fatalf("report = %+v", report)
+	}
 }
 
 func TestDaemonCommandsRejectUnknownOutput(t *testing.T) {
