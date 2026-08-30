@@ -26,6 +26,10 @@ type casProbe struct {
 
 var _ storage.ConditionalWriter = (*ArtifactStore)(nil)
 
+// DistributedConditionalWrites marks the S3 implementation as enforcing
+// preconditions at the object-store authority rather than in one process.
+func (*ArtifactStore) DistributedConditionalWrites() {}
+
 // GetWithETag returns the object and its current ETag. The ETag feeds
 // back into PutIfMatch to gate the next write.
 func (s *ArtifactStore) GetWithETag(ctx context.Context, key string) (io.ReadCloser, storage.ETag, error) {
