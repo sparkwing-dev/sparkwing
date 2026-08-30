@@ -58,12 +58,16 @@ Drain the current daemon, start this installed binary as its successor, and veri
 |---|---|
 | `-o, --output FORMAT` | Output format: pretty\|json\|plain (default: pretty on TTY, json when piped) |
 | `--home DIR` | Sparkwing state directory |
+| `--force` | Replace the daemon even when it already serves this build |
 
 ### Examples
 
 ```sh
 # Refresh only if already running
 sparkwing daemon restart
+
+# Replace an answering daemon
+sparkwing daemon restart --force
 
 # Machine-readable result
 sparkwing daemon restart -o json

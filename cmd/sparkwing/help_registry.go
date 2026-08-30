@@ -78,10 +78,12 @@ var cmdDaemonRestart = Command{
 	Flags: []FlagSpec{
 		{Name: "output", Short: "o", Argument: "FORMAT", Desc: "Output format: pretty|json|plain (default: pretty on TTY, json when piped)", Group: "Output"},
 		{Name: "home", Argument: "DIR", Desc: "Sparkwing state directory", Group: "Input"},
+		{Name: "force", Desc: "Replace the daemon even when it already serves this build", Group: "Behavior"},
 	},
-	GroupOrder: []string{"Input", "Output", "Other"},
+	GroupOrder: []string{"Input", "Behavior", "Output", "Other"},
 	Examples: []Example{
 		{"Refresh only if already running", "sparkwing daemon restart"},
+		{"Replace an answering daemon", "sparkwing daemon restart --force"},
 		{"Machine-readable result", "sparkwing daemon restart -o json"},
 	},
 }

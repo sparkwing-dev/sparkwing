@@ -116,6 +116,7 @@ func runDaemonRestart(args []string) error {
 	fs := flag.NewFlagSet(cmdDaemonRestart.Path, flag.ContinueOnError)
 	output := fs.StringP("output", "o", "", "output format: pretty|json|plain (default: pretty on TTY, json when piped)")
 	home := fs.String("home", "", "sparkwing home to refresh")
+	force := fs.Bool("force", false, "replace the daemon even when it already serves this build")
 	if err := parseAndCheck(cmdDaemonRestart, fs, args); err != nil {
 		if errors.Is(err, errHelpRequested) {
 			return nil
@@ -129,7 +130,11 @@ func runDaemonRestart(args []string) error {
 		return err
 	}
 	target := installedVersion()
-	result, err := wingdclient.RefreshRunning(ctx, wingdclient.Options{
+	replace := wingdclient.RefreshRunning
+	if *force {
+		replace = wingdclient.RestartRunning
+	}
+	result, err := replace(ctx, wingdclient.Options{
 		Home:    *home,
 		Version: target,
 		Logf:    func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) },

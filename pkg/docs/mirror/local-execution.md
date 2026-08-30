@@ -61,8 +61,10 @@ Local pipelines share a small admission daemon named wingd. It starts on
 demand and normally needs no operator attention. `sparkwing daemon status`
 reports whether it is running; JSON output includes the serving binary and its
 source revision. `sparkwing daemon restart` replaces only an answering daemon
-with the installed Sparkwing build. Existing holders reconnect and reattach to
-their durable leases, while a deliberately stopped daemon stays stopped. A
+when its build differs from the installed Sparkwing build. Add `--force` to
+replace an answering daemon that already serves the installed build. Existing
+holders reconnect and reattach to their durable leases, while a deliberately
+stopped daemon stays stopped. A
 release-pinned pipeline can use that refreshed daemon without replacing it
 with the older release build.
 
