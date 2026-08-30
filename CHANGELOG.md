@@ -49,6 +49,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.37.4] - 2026-08-30
 ### Added
 
 - **wingd:** `sparkwing daemon restart --force` replaces an answering daemon
