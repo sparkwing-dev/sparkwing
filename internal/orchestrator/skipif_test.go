@@ -216,6 +216,7 @@ type generousTimeout struct{ sparkwing.Base }
 
 var (
 	generousRan      atomic.Bool
+	generousBudget   chan time.Duration
 	generousCanceled chan struct{}
 )
 
@@ -224,6 +225,12 @@ func (generousTimeout) Plan(ctx context.Context, plan *sparkwing.Plan, _ sparkwi
 		generousRan.Store(true)
 		return nil
 	}).SkipIf(func(ctx context.Context) bool {
+		deadline, ok := ctx.Deadline()
+		if !ok {
+			generousBudget <- 0
+		} else {
+			generousBudget <- time.Until(deadline)
+		}
 		<-ctx.Done()
 		generousCanceled <- struct{}{}
 		return false
@@ -237,14 +244,14 @@ func init() {
 
 func TestSkipIf_PerNodeTimeoutOverride(t *testing.T) {
 	generousRan.Store(false)
+	generousBudget = make(chan time.Duration, 1)
 	generousCanceled = make(chan struct{}, 1)
 	p := newPaths(t)
-	start := time.Now()
 	_, _ = orchestrator.RunLocal(context.Background(), p, orchestrator.Options{Pipeline: "skipif-generous"})
-	elapsed := time.Since(start)
 
-	if elapsed > 500*time.Millisecond {
-		t.Fatalf("override budget should fire near 50ms, took %s", elapsed)
+	budget := <-generousBudget
+	if budget < 25*time.Millisecond || budget > 100*time.Millisecond {
+		t.Fatalf("predicate deadline budget = %s, want near 50ms", budget)
 	}
 	if !generousRan.Load() {
 		t.Fatal("job should run after predicate times out under override budget")
