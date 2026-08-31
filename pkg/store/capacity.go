@@ -644,9 +644,11 @@ SELECT pipeline, node_id, ` + profileColumns + `
 }
 
 // CacheExcludedCounts reports, per pipeline, how many finished runs were
-// dominated by cache hits and so were excluded from profile learning: runs
-// where at least fraction of their completed nodes carry the cachedOutcome
-// status. No counter is stored for this (unlike contention); the figure is
+// dominated by cache hits and so were excluded from run-level profile
+// learning: runs where at least fraction of their completed nodes carry the
+// cachedOutcome status. Such a run's executed nodes still fold into their
+// own node profiles; only the run rollup, whose wall time measured the
+// cache, is excluded. No counter is stored for this (unlike contention); the figure is
 // derived live from retained run history, so it reflects the runs still in the
 // store rather than every run ever excluded. Pass a pipeline to scope to one,
 // or "" for every pipeline. Pipelines with no cache-dominant runs are absent
