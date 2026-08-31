@@ -49,6 +49,7 @@ code change to unlock.
 
 ## [Unreleased]
 
+## [v0.38.0] - 2026-08-31
 ### Changed
 
 - **release (Breaking):** `sparkwing run kind-e2e` and its hosted workflow have
