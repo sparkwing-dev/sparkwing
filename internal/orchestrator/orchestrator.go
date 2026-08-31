@@ -536,6 +536,19 @@ func (e *nodeSupersededError) Error() string {
 	return fmt.Sprintf("nodes superseded by a newer arrival: %v", e.nodes)
 }
 
+// nodeFailureError names the run's genuine failures and only counts its
+// cancellations. Both prefixes are suppressed by the pretty renderer, whose
+// per-node summaries already carry the detail.
+func nodeFailureError(failed, cancelled []string) error {
+	if len(failed) > 0 {
+		if len(cancelled) > 0 {
+			return fmt.Errorf("nodes failed: %v; %d more cancelled with the run", failed, len(cancelled))
+		}
+		return fmt.Errorf("nodes failed: %v", failed)
+	}
+	return fmt.Errorf("nodes cancelled: %d node(s) stopped before completing", len(cancelled))
+}
+
 type runDaemonCanceledError struct {
 	reason string
 }
@@ -781,7 +794,12 @@ func dispatch(
 		return cause
 	}
 
+	// Cancellations are collateral, not verdicts: a node cancelled after the
+	// first failure or a lost daemon says nothing about the code it was
+	// given, and folding 72 of them into the failed list makes a two-node
+	// failure read as a 74-node catastrophe.
 	var failed []string
+	var cancelled []string
 	var superseded []string
 	for _, n := range plan.Nodes() {
 		oc, ok := state.getOutcome(n.ID())
@@ -791,18 +809,21 @@ func dispatch(
 		if n.IsOptional() {
 			continue
 		}
-		if oc == sparkwing.Superseded {
+		switch oc {
+		case sparkwing.Superseded:
 			superseded = append(superseded, n.ID())
-			continue
+		case sparkwing.Cancelled:
+			cancelled = append(cancelled, n.ID())
+		default:
+			failed = append(failed, n.ID())
 		}
-		failed = append(failed, n.ID())
 	}
 
-	emitRunSummary(delegate, plan, state, runStart, len(failed) == 0 && len(superseded) == 0)
+	emitRunSummary(delegate, plan, state, runStart, len(failed) == 0 && len(cancelled) == 0 && len(superseded) == 0)
 
-	if len(failed) > 0 {
+	if len(failed) > 0 || len(cancelled) > 0 {
 		planReleaseOutcome = "failed"
-		return fmt.Errorf("nodes failed: %v", failed)
+		return nodeFailureError(failed, cancelled)
 	}
 	if len(superseded) > 0 {
 		planReleaseOutcome = "superseded"

@@ -641,7 +641,8 @@ func (p *PrettyRenderer) writeRunBlock(w io.Writer, summary, finish *sparkwing.L
 	}
 
 	if finish != nil {
-		if errMsg, ok := finish.Attrs["error"].(string); ok && errMsg != "" && !strings.HasPrefix(errMsg, "nodes failed:") {
+		if errMsg, ok := finish.Attrs["error"].(string); ok && errMsg != "" &&
+			!strings.HasPrefix(errMsg, "nodes failed:") && !strings.HasPrefix(errMsg, "nodes cancelled:") {
 			fmt.Fprintln(w)
 			fmt.Fprintln(w, "  "+p.color("error  ", ansiDim)+" "+p.color(errMsg, ansiRed))
 		}

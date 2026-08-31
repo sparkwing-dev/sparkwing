@@ -57,7 +57,14 @@ code change to unlock.
   recorded nothing, so a pipeline whose runs usually cache well -- a merge
   gate rebuilding a small delta -- never accumulated the samples that retire
   the still-measuring charge, and its few live nodes were priced at carried
-  prior figures indefinitely.
+  prior figures or the half-machine cold-start default indefinitely.
+
+- **orchestrator:** A run's failure line now names only the nodes that
+  genuinely failed and counts its cancellations (`nodes failed: [wingd
+  compile]; 72 more cancelled with the run`). Cancelled nodes were folded
+  into the failed list, so a run aborted by a lost daemon read as a
+  catastrophic all-node failure instead of two failures and their
+  collateral.
 
 - **release:** The Kubernetes golden-path gate now proves that the Ready runner
   pod claims an explicitly queued node before and after a rollout. Webhook and

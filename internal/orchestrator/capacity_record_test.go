@@ -396,6 +396,9 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 // never reach MinSamples and are charged the still-measuring price forever.
 // The run-level rollup stays excluded -- its wall time measured the cache.
 func TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes(t *testing.T) {
+	if runtime.NumCPU() < 2 {
+		t.Skip("capLocalPeakCores caps the asserted peak at host cores")
+	}
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatal(err)
