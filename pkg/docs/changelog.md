@@ -51,6 +51,14 @@ code change to unlock.
 
 ### Fixed
 
+- **admission:** A cache-dominant run now folds the nodes that actually
+  executed into their capacity profiles; only the run-level rollup, whose
+  wall time measured the cache, stays excluded. Previously such a run
+  recorded nothing, so a pipeline whose runs usually cache well -- a merge
+  gate rebuilding a small delta -- never accumulated the samples that retire
+  the still-measuring charge, and its few live nodes were priced at carried
+  prior figures indefinitely.
+
 - **release:** The Kubernetes golden-path gate now proves that the Ready runner
   pod claims an explicitly queued node before and after a rollout. Webhook and
   retry checks separately verify in-process trigger execution, so those runs no

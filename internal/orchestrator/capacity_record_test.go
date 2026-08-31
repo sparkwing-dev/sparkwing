@@ -390,6 +390,65 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 	}
 }
 
+// TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes is the
+// BW-1878 acceptance criterion: a merge-gate-shaped run where nearly every
+// node cache-hits must still fold the nodes that executed, or those nodes
+// never reach MinSamples and are charged the still-measuring price forever.
+// The run-level rollup stays excluded -- its wall time measured the cache.
+func TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = st.Close() }()
+	ctx := context.Background()
+	start := time.Now()
+
+	if err := st.CreateRun(ctx, store.Run{ID: "land1", Pipeline: "gate", Status: "running", StartedAt: start}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 9; i++ {
+		nodeID := fmt.Sprintf("cached-%d", i)
+		if err := st.CreateNode(ctx, store.Node{RunID: "land1", NodeID: nodeID, Status: "pending"}); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.FinishNode(ctx, "land1", nodeID, string(sparkwing.Cached), "", nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.CreateNode(ctx, store.Node{RunID: "land1", NodeID: "build", Status: "pending"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.AddNodeMetricSample(ctx, "land1", "build", store.MetricSample{
+		TS: start, CPUMillicores: 2000, MemoryBytes: 1 << 30,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.FinishNode(ctx, "land1", "build", string(sparkwing.Success), "", nil); err != nil {
+		t.Fatal(err)
+	}
+
+	recordRunProfile(ctx, st, "gate", "land1", nil, "", runCharge{}, false, start, start.Add(20*time.Second))
+
+	node, err := st.GetPipelineProfile(ctx, "gate", "build")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if node == nil || node.SampleCount != 1 {
+		t.Fatalf("executed node profile = %+v, want one folded sample", node)
+	}
+	if node.PeakCores < 1.9 || node.PeakCores > 2.1 {
+		t.Errorf("executed node PeakCores = %v, want ~2.0", node.PeakCores)
+	}
+	rollup, err := st.GetPipelineProfile(ctx, "gate", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rollup != nil {
+		t.Errorf("rollup profile = %+v, want none: a cache-dominant run's wall time measured the cache", rollup)
+	}
+}
+
 func TestRecordRunProfile_MixedRunBelowThresholdStillFolds(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
