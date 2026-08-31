@@ -57,7 +57,7 @@ code change to unlock.
   recorded nothing, so a pipeline whose runs usually cache well -- a merge
   gate rebuilding a small delta -- never accumulated the samples that retire
   the still-measuring charge, and its few live nodes were priced at carried
-  prior figures indefinitely.
+  prior figures or the half-machine cold-start default indefinitely.
 
 - **orchestrator:** A run's failure line now names only the nodes that
   genuinely failed and counts its cancellations (`nodes failed: [wingd

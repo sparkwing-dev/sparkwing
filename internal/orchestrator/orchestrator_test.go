@@ -290,6 +290,9 @@ func TestRun_MidFailureCancelsDownstream(t *testing.T) {
 	if res.Status != "failed" {
 		t.Fatalf("status = %q, want failed", res.Status)
 	}
+	if res.Error == nil || res.Error.Error() != "nodes failed: [b]; 1 more cancelled with the run" {
+		t.Fatalf("run error = %v, want the genuine failure named and the cancellation counted", res.Error)
+	}
 
 	st, _ := store.Open(p.StateDB())
 	defer func() { _ = st.Close() }()
