@@ -12,6 +12,7 @@ Format conventions live in [../changelog-style.md](../changelog-style.md).
 
 | Version | Date | Summary |
 |---|---|---|
+| [v0.37.3](v0.37.3.md) | 2026-08-30 | Login-required dashboards require a controller session backend and enforce same-origin CSRF and live session revocation. |
 | [v0.37.0](v0.37.0.md) | 2026-08-28 | Authenticated dashboards require browser sessions for their proxy, keep controller service credentials server-side, and direct bearer-token automation to the controller API. |
 | [v0.4.0](v0.4.0.md) | 2026-05-20 | Author-SDK reshape (`*Node` → `*JobNode`, typed `Dep`/`WorkDep` for `Needs`, `CacheOptions` rename, spawn / risk APIs reshaped), package layout finalized (`orchestrator/` → `internal/`, `logs/` → `pkg/logs/`, `secrets/` → `internal/`, several others), CLI flag renames + retirements, `--json` / `--pretty` aliases dropped in favor of canonical `-o`/`--output`, `pipelines.yaml` `group:` field removed. Many breaking changes; each section in the linked guide is mechanical. |
 | [v0.5.0](v0.5.0.md) | 2026-05-28 | Config collapses to two files and two flags: the five `.sparkwing/` files (`pipelines.yaml`, `backends.yaml`, `runners.yaml`, `sources.yaml`, `sparks.yaml`) become one `.sparkwing/sparkwing.yaml`, profiles absorb every backend spec, `--profile` becomes the only "where" flag, and `sparkwing pipeline trigger` takes over remote execution. Hard cut, no shims. |

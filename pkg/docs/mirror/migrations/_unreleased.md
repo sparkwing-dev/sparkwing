@@ -5,29 +5,20 @@ pre-release manicuring agent moves these sections into
 `docs/migrations/v<X.Y.Z>.md` when the version is cut; until then the
 CHANGELOG links here.
 
-## Dashboard browser session hardening
+## Kubernetes acceptance testing
 
-- **Before:** `sparkwing-web --require-login` silently became login-free when
-  no controller URL reached the web handler. Login and logout forms accepted
-  cross-origin submissions, redirect targets were concatenated into the login
-  URL without encoding, and a controller-revoked session could remain accepted
-  from a web replica's cache for 60 seconds.
-- **After:** Login-required mode refuses to start without `--controller URL` or
-  a selected profile with `controller.url`. Browser forms require a same-origin
-  CSRF cookie and hidden token, logout verifies the session-bound controller
-  token, unsafe `/api/v1/*` mutations require the same token in
-  `X-CSRF-Token`, redirect targets are encoded and restricted to same-origin
-  paths, and every protected HTML/data/API request revalidates the controller
-  session. The proxy removes browser cookies and CSRF headers before adding its
-  service bearer. Controller outages and logout failures return `502` without
-  clearing the browser cookies.
-- **Migration:** Remove `--require-login` from controller-free trusted-network
-  deployments, or add a controller session backend. Automation should continue
-  to call the controller directly. Custom browser clients must read `sw_csrf`
-  and send it as `X-CSRF-Token` on unsafe dashboard API requests. Serve a
-  login-required dashboard over HTTPS; use
-  `SPARKWING_WEB_INSECURE_COOKIES=1` only for a loopback-only development
-  process.
-- **Why:** A login flag must never publish an unauthenticated dashboard, and a
-  successful logout or server-side revocation must be effective on the next
-  request.
+- **Before:** `sparkwing run kind-e2e` built images locally, created a Kind
+  cluster, and also had an existing-cluster mode selected by
+  `SPARKWING_KIND_E2E_PROVISION=existing`. A path-scoped hosted workflow ran the
+  Kind mode automatically.
+- **After:** `sparkwing run k8s-e2e` targets only an explicit Kubernetes
+  context. Set `SPARKWING_K8S_E2E_KUBE_CONTEXT`,
+  `SPARKWING_K8S_E2E_IMAGE_PREFIX`, `SPARKWING_K8S_E2E_TAG`, and
+  `SPARKWING_K8S_E2E_ALLOW_CLEANUP`. The check creates only a uniquely owned
+  namespace and release resources. It leaves cluster infrastructure intact.
+- **Migration:** Rename `SPARKWING_KIND_E2E_*` variables to
+  `SPARKWING_K8S_E2E_*`, remove `SPARKWING_KIND_E2E_PROVISION`, and invoke
+  `sparkwing run k8s-e2e` only when the designated test cluster is active.
+- **Why:** Acceptance evidence should come from the Kubernetes environment the
+  product will use, without requiring a memory-heavy local cluster or spending
+  cluster capacity on every source change.

@@ -41,13 +41,6 @@ func recordRunProfile(ctx context.Context, st *store.Store, pipeline, runID stri
 	if err != nil {
 		return
 	}
-	// A cache-dominant run measured the cache, not the work: its wall time
-	// collapses and its interval aggregation holds almost nothing, so the
-	// run-level rollup below is skipped. Its executed nodes still fold,
-	// because a node that ran did real work and its own reading is clean --
-	// skipping those starved exactly the pipelines that cache well (a merge
-	// gate rebuilding a small delta), pinning their few live nodes in the
-	// still-measuring charge forever.
 	dominant := cacheDominant(nodes)
 	cpuMeasured := nodemetrics.CPUAccountingAvailable()
 	bucket := nodemetrics.Interval()

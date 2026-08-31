@@ -2,10 +2,6 @@ package orchestrator
 
 import "testing"
 
-// TestNodeFailureError_CountsCancellationsInsteadOfNamingThem pins the
-// BW-1879 shape: a run that lost its daemon had 2 genuine failures and 72
-// cancellations, and the old message named all 74 nodes as failed -- a
-// two-node failure reading as a catastrophe.
 func TestNodeFailureError_CountsCancellationsInsteadOfNamingThem(t *testing.T) {
 	cancelled := make([]string, 72)
 	for i := range cancelled {

@@ -56,7 +56,7 @@ exists somewhere else and you just need a runner pool.
   runnable release.
 - A reachable Sparkwing controller URL.
 - A pre-created Secret holding the agent bearer token (see Auth
-  below). Optional for kind / single-tenant test installs where the
+  below). Optional for single-tenant test installs where the
   controller has auth disabled.
 - A default StorageClass (or an explicit `storageClassName`) for
   the cache + logs PVCs. Both are RWO.
@@ -91,7 +91,7 @@ helm install runners ./charts/sparkwing-runner-bundle \
     --set runner.labels='{cluster,arch=amd64}'
 ```
 
-For a fully unauthenticated test against a kind cluster:
+For a fully unauthenticated test cluster:
 
 ```bash
 helm install runners ./charts/sparkwing-runner-bundle \
@@ -160,7 +160,7 @@ PVCs are annotated `helm.sh/resource-policy: keep` by default so
 `helm uninstall` doesn't wipe history. Disable per-component with
 `<component>.storage.keepOnUninstall=false`.
 
-For an ephemeral install (kind / CI / a throwaway test):
+For an ephemeral test install:
 
 ```bash
 --set cache.storage.enabled=false \

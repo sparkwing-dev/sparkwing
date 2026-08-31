@@ -390,11 +390,6 @@ func TestRecordRunProfile_CacheDominantRunsKeepPercentilesAndPeaks(t *testing.T)
 	}
 }
 
-// TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes is the
-// BW-1878 acceptance criterion: a merge-gate-shaped run where nearly every
-// node cache-hits must still fold the nodes that executed, or those nodes
-// never reach MinSamples and are charged the still-measuring price forever.
-// The run-level rollup stays excluded -- its wall time measured the cache.
 func TestRecordRunProfile_CacheDominantRunStillFoldsItsExecutedNodes(t *testing.T) {
 	if runtime.NumCPU() < 2 {
 		t.Skip("capLocalPeakCores caps the asserted peak at host cores")

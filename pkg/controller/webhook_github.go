@@ -135,7 +135,7 @@ func (s *Server) handleGitHubPush(w http.ResponseWriter, r *http.Request, pipeli
 	g := &sparkwing.Git{
 		Branch: branch,
 		SHA:    payload.After,
-		Repo:   repoName,
+		Repo:   payload.Repository.FullName,
 	}
 
 	if err := s.store.CreateTrigger(r.Context(), store.Trigger{
@@ -246,7 +246,7 @@ func (s *Server) handleGitHubPullRequest(w http.ResponseWriter, r *http.Request,
 	g := &sparkwing.Git{
 		Branch: payload.PullRequest.Head.Ref,
 		SHA:    payload.PullRequest.Head.SHA,
-		Repo:   repoName,
+		Repo:   payload.Repository.FullName,
 	}
 	trigger.PullRequest = sparkwing.PullRequestFromEnv(triggerEnv)
 

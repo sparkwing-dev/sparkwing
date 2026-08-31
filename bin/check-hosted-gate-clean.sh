@@ -34,8 +34,8 @@ if [ -n "$release_tag" ]; then
     echo "invalid release self-pin tag: $release_tag" >&2
     exit 2
   fi
-  mod="testdata/kind-e2e/repo/.sparkwing/go.mod"
-  sum="testdata/kind-e2e/repo/.sparkwing/go.sum"
+  mod="testdata/k8s-e2e/repo/.sparkwing/go.mod"
+  sum="testdata/k8s-e2e/repo/.sparkwing/go.sum"
   fallback="pkg/scaffold/version.go"
   snapshot=".apidiff/pkg_scaffold.txt"
   pipeline_mod=".sparkwing/go.mod"

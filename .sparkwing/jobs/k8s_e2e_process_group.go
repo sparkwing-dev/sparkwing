@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func configureKindE2ECommand(cmd *exec.Cmd) {
+func configureKubernetesE2ECommand(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)

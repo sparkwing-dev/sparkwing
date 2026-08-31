@@ -43,12 +43,9 @@ type capacityCharge struct {
 }
 
 type capacityProfile struct {
-	Pipeline string `json:"pipeline"`
-	// Display is Pipeline decoded to the repo/pipeline form people see
-	// everywhere else; Pipeline stays the stored key because the explain
-	// endpoint is addressed by it.
-	Display string         `json:"display"`
-	Charge  capacityCharge `json:"charge"`
+	Pipeline string         `json:"pipeline"`
+	Display  string         `json:"display"`
+	Charge   capacityCharge `json:"charge"`
 
 	SampleCount     int     `json:"sample_count"`
 	PeakCores       float64 `json:"peak_cores"`

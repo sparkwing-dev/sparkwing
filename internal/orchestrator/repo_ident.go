@@ -39,12 +39,6 @@ func repoShortName(dir string) string {
 	}
 }
 
-// originRepoName reads the repository name from a checkout's origin remote, so two
-// clones of one repository resolve to one name. Git resolves config includes and
-// case-insensitive keys according to the same rules used by the checkout.
-//
-// A checkout carrying no origin returns "", and the caller keeps the directory name:
-// a repository with no remote has no identity beyond where it sits.
 func originRepoName(gitDir string) string {
 	cmd := exec.Command("git", "config", "--file", filepath.Join(gitDir, "config"), "--includes", "--get", "remote.origin.url")
 	raw, err := cmd.Output()
@@ -54,9 +48,6 @@ func originRepoName(gitDir string) string {
 	return repoNameFromURL(strings.TrimSpace(string(raw)))
 }
 
-// repoNameFromURL normalizes a remote to host/owner/path without credentials,
-// scheme, a trailing slash, or a .git suffix. The namespace keeps repositories
-// with the same basename from sharing capacity measurements.
 func repoNameFromURL(remote string) string {
 	remote = strings.TrimSpace(remote)
 	if strings.HasPrefix(remote, "/") || (len(remote) >= 3 && remote[1] == ':' && (remote[2] == '/' || remote[2] == '\\')) {
@@ -98,11 +89,6 @@ func localRepoName(repoPath string) string {
 	return fmt.Sprintf("local:%x", sum[:12])
 }
 
-// alternatesRepoName names a checkout that borrows its objects from another
-// repository instead of carrying a remote. A thin clone written for one run has no
-// origin, so its object store is the only thing tying it to the repository it holds:
-// .git/objects/info/alternates points at that repository's objects directory, whose
-// parent is the repository itself.
 func alternatesRepoName(gitDir string) string {
 	raw, err := os.ReadFile(filepath.Join(gitDir, "objects", "info", "alternates"))
 	if err != nil {
@@ -127,16 +113,6 @@ func alternatesRepoName(gitDir string) string {
 	return ""
 }
 
-// gitFileRepoName resolves the identity behind a .git file, the marker
-// for linked worktrees and submodules. A worktree keys as the
-// repository it was branched from -- the canonical identity read from
-// the shared config or borrowed object store in the common git dir,
-// else that repository's directory name -- so a worktree and its main
-// checkout price against one profile. Reading the shared config also
-// means a per-worktree remote override (extensions.worktreeConfig)
-// does not split a worktree's pricing from its repo's. Any other
-// pointer is a submodule, its own repository for pricing: its gitdir
-// carries its own config and object store.
 func gitFileRepoName(gitFile, dir string) string {
 	gitDir := gitDirPointer(gitFile, dir)
 	if gitDir == "" {

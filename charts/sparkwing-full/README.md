@@ -125,52 +125,41 @@ helm install sparkwing ./charts/sparkwing-full \
     -f compatible-images.yaml
 ```
 
-### Verify the source stack locally
+### Verify the source stack in Kubernetes
 
-From the Sparkwing checkout, the repository pipeline builds the five images,
-loads them into a disposable Kind cluster, installs this chart, and exercises
-the authenticated controller-to-runner path without a registry or cloud
-cluster:
-
-```bash
-sparkwing run kind-e2e
-```
-
-The local mode requires a running Docker daemon plus Kind, kubectl, Helm, curl,
-jq, and OpenSSL. It refuses to reuse an existing cluster with the selected
-name, preserves diagnostics outside the cluster, and removes only the cluster
-it created. Set `SPARKWING_KIND_E2E_KEEP_CLUSTER=1` to retain a failed cluster
-for inspection.
-
-The same protocol proof can target an existing cluster without provisioning or
-deleting cluster infrastructure. Use a dedicated namespace and immutable image
-tag:
+The repository pipeline installs the chart in an explicit Kubernetes context
+and exercises the authenticated controller-to-runner path with caller-supplied
+images:
 
 ```bash
-export SPARKWING_KIND_E2E_PROVISION=existing
-export SPARKWING_KIND_E2E_KUBE_CONTEXT=sparkwing-e2e
-export SPARKWING_KIND_E2E_NAMESPACE=sparkwing-e2e-verify
-export SPARKWING_KIND_E2E_RELEASE=sparkwing-e2e
-export SPARKWING_KIND_E2E_IMAGE_PREFIX=registry.example/sparkwing
-export SPARKWING_KIND_E2E_TAG=commit-0123456789ab
-export SPARKWING_KIND_E2E_ALLOW_CLEANUP="$SPARKWING_KIND_E2E_NAMESPACE/$SPARKWING_KIND_E2E_RELEASE"
-sparkwing run kind-e2e
+sparkwing run k8s-e2e
 ```
 
-Existing-cluster mode refuses an absent context, implicit image coordinates, a
+Use a dedicated namespace and immutable image tag:
+
+```bash
+export SPARKWING_K8S_E2E_KUBE_CONTEXT=sparkwing-e2e
+export SPARKWING_K8S_E2E_NAMESPACE=sparkwing-e2e-verify
+export SPARKWING_K8S_E2E_RELEASE=sparkwing-e2e
+export SPARKWING_K8S_E2E_IMAGE_PREFIX=registry.example/sparkwing
+export SPARKWING_K8S_E2E_TAG=commit-0123456789ab
+export SPARKWING_K8S_E2E_ALLOW_CLEANUP="$SPARKWING_K8S_E2E_NAMESPACE/$SPARKWING_K8S_E2E_RELEASE"
+sparkwing run k8s-e2e
+```
+
+The check refuses an absent context, implicit image coordinates, a
 pre-existing namespace, or an allow-list that differs from the
 configured namespace and release. It installs the Git fixture from a ConfigMap
 instead of a node host mount. Cleanup rechecks a unique per-run namespace owner
 token, uninstalls the allow-listed Helm release only when its durable Helm
 release metadata carries the same token, and deletes only resources carrying
 both ownership labels. It leaves the cluster and namespace intact. Set
-`SPARKWING_KIND_E2E_KEEP_RESOURCES=1` to retain those resources for inspection.
+`SPARKWING_K8S_E2E_KEEP_RESOURCES=1` to retain those resources for inspection.
 
-Local mode builds and verifies images from the checkout. Existing-cluster mode
-exercises the caller-selected repository prefix and tag and records those
-coordinates in its evidence; it does not resolve a mutable tag to a digest or
-prove how those images were built. Neither mode makes the chart's incompatible
-default public image tags runnable.
+The check exercises the caller-selected repository prefix and tag and records
+those coordinates in its evidence; it does not resolve a mutable tag to a
+digest or prove how those images were built. It does not make the chart's
+incompatible default public image tags runnable.
 
 For a production install, attach the Secrets you created above:
 
@@ -304,8 +293,7 @@ The controller's state DB lives on an RWO PVC. PVC is annotated
 `helm.sh/resource-policy: keep` by default so `helm uninstall`
 doesn't wipe run history. Disable with
 `controller.storage.pvc.keepOnUninstall=false`, or
-`controller.storage.type=emptyDir` for a fully ephemeral install
-(only useful for kind / CI smoke tests).
+`controller.storage.type=emptyDir` for a fully ephemeral test install.
 
 By default, controller and web each run a short ownership init container before
 the non-root application starts. The init container runs as UID 0 with a

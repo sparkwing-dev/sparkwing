@@ -81,8 +81,7 @@ controller:
   # State DB lives on a PVC. Single-instance, so RWO is fine.
   storage:
     # "pvc" mounts a PersistentVolumeClaim at /data.
-    # "emptyDir" runs ephemeral (state lost on pod restart -- only
-    # useful for kind / CI smoke tests).
+    # "emptyDir" runs ephemeral (state lost on pod restart).
     type: pvc
     pvc:
       size: 5Gi
@@ -292,7 +291,7 @@ sparkwing-runner-bundle:
     url: ""
     bundled: true
     # The controller-token Secret the runner mounts. Empty =
-    # unauthenticated to the controller (fine for kind / dev;
+    # unauthenticated to the controller (fine for isolated development;
     # not for shared installs). Pre-create with:
     #   kubectl create secret generic sparkwing-token \
     #     --from-literal=token=<token>

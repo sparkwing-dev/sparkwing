@@ -149,6 +149,9 @@ func TestWebhookGitHub_PushEnqueuesTrigger(t *testing.T) {
 	if tr.GitSHA != "abc123def456abc123def456abc123def456abcd" {
 		t.Errorf("sha=%q", tr.GitSHA)
 	}
+	if tr.Repo != "acme/sample-app" || tr.GithubOwner != "acme" || tr.GithubRepo != "sample-app" {
+		t.Errorf("repository provenance = %q %q/%q", tr.Repo, tr.GithubOwner, tr.GithubRepo)
+	}
 	if tr.TriggerEnv["GITHUB_REPOSITORY"] != "acme/sample-app" {
 		t.Errorf("env[GITHUB_REPOSITORY]=%q", tr.TriggerEnv["GITHUB_REPOSITORY"])
 	}
@@ -273,6 +276,9 @@ func TestWebhookGitHub_PullRequestDispatches(t *testing.T) {
 			}
 			if tr.GitSHA != "1111111111111111111111111111111111111111" {
 				t.Errorf("sha=%q want PR head sha", tr.GitSHA)
+			}
+			if tr.Repo != "acme/sample-app" || tr.GithubOwner != "acme" || tr.GithubRepo != "sample-app" {
+				t.Errorf("repository provenance = %q %q/%q", tr.Repo, tr.GithubOwner, tr.GithubRepo)
 			}
 			if tr.TriggerUser != "bob" {
 				t.Errorf("user=%q want bob", tr.TriggerUser)

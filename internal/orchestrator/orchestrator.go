@@ -536,9 +536,6 @@ func (e *nodeSupersededError) Error() string {
 	return fmt.Sprintf("nodes superseded by a newer arrival: %v", e.nodes)
 }
 
-// nodeFailureError names the run's genuine failures and only counts its
-// cancellations. Both prefixes are suppressed by the pretty renderer, whose
-// per-node summaries already carry the detail.
 func nodeFailureError(failed, cancelled []string) error {
 	if len(failed) > 0 {
 		if len(cancelled) > 0 {
@@ -794,10 +791,6 @@ func dispatch(
 		return cause
 	}
 
-	// Cancellations are collateral, not verdicts: a node cancelled after the
-	// first failure or a lost daemon says nothing about the code it was
-	// given, and folding 72 of them into the failed list makes a two-node
-	// failure read as a 74-node catastrophe.
 	var failed []string
 	var cancelled []string
 	var superseded []string

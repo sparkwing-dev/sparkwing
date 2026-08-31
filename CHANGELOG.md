@@ -49,6 +49,15 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Changed
+
+- **release (Breaking):** `sparkwing run kind-e2e` and its hosted workflow have
+  been replaced by the opt-in `sparkwing run k8s-e2e` acceptance path. The new
+  path requires an explicit Kubernetes context, image prefix and tag, and exact
+  namespace/release cleanup allow-list; it never creates or deletes cluster
+  infrastructure. See the
+  [migration guide](docs/migrations/_unreleased.md#kubernetes-acceptance-testing).
+
 ### Fixed
 
 - **admission:** A cache-dominant run now folds the nodes that actually
@@ -66,10 +75,9 @@ code change to unlock.
   catastrophic all-node failure instead of two failures and their
   collateral.
 
-- **release:** The Kubernetes golden-path gate now proves that the Ready runner
-  pod claims an explicitly queued node before and after a rollout. Webhook and
-  retry checks separately verify in-process trigger execution, so those runs no
-  longer fail because they have no pool claimant.
+- **controller:** GitHub webhook runs retain the full `owner/repository`
+  identity when they enter the runner. Remote retries can reconstruct and fetch
+  the original source instead of failing with a missing repository URL.
 
 ## [v0.37.4] - 2026-08-30
 ### Added
@@ -150,7 +158,7 @@ code change to unlock.
   controller-side session revocation takes effect on the next protected data
   request instead of after a 60-second web cache. Transient session-backend
   failures return `502` without deleting browser cookies. See the
-  [migration guide](docs/migrations/_unreleased.md#dashboard-browser-session-hardening).
+  [migration guide](docs/migrations/v0.37.3.md#dashboard-browser-session-hardening).
 
 ## [v0.37.2] - 2026-08-28
 ### Fixed

@@ -1,4 +1,4 @@
-module sparkwing-kind-e2e-pipelines
+module sparkwing-k8s-e2e-pipelines
 
 go 1.26.0
 
