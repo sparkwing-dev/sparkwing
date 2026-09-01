@@ -361,11 +361,11 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 	if err != nil {
 		return "", fmt.Errorf("resolve latest sparkwing release: %w", err)
 	}
-	aligned, err := releaseVersionArtifactsAligned(repoRoot, latest)
+	pinned, aligned, err := coherentReleaseVersionArtifacts(repoRoot)
 	if err != nil {
 		return "", err
 	}
-	if aligned {
+	if aligned && semver.Compare(pinned, latest) >= 0 {
 		return "", nil
 	}
 	if err := requireCleanSparkwingPinArtifacts(ctx, repoRoot); err != nil {
@@ -431,23 +431,31 @@ func readPipelineModulePin(repoRoot, moduleDir string) (string, error) {
 }
 
 func releaseVersionArtifactsAligned(repoRoot, version string) (bool, error) {
-	fallback, err := readFallbackSDKVersionFile(repoRoot)
+	pinned, aligned, err := coherentReleaseVersionArtifacts(repoRoot)
 	if err != nil {
 		return false, err
+	}
+	return aligned && pinned == version, nil
+}
+
+func coherentReleaseVersionArtifacts(repoRoot string) (string, bool, error) {
+	fallback, err := readFallbackSDKVersionFile(repoRoot)
+	if err != nil {
+		return "", false, err
 	}
 	snapshot, err := readScaffoldVersionArtifact(repoRoot, scaffoldAPISnapshotRel)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	pipeline, err := readPipelineModulePin(repoRoot, ".sparkwing")
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	fixture, err := readPipelineModulePin(repoRoot, kubernetesE2EPipelineModuleRel)
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
-	return fallback == version && snapshot == version && pipeline == version && fixture == version, nil
+	return fallback, fallback == snapshot && fallback == pipeline && fallback == fixture, nil
 }
 
 func regenerateScaffoldAPISnapshot(ctx context.Context, repoRoot string) error {

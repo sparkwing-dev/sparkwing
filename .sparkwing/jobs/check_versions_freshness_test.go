@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"golang.org/x/mod/semver"
 )
 
 func TestScaffoldFallbackProblem(t *testing.T) {
@@ -243,6 +245,18 @@ func TestReleaseVersionArtifactsAlignedDetectsFixtureOnlyDrift(t *testing.T) {
 	}
 	if !aligned {
 		t.Fatal("coherent release artifacts reported drift")
+	}
+
+	write(scaffoldFallbackRel, `const FallbackSDKVersion = "v0.38.3"`)
+	write(scaffoldAPISnapshotRel, `const FallbackSDKVersion = "v0.38.3"`)
+	write(".sparkwing/go.mod", module("v0.38.3"))
+	write(kubernetesE2EPipelineModuleRel+"/go.mod", module("v0.38.3"))
+	pinned, coherent, err := coherentReleaseVersionArtifacts(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !coherent || semver.Compare(pinned, "v0.38.2") < 0 {
+		t.Fatalf("ahead artifact set = (%q, %v), want coherent and at least latest", pinned, coherent)
 	}
 }
 
