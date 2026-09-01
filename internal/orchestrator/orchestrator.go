@@ -39,6 +39,8 @@ type Options struct {
 
 	RunID string
 
+	RunHandlePath string
+
 	Args map[string]string
 
 	Trigger sparkwing.TriggerInfo
@@ -208,6 +210,14 @@ func Run(ctx context.Context, backends Backends, opts Options) (*Result, error) 
 		Invocation:    invocation,
 	}); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
+	}
+	if opts.RunHandlePath != "" {
+		handle := NewRunHandle(runID, opts.Pipeline, localRunLogDir(backends.Logs, runID), "running")
+		if err := publishRunHandle(opts.RunHandlePath, handle); err != nil {
+			msg := fmt.Sprintf("publish run handle: %v", err)
+			_ = backends.State.FinishRun(context.WithoutCancel(ctx), runID, "failed", msg)
+			return nil, errors.New(msg)
+		}
 	}
 
 	hbCtx, cancelHeartbeat := context.WithCancel(ctx)

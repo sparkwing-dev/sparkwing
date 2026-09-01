@@ -39,10 +39,10 @@ func TestParseRunFlags_NoCache(t *testing.T) {
 	}
 }
 
-func TestParseRunFlags_RunReceiptFile(t *testing.T) {
-	wf, pass := parseRunFlags([]string{"--sw-run-receipt-file", "/tmp/run.json", "--target", "prod"})
-	if wf.runReceiptFile != "/tmp/run.json" {
-		t.Fatalf("runReceiptFile = %q", wf.runReceiptFile)
+func TestParseRunFlags_RunHandleFile(t *testing.T) {
+	wf, pass := parseRunFlags([]string{"--sw-run-handle-file", "/tmp/run.json", "--target", "prod"})
+	if wf.runHandleFile != "/tmp/run.json" {
+		t.Fatalf("runHandleFile = %q", wf.runHandleFile)
 	}
 	if got := strings.Join(pass, " "); got != "--target prod" {
 		t.Fatalf("passthrough = %q", got)

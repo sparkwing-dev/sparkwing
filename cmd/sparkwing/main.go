@@ -166,6 +166,13 @@ func dispatchRun(args []string) error {
 		}
 		env = bound
 	}
+	if wf.runHandleFile != "" {
+		path, pathErr := filepath.Abs(wf.runHandleFile)
+		if pathErr != nil {
+			return fmt.Errorf("--sw-run-handle-file %s: %w", wf.runHandleFile, pathErr)
+		}
+		env = setEnv(env, "SPARKWING_RUN_HANDLE_FILE", path)
+	}
 	if wf.verbose {
 		env = append(env, "SPARKWING_LOG_LEVEL=debug")
 	}

@@ -129,6 +129,7 @@ func Main() {
 	delegate := selectLocalRenderer()
 	opts := Options{
 		Pipeline:            pipeline,
+		RunHandlePath:       os.Getenv("SPARKWING_RUN_HANDLE_FILE"),
 		Args:                argsMap,
 		Git:                 detectGit(),
 		Delegate:            delegate,

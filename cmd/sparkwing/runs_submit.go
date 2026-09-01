@@ -24,14 +24,10 @@ const SubmitRequestIDKey = "_SPARKWING_SUBMIT_REQUEST_ID"
 const submitTriggerSourcePrefix = "runs-submit"
 
 type submitResult struct {
-	RunID    string `json:"run_id"`
-	Pipeline string `json:"pipeline"`
-
-	LogPath string `json:"log_path,omitempty"`
+	orchestrator.RunHandle
 
 	AlreadySubmitted bool `json:"already_submitted,omitempty"`
 
-	Status         string `json:"status,omitempty"`
 	IdempotencyKey string `json:"idempotency_key,omitempty"`
 	RequestID      string `json:"request_id,omitempty"`
 
@@ -140,7 +136,13 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	}
 
 	runID := orchestrator.NewLocalRunID()
-	triggerEnv := map[string]string{orchestrator.SubmitRepoDirKey: sub.RepoDir}
+	if err := orchestrator.CaptureSubmissionEnvironment(paths.Root, runID, os.Environ()); err != nil {
+		return submitResult{}, fmt.Errorf("capture submission environment: %w", err)
+	}
+	triggerEnv := map[string]string{
+		orchestrator.SubmitRepoDirKey:                 sub.RepoDir,
+		orchestrator.SubmissionEnvironmentCapturedKey: "1",
+	}
 	if sub.RequestID != "" {
 		triggerEnv[SubmitRequestIDKey] = sub.RequestID
 	}
@@ -170,6 +172,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	}
 
 	if err := st.CreateTrigger(ctx, trigger); err != nil {
+		_ = orchestrator.DiscardSubmissionEnvironment(paths.Root, runID)
 
 		if errors.Is(err, store.ErrDuplicateIdempotencyKey) {
 			existing, ferr := st.FindTriggerByIdempotencyKey(ctx, sub.Pipeline, sub.IdempotencyKey)
@@ -200,9 +203,7 @@ func persistSubmission(ctx context.Context, st *store.Store, paths orchestrator.
 	}
 
 	return submitResult{
-		RunID:          runID,
-		Pipeline:       sub.Pipeline,
-		LogPath:        orchestrator.EnsureRunLogDir(paths, runID),
+		RunHandle:      orchestrator.NewRunHandle(runID, sub.Pipeline, orchestrator.EnsureRunLogDir(paths, runID), "pending"),
 		IdempotencyKey: sub.IdempotencyKey,
 		RequestID:      sub.RequestID,
 	}, nil
@@ -243,11 +244,8 @@ func existingSubmissionResult(
 
 	logPath := existingRunLogDir(paths, existing.ID)
 	return submitResult{
-		RunID:            existing.ID,
-		Pipeline:         existing.Pipeline,
-		LogPath:          logPath,
+		RunHandle:        orchestrator.NewRunHandle(existing.ID, existing.Pipeline, logPath, status),
 		AlreadySubmitted: true,
-		Status:           status,
 		IdempotencyKey:   existing.IdempotencyKey,
 		RequestID:        sub.RequestID,
 	}, nil

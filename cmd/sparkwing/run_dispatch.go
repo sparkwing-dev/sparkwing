@@ -61,6 +61,8 @@ type runFlags struct {
 	localOnly bool
 
 	index string
+
+	runHandleFile string
 }
 
 func collectPipelineArgs(passthrough []string) map[string]string {
@@ -241,6 +243,17 @@ func parseRunFlags(args []string) (runFlags, []string) {
 			i++
 		case strings.HasPrefix(a, "--sw-index="):
 			wf.index = strings.TrimPrefix(a, "--sw-index=")
+			i++
+		case a == "--sw-run-handle-file":
+			if i+1 < len(args) {
+				wf.runHandleFile = args[i+1]
+				i += 2
+				continue
+			}
+			pass = append(pass, a)
+			i++
+		case strings.HasPrefix(a, "--sw-run-handle-file="):
+			wf.runHandleFile = strings.TrimPrefix(a, "--sw-run-handle-file=")
 			i++
 		case a == "-C", a == "--sw-cd":
 			if i+1 < len(args) {
