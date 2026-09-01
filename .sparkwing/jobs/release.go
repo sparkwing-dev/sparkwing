@@ -394,8 +394,13 @@ func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
+	fixturePinned, err := readPipelineModulePin(repoDir, kubernetesE2EPipelineModuleRel)
+	if err != nil {
+		return fmt.Errorf("release: read Kubernetes pipeline fixture pin: %w", err)
+	}
 	fallbackChanged := pinned != version
-	if !changed && !fallbackChanged {
+	fixtureChanged := fixturePinned != version
+	if !changed && !fallbackChanged && !fixtureChanged {
 		sparkwing.Info(ctx, "release-version artifacts already in shipped shape; skipping")
 		return nil
 	}
@@ -410,6 +415,11 @@ func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 	if fallbackChanged {
 		if err := bumpFallbackSDKVersionFile(repoDir, version); err != nil {
 			return fmt.Errorf("release: bump scaffold fallback: %w", err)
+		}
+	}
+	if fixtureChanged {
+		if err := bumpPipelineModulePin(ctx, repoDir, kubernetesE2EPipelineModuleRel, version); err != nil {
+			return fmt.Errorf("release: bump Kubernetes pipeline fixture: %w", err)
 		}
 	}
 	if err := regenerateScaffoldAPISnapshot(ctx, repoDir); err != nil {
