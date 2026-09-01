@@ -49,6 +49,11 @@ code change to unlock.
 
 ## [Unreleased]
 
+### Docs
+
+- **security:** The security policy now identifies the supported release and
+  provides a private GitHub vulnerability-reporting path.
+
 ### Fixed
 
 - **docs:** Self-hosting guidance now points operators to direct local
