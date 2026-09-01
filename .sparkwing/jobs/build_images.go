@@ -51,7 +51,7 @@ func (BuildImages) Help() string {
 func (BuildImages) Examples() []sparkwing.Example {
 	return []sparkwing.Example{
 		{Comment: "Local single-arch build, tagged commit-<sha>", Command: "sparkwing run build-images"},
-		{Comment: "Push multi-arch to a registry", Command: "sparkwing run build-images --registry=633280902600.dkr.ecr.us-west-2.amazonaws.com --push"},
+		{Comment: "Push multi-arch to a registry", Command: "sparkwing run build-images --registry=123456789012.dkr.ecr.us-west-2.amazonaws.com --push"},
 		{Comment: "Reuse a current SPA bundle to skip the slow npm step", Command: "sparkwing run build-images --skip-web-bundle"},
 	}
 }

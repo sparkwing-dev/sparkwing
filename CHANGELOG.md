@@ -51,6 +51,10 @@ code change to unlock.
 
 ### Fixed
 
+- **docs:** Self-hosting guidance now points operators to direct local
+  execution or the complete Helm chart. The unsupported Docker Compose example
+  and its private image coordinates have been removed, with migration guidance
+  for prior testers.
 - **web:** Run selection now discards superseded detail responses, so a slow
   request cannot replace the selected run with stale nodes or metadata.
 - **docs:** Trigger filter documentation now distinguishes declarative

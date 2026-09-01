@@ -15,8 +15,8 @@ these pages; the CLI ships them embedded too (`sparkwing docs read
   run --sw-mode=ci-embedded` inside GHA / Buildkite / GitLab CI.
 - **Self-hosting the dashboard?** [`architecture.md`](architecture.md)
   - [`deployment.md`](deployment.md).
-- **Self-hosting without Kubernetes?** [`self-hosting.md`](self-hosting.md)
-  -- single-host docker-compose + laptop-fleet runners.
+- **Self-hosting?** [`self-hosting.md`](self-hosting.md) -- choose direct local
+  execution or the complete Helm deployment.
 
 ## Map
 
@@ -32,7 +32,7 @@ docs/
   architecture.md        in-cluster deployment architecture
   deployment.md          deploy targets, gitops, ArgoCD, registries
   deployment-modes.md    the deployment shapes and what each gives you
-  self-hosting.md        non-k8s self-host: docker-compose + laptop runners
+  self-hosting.md        supported local and Kubernetes deployment paths
   ci-embedded.md         run pipelines inside an existing CI job
   local-execution.md     how local vs remote execution interact
   native-mode.md         the laptop model (detached dashboard)
