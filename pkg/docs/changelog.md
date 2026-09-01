@@ -56,6 +56,9 @@ code change to unlock.
 
 ### Fixed
 
+- **helm:** A configured web controller-token Secret is now required, so a
+  missing Secret or key keeps the web pod unready instead of starting a proxy
+  without its controller credential.
 - **docs:** Self-hosting guidance now points operators to direct local
   execution or the complete Helm chart. The unsupported Docker Compose example
   and its private image coordinates have been removed, with migration guidance

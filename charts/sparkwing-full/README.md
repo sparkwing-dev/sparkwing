@@ -277,7 +277,7 @@ are explicitly *not* paid gates -- they may land in OSS later. For now:
    `sparkwing-runner-bundle.controller.tokenSecret.name`.
 
    A configured Secret name requires a non-empty key; the chart rejects
-   incomplete pairs. Runner and cache Secret references are required, so
+   incomplete pairs. Web, runner, and cache Secret references are required, so
    Kubernetes holds those pods until the configured Secret is present.
 
 3. Set `web.requireLogin=true` to gate the dashboard behind `/login`.

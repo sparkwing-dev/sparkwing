@@ -93,7 +93,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.web.tokenSecret.name | quote }}
                   key: {{ .Values.web.tokenSecret.key | quote }}
-                  optional: true
             {{- end }}
             - name: OTEL_SERVICE_NAME
               value: "sparkwing-web"
