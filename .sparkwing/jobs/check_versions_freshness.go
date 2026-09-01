@@ -361,11 +361,11 @@ func autoBumpSparkwingPinIfStale(ctx context.Context, repoRoot string) (_ string
 	if err != nil {
 		return "", fmt.Errorf("resolve latest sparkwing release: %w", err)
 	}
-	pinned, err := readFallbackSDKVersionFile(repoRoot)
+	aligned, err := releaseVersionArtifactsAligned(repoRoot, latest)
 	if err != nil {
 		return "", err
 	}
-	if semver.Compare(pinned, latest) >= 0 {
+	if aligned {
 		return "", nil
 	}
 	if err := requireCleanSparkwingPinArtifacts(ctx, repoRoot); err != nil {
@@ -428,6 +428,26 @@ func readPipelineModulePin(repoRoot, moduleDir string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%s has no %s requirement", path, sdkModulePath)
+}
+
+func releaseVersionArtifactsAligned(repoRoot, version string) (bool, error) {
+	fallback, err := readFallbackSDKVersionFile(repoRoot)
+	if err != nil {
+		return false, err
+	}
+	snapshot, err := readScaffoldVersionArtifact(repoRoot, scaffoldAPISnapshotRel)
+	if err != nil {
+		return false, err
+	}
+	pipeline, err := readPipelineModulePin(repoRoot, ".sparkwing")
+	if err != nil {
+		return false, err
+	}
+	fixture, err := readPipelineModulePin(repoRoot, kubernetesE2EPipelineModuleRel)
+	if err != nil {
+		return false, err
+	}
+	return fallback == version && snapshot == version && pipeline == version && fixture == version, nil
 }
 
 func regenerateScaffoldAPISnapshot(ctx context.Context, repoRoot string) error {
@@ -493,10 +513,14 @@ func bumpFallbackSDKVersionFile(repoRoot, version string) error {
 }
 
 func readFallbackSDKVersionFile(repoRoot string) (string, error) {
-	path := filepath.Join(repoRoot, filepath.FromSlash(scaffoldFallbackRel))
+	return readScaffoldVersionArtifact(repoRoot, scaffoldFallbackRel)
+}
+
+func readScaffoldVersionArtifact(repoRoot, rel string) (string, error) {
+	path := filepath.Join(repoRoot, filepath.FromSlash(rel))
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read %s: %w", scaffoldFallbackRel, err)
+		return "", fmt.Errorf("read %s: %w", rel, err)
 	}
 	match := scaffoldFallbackVersionRe.FindSubmatch(data)
 	if match == nil {

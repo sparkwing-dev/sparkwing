@@ -400,7 +400,11 @@ func bumpSelfReplace(ctx context.Context, repoDir, version string) error {
 	}
 	fallbackChanged := pinned != version
 	fixtureChanged := fixturePinned != version
-	if !changed && !fallbackChanged && !fixtureChanged {
+	aligned, err := releaseVersionArtifactsAligned(repoDir, version)
+	if err != nil {
+		return fmt.Errorf("release: inspect release-version artifacts: %w", err)
+	}
+	if !changed && aligned {
 		sparkwing.Info(ctx, "release-version artifacts already in shipped shape; skipping")
 		return nil
 	}
@@ -448,11 +452,11 @@ func (j *prepareSelfReplaceJob) dryRun(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
-	pinned, err := readFallbackSDKVersionFile(j.RepoDir)
+	aligned, err := releaseVersionArtifactsAligned(j.RepoDir, version)
 	if err != nil {
 		return fmt.Errorf("release: %w", err)
 	}
-	if !moduleChanged && pinned == version {
+	if !moduleChanged && aligned {
 		sparkwing.Info(ctx, "dry-run: release-version artifacts already in shipped shape; no rewrite")
 	} else {
 		sparkwing.Info(ctx, "dry-run: would bump .sparkwing/go.mod and scaffold fallback to %s and strip self-replace", version)
